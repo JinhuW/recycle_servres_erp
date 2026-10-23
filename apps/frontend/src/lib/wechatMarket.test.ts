@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { priceChange, priceSpread, type WechatPrice, type WechatRow } from '@recycle-erp/shared';
 import {
-  boardOrder, boardRows, FACETS, facetCounts, facetOrder, fmtPrice, ladder, matchesSearch, parseNotes, signalCounts,
-  SIGNALS, UNBRANDED,
+  boardOrder, boardRows, FACETS, facetCounts, facetOrder, fmtPrice, ladder, parseNotes, signalCounts,
+  SIGNALS, UNBRANDED, wechatHaystack,
 } from './wechatMarket';
 import { matchWechatDay, pathToDesktopView, wechatDayPath } from './route';
 
@@ -42,12 +42,18 @@ describe('WeChat market board', () => {
     expect(sorted.map(r => r.key)).toEqual(['c', 'b', 'a', 'd']);
   });
 
-  it('searches the key, brand, ranks and part numbers', () => {
+  it('searches every term anywhere in the key, brand, spec and part numbers', () => {
     const r = row({ key: '三星 64G 5600 DM0', partNumbers: ['M321R8GA0BB0-CQK'], ranks: ['2R4'] });
-    expect(matchesSearch(r, 'm321r8')).toBe(true);
-    expect(matchesSearch(r, '2r4')).toBe(true);
-    expect(matchesSearch(r, ' ')).toBe(true);
-    expect(matchesSearch(r, 'EB2')).toBe(false);
+    const hits = (q: string) => boardRows([r], { pricedOnly: false, search: q, signal: null, picks: {} }).length === 1;
+    expect(wechatHaystack(r)).toContain('DDR5');
+    expect(hits('m321r8')).toBe(true);
+    expect(hits('2r4')).toBe(true);
+    expect(hits(' ')).toBe(true);
+    // The terms need not sit side by side, nor in one field.
+    expect(hits('ddr5 64g')).toBe(true);
+    expect(hits('64g ddr5 三星')).toBe(true);
+    expect(hits('ddr4 64g')).toBe(false);
+    expect(hits('EB2')).toBe(false);
   });
 
   it('compares prices only within one tax basis', () => {

@@ -88,7 +88,8 @@ const SORT_KEYS: Record<string, (o: OrderSummary) => string | number> = {
   commission: o => commissionFor(o),
   // Sorts by what the cell reads; the business sorts among the B's.
   paidBy:     o => !o.commissionPaidBy ? '' : o.commissionPaidBy.kind === 'company' ? 'Business Account' : o.commissionPaidBy.name,
-  payment:    o => o.payment,
+  // The payer the chip names, the same way.
+  payment:    o => (o.payment === 'company' ? 'Business' : o.paidBy?.name ?? 'Self-paid'),
   status:     o => o.status,
 };
 

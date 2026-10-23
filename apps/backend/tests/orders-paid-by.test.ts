@@ -209,6 +209,23 @@ describe('a self-paid PO names who paid', () => {
     expect(await storedPayer(id)).toBe(marcus.user.id);
   });
 
+  it('closed book: a payer sent with a Business Account PO writes nothing, so it is no change', async () => {
+    const marcus = await loginAs(MARCUS);
+    const alex = await loginAs(ALEX);
+    const { body: { id } } = await createOrder(marcus.token, { payment: 'company' });
+    await getTestDb()`UPDATE orders SET lifecycle = 'done' WHERE id = ${id}`;
+    const echoed = await api('PATCH', `/api/orders/${id}`, {
+      token: alex.token, body: { payment: 'company', paidByUserId: alex.user.id, notes: 'x' },
+    });
+    expect(echoed.status).toBe(200);
+    expect(await storedPayer(id)).toBeNull();
+    // A flip to self still is one.
+    const flipped = await api('PATCH', `/api/orders/${id}`, {
+      token: alex.token, body: { payment: 'self', paidByUserId: alex.user.id },
+    });
+    expect(flipped.status).toBe(409);
+  });
+
   it('the list, the export and the book all name the payer', async () => {
     const marcus = await loginAs(MARCUS);
     const alex = await loginAs(ALEX);

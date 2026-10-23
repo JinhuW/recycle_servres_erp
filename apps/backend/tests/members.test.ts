@@ -76,3 +76,24 @@ describe('members payload has no commission_rate', () => {
     expect('commission_rate' in m).toBe(false);
   });
 });
+
+describe('GET /api/members/names', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('lists active members for anyone, and those who left for a manager only', async () => {
+    const { token: mgr, user: alex } = await loginAs(ALEX);
+    const { token: marcus } = await loginAs(MARCUS);
+    const { user: priya } = await loginAs(PRIYA);
+    expect((await api('PATCH', `/api/members/${priya.id}`, { token: mgr, body: { active: false } })).status).toBe(200);
+
+    type Names = { items: { id: string; name: string; role: string; active: boolean }[] };
+    const active = (await api<Names>('GET', '/api/members/names', { token: mgr })).body.items;
+    expect(active.some(m => m.id === priya.id)).toBe(false);
+    expect(active.find(m => m.id === alex.id)).toMatchObject({ role: 'manager', active: true });
+
+    const all = (await api<Names>('GET', '/api/members/names?includeInactive=true', { token: mgr })).body.items;
+    expect(all.find(m => m.id === priya.id)).toMatchObject({ role: 'purchaser', active: false });
+    const asPurchaser = (await api<Names>('GET', '/api/members/names?includeInactive=true', { token: marcus })).body.items;
+    expect(asPurchaser.some(m => m.id === priya.id)).toBe(false);
+  });
+});

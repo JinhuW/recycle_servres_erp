@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  BUSINESS_ACCOUNT, NO_WAREHOUSE, facetCounts, matchesPayment, matchesWarehouse,
+  BUSINESS_ACCOUNT, NO_WAREHOUSE, costPayerDraft, facetCounts, matchesPayment, matchesWarehouse,
   payerAfterOwnerChange, payerChoices, payerOptions, paymentKey, paymentPickOrAll, warehouseOptions,
 } from './poFacets';
 
@@ -113,5 +113,42 @@ describe('facetCounts', () => {
     expect(c.warehouse.den).toBeUndefined();
     expect(c.warehouse.all).toBe(3);
     expect(c.payment).toEqual({ all: 3, [BUSINESS_ACCOUNT]: 1, 'u-tim': 1, 'u-jinhu': 1 });
+  });
+});
+
+describe('costPayerDraft', () => {
+  const MARCUS = { id: 'u-marcus', name: 'Marcus' };
+  const payers = [TIM, JINHU, MARCUS];
+  const saved = { ownerId: MARCUS.id, paidBy: TIM };
+
+  it('changes the payer only with a person picked that is not on file', () => {
+    expect(costPayerDraft({ payment: 'self', paidByUserId: TIM.id }, saved, payers).dirty).toBe(false);
+    expect(costPayerDraft({ payment: 'self', paidByUserId: JINHU.id }, saved, payers).dirty).toBe(true);
+    // A stale record names nobody, and the Business Account names no person.
+    expect(costPayerDraft({ payment: 'self', paidByUserId: null }, saved, payers).dirty).toBe(false);
+    expect(costPayerDraft({ payment: 'company', paidByUserId: JINHU.id }, saved, payers).dirty).toBe(false);
+  });
+
+  it('pays the cost back to the purchaser only when they paid it', () => {
+    const own = costPayerDraft({ payment: 'self', paidByUserId: MARCUS.id }, saved, payers);
+    expect(own).toMatchObject({ selfReimbursed: true, reimbursedTo: null, payer: MARCUS });
+    const manager = costPayerDraft({ payment: 'self', paidByUserId: TIM.id }, saved, payers);
+    expect(manager).toMatchObject({ selfReimbursed: false, reimbursedTo: 'Tim', payer: TIM });
+    // A record from before the payer was kept is the purchaser's.
+    expect(costPayerDraft({ payment: 'self', paidByUserId: null }, { ownerId: MARCUS.id, paidBy: null }, payers))
+      .toMatchObject({ selfReimbursed: true, reimbursedTo: null, payer: null });
+    expect(costPayerDraft({ payment: 'company', paidByUserId: null }, saved, payers))
+      .toMatchObject({ selfReimbursed: false, reimbursedTo: null });
+  });
+
+  it('judges the purchaser against the owner the draft has', () => {
+    const moved = costPayerDraft({ payment: 'self', paidByUserId: MARCUS.id }, { ownerId: JINHU.id, paidBy: MARCUS }, payers);
+    expect(moved).toMatchObject({ selfReimbursed: false, reimbursedTo: 'Marcus' });
+  });
+
+  it('names the payer on file when the list has dropped them', () => {
+    const gone = { id: 'u-gone', name: 'Gone' };
+    expect(costPayerDraft({ payment: 'self', paidByUserId: gone.id }, { ownerId: MARCUS.id, paidBy: gone }, payers))
+      .toMatchObject({ payer: gone, reimbursedTo: 'Gone' });
   });
 });

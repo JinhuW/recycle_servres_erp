@@ -4090,6 +4090,7 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-m-absent { background: var(--neg); }
 .bc-m-open { background: transparent; }
 .bc-m-priced { background: var(--info); }
+.bc-m-query { background: var(--info); }
 /* What the purchaser is paid, as the prices land. */
 .bc-earns { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; font-size: 12px; min-height: 26px; }
 .bc-earns-k { color: var(--fg-subtle); }

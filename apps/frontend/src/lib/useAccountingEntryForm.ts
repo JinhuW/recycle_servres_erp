@@ -4,7 +4,8 @@ import { useAuth } from './auth';
 import { handleFetchError } from './errorToast';
 import { fetchRateToUsd } from './fxRate';
 import { useDebouncedValue } from './useDebouncedValue';
-import { useManagerOptions } from './useManagers';
+import { useMembers } from './useManagers';
+import { payerChoices } from './poFacets';
 import {
   acctCreate, acctPatch, acctTargets, localToday,
   type AcctEntryDetail, type AcctTarget,
@@ -24,7 +25,7 @@ export function useAccountingEntryForm(opts: {
 }) {
   const { preset, entry, onSaved } = opts;
   const { user } = useAuth();
-  const managerOptions = useManagerOptions();
+  const members = useMembers();
   const today = useMemo(() => localToday(), []);
   const [form, setForm] = useState<EntryForm>(() => {
     const f = initialForm({ meId: user?.id ?? '', today, preset, entry });
@@ -56,15 +57,11 @@ export function useAccountingEntryForm(opts: {
     return () => { alive = false; };
   }, [form.currency, rate]);
 
-  // The people Paid by may name: the active managers; a manager no longer
-  // active still has to show on an entry booked to them; and a cost may
-  // name the PO's own purchaser, who paid it out of pocket.
+  // The people Paid by may name, the PO pages' own list: the active
+  // managers; on a cost, the PO's purchaser, who may have paid it out of
+  // pocket; and whoever the entry is booked to, though no longer listed.
   const owner = form.kind === 'purchase' ? form.target?.owner ?? null : null;
-  const managers = useMemo(() => {
-    const extra = [entry?.manager ?? null, owner].filter((m): m is { id: string; name: string } =>
-      !!m && !managerOptions.some(o => o.id === m.id));
-    return extra.length ? [...managerOptions, ...extra] : managerOptions;
-  }, [managerOptions, entry, owner]);
+  const managers = useMemo(() => payerChoices(members, owner, entry?.manager ?? null), [members, owner, entry]);
 
   // A preset can name a manager who is no longer active (one still holding a
   // balance, a sale's receiver since deactivated). The select can't show them
@@ -72,9 +69,9 @@ export function useAccountingEntryForm(opts: {
   // recording it.
   const meId = user?.id ?? '';
   useEffect(() => {
-    if (entry || managerOptions.length === 0 || form.managerId === meId) return;
+    if (entry || members.length === 0 || form.managerId === meId) return;
     if (!managers.some(m => m.id === form.managerId)) setForm(f => ({ ...f, managerId: meId }));
-  }, [entry, managerOptions, managers, form.managerId, meId]);
+  }, [entry, members, managers, form.managerId, meId]);
 
   const edit = (next: (f: EntryForm) => EntryForm) => { setForm(next); setError(null); };
   // An entry whose record was deleted keeps its kind with no link.

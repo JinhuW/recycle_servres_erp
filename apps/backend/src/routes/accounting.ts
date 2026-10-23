@@ -1,8 +1,8 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type postgres from 'postgres';
 import { actAsTx, getDb, type SqlLike } from '../db';
 import { nextHumanId } from '../lib/id-seq';
-import { getLatestRateToUsd } from '../lib/fx';
+import { cnyPerUsdOnFrag, getLatestRateToUsd } from '../lib/fx';
 import { poRealizedLateral } from '../lib/po-cost';
 import { allLimited } from '../lib/concurrency';
 import {
@@ -15,16 +15,17 @@ import { authMiddleware } from '../auth';
 import { requireManager } from '../lib/role';
 import { lockPayerTx, paidByErr, recordPayerTx, type CommissionPaidBy, type PayerRow } from './orders/shared';
 import { writeOrderEvent, type AuditChange } from '../services/orderAudit';
-import { nameHandoffByChange } from '../services/orderHandoff';
+import { namePeopleInChanges } from '../services/orderHandoff';
 import { isClosedBook } from '../services/orderAdvance';
 import type { Env, User } from '../types';
 import {
   ACCOUNTING_DUPLICATE_DAYS, ACCOUNTING_KINDS, ACCOUNTING_QUERY_MAX, ACCOUNTING_REVIEW_TABS,
   ACCOUNTING_UNREVIEWED_FIELDS, KIND_TARGET,
-  accountingChecks, addDays, hasAccountingWarning, isAccountingCurrency, isAccountingDirection, isAccountingKind,
-  isAccountingMethod, isAccountingReviewState, isIsoDate, todayIn,
-  type AccountingCurrency, type AccountingDirection, type AccountingKind, type AccountingMethod,
-  type AccountingReviewFacts, type AccountingReviewState, type AccountingReviewTab, type AccountingTargetType,
+  accountingChecks, addDays, foldChanges, hasAccountingWarning, isAccountingCurrency, isAccountingDirection,
+  accountingReviewRefusal, isAccountingKind, isAccountingMethod, isAccountingReviewState, isIsoDate, todayIn,
+  type AccountingChanges, type AccountingCurrency, type AccountingDirection, type AccountingKind,
+  type AccountingMethod, type AccountingReviewAction, type AccountingReviewFacts, type AccountingReviewRefusal,
+  type AccountingReviewState, type AccountingReviewSubject, type AccountingReviewTab, type AccountingTargetType,
 } from '@recycle-erp/shared';
 
 // The RMB Flow: the managers' book of money received and paid outside the
@@ -35,7 +36,8 @@ import {
 // kept in step both ways: this file writes the entry's side to the PO, and
 // migration 0199's triggers write the PO's side to its entries — a PO the
 // Business Account paid voids them, and this file refuses a new one there.
-const accounting = new Hono<{ Bindings: Env; Variables: { user: User } }>()
+type AcctEnv = { Bindings: Env; Variables: { user: User } };
+const accounting = new Hono<AcctEnv>()
   .use('*', authMiddleware)
   .use('*', requireManager);
 
@@ -68,8 +70,17 @@ type EntryRow = {
   query_by: string | null; query_by_name: string | null; query_text: string | null; query_at: string | null;
   query_to: string | null; query_to_name: string | null;
   answer_by: string | null; answer_by_name: string | null; answer_text: string | null; answer_at: string | null;
+  review_state: AccountingReviewState;
   version: string;
 };
+
+// The derived state, in the order the migration (0197) states it. The one
+// copy: rows select it, and the filters and tabs below test it.
+const reviewStateSql = (sql: SqlLike) => sql`CASE
+  WHEN e.reviewed_at IS NOT NULL THEN 'reviewed'
+  WHEN e.query_at IS NOT NULL AND e.answer_at IS NULL THEN 'queried'
+  WHEN e.review_cleared_at IS NOT NULL THEN 'changed'
+  ELSE 'open' END`;
 
 function entryCols(sql: SqlLike) {
   return sql`
@@ -81,7 +92,7 @@ function entryCols(sql: SqlLike) {
     e.author_id, au.name AS author_name, e.reviewed_by, rv.name AS reviewed_by_name, e.reviewed_at,
     e.review_cleared_at, e.query_by, qb.name AS query_by_name, e.query_text, e.query_at,
     e.query_to, qt.name AS query_to_name, e.answer_by, ab.name AS answer_by_name, e.answer_text, e.answer_at,
-    e.updated_at::text AS version
+    ${reviewStateSql(sql)} AS review_state, e.updated_at::text AS version
   `;
 }
 
@@ -98,25 +109,48 @@ function entryJoins(sql: SqlLike) {
   `;
 }
 
+// No open question, and no answer to one.
+const clearQuery = (sql: SqlLike) => sql`
+  query_by = NULL, query_text = NULL, query_at = NULL, query_to = NULL,
+  answer_by = NULL, answer_text = NULL, answer_at = NULL`;
+
+// Every edit since a sign-off was cleared, the record's delete among them,
+// and who had signed the version the first one cleared.
+const clearedEditsCol = (sql: SqlLike) => sql`
+  (SELECT json_agg(json_build_object(
+            'changes', ev.detail->'changes', 'by', ev.detail->'clearedReview'->>'by',
+            'byName', (SELECT u.name FROM users u WHERE u.id = (ev.detail->'clearedReview'->>'by')::uuid),
+            'synced', ev.detail->>'synced')
+          ORDER BY ev.created_at, ev.id)
+     FROM accounting_entry_events ev
+    WHERE ev.entry_id = e.id AND ev.kind IN ('edited', 'unlinked') AND e.review_cleared_at IS NOT NULL
+      AND ev.created_at >= e.review_cleared_at)`;
+
+type ClearedRow = EntryRow & {
+  edits: { changes: AccountingChanges | null; by: string | null; byName: string | null; synced: string | null }[] | null;
+};
+
+// What Review mode and the drawer show of an entry whose sign-off an edit
+// cleared: who had signed, and every field changed since.
+function clearedOf(r: ClearedRow) {
+  if (!r.review_cleared_at || !r.edits?.length) return null;
+  const first = r.edits[0];
+  return {
+    reviewer: first.by ? { id: first.by, name: first.byName ?? '' } : null,
+    at: r.review_cleared_at,
+    changes: foldChanges(r.edits.map(ev => ev.changes)),
+    // The last change came from the PO's side, so nobody wrote it: the row
+    // says so rather than naming the author, who didn't.
+    followedPo: r.edits.at(-1)?.synced === 'po',
+  };
+}
+
 function targetOf(r: { order_id: string | null; sell_order_id: string | null; after_sales_id: string | null }) {
   if (r.order_id) return { type: 'po' as const, id: r.order_id };
   if (r.sell_order_id) return { type: 'so' as const, id: r.sell_order_id };
   if (r.after_sales_id) return { type: 'as' as const, id: r.after_sales_id };
   return null;
 }
-
-// The derived state, in the order the migration (0197) states it.
-function reviewStateOf(r: Pick<EntryRow, 'reviewed_at' | 'query_at' | 'answer_at' | 'review_cleared_at'>): AccountingReviewState {
-  if (r.reviewed_at) return 'reviewed';
-  if (r.query_at && !r.answer_at) return 'queried';
-  return r.review_cleared_at ? 'changed' : 'open';
-}
-
-const reviewStateSql = (sql: SqlLike) => sql`CASE
-  WHEN e.reviewed_at IS NOT NULL THEN 'reviewed'
-  WHEN e.query_at IS NOT NULL AND e.answer_at IS NULL THEN 'queried'
-  WHEN e.review_cleared_at IS NOT NULL THEN 'changed'
-  ELSE 'open' END`;
 
 const person = (id: string | null, name: string | null) => (id ? { id, name: name ?? '' } : null);
 
@@ -125,10 +159,17 @@ const person = (id: string | null, name: string | null) => (id ? { id, name: nam
 // (query_to), since a payer that follows the PO moves the manager.
 const addresseeOf = (r: Pick<EntryRow, 'author_id' | 'manager_id'>) => r.author_id ?? r.manager_id;
 
+// The entry as the shared review rules read it.
+const subjectOf = (r: EntryRow): AccountingReviewSubject => ({
+  state: r.voided_at ? null : r.review_state,
+  authorId: r.author_id, reviewedBy: r.reviewed_by, queryBy: r.query_by, queryTo: r.query_to,
+  addressee: addresseeOf(r),
+});
+
 function shapeReview(r: EntryRow) {
   if (r.voided_at) return null;
   return {
-    state: reviewStateOf(r),
+    state: r.review_state,
     // What a sign-off names, so a page that is out of date can't sign off
     // something it never showed.
     version: r.version,
@@ -379,8 +420,8 @@ accounting.get('/summary', async (c) => {
              COUNT(*) FILTER (WHERE ${state} = 'reviewed')::int AS reviewed,
              COUNT(*) FILTER (WHERE ${state} = 'changed')::int AS changed,
              COUNT(*) FILTER (WHERE ${state} = 'queried')::int AS queried,
-             COUNT(*) FILTER (WHERE ${state} IN ('open', 'changed') AND e.author_id IS DISTINCT FROM ${me})::int AS for_me,
-             COUNT(*) FILTER (WHERE ${state} IN ('open', 'changed') AND e.author_id = ${me})::int AS waiting,
+             COUNT(*) FILTER (WHERE ${reviewTabFrag(sql, 'mine', me)})::int AS for_me,
+             COUNT(*) FILTER (WHERE ${reviewTabFrag(sql, 'others', me)})::int AS waiting,
              COALESCE(SUM(e.amount_cny), 0)::float AS moved_cny,
              COALESCE(SUM(e.amount_cny) FILTER (WHERE ${state} = 'reviewed'), 0)::float AS reviewed_cny,
              (SELECT COUNT(*)::int FROM users WHERE role = 'manager' AND active) AS active_managers
@@ -487,8 +528,9 @@ accounting.get('/entries', async (c) => {
 accounting.get('/entries/:id', async (c) => {
   const sql = getDb(c.env);
   const id = c.req.param('id');
-  const row = (await sql<EntryRow[]>`
-    SELECT ${entryCols(sql)} FROM accounting_entries e ${entryJoins(sql)} WHERE e.id = ${id} LIMIT 1
+  const row = (await sql<ClearedRow[]>`
+    SELECT ${entryCols(sql)}, ${clearedEditsCol(sql)} AS edits
+    FROM accounting_entries e ${entryJoins(sql)} WHERE e.id = ${id} LIMIT 1
   `)[0];
   if (!row) return c.json({ error: 'Not found' }, 404);
   const entry = shapeEntry(row);
@@ -506,6 +548,7 @@ accounting.get('/entries/:id', async (c) => {
   return c.json({
     entry: {
       ...entry,
+      cleared: clearedOf(row),
       targetFacts: target[0] ?? null,
       events: events.map(e => ({
         id: e.id, kind: e.kind, detail: e.detail, at: e.created_at,
@@ -639,7 +682,11 @@ async function prepareTargetTx(tx: SqlLike, f: EntryFields): Promise<Prepared> {
 // cost paid from the company's account — takes no RMB entry: that money is
 // Payments', and the flag or the link is undone on the PO.
 
-type Refused = { status: 400 | 409; error: string };
+// Every refusal a write gives: the status, the message, and for a sign-off
+// on a version the page never showed, a code the page can act on.
+type Refusal = { status: 400 | 403 | 409; error: string; code?: 'changed' };
+
+const refuse = (c: Context<AcctEnv>, r: Refusal) => c.json({ error: r.error, code: r.code }, r.status);
 
 const LINKED_MSG = 'a Mercury/PayPal row is linked as the commission — it was paid from the Business Account, see Payments';
 const COMPANY_COMMISSION_MSG = 'the commission was paid from the Business Account — change that on the PO';
@@ -656,7 +703,7 @@ const CLOSED_COST_MSG = 'the PO is Ready to Pay or Done, so who paid its cost is
 // manager deactivated since an entry was booked still paid it.
 async function payerAllowedTx(
   tx: SqlLike, f: EntryFields, prepared: Prepared & { kind: 'ok' }, payerChanged: boolean,
-): Promise<Refused | null> {
+): Promise<Refusal | null> {
   if (prepared.cost) {
     if (prepared.cost.payment === 'company') return { status: 409, error: COMPANY_COST_MSG };
     if (isClosedBook(prepared.cost.lifecycle) && (prepared.cost.paid_by ?? prepared.cost.user_id) !== f.managerId) {
@@ -687,7 +734,7 @@ async function syncPayerToPoTx(
   if (prepared.cost && prepared.cost.payment === 'self' && prepared.cost.paid_by !== f.managerId) {
     await tx`UPDATE orders SET paid_by = ${f.managerId}::uuid WHERE id = ${f.targetId}`;
     const changes: AuditChange[] = [{ field: 'paid_by', from: prepared.cost.paid_by, to: f.managerId }];
-    await nameHandoffByChange(tx, changes);
+    await namePeopleInChanges(tx, changes);
     await writeOrderEvent(tx, f.targetId, actorId, 'meta_changed', { changes });
   }
   return undefined;
@@ -710,7 +757,7 @@ accounting.post('/entries', async (c) => {
 
   type Outcome =
     | { kind: 'missing'; what: AccountingTargetType }
-    | { kind: 'refused'; status: 400 | 409; error: string }
+    | ({ kind: 'refused' } & Refusal)
     | { kind: 'created'; id: string; paidBy: CommissionPaidBy | undefined };
   const outcome = await sql.begin(async (tx): Promise<Outcome> => {
     await actAsTx(tx, u.id);
@@ -733,7 +780,7 @@ accounting.post('/entries', async (c) => {
     return { kind: 'created', id, paidBy: await syncPayerToPoTx(tx, f, u.id, prepared) };
   });
   if (outcome.kind === 'missing') return c.json({ error: MISSING[outcome.what] }, 404);
-  if (outcome.kind === 'refused') return c.json({ error: outcome.error }, outcome.status);
+  if (outcome.kind === 'refused') return refuse(c, outcome);
   return c.json(
     outcome.paidBy === undefined ? { id: outcome.id } : { id: outcome.id, commissionPaidBy: outcome.paidBy },
     201,
@@ -765,7 +812,7 @@ accounting.patch('/entries/:id', async (c) => {
 
   type Outcome =
     | { kind: 'notFound' } | { kind: 'voided' } | { kind: 'moved' } | { kind: 'bad'; error: string }
-    | { kind: 'refused'; status: 400 | 409; error: string }
+    | ({ kind: 'refused' } & Refusal)
     | { kind: 'missing'; what: AccountingTargetType }
     | { kind: 'ok'; paidBy: CommissionPaidBy | undefined };
   const outcome = await sql.begin(async (tx): Promise<Outcome> => {
@@ -773,10 +820,7 @@ accounting.patch('/entries/:id', async (c) => {
     // Orders before the entry: a PO delete holds its order and then reaches
     // the entry.
     if (poIds.length) await tx`SELECT 1 FROM orders WHERE id = ANY(${poIds}) ORDER BY id FOR NO KEY UPDATE`;
-    const row = (await tx<EntryRow[]>`
-      SELECT ${entryCols(tx)} FROM accounting_entries e ${entryJoins(tx)}
-      WHERE e.id = ${id} LIMIT 1 FOR UPDATE OF e
-    `)[0];
+    const row = await lockEntryTx(tx, id);
     if (!row) return { kind: 'notFound' };
     if (row.order_id !== pre.order_id) return { kind: 'moved' };
     if (row.voided_at) return { kind: 'voided' };
@@ -854,7 +898,7 @@ accounting.patch('/entries/:id', async (c) => {
     case 'voided': return c.json({ error: 'a voided entry is read-only — restore it first' }, 409);
     case 'moved': return c.json({ error: 'the entry changed while saving — open it again' }, 409);
     case 'bad': return c.json({ error: outcome.error }, 400);
-    case 'refused': return c.json({ error: outcome.error }, outcome.status);
+    case 'refused': return refuse(c, outcome);
     case 'missing': return c.json({ error: MISSING[outcome.what] }, 404);
     case 'ok': return c.json(outcome.paidBy === undefined ? { ok: true } : { ok: true, commissionPaidBy: outcome.paidBy });
   }
@@ -909,9 +953,7 @@ accounting.post('/entries/:id/restore', async (c) => {
     await tx`
       UPDATE accounting_entries
       SET voided_at = NULL, voided_by = NULL, void_reason = NULL, updated_at = NOW(),
-          reviewed_by = NULL, reviewed_at = NULL, review_cleared_at = NULL,
-          query_by = NULL, query_text = NULL, query_at = NULL, query_to = NULL,
-          answer_by = NULL, answer_text = NULL, answer_at = NULL
+          reviewed_by = NULL, reviewed_at = NULL, review_cleared_at = NULL, ${clearQuery(tx)}
       WHERE id = ${id}`;
     // The last word: a PO the Business Account paid voids its entries, and
     // this event, restoring what that voided, keeps it from voiding this one
@@ -944,14 +986,29 @@ async function lockEntryTx(tx: SqlLike, id: string): Promise<EntryRow | null> {
     WHERE e.id = ${id} LIMIT 1 FOR UPDATE OF e`)[0] ?? null;
 }
 
-type Refusal = { status: 403 | 409; error: string; code?: 'changed' };
+// The shared rules' reasons, as the API words them.
+const REVIEW_REFUSALS: Record<AccountingReviewRefusal, (r: EntryRow) => Refusal> = {
+  voided: () => ({ status: 409, error: 'a voided entry is out of review — restore it first' }),
+  reviewed: r => ({ status: 409, error: `${r.reviewed_by_name ?? 'another manager'} already reviewed this entry` }),
+  own: () => ({ status: 403, error: 'you wrote this version — another manager reviews it' }),
+  notReviewed: () => ({ status: 409, error: 'this entry is not reviewed' }),
+  notReviewer: () => ({ status: 403, error: 'only the manager who reviewed it can withdraw the review' }),
+  openQuestion: () => ({ status: 409, error: 'this entry already has an open question' }),
+  yours: () => ({ status: 400, error: 'this entry is yours to correct — edit it instead' }),
+  noQuestion: () => ({ status: 409, error: 'this entry has no open question' }),
+  notAddressee: () => ({ status: 403, error: 'the question was asked of another manager' }),
+  notAsker: () => ({ status: 403, error: 'only the manager who asked can withdraw the question' }),
+};
 
+function reviewRefused(row: EntryRow, me: string, action: AccountingReviewAction): Refusal | null {
+  const why = accountingReviewRefusal(subjectOf(row), me, action);
+  return why ? REVIEW_REFUSALS[why](row) : null;
+}
+
+// A sign-off also names the version the page showed.
 function signOffRefusal(row: EntryRow, me: string, version: string): Refusal | null {
-  if (row.voided_at) return { status: 409, error: 'a voided entry is out of review — restore it first' };
-  if (row.reviewed_at) return { status: 409, error: `${row.reviewed_by_name ?? 'another manager'} already reviewed this entry` };
-  if (row.author_id === me) return { status: 403, error: 'you wrote this version — another manager reviews it' };
-  if (row.version !== version) return { status: 409, error: 'the entry changed since you opened it', code: 'changed' };
-  return null;
+  return reviewRefused(row, me, 'review')
+    ?? (row.version === version ? null : { status: 409, error: 'the entry changed since you opened it', code: 'changed' });
 }
 
 // What a sign-off clears, kept on its event so withdrawing it (Review mode's
@@ -965,59 +1022,68 @@ type ReviewWas = {
   answer_by: string | null; answer_text: string | null; answer_at: string | null;
 };
 
-async function signOffTx(tx: SqlLike, row: EntryRow, me: string) {
-  const closesQuery = row.query_at !== null && row.answer_at === null;
-  const was: ReviewWas = {
-    review_cleared_at: row.review_cleared_at,
-    query_by: row.query_by, query_text: row.query_text, query_at: row.query_at, query_to: row.query_to,
-    answer_by: row.answer_by, answer_text: row.answer_text, answer_at: row.answer_at,
-  };
-  // updated_at stays: a sign-off says something about the entry, it doesn't
-  // make a new version of it.
+// Signs off entries already judged, one or a bulk batch, in two statements.
+// updated_at stays: a sign-off says something about the entry, it doesn't
+// make a new version of it.
+async function signOffTx(tx: SqlLike, rows: EntryRow[], me: string) {
+  if (rows.length === 0) return;
+  const events = rows.map(row => {
+    const was: ReviewWas = {
+      review_cleared_at: row.review_cleared_at,
+      query_by: row.query_by, query_text: row.query_text, query_at: row.query_at, query_to: row.query_to,
+      answer_by: row.answer_by, answer_text: row.answer_text, answer_at: row.answer_at,
+    };
+    return {
+      id: row.id,
+      detail: {
+        amountCny: row.amount_cny, ...(row.review_state === 'queried' ? { closedQuery: true } : {}),
+        ...(Object.values(was).some(v => v !== null) ? { was } : {}),
+      },
+    };
+  });
   await tx`
     UPDATE accounting_entries
-    SET reviewed_by = ${me}, reviewed_at = NOW(), review_cleared_at = NULL,
-        query_by = NULL, query_text = NULL, query_at = NULL, query_to = NULL,
-        answer_by = NULL, answer_text = NULL, answer_at = NULL
-    WHERE id = ${row.id}`;
-  await writeEvent(tx, row.id, me, 'reviewed', {
-    amountCny: row.amount_cny, ...(closesQuery ? { closedQuery: true } : {}),
-    ...(Object.values(was).some(v => v !== null) ? { was } : {}),
-  });
+    SET reviewed_by = ${me}, reviewed_at = NOW(), review_cleared_at = NULL, ${clearQuery(tx)}
+    WHERE id = ANY(${rows.map(r => r.id)})`;
+  await tx`
+    INSERT INTO accounting_entry_events (entry_id, kind, detail, actor_id)
+    SELECT x.id, 'reviewed', x.detail, ${me}::uuid
+    FROM jsonb_to_recordset(${tx.json(events as never)}) AS x(id text, detail jsonb)`;
 }
 
-const refuse = (c: { json: (b: unknown, s: 403 | 409) => Response }, r: Refusal) =>
-  c.json(r.code ? { error: r.error, code: r.code } : { error: r.error }, r.status);
-
-accounting.post('/entries/:id/review', async (c) => {
-  const u = c.var.user;
-  const id = c.req.param('id');
-  const body = (await c.req.json().catch(() => null)) as { version?: unknown } | null;
-  if (typeof body?.version !== 'string') return c.json({ error: 'version is required' }, 400);
-  const version = body.version;
-  const sql = getDb(c.env);
-  const outcome = await sql.begin(async (tx): Promise<'notFound' | 'ok' | Refusal> => {
+// The review routes' one shape: lock the entry, judge and write it, answer.
+async function reviewWrite(
+  c: Context<AcctEnv>, id: string, write: (tx: SqlLike, row: EntryRow) => Promise<Refusal | null>,
+) {
+  const outcome = await getDb(c.env).begin(async (tx): Promise<'notFound' | 'ok' | Refusal> => {
     const row = await lockEntryTx(tx, id);
     if (!row) return 'notFound';
-    const refused = signOffRefusal(row, u.id, version);
-    if (refused) return refused;
-    await signOffTx(tx, row, u.id);
-    return 'ok';
+    return (await write(tx, row)) ?? 'ok';
   });
   if (outcome === 'notFound') return c.json({ error: 'Not found' }, 404);
   if (outcome !== 'ok') return refuse(c, outcome);
   return c.json({ ok: true });
+}
+
+accounting.post('/entries/:id/review', async (c) => {
+  const me = c.var.user.id;
+  const body = (await c.req.json().catch(() => null)) as { version?: unknown } | null;
+  if (typeof body?.version !== 'string') return c.json({ error: 'version is required' }, 400);
+  const version = body.version;
+  return reviewWrite(c, c.req.param('id'), async (tx, row) => {
+    const refused = signOffRefusal(row, me, version);
+    if (refused) return refused;
+    await signOffTx(tx, [row], me);
+    return null;
+  });
 });
 
 accounting.delete('/entries/:id/review', async (c) => {
-  const u = c.var.user;
+  const me = c.var.user.id;
   const id = c.req.param('id');
-  const sql = getDb(c.env);
-  const outcome = await sql.begin(async (tx): Promise<'notFound' | 'ok' | Refusal> => {
-    const row = await lockEntryTx(tx, id);
-    if (!row) return 'notFound';
-    if (row.voided_at || !row.reviewed_at) return { status: 409, error: 'this entry is not reviewed' };
-    if (row.reviewed_by !== u.id) return { status: 403, error: 'only the manager who reviewed it can withdraw the review' };
+  return reviewWrite(c, id, async (tx, row) => {
+    const refused = reviewRefused(row, me, 'withdraw');
+    if (refused) return refused;
     // A reviewed entry can't be edited or asked about, so the latest sign-off
     // is the one being withdrawn.
     const was = (await tx<{ was: ReviewWas | null }[]>`
@@ -1031,12 +1097,9 @@ accounting.delete('/entries/:id/review', async (c) => {
                  query_to = ${was.query_at ? was.query_to ?? addresseeOf(row) : null},
                  answer_by = ${was.answer_by}, answer_text = ${was.answer_text}, answer_at = ${was.answer_at}` : tx``}
       WHERE id = ${id}`;
-    await writeEvent(tx, id, u.id, 'unreviewed');
-    return 'ok';
+    await writeEvent(tx, id, me, 'unreviewed');
+    return null;
   });
-  if (outcome === 'notFound') return c.json({ error: 'Not found' }, 404);
-  if (outcome !== 'ok') return refuse(c, outcome);
-  return c.json({ ok: true });
 });
 
 const queryText = (v: unknown) => {
@@ -1051,16 +1114,10 @@ accounting.post('/entries/:id/query', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { text?: unknown } | null;
   const text = queryText(body?.text);
   if (!text) return c.json({ error: `a question takes 1 to ${ACCOUNTING_QUERY_MAX} characters` }, 400);
-  const sql = getDb(c.env);
-  const outcome = await sql.begin(async (tx): Promise<'notFound' | 'ok' | Refusal | { status: 400; error: string }> => {
-    const row = await lockEntryTx(tx, id);
-    if (!row) return 'notFound';
-    if (row.voided_at) return { status: 409, error: 'a voided entry is out of review — restore it first' };
-    if (row.reviewed_at) return { status: 409, error: 'this entry is already reviewed' };
-    if (row.query_at && !row.answer_at) return { status: 409, error: 'this entry already has an open question' };
-    if (row.author_id === u.id) return { status: 403, error: 'you wrote this version — another manager reviews it' };
+  return reviewWrite(c, id, async (tx, row) => {
+    const refused = reviewRefused(row, u.id, 'query');
+    if (refused) return refused;
     const to = addresseeOf(row);
-    if (to === u.id) return { status: 400, error: 'this entry is yours to correct — edit it instead' };
     await tx`
       UPDATE accounting_entries
       SET query_by = ${u.id}, query_text = ${text}, query_at = NOW(), query_to = ${to},
@@ -1068,35 +1125,20 @@ accounting.post('/entries/:id/query', async (c) => {
       WHERE id = ${id}`;
     await writeEvent(tx, id, u.id, 'queried', { text });
     await notify(tx, { userId: to, kind: 'accounting_query', icon: 'cash', title: `${u.name} asked about ${id}`, body: text });
-    return 'ok';
+    return null;
   });
-  if (outcome === 'notFound') return c.json({ error: 'Not found' }, 404);
-  if (outcome !== 'ok') return c.json({ error: outcome.error }, outcome.status);
-  return c.json({ ok: true });
 });
 
 accounting.delete('/entries/:id/query', async (c) => {
-  const u = c.var.user;
+  const me = c.var.user.id;
   const id = c.req.param('id');
-  const sql = getDb(c.env);
-  const outcome = await sql.begin(async (tx): Promise<'notFound' | 'ok' | Refusal> => {
-    const row = await lockEntryTx(tx, id);
-    if (!row) return 'notFound';
-    if (row.voided_at || !row.query_at || row.answer_at || row.reviewed_at) {
-      return { status: 409, error: 'this entry has no open question' };
-    }
-    if (row.query_by !== u.id) return { status: 403, error: 'only the manager who asked can withdraw the question' };
-    await tx`
-      UPDATE accounting_entries
-      SET query_by = NULL, query_text = NULL, query_at = NULL, query_to = NULL,
-          answer_by = NULL, answer_text = NULL, answer_at = NULL
-      WHERE id = ${id}`;
-    await writeEvent(tx, id, u.id, 'query_withdrawn');
-    return 'ok';
+  return reviewWrite(c, id, async (tx, row) => {
+    const refused = reviewRefused(row, me, 'withdrawQuery');
+    if (refused) return refused;
+    await tx`UPDATE accounting_entries SET ${clearQuery(tx)} WHERE id = ${id}`;
+    await writeEvent(tx, id, me, 'query_withdrawn');
+    return null;
   });
-  if (outcome === 'notFound') return c.json({ error: 'Not found' }, 404);
-  if (outcome !== 'ok') return refuse(c, outcome);
-  return c.json({ ok: true });
 });
 
 accounting.post('/entries/:id/answer', async (c) => {
@@ -1105,45 +1147,31 @@ accounting.post('/entries/:id/answer', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { text?: unknown } | null;
   const text = queryText(body?.text);
   if (!text) return c.json({ error: `an answer takes 1 to ${ACCOUNTING_QUERY_MAX} characters` }, 400);
-  const sql = getDb(c.env);
-  const outcome = await sql.begin(async (tx): Promise<'notFound' | 'ok' | Refusal> => {
-    const row = await lockEntryTx(tx, id);
-    if (!row) return 'notFound';
-    if (row.voided_at || !row.query_at || row.answer_at || row.reviewed_at) {
-      return { status: 409, error: 'this entry has no open question' };
-    }
-    if (row.query_to !== u.id) return { status: 403, error: 'the question was asked of another manager' };
+  return reviewWrite(c, id, async (tx, row) => {
+    const refused = reviewRefused(row, u.id, 'answer');
+    if (refused) return refused;
     await tx`UPDATE accounting_entries SET answer_by = ${u.id}, answer_text = ${text}, answer_at = NOW() WHERE id = ${id}`;
     await writeEvent(tx, id, u.id, 'answered', { text });
     if (row.query_by) {
       await notify(tx, { userId: row.query_by, kind: 'accounting_answered', icon: 'cash', title: `${u.name} answered about ${id}`, body: text });
     }
-    return 'ok';
+    return null;
   });
-  if (outcome === 'notFound') return c.json({ error: 'Not found' }, 404);
-  if (outcome !== 'ok') return refuse(c, outcome);
-  return c.json({ ok: true });
 });
 
-// What a reviewer weighs an entry against: the FX ledger's rate on its day
-// (the earliest rate for a day before the ledger begins), another live entry
-// that looks like the same money, a sale the Business Account also received
-// (a live deposit linked as the sell order's payment, the read 0196's
-// commissions make), and every edit since a sign-off was cleared — the
-// record's delete among them.
+// What a reviewer weighs an entry against: the FX ledger's rate on its day,
+// another live entry that looks like the same money (within a date range the
+// book's index can find), a sale the Business Account also received (a live
+// deposit linked as the sell order's payment, the read 0196's commissions
+// make), and the edits since a sign-off was cleared.
 function reviewFactCols(sql: SqlLike) {
   return sql`
-    COALESCE(
-      (SELECT r.rate::float FROM fx_rates r
-        WHERE r.base_currency = 'USD' AND r.quote_currency = 'CNY' AND r.effective_date <= e.occurred_on
-        ORDER BY r.effective_date DESC, r.fetched_at DESC LIMIT 1),
-      (SELECT r.rate::float FROM fx_rates r
-        WHERE r.base_currency = 'USD' AND r.quote_currency = 'CNY'
-        ORDER BY r.effective_date, r.fetched_at LIMIT 1)) AS ledger_rate,
+    ${cnyPerUsdOnFrag(sql, sql`e.occurred_on`)} AS ledger_rate,
     (SELECT d.id FROM accounting_entries d
       WHERE d.id <> e.id AND d.voided_at IS NULL AND d.direction = e.direction AND d.kind = e.kind
         AND d.amount = e.amount AND d.currency = e.currency AND d.method = e.method
-        AND abs(d.occurred_on - e.occurred_on) <= ${ACCOUNTING_DUPLICATE_DAYS}
+        AND d.occurred_on BETWEEN e.occurred_on - ${ACCOUNTING_DUPLICATE_DAYS}::int
+                              AND e.occurred_on + ${ACCOUNTING_DUPLICATE_DAYS}::int
         AND (d.order_id = e.order_id OR d.sell_order_id = e.sell_order_id OR d.after_sales_id = e.after_sales_id
              OR (e.kind = 'other' AND e.counterparty IS NOT NULL AND lower(d.counterparty) = lower(e.counterparty)))
       ORDER BY abs(d.occurred_on - e.occurred_on), d.id LIMIT 1) AS duplicate_of,
@@ -1151,35 +1179,11 @@ function reviewFactCols(sql: SqlLike) {
       SELECT 1 FROM bank_transactions bt
       WHERE bt.sell_order_id = e.sell_order_id AND bt.link_kind = 'payment'
         AND bt.settle_status <> 'failed' AND bt.settle_status <> 'reversed')) AS business_received,
-    (SELECT json_agg(json_build_object(
-              'changes', ev.detail->'changes', 'by', ev.detail->'clearedReview'->>'by', 'at', ev.created_at,
-              'synced', ev.detail->>'synced')
-            ORDER BY ev.created_at, ev.id)
-       FROM accounting_entry_events ev
-      WHERE ev.entry_id = e.id AND ev.kind IN ('edited', 'unlinked') AND e.review_cleared_at IS NOT NULL
-        AND ev.created_at >= e.review_cleared_at) AS edits
+    ${clearedEditsCol(sql)} AS edits
   `;
 }
 
-type FactRow = EntryRow & {
-  ledger_rate: number | null; duplicate_of: string | null; business_received: boolean;
-  edits: {
-    changes: Record<string, { from: unknown; to: unknown }> | null; by: string | null; at: string; synced: string | null;
-  }[] | null;
-};
-
-// Every field changed since the sign-off was cleared, from what the reviewer
-// signed to what the entry says now. A field put back as it was drops out.
-function sinceReview(edits: NonNullable<FactRow['edits']>) {
-  const out: Record<string, { from: unknown; to: unknown }> = {};
-  for (const ev of edits) {
-    for (const [k, ch] of Object.entries(ev.changes ?? {})) {
-      out[k] = { from: k in out ? out[k].from : ch.from, to: ch.to };
-    }
-  }
-  for (const k of Object.keys(out)) if (JSON.stringify(out[k].from) === JSON.stringify(out[k].to)) delete out[k];
-  return out;
-}
+type FactRow = ClearedRow & { ledger_rate: number | null; duplicate_of: string | null; business_received: boolean };
 
 async function withFacts(sql: SqlLike, rows: FactRow[]) {
   const ids: Record<TargetLens, Set<string>> = { purchase: new Set(), commission: new Set(), so: new Set(), as: new Set() };
@@ -1190,11 +1194,6 @@ async function withFacts(sql: SqlLike, rows: FactRow[]) {
   const lenses = Object.keys(ids) as TargetLens[];
   const found = await allLimited(lenses.map(l => () => findTargets(sql, l, { ids: [...ids[l]] })));
   const byLens = new Map(lenses.map((l, i) => [l, new Map(found[i].map(t => [t.id, t]))]));
-  const reviewers = new Set(rows.flatMap(r => (r.edits?.[0]?.by ? [r.edits[0].by] : [])));
-  const names = reviewers.size
-    ? new Map((await sql<{ id: string; name: string }[]>`SELECT id, name FROM users WHERE id = ANY(${[...reviewers]})`)
-      .map(u => [u.id, u.name]))
-    : new Map<string, string>();
   return rows.map(r => {
     const t = targetOf(r);
     const target = t && r.kind !== 'other' ? byLens.get(LENS_OF[r.kind])?.get(t.id) ?? null : null;
@@ -1204,31 +1203,23 @@ async function withFacts(sql: SqlLike, rows: FactRow[]) {
       duplicateOf: r.duplicate_of,
       businessReceived: r.business_received,
     };
-    const first = r.edits?.[0];
     return {
       ...shapeEntry(r),
-      target: t,
       targetFacts: target,
-      facts,
       checks: accountingChecks({ kind: r.kind, currency: r.currency, fxRate: r.fx_rate, hasTarget: !!t }, facts),
-      cleared: r.review_cleared_at && r.edits?.length ? {
-        reviewer: first?.by ? { id: first.by, name: names.get(first.by) ?? '' } : null,
-        at: r.review_cleared_at,
-        changes: sinceReview(r.edits),
-        // The last change came from the PO's side, so nobody wrote it: the
-        // row says so rather than naming the author, who didn't.
-        followedPo: r.edits.at(-1)?.synced === 'po',
-      } : null,
+      cleared: clearedOf(r),
     };
   });
 }
 
+// Each tab's entries. `reviewed_at IS NULL` is what the state says already;
+// written out, it lets 0197's partial index serve the open tabs.
 function reviewTabFrag(sql: SqlLike, tab: AccountingReviewTab, me: string) {
   const state = reviewStateSql(sql);
   switch (tab) {
-    case 'mine': return sql`${state} IN ('open', 'changed') AND e.author_id IS DISTINCT FROM ${me}`;
-    case 'queried': return sql`${state} = 'queried'`;
-    case 'others': return sql`${state} IN ('open', 'changed') AND e.author_id = ${me}`;
+    case 'mine': return sql`e.reviewed_at IS NULL AND ${state} IN ('open', 'changed') AND e.author_id IS DISTINCT FROM ${me}`;
+    case 'queried': return sql`e.reviewed_at IS NULL AND ${state} = 'queried'`;
+    case 'others': return sql`e.reviewed_at IS NULL AND ${state} IN ('open', 'changed') AND e.author_id = ${me}`;
     case 'reviewed': return sql`e.reviewed_at >= NOW() - INTERVAL '30 days'`;
   }
 }
@@ -1242,6 +1233,9 @@ accounting.get('/review', async (c) => {
   const tab = tabRaw as AccountingReviewTab;
   const managerId = parseManager(c.req.query('managerId'));
   if (managerId === undefined) return c.json({ error: 'invalid managerId' }, 400);
+  // The page reads the counts off its For you list; another tab's list
+  // leaves them out.
+  const withCounts = c.req.query('counts') !== '0';
   const sql = getDb(c.env);
   const mgr = managerId ? sql`e.manager_id = ${managerId}` : sql`TRUE`;
   const [rows, counts] = await allLimited([
@@ -1251,12 +1245,12 @@ accounting.get('/review', async (c) => {
       WHERE e.voided_at IS NULL AND ${mgr} AND ${reviewTabFrag(sql, tab, me)}
       ORDER BY ${tab === 'reviewed' ? sql`e.reviewed_at DESC, e.id DESC` : sql`e.occurred_on, e.created_at, e.id`}
       LIMIT ${REVIEW_LIST_MAX}`,
-    () => sql<Record<AccountingReviewTab, number>[]>`
+    () => (withCounts ? sql<Record<AccountingReviewTab, number>[]>`
       SELECT COUNT(*) FILTER (WHERE ${reviewTabFrag(sql, 'mine', me)})::int AS mine,
              COUNT(*) FILTER (WHERE ${reviewTabFrag(sql, 'queried', me)})::int AS queried,
              COUNT(*) FILTER (WHERE ${reviewTabFrag(sql, 'others', me)})::int AS others,
              COUNT(*) FILTER (WHERE ${reviewTabFrag(sql, 'reviewed', me)})::int AS reviewed
-      FROM accounting_entries e WHERE e.voided_at IS NULL AND ${mgr}`,
+      FROM accounting_entries e WHERE e.voided_at IS NULL AND ${mgr}` : Promise.resolve([])),
   ]);
   return c.json({
     rows: await withFacts(sql, rows),
@@ -1269,10 +1263,9 @@ accounting.get('/review', async (c) => {
 accounting.get('/review/count', async (c) => {
   const me = c.var.user.id;
   const sql = getDb(c.env);
-  const state = reviewStateSql(sql);
   const [r] = await sql<{ for_me: number; asked: number }[]>`
-    SELECT COUNT(*) FILTER (WHERE ${state} IN ('open', 'changed') AND e.author_id IS DISTINCT FROM ${me})::int AS for_me,
-           COUNT(*) FILTER (WHERE ${state} = 'queried' AND e.query_to = ${me})::int AS asked
+    SELECT COUNT(*) FILTER (WHERE ${reviewTabFrag(sql, 'mine', me)})::int AS for_me,
+           COUNT(*) FILTER (WHERE ${reviewTabFrag(sql, 'queried', me)} AND e.query_to = ${me})::int AS asked
     FROM accounting_entries e WHERE e.voided_at IS NULL AND e.reviewed_at IS NULL`;
   return c.json({ forMe: r.for_me, asked: r.asked });
 });
@@ -1282,7 +1275,7 @@ const BULK_MAX = 200;
 // Signs off a batch the page listed. Only a plain To review entry with no
 // warning goes through; anything else is reported back, never forced.
 accounting.post('/review/bulk', async (c) => {
-  const u = c.var.user;
+  const me = c.var.user.id;
   const body = (await c.req.json().catch(() => null)) as { entries?: unknown } | null;
   const list = Array.isArray(body?.entries) ? body.entries : null;
   if (!list || list.length === 0 || list.length > BULK_MAX
@@ -1290,34 +1283,41 @@ accounting.post('/review/bulk', async (c) => {
     return c.json({ error: `entries takes 1 to ${BULK_MAX} { id, version } pairs` }, 400);
   }
   const wanted = new Map((list as { id: string; version: string }[]).map(x => [x.id, x.version]));
+  const ids = [...wanted.keys()];
   const sql = getDb(c.env);
-  // The checks are read before the locks: a change in between moves the
-  // version, which the sign-off below refuses.
-  const factRows = await sql<FactRow[]>`
+  // The checks are read before the locks, and only for what could be signed:
+  // a change in between moves the version, which the sign-off below refuses.
+  const candidates = await sql<FactRow[]>`
     SELECT ${entryCols(sql)}, ${reviewFactCols(sql)}
-    FROM accounting_entries e ${entryJoins(sql)} WHERE e.id = ANY(${[...wanted.keys()]})`;
-  const warned = new Set((await withFacts(sql, factRows)).filter(r => hasAccountingWarning(r.checks)).map(r => r.id));
+    FROM accounting_entries e ${entryJoins(sql)}
+    WHERE e.id = ANY(${ids}) AND e.voided_at IS NULL AND e.reviewed_at IS NULL
+      AND ${reviewStateSql(sql)} = 'open' AND e.author_id IS DISTINCT FROM ${me}`;
+  const warned = new Map((await withFacts(sql, candidates)).map(r => [r.id, hasAccountingWarning(r.checks)]));
 
   const skipped: { id: string; reason: string }[] = [];
-  const reviewed: string[] = [];
+  const signed: EntryRow[] = [];
   await sql.begin(async (tx) => {
     // One lock order, by id, so two bulk sign-offs can't deadlock each other.
     const locked = await tx<EntryRow[]>`
       SELECT ${entryCols(tx)} FROM accounting_entries e ${entryJoins(tx)}
-      WHERE e.id = ANY(${[...wanted.keys()]}) ORDER BY e.id FOR UPDATE OF e`;
+      WHERE e.id = ANY(${ids}) ORDER BY e.id FOR UPDATE OF e`;
     const byId = new Map(locked.map(r => [r.id, r]));
     for (const [id, version] of wanted) {
       const row = byId.get(id);
       if (!row) { skipped.push({ id, reason: 'not found' }); continue; }
-      const refused = signOffRefusal(row, u.id, version);
+      const refused = signOffRefusal(row, me, version);
       if (refused) { skipped.push({ id, reason: refused.error }); continue; }
-      if (reviewStateOf(row) !== 'open') { skipped.push({ id, reason: 'changed or queried entries are reviewed one by one' }); continue; }
-      if (warned.has(id)) { skipped.push({ id, reason: 'it has a warning' }); continue; }
-      await signOffTx(tx, row, u.id);
-      reviewed.push(id);
+      if (row.review_state !== 'open') { skipped.push({ id, reason: 'changed or queried entries are reviewed one by one' }); continue; }
+      // Unchecked: it turned To review after the checks were read, by a
+      // write that keeps the version (a question withdrawn).
+      const warn = warned.get(id);
+      if (warn === undefined) { skipped.push({ id, reason: 'the entry changed since you opened it' }); continue; }
+      if (warn) { skipped.push({ id, reason: 'it has a warning' }); continue; }
+      signed.push(row);
     }
+    await signOffTx(tx, signed, me);
   });
-  return c.json({ reviewed, skipped });
+  return c.json({ reviewed: signed.map(r => r.id), skipped });
 });
 
 // ── Records an entry can be for ─────────────────────────────────────────────

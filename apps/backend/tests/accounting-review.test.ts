@@ -258,6 +258,43 @@ describe('accounting review', () => {
     });
   });
 
+  it('signs a batch off at once, each entry with its own sign-off to undo', async () => {
+    const a = await record(alex.token, base({ counterparty: 'A' }));
+    const b = await record(alex.token, base({ counterparty: 'B', amount: 120 }));
+    // Asked and answered: To review again, and the sign-off keeps the exchange.
+    expect((await api('POST', `/api/accounting/entries/${b}/query`, { token: sofia.token, body: { text: 'which?' } })).status).toBe(200);
+    expect((await api('POST', `/api/accounting/entries/${b}/answer`, { token: alex.token, body: { text: 'the second' } })).status).toBe(200);
+    const r = await api<{ reviewed: string[]; skipped: unknown[] }>('POST', '/api/accounting/review/bulk', {
+      token: sofia.token,
+      body: { entries: await Promise.all([a, b].map(async id => ({ id, version: await versionOf(id) }))) },
+    });
+    expect(r.body).toEqual({ reviewed: [a, b], skipped: [] });
+    type Ev = { kind: string; detail: Record<string, unknown>; actor: { id: string } | null };
+    for (const id of [a, b]) {
+      const e = (await api<{ entry: Entry & { events: Ev[] } }>('GET', `/api/accounting/entries/${id}`, { token: alex.token })).body.entry;
+      expect(e.review).toMatchObject({ state: 'reviewed', by: { id: sofia.user.id } });
+      expect(e.events.at(-1)).toMatchObject({ kind: 'reviewed', actor: { id: sofia.user.id } });
+    }
+    expect((await api('DELETE', `/api/accounting/entries/${b}/review`, { token: sofia.token })).status).toBe(200);
+    expect((await entry(alex.token, b)).review).toMatchObject({
+      state: 'open', query: { text: 'which?', answer: { text: 'the second' } },
+    });
+  });
+
+  it('the drawer says what changed since review the way Review mode does', async () => {
+    const id = await record(alex.token, base({ amount: 1800 }));
+    expect((await review(sofia.token, id, await versionOf(id))).status).toBe(200);
+    expect((await api('PATCH', `/api/accounting/entries/${id}`, { token: sofia.token, body: { amount: 1880 } })).status).toBe(200);
+    // Put back, the amount drops out; the method stays changed.
+    expect((await api('PATCH', `/api/accounting/entries/${id}`, { token: sofia.token, body: { amount: 1800, method: 'cash' } })).status).toBe(200);
+    const drawer = (await api<{ entry: { cleared: ReviewRow['cleared'] } }>('GET', `/api/accounting/entries/${id}`, { token: alex.token })).body.entry;
+    expect(drawer.cleared).toEqual({
+      reviewer: { id: sofia.user.id, name: 'Sofia Reyes' }, at: expect.any(String),
+      changes: { method: { from: 'alipay', to: 'cash' } }, followedPo: false,
+    });
+    expect((await queue(alex.token, 'mine')).rows.find(r => r.id === id)!.cleared).toEqual(drawer.cleared);
+  });
+
   it('an entry nobody wrote is any manager\'s to review, and its questions go to its manager', async () => {
     const id = await record(alex.token, base({}));
     await getTestDb()`UPDATE accounting_entries SET author_id = NULL, created_by = NULL WHERE id = ${id}`;

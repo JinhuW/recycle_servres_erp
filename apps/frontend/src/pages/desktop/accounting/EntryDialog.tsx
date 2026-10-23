@@ -65,7 +65,7 @@ export function TargetLine({ kind, target }: { kind: Exclude<AccountingKind, 'ot
             ? `${t(FIGURE_KEY[kind])} ${fmtMoney(target.amount, target.currency, locale)}` : null,
           // Who the record says paid: the Business Account (a Mercury/PayPal
           // payment, not a manager's money) or the person.
-          target.payerBusiness ? t('acctPickBusiness')
+          target.payerBusiness ? t('payBusiness')
             : target.payerName ? t('acctPickPaidBy', { name: target.payerName }) : null,
         ].filter(Boolean).join(' · ')}
         {target.recordedCny ? <> · {t('acctPickRecorded')} <Yuan value={target.recordedCny} locale={locale} /></> : null}

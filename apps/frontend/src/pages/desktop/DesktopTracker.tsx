@@ -404,17 +404,17 @@ function WorkersCard({ filter, query, onQuery, onClear, fleetSize, funnel, subs,
   const pending = searching && loadedLimit < WORKERS_SEARCH_LIMIT && (workers?.length ?? 0) < total;
   const watched = subs?.filter(s => s.enabled).length;
   const active = rules?.filter(r => r.enabled).length;
-  // A key per count, so a count of one can read singular.
+  // A key per count; t() reads its singular for a count of one.
   const summary = watched === undefined || active === undefined || fleetSize === undefined || funnel === undefined
     ? null
     : [
-        fleetSize === 1 ? t('trkSumWorkersOne', { n: 1 }) : t('trkSumWorkers', { n: fleetSize ?? '—' }),
+        t('trkSumWorkers', { n: fleetSize ?? '—' }),
         ...(funnel ? [
-          funnel.poll === 1 ? t('trkSumPostsOne', { n: 1 }) : t('trkSumPosts', { n: funnel.poll }),
-          funnel.notify === 1 ? t('trkSumAlertsOne', { n: 1 }) : t('trkSumAlerts', { n: funnel.notify }),
+          t('trkSumPosts', { n: funnel.poll }),
+          t('trkSumAlerts', { n: funnel.notify }),
         ] : []),
-        watched === 1 ? t('trkSumSubsOne', { n: 1 }) : t('trkSumSubs', { n: watched }),
-        active === 1 ? t('trkSumRulesOne', { n: 1 }) : t('trkSumRules', { n: active }),
+        t('trkSumSubs', { n: watched }),
+        t('trkSumRules', { n: active }),
       ].join(' · ');
 
   return (

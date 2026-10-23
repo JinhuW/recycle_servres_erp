@@ -17,6 +17,69 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.318.1] - 2026-10-23
+
+The two things RS-359 left out of the v1.317 review (RS-360): the Activity
+crash, and the cleanups the review listed.
+
+**A tab gets only the areas it can draw.** v1.317 added the Accounting area
+to the Activity feed, and a tab still on an older bundle crashed when it
+opened one of those rows. That release is past, but the next new area would
+have done the same. The page now sends the areas it knows, and the server
+leaves the rest out of the rows and the counts. The row detail reads its
+area label from a table, so no row can throw there. Accounting rows nobody
+made say what did it (*Paid by followed the PO*), as the entry's history
+does, and a diff names payers who have left.
+
+**One rule in one place.** The review's main cleanups:
+
+- **Review state.** It is worked out once, in SQL, and the TypeScript twin
+  is gone. The summary band, the sidebar count and Review mode's tabs share
+  one predicate per tab. The open tabs say `reviewed_at IS NULL`, so 0197's
+  index can serve them.
+- **Who may do what.** Who may sign off, withdraw, ask, answer or withdraw
+  a question is one function in `packages/shared`. The API refuses with it,
+  and the pages offer buttons with it. The five review routes share one
+  shape, and a refusal has one type.
+- **Changed since review.** The drawer used to work this out again from the
+  history, naming the reviewer by a different rule. `GET /entries/:id` now
+  returns the same `cleared` block as Review mode's rows. The fold that
+  builds it lives in `packages/shared`, with tests.
+- **Bulk sign-off.** It is two statements whatever its size, through the
+  same code as a single sign-off, and checks only the entries it can sign.
+- **Commission paid from the Business Account.** It is one SQL function
+  (0203), called by both the payer sync and the routes. The rate for a day
+  is one helper in `lib/fx.ts`, with an index on `effective_date`. The
+  duplicate check is now a date range the book's index can find.
+- **PO PATCH.** It asks *does this change the payer?* once, on what
+  `paidByAfter` will write. Echoing a payer on a closed Business Account PO
+  no longer trips the closed-book freeze.
+- **Dev scrub.** The prod→dev scrub nulls every sealed `*_enc` column it
+  finds, on any table, so a new one needs no hand edit.
+
+**Less work per page.**
+
+- **Members.** Pickers read `/api/members/names` through one cached hook,
+  never `/api/members`, which computes every member's lifetime profit. The
+  names list takes `includeInactive` for managers. The PO pages, the
+  hand-off, Submit, Payments, Activity and the Accounting pages use it.
+- **Review count.** The sidebar and the RMB Flow page share one request
+  for the count.
+- **Review mode.** It caches its formatters, registers its key handler
+  once, works out its lists once per change, and stops re-reading *For you*
+  on a tab switch.
+- **`t()` and a count of one.** It reads the `…One` key when `n` is 1, so
+  the hand-written singular branches are gone.
+
+**Smaller fixes:**
+
+- The entry form builds its Paid by options with the PO pages' `payerChoices`.
+- The PO pages share one payer helper, `costPayerDraft`.
+- WeChat's search matches every term, anywhere, and highlights them. Its
+  view tabs are links that keep the view in the URL.
+- The Orders list sorts the Payment column by the payer it shows.
+- Dead keys and exports are gone, and the Review strip reuses `.bc-meter`.
+- `ReviewMark` moved under `pages/desktop/`.
 ## [1.318.0] - 2026-10-23
 
 Monitors ▸ WeChat: brand and generation get columns of their own, and the

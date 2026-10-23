@@ -5,10 +5,11 @@ import { handleFetchError } from './errorToast';
 import { buildHandoffBody, type HandoffDelivery, type HandoffMethod } from './handoff';
 import type { PackageSource } from './packageSource';
 import { normalizePaypalTxnInput } from './paypalTxn';
-import { payerChoices } from './poFacets';
+import { costPayerDraft, payerChoices } from './poFacets';
 import { poReadiness, readinessBlockerKeys } from './poReadiness';
 import type { Order, Warehouse } from './types';
 import type { PaymentProof } from './usePaymentProof';
+import { useMembers } from './useManagers';
 import { useTrackingInput } from './useTrackingInput';
 import { loadWarehouses } from './warehouses';
 
@@ -69,19 +70,17 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
   // the page's value moving fires this, so typing here is never overwritten.
   useEffect(() => { setTxnIdState(init.paypalTxnId); }, [init.paypalTxnId]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [members, setMembers] = useState<{ id: string; name: string; role?: string }[]>([]);
+  const members = useMembers();
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
     loadWarehouses().then(ws => { if (alive) setWarehouses(ws); }).catch(handleFetchError);
-    api.get<{ items: { id: string; name: string; role?: string }[] }>('/api/members/names')
-      .then(r => { if (alive) setMembers(r.items); })
-      .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
   // Who the Paid by select may name: the managers, the owner, the record.
   const payers = payerChoices(members, { id: order.userId, name: order.userName }, order.paidBy ?? null);
+  const { payer } = costPayerDraft({ payment: paidBy, paidByUserId }, { ownerId: order.userId, paidBy: order.paidBy ?? null }, payers);
   // The saved collector may have been deactivated since: the list is active
   // members only, and the server refuses a stale id. Cleared rather than
   // swapped for someone else — the section opens and asks.
@@ -140,7 +139,7 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
     delivery, setDelivery,
     byUserId, setByUserId, members,
     raw, setRaw, pick, setPick, tn, detected, carrier, hintKey,
-    paidBy, paidByUserId, setPaidBy, payers, method, setMethod,
+    paidBy, paidByUserId, setPaidBy, payers, payer, method, setMethod,
     txnId, setTxnId, proof,
     readiness, blockerKeys, canSubmit, busy, submit,
   };

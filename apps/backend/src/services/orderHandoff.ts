@@ -99,7 +99,7 @@ export async function activeMember(
 
 /** The timeline names people, not uuids: a handoff_by or paid_by change is
  *  rewritten with names the way owner_changed does it. Shared with PATCH. */
-export async function nameHandoffByChange(tx: SqlLike, changes: AuditChange[]): Promise<void> {
+export async function namePeopleInChanges(tx: SqlLike, changes: AuditChange[]): Promise<void> {
   const people = changes.filter(ch => ch.field === 'handoff_by' || ch.field === 'paid_by');
   if (people.length === 0) return;
   const ids = people.flatMap(ch => [ch.from, ch.to]).filter((v): v is string => typeof v === 'string');
@@ -328,7 +328,7 @@ export async function changeOrderOwnerTx(
   });
   if (payerFollows && opts.logPayer !== false) {
     const changes: AuditChange[] = [{ field: 'paid_by', from: fromUserId, to: newOwner.ownerId }];
-    await nameHandoffByChange(tx, changes);
+    await namePeopleInChanges(tx, changes);
     await writeOrderEvent(tx, id, actor.id, 'meta_changed', { changes });
   }
 }
@@ -407,7 +407,7 @@ export async function handoffOrderTx(
     FROM orders WHERE id = ${id}
   `)[0] as Record<string, unknown>;
   const changes = diff(before as unknown as Record<string, unknown>, after, HANDOFF_FIELDS);
-  await nameHandoffByChange(tx, changes);
+  await namePeopleInChanges(tx, changes);
 
   let pkg: HandoffPackage | null = null;
   let needsRegister = false;

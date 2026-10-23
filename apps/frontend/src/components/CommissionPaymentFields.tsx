@@ -67,7 +67,7 @@ function PaidByField({ paidBy, editable }: { paidBy: CommissionPaidBy; editable:
         style={{ width: '100%' }}
       >
         <option value="">{t('cpPaidByNone')}</option>
-        <option value={PAID_BY_COMPANY}>{t('cpPaidByCompany')}</option>
+        <option value={PAID_BY_COMPANY}>{t('payBusiness')}</option>
         {paidBy.options.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </select>
       {locked && (
@@ -103,7 +103,7 @@ export function CommissionPaidByConfirm({ paidBy }: { paidBy: CommissionPaidBy }
     );
   }
   const to = change.value === '' ? t('cpPaidByNone')
-    : change.value === PAID_BY_COMPANY ? t('cpPaidByCompany')
+    : change.value === PAID_BY_COMPANY ? t('payBusiness')
     : paidBy.nameFor(change.value) ?? '';
   return (
     <ConfirmDialog

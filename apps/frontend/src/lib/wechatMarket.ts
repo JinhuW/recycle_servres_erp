@@ -14,6 +14,7 @@ import type {
   WechatSide,
 } from '@recycle-erp/shared';
 import { api } from './api';
+import { matchesTerms, queryTerms } from './fleetView';
 
 const q = encodeURIComponent;
 
@@ -59,10 +60,10 @@ export function boardOrder(a: WechatRow, b: WechatRow): number {
 /** Traders on the line, both sides; the spec and code lists rank by it. */
 export const traders = (r: WechatRow) => r.buy.senders + r.sell.senders;
 
-export function matchesSearch(r: WechatRow, needle: string): boolean {
-  const n = needle.trim().toLowerCase();
-  if (!n) return true;
-  return [r.key, r.brand ?? '', ...r.partNumbers, ...r.ranks].some(s => s.toLowerCase().includes(n));
+/** Everything the search box may match a line on: what its name and spec
+ *  read, and its part numbers. The terms match as on the fleet pages. */
+export function wechatHaystack(r: WechatRow): string {
+  return [r.key, r.brand, r.ddr, r.code, ...r.partNumbers, ...r.ranks].filter(Boolean).join(' ');
 }
 
 // The Refine panel's rows. Spec and part-code lines add up across brands, so
@@ -173,9 +174,10 @@ export type BoardFilter = { pricedOnly: boolean; search: string; signal: string 
 
 /** The board's lines under its filters; the legend counts the same rows bar search and signal. */
 export function boardRows(rows: readonly WechatRow[], f: BoardFilter): WechatRow[] {
+  const terms = queryTerms(f.search);
   return rows.filter(r =>
     (!f.pricedOnly || hasPrice(r)) && (f.signal === null || r.signal === f.signal)
-    && matchesPicks(r, f.picks) && matchesSearch(r, f.search));
+    && matchesPicks(r, f.picks) && matchesTerms(wechatHaystack(r), terms));
 }
 
 /** Lines per known signal; one memtrade has no name for counts nowhere. */

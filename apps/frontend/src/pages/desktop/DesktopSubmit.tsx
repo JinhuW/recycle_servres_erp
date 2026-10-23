@@ -6,6 +6,7 @@ import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { PaymentFields } from '../../components/PaymentFields';
 import { payerAfterOwnerChange, payerChoices } from '../../lib/poFacets';
+import { useMembers } from '../../lib/useManagers';
 import type { HandoffMethod } from '../../lib/handoff';
 import { useT } from '../../lib/i18n';
 import { api, createOrder, deleteOrder, MAX_UPLOAD_BYTES } from '../../lib/api';
@@ -127,12 +128,7 @@ function OrderForm({
       .catch(handleFetchError);
   }, [isManager, user?.id]);
   // Every role: the Paid by select offers the managers by name.
-  const [memberNames, setMemberNames] = useState<{ id: string; name: string; role?: string }[]>([]);
-  useEffect(() => {
-    api.get<{ items: { id: string; name: string; role?: string }[] }>('/api/members/names')
-      .then(r => setMemberNames(r.items))
-      .catch(handleFetchError);
-  }, []);
+  const memberNames = useMembers();
   const owner = onBehalfOfUserId
     ? (members.find(m => m.id === onBehalfOfUserId) ?? null)
     : user ? { id: user.id, name: user.name } : null;

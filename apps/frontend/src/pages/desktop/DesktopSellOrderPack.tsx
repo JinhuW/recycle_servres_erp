@@ -438,7 +438,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
       }
       flashUndo({
         prev: applied.flatMap(lineId => before.get(lineId) ?? []),
-        msg: applied.length === 1 ? t('pkAppliedToastOne') : t('pkAppliedToast', { n: applied.length }),
+        msg: t('pkAppliedToast', { n: applied.length }),
       });
       // The selection moves on as a tick's does, judged on the reply: a fold
       // that lost a lot to 0 may now be a single row, under another key.
@@ -833,7 +833,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
       : whole.products === 0
         ? t('pkFinishNothing')
         : blockers.open > 0
-          ? t(left === 1 ? 'pkFinishLeftOne' : 'pkFinishLeft', { n: left })
+          ? t('pkFinishLeft', { n: left })
           : blockers.short > 0 || blockers.zero > 0
             ? t('pkFinishFix', { short: blockers.short, zero: blockers.zero })
             : !takesCounts
@@ -1104,7 +1104,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
                   {flagged.length > 0 && (
                     <button type="button" className="btn" disabled={!ready || busy} onClick={() => void applyFlagged()}>
                       <Icon name="check" size={15} />
-                      {' '}{flagged.length === 1 ? t('pkApplyOne') : t('pkApply', { n: flagged.length })}
+                      {' '}{t('pkApply', { n: flagged.length })}
                     </button>
                   )}
                   {(blockers.short > 0 || blockers.zero > 0) && (

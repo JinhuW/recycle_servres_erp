@@ -20,7 +20,8 @@ import { ApiError } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
-import { matchWechatDay, navigate, useRoute, wechatDayPath } from '../../lib/route';
+import { hrefFor, matchWechatDay, navigate, readHashQuery, replaceHashQuery, useRoute, wechatDayPath } from '../../lib/route';
+import { queryTerms } from '../../lib/fleetView';
 import {
   BUCKET_LABEL_KEY,
   BUCKET_TAX_KEY,
@@ -44,6 +45,7 @@ import {
   type Facet,
   type FacetPicks,
 } from '../../lib/wechatMarket';
+import { Hi } from './FleetAccounts';
 import '../../styles/facebookPool.css';
 
 // ─── Monitors ▸ WeChat ────────────────────────────────────────────────────────
@@ -65,6 +67,8 @@ const REPORT_TZ = 'America/New_York';
 type Loaded = { day: WechatDay; rows: WechatRow[] };
 type Tab = 'board' | 'groups';
 
+const tabFromUrl = (): Tab => (readHashQuery().get('view') === 'groups' ? 'groups' : 'board');
+
 // The legend wears the board's side colours: demand-heavy is the bid's.
 const SIGNAL_CLASS: Record<'info' | 'accent' | 'muted', string> = {
   info: 'wx-sig-bid', muted: 'wx-sig-even', accent: 'wx-sig-ask',
@@ -84,8 +88,14 @@ export function DesktopWechat() {
   const [signal, setSignal] = useState<string | null>(null);
   // Held across families and days; a family applies the facets it has.
   const [picks, setPicks] = useState<FacetPicks>({});
-  // Not in the URL, which carries the day: a day change keeps the tab.
-  const [tab, setTab] = useState<Tab>('board');
+  // The view rides the route's query, so a reload or a copied link opens the
+  // same tab. The path carries the day, and a day change keeps the tab.
+  const [tab, setTab] = useState<Tab>(tabFromUrl);
+  useEffect(() => {
+    const q = readHashQuery();
+    if (tab === 'board') q.delete('view'); else q.set('view', tab);
+    replaceHashQuery(q);
+  }, [tab, path]);
 
   const date = routed ?? days?.[0]?.date ?? null;
 
@@ -174,16 +184,26 @@ export function DesktopWechat() {
       )}
     </div>
   );
+  // Links, as the fleet pages' tabs are, so a view opens in a tab of its own.
+  // A plain click stays on the page: the query is all that moves.
+  const tabLink = (v: Tab) => ({
+    className: `tab ${tab === v ? 'active' : ''}`,
+    href: hrefFor(path + (v === 'groups' ? '?view=groups' : '')),
+    'aria-current': tab === v ? ('page' as const) : undefined,
+    onClick: (e: React.MouseEvent) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      setTab(v);
+    },
+  });
   const tabs = (
     <nav className="tabs fp-view-tabs" aria-label={t('wxViews')}>
-      <button type="button" aria-pressed={tab === 'board'} className={`tab ${tab === 'board' ? 'active' : ''}`}
-        onClick={() => setTab('board')}>
+      <a {...tabLink('board')}>
         <Icon name="tag" size={14} />{t('wxBoard')}{rows && <span className="chip muted">{rows.length}</span>}
-      </button>
-      <button type="button" aria-pressed={tab === 'groups'} className={`tab ${tab === 'groups' ? 'active' : ''}`}
-        onClick={() => setTab('groups')}>
+      </a>
+      <a {...tabLink('groups')}>
         <Icon name="chats" size={14} />{t('wxTabGroups')}{summary && <span className="chip muted">{summary.totals.groupsTotal}</span>}
-      </button>
+      </a>
     </nav>
   );
 
@@ -378,6 +398,7 @@ function BoardCard({
 
   useEffect(() => { setOpen(null); }, [kind, data?.day.date]);
 
+  const terms = useMemo(() => queryTerms(search), [search]);
   const rows = useMemo(() => {
     const shown = boardRows(data?.rows ?? [], { pricedOnly, search, signal, picks });
     return branded ? shown.sort(boardOrder) : shown;
@@ -399,9 +420,9 @@ function BoardCard({
   // A key per count, so a count of one can read singular.
   const tot = summary?.totals;
   const summaryLine = tot && [
-    tot.buyers === 1 ? t('wxSumBuyersOne', { n: 1 }) : t('wxSumBuyers', { n: fmt.format(tot.buyers) }),
-    tot.sellers === 1 ? t('wxSumSellersOne', { n: 1 }) : t('wxSumSellers', { n: fmt.format(tot.sellers) }),
-    tot.posts === 1 ? t('wxSumPostsOne', { n: 1 }) : t('wxSumPosts', { n: fmt.format(tot.posts) }),
+    t('wxSumBuyers', { n: fmt.format(tot.buyers) }),
+    t('wxSumSellers', { n: fmt.format(tot.sellers) }),
+    t('wxSumPosts', { n: fmt.format(tot.posts) }),
     tot.groupsTotal === 1
       ? t('wxSumGroupsOne', { active: tot.groupsActive, total: 1 })
       : t('wxSumGroups', { active: tot.groupsActive, total: tot.groupsTotal }),
@@ -485,7 +506,7 @@ function BoardCard({
                 const isOpen = open === r.key;
                 return (
                   <Fragment key={r.key}>
-                    <BoardRow row={r} branded={branded} open={isOpen} locale={locale}
+                    <BoardRow row={r} branded={branded} terms={terms} open={isOpen} locale={locale}
                       onToggle={() => setOpen(isOpen ? null : r.key)} />
                     {isOpen && (
                       <tr className="wx-detail-row">
@@ -517,21 +538,21 @@ function BoardCard({
   );
 }
 
-function LineName({ row }: { row: WechatRow }) {
+function LineName({ row, terms }: { row: WechatRow; terms: readonly string[] }) {
   const { t } = useT();
   const spec = [row.ranks[0], row.formFactor === 'pc' ? t('wxFormPc') : null, row.partNumbers[0]].filter(Boolean);
   return (
     <span className="fp-holder">
       {row.kind === 'quote' ? (
         <span className="wx-line">
-          <b>{row.capacityGb}G</b>
-          <span>{row.speed ?? '—'}</span>
-          {row.code ? <span className="wx-code">{row.code}</span> : <span className="fp-muted">{t('wxAnyCode')}</span>}
+          <b><Hi text={`${row.capacityGb}G`} terms={terms} /></b>
+          <span><Hi text={String(row.speed ?? '—')} terms={terms} /></span>
+          {row.code ? <span className="wx-code"><Hi text={row.code} terms={terms} /></span> : <span className="fp-muted">{t('wxAnyCode')}</span>}
         </span>
       ) : (
-        <span className="wx-line"><b>{lineKey(row.key, t)}</b></span>
+        <span className="wx-line"><b><Hi text={lineKey(row.key, t)} terms={terms} /></b></span>
       )}
-      {spec.length > 0 && <small className="mono">{spec.join(' · ')}</small>}
+      {spec.length > 0 && <small className="mono"><Hi text={spec.join(' · ')} terms={terms} /></small>}
     </span>
   );
 }
@@ -597,9 +618,10 @@ function Change({ cur, prev }: { cur: WechatPrice | null; prev: WechatPrice | nu
   );
 }
 
-function BoardRow({ row, branded, open, locale, onToggle }: {
+function BoardRow({ row, branded, terms, open, locale, onToggle }: {
   row: WechatRow;
   branded: boolean;
+  terms: readonly string[];
   open: boolean;
   locale: string;
   onToggle: () => void;
@@ -611,11 +633,12 @@ function BoardRow({ row, branded, open, locale, onToggle }: {
       tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}>
       {branded && (
         <td className="wx-tag">
-          {row.brand && row.brand !== UNBRANDED ? row.brand : <span className="fp-muted">{t('wxUnbranded')}</span>}
+          {row.brand && row.brand !== UNBRANDED
+            ? <Hi text={row.brand} terms={terms} /> : <span className="fp-muted">{t('wxUnbranded')}</span>}
         </td>
       )}
-      <td className="wx-line-cell"><LineName row={row} /></td>
-      <td className="wx-tag mono">{row.ddr ?? <span className="fp-muted">—</span>}</td>
+      <td className="wx-line-cell"><LineName row={row} terms={terms} /></td>
+      <td className="wx-tag mono">{row.ddr ? <Hi text={row.ddr} terms={terms} /> : <span className="fp-muted">—</span>}</td>
       <PriceCell stats={row.buy} side="buy" locale={locale} />
       <PriceCell stats={row.sell} side="sell" locale={locale} />
       <Ladder row={row} locale={locale} />

@@ -43,6 +43,13 @@ activity.get('/', async (c) => {
   const area = ACTIVITY_AREAS.includes(areaRaw as ActivityArea)
     ? (areaRaw as ActivityArea) : null;
   if (areaRaw && !area) return c.json({ error: 'unknown area' }, 400);
+  // The areas the caller can draw, rows and counts both. A page sends the
+  // list it was built with, so an area a later release adds never reaches a
+  // tab still open on an older bundle; a name this server doesn't have yet
+  // is skipped. Absent, every area; an area asked for by name is one.
+  const areasRaw = c.req.query('areas');
+  const known = areasRaw === undefined ? [...ACTIVITY_AREAS]
+    : ACTIVITY_AREAS.filter(a => a === area || areasRaw.split(',').includes(a));
 
   const actionRaw = c.req.query('action');
   const action = ACTIVITY_ACTIONS.includes(actionRaw as ActivityAction)
@@ -162,7 +169,8 @@ activity.get('/', async (c) => {
 
   // Each branch must be parenthesised: an unwrapped ORDER BY / LIMIT binds to
   // the whole union, not to the branch it was written on.
-  const wanted = ACTIVITY_AREAS.filter(a => !area || area === a);
+  const wanted = area ? [area] : known;
+  if (wanted.length === 0) return c.json({ events: [], counts: { all: 0 }, nextCursor: null });
   const union = wanted
     .map(a => sql`(${BRANCH[a]})`)
     .reduce((acc, b) => sql`${acc} UNION ALL ${b}`);
@@ -190,17 +198,14 @@ activity.get('/', async (c) => {
   // the client keeps the numbers it already has.
   let counts: Record<string, number> | undefined;
   if (!cursor) {
+    const countUnion = known
+      .map(a => sql`SELECT ${a}::text AS area ${FROM[a]} WHERE ${WHERE[a]}`)
+      .reduce((acc, b) => sql`${acc} UNION ALL ${b}`);
     const countRows = await sql<{ area: ActivityArea; n: number }[]>`
-      SELECT area, COUNT(*)::int AS n FROM (
-        SELECT 'po'    AS area ${FROM.po}    WHERE ${WHERE.po}
-        UNION ALL SELECT 'so'  ${FROM.so}    WHERE ${WHERE.so}
-        UNION ALL SELECT 'inv' ${FROM.inv}   WHERE ${WHERE.inv}
-        UNION ALL SELECT 'price' ${FROM.price} WHERE ${WHERE.price}
-        UNION ALL SELECT 'acct' ${FROM.acct} WHERE ${WHERE.acct}
-      ) t GROUP BY area
+      SELECT area, COUNT(*)::int AS n FROM (${countUnion}) t GROUP BY area
     `;
 
-    counts = { all: 0, po: 0, so: 0, inv: 0, price: 0, acct: 0 };
+    counts = { all: 0, ...Object.fromEntries(known.map(a => [a, 0])) };
     for (const r of countRows) {
       counts[r.area] = r.n;
       counts.all += r.n;
