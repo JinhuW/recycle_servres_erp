@@ -2724,9 +2724,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   "holder or manager" rule on return/report are enforced in the transaction,
   an import lands whole or not at all (naming the rows whose UID collided),
   and the `#` is never reused. Logins (password, 2FA key, e-mail password,
-  cookie) are sealed at rest under `FB_POOL_KEY`; the nightly prod→dev copy
-  blanks them. A purchaser's read carries the login of the accounts they hold
-  and only the rack — status, holder, age, the cookie's `c_user` — for the
+  cookie, access token) are sealed at rest under `FB_POOL_KEY`; the nightly
+  prod→dev copy blanks them, the access token too since v1.316.1. A
+  purchaser's read carries the login of the accounts they hold and only the
+  rack — status, holder, age, the cookie's `c_user` — for the
   rest; the activity ledger (every add, import, edit, take, return, report,
   retire, remove, plus copies and reveals of a login) is manager-only. In
   production without `FB_POOL_KEY` the pool routes answer 503 and name the

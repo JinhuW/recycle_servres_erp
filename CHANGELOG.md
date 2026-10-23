@@ -17,6 +17,19 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.316.1] - 2026-10-22
+
+The Facebook account pool loads on dev again (RS-352). The nightly prod→dev
+copy blanks the pool's sealed logins, because they are sealed under prod's
+`FB_POOL_KEY` and dev has its own. The access token column came later
+(v1.307.0, RS-337, migration 0190) and the scrub never learned it. So from the
+first import that carried tokens, rows #18–#27, every night brought prod's
+live Facebook access tokens into dev. The first one dev couldn't open failed
+`GET /api/facebook-pool` with a 500 for the whole page. The scrub now blanks
+the token too. Its test reads the sealed columns from the schema rather than
+listing them, so a new `*_enc` column fails CI until the scrub covers it. The
+ten tokens already on dev were blanked by hand the same day.
+
 ## [1.316.0] - 2026-10-22
 
 Monitors ▸ Reddit and Monitors ▸ WeChat now read like Monitors ▸ Facebook
