@@ -54,6 +54,7 @@ describe('POST /api/market/values', () => {
 
   it('updates an existing row, appends an event, recomputes trend', async () => {
     const sql = getTestDb();
+    await sql`UPDATE ref_prices SET avg_sell = 100 WHERE id = ${knownId}`;
     const beforeEvents = (await sql<{ c: number }[]>`
       SELECT COUNT(*)::int AS c FROM ref_price_events WHERE ref_price_id = ${knownId}
     `)[0].c;
@@ -79,6 +80,8 @@ describe('POST /api/market/values', () => {
       FROM ref_prices WHERE id = ${knownId}
     `)[0];
     expect(after.avg_sell).toBe(130);
+    // A fraction of the previous average, as the Market page reads it.
+    expect(after.trend).toBeCloseTo(0.3, 5);
     expect(after.samples).toBe(9);
     expect(after.source).toBe('test-scraper');
     expect(after.last_price).toBe(130);
@@ -95,6 +98,47 @@ describe('POST /api/market/values', () => {
     expect(afterEvents.c).toBe(beforeEvents + 1);
     expect(afterEvents.latest_source).toBe('scraper:test-scraper');
     expect(afterEvents.latest_actor).toBeNull();
+  });
+
+  it('writes a part auto-tracked with no price yet, without failing the batch', async () => {
+    const sql = getTestDb();
+    // Shaped like marketAutoTrack's insert: specs only, every price NULL.
+    await sql`
+      INSERT INTO ref_prices (id, category, label, part_number, samples, source)
+      VALUES ('auto-unpriced', 'RAM', 'Unpriced part', 'UNPRICED-1', 0, 'auto-intake')`;
+    const push = (avgSell: string) => api('POST', '/api/market/values', {
+      headers: { authorization: `Bearer ${writeBearer}` },
+      body: {
+        values: [
+          { selector: { partNumber: 'UNPRICED-1' }, low: avgSell, high: avgSell, avgSell, samples: 3, source: 'first-push' },
+          { selector: { id: knownId }, low: '1', high: '2', avgSell: '1.5', samples: 1, source: 'batch-mate' },
+        ],
+      },
+    });
+    const read = async () => (await sql<{ avg_sell: number; trend: number; source: string }[]>`
+      SELECT avg_sell::float AS avg_sell, trend, source FROM ref_prices WHERE id = 'auto-unpriced'`)[0];
+
+    const first = await push('100');
+    expect(first.status).toBe(200);
+    expect(first.body).toMatchObject({ updated: 2, notFound: 0, errors: [] });
+    expect(await read()).toEqual({ avg_sell: 100, trend: 0, source: 'first-push' });
+
+    await push('110');
+    expect((await read()).trend).toBeCloseTo(0.1, 5);
+  });
+
+  it('reads a previous average of 0 as no trend', async () => {
+    const sql = getTestDb();
+    await sql`
+      INSERT INTO ref_prices (id, category, label, part_number, avg_sell, samples, source)
+      VALUES ('zero-avg', 'RAM', 'Zero part', 'ZERO-AVG-1', 0, 0, 'auto-intake')`;
+    const r = await api('POST', '/api/market/values', {
+      headers: { authorization: `Bearer ${writeBearer}` },
+      body: { values: [{ selector: { id: 'zero-avg' }, low: '4', high: '6', avgSell: '5', samples: 1, source: 'x' }] },
+    });
+    expect((r.body as { updated: number }).updated).toBe(1);
+    const [row] = await sql<{ trend: number }[]>`SELECT trend FROM ref_prices WHERE id = 'zero-avg'`;
+    expect(row.trend).toBe(0);
   });
 
   it('reports notFound for unknown selectors', async () => {

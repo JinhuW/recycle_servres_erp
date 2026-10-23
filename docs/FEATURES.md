@@ -2494,6 +2494,12 @@ over MCP.
   (`bid:<order>`, v1.138.3), was retired with that import in v1.297.0; its
   events stay on file. The Activity page shows the source per row; the
   Market page shows only the price and its age.
+  - **The scraper's push** (`POST /api/market/values`, bearer
+    `market:write`) works on a part that has no price yet (v1.329.1). Until
+    then, a part auto-tracked from a PO made the whole batch fail, so no
+    scraper price had ever landed. The push also sets the trend arrow to the
+    change since the scraper's previous push, as a percent; a part's first
+    push reads as flat.
 - **Import prices from a spreadsheet** (v1.247.0, managers, desktop). The
   manager drops an `.xlsx`, and only its Part Number and Unit Price columns
   are read. The preview shows current → new price and max buy for every part

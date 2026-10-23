@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.329.1] - 2026-10-23
+
+The scraper's price push works again (RS-383). `POST /api/market/values`
+wrote `trend = NULL` when a part had no average sell price yet, but that
+column is NOT NULL. One such part failed the whole batch with a 500. Every part
+on the Market list is auto-tracked from a PO and starts with no price, so the
+scraper had never landed a price in prod. Now a part's first push sets `trend`
+to 0.
+
+The same line stored `trend` as a dollar difference, while the Market page
+shows it ×100 as a percent: a $10 rise would have read "+1000.0%". It is now
+the change as a fraction of the previous average, as the page and the seed
+assume, and a previous average of 0 also reads as flat. No stored value
+needed repair, because every `trend` in prod was still 0.
+
 ## [1.329.0] - 2026-10-23
 
 Pack mode now prints a label for each product instead of one for the box
