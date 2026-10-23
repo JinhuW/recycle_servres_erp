@@ -1,5 +1,5 @@
 // Helpers and types more than one orders route module uses.
-import { getDb } from '../../db';
+import { actAsTx, getDb } from '../../db';
 import { UUID_RE } from '../../lib/pagination';
 import { LINE_FIELDS, writeOrderEvent, type SqlLike } from '../../services/orderAudit';
 import { commissionLinkedFrag } from '../../banktx/match';
@@ -79,6 +79,7 @@ export async function recordPayerTx(
     : to.userId === from.commission_paid_by ? from.commission_paid_by_name
     : ((await tx`SELECT name FROM users WHERE id = ${to.userId}`)[0]?.name as string | undefined) ?? null;
   if (from.commission_paid_by !== to.userId || from.commission_paid_by_company !== to.company) {
+    await actAsTx(tx, actorId);
     await tx`
       UPDATE orders SET commission_paid_by = ${to.userId}, commission_paid_by_company = ${to.company}
       WHERE id = ${id}`;
@@ -355,6 +356,16 @@ export async function paidByErr(
   if (typeof v !== 'string' || !UUID_RE.test(v)) return 'paidByUserId must be a user id';
   if (v === ownerId) return (await activeMember(sql, v)) ? null : 'Paid by must be an active member';
   return (await isActiveManager(sql, v)) ? null : 'Paid by must be an active manager or the purchaser';
+}
+
+// paidByErr for a PO that exists. Only a payer the request picks is judged:
+// the editors send back the one on file with every save, and someone
+// deactivated since still paid. A pick is judged against the owner the
+// request leaves, since a purchaser can only have paid for their own PO.
+export async function pickedPaidByErr(
+  sql: SqlLike, po: { paidBy: string | null; ownerAfter: string }, v: unknown,
+): Promise<string | null> {
+  return v === po.paidBy ? null : paidByErr(sql, po.ownerAfter, v);
 }
 
 export function trackingTakenMsg(otherOrderId: string | null): string {

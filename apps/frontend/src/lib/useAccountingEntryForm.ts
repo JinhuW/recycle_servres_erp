@@ -106,6 +106,9 @@ export function useAccountingEntryForm(opts: {
     editing: !!entry,
     // A PO the Business Account paid takes no paid-out RMB entry: the form says so.
     payerLocked: payerLock(form, entry),
+    // The payer select stays open while putting the entry's own payer back
+    // would lift the lock, so a changed payer can be changed back.
+    payerPickLocked: payerLock({ ...form, managerId: entry?.manager.id ?? form.managerId }, entry),
     // A manager picked by hand stays put when the record changes.
     set: (patch: Partial<EntryForm>) => edit(f => ({ ...f, ...patch, ...(patch.managerId !== undefined ? { managerTouched: true } : {}) })),
     setKind: (k: AccountingKind) => edit(f => applyKind(f, k)),

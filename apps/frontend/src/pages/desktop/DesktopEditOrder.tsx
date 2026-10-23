@@ -9,7 +9,7 @@ import { api, deleteOrder, archiveOrder, unarchiveOrder, followLineTotal, ApiErr
 import { readArchiveConflict, type ArchiveConflict } from '../../lib/archiveConflict';
 import { readStageMoved } from '../../lib/boxCheck';
 import { costPayerLabel, costReimbursedToOwner, poStageName } from '../../lib/orderPresentation';
-import { payerChoices } from '../../lib/poFacets';
+import { payerAfterOwnerChange, payerChoices } from '../../lib/poFacets';
 import { ArchiveConflictList } from '../../components/ArchiveConflictList';
 import { SoldBadge } from '../../components/SoldBadge';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
@@ -328,8 +328,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
-  // Who the Cost Payment tab's Paid by may name: the managers, the owner, the record.
-  const payers = payerChoices(memberNames, { id: order.userId, name: order.userName }, order.paidBy ?? null);
   // Which stage the status section is showing. Null follows the order; a
   // reached step sets it to look back at what that stage recorded. Any
   // stage change snaps it back — a move is the news.
@@ -447,6 +445,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     ensure(user?.id, user?.name);
     return opts;
   }, [members, order.userId, order.userName, user?.id, user?.name]);
+  // A payer that named the old owner follows the PO to the new one, as the
+  // server moves it on save.
+  const pickOwner = (id: string) => {
+    if (payment === 'self') setPaidByUserId(p => payerAfterOwnerChange(p, ownerId, id));
+    setOwnerId(id);
+  };
+  // Who the Cost Payment tab's Paid by may name: the managers, the owner the
+  // PO will have, the record.
+  const payers = payerChoices(
+    memberNames, { id: ownerId, name: ownerOptions.find(o => o.id === ownerId)?.name ?? order.userName },
+    order.paidBy ?? null, ownerDirty ? order.userId : undefined,
+  );
   // Only a manager handles the commission money — the server refuses anyone else.
   const managers = useMemo(
     () => members.filter(m => m.role === 'manager').map(m => ({ id: m.id, name: m.name })),
@@ -698,7 +708,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // The cost comes back to whoever paid it. It rides the purchaser's earnings
   // only when the purchaser paid; a manager who paid is reimbursed apart. A
   // record naming nobody (an older backend) is the purchaser's, as it always was.
-  const selfReimbursed = costReimbursedToOwner(payment, paidByUserId, order.userId);
+  const selfReimbursed = costReimbursedToOwner(payment, paidByUserId, ownerId);
   const reimbursedTo = payment === 'self' && !selfReimbursed
     ? (payers.find(m => m.id === paidByUserId)?.name ?? order.paidBy?.name ?? null) : null;
   const purchaserEarn =
@@ -730,7 +740,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // What the backend reads as a change to the order itself — the set that
   // sends a purchaser's submitted order back to Draft. A note is not one.
   const materialDirty =
-    linesDirty || warehouseDirty || paymentDirty || methodDirty || otherFeesDirty
+    linesDirty || warehouseDirty || paymentDirty || methodDirty || payerDirty || otherFeesDirty
     || otherFeesNoteDirty || paypalDirty || sourceDirty || deliveryDirty || byUserDirty || trackingDirty;
 
   // What still stands between this Draft and In Transit — the one rule every
@@ -1817,7 +1827,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           ),
           commission: (
             <CommissionTab
-              ownerId={ownerId} onOwner={setOwnerId} ownerOptions={ownerOptions}
+              ownerId={ownerId} onOwner={pickOwner} ownerOptions={ownerOptions}
               commissionPct={commissionPct} onCommissionPct={setCommissionPct}
               isPurchaser={isPurchaser} orderLocked={orderLocked} isArchived={isArchived}
               selfReimbursed={selfReimbursed} reimbursedTo={reimbursedTo}

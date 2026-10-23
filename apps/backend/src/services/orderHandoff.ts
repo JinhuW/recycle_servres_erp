@@ -15,6 +15,7 @@
 // before the transaction, like PATCH); this file trusts its input.
 
 import type { Carrier, PackageSource } from '@recycle-erp/shared';
+import { actAsTx } from '../db';
 import { normPaypalTxnId } from '../ai/paypal';
 import { linkPaypalTxnToOrder, unlinkPaypalTxnFromOrder } from '../banktx/sync';
 import { advanceOrderTx, type AdvanceActor, type AdvanceOutcome } from './orderAdvance';
@@ -298,14 +299,15 @@ export function packageChanges(prev: HandoffPackage | null, next: HandoffPackage
 // A self-paid PO whose payer is the old owner moves to the new one, as Self
 // did before it named a person (0198 backfilled the owner as the payer): the
 // reimbursement follows the purchaser. Unless the same request picked that
-// payer (`payerPicked`), which is a decision, not a default.
+// payer (`payerPicked`), which is a decision, not a default. `logPayer: false`
+// is for a caller whose own diff of the row logs the move.
 export async function changeOrderOwnerTx(
   tx: SqlLike,
   id: string,
   actor: { id: string; name: string },
   fromUserId: string,
   newOwner: { ownerId: string; ownerName: string | null },
-  opts: { payerPicked?: boolean } = {},
+  opts: { payerPicked?: boolean; logPayer?: boolean } = {},
 ): Promise<void> {
   const prev = (await tx`
     SELECT name FROM users WHERE id = ${fromUserId} LIMIT 1
@@ -313,6 +315,7 @@ export async function changeOrderOwnerTx(
   const payer = (await tx<{ paid_by: string | null }[]>`
     SELECT paid_by FROM orders WHERE id = ${id}`)[0]?.paid_by ?? null;
   const payerFollows = !opts.payerPicked && payer === fromUserId;
+  await actAsTx(tx, actor.id);
   await tx`
     UPDATE orders SET user_id = ${newOwner.ownerId}
     ${payerFollows ? tx`, paid_by = ${newOwner.ownerId}::uuid` : tx``}
@@ -323,7 +326,7 @@ export async function changeOrderOwnerTx(
     toUserId: newOwner.ownerId,
     to: newOwner.ownerName ?? actor.name,
   });
-  if (payerFollows) {
+  if (payerFollows && opts.logPayer !== false) {
     const changes: AuditChange[] = [{ field: 'paid_by', from: fromUserId, to: newOwner.ownerId }];
     await nameHandoffByChange(tx, changes);
     await writeOrderEvent(tx, id, actor.id, 'meta_changed', { changes });
@@ -384,6 +387,7 @@ export async function handoffOrderTx(
     ? null
     : (input.paypalTxnId !== undefined ? input.paypalTxnId : before.paypal_txn_id);
   const setCommission = input.commissionRate !== undefined;
+  await actAsTx(tx, actor.id);
   await tx`
     UPDATE orders SET
       warehouse_id    = ${warehouseId},

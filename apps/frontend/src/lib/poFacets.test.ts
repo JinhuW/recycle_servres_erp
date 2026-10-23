@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   BUSINESS_ACCOUNT, NO_WAREHOUSE, facetCounts, matchesPayment, matchesWarehouse,
-  payerChoices, payerOptions, paymentKey, paymentPickOrAll, warehouseOptions,
+  payerAfterOwnerChange, payerChoices, payerOptions, paymentKey, paymentPickOrAll, warehouseOptions,
 } from './poFacets';
 
 // A chip's number must be what its click shows; a wrong count here reads as
@@ -74,6 +74,17 @@ describe('payers', () => {
     const gone = { id: 'u-old', name: 'Old Manager' };
     expect(payerChoices(members, marcus, gone).map(m => m.id)).toEqual(['u-old', 'u-tim', 'u-jinhu', 'u-marcus']);
     expect(payerChoices(members, marcus, marcus).map(m => m.id)).toEqual(['u-tim', 'u-jinhu', 'u-marcus']);
+    // Moving the PO from Marcus to Priya: Priya is offered, Marcus no longer is.
+    const priya = { id: 'u-priya', name: 'Priya' };
+    expect(payerChoices(members, priya, marcus, 'u-marcus').map(m => m.id)).toEqual(['u-tim', 'u-jinhu', 'u-priya']);
+    // A manager who owned it is still a manager.
+    expect(payerChoices(members, priya, TIM, 'u-tim').map(m => m.id)).toEqual(['u-tim', 'u-jinhu', 'u-priya']);
+  });
+
+  it('moves a payer that named the old owner to the new one', () => {
+    expect(payerAfterOwnerChange('u-marcus', 'u-marcus', 'u-priya')).toBe('u-priya');
+    expect(payerAfterOwnerChange('u-tim', 'u-marcus', 'u-priya')).toBe('u-tim');
+    expect(payerAfterOwnerChange(null, 'u-marcus', 'u-priya')).toBeNull();
   });
 });
 

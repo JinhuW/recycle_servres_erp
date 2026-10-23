@@ -1,7 +1,7 @@
 // A PO's moves through its life: revert acknowledgement, delete, archive,
 // the lot-price reset, advance and hand-off.
 import { Hono, type Context } from 'hono';
-import { getDb } from '../../db';
+import { actAsTx, getDb } from '../../db';
 import { deleteAttachments } from '../../r2';
 import { diff, writeOrderEvent, wasEverSubmitted } from '../../services/orderAudit';
 import { effectiveRole } from '../../lib/role';
@@ -17,7 +17,7 @@ import { normalizeTracking, type Carrier, type PackageSource } from '@recycle-er
 import { type Env, type User } from '../../types';
 import { PAYPAL_TXN_STRICT, normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
-import { type OrdersEnv, committedLinesBody, describeSellOrders, handoffByErr, isOrderPayment, isPaymentMethod, paidByErr, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, sourceErr, stageMovedBody, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, unackedRevertFrag, warehouseErr } from './shared';
+import { type OrdersEnv, committedLinesBody, describeSellOrders, handoffByErr, isOrderPayment, isPaymentMethod, pickedPaidByErr, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, sourceErr, stageMovedBody, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, unackedRevertFrag, warehouseErr } from './shared';
 
 const lifecycleRoutes = new Hono<OrdersEnv>();
 
@@ -76,6 +76,7 @@ lifecycleRoutes.delete('/:id', async (c) => {
     | { kind: 'ok'; scanned: { k: string }[] };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    await actAsTx(tx, u.id);
     const existing = (await tx`
       SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0] as { user_id: string; lifecycle: string } | undefined;
@@ -113,13 +114,32 @@ lifecycleRoutes.delete('/:id', async (c) => {
              linked_by = NULL, linked_at = NULL
        WHERE order_id = ${id}
     `;
-    // Money a manager booked against the draft stays on their book; the FK
-    // only drops the link, so the entry's history says which PO it was.
-    await tx`
-      INSERT INTO accounting_entry_events (entry_id, kind, detail, actor_id)
-      SELECT e.id, 'unlinked', jsonb_build_object('orderId', ${id}::text), ${u.id}
-      FROM accounting_entries e WHERE e.order_id = ${id}
-    `;
+    // Money a manager booked against the draft stays on their book, and the
+    // entry's history says which PO it was. The record is a field the review
+    // covers, so the unlink is a new version, as an edit is: a sign-off of
+    // "matches PO-123" no longer stands, and a page that showed the PO can't
+    // sign it off. Locked first, so a sign-off committing meanwhile is cleared
+    // rather than missed.
+    const linked = await tx<{ id: string; reviewed_by: string | null; reviewed_at: string | null }[]>`
+      SELECT id, reviewed_by, reviewed_at FROM accounting_entries
+      WHERE order_id = ${id} ORDER BY id FOR UPDATE`;
+    if (linked.length) {
+      await tx`
+        UPDATE accounting_entries
+           SET order_id = NULL, updated_at = NOW(),
+               review_cleared_at = CASE WHEN reviewed_at IS NOT NULL THEN NOW() ELSE review_cleared_at END,
+               reviewed_by = NULL, reviewed_at = NULL
+         WHERE id = ANY(${linked.map(e => e.id)})`;
+      for (const e of linked) {
+        await tx`
+          INSERT INTO accounting_entry_events (entry_id, kind, detail, actor_id)
+          VALUES (${e.id}, 'unlinked', ${tx.json({
+            orderId: id,
+            changes: { targetId: { from: id, to: null } },
+            ...(e.reviewed_at ? { clearedReview: { by: e.reviewed_by, at: e.reviewed_at } } : {}),
+          })}, ${u.id})`;
+      }
+    }
     await tx`DELETE FROM orders WHERE id = ${id}`; // order_lines cascade via FK
     return { kind: 'ok', scanned };
   });
@@ -487,12 +507,6 @@ lifecycleRoutes.post('/:id/handoff', async (c) => {
     paymentMethod = body.paymentMethod;
   }
   if (body.payment === 'self') paymentMethod = null;
-  if (body.paidByUserId != null) {
-    const owner = (await sql<{ user_id: string }[]>`SELECT user_id FROM orders WHERE id = ${id} LIMIT 1`)[0];
-    if (!owner) return c.json({ error: 'Not found' }, 404);
-    const pbErr = await paidByErr(sql, owner.user_id, body.paidByUserId);
-    if (pbErr) return c.json({ error: pbErr }, 400);
-  }
   let paypalTxnId: string | null | undefined;
   if (body.paypalTxnId !== undefined) {
     paypalTxnId = normPaypalTxnId(body.paypalTxnId);
@@ -541,6 +555,15 @@ lifecycleRoutes.post('/:id/handoff', async (c) => {
     const resolved = await resolveOrderOwner(sql, u, body.onBehalfOfUserId);
     if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
     newOwner = resolved;
+  }
+  if (body.paidByUserId != null) {
+    const po = (await sql<{ user_id: string; paid_by: string | null }[]>`
+      SELECT user_id, paid_by FROM orders WHERE id = ${id} LIMIT 1`)[0];
+    if (!po) return c.json({ error: 'Not found' }, 404);
+    const pbErr = await pickedPaidByErr(sql, {
+      paidBy: po.paid_by, ownerAfter: newOwner?.ownerId ?? po.user_id,
+    }, body.paidByUserId);
+    if (pbErr) return c.json({ error: pbErr }, 400);
   }
 
   const input: HandoffInput = {
