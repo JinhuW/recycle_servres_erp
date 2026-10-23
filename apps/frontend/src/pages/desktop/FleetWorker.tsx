@@ -1,3 +1,4 @@
+import { FB_FAILED_OUTCOMES, FB_PROXY_DEAD_AFTER, type FbStintOutcome } from '@recycle-erp/shared';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
@@ -7,6 +8,7 @@ import {
   challengeScreenshotUrl, coordinatorApi, type AlertHitRow, type Challenge, type FleetAccount, type FleetDoc,
 } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
+import { poolApi, proxyMarkFor, type FbProxyMark, type FbWorkerStint } from '../../lib/facebookPool';
 import {
   accountAlerts, browserLabel, canWatch, externalVncUrl, fleetActivity, fleetStatus, hitsByCity, parkedWorkers, searchedToday, SESSION_WARN_DAYS, whoIs,
 } from '../../lib/fleetView';
@@ -15,7 +17,7 @@ import { useT } from '../../lib/i18n';
 import { hrefFor, onLinkClick } from '../../lib/route';
 import { BuildChip, CityChip, EditCredentialsButton, fmtDays, HITS_DAYS, ReloginButton, WatchButton } from './FleetAccounts';
 import { EditCitiesButton } from './FleetCities';
-import { eventDetail, StatusChip, statusNote } from './FleetWorkers';
+import { eventDetail, ProxyDeadChip, StatusChip, statusNote } from './FleetWorkers';
 import '../../styles/facebookPool.css';
 
 // ─── One worker ───────────────────────────────────────────────────────────────
@@ -23,7 +25,8 @@ import '../../styles/facebookPool.css';
 // worker in the Account pool's credential-card style, its open checkpoints
 // and recent events, and every action the control plane offers on it today:
 // watch its browser, queue a re-login, set its credentials, set its cities
-// (FleetCities.tsx), clear a checkpoint. Pacing still lives in fleet.toml.
+// (FleetCities.tsx), clear a checkpoint, revive a DEAD proxy. Under them, every
+// pool account it has signed in with. Pacing still lives in fleet.toml.
 
 const REFRESH_MS = 30_000;
 const STUB_TONE = { live: 'accent', stale: 'warn', attention: 'warn', offline: 'neg' } as const;
@@ -36,6 +39,8 @@ export function FleetWorker({ workerId }: { workerId: string }) {
   const [failed, setFailed] = useState(false);
   const [zoom, setZoom] = useState<Challenge | null>(null);
   const [resolving, setResolving] = useState<number | null>(null);
+  const [marks, setMarks] = useState<FbProxyMark[] | null>(null);
+  const [stints, setStints] = useState<FbWorkerStint[] | null>(null);
 
   const load = useCallback(() => {
     coordinatorApi.fleet().then(doc => { setFleet(doc); setFailed(false); }).catch(err => {
@@ -44,7 +49,9 @@ export function FleetWorker({ workerId }: { workerId: string }) {
     });
     coordinatorApi.listOpenChallenges().then(setChallenges).catch(() => setChallenges([]));
     coordinatorApi.alertHits(HITS_DAYS).then(setHits).catch(() => setHits([]));
-  }, []);
+    poolApi.proxies().then(r => setMarks(r.proxies)).catch(() => setMarks([]));
+    poolApi.workerAccounts(workerId).then(r => setStints(r.stints)).catch(() => setStints([]));
+  }, [workerId]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     const refresh = () => { if (!document.hidden) load(); };
@@ -83,6 +90,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
   }, mine);
   const acct = w.account;
   const sess = w.session;
+  const mark = proxyMarkFor(marks, w);
   const stored = acct ? Object.entries(acct.secrets).filter(([, on]) => on).map(([k]) => k) : [];
   const configVnc = canWatch(w) ? null
     : externalVncUrl(w.vnc_url) ?? externalVncUrl(h?.vnc_url) ?? externalVncUrl(acct?.vnc_url);
@@ -106,7 +114,10 @@ export function FleetWorker({ workerId }: { workerId: string }) {
       : muted('—')],
     [t('fbcDetailUa'), browserLabel(sess?.user_agent) ? <span title={sess?.user_agent ?? undefined}>{browserLabel(sess?.user_agent)}</span> : muted('—')],
     [t('fbcDetailBackup'), sess?.backed_up_at ? <span title={sess.backed_up_at}>{relTime(sess.backed_up_at, locale)}</span> : muted(t('fbcNeverBackedUp'))],
-    [t('fbcDetailProxy'), <ProxyExit worker={w} />],
+    [t('fbcDetailProxy'), <>
+      <ProxyExit worker={w} />
+      {mark && <ProxyMarkNote mark={mark} onRevived={setMarks} />}
+    </>],
     [t('fbcColCities'), w.cities.length
       ? <span className="fl-cities ff-wrap-cell">{w.cities.map(c => <CityChip key={c.slug} city={c} hits={byCity} terms={[]} tone={searched(c.slug) ? 'accent' : 'muted'} runsPerDay={w.plan?.runs_per_day} />)}</span>
       : muted(t('fbcNoCities'))],
@@ -209,6 +220,8 @@ export function FleetWorker({ workerId }: { workerId: string }) {
         </aside>
       </div>
 
+      <AccountsUsed stints={stints} locale={locale} />
+
       {zoom && (
         <ImageLightbox url={challengeScreenshotUrl(zoom.id)} alt={t('fbcScreenshotAlt', { id: zoom.worker_id })}
           onClose={() => setZoom(null)} />
@@ -238,6 +251,96 @@ export function ProxyExit({ worker }: { worker: FleetAccount }) {
           : <><span className="mono">{p.ip ?? '—'}</span>{where && ` · ${where}`}</>}
       </small>
     </span>
+  );
+}
+
+// How many accounts failed behind the proxy since its last revive. Revive is
+// for after the IP behind it has been swapped: the count starts again.
+function ProxyMarkNote({ mark, onRevived }: { mark: FbProxyMark; onRevived: (marks: FbProxyMark[]) => void }) {
+  const { t } = useT();
+  const [busy, setBusy] = useState(false);
+  const revive = () => {
+    setBusy(true);
+    poolApi.reviveProxy(mark.url)
+      .then(r => { onRevived(r.proxies); showSuccessToast(t('fbcProxyRevived', { url: mark.url })); })
+      .catch(handleFetchError)
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="ff-proxy-mark">
+      {mark.dead && <ProxyDeadChip mark={mark} />}
+      <small className={mark.dead ? 'fp-bad' : 'fp-warn'}>
+        {t(mark.dead ? 'fbcProxyDeadNote' : 'fbcProxyFailedNote', { n: mark.failed, max: FB_PROXY_DEAD_AFTER })}
+      </small>
+      {mark.dead && (
+        <button type="button" className="btn sm" disabled={busy} onClick={revive} title={t('fbcProxyReviveHint')}>
+          <Icon name="refresh" size={12} />{t('fbcProxyRevive')}
+        </button>
+      )}
+    </div>
+  );
+}
+
+const OUTCOME_TONE: Record<FbStintOutcome, string> = {
+  available: 'muted', taken: 'muted', fleet: 'muted', removed: 'muted', problem: 'warn', retired: 'neg',
+};
+
+// Every pool account the worker has signed in with, newest first, each with
+// the proxy it went out through. Problem and Retired count against that proxy.
+function AccountsUsed({ stints, locale }: { stints: FbWorkerStint[] | null; locale: string }) {
+  const { t } = useT();
+  const when = (at: number) => new Date(at).toLocaleString(locale, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const failed = stints?.filter(s => s.outcome && FB_FAILED_OUTCOMES.includes(s.outcome)).length ?? 0;
+  return (
+    <section className="card ff-stints" aria-label={t('fbcAccountsUsed')}>
+      <div className="card-head">
+        <h2 className="card-title">{t('fbcAccountsUsed')}</h2>
+        <span className="card-sub">{stints ? t('fbcAccountsUsedSub', { n: stints.length, failed }) : ''}</span>
+      </div>
+      {stints === null ? <FormSkeleton fields={2} />
+        : stints.length === 0 ? <div className="fp-empty">{t('fbcAccountsUsedNone')}</div>
+        : (
+          <div className="fp-table-wrap">
+            <table className="fp-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>{t('fbcStintLogin')}</th>
+                  <th>{t('fbcColProxy')}</th>
+                  <th>{t('fbcStintFrom')}</th>
+                  <th>{t('fbcStintUntil')}</th>
+                  <th>{t('fbcStintOutcome')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stints.map(s => (
+                  <tr key={`${s.accountNo}-${s.startedAt}`}>
+                    <td className="mono">#{s.accountNo}</td>
+                    <td>
+                      <span className="fp-holder">
+                        <span>{s.email ?? s.uid}</span>
+                        {s.email && <small className="mono">{s.uid}</small>}
+                      </span>
+                    </td>
+                    <td>
+                      {!s.proxyKnown ? <span className="fp-muted" title={t('fbcStintProxyUnknownHint')}>{t('fbcStintProxyUnknown')}</span>
+                        : s.proxyUrl ? <span className="mono">{s.proxyUrl}</span>
+                        : <span className="fp-muted">{t('fbcProxyNone')}</span>}
+                    </td>
+                    <td>{when(s.startedAt)}</td>
+                    <td>{s.endedAt ? when(s.endedAt) : <span className="fp-muted">—</span>}</td>
+                    <td>
+                      {s.outcome
+                        ? <span className={`chip ${OUTCOME_TONE[s.outcome]}`}>{t(`fbcStint_${s.outcome}`)}</span>
+                        : <span className="chip accent">{t('fbcStint_current')}</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+    </section>
   );
 }
 

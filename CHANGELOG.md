@@ -17,6 +17,32 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.319.0] - 2026-10-23
+
+A fleet proxy that keeps burning Facebook accounts is now called out and
+stopped (RS-365). Every time a pool account goes onto a worker, the ERP
+records the worker's proxy at that moment, and when the account leaves the
+worker as Problem or Retired it counts against that proxy, whichever path
+moved it: Assign's "where does the old one go", the weekly liveness check, an
+edit, retire or delete. Once more than four distinct accounts have failed
+behind one proxy, counted across every worker that dials it, the proxy is
+**DEAD**. Until now nothing tied a lost account to the IP it was lost on, so a
+burned proxy kept eating fresh accounts one Assign at a time.
+
+The Fleet table's Proxy column shows the DEAD chip, or "n failed" below that.
+Assign refuses a worker behind a DEAD proxy (409 `fpProxyDead`) before any
+login reaches it, and the dialog says so and keeps Assign off. A manager
+revives the proxy from the worker's page after swapping the IP, and its count
+starts again.
+
+Each worker's page also lists **Accounts used**: every pool account it has
+signed in with, newest first, with the proxy, from and until, and how it
+ended. The stints are kept by a trigger on `fb_pool_accounts` (migration
+0204), so no writer of the pool can skip them. Assignments from before this
+release are backfilled from the pool ledger and marked "proxy not recorded",
+so they do not count toward DEAD. ERP-only: the backend reads the `/v1/fleet`
+document it already proxies, and the facebook tracker is unchanged.
+
 ## [1.318.2] - 2026-10-23
 
 A purchaser can no longer void or reassign a manager's RMB Flow entry by

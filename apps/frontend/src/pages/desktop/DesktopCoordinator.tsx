@@ -14,7 +14,7 @@ import { FLEET_STATUSES, fleetStatus, parkedWorkers, type FleetStatus } from '..
 import { useT } from '../../lib/i18n';
 import { hrefFor, matchFleetWatch, matchFleetWorker, onLinkClick, useRoute } from '../../lib/route';
 import { useEffectiveUser } from '../../lib/tweaks';
-import { poolApi, type PoolSnapshot } from '../../lib/facebookPool';
+import { poolApi, type FbProxyMark, type PoolSnapshot } from '../../lib/facebookPool';
 import { FacebookAccountPool } from './FacebookAccountPool';
 import { FormSkeleton } from '../../components/Skeleton';
 import { HITS_DAYS } from './FleetAccounts';
@@ -111,6 +111,7 @@ function FleetPage({ head, tabs }: { head: React.ReactNode; tabs: React.ReactNod
   const [challenges, setChallenges] = useState<Challenge[] | null>(null);
   const [stats, setStats] = useState<ReviewStatsDay[] | Unavailable | null>(null);
   const [prompt, setPrompt] = useState<FilterPrompt | Unavailable | null>(null);
+  const [marks, setMarks] = useState<FbProxyMark[] | null>(null);
   const [notConfigured, setNotConfigured] = useState(false);
 
   const [filter, setFilter] = useState<FleetStatus | 'all'>('all');
@@ -136,6 +137,9 @@ function FleetPage({ head, tabs }: { head: React.ReactNode; tabs: React.ReactNod
     // Per-city alert counts decorate the table; without them it still
     // renders, just without the numbers.
     coordinatorApi.alertHits(HITS_DAYS).then(setHits).catch(() => setHits([]));
+    // Failed accounts per proxy live in the pool; a pool without its key
+    // leaves the proxy column as it was.
+    poolApi.proxies().then(r => setMarks(r.proxies)).catch(() => setMarks([]));
     // Stats and prompt only feed the flow card; it shows "—" without them.
     coordinatorApi.reviewStats(STATS_DAYS)
       .then(setStats)
@@ -184,7 +188,7 @@ function FleetPage({ head, tabs }: { head: React.ReactNode; tabs: React.ReactNod
         <>
           <FleetLegend counts={counts} loading={!fleet && !fleetUnavailable} filter={filter} onFilter={setFilter} />
           <div className="fp-split ff-split">
-            <WorkersCard fleet={fleet} unavailable={fleetUnavailable} hits={hits} challenges={challenges}
+            <WorkersCard fleet={fleet} unavailable={fleetUnavailable} hits={hits} challenges={challenges} marks={marks}
               filter={filter} onClearFilter={() => setFilter('all')} locale={locale} />
             <ActivityAside fleet={fleet} unavailable={fleetUnavailable} challenges={challenges} locale={locale} />
           </div>

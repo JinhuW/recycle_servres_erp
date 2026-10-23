@@ -1,3 +1,4 @@
+import { FB_PROXY_DEAD_AFTER } from '@recycle-erp/shared';
 import { Fragment, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Skeleton } from '../../components/Skeleton';
@@ -13,6 +14,7 @@ import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import type { Translate } from '../../lib/orderPresentation';
+import { proxyMarkFor, type FbProxyMark } from '../../lib/facebookPool';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../lib/route';
 import { CityChip, fmtDays, Hi, HITS_DAYS, stateLabel } from './FleetAccounts';
 import '../../styles/facebookPool.css';
@@ -68,13 +70,14 @@ export function FleetLegend({ counts, loading, filter, onFilter }: {
   );
 }
 
-export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onClearFilter, locale }: {
+export function WorkersCard({ fleet, unavailable, hits, challenges, marks, filter, onClearFilter, locale }: {
   fleet: FleetDoc | null;
   // The facade answered with something other than a fleet document (an older
   // facade, or the tunnel is down): say so in the card, keep the page.
   unavailable: boolean;
   hits: AlertHitRow[] | null;
   challenges: Challenge[] | null;
+  marks: FbProxyMark[] | null;
   filter: FleetStatus | 'all';
   onClearFilter: () => void;
   locale: string;
@@ -164,7 +167,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
           <tbody>
             {shown.map(w => (
               <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms} startAt={startAt}
-                shared={!!w.proxy && (exits.get(w.proxy.url ?? '') ?? 0) > 1}
+                shared={!!w.proxy && (exits.get(w.proxy.url ?? '') ?? 0) > 1} mark={proxyMarkFor(marks, w)}
                 open={open.has(w.worker_id)} onToggle={() => toggle(w.worker_id)} locale={locale} />
             ))}
             {loading && SKELETON_ROWS.map(i => <WorkerRowSkeleton key={i} />)}
@@ -211,8 +214,11 @@ function WorkerRowSkeleton() {
 // The port and exit IP, then the city Facebook sees the account in, with the
 // ISP on hover. `shared` is an IP another worker also exits from, which only
 // holds while the two look like two people. A facade that predates the
-// lookup sends only the env var's name.
-function ProxyCell({ worker: w, shared, terms }: { worker: FleetAccount; shared: boolean; terms: readonly string[] }) {
+// lookup sends only the env var's name. `mark` counts the accounts that failed
+// behind this proxy; past FB_PROXY_DEAD_AFTER it is DEAD and Assign refuses it.
+function ProxyCell({ worker: w, shared, mark, terms }: {
+  worker: FleetAccount; shared: boolean; mark: FbProxyMark | undefined; terms: readonly string[];
+}) {
   const { t } = useT();
   const p = w.proxy;
   if (!p) {
@@ -225,24 +231,34 @@ function ProxyCell({ worker: w, shared, terms }: { worker: FleetAccount; shared:
       <span>
         {port ? <span className="mono"><Hi text={`:${port}`} terms={terms} /></span> : t('fbcProxyNone')}
         {p.ip && <span className="mono fp-muted"> · <Hi text={p.ip} terms={terms} /></span>}
+        {mark?.dead && <> <ProxyDeadChip mark={mark} /></>}
       </span>
       <small className={p.error ? 'fp-warn' : undefined}>
         {p.pending ? t('fbcProxyLookingUp')
           : p.error ? t('fbcProxyLookupFailed')
           : <Hi text={where || '—'} terms={terms} />}
         {shared && <> · <span className="fp-warn" title={t('fbcSharesIpHint')}>{t('fbcProxyShared')}</span></>}
+        {mark && !mark.dead && <> · <span className="fp-warn" title={t('fbcProxyFailedHint', { max: FB_PROXY_DEAD_AFTER })}>
+          {t('fbcProxyFailed', { n: mark.failed })}</span></>}
       </small>
     </span>
   );
 }
 
-function WorkerRow({ account: w, hits, parked, terms, startAt, shared, open, onToggle, locale }: {
+export function ProxyDeadChip({ mark }: { mark: FbProxyMark }) {
+  const { t, locale } = useT();
+  const since = mark.deadAt ? relTime(new Date(mark.deadAt).toISOString(), locale) : '';
+  return <span className="chip neg" title={t('fbcProxyDeadHint', { n: mark.failed, since })}>{t('fbcProxyDead')}</span>;
+}
+
+function WorkerRow({ account: w, hits, parked, terms, startAt, shared, mark, open, onToggle, locale }: {
   account: FleetAccount;
   hits: Map<string, CityHits>;
   parked: ReadonlySet<string>;
   terms: readonly string[];
   startAt: readonly string[] | undefined;
   shared: boolean;
+  mark: FbProxyMark | undefined;
   open: boolean;
   onToggle: () => void;
   locale: string;
@@ -277,7 +293,7 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, shared, open, onT
               {build && <> · <span className="mono" title={build}>v{build.split(' ')[0]}</span></>}</small>
           </span>
         </td>
-        <td className="ff-exit"><ProxyCell worker={w} shared={shared} terms={terms} /></td>
+        <td className="ff-exit"><ProxyCell worker={w} shared={shared} mark={mark} terms={terms} /></td>
         <td className="ff-wrap">
           <span className="fp-holder">
             <span><StatusChip status={status} /></span>

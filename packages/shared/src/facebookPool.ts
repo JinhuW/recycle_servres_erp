@@ -30,6 +30,39 @@ export const FB_POOL_EVENT_KINDS = [
 ] as const;
 export type FbPoolEventKind = (typeof FB_POOL_EVENT_KINDS)[number];
 
+/** A proxy is DEAD once more distinct accounts than this have failed on it. */
+export const FB_PROXY_DEAD_AFTER = 4;
+
+/** How an account's stint on a worker ended: what it became, 'fleet' for
+ *  another worker, 'removed' when it left the pool. Null while it is current. */
+export type FbStintOutcome = FbPoolStatus | 'removed';
+
+/** Outcomes that count against the proxy the account was on. */
+export const FB_FAILED_OUTCOMES: readonly FbStintOutcome[] = ['problem', 'retired'];
+
+/** One account's time on one worker. `proxyKnown` false: nobody recorded the
+ *  proxy (stints from before it was kept); true with a null url: the VM's own IP. */
+export type FbWorkerStint = {
+  accountNo: number;
+  uid: string;
+  email: string | null;
+  proxyUrl: string | null;
+  proxyKnown: boolean;
+  startedAt: number;
+  endedAt: number | null;
+  outcome: FbStintOutcome | null;
+};
+
+/** A proxy's failed accounts since its last revive. */
+export type FbProxyMark = {
+  url: string;
+  failed: number;
+  dead: boolean;
+  deadAt: number | null;
+  revivedAt: number | null;
+  revivedBy: string | null;
+};
+
 /** Fields whose copy or reveal is worth an audit line. */
 export const FB_POOL_SECRET_FIELDS = ['password', 'totp', 'emailPassword', 'cookie', 'token'] as const;
 export type FbPoolSecretField = (typeof FB_POOL_SECRET_FIELDS)[number];

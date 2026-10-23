@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-365](./RS-365-mark-a-proxy-dead-after-its-5th-failed-account-and-k.md) | in-progress | story | P2 | Mark a proxy DEAD after its 5th failed account, and keep each worker's account history | — |
 | [RS-364](./RS-364-describe-every-database-in-one-markdown-file.md) | done | task | P2 | Describe every database in one Markdown file | n/a — docs only, no release |
 | [RS-363](./RS-363-a-booked-po-s-payment-and-paid-by-are-manager-only.md) | done | bug | P1 | A booked PO's payment and Paid by are manager-only | 1.318.2 |
 | [RS-362](./RS-362-wechat-board-brand-and-generation-columns-and-a-refi.md) | done | story | P2 | WeChat board: brand and generation columns, and a refine filter | 1.318.0 |

@@ -13,6 +13,7 @@ import {
   nextPoolAccount,
   parsePoolImport,
   poolTotp,
+  proxyMarkFor,
   totpKey,
   validatePoolDraft,
   type PoolAccount,
@@ -249,6 +250,19 @@ describe('live six-digit TOTP', () => {
   it('does not invent a code for an invalid or missing key', async () => {
     expect(await poolTotp('')).toBeNull();
     expect(await poolTotp('invalid8key')).toBeNull();
+  });
+});
+
+describe('proxyMarkFor', () => {
+  const dead = { url: 'http://gw:10001', failed: 5, dead: true, deadAt: 1, revivedAt: null, revivedBy: null };
+  it('finds the mark on the proxy the worker dials now', () => {
+    expect(proxyMarkFor([dead], { proxy: { url: 'http://gw:10001' } })).toBe(dead);
+    expect(proxyMarkFor([dead], { proxy: { url: 'http://gw:10002' } })).toBeUndefined();
+  });
+  it('has none for the VM\'s own IP, an older facade, or marks not loaded', () => {
+    expect(proxyMarkFor([dead], { proxy: { url: null } })).toBeUndefined();
+    expect(proxyMarkFor([dead], {})).toBeUndefined();
+    expect(proxyMarkFor(null, { proxy: { url: 'http://gw:10001' } })).toBeUndefined();
   });
 });
 
