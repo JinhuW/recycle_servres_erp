@@ -2,12 +2,12 @@
 id: RS-361
 title: Refine the Pack page layout
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: JinhuW/tunicate
-pr:
+pr: 837
 version: 1.317.5
 related: []
 ---
