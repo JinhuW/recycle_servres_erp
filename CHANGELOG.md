@@ -17,6 +17,66 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.317.0] - 2026-10-22
+
+A PO's cost *Paid by* now names who paid the supplier (RS-353): the
+**Business Account** — the company's Mercury and PayPal money, the only kind
+the Payments page links to a PO — or **a person**, any active manager by
+name, or the purchaser when they are not one. It used to be a two-way switch,
+*Company card* or *Self-paid*, which said whose kind of money it was but not
+whose; RS-349 had to leave the cost out of the Accounting book for that
+reason. The stored value and every rule on it stay as they were: the Business
+Account keeps Method, the transaction-ID rule and auto-link, a person keeps
+the chat-screenshot rule. Migration 0198 adds `orders.paid_by` and names the
+purchaser on every self-paid PO, which is who the commission maths was
+reimbursing all along.
+
+The picker is a select on the create pages, both PO pages, the hand-off
+dialog and the phone sheet. The list's Payment cell and its filter chips read
+*Business* or the person's name, one chip per person who paid a loaded PO. A
+change is a *Paid by* line in Activity. The cost comes back to whoever paid
+it: the Commission tab adds it to the purchaser's earnings only when the
+purchaser paid, and reads *Cost reimbursed to ‹name›* when a manager did. The
+commission *Paid by*'s *Company paid* reads *Business Account* too, so the two
+fields share one vocabulary. The spreadsheet export names the payer.
+
+Accounting opens on the PO's payer: a PO picked for a Purchase entry carries
+its cost payer, and for a Commission entry its commission payer, so the
+Cost Payment and Commission cards' Record buttons and the entry dialog's PO
+pick start on that payer. A payer picked by hand, or an entry being edited,
+is never moved by the record. `/api/members/names` now carries each
+member's role, so a purchaser's picker can tell the managers apart.
+
+The Accounting page is the **RMB Flow**, and it sits with Payments under one
+sidebar parent, **Accounting** (RS-355): Payments is where everything the
+Business Account paid lives; the RMB Flow records what the managers paid and
+received outside it. Both pages print the breadcrumb. The PO, sell order and
+case cards, the phone Home link and screen say RMB Flow; the URLs are
+unchanged.
+
+An entry's *Paid by* and its PO's payer are one value, kept in step both
+ways (RS-354, RS-355). The book's *Manager* column is *Paid by*, and it
+names a person: an active manager, or the PO's own purchaser on a self-paid
+cost. Migration 0199 adds `accounting_sync_payer` and two triggers — on the
+PO's payer columns and on bank-row links — so whatever moves a PO's person
+payer (the PO page, a commission screenshot, a cost payer edited or handed
+off) moves its live entries of that kind, with a *Paid by followed the PO*
+history line; nobody on file leaves an entry as recorded. When the Business
+Account paid instead — the commission flagged company-paid or a
+Mercury/PayPal row linked as it, the cost flipped to the company's account,
+a settlement that flips — the PO's live paid-out entries of that kind are
+**voided** with the reason, restorable; unlinking does not bring them back,
+Restore does, and the PO never voids a restored entry again. The other way,
+saving an entry with *Paid by* X sets the PO's commission payer to X with
+its Activity line, or a self-paid PO's cost payer; an entry on a PO the
+Business Account paid is refused, and the form and the PO card say so and
+point to Payments. Every live PO-linked entry was brought in line with its
+PO once, moved or voided, with a history line.
+
+The running *Balance* is one company-wide book: the manager filter and
+*Held by* hide rows, never move the balance.
+
+
 ## [1.316.1] - 2026-10-22
 
 The Facebook account pool loads on dev again (RS-352). The nightly prod→dev

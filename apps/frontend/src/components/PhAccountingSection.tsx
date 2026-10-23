@@ -29,10 +29,14 @@ export function PhAccountingSection({ orderId, kind, version, onRecord }: {
     <div className="acct-ph-section">
       <div className="acct-card-head">
         <div className="acct-card-title">{t('acctCardTitle')}</div>
-        <button type="button" className="ph-btn acct-ph-record" onClick={() => onRecord({ kind, target })}>
-          <Icon name="plus" size={12} /> {t(recordActionKey(kind, KIND_DEFAULT_DIRECTION[kind]))}
-        </button>
+        {!target.payerBusiness && (
+          <button type="button" className="ph-btn acct-ph-record" onClick={() => onRecord({ kind, target })}>
+            <Icon name="plus" size={12} /> {t(recordActionKey(kind, KIND_DEFAULT_DIRECTION[kind]))}
+          </button>
+        )}
       </div>
+      {/* The Business Account's money is Payments', which the phone does not have. */}
+      {target.payerBusiness && <div className="acct-card-empty">{t('acctPaidFromBusiness')}</div>}
       {ledger.entries.length === 0 ? (
         <div className="acct-card-empty">
           {t(kind === 'purchase' ? 'acctCardEmptyPurchase' : 'acctCardEmptyCommission')}

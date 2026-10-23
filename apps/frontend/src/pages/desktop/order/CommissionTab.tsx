@@ -17,7 +17,10 @@ type Props = {
   isPurchaser: boolean;
   orderLocked: boolean;
   isArchived: boolean;
-  payment: 'company' | 'self';
+  /** The purchaser paid the cost themselves, so it comes back in their earnings. */
+  selfReimbursed: boolean;
+  /** Someone else paid it in person — named here, reimbursed apart. */
+  reimbursedTo: string | null;
   purchaserEarn: number;
   effectiveTotalCost: number;
   revenue: number;
@@ -110,14 +113,14 @@ export function CommissionTab(p: Props) {
             {t('eoFormula')}
           </div>
           <div style={{ marginTop: 4 }}>
-            {p.payment === 'self' ? t('eoFormulaSelf') : t('eoFormulaCompany')}
+            {p.selfReimbursed ? t('eoFormulaSelf') : t('eoFormulaCompany')}
           </div>
           <div className="mono" style={{ marginTop: 4, color: 'var(--fg)' }}>
-            {p.payment === 'self' ? `${fmtUSD(p.effectiveTotalCost, p.locale)} + ` : ''}
+            {p.selfReimbursed ? `${fmtUSD(p.effectiveTotalCost, p.locale)} + ` : ''}
             ({fmtUSD(p.revenue, p.locale)} − {fmtUSD(p.effectiveTotalCost, p.locale)}) × {(p.commissionRateApplied * 100).toFixed(2)}%
           </div>
           <div className="mono" style={{ marginTop: 2, color: 'var(--fg-subtle)' }}>
-            = {p.payment === 'self' ? `${fmtUSD(p.effectiveTotalCost, p.locale)} + ` : ''}{fmtUSD(p.commissionOnProfit, p.locale)} = <span style={{ color: 'var(--fg)', fontWeight: 600 }}>{fmtUSD(p.purchaserEarn, p.locale)}</span>
+            = {p.selfReimbursed ? `${fmtUSD(p.effectiveTotalCost, p.locale)} + ` : ''}{fmtUSD(p.commissionOnProfit, p.locale)} = <span style={{ color: 'var(--fg)', fontWeight: 600 }}>{fmtUSD(p.purchaserEarn, p.locale)}</span>
           </div>
           <div style={{ marginTop: 8, fontSize: 11, color: 'var(--fg-subtle)' }}>
             {t('eoWhatEarnsOnPO', { name: p.firstName })}
@@ -125,9 +128,15 @@ export function CommissionTab(p: Props) {
         </div>
 
         <div style={{ display: 'grid', gap: 8, fontSize: 12.5, alignContent: 'start' }}>
-          {p.payment === 'self' && (
+          {p.selfReimbursed && (
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--fg-subtle)' }}>{t('eoSelfPay')}</span>
+              <span className="mono">{fmtUSD(p.effectiveTotalCost, p.locale)}</span>
+            </div>
+          )}
+          {p.reimbursedTo && (
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--fg-subtle)' }}>{t('eoReimbursedTo', { name: p.reimbursedTo })}</span>
               <span className="mono">{fmtUSD(p.effectiveTotalCost, p.locale)}</span>
             </div>
           )}

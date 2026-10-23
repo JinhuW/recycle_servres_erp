@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyKind, initialForm, pickTarget, previewCny, toRequestBody } from './accountingForm';
+import { applyKind, initialForm, payerLock, pickTarget, previewCny, toRequestBody } from './accountingForm';
 import { markDayStarts, owedOnSale, phonePeriod, reviewActions, splitYuan, fmtCny, fmtSignedCny, type AcctReview } from './accounting';
 
 const ME = '11111111-1111-1111-1111-111111111111';
@@ -30,6 +30,33 @@ describe('the entry form', () => {
   it('keeps a counterparty the manager typed when the record changes', () => {
     const f = { ...initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase' } }), counterparty: 'Typed', counterpartyTouched: true };
     expect(pickTarget(f, { id: 'PO-2', party: 'Other' }).counterparty).toBe('Typed');
+  });
+
+  it("opens on the record's payer, unless a manager was picked by hand", () => {
+    const TIM = '22222222-2222-2222-2222-222222222222';
+    const fromCard = initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase', target: { id: 'PO-1', payerId: TIM } } });
+    expect(fromCard).toMatchObject({ managerId: TIM, managerTouched: false });
+    // A record naming nobody is the recorder's.
+    expect(initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase', target: { id: 'PO-1', payerId: null } } }).managerId).toBe(ME);
+    // The opener's own manager outranks the record's.
+    expect(initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase', target: { id: 'PO-1', payerId: TIM }, managerId: ME } })).toMatchObject({ managerId: ME, managerTouched: true });
+
+    const f = initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase' } });
+    expect(pickTarget(f, { id: 'PO-1', payerId: TIM }).managerId).toBe(TIM);
+    expect(pickTarget(f, { id: 'PO-1' }).managerId).toBe(ME);
+    expect(pickTarget({ ...f, managerTouched: true }, { id: 'PO-1', payerId: TIM }).managerId).toBe(ME);
+  });
+
+  it('takes no entry for a PO the Business Account paid', () => {
+    const company = { id: 'PO-1', payerBusiness: true };
+    expect(payerLock(company)).toBe(true);
+    expect(payerLock({ id: 'PO-1', payerId: ME })).toBe(false);
+    expect(payerLock(null)).toBe(false);
+    // The recorder stays the payer on the form; the request is refused before amount or record.
+    const f = pickTarget(initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase' } }), company);
+    expect(f.managerId).toBe(ME);
+    expect(toRequestBody({ ...f, amount: '5' })).toEqual({ error: 'acctPaidFromBusiness' });
+    expect(toRequestBody({ ...f, amount: '' })).toEqual({ error: 'acctPaidFromBusiness' });
   });
 
   it('turns into a request, or names what is missing', () => {

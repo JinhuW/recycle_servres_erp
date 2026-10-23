@@ -100,7 +100,7 @@ export function EntryDrawer({ id, onClose, onChanged, onToast }: Props) {
                     </dd>
                   </>
                 )}
-                <dt>{t('acctFieldManager')}</dt>
+                <dt>{t('acctFieldPaidBy')}</dt>
                 <dd>{entry.manager.name}</dd>
                 <dt>{t('acctFieldMethod')}</dt>
                 <dd>{t('acctMethod_' + entry.method)}</dd>

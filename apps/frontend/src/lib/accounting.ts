@@ -8,13 +8,15 @@ import {
   type AccountingTargetType, type IsoDate,
 } from '@recycle-erp/shared';
 
-// The managers' RMB book: the API client both shells use, and the small
-// pure helpers its pages share.
+// The RMB Flow: the API client both shells use, and the small pure helpers
+// its pages share.
 
 export type AcctEntry = {
   id: string; direction: AccountingDirection; kind: AccountingKind;
   amount: number; currency: AccountingCurrency; fxRate: number | null; amountCny: number;
   method: AccountingMethod; occurredOn: IsoDate;
+  // Who paid. On a PO's entry it is the PO's own payer, kept in step both
+  // ways; a PO the Business Account paid voids its entries instead.
   manager: { id: string; name: string };
   target: { type: AccountingTargetType; id: string } | null;
   counterparty: string | null; reference: string | null; note: string | null;
@@ -50,6 +52,19 @@ export type AcctRow = AcctEntry & { balance: number | null };
 export type AcctTarget = {
   id: string; status: string; party: string | null;
   amount: number | null; currency: AccountingCurrency; recordedCny: number;
+  // Whose hands the record says the money went through — a PO's cost payer
+  // or commission payer. The form offers them as the manager; one who is not
+  // an active manager falls back to the recorder. Optional for deploy skew.
+  payerId?: string | null;
+  // The payer as the picker reads it: the person's name, or the Business
+  // Account — a PO's cost paid from the company's account, or a commission
+  // the company paid (on file, or a Mercury/PayPal row linked as it).
+  payerName?: string | null;
+  // The PO the Business Account paid takes no RMB entry: the form and the
+  // card say so and point to Payments.
+  payerBusiness?: boolean;
+  // The purchaser may be a self-paid cost's payer.
+  owner?: { id: string; name: string };
 };
 
 export type AcctEvent = {
@@ -58,7 +73,9 @@ export type AcctEvent = {
     | 'reviewed' | 'unreviewed' | 'queried' | 'answered' | 'query_withdrawn';
   detail: {
     changes?: Record<string, { from: unknown; to: unknown }>; reason?: string; orderId?: string;
-    backfilled?: 'commission_paid_by' | 'payment_received_by';
+    backfilled?: 'commission_paid_by' | 'payment_received_by' | 'payer';
+    // Written by the PO's side of the link, not by a person.
+    synced?: 'po';
     text?: string; amountCny?: number;
     clearedReview?: { by: string | null; at: string };
   };

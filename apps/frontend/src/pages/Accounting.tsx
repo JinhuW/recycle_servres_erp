@@ -277,7 +277,7 @@ function EntryScreen({ id, showToast }: { id: string } & Props) {
                     {entry.targetFacts?.party && <span className="acct-sub">{entry.targetFacts.party}</span>}
                   </>
                 ) : <span style={{ color: 'var(--fg-subtle)' }}>{t('acctRecordDeleted')}</span>)}
-                {fact(t('acctFieldManager'), entry.manager.name)}
+                {fact(t('acctFieldPaidBy'), entry.manager.name)}
                 {fact(t('acctFieldMethod'), t('acctMethod_' + entry.method))}
                 {entry.counterparty && fact(t('acctFieldCounterparty'), entry.counterparty)}
                 {entry.reference && fact(t('acctFieldReference'), <span className="mono">{entry.reference}</span>)}

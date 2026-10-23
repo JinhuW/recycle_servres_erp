@@ -97,6 +97,7 @@ export function DesktopAccounting({ onToast }: Props) {
     <>
       <div className="page-head">
         <div>
+          <div className="page-sub">{t('nav_accounting')} / {t('nav_rmbFlow')}</div>
           <h1 className="page-title">{t('acctTitle')}</h1>
           <div className="page-sub">{t('acctSub')}</div>
         </div>
@@ -117,7 +118,7 @@ export function DesktopAccounting({ onToast }: Props) {
 
       <div className="acct-scope">
         <RangeChip value={range} today={today} first={summary?.first ?? null} locale={locale} onChange={setRange} />
-        <select className="select" value={managerId} aria-label={t('acctFieldManager')}
+        <select className="select" value={managerId} aria-label={t('acctFieldPaidBy')}
                 onChange={e => setManagerId(e.target.value)}>
           <option value="">{t('acctAllManagers')}</option>
           {summary?.managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -180,7 +181,7 @@ export function DesktopAccounting({ onToast }: Props) {
                   <th>{t('acctColDate')}</th>
                   <th>{t('acctColEntry')}</th>
                   <th>{t('acctFieldKind')}</th>
-                  <th>{t('acctFieldManager')}</th>
+                  <th>{t('acctFieldPaidBy')}</th>
                   <th>{t('acctFieldMethod')}</th>
                   <th className="acct-num">{t('acctReceived')}</th>
                   <th className="acct-num">{t('acctPaid')}</th>

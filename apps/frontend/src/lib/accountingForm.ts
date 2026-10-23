@@ -24,7 +24,10 @@ export type EntryForm = {
   fxRate: string;
   method: AccountingMethod;
   occurredOn: IsoDate;
+  // Who paid: a person's id. The Business Account's money is Payments'.
   managerId: string;
+  // Once the manager picks a payer, a record's payer no longer moves it.
+  managerTouched: boolean;
   counterparty: string;
   counterpartyTouched: boolean;
   reference: string;
@@ -39,6 +42,16 @@ export type EntryPreset = {
   amount?: number;
 };
 
+// The record's own payer, as the form picks it: the person, or nothing to say.
+const payerOf = (t: FormTarget | null | undefined): string | undefined => t?.payerId ?? undefined;
+
+/**
+ * A PO the Business Account paid — its cost from the company's account, its
+ * commission flagged so or a Mercury/PayPal row standing as it — takes no
+ * RMB entry: that money is Payments'. The form says so and will not save.
+ */
+export const payerLock = (t: FormTarget | null): boolean => !!t?.payerBusiness;
+
 export function initialForm(opts: { meId: string; today: IsoDate; preset?: EntryPreset; entry?: AcctEntry }): EntryForm {
   const { entry, preset } = opts;
   if (entry) {
@@ -47,7 +60,7 @@ export function initialForm(opts: { meId: string; today: IsoDate; preset?: Entry
       target: entry.target ? { id: entry.target.id } : null, targetLocked: false,
       amount: String(entry.amount), currency: entry.currency,
       fxRate: entry.fxRate === null ? '' : String(entry.fxRate),
-      method: entry.method, occurredOn: entry.occurredOn, managerId: entry.manager.id,
+      method: entry.method, occurredOn: entry.occurredOn, managerId: entry.manager.id, managerTouched: true,
       counterparty: entry.counterparty ?? '', counterpartyTouched: true,
       reference: entry.reference ?? '', note: entry.note ?? '',
     };
@@ -64,7 +77,11 @@ export function initialForm(opts: { meId: string; today: IsoDate; preset?: Entry
     fxRate: '',
     method: 'bank',
     occurredOn: opts.today,
-    managerId: preset?.managerId ?? opts.meId,
+    // The record's own payer when it names one (a PO's cost or commission
+    // payer), else the recorder. A pre-filled person the picker does not
+    // list is swapped for the recorder by the hook.
+    managerId: preset?.managerId ?? payerOf(preset?.target) ?? opts.meId,
+    managerTouched: preset?.managerId !== undefined,
     counterparty: preset?.target?.party ?? '',
     counterpartyTouched: false,
     reference: '',
@@ -75,11 +92,12 @@ export function initialForm(opts: { meId: string; today: IsoDate; preset?: Entry
 export function applyKind(f: EntryForm, kind: AccountingKind): EntryForm {
   if (f.targetLocked || kind === f.kind) return f;
   const sameRecord = KIND_TARGET[kind] === KIND_TARGET[f.kind];
+  const target = sameRecord ? f.target : null;
   return {
     ...f,
     kind,
     direction: f.directionTouched ? f.direction : KIND_DEFAULT_DIRECTION[kind],
-    target: sameRecord ? f.target : null,
+    target,
     counterparty: sameRecord || f.counterpartyTouched ? f.counterparty : '',
   };
 }
@@ -89,6 +107,9 @@ export function pickTarget(f: EntryForm, t: FormTarget | null): EntryForm {
     ...f,
     target: t,
     counterparty: f.counterpartyTouched ? f.counterparty : t?.party ?? '',
+    // The record's payer, unless one was picked by hand (or the entry is
+    // being edited, which counts as picked).
+    managerId: f.managerTouched ? f.managerId : payerOf(t) ?? f.managerId,
   };
 }
 
@@ -102,10 +123,11 @@ export function previewCny(f: EntryForm, latestRate: number | null): number | nu
 }
 
 export type FormError =
-  | 'acctErrAmount' | 'acctErrRate' | 'acctErrTarget' | 'acctErrDate' | 'acctErrManager';
+  | 'acctErrAmount' | 'acctErrRate' | 'acctErrTarget' | 'acctErrDate' | 'acctErrManager' | 'acctPaidFromBusiness';
 
 /** The request the form stands for, or the i18n key of what is missing. */
 export function toRequestBody(f: EntryForm, opts: { orphan?: boolean } = {}): { body: AcctEntryBody } | { error: FormError } {
+  if (payerLock(f.target)) return { error: 'acctPaidFromBusiness' };
   const amount = Number(f.amount);
   if (!f.amount.trim() || !Number.isFinite(amount) || amount <= 0 || amount > 1_000_000_000) {
     return { error: 'acctErrAmount' };

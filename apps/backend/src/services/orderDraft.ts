@@ -35,10 +35,11 @@ export async function insertDraftOrderTx(tx: SqlLike, opts: {
 }): Promise<string> {
   const orderId = await nextHumanId(tx, 'PO', 'PO');
   await tx`
-    INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle, paypal_txn_id, supplier_id, source, handoff_method)
+    INSERT INTO orders (id, user_id, category, warehouse_id, payment, paid_by, notes, total_cost, lifecycle, paypal_txn_id, supplier_id, source, handoff_method)
     VALUES (
       ${orderId}, ${opts.ownerId}, ${opts.category ?? 'Mixed'}, ${opts.warehouseId},
-      ${opts.payment ?? 'company'}, ${opts.notes ?? null}, ${null}, 'draft', ${opts.paypalTxnId ?? null},
+      ${opts.payment ?? 'company'}, ${opts.payment === 'self' ? opts.ownerId : null}::uuid,
+      ${opts.notes ?? null}, ${null}, 'draft', ${opts.paypalTxnId ?? null},
       ${opts.supplierId ?? null}, ${opts.source ?? null}, ${opts.handoffMethod ?? null}
     )
   `;

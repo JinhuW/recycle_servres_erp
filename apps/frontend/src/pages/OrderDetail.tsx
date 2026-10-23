@@ -25,7 +25,8 @@ import { OrderProductsBody, itemLabel } from './OrderProductsBody';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { productCount } from '../lib/productNo';
-import { profitTone } from '../lib/orderPresentation';
+import { costPayerLabel, profitTone } from '../lib/orderPresentation';
+import { payerChoices } from '../lib/poFacets';
 import { isPricedSellPrice } from '@recycle-erp/shared';
 import { derivePoPermissions, type TakeoverAnswer } from '../lib/poPermissions';
 import { poEffectiveCost, parseFeeInput, rateEq, readStoredGoodsTotal } from '../lib/poTotals';
@@ -68,6 +69,8 @@ export type OrderMetaDraft = {
   version: string;
   warehouseId: string;
   payment: 'company' | 'self';
+  // The person on a self-paid order; null keeps the record (or names the owner).
+  paidByUserId: string | null;
   paymentMethod: HandoffMethod | null;
   paypalTxnId: string;
   notes: string;
@@ -153,6 +156,7 @@ export function OrderDetail({
     order.id,
     order.warehouse?.id ?? '',
     order.payment,
+    order.paidBy?.id ?? '',
     order.paymentMethod ?? '',
     order.paypalTxnId ?? '',
     order.notes ?? '',
@@ -175,6 +179,7 @@ export function OrderDetail({
       version: serverVersion,
       warehouseId: order.warehouse?.id ?? '',
       payment: order.payment,
+      paidByUserId: order.paidBy?.id ?? null,
       paymentMethod: order.paymentMethod ?? null,
       paypalTxnId: order.paypalTxnId ?? '',
       notes: order.notes ?? '',
@@ -193,7 +198,7 @@ export function OrderDetail({
       commissionPct: order.commissionRate != null ? String(+(order.commissionRate * 100).toFixed(2)) : '',
     };
   const meta = currentMeta(metaDraft);
-  const { warehouseId, payment, paymentMethod, paypalTxnId, notes, fees, source, delivery, byUserId, ownerId, commissionPct } = meta;
+  const { warehouseId, payment, paidByUserId, paymentMethod, paypalTxnId, notes, fees, source, delivery, byUserId, ownerId, commissionPct } = meta;
   const tracking = resolveTracking(meta.tracking.raw, meta.tracking.pick);
   // Merged into the draft as it stands, not the one this render saw: the
   // PayPal screenshot scan writes its id seconds later, and notes typed in
@@ -309,14 +314,16 @@ export function OrderDetail({
     return () => { alive = false; };
   }, []);
   // Every role may pick a collector — the names list, as the hand-off uses.
-  const [memberNames, setMemberNames] = useState<{ id: string; name: string }[]>([]);
+  const [memberNames, setMemberNames] = useState<{ id: string; name: string; role?: string }[]>([]);
   useEffect(() => {
     let alive = true;
-    api.get<{ items: { id: string; name: string }[] }>('/api/members/names')
+    api.get<{ items: { id: string; name: string; role?: string }[] }>('/api/members/names')
       .then(r => { if (alive) setMemberNames(r.items); })
       .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
+  // Who the Cost Payment fold's Paid by may name: the managers, the owner, the record.
+  const payers = payerChoices(memberNames, { id: order.userId, name: order.userName ?? order.userId }, order.paidBy ?? null);
   // Filled when the Commission fold opens, below.
   const [managers, setManagers] = useState<{ id: string; name: string }[] | null>(null);
   const commissionPaidBy = useCommissionPaidBy({
@@ -355,6 +362,8 @@ export function OrderDetail({
   // Only a company order carries a method; the server clears it on a flip to
   // self, so the local value is not a change until the order is company again.
   const methodDirty = payment === 'company' && paymentMethod !== (order.paymentMethod ?? null);
+  // Same for the payer: only a self-paid order names one.
+  const payerDirty = payment === 'self' && paidByUserId !== null && paidByUserId !== (order.paidBy?.id ?? null);
   const paypalDirty = paypalTxnId !== (order.paypalTxnId ?? '');
   const feesDirty =
     feesValue !== (order.otherFees ?? 0) ||
@@ -466,6 +475,7 @@ export function OrderDetail({
         warehouseId:   warehouseDirty ? (warehouseId || null)       : undefined,
         payment:       paymentDirty   ? payment                     : undefined,
         paymentMethod: methodDirty    ? paymentMethod               : undefined,
+        paidByUserId:  payerDirty     ? paidByUserId                : undefined,
         paypalTxnId:   paypalDirty    ? (paypalTxnId || null)       : undefined,
         otherFees:     feesDirty      ? feesValue                   : undefined,
         otherFeesNote: feesDirty      ? (fees.note.trim() || null)  : undefined,
@@ -778,9 +788,10 @@ export function OrderDetail({
       el?.scrollIntoView({ behavior: 'smooth', block: id === 'payment' ? 'center' : 'start' });
     });
   };
+  const payerName = payers.find(m => m.id === paidByUserId)?.name ?? order.paidBy?.name ?? null;
   const paymentSummary = payment === 'self'
-    ? t('paySelfShort')
-    : [t('payCompanyShort'), paymentMethod === 'cash' ? t('hoMethodCash') : paymentMethod === 'paypal' ? t('hoMethodPaypal') : null, paypalTxnId.trim() || null]
+    ? costPayerLabel({ payment, paidBy: payerName ? { id: paidByUserId ?? '', name: payerName } : null }, t, true)
+    : [t('payBusinessShort'), paymentMethod === 'cash' ? t('hoMethodCash') : paymentMethod === 'paypal' ? t('hoMethodPaypal') : null, paypalTxnId.trim() || null]
         .filter(Boolean).join(' · ');
   // The owner select must be able to show the order as-is even when its
   // owner has left the member list, as the desktop's does.
@@ -798,8 +809,14 @@ export function OrderDetail({
     notes.trim() ? notes.trim().split('\n')[0] : t('phNoNotes'),
     submissionAtts.length > 0 ? t('poReadyFiles', { n: submissionAtts.length }) : null,
   ].filter(Boolean).join(' · ');
+  // The cost comes back to whoever paid it: in the purchaser's earnings when
+  // they paid, named apart when a manager did. A record naming nobody (an
+  // older backend) is the purchaser's, as it always was.
+  const selfReimbursed = payment === 'self' && (paidByUserId === null || paidByUserId === order.userId);
   const commissionMath = {
-    payment, revenue: totals.revenue, totalCost: cost.total,
+    selfReimbursed,
+    reimbursedTo: payment === 'self' && !selfReimbursed ? payerName : null,
+    revenue: totals.revenue, totalCost: cost.total,
     pricedCount: totals.priced, lineCount: order.lines.length,
   };
   const canEditCommission = !isPurchaser && canEditOrder;
@@ -1441,7 +1458,8 @@ export function OrderDetail({
           bodyClassName="ph-pay"
         >
           <PaymentFields
-            paidBy={payment} onPaidBy={v => canEditOrder && setMeta({ payment: v })}
+            paidBy={payment} paidByUserId={paidByUserId} payers={payers}
+            onPaidBy={(v, userId) => canEditOrder && setMeta({ payment: v, paidByUserId: v === 'self' ? userId : null })}
             method={paymentMethod} onMethod={v => canEditOrder && setMeta({ paymentMethod: v })}
             txnId={paypalTxnId} onTxnId={v => canEditOrder && setMeta({ paypalTxnId: v })}
             txnRequired={order.txnRequired === true}
@@ -1844,6 +1862,7 @@ export function OrderDetail({
             lines: { count: order.lines.length, units: totals.qty, goods: cost.goods },
             warehouseId: warehouseId || (order.warehouse?.id ?? ''),
             payment,
+            paidByUserId,
             paymentMethod,
             paypalTxnId,
             proof,

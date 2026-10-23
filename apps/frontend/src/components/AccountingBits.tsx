@@ -63,21 +63,26 @@ export function targetStatusLabel(type: AccountingTargetType, status: string, t:
 
 export const FIELD_KEY: Record<string, string> = {
   direction: 'acctFieldDirection', kind: 'acctFieldKind', amount: 'acctFieldAmount', currency: 'acctFieldCurrency',
-  fxRate: 'acctFieldRate', method: 'acctFieldMethod', occurredOn: 'acctFieldDate', managerId: 'acctFieldManager',
+  fxRate: 'acctFieldRate', method: 'acctFieldMethod', occurredOn: 'acctFieldDate', managerId: 'acctFieldPaidBy',
   targetId: 'acctFieldRecord', counterparty: 'acctFieldCounterparty', reference: 'acctFieldReference', note: 'acctFieldNote',
 };
 
 const BACKFILL_KEY: Record<NonNullable<AcctEvent['detail']['backfilled']>, string> = {
-  commission_paid_by: 'acctEvBackfilledPaidBy', payment_received_by: 'acctEvBackfilledReceiver',
+  commission_paid_by: 'acctEvBackfilledPaidBy', payment_received_by: 'acctEvBackfilledReceiver', payer: 'acctEvBackfilledPayer',
 };
 
 /** One line of an entry's history. An entry filled in from a record's own
- *  payer was recorded by nobody, so it names that field instead. */
+ *  payer, or moved or voided by its PO's side of the link, was written by
+ *  nobody, so the line says what did it instead. */
 export function HistoryLine({ e, t, locale }: { e: AcctEvent; t: Translate; locale: string }) {
-  const from = e.kind === 'created' ? e.detail.backfilled : undefined;
+  const byPo = !!e.detail.synced || !!e.detail.backfilled;
+  const by = e.kind === 'voided' && byPo ? t('acctEvVoidedPo')
+    : e.detail.backfilled ? t(BACKFILL_KEY[e.detail.backfilled])
+    : e.detail.synced === 'po' ? t('acctEvSyncedPo')
+    : null;
   return (
     <div>
-      {from ? t(BACKFILL_KEY[from]) : (
+      {by ?? (
         <><span style={{ fontWeight: 600 }}>{e.actor?.name ?? '—'}</span> {eventLine(e, t)}</>
       )}
       <span className="acct-history-when">{fmtDate(e.at, locale)}</span>

@@ -5,6 +5,9 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-355](./RS-355-accounting-groups-payments-and-rmb-flow-the-rmb-flow.md) | done | story | P2 | Accounting groups Payments and RMB Flow; the RMB Flow records money outside the Business Account | 1.317.0 |
+| [RS-354](./RS-354-accounting-an-entry-s-paid-by-and-the-po-s-payer-sta.md) | done | story | P2 | Accounting: an entry's Paid by and the PO's payer stay in sync; one company-wide balance | 1.317.0 |
+| [RS-353](./RS-353-paid-by-names-a-manager-or-the-business-account.md) | done | story | P2 | Paid by names a manager or the Business Account | 1.317.0 |
 | [RS-352](./RS-352-the-prod-dev-scrub-blanks-the-account-pool-s-access.md) | done | bug | P1 | The prod→dev scrub blanks the account pool's access tokens | v1.316.1 |
 | [RS-351](./RS-351-wechat-and-reddit-pages-follow-the-facebook-fleet-pa.md) | done | story | P2 | WeChat and Reddit pages follow the Facebook fleet pattern | 1.316.0 |
 | [RS-350](./RS-350-accounting-review-mode-another-manager-signs-off-eac.md) | done | story | P2 | Accounting review mode: another manager signs off each entry | 1.315.0 |

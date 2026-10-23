@@ -180,7 +180,7 @@ describe('accounting review', () => {
   });
 
   it('weighs each entry against its record, the FX ledger and its look-alikes', async () => {
-    const po = await api<{ id: string }>('POST', '/api/orders', { token: alex.token, body: PO_BODY });
+    const po = await api<{ id: string }>('POST', '/api/orders', { token: alex.token, body: { ...PO_BODY, payment: 'self' } });
     expect(po.status).toBe(201);
     // PO cost $20 ≈ ¥140 at the ledger's 7.0.
     const fair = await record(alex.token, base({ kind: 'purchase', targetId: po.body.id, amount: 140 }));

@@ -49,8 +49,15 @@ export const DESKTOP_NAV: readonly NavGroup[] = [
     tKey: 'nav_group_oversight',
     items: [
       { id: 'activity',   tKey: 'nav_activity',   icon: 'clock',      roles: ['manager'] },
-      { id: 'payments',   tKey: 'nav_payments',   icon: 'dollar',     roles: ['manager'], alsoActiveOn: ['internaltx'] },
-      { id: 'accounting', tKey: 'nav_accounting', icon: 'cash',       roles: ['manager'] },
+      // The company's money and the managers' RMB books, side by side.
+      {
+        tKey: 'nav_accounting',
+        icon: 'cash',
+        children: [
+          { id: 'payments',   tKey: 'nav_payments', icon: 'dollar', roles: ['manager'], alsoActiveOn: ['internaltx'] },
+          { id: 'accounting', tKey: 'nav_rmbFlow',  icon: 'cash',   roles: ['manager'] },
+        ],
+      },
       {
         tKey: 'nav_monitors',
         icon: 'eye',

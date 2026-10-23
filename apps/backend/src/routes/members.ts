@@ -75,8 +75,10 @@ async function lastManagerError(
 // member's lifetime profit, which is neither theirs to see nor cheap.
 members.get('/names', async (c) => {
   const sql = getDb(c.env);
-  const items = await sql<{ id: string; name: string }[]>`
-    SELECT id, name FROM users WHERE COALESCE(active, TRUE) ORDER BY name
+  // The role rides along so a purchaser's Paid by picker can offer the
+  // managers; who is a manager is no secret to anyone who can log in.
+  const items = await sql<{ id: string; name: string; role: string }[]>`
+    SELECT id, name, role FROM users WHERE COALESCE(active, TRUE) ORDER BY name
   `;
   return c.json({ items });
 });

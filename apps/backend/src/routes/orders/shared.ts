@@ -7,6 +7,8 @@ import { type TrackablePart } from '../../lib/marketAutoTrack';
 import { effectiveRole } from '../../lib/role';
 import { specVal } from '../../lib/orderInput';
 import { activeMember, type HandoffPackage } from '../../services/orderHandoff';
+export { paidByAfter } from '../../services/orderHandoff';
+import { isActiveManager } from '../../services/members';
 import { pickTrackingClient, carrierTrackingUrl } from '../../shipping';
 import { registerPackageTracking } from '../../shipping/track';
 import { synthesizePartNumber, chipMarkingCanon, normSellPrice, CARRIERS, PACKAGE_SOURCES, isValidTracking, normalizeTracking, type SerialIssue, type Carrier, type PackageSource } from '@recycle-erp/shared';
@@ -342,6 +344,19 @@ export async function handoffByErr(
   return member ? { member } : { error: 'handoff.byUserId must name an active member' };
 }
 
+// Who paid a self-paid order: an active manager, or the order's own
+// purchaser — the one person who may say they paid out of pocket without
+// being a manager. Absent means the caller did not say; the write paths
+// then keep what is on file, or name the owner.
+export async function paidByErr(
+  sql: SqlLike, ownerId: string, v: unknown,
+): Promise<string | null> {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== 'string' || !UUID_RE.test(v)) return 'paidByUserId must be a user id';
+  if (v === ownerId) return (await activeMember(sql, v)) ? null : 'Paid by must be an active member';
+  return (await isActiveManager(sql, v)) ? null : 'Paid by must be an active manager or the purchaser';
+}
+
 export function trackingTakenMsg(otherOrderId: string | null): string {
   return otherOrderId
     ? `This tracking number is already being tracked on ${otherOrderId}`
@@ -558,6 +573,7 @@ export function changesMaterialField(
     lines?: LinePatch[]; addLines?: unknown[]; removeLineIds?: string[];
     totalCost?: number | null; otherFees?: number | null; otherFeesNote?: string | null;
     warehouseId?: string | null; payment?: string; paymentMethod?: string | null;
+    paidByUserId?: string | null;
     paypalTxnId?: string | null;
     source?: string | null; handoffMethod?: 'pickup' | 'label' | null; handoffBy?: string | null;
     trackingNumber?: string; carrier?: string;
@@ -605,6 +621,10 @@ export function changesMaterialField(
   if (body.warehouseId !== undefined
       && !sameStoredValue(before.warehouse_id, body.warehouseId)) return true;
   if (body.payment !== undefined && body.payment !== before.payment) return true;
+  // Judged as the UPDATE lands it: a payer sent for a Business Account order
+  // writes nothing, and a null keeps whoever is on file.
+  if (body.paidByUserId != null && (body.payment ?? before.payment) === 'self'
+      && !sameStoredValue(before.paid_by, body.paidByUserId)) return true;
   if (body.paymentMethod !== undefined
       && !sameStoredValue(before.payment_method, body.paymentMethod)) return true;
   if (body.paypalTxnId !== undefined) {

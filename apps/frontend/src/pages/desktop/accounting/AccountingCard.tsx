@@ -6,7 +6,7 @@ import { FIGURE_KEY, NET_KEY, Yuan, recordActionKey } from '../../../components/
 import { useT } from '../../../lib/i18n';
 import { showSuccessToast } from '../../../lib/errorToast';
 import { fmtMoney } from '../../../lib/format';
-import { accountingEntryPath } from '../../../lib/route';
+import { accountingEntryPath, paymentsForOrderPath } from '../../../lib/route';
 import { fmtBookDay, owedOnSale, signedCny, type AcctScope } from '../../../lib/accounting';
 import { useAccountingTarget } from '../../../lib/useAccountingTarget';
 import type { SavedEntry } from '../../../lib/useAccountingEntryForm';
@@ -53,10 +53,16 @@ export function AccountingCard({ scope, className, managerId, onRecorded }: {
     <div className={className ?? 'oe-ledger'}>
       <div className="acct-card-head">
         <div className="acct-card-title">{t('acctCardTitle')}</div>
-        <button type="button" className="btn sm" onClick={() => setRecording(true)}>
-          <Icon name="plus" size={12} /> {action}
-        </button>
+        {target.payerBusiness && 'orderId' in scope ? (
+          // The Business Account's money is Payments', not the RMB Flow's.
+          <RouteLink to={paymentsForOrderPath(scope.orderId)} className="btn sm ghost">{t('payLedgerOpen')}</RouteLink>
+        ) : (
+          <button type="button" className="btn sm" onClick={() => setRecording(true)}>
+            <Icon name="plus" size={12} /> {action}
+          </button>
+        )}
       </div>
+      {target.payerBusiness && <div className="acct-card-empty">{t('acctPaidFromBusiness')}</div>}
       {ledger.entries.length === 0 ? (
         <div className="acct-card-empty">{t(EMPTY_KEY[kind])}</div>
       ) : (

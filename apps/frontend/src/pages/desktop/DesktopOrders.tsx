@@ -15,10 +15,10 @@ import { paymentGap } from '../../lib/paymentGap';
 import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
 import { lineSpecLabel } from '../../lib/lineGroups';
-import { inTransitDetail, profitTone, trackingNote } from '../../lib/orderPresentation';
+import { costPayerLabel, inTransitDetail, profitTone, trackingNote } from '../../lib/orderPresentation';
 import { statusTone, isCompleted, LIFECYCLE_STATUS, SOLD_LABEL, WORKFLOW_STAGES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
-import { NO_WAREHOUSE, facetCounts, matchesPayment, matchesWarehouse, warehouseOptions } from '../../lib/poFacets';
+import { BUSINESS_ACCOUNT, NO_WAREHOUSE, facetCounts, matchesPayment, matchesWarehouse, payerOptions, paymentPickOrAll, warehouseOptions } from '../../lib/poFacets';
 import type { PaymentPick, WarehousePick } from '../../lib/poFacets';
 import type { OrderSummary, Order } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
@@ -86,7 +86,8 @@ const SORT_KEYS: Record<string, (o: OrderSummary) => string | number> = {
   // Unsold POs sort below every realized figure, loss or gain.
   realized:   o => o.realized?.profit ?? Number.NEGATIVE_INFINITY,
   commission: o => commissionFor(o),
-  paidBy:     o => !o.commissionPaidBy ? '' : o.commissionPaidBy.kind === 'company' ? 'Company' : o.commissionPaidBy.name,
+  // Sorts by what the cell reads; the business sorts among the B's.
+  paidBy:     o => !o.commissionPaidBy ? '' : o.commissionPaidBy.kind === 'company' ? 'Business Account' : o.commissionPaidBy.name,
   payment:    o => o.payment,
   status:     o => o.status,
 };
@@ -256,14 +257,18 @@ export function DesktopOrders({ onToast }: Props) {
   const warehouseFacet = warehousePick !== 'all' && loadedAll && !warehouses.some(w => w.id === warehousePick)
     ? 'all'
     : warehousePick;
+  // The payer chips the same way: the Business Account, then each person who
+  // paid a PO in scope. A remembered payer with no PO here reads as All.
+  const payers = useMemo(() => payerOptions(orders), [orders]);
+  const paymentFacet = loadedAll ? paymentPickOrAll(paymentPick, orders) : paymentPick;
 
   // The warehouse and payment picks sit with search, ahead of the stage rail,
   // so the stage counts say what each stage holds for this warehouse.
   const visible = useMemo(
-    () => warehouseFacet === 'all' && paymentPick === 'all'
+    () => warehouseFacet === 'all' && paymentFacet === 'all'
       ? searched
-      : searched.filter(o => matchesWarehouse(o, warehouseFacet) && matchesPayment(o, paymentPick)),
-    [searched, warehouseFacet, paymentPick],
+      : searched.filter(o => matchesWarehouse(o, warehouseFacet) && matchesPayment(o, paymentFacet)),
+    [searched, warehouseFacet, paymentFacet],
   );
 
   // `sold` only reaches managers, and the chip lives in their rail: the role
@@ -272,11 +277,11 @@ export function DesktopOrders({ onToast }: Props) {
 
   const facets = useMemo(() => facetCounts(
     searched,
-    { warehouse: warehouseFacet, payment: paymentPick },
+    { warehouse: warehouseFacet, payment: paymentFacet },
     o => (stageFilter === 'all'
       ? showDone || soldPicked || !isCompleted(o.status)
       : o.lifecycle === stageFilter) && (!soldPicked || !!o.sold),
-  ), [searched, warehouseFacet, paymentPick, stageFilter, showDone, soldPicked]);
+  ), [searched, warehouseFacet, paymentFacet, stageFilter, showDone, soldPicked]);
 
   // The all-stages view hides Done POs unless the toggle is on; the stage
   // rail's own Done chip still shows them because a stage pick bypasses the
@@ -565,18 +570,22 @@ export function DesktopOrders({ onToast }: Props) {
           })}
           <span className="status-rail-sep" aria-hidden />
           <span className="rail-label"><Icon name="dollar" size={12} />{t('payment')}</span>
-          {(['all', 'company', 'self'] as const).map(p => {
-            const n = facets.payment[p];
-            const active = paymentPick === p;
+          {[
+            { id: 'all', label: t('all') },
+            { id: BUSINESS_ACCOUNT, label: t('payBusinessShort') },
+            ...payers.map(p => ({ id: p.id, label: p.name ?? t('paySelfShort') })),
+          ].map(p => {
+            const n = facets.payment[p.id] ?? 0;
+            const active = paymentFacet === p.id;
             return (
               <button
-                key={p}
+                key={p.id}
                 type="button"
                 className={'status-chip' + (n === 0 ? ' empty' : '')}
                 aria-pressed={active}
-                onClick={() => setPaymentPick(active && p !== 'all' ? 'all' : p)}
+                onClick={() => setPaymentPick(active && p.id !== 'all' ? 'all' : p.id)}
               >
-                {p === 'all' ? t('all') : p === 'company' ? t('payCompanyShort') : t('paySelfShort')}
+                {p.label}
                 <span className="mono sc-n">{n}</span>
               </button>
             );
@@ -742,10 +751,10 @@ export function DesktopOrders({ onToast }: Props) {
                             own click toggles the line drawer, hence the stop. */}
                         {isManager && typeof o.linkedPaid === 'number' ? (
                           <RouteLink to={paymentsForOrderPath(o.id)} className="chip chip-link" title={t('payLinkOpen')}>
-                            {o.payment === 'company' ? 'Company' : 'Self'} | {fmtUSD0(o.linkedPaid, locale)}
+                            {costPayerLabel(o, t, true)} | {fmtUSD0(o.linkedPaid, locale)}
                           </RouteLink>
                         ) : (
-                          <span className="chip">{o.payment === 'company' ? 'Company' : 'Self'}</span>
+                          <span className="chip">{costPayerLabel(o, t, true)}</span>
                         )}
                       </td>
                       <td style={{ display: isVis('status') ? undefined : 'none' }}>

@@ -10,7 +10,7 @@ import {
   type AcctEntryDetail, type AcctTarget,
 } from './accounting';
 import {
-  applyKind, initialForm, pickTarget, previewCny, toRequestBody,
+  applyKind, initialForm, payerLock, pickTarget, previewCny, toRequestBody,
   type EntryForm, type EntryPreset, type FormError, type FormTarget,
 } from './accountingForm';
 import type { PaidBy } from './useCommissionPaidBy';
@@ -56,11 +56,15 @@ export function useAccountingEntryForm(opts: {
     return () => { alive = false; };
   }, [form.currency, rate]);
 
-  // A manager no longer active still has to show on an entry booked to them.
+  // The people Paid by may name: the active managers; a manager no longer
+  // active still has to show on an entry booked to them; and a cost may
+  // name the PO's own purchaser, who paid it out of pocket.
+  const owner = form.kind === 'purchase' ? form.target?.owner ?? null : null;
   const managers = useMemo(() => {
-    if (!entry || managerOptions.some(m => m.id === entry.manager.id)) return managerOptions;
-    return [...managerOptions, entry.manager];
-  }, [managerOptions, entry]);
+    const extra = [entry?.manager ?? null, owner].filter((m): m is { id: string; name: string } =>
+      !!m && !managerOptions.some(o => o.id === m.id));
+    return extra.length ? [...managerOptions, ...extra] : managerOptions;
+  }, [managerOptions, entry, owner]);
 
   // A preset can name a manager who is no longer active (one still holding a
   // balance, a sale's receiver since deactivated). The select can't show them
@@ -69,8 +73,8 @@ export function useAccountingEntryForm(opts: {
   const meId = user?.id ?? '';
   useEffect(() => {
     if (entry || managerOptions.length === 0 || form.managerId === meId) return;
-    if (!managerOptions.some(m => m.id === form.managerId)) setForm(f => ({ ...f, managerId: meId }));
-  }, [entry, managerOptions, form.managerId, meId]);
+    if (!managers.some(m => m.id === form.managerId)) setForm(f => ({ ...f, managerId: meId }));
+  }, [entry, managerOptions, managers, form.managerId, meId]);
 
   const edit = (next: (f: EntryForm) => EntryForm) => { setForm(next); setError(null); };
   // An entry whose record was deleted keeps its kind with no link.
@@ -100,7 +104,10 @@ export function useAccountingEntryForm(opts: {
     form, error, busy, managers, rate, targetType, query, candidates, orphan,
     preview: previewCny(form, rate),
     editing: !!entry,
-    set: (patch: Partial<EntryForm>) => edit(f => ({ ...f, ...patch })),
+    // A PO the Business Account paid takes no RMB entry: the form says so.
+    payerLocked: payerLock(form.target),
+    // A manager picked by hand stays put when the record changes.
+    set: (patch: Partial<EntryForm>) => edit(f => ({ ...f, ...patch, ...(patch.managerId !== undefined ? { managerTouched: true } : {}) })),
     setKind: (k: AccountingKind) => edit(f => applyKind(f, k)),
     setDirection: (d: AccountingDirection) => edit(f => ({ ...f, direction: d, directionTouched: true })),
     setCounterparty: (v: string) => edit(f => ({ ...f, counterparty: v, counterpartyTouched: true })),

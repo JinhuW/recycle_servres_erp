@@ -15,7 +15,11 @@ function PhTarget({ kind, target }: { kind: Exclude<AccountingKind, 'other'>; ta
   const { t, locale } = useT();
   return (
     <div style={{ minWidth: 0, flex: 1 }}>
-      <div><span className="mono" style={{ fontWeight: 600 }}>{target.id}</span>{target.party ? ' · ' + target.party : ''}</div>
+      <div>
+        <span className="mono" style={{ fontWeight: 600 }}>{target.id}</span>
+        {target.party ? ' · ' + target.party : ''}
+        {target.payerBusiness ? ' · ' + t('acctPickBusiness') : target.payerName ? ' · ' + t('acctPickPaidBy', { name: target.payerName }) : ''}
+      </div>
       <div className="acct-sub" style={{ whiteSpace: 'normal' }}>
         {[
           target.status ? targetStatusLabel(KIND_TARGET[kind]!, target.status, t) : null,
@@ -138,11 +142,12 @@ export function PhAccountingSheet({ preset, entry, onClose, onSaved }: {
           </div>
         </div>
         <div className="ph-field">
-          <label htmlFor={id('manager')}>{t('acctFieldManager')}</label>
-          <select id={id('manager')} className="select" value={form.managerId}
+          <label htmlFor={id('manager')}>{t('acctFieldPaidBy')}</label>
+          <select id={id('manager')} className="select" value={form.managerId} disabled={f.payerLocked}
                   onChange={e => f.set({ managerId: e.target.value })}>
             {f.managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
+          {f.payerLocked && <div className="acct-sub" style={{ whiteSpace: 'normal' }}>{t('acctPaidFromBusiness')}</div>}
         </div>
         <div className="ph-field">
           <label htmlFor={id('party')}>{t('acctFieldCounterparty')}</label>
@@ -160,7 +165,7 @@ export function PhAccountingSheet({ preset, entry, onClose, onSaved }: {
                     onChange={e => f.set({ note: e.target.value })} style={{ resize: 'vertical', fontFamily: 'inherit' }} />
         </div>
         {f.error && <div className="acct-error" role="alert">{t(f.error)}</div>}
-        <button type="submit" className="ph-btn dark" style={{ width: '100%', height: 46 }} disabled={f.busy}>
+        <button type="submit" className="ph-btn dark" style={{ width: '100%', height: 46 }} disabled={f.busy || f.payerLocked}>
           {f.busy ? '…' : entry ? t('acctSaveEdit') : action}
         </button>
       </form>

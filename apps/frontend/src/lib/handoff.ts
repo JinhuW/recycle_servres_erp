@@ -78,6 +78,8 @@ export type HandoffBody = {
     | { method: 'label'; trackingNumber: string; carrier: Carrier };
   payment: 'company' | 'self';
   paymentMethod?: HandoffMethod;
+  /** Self-paid only: who paid, when the dialog named someone. */
+  paidByUserId?: string;
   paypalTxnId?: string;
   onBehalfOfUserId?: string;
   commissionRate?: number | null;
@@ -91,6 +93,8 @@ export type HandoffDraft = {
   trackingNumber: string;
   carrier: Carrier | null;
   paidBy: 'company' | 'self';
+  /** The person on a self-paid order; null lets the server keep or default. */
+  paidByUserId: string | null;
   /** Non-null for a company order by the time submit is allowed (blocker). */
   method: HandoffMethod | null;
   txnId: string;
@@ -110,6 +114,7 @@ export function buildHandoffBody(d: HandoffDraft): HandoffBody {
       : { method: 'label', trackingNumber: d.trackingNumber, carrier: d.carrier as Carrier },
     payment: d.paidBy,
   };
+  if (d.paidBy === 'self' && d.paidByUserId) body.paidByUserId = d.paidByUserId;
   if (d.paidBy === 'company' && d.method) {
     body.paymentMethod = d.method;
     // The PayPal screenshot is not in the body: it was uploaded as a Payment

@@ -309,7 +309,7 @@ export function DesktopAccountingReview({ onToast }: Props) {
                 </button>
               ))}
             </div>
-            <select className="select arv-mgr" value={managerId} aria-label={t('acctFieldManager')}
+            <select className="select arv-mgr" value={managerId} aria-label={t('acctFieldPaidBy')}
                     onChange={e => setManagerId(e.target.value)}>
               <option value="">{t('acctAllManagers')}</option>
               {managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -381,7 +381,7 @@ export function DesktopAccountingReview({ onToast }: Props) {
                         </dd>
                       </>
                     )}
-                    <dt>{t('acctFieldManager')}</dt><dd>{sel.manager.name}</dd>
+                    <dt>{t('acctFieldPaidBy')}</dt><dd>{sel.manager.name}</dd>
                     <dt>{t('acctFieldMethod')}</dt><dd>{t('acctMethod_' + sel.method)}</dd>
                     {sel.counterparty && <><dt>{t('acctFieldCounterparty')}</dt><dd>{sel.counterparty}</dd></>}
                     {sel.reference && <><dt>{t('acctFieldReference')}</dt><dd className="mono">{sel.reference}</dd></>}

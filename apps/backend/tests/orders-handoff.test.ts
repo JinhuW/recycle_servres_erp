@@ -403,7 +403,8 @@ describe('hand-off — validation and permissions', () => {
     const names = await api<{ items: { id: string; name: string }[] }>('GET', '/api/members/names', { token });
     expect(names.status).toBe(200);
     expect(names.body.items.length).toBeGreaterThan(1);
-    expect(Object.keys(names.body.items[0]).sort()).toEqual(['id', 'name']);
+    // Ids, names and roles only — never the profit the full list computes.
+    expect(Object.keys(names.body.items[0]).sort()).toEqual(['id', 'name', 'role']);
     expect((await api('GET', '/api/members', { token })).status).toBe(403);
   });
 });
