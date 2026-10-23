@@ -2,13 +2,13 @@
 id: RS-374
 title: Pack mode connects a Bluetooth label printer, shows its status, and names the purchasers
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: JinhuW/merrow
-pr:
-version:
+pr: "#848"
+version: 1.324.0
 related: [RS-371, RS-361]
 ---
 
