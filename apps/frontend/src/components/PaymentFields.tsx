@@ -33,6 +33,9 @@ type Props = {
    *  what the server said about the saved order. */
   txnRequired?: boolean;
   disabled?: boolean;
+  /** A manager has booked the cost: Paid by is theirs to change. Locks the
+   *  select only; method and proof never reach the book. */
+  payerLocked?: boolean;
   /** Short option labels for a narrow grid cell. */
   compact?: boolean;
   proof?: PaymentProof;
@@ -45,7 +48,7 @@ type Props = {
 
 export function PaymentFields({
   paidBy, paidByUserId, payers, onPaidBy, method, onMethod, txnId, onTxnId,
-  txnRequired = false, disabled = false, compact = false,
+  txnRequired = false, disabled = false, payerLocked = false, compact = false,
   proof, canEditProof = true, idPrefix = 'pay',
 }: Props) {
   const { t } = useT();
@@ -65,7 +68,8 @@ export function PaymentFields({
             id={`${p}-paidby`}
             className="select"
             value={value}
-            disabled={disabled}
+            disabled={disabled || payerLocked}
+            aria-describedby={payerLocked ? `${p}-paidby-locked` : undefined}
             onChange={e => {
               const v = e.target.value;
               onPaidBy(v === BUSINESS_ACCOUNT ? 'company' : 'self', v === BUSINESS_ACCOUNT || v === 'self' ? null : v);
@@ -75,6 +79,7 @@ export function PaymentFields({
             {stale && <option value="self">{t(compact ? 'paySelfShort' : 'paySelf')}</option>}
             {payers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
+          {payerLocked && <div className="field-hint" id={`${p}-paidby-locked`}>{t('payPayerLocked')}</div>}
         </div>
         {company && (
           <div className="field pay-reveal">

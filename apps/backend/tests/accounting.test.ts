@@ -423,18 +423,78 @@ describe('accounting', () => {
     expect(await poEvents(self, 'paid_by')).toEqual([expect.objectContaining({
       detail: { changes: [{ field: 'paid_by', from: 'Marcus Wright', to: 'Sofia Reyes' }] },
     })]);
-    // The PO's side: the cost payer edited, the entry follows.
-    expect((await api('PATCH', `/api/orders/${self}`, { token: marcus.token, body: { paidByUserId: alex.user.id } })).status).toBe(200);
+    // The PO's side: the cost payer edited, the entry follows. Booked, the
+    // payer is a manager's to change; the purchaser's edit moves nothing.
+    const refused = await api<{ error: string }>('PATCH', `/api/orders/${self}`, { token: marcus.token, body: { paidByUserId: alex.user.id } });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/only a manager can change its payment or Paid by/);
+    expect(await managerOf(id)).toMatchObject({ id: sofia.user.id });
+    expect((await api('PATCH', `/api/orders/${self}`, { token: alex.token, body: { paidByUserId: alex.user.id } })).status).toBe(200);
     expect(await managerOf(id)).toMatchObject({ id: alex.user.id });
     // Another purchaser cannot be the payer.
     const [priya] = await getTestDb()<{ id: string }[]>`SELECT id FROM users WHERE email = 'priya@recycleservers.io'`;
     expect((await patch(id, { managerId: priya.id })).status).toBe(400);
-    // Flipped to the company's account on the PO, the entry leaves the RMB Flow.
-    expect((await api('PATCH', `/api/orders/${self}`, { token: marcus.token, body: { payment: 'company', paymentMethod: 'cash' } })).status).toBe(200);
+    // Flipped to the company's account on the PO, the entry leaves the RMB
+    // Flow — by a manager; the purchaser's flip would void their entry.
+    expect((await api('PATCH', `/api/orders/${self}`, { token: marcus.token, body: { payment: 'company', paymentMethod: 'cash' } })).status).toBe(403);
+    expect((await entryOf(alex.token, id)).voided).toBeNull();
+    expect((await api('PATCH', `/api/orders/${self}`, { token: alex.token, body: { payment: 'company', paymentMethod: 'cash' } })).status).toBe(200);
     expect((await entryOf(alex.token, id)).voided).toMatchObject({ reason: 'Paid from the Business Account' });
     const company = await record(alex.token, base({ kind: 'purchase', targetId: self }));
     expect(company.status).toBe(409);
     expect(company.body.error).toMatch(/change that on the PO/);
+  });
+
+  it('a booked cost\'s payment and Paid by are a manager\'s to change', async () => {
+    const marcus = await loginAs(MARCUS);
+    const sofia = await loginAs(SOFIA);
+    const self = await draftPO(marcus.token, { payment: 'self' });
+    const payerLocked = async (token: string, po = self) =>
+      (await api<{ order: { payerLocked: boolean } }>('GET', `/api/orders/${po}`, { token })).body.order.payerLocked;
+    const stage = async () =>
+      (await getTestDb()<{ lifecycle: string }[]>`SELECT lifecycle FROM orders WHERE id = ${self}`)[0].lifecycle;
+    expect(await payerLocked(marcus.token)).toBe(false);
+
+    const id = await recorded(alex.token, base({ kind: 'purchase', targetId: self, managerId: marcus.user.id }));
+    expect(await payerLocked(marcus.token)).toBe(true);
+    expect(await payerLocked(alex.token)).toBe(false);
+    // A save that leaves the payer as it is still goes through.
+    expect((await api('PATCH', `/api/orders/${self}`, {
+      token: marcus.token, body: { payment: 'self', paidByUserId: marcus.user.id, notes: 'x' },
+    })).status).toBe(200);
+
+    // The hand-off sends the payer on file back, which passes; a new one doesn't.
+    const PNG = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'chat.png', { type: 'image/png' });
+    expect((await multipart(`/api/orders/${self}/status-meta/Submission/attachments`, { file: PNG }, { token: marcus.token })).status).toBe(200);
+    const handoff = (paidByUserId: string) => api<{ error: string }>('POST', `/api/orders/${self}/handoff`, {
+      token: marcus.token,
+      body: { source: 'local', handoff: { method: 'pickup', byUserId: marcus.user.id }, payment: 'self', paidByUserId },
+    });
+    const moved = await handoff(sofia.user.id);
+    expect(moved.status).toBe(403);
+    expect(moved.body.error).toMatch(/only a manager can change its payment or Paid by/);
+    expect(await stage()).toBe('draft');
+    expect(await managerOf(id)).toMatchObject({ id: marcus.user.id });
+    expect((await handoff(marcus.user.id)).status).toBe(200);
+    expect(await stage()).toBe('in_transit');
+
+    // Refused before the purchaser's edit would send the PO back to Draft.
+    expect((await api('PATCH', `/api/orders/${self}`, {
+      token: marcus.token, body: { payment: 'company', paymentMethod: 'cash' },
+    })).status).toBe(403);
+    expect(await stage()).toBe('in_transit');
+    expect(await getTestDb()`SELECT 1 FROM order_events WHERE order_id = ${self} AND kind = 'reverted'`).toHaveLength(0);
+    expect((await entryOf(alex.token, id)).voided).toBeNull();
+
+    // A voided entry books nothing: the payer is the purchaser's again.
+    expect((await api('POST', `/api/accounting/entries/${id}/void`, { token: alex.token, body: { reason: 'typo' } })).status).toBe(200);
+    expect(await payerLocked(marcus.token)).toBe(false);
+    expect((await api('PATCH', `/api/orders/${self}`, { token: marcus.token, body: { paidByUserId: sofia.user.id } })).status).toBe(200);
+
+    // A commission entry isn't the cost: the payer sync never moves it for one.
+    const done = await donePO();
+    await recorded(alex.token, base({ kind: 'commission', targetId: done }));
+    expect(await payerLocked(marcus.token, done)).toBe(false);
   });
 
   it('a cost entry can\'t move the payer of a PO past review', async () => {
@@ -556,14 +616,13 @@ describe('accounting', () => {
     expect((await signOff(sofia.token, id, moved.version)).status).toBe(403);
     expect((await signOff(alex.token, id, moved.version)).status).toBe(200);
 
-    // A purchaser's save moves the payer too, but a purchaser reviews nothing,
-    // so the entry keeps the manager who wrote it.
+    // A purchaser can't move a booked cost's payer at all, so the entry keeps
+    // its payer and the manager who wrote it.
     const draft = await draftPO(marcus.token, { payment: 'self' });
     const cost = await recorded(alex.token, base({ kind: 'purchase', targetId: draft, managerId: marcus.user.id }));
-    expect((await api('PATCH', `/api/orders/${draft}`, { token: marcus.token, body: { paidByUserId: sofia.user.id } })).status).toBe(200);
-    expect(await managerOf(cost)).toMatchObject({ id: sofia.user.id });
+    expect((await api('PATCH', `/api/orders/${draft}`, { token: marcus.token, body: { paidByUserId: sofia.user.id } })).status).toBe(403);
+    expect(await managerOf(cost)).toMatchObject({ id: marcus.user.id });
     expect(await reviewOf(cost)).toMatchObject({ author: { id: alex.user.id } });
-    expect((await entryOf(alex.token, cost)).events.at(-1)).toMatchObject({ kind: 'edited', actor: { id: marcus.user.id } });
   });
 
   it('a sign-off that commits while the PO moves the payer is cleared, not lost', async () => {

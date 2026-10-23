@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-363](./RS-363-a-booked-po-s-payment-and-paid-by-are-manager-only.md) | done | bug | P1 | A booked PO's payment and Paid by are manager-only | 1.318.2 |
 | [RS-362](./RS-362-wechat-board-brand-and-generation-columns-and-a-refi.md) | done | story | P2 | WeChat board: brand and generation columns, and a refine filter | 1.318.0 |
 | [RS-361](./RS-361-refine-the-pack-page-layout.md) | done | bug | P2 | Refine the Pack page layout | 1.317.5 |
 | [RS-360](./RS-360-fix-the-activity-crash-on-new-areas-and-the-v1-317-r.md) | done | task | P2 | Fix the Activity crash on new areas and the v1.317 review cleanups | 1.318.1 |

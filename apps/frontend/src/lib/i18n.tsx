@@ -349,6 +349,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payment: 'Payment',
     paySelf: 'Self-paid (reimburse)',
     payBusiness: 'Business Account',
+    payPayerLocked: "A manager has booked this PO's cost, so only a manager can change who paid.",
     totalCost: 'Total cost',
     totalRevenue: 'Total revenue',
     resumeDraftTitle: 'Continue a draft?',

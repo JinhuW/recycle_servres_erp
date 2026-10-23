@@ -1450,6 +1450,7 @@ export function OrderDetail({
             txnId={paypalTxnId} onTxnId={v => canEditOrder && setMeta({ paypalTxnId: v })}
             txnRequired={order.txnRequired === true}
             disabled={!canEditOrder}
+            payerLocked={order.payerLocked === true}
             proof={proof}
             canEditProof={canAnnotate}
             idPrefix="ph"

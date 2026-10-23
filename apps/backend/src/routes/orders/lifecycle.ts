@@ -17,7 +17,7 @@ import { normalizeTracking, type Carrier, type PackageSource } from '@recycle-er
 import { type Env, type User } from '../../types';
 import { PAYPAL_TXN_STRICT, normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
-import { type OrdersEnv, committedLinesBody, describeSellOrders, handoffByErr, isOrderPayment, isPaymentMethod, pickedPaidByErr, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, sourceErr, stageMovedBody, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, unackedRevertFrag, warehouseErr } from './shared';
+import { type OrdersEnv, committedLinesBody, describeSellOrders, handoffByErr, isOrderPayment, isPaymentMethod, pickedPaidByErr, PACKAGE_DELIVERED_MSG, parseCommissionRate, PAYER_BOOKED_MSG, registerIfNeeded, resolveOrderOwner, sourceErr, stageMovedBody, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, unackedRevertFrag, warehouseErr } from './shared';
 
 const lifecycleRoutes = new Hono<OrdersEnv>();
 
@@ -605,6 +605,7 @@ lifecycleRoutes.post('/:id/handoff', async (c) => {
       case 'archived': return c.json({ error: 'Order is archived — unarchive it first' }, 409);
       case 'notDraft':
         return c.json({ error: `Order is already ${LIFECYCLE_LABEL[r.lifecycle] ?? r.lifecycle}` }, 409);
+      case 'payerBooked': return c.json({ error: PAYER_BOOKED_MSG }, 403);
       case 'trackingTaken':
         return c.json({ error: trackingTakenMsg(r.otherOrderId), otherOrderId: r.otherOrderId }, 409);
       case 'trackingTakenStandalone': return c.json({ error: TRACKING_TAKEN_STANDALONE_MSG }, 409);

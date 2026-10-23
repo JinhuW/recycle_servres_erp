@@ -1798,6 +1798,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                 txnId={paypalTxn} onTxnId={setPaypalTxn}
                 txnRequired={order.txnRequired === true}
                 disabled={!canEditOrder}
+                payerLocked={order.payerLocked === true}
                 proof={proof}
                 canEditProof={canAnnotate}
                 idPrefix="eo"

@@ -203,6 +203,7 @@ export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }
           method={f.method} onMethod={f.setMethod}
           txnId={f.txnId} onTxnId={f.setTxnId}
           txnRequired
+          payerLocked={f.order.payerLocked === true}
           proof={f.proof}
           idPrefix="ho"
         />
