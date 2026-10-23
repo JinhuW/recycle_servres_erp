@@ -2,13 +2,13 @@
 id: RS-379
 title: The Facebook fleet page shows today's city round and moves workers into the queue
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: fb-queue-ui
-pr:
-version:
+pr: 856
+version: v1.328.0, facebook-tracker 0.13.16
 related: [RS-372, RS-370]
 ---
 
@@ -45,7 +45,7 @@ able to pull, and refuses to enroll an older one by itself.
 
 ## Acceptance criteria
 
-- [ ] A "Today's round" card opens the Fleet tab. For each item it has one mark
+- [x] A "Today's round" card opens the Fleet tab. For each item it has one mark
       per city:
       - searched today;
       - being searched now;
@@ -55,28 +55,28 @@ able to pull, and refuses to enroll an older one by itself.
 
       Under each item a sentence gives the counts, and a "Cities" list names
       each queue city's state and worker.
-- [ ] The card says how many workers take their cities from the queue and
+- [x] The card says how many workers take their cities from the queue and
       states the stored rules: once a day, the per-account budget, the window.
-- [ ] A manager can move every worker to the queue, or send every worker back
+- [x] A manager can move every worker to the queue, or send every worker back
       to its own list, after a confirmation that says how many still run an
       older worker.
-- [ ] In the workers table:
+- [x] In the workers table:
       - an enrolled worker carries a "Queue" chip;
       - its Searches cell shows minutes used against the budget;
       - its fold shows its home cities and the cities the queue handed it
         today.
-- [ ] The worker page:
+- [x] The worker page:
       - has a "City queue" row: in the queue or not, minutes used today,
         cities handed out, the city being searched now, quarantined;
       - labels the Cities row "Home cities" when the worker is enrolled;
       - lets a manager move the worker into the queue or back. The button is
         disabled, with the reason, for a worker older than 0.13.14.
-- [ ] An enrolled worker on an older monitor never frees its cities to the
+- [x] An enrolled worker on an older monitor never frees its cities to the
       queue, and enrolling one alone is refused with a 409 that says to
       redeploy it.
-- [ ] Against an older console the page shows no round card and no queue
+- [x] Against an older console the page shows no round card and no queue
       controls, and works as today.
-- [ ] Ships as facebook-tracker 0.13.16 and an ERP minor release.
+- [x] Ships as facebook-tracker 0.13.16 and an ERP minor release.
       `docs/FEATURES.md` describes the card.
 
 ## Out of scope
@@ -90,3 +90,27 @@ able to pull, and refuses to enroll an older one by itself.
 ## Notes
 
 - Design: [2026-10-23-fleet-city-queue-design.md](../superpowers/specs/2026-10-23-fleet-city-queue-design.md).
+- **Design choices.**
+  - The round board is the one new visual. It reuses the Today bar's
+    vocabulary: accent is searched, the hatch is a worker's own list.
+  - The cities kept on own lists are one hatched count, not 99 hatched cells.
+    In the first screenshot they outweighed the 28 cities the queue was
+    working.
+  - The Queue chip sits by the status chip, not under the name, because the
+    Worker column is narrow.
+  - An empty "From the queue today" is left out.
+- **The lede counts each worker once.** The first version said "the other 10
+  search their own lists. 10 more are in the queue but run an older worker"
+  about the same ten workers. It is now three sentences: who pulls, who waits
+  on a redeploy, who is outside.
+- **Verified locally end to end.**
+  - The stack: a coordinator on SQLite, a console on the real configs, and the
+    ERP on 8931/5180.
+  - Seeded with the real roster, the pilot, versioned heartbeats, item-tagged
+    searches, live leases, two cities searched late the day before, and a blind
+    account.
+  - Playwright screenshots covered every round state, the table chip and fold,
+    and the worker pages of nyc-1 (enrolled), ne-1 (0.13.12: button disabled
+    with the reason) and nj-2b (quarantined).
+  - The coordinator's `enrolled` followed each click, signed "Alex Chen":
+    *Back to its own list*, *Move to the queue*, then *Move every worker*.
