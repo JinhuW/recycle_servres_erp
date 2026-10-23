@@ -2419,49 +2419,171 @@ tr.rt-off td:not(:nth-last-child(-n + 2)) {
   min-width: 0;
 }
 .wx-chart {
-  padding: 10px 12px 6px;
+  padding: 10px 12px 4px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 8px;
 }
-.wx-chart svg {
+.wx-hist-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin-bottom: 4px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.wx-hist-head > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.wx-hist-head .wx-hist-basis {
+  margin-left: auto;
+  color: var(--fg-subtle);
+}
+.wx-hist-buy {
+  --wx-side: var(--wx-bid);
+}
+.wx-hist-sell {
+  --wx-side: var(--wx-ask);
+}
+/* Keys mirror the marks: a stroke for each side's line, a bar for the range. */
+.wx-hist-key {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--wx-side);
+}
+.wx-hist-key-range {
+  display: inline-block;
+  width: 5px;
+  height: 11px;
+  border-radius: 3px;
+  background: var(--fg-subtle);
+  opacity: 0.4;
+}
+.wx-hist {
+  position: relative;
+}
+/* A percentage width adds nothing to the table's min-content, so the measured
+   SVG can't hold the board wider than it would be without the chart. */
+.wx-hist svg {
   display: block;
   width: 100%;
-  height: 96px;
   overflow: visible;
 }
-.wx-chart path {
+.wx-hist-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.wx-hist-tick,
+.wx-hist-end {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+.wx-hist-tick {
+  font-size: 10.5px;
+  fill: var(--fg-subtle);
+}
+.wx-hist-day {
+  font-size: 10.5px;
+  fill: var(--fg-subtle);
+}
+.wx-hist-day.is-current {
+  fill: var(--fg-muted);
+  font-weight: 600;
+}
+.wx-hist-bar {
+  fill: var(--wx-side);
+  opacity: 0.22;
+}
+.wx-hist-line,
+.wx-hist-bridge {
   fill: none;
-  stroke-width: 1.6;
+  stroke: var(--wx-side);
   stroke-linejoin: round;
   stroke-linecap: round;
-  vector-effect: non-scaling-stroke;
 }
-.wx-line-buy {
-  stroke: var(--wx-bid);
+.wx-hist-line {
+  stroke-width: 2;
 }
-.wx-line-sell {
-  stroke: var(--wx-ask);
+.wx-hist-bridge {
+  stroke-width: 1.5;
+  stroke-dasharray: 2 4;
+  opacity: 0.55;
 }
-.wx-pt-buy,
-.wx-pt-sell {
-  fill: var(--bg-elev);
-  stroke-width: 1.4;
-  vector-effect: non-scaling-stroke;
+.wx-hist-dot {
+  fill: var(--wx-side);
+  stroke: var(--bg-elev);
+  stroke-width: 2;
 }
-.wx-pt-buy {
-  stroke: var(--wx-bid);
+/* The halo keeps a latest price legible where the other side's line runs
+   behind it. */
+.wx-hist-end {
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--fg);
+  paint-order: stroke;
+  stroke: var(--bg-elev);
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }
-.wx-pt-sell {
-  stroke: var(--wx-ask);
+.wx-hist-cross {
+  stroke: var(--fg-subtle);
+  stroke-width: 1;
 }
-.wx-chart-axis {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 4px;
-  font-size: 10.5px;
+.wx-hist-hit {
+  fill: transparent;
+}
+.wx-hist-hit:focus {
+  outline: none;
+}
+.wx-hist-hit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.wx-hist-tip {
+  position: absolute;
+  top: 4px;
+  z-index: 5;
+  padding: 8px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.wx-hist-tip-title {
+  margin-bottom: 6px;
+  font-size: 11.5px;
   color: var(--fg-subtle);
+}
+.wx-hist-tip-rows {
+  display: grid;
+  grid-template-columns: 14px auto auto auto;
+  align-items: center;
+  gap: 4px 8px;
+}
+.wx-hist-tip-rows b {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.wx-hist-tip-rows small {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.wx-hist-tip-foot {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-muted);
 }
 .wx-chart-empty {
   margin: 0;

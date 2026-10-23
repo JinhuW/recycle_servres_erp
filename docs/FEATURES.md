@@ -2713,7 +2713,13 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     Under them (beside them before v1.316.0) are the bid and ask medians
     over the last 30 report days,
     drawn in the one tax basis most of them were quoted in (v1.312.2), and
-    every price by tax basis.
+    every price by tax basis. Since v1.326.0 the chart has a price scale and
+    a date for each day, and draws the board's ladder for each day: each
+    side's low-to-high quotes as a bar in its own lane, bid left and ask right,
+    with the median on it. A dashed bridge crosses days a side wasn't quoted,
+    and each side's latest median is labelled. Hovering or focusing a day
+    (←/→ to step) shows both sides' medians, trader counts, ranges and the
+    spread, plus a price quoted only in another basis.
   - A group with no name shows its id, and a sender with no display name
     their WeChat id (v1.312.2). A link to a date that can't exist reads as
     no report for that day.

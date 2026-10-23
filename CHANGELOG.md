@@ -17,6 +17,29 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.326.0] - 2026-10-23
+
+Opening a line on Monitors ▸ WeChat now shows a readable price history
+(RS-377). Before, the "Last 30 report days" chart stretched a tiny fixed
+viewBox across the panel. Its dots came out as flat ovals, it had no price
+scale, and the only number on it was a low–high range in the middle of the
+date row. A day nobody quoted broke the line, so an early bid could sit alone
+in a corner with nothing tying it to the rest.
+
+The chart now draws in real pixels, with price gridlines and a label for each
+report day. It also draws the board's ladder, one per day: each side's quotes
+low to high as a faint bar in its own lane, bid left and ask right, with the
+median dot on top and the medians joined. A dashed bridge crosses the days a
+side wasn't quoted. Each side's latest median is labelled beside its last dot.
+The legend and the tax basis sit above the plot.
+
+Hovering a day, or tabbing in and stepping with ←/→, shows one tooltip for
+both sides: the median, how many quoted it, the low–high range, and the spread
+or by how much bids topped asks. A side quoted only in another tax basis shows
+that price, muted, with its basis, so a gap in the line is never a mystery.
+The `/history` payload already carried min, max and the count, so nothing
+changed on the backend.
+
 ## [1.325.0] - 2026-10-23
 
 Every ops alert now lands in one place, the "Homelab Alerts" Telegram group
