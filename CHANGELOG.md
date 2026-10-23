@@ -17,6 +17,26 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.327.1] - 2026-10-23
+
+The Bluetooth label printer now prints (RS-381). The office's printer is a
+CLABEL CT221D, a 2-inch printer on Microchip's ISSC Bluetooth service. Its
+first writable characteristic is not its data port, and the page wrote to
+the first writable characteristic it found. So every label and every status
+query went nowhere, and the printer showed as connected but never printed or
+reported *Ready*. Each known printer service now names its port: the
+characteristic a job is written to, and the one the printer answers on. Jobs
+go as acknowledged writes, so a small printer's buffer can't drop half a
+label.
+
+The CT221D takes 50 × 25 mm labels, and the page only offered inch stock
+from 4 × 6 down, defaulting to 4 × 6. A 50 × 25 mm stock is now the
+default. TSPL is sent its size and gap in millimetres. The small label sets
+the number, the purchaser and the counts larger, inside a 2-inch head's
+width. Debugged on the printer itself: a TSPL job sent to the right port
+printed, and the printer answers no status query, so its chip shows
+connected without a paper state.
+
 ## [1.327.0] - 2026-10-23
 
 Approving a PO's review now prints the box's label too (RS-378). RS-371 had

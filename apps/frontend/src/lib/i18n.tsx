@@ -3360,7 +3360,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     pkLabelPrint: 'Print label',
     pkLabelAuto: 'Print when packed',
     pkLabelAutoHint: 'Prints the box label once the last product is packed, once per box.',
-    pkLabelStock: 'Size (in)',
+    pkLabelStock: 'Label size',
     pkLabelKind: 'Sell order',
     pkLabelProducts: 'products',
     pkLabelProductsOne: 'product',

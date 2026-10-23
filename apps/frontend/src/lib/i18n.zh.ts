@@ -2473,7 +2473,7 @@ const zh: Record<string, string> = {
   pkLabelPrint: '打印标签',
   pkLabelAuto: '打包完成后自动打印',
   pkLabelAutoHint: '最后一个产品打包后打印箱标签，每箱一次。',
-  pkLabelStock: '尺寸（英寸）',
+  pkLabelStock: '标签尺寸',
   pkLabelKind: '销售订单',
   pkLabelProducts: '个产品',
   pkLabelProductsOne: '个产品',

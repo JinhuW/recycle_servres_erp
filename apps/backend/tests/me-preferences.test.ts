@@ -31,7 +31,7 @@ describe('PATCH /api/me/preferences allowlist', () => {
         'scan.cameraLabel': "Jinhu's iPhone Camera",
         'sellOrders.lineGroup': 'po',
         'pack.labelAuto': false,
-        'pack.labelSize': '2.25x1.25',
+        'pack.labelSize': '50x25mm',
         'pack.labelLanguage': 'zpl',
         'sidebar.folded': true,
         'onboarding.done': true,

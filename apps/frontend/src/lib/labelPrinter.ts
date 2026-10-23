@@ -41,12 +41,15 @@ function concat(parts: readonly Uint8Array[]): Uint8Array {
   return out;
 }
 
-// TSPL. The stock is die-cut, with the common 3 mm gap between labels.
-export function tsplJob(r: Raster, widthIn: number, heightIn: number): Uint8Array {
+// The die-cut stock as TSPL's SIZE and GAP take it, units included:
+// `{ size: '50 mm,25 mm', gap: '2 mm,0 mm' }`.
+export type TsplStock = { size: string; gap: string };
+
+export function tsplJob(r: Raster, stock: TsplStock): Uint8Array {
   // BITMAP prints a 0 bit, so the picture goes inverted.
   const bits = r.data.map(b => ~b & 0xff);
   return concat([
-    ascii(`SIZE ${widthIn},${heightIn}\r\nGAP 0.12,0\r\nDIRECTION 1\r\nCLS\r\n`),
+    ascii(`SIZE ${stock.size}\r\nGAP ${stock.gap}\r\nDIRECTION 1\r\nCLS\r\n`),
     ascii(`BITMAP 0,0,${r.widthBytes},${r.height},0,`),
     bits,
     ascii('\r\nPRINT 1,1\r\n'),
@@ -70,8 +73,8 @@ export function escposJob(r: Raster): Uint8Array {
   return concat([head, r.data, new Uint8Array([0x1b, 0x64, 0x03])]);
 }
 
-export function labelJob(lang: PrinterLanguage, r: Raster, widthIn: number, heightIn: number): Uint8Array {
-  return lang === 'zpl' ? zplJob(r) : lang === 'escpos' ? escposJob(r) : tsplJob(r, widthIn, heightIn);
+export function labelJob(lang: PrinterLanguage, r: Raster, stock: TsplStock): Uint8Array {
+  return lang === 'zpl' ? zplJob(r) : lang === 'escpos' ? escposJob(r) : tsplJob(r, stock);
 }
 
 // What the printer says about itself, where its language can ask: TSPL's
@@ -94,20 +97,49 @@ export function readStatus(lang: PrinterLanguage, byte: number): PaperState {
   return 'fault';
 }
 
-// Where printers put their serial port. Chrome lets a page open only the
-// services it named when it asked for the device, so this is the whole list.
+// Where printers put their serial port: the characteristic a job goes to, and
+// the one the printer answers on. A service can carry others beside them.
+// Microchip's (ISSC, the CLABEL CT221D's) lists a write-only characteristic
+// before its port that goes nowhere, and a printer written there prints
+// nothing. So each port is named, and only an unknown service's is guessed.
+// Chrome lets a page open only the services it named when it asked for the
+// device, so these are the whole list.
 const ZEBRA = '38eb4a80-c570-11e3-9507-0002a5d5c51b';
 const FF00 = '0000ff00-0000-1000-8000-00805f9b34fb';
-export const PRINTER_SERVICES = [
-  '000018f0-0000-1000-8000-00805f9b34fb',
-  FF00,
-  'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
-  '49535343-fe7d-4ae5-8fa9-9fafd205e455',
-  ZEBRA,
-];
+const uuid16 = (n: string) => `0000${n}-0000-1000-8000-00805f9b34fb`;
+const PORTS: Record<string, { write: string; notify: string }> = {
+  [uuid16('18f0')]: { write: uuid16('2af1'), notify: uuid16('2af0') },
+  [FF00]: { write: uuid16('ff02'), notify: uuid16('ff03') },
+  'e7810a71-73ae-499d-8c15-faa9aef0c3f2': {
+    write: 'bef8d6c9-9c21-4c9e-b632-bd58c1009f9f', notify: 'bef8d6c9-9c21-4c9e-b632-bd58c1009f9f',
+  },
+  '49535343-fe7d-4ae5-8fa9-9fafd205e455': {
+    write: '49535343-8841-43f4-a8d4-ecbe34729bb3', notify: '49535343-1e4d-4bd9-ba61-23c647249616',
+  },
+  [ZEBRA]: { write: '38eb4a82-c570-11e3-9507-0002a5d5c51b', notify: '38eb4a81-c570-11e3-9507-0002a5d5c51b' },
+};
+export const PRINTER_SERVICES = Object.keys(PORTS);
 
 export function languageFor(service: string): PrinterLanguage {
   return service === ZEBRA ? 'zpl' : service === FF00 ? 'escpos' : 'tspl';
+}
+
+type CharProps = { write: boolean; writeWithoutResponse: boolean; notify: boolean };
+
+// A service's port among its characteristics; null when nothing takes a write.
+// An unknown service's guess prefers a characteristic that acknowledges writes.
+export function pickPort<C extends { uuid: string; properties: CharProps }>(
+  service: string, chars: readonly C[],
+): { write: C; notify: C | null } | null {
+  const named = PORTS[service];
+  const write = (named && chars.find(c => c.uuid === named.write))
+    ?? chars.find(c => c.properties.write)
+    ?? chars.find(c => c.properties.writeWithoutResponse);
+  if (!write) return null;
+  const notify = (named && chars.find(c => c.uuid === named.notify && c.properties.notify))
+    ?? chars.find(c => c.properties.notify)
+    ?? null;
+  return { write, notify };
 }
 
 export function chunks(bytes: Uint8Array, size: number): Uint8Array[] {
@@ -120,7 +152,8 @@ export function chunks(bytes: Uint8Array, size: number): Uint8Array[] {
 // The subset of Web Bluetooth used here; the DOM lib doesn't carry it.
 
 type Char = EventTarget & {
-  properties: { write: boolean; writeWithoutResponse: boolean; notify: boolean };
+  uuid: string;
+  properties: CharProps;
   value?: DataView;
   writeValueWithResponse(v: Uint8Array): Promise<void>;
   writeValueWithoutResponse(v: Uint8Array): Promise<void>;
@@ -165,10 +198,9 @@ async function open(device: Device): Promise<void> {
   const gatt = await device.gatt!.connect();
   const services = await gatt.getPrimaryServices();
   for (const s of services) {
-    const chars = await s.getCharacteristics();
-    const write = chars.find(c => c.properties.writeWithoutResponse || c.properties.write);
-    if (!write) continue;
-    const notify = chars.find(c => c.properties.notify) ?? null;
+    const port = pickPort(s.uuid, await s.getCharacteristics());
+    if (!port) continue;
+    const { write, notify } = port;
     if (notify) {
       await notify.startNotifications();
       notify.addEventListener('characteristicvaluechanged', () => {
@@ -192,11 +224,12 @@ async function open(device: Device): Promise<void> {
 
 async function send(bytes: Uint8Array): Promise<void> {
   const { write } = link!;
-  // A write the printer acknowledges is slower but can't overrun its buffer;
-  // without one, a pause now and then gives it time to drain.
-  const acked = !write.properties.writeWithoutResponse;
+  // Acknowledged where the port takes it: slower, but an unacknowledged write
+  // is dropped once a small printer's buffer fills, and the label prints torn.
+  // Without one, a pause now and then gives the buffer time to drain.
+  const acked = write.properties.write;
   let n = 0;
-  for (const c of chunks(bytes, 180)) {
+  for (const c of chunks(bytes, 128)) {
     if (acked) await write.writeValueWithResponse(c);
     else {
       await write.writeValueWithoutResponse(c);
