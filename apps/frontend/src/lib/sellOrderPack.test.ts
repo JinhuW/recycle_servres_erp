@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { LineCheck } from './boxCheck';
 import {
-  allPacked, boxCounts, fitsAnySourcePo, flaggedLots, isPackable, nextOpenProduct, packBody, packFilter, packGroups, packProducts, packScan, packView, packWarehouseOptions,
+  allPacked, boxCounts, boxPurchasers, fitsAnySourcePo, flaggedLots, isPackable, nextOpenProduct, packBody, packFilter, packGroups, packProducts, packScan, packView, packWarehouseOptions,
   productBucket, productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck,
   type PackLine, type PackProduct,
 } from './sellOrderPack';
@@ -363,6 +363,17 @@ describe('allPacked / boxCounts', () => {
 
   it('has nothing to finish when no product has lots', () => {
     expect(allPacked(packProducts(packView([L('z', { qty: 0 })], '')), new Map())).toBe(false);
+  });
+
+  it('names who bought what is in the box, once each, in # order', () => {
+    const named = packProducts(packView([
+      L('a', { no: 1, sourcePurchaser: 'Priya' }),
+      L('b', { no: 2, sourcePurchaser: 'Marcus' }), L('c', { no: 2, sourcePurchaser: 'Priya' }),
+      L('d', { no: 3, sourcePurchaser: 'Tim' }),
+      L('e', { no: 4, sourcePurchaser: null }),
+    ], ''));
+    // Tim's lot went in at 0, so he bought nothing in this box.
+    expect(boxPurchasers(named, checks(C('d', 0, 'x')))).toEqual(['Priya', 'Marcus']);
   });
 
   it('counts the units in the box, and only the products with one in it', () => {
