@@ -38,6 +38,7 @@ const SCHEMA: Record<string, Validator> = {
   'sellOrders.lineGroup':     isOneOf('warehouse', 'po'),
   'pack.labelAuto':           isBoolean,
   'pack.labelSize':           isOneOf('4x6', '4x3', '2.25x1.25'),
+  'pack.labelLanguage':       isOneOf('auto', 'tspl', 'zpl', 'escpos'),
   'sidebar.folded':           isBoolean,
   'fleetWatch.accountHidden': isBoolean,
   'onboarding.done':          isBoolean,

@@ -43,10 +43,12 @@ export type PrefMap = {
   // How a sell order's lines are grouped: where they ship from, or which PO
   // they came in on.
   'sellOrders.lineGroup': 'warehouse' | 'po';
-  // Pack mode's box label: printed by itself once the box is packed, and the
-  // label stock it is laid out for (inches, width × height as it feeds).
+  // Pack mode's box label: printed by itself once the box is packed, the
+  // label stock it is laid out for (inches, width × height as it feeds), and
+  // the language the Bluetooth printer speaks ('auto' goes by its service).
   'pack.labelAuto': boolean;
   'pack.labelSize': '4x6' | '4x3' | '2.25x1.25';
+  'pack.labelLanguage': 'auto' | 'tspl' | 'zpl' | 'escpos';
   // Desktop sidebar folded to its icon rail at any width (under 900px the
   // rail is forced regardless).
   'sidebar.folded': boolean;

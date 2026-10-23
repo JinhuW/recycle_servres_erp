@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-374](./RS-374-pack-mode-connects-a-bluetooth-label-printer-shows-i.md) | done | story | P2 | Pack mode connects a Bluetooth label printer, shows its status, and names the purchasers | 1.324.0 |
 | [RS-372](./RS-372-workers-pull-their-cities-from-the-coordinator-s-que.md) | done | story | P2 | Workers pull their cities from the coordinator's queue (first stage) | facebook-tracker 0.13.14 |
 | [RS-371](./RS-371-pack-mode-prints-a-box-label-once-the-order-is-packe.md) | done | story | P2 | Pack mode prints a box label once the order is packed | 1.323.0 |
 | [RS-370](./RS-370-shadow-run-a-pull-based-city-queue-against-the-live.md) | done | task | P2 | Shadow-run a pull-based city queue against the live Facebook fleet | facebook-tracker 0.13.13 |

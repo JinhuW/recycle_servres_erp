@@ -1961,8 +1961,7 @@ html.desktop, body.desktop, .desktop #root {
 /* ── Pack mode box label print scope (PackLabel.tsx) ──────────────────────
    Mounted only while it prints. The app leaves the flow, not just the
    picture, so the print is the one label and a label printer feeds no blank
-   one after it. Black on white: thermal stock dithers anything grey. Sized
-   by the label, so one layout reads on every stock. */
+   one after it. */
 .pk-label-sheet { display: none; }
 @media print {
   body.printing-label { margin: 0; background: #fff; }
@@ -1970,35 +1969,8 @@ html.desktop, body.desktop, .desktop #root {
   .pk-label-sheet { display: block; }
   .pk-label-sheet, .pk-label-sheet * { visibility: visible; }
 }
-.pk-label { container-type: size; box-sizing: border-box; overflow: hidden; background: #fff; color: #000; break-inside: avoid; }
-.pk-label-in {
-  box-sizing: border-box; height: 100%; padding: 6cqmin;
-  display: flex; flex-direction: column; justify-content: space-between; gap: 3cqmin;
-  font-family: 'Inter', system-ui, sans-serif;
-}
-.pk-label-top {
-  display: flex; justify-content: space-between; gap: 3cqw;
-  font-size: min(4cqw, 5cqh); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
-}
-.pk-label-id {
-  font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: min(17cqw, 22cqh);
-  line-height: 1; letter-spacing: -0.02em; white-space: nowrap;
-  padding-bottom: 2.5cqmin; border-bottom: max(1.5px, 0.8cqmin) solid #000;
-}
-.pk-label-cap { font-size: min(3.6cqw, 4.6cqh); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1cqmin; }
-.pk-label-name {
-  font-size: min(9cqw, 10cqh); font-weight: 700; line-height: 1.12; overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-}
-.pk-label-counts { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 5cqw; row-gap: 1cqmin; font-size: min(6cqw, 7cqh); font-weight: 500; }
-.pk-label-counts b { font-size: 1.5em; font-weight: 800; font-variant-numeric: tabular-nums; }
-.pk-label-wh { display: none; }
-/* Small stock keeps the number, the name and the counts. */
-@container (max-height: 1.6in) {
-  .pk-label-top, .pk-label-cap { display: none; }
-  .pk-label-wh { display: inline; }
-  .pk-label-name { -webkit-line-clamp: 1; }
-}
+/* The label is one drawn picture (PackLabel.tsx), sized to the stock. */
+.pk-label { display: block; }
 
 /* ===== Inventory category sub-filter (foldable) ===== */
 .inv-subfilter {
@@ -4574,15 +4546,13 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
   .pk-fold svg, .pk-cell span { transition: none; }
 }
 
-/* The head's right side: the Label control over the key legend. */
+/* The head's right side: the printer over the key legend. */
 .pk-head-side { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
-.pk-label-btn { min-height: 44px; white-space: nowrap; }
-.pk-label-state {
-  font-size: 11.5px; padding: 1px 7px; border-radius: 999px;
-  background: var(--bg-soft); color: var(--fg-subtle);
-}
-.pk-label-state.on { background: var(--accent-soft); color: var(--accent-strong); }
-.pk-label-pop { width: 310px; }
+.pk-printer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.pk-printer-chip { font-size: 12.5px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk-printer-btn { min-height: 44px; white-space: nowrap; }
+.pk-printer-more { padding-left: 10px; padding-right: 10px; gap: 2px; }
+.pk-label-pop { width: 330px; }
 .pk-label-auto { cursor: pointer; }
 .pk-label-auto input { flex: none; margin: 3px 0 0; width: 15px; height: 15px; accent-color: var(--accent-strong); }
 .pk-label-pop .seg button { min-height: 36px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }

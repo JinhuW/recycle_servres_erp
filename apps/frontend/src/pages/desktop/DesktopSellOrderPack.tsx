@@ -5,16 +5,18 @@ import { ImageLightbox } from '../../components/ImageLightbox';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { api, ApiError, rawFetch } from '../../lib/api';
+import { fmtDate } from '../../lib/format';
 import {
   countOf, emptyCheck, isAbsentChecked, isShortChecked, lineState, partsNamed, type LineCheck,
 } from '../../lib/boxCheck';
 import { handleFetchError, showErrorDialog, showWarnToast } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
+import { labelJob, labelPrinter, PRINTER_DPI, toRaster, useLabelPrinter } from '../../lib/labelPrinter';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { usePreference } from '../../lib/preferences';
 import { navigate, navigateBack } from '../../lib/route';
 import {
-  allPacked, boxCounts, fitsAnySourcePo, flaggedLots, isPackable, nextOpenProduct, packBody, packFilter, packGroups, packProducts, packScan, packView, packWarehouseOf,
+  allPacked, boxCounts, boxPurchasers, fitsAnySourcePo, flaggedLots, isPackable, nextOpenProduct, packBody, packFilter, packGroups, packProducts, packScan, packView, packWarehouseOf,
   packWarehouseOptions, productBucket, productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck, UNASSIGNED,
   type PackLine, type PackProduct, type PackResponse,
 } from '../../lib/sellOrderPack';
@@ -22,7 +24,7 @@ import type { Category } from '../../lib/types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useLineSaveQueue } from '../../lib/useLineSaveQueue';
 import { useScanFilterText } from '../../lib/useScanFilter';
-import { PackLabel, PackLabelMenu } from './PackLabel';
+import { drawLabel, LABEL_SIZES, PackLabel, PackPrinterBar, type LabelText } from './PackLabel';
 
 // Pack mode: a sell order as a packing checklist, laid out like the PO's
 // Review mode and built for an iPad on a cart. Products run in the order's own
@@ -56,6 +58,7 @@ type OrderLine = {
   packWarehouse?: string | null;
   sourceOrderId?: string | null;
   sourceLineNo?: number | null;
+  sourcePurchaser?: string | null;
   type?: string | null;
   classification?: string | null;
   rank?: string | null;
@@ -94,7 +97,7 @@ const rowElId = (key: string) => (key.startsWith('p:') ? 'pk-prod-' + key.slice(
 const COLS = 6;
 
 export default function DesktopSellOrderPack({ id, onToast }: Props) {
-  const { t } = useT();
+  const { t, locale } = useT();
   const [order, setOrder] = useState<PackOrder | null>(null);
   // Only the first read can leave the page with no order; a failed re-read
   // keeps the one already shown.
@@ -118,8 +121,11 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const [zoom, setZoom] = useState<string | null>(null);
   const [labelAuto, setLabelAuto] = usePreference('pack.labelAuto', true);
   const [labelSize, setLabelSize] = usePreference('pack.labelSize', '4x6');
-  // Each request mounts a fresh label, which prints once.
-  const [printing, setPrinting] = useState(0);
+  const [labelLanguage, setLabelLanguage] = usePreference('pack.labelLanguage', 'auto');
+  const printer = useLabelPrinter();
+  // A label going through the print dialog. Each request mounts a fresh one,
+  // which prints once.
+  const [dialogLabel, setDialogLabel] = useState<{ n: number; text: LabelText } | null>(null);
   // The boxes this visit printed a label for by itself, by warehouse ('' for
   // the whole order): ticking one back and on again doesn't print another.
   const autoPrinted = useRef(new Set<string>());
@@ -365,6 +371,50 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     if (next) setSelected(keysOf(next)[0]!);
   };
 
+  // The label's words for a box: its lots, counted as `cs` has them.
+  const labelTextOf = (box: readonly Product[], cs: ReadonlyMap<string, LineCheck>): LabelText => {
+    const counts = boxCounts(box, cs);
+    const buyers = boxPurchasers(box, cs);
+    const from = picked ? t('pkLabelFrom', { wh: whName(picked) }) : null;
+    return {
+      kind: from ? `${t('pkLabelKind')} · ${from}` : t('pkLabelKind'),
+      date: fmtDate(new Date(), locale),
+      orderId: id,
+      caption: t('pkLabelPurchaser', { n: buyers.length }),
+      who: buyers.length > 2
+        ? `${buyers.slice(0, 2).join(', ')} ${t('pkSourcesMore', { n: buyers.length - 2 })}`
+        : buyers.join(', '),
+      products: { n: counts.products, word: t('pkLabelProducts', { n: counts.products }) },
+      units: { n: counts.units, word: t('pkLabelUnits', { n: counts.units }) },
+      from,
+    };
+  };
+
+  // To the Bluetooth printer while one is on, else through the print dialog.
+  const printLabel = async (text: LabelText = labelTextOf(products, checks)) => {
+    if (printer.state === 'printing' || printer.state === 'connecting') return;
+    if (printer.state !== 'on') {
+      setDialogLabel(d => ({ n: (d?.n ?? 0) + 1, text }));
+      return;
+    }
+    const lang = labelLanguage === 'auto' ? printer.language : labelLanguage;
+    try {
+      // A label sent to a printer out of paper or open is lost.
+      const paper = await labelPrinter.check(lang);
+      if (paper === 'paper' || paper === 'open' || paper === 'fault') {
+        showWarnToast(t('pkLabelNotReady', { state: t('pkPrinterPaper_' + paper) }));
+        return;
+      }
+      const [w, h] = LABEL_SIZES[labelSize];
+      const canvas = await drawLabel(text, w, h, PRINTER_DPI);
+      const dots = toRaster(canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height));
+      await labelPrinter.print(labelJob(lang, dots, w, h));
+      onToast?.(t('pkLabelPrinted', { id }));
+    } catch (e) {
+      showWarnToast(t('pkLabelPrintFailed', { msg: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+
   // The tick that packs the last product of the box prints its label: the
   // picked warehouse's box, or the whole order's. Only a tick made here does,
   // so another iPad finishing the order prints nothing on this one.
@@ -372,7 +422,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     if (!labelAuto || autoPrinted.current.has(picked)) return;
     if (allPacked(products, checks) || !allPacked(box, after)) return;
     autoPrinted.current.add(picked);
-    setPrinting(n => n + 1);
+    void printLabel(labelTextOf(box, after));
   };
 
   const pack = (l: Line) => {
@@ -870,11 +920,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   // The label is the box being packed: the picked warehouse's lots, or all.
   const box = boxCounts(products, checks);
   const boxDone = allPacked(products, checks);
-  const label = order && {
-    orderId: id, customer: order.customer.name, warehouse: picked ? whName(picked) : null, counts: box,
-  };
   const labelSummary = [id, t('pkSub', { products: box.products, units: box.units }), ...(picked ? [whName(picked)] : [])].join(' · ');
-  const printLabel = () => setPrinting(n => n + 1);
 
   return (
     <div className="pk-page">
@@ -896,14 +942,19 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
         </div>
         <div className="pk-head-side">
           {order && (
-            <PackLabelMenu
+            <PackPrinterBar
+              printer={printer}
               auto={labelAuto}
               size={labelSize}
+              language={labelLanguage}
               summary={labelSummary}
-              disabled={loadState !== 'ok' || box.products === 0}
+              canPrint={loadState === 'ok' && box.products > 0}
               onAuto={setLabelAuto}
               onSize={setLabelSize}
-              onPrint={printLabel}
+              onLanguage={setLabelLanguage}
+              onPrint={() => void printLabel()}
+              onPrintDialog={() => setDialogLabel(d => ({ n: (d?.n ?? 0) + 1, text: labelTextOf(products, checks) }))}
+              onConnectError={e => showWarnToast(t(e instanceof Error && e.message === 'no-port' ? 'pkPrinterNoPort' : 'pkPrinterConnectFailed'))}
             />
           )}
           <div className="bc-keys pk-keys" aria-hidden="true">
@@ -1159,7 +1210,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
                     </button>
                   )}
                   {boxDone && box.products > 0 && (
-                    <button type="button" className="btn" disabled={loadState !== 'ok'} onClick={printLabel}>
+                    <button type="button" className="btn" disabled={loadState !== 'ok' || printer.state === 'printing'} onClick={() => void printLabel()}>
                       <Icon name="printer" size={15} /> {t('pkLabelPrint')}
                     </button>
                   )}
@@ -1200,8 +1251,8 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
         />
       )}
       {zoom && <ImageLightbox url={zoom} onClose={() => setZoom(null)} />}
-      {printing > 0 && label && (
-        <PackLabel key={printing} content={label} size={labelSize} onDone={() => setPrinting(0)} />
+      {dialogLabel && (
+        <PackLabel key={dialogLabel.n} text={dialogLabel.text} size={labelSize} onDone={() => setDialogLabel(null)} />
       )}
     </div>
   );
