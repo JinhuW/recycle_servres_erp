@@ -1,6 +1,6 @@
 // PATCH /api/orders/:id — order fields and line edits in one transaction.
 import { Hono } from 'hono';
-import { getDb } from '../../db';
+import { actAsTx, getDb } from '../../db';
 import { deleteAttachments } from '../../r2';
 import { UUID_RE } from '../../lib/pagination';
 import { diff, writeOrderEvent, META_FIELDS, LINE_FIELDS, type AuditChange, type EventKind } from '../../services/orderAudit';
@@ -16,7 +16,7 @@ import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../../services/orderGoo
 import { synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, normalizeTracking, isMaterialPatch, type Carrier, type PackageSource } from '@recycle-erp/shared';
 import { normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
-import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, committedLinesBody, describeSellOrders, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, paidByAfter, paidByErr, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, stageMovedBody, type StoredLine, storedLineCols, supplierErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, trackInput, warehouseErr } from './shared';
+import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, committedLinesBody, describeSellOrders, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, paidByAfter, pickedPaidByErr, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, stageMovedBody, type StoredLine, storedLineCols, supplierErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, trackInput, warehouseErr } from './shared';
 import { OrderRefusal, refusalResponse } from './refusal';
 
 const patchRoutes = new Hono<OrdersEnv>();
@@ -111,11 +111,9 @@ patchRoutes.patch('/:id', async (c) => {
     tracking = { trackingNumber: tn, carrier: body.carrier as Carrier };
   }
 
-  const existing = (await sql`SELECT user_id, category, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0];
+  const existing = (await sql`SELECT user_id, category, lifecycle, paid_by FROM orders WHERE id = ${id} LIMIT 1`)[0];
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (u.role !== 'manager' && existing.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
-  const pbErr = await paidByErr(sql, existing.user_id, body.paidByUserId);
-  if (pbErr) return c.json({ error: pbErr }, 400);
   // The purchaser owns their order until the review closes it (Ready to Pay):
   // goods arrive miscounted, fees land late, a line turns out to be something
   // else. What they may not do is change it under a manager who has already
@@ -149,6 +147,10 @@ patchRoutes.patch('/:id', async (c) => {
     if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
     newOwner = resolved;
   }
+  const pbErr = await pickedPaidByErr(sql, {
+    paidBy: existing.paid_by, ownerAfter: newOwner?.ownerId ?? existing.user_id,
+  }, body.paidByUserId);
+  if (pbErr) return c.json({ error: pbErr }, 400);
   if (typeof body.paypalTxnId === 'string' && body.paypalTxnId.replace(/\s+/g, '').length > 64) {
     return c.json({ error: 'PayPal transaction ID is too long' }, 400);
   }
@@ -310,6 +312,7 @@ patchRoutes.patch('/:id', async (c) => {
 
   try {
     await sql.begin(async (tx) => {
+      await actAsTx(tx, u.id);
       // Lock the order + read fields we need for audit-diffing. The lock keeps
       // a concurrent advance from changing lifecycle between our pre/post
       // snapshots, so the diff describes one settled state transition.
@@ -528,10 +531,13 @@ patchRoutes.patch('/:id', async (c) => {
           paymentsLinked = await linkPaypalTxnToOrder(tx, normPaypal, id, u.id);
         }
       }
-      // Owner moves under the same lock as the meta fields.
-      if (newOwner && newOwner.ownerId !== orderBefore.user_id) {
+      // Owner moves under the same lock as the meta fields. A payer that
+      // follows the owner is logged by the meta diff below, with the rest.
+      const ownerChanged = !!newOwner && newOwner.ownerId !== orderBefore.user_id;
+      if (newOwner && ownerChanged) {
         await changeOrderOwnerTx(tx, id, u, orderBefore.user_id, newOwner, {
           payerPicked: body.paidByUserId != null && body.paidByUserId !== orderBefore.paid_by,
+          logPayer: false,
         });
       }
       // The box, under the same lock as the fields that describe it. A
@@ -832,7 +838,7 @@ patchRoutes.patch('/:id', async (c) => {
       const revertFields: AuditChange[] = [];
       const revertLinesEdited: Array<Record<string, unknown>> = [];
 
-      if (touchesOrder || touchesLines || packageChanged.length) {
+      if (touchesOrder || touchesLines || packageChanged.length || ownerChanged) {
         const orderAfter = (await tx`
           SELECT notes, warehouse_id, payment, payment_method, paid_by, total_cost::float AS total_cost,
                  commission_rate::float AS commission_rate,

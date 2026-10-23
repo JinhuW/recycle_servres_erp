@@ -26,7 +26,7 @@ import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { productCount } from '../lib/productNo';
 import { costPayerLabel, costReimbursedToOwner, profitTone } from '../lib/orderPresentation';
-import { payerChoices } from '../lib/poFacets';
+import { payerAfterOwnerChange, payerChoices } from '../lib/poFacets';
 import { isPricedSellPrice } from '@recycle-erp/shared';
 import { derivePoPermissions, type TakeoverAnswer } from '../lib/poPermissions';
 import { poEffectiveCost, parseFeeInput, rateEq, readStoredGoodsTotal } from '../lib/poTotals';
@@ -322,8 +322,18 @@ export function OrderDetail({
       .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
-  // Who the Cost Payment fold's Paid by may name: the managers, the owner, the record.
-  const payers = payerChoices(memberNames, { id: order.userId, name: order.userName ?? order.userId }, order.paidBy ?? null);
+  // Who the Cost Payment fold's Paid by may name: the managers, the owner the
+  // PO will have, the record.
+  const payers = payerChoices(
+    memberNames,
+    { id: ownerId, name: memberNames.find(m => m.id === ownerId)?.name ?? order.userName ?? order.userId },
+    order.paidBy ?? null, ownerId !== order.userId ? order.userId : undefined,
+  );
+  // A payer that named the old owner follows the PO to the new one, as the
+  // server moves it on save.
+  const pickOwner = (id: string) => setMeta({
+    ownerId: id, ...(payment === 'self' ? { paidByUserId: payerAfterOwnerChange(paidByUserId, ownerId, id) } : {}),
+  });
   // Filled when the Commission fold opens, below.
   const [managers, setManagers] = useState<{ id: string; name: string }[] | null>(null);
   const commissionPaidBy = useCommissionPaidBy({
@@ -386,7 +396,7 @@ export function OrderDetail({
   const commissionDirty = !isPurchaser && (parsedPct === null || Number.isFinite(parsedPct))
     && !rateEq(commissionRateValue ?? 0, order.commissionRate ?? 0);
   const commission = ownerDirty || commissionDirty;
-  const dirty = notesDirty || warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts || commission;
+  const dirty = notesDirty || warehouseDirty || paymentDirty || methodDirty || payerDirty || paypalDirty || feesDirty || facts || commission;
   // The order and its products screen are one instance, so moving between
   // them keeps the edits; anywhere else asks first.
   useUnsavedGuard(dirty, (p) => matchPurchaseOrder(p)?.id === order.id);
@@ -461,7 +471,7 @@ export function OrderDetail({
     // A note is not a change to the order itself and leaves the stage alone.
     // The same keys the backend treats as material (MATERIAL_PATCH_KEYS);
     // commission and owner are a manager's, and never cost the stage.
-    const material = warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts;
+    const material = warehouseDirty || paymentDirty || methodDirty || payerDirty || paypalDirty || feesDirty || facts;
     if (material && !(await askRevert())) return;
     setSaving(true);
     try {
@@ -812,7 +822,7 @@ export function OrderDetail({
   // The cost comes back to whoever paid it: in the purchaser's earnings when
   // they paid, named apart when a manager did. A record naming nobody (an
   // older backend) is the purchaser's, as it always was.
-  const selfReimbursed = costReimbursedToOwner(payment, paidByUserId, order.userId);
+  const selfReimbursed = costReimbursedToOwner(payment, paidByUserId, ownerId);
   const commissionMath = {
     selfReimbursed,
     reimbursedTo: payment === 'self' && !selfReimbursed ? payerName : null,
@@ -1482,7 +1492,7 @@ export function OrderDetail({
           mark={markFor('commission', commission)}
         >
           <PhCommissionFields
-            ownerId={ownerId} onOwner={id => setMeta({ ownerId: id })}
+            ownerId={ownerId} onOwner={pickOwner}
             ownerOptions={ownerOptions}
             commissionPct={commissionPct} onCommissionPct={v => setMeta({ commissionPct: v })}
             editable={canEditCommission}
@@ -1878,7 +1888,7 @@ export function OrderDetail({
       )}
       {commissionOpen && (
         <PhCommissionSheet
-          ownerId={ownerId} onOwner={id => setMeta({ ownerId: id })}
+          ownerId={ownerId} onOwner={pickOwner}
           ownerOptions={ownerOptions}
           commissionPct={commissionPct} onCommissionPct={v => setMeta({ commissionPct: v })}
           editable

@@ -5,7 +5,7 @@ import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { PaymentFields } from '../../components/PaymentFields';
-import { payerChoices } from '../../lib/poFacets';
+import { payerAfterOwnerChange, payerChoices } from '../../lib/poFacets';
 import type { HandoffMethod } from '../../lib/handoff';
 import { useT } from '../../lib/i18n';
 import { api, createOrder, deleteOrder, MAX_UPLOAD_BYTES } from '../../lib/api';
@@ -158,6 +158,14 @@ function OrderForm({
     otherFees: '',
     otherFeesNote: '',
   });
+  // A payer that named the old owner follows the PO to the new one, so the
+  // request says what the select shows.
+  const pickOwner = (id: string) => {
+    const from = onBehalfOfUserId || user?.id || '';
+    const to = id || user?.id || '';
+    setMeta(m => ({ ...m, paidByUserId: payerAfterOwnerChange(m.paidByUserId, from, to) }));
+    setOnBehalfOfUserId(id);
+  };
 
   // Photos picked before their line exists, keyed by _cid — the only stable
   // handle a line has before it is persisted. Uploaded by `flushPhotos` once
@@ -1119,7 +1127,7 @@ function OrderForm({
                 id="sub-behalf"
                 className="select"
                 value={onBehalfOfUserId}
-                onChange={e => setOnBehalfOfUserId(e.target.value)}
+                onChange={e => pickOwner(e.target.value)}
                 // The first confirmed line creates the PO and fixes its owner,
                 // so the picker locks from that moment on.
                 disabled={!!orderId}

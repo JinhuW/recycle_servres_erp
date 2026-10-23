@@ -93,7 +93,8 @@ export type AcctSummary = {
   managers: { id: string; name: string; balance: number }[];
   first: IsoDate | null;
   fx: AcctFx;
-  review: {
+  // Optional: a backend older than Review mode sends none.
+  review?: {
     entries: number; reviewed: number; changed: number; queried: number;
     forMe: number; waitingOnOthers: number; movedCny: number; reviewedCny: number; activeManagers: number;
   };
@@ -166,6 +167,8 @@ export const acctWithdrawQuery = (id: string) =>
   api.delete<{ ok: true }>(`/api/accounting/entries/${enc(id)}/query`).then(reviewChanged);
 export const acctAnswer = (id: string, text: string) =>
   api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/answer`, { text }).then(reviewChanged);
+// POST /review/bulk's cap per request; a longer queue goes in batches.
+export const ACCT_BULK_MAX = 200;
 export const acctBulkReview = (entries: { id: string; version: string }[]) =>
   api.post<{ reviewed: string[]; skipped: { id: string; reason: string }[] }>('/api/accounting/review/bulk', { entries })
     .then(reviewChanged);

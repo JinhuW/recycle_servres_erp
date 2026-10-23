@@ -810,7 +810,12 @@ is not a stage but a flag beside one, set once every line has sold
   owner takes over a payer that was the old owner** (v1.317.3): reassigning
   a self-paid PO, on the PO page or at hand-off, moves Paid by with it, with
   its Activity line, as Self meant before it named a person. A manager who
-  paid stays the payer, and so does a payer the same save picked.
+  paid stays the payer, and so does a payer the same save picked. Since
+  v1.317.4 a save that hands the PO over can't pick the old owner, who no
+  longer paid for their own PO, and the Paid by select offers the new owner.
+  Only a payer a save picks is checked: the one on file passes as it is,
+  even a manager deactivated since, so a hand-off or a save never fails on a
+  field nobody touched.
 - **The Actions column is pinned to the right edge** (v1.294.1). When the
   desktop list is wider than its card and scrolls sideways, the Actions
   header and cells stay put at the right while the other columns slide
@@ -2170,10 +2175,15 @@ is who paid, below).
     restored, with who and when. **Void** needs a reason and takes the entry
     out of every total and balance; **Restore** puts it back. Nothing is
     deleted. A draft PO deleted after money was booked against it leaves the
-    entry on the book without its link, and its history names the PO.
+    entry on the book without its link, and its history names the PO. The
+    record is part of what was signed off, so the delete clears a sign-off
+    and moves the entry's version (v1.317.4).
   - **An entry's Paid by and its PO's payer are one value** (v1.317.0,
     migration 0199), kept in step both ways. *Paid by* is a person: an
-    active manager, or the PO's own purchaser on a self-paid cost. The
+    active manager, or on a Purchase entry the PO's own purchaser, who paid
+    a self-paid cost or took the supplier's refund for it (v1.317.4). A
+    payer deactivated since an entry was booked stays on it through other
+    edits. The
     Business Account is never a payer here — its money is Payments'.
     - *PO → entry.* Whatever moves a PO's payer moves its live entries of
       that kind: the PO page's Paid by, a commission screenshot, a cost
@@ -2188,9 +2198,10 @@ is who paid, below).
       live paid-out entries of that kind are **voided** with the reason
       *Paid from the Business Account* and a *Voided: paid from the Business
       Account* history line; totals drop them. Unlinking the row or clearing
-      the flag does not bring them back; **Restore** does, and a restored
-      entry is never voided by the PO again. It catches up with the PO's
-      person payer as it comes back (v1.317.3).
+      the flag does not bring them back; **Restore** does, and an entry
+      restored from that void is never voided by the PO again. One voided
+      and restored by hand for another reason still is (v1.317.4). It
+      catches up with the PO's person payer as it comes back (v1.317.3).
     - *Entry → PO.* Saving a Commission entry with Paid by X sets the PO's
       commission Paid by to X, with the PO's Activity line. Saving a Purchase
       entry with Paid by a person sets a self-paid PO's cost payer, except
@@ -2278,9 +2289,12 @@ is who paid, below).
     second manager is needed.
   - **What a sign-off covers.** Every field but the note. An edit to any of
     them clears the sign-off, and so does a Paid by that follows its PO to
-    another person (v1.317.2; the author stays, the history line reads *Paid
-    by followed the PO. Review cleared*, and the queue row and review card say
-    *Paid by followed the PO* rather than naming the author). The entry then
+    another person (v1.317.2). The history line reads *Paid by followed the
+    PO. Review cleared*, and the queue row and review card say *Paid by
+    followed the PO*. Since v1.317.4 the manager whose save moved it (the
+    PO page, a bank link, another entry) is the new version's author, so
+    they can't sign their own move off. A purchaser's save or the bank sync
+    leaves the author as it was. The entry then
     reads *Changed since review*, with the old and new value of each field,
     until someone other than the editor signs it again. A note-only edit keeps
     the review. A sign-off names the version the page showed, so an
@@ -2290,7 +2304,9 @@ is who paid, below).
     since review* it closed (v1.317.3).
   - **Query.** A reviewer who can't sign asks the author a question (up to
     280 characters). Where an entry has no author, the question goes to the
-    manager whose money it was. That person is notified, and the entry waits
+    manager whose money it was. The question stays with whoever it was asked
+    of, even if the PO moves the payer later (v1.317.4). That person is
+    notified, and the entry waits
     under *Queried* until they answer or edit it. An edit counts as the
     answer. The exchange stays on the entry until the next sign-off, and a
     sign-off closes an open question.
@@ -2310,10 +2326,14 @@ is who paid, below).
         warns, short only informs;
       - a dollar entry's rate more than 2% from the ledger's that day;
       - a look-alike live entry within 7 days (same direction, kind, amount,
-        currency, method and record, or counterparty on an Other entry).
+        currency, method and record, or counterparty on an Other entry);
+      - a Sale whose sell order has a live Mercury/PayPal deposit linked as
+        its payment (*Also on Payments*, v1.317.4): that money is the
+        Business Account's, and only what reached a manager belongs here.
     - Checks are hints, never gates. *Mark n reviewed* signs off in bulk only
       To review entries with no warning, after a confirm that lists them, and
-      the server checks each one again.
+      the server checks each one again. A long queue goes in batches of 200
+      (v1.317.4).
   - **On the book:**
     - *Log* · *Review mode* (with what waits on you) · *Record entry* in the
       head.

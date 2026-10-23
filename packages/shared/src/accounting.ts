@@ -74,6 +74,10 @@ export type AccountingReviewFacts = {
   ledgerRate: number | null;
   // Another live entry that looks like the same money.
   duplicateOf: string | null;
+  // A sale whose sell order also has a live Mercury/PayPal deposit linked as
+  // its payment: that money is the Business Account's, on Payments. Optional
+  // for a backend older than the check.
+  businessReceived?: boolean;
 };
 
 export type AccountingCheck =
@@ -83,7 +87,8 @@ export type AccountingCheck =
   | { kind: 'noRecord'; tone: 'info' }
   | { kind: 'recordGone'; tone: 'info' }
   | { kind: 'rate'; tone: 'warn'; rate: number; ledgerRate: number; pct: number }
-  | { kind: 'duplicate'; tone: 'warn'; of: string };
+  | { kind: 'duplicate'; tone: 'warn'; of: string }
+  | { kind: 'businessReceived'; tone: 'warn' };
 
 // A booked figure within 1% or ¥10 of the record's own is the same money:
 // commissions round, and a dollar figure moves with the rate.
@@ -133,6 +138,8 @@ export function accountingChecks(
     }
   }
   if (f.duplicateOf) out.push({ kind: 'duplicate', tone: 'warn', of: f.duplicateOf });
+  // Part of a sale can still reach a manager, so it is a warning, not a refusal.
+  if (e.kind === 'sale' && f.businessReceived) out.push({ kind: 'businessReceived', tone: 'warn' });
   return out;
 }
 

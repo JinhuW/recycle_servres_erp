@@ -18,13 +18,25 @@ describe('the entry form', () => {
     let f = initialForm({ meId: ME, today: TODAY });
     f = pickTarget(applyKind(f, 'purchase'), { id: 'PO-1', party: 'Supplier' });
     expect(f).toMatchObject({ direction: 'out', counterparty: 'Supplier' });
-    // Commission is the same record type: the PO stays.
-    expect(applyKind(f, 'commission').target).toEqual({ id: 'PO-1', party: 'Supplier' });
+    // Commission names a PO too, but its party and payer are the commission's: the pick goes.
+    expect(applyKind(f, 'commission')).toMatchObject({ target: null, counterparty: '' });
     const sale = applyKind(f, 'sale');
     expect(sale).toMatchObject({ direction: 'in', target: null, counterparty: '' });
     const flipped = applyKind({ ...f, direction: 'in', directionTouched: true }, 'sale');
     expect(flipped.direction).toBe('in');
     expect(applyKind({ ...flipped, direction: 'out' }, 'after_sales').direction).toBe('out');
+  });
+
+  it("doesn't carry one kind's payer facts into the other", () => {
+    const TIM = '22222222-2222-2222-2222-222222222222';
+    let f = initialForm({ meId: ME, today: TODAY });
+    // The cost was paid from the company's account; the commission may still be Tim's.
+    f = pickTarget(applyKind(f, 'purchase'), { id: 'PO-1', payerBusiness: true });
+    expect(payerLock(f)).toBe(true);
+    const commission = applyKind(f, 'commission');
+    expect(commission.target).toBeNull();
+    expect(payerLock(commission)).toBe(false);
+    expect(pickTarget(commission, { id: 'PO-1', payerId: TIM }).managerId).toBe(TIM);
   });
 
   it('keeps a counterparty the manager typed when the record changes', () => {
@@ -72,6 +84,8 @@ describe('the entry form', () => {
     expect(payerLock({ ...same, managerId: ME }, entry)).toBe(true);
     expect(payerLock({ ...same, target: { id: 'PO-2', payerBusiness: true } }, entry)).toBe(true);
     expect(payerLock({ ...same, kind: 'commission' }, entry)).toBe(true);
+    // Lifted by putting the entry's own payer back, so the select stays open for it.
+    expect(payerLock({ ...same, managerId: entry.manager.id }, entry)).toBe(false);
   });
 
   it('turns into a request, or names what is missing', () => {

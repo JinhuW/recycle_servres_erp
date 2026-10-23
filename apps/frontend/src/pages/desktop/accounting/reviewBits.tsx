@@ -38,6 +38,7 @@ export function checkLines(
       text: t('acctChkRateText', { rate: c.rate.toFixed(4), ledger: c.ledgerRate.toFixed(4) }),
     };
     case 'duplicate': return { head: t('acctChkDuplicate'), text: t('acctChkDuplicateText', { id: c.of }) };
+    case 'businessReceived': return { head: t('acctChkBusinessReceived'), text: t('acctChkBusinessReceivedText') };
   }
 }
 
@@ -60,6 +61,7 @@ export function rowChip(row: AcctReviewRow, t: Translate, locale: string): { lab
       };
     case 'rate': return { label: t('acctChipRate', { pct: pct(c.pct) }), tone: 'warn' };
     case 'duplicate': return { label: t('acctChipDuplicate'), tone: 'warn' };
+    case 'businessReceived': return { label: t('acctChipBusinessReceived'), tone: 'warn' };
     case 'noRecord': return { label: t('acctChipNoRecord'), tone: 'muted' };
     case 'noFigure': case 'recordGone': return { label: checkLines(c, row, t, locale).head.replace(/\.$/, ''), tone: 'muted' };
   }

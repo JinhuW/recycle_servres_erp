@@ -152,7 +152,7 @@ function EntryFields({ f }: { f: AccountingEntryForm }) {
       <div className="field-row">
         <div className="field">
           <label className="label" htmlFor={id('manager')}>{t('acctFieldPaidBy')}</label>
-          <select id={id('manager')} className="select" value={form.managerId} disabled={f.payerLocked}
+          <select id={id('manager')} className="select" value={form.managerId} disabled={f.payerPickLocked}
                   onChange={e => f.set({ managerId: e.target.value })}>
             {f.managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>

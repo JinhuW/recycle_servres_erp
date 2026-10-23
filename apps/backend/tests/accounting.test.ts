@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart, testEnv } from './helpers/app';
-import { loginAs, ALEX, SOFIA, MARCUS } from './helpers/auth';
+import { loginAs, ALEX, SOFIA, MARCUS, PRIYA } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
 import { createSellOrderOn, signOffAll } from './helpers/fixtures';
 import { mockFrankfurter } from './helpers/fx';
@@ -368,7 +368,10 @@ describe('accounting', () => {
     const gone = await entryOf(alex.token, id);
     expect(gone.voided).toMatchObject({ reason: 'Paid from the Business Account' });
     expect(gone.manager).toMatchObject({ id: alex.user.id });
-    expect(gone.events.at(-1)).toMatchObject({ kind: 'voided', actor: null, detail: { synced: 'po', reason: 'Paid from the Business Account' } });
+    // The manager whose save voided it is the event's actor; nobody voided it by hand.
+    expect(gone.events.at(-1)).toMatchObject({
+      kind: 'voided', actor: { id: alex.user.id }, detail: { synced: 'po', reason: 'Paid from the Business Account' },
+    });
     expect((await listOf(alex.token, '')).rows.map(r => r.id)).not.toContain(id);
     // Nothing new while the company paid; the flag is undone on the PO.
     const refused = await record(alex.token, base({ kind: 'commission', targetId: po }));
@@ -466,10 +469,10 @@ describe('accounting', () => {
     const back = await entryOf(alex.token, id);
     expect(back.voided).toBeNull();
     expect(back.manager).toMatchObject({ id: sofia.user.id });
-    // Written in the restore's transaction, so it shares the restore's time.
-    expect(back.events).toContainEqual(expect.objectContaining({
-      kind: 'edited', detail: expect.objectContaining({ synced: 'po' }),
-    }));
+    // Written in the restore's transaction, after it, and read back that way.
+    expect(back.events.slice(-2)).toMatchObject([
+      { kind: 'restored' }, { kind: 'edited', detail: { synced: 'po' } },
+    ]);
   });
 
   it('a deleted draft leaves the void; a nobody-on-file PO leaves the entry', async () => {
@@ -508,6 +511,171 @@ describe('accounting', () => {
     expect((await api('PATCH', `/api/accounting/entries/${id}`, { token: alex.token, body: { note: 'supplier kept it' } })).status).toBe(200);
     const summary = (await api<Summary>('GET', '/api/accounting/summary?from=2026-10-01&to=2026-10-31', { token: alex.token })).body;
     expect(summary.paid).toBe(200);
+  });
+
+  // ── Review against the PO's side ──────────────────────────────────────────
+
+  type Review = {
+    state: string; version: string; author: { id: string } | null; by: { id: string } | null;
+    query: { to: { id: string } | null; answer: unknown } | null;
+  };
+  const reviewOf = async (id: string) =>
+    (await api<{ entry: { review: Review } }>('GET', `/api/accounting/entries/${id}`, { token: alex.token })).body.entry.review;
+  const signOff = (token: string, id: string, version: string) =>
+    api<{ error?: string; code?: string }>('POST', `/api/accounting/entries/${id}/review`, { token, body: { version } });
+
+  it('a payer the PO moves is written by the manager who moved it, who can\'t sign it off', async () => {
+    const sofia = await loginAs(SOFIA);
+    const marcus = await loginAs(MARCUS);
+    const po = await donePO();
+    const id = await recorded(alex.token, base({ kind: 'commission', targetId: po }));
+    expect((await signOff(sofia.token, id, (await reviewOf(id)).version)).status).toBe(200);
+
+    expect((await api('PUT', `/api/orders/${po}/commission-paid-by`, { token: sofia.token, body: { userId: sofia.user.id } })).status).toBe(200);
+    const moved = await reviewOf(id);
+    expect(moved).toMatchObject({ state: 'changed', author: { id: sofia.user.id }, by: null });
+    expect((await signOff(sofia.token, id, moved.version)).status).toBe(403);
+    expect((await signOff(alex.token, id, moved.version)).status).toBe(200);
+
+    // A purchaser's save moves the payer too, but a purchaser reviews nothing,
+    // so the entry keeps the manager who wrote it.
+    const draft = await draftPO(marcus.token, { payment: 'self' });
+    const cost = await recorded(alex.token, base({ kind: 'purchase', targetId: draft, managerId: marcus.user.id }));
+    expect((await api('PATCH', `/api/orders/${draft}`, { token: marcus.token, body: { paidByUserId: sofia.user.id } })).status).toBe(200);
+    expect(await managerOf(cost)).toMatchObject({ id: sofia.user.id });
+    expect(await reviewOf(cost)).toMatchObject({ author: { id: alex.user.id } });
+    expect((await entryOf(alex.token, cost)).events.at(-1)).toMatchObject({ kind: 'edited', actor: { id: marcus.user.id } });
+  });
+
+  it('a sign-off that commits while the PO moves the payer is cleared, not lost', async () => {
+    const sofia = await loginAs(SOFIA);
+    const po = await donePO();
+    const id = await recorded(alex.token, base({ kind: 'commission', targetId: po }));
+    const db = getTestDb();
+    let signed!: () => void;
+    let commit!: () => void;
+    const isSigned = new Promise<void>(r => { signed = r; });
+    const held = new Promise<void>(r => { commit = r; });
+    const signing = db.begin(async tx => {
+      await tx`UPDATE accounting_entries SET reviewed_by = ${sofia.user.id}, reviewed_at = NOW() WHERE id = ${id}`;
+      signed();
+      await held;
+    });
+    await isSigned;
+    const moving = api('PUT', `/api/orders/${po}/commission-paid-by`, { token: alex.token, body: { userId: sofia.user.id } });
+    // The move waits on the entry the sign-off holds.
+    for (let i = 0; i < 100; i++) {
+      const [w] = await db<{ n: number }[]>`
+        SELECT COUNT(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+      if (w.n > 0) break;
+      await new Promise(r => setTimeout(r, 20));
+    }
+    commit();
+    await signing;
+    expect((await moving).status).toBe(200);
+    expect(await reviewOf(id)).toMatchObject({ state: 'changed', by: null });
+    expect((await entryOf(alex.token, id)).events.at(-1)).toMatchObject({
+      kind: 'edited', detail: { synced: 'po', clearedReview: { by: sofia.user.id } },
+    });
+  });
+
+  it('only a restore of a Business Account void keeps the PO from voiding the entry again', async () => {
+    const po = await donePO();
+    const id = await recorded(alex.token, base({ kind: 'commission', targetId: po }));
+    expect((await api('POST', `/api/accounting/entries/${id}/void`, { token: alex.token, body: { reason: 'wrong amount' } })).status).toBe(200);
+    expect((await api('POST', `/api/accounting/entries/${id}/restore`, { token: alex.token })).status).toBe(200);
+    expect((await api('PUT', `/api/orders/${po}/commission-paid-by`, { token: alex.token, body: { company: true } })).status).toBe(200);
+    expect((await entryOf(alex.token, id)).voided).toMatchObject({ reason: 'Paid from the Business Account' });
+  });
+
+  it('a question stays with the manager it was asked of when the PO moves the payer', async () => {
+    const sofia = await loginAs(SOFIA);
+    const po = await donePO();
+    const id = await recorded(alex.token, base({ kind: 'commission', targetId: po }));
+    // Nobody wrote it (the 0196 backfill): the question goes to its manager.
+    await getTestDb()`UPDATE accounting_entries SET author_id = NULL, created_by = NULL WHERE id = ${id}`;
+    expect((await api('POST', `/api/accounting/entries/${id}/query`, { token: sofia.token, body: { text: 'which chat?' } })).status).toBe(200);
+    expect((await api('PUT', `/api/orders/${po}/commission-paid-by`, { token: sofia.token, body: { userId: sofia.user.id } })).status).toBe(200);
+    expect(await managerOf(id)).toMatchObject({ id: sofia.user.id });
+    expect(await reviewOf(id)).toMatchObject({ state: 'queried', query: { to: { id: alex.user.id }, answer: null } });
+
+    const count = async (token: string) =>
+      (await api<{ asked: number }>('GET', '/api/accounting/review/count', { token })).body.asked;
+    expect(await count(alex.token)).toBe(1);
+    expect(await count(sofia.token)).toBe(0);
+    const answer = (token: string) => api('POST', `/api/accounting/entries/${id}/answer`, { token, body: { text: 'the 10-02 one' } });
+    expect((await answer(sofia.token)).status).toBe(403);
+    expect((await answer(alex.token)).status).toBe(200);
+  });
+
+  it('a deleted draft clears the sign-off its record was part of', async () => {
+    const sofia = await loginAs(SOFIA);
+    const marcus = await loginAs(MARCUS);
+    const po = await draftPO(marcus.token, { payment: 'self' });
+    const signed = await recorded(alex.token, base({ kind: 'purchase', targetId: po, amount: 200, managerId: marcus.user.id }));
+    const open = await recorded(alex.token, base({ kind: 'purchase', targetId: po, amount: 30, managerId: marcus.user.id }));
+    expect((await signOff(sofia.token, signed, (await reviewOf(signed)).version)).status).toBe(200);
+    const stale = (await reviewOf(open)).version;
+    expect((await api('DELETE', `/api/orders/${po}`, { token: marcus.token })).status).toBe(200);
+
+    expect(await reviewOf(signed)).toMatchObject({ state: 'changed', by: null, author: { id: alex.user.id } });
+    const row = (await api<{ rows: { id: string; cleared: unknown }[] }>('GET', '/api/accounting/review?tab=mine', { token: sofia.token }))
+      .body.rows.find(r => r.id === signed);
+    expect(row?.cleared).toMatchObject({ reviewer: { id: sofia.user.id }, changes: { targetId: { from: po, to: null } } });
+    // A page that still showed the PO can't sign off what it no longer says.
+    const late = await signOff(sofia.token, open, stale);
+    expect(late.status).toBe(409);
+    expect(late.body.code).toBe('changed');
+  });
+
+  it('the purchaser who paid a self-paid cost can take its refund', async () => {
+    const marcus = await loginAs(MARCUS);
+    const priya = await loginAs(PRIYA);
+    const po = await draftPO(marcus.token, { payment: 'self' });
+    const refund = await record(alex.token, base({ kind: 'purchase', direction: 'in', targetId: po, amount: 20, managerId: marcus.user.id }));
+    expect(refund.status, refund.body.error).toBe(201);
+    const paid = await recorded(alex.token, base({ kind: 'purchase', targetId: po, amount: 200, managerId: marcus.user.id }));
+    expect((await patch(paid, { direction: 'in' })).status).toBe(200);
+    // Not another purchaser: they paid for nothing on this PO.
+    const other = await record(alex.token, base({ kind: 'purchase', direction: 'in', targetId: po, managerId: priya.user.id }));
+    expect(other.status).toBe(400);
+  });
+
+  it('a payer deactivated since stays on an entry whose other fields change', async () => {
+    const sofia = await loginAs(SOFIA);
+    const id = await recorded(alex.token, base({ managerId: sofia.user.id }));
+    await getTestDb()`UPDATE users SET active = FALSE WHERE id = ${sofia.user.id}`;
+    expect((await patch(id, { direction: 'in' })).status).toBe(200);
+    expect((await patch(id, { managerId: sofia.user.id, amount: 90 })).status).toBe(200);
+    // Booking someone deactivated is still refused.
+    const other = await recorded(alex.token, base({}));
+    expect((await patch(other, { managerId: sofia.user.id })).status).toBe(400);
+  });
+
+  it('warns on a sale the Business Account also received', async () => {
+    const sofia = await loginAs(SOFIA);
+    const so = await shippedSO(alex.token);
+    const id = await recorded(alex.token, base({ kind: 'sale', direction: 'in', targetId: so.id, amount: 640 }));
+    const checksOf = async () =>
+      (await api<{ rows: { id: string; checks: { kind: string; tone: string }[] }[] }>(
+        'GET', '/api/accounting/review?tab=mine', { token: sofia.token })).body.rows.find(r => r.id === id)!.checks;
+    expect((await checksOf()).map(c => c.kind)).not.toContain('businessReceived');
+
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [{ externalId: 'm-sale', amount: 90, counterparty: 'Buyer', postedAt: new Date(NOW - DAY) }]),
+    ]);
+    const [row] = await getTestDb()<{ id: string }[]>`SELECT id FROM bank_transactions WHERE external_id = 'm-sale'`;
+    expect((await api('POST', `/api/bank-transactions/${row.id}/link`, {
+      token: alex.token, body: { sellOrderId: so.id },
+    })).status).toBe(200);
+    expect(await checksOf()).toContainEqual({ kind: 'businessReceived', tone: 'warn' });
+    // A warning keeps it out of the bulk sign-off.
+    const { version } = await reviewOf(id);
+    const bulk = await api<{ reviewed: string[]; skipped: { id: string }[] }>('POST', '/api/accounting/review/bulk', {
+      token: sofia.token, body: { entries: [{ id, version }] },
+    });
+    expect(bulk.body.skipped.map(s => s.id)).toEqual([id]);
   });
 });
 

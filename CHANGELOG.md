@@ -17,6 +17,65 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.317.4] - 2026-10-23
+
+Fixes from a second review of the v1.317 release (RS-359), which reached
+prod while the review ran. Every finding was live there. A read-only check
+of prod found none of them had touched data yet.
+
+**The four-eyes rule holds when a payer follows its PO.** When a PO-side
+change moved an entry's Paid by, the sign-off was cleared but the old author
+stayed. The manager who made the change could then sign it off, and the
+person who wrote the entry could not. That manager is now the new version's
+author. The routes that can move a payer name their user to the database
+(`actAsTx`), and migration 0202's sync reads it. In the same function:
+
+- Only a restore of a *Paid from the Business Account* void now keeps the PO
+  from voiding an entry again. An entry once voided and restored for another
+  reason used to stay on the book for good.
+- The entries are locked before they are read, so a sign-off committing at
+  the same moment is cleared rather than silently wiped.
+- Events are stamped with the time they were written, so a restore no longer
+  reads after its own catch-up.
+
+**Review mode's questions and sign-offs stick to what they were about.**
+
+- A question's addressee is now stored. A payer that moved used to hand an
+  open question on an unauthored entry to someone who was never asked.
+- A deleted draft PO now clears its entries' sign-offs and moves their
+  version. A stale page could sign off "matches PO-123" after PO-123 was gone.
+- Moving to another entry closes the question form, which used to send the
+  typed text about the newly selected entry.
+- Undo now acts on the tab you are on, and ignores a second press.
+- Bulk sign-off now goes in batches of 200, where more than 200 failed every
+  time.
+- A Sale whose buyer's deposit is also linked on Payments now gets an *Also
+  on Payments* warning.
+
+**Paid by is judged only when someone changes it.** PO saves and the
+hand-off re-checked the payer on file with every request. A manager
+deactivated since they paid then blocked a hand-off on a field nobody had
+touched. Now only a picked payer is checked, against the owner the PO will
+have. That also closes the hole where one save could reassign a PO and keep
+its old owner as payer.
+
+- A payer change now counts as a material edit on the PO pages. A
+  purchaser's change used to send the PO back to Draft without the warning,
+  and the phone couldn't save it at all.
+- Paid by now follows *On behalf of* on the PO pages and Submit.
+- A move plus another change logs the payer once.
+
+**Smaller fixes in the RMB Flow:**
+
+- The purchaser who paid a self-paid cost can now be named on its refund.
+- An entry booked to a deactivated manager can have its direction changed.
+- Switching an entry between Purchase and Commission now drops the PO it
+  read the other kind's payer from.
+- The payer lock can be undone by putting the payer back.
+- The page no longer crashes against a backend without the review summary.
+- The folded sidebar keeps the Accounting icon under its count.
+- Counts of one are singular.
+
 ## [1.317.3] - 2026-10-23
 
 Fixes from the release review of everything `dev` carried past prod's

@@ -321,16 +321,17 @@ function IdentityBand({ summary, managerId, onManager }: {
           ))}
         </div>
       )}
-      <ReviewStrip review={summary.review} />
+      {summary.review && <ReviewStrip review={summary.review} />}
     </section>
   );
 }
 
 // The period's sign-off: a period whose every entry is reviewed is a period
 // reviewed, so there is nothing else to sign.
-function ReviewStrip({ review: r }: { review: AcctSummary['review'] }) {
+function ReviewStrip({ review: r }: { review: NonNullable<AcctSummary['review']> }) {
   const { t, locale } = useT();
   if (r.entries === 0) return null;
+  const entries = t(r.entries === 1 ? 'acctStripEntriesOne' : 'acctStripEntries', { n: r.reviewed, total: r.entries });
   const done = r.reviewed === r.entries;
   const open = r.entries - r.reviewed - r.changed - r.queried;
   return (
@@ -342,13 +343,13 @@ function ReviewStrip({ review: r }: { review: AcctSummary['review'] }) {
         <span className="acct-rstrip-done"><Icon name="check" size={13} /> {t('acctStripAllDone')}</span>
       ) : (
         <>
-          <span className="acct-rmeter" role="img" aria-label={t('acctStripEntries', { n: r.reviewed, total: r.entries })}>
+          <span className="acct-rmeter" role="img" aria-label={entries}>
             <i className="acct-m-done" style={{ flexGrow: r.reviewed }} />
             <i className="acct-m-changed" style={{ flexGrow: r.changed }} />
             <i className="acct-m-query" style={{ flexGrow: r.queried }} />
             <i style={{ flexGrow: open }} />
           </span>
-          <span>{t('acctStripEntries', { n: r.reviewed, total: r.entries })}</span>
+          <span>{entries}</span>
           <span className="acct-rstrip-sep" aria-hidden="true">·</span>
           <span>{t('acctStripMoney', { reviewed: fmtCny(r.reviewedCny, locale), moved: fmtCny(r.movedCny, locale) })}</span>
           {r.forMe > 0 && <><span className="acct-rstrip-sep" aria-hidden="true">·</span><b>{t('acctStripForMe', { n: r.forMe })}</b></>}

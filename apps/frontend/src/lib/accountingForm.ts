@@ -99,16 +99,18 @@ export function initialForm(opts: { meId: string; today: IsoDate; preset?: Entry
   };
 }
 
+// A kind change drops the record, even between purchase and commission: they
+// name the same PO, but its payer, figure, party and Business Account lock
+// are each kind's own (the cost's payer is not the commission's), and the
+// facts in hand were read for the old one.
 export function applyKind(f: EntryForm, kind: AccountingKind): EntryForm {
   if (f.targetLocked || kind === f.kind) return f;
-  const sameRecord = KIND_TARGET[kind] === KIND_TARGET[f.kind];
-  const target = sameRecord ? f.target : null;
   return {
     ...f,
     kind,
     direction: f.directionTouched ? f.direction : KIND_DEFAULT_DIRECTION[kind],
-    target,
-    counterparty: sameRecord || f.counterpartyTouched ? f.counterparty : '',
+    target: null,
+    counterparty: f.counterpartyTouched ? f.counterparty : '',
   };
 }
 

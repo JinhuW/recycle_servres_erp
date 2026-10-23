@@ -143,7 +143,7 @@ export function PhAccountingSheet({ preset, entry, onClose, onSaved }: {
         </div>
         <div className="ph-field">
           <label htmlFor={id('manager')}>{t('acctFieldPaidBy')}</label>
-          <select id={id('manager')} className="select" value={form.managerId} disabled={f.payerLocked}
+          <select id={id('manager')} className="select" value={form.managerId} disabled={f.payerPickLocked}
                   onChange={e => f.set({ managerId: e.target.value })}>
             {f.managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
