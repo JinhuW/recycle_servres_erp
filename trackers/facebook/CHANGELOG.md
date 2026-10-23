@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.14] - 2026-10-23
+
 ### Added
 
 - **Workers can take their cities from the coordinator's queue** (RS-372). An
