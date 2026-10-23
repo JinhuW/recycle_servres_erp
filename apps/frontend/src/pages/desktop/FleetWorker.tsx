@@ -1,5 +1,5 @@
 import { FB_FAILED_OUTCOMES, FB_PROXY_DEAD_AFTER, type FbStintOutcome } from '@recycle-erp/shared';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { FormSkeleton } from '../../components/Skeleton';
@@ -8,7 +8,10 @@ import {
   challengeScreenshotUrl, coordinatorApi, type AlertHitRow, type Challenge, type FleetAccount, type FleetDoc,
 } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
-import { poolApi, proxyMarkFor, type FbProxyMark, type FbWorkerStint } from '../../lib/facebookPool';
+import {
+  groupTimeline, loginCounts, loginTone, poolApi, proxyMarkFor, REPORT_REASON_KEYS,
+  type FbAccountTimeline, type FbProxyMark, type FbWorkerStint, type LoginTone, type TimelineLine,
+} from '../../lib/facebookPool';
 import {
   accountAlerts, browserLabel, canWatch, externalVncUrl, fleetActivity, fleetStatus, hitsByCity, parkedWorkers, searchedToday, SESSION_WARN_DAYS, whoIs,
 } from '../../lib/fleetView';
@@ -285,12 +288,29 @@ const OUTCOME_TONE: Record<FbStintOutcome, string> = {
   available: 'muted', taken: 'muted', fleet: 'muted', removed: 'muted', problem: 'warn', retired: 'neg',
 };
 
+const shortWhen = (at: number, locale: string) =>
+  new Date(at).toLocaleString(locale, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
 // Every pool account the worker has signed in with, newest first, each with
 // the proxy it went out through. Problem and Retired count against that proxy.
+// A row unfolds into the account's timeline, fetched the first time.
 function AccountsUsed({ stints, locale }: { stints: FbWorkerStint[] | null; locale: string }) {
   const { t } = useT();
-  const when = (at: number) => new Date(at).toLocaleString(locale, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const when = (at: number) => shortWhen(at, locale);
   const failed = stints?.filter(s => s.outcome && FB_FAILED_OUTCOMES.includes(s.outcome)).length ?? 0;
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const [timelines, setTimelines] = useState<ReadonlyMap<number, FbAccountTimeline | 'error'>>(() => new Map());
+  const toggle = (row: string, no: number) => {
+    setOpen(prev => {
+      const next = new Set(prev);
+      if (next.has(row)) next.delete(row); else next.add(row);
+      return next;
+    });
+    if (timelines.has(no)) return;
+    poolApi.timeline(no)
+      .then(tl => setTimelines(m => new Map(m).set(no, tl)))
+      .catch(err => { handleFetchError(err); setTimelines(m => new Map(m).set(no, 'error')); });
+  };
   return (
     <section className="card ff-stints" aria-label={t('fbcAccountsUsed')}>
       <div className="card-head">
@@ -304,6 +324,7 @@ function AccountsUsed({ stints, locale }: { stints: FbWorkerStint[] | null; loca
             <table className="fp-table">
               <thead>
                 <tr>
+                  <th aria-label={t('fbcTlTitle')} />
                   <th>#</th>
                   <th>{t('fbcStintLogin')}</th>
                   <th>{t('fbcColProxy')}</th>
@@ -313,8 +334,19 @@ function AccountsUsed({ stints, locale }: { stints: FbWorkerStint[] | null; loca
                 </tr>
               </thead>
               <tbody>
-                {stints.map(s => (
-                  <tr key={`${s.accountNo}-${s.startedAt}`}>
+                {stints.map(s => {
+                  const row = `${s.accountNo}-${s.startedAt}`;
+                  const isOpen = open.has(row);
+                  return (
+                  <Fragment key={row}>
+                  <tr className={isOpen ? 'ff-open ff-tl-toggle' : 'ff-tl-toggle'} onClick={() => toggle(row, s.accountNo)}>
+                    <td className="ff-chev">
+                      <button type="button" className="btn ghost icon sm" aria-expanded={isOpen}
+                        aria-label={t(isOpen ? 'fbcTlHide' : 'fbcTlShow', { n: s.accountNo })} title={t('fbcTlTitle')}
+                        onClick={e => { e.stopPropagation(); toggle(row, s.accountNo); }}>
+                        <Icon name={isOpen ? 'chevronUp' : 'chevronDown'} size={13} />
+                      </button>
+                    </td>
                     <td className="mono">#{s.accountNo}</td>
                     <td>
                       <span className="fp-holder">
@@ -335,12 +367,96 @@ function AccountsUsed({ stints, locale }: { stints: FbWorkerStint[] | null; loca
                         : <span className="chip accent">{t('fbcStint_current')}</span>}
                     </td>
                   </tr>
-                ))}
+                  {isOpen && (
+                    <tr className="ff-tl-row">
+                      <td colSpan={7}><AccountTimeline timeline={timelines.get(s.accountNo)} locale={locale} /></td>
+                    </tr>
+                  )}
+                  </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
     </section>
+  );
+}
+
+const LOGIN_DOT: Record<LoginTone, string> = { ok: 'ff-live', warn: 'ff-attention', fail: 'ff-offline', pending: 'ff-tl-muted' };
+
+function lineDot(line: TimelineLine): string {
+  if (line.kind === 'login') return LOGIN_DOT[loginTone(line.outcome)];
+  if (line.kind === 'pool' && line.action === 'reported') return 'ff-attention';
+  if (line.kind === 'pool' && (line.action === 'retired' || line.action === 'removed')) return 'ff-offline';
+  return 'ff-tl-muted';
+}
+
+// One account's life, newest first: every login a worker attempted for it,
+// and what the pool did with it. A run of identical logins is one line.
+function AccountTimeline({ timeline, locale }: { timeline: FbAccountTimeline | 'error' | undefined; locale: string }) {
+  const { t } = useT();
+  if (timeline === undefined) return <div className="ff-timeline-note fp-muted">{t('fbcTlLoading')}</div>;
+  if (timeline === 'error') return <div className="ff-timeline-note fp-warn">{t('fbcTlFailed')}</div>;
+  const lines = groupTimeline(timeline.events);
+  const { ok, failed } = loginCounts(timeline.events);
+  // To the second: a cookie restore that fails and the token refresh after it
+  // land in the same minute.
+  const when = (at: number) => new Date(at).toLocaleString(locale,
+    { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  return (
+    <div className="ff-timeline">
+      <div className="ff-timeline-head">
+        <span>{t('fbcTlSum', { ok, failed })}</span>
+        {timeline.logins !== 'ok' && (
+          <span className="fp-warn">{t(timeline.logins === 'not_served' ? 'fbcTlNotServed' : 'fbcTlUnreachable')}</span>
+        )}
+      </div>
+      <ul className="fp-log">
+        {lines.map((line, i) => (
+          <li key={i}>
+            <i className={`fp-dot ${lineDot(line)}`} />
+            <div>
+              <TimelineText line={line} />
+              <time title={new Date(line.at).toLocaleString(locale)}>
+                {line.count > 1 ? t('fbcTlRange', { from: when(line.since), to: when(line.at) }) : when(line.at)}
+              </time>
+            </div>
+          </li>
+        ))}
+        {lines.length === 0 && <li className="fp-muted">{t('fbcTlEmpty')}</li>}
+      </ul>
+    </div>
+  );
+}
+
+function TimelineText({ line }: { line: TimelineLine }) {
+  const { t } = useT();
+  if (line.kind === 'added') return <span>{t('fbcTlAdded', { batch: line.batch })}</span>;
+  if (line.kind === 'pool') {
+    const detail = line.detail ?? '';
+    const reason = detail in REPORT_REASON_KEYS ? t(REPORT_REASON_KEYS[detail as keyof typeof REPORT_REASON_KEYS]) : detail;
+    const text = line.action === 'assigned' ? t('fbcTlAssigned', { worker: detail, by: line.by })
+      : line.action === 'reported' ? t('fbcTlReported', { reason, by: line.by })
+      : line.action === 'took' ? t('fbcTlTook', { by: line.by })
+      : line.action === 'returned' ? t('fbcTlReturned', { by: line.by })
+      : line.action === 'retired' ? t('fbcTlRetired', { by: line.by })
+      : line.action === 'removed' ? t('fbcTlRemoved', { by: line.by })
+      : `${line.action} · ${line.by}`;
+    // A displaced account's note says which account replaced it, and where.
+    const why = line.action !== 'assigned' && line.action !== 'reported' && detail ? ` — ${detail}` : '';
+    return <span>{text}{why}</span>;
+  }
+  const what = t(`fbcTlLogin_${line.outcome ?? 'none'}`);
+  return (
+    <span title={line.url ?? undefined}>
+      <b>{line.outcome === 'challenge' && line.detail && line.detail !== 'checkpoint' ? `${what} (${line.detail})` : what}</b>
+      {line.count > 1 && <> ×{line.count}</>}
+      <span className="fp-muted">
+        {line.trigger && <> · {t(`fbcTlTrigger_${line.trigger}`)}</>}
+        {' · '}<span className="mono">{line.worker}</span>
+      </span>
+    </span>
   );
 }
 

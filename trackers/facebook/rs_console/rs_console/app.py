@@ -67,6 +67,7 @@ single-use ticket minted against the console token.
 
 import asyncio
 import hashlib
+import json
 import os
 import re
 import secrets as pysecrets
@@ -351,6 +352,35 @@ async def challenge_screenshot(challenge_id: int) -> Response:
     return await _forward(
         "GET", f"/v1/challenges/{challenge_id}/screenshot", timeout=SCREENSHOT_TIMEOUT_S
     )
+
+
+# The login ledger, one worker at a time, for the ERP's account timeline. The
+# datr fingerprint and device id stay here: they identify a browser, and the
+# ERP only needs what each attempt was and how it ended.
+LOGIN_FIELDS = (
+    "id", "worker_id", "account_id", "identity_key", "trigger", "outcome",
+    "started_at", "finished_at",
+)
+
+
+@app.get("/v1/logins", dependencies=[Depends(require_token)])
+async def logins(
+    worker_id: str = Query(...), limit: int = Query(default=200, ge=1, le=500)
+) -> Dict[str, Any]:
+    if not _WORKER_ID.match(worker_id):
+        raise HTTPException(status_code=400, detail="Not a valid worker id")
+    res = await _forward("GET", "/v1/logins", params={"worker_id": worker_id, "limit": limit})
+    if res.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Coordinator answered {res.status_code}")
+    rows = json.loads(res.body).get("logins") or []
+    out = []
+    for row in rows:
+        try:
+            detail = json.loads(row.get("detail_json") or "null")
+        except ValueError:
+            detail = None
+        out.append({**{k: row.get(k) for k in LOGIN_FIELDS}, "detail": detail})
+    return {"logins": out}
 
 
 @app.get("/v1/stats/reviews", dependencies=[Depends(require_token)])

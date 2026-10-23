@@ -48,6 +48,8 @@ Forwarded today:
   `/v1/challenges/{id}/screenshot`. `/v1/fleet` is composed here, so a new
   field in it is a contract change too: its `status_changes` (from the
   coordinator's `/v1/stats/status-changes`) feed the ERP's Recent activity.
+- `GET /v1/logins?worker_id=` (one worker's login ledger, without the device
+  fingerprints) for the account timeline on the ERP's worker page.
 - `POST /v1/workers/{id}/relogin`, `/v1/challenges/{id}/resolve`
 - `PUT /v1/accounts/{id}` (credentials write)
 - `PUT /v1/config/settings` (search settings; `rs_console/settings.py` lists

@@ -826,6 +826,40 @@
 .ff-proxy-mark small {
   font-size: 11.5px;
 }
+.ff-tl-muted {
+  --fp-color: var(--fg-subtle);
+}
+.ff-tl-toggle {
+  cursor: pointer;
+}
+.fp-table .ff-tl-row > td {
+  padding: 0;
+  white-space: normal;
+  background: var(--bg-soft);
+}
+.ff-timeline {
+  padding: 6px 0 4px 40px;
+}
+.ff-timeline-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 4px 15px 0;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.ff-timeline .fp-log {
+  max-height: 360px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.ff-timeline .fp-log li {
+  padding: 6px 15px;
+}
+.ff-timeline-note {
+  padding: 12px 55px;
+  font-size: 12px;
+}
 .ff-dead-note {
   color: var(--neg);
   background: var(--neg-soft);

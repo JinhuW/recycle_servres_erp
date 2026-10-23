@@ -18,6 +18,15 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **The console serves the login ledger to the ERP** (RS-366).
+  `GET /v1/logins?worker_id=<id>&limit=<1..500>` returns one worker's login
+  attempts from the coordinator: trigger, outcome, times, the account's
+  `identity_key` and the parsed detail. The `datr` fingerprint and device id
+  stay behind. The ERP's worker page draws each account's timeline from it;
+  until this console is deployed, that timeline shows the pool's events only.
+
 ## [0.13.12] - 2026-10-21
 
 ### Fixed
