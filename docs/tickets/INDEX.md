@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-370](./RS-370-shadow-run-a-pull-based-city-queue-against-the-live.md) | in-progress | task | P2 | Shadow-run a pull-based city queue against the live Facebook fleet | — |
+| [RS-370](./RS-370-shadow-run-a-pull-based-city-queue-against-the-live.md) | done | task | P2 | Shadow-run a pull-based city queue against the live Facebook fleet | facebook-tracker 0.13.13 |
 | [RS-368](./RS-368-railway-alerts-reach-telegram-one-topic-per-alert-ki.md) | done | story | P2 | Railway alerts reach Telegram, one topic per alert kind | 1.322.0 |
 | [RS-367](./RS-367-worker-page-a-full-height-history-column-that-tracks.md) | done | story | P2 | Worker page: a full-height History column that tracks everything | 1.321.0 |
 | [RS-366](./RS-366-timeline-of-each-account-s-logins-on-the-worker-page.md) | done | story | P2 | Timeline of each account's logins on the worker page | 1.320.0 |

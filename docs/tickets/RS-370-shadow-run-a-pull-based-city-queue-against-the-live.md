@@ -2,13 +2,13 @@
 id: RS-370
 title: Shadow-run a pull-based city queue against the live Facebook fleet
 type: task
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: fb-city-queue-shadow
-pr:
-version:
+pr: 847
+version: facebook-tracker 0.13.13
 related: [RS-277, RS-275, RS-334]
 ---
 
@@ -71,10 +71,10 @@ settled on:
 
 ## Acceptance criteria
 
-- [ ] Every search report that names a city is logged with its cards,
+- [x] Every search report that names a city is logged with its cards,
       opened, reviewed and alerted counts (`city_searches`, pruned to 14
       days), on SQLite and Postgres.
-- [ ] `city_queue.pick()` returns the next city for one worker, or none and a
+- [x] `city_queue.pick()` returns the next city for one worker, or none and a
       reason. It applies, each on its own:
       - due ratio,
       - region eligibility,
@@ -83,10 +83,10 @@ settled on:
       - daily budget,
       - quarantine,
       - home → familiar → other ordering.
-- [ ] An account with two or more searches in the window, all at 0 cards, on
+- [x] An account with two or more searches in the window, all at 0 cards, on
       cities another account got cards from, is reported as quarantined, with
       the evidence.
-- [ ] The coordinator's `POST /v1/queue/shadow` (admin) replays 1–14 days
+- [x] The coordinator's `POST /v1/queue/shadow` (admin) replays 1–14 days
       through `pick`. It returns actual vs shadow figures per fleet, per
       worker and per city:
       - visits per day,
@@ -98,13 +98,13 @@ settled on:
 
       What-if settings in the request change only the replay, never the
       stored tier settings.
-- [ ] The console's `POST /v1/queue/shadow` and
+- [x] The console's `POST /v1/queue/shadow` and
       `python -m rs_console.queue_shadow` build the roster from the
       `/v1/fleet` doc and return or print that report. The roster is the
       catalog with regions, plus each worker's home cities, `proxy_env`,
       `start_at` and phrases.
-- [ ] No worker, monitor, ERP route or ERP allowlist changes.
-- [ ] The design spec is in `docs/superpowers/specs/`, the README has a
+- [x] No worker, monitor, ERP route or ERP allowlist changes.
+- [x] The design spec is in `docs/superpowers/specs/`, the README has a
       section on the shadow report, `docs/DATABASE.md` lists
       `city_searches`, and the change ships as `facebook-tracker` 0.13.13.
 
@@ -130,3 +130,25 @@ Also left out:
 ## Notes
 
 - Design: [2026-10-23-fleet-city-queue-design.md](../superpowers/specs/2026-10-23-fleet-city-queue-design.md).
+- **Number.** This was RS-368 until two other sessions took that number
+  (#846 merged, #845 open), so it skipped to RS-370 to leave 369 to #845.
+- **Vendor re-pin.** The release gate could not run, because the pinned monitor
+  commit `96d9204` existed only in a deleted worktree's clone.
+  - It is rebuilt as `8979534`: the same parent `c20d341`, plus the one file
+    the original changed, copied from the VM.
+  - It matches the deployed tree byte for byte apart from the files the
+    deploy filter keeps off the VM, and `VENDOR.md` records how this was
+    checked.
+  - `recycle-patches` still has no private remote, which is what lost the
+    commit.
+- **First replay.** This was a dry run on the real roster with a synthetic log
+  shaped like the day's sweeps.
+  - With the defaults, the busiest account drops from 302 to 188 min a day,
+    redundant searches from 33 to 0, and the median account rises from 7 to
+    114.
+  - The cost: 31 cities go over 26 h, because sc-1 and mw-1 are the only
+    live accounts eligible for South Central and the Midwest, and they run
+    out of budget.
+  - Letting nyc-1, phl-1, va-2 and west-1 search one more region each brings
+    that to 0, with the busiest account at 194 min. That is the first of the
+    three decisions.
