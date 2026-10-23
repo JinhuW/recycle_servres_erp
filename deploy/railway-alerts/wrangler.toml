@@ -1,0 +1,28 @@
+# Railway → Telegram alert relay (worker.js). Every Railway project's webhook
+# POSTs here. Deploy from this directory, with any terraform-scoped
+# CLOUDFLARE_API_TOKEN unset so wrangler uses its OAuth login:
+#   npx wrangler@4.146.0 deploy
+#
+# Secrets, set once and again on every rotation:
+#   TELEGRAM_BOT_TOKEN  @Jinhu_homelab_bot. The homelab's Alertmanager sends
+#                       as the same bot, so a revoked token breaks both.
+#   WEBHOOK_SECRET      the bearer each project's webhook sends as its
+#                       Authorization header. Rotating it means updating all
+#                       seven webhooks (docs/agents/erp-ops.md).
+name = "railway-alerts"
+main = "worker.js"
+compatibility_date = "2026-06-18"
+account_id = "cf0e09b533b74d32407f6fe1b558165b"
+workers_dev = true
+
+# Keeps each payload and Telegram's rejections in the dashboard, which is the
+# only record of an alert that didn't arrive.
+[observability]
+enabled = true
+
+[vars]
+# The "Homelab Alerts" forum group.
+TELEGRAM_CHAT_ID = "-1004378564833"
+# message_thread_id of each topic in that group, from createForumTopic. An
+# event with no topic here, or whose topic was deleted, goes to General.
+TOPICS = { deploy_failed = 2, crashed = 3, monitor = 4, volume = 5 }

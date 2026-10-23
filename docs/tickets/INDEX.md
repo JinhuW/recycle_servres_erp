@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-368](./RS-368-railway-alerts-reach-telegram-one-topic-per-alert-ki.md) | done | story | P2 | Railway alerts reach Telegram, one topic per alert kind | 1.322.0 |
 | [RS-367](./RS-367-worker-page-a-full-height-history-column-that-tracks.md) | done | story | P2 | Worker page: a full-height History column that tracks everything | 1.321.0 |
 | [RS-366](./RS-366-timeline-of-each-account-s-logins-on-the-worker-page.md) | done | story | P2 | Timeline of each account's logins on the worker page | 1.320.0 |
 | [RS-365](./RS-365-mark-a-proxy-dead-after-its-5th-failed-account-and-k.md) | done | story | P2 | Mark a proxy DEAD after its 5th failed account, and keep each worker's account history | 1.319.0 |

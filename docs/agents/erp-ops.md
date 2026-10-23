@@ -95,6 +95,38 @@ The release flow itself (`dev` → `main` is a full release) is in the root
   addresses must skip itself while `X-Client-IP` is absent, as the per-IP
   login budget does.
 
+## Railway alerts → Telegram
+
+- All seven Railway projects in the workspace send one webhook each to the
+  `railway-alerts` Worker (`deploy/railway-alerts/`,
+  `https://railway-alerts.jinhuwang1127.workers.dev/`). The Worker posts each
+  event to the "Homelab Alerts" Telegram forum group (`-1004378564833`) as
+  `@Jinhu_homelab_bot`. Events: deploy failed, crashed, OOM-killed,
+  CPU/RAM monitor and volume alert, triggered and resolved. PR environments are
+  left out. Each kind goes to its own topic (`TOPICS` in `wrangler.toml`); a
+  kind without a topic, or whose topic was deleted, goes to General.
+- It runs on Cloudflare so an alert still gets out while Railway is down.
+  Deploy with `npx wrangler@4.146.0 deploy` from that directory, with
+  `CLOUDFLARE_API_TOKEN` unset.
+- **The homelab's Alertmanager sends as the same bot.** Revoking its token in
+  BotFather breaks both senders until each has the new token: run
+  `wrangler secret put TELEGRAM_BOT_TOKEN` here, and update Alertmanager's
+  config. A new topic comes from the Bot API's `createForumTopic` (the bot is
+  an admin with Manage Topics), and its id goes into `TOPICS`.
+- **Railway webhook headers can't be set from the CLI.** The CLI's OAuth token
+  gets "Not Authorized" on `notificationRuleUpdate`, and the Railway MCP tools
+  don't take headers. Rotating `WEBHOOK_SECRET` means
+  `wrangler secret put WEBHOOK_SECRET`, then a new `Authorization: Bearer …`
+  on all seven webhooks. Either paste it into each project's Settings →
+  Webhooks, or call `notificationRuleUpdate` from a logged-in dashboard tab.
+  `channelConfigs` is `[{type: "webhook", url, headers: {Authorization: "Bearer …"}}]`:
+  `headers` is a map, and the list-of-`{name, value}` form is refused as
+  "Invalid channel config".
+- Railway's `Test Webhook` events have an empty `details` and no service,
+  and Railway documents only the deployment shape. So the Worker lists
+  whatever monitor and volume fields arrive, and logs each payload to the
+  Worker's observability logs.
+
 ## Infrastructure (Terraform)
 
 - `infra/terraform/` owns Cloudflare side: R2 attachments bucket, custom
