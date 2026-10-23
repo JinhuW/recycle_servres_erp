@@ -2,12 +2,12 @@
 id: RS-366
 title: Timeline of each account's logins on the worker page
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: JinhuW/rasbora
-pr:
+pr: 843
 version: 1.320.0
 related: []
 ---
