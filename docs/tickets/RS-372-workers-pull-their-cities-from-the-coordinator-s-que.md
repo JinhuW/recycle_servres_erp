@@ -2,13 +2,13 @@
 id: RS-372
 title: Workers pull their cities from the coordinator's queue (first stage)
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: fb-city-queue-live
-pr:
-version:
+pr: 850
+version: facebook-tracker 0.13.14
 related: [RS-370, RS-277, RS-334]
 ---
 
@@ -53,31 +53,31 @@ live worker which is not enrolled still holds stays with that worker.
 
 ## Acceptance criteria
 
-- [ ] An enrolled worker gets each next city from
+- [x] An enrolled worker gets each next city from
       `POST /v1/workers/{id}/next-city` and searches it, including a city
       outside its own config, with the catalog's radius. It searches nothing
       when the answer is no city: the round is done, the budget is spent, it
       is outside its window, or it is quarantined. It falls back to its own
       list only when there is no answer at all.
-- [ ] Each (item, city) is handed out once per day across enrolled workers. A
+- [x] Each (item, city) is handed out once per day across enrolled workers. A
       city held by a live, unquarantined, not-enrolled worker stays that
       worker's.
-- [ ] An account stops at 6 h of searching per UTC day and is never handed a
+- [x] An account stops at 6 h of searching per UTC day and is never handed a
       city outside `start_at` + 8 h. So a restart outside the window, or after
       the round is done, searches nothing.
-- [ ] A worker that parks releases its lease at once. One that goes silent
+- [x] A worker that parks releases its lease at once. One that goes silent
       releases it after 30 minutes. Either way the city goes back to the
       queue.
-- [ ] An account whose every search over 48 h returns 0 cards, on cities
+- [x] An account whose every search over 48 h returns 0 cards, on cities
       other accounts get cards from, gets no city, and its searches do not
       count as visits.
-- [ ] Funnel reports carry the item, so a visit is per (item, city).
-- [ ] `rsc queue status | enroll | unenroll | set` manage the queue.
-- [ ] The console pushes the roster every 10 minutes, at startup and after
+- [x] Funnel reports carry the item, so a visit is per (item, city).
+- [x] `rsc queue status | enroll | unenroll | set` manage the queue.
+- [x] The console pushes the roster every 10 minutes, at startup and after
       *Edit cities*.
 - [ ] homelab-1, nyc-1, phl-1 and va-2 are enrolled and recreated on the new
       image. The other 36 workers are untouched.
-- [ ] Ships as `facebook-tracker` 0.13.14.
+- [x] Ships as `facebook-tracker` 0.13.14.
 
 ## Out of scope
 
@@ -93,3 +93,15 @@ live worker which is not enrolled still holds stays with that worker.
 
 - Design: [2026-10-23-fleet-city-queue-design.md](../superpowers/specs/2026-10-23-fleet-city-queue-design.md),
   *First stage (live)*.
+- **Vendored monitor.** `recycle-patches` `93e2566` (parent `8979534`). The
+  main checkout's clone was fast-forwarded to it the moment it was pinned, so
+  this commit cannot be lost the way `96d9204` was.
+- **End to end before merge.** A local coordinator was given the real roster:
+  127 cities, 42 workers, with the pilot enrolled and five static holders
+  live. The real `queued_cities()` then pulled for the four pilots,
+  interleaved:
+  - **Split.** They shared exactly homelab-1's 28 Southeast cities plus NYC
+    and Philadelphia, 8/8/7/7 per item.
+  - **No repeats.** No city was handed out twice, and no held city went out.
+  - **Edges.** Outside the window a worker got nothing, and a worker that
+    isn't enrolled got its own list.
