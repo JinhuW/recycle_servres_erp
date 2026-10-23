@@ -29,6 +29,11 @@ Each component has its own `pyproject.toml`. Workers are the vendored
 `ai-marketplace-monitor` fork, which calls the coordinator over HTTP with Bearer
 tokens. README → *How it fits together* has the diagram.
 
+The coordinator's tables are described in the root
+[docs/DATABASE.md](../../docs/DATABASE.md). A change to `SCHEMA` or to an
+`*_EXTRA_COLUMNS` list in `rs_coordinator/db.py` updates that section in the
+same PR.
+
 ## Contract with the ERP
 
 The ERP backend (`apps/backend/src/routes/coordinator.ts`, `src/vncBridge.ts`)

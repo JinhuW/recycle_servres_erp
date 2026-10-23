@@ -180,6 +180,9 @@ half of the tracker contracts — change them together with the tracker side
   `NO ACTION`.
 - FK indexes are managed in `0035_fk_indexes.sql` and `0040_perf_indexes.sql`.
   When you add a FK, add the matching index in the same migration.
+- `docs/DATABASE.md` describes every table and column. A migration that adds,
+  drops or changes a table updates that table's section, and the *As of* line,
+  in the same PR.
 
 ## Tests
 
