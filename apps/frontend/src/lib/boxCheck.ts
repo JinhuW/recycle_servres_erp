@@ -133,6 +133,23 @@ export function tally(lines: readonly CheckableLine[], checks: ReadonlyMap<strin
   return t;
 }
 
+// What the PO's box label counts once the review is done: the products with
+// a unit counted, by # (a transfer's two rows of one product are one), and
+// those units. A line counted 0 arrived empty.
+export function reviewedCounts<L extends CheckableLine & { no?: number }>(
+  lines: readonly L[], checks: ReadonlyMap<string, LineCheck>,
+): { products: number; units: number } {
+  const products = new Set<number | string>();
+  let units = 0;
+  for (const l of lines) {
+    const n = countOf(l, checks.get(l.id));
+    if (n === 0) continue;
+    products.add(l.no ?? l.id);
+    units += n;
+  }
+  return { products: products.size, units };
+}
+
 export type ScanMatch<L> = { line: L } | { ambiguous: string[] };
 
 // Which same-part line a scan lands on: one still waiting first, so a short

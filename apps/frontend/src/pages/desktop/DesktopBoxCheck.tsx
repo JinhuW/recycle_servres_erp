@@ -13,11 +13,11 @@ import { api, ApiError, rawFetch } from '../../lib/api';
 import { applyPatch, canApply, openIssuesByLine, settledBy, useAiReview, type AiFinding } from '../../lib/aiReview';
 import {
   checkBody, countOf, emptyCheck, entryAnswerFor, filterScan, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter,
-  orderLines, partsNamed, readStageMoved, stashEntryAnswer, tally,
+  orderLines, partsNamed, readStageMoved, reviewedCounts, stashEntryAnswer, tally,
   type ChecksResponse, type LineCheck,
 } from '../../lib/boxCheck';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
-import { fmtMoney, fmtUSD } from '../../lib/format';
+import { fmtDate, fmtMoney, fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useLineSaveQueue } from '../../lib/useLineSaveQueue';
@@ -39,6 +39,7 @@ import { statusTone } from '../../lib/status';
 import { useMarketLookup } from '../../lib/useMarketLookup';
 import type { Order, OrderLine } from '../../lib/types';
 import { AiReviewCard } from './AiReviewCard';
+import { PackPrinterBar, useLabelPrint, type LabelText } from './PackLabel';
 import { LineDrawer } from './submit/LineDrawer';
 import { editLineToPatch, orderLineToEditLine, type EditLine } from './submit/editLine';
 import { brandConfirmPending, patchEditsLine } from './submit/line';
@@ -51,7 +52,8 @@ import { brandConfirmPending, patchEditsLine } from './submit/line';
 // where the count stands. The same bench prices the PO: each line's sell
 // price, the projection the commission is paid on, is typed beside its
 // count, with the Market board's value offered where nobody has priced it,
-// or read off a sell order sheet dropped on the list.
+// or read off a sell order sheet dropped on the list. Approving the review
+// prints the box's label: the PO, its counts and its purchaser.
 
 const XLSX_ACCEPT = '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -148,6 +150,22 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     checksOf: r => r.lines,
   });
   const ready = loadState === 'ok' && !readOnly;
+
+  const label = useLabelPrint(id => showToast(t('pkLabelPrinted', { id })));
+  // The box's label, counted as the review stands: a line at 0 isn't in it.
+  const labelText = (): LabelText => {
+    const n = reviewedCounts(lines, checks);
+    return {
+      kind: [t('bcLabelKind'), order.warehouse?.short].filter(Boolean).join(' · '),
+      date: fmtDate(new Date(), locale),
+      orderId: order.id,
+      caption: t('pkLabelPurchaser', { n: 1 }),
+      who: order.userName,
+      products: { n: n.products, word: t('pkLabelProducts', { n: n.products }) },
+      units: { n: n.units, word: t('pkLabelUnits', { n: n.units }) },
+      from: null,
+    };
+  };
 
   useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
@@ -558,6 +576,8 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     } finally {
       setBusy(null);
     }
+    // Finishing the review prints the box's label, before the page leaves.
+    if (label.auto) await label.print(labelText());
     onApproved();
   };
 
@@ -891,6 +911,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const selPlan = selected ? plan?.rows.get(selected.id) : undefined;
   const selSource = selected ? sources.get(selected.id) : undefined;
   const shot = selShots[Math.min(photoIdx, selShots.length - 1)];
+  const boxCount = reviewedCounts(lines, checks);
 
   return (
     <div className="bc-page">
@@ -913,13 +934,25 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
             ].filter(Boolean).join(' · ')}
           </div>
         </div>
-        <div className="bc-keys" aria-hidden="true">
-          <span><kbd>↑</kbd><kbd>↓</kbd> {t('bcKeyMove')}</span>
-          <span><kbd>{t('bcKeySpace')}</kbd> {t('bcKeyCheck')}</span>
-          <span><kbd>+</kbd><kbd>−</kbd> {t('bcKeyCount')}</span>
-          <span><kbd>E</kbd> {t('bcKeyEdit')}</span>
-          <span><kbd>P</kbd> {t('bcKeyPrice')}</span>
-          <span><kbd>/</kbd> {t('bcKeyScan')}</span>
+        <div className="pk-head-side">
+          <PackPrinterBar
+            printer={label.printer}
+            settings={label.settings}
+            autoTitle={t('bcLabelAuto')}
+            autoHint={t('bcLabelAutoHint')}
+            summary={[order.id, t('pkSub', { products: boxCount.products, units: boxCount.units }), order.userName].join(' · ')}
+            canPrint={loadState === 'ok' && boxCount.products > 0}
+            onPrint={() => void label.print(labelText())}
+            onPrintDialog={() => void label.viaDialog(labelText())}
+          />
+          <div className="bc-keys" aria-hidden="true">
+            <span><kbd>↑</kbd><kbd>↓</kbd> {t('bcKeyMove')}</span>
+            <span><kbd>{t('bcKeySpace')}</kbd> {t('bcKeyCheck')}</span>
+            <span><kbd>+</kbd><kbd>−</kbd> {t('bcKeyCount')}</span>
+            <span><kbd>E</kbd> {t('bcKeyEdit')}</span>
+            <span><kbd>P</kbd> {t('bcKeyPrice')}</span>
+            <span><kbd>/</kbd> {t('bcKeyScan')}</span>
+          </div>
         </div>
       </div>
 
@@ -1441,6 +1474,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
       {serialIssues && <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />}
       {takeover.dialog}
       {mismatch.dialog}
+      {label.element}
     </div>
   );
 }

@@ -544,6 +544,18 @@ is not a stage but a flag beside one, set once every line has sold
   - Once every line is checked, **Approve for payment** at Reviewing moves
     the PO to Ready to Pay (re-reading the stage first). Short lines don't
     block it.
+  - **Approving prints the box's label** (v1.327.0, RS-378). It is Pack
+    mode's label (see *Sell orders* → *A finished box prints its label*),
+    for the PO, and prints before the page leaves for the PO page. It reads
+    *Purchase order · <warehouse>*, the date, the PO number, *Purchaser
+    <the PO's purchaser>*, and the counts: the products with a unit counted,
+    by #, and those units. A line counted 0 is in neither.
+    - It goes over Bluetooth when the label printer is on, else through the
+      print dialog. *Print when approved* in the label settings turns it off.
+      That is the same saved setting (`pack.labelAuto`) as Pack mode's.
+    - The page head carries Pack mode's printer bar: status, Connect, Print
+      label and the settings menu. Both pages share one connection and one
+      set of settings. A refused or cancelled approval prints nothing.
   - **Lines ticked at 0 are set to qty 0 on Approve** (v1.213.0; in v1.212.0,
     which never reached prod, Approve deleted them). They stay on the PO, so
     every line keeps its `#`.
