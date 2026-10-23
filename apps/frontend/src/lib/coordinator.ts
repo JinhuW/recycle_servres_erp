@@ -319,6 +319,21 @@ export type AlertHitRow = {
   hit: number;
 };
 
+// One login attempt from the coordinator's ledger, as the console serves it.
+// `identity_key` is `uid:<facebook uid>` on newer rows and null before; the
+// outcome is null while the attempt has not reported back.
+export type LedgerLogin = {
+  id: number;
+  worker_id: string;
+  account_id: string | null;
+  identity_key: string | null;
+  trigger: string | null;
+  outcome: string | null;
+  started_at: string;
+  finished_at: string | null;
+  detail: { kind?: string; url?: string } | null;
+};
+
 export const coordinatorApi = {
   listWorkers: () =>
     api.get<{ workers: FleetWorker[] }>('/api/coordinator/workers').then(r => r.workers),
@@ -341,6 +356,11 @@ export const coordinatorApi = {
     api.get<{ rows: AlertHitRow[]; unmatched_reactions: number }>(
       `/api/coordinator/stats/alert-hits?days=${days}`,
     ).then(r => r.rows),
+
+  // A console older than the ledger route answers 404.
+  workerLogins: (workerId: string) =>
+    api.get<{ logins: LedgerLogin[] }>(`/api/coordinator/workers/${encodeURIComponent(workerId)}/logins`)
+      .then(r => r.logins),
 
   listOpenChallenges: () =>
     api.get<{ challenges: Challenge[] }>('/api/coordinator/challenges?status=open')

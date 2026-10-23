@@ -295,6 +295,15 @@ coordinator.put('/settings', async (c) => {
 // writes them into that worker's config only; each city is narrowed to the
 // three fields a config holds.
 export const WORKER_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+// One worker's login ledger for the History column on its page: every
+// attempt, whichever account it was for. The console leaves the device
+// fingerprints out; one older than the route answers 404.
+coordinator.get('/workers/:id/logins', (c) => {
+  const id = c.req.param('id');
+  if (!WORKER_ID.test(id)) return c.json({ error: 'Not a valid worker id' }, 400);
+  return forward(c, 'GET', `/v1/logins?worker_id=${encodeURIComponent(id)}&limit=500`);
+});
 const CITY_FIELDS = ['slug', 'name', 'radius'] as const;
 
 coordinator.put('/workers/:id/cities', async (c) => {

@@ -122,6 +122,23 @@ describe('Coordinator proxy routes (/api/coordinator)', () => {
     expect(init.method).toBe('POST');
   });
 
+  it('forwards one worker\'s login ledger, and an older console\'s 404 as it is', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubFacade(200, { logins: [{ id: 1, worker_id: 'ne-1', outcome: 'restored' }] });
+    const r = await api<{ logins: unknown[] }>('GET', '/api/coordinator/workers/ne-1/logins', { token, env: ENV });
+    expect(r.status).toBe(200);
+    expect(r.body.logins).toHaveLength(1);
+    expect((spy.mock.calls[0] as [string])[0]).toBe('http://facade.internal:8600/v1/logins?worker_id=ne-1&limit=500');
+
+    stubFacade(404, { detail: 'Not Found' });
+    expect((await api('GET', '/api/coordinator/workers/ne-1/logins', { token, env: ENV })).status).toBe(404);
+    const bad = stubFacade(200, {});
+    expect((await api('GET', '/api/coordinator/workers/a.b/logins', { token, env: ENV })).status).toBe(400);
+    const marcus = (await loginAs(MARCUS)).token;
+    expect((await api('GET', '/api/coordinator/workers/ne-1/logins', { token: marcus, env: ENV })).status).toBe(403);
+    expect(bad).not.toHaveBeenCalled();
+  });
+
   it('refuses a re-login from a purchaser', async () => {
     const { token } = await loginAs(MARCUS);
     const spy = stubFacade(200, {});

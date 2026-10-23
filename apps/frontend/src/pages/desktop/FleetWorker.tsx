@@ -5,7 +5,7 @@ import { ImageLightbox } from '../../components/ImageLightbox';
 import { FormSkeleton } from '../../components/Skeleton';
 import { ApiError } from '../../lib/api';
 import {
-  challengeScreenshotUrl, coordinatorApi, type AlertHitRow, type Challenge, type FleetAccount, type FleetDoc,
+  challengeScreenshotUrl, coordinatorApi, type AlertHitRow, type Challenge, type FleetAccount, type FleetDoc, type LedgerLogin,
 } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
@@ -14,6 +14,7 @@ import {
 } from '../../lib/facebookPool';
 import {
   accountAlerts, browserLabel, canWatch, externalVncUrl, fleetActivity, fleetStatus, hitsByCity, parkedWorkers, searchedToday, SESSION_WARN_DAYS, whoIs,
+  workerHistory, type HistoryLine,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -29,7 +30,8 @@ import '../../styles/facebookPool.css';
 // and recent events, and every action the control plane offers on it today:
 // watch its browser, queue a re-login, set its credentials, set its cities
 // (FleetCities.tsx), clear a checkpoint, revive a DEAD proxy. Under them, every
-// pool account it has signed in with. Pacing still lives in fleet.toml.
+// pool account it has signed in with; beside them all, the worker's History.
+// Pacing still lives in fleet.toml.
 
 const REFRESH_MS = 30_000;
 const STUB_TONE = { live: 'accent', stale: 'warn', attention: 'warn', offline: 'neg' } as const;
@@ -44,6 +46,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
   const [resolving, setResolving] = useState<number | null>(null);
   const [marks, setMarks] = useState<FbProxyMark[] | null>(null);
   const [stints, setStints] = useState<FbWorkerStint[] | null>(null);
+  const [logins, setLogins] = useState<LedgerLogins>(null);
 
   const load = useCallback(() => {
     coordinatorApi.fleet().then(doc => { setFleet(doc); setFailed(false); }).catch(err => {
@@ -54,6 +57,8 @@ export function FleetWorker({ workerId }: { workerId: string }) {
     coordinatorApi.alertHits(HITS_DAYS).then(setHits).catch(() => setHits([]));
     poolApi.proxies().then(r => setMarks(r.proxies)).catch(() => setMarks([]));
     poolApi.workerAccounts(workerId).then(r => setStints(r.stints)).catch(() => setStints([]));
+    coordinatorApi.workerLogins(workerId).then(setLogins)
+      .catch(err => setLogins(err instanceof ApiError && err.status === 404 ? 'not_served' : 'unreachable'));
   }, [workerId]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -91,6 +96,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
   const events = fleetActivity({
     ...fleet, workers: [w], status_changes: fleet.status_changes?.filter(c => c.worker_id === w.worker_id),
   }, mine);
+  const history = workerHistory(events, stints ?? [], Array.isArray(logins) ? logins : []);
   const acct = w.account;
   const sess = w.session;
   const mark = proxyMarkFor(marks, w);
@@ -142,88 +148,76 @@ export function FleetWorker({ workerId }: { workerId: string }) {
         </div>
       </div>
 
-      <article className="fp-credential ff-worker-card" aria-label={name}>
-        <div className={`fp-stub ff-stub-${STUB_TONE[status]}`}>
-          <b>{initials}</b>
-          <small>{h ? t('fbcHeartbeatAge', { age: h.last_heartbeat_at ? relTime(h.last_heartbeat_at, locale) : t('fbcNever') }) : t('fbcNotDeployed')}</small>
-        </div>
-        <div className="fp-credential-main">
-          <div className="fp-credential-head">
-            <span><b>{name}</b> {who.userId && <span className="mono fp-muted">{who.userId}</span>}</span>
-            <small>{w.region.name} · {t('fbcCities', { n: w.cities.length })}</small>
-          </div>
-          <div className="ff-ledger">
-            <div><b>{h ? accountAlerts(w, byCity) : '—'}</b><small>{t('fbcColAlerts', { days: HITS_DAYS })}</small></div>
-            <div><b>{h?.last_search_at ? relTime(h.last_search_at, locale) : '—'}</b><small>{t('fbcColLastSearch')}</small></div>
-            <div><b>{h?.last_listing_at ? relTime(h.last_listing_at, locale) : '—'}</b><small>{t('fbcDetailLastListing')}</small></div>
-            <div><b>{h ? h.error_count : '—'}</b><small>{t('fbcDetailErrors')}</small></div>
-            <div><b>{mine.length}</b><small>{t('fbcOpenCheckpoints')}</small></div>
-          </div>
-          <dl className="fp-fields">
-            {fields.map(([k, v]) => (
-              <div key={k}><dt>{k}</dt><dd className={k === t('fbcColCities') ? 'ff-wrap-cell' : undefined}>{v}</dd></div>
-            ))}
-          </dl>
-          <div className="fp-credential-foot">
-            <div className="fp-row" style={{ flexWrap: 'wrap' }}>
-              {canWatch(w)
-                ? <WatchButton workerId={w.worker_id} className="btn" />
-                : configVnc
-                  ? <a className="btn" href={configVnc} target="_blank" rel="noopener"><Icon name="eye" size={13} />{t('fbcOpenVnc')}</a>
-                  : <span className="fp-muted" style={{ fontSize: 12 }}>{t('fbcNoVnc')}</span>}
-              {h && <ReloginButton workerId={w.worker_id} account={w} className="btn" onQueued={load} offerWatch={canWatch(w)} />}
-              <EditCredentialsButton account={w} onSaved={load} className="btn" />
-              {w.cities_editable && <EditCitiesButton worker={w} fleet={fleet} onSaved={load} />}
+      <div className="ff-worker-layout">
+        <div className="ff-worker-main">
+          <article className="fp-credential ff-worker-card" aria-label={name}>
+            <div className={`fp-stub ff-stub-${STUB_TONE[status]}`}>
+              <b>{initials}</b>
+              <small>{h ? t('fbcHeartbeatAge', { age: h.last_heartbeat_at ? relTime(h.last_heartbeat_at, locale) : t('fbcNever') }) : t('fbcNotDeployed')}</small>
             </div>
-          </div>
-        </div>
-      </article>
-
-      <div className="fp-split ff-split">
-        <section className="card" aria-label={t('fbcOpenCheckpoints')}>
-          <div className="card-head"><h2 className="card-title">{t('fbcOpenCheckpoints')}</h2><span className="card-sub">{t('fbcCheckpointsSub')}</span></div>
-          {mine.length === 0 && <div className="fp-empty">{t('fbcNoCheckpoint')}</div>}
-          {mine.map(c => (
-            <div key={c.id} className="ff-checkpoint">
-              <Thumbnail challenge={c} onZoom={() => setZoom(c)} />
-              <div className="ff-checkpoint-what">
-                <div><span className="chip accent">{c.kind}</span> <span className="mono">{w.worker_id}</span> {t('fbcAttnParked', { kind: c.kind })}</div>
-                <small>{t('fbcFlagged', { age: relTime(c.created_at, locale) })}{c.account_id && ` · ${c.account_id}`} · {t('fbcAttnClearIt')}</small>
-                <div className="fp-row" style={{ marginTop: 8 }}>
-                  {canWatch(w) && <WatchButton workerId={w.worker_id} />}
-                  <button type="button" className="btn primary sm" disabled={resolving === c.id}
-                    onClick={() => {
-                      setResolving(c.id);
-                      coordinatorApi.resolveChallenge(c.id)
-                        .then(() => { showSuccessToast(t('fbcResolved')); load(); })
-                        .catch(handleFetchError)
-                        .finally(() => setResolving(null));
-                    }}>
-                    <Icon name="check" size={13} />{t('fbcResolve')}
-                  </button>
+            <div className="fp-credential-main">
+              <div className="fp-credential-head">
+                <span><b>{name}</b> {who.userId && <span className="mono fp-muted">{who.userId}</span>}</span>
+                <small>{w.region.name} · {t('fbcCities', { n: w.cities.length })}</small>
+              </div>
+              <div className="ff-ledger">
+                <div><b>{h ? accountAlerts(w, byCity) : '—'}</b><small>{t('fbcColAlerts', { days: HITS_DAYS })}</small></div>
+                <div><b>{h?.last_search_at ? relTime(h.last_search_at, locale) : '—'}</b><small>{t('fbcColLastSearch')}</small></div>
+                <div><b>{h?.last_listing_at ? relTime(h.last_listing_at, locale) : '—'}</b><small>{t('fbcDetailLastListing')}</small></div>
+                <div><b>{h ? h.error_count : '—'}</b><small>{t('fbcDetailErrors')}</small></div>
+                <div><b>{mine.length}</b><small>{t('fbcOpenCheckpoints')}</small></div>
+              </div>
+              <dl className="fp-fields">
+                {fields.map(([k, v]) => (
+                  <div key={k}><dt>{k}</dt><dd className={k === t('fbcColCities') ? 'ff-wrap-cell' : undefined}>{v}</dd></div>
+                ))}
+              </dl>
+              <div className="fp-credential-foot">
+                <div className="fp-row" style={{ flexWrap: 'wrap' }}>
+                  {canWatch(w)
+                    ? <WatchButton workerId={w.worker_id} className="btn" />
+                    : configVnc
+                      ? <a className="btn" href={configVnc} target="_blank" rel="noopener"><Icon name="eye" size={13} />{t('fbcOpenVnc')}</a>
+                      : <span className="fp-muted" style={{ fontSize: 12 }}>{t('fbcNoVnc')}</span>}
+                  {h && <ReloginButton workerId={w.worker_id} account={w} className="btn" onQueued={load} offerWatch={canWatch(w)} />}
+                  <EditCredentialsButton account={w} onSaved={load} className="btn" />
+                  {w.cities_editable && <EditCitiesButton worker={w} fleet={fleet} onSaved={load} />}
                 </div>
               </div>
             </div>
-          ))}
-        </section>
-        <aside className="card fp-activity ff-activity" aria-label={t('fbcHistory')}>
-          <div className="card-head"><h2 className="card-title">{t('fbcHistory')}</h2></div>
-          <ul className="fp-log">
-            {events.map((e, i) => (
-              <li key={i}>
-                <i className={`fp-dot ff-${e.status ?? (e.kind === 'checkpoint' || e.kind === 'silent' ? 'attention' : 'live')}`} />
-                <div>
-                  {t(`fbcHist_${e.kind}`, { kind: eventDetail(t, e) })}
-                  <time title={e.at}>{relTime(e.at, locale)}</time>
-                </div>
-              </li>
-            ))}
-            {events.length === 0 && <li className="fp-muted">{t('fbcActivityEmpty')}</li>}
-          </ul>
-        </aside>
-      </div>
+          </article>
 
-      <AccountsUsed stints={stints} locale={locale} />
+          <section className="card" aria-label={t('fbcOpenCheckpoints')}>
+            <div className="card-head"><h2 className="card-title">{t('fbcOpenCheckpoints')}</h2><span className="card-sub">{t('fbcCheckpointsSub')}</span></div>
+            {mine.length === 0 && <div className="fp-empty">{t('fbcNoCheckpoint')}</div>}
+            {mine.map(c => (
+              <div key={c.id} className="ff-checkpoint">
+                <Thumbnail challenge={c} onZoom={() => setZoom(c)} />
+                <div className="ff-checkpoint-what">
+                  <div><span className="chip accent">{c.kind}</span> <span className="mono">{w.worker_id}</span> {t('fbcAttnParked', { kind: c.kind })}</div>
+                  <small>{t('fbcFlagged', { age: relTime(c.created_at, locale) })}{c.account_id && ` · ${c.account_id}`} · {t('fbcAttnClearIt')}</small>
+                  <div className="fp-row" style={{ marginTop: 8 }}>
+                    {canWatch(w) && <WatchButton workerId={w.worker_id} />}
+                    <button type="button" className="btn primary sm" disabled={resolving === c.id}
+                      onClick={() => {
+                        setResolving(c.id);
+                        coordinatorApi.resolveChallenge(c.id)
+                          .then(() => { showSuccessToast(t('fbcResolved')); load(); })
+                          .catch(handleFetchError)
+                          .finally(() => setResolving(null));
+                      }}>
+                      <Icon name="check" size={13} />{t('fbcResolve')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </section>
+
+          <AccountsUsed stints={stints} locale={locale} />
+        </div>
+        <WorkerHistory lines={history} logins={logins} locale={locale} />
+      </div>
 
       {zoom && (
         <ImageLightbox url={challengeScreenshotUrl(zoom.id)} alt={t('fbcScreenshotAlt', { id: zoom.worker_id })}
@@ -447,16 +441,92 @@ function TimelineText({ line }: { line: TimelineLine }) {
     const why = line.action !== 'assigned' && line.action !== 'reported' && detail ? ` — ${detail}` : '';
     return <span>{text}{why}</span>;
   }
-  const what = t(`fbcTlLogin_${line.outcome ?? 'none'}`);
+  return <LoginWords outcome={line.outcome} detail={line.detail} trigger={line.trigger} count={line.count}
+    url={line.url} worker={line.worker} />;
+}
+
+// One login, or a run of them: how it ended (a checkpoint names its kind
+// unless that is plain "checkpoint"), how many, what started it, and where.
+function LoginWords({ outcome, detail, trigger, count, url, worker }: {
+  outcome: string | null; detail: string | null; trigger: string | null; count: number; url: string | null;
+  worker?: string;
+}) {
+  const { t } = useT();
+  const what = t(`fbcTlLogin_${outcome ?? 'none'}`);
   return (
-    <span title={line.url ?? undefined}>
-      <b>{line.outcome === 'challenge' && line.detail && line.detail !== 'checkpoint' ? `${what} (${line.detail})` : what}</b>
-      {line.count > 1 && <> ×{line.count}</>}
+    <span title={url ?? undefined}>
+      <b>{outcome === 'challenge' && detail && detail !== 'checkpoint' ? `${what} (${detail})` : what}</b>
+      {count > 1 && <> ×{count}</>}
       <span className="fp-muted">
-        {line.trigger && <> · {t(`fbcTlTrigger_${line.trigger}`)}</>}
-        {' · '}<span className="mono">{line.worker}</span>
+        {trigger && <> · {t(`fbcTlTrigger_${trigger}`)}</>}
+        {worker && <>{' · '}<span className="mono">{worker}</span></>}
       </span>
     </span>
+  );
+}
+
+type LedgerLogins = LedgerLogin[] | 'not_served' | 'unreachable' | null;
+
+const LEFT_DOT: Partial<Record<FbStintOutcome, string>> = { problem: 'ff-attention', retired: 'ff-offline', removed: 'ff-offline' };
+
+function historyDot(line: HistoryLine): string {
+  if (line.kind === 'event') {
+    const e = line.event;
+    return `ff-${e.status ?? (e.kind === 'checkpoint' || e.kind === 'silent' ? 'attention' : 'live')}`;
+  }
+  if (line.kind === 'login') return LOGIN_DOT[loginTone(line.login.outcome)];
+  if (line.kind === 'left' && line.stint.outcome) return LEFT_DOT[line.stint.outcome] ?? 'ff-tl-muted';
+  return 'ff-tl-muted';
+}
+
+// The page's right-hand column: everything known to have happened on this
+// worker, newest first (lib/fleetView.ts → workerHistory). It is as tall as
+// the main column and scrolls its own list.
+function WorkerHistory({ lines, logins, locale }: { lines: HistoryLine[]; logins: LedgerLogins; locale: string }) {
+  const { t } = useT();
+  const ago = (at: number) => relTime(new Date(at).toISOString(), locale);
+  return (
+    <aside className="card fp-activity ff-activity ff-history" aria-label={t('fbcHistory')}>
+      <div className="card-head"><h2 className="card-title">{t('fbcHistory')}</h2></div>
+      {(logins === 'not_served' || logins === 'unreachable') && (
+        <div className="ff-history-note fp-warn">
+          {t(logins === 'not_served' ? 'fbcHistLoginsNotServed' : 'fbcHistLoginsUnreachable')}
+        </div>
+      )}
+      <ul className="fp-log">
+        {lines.map((line, i) => (
+          <li key={i}>
+            <i className={`fp-dot ${historyDot(line)}`} />
+            <div>
+              <HistoryText line={line} />
+              <time title={new Date(line.at).toLocaleString(locale)}>
+                {line.kind === 'login' && line.count > 1 ? t('fbcTlRange', { from: ago(line.since), to: ago(line.at) }) : ago(line.at)}
+              </time>
+            </div>
+          </li>
+        ))}
+        {lines.length === 0 && <li className="fp-muted">{t('fbcActivityEmpty')}</li>}
+      </ul>
+    </aside>
+  );
+}
+
+function HistoryText({ line }: { line: HistoryLine }) {
+  const { t } = useT();
+  if (line.kind === 'event') return <>{t(`fbcHist_${line.event.kind}`, { kind: eventDetail(t, line.event) })}</>;
+  if (line.kind === 'signon') {
+    return <>{t('fbcHistSignOn', { n: line.stint.accountNo, login: line.stint.email ?? line.stint.uid })}</>;
+  }
+  if (line.kind === 'left') {
+    return <>{t('fbcHistLeft', { n: line.stint.accountNo, outcome: t(`fbcStint_${line.stint.outcome}`) })}</>;
+  }
+  const l = line.login;
+  return (
+    <>
+      {line.accountNo !== null && <span className="mono">#{line.accountNo} </span>}
+      <LoginWords outcome={l.outcome} detail={l.detail?.kind ?? null} trigger={l.trigger} count={line.count}
+        url={l.detail?.url ?? null} />
+    </>
   );
 }
 
