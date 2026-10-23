@@ -331,7 +331,7 @@ function IdentityBand({ summary, managerId, onManager }: {
 function ReviewStrip({ review: r }: { review: NonNullable<AcctSummary['review']> }) {
   const { t, locale } = useT();
   if (r.entries === 0) return null;
-  const entries = t(r.entries === 1 ? 'acctStripEntriesOne' : 'acctStripEntries', { n: r.reviewed, total: r.entries });
+  const entries = t(r.entries === 1 ? 'acctStripEntriesOfOne' : 'acctStripEntries', { n: r.reviewed, total: r.entries });
   const done = r.reviewed === r.entries;
   const open = r.entries - r.reviewed - r.changed - r.queried;
   return (
@@ -343,10 +343,10 @@ function ReviewStrip({ review: r }: { review: NonNullable<AcctSummary['review']>
         <span className="acct-rstrip-done"><Icon name="check" size={13} /> {t('acctStripAllDone')}</span>
       ) : (
         <>
-          <span className="acct-rmeter" role="img" aria-label={entries}>
-            <i className="acct-m-done" style={{ flexGrow: r.reviewed }} />
-            <i className="acct-m-changed" style={{ flexGrow: r.changed }} />
-            <i className="acct-m-query" style={{ flexGrow: r.queried }} />
+          <span className="bc-meter acct-rmeter" role="img" aria-label={entries}>
+            <i className="bc-m-done" style={{ flexGrow: r.reviewed }} />
+            <i className="bc-m-part" style={{ flexGrow: r.changed }} />
+            <i className="bc-m-query" style={{ flexGrow: r.queried }} />
             <i style={{ flexGrow: open }} />
           </span>
           <span>{entries}</span>

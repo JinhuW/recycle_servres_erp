@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { api } from './api';
 import type { PaidBy } from './useCommissionPaidBy';
 import {
-  addDays, addMonths, startOfMonth, startOfYear, todayIn,
-  type AccountingCheck, type AccountingCurrency, type AccountingDirection, type AccountingKind,
-  type AccountingMethod, type AccountingReviewFacts, type AccountingReviewState, type AccountingReviewTab,
+  accountingReviewActions, addDays, addMonths, startOfMonth, startOfYear, todayIn,
+  type AccountingChanges, type AccountingCheck, type AccountingCurrency, type AccountingDirection,
+  type AccountingKind, type AccountingMethod, type AccountingReviewState, type AccountingReviewTab,
   type AccountingTargetType, type IsoDate,
 } from '@recycle-erp/shared';
 
@@ -27,7 +27,7 @@ export type AcctEntry = {
   review: AcctReview | null;
 };
 
-export type AcctPerson = { id: string; name: string };
+type AcctPerson = { id: string; name: string };
 
 export type AcctReview = {
   state: AccountingReviewState;
@@ -82,7 +82,20 @@ export type AcctEvent = {
   at: string; actor: { id: string; name: string } | null;
 };
 
-export type AcctEntryDetail = AcctEntry & { targetFacts: AcctTarget | null; events: AcctEvent[] };
+// An entry whose sign-off an edit cleared: who had signed, and every field
+// changed since, worked out by the server for Review mode and the drawer
+// alike.
+export type AcctCleared = {
+  reviewer: AcctPerson | null; at: string; changes: AccountingChanges;
+  // The last change was the PO's payer moving the entry's Paid by.
+  followedPo: boolean;
+};
+
+export type AcctEntryDetail = AcctEntry & {
+  targetFacts: AcctTarget | null; events: AcctEvent[];
+  // Optional: a backend older than the drawer's copy sends none.
+  cleared?: AcctCleared | null;
+};
 
 export type AcctFx = { rate: number; source: string; effectiveDate: string };
 
@@ -104,18 +117,14 @@ export type AcctSummary = {
 // field changed since an earlier sign-off was cleared.
 export type AcctReviewRow = AcctEntry & {
   targetFacts: AcctTarget | null;
-  facts: AccountingReviewFacts;
   checks: AccountingCheck[];
-  cleared: {
-    reviewer: AcctPerson | null; at: string; changes: Record<string, { from: unknown; to: unknown }>;
-    // The last change was the PO's payer moving the entry's Paid by.
-    followedPo: boolean;
-  } | null;
+  cleared: AcctCleared | null;
 };
 
 export type AcctReviewQueue = {
   rows: AcctReviewRow[];
-  counts: Record<AccountingReviewTab, number>;
+  // Left out when the page asked for the list alone.
+  counts?: Record<AccountingReviewTab, number>;
   truncated: boolean;
 };
 
@@ -155,8 +164,11 @@ export const acctVoid = (id: string, reason: string) =>
   api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/void`, { reason }).then(reviewChanged);
 export const acctRestore = (id: string) =>
   api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/restore`, {}).then(reviewChanged);
-export const acctReviewQueue = (tab: AccountingReviewTab, managerId?: string) =>
-  api.get<AcctReviewQueue>('/api/accounting/review?' + new URLSearchParams({ tab, ...(managerId ? { managerId } : {}) }));
+// `counts: false` for a list whose tab counts the page already has.
+export const acctReviewQueue = (tab: AccountingReviewTab, managerId?: string, opts: { counts?: boolean } = {}) =>
+  api.get<AcctReviewQueue>('/api/accounting/review?' + new URLSearchParams({
+    tab, ...(managerId ? { managerId } : {}), ...(opts.counts === false ? { counts: '0' } : {}),
+  }));
 export const acctMarkReviewed = (id: string, version: string) =>
   api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/review`, { version }).then(reviewChanged);
 export const acctWithdrawReview = (id: string) =>
@@ -183,11 +195,20 @@ export function acctLedgerPath(scope: AcctScope): string {
 
 // ── Formatting ──────────────────────────────────────────────────────────────
 
+// One formatter per locale: a Review mode queue prints hundreds of figures
+// and dates on every render, and building one is the slow part.
+const yuanFormats = new Map<string, Intl.NumberFormat>();
+const dayFormats = new Map<string, Intl.DateTimeFormat>();
+
 /** A money figure cut where a ledger cuts it: sign, whole yuan, and the
  *  jiao/fen the book prints quieter. */
 export function splitYuan(n: number, locale: string): { sign: '' | '−'; whole: string; fraction: string } {
-  const parts = new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    .formatToParts(Math.abs(n));
+  let fmt = yuanFormats.get(locale);
+  if (!fmt) {
+    fmt = new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    yuanFormats.set(locale, fmt);
+  }
+  const parts = fmt.formatToParts(Math.abs(n));
   let whole = '';
   let fraction = '';
   let seenDecimal = false;
@@ -211,9 +232,15 @@ export function fmtSignedCny(n: number, locale: string): string {
 
 /** "Oct 21" for a calendar date, read as written rather than as a moment. */
 export function fmtBookDay(d: IsoDate, locale: string, withYear = false): string {
-  return new Intl.DateTimeFormat(locale, {
-    month: 'short', day: 'numeric', timeZone: 'UTC', ...(withYear ? { year: 'numeric' } : {}),
-  }).format(new Date(d + 'T00:00:00Z'));
+  const key = locale + (withYear ? '|y' : '');
+  let fmt = dayFormats.get(key);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(locale, {
+      month: 'short', day: 'numeric', timeZone: 'UTC', ...(withYear ? { year: 'numeric' } : {}),
+    });
+    dayFormats.set(key, fmt);
+  }
+  return fmt.format(new Date(d + 'T00:00:00Z'));
 }
 
 /** Whether each row is the first of its day, so the book prints the date once. */
@@ -264,78 +291,64 @@ export function phonePeriod(p: PhonePeriod, today: IsoDate): { from: IsoDate; to
 // ── Review ──────────────────────────────────────────────────────────────────
 
 // Fired after any write that can move a count: a sign-off, a question, an
-// edit or a void. The sidebar badge and the page header listen.
+// edit or a void. The review count below listens.
 const REVIEW_CHANGED = 'acct-review-changed';
-export function reviewChanged<T>(r: T): T {
+function reviewChanged<T>(r: T): T {
   window.dispatchEvent(new Event(REVIEW_CHANGED));
   return r;
 }
 
+// What waits on the viewer, one count for the page: the sidebar and the RMB
+// Flow page both show it, and one request serves every reader. A write while
+// a read is out asks again once it lands, so the count never ends older than
+// the write.
+let reviewCount = 0;
+let countReading = false;
+let countStale = false;
+const countReaders = new Set<() => void>();
+
+function readReviewCount() {
+  if (countReading) { countStale = true; return; }
+  countReading = true;
+  api.get<{ forMe: number; asked: number }>('/api/accounting/review/count')
+    // A badge that fails to load stays as it was; it is never worth a dialog.
+    .then(r => { reviewCount = r.forMe + r.asked; for (const l of countReaders) l(); }, () => {})
+    .finally(() => {
+      countReading = false;
+      if (countStale) { countStale = false; readReviewCount(); }
+    });
+}
+
+function watchReviewCount(onChange: () => void) {
+  if (countReaders.size === 0) window.addEventListener(REVIEW_CHANGED, readReviewCount);
+  countReaders.add(onChange);
+  if (!countReading) readReviewCount();
+  return () => {
+    countReaders.delete(onChange);
+    if (countReaders.size === 0) window.removeEventListener(REVIEW_CHANGED, readReviewCount);
+  };
+}
+
+const watchNothing = () => () => {};
+
 /** What waits on the viewer: entries to sign off, and questions to answer. */
 export function useAcctReviewCount(enabled: boolean): number {
-  const [n, setN] = useState(0);
-  useEffect(() => {
-    if (!enabled) return;
-    let alive = true;
-    const load = () => {
-      api.get<{ forMe: number; asked: number }>('/api/accounting/review/count')
-        // A badge that fails to load stays as it was; it is never worth a dialog.
-        .then(r => { if (alive) setN(r.forMe + r.asked); }, () => {});
-    };
-    load();
-    window.addEventListener(REVIEW_CHANGED, load);
-    return () => { alive = false; window.removeEventListener(REVIEW_CHANGED, load); };
-  }, [enabled]);
+  const n = useSyncExternalStore(enabled ? watchReviewCount : watchNothing, () => reviewCount);
   return enabled ? n : 0;
 }
 
 /**
- * What the viewer may do about an entry's review — the server's rules, so a
- * button is never offered that the API would refuse. The author never signs
- * off their own version; a question goes to the author or, for an entry
- * nobody wrote, to the manager whose money it was.
+ * What the viewer may do about an entry's review: the API's own rules
+ * (packages/shared), so a button is never offered that the API would refuse.
  */
 export function reviewActions(e: Pick<AcctEntry, 'review' | 'manager'>, me: string) {
   const r = e.review;
-  const none = { review: false, withdraw: false, query: false, answer: false, withdrawQuery: false, own: false };
-  if (!r) return none;
-  const own = r.author?.id === me;
-  const addressee = r.author?.id ?? e.manager.id;
-  const open = r.state === 'open' || r.state === 'changed';
-  return {
-    review: !own && r.state !== 'reviewed',
-    withdraw: r.state === 'reviewed' && r.by?.id === me,
-    query: !own && open && addressee !== me,
-    answer: r.state === 'queried' && r.query?.to?.id === me,
-    withdrawQuery: r.state === 'queried' && r.query?.by?.id === me,
-    own: own && r.state !== 'reviewed',
-  };
-}
-
-/**
- * Every field changed since a sign-off was cleared, from what the reviewer
- * signed to what the entry says now, read off the entry's own history. A
- * field put back as it was drops out. The server's Review mode rows carry
- * the same thing, worked out the same way.
- */
-export function changesSinceReview(events: readonly AcctEvent[], clearedAt: string | null) {
-  const out: Record<string, { from: unknown; to: unknown }> = {};
-  if (!clearedAt) return out;
-  const since = new Date(clearedAt).getTime();
-  for (const ev of events) {
-    if (ev.kind !== 'edited' || new Date(ev.at).getTime() < since) continue;
-    for (const [k, ch] of Object.entries(ev.detail.changes ?? {})) {
-      out[k] = { from: k in out ? out[k].from : ch.from, to: ch.to };
-    }
-  }
-  for (const k of Object.keys(out)) if (JSON.stringify(out[k].from) === JSON.stringify(out[k].to)) delete out[k];
-  return out;
-}
-
-/** Who signed the version an edit then cleared: the last sign-off before it. */
-export function clearedReviewer(events: readonly AcctEvent[], clearedAt: string | null): AcctPerson | null {
-  if (!clearedAt) return null;
-  const since = new Date(clearedAt).getTime();
-  const last = events.filter(e => e.kind === 'reviewed' && new Date(e.at).getTime() <= since).at(-1);
-  return last?.actor ?? null;
+  return accountingReviewActions({
+    state: r?.state ?? null,
+    authorId: r?.author?.id ?? null,
+    reviewedBy: r?.by?.id ?? null,
+    queryBy: r?.query?.by?.id ?? null,
+    queryTo: r?.query?.to?.id ?? null,
+    addressee: r?.author?.id ?? e.manager.id,
+  }, me);
 }

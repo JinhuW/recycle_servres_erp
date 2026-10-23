@@ -3,6 +3,7 @@ import { AttachmentDropzone } from './AttachmentDropzone';
 import { Icon } from './Icon';
 import type { HandoffMethod } from '../lib/handoff';
 import { useT } from '../lib/i18n';
+import { BUSINESS_ACCOUNT } from '../lib/poFacets';
 import { normalizePaypalTxnInput, isStrictPaypalTxnId } from '../lib/paypalTxn';
 import type { PaymentProof } from '../lib/usePaymentProof';
 
@@ -14,10 +15,6 @@ import type { PaymentProof } from '../lib/usePaymentProof';
 // anything is typed. The rules live in lib/handoff.ts; this file is markup.
 // Without `proof` (the create pages — no order to attach to yet) only the
 // picker renders.
-
-/** The select's value for the Business Account: not a user id, so it cannot
- *  collide with one. */
-export const PAY_BUSINESS = 'company';
 
 type Props = {
   paidBy: 'company' | 'self';
@@ -57,7 +54,7 @@ export function PaymentFields({
   // A self-paid record naming nobody (an older backend, or a payer dropped
   // from the list) keeps a row of its own, or the select could not show it.
   const stale = !company && (paidByUserId === null || !payers.some(m => m.id === paidByUserId));
-  const value = company ? PAY_BUSINESS : stale ? 'self' : paidByUserId!;
+  const value = company ? BUSINESS_ACCOUNT : stale ? 'self' : paidByUserId!;
 
   return (
     <div className={'pay-fields' + (compact ? ' compact' : '')}>
@@ -71,10 +68,10 @@ export function PaymentFields({
             disabled={disabled}
             onChange={e => {
               const v = e.target.value;
-              onPaidBy(v === PAY_BUSINESS ? 'company' : 'self', v === PAY_BUSINESS || v === 'self' ? null : v);
+              onPaidBy(v === BUSINESS_ACCOUNT ? 'company' : 'self', v === BUSINESS_ACCOUNT || v === 'self' ? null : v);
             }}
           >
-            <option value={PAY_BUSINESS}>{t(compact ? 'payBusinessShort' : 'payBusiness')}</option>
+            <option value={BUSINESS_ACCOUNT}>{t(compact ? 'payBusinessShort' : 'payBusiness')}</option>
             {stale && <option value="self">{t(compact ? 'paySelfShort' : 'paySelf')}</option>}
             {payers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>

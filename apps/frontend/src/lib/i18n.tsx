@@ -347,7 +347,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     roleViewSub: 'Admin sees the whole org; Purchaser narrows to your own.',
     defaultWarehouseSaved: 'Default warehouse updated',
     payment: 'Payment',
-    payCompany: 'Company card',
     paySelf: 'Self-paid (reimburse)',
     payBusiness: 'Business Account',
     totalCost: 'Total cost',
@@ -537,7 +536,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     acctPickChange: 'Change',
     acctPickRecorded: 'in the book',
     acctPickPaidBy: 'paid by {name}',
-    acctPickBusiness: 'Business Account',
     acctRatePh: 'Latest: {rate}',
     acctPreview: 'Books as {amount}',
     acctCounterpartyPh: 'Supplier, customer or purchaser',
@@ -579,10 +577,9 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     acctTickChangedNobody: 'Changed after it was reviewed',
     acctTickChangedShort: 'Changed',
     acctTickQueried: '{name} asked: {text}',
-    acctTickNext: 'Next',
     acctStripLabel: 'Reviewed',
     acctStripEntries: '{n} of {total} entries',
-    acctStripEntriesOne: '{n} of {total} entry',
+    acctStripEntriesOfOne: '{n} of {total} entry',
     acctStripMoney: '{reviewed} of {moved} moved',
     acctStripForMe: '{n} for you',
     acctStripQueried: '{n} queried',
@@ -640,7 +637,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     acctRmKeyMove: 'Move',
     acctRmKeyQuery: 'Query',
     acctRmKeyOpen: 'Open entry',
-    acctRmKeyUndo: 'Undo',
     acctRmKeyLeave: 'Leave',
     acctRmReviewedCount: 'entries reviewed',
     acctRmReviewedCountOne: 'entry reviewed',
@@ -667,7 +663,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     acctRmChangedBy: 'changed by {name}',
     acctRmBackfilled: 'backfilled',
     acctRmDoneDivider: 'Reviewed in this visit · {n}',
-    acctRmUndo: 'Undo',
     acctRmEmpty_mine: 'Nothing left for you to review',
     acctRmEmptyHint_mine: 'Queried entries come back here once they are answered.',
     acctRmEmpty_queried: 'No open questions',
@@ -1434,7 +1429,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
 
     // ── DesktopEditOrder ──
     commissionRate: 'Commission rate (%)',
-    payCompanyShort: 'Company',
     paySelfShort: 'Self-paid',
     payBusinessShort: 'Business',
 
@@ -2553,7 +2547,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     cpHint: 'How {name} is paid their commission. If no screenshot is here when the order is marked Done, the Done dialog asks for one.',
     cpPaidByLabel: 'Paid by',
     cpPaidByNone: 'Not recorded',
-    cpPaidByCompany: 'Business Account',
     cpPaidByChangeTitle: 'Change who paid the commission?',
     cpPaidByChangeMsg: 'Paid by changes from {from} to {to}. The change is recorded in Activity.',
     cpPaidByChangeConfirm: 'Change',
@@ -4231,6 +4224,16 @@ export async function translateIn(lang: Lang, key: string): Promise<string> {
 
 type Vars = Record<string, string | number>;
 
+/**
+ * The key a call reads: `<key>One` for a count of one, where the table has
+ * it — "1 entry", not "1 entries". The count is `n`, as every count string
+ * names it (a formatted "1" counts too); a key whose singular turns on
+ * another number names that variant something else.
+ */
+export function countKey(key: string, vars?: Vars): string {
+  return vars !== undefined && Number(vars.n) === 1 && I18N.en?.[key + 'One'] !== undefined ? key + 'One' : key;
+}
+
 type LangCtx = {
   lang: Lang;
   /** BCP 47 tag for Intl / toLocale*String, derived from `lang`. */
@@ -4300,7 +4303,8 @@ export function LangProvider({ children }: { children: ReactNode }) {
 
   const t = (key: string, vars?: Vars) => {
     const dict = ready.includes(lang) ? I18N[lang] : undefined;
-    let s = dict?.[key] || I18N.en?.[key] || key;
+    const k = countKey(key, vars);
+    let s = dict?.[k] || I18N.en?.[k] || key;
     // split/join, not replace: String.replace with a string pattern swaps only
     // the FIRST occurrence, so a template using one placeholder twice would
     // half-fill. No current key does, which is exactly why it is worth fixing

@@ -475,6 +475,25 @@ describe('accounting', () => {
     ]);
   });
 
+  it('a failed or reversed commission row paid nothing, on the PO and in the sync alike', async () => {
+    const sofia = await loginAs(SOFIA);
+    const po = await donePO();
+    const entry = await recorded(alex.token, base({ kind: 'commission', targetId: po, managerId: sofia.user.id }));
+    const row = await bankRow('m-failed');
+    await getTestDb()`
+      UPDATE bank_transactions SET order_id = ${po}, link_kind = 'commission', linked_at = NOW(), settle_status = 'failed'
+      WHERE id = ${row}`;
+    expect((await entryOf(alex.token, entry)).voided).toBeNull();
+    expect(await payerOf(po)).toMatchObject({ kind: 'manager', id: sofia.user.id });
+
+    // Once it settles it is the Business Account's money: the entry goes.
+    await getTestDb()`UPDATE bank_transactions SET settle_status = 'settled' WHERE id = ${row}`;
+    expect((await entryOf(alex.token, entry)).voided).toMatchObject({ reason: 'Paid from the Business Account' });
+    expect(await payerOf(po)).toMatchObject({ kind: 'company', linked: true });
+    await getTestDb()`UPDATE bank_transactions SET settle_status = 'reversed' WHERE id = ${row}`;
+    expect(await payerOf(po)).toMatchObject({ kind: 'manager', id: sofia.user.id });
+  });
+
   it('a deleted draft leaves the void; a nobody-on-file PO leaves the entry', async () => {
     const sofia = await loginAs(SOFIA);
     const marcus = await loginAs(MARCUS);

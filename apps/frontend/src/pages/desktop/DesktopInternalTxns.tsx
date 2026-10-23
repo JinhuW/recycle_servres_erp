@@ -209,7 +209,7 @@ function RecordTr({ row, open, onToggle, locale, onChanged, onToast }: {
           )}
         </td>
         <td style={{ whiteSpace: 'nowrap' }}>
-          {row.memberCount === 1 ? t('payIntMembersOne') : t('payIntMembers', { n: row.memberCount })}
+          {t('payIntMembers', { n: row.memberCount })}
         </td>
         <td className="num mono" style={{ color: row.totalIn ? 'var(--pos)' : undefined, whiteSpace: 'nowrap' }}>
           {row.totalIn ? fmtSigned(row.totalIn, locale) : '—'}

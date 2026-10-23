@@ -1,5 +1,6 @@
-import type { AccountingCheck, AccountingKind } from '@recycle-erp/shared';
-import { FIGURE_KEY, FIELD_KEY, ReviewMark } from '../../../components/AccountingBits';
+import type { AccountingChanges, AccountingCheck, AccountingKind, AccountingReviewState } from '@recycle-erp/shared';
+import { FIGURE_KEY, FIELD_KEY } from '../../../components/AccountingBits';
+import { Icon } from '../../../components/Icon';
 import { fmtCny, fmtBookDay, type AcctEntry, type AcctReviewRow } from '../../../lib/accounting';
 import { fmtDate, fmtMoney } from '../../../lib/format';
 import type { Translate } from '../../../lib/orderPresentation';
@@ -69,7 +70,7 @@ export function rowChip(row: AcctReviewRow, t: Translate, locale: string): { lab
 
 /** A field's value in a was → now line, the way the entry's own form shows it. */
 export function fieldValue(
-  field: string, v: unknown, ctx: { t: Translate; locale: string; people: { id: string; name: string }[] },
+  field: string, v: unknown, ctx: { t: Translate; locale: string; people: People },
 ): string {
   if (v === null || v === undefined || v === '') return '—';
   switch (field) {
@@ -82,6 +83,46 @@ export function fieldValue(
     case 'managerId': return ctx.people.find(m => m.id === v)?.name ?? '—';
     default: return String(v);
   }
+}
+
+type People = { id: string; name: string }[];
+
+/** A was → now line per changed field: the drawer's Review card and Review
+ *  mode's side panel. */
+export function ChangeList({ changes, people, t, locale, className }: {
+  changes: AccountingChanges; people: People; t: Translate; locale: string; className?: string;
+}) {
+  return (
+    <dl className={'acct-rv-diff' + (className ? ' ' + className : '')}>
+      {Object.entries(changes).map(([k, ch]) => (
+        <div key={k}>
+          <dt>{FIELD_KEY[k] ? t(FIELD_KEY[k]) : k}</dt>
+          <dd>
+            <span className="acct-was">{fieldValue(k, ch.from, { t, locale, people })}</span>
+            <span aria-hidden="true">→</span>
+            <b>{fieldValue(k, ch.to, { t, locale, people })}</b>
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** The reviewer's tick, in each of its states. `own` is To review as the
+ *  entry's author sees it: someone else has to sign it. */
+export function ReviewMark({ state, own, size = 22, label }: {
+  state: AccountingReviewState; own?: boolean; size?: number; label?: string;
+}) {
+  const glyph = Math.round(size * 0.55);
+  const cls = state === 'reviewed' ? 'done' : state === 'changed' ? 'changed' : state === 'queried' ? 'query' : own ? 'own' : 'open';
+  return (
+    <span className={'acct-mark ' + cls} style={{ width: size, height: size }}
+          role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
+      {state === 'reviewed' && <Icon name="check" size={glyph} />}
+      {state === 'changed' && <Icon name="rotate" size={glyph} />}
+      {state === 'queried' && <span className="acct-mark-q">?</span>}
+    </span>
+  );
 }
 
 const firstName = (name: string) => name.split(/\s+/)[0] || name;

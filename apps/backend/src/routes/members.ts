@@ -75,10 +75,15 @@ async function lastManagerError(
 // member's lifetime profit, which is neither theirs to see nor cheap.
 members.get('/names', async (c) => {
   const sql = getDb(c.env);
+  // Members who have left too, for a manager reading back a name a record
+  // already holds: a payer on the book, an actor in the audit. The pickers
+  // offer active members only.
+  const includeInactive = c.req.query('includeInactive') === 'true' && c.var.user.role === 'manager';
   // The role rides along so a purchaser's Paid by picker can offer the
   // managers; who is a manager is no secret to anyone who can log in.
-  const items = await sql<{ id: string; name: string; role: string }[]>`
-    SELECT id, name, role FROM users WHERE COALESCE(active, TRUE) ORDER BY name
+  const items = await sql<{ id: string; name: string; role: string; active: boolean }[]>`
+    SELECT id, name, role, COALESCE(active, TRUE) AS active FROM users
+    WHERE ${includeInactive ? sql`TRUE` : sql`COALESCE(active, TRUE)`} ORDER BY name
   `;
   return c.json({ items });
 });

@@ -65,6 +65,89 @@ export const ACCOUNTING_QUERY_MAX = 280;
 // it, so editing the note keeps the review — the sell order's sign-off rule.
 export const ACCOUNTING_UNREVIEWED_FIELDS = ['note'] as const;
 
+// Who may do what about an entry's review. The API refuses with
+// accountingReviewRefusal and the pages offer buttons with
+// accountingReviewActions, so a page never offers what the API would refuse.
+export const ACCOUNTING_REVIEW_ACTIONS = ['review', 'withdraw', 'query', 'answer', 'withdrawQuery'] as const;
+export type AccountingReviewAction = typeof ACCOUNTING_REVIEW_ACTIONS[number];
+
+// An entry as the rules read it. `state` is null once the entry is voided.
+export type AccountingReviewSubject = {
+  state: AccountingReviewState | null;
+  authorId: string | null;
+  reviewedBy: string | null;
+  queryBy: string | null;
+  queryTo: string | null;
+  // Who a new question goes to: the author, or for an entry nobody wrote
+  // (the backfill) the manager whose money it was.
+  addressee: string;
+};
+
+export type AccountingReviewRefusal =
+  | 'voided' | 'reviewed' | 'own' | 'notReviewed' | 'notReviewer'
+  | 'openQuestion' | 'yours' | 'noQuestion' | 'notAddressee' | 'notAsker';
+
+/**
+ * Why `me` may not take `action` on an entry, or null when they may. The
+ * author never signs off their own version; a sign-off may close an open
+ * question; only the reviewer withdraws a sign-off, only the asker a
+ * question, and only its addressee answers it.
+ */
+export function accountingReviewRefusal(
+  s: AccountingReviewSubject, me: string, action: AccountingReviewAction,
+): AccountingReviewRefusal | null {
+  switch (action) {
+    case 'review':
+      if (s.state === null) return 'voided';
+      if (s.state === 'reviewed') return 'reviewed';
+      return s.authorId === me ? 'own' : null;
+    case 'withdraw':
+      if (s.state !== 'reviewed') return 'notReviewed';
+      return s.reviewedBy === me ? null : 'notReviewer';
+    case 'query':
+      if (s.state === null) return 'voided';
+      if (s.state === 'reviewed') return 'reviewed';
+      if (s.state === 'queried') return 'openQuestion';
+      if (s.authorId === me) return 'own';
+      return s.addressee === me ? 'yours' : null;
+    case 'answer':
+      if (s.state !== 'queried') return 'noQuestion';
+      return s.queryTo === me ? null : 'notAddressee';
+    case 'withdrawQuery':
+      if (s.state !== 'queried') return 'noQuestion';
+      return s.queryBy === me ? null : 'notAsker';
+  }
+}
+
+/** Each action `me` may take, and `own`: the entry waits on someone else
+ *  because `me` wrote this version. */
+export function accountingReviewActions(s: AccountingReviewSubject, me: string) {
+  const can = (a: AccountingReviewAction) => accountingReviewRefusal(s, me, a) === null;
+  return {
+    review: can('review'), withdraw: can('withdraw'), query: can('query'),
+    answer: can('answer'), withdrawQuery: can('withdrawQuery'),
+    own: s.state !== null && s.state !== 'reviewed' && s.authorId === me,
+  };
+}
+
+export type AccountingChanges = Record<string, { from: unknown; to: unknown }>;
+
+/**
+ * A run of edits read as one: each field from its first old value to its
+ * last new one. A field put back as it was drops out. What Review mode and
+ * the entry drawer show as changed since a sign-off was cleared.
+ */
+export function foldChanges(edits: readonly (AccountingChanges | null | undefined)[]): AccountingChanges {
+  const out: AccountingChanges = {};
+  for (const changes of edits) {
+    for (const [k, ch] of Object.entries(changes ?? {})) {
+      out[k] = { from: k in out ? out[k].from : ch.from, to: ch.to };
+    }
+  }
+  for (const k of Object.keys(out)) if (JSON.stringify(out[k].from) === JSON.stringify(out[k].to)) delete out[k];
+  return out;
+}
+
 // What the server knows about an entry that a reviewer weighs it against.
 export type AccountingReviewFacts = {
   // The record's own figure, in its own currency, and what the whole book has
@@ -95,7 +178,7 @@ export type AccountingCheck =
 const RECORD_TOLERANCE_PCT = 0.01;
 const RECORD_TOLERANCE_CNY = 10;
 // A dollar entry's rate this far from the ledger's for its day was likely mistyped.
-export const ACCOUNTING_RATE_TOLERANCE_PCT = 0.02;
+const RATE_TOLERANCE_PCT = 0.02;
 // Two entries this many days apart with the same amount, method and record
 // look like one payment booked twice.
 export const ACCOUNTING_DUPLICATE_DAYS = 7;
@@ -133,7 +216,7 @@ export function accountingChecks(
   }
   if (e.currency === 'USD' && e.fxRate !== null && f.ledgerRate !== null && f.ledgerRate > 0) {
     const pct = e.fxRate / f.ledgerRate - 1;
-    if (Math.abs(pct) > ACCOUNTING_RATE_TOLERANCE_PCT) {
+    if (Math.abs(pct) > RATE_TOLERANCE_PCT) {
       out.push({ kind: 'rate', tone: 'warn', rate: e.fxRate, ledgerRate: f.ledgerRate, pct });
     }
   }

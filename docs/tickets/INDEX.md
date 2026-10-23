@@ -7,6 +7,7 @@ See [README.md](./README.md) for what the fields mean.
 |---|---|---|---|---|---|
 | [RS-362](./RS-362-wechat-board-brand-and-generation-columns-and-a-refi.md) | done | story | P2 | WeChat board: brand and generation columns, and a refine filter | 1.318.0 |
 | [RS-361](./RS-361-refine-the-pack-page-layout.md) | done | bug | P2 | Refine the Pack page layout | 1.317.5 |
+| [RS-360](./RS-360-fix-the-activity-crash-on-new-areas-and-the-v1-317-r.md) | done | task | P2 | Fix the Activity crash on new areas and the v1.317 review cleanups | 1.318.1 |
 | [RS-359](./RS-359-fix-the-v1-317-prod-release-review-findings.md) | done | bug | P2 | Fix the v1.317 prod release review findings | 1.317.4 |
 | [RS-358](./RS-358-fix-the-dev-main-review-findings-before-the-v1-317-r.md) | done | bug | P2 | Fix the dev→main review findings before the v1.317 release | 1.317.3 |
 | [RS-357](./RS-357-a-paid-by-that-follows-the-po-clears-the-entry-s-sig.md) | done | bug | P2 | A Paid by that follows the PO clears the entry's sign-off | 1.317.2 |

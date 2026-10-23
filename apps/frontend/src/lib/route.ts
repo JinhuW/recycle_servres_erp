@@ -527,10 +527,8 @@ export function onLinkClick(path: string, onNavigate?: () => void): (e: LinkClic
 export function activityRecordHref(area: ActivityArea, targetRef: string | null): string | null {
   if (area === 'price') return hrefFor('/market');
   if (!targetRef) return null;
-  const base = area === 'po' ? '/purchase-orders/'
-    : area === 'so' ? '/sell-orders/'
-    : area === 'acct' ? '/accounting/'
-    : '/inventory/';
+  if (area === 'acct') return hrefFor(accountingEntryPath(targetRef));
+  const base = area === 'po' ? '/purchase-orders/' : area === 'so' ? '/sell-orders/' : '/inventory/';
   return hrefFor(base + encodeURIComponent(targetRef));
 }
 

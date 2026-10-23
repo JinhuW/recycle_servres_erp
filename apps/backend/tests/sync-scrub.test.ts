@@ -28,7 +28,7 @@ describe('prod→dev sync scrub', () => {
     });
     const users = (await sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM users`)[0].n;
     // Read from the schema, not listed by hand: token_enc was added after the
-    // scrub was written, slipped past it, and 500'd the pool on dev.
+    // scrub was first written, slipped past it, and 500'd the pool on dev.
     const sealed = (await sql<{ column_name: string }[]>`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'fb_pool_accounts' AND column_name ~ '_enc$'
@@ -40,10 +40,15 @@ describe('prod→dev sync scrub', () => {
         ...Object.fromEntries(sealed.map((col) => [col, 'v1.a.b.c'])),
       })}`;
 
+    // A sealed column the scrub has never heard of, on a table of its own.
+    await sql`CREATE TABLE public.scrub_probe (id INT PRIMARY KEY, secret_enc TEXT, label TEXT)`;
+    await sql`INSERT INTO public.scrub_probe VALUES (1, 'v1.a.b.c', 'kept')`;
+
     await sql.begin(async (tx) => {
       await tx`SELECT pg_catalog.set_config('search_path', '', true)`;
       await tx.unsafe(scrub);
     });
+    expect(await sql`SELECT secret_enc, label FROM scrub_probe`).toEqual([{ secret_enc: null, label: 'kept' }]);
 
     const [left] = await sql<Record<string, number>[]>`
       SELECT

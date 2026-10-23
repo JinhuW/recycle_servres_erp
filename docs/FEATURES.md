@@ -2364,6 +2364,9 @@ is who paid, below).
       on you, and the Accounting parent carries the count while folded
       (v1.317.3).
     - The entry drawer carries a Review card with the viewer's own actions.
+      Its *Changed since review* comes from the server, worked out the same
+      way as Review mode's (v1.318.1), and who may sign, ask or answer is
+      one rule the API and both pages share.
     - Editing a reviewed entry warns that saving clears the review.
     - The history logs every sign-off, withdrawal, question, answer and
       clear. The phone shows those lines too, but has no Review mode;
@@ -2456,7 +2459,14 @@ over MCP.
   in the book's own words: fields, yuan, the question's text. The action
   filter gains *Reviewed* and *Query*. The area travels in the address
   (`#/activity?area=acct`), so the book's *Log* button lands filtered. The
-  table is append-only by trigger from 0197, like the other four.
+  table is append-only by trigger from 0197, like the other four. A row
+  nobody made says what did it in the person column, as the entry's history
+  does: *Paid by followed the PO*, *Voided: paid from the Business Account*,
+  or the backfill (v1.318.1). A diff names payers who have left too.
+- **A tab gets only the areas it can draw** (v1.318.1). The page sends its
+  list (`areas`), and the server leaves every other area out of the rows and
+  the counts. An area a later release adds never reaches a tab still open on
+  an older bundle, which in v1.317 crashed on opening an Accounting row.
 - Loads as you scroll, with a pinned column head (v1.38.0), and "Open record"
   opens the record (v1.51.x).
 - Member/permission changes are **absent** — they write no audit rows
@@ -2615,6 +2625,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     posts and groups with messages, with the change in buyers and sellers
     against the day before on hover. Its foot carries the shown/total line
     count and the report's window. The four KPI cards are gone.
+  - Since v1.318.1 the search works as on the fleet pages: every term, in
+    any order and across name, spec, code and part numbers (`ddr5 64g`),
+    highlighted on the board. The tabs are links, and the Groups tab rides
+    the address (`?view=groups`), so a reload or a copied link opens it.
   - Claude's market notes, **Most wanted** and **Most offered** (the specs
     with the most buyers and sellers) sit in an aside beside the board, or
     above it below 1190px (v1.316.0). Clicking a spec shows it on the
