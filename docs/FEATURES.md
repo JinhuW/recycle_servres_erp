@@ -2757,7 +2757,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   coordinator's login ledger through the fleet console's `/v1/logins`
   (the facebook-tracker release after 0.13.12); a row names the account by uid, or else belongs
   to the account that was on that worker when it started. Against an older
-  console the timeline shows the pool's events and says logins will follow. A worker's Today strip uses
+  console the timeline shows the pool's events and says logins will follow.
+  Since v1.321.0 (RS-367) the worker's page is two columns from 1190px up:
+  the card, Open checkpoints and Accounts used on the left, and **History**
+  beside them from the card's top, as tall as they are and scrolling its own
+  list (below 1190px it stacks underneath). History tracks everything known
+  about the worker, newest first: its status changes, checkpoints and latest
+  search, listing and backup as before, each pool account signing on and
+  leaving (with how it left), and every login the worker attempted, whichever
+  account it was for, marked with that account's # and folded into runs.
+  Against an older console it says logins will appear once it is updated. A worker's Today strip uses
   its own sweep times, from the config it runs, so a worker that shares an IP
   and sweeps at its own hour shows that hour (facebook-tracker 0.13.8). And a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before

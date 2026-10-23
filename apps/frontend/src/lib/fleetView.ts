@@ -4,8 +4,10 @@
 // Kept out of the components so they can be unit-tested without React.
 
 import type {
-  AlertHitRow, Challenge, CityTierSettings, CityWrite, FleetAccount, FleetCity, FleetDoc, ReviewStatsDay, SearchSettingsWrite, StatusChange,
+  AlertHitRow, Challenge, CityTierSettings, CityWrite, FleetAccount, FleetCity, FleetDoc, LedgerLogin, ReviewStatsDay,
+  SearchSettingsWrite, StatusChange,
 } from './coordinator';
+import type { FbWorkerStint } from './facebookPool';
 import { ruleLines } from './keywordRules';
 
 export type AccountLiveness = 'live' | 'stale' | 'dead' | 'unknown' | 'none';
@@ -268,6 +270,56 @@ export function fleetActivity(fleet: FleetDoc | null, challenges: readonly Chall
     out.push({ at: ch.created_at, workerId: ch.worker_id, kind: 'checkpoint', detail: ch.kind });
   }
   return out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+}
+
+// ── One worker's History column ──
+// Everything the page knows happened on a worker, newest first: its activity
+// and status changes, each pool account signing on and leaving, and every
+// login it attempted, whichever account it was for.
+export type HistoryLine =
+  | { kind: 'event'; at: number; event: FleetEvent }
+  | { kind: 'signon'; at: number; stint: FbWorkerStint }
+  | { kind: 'left'; at: number; stint: FbWorkerStint }
+  | { kind: 'login'; at: number; since: number; count: number; accountNo: number | null; login: LedgerLogin };
+
+/** The account a login was for: the one its uid names, else the one on the
+ *  worker when it started. Null when neither is known. */
+export function loginAccountNo(login: LedgerLogin, stints: readonly FbWorkerStint[]): number | null {
+  const key = login.identity_key;
+  if (key?.startsWith('uid:')) return stints.find(s => s.uid === key.slice(4))?.accountNo ?? null;
+  const at = Date.parse(login.started_at);
+  return stints.find(s => at >= s.startedAt && (s.endedAt === null || at <= s.endedAt))?.accountNo ?? null;
+}
+
+/** Merged and sorted newest first. A run of logins for the same account with
+ *  the same trigger and outcome reads as one line, from `since` to `at`. On a
+ *  tie, an account signing on sorts above the one it replaced leaving. */
+export function workerHistory(
+  events: readonly FleetEvent[], stints: readonly FbWorkerStint[], logins: readonly LedgerLogin[],
+): HistoryLine[] {
+  const lines: HistoryLine[] = [
+    ...events.map(e => ({ kind: 'event' as const, at: Date.parse(e.at), event: e })),
+    ...stints.map(s => ({ kind: 'signon' as const, at: s.startedAt, stint: s })),
+    ...stints.flatMap(s => (s.endedAt === null ? [] : [{ kind: 'left' as const, at: s.endedAt, stint: s }])),
+    ...logins.map(l => {
+      const at = Date.parse(l.started_at);
+      return { kind: 'login' as const, at, since: at, count: 1, accountNo: loginAccountNo(l, stints), login: l };
+    }),
+  ];
+  lines.sort((a, b) => b.at - a.at);
+  const out: HistoryLine[] = [];
+  for (const line of lines) {
+    const last = out[out.length - 1];
+    if (line.kind === 'login' && last?.kind === 'login' && last.accountNo === line.accountNo
+        && last.login.trigger === line.login.trigger && last.login.outcome === line.login.outcome
+        && last.login.detail?.kind === line.login.detail?.kind) {
+      last.count += 1;
+      last.since = line.at;
+      continue;
+    }
+    out.push(line.kind === 'login' ? { ...line } : line);
+  }
+  return out;
 }
 
 // The pipeline a listing goes through, in the order the monitor and the

@@ -17,6 +17,26 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.321.0] - 2026-10-23
+
+The worker page's History is now a full-height column that tracks the
+worker's whole record (RS-367). It used to be a 286px box under the card,
+beside Open checkpoints, holding status changes, the latest search, listing
+and backup, and open checkpoints. Above it the card ran the full width with
+its values in the left third, and that empty strip is what the request
+pointed at. From 1190px up the page is now two columns: the card, Open
+checkpoints and Accounts used on the left, and History beside them from the
+card's top, as tall as they are, scrolling its own list.
+
+History merges into one list, newest first: what it showed before; each pool
+account signing on to the worker and leaving it, with how it left (from the
+v1.319.0 stints); and every login the worker attempted, whichever account it
+was for, marked with that account's # and folded into runs as in the account
+timeline. The logins come from the fleet console's ledger route through the
+new manager-only `GET /api/coordinator/workers/:id/logins`. Until the console
+release with that route is deployed, History shows the rest and says logins
+will follow.
+
 ## [1.320.0] - 2026-10-23
 
 Each account on a worker's page now unfolds into its timeline (RS-366). The

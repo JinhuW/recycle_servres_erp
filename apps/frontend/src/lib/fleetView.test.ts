@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetWorker } from './coordinator';
+import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetWorker, type LedgerLogin } from './coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
   externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic, reloginProgress,
@@ -8,6 +8,7 @@ import {
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyPort, sharedExits,
   applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
+  loginAccountNo, workerHistory,
 } from './fleetView';
 
 describe('keysymsFor', () => {
@@ -590,5 +591,52 @@ describe('sortFleet', () => {
     const live = { liveness: 'live', state: 'HEALTHY' } as never;
     const ws = [account({ worker_id: 'off' }), account({ worker_id: 'parked', health: live }), account({ worker_id: 'ok', health: live })];
     expect(ids(sortFleet(ws, 'status', 'asc', new Set(['parked'])))).toEqual(['ok', 'parked', 'off']);
+  });
+});
+
+describe('workerHistory', () => {
+  const stint = (accountNo: number, startedAt: number, endedAt: number | null, outcome: string | null = null) => ({
+    accountNo, uid: `6155620348100${accountNo}`, email: null, proxyUrl: null, proxyKnown: true,
+    startedAt, endedAt, outcome: outcome as never,
+  });
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const login = (at: number, over: Partial<LedgerLogin> = {}): LedgerLogin => ({
+    id: at, worker_id: 'ne-1', account_id: 'ne-1', identity_key: null, trigger: 'boot', outcome: 'failed',
+    started_at: iso(at), finished_at: null, detail: null, ...over,
+  });
+  const T = Date.parse('2026-10-23T09:00:00Z');
+  const old = stint(1, T, T + 3_600_000, 'problem');
+  const now = stint(2, T + 3_600_000, null);
+
+  it('names a login\'s account by uid first, then by who was on the worker', () => {
+    expect(loginAccountNo(login(T + 60_000), [old, now])).toBe(1);
+    expect(loginAccountNo(login(T + 7_200_000), [old, now])).toBe(2);
+    // A uid wins over the time: #1's login while #2 sat on the worker.
+    expect(loginAccountNo(login(T + 7_200_000, { identity_key: `uid:${old.uid}` }), [old, now])).toBe(1);
+    expect(loginAccountNo(login(T - 60_000), [old, now])).toBeNull();
+    expect(loginAccountNo(login(T, { identity_key: 'uid:999' }), [old, now])).toBeNull();
+  });
+
+  it('merges events, sign-ons, leaves and logins newest first, folding runs', () => {
+    const lines = workerHistory(
+      [{ at: iso(T + 30_000), workerId: 'ne-1', kind: 'attention', detail: 'SESSION_EXPIRED', status: 'attention' }],
+      [now, old],
+      [
+        login(T + 7_200_000, { trigger: 'cookie-restore', outcome: 'restored' }),
+        login(T + 120_000), login(T + 90_000), login(T + 60_000),
+        login(T + 10_000, { outcome: 'challenge', detail: { kind: 'checkpoint' } }),
+      ],
+    );
+    expect(lines.map(l => [l.kind, l.at - T, l.kind === 'login' ? [l.accountNo, l.count, l.since - T] : null])).toEqual([
+      ['login', 7_200_000, [2, 1, 7_200_000]],
+      ['signon', 3_600_000, null],
+      ['left', 3_600_000, null],
+      ['login', 120_000, [1, 3, 60_000]],
+      ['event', 30_000, null],
+      ['login', 10_000, [1, 1, 10_000]],
+      ['signon', 0, null],
+    ]);
+    expect(lines[1].kind === 'signon' && lines[1].stint.accountNo).toBe(2);
+    expect(lines[2].kind === 'left' && lines[2].stint.accountNo).toBe(1);
   });
 });
