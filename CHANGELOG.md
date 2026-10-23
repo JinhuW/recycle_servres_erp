@@ -45,9 +45,11 @@ Workers hand all of this over with their heartbeat (migration 0005), so the
 OCI fleet needs no new secret. Nothing counts as sent until the relay accepts
 it.
 
-The group already has topics for the Facebook coordinator's ops alerts and
-deploy notices, and for homelab Prometheus. Those senders move with their own
-release and config change.
+memtrade's daily WeChat report (on the office Mac) sends its failures
+through the same route to "WeChat · Daily report". The group already has
+topics for the Facebook coordinator's ops alerts and deploy notices, and for
+homelab Prometheus. Those senders move with their own release and config
+change.
 
 ## [1.324.0] - 2026-10-23
 
