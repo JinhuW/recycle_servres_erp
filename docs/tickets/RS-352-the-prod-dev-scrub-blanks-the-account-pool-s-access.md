@@ -2,13 +2,13 @@
 id: RS-352
 title: The prod→dev scrub blanks the account pool's access tokens
 type: bug
-status: backlog
+status: done
 priority: P1
 created: 2026-10-22
 reporter: jinhu
 branch: JinhuW/clam
-pr:
-version:
+pr: 829
+version: v1.316.1
 related: [RS-337]
 ---
 

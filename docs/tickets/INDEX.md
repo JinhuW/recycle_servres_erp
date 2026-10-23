@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-352](./RS-352-the-prod-dev-scrub-blanks-the-account-pool-s-access.md) | backlog | bug | P1 | The prod→dev scrub blanks the account pool's access tokens | — |
+| [RS-352](./RS-352-the-prod-dev-scrub-blanks-the-account-pool-s-access.md) | done | bug | P1 | The prod→dev scrub blanks the account pool's access tokens | v1.316.1 |
 | [RS-351](./RS-351-wechat-and-reddit-pages-follow-the-facebook-fleet-pa.md) | done | story | P2 | WeChat and Reddit pages follow the Facebook fleet pattern | 1.316.0 |
 | [RS-350](./RS-350-accounting-review-mode-another-manager-signs-off-eac.md) | done | story | P2 | Accounting review mode: another manager signs off each entry | 1.315.0 |
 | [RS-349](./RS-349-accounting-fix-the-period-picker-and-backfill-entrie.md) | done | bug | P2 | Accounting: fix the period picker and backfill entries from Paid by and the payment receiver | 1.314.0 |
