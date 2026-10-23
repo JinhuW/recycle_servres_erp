@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.15] - 2026-10-23
+
 ### Changed
 
 - **Ops alerts, deploy notices and fleet-verify reports can live in their own
