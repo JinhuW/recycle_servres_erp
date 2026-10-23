@@ -2,13 +2,13 @@
 id: RS-357
 title: A Paid by that follows the PO clears the entry's sign-off
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: review-follows-po-payer
-pr:
-version:
+pr: 831
+version: 1.317.2
 related: [RS-350, RS-354, RS-355]
 ---
 
@@ -38,23 +38,23 @@ edited, so the fix replaces the function in a new migration.
 
 ## Acceptance criteria
 
-- [ ] A reviewed entry whose Paid by follows its PO to another person reads
+- [x] A reviewed entry whose Paid by follows its PO to another person reads
       *Changed since review*. Its reviewer and sign-off time are cleared,
       and its author stays as it was.
-- [ ] The `edited` event that move writes carries `clearedReview: { by, at }`,
+- [x] The `edited` event that move writes carries `clearedReview: { by, at }`,
       as an edit through the route does. The review queue's *Changed since
       review* diff then shows Paid by from → to and names the earlier
       reviewer, and Activity shows *review cleared*.
-- [ ] An entry that wasn't reviewed keeps its state: To review stays To
+- [x] An entry that wasn't reviewed keeps its state: To review stays To
       review, Changed stays Changed, and an open question stays open, not
       answered.
-- [ ] The history line reads *Paid by followed the PO. Review cleared* when it
+- [x] The history line reads *Paid by followed the PO. Review cleared* when it
       cleared a sign-off (en + zh).
-- [ ] Review mode doesn't name a person for a change the PO made: the queue
+- [x] Review mode doesn't name a person for a change the PO made: the queue
       row's line under the id reads *Paid by followed the PO*, not *changed
       by ‹author›*, and the entry's review card names it the same way
       instead of "—".
-- [ ] Applies however the PO's payer moved: the PO page, a commission
+- [x] Applies however the PO's payer moved: the PO page, a commission
       screenshot, a hand-off, or another entry's Paid by writing back to the
       PO.
 
