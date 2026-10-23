@@ -245,8 +245,10 @@ is not a stage but a flag beside one, set once every line has sold
   commission paid from the company's account. A live bank payment linked as
   the PO's commission makes it read Business Account on its own: the select
   locks with a note saying why, and an
-  unlink or a reversal gives back the pick made by hand. **The screenshot's
-  upload records the payer** (v1.302.0): a manager who uploads one while
+  unlink or a reversal gives back the pick made by hand. Whatever this field
+  reads, the PO's Commission entries in the Accounting book read too, and a
+  Commission entry's Paid by writes back here (v1.315.0, see *Accounting*).
+  **The screenshot's upload records the payer** (v1.302.0): a manager who uploads one while
   Paid by reads *Not recorded* is recorded as the payer. If Paid by names
   someone else, or reads Company paid, the upload asks *Set Paid by to you?*
   and changes it only on a yes. The Done dialog's drop box does the same,
@@ -2130,13 +2132,14 @@ to a PO's commission, or to sell orders (v1.257.0).
 
 ## Accounting
 
-Manager-only, both shells (v1.310.0). The managers' own book of money they
-received and paid, kept in **RMB**. Payments reconciles the company's USD bank
-accounts; this records what moves through the managers' hands — a supplier
-paid by Alipay, a purchaser's commission by WeChat, a customer's bank
-transfer, a refund on a case. Entries are a record only: they change no PO
-cost, sell-order revenue or case amount (the one exception is the commission
-payer, below).
+Manager-only, both shells (v1.310.0). The book of money received and paid,
+kept in **RMB**, by the managers or from the company's own account (the
+**Business Account**, since v1.315.0). Payments reconciles the company's USD
+bank accounts; this records what moves through the managers' hands — a
+supplier paid by Alipay, a purchaser's commission by WeChat, a customer's
+bank transfer, a refund on a case. Entries are a record only: they change no
+PO cost, sell-order revenue or case amount (the one exception is who paid,
+below).
 
 - **An entry** says received or paid, what it was for, how much, how
   (bank transfer, Alipay, WeChat Pay, cash, other), on what date and through
@@ -2159,20 +2162,35 @@ payer, below).
     out of every total and balance; **Restore** puts it back. Nothing is
     deleted. A draft PO deleted after money was booked against it leaves the
     entry on the book without its link, and its history names the PO.
-  - **A paid commission fills the PO's Paid by** when nobody is on file — the
-    screenshot upload's rule (see *Purchase orders*).
-  - **A PO's payer is the entry's manager to begin with** (v1.315.0). A PO
-    picked for a Purchase entry carries its cost payer, and for a Commission
-    entry its commission payer: the Cost Payment and Commission cards' Record
-    buttons, on both shells, and the entry dialog's PO pick open on that
-    manager. A payer who is not an active manager (a purchaser who paid
-    themselves, the Business Account) leaves the recorder as the manager. A
-    manager picked by hand, or an entry being edited, is never moved by the
-    record. The picker's PO line names the payer — *paid by Tim Wu*, or
-    **Business Account** when the cost was paid from the company's account
-    or the commission was (on file, or a live Mercury/PayPal row linked as
-    it) — so a manager sees before booking that the business, not a person,
-    paid.
+  - **An entry's Paid by and its PO's payer are one value** (v1.315.0,
+    migration 0198), kept in step both ways. *Paid by* is a person — an
+    active manager, or the PO's own purchaser on a self-paid cost — or the
+    **Business Account**, the company's own money.
+    - *PO → entry.* Whatever moves a PO's payer moves its live entries of
+      that kind: the PO page's Paid by, a commission screenshot, a
+      Mercury/PayPal row linked or unlinked as the commission (a linked row
+      reads Business Account), a cost payer edited or handed off, a
+      settlement that flips. The entry gets a *Paid by followed the PO*
+      history line. Nobody on file leaves an entry as recorded; a restored
+      entry catches up with its PO. The sync is a database trigger, so no
+      writer is missed.
+    - *Entry → PO.* Saving a Commission entry with Paid by X sets the PO's
+      commission Paid by to X (Business Account = company paid), with the
+      PO's Activity line. Saving a Purchase entry with Paid by a person sets
+      a self-paid PO's cost payer. Two entries on one PO carry one payer.
+    - *The PO decides* when a bank row stands as the commission, or the
+      cost was paid from the Business Account: the form shows Paid by locked
+      on Business Account with the reason, and a save naming a person is
+      refused. Both are undone on the PO (unlink the row; change the PO's
+      Paid by). A self-paid cost does not offer the Business Account.
+    - A PO picked for a Purchase entry carries its cost payer, and for a
+      Commission entry its commission payer: the Cost Payment and Commission
+      cards' Record buttons, on both shells, and the entry dialog's PO pick
+      open on that payer. A payer picked by hand, or an entry being edited,
+      is never moved by the record. The picker's PO line names the payer —
+      *paid by Tim Wu*, or **Business Account**.
+    - Entries written before the link were brought in line with their PO
+      once, with a *Paid by brought in line with the PO* history line.
 - **The book starts from the payers already on file** (v1.314.0, migration
   0196). A PO with a manager in Paid by is booked as a Paid commission
   through that manager, against the purchaser. It is the PO's projected
@@ -2190,25 +2208,26 @@ payer, below).
   - Such an entry's history names no one: *Backfilled from the PO's Paid by*
     or *from the sell order's payment receiver*.
 - **The page** (`#/accounting`, under Oversight after Payments).
-  - The period (the dashboard's chip, *This month* by default) and the manager
-    (all, or one) are the book's scope.
+  - The period (the dashboard's chip, *This month* by default) and the payer
+    (everyone, the Business Account, or one person) are the band's scope.
   - **The band** states the period as an identity: *Opening + Received − Paid
     = Closing*, with Received and Paid broken down by kind, the closing figure
-    double-ruled. Under it, *Held by* gives each manager's balance on the
-    closing date — received minus paid; below zero the company owes them. A
-    name there scopes the page to that manager.
+    double-ruled. Under it, *Held by* gives the Business Account's and each
+    person's balance on the closing date — received minus paid; below zero
+    the company owes that person. A name there scopes the page to that payer.
   - **The book** has Date (printed once per day), Entry, For (kind, the record
-    as a link, counterparty, note), Manager, Method, then **Received, Paid and
+    as a link, counterparty, note), Paid by, Method, then **Received, Paid and
     Balance** columns: direction is the column a figure sits in. Balance is
-    what the manager scope held after that entry, from the first entry on, so
-    the direction, kind, method and search filters hide rows without changing
-    any balance. *Show voided* lists voided entries struck through.
+    one company-wide book (v1.315.0): what the whole book held after that
+    entry, from the first entry on, so the payer, direction, kind, method and
+    search filters hide rows without changing any balance. *Show voided*
+    lists voided entries struck through.
   - A row, or `#/accounting/AC-1008`, opens the entry in a drawer: the record
     it is for (with that record's own figure and what the book has against
     it), every field, the history, Edit, Void and Restore. *Record entry*
     opens the form: direction, kind, a record picker searched by id or name,
-    amount in ¥ or $ with the RMB it books as, date, method, manager,
-    counterparty, reference and note.
+    amount in ¥ or $ with the RMB it books as, date, method, Paid by (the
+    Business Account or a person), counterparty, reference and note.
 - **On the records** (managers only), an *Accounting* card shows what the book
   has against the record, what that comes to, the record's own figure and a
   Record button with the record already chosen:
@@ -2221,9 +2240,10 @@ payer, below).
     amount still owed;
   - the **after-sales case** (its refunds, net refunded, the case amount).
 - **On the phone**, Home links managers to the Accounting screen: period chips
-  (this month, last month, last 30 days, this year), a manager chip row, the
-  period as a vertical sum with each manager's balance, an All / Received /
-  Paid switch and the entries by day. `+` records an entry in a sheet; an
+  (this month, last month, last 30 days, this year), a Paid by chip row
+  (everyone, Business, each manager), the period as a vertical sum with the
+  Business Account's and each manager's balance, an All / Received / Paid
+  switch and the entries by day. `+` records an entry in a sheet; an
   entry opens on its own screen with Edit, Void and Restore. The phone PO
   page's Cost Payment and Commission folds carry the order's entries and a
   Record payment button.

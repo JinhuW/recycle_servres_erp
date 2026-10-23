@@ -43,10 +43,31 @@ fields share one vocabulary. The spreadsheet export names the payer.
 Accounting opens on the PO's payer: a PO picked for a Purchase entry carries
 its cost payer, and for a Commission entry its commission payer, so the
 Cost Payment and Commission cards' Record buttons and the entry dialog's PO
-pick start on that manager when they are an active one. A manager picked by
-hand, or an entry being edited, is never moved by the record.
-`/api/members/names` now carries each member's role, so a purchaser's
-picker can tell the managers apart.
+pick start on that payer. A payer picked by hand, or an entry being edited,
+is never moved by the record. `/api/members/names` now carries each
+member's role, so a purchaser's picker can tell the managers apart.
+
+An entry's *Paid by* and its PO's payer are now one value, kept in step both
+ways (RS-351). The book's *Manager* column is *Paid by*, and the **Business
+Account** is a payer the book can name: `accounting_entries.manager_id` is
+nullable, null being the company's account. Migration 0198 adds
+`accounting_sync_payer` and two triggers — on the PO's payer columns and on
+bank-row links — so whatever moves a PO's payer (the PO page, a commission
+screenshot, a Mercury/PayPal row linked or unlinked as the commission, a
+cost payer edited or handed off, a settlement that flips) moves its live
+entries of that kind, with a *Paid by followed the PO* history line; nobody
+on file leaves an entry as recorded, and a restored entry catches up. The
+other way, saving an entry with *Paid by* X sets the PO's commission payer
+to X (Business Account = company paid) with its Activity line, or a
+self-paid PO's cost payer; it is refused while a bank row stands as the
+commission, or while the cost was paid from the Business Account — those
+are undone on the PO, and the form shows the field locked with the reason.
+A self-paid cost may name the PO's own purchaser. Every live PO-linked
+entry was brought in line with its PO once, with a history line.
+
+The running *Balance* is one company-wide book: the *Paid by* filter and
+*Held by* hide rows, never move the balance. *Held by* and the filter gain
+the Business Account.
 
 ## [1.314.0] - 2026-10-22
 

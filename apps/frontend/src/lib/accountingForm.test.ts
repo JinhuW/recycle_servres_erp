@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { applyKind, initialForm, pickTarget, previewCny, toRequestBody } from './accountingForm';
-import { markDayStarts, owedOnSale, phonePeriod, splitYuan, fmtCny, fmtSignedCny } from './accounting';
+import { applyKind, businessOffered, initialForm, payerLock, pickTarget, previewCny, toRequestBody } from './accountingForm';
+import { BUSINESS_PAYER, acctPayerName, markDayStarts, owedOnSale, phonePeriod, splitYuan, fmtCny, fmtSignedCny } from './accounting';
 
 const ME = '11111111-1111-1111-1111-111111111111';
 const TODAY = '2026-10-21';
@@ -45,6 +45,41 @@ describe('the entry form', () => {
     expect(pickTarget(f, { id: 'PO-1', payerId: TIM }).managerId).toBe(TIM);
     expect(pickTarget(f, { id: 'PO-1' }).managerId).toBe(ME);
     expect(pickTarget({ ...f, managerTouched: true }, { id: 'PO-1', payerId: TIM }).managerId).toBe(ME);
+  });
+
+  it('reads the Business Account from the record, and lets the PO settle it', () => {
+    const TIM = '22222222-2222-2222-2222-222222222222';
+    const company = { id: 'PO-1', payerBusiness: true, payment: 'company' as const };
+    const fromCard = initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase', target: company } });
+    expect(fromCard.managerId).toBe(BUSINESS_PAYER);
+    // A cost paid from the company's account is the PO's to change: even a
+    // hand-picked person yields.
+    const f = { ...initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase' } }), managerId: TIM, managerTouched: true };
+    expect(pickTarget(f, company).managerId).toBe(BUSINESS_PAYER);
+    expect(payerLock('purchase', company)).toBe('company');
+    expect(payerLock('commission', company)).toBeNull();
+    expect(payerLock('commission', { id: 'PO-1', commissionLinked: true })).toBe('linked');
+    expect(payerLock('purchase', { id: 'PO-1', payment: 'self' })).toBeNull();
+    // The same PO read as a commission is free again, and vice versa.
+    const asCommission = applyKind(pickTarget(f, company), 'commission');
+    expect(asCommission.managerId).toBe(BUSINESS_PAYER);
+    expect(applyKind({ ...asCommission, managerId: TIM }, 'purchase').managerId).toBe(BUSINESS_PAYER);
+    // A self-paid cost was paid by a person.
+    expect(businessOffered('purchase', { id: 'PO-1', payment: 'self' })).toBe(false);
+    expect(businessOffered('purchase', company)).toBe(true);
+    expect(businessOffered('commission', { id: 'PO-1', payment: 'self' })).toBe(true);
+    expect(businessOffered('other', null)).toBe(true);
+    // An entry booked to the Business Account opens on it.
+    const entry = {
+      id: 'AC-1000', direction: 'out' as const, kind: 'purchase' as const, amount: 100, currency: 'CNY' as const,
+      fxRate: null, amountCny: 100, method: 'bank' as const, occurredOn: TODAY, manager: null,
+      target: { type: 'po' as const, id: 'PO-1' }, counterparty: null, reference: null, note: null,
+      createdAt: '', updatedAt: '', createdBy: null, voided: null,
+    };
+    expect(initialForm({ meId: ME, today: TODAY, entry }).managerId).toBe(BUSINESS_PAYER);
+    expect(toRequestBody({ ...initialForm({ meId: ME, today: TODAY, entry }), amount: '5' })).toMatchObject({ body: { managerId: null } });
+    expect(acctPayerName(null, k => k)).toBe('payBusiness');
+    expect(acctPayerName({ name: 'Tim Wu' }, k => k)).toBe('Tim Wu');
   });
 
   it('turns into a request, or names what is missing', () => {

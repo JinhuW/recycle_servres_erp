@@ -7,7 +7,7 @@ import { useT } from '../../../lib/i18n';
 import { showSuccessToast } from '../../../lib/errorToast';
 import { fmtMoney } from '../../../lib/format';
 import { accountingEntryPath } from '../../../lib/route';
-import { fmtBookDay, owedOnSale, signedCny, type AcctScope } from '../../../lib/accounting';
+import { acctPayerName, fmtBookDay, owedOnSale, signedCny, type AcctScope } from '../../../lib/accounting';
 import { useAccountingTarget } from '../../../lib/useAccountingTarget';
 import type { SavedEntry } from '../../../lib/useAccountingEntryForm';
 import type { EntryPreset } from '../../../lib/accountingForm';
@@ -65,7 +65,7 @@ export function AccountingCard({ scope, className, managerId, onRecorded }: {
             <RouteLink key={e.id} to={accountingEntryPath(e.id)} className="acct-card-row">
               <span className="acct-card-day">{fmtBookDay(e.occurredOn, locale)}</span>
               <span className="acct-card-what">
-                {[kind === 'sale' && e.kind !== 'sale' ? t('acctKind_' + e.kind) : null, e.manager.name, t('acctMethod_' + e.method)]
+                {[kind === 'sale' && e.kind !== 'sale' ? t('acctKind_' + e.kind) : null, acctPayerName(e.manager, t), t('acctMethod_' + e.method)]
                   .filter(Boolean).join(' · ')}
               </span>
               <Yuan value={signedCny(e)} locale={locale} signed className={e.direction === 'in' ? 'acct-in' : undefined} />

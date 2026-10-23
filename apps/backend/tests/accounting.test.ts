@@ -10,15 +10,15 @@ import { mockFrankfurter } from './helpers/fx';
 import { NOW, DAY, fakeProvider } from './helpers/bankProvider';
 import { syncBankTransactions } from '../src/banktx/sync';
 
-// The managers' RMB book: manager-only, entries linked to the record they are
-// for, totals in CNY at each dollar entry's own rate, a running balance that
-// no filter can move, and the commission payer filled the way a screenshot
-// upload fills it.
+// The RMB book: manager-only, entries linked to the record they are for,
+// totals in CNY at each dollar entry's own rate, a running balance that no
+// filter can move, and an entry's Paid by kept in step with its PO's payer
+// both ways (manager null: the Business Account).
 
 type Entry = {
   id: string; direction: string; kind: string; amount: number; currency: string; fxRate: number | null;
   amountCny: number; occurredOn: string; method: string; counterparty: string | null;
-  manager: { id: string; name: string };
+  manager: { id: string; name: string } | null;
   target: { type: string; id: string } | null; balance?: number | null;
   voided: { reason: string } | null;
 };
@@ -26,6 +26,7 @@ type Summary = {
   opening: number; received: number; paid: number; closing: number;
   byKind: Record<string, { received: number; paid: number; count: number }>;
   managers: { id: string; name: string; balance: number }[];
+  business: { balance: number };
   first: string | null; fx: { rate: number };
 };
 type PaidBy = { kind: 'manager'; id: string; name: string } | { kind: 'company'; linked: boolean } | null;
@@ -112,14 +113,16 @@ describe('accounting', () => {
 
   it('numbers entries AC-, and holds each kind to its record', async () => {
     const po = await draftPO(alex.token);
-    const first = await recorded(alex.token, base({ kind: 'purchase', targetId: po }));
+    // A draft PO is paid from the company's account: its cost entry is too.
+    const first = await recorded(alex.token, base({ kind: 'purchase', targetId: po, managerId: null }));
     expect(first).toMatch(/^AC-\d+$/);
     const second = await recorded(alex.token, base({}));
     expect(Number(second.slice(3))).toBe(Number(first.slice(3)) + 1);
 
     expect((await record(alex.token, base({ kind: 'purchase' }))).status).toBe(400);
     expect((await record(alex.token, base({ kind: 'other', targetId: po }))).status).toBe(400);
-    expect((await record(alex.token, base({ kind: 'purchase', targetId: 'PO-999999' }))).status).toBe(404);
+    expect((await record(alex.token, base({ kind: 'purchase', targetId: 'PO-999999', managerId: null }))).status).toBe(404);
+    expect((await record(alex.token, base({ managerId: 'nobody' }))).status).toBe(400);
     expect((await record(alex.token, base({ kind: 'sale', direction: 'in', targetId: po }))).status).toBe(404);
     const { user: marcus } = await loginAs(MARCUS);
     expect((await record(alex.token, base({ managerId: marcus.id }))).status).toBe(400);
@@ -154,6 +157,7 @@ describe('accounting', () => {
     expect(all.byKind.other).toEqual({ received: 500, paid: 380, count: 3 });
     expect(all.managers.find(m => m.id === alex.user.id)?.balance).toBe(1200);
     expect(all.managers.find(m => m.id === sofia.user.id)?.balance).toBe(-80);
+    expect(all.business.balance).toBe(0);
     expect(all.fx.rate).toBe(7.2);
 
     const mine = (await api<Summary>(
@@ -166,13 +170,19 @@ describe('accounting', () => {
   it('runs the balance over the whole book, whatever the filters hide', async () => {
     const po = await draftPO(alex.token);
     await recorded(alex.token, base({ direction: 'in', amount: 1000, occurredOn: '2026-10-01' }));
-    await recorded(alex.token, base({ kind: 'purchase', targetId: po, amount: 300, occurredOn: '2026-10-02' }));
+    await recorded(alex.token, base({ kind: 'purchase', targetId: po, amount: 300, occurredOn: '2026-10-02', managerId: null }));
     await recorded(alex.token, base({ direction: 'in', amount: 50, occurredOn: '2026-10-03', counterparty: 'Acme' }));
 
     const book = await listOf(alex.token, 'from=2026-10-01&to=2026-10-31');
     expect(book.rows.map(r => [r.amount, r.balance])).toEqual([[50, 750], [300, 700], [1000, 1000]]);
     const purchases = await listOf(alex.token, 'kind=purchase');
     expect(purchases.rows.map(r => r.balance)).toEqual([700]);
+    // One company-wide book: scoping to a payer hides rows, never moves the balance.
+    const business = await listOf(alex.token, 'managerId=business');
+    expect(business.rows.map(r => [r.amount, r.manager, r.balance])).toEqual([[300, null, 700]]);
+    const alexs = await listOf(alex.token, `managerId=${alex.user.id}`);
+    expect(alexs.rows.map(r => [r.amount, r.balance])).toEqual([[50, 750], [1000, 1000]]);
+    expect((await api('GET', '/api/accounting/entries?managerId=someone', { token: alex.token })).status).toBe(400);
     const searched = await listOf(alex.token, 'q=acme');
     expect(searched.rows.map(r => r.balance)).toEqual([750]);
     // A window that starts late still carries what came before it.
@@ -194,7 +204,7 @@ describe('accounting', () => {
 
   it('shows each record its own side of the book', async () => {
     const po = await draftPO(alex.token);
-    await recorded(alex.token, base({ kind: 'purchase', targetId: po, amount: 500 }));
+    await recorded(alex.token, base({ kind: 'purchase', targetId: po, amount: 500, managerId: null }));
     await recorded(alex.token, base({ kind: 'purchase', targetId: po, direction: 'in', amount: 50 }));
     await recorded(alex.token, base({ kind: 'commission', targetId: po, amount: 70 }));
     const so = await shippedSO(alex.token);
@@ -245,68 +255,153 @@ describe('accounting', () => {
     expect((await entryOf(alex.token, id)).events.map(e => e.kind)).toEqual(['created', 'edited', 'voided', 'restored']);
   });
 
-  it('a paid commission names its manager as the payer when nobody is on file', async () => {
+  // ── The two-way link with the PO (0198) ───────────────────────────────────
+
+  const payerOf = async (po: string) =>
+    (await api<{ order: { commissionPaidBy: PaidBy } }>('GET', `/api/orders/${po}`, { token: alex.token })).body.order.commissionPaidBy;
+  const patch = (id: string, body: Record<string, unknown>) =>
+    api<{ commissionPaidBy?: PaidBy; error?: string }>('PATCH', `/api/accounting/entries/${id}`, { token: alex.token, body });
+  const managerOf = async (id: string) => (await entryOf(alex.token, id)).manager;
+  const poEvents = async (po: string, field: string) =>
+    (await api<{ events: { kind: string; detail: { changes?: { field: string; from: unknown; to: unknown }[] } }[] }>(
+      'GET', `/api/orders/${po}/events`, { token: alex.token })).body.events
+      .filter(e => e.kind === 'meta_changed' && e.detail.changes?.some(ch => ch.field === field));
+  // A Mercury row, synced in; its id for the link routes.
+  const bankRow = async (externalId: string) => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [{ externalId, amount: -50, counterparty: 'Marcus', postedAt: new Date(NOW - DAY) }]),
+    ]);
+    const [row] = await getTestDb()<{ id: string }[]>`SELECT id FROM bank_transactions WHERE external_id = ${externalId}`;
+    return row.id;
+  };
+
+  it('a commission entry names the PO\'s payer, and the PO names the entry\'s', async () => {
     const sofia = await loginAs(SOFIA);
     const po = await donePO();
     const r = await record(alex.token, base({ kind: 'commission', targetId: po, managerId: sofia.user.id }));
     expect(r.status).toBe(201);
     expect(r.body.commissionPaidBy).toMatchObject({ kind: 'manager', id: sofia.user.id });
+    expect(await payerOf(po)).toMatchObject({ kind: 'manager', id: sofia.user.id });
 
-    // Someone is on file now: a second entry leaves them.
-    const again = await record(alex.token, base({ kind: 'commission', targetId: po }));
-    expect(again.body.commissionPaidBy).toBeUndefined();
-    const order = await api<{ order: { commissionPaidBy: PaidBy } }>('GET', `/api/orders/${po}`, { token: alex.token });
-    expect(order.body.order.commissionPaidBy).toMatchObject({ kind: 'manager', id: sofia.user.id });
-    const events = await api<{ events: { kind: string; detail: { changes?: { field: string }[] } }[] }>(
-      'GET', `/api/orders/${po}/events`, { token: alex.token });
-    expect(events.body.events.filter(e => e.kind === 'meta_changed'
-      && e.detail.changes?.some(ch => ch.field === 'commission_paid_by'))).toHaveLength(1);
-  });
+    // Booked under the wrong manager: the correction moves the PO's payer.
+    expect((await patch(r.body.id, { managerId: alex.user.id })).body.commissionPaidBy)
+      .toMatchObject({ kind: 'manager', id: alex.user.id });
+    expect(await payerOf(po)).toMatchObject({ kind: 'manager', id: alex.user.id });
+    // A note edit touches neither side.
+    expect((await patch(r.body.id, { note: 'typo fixed' })).body.commissionPaidBy).toBeUndefined();
+    expect(await poEvents(po, 'commission_paid_by')).toHaveLength(2);
 
-  it('fills the payer once, and moves it with a corrected manager while it is still theirs', async () => {
-    const sofia = await loginAs(SOFIA);
-    const po = await donePO();
-    const payerOf = async () =>
-      (await api<{ order: { commissionPaidBy: PaidBy } }>('GET', `/api/orders/${po}`, { token: alex.token })).body.order.commissionPaidBy;
-    const patch = (id: string, body: Record<string, unknown>) =>
-      api<{ commissionPaidBy?: PaidBy }>('PATCH', `/api/accounting/entries/${id}`, { token: alex.token, body });
-    const id = await recorded(alex.token, base({ kind: 'commission', targetId: po }));
-    expect(await payerOf()).toMatchObject({ kind: 'manager', id: alex.user.id });
-
-    // Booked under the wrong manager: the correction carries the payer along.
-    expect((await patch(id, { managerId: sofia.user.id })).body.commissionPaidBy)
-      .toMatchObject({ kind: 'manager', id: sofia.user.id });
-    expect(await payerOf()).toMatchObject({ kind: 'manager', id: sofia.user.id });
-
-    // Cleared by hand on purpose, a later edit of the note leaves it cleared.
+    // The PO's side: set by hand, the entry follows, with its own history line.
+    expect((await api('PUT', `/api/orders/${po}/commission-paid-by`, { token: alex.token, body: { userId: sofia.user.id } })).status).toBe(200);
+    expect(await managerOf(r.body.id)).toMatchObject({ id: sofia.user.id });
+    expect((await entryOf(alex.token, r.body.id)).events.at(-1)).toMatchObject({
+      kind: 'edited', detail: { synced: 'po', changes: { managerId: { from: alex.user.id, to: sofia.user.id } } },
+    });
+    // Cleared on the PO, nobody is on file: the entry keeps what it recorded.
     expect((await api('PUT', `/api/orders/${po}/commission-paid-by`, { token: alex.token, body: { userId: null } })).status).toBe(200);
-    expect((await patch(id, { note: 'typo fixed' })).body.commissionPaidBy).toBeUndefined();
-    expect((await patch(id, { managerId: alex.user.id })).body.commissionPaidBy).toBeUndefined();
-    expect(await payerOf()).toBeNull();
+    expect(await managerOf(r.body.id)).toMatchObject({ id: sofia.user.id });
+    expect(await payerOf(po)).toBeNull();
+    // Two entries on one PO carry one payer: the PO's.
+    const second = await recorded(alex.token, base({ kind: 'commission', targetId: po, managerId: alex.user.id }));
+    expect(await managerOf(r.body.id)).toMatchObject({ id: alex.user.id });
+    expect(await managerOf(second)).toMatchObject({ id: alex.user.id });
   });
 
-  it('leaves the payer alone when the company paid, or a bank row says so', async () => {
-    const company = await donePO();
-    expect((await api('PUT', `/api/orders/${company}/commission-paid-by`, { token: alex.token, body: { company: true } })).status).toBe(200);
-    expect((await record(alex.token, base({ kind: 'commission', targetId: company }))).body.commissionPaidBy).toBeUndefined();
+  it('the Business Account is a payer on both sides, and a linked bank row decides', async () => {
+    const po = await donePO();
+    const id = await recorded(alex.token, base({ kind: 'commission', targetId: po, managerId: null }));
+    expect(await managerOf(id)).toBeNull();
+    expect(await payerOf(po)).toEqual({ kind: 'company', linked: false });
+    expect((await patch(id, { managerId: alex.user.id })).body.commissionPaidBy).toMatchObject({ kind: 'manager', id: alex.user.id });
+    expect((await api('PUT', `/api/orders/${po}/commission-paid-by`, { token: alex.token, body: { company: true } })).status).toBe(200);
+    expect(await managerOf(id)).toBeNull();
 
+    // A row linked as the commission: the company paid, whatever was on file.
     const banked = await donePO();
-    await syncBankTransactions(testEnv, [
-      fakeProvider('mercury', [{ externalId: 'm-commission', amount: -50, counterparty: 'Marcus', postedAt: new Date(NOW - DAY) }]),
-    ]);
-    const [row] = await getTestDb()<{ id: string }[]>`SELECT id FROM bank_transactions WHERE external_id = 'm-commission'`;
-    expect((await api('POST', `/api/bank-transactions/${row.id}/link`, {
+    const entry = await recorded(alex.token, base({ kind: 'commission', targetId: banked, managerId: alex.user.id }));
+    const row = await bankRow('m-commission');
+    expect((await api('POST', `/api/bank-transactions/${row}/link`, {
       token: alex.token, body: { orderId: banked, kind: 'commission' },
     })).status).toBe(200);
-    expect((await record(alex.token, base({ kind: 'commission', targetId: banked }))).body.commissionPaidBy).toBeUndefined();
-    const [o] = await getTestDb()<{ commission_paid_by: string | null }[]>`SELECT commission_paid_by FROM orders WHERE id = ${banked}`;
-    expect(o.commission_paid_by).toBeNull();
+    expect(await managerOf(entry)).toBeNull();
+    expect(await payerOf(banked)).toEqual({ kind: 'company', linked: true });
+    const person = await patch(entry, { managerId: alex.user.id });
+    expect(person.status).toBe(409);
+    expect(person.body.error).toMatch(/linked as the commission/);
+    expect((await record(alex.token, base({ kind: 'commission', targetId: banked }))).status).toBe(409);
+    const business = await record(alex.token, base({ kind: 'commission', targetId: banked, managerId: null }));
+    expect(business.status).toBe(201);
+    expect(business.body.commissionPaidBy).toBeUndefined();
+    // Unlinked, the PO falls back to whoever is on file, and so do its entries.
+    expect((await api('POST', `/api/bank-transactions/${row}/unlink`, { token: alex.token, body: {} })).status).toBe(200);
+    expect(await managerOf(entry)).toMatchObject({ id: alex.user.id });
+    expect(await managerOf(business.body.id)).toMatchObject({ id: alex.user.id });
+
+    const summary = (await api<Summary>('GET', '/api/accounting/summary?from=2026-10-01&to=2026-10-31', { token: alex.token })).body;
+    expect(summary.business.balance).toBe(-100);
+  });
+
+  it('a cost entry names the self-paid PO\'s payer both ways; a company-paid cost is set on the PO', async () => {
+    const marcus = await loginAs(MARCUS);
+    const sofia = await loginAs(SOFIA);
+    const self = (await api<{ id: string }>('POST', '/api/orders', { token: marcus.token, body: { ...PO_BODY, payment: 'self' } })).body.id;
+    // The purchaser paid out of pocket: the entry may name them.
+    const id = await recorded(alex.token, base({ kind: 'purchase', targetId: self, managerId: marcus.user.id }));
+    expect(await managerOf(id)).toMatchObject({ id: marcus.user.id });
+    expect((await patch(id, { managerId: sofia.user.id })).status).toBe(200);
+    const [o] = await getTestDb()<{ paid_by: string }[]>`SELECT paid_by FROM orders WHERE id = ${self}`;
+    expect(o.paid_by).toBe(sofia.user.id);
+    expect(await poEvents(self, 'paid_by')).toEqual([expect.objectContaining({
+      detail: { changes: [{ field: 'paid_by', from: 'Marcus Wright', to: 'Sofia Reyes' }] },
+    })]);
+    // The PO's side: the cost payer edited, the entry follows.
+    expect((await api('PATCH', `/api/orders/${self}`, { token: marcus.token, body: { paidByUserId: alex.user.id } })).status).toBe(200);
+    expect(await managerOf(id)).toMatchObject({ id: alex.user.id });
+    // Another purchaser cannot be the payer; nor can the Business Account, which is a PO-side change.
+    const [priya] = await getTestDb()<{ id: string }[]>`SELECT id FROM users WHERE email = 'priya@recycleservers.io'`;
+    expect((await patch(id, { managerId: priya.id })).status).toBe(400);
+    const business = await patch(id, { managerId: null });
+    expect(business.status).toBe(400);
+    expect(business.body.error).toMatch(/set on the PO/);
+    // Flipped to the company's account on the PO, the entry reads Business Account.
+    expect((await api('PATCH', `/api/orders/${self}`, { token: marcus.token, body: { payment: 'company', paymentMethod: 'cash' } })).status).toBe(200);
+    expect(await managerOf(id)).toBeNull();
+    const person = await patch(id, { managerId: alex.user.id });
+    expect(person.status).toBe(409);
+    expect(person.body.error).toMatch(/change that on the PO/);
+  });
+
+  it('a restored entry catches up with its PO; a deleted draft leaves what was on file', async () => {
+    const sofia = await loginAs(SOFIA);
+    const po = await donePO();
+    const id = await recorded(alex.token, base({ kind: 'commission', targetId: po, managerId: sofia.user.id }));
+    expect((await api('POST', `/api/accounting/entries/${id}/void`, { token: alex.token, body: { reason: 'dup' } })).status).toBe(200);
+    expect((await api('PUT', `/api/orders/${po}/commission-paid-by`, { token: alex.token, body: { userId: alex.user.id } })).status).toBe(200);
+    expect(await managerOf(id)).toMatchObject({ id: sofia.user.id });
+    expect((await api('POST', `/api/accounting/entries/${id}/restore`, { token: alex.token })).status).toBe(200);
+    expect(await managerOf(id)).toMatchObject({ id: alex.user.id });
+
+    // A draft deleted with a row linked as its commission: the delete frees
+    // the row while the PO still stands, so the entry ends on the person on file.
+    const marcus = await loginAs(MARCUS);
+    const draft = await draftPO(marcus.token);
+    const entry = await recorded(alex.token, base({ kind: 'commission', targetId: draft, managerId: sofia.user.id }));
+    const row = await bankRow('m-draft');
+    await getTestDb()`
+      UPDATE bank_transactions SET order_id = ${draft}, link_kind = 'commission', linked_at = NOW() WHERE id = ${row}`;
+    expect(await managerOf(entry)).toBeNull();
+    expect((await api('DELETE', `/api/orders/${draft}`, { token: marcus.token })).status).toBe(200);
+    const orphan = await entryOf(alex.token, entry);
+    expect(orphan.manager).toMatchObject({ id: sofia.user.id });
+    expect(orphan.target).toBeNull();
+    // The unlink and the sync share the delete's transaction and its clock.
+    expect(orphan.events.map(e => e.kind).sort()).toEqual(['created', 'edited', 'edited', 'unlinked']);
   });
 
   it('keeps money booked on a deleted draft, and says which PO it was', async () => {
     const marcus = await loginAs(MARCUS);
     const po = await draftPO(marcus.token);
-    const id = await recorded(alex.token, base({ kind: 'purchase', targetId: po, amount: 200 }));
+    const id = await recorded(alex.token, base({ kind: 'purchase', targetId: po, amount: 200, managerId: null }));
     expect((await api('DELETE', `/api/orders/${po}`, { token: marcus.token })).status).toBe(200);
 
     const orphan = await entryOf(alex.token, id);
@@ -456,5 +551,46 @@ describe('migration 0196 books the payers already on file', () => {
     expect((await entryOf(alex.token, of(cny)!.id)).events).toEqual([expect.objectContaining({
       kind: 'created', detail: expect.objectContaining({ backfilled: 'payment_received_by' }),
     })]);
+  });
+});
+
+// Entries written before the link existed catch up with their PO once.
+describe('migration 0198 brings each entry in line with its PO', () => {
+  let alex: Awaited<ReturnType<typeof loginAs>>;
+  beforeEach(async () => {
+    await resetDb();
+    alex = await loginAs(ALEX);
+  });
+  const replay = async () => {
+    const file = new URL('../migrations/0198_accounting_payer_sync.sql', import.meta.url);
+    await getTestDb().unsafe(readFileSync(fileURLToPath(file), 'utf8'));
+  };
+
+  it('moves a stale payer, once, and says so', async () => {
+    const sofia = await loginAs(SOFIA);
+    const company = await draftPO(alex.token);
+    const stale = await recorded(alex.token, {
+      direction: 'out', kind: 'purchase', amount: 100, currency: 'CNY', method: 'cash',
+      occurredOn: '2026-10-05', managerId: null, targetId: company,
+    });
+    const nobody = await donePO();
+    const kept = await recorded(alex.token, {
+      direction: 'out', kind: 'commission', amount: 100, currency: 'CNY', method: 'cash',
+      occurredOn: '2026-10-05', managerId: sofia.user.id, targetId: nobody,
+    });
+    // As the book stood before the link: no trigger watches the entry itself.
+    await getTestDb()`UPDATE accounting_entries SET manager_id = ${alex.user.id} WHERE id = ${stale}`;
+    await getTestDb()`UPDATE orders SET commission_paid_by = NULL WHERE id = ${nobody}`;
+
+    await replay();
+    await replay();
+
+    const moved = await entryOf(alex.token, stale);
+    expect(moved.manager).toBeNull();
+    expect(moved.events.map(e => e.kind)).toEqual(['created', 'edited']);
+    expect(moved.events[1]).toMatchObject({
+      detail: { backfilled: 'payer', changes: { managerId: { from: alex.user.id, to: null } } },
+    });
+    expect((await entryOf(alex.token, kept)).manager).toMatchObject({ id: sofia.user.id });
   });
 });

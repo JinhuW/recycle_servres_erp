@@ -4,7 +4,7 @@ import { Icon } from '../../../components/Icon';
 import { FIGURE_KEY, Yuan, recordActionKey, targetStatusLabel } from '../../../components/AccountingBits';
 import { useT } from '../../../lib/i18n';
 import { fmtMoney } from '../../../lib/format';
-import type { AcctEntryDetail, AcctTarget } from '../../../lib/accounting';
+import { BUSINESS_PAYER, type AcctEntryDetail, type AcctTarget } from '../../../lib/accounting';
 import type { EntryPreset, FormTarget } from '../../../lib/accountingForm';
 import { useAccountingEntryForm, type AccountingEntryForm, type SavedEntry } from '../../../lib/useAccountingEntryForm';
 
@@ -148,11 +148,15 @@ function EntryFields({ f }: { f: AccountingEntryForm }) {
 
       <div className="field-row">
         <div className="field">
-          <label className="label" htmlFor={id('manager')}>{t('acctFieldManager')}</label>
-          <select id={id('manager')} className="select" value={form.managerId}
+          <label className="label" htmlFor={id('manager')}>{t('acctFieldPaidBy')}</label>
+          <select id={id('manager')} className="select" value={form.managerId} disabled={!!f.payerLocked}
                   onChange={e => f.set({ managerId: e.target.value })}>
+            {f.businessOffered && <option value={BUSINESS_PAYER}>{t('payBusiness')}</option>}
             {f.managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
+          {f.payerLocked && (
+            <div className="acct-sub">{t(f.payerLocked === 'linked' ? 'acctPaidByLockedLinked' : 'acctPaidByLockedCompany')}</div>
+          )}
         </div>
         <div className="field">
           <label className="label" htmlFor={id('party')}>{t('acctFieldCounterparty')}</label>

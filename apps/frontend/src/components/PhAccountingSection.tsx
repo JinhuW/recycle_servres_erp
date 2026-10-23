@@ -6,7 +6,7 @@ import { FIGURE_KEY, NET_KEY, Yuan, recordActionKey } from './AccountingBits';
 import { useT } from '../lib/i18n';
 import { fmtMoney } from '../lib/format';
 import { accountingEntryPath } from '../lib/route';
-import { fmtBookDay, signedCny } from '../lib/accounting';
+import { acctPayerName, fmtBookDay, signedCny } from '../lib/accounting';
 import { useAccountingTarget } from '../lib/useAccountingTarget';
 import type { EntryPreset } from '../lib/accountingForm';
 import '../styles/accounting.css';
@@ -42,7 +42,7 @@ export function PhAccountingSection({ orderId, kind, version, onRecord }: {
           {ledger.entries.map(e => (
             <RouteLink key={e.id} to={accountingEntryPath(e.id)} className="acct-card-row">
               <span className="acct-card-day">{fmtBookDay(e.occurredOn, locale)}</span>
-              <span className="acct-card-what">{e.manager.name} · {t('acctMethod_' + e.method)}</span>
+              <span className="acct-card-what">{acctPayerName(e.manager, t)} · {t('acctMethod_' + e.method)}</span>
               <Yuan value={signedCny(e)} locale={locale} signed className={e.direction === 'in' ? 'acct-in' : undefined} />
             </RouteLink>
           ))}

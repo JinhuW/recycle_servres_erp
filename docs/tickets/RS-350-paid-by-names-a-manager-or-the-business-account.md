@@ -76,6 +76,8 @@ payer.
   AGENTS.md fixed rule: the set stays Company pay / Self pay).
 - Booking Business Account money in the RMB book (it is the USD bank,
   reconciled on Payments) and a purchase backfill from the cost payer.
+  Superseded by RS-351 in the same release: the book names the Business
+  Account and an entry's Paid by follows its PO.
 - Paying a manager back; per-manager reimbursement reports.
 - A bank row hand-linked to a person-paid PO is that person's reimbursement
   (FEATURES, payment gap: self-paid POs), not the cost payment, so the cost

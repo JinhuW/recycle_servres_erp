@@ -12,8 +12,8 @@ import { usePhScrolled } from '../lib/usePhScrolled';
 import { useEffectiveUser } from '../lib/tweaks';
 import { accountingEntryPath, match, navigateBack, replaceRoute, useRoute } from '../lib/route';
 import {
-  PHONE_PERIODS, acctEntries, acctEntry, acctRestore, acctSummary, acctVoid, fmtBookDay, localToday,
-  phonePeriod, signedCny,
+  BUSINESS_PAYER, PHONE_PERIODS, acctEntries, acctEntry, acctPayerName, acctRestore, acctSummary, acctVoid,
+  fmtBookDay, localToday, phonePeriod, signedCny,
   type AcctEntryDetail, type AcctRow, type AcctSummary, type PhonePeriod,
 } from '../lib/accounting';
 import '../styles/accounting.css';
@@ -108,15 +108,15 @@ function BookScreen({ showToast }: Props) {
             </button>
           ))}
         </div>
-        {summary && summary.managers.length > 1 && (
+        {summary && summary.managers.length > 0 && (
           <div className="ph-chip-scroller" style={{ marginTop: 0 }}>
             <button className={'ph-chip-btn ' + (!managerId ? 'active' : '')} aria-pressed={!managerId} onClick={() => setManagerId('')}>
               {t('acctAllManagers')}
             </button>
-            {summary.managers.map(m => (
+            {[{ id: BUSINESS_PAYER, name: t('payBusinessShort') }, ...summary.managers.map(m => ({ id: m.id, name: m.name.split(' ')[0] }))].map(m => (
               <button key={m.id} className={'ph-chip-btn ' + (managerId === m.id ? 'active' : '')} aria-pressed={managerId === m.id}
                       onClick={() => setManagerId(managerId === m.id ? '' : m.id)}>
-                {m.name.split(' ')[0]}
+                {m.name}
               </button>
             ))}
           </div>
@@ -149,7 +149,7 @@ function BookScreen({ showToast }: Props) {
                   </span>
                   <Yuan value={signedCny(r)} locale={locale} signed className={r.direction === 'in' ? 'acct-in' : undefined} />
                   <span className="acct-ph-row-sub">
-                    {[r.counterparty, r.manager.name.split(' ')[0], t('acctMethod_' + r.method)].filter(Boolean).join(' · ')}
+                    {[r.counterparty, r.manager ? r.manager.name.split(' ')[0] : t('payBusinessShort'), t('acctMethod_' + r.method)].filter(Boolean).join(' · ')}
                   </span>
                 </RouteLink>
               ))}
@@ -191,7 +191,7 @@ function Tape({ summary }: { summary: AcctSummary }) {
       {summary.managers.length > 0 && (
         <div className="acct-ph-held">
           <div style={{ color: 'var(--fg-subtle)' }}>{t('acctHeldBy')}</div>
-          {summary.managers.map(m => (
+          {[{ id: BUSINESS_PAYER, name: t('payBusiness'), balance: summary.business.balance }, ...summary.managers].map(m => (
             <div key={m.id}>
               <span>{m.name}</span>
               <Yuan value={m.balance} locale={locale} className={m.balance < 0 ? 'acct-neg' : undefined} />
@@ -277,7 +277,7 @@ function EntryScreen({ id, showToast }: { id: string } & Props) {
                     {entry.targetFacts?.party && <span className="acct-sub">{entry.targetFacts.party}</span>}
                   </>
                 ) : <span style={{ color: 'var(--fg-subtle)' }}>{t('acctRecordDeleted')}</span>)}
-                {fact(t('acctFieldManager'), entry.manager.name)}
+                {fact(t('acctFieldPaidBy'), acctPayerName(entry.manager, t))}
                 {fact(t('acctFieldMethod'), t('acctMethod_' + entry.method))}
                 {entry.counterparty && fact(t('acctFieldCounterparty'), entry.counterparty)}
                 {entry.reference && fact(t('acctFieldReference'), <span className="mono">{entry.reference}</span>)}

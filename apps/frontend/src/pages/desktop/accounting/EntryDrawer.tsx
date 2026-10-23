@@ -6,7 +6,7 @@ import { HistoryLine, Yuan, recordPath } from '../../../components/AccountingBit
 import { useT } from '../../../lib/i18n';
 import { handleFetchError } from '../../../lib/errorToast';
 import { fmtMoney } from '../../../lib/format';
-import { acctEntry, acctRestore, acctVoid, fmtBookDay, type AcctEntryDetail } from '../../../lib/accounting';
+import { acctEntry, acctPayerName, acctRestore, acctVoid, fmtBookDay, type AcctEntryDetail } from '../../../lib/accounting';
 import { EntryDialog, TargetLine } from './EntryDialog';
 
 type Props = {
@@ -99,8 +99,8 @@ export function EntryDrawer({ id, onClose, onChanged, onToast }: Props) {
                     </dd>
                   </>
                 )}
-                <dt>{t('acctFieldManager')}</dt>
-                <dd>{entry.manager.name}</dd>
+                <dt>{t('acctFieldPaidBy')}</dt>
+                <dd>{acctPayerName(entry.manager, t)}</dd>
                 <dt>{t('acctFieldMethod')}</dt>
                 <dd>{t('acctMethod_' + entry.method)}</dd>
                 {entry.counterparty && (<><dt>{t('acctFieldCounterparty')}</dt><dd>{entry.counterparty}</dd></>)}

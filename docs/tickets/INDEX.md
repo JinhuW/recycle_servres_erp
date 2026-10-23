@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-351](./RS-351-accounting-an-entry-s-paid-by-and-the-po-s-payer-sta.md) | done | story | P2 | Accounting: an entry's Paid by and the PO's payer stay in sync; one company-wide balance | 1.315.0 |
 | [RS-350](./RS-350-paid-by-names-a-manager-or-the-business-account.md) | done | story | P2 | Paid by names a manager or the Business Account | 1.315.0 |
 | [RS-349](./RS-349-accounting-fix-the-period-picker-and-backfill-entrie.md) | done | bug | P2 | Accounting: fix the period picker and backfill entries from Paid by and the payment receiver | 1.314.0 |
 | [RS-348](./RS-348-fix-the-sell-order-sheet-review-findings-before-the.md) | done | bug | P2 | Fix the sell order sheet review findings before the v1.313 release | v1.313.1 |

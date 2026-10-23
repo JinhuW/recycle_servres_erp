@@ -13,7 +13,7 @@ import { forEachKeysetPage } from '../../lib/keysetPages';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { accountingEntryPath, match, navigate, useRoute } from '../../lib/route';
 import {
-  acctEntries, acctSummary, fmtBookDay, localToday, markDayStarts,
+  BUSINESS_PAYER, acctEntries, acctPayerName, acctSummary, fmtBookDay, localToday, markDayStarts,
   type AcctRow, type AcctSummary,
 } from '../../lib/accounting';
 import { RangeChip, type RangeValue } from './DashboardRange';
@@ -84,7 +84,7 @@ export function DesktopAccounting({ onToast }: Props) {
   const changed = () => setGen(g => g + 1);
   const filtered = !!(direction || kind || method || q);
   const dayStarts = markDayStarts(rows);
-  const managerName = summary?.managers.find(m => m.id === managerId)?.name;
+  const managerName = managerId === BUSINESS_PAYER ? t('payBusiness') : summary?.managers.find(m => m.id === managerId)?.name;
 
   return (
     <>
@@ -102,9 +102,10 @@ export function DesktopAccounting({ onToast }: Props) {
 
       <div className="acct-scope">
         <RangeChip value={range} today={today} first={summary?.first ?? null} locale={locale} onChange={setRange} />
-        <select className="select" value={managerId} aria-label={t('acctFieldManager')}
+        <select className="select" value={managerId} aria-label={t('acctFieldPaidBy')}
                 onChange={e => setManagerId(e.target.value)}>
           <option value="">{t('acctAllManagers')}</option>
+          <option value={BUSINESS_PAYER}>{t('payBusiness')}</option>
           {summary?.managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
         {summary && <span className="acct-rate">{t('acctRateNote', { rate: summary.fx.rate.toFixed(4) })}</span>}
@@ -160,7 +161,7 @@ export function DesktopAccounting({ onToast }: Props) {
                   <th>{t('acctColDate')}</th>
                   <th>{t('acctColEntry')}</th>
                   <th>{t('acctFieldKind')}</th>
-                  <th>{t('acctFieldManager')}</th>
+                  <th>{t('acctFieldPaidBy')}</th>
                   <th>{t('acctFieldMethod')}</th>
                   <th className="acct-num">{t('acctReceived')}</th>
                   <th className="acct-num">{t('acctPaid')}</th>
@@ -197,7 +198,7 @@ export function DesktopAccounting({ onToast }: Props) {
                         </div>
                         {r.note && <span className="acct-sub" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.note}</span>}
                       </td>
-                      <td style={{ whiteSpace: 'nowrap' }}>{r.manager.name}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{acctPayerName(r.manager, t)}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{t('acctMethod_' + r.method)}</td>
                       <td className="acct-num">
                         {r.direction === 'in' && <Amount row={r} locale={locale} />}
@@ -289,7 +290,7 @@ function IdentityBand({ summary, managerId, onManager }: {
       {summary.managers.length > 0 && (
         <div className="acct-held">
           <span className="acct-held-label" title={t('acctHeldByHint')}>{t('acctHeldBy')}</span>
-          {summary.managers.map(m => (
+          {[{ id: BUSINESS_PAYER, name: t('payBusiness'), balance: summary.business.balance }, ...summary.managers].map(m => (
             <button key={m.id} type="button" aria-pressed={managerId === m.id}
                     onClick={() => onManager(managerId === m.id ? '' : m.id)}>
               <span>{m.name}</span>
