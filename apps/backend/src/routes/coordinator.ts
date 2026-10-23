@@ -147,11 +147,11 @@ async function forward(
 /**
  * One facade call for a route that acts on the answer instead of relaying it:
  * `error` is set, already worded for the manager, unless the facade said 2xx.
- * `status` is what to answer with in that case.
+ * `status` is what to answer with in that case. A GET's answer is `payload`.
  */
 export async function callFacade(
-  env: Env, method: 'POST' | 'PUT', path: string, body?: unknown,
-): Promise<{ error: string | null; status: ContentfulStatusCode }> {
+  env: Env, method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown,
+): Promise<{ error: string | null; status: ContentfulStatusCode; payload?: unknown }> {
   const up = upstream(env);
   if (!up) return { error: NOT_CONFIGURED, status: 501 };
   const headers: Record<string, string> = { ...up.headers };
@@ -171,7 +171,7 @@ export async function callFacade(
     log.warn('coordinator upstream refused the request', { module: 'coordinator', upstreamStatus: res.status, upstreamPath: path });
     return { error: refused, status: 502 };
   }
-  if (res.ok) return { error: null, status: 200 };
+  if (res.ok) return { error: null, status: 200, payload: method === 'GET' ? await res.json().catch(() => null) : undefined };
   const payload = await res.json().catch(() => null) as { detail?: unknown; error?: unknown } | null;
   const status = res.status >= 400 && res.status < 600 ? res.status : 502;
   return { error: upstreamWhy(payload) ?? `coordinator returned ${res.status}`, status: status as ContentfulStatusCode };

@@ -816,6 +816,24 @@
   overflow-y: auto;
   scrollbar-width: thin;
 }
+.ff-proxy-mark {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.ff-proxy-mark small {
+  font-size: 11.5px;
+}
+.ff-dead-note {
+  color: var(--neg);
+  background: var(--neg-soft);
+  border-radius: 8px;
+}
+.ff-dead-note .icon {
+  color: var(--neg);
+}
 .ff-summary {
   margin-left: auto;
   color: var(--fg-subtle);

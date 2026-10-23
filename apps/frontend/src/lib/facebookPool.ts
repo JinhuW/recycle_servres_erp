@@ -12,7 +12,9 @@ import {
   type FbPoolEventKind,
   type FbPoolSecretField,
   type FbPoolStatus,
+  type FbProxyMark,
   type FbReportReason,
+  type FbWorkerStint,
 } from '@recycle-erp/shared';
 import { api } from './api';
 
@@ -338,7 +340,24 @@ export const poolApi = {
   remove: (no: number) => api.delete<PoolSnapshot>(`${BASE}/${no}`),
   importRows: (batch: string, rows: PoolDraft[]) =>
     api.post<PoolSnapshot>(`${BASE}/import`, { batch, rows }),
+  // Manager-only: proxies with failed accounts, and one worker's accounts.
+  proxies: () => api.get<{ proxies: FbProxyMark[] }>(`${BASE}/proxies`),
+  reviveProxy: (url: string) => api.post<{ proxies: FbProxyMark[] }>(`${BASE}/proxies/revive`, { url }),
+  workerAccounts: (worker: string) =>
+    api.get<{ stints: FbWorkerStint[] }>(`${BASE}/workers/${encodeURIComponent(worker)}/accounts`),
 };
+
+export type { FbProxyMark, FbWorkerStint };
+
+/** The mark on the proxy a worker dials now; none when nothing failed on it
+ *  since its last revive, or it has no proxy. */
+export function proxyMarkFor(
+  marks: readonly FbProxyMark[] | null,
+  worker: { proxy?: { url: string | null } | null },
+): FbProxyMark | undefined {
+  const url = worker.proxy?.url;
+  return url ? marks?.find((m) => m.url === url) : undefined;
+}
 
 /** Where the account a worker held goes when another is sent to it. */
 export const PREVIOUS_FATES = ['available', 'problem', 'retired'] as const;

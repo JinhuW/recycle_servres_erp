@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-23:** ERP migration `0203`, Reddit tracker migration `0004`,
+**As of 2026-10-23:** ERP migration `0204`, Reddit tracker migration `0004`,
 Facebook tracker `0.13.12`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -119,7 +119,8 @@ isolation boundary (`trackers/facebook/infra/README.md`).
     - the canonical part number, for `part_number_lookups`;
     - the file name, for `schema_migrations`.
   - Number keys:
-    - `fb_pool_accounts.no` is an identity column;
+    - `fb_pool_accounts.no` and `fb_worker_accounts.id` are identity columns;
+    - `fb_proxies` is keyed by the proxy's `url`;
     - `fx_rates`, `login_attempts`, `oauth_refresh_tokens` and
       `public_form_reservations` use `bigserial`;
     - `wechat_market_days` is keyed by `report_date`.
@@ -151,7 +152,8 @@ isolation boundary (`trackers/facebook/infra/README.md`).
   the parent row removes its history with it. `sell_order_events` refuses
   even a cascade, so a sell order that has any history can only be archived,
   never deleted. `fb_pool_events` has no foreign key to `fb_pool_accounts`,
-  so an account's history outlives the account.
+  so an account's history outlives the account; neither has
+  `fb_worker_accounts`, which a trigger keeps rather than a ledger lock.
 - **Money.** Amounts are `numeric`. The one float that holds money is
   `ref_prices.trend`, a `real` delta. Each amount's *Meaning* names its
   currency: USD, or CNY (RMB) in the RMB Flow book and on CNY sell orders.
@@ -2032,9 +2034,9 @@ Read within one day only, so the primary key's report_date prefix serves as the 
 
 ### Facebook account pool
 
-The ERP-side Facebook account pool: purchased Marketplace logins that purchasers take and return and managers assign to fleet workers. fb_pool_accounts is one row per login with its secrets sealed, and fb_pool_events is the append-only ledger of who did what to which account. The fleet's own worker vault lives in the Facebook tracker's database, not here.
+The ERP-side Facebook account pool: purchased Marketplace logins that purchasers take and return and managers assign to fleet workers. fb_pool_accounts is one row per login with its secrets sealed, and fb_pool_events is the append-only ledger of who did what to which account. fb_worker_accounts is every stint an account had on a fleet worker, with the proxy it went out through, and fb_proxies holds when a manager last revived a DEAD proxy. The fleet's own worker vault lives in the Facebook tracker's database, not here.
 
-Tables: [`fb_pool_accounts`](#erp-fb-pool-accounts), [`fb_pool_events`](#erp-fb-pool-events)
+Tables: [`fb_pool_accounts`](#erp-fb-pool-accounts), [`fb_pool_events`](#erp-fb-pool-events), [`fb_worker_accounts`](#erp-fb-worker-accounts), [`fb_proxies`](#erp-fb-proxies)
 
 <a id="erp-fb-pool-accounts"></a>
 
@@ -2071,6 +2073,7 @@ One row per Facebook Marketplace login in the shared pool. Managers add, import,
 - **Unique:** `(uid)`
 - **Checks:** `status IN ('available', 'taken', 'fleet', 'problem', 'retired')`; `uid ~ '^\d{10,20}$'`
 - **Indexes:** `fb_pool_accounts_created_by_idx` (created_by); `fb_pool_accounts_holder_user_id_idx` (holder_user_id); `fb_pool_accounts_status_idx` (status, added_at)
+- **Triggers:** `fb_worker_accounts_track` (after insert, update of status or holder_name, or delete → `fb_worker_accounts_track()`)
 
 Secrets are AES-256-GCM blobs sealed under FB_POOL_KEY (lib/sealed.ts, v1.<iv>.<tag>.<body> base64url), never clear text, and are shown only to a manager or the purchaser holding the account; the prod→dev copy nulls every *_enc column. `no` never reuses a removed account's number.
 
@@ -2098,6 +2101,49 @@ Append-only ledger of every action on the pool: who did what to which account, i
 - **Triggers:** `fb_pool_events_no_delete` (before delete → `fb_pool_events_lock()`); `fb_pool_events_no_update` (before update → `fb_pool_events_lock()`)
 
 UPDATE and DELETE raise (fb_pool_events_lock). account_no has no FK on purpose, so a removed account's history outlives it.
+
+<a id="erp-fb-worker-accounts"></a>
+
+#### `fb_worker_accounts`
+
+One row per stint of a pool account on a fleet worker: it opens when the account becomes fleet on that worker and closes when it stops being that. The worker page lists them as Accounts used, and a proxy's failed stints decide whether it is DEAD.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `integer` | ✓ | identity |  |
+| `worker_id` | `text` | ✓ |  | The worker, as the account's holder_name named it; compared case-blind. |
+| `account_no` | `integer` | ✓ |  | The pool account's #. No FK, so a removed account's stints are kept. |
+| `uid` | `text` | ✓ |  | The account's Facebook uid at the time. |
+| `proxy_url` | `text` |  |  | The worker's proxy when the account was sent, scheme://host:port with no login, as the fleet document names it. NULL = the VM's own IP (proxy_known) or not recorded. |
+| `proxy_known` | `boolean` | ✓ | `false` | Whether /assign recorded the proxy. False for stints backfilled from the ledger (before v1.319.0), opened by an edit with no Assign, or sent while the fleet document did not list the worker. |
+| `started_at` | `timestamptz` | ✓ | `now()` |  |
+| `ended_at` | `timestamptz` |  |  | NULL while the account is still on the worker. |
+| `outcome` | `text` |  |  | What the account became when the stint ended: a pool status (available, taken, problem, retired), fleet for another worker, or removed when it left the pool. NULL while current. problem and retired count against the proxy. |
+
+- **Primary key:** `id`
+- **Checks:** `(ended_at IS NULL) = (outcome IS NULL)`; `outcome IN ('available', 'taken', 'fleet', 'problem', 'retired', 'removed')`
+- **Indexes:** `fb_worker_accounts_failed_idx` (proxy_url, ended_at) WHERE outcome IN ('problem', 'retired'); `fb_worker_accounts_open_idx` UNIQUE (account_no) WHERE ended_at IS NULL; `fb_worker_accounts_worker_idx` (lower(worker_id), started_at DESC)
+
+Written only by the fb_worker_accounts_track trigger on fb_pool_accounts, except proxy_url and proxy_known, which /assign stamps on the open stint. A proxy whose distinct failed accounts since its last revive exceed four (FB_PROXY_DEAD_AFTER) is DEAD, and /assign refuses its workers.
+
+<a id="erp-fb-proxies"></a>
+
+#### `fb_proxies`
+
+A row for each proxy a manager has revived. A revive restarts the proxy's failed count: stints that ended before it no longer count.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `url` | `text` | ✓ |  | The proxy, as fb_worker_accounts.proxy_url names it. |
+| `revived_at` | `timestamptz` |  |  | The latest revive. |
+| `revived_by` | `uuid` |  |  | → users. The manager who revived it. |
+| `revived_by_name` | `text` |  |  | Their name snapshot. |
+
+- **Primary key:** `url`
+- **References:** `revived_by` → `users.id` (on delete set null)
+- **Indexes:** `fb_proxies_revived_by_idx` (revived_by)
+
+Only the latest revive is kept; the backend logs each one.
 
 ### System
 
@@ -2163,6 +2209,7 @@ These are the app's own functions. The rest of `public`'s functions belong to
 | `accounting_sync_payer(p_order_id text, p_detail jsonb)` | `void` | Applies a PO's payer to its live paid-out commission and purchase RMB Flow entries: voids them as 'Paid from the Business Account' when the company paid (unless a manager restored the entry), otherwise moves their Paid by to the PO's person payer and clears any review, logging voided or edited events. Called by the orders_sync_accounting_payer and bank_transactions_sync_accounting_payer trigger functions, and by routes/accounting.ts when an entry is restored. |
 | `bank_transactions_sync_accounting_payer()` | `trigger` | Trigger function on bank_transactions (AFTER INSERT or DELETE, and AFTER UPDATE when order_id, link_kind or settle_status actually changes, via the bank_transactions_sync_accounting_payer and _update triggers) that runs accounting_sync_payer for the previously and newly linked PO. |
 | `fb_pool_events_lock()` | `trigger` | Trigger functions behind the BEFORE UPDATE and BEFORE DELETE triggers (<table>_no_update, <table>_no_delete) on accounting_entry_events, fb_pool_events, inventory_events, order_events and sell_order_events: they raise, which makes those ledgers append-only. The inventory, order and accounting-entry versions let a DELETE through when another trigger fired it (pg_trigger_depth() > 1), so a parent's FK cascade can still remove its history; the fb_pool and sell-order versions refuse every update and delete. |
+| `fb_worker_accounts_track()` | `trigger` | Trigger function on fb_pool_accounts (AFTER INSERT, UPDATE OF status or holder_name, or DELETE): closes the account's open fb_worker_accounts stint when it stops being fleet on that worker, with what it became (removed on delete), and opens one when it becomes fleet on a worker. |
 | `inventory_events_lock()` | `trigger` | Trigger functions behind the BEFORE UPDATE and BEFORE DELETE triggers (<table>_no_update, <table>_no_delete) on accounting_entry_events, fb_pool_events, inventory_events, order_events and sell_order_events: they raise, which makes those ledgers append-only. The inventory, order and accounting-entry versions let a DELETE through when another trigger fired it (pg_trigger_depth() > 1), so a parent's FK cascade can still remove its history; the fb_pool and sell-order versions refuse every update and delete. |
 | `order_commission_bank_linked(p_order_id text)` | `boolean` | Returns whether a PO's commission was paid through the bank: a linked bank_transactions row with link_kind commission that has not failed or been reversed. Called by accounting_sync_payer and by banktx/match.ts commissionLinkedFrag, which the PO page and the RMB Flow's refusals use. |
 | `order_events_lock()` | `trigger` | Trigger functions behind the BEFORE UPDATE and BEFORE DELETE triggers (<table>_no_update, <table>_no_delete) on accounting_entry_events, fb_pool_events, inventory_events, order_events and sell_order_events: they raise, which makes those ledgers append-only. The inventory, order and accounting-entry versions let a DELETE through when another trigger fired it (pg_trigger_depth() > 1), so a parent's FK cascade can still remove its history; the fb_pool and sell-order versions refuse every update and delete. |

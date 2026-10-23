@@ -2730,7 +2730,20 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   times apart. The column sorts by port, with the VM's own IP last, so each
   pair sits side by side. With no sort, rows keep the fleet document's order.
   The search box matches the port, exit IP, city and state. (v1.303.0 to
-  v1.305.0 grouped the table by city, then by city and proxy, then by proxy.) A worker's Today strip uses
+  v1.305.0 grouped the table by city, then by city and proxy, then by proxy.)
+  Since v1.319.0 (RS-365) a proxy is **DEAD** once more than 4 distinct
+  accounts have failed behind it: an account fails when it leaves a worker on
+  that proxy as Problem or Retired (Assign's "where does the old one go", the
+  weekly check, an edit or retire). The column shows a red DEAD chip, or
+  "n failed" below that, counted across every worker that dials the proxy.
+  Assign refuses a worker behind a DEAD proxy before anything reaches it (the
+  dialog says so and keeps Assign off), until a manager presses **Revive** on
+  a worker's page, after swapping the IP; the count then starts again. The
+  worker's page also lists **Accounts used**: every pool account it has
+  signed in with, newest first, with the proxy it went out through, from and
+  until, and how it ended (on now, returned, Problem, Retired, moved to
+  another worker, removed). Stints from before v1.319.0 come from the pool
+  ledger and say "proxy not recorded", so they do not count toward DEAD. A worker's Today strip uses
   its own sweep times, from the config it runs, so a worker that shares an IP
   and sweeps at its own hour shows that hour (facebook-tracker 0.13.8). And a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before
