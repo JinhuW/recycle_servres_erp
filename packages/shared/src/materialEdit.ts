@@ -6,7 +6,7 @@
 export const MATERIAL_PATCH_KEYS = [
   'lines', 'addLines', 'removeLineIds',
   'totalCost', 'otherFees', 'otherFeesNote',
-  'warehouseId', 'payment', 'paymentMethod', 'paypalTxnId',
+  'warehouseId', 'payment', 'paymentMethod', 'paidByUserId', 'paypalTxnId',
   'source', 'handoffMethod', 'handoffBy',
   'trackingNumber', 'carrier',
 ] as const;

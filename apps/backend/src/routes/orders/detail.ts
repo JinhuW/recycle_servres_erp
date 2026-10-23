@@ -40,6 +40,7 @@ detailRoutes.get('/:id', async (c) => {
            o.commission_paid_by, cpb.name AS commission_paid_by_name,
            o.commission_paid_by_company,
            ${commissionLinkedFrag(sql)} AS commission_linked,
+           o.paid_by, pb.name AS paid_by_name,
            o.supplier_id, sup.name AS supplier_name,
            o.commission_rate::float AS commission_rate,
            u.name AS user_name, u.initials AS user_initials,
@@ -51,6 +52,7 @@ detailRoutes.get('/:id', async (c) => {
     FROM orders o
     JOIN users u ON u.id = o.user_id
     LEFT JOIN users hb ON hb.id = o.handoff_by
+    LEFT JOIN users pb ON pb.id = o.paid_by
     -- Only while still an active manager: the advance reads it the same way,
     -- so the client asks about exactly the manager the server would keep.
     LEFT JOIN users mg ON mg.id = o.manager_id AND mg.role = 'manager' AND mg.active
@@ -259,6 +261,9 @@ detailRoutes.get('/:id', async (c) => {
         ? { id: order.supplier_id, name: order.supplier_name }
         : null,
       commissionRate: order.commission_rate,
+      // Every role: who paid the supplier is a name on the Cost Payment tab.
+      // Null for the Business Account.
+      paidBy: order.paid_by ? { id: order.paid_by, name: order.paid_by_name ?? '' } : null,
       // Every role, as `manager` is: the purchaser may see who paid them.
       commissionPaidBy: commissionPaidByOf({
         commission_paid_by: order.commission_paid_by, commission_paid_by_name: order.commission_paid_by_name,

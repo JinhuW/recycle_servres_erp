@@ -8,7 +8,8 @@ import { useEffectiveUser } from '../../lib/tweaks';
 import { api, deleteOrder, archiveOrder, unarchiveOrder, followLineTotal, ApiError } from '../../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../../lib/archiveConflict';
 import { readStageMoved } from '../../lib/boxCheck';
-import { poStageName } from '../../lib/orderPresentation';
+import { costPayerLabel, costReimbursedToOwner, poStageName } from '../../lib/orderPresentation';
+import { payerChoices } from '../../lib/poFacets';
 import { ArchiveConflictList } from '../../components/ArchiveConflictList';
 import { SoldBadge } from '../../components/SoldBadge';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
@@ -285,6 +286,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const [persistedIds, setPersistedIds] = useState<string[]>(() => order.lines.map(l => l.id));
   const [notes, setNotes] = useState<string>(order.notes ?? '');
   const [payment, setPayment] = useState<'company' | 'self'>(order.payment);
+  const [paidByUserId, setPaidByUserId] = useState<string | null>(order.paidBy?.id ?? null);
+  const setPayer = (v: 'company' | 'self', userId: string | null) => {
+    setPayment(v);
+    setPaidByUserId(v === 'self' ? userId : null);
+  };
   const [paymentMethod, setPaymentMethod] = useState<HandoffMethod | null>(order.paymentMethod ?? null);
   // The hand-off's facts, now the Delivery tab's to edit: where the goods came
   // from, how they travel, who collected them, which box carries them. The
@@ -314,14 +320,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   };
   // Every role may pick a collector: the names list is what the hand-off
   // uses, and it is not the manager-only member list below.
-  const [memberNames, setMemberNames] = useState<{ id: string; name: string }[]>([]);
+  const [memberNames, setMemberNames] = useState<{ id: string; name: string; role?: string }[]>([]);
   useEffect(() => {
     let alive = true;
-    api.get<{ items: { id: string; name: string }[] }>('/api/members/names')
+    api.get<{ items: { id: string; name: string; role?: string }[] }>('/api/members/names')
       .then(r => { if (alive) setMemberNames(r.items); })
       .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
+  // Who the Cost Payment tab's Paid by may name: the managers, the owner, the record.
+  const payers = payerChoices(memberNames, { id: order.userId, name: order.userName }, order.paidBy ?? null);
   // Which stage the status section is showing. Null follows the order; a
   // reached step sets it to look back at what that stage recorded. Any
   // stage change snaps it back — a move is the news.
@@ -585,6 +593,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // Only a company order carries a method; the server clears it on a flip to
   // self, so the local value is not a change until the order is company again.
   const methodDirty = payment === 'company' && paymentMethod !== (order.paymentMethod ?? null);
+  // Same for the payer: only a self-paid order names one.
+  const payerDirty = payment === 'self' && paidByUserId !== null && paidByUserId !== (order.paidBy?.id ?? null);
   // '' = explicitly unset (null). Non-numeric intermediate input (e.g. "5e")
   // must NOT be treated as a change — the same guard the other-fees field uses.
   const parsedCommission =
@@ -685,15 +695,21 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const effectiveProfit = totals.revenue - effectiveTotalCost;
   const commissionRateApplied = commissionRateValue ?? 0;
   const commissionOnProfit = effectiveProfit * commissionRateApplied;
+  // The cost comes back to whoever paid it. It rides the purchaser's earnings
+  // only when the purchaser paid; a manager who paid is reimbursed apart. A
+  // record naming nobody (an older backend) is the purchaser's, as it always was.
+  const selfReimbursed = costReimbursedToOwner(payment, paidByUserId, order.userId);
+  const reimbursedTo = payment === 'self' && !selfReimbursed
+    ? (payers.find(m => m.id === paidByUserId)?.name ?? order.paidBy?.name ?? null) : null;
   const purchaserEarn =
-    (payment === 'self' ? effectiveTotalCost : 0) + commissionOnProfit;
+    (selfReimbursed ? effectiveTotalCost : 0) + commissionOnProfit;
 
   // Unsaved edits by section — the tabs' blue dots and the footer's count.
   // "products" is the items card above the tabs: no tab, but it counts.
   const dirtyBy = {
     products: linesDirty || otherFeesDirty || otherFeesNoteDirty,
     delivery: warehouseDirty || sourceDirty || deliveryDirty || byUserDirty || trackingDirty,
-    payment: paymentDirty || methodDirty || paypalDirty,
+    payment: paymentDirty || methodDirty || payerDirty || paypalDirty,
     commission: commissionDirty || ownerDirty,
     notes: notesDirty,
   };
@@ -930,6 +946,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
         paymentMethod: methodDirty    ? paymentMethod          : undefined,
+        paidByUserId:  payerDirty     ? paidByUserId           : undefined,
         commissionRate: commissionDirty ? commissionRateValue : undefined,
         paypalTxnId:   paypalDirty     ? (paypalTxn || null)   : undefined,
         onBehalfOfUserId: ownerDirty ? ownerId : undefined,
@@ -1259,7 +1276,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         : delivery === 'label' ? [tracking.carrier, tracking.tn].filter(Boolean).join(' ') : null,
     ].filter(Boolean).join(' · '),
     payment: [
-      payment === 'self' ? t('paySelfShort') : t('payCompanyShort'),
+      costPayerLabel({ payment, paidBy: payers.find(m => m.id === paidByUserId) ?? order.paidBy ?? null }, t, true),
       payment === 'company' ? (paymentMethod === 'cash' ? t('hoMethodCash') : paymentMethod === 'paypal' ? t('hoMethodPaypal') : null) : null,
       payment === 'company' && paymentMethod === 'paypal' ? paypalTxn.trim() || null : null,
     ].filter(Boolean).join(' · '),
@@ -1783,7 +1800,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           payment: (
             <div className="oe-tabpad oe-pay">
               <PaymentFields
-                paidBy={payment} onPaidBy={setPayment}
+                paidBy={payment} paidByUserId={paidByUserId} payers={payers} onPaidBy={setPayer}
                 method={paymentMethod} onMethod={setPaymentMethod}
                 txnId={paypalTxn} onTxnId={setPaypalTxn}
                 txnRequired={order.txnRequired === true}
@@ -1803,7 +1820,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               ownerId={ownerId} onOwner={setOwnerId} ownerOptions={ownerOptions}
               commissionPct={commissionPct} onCommissionPct={setCommissionPct}
               isPurchaser={isPurchaser} orderLocked={orderLocked} isArchived={isArchived}
-              payment={payment}
+              selfReimbursed={selfReimbursed} reimbursedTo={reimbursedTo}
               purchaserEarn={purchaserEarn}
               effectiveTotalCost={effectiveTotalCost}
               revenue={totals.revenue}
@@ -2141,6 +2158,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             lines: { count: lines.length, units: totals.qty, goods: cost.goods },
             warehouseId,
             payment,
+            paidByUserId,
             paymentMethod,
             paypalTxnId: paypalTxn,
             proof,

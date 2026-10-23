@@ -37,11 +37,14 @@ export function EntryDialog({ preset, entry, onClose, onSaved, zIndex }: {
         className="modal-body"
         onSubmit={e => { e.preventDefault(); void f.submit(); }}
       >
+        {entry?.review?.state === 'reviewed' && (
+          <div className="acct-banner">{t('acctEditClearsReview', { name: entry.review.by?.name ?? '—' })}</div>
+        )}
         <EntryFields f={f} />
       </form>
       <div className="modal-foot">
         <button type="button" className="btn" onClick={onClose} disabled={f.busy}>{t('cancel')}</button>
-        <button type="submit" form="acct-entry-form" className="btn accent" disabled={f.busy}>
+        <button type="submit" form="acct-entry-form" className="btn accent" disabled={f.busy || f.payerLocked}>
           {f.busy ? '…' : entry ? t('acctSaveEdit') : action}
         </button>
       </div>
@@ -60,6 +63,10 @@ export function TargetLine({ kind, target }: { kind: Exclude<AccountingKind, 'ot
           target.status ? targetStatusLabel(KIND_TARGET[kind]!, target.status, t) : null,
           target.amount != null && target.currency
             ? `${t(FIGURE_KEY[kind])} ${fmtMoney(target.amount, target.currency, locale)}` : null,
+          // Who the record says paid: the Business Account (a Mercury/PayPal
+          // payment, not a manager's money) or the person.
+          target.payerBusiness ? t('acctPickBusiness')
+            : target.payerName ? t('acctPickPaidBy', { name: target.payerName }) : null,
         ].filter(Boolean).join(' · ')}
         {target.recordedCny ? <> · {t('acctPickRecorded')} <Yuan value={target.recordedCny} locale={locale} /></> : null}
       </span>
@@ -144,11 +151,12 @@ function EntryFields({ f }: { f: AccountingEntryForm }) {
 
       <div className="field-row">
         <div className="field">
-          <label className="label" htmlFor={id('manager')}>{t('acctFieldManager')}</label>
-          <select id={id('manager')} className="select" value={form.managerId}
+          <label className="label" htmlFor={id('manager')}>{t('acctFieldPaidBy')}</label>
+          <select id={id('manager')} className="select" value={form.managerId} disabled={f.payerLocked}
                   onChange={e => f.set({ managerId: e.target.value })}>
             {f.managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
+          {f.payerLocked && <div className="acct-sub">{t('acctPaidFromBusiness')}</div>}
         </div>
         <div className="field">
           <label className="label" htmlFor={id('party')}>{t('acctFieldCounterparty')}</label>

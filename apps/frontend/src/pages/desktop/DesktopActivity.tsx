@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ACTIVITY_ACTIONS, type ActivityAction, type ActivityArea,
+  ACTIVITY_ACTIONS, ACTIVITY_AREAS, type ActivityAction, type ActivityArea,
 } from '@recycle-erp/shared';
 import { Icon, type IconName } from '../../components/Icon';
 import { ListSkeleton } from '../../components/Skeleton';
@@ -11,12 +11,15 @@ import { useT } from '../../lib/i18n';
 import {
   createdEventParts, fieldLabel, linePhotoEventDetail, productsCount, renderValue, type Translate,
 } from '../../lib/orderPresentation';
-import { activityRecordHref, onLinkClick } from '../../lib/route';
+import { activityRecordHref, onLinkClick, readHashQuery, replaceHashQuery } from '../../lib/route';
+import { FIELD_KEY } from '../../components/AccountingBits';
+import { fmtCny } from '../../lib/accounting';
+import { fieldValue } from './accounting/reviewBits';
 import { boxCheckEventLines } from '../../lib/boxCheck';
 import { aiReviewEventText } from '../../lib/aiReview';
 import { useSentinel } from '../../lib/useSentinel';
 
-// The global audit register — every change made across all four ledgers, in
+// The global audit register — every change made across all five ledgers, in
 // one record. Read-only; the source tables are append-only by trigger.
 //
 // Deliberately not the dot-and-rail timeline used by OrderActivityLog and
@@ -48,18 +51,21 @@ const AREAS: { id: 'all' | ActivityArea; tKey: string }[] = [
   { id: 'so',    tKey: 'acAreaSo' },
   { id: 'inv',   tKey: 'acAreaInv' },
   { id: 'price', tKey: 'acAreaPrice' },
+  { id: 'acct',  tKey: 'acAreaAcct' },
 ];
 
 const ACTION_TKEY: Record<ActivityAction, string> = {
   created: 'acActCreated', status: 'acActStatus', edited: 'acActEdited',
   added: 'acActAdded', removed: 'acActRemoved', priced: 'acActPriced',
   moved: 'acActMoved', archived: 'acActArchived', note: 'acActNote',
+  reviewed: 'acActReviewed', queried: 'acActQueried',
 };
 
 // Chip tone per action, reusing the .chip classes from tokens.css.
 const ACTION_TONE: Record<ActivityAction, string> = {
   created: 'pos', status: 'info', edited: '', added: 'pos', removed: 'neg',
   priced: 'warn', moved: 'info', archived: '', note: '',
+  reviewed: 'pos', queried: 'info',
 };
 
 const RANGES: { days: number; tKey: string }[] = [
@@ -70,10 +76,61 @@ const RANGES: { days: number; tKey: string }[] = [
 ];
 
 type Change = { field: string; from: unknown; to: unknown };
+type Summary = { diff?: Change; shown?: { k: string; from: string; to: string }; note?: string; plain?: string };
+type Ctx = { locale: string; t: Translate; members: Member[] };
+
+// The Accounting book's events read in its own words: its field names, yuan,
+// and the entry each one is about.
+type AcctDetail = {
+  changes?: Record<string, { from: unknown; to: unknown }>; reason?: string; text?: string; orderId?: string;
+  backfilled?: 'commission_paid_by' | 'payment_received_by'; clearedReview?: unknown; amountCny?: number;
+  entry: { direction: string; kind: string; amountCny: number; record: string | null };
+};
+
+function acctDiffs(d: AcctDetail, ctx: Ctx) {
+  return Object.entries(d.changes ?? {}).map(([k, ch]) => ({
+    k: FIELD_KEY[k] ? ctx.t(FIELD_KEY[k]) : k,
+    from: fieldValue(k, ch.from, { t: ctx.t, locale: ctx.locale, people: ctx.members }),
+    to: fieldValue(k, ch.to, { t: ctx.t, locale: ctx.locale, people: ctx.members }),
+  }));
+}
+
+function summariseAcct(e: Event, ctx: Ctx): Summary {
+  const { t, locale } = ctx;
+  const d = e.detail as AcctDetail;
+  switch (e.kind) {
+    case 'created': return {
+      plain: [t('acctDir_' + d.entry.direction), t('acctKind_' + d.entry.kind) + (d.entry.record ? ' ' + d.entry.record : ''),
+        fmtCny(d.entry.amountCny, locale)].join(' · '),
+      note: d.backfilled ? t(d.backfilled === 'commission_paid_by' ? 'acctEvBackfilledPaidBy' : 'acctEvBackfilledReceiver') : undefined,
+    };
+    case 'edited': {
+      const diffs = acctDiffs(d, ctx);
+      return {
+        shown: diffs[0],
+        note: [diffs.length > 1 ? t('acAndMore', { n: diffs.length - 1 }) : null,
+          d.clearedReview ? t('acAcctReviewCleared') : null].filter(Boolean).join(' · ') || undefined,
+      };
+    }
+    case 'voided': return { plain: t('acAcctVoided', { reason: d.reason ?? '' }) };
+    case 'restored': return { plain: t('acAcctRestored') };
+    case 'unlinked': return { plain: t('acAcctUnlinked', { id: d.orderId ?? '' }) };
+    case 'reviewed': return {
+      plain: t('acAcctReviewed'), note: t('acAcctSignedOff', { amount: fmtCny(d.amountCny ?? d.entry.amountCny, locale) }),
+    };
+    case 'unreviewed': return { plain: t('acAcctUnreviewed') };
+    case 'queried': return { plain: t('acAcctAsked', { text: d.text ?? '' }) };
+    case 'answered': return { plain: t('acAcctAnswered', { text: d.text ?? '' }) };
+    case 'query_withdrawn': return { plain: t('acAcctQueryWithdrawn') };
+    default: return { plain: '' };
+  }
+}
 
 // Reduce an event to the one line the Change lane shows. Returns either a
 // field diff (rendered as struck-old → solid-new) or a plain sentence.
-function summarise(e: Event, locale: string, t: Translate): { diff?: Change; note?: string; plain?: string } {
+function summarise(e: Event, ctx: Ctx): Summary {
+  const { locale, t } = ctx;
+  if (e.area === 'acct') return summariseAcct(e, ctx);
   const d = e.detail;
   const changes = Array.isArray(d.changes) ? (d.changes as Change[]) : null;
   if (changes?.length) {
@@ -138,13 +195,25 @@ function summarise(e: Event, locale: string, t: Translate): { diff?: Change; not
 }
 
 const AREA_ICON: Record<ActivityArea, IconName> = {
-  po: 'file', so: 'tag', inv: 'inventory', price: 'trending',
+  po: 'file', so: 'tag', inv: 'inventory', price: 'trending', acct: 'cash',
+};
+
+// The Accounting page's Log button lands here filtered to its book.
+const areaFromUrl = (): 'all' | ActivityArea => {
+  const a = readHashQuery().get('area');
+  return a && (ACTIVITY_AREAS as readonly string[]).includes(a) ? (a as ActivityArea) : 'all';
 };
 
 export function DesktopActivity() {
   const { t, locale } = useT();
 
-  const [area, setArea] = useState<'all' | ActivityArea>('all');
+  const [area, setArea] = useState<'all' | ActivityArea>(areaFromUrl);
+  // The area travels in the address, so a copied link opens the same view.
+  useEffect(() => {
+    const q = readHashQuery();
+    if (area === 'all') q.delete('area'); else q.set('area', area);
+    replaceHashQuery(q);
+  }, [area]);
   const [action, setAction] = useState<'' | ActivityAction>('');
   const [actor, setActor] = useState('');
   const [days, setDays] = useState(0);
@@ -340,7 +409,7 @@ export function DesktopActivity() {
                   </span>
                 </div>
                 {g.events.map(e => {
-                  const s = summarise(e, locale, t);
+                  const s = summarise(e, { locale, t, members });
                   const isOpen = open.has(e.id);
                   const recordHref = activityRecordHref(e.area, e.targetRef);
                   const time = new Date(e.createdAt)
@@ -369,7 +438,15 @@ export function DesktopActivity() {
                           {t(ACTION_TKEY[e.action])}
                         </span>
                         <span className="ac-change">
-                          {s.diff ? (
+                          {s.shown ? (
+                            <>
+                              <span className="ac-k">{s.shown.k} </span>
+                              <span className="ac-was">{s.shown.from}</span>
+                              <span className="ac-arr">→</span>
+                              <span className="ac-now">{s.shown.to}</span>
+                              {s.note && <span className="ac-more">{s.note}</span>}
+                            </>
+                          ) : s.diff ? (
                             <>
                               {s.diff.field && (
                                 <span className="ac-k">{fieldLabel(s.diff.field)} </span>
@@ -405,6 +482,18 @@ export function DesktopActivity() {
                                 })}
                               />
                             </div>
+                            {e.area === 'acct' && !!e.detail.changes && (
+                              <div className="ac-diffs">
+                                {acctDiffs(e.detail as AcctDetail, { locale, t, members }).map((c, i) => (
+                                  <div key={i}>
+                                    <span className="ac-k">{c.k}: </span>
+                                    <span className="ac-was">{c.from}</span>
+                                    <span className="ac-arr">→</span>
+                                    <span className="ac-now">{c.to}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             {Array.isArray(e.detail.changes) && (
                               <div className="ac-diffs">
                                 {(e.detail.changes as Change[]).map((c, i) => (
@@ -464,7 +553,7 @@ export function DesktopActivity() {
             <span key={a.id}>
               <i style={{ background: {
                 po: 'var(--info)', so: 'var(--accent)',
-                inv: 'oklch(0.72 0.13 75)', price: 'oklch(0.55 0.16 295)',
+                inv: 'oklch(0.72 0.13 75)', price: 'oklch(0.55 0.16 295)', acct: 'oklch(0.4 0.03 250)',
               }[a.id as ActivityArea] }} />
               {t(a.tKey)}
             </span>

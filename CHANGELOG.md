@@ -17,6 +17,266 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.317.3] - 2026-10-23
+
+Fixes from the release review of everything `dev` carried past prod's
+v1.313.1 (RS-358), most of it the Accounting work that keeps an entry's
+Paid by in step with its PO.
+
+**Who paid a PO's cost now holds still where the PO says it should.** A
+purchase entry could move the payer of a PO at Ready to Pay or Done, which
+the PO page refuses because whoever paid is reimbursed through the
+commission. The entry is now refused too. Reassigning a self-paid PO to
+another purchaser used to leave the old owner as the payer, so they kept
+the reimbursement, where Self had always meant the current owner. A payer
+who was the old owner now follows the PO to the new one, with an Activity
+line. A manager who paid stays, and so does a payer the same save picked.
+Review mode's money panel added the cost to the purchaser's earnings for any
+self-paid PO, even one a manager paid. It now uses the Commission tab's
+rule, which is now one function on all three surfaces.
+
+**The RMB Flow lets through what the server allows, and Undo really
+undoes.** On a PO the Business Account paid, the entry form refused a
+supplier's refund or a commission clawback, and greyed out Save on an entry
+a manager had restored there, even for a note. It now locks only a paid-out
+entry, and on an edit only when the record, direction or payer moves.
+Restoring an entry now brings its Paid by up to date with its PO, as RS-354
+promised; while voided, the sync had passed it by. Withdrawing a sign-off
+(Review mode's Undo) used to leave an entry plain *To review*, losing the
+question it had closed or its *Changed since review* diff. The sign-off now
+keeps both on its event, and Undo puts them back. Review diffs name a payer
+who is a purchaser or a deactivated manager instead of "—".
+
+**Smaller fixes.** The review count disappeared from the sidebar when RMB
+Flow moved under the Accounting parent. It shows there again, and on the
+parent while that is folded. Migration 0201 stops the bank sync re-running
+the payer sync for every linked row it re-fetches, by firing the update
+trigger only when a row's link or settlement actually changed.
+
+## [1.317.2] - 2026-10-23
+
+A Paid by that follows its PO now clears the entry's sign-off (RS-357).
+Review mode clears a sign-off when a manager edits any field but the note, so
+the reviewer signs what the entry says. But since 1.317.0 an entry's Paid by
+also moves without anyone editing it: when a PO's payer changes from one
+person to another, the database sync moves the PO's live entries with it.
+That path left the sign-off standing, so a reviewed entry could show a payer
+its reviewer never saw. Migration 0200 makes the sync clear it the way an
+edit does. The entry reads *Changed since review* with Paid by's old and new
+value, its history line says *Paid by followed the PO. Review cleared*, and
+Activity shows the review cleared. The author stays, since the database
+doesn't know who saved the PO, so review mode names the PO instead of a
+person. The queue row and the entry's review card read *Paid by followed the
+PO* where they used to say *changed by* the author, who didn't change it.
+The queue row's line under the id also wraps now rather than running into
+the next column. An entry that wasn't signed off keeps its state, and an
+open question stays open.
+
+## [1.317.1] - 2026-10-23
+
+The monitors' toolbar summaries say "1 rule on", not "1 rules on" (RS-356).
+Reddit's workers summary, WeChat's board summary and Facebook's workers
+summary were each one sentence with its plural nouns fixed in the string.
+Any count of one read wrong, and dev, with exactly one Reddit rule enabled,
+showed it. Each count now has its own string with a singular form, joined
+with ` · `, so a summary of 1 worker, 1 subreddit, 1 buyer or 1 city reads
+right in any combination. The Chinese text is unchanged. Reddit's summary
+without post stats drops its "watched", matching the one with them.
+
+The `verify` skill no longer sends a session to port 8899. That port collided
+with another session's backend in the RS-351 check. The skill now checks a
+port by number before using it, and confirms the health check's version is
+the worktree's own.
+
+## [1.317.0] - 2026-10-22
+
+A PO's cost *Paid by* now names who paid the supplier (RS-353): the
+**Business Account** — the company's Mercury and PayPal money, the only kind
+the Payments page links to a PO — or **a person**, any active manager by
+name, or the purchaser when they are not one. It used to be a two-way switch,
+*Company card* or *Self-paid*, which said whose kind of money it was but not
+whose; RS-349 had to leave the cost out of the Accounting book for that
+reason. The stored value and every rule on it stay as they were: the Business
+Account keeps Method, the transaction-ID rule and auto-link, a person keeps
+the chat-screenshot rule. Migration 0198 adds `orders.paid_by` and names the
+purchaser on every self-paid PO, which is who the commission maths was
+reimbursing all along.
+
+The picker is a select on the create pages, both PO pages, the hand-off
+dialog and the phone sheet. The list's Payment cell and its filter chips read
+*Business* or the person's name, one chip per person who paid a loaded PO. A
+change is a *Paid by* line in Activity. The cost comes back to whoever paid
+it: the Commission tab adds it to the purchaser's earnings only when the
+purchaser paid, and reads *Cost reimbursed to ‹name›* when a manager did. The
+commission *Paid by*'s *Company paid* reads *Business Account* too, so the two
+fields share one vocabulary. The spreadsheet export names the payer.
+
+Accounting opens on the PO's payer: a PO picked for a Purchase entry carries
+its cost payer, and for a Commission entry its commission payer, so the
+Cost Payment and Commission cards' Record buttons and the entry dialog's PO
+pick start on that payer. A payer picked by hand, or an entry being edited,
+is never moved by the record. `/api/members/names` now carries each
+member's role, so a purchaser's picker can tell the managers apart.
+
+The Accounting page is the **RMB Flow**, and it sits with Payments under one
+sidebar parent, **Accounting** (RS-355): Payments is where everything the
+Business Account paid lives; the RMB Flow records what the managers paid and
+received outside it. Both pages print the breadcrumb. The PO, sell order and
+case cards, the phone Home link and screen say RMB Flow; the URLs are
+unchanged.
+
+An entry's *Paid by* and its PO's payer are one value, kept in step both
+ways (RS-354, RS-355). The book's *Manager* column is *Paid by*, and it
+names a person: an active manager, or the PO's own purchaser on a self-paid
+cost. Migration 0199 adds `accounting_sync_payer` and two triggers — on the
+PO's payer columns and on bank-row links — so whatever moves a PO's person
+payer (the PO page, a commission screenshot, a cost payer edited or handed
+off) moves its live entries of that kind, with a *Paid by followed the PO*
+history line; nobody on file leaves an entry as recorded. When the Business
+Account paid instead — the commission flagged company-paid or a
+Mercury/PayPal row linked as it, the cost flipped to the company's account,
+a settlement that flips — the PO's live paid-out entries of that kind are
+**voided** with the reason, restorable; unlinking does not bring them back,
+Restore does, and the PO never voids a restored entry again. The other way,
+saving an entry with *Paid by* X sets the PO's commission payer to X with
+its Activity line, or a self-paid PO's cost payer; an entry on a PO the
+Business Account paid is refused, and the form and the PO card say so and
+point to Payments. Every live PO-linked entry was brought in line with its
+PO once, moved or voided, with a history line.
+
+The running *Balance* is one company-wide book: the manager filter and
+*Held by* hide rows, never move the balance.
+
+## [1.316.1] - 2026-10-22
+
+The Facebook account pool loads on dev again (RS-352). The nightly prod→dev
+copy blanks the pool's sealed logins, because they are sealed under prod's
+`FB_POOL_KEY` and dev has its own. The access token column came later
+(v1.307.0, RS-337, migration 0190) and the scrub never learned it. So from the
+first import that carried tokens, rows #18–#27, every night brought prod's
+live Facebook access tokens into dev. The first one dev couldn't open failed
+`GET /api/facebook-pool` with a 500 for the whole page. The scrub now blanks
+the token too. Its test reads the sealed columns from the schema rather than
+listing them, so a new `*_enc` column fails CI until the scrub covers it. The
+ten tokens already on dev were blanked by hand the same day.
+
+## [1.316.0] - 2026-10-22
+
+Monitors ▸ Reddit and Monitors ▸ WeChat now read like Monitors ▸ Facebook
+(RS-351), so the three monitors look like one product. Each page has the
+same head, an icon tab row, a legend of pills that filters, a main card
+whose toolbar has a search box on the left and a one-line summary on the
+right, and an aside beside it.
+
+Reddit splits into **Fleet** and **Prompts** (`/tracker/prompts`), the
+prompt comparison moving to its own tab. Its workers table gains the search
+box it lacked: the table loads by pages of 15, so a search loads every
+worker the status filter allows in one request and filters them in the
+browser, and finds a worker that was never scrolled in. Worker loads are
+now latest-wins, so a reload can no longer be dropped behind a refresh or
+an append still in flight, and a late page can't land on a newer list. The
+toolbar's summary counts workers, posts in the past 24 hours, alerts,
+subreddits and rules.
+
+WeChat trades its KPI cards for the pattern. A legend of memtrade's supply
+reads (Short to Glut) counts the board's lines in each and filters to one.
+The board's toolbar leads with the search and sums up buyers, sellers,
+posts and groups on the right, with the day-over-day change on hover. The
+market notes and the two rankings move into an aside beside the board
+(above it below 1190px), and **Groups read** gets a tab of its own,
+always open, with the report's window in its foot. To fit seven columns
+beside the aside, the board takes the Fleet table's tighter cells and a
+narrower bid/ask bar, its line family and *Priced lines only* get a row
+under the search, and an opened line stacks its posts over its price
+history instead of setting them side by side. No backend, proxy or tracker
+change.
+
+## [1.315.0] - 2026-10-22
+
+The Accounting book now has a second pair of eyes (RS-350). Until this
+release, one manager wrote each RMB entry and nobody else had to look at it.
+Payments has a bank feed to check against; this book has none, so another
+person is the only check it can have. Every live entry now needs one manager's
+sign-off, and that manager can't be the one who wrote it. *Writing it* means
+recording the entry, or later changing anything the sign-off covers: every
+field but the note. The entries the RS-349 backfill wrote have no author, so
+any manager can review them. The entry's own manager may review an entry
+someone else typed in their name, which is them confirming their own money.
+
+**Review mode** (`#/accounting/review`, desktop) is the PO's Review mode
+pointed at the book:
+
+- A queue, oldest first and not limited to the book's period, so a backlog
+  can't hide behind *This month*.
+- Tabs for *For you*, *Queried*, *Waiting on others* and *Reviewed*.
+- A side panel that weighs each entry against:
+  - the record it names (over the record's figure warns; short only informs,
+    since sales arrive in part-payments);
+  - the FX ledger's rate for its day (a dollar entry more than 2% off warns);
+  - a look-alike entry within a week (warns).
+- **Space** signs off the selected entry. The row sinks under *Reviewed in
+  this visit* with an Undo.
+- *Mark n reviewed* signs off in bulk, after a confirm that lists the
+  entries. It only takes entries still To review that carry no warning, and
+  the server checks each one again.
+
+A reviewer who can't sign an entry off can **query** it instead. The author
+is notified, and the entry waits until they answer or fix it. Fixing it
+counts as the answer.
+
+A sign-off names the version the page showed, so a page that is out of date
+can't sign off an entry that changed after it loaded. An edit to a covered
+field clears the sign-off and shows *Changed since review* with the old and
+new values. Restoring a voided entry brings it back To review.
+
+On the book:
+
+- A *Log* button and a *Review mode* button with the count waiting on you.
+- A Review filter.
+- The reviewer's tick in the margin past the balance.
+- A *Reviewed* strip in the band. A period whose strip reads all reviewed is
+  signed off; there is nothing else to sign.
+
+The entry drawer has a Review card with the viewer's own actions, and its
+history logs every sign-off, withdrawal, question and answer. The sidebar
+counts what waits on you. The phone keeps the book as it was.
+
+The book's history is also in **Activity** now, as a fifth ledger. *Log*
+opens Activity with the Accounting area picked, and its action filter gains
+Reviewed and Query. Migration 0197 makes `accounting_entry_events`
+append-only by trigger, like the other four ledgers. Until then a sign-off
+could have been edited after the fact, under a page that calls every row
+immutable.
+
+## [1.314.0] - 2026-10-22
+
+The Accounting book now starts from the money the ERP already knew had gone
+through a manager's hands (RS-349). Migration 0196 books every PO with a
+manager in *Paid by* as a Paid commission through that manager, and every
+Done sell order with a payment receiver as a Received sale through that
+receiver. The figure is the record's own: the PO's projected commission in
+dollars at the FX ledger's rate for its day, or the sale's total in the
+order's currency. The receipts' AI-read amounts can't stand in for it: one
+transfer is often uploaded on two POs, a sale arrives in part-payments, and a
+commission transfer can carry the cost reimbursement too. Where a single
+receipt covers a single PO, the booked yuan lands within a few yuan of it.
+Only the receipts' method is read back, and only where an order's receipts
+agree on one. A commission is dated by its first screenshot or its move to
+Done, whichever came first, a sale by the day it went Done, both on China's
+calendar, where the RMB book is kept. Company-paid commissions (on file, or a
+bank row linked as the commission) are left out, and so is any record the
+book already has an entry for, so the migration adds nothing a second time.
+The prod copy of 10-22 gives 19 commissions and 22 sales. An entry booked
+this way has no person in its history: it reads *Backfilled from the PO's
+Paid by*, or *from the sell order's payment receiver*.
+
+The page's period picker also opened under the sidebar. The chip is the
+dashboard's, whose popover was pinned to the chip's right edge for a chip at
+the right of the page. On Accounting the chip leads its row, so the popover
+now opens rightwards there. On both pages the popover is wide enough for the
+two custom dates side by side. Before, the dates and *Apply* spilled past its
+right edge.
+
 ## [1.313.1] - 2026-10-22
 
 Fixes from the review of the Review mode sell order sheet (RS-348), made

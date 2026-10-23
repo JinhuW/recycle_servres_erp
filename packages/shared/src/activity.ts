@@ -2,19 +2,21 @@
 // apps/backend/src/routes/activity.ts and the register UI in
 // apps/frontend/src/pages/desktop/DesktopActivity.tsx.
 //
-// The four audit ledgers name the same human concept differently:
+// The audit ledgers name the same human concept differently:
 // order_events says `advanced`, sell_order_events says `status_changed`,
 // inventory_events says `status`. The Activity page presents one word, so the
 // raw kind → action mapping lives here rather than being written twice and
 // drifting. The backend also inverts this map to turn `?action=status` into
 // the set of raw kinds to filter each branch on.
 
-export const ACTIVITY_AREAS = ['po', 'so', 'inv', 'price'] as const;
+export const ACTIVITY_AREAS = ['po', 'so', 'inv', 'price', 'acct'] as const;
 export type ActivityArea = (typeof ACTIVITY_AREAS)[number];
 
 export const ACTIVITY_ACTIONS = [
   'created', 'status', 'edited', 'added',
   'removed', 'priced', 'moved', 'archived', 'note',
+  // The Accounting book's sign-offs and the questions that hold one up.
+  'reviewed', 'queried',
 ] as const;
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
 
@@ -73,6 +75,20 @@ export const ACTIVITY_KIND_MAP: Record<
     edited:      'edited',
     priced:      'priced',
     transferred: 'moved',
+  },
+  // Voiding takes an entry out of the book and restoring puts it back: its
+  // standing changes, so both read as a status move.
+  acct: {
+    created:         'created',
+    edited:          'edited',
+    unlinked:        'edited',
+    voided:          'status',
+    restored:        'status',
+    reviewed:        'reviewed',
+    unreviewed:      'reviewed',
+    queried:         'queried',
+    answered:        'queried',
+    query_withdrawn: 'queried',
   },
 };
 

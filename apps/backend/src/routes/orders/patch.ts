@@ -16,7 +16,7 @@ import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../../services/orderGoo
 import { synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, normalizeTracking, isMaterialPatch, type Carrier, type PackageSource } from '@recycle-erp/shared';
 import { normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
-import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, committedLinesBody, describeSellOrders, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, stageMovedBody, type StoredLine, storedLineCols, supplierErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, trackInput, warehouseErr } from './shared';
+import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, committedLinesBody, describeSellOrders, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, paidByAfter, paidByErr, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, stageMovedBody, type StoredLine, storedLineCols, supplierErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, trackInput, warehouseErr } from './shared';
 import { OrderRefusal, refusalResponse } from './refusal';
 
 const patchRoutes = new Hono<OrdersEnv>();
@@ -53,6 +53,7 @@ patchRoutes.patch('/:id', async (c) => {
         warehouseId?: string | null;
         payment?: 'company' | 'self';
         paymentMethod?: 'paypal' | 'cash' | null;
+        paidByUserId?: string | null;
         commissionRate?: number | null;
         paypalTxnId?: string | null;
         onBehalfOfUserId?: string | null;
@@ -113,6 +114,8 @@ patchRoutes.patch('/:id', async (c) => {
   const existing = (await sql`SELECT user_id, category, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0];
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (u.role !== 'manager' && existing.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+  const pbErr = await paidByErr(sql, existing.user_id, body.paidByUserId);
+  if (pbErr) return c.json({ error: pbErr }, 400);
   // The purchaser owns their order until the review closes it (Ready to Pay):
   // goods arrive miscounted, fees land late, a line turns out to be something
   // else. What they may not do is change it under a manager who has already
@@ -312,6 +315,7 @@ patchRoutes.patch('/:id', async (c) => {
       // snapshots, so the diff describes one settled state transition.
       const orderBefore = (await tx`
         SELECT o.id, o.user_id, o.lifecycle, o.notes, o.warehouse_id, o.payment, o.payment_method,
+               o.paid_by,
                o.total_cost::float AS total_cost,
                o.commission_rate::float AS commission_rate,
                o.other_fees::float AS other_fees,
@@ -330,7 +334,7 @@ patchRoutes.patch('/:id', async (c) => {
       `)[0] as
         | { id: string; user_id: string; lifecycle: string; notes: string | null;
             warehouse_id: string | null;
-            payment: string; payment_method: string | null;
+            payment: string; payment_method: string | null; paid_by: string | null;
             total_cost: number | null; commission_rate: number | null;
             other_fees: number; other_fees_note: string | null; paypal_txn_id: string | null;
             supplier_id: string | null; archived_at: Date | null;
@@ -373,6 +377,7 @@ patchRoutes.patch('/:id', async (c) => {
           body.paypalTxnId !== undefined ||
           body.paymentMethod !== undefined ||
           (body.payment !== undefined && body.payment !== orderBefore.payment) ||
+          (body.paidByUserId != null && body.paidByUserId !== orderBefore.paid_by) ||
           // Ownership decides whose closed book this is — commission and
           // "my orders" both key off it, so it freezes with the rest.
           body.onBehalfOfUserId !== undefined;
@@ -444,6 +449,7 @@ patchRoutes.patch('/:id', async (c) => {
         body.warehouseId !== undefined ||
         body.payment !== undefined ||
         body.paymentMethod !== undefined ||
+        body.paidByUserId !== undefined ||
         body.commissionRate !== undefined ||
         body.paypalTxnId !== undefined ||
         body.supplierId !== undefined ||
@@ -479,6 +485,9 @@ patchRoutes.patch('/:id', async (c) => {
         const paymentAfter = body.payment ?? orderBefore.payment;
         const setMethod    = paymentAfter === 'self' || body.paymentMethod !== undefined ? 1 : 0;
         const newMethod    = paymentAfter === 'self' ? null : (body.paymentMethod ?? null);
+        // The payer follows the payment the same way: the Business Account
+        // has none, and a self-paid order always names someone.
+        const newPaidBy    = paidByAfter(paymentAfter, body.paidByUserId, orderBefore.paid_by, orderBefore.user_id);
         // Same canon as the add-package boundary — a pasted id with spaces or
         // lowercase must diff clean against the AI-extracted value.
         const normPaypal = clearPaypal ? null : normPaypalTxnId(body.paypalTxnId);
@@ -498,6 +507,7 @@ patchRoutes.patch('/:id', async (c) => {
             other_fees_note = CASE WHEN ${setFeesNote}::int  = 1 THEN ${normFeeNote(body.otherFeesNote)} ELSE other_fees_note END,
             payment      = COALESCE(${body.payment ?? null}, payment),
             payment_method = CASE WHEN ${setMethod}::int = 1 THEN ${newMethod} ELSE payment_method END,
+            paid_by      = ${newPaidBy}::uuid,
             source         = CASE WHEN ${setSource}::int = 1 THEN ${body.source ?? null} ELSE source END,
             handoff_method = CASE WHEN ${setMethodHo}::int = 1 THEN ${facts.method} ELSE handoff_method END,
             handoff_by     = CASE WHEN ${setBy}::int = 1 THEN ${facts.by}::uuid ELSE handoff_by END
@@ -520,7 +530,9 @@ patchRoutes.patch('/:id', async (c) => {
       }
       // Owner moves under the same lock as the meta fields.
       if (newOwner && newOwner.ownerId !== orderBefore.user_id) {
-        await changeOrderOwnerTx(tx, id, u, orderBefore.user_id, newOwner);
+        await changeOrderOwnerTx(tx, id, u, orderBefore.user_id, newOwner, {
+          payerPicked: body.paidByUserId != null && body.paidByUserId !== orderBefore.paid_by,
+        });
       }
       // The box, under the same lock as the fields that describe it. A
       // tracking number only makes sense on a label; a flip away from label
@@ -822,7 +834,7 @@ patchRoutes.patch('/:id', async (c) => {
 
       if (touchesOrder || touchesLines || packageChanged.length) {
         const orderAfter = (await tx`
-          SELECT notes, warehouse_id, payment, payment_method, total_cost::float AS total_cost,
+          SELECT notes, warehouse_id, payment, payment_method, paid_by, total_cost::float AS total_cost,
                  commission_rate::float AS commission_rate,
                  other_fees::float AS other_fees, other_fees_note, paypal_txn_id,
                  supplier_id, source, handoff_method, handoff_by

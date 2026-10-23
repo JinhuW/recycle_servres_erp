@@ -553,6 +553,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     <>
       <div className="page-head">
         <div>
+          <div className="page-sub">{t('nav_accounting')} / {t('nav_payments')}</div>
           <h1 className="page-title">{t('payTitle')}</h1>
           <div className="page-sub">{t('paySub')}</div>
         </div>

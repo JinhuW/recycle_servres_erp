@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { EVALUATOR_MODEL, evaluatorModelProblem, summarizeTrial, TRIAL_MIN_LABELLED, type VsLive } from './tracker';
+import {
+  EVALUATOR_MODEL, evaluatorModelProblem, funnelCounts, summarizeTrial, TRIAL_MIN_LABELLED, workerHaystack,
+  type TrackerWorker, type VsLive,
+} from './tracker';
 
 const cell = (posts: number, leads = 0, notLeads = 0) => ({ posts, leads, notLeads });
 
@@ -59,5 +62,33 @@ describe('EVALUATOR_MODEL', () => {
     expect(evaluatorModelProblem('vendor/not-in-catalogue', catalogue)).toBe('unlisted');
     expect(evaluatorModelProblem('openai/gpt-4o-mini', null)).toBe('loading');
     expect(evaluatorModelProblem('gpt-4o-mini', catalogue)).toBe('shape');
+  });
+});
+
+describe('funnelCounts', () => {
+  it('reads the window as one cohort: everything polled, then what passed each stage', () => {
+    const stats = {
+      posts: { new: 4, rejected: 30, target: 2, notified: 5, failed: 1 },
+      oldestPending: null,
+      failed: [],
+    };
+
+    expect(funnelCounts(stats)).toEqual({ poll: 42, evaluate: 7, notify: 5 });
+  });
+
+  it('counts a status with no posts as zero, and no stats as nothing', () => {
+    expect(funnelCounts({ posts: { notified: 3 }, oldestPending: null, failed: [] }))
+      .toEqual({ poll: 3, evaluate: 3, notify: 3 });
+    expect(funnelCounts(null)).toBeNull();
+  });
+});
+
+describe('workerHaystack', () => {
+  const worker: TrackerWorker = {
+    workerId: 'oci-7f3a', role: 'api', startedAt: '', lastHeartbeatAt: '', secondsSinceHeartbeat: 0, loops: {},
+  };
+
+  it('matches on the id, the raw role and the label the table shows', () => {
+    expect(workerHaystack(worker, 'API 服务')).toBe('oci-7f3a api API 服务');
   });
 });

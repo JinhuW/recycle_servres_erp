@@ -396,7 +396,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/payments/internal') return 'internaltx';
   if (path === '/payments' || match('/payments/po/:id', path) || match('/payments/so/:id', path)) return 'payments';
   if (path === '/accounting' || match('/accounting/:id', path)) return 'accounting';
-  if (path === '/tracker') return 'tracker';
+  if (path === '/tracker' || path === '/tracker/prompts') return 'tracker';
   if (path === '/wechat' || matchWechatDay(path)) return 'wechat';
   if (path === '/fleet' || path === '/fleet/pool' || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
   if (path === '/settings') return 'settings';
@@ -417,6 +417,16 @@ export function afterSalesNewPath(sellOrderId?: string): string {
 // its own screen on the phone).
 export function accountingEntryPath(id: string): string {
   return `/accounting/${encodeURIComponent(id)}`;
+}
+
+// Review mode for the book: a desktop page of its own, no sidebar.
+export const ACCOUNTING_REVIEW_PATH = '/accounting/review';
+
+/** The entry an Accounting path opens. Review mode's path is not an entry —
+ *  on the phone, which has no Review mode, it is just the book. */
+export function matchAccountingEntry(path: string): string | null {
+  if (path === ACCOUNTING_REVIEW_PATH) return null;
+  return match('/accounting/:id', path)?.id ?? null;
 }
 
 // One report day on Monitors ▸ WeChat; bare /wechat is the newest one.
@@ -519,6 +529,7 @@ export function activityRecordHref(area: ActivityArea, targetRef: string | null)
   if (!targetRef) return null;
   const base = area === 'po' ? '/purchase-orders/'
     : area === 'so' ? '/sell-orders/'
+    : area === 'acct' ? '/accounting/'
     : '/inventory/';
   return hrefFor(base + encodeURIComponent(targetRef));
 }

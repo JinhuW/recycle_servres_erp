@@ -153,6 +153,7 @@ const FIELD_LABEL: Record<string, string> = {
   other_fees:      'Other fees',
   other_fees_note: 'Other fees note',
   paypal_txn_id:   'PayPal transaction ID',
+  paid_by:         'Paid by',
   commission_paid_by: 'Commission paid by',
   source:          'Source',
   handoff_method:  'Delivery',
@@ -178,8 +179,32 @@ const ENUM_VALUE_LABEL: Record<string, Record<string, string>> = {
   source:         { facebook: 'Facebook', local: 'Local', reddit: 'Reddit', other: 'Other' },
   handoff_method: { pickup: 'Local pickup', label: 'Shipping label' },
   payment_method: { paypal: 'PayPal', cash: 'Cash' },
-  payment:        { company: 'Company card', self: 'Self-paid' },
+  payment:        { company: 'Business Account', self: 'Self-paid' },
 };
+
+/**
+ * Who paid the supplier, as the list cell, the tab summary and the hand-off
+ * dialog read it: the Business Account, or the person. A self-paid PO from a
+ * backend that predates the payer falls back to the old Self-paid label.
+ */
+export function costPayerLabel(
+  o: { payment: 'company' | 'self'; paidBy?: { id: string; name: string } | null },
+  t: Translate, compact = false,
+): string {
+  if (o.payment === 'company') return t(compact ? 'payBusinessShort' : 'payBusiness');
+  return o.paidBy?.name ?? t(compact ? 'paySelfShort' : 'paySelf');
+}
+
+/**
+ * Whether the purchaser's earnings carry the cost back: they paid it out of
+ * pocket. Another manager who paid is reimbursed apart, and a PO with no
+ * payer on file predates the field, when Self meant the purchaser.
+ */
+export function costReimbursedToOwner(
+  payment: 'company' | 'self', paidById: string | null | undefined, ownerId: string,
+): boolean {
+  return payment === 'self' && (paidById == null || paidById === ownerId);
+}
 
 /** One side of a field change, in the units that field is read in. */
 export function renderValue(field: string, v: unknown, locale: string): string {

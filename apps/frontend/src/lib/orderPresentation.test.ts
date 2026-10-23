@@ -3,8 +3,8 @@ import { I18N } from './i18n';
 import zh from './i18n.zh';
 import { fmtUSD } from './format';
 import {
-  createdEventParts, fieldLabel, inTransitDetail, linePhotoEventDetail, managerChangedLine, ownerChangedLine,
-  profitTone, renderValue, signedUSD0, trackingNote,
+  costPayerLabel, createdEventParts, fieldLabel, inTransitDetail, linePhotoEventDetail, managerChangedLine,
+  ownerChangedLine, profitTone, renderValue, signedUSD0, trackingNote,
 } from './orderPresentation';
 import type { PackageTracking } from './types';
 
@@ -85,6 +85,16 @@ describe('the keys the audit rows name', () => {
 describe('fieldLabel', () => {
   it('names purchase- and sell-order fields from the one map', () => {
     expect(fieldLabel('commission_paid_by')).toBe('Commission paid by');
+    expect(fieldLabel('paid_by')).toBe('Paid by');
+    expect(renderValue('payment', 'company', 'en-US')).toBe('Business Account');
+  });
+
+  it('names the cost payer: the Business Account, the person, or the old Self-paid', () => {
+    const t = (k: string) => k;
+    expect(costPayerLabel({ payment: 'company' }, t)).toBe('payBusiness');
+    expect(costPayerLabel({ payment: 'company' }, t, true)).toBe('payBusinessShort');
+    expect(costPayerLabel({ payment: 'self', paidBy: { id: 'u1', name: 'Tim' } }, t)).toBe('Tim');
+    expect(costPayerLabel({ payment: 'self' }, t)).toBe('paySelf');
     expect(fieldLabel('payment_received_by')).toBe('Payment received by');
     expect(fieldLabel('handoff_by')).toBe('Picked up by');
     expect(fieldLabel('not_a_column')).toBe('not_a_column');

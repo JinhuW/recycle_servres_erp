@@ -39,6 +39,7 @@ import {
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext, isAuthorizePath,
   readHashQuery,
   replaceRoute,
+  matchAccountingEntry,
 } from './lib/route';
 import { confirmDiscard } from './lib/unsavedGuard';
 import { openWalkthrough, useWalkthroughAutoStart, useWalkthroughOpen } from './lib/onboarding';
@@ -238,7 +239,7 @@ function Shell() {
   // detail: the header's back button is the way out, not the tab bar.
   const shippingTaskOpen = !!shippingRoute && shippingRoute.kind !== 'dashboard';
   // One Accounting entry is a focused screen too.
-  const accountingEntryOpen = view === 'accounting' && !!match('/accounting/:id', path);
+  const accountingEntryOpen = view === 'accounting' && !!matchAccountingEntry(path);
 
   // The walkthrough points at the tab bar, so it waits for a screen that has
   // one: not the capture flow, an order, or a shipping task.

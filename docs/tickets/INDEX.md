@@ -5,11 +5,21 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-358](./RS-358-fix-the-dev-main-review-findings-before-the-v1-317-r.md) | done | bug | P2 | Fix the dev→main review findings before the v1.317 release | 1.317.3 |
+| [RS-357](./RS-357-a-paid-by-that-follows-the-po-clears-the-entry-s-sig.md) | done | bug | P2 | A Paid by that follows the PO clears the entry's sign-off | 1.317.2 |
+| [RS-356](./RS-356-monitor-summaries-pluralise-a-count-of-one.md) | done | bug | P3 | Monitor summaries pluralise a count of one | 1.317.1 |
+| [RS-355](./RS-355-accounting-groups-payments-and-rmb-flow-the-rmb-flow.md) | done | story | P2 | Accounting groups Payments and RMB Flow; the RMB Flow records money outside the Business Account | 1.317.0 |
+| [RS-354](./RS-354-accounting-an-entry-s-paid-by-and-the-po-s-payer-sta.md) | done | story | P2 | Accounting: an entry's Paid by and the PO's payer stay in sync; one company-wide balance | 1.317.0 |
+| [RS-353](./RS-353-paid-by-names-a-manager-or-the-business-account.md) | done | story | P2 | Paid by names a manager or the Business Account | 1.317.0 |
+| [RS-352](./RS-352-the-prod-dev-scrub-blanks-the-account-pool-s-access.md) | done | bug | P1 | The prod→dev scrub blanks the account pool's access tokens | v1.316.1 |
+| [RS-351](./RS-351-wechat-and-reddit-pages-follow-the-facebook-fleet-pa.md) | done | story | P2 | WeChat and Reddit pages follow the Facebook fleet pattern | 1.316.0 |
+| [RS-350](./RS-350-accounting-review-mode-another-manager-signs-off-eac.md) | done | story | P2 | Accounting review mode: another manager signs off each entry | 1.315.0 |
+| [RS-349](./RS-349-accounting-fix-the-period-picker-and-backfill-entrie.md) | done | bug | P2 | Accounting: fix the period picker and backfill entries from Paid by and the payment receiver | 1.314.0 |
 | [RS-348](./RS-348-fix-the-sell-order-sheet-review-findings-before-the.md) | done | bug | P2 | Fix the sell order sheet review findings before the v1.313 release | v1.313.1 |
 | [RS-347](./RS-347-review-mode-prices-the-po-from-a-dropped-sell-order.md) | done | story | P2 | Review mode prices the PO from a dropped sell order sheet | v1.313.0 |
 | [RS-346](./RS-346-fix-the-wechat-market-review-findings-before-the-v1.md) | done | bug | P1 | Fix the WeChat market review findings before the v1.312 release | v1.312.2 |
 | [RS-345](./RS-345-fix-the-sale-reopen-review-findings-before-the-v1-31.md) | done | bug | P1 | Fix the sale-reopen review findings before the v1.311 release | v1.312.1 |
-| [RS-344](./RS-344-wechat-market-page-under-monitors-fed-by-memtrade-s.md) | in-review | story | P2 | WeChat market page under Monitors, fed by memtrade's daily push | v1.312.0 |
+| [RS-344](./RS-344-wechat-market-page-under-monitors-fed-by-memtrade-s.md) | done | story | P2 | WeChat market page under Monitors, fed by memtrade's daily push | v1.312.0 |
 | [RS-343](./RS-343-reopen-a-done-sell-order-to-awaiting-payment.md) | done | story | P2 | Reopen a Done sell order to Awaiting payment | v1.311.0 |
 | [RS-342](./RS-342-fix-the-accounting-review-findings-before-the-v1-310.md) | done | bug | P1 | Fix the Accounting review findings before the v1.310 release | v1.310.2 |
 | [RS-341](./RS-341-fix-the-dev-to-main-review-findings-before-the-v1-31.md) | done | bug | P1 | Fix the dev-to-main review findings before the v1.310 release | v1.310.1 |

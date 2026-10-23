@@ -130,6 +130,10 @@ export type OrderSummary = {
   // with no lines yet.
   categories: Category[];
   payment: 'company' | 'self';
+  // Who paid the supplier on a self-paid PO: a manager in person, or the
+  // purchaser. Null for the Business Account ('company'). Optional for deploy
+  // skew; an older backend sends nothing and a self-paid PO reads Self-paid.
+  paidBy?: { id: string; name: string } | null;
   notes: string | null;
   lifecycle: string;
   // Every line with units has sold — a flag beside the stage, not a stage, so

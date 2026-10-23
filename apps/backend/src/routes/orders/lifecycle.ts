@@ -17,7 +17,7 @@ import { normalizeTracking, type Carrier, type PackageSource } from '@recycle-er
 import { type Env, type User } from '../../types';
 import { PAYPAL_TXN_STRICT, normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
-import { type OrdersEnv, committedLinesBody, describeSellOrders, handoffByErr, isOrderPayment, isPaymentMethod, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, sourceErr, stageMovedBody, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, unackedRevertFrag, warehouseErr } from './shared';
+import { type OrdersEnv, committedLinesBody, describeSellOrders, handoffByErr, isOrderPayment, isPaymentMethod, paidByErr, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, sourceErr, stageMovedBody, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, unackedRevertFrag, warehouseErr } from './shared';
 
 const lifecycleRoutes = new Hono<OrdersEnv>();
 
@@ -455,7 +455,7 @@ lifecycleRoutes.post('/:id/handoff', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     warehouseId?: unknown; source?: unknown;
     handoff?: { method?: unknown; byUserId?: unknown; trackingNumber?: unknown; carrier?: unknown } | null;
-    payment?: unknown; paymentMethod?: unknown;
+    payment?: unknown; paymentMethod?: unknown; paidByUserId?: unknown;
     paypalTxnId?: unknown; paymentScreenshotKey?: unknown; paymentScreenshotUrl?: unknown;
     onBehalfOfUserId?: unknown; commissionRate?: unknown;
   } | null;
@@ -487,6 +487,12 @@ lifecycleRoutes.post('/:id/handoff', async (c) => {
     paymentMethod = body.paymentMethod;
   }
   if (body.payment === 'self') paymentMethod = null;
+  if (body.paidByUserId != null) {
+    const owner = (await sql<{ user_id: string }[]>`SELECT user_id FROM orders WHERE id = ${id} LIMIT 1`)[0];
+    if (!owner) return c.json({ error: 'Not found' }, 404);
+    const pbErr = await paidByErr(sql, owner.user_id, body.paidByUserId);
+    if (pbErr) return c.json({ error: pbErr }, 400);
+  }
   let paypalTxnId: string | null | undefined;
   if (body.paypalTxnId !== undefined) {
     paypalTxnId = normPaypalTxnId(body.paypalTxnId);
@@ -543,6 +549,7 @@ lifecycleRoutes.post('/:id/handoff', async (c) => {
     handoff,
     payment: body.payment,
     paymentMethod,
+    paidByUserId: body.paidByUserId as string | null | undefined,
     paypalTxnId,
     paymentScreenshotKey: opt(body.paymentScreenshotKey),
     paymentScreenshotUrl: opt(body.paymentScreenshotUrl),

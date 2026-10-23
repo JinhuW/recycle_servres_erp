@@ -3,6 +3,7 @@ import { Icon } from './Icon';
 import { PaymentFields } from './PaymentFields';
 import { fmtUSD } from '../lib/format';
 import { useT } from '../lib/i18n';
+import { costPayerLabel } from '../lib/orderPresentation';
 import { PACKAGE_SOURCES, packageSourceLabelKey } from '../lib/packageSource';
 import { CARRIERS } from '../lib/carrierDetect';
 import type { ReadinessItem, ReadinessTab } from '../lib/poReadiness';
@@ -82,7 +83,7 @@ export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }
   const proofN = f.paidBy === 'self' ? f.proof.chatAtts.length
     : f.method === 'cash' || f.method === 'paypal' ? f.proof.proofAtts.length : 0;
   const paymentSummary = [
-    f.paidBy === 'self' ? t('paySelfShort') : t('payCompanyShort'),
+    costPayerLabel({ payment: f.paidBy, paidBy: f.payers.find(m => m.id === f.paidByUserId) ?? null }, t, true),
     f.paidBy === 'company' ? (f.method === 'cash' ? t('hoMethodCash') : f.method === 'paypal' ? t('hoMethodPaypal') : null) : null,
     f.paidBy === 'company' && f.method === 'paypal' ? f.txnId.trim() || null : null,
     proofN > 0 ? t('payProofOnFile', { n: proofN }) : null,
@@ -198,7 +199,7 @@ export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }
 
       <HandoffSection item={itemFor(f, 'payment')} title={t('hoPayment')} summary={paymentSummary} phone={phone}>
         <PaymentFields
-          paidBy={f.paidBy} onPaidBy={f.setPaidBy}
+          paidBy={f.paidBy} paidByUserId={f.paidByUserId} payers={f.payers} onPaidBy={f.setPaidBy}
           method={f.method} onMethod={f.setMethod}
           txnId={f.txnId} onTxnId={f.setTxnId}
           txnRequired

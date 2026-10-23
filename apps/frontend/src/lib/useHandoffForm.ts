@@ -5,6 +5,7 @@ import { handleFetchError } from './errorToast';
 import { buildHandoffBody, type HandoffDelivery, type HandoffMethod } from './handoff';
 import type { PackageSource } from './packageSource';
 import { normalizePaypalTxnInput } from './paypalTxn';
+import { payerChoices } from './poFacets';
 import { poReadiness, readinessBlockerKeys } from './poReadiness';
 import type { Order, Warehouse } from './types';
 import type { PaymentProof } from './usePaymentProof';
@@ -32,6 +33,7 @@ export type HandoffInit = {
    *  the page is clean (both shells ask for a save first otherwise). */
   warehouseId: string;
   payment: 'company' | 'self';
+  paidByUserId: string | null;
   paymentMethod: HandoffMethod | null;
   paypalTxnId: string;
   /** The page's proof hook, shared so both surfaces see one attachment list. */
@@ -50,7 +52,13 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
     order.handoffMethod === 'label' ? order.package?.trackingNumber ?? '' : '',
     order.handoffMethod === 'label' ? (order.package?.carrier as Carrier | undefined) ?? null : null,
   );
-  const [paidBy, setPaidBy] = useState<'company' | 'self'>(init.payment);
+  const [paidBy, setPaidByState] = useState<'company' | 'self'>(init.payment);
+  const [paidByUserId, setPaidByUserId] = useState<string | null>(init.paidByUserId);
+  // One pick writes both: the Business Account, or a person (and so self).
+  const setPaidBy = (v: 'company' | 'self', userId: string | null) => {
+    setPaidByState(v);
+    setPaidByUserId(v === 'self' ? userId : null);
+  };
   // A company order that was never asked stays null and the dialog asks —
   // defaulting to PayPal here is how a cash deal ended up chasing an id.
   const [method, setMethod] = useState<HandoffMethod | null>(init.paymentMethod);
@@ -61,17 +69,19 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
   // the page's value moving fires this, so typing here is never overwritten.
   useEffect(() => { setTxnIdState(init.paypalTxnId); }, [init.paypalTxnId]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [members, setMembers] = useState<{ id: string; name: string }[]>([]);
+  const [members, setMembers] = useState<{ id: string; name: string; role?: string }[]>([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
     loadWarehouses().then(ws => { if (alive) setWarehouses(ws); }).catch(handleFetchError);
-    api.get<{ items: { id: string; name: string }[] }>('/api/members/names')
+    api.get<{ items: { id: string; name: string; role?: string }[] }>('/api/members/names')
       .then(r => { if (alive) setMembers(r.items); })
       .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
+  // Who the Paid by select may name: the managers, the owner, the record.
+  const payers = payerChoices(members, { id: order.userId, name: order.userName }, order.paidBy ?? null);
   // The saved collector may have been deactivated since: the list is active
   // members only, and the server refuses a stale id. Cleared rather than
   // swapped for someone else — the section opens and asks.
@@ -110,7 +120,7 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
     try {
       const body = buildHandoffBody({
         warehouseId, source: source!, delivery: delivery!, byUserId, trackingNumber: tn, carrier,
-        paidBy, method, txnId,
+        paidBy, paidByUserId, method, txnId,
       });
       const r = await api.post<{ ok: true; packageId: string | null }>(`/api/orders/${order.id}/handoff`, body);
       onDone({ packageId: r.packageId });
@@ -130,7 +140,7 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
     delivery, setDelivery,
     byUserId, setByUserId, members,
     raw, setRaw, pick, setPick, tn, detected, carrier, hintKey,
-    paidBy, setPaidBy, method, setMethod,
+    paidBy, paidByUserId, setPaidBy, payers, method, setMethod,
     txnId, setTxnId, proof,
     readiness, blockerKeys, canSubmit, busy, submit,
   };

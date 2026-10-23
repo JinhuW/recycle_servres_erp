@@ -8,15 +8,26 @@ import type { PaymentProof } from '../lib/usePaymentProof';
 
 // How a PO was paid, and the proof that goes with it — one component behind
 // the create pages, both PO pages, the hand-off dialog and the phone sheet.
-// Paid by, then (for the company card) the method, then a proof panel whose
-// heading names exactly what the chosen path needs, so the requirement is
-// read before anything is typed. The rules live in lib/handoff.ts; this file
-// is markup. Without `proof` (the create pages — no order to attach to yet)
-// only the picker renders.
+// Paid by — the Business Account, or the person who paid — then (for the
+// Business Account) the method, then a proof panel whose heading names
+// exactly what the chosen path needs, so the requirement is read before
+// anything is typed. The rules live in lib/handoff.ts; this file is markup.
+// Without `proof` (the create pages — no order to attach to yet) only the
+// picker renders.
+
+/** The select's value for the Business Account: not a user id, so it cannot
+ *  collide with one. */
+export const PAY_BUSINESS = 'company';
 
 type Props = {
   paidBy: 'company' | 'self';
-  onPaidBy: (v: 'company' | 'self') => void;
+  /** The person on a self-paid order. Null while a stale record names
+   *  nobody; the select then shows the old Self-paid label. */
+  paidByUserId: string | null;
+  /** The people the select offers (lib/poFacets.ts payerChoices). */
+  payers: { id: string; name: string }[];
+  /** One pick sets both: the Business Account, or self plus the person. */
+  onPaidBy: (v: 'company' | 'self', userId: string | null) => void;
   method: HandoffMethod | null;
   onMethod: (v: HandoffMethod) => void;
   txnId: string;
@@ -36,29 +47,37 @@ type Props = {
 };
 
 export function PaymentFields({
-  paidBy, onPaidBy, method, onMethod, txnId, onTxnId,
+  paidBy, paidByUserId, payers, onPaidBy, method, onMethod, txnId, onTxnId,
   txnRequired = false, disabled = false, compact = false,
   proof, canEditProof = true, idPrefix = 'pay',
 }: Props) {
   const { t } = useT();
   const company = paidBy === 'company';
   const p = idPrefix;
+  // A self-paid record naming nobody (an older backend, or a payer dropped
+  // from the list) keeps a row of its own, or the select could not show it.
+  const stale = !company && (paidByUserId === null || !payers.some(m => m.id === paidByUserId));
+  const value = company ? PAY_BUSINESS : stale ? 'self' : paidByUserId!;
 
   return (
     <div className={'pay-fields' + (compact ? ' compact' : '')}>
       <div className="pay-row">
         <div className="field">
-          <span className="label" id={`${p}-paidby`}>{t('hoPaidBy')}</span>
-          <div className="seg ho-seg" role="radiogroup" aria-labelledby={`${p}-paidby`}>
-            <button type="button" role="radio" aria-checked={company} className={company ? 'active' : ''}
-              disabled={disabled} onClick={() => onPaidBy('company')}>
-              {t(compact ? 'payCompanyShort' : 'payCompany')}
-            </button>
-            <button type="button" role="radio" aria-checked={!company} className={!company ? 'active' : ''}
-              disabled={disabled} onClick={() => onPaidBy('self')}>
-              {t(compact ? 'paySelfShort' : 'paySelf')}
-            </button>
-          </div>
+          <label className="label" htmlFor={`${p}-paidby`}>{t('hoPaidBy')}</label>
+          <select
+            id={`${p}-paidby`}
+            className="select"
+            value={value}
+            disabled={disabled}
+            onChange={e => {
+              const v = e.target.value;
+              onPaidBy(v === PAY_BUSINESS ? 'company' : 'self', v === PAY_BUSINESS || v === 'self' ? null : v);
+            }}
+          >
+            <option value={PAY_BUSINESS}>{t(compact ? 'payBusinessShort' : 'payBusiness')}</option>
+            {stale && <option value="self">{t(compact ? 'paySelfShort' : 'paySelf')}</option>}
+            {payers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
         </div>
         {company && (
           <div className="field pay-reveal">

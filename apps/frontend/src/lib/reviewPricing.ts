@@ -31,7 +31,8 @@ export type ReviewMoneyInput = {
   goodsFollowsLines?: boolean;
   otherFees: number;
   commissionRate: number | null;
-  payment: 'company' | 'self';
+  // The purchaser paid the cost out of pocket (costReimbursedToOwner).
+  selfReimbursed: boolean;
   // Lines Approve will set to qty 0: no revenue, and no cost when the goods
   // total follows the lines.
   zeroed?: ReadonlySet<string>;
@@ -47,8 +48,8 @@ export type ReviewMoney = {
   profit: number;
   rate: number;
   commission: number;
-  // What the purchaser is paid: the commission, plus the cost back on a
-  // self-paid PO.
+  // What the purchaser is paid: the commission, plus the cost back when
+  // they paid it.
   earns: number;
   lotPrice: boolean;
 };
@@ -84,7 +85,7 @@ export function reviewMoney(o: ReviewMoneyInput): ReviewMoney {
     priced, total, revenue,
     goods: cost.goods, fees: cost.fees, cost: cost.total,
     profit, rate, commission,
-    earns: (o.payment === 'self' ? cost.total : 0) + commission,
+    earns: (o.selfReimbursed ? cost.total : 0) + commission,
     lotPrice,
   };
 }

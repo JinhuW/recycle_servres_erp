@@ -139,6 +139,7 @@ listRoutes.get('/', async (c) => {
       o.commission_rate::float AS commission_rate,
       o.commission_paid_by, cpb.name AS commission_paid_by_name, o.commission_paid_by_company,
       ${commissionLinkedFrag(sql)} AS commission_linked,
+      o.paid_by, pb.name AS paid_by_name,
       w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
       rz.sold_qty, rz.bought_qty, rz.revenue AS rz_revenue, rz.cost AS rz_cost,
       rz.projected_profit,
@@ -176,13 +177,14 @@ listRoutes.get('/', async (c) => {
     LEFT JOIN users mg ON mg.id = o.manager_id AND mg.role = 'manager' AND mg.active
     -- Unfiltered, unlike mg: a record of who paid, kept after they leave.
     LEFT JOIN users cpb ON cpb.id = o.commission_paid_by
+    LEFT JOIN users pb ON pb.id = o.paid_by
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
                           AND (${isManager} OR sup.owner_id IS NULL OR sup.owner_id = ${u.id})
     ${poRealizedLateral(sql, isManager)}
     LEFT JOIN order_lines l ON l.order_id = o.id
     WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${excludeFrag} AND ${archivedFrag} ${cursorFrag}
-    GROUP BY o.id, u.name, u.initials, mg.id, cpb.name, w.id, w.short, w.region, sup.name,
+    GROUP BY o.id, u.name, u.initials, mg.id, cpb.name, pb.name, w.id, w.short, w.region, sup.name,
              rz.sold_qty, rz.bought_qty, rz.revenue, rz.cost, rz.projected_profit
     ORDER BY ${sortExpr} ${dirSql}, o.id ${dirSql}
     LIMIT ${limit + 1}
@@ -214,6 +216,7 @@ listRoutes.get('/', async (c) => {
       category: r.category,
       categories: sortCategories((r.categories as string[] | null) ?? []),
       payment: r.payment,
+      paidBy: r.paid_by ? { id: r.paid_by, name: r.paid_by_name ?? '' } : null,
       notes: r.notes,
       lifecycle: r.lifecycle,
       archivedAt: r.archived_at,

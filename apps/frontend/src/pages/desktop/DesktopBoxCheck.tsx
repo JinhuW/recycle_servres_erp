@@ -26,7 +26,7 @@ import { lineSpecLabel } from '../../lib/lineGroups';
 import { linePhotos } from '../../lib/linePhotos';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
 import { paymentGap, reviewApproveTotal } from '../../lib/paymentGap';
-import { poStageName } from '../../lib/orderPresentation';
+import { costReimbursedToOwner, poStageName } from '../../lib/orderPresentation';
 import { lineShippedOn } from '../../lib/poPermissions';
 import { rateEq } from '../../lib/poTotals';
 import { precheckMessageKey, precheckPriceFile } from '../../lib/priceFilePrecheck';
@@ -678,10 +678,11 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   // The commission as Approve will leave it: a line set to 0 brings no
   // revenue and, when the goods total follows the lines, no cost — the rule
   // the payment gap above reads by.
+  const selfReimbursed = costReimbursedToOwner(order.payment, order.paidBy?.id, order.userId);
   const moneyAt = (sellPrice: (l: OrderLine) => number | null) => reviewMoney({
     lines: lines.map(l => ({ id: l.id, qty: l.qty, unitCost: l.unitCost, sellPrice: sellPrice(l) })),
     totalCost: order.totalCost, goodsFollowsLines: order.goodsFollowsLines, otherFees: order.otherFees,
-    commissionRate: rate, payment: order.payment,
+    commissionRate: rate, selfReimbursed,
     zeroed: new Set(atReviewing ? toZero.map(l => l.id) : []),
   });
   const money = moneyAt(priceOf);
@@ -1318,7 +1319,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                 <dd className={'mono' + (shown.profit < 0 ? ' neg' : '')}>{fmtUSD(shown.profit, locale)}</dd>
                 <dt>{t('eoRate')}</dt><dd className="mono">{(shown.rate * 100).toFixed(2)}%</dd>
                 <dt>{t('eoCommissionOnProfit')}</dt><dd className="mono">{fmtUSD(shown.commission, locale)}</dd>
-                {order.payment === 'self' && (<><dt>{t('eoSelfPay')}</dt><dd className="mono">{fmtUSD(shown.cost, locale)}</dd></>)}
+                {selfReimbursed && (<><dt>{t('eoSelfPay')}</dt><dd className="mono">{fmtUSD(shown.cost, locale)}</dd></>)}
                 <dt className="bc-kv-total">{t('eoTotal')}</dt>
                 <dd className={'bc-kv-total ' + shownEarnsClass}>{fmtUSD(shown.earns, locale)}</dd>
               </dl>
