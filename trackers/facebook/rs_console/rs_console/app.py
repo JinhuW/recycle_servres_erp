@@ -698,6 +698,18 @@ async def fleet() -> Dict[str, Any]:
                 fleet_view.apply_tiers(doc, res.json() or {})
         except (httpx.HTTPError, ValueError):
             pass
+        # Today's city round and each worker's part in it. An older
+        # coordinator answers 404, which leaves `queue` null and the ERP
+        # showing the fleet as it was.
+        queue = None
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT_S, base_url=base, headers=headers) as client:
+                res = await client.get("/v1/queue/status")
+            if res.status_code == 200:
+                queue = res.json()
+        except (httpx.HTTPError, ValueError):
+            pass
+        fleet_view.apply_queue(doc, queue)
     # Where each worker comes out, asked through its own proxy. Never fails
     # the page: a slow or dead proxy reads `pending` / `error` on its row.
     targets = fleet_view.proxy_targets(doc, dict(os.environ))
@@ -816,6 +828,36 @@ async def put_city_tiers(body: Any = Body(default=None)) -> Response:
     if isinstance(by, str) and by.strip():
         upstream_body["updated_by"] = by.strip()[:120]
     return await _forward("PUT", "/v1/city-tiers", json_body=upstream_body)
+
+
+def _who(body: Dict[str, Any]) -> Optional[str]:
+    by = body.get("updated_by")
+    return by.strip()[:120] if isinstance(by, str) and by.strip() else None
+
+
+@app.put("/v1/workers/{worker_id}/queue", dependencies=[Depends(require_token)])
+async def put_worker_queue(worker_id: str, body: Any = Body(default=None)) -> Response:
+    """Put one worker in the city queue or take it out. The coordinator
+    refuses (409) a worker whose monitor never asks the queue."""
+    if not isinstance(body, dict) or not isinstance(body.get("enrolled"), bool):
+        raise HTTPException(status_code=400, detail="Expected {enrolled: true|false}")
+    return await _forward(
+        "PUT",
+        f"/v1/workers/{worker_id}/queue",
+        json_body={"enrolled": body["enrolled"], "updated_by": _who(body)},
+    )
+
+
+@app.put("/v1/queue/everyone", dependencies=[Depends(require_token)])
+async def put_queue_everyone(body: Any = Body(default=None)) -> Response:
+    """Every worker takes its cities from the queue, or none does."""
+    if not isinstance(body, dict) or not isinstance(body.get("enrolled"), bool):
+        raise HTTPException(status_code=400, detail="Expected {enrolled: true|false}")
+    return await _forward(
+        "PUT",
+        "/v1/queue/settings",
+        json_body={"enrolled": ["*"] if body["enrolled"] else [], "updated_by": _who(body)},
+    )
 
 
 async def push_roster() -> bool:

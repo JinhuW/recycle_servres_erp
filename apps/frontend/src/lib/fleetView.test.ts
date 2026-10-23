@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetWorker, type LedgerLogin } from './coordinator';
+import {
+  vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetQueue, type FleetQueueWorker, type FleetWorker,
+  type LedgerLogin,
+} from './coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
   externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic, reloginProgress,
@@ -8,7 +11,7 @@ import {
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyPort, sharedExits,
   applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
-  loginAccountNo, workerHistory,
+  loginAccountNo, workerHistory, queueCitiesToday, queueCityName, queueRound, queueSummary,
 } from './fleetView';
 
 describe('keysymsFor', () => {
@@ -638,5 +641,65 @@ describe('workerHistory', () => {
     ]);
     expect(lines[1].kind === 'signon' && lines[1].stint.accountNo).toBe(2);
     expect(lines[2].kind === 'left' && lines[2].stint.accountNo).toBe(1);
+  });
+});
+
+
+describe('the city queue', () => {
+  const at = (state: string, by: string | null = null) => ({ state, at: '2026-10-24T13:10:00+00:00', by }) as FleetQueue['cities'][number]['items'][string];
+  const queue: FleetQueue = {
+    at: '2026-10-24T14:00:00+00:00',
+    everyone: false,
+    settings: { enrolled: ['homelab-1'], per_day: 1, budget_minutes: 360, window_hours: 8 },
+    items: {},
+    quarantined: [],
+    roster_updated_at: null,
+    cities: [
+      { slug: 'reno', name: 'Reno, NV', region: 'mtn', home: [], held_by: null, items: { server_ram: at('later') } },
+      { slug: 'boston', name: 'Boston, MA', region: 'ne', home: ['ne-1'], held_by: 'ne-1', items: { server_ram: at('held', 'ne-1') } },
+      { slug: 'miami', name: 'Miami, FL', region: 'se', home: ['homelab-1'], held_by: null, items: { server_ram: at('searched', 'nyc-1') } },
+      { slug: 'dc', name: 'Washington, DC', region: 'se', home: [], held_by: null, items: { server_ram: at('leased', 'va-2') } },
+      { slug: 'atlanta', name: null, region: 'se', home: [], held_by: null, items: { server_ram: at('due') } },
+    ],
+  };
+  const part = (over: Partial<FleetQueueWorker>): FleetQueueWorker => ({
+    worker_id: 'w', enrolled: false, capable: true, version: '0.13.16', quarantined: false,
+    minutes_today: 0, budget_minutes: 360, handed_today: 0, handed: [], open: [], ...over,
+  });
+
+  it('lays a round out as it runs, done first and the kept cities last, and counts it', () => {
+    const { cells, counts } = queueRound(queue, 'server_ram');
+    expect(cells.map(c => c.state)).toEqual(['searched', 'leased', 'due', 'later', 'held']);
+    expect(cells.find(c => c.slug === 'atlanta')?.name).toBe('atlanta');
+    expect(counts).toEqual({ cities: 5, queue: 4, searched: 1, leased: 1, due: 1, later: 1, held: 1 });
+    // The served counts win when the coordinator sends them.
+    const served = { ...queue, items: { server_ram: { ...counts, due: 9 } } };
+    expect(queueRound(served, 'server_ram').counts.due).toBe(9);
+    // An item a city has no row for reads as due.
+    expect(queueRound(queue, 'enterprise_ssd').cells.every(c => c.state === 'due')).toBe(true);
+  });
+
+  it('counts who pulls, who waits on an older worker, and who is older', () => {
+    const fleet = {
+      queue,
+      workers: [
+        account({ worker_id: 'homelab-1', queue: part({ enrolled: true }) }),
+        account({ worker_id: 'ne-1', queue: part({ enrolled: true, capable: false, version: '0.13.12' }) }),
+        account({ worker_id: 'mw-1', queue: part({ capable: false }) }),
+        account({ worker_id: 'se-1', queue: null }),
+      ],
+    } as unknown as FleetDoc;
+    expect(queueSummary(fleet)).toEqual({ workers: 4, pulling: 1, waiting: 1, older: 2, everyone: false });
+    expect(queueSummary({ ...fleet, queue: null } as FleetDoc)).toBeNull();
+  });
+
+  it('splits an enrolled worker’s day into its own cities and what the queue added', () => {
+    const w = account({ queue: part({ enrolled: true, handed: ['dc', 'miami', 'reno'] }) });
+    expect(queueCitiesToday(w).fromQueue).toEqual(['miami', 'reno']);
+    expect(queueCitiesToday(account({})).fromQueue).toEqual([]);
+    const fleet = { queue } as unknown as FleetDoc;
+    expect(queueCityName(fleet, 'miami')).toBe('Miami, FL');
+    expect(queueCityName(fleet, 'nowhere')).toBe('nowhere');
+    expect(queueCityName(null, 'miami')).toBe('miami');
   });
 });

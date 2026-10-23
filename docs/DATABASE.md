@@ -3058,7 +3058,7 @@ Pruned to 14 days on each insert.
 The city queue's two JSON documents: `settings` and `roster`.
 
 - **`settings`** holds only the keys someone set, through `rsc queue` or `PUT /v1/queue/settings`. The rest come from `city_queue.DEFAULTS`. The keys are `enrolled`, `regions`, `partners`, `per_day`, `budget_minutes`, `window_hours` and the others listed there.
-- **`roster`** is what the console last pushed: the catalog with each city's region and radius, and each worker's home cities, partner key, `start_at` and phrase count.
+- **`roster`** is what the console last pushed: the catalog with each city's region and radius, the enabled search items, and each worker's home cities, partner key, `start_at` and phrase count.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |

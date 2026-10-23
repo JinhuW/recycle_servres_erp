@@ -332,6 +332,33 @@ def search_plan(
     return {"phrases": phrases, "cities": city_count, "runs_per_day": runs, "per_day": per_day}
 
 
+def apply_queue(doc: Dict[str, Any], status: Optional[Dict[str, Any]]) -> None:
+    """Put the coordinator's city-queue status on the document: today's round
+    as `queue`, and each worker's part in it as its `queue`. Null on both
+    when the coordinator predates the queue."""
+    if not isinstance(status, dict):
+        doc["queue"] = None
+        for worker in doc["workers"]:
+            worker["queue"] = None
+        return
+    settings = status.get("settings") or {}
+    doc["queue"] = {
+        "at": status.get("at"),
+        "everyone": bool(status.get("everyone")),
+        "settings": {
+            key: settings.get(key)
+            for key in ("enrolled", "per_day", "budget_minutes", "window_hours")
+        },
+        "items": status.get("items") or {},
+        "cities": status.get("cities") or [],
+        "quarantined": status.get("quarantined") or [],
+        "roster_updated_at": status.get("roster_updated_at"),
+    }
+    rows = {row.get("worker_id"): row for row in status.get("workers") or []}
+    for worker in doc["workers"]:
+        worker["queue"] = rows.get(worker["worker_id"])
+
+
 def apply_tiers(doc: Dict[str, Any], ranked: Dict[str, Any]) -> None:
     """Mark each worker's cities with how often the coordinator has them
     searched (`per_day`, `pin`, `score`), and recount the daily budget.

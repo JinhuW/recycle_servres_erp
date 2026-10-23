@@ -55,12 +55,17 @@ Forwarded today:
 - `PUT /v1/config/settings` (search settings; `rs_console/settings.py` lists
   the keys, and the README's *Settings saved from the ERP* says where they live)
 - `PUT /v1/workers/{id}/cities` (one worker's cities, into its own config)
+- `PUT /v1/workers/{id}/queue` and `PUT /v1/queue/everyone` (`{enrolled}`:
+  one worker, or every worker, into the city queue or out of it). `/v1/fleet`
+  also carries the queue: today's round as `queue`, and each worker's part in
+  it as its `queue`. Both are `null` against a coordinator that predates the
+  queue.
 - `GET/PUT /v1/city-tiers` (how often cities are searched: the rank rule and
   pins, kept by the coordinator; workers read them through
   `POST /v1/workers/{id}/search-plan`)
 - the VNC websocket
 
-**Not forwarded to the ERP: the city queue** (README → *City queue*).
+**Not forwarded to the ERP: the rest of the city queue** (README → *City queue*).
 
 - **Workers** ask the coordinator directly with
   `POST /v1/workers/{id}/next-city`.
@@ -72,7 +77,8 @@ Forwarded today:
 - **The replay** is the console's `POST /v1/queue/shadow`, run with
   `python -m rs_console.queue_shadow`.
 
-None of these is an ERP contract yet.
+The ERP reaches the queue only through `/v1/fleet` and the two enrollment
+routes above.
 
 Renaming or reshaping any of these is a change to both sides (root AGENTS.md →
 *Contracts*). Ship the console first and keep it backward-compatible until the

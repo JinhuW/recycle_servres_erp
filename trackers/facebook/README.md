@@ -814,9 +814,30 @@ A visit is any of these:
 - a search from before the log began, kept in `search_cities`;
 - a lease that was closed or is still live.
 
-The console pushes the roster (the catalog with each city's radius, and each
-worker's home cities and `start_at`) every 10 minutes, at startup and after
-*Edit cities*. The coordinator keeps it in `queue_config`.
+The console pushes the roster every 10 minutes, at startup and after *Edit
+cities*. The roster is the catalog with each city's radius, the enabled
+items, and each worker's home cities and `start_at`. The coordinator keeps it
+in `queue_config`.
+
+**Who can pull.** Only a worker whose monitor is 0.13.14 or later asks the
+queue (`city_queue.capable`, from the version its heartbeat reports). One
+enrolled on an older monitor keeps searching its own list, so the queue
+treats its cities as held. Enrolling everyone (`*`) is therefore safe while
+old images still run. The per-worker route refuses (409) to enroll an older
+worker by itself.
+
+**In the ERP.** The Fleet tab opens with *Today's round*:
+
+- one mark per city per item, showing searched today, being searched, due,
+  not due yet, or on a worker's own list;
+- a sentence of counts;
+- a Cities table of who has what;
+- a manager's "Move every worker to the queue" (or back).
+
+In the worker list, an enrolled worker carries a Queue chip, its Searches
+ring counts minutes against the budget, and its fold adds the cities the
+queue handed it. The worker page has a *City queue* row and the button that
+moves one worker in or out.
 
 To run it on the VM:
 

@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.328.0] - 2026-10-23
+
+Monitors ▸ Facebook now shows the city queue, the new way Facebook workers
+get their cities (RS-379). Since facebook-tracker 0.13.14 a worker in the
+queue asks the coordinator for each city instead of walking its own list. The
+pilot is four workers. Until now the page showed nothing of that: who was in
+the queue, how far today's round had got, what each pilot was handed.
+
+The Fleet tab now opens with **Today's round**:
+- **The board.** One mark per city for each search item: searched, being
+  searched, still due, not due yet, or still on a worker's own list. It has
+  a counts sentence and a Cities table of who has what.
+- **The lede.** Who pulls, who waits on a redeploy, and the rules as stored.
+- **Everyone at once.** One confirmed click moves every worker to the queue,
+  or sends every worker back.
+
+In the workers table, an enrolled worker carries a **Queue** chip and its
+Searches ring counts minutes against its budget. Its fold adds the cities the
+queue handed it. The worker page gains a **City queue** row (minutes used,
+cities handed out, the city being searched, quarantined) and a button that
+moves that worker in or out.
+
+The backend proxies two new manager-only routes for that switch. A worker on
+a monitor older than 0.13.14 cannot be enrolled by itself: the coordinator
+answers 409 and the page says to redeploy it. The whole tracker side ships as
+facebook-tracker 0.13.16.
+
 ## [1.327.1] - 2026-10-23
 
 The Bluetooth label printer now prints (RS-381). The office's printer is a

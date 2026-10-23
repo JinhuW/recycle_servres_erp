@@ -1028,6 +1028,149 @@
 .ff-ring-idle {
   color: var(--fg-muted);
 }
+
+/* Today's round (FleetQueue.tsx): one mark per city per item, in the order
+   the round runs. The colours are the Today bar's: accent is searched, the
+   hatch is a worker's own list. */
+.ff-status-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ff-round-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px 18px 16px;
+}
+.ff-round-lede {
+  margin: 0;
+  max-width: 82ch;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ff-round-rules {
+  color: var(--fg-muted);
+}
+.ff-round-item {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  column-gap: 14px;
+  row-gap: 5px;
+  align-items: start;
+}
+.ff-round-name {
+  padding-top: 1px;
+  font-size: 12px;
+}
+.ff-round-board {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+}
+.ff-round-cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.ff-round-cells i,
+.ff-round-key i {
+  display: block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.ff-round-searched {
+  background: var(--accent);
+}
+.ff-round-leased {
+  background: var(--info);
+}
+.ff-round-due {
+  background: var(--bg-soft);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.ff-round-later {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.ff-round-held {
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--fg-subtle) 55%, transparent) 0 2px,
+    transparent 2px 4px
+  );
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.ff-round-kept {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 10px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.ff-round-kept i {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.ff-round-count {
+  grid-column: 2;
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ff-round-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0 0 0 146px;
+  list-style: none;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.ff-round-key li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ff-round-cities summary {
+  padding-left: 146px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.ff-round-cities .table {
+  margin-top: 8px;
+}
+.ff-round-at-leased {
+  color: var(--info-strong);
+}
+.ff-round-at-due {
+  font-weight: 500;
+}
+.ff-round-at-later,
+.ff-round-at-held {
+  color: var(--fg-subtle);
+}
+@media (max-width: 1190px) {
+  .ff-round-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ff-round-count {
+    grid-column: 1;
+  }
+  .ff-round-key,
+  .ff-round-cities summary {
+    padding-left: 0;
+  }
+}
 .ff-posts {
   white-space: nowrap;
   color: var(--fg-muted);

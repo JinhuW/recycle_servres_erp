@@ -99,7 +99,12 @@ MAX_CATALOG = 1000
 MAX_DAYS = 14
 MAX_PHRASES = 20
 MAX_RADIUS_KM = 2000
+MAX_ITEMS = 20
 EVERY_WORKER = "*"
+# The first monitor that asks the queue; an older one searches its own list
+# whatever the settings say.
+QUEUE_SINCE = (0, 13, 14)
+_VERSION = re.compile(r"^\s*(\d+)\.(\d+)\.(\d+)")
 # A city unsearched for longer than this missed a day.
 GAP_ALERT_HOURS = 26
 # Consecutive reports further apart than this are a new sweep or item, not
@@ -133,10 +138,13 @@ class Roster:
 
     cities: Dict[str, Dict[str, Any]]
     workers: Dict[str, Worker]
+    # The enabled search items, so a round is known before anyone searches.
+    items: List[str] = field(default_factory=list)
 
     def dump(self: "Roster") -> Dict[str, Any]:
         """The body `validate_roster` reads back: what the coordinator stores."""
         return {
+            "items": self.items,
             "catalog": [{"slug": slug, **meta} for slug, meta in self.cities.items()],
             "workers": {
                 wid: {
@@ -215,7 +223,14 @@ def validate_roster(body: Any) -> Roster:
         )
         for slug in slugs:
             cities.setdefault(slug, {"name": None, "region": None, "radius": None})
-    return Roster(cities=cities, workers=out)
+    items = body.get("items", [])
+    if (
+        not isinstance(items, list)
+        or len(items) > MAX_ITEMS
+        or not all(isinstance(i, str) and i.strip() and len(i) <= 120 for i in items)
+    ):
+        raise QueueError(f"items lists up to {MAX_ITEMS} search item names")
+    return Roster(cities=cities, workers=out, items=list(dict.fromkeys(i.strip() for i in items)))
 
 
 def validate_settings(
@@ -291,6 +306,13 @@ def validate_settings(
 
 def enrolled(worker_id: str, settings: Mapping[str, Any]) -> bool:
     return EVERY_WORKER in settings["enrolled"] or worker_id in settings["enrolled"]
+
+
+def capable(row: Optional[Mapping[str, Any]]) -> bool:
+    """Whether a worker's monitor asks the queue: the version it last
+    reported ("0.13.14 (93e2566)") is QUEUE_SINCE or later."""
+    match = _VERSION.match(str((row or {}).get("version") or ""))
+    return bool(match) and tuple(int(g) for g in match.groups()) >= QUEUE_SINCE
 
 
 def per_day_map(
@@ -622,6 +644,30 @@ def live_state(
     return state
 
 
+def held_by(
+    roster: Roster,
+    settings: Mapping[str, Any],
+    worker_rows: Iterable[Mapping[str, Any]],
+    blind: Iterable[str],
+    now: float,
+) -> Dict[str, str]:
+    """Each city a live, unquarantined worker outside the queue still searches
+    from its own list, and that worker. A parked or blind one's cities are
+    free. An enrolled worker whose monitor predates the queue is outside it
+    too: it never asks, so its cities stay its own."""
+    rows = list(worker_rows)
+    up = availability(rows, [], datetime.fromtimestamp(now, timezone.utc))
+    by_id = {r["worker_id"]: r for r in rows}
+    blind = set(blind)
+    out: Dict[str, str] = {}
+    for wid, worker in sorted(roster.workers.items()):
+        outside = not enrolled(wid, settings) or not capable(by_id.get(wid))
+        if outside and wid not in blind and up(wid, now):
+            for city in worker.home:
+                out.setdefault(city, wid)
+    return out
+
+
 def held_cities(
     roster: Roster,
     settings: Mapping[str, Any],
@@ -629,15 +675,7 @@ def held_cities(
     blind: Iterable[str],
     now: float,
 ) -> Set[str]:
-    """Cities a live, unquarantined worker outside the queue still searches
-    from its own list. A parked or blind one's cities are free."""
-    up = availability(worker_rows, [], datetime.fromtimestamp(now, timezone.utc))
-    blind = set(blind)
-    out: Set[str] = set()
-    for wid, worker in roster.workers.items():
-        if not enrolled(wid, settings) and wid not in blind and up(wid, now):
-            out |= set(worker.home)
-    return out
+    return set(held_by(roster, settings, worker_rows, blind, now))
 
 
 @dataclass
@@ -730,60 +768,124 @@ def next_city(
     }
 
 
+def _last_by(
+    item: str,
+    now: float,
+    live: Live,
+    blind: Set[str],
+) -> Dict[str, Tuple[float, str]]:
+    """Each city's latest visit for `item` and who made it, by the same rules
+    `live_state` counts a visit."""
+    out: Dict[str, Tuple[float, str]] = {}
+
+    def seen(city: str, at: float, wid: str) -> None:
+        if wid not in blind and (city not in out or at > out[city][0]):
+            out[city] = (at, wid)
+
+    for row in live.searches:
+        if row.get("item") in (None, item):
+            seen(row["city"].lower(), _ts(row["at"]), row["worker_id"])
+    for row in _seeded(live):
+        seen(row["city"].lower(), _ts(row["last_at"]), row["worker_id"])
+    for lease in live.leases:
+        closed = lease.get("closed_at")
+        if lease["item"] == item and (closed or _ts(lease["expires_at"]) > now):
+            seen(lease["city"], _ts(lease["leased_at"]), lease["worker_id"])
+    return out
+
+
 def queue_status(now: float, settings: Mapping[str, Any], live: Live) -> Dict[str, Any]:
-    """Today's round: per item, the catalog's cities searched today, leased now
-    and still due; per worker in the queue, its minutes and open leases."""
-    blind = _blind(live, now, settings)
+    """Today's round, city by city and item by item, and every worker's part in it.
+
+    A city is, for each item: `leased` (being searched now), `held` (on the
+    own list of a live worker outside the queue), `searched` (today, and not
+    due again yet), `later` (searched before today, due at `at`) or `due`.
+    """
+    blind = set(_blind(live, now, settings))
     roster = live.roster
-    held = held_cities(roster, settings, live.worker_rows, blind, now)
+    holder = held_by(roster, settings, live.worker_rows, blind, now)
     per_day = per_day_map(roster.cities, settings, live.scores, live.pins)
     today = _day(now)
-    items = sorted(
-        {lease["item"] for lease in live.leases}
-        | {r["item"] for r in live.searches if r.get("item")}
-    )
+    observed = {lease["item"] for lease in live.leases} | {
+        r["item"] for r in live.searches if r.get("item")
+    }
+    items = list(dict.fromkeys([*roster.items, *sorted(observed)]))
     open_leases = [
         lease
         for lease in live.leases
         if not lease.get("closed_at") and _ts(lease["expires_at"]) > now
     ]
-    out_items = {}
+    homes: Dict[str, List[str]] = defaultdict(list)
+    for wid, worker in sorted(roster.workers.items()):
+        for city in worker.home:
+            homes[city].append(wid)
+
+    cities = {
+        slug: {
+            "slug": slug,
+            "name": meta["name"],
+            "region": meta["region"],
+            "home": homes.get(slug, []),
+            "held_by": holder.get(slug),
+            "items": {},
+        }
+        for slug, meta in roster.cities.items()
+    }
+    counts = {}
     for item in items:
         state = live_state(item, now, live.searches, _seeded(live), live.leases, blind)
-        leased = {lease["city"] for lease in open_leases if lease["item"] == item}
-        searched = due = 0
-        for city in roster.cities:
-            last = state.last_visit.get(city)
-            if last is not None and _day(last) == today:
-                searched += 1
-            if city in held or city in leased:
-                continue
-            if last is None or now - last >= DAY / per_day[city] * (1 - settings["early"]):
-                due += 1
-        out_items[item] = {
-            "cities": len(roster.cities),
-            "searched_today": searched,
-            "leased": len(leased),
-            "held": len(held & set(roster.cities)),
-            "due": due,
+        last_by = _last_by(item, now, live, blind)
+        leased = {lease["city"]: lease for lease in open_leases if lease["item"] == item}
+        tally = Counter()
+        for slug, city in cities.items():
+            last = state.last_visit.get(slug)
+            at, by = (
+                (last, last_by.get(slug, (None, None))[1]) if last is not None else (None, None)
+            )
+            if slug in leased:
+                row = {
+                    "state": "leased",
+                    "at": leased[slug]["leased_at"],
+                    "by": leased[slug]["worker_id"],
+                }
+            elif slug in holder:
+                row = {"state": "held", "at": _iso(at) if at else None, "by": holder[slug]}
+            else:
+                due_at = (
+                    None if last is None else last + DAY / per_day[slug] * (1 - settings["early"])
+                )
+                if due_at is None or now >= due_at:
+                    row = {"state": "due", "at": _iso(at) if at else None, "by": by}
+                elif _day(last) == today:
+                    row = {"state": "searched", "at": _iso(at), "by": by}
+                else:
+                    row = {"state": "later", "at": _iso(due_at), "by": by}
+            city["items"][item] = row
+            tally[row["state"]] += 1
+        counts[item] = {
+            "cities": len(cities),
+            "queue": len(cities) - tally["held"],
+            **{key: tally[key] for key in ("searched", "leased", "due", "later", "held")},
         }
 
-    state = live_state("", now, [], [], live.leases, ())
-    ids = {lease["worker_id"] for lease in live.leases if _day(_ts(lease["leased_at"])) == today}
-    ids |= {wid for wid in roster.workers if enrolled(wid, settings)}
+    minutes = live_state("", now, [], [], live.leases, ()).minutes
+    rows = {r["worker_id"]: r for r in live.worker_rows}
+    todays = [lease for lease in live.leases if _day(_ts(lease["leased_at"])) == today]
+    ids = set(roster.workers) | {lease["worker_id"] for lease in todays}
     workers = []
     for wid in sorted(ids):
+        mine = [lease for lease in todays if lease["worker_id"] == wid]
         workers.append(
             {
                 "worker_id": wid,
                 "enrolled": enrolled(wid, settings),
+                "capable": capable(rows.get(wid)),
+                "version": (rows.get(wid) or {}).get("version"),
                 "quarantined": wid in blind,
-                "minutes_today": round(state.minutes.get((wid, today), 0.0)),
-                "handed_today": sum(
-                    1
-                    for lease in live.leases
-                    if lease["worker_id"] == wid and _day(_ts(lease["leased_at"])) == today
-                ),
+                "minutes_today": round(minutes.get((wid, today), 0.0)),
+                "budget_minutes": settings["budget_minutes"],
+                "handed_today": len(mine),
+                "handed": list(dict.fromkeys(lease["city"] for lease in mine)),
                 "open": [
                     {"item": lease["item"], "city": lease["city"], "leased_at": lease["leased_at"]}
                     for lease in open_leases
@@ -794,7 +896,9 @@ def queue_status(now: float, settings: Mapping[str, Any], live: Live) -> Dict[st
     return {
         "at": _iso(now),
         "settings": {k: v for k, v in settings.items() if k != "tiers"},
-        "items": out_items,
+        "everyone": EVERY_WORKER in settings["enrolled"],
+        "items": counts,
+        "cities": list(cities.values()),
         "workers": workers,
         "quarantined": sorted(blind),
     }
@@ -829,6 +933,39 @@ def save_settings(db: Any, changes: Mapping[str, Any], by: Optional[str]) -> Dic
     merged = load_settings(db, dict(changes))
     db.put_queue_config("settings", {**stored_settings(db), **{k: merged[k] for k in changes}}, by)
     return merged
+
+
+class NotCapable(QueueError):
+    """A worker whose monitor predates the queue cannot be enrolled by itself."""
+
+
+def enroll(db: Any, worker_id: str, on: bool, by: Optional[str]) -> Dict[str, Any]:
+    """Put one worker in the queue or take it out; the settings after.
+
+    A worker on a monitor older than QUEUE_SINCE never asks, so enrolling it
+    would only free its cities to the others: NotCapable. Taking one worker
+    out while every worker is enrolled names all the others instead.
+    """
+    settings = load_settings(db)
+    current = set(settings["enrolled"])
+    if on:
+        row = db.get_worker(worker_id)
+        if not capable(row):
+            runs = (row or {}).get("version") or "an unknown version"
+            need = ".".join(map(str, QUEUE_SINCE))
+            raise NotCapable(
+                f"{worker_id} runs {runs}; the queue needs {need} or later. "
+                "Redeploy this worker first."
+            )
+        if EVERY_WORKER in current or worker_id in current:
+            return settings
+        return save_settings(db, {"enrolled": sorted(current | {worker_id})}, by)
+    if EVERY_WORKER in current:
+        others = sorted(w for w in load_roster(db).workers if w != worker_id)
+        return save_settings(db, {"enrolled": others}, by)
+    if worker_id not in current:
+        return settings
+    return save_settings(db, {"enrolled": sorted(current - {worker_id})}, by)
 
 
 def load_roster(db: Any) -> Roster:

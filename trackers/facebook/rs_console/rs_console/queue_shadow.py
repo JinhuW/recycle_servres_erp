@@ -56,7 +56,8 @@ def roster(doc: Dict[str, Any]) -> Dict[str, Any]:
             "start_at": worker.get("start_at") or [],
             "phrases": (worker.get("plan") or {}).get("phrases") or 2,
         }
-    return {"catalog": catalog, "workers": workers}
+    items = [i["name"] for i in doc.get("items") or [] if i.get("enabled", True) and i.get("name")]
+    return {"items": items, "catalog": catalog, "workers": workers}
 
 
 def _row(cells: List[Any], widths: List[int]) -> str:
