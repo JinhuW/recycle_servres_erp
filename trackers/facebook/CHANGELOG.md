@@ -18,6 +18,19 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.15] - 2026-10-23
+
+### Changed
+
+- **Ops alerts, deploy notices and fleet-verify reports can live in their own
+  chat and topics** (RS-375). `TELEGRAM_TOPIC_OPS` now also routes the
+  coordinator's ops alerts (worker down, session expiring, challenge), not
+  only fleet-verify's reports. `scripts/deploy.sh` posts its deploy notice to
+  `TELEGRAM_OPS_CHAT_ID` when that is set. `TELEGRAM_TOPIC_OPS` and
+  `TELEGRAM_TOPIC_RELEASES` name topics in that chat. With no ops chat set,
+  nothing moves. Production sets all three to the "Homelab Alerts" ops group,
+  so the buyers' listings group carries only listings.
+
 ## [0.13.14] - 2026-10-23
 
 ### Added

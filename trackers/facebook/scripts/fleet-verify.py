@@ -285,7 +285,10 @@ def render(results: List[Dict[str, Any]], since: dt.datetime, now: dt.datetime) 
 
 
 def send_telegram(text: str, env: Dict[str, str]) -> None:
-    token, chat = env.get("TELEGRAM_TOKEN"), env.get("TELEGRAM_CHAT_ID")
+    # Same chat as the coordinator's ops alerts: the ops chat when one is set,
+    # with TELEGRAM_TOPIC_OPS a topic in it.
+    token = env.get("TELEGRAM_TOKEN")
+    chat = env.get("TELEGRAM_OPS_CHAT_ID") or env.get("TELEGRAM_CHAT_ID")
     if not token or not chat:
         raise RuntimeError("no TELEGRAM_TOKEN / TELEGRAM_CHAT_ID available")
     params: Dict[str, str] = {
