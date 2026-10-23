@@ -526,6 +526,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     acctFieldPaidBy: 'Paid by',
     acctPaidFromBusiness: 'This was paid from the Business Account, so it belongs on Payments, not the RMB Flow.',
     acctEvSyncedPo: 'Paid by followed the PO',
+    acctEvSyncedPoCleared: 'Paid by followed the PO. Review cleared',
     acctEvVoidedPo: 'Voided: paid from the Business Account',
     acctEvBackfilledPayer: 'Paid by brought in line with the PO',
     acctFieldCounterparty: 'Counterparty',

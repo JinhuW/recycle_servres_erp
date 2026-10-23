@@ -291,6 +291,9 @@
 .arv-row { border-top: 1px solid var(--border); cursor: pointer; font-size: 13px; }
 .arv-row > span { padding: 11px 10px; min-width: 0; }
 .arv-row > span:first-child { padding: 9px 0 0 14px; }
+/* Who changed it, under the id: the column is narrow, so it wraps rather than
+   running into the next one. */
+.arv-row .arv-pick + .acct-sub { white-space: normal; }
 .arv-rows .arv-row:first-child { border-top: 0; }
 .arv-rows .arv-row.arv-daystart { border-top: 1px solid var(--border-strong); }
 .arv-rows .arv-row.arv-daystart:first-child { border-top: 0; }

@@ -78,7 +78,7 @@ export function HistoryLine({ e, t, locale }: { e: AcctEvent; t: Translate; loca
   const byPo = !!e.detail.synced || !!e.detail.backfilled;
   const by = e.kind === 'voided' && byPo ? t('acctEvVoidedPo')
     : e.detail.backfilled ? t(BACKFILL_KEY[e.detail.backfilled])
-    : e.detail.synced === 'po' ? t('acctEvSyncedPo')
+    : e.detail.synced === 'po' ? t(e.detail.clearedReview ? 'acctEvSyncedPoCleared' : 'acctEvSyncedPo')
     : null;
   return (
     <div>

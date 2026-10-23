@@ -2174,7 +2174,9 @@ is who paid, below).
       that kind: the PO page's Paid by, a commission screenshot, a cost
       payer edited or handed off. The entry gets a *Paid by followed the
       PO* history line. Nobody on file leaves an entry as recorded. The
-      sync is a database trigger, so no writer is missed.
+      sync is a database trigger, so no writer is missed. A move clears a
+      sign-off on the entry, as an edit does (v1.317.2): see *What a
+      sign-off covers* under review mode.
     - *The Business Account paid, so the entry goes.* When a PO's commission
       becomes company-paid (flagged on the PO, or a Mercury/PayPal row linked
       as the commission), or its cost flips to the company's account, its
@@ -2265,12 +2267,16 @@ is who paid, below).
     reviews them. With one active manager, nobody can, and the strip says a
     second manager is needed.
   - **What a sign-off covers.** Every field but the note. An edit to any of
-    them clears the sign-off. The entry then reads *Changed since review*,
-    with the old and new value of each field, until someone other than the
-    editor signs it again. A note-only edit keeps the review. A sign-off
-    names the version the page showed, so an out-of-date page gets a 409 and
-    re-reads. A void takes the entry out of review, and a restore brings it
-    back To review. The reviewer can withdraw their own sign-off.
+    them clears the sign-off, and so does a Paid by that follows its PO to
+    another person (v1.317.2; the author stays, the history line reads *Paid
+    by followed the PO. Review cleared*, and the queue row and review card say
+    *Paid by followed the PO* rather than naming the author). The entry then
+    reads *Changed since review*, with the old and new value of each field,
+    until someone other than the editor signs it again. A note-only edit keeps
+    the review. A sign-off names the version the page showed, so an
+    out-of-date page gets a 409 and re-reads. A void takes the entry out of
+    review, and a restore brings it back To review. The reviewer can withdraw
+    their own sign-off.
   - **Query.** A reviewer who can't sign asks the author a question (up to
     280 characters). Where an entry has no author, the question goes to the
     manager whose money it was. That person is notified, and the entry waits

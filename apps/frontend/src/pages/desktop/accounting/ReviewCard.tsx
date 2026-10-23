@@ -69,7 +69,9 @@ export function ReviewCard({ entry, onChanged, onToast }: Props) {
       break;
     case 'changed':
       line = reviewer ? t('acctTickChanged', { name: reviewer.name }) : t('acctTickChangedNobody');
-      detail = lastEdit ? `${lastEdit.actor?.name ?? '—'} · ${fmtDate(lastEdit.at, locale)}` : null;
+      detail = lastEdit
+        ? `${lastEdit.detail.synced === 'po' ? t('acctEvSyncedPo') : lastEdit.actor?.name ?? '—'} · ${fmtDate(lastEdit.at, locale)}`
+        : null;
       foot = t('acctRvChangedFoot');
       warnFoot = true;
       break;

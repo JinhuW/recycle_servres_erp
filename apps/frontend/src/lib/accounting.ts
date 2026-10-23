@@ -105,7 +105,11 @@ export type AcctReviewRow = AcctEntry & {
   targetFacts: AcctTarget | null;
   facts: AccountingReviewFacts;
   checks: AccountingCheck[];
-  cleared: { reviewer: AcctPerson | null; at: string; changes: Record<string, { from: unknown; to: unknown }> } | null;
+  cleared: {
+    reviewer: AcctPerson | null; at: string; changes: Record<string, { from: unknown; to: unknown }>;
+    // The last change was the PO's payer moving the entry's Paid by.
+    followedPo: boolean;
+  } | null;
 };
 
 export type AcctReviewQueue = {
