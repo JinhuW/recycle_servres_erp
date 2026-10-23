@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-382](./RS-382-pack-mode-prints-a-label-for-each-product-not-one-fo.md) | done | story | P2 | Pack mode prints a label for each product, not one for the box | 1.329.0 |
 | [RS-381](./RS-381-the-bluetooth-label-printer-prints-nothing-jobs-go-t.md) | done | bug | P1 | The Bluetooth label printer prints nothing: jobs go to the wrong characteristic | 1.327.1 |
 | [RS-379](./RS-379-the-facebook-fleet-page-shows-today-s-city-round-and.md) | done | story | P2 | The Facebook fleet page shows today's city round and moves workers into the queue | v1.328.0, facebook-tracker 0.13.16 |
 | [RS-378](./RS-378-review-mode-prints-the-po-s-box-label-when-the-revie.md) | done | story | P2 | Review mode prints the PO's box label when the review is approved | 1.327.0 |

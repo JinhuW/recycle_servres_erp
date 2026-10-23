@@ -18,9 +18,6 @@ export type PackLine = CheckableLine & {
   packWarehouse?: string | null;
   sourceOrderId?: string | null;
   sourceLineNo?: number | null;
-  // Who bought the lot, by its PO. Absent from a backend older than this
-  // bundle.
-  sourcePurchaser?: string | null;
   // The product's # on the order, which the packer labels the items with.
   no: number;
 };
@@ -237,44 +234,6 @@ export function productTally<L extends CheckableLine>(
     out[bucket] += 1;
   }
   return out;
-}
-
-// Every product with lots is packed: the box is finished, and its label prints.
-export function allPacked<L extends CheckableLine>(
-  products: readonly PackProduct<L>[], checks: ReadonlyMap<string, LineCheck>,
-): boolean {
-  const t = productTally(products, checks);
-  return t.products > 0 && t.done === t.products;
-}
-
-export type BoxCounts = { products: number; units: number };
-
-// What the box label counts. A product counted 0 went in empty, so it is not
-// one of the box's products.
-export function boxCounts<L extends CheckableLine>(
-  products: readonly PackProduct<L>[], checks: ReadonlyMap<string, LineCheck>,
-): BoxCounts {
-  const out: BoxCounts = { products: 0, units: 0 };
-  for (const p of products) {
-    const { counted } = productSummary(p.lots, checks);
-    if (counted > 0) out.products += 1;
-    out.units += counted;
-  }
-  return out;
-}
-
-// Who bought what is in the box, in # order: the purchasers of the POs its
-// counted lots came from, each once.
-export function boxPurchasers<L extends CheckableLine & Pick<PackLine, 'sourcePurchaser'>>(
-  products: readonly PackProduct<L>[], checks: ReadonlyMap<string, LineCheck>,
-): string[] {
-  const out = new Set<string>();
-  for (const p of products) {
-    for (const l of p.lots) {
-      if (l.sourcePurchaser && countOf(l, checks.get(l.id)) > 0) out.add(l.sourcePurchaser);
-    }
-  }
-  return [...out];
 }
 
 export type ShipBlockers = { open: number; short: number; zero: number };

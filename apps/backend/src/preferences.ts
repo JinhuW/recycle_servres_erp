@@ -37,6 +37,7 @@ const SCHEMA: Record<string, Validator> = {
   'scan.cameraLabel':         isShortString,
   'sellOrders.lineGroup':     isOneOf('warehouse', 'po'),
   'pack.labelAuto':           isBoolean,
+  'review.labelAuto':         isBoolean,
   'pack.labelSize':           isOneOf('50x25mm', '4x6', '4x3', '2.25x1.25'),
   'pack.labelLanguage':       isOneOf('auto', 'tspl', 'zpl', 'escpos'),
   'sidebar.folded':           isBoolean,

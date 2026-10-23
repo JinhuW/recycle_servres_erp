@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.329.0] - 2026-10-23
+
+Pack mode now prints a label for each product instead of one for the box
+(RS-382). The requester meant the product's # all along: the number the
+packer has been writing on each item by hand, which the receiver matches the
+item to its line on the order by. The label carries the SO number, the #
+large, the part number and the units packed, with the date on taller stock.
+In Auto, the tick that packs a product prints its label, once per product per
+visit, and an Apply that packs several prints them in # order. In Manual,
+Print label prints the selected product's. The box label (PO number,
+purchaser, date and counts) stays with Review mode, which prints it on
+approval.
+
+A label per product means labels asked for while one prints, at every quick
+scan, and the print used to drop those. They now wait their turn, and
+without a printer they go through one print dialog, a page each. Review
+mode's *Print when approved* is its own setting now, so switching one page
+to Manual leaves the other, and the settings button shows *Auto* or *Manual*
+as v1.323.0's Label button did. The box label's per-lot purchaser data on
+the sell order read went with the box label.
+
 ## [1.328.0] - 2026-10-23
 
 Monitors ▸ Facebook now shows the city queue, the new way Facebook workers

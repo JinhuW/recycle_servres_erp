@@ -1958,7 +1958,7 @@ html.desktop, body.desktop, .desktop #root {
   }
 }
 
-/* ── Pack mode box label print scope (PackLabel.tsx) ──────────────────────
+/* ── Bench label print scope (LabelPrint.tsx) ─────────────────────────────
    Mounted only while it prints. The app leaves the flow, not just the
    picture, so the print is the one label and a label printer feeds no blank
    one after it. */
@@ -1969,8 +1969,10 @@ html.desktop, body.desktop, .desktop #root {
   .pk-label-sheet { display: block; }
   .pk-label-sheet, .pk-label-sheet * { visibility: visible; }
 }
-/* The label is one drawn picture (PackLabel.tsx), sized to the stock. */
+/* Each label is one drawn picture (LabelPrint.tsx), sized to the stock, on a
+   page of its own. */
 .pk-label { display: block; }
+.pk-label + .pk-label { break-before: page; }
 
 /* ===== Inventory category sub-filter (foldable) ===== */
 .inv-subfilter {
@@ -4551,7 +4553,12 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 .pk-printer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .pk-printer-chip { font-size: 12.5px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pk-printer-btn { min-height: 44px; white-space: nowrap; }
-.pk-printer-more { padding-left: 10px; padding-right: 10px; gap: 2px; }
+.pk-printer-more { padding-left: 10px; padding-right: 10px; gap: 6px; }
+.pk-label-state {
+  font-size: 11.5px; padding: 1px 7px; border-radius: 999px;
+  background: var(--bg-soft); color: var(--fg-subtle);
+}
+.pk-label-state.on { background: var(--accent-soft); color: var(--accent-strong); }
 .pk-label-pop { width: 330px; }
 .pk-label-auto { cursor: pointer; }
 .pk-label-auto input { flex: none; margin: 3px 0 0; width: 15px; height: 15px; accent-color: var(--accent-strong); }

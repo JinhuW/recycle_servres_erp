@@ -39,7 +39,7 @@ import { statusTone } from '../../lib/status';
 import { useMarketLookup } from '../../lib/useMarketLookup';
 import type { Order, OrderLine } from '../../lib/types';
 import { AiReviewCard } from './AiReviewCard';
-import { PackPrinterBar, useLabelPrint, type LabelText } from './PackLabel';
+import { LabelPrinterBar, useLabelPrint, type LabelText } from './LabelPrint';
 import { LineDrawer } from './submit/LineDrawer';
 import { editLineToPatch, orderLineToEditLine, type EditLine } from './submit/editLine';
 import { brandConfirmPending, patchEditsLine } from './submit/line';
@@ -151,19 +151,22 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   });
   const ready = loadState === 'ok' && !readOnly;
 
-  const label = useLabelPrint(id => showToast(t('pkLabelPrinted', { id })));
+  const label = useLabelPrint('review.labelAuto', name => showToast(t('pkLabelPrinted', { id: name })));
   // The box's label, counted as the review stands: a line at 0 isn't in it.
   const labelText = (): LabelText => {
     const n = reviewedCounts(lines, checks);
     return {
-      kind: [t('bcLabelKind'), order.warehouse?.short].filter(Boolean).join(' · '),
+      name: order.id,
+      top: [t('bcLabelKind'), order.warehouse?.short].filter(Boolean).join(' · '),
       date: fmtDate(new Date(), locale),
-      orderId: order.id,
+      title: order.id,
       caption: t('pkLabelPurchaser', { n: 1 }),
-      who: order.userName,
-      products: { n: n.products, word: t('pkLabelProducts', { n: n.products }) },
-      units: { n: n.units, word: t('pkLabelUnits', { n: n.units }) },
-      from: null,
+      body: order.userName,
+      mono: false,
+      counts: [
+        { n: n.products, word: t('pkLabelProducts', { n: n.products }) },
+        { n: n.units, word: t('pkLabelUnits', { n: n.units }) },
+      ],
     };
   };
 
@@ -577,7 +580,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
       setBusy(null);
     }
     // Finishing the review prints the box's label, before the page leaves.
-    if (label.auto) await label.print(labelText());
+    if (label.auto) await label.print([labelText()]);
     onApproved();
   };
 
@@ -935,15 +938,15 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
           </div>
         </div>
         <div className="pk-head-side">
-          <PackPrinterBar
+          <LabelPrinterBar
             printer={label.printer}
             settings={label.settings}
             autoTitle={t('bcLabelAuto')}
             autoHint={t('bcLabelAutoHint')}
             summary={[order.id, t('pkSub', { products: boxCount.products, units: boxCount.units }), order.userName].join(' · ')}
             canPrint={loadState === 'ok' && boxCount.products > 0}
-            onPrint={() => void label.print(labelText())}
-            onPrintDialog={() => void label.viaDialog(labelText())}
+            onPrint={() => void label.print([labelText()])}
+            onPrintDialog={() => void label.viaDialog([labelText()])}
           />
           <div className="bc-keys" aria-hidden="true">
             <span><kbd>↑</kbd><kbd>↓</kbd> {t('bcKeyMove')}</span>

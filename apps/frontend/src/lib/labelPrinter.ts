@@ -241,6 +241,9 @@ async function send(bytes: Uint8Array): Promise<void> {
 export const labelPrinter = {
   subscribe(l: () => void) { listeners.add(l); return () => { listeners.delete(l); }; },
 
+  // As it is now, for a print that waited its turn.
+  status: snapshot,
+
   // Needs a click: Chrome opens its device chooser only from one.
   async connect(): Promise<void> {
     const bt = bluetooth();

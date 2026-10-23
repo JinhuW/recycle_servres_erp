@@ -140,7 +140,7 @@ describe('final sell price on PO lines', () => {
 });
 
 type SoRef = { id: string; customer: string; qty: number };
-type SoDetail = { order: { lines: { inventoryId: string | null; sourceOrderId: string | null; sourcePurchaser: string | null }[] } };
+type SoDetail = { order: { lines: { inventoryId: string | null; sourceOrderId: string | null }[] } };
 
 describe('a PO and the sell orders that sold it link to each other', () => {
   beforeEach(async () => { await resetDb(); });
@@ -179,7 +179,5 @@ describe('a PO and the sell orders that sold it link to each other', () => {
     expect(so.status).toBe(200);
     expect(so.body.order.lines[0].inventoryId).toBe(lineIds[0]);
     expect(so.body.order.lines[0].sourceOrderId).toBe(id);
-    // The PO's purchaser, whom Pack mode's box label names.
-    expect(so.body.order.lines[0].sourcePurchaser).toBe('Marcus Wright');
   });
 });
