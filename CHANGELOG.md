@@ -17,6 +17,22 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.317.1] - 2026-10-23
+
+The monitors' toolbar summaries say "1 rule on", not "1 rules on" (RS-356).
+Reddit's workers summary, WeChat's board summary and Facebook's workers
+summary were each one sentence with its plural nouns fixed in the string.
+Any count of one read wrong, and dev, with exactly one Reddit rule enabled,
+showed it. Each count now has its own string with a singular form, joined
+with ` · `, so a summary of 1 worker, 1 subreddit, 1 buyer or 1 city reads
+right in any combination. The Chinese text is unchanged. Reddit's summary
+without post stats drops its "watched", matching the one with them.
+
+The `verify` skill no longer sends a session to port 8899. That port collided
+with another session's backend in the RS-351 check. The skill now checks a
+port by number before using it, and confirms the health check's version is
+the worktree's own.
+
 ## [1.317.0] - 2026-10-22
 
 A PO's cost *Paid by* now names who paid the supplier (RS-353): the
@@ -75,7 +91,6 @@ PO once, moved or voided, with a history line.
 
 The running *Balance* is one company-wide book: the manager filter and
 *Held by* hide rows, never move the balance.
-
 
 ## [1.316.1] - 2026-10-22
 

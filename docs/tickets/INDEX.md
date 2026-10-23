@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-356](./RS-356-monitor-summaries-pluralise-a-count-of-one.md) | done | bug | P3 | Monitor summaries pluralise a count of one | 1.317.1 |
 | [RS-355](./RS-355-accounting-groups-payments-and-rmb-flow-the-rmb-flow.md) | done | story | P2 | Accounting groups Payments and RMB Flow; the RMB Flow records money outside the Business Account | 1.317.0 |
 | [RS-354](./RS-354-accounting-an-entry-s-paid-by-and-the-po-s-payer-sta.md) | done | story | P2 | Accounting: an entry's Paid by and the PO's payer stay in sync; one company-wide balance | 1.317.0 |
 | [RS-353](./RS-353-paid-by-names-a-manager-or-the-business-account.md) | done | story | P2 | Paid by names a manager or the Business Account | 1.317.0 |

@@ -355,6 +355,16 @@ function BoardCard({
     () => (kind === 'quote' ? groupByBrand(rows) : [{ brand: null, rows }]),
     [kind, rows],
   );
+  // A key per count, so a count of one can read singular.
+  const tot = summary?.totals;
+  const summaryLine = tot && [
+    tot.buyers === 1 ? t('wxSumBuyersOne', { n: 1 }) : t('wxSumBuyers', { n: fmt.format(tot.buyers) }),
+    tot.sellers === 1 ? t('wxSumSellersOne', { n: 1 }) : t('wxSumSellers', { n: fmt.format(tot.sellers) }),
+    tot.posts === 1 ? t('wxSumPostsOne', { n: 1 }) : t('wxSumPosts', { n: fmt.format(tot.posts) }),
+    tot.groupsTotal === 1
+      ? t('wxSumGroupsOne', { active: tot.groupsActive, total: 1 })
+      : t('wxSumGroups', { active: tot.groupsActive, total: tot.groupsTotal }),
+  ].join(' · ');
 
   return (
     <section className="card wx-board" aria-label={t('wxBoard')}>
@@ -376,15 +386,7 @@ function BoardCard({
           s: trend(summary.totals.sellers, prev.totals.sellers) ?? '—',
           date: fmtDay(prev.date, locale),
         }) : undefined}>
-          {summary
-            ? t('wxBoardSummary', {
-                buyers: fmt.format(summary.totals.buyers),
-                sellers: fmt.format(summary.totals.sellers),
-                posts: fmt.format(summary.totals.posts),
-                active: summary.totals.groupsActive,
-                total: summary.totals.groupsTotal,
-              })
-            : <Skeleton width={240} height={11} />}
+          {summaryLine ?? <Skeleton width={240} height={11} />}
         </span>
       </div>
       {/* The Facebook toolbar is search and summary alone; the board's two

@@ -7,12 +7,18 @@ description: Build/launch/drive recipe for verifying recycle-erp changes end-to-
 
 ## Launch
 
-- Port 8787 may be occupied by an unrelated local process — check first, and
-  if busy run on an alternate port:
-  `PORT=8899 VITE_API_BASE=http://localhost:8899 JWT_SECRET=local-dev-secret pnpm dev`
-  (repo-root `.env` has no `JWT_SECRET`; the backend throws without one — any
-  value works locally). Frontend lands on :5173, health check:
-  `curl http://127.0.0.1:<port>/api/health` → `{"status":"ok","version":…}`.
+- Other sessions' dev servers often hold 8787, 8899 and 5173. Check a port by
+  number, `lsof -nP -iTCP:<port> -sTCP:LISTEN` (a grep for ` :5173 ` misses
+  `*:5173`), and pick free ones, e.g. backend 8931 and vite 5180:
+  `PORT=8931 JWT_SECRET=local-dev-secret pnpm dev` in `apps/backend`, then
+  `VITE_API_BASE=http://localhost:8931 pnpm exec vite --port 5180 --strictPort`
+  in `apps/frontend` (repo-root `.env` has no `JWT_SECRET`; the backend throws
+  without one — any value works locally).
+- Health check: `curl http://127.0.0.1:<port>/api/health` →
+  `{"status":"ok","version":…}`. The `version` must equal this worktree's
+  `package.json`. Otherwise another session's backend is answering and yours
+  died with `EADDRINUSE` (see its log). See
+  [the debug note](../../../docs/debug-notes/2026-10-22-local-verify-reached-another-sessions-dev-server.md).
 - The dev DB is the local docker Postgres from `docker-compose.override.yml`
   (`recycle-erp-testdb`) — safe to create draft POs; DELETE them afterwards
   (`DELETE /api/orders/<id>` works on drafts).
