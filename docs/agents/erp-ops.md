@@ -105,6 +105,7 @@ Every ops alert goes to the "Homelab Alerts" Telegram forum group
 | Railway · Deploy failed (2), · Crashed (3), · CPU/RAM (4), · Volumes (5) | Railway webhooks → relay `POST /` | `@Jinhu_homelab_bot` |
 | ERP · Uptime (15) | `deploy/railway-uptime/check.sh` → relay `POST /alert` | `@Jinhu_homelab_bot` |
 | Reddit · Workers (16), · Errors (17) | the reddit api's watch → relay `POST /alert` | `@Jinhu_homelab_bot` |
+| WeChat · Daily report (28) | memtrade's daily run on the Mac (`src/alert.ts`, `scripts/daily-report.sh`) → relay `POST /alert` | `@Jinhu_homelab_bot` |
 | Homelab · Prometheus (12) | Alertmanager on `10.10.60.5`, its own `telegram_configs` | `@Jinhu_homelab_bot` |
 | Facebook · Fleet ops (13), · Releases (14) | the facebook coordinator and `scripts/deploy.sh` (`TELEGRAM_OPS_CHAT_ID`, `TELEGRAM_TOPIC_OPS`, `TELEGRAM_TOPIC_RELEASES`) | `@recycle_facebook_alerts_bot` |
 
@@ -122,9 +123,13 @@ them.
   only `TOPICS` in `wrangler.toml` maps a topic key to a thread. A key or
   event without a topic, or whose topic was deleted, goes to General.
 - **One bearer per route.** `WEBHOOK_SECRET` belongs to the Railway webhooks.
-  `ALERT_TOKEN` is set on `uptime-monitor` as `ALERT_TOKEN` and on the reddit
-  `api` as `OPS_ALERT_TOKEN`. Rotating it means `wrangler secret put
-  ALERT_TOKEN` and both of those variables.
+  `ALERT_TOKEN` has three holders:
+  - `uptime-monitor`, as `ALERT_TOKEN`;
+  - the reddit `api`, as `OPS_ALERT_TOKEN`;
+  - memtrade, as `~/Projects/wehat_ai/memtrade/.ops-alert-token` (0600,
+    gitignored).
+
+  Rotating it means `wrangler secret put ALERT_TOKEN` and updating all three.
 - It runs on Cloudflare so an alert still gets out while Railway is down.
   Deploy with `npx wrangler@4.146.0 deploy` from that directory, with
   `CLOUDFLARE_API_TOKEN` unset.
