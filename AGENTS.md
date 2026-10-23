@@ -181,6 +181,8 @@ Four things worth knowing:
 ## Pointers
 
 - What the system does today, by area: `docs/FEATURES.md`.
+- Every database (ERP, Reddit tracker, Facebook coordinator), table by
+  table: `docs/DATABASE.md`.
 - What was asked, and by whom: `docs/tickets/` (index in `INDEX.md`).
 - What shipped when: `CHANGELOG.md` — one section per `v*` tag.
 - Per-feature design docs: `docs/superpowers/specs/`.

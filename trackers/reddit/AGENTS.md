@@ -100,6 +100,8 @@ Breaking any of these breaks the fleet. The tests that cover them are
   `schema_migrations` ledger by filename and both start at `0001_init.sql`, so
   the two must never share a database. `scripts/migrate.ts --reset` drops every
   table in `public`.
+- A new migration updates the Reddit section of the root `docs/DATABASE.md`,
+  and its *As of* line, in the same PR.
 - Tests run against real Postgres (`docker compose up -d postgres`, on
   `127.0.0.1:5433`). The claim logic depends on `FOR UPDATE SKIP LOCKED`, which
   fakes do not reproduce.
