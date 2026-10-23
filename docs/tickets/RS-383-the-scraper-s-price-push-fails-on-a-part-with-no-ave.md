@@ -7,7 +7,7 @@ priority: P1
 created: 2026-10-23
 reporter: jinhu
 branch: fix/market-write-null-trend
-pr:
+pr: 858
 version: 1.329.1
 related: [RS-364]
 ---
