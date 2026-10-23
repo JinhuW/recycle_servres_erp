@@ -2,12 +2,12 @@
 id: RS-356
 title: Monitor summaries pluralise a count of one
 type: bug
-status: in-review
+status: done
 priority: P3
 created: 2026-10-22
 reporter: jinhu
 branch: fix/monitor-summary-plurals
-pr:
+pr: 830
 version: 1.317.1
 related: [RS-351]
 ---
