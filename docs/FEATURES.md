@@ -3536,7 +3536,12 @@ removed in v1.191.0.
     CPU/RAM monitor and volume alerts, triggered and resolved (v1.322.0);
   - the ERP uptime probe;
   - the reddit fleet: a worker down, a loop failing three times in a row,
-    and every warn/error line as a minute digest.
+    and every warn/error line as a minute digest;
+  - homelab Prometheus (Alertmanager);
+  - the Facebook fleet's ops alerts (worker down, session expiring,
+    challenge) and deploy notices (facebook-tracker 0.13.15). The buyers'
+    listings group now carries only listings;
+  - failures of memtrade's daily WeChat market report.
 
   A Railway message names the project, environment, service and commit, and
   links to the deployment. The relay is a Cloudflare Worker, so alerts still

@@ -12,7 +12,7 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-378](./RS-378-review-mode-prints-the-po-s-box-label-when-the-revie.md) | done | story | P2 | Review mode prints the PO's box label when the review is approved | 1.327.0 |
 | [RS-377](./RS-377-wechat-line-history-chart-reads-as-a-price-ladder-pe.md) | done | story | P2 | WeChat line history chart reads as a price ladder per report day | 1.326.0 |
 | [RS-376](./RS-376-reddit-worker-errors-alert-in-telegram.md) | done | story | P2 | Reddit worker errors alert in Telegram | 1.325.0 |
-| [RS-375](./RS-375-all-ops-alerts-land-in-homelab-alerts.md) | in-progress | story | P2 | All ops alerts land in Homelab Alerts | — |
+| [RS-375](./RS-375-all-ops-alerts-land-in-homelab-alerts.md) | done | story | P2 | All ops alerts land in Homelab Alerts | 1.325.0 |
 | [RS-374](./RS-374-pack-mode-connects-a-bluetooth-label-printer-shows-i.md) | done | story | P2 | Pack mode connects a Bluetooth label printer, shows its status, and names the purchasers | 1.324.0 |
 | [RS-372](./RS-372-workers-pull-their-cities-from-the-coordinator-s-que.md) | done | story | P2 | Workers pull their cities from the coordinator's queue (first stage) | facebook-tracker 0.13.14 |
 | [RS-371](./RS-371-pack-mode-prints-a-box-label-once-the-order-is-packe.md) | done | story | P2 | Pack mode prints a box label once the order is packed | 1.323.0 |
