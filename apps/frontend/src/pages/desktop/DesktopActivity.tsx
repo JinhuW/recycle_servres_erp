@@ -90,8 +90,8 @@ type AcctDetail = {
 function acctDiffs(d: AcctDetail, ctx: Ctx) {
   return Object.entries(d.changes ?? {}).map(([k, ch]) => ({
     k: FIELD_KEY[k] ? ctx.t(FIELD_KEY[k]) : k,
-    from: fieldValue(k, ch.from, { t: ctx.t, locale: ctx.locale, managers: ctx.members }),
-    to: fieldValue(k, ch.to, { t: ctx.t, locale: ctx.locale, managers: ctx.members }),
+    from: fieldValue(k, ch.from, { t: ctx.t, locale: ctx.locale, people: ctx.members }),
+    to: fieldValue(k, ch.to, { t: ctx.t, locale: ctx.locale, people: ctx.members }),
   }));
 }
 

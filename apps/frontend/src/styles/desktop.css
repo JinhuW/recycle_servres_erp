@@ -98,6 +98,8 @@ html.desktop, body.desktop, .desktop #root {
    above the icon-rail block, whose `.sidebar .nav-item` padding has to win
    over the child indent; the rail hides the caret as one of its label spans. */
 .nav-item .nav-caret { margin-left: auto; display: inline-flex; opacity: 0.6; }
+/* A folded parent's count sits at the right edge, the caret after it. */
+.nav-item .badge + .nav-caret { margin-left: 6px; }
 .nav-item.open { color: var(--fg); }
 .nav-item.open .nav-icon { color: var(--accent); opacity: 1; }
 .nav-children { display: flex; flex-direction: column; gap: 2px; }

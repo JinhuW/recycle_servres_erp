@@ -120,6 +120,30 @@ describe('a self-paid PO names who paid', () => {
     expect(order.paidBy).toMatchObject({ id: alex.user.id });
   });
 
+  it('a new owner takes over a payer that was the old owner', async () => {
+    const marcus = await loginAs(MARCUS);
+    const priya = await loginAs(PRIYA);
+    const alex = await loginAs(ALEX);
+    const { body: { id } } = await createOrder(marcus.token, { payment: 'self' });
+    const reassign = (to: string, body: Record<string, unknown> = {}) =>
+      api('PATCH', `/api/orders/${id}`, { token: alex.token, body: { onBehalfOfUserId: to, ...body } });
+
+    expect((await reassign(priya.user.id)).status).toBe(200);
+    expect(await storedPayer(id)).toBe(priya.user.id);
+    const events = await getTestDb()<{ detail: { changes?: { field: string; from: unknown; to: unknown }[] } }[]>`
+      SELECT detail FROM order_events WHERE order_id = ${id} AND kind = 'meta_changed' ORDER BY created_at, id`;
+    expect(events.flatMap(e => e.detail.changes ?? []).filter(ch => ch.field === 'paid_by'))
+      .toEqual([{ field: 'paid_by', from: 'Marcus Wright', to: 'Priya Shah' }]);
+
+    // A manager who paid stays the payer whoever owns the PO.
+    expect((await api('PATCH', `/api/orders/${id}`, { token: alex.token, body: { paidByUserId: alex.user.id } })).status).toBe(200);
+    expect((await reassign(marcus.user.id)).status).toBe(200);
+    expect(await storedPayer(id)).toBe(alex.user.id);
+    // So does an old owner the same request picks as the payer.
+    expect((await reassign(priya.user.id, { paidByUserId: marcus.user.id })).status).toBe(200);
+    expect(await storedPayer(id)).toBe(marcus.user.id);
+  });
+
   it('closed book: a manager cannot move the payer without reopening', async () => {
     const marcus = await loginAs(MARCUS);
     const alex = await loginAs(ALEX);

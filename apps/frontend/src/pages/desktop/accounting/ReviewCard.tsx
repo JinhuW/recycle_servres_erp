@@ -6,7 +6,7 @@ import { useAuth } from '../../../lib/auth';
 import { useT } from '../../../lib/i18n';
 import { handleFetchError } from '../../../lib/errorToast';
 import { fmtDate } from '../../../lib/format';
-import { useManagerOptions } from '../../../lib/useManagers';
+import { useMemberNames } from '../../../lib/useManagers';
 import {
   acctAnswer, acctAsk, acctMarkReviewed, acctWithdrawQuery, acctWithdrawReview,
   changesSinceReview, clearedReviewer, fmtCny, reviewActions, type AcctEntryDetail,
@@ -26,7 +26,7 @@ type Props = {
 export function ReviewCard({ entry, onChanged, onToast }: Props) {
   const { t, locale } = useT();
   const { user } = useAuth();
-  const managers = useManagerOptions();
+  const people = useMemberNames();
   const me = user?.id ?? '';
   const [form, setForm] = useState<null | 'query' | 'answer'>(null);
   const [text, setText] = useState('');
@@ -105,9 +105,9 @@ export function ReviewCard({ entry, onChanged, onToast }: Props) {
                   <div key={k}>
                     <dt>{FIELD_KEY[k] ? t(FIELD_KEY[k]) : k}</dt>
                     <dd>
-                      <span className="acct-was">{fieldValue(k, ch.from, { t, locale, managers })}</span>
+                      <span className="acct-was">{fieldValue(k, ch.from, { t, locale, people })}</span>
                       <span aria-hidden="true">→</span>
-                      <b>{fieldValue(k, ch.to, { t, locale, managers })}</b>
+                      <b>{fieldValue(k, ch.to, { t, locale, people })}</b>
                     </dd>
                   </div>
                 ))}

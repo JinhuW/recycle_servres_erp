@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { applyKind, initialForm, payerLock, pickTarget, previewCny, toRequestBody } from './accountingForm';
-import { markDayStarts, owedOnSale, phonePeriod, reviewActions, splitYuan, fmtCny, fmtSignedCny, type AcctReview } from './accounting';
+import { markDayStarts, owedOnSale, phonePeriod, reviewActions, splitYuan, fmtCny, fmtSignedCny, type AcctEntry, type AcctReview } from './accounting';
 
 const ME = '11111111-1111-1111-1111-111111111111';
 const TODAY = '2026-10-21';
@@ -47,16 +47,31 @@ describe('the entry form', () => {
     expect(pickTarget({ ...f, managerTouched: true }, { id: 'PO-1', payerId: TIM }).managerId).toBe(ME);
   });
 
-  it('takes no entry for a PO the Business Account paid', () => {
+  it('takes no paid-out entry for a PO the Business Account paid', () => {
     const company = { id: 'PO-1', payerBusiness: true };
-    expect(payerLock(company)).toBe(true);
-    expect(payerLock({ id: 'PO-1', payerId: ME })).toBe(false);
-    expect(payerLock(null)).toBe(false);
+    const out = { kind: 'purchase' as const, direction: 'out' as const, managerId: ME };
+    expect(payerLock({ ...out, target: company })).toBe(true);
+    expect(payerLock({ ...out, target: { id: 'PO-1', payerId: ME } })).toBe(false);
+    expect(payerLock({ ...out, target: null })).toBe(false);
+    // A refund or a clawback is the book's money.
+    expect(payerLock({ ...out, direction: 'in', target: company })).toBe(false);
     // The recorder stays the payer on the form; the request is refused before amount or record.
     const f = pickTarget(initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase' } }), company);
     expect(f.managerId).toBe(ME);
     expect(toRequestBody({ ...f, amount: '5' })).toEqual({ error: 'acctPaidFromBusiness' });
     expect(toRequestBody({ ...f, amount: '' })).toEqual({ error: 'acctPaidFromBusiness' });
+  });
+
+  it('keeps an entry restored on such a PO editable while its record and payer stay', () => {
+    const TIM = '22222222-2222-2222-2222-222222222222';
+    const entry = {
+      kind: 'purchase', direction: 'out', target: { type: 'po', id: 'PO-1' }, manager: { id: TIM, name: 'Tim' },
+    } as AcctEntry;
+    const same = { kind: 'purchase' as const, direction: 'out' as const, managerId: TIM, target: { id: 'PO-1', payerBusiness: true } };
+    expect(payerLock(same, entry)).toBe(false);
+    expect(payerLock({ ...same, managerId: ME }, entry)).toBe(true);
+    expect(payerLock({ ...same, target: { id: 'PO-2', payerBusiness: true } }, entry)).toBe(true);
+    expect(payerLock({ ...same, kind: 'commission' }, entry)).toBe(true);
   });
 
   it('turns into a request, or names what is missing', () => {

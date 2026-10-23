@@ -67,7 +67,7 @@ export function rowChip(row: AcctReviewRow, t: Translate, locale: string): { lab
 
 /** A field's value in a was → now line, the way the entry's own form shows it. */
 export function fieldValue(
-  field: string, v: unknown, ctx: { t: Translate; locale: string; managers: { id: string; name: string }[] },
+  field: string, v: unknown, ctx: { t: Translate; locale: string; people: { id: string; name: string }[] },
 ): string {
   if (v === null || v === undefined || v === '') return '—';
   switch (field) {
@@ -77,7 +77,7 @@ export function fieldValue(
     case 'kind': return ctx.t('acctKind_' + String(v));
     case 'method': return ctx.t('acctMethod_' + String(v));
     case 'occurredOn': return fmtBookDay(String(v), ctx.locale, true);
-    case 'managerId': return ctx.managers.find(m => m.id === v)?.name ?? '—';
+    case 'managerId': return ctx.people.find(m => m.id === v)?.name ?? '—';
     default: return String(v);
   }
 }

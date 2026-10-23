@@ -805,7 +805,12 @@ is not a stage but a flag beside one, set once every line has sold
   *Paid by: ‹from› → ‹to›* Activity line. **The cost comes back to whoever
   paid it**: the Commission tab adds it to the purchaser's earnings only when
   the purchaser paid, and reads *Cost reimbursed to ‹name›* when a manager
-  did. The spreadsheet export's *Payment method* row names the payer too.
+  did; Review mode's money panel follows the same rule (v1.317.3). The
+  spreadsheet export's *Payment method* row names the payer too. **A new
+  owner takes over a payer that was the old owner** (v1.317.3): reassigning
+  a self-paid PO, on the PO page or at hand-off, moves Paid by with it, with
+  its Activity line, as Self meant before it named a person. A manager who
+  paid stays the payer, and so does a payer the same save picked.
 - **The Actions column is pinned to the right edge** (v1.294.1). When the
   desktop list is wider than its card and scrolls sideways, the Actions
   header and cells stay put at the right while the other columns slide
@@ -2184,15 +2189,20 @@ is who paid, below).
       *Paid from the Business Account* and a *Voided: paid from the Business
       Account* history line; totals drop them. Unlinking the row or clearing
       the flag does not bring them back; **Restore** does, and a restored
-      entry is never voided by the PO again.
+      entry is never voided by the PO again. It catches up with the PO's
+      person payer as it comes back (v1.317.3).
     - *Entry → PO.* Saving a Commission entry with Paid by X sets the PO's
       commission Paid by to X, with the PO's Activity line. Saving a Purchase
-      entry with Paid by a person sets a self-paid PO's cost payer. Two
-      entries on one PO carry one payer.
-    - *No entry for a PO the Business Account paid.* The form says so, with
-      Paid by greyed and Save off; the PO's Cost Payment or Commission card
-      says so in place of its Record button, with *Open Payments*; the API
-      refuses. The flag or the link is undone on the PO.
+      entry with Paid by a person sets a self-paid PO's cost payer, except
+      on a PO at Ready to Pay or Done, whose payer is settled as the PO page
+      holds it (refused, v1.317.3). Two entries on one PO carry one payer.
+    - *No paid-out entry for a PO the Business Account paid.* The form says
+      so, with Paid by greyed and Save off; the PO's Cost Payment or
+      Commission card says so in place of its Record button, with *Open
+      Payments*; the API refuses. The flag or the link is undone on the PO.
+      Money coming back (a supplier's refund, a commission clawback) is
+      recorded as usual, and an entry restored there stays editable while
+      its record, direction and Paid by stay (v1.317.3).
     - A PO picked for a Purchase entry carries its cost payer, and for a
       Commission entry its commission payer: the Cost Payment and Commission
       cards' Record buttons, on both shells, and the entry dialog's PO pick
@@ -2276,7 +2286,8 @@ is who paid, below).
     the review. A sign-off names the version the page showed, so an
     out-of-date page gets a 409 and re-reads. A void takes the entry out of
     review, and a restore brings it back To review. The reviewer can withdraw
-    their own sign-off.
+    their own sign-off, which puts back the open question or the *Changed
+    since review* it closed (v1.317.3).
   - **Query.** A reviewer who can't sign asks the author a question (up to
     280 characters). Where an entry has no author, the question goes to the
     manager whose money it was. That person is notified, and the entry waits
@@ -2314,8 +2325,9 @@ is who paid, below).
       reviewed, what is for you, queried and waiting on others. A period with
       every entry reviewed says so; there is no separate period sign-off.
   - **Elsewhere:**
-    - The sidebar's Accounting item counts the entries and questions waiting
-      on you.
+    - The sidebar's RMB Flow item counts the entries and questions waiting
+      on you, and the Accounting parent carries the count while folded
+      (v1.317.3).
     - The entry drawer carries a Review card with the viewer's own actions.
     - Editing a reviewed entry warns that saving clears the review.
     - The history logs every sign-off, withdrawal, question, answer and

@@ -120,6 +120,25 @@ describe('accounting review', () => {
     expect((await entry(alex.token, id)).review!.state).toBe('open');
   });
 
+  it('withdrawing a sign-off puts back the question or the change it closed', async () => {
+    const id = await record(alex.token, base({}));
+    expect((await api('POST', `/api/accounting/entries/${id}/query`, { token: sofia.token, body: { text: 'amount?' } })).status).toBe(200);
+    expect((await review(sofia.token, id, await versionOf(id))).status).toBe(200);
+    expect((await entry(alex.token, id)).review).toMatchObject({ state: 'reviewed', query: null });
+    expect((await api('DELETE', `/api/accounting/entries/${id}/review`, { token: sofia.token })).status).toBe(200);
+    expect((await entry(alex.token, id)).review).toMatchObject({ state: 'queried', query: { text: 'amount?', answer: null } });
+
+    // Changed since its last sign-off: back to Changed, with what changed.
+    const changed = await record(alex.token, base({ amount: 1800 }));
+    expect((await review(sofia.token, changed, await versionOf(changed))).status).toBe(200);
+    expect((await api('PATCH', `/api/accounting/entries/${changed}`, { token: sofia.token, body: { amount: 1880 } })).status).toBe(200);
+    expect((await review(alex.token, changed, await versionOf(changed))).status).toBe(200);
+    expect((await api('DELETE', `/api/accounting/entries/${changed}/review`, { token: alex.token })).status).toBe(200);
+    expect((await entry(alex.token, changed)).review!.state).toBe('changed');
+    const row = (await queue(alex.token, 'mine')).rows.find(r => r.id === changed)!;
+    expect(row.cleared).toMatchObject({ changes: { amount: { from: 1800, to: 1880 } } });
+  });
+
   it('a question goes to the author, and the answer sends it back to review', async () => {
     const id = await record(alex.token, base({}));
     const ask = (token: string, text: string) =>

@@ -82,7 +82,7 @@ export function useAccountingEntryForm(opts: {
 
   const submit = async () => {
     if (busy) return;
-    const r = toRequestBody(form, { orphan });
+    const r = toRequestBody(form, { orphan, entry });
     if ('error' in r) { setError(r.error); return; }
     setBusy(true);
     try {
@@ -104,8 +104,8 @@ export function useAccountingEntryForm(opts: {
     form, error, busy, managers, rate, targetType, query, candidates, orphan,
     preview: previewCny(form, rate),
     editing: !!entry,
-    // A PO the Business Account paid takes no RMB entry: the form says so.
-    payerLocked: payerLock(form.target),
+    // A PO the Business Account paid takes no paid-out RMB entry: the form says so.
+    payerLocked: payerLock(form, entry),
     // A manager picked by hand stays put when the record changes.
     set: (patch: Partial<EntryForm>) => edit(f => ({ ...f, ...patch, ...(patch.managerId !== undefined ? { managerTouched: true } : {}) })),
     setKind: (k: AccountingKind) => edit(f => applyKind(f, k)),

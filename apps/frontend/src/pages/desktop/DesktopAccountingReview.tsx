@@ -11,7 +11,7 @@ import { useT } from '../../lib/i18n';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtMoney } from '../../lib/format';
 import { useEscapeKey } from '../../lib/useEscapeKey';
-import { useManagerOptions } from '../../lib/useManagers';
+import { useManagerOptions, useMemberNames } from '../../lib/useManagers';
 import { navigate } from '../../lib/route';
 import {
   acctAnswer, acctAsk, acctBulkReview, acctMarkReviewed, acctReviewQueue, acctWithdrawQuery, acctWithdrawReview,
@@ -36,6 +36,7 @@ export function DesktopAccountingReview({ onToast }: Props) {
   const { user } = useAuth();
   const me = user?.id ?? '';
   const managers = useManagerOptions();
+  const people = useMemberNames();
   const [tab, setTab] = useState<AccountingReviewTab>('mine');
   const [managerId, setManagerId] = useState('');
   // The For you list is always loaded: the tally counts it whatever tab is up.
@@ -423,9 +424,9 @@ export function DesktopAccountingReview({ onToast }: Props) {
                       <div key={k}>
                         <dt>{FIELD_KEY[k] ? t(FIELD_KEY[k]) : k}</dt>
                         <dd>
-                          <span className="acct-was">{fieldValue(k, ch.from, { t, locale, managers })}</span>
+                          <span className="acct-was">{fieldValue(k, ch.from, { t, locale, people })}</span>
                           <span aria-hidden="true">→</span>
-                          <b>{fieldValue(k, ch.to, { t, locale, managers })}</b>
+                          <b>{fieldValue(k, ch.to, { t, locale, people })}</b>
                         </dd>
                       </div>
                     ))}

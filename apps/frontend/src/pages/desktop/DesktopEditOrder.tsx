@@ -8,7 +8,7 @@ import { useEffectiveUser } from '../../lib/tweaks';
 import { api, deleteOrder, archiveOrder, unarchiveOrder, followLineTotal, ApiError } from '../../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../../lib/archiveConflict';
 import { readStageMoved } from '../../lib/boxCheck';
-import { costPayerLabel, poStageName } from '../../lib/orderPresentation';
+import { costPayerLabel, costReimbursedToOwner, poStageName } from '../../lib/orderPresentation';
 import { payerChoices } from '../../lib/poFacets';
 import { ArchiveConflictList } from '../../components/ArchiveConflictList';
 import { SoldBadge } from '../../components/SoldBadge';
@@ -698,7 +698,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // The cost comes back to whoever paid it. It rides the purchaser's earnings
   // only when the purchaser paid; a manager who paid is reimbursed apart. A
   // record naming nobody (an older backend) is the purchaser's, as it always was.
-  const selfReimbursed = payment === 'self' && (paidByUserId === null || paidByUserId === order.userId);
+  const selfReimbursed = costReimbursedToOwner(payment, paidByUserId, order.userId);
   const reimbursedTo = payment === 'self' && !selfReimbursed
     ? (payers.find(m => m.id === paidByUserId)?.name ?? order.paidBy?.name ?? null) : null;
   const purchaserEarn =

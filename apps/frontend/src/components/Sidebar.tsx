@@ -78,6 +78,7 @@ export function Sidebar({ view, folded, onToggleFold }: Props) {
   const user = useEffectiveUser();
   // The Accounting entries and questions waiting on this manager.
   const reviewCount = useAcctReviewCount(user?.role === 'manager');
+  const countOf = (item: ShownLeaf) => item.leaf.id === 'accounting' ? reviewCount : undefined;
   if (!user) return null;
   const foldLabel = folded ? t('sidebarExpand') : t('sidebarCollapse');
   return (
@@ -105,9 +106,11 @@ export function Sidebar({ view, folded, onToggleFold }: Props) {
           <div className="nav-section">{t(group.tKey)}</div>
           {group.items.map(item => {
             if (item.kind === 'leaf') {
-              return <LeafLink key={item.leaf.id} item={item} count={item.leaf.id === 'accounting' ? reviewCount : undefined} />;
+              return <LeafLink key={item.leaf.id} item={item} count={countOf(item)} />;
             }
             const label = t(item.parent.tKey);
+            // A folded parent carries the count its children would show.
+            const folded = item.open ? 0 : item.children.reduce((n, c) => n + (countOf(c) ?? 0), 0);
             return (
               <Fragment key={item.parent.tKey}>
                 {/* Not aria-current: while it is open, the page is one of its
@@ -118,13 +121,14 @@ export function Sidebar({ view, folded, onToggleFold }: Props) {
                   label={label}
                   icon={item.parent.icon}
                 >
+                  {!!folded && <span className="badge due" title={t('acctReviewModeHint', { n: folded })}>{folded}</span>}
                   <span className="nav-caret">
                     <Icon name={item.open ? 'chevronDown' : 'chevronRight'} size={13} />
                   </span>
                 </NavLink>
                 {item.open && (
                   <div className="nav-children" role="group" aria-label={label}>
-                    {item.children.map(c => <LeafLink key={c.leaf.id} item={c} sub />)}
+                    {item.children.map(c => <LeafLink key={c.leaf.id} item={c} sub count={countOf(c)} />)}
                   </div>
                 )}
               </Fragment>

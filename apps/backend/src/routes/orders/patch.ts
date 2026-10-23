@@ -530,7 +530,9 @@ patchRoutes.patch('/:id', async (c) => {
       }
       // Owner moves under the same lock as the meta fields.
       if (newOwner && newOwner.ownerId !== orderBefore.user_id) {
-        await changeOrderOwnerTx(tx, id, u, orderBefore.user_id, newOwner);
+        await changeOrderOwnerTx(tx, id, u, orderBefore.user_id, newOwner, {
+          payerPicked: body.paidByUserId != null && body.paidByUserId !== orderBefore.paid_by,
+        });
       }
       // The box, under the same lock as the fields that describe it. A
       // tracking number only makes sense on a label; a flip away from label

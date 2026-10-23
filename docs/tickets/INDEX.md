@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-358](./RS-358-fix-the-dev-main-review-findings-before-the-v1-317-r.md) | done | bug | P2 | Fix the dev→main review findings before the v1.317 release | 1.317.3 |
 | [RS-357](./RS-357-a-paid-by-that-follows-the-po-clears-the-entry-s-sig.md) | done | bug | P2 | A Paid by that follows the PO clears the entry's sign-off | 1.317.2 |
 | [RS-356](./RS-356-monitor-summaries-pluralise-a-count-of-one.md) | done | bug | P3 | Monitor summaries pluralise a count of one | 1.317.1 |
 | [RS-355](./RS-355-accounting-groups-payments-and-rmb-flow-the-rmb-flow.md) | done | story | P2 | Accounting groups Payments and RMB Flow; the RMB Flow records money outside the Business Account | 1.317.0 |
