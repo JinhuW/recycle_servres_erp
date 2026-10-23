@@ -296,7 +296,6 @@ sellOrders.get('/:id', async (c) => {
     inventory_id: string | null; warehouse_id: string | null;
     source_order_id: string | null;
     source_line_no: number | null;
-    source_purchaser: string | null;
     inventory_qty: number | null;
     type: string | null; classification: string | null; rank: string | null;
     speed: string | null; interface: string | null; form_factor: string | null;
@@ -311,7 +310,7 @@ sellOrders.get('/:id', async (c) => {
            sol.source_unit_price::float AS source_unit_price,
            sol.condition, sol.position, sol.product_no, sol.append_batch,
            sol.inventory_id, sol.warehouse_id, ol.order_id AS source_order_id,
-           ${poLineNo(sql, 'ol')} AS source_line_no, pu.name AS source_purchaser,
+           ${poLineNo(sql, 'ol')} AS source_line_no,
            w.short AS warehouse_short, pw.short AS pack_warehouse_short,
            -- The lot's spec, read live: sell_order_lines keeps only a text
            -- snapshot. Null for a hand-typed line or a deleted lot.
@@ -335,7 +334,6 @@ sellOrders.get('/:id', async (c) => {
     LEFT JOIN warehouses w ON w.id = sol.warehouse_id
     LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
     LEFT JOIN orders src ON src.id = ol.order_id
-    LEFT JOIN users pu ON pu.id = src.user_id
     LEFT JOIN warehouses pw ON pw.id = COALESCE(ol.warehouse_id, src.warehouse_id, sol.warehouse_id)
     LEFT JOIN LATERAL (
       SELECT ls.delivery_url
@@ -463,8 +461,6 @@ sellOrders.get('/:id', async (c) => {
         sourceOrderId: l.source_order_id,
         // The line's # on that PO's page.
         sourceLineNo: l.source_line_no,
-        // Who bought it: Pack mode's box label names them.
-        sourcePurchaser: l.source_purchaser,
         type: l.type, classification: l.classification, rank: l.rank,
         speed: l.speed, interface: l.interface, formFactor: l.form_factor,
         health: l.health,

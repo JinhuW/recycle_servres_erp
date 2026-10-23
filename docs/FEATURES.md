@@ -544,18 +544,21 @@ is not a stage but a flag beside one, set once every line has sold
   - Once every line is checked, **Approve for payment** at Reviewing moves
     the PO to Ready to Pay (re-reading the stage first). Short lines don't
     block it.
-  - **Approving prints the box's label** (v1.327.0, RS-378). It is Pack
-    mode's label (see *Sell orders* → *A finished box prints its label*),
-    for the PO, and prints before the page leaves for the PO page. It reads
+  - **Approving prints the box's label** (v1.327.0, RS-378). It is drawn
+    and printed as Pack mode's labels are (see *Sell orders* → *Each packed
+    product prints its label*), and prints before the page leaves for the PO
+    page. It reads
     *Purchase order · <warehouse>*, the date, the PO number, *Purchaser
     <the PO's purchaser>*, and the counts: the products with a unit counted,
     by #, and those units. A line counted 0 is in neither.
     - It goes over Bluetooth when the label printer is on, else through the
       print dialog. *Print when approved* in the label settings turns it off.
-      That is the same saved setting (`pack.labelAuto`) as Pack mode's.
+      It is Review mode's own setting (`review.labelAuto`, v1.329.0, RS-382);
+      until then it was Pack mode's (`pack.labelAuto`).
     - The page head carries Pack mode's printer bar: status, Connect, Print
-      label and the settings menu. Both pages share one connection and one
-      set of settings. A refused or cancelled approval prints nothing.
+      label and the settings menu, whose button shows *Auto* or *Manual*.
+      Both pages share one connection, the stock and the language. A refused
+      or cancelled approval prints nothing.
   - **Lines ticked at 0 are set to qty 0 on Approve** (v1.213.0; in v1.212.0,
     which never reached prod, Approve deleted them). They stay on the PO, so
     every line keeps its `#`.
@@ -1840,19 +1843,22 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     blocks, and the Finish card offers Edit order to match the order to the
     box first. A refused move (a lot taken meanwhile) says
     why and stays on the page.
-  - **A finished box prints its label** (v1.323.0, RS-371; Bluetooth since
-    v1.324.0, RS-374). The tick that packs the last product left prints it.
-    That covers a row, a whole product, a scan or Apply. The box is the
-    *Packing from* warehouse's lots, or the whole order.
-    - The label carries the SO number, the purchasers, and the counts: the
-      products with a unit in the box, and those units. It also carries the
-      date, and the warehouse when only one is packed. The purchasers are
-      whoever owns the POs the box's counted lots came from, once each in #
-      order: two, then *+n* (v1.324.0). Until then it named the customer.
-      The sell order read carries each line's `sourcePurchaser` for it.
-    - It prints once per box per visit. Ticking the last product back and on
-      again doesn't print another. Opening an order already packed, or a
-      second device finishing it, prints nothing.
+  - **Each packed product prints its label** (v1.329.0, RS-382; Bluetooth
+    since v1.324.0, RS-374). In Auto, the tick that packs a product prints
+    that product's label: a row, a whole product, a scan or Apply. Several
+    packed at once print in # order, and labels asked for while one prints
+    wait their turn. From v1.323.0 (RS-371) the tick that finished the box
+    printed one label for the whole box instead; the box label is Review
+    mode's now.
+    - The label carries the SO number and the date, the product's # large,
+      its part number, and the units of it packed. It is the # the packer
+      used to write on each item, so the receiver matches an item to its
+      line by it.
+    - It prints once per product per visit. Ticking a product back and on
+      again doesn't print another, a product packed at 0 prints none, and a
+      second device packing the order prints nothing on this one.
+    - In Manual, ticks print nothing, and **Print label** prints the
+      selected product's label. Its tooltip names the product.
     - **The page head shows the label printer** (v1.324.0). It reads *Label
       printer off* with **Connect**, *Connecting…*, or *Label printer on ·
       <name> · Ready*. Where the printer reports a problem, the chip says
@@ -1875,23 +1881,25 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
       connected, and so does the CT221D, which answers neither query. A
       printer out of paper, open or faulted gets no label, and a toast says
       why.
-    - The printer stays connected across Pack mode visits in the tab. Where
+    - The printer stays connected across Pack and Review mode visits in the
+      tab. Where
       Chrome offers `getDevices`, a printer allowed before reconnects on load.
-    - **Print label** sits beside the chip, and a packed box also gets one
-      in the Finish card. With a printer on, it and the automatic print send
-      the label over Bluetooth, with no dialog, and a toast confirms it.
+    - **Print label** sits beside the chip. With a printer on, it and the
+      automatic print send the label over Bluetooth, with no dialog, and a
+      toast confirms each one.
       Without one, they open the print dialog. The settings menu holds *Print
       when packed* (on by default), the stock (50 × 25 mm, the default since
       v1.327.1 and the CT221D's; 4 × 6, 4 × 3 or 2.25 × 1.25 in), the
       language, *Print with the dialog* and *Disconnect*. TSPL gets each
       stock's size and gap in its own unit (`SIZE 50 mm,25 mm`).
       Its choices are saved preferences (`pack.labelAuto`, `pack.labelSize`,
-      `pack.labelLanguage`).
+      `pack.labelLanguage`). The settings button shows *Auto* or *Manual*
+      (v1.329.0).
     - The label is one drawn picture (v1.324.0). The printer gets it as 1-bit
       dots at 203 dpi, and the dialog prints it as an image at 300 dpi, at
-      the stock's size and on one page. It is black on white for thermal
-      stock. Stock under 1.6 in tall keeps only the number, the purchasers
-      and the counts, set larger (v1.327.1).
+      the stock's size, one label to a page. It is black on white for thermal
+      stock. Stock under 1.6 in tall drops the date and the caption and sets
+      the rest larger (v1.327.1, v1.329.0).
   - The endpoints (`GET /api/sell-orders/:id/pack`,
     `PUT /api/sell-orders/:id/pack/:lineId`, and
     `POST /api/sell-orders/:id/pack/apply` on a Draft or Packing order only) 403 anyone whose
