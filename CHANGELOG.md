@@ -17,6 +17,38 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.325.0] - 2026-10-23
+
+Every ops alert now lands in one place, the "Homelab Alerts" Telegram group
+(RS-375), and the reddit workers report their own failures there (RS-376).
+Before this, homelab Prometheus alerts went to a DM, and Facebook fleet ops
+alerts and release notices sat in the buyers' listings group. A prod outage
+of the ERP reached no one, because the uptime cron's Lark webhook was never
+set. A dead OpenRouter key on a reddit worker showed only in its logs.
+
+The Railway alert relay (`deploy/railway-alerts/`) gained `POST /alert` for
+our own senders, with a bearer of its own. A sender names a topic key, and
+only the relay knows the group and its threads. The uptime cron now posts a
+failing run to "ERP · Uptime" (it used to print `000000` for a dead
+connection; now it prints `000`).
+
+The reddit tracker's api runs a watch every minute:
+- **Down.** A process silent for ten minutes goes to "Reddit · Workers", then
+  "back" or "gone".
+- **Failing.** So does a loop that fails three iterations in a row. Logging a
+  warn counts as failing, so a dead API key or a Reddit block pages, not only
+  a crash.
+- **Every error line.** Every warn/error line from any worker goes to
+  "Reddit · Errors" as one digest a minute.
+
+Workers hand all of this over with their heartbeat (migration 0005), so the
+OCI fleet needs no new secret. Nothing counts as sent until the relay accepts
+it.
+
+The group already has topics for the Facebook coordinator's ops alerts and
+deploy notices, and for homelab Prometheus. Those senders move with their own
+release and config change.
+
 ## [1.324.0] - 2026-10-23
 
 Pack mode now connects to the Bluetooth label printer and shows its status

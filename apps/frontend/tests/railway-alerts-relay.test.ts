@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error — plain JS Worker module, no types.
-import worker, { format } from '../../../deploy/railway-alerts/worker.js';
+import worker, { alertMessage, format } from '../../../deploy/railway-alerts/worker.js';
 
 // RS-368: Railway's raw webhook JSON relayed into one Telegram topic per kind
 // of alert.
 
 const env = {
   WEBHOOK_SECRET: 's3cret',
+  ALERT_TOKEN: 'alert-token',
   TELEGRAM_BOT_TOKEN: '123:abc',
   TELEGRAM_CHAT_ID: '-1001',
-  TOPICS: { deploy_failed: 11, crashed: 12, monitor: 13, volume: 14 },
+  TOPICS: { deploy_failed: 11, crashed: 12, monitor: 13, volume: 14, reddit_workers: 16 },
 };
 
 const resource = {
@@ -31,6 +32,16 @@ const event = (type: string, details: Record<string, unknown> = {}) => ({
 const post = (body: unknown, auth: string | null = 'Bearer s3cret') =>
   worker.fetch(
     new Request('https://railway-alerts.example/', {
+      method: 'POST',
+      headers: auth ? { Authorization: auth } : {},
+      body: JSON.stringify(body),
+    }),
+    env,
+  ) as Promise<Response>;
+
+const postAlert = (body: unknown, auth: string | null = 'Bearer alert-token') =>
+  worker.fetch(
+    new Request('https://railway-alerts.example/alert', {
       method: 'POST',
       headers: auth ? { Authorization: auth } : {},
       body: JSON.stringify(body),
@@ -166,5 +177,66 @@ describe('format', () => {
       'alert.threshold: 90',
       '<a href="https://railway.com/project/p1?environmentId=e1">Open in Railway</a>',
     ].join('\n'));
+  });
+});
+
+// RS-375: our own senders post `{topic, status, title, lines, link}` to /alert.
+describe('/alert', () => {
+  const alert = { topic: 'reddit_workers', status: 'firing', title: 'Reddit worker down', lines: ['c814 · last beat 12m ago'] };
+
+  it.each([
+    [null],
+    ['Bearer s3cret'],
+    ['Bearer wrong'],
+  ])('refuses Authorization %s and sends nothing', async (auth) => {
+    const res = await postAlert(alert, auth);
+    expect(res.status).toBe(401);
+    expect(sent).toEqual([]);
+  });
+
+  it('does not take the alert bearer on the Railway route', async () => {
+    const res = await post(event('Deployment.failed'), 'Bearer alert-token');
+    expect(res.status).toBe(401);
+  });
+
+  it('puts the alert in its topic', async () => {
+    const res = await postAlert(alert);
+    expect(res.status).toBe(204);
+    expect(sent[0]).toMatchObject({ chat_id: '-1001', message_thread_id: 16, parse_mode: 'HTML' });
+    expect(sent[0].text).toBe('<b>🔴 Reddit worker down</b>\nc814 · last beat 12m ago');
+  });
+
+  it.each([['nope'], ['constructor'], [undefined]])('sends topic %s to General', async (topic) => {
+    await postAlert({ ...alert, topic });
+    expect(sent[0].message_thread_id).toBeUndefined();
+  });
+
+  it('answers 502 when Telegram rejects it, so the sender retries', async () => {
+    answer = () => ({ status: 400, body: { ok: false, description: 'Bad Request: chat not found' } });
+    const res = await postAlert(alert);
+    expect(res.status).toBe(502);
+  });
+
+  it('renders status, escapes text and keeps the link', () => {
+    const { text, topic } = alertMessage({
+      topic: 'erp_uptime',
+      status: 'resolved',
+      title: 'prod <ok>',
+      lines: ['a & b'],
+      link: 'https://x.example/?a=1&b=2',
+    });
+    expect(topic).toBe('erp_uptime');
+    expect(text).toBe([
+      '<b>✅ prod &lt;ok&gt;</b>',
+      'a &amp; b',
+      '<a href="https://x.example/?a=1&amp;b=2">Open</a>',
+    ].join('\n'));
+  });
+
+  it('stays under Telegram\'s length cap however many lines come', () => {
+    const lines = Array.from({ length: 200 }, (_, i) => `${i} ${'x'.repeat(280)}`);
+    const { text } = alertMessage({ topic: 'reddit_errors', status: 'info', title: 'errors', lines });
+    expect(text.length).toBeLessThan(4096);
+    expect(text).toMatch(/… \d+ more$/);
   });
 });

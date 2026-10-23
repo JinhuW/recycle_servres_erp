@@ -20,6 +20,9 @@ export interface Config {
   readonly apiPort: number;
   readonly apiToken: string;
   readonly logLevel: string;
+  /** The ops alert relay's POST /alert; both unset turns the api's watch off. */
+  readonly opsAlertUrl: string;
+  readonly opsAlertToken: string;
 }
 
 const DEFAULT_USER_AGENT = 'recycle-servers-tracker/1.0 (contact: develop.jinhu@gmail.com)';
@@ -62,6 +65,12 @@ export function loadConfig(): Config {
   const alertTransport: AlertTransport =
     process.env['ALERT_TRANSPORT'] === 'console' ? 'console' : 'telegram';
 
+  const opsAlertUrl = process.env['OPS_ALERT_URL'] ?? '';
+  const opsAlertToken = process.env['OPS_ALERT_TOKEN'] ?? '';
+  if (Boolean(opsAlertUrl) !== Boolean(opsAlertToken)) {
+    throw new Error('OPS_ALERT_URL and OPS_ALERT_TOKEN are set together or not at all');
+  }
+
   return {
     databaseUrl: required('DATABASE_URL', role),
     alertTransport,
@@ -78,5 +87,7 @@ export function loadConfig(): Config {
     apiPort,
     apiToken: role === 'api' ? required('API_TOKEN', role) : (process.env['API_TOKEN'] ?? ''),
     logLevel: process.env['LOG_LEVEL'] || 'info',
+    opsAlertUrl,
+    opsAlertToken,
   };
 }

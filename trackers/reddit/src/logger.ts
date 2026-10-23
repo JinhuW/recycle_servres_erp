@@ -20,14 +20,34 @@ export interface Logger {
   child(scope: string): Logger;
 }
 
+/**
+ * Sees every warn and error line, whatever the log level, with the scope that
+ * logged it. It is how the heartbeat learns which loop is failing, and what to
+ * hand the ops alerts (see LoopRegistry.noteProblem).
+ */
+export type ProblemHook = (
+  scope: string,
+  level: 'warn' | 'error',
+  message: string,
+  fields: Record<string, unknown>,
+) => void;
+
 function isLevel(value: string): value is LogLevel {
   return value in LEVEL_ORDER;
 }
 
-export function createLogger(workerId: string, level: string, scope?: string): Logger {
+export function createLogger(
+  workerId: string,
+  level: string,
+  scope?: string,
+  onProblem?: ProblemHook,
+): Logger {
   const minimum = LEVEL_ORDER[isLevel(level) ? level : 'info'];
 
   const emit = (lineLevel: LogLevel, message: string, fields?: Record<string, unknown>): void => {
+    if (onProblem && (lineLevel === 'warn' || lineLevel === 'error')) {
+      onProblem(scope ?? '', lineLevel, message, fields ?? {});
+    }
     if (LEVEL_ORDER[lineLevel] < minimum) return;
     const parts = [
       new Date().toISOString(),
@@ -59,6 +79,8 @@ export function createLogger(workerId: string, level: string, scope?: string): L
     warn: (m, f) => emit('warn', m, f),
     error: (m, f) => emit('error', m, f),
     event: emitEvent,
-    child: (childScope) => createLogger(workerId, level, scope ? `${scope}:${childScope}` : childScope),
+    child: (childScope) => createLogger(
+      workerId, level, scope ? `${scope}:${childScope}` : childScope, onProblem,
+    ),
   };
 }

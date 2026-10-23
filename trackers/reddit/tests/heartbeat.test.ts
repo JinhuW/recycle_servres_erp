@@ -14,6 +14,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await db.sql`DELETE FROM workers`;
+  await db.sql`DELETE FROM worker_errors`;
 });
 
 interface WorkerRow {
@@ -162,5 +163,159 @@ describe('removeWorker', () => {
 
   it('is a no-op for an unknown worker', async () => {
     await expect(removeWorker(db.sql, 'never-existed')).resolves.toBeUndefined();
+  });
+});
+
+// RS-376: what has been going wrong travels with the beat.
+describe('LoopRegistry failures', () => {
+  it('counts iterations that threw or logged a problem, and resets on a clean one', async () => {
+    const registry = new LoopRegistry(() => 1_000);
+    const boom = registry.wrap('poll', async () => {
+      throw new Error('reddit down');
+    });
+    const warned = registry.wrap('poll', async () => {
+      registry.noteProblem('poll', 'warn', 'blocked by reddit', {status: 403});
+      return false;
+    });
+    const clean = registry.wrap('poll', async () => true);
+
+    await expect(boom()).rejects.toThrow();
+    await warned();
+    expect(registry.failureSnapshot().poll.consecutiveFailures).toBe(2);
+    expect(registry.failureSnapshot().poll.lastError).toBe('blocked by reddit');
+
+    await clean();
+    expect(registry.failureSnapshot().poll).toMatchObject({consecutiveFailures: 0, lastError: 'blocked by reddit'});
+  });
+
+  it('attributes a problem to the loop its scope starts with, and only that loop', async () => {
+    const registry = new LoopRegistry(() => 1_000);
+    const evaluate = registry.wrap('evaluate', async () => {
+      registry.noteProblem('evaluate:llm', 'warn', 'evaluation failed', {error: '401 Unauthorized'});
+      return true;
+    });
+    const notify = registry.wrap('notify', async () => {
+      registry.noteProblem('reactions', 'warn', 'getUpdates failed', {});
+      return true;
+    });
+
+    await evaluate();
+    await notify();
+
+    const failures = registry.failureSnapshot();
+    expect(failures.evaluate).toMatchObject({consecutiveFailures: 1, lastError: 'evaluation failed: 401 Unauthorized'});
+    expect(failures.evaluate.lastErrorAt).toBe(new Date(1_000).toISOString());
+    expect(failures.notify.consecutiveFailures).toBe(0);
+    // A per-post warning doesn't change what the ERP's fleet view reads.
+    expect(registry.snapshot().evaluate.lastSuccessAt).toBe(new Date(1_000).toISOString());
+  });
+
+  it('buffers problem lines up to a cap and counts the rest', () => {
+    const registry = new LoopRegistry(() => 1_000);
+    for (let i = 0; i < 205; i++) registry.noteProblem('poll', 'warn', `line ${i}`, {});
+
+    const batch = registry.pendingProblems();
+    expect(batch.problems).toHaveLength(200);
+    expect(batch.dropped).toBe(5);
+  });
+
+  it('acknowledges only the batch it was given, keeping lines logged meanwhile', () => {
+    const registry = new LoopRegistry(() => 1_000);
+    registry.noteProblem('poll', 'warn', 'first', {});
+    const batch = registry.pendingProblems();
+    registry.noteProblem('poll', 'error', 'second', {});
+
+    registry.ackProblems(batch);
+
+    expect(registry.pendingProblems().problems.map((p) => p.message)).toEqual(['second']);
+  });
+});
+
+describe('heartbeatOnce problems', () => {
+  const deps = (registry: LoopRegistry) => ({
+    sql: db.sql,
+    workerId: 'w-1',
+    role: 'worker' as const,
+    startedAt: new Date('2026-08-14T10:00:00Z'),
+    registry,
+  });
+
+  it('writes loop failures and moves buffered lines into worker_errors', async () => {
+    const registry = new LoopRegistry(() => 7_000);
+    await registry.wrap('evaluate', async () => {
+      registry.noteProblem('evaluate', 'warn', 'evaluation failed', {redditId: 't3_a', error: '401'});
+      return true;
+    })();
+
+    await heartbeatOnce(deps(registry));
+
+    const [row] = await db.sql<Array<{loop_failures: Record<string, {consecutiveFailures: number}>}>>`
+      SELECT loop_failures FROM workers WHERE worker_id = 'w-1'`;
+    expect(row!.loop_failures['evaluate']!.consecutiveFailures).toBe(1);
+    const errors = await db.sql<Array<{worker_id: string; scope: string; level: string; message: string; fields: unknown; at: Date}>>`
+      SELECT worker_id, scope, level, message, fields, at FROM worker_errors`;
+    expect(errors).toEqual([{
+      worker_id: 'w-1',
+      scope: 'evaluate',
+      level: 'warn',
+      message: 'evaluation failed',
+      fields: {redditId: 't3_a', error: '401'},
+      at: new Date(7_000),
+    }]);
+    expect(registry.pendingProblems().problems).toEqual([]);
+
+    await heartbeatOnce(deps(registry));
+    expect(await db.sql`SELECT 1 FROM worker_errors`).toHaveLength(1);
+  });
+
+  it('records dropped lines as one line saying how many', async () => {
+    const registry = new LoopRegistry(() => 7_000);
+    for (let i = 0; i < 203; i++) registry.noteProblem('heartbeat', 'error', 'heartbeat iteration failed', {});
+
+    await heartbeatOnce(deps(registry));
+
+    const [dropped] = await db.sql<Array<{fields: {count: number}}>>`
+      SELECT fields FROM worker_errors WHERE message LIKE 'problem lines dropped%'`;
+    expect(dropped!.fields.count).toBe(3);
+    expect(registry.pendingProblems()).toEqual({problems: [], dropped: 0});
+  });
+
+  it('keeps the buffer while the beat itself cannot be written', async () => {
+    const registry = new LoopRegistry(() => 7_000);
+    registry.noteProblem('poll', 'warn', 'reddit fetch failed', {});
+    await db.sql.unsafe(`ALTER TABLE workers ADD CONSTRAINT refuse CHECK (worker_id <> 'w-1') NOT VALID`);
+    try {
+      await expect(heartbeatOnce(deps(registry))).rejects.toThrow();
+    } finally {
+      await db.sql.unsafe('ALTER TABLE workers DROP CONSTRAINT refuse');
+    }
+
+    expect(registry.pendingProblems().problems.map((p) => p.message)).toEqual(['reddit fetch failed']);
+  });
+
+  it('still beats, and drops the batch, when only the lines are refused', async () => {
+    const registry = new LoopRegistry(() => 7_000);
+    registry.noteProblem('refused', 'warn', 'reddit fetch failed', {});
+    await db.sql.unsafe(`ALTER TABLE worker_errors ADD CONSTRAINT refuse CHECK (scope <> 'refused')`);
+    try {
+      await expect(heartbeatOnce(deps(registry))).rejects.toThrow();
+    } finally {
+      await db.sql.unsafe('ALTER TABLE worker_errors DROP CONSTRAINT refuse');
+    }
+
+    expect(await db.sql`SELECT 1 FROM workers WHERE worker_id = 'w-1'`).toHaveLength(1);
+    expect(registry.pendingProblems().problems).toEqual([]);
+  });
+
+  it('stores a line with a NUL in it', async () => {
+    const registry = new LoopRegistry(() => 7_000);
+    registry.noteProblem('poll', 'warn', 'bad\u0000byte', {error: 'x\u0000y'});
+
+    await heartbeatOnce(deps(registry));
+
+    const [row] = await db.sql<Array<{message: string; fields: {error: string}}>>`
+      SELECT message, fields FROM worker_errors`;
+    expect(row).toEqual({message: 'badbyte', fields: {error: 'xy'}});
+    expect(registry.failureSnapshot().poll.lastError).toBe('badbyte: xy');
   });
 });
