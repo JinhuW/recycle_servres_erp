@@ -2,12 +2,12 @@
 id: RS-362
 title: WeChat board: brand and generation columns, and a refine filter
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: JinhuW/featherduster
-pr:
+pr: 838
 version: 1.318.0
 related: []
 ---
