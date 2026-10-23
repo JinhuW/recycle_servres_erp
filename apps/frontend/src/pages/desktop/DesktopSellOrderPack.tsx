@@ -11,9 +11,7 @@ import {
 } from '../../lib/boxCheck';
 import { handleFetchError, showErrorDialog, showWarnToast } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
-import { labelJob, labelPrinter, PRINTER_DPI, toRaster, useLabelPrinter } from '../../lib/labelPrinter';
 import { sellOrderStatuses } from '../../lib/lookups';
-import { usePreference } from '../../lib/preferences';
 import { navigate, navigateBack } from '../../lib/route';
 import {
   allPacked, boxCounts, boxPurchasers, fitsAnySourcePo, flaggedLots, isPackable, nextOpenProduct, packBody, packFilter, packGroups, packProducts, packScan, packView, packWarehouseOf,
@@ -24,7 +22,7 @@ import type { Category } from '../../lib/types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useLineSaveQueue } from '../../lib/useLineSaveQueue';
 import { useScanFilterText } from '../../lib/useScanFilter';
-import { drawLabel, LABEL_SIZES, PackLabel, PackPrinterBar, type LabelText } from './PackLabel';
+import { PackPrinterBar, useLabelPrint, type LabelText } from './PackLabel';
 
 // Pack mode: a sell order as a packing checklist, laid out like the PO's
 // Review mode and built for an iPad on a cart. Products run in the order's own
@@ -119,13 +117,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const [shipping, setShipping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
-  const [labelAuto, setLabelAuto] = usePreference('pack.labelAuto', true);
-  const [labelSize, setLabelSize] = usePreference('pack.labelSize', '4x6');
-  const [labelLanguage, setLabelLanguage] = usePreference('pack.labelLanguage', 'auto');
-  const printer = useLabelPrinter();
-  // A label going through the print dialog. Each request mounts a fresh one,
-  // which prints once.
-  const [dialogLabel, setDialogLabel] = useState<{ n: number; text: LabelText } | null>(null);
+  const label = useLabelPrint(orderId => onToast?.(t('pkLabelPrinted', { id: orderId })));
   // The boxes this visit printed a label for by itself, by warehouse ('' for
   // the whole order): ticking one back and on again doesn't print another.
   const autoPrinted = useRef(new Set<string>());
@@ -390,39 +382,14 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     };
   };
 
-  // To the Bluetooth printer while one is on, else through the print dialog.
-  const printLabel = async (text: LabelText = labelTextOf(products, checks)) => {
-    if (printer.state === 'printing' || printer.state === 'connecting') return;
-    if (printer.state !== 'on') {
-      setDialogLabel(d => ({ n: (d?.n ?? 0) + 1, text }));
-      return;
-    }
-    const lang = labelLanguage === 'auto' ? printer.language : labelLanguage;
-    try {
-      // A label sent to a printer out of paper or open is lost.
-      const paper = await labelPrinter.check(lang);
-      if (paper === 'paper' || paper === 'open' || paper === 'fault') {
-        showWarnToast(t('pkLabelNotReady', { state: t('pkPrinterPaper_' + paper) }));
-        return;
-      }
-      const [w, h] = LABEL_SIZES[labelSize];
-      const canvas = await drawLabel(text, w, h, PRINTER_DPI);
-      const dots = toRaster(canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height));
-      await labelPrinter.print(labelJob(lang, dots, w, h));
-      onToast?.(t('pkLabelPrinted', { id }));
-    } catch (e) {
-      showWarnToast(t('pkLabelPrintFailed', { msg: e instanceof Error ? e.message : String(e) }));
-    }
-  };
-
   // The tick that packs the last product of the box prints its label: the
   // picked warehouse's box, or the whole order's. Only a tick made here does,
   // so another iPad finishing the order prints nothing on this one.
   const labelOnFinish = (box: readonly Product[], after: ReadonlyMap<string, LineCheck>) => {
-    if (!labelAuto || autoPrinted.current.has(picked)) return;
+    if (!label.auto || autoPrinted.current.has(picked)) return;
     if (allPacked(products, checks) || !allPacked(box, after)) return;
     autoPrinted.current.add(picked);
-    void printLabel(labelTextOf(box, after));
+    void label.print(labelTextOf(box, after));
   };
 
   const pack = (l: Line) => {
@@ -943,18 +910,14 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
         <div className="pk-head-side">
           {order && (
             <PackPrinterBar
-              printer={printer}
-              auto={labelAuto}
-              size={labelSize}
-              language={labelLanguage}
+              printer={label.printer}
+              settings={label.settings}
+              autoTitle={t('pkLabelAuto')}
+              autoHint={t('pkLabelAutoHint')}
               summary={labelSummary}
               canPrint={loadState === 'ok' && box.products > 0}
-              onAuto={setLabelAuto}
-              onSize={setLabelSize}
-              onLanguage={setLabelLanguage}
-              onPrint={() => void printLabel()}
-              onPrintDialog={() => setDialogLabel(d => ({ n: (d?.n ?? 0) + 1, text: labelTextOf(products, checks) }))}
-              onConnectError={e => showWarnToast(t(e instanceof Error && e.message === 'no-port' ? 'pkPrinterNoPort' : 'pkPrinterConnectFailed'))}
+              onPrint={() => void label.print(labelTextOf(products, checks))}
+              onPrintDialog={() => void label.viaDialog(labelTextOf(products, checks))}
             />
           )}
           <div className="bc-keys pk-keys" aria-hidden="true">
@@ -1210,7 +1173,12 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
                     </button>
                   )}
                   {boxDone && box.products > 0 && (
-                    <button type="button" className="btn" disabled={loadState !== 'ok' || printer.state === 'printing'} onClick={() => void printLabel()}>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={loadState !== 'ok' || label.printer.state === 'printing'}
+                      onClick={() => void label.print(labelTextOf(products, checks))}
+                    >
                       <Icon name="printer" size={15} /> {t('pkLabelPrint')}
                     </button>
                   )}
@@ -1251,9 +1219,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
         />
       )}
       {zoom && <ImageLightbox url={zoom} onClose={() => setZoom(null)} />}
-      {dialogLabel && (
-        <PackLabel key={dialogLabel.n} text={dialogLabel.text} size={labelSize} onDone={() => setDialogLabel(null)} />
-      )}
+      {label.element}
     </div>
   );
 }

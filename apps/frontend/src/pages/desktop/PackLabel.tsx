@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from '../../components/Icon';
+import { showWarnToast } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
-import { labelPrinter, type PrinterLanguage, type PrinterStatus } from '../../lib/labelPrinter';
-import type { PrefMap } from '../../lib/preferences';
+import {
+  labelJob, labelPrinter, PRINTER_DPI, toRaster, useLabelPrinter, type PrinterLanguage, type PrinterStatus,
+} from '../../lib/labelPrinter';
+import { usePreference, type PrefMap } from '../../lib/preferences';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 
-// Pack mode's box label: the order, what is in the box and who bought it. It
-// is drawn once, as a picture. The Bluetooth printer gets that picture in
-// dots, and the print dialog, the fallback, prints it as an image, so the two
-// can't drift apart.
+// The box label Pack mode prints for a sell order and Review mode for a PO:
+// the order, what is in the box and who bought it. It is drawn once, as a
+// picture. The Bluetooth printer gets that picture in dots, and the print
+// dialog, the fallback, prints it as an image, so the two can't drift apart.
 
 export type LabelSize = PrefMap['pack.labelSize'];
 export type LabelLanguage = PrefMap['pack.labelLanguage'];
@@ -217,6 +220,51 @@ export function PackLabel({ text, size, onDone }: { text: LabelText; size: Label
   );
 }
 
+// A page's label printing: the printer, the saved settings, and a print that
+// goes over Bluetooth while a printer is on, else through the dialog. The page
+// renders `element`, which is the dialog's label while one prints.
+export function useLabelPrint(onPrinted: (orderId: string) => void) {
+  const { t } = useT();
+  const [auto, setAuto] = usePreference('pack.labelAuto', true);
+  const [size, setSize] = usePreference('pack.labelSize', '4x6');
+  const [language, setLanguage] = usePreference('pack.labelLanguage', 'auto');
+  const printer = useLabelPrinter();
+  // Each request mounts a fresh label, which prints once.
+  const [dialog, setDialog] = useState<{ n: number; text: LabelText; done: () => void } | null>(null);
+
+  // Settles once the dialog closes.
+  const viaDialog = (text: LabelText) =>
+    new Promise<void>(done => setDialog(d => ({ n: (d?.n ?? 0) + 1, text, done })));
+
+  // Settles once the label is out, or refused.
+  const print = async (text: LabelText): Promise<void> => {
+    if (printer.state === 'printing' || printer.state === 'connecting') return;
+    if (printer.state !== 'on') return viaDialog(text);
+    const lang = language === 'auto' ? printer.language : language;
+    try {
+      // A label sent to a printer out of paper or open is lost.
+      const paper = await labelPrinter.check(lang);
+      if (paper === 'paper' || paper === 'open' || paper === 'fault') {
+        showWarnToast(t('pkLabelNotReady', { state: t('pkPrinterPaper_' + paper) }));
+        return;
+      }
+      const [w, h] = LABEL_SIZES[size];
+      const canvas = await drawLabel(text, w, h, PRINTER_DPI);
+      const dots = toRaster(canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height));
+      await labelPrinter.print(labelJob(lang, dots, w, h));
+      onPrinted(text.orderId);
+    } catch (e) {
+      showWarnToast(t('pkLabelPrintFailed', { msg: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+
+  const element = dialog && (
+    <PackLabel key={dialog.n} text={dialog.text} size={size} onDone={() => { dialog.done(); setDialog(null); }} />
+  );
+  const settings: Settings = { auto, size, language, onAuto: setAuto, onSize: setSize, onLanguage: setLanguage };
+  return { printer, auto, print, viaDialog, element, settings };
+}
+
 type Settings = {
   auto: boolean;
   size: LabelSize;
@@ -226,14 +274,17 @@ type Settings = {
   onLanguage: (l: LabelLanguage) => void;
 };
 
-type BarProps = Settings & {
+type BarProps = {
   printer: PrinterStatus;
+  settings: Settings;
+  // When the page prints by itself: finishing the box, or the review.
+  autoTitle: string;
+  autoHint: string;
   // What the label would say now, for the Print button's title.
   summary: string;
   canPrint: boolean;
   onPrint: () => void;
   onPrintDialog: () => void;
-  onConnectError: (e: unknown) => void;
 };
 
 const LANGUAGES: readonly LabelLanguage[] = ['auto', 'tspl', 'zpl', 'escpos'];
@@ -241,7 +292,7 @@ const LANGUAGE_NAME: Record<PrinterLanguage, string> = { tspl: 'TSPL', zpl: 'ZPL
 
 // The page head's printer: whether it is on and how it is (paper, cover),
 // Connect while it isn't, Print label, and the label's settings.
-export function PackPrinterBar({ printer, summary, canPrint, onPrint, onPrintDialog, onConnectError, ...settings }: BarProps) {
+export function PackPrinterBar({ printer, settings, autoTitle, autoHint, summary, canPrint, onPrint, onPrintDialog }: BarProps) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -284,7 +335,10 @@ export function PackPrinterBar({ printer, summary, canPrint, onPrint, onPrintDia
           type="button"
           className="btn pk-printer-btn"
           disabled={printer.state === 'connecting'}
-          onClick={() => { labelPrinter.connect().catch(onConnectError); }}
+          onClick={() => {
+            labelPrinter.connect().catch(e =>
+              showWarnToast(t(e instanceof Error && e.message === 'no-port' ? 'pkPrinterNoPort' : 'pkPrinterConnectFailed')));
+          }}
         >
           <Icon name="zap" size={15} /> {t('pkPrinterConnect')}
         </button>
@@ -314,6 +368,8 @@ export function PackPrinterBar({ printer, summary, canPrint, onPrint, onPrintDia
         {open && (
           <PrinterPop
             {...settings}
+            autoTitle={autoTitle}
+            autoHint={autoHint}
             detected={printer.state === 'unsupported' ? null : printer.language}
             canPrint={canPrint}
             close={() => { setOpen(false); trigger.current?.focus(); }}
@@ -327,7 +383,9 @@ export function PackPrinterBar({ printer, summary, canPrint, onPrint, onPrintDia
 }
 
 // Its own component so its Escape sits above the page's, which leaves Pack mode.
-function PrinterPop({ auto, size, language, onAuto, onSize, onLanguage, detected, canPrint, close, onPrintDialog, onDisconnect }: Settings & {
+function PrinterPop({ auto, size, language, onAuto, onSize, onLanguage, autoTitle, autoHint, detected, canPrint, close, onPrintDialog, onDisconnect }: Settings & {
+  autoTitle: string;
+  autoHint: string;
   // The language the printer's service implies; null without Bluetooth.
   detected: PrinterLanguage | null;
   canPrint: boolean;
@@ -342,8 +400,8 @@ function PrinterPop({ auto, size, language, onAuto, onSize, onLanguage, detected
       <label className="so-download-row pk-label-auto">
         <input type="checkbox" checked={auto} onChange={e => onAuto(e.target.checked)} />
         <span>
-          <span className="so-download-label">{t('pkLabelAuto')}</span>
-          <span className="so-download-hint">{t('pkLabelAutoHint')}</span>
+          <span className="so-download-label">{autoTitle}</span>
+          <span className="so-download-hint">{autoHint}</span>
         </span>
       </label>
       <div className="so-download-warehouse">

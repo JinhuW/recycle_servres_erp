@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.327.0] - 2026-10-23
+
+Approving a PO's review now prints the box's label too (RS-378). RS-371 had
+read "once i finish the review" as Pack mode. Asked, the requester wanted
+both. **Approve for payment** in Review mode prints the same label Pack mode
+does, for the PO. It carries the PO number and warehouse, the PO's
+purchaser, the date, and the products and units counted. A line counted 0
+is left out. It prints before the page leaves for the PO page: over
+Bluetooth when the label printer is on, else through the print dialog.
+*Print when approved* in the label settings turns it off.
+
+Review mode's page head now has Pack mode's printer bar: status, Connect,
+Print label and the settings. Both pages print through one shared hook,
+with one connection and one set of settings, so a label can't come out
+differently from either page.
 ## [1.326.0] - 2026-10-23
 
 Opening a line on Monitors ▸ WeChat now shows a readable price history
