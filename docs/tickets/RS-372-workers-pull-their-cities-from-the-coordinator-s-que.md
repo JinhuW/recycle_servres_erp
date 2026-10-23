@@ -75,7 +75,7 @@ live worker which is not enrolled still holds stays with that worker.
 - [x] `rsc queue status | enroll | unenroll | set` manage the queue.
 - [x] The console pushes the roster every 10 minutes, at startup and after
       *Edit cities*.
-- [ ] homelab-1, nyc-1, phl-1 and va-2 are enrolled and recreated on the new
+- [x] homelab-1, nyc-1, phl-1 and va-2 are enrolled and recreated on the new
       image. The other 36 workers are untouched.
 - [x] Ships as `facebook-tracker` 0.13.14.
 
@@ -105,3 +105,23 @@ live worker which is not enrolled still holds stays with that worker.
   - **No repeats.** No city was handed out twice, and no held city went out.
   - **Edges.** Outside the window a worker got nothing, and a worker that
     isn't enrolled got its own list.
+- **Deployed 2026-10-23, in two steps.**
+  - **19:39 UTC.** `scripts/deploy.sh` ran with all 40 workers held, and the
+    coordinator and console came up on 0.13.14. The console's startup push
+    still met the old coordinator, which answered 404, so the roster was
+    pushed by hand at 19:40. The 10-minute loop kept it current after that.
+  - **Before the pilots moved.** A read-only dry run of `next_city` in the
+    container showed `nothing_due` for all four pilots and both items:
+    today's 13:00 sweep is seeded from `search_cities`. For tomorrow at 13:05
+    it gave homelab-1 Fort Myers, its most overdue home city.
+  - **19:41.** `rsc queue enroll homelab-1 nyc-1 phl-1 va-2`.
+  - **19:42.** `RS_DEPLOY_HOLD="<the other 36>" scripts/deploy.sh --redeploy`
+    recreated only `rs-monitor`, `-nyc`, `-phl` and `-va2`.
+  - **After the restart.** Each pilot's startup sweep logged "Nothing more for
+    server_ram after 0 cities" (and the same for enterprise_ssd), so there
+    was no off-schedule sweep. All four heartbeat HEALTHY on
+    `0.13.14 (93e2566)`. The other 36 are still on 0.13.12, up 2 days.
+- **Next.** The 2026-10-24 13:00 UTC sweep is the pilot day. Read it with
+  `docker exec rs-coordinator rsc queue status` and
+  `python -m rs_console.queue_shadow --days 1`. Then `rsc queue enroll --all`
+  and a deploy that recreates the rest.
