@@ -17,6 +17,31 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.324.0] - 2026-10-23
+
+Pack mode now connects to the Bluetooth label printer and shows its status
+(RS-374). The page head reads *Label printer off* with **Connect**. Once
+connected it reads *Label printer on*, with the printer's name and how it
+is: *Ready*, or *Out of paper*, *Cover open*, *Busy*, *Needs attention*.
+Connect is Chrome's Web Bluetooth chooser on the Mac. **Print label** sits
+beside it. With a printer on, it and v1.323.0's automatic print on finishing
+a box send the label straight to the printer, with no dialog. A printer out
+of paper or open gets no label, and the page says why. Without a printer, or
+in a browser with no Web Bluetooth, the print dialog still prints it.
+
+No printer model is on record, so the page speaks the three languages
+Bluetooth label printers use. It reads Zebra's service as ZPL, the FF00 port
+as ESC/POS raster, and the rest as TSPL. The label settings can set the
+language by hand. The status comes from TSPL's status query or the ESC/POS
+paper sensor, asked on connect, every 15 seconds, and before each print. The
+printer stays connected across orders in the tab.
+
+The label now names our purchasers in place of the customer. Those are
+whoever bought the lots in the box, from each lot's PO: two names, then
+*+n*. The sell order read carries each line's `sourcePurchaser` for it. The
+label is now one drawn picture. The printer gets it in 203 dpi dots and the
+dialog prints it as an image, so the two can't differ.
+
 ## [1.323.0] - 2026-10-23
 
 Pack mode prints a box label when the box is finished (RS-371). The tick

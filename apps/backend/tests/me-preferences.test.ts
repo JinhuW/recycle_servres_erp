@@ -32,6 +32,7 @@ describe('PATCH /api/me/preferences allowlist', () => {
         'sellOrders.lineGroup': 'po',
         'pack.labelAuto': false,
         'pack.labelSize': '2.25x1.25',
+        'pack.labelLanguage': 'zpl',
         'sidebar.folded': true,
         'onboarding.done': true,
       },

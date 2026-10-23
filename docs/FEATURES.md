@@ -1828,24 +1828,48 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     blocks, and the Finish card offers Edit order to match the order to the
     box first. A refused move (a lot taken meanwhile) says
     why and stays on the page.
-  - **A finished box prints its label** (v1.323.0, RS-371). The tick that
-    packs the last product left prints it, through the browser's print
-    dialog. That covers a row, a whole product, a scan or Apply. The box is
-    the *Packing from* warehouse's lots, or the whole order.
-    - The label carries the SO number, the customer, and the counts: the
+  - **A finished box prints its label** (v1.323.0, RS-371; Bluetooth since
+    v1.324.0, RS-374). The tick that packs the last product left prints it.
+    That covers a row, a whole product, a scan or Apply. The box is the
+    *Packing from* warehouse's lots, or the whole order.
+    - The label carries the SO number, the purchasers, and the counts: the
       products with a unit in the box, and those units. It also carries the
-      date, and the warehouse when only one is packed.
+      date, and the warehouse when only one is packed. The purchasers are
+      whoever owns the POs the box's counted lots came from, once each in #
+      order: two, then *+n* (v1.324.0). Until then it named the customer.
+      The sell order read carries each line's `sourcePurchaser` for it.
     - It prints once per box per visit. Ticking the last product back and on
       again doesn't print another. Opening an order already packed, or a
-      second iPad finishing it, prints nothing.
-    - The **Label** control in the page head prints it on demand. It also
-      holds *Print when packed* (on by default) and the stock: 4 × 6,
-      4 × 3 or 2.25 × 1.25 in. Both are saved preferences (`pack.labelAuto`,
-      `pack.labelSize`). A packed box also gets **Print label** in the Finish
-      card.
-    - The print is that one label, at the stock's size, so a label printer
-      feeds no blank label after it. It is black on white for thermal stock.
-      The smallest stock keeps only the number, the customer and the counts.
+      second device finishing it, prints nothing.
+    - **The page head shows the label printer** (v1.324.0). It reads *Label
+      printer off* with **Connect**, *Connecting…*, or *Label printer on ·
+      <name> · Ready*. Where the printer reports a problem, the chip says
+      *Out of paper*, *Cover open*, *Busy* or *Needs attention*. In a browser
+      without Web Bluetooth it reads *No Bluetooth in this browser*.
+    - Connect is Chrome's Web Bluetooth chooser. It works on the Mac, not in
+      iPad Safari. The page asks for the five services label printers put
+      their serial port on. It speaks the language the service implies:
+      Zebra's is ZPL, FF00 is ESC/POS raster, the rest TSPL. The label
+      settings can set the language by hand (`pack.labelLanguage`).
+    - The status is asked on connect, every 15 s, and before each print, by
+      TSPL's `ESC ! ?` or ESC/POS's paper sensor. A Zebra shows only
+      connected. A printer out of paper, open or faulted gets no label, and
+      a toast says why.
+    - The printer stays connected across Pack mode visits in the tab. Where
+      Chrome offers `getDevices`, a printer allowed before reconnects on load.
+    - **Print label** sits beside the chip, and a packed box also gets one
+      in the Finish card. With a printer on, it and the automatic print send
+      the label over Bluetooth, with no dialog, and a toast confirms it.
+      Without one, they open the print dialog. The settings menu holds *Print
+      when packed* (on by default), the stock (4 × 6, 4 × 3 or
+      2.25 × 1.25 in), the language, *Print with the dialog* and *Disconnect*.
+      Its choices are saved preferences (`pack.labelAuto`, `pack.labelSize`,
+      `pack.labelLanguage`).
+    - The label is one drawn picture (v1.324.0). The printer gets it as 1-bit
+      dots at 203 dpi, and the dialog prints it as an image at 300 dpi, at
+      the stock's size and on one page. It is black on white for thermal
+      stock. The smallest stock keeps only the number, the purchasers and
+      the counts.
   - The endpoints (`GET /api/sell-orders/:id/pack`,
     `PUT /api/sell-orders/:id/pack/:lineId`, and
     `POST /api/sell-orders/:id/pack/apply` on a Draft or Packing order only) 403 anyone whose

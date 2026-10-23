@@ -18,6 +18,9 @@ export type PackLine = CheckableLine & {
   packWarehouse?: string | null;
   sourceOrderId?: string | null;
   sourceLineNo?: number | null;
+  // Who bought the lot, by its PO. Absent from a backend older than this
+  // bundle.
+  sourcePurchaser?: string | null;
   // The product's # on the order, which the packer labels the items with.
   no: number;
 };
@@ -258,6 +261,20 @@ export function boxCounts<L extends CheckableLine>(
     out.units += counted;
   }
   return out;
+}
+
+// Who bought what is in the box, in # order: the purchasers of the POs its
+// counted lots came from, each once.
+export function boxPurchasers<L extends CheckableLine & Pick<PackLine, 'sourcePurchaser'>>(
+  products: readonly PackProduct<L>[], checks: ReadonlyMap<string, LineCheck>,
+): string[] {
+  const out = new Set<string>();
+  for (const p of products) {
+    for (const l of p.lots) {
+      if (l.sourcePurchaser && countOf(l, checks.get(l.id)) > 0) out.add(l.sourcePurchaser);
+    }
+  }
+  return [...out];
 }
 
 export type ShipBlockers = { open: number; short: number; zero: number };
