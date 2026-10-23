@@ -30,6 +30,8 @@ describe('PATCH /api/me/preferences allowlist', () => {
         'scan.deskCamera': true,
         'scan.cameraLabel': "Jinhu's iPhone Camera",
         'sellOrders.lineGroup': 'po',
+        'pack.labelAuto': false,
+        'pack.labelSize': '2.25x1.25',
         'sidebar.folded': true,
         'onboarding.done': true,
       },
@@ -54,6 +56,11 @@ describe('PATCH /api/me/preferences allowlist', () => {
       token, body: { 'sellOrders.lineGroup': 'customer' },
     });
     expect(badGroup.status).toBe(400);
+
+    const badStock = await api('PATCH', '/api/me/preferences', {
+      token, body: { 'pack.labelSize': '6x4' },
+    });
+    expect(badStock.status).toBe(400);
   });
 
   // `SCHEMA[key]` on a plain object found Object.prototype members: `toString`

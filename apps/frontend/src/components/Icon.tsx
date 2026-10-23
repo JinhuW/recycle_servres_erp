@@ -15,7 +15,7 @@ export type IconName =
   | 'clock' | 'info' | 'alert' | 'flash' | 'hash' | 'scan'
   | 'settings' | 'bell' | 'tag' | 'trendDown' | 'minus'
   | 'book' | 'star' | 'zap' | 'globe' | 'mail' | 'grip'
-  | 'truck' | 'cash' | 'refresh' | 'label' | 'package'
+  | 'truck' | 'cash' | 'refresh' | 'label' | 'package' | 'printer'
   | 'paperclip' | 'file' | 'image' | 'invoice' | 'analytics' | 'calendar'
   | 'note' | 'copy' | 'key' | 'eyeOff' | 'users' | 'keyboard' | 'panelRight'
   | 'maximize' | 'minimize' | 'chats';
@@ -97,6 +97,7 @@ const PATHS: Record<IconName, JSX.Element> = {
   truck: <><path d="M2 17V6h11v11"/><path d="M13 9h5l3 4v4h-8"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></>,
   // Shipping label with a barcode — distinct from `truck`, which Transfers owns.
   label: <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9v6"/><path d="M10.5 9v6"/><path d="M14 9v3"/><path d="M17 9v6"/></>,
+  printer: <><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/></>,
   // Taped parcel — the backend's shipment/package notifications name this icon
   // (stored per row, so the name must stay renderable forever).
   package: <><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v9"/><path d="M7.5 5.5l9 5"/></>,

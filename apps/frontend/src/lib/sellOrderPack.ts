@@ -236,6 +236,30 @@ export function productTally<L extends CheckableLine>(
   return out;
 }
 
+// Every product with lots is packed: the box is finished, and its label prints.
+export function allPacked<L extends CheckableLine>(
+  products: readonly PackProduct<L>[], checks: ReadonlyMap<string, LineCheck>,
+): boolean {
+  const t = productTally(products, checks);
+  return t.products > 0 && t.done === t.products;
+}
+
+export type BoxCounts = { products: number; units: number };
+
+// What the box label counts. A product counted 0 went in empty, so it is not
+// one of the box's products.
+export function boxCounts<L extends CheckableLine>(
+  products: readonly PackProduct<L>[], checks: ReadonlyMap<string, LineCheck>,
+): BoxCounts {
+  const out: BoxCounts = { products: 0, units: 0 };
+  for (const p of products) {
+    const { counted } = productSummary(p.lots, checks);
+    if (counted > 0) out.products += 1;
+    out.units += counted;
+  }
+  return out;
+}
+
 export type ShipBlockers = { open: number; short: number; zero: number };
 
 // What stands between the box and Mark shipped: lines nobody ticked, and

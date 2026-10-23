@@ -17,6 +17,28 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.323.0] - 2026-10-23
+
+Pack mode prints a box label when the box is finished (RS-371). The tick
+that packs the last product left opens the print dialog with a label for the
+box. The label carries the SO number, the customer, the products and units in
+the box, and the date. When one *Packing from* warehouse is picked, the label
+is for that warehouse's box, with its name and its counts. The receiver can
+check the box against it, and nobody has to write it by hand.
+
+It prints once per box per visit. Ticking the last product back and on again
+doesn't print a second label, and neither does opening an order that is
+already packed or another iPad finishing it. A **Label** control in the page
+head prints on demand, turns the automatic print off, and picks the stock:
+4 × 6, 4 × 3 or 2.25 × 1.25 in. Both choices are saved preferences. A packed
+box also gets **Print label** in the Finish card.
+
+The ERP had no label printing before this. The label goes through the
+browser's print dialog because no printer model is on record, and every
+label printer with a driver or AirPrint takes a print job, the iPad's
+included. The print is that one label, at the stock's size, black on white,
+so a thermal printer feeds no blank label after it. The transfer manifest
+prints as it did.
 ## [1.322.0] - 2026-10-23
 
 Railway alerts now reach Telegram (RS-368). The uptime cron probes only the
