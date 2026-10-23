@@ -98,6 +98,36 @@ def test_a_counted_search_stamps_its_city(client):
     assert days == [row(today(), searches=3, cards=4, reviewed=1)]
 
 
+def test_a_counted_search_is_logged_with_what_it_found(client):
+    found = {"searches": 1, "cards": 120, "opened": 9, "reviewed": 3, "alerted": 1}
+    for body in (
+        {"worker_id": "mw-1", **found, "search_city": "chicago"},
+        {"worker_id": "nj-2b", "searches": 1, "search_city": "nyc"},
+        {"worker_id": "mw-1", "reviewed": 1, "search_city": "detroit"},
+        {"worker_id": "mw-1", "searches": 1, "cards": 7},
+    ):
+        assert client.post("/v1/stats/reviews", json=body, headers=WORKER_AUTH).status_code == 200
+
+    rows = client.db.city_searches_since("0")
+    counts = ("cards", "opened", "reviewed", "alerted")
+    assert [(r["worker_id"], r["city"], *(r[c] for c in counts)) for r in rows] == [
+        ("mw-1", "chicago", 120, 9, 3, 1),
+        ("nj-2b", "nyc", 0, 0, 0, 0),
+    ]
+    assert all(r["at"].endswith("+00:00") for r in rows)
+
+
+def test_the_city_search_log_is_pruned(client):
+    old = (datetime.now(timezone.utc) - timedelta(days=20)).isoformat(timespec="seconds")
+    with client.db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO city_searches (worker_id, city, at) VALUES (?, ?, ?)",
+            ("mw-1", "peoria", old),
+        )
+    client.db.log_city_search("mw-1", "chicago", cards=5)
+    assert [r["city"] for r in client.db.city_searches_since("0")] == ["chicago"]
+
+
 def test_search_cities_are_admin_only(client):
     assert client.get("/v1/stats/search-cities", headers=WORKER_AUTH).status_code in (401, 403)
 

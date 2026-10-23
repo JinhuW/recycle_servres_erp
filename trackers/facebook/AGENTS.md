@@ -60,6 +60,10 @@ Forwarded today:
   `POST /v1/workers/{id}/search-plan`)
 - the VNC websocket
 
+`POST /v1/queue/shadow` (the city queue's replay, README → *Shadow city
+queue*) is a console route the ERP does **not** forward. Read it on the VM
+with `python -m rs_console.queue_shadow` until the queue drives workers.
+
 Renaming or reshaping any of these is a change to both sides (root AGENTS.md →
 *Contracts*). Ship the console first and keep it backward-compatible until the
 ERP release lands. `rs_console/rs_console/static/fleet.css` mirrors the ERP's

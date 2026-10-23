@@ -818,6 +818,36 @@ class PostgresDatabase:
             )
             return _rows(cur.fetchall())
 
+    def log_city_search(
+        self: "PostgresDatabase",
+        worker_id: str,
+        city: str,
+        cards: int = 0,
+        opened: int = 0,
+        reviewed: int = 0,
+        alerted: int = 0,
+    ) -> None:
+        """See `Database.log_city_search`."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=SEARCH_CYCLE_DAYS)).isoformat(
+            timespec="seconds"
+        )
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO city_searches (worker_id, city, at, cards, opened, reviewed, alerted) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (worker_id, city, utcnow(), cards, opened, reviewed, alerted),
+            )
+            cur.execute("DELETE FROM city_searches WHERE at < %s", (cutoff,))
+
+    def city_searches_since(self: "PostgresDatabase", since: str) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, city, at, cards, opened, reviewed, alerted "
+                "FROM city_searches WHERE at >= %s ORDER BY at, id",
+                (since,),
+            )
+            return _rows(cur.fetchall())
+
     def city_tier_config(self: "PostgresDatabase") -> Dict[str, Any]:
         with self.cursor() as cur:
             cur.execute("SELECT body, updated_at, updated_by FROM city_tier_settings WHERE id = 1")

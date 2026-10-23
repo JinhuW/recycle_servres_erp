@@ -126,6 +126,22 @@ CREATE TABLE IF NOT EXISTS search_cities (
     PRIMARY KEY (worker_id, city)
 );
 
+-- Every search that named its city, with what it found. search_cities keeps
+-- only the last one; the city queue (city_queue.py) needs the history: when a
+-- city was last seen by anyone, and which accounts get 0 cards where others
+-- get some. Pruned to SEARCH_CYCLE_DAYS; nothing in the alert path reads it.
+CREATE TABLE IF NOT EXISTS city_searches (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    worker_id  TEXT NOT NULL,
+    city       TEXT NOT NULL,
+    at         TEXT NOT NULL,
+    cards      INTEGER NOT NULL DEFAULT 0,
+    opened     INTEGER NOT NULL DEFAULT 0,
+    reviewed   INTEGER NOT NULL DEFAULT 0,
+    alerted    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_city_searches_at ON city_searches(at);
+
 -- How often each city is searched (city_tiers.py): the tier settings as one
 -- JSON row, and the cities a manager pinned to a searches-a-day count. The
 -- rank itself is computed on read from alert_messages, never stored.
@@ -1485,6 +1501,35 @@ class Database:
         with self.cursor() as cur:
             cur.execute(
                 "SELECT worker_id, city, last_at FROM search_cities ORDER BY worker_id, city"
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    def log_city_search(
+        self: "Database",
+        worker_id: str,
+        city: str,
+        cards: int = 0,
+        opened: int = 0,
+        reviewed: int = 0,
+        alerted: int = 0,
+    ) -> None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=SEARCH_CYCLE_DAYS)).isoformat(
+            timespec="seconds"
+        )
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO city_searches (worker_id, city, at, cards, opened, reviewed, alerted) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (worker_id, city, utcnow(), cards, opened, reviewed, alerted),
+            )
+            cur.execute("DELETE FROM city_searches WHERE at < ?", (cutoff,))
+
+    def city_searches_since(self: "Database", since: str) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, city, at, cards, opened, reviewed, alerted "
+                "FROM city_searches WHERE at >= ? ORDER BY at, id",
+                (since,),
             )
             return [dict(row) for row in cur.fetchall()]
 

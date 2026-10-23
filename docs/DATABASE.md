@@ -9,7 +9,7 @@ on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
 **As of 2026-10-23:** ERP migration `0204`, Reddit tracker migration `0004`,
-Facebook tracker `0.13.12`. *Keeping this file current* at the end says how to
+Facebook tracker `0.13.13`. *Keeping this file current* at the end says how to
 refresh a section.
 
 - [Overview](#overview)
@@ -38,7 +38,7 @@ refresh a section.
 | --- | --- | --- | --- | --- | --- | --- |
 | **ERP** | `apps/backend` | Postgres 18 | Railway project `recycle-erp-experiment`, with one Postgres per environment (production, dev) | `DATABASE_URL` | `apps/backend/migrations/*.sql`, applied by `scripts/migrate.mjs` | 69 |
 | **Reddit tracker** | `trackers/reddit` (`api`, `worker` and the OCI worker VMs) | Postgres | Railway project `reddits-tracker`, with public networking on so the OCI VMs can reach it | `DATABASE_URL` | `trackers/reddit/migrations/*.sql`, applied by `scripts/migrate.ts` | 13 + 1 view |
-| **Facebook coordinator** | `trackers/facebook/rs_coordinator` | Postgres 16 in prod; SQLite locally and in tests | Railway project `facebook-tracker` (Terraform in `trackers/facebook/infra/`), reached by the coordinator on the homelab VM through Railway's TCP proxy | `RS_DATABASE_URL`, else `DATABASE_URL`; with neither set, SQLite at `RS_COORDINATOR_DB` | `SCHEMA` plus the `*_EXTRA_COLUMNS` lists in `rs_coordinator/db.py`, applied at boot | 29 |
+| **Facebook coordinator** | `trackers/facebook/rs_coordinator` | Postgres 16 in prod; SQLite locally and in tests | Railway project `facebook-tracker` (Terraform in `trackers/facebook/infra/`), reached by the coordinator on the homelab VM through Railway's TCP proxy | `RS_DATABASE_URL`, else `DATABASE_URL`; with neither set, SQLite at `RS_COORDINATOR_DB` | `SCHEMA` plus the `*_EXTRA_COLUMNS` lists in `rs_coordinator/db.py`, applied at boot | 30 |
 
 **The three share no database and no rows.** The ERP reaches each tracker only
 over HTTP:
@@ -2908,9 +2908,9 @@ A login obstacle a worker could not clear by itself (CAPTCHA, checkpoint, lock p
 
 ### Search activity
 
-What workers did between a search and an alert, for the ERP's funnel card and fleet table. Nothing in the alert path reads these.
+What workers did between a search and an alert, for the ERP's funnel card and fleet table and the city queue's shadow report. Nothing in the alert path reads these.
 
-Tables: [`review_stats`](#facebook-review-stats), [`search_cycles`](#facebook-search-cycles), [`search_cities`](#facebook-search-cities)
+Tables: [`review_stats`](#facebook-review-stats), [`search_cycles`](#facebook-search-cycles), [`search_cities`](#facebook-search-cities), [`city_searches`](#facebook-city-searches)
 
 <a id="facebook-review-stats"></a>
 
@@ -2969,6 +2969,28 @@ When each worker last searched each city, from funnel reports that count a searc
 | `last_at` | `text` | ✓ |  | Coordinator time of the latest search of that city. |
 
 - **Primary key:** `worker_id, city`
+
+<a id="facebook-city-searches"></a>
+
+#### `city_searches`
+
+Every funnel report that counts a search and names its city, one row per search page, with what that page found. `search_cities` keeps only the latest per worker and city. The city queue (`rs_coordinator/city_queue.py`) needs the history: when each city was last searched by anyone, and which accounts get 0 cards where others get some.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `integer` | ✓ | identity |  |
+| `worker_id` | `text` | ✓ |  |  |
+| `city` | `text` | ✓ |  | Facebook city slug. |
+| `at` | `text` | ✓ |  | Coordinator time the report arrived, in utcnow()'s form. |
+| `cards` | `integer` | ✓ | `0` | Result cards the search returned. 0 where other accounts get cards is how a blind account shows. |
+| `opened` | `integer` | ✓ | `0` | Listing pages visited from that search. |
+| `reviewed` | `integer` | ✓ | `0` | Fresh AI verdicts from that search. |
+| `alerted` | `integer` | ✓ | `0` | Alerts the worker delivered from that search. |
+
+- **Primary key:** `id`
+- **Indexes:** `idx_city_searches_at` (at)
+
+Pruned to 14 days on each insert. Read only by `POST /v1/queue/shadow`.
 
 ### Listings and dedupe
 

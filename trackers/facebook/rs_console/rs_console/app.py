@@ -95,6 +95,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from . import fleet as fleet_view
 from . import proxy_exit, settings, vnc
+from . import queue_shadow as queue_shadow_view
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -122,6 +123,8 @@ TIMEOUT_S = 10.0
 # A checkpoint screenshot is a full browser-window PNG the coordinator may be
 # capturing on demand; give it a longer budget than the JSON calls.
 SCREENSHOT_TIMEOUT_S = 20.0
+# The queue's shadow report replays up to two weeks of the whole fleet.
+SHADOW_TIMEOUT_S = 120.0
 
 app = FastAPI(title="rs-console", docs_url=None, redoc_url=None)
 
@@ -771,6 +774,25 @@ async def put_city_tiers(body: Any = Body(default=None)) -> Response:
     if isinstance(by, str) and by.strip():
         upstream_body["updated_by"] = by.strip()[:120]
     return await _forward("PUT", "/v1/city-tiers", json_body=upstream_body)
+
+
+@app.post("/v1/queue/shadow", dependencies=[Depends(require_token)])
+async def queue_shadow(body: Any = Body(default=None)) -> Response:
+    """What the city queue would have handed out, next to what the fleet did
+    (`queue_shadow.py`). The coordinator replays; the roster is built here
+    from the same document `/v1/fleet` serves. The ERP does not forward it."""
+    if body is not None and not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Expected a JSON object")
+    body = body or {}
+    doc = await fleet()
+    upstream_body = {
+        "days": body.get("days", 3),
+        "settings": body.get("settings") or {},
+        "roster": queue_shadow_view.roster(doc),
+    }
+    return await _forward(
+        "POST", "/v1/queue/shadow", json_body=upstream_body, timeout=SHADOW_TIMEOUT_S
+    )
 
 
 @app.get("/v1/config/filter-prompt", dependencies=[Depends(require_token)])

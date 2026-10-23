@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.13] - 2026-10-23
+
 ### Added
 
 - **The console serves the login ledger to the ERP** (RS-366).
@@ -26,6 +28,34 @@ deployed?" harder to answer.
   `identity_key` and the parsed detail. The `datr` fingerprint and device id
   stay behind. The ERP's worker page draws each account's timeline from it;
   until this console is deployed, that timeline shows the pool's events only.
+- **A shadow run of a pull-based city queue** (RS-370). Today each worker
+  searches a fixed list someone set by hand. On 2026-10-23 that put 92% of
+  the fleet's results on five accounts and left 123 of 127 cities with one
+  live account. It also hid four HEALTHY accounts whose searches return
+  nothing.
+
+  The coordinator now:
+  - logs every search with what it found (`city_searches`);
+  - has the queue's decision, `city_queue.pick`: due cities only, a daily
+    budget per account, home regions, IP partners kept apart, home cities
+    first, and blind accounts quarantined;
+  - replays the fleet's real availability through it with
+    `POST /v1/queue/shadow`.
+
+  `python -m rs_console.queue_shadow` prints the replay next to what the
+  workers did, with what-if budgets, windows and tiers. No worker changes
+  behaviour; the report is the evidence for the queue's budget, eligibility
+  and frequency before any worker follows it.
+
+### Changed
+
+- **The vendored monitor is pinned at `8979534` instead of `96d9204`.** The
+  code is the same; only the hash moved. `96d9204` lived only in a deleted
+  worktree's clone, so the release gate could not be run anywhere.
+  `8979534` rebuilds it from its parent `c20d341` and the one file it changed,
+  copied from the VM. It matches the deployed tree byte for byte, apart from
+  what the deploy filter keeps off the VM. `VENDOR.md` says how this was
+  checked.
 
 ## [0.13.12] - 2026-10-21
 
