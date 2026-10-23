@@ -2,13 +2,13 @@
 id: RS-381
 title: "The Bluetooth label printer prints nothing: jobs go to the wrong characteristic"
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-23
 reporter: jinhu
 branch: JinhuW/merrow
-pr:
-version:
+pr: "#855"
+version: 1.327.1
 related: [RS-374, RS-378]
 ---
 
@@ -49,16 +49,16 @@ with 50 × 25 mm labels can't take that, and TSPL was sent `SIZE 4,6`.
 
 ## Acceptance criteria
 
-- [ ] Each known service's port is named (write and notify characteristic).
+- [x] Each known service's port is named (write and notify characteristic).
       The CT221D's job goes to `…8841…` and its replies are read on
       `…1e4d…`. Nothing is written to `…6daa…` or `…aca3…`. An unknown
       service's port is guessed, preferring a characteristic that
       acknowledges writes.
-- [ ] Jobs go as acknowledged writes wherever the port takes them, in
+- [x] Jobs go as acknowledged writes wherever the port takes them, in
       128-byte chunks.
-- [ ] A 50 × 25 mm stock exists and is the default. TSPL gets `SIZE 50 mm,25
+- [x] A 50 × 25 mm stock exists and is the default. TSPL gets `SIZE 50 mm,25
       mm` and `GAP 2 mm,0 mm`, and inch stock still gets its sizes in inches.
-- [ ] The 50 × 25 mm label is laid out for its size: the number, the
+- [x] The 50 × 25 mm label is laid out for its size: the number, the
       purchaser and the counts, large enough to read, inside a 2-inch head's
       width.
 - [ ] A real label prints on the CT221D from the dev site.
