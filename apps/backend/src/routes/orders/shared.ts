@@ -6,8 +6,8 @@ import { commissionLinkedFrag } from '../../banktx/match';
 import { type TrackablePart } from '../../lib/marketAutoTrack';
 import { effectiveRole } from '../../lib/role';
 import { specVal } from '../../lib/orderInput';
-import { activeMember, type HandoffPackage } from '../../services/orderHandoff';
-export { paidByAfter } from '../../services/orderHandoff';
+import { activeMember, paidByAfter, type HandoffPackage } from '../../services/orderHandoff';
+export { orderCostBooked, paidByAfter, PAYER_BOOKED_MSG } from '../../services/orderHandoff';
 import { isActiveManager } from '../../services/members';
 import { pickTrackingClient, carrierTrackingUrl } from '../../shipping';
 import { registerPackageTracking } from '../../shipping/track';
@@ -551,6 +551,18 @@ export function sameStoredValue(before: unknown, after: unknown): boolean {
   return JSON.stringify(blank(before) ? null : before) === JSON.stringify(blank(after) ? null : after);
 }
 
+/** Whether a request moves who paid the PO, judged on what the UPDATE writes
+ *  (paidByAfter): a payer echoed from the record, or sent with a Business
+ *  Account order, which names nobody, changes nothing. */
+export function movesPayer(
+  body: { payment?: string; paidByUserId?: string | null },
+  before: { payment: string; paid_by: string | null; user_id: string },
+): boolean {
+  if (body.paidByUserId == null) return false;
+  const after = paidByAfter(body.payment ?? before.payment, body.paidByUserId, before.paid_by, before.user_id);
+  return !sameStoredValue(before.paid_by, after);
+}
+
 export const LINE_FIELD_SET: ReadonlySet<string> = new Set(LINE_FIELDS);
 // The line columns PATCH writes with a presence sentinel (null clears), not
 // COALESCE (null keeps) — must match the UPDATE in PATCH /:id.
@@ -589,7 +601,7 @@ export function changesMaterialField(
     source?: string | null; handoffMethod?: 'pickup' | 'label' | null; handoffBy?: string | null;
     trackingNumber?: string; carrier?: string;
   },
-  before: Record<string, unknown> & HandoffFactsBefore,
+  before: Record<string, unknown> & HandoffFactsBefore & { payment: string; paid_by: string | null; user_id: string },
   linesBefore: Map<string, Record<string, unknown>>,
 ): boolean {
   if (body.addLines?.length) return true;
@@ -632,10 +644,7 @@ export function changesMaterialField(
   if (body.warehouseId !== undefined
       && !sameStoredValue(before.warehouse_id, body.warehouseId)) return true;
   if (body.payment !== undefined && body.payment !== before.payment) return true;
-  // Judged as the UPDATE lands it: a payer sent for a Business Account order
-  // writes nothing, and a null keeps whoever is on file.
-  if (body.paidByUserId != null && (body.payment ?? before.payment) === 'self'
-      && !sameStoredValue(before.paid_by, body.paidByUserId)) return true;
+  if (movesPayer(body, before)) return true;
   if (body.paymentMethod !== undefined
       && !sameStoredValue(before.payment_method, body.paymentMethod)) return true;
   if (body.paypalTxnId !== undefined) {

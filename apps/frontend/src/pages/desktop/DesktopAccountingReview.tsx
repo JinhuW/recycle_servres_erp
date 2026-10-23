@@ -5,7 +5,7 @@ import {
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import { RouteLink } from '../../components/RouteLink';
-import { FIELD_KEY, ReviewMark, Yuan, recordPath } from '../../components/AccountingBits';
+import { Yuan, recordPath } from '../../components/AccountingBits';
 import { useAuth } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
 import { handleFetchError } from '../../lib/errorToast';
@@ -17,7 +17,7 @@ import {
   ACCT_BULK_MAX, acctAnswer, acctAsk, acctBulkReview, acctMarkReviewed, acctReviewQueue, acctWithdrawQuery, acctWithdrawReview,
   fmtBookDay, fmtCny, markDayStarts, reviewActions, type AcctReviewQueue, type AcctReviewRow,
 } from '../../lib/accounting';
-import { checkLines, fieldValue, rowChip } from './accounting/reviewBits';
+import { ChangeList, ReviewMark, checkLines, rowChip } from './accounting/reviewBits';
 import { EntryDrawer } from './accounting/EntryDrawer';
 import '../../styles/accounting.css';
 
@@ -39,9 +39,10 @@ export function DesktopAccountingReview({ onToast }: Props) {
   const people = useMemberNames();
   const [tab, setTab] = useState<AccountingReviewTab>('mine');
   const [managerId, setManagerId] = useState('');
-  // The For you list is always loaded: the tally counts it whatever tab is up.
+  // The For you list is always loaded: the tally and the tab counts read it
+  // whatever tab is up. Another tab's list is kept with the tab it is for.
   const [mine, setMine] = useState<AcctReviewQueue | null>(null);
-  const [other, setOther] = useState<AcctReviewQueue | null>(null);
+  const [other, setOther] = useState<{ tab: AccountingReviewTab; queue: AcctReviewQueue } | null>(null);
   // Signed off in this visit, newest first; questions asked in it.
   const [done, setDone] = useState<AcctReviewRow[]>([]);
   const [asked, setAsked] = useState<AcctReviewRow[]>([]);
@@ -54,20 +55,25 @@ export function DesktopAccountingReview({ onToast }: Props) {
   const [undo, setUndo] = useState<Undo | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const gen = useRef(0);
-  const load = useCallback(() => {
-    const g = ++gen.current;
-    const mgr = managerId || undefined;
-    void Promise.all([
-      acctReviewQueue('mine', mgr),
-      tab === 'mine' ? Promise.resolve(null) : acctReviewQueue(tab, mgr),
-    ]).then(([m, o]) => {
-      if (g !== gen.current) return;
-      setMine(m);
-      setOther(o);
-    }).catch(handleFetchError);
+  // For you depends on the filter alone, so a tab switch reads just the tab.
+  const genMine = useRef(0);
+  const genOther = useRef(0);
+  const loadMine = useCallback(() => {
+    const g = ++genMine.current;
+    acctReviewQueue('mine', managerId || undefined)
+      .then(m => { if (g === genMine.current) setMine(m); })
+      .catch(handleFetchError);
+  }, [managerId]);
+  const loadOther = useCallback(() => {
+    const g = ++genOther.current;
+    if (tab === 'mine') return;
+    acctReviewQueue(tab, managerId || undefined, { counts: false })
+      .then(q => { if (g === genOther.current) setOther({ tab, queue: q }); })
+      .catch(handleFetchError);
   }, [tab, managerId]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadMine(); }, [loadMine]);
+  useEffect(() => { loadOther(); }, [loadOther]);
+  const load = useCallback(() => { loadMine(); loadOther(); }, [loadMine, loadOther]);
   useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
   // The Undo toast outlives the render that made it: its action re-reads the
   // lists the page shows now, and a second press while one runs does nothing.
@@ -75,11 +81,44 @@ export function DesktopAccountingReview({ onToast }: Props) {
   loadRef.current = load;
   const busyRef = useRef(false);
 
-  const queue = tab === 'mine' ? mine : other;
+  const queue = tab === 'mine' ? mine : other?.tab === tab ? other.queue : null;
   const rows = useMemo(() => queue?.rows ?? [], [queue]);
-  // Rows signed off here stay on the page until it is left, under the divider.
-  const doneRows = tab === 'mine' ? done.filter(d => !rows.some(r => r.id === d.id)) : [];
-  const visible = useMemo(() => [...rows, ...doneRows], [rows, doneRows]);
+
+  // What the lists, the tally and the bulk dialog show, worked out once per
+  // change rather than on every keystroke in the question box.
+  const view = useMemo(() => {
+    const rowIds = new Set(rows.map(r => r.id));
+    const doneIds = new Set(done.map(d => d.id));
+    // Rows signed off here stay on the page until it is left, under the divider.
+    const doneRows = tab === 'mine' ? done.filter(d => !rowIds.has(d.id)) : [];
+    // The tally counts this visit's For you queue: what is left in it, plus
+    // what was signed off or queried from it.
+    const pending = mine?.rows ?? [];
+    const pendingIds = new Set(pending.map(p => p.id));
+    const tallied = [...pending, ...done.filter(d => !pendingIds.has(d.id)),
+      ...asked.filter(a => !pendingIds.has(a.id) && !doneIds.has(a.id))];
+    // Bulk: from the For you queue whatever tab is up — To review, never
+    // changed or queried, no warning, and not the viewer's.
+    const bulk = pending
+      .filter(r => r.review?.state === 'open' && !hasAccountingWarning(r.checks) && reviewActions(r, me).review);
+    const bulkIds = new Set(bulk.map(r => r.id));
+    const cny = (list: AcctReviewRow[]) => list.reduce((a, r) => a + r.amountCny, 0);
+    return {
+      doneIds, doneRows, visible: [...rows, ...doneRows], tallied, bulk,
+      held: pending.filter(r => !bulkIds.has(r.id)),
+      sum: {
+        done: done.length,
+        queried: asked.filter(a => !doneIds.has(a.id)).length,
+        changed: pending.filter(r => r.review?.state === 'changed').length,
+        open: pending.filter(r => r.review?.state === 'open').length,
+      },
+      cnyTotal: cny(tallied),
+      cnyDone: cny(done),
+      leftIn: cny(pending.filter(r => r.direction === 'in')),
+      leftOut: cny(pending.filter(r => r.direction === 'out')),
+    };
+  }, [rows, tab, done, asked, mine, me]);
+  const { doneRows, visible, tallied, bulk, held, sum, cnyTotal, cnyDone, leftIn, leftOut } = view;
   const sel = visible.find(r => r.id === selId) ?? rows[0] ?? doneRows[0] ?? null;
   // A question or an answer is about the entry it was opened on: moving off
   // it, by click or key, drops what was typed rather than sending it elsewhere.
@@ -158,27 +197,6 @@ export function DesktopAccountingReview({ onToast }: Props) {
     });
   };
 
-  // ── The tally counts this visit's For you queue: what is left in it, plus
-  // what was signed off or queried from it.
-  const pending = mine?.rows ?? [];
-  const tallied = [...pending, ...done.filter(d => !pending.some(p => p.id === d.id)),
-    ...asked.filter(a => !pending.some(p => p.id === a.id) && !done.some(d => d.id === a.id))];
-  const sum = {
-    done: done.length,
-    queried: asked.filter(a => !done.some(d => d.id === a.id)).length,
-    changed: pending.filter(r => r.review?.state === 'changed').length,
-    open: pending.filter(r => r.review?.state === 'open').length,
-  };
-  const cnyTotal = tallied.reduce((a, r) => a + r.amountCny, 0);
-  const cnyDone = done.reduce((a, r) => a + r.amountCny, 0);
-  const leftIn = pending.filter(r => r.direction === 'in').reduce((a, r) => a + r.amountCny, 0);
-  const leftOut = pending.filter(r => r.direction === 'out').reduce((a, r) => a + r.amountCny, 0);
-
-  // Bulk: from the For you queue whatever tab is up — To review, never
-  // changed or queried, no warning, and not the viewer's.
-  const bulk = pending
-    .filter(r => r.review?.state === 'open' && !hasAccountingWarning(r.checks) && reviewActions(r, me).review);
-  const held = pending.filter(r => !bulk.includes(r));
   const confirmBulk = () => {
     const ids = new Set(bulk.map(r => r.id));
     void run(async () => {
@@ -197,8 +215,8 @@ export function DesktopAccountingReview({ onToast }: Props) {
       setTab('mine');
       setBulkOpen(false);
       onToast?.(skippedN
-        ? t(reviewedN === 1 ? 'acctBulkSkippedToastOne' : 'acctBulkSkippedToast', { n: reviewedN, skipped: skippedN })
-        : t(reviewedN === 1 ? 'acctBulkToastOne' : 'acctBulkToast', { n: reviewedN }));
+        ? t('acctBulkSkippedToast', { n: reviewedN, skipped: skippedN })
+        : t('acctBulkToast', { n: reviewedN }));
     }, () => setSelId(rows.find(r => !ids.has(r.id))?.id ?? null));
   };
 
@@ -209,43 +227,46 @@ export function DesktopAccountingReview({ onToast }: Props) {
     if (form) { setForm(null); setText(''); } else exit();
   });
 
-  // ── Keyboard, ignored while typing or under a dialog.
+  // ── Keyboard, ignored while typing or under a dialog. One listener for the
+  // page's life, reading the render it fires in through the ref.
+  const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (openEntry || bulkOpen || document.querySelector('[aria-modal="true"]')) return;
-      const target = e.target as HTMLElement | null;
-      if (target?.closest('input, textarea, select')) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const i = visible.findIndex(r => r.id === sel?.id);
-      const move = (d: number) => {
-        const n = visible[Math.max(0, Math.min(visible.length - 1, i + d))];
-        if (!n) return;
-        setSelId(n.id);
-        requestAnimationFrame(() => document.getElementById('arv-row-' + n.id)?.scrollIntoView({ block: 'nearest' }));
-      };
-      switch (e.key) {
-        case 'ArrowDown': case 'j': e.preventDefault(); move(1); break;
-        case 'ArrowUp': case 'k': e.preventDefault(); move(-1); break;
-        case ' ':
-          if (target?.closest('button') && !target.closest('.arv-rows')) return;
-          e.preventDefault();
-          if (target?.closest('button')) target.blur();
-          if (sel) mark(sel);
-          break;
-        case 'q': if (sel && reviewActions(sel, me).query) { e.preventDefault(); setForm('query'); } break;
-        case 'e': if (sel) { e.preventDefault(); setOpenEntry(sel.id); } break;
-        case 'u': if (undo) { e.preventDefault(); void undo.run(); } break;
-      }
+    const handler = (e: KeyboardEvent) => onKey.current(e);
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+  onKey.current = (e: KeyboardEvent) => {
+    if (openEntry || bulkOpen || document.querySelector('[aria-modal="true"]')) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('input, textarea, select')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const i = visible.findIndex(r => r.id === sel?.id);
+    const move = (d: number) => {
+      const n = visible[Math.max(0, Math.min(visible.length - 1, i + d))];
+      if (!n) return;
+      setSelId(n.id);
+      requestAnimationFrame(() => document.getElementById('arv-row-' + n.id)?.scrollIntoView({ block: 'nearest' }));
     };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  });
+    switch (e.key) {
+      case 'ArrowDown': case 'j': e.preventDefault(); move(1); break;
+      case 'ArrowUp': case 'k': e.preventDefault(); move(-1); break;
+      case ' ':
+        if (target?.closest('button') && !target.closest('.arv-rows')) return;
+        e.preventDefault();
+        if (target?.closest('button')) target.blur();
+        if (sel) mark(sel);
+        break;
+      case 'q': if (sel && reviewActions(sel, me).query) { e.preventDefault(); setForm('query'); } break;
+      case 'e': if (sel) { e.preventDefault(); setOpenEntry(sel.id); } break;
+      case 'u': if (undo) { e.preventDefault(); void undo.run(); } break;
+    }
+  };
 
   const can = sel ? reviewActions(sel, me) : null;
   const addressee = sel ? (sel.review?.query?.to?.name ?? sel.review?.author?.name ?? sel.manager.name) : '';
-  const counts = (other ?? mine)?.counts;
+  const counts = mine?.counts;
   const tabCount = (k: AccountingReviewTab) => counts?.[k] ?? 0;
-  const bulkTitle = t(bulk.length === 1 ? 'acctRmBulkTitleOne' : 'acctRmBulkTitle', { n: bulk.length });
+  const bulkTitle = t('acctRmBulkTitle', { n: bulk.length });
 
   return (
     <div className="bc-page arv-page">
@@ -270,7 +291,7 @@ export function DesktopAccountingReview({ onToast }: Props) {
             <span><kbd>{t('bcKeySpace')}</kbd> {t('acctMarkReviewed')}</span>
             <span><kbd>Q</kbd> {t('acctRmKeyQuery')}</span>
             <span><kbd>E</kbd> {t('acctRmKeyOpen')}</span>
-            <span><kbd>U</kbd> {t('acctRmKeyUndo')}</span>
+            <span><kbd>U</kbd> {t('undo')}</span>
             <span><kbd>Esc</kbd> {t('acctRmKeyLeave')}</span>
           </div>
         </div>
@@ -280,13 +301,13 @@ export function DesktopAccountingReview({ onToast }: Props) {
         <div className="bc-tally-half">
           <div className="bc-tally-num">
             <span className="mono"><b>{sum.done}</b><span className="muted"> / {tallied.length}</span></span>
-            <span className="card-sub">{t(tallied.length === 1 ? 'acctRmReviewedCountOne' : 'acctRmReviewedCount')}</span>
+            <span className="card-sub">{t('acctRmReviewedCount', { n: tallied.length })}</span>
           </div>
           <div className="bc-tally-meter">
             <div className="bc-meter" role="img" aria-label={`${sum.done} / ${tallied.length}`}>
               <i className="bc-m-done" style={{ flexGrow: sum.done }} />
               <i className="bc-m-part" style={{ flexGrow: sum.changed }} />
-              <i className="arv-m-query" style={{ flexGrow: sum.queried }} />
+              <i className="bc-m-query" style={{ flexGrow: sum.queried }} />
               <i className="bc-m-open" style={{ flexGrow: sum.open }} />
             </div>
             <div className="bc-legend">
@@ -441,18 +462,7 @@ export function DesktopAccountingReview({ onToast }: Props) {
                     </span>
                     <span className="card-sub">{fmtDate(sel.cleared.at, locale)}</span>
                   </div>
-                  <dl className="acct-rv-diff arv-diff">
-                    {Object.entries(sel.cleared.changes).map(([k, ch]) => (
-                      <div key={k}>
-                        <dt>{FIELD_KEY[k] ? t(FIELD_KEY[k]) : k}</dt>
-                        <dd>
-                          <span className="acct-was">{fieldValue(k, ch.from, { t, locale, people })}</span>
-                          <span aria-hidden="true">→</span>
-                          <b>{fieldValue(k, ch.to, { t, locale, people })}</b>
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
+                  <ChangeList changes={sel.cleared.changes} people={people} t={t} locale={locale} className="arv-diff" />
                 </div>
               )}
 
@@ -544,7 +554,7 @@ export function DesktopAccountingReview({ onToast }: Props) {
                       </button>}
                       {can.withdraw && (
                         <button type="button" className="btn" disabled={busy}
-                                onClick={() => (done.some(d => d.id === sel.id) ? void unmark(sel)
+                                onClick={() => (view.doneIds.has(sel.id) ? void unmark(sel)
                                   : void run(() => acctWithdrawReview(sel.id), () => onToast?.(t('acctUnreviewedToast', { id: sel.id }))))}>
                           {t('acctWithdrawReview')}
                         </button>
@@ -571,7 +581,7 @@ export function DesktopAccountingReview({ onToast }: Props) {
       {undo && (
         <div className="arv-toast" role="status">
           <span>{undo.text}</span>
-          <button type="button" onClick={() => void undo.run()}>{t('acctRmUndo')}</button>
+          <button type="button" onClick={() => void undo.run()}>{t('undo')}</button>
         </div>
       )}
 
@@ -589,7 +599,7 @@ export function DesktopAccountingReview({ onToast }: Props) {
                 </div>
               ))}
               <div className="arv-bulk-total">
-                <span>{t(bulk.length === 1 ? 'acctRmBulkTotalOne' : 'acctRmBulkTotal', { n: bulk.length })}</span>
+                <span>{t('acctRmBulkTotal', { n: bulk.length })}</span>
                 <Yuan value={bulk.reduce((a, r) => a + r.amountCny, 0)} locale={locale} />
               </div>
             </div>
@@ -616,7 +626,7 @@ export function DesktopAccountingReview({ onToast }: Props) {
       <>
         {list.map((r, i) => {
           const a = reviewActions(r, me);
-          const state = isDone ? 'reviewed' : r.review?.state ?? 'open';
+          const state = r.review?.state ?? 'open';
           const chip = rowChip(r, t, locale);
           const by = r.review?.author?.name;
           return (
@@ -659,7 +669,7 @@ export function DesktopAccountingReview({ onToast }: Props) {
               <span>
                 {isDone ? (
                   <button type="button" className="arv-undo" disabled={busy} onClick={e => { e.stopPropagation(); void unmark(r); }}>
-                    {t('acctRmUndo')}
+                    {t('undo')}
                   </button>
                 ) : chip.label && <span className={'chip ' + chip.tone}>{chip.label}</span>}
               </span>

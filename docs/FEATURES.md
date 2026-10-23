@@ -813,6 +813,14 @@ is not a stage but a flag beside one, set once every line has sold
   paid stays the payer, and so does a payer the same save picked. Since
   v1.317.4 a save that hands the PO over can't pick the old owner, who no
   longer paid for their own PO, and the Paid by select offers the new owner.
+  **Once a manager has booked the cost, Paid by is a manager's** (v1.318.2).
+  A purchaser's PO save or hand-off that would change the payment or Paid by
+  of a PO with a live paid-out cost entry in the RMB Flow is refused (403),
+  because the payer sync would void or move the manager's entry. Saves that
+  leave the payer alone go through. The purchaser's Paid by select is
+  disabled on both PO pages and both hand-off surfaces, with *A manager has
+  booked this PO's cost*; a voided entry, or a commission entry alone, locks
+  nothing.
   Only a payer a save picks is checked: the one on file passes as it is,
   even a manager deactivated since, so a hand-off or a save never fails on a
   field nobody touched.
@@ -1283,6 +1291,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
 - After a transfer or add-to-order, the list and its facets reload with every
   active filter, including Show sold, Hide pending and the attribute chips
   (v1.179.0).
+- The **Refine** panel of attribute chips folds away on a click outside it.
+  Since v1.318.0 it folds on the click itself, not the press, so the click
+  still lands on the row it was aimed at. A picked chip keeps its label under
+  the mouse. Monitors ▸ WeChat uses the same panel.
 - Export honours the row selection, one worksheet per category, with designed
   workbook styling (v1.30.0, v1.31.0). Select/unselect all lots in the current
   filter (v1.19.0). Select all takes every sellable lot the filters match,
@@ -1690,6 +1702,17 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   page head, a progress card, a table with the scan box over it, and a side
   panel with the selected item and a **Finish** card.
   - **Opening it moves a Draft to Packing** (v1.230.0), once per visit.
+  - **The progress card maps the order** (v1.317.5). It has one cell per
+    product, in # order, labelled with its #:
+    - green once packed, amber while short, red at 0;
+    - a dashed slot while waiting.
+
+    A long order's cells drop their labels. The count beside it says what it
+    counts: *products packed*, or *products packed, DAL only* under *Packing
+    from*. The units sit at the end of the legend.
+  - **The selected row is framed in ink** (v1.317.5): the row Space and a
+    scan act on. Green only ever means packed. A product with no photo gives
+    the Selected card one line, not an empty frame.
   - **Products run in the order's own list order**, # order (v1.220.3; by #
     since v1.219.0, grouped by source PO in v1.218.0). That is the Packing
     list's order, except for products added once the order was past Draft,
@@ -2349,6 +2372,9 @@ is who paid, below).
       on you, and the Accounting parent carries the count while folded
       (v1.317.3).
     - The entry drawer carries a Review card with the viewer's own actions.
+      Its *Changed since review* comes from the server, worked out the same
+      way as Review mode's (v1.318.1), and who may sign, ask or answer is
+      one rule the API and both pages share.
     - Editing a reviewed entry warns that saving clears the review.
     - The history logs every sign-off, withdrawal, question, answer and
       clear. The phone shows those lines too, but has no Review mode;
@@ -2441,7 +2467,14 @@ over MCP.
   in the book's own words: fields, yuan, the question's text. The action
   filter gains *Reviewed* and *Query*. The area travels in the address
   (`#/activity?area=acct`), so the book's *Log* button lands filtered. The
-  table is append-only by trigger from 0197, like the other four.
+  table is append-only by trigger from 0197, like the other four. A row
+  nobody made says what did it in the person column, as the entry's history
+  does: *Paid by followed the PO*, *Voided: paid from the Business Account*,
+  or the backfill (v1.318.1). A diff names payers who have left too.
+- **A tab gets only the areas it can draw** (v1.318.1). The page sends its
+  list (`areas`), and the server leaves every other area out of the rows and
+  the counts. An area a later release adds never reaches a tab still open on
+  an older bundle, which in v1.317 crashed on opening an Accounting row.
 - Loads as you scroll, with a pinned column head (v1.38.0), and "Open record"
   opens the record (v1.51.x).
 - Member/permission changes are **absent** — they write no audit rows
@@ -2594,27 +2627,44 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     the tab holds across a change of day. Above the board, a legend of
     memtrade's supply reads (Short, Tight, Balanced, Loose, Glut) counts the
     lines in each and filters the board to one; the counts follow the line
-    family and *Priced lines only*, not the search. The board's toolbar puts
+    family, *Priced lines only* and the Refine chips (v1.318.0), not the
+    search. The board's toolbar puts
     the search first and a summary on the right: buyers, sellers, trade
     posts and groups with messages, with the change in buyers and sellers
     against the day before on hover. Its foot carries the shown/total line
     count and the report's window. The four KPI cards are gone.
+  - Since v1.318.1 the search works as on the fleet pages: every term, in
+    any order and across name, spec, code and part numbers (`ddr5 64g`),
+    highlighted on the board. The tabs are links, and the Groups tab rides
+    the address (`?view=groups`), so a reload or a copied link opens it.
   - Claude's market notes, **Most wanted** and **Most offered** (the specs
     with the most buyers and sellers) sit in an aside beside the board, or
     above it below 1190px (v1.316.0). Clicking a spec shows it on the
     board, clearing the supply filter and turning *Priced lines only* off
-    when the spec has no price (v1.312.2).
-  - The **price board** lists every line by brand & code (三星 64G 5600 DM0,
-    grouped under brand headers), by spec (64G 5600) or by part code
-    (32G DM0). Each line shows the bid (buyers) and ask (sellers) median
+    when the spec has no price (v1.312.2), and clearing the Refine chips
+    (v1.318.0).
+  - The **price board** lists every line by brand & code (三星 64G 5600 DM0),
+    by spec (64G 5600) or by part code (32G DM0). Since v1.318.0 the brand
+    and the DDR generation have columns of their own; before, brand & code
+    lines sat under brand header rows and the generation sat under the
+    module. Brand & code lines sort brand-first. Spec and part-code lines
+    have no brand, so their boards show *Generation* alone. Each line shows the bid (buyers) and ask (sellers) median
     with its tax basis, how many traders quoted and their range, a bar of
     both sides' ranges with the spread or a crossed market, buyers and
     sellers, memtrade's supply read (short to glut), and each median's
     change against the day before. Changes and spreads compare one tax
     basis only: a 含税 and a 未税 price are never set against each other.
-    Search and *Priced lines only* filter it. A quote with no brand sits
-    under one *Unbranded* header whether memtrade wrote 未注明 or nothing
-    (v1.312.2).
+    Search and *Priced lines only* filter it. A quote with no brand reads
+    *No brand given* and sorts last, whether memtrade wrote 未注明 or
+    nothing (v1.312.2).
+  - A **Refine RAM** panel on the board (v1.318.0) is the inventory page's
+    panel of chips: Generation, Speed, Brand (brand & code only), Capacity,
+    Device (Server/PC) and Rank, each chip with the lines it would show.
+    Chips are OR within a row and AND across rows. Each row counts under the
+    other rows' picks, *Priced lines only* and the supply legend, not the
+    search. A pick nothing matches any more stays, at 0, so it can be
+    unpicked. Picks hold across a change of day and of board; the toolbar's
+    *Clear* and the panel's *Clear all* drop them.
   - Opening a line lists its posts, newest first and up to 100: who, what
     price and quantity, the raw line, which groups and how many copies.
     *Bids* and *Asks* ask for each side's own newest 100 (v1.312.2).

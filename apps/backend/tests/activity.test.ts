@@ -163,6 +163,23 @@ describe('global activity feed', () => {
     expect(removed.body.events.find(e => e.kind === 'line_photo_removed')?.action).toBe('removed');
   });
 
+  it('sends only the areas the caller can draw', async () => {
+    await seedAllLedgers();
+    const { token } = await loginAs(ALEX);
+    // A tab built before an area existed asks for the ones it knows; a name
+    // this server doesn't have is skipped, not refused.
+    const r = await get(token, '?areas=po,so,later');
+    expect(r.status).toBe(200);
+    expect(new Set(r.body.events.map(e => e.area))).toEqual(new Set(['po', 'so']));
+    expect(Object.keys(r.body.counts!).sort()).toEqual(['all', 'po', 'so']);
+    expect(r.body.counts!.all).toBe(r.body.counts!.po + r.body.counts!.so);
+    // An area asked for by name is always one of them.
+    const inv = await get(token, '?areas=po&area=inv');
+    expect(inv.body.events.length).toBeGreaterThan(0);
+    expect(inv.body.events.every(e => e.area === 'inv')).toBe(true);
+    expect(Object.keys(inv.body.counts!).sort()).toEqual(['all', 'inv', 'po']);
+  });
+
   it('rejects an unknown area or action instead of ignoring it', async () => {
     const { token } = await loginAs(ALEX);
     expect((await get(token, '?area=nope')).status).toBe(400);

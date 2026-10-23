@@ -6,14 +6,15 @@ import { Icon, type IconName } from '../../components/Icon';
 import { ListSkeleton } from '../../components/Skeleton';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
+import { useMemberNames, type MemberOption } from '../../lib/useManagers';
 import { fmtDate, fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import {
   createdEventParts, fieldLabel, linePhotoEventDetail, productsCount, renderValue, type Translate,
 } from '../../lib/orderPresentation';
 import { activityRecordHref, onLinkClick, readHashQuery, replaceHashQuery } from '../../lib/route';
-import { FIELD_KEY } from '../../components/AccountingBits';
-import { fmtCny } from '../../lib/accounting';
+import { FIELD_KEY, eventAgent } from '../../components/AccountingBits';
+import { fmtCny, type AcctEvent } from '../../lib/accounting';
 import { fieldValue } from './accounting/reviewBits';
 import { boxCheckEventLines } from '../../lib/boxCheck';
 import { aiReviewEventText } from '../../lib/aiReview';
@@ -43,7 +44,6 @@ type Event = {
 // unfiltered-by-cursor) count query on scroll pages, so loadMore keeps the
 // numbers it already has rather than blanking the pills.
 type Feed = { events: Event[]; counts?: Record<string, number>; nextCursor: string | null };
-type Member = { id: string; name: string };
 
 const AREAS: { id: 'all' | ActivityArea; tKey: string }[] = [
   { id: 'all',   tKey: 'acAreaAll' },
@@ -53,6 +53,10 @@ const AREAS: { id: 'all' | ActivityArea; tKey: string }[] = [
   { id: 'price', tKey: 'acAreaPrice' },
   { id: 'acct',  tKey: 'acAreaAcct' },
 ];
+const AREA_TKEY = Object.fromEntries(AREAS.map(a => [a.id, a.tKey])) as Record<'all' | ActivityArea, string>;
+// Every area this page can draw, sent with each read: the server leaves out
+// any area a later release adds, which this bundle would have no words for.
+const AREAS_PARAM = ACTIVITY_AREAS.join(',');
 
 const ACTION_TKEY: Record<ActivityAction, string> = {
   created: 'acActCreated', status: 'acActStatus', edited: 'acActEdited',
@@ -77,13 +81,11 @@ const RANGES: { days: number; tKey: string }[] = [
 
 type Change = { field: string; from: unknown; to: unknown };
 type Summary = { diff?: Change; shown?: { k: string; from: string; to: string }; note?: string; plain?: string };
-type Ctx = { locale: string; t: Translate; members: Member[] };
+type Ctx = { locale: string; t: Translate; members: MemberOption[] };
 
 // The Accounting book's events read in its own words: its field names, yuan,
-// and the entry each one is about.
-type AcctDetail = {
-  changes?: Record<string, { from: unknown; to: unknown }>; reason?: string; text?: string; orderId?: string;
-  backfilled?: 'commission_paid_by' | 'payment_received_by'; clearedReview?: unknown; amountCny?: number;
+// and the entry each one is about. The detail is the entry history's own.
+type AcctDetail = AcctEvent['detail'] & {
   entry: { direction: string; kind: string; amountCny: number; record: string | null };
 };
 
@@ -102,7 +104,6 @@ function summariseAcct(e: Event, ctx: Ctx): Summary {
     case 'created': return {
       plain: [t('acctDir_' + d.entry.direction), t('acctKind_' + d.entry.kind) + (d.entry.record ? ' ' + d.entry.record : ''),
         fmtCny(d.entry.amountCny, locale)].join(' · '),
-      note: d.backfilled ? t(d.backfilled === 'commission_paid_by' ? 'acctEvBackfilledPaidBy' : 'acctEvBackfilledReceiver') : undefined,
     };
     case 'edited': {
       const diffs = acctDiffs(d, ctx);
@@ -220,7 +221,8 @@ export function DesktopActivity() {
   const [search, setSearch] = useState('');
 
   const [feed, setFeed] = useState<Feed | null>(null);
-  const [members, setMembers] = useState<Member[]>([]);
+  // Members who have left too: they are in the history, as actors and payers.
+  const members = useMemberNames();
   const [loadingMore, setLoadingMore] = useState(false);
   const [open, setOpen] = useState<Set<string>>(new Set());
   // Guards against a slow first request landing after a faster later one and
@@ -230,7 +232,7 @@ export function DesktopActivity() {
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   const params = useCallback((cursor?: string) => {
-    const p = new URLSearchParams();
+    const p = new URLSearchParams({ areas: AREAS_PARAM });
     if (area !== 'all') p.set('area', area);
     if (action) p.set('action', action);
     if (actor) p.set('actor', actor);
@@ -244,12 +246,6 @@ export function DesktopActivity() {
     if (cursor) p.set('cursor', cursor);
     return p;
   }, [area, action, actor, search, days]);
-
-  useEffect(() => {
-    api.get<{ items: Member[] }>('/api/members')
-      .then(r => setMembers(r.items))
-      .catch(handleFetchError);
-  }, []);
 
   useEffect(() => {
     const id = ++reqId.current;
@@ -410,6 +406,9 @@ export function DesktopActivity() {
                 </div>
                 {g.events.map(e => {
                   const s = summarise(e, { locale, t, members });
+                  // An Accounting event nobody made says what did it, as its history does.
+                  const who = (e.area === 'acct' ? eventAgent(e as Pick<AcctEvent, 'kind' | 'detail'>, t) : null)
+                    ?? e.actor?.name ?? t('acUnattributed');
                   const isOpen = open.has(e.id);
                   const recordHref = activityRecordHref(e.area, e.targetRef);
                   const time = new Date(e.createdAt)
@@ -429,7 +428,7 @@ export function DesktopActivity() {
                           <span className="avatar sm" style={{ width: 20, height: 20, fontSize: 9 }}>
                             {e.actor?.initials ?? '—'}
                           </span>
-                          <span>{e.actor?.name ?? t('acUnattributed')}</span>
+                          <span>{who}</span>
                         </span>
                         <span className={'ac-target' + (e.area === 'inv' || e.area === 'price' ? ' ac-dim' : '')}>
                           {e.target}
@@ -472,9 +471,9 @@ export function DesktopActivity() {
                           <div className="ac-detail-inner">
                             <div className="ac-detail-grid">
                               <Field k={t('acLaneRecord')} v={e.target} />
-                              <Field k={t('acFieldArea')} v={t(AREAS.find(a => a.id === e.area)!.tKey)} />
+                              <Field k={t('acFieldArea')} v={t(AREA_TKEY[e.area])} />
                               <Field k={t('acFieldKind')} v={e.kind} />
-                              <Field k={t('acLanePerson')} v={e.actor?.name ?? t('acUnattributed')} />
+                              <Field k={t('acLanePerson')} v={who} />
                               <Field
                                 k={t('acFieldWhen')}
                                 v={new Date(e.createdAt).toLocaleString(locale, {

@@ -3,6 +3,8 @@
 // no refetch, no skeleton — and a chip's count is what its click would show
 // given every other filter on the page.
 
+import { costReimbursedToOwner } from './orderPresentation';
+
 /** 'all' · a warehouse id · 'none' for POs that have no warehouse. */
 export type WarehousePick = string;
 /** 'all' · 'company' (the Business Account) · a payer's user id. */
@@ -106,6 +108,33 @@ export function payerChoices(
  *  the old owner follows it to the new one, as the server moves it. */
 export const payerAfterOwnerChange = (paidById: string | null, from: string, to: string): string | null =>
   paidById === from ? to : paidById;
+
+/**
+ * Where a page's Paid by draft stands against the PO: whether it changes the
+ * payer on file, who the cost goes back to, and the person the Payment
+ * summary names. The cost rides the purchaser's earnings only when they paid
+ * it — or the record names nobody, from before the field, when Self meant the
+ * purchaser — and is reimbursed apart to anyone else. `ownerId` is the owner
+ * the draft has, which may not be saved yet.
+ */
+export function costPayerDraft(
+  draft: { payment: 'company' | 'self'; paidByUserId: string | null },
+  po: { ownerId: string; paidBy: { id: string; name: string } | null },
+  payers: readonly { id: string; name: string }[],
+): {
+  dirty: boolean; selfReimbursed: boolean; reimbursedTo: string | null;
+  payer: { id: string; name: string } | null;
+} {
+  const self = draft.payment === 'self';
+  const payer = payers.find(m => m.id === draft.paidByUserId) ?? po.paidBy;
+  const selfReimbursed = costReimbursedToOwner(draft.payment, draft.paidByUserId, po.ownerId);
+  return {
+    dirty: self && draft.paidByUserId !== null && draft.paidByUserId !== (po.paidBy?.id ?? null),
+    selfReimbursed,
+    reimbursedTo: self && !selfReimbursed ? payer?.name ?? null : null,
+    payer,
+  };
+}
 
 export type FacetCounts = {
   warehouse: Record<string, number>;

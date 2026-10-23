@@ -8,8 +8,9 @@ import { useEffectiveUser } from '../../lib/tweaks';
 import { api, deleteOrder, archiveOrder, unarchiveOrder, followLineTotal, ApiError } from '../../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../../lib/archiveConflict';
 import { readStageMoved } from '../../lib/boxCheck';
-import { costPayerLabel, costReimbursedToOwner, poStageName } from '../../lib/orderPresentation';
-import { payerAfterOwnerChange, payerChoices } from '../../lib/poFacets';
+import { costPayerLabel, poStageName } from '../../lib/orderPresentation';
+import { costPayerDraft, payerAfterOwnerChange, payerChoices } from '../../lib/poFacets';
+import { useMembers } from '../../lib/useManagers';
 import { ArchiveConflictList } from '../../components/ArchiveConflictList';
 import { SoldBadge } from '../../components/SoldBadge';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
@@ -318,16 +319,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       setRefreshState({ error: e instanceof ApiError && e.status === 501 ? e.message : t('poPkgRefreshFailed') });
     }
   };
-  // Every role may pick a collector: the names list is what the hand-off
-  // uses, and it is not the manager-only member list below.
-  const [memberNames, setMemberNames] = useState<{ id: string; name: string; role?: string }[]>([]);
-  useEffect(() => {
-    let alive = true;
-    api.get<{ items: { id: string; name: string; role?: string }[] }>('/api/members/names')
-      .then(r => { if (alive) setMemberNames(r.items); })
-      .catch(handleFetchError);
-    return () => { alive = false; };
-  }, []);
+  // Every role may pick a collector or a payer from the names list.
+  const memberNames = useMembers();
   // Which stage the status section is showing. Null follows the order; a
   // reached step sets it to look back at what that stage recorded. Any
   // stage change snaps it back — a move is the news.
@@ -422,15 +415,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // (or take it back) at any stage short of Done; ownership drives commission
   // and "my orders".
   const [ownerId, setOwnerId] = useState(order.userId);
-  const [members, setMembers] = useState<{ id: string; name: string; role: string }[]>([]);
-  useEffect(() => {
-    if (isPurchaser) return;
-    let alive = true;
-    api.get<{ items: { id: string; name: string; role: string }[] }>('/api/members')
-      .then(r => { if (alive) setMembers(r.items); })
-      .catch(handleFetchError);
-    return () => { alive = false; };
-  }, [isPurchaser]);
+  // Whom to hand the PO to, and who paid its commission, are a manager's
+  // picks; a purchaser's page offers neither.
+  const members = useMemo(() => (isPurchaser ? [] : memberNames), [isPurchaser, memberNames]);
   const ownerDirty = ownerId !== order.userId;
   // The member list holds active members only; a deactivated owner still
   // needs a row so the select can show the order as-is. The signed-in user is
@@ -457,6 +444,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     memberNames, { id: ownerId, name: ownerOptions.find(o => o.id === ownerId)?.name ?? order.userName },
     order.paidBy ?? null, ownerDirty ? order.userId : undefined,
   );
+  const payerDraft = costPayerDraft({ payment, paidByUserId }, { ownerId, paidBy: order.paidBy ?? null }, payers);
   // Only a manager handles the commission money — the server refuses anyone else.
   const managers = useMemo(
     () => members.filter(m => m.role === 'manager').map(m => ({ id: m.id, name: m.name })),
@@ -604,7 +592,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // self, so the local value is not a change until the order is company again.
   const methodDirty = payment === 'company' && paymentMethod !== (order.paymentMethod ?? null);
   // Same for the payer: only a self-paid order names one.
-  const payerDirty = payment === 'self' && paidByUserId !== null && paidByUserId !== (order.paidBy?.id ?? null);
+  const payerDirty = payerDraft.dirty;
   // '' = explicitly unset (null). Non-numeric intermediate input (e.g. "5e")
   // must NOT be treated as a change — the same guard the other-fees field uses.
   const parsedCommission =
@@ -705,12 +693,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const effectiveProfit = totals.revenue - effectiveTotalCost;
   const commissionRateApplied = commissionRateValue ?? 0;
   const commissionOnProfit = effectiveProfit * commissionRateApplied;
-  // The cost comes back to whoever paid it. It rides the purchaser's earnings
-  // only when the purchaser paid; a manager who paid is reimbursed apart. A
-  // record naming nobody (an older backend) is the purchaser's, as it always was.
-  const selfReimbursed = costReimbursedToOwner(payment, paidByUserId, ownerId);
-  const reimbursedTo = payment === 'self' && !selfReimbursed
-    ? (payers.find(m => m.id === paidByUserId)?.name ?? order.paidBy?.name ?? null) : null;
+  const { selfReimbursed, reimbursedTo } = payerDraft;
   const purchaserEarn =
     (selfReimbursed ? effectiveTotalCost : 0) + commissionOnProfit;
 
@@ -1286,7 +1269,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         : delivery === 'label' ? [tracking.carrier, tracking.tn].filter(Boolean).join(' ') : null,
     ].filter(Boolean).join(' · '),
     payment: [
-      costPayerLabel({ payment, paidBy: payers.find(m => m.id === paidByUserId) ?? order.paidBy ?? null }, t, true),
+      costPayerLabel({ payment, paidBy: payerDraft.payer }, t, true),
       payment === 'company' ? (paymentMethod === 'cash' ? t('hoMethodCash') : paymentMethod === 'paypal' ? t('hoMethodPaypal') : null) : null,
       payment === 'company' && paymentMethod === 'paypal' ? paypalTxn.trim() || null : null,
     ].filter(Boolean).join(' · '),
@@ -1815,6 +1798,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                 txnId={paypalTxn} onTxnId={setPaypalTxn}
                 txnRequired={order.txnRequired === true}
                 disabled={!canEditOrder}
+                payerLocked={order.payerLocked === true}
                 proof={proof}
                 canEditProof={canAnnotate}
                 idPrefix="eo"

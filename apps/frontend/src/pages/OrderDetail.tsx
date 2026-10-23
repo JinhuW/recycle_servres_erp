@@ -25,8 +25,9 @@ import { OrderProductsBody, itemLabel } from './OrderProductsBody';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { productCount } from '../lib/productNo';
-import { costPayerLabel, costReimbursedToOwner, profitTone } from '../lib/orderPresentation';
-import { payerAfterOwnerChange, payerChoices } from '../lib/poFacets';
+import { costPayerLabel, profitTone } from '../lib/orderPresentation';
+import { costPayerDraft, payerAfterOwnerChange, payerChoices } from '../lib/poFacets';
+import { useManagerOptions, useMembers } from '../lib/useManagers';
 import { isPricedSellPrice } from '@recycle-erp/shared';
 import { derivePoPermissions, type TakeoverAnswer } from '../lib/poPermissions';
 import { poEffectiveCost, parseFeeInput, rateEq, readStoredGoodsTotal } from '../lib/poTotals';
@@ -313,15 +314,8 @@ export function OrderDetail({
       .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
-  // Every role may pick a collector — the names list, as the hand-off uses.
-  const [memberNames, setMemberNames] = useState<{ id: string; name: string; role?: string }[]>([]);
-  useEffect(() => {
-    let alive = true;
-    api.get<{ items: { id: string; name: string; role?: string }[] }>('/api/members/names')
-      .then(r => { if (alive) setMemberNames(r.items); })
-      .catch(handleFetchError);
-    return () => { alive = false; };
-  }, []);
+  // Every role may pick a collector or a payer from the names list.
+  const memberNames = useMembers();
   // Who the Cost Payment fold's Paid by may name: the managers, the owner the
   // PO will have, the record.
   const payers = payerChoices(
@@ -329,17 +323,18 @@ export function OrderDetail({
     { id: ownerId, name: memberNames.find(m => m.id === ownerId)?.name ?? order.userName ?? order.userId },
     order.paidBy ?? null, ownerId !== order.userId ? order.userId : undefined,
   );
+  const payerDraft = costPayerDraft({ payment, paidByUserId }, { ownerId, paidBy: order.paidBy ?? null }, payers);
   // A payer that named the old owner follows the PO to the new one, as the
   // server moves it on save.
   const pickOwner = (id: string) => setMeta({
     ownerId: id, ...(payment === 'self' ? { paidByUserId: payerAfterOwnerChange(paidByUserId, ownerId, id) } : {}),
   });
-  // Filled when the Commission fold opens, below.
-  const [managers, setManagers] = useState<{ id: string; name: string }[] | null>(null);
+  // Only a manager handles the commission money, and picks who paid it.
+  const managers = useManagerOptions();
   const commissionPaidBy = useCommissionPaidBy({
     orderId: order.id,
     paidBy: order.commissionPaidBy ?? null,
-    managers: managers ?? NO_MANAGERS,
+    managers: isPurchaser ? NO_MANAGERS : managers,
     me: user ? { id: user.id, name: user.name } : null,
     onMutated: () => setActivityRefreshKey(k => k + 1),
   });
@@ -373,7 +368,7 @@ export function OrderDetail({
   // self, so the local value is not a change until the order is company again.
   const methodDirty = payment === 'company' && paymentMethod !== (order.paymentMethod ?? null);
   // Same for the payer: only a self-paid order names one.
-  const payerDirty = payment === 'self' && paidByUserId !== null && paidByUserId !== (order.paidBy?.id ?? null);
+  const payerDirty = payerDraft.dirty;
   const paypalDirty = paypalTxnId !== (order.paypalTxnId ?? '');
   const feesDirty =
     feesValue !== (order.otherFees ?? 0) ||
@@ -773,20 +768,6 @@ export function OrderDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveStatus]);
   const toggleFold = (id: FoldId) => setOpenFold(o => o === id ? null : id);
-  // The names list carries no roles, and only a manager handles the commission
-  // money; the full member list is a manager's, as is the pick. It is a
-  // heavy read, so it waits until the fold that needs it is open.
-  const wantManagers = !isPurchaser && openFold === 'commission' && managers === null;
-  useEffect(() => {
-    if (!wantManagers) return;
-    let alive = true;
-    api.get<{ items: { id: string; name: string; role: string }[] }>('/api/members')
-      .then(r => {
-        if (alive) setManagers(r.items.filter(m => m.role === 'manager').map(m => ({ id: m.id, name: m.name })));
-      })
-      .catch(handleFetchError);
-    return () => { alive = false; };
-  }, [wantManagers]);
   // A readiness row opens the fold and lands on its first field; the fold
   // has to be open before the scroll can find anything.
   const showFold = (id: FoldId) => {
@@ -798,9 +779,8 @@ export function OrderDetail({
       el?.scrollIntoView({ behavior: 'smooth', block: id === 'payment' ? 'center' : 'start' });
     });
   };
-  const payerName = payers.find(m => m.id === paidByUserId)?.name ?? order.paidBy?.name ?? null;
   const paymentSummary = payment === 'self'
-    ? costPayerLabel({ payment, paidBy: payerName ? { id: paidByUserId ?? '', name: payerName } : null }, t, true)
+    ? costPayerLabel({ payment, paidBy: payerDraft.payer }, t, true)
     : [t('payBusinessShort'), paymentMethod === 'cash' ? t('hoMethodCash') : paymentMethod === 'paypal' ? t('hoMethodPaypal') : null, paypalTxnId.trim() || null]
         .filter(Boolean).join(' · ');
   // The owner select must be able to show the order as-is even when its
@@ -819,13 +799,9 @@ export function OrderDetail({
     notes.trim() ? notes.trim().split('\n')[0] : t('phNoNotes'),
     submissionAtts.length > 0 ? t('poReadyFiles', { n: submissionAtts.length }) : null,
   ].filter(Boolean).join(' · ');
-  // The cost comes back to whoever paid it: in the purchaser's earnings when
-  // they paid, named apart when a manager did. A record naming nobody (an
-  // older backend) is the purchaser's, as it always was.
-  const selfReimbursed = costReimbursedToOwner(payment, paidByUserId, ownerId);
   const commissionMath = {
-    selfReimbursed,
-    reimbursedTo: payment === 'self' && !selfReimbursed ? payerName : null,
+    selfReimbursed: payerDraft.selfReimbursed,
+    reimbursedTo: payerDraft.reimbursedTo,
     revenue: totals.revenue, totalCost: cost.total,
     pricedCount: totals.priced, lineCount: order.lines.length,
   };
@@ -1474,6 +1450,7 @@ export function OrderDetail({
             txnId={paypalTxnId} onTxnId={v => canEditOrder && setMeta({ paypalTxnId: v })}
             txnRequired={order.txnRequired === true}
             disabled={!canEditOrder}
+            payerLocked={order.payerLocked === true}
             proof={proof}
             canEditProof={canAnnotate}
             idPrefix="ph"

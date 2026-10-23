@@ -18,7 +18,7 @@ function PhTarget({ kind, target }: { kind: Exclude<AccountingKind, 'other'>; ta
       <div>
         <span className="mono" style={{ fontWeight: 600 }}>{target.id}</span>
         {target.party ? ' · ' + target.party : ''}
-        {target.payerBusiness ? ' · ' + t('acctPickBusiness') : target.payerName ? ' · ' + t('acctPickPaidBy', { name: target.payerName }) : ''}
+        {target.payerBusiness ? ' · ' + t('payBusiness') : target.payerName ? ' · ' + t('acctPickPaidBy', { name: target.payerName }) : ''}
       </div>
       <div className="acct-sub" style={{ whiteSpace: 'normal' }}>
         {[

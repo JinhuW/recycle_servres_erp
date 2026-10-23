@@ -25,11 +25,23 @@ UPDATE public.oauth_clients SET secret_hash = NULL, revoked_at = COALESCE(revoke
 -- hostname. Prod carries no marker table, so the dump never brings one.
 CREATE TABLE public.env_marker (name TEXT PRIMARY KEY);
 INSERT INTO public.env_marker (name) VALUES ('dev');
--- The Facebook account pool's logins are sealed under prod's FB_POOL_KEY,
--- which dev doesn't have; blanked so dev holds neither the secrets nor blobs
--- it can't open. The rows themselves stay, so the rack still looks real.
--- One blob left behind 500s the whole pool on dev, so a new sealed column
--- must be added here; tests/sync-scrub.test.ts checks every *_enc column.
-UPDATE public.fb_pool_accounts
-   SET password_enc = NULL, totp_enc = NULL, email_password_enc = NULL, cookie_enc = NULL,
-       token_enc = NULL;
+-- Sealed values (lib/sealed.ts) are sealed under prod's keys, which dev
+-- doesn't have — the Facebook account pool's logins under FB_POOL_KEY.
+-- Blanked so dev holds neither the secrets nor blobs it can't open; the rows
+-- themselves stay, so the rack still looks real. One blob left behind 500s
+-- the page that reads it, so every *_enc column of every table is found here
+-- rather than listed: a new one is cleared without an edit.
+DO $$
+DECLARE c RECORD;
+BEGIN
+  FOR c IN
+    SELECT cl.relname AS tbl, a.attname AS col
+    FROM pg_catalog.pg_attribute a
+    JOIN pg_catalog.pg_class cl ON cl.oid = a.attrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = cl.relnamespace
+    WHERE n.nspname = 'public' AND cl.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped
+      AND a.attname ~ '_enc$'
+  LOOP
+    EXECUTE pg_catalog.format('UPDATE public.%I SET %I = NULL WHERE %I IS NOT NULL', c.tbl, c.col, c.col);
+  END LOOP;
+END $$;

@@ -207,14 +207,11 @@ export function linkedPaidFrag(sql: SqlClient, orderAlias = 'o') {
 }
 
 // Whether the company's own money paid the purchaser: a live bank row linked
-// as this PO's commission. Failed and reversed rows paid nothing.
+// as this PO's commission. The rule is the SQL function (0203), which the
+// payer sync calls too.
 export function commissionLinkedFrag(sql: SqlClient | TransactionSql, orderAlias = 'o') {
   const o = sql(orderAlias);
-  return sql`EXISTS (
-    SELECT 1 FROM bank_transactions bt
-    WHERE bt.order_id = ${o}.id AND bt.link_kind = 'commission'
-      AND bt.settle_status <> 'failed' AND bt.settle_status <> 'reversed'
-  )`;
+  return sql`order_commission_bank_linked(${o}.id)`;
 }
 
 // A row links to one target — a purchase order (cost or commission) or a sell

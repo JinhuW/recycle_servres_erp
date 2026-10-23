@@ -14,6 +14,7 @@ import type {
   WechatSide,
 } from '@recycle-erp/shared';
 import { api } from './api';
+import { matchesTerms, queryTerms } from './fleetView';
 
 const q = encodeURIComponent;
 
@@ -59,23 +60,68 @@ export function boardOrder(a: WechatRow, b: WechatRow): number {
 /** Traders on the line, both sides; the spec and code lists rank by it. */
 export const traders = (r: WechatRow) => r.buy.senders + r.sell.senders;
 
-export function matchesSearch(r: WechatRow, needle: string): boolean {
-  const n = needle.trim().toLowerCase();
-  if (!n) return true;
-  return [r.key, r.brand ?? '', ...r.partNumbers, ...r.ranks].some(s => s.toLowerCase().includes(n));
+/** Everything the search box may match a line on: what its name and spec
+ *  read, and its part numbers. The terms match as on the fleet pages. */
+export function wechatHaystack(r: WechatRow): string {
+  return [r.key, r.brand, r.ddr, r.code, ...r.partNumbers, ...r.ranks].filter(Boolean).join(' ');
 }
 
-export type BoardGroup = { brand: string | null; rows: WechatRow[] };
+// The Refine panel's rows. Spec and part-code lines add up across brands, so
+// memtrade gives them none to filter by.
+export type Facet = 'ddr' | 'speed' | 'brand' | 'capacity' | 'form' | 'rank';
+export const FACETS: Record<WechatRowKind, readonly Facet[]> = {
+  quote: ['ddr', 'speed', 'brand', 'capacity', 'form', 'rank'],
+  spec: ['ddr', 'speed', 'capacity', 'form', 'rank'],
+  code: ['ddr', 'speed', 'capacity', 'form', 'rank'],
+};
+export type FacetPicks = Partial<Record<Facet, string[]>>;
 
-/** Quote lines grouped under brand headers, in board order. */
-export function groupByBrand(rows: WechatRow[]): BoardGroup[] {
-  const groups: BoardGroup[] = [];
-  for (const r of [...rows].sort(boardOrder)) {
-    const last = groups[groups.length - 1];
-    if (last && last.brand === brandOf(r)) last.rows.push(r);
-    else groups.push({ brand: brandOf(r), rows: [r] });
+/** The values a line files under; a line can list several ranks. */
+export function facetValues(r: WechatRow, f: Facet): string[] {
+  switch (f) {
+    case 'ddr': return r.ddr ? [r.ddr] : [];
+    case 'speed': return r.speed === null ? [] : [String(r.speed)];
+    case 'brand': return [brandOf(r)];
+    case 'capacity': return r.capacityGb === null ? [] : [String(r.capacityGb)];
+    case 'form': return r.formFactor ? [r.formFactor] : [];
+    case 'rank': return r.ranks;
   }
-  return groups;
+}
+
+/** Any picked value within a facet, every facet with picks. */
+function matchesPicks(r: WechatRow, picks: FacetPicks, skip?: Facet): boolean {
+  return (Object.keys(picks) as Facet[]).every(f => {
+    const want = picks[f];
+    return f === skip || !want?.length || facetValues(r, f).some(v => want.includes(v));
+  });
+}
+
+/** Lines per value of each facet, under the other facets' picks. */
+export function facetCounts(
+  rows: readonly WechatRow[], facets: readonly Facet[], picks: FacetPicks,
+): Record<Facet, Record<string, number>> {
+  const out = Object.fromEntries(facets.map(f => [f, {}])) as Record<Facet, Record<string, number>>;
+  for (const f of facets) {
+    for (const r of rows) {
+      if (!matchesPicks(r, picks, f)) continue;
+      for (const v of facetValues(r, f)) out[f][v] = (out[f][v] ?? 0) + 1;
+    }
+  }
+  return out;
+}
+
+const FORM_ORDER = ['server', 'pc'];
+/** A facet's chips in reading order: brands as the board sorts them. */
+export function facetOrder(f: Facet, values: string[]): string[] {
+  const by: Record<Facet, (a: string, b: string) => number> = {
+    ddr: (a, b) => a.localeCompare(b, undefined, { numeric: true }),
+    speed: (a, b) => Number(a) - Number(b),
+    brand: (a, b) => brandRank(a) - brandRank(b) || a.localeCompare(b),
+    capacity: (a, b) => Number(a) - Number(b),
+    form: (a, b) => FORM_ORDER.indexOf(a) - FORM_ORDER.indexOf(b),
+    rank: (a, b) => a.localeCompare(b, undefined, { numeric: true }),
+  };
+  return [...values].sort(by[f]);
 }
 
 export function fmtPrice(value: number, bucket: WechatPriceBucket, locale: string): string {
@@ -124,12 +170,14 @@ export const SIGNAL_TONE: Record<string, 'info' | 'accent' | 'muted'> = {
 // The legend's pills, from most wanted to most offered.
 export const SIGNALS = Object.keys(SIGNAL_KEY);
 
-export type BoardFilter = { pricedOnly: boolean; search: string; signal: string | null };
+export type BoardFilter = { pricedOnly: boolean; search: string; signal: string | null; picks: FacetPicks };
 
 /** The board's lines under its filters; the legend counts the same rows bar search and signal. */
 export function boardRows(rows: readonly WechatRow[], f: BoardFilter): WechatRow[] {
+  const terms = queryTerms(f.search);
   return rows.filter(r =>
-    (!f.pricedOnly || hasPrice(r)) && (f.signal === null || r.signal === f.signal) && matchesSearch(r, f.search));
+    (!f.pricedOnly || hasPrice(r)) && (f.signal === null || r.signal === f.signal)
+    && matchesPicks(r, f.picks) && matchesTerms(wechatHaystack(r), terms));
 }
 
 /** Lines per known signal; one memtrade has no name for counts nowhere. */

@@ -28,8 +28,10 @@ The release flow itself (`dev` → `main` is a full release) is in the root
   data.
 - **The nightly prod→dev copy scrubs credentials**
   (`deploy/railway-sync/scrub.sql`, v1.196.1).  It truncates the refresh,
-  OAuth and login-attempt tables and nulls OAuth client secrets, inside the
-  restore transaction.  A new table holding a token belongs in that file.  An
+  OAuth and login-attempt tables, nulls OAuth client secrets and every
+  sealed `*_enc` column it finds (v1.318.1), inside the restore
+  transaction.  A new table holding a token belongs in that file; a sealed
+  column only needs the `_enc` suffix.  An
   FK onto a scrubbed table fails `tests/sync-scrub.test.ts`, which is the
   point.  Qualify every name in it with `public.`, because the dump before it
   empties `search_path` (v1.211.1).

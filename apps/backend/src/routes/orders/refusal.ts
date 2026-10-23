@@ -7,8 +7,8 @@
 import type { Context } from 'hono';
 import type { User } from '../../types';
 import {
-  committedLinesBody, describeSellOrders, PACKAGE_DELIVERED_MSG, TRACKING_TAKEN_STANDALONE_MSG,
-  trackingTakenMsg,
+  committedLinesBody, describeSellOrders, PACKAGE_DELIVERED_MSG, PAYER_BOOKED_MSG,
+  TRACKING_TAKEN_STANDALONE_MSG, trackingTakenMsg,
 } from './shared';
 
 export type Refusal =
@@ -18,6 +18,7 @@ export type Refusal =
   | { kind: 'archived' }
   | { kind: 'doneLocked' }
   | { kind: 'purchaserDone' }
+  | { kind: 'payerBooked' }
   | { kind: 'revertCommitted'; lineIds: string[] }
   | { kind: 'revertTransfer'; lineIds: string[] }
   | { kind: 'orderWouldBeEmpty' }
@@ -50,6 +51,8 @@ export function refusalResponse(c: Context, u: User, r: Refusal): Response {
       return c.json({ error: 'Order is archived — unarchive it first' }, 409);
     case 'purchaserDone':
       return c.json({ error: 'Only managers can edit an order after submission' }, 403);
+    case 'payerBooked':
+      return c.json({ error: PAYER_BOOKED_MSG }, 403);
     // The revert is a purchaser's edit, so there is no manager variant of
     // these two: the lines that block, and no sell order named.
     case 'revertCommitted':

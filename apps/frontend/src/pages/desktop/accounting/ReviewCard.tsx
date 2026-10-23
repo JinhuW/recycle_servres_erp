@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { ACCOUNTING_QUERY_MAX } from '@recycle-erp/shared';
 import { Icon } from '../../../components/Icon';
-import { FIELD_KEY, ReviewMark } from '../../../components/AccountingBits';
 import { useAuth } from '../../../lib/auth';
 import { useT } from '../../../lib/i18n';
 import { handleFetchError } from '../../../lib/errorToast';
@@ -9,9 +8,9 @@ import { fmtDate } from '../../../lib/format';
 import { useMemberNames } from '../../../lib/useManagers';
 import {
   acctAnswer, acctAsk, acctMarkReviewed, acctWithdrawQuery, acctWithdrawReview,
-  changesSinceReview, clearedReviewer, fmtCny, reviewActions, type AcctEntryDetail,
+  fmtCny, reviewActions, type AcctEntryDetail,
 } from '../../../lib/accounting';
-import { fieldValue } from './reviewBits';
+import { ChangeList, ReviewMark } from './reviewBits';
 
 type Props = {
   entry: AcctEntryDetail;
@@ -52,8 +51,7 @@ export function ReviewCard({ entry, onChanged, onToast }: Props) {
     }
   };
 
-  const reviewer = clearedReviewer(entry.events, r.clearedAt);
-  const changes = r.state === 'changed' ? changesSinceReview(entry.events, r.clearedAt) : {};
+  const cleared = r.state === 'changed' ? entry.cleared ?? null : null;
   const lastEdit = entry.events.filter(e => e.kind === 'edited').at(-1);
   const q = r.query;
   const addressee = q?.to?.name ?? r.author?.name ?? entry.manager.name;
@@ -68,7 +66,7 @@ export function ReviewCard({ entry, onChanged, onToast }: Props) {
       detail = t('acctRvSignedAt', { when: r.at ? fmtDate(r.at, locale) : '', amount: fmtCny(entry.amountCny, locale) });
       break;
     case 'changed':
-      line = reviewer ? t('acctTickChanged', { name: reviewer.name }) : t('acctTickChangedNobody');
+      line = cleared?.reviewer ? t('acctTickChanged', { name: cleared.reviewer.name }) : t('acctTickChangedNobody');
       detail = lastEdit
         ? `${lastEdit.detail.synced === 'po' ? t('acctEvSyncedPo') : lastEdit.actor?.name ?? '—'} · ${fmtDate(lastEdit.at, locale)}`
         : null;
@@ -99,19 +97,8 @@ export function ReviewCard({ entry, onChanged, onToast }: Props) {
           <div className="acct-rv-who">
             <div className="acct-rv-line">{line}</div>
             {detail && <div className="acct-rv-detail">{detail}</div>}
-            {Object.keys(changes).length > 0 && (
-              <dl className="acct-rv-diff">
-                {Object.entries(changes).map(([k, ch]) => (
-                  <div key={k}>
-                    <dt>{FIELD_KEY[k] ? t(FIELD_KEY[k]) : k}</dt>
-                    <dd>
-                      <span className="acct-was">{fieldValue(k, ch.from, { t, locale, people })}</span>
-                      <span aria-hidden="true">→</span>
-                      <b>{fieldValue(k, ch.to, { t, locale, people })}</b>
-                    </dd>
-                  </div>
-                ))}
-              </dl>
+            {cleared && Object.keys(cleared.changes).length > 0 && (
+              <ChangeList changes={cleared.changes} people={people} t={t} locale={locale} />
             )}
             {q && (
               <div className="acct-rv-quote">

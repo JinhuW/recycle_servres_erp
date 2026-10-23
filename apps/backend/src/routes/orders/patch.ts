@@ -10,13 +10,13 @@ import { committedClaimsByLine, openSellStatuses } from '../../lib/sellCommitmen
 import { mergedSpec, specRuleErr, specVal, validateLineInput } from '../../lib/orderInput';
 import { revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE, isClosedBook, heldLines } from '../../services/orderAdvance';
 import { syncOrderCategory } from '../../services/orderCategory';
-import { nameHandoffByChange, setOrderPackageTx, unlinkOrderPackagesTx, packageChanges, changeOrderOwnerTx, type HandoffPackage } from '../../services/orderHandoff';
+import { namePeopleInChanges, setOrderPackageTx, unlinkOrderPackagesTx, packageChanges, changeOrderOwnerTx, type HandoffPackage } from '../../services/orderHandoff';
 import { linkPaypalTxnToOrder, unlinkPaypalTxnFromOrder } from '../../banktx/sync';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../../services/orderGoodsTotal';
 import { synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, normalizeTracking, isMaterialPatch, type Carrier, type PackageSource } from '@recycle-erp/shared';
 import { normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
-import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, committedLinesBody, describeSellOrders, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, paidByAfter, pickedPaidByErr, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, stageMovedBody, type StoredLine, storedLineCols, supplierErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, trackInput, warehouseErr } from './shared';
+import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, committedLinesBody, describeSellOrders, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, movesPayer, paidByAfter, pickedPaidByErr, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, orderCostBooked, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, stageMovedBody, type StoredLine, storedLineCols, supplierErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, trackInput, warehouseErr } from './shared';
 import { OrderRefusal, refusalResponse } from './refusal';
 
 const patchRoutes = new Hono<OrdersEnv>();
@@ -380,7 +380,7 @@ patchRoutes.patch('/:id', async (c) => {
           body.paypalTxnId !== undefined ||
           body.paymentMethod !== undefined ||
           (body.payment !== undefined && body.payment !== orderBefore.payment) ||
-          (body.paidByUserId != null && body.paidByUserId !== orderBefore.paid_by) ||
+          movesPayer(body, orderBefore) ||
           // Ownership decides whose closed book this is — commission and
           // "my orders" both key off it, so it freezes with the rest.
           body.onBehalfOfUserId !== undefined;
@@ -391,6 +391,36 @@ patchRoutes.patch('/:id', async (c) => {
         // past review must close the book on the purchaser here too, not
         // revert it.
         if (u.role !== 'manager') throw new OrderRefusal({ kind: 'purchaserDone' });
+      }
+
+      const touchesOrder =
+        body.totalCost !== undefined ||
+        body.otherFees !== undefined ||
+        body.otherFeesNote !== undefined ||
+        body.notes !== undefined ||
+        body.warehouseId !== undefined ||
+        body.payment !== undefined ||
+        body.paymentMethod !== undefined ||
+        body.paidByUserId !== undefined ||
+        body.commissionRate !== undefined ||
+        body.paypalTxnId !== undefined ||
+        body.supplierId !== undefined ||
+        body.source !== undefined ||
+        body.handoffMethod !== undefined ||
+        body.handoffBy !== undefined;
+      // A self-paid order has no method: flipping to self clears it whether
+      // or not the request said so, and a method sent alongside is dropped.
+      const paymentAfter = body.payment ?? orderBefore.payment;
+      // The payer follows the payment the same way: the Business Account
+      // has none, and a self-paid order always names someone.
+      const newPaidBy = paidByAfter(paymentAfter, body.paidByUserId, orderBefore.paid_by, orderBefore.user_id);
+      // A booked cost's payer is a manager's: the payer sync would void or
+      // move their entry. Refused before the revert below, so a purchaser's
+      // refused edit doesn't send the PO back to Draft on the way.
+      if (u.role !== 'manager' && touchesOrder
+          && (paymentAfter !== orderBefore.payment || newPaidBy !== orderBefore.paid_by)
+          && await orderCostBooked(tx, id)) {
+        throw new OrderRefusal({ kind: 'payerBooked' });
       }
 
       // Read before anything moves: afterwards a goods total that merely went
@@ -444,21 +474,6 @@ patchRoutes.patch('/:id', async (c) => {
 
       let removedSnapshots: LineSnapRow[] = [];
 
-      const touchesOrder =
-        body.totalCost !== undefined ||
-        body.otherFees !== undefined ||
-        body.otherFeesNote !== undefined ||
-        body.notes !== undefined ||
-        body.warehouseId !== undefined ||
-        body.payment !== undefined ||
-        body.paymentMethod !== undefined ||
-        body.paidByUserId !== undefined ||
-        body.commissionRate !== undefined ||
-        body.paypalTxnId !== undefined ||
-        body.supplierId !== undefined ||
-        body.source !== undefined ||
-        body.handoffMethod !== undefined ||
-        body.handoffBy !== undefined;
       // The collector follows the method the way payment_method follows
       // payment: NULL unless the after-state is pickup.
       const facts = handoffFactsAfter(body, orderBefore);
@@ -483,14 +498,8 @@ patchRoutes.patch('/:id', async (c) => {
         const setSource    = body.source        !== undefined ? 1 : 0;
         const setMethodHo  = body.handoffMethod !== undefined ? 1 : 0;
         const setBy        = body.handoffMethod !== undefined || body.handoffBy !== undefined ? 1 : 0;
-        // A self-paid order has no method: flipping to self clears it whether
-        // or not the request said so, and a method sent alongside is dropped.
-        const paymentAfter = body.payment ?? orderBefore.payment;
         const setMethod    = paymentAfter === 'self' || body.paymentMethod !== undefined ? 1 : 0;
         const newMethod    = paymentAfter === 'self' ? null : (body.paymentMethod ?? null);
-        // The payer follows the payment the same way: the Business Account
-        // has none, and a self-paid order always names someone.
-        const newPaidBy    = paidByAfter(paymentAfter, body.paidByUserId, orderBefore.paid_by, orderBefore.user_id);
         // Same canon as the add-package boundary — a pasted id with spaces or
         // lowercase must diff clean against the AI-extracted value.
         const normPaypal = clearPaypal ? null : normPaypalTxnId(body.paypalTxnId);
@@ -536,7 +545,7 @@ patchRoutes.patch('/:id', async (c) => {
       const ownerChanged = !!newOwner && newOwner.ownerId !== orderBefore.user_id;
       if (newOwner && ownerChanged) {
         await changeOrderOwnerTx(tx, id, u, orderBefore.user_id, newOwner, {
-          payerPicked: body.paidByUserId != null && body.paidByUserId !== orderBefore.paid_by,
+          payerPicked: movesPayer(body, orderBefore),
           logPayer: false,
         });
       }
@@ -851,7 +860,7 @@ patchRoutes.patch('/:id', async (c) => {
           orderAfter,
           META_FIELDS,
         );
-        await nameHandoffByChange(tx, metaChanges);
+        await namePeopleInChanges(tx, metaChanges);
         // The box's move rides the same event as the fields, so the timeline
         // and the change-review show one edit, not a field and a package.
         metaChanges.push(...packageChanged);

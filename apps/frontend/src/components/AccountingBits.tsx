@@ -1,5 +1,4 @@
-import type { AccountingDirection, AccountingKind, AccountingReviewState, AccountingTargetType } from '@recycle-erp/shared';
-import { Icon } from './Icon';
+import type { AccountingDirection, AccountingKind, AccountingTargetType } from '@recycle-erp/shared';
 import { splitYuan, type AcctEntry, type AcctEvent } from '../lib/accounting';
 import { afterSalesCasePath } from '../lib/route';
 import { poStageName, type Translate } from '../lib/orderPresentation';
@@ -71,15 +70,20 @@ const BACKFILL_KEY: Record<NonNullable<AcctEvent['detail']['backfilled']>, strin
   commission_paid_by: 'acctEvBackfilledPaidBy', payment_received_by: 'acctEvBackfilledReceiver', payer: 'acctEvBackfilledPayer',
 };
 
-/** One line of an entry's history. An entry filled in from a record's own
- *  payer, or moved or voided by its PO's side of the link, was written by
- *  nobody, so the line says what did it instead. */
-export function HistoryLine({ e, t, locale }: { e: AcctEvent; t: Translate; locale: string }) {
+/** What wrote an event nobody did: an entry filled in from a record's own
+ *  payer, or moved or voided by its PO's side of the link. Null for an
+ *  event a person made. The history and the Activity page both say it. */
+export function eventAgent(e: Pick<AcctEvent, 'kind' | 'detail'>, t: Translate): string | null {
   const byPo = !!e.detail.synced || !!e.detail.backfilled;
-  const by = e.kind === 'voided' && byPo ? t('acctEvVoidedPo')
+  return e.kind === 'voided' && byPo ? t('acctEvVoidedPo')
     : e.detail.backfilled ? t(BACKFILL_KEY[e.detail.backfilled])
     : e.detail.synced === 'po' ? t(e.detail.clearedReview ? 'acctEvSyncedPoCleared' : 'acctEvSyncedPo')
     : null;
+}
+
+/** One line of an entry's history; an event nobody made says what did it. */
+export function HistoryLine({ e, t, locale }: { e: AcctEvent; t: Translate; locale: string }) {
+  const by = eventAgent(e, t);
   return (
     <div>
       {by ?? (
@@ -105,22 +109,5 @@ function eventLine(e: AcctEvent, t: Translate): string {
     case 'answered': return t('acctEvAnswered', { text: e.detail.text ?? '' });
     case 'query_withdrawn': return t('acctEvQueryWithdrawn');
   }
-}
-
-/** The reviewer's tick, in each of its states. `own` is To review as the
- *  entry's author sees it: someone else has to sign it. */
-export function ReviewMark({ state, own, size = 22, label }: {
-  state: AccountingReviewState; own?: boolean; size?: number; label?: string;
-}) {
-  const glyph = Math.round(size * 0.55);
-  const cls = state === 'reviewed' ? 'done' : state === 'changed' ? 'changed' : state === 'queried' ? 'query' : own ? 'own' : 'open';
-  return (
-    <span className={'acct-mark ' + cls} style={{ width: size, height: size }}
-          role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
-      {state === 'reviewed' && <Icon name="check" size={glyph} />}
-      {state === 'changed' && <Icon name="rotate" size={glyph} />}
-      {state === 'queried' && <span className="acct-mark-q">?</span>}
-    </span>
-  );
 }
 

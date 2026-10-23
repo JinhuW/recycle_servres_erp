@@ -47,6 +47,7 @@ export type HandoffRefusal =
   | { kind: 'forbidden' }
   | { kind: 'archived' }
   | { kind: 'notDraft'; lifecycle: string }
+  | { kind: 'payerBooked' }
   | { kind: 'trackingTaken'; otherOrderId: string | null }
   | { kind: 'trackingTakenStandalone' }
   | { kind: 'packageDelivered' }
@@ -86,6 +87,22 @@ export function paidByAfter(
   return sent ?? before ?? ownerId;
 }
 
+/** Whether a manager has booked the PO's cost: a live paid-out purchase
+ *  entry, the one the payer sync (0199) voids or moves when payment or
+ *  paid_by changes. Once there is one, the payer is a manager's to change. */
+export async function orderCostBooked(sql: SqlLike, orderId: string): Promise<boolean> {
+  const r = (await sql`
+    SELECT EXISTS (
+      SELECT 1 FROM accounting_entries
+      WHERE order_id = ${orderId} AND kind = 'purchase' AND direction = 'out' AND voided_at IS NULL
+    ) AS booked
+  `)[0];
+  return r.booked as boolean;
+}
+
+export const PAYER_BOOKED_MSG =
+  "A manager has booked this PO's cost in Accounting, so only a manager can change its payment or Paid by.";
+
 /** An active member by id, for the "Picked up by" picker. Null when unknown
  *  or deactivated. The caller has already checked the id is uuid-shaped. */
 export async function activeMember(
@@ -99,7 +116,7 @@ export async function activeMember(
 
 /** The timeline names people, not uuids: a handoff_by or paid_by change is
  *  rewritten with names the way owner_changed does it. Shared with PATCH. */
-export async function nameHandoffByChange(tx: SqlLike, changes: AuditChange[]): Promise<void> {
+export async function namePeopleInChanges(tx: SqlLike, changes: AuditChange[]): Promise<void> {
   const people = changes.filter(ch => ch.field === 'handoff_by' || ch.field === 'paid_by');
   if (people.length === 0) return;
   const ids = people.flatMap(ch => [ch.from, ch.to]).filter((v): v is string => typeof v === 'string');
@@ -328,7 +345,7 @@ export async function changeOrderOwnerTx(
   });
   if (payerFollows && opts.logPayer !== false) {
     const changes: AuditChange[] = [{ field: 'paid_by', from: fromUserId, to: newOwner.ownerId }];
-    await nameHandoffByChange(tx, changes);
+    await namePeopleInChanges(tx, changes);
     await writeOrderEvent(tx, id, actor.id, 'meta_changed', { changes });
   }
 }
@@ -379,6 +396,12 @@ export async function handoffOrderTx(
     ? null
     : (input.paymentMethod !== undefined ? input.paymentMethod : before.payment_method);
   const paidBy = paidByAfter(payment, input.paidByUserId, before.paid_by, before.user_id);
+  // PATCH's rule: a booked cost's payer is a manager's. The hand-off sends
+  // the payer on file back with every submit, which changes nothing.
+  if (actor.role !== 'manager' && (payment !== before.payment || paidBy !== before.paid_by)
+      && await orderCostBooked(tx, id)) {
+    throw new HandoffRefused({ kind: 'payerBooked' });
+  }
   // The id follows the method the way the method follows the payment: only a
   // PayPal payment has one. A Draft saved as PayPal and handed off as Self or
   // Cash must not keep the id — the link below would file a company payment
@@ -407,7 +430,7 @@ export async function handoffOrderTx(
     FROM orders WHERE id = ${id}
   `)[0] as Record<string, unknown>;
   const changes = diff(before as unknown as Record<string, unknown>, after, HANDOFF_FIELDS);
-  await nameHandoffByChange(tx, changes);
+  await namePeopleInChanges(tx, changes);
 
   let pkg: HandoffPackage | null = null;
   let needsRegister = false;

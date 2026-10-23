@@ -14,7 +14,7 @@ import { sellOrderStatuses } from '../../lib/lookups';
 import { navigate, navigateBack } from '../../lib/route';
 import {
   fitsAnySourcePo, flaggedLots, isPackable, nextOpenProduct, packBody, packFilter, packGroups, packProducts, packScan, packView, packWarehouseOf,
-  packWarehouseOptions, productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck, UNASSIGNED,
+  packWarehouseOptions, productBucket, productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck, UNASSIGNED,
   type PackLine, type PackProduct, type PackResponse,
 } from '../../lib/sellOrderPack';
 import type { Category } from '../../lib/types';
@@ -225,6 +225,14 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     [fit, allProducts, products],
   );
   const sum = useMemo(() => productTally(products, checks), [products, checks]);
+  // The progress map: one cell per product the tally counts, in # order.
+  const cells = useMemo(
+    () => products.flatMap(p => {
+      const bucket = productBucket(p.lots, checks);
+      return bucket ? [{ no: p.no, bucket }] : [];
+    }),
+    [products, checks],
+  );
   const whole = useMemo(() => productTally(allProducts, checks), [allProducts, checks]);
   const blockers = useMemo(() => shipBlockers(lines, checks), [lines, checks]);
   const flagged = useMemo(() => flaggedLots(lines, checks), [lines, checks]);
@@ -430,7 +438,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
       }
       flashUndo({
         prev: applied.flatMap(lineId => before.get(lineId) ?? []),
-        msg: applied.length === 1 ? t('pkAppliedToastOne') : t('pkAppliedToast', { n: applied.length }),
+        msg: t('pkAppliedToast', { n: applied.length }),
       });
       // The selection moves on as a tick's does, judged on the reply: a fold
       // that lost a lot to 0 may now be a single row, under another key.
@@ -825,7 +833,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
       : whole.products === 0
         ? t('pkFinishNothing')
         : blockers.open > 0
-          ? t(left === 1 ? 'pkFinishLeftOne' : 'pkFinishLeft', { n: left })
+          ? t('pkFinishLeft', { n: left })
           : blockers.short > 0 || blockers.zero > 0
             ? t('pkFinishFix', { short: blockers.short, zero: blockers.zero })
             : !takesCounts
@@ -865,23 +873,27 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
         <div className="oe-banner bc-banner"><Icon name="lock" size={13} /> {finishText}</div>
       )}
 
-      <div className="card bc-tally pk-tally">
-        <div className="bc-tally-num">
+      <div className="card pk-tally">
+        <div className="pk-tally-num">
           <span className="mono"><b>{sum.done}</b><span className="muted"> / {sum.products}</span></span>
-          <span className="card-sub">{t('pkUnits', { n: sum.counted, of: sum.units })}</span>
+          <span className="pk-tally-cap">{picked ? t('pkTallyCapWh', { wh: whName(picked) }) : t('pkTallyCap')}</span>
         </div>
-        <div className="bc-tally-meter">
-          <div className="bc-meter" role="img" aria-label={t('pkProgress', { n: sum.done, of: sum.products })}>
-            <i className="bc-m-done" style={{ flexGrow: sum.done }} />
-            <i className="bc-m-part" style={{ flexGrow: sum.partial }} />
-            <i className="bc-m-absent" style={{ flexGrow: sum.absent }} />
-            <i className="bc-m-open" style={{ flexGrow: sum.open }} />
+        <div className="pk-tally-map">
+          {/* The cells carry the #s the packer writes on the labels, so what
+              is left reads as which products, not how many. */}
+          <div
+            className={'pk-map' + (cells.length > 40 ? ' pk-map-dense' : '')}
+            role="img"
+            aria-label={t('pkProgress', { n: sum.done, of: sum.products })}
+          >
+            {cells.map(c => <i key={c.no} className={'pk-cell ' + c.bucket}><span>#{c.no}</span></i>)}
           </div>
           <div className="bc-legend">
             <span className="chip pos dot">{t('pkLegendPacked', { n: sum.done })}</span>
             {sum.partial > 0 && <span className="chip warn dot">{t('pkLegendShort', { n: sum.partial })}</span>}
             {sum.absent > 0 && <span className="chip neg dot">{t('pkLegendZero', { n: sum.absent })}</span>}
             <span className="chip muted dot">{t('pkLegendOpen', { n: sum.open })}</span>
+            <span className="mono pk-tally-units">{t('pkUnits', { n: sum.counted, of: sum.units })}</span>
           </div>
         </div>
         {warehouses.length > 1 && (
@@ -1011,7 +1023,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
                   {t('pkSelTitle')} <span className="mono muted">#{selNo}</span>
                 </span>
               </div>
-              <div className="bc-photo">
+              <div className={'bc-photo' + (selPhoto ? '' : ' pk-photo-none')}>
                 {selPhoto ? (
                   <button type="button" className="bc-photo-btn" onClick={() => setZoom(selPhoto)} title={t('linePhotos')}>
                     <img src={selPhoto} alt={t('pkPhoto', { pn: pnOf(selLine) })} />
@@ -1092,7 +1104,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
                   {flagged.length > 0 && (
                     <button type="button" className="btn" disabled={!ready || busy} onClick={() => void applyFlagged()}>
                       <Icon name="check" size={15} />
-                      {' '}{flagged.length === 1 ? t('pkApplyOne') : t('pkApply', { n: flagged.length })}
+                      {' '}{t('pkApply', { n: flagged.length })}
                     </button>
                   )}
                   {(blockers.short > 0 || blockers.zero > 0) && (

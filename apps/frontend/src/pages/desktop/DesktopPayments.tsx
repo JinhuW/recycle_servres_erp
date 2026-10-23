@@ -11,6 +11,7 @@ import { usePersisted } from '../../lib/listMemory';
 import { match, readHashQuery, useRoute } from '../../lib/route';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useSentinel } from '../../lib/useSentinel';
+import { useMembers } from '../../lib/useManagers';
 import { RouteLink } from '../../components/RouteLink';
 import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
 import { PaymentIgnoreRules } from './PaymentIgnoreRules';
@@ -351,7 +352,8 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   const [disputed, setDisputed] = usePersisted('desktop.payments.disputed', false);
   const [settle, setSettle] = usePersisted('desktop.payments.settle', 'all');
   const [assignee, setAssignee] = usePersisted('desktop.payments.assignee', 'all');
-  const [members, setMembers] = useState<Member[]>([]);
+  // The owner picker and the filter share one list.
+  const members: Member[] = useMembers();
   const [feed, setFeed] = useState<Feed | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -406,14 +408,6 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     if (cursor) p.set('cursor', cursor);
     return p.toString();
   }, [focusOrder, focusSo, status, source, direction, settledQ, hasMatch, disputed, settle, assignee]);
-
-  // The owner picker and the filter share one list; the page is manager-only,
-  // so /api/members is readable here.
-  useEffect(() => {
-    api.get<{ items: Member[] }>('/api/members')
-      .then(r => setMembers(r.items))
-      .catch(handleFetchError);
-  }, []);
 
   // The unlinked and suggested tiles are scoped to the same direction as the
   // list, so the number on the tile and the rows under it can never disagree —
@@ -995,9 +989,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
                   // a control here would only be a second way to do that and an
                   // extra tab stop.
                   <span className="muted">
-                    {row.match!.count === 1
-                      ? t('payMatchCountOne')
-                      : t('payMatchCount', { n: row.match!.count })}
+                    {t('payMatchCount', { n: row.match!.count })}
                   </span>
                 ) : row.category !== 'transfer' && (
                   <span className="muted">{t('payStatusUnlinked')}</span>
@@ -1777,7 +1769,7 @@ function RecordPicker({ txnId, anchor, onDone, onClose }: {
           >
             <span style={{ fontWeight: 500 }}>{r.title || t('payIntUntitled')}</span>
             <span className="muted" style={{ marginLeft: 'auto', fontSize: 12 }}>
-              {r.memberCount === 1 ? t('payIntMembersOne') : t('payIntMembers', { n: r.memberCount })}
+              {t('payIntMembers', { n: r.memberCount })}
             </span>
           </button>
         ))}

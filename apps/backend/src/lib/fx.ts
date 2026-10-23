@@ -9,6 +9,7 @@
 // (base, quote, effective_date) so the loop is safe to call repeatedly
 // within the same UTC day.
 
+import type postgres from 'postgres';
 import type { Sql } from 'postgres';
 import type { SqlLike } from '../db';
 
@@ -43,6 +44,22 @@ export function isSupportedCurrency(c: unknown): c is SupportedCurrency {
 
 export function convertToUsd(amount: number, rateToUsd: number): number {
   return Math.round(amount * rateToUsd * 100) / 100;
+}
+
+/**
+ * CNY per 1 USD as the ledger stood on a calendar day, as a column a query
+ * can select per row: the day's rate, else the latest before it, else — for
+ * a day before the ledger begins — its earliest. The stored direction, not
+ * the multiplier to USD the lookups above return.
+ */
+export function cnyPerUsdOnFrag(sql: SqlLike, day: postgres.PendingQuery<postgres.Row[]>) {
+  return sql`COALESCE(
+    (SELECT r.rate::float FROM fx_rates r
+      WHERE r.base_currency = 'USD' AND r.quote_currency = 'CNY' AND r.effective_date <= ${day}
+      ORDER BY r.effective_date DESC, r.fetched_at DESC LIMIT 1),
+    (SELECT r.rate::float FROM fx_rates r
+      WHERE r.base_currency = 'USD' AND r.quote_currency = 'CNY'
+      ORDER BY r.effective_date, r.fetched_at LIMIT 1))`;
 }
 
 function todayIso(): string {

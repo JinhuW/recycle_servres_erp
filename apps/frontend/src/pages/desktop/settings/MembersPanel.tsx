@@ -11,6 +11,7 @@ import { PasswordMeter } from '../../../components/PasswordMeter';
 import { pwStrengthLabels } from '../../../lib/passwordI18n';
 import { ConfirmDialog } from './dialogs';
 import { useT } from '../../../lib/i18n';
+import { forgetMembers } from '../../../lib/useManagers';
 
 // ─── Members ──────────────────────────────────────────────────────────────────
 export function MembersPanel({ showToast }: { showToast: ToastFn }) {
@@ -31,8 +32,9 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
 
   // Archived members too: the Show archived toggle, the reactivate path and
   // the invite form's duplicate-email check all read them from this list.
+  // Every write here reloads; the pickers' cached names go with it.
   const reload = () => api.get<{ items: Member[] }>('/api/members?includeInactive=true')
-    .then(r => setMembers(r.items))
+    .then(r => { forgetMembers(); setMembers(r.items); })
     .catch(handleFetchError)
     .finally(() => setLoadedOnce(true));
   useEffect(() => { reload(); }, []);

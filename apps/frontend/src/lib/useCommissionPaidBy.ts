@@ -26,7 +26,7 @@ export function paidByValue(p: PaidBy): string {
 
 export function paidByLabel(p: PaidBy, t: Translate): string {
   if (!p) return t('cpPaidByNone');
-  return p.kind === 'company' ? t('cpPaidByCompany') : p.name;
+  return p.kind === 'company' ? t('payBusiness') : p.name;
 }
 
 // A bank payment linked as the commission says the company paid; the server

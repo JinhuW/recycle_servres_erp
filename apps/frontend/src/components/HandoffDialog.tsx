@@ -83,7 +83,7 @@ export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }
   const proofN = f.paidBy === 'self' ? f.proof.chatAtts.length
     : f.method === 'cash' || f.method === 'paypal' ? f.proof.proofAtts.length : 0;
   const paymentSummary = [
-    costPayerLabel({ payment: f.paidBy, paidBy: f.payers.find(m => m.id === f.paidByUserId) ?? null }, t, true),
+    costPayerLabel({ payment: f.paidBy, paidBy: f.payer }, t, true),
     f.paidBy === 'company' ? (f.method === 'cash' ? t('hoMethodCash') : f.method === 'paypal' ? t('hoMethodPaypal') : null) : null,
     f.paidBy === 'company' && f.method === 'paypal' ? f.txnId.trim() || null : null,
     proofN > 0 ? t('payProofOnFile', { n: proofN }) : null,
@@ -203,6 +203,7 @@ export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }
           method={f.method} onMethod={f.setMethod}
           txnId={f.txnId} onTxnId={f.setTxnId}
           txnRequired
+          payerLocked={f.order.payerLocked === true}
           proof={f.proof}
           idPrefix="ho"
         />

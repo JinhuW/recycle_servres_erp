@@ -17,6 +17,156 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.318.2] - 2026-10-23
+
+A purchaser can no longer void or reassign a manager's RMB Flow entry by
+changing their PO's payer (RS-363). The payer sync (0199) keeps a PO's live
+cost entries in step with the PO: a flip to the Business Account voids them,
+and a new Paid by moves them. Only managers book entries, but until now a
+purchaser could make either change on their own PO, through the PO page or
+the hand-off, right up to Ready to Pay. RS-358 had left that as the design.
+
+Now, once a PO has a live paid-out cost entry, only a manager can change its
+payment or Paid by. A purchaser's save that would is refused with a 403,
+before anything is written, so it doesn't send an In Transit PO back to
+Draft on the way. A save that leaves the payer as it is, including the
+hand-off's echo of it, still goes through. A PO with no cost entry, or only
+voided ones, works as before. The PO payload carries `payerLocked`, and the
+purchaser's Paid by select is disabled on both PO pages and both hand-off
+surfaces, with a note saying a manager has booked the cost. The rule sits in
+the two write routes, not the trigger, which can't tell who saved the PO and
+would otherwise also block the bank sync.
+
+## [1.318.1] - 2026-10-23
+
+The two things RS-359 left out of the v1.317 review (RS-360): the Activity
+crash, and the cleanups the review listed.
+
+**A tab gets only the areas it can draw.** v1.317 added the Accounting area
+to the Activity feed, and a tab still on an older bundle crashed when it
+opened one of those rows. That release is past, but the next new area would
+have done the same. The page now sends the areas it knows, and the server
+leaves the rest out of the rows and the counts. The row detail reads its
+area label from a table, so no row can throw there. Accounting rows nobody
+made say what did it (*Paid by followed the PO*), as the entry's history
+does, and a diff names payers who have left.
+
+**One rule in one place.** The review's main cleanups:
+
+- **Review state.** It is worked out once, in SQL, and the TypeScript twin
+  is gone. The summary band, the sidebar count and Review mode's tabs share
+  one predicate per tab. The open tabs say `reviewed_at IS NULL`, so 0197's
+  index can serve them.
+- **Who may do what.** Who may sign off, withdraw, ask, answer or withdraw
+  a question is one function in `packages/shared`. The API refuses with it,
+  and the pages offer buttons with it. The five review routes share one
+  shape, and a refusal has one type.
+- **Changed since review.** The drawer used to work this out again from the
+  history, naming the reviewer by a different rule. `GET /entries/:id` now
+  returns the same `cleared` block as Review mode's rows. The fold that
+  builds it lives in `packages/shared`, with tests.
+- **Bulk sign-off.** It is two statements whatever its size, through the
+  same code as a single sign-off, and checks only the entries it can sign.
+- **Commission paid from the Business Account.** It is one SQL function
+  (0203), called by both the payer sync and the routes. The rate for a day
+  is one helper in `lib/fx.ts`, with an index on `effective_date`. The
+  duplicate check is now a date range the book's index can find.
+- **PO PATCH.** It asks *does this change the payer?* once, on what
+  `paidByAfter` will write. Echoing a payer on a closed Business Account PO
+  no longer trips the closed-book freeze.
+- **Dev scrub.** The prod→dev scrub nulls every sealed `*_enc` column it
+  finds, on any table, so a new one needs no hand edit.
+
+**Less work per page.**
+
+- **Members.** Pickers read `/api/members/names` through one cached hook,
+  never `/api/members`, which computes every member's lifetime profit. The
+  names list takes `includeInactive` for managers. The PO pages, the
+  hand-off, Submit, Payments, Activity and the Accounting pages use it.
+- **Review count.** The sidebar and the RMB Flow page share one request
+  for the count.
+- **Review mode.** It caches its formatters, registers its key handler
+  once, works out its lists once per change, and stops re-reading *For you*
+  on a tab switch.
+- **`t()` and a count of one.** It reads the `…One` key when `n` is 1, so
+  the hand-written singular branches are gone.
+
+**Smaller fixes:**
+
+- The entry form builds its Paid by options with the PO pages' `payerChoices`.
+- The PO pages share one payer helper, `costPayerDraft`.
+- WeChat's search matches every term, anywhere, and highlights them. Its
+  view tabs are links that keep the view in the URL.
+- The Orders list sorts the Payment column by the payer it shows.
+- Dead keys and exports are gone, and the Review strip reuses `.bc-meter`.
+- `ReviewMark` moved under `pages/desktop/`.
+
+## [1.318.0] - 2026-10-23
+
+Monitors ▸ WeChat: brand and generation get columns of their own, and the
+board gets the inventory page's Refine panel (RS-362).
+
+**Brand and generation are columns.** The *Brand & code* board used to put
+each brand in a header row ("三星 · 53 lines") over its lines, and tuck the
+DDR generation into the grey text under the module. Both are now columns, so a
+line reads across in one row. Lines still sort brand-first, unbranded last.
+The spec and part-code boards show *Generation* but no *Brand*, because
+memtrade gives those lines no brand.
+
+**A Refine panel filters the board.** It is the same collapsible panel of
+chips as the inventory page's **Refine RAM**: Generation, Speed, Brand
+(*Brand & code* only), Capacity, Device (Server/PC) and Rank, each chip with
+the number of lines it would show. Chips are OR within a row and AND across
+rows. Each row counts under the other rows' picks, *Priced lines only* and the
+supply legend, but not the search, as the legend does. The legend's own
+counts now follow the picks. Picks hold across a change of day and of board.
+Picking a spec from Most wanted or Most offered clears them, and so does the
+toolbar's *Clear*.
+
+The panel is now one component the two pages share. Two fixes came with it,
+so the inventory panel gets them too:
+
+- It collapses on a click outside it rather than on mousedown. The mousedown
+  collapse moved everything below the panel before the mouse came up, so the
+  click that closed the panel could miss the row it was aimed at, or a Most
+  wanted spec once the page was scrolled.
+- A picked chip's label no longer vanishes under the mouse. The hover style
+  outranked the picked one and inked the label in the chip's own fill.
+
+## [1.317.5] - 2026-10-23
+
+Pack mode's progress card, selection and side panel, refined (RS-361).
+
+**The progress card lays out again.** It borrowed Review mode's two-half
+grid but held three bare pieces. The count sat flush in the card's corner,
+the meter was glued to its top edge, and *Packing from* floated mid-card on
+a second row. The card now has its own grid: the count, the progress, and
+the warehouse switch on one padded row, with the switch on its own row
+below 900px.
+
+**The progress bar maps the order.** One cell per product, in # order and
+labelled with the # the packer writes on the item. A cell is green once the
+product is packed, amber while it is short, red at 0, and a dashed empty slot
+while it waits. What is left now reads as which products, not how many.
+Cells too narrow for a label drop it. The cells and the legend chips count
+from one helper, so they can't disagree.
+
+**The count says what it counts.** It is captioned *products packed*, or
+*products packed, AMS only* under a picked warehouse. Before, a picked
+warehouse showed "1 / 1" under a head that said "6 products", with nothing
+to explain the gap. The units moved to the end of the legend.
+
+**Selection is an ink frame.** The selected row used the green wash, and in
+Pack mode green means packed: an unpacked selected row read as done, and a
+packed one became a solid mint slab. The row Space and the scanner act on is
+now framed in ink on a neutral wash. A scan's "tap the one you packed" row
+keeps its amber rail.
+
+**Less empty space.** A product with no photo gives the Selected card one
+line in place of an empty 4:3 frame, which brings Finish and Mark shipped
+back on screen on a laptop or iPad. Rows with no photo keep the photo's
+width but no longer draw a grey tile each.
+
 ## [1.317.4] - 2026-10-23
 
 Fixes from a second review of the v1.317 release (RS-359), which reached

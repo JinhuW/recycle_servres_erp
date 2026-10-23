@@ -147,7 +147,7 @@ export function SubmissionThread({ submission, composerRef, onMode, onSent, onTo
         <h2 className="ws-mail-subject">{mail.threadSubject}</h2>
         {messages.length > 0 && (
           <span className="ws-mail-count">
-            {messages.length === 1 ? t('webSubThreadCountOne') : t('webSubThreadCount', { n: messages.length })}
+            {t('webSubThreadCount', { n: messages.length })}
           </span>
         )}
       </div>
