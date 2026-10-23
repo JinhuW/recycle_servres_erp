@@ -28,5 +28,8 @@ INSERT INTO public.env_marker (name) VALUES ('dev');
 -- The Facebook account pool's logins are sealed under prod's FB_POOL_KEY,
 -- which dev doesn't have; blanked so dev holds neither the secrets nor blobs
 -- it can't open. The rows themselves stay, so the rack still looks real.
+-- One blob left behind 500s the whole pool on dev, so a new sealed column
+-- must be added here; tests/sync-scrub.test.ts checks every *_enc column.
 UPDATE public.fb_pool_accounts
-   SET password_enc = NULL, totp_enc = NULL, email_password_enc = NULL, cookie_enc = NULL;
+   SET password_enc = NULL, totp_enc = NULL, email_password_enc = NULL, cookie_enc = NULL,
+       token_enc = NULL;

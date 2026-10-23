@@ -1,5 +1,5 @@
 ---
-id: RS-351
+id: RS-354
 title: Accounting: an entry's Paid by and the PO's payer stay in sync; one company-wide balance
 type: story
 status: done
@@ -8,8 +8,8 @@ created: 2026-10-22
 reporter: jinhu
 branch: feat/po-paid-by-payer
 pr: 826
-version: 1.315.0
-related: [RS-350, RS-349, RS-340]
+version: 1.317.0
+related: [RS-353, RS-349, RS-340]
 ---
 
 ## Ask
@@ -26,7 +26,7 @@ related: [RS-350, RS-349, RS-340]
 RS-340 opened the managers' RMB book with `accounting_entries.manager_id
 NOT NULL`: whose money moved. RS-349 booked commissions from the PO's
 commission *Paid by*, and a commission entry fills that field when nobody
-is on file; the PO never writes back. RS-350 named the cost payer and let
+is on file; the PO never writes back. RS-353 named the cost payer and let
 the PO read *Business Account* when the company paid — but the book could
 not say so, and an entry written under Jinhu kept reading Jinhu after a
 PayPal row was linked as the commission and the PO flipped to Business
@@ -70,12 +70,12 @@ the company's single book rather than one per manager.
 
 ## Notes
 
-- **Superseded in part by RS-353 (same release):** the Business Account is
+- **Superseded in part by RS-355 (same release):** the Business Account is
   not a payer in the RMB book after all. `manager_id` stays NOT NULL, the
   form, filter and Held by offer people only, and a PO the Business Account
   paid voids its entries instead of carrying them. The person-to-person
   link and the one company-wide balance stand as written here.
-- PO → entry runs in the database (migration 0198: `accounting_sync_payer`
+- PO → entry runs in the database (migration 0199: `accounting_sync_payer`
   and two triggers), so every writer is covered — the PO page, the
   commission screenshot fill, bank link / unlink / pair, the bank sync's
   settle-status flips, a PO delete — without a hook in each route.
@@ -84,7 +84,7 @@ the company's single book rather than one per manager.
 - Deleting a draft PO unlinks its bank rows before the delete, so a
   commission entry on a linked Business Account PO lands on the PO's
   on-file person, then reads as unlinked.
-- Supersedes RS-350's "no Business Account money in the RMB book".
+- Supersedes RS-353's "no Business Account money in the RMB book".
 - Plan: `~/.claude/plans/mossy-hopping-dijkstra.md` (session plan, not in
   repo), reviewed twice; the first draft derived the payer on read and was
   redone when Jinhu said the link must sync both ways.

@@ -1,5 +1,5 @@
 ---
-id: RS-353
+id: RS-355
 title: Accounting groups Payments and RMB Flow; the RMB Flow records money outside the Business Account
 type: story
 status: done
@@ -8,8 +8,8 @@ created: 2026-10-22
 reporter: jinhu
 branch: feat/po-paid-by-payer
 pr: 826
-version: 1.315.0
-related: [RS-351, RS-350, RS-340]
+version: 1.317.0
+related: [RS-354, RS-353, RS-340]
 ---
 
 ## Ask
@@ -26,7 +26,7 @@ related: [RS-351, RS-350, RS-340]
 
 ## Context
 
-RS-351 (same release) let the RMB book name the Business Account as a
+RS-354 (same release) let the RMB book name the Business Account as a
 payer, so an entry could follow its PO when a Mercury/PayPal row was linked
 as the commission. Jinhu's clarification draws the line the other way: the
 company's own money is Payments' — the USD bank, reconciled there — and the
@@ -59,7 +59,7 @@ Flow's Paid by offers people only. A person payer keeps flowing both ways.
       and a restored entry is never voided by the PO again.
 - [x] Recording an RMB entry on a PO the Business Account paid is refused;
       the form and the PO card say so and point to Payments.
-- [x] A person payer still flows both ways (RS-351).
+- [x] A person payer still flows both ways (RS-354).
 - [x] Existing live entries on a company-paid PO are voided once, with a
       history line saying so.
 
@@ -70,8 +70,8 @@ Flow's Paid by offers people only. A person payer keeps flowing both ways.
 
 ## Notes
 
-- Supersedes RS-351's Business Account payer; `accounting_entries.manager_id`
-  stays NOT NULL. Migration 0198 is rewritten in place: it had run nowhere
+- Supersedes RS-354's Business Account payer; `accounting_entries.manager_id`
+  stays NOT NULL. Migration 0199 is rewritten in place: it had run nowhere
   but CI and a local dev database.
 - The one-off void reaches production rows (PO-1439 / AC-1038 among them);
   each keeps its history and can be restored.

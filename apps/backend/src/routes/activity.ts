@@ -8,9 +8,10 @@ import { restageSoldEvent, soldSettleEventSql } from '../services/orderSold';
 import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor } from '../lib/pagination';
 import type { Env, User } from '../types';
 
-// Workspace-wide activity feed — the union of all four audit ledgers
-// (order_events, sell_order_events, inventory_events, ref_price_events) as one
-// reverse-chronological record. Drives the desktop Activity page.
+// Workspace-wide activity feed — the union of all five audit ledgers
+// (order_events, sell_order_events, inventory_events, ref_price_events,
+// accounting_entry_events) as one reverse-chronological record. Drives the
+// desktop Activity page.
 //
 // Read-only. Every source table is append-only by trigger; nothing here writes.
 
@@ -57,8 +58,8 @@ activity.get('/', async (c) => {
   // ── Filter fragments, shared by the feed and the pill counts ──────────────
   // Keyset on (created_at, id) — the tiebreaker shape lib/pagination.ts
   // documents. Both columns stay uncast so each branch can use its *_feed_idx
-  // from migration 0079; all four ledgers key on uuid, so the id compare is
-  // type-clean.
+  // from migration 0079 (0197 for accounting); all five ledgers key on uuid,
+  // so the id compare is type-clean.
   const afterTs = cursorTs(cursor);
   const cursorFrag = afterTs && cursor
     ? sql`(e.created_at, e.id) < (${cursorTsParam(sql, afterTs)}, ${cursor.id}::uuid)`
@@ -94,6 +95,9 @@ activity.get('/', async (c) => {
     price: sql`${!action || action === 'priced' ? sql`TRUE` : sql`FALSE`}
             AND ${sinceFrag} AND ${actorFrag('actor_user_id')}
             AND (${searchFrag(['rp.part_number', 'rp.label', 'act.name'])})`,
+    acct: sql`${sinceFrag} AND ${kindFrag('acct')} AND ${actorFrag('actor_id')}
+            AND (${searchFrag(['e.entry_id', 'ae.order_id', 'ae.sell_order_id', 'ae.after_sales_id',
+                               'ae.counterparty', "e.detail->>'text'", 'act.name'])})`,
   };
 
   const FROM = {
@@ -107,11 +111,14 @@ activity.get('/', async (c) => {
     price: sql`FROM ref_price_events e
                JOIN ref_prices rp ON rp.id = e.ref_price_id
                LEFT JOIN users act ON act.id = e.actor_user_id`,
+    acct: sql`FROM accounting_entry_events e
+              JOIN accounting_entries ae ON ae.id = e.entry_id
+              LEFT JOIN users act ON act.id = e.actor_id`,
   };
 
   // ── Feed ──────────────────────────────────────────────────────────────────
-  // Each branch pre-sorts and pre-limits, so the union merges four short lists
-  // rather than materialising four whole ledgers.
+  // Each branch pre-sorts and pre-limits, so the union merges five short lists
+  // rather than materialising five whole ledgers.
   const tail = (a: ActivityArea) =>
     sql`${FROM[a]} WHERE ${cursorFrag} AND ${WHERE[a]}
         ORDER BY e.created_at DESC, e.id DESC LIMIT ${limit + 1}`;
@@ -141,6 +148,16 @@ activity.get('/', async (c) => {
               e.ref_price_id AS target_ref, 'priced' AS kind,
               jsonb_build_object('price', e.price, 'source', e.source, 'note', e.note) AS detail
             ${tail('price')}`,
+    // An entry's own event says what happened; the entry says what it is, so
+    // a sign-off line can name the money it signed and the record it is for.
+    acct: sql`SELECT 'acct' AS area, e.id AS id, e.created_at, ${cursorTsSelect(sql, sql`e.created_at`)} AS cursor_ts,
+              e.actor_id AS actor_id, act.name AS actor_name, act.initials AS actor_initials,
+              e.entry_id AS target, e.entry_id AS target_ref, e.kind,
+              e.detail || jsonb_build_object(
+                'entry', jsonb_build_object(
+                  'direction', ae.direction, 'kind', ae.kind, 'amountCny', ae.amount_cny,
+                  'record', COALESCE(ae.order_id, ae.sell_order_id, ae.after_sales_id))) AS detail
+            ${tail('acct')}`,
   };
 
   // Each branch must be parenthesised: an unwrapped ORDER BY / LIMIT binds to
@@ -169,7 +186,7 @@ activity.get('/', async (c) => {
   //
   // Which is exactly why it only runs on the first page. The count deliberately
   // ignores the cursor, so every infinite-scroll page used to re-run the same
-  // full four-ledger COUNT and get the same answer. Omitted on cursored pages;
+  // full five-ledger COUNT and get the same answer. Omitted on cursored pages;
   // the client keeps the numbers it already has.
   let counts: Record<string, number> | undefined;
   if (!cursor) {
@@ -179,10 +196,11 @@ activity.get('/', async (c) => {
         UNION ALL SELECT 'so'  ${FROM.so}    WHERE ${WHERE.so}
         UNION ALL SELECT 'inv' ${FROM.inv}   WHERE ${WHERE.inv}
         UNION ALL SELECT 'price' ${FROM.price} WHERE ${WHERE.price}
+        UNION ALL SELECT 'acct' ${FROM.acct} WHERE ${WHERE.acct}
       ) t GROUP BY area
     `;
 
-    counts = { all: 0, po: 0, so: 0, inv: 0, price: 0 };
+    counts = { all: 0, po: 0, so: 0, inv: 0, price: 0, acct: 0 };
     for (const r of countRows) {
       counts[r.area] = r.n;
       counts.all += r.n;

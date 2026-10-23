@@ -1,6 +1,6 @@
 # Events written in one transaction share a clock, so their order is undefined
 
-**Date:** 2026-10-22 · **Area:** backend tests, `accounting_entry_events`, `order_events` · **Ticket:** RS-351
+**Date:** 2026-10-22 · **Area:** backend tests, `accounting_entry_events`, `order_events` · **Ticket:** RS-354
 
 ## Symptom
 
@@ -20,7 +20,7 @@ swapped. The code under test did the same thing both times.
 `accounting_entry_events.created_at` defaults to `NOW()`, which in Postgres is
 the **transaction's** start time, not the statement's. The PO delete writes
 the `unlinked` event and then nulls `bank_transactions.order_id`, whose
-trigger (migration 0198) writes the sync's `edited` event — both inside the
+trigger (migration 0199) writes the sync's `edited` event — both inside the
 delete's transaction, so both carry the same `created_at`. The history is
 read `ORDER BY created_at, id`, and `id` is a random UUID, so the tie breaks
 either way.

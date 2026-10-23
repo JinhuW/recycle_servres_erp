@@ -1,5 +1,5 @@
 ---
-id: RS-350
+id: RS-353
 title: Paid by names a manager or the Business Account
 type: story
 status: done
@@ -8,7 +8,7 @@ created: 2026-10-22
 reporter: jinhu
 branch: feat/po-paid-by-payer
 pr: 826
-version: 1.315.0
+version: 1.317.0
 related: [RS-328, RS-349]
 ---
 
@@ -76,7 +76,7 @@ payer.
   AGENTS.md fixed rule: the set stays Company pay / Self pay).
 - Booking Business Account money in the RMB book (it is the USD bank,
   reconciled on Payments) and a purchase backfill from the cost payer.
-  Superseded by RS-351 in the same release: the book names the Business
+  Superseded by RS-354 in the same release: the book names the Business
   Account and an entry's Paid by follows its PO.
 - Paying a manager back; per-manager reimbursement reports.
 - A bank row hand-linked to a person-paid PO is that person's reimbursement
@@ -92,7 +92,7 @@ payer.
 - Activity history written before this release still reads "Company" for a
   commission paid by the business (`routes/orders/shared.ts
   recordPayerTx`); only the live labels say Business Account.
-- Migration 0197 backfills `paid_by = user_id` on every self-paid PO: the
+- Migration 0198 backfills `paid_by = user_id` on every self-paid PO: the
   owner is who the system already reimburses, so the record matches the
   books.
 - Plan: `~/.claude/plans/mossy-hopping-dijkstra.md` (session plan, not in

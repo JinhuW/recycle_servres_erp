@@ -3,7 +3,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
 import { loginAs, ALEX, SOFIA, MARCUS, PRIYA } from './helpers/auth';
 
-// Who paid the supplier on a self-paid PO (orders.paid_by, 0197): a manager
+// Who paid the supplier on a self-paid PO (orders.paid_by, 0198): a manager
 // in person or the purchaser. The Business Account ('company') names nobody,
 // and every write path keeps the two in step.
 

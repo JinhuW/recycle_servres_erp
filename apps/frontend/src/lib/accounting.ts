@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react';
 import { api } from './api';
 import type { PaidBy } from './useCommissionPaidBy';
 import {
   addDays, addMonths, startOfMonth, startOfYear, todayIn,
-  type AccountingCurrency, type AccountingDirection, type AccountingKind, type AccountingMethod,
+  type AccountingCheck, type AccountingCurrency, type AccountingDirection, type AccountingKind,
+  type AccountingMethod, type AccountingReviewFacts, type AccountingReviewState, type AccountingReviewTab,
   type AccountingTargetType, type IsoDate,
 } from '@recycle-erp/shared';
 
@@ -21,6 +23,26 @@ export type AcctEntry = {
   createdAt: string; updatedAt: string;
   createdBy: { id: string; name: string } | null;
   voided: { at: string; by: string | null; reason: string } | null;
+  // Null once voided: a voided entry is out of review.
+  review: AcctReview | null;
+};
+
+export type AcctPerson = { id: string; name: string };
+
+export type AcctReview = {
+  state: AccountingReviewState;
+  // What a sign-off names, so a stale page can't sign off another version.
+  version: string;
+  // Whoever wrote the version on the book; null for a backfilled entry.
+  author: AcctPerson | null;
+  by: AcctPerson | null;
+  at: string | null;
+  clearedAt: string | null;
+  query: {
+    by: AcctPerson | null; text: string; at: string; to: AcctPerson | null;
+    // An answer with no text is an edit that fixed the entry.
+    answer: { by: AcctPerson | null; text: string | null; at: string } | null;
+  } | null;
 };
 
 export type AcctRow = AcctEntry & { balance: number | null };
@@ -46,12 +68,16 @@ export type AcctTarget = {
 };
 
 export type AcctEvent = {
-  id: string; kind: 'created' | 'edited' | 'voided' | 'restored' | 'unlinked';
+  id: string;
+  kind: 'created' | 'edited' | 'voided' | 'restored' | 'unlinked'
+    | 'reviewed' | 'unreviewed' | 'queried' | 'answered' | 'query_withdrawn';
   detail: {
     changes?: Record<string, { from: unknown; to: unknown }>; reason?: string; orderId?: string;
     backfilled?: 'commission_paid_by' | 'payment_received_by' | 'payer';
     // Written by the PO's side of the link, not by a person.
     synced?: 'po';
+    text?: string; amountCny?: number;
+    clearedReview?: { by: string | null; at: string };
   };
   at: string; actor: { id: string; name: string } | null;
 };
@@ -67,6 +93,25 @@ export type AcctSummary = {
   managers: { id: string; name: string; balance: number }[];
   first: IsoDate | null;
   fx: AcctFx;
+  review: {
+    entries: number; reviewed: number; changed: number; queried: number;
+    forMe: number; waitingOnOthers: number; movedCny: number; reviewedCny: number; activeManagers: number;
+  };
+};
+
+// A row of Review mode: the entry, what it is weighed against, and every
+// field changed since an earlier sign-off was cleared.
+export type AcctReviewRow = AcctEntry & {
+  targetFacts: AcctTarget | null;
+  facts: AccountingReviewFacts;
+  checks: AccountingCheck[];
+  cleared: { reviewer: AcctPerson | null; at: string; changes: Record<string, { from: unknown; to: unknown }> } | null;
+};
+
+export type AcctReviewQueue = {
+  rows: AcctReviewRow[];
+  counts: Record<AccountingReviewTab, number>;
+  truncated: boolean;
 };
 
 export type AcctLedger = {
@@ -98,13 +143,28 @@ export const acctEntries = (query: string) =>
 export const acctEntry = (id: string) =>
   api.get<{ entry: AcctEntryDetail }>(`/api/accounting/entries/${enc(id)}`);
 export const acctCreate = (body: AcctEntryBody) =>
-  api.post<{ id: string; commissionPaidBy?: PaidBy }>('/api/accounting/entries', body);
+  api.post<{ id: string; commissionPaidBy?: PaidBy }>('/api/accounting/entries', body).then(reviewChanged);
 export const acctPatch = (id: string, body: Partial<AcctEntryBody>) =>
-  api.patch<{ ok: true; commissionPaidBy?: PaidBy }>(`/api/accounting/entries/${enc(id)}`, body);
+  api.patch<{ ok: true; commissionPaidBy?: PaidBy }>(`/api/accounting/entries/${enc(id)}`, body).then(reviewChanged);
 export const acctVoid = (id: string, reason: string) =>
-  api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/void`, { reason });
+  api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/void`, { reason }).then(reviewChanged);
 export const acctRestore = (id: string) =>
-  api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/restore`, {});
+  api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/restore`, {}).then(reviewChanged);
+export const acctReviewQueue = (tab: AccountingReviewTab, managerId?: string) =>
+  api.get<AcctReviewQueue>('/api/accounting/review?' + new URLSearchParams({ tab, ...(managerId ? { managerId } : {}) }));
+export const acctMarkReviewed = (id: string, version: string) =>
+  api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/review`, { version }).then(reviewChanged);
+export const acctWithdrawReview = (id: string) =>
+  api.delete<{ ok: true }>(`/api/accounting/entries/${enc(id)}/review`).then(reviewChanged);
+export const acctAsk = (id: string, text: string) =>
+  api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/query`, { text }).then(reviewChanged);
+export const acctWithdrawQuery = (id: string) =>
+  api.delete<{ ok: true }>(`/api/accounting/entries/${enc(id)}/query`).then(reviewChanged);
+export const acctAnswer = (id: string, text: string) =>
+  api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/answer`, { text }).then(reviewChanged);
+export const acctBulkReview = (entries: { id: string; version: string }[]) =>
+  api.post<{ reviewed: string[]; skipped: { id: string; reason: string }[] }>('/api/accounting/review/bulk', { entries })
+    .then(reviewChanged);
 export const acctTargets = (kind: AccountingKind, q: string) =>
   api.get<{ candidates: AcctTarget[] }>('/api/accounting/targets?' + new URLSearchParams({ kind, ...(q ? { q } : {}) }));
 
@@ -192,4 +252,83 @@ export function phonePeriod(p: PhonePeriod, today: IsoDate): { from: IsoDate; to
     case '30d': return { from: addDays(today, -29), to: today };
     case 'year': return { from: startOfYear(today), to: today };
   }
+}
+
+// ── Review ──────────────────────────────────────────────────────────────────
+
+// Fired after any write that can move a count: a sign-off, a question, an
+// edit or a void. The sidebar badge and the page header listen.
+const REVIEW_CHANGED = 'acct-review-changed';
+export function reviewChanged<T>(r: T): T {
+  window.dispatchEvent(new Event(REVIEW_CHANGED));
+  return r;
+}
+
+/** What waits on the viewer: entries to sign off, and questions to answer. */
+export function useAcctReviewCount(enabled: boolean): number {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    const load = () => {
+      api.get<{ forMe: number; asked: number }>('/api/accounting/review/count')
+        // A badge that fails to load stays as it was; it is never worth a dialog.
+        .then(r => { if (alive) setN(r.forMe + r.asked); }, () => {});
+    };
+    load();
+    window.addEventListener(REVIEW_CHANGED, load);
+    return () => { alive = false; window.removeEventListener(REVIEW_CHANGED, load); };
+  }, [enabled]);
+  return enabled ? n : 0;
+}
+
+/**
+ * What the viewer may do about an entry's review — the server's rules, so a
+ * button is never offered that the API would refuse. The author never signs
+ * off their own version; a question goes to the author or, for an entry
+ * nobody wrote, to the manager whose money it was.
+ */
+export function reviewActions(e: Pick<AcctEntry, 'review' | 'manager'>, me: string) {
+  const r = e.review;
+  const none = { review: false, withdraw: false, query: false, answer: false, withdrawQuery: false, own: false };
+  if (!r) return none;
+  const own = r.author?.id === me;
+  const addressee = r.author?.id ?? e.manager.id;
+  const open = r.state === 'open' || r.state === 'changed';
+  return {
+    review: !own && r.state !== 'reviewed',
+    withdraw: r.state === 'reviewed' && r.by?.id === me,
+    query: !own && open && addressee !== me,
+    answer: r.state === 'queried' && r.query?.to?.id === me,
+    withdrawQuery: r.state === 'queried' && r.query?.by?.id === me,
+    own: own && r.state !== 'reviewed',
+  };
+}
+
+/**
+ * Every field changed since a sign-off was cleared, from what the reviewer
+ * signed to what the entry says now, read off the entry's own history. A
+ * field put back as it was drops out. The server's Review mode rows carry
+ * the same thing, worked out the same way.
+ */
+export function changesSinceReview(events: readonly AcctEvent[], clearedAt: string | null) {
+  const out: Record<string, { from: unknown; to: unknown }> = {};
+  if (!clearedAt) return out;
+  const since = new Date(clearedAt).getTime();
+  for (const ev of events) {
+    if (ev.kind !== 'edited' || new Date(ev.at).getTime() < since) continue;
+    for (const [k, ch] of Object.entries(ev.detail.changes ?? {})) {
+      out[k] = { from: k in out ? out[k].from : ch.from, to: ch.to };
+    }
+  }
+  for (const k of Object.keys(out)) if (JSON.stringify(out[k].from) === JSON.stringify(out[k].to)) delete out[k];
+  return out;
+}
+
+/** Who signed the version an edit then cleared: the last sign-off before it. */
+export function clearedReviewer(events: readonly AcctEvent[], clearedAt: string | null): AcctPerson | null {
+  if (!clearedAt) return null;
+  const since = new Date(clearedAt).getTime();
+  const last = events.filter(e => e.kind === 'reviewed' && new Date(e.at).getTime() <= since).at(-1);
+  return last?.actor ?? null;
 }

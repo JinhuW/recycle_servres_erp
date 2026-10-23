@@ -8,6 +8,7 @@ import { handleFetchError } from '../../../lib/errorToast';
 import { fmtMoney } from '../../../lib/format';
 import { acctEntry, acctRestore, acctVoid, fmtBookDay, type AcctEntryDetail } from '../../../lib/accounting';
 import { EntryDialog, TargetLine } from './EntryDialog';
+import { ReviewCard } from './ReviewCard';
 
 type Props = {
   id: string;
@@ -107,6 +108,8 @@ export function EntryDrawer({ id, onClose, onChanged, onToast }: Props) {
                 {entry.reference && (<><dt>{t('acctFieldReference')}</dt><dd className="mono">{entry.reference}</dd></>)}
                 {entry.note && (<><dt>{t('acctFieldNote')}</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{entry.note}</dd></>)}
               </dl>
+
+              <ReviewCard entry={entry} onToast={onToast} onChanged={() => { load(); onChanged(); }} />
 
               <div className="so-section-head" style={{ marginTop: 22 }}><Icon name="clock" size={14} /> {t('acctHistory')}</div>
               <div className="acct-history">

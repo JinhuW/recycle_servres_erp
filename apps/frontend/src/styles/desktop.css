@@ -92,6 +92,8 @@ html.desktop, body.desktop, .desktop #root {
   border-radius: 999px; background: var(--accent-soft);
   color: var(--accent-strong); font-weight: 600;
 }
+/* Work waiting on the viewer reads amber, apart from the accent marks. */
+.nav-item .badge.due { background: var(--warn-soft); color: var(--warn-strong); }
 /* Second level: a parent opens while you are on one of its pages. These stay
    above the icon-rail block, whose `.sidebar .nav-item` padding has to win
    over the child indent; the rail hides the caret as one of its label spans. */
@@ -2406,6 +2408,10 @@ html.desktop, body.desktop, .desktop #root {
 .ac-area[data-area="so"]    .ac-bar,    .ac-row[data-area="so"]    .ac-stripe { background: var(--accent); }
 .ac-area[data-area="inv"]   .ac-bar,    .ac-row[data-area="inv"]   .ac-stripe { background: oklch(0.72 0.13 75); }
 .ac-area[data-area="price"] .ac-bar,    .ac-row[data-area="price"] .ac-stripe { background: oklch(0.55 0.16 295); }
+/* The Accounting book's ink: darker than the other four, so it reads apart by
+   lightness as well as hue. */
+.ac-area[data-area="acct"]  .ac-bar,    .ac-row[data-area="acct"]  .ac-stripe { background: oklch(0.4 0.03 250); }
+.ac-area[aria-pressed="true"][data-area="acct"] .ac-bar { background: rgba(255,255,255,0.7); }
 
 .ac-t {
   font-family: 'JetBrains Mono', ui-monospace, monospace;

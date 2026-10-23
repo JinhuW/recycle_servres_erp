@@ -48,7 +48,7 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   non-manager's JSON never carries a manager-only key — not even as `null`,
   since the name alone would advertise the feature. Whole-endpoint manager
   features (sell orders, customers, transfers, activity, members,
-  bank and internal transactions, the RMB Flow (v1.310.0, named Accounting until v1.315.0), tracker,
+  bank and internal transactions, the RMB Flow (v1.310.0, named Accounting until v1.317.0), tracker,
   the WeChat market (v1.312.0), coordinator, connectors, FX rates, inventory export and analysis, a line's
   linked sell orders) answer 403. The
   Facebook account pool (`/api/facebook-pool`, v1.262.0) is the exception
@@ -231,7 +231,7 @@ is not a stage but a flag beside one, set once every line has sold
   one fact per row since v1.172.1: source, then warehouse, then the delivery
   switch beside what that choice needs, a hairline between them), *Cost
   Payment* (paid by — the Business Account, or the person who paid, since
-  v1.315.0 — method, transaction ID, proof files, the manager's
+  v1.317.0 — method, transaction ID, proof files, the manager's
   bank-payments ledger and the Accounting card — named *Payment* until
   v1.163.0, when the second payment below got a home), *Commission* (purchaser, rate, and what the
   purchaser earns — the maths that used to sit in an aside titled "Payment
@@ -241,13 +241,13 @@ is not a stage but a flag beside one, set once every line has sold
   Above the drop box, **Paid by** names the manager who paid the purchaser
   (v1.217.0): a select of the active managers, or *Not recorded*, which every
   order starts at. Since v1.301.0 it also offers **Business Account** (named
-  *Company paid* until v1.315.0), a fixed option rather than a member, for a
+  *Company paid* until v1.317.0), a fixed option rather than a member, for a
   commission paid from the company's account. A live bank payment linked as
   the PO's commission makes it read Business Account on its own: the select
   locks with a note saying why, and an
   unlink or a reversal gives back the pick made by hand. Whatever this field
   reads, the PO's Commission entries in the RMB Flow read too, and a
-  Commission entry's Paid by writes back here (v1.315.0, see *Accounting*).
+  Commission entry's Paid by writes back here (v1.317.0, see *Accounting*).
   **The screenshot's upload records the payer** (v1.302.0): a manager who uploads one while
   Paid by reads *Not recorded* is recorded as the payer. If Paid by names
   someone else, or reads Company paid, the upload asks *Set Paid by to you?*
@@ -721,11 +721,11 @@ is not a stage but a flag beside one, set once every line has sold
   how the goods get here: **Local pickup** (who collected it, from a member
   picker) or **Shipping label** (paste the tracking number; the carrier is
   recognised from its shape, as on Add-package). Then who paid. The
-  **Business Account** (*Company card* until v1.315.0) names a method, PayPal
+  **Business Account** (*Company card* until v1.317.0) names a method, PayPal
   or Cash: PayPal keeps the transaction-ID rule and offers the optional
   screenshot that reads the ID; Cash lifts that rule but needs its own proof
   (v1.153.0, below). **A person** — any active manager by name, or the
-  purchaser (*Self-paid* until v1.315.0) — asks for no method and no ID — it
+  purchaser (*Self-paid* until v1.317.0) — asks for no method and no ID — it
   is reimbursed, not matched against the bank — but **requires the chat with
   the seller** as a Submission attachment (any
   Submission file on the order counts). The dialog asks for nothing else —
@@ -788,18 +788,18 @@ is not a stage but a flag beside one, set once every line has sold
   had a picker in the cell. The record is made on the PO page, by the
   commission screenshot's upload or a confirmed pick. A manager sees a PO
   with a bank payment linked as its commission as a *Business Account* chip
-  (*Company paid* until v1.315.0) that opens that payment. It is sortable,
+  (*Company paid* until v1.317.0) that opens that payment. It is sortable,
   in the Columns picker and on by default. Unlike Total cost above,
   migration 0188 added it to every saved column list, so nobody has to tick
   it on.
-- **The cost's Paid by names who paid the supplier** (v1.315.0): the
+- **The cost's Paid by names who paid the supplier** (v1.317.0): the
   **Business Account** — the company's Mercury and PayPal money, the only
   kind the Payments page links to a PO — or **a person**, any active manager
   by name, or the purchaser when they are not one. The picker is a select on
   every surface the payment picker already had (below); picking a person
   keeps the chat-screenshot rule, the Business Account keeps Method and the
   transaction-ID and auto-link rules. Stored as the same `payment`
-  (`company` / `self`) plus `orders.paid_by` (migration 0197), which named
+  (`company` / `self`) plus `orders.paid_by` (migration 0198), which named
   the purchaser on every self-paid PO that existed. The list's Payment cell
   and its filter chips read *Business* or the person's name; a change is one
   *Paid by: ‹from› → ‹to›* Activity line. **The cost comes back to whoever
@@ -816,7 +816,7 @@ is not a stage but a flag beside one, set once every line has sold
   screenshot of the amount** (v1.153.0). The desktop Submit and Edit pages,
   the phone's Review and Detail screens, and the hand-off dialog and sheet
   all share one component: *Paid by* (the Business Account or a person since
-  v1.315.0; Company card / Self-paid before), then, under the Business
+  v1.317.0; Company card / Self-paid before), then, under the Business
   Account, *Method* (PayPal / Cash), then a proof panel whose heading
   states what the chosen path needs before anything is typed — the
   transaction ID plus the optional screenshot that reads it (since v1.167.0
@@ -1084,7 +1084,7 @@ is not a stage but a flag beside one, set once every line has sold
 - **Warehouse and payment chips** under the desktop list's stage rail
   (v1.252.0): a Warehouse group (All, one chip per warehouse the loaded POs
   use, No warehouse when some PO has none) and a Payment group (All,
-  Business, one chip per person who paid a loaded PO — since v1.315.0; All,
+  Business, one chip per person who paid a loaded PO — since v1.317.0; All,
   Company, Self-paid before), for every role. Each chip's count is what its click
   would show given every other filter — search, Done, stage, Sold and the
   other group; the active chip clicked again clears its group. The filter is
@@ -1906,7 +1906,7 @@ when it arrives.  The system never buys a label.
 
 ## Payments and reconciliation
 
-Manager-only; the sidebar's **Accounting ▸ Payments** (v1.315.0), beside the
+Manager-only; the sidebar's **Accounting ▸ Payments** (v1.317.0), beside the
 RMB Flow. Links **Mercury and PayPal transactions to purchase orders**, to a
 PO's commission, or to sell orders (v1.257.0). Everything the Business
 Account paid lives here; the RMB Flow is for money that did not go through
@@ -2135,7 +2135,7 @@ it.
 
 ## RMB Flow
 
-Manager-only, both shells (v1.310.0; named *Accounting* until v1.315.0).
+Manager-only, both shells (v1.310.0; named *Accounting* until v1.317.0).
 The managers' book of money received and paid **outside the Business
 Account**, kept in **RMB**. The company's own money is Payments' — the USD
 bank, reconciled there — and both pages sit under the sidebar's
@@ -2166,8 +2166,8 @@ is who paid, below).
     out of every total and balance; **Restore** puts it back. Nothing is
     deleted. A draft PO deleted after money was booked against it leaves the
     entry on the book without its link, and its history names the PO.
-  - **An entry's Paid by and its PO's payer are one value** (v1.315.0,
-    migration 0198), kept in step both ways. *Paid by* is a person: an
+  - **An entry's Paid by and its PO's payer are one value** (v1.317.0,
+    migration 0199), kept in step both ways. *Paid by* is a person: an
     active manager, or the PO's own purchaser on a self-paid cost. The
     Business Account is never a payer here — its money is Payments'.
     - *PO → entry.* Whatever moves a PO's payer moves its live entries of
@@ -2228,7 +2228,7 @@ is who paid, below).
   - **The book** has Date (printed once per day), Entry, For (kind, the record
     as a link, counterparty, note), Paid by, Method, then **Received, Paid and
     Balance** columns: direction is the column a figure sits in. Balance is
-    one company-wide book (v1.315.0): what the whole book held after that
+    one company-wide book (v1.317.0): what the whole book held after that
     entry, from the first entry on, so the payer, direction, kind, method and
     search filters hide rows without changing any balance. *Show voided*
     lists voided entries struck through.
@@ -2256,6 +2256,65 @@ is who paid, below).
   entry opens on its own screen with Edit, Void and Restore. The phone PO
   page's Cost Payment and Commission folds carry the order's entries and a
   Record payment button.
+- **Every entry is signed off by a manager who didn't write it** (v1.315.0,
+  RS-350; desktop).
+  - **Who writes, who signs.** The author is whoever recorded the entry, or
+    later changed a field the sign-off covers. The author can't sign off
+    their own version; any other active manager can, the entry's own manager
+    included. Entries the 0196 backfill wrote have no author, so any manager
+    reviews them. With one active manager, nobody can, and the strip says a
+    second manager is needed.
+  - **What a sign-off covers.** Every field but the note. An edit to any of
+    them clears the sign-off. The entry then reads *Changed since review*,
+    with the old and new value of each field, until someone other than the
+    editor signs it again. A note-only edit keeps the review. A sign-off
+    names the version the page showed, so an out-of-date page gets a 409 and
+    re-reads. A void takes the entry out of review, and a restore brings it
+    back To review. The reviewer can withdraw their own sign-off.
+  - **Query.** A reviewer who can't sign asks the author a question (up to
+    280 characters). Where an entry has no author, the question goes to the
+    manager whose money it was. That person is notified, and the entry waits
+    under *Queried* until they answer or edit it. An edit counts as the
+    answer. The exchange stays on the entry until the next sign-off, and a
+    sign-off closes an open question.
+  - **Review mode** (`#/accounting/review`) is the PO's Review mode for the
+    book: full width, no sidebar.
+    - Tabs: *For you*, *Queried*, *Waiting on others* (your own entries) and
+      *Reviewed* (the last 30 days). The queue runs oldest first and is not
+      limited to the book's period.
+    - A tally counts entries and yuan reviewed in the visit.
+    - Each row's mark signs it off, as does Space. A row signed off here
+      sinks under *Reviewed in this visit* with an Undo. ↑↓ / j k move,
+      `q` queries, `e` opens the entry's drawer, `u` undoes the last action,
+      Esc leaves.
+    - The side panel shows the entry, then its checks:
+      - the record's own figure against what the book has on it, at the FX
+        ledger's rate for the entry's day: matches within 1% or ¥10; over
+        warns, short only informs;
+      - a dollar entry's rate more than 2% from the ledger's that day;
+      - a look-alike live entry within 7 days (same direction, kind, amount,
+        currency, method and record, or counterparty on an Other entry).
+    - Checks are hints, never gates. *Mark n reviewed* signs off in bulk only
+      To review entries with no warning, after a confirm that lists them, and
+      the server checks each one again.
+  - **On the book:**
+    - *Log* · *Review mode* (with what waits on you) · *Record entry* in the
+      head.
+    - A Review filter.
+    - A Review column past Balance: the reviewer's first name on a tick, a
+      dashed ring on your own entry, an amber loop when changed, a blue `?`
+      when queried.
+    - A *Reviewed* strip in the band, over the band's scope: entries and yuan
+      reviewed, what is for you, queried and waiting on others. A period with
+      every entry reviewed says so; there is no separate period sign-off.
+  - **Elsewhere:**
+    - The sidebar's Accounting item counts the entries and questions waiting
+      on you.
+    - The entry drawer carries a Review card with the viewer's own actions.
+    - Editing a reviewed entry warns that saving clears the review.
+    - The history logs every sign-off, withdrawal, question, answer and
+      clear. The phone shows those lines too, but has no Review mode;
+      `#/accounting/review` opens the book there.
 
 ## Transfers
 
@@ -2338,6 +2397,13 @@ over MCP.
   reverse-chronological register (v1.37.0), filterable by area, action, person,
   date range and free text. Raw kinds normalise to one vocabulary so query and
   labels can't drift.
+- **The Accounting book is the fifth ledger** (v1.315.0, RS-350).
+  `accounting_entry_events` joins the union as the *Accounting* area, with a
+  darker ink stripe. A row names its entry and opens it, and reads the change
+  in the book's own words: fields, yuan, the question's text. The action
+  filter gains *Reviewed* and *Query*. The area travels in the address
+  (`#/activity?area=acct`), so the book's *Log* button lands filtered. The
+  table is append-only by trigger from 0197, like the other four.
 - Loads as you scroll, with a pinned column head (v1.38.0), and "Open record"
   opens the record (v1.51.x).
 - Member/permission changes are **absent** — they write no audit rows
@@ -2440,6 +2506,17 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   waiting and the failed list still look at every post. If either read
   fails, that part shows a dash or a note.
 
+  Since v1.316.0 the page has the Facebook page's tabs: **Fleet**
+  (`/tracker`, everything above) and **Prompts** (`/tracker/prompts`, the
+  card below), and the title follows the tab. The workers toolbar matches
+  the Facebook one. A search box on the left finds a worker by id or role,
+  across the whole fleet rather than the rows scrolled in: while a search is
+  typed, the table loads every worker the status filter allows in one
+  request (the tracker's cap is 500) and filters them in the browser. On the
+  right, a summary reads workers, posts in the past 24 hours, alerts,
+  subreddits watched and rules on. *Clear filters* resets the search and the
+  legend together.
+
   Since v1.291.0, a **Which prompt is better** card scores every prompt
   version by its leads. A lead is an alert someone reacted to with anything
   but 👎.
@@ -2473,13 +2550,22 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   redoes a day; a push replaces the whole day. The ERP only stores and shows
   it: nothing feeds Market values or any order.
   - One report day at a time, picked from a dropdown or with the arrows.
-    The newest is `/wechat`; `/wechat/<date>` links to one day. Cards show
-    buyers, sellers, trade posts and group messages, with the change in
-    buyers and sellers against the report day before.
-  - Claude's market notes sit beside **Most wanted** and **Most offered**,
-    the specs with the most buyers and sellers. Clicking one shows it on
-    the board, turning *Priced lines only* off when the spec has no price
-    (v1.312.2).
+    The newest is `/wechat`; `/wechat/<date>` links to one day.
+  - Since v1.316.0 the page has the Facebook fleet page's layout. Two tabs,
+    **Price board** and **Groups**, each with a count, sit under the title;
+    the tab holds across a change of day. Above the board, a legend of
+    memtrade's supply reads (Short, Tight, Balanced, Loose, Glut) counts the
+    lines in each and filters the board to one; the counts follow the line
+    family and *Priced lines only*, not the search. The board's toolbar puts
+    the search first and a summary on the right: buyers, sellers, trade
+    posts and groups with messages, with the change in buyers and sellers
+    against the day before on hover. Its foot carries the shown/total line
+    count and the report's window. The four KPI cards are gone.
+  - Claude's market notes, **Most wanted** and **Most offered** (the specs
+    with the most buyers and sellers) sit in an aside beside the board, or
+    above it below 1190px (v1.316.0). Clicking a spec shows it on the
+    board, clearing the supply filter and turning *Priced lines only* off
+    when the spec has no price (v1.312.2).
   - The **price board** lists every line by brand & code (三星 64G 5600 DM0,
     grouped under brand headers), by spec (64G 5600) or by part code
     (32G DM0). Each line shows the bid (buyers) and ask (sellers) median
@@ -2494,7 +2580,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - Opening a line lists its posts, newest first and up to 100: who, what
     price and quantity, the raw line, which groups and how many copies.
     *Bids* and *Asks* ask for each side's own newest 100 (v1.312.2).
-    Beside them are the bid and ask medians over the last 30 report days,
+    Under them (beside them before v1.316.0) are the bid and ask medians
+    over the last 30 report days,
     drawn in the one tax basis most of them were quoted in (v1.312.2), and
     every price by tax basis.
   - A group with no name shows its id, and a sender with no display name
@@ -2502,8 +2589,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     no report for that day.
   - A banner says when memtrade fell back to its rules for a day (Claude
     was unavailable), when only part of a day's posts arrived, and repeats
-    memtrade's own warnings. **Groups read** lists each group's messages
-    that day and marks the ones joined in it.
+    memtrade's own warnings. **Groups read**, on the Groups tab since
+    v1.316.0 and always open, lists each group's messages that day and
+    marks the ones joined in it.
   - The push (`/api/wechat-market/push/*`) takes a Bearer token with the
     `wechat:write` scope from a service client a manager creates under
     Settings → Connectors. The day comes first, then its posts in batches
@@ -2698,9 +2786,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   "holder or manager" rule on return/report are enforced in the transaction,
   an import lands whole or not at all (naming the rows whose UID collided),
   and the `#` is never reused. Logins (password, 2FA key, e-mail password,
-  cookie) are sealed at rest under `FB_POOL_KEY`; the nightly prod→dev copy
-  blanks them. A purchaser's read carries the login of the accounts they hold
-  and only the rack — status, holder, age, the cookie's `c_user` — for the
+  cookie, access token) are sealed at rest under `FB_POOL_KEY`; the nightly
+  prod→dev copy blanks them, the access token too since v1.316.1. A
+  purchaser's read carries the login of the accounts they hold and only the
+  rack — status, holder, age, the cookie's `c_user` — for the
   rest; the activity ledger (every add, import, edit, take, return, report,
   retire, remove, plus copies and reveals of a login) is manager-only. In
   production without `FB_POOL_KEY` the pool routes answer 503 and name the
@@ -3131,7 +3220,7 @@ removed in v1.191.0.
 - **The sidebar has a second level** (v1.207.0). A parent entry opens while
   you are on one of its pages and is one row with a › caret everywhere else;
   clicking it opens its first child. Two parents today: **Oversight ▸
-  Accounting** (v1.315.0), holding **Payments** (`/payments`, lit on Internal
+  Accounting** (v1.317.0), holding **Payments** (`/payments`, lit on Internal
   transactions too) and **RMB Flow** (`/accounting`); and **Oversight ▸
   Monitors**, holding **Facebook** (`/fleet`), **Reddit** (`/tracker`) and, since
   v1.312.0, **WeChat** (`/wechat`). A parent's pages print its breadcrumb as

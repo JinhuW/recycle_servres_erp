@@ -256,7 +256,7 @@ describe('accounting', () => {
     expect((await entryOf(alex.token, id)).events.map(e => e.kind)).toEqual(['created', 'edited', 'voided', 'restored']);
   });
 
-  // ── The two-way link with the PO (0198) ───────────────────────────────────
+  // ── The two-way link with the PO (0199) ───────────────────────────────────
 
   const payerOf = async (po: string) =>
     (await api<{ order: { commissionPaidBy: PaidBy } }>('GET', `/api/orders/${po}`, { token: alex.token })).body.order.commissionPaidBy;
@@ -564,14 +564,14 @@ describe('migration 0196 books the payers already on file', () => {
 });
 
 // Entries written before the link existed catch up with their PO once.
-describe('migration 0198 brings each entry in line with its PO', () => {
+describe('migration 0199 brings each entry in line with its PO', () => {
   let alex: Awaited<ReturnType<typeof loginAs>>;
   beforeEach(async () => {
     await resetDb();
     alex = await loginAs(ALEX);
   });
   const replay = async () => {
-    const file = new URL('../migrations/0198_accounting_payer_sync.sql', import.meta.url);
+    const file = new URL('../migrations/0199_accounting_payer_sync.sql', import.meta.url);
     await getTestDb().unsafe(readFileSync(fileURLToPath(file), 'utf8'));
   };
 

@@ -5,23 +5,31 @@ import { ModelPicker, useAiModels } from '../../components/ModelPicker';
 import { Skeleton } from '../../components/Skeleton';
 import { ApiError } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
+import { matchesTerms, queryTerms } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { hrefFor, onLinkClick, useRoute } from '../../lib/route';
 import {
   EVALUATOR_MODEL,
   evaluatorModelProblem,
+  funnelCounts,
   MIN_POLL_INTERVAL_S,
   normalizeSubredditName,
   trackerApi,
+  workerHaystack,
   WORKERS_PAGE_SIZE,
+  WORKERS_SEARCH_LIMIT,
   type LoopName,
+  type PostStatus,
   type TrackerMatch,
   type TrackerRule,
   type TrackerStats,
   type TrackerSubreddit,
   type TrackerWorker,
+  type TrackerWorkerRole,
 } from '../../lib/tracker';
 import { liveness, type Liveness } from '../../lib/workerLiveness';
+import { Hi } from './FleetAccounts';
 import { ConfirmDialog } from './settings/dialogs';
 import { Toggle } from './settings/_shared';
 import { PromptsCard } from './TrackerPrompts';
@@ -29,10 +37,11 @@ import '../../styles/facebookPool.css';
 
 // ─── Monitors ▸ Reddit ────────────────────────────────────────────────────────
 // The Facebook fleet page's chrome (DesktopCoordinator.tsx) with the Reddit
-// monitor's content: a status legend that filters, the workers table beside
-// the newest matches, the pipeline from a poll to an alert, where the
-// subreddits and the alert rules are edited, and the prompt scores below it. Everything goes through the
-// /api/tracker proxy; a 501 from it means the backend has no tracker
+// monitor's content, in two tabs. Fleet: a status legend that filters, the
+// workers table beside the newest matches, and the pipeline from a poll to an
+// alert, where the subreddits and the alert rules are edited. Prompts
+// (/tracker/prompts): which prompt finds more leads. Everything goes through
+// the /api/tracker proxy; a 501 from it means the backend has no tracker
 // credentials, which gets its own quiet state instead of error toasts.
 
 const REFRESH_MS = 30_000;
@@ -45,6 +54,7 @@ const LIVENESS_KEY: Record<Liveness, string> = { live: 'trkLive', stale: 'trkSta
 const LIVENESS_CLASS: Record<Liveness, string> = { live: 'ff-live', stale: 'ff-stale', dead: 'ff-offline' };
 
 const LOOPS: readonly LoopName[] = ['poll', 'evaluate', 'notify'];
+const ROLE_KEY: Record<TrackerWorkerRole, string> = { api: 'trkRoleApi', worker: 'trkRoleWorker' };
 
 // Matches and stats are only decoration on this page: without them their
 // parts read "—", never an error dialog.
@@ -54,14 +64,18 @@ type Props = { showToast?: (msg: string, kind?: 'success' | 'error') => void };
 
 export function DesktopTracker({ showToast }: Props) {
   const { t, locale } = useT();
+  const { path } = useRoute();
+  const promptsOpen = path === '/tracker/prompts';
 
   const [rules, setRules] = useState<TrackerRule[] | null>(null);
   const [subs, setSubs] = useState<TrackerSubreddit[] | null>(null);
-  const [counts, setCounts] = useState<Record<Liveness, number> | null>(null);
+  const [counts, setCounts] = useState<Record<Liveness, number> | Unavailable | null>(null);
   const [matches, setMatches] = useState<TrackerMatch[] | Unavailable | null>(null);
   const [stats, setStats] = useState<TrackerStats | Unavailable | null>(null);
   const [notConfigured, setNotConfigured] = useState(false);
+  // Both live here, not in the table, so a trip to Prompts keeps them.
   const [filter, setFilter] = useState<Liveness | 'all'>('all');
+  const [query, setQuery] = useState('');
 
   const [liveModel, setLiveModel] = useState<string | null>(null);
 
@@ -93,14 +107,20 @@ export function DesktopTracker({ showToast }: Props) {
   }, [fail, loadModel]);
 
   const loadLive = useCallback(() => {
-    trackerApi.workerCounts().then(setCounts).catch(fail);
+    // A failed refresh keeps the last counts; a first one that fails reads "—".
+    trackerApi.workerCounts().then(setCounts).catch(err => {
+      setCounts(c => c ?? 'unavailable');
+      fail(err);
+    });
     trackerApi.listMatches(MATCHES_SHOWN).then(setMatches).catch(() => setMatches('unavailable'));
     trackerApi.stats(new Date(Date.now() - STATS_WINDOW_MS)).then(setStats).catch(() => setStats('unavailable'));
   }, [fail]);
 
-  // Liveness, matches and the post counts all move on their own. A
-  // backgrounded tab polls nothing and catches up the moment it's back.
+  // Liveness, matches and the post counts all move on their own, and only
+  // the Fleet tab shows them. A backgrounded tab polls nothing and catches up
+  // the moment it's back.
   useEffect(() => {
+    if (promptsOpen) return;
     loadLive();
     const refresh = () => { if (!document.hidden) loadLive(); };
     const timer = setInterval(refresh, REFRESH_MS);
@@ -109,17 +129,26 @@ export function DesktopTracker({ showToast }: Props) {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [loadLive]);
+  }, [loadLive, promptsOpen]);
 
   const head = (
     <div className="page-head"><div><div className="page-sub">{t('nav_monitors')} / {t('nav_tracker')}</div>
-      <h1 className="page-title">{t('trkTitle')}</h1></div></div>
+      <h1 className="page-title">{promptsOpen ? t('trkPromptsTitle') : t('trkTitle')}</h1></div></div>
+  );
+  const tabs = (
+    <nav className="tabs fp-view-tabs" aria-label={t('trkViews')}>
+      <a className={`tab ${!promptsOpen ? 'active' : ''}`} href={hrefFor('/tracker')} onClick={onLinkClick('/tracker')}
+        aria-current={!promptsOpen ? 'page' : undefined}><Icon name="globe" size={14} />{t('fpFleet')}</a>
+      <a className={`tab ${promptsOpen ? 'active' : ''}`} href={hrefFor('/tracker/prompts')} onClick={onLinkClick('/tracker/prompts')}
+        aria-current={promptsOpen ? 'page' : undefined}><Icon name="sparkles" size={14} />{t('trkTabPrompts')}</a>
+    </nav>
   );
 
   if (notConfigured) {
     return (
       <>
         {head}
+        {tabs}
         <div className="card">
           <div className="card-body" style={{ display: 'flex', gap: 10, alignItems: 'flex-start', color: 'var(--fg-muted)' }}>
             <Icon name="info" size={16} style={{ flexShrink: 0, marginTop: 2 }} />
@@ -130,27 +159,41 @@ export function DesktopTracker({ showToast }: Props) {
     );
   }
 
+  // Undefined while stats load, null when the tracker can't count posts.
+  const funnel = stats === null ? undefined : funnelCounts(stats === 'unavailable' ? null : stats);
+  // Undefined while the counts load, null when they couldn't be read.
+  const fleetSize = counts === null ? undefined
+    : counts === 'unavailable' ? null
+    : counts.live + counts.stale + counts.dead;
+
+  // Head and tabs sit outside .fp-pool, as on the Facebook page.
   return (
     <>
       {head}
+      {tabs}
       <div className="fp-pool">
-        <WorkerLegend counts={counts} filter={filter} onFilter={setFilter} />
-        <div className="fp-split ff-split">
-          <WorkersCard filter={filter} onClearFilter={() => setFilter('all')} subs={subs} rules={rules}
-            locale={locale} onError={fail} showToast={showToast} onRemoved={loadLive} />
-          <MatchesAside matches={matches} locale={locale} />
-        </div>
-        <FlowCard stats={stats} subs={subs} rules={rules} liveModel={liveModel} locale={locale}
-          onSubsChanged={setSubs} onDeleteSub={setDeletingSub}
-          onRulesChanged={setRules} onEditRule={setRuleDialog} onDeleteRule={setDeletingRule}
-          onEditModel={() => setModelDialog(true)}
-          onError={fail} showToast={showToast} />
-        <PromptsCard locale={locale} onError={fail} showToast={showToast}
-          onPromoted={() => {
-            // Promote rewrites the live model along with the prompt.
-            trackerApi.listRules().then(setRules).catch(fail);
-            loadModel().catch(fail);
-          }} />
+        {promptsOpen ? (
+          <PromptsCard locale={locale} onError={fail} showToast={showToast}
+            onPromoted={() => {
+              // Promote rewrites the live model along with the prompt.
+              trackerApi.listRules().then(setRules).catch(fail);
+              loadModel().catch(fail);
+            }} />
+        ) : <>
+          <WorkerLegend counts={counts} filter={filter} onFilter={setFilter} />
+          <div className="fp-split ff-split">
+            <WorkersCard filter={filter} query={query} onQuery={setQuery}
+              onClear={() => { setFilter('all'); setQuery(''); }}
+              fleetSize={fleetSize} funnel={funnel} subs={subs} rules={rules}
+              locale={locale} onError={fail} showToast={showToast} onRemoved={loadLive} />
+            <MatchesAside matches={matches} locale={locale} />
+          </div>
+          <FlowCard stats={stats} subs={subs} rules={rules} liveModel={liveModel} locale={locale}
+            onSubsChanged={setSubs} onDeleteSub={setDeletingSub}
+            onRulesChanged={setRules} onEditRule={setRuleDialog} onDeleteRule={setDeletingRule}
+            onEditModel={() => setModelDialog(true)}
+            onError={fail} showToast={showToast} />
+        </>}
       </div>
 
       {modelDialog && liveModel !== null && (
@@ -226,7 +269,7 @@ export function DesktopTracker({ showToast }: Props) {
 }
 
 function WorkerLegend({ counts, filter, onFilter }: {
-  counts: Record<Liveness, number> | null;
+  counts: Record<Liveness, number> | Unavailable | null;
   filter: Liveness | 'all';
   onFilter: (f: Liveness | 'all') => void;
 }) {
@@ -238,7 +281,7 @@ function WorkerLegend({ counts, filter, onFilter }: {
           onClick={() => onFilter(filter === s ? 'all' : s)}>
           <i className="fp-dot" />
           <span>{t(LIVENESS_KEY[s])}</span>
-          <b>{counts ? counts[s] : <Skeleton width={14} height={13} radius={4} />}</b>
+          <b>{counts === 'unavailable' ? '—' : counts ? counts[s] : <Skeleton width={14} height={13} radius={4} />}</b>
         </button>
       ))}
     </div>
@@ -252,9 +295,13 @@ function StatusChip({ state }: { state: Liveness }) {
 
 const SKELETON_ROWS = [0, 1, 2, 3, 4, 5];
 
-function WorkersCard({ filter, onClearFilter, subs, rules, locale, onError, showToast, onRemoved }: {
+function WorkersCard({ filter, query, onQuery, onClear, fleetSize, funnel, subs, rules, locale, onError, showToast, onRemoved }: {
   filter: Liveness | 'all';
-  onClearFilter: () => void;
+  query: string;
+  onQuery: (q: string) => void;
+  onClear: () => void;
+  fleetSize: number | null | undefined;
+  funnel: Record<LoopName, number> | null | undefined;
   subs: TrackerSubreddit[] | null;
   rules: TrackerRule[] | null;
   locale: string;
@@ -266,37 +313,68 @@ function WorkersCard({ filter, onClearFilter, subs, rules, locale, onError, show
   const [workers, setWorkers] = useState<TrackerWorker[] | null>(null);
   const [total, setTotal] = useState(0);
   const [now, setNow] = useState(() => Date.now());
-  const loadingRef = useRef(false);
+  // The limit the list on screen was loaded with: a search filters a full
+  // load, and until one lands it can't say a worker isn't there.
+  const [loadedLimit, setLoadedLimit] = useState(0);
+  // Latest wins: each reload outdates whatever is still in flight, so a late
+  // response — a page appended by scrolling included — never lands on top.
+  const seqRef = useRef(0);
+  const appendingRef = useRef(false);
   const loadedRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const terms = queryTerms(query);
+  const searching = terms.length > 0;
 
   loadedRef.current = workers?.length ?? 0;
 
-  const load = useCallback((offset: number, limit: number, append: boolean) => {
-    if (loadingRef.current) return;
-    loadingRef.current = true;
-    trackerApi.listWorkers({ status: filter, limit, offset })
+  const load = useCallback((limit: number) => {
+    const seq = ++seqRef.current;
+    appendingRef.current = false;
+    trackerApi.listWorkers({ status: filter, limit, offset: 0 })
       .then(page => {
+        if (seq !== seqRef.current) return;
         setTotal(page.total);
         setNow(Date.now());
-        setWorkers(prev => append ? [...(prev ?? []), ...page.workers] : page.workers);
+        setWorkers(page.workers);
+        setLoadedLimit(limit);
       })
-      .catch(onError)
-      .finally(() => { loadingRef.current = false; });
+      .catch(err => { if (seq === seqRef.current) onError(err); });
   }, [filter, onError]);
 
-  // Filter change (and mount): start over from the first page.
+  const append = useCallback(() => {
+    if (appendingRef.current) return;
+    appendingRef.current = true;
+    const seq = seqRef.current;
+    trackerApi.listWorkers({ status: filter, limit: WORKERS_PAGE_SIZE, offset: loadedRef.current })
+      .then(page => {
+        if (seq !== seqRef.current) return;
+        setTotal(page.total);
+        setNow(Date.now());
+        setWorkers(prev => [...(prev ?? []), ...page.workers]);
+      })
+      .catch(err => { if (seq === seqRef.current) onError(err); })
+      .finally(() => { if (seq === seqRef.current) appendingRef.current = false; });
+  }, [filter, onError]);
+
+  // A new filter starts over from a blank table.
   useEffect(() => {
     setWorkers(null);
     setTotal(0);
-    load(0, WORKERS_PAGE_SIZE, false);
-  }, [load]);
+    setLoadedLimit(0);
+  }, [filter]);
+
+  // A search loads every worker the filter allows, once, as it starts; the
+  // keys typed after that only filter here. Clearing it starts over at the
+  // first page.
+  useEffect(() => {
+    load(searching ? WORKERS_SEARCH_LIMIT : WORKERS_PAGE_SIZE);
+  }, [load, searching]);
 
   // Liveness is time-derived, so the loaded window refetches on a timer —
   // as one request covering everything currently on screen, not per page.
   useEffect(() => {
     const refresh = () => {
-      if (!document.hidden) load(0, Math.max(loadedRef.current, WORKERS_PAGE_SIZE), false);
+      if (!document.hidden) load(searching ? WORKERS_SEARCH_LIMIT : Math.max(loadedRef.current, WORKERS_PAGE_SIZE));
     };
     const timer = setInterval(refresh, REFRESH_MS);
     document.addEventListener('visibilitychange', refresh);
@@ -304,44 +382,55 @@ function WorkersCard({ filter, onClearFilter, subs, rules, locale, onError, show
       clearInterval(timer);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [load]);
+  }, [load, searching]);
 
   // Infinite scroll: when the sentinel under the table becomes visible and
-  // more rows exist, append the next page.
+  // more rows exist, append the next page. The observer is rebuilt after
+  // every load, so a sentinel still in view asks again.
+  const loaded = workers?.length ?? 0;
   useEffect(() => {
     const sentinel = sentinelRef.current;
-    if (!sentinel) return;
+    if (!sentinel || searching) return;
     const observer = new IntersectionObserver(entries => {
-      if (entries.some(e => e.isIntersecting) && loadedRef.current < total) {
-        load(loadedRef.current, WORKERS_PAGE_SIZE, true);
-      }
+      if (entries.some(e => e.isIntersecting) && loadedRef.current < total) append();
     }, { rootMargin: '200px' });
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [load, total]);
+  }, [append, total, searching, loaded]);
 
+  const shown = workers && searching
+    ? workers.filter(w => matchesTerms(workerHaystack(w, t(ROLE_KEY[w.role])), terms))
+    : workers;
+  const pending = searching && loadedLimit < WORKERS_SEARCH_LIMIT && (workers?.length ?? 0) < total;
   const watched = subs?.filter(s => s.enabled).length;
   const active = rules?.filter(r => r.enabled).length;
 
   return (
     <section className="card fp-accounts ff-workers" aria-label={t('trkWorkers')}>
       <div className="fp-toolbar">
-        <h2>{t('trkWorkers')}</h2>
-        {filter !== 'all' && (
-          <button type="button" className="btn ghost sm" onClick={onClearFilter}>
+        <label className="toolbar-search">
+          <Icon name="search" size={14} />
+          <input className="input" type="search" value={query} autoComplete="off"
+            placeholder={t('trkSearchWorkers')} aria-label={t('trkSearchWorkers')}
+            onChange={e => onQuery(e.target.value)} />
+        </label>
+        {(filter !== 'all' || query) && (
+          <button type="button" className="btn ghost sm" onClick={onClear}>
             <Icon name="x" size={12} />
-            {t('trkShowAll')}
+            {t('fpClear')}
           </button>
         )}
         <span className="ff-summary">
-          {watched === undefined || active === undefined
-            ? <Skeleton width={200} height={11} />
-            : t('trkWorkersSummary', { subs: watched, rules: active })}
+          {watched === undefined || active === undefined || fleetSize === undefined || funnel === undefined
+            ? <Skeleton width={260} height={11} />
+            : funnel
+              ? t('trkWorkersSummaryPosts', { n: fleetSize ?? '—', posts: funnel.poll, alerts: funnel.notify, subs: watched, rules: active })
+              : t('trkWorkersSummary', { n: fleetSize ?? '—', subs: watched, rules: active })}
         </span>
       </div>
 
       <div className="fp-table-wrap">
-        <table className="fp-table ff-table" aria-busy={!workers}>
+        <table className="fp-table ff-table" aria-busy={!workers || pending}>
           <thead>
             <tr>
               <th>{t('trkColWorker')}</th>
@@ -351,8 +440,8 @@ function WorkersCard({ filter, onClearFilter, subs, rules, locale, onError, show
             </tr>
           </thead>
           <tbody>
-            {(workers ?? []).map(w => (
-              <WorkerRow key={w.workerId} worker={w} now={now} locale={locale}
+            {(shown ?? []).map(w => (
+              <WorkerRow key={w.workerId} worker={w} now={now} locale={locale} terms={terms}
                 onRemove={() => {
                   trackerApi.removeWorker(w.workerId)
                     .then(() => {
@@ -365,17 +454,19 @@ function WorkersCard({ filter, onClearFilter, subs, rules, locale, onError, show
                 }}
               />
             ))}
-            {!workers && SKELETON_ROWS.map(i => <WorkerRowSkeleton key={i} />)}
-            {workers?.length === 0 && (
-              <tr><td colSpan={6} className="fp-empty">{filter === 'all' ? t('trkFleetEmpty') : t('trkFleetEmptyFilter')}</td></tr>
+            {(!shown || (pending && shown.length === 0)) && SKELETON_ROWS.map(i => <WorkerRowSkeleton key={i} />)}
+            {shown?.length === 0 && !pending && (
+              <tr><td colSpan={6} className="fp-empty">
+                {searching ? t('trkFleetEmptySearch') : filter === 'all' ? t('trkFleetEmpty') : t('trkFleetEmptyFilter')}
+              </td></tr>
             )}
           </tbody>
         </table>
       </div>
-      <div ref={sentinelRef} style={{ height: 1 }} />
+      {!searching && <div ref={sentinelRef} style={{ height: 1 }} />}
       <div className="fp-table-foot">
-        {workers
-          ? t('trkFleetFoot', { shown: workers.length, n: total, age: relTime(new Date(now).toISOString(), locale) })
+        {shown && !pending
+          ? t('trkFleetFoot', { shown: shown.length, n: total, age: relTime(new Date(now).toISOString(), locale) })
           : <Skeleton width={150} height={11} />}
       </div>
     </section>
@@ -401,10 +492,11 @@ function WorkerRowSkeleton() {
   );
 }
 
-function WorkerRow({ worker: w, now, locale, onRemove }: {
+function WorkerRow({ worker: w, now, locale, terms, onRemove }: {
   worker: TrackerWorker;
   now: number;
   locale: string;
+  terms: readonly string[];
   onRemove: () => void;
 }) {
   const { t } = useT();
@@ -414,8 +506,8 @@ function WorkerRow({ worker: w, now, locale, onRemove }: {
     <tr>
       <td className="ff-wrap">
         <span className="fp-holder">
-          <span className="mono">{w.workerId}</span>
-          <small>{t(w.role === 'api' ? 'trkRoleApi' : 'trkRoleWorker')} · {t('trkStarted', { age: relTime(w.startedAt, locale) })}</small>
+          <span className="mono"><Hi text={w.workerId} terms={terms} /></span>
+          <small><Hi text={t(ROLE_KEY[w.role])} terms={terms} /> · {t('trkStarted', { age: relTime(w.startedAt, locale) })}</small>
         </span>
       </td>
       <td className="ff-wrap">
@@ -516,13 +608,8 @@ function FlowCard({ stats, subs, rules, liveModel, locale, onSubsChanged, onDele
   const [stage, setStage] = useState<LoopName>('evaluate');
   const fmt = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const posts = stats && stats !== 'unavailable' ? stats.posts : null;
-  const n = (...keys: Array<keyof NonNullable<typeof posts>>) =>
-    posts ? keys.reduce((sum, k) => sum + (posts[k] ?? 0), 0) : undefined;
-  const counts: Record<LoopName, number | undefined> = {
-    poll: n('new', 'rejected', 'target', 'notified', 'failed'),
-    evaluate: n('target', 'notified'),
-    notify: n('notified'),
-  };
+  const n = (k: PostStatus) => (posts ? posts[k] ?? 0 : undefined);
+  const counts = funnelCounts(stats && stats !== 'unavailable' ? stats : null);
 
   const settings = (k: LoopName): Setting[] => {
     const v = (x: number | undefined) => (x === undefined ? '—' : fmt.format(x));
@@ -575,8 +662,8 @@ function FlowCard({ stats, subs, rules, liveModel, locale, onSubsChanged, onDele
               <span className="ff-stage-n"><Skeleton width={46} height={20} /></span>
               <span className="ff-stage-unit"><Skeleton width={64} height={10} /></span>
             </> : <>
-              <span className="ff-stage-n">{counts[k] === undefined ? '—' : fmt.format(counts[k])}</span>
-              <span className="ff-stage-unit">{counts[k] === undefined ? t('trkFlowNotCounted') : t(`trkFlowUnit_${k}`)}</span>
+              <span className="ff-stage-n">{counts ? fmt.format(counts[k]) : '—'}</span>
+              <span className="ff-stage-unit">{counts ? t(`trkFlowUnit_${k}`) : t('trkFlowNotCounted')}</span>
             </>}
           </button>
         ))}

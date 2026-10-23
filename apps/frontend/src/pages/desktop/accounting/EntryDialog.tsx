@@ -37,6 +37,9 @@ export function EntryDialog({ preset, entry, onClose, onSaved, zIndex }: {
         className="modal-body"
         onSubmit={e => { e.preventDefault(); void f.submit(); }}
       >
+        {entry?.review?.state === 'reviewed' && (
+          <div className="acct-banner">{t('acctEditClearsReview', { name: entry.review.by?.name ?? '—' })}</div>
+        )}
         <EntryFields f={f} />
       </form>
       <div className="modal-foot">
