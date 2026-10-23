@@ -3418,3 +3418,10 @@ removed in v1.191.0.
   report per load. Numbers only, no paths — it is the answer to "the page feels
   slow", which until then had no evidence behind it either way.
 - `/api/health` reports version, build date, commit and provider modes.
+- **Railway alerts reach Telegram** (v1.322.0). All seven Railway projects
+  send deploy-failed, crashed, out-of-memory, CPU/RAM-monitor and
+  volume alerts, triggered and resolved, to the "Homelab Alerts" Telegram
+  group. Each kind has its own topic. A message names the project,
+  environment, service and commit and links to the deployment. The relay is a
+  Cloudflare Worker, so alerts still arrive while Railway is down
+  (`docs/agents/erp-ops.md`).

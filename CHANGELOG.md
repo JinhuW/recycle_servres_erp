@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.322.0] - 2026-10-23
+
+Railway alerts now reach Telegram (RS-368). The uptime cron probes only the
+prod ERP, so a crashed tracker, a failed dev build or a volume filling up was
+easy to miss. All seven Railway projects now send a webhook for deploy failed,
+crashed and out-of-memory, and for CPU/RAM monitor and volume alerts,
+triggered and resolved. The messages go to the "Homelab Alerts" Telegram
+group, each kind in its own topic. A message names the project, environment
+and service and the commit, and links to the deployment.
+
+Railway formats webhooks only for Discord and Slack, so a small Cloudflare
+Worker (`deploy/railway-alerts/`) turns the raw JSON into a Telegram message.
+It runs off Railway so an alert still gets out while Railway is the thing
+failing. Railway doesn't sign its webhooks, so each one carries a bearer the
+Worker checks. A deleted topic sends the alert to General rather than dropping
+it. A send Telegram refuses answers 502, so Railway retries it.
+
 ## [1.321.0] - 2026-10-23
 
 The worker page's History is now a full-height column that tracks the
