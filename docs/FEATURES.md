@@ -1863,25 +1863,35 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
       their serial port on. It speaks the language the service implies:
       Zebra's is ZPL, FF00 is ESC/POS raster, the rest TSPL. The label
       settings can set the language by hand (`pack.labelLanguage`).
+    - **Each service's port is named** (v1.327.1, RS-381): the characteristic
+      a job is written to, and the one the printer answers on. Until then
+      the page took the first characteristic that takes a write. On the
+      office's CLABEL CT221D (Microchip's ISSC service) that one goes
+      nowhere, so nothing printed. An unknown service's port is guessed,
+      preferring a characteristic that acknowledges writes. Jobs go as
+      acknowledged writes wherever the port takes them.
     - The status is asked on connect, every 15 s, and before each print, by
       TSPL's `ESC ! ?` or ESC/POS's paper sensor. A Zebra shows only
-      connected. A printer out of paper, open or faulted gets no label, and
-      a toast says why.
+      connected, and so does the CT221D, which answers neither query. A
+      printer out of paper, open or faulted gets no label, and a toast says
+      why.
     - The printer stays connected across Pack mode visits in the tab. Where
       Chrome offers `getDevices`, a printer allowed before reconnects on load.
     - **Print label** sits beside the chip, and a packed box also gets one
       in the Finish card. With a printer on, it and the automatic print send
       the label over Bluetooth, with no dialog, and a toast confirms it.
       Without one, they open the print dialog. The settings menu holds *Print
-      when packed* (on by default), the stock (4 × 6, 4 × 3 or
-      2.25 × 1.25 in), the language, *Print with the dialog* and *Disconnect*.
+      when packed* (on by default), the stock (50 × 25 mm, the default since
+      v1.327.1 and the CT221D's; 4 × 6, 4 × 3 or 2.25 × 1.25 in), the
+      language, *Print with the dialog* and *Disconnect*. TSPL gets each
+      stock's size and gap in its own unit (`SIZE 50 mm,25 mm`).
       Its choices are saved preferences (`pack.labelAuto`, `pack.labelSize`,
       `pack.labelLanguage`).
     - The label is one drawn picture (v1.324.0). The printer gets it as 1-bit
       dots at 203 dpi, and the dialog prints it as an image at 300 dpi, at
       the stock's size and on one page. It is black on white for thermal
-      stock. The smallest stock keeps only the number, the purchasers and
-      the counts.
+      stock. Stock under 1.6 in tall keeps only the number, the purchasers
+      and the counts, set larger (v1.327.1).
   - The endpoints (`GET /api/sell-orders/:id/pack`,
     `PUT /api/sell-orders/:id/pack/:lineId`, and
     `POST /api/sell-orders/:id/pack/apply` on a Draft or Packing order only) 403 anyone whose

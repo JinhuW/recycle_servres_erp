@@ -47,7 +47,7 @@ export type PrefMap = {
   // label stock it is laid out for (inches, width × height as it feeds), and
   // the language the Bluetooth printer speaks ('auto' goes by its service).
   'pack.labelAuto': boolean;
-  'pack.labelSize': '4x6' | '4x3' | '2.25x1.25';
+  'pack.labelSize': '50x25mm' | '4x6' | '4x3' | '2.25x1.25';
   'pack.labelLanguage': 'auto' | 'tspl' | 'zpl' | 'escpos';
   // Desktop sidebar folded to its icon rail at any width (under 900px the
   // rail is forced regardless).

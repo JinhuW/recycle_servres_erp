@@ -4,7 +4,7 @@ import { Icon } from '../../components/Icon';
 import { showWarnToast } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
 import {
-  labelJob, labelPrinter, PRINTER_DPI, toRaster, useLabelPrinter, type PrinterLanguage, type PrinterStatus,
+  labelJob, labelPrinter, PRINTER_DPI, toRaster, useLabelPrinter, type PrinterLanguage, type PrinterStatus, type TsplStock,
 } from '../../lib/labelPrinter';
 import { usePreference, type PrefMap } from '../../lib/preferences';
 import { useEscapeKey } from '../../lib/useEscapeKey';
@@ -17,11 +17,14 @@ import { useEscapeKey } from '../../lib/useEscapeKey';
 export type LabelSize = PrefMap['pack.labelSize'];
 export type LabelLanguage = PrefMap['pack.labelLanguage'];
 
-// Inches, width × height as the stock feeds.
-export const LABEL_SIZES: Record<LabelSize, readonly [number, number]> = {
-  '4x6': [4, 6],
-  '4x3': [4, 3],
-  '2.25x1.25': [2.25, 1.25],
+// Each stock: width × height in inches as it feeds, its name, and how TSPL
+// sizes it, in the stock's own unit with the gap between its labels. 50 × 25
+// mm is what the office's 2-inch CLABEL CT221D takes.
+export const LABEL_SIZES: Record<LabelSize, { inches: readonly [number, number]; name: string; tspl: TsplStock }> = {
+  '50x25mm': { inches: [50 / 25.4, 25 / 25.4], name: '50×25 mm', tspl: { size: '50 mm,25 mm', gap: '2 mm,0 mm' } },
+  '4x6': { inches: [4, 6], name: '4×6 in', tspl: { size: '4,6', gap: '0.12,0' } },
+  '4x3': { inches: [4, 3], name: '4×3 in', tspl: { size: '4,3', gap: '0.12,0' } },
+  '2.25x1.25': { inches: [2.25, 1.25], name: '2.25×1.25 in', tspl: { size: '2.25,1.25', gap: '0.12,0' } },
 };
 
 // The label's words, already in the reader's language.
@@ -78,15 +81,17 @@ export async function drawLabel(text: LabelText, widthIn: number, heightIn: numb
   g.fillRect(0, 0, W, H);
   g.fillStyle = '#000';
   const m = Math.min(W, H);
-  const pad = 0.06 * m;
+  // A 2-inch head is a little narrower than its 50 mm stock.
+  const pad = Math.max(0.06 * m, 0.045 * W);
   const inner = W - 2 * pad;
   const small = heightIn < 1.6;
   const size = {
     top: Math.min(0.04 * W, 0.05 * H),
     id: Math.min(0.17 * W, 0.22 * H),
     cap: Math.min(0.036 * W, 0.046 * H),
-    who: Math.min(0.09 * W, 0.1 * H),
-    count: Math.min(0.06 * W, 0.07 * H),
+    // Small stock has no top row or caption, so its name and counts take the room.
+    who: Math.min(0.09 * W, (small ? 0.14 : 0.1) * H),
+    count: Math.min(0.06 * W, (small ? 0.1 : 0.07) * H),
   };
   const caps = (px: number) => { g.font = `600 ${px}px ${SANS}`; g.letterSpacing = `${(0.07 * px).toFixed(1)}px`; };
   const plain = () => { g.letterSpacing = '0px'; };
@@ -185,14 +190,14 @@ export function PackLabel({ text, size, onDone }: { text: LabelText; size: Label
   const done = useRef(onDone);
   useEffect(() => { done.current = onDone; });
   const asked = useRef({ text, size });
-  const [w, h] = LABEL_SIZES[size];
+  const [w, h] = LABEL_SIZES[size].inches;
 
   useEffect(() => {
     let live = true;
     document.body.classList.add('printing-label');
     const after = () => done.current();
     window.addEventListener('afterprint', after);
-    const [aw, ah] = LABEL_SIZES[asked.current.size];
+    const [aw, ah] = LABEL_SIZES[asked.current.size].inches;
     // A laser or inkjet in the dialog is sharper than thermal's 203 dpi.
     void drawLabel(asked.current.text, aw, ah, 300).then(c => { if (live) setUrl(c.toDataURL('image/png')); });
     return () => {
@@ -226,7 +231,7 @@ export function PackLabel({ text, size, onDone }: { text: LabelText; size: Label
 export function useLabelPrint(onPrinted: (orderId: string) => void) {
   const { t } = useT();
   const [auto, setAuto] = usePreference('pack.labelAuto', true);
-  const [size, setSize] = usePreference('pack.labelSize', '4x6');
+  const [size, setSize] = usePreference('pack.labelSize', '50x25mm');
   const [language, setLanguage] = usePreference('pack.labelLanguage', 'auto');
   const printer = useLabelPrinter();
   // Each request mounts a fresh label, which prints once.
@@ -248,10 +253,10 @@ export function useLabelPrint(onPrinted: (orderId: string) => void) {
         showWarnToast(t('pkLabelNotReady', { state: t('pkPrinterPaper_' + paper) }));
         return;
       }
-      const [w, h] = LABEL_SIZES[size];
-      const canvas = await drawLabel(text, w, h, PRINTER_DPI);
+      const stock = LABEL_SIZES[size];
+      const canvas = await drawLabel(text, stock.inches[0], stock.inches[1], PRINTER_DPI);
       const dots = toRaster(canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height));
-      await labelPrinter.print(labelJob(lang, dots, w, h));
+      await labelPrinter.print(labelJob(lang, dots, stock.tspl));
       onPrinted(text.orderId);
     } catch (e) {
       showWarnToast(t('pkLabelPrintFailed', { msg: e instanceof Error ? e.message : String(e) }));
@@ -404,18 +409,18 @@ function PrinterPop({ auto, size, language, onAuto, onSize, onLanguage, autoTitl
           <span className="so-download-hint">{autoHint}</span>
         </span>
       </label>
-      <div className="so-download-warehouse">
+      <div className="so-download-warehouse pk-label-row">
         <span>{t('pkLabelStock')}</span>
         <div className="seg" role="group" aria-label={t('pkLabelStock')}>
           {(Object.keys(LABEL_SIZES) as LabelSize[]).map(s => (
             <button key={s} type="button" className={s === size ? 'active' : ''} aria-pressed={s === size} onClick={() => onSize(s)}>
-              {LABEL_SIZES[s].join('×')}
+              {LABEL_SIZES[s].name}
             </button>
           ))}
         </div>
       </div>
       {detected && (
-        <div className="so-download-warehouse">
+        <div className="so-download-warehouse pk-label-row">
           <span>{t('pkLabelLanguage')}</span>
           <div className="seg" role="group" aria-label={t('pkLabelLanguage')}>
             {LANGUAGES.map(l => (

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chunks, escposJob, languageFor, PRINTER_SERVICES, readStatus, toRaster, tsplJob, zplJob, type Raster } from './labelPrinter';
+import { chunks, escposJob, languageFor, pickPort, PRINTER_SERVICES, readStatus, toRaster, tsplJob, zplJob, type Raster } from './labelPrinter';
 
 // A w×h RGBA image, black where `dark(x, y)`.
 const img = (w: number, h: number, dark: (x: number, y: number) => boolean) => {
@@ -29,9 +29,9 @@ describe('toRaster', () => {
 describe('the label languages', () => {
   const r: Raster = { widthBytes: 2, height: 1, data: new Uint8Array([0xf0, 0x01]) };
 
-  it('TSPL sizes the label and sends the picture inverted, since BITMAP prints a 0', () => {
-    const job = tsplJob(r, 4, 6);
-    const head = 'SIZE 4,6\r\nGAP 0.12,0\r\nDIRECTION 1\r\nCLS\r\nBITMAP 0,0,2,1,0,';
+  it('TSPL sizes the label in its stock\'s unit and sends the picture inverted, since BITMAP prints a 0', () => {
+    const job = tsplJob(r, { size: '50 mm,25 mm', gap: '2 mm,0 mm' });
+    const head = 'SIZE 50 mm,25 mm\r\nGAP 2 mm,0 mm\r\nDIRECTION 1\r\nCLS\r\nBITMAP 0,0,2,1,0,';
     expect(text(job.subarray(0, head.length))).toBe(head);
     expect([...job.subarray(head.length, head.length + 2)]).toEqual([0x0f, 0xfe]);
     expect(text(job.subarray(head.length + 2))).toBe('\r\nPRINT 1,1\r\n');
@@ -70,6 +70,31 @@ describe('languageFor', () => {
     expect(languageFor('000018f0-0000-1000-8000-00805f9b34fb')).toBe('tspl');
     // Chrome opens only services named when asking for the device, in lower case.
     for (const s of PRINTER_SERVICES) expect(s).toBe(s.toLowerCase());
+  });
+});
+
+describe('pickPort', () => {
+  const ch = (uuid: string, ...props: ('write' | 'writeWithoutResponse' | 'notify')[]) => ({
+    uuid, properties: { write: props.includes('write'), writeWithoutResponse: props.includes('writeWithoutResponse'), notify: props.includes('notify') },
+  });
+  it('takes the named port, not the first characteristic that takes a write', () => {
+    // The CLABEL CT221D's Microchip service, in the order Chrome lists it.
+    const chars = [
+      ch('49535343-1e4d-4bd9-ba61-23c647249616', 'notify'),
+      ch('49535343-6daa-4d02-abf6-19569aca69fe', 'writeWithoutResponse'),
+      ch('49535343-8841-43f4-a8d4-ecbe34729bb3', 'writeWithoutResponse', 'write'),
+      ch('49535343-aca3-481c-91ec-d85e28a60318', 'write', 'notify'),
+    ];
+    const port = pickPort('49535343-fe7d-4ae5-8fa9-9fafd205e455', chars)!;
+    expect(port.write.uuid).toBe('49535343-8841-43f4-a8d4-ecbe34729bb3');
+    expect(port.notify?.uuid).toBe('49535343-1e4d-4bd9-ba61-23c647249616');
+  });
+
+  it('guesses an unknown service\'s port, preferring a write the printer acknowledges', () => {
+    const port = pickPort('0000abcd-0000-1000-8000-00805f9b34fb', [ch('a', 'writeWithoutResponse'), ch('b', 'write'), ch('c', 'notify')])!;
+    expect(port.write.uuid).toBe('b');
+    expect(port.notify?.uuid).toBe('c');
+    expect(pickPort('x', [ch('c', 'notify')])).toBeNull();
   });
 });
 
