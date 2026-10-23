@@ -98,6 +98,16 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
   const cities = new Set(all.flatMap(w => w.cities.map(c => c.slug))).size;
   const alerts = all.reduce((n, w) => n + accountAlerts(w, byCity), 0);
   const posts = fleetPostsToday(all);
+  // A key per count, so a count of one can read singular.
+  const workersPart = all.length === 1 ? t('fbcSumWorkersOne', { n: 1 }) : t('fbcSumWorkers', { n: all.length });
+  const citiesPart = cities === 1 ? t('fbcSumCitiesOne', { n: 1 }) : t('fbcSumCities', { n: cities });
+  const alertsPart = alerts === 1
+    ? t('fbcSumAlertsOne', { n: 1, days: HITS_DAYS })
+    : t('fbcSumAlerts', { n: alerts, days: HITS_DAYS });
+  const summary = (posts === null
+    ? [workersPart, citiesPart, alertsPart]
+    : [workersPart, posts === 1 ? t('fbcSumPostsOne', { n: 1 }) : t('fbcSumPosts', { n: posts }), alertsPart, citiesPart]
+  ).join(' · ');
   const startAt = fleet?.search.start_at;
   const missing = fleet
     ? [!fleet.sources.fleet && 'fleet.toml', !fleet.sources.master && 'master.toml'].filter(Boolean) as string[]
@@ -124,9 +134,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
           </button>
         )}
         <span className="ff-summary">
-          {!fleet ? (loading ? <Skeleton width={220} height={11} /> : '…') : posts === null
-            ? t('fbcWorkersSummary', { n: all.length, cities, alerts, days: HITS_DAYS })
-            : t('fbcWorkersSummaryPosts', { n: all.length, posts, cities, alerts, days: HITS_DAYS })}
+          {!fleet ? (loading ? <Skeleton width={220} height={11} /> : '…') : summary}
         </span>
       </div>
 

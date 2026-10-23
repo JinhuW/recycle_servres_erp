@@ -404,6 +404,18 @@ function WorkersCard({ filter, query, onQuery, onClear, fleetSize, funnel, subs,
   const pending = searching && loadedLimit < WORKERS_SEARCH_LIMIT && (workers?.length ?? 0) < total;
   const watched = subs?.filter(s => s.enabled).length;
   const active = rules?.filter(r => r.enabled).length;
+  // A key per count, so a count of one can read singular.
+  const summary = watched === undefined || active === undefined || fleetSize === undefined || funnel === undefined
+    ? null
+    : [
+        fleetSize === 1 ? t('trkSumWorkersOne', { n: 1 }) : t('trkSumWorkers', { n: fleetSize ?? '—' }),
+        ...(funnel ? [
+          funnel.poll === 1 ? t('trkSumPostsOne', { n: 1 }) : t('trkSumPosts', { n: funnel.poll }),
+          funnel.notify === 1 ? t('trkSumAlertsOne', { n: 1 }) : t('trkSumAlerts', { n: funnel.notify }),
+        ] : []),
+        watched === 1 ? t('trkSumSubsOne', { n: 1 }) : t('trkSumSubs', { n: watched }),
+        active === 1 ? t('trkSumRulesOne', { n: 1 }) : t('trkSumRules', { n: active }),
+      ].join(' · ');
 
   return (
     <section className="card fp-accounts ff-workers" aria-label={t('trkWorkers')}>
@@ -421,11 +433,7 @@ function WorkersCard({ filter, query, onQuery, onClear, fleetSize, funnel, subs,
           </button>
         )}
         <span className="ff-summary">
-          {watched === undefined || active === undefined || fleetSize === undefined || funnel === undefined
-            ? <Skeleton width={260} height={11} />
-            : funnel
-              ? t('trkWorkersSummaryPosts', { n: fleetSize ?? '—', posts: funnel.poll, alerts: funnel.notify, subs: watched, rules: active })
-              : t('trkWorkersSummary', { n: fleetSize ?? '—', subs: watched, rules: active })}
+          {summary ?? <Skeleton width={260} height={11} />}
         </span>
       </div>
 
