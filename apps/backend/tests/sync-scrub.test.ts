@@ -27,9 +27,18 @@ describe('prod→dev sync scrub', () => {
       scopes: ['market:read'], createdBy: null, public: false,
     });
     const users = (await sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM users`)[0].n;
+    // Read from the schema, not listed by hand: token_enc was added after the
+    // scrub was written, slipped past it, and 500'd the pool on dev.
+    const sealed = (await sql<{ column_name: string }[]>`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'fb_pool_accounts' AND column_name ~ '_enc$'
+      ORDER BY column_name`).map((r) => r.column_name);
+    expect(sealed).toEqual(expect.arrayContaining(['password_enc', 'totp_enc', 'email_password_enc', 'cookie_enc', 'token_enc']));
     await sql`
-      INSERT INTO fb_pool_accounts (uid, password_enc, totp_enc, email_password_enc, cookie_enc, cookie_uid, batch)
-      VALUES ('61556203481174', 'v1.a.b.c', 'v1.a.b.c', 'v1.a.b.c', 'v1.a.b.c', '61556203481174', 'Batch')`;
+      INSERT INTO fb_pool_accounts ${sql({
+        uid: '61556203481174', cookie_uid: '61556203481174', batch: 'Batch',
+        ...Object.fromEntries(sealed.map((col) => [col, 'v1.a.b.c'])),
+      })}`;
 
     await sql.begin(async (tx) => {
       await tx`SELECT pg_catalog.set_config('search_path', '', true)`;
@@ -48,9 +57,9 @@ describe('prod→dev sync scrub', () => {
     expect(left).toEqual({ refresh: 0, oauth_refresh: 0, codes: 0, pending: 0, attempts: 0, live_clients: 0 });
     expect((await sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM users`)[0].n).toBe(users);
     // The pool's rows survive the copy; their sealed logins do not.
-    expect(await sql`
-      SELECT uid, cookie_uid, password_enc, totp_enc, email_password_enc, cookie_enc FROM fb_pool_accounts`,
-    ).toEqual([{ uid: '61556203481174', cookie_uid: '61556203481174', password_enc: null, totp_enc: null,
-      email_password_enc: null, cookie_enc: null }]);
+    expect(await sql`SELECT ${sql(['uid', 'cookie_uid', ...sealed])} FROM fb_pool_accounts`).toEqual([{
+      uid: '61556203481174', cookie_uid: '61556203481174',
+      ...Object.fromEntries(sealed.map((col) => [col, null])),
+    }]);
   });
 });
