@@ -2,12 +2,12 @@
 id: RS-367
 title: Worker page: a full-height History column that tracks everything
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: JinhuW/rasbora
-pr:
+pr: 844
 version: 1.321.0
 related: []
 ---
