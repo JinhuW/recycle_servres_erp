@@ -650,6 +650,7 @@ const zh: Record<string, string> = {
   commissionRate: '佣金比率 (%)',
   paySelfShort: '自费',
   payBusinessShort: '公司',
+  payPayerLocked: '经理已记账此采购单的成本，只有经理可以更改付款人。',
 
   // ── Mobile OrderDetail ──
   lifecycleAdvance: '推进至 {status}',

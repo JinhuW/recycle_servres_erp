@@ -7,7 +7,7 @@ import { type TrackablePart } from '../../lib/marketAutoTrack';
 import { effectiveRole } from '../../lib/role';
 import { specVal } from '../../lib/orderInput';
 import { activeMember, paidByAfter, type HandoffPackage } from '../../services/orderHandoff';
-export { paidByAfter } from '../../services/orderHandoff';
+export { orderCostBooked, paidByAfter, PAYER_BOOKED_MSG } from '../../services/orderHandoff';
 import { isActiveManager } from '../../services/members';
 import { pickTrackingClient, carrierTrackingUrl } from '../../shipping';
 import { registerPackageTracking } from '../../shipping/track';

@@ -17,6 +17,26 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.318.2] - 2026-10-23
+
+A purchaser can no longer void or reassign a manager's RMB Flow entry by
+changing their PO's payer (RS-363). The payer sync (0199) keeps a PO's live
+cost entries in step with the PO: a flip to the Business Account voids them,
+and a new Paid by moves them. Only managers book entries, but until now a
+purchaser could make either change on their own PO, through the PO page or
+the hand-off, right up to Ready to Pay. RS-358 had left that as the design.
+
+Now, once a PO has a live paid-out cost entry, only a manager can change its
+payment or Paid by. A purchaser's save that would is refused with a 403,
+before anything is written, so it doesn't send an In Transit PO back to
+Draft on the way. A save that leaves the payer as it is, including the
+hand-off's echo of it, still goes through. A PO with no cost entry, or only
+voided ones, works as before. The PO payload carries `payerLocked`, and the
+purchaser's Paid by select is disabled on both PO pages and both hand-off
+surfaces, with a note saying a manager has booked the cost. The rule sits in
+the two write routes, not the trigger, which can't tell who saved the PO and
+would otherwise also block the bank sync.
+
 ## [1.318.1] - 2026-10-23
 
 The two things RS-359 left out of the v1.317 review (RS-360): the Activity
@@ -80,6 +100,7 @@ does, and a diff names payers who have left.
 - The Orders list sorts the Payment column by the payer it shows.
 - Dead keys and exports are gone, and the Review strip reuses `.bc-meter`.
 - `ReviewMark` moved under `pages/desktop/`.
+
 ## [1.318.0] - 2026-10-23
 
 Monitors ▸ WeChat: brand and generation get columns of their own, and the

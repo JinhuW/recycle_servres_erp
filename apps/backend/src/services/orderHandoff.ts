@@ -47,6 +47,7 @@ export type HandoffRefusal =
   | { kind: 'forbidden' }
   | { kind: 'archived' }
   | { kind: 'notDraft'; lifecycle: string }
+  | { kind: 'payerBooked' }
   | { kind: 'trackingTaken'; otherOrderId: string | null }
   | { kind: 'trackingTakenStandalone' }
   | { kind: 'packageDelivered' }
@@ -85,6 +86,22 @@ export function paidByAfter(
   if (payment !== 'self') return null;
   return sent ?? before ?? ownerId;
 }
+
+/** Whether a manager has booked the PO's cost: a live paid-out purchase
+ *  entry, the one the payer sync (0199) voids or moves when payment or
+ *  paid_by changes. Once there is one, the payer is a manager's to change. */
+export async function orderCostBooked(sql: SqlLike, orderId: string): Promise<boolean> {
+  const r = (await sql`
+    SELECT EXISTS (
+      SELECT 1 FROM accounting_entries
+      WHERE order_id = ${orderId} AND kind = 'purchase' AND direction = 'out' AND voided_at IS NULL
+    ) AS booked
+  `)[0];
+  return r.booked as boolean;
+}
+
+export const PAYER_BOOKED_MSG =
+  "A manager has booked this PO's cost in Accounting, so only a manager can change its payment or Paid by.";
 
 /** An active member by id, for the "Picked up by" picker. Null when unknown
  *  or deactivated. The caller has already checked the id is uuid-shaped. */
@@ -379,6 +396,12 @@ export async function handoffOrderTx(
     ? null
     : (input.paymentMethod !== undefined ? input.paymentMethod : before.payment_method);
   const paidBy = paidByAfter(payment, input.paidByUserId, before.paid_by, before.user_id);
+  // PATCH's rule: a booked cost's payer is a manager's. The hand-off sends
+  // the payer on file back with every submit, which changes nothing.
+  if (actor.role !== 'manager' && (payment !== before.payment || paidBy !== before.paid_by)
+      && await orderCostBooked(tx, id)) {
+    throw new HandoffRefused({ kind: 'payerBooked' });
+  }
   // The id follows the method the way the method follows the payment: only a
   // PayPal payment has one. A Draft saved as PayPal and handed off as Self or
   // Cash must not keep the id — the link below would file a company payment

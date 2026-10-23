@@ -14,7 +14,7 @@ import { poRealizedLateral } from '../../lib/po-cost';
 import { realizedFromRow } from '../../services/poRealized';
 import { linePhotos, type LinePhoto } from '../../lib/linePhotos';
 import { poLineOrder } from '../../lib/poLineNo';
-import { type OrdersEnv, commissionPaidByOf, newestPackageJson, packageFromJson, unackedRevertFrag } from './shared';
+import { type OrdersEnv, commissionPaidByOf, newestPackageJson, orderCostBooked, packageFromJson, unackedRevertFrag } from './shared';
 
 const detailRoutes = new Hono<OrdersEnv>();
 
@@ -220,6 +220,11 @@ detailRoutes.get('/:id', async (c) => {
     });
   }
 
+  // The PATCH and hand-off gate, so the pickers lock before a save is
+  // refused. The raw role, as the gate reads it: a manager previewing as a
+  // purchaser may still change the payer.
+  const payerLocked = u.role !== 'manager' && await orderCostBooked(sql, id);
+
   return c.json({
     order: {
       id: order.id,
@@ -264,6 +269,7 @@ detailRoutes.get('/:id', async (c) => {
       // Every role: who paid the supplier is a name on the Cost Payment tab.
       // Null for the Business Account.
       paidBy: order.paid_by ? { id: order.paid_by, name: order.paid_by_name ?? '' } : null,
+      payerLocked,
       // Every role, as `manager` is: the purchaser may see who paid them.
       commissionPaidBy: commissionPaidByOf({
         commission_paid_by: order.commission_paid_by, commission_paid_by_name: order.commission_paid_by_name,

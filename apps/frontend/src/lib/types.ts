@@ -188,6 +188,10 @@ export type OrderSummary = {
   // which outranks the hand pick. Optional for deploy skew; null until a
   // manager records it. An older backend sends a manager without `kind`.
   commissionPaidBy?: CommissionPayer | null;
+  // A manager has booked the cost in Accounting, so this viewer can't change
+  // the payment or Paid by; the server refuses it too. Optional for deploy
+  // skew: absent reads as unlocked, and the server still holds the line.
+  payerLocked?: boolean;
   // The hand-off's package — what the In Transit chip links. Only the list
   // endpoint reports it; null on a pickup or a pre-hand-off order.
   tracking?: PackageTracking | null;

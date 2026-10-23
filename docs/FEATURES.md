@@ -813,6 +813,14 @@ is not a stage but a flag beside one, set once every line has sold
   paid stays the payer, and so does a payer the same save picked. Since
   v1.317.4 a save that hands the PO over can't pick the old owner, who no
   longer paid for their own PO, and the Paid by select offers the new owner.
+  **Once a manager has booked the cost, Paid by is a manager's** (v1.318.2).
+  A purchaser's PO save or hand-off that would change the payment or Paid by
+  of a PO with a live paid-out cost entry in the RMB Flow is refused (403),
+  because the payer sync would void or move the manager's entry. Saves that
+  leave the payer alone go through. The purchaser's Paid by select is
+  disabled on both PO pages and both hand-off surfaces, with *A manager has
+  booked this PO's cost*; a voided entry, or a commission entry alone, locks
+  nothing.
   Only a payer a save picks is checked: the one on file passes as it is,
   even a manager deactivated since, so a hand-off or a save never fails on a
   field nobody touched.
