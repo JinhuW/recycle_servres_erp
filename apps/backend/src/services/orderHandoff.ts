@@ -294,23 +294,40 @@ export function packageChanges(prev: HandoffPackage | null, next: HandoffPackage
 // timeline names people, not a uuid diff), and both names are snapshotted here
 // because events render without joining users on the owner. A null ownerName
 // is the actor taking the order back.
+//
+// A self-paid PO whose payer is the old owner moves to the new one, as Self
+// did before it named a person (0198 backfilled the owner as the payer): the
+// reimbursement follows the purchaser. Unless the same request picked that
+// payer (`payerPicked`), which is a decision, not a default.
 export async function changeOrderOwnerTx(
   tx: SqlLike,
   id: string,
   actor: { id: string; name: string },
   fromUserId: string,
   newOwner: { ownerId: string; ownerName: string | null },
+  opts: { payerPicked?: boolean } = {},
 ): Promise<void> {
   const prev = (await tx`
     SELECT name FROM users WHERE id = ${fromUserId} LIMIT 1
   `)[0] as { name: string } | undefined;
-  await tx`UPDATE orders SET user_id = ${newOwner.ownerId} WHERE id = ${id}`;
+  const payer = (await tx<{ paid_by: string | null }[]>`
+    SELECT paid_by FROM orders WHERE id = ${id}`)[0]?.paid_by ?? null;
+  const payerFollows = !opts.payerPicked && payer === fromUserId;
+  await tx`
+    UPDATE orders SET user_id = ${newOwner.ownerId}
+    ${payerFollows ? tx`, paid_by = ${newOwner.ownerId}::uuid` : tx``}
+    WHERE id = ${id}`;
   await writeOrderEvent(tx, id, actor.id, 'owner_changed', {
     fromUserId,
     from: prev?.name ?? null,
     toUserId: newOwner.ownerId,
     to: newOwner.ownerName ?? actor.name,
   });
+  if (payerFollows) {
+    const changes: AuditChange[] = [{ field: 'paid_by', from: fromUserId, to: newOwner.ownerId }];
+    await nameHandoffByChange(tx, changes);
+    await writeOrderEvent(tx, id, actor.id, 'meta_changed', { changes });
+  }
 }
 
 export async function handoffOrderTx(
@@ -438,7 +455,9 @@ export async function handoffOrderTx(
   }
 
   if (input.newOwner && input.newOwner.ownerId !== before.user_id) {
-    await changeOrderOwnerTx(tx, id, actor, before.user_id, input.newOwner);
+    await changeOrderOwnerTx(tx, id, actor, before.user_id, input.newOwner, {
+      payerPicked: input.paidByUserId != null && input.paidByUserId !== before.paid_by,
+    });
   }
 
   // Written before the advance's `submitted` so the timeline reads "handed

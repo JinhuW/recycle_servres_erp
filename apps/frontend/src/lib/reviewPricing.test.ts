@@ -38,7 +38,7 @@ const lines = [
 
 describe('reviewMoney', () => {
   it('follows the Commission tab: revenue over priced lines, cost all-in, commission on the profit', () => {
-    const m = reviewMoney({ lines, totalCost: null, otherFees: 7, commissionRate: 0.5, payment: 'company' });
+    const m = reviewMoney({ lines, totalCost: null, otherFees: 7, commissionRate: 0.5, selfReimbursed: false });
     expect(m).toMatchObject({ priced: 2, total: 3, revenue: 108, goods: 105, fees: 7, cost: 112, lotPrice: false });
     expect(m.profit).toBe(-4);
     expect(m.commission).toBe(-2);
@@ -46,33 +46,33 @@ describe('reviewMoney', () => {
   });
 
   it('pays the cost back on a self-paid PO', () => {
-    const m = reviewMoney({ lines, totalCost: null, otherFees: 0, commissionRate: 0.4, payment: 'self' });
+    const m = reviewMoney({ lines, totalCost: null, otherFees: 0, commissionRate: 0.4, selfReimbursed: true });
     expect(m.cost).toBe(105);
     expect(m.commission).toBeCloseTo(1.2);
     expect(m.earns).toBeCloseTo(106.2);
   });
 
   it('reads an unset rate as 0', () => {
-    const m = reviewMoney({ lines, totalCost: null, otherFees: 0, commissionRate: null, payment: 'company' });
+    const m = reviewMoney({ lines, totalCost: null, otherFees: 0, commissionRate: null, selfReimbursed: false });
     expect(m.rate).toBe(0);
     expect(m.commission).toBe(0);
   });
 
   it('keeps a negotiated lot price as the goods cost, by the server verdict or by the mismatch', () => {
-    const byVerdict = reviewMoney({ lines, totalCost: 90, goodsFollowsLines: false, otherFees: 0, commissionRate: 0.5, payment: 'company' });
+    const byVerdict = reviewMoney({ lines, totalCost: 90, goodsFollowsLines: false, otherFees: 0, commissionRate: 0.5, selfReimbursed: false });
     expect(byVerdict).toMatchObject({ goods: 90, lotPrice: true });
-    const byMismatch = reviewMoney({ lines, totalCost: 90, otherFees: 0, commissionRate: 0.5, payment: 'company' });
+    const byMismatch = reviewMoney({ lines, totalCost: 90, otherFees: 0, commissionRate: 0.5, selfReimbursed: false });
     expect(byMismatch).toMatchObject({ goods: 90, lotPrice: true });
     // A stored total that mirrors the lines is not a lot price.
-    const mirror = reviewMoney({ lines, totalCost: 105, otherFees: 0, commissionRate: 0.5, payment: 'company' });
+    const mirror = reviewMoney({ lines, totalCost: 105, otherFees: 0, commissionRate: 0.5, selfReimbursed: false });
     expect(mirror).toMatchObject({ goods: 105, lotPrice: false });
   });
 
   it('drops a line Approve will zero from the revenue, and from a goods total that follows the lines', () => {
     const zeroed = new Set(['a']);
-    const follows = reviewMoney({ lines, totalCost: null, otherFees: 0, commissionRate: 0.5, payment: 'company', zeroed });
+    const follows = reviewMoney({ lines, totalCost: null, otherFees: 0, commissionRate: 0.5, selfReimbursed: false, zeroed });
     expect(follows).toMatchObject({ revenue: 8, goods: 65, priced: 2 });
-    const lot = reviewMoney({ lines, totalCost: 90, goodsFollowsLines: false, otherFees: 0, commissionRate: 0.5, payment: 'company', zeroed });
+    const lot = reviewMoney({ lines, totalCost: 90, goodsFollowsLines: false, otherFees: 0, commissionRate: 0.5, selfReimbursed: false, zeroed });
     expect(lot).toMatchObject({ revenue: 8, goods: 90 });
   });
 });

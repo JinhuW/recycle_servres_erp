@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
-import { api, testEnv } from './helpers/app';
+import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, SOFIA, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
 import { createSellOrderOn, signOffAll } from './helpers/fixtures';
@@ -432,6 +432,44 @@ describe('accounting', () => {
     const company = await record(alex.token, base({ kind: 'purchase', targetId: self }));
     expect(company.status).toBe(409);
     expect(company.body.error).toMatch(/change that on the PO/);
+  });
+
+  it('a cost entry can\'t move the payer of a PO past review', async () => {
+    const marcus = await loginAs(MARCUS);
+    const sofia = await loginAs(SOFIA);
+    const po = await draftPO(marcus.token, { payment: 'self' });
+    const chat = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'chat.png', { type: 'image/png' });
+    expect((await multipart(`/api/orders/${po}/status-meta/Submission/attachments`, { file: chat }, { token: marcus.token })).status).toBe(200);
+    expect((await api('POST', `/api/orders/${po}/advance`, { token: marcus.token, body: {} })).status).toBe(200);
+    for (let i = 0; i < 3; i++) {
+      expect((await api('POST', `/api/orders/${po}/advance`, { token: alex.token, body: {} })).status).toBe(200);
+    }
+    const moved = await record(alex.token, base({ kind: 'purchase', targetId: po, managerId: sofia.user.id }));
+    expect(moved.status).toBe(409);
+    expect(moved.body.error).toMatch(/Ready to Pay or Done/);
+    // The payer on file can still be booked; moving it from the entry can't.
+    const id = await recorded(alex.token, base({ kind: 'purchase', targetId: po, managerId: marcus.user.id }));
+    expect((await patch(id, { managerId: sofia.user.id })).status).toBe(409);
+    const [o] = await getTestDb()<{ paid_by: string }[]>`SELECT paid_by FROM orders WHERE id = ${po}`;
+    expect(o.paid_by).toBe(marcus.user.id);
+  });
+
+  it('a restored entry catches up with its PO\'s payer', async () => {
+    const sofia = await loginAs(SOFIA);
+    const po = await donePO();
+    const id = await recorded(alex.token, base({ kind: 'commission', targetId: po }));
+    expect((await api('PUT', `/api/orders/${po}/commission-paid-by`, { token: alex.token, body: { company: true } })).status).toBe(200);
+    // Voided, the entry is passed by while the PO moves on to Sofia.
+    expect((await api('PUT', `/api/orders/${po}/commission-paid-by`, { token: alex.token, body: { userId: sofia.user.id } })).status).toBe(200);
+    expect(await managerOf(id)).toMatchObject({ id: alex.user.id });
+    expect((await api('POST', `/api/accounting/entries/${id}/restore`, { token: alex.token })).status).toBe(200);
+    const back = await entryOf(alex.token, id);
+    expect(back.voided).toBeNull();
+    expect(back.manager).toMatchObject({ id: sofia.user.id });
+    // Written in the restore's transaction, so it shares the restore's time.
+    expect(back.events).toContainEqual(expect.objectContaining({
+      kind: 'edited', detail: expect.objectContaining({ synced: 'po' }),
+    }));
   });
 
   it('a deleted draft leaves the void; a nobody-on-file PO leaves the entry', async () => {

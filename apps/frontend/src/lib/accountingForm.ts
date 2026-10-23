@@ -48,9 +48,19 @@ const payerOf = (t: FormTarget | null | undefined): string | undefined => t?.pay
 /**
  * A PO the Business Account paid — its cost from the company's account, its
  * commission flagged so or a Mercury/PayPal row standing as it — takes no
- * RMB entry: that money is Payments'. The form says so and will not save.
+ * paid-out RMB entry: that money is Payments'. The form says so and will not
+ * save. Money coming back (a refund, a clawback) is the book's, and an edit
+ * that leaves the entry's record, direction and payer alone isn't judged
+ * against the PO, so an entry restored there stays editable — the server's
+ * rule (routes/accounting.ts payerAllowedTx).
  */
-export const payerLock = (t: FormTarget | null): boolean => !!t?.payerBusiness;
+export function payerLock(
+  f: Pick<EntryForm, 'target' | 'direction' | 'kind' | 'managerId'>, entry?: AcctEntry,
+): boolean {
+  if (!f.target?.payerBusiness || f.direction !== 'out') return false;
+  return !entry || f.kind !== entry.kind || f.direction !== entry.direction
+    || f.target.id !== entry.target?.id || f.managerId !== entry.manager.id;
+}
 
 export function initialForm(opts: { meId: string; today: IsoDate; preset?: EntryPreset; entry?: AcctEntry }): EntryForm {
   const { entry, preset } = opts;
@@ -126,8 +136,10 @@ export type FormError =
   | 'acctErrAmount' | 'acctErrRate' | 'acctErrTarget' | 'acctErrDate' | 'acctErrManager' | 'acctPaidFromBusiness';
 
 /** The request the form stands for, or the i18n key of what is missing. */
-export function toRequestBody(f: EntryForm, opts: { orphan?: boolean } = {}): { body: AcctEntryBody } | { error: FormError } {
-  if (payerLock(f.target)) return { error: 'acctPaidFromBusiness' };
+export function toRequestBody(
+  f: EntryForm, opts: { orphan?: boolean; entry?: AcctEntry } = {},
+): { body: AcctEntryBody } | { error: FormError } {
+  if (payerLock(f, opts.entry)) return { error: 'acctPaidFromBusiness' };
   const amount = Number(f.amount);
   if (!f.amount.trim() || !Number.isFinite(amount) || amount <= 0 || amount > 1_000_000_000) {
     return { error: 'acctErrAmount' };

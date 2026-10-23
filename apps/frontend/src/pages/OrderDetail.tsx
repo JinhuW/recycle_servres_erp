@@ -25,7 +25,7 @@ import { OrderProductsBody, itemLabel } from './OrderProductsBody';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { productCount } from '../lib/productNo';
-import { costPayerLabel, profitTone } from '../lib/orderPresentation';
+import { costPayerLabel, costReimbursedToOwner, profitTone } from '../lib/orderPresentation';
 import { payerChoices } from '../lib/poFacets';
 import { isPricedSellPrice } from '@recycle-erp/shared';
 import { derivePoPermissions, type TakeoverAnswer } from '../lib/poPermissions';
@@ -812,7 +812,7 @@ export function OrderDetail({
   // The cost comes back to whoever paid it: in the purchaser's earnings when
   // they paid, named apart when a manager did. A record naming nobody (an
   // older backend) is the purchaser's, as it always was.
-  const selfReimbursed = payment === 'self' && (paidByUserId === null || paidByUserId === order.userId);
+  const selfReimbursed = costReimbursedToOwner(payment, paidByUserId, order.userId);
   const commissionMath = {
     selfReimbursed,
     reimbursedTo: payment === 'self' && !selfReimbursed ? payerName : null,

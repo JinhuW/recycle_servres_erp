@@ -17,6 +17,42 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.317.3] - 2026-10-23
+
+Fixes from the release review of everything `dev` carried past prod's
+v1.313.1 (RS-358), most of it the Accounting work that keeps an entry's
+Paid by in step with its PO.
+
+**Who paid a PO's cost now holds still where the PO says it should.** A
+purchase entry could move the payer of a PO at Ready to Pay or Done, which
+the PO page refuses because whoever paid is reimbursed through the
+commission. The entry is now refused too. Reassigning a self-paid PO to
+another purchaser used to leave the old owner as the payer, so they kept
+the reimbursement, where Self had always meant the current owner. A payer
+who was the old owner now follows the PO to the new one, with an Activity
+line. A manager who paid stays, and so does a payer the same save picked.
+Review mode's money panel added the cost to the purchaser's earnings for any
+self-paid PO, even one a manager paid. It now uses the Commission tab's
+rule, which is now one function on all three surfaces.
+
+**The RMB Flow lets through what the server allows, and Undo really
+undoes.** On a PO the Business Account paid, the entry form refused a
+supplier's refund or a commission clawback, and greyed out Save on an entry
+a manager had restored there, even for a note. It now locks only a paid-out
+entry, and on an edit only when the record, direction or payer moves.
+Restoring an entry now brings its Paid by up to date with its PO, as RS-354
+promised; while voided, the sync had passed it by. Withdrawing a sign-off
+(Review mode's Undo) used to leave an entry plain *To review*, losing the
+question it had closed or its *Changed since review* diff. The sign-off now
+keeps both on its event, and Undo puts them back. Review diffs name a payer
+who is a purchaser or a deactivated manager instead of "—".
+
+**Smaller fixes.** The review count disappeared from the sidebar when RMB
+Flow moved under the Accounting parent. It shows there again, and on the
+parent while that is folded. Migration 0201 stops the bank sync re-running
+the payer sync for every linked row it re-fetches, by firing the update
+trigger only when a row's link or settlement actually changed.
+
 ## [1.317.2] - 2026-10-23
 
 A Paid by that follows its PO now clears the entry's sign-off (RS-357).

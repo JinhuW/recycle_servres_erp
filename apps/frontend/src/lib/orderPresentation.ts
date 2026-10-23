@@ -195,6 +195,17 @@ export function costPayerLabel(
   return o.paidBy?.name ?? t(compact ? 'paySelfShort' : 'paySelf');
 }
 
+/**
+ * Whether the purchaser's earnings carry the cost back: they paid it out of
+ * pocket. Another manager who paid is reimbursed apart, and a PO with no
+ * payer on file predates the field, when Self meant the purchaser.
+ */
+export function costReimbursedToOwner(
+  payment: 'company' | 'self', paidById: string | null | undefined, ownerId: string,
+): boolean {
+  return payment === 'self' && (paidById == null || paidById === ownerId);
+}
+
 /** One side of a field change, in the units that field is read in. */
 export function renderValue(field: string, v: unknown, locale: string): string {
   if (v === null || v === undefined || v === '') return '—';

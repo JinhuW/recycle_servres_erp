@@ -16,6 +16,7 @@ import { requireManager } from '../lib/role';
 import { lockPayerTx, paidByErr, recordPayerTx, type CommissionPaidBy, type PayerRow } from './orders/shared';
 import { writeOrderEvent, type AuditChange } from '../services/orderAudit';
 import { nameHandoffByChange } from '../services/orderHandoff';
+import { isClosedBook } from '../services/orderAdvance';
 import type { Env, User } from '../types';
 import {
   ACCOUNTING_DUPLICATE_DAYS, ACCOUNTING_KINDS, ACCOUNTING_QUERY_MAX, ACCOUNTING_REVIEW_TABS,
@@ -592,7 +593,7 @@ async function writeEvent(tx: SqlLike, entryId: string, actorId: string, kind: E
 }
 
 // A PO's cost payer, locked for the caller's write.
-type CostRow = { payment: 'company' | 'self'; paid_by: string | null; user_id: string };
+type CostRow = { payment: 'company' | 'self'; paid_by: string | null; user_id: string; lifecycle: string };
 
 type Prepared =
   | { kind: 'missing'; what: AccountingTargetType }
@@ -613,7 +614,7 @@ async function prepareTargetTx(tx: SqlLike, f: EntryFields): Promise<Prepared> {
   }
   if (f.kind === 'purchase' && f.direction === 'out') {
     const cost = (await tx<CostRow[]>`
-      SELECT payment, paid_by, user_id FROM orders WHERE id = ${f.targetId} LIMIT 1 FOR NO KEY UPDATE`)[0];
+      SELECT payment, paid_by, user_id, lifecycle FROM orders WHERE id = ${f.targetId} LIMIT 1 FOR NO KEY UPDATE`)[0];
     return cost ? { kind: 'ok', payer: null, cost } : { kind: 'missing', what: 'po' };
   }
   const table = type === 'po' ? tx`orders` : type === 'so' ? tx`sell_orders` : tx`after_sales_cases`;
@@ -634,12 +635,18 @@ type Refused = { status: 400 | 409; error: string };
 const LINKED_MSG = 'a Mercury/PayPal row is linked as the commission — it was paid from the Business Account, see Payments';
 const COMPANY_COMMISSION_MSG = 'the commission was paid from the Business Account — change that on the PO';
 const COMPANY_COST_MSG = 'the cost was paid from the Business Account — change that on the PO';
+const CLOSED_COST_MSG = 'the PO is Ready to Pay or Done, so who paid its cost is settled — move it back to Reviewing to change it';
 
 // Who may be the payer: an active manager, or — for a self-paid cost — the
-// PO's own purchaser (routes/orders/shared.ts paidByErr).
+// PO's own purchaser (routes/orders/shared.ts paidByErr). A reviewed PO's
+// payer is part of its closed book, as PO PATCH holds it: whoever paid is
+// reimbursed through the commission, so it can't move from here either.
 async function payerAllowedTx(tx: SqlLike, f: EntryFields, prepared: Prepared & { kind: 'ok' }): Promise<Refused | null> {
   if (prepared.cost) {
     if (prepared.cost.payment === 'company') return { status: 409, error: COMPANY_COST_MSG };
+    if (isClosedBook(prepared.cost.lifecycle) && (prepared.cost.paid_by ?? prepared.cost.user_id) !== f.managerId) {
+      return { status: 409, error: CLOSED_COST_MSG };
+    }
     const err = await paidByErr(tx, prepared.cost.user_id, f.managerId);
     return err ? { status: 400, error: err } : null;
   }
@@ -861,10 +868,16 @@ accounting.post('/entries/:id/restore', async (c) => {
   const id = c.req.param('id');
   const sql = getDb(c.env);
   const outcome = await sql.begin(async (tx) => {
+    // Orders before the entry, as PATCH takes them: the restore re-reads the
+    // PO's payer below.
+    const po = (await tx<{ order_id: string | null }[]>`
+      SELECT order_id FROM accounting_entries WHERE id = ${id}`)[0]?.order_id;
+    if (po) await tx`SELECT 1 FROM orders WHERE id = ${po} FOR NO KEY UPDATE`;
     const cur = (await tx<{
       voided_at: string | null; void_reason: string | null; reviewed_by: string | null; reviewed_at: string | null;
+      order_id: string | null;
     }[]>`
-      SELECT voided_at, void_reason, reviewed_by, reviewed_at
+      SELECT voided_at, void_reason, reviewed_by, reviewed_at, order_id
       FROM accounting_entries WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0];
     if (!cur) return 'notFound' as const;
     if (!cur.voided_at) return 'live' as const;
@@ -883,6 +896,9 @@ accounting.post('/entries/:id/restore', async (c) => {
       reason: cur.void_reason,
       ...(cur.reviewed_at ? { clearedReview: { by: cur.reviewed_by, at: cur.reviewed_at } } : {}),
     });
+    // While it was voided the sync passed it by, so it catches up with the
+    // PO's payer now; the event above keeps the PO from voiding it again.
+    if (cur.order_id) await tx`SELECT accounting_sync_payer(${cur.order_id}, '{"synced": "po"}'::jsonb)`;
     return 'ok' as const;
   });
   if (outcome === 'notFound') return c.json({ error: 'Not found' }, 404);
@@ -914,8 +930,22 @@ function signOffRefusal(row: EntryRow, me: string, version: string): Refusal | n
   return null;
 }
 
+// What a sign-off clears, kept on its event so withdrawing it (Review mode's
+// Undo) puts the entry back where it stood: an open question, or the edits
+// since the last sign-off.
+type ReviewWas = {
+  review_cleared_at: string | null;
+  query_by: string | null; query_text: string | null; query_at: string | null;
+  answer_by: string | null; answer_text: string | null; answer_at: string | null;
+};
+
 async function signOffTx(tx: SqlLike, row: EntryRow, me: string) {
   const closesQuery = row.query_at !== null && row.answer_at === null;
+  const was: ReviewWas = {
+    review_cleared_at: row.review_cleared_at,
+    query_by: row.query_by, query_text: row.query_text, query_at: row.query_at,
+    answer_by: row.answer_by, answer_text: row.answer_text, answer_at: row.answer_at,
+  };
   // updated_at stays: a sign-off says something about the entry, it doesn't
   // make a new version of it.
   await tx`
@@ -926,6 +956,7 @@ async function signOffTx(tx: SqlLike, row: EntryRow, me: string) {
     WHERE id = ${row.id}`;
   await writeEvent(tx, row.id, me, 'reviewed', {
     amountCny: row.amount_cny, ...(closesQuery ? { closedQuery: true } : {}),
+    ...(Object.values(was).some(v => v !== null) ? { was } : {}),
   });
 }
 
@@ -961,7 +992,18 @@ accounting.delete('/entries/:id/review', async (c) => {
     if (!row) return 'notFound';
     if (row.voided_at || !row.reviewed_at) return { status: 409, error: 'this entry is not reviewed' };
     if (row.reviewed_by !== u.id) return { status: 403, error: 'only the manager who reviewed it can withdraw the review' };
-    await tx`UPDATE accounting_entries SET reviewed_by = NULL, reviewed_at = NULL WHERE id = ${id}`;
+    // A reviewed entry can't be edited or asked about, so the latest sign-off
+    // is the one being withdrawn.
+    const was = (await tx<{ was: ReviewWas | null }[]>`
+      SELECT detail->'was' AS was FROM accounting_entry_events
+      WHERE entry_id = ${id} AND kind = 'reviewed'
+      ORDER BY created_at DESC LIMIT 1`)[0]?.was ?? null;
+    await tx`
+      UPDATE accounting_entries SET reviewed_by = NULL, reviewed_at = NULL
+      ${was ? tx`, review_cleared_at = ${was.review_cleared_at},
+                 query_by = ${was.query_by}, query_text = ${was.query_text}, query_at = ${was.query_at},
+                 answer_by = ${was.answer_by}, answer_text = ${was.answer_text}, answer_at = ${was.answer_at}` : tx``}
+      WHERE id = ${id}`;
     await writeEvent(tx, id, u.id, 'unreviewed');
     return 'ok';
   });
