@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: JinhuW/pinfish
-pr:
+pr: "#857"
 version: 1.329.0
 related: [RS-371, RS-374, RS-378]
 ---
