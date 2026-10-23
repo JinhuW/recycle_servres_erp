@@ -308,6 +308,57 @@ describe('accounting', () => {
     expect(await managerOf(second)).toMatchObject({ id: alex.user.id });
   });
 
+  it('a Paid by that follows the PO clears a sign-off, and leaves an unsigned entry as it was', async () => {
+    type Review = { state: string; version: string; author: { id: string } | null; by: { id: string } | null; query: { answer: unknown } | null };
+    type Cleared = { reviewer: { id: string } | null; changes: Record<string, { from: unknown; to: unknown }> } | null;
+    const sofia = await loginAs(SOFIA);
+    const reviewed = async (id: string) =>
+      (await api<{ entry: { manager: { id: string }; review: Review; events: { kind: string; detail: Record<string, unknown> }[] } }>(
+        'GET', `/api/accounting/entries/${id}`, { token: alex.token })).body.entry;
+    const signOff = async (id: string) => {
+      const { review } = await reviewed(id);
+      expect((await api('POST', `/api/accounting/entries/${id}/review`, { token: sofia.token, body: { version: review.version } })).status).toBe(200);
+    };
+    const clearedOf = async (id: string) =>
+      (await api<{ rows: { id: string; cleared: Cleared }[] }>('GET', '/api/accounting/review?tab=mine', { token: sofia.token }))
+        .body.rows.find(r => r.id === id)?.cleared;
+    const po = await donePO();
+    const signed = await recorded(alex.token, base({ kind: 'commission', targetId: po }));
+    const open = await recorded(alex.token, base({ kind: 'commission', targetId: po, amount: 50 }));
+    const asked = await recorded(alex.token, base({ kind: 'commission', targetId: po, amount: 20 }));
+    await signOff(signed);
+    expect((await api('POST', `/api/accounting/entries/${asked}/query`, { token: sofia.token, body: { text: 'which chat?' } })).status).toBe(200);
+
+    // The PO page names Sofia: the sign-off Sofia gave Alex's payer is cleared.
+    expect((await api('PUT', `/api/orders/${po}/commission-paid-by`, { token: alex.token, body: { userId: sofia.user.id } })).status).toBe(200);
+    const s = await reviewed(signed);
+    expect(s.manager).toMatchObject({ id: sofia.user.id });
+    expect(s.review).toMatchObject({ state: 'changed', by: null, author: { id: alex.user.id } });
+    expect(s.events.at(-1)).toMatchObject({
+      kind: 'edited',
+      detail: { synced: 'po', changes: { managerId: { from: alex.user.id, to: sofia.user.id } }, clearedReview: { by: sofia.user.id } },
+    });
+    expect(await clearedOf(signed)).toMatchObject({
+      reviewer: { id: sofia.user.id }, changes: { managerId: { from: alex.user.id, to: sofia.user.id } }, followedPo: true,
+    });
+    // Nothing signed, nothing to clear; a question stays open, unanswered.
+    const o = await reviewed(open);
+    expect(o.review).toMatchObject({ state: 'open' });
+    expect(o.events.at(-1)?.detail).not.toHaveProperty('clearedReview');
+    expect((await reviewed(asked)).review).toMatchObject({ state: 'queried', query: { answer: null } });
+
+    // Another entry's Paid by writing back to the PO clears it the same way.
+    await signOff(signed);
+    expect((await patch(open, { managerId: alex.user.id })).status).toBe(200);
+    expect((await reviewed(signed)).review).toMatchObject({ state: 'changed', by: null });
+    expect((await reviewed(signed)).events.at(-1)).toMatchObject({
+      detail: { synced: 'po', clearedReview: { by: sofia.user.id } },
+    });
+    // A manager's own edit since then is a person's change, not the PO's.
+    expect((await patch(signed, { amount: 90 })).status).toBe(200);
+    expect(await clearedOf(signed)).toMatchObject({ followedPo: false });
+  });
+
   it('a PO the Business Account paid voids its RMB entries, and takes no new one', async () => {
     const po = await donePO();
     const id = await recorded(alex.token, base({ kind: 'commission', targetId: po }));

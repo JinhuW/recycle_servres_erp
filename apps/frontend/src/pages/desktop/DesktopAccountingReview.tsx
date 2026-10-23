@@ -615,7 +615,8 @@ export function DesktopAccountingReview({ onToast }: Props) {
               <span>
                 <button type="button" className="arv-pick" onClick={e => { e.stopPropagation(); setSelId(r.id); }}>{r.id}</button>
                 <span className="acct-sub">
-                  {by ? t(r.review?.state === 'changed' ? 'acctRmChangedBy' : 'acctRmBy', { name: by }) : t('acctRmBackfilled')}
+                  {r.review?.state === 'changed' && r.cleared?.followedPo ? t('acctEvSyncedPo')
+                    : by ? t(r.review?.state === 'changed' ? 'acctRmChangedBy' : 'acctRmBy', { name: by }) : t('acctRmBackfilled')}
                 </span>
               </span>
               <span style={{ minWidth: 0 }}>

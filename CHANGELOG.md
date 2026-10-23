@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.317.2] - 2026-10-23
+
+A Paid by that follows its PO now clears the entry's sign-off (RS-357).
+Review mode clears a sign-off when a manager edits any field but the note, so
+the reviewer signs what the entry says. But since 1.317.0 an entry's Paid by
+also moves without anyone editing it: when a PO's payer changes from one
+person to another, the database sync moves the PO's live entries with it.
+That path left the sign-off standing, so a reviewed entry could show a payer
+its reviewer never saw. Migration 0200 makes the sync clear it the way an
+edit does. The entry reads *Changed since review* with Paid by's old and new
+value, its history line says *Paid by followed the PO. Review cleared*, and
+Activity shows the review cleared. The author stays, since the database
+doesn't know who saved the PO, so review mode names the PO instead of a
+person. The queue row and the entry's review card read *Paid by followed the
+PO* where they used to say *changed by* the author, who didn't change it.
+The queue row's line under the id also wraps now rather than running into
+the next column. An entry that wasn't signed off keeps its state, and an
+open question stays open.
+
 ## [1.317.1] - 2026-10-23
 
 The monitors' toolbar summaries say "1 rule on", not "1 rules on" (RS-356).

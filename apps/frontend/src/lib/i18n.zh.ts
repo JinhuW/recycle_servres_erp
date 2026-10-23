@@ -3539,6 +3539,7 @@ const zh: Record<string, string> = {
   acctFieldPaidBy: '付款方',
   acctPaidFromBusiness: '这笔由公司账户支付，记在付款对账，不在人民币流水。',
   acctEvSyncedPo: '付款方已跟随采购单',
+  acctEvSyncedPoCleared: '付款方已跟随采购单，审核已失效',
   acctEvVoidedPo: '已作废：由公司账户支付',
   acctEvBackfilledPayer: '付款方已与采购单对齐',
   acctFieldCounterparty: '对方',

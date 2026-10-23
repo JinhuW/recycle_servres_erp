@@ -1074,7 +1074,8 @@ function reviewFactCols(sql: SqlLike) {
              OR (e.kind = 'other' AND e.counterparty IS NOT NULL AND lower(d.counterparty) = lower(e.counterparty)))
       ORDER BY abs(d.occurred_on - e.occurred_on), d.id LIMIT 1) AS duplicate_of,
     (SELECT json_agg(json_build_object(
-              'changes', ev.detail->'changes', 'by', ev.detail->'clearedReview'->>'by', 'at', ev.created_at)
+              'changes', ev.detail->'changes', 'by', ev.detail->'clearedReview'->>'by', 'at', ev.created_at,
+              'synced', ev.detail->>'synced')
             ORDER BY ev.created_at, ev.id)
        FROM accounting_entry_events ev
       WHERE ev.entry_id = e.id AND ev.kind = 'edited' AND e.review_cleared_at IS NOT NULL
@@ -1084,7 +1085,9 @@ function reviewFactCols(sql: SqlLike) {
 
 type FactRow = EntryRow & {
   ledger_rate: number | null; duplicate_of: string | null;
-  edits: { changes: Record<string, { from: unknown; to: unknown }> | null; by: string | null; at: string }[] | null;
+  edits: {
+    changes: Record<string, { from: unknown; to: unknown }> | null; by: string | null; at: string; synced: string | null;
+  }[] | null;
 };
 
 // Every field changed since the sign-off was cleared, from what the reviewer
@@ -1133,6 +1136,9 @@ async function withFacts(sql: SqlLike, rows: FactRow[]) {
         reviewer: first?.by ? { id: first.by, name: names.get(first.by) ?? '' } : null,
         at: r.review_cleared_at,
         changes: sinceReview(r.edits),
+        // The last change came from the PO's side, so nobody wrote it: the
+        // row says so rather than naming the author, who didn't.
+        followedPo: r.edits.at(-1)?.synced === 'po',
       } : null,
     };
   });
