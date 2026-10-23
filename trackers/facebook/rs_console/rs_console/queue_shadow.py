@@ -18,6 +18,17 @@ import sys
 from typing import Any, Dict, List, Optional
 
 
+def _city(city: Dict[str, Any], region: Optional[str]) -> Dict[str, Any]:
+    # The radius travels with the city: a worker handed one outside its own
+    # config has no other way to know it.
+    return {
+        "slug": city["slug"],
+        "name": city.get("name"),
+        "region": region,
+        "radius": city.get("radius_km"),
+    }
+
+
 def roster(doc: Dict[str, Any]) -> Dict[str, Any]:
     """The `/v1/fleet` document as the coordinator's roster.
 
@@ -30,9 +41,7 @@ def roster(doc: Dict[str, Any]) -> Dict[str, Any]:
         for city in region.get("cities") or []:
             if city["slug"] not in seen:
                 seen.add(city["slug"])
-                catalog.append(
-                    {"slug": city["slug"], "name": city.get("name"), "region": region["key"]}
-                )
+                catalog.append(_city(city, region["key"]))
     workers: Dict[str, Dict[str, Any]] = {}
     for worker in doc.get("workers") or []:
         cities = worker.get("cities") or []
@@ -40,7 +49,7 @@ def roster(doc: Dict[str, Any]) -> Dict[str, Any]:
             # A city set on the worker page that no region holds.
             if city["slug"] not in seen:
                 seen.add(city["slug"])
-                catalog.append({"slug": city["slug"], "name": city.get("name"), "region": None})
+                catalog.append(_city(city, None))
         workers[worker["worker_id"]] = {
             "home": [c["slug"] for c in cities],
             "partner_key": worker.get("proxy_env") or None,

@@ -18,6 +18,45 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **Workers can take their cities from the coordinator's queue** (RS-372). An
+  enrolled worker asks `POST /v1/workers/<id>/next-city` before each city of
+  an item's sweep, and searches what it is handed, including cities outside
+  its own config. It stops when the queue has nothing more for it:
+  - every city has been searched once today for that item;
+  - its 6 hours of searching are spent;
+  - it is outside its window (8 h after a `start_at`);
+  - it is quarantined (every search at 0 cards where others get cards).
+
+  These are the owner's first-stage rules (2026-10-23). Facebook was found not
+  to mind an account searching far from its IP, so neither region nor IP
+  partner limits anyone; `regions=home` and `partners=true` restore those
+  rules.
+
+  How the hand-outs work:
+  - **Held cities.** A city that a live worker outside the queue still holds
+    stays that worker's, so enrolling a few accounts fills holes and never
+    repeats a static sweep.
+  - **Leases.** They last while the worker heartbeats HEALTHY and come back
+    the moment it parks.
+  - **Restarts.** A restart after the round, or outside the window, searches
+    nothing, so an enrolled worker no longer runs an off-schedule sweep on
+    every deploy.
+
+  Operators use `rsc queue status|enroll|unenroll|set|show`, and rs_console
+  pushes the roster (catalog with radius, home cities, start times) every 10
+  minutes and after *Edit cities*. Workers not enrolled, and every worker when
+  the coordinator cannot be reached, search their own lists exactly as before.
+  The shadow report now replays on the stored queue settings.
+
+### Changed
+
+- **Every search report names its item** (`city_searches.item`), so a city
+  searched for one item still counts as due for the other.
+- **The vendored monitor is pinned at `93e2566`**, which is `8979534` plus the
+  queue loop.
+
 ## [0.13.13] - 2026-10-23
 
 ### Added

@@ -288,6 +288,8 @@ class ReviewStatsReport(BaseModel):
     alerted: int = Field(default=0, ge=0)
     # The city of the page that counted a search; older workers leave it out.
     search_city: str | None = None
+    # The item that search was for; workers before the city queue leave it out.
+    item: str | None = None
 
 
 class ReviewStatsDay(BaseModel):

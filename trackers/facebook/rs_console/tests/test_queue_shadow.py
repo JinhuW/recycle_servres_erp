@@ -61,10 +61,10 @@ DOC = {
 def test_the_roster_is_the_fleet_documents_catalog_and_workers():
     out = queue_shadow.roster(DOC)
     assert out["catalog"] == [
-        {"slug": "boston", "name": "Boston, MA", "region": "rs_northeast"},
-        {"slug": "nyc", "name": "New York, NY", "region": "rs_northeast"},
-        {"slug": "reno", "name": "Reno, NV", "region": "rs_mountain"},
-        {"slug": "105580889476291", "name": "Atlantic City, NJ", "region": None},
+        {"slug": "boston", "name": "Boston, MA", "region": "rs_northeast", "radius": 100},
+        {"slug": "nyc", "name": "New York, NY", "region": "rs_northeast", "radius": 100},
+        {"slug": "reno", "name": "Reno, NV", "region": "rs_mountain", "radius": None},
+        {"slug": "105580889476291", "name": "Atlantic City, NJ", "region": None, "radius": None},
     ]
     assert out["workers"] == {
         "ne-1": {
@@ -234,3 +234,35 @@ def test_the_cli_prints_the_report_or_the_coordinators_refusal(monkeypatch, caps
     monkeypatch.setattr(console, "queue_shadow", refuse)
     assert queue_shadow.main(["--days", "30"]) == 1
     assert "days is 1 to 14" in capsys.readouterr().err
+
+
+def test_the_roster_is_pushed_to_the_queue(client):
+    import asyncio
+
+    assert asyncio.run(console.push_roster()) is True
+    (call,) = client.calls
+    assert (call.method, call.url.path) == ("PUT", "/v1/queue/roster")
+    assert json.loads(call.content) == {**queue_shadow.roster(DOC), "updated_by": "rs-console"}
+
+
+def test_the_console_pushes_at_startup_and_again_after_a_cities_save(monkeypatch):
+    import threading
+
+    pushes = []
+    pushed = threading.Event()
+
+    async def push():
+        pushes.append(1)
+        pushed.set()
+        return True
+
+    monkeypatch.setattr(console, "push_roster", push)
+    monkeypatch.setattr(console, "ROSTER_PUSH_S", 3600.0)
+    with TestClient(console.app):
+        assert pushed.wait(5)
+        pushed.clear()
+        console._push_roster_soon()
+        assert pushed.wait(5)
+    assert len(pushes) == 2 and console._roster_wake is None
+    # Without the loop (no lifespan), a save has nobody to wake.
+    console._push_roster_soon()

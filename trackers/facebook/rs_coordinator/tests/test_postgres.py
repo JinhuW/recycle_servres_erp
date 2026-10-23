@@ -387,6 +387,36 @@ def test_city_searches_append_in_order(backend):
         ("nj-2b", "nyc", 0, 0),
     ]
     assert backend.city_searches_since("9999") == []
+    backend.log_city_search("mw-1", "peoria", cards=3, item="server_ram")
+    assert backend.city_searches_since("0")[-1]["item"] == "server_ram"
+    assert backend.city_search_log_start() == rows[0]["at"]
+
+
+def test_city_leases_open_settle_extend(backend):
+    t = "2026-10-23T13:00:00+00:00"
+    later = "2026-10-23T13:30:00+00:00"
+    backend.open_city_lease("nyc-1", "server_ram", "nyc", "home", t, later)
+    backend.open_city_lease("nyc-1", "server_ram", "boston", "other", t, later)
+    backend.open_city_lease("nyc-1", "enterprise_ssd", "nyc", "home", t, later)
+    # Done with nyc for one item: it closes; the item's other live lease is given up.
+    backend.settle_city_leases("nyc-1", "server_ram", "nyc", "2026-10-23T13:10:00+00:00")
+    rows = {(r["item"], r["city"]): r for r in backend.city_leases_since("0")}
+    assert rows[("server_ram", "nyc")]["closed_at"] == "2026-10-23T13:10:00+00:00"
+    assert rows[("server_ram", "boston")]["expires_at"] == "2026-10-23T13:10:00+00:00"
+    assert rows[("enterprise_ssd", "nyc")]["closed_at"] is None
+    backend.extend_city_leases("nyc-1", "2026-10-23T14:00:00+00:00", "2026-10-23T13:20:00+00:00")
+    rows = {(r["item"], r["city"]): r for r in backend.city_leases_since("0")}
+    assert rows[("enterprise_ssd", "nyc")]["expires_at"] == "2026-10-23T14:00:00+00:00"
+    assert rows[("server_ram", "boston")]["expires_at"] == "2026-10-23T13:10:00+00:00"
+
+
+def test_queue_config_is_one_json_row_per_key(backend):
+    assert backend.queue_config("settings") is None
+    backend.put_queue_config("settings", {"enrolled": ["nyc-1"]}, "rsc")
+    backend.put_queue_config("settings", {"enrolled": ["*"], "budget_minutes": 300})
+    stored = backend.queue_config("settings")
+    assert stored["body"] == {"enrolled": ["*"], "budget_minutes": 300}
+    assert stored["updated_by"] is None and stored["updated_at"]
 
 
 def test_status_changes_append_and_move_the_marker(backend):

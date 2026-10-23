@@ -9,7 +9,7 @@ on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
 **As of 2026-10-23:** ERP migration `0204`, Reddit tracker migration `0004`,
-Facebook tracker `0.13.13`. *Keeping this file current* at the end says how to
+Facebook tracker `0.13.14`. *Keeping this file current* at the end says how to
 refresh a section.
 
 - [Overview](#overview)
@@ -38,7 +38,7 @@ refresh a section.
 | --- | --- | --- | --- | --- | --- | --- |
 | **ERP** | `apps/backend` | Postgres 18 | Railway project `recycle-erp-experiment`, with one Postgres per environment (production, dev) | `DATABASE_URL` | `apps/backend/migrations/*.sql`, applied by `scripts/migrate.mjs` | 69 |
 | **Reddit tracker** | `trackers/reddit` (`api`, `worker` and the OCI worker VMs) | Postgres | Railway project `reddits-tracker`, with public networking on so the OCI VMs can reach it | `DATABASE_URL` | `trackers/reddit/migrations/*.sql`, applied by `scripts/migrate.ts` | 13 + 1 view |
-| **Facebook coordinator** | `trackers/facebook/rs_coordinator` | Postgres 16 in prod; SQLite locally and in tests | Railway project `facebook-tracker` (Terraform in `trackers/facebook/infra/`), reached by the coordinator on the homelab VM through Railway's TCP proxy | `RS_DATABASE_URL`, else `DATABASE_URL`; with neither set, SQLite at `RS_COORDINATOR_DB` | `SCHEMA` plus the `*_EXTRA_COLUMNS` lists in `rs_coordinator/db.py`, applied at boot | 30 |
+| **Facebook coordinator** | `trackers/facebook/rs_coordinator` | Postgres 16 in prod; SQLite locally and in tests | Railway project `facebook-tracker` (Terraform in `trackers/facebook/infra/`), reached by the coordinator on the homelab VM through Railway's TCP proxy | `RS_DATABASE_URL`, else `DATABASE_URL`; with neither set, SQLite at `RS_COORDINATOR_DB` | `SCHEMA` plus the `*_EXTRA_COLUMNS` lists in `rs_coordinator/db.py`, applied at boot | 32 |
 
 **The three share no database and no rows.** The ERP reaches each tracker only
 over HTTP:
@@ -2908,9 +2908,9 @@ A login obstacle a worker could not clear by itself (CAPTCHA, checkpoint, lock p
 
 ### Search activity
 
-What workers did between a search and an alert, for the ERP's funnel card and fleet table and the city queue's shadow report. Nothing in the alert path reads these.
+What workers did between a search and an alert, for the ERP's funnel card and fleet table, and the city queue that hands enrolled workers their cities. Nothing in the alert path reads these.
 
-Tables: [`review_stats`](#facebook-review-stats), [`search_cycles`](#facebook-search-cycles), [`search_cities`](#facebook-search-cities), [`city_searches`](#facebook-city-searches)
+Tables: [`review_stats`](#facebook-review-stats), [`search_cycles`](#facebook-search-cycles), [`search_cities`](#facebook-search-cities), [`city_searches`](#facebook-city-searches), [`city_leases`](#facebook-city-leases), [`queue_config`](#facebook-queue-config)
 
 <a id="facebook-review-stats"></a>
 
@@ -2986,11 +2986,52 @@ Every funnel report that counts a search and names its city, one row per search 
 | `opened` | `integer` | ✓ | `0` | Listing pages visited from that search. |
 | `reviewed` | `integer` | ✓ | `0` | Fresh AI verdicts from that search. |
 | `alerted` | `integer` | ✓ | `0` | Alerts the worker delivered from that search. |
+| `item` | `text` |  |  | The search item it was for. NULL from workers before 0.13.14, which search every item. |
 
 - **Primary key:** `id`
 - **Indexes:** `idx_city_searches_at` (at)
 
-Pruned to 14 days on each insert. Read only by `POST /v1/queue/shadow`.
+Pruned to 14 days on each insert. `item` was added by the additive column list. Read by the city queue (`next-city`, `/v1/queue/status`) and `POST /v1/queue/shadow`.
+
+<a id="facebook-city-leases"></a>
+
+#### `city_leases`
+
+The city queue's hand-outs: one row per (item, city) given to an enrolled worker. A live lease keeps the city off every other worker, and the lease rows are what an account's daily minutes are counted from.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `integer` | ✓ | identity |  |
+| `worker_id` | `text` | ✓ |  |  |
+| `item` | `text` | ✓ |  | Search item the city was handed out for. |
+| `city` | `text` | ✓ |  | Facebook city slug. |
+| `leased_at` | `text` | ✓ |  | When the city was handed out. |
+| `expires_at` | `text` | ✓ |  | When the lease lapses unless renewed. A HEALTHY heartbeat moves it `lease_minutes` on; any other state pulls it to now. |
+| `closed_at` | `text` |  |  | When the worker's next ask reported the city done. NULL while live, or once abandoned (expired unclosed), in which case the city goes back to the queue. |
+| `why` | `text` |  |  | home, familiar or other: which of the worker's groups the city came from. |
+
+- **Primary key:** `id`
+- **Indexes:** `idx_city_leases_leased` (leased_at), `idx_city_leases_worker` (worker_id)
+
+Pruned to 14 days on each insert.
+
+<a id="facebook-queue-config"></a>
+
+#### `queue_config`
+
+The city queue's two JSON documents: `settings` and `roster`.
+
+- **`settings`** holds only the keys someone set, through `rsc queue` or `PUT /v1/queue/settings`. The rest come from `city_queue.DEFAULTS`. The keys are `enrolled`, `regions`, `partners`, `per_day`, `budget_minutes`, `window_hours` and the others listed there.
+- **`roster`** is what the console last pushed: the catalog with each city's region and radius, and each worker's home cities, partner key, `start_at` and phrase count.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `key` | `text` | ✓ |  | 'settings' or 'roster'. |
+| `body` | `text` | ✓ |  | The JSON document. |
+| `updated_at` | `text` | ✓ |  |  |
+| `updated_by` | `text` |  |  | 'rsc', 'rs-console', or who saved it through the API. |
+
+- **Primary key:** `key`
 
 ### Listings and dedupe
 

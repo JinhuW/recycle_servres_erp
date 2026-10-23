@@ -60,9 +60,19 @@ Forwarded today:
   `POST /v1/workers/{id}/search-plan`)
 - the VNC websocket
 
-`POST /v1/queue/shadow` (the city queue's replay, README → *Shadow city
-queue*) is a console route the ERP does **not** forward. Read it on the VM
-with `python -m rs_console.queue_shadow` until the queue drives workers.
+**Not forwarded to the ERP: the city queue** (README → *City queue*).
+
+- **Workers** ask the coordinator directly with
+  `POST /v1/workers/{id}/next-city`.
+- **rs_console** pushes the coordinator `PUT /v1/queue/roster` every 10
+  minutes.
+- **Operators** use `rsc queue status|enroll|unenroll|set|show` in
+  rs-coordinator for the queue and its settings (`/v1/queue/settings`,
+  `/v1/queue/status`).
+- **The replay** is the console's `POST /v1/queue/shadow`, run with
+  `python -m rs_console.queue_shadow`.
+
+None of these is an ERP contract yet.
 
 Renaming or reshaping any of these is a change to both sides (root AGENTS.md →
 *Contracts*). Ship the console first and keep it backward-compatible until the
