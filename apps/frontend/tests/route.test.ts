@@ -62,7 +62,10 @@ describe('pathToDesktopView — tracker', () => {
   it('resolves the tracker path', () => {
     expect(pathToDesktopView('/tracker')).toBe('tracker');
   });
-  it('does not match tracker sub-paths', () => {
+  it('keeps the Prompts tab on the tracker view', () => {
+    expect(pathToDesktopView('/tracker/prompts')).toBe('tracker');
+  });
+  it('does not match other tracker sub-paths', () => {
     expect(pathToDesktopView('/tracker/x')).toBe('dashboard');
   });
 });

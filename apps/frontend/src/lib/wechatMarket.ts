@@ -121,6 +121,23 @@ export const SIGNAL_TONE: Record<string, 'info' | 'accent' | 'muted'> = {
   偏松: 'accent',
   过剩: 'accent',
 };
+// The legend's pills, from most wanted to most offered.
+export const SIGNALS = Object.keys(SIGNAL_KEY);
+
+export type BoardFilter = { pricedOnly: boolean; search: string; signal: string | null };
+
+/** The board's lines under its filters; the legend counts the same rows bar search and signal. */
+export function boardRows(rows: readonly WechatRow[], f: BoardFilter): WechatRow[] {
+  return rows.filter(r =>
+    (!f.pricedOnly || hasPrice(r)) && (f.signal === null || r.signal === f.signal) && matchesSearch(r, f.search));
+}
+
+/** Lines per known signal; one memtrade has no name for counts nowhere. */
+export function signalCounts(rows: readonly WechatRow[]): Record<string, number> {
+  const out = Object.fromEntries(SIGNALS.map(s => [s, 0]));
+  for (const r of rows) if (r.signal && r.signal in out) out[r.signal]! += 1;
+  return out;
+}
 
 export type NoteBlock = { bold: boolean; text: string }[];
 

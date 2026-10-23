@@ -25,14 +25,16 @@ import {
   BUCKET_TAX_KEY,
   SIGNAL_KEY,
   SIGNAL_TONE,
+  SIGNALS,
   UNBRANDED,
+  boardRows,
   fmtPrice,
   fmtRange,
   groupByBrand,
   hasPrice,
   ladder,
-  matchesSearch,
   parseNotes,
+  signalCounts,
   traders,
   wechatApi,
 } from '../../lib/wechatMarket';
@@ -41,8 +43,11 @@ import '../../styles/facebookPool.css';
 // ─── Monitors ▸ WeChat ────────────────────────────────────────────────────────
 // The daily memory-module market memtrade reads out of the team's WeChat
 // trading groups and pushes here after its 08:00 ET run. One report day at a
-// time: what buyers bid and sellers ask for each module, how many traders
-// stand behind each price, against the day before, and the posts themselves.
+// time, in the Facebook fleet page's chrome: a signal legend that filters the
+// price board — what buyers bid and sellers ask for each module, how many
+// traders stand behind each price, against the day before, and the posts
+// themselves — beside the day's notes and rankings; the groups on a tab of
+// their own.
 
 const KINDS: readonly WechatRowKind[] = ['quote', 'spec', 'code'];
 const KIND_KEY: Record<WechatRowKind, string> = { quote: 'wxKindQuote', spec: 'wxKindSpec', code: 'wxKindCode' };
@@ -52,6 +57,12 @@ const HISTORY_DAYS = 30;
 const REPORT_TZ = 'America/New_York';
 
 type Loaded = { day: WechatDay; rows: WechatRow[] };
+type Tab = 'board' | 'groups';
+
+// The legend wears the board's side colours: demand-heavy is the bid's.
+const SIGNAL_CLASS: Record<'info' | 'accent' | 'muted', string> = {
+  info: 'wx-sig-bid', muted: 'wx-sig-even', accent: 'wx-sig-ask',
+};
 
 export function DesktopWechat() {
   const { t, locale } = useT();
@@ -64,6 +75,9 @@ export function DesktopWechat() {
   const [specRows, setSpecRows] = useState<WechatRow[] | null>(null);
   const [search, setSearch] = useState('');
   const [pricedOnly, setPricedOnly] = useState(true);
+  const [signal, setSignal] = useState<string | null>(null);
+  // Not in the URL, which carries the day: a day change keeps the tab.
+  const [tab, setTab] = useState<Tab>('board');
 
   const date = routed ?? days?.[0]?.date ?? null;
 
@@ -114,37 +128,46 @@ export function DesktopWechat() {
     return () => { alive = false; };
   }, [date, loadDay]);
 
-  // The top cards rank by traders, priced or not, so a pick the priced-only
-  // filter would hide turns the filter off.
+  // The rankings rank by traders, priced or not, so a pick the priced-only
+  // filter or the signal would hide clears them.
   const pickSpec = (row: WechatRow) => {
     setKind('spec');
     setSearch(row.key);
+    setSignal(null);
     if (!hasPrice(row)) setPricedOnly(false);
   };
 
   const day = loaded && loaded !== 'missing' ? loaded.day : null;
+  const rows = loaded && loaded !== 'missing' ? loaded.rows : null;
   const summary = days?.find(d => d.date === date) ?? null;
   const prevSummary = day?.prevDate ? days?.find(d => d.date === day.prevDate) ?? null : null;
+  // As the Facebook legend ignores its search box, the counts ignore this
+  // one: they are the lines each pill would show.
+  const legend = useMemo(
+    () => (rows ? signalCounts(boardRows(rows, { pricedOnly, search: '', signal: null })) : null),
+    [rows, pricedOnly],
+  );
 
   const head = (
     <div className="page-head">
-      <div style={{ flex: '1 1 320px', minWidth: 0 }}>
-        <div className="page-sub" style={{ marginTop: 0, marginBottom: 2 }}>{t('nav_monitors')} / {t('nav_wechat')}</div>
-        <h1 className="page-title">{t('wxTitle')}</h1>
-        <div className="page-sub">
-          {summary
-            ? t('wxWindow', {
-                from: fmtWindow(summary.windowStart, locale),
-                to: fmtWindow(summary.windowEnd, locale),
-                age: relTime(summary.pushedAt, locale),
-              })
-            : t('wxSub')}
-        </div>
-      </div>
+      <div><div className="page-sub">{t('nav_monitors')} / {t('nav_wechat')}</div>
+        <h1 className="page-title">{t('wxTitle')}</h1></div>
       {days && days.length > 0 && date && (
         <DayNav days={days} date={date} prev={day?.prevDate ?? null} next={day?.nextDate ?? null} />
       )}
     </div>
+  );
+  const tabs = (
+    <nav className="tabs fp-view-tabs" aria-label={t('wxViews')}>
+      <button type="button" aria-pressed={tab === 'board'} className={`tab ${tab === 'board' ? 'active' : ''}`}
+        onClick={() => setTab('board')}>
+        <Icon name="tag" size={14} />{t('wxBoard')}{rows && <span className="chip muted">{rows.length}</span>}
+      </button>
+      <button type="button" aria-pressed={tab === 'groups'} className={`tab ${tab === 'groups' ? 'active' : ''}`}
+        onClick={() => setTab('groups')}>
+        <Icon name="chats" size={14} />{t('wxTabGroups')}{summary && <span className="chip muted">{summary.totals.groupsTotal}</span>}
+      </button>
+    </nav>
   );
 
   if (days && days.length === 0) {
@@ -164,9 +187,11 @@ export function DesktopWechat() {
     );
   }
 
+  // Head and tabs sit outside .fp-pool, as on the Facebook page.
   return (
     <>
       {head}
+      {tabs}
       <div className="fp-pool wx-page">
         {loaded === 'missing' && (
           <div className="wx-banner"><Icon name="info" size={15} /><span>{t('wxDayMissing', { date: date ?? '' })}</span></div>
@@ -187,32 +212,34 @@ export function DesktopWechat() {
           </div>
         )}
 
-        {loaded !== 'missing' && <Kpis summary={summary} prev={prevSummary} locale={locale} />}
-
-        {loaded !== 'missing' && (
-          <div className="wx-overview">
-            <NotesCard day={day} />
-            <TopCard title={t('wxMostWanted')} sub={t('wxMostWantedSub')} rows={specRows} side="buy" locale={locale}
-              onPick={pickSpec} />
-            <TopCard title={t('wxMostOffered')} sub={t('wxMostOfferedSub')} rows={specRows} side="sell" locale={locale}
-              onPick={pickSpec} />
+        {tab === 'board' && loaded !== 'missing' && <>
+          <SignalLegend counts={legend} signal={signal} onSignal={setSignal} />
+          <div className="fp-split wx-split">
+            <BoardCard
+              kind={kind}
+              onKind={k => { setKind(k); setSearch(''); setSignal(null); }}
+              loaded={loaded}
+              search={search}
+              onSearch={setSearch}
+              pricedOnly={pricedOnly}
+              onPricedOnly={setPricedOnly}
+              signal={signal}
+              onClear={() => { setSearch(''); setSignal(null); }}
+              summary={summary}
+              prev={prevSummary}
+              locale={locale}
+            />
+            <aside className="wx-aside">
+              <NotesCard day={day} />
+              <TopCard title={t('wxMostWanted')} sub={t('wxMostWantedSub')} rows={specRows} side="buy" locale={locale}
+                onPick={pickSpec} />
+              <TopCard title={t('wxMostOffered')} sub={t('wxMostOfferedSub')} rows={specRows} side="sell" locale={locale}
+                onPick={pickSpec} />
+            </aside>
           </div>
-        )}
+        </>}
 
-        {loaded !== 'missing' && (
-          <BoardCard
-            kind={kind}
-            onKind={k => { setKind(k); setSearch(''); }}
-            loaded={loaded}
-            search={search}
-            onSearch={setSearch}
-            pricedOnly={pricedOnly}
-            onPricedOnly={setPricedOnly}
-            locale={locale}
-          />
-        )}
-
-        {day && <GroupsCard day={day} locale={locale} />}
+        {tab === 'groups' && loaded !== 'missing' && <GroupsCard day={day} locale={locale} />}
       </div>
     </>
   );
@@ -265,64 +292,41 @@ function DayNav({ days, date, prev, next }: {
   );
 }
 
-function Kpis({ summary, prev, locale }: { summary: WechatDaySummary | null; prev: WechatDaySummary | null; locale: string }) {
+function SignalLegend({ counts, signal, onSignal }: {
+  counts: Record<string, number> | null;
+  signal: string | null;
+  onSignal: (s: string | null) => void;
+}) {
   const { t } = useT();
-  const fmt = new Intl.NumberFormat(locale);
-  const delta = (cur: number, before: number | undefined) => {
-    if (before === undefined || before === 0) return null;
-    const pct = (cur - before) / before;
-    if (Math.abs(pct) < 0.005) return <div className="kpi-trend"><span className="fp-muted">{t('wxSameAsPrev')}</span></div>;
-    return (
-      <div className={`kpi-trend ${pct > 0 ? 'up' : 'down'}`}>
-        <Icon name={pct > 0 ? 'arrowUp' : 'arrowDown'} size={11} />
-        {(pct > 0 ? '+' : '−') + Math.abs(pct * 100).toFixed(0)}%
-        <span className="fp-muted">{t('wxVsPrev')}</span>
-      </div>
-    );
-  };
-  if (!summary) {
-    return (
-      <div className="kpi-grid">
-        {[0, 1, 2, 3].map(i => (
-          <div key={i} className="kpi"><Skeleton width={90} height={12} /><Skeleton width={110} height={26} style={{ marginTop: 10 }} /></div>
-        ))}
-      </div>
-    );
-  }
-  const s = summary.totals;
   return (
-    <div className="kpi-grid">
-      <div className="kpi">
-        <div className="kpi-label"><span className="wx-dot wx-buy" />{t('wxKpiBuyers')}</div>
-        <div className="kpi-value mono">{fmt.format(s.buyers)}</div>
-        <div className="kpi-trend"><span className="fp-muted">{t('wxKpiPosts', { n: fmt.format(s.buyPosts) })}</span></div>
-        {delta(s.buyers, prev?.totals.buyers)}
-      </div>
-      <div className="kpi">
-        <div className="kpi-label"><span className="wx-dot wx-sell" />{t('wxKpiSellers')}</div>
-        <div className="kpi-value mono">{fmt.format(s.sellers)}</div>
-        <div className="kpi-trend"><span className="fp-muted">{t('wxKpiPosts', { n: fmt.format(s.sellPosts) })}</span></div>
-        {delta(s.sellers, prev?.totals.sellers)}
-      </div>
-      <div className="kpi">
-        <div className="kpi-label">{t('wxKpiPostsLabel')}</div>
-        <div className="kpi-value mono">{fmt.format(s.posts)}</div>
-        <div className="kpi-trend"><span className="fp-muted">{t('wxKpiCandidates', { n: fmt.format(s.candidates) })}</span></div>
-      </div>
-      <div className="kpi">
-        <div className="kpi-label">{t('wxKpiMessages')}</div>
-        <div className="kpi-value mono">{fmt.format(s.messages)}</div>
-        <div className="kpi-trend"><span className="fp-muted">{t('wxKpiGroups', { active: s.groupsActive, total: s.groupsTotal })}</span></div>
-      </div>
+    <div className="fp-legend" role="group" aria-label={t('wxSignals')}>
+      {SIGNALS.map(s => (
+        <button key={s} type="button" className={`fp-legend-item ${SIGNAL_CLASS[SIGNAL_TONE[s] ?? 'muted']}`}
+          aria-pressed={signal === s} onClick={() => onSignal(signal === s ? null : s)}>
+          <i className="fp-dot" />
+          <span>{t(SIGNAL_KEY[s]!)}</span>
+          <b>{counts ? counts[s] : <Skeleton width={14} height={13} radius={4} />}</b>
+        </button>
+      ))}
     </div>
   );
+}
+
+// "+12%" against the day before; null when that day had none to compare.
+function trend(cur: number, before: number): string | null {
+  if (before === 0) return null;
+  const pct = (cur - before) / before;
+  if (Math.abs(pct) < 0.005) return '±0%';
+  return `${pct > 0 ? '+' : '−'}${Math.abs(pct * 100).toFixed(0)}%`;
 }
 
 // ── The board ─────────────────────────────────────────────────────────────────
 
 const COLS = 7;
 
-function BoardCard({ kind, onKind, loaded, search, onSearch, pricedOnly, onPricedOnly, locale }: {
+function BoardCard({
+  kind, onKind, loaded, search, onSearch, pricedOnly, onPricedOnly, signal, onClear, summary, prev, locale,
+}: {
   kind: WechatRowKind;
   onKind: (k: WechatRowKind) => void;
   loaded: Loaded | 'missing' | null;
@@ -330,17 +334,22 @@ function BoardCard({ kind, onKind, loaded, search, onSearch, pricedOnly, onPrice
   onSearch: (s: string) => void;
   pricedOnly: boolean;
   onPricedOnly: (v: boolean) => void;
+  signal: string | null;
+  onClear: () => void;
+  summary: WechatDaySummary | null;
+  prev: WechatDaySummary | null;
   locale: string;
 }) {
   const { t } = useT();
   const [open, setOpen] = useState<string | null>(null);
   const data = loaded && loaded !== 'missing' ? loaded : null;
+  const fmt = new Intl.NumberFormat(locale);
 
   useEffect(() => { setOpen(null); }, [kind, data?.day.date]);
 
   const rows = useMemo(
-    () => (data?.rows ?? []).filter(r => (!pricedOnly || hasPrice(r)) && matchesSearch(r, search)),
-    [data, pricedOnly, search],
+    () => boardRows(data?.rows ?? [], { pricedOnly, search, signal }),
+    [data, pricedOnly, search, signal],
   );
   const groups = useMemo(
     () => (kind === 'quote' ? groupByBrand(rows) : [{ brand: null, rows }]),
@@ -350,7 +359,37 @@ function BoardCard({ kind, onKind, loaded, search, onSearch, pricedOnly, onPrice
   return (
     <section className="card wx-board" aria-label={t('wxBoard')}>
       <div className="fp-toolbar">
-        <h2>{t('wxBoard')}</h2>
+        <label className="toolbar-search">
+          <Icon name="search" size={14} />
+          <input className="input" type="search" value={search} autoComplete="off"
+            placeholder={t('wxSearch')} aria-label={t('wxSearch')}
+            onChange={e => onSearch(e.target.value)} />
+        </label>
+        {(search || signal) && (
+          <button type="button" className="btn ghost sm" onClick={onClear}>
+            <Icon name="x" size={12} />
+            {t('fpClear')}
+          </button>
+        )}
+        <span className="ff-summary" title={summary && prev ? t('wxSummaryVsPrev', {
+          b: trend(summary.totals.buyers, prev.totals.buyers) ?? '—',
+          s: trend(summary.totals.sellers, prev.totals.sellers) ?? '—',
+          date: fmtDay(prev.date, locale),
+        }) : undefined}>
+          {summary
+            ? t('wxBoardSummary', {
+                buyers: fmt.format(summary.totals.buyers),
+                sellers: fmt.format(summary.totals.sellers),
+                posts: fmt.format(summary.totals.posts),
+                active: summary.totals.groupsActive,
+                total: summary.totals.groupsTotal,
+              })
+            : <Skeleton width={240} height={11} />}
+        </span>
+      </div>
+      {/* The Facebook toolbar is search and summary alone; the board's two
+          controls would wrap it at this width, so they get a row of their own. */}
+      <div className="fp-toolbar wx-board-by">
         <div className="seg" role="tablist" aria-label={t('wxBoardBy')}>
           {KINDS.map(k => (
             <button key={k} role="tab" aria-selected={kind === k} className={kind === k ? 'active' : ''} onClick={() => onKind(k)}>
@@ -362,14 +401,6 @@ function BoardCard({ kind, onKind, loaded, search, onSearch, pricedOnly, onPrice
           <input type="checkbox" checked={pricedOnly} onChange={e => onPricedOnly(e.target.checked)} />
           {t('wxPricedOnly')}
         </label>
-        <div className="toolbar-search wx-search">
-          <Icon name="search" size={13} />
-          <input className="input" placeholder={t('wxSearch')} aria-label={t('wxSearch')}
-            value={search} onChange={e => onSearch(e.target.value)} />
-        </div>
-        <span className="ff-summary">
-          {data ? t('wxBoardCount', { shown: rows.length, n: data.rows.length }) : <Skeleton width={90} height={11} />}
-        </span>
       </div>
 
       {!data ? (
@@ -421,7 +452,17 @@ function BoardCard({ kind, onKind, loaded, search, onSearch, pricedOnly, onPrice
           </table>
         </div>
       )}
-      <div className="fp-table-foot">{t('wxBoardFoot')}</div>
+      <div className="fp-table-foot wx-foot">
+        <span>
+          {data ? t('wxBoardCount', { shown: rows.length, n: data.rows.length }) : <Skeleton width={90} height={11} />}
+          {summary && ` · ${t('wxWindow', {
+            from: fmtWindow(summary.windowStart, locale),
+            to: fmtWindow(summary.windowEnd, locale),
+            age: relTime(summary.pushedAt, locale),
+          })}`}
+        </span>
+        <span>{t('wxBoardFoot')}</span>
+      </div>
     </section>
   );
 }
@@ -793,10 +834,22 @@ function TopCard({ title, sub, rows, side, locale, onPick }: {
   );
 }
 
-function GroupsCard({ day, locale }: { day: WechatDay; locale: string }) {
+function GroupsCard({ day, locale }: { day: WechatDay | null; locale: string }) {
   const { t } = useT();
-  const [open, setOpen] = useState(false);
   const fmt = new Intl.NumberFormat(locale);
+  if (!day) {
+    return (
+      <section className="card" aria-label={t('wxGroups')} aria-busy>
+        <div className="card-head">
+          <div>
+            <h2 className="card-title">{t('wxGroups')}</h2>
+            <span className="card-sub"><Skeleton width={140} height={11} /></span>
+          </div>
+        </div>
+        <TableSkeleton rows={8} cols={4} />
+      </section>
+    );
+  }
   const windowStart = Date.parse(day.windowStart);
   return (
     <section className="card" aria-label={t('wxGroups')}>
@@ -805,42 +858,43 @@ function GroupsCard({ day, locale }: { day: WechatDay; locale: string }) {
           <h2 className="card-title">{t('wxGroups')}</h2>
           <span className="card-sub">{t('wxGroupsSub', { active: day.totals.groupsActive, total: day.totals.groupsTotal })}</span>
         </div>
-        <button className="btn sm" aria-expanded={open} onClick={() => setOpen(o => !o)}>
-          <Icon name={open ? 'chevronUp' : 'chevronDown'} size={13} />
-          {t(open ? 'wxGroupsHide' : 'wxGroupsShow')}
-        </button>
       </div>
-      {open && (
-        <div className="fp-table-wrap">
-          <table className="fp-table">
-            <thead>
-              <tr>
-                <th>{t('wxColGroup')}</th>
-                <th className="wx-num">{t('wxColMessages')}</th>
-                <th className="wx-num">{t('wxColCandidates')}</th>
-                <th>{t('wxColFirstSeen')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {day.groups.map(g => {
-                const joined = g.firstSeen !== null && Date.parse(g.firstSeen) >= windowStart;
-                return (
-                  <tr key={g.id} className={g.messages ? undefined : 'wx-quiet'}>
-                    <td>{g.name || <span className="mono fp-muted">{g.id}</span>}</td>
-                    <td className="wx-num mono">{fmt.format(g.messages)}</td>
-                    <td className="wx-num mono">{fmt.format(g.candidates)}</td>
-                    <td>
-                      {g.firstSeen === null
-                        ? <span className="fp-muted">{t('wxNoHistory')}</span>
-                        : <>{new Date(g.firstSeen).toLocaleDateString(locale)}{joined && <span className="chip accent" style={{ marginLeft: 6 }}>{t('wxJoined')}</span>}</>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="fp-table-wrap">
+        <table className="fp-table">
+          <thead>
+            <tr>
+              <th>{t('wxColGroup')}</th>
+              <th className="wx-num">{t('wxColMessages')}</th>
+              <th className="wx-num">{t('wxColCandidates')}</th>
+              <th>{t('wxColFirstSeen')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {day.groups.map(g => {
+              const joined = g.firstSeen !== null && Date.parse(g.firstSeen) >= windowStart;
+              return (
+                <tr key={g.id} className={g.messages ? undefined : 'wx-quiet'}>
+                  <td>{g.name || <span className="mono fp-muted">{g.id}</span>}</td>
+                  <td className="wx-num mono">{fmt.format(g.messages)}</td>
+                  <td className="wx-num mono">{fmt.format(g.candidates)}</td>
+                  <td>
+                    {g.firstSeen === null
+                      ? <span className="fp-muted">{t('wxNoHistory')}</span>
+                      : <>{new Date(g.firstSeen).toLocaleDateString(locale)}{joined && <span className="chip accent" style={{ marginLeft: 6 }}>{t('wxJoined')}</span>}</>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="fp-table-foot">
+        {t('wxWindow', {
+          from: fmtWindow(day.windowStart, locale),
+          to: fmtWindow(day.windowEnd, locale),
+          age: relTime(day.pushedAt, locale),
+        })}
+      </div>
     </section>
   );
 }

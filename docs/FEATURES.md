@@ -2444,6 +2444,17 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   waiting and the failed list still look at every post. If either read
   fails, that part shows a dash or a note.
 
+  Since v1.316.0 the page has the Facebook page's tabs: **Fleet**
+  (`/tracker`, everything above) and **Prompts** (`/tracker/prompts`, the
+  card below), and the title follows the tab. The workers toolbar matches
+  the Facebook one. A search box on the left finds a worker by id or role,
+  across the whole fleet rather than the rows scrolled in: while a search is
+  typed, the table loads every worker the status filter allows in one
+  request (the tracker's cap is 500) and filters them in the browser. On the
+  right, a summary reads workers, posts in the past 24 hours, alerts,
+  subreddits watched and rules on. *Clear filters* resets the search and the
+  legend together.
+
   Since v1.291.0, a **Which prompt is better** card scores every prompt
   version by its leads. A lead is an alert someone reacted to with anything
   but 👎.
@@ -2477,13 +2488,22 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   redoes a day; a push replaces the whole day. The ERP only stores and shows
   it: nothing feeds Market values or any order.
   - One report day at a time, picked from a dropdown or with the arrows.
-    The newest is `/wechat`; `/wechat/<date>` links to one day. Cards show
-    buyers, sellers, trade posts and group messages, with the change in
-    buyers and sellers against the report day before.
-  - Claude's market notes sit beside **Most wanted** and **Most offered**,
-    the specs with the most buyers and sellers. Clicking one shows it on
-    the board, turning *Priced lines only* off when the spec has no price
-    (v1.312.2).
+    The newest is `/wechat`; `/wechat/<date>` links to one day.
+  - Since v1.316.0 the page has the Facebook fleet page's layout. Two tabs,
+    **Price board** and **Groups**, each with a count, sit under the title;
+    the tab holds across a change of day. Above the board, a legend of
+    memtrade's supply reads (Short, Tight, Balanced, Loose, Glut) counts the
+    lines in each and filters the board to one; the counts follow the line
+    family and *Priced lines only*, not the search. The board's toolbar puts
+    the search first and a summary on the right: buyers, sellers, trade
+    posts and groups with messages, with the change in buyers and sellers
+    against the day before on hover. Its foot carries the shown/total line
+    count and the report's window. The four KPI cards are gone.
+  - Claude's market notes, **Most wanted** and **Most offered** (the specs
+    with the most buyers and sellers) sit in an aside beside the board, or
+    above it below 1190px (v1.316.0). Clicking a spec shows it on the
+    board, clearing the supply filter and turning *Priced lines only* off
+    when the spec has no price (v1.312.2).
   - The **price board** lists every line by brand & code (三星 64G 5600 DM0,
     grouped under brand headers), by spec (64G 5600) or by part code
     (32G DM0). Each line shows the bid (buyers) and ask (sellers) median
@@ -2498,7 +2518,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - Opening a line lists its posts, newest first and up to 100: who, what
     price and quantity, the raw line, which groups and how many copies.
     *Bids* and *Asks* ask for each side's own newest 100 (v1.312.2).
-    Beside them are the bid and ask medians over the last 30 report days,
+    Under them (beside them before v1.316.0) are the bid and ask medians
+    over the last 30 report days,
     drawn in the one tax basis most of them were quoted in (v1.312.2), and
     every price by tax basis.
   - A group with no name shows its id, and a sender with no display name
@@ -2506,8 +2527,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     no report for that day.
   - A banner says when memtrade fell back to its rules for a day (Claude
     was unavailable), when only part of a day's posts arrived, and repeats
-    memtrade's own warnings. **Groups read** lists each group's messages
-    that day and marks the ones joined in it.
+    memtrade's own warnings. **Groups read**, on the Groups tab since
+    v1.316.0 and always open, lists each group's messages that day and
+    marks the ones joined in it.
   - The push (`/api/wechat-market/push/*`) takes a Bearer token with the
     `wechat:write` scope from a service client a manager creates under
     Settings → Connectors. The day comes first, then its posts in batches

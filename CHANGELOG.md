@@ -17,6 +17,37 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.316.0] - 2026-10-22
+
+Monitors ▸ Reddit and Monitors ▸ WeChat now read like Monitors ▸ Facebook
+(RS-351), so the three monitors look like one product. Each page has the
+same head, an icon tab row, a legend of pills that filters, a main card
+whose toolbar has a search box on the left and a one-line summary on the
+right, and an aside beside it.
+
+Reddit splits into **Fleet** and **Prompts** (`/tracker/prompts`), the
+prompt comparison moving to its own tab. Its workers table gains the search
+box it lacked: the table loads by pages of 15, so a search loads every
+worker the status filter allows in one request and filters them in the
+browser, and finds a worker that was never scrolled in. Worker loads are
+now latest-wins, so a reload can no longer be dropped behind a refresh or
+an append still in flight, and a late page can't land on a newer list. The
+toolbar's summary counts workers, posts in the past 24 hours, alerts,
+subreddits and rules.
+
+WeChat trades its KPI cards for the pattern. A legend of memtrade's supply
+reads (Short to Glut) counts the board's lines in each and filters to one.
+The board's toolbar leads with the search and sums up buyers, sellers,
+posts and groups on the right, with the day-over-day change on hover. The
+market notes and the two rankings move into an aside beside the board
+(above it below 1190px), and **Groups read** gets a tab of its own,
+always open, with the report's window in its foot. To fit seven columns
+beside the aside, the board takes the Fleet table's tighter cells and a
+narrower bid/ask bar, its line family and *Priced lines only* get a row
+under the search, and an opened line stacks its posts over its price
+history instead of setting them side by side. No backend, proxy or tracker
+change.
+
 ## [1.315.0] - 2026-10-22
 
 The Accounting book now has a second pair of eyes (RS-350). Until this

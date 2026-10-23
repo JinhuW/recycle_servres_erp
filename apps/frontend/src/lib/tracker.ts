@@ -80,6 +80,20 @@ export type TrackerStats = {
   failed: Array<{ reddit_id: string; title: string; attempts: number }>;
 };
 
+/**
+ * Each loop's share of the window's posts: every post was polled, only
+ * targets passed the evaluator, and notified ones went out. Null without stats.
+ */
+export function funnelCounts(stats: TrackerStats | null): Record<LoopName, number> | null {
+  if (!stats) return null;
+  const n = (...keys: PostStatus[]) => keys.reduce((sum, k) => sum + (stats.posts[k] ?? 0), 0);
+  return {
+    poll: n('new', 'rejected', 'target', 'notified', 'failed'),
+    evaluate: n('target', 'notified'),
+    notify: n('notified'),
+  };
+}
+
 // ─── Prompt versions and trials (GET /api/prompt-stats) ─────────────────────
 // A version is the exact model + system prompt a post was judged with. A lead
 // is an alert someone reacted to with anything but 👎; a 👎 alone makes it a
@@ -160,6 +174,14 @@ export function summarizeTrial(vs: VsLive): TrialSummary {
 }
 
 export const WORKERS_PAGE_SIZE = 15;
+// A search loads every worker it could match in one page: the tracker's own
+// MAX_LIMIT, far above the fleet's size, so the browser filters the lot.
+export const WORKERS_SEARCH_LIMIT = 500;
+
+/** What the workers search box matches: the id, and the role as stored and as shown. */
+export function workerHaystack(w: TrackerWorker, roleLabel: string): string {
+  return [w.workerId, w.role, roleLabel].join(' ');
+}
 
 /** An OpenRouter model id, `provider/model`; the tracker checks the same shape. */
 export const MODEL_ID = /^[\w.-]+\/[\w.:-]+$/;
