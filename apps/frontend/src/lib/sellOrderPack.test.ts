@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { LineCheck } from './boxCheck';
 import {
-  fitsAnySourcePo, flaggedLots, isPackable, nextOpenProduct, packBody, packFilter, packGroups, packProducts, packScan, packView, packWarehouseOptions,
+  allPacked, boxCounts, fitsAnySourcePo, flaggedLots, isPackable, nextOpenProduct, packBody, packFilter, packGroups, packProducts, packScan, packView, packWarehouseOptions,
   productBucket, productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck,
   type PackLine, type PackProduct,
 } from './sellOrderPack';
@@ -344,5 +344,29 @@ describe('productTally', () => {
     });
     // The progress map colours each product by the same bucket.
     expect(ps.map(p => productBucket(p.lots, cs))).toEqual(['done', 'partial', 'absent', 'open', null]);
+  });
+});
+
+describe('allPacked / boxCounts', () => {
+  const ps = packProducts(packView([
+    L('a', { no: 1, qty: 3 }),
+    L('b', { no: 2 }), L('c', { no: 2 }),
+    L('z', { no: 3, qty: 0 }),
+  ], ''));
+
+  it('finishes the box once every product with lots is packed, short counts included', () => {
+    expect(allPacked(ps, checks(C('a', 3, 'x'), C('b', 2, 'x')))).toBe(false);
+    expect(allPacked(ps, checks(C('a', 3, 'x'), C('b', 2, 'x'), C('c', 1, 'x')))).toBe(true);
+    // A product held at 0 has no lots, so it never keeps the box open.
+    expect(ps).toHaveLength(3);
+  });
+
+  it('has nothing to finish when no product has lots', () => {
+    expect(allPacked(packProducts(packView([L('z', { qty: 0 })], '')), new Map())).toBe(false);
+  });
+
+  it('counts the units in the box, and only the products with one in it', () => {
+    expect(boxCounts(ps, checks(C('a', 3, 'x'), C('b', 2, 'x'), C('c', 1, 'x')))).toEqual({ products: 2, units: 6 });
+    expect(boxCounts(ps, checks(C('a', 0, 'x'), C('b', 2, 'x'), C('c', 1, 'x')))).toEqual({ products: 1, units: 3 });
   });
 });

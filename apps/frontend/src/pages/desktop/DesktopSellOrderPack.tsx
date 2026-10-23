@@ -11,9 +11,10 @@ import {
 import { handleFetchError, showErrorDialog, showWarnToast } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
 import { sellOrderStatuses } from '../../lib/lookups';
+import { usePreference } from '../../lib/preferences';
 import { navigate, navigateBack } from '../../lib/route';
 import {
-  fitsAnySourcePo, flaggedLots, isPackable, nextOpenProduct, packBody, packFilter, packGroups, packProducts, packScan, packView, packWarehouseOf,
+  allPacked, boxCounts, fitsAnySourcePo, flaggedLots, isPackable, nextOpenProduct, packBody, packFilter, packGroups, packProducts, packScan, packView, packWarehouseOf,
   packWarehouseOptions, productBucket, productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck, UNASSIGNED,
   type PackLine, type PackProduct, type PackResponse,
 } from '../../lib/sellOrderPack';
@@ -21,6 +22,7 @@ import type { Category } from '../../lib/types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useLineSaveQueue } from '../../lib/useLineSaveQueue';
 import { useScanFilterText } from '../../lib/useScanFilter';
+import { PackLabel, PackLabelMenu } from './PackLabel';
 
 // Pack mode: a sell order as a packing checklist, laid out like the PO's
 // Review mode and built for an iPad on a cart. Products run in the order's own
@@ -36,7 +38,8 @@ import { useScanFilterText } from '../../lib/useScanFilter';
 // and taking it back puts the qty back — the server's rule, in
 // routes/sellOrderPack.ts — so a lot held at 0 has nothing left to pack.
 // Lots lowered and left unticked are listed in Finish, whose Apply ticks them
-// all at their counts in one request.
+// all at their counts in one request. The tick that finishes the box prints
+// its label (PackLabel.tsx).
 
 type OrderLine = {
   id: string;
@@ -113,6 +116,13 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const [shipping, setShipping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
+  const [labelAuto, setLabelAuto] = usePreference('pack.labelAuto', true);
+  const [labelSize, setLabelSize] = usePreference('pack.labelSize', '4x6');
+  // Each request mounts a fresh label, which prints once.
+  const [printing, setPrinting] = useState(0);
+  // The boxes this visit printed a label for by itself, by warehouse ('' for
+  // the whole order): ticking one back and on again doesn't print another.
+  const autoPrinted = useRef(new Set<string>());
 
   const scanRef = useRef<HTMLInputElement | null>(null);
   // Set when a scanner's first character landed on the page and was moved into
@@ -355,6 +365,16 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     if (next) setSelected(keysOf(next)[0]!);
   };
 
+  // The tick that packs the last product of the box prints its label: the
+  // picked warehouse's box, or the whole order's. Only a tick made here does,
+  // so another iPad finishing the order prints nothing on this one.
+  const labelOnFinish = (box: readonly Product[], after: ReadonlyMap<string, LineCheck>) => {
+    if (!labelAuto || autoPrinted.current.has(picked)) return;
+    if (allPacked(products, checks) || !allPacked(box, after)) return;
+    autoPrinted.current.add(picked);
+    setPrinting(n => n + 1);
+  };
+
   const pack = (l: Line) => {
     const prev = checkOf(l.id);
     const next = { ...prev, checkedAt: new Date().toISOString() };
@@ -362,7 +382,9 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     setChoose(new Set());
     const n = countOf(l, prev);
     flashUndo({ prev: [prev], msg: t(takesCounts && n < l.qty ? 'pkPackedSetToast' : 'pkPackedToast', { pn: pnOf(l), n, of: l.qty }) });
-    moveOn(l.id, new Map(checks).set(l.id, next));
+    const after = new Map(checks).set(l.id, next);
+    moveOn(l.id, after);
+    labelOnFinish(products, after);
   };
 
   const toggle = (l: Line) => {
@@ -402,6 +424,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     });
     flashUndo({ prev, msg: t('pkPackedLotsToast', { pn, n: plan.tick.length, of: p.lots.length }) });
     moveOn(p.head.id, after);
+    labelOnFinish(products, after);
   };
 
   const toggleKey = (key: string) => {
@@ -440,13 +463,15 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
         prev: applied.flatMap(lineId => before.get(lineId) ?? []),
         msg: t('pkAppliedToast', { n: applied.length }),
       });
-      // The selection moves on as a tick's does, judged on the reply: a fold
-      // that lost a lot to 0 may now be a single row, under another key.
+      // Judged on the reply: a lot applied at 0 leaves its product, and a
+      // fold that lost one may now be a single row, under another key.
+      const qtyNow = new Map(r.lines.map(x => [x.lineId, x.qty]));
+      const now = packProducts(packView(lines.map(l => ({ ...l, qty: qtyNow.get(l.id) ?? l.qty })), picked));
+      const after = new Map(r.lines.map(x => [x.lineId, toCheck(x)]));
+      labelOnFinish(now, after);
+      // The selection moves on as a tick's does.
       const selNo = selKey ? (selKey.startsWith('p:') ? Number(selKey.slice(2)) : lineNo.get(selKey)) : undefined;
       if (selNo !== undefined && applied.some(lineId => lineNo.get(lineId) === selNo)) {
-        const qtyNow = new Map(r.lines.map(x => [x.lineId, x.qty]));
-        const now = packProducts(packView(lines.map(l => ({ ...l, qty: qtyNow.get(l.id) ?? l.qty })), picked));
-        const after = new Map(r.lines.map(x => [x.lineId, toCheck(x)]));
         const p = now.find(x => x.no === selNo);
         const state = p && productSummary(p.lots, after).state;
         const target = state === 'open' || state === 'mixed' ? p : nextOpenProduct(now, after, selNo);
@@ -842,6 +867,14 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
 
   const units = lines.reduce((a, l) => a + l.qty, 0);
   const shippedMeta = order?.statusMeta.Shipped;
+  // The label is the box being packed: the picked warehouse's lots, or all.
+  const box = boxCounts(products, checks);
+  const boxDone = allPacked(products, checks);
+  const label = order && {
+    orderId: id, customer: order.customer.name, warehouse: picked ? whName(picked) : null, counts: box,
+  };
+  const labelSummary = [id, t('pkSub', { products: box.products, units: box.units }), ...(picked ? [whName(picked)] : [])].join(' · ');
+  const printLabel = () => setPrinting(n => n + 1);
 
   return (
     <div className="pk-page">
@@ -861,11 +894,24 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
             </div>
           )}
         </div>
-        <div className="bc-keys pk-keys" aria-hidden="true">
-          <span><kbd>↑</kbd><kbd>↓</kbd> {t('bcKeyMove')}</span>
-          <span><kbd>{t('bcKeySpace')}</kbd> {t('pkKeyPack')}</span>
-          <span><kbd>←</kbd><kbd>→</kbd> {t('pkKeyFold')}</span>
-          <span><kbd>/</kbd> {t('bcKeyScan')}</span>
+        <div className="pk-head-side">
+          {order && (
+            <PackLabelMenu
+              auto={labelAuto}
+              size={labelSize}
+              summary={labelSummary}
+              disabled={loadState !== 'ok' || box.products === 0}
+              onAuto={setLabelAuto}
+              onSize={setLabelSize}
+              onPrint={printLabel}
+            />
+          )}
+          <div className="bc-keys pk-keys" aria-hidden="true">
+            <span><kbd>↑</kbd><kbd>↓</kbd> {t('bcKeyMove')}</span>
+            <span><kbd>{t('bcKeySpace')}</kbd> {t('pkKeyPack')}</span>
+            <span><kbd>←</kbd><kbd>→</kbd> {t('pkKeyFold')}</span>
+            <span><kbd>/</kbd> {t('bcKeyScan')}</span>
+          </div>
         </div>
       </div>
 
@@ -1112,6 +1158,11 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
                       <Icon name="edit" size={15} /> {t('editOrder')}
                     </button>
                   )}
+                  {boxDone && box.products > 0 && (
+                    <button type="button" className="btn" disabled={loadState !== 'ok'} onClick={printLabel}>
+                      <Icon name="printer" size={15} /> {t('pkLabelPrint')}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn accent"
@@ -1149,6 +1200,9 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
         />
       )}
       {zoom && <ImageLightbox url={zoom} onClose={() => setZoom(null)} />}
+      {printing > 0 && label && (
+        <PackLabel key={printing} content={label} size={labelSize} onDone={() => setPrinting(0)} />
+      )}
     </div>
   );
 }

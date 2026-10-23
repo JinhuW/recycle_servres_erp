@@ -1828,6 +1828,24 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     blocks, and the Finish card offers Edit order to match the order to the
     box first. A refused move (a lot taken meanwhile) says
     why and stays on the page.
+  - **A finished box prints its label** (v1.323.0, RS-371). The tick that
+    packs the last product left prints it, through the browser's print
+    dialog. That covers a row, a whole product, a scan or Apply. The box is
+    the *Packing from* warehouse's lots, or the whole order.
+    - The label carries the SO number, the customer, and the counts: the
+      products with a unit in the box, and those units. It also carries the
+      date, and the warehouse when only one is packed.
+    - It prints once per box per visit. Ticking the last product back and on
+      again doesn't print another. Opening an order already packed, or a
+      second iPad finishing it, prints nothing.
+    - The **Label** control in the page head prints it on demand. It also
+      holds *Print when packed* (on by default) and the stock: 4 × 6,
+      4 × 3 or 2.25 × 1.25 in. Both are saved preferences (`pack.labelAuto`,
+      `pack.labelSize`). A packed box also gets **Print label** in the Finish
+      card.
+    - The print is that one label, at the stock's size, so a label printer
+      feeds no blank label after it. It is black on white for thermal stock.
+      The smallest stock keeps only the number, the customer and the counts.
   - The endpoints (`GET /api/sell-orders/:id/pack`,
     `PUT /api/sell-orders/:id/pack/:lineId`, and
     `POST /api/sell-orders/:id/pack/apply` on a Draft or Packing order only) 403 anyone whose

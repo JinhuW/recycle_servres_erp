@@ -36,6 +36,8 @@ const SCHEMA: Record<string, Validator> = {
   // re-issued per session, labels aren't.
   'scan.cameraLabel':         isShortString,
   'sellOrders.lineGroup':     isOneOf('warehouse', 'po'),
+  'pack.labelAuto':           isBoolean,
+  'pack.labelSize':           isOneOf('4x6', '4x3', '2.25x1.25'),
   'sidebar.folded':           isBoolean,
   'fleetWatch.accountHidden': isBoolean,
   'onboarding.done':          isBoolean,
