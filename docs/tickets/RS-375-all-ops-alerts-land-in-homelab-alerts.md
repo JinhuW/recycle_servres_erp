@@ -67,5 +67,15 @@ keep their own bots and get the group's chat id plus a topic.
 - v1.325.0 (PR 849) ships the relay route and the uptime cron. The uptime
   service builds from `dev` on changes under `deploy/railway-uptime/`, so it
   goes live with the merge.
-- The Facebook part ships as its own facebook-tracker release. Alertmanager
-  is a config change on `10.10.60.5`, outside the repo.
+- The Facebook part is facebook-tracker 0.13.15 (PR 854): the coordinator's
+  ops alerts, deploy notices and fleet-verify reports follow
+  `TELEGRAM_OPS_CHAT_ID` and its topics. It goes live when the VM's
+  `configs/secrets.env` sets `TELEGRAM_OPS_CHAT_ID=-1004378564833`,
+  `TELEGRAM_TOPIC_OPS=13` and `TELEGRAM_TOPIC_RELEASES=14` and 0.13.15 is
+  deployed. That needs `@recycle_facebook_alerts_bot` in the group, and the
+  city-queue pilot session agreeing to a restart.
+- Alertmanager is a config change on `10.10.60.5`, outside the repo: in the
+  `telegram` receiver, `chat_id: -1004378564833` and `message_thread_id: 12`.
+- memtrade's daily WeChat report posts its failures to "WeChat · Daily
+  report" (thread 28) through the relay. That session added the topic, and
+  v1.325.0 maps `wechat_report` to it.
