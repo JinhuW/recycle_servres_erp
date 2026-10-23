@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.13] - 2026-10-23
+
 ### Added
 
 - **The console serves the login ledger to the ERP** (RS-366).
