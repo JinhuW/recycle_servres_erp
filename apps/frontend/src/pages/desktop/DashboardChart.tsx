@@ -14,7 +14,7 @@ const PAD = { l: 58, r: 12, t: 12, b: 26 };
 
 const utc = (d: IsoDate) => new Date(d + 'T00:00:00Z');
 
-function niceStep(rough: number): number {
+export function niceStep(rough: number): number {
   if (rough <= 0) return 1;
   const pow = 10 ** Math.floor(Math.log10(rough));
   const f = rough / pow;

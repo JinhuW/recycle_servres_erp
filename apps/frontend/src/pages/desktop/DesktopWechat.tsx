@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import {
   headlinePrice,
   priceChange,
@@ -20,6 +20,7 @@ import { ApiError } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { useElementWidth } from '../../lib/useElementWidth';
 import { hrefFor, matchWechatDay, navigate, readHashQuery, replaceHashQuery, useRoute, wechatDayPath } from '../../lib/route';
 import { queryTerms } from '../../lib/fleetView';
 import {
@@ -45,6 +46,7 @@ import {
   type Facet,
   type FacetPicks,
 } from '../../lib/wechatMarket';
+import { niceStep } from './DashboardChart';
 import { Hi } from './FleetAccounts';
 import '../../styles/facebookPool.css';
 
@@ -802,54 +804,195 @@ function chartBasis(history: WechatHistoryDay[]): WechatPriceBucket | null {
   return best;
 }
 
+const HIST_H = 160;
+const HIST_PAD = { t: 10, b: 24 };
+// JetBrains Mono at the axis's 10.5–11px, close enough to size the gutters
+// from a label's length.
+const MONO_CH = 6.6;
+const SIDES = ['buy', 'sell'] as const;
+const inBasis = (h: WechatHistoryDay, s: WechatSide, basis: WechatPriceBucket) =>
+  (h[s].price?.bucket === basis ? h[s].price : null);
+
 function HistoryChart({ history, locale }: { history: WechatHistoryDay[] | null; locale: string }) {
   const { t } = useT();
-  if (!history) return <Skeleton width="100%" height={96} />;
-  const shown = chartBasis(history);
-  const series = (s: WechatSide) =>
-    history.map(h => (h[s].price && h[s].price.bucket === shown ? h[s].price.median : null));
-  const bid = series('buy');
-  const ask = series('sell');
-  const values = [...bid, ...ask].filter((v): v is number => v !== null);
-  if (values.length < 2 || !shown) return <p className="fp-muted wx-chart-empty">{t('wxHistoryThin')}</p>;
-  const W = 320;
-  const H = 96;
-  const pad = 6;
-  const lo = Math.min(...values);
-  const hi = Math.max(...values);
-  const x = (i: number) => pad + (history.length === 1 ? 0 : (i / (history.length - 1)) * (W - pad * 2));
-  const y = (v: number) => H - pad - ((v - lo) / (hi - lo || 1)) * (H - pad * 2);
-  const path = (vals: (number | null)[]) => {
-    let d = '';
-    let pen = false;
-    vals.forEach((v, i) => {
-      if (v === null) { pen = false; return; }
-      d += `${pen ? 'L' : 'M'} ${x(i).toFixed(1)} ${y(v).toFixed(1)} `;
-      pen = true;
+  if (!history) return <Skeleton width="100%" height={HIST_H + 40} />;
+  const basis = chartBasis(history);
+  const priced = basis ? history.reduce((k, h) => k + SIDES.filter(s => inBasis(h, s, basis)).length, 0) : 0;
+  if (!basis || priced < 2) return <p className="fp-muted wx-chart-empty">{t('wxHistoryThin')}</p>;
+  return <HistoryPlot history={history} basis={basis} locale={locale} />;
+}
+
+// The board's ladder turned upright, one per report day: each side's quotes
+// low to high in its own lane, bid left of the day and ask right of it, with
+// the median on top and the medians joined. A dashed bridge crosses days the
+// side wasn't quoted in this basis.
+function HistoryPlot({ history, basis, locale }: { history: WechatHistoryDay[]; basis: WechatPriceBucket; locale: string }) {
+  const { t } = useT();
+  const wrap = useRef<HTMLDivElement>(null);
+  const width = useElementWidth(wrap);
+  const [hover, setHover] = useState<number | null>(null);
+  const dayFmt = useMemo(() => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }), [locale]);
+  const day = (date: string) => dayFmt.format(new Date(`${date}T00:00:00Z`));
+  const fmt = (v: number) => fmtPrice(v, basis, locale);
+
+  const pts = { buy: history.map(h => inBasis(h, 'buy', basis)), sell: history.map(h => inBasis(h, 'sell', basis)) };
+  const all = SIDES.flatMap(s => pts[s].filter((p): p is WechatPrice => p !== null));
+  const lo = Math.min(...all.map(p => p.min));
+  const hi = Math.max(...all.map(p => p.max));
+  const step = niceStep((hi - lo) / 3 || hi / 20 || 1);
+  let yMin = Math.floor(lo / step) * step;
+  let yMax = Math.ceil(hi / step) * step;
+  if (yMin === yMax) { yMin = Math.max(0, yMin - step); yMax += step; }
+  const ticks: number[] = [];
+  for (let v = yMin; v <= yMax + step / 2; v += step) ticks.push(v);
+
+  const ends = SIDES.flatMap(s => {
+    for (let i = history.length - 1; i >= 0; i--) {
+      const p = pts[s][i];
+      if (p) return [{ s, i, label: fmt(p.median) }];
+    }
+    return [];
+  });
+  const padL = 12 + Math.max(...ticks.map(v => fmt(v).length)) * MONO_CH;
+  const padR = 14 + Math.max(0, ...ends.map(e => e.label.length)) * MONO_CH;
+  const n = history.length;
+  const innerW = Math.max(0, width - padL - padR);
+  const innerH = HIST_H - HIST_PAD.t - HIST_PAD.b;
+  const slot = innerW / n;
+  const lane = Math.min(4, slot * 0.18);
+  const barW = Math.max(2, Math.min(6, slot * 0.25));
+  const cx = (i: number) => padL + slot * (i + 0.5);
+  const x = (i: number, s: WechatSide) => cx(i) + (s === 'buy' ? -lane : lane);
+  const y = (v: number) => HIST_PAD.t + ((yMax - v) / (yMax - yMin)) * innerH;
+
+  const lines = (s: WechatSide) => {
+    let solid = '';
+    let bridge = '';
+    let last: { i: number; at: string } | null = null;
+    pts[s].forEach((p, i) => {
+      if (!p) return;
+      const at = `${x(i, s).toFixed(1)},${y(p.median).toFixed(1)}`;
+      if (!last) solid += `M${at}`;
+      else if (i === last.i + 1) solid += ` L${at}`;
+      else { bridge += `M${last.at} L${at} `; solid += ` M${at}`; }
+      last = { i, at };
     });
-    return d;
+    return { solid, bridge };
   };
-  const dots = (vals: (number | null)[], s: WechatSide) => vals.map((v, i) => v === null ? null : (
-    <circle key={`${s}${i}`} className={`wx-pt-${s}`} cx={x(i)} cy={y(v)} r={2.2}>
-      <title>{`${history[i]!.date} · ${t(s === 'buy' ? 'wxBid' : 'wxAsk')} ${fmtPrice(v, shown, locale)} ${t(BUCKET_LABEL_KEY[shown])}`}</title>
-    </circle>
-  ));
+
+  // Each side's latest median sits beside its dot; two that would touch are
+  // pushed apart around their midpoint, the higher price staying on top.
+  const endY = ends.map(e => y(pts[e.s][e.i]!.median));
+  if (ends.length === 2 && Math.abs(cx(ends[0]!.i) - cx(ends[1]!.i)) < padR && Math.abs(endY[0]! - endY[1]!) < 13) {
+    const mid = (endY[0]! + endY[1]!) / 2;
+    const bidHigher = endY[0]! < endY[1]!;
+    endY[0] = mid + (bidHigher ? -6.5 : 6.5);
+    endY[1] = mid + (bidHigher ? 6.5 : -6.5);
+  }
+
+  const every = Math.ceil(n / Math.max(1, Math.floor(innerW / 64)));
+  const idxAt = (clientX: number) => {
+    const i = Math.floor((clientX - wrap.current!.getBoundingClientRect().left - padL) / slot);
+    return Math.max(0, Math.min(n - 1, i));
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'ArrowLeft') { setHover(h => Math.max(0, (h ?? n) - 1)); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { setHover(h => Math.min(n - 1, (h ?? -1) + 1)); e.preventDefault(); }
+    else if (e.key === 'Escape') setHover(null);
+  };
+  const ranged = all.some(p => p.min < p.max);
+
   return (
     <div className="wx-chart">
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img"
-        aria-label={t('wxHistoryAria', { from: history[0]!.date, to: history.at(-1)!.date })}>
-        <path d={path(bid)} className="wx-line-buy" />
-        <path d={path(ask)} className="wx-line-sell" />
-        {dots(bid, 'buy')}
-        {dots(ask, 'sell')}
-      </svg>
-      <div className="wx-chart-axis">
-        <span>{history[0]!.date.slice(5)}</span>
-        <span className="mono">
-          {fmtPrice(lo, shown, locale)}–{fmtPrice(hi, shown, locale)} {t(BUCKET_LABEL_KEY[shown])}
-        </span>
-        <span>{history.at(-1)!.date.slice(5)}</span>
+      <div className="wx-hist-head">
+        {SIDES.map(s => (
+          <span key={s}><i className={`wx-hist-key wx-hist-${s}`} />{t(s === 'buy' ? 'wxBid' : 'wxAsk')}</span>
+        ))}
+        {ranged && <span><i className="wx-hist-key-range" />{t('wxHistoryRange')}</span>}
+        <span className="wx-hist-basis">{t('wxHistoryBasis', { basis: t(BUCKET_LABEL_KEY[basis]) })}</span>
       </div>
+      <div className="wx-hist" ref={wrap}>
+        <svg width={Math.max(1, width)} height={HIST_H} role="img"
+          aria-label={t('wxHistoryAria', { from: history[0]!.date, to: history.at(-1)!.date })}>
+          {ticks.map(v => (
+            <g key={v}>
+              <line className="wx-hist-grid" x1={padL} x2={padL + innerW} y1={Math.round(y(v)) + 0.5} y2={Math.round(y(v)) + 0.5} />
+              <text className="wx-hist-tick" x={padL - 8} y={y(v) + 3.5} textAnchor="end">{fmt(v)}</text>
+            </g>
+          ))}
+          {SIDES.map(s => {
+            const { solid, bridge } = lines(s);
+            return (
+              <g key={s} className={`wx-hist-${s}`}>
+                {pts[s].map((p, i) => p && p.min < p.max && (
+                  <rect key={i} className="wx-hist-bar" x={x(i, s) - barW / 2} y={y(p.max)}
+                    width={barW} height={y(p.min) - y(p.max)} rx={barW / 2} />
+                ))}
+                <path className="wx-hist-bridge" d={bridge} />
+                <path className="wx-hist-line" d={solid} />
+                {pts[s].map((p, i) => p && (
+                  <circle key={i} className="wx-hist-dot" cx={x(i, s)} cy={y(p.median)} r={hover === i ? 5 : 4} />
+                ))}
+              </g>
+            );
+          })}
+          {ends.map((e, k) => (
+            <text key={e.s} className="wx-hist-end" x={cx(e.i) + lane + 7} y={endY[k]! + 3.5}>{e.label}</text>
+          ))}
+          {history.map((h, i) => (n - 1 - i) % every === 0 && (
+            <text key={h.date} className={`wx-hist-day${i === n - 1 ? ' is-current' : ''}`}
+              x={cx(i)} y={HIST_H - 7} textAnchor="middle">{day(h.date)}</text>
+          ))}
+          {hover !== null && (
+            <line className="wx-hist-cross" x1={cx(hover)} x2={cx(hover)} y1={HIST_PAD.t} y2={HIST_PAD.t + innerH} />
+          )}
+          <rect className="wx-hist-hit" tabIndex={0} x={padL} y={HIST_PAD.t} width={innerW} height={innerH}
+            onPointerMove={e => setHover(idxAt(e.clientX))} onPointerLeave={() => setHover(null)}
+            onFocus={() => setHover(n - 1)} onBlur={() => setHover(null)} onKeyDown={onKey} />
+        </svg>
+        {hover !== null && (
+          <HistoryTip day={history[hover]!} basis={basis} locale={locale} title={day(history[hover]!.date)}
+            style={cx(hover) > width / 2 ? { right: width - cx(hover) + 14 } : { left: cx(hover) + 14 }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HistoryTip({ day, basis, locale, title, style }: {
+  day: WechatHistoryDay; basis: WechatPriceBucket; locale: string; title: string; style: CSSProperties;
+}) {
+  const { t } = useT();
+  const bid = inBasis(day, 'buy', basis);
+  const ask = inBasis(day, 'sell', basis);
+  const spread = bid && ask ? ask.median - bid.median : null;
+  return (
+    <div className="wx-hist-tip" style={style} role="status">
+      <div className="wx-hist-tip-title">{title}</div>
+      <div className="wx-hist-tip-rows">
+        {SIDES.map(s => {
+          const p = day[s].price;
+          const other = p && p.bucket !== basis;
+          const range = p && fmtRange(p, locale);
+          return (
+            <Fragment key={s}>
+              <i className={`wx-hist-key wx-hist-${s}`} />
+              <b className={!p || other ? 'fp-muted' : undefined}>{p ? fmtPrice(p.median, p.bucket, locale) : '—'}</b>
+              <span>{t(s === 'buy' ? 'wxBid' : 'wxAsk')}</span>
+              <small>
+                {!p
+                  ? (day[s].senders ? t(s === 'buy' ? 'wxBuyersN' : 'wxSellersN', { n: day[s].senders }) : t('wxNotQuoted'))
+                  : `${other ? `${t(BUCKET_LABEL_KEY[p.bucket])} · ` : ''}${t('wxQuotes', { n: p.n })}${range ? ` · ${range}` : ''}`}
+              </small>
+            </Fragment>
+          );
+        })}
+      </div>
+      {spread !== null && (
+        <div className={`wx-hist-tip-foot${spread < 0 ? ' fp-warn' : ''}`}>
+          {t(spread < 0 ? 'wxCrossed' : 'wxSpread', { v: fmtPrice(Math.abs(spread), basis, locale) })}
+        </div>
+      )}
     </div>
   );
 }

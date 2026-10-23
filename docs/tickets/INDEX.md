@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-377](./RS-377-wechat-line-history-chart-reads-as-a-price-ladder-pe.md) | done | story | P2 | WeChat line history chart reads as a price ladder per report day | — |
 | [RS-376](./RS-376-reddit-worker-errors-alert-in-telegram.md) | done | story | P2 | Reddit worker errors alert in Telegram | 1.325.0 |
 | [RS-375](./RS-375-all-ops-alerts-land-in-homelab-alerts.md) | in-progress | story | P2 | All ops alerts land in Homelab Alerts | — |
 | [RS-374](./RS-374-pack-mode-connects-a-bluetooth-label-printer-shows-i.md) | done | story | P2 | Pack mode connects a Bluetooth label printer, shows its status, and names the purchasers | 1.324.0 |
