@@ -1690,6 +1690,17 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   page head, a progress card, a table with the scan box over it, and a side
   panel with the selected item and a **Finish** card.
   - **Opening it moves a Draft to Packing** (v1.230.0), once per visit.
+  - **The progress card maps the order** (v1.317.5). It has one cell per
+    product, in # order, labelled with its #:
+    - green once packed, amber while short, red at 0;
+    - a dashed slot while waiting.
+
+    A long order's cells drop their labels. The count beside it says what it
+    counts: *products packed*, or *products packed, DAL only* under *Packing
+    from*. The units sit at the end of the legend.
+  - **The selected row is framed in ink** (v1.317.5): the row Space and a
+    scan act on. Green only ever means packed. A product with no photo gives
+    the Selected card one line, not an empty frame.
   - **Products run in the order's own list order**, # order (v1.220.3; by #
     since v1.219.0, grouped by source PO in v1.218.0). That is the Packing
     list's order, except for products added once the order was past Draft,

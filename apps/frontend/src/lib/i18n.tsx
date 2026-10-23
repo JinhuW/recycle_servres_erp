@@ -3303,6 +3303,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     pkScanPacked: 'Packed {pn}.',
     pkProgress: '{n} of {of} products packed',
     pkUnits: '{n} / {of} units',
+    pkTallyCap: 'products packed',
+    pkTallyCapWh: 'products packed, {wh} only',
     pkLegendPacked: '{n} packed',
     pkLegendShort: '{n} short',
     pkLegendZero: '{n} not packed',

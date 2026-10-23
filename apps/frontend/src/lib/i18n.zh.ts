@@ -2412,6 +2412,8 @@ const zh: Record<string, string> = {
   pkScanPacked: '已打包 {pn}。',
   pkProgress: '已打包 {n} / {of} 个产品',
   pkUnits: '{n} / {of} 件',
+  pkTallyCap: '已打包产品',
+  pkTallyCapWh: '已打包产品（仅 {wh}）',
   pkLegendPacked: '已打包 {n}',
   pkLegendShort: '短缺 {n}',
   pkLegendZero: '未打包 {n}',

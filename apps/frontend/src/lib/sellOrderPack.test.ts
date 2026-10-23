@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { LineCheck } from './boxCheck';
 import {
   fitsAnySourcePo, flaggedLots, isPackable, nextOpenProduct, packBody, packFilter, packGroups, packProducts, packScan, packView, packWarehouseOptions,
-  productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck,
+  productBucket, productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck,
   type PackLine, type PackProduct,
 } from './sellOrderPack';
 
@@ -342,5 +342,7 @@ describe('productTally', () => {
     expect(productTally(ps, cs)).toEqual({
       products: 4, done: 1, partial: 1, absent: 1, open: 1, units: 12, counted: 4,
     });
+    // The progress map colours each product by the same bucket.
+    expect(ps.map(p => productBucket(p.lots, cs))).toEqual(['done', 'partial', 'absent', 'open', null]);
   });
 });

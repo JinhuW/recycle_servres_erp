@@ -4360,8 +4360,40 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 .pk-page .bc-back { min-height: 44px; font-size: 13.5px; }
 .pk-page .page-sub { font-size: 14px; }
 
+/* Progress: the count, a map of the products, and the warehouse switch on one
+   row. Its own grid: Review's `.bc-tally` is built for two halves. */
+.pk-tally { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 28px; align-items: center; padding: 16px 20px; }
+.pk-tally-num { display: grid; gap: 6px; min-width: 128px; }
+.pk-tally-num .mono { font-size: 34px; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pk-tally-num .mono b { font-weight: 600; }
+.pk-tally-num .mono .muted { font-size: 18px; letter-spacing: 0; color: var(--fg-subtle); }
+.pk-tally-cap { font-size: 12.5px; color: var(--fg-subtle); }
+.pk-tally-map { display: grid; gap: 10px; min-width: 0; }
+.pk-tally .bc-legend { margin-top: 0; align-items: center; }
 .pk-tally .bc-legend .chip { font-size: 12.5px; }
-.pk-wh { display: grid; gap: 6px; justify-items: end; }
+.pk-tally-units { margin-left: auto; font-size: 13px; color: var(--fg-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* One cell per product in # order, so what is left reads as which #s. A
+   waiting product is an empty dashed slot, so a row of them can't pass for
+   the buttons beside it. */
+/* The span draws the cell: a container query styles only what is inside the
+   container, and a cell too narrow for its # drops the label and the dashes. */
+.pk-map { display: flex; gap: 4px; height: 30px; }
+.pk-map-dense { gap: 1px; }
+.pk-cell { flex: 1 1 0; min-width: 0; display: flex; container-type: inline-size; font-style: normal; }
+.pk-cell span {
+  flex: 1; display: grid; place-items: center; overflow: hidden; white-space: nowrap;
+  border-radius: 6px; border: 1.5px dashed var(--border-strong); background: transparent;
+  font: 600 11.5px/1 'JetBrains Mono', ui-monospace, monospace; color: var(--fg-subtle);
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+.pk-cell.done span { background: var(--accent-strong); border-color: transparent; color: var(--accent-fg); }
+.pk-cell.partial span { background: var(--warn); border-color: transparent; color: var(--fg); }
+.pk-cell.absent span { background: var(--neg); border-color: transparent; color: white; }
+@container (max-width: 30px) {
+  .pk-cell span { font-size: 0; border-radius: 3px; }
+  .pk-cell.open span { border-style: solid; border-color: transparent; background: var(--border); }
+}
+.pk-wh { display: grid; gap: 6px; justify-items: start; }
 .pk-wh-label { font-size: 12.5px; color: var(--fg-subtle); }
 .pk-wh .seg button { min-height: 44px; padding: 8px 16px; font-size: 14px; }
 
@@ -4400,7 +4432,8 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
   border: 1px solid var(--border); border-radius: 8px; background: var(--bg-soft); color: var(--fg-subtle); cursor: zoom-in;
 }
 .pk-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.pk-thumb-none { cursor: default; opacity: 0.6; }
+/* Keeps the photo's footprint without drawing a tile on every row. */
+.pk-thumb-none { cursor: default; border-color: transparent; background: transparent; opacity: 0.45; }
 .pk-table .bc-pn { font-size: 14.5px; }
 .pk-table .bc-spec { font-size: 12.5px; }
 .pk-meta { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 4px; font-size: 12.5px; color: var(--fg-subtle); }
@@ -4427,6 +4460,13 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 @media (hover: none) {
   .pk-table .bc-row:hover td { background: none; }
 }
+/* The selected row is the cursor Space and the scanner act on: an ink frame,
+   never the green fill, which here means packed. */
+.pk-table tr.row-selected td, .pk-table tr.row-selected:hover td {
+  background: var(--bg-soft); box-shadow: inset 0 1.5px 0 var(--fg), inset 0 -1.5px 0 var(--fg);
+}
+.pk-table tr.row-selected td:first-child { box-shadow: inset 1.5px 0 0 var(--fg), inset 0 1.5px 0 var(--fg), inset 0 -1.5px 0 var(--fg); }
+.pk-table tr.row-selected td:last-child { box-shadow: inset -1.5px 0 0 var(--fg), inset 0 1.5px 0 var(--fg), inset 0 -1.5px 0 var(--fg); }
 /* Done rows dim their content, never the cell: the tick has to stay readable
    to undo it, and the selected wash would go patchy. */
 .pk-table .bc-done .pk-thumb, .pk-table .bc-done .pk-meta, .pk-table .bc-done .pk-no,
@@ -4445,6 +4485,8 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 .pk-table .pk-choose { background: var(--warn-soft); }
 .pk-table .pk-choose td:first-child { box-shadow: inset 4px 0 0 var(--warn); }
 .pk-choose .pk-cb { border-color: var(--warn-strong); }
+.pk-table tr.pk-choose.row-selected td, .pk-table tr.pk-choose.row-selected:hover td { background: var(--warn-soft); }
+.pk-table tr.pk-choose.row-selected td:first-child { box-shadow: inset 4px 0 0 var(--warn), inset 0 1.5px 0 var(--fg), inset 0 -1.5px 0 var(--fg); }
 /* Every lot held at 0: the # stays in the list, there is nothing to pack. */
 .pk-zero .pk-thumb, .pk-zero .bc-pn, .pk-zero .bc-spec, .pk-zero .pk-meta, .pk-zero .pk-no { opacity: 0.5; }
 .pk-zero-note { font-size: 13px; color: var(--fg-subtle); white-space: nowrap; }
@@ -4453,6 +4495,9 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 .pk-table .pk-group td { padding-top: 0; padding-bottom: 0; font-size: 12px; }
 .pk-group .bc-link { min-height: 44px; padding: 0 10px; margin-left: 6px; font-size: 13px; }
 
+/* No photo: one line, not an empty 4:3 frame pushing Finish down. */
+.pk-photo-none { aspect-ratio: auto; }
+.pk-photo-none .bc-photo-empty { display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding: 11px 18px; }
 .pk-sel-lots { list-style: none; margin: 12px 0 0; padding: 10px 0 0; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 12.5px; }
 .pk-sel-lots li { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--fg-muted); }
 .pk-sel-lots .pk-sel-done { color: var(--accent-strong); }
@@ -4478,11 +4523,11 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 @media (max-width: 900px) {
   .pk-cond-cell { display: none; }
   .pk-cond-inline { display: inline; }
-  .pk-tally { grid-template-columns: auto minmax(0, 1fr); }
-  .pk-wh { grid-column: 1 / -1; justify-items: start; }
+  .pk-tally { grid-template-columns: auto minmax(0, 1fr); row-gap: 14px; }
+  .pk-wh { grid-column: 1 / -1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .pk-fold svg { transition: none; }
+  .pk-fold svg, .pk-cell span { transition: none; }
 }
 
 /* Offered when the window no longer fits the shell it loaded with (App.tsx).
