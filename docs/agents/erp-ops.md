@@ -106,12 +106,20 @@ Every ops alert goes to the "Homelab Alerts" Telegram forum group
 | ERP · Uptime (15) | `deploy/railway-uptime/check.sh` → relay `POST /alert` | `@Jinhu_homelab_bot` |
 | Reddit · Workers (16), · Errors (17) | the reddit api's watch → relay `POST /alert` | `@Jinhu_homelab_bot` |
 | WeChat · Daily report (28) | memtrade's daily run on the Mac (`src/alert.ts`, `scripts/daily-report.sh`) → relay `POST /alert` | `@Jinhu_homelab_bot` |
-| Homelab · Prometheus (12) | Alertmanager on `10.10.60.5`, its own `telegram_configs` | `@Jinhu_homelab_bot` |
+| Homelab · Prometheus (12) | Alertmanager on `10.10.60.5` (0.28.1+; 0.27 has no `message_thread_id`), its own `telegram_configs` | `@Jinhu_homelab_bot` |
 | Facebook · Fleet ops (13), · Releases (14) | the facebook coordinator and `scripts/deploy.sh` (`TELEGRAM_OPS_CHAT_ID`, `TELEGRAM_TOPIC_OPS`, `TELEGRAM_TOPIC_RELEASES`) | `@recycle_facebook_alerts_bot` |
 
 The buyers' lead alerts (the reddit leads group, Facebook's
 High/Medium/Low topics) are not ops alerts and stay where the buyers read
 them.
+
+The Alertmanager and facebook settings live outside this repo. Alertmanager's
+are in `/srv/homelab_monitoring/config/alertmanager/alertmanager.yml` and
+`docker/core/alerting.yml` (image tag) on `ubuntu@10.10.60.5`. That tree is
+rsynced from a clone of `JinhuW/homelab-monitoring`, so the clone has to
+carry the same edit or the next push reverts it. Facebook's are in the
+homelab VM's `configs/secrets.env`, read by the coordinator alone; change
+them and recreate only `rs-coordinator`.
 
 - **The relay** is the `railway-alerts` Worker (`deploy/railway-alerts/`,
   `https://railway-alerts.jinhuwang1127.workers.dev`). All seven Railway
