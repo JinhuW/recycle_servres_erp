@@ -867,6 +867,106 @@ def cmd_msg_claim(args: argparse.Namespace) -> int:
     return 0
 
 
+def _queue_save(db: Any, changes: Dict[str, Any]) -> int:
+    from . import city_queue
+
+    try:
+        merged = city_queue.save_settings(db, changes, "rsc")
+    except city_queue.QueueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(json.dumps({k: v for k, v in merged.items() if k != "tiers"}, indent=2))
+    return 0
+
+
+def cmd_queue_show(args: argparse.Namespace) -> int:
+    from . import city_queue
+
+    db = open_database()
+    settings = city_queue.load_settings(db)
+    print(json.dumps({k: v for k, v in settings.items() if k != "tiers"}, indent=2))
+    return 0
+
+
+def cmd_queue_enroll(args: argparse.Namespace) -> int:
+    from . import city_queue
+
+    if not args.all and not args.workers:
+        print("error: name the workers, or pass --all", file=sys.stderr)
+        return 2
+    db = open_database()
+    current = set(city_queue.load_settings(db)["enrolled"])
+    if args.all:
+        enrolled = set() if args.remove else {city_queue.EVERY_WORKER}
+    elif args.remove:
+        if city_queue.EVERY_WORKER in current:
+            print(
+                "error: every worker is enrolled; `unenroll --all`, then enroll the ones to keep",
+                file=sys.stderr,
+            )
+            return 1
+        enrolled = current - set(args.workers)
+    else:
+        enrolled = current | set(args.workers)
+    return _queue_save(db, {"enrolled": sorted(enrolled)})
+
+
+def cmd_queue_set(args: argparse.Namespace) -> int:
+    changes: Dict[str, Any] = {}
+    for pair in args.pairs:
+        key, sep, raw = pair.partition("=")
+        if not sep:
+            print(f"error: {pair!r} is not key=value", file=sys.stderr)
+            return 2
+        try:
+            changes[key] = json.loads(raw)
+        except ValueError:
+            # Bare words (regions=home) are strings.
+            changes[key] = raw
+    return _queue_save(open_database(), changes)
+
+
+def cmd_queue_status(args: argparse.Namespace) -> int:
+    from . import city_queue
+
+    db = open_database()
+    now = datetime.now(timezone.utc)
+    settings = city_queue.load_settings(db)
+    status = city_queue.queue_status(
+        now.timestamp(), settings, city_queue.load_live(db, now, settings)
+    )
+    roster = db.queue_config("roster")
+    if args.json:
+        status["roster_updated_at"] = (roster or {}).get("updated_at")
+        print(json.dumps(status, indent=2))
+        return 0
+    enrolled = ", ".join(settings["enrolled"]) or "nobody"
+    print(f"queue at {status['at']}: enrolled {enrolled}")
+    print(
+        f"roster from the console: {(roster or {}).get('updated_at') or 'never pushed'}; "
+        f"{settings['per_day']}x a day, {settings['budget_minutes']} min per account, "
+        f"window {settings['window_hours']} h"
+    )
+    if not status["items"]:
+        print("no item searched or handed out in the last two days")
+    for item, row in status["items"].items():
+        print(
+            f"  {item:<16} {row['searched_today']:>3}/{row['cities']} searched today, "
+            f"{row['leased']} leased now, {row['due']} due, {row['held']} held by workers outside"
+        )
+    for w in status["workers"]:
+        flags = "" if w["enrolled"] else " (not enrolled)"
+        flags += " QUARANTINED" if w["quarantined"] else ""
+        leases = ", ".join(f"{o['item']}:{o['city']}" for o in w["open"]) or "-"
+        print(
+            f"  {w['worker_id']:<12} {w['minutes_today']:>4} min today, "
+            f"{w['handed_today']:>3} handed out, open {leases}{flags}"
+        )
+    if status["quarantined"]:
+        print(f"quarantined: {', '.join(status['quarantined'])}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rsc", description="Recycle Servers coordinator")
     # The first question during an incident is "which version is this box
@@ -1098,6 +1198,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     m_claim.add_argument("thread_id")
     m_claim.set_defaults(func=cmd_msg_claim)
+
+    queue = sub.add_parser("queue", help="The city queue enrolled workers take their cities from")
+    queue_sub = queue.add_subparsers(dest="queue_command", required=True)
+    q_status = queue_sub.add_parser("status", help="Today's round and each enrolled worker")
+    q_status.add_argument("--json", action="store_true")
+    q_status.set_defaults(func=cmd_queue_status)
+    q_show = queue_sub.add_parser("show", help="Print the queue settings")
+    q_show.set_defaults(func=cmd_queue_show)
+    for name, remove, text in (
+        ("enroll", False, "Let workers take their cities from the queue"),
+        ("unenroll", True, "Send workers back to their own city lists"),
+    ):
+        q_enroll = queue_sub.add_parser(name, help=text)
+        q_enroll.add_argument("workers", nargs="*")
+        q_enroll.add_argument("--all", action="store_true", help="every worker")
+        q_enroll.set_defaults(func=cmd_queue_enroll, remove=remove)
+    q_set = queue_sub.add_parser(
+        "set", help="Change settings: budget_minutes=360 per_day=1 regions=any partners=false"
+    )
+    q_set.add_argument("pairs", nargs="+", metavar="key=value")
+    q_set.set_defaults(func=cmd_queue_set)
 
     return parser
 

@@ -22,7 +22,11 @@ LEGACY = {"Authorization": "Bearer test-token"}
 # A UTC midnight, so start_at times land on the day they name.
 T0 = datetime(2026, 10, 20, tzinfo=timezone.utc).timestamp()
 HOUR = 3600.0
-SETTINGS = city_queue.validate_settings({}, {})
+# Both rule switches on, so the region and partner rules are exercised; the
+# owner's defaults turn them off (the live tests below run on those).
+SETTINGS = city_queue.validate_settings(
+    {"regions": "home", "partners": True, "budget_minutes": 180}, {}
+)
 
 CATALOG = [
     {"slug": "boston", "name": "Boston, MA", "region": "ne"},
@@ -464,7 +468,8 @@ def test_the_route_replays_the_log_and_saves_nothing(client):
     report = res.json()
     assert [q["worker_id"] for q in report["quarantined"]] == ["mw-1b"]
     workers = {w["worker_id"]: w for w in report["workers"]}
-    assert workers["mw-1"]["actual"]["searches"] == 2 and workers["mw-1"]["partners"] == ["mw-1b"]
+    # Partners are off by default, so nobody is paired.
+    assert workers["mw-1"]["actual"]["searches"] == 2 and workers["mw-1"]["partners"] == []
     assert report["settings"]["tiers"]["per_day"] == [2, 1, 1]
     assert report["window"]["days"] == 1
 

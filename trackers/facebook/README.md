@@ -762,35 +762,85 @@ The rule and the pins live in the coordinator's `city_tier_settings` and
 `GET/PUT /v1/city-tiers`, and `/v1/fleet` marks each city with its `per_day`,
 `pin` and `score`.
 
-**Shadow city queue.** The fleet is moving from fixed city lists to a queue
-workers pull from. Until workers ask it, the coordinator only replays what it
-would have done. Every search that names its city is logged in
-`city_searches`, with its cards, opened, reviewed and alerted counts.
-`POST /v1/queue/shadow` wakes each worker at its `start_at` times, but only
-while its status history says it was up. Each wake hands the worker cities
-through `city_queue.pick`. The report puts the result next to what the workers
-actually did: searches and browser minutes a day per account, redundant
-searches, cities unsearched for over 26 h, and overdue city-hours.
+**City queue.** An enrolled worker does not walk its own city list. Before
+each city of an item's sweep it asks the coordinator,
+`POST /v1/workers/<id>/next-city`. The ask reports the city it just finished,
+and the answer is one of:
 
-The queue's rules, with their defaults:
+- **A city**, with its name and radius. It may be outside the worker's
+  config.
+- **Nothing more**, which ends the sweep. The reasons are:
+  - the round is done: every city has been searched for that item today;
+  - the account has spent its budget;
+  - it is outside its window;
+  - it is quarantined.
+- **`queue: false`**, for a worker that is not enrolled. It searches its own
+  list as before.
 
-- **Due.** Only due cities are handed out. A city is due 0.85 of the way
-  through its tier interval, and the tiers are ranked over the whole catalog.
-- **Budget.** Each account gets 180 browser minutes per UTC day, and keeps
-  asking for 8 h after each `start_at`.
-- **Region.** A worker searches only regions where it or its IP partner (same
-  `proxy_env`) has home cities.
-- **Partners.**
-  - A worker never takes its partner's home cities or the cities its partner
-    searched in the last 7 days.
-  - It never starts while its partner is searching or finished less than
-    30 minutes ago.
+A worker that gets no answer at all also searches its own list. That is the
+only fallback.
+
+**The rules**, with the first stage's defaults (the owner's calls,
+2026-10-23):
+
+- **Once a day.** Every city is searched once a day per item. A city is due
+  again 0.85 of a day after its last search.
+- **Budget.** An account searches at most 360 minutes per UTC day, counted
+  from its leases, and only within 8 h of one of its `start_at` times. A
+  restart outside that window, or after the round is done, searches nothing,
+  so an enrolled worker no longer runs an off-schedule sweep on every
+  deploy.
+- **Region and IP partner do not limit anyone.** Facebook was found not to
+  mind an account searching far from its IP. `regions=home` and
+  `partners=true` restore the old rules.
 - **Order.** Home cities first, then cities the worker searched in the last
-  7 days, then the rest.
-- **Quarantine.** An account whose searches all return 0 cards, on cities
-  others get cards from, gets nothing.
+  7 days, then the rest. Within each group, the most overdue first.
+- **Held cities.** A city a live (HEALTHY, not dead), unquarantined worker
+  outside the queue still holds stays that worker's. Enrolling a few workers
+  therefore fills holes, such as a parked account's cities, and never
+  repeats a static sweep.
+- **Leases.** A handed-out (item, city) is leased to its worker. A HEALTHY
+  heartbeat renews the lease for another 30 minutes. A heartbeat in any other
+  state gives the city back at once, and the next ask closes the lease. A
+  lease that runs out unclosed returns its city to the queue.
+- **Quarantine.** An account whose searches over 48 h all return 0 cards, on
+  cities other accounts get cards from, gets nothing. Its searches count as
+  no one's visit.
 
-To read it on the VM:
+A visit is any of these:
+
+- a search report for that item, or one with no item, which an older worker
+  sent;
+- a search from before the log began, kept in `search_cities`;
+- a lease that was closed or is still live.
+
+The console pushes the roster (the catalog with each city's radius, and each
+worker's home cities and `start_at`) every 10 minutes, at startup and after
+*Edit cities*. The coordinator keeps it in `queue_config`.
+
+To run it on the VM:
+
+```bash
+docker exec rs-coordinator rsc queue status                  # today's round, per item and per worker
+docker exec rs-coordinator rsc queue enroll homelab-1 nyc-1  # or --all
+docker exec rs-coordinator rsc queue unenroll nyc-1          # back to its own list
+docker exec rs-coordinator rsc queue set budget_minutes=300 per_day=1 regions=any
+docker exec rs-coordinator rsc queue show
+```
+
+`rsc queue set` stores only the keys you give it, so a default changed in
+code still reaches every key nobody set.
+
+**Shadow report.** `POST /v1/queue/shadow` replays the fleet through the same
+rules. It wakes each worker at its `start_at` times while its status history
+says it was up, and puts the result next to what the workers actually did:
+
+- searches and browser minutes a day per account;
+- redundant searches;
+- cities unsearched for over 26 h;
+- overdue city-hours.
+
+It uses the stored queue settings, with what-ifs on top:
 
 ```bash
 docker exec rs-console python -m rs_console.queue_shadow             # last 3 days
@@ -798,9 +848,9 @@ docker exec rs-console python -m rs_console.queue_shadow --days 7 --budget 240 -
 docker exec rs-console python -m rs_console.queue_shadow --per-day 3,2,1 --json
 ```
 
-What-if values change only that replay, never the stored settings. The log
-starts at the deploy that added it, and a window that reaches further back is
-marked partial. The design and the phases after this one are in
+What-if values change only that replay. The search log (`city_searches`)
+starts at 0.13.13, and a window that reaches further back is marked partial.
+The design and the stages are in
 [docs/superpowers/specs/2026-10-23-fleet-city-queue-design.md](../../docs/superpowers/specs/2026-10-23-fleet-city-queue-design.md).
 
 **It is built to be absorbed by the ERP.** The page is plain HTML/JS with no

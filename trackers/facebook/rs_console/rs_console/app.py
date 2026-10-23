@@ -66,8 +66,10 @@ single-use ticket minted against the console token.
 """
 
 import asyncio
+import contextlib
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets as pysecrets
@@ -125,8 +127,47 @@ TIMEOUT_S = 10.0
 SCREENSHOT_TIMEOUT_S = 20.0
 # The queue's shadow report replays up to two weeks of the whole fleet.
 SHADOW_TIMEOUT_S = 120.0
+# How often the city queue's roster is pushed when nothing changed.
+ROSTER_PUSH_S = 600.0
 
-app = FastAPI(title="rs-console", docs_url=None, redoc_url=None)
+logger = logging.getLogger(__name__)
+
+# The roster loop's event loop and wake-up, while it runs; a cities save sets
+# it from the handler's thread so the queue hears now, not in ten minutes.
+_roster_wake: Optional[tuple] = None
+
+
+async def _roster_loop(wake: asyncio.Event) -> None:
+    while True:
+        try:
+            await push_roster()
+        except Exception:  # noqa: BLE001 - the next round retries; the console must stay up
+            logger.warning("Could not push the city queue roster", exc_info=True)
+        wake.clear()
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(wake.wait(), ROSTER_PUSH_S)
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    global _roster_wake
+    wake = asyncio.Event()
+    _roster_wake = (asyncio.get_running_loop(), wake)
+    task = asyncio.create_task(_roster_loop(wake))
+    try:
+        yield
+    finally:
+        _roster_wake = None
+        task.cancel()
+
+
+def _push_roster_soon() -> None:
+    if _roster_wake is not None:
+        loop, wake = _roster_wake
+        loop.call_soon_threadsafe(wake.set)
+
+
+app = FastAPI(title="rs-console", docs_url=None, redoc_url=None, lifespan=_lifespan)
 
 # The dashboard shell is public — it holds no data, only markup and script.
 # Everything it shows comes from the token-guarded routes below, after the
@@ -746,6 +787,7 @@ def put_worker_cities(worker_id: str, body: Any = Body(default=None)) -> Dict[st
         by = body.get("updated_by") if isinstance(body.get("updated_by"), str) else None
         state = settings.stamp(values, (by or "").strip()[:120] or None)
         settings.save(state)
+    _push_roster_soon()
     return {
         "worker_id": worker_id,
         "cities": city_list,
@@ -774,6 +816,21 @@ async def put_city_tiers(body: Any = Body(default=None)) -> Response:
     if isinstance(by, str) and by.strip():
         upstream_body["updated_by"] = by.strip()[:120]
     return await _forward("PUT", "/v1/city-tiers", json_body=upstream_body)
+
+
+async def push_roster() -> bool:
+    """Send the coordinator the roster its city queue hands cities out from:
+    the catalog and each worker's home cities, from the `/v1/fleet` document.
+    Only this console reads the worker configs, so the queue knows nothing
+    of a city or a worker until this has run."""
+    doc = await fleet()
+    body = queue_shadow_view.roster(doc)
+    if not body["workers"]:
+        return False
+    base, headers = _upstream()
+    async with httpx.AsyncClient(timeout=TIMEOUT_S, base_url=base, headers=headers) as client:
+        res = await client.put("/v1/queue/roster", json={**body, "updated_by": "rs-console"})
+    return res.status_code == 200
 
 
 @app.post("/v1/queue/shadow", dependencies=[Depends(require_token)])

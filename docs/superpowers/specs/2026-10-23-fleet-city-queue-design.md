@@ -1,7 +1,8 @@
 # Fleet city queue — design
 
-**Ticket:** RS-370 · **Date:** 2026-10-23 ·
-**Status:** phase 1 (shadow) built, facebook-tracker 0.13.13
+**Tickets:** RS-370 (shadow), RS-372 (first stage live) · **Date:** 2026-10-23 ·
+**Status:** shadow built in facebook-tracker 0.13.13; first stage live in
+0.13.14, piloted on homelab-1, nyc-1, phl-1 and va-2
 
 ## The ask
 
@@ -63,8 +64,10 @@ the queue is bounded:
 ## Rules
 
 `rs_coordinator/city_queue.py` `pick(worker, now, fleet, state, settings)` is
-the one decision. The shadow report uses it now and the live queue will later.
-It refuses, in this order:
+the one decision, used by both the shadow report and the live queue. Since
+the first stage, the region and partner rules below are off by default
+(`regions=any`, `partners=false`), the budget is 360 minutes, and every city
+is due once a day. Phase 3 explains why. It refuses, in this order:
 
 | Refusal | When |
 | --- | --- |
@@ -174,38 +177,105 @@ The quarantine verdict, live: an ops note when an account turns blind, and the
 console shows it on the worker's row. This is useful before any queue, since
 today these accounts sit HEALTHY doing nothing.
 
-## Phase 3: workers pull
+## Phase 3: workers pull — the first stage (RS-372, 0.13.14)
 
-- **Roster in the coordinator.** The console pushes it on every config render
-  (deploy, *Edit cities*, settings saves). The coordinator stores it with
-  `updated_at`, so `next-city` never calls back to the console.
-- **`POST /v1/workers/{id}/next-city?item=`** returns `{slug, name, radius}`
-  or 204 with the refusal. It runs `pick` under a per-(item, city) lease
-  claimed with `UPDATE … WHERE … FOR UPDATE SKIP LOCKED`: Postgres in prod, a
-  lock on SQLite. The lease expires after 30 minutes, and a heartbeat that
-  reports a park releases it at once.
-- **`POST /v1/workers/{id}/city-done`** carries cards, opened, reviewed and
-  alerted.
-  - 0 cards where the city's recent median is above 0 does not count as a
-    visit, and the city goes back in the queue.
-  - Two such results quarantine the worker.
-- **Monitor.** In the vendored `facebook.py` `search()`, the
-  `zip(planned_cities(...))` loop becomes "while `next-city` gives one". Item
-  jobs and `start_at` stay, and `start_at` now means "when this account is
-  active".
-  - If the coordinator cannot be reached, the worker searches its own home
-    cities, as it does today when `search-plan` fails, never the whole
-    catalog.
-  - A city from the coordinator may be outside the worker's config, so its
-    radius comes with it.
-- **Rollout.** Pilot one region's accounts first, then the rest.
+**The owner's decisions** (2026-10-23), in answer to the three questions
+below:
+
+- **Regions:** none. Facebook does not care where the account's IP is
+  against the searched city; sc-1 had searched Texas from a New York exit for
+  weeks.
+- **IP partners:** both rules go. Partners may share cities and search at
+  once.
+- **Frequency:** every city once a day per item. "Once all target cities get
+  searched, then we can call it done": an empty queue ends the sweep.
+- **Budget:** at most 6 hours of searching per account per day.
+- **Rollout:** a pilot, then everyone.
+
+**Changed from the outline above.**
+
+- *There is no `city-done` call.* The next ask carries `done`, which closes the
+  lease.
+- *A visit is no longer judged by the city's median cards.* It is any search
+  report for the item (or with no item), a pre-log `search_cities` stamp, or a
+  closed or live lease. Quarantine stays the 0-card rule, and a quarantined
+  account's searches count as nobody's visit.
+- *There is no SKIP LOCKED.* The coordinator is a single process, so a
+  process lock around pick-and-lease is enough on both backends.
+- *There is no per-region pilot.* With no regions, the pilot is a set of
+  accounts, and a city a live worker outside the queue holds stays its own
+  (`held`), so the pilot never repeats a static sweep.
+
+**Settings.** `queue_config['settings']` stores only the keys someone set:
+
+| Setting | Default |
+| --- | --- |
+| `enrolled` | `[]` (`["*"]` is everyone) |
+| `regions` | `any` (`home` restores the region rule) |
+| `partners` | `false` |
+| `per_day` | `1` (`null` follows the tiers) |
+| `budget_minutes` | 360 |
+| `window_hours` | 8 |
+| `lease_minutes` | 30 |
+| `quarantine_hours` | 48 |
+| `early` | 0.15 |
+| `familiar_days` | 7 |
+
+**Protocol.** The worker posts `POST /v1/workers/{id}/next-city` with
+`{item, home, start_at, done}`. It is always answered with a 200, because the
+monitor reads anything else as "unreachable" and falls back to its own list.
+The three answers:
+
+- `{queue: false}`: the worker is not enrolled and searches its own list.
+- `{queue: true, city: {slug, name, radius}, why}`: search that city.
+- `{queue: true, city: null, reason}`: the sweep ends. The reasons are
+  `nothing_due`, `budget`, `outside_window` and `quarantined`, plus
+  `partner_busy` with `retry_after` when the partner rule is on.
+
+**Leases.** `city_leases` holds one row per hand-out.
+
+- **Renewed:** a HEALTHY heartbeat moves `expires_at` on by `lease_minutes`.
+- **Given back:** any other reported state pulls it to now.
+- **Closed:** the next ask's `done` closes it, and gives up the worker's other
+  live leases for that item, which a crash left behind.
+- **Minutes:** a worker's budget is counted from its leases, `(closed_at, or
+  min(now, expires_at)) − leased_at`.
+
+**Roster.** rs_console pushes `PUT /v1/queue/roster`. It sends the catalog
+with each city's radius, and each worker's home cities, `proxy_env`,
+`start_at` and phrases. It pushes at startup, every 10 minutes, and as soon as
+*Edit cities* saves. The asking worker's own `home` and `start_at` override
+the roster's copy.
+
+**Monitor** (`recycle-patches` `93e2566`):
+
+- `search()` iterates `queued_cities()`.
+  - `{queue: false}`, or no first answer, means `planned_cities` as before.
+  - A queue lost mid-sweep leaves the own list's unsearched cities.
+  - An empty answer ends the sweep.
+- Every funnel report names its `item`, which `city_searches.item` records.
+
+**Operate.**
+
+- `rsc queue status` shows today's round: per item, cities searched, leased,
+  due and held, and per worker, its minutes and leases.
+- `rsc queue enroll <ids>|--all`, `unenroll`, `set key=value` and `show`
+  change and print the settings.
+
+**Rollout.**
+
+1. Deploy 0.13.14 with every worker held.
+2. `rsc queue enroll homelab-1 nyc-1 phl-1 va-2`: one 28-city list plus three
+   idle helpers.
+3. Recreate only those four.
+4. After a pilot day, `rsc queue enroll --all` and recreate the rest.
 
 ## Phase 4: the ERP page
 
 The worker page's *Edit cities* becomes *Home cities*. The fleet page shows
 each city's next due time, lease holder and home workers.
 
-## Decisions to confirm (from the shadow report)
+## Decisions to confirm (from the shadow report) — answered in phase 3
 
 1. **Which exits may search which regions**, especially the three regions with
    no local exit.

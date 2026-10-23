@@ -54,7 +54,7 @@ def report_reviews(
     if not worker_id:
         raise HTTPException(status_code=422, detail="worker_id is required")
     deps.db.add_review_stats(
-        worker_id, **payload.model_dump(exclude={"worker_id", "search_city"})
+        worker_id, **payload.model_dump(exclude={"worker_id", "search_city", "item"})
     )
     if payload.search_city and payload.searches:
         deps.db.touch_search_city(worker_id, payload.search_city)
@@ -65,6 +65,7 @@ def report_reviews(
             opened=payload.opened,
             reviewed=payload.reviewed,
             alerted=payload.alerted,
+            item=payload.item,
         )
     return StatusResponse()
 

@@ -13,7 +13,7 @@ all. So they are pinned here by commit instead, and
 
 | Path | Upstream | Branch | Pinned commit |
 | --- | --- | --- | --- |
-| `ai-marketplace-monitor/` | https://github.com/BoPeng/ai-marketplace-monitor | `recycle-patches` | `8979534c9743b17c096d1e453b324a96916e78bf` |
+| `ai-marketplace-monitor/` | https://github.com/BoPeng/ai-marketplace-monitor | `recycle-patches` | `93e2566965b6b305de8bc3f7d0360ec381fd1407` |
 | `facebook-marketplace-bot/` | https://github.com/GeorgiKeranov/facebook-marketplace-bot | (as cloned) | `3bda6b40dc6be0a613c3785bed3eb0409f9b5377` |
 
 ## ai-marketplace-monitor
@@ -36,7 +36,7 @@ before relying on a clone of this tree being enough to redeploy.
 Before pulling upstream, **rebase** that branch rather than merging into it, and
 re-run `scripts/check-vendor.sh` to refresh the pin above.
 
-**Why the pin is `8979534`, not `96d9204`.** `96d9204` (the RS-338 endpoint
+**Why `recycle-patches` has `8979534`, not `96d9204`.** `96d9204` (the RS-338 endpoint
 fix that 0.13.12 shipped) existed only in a worktree's clone, and that clone
 was deleted. With no private remote, no copy of the commit survived. `8979534`
 rebuilds it:

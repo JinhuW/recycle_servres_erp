@@ -267,7 +267,10 @@ do this — the working values are `sac` and the numeric id `112454482100538`.
   - Partners sweep at different times. The `b` worker runs
     `python -m rs_console.settings start-at <id>b 17:00` in rs-console. A
     fleet-wide sweep time saved from the ERP does not override it.
-  - Partners never search the same cities.
+  - Partners never search the same cities. This binds the lists set by hand
+    only. Workers enrolled in the city queue share cities freely, by the
+    owner's call on 2026-10-23 (README → *City queue*; `rsc queue set
+    partners=true` restores it there).
   - Partners' first logins are at least 24 hours apart. Pair a live account
     last, one or two a day.
 
@@ -281,7 +284,10 @@ do this — the working values are `sac` and the numeric id `112454482100538`.
   /etc/sysctl.d/60-inotify.conf && sudo sysctl --system` first
   ([debug note](../../../docs/debug-notes/2026-10-20-forty-workers-exhaust-the-vms-inotify-instances.md)).
 - Match proxy geography to the region. A Houston-centred search from a Denver IP
-  looks wrong to Facebook's heuristics.
+  looks wrong to Facebook's heuristics. Or so this assumed. On 2026-10-23 the
+  owner found Facebook does not mind (sc-1 had searched Texas from a New York
+  exit for weeks), and the city queue hands any city to any enrolled worker
+  (`regions=any`).
 - Region borders overlap on purpose. A 500-mile radius is not what Facebook
   actually returns — ranking, seller settings, and category placement hide
   listings that are geographically in range — so neighbouring cities seeing the
