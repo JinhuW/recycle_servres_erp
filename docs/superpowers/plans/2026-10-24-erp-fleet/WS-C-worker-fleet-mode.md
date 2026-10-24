@@ -92,12 +92,20 @@ vendored monitor in worktrees; `facebook.py` `queued_cities` (~2071–2185),
 
 ## Exit
 
-- [ ] Against WS-B's dev backend (or the fake server in
-      `rs_worker/tests/fake_fleet.py` until then): a container with the three
-      env vars claims a throwaway pool account, logs in once, receives a
-      manual task, searches it, its listing reaches the coordinator, and it
-      receives the next task without a login.
-- [ ] Without the env vars the image runs the old way and the old suites pass.
+- [x] Against the fake server in `rs_worker/tests/fake_fleet.py` (WS-B's
+      backend did not exist yet): the entrypoint claims, renders config,
+      session and identity, the monitor logs in once, receives a manual
+      task, searches it (browser mocked), reports it done and receives the
+      next task without a login; a stale epoch exits 75 without one
+      (`rs_worker/tests/test_monitor_fleet_mode.py`,
+      `test_entry.py`; the image built locally and ran against the fake
+      fleet with made-up data). **Still open against WS-B's dev backend with
+      a throwaway pool account and a listing reaching the coordinator**: WS-F's
+      integration step; see the PR's follow-ups for the exact run.
+- [x] Without the env vars the image runs the old way (`aimm --version`
+      through the built image's entrypoint; `test_the_old_way_really_execs`)
+      and the old suites pass (monitor: 547 passed, 1 skipped, the
+      pre-existing 512 among them unchanged).
 
 ## Notes for the agent
 

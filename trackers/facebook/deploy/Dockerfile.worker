@@ -1,0 +1,86 @@
+# The fleet worker image: the vendored monitor plus rs_worker, the entrypoint
+# that turns three RS_FLEET_* variables into a claim from the ERP's fleet.
+# Without them the image behaves exactly as ai-marketplace-monitor/Dockerfile
+# did: tini runs supervisord with the bind-mounted config, and the homelab
+# compose files keep working against it.
+#
+# Build from this folder's parent (trackers/facebook), so both trees are in
+# the context; Dockerfile.worker.dockerignore keeps everything else out:
+#
+#   docker build -f deploy/Dockerfile.worker \
+#       -t ghcr.io/jinhuw/aimm-recycle:$(cat VERSION) \
+#       --build-arg RS_VERSION=$(cat VERSION) \
+#       --build-arg RS_MONITOR_COMMIT=$(git -C ai-marketplace-monitor rev-parse --short HEAD) .
+
+FROM python:3.12-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    DISPLAY=:99 \
+    SCREEN_GEOMETRY=1920x1080x24 \
+    VNC_PORT=5900 \
+    AIMM_WEBUI_HOST=0.0.0.0 \
+    AIMM_WEBUI_PORT=8467 \
+    AIMM_ENABLE_VNC=1 \
+    AIMM_NOVNC_DIR=/usr/share/novnc \
+    AIMM_VNC_HOST=127.0.0.1 \
+    AIMM_VNC_PORT=5900
+
+# Xvfb + x11vnc + xauth: the virtual display and VNC the non-headless browser
+# needs; websockify + novnc: the browser-based VNC client; supervisor: the
+# old mode's process manager; tini: PID 1; curl: the healthcheck.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xvfb \
+        x11vnc \
+        xauth \
+        supervisor \
+        websockify \
+        novnc \
+        ca-certificates \
+        curl \
+        git \
+        tini \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN if [ ! -e /usr/share/novnc/vnc.html ] && [ -e /usr/share/novnc/vnc_lite.html ]; then \
+        ln -s /usr/share/novnc/vnc_lite.html /usr/share/novnc/vnc.html; \
+    fi
+
+WORKDIR /app
+
+# Build identity: the version the worker claims with and reports in every
+# heartbeat. "unknown" is an honest answer for an image built by hand.
+ARG RS_VERSION=unknown
+ARG RS_MONITOR_COMMIT=unknown
+ENV RS_VERSION=$RS_VERSION \
+    RS_MONITOR_COMMIT=$RS_MONITOR_COMMIT
+
+COPY ai-marketplace-monitor/pyproject.toml ai-marketplace-monitor/README.md ./
+COPY ai-marketplace-monitor/src ./src
+
+RUN pip install . \
+    && playwright install --with-deps chromium
+
+RUN mkdir -p /etc/supervisor/conf.d /var/log/supervisor /root/.ai-marketplace-monitor
+COPY ai-marketplace-monitor/docker/supervisord.conf /etc/supervisor/conf.d/aimm.conf
+
+COPY rs_worker ./rs_worker
+
+# 5900 VNC, 8467 the monitor's web UI, 8788 /healthz in fleet mode.
+EXPOSE 5900 8467 8788
+
+# No VOLUME for /root/.ai-marketplace-monitor: in fleet mode the claimed
+# session is written there and must die with the container, not linger in an
+# anonymous volume. The compose files mount their own named volumes.
+
+# In fleet mode the entrypoint serves /healthz once the monitor is up; the
+# old mode has nothing on 8788 and is left as healthy as before (the compose
+# files bring their own healthcheck).
+HEALTHCHECK --interval=1m --timeout=10s --start-period=5m --retries=3 \
+    CMD sh -c 'if [ -n "$RS_FLEET_URL" ]; then curl -sf http://127.0.0.1:8788/healthz; else exit 0; fi'
+
+ENTRYPOINT ["/usr/bin/tini", "--", "python", "-m", "rs_worker.entry"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf", "-n"]
