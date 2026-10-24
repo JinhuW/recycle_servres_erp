@@ -931,7 +931,9 @@ def cmd_queue_status(args: argparse.Namespace) -> int:
 
     db = open_database()
     now = datetime.now(timezone.utc)
-    settings = city_queue.load_settings(db)
+    settings = city_queue.with_start(
+        city_queue.load_settings(db), city_queue.load_start(db), now.timestamp()
+    )
     status = city_queue.queue_status(
         now.timestamp(), settings, city_queue.load_live(db, now, settings)
     )
@@ -947,6 +949,13 @@ def cmd_queue_status(args: argparse.Namespace) -> int:
         f"{settings['per_day']}x a day, {settings['budget_minutes']} min per account, "
         f"window {settings['window_hours']} h"
     )
+    if status["started"]:
+        started = status["started"]
+        print(
+            f"round started by hand at {started['at']} by {started['by'] or 'someone'}, "
+            f"runs until {started['until']}; due: not searched in the last "
+            f"{started['fresh_hours']:g} h"
+        )
     if not status["items"]:
         print("no item searched or handed out in the last two days")
     for item, row in status["items"].items():
@@ -968,6 +977,38 @@ def cmd_queue_status(args: argparse.Namespace) -> int:
         )
     if status["quarantined"]:
         print(f"quarantined: {', '.join(status['quarantined'])}")
+    return 0
+
+
+def cmd_queue_start(args: argparse.Namespace) -> int:
+    from . import city_queue
+
+    db = open_database()
+    now = datetime.now(timezone.utc)
+    if args.dry_run:
+        settings = city_queue.with_start(
+            city_queue.load_settings(db), city_queue.load_start(db), now.timestamp()
+        )
+        out = city_queue.start_preview(
+            now.timestamp(), settings, city_queue.load_live(db, now, settings)
+        )
+    else:
+        out = city_queue.start_round(db, now, "rsc")
+    if args.json:
+        print(json.dumps(out, indent=2))
+        return 0
+    verb = "would start" if args.dry_run else "started"
+    print(
+        f"{verb} now, until {out['until'] if args.dry_run else out['started']['until']}: "
+        f"{len(out['wake'])} worker(s) woken: {', '.join(out['wake']) or '-'}"
+    )
+    if out["older"]:
+        print(f"on an older monitor, starting at their usual time: {', '.join(out['older'])}")
+    for item, row in out["items"].items():
+        print(
+            f"  {item:<16} {row['due']:>3}/{row['queue']} due "
+            f"(not searched in the last {out['fresh_hours']:g} h), {row['leased']} under way"
+        )
     return 0
 
 
@@ -1252,6 +1293,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     q_set.add_argument("pairs", nargs="+", metavar="key=value")
     q_set.set_defaults(func=cmd_queue_set)
+    q_start = queue_sub.add_parser(
+        "start", help="Start the round now instead of at the workers' start times"
+    )
+    q_start.add_argument("--dry-run", action="store_true", help="say what it would do")
+    q_start.add_argument("--json", action="store_true")
+    q_start.set_defaults(func=cmd_queue_start)
     q_log = queue_sub.add_parser(
         "log", help="Each city a worker searched, newest first, from handout to result"
     )

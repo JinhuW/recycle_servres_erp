@@ -18,6 +18,32 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **The city round can be started now, instead of at the workers' start
+  times** (RS-393).
+  - **The start.** `POST /v1/queue/start`, or `rsc queue start`, stores who
+    started the round and when, in `queue_config` `start`. For a window's
+    length (8 h) from then:
+    - every enrolled worker's window is open;
+    - a city is due once it was not searched in the last
+      `start_fresh_hours` (2 by default).
+  - **Waking the workers.** The coordinator queues a new `sweep` directive for
+    every enrolled worker that is HEALTHY, live, not quarantined and on
+    0.13.18 or later. Its directive poll picks it up within about 10 s, and
+    the idle loop runs every search job then, with no restart.
+  - **The preview.** `GET /v1/queue/start` (`rsc queue start --dry-run`) says
+    who would start, who runs an older monitor and so starts at its usual
+    time, and how many cities would be due.
+  - **The console** forwards both routes, and `/v1/fleet`'s `queue.started`
+    carries a running start.
+
+### Changed
+
+- **The vendored monitor is pinned at `3a621a4`**: it acts on `sweep`. The
+  start-up run of every job and the one a `sweep` triggers now share
+  `_run_all_jobs`. Older monitors ignore the directive.
+
 ## [0.13.17] - 2026-10-23
 
 ### Added

@@ -17,6 +17,40 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.334.0] - 2026-10-24
+
+A manager can start the Facebook fleet's city round now, instead of waiting
+for the workers' start times (RS-393, facebook-tracker 0.13.18). The owner
+asked for "a buttom to start the task right now instead of waiting for the
+design start time". Running the pilot round at an odd hour had needed
+hand-set queue rules and container restarts, and a restart is a Facebook
+login.
+
+**Start the round now** sits on the round card. Its confirmation shows,
+before anything changes:
+
+- how many workers start searching within a minute;
+- which enrolled workers run an older worker and so start at their usual
+  time;
+- for each item, how many cities are due: those not searched in the last
+  2 hours;
+- when the round ends.
+
+Once started, the lede says who started it and until when.
+
+Behind it:
+
+- **The coordinator** stores the start. For 8 hours it opens every enrolled
+  worker's window and hands out every city not searched lately.
+- **Waking the workers.** It wakes each one that can start through a new
+  `sweep` directive on the poll workers already make every 10 seconds, so
+  nothing is restarted.
+- **The ERP** forwards `GET /api/coordinator/queue/start` (the preview) and
+  `POST` (the start, signed by the session).
+- **Older workers.** A worker on 0.13.17 or older ignores the directive. So
+  the button wakes workers only once they are redeployed, and until then its
+  confirmation says so.
+
 ## [1.333.1] - 2026-10-24
 
 A direct-debit or eCheck PayPal payment now leaves *pending* once PayPal

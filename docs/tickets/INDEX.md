@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-393](./RS-393-a-manager-can-start-the-city-round-now-instead-of-at.md) | in-progress | story | P2 | A manager can start the city round now instead of at the workers' start time | — |
 | [RS-392](./RS-392-never-re-login-facebook-unless-necessary-the-first-r.md) | done | task | P2 | Never re-login Facebook unless necessary: the first rule in AGENTS.md | n/a — docs only, no release |
 | [RS-391](./RS-391-a-bank-funded-paypal-payment-leaves-pending-when-pay.md) | done | bug | P2 | A bank-funded PayPal payment leaves pending when PayPal settles it | 1.333.1 |
 | [RS-390](./RS-390-rmb-flow-entries-take-ai-renamed-payment-screenshots.md) | done | story | P2 | RMB Flow entries take AI-renamed payment screenshots; Reference removed | 1.333.0 |

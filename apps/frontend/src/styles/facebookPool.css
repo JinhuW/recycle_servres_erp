@@ -2893,3 +2893,20 @@ tr.wx-quiet td {
   outline-offset: 2px;
   border-radius: 2px;
 }
+
+/* Start the round now (FleetQueue.tsx). */
+.ff-round-actions {
+  display: flex;
+  gap: 8px;
+}
+.ff-round-started {
+  color: var(--info-strong);
+}
+.ff-round-start-due {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.ff-round-start-due .mono {
+  margin-right: 4px;
+}

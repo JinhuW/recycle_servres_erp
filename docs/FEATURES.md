@@ -3099,6 +3099,22 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     disabled, with the reason, for a worker on an older monitor.
   - **Older consoles.** Against an older console none of this shows.
 
+  **Starting the round now.** Since v1.334.0 (RS-393, facebook-tracker
+  0.13.18), the round card has **Start the round now**, so a manager need not
+  wait for the workers' start times.
+  - **The confirmation** says:
+    - how many workers start searching within a minute;
+    - which enrolled workers run an older worker and start at their usual
+      time;
+    - for each item, how many cities are due: those not searched in the last
+      2 hours;
+    - when the round ends (8 hours later), and that the usual start times
+      still run.
+  - **Once started**, the lede reads "Started by … at …, runs until …".
+  - **The board's due cities** follow the started round's rule.
+  - **Before the workers are redeployed** onto 0.13.18, the button wakes no
+    one and says so.
+
   **The city log.** Since v1.331.0 (RS-385, facebook-tracker 0.13.17), every
   city a worker searches is logged from its start to its end.
   - **The worker page's City log card.** It covers the last 24 h, one row a

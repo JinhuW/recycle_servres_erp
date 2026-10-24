@@ -346,6 +346,16 @@ coordinator.put('/workers/:id/queue', async (c) => {
   });
 });
 
+// Start the city round now instead of at the workers' start times. The GET is
+// the confirmation's preview (who starts, who waits, how many cities are due);
+// the POST starts it, signed by the session.
+coordinator.get('/queue/start', (c) => forward(c, 'GET', '/v1/queue/start'));
+
+coordinator.post('/queue/start', (c) => {
+  log.info('fleet city round started by hand', { module: 'coordinator', by: c.var.user.email });
+  return forward(c, 'POST', '/v1/queue/start', { updated_by: c.var.user.name || c.var.user.email });
+});
+
 // The city log: each city a worker searched, from its handout or start to its
 // end, for the worker page (by worker) and the round card (by city). An older
 // console answers 404, and the page then shows no log.

@@ -69,7 +69,9 @@ def next_city(
 
     now = datetime.now(timezone.utc)
     with _handout:
-        settings = city_queue.load_settings(deps.db)
+        settings = city_queue.with_start(
+            city_queue.load_settings(deps.db), city_queue.load_start(deps.db), now.timestamp()
+        )
         # Live leases other than `done` are what a restart left behind.
         for lease in deps.db.settle_city_leases(worker_id, item, done, _stamp(now)):
             deps.db.log_city_event(
@@ -218,13 +220,38 @@ def put_settings(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
 @router.get("/v1/queue/status", dependencies=[Depends(require_admin)])
 def status() -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
-    settings = city_queue.load_settings(deps.db)
+    settings = city_queue.with_start(
+        city_queue.load_settings(deps.db), city_queue.load_start(deps.db), now.timestamp()
+    )
     out = city_queue.queue_status(
         now.timestamp(), settings, city_queue.load_live(deps.db, now, settings)
     )
     roster = deps.db.queue_config("roster")
     out["roster_updated_at"] = roster["updated_at"] if roster else None
     return out
+
+
+@router.get("/v1/queue/start", dependencies=[Depends(require_admin)])
+def start_preview() -> Dict[str, Any]:
+    """What starting the round now would do: who starts, who waits for its
+    usual time, and how many cities would be due."""
+    now = datetime.now(timezone.utc)
+    settings = city_queue.with_start(
+        city_queue.load_settings(deps.db), city_queue.load_start(deps.db), now.timestamp()
+    )
+    return city_queue.start_preview(
+        now.timestamp(), settings, city_queue.load_live(deps.db, now, settings)
+    )
+
+
+@router.post("/v1/queue/start", dependencies=[Depends(require_admin)])
+def start_round(body: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
+    """Start the round now instead of at the workers' start times: open every
+    enrolled worker's window for `window_hours` and wake the ones that can
+    start a sweep on a directive."""
+    by = body.get("updated_by") if isinstance(body.get("updated_by"), str) else None
+    with _handout:
+        return city_queue.start_round(deps.db, datetime.now(timezone.utc), by)
 
 
 @router.post("/v1/queue/shadow", dependencies=[Depends(require_admin)])

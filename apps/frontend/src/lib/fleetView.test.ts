@@ -12,7 +12,7 @@ import {
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyPort, sharedExits,
   applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
   loginAccountNo, workerHistory, queueCitiesToday, queueCityName, queueRound, queueSummary,
-  cityStepDot, stepCount, visitMinutes, VISIT_TONE,
+  cityStepDot, stepCount, visitMinutes, VISIT_TONE, queueStartedNow,
 } from './fleetView';
 
 describe('keysymsFor', () => {
@@ -733,6 +733,22 @@ describe('the city log', () => {
     expect(stepCount(page, 'opened')).toBe(0);
     expect(stepCount(page, 'phrase')).toBe(0);
     expect(stepCount(page, 'reviewed')).toBe(0);
+  });
+});
+
+describe('a round started by hand', () => {
+  const queue = (started: FleetQueue['started']): FleetQueue => ({
+    at: '2026-10-24T08:00:00Z', everyone: true,
+    settings: { enrolled: ['*'], per_day: 1, budget_minutes: 360, window_hours: 8 },
+    items: {}, cities: [], quarantined: [], roster_updated_at: null, started,
+  });
+  const started = { at: '2026-10-24T08:00:00Z', by: 'Alex Chen', until: '2026-10-24T16:00:00Z', fresh_hours: 2 };
+
+  it('counts only while it runs', () => {
+    expect(queueStartedNow(queue(started), Date.parse('2026-10-24T09:00:00Z'))).toEqual(started);
+    expect(queueStartedNow(queue(started), Date.parse('2026-10-24T16:00:00Z'))).toBeNull();
+    expect(queueStartedNow(queue(null), Date.parse('2026-10-24T09:00:00Z'))).toBeNull();
+    expect(queueStartedNow(queue(undefined), Date.parse('2026-10-24T09:00:00Z'))).toBeNull();
   });
 });
 

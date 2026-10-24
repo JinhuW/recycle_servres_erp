@@ -954,3 +954,12 @@ def test_insert_challenge_uses_returning_instead_of_lastrowid():
     handle = _OfflinePostgres()
     assert handle.insert_challenge({"worker_id": "w", "kind": "captcha"}) == 1
     assert handle.log[0].endswith("RETURNING id")
+
+
+def test_a_sweep_request_is_taken_once(backend):
+    assert backend.take_sweep("nyc-1") is False
+    backend.request_sweep("nyc-1")
+    backend.request_sweep("nyc-1")
+    assert backend.get_worker("nyc-1")["sweep_requested_at"]
+    assert backend.take_sweep("nyc-1") is True
+    assert backend.take_sweep("nyc-1") is False

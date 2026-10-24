@@ -861,6 +861,19 @@ async def put_queue_everyone(body: Any = Body(default=None)) -> Response:
     )
 
 
+@app.get("/v1/queue/start", dependencies=[Depends(require_token)])
+async def queue_start_preview() -> Response:
+    """What starting the city round now would do."""
+    return await _forward("GET", "/v1/queue/start")
+
+
+@app.post("/v1/queue/start", dependencies=[Depends(require_token)])
+async def queue_start(body: Any = Body(default=None)) -> Response:
+    """Start the city round now instead of at the workers' start times."""
+    who = _who(body) if isinstance(body, dict) else None
+    return await _forward("POST", "/v1/queue/start", json_body={"updated_by": who})
+
+
 @app.get("/v1/city-log", dependencies=[Depends(require_token)])
 async def city_log(
     worker_id: Optional[str] = Query(default=None),
