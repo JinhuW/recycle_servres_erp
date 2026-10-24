@@ -17,6 +17,36 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.335.0] - 2026-10-24
+
+The host agent for the Facebook worker fleet, `apps/fleet-agent`, the piece
+of RS-394 that turns a Docker host into a fleet host with one container and
+a token. Nothing uses it yet: the ERP routes it talks to land with the
+backend workstreams, and the first host is prepared and cut over by the ops
+one.
+
+What it does, every 30 seconds: ask the ERP how many workers this host should
+run and on which image, look at the containers carrying its label, and
+start, restart, replace or remove workers until they match, then report what
+runs. A worker is started with the fixed `docker run` line of the contract
+(labels, no restart policy, 1 GB shm, the five fleet variables, the VNC port
+on loopback); the token reaches the Docker CLI through its environment, never
+a process list. Starts are one per tick and at least three minutes apart,
+because each one is a Facebook login. Exited workers come back by exit code:
+stale epoch or no slot after a minute, a failed claim after ten, anything
+else after a minute and counted, with five such restarts in half an hour
+leaving the worker stopped and reported. A host the ERP marks
+non-authoritative is observed and reported, never touched; an unreachable
+ERP leaves the host on its last answer and restarts only.
+
+The package has no runtime dependencies (the `docker` CLI over the mounted
+socket, `fetch` for HTTP), builds with `tsc` into a `node:24-alpine` image
+with the CLI installed, and keeps its only state, the cached answer and the
+start memory, on a `/state` volume. Its planner is a pure function with a
+test for each rule, the agent runs against a fake daemon and a mock ERP, and
+an opt-in live test drives the real daemon with a sleeping `alpine:3` image
+and cleans up after itself.
+
 ## [1.334.0] - 2026-10-24
 
 A manager can start the Facebook fleet's city round now, instead of waiting

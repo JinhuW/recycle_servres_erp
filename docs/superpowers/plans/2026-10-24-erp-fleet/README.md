@@ -88,7 +88,7 @@ E join as they land.
 | A | not started | | |
 | B | not started | | |
 | C | not started | | |
-| D | not started | | |
+| D | merged | #877 | v1.335.0; `apps/fleet-agent` with planner, docker CLI and agent tests, Dockerfile, README; live Docker check passed locally against a mock ERP; the check against the dev backend is F's integration step |
 | E | not started | | |
 | F | Now section done; Integration waits for A+B+C | #876 | `fleet-images.yml` on dev, both jobs skip until the mirror/private packages exist; 4 `FLEET_*` vars set on Railway **dev**; `HOSTS.md` has the owner-runnable checklist; export procedure in WS-F. Host `10.10.60.14` answered from the Mac at 21:30 UTC after being dark earlier; nothing run on it. Owner steps: mirror + `AIMM_MIRROR_*`, private GHCR packages + `GHCR_PRIVATE_CONFIRMED`, GHCR read token, coordinator LAN publish, first host command |
 | G | not started | | |

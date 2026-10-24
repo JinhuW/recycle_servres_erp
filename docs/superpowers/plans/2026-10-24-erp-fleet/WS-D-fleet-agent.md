@@ -44,10 +44,14 @@ to TypeScript; drop per-worker config sync (the worker renders its own).
 
 ## Exit
 
-- [ ] On a dev machine with Docker, the agent pointed at WS-B's dev backend
-      with a registered host starts `count` worker containers (any image that
-      exits 0 is fine for this check), reports them, scales down when
-      capacity drops, and stays observe-only when `authoritative=false`.
+- [x] On a dev machine with Docker, the agent pointed at a mock of the host
+      API (`tests/live-docker.test.ts`, `FLEET_AGENT_LIVE_DOCKER=1`) with a
+      registered host starts `count` containers of a sleeping `alpine:3`
+      image, reports them, scales down when capacity drops, and stays
+      observe-only when `authoritative=false` (2026-10-24, Colima).
+- [ ] The same against WS-B's dev backend with a host registered in the
+      Hosts tab: WS-F's integration step. Run it with the one-liner in the
+      package README and `FLEET_URL` set to the dev ERP.
 
 ## Notes for the agent
 
