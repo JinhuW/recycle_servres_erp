@@ -25,6 +25,7 @@ on:
     paths:
       - "apps/backend/**"
       - "apps/frontend/**"
+      - "apps/fleet-agent/**"
       - "packages/shared/**"
       - ".github/workflows/backend-tests.yml"
       # tests/sync-scrub.test.ts runs this against the migrated schema.
@@ -47,6 +48,7 @@ on:
     paths:
       - "apps/backend/**"
       - "apps/frontend/**"
+      - "apps/fleet-agent/**"
       - "packages/shared/**"
       - ".github/workflows/backend-tests.yml"
       # tests/sync-scrub.test.ts runs this against the migrated schema.
@@ -123,3 +125,8 @@ jobs:
 
       # No database needed — these are pure helpers and component-level tests.
       - run: pnpm --filter recycle-erp-frontend test
+
+      # The host agent's planner and docker wrapper, against a fake docker. The
+      # live-docker file skips itself unless FLEET_AGENT_LIVE_DOCKER=1, so CI
+      # never starts a container.
+      - run: pnpm --filter recycle-erp-fleet-agent test

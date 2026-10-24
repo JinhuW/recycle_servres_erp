@@ -100,7 +100,7 @@ function deviceOf(raw) {
   };
 }
 
-console.log(`${dryRun ? 'dry run against' : 'seeding slots on'} ${dbTarget(url).host}`);
+console.log(`${dryRun ? 'dry run against' : 'seeding slots on'} ${dbTarget(url).host}/${dbTarget(url).database}`);
 const sql = postgres(url, { max: 1, onnotice: () => {} });
 
 try {

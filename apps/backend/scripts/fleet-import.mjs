@@ -76,7 +76,7 @@ async function main() {
   const dup = master.cities.map((c) => c.slug).filter((s, i, all) => all.indexOf(s) !== i);
   if (dup.length) throw new Error(`master.toml lists a city twice: ${[...new Set(dup)].join(', ')}`);
 
-  console.log(`${dryRun ? 'dry run against' : 'importing into'} ${dbTarget(url).host}`);
+  console.log(`${dryRun ? 'dry run against' : 'importing into'} ${dbTarget(url).host}/${dbTarget(url).database}`);
   const sql = postgres(url, { max: 2, onnotice: () => {} });
   try {
     const have = {

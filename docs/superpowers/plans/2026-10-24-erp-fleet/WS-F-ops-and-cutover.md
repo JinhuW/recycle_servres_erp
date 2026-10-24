@@ -61,7 +61,7 @@ first rule).
    - [x] `HOSTS.md` carries the owner-runnable, read-only block with expected
          answers, the GHCR login step, the agent one-liner and what to paste
          back. No command was run on the host; it answered `ping` and
-         `tcp/22` from the Mac at 21:30 UTC on 2026-10-24 after being
+         `tcp/22` from the Mac at about 20:40 UTC on 2026-10-24 after being
          unreachable earlier that day (`HOSTS.md` → *Reachability*).
    - [ ] Owner runs the block and pastes the output into *Timings and
          surprises* below.
@@ -158,7 +158,7 @@ for the credentials path). Delete the scratch copies afterwards.
 ### Timings and surprises (filled during Integration)
 
 - 2026-10-24: `10.10.60.14` unreachable from the Mac in the morning,
-  reachable (ping, tcp/22) at 21:30 UTC; not logged in. The homelab VM
+  reachable (ping, tcp/22) at about 20:40 UTC; not logged in. The homelab VM
   reaches it too.
 - 2026-10-24: the live workers carry `RS_COORDINATOR_URL=http://coordinator.tailnet:8500`
   (the example value; no tailnet interface on the VM) and
@@ -167,25 +167,100 @@ for the credentials path). Delete the scratch copies afterwards.
   `127.0.0.1:8500` only; `configs/secrets.coordinator-lan.env` does not exist
   on the VM, so the LAN publish is off.
 - Host checklist output: (owner pastes here)
-- Integration run: (timings here)
+
+#### Integration run, login-free part (2026-10-24, on the Mac)
+
+No worker image ran, no Facebook login happened, no pool account was used.
+The backend (v1.339.0, then the fix below) ran from a worktree on a free
+port against a private database `fleet_f_int_<ts>` on the local
+`recycle-erp-testdb` container, migrated and seeded with the repo's scripts,
+with a made-up `FB_POOL_KEY` and `FLEET_WORKER_TOKEN_KEY` and
+`FLEET_IMAGE_WORKER=fleet-check:sleeper`. One made-up account (`uid
+100000000000901`, status `fleet`, `alive_checked_at` set so the liveness
+loop never probed it, home city `houston`, no proxy) got its `fleet_slots`
+row by hand. The database, the image and every container were removed
+afterwards.
+
+What was proven, with timings:
+
+| Step | Result |
+| --- | --- |
+| `fleet-import.mjs` on `master.toml` | 127 cities, 2 items, 12 search keys in 0.12 s; the first scheduler tick (5 s after boot) wrote **254 ready tasks**, all due at once (`reason added`) |
+| Claim (`fleet-fake-worker.mjs`) | 200 with epoch 1, two cookies parsed from the header string, `has_proxy false`, home cities and both items, settings with `lease_minutes 30`, `poll_hold_seconds 50`; the `fb_worker_accounts` stint opened |
+| Manual task during a held poll | the imported tasks were pushed a day out by hand so the poll was empty; `POST /api/fleet/tasks` reused the pair's waiting row (priority 100, `manual`) and the held poll returned it **12 ms** after the POST |
+| Done → next | events `handed, started, searched, finished, done` recorded; the scheduler wrote the pair's next `cadence` task due exactly `done_at + 1 day` |
+| Second worker on the only account | `no_slot`, exit 75, while the first held the lease |
+| Epoch bumped by hand while the first held a poll | the next heartbeat (10 s cadence, 7 s after the bump) answered 409 `stale_epoch`; the fake worker exited **75** |
+| Add a city | disabled city + `verify-slug` (priority 50) on `enterprise_ssd`. **Bug:** the held poll got it only when its 40 s hold ran out (36 s late); fixed in v1.340.0 (`createCity` notifies), re-run: handed **3 ms** after the POST. The fake worker's `finished {location, matches: true}` enabled the city and set `verified_as`; its two search tasks appeared on the next tick, 25 s later |
+| Remove the city | `DELETE` disabled it and cancelled both ready tasks in the same request |
+| Agent, observe only | `authoritative=false`, capacity 0: first report 30 ms after start, `last_seen_at` moving every tick (`FLEET_INTERVAL=5`), `report.containers` `[]` |
+| Agent, capacity 2 | `PUT` at :30.7 → first `run` at :34.4 (next tick), second at :44.6 (stagger 10 s); both reported running with ports 5901, 5902 on 127.0.0.1 |
+| Agent, capacity 1 | picked up on the next tick; `remove` of `-2` logged 34 s after the `PUT`, because `docker stop -t 30` waits out the full grace period on a `sleep` that ignores SIGTERM |
+| Agent, `authoritative=false` again (capacity 0) | "observing only" every tick, the running container untouched |
+| Agent stop (SIGTERM) | exited at once, containers left running (by design); removed by hand |
+
+Surprises:
+
+- The verify-slug wake bug above (fixed with a test in
+  `fleet-claim.test.ts`).
+- The agent's tick is serial: while one `docker stop -t 30` runs, nothing is
+  reported, so `last_seen_at` goes stale for up to 30 s. Harmless at
+  capacity changes; worth knowing before reading a stale host as dead.
+- The ERP's workers list keeps the last state (`HEALTHY`) of a worker that
+  exited cleanly; only `last_heartbeat_at` shows it is gone.
+- The fake worker reports its last task through `next-task` with `wait 0`,
+  which can lease it another task it then abandons until the lease runs out
+  (30 min). The contract has no "done, hand me nothing" form; a real
+  worker that stops cleanly has the same problem.
+- `master.toml` carries `date_listed = ["last 7 days", "last 7 days"]` (an
+  array); it reaches the claim answer as-is, the worker must accept it.
+- With the sleeper image the ERP sees containers but no worker heartbeats,
+  as expected; a container the agent starts cannot reach a backend bound to
+  `127.0.0.1` on the Mac anyway.
+
+Still open, each needs a real Facebook login and the owner:
+
+| Item | What the owner must provide |
+| --- | --- |
+| A real claim and exactly one `boot` in the login ledger | a **throwaway** pool account (never a fleet one) imported into the dev pool, with its slot (`fleet-seed-slots.mjs` or by hand); the worker image built on the Mac from the pinned monitor (the mirror is not set up yet) |
+| A real search of a manual task | the same, plus the go to start one worker container |
+| A listing reaching the coordinator (`rsc` shows the sighting) | how a worker off the VM reaches the coordinator: the LAN publish (`configs/secrets.coordinator-lan.env` on the VM) or another route, and `FLEET_COORDINATOR_URL` set to it |
+| Stale epoch on the real image: 409, exit 75, agent restart after 60 s, second claim | the go for a **second login** of the throwaway account (expected and noted in the ledger) |
+| The agent against the dev backend on a real host | which host (`worker-60-14` per `HOSTS.md`), the GHCR read token, and the host checklist run by the owner |
 
 ## Integration (after A, B, C merge to dev)
 
 - [ ] `pnpm dev` ERP on the Mac with the fleet migration; `fleet-import.mjs`
       against `master.toml`; `fleet-seed-slots.mjs` with one **throwaway**
       pool account (never a live fleet account).
+      - Login-free part done 2026-10-24: private local DB, import → 254
+        ready tasks, a made-up account's slot by hand. Open: the throwaway
+        account.
 - [ ] Register host `mac-dev`; run WS-D's agent locally (or `docker run` the
       worker by hand with the three env vars); capacity 1.
+      - Login-free part done: host `mac-int`, agent with a sleeping image
+        through observe → 2 → 1 → observe. Open: the real worker image.
 - [ ] The worker claims, logs in once (ledger: one `boot`), receives a manual
       task within 2 s, searches it, the listing reaches the coordinator
       (`rsc` on the VM shows the sighting), `done` closes the task and the
       scheduler writes tomorrow's.
+      - Login-free part done with the fake worker: claim, manual task in
+        12 ms, done, tomorrow's task written. Open: login, real search,
+        coordinator sighting.
 - [ ] Add a city in the ERP → `verify-slug` task → the worker reports the
       label → city enabled; remove → cancelled.
+      - Done with the fake worker (it posts the same `finished` event a real
+        one does); found and fixed the missing wake. Open: a real worker
+        reading the label off Facebook.
 - [ ] Claim the same account from a second container → the first gets 409 on
       its next call and exits 75; the agent restarts it after 60 s and it
       claims again (second login — expected, note it).
+      - Login-free part done: `no_slot` (75) for a second fake worker, 409
+        `stale_epoch` and exit 75 after a hand-bumped epoch. Open: the real
+        image's exit and the agent's restart.
 - [ ] Record timings and any surprise in this file.
+      - Login-free run recorded under *Timings and surprises*; the real run
+        still to add.
 
 ## Cutover runbook (prod)
 

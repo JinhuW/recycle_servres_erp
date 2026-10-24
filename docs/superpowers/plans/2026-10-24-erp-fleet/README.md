@@ -29,7 +29,7 @@ listings to it. Its own city queue retires after cutover.
 | C | [`WS-C-worker-fleet-mode.md`](WS-C-worker-fleet-mode.md) | Worker image entrypoint + vendored monitor "fleet mode" | contract only | A, B, D, E, F |
 | D | [`WS-D-fleet-agent.md`](WS-D-fleet-agent.md) | `apps/fleet-agent`: one TS container per host | contract only | A, B, C, E, F |
 | E | [`WS-E-erp-ui.md`](WS-E-erp-ui.md) | Cities, Queue, Hosts, Slots tabs in the ERP frontend | contract only (mock server) | A, B, C, D, F |
-| F | [`WS-F-ops-and-cutover.md`](WS-F-ops-and-cutover.md) | GHCR images, Railway env, host prep (`10.10.60.14`), imports, cutover runbook | A–E for cutover; host prep and CI now | A, B, C, D, E |
+| F | Now section done; Integration: login-free part done locally, real-login part waits for the owner | #876, #883 | `fleet-images.yml` on dev, both jobs skip until the mirror/private packages exist; 4 `FLEET_*` vars set on Railway **dev**; `HOSTS.md` has the owner-runnable checklist; export procedure in WS-F. Host `10.10.60.14` answered from the Mac at about 20:40 UTC after being dark earlier; nothing run on it. Local integration (fake worker + agent with a sleeping image, no login) passed; it found the city-add wake bug, fixed in v1.340.0; CI now runs the agent's tests. Owner steps: throwaway pool account, mirror + `AIMM_MIRROR_*`, private GHCR packages + `GHCR_PRIVATE_CONFIRMED`, GHCR read token, coordinator LAN publish, first host command |
 | G | [`WS-G-tiers-second-host.md`](WS-G-tiers-second-host.md) | Tiers by alert hits, second host | cutover done | — |
 
 ```

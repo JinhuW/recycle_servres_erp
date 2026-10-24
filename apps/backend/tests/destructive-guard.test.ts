@@ -47,6 +47,10 @@ describe('dbTarget', () => {
     expect(dbTarget('postgres://u:p@postgres.railway.internal:5432/x').local).toBe(false);
   });
 
+  it('names the database as well as the host', () => {
+    expect(dbTarget('postgres://u:p@127.0.0.1:55432/fleet_check_1')).toEqual({ host: '127.0.0.1', database: 'fleet_check_1', local: true });
+  });
+
   it('refuses production whatever the host, unless overridden', () => {
     const local = 'postgres://u:p@postgres:5432/x';
     expect(destructiveRefusal(local, 'seed', 'ALLOW_X', { NODE_ENV: 'production' }))
