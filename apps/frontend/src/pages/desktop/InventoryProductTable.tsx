@@ -2,11 +2,13 @@ import { Fragment, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { RouteLink } from '../../components/RouteLink';
+import { SortTh, type SortState } from '../../components/SortTh';
 import { poLinePath } from '../../lib/route';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../../lib/format';
 import { statusTone } from '../../lib/status';
 import { useT } from '../../lib/i18n';
 import { SerialNumbers } from '../../components/SerialNumbers';
+import { isInventorySortCol, productLabel, productSpec, sortProductGroups, type InventorySortCol } from '@recycle-erp/shared';
 
 export type ProductLot = {
   id: string;
@@ -82,6 +84,8 @@ type GroupedColVis = {
 type Props = {
   groups: ProductGroup[];
   isManager: boolean;
+  sort: SortState;
+  onSort: (col: string) => void;
   cols: GroupedColVis;
   selected: Set<string>;
   selectAllState: 'empty' | 'none' | 'some' | 'all';
@@ -97,29 +101,8 @@ const SELLABLE = new Set(['Reviewing', 'Done']);
 const categoryChip = (c: string) =>
   c === 'RAM' ? 'info' : c === 'SSD' ? 'pos' : c === 'HDD' ? 'cool' : 'warn';
 
-function productLabel(g: ProductGroup): string {
-  // RAM surfaces type in the subtitle, so keep it out of the title to avoid
-  // repeating it; other categories keep the existing label shape.
-  const bits = (g.category === 'RAM'
-    ? [g.brand, g.capacity, g.generation]
-    : [g.brand, g.capacity, g.type, g.generation]
-  ).filter(Boolean);
-  return bits.length ? bits.join(' ') : (g.description || g.category);
-}
-
-function productSpec(g: ProductGroup): string {
-  if (g.category === 'RAM') {
-    return [g.type, g.classification, g.rank, g.speed ? `${g.speed} MHz` : null]
-      .filter(Boolean).join(' · ');
-  }
-  // `Other` carries no spec columns — its item type is the whole subtitle.
-  if (g.category === 'Other') return g.item_type ?? '';
-  return [g.interface, g.form_factor, g.speed, g.rpm ? `${g.rpm} RPM` : null]
-    .filter(Boolean).join(' · ');
-}
-
 export function InventoryProductTable({
-  groups, isManager, cols, selected, selectAllState, onToggleAll,
+  groups, isManager, sort, onSort, cols, selected, selectAllState, onToggleAll,
   onToggleLot, onToggleGroup, onQuickView, onEditLot,
 }: Props) {
   const { t, locale } = useT();
@@ -133,6 +116,13 @@ export function InventoryProductTable({
       return next;
     });
   };
+
+  // The server already sent these sorted. Re-sorting what is here answers a
+  // header click at once, and is a no-op once the refetch lands.
+  const rows = sort.dir && isInventorySortCol(sort.col) ? sortProductGroups(groups, sort.col, sort.dir) : groups;
+  const sortableTh = (col: InventorySortCol, label: string, align?: 'right') => (
+    <SortTh col={col} sort={sort} onSort={onSort} align={align}>{label}</SortTh>
+  );
 
   // toggle(chevron+checkbox) + product + lots are always shown; the rest follow
   // the Columns menu toggles so the menu actually affects the grouped view.
@@ -163,17 +153,17 @@ export function InventoryProductTable({
               />
             )}
           </th>
-          <th>{t('iptProduct')}</th>
-          {cols.partNumber && <th>{t('partNumber')}</th>}
-          {cols.qty && <th className="num">{t('qty')}</th>}
-          <th>{t('iptLots')}</th>
-          {cols.warehouse && <th>{t('iptWarehouses')}</th>}
-          {showCost && <th className="num">{t('eoCost')}</th>}
-          {cols.sellPrice && <th className="num">{t('mktLegendSell')}</th>}
+          {sortableTh('product', t('iptProduct'))}
+          {cols.partNumber && sortableTh('partNumber', t('partNumber'))}
+          {cols.qty && sortableTh('qty', t('qty'), 'right')}
+          {sortableTh('lots', t('iptLots'))}
+          {cols.warehouse && sortableTh('warehouses', t('iptWarehouses'))}
+          {showCost && sortableTh('cost', t('eoCost'), 'right')}
+          {cols.sellPrice && sortableTh('sell', t('mktLegendSell'), 'right')}
         </tr>
       </thead>
       <tbody>
-        {groups.map((g) => {
+        {rows.map((g) => {
           const isOpen = open.has(g.key);
           const pns = g.part_numbers ?? [];
           const manyPns = pns.length > 1;
