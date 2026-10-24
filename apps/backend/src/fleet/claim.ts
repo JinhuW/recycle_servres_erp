@@ -413,6 +413,7 @@ function why(r: PickRow): FleetTaskWhy {
 async function pickTask(
   sql: postgres.Sql, w: WorkerIdentity, settings: FleetSettings,
   done: { task_id: number; result: Record<string, unknown> } | null,
+  take = true,
 ): Promise<Pick> {
   return sql.begin(async (tx): Promise<Pick> => {
     // The hold may have lasted a minute: the slot could have moved on.
@@ -431,6 +432,7 @@ async function pickTask(
           VALUES (${done.task_id}, ${w.worker_id}, 'done', ${tx.json(done.result as postgres.JSONValue)})`;
       }
     }
+    if (!take) return { task: null, reason: 'done_only' };
 
     const quarantined = slot.quarantined_until !== null && slot.quarantined_until.getTime() > Date.now();
     if (!quarantined) {
@@ -504,6 +506,8 @@ worker.post('/next-task', workerAuth, async (c) => {
     if (JSON.stringify(result).length > MAX_DETAIL_BYTES) return c.json({ ...BAD_REQUEST, detail: 'done.result' }, 422);
     done = { task_id: body.done.task_id as number, result };
   }
+  if (body.take !== undefined && typeof body.take !== 'boolean') return c.json({ ...BAD_REQUEST, detail: 'take' }, 422);
+  const take = body.take !== false;
   const sql = getDb(c.env);
   const settings = await loadSettings(sql);
   const wait = typeof body.wait === 'number' && Number.isFinite(body.wait) ? body.wait : settings.poll_hold_seconds;
@@ -511,8 +515,8 @@ worker.post('/next-task', workerAuth, async (c) => {
 
   // The listener is up before the first look, so a task written between the
   // look and the hold still wakes it.
-  if (hold > 0) await waker(sql).ready;
-  let answer = await pickTask(sql, w, settings, done);
+  if (take && hold > 0) await waker(sql).ready;
+  let answer = await pickTask(sql, w, settings, done, take);
   if ('stale' in answer) return c.json({ error: 'stale_epoch' }, 409);
   if (answer.task || answer.reason !== 'nothing_due' || hold === 0) return c.json(answer);
   if (holds >= MAX_HOLDS) return c.json(answer);
