@@ -2,13 +2,13 @@
 id: RS-393
 title: A manager can start the city round now instead of at the workers' start time
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-24
 reporter: jinhu
 branch: fb-round-start
-pr:
-version:
+pr: 872
+version: v1.334.0, facebook-tracker 0.13.18
 related: [RS-385, RS-379, RS-372]
 ---
 
