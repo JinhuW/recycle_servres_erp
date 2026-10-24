@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-392](./RS-392-never-re-login-facebook-unless-necessary-the-first-r.md) | in-review | task | P2 | Never re-login Facebook unless necessary: the first rule in AGENTS.md | — |
 | [RS-391](./RS-391-a-bank-funded-paypal-payment-leaves-pending-when-pay.md) | done | bug | P2 | A bank-funded PayPal payment leaves pending when PayPal settles it | 1.333.1 |
 | [RS-390](./RS-390-rmb-flow-entries-take-ai-renamed-payment-screenshots.md) | done | story | P2 | RMB Flow entries take AI-renamed payment screenshots; Reference removed | 1.333.0 |
 | [RS-389](./RS-389-fix-what-the-dev-to-prod-review-found-before-releasi.md) | done | bug | P1 | Fix what the dev-to-prod review found before releasing v1.332 | 1.332.2 |

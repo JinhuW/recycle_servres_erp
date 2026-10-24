@@ -10,6 +10,34 @@ repo. It holds two things:
 rules that hold everywhere. Each area keeps its own conventions in its own
 `AGENTS.md`; read that file before working there.
 
+## First rule: never log a Facebook account in without a reason
+
+Before anything else in this repo: **don't cause a Facebook login unless the
+task can't be done without one.** Every login risks a checkpoint, and a
+checkpointed account is usually lost. On 2026-10-24, 26 of the fleet's 41
+accounts were parked on `SESSION_EXPIRED` or `CHECKPOINT`.
+
+Each of these is a login:
+
+- **Starting a worker container.** `docker restart`, `docker compose up
+  --force-recreate`, `trackers/facebook/scripts/deploy.sh` (it restarts the
+  workers) and `rsc fleet release` all open a new browser that restores the
+  account's session. The login ledger (`rsc vault logins`) records each one as
+  `boot`.
+- **Re-login** on the ERP's or the console's worker page
+  (`POST /v1/workers/{id}/relogin`).
+- **Deleting or replacing a saved session** (`trackers/facebook/configs/sessions/`).
+
+So:
+
+- Never restart a worker to make a sweep start sooner, to pick up a setting
+  faster, or to see if it helps. Wait for its schedule.
+- Ship changes that need new containers in one deploy, not one restart each.
+- Ask the owner before any restart or re-login the task doesn't strictly need.
+- An idle worker won't notice an edit to its config. The monitor watches its
+  config directory, and a host-side write to the bind-mounted `config.toml`
+  raises no event there. That is not a reason to restart it.
+
 ## Map
 
 | Path | What | Stack | Runs on | Versioned by | Agent doc |
