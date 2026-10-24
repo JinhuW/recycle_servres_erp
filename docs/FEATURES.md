@@ -2145,7 +2145,10 @@ it.
   manager types — and the link happens when they click a PO in it. The
   per-suggestion button in the expanded row is labelled with its PO
   (`Link PO-1414`) because it does link on the click. `Not it` is gone; it
-  existed only to escape the one-click path.
+  existed only to escape the one-click path. A transfer row has no `Link…`
+  (v1.331.1). The server refuses it, because the PayPal leg of the same
+  payment is the one that links, so the button could only fail. *Not a
+  transfer* in the expanded row is the way back.
 - **Owner is a column** (v1.121.0), between Amount and Status — avatar and first
   name, full name on hover, a dash where nobody owns it. Owner and PO are
   mutually exclusive by constraint, so a linked payment shows its PO's owner
@@ -2219,11 +2222,31 @@ it.
   - **A reversed payment stops counting towards its order.** PayPal reverses in
     place, reusing the transaction id, so this lands on a row already linked to
     a PO. It stays on the ledger, badged, but leaves the PO's linked total.
+  - **A payment funded by eCheck shows up while it is pending** (v1.331.1).
+    Transaction Search returns only balance-affecting records by default, and
+    an eCheck affects nothing until it clears 3–6 business days later. Until
+    v1.331.1 the payment and its `T0300` funding stayed out of the ERP for that
+    whole time. All the manager could see was the Mercury `PAYPAL; ECHECK`
+    pull, a transfer that can't be linked. The sync now makes a second pass for
+    all records and adds each transaction the first pass missed, at its latest
+    record:
+    - pending, if it is still in flight;
+    - failed or reversed, if it bounced or was voided;
+    - dropped, if its latest record is settled. That is a hold that moved no
+      money.
 
 > PayPal's Transaction Search lags ~3 hours. A fresh transaction missing from
 > Payments is usually that, not a sync bug — check `last_refreshed_datetime`
 > first. Since v1.127.0 the other answer is that it is **pending**: it is
-> ingested and badged, not missing.
+> ingested and badged, not missing. A pending eCheck payment was the
+> exception until v1.331.1. If only its Mercury `PAYPAL; ECHECK` leg is
+> there, query with `balance_affecting_records_only=N`.
+>
+> **The two record modes don't line up.** With `N`, PayPal answers with one
+> record per state a transaction went through, and matches each record by its
+> update date. With the default `Y`, it returns one record per transaction,
+> matched by initiation date. `outsideBalance` in `banktx/paypal.ts` reconciles
+> the two.
 
 > **The sync window is `cursor − 5 days`, plus the oldest row still pending.**
 > The overlap alone would let a payment that stays pending for weeks fall out

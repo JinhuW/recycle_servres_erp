@@ -17,6 +17,41 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.331.1] - 2026-10-24
+
+A PayPal payment funded by eCheck now reaches Payments while it is still
+pending (RS-386). One of these, $11,950 to a supplier for PO-1521, never
+appeared in the ERP. The only row the manager saw was its Mercury
+`PAYPAL; ECHECK` pull, and trying to link it ended in "A transfer cannot be
+linked to an order".
+
+The cause was a default in PayPal's API. Transaction Search returns only
+balance-affecting records unless asked otherwise, and an eCheck affects nothing
+until it clears 3–6 business days later. Every sync pass logged
+`paypal inserted=0` and no error. The sync now makes a second pass that asks
+for every record. It adds each transaction the first pass missed, taken at its
+latest record:
+
+- pending while the eCheck is in flight;
+- failed or reversed if it bounced or was voided;
+- left out if that record is settled. That is a hold that moved no money.
+
+The second pass has two quirks:
+
+- It returns one record per state a transaction went through, and it matches
+  records by update date rather than initiation date. So the merge runs over
+  the whole fetched range.
+- It ignores a transaction begun before the window. Otherwise a narrow sync
+  could flip a held row's status, and the weekly deep sync would flip it back.
+
+Read-only dry runs against prod changed no held row. Each added the two pending
+legs and four dead records from August and September (denied attempts and a
+voided authorization).
+
+The Payments rail also stops offering **Link…** on a transfer row. The server
+always refuses that link, because the PayPal leg of the same payment is the
+one that links. *Not a transfer* in the expanded row is still there.
+
 ## [1.331.0] - 2026-10-23
 
 Every city a Facebook worker searches is now logged from its handout to its
