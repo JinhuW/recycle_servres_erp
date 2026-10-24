@@ -21,6 +21,7 @@ import { useT } from '../../lib/i18n';
 import { hrefFor, onLinkClick } from '../../lib/route';
 import { BuildChip, CityChip, EditCredentialsButton, fmtDays, HITS_DAYS, ReloginButton, WatchButton } from './FleetAccounts';
 import { EditCitiesButton } from './FleetCities';
+import { CityLogCard, loadCityLog, type CityLogState } from './FleetCityLog';
 import { QueueButton, QueueField } from './FleetQueue';
 import { eventDetail, ProxyDeadChip, StatusChip, statusNote } from './FleetWorkers';
 import '../../styles/facebookPool.css';
@@ -48,6 +49,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
   const [marks, setMarks] = useState<FbProxyMark[] | null>(null);
   const [stints, setStints] = useState<FbWorkerStint[] | null>(null);
   const [logins, setLogins] = useState<LedgerLogins>(null);
+  const [cityLog, setCityLog] = useState<CityLogState>(null);
 
   const load = useCallback(() => {
     coordinatorApi.fleet().then(doc => { setFleet(doc); setFailed(false); }).catch(err => {
@@ -60,6 +62,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
     poolApi.workerAccounts(workerId).then(r => setStints(r.stints)).catch(() => setStints([]));
     coordinatorApi.workerLogins(workerId).then(setLogins)
       .catch(err => setLogins(err instanceof ApiError && err.status === 404 ? 'not_served' : 'unreachable'));
+    loadCityLog({ worker: workerId }, setCityLog);
   }, [workerId]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -220,6 +223,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
           </section>
 
           <AccountsUsed stints={stints} locale={locale} />
+          <CityLogCard log={cityLog} />
         </div>
         <WorkerHistory lines={history} logins={logins} locale={locale} />
       </div>

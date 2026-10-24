@@ -9,7 +9,7 @@ on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
 **As of 2026-10-23:** ERP migration `0204`, Reddit tracker migration `0005`,
-Facebook tracker `0.13.14`. *Keeping this file current* at the end says how to
+Facebook tracker `0.13.17`. *Keeping this file current* at the end says how to
 refresh a section.
 
 - [Overview](#overview)
@@ -2946,7 +2946,7 @@ A login obstacle a worker could not clear by itself (CAPTCHA, checkpoint, lock p
 
 What workers did between a search and an alert, for the ERP's funnel card and fleet table, and the city queue that hands enrolled workers their cities. Nothing in the alert path reads these.
 
-Tables: [`review_stats`](#facebook-review-stats), [`search_cycles`](#facebook-search-cycles), [`search_cities`](#facebook-search-cities), [`city_searches`](#facebook-city-searches), [`city_leases`](#facebook-city-leases), [`queue_config`](#facebook-queue-config)
+Tables: [`review_stats`](#facebook-review-stats), [`search_cycles`](#facebook-search-cycles), [`search_cities`](#facebook-search-cities), [`city_searches`](#facebook-city-searches), [`city_leases`](#facebook-city-leases), [`city_events`](#facebook-city-events), [`queue_config`](#facebook-queue-config)
 
 <a id="facebook-review-stats"></a>
 
@@ -3050,6 +3050,34 @@ The city queue's hand-outs: one row per (item, city) given to an enrolled worker
 - **Indexes:** `idx_city_leases_leased` (leased_at), `idx_city_leases_worker` (worker_id)
 
 Pruned to 14 days on each insert.
+
+<a id="facebook-city-events"></a>
+
+#### `city_events`
+
+The city log: what happened to each city on each worker, one row per step. `rs_coordinator/city_log.py` groups the rows into one visit per city, from its handout or start to its end. The steps come from two writers:
+
+- **The coordinator:**
+  - `handed`, at `next-city`, stamped as the lease's `leased_at`;
+  - `searched`, from each funnel report that counts a search and names its city;
+  - `alerted`, from each delivered alert that names its city;
+  - `released`, when a heartbeat parks the worker or its next ask finds a lease a restart left.
+- **The monitor**, through `POST /v1/workers/{id}/city-events`: `started`, `finished` and `stopped`.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `integer` | ✓ | identity | Breaks ties between steps in the same second. |
+| `at` | `text` | ✓ |  | Coordinator time of the step, in utcnow()'s form. |
+| `worker_id` | `text` | ✓ |  |  |
+| `item` | `text` |  |  | The search item. NULL on pages from workers before 0.13.14. |
+| `city` | `text` | ✓ |  | Facebook city slug. |
+| `event` | `text` | ✓ |  | handed, started, searched, alerted, finished, stopped or released. |
+| `detail` | `text` |  |  | JSON: `why` (handed); `phrase` and the page's counts (searched); the listing's `title`, `price`, `score`, `url` (alerted); the city's counts, `empty` and `seconds` (finished, stopped); `reason`, `wall`, `error`, `of` (stopped); `reason`, the parked state or `restarted` (released). NULL when the step said nothing more. |
+
+- **Primary key:** `id`
+- **Indexes:** `idx_city_events_at` (at), `idx_city_events_worker` (worker_id, at)
+
+Pruned to 14 days on each insert. Read by `GET /v1/city-log` and `rsc queue log`. An *expired* visit is not a row: it is read from a lease that ran out with no close and no `released` step.
 
 <a id="facebook-queue-config"></a>
 

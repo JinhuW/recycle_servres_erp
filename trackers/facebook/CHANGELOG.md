@@ -18,6 +18,35 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **A city log: every city a worker searches, from handout to result**
+  (RS-385).
+  - **Storage.** The coordinator keeps one `city_events` row per step:
+    - `handed` out by the queue;
+    - each `searched` page, with its phrase and funnel counts;
+    - each `alerted` listing, with its title, price and score;
+    - a lease `released` when the worker parks or restarts.
+  - **The monitor's side.** It reports `started`, then `finished` with the
+    city's own counts and minutes, or `stopped` with the reason (a wall and
+    its kind, a lost session, a pause, a sweep cut short, an error). It does
+    so through `POST /v1/workers/<id>/city-events`, and logs the same as
+    `[City]` lines with the brief report.
+  - **Reading it.** `rsc queue log` prints one line per city, and
+    `--events` adds the steps. The console serves the log as
+    `GET /v1/city-log` for the ERP's worker page and the round card.
+  - **Older monitors still show.** For them, a visit's end is read from the
+    lease, or from the worker moving on.
+
+### Changed
+
+- **The funnel and alert reports say more.** The per-page funnel report
+  carries the search phrase, and the alert report the listing's title and
+  price. Both are optional, so an older worker or coordinator still
+  validates.
+- **The vendored monitor is pinned at `e045334`**: per-city start, finish
+  and stop, with the reports above.
+
 ## [0.13.16] - 2026-10-23
 
 ### Added

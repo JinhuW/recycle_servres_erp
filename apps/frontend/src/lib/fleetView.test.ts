@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetQueue, type FleetQueueWorker, type FleetWorker,
+  vncSocketUrl, type Challenge, type CityStep, type FleetAccount, type FleetDoc, type FleetQueue, type FleetQueueWorker, type FleetWorker,
   type LedgerLogin,
 } from './coordinator';
 import {
@@ -12,6 +12,7 @@ import {
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyPort, sharedExits,
   applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
   loginAccountNo, workerHistory, queueCitiesToday, queueCityName, queueRound, queueSummary,
+  cityStepDot, stepCount, visitMinutes, VISIT_TONE,
 } from './fleetView';
 
 describe('keysymsFor', () => {
@@ -703,3 +704,35 @@ describe('the city queue', () => {
     expect(queueCityName(null, 'miami')).toBe('miami');
   });
 });
+
+describe('the city log', () => {
+  const step = (event: CityStep['event'], detail: CityStep['detail'] = {}): CityStep =>
+    ({ at: '2026-10-24T13:42:00+00:00', event, detail });
+
+  it('reads a visit\'s minutes, rounding a short one down to none', () => {
+    expect(visitMinutes({ seconds: null })).toBeNull();
+    expect(visitMinutes({ seconds: 12 })).toBe(0);
+    expect(visitMinutes({ seconds: 40 })).toBe(1);
+    expect(visitMinutes({ seconds: 389 })).toBe(6);
+  });
+
+  it('colors each step and outcome by how it went', () => {
+    expect(cityStepDot(step('alerted'))).toBe('ff-live');
+    expect(cityStepDot(step('finished'))).toBe('ff-live');
+    expect(cityStepDot(step('stopped'))).toBe('ff-attention');
+    expect(cityStepDot(step('released'))).toBe('ff-attention');
+    expect(cityStepDot(step('expired'))).toBe('ff-offline');
+    expect(cityStepDot(step('searched'))).toBe('ff-tl-muted');
+    expect(VISIT_TONE.finished).toBe('accent');
+    expect(VISIT_TONE.expired).toBe('neg');
+  });
+
+  it('reads a step\'s counts, absent ones as zero', () => {
+    const page = step('searched', { cards: 31, phrase: 'dell poweredge', opened: null });
+    expect(stepCount(page, 'cards')).toBe(31);
+    expect(stepCount(page, 'opened')).toBe(0);
+    expect(stepCount(page, 'phrase')).toBe(0);
+    expect(stepCount(page, 'reviewed')).toBe(0);
+  });
+});
+

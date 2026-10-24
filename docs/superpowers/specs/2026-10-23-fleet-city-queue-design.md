@@ -275,6 +275,50 @@ the roster's copy.
 The worker page's *Edit cities* becomes *Home cities*. The fleet page shows
 each city's next due time, lease holder and home workers.
 
+## Phase 5: the city log (RS-385, 0.13.17, ERP 1.331.0)
+
+The owner asked for "an log for each each cities": once a worker finishes a
+city, a brief report of its results. Then: "a full lifecycle logs not just
+finish".
+
+**One append-only table, two writers.** `city_events` holds one row per step.
+
+- **The coordinator** writes what it already sees:
+  - `handed` at `next-city`, stamped as the lease's `leased_at`, which is how
+    a visit finds its lease;
+  - `searched` from each funnel report that names its city, now with the
+    phrase;
+  - `alerted` from each delivered alert, now with the listing's title and
+    price;
+  - `released` when a parking heartbeat, or an ask after a restart, gives a
+    lease up.
+- **The monitor** (vendored `e045334`) reports what only it sees:
+  - `started`: the searches planned, and queue or own list;
+  - `finished`: its own count of the city and the seconds it took;
+  - `stopped`: the reason (a wall and its kind, a lost session, a pause, a
+    sweep cut short, or an error) and how far it got.
+
+  It logs the same as `[City]` lines.
+
+**Visits are read, not stored.** `city_log.visits` groups a worker's steps
+into one visit per city. A worker searches one city at a time, so its step on
+another city ends the visit before. The outcome is read from the first source
+that has one:
+
+1. the monitor's own `finished`, `stopped` or `released`;
+2. the lease: closed by the next ask, or run out unclosed, which reads as
+   `expired`;
+3. the worker moving on, or half an hour of silence, for a visit with no
+   handout or start: an older own-list monitor;
+4. `searching` while steps keep coming, else `quiet`.
+
+The log therefore works for 0.13.14–0.13.16 queue workers and 0.13.12 own-list
+workers on the day the coordinator ships, before any worker is recreated.
+
+**Read by** `rsc queue log`, the console's `GET /v1/city-log` (by worker or
+city, up to 72 h), the ERP worker page's *City log* card, and the round card's
+city names.
+
 ## Decisions to confirm (from the shadow report) — answered in phase 3
 
 1. **Which exits may search which regions**, especially the three regions with

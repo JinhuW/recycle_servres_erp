@@ -257,6 +257,7 @@ async def workers() -> Response:
 
 
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_CITY_SLUG = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 @app.post("/v1/workers/{worker_id}/relogin", dependencies=[Depends(require_token)])
@@ -857,6 +858,26 @@ async def put_queue_everyone(body: Any = Body(default=None)) -> Response:
         "PUT",
         "/v1/queue/settings",
         json_body={"enrolled": ["*"] if body["enrolled"] else [], "updated_by": _who(body)},
+    )
+
+
+@app.get("/v1/city-log", dependencies=[Depends(require_token)])
+async def city_log(
+    worker_id: Optional[str] = Query(default=None),
+    city: Optional[str] = Query(default=None),
+    item: Optional[str] = Query(default=None, max_length=120),
+    hours: int = Query(default=24, ge=1, le=72),
+) -> Response:
+    """Each city searched in the last `hours`, from its handout or start to its
+    end, for one worker or one city. An older coordinator answers 404, which
+    is passed on: the ERP then shows no log."""
+    if worker_id is not None and not _WORKER_ID.match(worker_id):
+        raise HTTPException(status_code=400, detail="Not a valid worker id")
+    if city is not None and not _CITY_SLUG.match(city):
+        raise HTTPException(status_code=400, detail="Not a valid city")
+    params = {"worker_id": worker_id, "city": city, "item": item, "hours": hours}
+    return await _forward(
+        "GET", "/v1/city-log", params={k: v for k, v in params.items() if v is not None}
     )
 
 

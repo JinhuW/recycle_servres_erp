@@ -43,7 +43,7 @@ def report_alert_message(
     worker_id = worker or payload.worker_id
     if not worker_id:
         raise HTTPException(status_code=422, detail="worker_id is required")
-    record = payload.model_dump(exclude_none=True)
+    record = payload.model_dump(exclude_none=True, exclude={"title", "price"})
     record["worker_id"] = worker_id
     # Claim-style insert: a retried report of the same message is a no-op.
     # A direct-send worker's alert bypasses ingest and the outbox, so this is
@@ -51,6 +51,23 @@ def report_alert_message(
     # per part of a split message.
     if deps.db.add_alert_message(record) and payload.part == 1:
         deps.db.add_review_stats(worker_id, coordinated=1, sent=1)
+        if payload.search_city:
+            detail = {
+                "listing_id": payload.listing_id,
+                "title": payload.title,
+                "price": payload.price,
+                "score": payload.ai_score,
+                "priority": payload.priority,
+                "url": payload.post_url,
+                "phrase": payload.search_phrase,
+            }
+            deps.db.log_city_event(
+                worker_id,
+                payload.item_name,
+                payload.search_city,
+                "alerted",
+                {k: v for k, v in detail.items() if v is not None},
+            )
     return StatusResponse()
 
 

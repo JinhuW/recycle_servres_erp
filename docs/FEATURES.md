@@ -3019,6 +3019,33 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     **Move to the queue** / **Back to its own list** moves one worker, and is
     disabled, with the reason, for a worker on an older monitor.
   - **Older consoles.** Against an older console none of this shows.
+
+  **The city log.** Since v1.331.0 (RS-385, facebook-tracker 0.13.17), every
+  city a worker searches is logged from its start to its end.
+  - **The worker page's City log card.** It covers the last 24 h, one row a
+    city:
+    - when it ran and for how long;
+    - the city and the item;
+    - searches, cards, opened, AI-reviewed and alerts;
+    - the outcome: **Finished**, **Searching now**, **Stopped** with the
+      reason (a wall and its kind, logged out, paused, cut short, an error),
+      **Given back** (the worker restarted, or parked in a checkpoint or an
+      expired session), **Expired** (the worker went silent), or **No word
+      since** a time.
+  - **A row's steps.** A row opens to its steps, each timed to the second:
+    - handed out by the queue, and why: a home city, a city it searched
+      lately, or another city;
+    - started, and how many searches were planned;
+    - each search's phrase and what it found;
+    - each alert, with the listing's title linking to Facebook, its price and
+      its score;
+    - the end.
+  - **Older workers.** A worker on an older monitor reports no start or
+    finish. Its rows are added up from its searches and say so.
+  - **One city's log.** On the round card, a city's name in the **Cities**
+    table opens that city's last 24 h across every worker and item.
+  - **Older consoles.** Against an older console the card and the city links
+    show nothing.
 - **Facebook account pool** — a second tab at **Monitors ▸ Facebook**,
   linked directly at `/#/fleet/pool` (v1.261.0). Managers see a status legend
   with counts that filters (the key-tag rail left the manager's view in

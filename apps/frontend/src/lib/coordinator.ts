@@ -349,6 +349,60 @@ export type FleetQueueWorker = {
   open: { item: string; city: string; leased_at: string }[];
 };
 
+// The coordinator's city log: each city a worker searched, from its handout
+// (or its start, on a worker's own list) to its end. `detail` holds what the
+// step said: `why` for handed; the page's counts and `phrase` for searched;
+// the listing for alerted; the city's counts for finished and stopped, with
+// `reason` (and `wall`, `error`, `of`) for stopped; `reason` for released
+// ("restarted", or the state the worker parked in). `expired` is read from a
+// lease that ran out with no word from its worker.
+export type CityStepKind =
+  | 'handed' | 'started' | 'searched' | 'alerted' | 'finished' | 'stopped' | 'released' | 'expired';
+
+export type CityStep = {
+  at: string;
+  event: CityStepKind;
+  detail: Record<string, string | number | null | undefined>;
+};
+
+// Searching now; no word for half an hour (quiet); or how it ended.
+export type CityVisitOutcome = 'finished' | 'stopped' | 'released' | 'expired' | 'searching' | 'quiet';
+
+export type CityVisitTotals = {
+  searches: number;
+  cards: number;
+  title_pass: number;
+  opened: number;
+  keyword_pass: number;
+  fresh: number;
+  reviewed: number;
+  alerted: number;
+  empty?: number;
+};
+
+export type CityVisit = {
+  worker_id: string;
+  // null from a worker older than the city queue.
+  item: string | null;
+  city: string;
+  name: string | null;
+  via: 'queue' | 'own' | null;
+  // Why the queue handed it out: home, familiar or other.
+  why: string | null;
+  outcome: CityVisitOutcome;
+  reason: string | null;
+  wall: string | null;
+  error: string | null;
+  // The counts are the worker's own report; otherwise summed from its pages.
+  reported: boolean;
+  started_at: string;
+  ended_at: string | null;
+  seconds: number | null;
+  totals: CityVisitTotals;
+  alerts: { at: string; title?: string; price?: string; score?: number; url?: string; listing_id?: string }[];
+  events: CityStep[];
+};
+
 // One change the coordinator logged: the `state` a worker reported moving
 // (HEALTHY → SESSION_EXPIRED), or its liveness crossing live → stale → dead →
 // live. `was` is null on a worker's first report. `at` is when it happened.
@@ -452,6 +506,17 @@ export const coordinatorApi = {
   // Every worker takes its cities from the queue, or none does.
   setEveryoneQueue: (enrolled: boolean) =>
     api.put<unknown>('/api/coordinator/queue/everyone', { enrolled }),
+
+  // One worker's cities, or one city's workers, over the last `hours`. A
+  // console older than the city log answers 404.
+  cityLog: (q: { worker?: string; city?: string; hours?: number }) => {
+    const params = new URLSearchParams();
+    if (q.worker) params.set('worker', q.worker);
+    if (q.city) params.set('city', q.city);
+    params.set('hours', String(q.hours ?? 24));
+    return api.get<{ at: string; hours: number; visits: CityVisit[] }>(`/api/coordinator/city-log?${params}`)
+      .then(r => r.visits);
+  },
 
   // How often cities are searched. Pins replace the whole map, so a caller
   // re-reads it just before saving and applies only its own edits.

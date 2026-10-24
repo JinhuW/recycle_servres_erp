@@ -334,3 +334,21 @@ def test_logins_forward_one_worker_without_device_fingerprints(client):
     assert client.get("/v1/logins?worker_id=a/b", headers=AUTH).status_code in (400, 404)
     assert client.get("/v1/logins?worker_id=ne-1&limit=501", headers=AUTH).status_code == 422
     assert client.get("/v1/logins", headers=AUTH).status_code == 422
+
+
+def test_the_city_log_forwards_one_worker_or_one_city(client):
+    visit = {"worker_id": "ne-1", "city": "nyc", "outcome": "finished", "events": []}
+    client.answers["/v1/city-log"] = {"at": "2026-10-24T14:00:00+00:00", "hours": 24, "visits": [visit]}
+    res = client.get("/v1/city-log?worker_id=ne-1", headers=AUTH)
+    assert res.status_code == 200 and res.json()["visits"] == [visit]
+    res = client.get("/v1/city-log?city=nyc&item=server_ram&hours=12", headers=AUTH)
+    first, second = client.calls
+    assert first.url.path == "/v1/city-log"
+    assert dict(first.url.params) == {"worker_id": "ne-1", "hours": "24"}
+    assert dict(second.url.params) == {"city": "nyc", "item": "server_ram", "hours": "12"}
+
+    assert client.get("/v1/city-log", headers={}).status_code == 401
+    assert client.get("/v1/city-log?worker_id=a%20b", headers=AUTH).status_code == 400
+    assert client.get("/v1/city-log?city=New%20York", headers=AUTH).status_code == 400
+    assert client.get("/v1/city-log?hours=73", headers=AUTH).status_code == 422
+    assert len(client.calls) == 2

@@ -4,6 +4,7 @@ import { coordinatorApi, type FleetAccount, type FleetDoc, type QueueCityState }
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import { queueCityName, queueRound, queueSummary, type RoundCell } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
+import { CityLogModal } from './FleetCityLog';
 import type { Translate } from '../../lib/orderPresentation';
 import '../../styles/facebookPool.css';
 
@@ -11,8 +12,8 @@ import '../../styles/facebookPool.css';
 // Enrolled workers ask the coordinator for each city instead of walking their
 // own lists. Today's round opens the Fleet tab: one mark per city per item, in
 // the order the round runs, so "is today's work done?" is answered before the
-// worker list is read. The worker page says what one worker took and moves it
-// in or out of the queue.
+// worker list is read; a city's name opens its log (FleetCityLog.tsx). The
+// worker page says what one worker took and moves it in or out of the queue.
 
 const CELL_TITLE: Record<QueueCityState, string> = {
   searched: 'fbcRoundCellSearched',
@@ -62,6 +63,7 @@ function roundSentence(t: Translate, counts: ReturnType<typeof queueRound>['coun
 export function RoundCard({ fleet, onSaved }: { fleet: FleetDoc | null; onSaved: () => void }) {
   const { t, locale } = useT();
   const [asking, setAsking] = useState(false);
+  const [logOf, setLogOf] = useState<{ slug: string; name: string } | null>(null);
   const queue = fleet?.queue;
   const summary = fleet ? queueSummary(fleet) : null;
   if (!fleet || !queue || !summary) return null;
@@ -139,7 +141,13 @@ export function RoundCard({ fleet, onSaved }: { fleet: FleetDoc | null; onSaved:
                     <tbody>
                       {queueCities.map(c => (
                         <tr key={c.slug}>
-                          <td>{c.name ?? c.slug}</td>
+                          <td>
+                            <button type="button" className="ff-round-city"
+                              title={t('fbcCityLogOpen', { city: c.name ?? c.slug })}
+                              onClick={() => setLogOf({ slug: c.slug, name: c.name ?? c.slug })}>
+                              {c.name ?? c.slug}
+                            </button>
+                          </td>
                           {items.map(i => {
                             const at = c.items[i];
                             return <td key={i} className={`ff-round-at ff-round-at-${at?.state ?? 'due'}`}>
@@ -155,6 +163,7 @@ export function RoundCard({ fleet, onSaved }: { fleet: FleetDoc | null; onSaved:
             )}
           </>}
       </div>
+      {logOf && <CityLogModal slug={logOf.slug} name={logOf.name} onClose={() => setLogOf(null)} />}
       {asking && (
         <EveryoneModal everyone={summary.everyone} older={summary.older}
           onClose={() => setAsking(false)} onSaved={() => { setAsking(false); onSaved(); }} />
