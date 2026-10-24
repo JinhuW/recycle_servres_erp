@@ -44,6 +44,14 @@ export type FleetCity = {
   disabled_at: string | null;
 };
 
+/** A city as the Cities tab lists it: the row plus the queue's view of it. */
+export type FleetCityListed = FleetCity & {
+  /** The open (ready or leased) tasks on this city, at most one per item and kind. */
+  open_tasks: FleetTask[];
+  /** When each item's last search of this city finished, by item name. */
+  last_done_at: Record<string, string>;
+};
+
 export type FleetItem = {
   name: string;
   phrases: string[];
@@ -89,6 +97,13 @@ export type FleetTaskEvent = {
   detail: Record<string, unknown> | null;
   at: string;
 };
+
+/** A task with its events, as the city log shows it. */
+export type FleetTaskLog = FleetTask & { events: FleetTaskEvent[] };
+
+/** What a round start did: tasks pulled forward to now, and the ones left
+ *  alone because their city-item finished within `start_fresh_hours`. */
+export type RoundStartAnswer = { started: number; skipped: number };
 
 /** The browser profile a slot keeps so an account always looks like one machine. */
 export type FleetDevice = {
@@ -278,6 +293,11 @@ export type DesiredAnswer = {
   roll: { replace: string } | null;
 };
 
-export type FleetErrorCode = 'stale_epoch' | 'no_slot' | 'not_found' | 'bad_request' | 'unauthorized';
+export type FleetErrorCode =
+  | 'stale_epoch' | 'no_slot' | 'not_found' | 'bad_request' | 'unauthorized'
+  /** The city, item or task already exists (or is already leased). */
+  | 'exists'
+  /** Enabling a city whose slug no worker has verified yet; `override_verify` gets past it. */
+  | 'unverified';
 
 export type FleetError = { error: FleetErrorCode; detail?: string };

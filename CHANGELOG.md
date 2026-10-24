@@ -17,6 +17,41 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.338.0] - 2026-10-24
+
+The ERP fleet's queue now fills itself (RS-394, PR A2 of the plan). Still no
+page and no worker: the live fleet keeps sweeping off the coordinator until the
+cutover, and these routes are the Cities and Queue tabs' backend, built ahead
+of them.
+
+- **Catalog routes.** `GET/POST /api/fleet/cities`, `PUT/DELETE
+  /api/fleet/cities/:slug`, `GET/PUT /api/fleet/items` and `GET/PUT
+  /api/fleet/settings`, all manager scope. A new city arrives disabled with a
+  `verify-slug` task, because a slug Facebook does not know silently searches
+  the account's own city; `override_verify` is the manager's way past the
+  check. Settings are validated against the plan's keys and bounds and the
+  monitor's own filter vocabulary (no `start_at`: the fleet has no sweep time).
+- **Scheduler.** `reconcile()` keeps one open search task per enabled city and
+  item, due when the last finished search plus `1 day / per_day` says; cancels
+  what waits on a disabled city or item; expires a lease past its time or past
+  `task_max_minutes` however faithfully its worker heartbeats (the old queue's
+  unbounded renewal); writes one probe task per quarantined slot per
+  `quarantine_probe_hours` so a quarantine can end; and sends `NOTIFY
+  fleet_tasks` with the item for anything that became ready. It runs every
+  30 s from each backend instance (unless `FLEET_ROLE=manager-only`) and after
+  every manager write, and two instances reconciling at once insert nothing
+  twice: every insert goes through the open-task unique index.
+- **Tasks routes.** `GET /api/fleet/tasks` with state, city, item, worker and
+  since filters; `POST /api/fleet/tasks` pulls a pair's waiting task to the
+  front at priority 100 (one open search per pair, so no second task); `POST
+  /api/fleet/round/start` makes every waiting search due now except pairs
+  finished within `start_fresh_hours`; `GET /api/fleet/city-log` returns a
+  city's or worker's recent tasks with their events.
+- **Import.** `apps/backend/scripts/fleet-import.mjs --master <master.toml>
+  [--dry-run]` loads the trackers' 127 cities (enabled, verified as
+  `imported`), the two items with phrases and filters, and the search
+  settings; the dry run prints what would change. `smol-toml` is the backend's
+  TOML reader.
 ## [1.337.0] - 2026-10-24
 
 Monitors ▸ Facebook gets four tabs for the ERP-owned fleet (RS-394): **Cities**,
