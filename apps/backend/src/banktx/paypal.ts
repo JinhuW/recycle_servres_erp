@@ -122,33 +122,56 @@ async function listWindow(env: Env, from: number, to: number, balanceOnly: boole
   }
 }
 
-// Transaction Search returns only balance-affecting records unless told
-// otherwise, and a payment funded by eCheck affects nothing until it clears
-// days later — so it, and its T0300 funding, were invisible for as long as a
-// manager most needed to link them. The full pass (`all`) is read for the
-// transactions the balance pass did not return, each at its latest record: it
-// answers with one record per state a transaction went through, so a bounced
-// eCheck arrives as both its pending and its denied record. A transaction whose
-// latest record is settled is a hold or memo that moved no money, and would
-// read as a payment.
-//
-// The balance pass matches a transaction by when it began, the full pass a
-// record by when it changed. A transaction begun before `startMs` would be
-// missing from the balance pass without being outside the balance, and its
-// late record would overwrite the status a wider window reads back.
-function outsideBalance(balance: WireTxn[], all: WireTxn[], startMs: number): WireTxn[] {
-  const seen = new Set(balance.map((t) => t.transaction_info?.transaction_id));
+// The full pass answers with one record per state a transaction went through
+// — a bounced eCheck arrives as both its pending and its denied record — so
+// each transaction is read at its latest.
+function latestById(all: WireTxn[]): Map<string, WireTxn> {
   const latest = new Map<string, WireTxn>();
   for (const t of all) {
     const info = t.transaction_info;
-    if (!info?.transaction_id || seen.has(info.transaction_id)) continue;
-    if (!info.transaction_initiation_date || Date.parse(info.transaction_initiation_date) < startMs) continue;
+    if (!info?.transaction_id) continue;
     const prev = latest.get(info.transaction_id)?.transaction_info;
     if (!prev || (info.transaction_updated_date ?? '') >= (prev.transaction_updated_date ?? '')) {
       latest.set(info.transaction_id, t);
     }
   }
-  return [...latest.values()].filter((t) => t.transaction_info?.transaction_status !== 'S');
+  return latest;
+}
+
+// Transaction Search returns only balance-affecting records unless told
+// otherwise, and a payment funded by eCheck affects nothing until it clears
+// days later — so it, and its T0300 funding, were invisible for as long as a
+// manager most needed to link them. The full pass adds the transactions the
+// balance pass did not return. One whose latest record is settled is a hold or
+// memo that moved no money, and would read as a payment.
+//
+// The balance pass matches a transaction by its balance record — when it
+// began, or for a bank-funded payment when the money was drawn — the full pass
+// a record by when it changed. A transaction begun before `startMs` could be
+// missing from the balance pass without being outside the balance, and its
+// late record would overwrite the status a wider window reads back.
+function outsideBalance(balance: WireTxn[], latest: Map<string, WireTxn>, startMs: number): WireTxn[] {
+  const seen = new Set(balance.map((t) => t.transaction_info?.transaction_id));
+  return [...latest.values()].filter((t) => {
+    const info = t.transaction_info;
+    return !!info?.transaction_id && !seen.has(info.transaction_id)
+      && !!info.transaction_initiation_date && Date.parse(info.transaction_initiation_date) >= startMs
+      && info.transaction_status !== 'S';
+  });
+}
+
+// The balance record of a bank-funded payment is the moment the money was
+// drawn, stamped P; its settlement is a later record outside the balance, so
+// read alone it stays pending forever. A V there counts as settled: it marks
+// the reversal on the seller's side, and money that comes back to us arrives
+// as a credit of its own (T1106, T1107) or on Mercury — after a chargeback
+// decided against us, not at all. A record the balance pass has as settled
+// keeps that for the same reason.
+function currentStatus(t: WireTxn, latest: Map<string, WireTxn>): string | undefined {
+  const info = t.transaction_info;
+  if (info?.transaction_status !== 'P') return info?.transaction_status;
+  const now = latest.get(info.transaction_id ?? '')?.transaction_info?.transaction_status;
+  return now === 'S' || now === 'V' ? 'S' : now === 'D' ? 'D' : 'P';
 }
 
 // T03xx = bank deposit into PayPal, T04xx = withdrawal back to a bank,
@@ -159,9 +182,10 @@ export function paypalTxnCategory(eventCode: string | undefined): BankTxnCategor
   return eventCode && /^T0[347]/.test(eventCode) ? 'transfer' : 'external';
 }
 
-// S = settled, P = pending, D = denied, V = a settled payment reversed in
-// place — PayPal reuses the transaction id rather than issuing a new row, so
-// this one can arrive on a payment already linked to a PO.
+// S = settled, P = pending, D = denied, V = reversed. A V later in a pending
+// payment's history is read as settled by `currentStatus`; one arriving here is
+// the record itself — in prod, only ever a voided authorization that the full
+// pass alone returns.
 //
 // Anything else maps to 'pending': a state nobody has seen is better shown and
 // treated as in flight than hidden, and 'failed' would hide it.
@@ -370,8 +394,9 @@ export function paypalProvider(env: Env): BankProvider {
         balance.push(...await listWindow(env, from, windowEnd, true));
         all.push(...await listWindow(env, from, windowEnd, false));
       }
+      const latest = latestById(all);
       const txns: NormalizedTxn[] = [];
-      for (const t of [...balance, ...outsideBalance(balance, all, start)]) {
+      for (const t of [...balance, ...outsideBalance(balance, latest, start)]) {
         const info = t.transaction_info;
         if (!info?.transaction_id) continue;
         const amount = Number(info.transaction_amount?.value);
@@ -388,7 +413,7 @@ export function paypalProvider(env: Env): BankProvider {
           description: info.transaction_subject ?? info.transaction_note ?? null,
           paypalTxnId: externalId,
           category: paypalTxnCategory(info.transaction_event_code),
-          settleStatus: paypalSettleStatus(info.transaction_status),
+          settleStatus: paypalSettleStatus(currentStatus(t, latest)),
           raw: t,
         });
       }

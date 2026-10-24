@@ -2238,9 +2238,14 @@ it.
   - **Failed and reversed are records, not tasks.** Out of the queue, out of
     every tile, no actions at all. Choosing one in the filter widens the tab to
     All, since asking for them from inside the queue would always answer empty.
-  - **A reversed payment stops counting towards its order.** PayPal reverses in
-    place, reusing the transaction id, so this lands on a row already linked to
-    a PO. It stays on the ledger, badged, but leaves the PO's linked total.
+  - **A reversed payment stops counting towards its order.** It stays on the
+    ledger, badged, but leaves the PO's linked total. A PayPal payment we sent
+    is never reversed this way (v1.333.1). PayPal's `V` on it means the seller
+    was debited for a case. If money comes back to us, it arrives as a credit
+    row of its own (`T1106` reversal, `T1107` refund), or on Mercury after a
+    card chargeback. If the case goes against us, as PO-1399's did, nothing
+    comes back. Until v1.333.1 this bullet said PayPal reverses a payment in
+    place. No such record has ever arrived.
   - **A payment funded by eCheck shows up while it is pending** (v1.331.1).
     Transaction Search returns only balance-affecting records by default, and
     an eCheck affects nothing until it clears 3–6 business days later. Until
@@ -2253,6 +2258,15 @@ it.
     - failed or reversed, if it bounced or was voided;
     - dropped, if its latest record is settled. That is a hold that moved no
       money.
+  - **A bank-funded payment leaves pending once PayPal settles it**
+    (v1.333.1). For a direct debit or eCheck, PayPal's balance record marks
+    the moment the money was drawn, stamped pending, and the settlement
+    arrives later in a record outside the balance. The sync read only the
+    first record, so seven prod payments sat pending for months, PO-1383,
+    PO-1386 and PO-1411 among them, and held the sync window open back to
+    July. A pending balance record now takes the status of its latest record.
+    No money moves: pending and settled count the same towards a PO and in
+    the RMB ledger.
 
 > PayPal's Transaction Search lags ~3 hours. A fresh transaction missing from
 > Payments is usually that, not a sync bug — check `last_refreshed_datetime`
@@ -2264,8 +2278,9 @@ it.
 > **The two record modes don't line up.** With `N`, PayPal answers with one
 > record per state a transaction went through, and matches each record by its
 > update date. With the default `Y`, it returns one record per transaction,
-> matched by initiation date. `outsideBalance` in `banktx/paypal.ts` reconciles
-> the two.
+> matched by the date of its balance record. That is the initiation date,
+> except for a bank-funded payment, where it is the day the money was drawn.
+> `outsideBalance` and `currentStatus` in `banktx/paypal.ts` reconcile the two.
 
 > **The sync window is `cursor − 5 days`, plus the oldest row still pending.**
 > The overlap alone would let a payment that stays pending for weeks fall out

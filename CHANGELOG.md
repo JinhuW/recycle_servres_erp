@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.333.1] - 2026-10-24
+
+A direct-debit or eCheck PayPal payment now leaves *pending* once PayPal
+settles it (RS-391). Seven prod payments had sat pending for months: PO-1383,
+PO-1386, PO-1411 and four ignored rows. They also held every sync's window
+open back to July.
+
+For a bank-funded payment, the balance record PayPal returns marks the moment
+the money was drawn, stamped pending. The settlement arrives later, in a
+record outside the balance, which the sync never read. A pending balance
+record now takes the status of its latest record. No money moves: pending and
+settled count the same towards a PO and in the RMB ledger.
+
+The same debugging corrected a belief about reversals. PayPal's `V` on a
+payment we sent means the seller was debited for a case. It does not mean our
+money came back. PO-1399's payment carries a `V`, but its chargeback was
+decided against us and nothing came back. So a `V` there counts as settled.
+Money that does come back arrives as a credit row of its own (`T1106`,
+`T1107`), or on Mercury. FEATURES and the code comments no longer say PayPal
+reverses a payment in place.
+
+Read-only dry runs against prod changed exactly the stale rows and nothing
+else.
+
 ## [1.333.0] - 2026-10-24
 
 An RMB Flow entry now keeps the payment screenshots that prove it (RS-390).
