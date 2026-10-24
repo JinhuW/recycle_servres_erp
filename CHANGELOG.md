@@ -17,6 +17,26 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.330.0] - 2026-10-23
+
+The label printer comes back by itself (RS-384). Until now the Pack and
+Review heads read *Label printer off* whenever the printer slept, was
+switched off or went out of range, and someone had to click Connect and pick
+it from Chrome's chooser again. The page now keeps the printer it last
+connected. It reads *Waiting for CT221D-4FD1* and tries again on its own,
+backing off to every 10 s, until the printer answers. While it waits, labels
+go through the print dialog as they do with no printer. Connect still opens
+the chooser to pick another printer, and Disconnect ends the wait.
+
+A reload is a different matter. Chrome 155 still hides `getDevices()`, the
+only way a fresh page can reach a printer without the chooser, behind
+`chrome://flags/#enable-web-bluetooth-new-permissions-backend`. The page
+already reconnected through `getDevices()` where it existed, but it tried
+once and gave up. Now it waits for the remembered printer the same way, and
+hears it advertise first where Chrome can scan. Where the flag is off, the
+label settings menu says so. The `gattserverdisconnected` listener also no
+longer stacks up with every reconnect.
+
 ## [1.329.1] - 2026-10-23
 
 The scraper's price push works again (RS-383). `POST /api/market/values`

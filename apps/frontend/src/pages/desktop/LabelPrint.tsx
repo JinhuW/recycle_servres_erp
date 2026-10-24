@@ -347,6 +347,7 @@ export function LabelPrinterBar({ printer, settings, autoTitle, autoHint, summar
   const on = printer.state === 'on' || printer.state === 'printing';
   const paperBad = printer.paper !== null && printer.paper !== 'ready' && printer.paper !== 'busy';
   const chipText = printer.state === 'unsupported' ? t('pkPrinterUnsupported')
+    : printer.state === 'waiting' ? t('pkPrinterWaiting', { name: printer.name ?? '' })
     : printer.state === 'connecting' ? t('pkPrinterConnecting')
     : printer.state === 'printing' ? t('pkPrinterPrinting')
     : printer.state === 'on'
@@ -356,8 +357,15 @@ export function LabelPrinterBar({ printer, settings, autoTitle, autoHint, summar
 
   return (
     <div className="pk-printer" ref={wrapRef}>
-      <span className={'chip dot pk-printer-chip ' + tone} role="status" aria-live="polite">{chipText}</span>
-      {(printer.state === 'off' || printer.state === 'connecting') && (
+      <span
+        className={'chip dot pk-printer-chip ' + tone}
+        role="status"
+        aria-live="polite"
+        title={printer.state === 'waiting' ? t('pkPrinterWaitingHint') : undefined}
+      >
+        {chipText}
+      </span>
+      {(printer.state === 'off' || printer.state === 'waiting' || printer.state === 'connecting') && (
         <button
           type="button"
           className="btn pk-printer-btn"
@@ -403,7 +411,7 @@ export function LabelPrinterBar({ printer, settings, autoTitle, autoHint, summar
             canPrint={canPrint}
             close={() => { setOpen(false); trigger.current?.focus(); }}
             onPrintDialog={() => { setOpen(false); onPrintDialog(); }}
-            onDisconnect={on ? () => { setOpen(false); labelPrinter.disconnect(); } : null}
+            onDisconnect={on || printer.state === 'waiting' ? () => { setOpen(false); labelPrinter.disconnect(); } : null}
           />
         )}
       </div>
@@ -468,6 +476,7 @@ function PrinterPop({ auto, size, language, onAuto, onSize, onLanguage, autoTitl
           <span><span className="so-download-label">{t('pkPrinterDisconnect')}</span></span>
         </button>
       )}
+      {detected && !labelPrinter.canResume() && <p className="so-download-hint pk-label-note">{t('pkPrinterNoResume')}</p>}
     </div>
   );
 }

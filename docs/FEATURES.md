@@ -1882,8 +1882,18 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
       printer out of paper, open or faulted gets no label, and a toast says
       why.
     - The printer stays connected across Pack and Review mode visits in the
-      tab. Where
-      Chrome offers `getDevices`, a printer allowed before reconnects on load.
+      tab. **It reconnects by itself** (v1.330.0, RS-384). When the printer
+      sleeps, is switched off or goes out of range, the chip reads *Waiting
+      for <name>* and the page tries again, backing off to every 10 s, with
+      no chooser. Meanwhile labels go through the print dialog. Connect
+      still picks another printer, and Disconnect ends the wait and forgets
+      the printer.
+    - After a reload, the page can reach the printer without the chooser
+      only through `getDevices()`. Chrome (155) keeps that behind
+      `chrome://flags/#enable-web-bluetooth-new-permissions-backend`. With
+      the flag on, the remembered printer is waited for on load the same
+      way, and the page hears it advertise first. With the flag off, the
+      label settings menu says so.
     - **Print label** sits beside the chip. With a printer on, it and the
       automatic print send the label over Bluetooth, with no dialog, and a
       toast confirms each one.

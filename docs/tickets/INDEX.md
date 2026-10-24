@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-384](./RS-384-the-label-printer-reconnects-by-itself-to-the-last-p.md) | done | story | P2 | The label printer reconnects by itself to the last printer | 1.330.0 |
 | [RS-383](./RS-383-the-scraper-s-price-push-fails-on-a-part-with-no-ave.md) | done | bug | P1 | The scraper's price push fails on a part with no average yet | 1.329.1 |
 | [RS-382](./RS-382-pack-mode-prints-a-label-for-each-product-not-one-fo.md) | done | story | P2 | Pack mode prints a label for each product, not one for the box | 1.329.0 |
 | [RS-381](./RS-381-the-bluetooth-label-printer-prints-nothing-jobs-go-t.md) | done | bug | P1 | The Bluetooth label printer prints nothing: jobs go to the wrong characteristic | 1.327.1 |
