@@ -49,6 +49,18 @@ deployed?" harder to answer.
     routes with made-up data, which the entrypoint and monitor-loop suites run
     against (`.venv-aimm/bin/python -m pytest rs_worker/tests`).
 
+- **The fleet worker dials the ERP's VNC relay** (`rs_worker/vnc_relay.py`,
+  started by the entrypoint after the claim when the image has x11vnc). It
+  parks one WebSocket at `GET {RS_FLEET_URL}/api/fleet/worker/vnc` with the
+  worker token and sends nothing until the relay's `viewer` text frame says
+  a manager's noVNC page is paired with it; only then does it dial the local
+  x11vnc on 5900 and move bytes both ways as binary frames. A pair ends
+  together, and a fresh socket is parked for the next viewer (1 s, or a
+  backoff to 60 s while the ERP is unreachable). A 409 on the dial stops it
+  for good; SIGTERM stops it with the monitor. It never touches the browser
+  or the session, and dials the ERP directly, never through the account's
+  proxy. Uses `websockets`, already in the image through the monitor's web
+  UI. Needs the relay to send the `viewer` frame on pairing.
 - **A stopping fleet worker hands its last result back.** On `docker stop`
   (SIGTERM, which the monitor's CLI turns into KeyboardInterrupt), an
   exception or a clean exit, a finished task waiting to be reported is sent

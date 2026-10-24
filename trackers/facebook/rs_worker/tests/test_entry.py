@@ -29,7 +29,7 @@ import tomllib
 
 from rs_worker import entry
 
-from .fake_fleet import ACCOUNT, HOST_TOKEN, FakeFleet, mint_token
+from .fake_fleet import ACCOUNT, HOST_TOKEN, FakeFleet, mint_token, read_token
 
 TRACKER_ROOT = Path(__file__).resolve().parents[2]
 
@@ -470,7 +470,8 @@ def test_docker_stop_ends_the_worker_as_soon_as_the_monitor_has_gone(
     assert code == 0
     # Not the kill timer's 24 s: nothing is left waiting once the monitor exits.
     assert elapsed < 5, elapsed
-    assert entry.MONITOR_STOP_GRACE_S + entry.DISPLAY_STOP_GRACE_S < 30  # docker stop -t 30
+    grace = entry.MONITOR_STOP_GRACE_S + entry.DISPLAY_STOP_GRACE_S + entry.RELAY_STOP_GRACE_S
+    assert grace < 30  # docker stop -t 30
 
 
 def test_the_display_is_stopped_together_within_its_grace(tmp_path: Path) -> None:
@@ -487,3 +488,42 @@ def test_the_display_is_stopped_together_within_its_grace(tmp_path: Path) -> Non
     # One shared grace, not one per process.
     assert time.monotonic() - started < 2
     assert all(p.poll() is not None for p in stubborn)
+
+
+def test_the_vnc_relay_runs_beside_the_monitor_with_the_worker_token(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rs_worker import vnc_relay
+
+    made: List[Dict[str, Any]] = []
+
+    class Recorder:
+        def __init__(self, fleet_url: str, token: str, addr: Any, **_: Any) -> None:
+            made.append({"url": fleet_url, "token": token, "addr": addr, "calls": []})
+
+        def start(self) -> "Recorder":
+            made[-1]["calls"].append("start")
+            return self
+
+        def request_stop(self) -> None:
+            made[-1]["calls"].append("request_stop")
+
+        def stop(self, timeout: float = 1.0) -> None:
+            made[-1]["calls"].append("stop")
+
+    monkeypatch.setattr(vnc_relay, "VncRelay", Recorder)
+    # An image with x11vnc (and, here, no Xvfb to start).
+    monkeypatch.setattr(
+        entry.shutil, "which", lambda name: "/usr/bin/x11vnc" if name == "x11vnc" else None
+    )
+    env = fleet_env(fleet, RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path))
+    assert entry.run_fleet([], env, home=tmp_path / "home") == 0
+    assert len(made) == 1
+    assert made[0]["url"] == fleet.url + "/" and made[0]["addr"] == ("127.0.0.1", 5900)
+    claims = read_token(made[0]["token"])
+    assert claims is not None and claims["worker_id"] == "lab-1" and claims["epoch"] == fleet.epoch
+    assert made[0]["calls"] == ["start", "stop"]
+
+
+def test_without_a_vnc_server_there_is_no_relay(fleet: FakeFleet, tmp_path: Path) -> None:
+    assert entry.start_vnc_relay(fleet.url, "token", {}) is None
