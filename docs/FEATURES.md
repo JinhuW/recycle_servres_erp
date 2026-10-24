@@ -554,7 +554,10 @@ is not a stage but a flag beside one, set once every line has sold
     - It goes over Bluetooth when the label printer is on, else through the
       print dialog. *Print when approved* in the label settings turns it off.
       It is Review mode's own setting (`review.labelAuto`, v1.329.0, RS-382);
-      until then it was Pack mode's (`pack.labelAuto`).
+      until then it was Pack mode's (`pack.labelAuto`). Approve stays busy
+      until the label is out (v1.332.2, RS-389). Before that it came back
+      while the label printed, and a second click tried to approve a PO that
+      had already moved.
     - The page head carries Pack mode's printer bar: status, Connect, Print
       label and the settings menu, whose button shows *Auto* or *Manual*.
       Both pages share one connection, the stock and the language. A refused
@@ -1894,7 +1897,16 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
       for <name>* and the page tries again, backing off to every 10 s, with
       no chooser. Meanwhile labels go through the print dialog. Connect
       still picks another printer, and Disconnect ends the wait and forgets
-      the printer.
+      the printer. A printer that comes back without a port the page knows
+      is forgotten rather than waited for (v1.332.2).
+    - A label asked for while the printer is *Connecting…* waits for the
+      connect. It goes over Bluetooth once the printer is on, or through the
+      dialog if the connect fails (v1.332.2, RS-389); until then it was
+      dropped without a word. Labels and the bar's 15 s status checks reach
+      the printer one at a time, so a check can't break a label mid-write.
+      The dialog counts as done when the browser leaves print media, as well
+      as on `afterprint`. A label that fails to draw shows a toast. Either way
+      the labels queued behind it go on.
     - After a reload, the page can reach the printer without the chooser
       only through `getDevices()`. Chrome (155) keeps that behind
       `chrome://flags/#enable-web-bluetooth-new-permissions-backend`. With
@@ -2882,6 +2894,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   (the facebook-tracker release after 0.13.12); a row names the account by uid, or else belongs
   to the account that was on that worker when it started. Against an older
   console the timeline shows the pool's events and says logins will follow.
+  Since v1.332.2 (RS-389) it says *some logins may be missing* when one of
+  the workers didn't answer, or when a worker's ledger (its newest 500 logins)
+  doesn't reach back to when the account went on it. *The fleet console did
+  not answer* is kept for when no worker answered. A timeline that failed to
+  load is asked for again the next time its row unfolds.
+  Also since v1.332.2, a fleet document that can't be read no longer blocks
+  Assign. The DEAD check then goes by the proxy the worker's last account went
+  through, and the new stint's proxy is left unrecorded.
   Since v1.321.0 (RS-367) the worker's page is two columns from 1190px up:
   the card, Open checkpoints and Accounts used on the left, and **History**
   beside them from the card's top, as tall as they are and scrolling its own
@@ -3608,7 +3628,8 @@ removed in v1.191.0.
     CPU/RAM monitor and volume alerts, triggered and resolved (v1.322.0);
   - the ERP uptime probe;
   - the reddit fleet: a worker down, a loop failing three times in a row,
-    and every warn/error line as a minute digest;
+    and every warn/error line as a minute digest. The watch's own failures
+    to reach the relay stay out of that digest (v1.332.2);
   - homelab Prometheus (Alertmanager);
   - the Facebook fleet's ops alerts (worker down, session expiring,
     challenge) and deploy notices (facebook-tracker 0.13.15). The buyers'

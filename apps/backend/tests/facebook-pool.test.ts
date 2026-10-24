@@ -299,9 +299,9 @@ describe('facebook account pool', () => {
     // is answered here, outside the spy, so `sent(spy, i)` counts only the
     // calls that act on the worker.
     let fleetAnswer: [number, unknown] = [200, { workers: [] }];
-    // Each worker's login ledger as the console serves it; null is a console
-    // from before the route.
-    let ledger: Record<string, unknown[]> | null = {};
+    // Each worker's login ledger as the console serves it, or the status it
+    // fails with; null is a console from before the route.
+    let ledger: Record<string, unknown[] | number> | null = {};
     beforeEach(() => { fleetAnswer = [200, { workers: [] }]; ledger = {}; });
     const PROXY = 'http://gw.proxy.example:10001';
     const onProxy = (...workers: [string, string | null][]) => {
@@ -316,9 +316,11 @@ describe('facebook account pool', () => {
       vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
         const u = new URL(String(url));
         if (u.pathname === '/v1/logins') {
-          return ledger === null
-            ? new Response(JSON.stringify({ detail: 'Not Found' }), { status: 404 })
-            : new Response(JSON.stringify({ logins: ledger[u.searchParams.get('worker_id') ?? ''] ?? [] }), { status: 200 });
+          if (ledger === null) return new Response(JSON.stringify({ detail: 'Not Found' }), { status: 404 });
+          const rows = ledger[u.searchParams.get('worker_id') ?? ''] ?? [];
+          return typeof rows === 'number'
+            ? new Response(JSON.stringify({ detail: 'Coordinator answered 500' }), { status: rows })
+            : new Response(JSON.stringify({ logins: rows }), { status: 200 });
         }
         if (u.pathname !== '/v1/fleet') return spy(url, init);
         const [status, body] = fleetAnswer;
@@ -543,6 +545,11 @@ describe('facebook account pool', () => {
         expect(refused.body.code).toBe('fpProxyDead');
         expect(refused.body.error).toMatch(/DEAD: 5 accounts failed/);
       }
+      // Unreadable, the fleet document leaves the check to the proxy the
+      // worker's last account went through.
+      fleetAnswer = [502, { detail: 'coordinator unreachable' }];
+      expect((await assign(token, 8, 'nyc-1', 'problem')).body.code).toBe('fpProxyDead');
+      onProxy(['nyc-1', PROXY], ['nyc-2', PROXY]);
       expect(spy.mock.calls.length).toBe(calls); // nothing reached a worker
       const pool = await api<Snapshot>('GET', BASE, { token });
       expect(pool.body.accounts.find((a) => a.no === 8)).toMatchObject({ status: 'available' });
@@ -637,16 +644,43 @@ describe('facebook account pool', () => {
       expect(r.body.events.map((e) => e.kind)).toEqual(['pool', 'added']);
     });
 
-    it('sends nothing when the fleet document cannot be read', async () => {
+    it('marks logins partial when one worker does not answer or its ledger stops short', async () => {
+      const token = await manager();
+      await seedPool(token, 2);
+      onProxy(['ne-1', PROXY], ['va-1', null]);
+      stubFacade([200, {}]);
+      expect((await assign(token, 1, 'ne-1')).status).toBe(200);
+      expect((await assign(token, 2, 'ne-1', 'problem')).status).toBe(200);
+      expect((await assign(token, 1, 'va-1')).status).toBe(200);
+      const [, onNe] = await stints(token, 'ne-1');
+      const [onVa] = await stints(token, 'va-1');
+
+      ledger = { 'ne-1': [attempt('ne-1', onNe.startedAt, { identity_key: `uid:${uid(1)}` })], 'va-1': 500 };
+      const r = await timeline(token, 1);
+      expect(r.status).toBe(200);
+      expect(r.body.logins).toBe('partial');
+      expect(r.body.events.filter((e) => e.kind === 'login').map((e) => e.worker)).toEqual(['ne-1']);
+
+      ledger = { 'ne-1': 500, 'va-1': 500 };
+      expect((await timeline(token, 1)).body.logins).toBe('unreachable');
+
+      // A full page that begins after the account went on va-1.
+      const page = Array.from({ length: 500 }, (_, i) => attempt('va-1', onVa.startedAt + 60_000 + i));
+      ledger = { 'ne-1': [], 'va-1': page };
+      expect((await timeline(token, 1)).body.logins).toBe('partial');
+      ledger = { 'ne-1': [], 'va-1': page.slice(1) };
+      expect((await timeline(token, 1)).body.logins).toBe('ok');
+    });
+
+    it('assigns with the proxy unknown when the fleet document cannot be read', async () => {
       const token = await manager();
       await seedPool(token, 1);
       fleetAnswer = [502, { detail: 'coordinator unreachable' }];
       const spy = stubFacade([200, {}]);
       const r = await assign(token, 1, 'nyc-1');
-      expect(r.status).toBe(502);
-      expect(r.body.error).toMatch(/coordinator unreachable/);
-      expect(spy).not.toHaveBeenCalled();
-      expect(await stints(token, 'nyc-1')).toEqual([]);
+      expect(r.status).toBe(200);
+      expect(spy).toHaveBeenCalled();
+      expect(await stints(token, 'nyc-1')).toMatchObject([{ proxyUrl: null, proxyKnown: false }]);
     });
 
     it('sends no device when the pool cookie belongs to another account, or has none', async () => {

@@ -185,11 +185,23 @@ export async function drawLabel(text: LabelText, widthIn: number, heightIn: numb
 // out of the flow (`body.printing-label`) and each page is the stock's own
 // size, one label to a page, so a label printer feeds no blank one after
 // them. Each mount prints the labels it was given once; a later render
-// doesn't redraw them.
+// doesn't redraw them. It ends once, however it ends: the labels after it wait
+// on that.
 export function LabelDialog({ texts, size, onDone }: { texts: readonly LabelText[]; size: LabelSize; onDone: () => void }) {
+  const { t } = useT();
   const [urls, setUrls] = useState<string[] | null>(null);
   const done = useRef(onDone);
   useEffect(() => { done.current = onDone; });
+  const ended = useRef(false);
+  const end = () => {
+    if (ended.current) return;
+    ended.current = true;
+    done.current();
+  };
+  const fail = (why: string) => {
+    showWarnToast(t('pkLabelPrintFailed', { msg: why }));
+    end();
+  };
   const asked = useRef({ texts, size });
   const loaded = useRef(0);
   const [w, h] = LABEL_SIZES[size].inches;
@@ -197,15 +209,20 @@ export function LabelDialog({ texts, size, onDone }: { texts: readonly LabelText
   useEffect(() => {
     let live = true;
     document.body.classList.add('printing-label');
-    const after = () => done.current();
-    window.addEventListener('afterprint', after);
+    window.addEventListener('afterprint', end);
+    // Leaving print media says the same, where afterprint doesn't fire.
+    const media = window.matchMedia('print');
+    const onMedia = (e: MediaQueryListEvent) => { if (!e.matches) end(); };
+    media.addEventListener('change', onMedia);
     const [aw, ah] = LABEL_SIZES[asked.current.size].inches;
     // A laser or inkjet in the dialog is sharper than thermal's 203 dpi.
-    void Promise.all(asked.current.texts.map(x => drawLabel(x, aw, ah, 300)))
-      .then(cs => { if (live) setUrls(cs.map(c => c.toDataURL('image/png'))); });
+    Promise.all(asked.current.texts.map(x => drawLabel(x, aw, ah, 300)))
+      .then(cs => { if (live) setUrls(cs.map(c => c.toDataURL('image/png'))); })
+      .catch(e => { if (live) fail(e instanceof Error ? e.message : String(e)); });
     return () => {
       live = false;
-      window.removeEventListener('afterprint', after);
+      window.removeEventListener('afterprint', end);
+      media.removeEventListener('change', onMedia);
       document.body.classList.remove('printing-label');
     };
   }, []);
@@ -226,6 +243,7 @@ export function LabelDialog({ texts, size, onDone }: { texts: readonly LabelText
           alt={texts[i]!.name}
           style={{ width: `${w}in`, height: `${h}in` }}
           onLoad={onLoad}
+          onError={() => fail(texts[i]!.name)}
         />
       ))}
     </div>,
@@ -254,8 +272,9 @@ export function useLabelPrint(autoKey: 'pack.labelAuto' | 'review.labelAuto', on
     new Promise<void>(done => setDialog(d => ({ n: (d?.n ?? 0) + 1, texts, done })));
 
   const send = async (texts: readonly LabelText[]): Promise<void> => {
-    const now = labelPrinter.status();
-    if (now.state === 'connecting') return;
+    // Asked for while the printer connects, it goes to the printer once that
+    // is on, or to the dialog if it doesn't come on.
+    const now = await labelPrinter.settled();
     if (now.state !== 'on') return viaDialog(texts);
     const lang = language === 'auto' ? now.language : language;
     try {

@@ -245,8 +245,10 @@ and writes them with its heartbeat (`loop_failures`, `worker_errors`). So the
 OCI workers need nothing beyond `DATABASE_URL`, and only the api holds the
 relay's `OPS_ALERT_URL` and `OPS_ALERT_TOKEN`. The token is the relay's
 `ALERT_TOKEN` secret. Nothing counts as sent until the relay accepts it, so a
-relay or Telegram outage delays alerts but doesn't lose them. The api's own
-crash is reported by Railway's webhook, not by this watch.
+relay or Telegram outage delays alerts but doesn't lose them. The watch's own
+relay failures stay in the api's log and out of the digest, which would only
+queue them for the relay that failed. The api's own crash is reported by
+Railway's webhook, not by this watch.
 
 ## Deployment
 

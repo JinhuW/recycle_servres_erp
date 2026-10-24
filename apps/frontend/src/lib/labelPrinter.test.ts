@@ -105,16 +105,40 @@ describe('chunks', () => {
 });
 
 // A CT221D-like printer over a fake Web Bluetooth. `failures` connects fail
-// before one succeeds; `drop()` is the printer going to sleep.
+// before one succeeds; `drop()` is the printer going to sleep. Like Chrome, it
+// hands back the same characteristics on every connect. Each write takes 5 ms,
+// and `overlapped` says whether one began while another was in flight.
 class FakePrinter extends EventTarget {
   name: string;
   failures = 0;
   connects = 0;
+  connectMs = 0;
+  noPort = false;
+  writes: Uint8Array[] = [];
+  inFlight = 0;
+  overlapped = false;
   watchAdvertisements?: (o: { signal: AbortSignal }) => Promise<void>;
+  notifyChar = Object.assign(new EventTarget(), {
+    uuid: '49535343-1e4d-4bd9-ba61-23c647249616',
+    properties: { write: false, writeWithoutResponse: false, notify: true },
+    startNotifications: async function () { return this; },
+  });
+  writeChar = Object.assign(new EventTarget(), {
+    uuid: '49535343-8841-43f4-a8d4-ecbe34729bb3',
+    properties: { write: true, writeWithoutResponse: true, notify: false },
+    writeValueWithResponse: async (v: Uint8Array) => {
+      if (this.inFlight) this.overlapped = true;
+      this.inFlight++;
+      this.writes.push(v);
+      await new Promise(r => setTimeout(r, 5));
+      this.inFlight--;
+    },
+  });
   gatt = {
     connected: false,
     connect: async () => {
       this.connects++;
+      if (this.connectMs) await new Promise(r => setTimeout(r, this.connectMs));
       if (this.failures > 0) { this.failures--; throw new Error('NetworkError: Connection failed'); }
       this.gatt.connected = true;
       return this.gatt;
@@ -126,18 +150,7 @@ class FakePrinter extends EventTarget {
     },
     getPrimaryServices: async () => [{
       uuid: '49535343-fe7d-4ae5-8fa9-9fafd205e455',
-      getCharacteristics: async () => [
-        Object.assign(new EventTarget(), {
-          uuid: '49535343-1e4d-4bd9-ba61-23c647249616',
-          properties: { write: false, writeWithoutResponse: false, notify: true },
-          startNotifications: async function () { return this; },
-        }),
-        Object.assign(new EventTarget(), {
-          uuid: '49535343-8841-43f4-a8d4-ecbe34729bb3',
-          properties: { write: true, writeWithoutResponse: true, notify: false },
-          writeValueWithResponse: async () => {},
-        }),
-      ],
+      getCharacteristics: async () => (this.noPort ? [] : [this.notifyChar, this.writeChar]),
     }],
   };
   constructor(public id: string) { super(); this.name = `CT221D-${id}`; }
@@ -168,6 +181,7 @@ describe('reconnecting the label printer', () => {
 
   it('waits for a printer that dropped and connects it again without the chooser', async () => {
     const p = new FakePrinter('4FD1');
+    const listen = vi.spyOn(p.notifyChar, 'addEventListener');
     const requestDevice = vi.fn(async () => p);
     const printer = await load({ requestDevice });
     await printer.connect();
@@ -188,6 +202,55 @@ describe('reconnecting the label printer', () => {
     p.drop();
     await vi.advanceTimersByTimeAsync(2000);
     expect(p.connects).toBe(6);
+    // Nor its answer listener, on the characteristic it hands back each time.
+    expect(listen).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops waiting for a printer that no longer shows a port it knows', async () => {
+    const p = new FakePrinter('4FD1');
+    const printer = await load({ requestDevice: async () => p });
+    await printer.connect();
+    p.noPort = true;
+    p.drop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(printer.status()).toMatchObject({ state: 'off', name: null });
+    const tries = p.connects;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(p.connects).toBe(tries);
+    expect(saved.size).toBe(0);
+  });
+
+  it('sends one thing at a time: a label waits for the status check under way, and the next check for it', async () => {
+    const p = new FakePrinter('4FD1');
+    const printer = await load({ requestDevice: async () => p });
+    await printer.connect();
+    const all = Promise.all([
+      printer.check('tspl'),
+      printer.print(new Uint8Array(300).fill(1)),
+      printer.check('tspl'),
+    ]);
+    await vi.advanceTimersByTimeAsync(3000);
+    await all;
+    expect(p.overlapped).toBe(false);
+    // The query, the job's three chunks, then the second query.
+    expect(p.writes.map(w => w[0])).toEqual([0x1b, 1, 1, 1, 0x1b]);
+    expect(printer.status().state).toBe('on');
+  });
+
+  it('tells a label asked for mid-connect how the connect ended', async () => {
+    const p = new FakePrinter('4FD1');
+    p.connectMs = 100;
+    const printer = await load({ requestDevice: async () => p });
+    void printer.connect();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(printer.status().state).toBe('connecting');
+    let ended: string | null = null;
+    void printer.settled().then(s => { ended = s.state; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ended).toBeNull();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(ended).toBe('on');
+    expect((await printer.settled()).state).toBe('on');
   });
 
   it('stops waiting on Disconnect, and forgets the printer', async () => {

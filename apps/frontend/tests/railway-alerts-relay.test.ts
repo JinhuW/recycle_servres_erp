@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error — plain JS Worker module, no types.
 import worker, { alertMessage, format } from '../../../deploy/railway-alerts/worker.js';
 
-// RS-368: Railway's raw webhook JSON relayed into one Telegram topic per kind
+// Railway's raw webhook JSON relayed into one Telegram topic per kind
 // of alert.
 
 const env = {
@@ -180,7 +180,7 @@ describe('format', () => {
   });
 });
 
-// RS-375: our own senders post `{topic, status, title, lines, link}` to /alert.
+// Our own senders post `{topic, status, title, lines, link}` to /alert.
 describe('/alert', () => {
   const alert = { topic: 'reddit_workers', status: 'firing', title: 'Reddit worker down', lines: ['c814 · last beat 12m ago'] };
 

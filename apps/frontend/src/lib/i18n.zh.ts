@@ -2951,6 +2951,7 @@ const zh: Record<string, string> = {
   fbcTlSum: "登录：{ok} 次成功 · {failed} 次失败",
   fbcTlNotServed: "节点控制台更新后才会显示登录记录；目前只显示账号池中的事件。",
   fbcTlUnreachable: "节点控制台没有响应，登录记录缺失。",
+  fbcTlPartial: "部分登录记录可能缺失：有节点没有响应，或它的登录记录没有保留到那么早。",
   fbcTlEmpty: "此账号还没有任何记录。",
   fbcTlRange: "{from} – {to}",
   fbcTlAdded: "加入账号池 · 批次 {batch}",

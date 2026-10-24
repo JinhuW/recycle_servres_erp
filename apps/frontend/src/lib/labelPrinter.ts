@@ -197,6 +197,16 @@ let known: Device | null = null;
 let turn = 0;
 let scan: AbortController | null = null;
 const watched = new WeakSet<Device>();
+// A reconnect can hand back the same characteristic, which keeps its listener.
+const listening = new WeakSet<Char>();
+// One GATT operation at a time: Chrome refuses a write while another is in
+// flight, and a status answer goes to whichever check is waiting for one.
+let line: Promise<unknown> = Promise.resolve();
+function inTurn<T>(op: () => Promise<T>): Promise<T> {
+  const run = line.then(op);
+  line = run.catch(() => {});
+  return run;
+}
 
 function set(next: Partial<PrinterStatus>) {
   status = { ...status, ...next };
@@ -235,10 +245,13 @@ async function open(device: Device, mine: number): Promise<void> {
   const { write, notify } = found;
   if (notify) {
     await notify.startNotifications();
-    notify.addEventListener('characteristicvaluechanged', () => {
-      const v = notify.value;
-      if (v && v.byteLength) reply?.(v.getUint8(0));
-    });
+    if (!listening.has(notify)) {
+      listening.add(notify);
+      notify.addEventListener('characteristicvaluechanged', () => {
+        const v = notify.value;
+        if (v && v.byteLength) reply?.(v.getUint8(0));
+      });
+    }
   }
   if (!watched.has(device)) {
     watched.add(device);
@@ -284,10 +297,22 @@ async function reconnect(device: Device): Promise<void> {
       await heard(device);
       await open(device, mine);
       return;
-    } catch {
+    } catch (e) {
+      // A printer with no port this page knows won't grow one by waiting.
+      if (e instanceof Error && e.message === 'no-port') {
+        if (mine === turn) forget();
+        return;
+      }
       await new Promise(r => setTimeout(r, pause));
     }
   }
+}
+
+function forget() {
+  link = null;
+  take(null);
+  try { localStorage.removeItem(DEVICE_KEY); } catch { /* private window */ }
+  set({ state: 'off', name: null, paper: null });
 }
 
 async function send(bytes: Uint8Array): Promise<void> {
@@ -348,37 +373,56 @@ export const labelPrinter = {
   // forgets the printer.
   canResume: () => !!bluetooth()?.getDevices,
 
-  disconnect(): void {
-    link = null;
-    take(null);
-    try { localStorage.removeItem(DEVICE_KEY); } catch { /* private window */ }
-    set({ state: 'off', name: null, paper: null });
+  disconnect: forget,
+
+  // Once a connect under way has finished or failed.
+  settled(): Promise<PrinterStatus> {
+    return new Promise(resolve => {
+      const done = () => {
+        const now = snapshot();
+        if (now.state === 'connecting') return;
+        listeners.delete(done);
+        resolve(now);
+      };
+      listeners.add(done);
+      done();
+    });
   },
 
   // Asks the printer how it is; null when its language can't ask, it has no
   // way to answer, or it doesn't within a second.
-  async check(lang: PrinterLanguage): Promise<PaperState | null> {
-    const query = STATUS_QUERY[lang];
-    if (!link?.notify || !query || status.state !== 'on') return null;
-    const answer = new Promise<number | null>(resolve => {
-      reply = resolve;
-      setTimeout(() => resolve(null), 1000);
+  check(lang: PrinterLanguage): Promise<PaperState | null> {
+    return inTurn(async () => {
+      const query = STATUS_QUERY[lang];
+      if (!link?.notify || !query || status.state !== 'on') return null;
+      const answer = new Promise<number | null>(resolve => {
+        reply = resolve;
+        setTimeout(() => resolve(null), 1000);
+      });
+      let byte: number | null;
+      try {
+        await send(query);
+        byte = await answer;
+      } finally {
+        reply = null;
+      }
+      const paper = byte === null ? null : readStatus(lang, byte);
+      set({ paper });
+      return paper;
     });
-    await send(query);
-    const byte = await answer;
-    reply = null;
-    const paper = byte === null ? null : readStatus(lang, byte);
-    set({ paper });
-    return paper;
   },
 
-  async print(job: Uint8Array): Promise<void> {
-    set({ state: 'printing' });
-    try {
-      await send(job);
-    } finally {
-      if (link) set({ state: 'on' });
-    }
+  print(job: Uint8Array): Promise<void> {
+    return inTurn(async () => {
+      // Disconnected while the job waited its turn.
+      if (!link) throw new Error('disconnected');
+      set({ state: 'printing' });
+      try {
+        await send(job);
+      } finally {
+        if (link) set({ state: 'on' });
+      }
+    });
   },
 };
 

@@ -546,6 +546,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     // the qty they had; the re-read brings the new one (and the goods total).
     let zeroed = false;
     const reloadIfZeroed = () => (zeroed ? onReload().catch(handleFetchError) : undefined);
+    let approved = false;
     try {
       // A count the server never stored would be zeroed or approved as if it
       // had been.
@@ -570,6 +571,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
         return;
       }
       stashEntryAnswer(order.id, null);
+      approved = true;
     } catch (e) {
       const now = readStageMoved(e);
       if (now !== null) showErrorDialog(t('bcStaleStage', { id: order.id, s: poStageName(now, t) }));
@@ -577,10 +579,13 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
       await reloadIfZeroed();
       return;
     } finally {
-      setBusy(null);
+      // An approved PO has left Reviewing, so Approve stays busy while its
+      // label prints: a second click would try to approve it again.
+      if (!approved) setBusy(null);
     }
     // Finishing the review prints the box's label, before the page leaves.
     if (label.auto) await label.print([labelText()]);
+    setBusy(null);
     onApproved();
   };
 

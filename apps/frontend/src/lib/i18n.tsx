@@ -3839,6 +3839,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fbcTlSum: "Logins: {ok} succeeded · {failed} failed",
     fbcTlNotServed: "Logins appear once the fleet console is updated; until then this shows the pool's events only.",
     fbcTlUnreachable: "The fleet console did not answer, so logins are missing.",
+    fbcTlPartial: "Some logins may be missing: a worker did not answer, or its ledger doesn't reach back that far.",
     fbcTlEmpty: "Nothing recorded for this account yet.",
     fbcTlRange: "{from} – {to}",
     fbcTlAdded: "Added to the pool · batch {batch}",

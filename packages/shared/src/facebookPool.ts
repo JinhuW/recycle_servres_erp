@@ -78,10 +78,12 @@ export type FbTimelineEvent =
   | { kind: 'added'; at: number; batch: string };
 
 /** `logins` says whether the fleet answered: `not_served` is a console that
- *  predates the login route, `unreachable` one that did not answer. */
+ *  predates the login route, `unreachable` one that did not answer for any
+ *  worker, `partial` some logins missing: a worker that did not answer, or a
+ *  ledger that doesn't reach back to when the account went on it. */
 export type FbAccountTimeline = {
   events: FbTimelineEvent[];
-  logins: 'ok' | 'not_served' | 'unreachable';
+  logins: 'ok' | 'partial' | 'not_served' | 'unreachable';
 };
 
 /** Fields whose copy or reveal is worth an audit line. */

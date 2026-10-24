@@ -108,7 +108,9 @@ async function runApi(): Promise<void> {
       {name: 'watch', logger: logger.child('watch'), idleMs: 60_000, busyMs: 5_000},
       () => watchOnce({
         sql,
-        logger: logger.child('watch'),
+        // Without the problem hook: a relay failure in worker_errors would be
+        // queued for the relay that just failed, and pad the digest after it.
+        logger: createLogger(config.workerId, config.logLevel, 'watch'),
         selfId: config.workerId,
         relayUrl: config.opsAlertUrl,
         relayToken: config.opsAlertToken,
