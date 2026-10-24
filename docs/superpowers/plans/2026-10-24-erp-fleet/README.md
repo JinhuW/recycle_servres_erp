@@ -102,8 +102,8 @@ E join as they land.
   proxies: `fb_worker_accounts`, `fb_proxies` (`0204_fb_worker_accounts.sql`,
   `routes/facebookPool.ts`). Shared types: `packages/shared/src/facebookPool.ts`.
 - The vendored monitor is `trackers/facebook/ai-marketplace-monitor/`, branch
-  `recycle-patches`, pinned in `trackers/facebook/VENDOR.md` (3a621a4 on
-  2026-10-24). It is gitignored; clone it from a checkout that has it
+  `recycle-patches`, pinned in `trackers/facebook/VENDOR.md` (cb6d09b, the
+  fleet-mode commit, since 2026-10-24). It is gitignored; clone it from a checkout that has it
   (`docs/agents/...`, memory "facebook vendored monitor in worktrees").
   Queue code worth reading: `facebook.py` `queued_cities` (~2071),
   `search()` (~2700–2850), `monitor.py` `start_monitor` idle loop (~723–829),
