@@ -1036,17 +1036,22 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
                     {t('payIgnore')}
                   </button>
                 </span>
-                <button
-                  ref={linkBtnRef}
-                  type="button" className={likely ? 'btn sm primary' : 'btn sm'}
-                  onClick={() => setPicking(p => !p)}
-                >
-                  {t('payLink')}
-                </button>
+                {/* POST /:id/link refuses a transfer — the PayPal leg of the
+                    same payment is what links — so the button could only
+                    fail. Not a transfer, in the expansion, is the way back. */}
+                {row.category !== 'transfer' && (
+                  <button
+                    ref={linkBtnRef}
+                    type="button" className={likely ? 'btn sm primary' : 'btn sm'}
+                    onClick={() => setPicking(p => !p)}
+                  >
+                    {t('payLink')}
+                  </button>
+                )}
               </>
             )}
           </span>
-          {picking && !isLinkedRow(row) && (
+          {picking && !isLinkedRow(row) && row.category !== 'transfer' && (
             <LinkPicker
               txnId={row.id}
               amount={row.amount}

@@ -33,6 +33,7 @@ type WireTxn = {
     transaction_event_code?: string;
     transaction_status?: string;
     transaction_initiation_date?: string;
+    transaction_updated_date?: string;
     transaction_subject?: string | null;
     transaction_note?: string | null;
     transaction_amount?: { currency_code?: string; value?: string };
@@ -100,13 +101,54 @@ async function getJson<T>(env: Env, url: string, path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function listPage(env: Env, query: Record<string, string>): Promise<{ rows: WireTxn[]; totalPages: number }> {
-  const body = await getJson<{ transaction_details?: WireTxn[]; total_pages?: number }>(
-    env,
-    `${base(env)}/v1/reporting/transactions?${new URLSearchParams(query)}`,
-    '/v1/reporting/transactions',
-  );
-  return { rows: body.transaction_details ?? [], totalPages: body.total_pages ?? 1 };
+async function listWindow(env: Env, from: number, to: number, balanceOnly: boolean): Promise<WireTxn[]> {
+  const rows: WireTxn[] = [];
+  for (let page = 1; ; page++) {
+    const query = new URLSearchParams({
+      start_date: new Date(from).toISOString(),
+      end_date: new Date(to).toISOString(),
+      fields: 'transaction_info,payer_info',
+      balance_affecting_records_only: balanceOnly ? 'Y' : 'N',
+      page_size: String(PAGE_SIZE),
+      page: String(page),
+    });
+    const body = await getJson<{ transaction_details?: WireTxn[]; total_pages?: number }>(
+      env,
+      `${base(env)}/v1/reporting/transactions?${query}`,
+      '/v1/reporting/transactions',
+    );
+    rows.push(...(body.transaction_details ?? []));
+    if (page >= (body.total_pages ?? 1)) return rows;
+  }
+}
+
+// Transaction Search returns only balance-affecting records unless told
+// otherwise, and a payment funded by eCheck affects nothing until it clears
+// days later — so it, and its T0300 funding, were invisible for as long as a
+// manager most needed to link them. The full pass (`all`) is read for the
+// transactions the balance pass did not return, each at its latest record: it
+// answers with one record per state a transaction went through, so a bounced
+// eCheck arrives as both its pending and its denied record. A transaction whose
+// latest record is settled is a hold or memo that moved no money, and would
+// read as a payment.
+//
+// The balance pass matches a transaction by when it began, the full pass a
+// record by when it changed. A transaction begun before `startMs` would be
+// missing from the balance pass without being outside the balance, and its
+// late record would overwrite the status a wider window reads back.
+function outsideBalance(balance: WireTxn[], all: WireTxn[], startMs: number): WireTxn[] {
+  const seen = new Set(balance.map((t) => t.transaction_info?.transaction_id));
+  const latest = new Map<string, WireTxn>();
+  for (const t of all) {
+    const info = t.transaction_info;
+    if (!info?.transaction_id || seen.has(info.transaction_id)) continue;
+    if (!info.transaction_initiation_date || Date.parse(info.transaction_initiation_date) < startMs) continue;
+    const prev = latest.get(info.transaction_id)?.transaction_info;
+    if (!prev || (info.transaction_updated_date ?? '') >= (prev.transaction_updated_date ?? '')) {
+      latest.set(info.transaction_id, t);
+    }
+  }
+  return [...latest.values()].filter((t) => t.transaction_info?.transaction_status !== 'S');
 }
 
 // T03xx = bank deposit into PayPal, T04xx = withdrawal back to a bank,
@@ -319,41 +361,36 @@ export function paypalProvider(env: Env): BankProvider {
   return {
     source: 'paypal',
     async fetchSince(sinceIso: string): Promise<BankFetch> {
-      const txns: NormalizedTxn[] = [];
+      const start = new Date(sinceIso).getTime();
       const end = Date.now();
-      for (let from = new Date(sinceIso).getTime(); from < end; from += WINDOW_MS) {
+      const balance: WireTxn[] = [];
+      const all: WireTxn[] = [];
+      for (let from = start; from < end; from += WINDOW_MS) {
         const windowEnd = Math.min(from + WINDOW_MS, end);
-        for (let page = 1; ; page++) {
-          const { rows, totalPages } = await listPage(env, {
-            start_date: new Date(from).toISOString(),
-            end_date: new Date(windowEnd).toISOString(),
-            fields: 'transaction_info,payer_info',
-            page_size: String(PAGE_SIZE),
-            page: String(page),
-          });
-          for (const t of rows) {
-            const info = t.transaction_info;
-            if (!info?.transaction_id) continue;
-            const amount = Number(info.transaction_amount?.value);
-            if (!Number.isFinite(amount) || !info.transaction_initiation_date) continue;
-            const externalId = info.transaction_id.toUpperCase();
-            txns.push({
-              source: 'paypal',
-              externalId,
-              accountExternalId: 'primary',
-              postedAt: new Date(info.transaction_initiation_date),
-              amount,
-              currency: (info.transaction_amount?.currency_code ?? 'USD').toUpperCase(),
-              counterparty: counterpartyOf(t),
-              description: info.transaction_subject ?? info.transaction_note ?? null,
-              paypalTxnId: externalId,
-              category: paypalTxnCategory(info.transaction_event_code),
-              settleStatus: paypalSettleStatus(info.transaction_status),
-              raw: t,
-            });
-          }
-          if (page >= totalPages) break;
-        }
+        balance.push(...await listWindow(env, from, windowEnd, true));
+        all.push(...await listWindow(env, from, windowEnd, false));
+      }
+      const txns: NormalizedTxn[] = [];
+      for (const t of [...balance, ...outsideBalance(balance, all, start)]) {
+        const info = t.transaction_info;
+        if (!info?.transaction_id) continue;
+        const amount = Number(info.transaction_amount?.value);
+        if (!Number.isFinite(amount) || !info.transaction_initiation_date) continue;
+        const externalId = info.transaction_id.toUpperCase();
+        txns.push({
+          source: 'paypal',
+          externalId,
+          accountExternalId: 'primary',
+          postedAt: new Date(info.transaction_initiation_date),
+          amount,
+          currency: (info.transaction_amount?.currency_code ?? 'USD').toUpperCase(),
+          counterparty: counterpartyOf(t),
+          description: info.transaction_subject ?? info.transaction_note ?? null,
+          paypalTxnId: externalId,
+          category: paypalTxnCategory(info.transaction_event_code),
+          settleStatus: paypalSettleStatus(info.transaction_status),
+          raw: t,
+        });
       }
       return { accounts: [{ externalId: 'primary', name: 'PayPal' }], txns };
     },
