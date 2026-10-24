@@ -1288,6 +1288,13 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   lots alone, and its row — qty and the in-stock split, lot and PO counts,
   cost range, Warehouses — sums those alone. The attribute chips still show
   a matching product whole, so a mis-typed lot stays findable.
+- **The desktop Inventory table sorts by any column** (v1.332.0): Product,
+  Part #, Qty, Lots, Warehouses, Cost, Sell. A click goes high → low → low →
+  high → back to the bid-sheet order. Blanks sort last, and ties keep the
+  bid-sheet order. The server ranks every matching product before it caps
+  the list at 200, so the top of a sort is the top of the whole stock. A
+  hidden sorted column, or Cost for a non-manager, falls back to the
+  bid-sheet order. The export keeps the bid-sheet order.
 - **The phone Inventory list is one category → brand → capacity order across
   every page it loads** (v1.258.9), the order the exports use.
 - **The phone Inventory list shows each line's sell price to every role**

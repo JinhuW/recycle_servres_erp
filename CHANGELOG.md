@@ -17,6 +17,26 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.332.0] - 2026-10-24
+
+The desktop Inventory table sorts by any column (RS-387). Product, Part #,
+Qty, Lots, Warehouses, Cost and Sell each take a click: the first sorts high
+to low, the second low to high, the third goes back to the bid-sheet order the
+table has always used. Blanks sort last either way, and products that tie keep
+their bid-sheet order.
+
+The sort runs on the server. The table lists at most 200 products, the newest
+ones when nothing is sorted. A sort ranks every product the filters match
+first and then takes the top 200, so "Qty, high to low" shows the biggest
+stock, not the biggest among the newest 200. `GET /api/inventory/products`
+takes `sort` and `dir` for this. The browser re-sorts the rows it already has
+straight away, so a click shows at once and the server's answer replaces it.
+
+The sort lasts until you leave and come back. An expanded product stays
+expanded when the rows move. If you hide the sorted column, or you aren't a
+manager and so can't see Cost, the table goes back to bid-sheet order. The
+export still uses the bid-sheet order.
+
 ## [1.331.1] - 2026-10-24
 
 A PayPal payment funded by eCheck now reaches Payments while it is still

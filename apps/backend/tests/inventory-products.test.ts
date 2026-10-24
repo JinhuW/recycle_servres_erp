@@ -183,6 +183,32 @@ describe('GET /api/inventory/products', () => {
     expectSheetOrder(r.body.products);
   });
 
+  it('sorts by a column, ties in workbook order, and rejects an unknown column', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ products: (SheetOrdered & { qty: number })[] }>(
+      'GET', '/api/inventory/products?sort=qty&dir=desc', { token });
+    expect(r.status).toBe(200);
+    const ps = r.body.products;
+    for (let i = 1; i < ps.length; i++) expect(ps[i - 1].qty).toBeGreaterThanOrEqual(ps[i].qty);
+    const runs = Map.groupBy(ps, (p) => p.qty);
+    const tied = [...runs.values()].filter((run) => run.length > 1);
+    expect(tied.length).toBeGreaterThan(0);
+    for (const run of tied) expectSheetOrder(run);
+
+    expect((await api('GET', '/api/inventory/products?sort=unit_cost', { token })).status).toBe(400);
+    expect((await api('GET', '/api/inventory/products?sort=qty&dir=up', { token })).status).toBe(400);
+  });
+
+  // Purchasers' groups carry no cost, so a crafted cost sort can't rank by it.
+  it('leaves a purchaser\'s list unranked under a cost sort', async () => {
+    const { token } = await loginAs(MARCUS);
+    const plain = await api<{ products: Group[] }>('GET', '/api/inventory/products', { token });
+    const byCost = await api<{ products: Group[] }>('GET', '/api/inventory/products?sort=cost&dir=desc', { token });
+    expect(byCost.status).toBe(200);
+    expect(plain.body.products.length).toBeGreaterThan(1);
+    expect(byCost.body.products.map((g) => g.key)).toEqual(plain.body.products.map((g) => g.key));
+  });
+
   it('scopes purchasers to their own lines', async () => {
     const mgr = await loginAs(ALEX);
     await po(mgr.token, { brand: 'SCOPEZ', partNumber: 'SCOPE-9' });
@@ -249,6 +275,26 @@ describe('select-all past the grouped cap', () => {
     expect(sellable).not.toContain(transitId);
     const listed = new Set(r.body.products.flatMap((g) => g.lines.map((l) => l.id)));
     expect(sellable.filter((id) => !listed.has(id)).length).toBeGreaterThanOrEqual(4);
+  });
+
+  // The table sorts on the server so a column sort ranks the whole stock, not
+  // just the newest 200 products the unsorted list keeps.
+  it('sorts every matching product before the cap, not only the 200 listed', async () => {
+    const { token } = await loginAs(ALEX);
+    const unsorted = await api<Products>('GET', `/api/inventory/products?q=${BRAND}`, { token });
+    const listed = new Set(unsorted.body.products.flatMap((g) => g.lines.map((l) => l.id)));
+    const pastCap = doneIds.find((id) => !listed.has(id))!;
+    await getTestDb()`UPDATE order_lines SET qty = 99 WHERE id = ${pastCap}`;
+
+    const desc = await api<Products>('GET', `/api/inventory/products?q=${BRAND}&sort=qty&dir=desc`, { token });
+    expect(desc.status).toBe(200);
+    expect(desc.body.products).toHaveLength(200);
+    expect(desc.body.products[0].qty).toBe(99);
+    expect(desc.body.products[0].lines.map((l) => l.id)).toEqual([pastCap]);
+
+    const asc = await api<Products>('GET', `/api/inventory/products?q=${BRAND}&sort=qty&dir=asc`, { token });
+    expect(asc.body.products).toHaveLength(200);
+    expect(asc.body.products.some((g) => g.qty === 99)).toBe(false);
   });
 
   it('narrows sellable_ids to the warehouse filter per lot', async () => {
