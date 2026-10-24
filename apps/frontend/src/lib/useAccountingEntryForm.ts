@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { KIND_TARGET, type AccountingDirection, type AccountingKind } from '@recycle-erp/shared';
 import { useAuth } from './auth';
-import { handleFetchError } from './errorToast';
+import { handleFetchError, showWarnToast } from './errorToast';
+import { useT } from './i18n';
 import { fetchRateToUsd } from './fxRate';
 import { useDebouncedValue } from './useDebouncedValue';
 import { useMembers } from './useManagers';
 import { payerChoices } from './poFacets';
 import {
-  acctCreate, acctPatch, acctTargets, localToday,
+  acctCreate, acctPatch, acctTargets, acctUploadAttachment, localToday,
   type AcctEntryDetail, type AcctTarget,
 } from './accounting';
 import {
@@ -24,6 +25,7 @@ export function useAccountingEntryForm(opts: {
   preset?: EntryPreset; entry?: AcctEntryDetail; onSaved: (r: SavedEntry) => void;
 }) {
   const { preset, entry, onSaved } = opts;
+  const { t } = useT();
   const { user } = useAuth();
   const members = useMembers();
   const today = useMemo(() => localToday(), []);
@@ -37,6 +39,9 @@ export function useAccountingEntryForm(opts: {
   const settledQuery = useDebouncedValue(query, 200);
   const [candidates, setCandidates] = useState<AcctTarget[] | null>(null);
   const [rate, setRate] = useState<number | null>(null);
+  // Screenshots picked before the entry exists: they go up once it does.
+  // An edit has none — the entry's own page manages its screenshots live.
+  const [files, setFiles] = useState<File[]>([]);
 
   const targetType = KIND_TARGET[form.kind];
   const searching = !!targetType && !form.targetLocked;
@@ -88,6 +93,11 @@ export function useAccountingEntryForm(opts: {
         onSaved({ id: entry.id, created: false, commissionPaidBy: res.commissionPaidBy });
       } else {
         const res = await acctCreate(r.body);
+        // One at a time, in the order picked. The entry stands either way: a
+        // screenshot that didn't go up is added again from the entry.
+        let failed = 0;
+        for (const file of files) await acctUploadAttachment(res.id, file).catch(() => { failed++; });
+        if (failed) showWarnToast(t('acctScreenshotsFailed', { id: res.id, n: failed }));
         onSaved({ id: res.id, created: true, commissionPaidBy: res.commissionPaidBy });
       }
     } catch (e) {
@@ -113,6 +123,12 @@ export function useAccountingEntryForm(opts: {
     setCounterparty: (v: string) => edit(f => ({ ...f, counterparty: v, counterpartyTouched: true })),
     choose: (t: FormTarget | null) => { edit(f => pickTarget(f, t)); setQuery(''); },
     setQuery,
+    files,
+    addFiles: (list: FileList | File[] | null) => {
+      const picked = [...(list ?? [])].filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
+      if (picked.length) setFiles(fs => [...fs, ...picked]);
+    },
+    removeFile: (i: number) => setFiles(fs => fs.filter((_, j) => j !== i)),
     submit,
   };
 }

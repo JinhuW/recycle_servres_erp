@@ -6,6 +6,7 @@ import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import { RouteLink } from '../../components/RouteLink';
 import { Yuan, recordPath } from '../../components/AccountingBits';
+import { AcctAttachments } from '../../components/AcctAttachments';
 import { useAuth } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
 import { handleFetchError } from '../../lib/errorToast';
@@ -430,6 +431,12 @@ export function DesktopAccountingReview({ onToast }: Props) {
                     {sel.counterparty && <><dt>{t('acctFieldCounterparty')}</dt><dd>{sel.counterparty}</dd></>}
                     {sel.reference && <><dt>{t('acctFieldReference')}</dt><dd className="mono">{sel.reference}</dd></>}
                     {sel.note && <><dt>{t('acctFieldNote')}</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{sel.note}</dd></>}
+                    <dt>{t('acctScreenshots')}</dt>
+                    <dd>
+                      {sel.attachments.length
+                        ? <AcctAttachments key={sel.id} entryId={sel.id} initial={sel.attachments} readOnly />
+                        : '—'}
+                    </dd>
                     <dt>{t('acctRmRecorded')}</dt>
                     <dd>{sel.review?.author?.name ?? t('acctRmBackfilled')} · {fmtDate(sel.createdAt, locale)}</dd>
                   </dl>

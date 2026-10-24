@@ -97,9 +97,19 @@ describe('the entry form', () => {
     expect(ok).toEqual({
       body: {
         direction: 'out', kind: 'purchase', amount: 12.35, currency: 'CNY', fxRate: null, method: 'bank',
-        occurredOn: TODAY, managerId: ME, targetId: 'PO-1', counterparty: null, reference: null, note: null,
+        occurredOn: TODAY, managerId: ME, targetId: 'PO-1', counterparty: null, note: null,
       },
     });
+    // The form no longer asks for a reference: an edit leaves one already on
+    // the entry alone, since PATCH only touches the keys it is sent.
+    const old = {
+      id: 'AC-1', direction: 'out', kind: 'other', amount: 5, currency: 'CNY', fxRate: null, method: 'cash',
+      occurredOn: TODAY, manager: { id: ME, name: 'Me' }, target: null,
+      counterparty: null, reference: 'TX-9', note: null,
+    } as AcctEntry;
+    const edited = toRequestBody(initialForm({ meId: ME, today: TODAY, entry: old }), { entry: old });
+    expect(edited).toMatchObject({ body: { amount: 5, method: 'cash' } });
+    expect(edited).not.toHaveProperty('body.reference');
     expect(toRequestBody({ ...f, kind: 'other', amount: '5', currency: 'USD', fxRate: '700' })).toEqual({ error: 'acctErrRate' });
     // An Other entry never sends a record, whatever was picked before.
     expect(toRequestBody({ ...f, kind: 'other', amount: '5', target: { id: 'PO-1' } })).toMatchObject({ body: { targetId: null } });

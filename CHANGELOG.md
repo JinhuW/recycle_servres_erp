@@ -17,6 +17,37 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.333.0] - 2026-10-24
+
+An RMB Flow entry now keeps the payment screenshots that prove it (RS-390).
+Until now an entry recorded money that moved through a manager's hands, an
+Alipay transfer or a WeChat payment, with nothing to show for it. Each
+screenshot goes through the same AI rename a PO's payment evidence gets: the
+model reads the receipt and the file is stored as
+`<date>-<method>-<amount>.png`, so a list of them reads without opening one.
+If the model can't read it, the file keeps its own name. The rename never
+fails an upload.
+
+*Record entry* takes screenshots on both shells before the entry exists. On
+desktop you can pick, drop or paste them (⌘V of a screenshot works). They
+upload once the entry is saved; one that fails leaves the entry saved and a
+warning says to add it from the entry. The entry drawer and the phone's
+entry screen add and remove them live, and Review shows them beside the
+figure being signed. Adding or removing one is a line in the entry's history
+and on Activity. It leaves the entry's version and sign-off alone, because
+proof is not money. A voided entry's screenshots are read-only. The
+screenshots live in a new `accounting_entry_attachments` table (migration
+0205).
+
+The form's *Reference* field is gone. Nobody filled it in, and the
+screenshot is the record now. Entries that have a reference still show it,
+and editing one keeps it.
+
+Two shared pieces had buttons that submitted any form they sat in: the
+attachment chip's remove button and the image lightbox's close button. Inside
+*Record entry*, either one would have saved the entry. Both are plain buttons
+now.
+
 ## [1.332.2] - 2026-10-24
 
 The fixes a review of the v1.318.2 → v1.332.1 release found before it went to

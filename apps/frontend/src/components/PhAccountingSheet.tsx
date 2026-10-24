@@ -7,6 +7,7 @@ import { fmtMoney } from '../lib/format';
 import type { AcctEntryDetail, AcctTarget } from '../lib/accounting';
 import type { EntryPreset, FormTarget } from '../lib/accountingForm';
 import { useAccountingEntryForm, type SavedEntry } from '../lib/useAccountingEntryForm';
+import { AcctPendingAttachments } from './AcctAttachments';
 import '../styles/accounting.css';
 
 const PICK_LABEL = { po: 'acctFieldPo', so: 'acctFieldSo', as: 'acctFieldAs' } as const;
@@ -154,11 +155,9 @@ export function PhAccountingSheet({ preset, entry, onClose, onSaved }: {
           <input id={id('party')} className="input" value={form.counterparty} maxLength={200}
                  placeholder={t('acctCounterpartyPh')} onChange={e => f.setCounterparty(e.target.value)} />
         </div>
-        <div className="ph-field">
-          <label htmlFor={id('ref')}>{t('acctFieldReference')}</label>
-          <input id={id('ref')} className="input" value={form.reference} maxLength={200}
-                 placeholder={t('acctReferencePh')} onChange={e => f.set({ reference: e.target.value })} />
-        </div>
+        {!f.editing && (
+          <AcctPendingAttachments files={f.files} onAdd={f.addFiles} onRemove={f.removeFile} busy={f.busy} />
+        )}
         <div className="ph-field">
           <label htmlFor={id('note')}>{t('acctFieldNote')}</label>
           <textarea id={id('note')} className="input" rows={2} value={form.note} maxLength={2000}

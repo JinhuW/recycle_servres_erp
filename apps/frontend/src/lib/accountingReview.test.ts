@@ -89,7 +89,7 @@ describe('the review panel\'s words', () => {
     createdAt: '', updatedAt: '', createdBy: null, voided: null,
     review: { state: 'open', version: 'v', author: null, by: null, at: null, clearedAt: null, query: null },
     targetFacts: { id: 'PO-1', status: 'done', party: null, amount: 100, currency: 'USD', recordedCny: 700 },
-    checks: [], cleared: null, ...over,
+    checks: [], cleared: null, attachments: [], ...over,
   });
   const record = (verdict: 'matches' | 'over' | 'short', diffCny: number): AccountingCheck => ({
     kind: 'record', tone: verdict === 'matches' ? 'ok' : verdict === 'over' ? 'warn' : 'info',

@@ -2,6 +2,7 @@ import { ACCOUNTING_KINDS, ACCOUNTING_METHODS, KIND_TARGET, type AccountingKind,
 import { Modal } from '../../../components/Modal';
 import { Icon } from '../../../components/Icon';
 import { FIGURE_KEY, Yuan, recordActionKey, targetStatusLabel } from '../../../components/AccountingBits';
+import { AcctPendingAttachments } from '../../../components/AcctAttachments';
 import { useT } from '../../../lib/i18n';
 import { fmtMoney } from '../../../lib/format';
 import type { AcctEntryDetail, AcctTarget } from '../../../lib/accounting';
@@ -36,6 +37,13 @@ export function EntryDialog({ preset, entry, onClose, onSaved, zIndex }: {
         id="acct-entry-form"
         className="modal-body"
         onSubmit={e => { e.preventDefault(); void f.submit(); }}
+        // A screenshot is usually on the clipboard already. A paste with no
+        // image in it is left to the field it lands in.
+        onPaste={e => {
+          if (f.editing || f.busy) return;
+          const images = [...e.clipboardData.files].filter(x => x.type.startsWith('image/'));
+          if (images.length) { e.preventDefault(); f.addFiles(images); }
+        }}
       >
         {entry?.review?.state === 'reviewed' && (
           <div className="acct-banner">{t('acctEditClearsReview', { name: entry.review.by?.name ?? '—' })}</div>
@@ -165,11 +173,9 @@ function EntryFields({ f }: { f: AccountingEntryForm }) {
         </div>
       </div>
 
-      <div className="field">
-        <label className="label" htmlFor={id('ref')}>{t('acctFieldReference')}</label>
-        <input id={id('ref')} className="input" value={form.reference} maxLength={200}
-               placeholder={t('acctReferencePh')} onChange={e => f.set({ reference: e.target.value })} />
-      </div>
+      {!f.editing && (
+        <AcctPendingAttachments files={f.files} onAdd={f.addFiles} onRemove={f.removeFile} busy={f.busy} paste />
+      )}
       <div className="field">
         <label className="label" htmlFor={id('note')}>{t('acctFieldNote')}</label>
         <textarea id={id('note')} className="input" rows={2} value={form.note} maxLength={2000}
