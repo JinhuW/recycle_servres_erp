@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-394](./RS-394-facebook-workers-pull-cities-from-an-always-on-fleet.md) | backlog | story | P2 | Facebook workers pull cities from an always-on fleet queue in the ERP | — |
 | [RS-393](./RS-393-a-manager-can-start-the-city-round-now-instead-of-at.md) | done | story | P2 | A manager can start the city round now instead of at the workers' start time | v1.334.0, facebook-tracker 0.13.18 |
 | [RS-392](./RS-392-never-re-login-facebook-unless-necessary-the-first-r.md) | done | task | P2 | Never re-login Facebook unless necessary: the first rule in AGENTS.md | n/a — docs only, no release |
 | [RS-391](./RS-391-a-bank-funded-paypal-payment-leaves-pending-when-pay.md) | done | bug | P2 | A bank-funded PayPal payment leaves pending when PayPal settles it | 1.333.1 |
