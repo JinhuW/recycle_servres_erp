@@ -2,13 +2,13 @@
 id: RS-391
 title: A bank-funded PayPal payment leaves pending when PayPal settles it
 type: bug
-status: backlog
+status: done
 priority: P2
 created: 2026-10-24
 reporter: jinhu
 branch: JinhuW/bowhead
-pr:
-version:
+pr: 869
+version: 1.333.1
 related: [RS-386]
 ---
 
@@ -88,12 +88,12 @@ So one $2,800 was paid, but PO-1383 and PO-1463 each read paid $2,800.
 
 ## Acceptance criteria
 
-- [ ] A balance record still `P` takes the status of its latest `N` record:
+- [x] A balance record still `P` takes the status of its latest `N` record:
       `S` → settled, `D` → failed, `V` → settled. A `V` counts as settled
       because the payment did settle, and any return is its own credit row.
       With no later record it stays pending.
-- [ ] A balance record already `S` is never changed by a later `N` record.
-- [ ] Read-only dry runs against prod over the sync's real windows:
+- [x] A balance record already `S` is never changed by a later `N` record.
+- [x] Read-only dry runs against prod over the sync's real windows:
   - the stale rows settle;
   - the `T1501` hold stays pending;
   - no amount, link or other status changes.
