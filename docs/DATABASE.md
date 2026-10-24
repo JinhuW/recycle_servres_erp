@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-24:** ERP migration `0205`, Reddit tracker migration `0005`,
+**As of 2026-10-24:** ERP migration `0206`, Reddit tracker migration `0005`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -25,6 +25,7 @@ refresh a section.
   - [Accounting, banking and FX](#accounting-banking-and-fx)
   - [Market values](#market-values)
   - [Facebook account pool](#facebook-account-pool)
+  - [Fleet](#fleet)
   - [System](#system)
   - [SQL functions](#sql-functions)
 - [Reddit tracker database](#reddit-tracker-database)
@@ -2167,6 +2168,197 @@ A row for each proxy a manager has revived. A revive restarts the proxy's failed
 - **Indexes:** `fb_proxies_revived_by_idx` (revived_by)
 
 Only the latest revive is kept; the backend logs each one.
+
+### Fleet
+
+The ERP fleet: the city task queue the Facebook Marketplace workers pull from, and the slots they run pool accounts in. fleet_cities and fleet_items are the catalog managers edit; fleet_settings holds the queue's knobs; fleet_tasks is one open task per enabled city and item, with fleet_task_events as its log; fleet_hosts are the machines that run worker containers; fleet_slots is the fleet's view of each pool account (who runs it, where, under which lease epoch) and fleet_workers the containers that heartbeat. fleet_minutes is a view that sums each account's leased minutes per UTC day for the daily budget. The accounts themselves and their secrets stay in fb_pool_accounts. Migration 0206 creates all of it; the routes under /api/fleet fill it in later releases.
+
+Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_slots`](#erp-fleet-slots), [`fleet_workers`](#erp-fleet-workers), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
+
+<a id="erp-fleet-cities"></a>
+
+#### `fleet_cities`
+
+One row per Marketplace location the fleet searches. A city a manager adds starts disabled until a worker has verified its slug (a wrong slug searches the account's own city silently) or the manager overrides the check.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `slug` | `text` | ✓ |  | The Facebook location slug or numeric id in the Marketplace URL. |
+| `name` | `text` | ✓ |  | Display name. |
+| `radius_km` | `integer` | ✓ | `500` | Search radius. |
+| `region` | `text` |  |  | Region label from master.toml, for grouping. |
+| `enabled` | `boolean` | ✓ | `false` | True once verified or overridden; only enabled cities get tasks. |
+| `per_day` | `integer` |  |  | Searches per item per day; NULL follows per_day_default (and tiers later). |
+| `pinned` | `boolean` | ✓ | `false` | Kept at the top of the cities page. |
+| `verified_at` | `timestamptz` |  |  | When a worker confirmed the slug. |
+| `verified_as` | `text` |  |  | The location label Facebook showed; 'imported' for cities taken from master.toml. |
+| `added_by` | `uuid` |  |  | → users. The manager who added it; NULL for imports. |
+| `added_at` | `timestamptz` | ✓ | `now()` |  |
+| `disabled_at` | `timestamptz` |  |  | When a manager removed it; its open tasks are cancelled then. |
+
+- **Primary key:** `slug`
+- **References:** `added_by` → `users.id` (on delete set null)
+- **Indexes:** `fleet_cities_added_by_idx` (added_by)
+
+<a id="erp-fleet-items"></a>
+
+#### `fleet_items`
+
+What the fleet searches for in every city: the search phrases and filters of one item, as the monitor's config names them.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `name` | `text` | ✓ |  | The item's key, e.g. server_ram, enterprise_ssd. |
+| `phrases` | `jsonb` | ✓ |  | Search phrases, a JSON array of strings. |
+| `filters` | `jsonb` | ✓ | `'{}'` | Marketplace filters: date_listed, delivery_method, max_results and the like. |
+| `enabled` | `boolean` | ✓ | `true` | A disabled item gets no tasks and its open ones are cancelled. |
+
+- **Primary key:** `name`
+
+<a id="erp-fleet-settings"></a>
+
+#### `fleet_settings`
+
+The queue's knobs, one JSON value per key: per_day_default, budget_minutes, lease_minutes, task_max_minutes, poll_hold_seconds, familiar_days, start_fresh_hours, quarantine_hours, quarantine_probe_hours and search (the monitor's search parameters). A missing key means its default (packages/shared/src/fleet.ts, FLEET_SETTINGS_DEFAULTS).
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `key` | `text` | ✓ |  |  |
+| `value` | `jsonb` | ✓ |  | A number for the limits, an object for search. |
+| `updated_by` | `uuid` |  |  | → users. The manager who last changed it; NULL for an import. |
+| `updated_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `key`
+- **References:** `updated_by` → `users.id` (on delete set null)
+- **Indexes:** `fleet_settings_updated_by_idx` (updated_by)
+
+<a id="erp-fleet-hosts"></a>
+
+#### `fleet_hosts`
+
+A machine that runs worker containers through one fleet-agent container. The agent authenticates with a bearer token the ERP showed once when the host was added; only its sha256 is stored.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `host_id` | `text` | ✓ |  | The host's name, e.g. homelab, worker-60-14; worker ids are `<host_id>-<n>`. |
+| `token_hash` | `text` | ✓ |  | sha256 (hex) of the host's bearer token. |
+| `capacity` | `integer` | ✓ | `0` | How many workers the agent should run. |
+| `authoritative` | `boolean` | ✓ | `false` | False means observe only: the agent reports what runs and starts nothing. |
+| `version` | `text` |  |  | The agent's version from its last report. |
+| `last_seen_at` | `timestamptz` |  |  | The last report or desired-state read. |
+| `report` | `jsonb` |  |  | The agent's last report: its version and the containers it runs. |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `host_id`
+
+<a id="erp-fleet-slots"></a>
+
+#### `fleet_slots`
+
+The fleet's view of one pool account: which worker runs it, on which host, under which lease epoch. A worker claims a free slot at boot and the claim bumps the epoch; every later call carries it in the worker's token, and a token whose epoch is no longer the slot's is refused with 409, so one account never runs in two browsers. The login itself stays in fb_pool_accounts.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `account_no` | `integer` | ✓ |  | → fb_pool_accounts. The account's #. |
+| `worker_id` | `text` |  |  | The worker holding the slot; NULL when free. |
+| `host_id` | `text` |  |  | → fleet_hosts. Where it runs now. |
+| `last_host_id` | `text` |  |  | Where it last ran; a claim from that host is preferred, so an account keeps its machine. |
+| `epoch` | `integer` | ✓ | `0` | Bumped by every claim; the worker token names it. |
+| `lease_expires_at` | `timestamptz` |  |  | Renewed by heartbeats; NULL or past means the slot is free to claim. |
+| `proxy_url` | `text` |  |  | The account's sticky proxy, scheme://user:pass@host:port, sealed under FB_POOL_KEY (lib/sealed.ts); NULL = the host's own IP. |
+| `device` | `jsonb` |  |  | The browser profile the account always presents: user agent, viewport, timezone, locale, datr hints. |
+| `home_cities` | `jsonb` | ✓ | `'[]'` | City slugs this account searches first. |
+| `quarantined_until` | `timestamptz` |  |  | Set by the 0-card rule; while in the future the slot gets only probe tasks. |
+| `note` | `text` | ✓ | `''` | Free text for managers. |
+
+- **Primary key:** `account_no`
+- **References:** `account_no` → `fb_pool_accounts.no` (on delete cascade); `host_id` → `fleet_hosts.host_id` (on delete set null)
+- **Indexes:** `fleet_slots_host_id_idx` (host_id)
+
+<a id="erp-fleet-workers"></a>
+
+#### `fleet_workers`
+
+One row per worker container that has claimed a slot, kept current by its heartbeats. The Slots and Hosts pages read it next to fleet_slots.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `worker_id` | `text` | ✓ |  | `<host_id>-<n>`, chosen by the host agent. |
+| `host_id` | `text` |  |  | → fleet_hosts. |
+| `account_no` | `integer` |  |  | → fb_pool_accounts. The slot it holds. |
+| `epoch` | `integer` |  |  | The epoch it claimed. |
+| `state` | `text` |  |  | The monitor's state: HEALTHY, SESSION_EXPIRED, CHECKPOINT, CHALLENGE_*, DEGRADED, DEAD. A parked state releases the worker's task. |
+| `version` | `text` |  |  | The worker image's version. |
+| `last_heartbeat_at` | `timestamptz` |  |  |  |
+| `vnc_port` | `integer` |  |  | The host port the agent mapped for noVNC. |
+| `detail` | `jsonb` |  |  | Whatever the heartbeat carried: last search, page state. |
+
+- **Primary key:** `worker_id`
+- **References:** `account_no` → `fb_pool_accounts.no` (on delete set null); `host_id` → `fleet_hosts.host_id` (on delete cascade)
+- **Indexes:** `fleet_workers_account_no_idx` (account_no); `fleet_workers_host_id_idx` (host_id)
+
+<a id="erp-fleet-tasks"></a>
+
+#### `fleet_tasks`
+
+One search of one item in one city. The scheduler keeps exactly one open (ready or leased) task per city, item and kind; a worker leases the next due one, finishes it, and the scheduler writes the next with `due_at = done + day / per_day`. The partial unique index is what makes that safe from two backend instances.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | sequence |  |
+| `city` | `text` | ✓ |  | → fleet_cities. |
+| `item` | `text` | ✓ |  | → fleet_items. |
+| `kind` | `text` | ✓ | `'search'` | search, verify-slug (a new city's check) or probe (a quarantined slot's periodic test). |
+| `due_at` | `timestamptz` | ✓ |  | Not handed out before this. |
+| `priority` | `integer` | ✓ | `0` | Higher first; a manager's task is 100, a slug check 50. |
+| `state` | `text` | ✓ |  | ready, leased, done, cancelled or expired. |
+| `worker_id` | `text` |  |  | Who leased it. |
+| `account_no` | `integer` |  |  | The account it was searched with. No FK, so a removed account's history is kept. |
+| `epoch` | `integer` |  |  | The lease epoch of the worker that took it. |
+| `leased_at` | `timestamptz` |  |  |  |
+| `lease_expires_at` | `timestamptz` |  |  | Renewed by HEALTHY heartbeats; past it the task is expired and re-queued. |
+| `started_at` | `timestamptz` |  |  | When the worker reported the search began. |
+| `done_at` | `timestamptz` |  |  |  |
+| `reason` | `text` |  |  | Why it exists: cadence, added (a new city), manual, start (a round start), probe or verify. |
+| `result` | `jsonb` |  |  | What the search found: cards, opened, reviewed, alerted, seconds, stopped. |
+
+- **Primary key:** `id`
+- **References:** `city` → `fleet_cities.slug`; `item` → `fleet_items.name`
+- **Checks:** `state IN ('ready', 'leased', 'done', 'cancelled', 'expired')`
+- **Indexes:** `fleet_tasks_due_idx` (state, due_at); `fleet_tasks_item_idx` (item); `fleet_tasks_open_idx` UNIQUE (city, item, kind) WHERE state IN ('ready', 'leased'); `fleet_tasks_worker_idx` (worker_id, leased_at DESC)
+
+The scheduler sends `NOTIFY fleet_tasks` (payload: the item) after every write that can make a task ready; a worker's held next-task poll listens on it.
+
+<a id="erp-fleet-task-events"></a>
+
+#### `fleet_task_events`
+
+What happened to a task, in order: the city log the fleet pages show.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | sequence |  |
+| `task_id` | `bigint` |  |  | → fleet_tasks. |
+| `worker_id` | `text` |  |  | The worker that reported it; NULL for the scheduler's own (expired). |
+| `kind` | `text` | ✓ |  | handed, started, searched, finished, stopped, released, expired or done. |
+| `detail` | `jsonb` |  |  | Per kind: the result for done, the parked state for released, the cards seen for searched. |
+| `at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `task_id` → `fleet_tasks.id` (on delete cascade)
+- **Indexes:** `fleet_task_events_task_idx` (task_id, at)
+
+<a id="erp-fleet-minutes"></a>
+
+#### `fleet_minutes` (view)
+
+Each account's leased minutes per UTC day, from fleet_tasks: the time from `leased_at` to `done_at`, or to the lease's end (capped at now) for a task still open. The next-task pick skips an account whose day is at budget_minutes.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `account_no` | `integer` | The account. |
+| `day` | `date` | The UTC day the lease began. |
+| `minutes` | `numeric` | Leased minutes that day. |
 
 ### System
 

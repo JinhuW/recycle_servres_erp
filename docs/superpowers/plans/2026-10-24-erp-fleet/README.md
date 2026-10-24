@@ -85,7 +85,7 @@ E join as they land.
 
 | WS | Status | PR | Notes |
 | --- | --- | --- | --- |
-| A | not started | | |
+| A | A1 merged; A2 not started | #875 | migration landed as `0206_fleet.sql` (0205 was taken); `GET /api/fleet/health` is manager scope; worker-token key derives from `JWT_SECRET` outside production |
 | B | not started | | |
 | C | not started | | |
 | D | merged | #877 | v1.335.0; `apps/fleet-agent` with planner, docker CLI and agent tests, Dockerfile, README; live Docker check passed locally against a mock ERP; the check against the dev backend is F's integration step |

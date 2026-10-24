@@ -1,0 +1,123 @@
+import { createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
+import type { MiddlewareHandler } from 'hono';
+import { every } from 'hono/combine';
+import type { FleetWorkerTokenClaims } from '@recycle-erp/shared';
+import { authMiddleware } from '../auth';
+import { getDb } from '../db';
+import { requireManager } from '../lib/role';
+import type { Env, User } from '../types';
+import { loadHostByTokenHash, loadSlot, sha256hex, type FleetHostRow, type FleetSlotRow } from './sql';
+
+// ─── Fleet auth scopes ────────────────────────────────────────────────────────
+// Three callers reach /api/fleet: a manager in the browser (session cookie), a
+// host agent (a bearer whose sha256 is on its fleet_hosts row) and a worker (a
+// bearer the ERP minted at claim time). The worker token is not a session: it
+// names the slot's lease epoch, and a slot re-claimed elsewhere moves on to the
+// next epoch, so the old worker's every call is refused with 409 and it exits.
+// That is what keeps one Facebook account off two browsers at once.
+
+export type ManagerEnv = { Bindings: Env; Variables: { user: User } };
+export type HostEnv = { Bindings: Env; Variables: { host: FleetHostRow } };
+export type WorkerEnv = { Bindings: Env; Variables: { worker: WorkerIdentity } };
+
+/** The verified token plus the slot it names, as the row stands at this call. */
+export type WorkerIdentity = FleetWorkerTokenClaims & { slot: FleetSlotRow };
+
+export const WORKER_TOKEN_DAYS = 7;
+
+const UNAUTHORIZED = { error: 'unauthorized' } as const;
+
+/** Session cookie plus the manager role, the way routes/coordinator.ts gates itself. */
+export const managerOnly: MiddlewareHandler<ManagerEnv> = every(authMiddleware, requireManager);
+
+function bearer(header: string | undefined): string | null {
+  const m = header?.match(/^Bearer\s+(\S+)\s*$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * The HMAC key behind worker tokens, or null when production has none: the
+ * worker routes then answer 401 and say which variable is missing, while the
+ * rest of the app boots as usual. Outside production the key is derived from
+ * JWT_SECRET, as the pool's sealing key is, so dev and CI need no extra
+ * variable.
+ */
+export function workerTokenKey(env: Env): Buffer | null {
+  const raw = env.FLEET_WORKER_TOKEN_KEY?.trim();
+  if (raw) return Buffer.from(raw, 'hex');
+  if (env.NODE_ENV === 'production') return null;
+  return Buffer.from(hkdfSync('sha256', env.JWT_SECRET, '', 'fleet-worker-token', 32));
+}
+
+const hmac = (key: Buffer, payload: string): Buffer => createHmac('sha256', key).update(payload).digest();
+
+/** `base64url(json) . base64url(hmac)`; `exp` is Unix seconds. */
+export function signWorkerToken(claims: FleetWorkerTokenClaims, key: Buffer): string {
+  const payload = Buffer.from(JSON.stringify(claims), 'utf8').toString('base64url');
+  return `${payload}.${hmac(key, payload).toString('base64url')}`;
+}
+
+/** The claims of a token this key signed and that has not expired; null otherwise. */
+export function verifyWorkerToken(
+  token: string,
+  key: Buffer,
+  now: Date = new Date(),
+): FleetWorkerTokenClaims | null {
+  const parts = token.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  const [payload, sig] = parts;
+  const given = Buffer.from(sig, 'base64url');
+  const expected = hmac(key, payload);
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+  let claims: unknown;
+  try {
+    claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+  if (!claimsShaped(claims)) return null;
+  if (claims.exp * 1000 <= now.getTime()) return null;
+  return claims;
+}
+
+function claimsShaped(v: unknown): v is FleetWorkerTokenClaims {
+  if (typeof v !== 'object' || v === null) return false;
+  const c = v as Record<string, unknown>;
+  return typeof c.worker_id === 'string' && c.worker_id.length > 0
+    && Number.isInteger(c.account_no)
+    && Number.isInteger(c.epoch)
+    && typeof c.exp === 'number' && Number.isFinite(c.exp);
+}
+
+/**
+ * A host agent's bearer. The stored hash is the lookup key, so a token never
+ * sits in the database; a route with an `:id` must be the token's own host.
+ */
+export const hostAuth: MiddlewareHandler<HostEnv> = async (c, next) => {
+  const token = bearer(c.req.header('Authorization'));
+  if (!token) return c.json(UNAUTHORIZED, 401);
+  const host = await loadHostByTokenHash(getDb(c.env), sha256hex(token));
+  if (!host) return c.json(UNAUTHORIZED, 401);
+  const id = c.req.param('id');
+  if (id !== undefined && id !== host.host_id) return c.json(UNAUTHORIZED, 401);
+  c.set('host', host);
+  return next();
+};
+
+/**
+ * A worker's bearer. A bad or expired token is 401; a good token whose epoch
+ * is no longer the slot's (or whose slot is gone) is 409 stale_epoch on every
+ * route, which the worker reads as "exit, let the agent claim again".
+ */
+export const workerAuth: MiddlewareHandler<WorkerEnv> = async (c, next) => {
+  const key = workerTokenKey(c.env);
+  if (!key) return c.json({ ...UNAUTHORIZED, detail: 'FLEET_WORKER_TOKEN_KEY is not set' }, 401);
+  const token = bearer(c.req.header('Authorization'));
+  if (!token) return c.json(UNAUTHORIZED, 401);
+  const claims = verifyWorkerToken(token, key);
+  if (!claims) return c.json(UNAUTHORIZED, 401);
+  const slot = await loadSlot(getDb(c.env), claims.account_no);
+  if (!slot || slot.epoch !== claims.epoch) return c.json({ error: 'stale_epoch' }, 409);
+  c.set('worker', { ...claims, slot });
+  return next();
+};
