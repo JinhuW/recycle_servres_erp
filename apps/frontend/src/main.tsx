@@ -19,6 +19,15 @@ installChunkReload();
 // Records how long this load actually took. Reports once, after `load`.
 installTiming();
 
+// iOS zooms into any focused field under 16px (the phone shell's are 14px) and
+// never zooms back out; maximum-scale stops that, and Safari still lets a pinch
+// past it. Android never focus-zooms but takes the cap as a pinch lock, so it
+// keeps the uncapped viewport. iPadOS reports itself as a Mac.
+const ua = navigator.userAgent;
+if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) {
+  document.querySelector<HTMLMetaElement>('meta[name="viewport"]')!.content += ', maximum-scale=1';
+}
+
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element missing');
 

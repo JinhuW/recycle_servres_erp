@@ -3552,6 +3552,11 @@ removed in v1.191.0.
   720px loads the phone shell, which has no sell-order routes.
 - The mobile shell is a **PWA** with install onboarding, a service worker and a
   share target, scoped to mobile only (v0.1.1).
+- **Tapping into a field no longer zooms the page on an iPhone or iPad**
+  (v1.332.1). iOS zooms into any focused field under 16px and stays zoomed,
+  and every field on the phone is 14px. On iOS alone, the viewport now caps
+  the scale; Safari still lets a pinch go past it. Elsewhere the viewport
+  stays uncapped, so the phone can still be pinch-zoomed (v1.258.7).
 - Mobile PO lists colour-code warehouse, status and owner with stable hashed
   hues (v0.1.3).
 - On mobile, the PO edit screen **docks the four category add-targets above the
