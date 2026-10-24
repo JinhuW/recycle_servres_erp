@@ -175,6 +175,9 @@ def _take_directives(worker_id: str) -> list[str]:
     if deps.db.take_restore(worker_id):
         directives.append("restore")
         logger.info("Delivered session-restore directive to worker %s", worker_id)
+    if deps.db.take_sweep(worker_id):
+        directives.append("sweep")
+        logger.info("Delivered sweep directive to worker %s", worker_id)
     return directives
 
 

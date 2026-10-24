@@ -9,7 +9,7 @@ on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
 **As of 2026-10-24:** ERP migration `0205`, Reddit tracker migration `0005`,
-Facebook tracker `0.13.17`. *Keeping this file current* at the end says how to
+Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
 - [Overview](#overview)
@@ -3106,14 +3106,15 @@ Pruned to 14 days on each insert. Read by `GET /v1/city-log` and `rsc queue log`
 
 #### `queue_config`
 
-The city queue's two JSON documents: `settings` and `roster`.
+The city queue's JSON documents: `settings`, `roster` and `start`.
 
 - **`settings`** holds only the keys someone set, through `rsc queue` or `PUT /v1/queue/settings`. The rest come from `city_queue.DEFAULTS`. The keys are `enrolled`, `regions`, `partners`, `per_day`, `budget_minutes`, `window_hours` and the others listed there.
 - **`roster`** is what the console last pushed: the catalog with each city's region and radius, the enabled search items, and each worker's home cities, partner key, `start_at` and phrase count.
+- **`start`** is the last round started by hand (`POST /v1/queue/start`, `rsc queue start`): `{at, by}`. For `window_hours` from `at`, every enrolled worker's window is open and a city is due once it was not searched in the last `start_fresh_hours`. Afterwards the row is inert until the next start replaces it.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
-| `key` | `text` | ✓ |  | 'settings' or 'roster'. |
+| `key` | `text` | ✓ |  | 'settings', 'roster' or 'start'. |
 | `body` | `text` | ✓ |  | The JSON document. |
 | `updated_at` | `text` | ✓ |  |  |
 | `updated_by` | `text` |  |  | 'rsc', 'rs-console', or who saved it through the API. |
@@ -3434,6 +3435,7 @@ One worker's latest reported health, upserted by each heartbeat (`POST /v1/heart
 | `relogin_requested_at` | `text` |  |  | Set when an operator presses Re-login; cleared when the worker's next heartbeat or directive poll takes it. |
 | `relogin_last_requested_at` | `text` |  |  | The same stamp, kept after pickup so the ERP can tell a queued re-login from one under way. |
 | `restore_requested_at` | `text` |  |  | Set by the ERP's cookie-first assign to restore the seeded snapshot now; cleared on pickup. |
+| `sweep_requested_at` | `text` |  |  | Set when a manager starts the city round by hand, for each worker that can start a sweep on a directive; cleared when its directive poll picks it up. |
 | `login_step` | `text` |  |  | Where the latest login has got to: picked_up, typing, submitted, challenge, waiting_for_human, logged_in or failed (free text, up to 32 chars). |
 | `login_step_at` | `text` |  |  | When login_step was reached, as the worker reported it. |
 | `host_id` | `text` |  |  | Docker host the worker reports running on (RS_HOST_ID). |

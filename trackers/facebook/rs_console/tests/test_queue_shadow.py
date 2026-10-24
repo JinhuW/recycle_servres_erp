@@ -295,3 +295,30 @@ def test_one_worker_and_everyone_go_in_and_out_of_the_queue(client):
     assert json.loads(first.content) == {"enrolled": ["*"], "updated_by": None}
     assert json.loads(second.content) == {"enrolled": [], "updated_by": "Alex"}
     assert client.put("/v1/queue/everyone", json=[1], headers=AUTH).status_code == 400
+
+
+def test_the_round_starts_now_through_the_console(client):
+    assert client.post("/v1/queue/start", json={}).status_code == 401
+    assert client.get("/v1/queue/start", headers=AUTH).status_code == 200
+    res = client.post(
+        "/v1/queue/start", json={"updated_by": " Alex Chen ", "at": "2020-01-01"}, headers=AUTH
+    )
+    assert res.status_code == 200
+    preview, start = client.calls
+    assert (preview.method, preview.url.path) == ("GET", "/v1/queue/start")
+    assert (start.method, start.url.path) == ("POST", "/v1/queue/start")
+    assert json.loads(start.content) == {"updated_by": "Alex Chen"}
+
+
+def test_the_fleet_carries_a_started_round_only_from_a_coordinator_that_has_one():
+    from rs_console import fleet
+
+    status = {"at": "x", "items": {}, "cities": [], "workers": []}
+    doc = {"workers": []}
+    fleet.apply_queue(doc, status)
+    assert "started" not in doc["queue"]
+    fleet.apply_queue(doc, {**status, "started": None})
+    assert doc["queue"]["started"] is None
+    started = {"at": "2026-10-24T08:00:00+00:00", "by": "Alex Chen", "until": "x", "fresh_hours": 2}
+    fleet.apply_queue(doc, {**status, "started": started})
+    assert doc["queue"]["started"] == started

@@ -67,6 +67,9 @@ DEFAULTS: Dict[str, Any] = {
     "early": 0.15,
     # How long an idle worker waits before asking again.
     "poll_minutes": 15,
+    # A round started by hand (`start_round`) hands out every city not
+    # searched this recently, instead of waiting for it to fall due.
+    "start_fresh_hours": 2,
     # A partner's recent cities stay off limits this long.
     "partner_days": 7,
     # A partner that finished this recently still counts as busy.
@@ -88,6 +91,7 @@ _LIMITS: Dict[str, Tuple[float, float, bool]] = {
     "quarantine_hours": (1, 336, True),
     "early": (0, 0.9, False),
     "poll_minutes": (1, 120, True),
+    "start_fresh_hours": (0.5, 24, False),
     "partner_days": (0, 14, True),
     "partner_gap_minutes": (0, 240, True),
     "familiar_days": (0, 14, True),
@@ -104,6 +108,8 @@ EVERY_WORKER = "*"
 # The first monitor that asks the queue; an older one searches its own list
 # whatever the settings say.
 QUEUE_SINCE = (0, 13, 14)
+# The first monitor a `sweep` directive wakes; an older one ignores it.
+SWEEP_SINCE = (0, 13, 18)
 _VERSION = re.compile(r"^\s*(\d+)\.(\d+)\.(\d+)")
 # A city unsearched for longer than this missed a day.
 GAP_ALERT_HOURS = 26
@@ -308,11 +314,47 @@ def enrolled(worker_id: str, settings: Mapping[str, Any]) -> bool:
     return EVERY_WORKER in settings["enrolled"] or worker_id in settings["enrolled"]
 
 
+def _runs(row: Optional[Mapping[str, Any]], since: Tuple[int, int, int]) -> bool:
+    match = _VERSION.match(str((row or {}).get("version") or ""))
+    return bool(match) and tuple(int(g) for g in match.groups()) >= since
+
+
 def capable(row: Optional[Mapping[str, Any]]) -> bool:
     """Whether a worker's monitor asks the queue: the version it last
     reported ("0.13.14 (93e2566)") is QUEUE_SINCE or later."""
-    match = _VERSION.match(str((row or {}).get("version") or ""))
-    return bool(match) and tuple(int(g) for g in match.groups()) >= QUEUE_SINCE
+    return _runs(row, QUEUE_SINCE)
+
+
+def sweeps(row: Optional[Mapping[str, Any]]) -> bool:
+    """Whether a worker's monitor starts a sweep on a `sweep` directive."""
+    return _runs(row, SWEEP_SINCE)
+
+
+def with_start(
+    settings: Mapping[str, Any], start: Optional[Mapping[str, Any]], now: float
+) -> Dict[str, Any]:
+    """The settings as a round started by hand leaves them while it runs: a
+    window's length from its start. `started` then opens every enrolled
+    worker's window, and a city is due once it was not searched in the last
+    `start_fresh_hours`."""
+    out = dict(settings)
+    if not start:
+        return out
+    at = _ts(start["at"])
+    until = at + settings["window_hours"] * 3600
+    if at <= now < until:
+        out["started"] = {
+            "at": start["at"],
+            "by": start.get("by"),
+            "until": _iso(until),
+            "fresh_hours": settings["start_fresh_hours"],
+        }
+    return out
+
+
+def _fresh(settings: Mapping[str, Any]) -> Optional[float]:
+    """Seconds a city stays not due after a search, while a started round runs."""
+    return settings["start_fresh_hours"] * 3600 if settings.get("started") else None
 
 
 def per_day_map(
@@ -454,6 +496,7 @@ def pick(
     mine = state.worker_visits.get(worker_id, {})
     familiar_since = now - settings["familiar_days"] * DAY
     due_at = 1 - settings["early"]
+    fresh = _fresh(settings)
 
     best: Optional[Tuple[Tuple[int, float, str], str]] = None
     for city, region in fleet.region.items():
@@ -462,7 +505,11 @@ def pick(
         if city in fleet.held and city not in home:
             continue
         ratio = overdue(city, now, fleet, state)
-        if ratio < due_at:
+        if fresh is not None:
+            last = state.last_visit.get(city)
+            if last is not None and now - last < fresh:
+                continue
+        elif ratio < due_at:
             continue
         group = 0 if city in home else 1 if mine.get(city, -math.inf) >= familiar_since else 2
         key = (group, -ratio, city)
@@ -726,7 +773,7 @@ def next_city(
     """
     if not enrolled(worker_id, settings):
         return {"queue": False}
-    if not in_window(start_at, now, settings["window_hours"]):
+    if not settings.get("started") and not in_window(start_at, now, settings["window_hours"]):
         return {"queue": True, "city": None, "reason": "outside_window"}
     blind = _blind(live, now, settings)
     if worker_id in blind:
@@ -832,6 +879,7 @@ def queue_status(now: float, settings: Mapping[str, Any], live: Live) -> Dict[st
         for slug, meta in roster.cities.items()
     }
     counts = {}
+    fresh = _fresh(settings)
     for item in items:
         state = live_state(item, now, live.searches, _seeded(live), live.leases, blind)
         last_by = _last_by(item, now, live, blind)
@@ -851,9 +899,12 @@ def queue_status(now: float, settings: Mapping[str, Any], live: Live) -> Dict[st
             elif slug in holder:
                 row = {"state": "held", "at": _iso(at) if at else None, "by": holder[slug]}
             else:
-                due_at = (
-                    None if last is None else last + DAY / per_day[slug] * (1 - settings["early"])
-                )
+                if last is None:
+                    due_at = None
+                elif fresh is not None:
+                    due_at = last + fresh
+                else:
+                    due_at = last + DAY / per_day[slug] * (1 - settings["early"])
                 if due_at is None or now >= due_at:
                     row = {"state": "due", "at": _iso(at) if at else None, "by": by}
                 elif _day(last) == today:
@@ -895,7 +946,8 @@ def queue_status(now: float, settings: Mapping[str, Any], live: Live) -> Dict[st
         )
     return {
         "at": _iso(now),
-        "settings": {k: v for k, v in settings.items() if k != "tiers"},
+        "settings": {k: v for k, v in settings.items() if k not in ("tiers", "started")},
+        "started": settings.get("started"),
         "everyone": EVERY_WORKER in settings["enrolled"],
         "items": counts,
         "cities": list(cities.values()),
@@ -966,6 +1018,59 @@ def enroll(db: Any, worker_id: str, on: bool, by: Optional[str]) -> Dict[str, An
     if worker_id not in current:
         return settings
     return save_settings(db, {"enrolled": sorted(current - {worker_id})}, by)
+
+
+def load_start(db: Any) -> Optional[Dict[str, Any]]:
+    """The last round started by hand, {at, by}, whether or not it still runs."""
+    stored = db.queue_config("start")
+    return dict(stored["body"]) if stored else None
+
+
+def start_preview(now: float, settings: Mapping[str, Any], live: Live) -> Dict[str, Any]:
+    """What starting the round now would do.
+
+    `wake`: the enrolled workers a `sweep` directive starts now (HEALTHY, not
+    dead, not quarantined, on SWEEP_SINCE or later). `older`: the others that
+    would search, on a monitor that ignores the directive, so they start at
+    their usual time. And per item, how many queue cities would be due.
+    """
+    up = availability(live.worker_rows, [], datetime.fromtimestamp(now, timezone.utc))
+    rows = {r["worker_id"]: r for r in live.worker_rows}
+    blind = set(_blind(live, now, settings))
+    wake: List[str] = []
+    older: List[str] = []
+    for wid in sorted(set(live.roster.workers) | set(rows)):
+        row = rows.get(wid)
+        if not enrolled(wid, settings) or not capable(row) or wid in blind or not up(wid, now):
+            continue
+        (wake if sweeps(row) else older).append(wid)
+    hypothetical = with_start(settings, {"at": _iso(now)}, now)
+    round_now = queue_status(now, hypothetical, live)
+    return {
+        "wake": wake,
+        "older": older,
+        "items": {
+            item: {"due": c["due"], "queue": c["queue"], "leased": c["leased"]}
+            for item, c in round_now["items"].items()
+        },
+        "fresh_hours": settings["start_fresh_hours"],
+        "window_hours": settings["window_hours"],
+        "until": hypothetical["started"]["until"],
+        "started": settings.get("started"),
+    }
+
+
+def start_round(db: Any, now: datetime, by: Optional[str]) -> Dict[str, Any]:
+    """Start the round now: store when and who, and wake the workers that a
+    `sweep` directive starts. The preview, with `started` filled in."""
+    settings = load_settings(db)
+    preview = start_preview(now.timestamp(), settings, load_live(db, now, settings))
+    start = {"at": _stamp(now), "by": by}
+    db.put_queue_config("start", start, by)
+    for wid in preview["wake"]:
+        db.request_sweep(wid)
+    preview["started"] = with_start(settings, start, now.timestamp())["started"]
+    return preview
 
 
 def load_roster(db: Any) -> Roster:

@@ -852,6 +852,29 @@ docker exec rs-coordinator rsc queue show
 `rsc queue set` stores only the keys you give it, so a default changed in
 code still reaches every key nobody set.
 
+**Starting the round now.** A manager can start the round at any time instead
+of waiting for the workers' start times: the round card's **Start the round
+now**, or `rsc queue start`. The start is stored as `queue_config` `start`
+(`{at, by}`). For a window's length from then:
+
+- every enrolled worker's window is open, whatever its `start_at`;
+- a city is due once it was not searched in the last `start_fresh_hours` (2 by
+  default), not after the usual 12 h;
+- the budget, leases, held cities and quarantine apply as usual.
+
+The coordinator also queues a `sweep` directive for each enrolled worker that
+is HEALTHY, live, not quarantined and on 0.13.18 or later. The worker's
+directive poll picks it up within about 10 s, and its idle loop runs every
+search job at once, with no restart. A worker on an older monitor ignores the
+directive and starts at its usual time. The scheduled start times still run
+afterwards; a city the started round searched is simply not due yet.
+
+```bash
+docker exec rs-coordinator rsc queue start --dry-run   # who would start, and how much is due
+docker exec rs-coordinator rsc queue start             # start it
+docker exec rs-coordinator rsc queue set start_fresh_hours=4
+```
+
 **City log.** Every city a worker searches is logged in `city_events`, from
 its start to its end, queue or not. The coordinator writes the steps it sees
 itself:

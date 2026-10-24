@@ -489,6 +489,45 @@ describe('City queue (PUT /api/coordinator/workers/:id/queue, /queue/everyone)',
   });
 });
 
+describe('Start the round (GET/POST /api/coordinator/queue/start)', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('requires a manager', async () => {
+    const spy = stubFacade(200, {});
+    expect((await api('POST', '/api/coordinator/queue/start', { body: {} })).status).toBe(401);
+    const { token } = await loginAs(MARCUS);
+    expect((await api('GET', '/api/coordinator/queue/start', { token, env: ENV })).status).toBe(403);
+    expect((await api('POST', '/api/coordinator/queue/start', { token, env: ENV, body: {} })).status).toBe(403);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('forwards the preview, and a start signed by the session only', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubFacade(200, { wake: ['nyc-1'], older: [], items: {}, started: null });
+    const preview = await api<{ wake: string[] }>('GET', '/api/coordinator/queue/start', { token, env: ENV });
+    expect(preview.status).toBe(200);
+    expect(preview.body.wake).toEqual(['nyc-1']);
+    expect((spy.mock.calls[0] as [string])[0]).toBe('http://facade.internal:8600/v1/queue/start');
+
+    const r = await api('POST', '/api/coordinator/queue/start', {
+      token, env: ENV, body: { updated_by: 'someone else', at: '2020-01-01' },
+    });
+    expect(r.status).toBe(200);
+    const [url, init] = spy.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe('http://facade.internal:8600/v1/queue/start');
+    expect(init.method).toBe('POST');
+    const sent = JSON.parse(init.body as string);
+    expect(Object.keys(sent)).toEqual(['updated_by']);
+    expect(sent.updated_by).not.toBe('someone else');
+  });
+});
+
 describe('City log (GET /api/coordinator/city-log)', () => {
   beforeEach(async () => {
     await resetDb();

@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal } from '../../components/Modal';
-import { coordinatorApi, type FleetAccount, type FleetDoc, type QueueCityState } from '../../lib/coordinator';
+import { FormSkeleton } from '../../components/Skeleton';
+import {
+  coordinatorApi, type FleetAccount, type FleetDoc, type QueueCityState, type QueueStartPreview,
+} from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
-import { queueCityName, queueRound, queueSummary, type RoundCell } from '../../lib/fleetView';
+import { queueCityName, queueRound, queueStartedNow, queueSummary, type RoundCell } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 import { CityLogModal } from './FleetCityLog';
 import type { Translate } from '../../lib/orderPresentation';
@@ -12,7 +15,8 @@ import '../../styles/facebookPool.css';
 // Enrolled workers ask the coordinator for each city instead of walking their
 // own lists. Today's round opens the Fleet tab: one mark per city per item, in
 // the order the round runs, so "is today's work done?" is answered before the
-// worker list is read; a city's name opens its log (FleetCityLog.tsx). The
+// worker list is read; a city's name opens its log (FleetCityLog.tsx), and a
+// manager can start the round now instead of at the workers' start times. The
 // worker page says what one worker took and moves it in or out of the queue.
 
 const CELL_TITLE: Record<QueueCityState, string> = {
@@ -63,6 +67,7 @@ function roundSentence(t: Translate, counts: ReturnType<typeof queueRound>['coun
 export function RoundCard({ fleet, onSaved }: { fleet: FleetDoc | null; onSaved: () => void }) {
   const { t, locale } = useT();
   const [asking, setAsking] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [logOf, setLogOf] = useState<{ slug: string; name: string } | null>(null);
   const queue = fleet?.queue;
   const summary = fleet ? queueSummary(fleet) : null;
@@ -87,19 +92,33 @@ export function RoundCard({ fleet, onSaved }: { fleet: FleetDoc | null; onSaved:
     window: s.window_hours,
   });
   const queueCities = queue.cities.filter(c => items.some(i => c.items[i]?.state !== 'held'));
+  const started = queueStartedNow(queue);
 
   return (
     <section className="card ff-round" aria-labelledby="ff-round-title">
       <div className="card-head">
         <h2 className="card-title" id="ff-round-title">{t('fbcRoundTitle')}</h2>
-        <button type="button" className="btn sm" onClick={() => setAsking(true)}>
-          {t(summary.everyone ? 'fbcQueueNoOne' : 'fbcQueueEveryone')}
-        </button>
+        <div className="ff-round-actions">
+          {/* Absent against a coordinator that cannot start a round by hand. */}
+          {queue.started !== undefined && (
+            <button type="button" className="btn sm primary" onClick={() => setStarting(true)}>
+              {t('fbcRoundStartNow')}
+            </button>
+          )}
+          <button type="button" className="btn sm" onClick={() => setAsking(true)}>
+            {t(summary.everyone ? 'fbcQueueNoOne' : 'fbcQueueEveryone')}
+          </button>
+        </div>
       </div>
       <div className="ff-round-body">
         <p className="ff-round-lede">
           {who}
           <span className="ff-round-rules"> {rules}</span>
+          {started && (
+            <span className="ff-round-started"> {t('fbcRoundStartedLine', {
+              by: started.by ?? t('fbcRoundSomeone'), time: when(started.at, locale), until: when(started.until, locale),
+            })}</span>
+          )}
         </p>
         {queue.cities.length === 0 || items.length === 0
           ? <p className="fp-muted">{t('fbcRoundNoRoster')}</p>
@@ -163,12 +182,75 @@ export function RoundCard({ fleet, onSaved }: { fleet: FleetDoc | null; onSaved:
             )}
           </>}
       </div>
+      {starting && (
+        <StartRoundModal onClose={() => setStarting(false)} onSaved={() => { setStarting(false); onSaved(); }} />
+      )}
       {logOf && <CityLogModal slug={logOf.slug} name={logOf.name} onClose={() => setLogOf(null)} />}
       {asking && (
         <EveryoneModal everyone={summary.everyone} older={summary.older}
           onClose={() => setAsking(false)} onSaved={() => { setAsking(false); onSaved(); }} />
       )}
     </section>
+  );
+}
+
+// Start the round now. The preview names what that does before anything does
+// it: who starts, who waits for its usual time, and how much is due.
+function StartRoundModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { t, locale } = useT();
+  const [preview, setPreview] = useState<QueueStartPreview | null | 'failed'>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    coordinatorApi.queueStartPreview().then(setPreview).catch(e => { handleFetchError(e); setPreview('failed'); });
+  }, []);
+  const ready = preview !== null && preview !== 'failed' ? preview : null;
+
+  async function confirm() {
+    if (busy || !ready) return;
+    setBusy(true);
+    try {
+      const done = await coordinatorApi.startQueueRound();
+      showSuccessToast(t('fbcRoundStartDone', { n: done.wake.length }));
+      onSaved();
+    } catch (e) {
+      handleFetchError(e);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 520 }}>
+      <div className="modal-head">
+        <div><div className="modal-title">{t('fbcRoundStartTitle')}</div></div>
+      </div>
+      <div className="modal-body ff-round-start">
+        {preview === null ? <FormSkeleton fields={3} />
+          : preview === 'failed' ? <p className="fp-warn">{t('fbcRoundStartFailed')}</p>
+          : <>
+            <p>{preview.wake.length ? t('fbcRoundStartWake', { n: preview.wake.length }) : t('fbcRoundStartWakeNone')}</p>
+            {preview.older.length > 0 && (
+              <p className="fp-warn">{t('fbcRoundStartOlder', { n: preview.older.length, ids: preview.older.join(', ') })}</p>
+            )}
+            <ul className="ff-round-start-due">
+              {Object.entries(preview.items).map(([item, c]) => (
+                <li key={item}><span className="mono">{item}</span> {t('fbcRoundStartDue', { due: c.due, queue: c.queue })}</li>
+              ))}
+            </ul>
+            <p className="fp-muted">{t('fbcRoundStartNote', { fresh: preview.fresh_hours, until: when(preview.until, locale) })}</p>
+            {preview.started && (
+              <p className="fp-muted">{t('fbcRoundStartAgain', {
+                by: preview.started.by ?? t('fbcRoundSomeone'), time: when(preview.started.at, locale),
+              })}</p>
+            )}
+          </>}
+      </div>
+      <div className="modal-foot">
+        <button type="button" className="btn" onClick={onClose} disabled={busy}>{t('cancel')}</button>
+        <button type="button" className="btn primary" onClick={confirm} disabled={busy || !ready || ready.wake.length === 0}>
+          {t('fbcRoundStartConfirm')}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
