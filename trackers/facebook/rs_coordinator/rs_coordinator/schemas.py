@@ -290,6 +290,41 @@ class ReviewStatsReport(BaseModel):
     search_city: str | None = None
     # The item that search was for; workers before the city queue leave it out.
     item: str | None = None
+    # The phrase typed into Marketplace, for the city log; older workers leave
+    # it out.
+    search_phrase: str | None = Field(default=None, max_length=200)
+
+
+class CityEventReport(BaseModel):
+    """A step of one city on one worker that only the monitor sees: it began
+    the city, finished it (with the city's counts), or stopped part-way.
+
+    Counts are left out, not zero, where they do not apply, so a stored
+    `started` carries only what it said.
+    """
+
+    item: str = Field(min_length=1, max_length=120)
+    city: str = Field(min_length=1, max_length=120)
+    event: Literal["started", "finished", "stopped"]
+    via: Literal["queue", "own"] | None = None
+    radius: int | None = Field(default=None, ge=0, le=1000)
+    # Searches planned (started) or run (finished, stopped), and planned
+    # (`of`) for a city that stopped.
+    searches: int | None = Field(default=None, ge=0, le=1000)
+    of: int | None = Field(default=None, ge=0, le=1000)
+    cards: int | None = Field(default=None, ge=0, le=100000)
+    title_pass: int | None = Field(default=None, ge=0, le=100000)
+    opened: int | None = Field(default=None, ge=0, le=100000)
+    keyword_pass: int | None = Field(default=None, ge=0, le=100000)
+    fresh: int | None = Field(default=None, ge=0, le=100000)
+    reviewed: int | None = Field(default=None, ge=0, le=100000)
+    alerted: int | None = Field(default=None, ge=0, le=100000)
+    # Searches that came back with no cards at all.
+    empty: int | None = Field(default=None, ge=0, le=1000)
+    seconds: int | None = Field(default=None, ge=0, le=86400)
+    reason: str | None = Field(default=None, max_length=40)
+    wall: str | None = Field(default=None, max_length=40)
+    error: str | None = Field(default=None, max_length=200)
 
 
 class ReviewStatsDay(BaseModel):
@@ -384,6 +419,10 @@ class AlertMessageReport(BaseModel):
     ai_score: int | None = None
     unit_count: int | None = None
     prompt_hash: str | None = None
+    # What the listing was, for the city log only: not stored with the
+    # message. Older workers leave them out.
+    title: str | None = Field(default=None, max_length=300)
+    price: str | None = Field(default=None, max_length=60)
 
 
 class AlertClaim(BaseModel):

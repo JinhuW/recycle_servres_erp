@@ -852,6 +852,49 @@ docker exec rs-coordinator rsc queue show
 `rsc queue set` stores only the keys you give it, so a default changed in
 code still reaches every key nobody set.
 
+**City log.** Every city a worker searches is logged in `city_events`, from
+its start to its end, queue or not. The coordinator writes the steps it sees
+itself:
+
+- `handed`: the queue handed it out, and why (home, familiar or other);
+- `searched`: each search page, with the phrase and its funnel counts;
+- `alerted`: each alert sent, with the listing's title, price and score;
+- `released`: the worker gave its lease back, because it parked (in that
+  state) or restarted.
+
+A worker on 0.13.17 or later reports the rest, with
+`POST /v1/workers/<id>/city-events`:
+
+- `started`: the searches planned, and whether the city came from the queue
+  or its own list;
+- `finished`: the city's own counts and how long it took;
+- `stopped`: how far it got and why. The reasons are a wall (and its kind), a
+  lost session, a pause, the sweep cut short, or an error.
+
+The worker's own log carries the same start and end as `[City]` lines, the end
+with the brief report:
+`[City] Done Miami, FL for server_ram in 6 minutes: 3 searches, 84 cards, 9 opened, 5 reviewed, 1 alert.`
+
+An older worker sends pages only, and the log still reads it. Each visit's end
+comes from the first of these that applies:
+
+1. the worker's `finished`, `stopped` or `released`;
+2. its lease: closed by the next ask, or run out (`expired`);
+3. the worker moving on to another city;
+4. half an hour of silence.
+
+It is pruned with the rest of the queue's history after 14 days.
+
+```bash
+docker exec rs-coordinator rsc queue log                             # the last 24 h, one line a city
+docker exec rs-coordinator rsc queue log --worker nyc-1 --events     # each city's steps
+docker exec rs-coordinator rsc queue log --city miami --hours 72 --json
+```
+
+The ERP reads it through the console's `GET /v1/city-log?worker_id=|city=&hours=`.
+The worker page has a *City log* card, and a city's name in the round card's
+Cities table opens that city's log.
+
 **Shadow report.** `POST /v1/queue/shadow` replays the fleet through the same
 rules. It wakes each worker at its `start_at` times while its status history
 says it was up, and puts the result next to what the workers actually did:

@@ -346,6 +346,25 @@ coordinator.put('/workers/:id/queue', async (c) => {
   });
 });
 
+// The city log: each city a worker searched, from its handout or start to its
+// end, for the worker page (by worker) and the round card (by city). An older
+// console answers 404, and the page then shows no log.
+const CITY_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+coordinator.get('/city-log', (c) => {
+  const worker = c.req.query('worker');
+  const city = c.req.query('city');
+  const hours = Number(c.req.query('hours') ?? 24);
+  if (worker !== undefined && !WORKER_ID.test(worker)) return c.json({ error: 'Not a valid worker id' }, 400);
+  if (city !== undefined && !CITY_SLUG.test(city)) return c.json({ error: 'Not a valid city' }, 400);
+  if (!Number.isInteger(hours) || hours < 1 || hours > 72) return c.json({ error: 'hours is 1 to 72' }, 400);
+  const params = new URLSearchParams();
+  if (worker !== undefined) params.set('worker_id', worker);
+  if (city !== undefined) params.set('city', city);
+  params.set('hours', String(hours));
+  return forward(c, 'GET', `/v1/city-log?${params}`);
+});
+
 coordinator.put('/queue/everyone', async (c) => {
   const raw: unknown = await c.req.json().catch(() => null);
   if (!isObject(raw) || typeof raw.enrolled !== 'boolean') {

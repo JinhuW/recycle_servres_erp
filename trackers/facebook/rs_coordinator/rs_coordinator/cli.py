@@ -971,6 +971,35 @@ def cmd_queue_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_queue_log(args: argparse.Namespace) -> int:
+    from . import city_log, city_queue
+
+    db = open_database()
+    now = datetime.now(timezone.utc)
+    since = (now - timedelta(hours=args.hours)).isoformat(timespec="seconds")
+    names = {slug: meta.get("name") for slug, meta in city_queue.load_roster(db).cities.items()}
+    found = city_log.select(
+        city_log.visits(
+            db.city_events_since(since, args.worker),
+            db.city_leases_since(since),
+            names,
+            now.timestamp(),
+        ),
+        args.city.lower() if args.city else None,
+        args.item,
+        args.limit,
+    )
+    if args.json:
+        print(json.dumps(found, indent=2))
+        return 0
+    if not found:
+        print(f"no city searched in the last {args.hours} h")
+        return 0
+    for line in city_log.render(found, args.events):
+        print(line)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rsc", description="Recycle Servers coordinator")
     # The first question during an incident is "which version is this box
@@ -1223,6 +1252,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     q_set.add_argument("pairs", nargs="+", metavar="key=value")
     q_set.set_defaults(func=cmd_queue_set)
+    q_log = queue_sub.add_parser(
+        "log", help="Each city a worker searched, newest first, from handout to result"
+    )
+    q_log.add_argument("--worker")
+    q_log.add_argument("--city")
+    q_log.add_argument("--item")
+    q_log.add_argument("--hours", type=int, default=24)
+    q_log.add_argument("--limit", type=int, default=200)
+    q_log.add_argument("--events", action="store_true", help="each visit's steps")
+    q_log.add_argument("--json", action="store_true")
+    q_log.set_defaults(func=cmd_queue_log)
 
     return parser
 

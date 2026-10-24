@@ -399,15 +399,35 @@ def test_city_leases_open_settle_extend(backend):
     backend.open_city_lease("nyc-1", "server_ram", "boston", "other", t, later)
     backend.open_city_lease("nyc-1", "enterprise_ssd", "nyc", "home", t, later)
     # Done with nyc for one item: it closes; the item's other live lease is given up.
-    backend.settle_city_leases("nyc-1", "server_ram", "nyc", "2026-10-23T13:10:00+00:00")
+    given_up = backend.settle_city_leases("nyc-1", "server_ram", "nyc", "2026-10-23T13:10:00+00:00")
+    assert given_up == [{"item": "server_ram", "city": "boston", "leased_at": t}]
     rows = {(r["item"], r["city"]): r for r in backend.city_leases_since("0")}
     assert rows[("server_ram", "nyc")]["closed_at"] == "2026-10-23T13:10:00+00:00"
     assert rows[("server_ram", "boston")]["expires_at"] == "2026-10-23T13:10:00+00:00"
     assert rows[("enterprise_ssd", "nyc")]["closed_at"] is None
-    backend.extend_city_leases("nyc-1", "2026-10-23T14:00:00+00:00", "2026-10-23T13:20:00+00:00")
+    moved = backend.extend_city_leases(
+        "nyc-1", "2026-10-23T14:00:00+00:00", "2026-10-23T13:20:00+00:00"
+    )
+    assert [(m["item"], m["city"]) for m in moved] == [("enterprise_ssd", "nyc")]
     rows = {(r["item"], r["city"]): r for r in backend.city_leases_since("0")}
     assert rows[("enterprise_ssd", "nyc")]["expires_at"] == "2026-10-23T14:00:00+00:00"
     assert rows[("server_ram", "boston")]["expires_at"] == "2026-10-23T13:10:00+00:00"
+
+
+def test_city_events_append_with_their_detail(backend):
+    t = "2026-10-23T13:00:00+00:00"
+    backend.log_city_event("nyc-1", "server_ram", "nyc", "handed", {"why": "home"}, t)
+    backend.log_city_event("ne-1", None, "boston", "searched", {"cards": 3, "phrase": "dell"})
+    backend.log_city_event("nyc-1", "server_ram", "nyc", "started")
+    rows = backend.city_events_since("0")
+    assert [(r["worker_id"], r["event"], r["detail"]) for r in rows] == [
+        ("nyc-1", "handed", {"why": "home"}),
+        ("ne-1", "searched", {"cards": 3, "phrase": "dell"}),
+        ("nyc-1", "started", {}),
+    ]
+    assert rows[0]["at"] == t and rows[1]["item"] is None
+    assert [r["event"] for r in backend.city_events_since("0", "nyc-1")] == ["handed", "started"]
+    assert backend.city_events_since("9999") == []
 
 
 def test_queue_config_is_one_json_row_per_key(backend):

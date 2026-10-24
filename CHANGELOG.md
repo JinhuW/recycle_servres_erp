@@ -17,6 +17,44 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.331.0] - 2026-10-23
+
+Every city a Facebook worker searches is now logged from its handout to its
+result (RS-385, facebook-tracker 0.13.17). The owner asked first for a brief
+report once a worker finishes a city, then for "a full lifecycle logs not just
+finish".
+
+On a worker's page, a **City log** card lists its last 24 h, one row a city:
+
+- when and how long;
+- searches, cards, opened, AI-reviewed and alerts;
+- whether it finished, is being searched, stopped (on a wall, logged out,
+  paused, cut short, an error), was given back (a restart, a park), expired
+  with the worker silent, or has gone quiet.
+
+A row opens to its steps, each timed to the second:
+
+- the queue handing it out, and why;
+- the start;
+- each search's phrase and what it found;
+- each alert with the listing's title, price and score;
+- the end.
+
+On the round card, a city's name in the Cities table opens the same log for
+that city across every worker and item.
+
+Behind it:
+
+- **The coordinator** keeps the steps in a new `city_events` table. It writes
+  the ones it sees itself (handout, each search page, each alert, a lease
+  given back). The monitor reports its start, finish with its own counts, or
+  stop with the reason.
+- **The API.** `GET /api/coordinator/city-log` forwards by worker or by city,
+  for 1 to 72 hours.
+- **Older workers.** A worker on an older monitor still shows, its rows added
+  up from its pages, with the end read from its lease or from it moving on.
+  So the log covered the whole fleet the day the coordinator shipped.
+
 ## [1.330.0] - 2026-10-23
 
 The label printer comes back by itself (RS-384). Until now the Pack and

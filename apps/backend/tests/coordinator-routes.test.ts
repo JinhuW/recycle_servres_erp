@@ -489,6 +489,41 @@ describe('City queue (PUT /api/coordinator/workers/:id/queue, /queue/everyone)',
   });
 });
 
+describe('City log (GET /api/coordinator/city-log)', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('forwards one worker\'s or one city\'s log, and an older console\'s 404 as it is', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubFacade(200, { at: '2026-10-24T14:00:00+00:00', hours: 24, visits: [{ city: 'nyc' }] });
+    const r = await api<{ visits: unknown[] }>('GET', '/api/coordinator/city-log?worker=ne-1', { token, env: ENV });
+    expect(r.status).toBe(200);
+    expect(r.body.visits).toHaveLength(1);
+    expect((spy.mock.calls[0] as [string])[0]).toBe('http://facade.internal:8600/v1/city-log?worker_id=ne-1&hours=24');
+    await api('GET', '/api/coordinator/city-log?city=nyc&hours=12', { token, env: ENV });
+    expect((spy.mock.calls[1] as [string])[0]).toBe('http://facade.internal:8600/v1/city-log?city=nyc&hours=12');
+
+    stubFacade(404, { detail: 'Not Found' });
+    expect((await api('GET', '/api/coordinator/city-log?city=nyc', { token, env: ENV })).status).toBe(404);
+  });
+
+  it('refuses a purchaser and a bad worker, city or window', async () => {
+    const spy = stubFacade(200, {});
+    const marcus = (await loginAs(MARCUS)).token;
+    expect((await api('GET', '/api/coordinator/city-log?city=nyc', { token: marcus, env: ENV })).status).toBe(403);
+    const { token } = await loginAs(ALEX);
+    for (const query of ['worker=a.b', 'city=New%20York', 'hours=0', 'hours=73', 'hours=2.5']) {
+      expect((await api('GET', `/api/coordinator/city-log?${query}`, { token, env: ENV })).status).toBe(400);
+    }
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
 describe('City tiers (GET/PUT /api/coordinator/city-tiers)', () => {
   beforeEach(async () => {
     await resetDb();

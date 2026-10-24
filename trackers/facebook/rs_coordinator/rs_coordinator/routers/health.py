@@ -102,9 +102,18 @@ def heartbeat(
                     "lease_minutes", city_queue.DEFAULTS["lease_minutes"]
                 )
                 until = now + timedelta(minutes=minutes)
-            db.extend_city_leases(
-                worker_id, until.isoformat(timespec="seconds"), now.isoformat(timespec="seconds")
-            )
+            stamp = now.isoformat(timespec="seconds")
+            moved = db.extend_city_leases(worker_id, until.isoformat(timespec="seconds"), stamp)
+            if until == now:
+                for lease in moved:
+                    db.log_city_event(
+                        worker_id,
+                        lease["item"],
+                        lease["city"],
+                        "released",
+                        {"reason": payload.state.value},
+                        at=stamp,
+                    )
         except Exception:  # noqa: BLE001 - a lease runs out on its own; the heartbeat must land
             logger.exception("Could not move the city leases of worker %s", worker_id)
 

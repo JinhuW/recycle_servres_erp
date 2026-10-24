@@ -161,6 +161,23 @@ CREATE TABLE IF NOT EXISTS city_leases (
 CREATE INDEX IF NOT EXISTS idx_city_leases_leased ON city_leases(leased_at);
 CREATE INDEX IF NOT EXISTS idx_city_leases_worker ON city_leases(worker_id);
 
+-- The city log (city_log.py): what happened to each city on each worker, one
+-- row per step. The coordinator writes the steps it sees (handed out, each
+-- search page, each alert, given back) and the monitor reports the rest
+-- (started, finished with its counts, stopped and why). `detail` is JSON.
+-- Pruned to SEARCH_CYCLE_DAYS.
+CREATE TABLE IF NOT EXISTS city_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    at         TEXT NOT NULL,
+    worker_id  TEXT NOT NULL,
+    item       TEXT,
+    city       TEXT NOT NULL,
+    event      TEXT NOT NULL,
+    detail     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_city_events_at ON city_events(at);
+CREATE INDEX IF NOT EXISTS idx_city_events_worker ON city_events(worker_id, at);
+
 -- The city queue's settings (who is enrolled, the budget, the window, ...)
 -- and the roster the console pushes (the catalog and each worker's home
 -- cities), one JSON row each, keyed 'settings' and 'roster'.
@@ -811,6 +828,15 @@ def as_utc_stamp(value: Optional[str]) -> str:
                 parsed = parsed.replace(tzinfo=timezone.utc)
             return parsed.astimezone(timezone.utc).isoformat(timespec="seconds")
     return utcnow()
+
+
+def city_event_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """A `city_events` row with its JSON `detail` decoded ({} when empty)."""
+    try:
+        detail = json.loads(row.get("detail") or "null")
+    except ValueError:
+        detail = None
+    return {**row, "detail": detail if isinstance(detail, dict) else {}}
 
 
 def postgres_url(env: Optional[Dict[str, str]] = None) -> Optional[str]:
@@ -1600,10 +1626,10 @@ class Database:
 
     def settle_city_leases(
         self: "Database", worker_id: str, item: str, done: Optional[str], now: str
-    ) -> None:
+    ) -> List[Dict[str, Any]]:
         """Close the worker's live lease on `done` for this item; give up its
         others for the item (a crash or restart left them), which sends those
-        cities back to the queue."""
+        cities back to the queue. Returns the ones given up."""
         with self.cursor() as cur:
             if done:
                 cur.execute(
@@ -1612,19 +1638,76 @@ class Database:
                     (now, worker_id, item, done, now),
                 )
             cur.execute(
+                "SELECT item, city, leased_at FROM city_leases WHERE worker_id = ? "
+                "AND item = ? AND closed_at IS NULL AND expires_at > ? ORDER BY id",
+                (worker_id, item, now),
+            )
+            given_up = [dict(row) for row in cur.fetchall()]
+            cur.execute(
                 "UPDATE city_leases SET expires_at = ? WHERE worker_id = ? AND item = ? "
                 "AND closed_at IS NULL AND expires_at > ?",
                 (now, worker_id, item, now),
             )
+        return given_up
 
-    def extend_city_leases(self: "Database", worker_id: str, until: str, now: str) -> None:
-        """Move the worker's live leases' expiry; `until` = now gives them up."""
+    def extend_city_leases(
+        self: "Database", worker_id: str, until: str, now: str
+    ) -> List[Dict[str, Any]]:
+        """Move the worker's live leases' expiry; `until` = now gives them up.
+        Returns the leases moved."""
         with self.cursor() as cur:
+            cur.execute(
+                "SELECT item, city, leased_at FROM city_leases WHERE worker_id = ? "
+                "AND closed_at IS NULL AND expires_at > ? ORDER BY id",
+                (worker_id, now),
+            )
+            moved = [dict(row) for row in cur.fetchall()]
             cur.execute(
                 "UPDATE city_leases SET expires_at = ? WHERE worker_id = ? "
                 "AND closed_at IS NULL AND expires_at > ?",
                 (until, worker_id, now),
             )
+        return moved
+
+    def log_city_event(
+        self: "Database",
+        worker_id: str,
+        item: str | None,
+        city: str,
+        event: str,
+        detail: Dict[str, Any] | None = None,
+        at: str | None = None,
+    ) -> None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=SEARCH_CYCLE_DAYS)).isoformat(
+            timespec="seconds"
+        )
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO city_events (at, worker_id, item, city, event, detail) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    at or utcnow(),
+                    worker_id,
+                    item,
+                    city,
+                    event,
+                    json.dumps(detail) if detail else None,
+                ),
+            )
+            cur.execute("DELETE FROM city_events WHERE at < ?", (cutoff,))
+
+    def city_events_since(
+        self: "Database", since: str, worker_id: str | None = None
+    ) -> List[Dict[str, Any]]:
+        """Oldest first, `detail` decoded."""
+        sql = "SELECT id, at, worker_id, item, city, event, detail FROM city_events WHERE at >= ?"
+        params: List[Any] = [since]
+        if worker_id is not None:
+            sql += " AND worker_id = ?"
+            params.append(worker_id)
+        with self.cursor() as cur:
+            cur.execute(sql + " ORDER BY at, id", params)
+            return [city_event_row(dict(row)) for row in cur.fetchall()]
 
     def city_leases_since(self: "Database", since: str) -> List[Dict[str, Any]]:
         with self.cursor() as cur:

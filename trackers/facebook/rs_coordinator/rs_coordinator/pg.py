@@ -52,6 +52,7 @@ from .db import (
     THREAD_EXTRA_COLUMNS,
     UNMATCHED_REACTIONS_SQL,
     WORKER_HEALTH_COLUMNS,
+    city_event_row,
     review_stat_deltas,
     review_stats_row,
     stats_cutoff,
@@ -883,7 +884,7 @@ class PostgresDatabase:
 
     def settle_city_leases(
         self: "PostgresDatabase", worker_id: str, item: str, done: Optional[str], now: str
-    ) -> None:
+    ) -> List[Dict[str, Any]]:
         """See `Database.settle_city_leases`."""
         with self.cursor() as cur:
             if done:
@@ -893,21 +894,78 @@ class PostgresDatabase:
                     (now, worker_id, item, done, now),
                 )
             cur.execute(
+                "SELECT item, city, leased_at FROM city_leases WHERE worker_id = %s "
+                "AND item = %s AND closed_at IS NULL AND expires_at > %s ORDER BY id",
+                (worker_id, item, now),
+            )
+            given_up = _rows(cur.fetchall())
+            cur.execute(
                 "UPDATE city_leases SET expires_at = %s WHERE worker_id = %s AND item = %s "
                 "AND closed_at IS NULL AND expires_at > %s",
                 (now, worker_id, item, now),
             )
+        return given_up
 
     def extend_city_leases(
         self: "PostgresDatabase", worker_id: str, until: str, now: str
-    ) -> None:
+    ) -> List[Dict[str, Any]]:
         """See `Database.extend_city_leases`."""
         with self.cursor() as cur:
+            cur.execute(
+                "SELECT item, city, leased_at FROM city_leases WHERE worker_id = %s "
+                "AND closed_at IS NULL AND expires_at > %s ORDER BY id",
+                (worker_id, now),
+            )
+            moved = _rows(cur.fetchall())
             cur.execute(
                 "UPDATE city_leases SET expires_at = %s WHERE worker_id = %s "
                 "AND closed_at IS NULL AND expires_at > %s",
                 (until, worker_id, now),
             )
+        return moved
+
+    def log_city_event(
+        self: "PostgresDatabase",
+        worker_id: str,
+        item: str | None,
+        city: str,
+        event: str,
+        detail: Dict[str, Any] | None = None,
+        at: str | None = None,
+    ) -> None:
+        """See `Database.log_city_event`."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=SEARCH_CYCLE_DAYS)).isoformat(
+            timespec="seconds"
+        )
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO city_events (at, worker_id, item, city, event, detail) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (
+                    at or utcnow(),
+                    worker_id,
+                    item,
+                    city,
+                    event,
+                    json.dumps(detail) if detail else None,
+                ),
+            )
+            cur.execute("DELETE FROM city_events WHERE at < %s", (cutoff,))
+
+    def city_events_since(
+        self: "PostgresDatabase", since: str, worker_id: str | None = None
+    ) -> List[Dict[str, Any]]:
+        """See `Database.city_events_since`."""
+        sql = (
+            "SELECT id, at, worker_id, item, city, event, detail FROM city_events WHERE at >= %s"
+        )
+        params: List[Any] = [since]
+        if worker_id is not None:
+            sql += " AND worker_id = %s"
+            params.append(worker_id)
+        with self.cursor() as cur:
+            cur.execute(sql + " ORDER BY at, id", params)
+            return [city_event_row(row) for row in _rows(cur.fetchall())]
 
     def city_leases_since(self: "PostgresDatabase", since: str) -> List[Dict[str, Any]]:
         with self.cursor() as cur:

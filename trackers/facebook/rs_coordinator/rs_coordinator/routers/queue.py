@@ -1,5 +1,6 @@
 """The city queue: enrolled workers ask it for their next city, operators set
-it and read it, and the shadow report replays it.
+it and read it, and the shadow report replays it. Also the city log of what
+happened to each city on each worker (`city_log.py`).
 
 The console sends the roster (the catalog, and each worker's home cities and
 start_at times), because only it reads the worker configs. The logic is in
@@ -10,10 +11,11 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
-from .. import city_queue, city_tiers, deps
+from .. import city_log, city_queue, city_tiers, deps
 from ..deps import require_admin, require_worker
+from ..schemas import CityEventReport, StatusResponse
 
 router = APIRouter()
 
@@ -68,7 +70,11 @@ def next_city(
     now = datetime.now(timezone.utc)
     with _handout:
         settings = city_queue.load_settings(deps.db)
-        deps.db.settle_city_leases(worker_id, item, done, _stamp(now))
+        # Live leases other than `done` are what a restart left behind.
+        for lease in deps.db.settle_city_leases(worker_id, item, done, _stamp(now)):
+            deps.db.log_city_event(
+                worker_id, item, lease["city"], "released", {"reason": "restarted"}, _stamp(now)
+            )
         if not city_queue.enrolled(worker_id, settings):
             return {"queue": False}
         answer = city_queue.next_city(
@@ -89,7 +95,64 @@ def next_city(
                 _stamp(now),
                 _stamp(now + timedelta(minutes=settings["lease_minutes"])),
             )
+            # Stamped as the lease is, which is how the log finds the lease.
+            deps.db.log_city_event(
+                worker_id,
+                item,
+                answer["city"]["slug"],
+                "handed",
+                {"why": answer["why"]},
+                _stamp(now),
+            )
     return answer
+
+
+@router.post("/v1/workers/{worker_id}/city-events", response_model=StatusResponse)
+def report_city_event(
+    worker_id: str,
+    payload: CityEventReport,
+    worker: Optional[str] = Depends(require_worker),
+) -> StatusResponse:
+    """A step of one city only the monitor sees: started, finished with the
+    city's counts, or stopped and why."""
+    if worker is not None and worker != worker_id:
+        raise HTTPException(status_code=403, detail="A worker reports only its own cities")
+    city = _slugs([payload.city], "city")[0]
+    deps.db.log_city_event(
+        worker_id,
+        payload.item.strip(),
+        city,
+        payload.event,
+        payload.model_dump(exclude={"item", "city", "event"}, exclude_none=True),
+    )
+    return StatusResponse()
+
+
+@router.get("/v1/city-log", dependencies=[Depends(require_admin)])
+def city_log_view(
+    worker_id: Optional[str] = Query(default=None, max_length=64),
+    city: Optional[str] = Query(default=None, max_length=120),
+    item: Optional[str] = Query(default=None, max_length=MAX_ITEM),
+    hours: int = Query(default=24, ge=1, le=72),
+    limit: int = Query(default=200, ge=1, le=city_log.MAX_VISITS),
+) -> Dict[str, Any]:
+    """Each city searched in the last `hours`, newest first, with its steps."""
+    now = datetime.now(timezone.utc)
+    since = _stamp(now - timedelta(hours=hours))
+    names = {slug: meta.get("name") for slug, meta in city_queue.load_roster(deps.db).cities.items()}
+    found = city_log.visits(
+        deps.db.city_events_since(since, worker_id),
+        deps.db.city_leases_since(since),
+        names,
+        now.timestamp(),
+    )
+    return {
+        "at": _stamp(now),
+        "hours": hours,
+        "visits": city_log.select(
+            found, city.strip().lower() if city else None, item, limit
+        ),
+    }
 
 
 @router.put("/v1/workers/{worker_id}/queue", dependencies=[Depends(require_admin)])

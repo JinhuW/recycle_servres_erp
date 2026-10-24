@@ -4,8 +4,8 @@
 // Kept out of the components so they can be unit-tested without React.
 
 import type {
-  AlertHitRow, Challenge, CityTierSettings, CityWrite, FleetAccount, FleetCity, FleetDoc, FleetQueue, LedgerLogin,
-  QueueCityState, QueueItemCounts, ReviewStatsDay, SearchSettingsWrite, StatusChange,
+  AlertHitRow, Challenge, CityStep, CityTierSettings, CityVisit, CityVisitOutcome, CityWrite, FleetAccount, FleetCity,
+  FleetDoc, FleetQueue, LedgerLogin, QueueCityState, QueueItemCounts, ReviewStatsDay, SearchSettingsWrite, StatusChange,
 } from './coordinator';
 import type { FbWorkerStint } from './facebookPool';
 import { ruleLines } from './keywordRules';
@@ -920,4 +920,33 @@ export function queueCitiesToday(w: FleetAccount): { home: FleetCity[]; fromQueu
 /** The city name the queue knows for a slug, else the slug. */
 export function queueCityName(fleet: FleetDoc | null, slug: string): string {
   return fleet?.queue?.cities.find(c => c.slug === slug)?.name ?? slug;
+}
+
+// ─── The city log ─────────────────────────────────────────────────────────────
+
+// The chip a visit's outcome wears: a finished city is the round's accent, a
+// city being searched is the board's "now", and a city that ended badly says
+// how badly.
+export const VISIT_TONE: Record<CityVisitOutcome, string> = {
+  finished: 'accent', searching: 'info', stopped: 'warn', released: 'muted', expired: 'neg', quiet: 'warn',
+};
+
+/** Minutes a visit took, at least 1 once it ran half a minute; null if unknown. */
+export function visitMinutes(v: Pick<CityVisit, 'seconds'>): number | null {
+  if (v.seconds === null) return null;
+  return v.seconds < 30 ? 0 : Math.max(1, Math.round(v.seconds / 60));
+}
+
+/** The timeline dot for one step, in the History column's colors. */
+export function cityStepDot(step: CityStep): string {
+  if (step.event === 'alerted' || step.event === 'finished') return 'ff-live';
+  if (step.event === 'stopped' || step.event === 'released') return 'ff-attention';
+  if (step.event === 'expired') return 'ff-offline';
+  return 'ff-tl-muted';
+}
+
+/** A step's number field, 0 when absent. */
+export function stepCount(step: CityStep, key: string): number {
+  const v = step.detail[key];
+  return typeof v === 'number' ? v : 0;
 }
