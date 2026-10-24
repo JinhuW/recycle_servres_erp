@@ -128,6 +128,9 @@ export type FleetSlot = {
   home_cities: string[];
   quarantined_until: string | null;
   note: string;
+  /** A manager parked it: nothing claims it until it is unparked, and its
+   *  worker is fenced out. Stored as an infinite lease with no worker. */
+  parked: boolean;
 };
 
 export type FleetHost = {
@@ -152,6 +155,23 @@ export type FleetHostContainer = {
 export type FleetHostReport = {
   version: string;
   containers: FleetHostContainer[];
+};
+
+/** A roll of one worker image through the fleet, one idle worker at a time.
+ *  Kept in `fleet_settings` under `release`; only the latest one is held. */
+export type FleetRelease = {
+  image: string;
+  version: string;
+  state: 'rolling' | 'done' | 'failed' | 'superseded';
+  started_at: string;
+  finished_at: string | null;
+  /** Workers already on `image` through this roll, and the ones left out
+   *  because their host is observe-only or silent. */
+  upgraded: string[];
+  skipped: string[];
+  /** The worker being replaced now, and the state it was in before. */
+  current: { worker_id: string; host_id: string; started_at: string; pre_state: string } | null;
+  failure: string | null;
 };
 
 export type FleetWorker = {
@@ -255,6 +275,21 @@ export type HeartbeatRequest = {
   last_search_at: string | null;
   detail?: Record<string, unknown>;
 };
+
+/** A worker's progress on a task, as the city log shows it. */
+export type FleetEventRequest = {
+  task_id: number;
+  kind: 'started' | 'searched' | 'finished' | 'stopped';
+  detail?: Record<string, unknown>;
+};
+
+/** The worker's current browser session, resealed into the pool row. */
+export type SessionRequest = {
+  cookies: FleetCookie[];
+  token?: string | null;
+};
+
+export type HostReportRequest = FleetHostReport;
 
 export type HeartbeatAnswer = {
   ok: true;

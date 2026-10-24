@@ -86,7 +86,7 @@ E join as they land.
 | WS | Status | PR | Notes |
 | --- | --- | --- | --- |
 | A | A1 and A2 merged | #875, #880 | migration landed as `0206_fleet.sql` (0205 was taken); `GET /api/fleet/health` is manager scope; worker-token key derives from `JWT_SECRET` outside production. A2 (v1.338.0): catalog, tasks and round routes, `reconcile()` on a 30 s tick (`FLEET_ROLE=manager-only` skips it) and after every manager write, `fleet-import.mjs`; probe tasks carry their slot's `account_no` from insert; DELETE cancels waiting tasks only, a leased one finishes; `GET /items` and `GET /tasks` answer bare arrays, `GET /cities` answers `{cities}` |
-| B | not started | | |
+| B | merged | #881 | v1.339.0: `src/fleet/{claim,hosts,workers,vnc}.ts`; worker routes, hosts/desired/report, releases (roll state in `fleet_settings.release`), slots (plus `unpark`), workers, VNC relay; `fleet-seed-slots.mjs`, `fleet-fake-worker.mjs`; task ids cast to int on the wire; proved locally against a private DB with a made-up account |
 | C | done (mock contract) | #879 | `rs_worker/entry.py`, `deploy/Dockerfile.worker`, monitor `[fleet]` mode on `recycle-patches`; end-to-end against WS-B's backend is F's integration step |
 | D | merged | #877 | v1.335.0; `apps/fleet-agent` with planner, docker CLI and agent tests, Dockerfile, README; live Docker check passed locally against a mock ERP; the check against the dev backend is F's integration step |
 | E | merged | #878 | v1.337.0: Cities, Queue, Hosts, Slots tabs + fleet worker page against mocks; page-side types extend `@recycle-erp/shared` fleet rows in `lib/fleet.ts` (open tasks per city, slot's worker/pool status/minutes, host's desired); manager VNC path assumed `/api/fleet/vnc/:worker/ws` |

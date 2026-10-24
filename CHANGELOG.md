@@ -17,6 +17,62 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.339.0] - 2026-10-24
+
+The ERP fleet's claim protocol (RS-394): the routes a worker container and a
+host agent talk to, and the manager's view of slots, hosts and workers. The
+live fleet is untouched; nothing calls these routes until the worker image
+runs in fleet mode against a dev backend (WS-F's integration step).
+
+- **Workers** (`/api/fleet/worker/*`, `src/fleet/claim.ts`). `claim` (host
+  scope) locks a free slot with `FOR UPDATE SKIP LOCKED`, preferring the host
+  the account last ran on and then accounts whose home cities nobody covers,
+  moves its epoch on, marks the pool account as held by the worker (the
+  stint trigger closes the old stint and opens the new one, the ledger names
+  the host), stamps the proxy exit on the stint, and answers the one payload
+  that carries secrets in clear: password, 2FA key, cookies as Playwright
+  storage state, access token, proxy URL, device, home cities, items and
+  settings, plus a seven-day worker token. `heartbeat` renews the slot lease,
+  records the worker, renews the task lease on `HEALTHY` and hands the task
+  back to the queue on a parked state (`SESSION_EXPIRED`, `CHECKPOINT`,
+  `CHALLENGE_*`, `DEAD`); `DEGRADED` changes nothing. `next-task` closes the
+  task the worker finished, picks by priority, then home, familiar (searched
+  by this account within `familiar_days`) and other, then due time; a
+  quarantined slot gets only its own probe; an account past `budget_minutes`
+  of leases today waits. With nothing due it holds on `LISTEN fleet_tasks`
+  for up to `poll_hold_seconds`, one dedicated connection fanning out to at
+  most 200 held polls, and looks once more. `events` appends to the task log,
+  and a `verify-slug` verdict enables the city or leaves it disabled.
+  `session` reseals the worker's cookies and token into the pool row.
+- **Hosts and releases** (`/api/fleet/hosts*`, `/api/fleet/releases`,
+  `src/fleet/hosts.ts`). A manager registers a host and sees its token once;
+  only the sha256 is kept. The agent reads `desired` (count = capacity when
+  authoritative, VNC ports from 5901, the image from the latest release or
+  `FLEET_IMAGE_WORKER`) and posts its `report`. A release rolls one idle
+  worker at a time across the fleet, waiting for the replacement's first
+  heartbeat on the new version in a state no worse than before, stopping the
+  release after twenty minutes without one, and skipping workers on
+  observe-only or silent hosts: the coordinator's `advance_rollout` rules.
+  The roll state lives in `fleet_settings` under `release`.
+- **Slots and workers** (`/api/fleet/slots*`, `/api/fleet/workers`,
+  `src/fleet/workers.ts`): each account's slot with its pool status, today's
+  leased minutes and the worker's current task; release a quarantine early;
+  park an account (its worker is fenced out and nothing claims it) and unpark
+  it.
+- **VNC relay** (`src/fleet/vnc.ts`): a worker dials
+  `GET /api/fleet/worker/vnc` with its token and the ERP parks the socket by
+  worker id; a manager's noVNC page on `/api/fleet/vnc/:worker/ws` is paired
+  with it. No port opens on the worker's host. The coordinator's own relay is
+  unchanged.
+- **Scripts.** `scripts/fleet-seed-slots.mjs` seeds one slot per fleet pool
+  account from the coordinator's exports (home cities, device profiles) and
+  the proxy login from the environment, sealed; `--dry-run` rolls back.
+  `scripts/fleet-fake-worker.mjs` stands in for a worker container: claim,
+  heartbeat, long-poll, events, done, session, with the contract's exit codes.
+- `FLEET_COORDINATOR_URL` and `FLEET_IMAGE_WORKER` join the backend
+  environment; the bearer-only worker routes and the host report are exempt
+  from the CSRF header.
+
 ## [1.338.0] - 2026-10-24
 
 The ERP fleet's queue now fills itself (RS-394, PR A2 of the plan). Still no
@@ -52,6 +108,7 @@ of them.
   `imported`), the two items with phrases and filters, and the search
   settings; the dry run prints what would change. `smol-toml` is the backend's
   TOML reader.
+
 ## [1.337.0] - 2026-10-24
 
 Monitors ▸ Facebook gets four tabs for the ERP-owned fleet (RS-394): **Cities**,
