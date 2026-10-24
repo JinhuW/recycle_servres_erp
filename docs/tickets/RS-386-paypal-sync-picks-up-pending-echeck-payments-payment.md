@@ -2,13 +2,13 @@
 id: RS-386
 title: PayPal sync picks up pending eCheck payments; Payments stops offering Link on a transfer
 type: bug
-status: backlog
+status: done
 priority: P2
 created: 2026-10-24
 reporter: jinhu
 branch: JinhuW/bowhead
-pr:
-version:
+pr: 863
+version: 1.331.1
 related: []
 ---
 
