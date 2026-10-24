@@ -72,9 +72,11 @@ settings, tasks, round, city-log), `apps/backend/scripts/fleet-import.mjs`,
 
 - [x] A1 merged (#875, v1.336.0, `0206_fleet.sql`): `GET /api/fleet/health` lists the
       tables on a local backend; dev follows the release.
-- [ ] A2 merged: after `fleet-import.mjs`, `GET /api/fleet/tasks?state=ready`
+- [x] A2 merged (#880, v1.338.0): after `fleet-import.mjs`, `GET /api/fleet/tasks?state=ready`
       returns 254 tasks; `POST /api/fleet/cities` creates a disabled city with
-      a `verify-slug` task; `DELETE` cancels.
+      a `verify-slug` task; `DELETE` cancels. Proven on a local backend against a
+      scratch database (254 ready tasks 5 s after the import, on the scheduler's
+      first tick) and in `tests/fleet-scheduler.test.ts` / `tests/fleet-cities.test.ts`.
 
 ## Notes for the agent
 

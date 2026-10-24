@@ -1,8 +1,81 @@
 import { createHash } from 'node:crypto';
+import type { FleetError, FleetTask, FleetTaskEvent } from '@recycle-erp/shared';
 import type { SqlLike } from '../db';
 
 // Row shapes and the few queries more than one fleet module runs. Handlers keep
-// their own SQL next to the route; this is only what auth and health share.
+// their own SQL next to the module that owns the table; this is only what
+// several of them share: auth and health, the task row every module reads, and
+// the refusal shape every manager route answers with.
+
+/** A refused manager request: the status and the contract's error body. */
+export type Refusal = { status: 404 | 409 | 422; body: FleetError };
+
+export const bad = (detail: string): Refusal => ({ status: 422, body: { error: 'bad_request', detail } });
+export const notFound = (detail: string): Refusal => ({ status: 404, body: { error: 'not_found', detail } });
+export const exists = (detail: string): Refusal => ({ status: 409, body: { error: 'exists', detail } });
+
+export const isRefusal = (v: unknown): v is Refusal =>
+  typeof v === 'object' && v !== null && 'status' in v && 'body' in v
+  && typeof (v as Refusal).body === 'object' && 'error' in (v as Refusal).body;
+
+export const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
+
+/** fleet_tasks as postgres.js returns it: the BIGSERIAL id arrives as a string. */
+export type TaskRow = {
+  id: string;
+  city: string;
+  item: string;
+  kind: FleetTask['kind'];
+  due_at: Date;
+  priority: number;
+  state: FleetTask['state'];
+  worker_id: string | null;
+  account_no: number | null;
+  epoch: number | null;
+  leased_at: Date | null;
+  lease_expires_at: Date | null;
+  started_at: Date | null;
+  done_at: Date | null;
+  reason: FleetTask['reason'];
+  result: FleetTask['result'];
+};
+
+export type TaskEventRow = {
+  id: string;
+  task_id: string | null;
+  worker_id: string | null;
+  kind: FleetTaskEvent['kind'];
+  detail: FleetTaskEvent['detail'];
+  at: Date;
+};
+
+export const taskToWire = (r: TaskRow): FleetTask => ({
+  id: Number(r.id),
+  city: r.city,
+  item: r.item,
+  kind: r.kind,
+  due_at: r.due_at.toISOString(),
+  priority: r.priority,
+  state: r.state,
+  worker_id: r.worker_id,
+  account_no: r.account_no,
+  epoch: r.epoch,
+  leased_at: iso(r.leased_at),
+  lease_expires_at: iso(r.lease_expires_at),
+  started_at: iso(r.started_at),
+  done_at: iso(r.done_at),
+  reason: r.reason,
+  result: r.result,
+});
+
+export const eventToWire = (r: TaskEventRow): FleetTaskEvent => ({
+  id: Number(r.id),
+  task_id: r.task_id === null ? null : Number(r.task_id),
+  worker_id: r.worker_id,
+  kind: r.kind,
+  detail: r.detail,
+  at: r.at.toISOString(),
+});
 
 /** Every relation the fleet migration creates, the view included. */
 export const FLEET_TABLES = [

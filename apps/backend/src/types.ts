@@ -30,6 +30,9 @@ export type Env = {
   // Signs the fleet's worker tokens (src/fleet/auth.ts): 64 hex chars. Unset in
   // production answers 401 on the worker routes, nothing else; dev derives one.
   FLEET_WORKER_TOKEN_KEY?: string;
+  // Which part of the fleet this instance serves (src/fleet/). Unset is all of
+  // it; 'manager-only' leaves the scheduler tick to the instance serving workers.
+  FLEET_ROLE?: string;
   // Shippo tracking (tracking only — never buys labels). Unset means tracking
   // is a stub that never ticks.
   SHIPPO_API_URL?: string;
