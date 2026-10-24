@@ -35,6 +35,7 @@ import trackerRoutes from './routes/tracker';
 import aiModelsRoutes from './routes/aiModels';
 import coordinatorRoutes from './routes/coordinator';
 import facebookPoolRoutes from './routes/facebookPool';
+import fleetRoutes from './routes/fleet';
 import wechatMarketRoutes from './routes/wechatMarket';
 import bankTxRoutes from './routes/bankTx';
 import internalTxRoutes from './routes/internalTx';
@@ -424,6 +425,9 @@ app.route('/api/coordinator', coordinatorRoutes);
 // Self-applies authMiddleware; the take/return/report routes are for every
 // role and the rest is manager-gated inside the module.
 app.route('/api/facebook-pool', facebookPoolRoutes);
+// Self-applies its scopes per route: cookie + manager gate on the pages' reads
+// and writes, a bearer on the host-agent and worker routes (src/fleet/auth.ts).
+app.route('/api/fleet', fleetRoutes);
 // Self-applies its auth: Bearer (wechat:write) on /push/*, where memtrade
 // sends each day's report; cookie + manager gate on the page's reads.
 app.route('/api/wechat-market', wechatMarketRoutes);

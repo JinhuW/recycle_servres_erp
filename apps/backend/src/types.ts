@@ -27,6 +27,9 @@ export type Env = {
   // Seals the Facebook account pool's credentials (lib/sealed.ts): 64 hex
   // chars. Unset in production disables the pool routes (503), nothing else.
   FB_POOL_KEY?: string;
+  // Signs the fleet's worker tokens (src/fleet/auth.ts): 64 hex chars. Unset in
+  // production answers 401 on the worker routes, nothing else; dev derives one.
+  FLEET_WORKER_TOKEN_KEY?: string;
   // Shippo tracking (tracking only — never buys labels). Unset means tracking
   // is a stub that never ticks.
   SHIPPO_API_URL?: string;

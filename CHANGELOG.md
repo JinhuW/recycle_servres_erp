@@ -17,6 +17,34 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.336.0] - 2026-10-24
+
+Groundwork for the ERP fleet, the city task queue the Facebook workers will
+pull from instead of sweeping on a clock (RS-394). No behaviour changes: the
+live fleet still runs off the coordinator's queue, no page changed, and
+nothing writes to the new tables yet.
+
+- **Schema.** Migration `0206_fleet.sql` creates `fleet_cities`,
+  `fleet_items`, `fleet_settings`, `fleet_hosts`, `fleet_slots`,
+  `fleet_workers`, `fleet_tasks`, `fleet_task_events` and the `fleet_minutes`
+  view, as the plan's contract spells them out, plus the FK indexes the rest
+  of the schema keeps. `docs/DATABASE.md` has a *Fleet* section.
+- **Three auth scopes** (`src/fleet/auth.ts`): `managerOnly` (the session
+  cookie and the manager role, as the coordinator proxy gates itself),
+  `hostAuth` (a host agent's bearer, matched by sha256 against
+  `fleet_hosts.token_hash`) and `workerAuth` (an HMAC token the ERP mints at
+  claim time, signed with `FLEET_WORKER_TOKEN_KEY`, naming the slot's lease
+  epoch). A token whose epoch is no longer the slot's gets `409 stale_epoch`
+  on every worker route, which is what keeps one account off two browsers.
+  Dev and CI derive the key from `JWT_SECRET`; production without it answers
+  401 on the worker routes and boots as usual.
+- **`/api/fleet` is mounted** with one route, `GET /api/fleet/health`
+  (manager), which lists the fleet tables present in the database.
+- **Shared types** for the whole fleet (`packages/shared/src/fleet.ts`):
+  cities, items, tasks, events, slots, hosts, workers, settings and the
+  claim, next-task and desired-state payloads the worker, the host agent and
+  the pages build against.
+
 ## [1.335.0] - 2026-10-24
 
 The host agent for the Facebook worker fleet, `apps/fleet-agent`, the piece
@@ -46,6 +74,7 @@ start memory, on a `/state` volume. Its planner is a pure function with a
 test for each rule, the agent runs against a fake daemon and a mock ERP, and
 an opt-in live test drives the real daemon with a sleeping `alpine:3` image
 and cleans up after itself.
+
 
 ## [1.334.0] - 2026-10-24
 
