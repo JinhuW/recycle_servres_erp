@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-24
 reporter: jinhu
 branch: JinhuW/auk
-pr:
+pr: 865
 version: 1.332.1
 related: [RS-252]
 ---
