@@ -17,6 +17,48 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.332.2] - 2026-10-24
+
+The fixes a review of the v1.318.2 → v1.332.1 release found before it went to
+production (RS-389). Most of them were in the label-printer flow that
+v1.323.0 to v1.330.0 built, where a label could be lost without a word.
+
+- **Review mode's Approve stays busy until the box label is out.** It used to
+  come back the moment the PO moved to Ready to Pay, while the label was still
+  printing. A second click then re-ran the zeroing on a PO that had already
+  moved, and the manager saw "PO already moved" after an approval that had
+  worked.
+- **A label asked for while the printer is connecting waits for the
+  connect.** It goes over Bluetooth once the printer is on, or through the
+  print dialog if the connect fails. Before, it was dropped: Pack mode had
+  already counted the product as printed, and Review mode left for the PO
+  without its box label.
+- **The print dialog can no longer stall the queue.** It used to finish only
+  on `afterprint`, after every image loaded. A label that failed to draw, or a
+  browser that never fires `afterprint`, held back every later label in the
+  tab. The dialog now also ends when the browser leaves print media, and a
+  failed draw ends it with a toast.
+- **Status checks and labels go to the printer one at a time.** The bar's 15 s
+  `ESC ! ?` check could land between two labels of a batch and overlap the next
+  label's writes, which Chrome refuses, so that label failed. The connection
+  also stopped adding an answer listener on every reconnect. A printer that
+  comes back without a port the page knows is forgotten, instead of retried
+  every 10 s for good.
+- **An account's timeline says when some logins are missing, not that the
+  fleet is down.** One worker's failed ledger read used to mark the whole
+  timeline *unreachable*. It now reads *some logins may be missing*, which is
+  also shown when a worker's ledger (its newest 500 logins) doesn't reach back
+  to when the account went on it. A timeline that failed to load is fetched
+  again on the next unfold, where before the page needed a reload.
+- **Assign no longer fails when the fleet document can't be read.** It wanted
+  one worker's proxy from it, and a slow composition used to block the
+  install. The DEAD check then goes by the proxy the worker's last account
+  went through.
+- **The reddit watch keeps its own relay failures out of the error digest.**
+  Logged into `worker_errors`, each one was queued for the relay that had just
+  failed, and padded the digest once it came back. (The tracker deploys on its
+  own; this ships with its next `railway up`.)
+
 ## [1.332.1] - 2026-10-24
 
 Filling in a PO's products on an iPhone no longer zooms the page in (RS-388).

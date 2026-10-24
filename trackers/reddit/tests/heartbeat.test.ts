@@ -166,7 +166,7 @@ describe('removeWorker', () => {
   });
 });
 
-// RS-376: what has been going wrong travels with the beat.
+// What has been going wrong travels with the beat.
 describe('LoopRegistry failures', () => {
   it('counts iterations that threw or logged a problem, and resets on a clean one', async () => {
     const registry = new LoopRegistry(() => 1_000);

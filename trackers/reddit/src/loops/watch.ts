@@ -20,6 +20,7 @@ const WORKERS_LISTED = 5;
 
 export interface WatchDeps {
   sql: Sql;
+  /** Logs relay failures, so it must not feed worker_errors. */
   logger: Logger;
   /** The api's own row: if the api is down, this loop is too, and Railway's webhook reports it. */
   selfId: string;

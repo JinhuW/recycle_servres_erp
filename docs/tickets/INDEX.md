@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-389](./RS-389-fix-what-the-dev-to-prod-review-found-before-releasi.md) | done | bug | P1 | Fix what the dev-to-prod review found before releasing v1.332 | 1.332.2 |
 | [RS-388](./RS-388-phone-the-page-no-longer-zooms-in-when-a-po-line-fie.md) | done | bug | P2 | Phone: the page no longer zooms in when a PO line field is focused | 1.332.1 |
 | [RS-387](./RS-387-sort-the-inventory-table-by-column.md) | done | story | P2 | Sort the Inventory table by column | 1.332.0 |
 | [RS-386](./RS-386-paypal-sync-picks-up-pending-echeck-payments-payment.md) | done | bug | P2 | PayPal sync picks up pending eCheck payments; Payments stops offering Link on a transfer | 1.331.1 |

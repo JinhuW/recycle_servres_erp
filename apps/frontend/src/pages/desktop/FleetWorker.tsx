@@ -304,12 +304,16 @@ function AccountsUsed({ stints, locale }: { stints: FbWorkerStint[] | null; loca
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const [timelines, setTimelines] = useState<ReadonlyMap<number, FbAccountTimeline | 'error'>>(() => new Map());
   const toggle = (row: string, no: number) => {
+    const opening = !open.has(row);
     setOpen(prev => {
       const next = new Set(prev);
       if (next.has(row)) next.delete(row); else next.add(row);
       return next;
     });
-    if (timelines.has(no)) return;
+    // A timeline that failed to load is asked for again on the next unfold.
+    const had = timelines.get(no);
+    if (!opening || (had !== undefined && had !== 'error')) return;
+    if (had === 'error') setTimelines(m => { const next = new Map(m); next.delete(no); return next; });
     poolApi.timeline(no)
       .then(tl => setTimelines(m => new Map(m).set(no, tl)))
       .catch(err => { handleFetchError(err); setTimelines(m => new Map(m).set(no, 'error')); });
@@ -395,6 +399,8 @@ function lineDot(line: TimelineLine): string {
   return 'ff-tl-muted';
 }
 
+const TL_LOGINS_NOTE = { not_served: 'fbcTlNotServed', unreachable: 'fbcTlUnreachable', partial: 'fbcTlPartial' } as const;
+
 // One account's life, newest first: every login a worker attempted for it,
 // and what the pool did with it. A run of identical logins is one line.
 function AccountTimeline({ timeline, locale }: { timeline: FbAccountTimeline | 'error' | undefined; locale: string }) {
@@ -412,7 +418,7 @@ function AccountTimeline({ timeline, locale }: { timeline: FbAccountTimeline | '
       <div className="ff-timeline-head">
         <span>{t('fbcTlSum', { ok, failed })}</span>
         {timeline.logins !== 'ok' && (
-          <span className="fp-warn">{t(timeline.logins === 'not_served' ? 'fbcTlNotServed' : 'fbcTlUnreachable')}</span>
+          <span className="fp-warn">{t(TL_LOGINS_NOTE[timeline.logins])}</span>
         )}
       </div>
       <ul className="fp-log">

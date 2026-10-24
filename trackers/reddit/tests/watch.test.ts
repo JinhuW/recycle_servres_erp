@@ -3,7 +3,7 @@ import {createLogger} from '../src/logger.ts';
 import {FAILING_AFTER, watchOnce, type RelayAlert} from '../src/loops/watch.ts';
 import {createTestDb, type TestDb} from './helpers/db.ts';
 
-// RS-376: the api's watch turns the fleet's heartbeats into ops alerts.
+// The api's watch turns the fleet's heartbeats into ops alerts.
 
 let db: TestDb;
 let posted: RelayAlert[];

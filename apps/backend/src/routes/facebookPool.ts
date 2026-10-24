@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import {
   FB_FAILED_OUTCOMES,
   FB_POOL_LIMIT,
@@ -460,20 +459,31 @@ function legacyDevice(cookie: string, cookieUidValue: string | null, uid: string
 
 // The proxy a worker browses through now, as the fleet document names it
 // (scheme://host:port, login cut out; null on the VM's own IP). A worker the
-// document doesn't list, or a facade that predates the exit lookup, leaves it
-// unknown, and an unknown proxy is neither recorded nor checked.
+// document doesn't list, a facade that predates the exit lookup, or a document
+// that can't be read leaves it unknown, and an unknown proxy is not recorded.
 type WorkerProxy = { url: string | null; known: boolean };
 type FleetDocProxies = { workers?: { worker_id?: unknown; proxy?: { url?: unknown } | null }[] } | null;
 
-async function workerProxy(
-  env: Env, worker: string,
-): Promise<{ error: string; status: ContentfulStatusCode } | { error: null; proxy: WorkerProxy }> {
+async function workerProxy(env: Env, worker: string): Promise<WorkerProxy> {
   const fleet = await callFacade(env, 'GET', '/v1/fleet');
-  if (fleet.error) return { error: fleet.error, status: fleet.status };
+  if (fleet.error) {
+    log.warn('fleet document unreadable; the proxy is left unknown', { module: 'facebookPool', workerId: worker, error: fleet.error });
+    return { url: null, known: false };
+  }
   const w = (fleet.payload as FleetDocProxies)?.workers
     ?.find((x) => typeof x.worker_id === 'string' && x.worker_id.toLowerCase() === worker.toLowerCase());
-  if (!w?.proxy) return { error: null, proxy: { url: null, known: false } };
-  return { error: null, proxy: { url: typeof w.proxy.url === 'string' ? w.proxy.url : null, known: true } };
+  if (!w?.proxy) return { url: null, known: false };
+  return { url: typeof w.proxy.url === 'string' ? w.proxy.url : null, known: true };
+}
+
+// An unknown proxy is checked as the one the worker's last account went
+// through: proxies change far less often than accounts do.
+async function lastProxy(sql: SqlLike, worker: string): Promise<string | null> {
+  const [row] = await sql<{ proxy_url: string | null }[]>`
+    SELECT proxy_url FROM fb_worker_accounts
+    WHERE lower(worker_id) = lower(${worker}) AND proxy_known
+    ORDER BY started_at DESC LIMIT 1`;
+  return row?.proxy_url ?? null;
 }
 
 type MarkRow = { url: string; failed: number; dead_at: Date | null; revived_at: Date | null; revived_by_name: string | null };
@@ -554,13 +564,12 @@ pool.post('/:no/assign', async (c) => {
   if (!password) return c.json({ error: 'This account has no password to sign in with', code: 'fpNoPassword' }, 409);
   // Read before anything reaches the worker: an account sent through a proxy
   // that has burned more than FB_PROXY_DEAD_AFTER is the next one it burns.
-  const read = await workerProxy(c.env, worker);
-  if (read.error !== null) return c.json({ error: read.error }, read.status);
-  const { proxy } = read;
-  if (proxy.url) {
-    const [mark] = await proxyMarks(sql, proxy.url);
+  const proxy = await workerProxy(c.env, worker);
+  const checked = proxy.known ? proxy.url : await lastProxy(sql, worker);
+  if (checked) {
+    const [mark] = await proxyMarks(sql, checked);
     if (mark?.dead)
-      return c.json({ error: `${worker}'s proxy ${proxy.url} is DEAD: ${mark.failed} accounts failed on it`, code: 'fpProxyDead' }, 409);
+      return c.json({ error: `${worker}'s proxy ${checked} is DEAD: ${mark.failed} accounts failed on it`, code: 'fpProxyDead' }, 409);
   }
   const cookie = unsealOrEmpty(row.cookie_enc, key);
   // Cookie-first: a cookie that is this account's own (its c_user matches) can
@@ -743,12 +752,30 @@ pool.get('/:no/timeline', async (c) => {
   }));
   if (account) events.push({ kind: 'added', at: account.added_at.getTime(), batch: account.batch });
 
-  const workers = [...new Map(stints.map((s) => [s.worker_id.toLowerCase(), s.worker_id])).values()];
+  // When the account first went on each worker. A holder that isn't a worker
+  // id has no ledger to read.
+  const firstOn = new Map<string, { worker: string; at: number }>();
+  for (const s of stints) {
+    if (!WORKER_ID.test(s.worker_id)) continue;
+    const k = s.worker_id.toLowerCase();
+    const at = s.started_at.getTime();
+    if (!firstOn.has(k) || at < firstOn.get(k)!.at) firstOn.set(k, { worker: s.worker_id, at });
+  }
+  const workers = [...firstOn.values()];
   const reads = await allLimited(workers.map((w) => () =>
-    callFacade(c.env, 'GET', `/v1/logins?worker_id=${encodeURIComponent(w)}&limit=${LEDGER_ROWS}`)));
+    callFacade(c.env, 'GET', `/v1/logins?worker_id=${encodeURIComponent(w.worker)}&limit=${LEDGER_ROWS}`)));
+  // A full page whose oldest row is newer than the account's first stint there
+  // has cut off that stint's early logins.
+  const cut = reads.some((r, i) => {
+    const rows = (r.payload as { logins?: LedgerRow[] } | null)?.logins ?? [];
+    return !r.error && rows.length >= LEDGER_ROWS
+      && Math.min(...rows.map((row) => Date.parse(row.started_at))) > workers[i].at;
+  });
+  const failed = reads.filter((r) => r.error).length;
   let logins: FbAccountTimeline['logins'] = 'ok';
   if (reads.some((r) => r.status === 404)) logins = 'not_served';
-  else if (reads.some((r) => r.error)) logins = 'unreachable';
+  else if (failed && failed === reads.length) logins = 'unreachable';
+  else if (failed || cut) logins = 'partial';
   const key = `uid:${uid}`;
   const onIt = (worker: string, at: number) => stints.some((s) =>
     s.worker_id.toLowerCase() === worker.toLowerCase()

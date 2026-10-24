@@ -11,7 +11,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// RS-376: the heartbeat learns about problems from the logger.
+// The heartbeat learns about problems from the logger.
 describe('problem hook', () => {
   it('sees warn and error lines with their scope, whatever the log level', () => {
     const seen: Parameters<ProblemHook>[] = [];
