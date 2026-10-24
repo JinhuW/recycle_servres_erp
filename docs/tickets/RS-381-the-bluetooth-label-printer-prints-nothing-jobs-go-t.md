@@ -61,7 +61,7 @@ with 50 × 25 mm labels can't take that, and TSPL was sent `SIZE 4,6`.
 - [x] The 50 × 25 mm label is laid out for its size: the number, the
       purchaser and the counts, large enough to read, inside a 2-inch head's
       width.
-- [ ] A real label prints on the CT221D from the dev site.
+- [x] A real label prints on the CT221D from the dev site.
 
 ## Out of scope
 
@@ -76,3 +76,7 @@ with 50 × 25 mm labels can't take that, and TSPL was sent `SIZE 4,6`.
   test.
 - A parallel session (per-product Pack labels, worktree `pinfish`) was told
   the root cause, so it can rebase onto this fix.
+- Confirmed on the real printer: after the fix reached dev, the requester
+  connected the CT221D in Review mode and pressed Print label. "Label printed
+  fine." By then dev also carried RS-382 (v1.329.0, per-product Pack labels),
+  which kept this fix.
