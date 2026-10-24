@@ -35,6 +35,7 @@ import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import type { Hono } from 'hono';
 import { log } from './lib/log';
 import { refusalMessage, upstream, VNC_WORKER_ID } from './routes/coordinator';
+import { closeFleetVnc, handleFleetVncUpgrade } from './fleet/vnc';
 import type { Env } from './types';
 
 const PATH = /^\/api\/coordinator\/vnc\/([^/?#]+)\/ws$/;
@@ -256,8 +257,9 @@ function recheck(client: WebSocket, workerId: string, check: () => Promise<numbe
 }
 
 /**
- * Takes over HTTP upgrades on the server. Only the VNC path upgrades; every
- * other upgrade request is refused, as it was before this existed.
+ * Takes over HTTP upgrades on the server. Only the VNC paths upgrade (this
+ * relay's, and the fleet's in fleet/vnc.ts); every other upgrade request is
+ * refused, as it was before this existed.
  */
 export function attachVncBridge(
   server: Server, app: FetchApp, env: Env, { revalidateMs = REVALIDATE_MS }: { revalidateMs?: number } = {},
@@ -267,6 +269,7 @@ export function attachVncBridge(
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.on('error', () => socket.destroy());
+    if (handleFleetVncUpgrade(req, socket, head, app, env, wss, { revalidateMs })) return;
     const path = (req.url ?? '').split('?')[0] ?? '';
     const match = PATH.exec(path);
     if (!match) {
@@ -318,6 +321,7 @@ export function attachVncBridge(
 /** Closes every relayed socket — for shutdown, so a viewer never pins the process. */
 export function closeVncBridges({ graceMs = TERMINATE_GRACE_MS }: { graceMs?: number } = {}): void {
   closing = true;
+  closeFleetVnc({ graceMs });
   for (const ws of open) closeQuietly(ws, 1001, RESTARTING);
   // A close is a handshake: a viewer whose laptop slept never answers it, and
   // ws's own 30 s close timeout outlasts the shutdown's hard deadline, so

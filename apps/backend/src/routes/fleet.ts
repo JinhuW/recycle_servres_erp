@@ -8,6 +8,11 @@ import {
 import { reconcile } from '../fleet/scheduler';
 import { FLEET_TABLES, fleetTablesPresent, isRefusal, type Refusal } from '../fleet/sql';
 import { cityLog, listTasks, manualTask, readLogQuery, readTaskFilter, startRound } from '../fleet/tasks';
+import worker from '../fleet/claim';
+import hosts, { releases } from '../fleet/hosts';
+import { slots, workers } from '../fleet/workers';
+import { allowedAppOrigin } from '../lib/origins';
+import { VNC_WORKER_ID } from './coordinator';
 
 // ─── Fleet ────────────────────────────────────────────────────────────────────
 // The city task queue and the worker slots (src/fleet/). Each sub-module mounts
@@ -110,7 +115,30 @@ fleet.get('/city-log', managerOnly, async (c) => {
   return c.json(await cityLog(getDb(c.env), q));
 });
 
-// ── Slots, hosts, workers, the worker protocol (fleet/claim.ts, hosts.ts) ───
-// Mounted here by the claim-protocol module under hostAuth / workerAuth.
+// ── Slots, hosts, workers, the worker protocol ───────────────────────────────
+// Each module mounts its own scope: claim is hostAuth, the rest of the worker
+// protocol workerAuth (fleet/claim.ts); hosts carry managerOnly on the list
+// and hostAuth on desired/report (fleet/hosts.ts); slots and workers are the
+// manager's (fleet/workers.ts).
+
+fleet.route('/worker', worker);
+fleet.route('/hosts', hosts);
+fleet.route('/releases', releases);
+fleet.route('/slots', slots);
+fleet.route('/workers', workers);
+
+// The manager's end of a fleet worker's VNC relay (fleet/vnc.ts). Like the
+// coordinator path, the handshake is replayed here as a GET so the session,
+// the role and the Origin are checked before a socket exists.
+fleet.get('/vnc/:workerId/ws', managerOnly, (c) => {
+  if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
+    return c.json({ error: 'Expected a WebSocket upgrade' }, 426);
+  }
+  if (!allowedAppOrigin(c.req.header('origin'), c.env.CORS_ALLOWED_ORIGINS)) {
+    return c.json({ error: 'Origin not allowed' }, 403);
+  }
+  if (!VNC_WORKER_ID.test(c.req.param('workerId'))) return c.json({ error: 'not_found' }, 404);
+  return c.body(null, 204);
+});
 
 export default fleet;

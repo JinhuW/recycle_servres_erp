@@ -58,11 +58,17 @@ tests `apps/backend/tests/fleet-claim.test.ts`, `fleet-hosts.test.ts`.
 
 ## Exit
 
-- [ ] `apps/backend/scripts/fleet-fake-worker.mjs` (ship it in this PR, it is
+- [x] `apps/backend/scripts/fleet-fake-worker.mjs` (ship it in this PR, it is
       the integration tool): claims a slot on dev, long-polls, receives a task
       within 1 s of a manual task, reports done, receives the next one; a
       second run with the same account gets a different slot or `no_slot`.
-- [ ] Hosts tab data (`GET /api/fleet/hosts`) shows a fake host's report.
+      (2026-10-24, against a local backend on a private database with a
+      made-up pool account: both manual tasks arrived 5–6 ms after their
+      insert + `NOTIFY`; the second run exited 75 `no_slot`. Against dev:
+      WS-F's integration step, once A2's `POST /api/fleet/tasks` exists.)
+- [x] Hosts tab data (`GET /api/fleet/hosts`) shows a fake host's report
+      (2026-10-24, same local run: `report.containers`, `version`,
+      `last_seen_at` and `desired` in the answer).
 
 ## Notes for the agent
 
