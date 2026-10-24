@@ -17,6 +17,22 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.332.1] - 2026-10-24
+
+Filling in a PO's products on an iPhone no longer zooms the page in (RS-388).
+iOS zooms into any focused field whose text is smaller than 16px, and it
+doesn't zoom back out when you leave the field. Every field in the phone
+shell is 14px, so each tap on a part number, qty or price left the purchaser
+on a page wider than the screen, pinching it back by hand.
+
+`user-scalable=no` in the viewport had held this back until v1.258.7, when it
+was removed so the phone could be pinch-zoomed. `main.tsx` now adds
+`maximum-scale=1` to the viewport, but only on iOS, iPadOS included, since
+an iPad's desktop-shell fields are 13.5px. That stops the focus zoom, and
+Safari still lets a pinch go past the cap. Android never focus-zooms but
+would take the cap as a pinch lock, so its viewport stays as it was. Field
+sizes and layouts are unchanged.
+
 ## [1.332.0] - 2026-10-24
 
 The desktop Inventory table sorts by any column (RS-387). Product, Part #,
