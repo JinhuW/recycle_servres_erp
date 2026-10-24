@@ -1,16 +1,18 @@
-// Made-up fleet rows for the tests and the dev preview. Nothing here is a
-// real account, host, token or uid.
+// Made-up fleet rows for the tests and the dev preview, in the shapes the
+// backend answers (the shared types, with the slot/host/worker extras the
+// manager routes fold in). Nothing here is a real account, host, token or uid.
 
 import type {
-  FleetCity, FleetCityLogTask, FleetHost, FleetItem, FleetSettings, FleetSlot, FleetTask, FleetWorker,
-} from '../../../lib/fleet';
+  FleetCityListed, FleetRelease, FleetTask as WireTask, FleetTaskLog,
+} from '@recycle-erp/shared';
+import type { FleetHost, FleetItem, FleetSettings, FleetSlot, FleetTask, FleetWorker } from '../../../lib/fleet';
 
 export const NOW = Date.parse('2026-10-24T18:30:00Z');
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
 const ahead = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
 
 export const ITEMS: FleetItem[] = [
-  { name: 'server_ram', phrases: ['server ram', 'ddr4 ecc'], filters: { date_listed: 'last-24-hours' }, enabled: true },
+  { name: 'server_ram', phrases: ['server ram', 'ddr4 ecc'], filters: { date_listed: 'last 24 hours' }, enabled: true },
   { name: 'enterprise_ssd', phrases: ['enterprise ssd'], filters: {}, enabled: true },
 ];
 
@@ -19,54 +21,13 @@ export const SETTINGS: FleetSettings = {
   familiar_days: 7, start_fresh_hours: 2, quarantine_hours: 48, quarantine_probe_hours: 6, search: {},
 };
 
-const city = (slug: string, name: string, region: string, over: Partial<FleetCity> = {}): FleetCity => ({
-  slug, name, radius_km: 500, region, enabled: true, per_day: null, pinned: false,
-  verified_at: ago(60 * 24 * 3), verified_as: name, added_by: null, added_at: ago(60 * 24 * 5), disabled_at: null,
-  open: { server_ram: null, enterprise_ssd: null }, last_done_at: { server_ram: null, enterprise_ssd: null },
-  ...over,
+// GET /tasks answers bare rows: no city name, ids as numbers.
+const task = (id: number, city: string, item: string, state: WireTask['state'], over: Partial<WireTask> = {}): WireTask => ({
+  id, city, item, kind: 'search', due_at: ago(60), priority: 0, state, worker_id: null, account_no: null, epoch: null,
+  leased_at: null, lease_expires_at: null, started_at: null, done_at: null, reason: 'cadence', result: null, ...over,
 });
 
-const open = (id: number, state: 'ready' | 'leased', dueMin: number, worker: string | null = null) => ({
-  id, kind: 'search' as const, state, due_at: state === 'leased' ? ago(10) : (dueMin < 0 ? ago(-dueMin) : ahead(dueMin)),
-  priority: 0, worker_id: worker, lease_expires_at: state === 'leased' ? ahead(20) : null,
-});
-
-export const CITIES: FleetCity[] = [
-  city('houston', 'Houston, TX', 'south', {
-    open: { server_ram: open(201, 'leased', 0, 'homelab-3'), enterprise_ssd: open(202, 'ready', 180) },
-    last_done_at: { server_ram: ago(60 * 25), enterprise_ssd: ago(90) },
-    pinned: true, per_day: 2,
-  }),
-  city('denver', 'Denver, CO', 'mountain', {
-    open: { server_ram: open(203, 'ready', -45), enterprise_ssd: open(204, 'ready', -40) },
-    last_done_at: { server_ram: ago(60 * 25), enterprise_ssd: ago(60 * 26) },
-  }),
-  city('nyc', 'New York, NY', 'northeast', {
-    open: { server_ram: open(205, 'ready', 60 * 20), enterprise_ssd: open(206, 'ready', 60 * 21) },
-    last_done_at: { server_ram: ago(240), enterprise_ssd: ago(180) },
-  }),
-  city('philly', 'Philadelphia, PA', 'northeast', {
-    open: { server_ram: open(207, 'ready', 15), enterprise_ssd: open(208, 'leased', 0, 'worker-60-14-1') },
-    last_done_at: { server_ram: ago(60 * 23), enterprise_ssd: ago(60 * 24) },
-  }),
-  city('boise', 'Boise, ID', 'mountain', {
-    enabled: false, verified_at: null, verified_as: null, added_at: ago(4),
-    open: { server_ram: null, enterprise_ssd: null },
-  }),
-  city('tulsa', 'Tulsa, OK', 'south', {
-    enabled: false, disabled_at: ago(30),
-    open: { server_ram: null, enterprise_ssd: null },
-    last_done_at: { server_ram: ago(60 * 30), enterprise_ssd: ago(60 * 30) },
-  }),
-];
-
-const task = (id: number, cityId: string, item: string, state: FleetTask['state'], over: Partial<FleetTask> = {}): FleetTask => ({
-  id, city: cityId, city_name: CITIES.find(c => c.slug === cityId)?.name ?? cityId, item, kind: 'search', due_at: ago(60),
-  priority: 0, state, worker_id: null, account_no: null, epoch: null, leased_at: null, lease_expires_at: null,
-  started_at: null, done_at: null, reason: 'cadence', result: null, ...over,
-});
-
-export const TASKS: FleetTask[] = [
+export const TASKS: WireTask[] = [
   task(201, 'houston', 'server_ram', 'leased', { worker_id: 'homelab-3', account_no: 12, epoch: 7, leased_at: ago(10), lease_expires_at: ahead(20), started_at: ago(9) }),
   task(202, 'houston', 'enterprise_ssd', 'ready', { due_at: ahead(180) }),
   task(203, 'denver', 'server_ram', 'ready', { due_at: ago(45) }),
@@ -93,7 +54,38 @@ export const TASKS: FleetTask[] = [
   task(170, 'denver', 'server_ram', 'expired', { worker_id: 'homelab-2', leased_at: ago(60 * 5), lease_expires_at: ago(60 * 4), done_at: ago(60 * 4) }),
 ];
 
-export const CITY_LOG: FleetCityLogTask[] = [
+// GET /cities: each city carries its open tasks (the same rows) and, per
+// item, when its last search finished; an item never searched is absent.
+const city = (slug: string, name: string, region: string, over: Partial<FleetCityListed> = {}): FleetCityListed => ({
+  slug, name, radius_km: 500, region, enabled: true, per_day: null, pinned: false,
+  verified_at: ago(60 * 24 * 3), verified_as: name, added_by: null, added_at: ago(60 * 24 * 5), disabled_at: null,
+  open_tasks: TASKS.filter(t => t.city === slug && (t.state === 'ready' || t.state === 'leased')),
+  last_done_at: {},
+  ...over,
+});
+
+export const CITIES: FleetCityListed[] = [
+  city('houston', 'Houston, TX', 'south', {
+    last_done_at: { server_ram: ago(60 * 25), enterprise_ssd: ago(90) },
+    pinned: true, per_day: 2,
+  }),
+  city('denver', 'Denver, CO', 'mountain', {
+    last_done_at: { server_ram: ago(60 * 25), enterprise_ssd: ago(60 * 26) },
+  }),
+  city('nyc', 'New York, NY', 'northeast', {
+    last_done_at: { server_ram: ago(240), enterprise_ssd: ago(180) },
+  }),
+  city('philly', 'Philadelphia, PA', 'northeast', {
+    last_done_at: { server_ram: ago(60 * 23), enterprise_ssd: ago(60 * 24) },
+  }),
+  city('boise', 'Boise, ID', 'mountain', { enabled: false, verified_at: null, verified_as: null, added_at: ago(4) }),
+  city('tulsa', 'Tulsa, OK', 'south', {
+    enabled: false, disabled_at: ago(30),
+    last_done_at: { server_ram: ago(60 * 30), enterprise_ssd: ago(60 * 30) },
+  }),
+];
+
+export const CITY_LOG: FleetTaskLog[] = [
   {
     ...TASKS[8],
     events: [
@@ -138,6 +130,16 @@ export const HOSTS: FleetHost[] = [
   },
 ];
 
+// The latest roll, as GET /hosts answers it beside the hosts.
+export const RELEASE: FleetRelease = {
+  image: 'ghcr.io/jinhuw/aimm-recycle:0.14.0', version: '0.14.0', state: 'rolling', started_at: ago(45), finished_at: null,
+  upgraded: ['homelab-1', 'homelab-2', 'worker-60-14-1'], skipped: ['office-mini-1'],
+  current: { worker_id: 'homelab-3', host_id: 'homelab', started_at: ago(3), pre_state: 'HEALTHY' }, failure: null,
+};
+
+// GET /workers and the slot rows: a worker's task carries its city's name.
+const held = (t: WireTask): FleetTask => ({ ...t, city_name: CITIES.find(c => c.slug === t.city)?.name ?? null });
+
 const worker = (id: string, host: string, no: number, epoch: number, over: Partial<FleetWorker> = {}): FleetWorker => ({
   worker_id: id, host_id: host, account_no: no, epoch, state: 'HEALTHY', version: '0.14.0', last_heartbeat_at: ago(1),
   vnc_port: 5901, detail: null, task: null, ...over,
@@ -146,9 +148,9 @@ const worker = (id: string, host: string, no: number, epoch: number, over: Parti
 export const WORKERS: FleetWorker[] = [
   worker('homelab-1', 'homelab', 4, 3),
   worker('homelab-2', 'homelab', 7, 5, { state: 'SESSION_EXPIRED', last_heartbeat_at: ago(3) }),
-  worker('homelab-3', 'homelab', 12, 7, { task: TASKS[0], version: '0.13.9' }),
+  worker('homelab-3', 'homelab', 12, 7, { task: held(TASKS[0]), version: '0.13.9' }),
   worker('homelab-4', 'homelab', 19, 2, { state: 'DEGRADED', version: '0.13.9' }),
-  worker('worker-60-14-1', 'worker-60-14', 31, 2, { task: TASKS[7], vnc_port: 5902 }),
+  worker('worker-60-14-1', 'worker-60-14', 31, 2, { task: held(TASKS[7]), vnc_port: 5902 }),
 ];
 
 const slot = (no: number, over: Partial<FleetSlot> = {}): FleetSlot => ({
@@ -167,4 +169,6 @@ export const SLOTS: FleetSlot[] = [
   slot(33, { last_host_id: 'homelab', epoch: 4, lease_expires_at: ago(60 * 5) }),
   slot(35, { pool_status: 'problem', last_host_id: 'homelab', epoch: 1, lease_expires_at: ago(60 * 48), note: 'checkpoint 10-20' }),
   slot(40),
+  // Parked by a manager: no worker, and the backend answers no lease for it.
+  slot(44, { last_host_id: 'homelab', epoch: 9, parked: true, note: 'parked 10-24' }),
 ];

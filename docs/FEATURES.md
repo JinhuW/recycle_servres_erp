@@ -3162,14 +3162,19 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     **Enable anyway**. Row actions: pin, per-day, **Search now** (a manual
     task per item, ahead of everything else), **Remove** after a confirm
     (the city is disabled and its waiting tasks cancelled; its history
-    stays). **Show removed** lists removed cities with a **Restore**.
+    stays). **Show removed** lists removed cities with a **Restore**; a
+    city removed before its slug was verified asks whether to **Enable
+    anyway** instead (v1.341.0). Search now passes over an item a worker is
+    already searching.
   - **Queue** (`/#/fleet/queue`, v1.337.0): a board per item with one cell
     per city in the order the round runs — searched today, being searched,
     due, not due yet, cancelled — and a sentence of counts under each; a
-    cell opens the city's log. **Start the round now** previews, per item,
-    how many waiting tasks fall due and how many are skipped because the
-    city was searched within the fresh window (2 h by default), then makes
-    them due. The **Tasks** table lists the last 24 h and everything
+    cell opens the city's log; only searches count, so a slug check is not
+    the day's search (v1.341.0). **Start the round now** previews, per item,
+    how many searches waiting for later fall due and how many are skipped
+    because the city was searched within the fresh window (2 h by default),
+    then makes them due and says how many started and how many were skipped
+    (v1.341.0). The **Tasks** table lists the last 24 h and everything
     waiting, filtered by state, item, city and worker, with each task's
     state, time (due, lease or end), worker, why it exists (cadence, new
     city, search now, round started, quarantine probe, verify slug) and its
@@ -3184,16 +3189,21 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     roll's progress with the worker being replaced. **Add host** registers
     one and shows its token once, with a copy button and the three
     variables the agent needs; it is never shown again. **Release** names a
-    worker image and version and starts the roll: every host replaces one
-    idle worker at a time. Removing a host asks first and says how many
+    worker image and version and starts the roll: the ERP replaces one idle
+    worker at a time across the fleet. Since v1.341.0 a banner above the
+    table follows the latest roll: rolling, rolled out, stopped (with the
+    reason) or superseded, the workers replaced and left out, and the one
+    being replaced now. Removing a host asks first and says how many
     workers still run there.
   - **Slots** (`/#/fleet/slots`, v1.337.0): one row per fleet account —
     number, masked uid, pool status and the worker's state, host (or the
     last host it ran on), worker (linked to its page) with the city it is
-    searching, epoch, lease (held, lapsed, free) with its end, minutes of
-    searching today against the budget as a ring, and quarantine with its
-    end and a **Release**. **Park** frees the account after a confirm (its
-    worker exits on its next call). **Account pool** leads to the
+    searching, epoch, lease (held, lapsed, free, or **Parked**) with its end,
+    minutes of searching today against the budget as a ring, and quarantine
+    with its end and a **Release**. **Park** takes the account out after a
+    confirm (its worker exits on its next call and nothing claims it);
+    **Unpark** (v1.341.0) lets it be claimed again, after a confirm that says
+    the next worker's start is a Facebook login. **Account pool** leads to the
     credentials.
   - **The worker page** (`/#/fleet/worker/<id>`, v1.337.0) recognises a
     fleet worker: state, last heartbeat, account and epoch, version, the task

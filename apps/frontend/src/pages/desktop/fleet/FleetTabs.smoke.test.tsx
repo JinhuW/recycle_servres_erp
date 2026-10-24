@@ -16,14 +16,14 @@ vi.mock('../../../lib/fleet', async () => {
 });
 vi.mock('../../../lib/errorToast', () => ({ handleFetchError: vi.fn(), showSuccessToast: vi.fn() }));
 
-const { CITIES, CITY_LOG, HOSTS, NOW, SLOTS, TASKS } = await import('./fixtures');
+const { CITIES, CITY_LOG, HOSTS, NOW, RELEASE, SLOTS, TASKS } = await import('./fixtures');
 const { CitiesTable } = await import('./FleetCitiesTab');
 const { CityLogTable, QueueBoard, TaskTable } = await import('./FleetQueueTab');
-const { HostsTable } = await import('./FleetHostsTab');
+const { HostsTable, ReleaseBanner } = await import('./FleetHostsTab');
 const { SlotsTable } = await import('./FleetSlotsTab');
 const { FleetWorkerPage } = await import('./FleetWorkerSwitch');
 const { WORKERS } = await import('./fixtures');
-const { EMPTY_TASK_FILTER } = await import('./fleetBoard');
+const { EMPTY_TASK_FILTER, withCityNames } = await import('./fleetBoard');
 
 const noop = () => undefined;
 const items = ['server_ram', 'enterprise_ssd'];
@@ -68,7 +68,7 @@ describe('Queue tab', () => {
   });
   it('honours a filter', () => {
     const html = renderToString(
-      <TaskTable tasks={TASKS} items={items} filter={{ ...EMPTY_TASK_FILTER, state: 'cancelled' }} onFilter={noop} onCity={noop} now={NOW} />,
+      <TaskTable tasks={withCityNames(TASKS, CITIES)} items={items} filter={{ ...EMPTY_TASK_FILTER, state: 'cancelled' }} onFilter={noop} onCity={noop} now={NOW} />,
     );
     expect(html).toContain('Tulsa, OK');
     expect(html).not.toContain('Houston, TX');
@@ -93,6 +93,16 @@ describe('Hosts tab', () => {
     expect(html).toContain('fleetRollProgress');
     expect(html).toContain('1.340.0');
   });
+  it('shows the latest roll from the hosts answer', () => {
+    const html = renderToString(<ReleaseBanner release={RELEASE} now={NOW} />);
+    expect(html).toContain('fleetReleaseState_rolling');
+    expect(html).toContain('0.14.0');
+    expect(html).toContain('fleetReleaseCounts');
+    expect(html).toContain('fleetRollReplacing');
+    const failed = renderToString(<ReleaseBanner release={{ ...RELEASE, state: 'failed', current: null, failure: 'homelab-3 did not come back' }} now={NOW} />);
+    expect(failed).toContain('fleetReleaseState_failed');
+    expect(failed).toContain('homelab-3 did not come back');
+  });
 });
 
 describe('Slots tab', () => {
@@ -106,6 +116,13 @@ describe('Slots tab', () => {
     expect(html).toContain('ff-ring-full');            // #12 has used its budget
     expect(html).toContain('fpInFleet');
     expect(html).toContain('fpProblem');
+  });
+  it('shows a parked slot as parked with an Unpark action, not as free', () => {
+    const html = renderToString(<SlotsTable slots={[SLOTS[8]]} onChanged={noop} now={NOW} />);
+    expect(html).toContain('fleetLeaseParked');
+    expect(html).toContain('fleetUnpark');
+    expect(html).not.toContain('fleetLeaseNone');
+    expect(html).not.toContain('>fleetPark<');
   });
 });
 

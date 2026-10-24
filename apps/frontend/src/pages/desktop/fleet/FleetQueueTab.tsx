@@ -9,7 +9,7 @@ import {
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
 import {
-  BOARD_ORDER, boardCells, countsSentence, dueLabel, EMPTY_TASK_FILTER, easternClock, filterTasks, roundStartPreview, sortTasks,
+  BOARD_ORDER, boardCells, countsSentence, dueLabel, EMPTY_TASK_FILTER, easternClock, filterTasks, roundStartPreview, sortTasks, withCityNames,
   type BoardCell, type BoardState, type TaskFilter, type Translate,
 } from './fleetBoard';
 import { Clock, EmptyRow, TabCard, UnavailableCard, useFleetPoll, WorkerLink } from './shared';
@@ -44,7 +44,7 @@ export function FleetQueueTab() {
       fleetApi.cities(), fleetApi.items(), fleetApi.tasks({ since }),
       // The settings only feed the round-start preview; the board stands without them.
       fleetApi.settings().catch(() => null),
-    ]).then(([cities, items, tasks, settings]) => ({ cities, items, tasks, settings }));
+    ]).then(([cities, items, tasks, settings]) => ({ cities, items, tasks: withCityNames(tasks, cities), settings }));
   });
   const [starting, setStarting] = useState(false);
   const [logOf, setLogOf] = useState<{ slug: string; name: string } | null>(null);
@@ -213,7 +213,7 @@ function resultText(t: Translate, task: FleetTask): string {
 
 // Start the round now. The preview is worked out here from the same rule the
 // backend applies, so the dialog says what will happen before it does; the
-// answer's counts go into the toast.
+// answer's counts (started, skipped) go into the toast.
 export function StartRoundDialog({ cities, items, freshHours, onClose, onDone, now = Date.now() }: {
   cities: readonly FleetCity[]; items: readonly string[]; freshHours: number; onClose: () => void; onDone: () => void; now?: number;
 }) {
@@ -225,9 +225,8 @@ export function StartRoundDialog({ cities, items, freshHours, onClose, onDone, n
     if (busy) return;
     setBusy(true);
     try {
-      const done = await fleetApi.startRound();
-      const n = Object.values(done.items).reduce((sum, i) => sum + i.due, 0);
-      showSuccessToast(t('fleetRoundStarted', { n }));
+      const { started, skipped } = await fleetApi.startRound();
+      showSuccessToast(t(skipped ? 'fleetRoundStartedSkipped' : 'fleetRoundStarted', { n: started, skipped }));
       onDone();
     } catch (e) {
       handleFetchError(e);

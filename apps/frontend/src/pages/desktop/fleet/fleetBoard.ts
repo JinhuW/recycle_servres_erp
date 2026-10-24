@@ -3,7 +3,7 @@
 // tables show. Kept out of the components so they can be unit-tested without
 // React.
 
-import type { FleetCity, FleetHost, FleetSlot, FleetTask } from '../../../lib/fleet';
+import type { FleetCity, FleetHost, FleetRelease, FleetSlot, FleetTask } from '../../../lib/fleet';
 
 export type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -67,6 +67,12 @@ export function dueLabel(t: Translate, dueAt: string | null | undefined, now: nu
 
 // ── The board ────────────────────────────────────────────────────────────────
 
+/** The city's open search for one item, if any. A verify-slug or probe task
+ *  is open on the same pair at times; the board and the round count searches. */
+export function openSearch(city: FleetCity, item: string): FleetTask | null {
+  return city.open_tasks.find(t => t.item === item && t.kind === 'search') ?? null;
+}
+
 // Where a city stands for one item: its open task is due (or overdue), waits
 // for its time, or a worker holds it; or nothing is open because the city was
 // searched today, or because its tasks were cancelled (the city was removed).
@@ -96,7 +102,8 @@ export function boardCells(
   const doneToday = new Map<string, FleetTask>();
   const cancelledToday = new Map<string, FleetTask>();
   for (const task of tasks) {
-    if (task.item !== item) continue;
+    // A slug check or a quarantine probe is not the city's search for the day.
+    if (task.item !== item || task.kind !== 'search') continue;
     if (task.state === 'done' && task.done_at && task.done_at >= today) {
       const prev = doneToday.get(task.city);
       if (!prev || (prev.done_at ?? '') < task.done_at) doneToday.set(task.city, task);
@@ -106,7 +113,7 @@ export function boardCells(
   }
   const cells: BoardCell[] = [];
   for (const city of cities) {
-    const open = city.open[item] ?? null;
+    const open = openSearch(city, item);
     const done = doneToday.get(city.slug);
     const cancelled = cancelledToday.get(city.slug);
     if (open?.state === 'leased') {
@@ -147,8 +154,9 @@ export function countsSentence(t: Translate, counts: BoardCounts): string {
 
 export type RoundPreviewItem = { due: number; skipped: number; ready: number };
 
-/** What `round/start` would do, worked out from the cities: every ready task
- *  falls due unless its city-item was searched within `freshHours`. */
+/** What `round/start` would do, worked out from the cities by the backend's
+ *  rule: every search waiting for later falls due now unless its city-item
+ *  finished within `freshHours`. One already due is left as it is. */
 export function roundStartPreview(
   cities: readonly FleetCity[], items: readonly string[], freshHours: number, now: number = Date.now(),
 ): Record<string, RoundPreviewItem> {
@@ -157,8 +165,8 @@ export function roundStartPreview(
   for (const item of items) {
     const row: RoundPreviewItem = { due: 0, skipped: 0, ready: 0 };
     for (const city of cities) {
-      const open = city.open[item];
-      if (!open || open.state !== 'ready') continue;
+      const open = openSearch(city, item);
+      if (!open || open.state !== 'ready' || Date.parse(open.due_at) <= now) continue;
       row.ready += 1;
       const last = city.last_done_at[item];
       if (last && Date.parse(last) >= fresh) row.skipped += 1;
@@ -183,8 +191,7 @@ export function cityStanding(c: FleetCity): CityStanding {
 export function nextDue(c: FleetCity): { at: string | null; holder: string | null } {
   let at: string | null = null;
   let holder: string | null = null;
-  for (const open of Object.values(c.open)) {
-    if (!open) continue;
+  for (const open of c.open_tasks) {
     if (open.state === 'leased' && open.worker_id) holder = open.worker_id;
     if (at === null || open.due_at < at) at = open.due_at;
   }
@@ -200,18 +207,24 @@ export const marketplaceUrl = (slug: string): string => `https://www.facebook.co
 /** Containers the agent reported running, against the count the ERP wants. */
 export function hostRunning(h: FleetHost): { running: number; desired: number } {
   const running = (h.report?.containers ?? []).filter(c => c.state === 'running').length;
-  return { running, desired: h.desired?.count ?? (h.authoritative ? h.capacity : 0) };
+  return { running, desired: h.desired.count };
 }
 
 /** A roll's progress on one host: workers already on the target image, of
  *  the containers it runs; null when no release is rolling. */
 export function rollProgress(h: FleetHost): { onTarget: number; total: number; replacing: string | null } | null {
-  const target = h.desired?.image;
+  const target = h.desired.image;
   const containers = h.report?.containers ?? [];
   if (!target || containers.length === 0) return null;
   const onTarget = containers.filter(c => c.image === target).length;
-  if (onTarget === containers.length && !h.desired?.roll) return null;
-  return { onTarget, total: containers.length, replacing: h.desired?.roll?.replace ?? null };
+  if (onTarget === containers.length && !h.desired.roll) return null;
+  return { onTarget, total: containers.length, replacing: h.desired.roll?.replace ?? null };
+}
+
+/** The latest release's progress, for the Hosts tab's banner; null when none was ever started. */
+export function releaseSummary(r: FleetRelease | null): { upgraded: number; skipped: number; replacing: string | null } | null {
+  if (!r) return null;
+  return { upgraded: r.upgraded.length, skipped: r.skipped.length, replacing: r.current?.worker_id ?? null };
 }
 
 export type Liveness = 'live' | 'stale' | 'dead' | 'never';
@@ -251,7 +264,23 @@ export function leaseLive(s: Pick<FleetSlot, 'lease_expires_at'>, now: number = 
   return Boolean(s.lease_expires_at && Date.parse(s.lease_expires_at) > now);
 }
 
+/** Where a slot's lease stands. A parked slot answers no lease at all, so it
+ *  is told apart by its flag rather than read as free. */
+export type SlotLease = 'parked' | 'held' | 'lapsed' | 'free';
+
+export function slotLease(s: Pick<FleetSlot, 'lease_expires_at' | 'parked'>, now: number = Date.now()): SlotLease {
+  if (s.parked) return 'parked';
+  if (!s.lease_expires_at) return 'free';
+  return leaseLive(s, now) ? 'held' : 'lapsed';
+}
+
 // ── Task table filters ───────────────────────────────────────────────────────
+
+/** The task list answers city slugs only; the table shows the city's name. */
+export function withCityNames(tasks: readonly FleetTask[], cities: readonly FleetCity[]): FleetTask[] {
+  const names = new Map(cities.map(c => [c.slug, c.name]));
+  return tasks.map(t => ({ ...t, city_name: t.city_name ?? names.get(t.city) ?? null }));
+}
 
 export type TaskFilter = { state: string; item: string; city: string; worker: string };
 export const EMPTY_TASK_FILTER: TaskFilter = { state: '', item: '', city: '', worker: '' };

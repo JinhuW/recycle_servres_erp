@@ -3,18 +3,19 @@ import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { ApiError } from '../../../lib/api';
-import { fleetApi, type FleetHost, type FleetHostCreated } from '../../../lib/fleet';
+import { fleetApi, type FleetHost, type FleetHostCreated, type FleetRelease } from '../../../lib/fleet';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
-import { hostRunning, rollProgress } from './fleetBoard';
-import { ConfirmDialogBody, EmptyRow, SeenChip, TabCard, UnavailableCard, useFleetPoll } from './shared';
+import { hostRunning, releaseSummary, rollProgress } from './fleetBoard';
+import { Clock, ConfirmDialogBody, EmptyRow, SeenChip, TabCard, UnavailableCard, useFleetPoll } from './shared';
 
 // ─── Hosts ────────────────────────────────────────────────────────────────────
 // The machines that run worker containers. Each runs one agent that asks the
 // ERP what it should run (count, image) and reports what it does run. A host
 // is observe-only until a manager makes it authoritative, so a freshly
 // registered agent starts nothing by accident. A release names an image and a
-// version; every authoritative host then replaces one idle worker at a time.
+// version; the ERP then replaces one idle worker at a time across the fleet,
+// and the roll's state (the latest release only) shows above the table.
 
 const CAPACITY_MAX = 64;
 
@@ -25,10 +26,11 @@ export function FleetHostsTab() {
   const [releasing, setReleasing] = useState(false);
 
   if (data === 'unavailable') return <UnavailableCard text={t('fleetNotServed')} />;
-  const hosts = data ?? [];
+  const hosts = data?.hosts ?? [];
+  const release = data?.release ?? null;
   const running = hosts.reduce((n, h) => n + hostRunning(h).running, 0);
   const desired = hosts.reduce((n, h) => n + hostRunning(h).desired, 0);
-  const image = hosts.find(h => h.desired?.image)?.desired?.image ?? null;
+  const image = hosts.find(h => h.desired.image)?.desired.image || null;
 
   return (
     <div className="fp-pool">
@@ -42,13 +44,41 @@ export function FleetHostsTab() {
             <Icon name="plus" size={13} />{t('fleetHostAdd')}
           </button>
         </>}>
+        {release && <ReleaseBanner release={release} />}
         {data === null ? <TableSkeleton rows={3} cols={7} /> : <HostsTable hosts={hosts} onChanged={reload} />}
       </TabCard>
       {image && (
         <p className="fp-muted fleet-note">{t('fleetHostsImage', { image })}</p>
       )}
       {adding && <AddHostDialog onClose={() => setAdding(false)} onChanged={reload} />}
-      {releasing && <ReleaseDialog current={image} onClose={() => setReleasing(false)} onDone={() => { setReleasing(false); reload(); }} />}
+      {releasing && <ReleaseDialog current={release?.image ?? image} onClose={() => setReleasing(false)} onDone={() => { setReleasing(false); reload(); }} />}
+    </div>
+  );
+}
+
+const RELEASE_CHIP: Record<FleetRelease['state'], string> = {
+  rolling: 'chip info', done: 'chip pos', failed: 'chip neg', superseded: 'chip muted',
+};
+
+/** The latest roll: its state, how far it got, the worker being replaced now and why it stopped if it did. */
+export function ReleaseBanner({ release, now }: { release: FleetRelease; now?: number }) {
+  const { t } = useT();
+  const sum = releaseSummary(release)!;
+  return (
+    <div className="card-body fleet-release">
+      <span className="fp-holder">
+        <span>
+          <span className={RELEASE_CHIP[release.state]}>{t(`fleetReleaseState_${release.state}`)}</span>
+          {' '}<span className="mono">{release.version}</span>
+          <small className="fp-muted mono"> {release.image}</small>
+        </span>
+        <small>
+          {t('fleetReleaseCounts', { n: sum.upgraded, skipped: sum.skipped })}
+          {sum.replacing && <> · {t('fleetRollReplacing', { worker: sum.replacing })}</>}
+          {' · '}{t('fleetReleaseSince')} <Clock at={release.started_at} now={now} />
+        </small>
+        {release.failure && <small className="fp-warn">{release.failure}</small>}
+      </span>
     </div>
   );
 }
@@ -102,7 +132,7 @@ export function HostsTable({ hosts, onChanged, now = Date.now() }: { hosts: read
                 <td>
                   <span className="fp-holder">
                     <span className="mono">{h.host_id}</span>
-                    {h.desired?.version && <small>{t('fleetHostWorkerVersion', { version: h.desired.version })}</small>}
+                    {h.desired.version && <small>{t('fleetHostWorkerVersion', { version: h.desired.version })}</small>}
                   </span>
                 </td>
                 <td>

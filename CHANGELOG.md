@@ -17,6 +17,36 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.341.0] - 2026-10-24
+
+The fleet tabs under **Monitors ▸ Facebook** now read the routes the backend
+actually ships. They were built against mocks before the backend merged, and
+the two disagreed on most answers: the cities, items, tasks and city-log
+routes answer bare rows where the page expected envelopes, a city carries its
+open tasks as a list rather than a map per item, the round start answers
+`{started, skipped}`, and the hosts list comes with the latest release beside
+it. Against a real backend every tab would have broken on its first poll.
+
+- **Cities, Queue.** The page reads a city's `open_tasks` and counts only
+  searches on the board, so a finished slug check no longer reads as the day's
+  search. Restoring a removed city whose slug was never verified gets the
+  backend's `409 unverified` and asks whether to **Enable anyway**; Search now
+  passes over an item a worker is already searching. The task table names
+  cities from the city list, since the task rows carry slugs only.
+- **Start the round now.** The preview follows the backend's rule (only
+  searches waiting for later move; one already due is left), and the toast
+  reports the answer's started and skipped counts.
+- **Hosts.** A banner shows the latest roll from `GET /hosts`: its state,
+  version and image, workers replaced and left out, the one being replaced now
+  and, if it stopped, why.
+- **Slots.** A parked slot reads **Parked**, not free (the backend answers no
+  lease for it), with an **Unpark** action that lets the account be claimed
+  again; any slot that is not parked can be parked.
+- The fetchers' tests answer with the backend's shapes, and the fixtures the
+  smoke tests render are typed from the shared wire types, so the two cannot
+  drift apart silently again. Checked end to end against a local backend with
+  a made-up account and the fake worker.
+
 ## [1.340.0] - 2026-10-24
 
 What the fleet's first end-to-end run on a local backend turned up (RS-394,
