@@ -49,9 +49,35 @@ deployed?" harder to answer.
     routes with made-up data, which the entrypoint and monitor-loop suites run
     against (`.venv-aimm/bin/python -m pytest rs_worker/tests`).
 
+- **A stopping fleet worker hands its last result back.** On `docker stop`
+  (SIGTERM, which the monitor's CLI turns into KeyboardInterrupt), an
+  exception or a clean exit, a finished task waiting to be reported is sent
+  once to `next-task` with `take: false` and `wait: 0`: the fleet closes it
+  and leases nothing, answering `{task: null, reason: "done_only"}`. Before,
+  the only way to report a result was the next ask, so the worker's last
+  task stayed leased to a dead container until `lease_minutes` ran out. The
+  call has an 8 s timeout and never logs in; a stale epoch skips it (its
+  token is dead). A fleet that predates `take` would lease a task instead,
+  which then simply expires. The fake fleet answers `take: false` as the
+  ERP does.
+
 ### Changed
 
-- **The vendored monitor is pinned at the fleet-mode commit** (VENDOR.md).
+- **The vendored monitor is pinned at the fleet-mode commit** (VENDOR.md),
+  now `9a06d98`, which adds the hand-back above.
+- **A result the fleet did not answer is sent again** with the next ask
+  instead of being dropped; the fleet ignores a `done` it already took.
+- **`docker stop -t 30` fits.** The entrypoint now installs its SIGTERM
+  forwarding before it starts anything (a stop during start-up was lost),
+  gives the monitor 24 s, then stops Xvfb and x11vnc together within 3 s. Its
+  kill timer is a daemon and cancelled once the monitor exits; before, a
+  pending 25 s timer kept the entrypoint alive after a monitor that had
+  already left. The session upload on the way out has a 10 s timeout.
+- **`date_listed` as a list, as master.toml writes it**
+  (`["last 7 days", "last 7 days"]`), reaches a fleet worker unchanged through
+  the claim's `settings.search` and searches with `daysSinceListed=7` on the
+  first and later searches, exactly as on the old path. It already worked;
+  tests in both suites now pin it, for the marketplace and for an item.
 
 ## [0.13.18] - 2026-10-24
 

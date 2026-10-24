@@ -57,8 +57,11 @@ EXIT_CONFIG = 70
 HEALTHZ_PORT = 8788
 CLAIM_ATTEMPTS = 3
 CLAIM_RETRY_S = 10
-# supervisord gave the monitor 25 s to save its session on SIGTERM; so do we.
-MONITOR_STOP_GRACE_S = 25
+# The agent stops a worker with `docker stop -t 30`. The monitor gets 24 s
+# to hand back its last result and save its session, the display 3 s after
+# it, which leaves a margin before Docker's SIGKILL.
+MONITOR_STOP_GRACE_S = 24
+DISPLAY_STOP_GRACE_S = 3
 
 TEMPLATE = Path(__file__).with_name("config.template.toml")
 # Which of the account's cookies name the browser rather than the login.
@@ -440,42 +443,80 @@ def serve_healthz(health: _Health, port: int) -> http.server.ThreadingHTTPServer
     return server
 
 
+def stop_all(procs: Sequence[subprocess.Popen], grace_s: float) -> None:
+    """SIGTERM every process at once, then SIGKILL what is left after `grace_s` in all."""
+    for proc in procs:
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+    deadline = time.monotonic() + grace_s
+    for proc in procs:
+        try:
+            proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+
 def run_monitor(command: Sequence[str], env: Dict[str, str], health: _Health, healthz_port: int) -> int:
     """Run the display and the monitor; the monitor's exit code, 75 kept as 75.
 
-    SIGTERM (`docker stop`) goes to the monitor, which saves its session and
-    leaves 0 within `MONITOR_STOP_GRACE_S`; after that it is killed.
+    SIGTERM (`docker stop`) goes to the monitor, which hands back its last
+    result, saves its session and leaves 0 within `MONITOR_STOP_GRACE_S`;
+    after that it is killed. tini sends the signal to this process only, so
+    the display stays up while the browser saves and is stopped after.
     """
-    display = start_display(env)
-    monitor = subprocess.Popen(list(command), env=env)
-    health.monitor = monitor
-    server = serve_healthz(health, healthz_port)
-    log(f"monitor started (pid {monitor.pid}); /healthz on {healthz_port}")
+    procs: Dict[str, subprocess.Popen] = {}
+    stopping = threading.Event()
+
+    def kill_monitor() -> None:
+        if "monitor" in procs:
+            procs["monitor"].kill()
+
+    # Daemon, and started once: a pending timer must not keep this process
+    # alive after the monitor has gone.
+    killer = threading.Timer(MONITOR_STOP_GRACE_S, kill_monitor)
+    killer.daemon = True
+
+    def stop_monitor() -> None:
+        try:
+            procs["monitor"].send_signal(signal.SIGTERM)
+        except OSError:
+            pass
+        if not killer.is_alive():
+            killer.start()
 
     def forward(signum: int, _frame: Any) -> None:
         log(f"signal {signum}: stopping the monitor")
-        try:
-            monitor.send_signal(signal.SIGTERM)
-        except OSError:
-            pass
-        threading.Timer(MONITOR_STOP_GRACE_S, monitor.kill).start()
+        stopping.set()
+        if "monitor" in procs:
+            stop_monitor()
 
+    # Installed before anything starts, so a stop during start-up is not lost.
     previous = {}
     if threading.current_thread() is threading.main_thread():
         for signum in (signal.SIGTERM, signal.SIGINT):
             previous[signum] = signal.signal(signum, forward)
+    display: List[subprocess.Popen] = []
+    server: http.server.ThreadingHTTPServer | None = None
     try:
+        display = start_display(env)
+        monitor = subprocess.Popen(list(command), env=env)
+        procs["monitor"] = monitor
+        if stopping.is_set():
+            stop_monitor()
+        health.monitor = monitor
+        server = serve_healthz(health, healthz_port)
+        log(f"monitor started (pid {monitor.pid}); /healthz on {healthz_port}")
         code = monitor.wait()
     finally:
+        killer.cancel()
         for signum, handler in previous.items():
             signal.signal(signum, handler)
-        server.shutdown()
-        for proc in display:
-            try:
-                proc.terminate()
-                proc.wait(timeout=5)
-            except (OSError, subprocess.TimeoutExpired):
-                proc.kill()
+        if server is not None:
+            server.shutdown()
+        stop_all(display, DISPLAY_STOP_GRACE_S)
     if code < 0:
         return 128 - code
     return code

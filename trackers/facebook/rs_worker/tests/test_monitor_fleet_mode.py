@@ -53,7 +53,10 @@ def rendered_config(fleet: FakeFleet, home: Path) -> Path:
 
 
 def monitor_for(
-    monkeypatch: pytest.MonkeyPatch, config_path: Path, asks_allowed: int
+    monkeypatch: pytest.MonkeyPatch,
+    config_path: Path,
+    asks_allowed: int,
+    stop: type[BaseException] = EndOfScriptError,
 ) -> Dict[str, Any]:
     """A real MarketplaceMonitor on the rendered config, with the browser mocked.
 
@@ -74,7 +77,7 @@ def monitor_for(
         def next_task(self, done: Any, wait: int) -> Any:
             Scripted.asks += 1
             if Scripted.asks > asks_allowed:
-                raise EndOfScriptError()
+                raise stop()
             return super().next_task(done, wait)
 
     monkeypatch.setattr(monitor_mod, "FleetClient", Scripted)
@@ -197,3 +200,58 @@ def test_an_empty_fleet_is_asked_again_and_an_unreachable_one_waited_for(
         seen["monitor"].fleet_loop()
     assert seen["sleeps"] == [30, 60, 120]
     assert seen["logins"] == 1
+
+
+def test_docker_stop_hands_the_last_result_back_and_takes_nothing(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shared_env: None
+) -> None:
+    config_path = rendered_config(fleet, tmp_path / "home")
+    first = fleet.add_task("houston", "server_ram")
+    waiting = fleet.add_task("denver", "server_ram")
+    # SIGTERM reaches the monitor as KeyboardInterrupt (cli.py), here on the
+    # ask after the first task.
+    seen = monitor_for(monkeypatch, config_path, asks_allowed=1, stop=KeyboardInterrupt)
+    with pytest.raises(KeyboardInterrupt):
+        seen["monitor"].fleet_loop()
+
+    assert seen["searched"] == [("server_ram", "houston")]
+    asks = [r[2] for r in fleet.requests if r[1] == "/api/fleet/worker/next-task"]
+    assert asks[-1] == {"done": fleet.done[-1], "wait": 0, "take": False}
+    assert [d["task_id"] for d in fleet.done] == [first["id"]]
+    # Nothing new was leased to a worker on its way out.
+    assert fleet.tasks == [waiting]
+    assert seen["logins"] == 1
+
+
+def test_master_tomls_date_listed_list_reaches_the_search_url(
+    fleet: FakeFleet, tmp_path: Path, shared_env: None
+) -> None:
+    from unittest.mock import MagicMock as Mock
+
+    from ai_marketplace_monitor.config import Config
+    from ai_marketplace_monitor.facebook import FacebookMarketplace
+
+    # What configs/master.toml says, as the fleet hands it over in settings.search.
+    literal = ["last 7 days", "last 7 days"]
+    assert fleet_settings_search()["date_listed"] == literal
+    config_path = rendered_config(fleet, tmp_path / "home")
+    with open(config_path, "rb") as f:
+        assert tomllib.load(f)["marketplace"]["facebook"]["date_listed"] == literal
+
+    config = Config([config_path], logging.getLogger("fleet-mode-test"))
+    assert config.marketplace["facebook"].date_listed == [7, 7]
+    market = FacebookMarketplace("facebook", Mock())
+    market.configure(config.marketplace["facebook"])
+    item = config.item["server_ram"]
+    first = market.base_search_options(item)
+    item.searched_count += 1
+    assert first == market.base_search_options(item) == [
+        "daysSinceListed=7",
+        "deliveryMethod=local_pick_up",
+    ]
+
+
+def fleet_settings_search() -> Dict[str, Any]:
+    from .fake_fleet import SETTINGS
+
+    return dict(SETTINGS["search"])

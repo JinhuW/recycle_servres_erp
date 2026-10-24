@@ -1,7 +1,8 @@
 r"""A stand-in for the ERP's fleet worker API, for tests and local runs.
 
 Implements `/api/fleet/worker/*` as CONTRACTS.md §5 describes it: `claim`
-(host scope), `heartbeat`, `next-task` with the hold, `events` and `session`
+(host scope), `heartbeat`, `next-task` with the hold (and `take: false`,
+which closes `done` and answers `done_only` at once), `events` and `session`
 (worker scope), with made-up account data. The worker token has the real
 shape (`base64url(json{worker_id, account_no, epoch, exp}) . hmac`) under a
 made-up key, and a token whose epoch is not the slot's current one gets
@@ -242,6 +243,9 @@ class FakeFleet:
     def next_task(self, body: Dict[str, Any]) -> Tuple[int, Any]:
         if body.get("done"):
             self.done.append(body["done"])
+        if body.get("take") is False:
+            # A stopping worker hands its last result back and takes nothing.
+            return 200, {"task": None, "reason": "done_only"}
         wait = min(float(body.get("wait") or 0), self.hold_seconds)
         deadline = time.monotonic() + wait
         with self._wake:
