@@ -1,0 +1,312 @@
+/* Monitors ▸ Facebook: the ERP-owned fleet tabs (pages/desktop/fleet/*).
+   Everything shared with the coordinator's Fleet tab — tables, chips, the
+   round board's layout, the budget ring — comes from facebookPool.css; this
+   file holds only what those tabs add. */
+
+.fleet-card .card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fleet-card .card-head > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fleet-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.fleet-unavailable {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  color: var(--fg-muted);
+}
+.fleet-note {
+  font-size: 12px;
+  margin: -6px 2px 0;
+}
+.fleet-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Tables */
+.fleet-table td {
+  vertical-align: middle;
+}
+.fleet-table .fleet-row-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.fleet-table .fleet-row-actions .btn + .btn {
+  margin-left: 6px;
+}
+.fleet-row-removed td {
+  opacity: 0.55;
+}
+.fleet-link {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.fleet-link:hover {
+  color: var(--accent-strong);
+}
+.fleet-perday {
+  width: 88px;
+  padding: 4px 4px;
+  font-size: 12px;
+}
+.fleet-table th,
+.fleet-table td {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.fleet-table .fleet-row-actions {
+  padding-right: 14px;
+}
+.fleet-inline-action {
+  margin-top: 4px;
+  align-self: flex-start;
+}
+.fleet-log-empty {
+  margin: 0;
+  padding: 4px 0;
+  font-size: 12.5px;
+}
+.fleet-table .fleet-row-actions .btn.sm {
+  padding: 4px 8px;
+}
+.fleet-pin-mark {
+  margin-left: 5px;
+  color: var(--warn-strong);
+  vertical-align: -1px;
+}
+.fleet-pinned {
+  color: var(--warn-strong);
+}
+.fleet-verifying {
+  animation: fleet-pulse 1.6s ease-in-out infinite;
+}
+@keyframes fleet-pulse {
+  50% { opacity: 0.55; }
+}
+
+/* The queue board: a city is a button here, not a mark, so it opens its log. */
+.fleet-cell {
+  display: block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.ff-round-key .fleet-cell {
+  cursor: default;
+}
+.fleet-cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.fleet-cell-done { background: var(--accent); }
+.fleet-cell-leased { background: var(--info); }
+.fleet-cell-due {
+  background: var(--bg-soft);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.fleet-cell-later {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.fleet-cell-cancelled {
+  background: repeating-linear-gradient(135deg, var(--border) 0 2px, transparent 2px 4px);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.fleet-board-card .ff-round-body {
+  padding-top: 14px;
+}
+
+/* Task table filters */
+.fleet-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 4px;
+}
+.fleet-filters .input {
+  width: auto;
+  min-width: 120px;
+  padding: 5px 8px;
+  font-size: 12.5px;
+}
+.fleet-filters-count {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+/* Hosts */
+.fleet-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-subtle);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.fleet-switch i {
+  display: inline-block;
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--border-strong);
+  position: relative;
+  transition: background 0.15s ease;
+}
+.fleet-switch i::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.15s ease;
+}
+.fleet-switch.on i { background: var(--accent); }
+.fleet-switch.on i::after { transform: translateX(12px); }
+.fleet-switch.on { color: var(--fg); }
+.fleet-switch:disabled { opacity: 0.5; cursor: not-allowed; }
+.fleet-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.fleet-stepper b {
+  min-width: 2ch;
+  text-align: center;
+}
+.fleet-token {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fleet-token code {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  font-size: 12px;
+  word-break: break-all;
+  user-select: all;
+}
+.fleet-env {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-soft);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+/* Forms in dialogs */
+.fleet-form {
+  display: grid;
+  gap: 14px;
+}
+.fleet-form p {
+  margin: 0;
+}
+.fleet-field {
+  display: grid;
+  gap: 5px;
+  font-size: 13px;
+}
+.fleet-field > span {
+  font-weight: 500;
+}
+.fleet-field small {
+  font-size: 12px;
+}
+.fleet-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.fleet-verify {
+  display: grid;
+  gap: 10px;
+}
+.fleet-verify p {
+  margin: 0;
+}
+.fleet-verify-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fleet-spin {
+  animation: fleet-spin 1.2s linear infinite;
+}
+@keyframes fleet-spin {
+  to { transform: rotate(360deg); }
+}
+.fleet-danger {
+  background: var(--neg);
+  border-color: var(--neg);
+}
+
+/* The worker page */
+.fleet-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 10px 24px;
+  margin: 0;
+  padding: 16px 18px;
+  font-size: 13px;
+}
+.fleet-facts dt {
+  color: var(--fg-subtle);
+}
+.fleet-facts dd {
+  margin: 0;
+}
+.fleet-vnc-screen {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  background: #111;
+}
+.fleet-vnc-canvas {
+  position: absolute;
+  inset: 0;
+}
+.fleet-vnc-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+}

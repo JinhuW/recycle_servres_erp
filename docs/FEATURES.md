@@ -3141,6 +3141,65 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     table opens that city's last 24 h across every worker and item.
   - **Older consoles.** Against an older console the card and the city links
     show nothing.
+- **Fleet (ERP-owned)** — since v1.337.0 (RS-394) **Monitors ▸ Facebook**
+  has four more tabs, between Fleet and Account pool, for the task queue the
+  ERP itself runs: the backend owns the city catalog, the tasks, the hosts and
+  the account slots (`/api/fleet`), and identical worker containers on any
+  host pull their next city from it. The tabs are managers-only and
+  desktop-only; the phone has no fleet pages. Times read in US Eastern, as
+  on the Fleet tab. Against a backend without the fleet routes each tab says
+  so and the rest of the page is unaffected. Every tab re-reads every 10 s
+  while it is visible.
+  - **Cities** (`/#/fleet/cities`, v1.337.0): the catalog the queue works
+    from. One row a city: name with its Marketplace slug (linked, so a wrong
+    slug can be caught) and radius, region, standing — **Verifying** (a
+    worker has yet to open the slug and report the location Facebook
+    shows), **Enabled**, **Disabled**, **Removed** — with the label Facebook
+    returned under it, searches a day (Default or a fixed count), a pin, the
+    last search per item, the next due time and the worker holding it.
+    **Add city** takes a slug, a name, a region and a radius; the dialog then
+    follows the new row, "verifying…" until the worker reports, and offers
+    **Enable anyway**. Row actions: pin, per-day, **Search now** (a manual
+    task per item, ahead of everything else), **Remove** after a confirm
+    (the city is disabled and its waiting tasks cancelled; its history
+    stays). **Show removed** lists removed cities with a **Restore**.
+  - **Queue** (`/#/fleet/queue`, v1.337.0): a board per item with one cell
+    per city in the order the round runs — searched today, being searched,
+    due, not due yet, cancelled — and a sentence of counts under each; a
+    cell opens the city's log. **Start the round now** previews, per item,
+    how many waiting tasks fall due and how many are skipped because the
+    city was searched within the fresh window (2 h by default), then makes
+    them due. The **Tasks** table lists the last 24 h and everything
+    waiting, filtered by state, item, city and worker, with each task's
+    state, time (due, lease or end), worker, why it exists (cadence, new
+    city, search now, round started, quarantine probe, verify slug) and its
+    result. A city name opens **the log**: its tasks over 24 h, each one
+    folding open to its events (handed out, started, searched, finished,
+    stopped, given back, expired, done), timed in Eastern.
+  - **Hosts** (`/#/fleet/hosts`, v1.337.0): the machines that run worker
+    containers through one agent each. A row shows whether the agent
+    **runs workers** (a switch; off is observe-only, so a new host starts
+    nothing by accident), a capacity stepper, the agent's version, when it
+    last reported (live, stale, gone, never), running against desired, and a
+    roll's progress with the worker being replaced. **Add host** registers
+    one and shows its token once, with a copy button and the three
+    variables the agent needs; it is never shown again. **Release** names a
+    worker image and version and starts the roll: every host replaces one
+    idle worker at a time. Removing a host asks first and says how many
+    workers still run there.
+  - **Slots** (`/#/fleet/slots`, v1.337.0): one row per fleet account —
+    number, masked uid, pool status and the worker's state, host (or the
+    last host it ran on), worker (linked to its page) with the city it is
+    searching, epoch, lease (held, lapsed, free) with its end, minutes of
+    searching today against the budget as a ring, and quarantine with its
+    end and a **Release**. **Park** frees the account after a confirm (its
+    worker exits on its next call). **Account pool** leads to the
+    credentials.
+  - **The worker page** (`/#/fleet/worker/<id>`, v1.337.0) recognises a
+    fleet worker: state, last heartbeat, account and epoch, version, the task
+    it holds (city, item, since when, lease), and **Watch**, its browser
+    through the ERP's own relay, view-only. Any other id shows the
+    coordinator's worker page as before.
 - **Facebook account pool** — a second tab at **Monitors ▸ Facebook**,
   linked directly at `/#/fleet/pool` (v1.261.0). Managers see a status legend
   with counts that filters (the key-tag rail left the manager's view in
