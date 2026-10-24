@@ -12,7 +12,9 @@ not there at all. With them it:
 3. exports `RS_FB_PASSWORD` / `RS_FB_TOTP` for the monitor's password
    fallback, used only when the cookie session is invalid, as today;
 4. runs the virtual display, VNC and the monitor, serving `GET /healthz` on
-   8788 while the monitor is up, and leaves with the monitor's exit code.
+   8788 while the monitor is up, and leaves with the monitor's exit code;
+5. keeps a socket parked at the ERP's VNC relay (`vnc_relay.py`), so a
+   manager can watch the browser with no port open on this host.
 
 Exit codes, as the host agent reads them: 75 for "no slot" or a stale epoch
 (the agent starts a fresh container after a minute), 70 for a claim or
@@ -20,7 +22,9 @@ configuration failure (the agent backs off ten minutes), otherwise the
 monitor's own code (0 on `docker stop`).
 
 stdlib only: four requests and a TOML writer are not worth a dependency, and
-this runs before anything else in the image is known to work. Secrets from
+this runs before anything else in the image is known to work. The relay
+alone uses `websockets`, which the monitor's web UI already installs, and is
+imported only in fleet mode. Secrets from
 the claim are written with mode 0600 and never logged.
 """
 
@@ -62,6 +66,8 @@ CLAIM_RETRY_S = 10
 # it, which leaves a margin before Docker's SIGKILL.
 MONITOR_STOP_GRACE_S = 24
 DISPLAY_STOP_GRACE_S = 3
+# The relay is told to stop with the monitor; this is only its last join.
+RELAY_STOP_GRACE_S = 1
 
 TEMPLATE = Path(__file__).with_name("config.template.toml")
 # Which of the account's cookies name the browser rather than the login.
@@ -459,7 +465,13 @@ def stop_all(procs: Sequence[subprocess.Popen], grace_s: float) -> None:
             proc.wait()
 
 
-def run_monitor(command: Sequence[str], env: Dict[str, str], health: _Health, healthz_port: int) -> int:
+def run_monitor(
+    command: Sequence[str],
+    env: Dict[str, str],
+    health: _Health,
+    healthz_port: int,
+    on_stop: Callable[[], None] | None = None,
+) -> int:
     """Run the display and the monitor; the monitor's exit code, 75 kept as 75.
 
     SIGTERM (`docker stop`) goes to the monitor, which hands back its last
@@ -490,6 +502,8 @@ def run_monitor(command: Sequence[str], env: Dict[str, str], health: _Health, he
     def forward(signum: int, _frame: Any) -> None:
         log(f"signal {signum}: stopping the monitor")
         stopping.set()
+        if on_stop is not None:
+            on_stop()
         if "monitor" in procs:
             stop_monitor()
 
@@ -564,16 +578,37 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
         log(f"could not render the worker's configuration: {e}; exiting {EXIT_CONFIG}")
         return EXIT_CONFIG
 
+    relay = start_vnc_relay(fleet_url, str(answer["worker_token"]), env)
     health = _Health(worker_id, int(answer["epoch"]))
     port = env.get("RS_WORKER_HEALTHZ_PORT") or ""
-    code = run_monitor(
-        monitor_command(env),
-        monitor_env(env, answer, host_id, worker_id),
-        health,
-        int(port) if port.isdigit() else HEALTHZ_PORT,
-    )
+    try:
+        code = run_monitor(
+            monitor_command(env),
+            monitor_env(env, answer, host_id, worker_id),
+            health,
+            int(port) if port.isdigit() else HEALTHZ_PORT,
+            on_stop=relay.request_stop if relay is not None else None,
+        )
+    finally:
+        if relay is not None:
+            relay.stop(timeout=RELAY_STOP_GRACE_S)
     log(f"monitor exited {code}")
     return code
+
+
+def start_vnc_relay(fleet_url: str, worker_token: str, env: Dict[str, str]) -> Any:
+    """The relay to the ERP's VNC page, when this image has a VNC server to show."""
+    if shutil.which("x11vnc") is None:
+        return None
+    from .vnc_relay import VncRelay
+
+    port = env.get("VNC_PORT") or ""
+    return VncRelay(
+        fleet_url,
+        worker_token,
+        ("127.0.0.1", int(port) if port.isdigit() else 5900),
+        log=log,
+    ).start()
 
 
 def main(argv: Sequence[str] | None = None, env: Dict[str, str] | None = None) -> int:
