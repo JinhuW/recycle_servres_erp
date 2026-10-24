@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-24
 reporter: jinhu
 branch: JinhuW/wahoo
-pr:
+pr: 864
 version: 1.332.0
 related: [RS-004, RS-285]
 ---
