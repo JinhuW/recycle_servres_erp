@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: JinhuW/sardine
-pr:
+pr: "#860"
 version: 1.330.0
 related: [RS-374, RS-381]
 ---
