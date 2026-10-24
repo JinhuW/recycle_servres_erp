@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-385](./RS-385-each-city-a-worker-searches-is-logged-from-handout-t.md) | in-progress | story | P2 | Each city a worker searches is logged from handout to result | — |
+| [RS-385](./RS-385-each-city-a-worker-searches-is-logged-from-handout-t.md) | done | story | P2 | Each city a worker searches is logged from handout to result | v1.331.0, facebook-tracker 0.13.17 |
 | [RS-384](./RS-384-the-label-printer-reconnects-by-itself-to-the-last-p.md) | done | story | P2 | The label printer reconnects by itself to the last printer | 1.330.0 |
 | [RS-383](./RS-383-the-scraper-s-price-push-fails-on-a-part-with-no-ave.md) | done | bug | P1 | The scraper's price push fails on a part with no average yet | 1.329.1 |
 | [RS-382](./RS-382-pack-mode-prints-a-label-for-each-product-not-one-fo.md) | done | story | P2 | Pack mode prints a label for each product, not one for the box | 1.329.0 |

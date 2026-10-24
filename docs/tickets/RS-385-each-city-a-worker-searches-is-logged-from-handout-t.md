@@ -2,13 +2,13 @@
 id: RS-385
 title: Each city a worker searches is logged from handout to result
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: fb-city-log
-pr:
-version:
+pr: 861
+version: v1.331.0, facebook-tracker 0.13.17
 related: [RS-379, RS-372, RS-370]
 ---
 
