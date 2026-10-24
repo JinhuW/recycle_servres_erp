@@ -398,7 +398,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/accounting' || match('/accounting/:id', path)) return 'accounting';
   if (path === '/tracker' || path === '/tracker/prompts') return 'tracker';
   if (path === '/wechat' || matchWechatDay(path)) return 'wechat';
-  if (path === '/fleet' || path === '/fleet/pool' || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
+  if (path === '/fleet' || path === '/fleet/pool' || matchFleetTab(path) || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
   if (path === '/settings') return 'settings';
   return 'dashboard';
 }
@@ -437,6 +437,20 @@ export function wechatDayPath(date: string): string {
 export function matchWechatDay(path: string): { date: string } | null {
   const m = match('/wechat/:date', path);
   return m && /^\d{4}-\d{2}-\d{2}$/.test(m.date) ? { date: m.date } : null;
+}
+
+// The ERP-owned fleet's tabs under Monitors ▸ Facebook: the city catalog,
+// the task queue, the hosts and the account slots (pages/desktop/fleet/*).
+export const FLEET_TABS = ['cities', 'queue', 'hosts', 'slots'] as const;
+export type FleetTab = (typeof FLEET_TABS)[number];
+
+export function fleetTabPath(tab: FleetTab): string {
+  return `/fleet/${tab}`;
+}
+
+export function matchFleetTab(path: string): FleetTab | null {
+  const m = match('/fleet/:tab', path);
+  return m && (FLEET_TABS as readonly string[]).includes(m.tab) ? (m.tab as FleetTab) : null;
 }
 
 // The fleet page's live-browser viewer for one Facebook worker. A sub-route of

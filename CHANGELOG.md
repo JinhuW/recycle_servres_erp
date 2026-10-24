@@ -17,6 +17,55 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.337.0] - 2026-10-24
+
+Monitors ▸ Facebook gets four tabs for the ERP-owned fleet (RS-394): **Cities**,
+**Queue**, **Hosts** and **Slots**, beside the coordinator's Fleet tab and the
+Account pool. They read the ERP's own task queue through `/api/fleet`, which
+the backend workstreams of the same ticket deliver; against a backend without
+those routes each tab says so and the rest of the page is unaffected.
+
+- **Cities** is the catalog the queue works from: name, Marketplace slug,
+  region, standing (verifying, enabled, disabled, removed), searches a day,
+  a pin, the last search per item, the next due time and the worker holding
+  it. **Add city** takes a slug, a name, a region and a radius and then
+  follows the row: "verifying…" until a worker reports the location Facebook
+  showed for the slug, with **Enable anyway** for a manager who will not
+  wait. A row can be pinned, given its own per-day count, searched now (a
+  manual task per item, ahead of everything), or removed after a confirm;
+  removed cities can be shown and restored.
+- **Queue** opens with a board per item, one cell per city in the order the
+  round runs — searched today, being searched, due, not due yet, cancelled —
+  and a counts sentence under each. **Start the round now** previews, per
+  item, how many waiting tasks fall due and how many are skipped because the
+  city was searched within the fresh window, then does it. A task table with
+  state, item, city and worker filters lists the last 24 hours and everything
+  waiting; a city's name, on the board or in the table, opens its log: its
+  tasks and each one's events.
+- **Hosts** lists the machines that run worker containers: whether the agent
+  may run workers (a switch; off is observe-only), a capacity stepper, the
+  agent's version, when it last reported, running against desired, and a
+  roll's progress. **Add host** shows the new host's token once, with a copy
+  button and the three variables its agent needs. **Release** names an image
+  and a version and starts the roll.
+- **Slots** lists each fleet account's slot: the masked uid, pool status and
+  worker state, host, worker (linked), epoch, lease, minutes of searching
+  today against the budget as a ring, and quarantine with a release button;
+  **Park** frees the account after a confirm. A button leads to the pool
+  page for the credentials.
+- **The worker page** (`/fleet/worker/<id>`) now recognises a fleet worker:
+  its state, host, account and epoch, the task it holds, and **Watch**, its
+  browser through the ERP's own VNC relay rather than the coordinator's.
+  Any other id shows the coordinator's worker page as before.
+
+Times on the new tabs read in US Eastern, like the Fleet tab's. The tabs are
+desktop-only. The fetchers live in `lib/fleet.ts`; the row types are the
+shared fleet types, extended there with what the manager routes fold in (a
+city's open task per item, a slot's worker and pool status, a host's desired
+state); pure helpers (board cells, counts,
+due times, the round preview, masks) have vitest coverage, and the tables have
+smoke tests against made-up fixtures.
+
 ## [1.336.0] - 2026-10-24
 
 Groundwork for the ERP fleet, the city task queue the Facebook workers will
@@ -44,6 +93,7 @@ nothing writes to the new tables yet.
   cities, items, tasks, events, slots, hosts, workers, settings and the
   claim, next-task and desired-state payloads the worker, the host agent and
   the pages build against.
+
 
 ## [1.335.0] - 2026-10-24
 

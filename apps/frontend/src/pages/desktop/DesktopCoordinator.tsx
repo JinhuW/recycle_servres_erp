@@ -12,7 +12,7 @@ import {
 import { handleFetchError } from '../../lib/errorToast';
 import { FLEET_STATUSES, fleetStatus, parkedWorkers, type FleetStatus } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
-import { hrefFor, matchFleetWatch, matchFleetWorker, onLinkClick, useRoute } from '../../lib/route';
+import { FLEET_TABS, fleetTabPath, hrefFor, matchFleetTab, matchFleetWatch, matchFleetWorker, onLinkClick, useRoute, type FleetTab } from '../../lib/route';
 import { useEffectiveUser } from '../../lib/tweaks';
 import { poolApi, type FbProxyMark, type PoolSnapshot } from '../../lib/facebookPool';
 import { FacebookAccountPool } from './FacebookAccountPool';
@@ -21,20 +21,27 @@ import { HITS_DAYS } from './FleetAccounts';
 import { FlowCard } from './FleetFlow';
 import { RoundCard } from './FleetQueue';
 import { ActivityAside, FleetLegend, WorkersCard } from './FleetWorkers';
+import { FLEET_TAB_TITLE } from './fleet/FleetPage';
 
 // The viewer carries noVNC; it is its own chunk, fetched only when a manager
 // actually opens a worker's browser. The worker page is its own chunk too.
 const FleetWatch = lazy(() => import('./FleetWatch').then(m => ({ default: m.FleetWatch })));
-const FleetWorker = lazy(() => import('./FleetWorker').then(m => ({ default: m.FleetWorker })));
+// The worker page decides between the ERP's own fleet worker and the
+// coordinator's (pages/desktop/fleet/FleetWorkerSwitch.tsx).
+const FleetWorker = lazy(() => import('./fleet/FleetWorkerSwitch').then(m => ({ default: m.FleetWorkerSwitch })));
+// The ERP-owned fleet tabs: their tables and dialogs are one chunk together.
+const FleetTabPage = lazy(() => import('./fleet/FleetPage').then(m => ({ default: m.FleetTabPage })));
 
 // ─── Monitors ▸ Facebook ──────────────────────────────────────────────────────
-// Two tabs in one chrome. Fleet (managers only): the status legend, the
+// Six tabs in one chrome. Fleet (managers only): the status legend, the
 // workers table with the activity aside, and the pipeline from a search to an
-// alert; the eye on a row opens that worker's page (FleetWorker.tsx). Account
-// pool: the accounts purchasers take (FacebookAccountPool.tsx). Everything
-// live goes through the /api/coordinator proxy; a 501 from it means the
-// backend has no control-plane credentials, which gets its own quiet state
-// instead of error toasts.
+// alert; the eye on a row opens that worker's page (FleetWorker.tsx). Cities,
+// Queue, Hosts and Slots (managers only): the ERP's own fleet task queue, read
+// from /api/fleet (pages/desktop/fleet/*). Account pool: the accounts
+// purchasers take (FacebookAccountPool.tsx). Everything on the Fleet tab goes
+// through the /api/coordinator proxy; a 501 from it means the backend has no
+// control-plane credentials, which gets its own quiet state instead of error
+// toasts.
 
 const REFRESH_MS = 30_000;
 const STATS_DAYS = 14;
@@ -51,6 +58,7 @@ export function DesktopCoordinator({ showToast }: Props) {
   const { t } = useT();
   const [pool, setPool] = useState<PoolSnapshot | null>(null);
   const manager = user?.role === 'manager';
+  const fleetTab: FleetTab | null = manager ? matchFleetTab(path) : null;
   const poolOpen = !manager || path === '/fleet/pool';
   const watch = manager ? matchFleetWatch(path) : null;
   const worker = manager ? matchFleetWorker(path) : null;
@@ -81,14 +89,26 @@ export function DesktopCoordinator({ showToast }: Props) {
       </Suspense>
     );
   }
+  const fleetOpen = !poolOpen && !fleetTab;
   const tabs = manager ? <nav className="tabs fp-view-tabs" aria-label={t('fpViews')}>
-    <a className={`tab ${!poolOpen ? 'active' : ''}`} href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')} aria-current={!poolOpen ? 'page' : undefined}><Icon name="shield" size={14} />{t('fpFleet')}</a>
+    <a className={`tab ${fleetOpen ? 'active' : ''}`} href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')} aria-current={fleetOpen ? 'page' : undefined}><Icon name="shield" size={14} />{t('fpFleet')}</a>
+    {FLEET_TABS.map(tab => (
+      <a key={tab} className={`tab ${fleetTab === tab ? 'active' : ''}`} href={hrefFor(fleetTabPath(tab))} onClick={onLinkClick(fleetTabPath(tab))}
+        aria-current={fleetTab === tab ? 'page' : undefined}>{t(FLEET_TAB_TITLE[tab])}</a>
+    ))}
     <a className={`tab ${poolOpen ? 'active' : ''}`} href={hrefFor('/fleet/pool')} onClick={onLinkClick('/fleet/pool')} aria-current={poolOpen ? 'page' : undefined}><Icon name="users" size={14} />{t('fpPool')}{pool && <span className="chip muted">{pool.accounts.length}</span>}</a>
   </nav> : null;
   const head = (
     <div className="page-head"><div><div className="page-sub">{t('nav_monitors')} / {t('nav_coordinator')}</div>
-      <h1 className="page-title">{poolOpen ? t('fpTitle') : t('fbcFleetTitle')}</h1></div></div>
+      <h1 className="page-title">{poolOpen ? t('fpTitle') : fleetTab ? t(FLEET_TAB_TITLE[fleetTab]) : t('fbcFleetTitle')}</h1></div></div>
   );
+  if (fleetTab) {
+    return (
+      <Suspense fallback={<>{head}{tabs}<FormSkeleton fields={4} /></>}>
+        <FleetTabPage key={fleetTab} tab={fleetTab} head={head} tabs={tabs} />
+      </Suspense>
+    );
+  }
   return poolOpen ? <>
     {head}
     {tabs}

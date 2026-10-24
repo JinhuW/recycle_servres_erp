@@ -41,10 +41,14 @@ components (tables, chips, rings) rather than new ones.
 
 ## Exit
 
+- [x] The four tabs render from fixtures with every action wired to the typed
+      fetcher (v1.337.0: vitest helpers + smoke tests, Playwright pass against
+      a mock API; see the PR).
 - [ ] Against WS-A/B on dev: add a city → appears "verifying", becomes
       enabled after the fake worker reports; *Search now* creates a task the
       fake worker receives; *Remove* cancels it; Hosts shows the fake host;
-      Slots shows the claimed account with its epoch.
+      Slots shows the claimed account with its epoch. (WS-F's integration
+      step; the recipe is in the PR's follow-ups.)
 
 ## Notes for the agent
 

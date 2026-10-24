@@ -89,7 +89,7 @@ E join as they land.
 | B | not started | | |
 | C | done (mock contract) | #879 | `rs_worker/entry.py`, `deploy/Dockerfile.worker`, monitor `[fleet]` mode on `recycle-patches`; end-to-end against WS-B's backend is F's integration step |
 | D | merged | #877 | v1.335.0; `apps/fleet-agent` with planner, docker CLI and agent tests, Dockerfile, README; live Docker check passed locally against a mock ERP; the check against the dev backend is F's integration step |
-| E | not started | | |
+| E | merged | #878 | v1.337.0: Cities, Queue, Hosts, Slots tabs + fleet worker page against mocks; page-side types extend `@recycle-erp/shared` fleet rows in `lib/fleet.ts` (open tasks per city, slot's worker/pool status/minutes, host's desired); manager VNC path assumed `/api/fleet/vnc/:worker/ws` |
 | F | Now section done; Integration waits for A+B+C | #876 | `fleet-images.yml` on dev, both jobs skip until the mirror/private packages exist; 4 `FLEET_*` vars set on Railway **dev**; `HOSTS.md` has the owner-runnable checklist; export procedure in WS-F. Host `10.10.60.14` answered from the Mac at 21:30 UTC after being dark earlier; nothing run on it. Owner steps: mirror + `AIMM_MIRROR_*`, private GHCR packages + `GHCR_PRIVATE_CONFIRMED`, GHCR read token, coordinator LAN publish, first host command |
 | G | not started | | |
 
