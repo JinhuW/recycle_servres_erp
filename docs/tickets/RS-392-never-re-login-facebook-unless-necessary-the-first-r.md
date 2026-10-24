@@ -2,13 +2,13 @@
 id: RS-392
 title: Never re-login Facebook unless necessary: the first rule in AGENTS.md
 type: task
-status: in-review
+status: done
 priority: P2
 created: 2026-10-24
 reporter: jinhu
 branch: docs/never-relogin-facebook
-pr:
-version:
+pr: 870
+version: n/a — docs only, no release
 related: []
 ---
 
