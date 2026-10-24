@@ -123,6 +123,8 @@ function summariseAcct(e: Event, ctx: Ctx): Summary {
     case 'queried': return { plain: t('acAcctAsked', { text: d.text ?? '' }) };
     case 'answered': return { plain: t('acAcctAnswered', { text: d.text ?? '' }) };
     case 'query_withdrawn': return { plain: t('acAcctQueryWithdrawn') };
+    case 'attachment_added': return { plain: t('acAcctAttachAdded', { name: d.filename ?? '' }) };
+    case 'attachment_removed': return { plain: t('acAcctAttachRemoved', { name: d.filename ?? '' }) };
     default: return { plain: '' };
   }
 }

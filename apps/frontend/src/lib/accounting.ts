@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { api } from './api';
 import type { PaidBy } from './useCommissionPaidBy';
+import type { ChipAttachment } from '../components/AttachmentChip';
 import {
   accountingReviewActions, addDays, addMonths, startOfMonth, startOfYear, todayIn,
   type AccountingChanges, type AccountingCheck, type AccountingCurrency, type AccountingDirection,
@@ -67,16 +68,21 @@ export type AcctTarget = {
   owner?: { id: string; name: string };
 };
 
+// A payment screenshot on an entry, under the name the receipt OCR gave it.
+export type AcctAttachment = ChipAttachment & { uploadedAt: string };
+
 export type AcctEvent = {
   id: string;
   kind: 'created' | 'edited' | 'voided' | 'restored' | 'unlinked'
-    | 'reviewed' | 'unreviewed' | 'queried' | 'answered' | 'query_withdrawn';
+    | 'reviewed' | 'unreviewed' | 'queried' | 'answered' | 'query_withdrawn'
+    | 'attachment_added' | 'attachment_removed';
   detail: {
     changes?: Record<string, { from: unknown; to: unknown }>; reason?: string; orderId?: string;
     backfilled?: 'commission_paid_by' | 'payment_received_by' | 'payer';
     // Written by the PO's side of the link, not by a person.
     synced?: 'po';
     text?: string; amountCny?: number;
+    filename?: string;
     clearedReview?: { by: string | null; at: string };
   };
   at: string; actor: { id: string; name: string } | null;
@@ -92,7 +98,7 @@ export type AcctCleared = {
 };
 
 export type AcctEntryDetail = AcctEntry & {
-  targetFacts: AcctTarget | null; events: AcctEvent[];
+  targetFacts: AcctTarget | null; events: AcctEvent[]; attachments: AcctAttachment[];
   // Optional: a backend older than the drawer's copy sends none.
   cleared?: AcctCleared | null;
 };
@@ -117,6 +123,7 @@ export type AcctSummary = {
 // field changed since an earlier sign-off was cleared.
 export type AcctReviewRow = AcctEntry & {
   targetFacts: AcctTarget | null;
+  attachments: AcctAttachment[];
   checks: AccountingCheck[];
   cleared: AcctCleared | null;
 };
@@ -138,7 +145,7 @@ export type AcctLedger = {
 export type AcctEntryBody = {
   direction: AccountingDirection; kind: AccountingKind; amount: number; currency: AccountingCurrency;
   fxRate: number | null; method: AccountingMethod; occurredOn: IsoDate; managerId: string;
-  targetId: string | null; counterparty: string | null; reference: string | null; note: string | null;
+  targetId: string | null; counterparty: string | null; note: string | null;
 };
 
 // Which record's side of the book a card shows.
@@ -164,6 +171,13 @@ export const acctVoid = (id: string, reason: string) =>
   api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/void`, { reason }).then(reviewChanged);
 export const acctRestore = (id: string) =>
   api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/restore`, {}).then(reviewChanged);
+export const acctUploadAttachment = (id: string, file: File) => {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  return api.upload<{ attachment: AcctAttachment }>(`/api/accounting/entries/${enc(id)}/attachments`, form);
+};
+export const acctDeleteAttachment = (id: string, attachmentId: string) =>
+  api.delete<{ ok: true }>(`/api/accounting/entries/${enc(id)}/attachments/${enc(attachmentId)}`);
 // `counts: false` for a list whose tab counts the page already has.
 export const acctReviewQueue = (tab: AccountingReviewTab, managerId?: string, opts: { counts?: boolean } = {}) =>
   api.get<AcctReviewQueue>('/api/accounting/review?' + new URLSearchParams({
