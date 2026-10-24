@@ -161,7 +161,12 @@ type Char = EventTarget & {
 };
 type Service = { uuid: string; getCharacteristics(): Promise<Char[]> };
 type Gatt = { connected: boolean; connect(): Promise<Gatt>; disconnect(): void; getPrimaryServices(): Promise<Service[]> };
-type Device = EventTarget & { id: string; name?: string; gatt?: Gatt };
+type Device = EventTarget & {
+  id: string;
+  name?: string;
+  gatt?: Gatt;
+  watchAdvertisements?(o: { signal: AbortSignal }): Promise<void>;
+};
 type Bluetooth = {
   requestDevice(o: { acceptAllDevices: true; optionalServices: string[] }): Promise<Device>;
   getDevices?(): Promise<Device[]>;
@@ -170,7 +175,9 @@ type Bluetooth = {
 const bluetooth = (): Bluetooth | undefined => (navigator as Navigator & { bluetooth?: Bluetooth }).bluetooth;
 
 export type PrinterStatus = {
-  state: 'unsupported' | 'off' | 'connecting' | 'on' | 'printing';
+  // `waiting`: the last printer dropped or isn't found yet, and the page will
+  // connect it by itself once it answers. Labels go through the dialog meanwhile.
+  state: 'unsupported' | 'off' | 'waiting' | 'connecting' | 'on' | 'printing';
   name: string | null;
   // The language the printer's service implies.
   language: PrinterLanguage;
@@ -184,6 +191,12 @@ let reply: ((byte: number) => void) | null = null;
 const listeners = new Set<() => void>();
 // Remembered so a reload can reconnect without the chooser.
 const DEVICE_KEY = 'rs.labelPrinter';
+// The printer last picked. A drop keeps it, so the page can wait for it.
+let known: Device | null = null;
+// Each pick or wait takes a turn. A newer turn, or Disconnect, ends the old one.
+let turn = 0;
+let scan: AbortController | null = null;
+const watched = new WeakSet<Device>();
 
 function set(next: Partial<PrinterStatus>) {
   status = { ...status, ...next };
@@ -193,33 +206,88 @@ function set(next: Partial<PrinterStatus>) {
 const UNSUPPORTED: PrinterStatus = { state: 'unsupported', name: null, language: 'tspl', paper: null };
 const snapshot = () => (bluetooth() ? status : UNSUPPORTED);
 
-async function open(device: Device): Promise<void> {
-  set({ state: 'connecting', name: device.name ?? null });
+// Starts a turn for `device`, ending any wait for another printer.
+function take(device: Device | null): number {
+  scan?.abort();
+  scan = null;
+  if (known && known !== device) known.gatt?.disconnect();
+  known = device;
+  return ++turn;
+}
+
+// Once another turn has started, this one leaves the link alone, and drops its
+// connection unless the new turn wants the same printer.
+async function open(device: Device, mine: number): Promise<void> {
   const gatt = await device.gatt!.connect();
-  const services = await gatt.getPrimaryServices();
-  for (const s of services) {
+  let found: { service: string; write: Char; notify: Char | null } | null = null;
+  for (const s of await gatt.getPrimaryServices()) {
     const port = pickPort(s.uuid, await s.getCharacteristics());
-    if (!port) continue;
-    const { write, notify } = port;
-    if (notify) {
-      await notify.startNotifications();
-      notify.addEventListener('characteristicvaluechanged', () => {
-        const v = notify.value;
-        if (v && v.byteLength) reply?.(v.getUint8(0));
-      });
-    }
-    device.addEventListener('gattserverdisconnected', () => {
-      if (link?.device !== device) return;
-      link = null;
-      set({ state: 'off', paper: null });
-    });
-    link = { device, write, notify };
-    try { localStorage.setItem(DEVICE_KEY, device.id); } catch { /* private window */ }
-    set({ state: 'on', language: languageFor(s.uuid), paper: null });
+    if (port) { found = { service: s.uuid, ...port }; break; }
+  }
+  if (mine !== turn) {
+    if (known !== device) gatt.disconnect();
     return;
   }
-  gatt.disconnect();
-  throw new Error('no-port');
+  if (!found) {
+    gatt.disconnect();
+    throw new Error('no-port');
+  }
+  const { write, notify } = found;
+  if (notify) {
+    await notify.startNotifications();
+    notify.addEventListener('characteristicvaluechanged', () => {
+      const v = notify.value;
+      if (v && v.byteLength) reply?.(v.getUint8(0));
+    });
+  }
+  if (!watched.has(device)) {
+    watched.add(device);
+    device.addEventListener('gattserverdisconnected', () => {
+      // Disconnect clears the link first, so only a drop gets past this.
+      if (link?.device !== device) return;
+      link = null;
+      void reconnect(device);
+    });
+  }
+  link = { device, write, notify };
+  try { localStorage.setItem(DEVICE_KEY, device.id); } catch { /* private window */ }
+  set({ state: 'on', name: device.name ?? null, language: languageFor(found.service), paper: null });
+}
+
+// Where Chrome can scan, the page hears the printer advertise before it
+// connects, which is the order Chrome's own sample uses for a remembered
+// device. Elsewhere the connect itself waits or fails.
+function heard(device: Device): Promise<void> {
+  if (!device.watchAdvertisements) return Promise.resolve();
+  const stop = new AbortController();
+  scan = stop;
+  return new Promise<void>((resolve, reject) => {
+    // Resolved first: abort runs its listener at once, which would reject.
+    const onAd = () => { resolve(); stop.abort(); };
+    device.addEventListener('advertisementreceived', onAd, { once: true });
+    stop.signal.addEventListener('abort', () => {
+      device.removeEventListener('advertisementreceived', onAd);
+      reject(new Error('stopped'));
+    });
+    device.watchAdvertisements!({ signal: stop.signal }).catch(reject);
+  });
+}
+
+// A printer that slept, was switched off or wandered out of range comes back
+// by itself. The tries back off to every 10 s, until one connects or another
+// turn starts.
+async function reconnect(device: Device): Promise<void> {
+  const mine = take(device);
+  set({ state: 'waiting', name: device.name ?? null, paper: null });
+  for (let pause = 2000; mine === turn; pause = Math.min(pause * 2, 10_000)) {
+    try {
+      await heard(device);
+      await open(device, mine);
+      return;
+    } catch {
+      await new Promise(r => setTimeout(r, pause));
+    }
+  }
 }
 
 async function send(bytes: Uint8Array): Promise<void> {
@@ -252,33 +320,38 @@ export const labelPrinter = {
     try {
       device = await bt.requestDevice({ acceptAllDevices: true, optionalServices: PRINTER_SERVICES });
     } catch {
-      // The packer closed the chooser.
+      // The packer closed the chooser. A wait for the last printer carries on.
       return;
     }
+    const mine = take(device);
+    set({ state: 'connecting', name: device.name ?? null, paper: null });
     try {
-      await open(device);
+      await open(device, mine);
     } catch (e) {
       set({ state: 'off', name: null });
       throw e;
     }
   },
 
-  // A printer this browser was allowed before, reconnected without the chooser.
+  // A printer this browser was allowed before, waited for without the chooser.
   async resume(): Promise<void> {
     const bt = bluetooth();
     if (!bt?.getDevices || link || status.state !== 'off') return;
     let id: string | null = null;
     try { id = localStorage.getItem(DEVICE_KEY); } catch { /* private window */ }
     const device = id ? (await bt.getDevices()).find(d => d.id === id) : undefined;
-    if (!device) return;
-    await open(device).catch(() => set({ state: 'off', name: null }));
+    if (device) void reconnect(device);
   },
 
+  // Without getDevices, which Chrome keeps behind
+  // chrome://flags/#enable-web-bluetooth-new-permissions-backend, a reload
+  // forgets the printer.
+  canResume: () => !!bluetooth()?.getDevices,
+
   disconnect(): void {
-    const d = link?.device;
     link = null;
+    take(null);
     try { localStorage.removeItem(DEVICE_KEY); } catch { /* private window */ }
-    d?.gatt?.disconnect();
     set({ state: 'off', name: null, paper: null });
   },
 

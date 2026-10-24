@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { chunks, escposJob, languageFor, pickPort, PRINTER_SERVICES, readStatus, toRaster, tsplJob, zplJob, type Raster } from './labelPrinter';
 
 // A w×h RGBA image, black where `dark(x, y)`.
@@ -101,5 +101,168 @@ describe('pickPort', () => {
 describe('chunks', () => {
   it('splits a job into writes of at most the size', () => {
     expect(chunks(new Uint8Array(5), 2).map(c => c.length)).toEqual([2, 2, 1]);
+  });
+});
+
+// A CT221D-like printer over a fake Web Bluetooth. `failures` connects fail
+// before one succeeds; `drop()` is the printer going to sleep.
+class FakePrinter extends EventTarget {
+  name: string;
+  failures = 0;
+  connects = 0;
+  watchAdvertisements?: (o: { signal: AbortSignal }) => Promise<void>;
+  gatt = {
+    connected: false,
+    connect: async () => {
+      this.connects++;
+      if (this.failures > 0) { this.failures--; throw new Error('NetworkError: Connection failed'); }
+      this.gatt.connected = true;
+      return this.gatt;
+    },
+    disconnect: () => {
+      if (!this.gatt.connected) return;
+      this.gatt.connected = false;
+      this.dispatchEvent(new Event('gattserverdisconnected'));
+    },
+    getPrimaryServices: async () => [{
+      uuid: '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+      getCharacteristics: async () => [
+        Object.assign(new EventTarget(), {
+          uuid: '49535343-1e4d-4bd9-ba61-23c647249616',
+          properties: { write: false, writeWithoutResponse: false, notify: true },
+          startNotifications: async function () { return this; },
+        }),
+        Object.assign(new EventTarget(), {
+          uuid: '49535343-8841-43f4-a8d4-ecbe34729bb3',
+          properties: { write: true, writeWithoutResponse: true, notify: false },
+          writeValueWithResponse: async () => {},
+        }),
+      ],
+    }],
+  };
+  constructor(public id: string) { super(); this.name = `CT221D-${id}`; }
+  drop() { this.gatt.connected = false; this.dispatchEvent(new Event('gattserverdisconnected')); }
+}
+
+describe('reconnecting the label printer', () => {
+  let saved: Map<string, string>;
+  const load = async (bluetooth: object) => {
+    vi.stubGlobal('navigator', { bluetooth });
+    vi.resetModules();
+    return (await import('./labelPrinter')).labelPrinter;
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    saved = new Map();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => saved.get(k) ?? null,
+      setItem: (k: string, v: string) => { saved.set(k, v); },
+      removeItem: (k: string) => { saved.delete(k); },
+    });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('waits for a printer that dropped and connects it again without the chooser', async () => {
+    const p = new FakePrinter('4FD1');
+    const requestDevice = vi.fn(async () => p);
+    const printer = await load({ requestDevice });
+    await printer.connect();
+    expect(printer.status()).toMatchObject({ state: 'on', name: 'CT221D-4FD1' });
+
+    p.failures = 2;
+    p.drop();
+    expect(printer.status()).toMatchObject({ state: 'waiting', name: 'CT221D-4FD1' });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(printer.status().state).toBe('waiting');
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(printer.status()).toMatchObject({ state: 'on', name: 'CT221D-4FD1' });
+    expect(requestDevice).toHaveBeenCalledTimes(1);
+    expect(p.connects).toBe(4);
+
+    // Its drop listener isn't stacked by the reconnect: one drop, one wait.
+    p.failures = 1;
+    p.drop();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(p.connects).toBe(6);
+  });
+
+  it('stops waiting on Disconnect, and forgets the printer', async () => {
+    const p = new FakePrinter('4FD1');
+    const printer = await load({ requestDevice: async () => p });
+    await printer.connect();
+    p.failures = 99;
+    p.drop();
+    await vi.advanceTimersByTimeAsync(0);
+    printer.disconnect();
+    const tries = p.connects;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(p.connects).toBe(tries);
+    expect(printer.status()).toMatchObject({ state: 'off', name: null });
+    expect(saved.size).toBe(0);
+  });
+
+  it('ends the wait when the chooser picks another printer, and carries on when it is closed', async () => {
+    const a = new FakePrinter('4FD1');
+    const b = new FakePrinter('9A20');
+    const requestDevice = vi.fn().mockResolvedValueOnce(a).mockRejectedValueOnce(new Error('cancelled')).mockResolvedValueOnce(b);
+    const printer = await load({ requestDevice });
+    await printer.connect();
+    a.failures = 99;
+    a.drop();
+    await vi.advanceTimersByTimeAsync(0);
+
+    await printer.connect();
+    expect(printer.status()).toMatchObject({ state: 'waiting', name: 'CT221D-4FD1' });
+
+    await printer.connect();
+    expect(printer.status()).toMatchObject({ state: 'on', name: 'CT221D-9A20' });
+    const tries = a.connects;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(a.connects).toBe(tries);
+    expect(saved.get('rs.labelPrinter')).toBe('9A20');
+  });
+
+  it('on load, waits for the remembered printer where Chrome offers getDevices', async () => {
+    const p = new FakePrinter('4FD1');
+    p.failures = 1;
+    saved.set('rs.labelPrinter', '4FD1');
+    const printer = await load({ requestDevice: vi.fn(), getDevices: async () => [new FakePrinter('0000'), p] });
+    expect(printer.canResume()).toBe(true);
+    await printer.resume();
+    expect(printer.status()).toMatchObject({ state: 'waiting', name: 'CT221D-4FD1' });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(printer.status()).toMatchObject({ state: 'on', name: 'CT221D-4FD1' });
+  });
+
+  it('hears the printer advertise before connecting, where Chrome can scan', async () => {
+    const p = new FakePrinter('4FD1');
+    let scanning: AbortSignal | null = null;
+    p.watchAdvertisements = async ({ signal }) => { scanning = signal; };
+    saved.set('rs.labelPrinter', '4FD1');
+    const printer = await load({ requestDevice: vi.fn(), getDevices: async () => [p] });
+    await printer.resume();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(p.connects).toBe(0);
+    p.dispatchEvent(new Event('advertisementreceived'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(printer.status().state).toBe('on');
+    expect(scanning!.aborted).toBe(true);
+  });
+
+  it('stays off on load without getDevices, or after a Disconnect', async () => {
+    saved.set('rs.labelPrinter', '4FD1');
+    const without = await load({ requestDevice: vi.fn() });
+    expect(without.canResume()).toBe(false);
+    await without.resume();
+    expect(without.status().state).toBe('off');
+
+    saved.clear();
+    const printer = await load({ requestDevice: vi.fn(), getDevices: async () => [new FakePrinter('4FD1')] });
+    await printer.resume();
+    expect(printer.status().state).toBe('off');
   });
 });

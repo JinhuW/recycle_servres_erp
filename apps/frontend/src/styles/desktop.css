@@ -4566,6 +4566,7 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 /* A caption over its choices: four sizes don't fit beside one. */
 .pk-label-row { flex-direction: column; align-items: flex-start; gap: 8px; }
 .pk-label-row .seg { flex-wrap: wrap; }
+.pk-label-note { margin: 6px 0 0; padding: 10px 10px 4px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
 
 /* Offered when the window no longer fits the shell it loaded with (App.tsx).
    Fixed and above both shells' chrome, never in the layout flow, so it cannot
