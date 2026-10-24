@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { FleetCity, FleetTask } from '../../../lib/fleet';
-import { CITIES, HOSTS, NOW, SLOTS, TASKS } from './fixtures';
+import { CITIES, HOSTS, NOW, RELEASE, SLOTS, TASKS } from './fixtures';
 import {
   boardCells, budgetTone, cityStanding, countsSentence, dueIn, dueLabel, easternClock, filterTasks, hostRunning, isQuarantined,
-  isSlug, leaseLive, liveness, maskUid, nextDue, rollProgress, roundStartPreview, sortTasks, spanLabel, utcDayStart,
+  isSlug, leaseLive, liveness, maskUid, nextDue, openSearch, releaseSummary, rollProgress, roundStartPreview, slotLease, sortTasks, spanLabel,
+  utcDayStart, withCityNames,
 } from './fleetBoard';
 
 // A translator that shows its key and its numbers, so a sentence can be read
@@ -79,13 +80,19 @@ describe('boardCells', () => {
     expect(cells.map(c => c.slug)).not.toContain('tulsa');
   });
   it('reads an enabled city with nothing open as waiting', () => {
-    const bare: FleetCity = { ...CITIES[1], open: { server_ram: null, enterprise_ssd: null } };
+    const bare: FleetCity = { ...CITIES[1], open_tasks: [] };
     const { cells } = boardCells([bare], [], 'server_ram', NOW);
     expect(cells).toEqual([{ slug: 'denver', name: 'Denver, CO', state: 'later', at: null, by: null }]);
   });
+  it('does not count a finished slug check as the day’s search', () => {
+    const checked: FleetTask = { ...TASKS[13], state: 'done', done_at: min(-1) };
+    const boise: FleetCity = { ...CITIES[4], enabled: true, verified_at: min(-1), open_tasks: [] };
+    const { cells } = boardCells([boise], [checked], 'server_ram', NOW);
+    expect(cells[0].state).toBe('later');
+  });
   it('does not count yesterday as done today', () => {
     const yesterday: FleetTask = { ...TASKS[8], done_at: '2026-10-23T23:59:00Z' };
-    const nyc: FleetCity = { ...CITIES[2], open: { server_ram: null, enterprise_ssd: null } };
+    const nyc: FleetCity = { ...CITIES[2], open_tasks: [] };
     const { cells } = boardCells([nyc], [yesterday], 'server_ram', NOW);
     expect(cells[0].state).toBe('later');
   });
@@ -105,15 +112,15 @@ describe('countsSentence', () => {
 });
 
 describe('roundStartPreview', () => {
-  it('counts ready tasks, skipping city-items searched within the window', () => {
+  it('counts searches waiting for later, skipping city-items searched within the window', () => {
     const preview = roundStartPreview(CITIES, ['server_ram', 'enterprise_ssd'], 2, NOW);
-    // server_ram: denver (25 h ago), nyc (4 h ago), philly (23 h ago) ready; none fresh.
-    expect(preview.server_ram).toEqual({ ready: 3, due: 3, skipped: 0 });
-    // enterprise_ssd: houston done 90 min ago is fresh; denver, nyc are not.
-    expect(preview.enterprise_ssd).toEqual({ ready: 3, due: 2, skipped: 1 });
+    // server_ram: nyc (4 h ago) and philly (23 h ago) wait; denver is already due, so the start leaves it.
+    expect(preview.server_ram).toEqual({ ready: 2, due: 2, skipped: 0 });
+    // enterprise_ssd: houston done 90 min ago is fresh; nyc is not; denver is already due.
+    expect(preview.enterprise_ssd).toEqual({ ready: 2, due: 1, skipped: 1 });
   });
   it('a wider window skips more', () => {
-    expect(roundStartPreview(CITIES, ['server_ram'], 6, NOW).server_ram).toEqual({ ready: 3, due: 2, skipped: 1 });
+    expect(roundStartPreview(CITIES, ['server_ram'], 6, NOW).server_ram).toEqual({ ready: 2, due: 1, skipped: 1 });
   });
 });
 
@@ -125,8 +132,15 @@ describe('cities', () => {
     expect(cityStanding({ ...CITIES[0], enabled: false })).toBe('disabled');
   });
   it('finds the soonest open task and the holder', () => {
-    expect(nextDue(CITIES[0])).toEqual({ at: CITIES[0].open.server_ram!.due_at, holder: 'homelab-3' });
-    expect(nextDue(CITIES[4])).toEqual({ at: null, holder: null });
+    expect(nextDue(CITIES[0])).toEqual({ at: TASKS[0].due_at, holder: 'homelab-3' });
+    // A city being verified is due when its verify-slug task is.
+    expect(nextDue(CITIES[4])).toEqual({ at: TASKS[13].due_at, holder: null });
+    expect(nextDue(CITIES[5])).toEqual({ at: null, holder: null });
+  });
+  it('picks the open search per item and passes over a verify-slug task', () => {
+    expect(openSearch(CITIES[0], 'server_ram')?.id).toBe(201);
+    expect(openSearch(CITIES[4], 'server_ram')).toBeNull();
+    expect(CITIES[4].open_tasks.map(x => x.kind)).toEqual(['verify-slug']);
   });
   it('accepts Marketplace slugs and numeric ids', () => {
     expect(isSlug('houston')).toBe(true);
@@ -148,6 +162,11 @@ describe('hosts', () => {
     expect(rollProgress(HOSTS[0])).toEqual({ onTarget: 2, total: 4, replacing: 'homelab-3' });
     expect(rollProgress(HOSTS[1])).toBeNull();
     expect(rollProgress(HOSTS[2])).toBeNull();
+  });
+  it('sums up the latest release', () => {
+    expect(releaseSummary(RELEASE)).toEqual({ upgraded: 3, skipped: 1, replacing: 'homelab-3' });
+    expect(releaseSummary({ ...RELEASE, current: null, state: 'done' })).toEqual({ upgraded: 3, skipped: 1, replacing: null });
+    expect(releaseSummary(null)).toBeNull();
   });
   it('grades a last-seen time', () => {
     expect(liveness(min(-1), NOW)).toBe('live');
@@ -175,12 +194,24 @@ describe('slots', () => {
     expect(leaseLive(SLOTS[5], NOW)).toBe(false);
     expect(leaseLive(SLOTS[7], NOW)).toBe(false);
   });
+  it('tells a parked slot from a free one, though neither has a lease', () => {
+    expect(SLOTS[8].lease_expires_at).toBeNull();
+    expect(slotLease(SLOTS[8], NOW)).toBe('parked');
+    expect(slotLease(SLOTS[7], NOW)).toBe('free');
+    expect(slotLease(SLOTS[0], NOW)).toBe('held');
+    expect(slotLease(SLOTS[5], NOW)).toBe('lapsed');
+  });
 });
 
 describe('task table', () => {
+  const named = withCityNames(TASKS, CITIES);
+  it('names each task’s city from the city list', () => {
+    expect(named[0].city_name).toBe('Houston, TX');
+    expect(withCityNames([{ ...TASKS[0], city: 'gone' }], CITIES)[0].city_name).toBeNull();
+  });
   it('filters by state, item and a case-insensitive city or worker', () => {
     expect(filterTasks(TASKS, { state: 'leased', item: '', city: '', worker: '' }).map(x => x.id)).toEqual([201, 208]);
-    expect(filterTasks(TASKS, { state: '', item: 'enterprise_ssd', city: 'NEW YORK', worker: '' }).map(x => x.id)).toEqual([206, 191]);
+    expect(filterTasks(named, { state: '', item: 'enterprise_ssd', city: 'NEW YORK', worker: '' }).map(x => x.id)).toEqual([206, 191]);
     expect(filterTasks(TASKS, { state: '', item: '', city: '', worker: 'homelab-1' }).map(x => x.id)).toEqual([190, 191]);
   });
   it('sorts newest activity first', () => {

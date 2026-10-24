@@ -3,7 +3,7 @@ import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { ApiError } from '../../../lib/api';
-import { fleetApi, type FleetCity, type FleetItem } from '../../../lib/fleet';
+import { fleetApi, fleetErrorCode, type FleetCity, type FleetItem } from '../../../lib/fleet';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
 import { cityStanding, isSlug, marketplaceUrl, nextDue, normalizeSlug, type CityStanding } from './fleetBoard';
@@ -68,10 +68,11 @@ export function CitiesTable({ cities, items, onChanged, now = Date.now() }: {
 }) {
   const { t } = useT();
   const [removing, setRemoving] = useState<FleetCity | null>(null);
+  const [unverified, setUnverified] = useState<FleetCity | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const cols = 8 + items.length;
 
-  const act = async (slug: string, run: () => Promise<unknown>, done?: string) => {
+  const act = async (slug: string, run: () => Promise<unknown>, done?: string, refused?: (e: unknown) => boolean) => {
     if (busy) return;
     setBusy(slug);
     try {
@@ -79,19 +80,31 @@ export function CitiesTable({ cities, items, onChanged, now = Date.now() }: {
       if (done) showSuccessToast(done);
       onChanged();
     } catch (e) {
-      handleFetchError(e);
+      if (!refused?.(e)) handleFetchError(e);
     } finally {
       setBusy(null);
     }
   };
+  // A pair a worker is searching right now answers 409 exists; that item is
+  // already being done, so only the other refusals count.
   const searchNow = (c: FleetCity) =>
-    act(c.slug, () => Promise.all(items.map(item => fleetApi.searchNow(c.slug, item))), t('fleetSearchNowDone', { city: c.name }));
+    act(c.slug, async () => {
+      const out = await Promise.allSettled(items.map(item => fleetApi.searchNow(c.slug, item)));
+      const failed = out.find((r): r is PromiseRejectedResult => r.status === 'rejected' && fleetErrorCode(r.reason) !== 'exists');
+      if (failed) throw failed.reason;
+    }, t('fleetSearchNowDone', { city: c.name }));
   const setPin = (c: FleetCity) => act(c.slug, () => fleetApi.updateCity(c.slug, { pinned: !c.pinned }));
   const setPerDay = (c: FleetCity, v: string) => act(c.slug, () => fleetApi.updateCity(c.slug, { per_day: v === '' ? null : Number(v) }));
   const enableAnyway = (c: FleetCity) =>
     act(c.slug, () => fleetApi.updateCity(c.slug, { enabled: true, override_verify: true }), t('fleetCityEnabledToast', { city: c.name }));
+  // A city removed before a worker verified its slug is refused with 409
+  // unverified; the manager is then asked whether to vouch for it.
   const restore = (c: FleetCity) =>
-    act(c.slug, () => fleetApi.updateCity(c.slug, { enabled: true }), t('fleetCityEnabledToast', { city: c.name }));
+    act(c.slug, () => fleetApi.updateCity(c.slug, { enabled: true }), t('fleetCityEnabledToast', { city: c.name }), e => {
+      if (fleetErrorCode(e) !== 'unverified') return false;
+      setUnverified(c);
+      return true;
+    });
 
   return (
     <div className="fp-table-wrap">
@@ -175,6 +188,14 @@ export function CitiesTable({ cities, items, onChanged, now = Date.now() }: {
           })}
         </tbody>
       </table>
+      {unverified && (
+        <Modal onClose={() => setUnverified(null)} shellStyle={{ maxWidth: 460 }}>
+          <ConfirmDialogBody title={t('fleetCityUnverifiedTitle', { city: unverified.name })} confirm={t('fleetCityEnableAnyway')}
+            busy={busy === unverified.slug} onClose={() => setUnverified(null)}
+            onConfirm={() => { const c = unverified; setUnverified(null); void enableAnyway(c); }}
+            body={<p>{t('fleetCityUnverifiedBody', { slug: unverified.slug })}</p>} />
+        </Modal>
+      )}
       {removing && (
         <RemoveCityDialog city={removing} onClose={() => setRemoving(null)} onDone={() => { setRemoving(null); onChanged(); }} />
       )}
@@ -185,7 +206,7 @@ export function CitiesTable({ cities, items, onChanged, now = Date.now() }: {
 function RemoveCityDialog({ city, onClose, onDone }: { city: FleetCity; onClose: () => void; onDone: () => void }) {
   const { t } = useT();
   const [busy, setBusy] = useState(false);
-  const open = Object.values(city.open).filter(Boolean).length;
+  const open = city.open_tasks.filter(task => task.state === 'ready').length;
   const confirm = async () => {
     if (busy) return;
     setBusy(true);

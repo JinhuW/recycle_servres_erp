@@ -4,39 +4,32 @@
 // proxied; the backend owns these tables.
 //
 // The row types are the shared fleet types; where a manager route folds in
-// more than the row (a city's open tasks, a slot's worker and pool status,
-// a host's desired state), the page-side type extends the shared one here.
+// more than the row (a slot's worker and pool status, a host's desired
+// state), the page-side type extends the shared one here.
 
 import type {
-  FleetCity as FleetCityRow, FleetHost as FleetHostRow, FleetItem, FleetSettings, FleetSlot as FleetSlotRow,
-  FleetTask as FleetTaskRow, FleetTaskEvent, FleetTaskState, FleetWorker as FleetWorkerRow,
+  FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetRelease, FleetSettings, FleetSlot as FleetSlotRow,
+  FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, RoundStartAnswer,
 } from '@recycle-erp/shared';
-import { api } from './api';
+import { ApiError, api } from './api';
 
 export type {
-  FleetItem, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason, FleetTaskResult,
-  FleetTaskState, FleetHostContainer, FleetHostReport, DesiredAnswer,
+  FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,
+  FleetTaskResult, FleetTaskState, FleetHostContainer, FleetHostReport, DesiredAnswer, RoundStartAnswer,
 } from '@recycle-erp/shared';
 export { FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked } from '@recycle-erp/shared';
 
 // snake_case on purpose: rows come straight from the backend's SQL.
 
 export type FleetTask = FleetTaskRow & {
-  // The city's display name, joined in for the tables; null once a city row
-  // is gone.
+  // The city's display name, joined in where a worker's task is shown; the
+  // task list leaves it out.
   city_name?: string | null;
 };
 
-// The open (ready or leased) task a city has for one item, as the cities
-// route folds it in.
-export type FleetCityOpenTask = Pick<FleetTask, 'id' | 'kind' | 'state' | 'due_at' | 'priority' | 'worker_id' | 'lease_expires_at'>;
-
-export type FleetCity = FleetCityRow & {
-  // Per item name: the one open task, or null when none is waiting.
-  open: Record<string, FleetCityOpenTask | null>;
-  // Per item name: when the last search finished; null = never.
-  last_done_at: Record<string, string | null>;
-};
+// A city with its open (ready or leased) tasks and the last finished search
+// per item, as GET /cities lists it and every city write answers it.
+export type FleetCity = FleetCityListed;
 
 export type FleetCityWrite = { slug: string; name: string; radius_km?: number; region?: string | null };
 export type FleetCityPatch = {
@@ -51,13 +44,16 @@ export type FleetRoll = { replace: string } | null;
 
 export type FleetHost = FleetHostRow & {
   // What the ERP tells the agent to run, folded in by the hosts route.
-  desired: { count: number; image: string; version: string; roll: FleetRoll } | null;
+  desired: { count: number; image: string; version: string; roll: FleetRoll };
 };
 
 // The token is in the answer to POST /api/fleet/hosts only, once.
 export type FleetHostCreated = FleetHost & { token: string };
 
-export type FleetRelease = { image: string; version: string };
+// The hosts and the one roll the ERP keeps (the latest release, any state).
+export type FleetHosts = { hosts: FleetHost[]; release: FleetRelease | null };
+
+export type FleetReleaseWrite = { image: string; version: string };
 
 export type FleetWorker = FleetWorkerRow & {
   // The task it holds now, if any.
@@ -74,13 +70,6 @@ export type FleetSlot = FleetSlotRow & {
   worker: FleetWorker | null;
 };
 
-// What starting the round did: per item, the tasks made due now and the
-// city-items skipped because they were searched within `fresh_hours`.
-export type FleetRoundStart = {
-  fresh_hours: number;
-  items: Record<string, { due: number; skipped: number }>;
-};
-
 export type FleetTaskQuery = {
   state?: FleetTaskState;
   city?: string;
@@ -89,7 +78,14 @@ export type FleetTaskQuery = {
   since?: string;
 };
 
-export type FleetCityLogTask = FleetTask & { events: FleetTaskEvent[] };
+export type FleetCityLogTask = FleetTaskLog;
+
+/** The fleet's error code on a refused call (`unverified`, `exists`, ...), if it carried one. */
+export function fleetErrorCode(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null;
+  const body = err.body as { error?: unknown } | undefined;
+  return typeof body?.error === 'string' ? body.error : null;
+}
 
 const BASE = '/api/fleet';
 const slug = (s: string) => encodeURIComponent(s);
@@ -104,47 +100,51 @@ function query(params: Record<string, string | number | undefined>): string {
 export const fleetApi = {
   // ── Cities ──
   cities: () => api.get<{ cities: FleetCity[] }>(`${BASE}/cities`).then(r => r.cities),
-  // The city starts disabled with a verify-slug task; 409 when the slug exists.
-  addCity: (body: FleetCityWrite) => api.post<{ city: FleetCity }>(`${BASE}/cities`, body).then(r => r.city),
-  updateCity: (slugId: string, patch: FleetCityPatch) =>
-    api.put<{ city: FleetCity }>(`${BASE}/cities/${slug(slugId)}`, patch).then(r => r.city),
-  // Disables the city and cancels its open tasks; the row stays for its history.
-  removeCity: (slugId: string) => api.delete<{ ok: true }>(`${BASE}/cities/${slug(slugId)}`),
+  // The city starts disabled with a verify-slug task; 409 exists when the slug is taken.
+  addCity: (body: FleetCityWrite) => api.post<FleetCity>(`${BASE}/cities`, body),
+  // 409 unverified for `enabled: true` on a slug no worker has checked;
+  // `override_verify: true` is the manager's way past it.
+  updateCity: (slugId: string, patch: FleetCityPatch) => api.put<FleetCity>(`${BASE}/cities/${slug(slugId)}`, patch),
+  // Disables the city and cancels its waiting tasks; a search under way finishes.
+  removeCity: (slugId: string) => api.delete<FleetCity>(`${BASE}/cities/${slug(slugId)}`),
 
   // ── Items and settings ──
-  items: () => api.get<{ items: FleetItem[] }>(`${BASE}/items`).then(r => r.items),
-  saveItems: (items: FleetItem[]) =>
-    api.put<{ items: FleetItem[] }>(`${BASE}/items`, { items }).then(r => r.items),
+  items: () => api.get<FleetItem[]>(`${BASE}/items`),
+  // Upserts the items given; one leaves by `enabled: false`, never by omission.
+  saveItems: (items: FleetItem[]) => api.put<FleetItem[]>(`${BASE}/items`, items),
   settings: () => api.get<FleetSettings>(`${BASE}/settings`),
   saveSettings: (patch: Partial<FleetSettings>) =>
     api.put<FleetSettings>(`${BASE}/settings`, patch),
 
   // ── Tasks ──
-  // A manual task: priority 100, so the next free worker takes it.
-  searchNow: (city: string, item: string) => api.post<{ task: FleetTask }>(`${BASE}/tasks`, { city, item }).then(r => r.task),
-  // Every ready task whose city-item was not done lately falls due now.
-  startRound: () => api.post<FleetRoundStart>(`${BASE}/round/start`, {}),
-  tasks: (q: FleetTaskQuery = {}) => api.get<{ tasks: FleetTask[] }>(`${BASE}/tasks${query(q)}`).then(r => r.tasks),
+  // A manual task: priority 100, so the next free worker takes it. 409 exists
+  // while a worker is already searching the pair.
+  searchNow: (city: string, item: string) => api.post<FleetTask>(`${BASE}/tasks`, { city, item }),
+  // Every waiting search falls due now unless its city-item finished lately.
+  startRound: () => api.post<RoundStartAnswer>(`${BASE}/round/start`, {}),
+  tasks: (q: FleetTaskQuery = {}) => api.get<FleetTask[]>(`${BASE}/tasks${query(q)}`),
   // One city's, or one worker's, tasks with their events over the last `hours`.
   cityLog: (q: { city?: string; worker?: string; hours?: number }) =>
-    api.get<{ tasks: FleetCityLogTask[] }>(`${BASE}/city-log${query({ city: q.city, worker: q.worker, hours: q.hours ?? 24 })}`)
-      .then(r => r.tasks),
+    api.get<FleetCityLogTask[]>(`${BASE}/city-log${query({ city: q.city, worker: q.worker, hours: q.hours ?? 24 })}`),
 
   // ── Hosts ──
-  hosts: () => api.get<{ hosts: FleetHost[] }>(`${BASE}/hosts`).then(r => r.hosts),
+  hosts: () => api.get<FleetHosts>(`${BASE}/hosts`),
   // The answer carries the host's bearer token; it is never shown again.
   addHost: (host_id: string) => api.post<{ host: FleetHostCreated }>(`${BASE}/hosts`, { host_id }).then(r => r.host),
   updateHost: (hostId: string, patch: { capacity?: number; authoritative?: boolean }) =>
     api.put<{ host: FleetHost }>(`${BASE}/hosts/${slug(hostId)}`, patch).then(r => r.host),
   removeHost: (hostId: string) => api.delete<{ ok: true }>(`${BASE}/hosts/${slug(hostId)}`),
-  // Starts a roll: every host replaces one idle worker at a time onto `image`.
-  release: (body: FleetRelease) => api.post<{ ok: true }>(`${BASE}/releases`, body),
+  // Starts a roll: one idle worker at a time, fleet-wide, onto `image`.
+  release: (body: FleetReleaseWrite) =>
+    api.post<{ ok: true; release: FleetRelease }>(`${BASE}/releases`, body).then(r => r.release),
 
   // ── Slots and workers ──
   slots: () => api.get<{ slots: FleetSlot[] }>(`${BASE}/slots`).then(r => r.slots),
   releaseQuarantine: (no: number) => api.post<{ slot: FleetSlot }>(`${BASE}/slots/${no}/release-quarantine`, {}).then(r => r.slot),
   // Parks the account: its worker exits on its next call and nothing claims it.
   parkSlot: (no: number) => api.post<{ slot: FleetSlot }>(`${BASE}/slots/${no}/park`, {}).then(r => r.slot),
+  // Lets a parked account be claimed again.
+  unparkSlot: (no: number) => api.post<{ slot: FleetSlot }>(`${BASE}/slots/${no}/unpark`, {}).then(r => r.slot),
   workers: () => api.get<{ workers: FleetWorker[] }>(`${BASE}/workers`).then(r => r.workers),
 };
 

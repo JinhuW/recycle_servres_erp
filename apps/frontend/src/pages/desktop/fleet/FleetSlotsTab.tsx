@@ -6,7 +6,7 @@ import { fleetApi, type FleetSlot } from '../../../lib/fleet';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
 import { hrefFor, onLinkClick } from '../../../lib/route';
-import { isQuarantined, leaseLive, maskUid } from './fleetBoard';
+import { isQuarantined, leaseLive, maskUid, slotLease } from './fleetBoard';
 import { BudgetRing, Clock, ConfirmDialogBody, EmptyRow, TabCard, UnavailableCard, useFleetPoll, WorkerLink } from './shared';
 
 // ─── Slots ────────────────────────────────────────────────────────────────────
@@ -14,7 +14,9 @@ import { BudgetRing, Clock, ConfirmDialogBody, EmptyRow, TabCard, UnavailableCar
 // host, under which epoch (a stale epoch is how a second copy of the account
 // is refused), how long its lease has, how much of today's budget it has
 // used, and whether it is quarantined because its searches found nothing
-// where other accounts found listings. The pool page keeps the credentials.
+// where other accounts found listings. A parked slot is one a manager took
+// out: nothing claims it until it is unparked here. The pool page keeps the
+// credentials.
 
 const POOL_CHIP: Record<string, string> = {
   available: 'chip pos', taken: 'chip info', fleet: 'chip accent', problem: 'chip warn', retired: 'chip muted',
@@ -37,7 +39,9 @@ export function FleetSlotsTab() {
   return (
     <div className="fp-pool">
       <TabCard title={t('fleetSlotsTitle')} className="fleet-slots"
-        sub={data ? t('fleetSlotsSub', { held, n: slots.length, quarantined: slots.filter(s => isQuarantined(s)).length }) : ''}
+        sub={data ? t('fleetSlotsSub', {
+          held, n: slots.length, quarantined: slots.filter(s => isQuarantined(s)).length, parked: slots.filter(s => s.parked).length,
+        }) : ''}
         actions={
           <a className="btn sm" href={hrefFor('/fleet/pool')} onClick={onLinkClick('/fleet/pool')}>
             <Icon name="users" size={13} />{t('fleetSlotsPoolLink')}
@@ -53,6 +57,7 @@ export function SlotsTable({ slots, onChanged, now = Date.now() }: { slots: read
   const { t } = useT();
   const [busy, setBusy] = useState<number | null>(null);
   const [parking, setParking] = useState<FleetSlot | null>(null);
+  const [unparking, setUnparking] = useState<FleetSlot | null>(null);
 
   const releaseQuarantine = async (s: FleetSlot) => {
     if (busy) return;
@@ -89,6 +94,7 @@ export function SlotsTable({ slots, onChanged, now = Date.now() }: { slots: read
           {slots.length === 0 && <EmptyRow cols={10}>{t('fleetSlotsNone')}</EmptyRow>}
           {slots.map(s => {
             const live = leaseLive(s, now);
+            const lease = slotLease(s, now);
             const quarantined = isQuarantined(s, now);
             const state = s.worker?.state ?? null;
             const rowBusy = busy === s.account_no;
@@ -116,12 +122,16 @@ export function SlotsTable({ slots, onChanged, now = Date.now() }: { slots: read
                 </td>
                 <td className="num mono">{s.epoch}</td>
                 <td>
-                  {s.lease_expires_at ? (
+                  {lease === 'parked' ? (
+                    <span className="chip warn">{t('fleetLeaseParked')}</span>
+                  ) : lease === 'free' ? (
+                    <span className="fp-muted">{t('fleetLeaseNone')}</span>
+                  ) : (
                     <span className="fp-holder">
                       <span className={live ? '' : 'fp-muted'}>{t(live ? 'fleetLeaseLive' : 'fleetLeaseLapsed')}</span>
                       <small><Clock at={s.lease_expires_at} now={now} /></small>
                     </span>
-                  ) : <span className="fp-muted">{t('fleetLeaseNone')}</span>}
+                  )}
                 </td>
                 <td><BudgetRing minutes={s.minutes_today} budget={s.budget_minutes} /></td>
                 <td>
@@ -136,7 +146,9 @@ export function SlotsTable({ slots, onChanged, now = Date.now() }: { slots: read
                   {quarantined && (
                     <button type="button" className="btn sm" onClick={() => releaseQuarantine(s)} disabled={rowBusy} title={t('fleetQuarantineReleaseHint')}>{t('fleetQuarantineRelease')}</button>
                   )}
-                  {live && (
+                  {s.parked ? (
+                    <button type="button" className="btn sm" onClick={() => setUnparking(s)} disabled={rowBusy}>{t('fleetUnpark')}</button>
+                  ) : (
                     <button type="button" className="btn sm" onClick={() => setParking(s)} disabled={rowBusy}>{t('fleetPark')}</button>
                   )}
                 </td>
@@ -146,6 +158,7 @@ export function SlotsTable({ slots, onChanged, now = Date.now() }: { slots: read
         </tbody>
       </table>
       {parking && <ParkDialog slot={parking} onClose={() => setParking(null)} onDone={() => { setParking(null); onChanged(); }} />}
+      {unparking && <UnparkDialog slot={unparking} onClose={() => setUnparking(null)} onDone={() => { setUnparking(null); onChanged(); }} />}
     </div>
   );
 }
@@ -174,6 +187,35 @@ function ParkDialog({ slot, onClose, onDone }: { slot: FleetSlot; onClose: () =>
         body={<>
           <p>{t('fleetParkBody', { worker: slot.worker_id ?? '—' })}</p>
           <p className="fp-warn">{t('fleetParkWarn')}</p>
+        </>} />
+    </Modal>
+  );
+}
+
+// Unparking makes the account claimable again: the next worker that asks for
+// a slot may take it, and that worker's start is a Facebook login.
+function UnparkDialog({ slot, onClose, onDone }: { slot: FleetSlot; onClose: () => void; onDone: () => void }) {
+  const { t } = useT();
+  const [busy, setBusy] = useState(false);
+  const confirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fleetApi.unparkSlot(slot.account_no);
+      showSuccessToast(t('fleetUnparked', { no: slot.account_no }));
+      onDone();
+    } catch (e) {
+      handleFetchError(e);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 460 }}>
+      <ConfirmDialogBody title={t('fleetUnparkTitle', { no: slot.account_no })} confirm={t('fleetUnpark')} busy={busy}
+        onClose={onClose} onConfirm={confirm}
+        body={<>
+          <p>{t('fleetUnparkBody')}</p>
+          <p className="fp-warn">{t('fleetUnparkWarn')}</p>
         </>} />
     </Modal>
   );

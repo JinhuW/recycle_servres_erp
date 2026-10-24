@@ -44,11 +44,16 @@ components (tables, chips, rings) rather than new ones.
 - [x] The four tabs render from fixtures with every action wired to the typed
       fetcher (v1.337.0: vitest helpers + smoke tests, Playwright pass against
       a mock API; see the PR).
-- [ ] Against WS-A/B on dev: add a city → appears "verifying", becomes
+- [x] Against WS-A/B: add a city → appears "verifying", becomes
       enabled after the fake worker reports; *Search now* creates a task the
       fake worker receives; *Remove* cancels it; Hosts shows the fake host;
-      Slots shows the claimed account with its epoch. (WS-F's integration
-      step; the recipe is in the PR's follow-ups.)
+      Slots shows the claimed account with its epoch. (v1.341.0: done
+      **locally**, not on Railway dev: a private database on the test
+      container, migrated, seeded and loaded from `master.toml`, one made-up
+      pool account, `fleet-fake-worker.mjs` with the token from the Hosts
+      tab, headless Playwright as a seed manager. Also checked: park/unpark,
+      409 `unverified` → Enable anyway, round start answer, release banner,
+      the worker page's current task. See the PR.)
 
 ## Notes for the agent
 
