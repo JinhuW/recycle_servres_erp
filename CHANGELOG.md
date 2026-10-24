@@ -17,6 +17,32 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.342.0] - 2026-10-24
+
+A fleet worker that stops can now report its last search without being handed
+another. Until now the only way to close a finished task was the `done` field
+of `POST /api/fleet/worker/next-task`, and that call always leased the next
+due city as well. A worker shutting down (a release roll, a host reboot, a
+SIGTERM) either dropped its report, leaving the finished task leased, or sent
+it and walked away with a fresh task nobody would search; either way a city
+sat leased for up to `lease_minutes` before the queue got it back.
+
+- **`take: false`.** `next-task` accepts an optional `take` (default `true`).
+  With `false` the server closes `done` exactly as before and answers
+  `{task: null, reason: "done_only"}` at once: no pick, no lease, no hold, and
+  budget and quarantine are not consulted. A stale epoch is still `409`, and a
+  `take` that is not a boolean is `422`. Workers that omit it behave as they
+  always did.
+- **Fake worker.** `apps/backend/scripts/fleet-fake-worker.mjs` sends its final
+  report with `take: false`, so a run no longer leaves a leased task behind.
+- **Wake-ups after commit.** The `fleet_tasks` notify that wakes held polls
+  went out through postgres.js's `notify`, which is bound to the pool, so a
+  notify sent inside a transaction (a new city's slug check, a released task)
+  fired on another connection before the task committed. A held poll could
+  wake, find nothing and answer `nothing_due`, leaving the worker idle for its
+  30-second retry; CI caught it as a flaky wake test. The notify now runs as
+  `pg_notify` on the caller's own handle and is delivered at commit.
+
 ## [1.341.0] - 2026-10-24
 
 The fleet tabs under **Monitors ▸ Facebook** now read the routes the backend

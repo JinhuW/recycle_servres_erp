@@ -69,6 +69,11 @@ tests `apps/backend/tests/fleet-claim.test.ts`, `fleet-hosts.test.ts`.
 - [x] Hosts tab data (`GET /api/fleet/hosts`) shows a fake host's report
       (2026-10-24, same local run: `report.containers`, `version`,
       `last_seen_at` and `desired` in the answer).
+- [x] A stopping worker reports its last task without leasing another:
+      `next-task` with `take: false` closes `done` and answers
+      `{task: null, reason: "done_only"}` at once, even with a task due
+      (2026-10-24, `tests/fleet-claim.test.ts`; the fake worker's final
+      report uses it).
 
 ## Notes for the agent
 

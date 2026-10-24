@@ -32,6 +32,7 @@ what answers.
 | `POST /slots/:no/unpark`; slot rows carry `parked` | §7 | #881 |
 | Agent: exit-code delays, crash limit, VNC port fallback, `RS_VNC_PORT` is the host port | §6, §10 | #877 |
 | Shared worker env (`OPENROUTER_API_KEY`, `TELEGRAM_*`, …) that the rendered config needs: supplier undecided | §2 | #879 |
+| `next-task` takes `take` (default `true`); `take: false` closes `done`, leases nothing and answers `{task: null, reason: "done_only"}` at once | §5 | #885 |
 
 ## 1. Names
 
@@ -292,12 +293,15 @@ Only `state` is required (`422` otherwise).
 ```jsonc
 // request
 { "done": { "task_id": 123, "result": { "cards": 115, "opened": 9, "reviewed": 9, "alerted": 1, "seconds": 412 } } | null,
-  "wait": 50 }
+  "wait": 50,
+  "take": true }   // optional, default true
 // 200, a task
 { "task": { "id": 124, "kind": "search", "city": { "slug": "houston", "name": "Houston", "radius_km": 500 },
             "item": "server_ram", "lease_expires_at": "…", "why": "home" | "familiar" | "other" | "manual" | "probe" } }
 // 200, nothing yet (after holding up to `wait` seconds)
 { "task": null, "retry_after": 30, "reason": "nothing_due" | "budget" | "quarantined" }
+// 200, take: false
+{ "task": null, "reason": "done_only" }
 ```
 
 In one transaction: close `done` (state `done`, `result`, event `done`),
@@ -316,6 +320,13 @@ answers at once), retry the pick once, else answer `null` with
 `done.task_id` is a JSON integer (`422` otherwise). A `done` for a task this
 worker no longer holds (not `leased`, or leased to another worker) is a
 **silent no-op**: nothing is written and the pick goes on as usual.
+
+`take: false` closes `done` as above and answers `{task: null, reason:
+"done_only"}` at once: no pick, no lease, no hold, and neither budget nor
+quarantine is consulted. A stale epoch is still `409`. A worker that is
+stopping (SIGTERM or any clean shutdown; not after `409 stale_epoch`, its
+token is dead) sends its pending `done` this way, so its last task does not
+stay leased for `lease_minutes`. `take` that is not a boolean is `422`.
 
 ### `POST /api/fleet/worker/events` — worker scope
 

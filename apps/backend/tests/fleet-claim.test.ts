@@ -229,6 +229,7 @@ describe('the worker routes with a stale epoch', () => {
     for (const r of await Promise.all([
       api('POST', '/api/fleet/worker/heartbeat', { headers: h, body: { state: 'HEALTHY' } }),
       api('POST', '/api/fleet/worker/next-task', { headers: h, body: { done: null, wait: 0 } }),
+      api('POST', '/api/fleet/worker/next-task', { headers: h, body: { done: { task_id: 1, result: {} }, wait: 0, take: false } }),
       api('POST', '/api/fleet/worker/events', { headers: h, body: { task_id: 1, kind: 'started' } }),
       api('PUT', '/api/fleet/worker/session', { headers: h, body: { cookies: [] } }),
     ])) {
@@ -335,6 +336,23 @@ describe('POST /api/fleet/worker/next-task', () => {
     expect(r.body.task).toMatchObject({ kind: 'verify-slug', city: { slug: 'austin' } });
   });
 
+  it('a notify sent inside a transaction wakes the poll only once the task has committed', async () => {
+    await seedSlot(1);
+    const { worker_token: token } = await claimed('lab-1');
+    const held = nextTask(token, null, 5);
+    await new Promise((r) => setTimeout(r, 300));
+    let id = 0;
+    await getTestDb().begin(async (tx) => {
+      const [t] = await tx<{ id: number }[]>`
+        INSERT INTO fleet_tasks (city, item, kind, due_at, priority, state, reason)
+        VALUES ('houston', 'server_ram', 'search', NOW(), 0, 'ready', 'cadence') RETURNING id::int AS id`;
+      id = t.id;
+      await notifyReady(tx, ['server_ram']);
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    expect((await held).body.task).toMatchObject({ id });
+  });
+
   it('caps the hold at poll_hold_seconds and answers null after it', async () => {
     await seedSlot(1);
     await getTestDb()`INSERT INTO fleet_settings (key, value) VALUES ('poll_hold_seconds', '1')`;
@@ -357,6 +375,49 @@ describe('POST /api/fleet/worker/next-task', () => {
     const r = await nextTask(token, null, 5);
     expect(r.body).toEqual({ task: null, retry_after: 300, reason: 'budget' });
     expect((await taskRow(waiting)).state).toBe('ready');
+  });
+
+  it('take:false closes done and leases nothing, even with a task due, and answers at once', async () => {
+    const no = await seedSlot(1);
+    const { worker_token: token } = await claimed('lab-1');
+    const first = await addTask('houston');
+    expect((await nextTask(token)).body.task).toMatchObject({ id: first });
+    const waiting = await addTask('denver');
+    const result = { cards: 3, opened: 0, reviewed: 0, alerted: 0, seconds: 5 };
+    const started = Date.now();
+    const r = await api<NextTaskAnswer>('POST', '/api/fleet/worker/next-task', {
+      headers: bearer(token), body: { done: { task_id: first, result }, wait: 10, take: false },
+    });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ task: null, reason: 'done_only' });
+    expect(await taskRow(first)).toMatchObject({ state: 'done', result });
+    expect(await events(first)).toEqual(['handed', 'done']);
+    expect(await taskRow(waiting)).toMatchObject({ state: 'ready', worker_id: null });
+    expect(await events(waiting)).toEqual([]);
+    // Without done it still takes nothing; budget and quarantine are not consulted.
+    await getTestDb()`UPDATE fleet_slots SET quarantined_until = NOW() + interval '1 hour' WHERE account_no = ${no}`;
+    const bare = await api<NextTaskAnswer>('POST', '/api/fleet/worker/next-task', { headers: bearer(token), body: { done: null, wait: 10, take: false } });
+    expect(bare.body).toEqual({ task: null, reason: 'done_only' });
+    expect((await taskRow(waiting)).state).toBe('ready');
+  });
+
+  it('takes as before when take is omitted or true, and refuses a take that is not a boolean', async () => {
+    await seedSlot(1);
+    const { worker_token: token } = await claimed('lab-1');
+    const first = await addTask('houston');
+    const second = await addTask('denver');
+    expect((await nextTask(token)).body.task).toMatchObject({ id: first });
+    const r = await api<NextTaskAnswer>('POST', '/api/fleet/worker/next-task', {
+      headers: bearer(token), body: { done: { task_id: first, result: {} }, wait: 0, take: true },
+    });
+    expect(r.body.task).toMatchObject({ id: second });
+    const bad = await api<{ error: string; detail?: string }>('POST', '/api/fleet/worker/next-task', {
+      headers: bearer(token), body: { done: { task_id: second, result: {} }, wait: 0, take: 'no' },
+    });
+    expect(bad.status).toBe(422);
+    expect(bad.body).toEqual({ error: 'bad_request', detail: 'take' });
+    expect((await taskRow(second)).state).toBe('leased');
   });
 
   it('hands a quarantined slot only its own probe, and a healthy worker any search or slug check', async () => {
