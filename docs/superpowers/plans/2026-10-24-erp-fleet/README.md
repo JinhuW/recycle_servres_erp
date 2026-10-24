@@ -90,7 +90,7 @@ E join as they land.
 | C | not started | | |
 | D | not started | | |
 | E | not started | | |
-| F | not started | | host `10.10.60.14` not yet reachable from the Mac; verify from the owner's machine |
+| F | Now section done; Integration waits for A+B+C | #876 | `fleet-images.yml` on dev, both jobs skip until the mirror/private packages exist; 4 `FLEET_*` vars set on Railway **dev**; `HOSTS.md` has the owner-runnable checklist; export procedure in WS-F. Host `10.10.60.14` answered from the Mac at 21:30 UTC after being dark earlier; nothing run on it. Owner steps: mirror + `AIMM_MIRROR_*`, private GHCR packages + `GHCR_PRIVATE_CONFIRMED`, GHCR read token, coordinator LAN publish, first host command |
 | G | not started | | |
 
 ## Facts an agent should not have to rediscover

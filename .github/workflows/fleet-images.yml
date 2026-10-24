@@ -1,0 +1,274 @@
+# Build and push the two fleet images to GHCR:
+#
+#   ghcr.io/jinhuw/aimm-recycle:<facebook-tracker version>   the worker
+#   ghcr.io/jinhuw/fleet-agent:<root version>                 the host agent
+#
+# Both packages are PRIVATE. The worker image carries the vendored monitor, an
+# AGPL-3 fork that is never distributed, so every job here refuses to push to
+# a package the public can pull (see "Refuse a public package"). Before the
+# first push the owner creates each package by hand so it starts private and
+# this repository is granted write access to it (the repository itself is
+# public, and a package GitHub creates on a workflow's first push may inherit
+# that):
+#
+#   docker login ghcr.io -u <github user>          # PAT with write:packages
+#   docker pull alpine:3.20 && docker tag alpine:3.20 ghcr.io/jinhuw/aimm-recycle:bootstrap
+#   docker push ghcr.io/jinhuw/aimm-recycle:bootstrap   # same for fleet-agent
+#   github.com/users/JinhuW/packages/container/aimm-recycle/settings
+#     -> Danger zone: visibility Private (the default for a hand push)
+#     -> Manage Actions access: add recycle_servres_erp, role Write
+#   gh variable set GHCR_PRIVATE_CONFIRMED --body yes
+#
+# Pulling on a host: a classic PAT with only read:packages (fine-grained
+# tokens cannot read packages), `echo "$PAT" | docker login ghcr.io -u <user>
+# --password-stdin`. The fleet agent pulls through the Docker CLI inside its
+# own container, so the host's ~/.docker/config.json is mounted into it
+# (docs/superpowers/plans/2026-10-24-erp-fleet/HOSTS.md).
+#
+# Why the worker job needs a mirror: trackers/facebook/ai-marketplace-monitor
+# is gitignored (trackers/facebook/VENDOR.md). The job clones branch
+# recycle-patches from a PRIVATE mirror of it and checks out the exact commit
+# VENDOR.md pins, so the image is built from what the release was tested
+# against. Until the owner creates that mirror and sets both of these, the
+# job logs that it is skipping and exits green:
+#
+#   gh variable set AIMM_MIRROR_REPO  --body JinhuW/aimm-recycle-patches   # owner/repo
+#   gh secret   set AIMM_MIRROR_TOKEN                                      # fine-grained PAT, Contents: read, that repo only
+#
+# Why the agent job also runs on pushes to dev: version-check.yml creates the
+# root v* tags with GITHUB_TOKEN, and GitHub never starts a workflow from an
+# event GITHUB_TOKEN caused, so a tag trigger alone would never fire for the
+# agent. The dev push builds the version package.json carries; the tag and
+# workflow_dispatch triggers cover hand-pushed tags and re-runs. The
+# facebook-tracker tags are pushed by a person (scripts/release.sh), so their
+# tag trigger does fire.
+name: fleet-images
+
+on:
+  push:
+    tags:
+      - "facebook-tracker/v*"
+      - "v*"
+    # Branch pushes only; GitHub does not apply `paths` to tag pushes.
+    branches: [dev]
+    paths:
+      - "apps/fleet-agent/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - ".github/workflows/fleet-images.yml"
+      - "!**/*.md"
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Which image to build from this ref
+        type: choice
+        default: both
+        options: [both, aimm-recycle, fleet-agent]
+
+# One build per ref at a time, and never cancel a push half way through a
+# layer upload.
+concurrency:
+  group: fleet-images-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  GHCR_OWNER: jinhuw
+
+jobs:
+  aimm-recycle:
+    if: >-
+      startsWith(github.ref, 'refs/tags/facebook-tracker/v') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.image != 'fleet-agent')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Decide whether this run can build the worker image
+        id: gate
+        env:
+          MIRROR_REPO: ${{ vars.AIMM_MIRROR_REPO }}
+          HAS_TOKEN: ${{ secrets.AIMM_MIRROR_TOKEN != '' }}
+          PRIVATE_CONFIRMED: ${{ vars.GHCR_PRIVATE_CONFIRMED }}
+        run: |
+          set -euo pipefail
+          skip() { echo "::notice title=aimm-recycle skipped::$1"; echo "build=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          [ -n "$MIRROR_REPO" ] || skip "Repository variable AIMM_MIRROR_REPO is not set: no private mirror of recycle-patches to clone yet. Build the worker image on the Mac and push by hand (trackers/facebook/VENDOR.md)."
+          [ "$HAS_TOKEN" = "true" ] || skip "Repository secret AIMM_MIRROR_TOKEN is not set; the mirror $MIRROR_REPO cannot be cloned."
+          [ "$PRIVATE_CONFIRMED" = "yes" ] || skip "Repository variable GHCR_PRIVATE_CONFIRMED is not 'yes': create ghcr.io/$GHCR_OWNER/aimm-recycle as a private package first (header of this workflow)."
+          [ -f trackers/facebook/deploy/Dockerfile.worker ] || skip "trackers/facebook/deploy/Dockerfile.worker does not exist on this ref."
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$(tr -d '[:space:]' < trackers/facebook/VERSION)"
+          else
+            VERSION="${GITHUB_REF_NAME#facebook-tracker/v}"
+            FILE_VERSION="$(tr -d '[:space:]' < trackers/facebook/VERSION)"
+            if [ "$VERSION" != "$FILE_VERSION" ]; then
+              echo "::error::Tag says $VERSION but trackers/facebook/VERSION says $FILE_VERSION. The tag is not on the release commit."
+              exit 1
+            fi
+          fi
+          # Column 5 of the monitor's row in VENDOR.md, the same read
+          # scripts/check-vendor.sh does, so there is one place the pin lives.
+          PIN="$(awk -F'|' '$2 ~ /`ai-marketplace-monitor\/`/ {gsub(/[ `]/,"",$5); print $5}' trackers/facebook/VENDOR.md)"
+          if ! printf '%s' "$PIN" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::Could not read the ai-marketplace-monitor pin from trackers/facebook/VENDOR.md (got '$PIN')."
+            exit 1
+          fi
+          echo "Building aimm-recycle:$VERSION from recycle-patches@$PIN"
+          {
+            echo "build=true"
+            echo "version=$VERSION"
+            echo "pin=$PIN"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Refuse a public package
+        if: steps.gate.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+          # An anonymous pull token is granted for any name; the tag list then
+          # answers 200 only for a public package (403 for private or absent).
+          IMAGE="$GHCR_OWNER/aimm-recycle"
+          TOKEN="$(curl -fsS "https://ghcr.io/token?scope=repository:$IMAGE:pull" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')"
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/$IMAGE/tags/list")"
+          if [ "$CODE" = "200" ]; then
+            echo "::error::ghcr.io/$IMAGE is publicly pullable. The worker image is never distributed; make the package private before pushing."
+            exit 1
+          fi
+          echo "ghcr.io/$IMAGE is not anonymously pullable (HTTP $CODE) — ok."
+
+      - name: Clone the vendored monitor at the pinned commit
+        if: steps.gate.outputs.build == 'true'
+        env:
+          MIRROR_REPO: ${{ vars.AIMM_MIRROR_REPO }}
+          MIRROR_TOKEN: ${{ secrets.AIMM_MIRROR_TOKEN }}
+          PIN: ${{ steps.gate.outputs.pin }}
+        run: |
+          set -euo pipefail
+          DEST=trackers/facebook/ai-marketplace-monitor
+          # The token travels in a per-command header, never into .git/config:
+          # the clone sits inside the build context.
+          AUTH="$(printf 'x-access-token:%s' "$MIRROR_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+            clone --quiet --no-checkout "https://github.com/$MIRROR_REPO.git" "$DEST"
+          git -C "$DEST" -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+            fetch --quiet origin "$PIN"
+          git -C "$DEST" checkout --quiet -B recycle-patches "$PIN"
+          git -C "$DEST" remote remove origin
+          HEAD="$(git -C "$DEST" rev-parse HEAD)"
+          [ "$HEAD" = "$PIN" ] || { echo "::error::Checked out $HEAD, expected $PIN"; exit 1; }
+          cd trackers/facebook && sh scripts/check-vendor.sh || echo "::warning::check-vendor reported drift for the reference checkout (facebook-marketplace-bot is not cloned in CI); the monitor pin above is verified."
+
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        if: steps.gate.outputs.build == 'true'
+
+      - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        if: steps.gate.outputs.build == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Context is the tracker folder, not the monitor: the Dockerfile copies
+      # rs_worker/ beside the vendored tree. Whatever ENTRYPOINT it declares
+      # is what ships; nothing here depends on it. The build args match the
+      # ones scripts/deploy.sh passes; a Dockerfile that does not declare them
+      # only gets a build warning.
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        if: steps.gate.outputs.build == 'true'
+        with:
+          context: trackers/facebook
+          file: trackers/facebook/deploy/Dockerfile.worker
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ghcr.io/${{ env.GHCR_OWNER }}/aimm-recycle:${{ steps.gate.outputs.version }}
+          build-args: |
+            RS_VERSION=${{ steps.gate.outputs.version }}
+            RS_MONITOR_COMMIT=${{ steps.gate.outputs.pin }}
+          cache-from: type=gha,scope=aimm-recycle
+          cache-to: type=gha,scope=aimm-recycle,mode=max
+
+  fleet-agent:
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.ref == 'refs/heads/dev' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.image != 'aimm-recycle')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Decide whether this run can build the agent image
+        id: gate
+        env:
+          PRIVATE_CONFIRMED: ${{ vars.GHCR_PRIVATE_CONFIRMED }}
+        run: |
+          set -euo pipefail
+          skip() { echo "::notice title=fleet-agent skipped::$1"; echo "build=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          [ -f apps/fleet-agent/Dockerfile ] || skip "apps/fleet-agent/Dockerfile does not exist on this ref yet."
+          [ "$PRIVATE_CONFIRMED" = "yes" ] || skip "Repository variable GHCR_PRIVATE_CONFIRMED is not 'yes': create ghcr.io/$GHCR_OWNER/fleet-agent as a private package first (header of this workflow)."
+
+          VERSION="$(node -p "require('./package.json').version")"
+          case "$GITHUB_REF" in
+            refs/tags/v*)
+              if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+                echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $VERSION."
+                exit 1
+              fi ;;
+            refs/heads/*)
+              # A dev push that forgot its bump fails version-check; do not
+              # overwrite the previous release's image under its own number.
+              # (version-check tags HEAD after this job starts, so a tag on
+              # HEAD itself is the re-run case and fine.)
+              EXISTING="$(git ls-remote --tags origin "refs/tags/v$VERSION" | cut -f1)"
+              if [ -n "$EXISTING" ] && [ "$EXISTING" != "$GITHUB_SHA" ]; then
+                skip "v$VERSION is already tagged on ${EXISTING:0:12}, not on this commit: package.json was not bumped, so there is no new version to publish."
+              fi ;;
+          esac
+          echo "Building fleet-agent:$VERSION"
+          {
+            echo "build=true"
+            echo "version=$VERSION"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Refuse a public package
+        if: steps.gate.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+          IMAGE="$GHCR_OWNER/fleet-agent"
+          TOKEN="$(curl -fsS "https://ghcr.io/token?scope=repository:$IMAGE:pull" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')"
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/$IMAGE/tags/list")"
+          if [ "$CODE" = "200" ]; then
+            echo "::error::ghcr.io/$IMAGE is publicly pullable; make the package private before pushing."
+            exit 1
+          fi
+          echo "ghcr.io/$IMAGE is not anonymously pullable (HTTP $CODE) — ok."
+
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        if: steps.gate.outputs.build == 'true'
+
+      - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        if: steps.gate.outputs.build == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Repo-root context: the agent is a pnpm workspace package and its
+      # install needs the root lockfile and pnpm-workspace.yaml.
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        if: steps.gate.outputs.build == 'true'
+        with:
+          context: .
+          file: apps/fleet-agent/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ghcr.io/${{ env.GHCR_OWNER }}/fleet-agent:${{ steps.gate.outputs.version }}
+          build-args: |
+            FLEET_AGENT_VERSION=${{ steps.gate.outputs.version }}
+          cache-from: type=gha,scope=fleet-agent
+          cache-to: type=gha,scope=fleet-agent,mode=max
