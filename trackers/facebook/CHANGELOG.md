@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.17] - 2026-10-23
+
 ### Added
 
 - **A city log: every city a worker searches, from handout to result**
