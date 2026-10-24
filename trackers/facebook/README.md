@@ -26,6 +26,7 @@ TypeScript ERP and Reddit tracker elsewhere in this monorepo.
 | `rs_poster/` | Buy-ad poster (Playwright). CLIs: `rs-poster`, and `rs-session` for password-free Facebook sessions. |
 | `rs_messenger/` | Marketplace inbox bridge (Playwright). CLI: `rs-messenger`. Reports conversations to the coordinator, which routes them to Telegram and queues (optional, default-off) auto-replies for it to send. |
 | `rs_router/` | Messenger router (stdlib only): bridges mautrix-meta Matrix rooms to the coordinator's messages API and sends the replies queued for the bridge. CLI: `rs-router`. |
+| `rs_worker/` | The worker image's entrypoint (stdlib only). With the `RS_FLEET_*` variables it claims an account from the ERP's fleet and runs the monitor in fleet mode; without them the image runs as before. `deploy/Dockerfile.worker` builds it. |
 | `configs/` | `master.toml` (what the fleet searches), `fleet.toml` (which VM searches where), generated per-worker shards. |
 | `deploy/` | Docker Compose files and the per-node bringup checklist. |
 | `scripts/` | Deploy, measurement probes, and the release/vendor/secret checks. |
@@ -379,6 +380,60 @@ coordinator decides (`rs_coordinator/fleet.py`):
 [deploy/README.md](deploy/README.md) → *The fleet agent* has the runbooks:
 moving the existing compose workers under the agent, adding a host, rolling
 back.
+
+### Fleet mode
+
+The ERP is growing a task queue of its own (`/api/fleet`, ticket RS-394): the
+account pool, a city catalog managers edit, one open task per city and item,
+and a slot-claim protocol with a lease epoch. The worker's side of it is
+**fleet mode**, and it lives in two places:
+
+- **`rs_worker/entry.py`** is the image's entrypoint (`deploy/Dockerfile.worker`,
+  built from this folder so both `ai-marketplace-monitor/` and `rs_worker/`
+  are in the context). Without `RS_FLEET_URL`, `RS_FLEET_HOST_ID` and
+  `RS_FLEET_HOST_TOKEN` it execs the image's command, and the worker runs
+  exactly as the compose files expect. With them it `POST`s
+  `/api/fleet/worker/claim` with the host token (`RS_FLEET_WORKER_ID`, the
+  image's `RS_VERSION`, `RS_VNC_PORT`), and renders what the claim answers
+  into the container, never onto a mount: `config.toml` from
+  `rs_worker/config.template.toml` plus the slot's proxy, device, items,
+  search settings, home cities and coordinator URL, with a `[fleet]` table
+  carrying the worker token and epoch; `session.json` from the account's
+  cookies; `identity.json` from its device. `RS_FB_PASSWORD` / `RS_FB_TOTP`
+  go to the monitor in its environment for the password fallback, which runs
+  only when the cookie session is invalid, as today. It then runs Xvfb,
+  x11vnc and `aimm`, answers `GET /healthz` on 8788 while the monitor is up
+  (the image's `HEALTHCHECK`), and leaves with the monitor's exit code: **75**
+  for no free slot or a stale epoch (the agent claims again after a minute),
+  **70** for a claim or configuration failure (the agent backs off). Shared
+  secrets (`OPENROUTER_API_KEY`, the Telegram channel, `RS_CONTROL_PLANE_TOKEN`
+  for the coordinator) still come from the environment the agent passes.
+- **The monitor's `[fleet]` section** (`recycle-patches`) replaces the
+  schedule. It logs in once, from the claimed session, then loops: while the
+  page is live and logged in it asks `next-task` (the server holds the call
+  up to `poll_hold_seconds`), searches exactly the city and item it is handed
+  (`search_task`, the per-city body of `search()`, with the task's radius),
+  and reports it done with the next ask. `verify-slug` tasks open the search
+  page and report the location label Facebook shows; `probe` tasks are
+  ordinary searches. Heartbeats go to the fleet, with the epoch and the VNC
+  port, and the coordinator still gets the listings, alert claims, funnel
+  counts and challenges. Parked (no page, a wall, a login that gave up), it
+  runs only the session checks and an operator's `relogin` directive, which
+  rides on the heartbeat's answer: **a wake never logs in**. With the fleet
+  unreachable it backs off from 30 s to 10 min and keeps its session; there
+  is **no own-list fallback** (`queued_cities` and `planned_cities` are never
+  called). A `409 stale_epoch` from any call closes the browser without
+  saving and exits 75. The 30-minute session save also uploads the session
+  to the pool (`PUT /api/fleet/worker/session`).
+
+Try it without a backend: `rs_worker/tests/fake_fleet.py` is a small server
+with the five routes and made-up data (`python -m rs_worker.tests.fake_fleet`
+runs it on 8790 with one task queued). The suites in `rs_worker/tests` run
+the entrypoint and the monitor's loop against it; run them from this folder in
+the monitor's venv: `.venv-aimm/bin/python -m pytest rs_worker/tests`. The
+contract both sides build against is
+[`docs/superpowers/plans/2026-10-24-erp-fleet/CONTRACTS.md`](../../docs/superpowers/plans/2026-10-24-erp-fleet/CONTRACTS.md)
+in the ERP repo.
 
 ### Did it alert, and did the alert arrive?
 
@@ -1161,6 +1216,7 @@ full result page per phrase in Facebook traffic, so keep the phrase count small.
 | System faults page once, fleet-wide — an AI outage is declared only after `RS_INCIDENT_DOWN_AFTER` (3) straight failed evaluations and cleared after `RS_INCIDENT_UP_AFTER` (3) straight successes, and the crossing is POSTed to the coordinator's `/v1/incidents`, which dedupes across every worker (one DOWN page per key per `RS_INCIDENT_COOLDOWN_HOURS`, one recovered note per paged DOWN). Without a control plane, or when it is unreachable, a local gate applies the same one-per-cooldown rule to this process. Replaces the per-process flag that sent a DOWN/recovered pair for every listing while OpenRouter flapped | `ops_incidents.py` (new: `OutageTracker`, `LocalIncidentGate`), `monitor.py` (`_report_incident`, `evaluate_by_ai`), `control_plane.py` (`report_incident`) |
 | One alert per listing, fleet-wide — after the rating gates and before any send, the worker claims the listing from the coordinator's `/v1/alerts/claim`; only a granted claim sends, and its delivery is reported to `/v1/alerts/claim/delivered`. A `duplicate` (the fleet already alerted it) is skipped and cached as notified; a `pending` one (another worker is sending it) is skipped and asked again next sweep. No answer sends as before | `monitor.py` (`_search_item`, `listing_alert.fleet_claim`), `control_plane.py` (`claim_alert`, `alert_delivered`) |
 | Funnel counts — each search page, card, title-gate pass, real page visit, keyword-gate pass, not-yet-alerted listing, fresh AI verdict and delivered alert is counted into a buffer and POSTed to `/v1/stats/reviews` once per search page (previously one POST per verdict and one per alert), feeding the ERP's search-to-alert card; the report that counts a search names its `search_city`, which colors the cities searched today on the ERP's fleet fold | `facebook.py` (`count_stage`, `flush_stage_counts`, `_examine_listings`), `monitor.py` (`_count_stage`), `marketplace.py` (`count_stage`), `control_plane.py` (`report_review_stats`) |
+| Fleet mode — a `[fleet]` config table (`url`, `worker_token`, `epoch`, `worker_id`, `poll_hold_seconds`; `rs_worker/entry.py` writes it from the claim) puts the monitor on the ERP's task queue instead of a schedule: one login at boot, then `next-task` long-polls while the page is live and logged in, `search_task` searches exactly the city and item handed out (the per-city body of `search()`, now `_search_one_city`), `verify_slug_task` reads the location label for a new slug, heartbeats and `started`/`searched`/`finished`/`stopped` events go to the fleet with the epoch, the session save uploads to the pool, the device comes from the claim (the coordinator's identity, restore and directive routes are not asked), and a `409 stale_epoch` closes the browser and exits 75. No own-list fallback; a wake never logs in. Without the table nothing changes | `control_plane.py` (`FleetConfig`, `FleetClient`, `StaleEpochError`, `STALE_EPOCH_EXIT_CODE`), `config.py` (`[fleet]`), `monitor.py` (`fleet_loop`, `_fleet_login`, `_run_task`, `_exit_stale_epoch`, `_search_item(listings=)`), `facebook.py` (`set_fleet`, `fleet_ready`, `search_task`, `verify_slug_task`, `_search_one_city`, `_send_fleet_heartbeat`, `_fleet_event`, `_upload_session_to_fleet`, `drop_browser`) |
 
 Before pulling upstream, rebase that branch rather than merging into it, then
 refresh the pin with `scripts/check-vendor.sh update`.

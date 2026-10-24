@@ -18,6 +18,41 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **Fleet mode for the worker image** (RS-394, the ERP's fleet task queue;
+  this is the worker's half, built against the plan's contract and tested
+  against a fake fleet server until the ERP's backend lands).
+  - **`rs_worker/entry.py`**, the image's new entrypoint. Without
+    `RS_FLEET_URL`, `RS_FLEET_HOST_ID` and `RS_FLEET_HOST_TOKEN` it execs the
+    image's command unchanged, so every compose worker runs as before. With
+    them it claims an account from `POST /api/fleet/worker/claim`, renders
+    `config.toml` (from `rs_worker/config.template.toml`), `session.json` and
+    `identity.json` inside the container, hands the password fallback over as
+    `RS_FB_PASSWORD` / `RS_FB_TOTP`, runs Xvfb, x11vnc and the monitor, serves
+    `GET /healthz` on 8788, and leaves with the monitor's exit code: 75 for no
+    slot or a stale epoch, 70 for a claim or configuration failure.
+  - **`deploy/Dockerfile.worker`** builds that image from this folder (the
+    monitor plus `rs_worker/`), with the entrypoint, the healthcheck and
+    5900/8467/8788 exposed; `Dockerfile.worker.dockerignore` keeps secrets and
+    venvs out of the build context. No `VOLUME`: the claimed session must die
+    with the container.
+  - **The monitor's `[fleet]` section** (`recycle-patches`, see README →
+    *Upstream patches*): one login at boot, then `next-task` long-polls while
+    the page is live and logged in, one city per task with the radius the
+    task gives, `verify-slug` tasks that read Facebook's location label,
+    heartbeats and task events to the fleet with the epoch, the session save
+    uploaded to the pool, backoff with the session kept when the fleet is
+    unreachable, exit 75 on a stale epoch without saving, and no own-list
+    fallback. Nothing changes for a worker without the section.
+  - **`rs_worker/tests/fake_fleet.py`**, a stand-in for the five worker
+    routes with made-up data, which the entrypoint and monitor-loop suites run
+    against (`.venv-aimm/bin/python -m pytest rs_worker/tests`).
+
+### Changed
+
+- **The vendored monitor is pinned at the fleet-mode commit** (VENDOR.md).
+
 ## [0.13.18] - 2026-10-24
 
 ### Added
