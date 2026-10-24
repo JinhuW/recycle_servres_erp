@@ -147,11 +147,11 @@ async function forward(
 /**
  * One facade call for a route that acts on the answer instead of relaying it:
  * `error` is set, already worded for the manager, unless the facade said 2xx.
- * `status` is what to answer with in that case.
+ * `status` is what to answer with in that case. A GET's answer is `payload`.
  */
 export async function callFacade(
-  env: Env, method: 'POST' | 'PUT', path: string, body?: unknown,
-): Promise<{ error: string | null; status: ContentfulStatusCode }> {
+  env: Env, method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown,
+): Promise<{ error: string | null; status: ContentfulStatusCode; payload?: unknown }> {
   const up = upstream(env);
   if (!up) return { error: NOT_CONFIGURED, status: 501 };
   const headers: Record<string, string> = { ...up.headers };
@@ -171,7 +171,7 @@ export async function callFacade(
     log.warn('coordinator upstream refused the request', { module: 'coordinator', upstreamStatus: res.status, upstreamPath: path });
     return { error: refused, status: 502 };
   }
-  if (res.ok) return { error: null, status: 200 };
+  if (res.ok) return { error: null, status: 200, payload: method === 'GET' ? await res.json().catch(() => null) : undefined };
   const payload = await res.json().catch(() => null) as { detail?: unknown; error?: unknown } | null;
   const status = res.status >= 400 && res.status < 600 ? res.status : 502;
   return { error: upstreamWhy(payload) ?? `coordinator returned ${res.status}`, status: status as ContentfulStatusCode };
@@ -295,6 +295,15 @@ coordinator.put('/settings', async (c) => {
 // writes them into that worker's config only; each city is narrowed to the
 // three fields a config holds.
 export const WORKER_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+// One worker's login ledger for the History column on its page: every
+// attempt, whichever account it was for. The console leaves the device
+// fingerprints out; one older than the route answers 404.
+coordinator.get('/workers/:id/logins', (c) => {
+  const id = c.req.param('id');
+  if (!WORKER_ID.test(id)) return c.json({ error: 'Not a valid worker id' }, 400);
+  return forward(c, 'GET', `/v1/logins?worker_id=${encodeURIComponent(id)}&limit=500`);
+});
 const CITY_FIELDS = ['slug', 'name', 'radius'] as const;
 
 coordinator.put('/workers/:id/cities', async (c) => {
@@ -315,6 +324,57 @@ coordinator.put('/workers/:id/cities', async (c) => {
   });
   return forward(c, 'PUT', `/v1/workers/${encodeURIComponent(id)}/cities`, {
     cities, updated_by: c.var.user.name || c.var.user.email,
+  });
+});
+
+// ── The city queue ───────────────────────────────────────────────────────────
+// Whether a worker takes its cities from the coordinator's queue or searches
+// its own list. The coordinator refuses (409) a worker whose monitor never
+// asks the queue, and that message is what the manager reads.
+coordinator.put('/workers/:id/queue', async (c) => {
+  const id = c.req.param('id');
+  if (!WORKER_ID.test(id)) return c.json({ error: 'Not a valid worker id' }, 400);
+  const raw: unknown = await c.req.json().catch(() => null);
+  if (!isObject(raw) || typeof raw.enrolled !== 'boolean') {
+    return c.json({ error: 'Expected {enrolled: true|false}' }, 400);
+  }
+  log.info('fleet worker queue set', {
+    module: 'coordinator', workerId: id, enrolled: raw.enrolled, by: c.var.user.email,
+  });
+  return forward(c, 'PUT', `/v1/workers/${encodeURIComponent(id)}/queue`, {
+    enrolled: raw.enrolled, updated_by: c.var.user.name || c.var.user.email,
+  });
+});
+
+// The city log: each city a worker searched, from its handout or start to its
+// end, for the worker page (by worker) and the round card (by city). An older
+// console answers 404, and the page then shows no log.
+const CITY_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+coordinator.get('/city-log', (c) => {
+  const worker = c.req.query('worker');
+  const city = c.req.query('city');
+  const hours = Number(c.req.query('hours') ?? 24);
+  if (worker !== undefined && !WORKER_ID.test(worker)) return c.json({ error: 'Not a valid worker id' }, 400);
+  if (city !== undefined && !CITY_SLUG.test(city)) return c.json({ error: 'Not a valid city' }, 400);
+  if (!Number.isInteger(hours) || hours < 1 || hours > 72) return c.json({ error: 'hours is 1 to 72' }, 400);
+  const params = new URLSearchParams();
+  if (worker !== undefined) params.set('worker_id', worker);
+  if (city !== undefined) params.set('city', city);
+  params.set('hours', String(hours));
+  return forward(c, 'GET', `/v1/city-log?${params}`);
+});
+
+coordinator.put('/queue/everyone', async (c) => {
+  const raw: unknown = await c.req.json().catch(() => null);
+  if (!isObject(raw) || typeof raw.enrolled !== 'boolean') {
+    return c.json({ error: 'Expected {enrolled: true|false}' }, 400);
+  }
+  log.info('fleet queue set for every worker', {
+    module: 'coordinator', enrolled: raw.enrolled, by: c.var.user.email,
+  });
+  return forward(c, 'PUT', '/v1/queue/everyone', {
+    enrolled: raw.enrolled, updated_by: c.var.user.name || c.var.user.email,
   });
 });
 

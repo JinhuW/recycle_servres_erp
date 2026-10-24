@@ -38,6 +38,7 @@ from .db import (
     ACCOUNT_LOCK_COLUMNS,
     ALERT_CLAIM_SQL,
     ALERT_HIT_SQL,
+    CITY_SEARCH_EXTRA_COLUMNS,
     LISTING_EXTRA_COLUMNS,
     OUTBOUND_EXTRA_COLUMNS,
     REVIEW_STAT_COUNTERS,
@@ -51,6 +52,7 @@ from .db import (
     THREAD_EXTRA_COLUMNS,
     UNMATCHED_REACTIONS_SQL,
     WORKER_HEALTH_COLUMNS,
+    city_event_row,
     review_stat_deltas,
     review_stats_row,
     stats_cutoff,
@@ -210,6 +212,7 @@ class PostgresDatabase:
                 self._migrate_columns(conn, "outbound_messages", OUTBOUND_EXTRA_COLUMNS)
                 self._migrate_columns(conn, "session_snapshots", SNAPSHOT_EXTRA_COLUMNS)
                 self._migrate_columns(conn, "review_stats", REVIEW_STATS_EXTRA_COLUMNS)
+                self._migrate_columns(conn, "city_searches", CITY_SEARCH_EXTRA_COLUMNS)
                 self._migrate_columns(conn, "accounts", ACCOUNT_EXTRA_COLUMNS)
                 self._migrate_columns(conn, "accounts", ACCOUNT_LOCK_COLUMNS)
                 # Created after the migration adds the columns they index.
@@ -817,6 +820,187 @@ class PostgresDatabase:
                 "SELECT worker_id, city, last_at FROM search_cities ORDER BY worker_id, city"
             )
             return _rows(cur.fetchall())
+
+    def log_city_search(
+        self: "PostgresDatabase",
+        worker_id: str,
+        city: str,
+        cards: int = 0,
+        opened: int = 0,
+        reviewed: int = 0,
+        alerted: int = 0,
+        item: str | None = None,
+    ) -> None:
+        """See `Database.log_city_search`."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=SEARCH_CYCLE_DAYS)).isoformat(
+            timespec="seconds"
+        )
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO city_searches "
+                "(worker_id, city, at, cards, opened, reviewed, alerted, item) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (worker_id, city, utcnow(), cards, opened, reviewed, alerted, item),
+            )
+            cur.execute("DELETE FROM city_searches WHERE at < %s", (cutoff,))
+
+    def city_searches_since(self: "PostgresDatabase", since: str) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, city, at, cards, opened, reviewed, alerted, item "
+                "FROM city_searches WHERE at >= %s ORDER BY at, id",
+                (since,),
+            )
+            return _rows(cur.fetchall())
+
+    def city_search_log_start(self: "PostgresDatabase") -> Optional[str]:
+        with self.cursor() as cur:
+            cur.execute("SELECT MIN(at) AS first FROM city_searches")
+            row = _row(cur.fetchone())
+        return row["first"] if row else None
+
+    # -- the city queue's leases and config ----------------------------------
+
+    def open_city_lease(
+        self: "PostgresDatabase",
+        worker_id: str,
+        item: str,
+        city: str,
+        why: str,
+        leased_at: str,
+        expires_at: str,
+    ) -> None:
+        """See `Database.open_city_lease`."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=SEARCH_CYCLE_DAYS)).isoformat(
+            timespec="seconds"
+        )
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO city_leases (worker_id, item, city, leased_at, expires_at, why) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (worker_id, item, city, leased_at, expires_at, why),
+            )
+            cur.execute("DELETE FROM city_leases WHERE leased_at < %s", (cutoff,))
+
+    def settle_city_leases(
+        self: "PostgresDatabase", worker_id: str, item: str, done: Optional[str], now: str
+    ) -> List[Dict[str, Any]]:
+        """See `Database.settle_city_leases`."""
+        with self.cursor() as cur:
+            if done:
+                cur.execute(
+                    "UPDATE city_leases SET closed_at = %s WHERE worker_id = %s AND item = %s "
+                    "AND city = %s AND closed_at IS NULL AND expires_at > %s",
+                    (now, worker_id, item, done, now),
+                )
+            cur.execute(
+                "SELECT item, city, leased_at FROM city_leases WHERE worker_id = %s "
+                "AND item = %s AND closed_at IS NULL AND expires_at > %s ORDER BY id",
+                (worker_id, item, now),
+            )
+            given_up = _rows(cur.fetchall())
+            cur.execute(
+                "UPDATE city_leases SET expires_at = %s WHERE worker_id = %s AND item = %s "
+                "AND closed_at IS NULL AND expires_at > %s",
+                (now, worker_id, item, now),
+            )
+        return given_up
+
+    def extend_city_leases(
+        self: "PostgresDatabase", worker_id: str, until: str, now: str
+    ) -> List[Dict[str, Any]]:
+        """See `Database.extend_city_leases`."""
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT item, city, leased_at FROM city_leases WHERE worker_id = %s "
+                "AND closed_at IS NULL AND expires_at > %s ORDER BY id",
+                (worker_id, now),
+            )
+            moved = _rows(cur.fetchall())
+            cur.execute(
+                "UPDATE city_leases SET expires_at = %s WHERE worker_id = %s "
+                "AND closed_at IS NULL AND expires_at > %s",
+                (until, worker_id, now),
+            )
+        return moved
+
+    def log_city_event(
+        self: "PostgresDatabase",
+        worker_id: str,
+        item: str | None,
+        city: str,
+        event: str,
+        detail: Dict[str, Any] | None = None,
+        at: str | None = None,
+    ) -> None:
+        """See `Database.log_city_event`."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=SEARCH_CYCLE_DAYS)).isoformat(
+            timespec="seconds"
+        )
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO city_events (at, worker_id, item, city, event, detail) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (
+                    at or utcnow(),
+                    worker_id,
+                    item,
+                    city,
+                    event,
+                    json.dumps(detail) if detail else None,
+                ),
+            )
+            cur.execute("DELETE FROM city_events WHERE at < %s", (cutoff,))
+
+    def city_events_since(
+        self: "PostgresDatabase", since: str, worker_id: str | None = None
+    ) -> List[Dict[str, Any]]:
+        """See `Database.city_events_since`."""
+        sql = (
+            "SELECT id, at, worker_id, item, city, event, detail FROM city_events WHERE at >= %s"
+        )
+        params: List[Any] = [since]
+        if worker_id is not None:
+            sql += " AND worker_id = %s"
+            params.append(worker_id)
+        with self.cursor() as cur:
+            cur.execute(sql + " ORDER BY at, id", params)
+            return [city_event_row(row) for row in _rows(cur.fetchall())]
+
+    def city_leases_since(self: "PostgresDatabase", since: str) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, item, city, leased_at, expires_at, closed_at, why "
+                "FROM city_leases WHERE leased_at >= %s ORDER BY leased_at, id",
+                (since,),
+            )
+            return _rows(cur.fetchall())
+
+    def queue_config(self: "PostgresDatabase", key: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT body, updated_at, updated_by FROM queue_config WHERE key = %s", (key,)
+            )
+            row = _row(cur.fetchone())
+        if not row:
+            return None
+        return {"body": json.loads(row["body"]), "updated_at": row["updated_at"],
+                "updated_by": row["updated_by"]}
+
+    def put_queue_config(
+        self: "PostgresDatabase",
+        key: str,
+        body: Dict[str, Any],
+        updated_by: Optional[str] = None,
+    ) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO queue_config (key, body, updated_at, updated_by) "
+                "VALUES (%s, %s, %s, %s) "
+                "ON CONFLICT(key) DO UPDATE SET body = excluded.body, "
+                "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+                (key, json.dumps(body), utcnow(), updated_by),
+            )
 
     def city_tier_config(self: "PostgresDatabase") -> Dict[str, Any]:
         with self.cursor() as cur:

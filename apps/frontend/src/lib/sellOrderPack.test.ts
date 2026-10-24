@@ -346,3 +346,4 @@ describe('productTally', () => {
     expect(ps.map(p => productBucket(p.lots, cs))).toEqual(['done', 'partial', 'absent', 'open', null]);
   });
 });
+

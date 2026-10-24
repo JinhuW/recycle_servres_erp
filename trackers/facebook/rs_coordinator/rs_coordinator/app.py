@@ -35,6 +35,7 @@ from .routers import (
     listings,
     logins,
     messages,
+    queue,
     session,
     stats,
 )
@@ -120,6 +121,7 @@ app.include_router(alerts.router, tags=["alerts"])
 app.include_router(accounts.router, tags=["accounts"])
 app.include_router(incidents.router, tags=["incidents"])
 app.include_router(cities.router, tags=["cities"])
+app.include_router(queue.router, tags=["queue"])
 
 
 def __getattr__(name: str) -> Any:

@@ -295,12 +295,37 @@ describe('facebook account pool', () => {
     const ENV = { COORDINATOR_API_URL: 'http://facade.internal:8600', COORDINATOR_API_TOKEN: 'console-secret' };
     afterEach(() => { vi.unstubAllGlobals(); });
 
+    // Assign reads the worker's proxy from the fleet document first. That read
+    // is answered here, outside the spy, so `sent(spy, i)` counts only the
+    // calls that act on the worker.
+    let fleetAnswer: [number, unknown] = [200, { workers: [] }];
+    // Each worker's login ledger as the console serves it, or the status it
+    // fails with; null is a console from before the route.
+    let ledger: Record<string, unknown[] | number> | null = {};
+    beforeEach(() => { fleetAnswer = [200, { workers: [] }]; ledger = {}; });
+    const PROXY = 'http://gw.proxy.example:10001';
+    const onProxy = (...workers: [string, string | null][]) => {
+      fleetAnswer = [200, { workers: workers.map(([worker_id, url]) => ({ worker_id, proxy: { url, ip: '203.0.113.7' } })) }];
+    };
+
     function stubFacade(...answers: [number, unknown][]) {
-      const spy = vi.fn(async () => {
+      const spy = vi.fn(async (_url: string, _init?: RequestInit) => {
         const [status, body] = answers.length > 1 ? answers.shift()! : answers[0];
         return new Response(JSON.stringify(body), { status });
       });
-      vi.stubGlobal('fetch', spy);
+      vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+        const u = new URL(String(url));
+        if (u.pathname === '/v1/logins') {
+          if (ledger === null) return new Response(JSON.stringify({ detail: 'Not Found' }), { status: 404 });
+          const rows = ledger[u.searchParams.get('worker_id') ?? ''] ?? [];
+          return typeof rows === 'number'
+            ? new Response(JSON.stringify({ detail: 'Coordinator answered 500' }), { status: rows })
+            : new Response(JSON.stringify({ logins: rows }), { status: 200 });
+        }
+        if (u.pathname !== '/v1/fleet') return spy(url, init);
+        const [status, body] = fleetAnswer;
+        return new Response(JSON.stringify(body), { status });
+      });
       return spy;
     }
     const sent = (spy: ReturnType<typeof vi.fn>, i: number) => {
@@ -446,6 +471,216 @@ describe('facebook account pool', () => {
       const marcus = (await loginAs(MARCUS)).token;
       expect((await api('POST', `${BASE}/1/assign`, { token: marcus, env: ENV, body: { worker: 'va-1' } })).status).toBe(403);
       expect(spy).not.toHaveBeenCalled();
+    });
+
+    type Stint = { accountNo: number; uid: string; email: string | null; proxyUrl: string | null; proxyKnown: boolean;
+      startedAt: number; endedAt: number | null; outcome: string | null };
+    type Mark = { url: string; failed: number; dead: boolean; deadAt: number | null; revivedAt: number | null; revivedBy: string | null };
+    const stints = async (token: string, worker: string) =>
+      (await api<{ stints: Stint[] }>('GET', `${BASE}/workers/${worker}/accounts`, { token })).body.stints;
+    const marks = async (token: string) => (await api<{ proxies: Mark[] }>('GET', `${BASE}/proxies`, { token })).body.proxies;
+    const assign = (token: string, no: number, worker: string, previous?: string) =>
+      api<{ code?: string; error?: string }>('POST', `${BASE}/${no}/assign`, { token, env: ENV, body: { worker, previous } });
+
+    it('keeps every account a worker used, with the proxy it went out through and how it ended', async () => {
+      const token = await manager();
+      await seedPool(token, 5);
+      onProxy(['nyc-1', PROXY], ['va-1', null]);
+      stubFacade([200, {}]);
+      expect((await assign(token, 1, 'nyc-1')).status).toBe(200);
+      expect((await assign(token, 2, 'nyc-1', 'problem')).status).toBe(200);
+      expect((await assign(token, 3, 'nyc-1', 'available')).status).toBe(200);
+      // Sending the same login again continues its stint.
+      expect((await assign(token, 3, 'nyc-1')).status).toBe(200);
+      expect((await assign(token, 4, 'va-1')).status).toBe(200);
+
+      const nyc = await stints(token, 'NYC-1');
+      expect(nyc.map((s) => [s.accountNo, s.outcome, s.proxyUrl])).toEqual([
+        [3, null, PROXY], [2, 'available', PROXY], [1, 'problem', PROXY],
+      ]);
+      expect(nyc[2]).toMatchObject({ uid: uid(1), email: 'acct1@outlook.example', proxyKnown: true });
+      expect(nyc[2].endedAt).not.toBeNull();
+      // The VM's own IP is a known proxy of none.
+      expect(await stints(token, 'va-1')).toMatchObject([{ accountNo: 4, proxyUrl: null, proxyKnown: true, outcome: null }]);
+
+      // Every other way off a worker closes the stint too: the weekly check's
+      // move to Problem (holder kept), a delete, an edit to another worker.
+      await getTestDb()`UPDATE fb_pool_accounts SET status = 'problem', updated_at = NOW() WHERE no = 3`;
+      expect((await api('DELETE', `${BASE}/4`, { token })).status).toBe(200);
+      await api('PUT', `${BASE}/5`, { token, body: { draft: draft(5, { status: 'fleet', holder: 'nyc-1' }) } });
+      await api('PUT', `${BASE}/5`, { token, body: { draft: draft(5, { status: 'fleet', holder: 'va-1' }) } });
+      expect((await stints(token, 'nyc-1')).map((s) => [s.accountNo, s.outcome, s.proxyKnown])).toEqual([
+        [5, 'fleet', false], [3, 'problem', true], [2, 'available', true], [1, 'problem', true],
+      ]);
+      expect((await stints(token, 'va-1')).map((s) => [s.accountNo, s.outcome])).toEqual([[5, null], [4, 'removed']]);
+
+      // Two failed on the proxy, the returned one doesn't count.
+      expect(await marks(token)).toEqual([
+        { url: PROXY, failed: 2, dead: false, deadAt: null, revivedAt: null, revivedBy: null },
+      ]);
+    });
+
+    it('marks a proxy DEAD at its fifth failed account and refuses Assign behind it until revived', async () => {
+      const token = await manager();
+      await seedPool(token, 8);
+      // Two workers dial one proxy: its failures are the proxy's, not a worker's.
+      onProxy(['nyc-1', PROXY], ['nyc-2', PROXY]);
+      const spy = stubFacade([200, {}]);
+      expect((await assign(token, 1, 'nyc-1')).status).toBe(200);
+      for (const no of [2, 3, 4]) expect((await assign(token, no, 'nyc-1', 'problem')).status).toBe(200);
+      expect((await assign(token, 5, 'nyc-2')).status).toBe(200);
+      expect((await assign(token, 6, 'nyc-2', 'retired')).status).toBe(200);
+      // #1-#3 failed on nyc-1, #5 on nyc-2: four is not yet more than four.
+      expect(await marks(token)).toMatchObject([{ url: PROXY, failed: 4, dead: false, deadAt: null }]);
+
+      expect((await assign(token, 7, 'nyc-1', 'problem')).status).toBe(200);
+      const [dead] = await marks(token);
+      expect(dead).toMatchObject({ url: PROXY, failed: 5, dead: true });
+      expect(dead.deadAt).not.toBeNull();
+
+      const calls = spy.mock.calls.length;
+      for (const worker of ['nyc-1', 'nyc-2']) {
+        const refused = await assign(token, 8, worker, 'problem');
+        expect(refused.status).toBe(409);
+        expect(refused.body.code).toBe('fpProxyDead');
+        expect(refused.body.error).toMatch(/DEAD: 5 accounts failed/);
+      }
+      // Unreadable, the fleet document leaves the check to the proxy the
+      // worker's last account went through.
+      fleetAnswer = [502, { detail: 'coordinator unreachable' }];
+      expect((await assign(token, 8, 'nyc-1', 'problem')).body.code).toBe('fpProxyDead');
+      onProxy(['nyc-1', PROXY], ['nyc-2', PROXY]);
+      expect(spy.mock.calls.length).toBe(calls); // nothing reached a worker
+      const pool = await api<Snapshot>('GET', BASE, { token });
+      expect(pool.body.accounts.find((a) => a.no === 8)).toMatchObject({ status: 'available' });
+      expect(pool.body.accounts.find((a) => a.no === 7)).toMatchObject({ status: 'fleet', holder: 'nyc-1' });
+
+      // A revive restarts the count; failures after it count again.
+      const marcus = (await loginAs(MARCUS)).token;
+      expect((await api('POST', `${BASE}/proxies/revive`, { token: marcus, body: { url: PROXY } })).status).toBe(403);
+      expect((await api('GET', `${BASE}/proxies`, { token: marcus })).status).toBe(403);
+      expect((await api('POST', `${BASE}/proxies/revive`, { token, body: { url: '' } })).status).toBe(400);
+      const revived = await api<{ proxies: Mark[] }>('POST', `${BASE}/proxies/revive`, { token, body: { url: PROXY } });
+      expect(revived.status).toBe(200);
+      expect(revived.body.proxies).toEqual([]);
+      expect((await assign(token, 8, 'nyc-1', 'problem')).status).toBe(200);
+      expect(await marks(token)).toMatchObject([{ url: PROXY, failed: 1, dead: false, revivedBy: 'Alex Chen' }]);
+    });
+
+    type TimelineEvent = { kind: string; at: number; worker?: string; trigger?: string | null; outcome?: string | null;
+      detail?: string | null; url?: string | null; action?: string; by?: string; batch?: string };
+    const timeline = (token: string, no: number) =>
+      api<{ events: TimelineEvent[]; logins: string }>('GET', `${BASE}/${no}/timeline`, { token, env: ENV });
+    const iso = (ms: number) => new Date(ms).toISOString().replace('Z', '+00:00');
+    const attempt = (worker: string, at: number, over: Record<string, unknown> = {}) => ({
+      id: at, worker_id: worker, account_id: worker, identity_key: null, trigger: 'boot', outcome: 'restored',
+      started_at: iso(at), finished_at: iso(at + 5000), detail: null, ...over,
+    });
+
+    it('traces an account across workers: its logins and the pool events, newest first', async () => {
+      const token = await manager();
+      await seedPool(token, 2);
+      onProxy(['ne-1', PROXY], ['va-1', null]);
+      stubFacade([200, {}]);
+      expect((await assign(token, 1, 'ne-1')).status).toBe(200);
+      expect((await assign(token, 2, 'ne-1', 'problem')).status).toBe(200);
+      expect((await assign(token, 1, 'va-1')).status).toBe(200);
+      const [on2, on1] = await stints(token, 'ne-1');
+      const [onVa] = await stints(token, 'va-1');
+
+      ledger = {
+        'ne-1': [
+          attempt('ne-1', on1.startedAt, { trigger: 'cookie-restore' }), // unnamed, inside #1's stint
+          attempt('ne-1', on1.startedAt - 86_400_000, { identity_key: `uid:${uid(1)}`, trigger: 'relogin', outcome: 'password_ok' }),
+          attempt('ne-1', on2.startedAt + 60_000, { outcome: 'failed' }), // unnamed, #2's time
+          attempt('ne-1', on2.startedAt + 120_000, { identity_key: `uid:${uid(2)}` }), // named #2
+        ],
+        'va-1': [attempt('va-1', onVa.startedAt + 1000, {
+          trigger: 'relogin', outcome: 'challenge',
+          detail: { kind: 'checkpoint', url: 'https://www.facebook.com/checkpoint/1/' },
+        })],
+      };
+      const r = await timeline(token, 1);
+      expect(r.status).toBe(200);
+      expect(r.body.logins).toBe('ok');
+      const logins = r.body.events.filter((e) => e.kind === 'login');
+      expect(logins.map((e) => [e.worker, e.trigger, e.outcome, e.detail])).toEqual([
+        ['va-1', 'relogin', 'challenge', 'checkpoint'],
+        ['ne-1', 'cookie-restore', 'restored', null],
+        ['ne-1', 'relogin', 'password_ok', null],
+      ]);
+      expect(logins[0].url).toBe('https://www.facebook.com/checkpoint/1/');
+      const pool = r.body.events.filter((e) => e.kind !== 'login');
+      expect(pool.map((e) => [e.kind, e.action ?? null, e.detail ?? null])).toEqual([
+        ['pool', 'assigned', 'va-1'],
+        ['pool', 'reported', 'replaced by #2 on ne-1'],
+        ['pool', 'assigned', 'ne-1'],
+        ['added', null, null],
+      ]);
+      expect(pool[0].by).toBe('Alex Chen');
+      expect(pool[3].batch).toBe('Batch T');
+      const ats = r.body.events.map((e) => e.at);
+      expect(ats).toEqual([...ats].sort((a, b) => b - a));
+
+      // #2 gets its own rows and none of #1's.
+      const two = await timeline(token, 2);
+      expect(two.body.events.filter((e) => e.kind === 'login').map((e) => e.outcome)).toEqual(['restored', 'failed']);
+
+      const marcus = (await loginAs(MARCUS)).token;
+      expect((await timeline(marcus, 1)).status).toBe(403);
+      expect((await timeline(token, 99)).status).toBe(404);
+    });
+
+    it('still shows the pool events when the console does not serve logins', async () => {
+      const token = await manager();
+      await seedPool(token, 1);
+      onProxy(['ne-1', PROXY]);
+      stubFacade([200, {}]);
+      expect((await assign(token, 1, 'ne-1')).status).toBe(200);
+      ledger = null;
+      const r = await timeline(token, 1);
+      expect(r.status).toBe(200);
+      expect(r.body.logins).toBe('not_served');
+      expect(r.body.events.map((e) => e.kind)).toEqual(['pool', 'added']);
+    });
+
+    it('marks logins partial when one worker does not answer or its ledger stops short', async () => {
+      const token = await manager();
+      await seedPool(token, 2);
+      onProxy(['ne-1', PROXY], ['va-1', null]);
+      stubFacade([200, {}]);
+      expect((await assign(token, 1, 'ne-1')).status).toBe(200);
+      expect((await assign(token, 2, 'ne-1', 'problem')).status).toBe(200);
+      expect((await assign(token, 1, 'va-1')).status).toBe(200);
+      const [, onNe] = await stints(token, 'ne-1');
+      const [onVa] = await stints(token, 'va-1');
+
+      ledger = { 'ne-1': [attempt('ne-1', onNe.startedAt, { identity_key: `uid:${uid(1)}` })], 'va-1': 500 };
+      const r = await timeline(token, 1);
+      expect(r.status).toBe(200);
+      expect(r.body.logins).toBe('partial');
+      expect(r.body.events.filter((e) => e.kind === 'login').map((e) => e.worker)).toEqual(['ne-1']);
+
+      ledger = { 'ne-1': 500, 'va-1': 500 };
+      expect((await timeline(token, 1)).body.logins).toBe('unreachable');
+
+      // A full page that begins after the account went on va-1.
+      const page = Array.from({ length: 500 }, (_, i) => attempt('va-1', onVa.startedAt + 60_000 + i));
+      ledger = { 'ne-1': [], 'va-1': page };
+      expect((await timeline(token, 1)).body.logins).toBe('partial');
+      ledger = { 'ne-1': [], 'va-1': page.slice(1) };
+      expect((await timeline(token, 1)).body.logins).toBe('ok');
+    });
+
+    it('assigns with the proxy unknown when the fleet document cannot be read', async () => {
+      const token = await manager();
+      await seedPool(token, 1);
+      fleetAnswer = [502, { detail: 'coordinator unreachable' }];
+      const spy = stubFacade([200, {}]);
+      const r = await assign(token, 1, 'nyc-1');
+      expect(r.status).toBe(200);
+      expect(spy).toHaveBeenCalled();
+      expect(await stints(token, 'nyc-1')).toMatchObject([{ proxyUrl: null, proxyKnown: false }]);
     });
 
     it('sends no device when the pool cookie belongs to another account, or has none', async () => {

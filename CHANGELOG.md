@@ -17,6 +17,463 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.332.2] - 2026-10-24
+
+The fixes a review of the v1.318.2 → v1.332.1 release found before it went to
+production (RS-389). Most of them were in the label-printer flow that
+v1.323.0 to v1.330.0 built, where a label could be lost without a word.
+
+- **Review mode's Approve stays busy until the box label is out.** It used to
+  come back the moment the PO moved to Ready to Pay, while the label was still
+  printing. A second click then re-ran the zeroing on a PO that had already
+  moved, and the manager saw "PO already moved" after an approval that had
+  worked.
+- **A label asked for while the printer is connecting waits for the
+  connect.** It goes over Bluetooth once the printer is on, or through the
+  print dialog if the connect fails. Before, it was dropped: Pack mode had
+  already counted the product as printed, and Review mode left for the PO
+  without its box label.
+- **The print dialog can no longer stall the queue.** It used to finish only
+  on `afterprint`, after every image loaded. A label that failed to draw, or a
+  browser that never fires `afterprint`, held back every later label in the
+  tab. The dialog now also ends when the browser leaves print media, and a
+  failed draw ends it with a toast.
+- **Status checks and labels go to the printer one at a time.** The bar's 15 s
+  `ESC ! ?` check could land between two labels of a batch and overlap the next
+  label's writes, which Chrome refuses, so that label failed. The connection
+  also stopped adding an answer listener on every reconnect. A printer that
+  comes back without a port the page knows is forgotten, instead of retried
+  every 10 s for good.
+- **An account's timeline says when some logins are missing, not that the
+  fleet is down.** One worker's failed ledger read used to mark the whole
+  timeline *unreachable*. It now reads *some logins may be missing*, which is
+  also shown when a worker's ledger (its newest 500 logins) doesn't reach back
+  to when the account went on it. A timeline that failed to load is fetched
+  again on the next unfold, where before the page needed a reload.
+- **Assign no longer fails when the fleet document can't be read.** It wanted
+  one worker's proxy from it, and a slow composition used to block the
+  install. The DEAD check then goes by the proxy the worker's last account
+  went through.
+- **The reddit watch keeps its own relay failures out of the error digest.**
+  Logged into `worker_errors`, each one was queued for the relay that had just
+  failed, and padded the digest once it came back. (The tracker deploys on its
+  own; this ships with its next `railway up`.)
+
+## [1.332.1] - 2026-10-24
+
+Filling in a PO's products on an iPhone no longer zooms the page in (RS-388).
+iOS zooms into any focused field whose text is smaller than 16px, and it
+doesn't zoom back out when you leave the field. Every field in the phone
+shell is 14px, so each tap on a part number, qty or price left the purchaser
+on a page wider than the screen, pinching it back by hand.
+
+`user-scalable=no` in the viewport had held this back until v1.258.7, when it
+was removed so the phone could be pinch-zoomed. `main.tsx` now adds
+`maximum-scale=1` to the viewport, but only on iOS, iPadOS included, since
+an iPad's desktop-shell fields are 13.5px. That stops the focus zoom, and
+Safari still lets a pinch go past the cap. Android never focus-zooms but
+would take the cap as a pinch lock, so its viewport stays as it was. Field
+sizes and layouts are unchanged.
+
+## [1.332.0] - 2026-10-24
+
+The desktop Inventory table sorts by any column (RS-387). Product, Part #,
+Qty, Lots, Warehouses, Cost and Sell each take a click: the first sorts high
+to low, the second low to high, the third goes back to the bid-sheet order the
+table has always used. Blanks sort last either way, and products that tie keep
+their bid-sheet order.
+
+The sort runs on the server. The table lists at most 200 products, the newest
+ones when nothing is sorted. A sort ranks every product the filters match
+first and then takes the top 200, so "Qty, high to low" shows the biggest
+stock, not the biggest among the newest 200. `GET /api/inventory/products`
+takes `sort` and `dir` for this. The browser re-sorts the rows it already has
+straight away, so a click shows at once and the server's answer replaces it.
+
+The sort lasts until you leave and come back. An expanded product stays
+expanded when the rows move. If you hide the sorted column, or you aren't a
+manager and so can't see Cost, the table goes back to bid-sheet order. The
+export still uses the bid-sheet order.
+
+## [1.331.1] - 2026-10-24
+
+A PayPal payment funded by eCheck now reaches Payments while it is still
+pending (RS-386). One of these, $11,950 to a supplier for PO-1521, never
+appeared in the ERP. The only row the manager saw was its Mercury
+`PAYPAL; ECHECK` pull, and trying to link it ended in "A transfer cannot be
+linked to an order".
+
+The cause was a default in PayPal's API. Transaction Search returns only
+balance-affecting records unless asked otherwise, and an eCheck affects nothing
+until it clears 3–6 business days later. Every sync pass logged
+`paypal inserted=0` and no error. The sync now makes a second pass that asks
+for every record. It adds each transaction the first pass missed, taken at its
+latest record:
+
+- pending while the eCheck is in flight;
+- failed or reversed if it bounced or was voided;
+- left out if that record is settled. That is a hold that moved no money.
+
+The second pass has two quirks:
+
+- It returns one record per state a transaction went through, and it matches
+  records by update date rather than initiation date. So the merge runs over
+  the whole fetched range.
+- It ignores a transaction begun before the window. Otherwise a narrow sync
+  could flip a held row's status, and the weekly deep sync would flip it back.
+
+Read-only dry runs against prod changed no held row. Each added the two pending
+legs and four dead records from August and September (denied attempts and a
+voided authorization).
+
+The Payments rail also stops offering **Link…** on a transfer row. The server
+always refuses that link, because the PayPal leg of the same payment is the
+one that links. *Not a transfer* in the expanded row is still there.
+
+## [1.331.0] - 2026-10-23
+
+Every city a Facebook worker searches is now logged from its handout to its
+result (RS-385, facebook-tracker 0.13.17). The owner asked first for a brief
+report once a worker finishes a city, then for "a full lifecycle logs not just
+finish".
+
+On a worker's page, a **City log** card lists its last 24 h, one row a city:
+
+- when and how long;
+- searches, cards, opened, AI-reviewed and alerts;
+- whether it finished, is being searched, stopped (on a wall, logged out,
+  paused, cut short, an error), was given back (a restart, a park), expired
+  with the worker silent, or has gone quiet.
+
+A row opens to its steps, each timed to the second:
+
+- the queue handing it out, and why;
+- the start;
+- each search's phrase and what it found;
+- each alert with the listing's title, price and score;
+- the end.
+
+On the round card, a city's name in the Cities table opens the same log for
+that city across every worker and item.
+
+Behind it:
+
+- **The coordinator** keeps the steps in a new `city_events` table. It writes
+  the ones it sees itself (handout, each search page, each alert, a lease
+  given back). The monitor reports its start, finish with its own counts, or
+  stop with the reason.
+- **The API.** `GET /api/coordinator/city-log` forwards by worker or by city,
+  for 1 to 72 hours.
+- **Older workers.** A worker on an older monitor still shows, its rows added
+  up from its pages, with the end read from its lease or from it moving on.
+  So the log covered the whole fleet the day the coordinator shipped.
+
+## [1.330.0] - 2026-10-23
+
+The label printer comes back by itself (RS-384). Until now the Pack and
+Review heads read *Label printer off* whenever the printer slept, was
+switched off or went out of range, and someone had to click Connect and pick
+it from Chrome's chooser again. The page now keeps the printer it last
+connected. It reads *Waiting for CT221D-4FD1* and tries again on its own,
+backing off to every 10 s, until the printer answers. While it waits, labels
+go through the print dialog as they do with no printer. Connect still opens
+the chooser to pick another printer, and Disconnect ends the wait.
+
+A reload is a different matter. Chrome 155 still hides `getDevices()`, the
+only way a fresh page can reach a printer without the chooser, behind
+`chrome://flags/#enable-web-bluetooth-new-permissions-backend`. The page
+already reconnected through `getDevices()` where it existed, but it tried
+once and gave up. Now it waits for the remembered printer the same way, and
+hears it advertise first where Chrome can scan. Where the flag is off, the
+label settings menu says so. The `gattserverdisconnected` listener also no
+longer stacks up with every reconnect.
+
+## [1.329.1] - 2026-10-23
+
+The scraper's price push works again (RS-383). `POST /api/market/values`
+wrote `trend = NULL` when a part had no average sell price yet, but that
+column is NOT NULL. One such part failed the whole batch with a 500. Every part
+on the Market list is auto-tracked from a PO and starts with no price, so the
+scraper had never landed a price in prod. Now a part's first push sets `trend`
+to 0.
+
+The same line stored `trend` as a dollar difference, while the Market page
+shows it ×100 as a percent: a $10 rise would have read "+1000.0%". It is now
+the change as a fraction of the previous average, as the page and the seed
+assume, and a previous average of 0 also reads as flat. No stored value
+needed repair, because every `trend` in prod was still 0.
+
+## [1.329.0] - 2026-10-23
+
+Pack mode now prints a label for each product instead of one for the box
+(RS-382). The requester meant the product's # all along: the number the
+packer has been writing on each item by hand, which the receiver matches the
+item to its line on the order by. The label carries the SO number, the #
+large, the part number and the units packed, with the date on taller stock.
+In Auto, the tick that packs a product prints its label, once per product per
+visit, and an Apply that packs several prints them in # order. In Manual,
+Print label prints the selected product's. The box label (PO number,
+purchaser, date and counts) stays with Review mode, which prints it on
+approval.
+
+A label per product means labels asked for while one prints, at every quick
+scan, and the print used to drop those. They now wait their turn, and
+without a printer they go through one print dialog, a page each. Review
+mode's *Print when approved* is its own setting now, so switching one page
+to Manual leaves the other, and the settings button shows *Auto* or *Manual*
+as v1.323.0's Label button did. The box label's per-lot purchaser data on
+the sell order read went with the box label.
+
+## [1.328.0] - 2026-10-23
+
+Monitors ▸ Facebook now shows the city queue, the new way Facebook workers
+get their cities (RS-379). Since facebook-tracker 0.13.14 a worker in the
+queue asks the coordinator for each city instead of walking its own list. The
+pilot is four workers. Until now the page showed nothing of that: who was in
+the queue, how far today's round had got, what each pilot was handed.
+
+The Fleet tab now opens with **Today's round**:
+- **The board.** One mark per city for each search item: searched, being
+  searched, still due, not due yet, or still on a worker's own list. It has
+  a counts sentence and a Cities table of who has what.
+- **The lede.** Who pulls, who waits on a redeploy, and the rules as stored.
+- **Everyone at once.** One confirmed click moves every worker to the queue,
+  or sends every worker back.
+
+In the workers table, an enrolled worker carries a **Queue** chip and its
+Searches ring counts minutes against its budget. Its fold adds the cities the
+queue handed it. The worker page gains a **City queue** row (minutes used,
+cities handed out, the city being searched, quarantined) and a button that
+moves that worker in or out.
+
+The backend proxies two new manager-only routes for that switch. A worker on
+a monitor older than 0.13.14 cannot be enrolled by itself: the coordinator
+answers 409 and the page says to redeploy it. The whole tracker side ships as
+facebook-tracker 0.13.16.
+
+## [1.327.1] - 2026-10-23
+
+The Bluetooth label printer now prints (RS-381). The office's printer is a
+CLABEL CT221D, a 2-inch printer on Microchip's ISSC Bluetooth service. Its
+first writable characteristic is not its data port, and the page wrote to
+the first writable characteristic it found. So every label and every status
+query went nowhere, and the printer showed as connected but never printed or
+reported *Ready*. Each known printer service now names its port: the
+characteristic a job is written to, and the one the printer answers on. Jobs
+go as acknowledged writes, so a small printer's buffer can't drop half a
+label.
+
+The CT221D takes 50 × 25 mm labels, and the page only offered inch stock
+from 4 × 6 down, defaulting to 4 × 6. A 50 × 25 mm stock is now the
+default. TSPL is sent its size and gap in millimetres. The small label sets
+the number, the purchaser and the counts larger, inside a 2-inch head's
+width. Debugged on the printer itself: a TSPL job sent to the right port
+printed, and the printer answers no status query, so its chip shows
+connected without a paper state.
+
+## [1.327.0] - 2026-10-23
+
+Approving a PO's review now prints the box's label too (RS-378). RS-371 had
+read "once i finish the review" as Pack mode. Asked, the requester wanted
+both. **Approve for payment** in Review mode prints the same label Pack mode
+does, for the PO. It carries the PO number and warehouse, the PO's
+purchaser, the date, and the products and units counted. A line counted 0
+is left out. It prints before the page leaves for the PO page: over
+Bluetooth when the label printer is on, else through the print dialog.
+*Print when approved* in the label settings turns it off.
+
+Review mode's page head now has Pack mode's printer bar: status, Connect,
+Print label and the settings. Both pages print through one shared hook,
+with one connection and one set of settings, so a label can't come out
+differently from either page.
+## [1.326.0] - 2026-10-23
+
+Opening a line on Monitors ▸ WeChat now shows a readable price history
+(RS-377). Before, the "Last 30 report days" chart stretched a tiny fixed
+viewBox across the panel. Its dots came out as flat ovals, it had no price
+scale, and the only number on it was a low–high range in the middle of the
+date row. A day nobody quoted broke the line, so an early bid could sit alone
+in a corner with nothing tying it to the rest.
+
+The chart now draws in real pixels, with price gridlines and a label for each
+report day. It also draws the board's ladder, one per day: each side's quotes
+low to high as a faint bar in its own lane, bid left and ask right, with the
+median dot on top and the medians joined. A dashed bridge crosses the days a
+side wasn't quoted. Each side's latest median is labelled beside its last dot.
+The legend and the tax basis sit above the plot.
+
+Hovering a day, or tabbing in and stepping with ←/→, shows one tooltip for
+both sides: the median, how many quoted it, the low–high range, and the spread
+or by how much bids topped asks. A side quoted only in another tax basis shows
+that price, muted, with its basis, so a gap in the line is never a mystery.
+The `/history` payload already carried min, max and the count, so nothing
+changed on the backend.
+
+## [1.325.0] - 2026-10-23
+
+Every ops alert now lands in one place, the "Homelab Alerts" Telegram group
+(RS-375), and the reddit workers report their own failures there (RS-376).
+Before this, homelab Prometheus alerts went to a DM, and Facebook fleet ops
+alerts and release notices sat in the buyers' listings group. A prod outage
+of the ERP reached no one, because the uptime cron's Lark webhook was never
+set. A dead OpenRouter key on a reddit worker showed only in its logs.
+
+The Railway alert relay (`deploy/railway-alerts/`) gained `POST /alert` for
+our own senders, with a bearer of its own. A sender names a topic key, and
+only the relay knows the group and its threads. The uptime cron now posts a
+failing run to "ERP · Uptime" (it used to print `000000` for a dead
+connection; now it prints `000`).
+
+The reddit tracker's api runs a watch every minute:
+- **Down.** A process silent for ten minutes goes to "Reddit · Workers", then
+  "back" or "gone".
+- **Failing.** So does a loop that fails three iterations in a row. Logging a
+  warn counts as failing, so a dead API key or a Reddit block pages, not only
+  a crash.
+- **Every error line.** Every warn/error line from any worker goes to
+  "Reddit · Errors" as one digest a minute.
+
+Workers hand all of this over with their heartbeat (migration 0005), so the
+OCI fleet needs no new secret. Nothing counts as sent until the relay accepts
+it.
+
+memtrade's daily WeChat report (on the office Mac) sends its failures
+through the same route to "WeChat · Daily report". The group already has
+topics for the Facebook coordinator's ops alerts and deploy notices, and for
+homelab Prometheus. Those senders move with their own release and config
+change.
+
+## [1.324.0] - 2026-10-23
+
+Pack mode now connects to the Bluetooth label printer and shows its status
+(RS-374). The page head reads *Label printer off* with **Connect**. Once
+connected it reads *Label printer on*, with the printer's name and how it
+is: *Ready*, or *Out of paper*, *Cover open*, *Busy*, *Needs attention*.
+Connect is Chrome's Web Bluetooth chooser on the Mac. **Print label** sits
+beside it. With a printer on, it and v1.323.0's automatic print on finishing
+a box send the label straight to the printer, with no dialog. A printer out
+of paper or open gets no label, and the page says why. Without a printer, or
+in a browser with no Web Bluetooth, the print dialog still prints it.
+
+No printer model is on record, so the page speaks the three languages
+Bluetooth label printers use. It reads Zebra's service as ZPL, the FF00 port
+as ESC/POS raster, and the rest as TSPL. The label settings can set the
+language by hand. The status comes from TSPL's status query or the ESC/POS
+paper sensor, asked on connect, every 15 seconds, and before each print. The
+printer stays connected across orders in the tab.
+
+The label now names our purchasers in place of the customer. Those are
+whoever bought the lots in the box, from each lot's PO: two names, then
+*+n*. The sell order read carries each line's `sourcePurchaser` for it. The
+label is now one drawn picture. The printer gets it in 203 dpi dots and the
+dialog prints it as an image, so the two can't differ.
+
+## [1.323.0] - 2026-10-23
+
+Pack mode prints a box label when the box is finished (RS-371). The tick
+that packs the last product left opens the print dialog with a label for the
+box. The label carries the SO number, the customer, the products and units in
+the box, and the date. When one *Packing from* warehouse is picked, the label
+is for that warehouse's box, with its name and its counts. The receiver can
+check the box against it, and nobody has to write it by hand.
+
+It prints once per box per visit. Ticking the last product back and on again
+doesn't print a second label, and neither does opening an order that is
+already packed or another iPad finishing it. A **Label** control in the page
+head prints on demand, turns the automatic print off, and picks the stock:
+4 × 6, 4 × 3 or 2.25 × 1.25 in. Both choices are saved preferences. A packed
+box also gets **Print label** in the Finish card.
+
+The ERP had no label printing before this. The label goes through the
+browser's print dialog because no printer model is on record, and every
+label printer with a driver or AirPrint takes a print job, the iPad's
+included. The print is that one label, at the stock's size, black on white,
+so a thermal printer feeds no blank label after it. The transfer manifest
+prints as it did.
+## [1.322.0] - 2026-10-23
+
+Railway alerts now reach Telegram (RS-368). The uptime cron probes only the
+prod ERP, so a crashed tracker, a failed dev build or a volume filling up was
+easy to miss. All seven Railway projects now send a webhook for deploy failed,
+crashed and out-of-memory, and for CPU/RAM monitor and volume alerts,
+triggered and resolved. The messages go to the "Homelab Alerts" Telegram
+group, each kind in its own topic. A message names the project, environment
+and service and the commit, and links to the deployment.
+
+Railway formats webhooks only for Discord and Slack, so a small Cloudflare
+Worker (`deploy/railway-alerts/`) turns the raw JSON into a Telegram message.
+It runs off Railway so an alert still gets out while Railway is the thing
+failing. Railway doesn't sign its webhooks, so each one carries a bearer the
+Worker checks. A deleted topic sends the alert to General rather than dropping
+it. A send Telegram refuses answers 502, so Railway retries it.
+
+## [1.321.0] - 2026-10-23
+
+The worker page's History is now a full-height column that tracks the
+worker's whole record (RS-367). It used to be a 286px box under the card,
+beside Open checkpoints, holding status changes, the latest search, listing
+and backup, and open checkpoints. Above it the card ran the full width with
+its values in the left third, and that empty strip is what the request
+pointed at. From 1190px up the page is now two columns: the card, Open
+checkpoints and Accounts used on the left, and History beside them from the
+card's top, as tall as they are, scrolling its own list.
+
+History merges into one list, newest first: what it showed before; each pool
+account signing on to the worker and leaving it, with how it left (from the
+v1.319.0 stints); and every login the worker attempted, whichever account it
+was for, marked with that account's # and folded into runs as in the account
+timeline. The logins come from the fleet console's ledger route through the
+new manager-only `GET /api/coordinator/workers/:id/logins`. Until the console
+release with that route is deployed, History shows the rest and says logins
+will follow.
+
+## [1.320.0] - 2026-10-23
+
+Each account on a worker's page now unfolds into its timeline (RS-366). The
+Accounts used card from v1.319.0 said which accounts a worker had and how each
+ended, but not how it fared along the way. A row now opens the account's
+whole life, newest first and across every worker it was on: every login the
+workers attempted for it, with the outcome (login success by restored
+session, password or Watch; login failed; checkpoint; locked by Facebook;
+timed out), the trigger, the worker and the time to the second, interleaved
+with what the pool did (added, assigned and by whom, moved to Problem and
+why, returned, retired, removed). A worker that fails at every restart reads
+as one line with a count, not hundreds, and the head sums the successes and
+failures.
+
+The logins come from the coordinator's login ledger, which the fleet console
+now serves at `GET /v1/logins` without the device fingerprints
+(facebook-tracker, unreleased until it is deployed). A ledger row names the
+account by uid on newer rows; an older row belongs to the account that was on
+that worker when it started, from the v1.319.0 stints. Until the console is
+deployed, the timeline shows the pool's events and says so.
+
+## [1.319.0] - 2026-10-23
+
+A fleet proxy that keeps burning Facebook accounts is now called out and
+stopped (RS-365). Every time a pool account goes onto a worker, the ERP
+records the worker's proxy at that moment, and when the account leaves the
+worker as Problem or Retired it counts against that proxy, whichever path
+moved it: Assign's "where does the old one go", the weekly liveness check, an
+edit, retire or delete. Once more than four distinct accounts have failed
+behind one proxy, counted across every worker that dials it, the proxy is
+**DEAD**. Until now nothing tied a lost account to the IP it was lost on, so a
+burned proxy kept eating fresh accounts one Assign at a time.
+
+The Fleet table's Proxy column shows the DEAD chip, or "n failed" below that.
+Assign refuses a worker behind a DEAD proxy (409 `fpProxyDead`) before any
+login reaches it, and the dialog says so and keeps Assign off. A manager
+revives the proxy from the worker's page after swapping the IP, and its count
+starts again.
+
+Each worker's page also lists **Accounts used**: every pool account it has
+signed in with, newest first, with the proxy, from and until, and how it
+ended. The stints are kept by a trigger on `fb_pool_accounts` (migration
+0204), so no writer of the pool can skip them. Assignments from before this
+release are backfilled from the pool ledger and marked "proxy not recorded",
+so they do not count toward DEAD. ERP-only: the backend reads the `/v1/fleet`
+document it already proxies, and the facebook tracker is unchanged.
+
 ## [1.318.2] - 2026-10-23
 
 A purchaser can no longer void or reassign a manager's RMB Flow entry by

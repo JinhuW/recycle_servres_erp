@@ -30,6 +30,62 @@ export const FB_POOL_EVENT_KINDS = [
 ] as const;
 export type FbPoolEventKind = (typeof FB_POOL_EVENT_KINDS)[number];
 
+/** A proxy is DEAD once more distinct accounts than this have failed on it. */
+export const FB_PROXY_DEAD_AFTER = 4;
+
+/** How an account's stint on a worker ended: what it became, 'fleet' for
+ *  another worker, 'removed' when it left the pool. Null while it is current. */
+export type FbStintOutcome = FbPoolStatus | 'removed';
+
+/** Outcomes that count against the proxy the account was on. */
+export const FB_FAILED_OUTCOMES: readonly FbStintOutcome[] = ['problem', 'retired'];
+
+/** One account's time on one worker. `proxyKnown` false: nobody recorded the
+ *  proxy (stints from before it was kept); true with a null url: the VM's own IP. */
+export type FbWorkerStint = {
+  accountNo: number;
+  uid: string;
+  email: string | null;
+  proxyUrl: string | null;
+  proxyKnown: boolean;
+  startedAt: number;
+  endedAt: number | null;
+  outcome: FbStintOutcome | null;
+};
+
+/** A proxy's failed accounts since its last revive. */
+export type FbProxyMark = {
+  url: string;
+  failed: number;
+  dead: boolean;
+  deadAt: number | null;
+  revivedAt: number | null;
+  revivedBy: string | null;
+};
+
+/** Login outcomes, as the coordinator's ledger records them, that leave the
+ *  worker signed in. Every other finished outcome is a failure; a null one is
+ *  an attempt that never reported back. */
+export const FB_LOGIN_OK_OUTCOMES = ['restored', 'password_ok', 'watch_ok'] as const;
+
+/** One line of an account's timeline: a login attempt from the coordinator's
+ *  ledger, an action from the pool's own ledger, or the account entering the
+ *  pool. `detail` on a login is what Facebook showed (checkpoint, 2fa…). */
+export type FbTimelineEvent =
+  | { kind: 'login'; at: number; worker: string; trigger: string | null; outcome: string | null;
+      detail: string | null; url: string | null }
+  | { kind: 'pool'; at: number; action: FbPoolEventKind; status: FbPoolStatus; detail: string | null; by: string }
+  | { kind: 'added'; at: number; batch: string };
+
+/** `logins` says whether the fleet answered: `not_served` is a console that
+ *  predates the login route, `unreachable` one that did not answer for any
+ *  worker, `partial` some logins missing: a worker that did not answer, or a
+ *  ledger that doesn't reach back to when the account went on it. */
+export type FbAccountTimeline = {
+  events: FbTimelineEvent[];
+  logins: 'ok' | 'partial' | 'not_served' | 'unreachable';
+};
+
 /** Fields whose copy or reveal is worth an audit line. */
 export const FB_POOL_SECRET_FIELDS = ['password', 'totp', 'emailPassword', 'cookie', 'token'] as const;
 export type FbPoolSecretField = (typeof FB_POOL_SECRET_FIELDS)[number];

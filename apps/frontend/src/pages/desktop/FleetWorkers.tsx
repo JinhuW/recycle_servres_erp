@@ -1,3 +1,4 @@
+import { FB_PROXY_DEAD_AFTER } from '@recycle-erp/shared';
 import { Fragment, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Skeleton } from '../../components/Skeleton';
@@ -5,16 +6,18 @@ import { SortTh, type SortState } from '../../components/SortTh';
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
-  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, proxyPort, queryTerms, searchedToday,
-  sharedExits, sortFleet, whoIs,
+  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, proxyPort, queueCitiesToday, queryTerms, queueCityName,
+  searchedToday, sharedExits, sortFleet, whoIs,
   type CityHits, type DayStrip, type FleetEvent, type FleetSortCol, type FleetStatus,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import type { Translate } from '../../lib/orderPresentation';
+import { proxyMarkFor, type FbProxyMark } from '../../lib/facebookPool';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../lib/route';
 import { CityChip, fmtDays, Hi, HITS_DAYS, stateLabel } from './FleetAccounts';
+import { QueueChip } from './FleetQueue';
 import '../../styles/facebookPool.css';
 
 // ─── Fleet list ───────────────────────────────────────────────────────────────
@@ -68,13 +71,14 @@ export function FleetLegend({ counts, loading, filter, onFilter }: {
   );
 }
 
-export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onClearFilter, locale }: {
+export function WorkersCard({ fleet, unavailable, hits, challenges, marks, filter, onClearFilter, locale }: {
   fleet: FleetDoc | null;
   // The facade answered with something other than a fleet document (an older
   // facade, or the tunnel is down): say so in the card, keep the page.
   unavailable: boolean;
   hits: AlertHitRow[] | null;
   challenges: Challenge[] | null;
+  marks: FbProxyMark[] | null;
   filter: FleetStatus | 'all';
   onClearFilter: () => void;
   locale: string;
@@ -163,8 +167,8 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
           </thead>
           <tbody>
             {shown.map(w => (
-              <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms} startAt={startAt}
-                shared={!!w.proxy && (exits.get(w.proxy.url ?? '') ?? 0) > 1}
+              <WorkerRow key={w.worker_id} account={w} fleet={fleet} hits={byCity} parked={parked} terms={terms} startAt={startAt}
+                shared={!!w.proxy && (exits.get(w.proxy.url ?? '') ?? 0) > 1} mark={proxyMarkFor(marks, w)}
                 open={open.has(w.worker_id)} onToggle={() => toggle(w.worker_id)} locale={locale} />
             ))}
             {loading && SKELETON_ROWS.map(i => <WorkerRowSkeleton key={i} />)}
@@ -211,8 +215,11 @@ function WorkerRowSkeleton() {
 // The port and exit IP, then the city Facebook sees the account in, with the
 // ISP on hover. `shared` is an IP another worker also exits from, which only
 // holds while the two look like two people. A facade that predates the
-// lookup sends only the env var's name.
-function ProxyCell({ worker: w, shared, terms }: { worker: FleetAccount; shared: boolean; terms: readonly string[] }) {
+// lookup sends only the env var's name. `mark` counts the accounts that failed
+// behind this proxy; past FB_PROXY_DEAD_AFTER it is DEAD and Assign refuses it.
+function ProxyCell({ worker: w, shared, mark, terms }: {
+  worker: FleetAccount; shared: boolean; mark: FbProxyMark | undefined; terms: readonly string[];
+}) {
   const { t } = useT();
   const p = w.proxy;
   if (!p) {
@@ -225,24 +232,35 @@ function ProxyCell({ worker: w, shared, terms }: { worker: FleetAccount; shared:
       <span>
         {port ? <span className="mono"><Hi text={`:${port}`} terms={terms} /></span> : t('fbcProxyNone')}
         {p.ip && <span className="mono fp-muted"> · <Hi text={p.ip} terms={terms} /></span>}
+        {mark?.dead && <> <ProxyDeadChip mark={mark} /></>}
       </span>
       <small className={p.error ? 'fp-warn' : undefined}>
         {p.pending ? t('fbcProxyLookingUp')
           : p.error ? t('fbcProxyLookupFailed')
           : <Hi text={where || '—'} terms={terms} />}
         {shared && <> · <span className="fp-warn" title={t('fbcSharesIpHint')}>{t('fbcProxyShared')}</span></>}
+        {mark && !mark.dead && <> · <span className="fp-warn" title={t('fbcProxyFailedHint', { max: FB_PROXY_DEAD_AFTER })}>
+          {t('fbcProxyFailed', { n: mark.failed })}</span></>}
       </small>
     </span>
   );
 }
 
-function WorkerRow({ account: w, hits, parked, terms, startAt, shared, open, onToggle, locale }: {
+export function ProxyDeadChip({ mark }: { mark: FbProxyMark }) {
+  const { t, locale } = useT();
+  const since = mark.deadAt ? relTime(new Date(mark.deadAt).toISOString(), locale) : '';
+  return <span className="chip neg" title={t('fbcProxyDeadHint', { n: mark.failed, since })}>{t('fbcProxyDead')}</span>;
+}
+
+function WorkerRow({ account: w, fleet, hits, parked, terms, startAt, shared, mark, open, onToggle, locale }: {
   account: FleetAccount;
+  fleet: FleetDoc | null;
   hits: Map<string, CityHits>;
   parked: ReadonlySet<string>;
   terms: readonly string[];
   startAt: readonly string[] | undefined;
   shared: boolean;
+  mark: FbProxyMark | undefined;
   open: boolean;
   onToggle: () => void;
   locale: string;
@@ -260,6 +278,9 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, shared, open, onT
   const plan = w.plan;
   const build = h?.version && !isUnstampedBuild(h.version) ? h.version : null;
   const searched = searchedToday(w, status);
+  // Bounded by its budget, not its list: a worker the queue hands cities to.
+  const pulling = Boolean(w.queue?.enrolled && w.queue.capable);
+  const fromQueue = pulling ? queueCitiesToday(w).fromQueue : [];
 
   return (
     <Fragment>
@@ -277,10 +298,10 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, shared, open, onT
               {build && <> · <span className="mono" title={build}>v{build.split(' ')[0]}</span></>}</small>
           </span>
         </td>
-        <td className="ff-exit"><ProxyCell worker={w} shared={shared} terms={terms} /></td>
+        <td className="ff-exit"><ProxyCell worker={w} shared={shared} mark={mark} terms={terms} /></td>
         <td className="ff-wrap">
           <span className="fp-holder">
-            <span><StatusChip status={status} /></span>
+            <span className="ff-status-chips"><StatusChip status={status} /><QueueChip worker={w} /></span>
             {note && <small className={status === 'attention' || status === 'offline' ? 'fp-warn' : ''}>{note}</small>}
             {beat && <small className="fp-muted" title={new Date(beat).toLocaleString(locale)}>
               {t('fbcHeartbeatAge', { age: relTime(beat, locale) })}</small>}
@@ -294,7 +315,9 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, shared, open, onT
             : <span className="fp-muted" title={t('fbcTodayUnknown')}>—</span>}
         </td>
         <td>
-          <SearchRing done={strip?.searches ?? null} budget={strip?.budget ?? plan?.per_day ?? null} />
+          {pulling && w.queue
+            ? <SearchRing done={w.queue.minutes_today} budget={w.queue.budget_minutes} minutes />
+            : <SearchRing done={strip?.searches ?? null} budget={strip?.budget ?? plan?.per_day ?? null} />}
         </td>
         <td title={h?.session_expiry ?? undefined}
           className={days === null ? 'fp-muted' : days <= 7 ? 'fp-warn' : 'fp-ok'}>
@@ -318,13 +341,22 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, shared, open, onT
       {open && (
         <tr className="ff-fold">
           <td colSpan={9}>
-            <div className="fp-section-label">{t('fbcFoldCities', { n: w.cities.length })}</div>
+            <div className="fp-section-label">
+              {t(pulling ? 'fbcQueueHomeCities' : 'fbcFoldCities', { n: w.cities.length })}
+            </div>
             <div className="fl-cities">
               {w.cities.length
                 ? w.cities.map(c => <CityChip key={c.slug} city={c} hits={hits} terms={terms}
                     tone={searched(c.slug) ? 'accent' : 'muted'} runsPerDay={w.plan?.runs_per_day} />)
                 : <span className="fp-muted">{t('fbcNoCities')}</span>}
             </div>
+            {fromQueue.length > 0 && <>
+              <div className="fp-section-label">{t('fbcQueueFromQueue', { n: fromQueue.length })}</div>
+              <div className="fl-cities">
+                {fromQueue.map(slug => <CityChip key={slug} hits={hits} terms={terms} tone="accent"
+                  city={{ slug, name: queueCityName(fleet, slug), radius_km: null }} />)}
+              </div>
+            </>}
           </td>
         </tr>
       )}
@@ -358,7 +390,9 @@ function DayBar({ strip, status }: { strip: DayStrip; status: FleetStatus }) {
 
 // Done against the day's budget. Amber once the budget is met — the sweep is
 // over for the day — and a dash when the monitor does not report searches.
-function SearchRing({ done, budget }: { done: number | null; budget: number | null }) {
+// With `minutes`, the same ring counts browser minutes against a queue
+// worker's daily budget instead.
+function SearchRing({ done, budget, minutes = false }: { done: number | null; budget: number | null; minutes?: boolean }) {
   const { t } = useT();
   const r = 8;
   const c = 2 * Math.PI * r;
@@ -366,7 +400,7 @@ function SearchRing({ done, budget }: { done: number | null; budget: number | nu
   const tone = done === null || done === 0 ? 'idle' : budget !== null && done >= budget ? 'full' : 'part';
   const title = done === null
     ? t('fbcSearchesUnknown')
-    : budget !== null ? t('fbcSearchesOf', { done, budget }) : undefined;
+    : budget !== null ? t(minutes ? 'fbcQueueMinutesOf' : 'fbcSearchesOf', { done, budget }) : undefined;
   return (
     <span className={`ff-searches ff-ring-${tone}`} title={title}>
       <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden>
@@ -376,7 +410,8 @@ function SearchRing({ done, budget }: { done: number | null; budget: number | nu
             strokeDasharray={`${frac * c} ${c}`} transform="rotate(-90 11 11)" />
         )}
       </svg>
-      <span className="mono"><b>{done ?? '—'}</b>{budget !== null && <span className="ff-ring-of">/{budget}</span>}</span>
+      <span className="mono"><b>{done ?? '—'}</b>{budget !== null && <span className="ff-ring-of">/{budget}</span>}
+        {minutes && <span className="ff-ring-of"> {t('fbcQueueMin')}</span>}</span>
     </span>
   );
 }

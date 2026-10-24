@@ -28,12 +28,14 @@ def client(monkeypatch, tmp_path):
         'rating_prompt = "rate 1-5"\npassword = "SECRET"\n'
     )
 
-    # Capture upstream calls instead of making them.
+    # Capture upstream calls instead of making them. A test may set the JSON
+    # one upstream path answers with in `client.answers`.
     calls = []
+    answers = {}
 
     async def fake_forward_transport(request):
         calls.append(request)
-        return httpx.Response(200, json={"workers": []})
+        return httpx.Response(200, json=answers.get(request.url.path, {"workers": []}))
 
     real_client = httpx.AsyncClient
 
@@ -46,6 +48,7 @@ def client(monkeypatch, tmp_path):
 
     test_client = TestClient(console.app)
     test_client.calls = calls
+    test_client.answers = answers
     yield test_client
 
 
@@ -57,6 +60,7 @@ def test_token_required_everywhere(client):
         "/v1/stats/reviews",
         "/v1/stats/alert-hits",
         "/v1/config/filter-prompt",
+        "/v1/logins?worker_id=ne-1",
     ):
         assert client.get(path).status_code == 401, path
     assert client.post("/v1/challenges/1/resolve").status_code == 401
@@ -301,3 +305,50 @@ def test_seed_session_needs_a_cookie_string_and_a_valid_worker(client):
         "/v1/workers/bad%20id/session", json={"cookie": "x"}, headers=AUTH
     ).status_code == 400
     assert client.calls == []
+
+
+def test_logins_forward_one_worker_without_device_fingerprints(client):
+    row = {
+        "id": 9, "worker_id": "ne-1", "account_id": "ne-1", "identity_key": "uid:61556203481001",
+        "device_id": "dev-uuid", "datr_fp": "0123456789abcdef", "device_drift": 0,
+        "trigger": "relogin", "outcome": "challenge",
+        "detail_json": '{"kind": "checkpoint", "url": "https://www.facebook.com/checkpoint/1/"}',
+        "started_at": "2026-10-23T09:39:23+00:00", "finished_at": "2026-10-23T09:40:01+00:00",
+    }
+    client.answers["/v1/logins"] = {"logins": [row, {**row, "id": 8, "detail_json": None}]}
+    res = client.get("/v1/logins?worker_id=ne-1&limit=500", headers=AUTH)
+    assert res.status_code == 200
+    (request,) = client.calls
+    assert request.url.path == "/v1/logins"
+    assert dict(request.url.params) == {"worker_id": "ne-1", "limit": "500"}
+    first, second = res.json()["logins"]
+    assert first == {
+        "id": 9, "worker_id": "ne-1", "account_id": "ne-1", "identity_key": "uid:61556203481001",
+        "trigger": "relogin", "outcome": "challenge",
+        "started_at": "2026-10-23T09:39:23+00:00", "finished_at": "2026-10-23T09:40:01+00:00",
+        "detail": {"kind": "checkpoint", "url": "https://www.facebook.com/checkpoint/1/"},
+    }
+    assert second["detail"] is None
+    assert "datr" not in res.text and "dev-uuid" not in res.text
+
+    assert client.get("/v1/logins?worker_id=a/b", headers=AUTH).status_code in (400, 404)
+    assert client.get("/v1/logins?worker_id=ne-1&limit=501", headers=AUTH).status_code == 422
+    assert client.get("/v1/logins", headers=AUTH).status_code == 422
+
+
+def test_the_city_log_forwards_one_worker_or_one_city(client):
+    visit = {"worker_id": "ne-1", "city": "nyc", "outcome": "finished", "events": []}
+    client.answers["/v1/city-log"] = {"at": "2026-10-24T14:00:00+00:00", "hours": 24, "visits": [visit]}
+    res = client.get("/v1/city-log?worker_id=ne-1", headers=AUTH)
+    assert res.status_code == 200 and res.json()["visits"] == [visit]
+    res = client.get("/v1/city-log?city=nyc&item=server_ram&hours=12", headers=AUTH)
+    first, second = client.calls
+    assert first.url.path == "/v1/city-log"
+    assert dict(first.url.params) == {"worker_id": "ne-1", "hours": "24"}
+    assert dict(second.url.params) == {"city": "nyc", "item": "server_ram", "hours": "12"}
+
+    assert client.get("/v1/city-log", headers={}).status_code == 401
+    assert client.get("/v1/city-log?worker_id=a%20b", headers=AUTH).status_code == 400
+    assert client.get("/v1/city-log?city=New%20York", headers=AUTH).status_code == 400
+    assert client.get("/v1/city-log?hours=73", headers=AUTH).status_code == 422
+    assert len(client.calls) == 2

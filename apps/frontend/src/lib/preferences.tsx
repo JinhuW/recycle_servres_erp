@@ -43,6 +43,15 @@ export type PrefMap = {
   // How a sell order's lines are grouped: where they ship from, or which PO
   // they came in on.
   'sellOrders.lineGroup': 'warehouse' | 'po';
+  // The bench labels: Pack mode's per product, printed by itself as each is
+  // packed, and Review mode's per PO box, printed by itself on approval. The
+  // stock (width × height as it feeds) and the language the Bluetooth printer
+  // speaks ('auto' goes by its service) are the one printer's, so both pages
+  // share them.
+  'pack.labelAuto': boolean;
+  'review.labelAuto': boolean;
+  'pack.labelSize': '50x25mm' | '4x6' | '4x3' | '2.25x1.25';
+  'pack.labelLanguage': 'auto' | 'tspl' | 'zpl' | 'escpos';
   // Desktop sidebar folded to its icon rail at any width (under 900px the
   // rail is forced regardless).
   'sidebar.folded': boolean;

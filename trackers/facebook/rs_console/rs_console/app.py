@@ -66,7 +66,10 @@ single-use ticket minted against the console token.
 """
 
 import asyncio
+import contextlib
 import hashlib
+import json
+import logging
 import os
 import re
 import secrets as pysecrets
@@ -94,6 +97,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from . import fleet as fleet_view
 from . import proxy_exit, settings, vnc
+from . import queue_shadow as queue_shadow_view
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -121,8 +125,49 @@ TIMEOUT_S = 10.0
 # A checkpoint screenshot is a full browser-window PNG the coordinator may be
 # capturing on demand; give it a longer budget than the JSON calls.
 SCREENSHOT_TIMEOUT_S = 20.0
+# The queue's shadow report replays up to two weeks of the whole fleet.
+SHADOW_TIMEOUT_S = 120.0
+# How often the city queue's roster is pushed when nothing changed.
+ROSTER_PUSH_S = 600.0
 
-app = FastAPI(title="rs-console", docs_url=None, redoc_url=None)
+logger = logging.getLogger(__name__)
+
+# The roster loop's event loop and wake-up, while it runs; a cities save sets
+# it from the handler's thread so the queue hears now, not in ten minutes.
+_roster_wake: Optional[tuple] = None
+
+
+async def _roster_loop(wake: asyncio.Event) -> None:
+    while True:
+        try:
+            await push_roster()
+        except Exception:  # noqa: BLE001 - the next round retries; the console must stay up
+            logger.warning("Could not push the city queue roster", exc_info=True)
+        wake.clear()
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(wake.wait(), ROSTER_PUSH_S)
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    global _roster_wake
+    wake = asyncio.Event()
+    _roster_wake = (asyncio.get_running_loop(), wake)
+    task = asyncio.create_task(_roster_loop(wake))
+    try:
+        yield
+    finally:
+        _roster_wake = None
+        task.cancel()
+
+
+def _push_roster_soon() -> None:
+    if _roster_wake is not None:
+        loop, wake = _roster_wake
+        loop.call_soon_threadsafe(wake.set)
+
+
+app = FastAPI(title="rs-console", docs_url=None, redoc_url=None, lifespan=_lifespan)
 
 # The dashboard shell is public — it holds no data, only markup and script.
 # Everything it shows comes from the token-guarded routes below, after the
@@ -212,6 +257,7 @@ async def workers() -> Response:
 
 
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_CITY_SLUG = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 @app.post("/v1/workers/{worker_id}/relogin", dependencies=[Depends(require_token)])
@@ -351,6 +397,35 @@ async def challenge_screenshot(challenge_id: int) -> Response:
     return await _forward(
         "GET", f"/v1/challenges/{challenge_id}/screenshot", timeout=SCREENSHOT_TIMEOUT_S
     )
+
+
+# The login ledger, one worker at a time, for the ERP's account timeline. The
+# datr fingerprint and device id stay here: they identify a browser, and the
+# ERP only needs what each attempt was and how it ended.
+LOGIN_FIELDS = (
+    "id", "worker_id", "account_id", "identity_key", "trigger", "outcome",
+    "started_at", "finished_at",
+)
+
+
+@app.get("/v1/logins", dependencies=[Depends(require_token)])
+async def logins(
+    worker_id: str = Query(...), limit: int = Query(default=200, ge=1, le=500)
+) -> Dict[str, Any]:
+    if not _WORKER_ID.match(worker_id):
+        raise HTTPException(status_code=400, detail="Not a valid worker id")
+    res = await _forward("GET", "/v1/logins", params={"worker_id": worker_id, "limit": limit})
+    if res.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Coordinator answered {res.status_code}")
+    rows = json.loads(res.body).get("logins") or []
+    out = []
+    for row in rows:
+        try:
+            detail = json.loads(row.get("detail_json") or "null")
+        except ValueError:
+            detail = None
+        out.append({**{k: row.get(k) for k in LOGIN_FIELDS}, "detail": detail})
+    return {"logins": out}
 
 
 @app.get("/v1/stats/reviews", dependencies=[Depends(require_token)])
@@ -624,6 +699,18 @@ async def fleet() -> Dict[str, Any]:
                 fleet_view.apply_tiers(doc, res.json() or {})
         except (httpx.HTTPError, ValueError):
             pass
+        # Today's city round and each worker's part in it. An older
+        # coordinator answers 404, which leaves `queue` null and the ERP
+        # showing the fleet as it was.
+        queue = None
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT_S, base_url=base, headers=headers) as client:
+                res = await client.get("/v1/queue/status")
+            if res.status_code == 200:
+                queue = res.json()
+        except (httpx.HTTPError, ValueError):
+            pass
+        fleet_view.apply_queue(doc, queue)
     # Where each worker comes out, asked through its own proxy. Never fails
     # the page: a slow or dead proxy reads `pending` / `error` on its row.
     targets = fleet_view.proxy_targets(doc, dict(os.environ))
@@ -713,6 +800,7 @@ def put_worker_cities(worker_id: str, body: Any = Body(default=None)) -> Dict[st
         by = body.get("updated_by") if isinstance(body.get("updated_by"), str) else None
         state = settings.stamp(values, (by or "").strip()[:120] or None)
         settings.save(state)
+    _push_roster_soon()
     return {
         "worker_id": worker_id,
         "cities": city_list,
@@ -741,6 +829,90 @@ async def put_city_tiers(body: Any = Body(default=None)) -> Response:
     if isinstance(by, str) and by.strip():
         upstream_body["updated_by"] = by.strip()[:120]
     return await _forward("PUT", "/v1/city-tiers", json_body=upstream_body)
+
+
+def _who(body: Dict[str, Any]) -> Optional[str]:
+    by = body.get("updated_by")
+    return by.strip()[:120] if isinstance(by, str) and by.strip() else None
+
+
+@app.put("/v1/workers/{worker_id}/queue", dependencies=[Depends(require_token)])
+async def put_worker_queue(worker_id: str, body: Any = Body(default=None)) -> Response:
+    """Put one worker in the city queue or take it out. The coordinator
+    refuses (409) a worker whose monitor never asks the queue."""
+    if not isinstance(body, dict) or not isinstance(body.get("enrolled"), bool):
+        raise HTTPException(status_code=400, detail="Expected {enrolled: true|false}")
+    return await _forward(
+        "PUT",
+        f"/v1/workers/{worker_id}/queue",
+        json_body={"enrolled": body["enrolled"], "updated_by": _who(body)},
+    )
+
+
+@app.put("/v1/queue/everyone", dependencies=[Depends(require_token)])
+async def put_queue_everyone(body: Any = Body(default=None)) -> Response:
+    """Every worker takes its cities from the queue, or none does."""
+    if not isinstance(body, dict) or not isinstance(body.get("enrolled"), bool):
+        raise HTTPException(status_code=400, detail="Expected {enrolled: true|false}")
+    return await _forward(
+        "PUT",
+        "/v1/queue/settings",
+        json_body={"enrolled": ["*"] if body["enrolled"] else [], "updated_by": _who(body)},
+    )
+
+
+@app.get("/v1/city-log", dependencies=[Depends(require_token)])
+async def city_log(
+    worker_id: Optional[str] = Query(default=None),
+    city: Optional[str] = Query(default=None),
+    item: Optional[str] = Query(default=None, max_length=120),
+    hours: int = Query(default=24, ge=1, le=72),
+) -> Response:
+    """Each city searched in the last `hours`, from its handout or start to its
+    end, for one worker or one city. An older coordinator answers 404, which
+    is passed on: the ERP then shows no log."""
+    if worker_id is not None and not _WORKER_ID.match(worker_id):
+        raise HTTPException(status_code=400, detail="Not a valid worker id")
+    if city is not None and not _CITY_SLUG.match(city):
+        raise HTTPException(status_code=400, detail="Not a valid city")
+    params = {"worker_id": worker_id, "city": city, "item": item, "hours": hours}
+    return await _forward(
+        "GET", "/v1/city-log", params={k: v for k, v in params.items() if v is not None}
+    )
+
+
+async def push_roster() -> bool:
+    """Send the coordinator the roster its city queue hands cities out from:
+    the catalog and each worker's home cities, from the `/v1/fleet` document.
+    Only this console reads the worker configs, so the queue knows nothing
+    of a city or a worker until this has run."""
+    doc = await fleet()
+    body = queue_shadow_view.roster(doc)
+    if not body["workers"]:
+        return False
+    base, headers = _upstream()
+    async with httpx.AsyncClient(timeout=TIMEOUT_S, base_url=base, headers=headers) as client:
+        res = await client.put("/v1/queue/roster", json={**body, "updated_by": "rs-console"})
+    return res.status_code == 200
+
+
+@app.post("/v1/queue/shadow", dependencies=[Depends(require_token)])
+async def queue_shadow(body: Any = Body(default=None)) -> Response:
+    """What the city queue would have handed out, next to what the fleet did
+    (`queue_shadow.py`). The coordinator replays; the roster is built here
+    from the same document `/v1/fleet` serves. The ERP does not forward it."""
+    if body is not None and not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Expected a JSON object")
+    body = body or {}
+    doc = await fleet()
+    upstream_body = {
+        "days": body.get("days", 3),
+        "settings": body.get("settings") or {},
+        "roster": queue_shadow_view.roster(doc),
+    }
+    return await _forward(
+        "POST", "/v1/queue/shadow", json_body=upstream_body, timeout=SHADOW_TIMEOUT_S
+    )
 
 
 @app.get("/v1/config/filter-prompt", dependencies=[Depends(require_token)])

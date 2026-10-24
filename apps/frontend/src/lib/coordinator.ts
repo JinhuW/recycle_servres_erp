@@ -213,6 +213,9 @@ export type FleetAccount = {
   // Whether the console holds this worker's config and so can save its
   // cities; absent from a facade that predates per-worker cities.
   cities_editable?: boolean;
+  // Its part in the city queue: null against a coordinator that predates the
+  // queue, absent from a facade that does.
+  queue?: FleetQueueWorker | null;
   // The sweep times (UTC) the worker's own config runs. They differ from the
   // fleet's for an account that shares an IP. Absent from an older facade.
   start_at?: string[] | null;
@@ -287,6 +290,117 @@ export type FleetDoc = {
   // The week's status changes, newest first. null when the coordinator
   // predates its status log; absent from a facade that predates the field.
   status_changes?: StatusChange[] | null;
+  // Today's city round. null against a coordinator that predates the queue,
+  // absent from a facade that does.
+  queue?: FleetQueue | null;
+};
+
+// Where a city stands in today's round, for one item: being searched now
+// (`leased`), on the own list of a live worker outside the queue (`held`),
+// searched today, not due again until `at` (`later`), or due.
+export type QueueCityState = 'leased' | 'held' | 'searched' | 'later' | 'due';
+
+export type FleetQueueCity = {
+  slug: string;
+  name: string | null;
+  region: string | null;
+  // The workers whose own lists hold this city.
+  home: string[];
+  held_by: string | null;
+  // Per item. `at` is the search (or the lease) for searched/leased/held and
+  // due, and when it falls due for later; `by` is the worker.
+  items: Record<string, { state: QueueCityState; at: string | null; by: string | null }>;
+};
+
+export type QueueItemCounts = {
+  cities: number;
+  queue: number;
+  searched: number;
+  leased: number;
+  due: number;
+  later: number;
+  held: number;
+};
+
+export type FleetQueue = {
+  at: string;
+  // Every worker is enrolled ("*").
+  everyone: boolean;
+  settings: { enrolled: string[]; per_day: number | null; budget_minutes: number; window_hours: number };
+  items: Record<string, QueueItemCounts>;
+  cities: FleetQueueCity[];
+  quarantined: string[];
+  roster_updated_at: string | null;
+};
+
+// One worker's part in the queue. `capable` is whether its monitor asks the
+// queue at all (0.13.14 or later); an enrolled worker that is not still
+// searches its own list.
+export type FleetQueueWorker = {
+  worker_id: string;
+  enrolled: boolean;
+  capable: boolean;
+  version: string | null;
+  quarantined: boolean;
+  minutes_today: number;
+  budget_minutes: number;
+  handed_today: number;
+  handed: string[];
+  open: { item: string; city: string; leased_at: string }[];
+};
+
+// The coordinator's city log: each city a worker searched, from its handout
+// (or its start, on a worker's own list) to its end. `detail` holds what the
+// step said: `why` for handed; the page's counts and `phrase` for searched;
+// the listing for alerted; the city's counts for finished and stopped, with
+// `reason` (and `wall`, `error`, `of`) for stopped; `reason` for released
+// ("restarted", or the state the worker parked in). `expired` is read from a
+// lease that ran out with no word from its worker.
+export type CityStepKind =
+  | 'handed' | 'started' | 'searched' | 'alerted' | 'finished' | 'stopped' | 'released' | 'expired';
+
+export type CityStep = {
+  at: string;
+  event: CityStepKind;
+  detail: Record<string, string | number | null | undefined>;
+};
+
+// Searching now; no word for half an hour (quiet); or how it ended.
+export type CityVisitOutcome = 'finished' | 'stopped' | 'released' | 'expired' | 'searching' | 'quiet';
+
+export type CityVisitTotals = {
+  searches: number;
+  cards: number;
+  title_pass: number;
+  opened: number;
+  keyword_pass: number;
+  fresh: number;
+  reviewed: number;
+  alerted: number;
+  empty?: number;
+};
+
+export type CityVisit = {
+  worker_id: string;
+  // null from a worker older than the city queue.
+  item: string | null;
+  city: string;
+  name: string | null;
+  via: 'queue' | 'own' | null;
+  // Why the queue handed it out: home, familiar or other.
+  why: string | null;
+  outcome: CityVisitOutcome;
+  reason: string | null;
+  wall: string | null;
+  error: string | null;
+  // The counts are the worker's own report; otherwise summed from its pages.
+  reported: boolean;
+  started_at: string;
+  ended_at: string | null;
+  seconds: number | null;
+  totals: CityVisitTotals;
+  alerts: { at: string; title?: string; price?: string; score?: number; url?: string; listing_id?: string }[];
+  events: CityStep[];
 };
 
 // One change the coordinator logged: the `state` a worker reported moving
@@ -319,6 +433,21 @@ export type AlertHitRow = {
   hit: number;
 };
 
+// One login attempt from the coordinator's ledger, as the console serves it.
+// `identity_key` is `uid:<facebook uid>` on newer rows and null before; the
+// outcome is null while the attempt has not reported back.
+export type LedgerLogin = {
+  id: number;
+  worker_id: string;
+  account_id: string | null;
+  identity_key: string | null;
+  trigger: string | null;
+  outcome: string | null;
+  started_at: string;
+  finished_at: string | null;
+  detail: { kind?: string; url?: string } | null;
+};
+
 export const coordinatorApi = {
   listWorkers: () =>
     api.get<{ workers: FleetWorker[] }>('/api/coordinator/workers').then(r => r.workers),
@@ -342,6 +471,11 @@ export const coordinatorApi = {
       `/api/coordinator/stats/alert-hits?days=${days}`,
     ).then(r => r.rows),
 
+  // A console older than the ledger route answers 404.
+  workerLogins: (workerId: string) =>
+    api.get<{ logins: LedgerLogin[] }>(`/api/coordinator/workers/${encodeURIComponent(workerId)}/logins`)
+      .then(r => r.logins),
+
   listOpenChallenges: () =>
     api.get<{ challenges: Challenge[] }>('/api/coordinator/challenges?status=open')
       .then(r => r.challenges),
@@ -361,6 +495,28 @@ export const coordinatorApi = {
     api.put<{ cities: CityWrite[]; changed: string[] }>(
       `/api/coordinator/workers/${encodeURIComponent(workerId)}/cities`, { cities },
     ),
+
+  // Put one worker in the city queue or take it out. The coordinator refuses
+  // (409) a worker whose monitor never asks the queue.
+  setWorkerQueue: (workerId: string, enrolled: boolean) =>
+    api.put<{ worker_id: string; enrolled: boolean; everyone: boolean }>(
+      `/api/coordinator/workers/${encodeURIComponent(workerId)}/queue`, { enrolled },
+    ),
+
+  // Every worker takes its cities from the queue, or none does.
+  setEveryoneQueue: (enrolled: boolean) =>
+    api.put<unknown>('/api/coordinator/queue/everyone', { enrolled }),
+
+  // One worker's cities, or one city's workers, over the last `hours`. A
+  // console older than the city log answers 404.
+  cityLog: (q: { worker?: string; city?: string; hours?: number }) => {
+    const params = new URLSearchParams();
+    if (q.worker) params.set('worker', q.worker);
+    if (q.city) params.set('city', q.city);
+    params.set('hours', String(q.hours ?? 24));
+    return api.get<{ at: string; hours: number; visits: CityVisit[] }>(`/api/coordinator/city-log?${params}`)
+      .then(r => r.visits);
+  },
 
   // How often cities are searched. Pins replace the whole map, so a caller
   // re-reads it just before saving and applies only its own edits.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ApiError } from './api';
 import {
-  asksToMoveToReviewing, boxCheckEventLines, checkBody, countOf, emptyCheck, entryAnswerFor, filterScan, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, partsNamed, readStageMoved, stashEntryAnswer, tally,
+  asksToMoveToReviewing, boxCheckEventLines, checkBody, countOf, reviewedCounts, emptyCheck, entryAnswerFor, filterScan, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, partsNamed, readStageMoved, stashEntryAnswer, tally,
   type LineCheck,
 } from './boxCheck';
 
@@ -76,6 +76,19 @@ describe('orderLines', () => {
     const o = orderLines(lines, checks);
     expect(o.open.map(l => l.id)).toEqual(['b', 'd']);
     expect(o.done.map(l => l.id)).toEqual(['c', 'a']);
+  });
+});
+
+describe('reviewedCounts', () => {
+  it('counts the products with a unit in the box by #, and their units', () => {
+    const box = [
+      { ...L('a', 16, 'A'), no: 1 },
+      // A partial transfer's clone repeats its source's #.
+      { ...L('a2', 4, 'A'), no: 1 },
+      { ...L('b', 8, 'B'), no: 2 },
+      { ...L('c', 4, 'C'), no: 3 },
+    ];
+    expect(reviewedCounts(box, new Map([['b', C('b', 5)], ['c', C('c', 0)]]))).toEqual({ products: 2, units: 25 });
   });
 });
 

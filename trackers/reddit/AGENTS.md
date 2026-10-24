@@ -37,6 +37,10 @@ has the repo map and workflow.
 - **The Dockerfile CMD or shutdown path** →
   [docs/debug-notes/signals-must-reach-node.md](docs/debug-notes/signals-must-reach-node.md).
   node must be PID 1 or SIGTERM never reaches the shutdown handler.
+- **A `logger.warn`/`error` call, or a loop's error handling** → README
+  *Ops alerts*. Every warn/error line reaches the ops Telegram group. One
+  logged in a loop's scope also counts that iteration as failed, and three in
+  a row page. Something routine belongs at `info`.
 - **Telegram delivery or `telegram_chat_ids`** →
   [docs/debug-notes/telegram-supergroup-migration.md](docs/debug-notes/telegram-supergroup-migration.md).
   A group upgraded to a supergroup gets a new `-100…` chat id, and every alert
@@ -100,6 +104,8 @@ Breaking any of these breaks the fleet. The tests that cover them are
   `schema_migrations` ledger by filename and both start at `0001_init.sql`, so
   the two must never share a database. `scripts/migrate.ts --reset` drops every
   table in `public`.
+- A new migration updates the Reddit section of the root `docs/DATABASE.md`,
+  and its *As of* line, in the same PR.
 - Tests run against real Postgres (`docker compose up -d postgres`, on
   `127.0.0.1:5433`). The claim logic depends on `FOR UPDATE SKIP LOCKED`, which
   fakes do not reproduce.

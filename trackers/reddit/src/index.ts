@@ -14,16 +14,22 @@ import {evaluateOnce} from './loops/evaluate.ts';
 import {notifyOnce} from './loops/notify.ts';
 import {pollOnce} from './loops/poll.ts';
 import {reactionsOnce} from './loops/reactions.ts';
+import {watchOnce} from './loops/watch.ts';
 import {startLoop, type LoopHandle} from './loops/runner.ts';
 import {RedditPacer} from './pacing.ts';
 import {SettingsStore} from './settings.ts';
 
 const config = loadConfig();
-const logger = createLogger(config.workerId, config.logLevel);
+const registry = new LoopRegistry();
+// Every warn/error line goes to the registry too: it is how a failing loop is
+// noticed and what the ops watch sends on (loops/watch.ts).
+const logger = createLogger(
+  config.workerId, config.logLevel, undefined,
+  (scope, level, message, fields) => registry.noteProblem(scope, level, message, fields),
+);
 const sql = createDb(config.databaseUrl);
 const settings = new SettingsStore(sql);
 const startedAt = Date.now();
-const registry = new LoopRegistry();
 
 const HEARTBEAT_IDLE_MS = 30_000;
 
@@ -95,6 +101,24 @@ async function runApi(): Promise<void> {
     )
     : null;
 
+  // Like the reactions loop, the watch must run once per fleet, so it lives in
+  // the api. Off without a relay to send to (local runs).
+  const watch = config.opsAlertUrl
+    ? startLoop(
+      {name: 'watch', logger: logger.child('watch'), idleMs: 60_000, busyMs: 5_000},
+      () => watchOnce({
+        sql,
+        // Without the problem hook: a relay failure in worker_errors would be
+        // queued for the relay that just failed, and pad the digest after it.
+        logger: createLogger(config.workerId, config.logLevel, 'watch'),
+        selfId: config.workerId,
+        relayUrl: config.opsAlertUrl,
+        relayToken: config.opsAlertToken,
+      }),
+    )
+    : null;
+  if (!watch) logger.info('ops alerts off: OPS_ALERT_URL is not set');
+
   await new Promise<void>((resolve) => {
     const shutdown = (signal: string) => {
       if (shuttingDown) return;
@@ -102,6 +126,7 @@ async function runApi(): Promise<void> {
       logger.info('shutting down', {signal});
       heartbeat.stop();
       reactions?.stop();
+      watch?.stop();
       abort.abort();
       server.close(() => resolve());
     };
@@ -111,6 +136,7 @@ async function runApi(): Promise<void> {
 
   await heartbeat.stopped;
   await reactions?.stopped;
+  await watch?.stopped;
   await deregister();
   await sql.end();
 }

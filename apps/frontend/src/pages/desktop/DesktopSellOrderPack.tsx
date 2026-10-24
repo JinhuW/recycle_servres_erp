@@ -5,6 +5,7 @@ import { ImageLightbox } from '../../components/ImageLightbox';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { api, ApiError, rawFetch } from '../../lib/api';
+import { fmtDate } from '../../lib/format';
 import {
   countOf, emptyCheck, isAbsentChecked, isShortChecked, lineState, partsNamed, type LineCheck,
 } from '../../lib/boxCheck';
@@ -21,6 +22,7 @@ import type { Category } from '../../lib/types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useLineSaveQueue } from '../../lib/useLineSaveQueue';
 import { useScanFilterText } from '../../lib/useScanFilter';
+import { LabelPrinterBar, useLabelPrint, type LabelText } from './LabelPrint';
 
 // Pack mode: a sell order as a packing checklist, laid out like the PO's
 // Review mode and built for an iPad on a cart. Products run in the order's own
@@ -36,7 +38,8 @@ import { useScanFilterText } from '../../lib/useScanFilter';
 // and taking it back puts the qty back — the server's rule, in
 // routes/sellOrderPack.ts — so a lot held at 0 has nothing left to pack.
 // Lots lowered and left unticked are listed in Finish, whose Apply ticks them
-// all at their counts in one request.
+// all at their counts in one request. The tick that packs a product prints
+// its label, with its # on it (LabelPrint.tsx).
 
 type OrderLine = {
   id: string;
@@ -91,7 +94,7 @@ const rowElId = (key: string) => (key.startsWith('p:') ? 'pk-prod-' + key.slice(
 const COLS = 6;
 
 export default function DesktopSellOrderPack({ id, onToast }: Props) {
-  const { t } = useT();
+  const { t, locale } = useT();
   const [order, setOrder] = useState<PackOrder | null>(null);
   // Only the first read can leave the page with no order; a failed re-read
   // keeps the one already shown.
@@ -113,6 +116,10 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const [shipping, setShipping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
+  const label = useLabelPrint('pack.labelAuto', name => onToast?.(t('pkLabelPrinted', { id: name })));
+  // The products this visit printed a label for by itself, by warehouse and
+  // #: ticking one back and on again doesn't print another.
+  const autoPrinted = useRef(new Set<string>());
 
   const scanRef = useRef<HTMLInputElement | null>(null);
   // Set when a scanner's first character landed on the page and was moved into
@@ -355,6 +362,41 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     if (next) setSelected(keysOf(next)[0]!);
   };
 
+  // A product's label, which the receiver matches the item to the order by:
+  // the order, the product's #, its part and the units of it packed, counted
+  // as `cs` has them.
+  const labelTextOf = (p: Product, cs: ReadonlyMap<string, LineCheck>): LabelText => {
+    const { counted } = productSummary(p.lots, cs);
+    return {
+      name: `${id} #${p.no}`,
+      top: id,
+      date: fmtDate(new Date(), locale),
+      title: '#' + p.no,
+      caption: null,
+      body: pnOf(p.head),
+      mono: true,
+      counts: [{ n: counted, word: t('pkLabelUnits', { n: counted }) }],
+    };
+  };
+
+  // A tick that packs a product prints its label, in # order when one tick
+  // packs several. Only a tick made here does, so another iPad packing the
+  // order prints nothing on this one. A product packed at 0 has nothing to
+  // label.
+  const labelOnPack = (view: readonly Product[], after: ReadonlyMap<string, LineCheck>) => {
+    if (!label.auto) return;
+    const texts: LabelText[] = [];
+    for (const p of view) {
+      const key = `${picked}:${p.no}`;
+      const now = productSummary(p.lots, after);
+      if (now.state !== 'done' || now.counted === 0 || autoPrinted.current.has(key)) continue;
+      if (productSummary(p.lots, checks).state === 'done') continue;
+      autoPrinted.current.add(key);
+      texts.push(labelTextOf(p, after));
+    }
+    void label.print(texts);
+  };
+
   const pack = (l: Line) => {
     const prev = checkOf(l.id);
     const next = { ...prev, checkedAt: new Date().toISOString() };
@@ -362,7 +404,9 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     setChoose(new Set());
     const n = countOf(l, prev);
     flashUndo({ prev: [prev], msg: t(takesCounts && n < l.qty ? 'pkPackedSetToast' : 'pkPackedToast', { pn: pnOf(l), n, of: l.qty }) });
-    moveOn(l.id, new Map(checks).set(l.id, next));
+    const after = new Map(checks).set(l.id, next);
+    moveOn(l.id, after);
+    labelOnPack(products, after);
   };
 
   const toggle = (l: Line) => {
@@ -402,6 +446,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     });
     flashUndo({ prev, msg: t('pkPackedLotsToast', { pn, n: plan.tick.length, of: p.lots.length }) });
     moveOn(p.head.id, after);
+    labelOnPack(products, after);
   };
 
   const toggleKey = (key: string) => {
@@ -440,13 +485,15 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
         prev: applied.flatMap(lineId => before.get(lineId) ?? []),
         msg: t('pkAppliedToast', { n: applied.length }),
       });
-      // The selection moves on as a tick's does, judged on the reply: a fold
-      // that lost a lot to 0 may now be a single row, under another key.
+      // Judged on the reply: a lot applied at 0 leaves its product, and a
+      // fold that lost one may now be a single row, under another key.
+      const qtyNow = new Map(r.lines.map(x => [x.lineId, x.qty]));
+      const now = packProducts(packView(lines.map(l => ({ ...l, qty: qtyNow.get(l.id) ?? l.qty })), picked));
+      const after = new Map(r.lines.map(x => [x.lineId, toCheck(x)]));
+      labelOnPack(now, after);
+      // The selection moves on as a tick's does.
       const selNo = selKey ? (selKey.startsWith('p:') ? Number(selKey.slice(2)) : lineNo.get(selKey)) : undefined;
       if (selNo !== undefined && applied.some(lineId => lineNo.get(lineId) === selNo)) {
-        const qtyNow = new Map(r.lines.map(x => [x.lineId, x.qty]));
-        const now = packProducts(packView(lines.map(l => ({ ...l, qty: qtyNow.get(l.id) ?? l.qty })), picked));
-        const after = new Map(r.lines.map(x => [x.lineId, toCheck(x)]));
         const p = now.find(x => x.no === selNo);
         const state = p && productSummary(p.lots, after).state;
         const target = state === 'open' || state === 'mixed' ? p : nextOpenProduct(now, after, selNo);
@@ -842,6 +889,10 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
 
   const units = lines.reduce((a, l) => a + l.qty, 0);
   const shippedMeta = order?.statusMeta.Shipped;
+  // Print label prints the selected product's.
+  const printNo = selKey ? keyNo(selKey) : undefined;
+  const printProduct = printNo === undefined ? null : shownProduct(printNo) ?? null;
+  const printUnits = printProduct ? productSummary(printProduct.lots, checks).counted : 0;
 
   return (
     <div className="pk-page">
@@ -861,11 +912,27 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
             </div>
           )}
         </div>
-        <div className="bc-keys pk-keys" aria-hidden="true">
-          <span><kbd>↑</kbd><kbd>↓</kbd> {t('bcKeyMove')}</span>
-          <span><kbd>{t('bcKeySpace')}</kbd> {t('pkKeyPack')}</span>
-          <span><kbd>←</kbd><kbd>→</kbd> {t('pkKeyFold')}</span>
-          <span><kbd>/</kbd> {t('bcKeyScan')}</span>
+        <div className="pk-head-side">
+          {order && (
+            <LabelPrinterBar
+              printer={label.printer}
+              settings={label.settings}
+              autoTitle={t('pkLabelAuto')}
+              autoHint={t('pkLabelAutoHint')}
+              summary={printProduct
+                ? [`#${printProduct.no}`, pnOf(printProduct.head), `${printUnits} ${t('pkLabelUnits', { n: printUnits })}`].join(' · ')
+                : ''}
+              canPrint={loadState === 'ok' && printUnits > 0}
+              onPrint={() => { if (printProduct) void label.print([labelTextOf(printProduct, checks)]); }}
+              onPrintDialog={() => { if (printProduct) void label.viaDialog([labelTextOf(printProduct, checks)]); }}
+            />
+          )}
+          <div className="bc-keys pk-keys" aria-hidden="true">
+            <span><kbd>↑</kbd><kbd>↓</kbd> {t('bcKeyMove')}</span>
+            <span><kbd>{t('bcKeySpace')}</kbd> {t('pkKeyPack')}</span>
+            <span><kbd>←</kbd><kbd>→</kbd> {t('pkKeyFold')}</span>
+            <span><kbd>/</kbd> {t('bcKeyScan')}</span>
+          </div>
         </div>
       </div>
 
@@ -1149,6 +1216,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
         />
       )}
       {zoom && <ImageLightbox url={zoom} onClose={() => setZoom(null)} />}
+      {label.element}
     </div>
   );
 }

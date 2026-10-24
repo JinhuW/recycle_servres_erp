@@ -13,7 +13,7 @@ all. So they are pinned here by commit instead, and
 
 | Path | Upstream | Branch | Pinned commit |
 | --- | --- | --- | --- |
-| `ai-marketplace-monitor/` | https://github.com/BoPeng/ai-marketplace-monitor | `recycle-patches` | `96d9204798c0eb06759744069cdceec210f6473d` |
+| `ai-marketplace-monitor/` | https://github.com/BoPeng/ai-marketplace-monitor | `recycle-patches` | `e0453344add50af860fda9e433dca49c7cb6b279` |
 | `facebook-marketplace-bot/` | https://github.com/GeorgiKeranov/facebook-marketplace-bot | (as cloned) | `3bda6b40dc6be0a613c3785bed3eb0409f9b5377` |
 
 ## ai-marketplace-monitor
@@ -35,6 +35,20 @@ before relying on a clone of this tree being enough to redeploy.
 
 Before pulling upstream, **rebase** that branch rather than merging into it, and
 re-run `scripts/check-vendor.sh` to refresh the pin above.
+
+**Why `recycle-patches` has `8979534`, not `96d9204`.** `96d9204` (the RS-338 endpoint
+fix that 0.13.12 shipped) existed only in a worktree's clone, and that clone
+was deleted. With no private remote, no copy of the commit survived. `8979534`
+rebuilds it:
+
+- Same parent, `c20d341`.
+- Same single-file change to `token_session.py`, copied from the VM.
+- An rsync checksum dry run found no content difference against the deployed
+  tree on the VM. That covers every file except what `deploy.rsync-filter`
+  keeps off the VM: `.git` and five docs PNGs.
+
+The code the fleet runs is unchanged; only the hash moved. The private remote
+asked for above is what would have prevented this.
 
 ## facebook-marketplace-bot
 

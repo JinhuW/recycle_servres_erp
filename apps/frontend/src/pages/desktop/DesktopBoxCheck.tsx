@@ -13,11 +13,11 @@ import { api, ApiError, rawFetch } from '../../lib/api';
 import { applyPatch, canApply, openIssuesByLine, settledBy, useAiReview, type AiFinding } from '../../lib/aiReview';
 import {
   checkBody, countOf, emptyCheck, entryAnswerFor, filterScan, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter,
-  orderLines, partsNamed, readStageMoved, stashEntryAnswer, tally,
+  orderLines, partsNamed, readStageMoved, reviewedCounts, stashEntryAnswer, tally,
   type ChecksResponse, type LineCheck,
 } from '../../lib/boxCheck';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
-import { fmtMoney, fmtUSD } from '../../lib/format';
+import { fmtDate, fmtMoney, fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useLineSaveQueue } from '../../lib/useLineSaveQueue';
@@ -39,6 +39,7 @@ import { statusTone } from '../../lib/status';
 import { useMarketLookup } from '../../lib/useMarketLookup';
 import type { Order, OrderLine } from '../../lib/types';
 import { AiReviewCard } from './AiReviewCard';
+import { LabelPrinterBar, useLabelPrint, type LabelText } from './LabelPrint';
 import { LineDrawer } from './submit/LineDrawer';
 import { editLineToPatch, orderLineToEditLine, type EditLine } from './submit/editLine';
 import { brandConfirmPending, patchEditsLine } from './submit/line';
@@ -51,7 +52,8 @@ import { brandConfirmPending, patchEditsLine } from './submit/line';
 // where the count stands. The same bench prices the PO: each line's sell
 // price, the projection the commission is paid on, is typed beside its
 // count, with the Market board's value offered where nobody has priced it,
-// or read off a sell order sheet dropped on the list.
+// or read off a sell order sheet dropped on the list. Approving the review
+// prints the box's label: the PO, its counts and its purchaser.
 
 const XLSX_ACCEPT = '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -148,6 +150,25 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     checksOf: r => r.lines,
   });
   const ready = loadState === 'ok' && !readOnly;
+
+  const label = useLabelPrint('review.labelAuto', name => showToast(t('pkLabelPrinted', { id: name })));
+  // The box's label, counted as the review stands: a line at 0 isn't in it.
+  const labelText = (): LabelText => {
+    const n = reviewedCounts(lines, checks);
+    return {
+      name: order.id,
+      top: [t('bcLabelKind'), order.warehouse?.short].filter(Boolean).join(' · '),
+      date: fmtDate(new Date(), locale),
+      title: order.id,
+      caption: t('pkLabelPurchaser', { n: 1 }),
+      body: order.userName,
+      mono: false,
+      counts: [
+        { n: n.products, word: t('pkLabelProducts', { n: n.products }) },
+        { n: n.units, word: t('pkLabelUnits', { n: n.units }) },
+      ],
+    };
+  };
 
   useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
@@ -525,6 +546,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     // the qty they had; the re-read brings the new one (and the goods total).
     let zeroed = false;
     const reloadIfZeroed = () => (zeroed ? onReload().catch(handleFetchError) : undefined);
+    let approved = false;
     try {
       // A count the server never stored would be zeroed or approved as if it
       // had been.
@@ -549,6 +571,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
         return;
       }
       stashEntryAnswer(order.id, null);
+      approved = true;
     } catch (e) {
       const now = readStageMoved(e);
       if (now !== null) showErrorDialog(t('bcStaleStage', { id: order.id, s: poStageName(now, t) }));
@@ -556,8 +579,13 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
       await reloadIfZeroed();
       return;
     } finally {
-      setBusy(null);
+      // An approved PO has left Reviewing, so Approve stays busy while its
+      // label prints: a second click would try to approve it again.
+      if (!approved) setBusy(null);
     }
+    // Finishing the review prints the box's label, before the page leaves.
+    if (label.auto) await label.print([labelText()]);
+    setBusy(null);
     onApproved();
   };
 
@@ -891,6 +919,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const selPlan = selected ? plan?.rows.get(selected.id) : undefined;
   const selSource = selected ? sources.get(selected.id) : undefined;
   const shot = selShots[Math.min(photoIdx, selShots.length - 1)];
+  const boxCount = reviewedCounts(lines, checks);
 
   return (
     <div className="bc-page">
@@ -913,13 +942,25 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
             ].filter(Boolean).join(' · ')}
           </div>
         </div>
-        <div className="bc-keys" aria-hidden="true">
-          <span><kbd>↑</kbd><kbd>↓</kbd> {t('bcKeyMove')}</span>
-          <span><kbd>{t('bcKeySpace')}</kbd> {t('bcKeyCheck')}</span>
-          <span><kbd>+</kbd><kbd>−</kbd> {t('bcKeyCount')}</span>
-          <span><kbd>E</kbd> {t('bcKeyEdit')}</span>
-          <span><kbd>P</kbd> {t('bcKeyPrice')}</span>
-          <span><kbd>/</kbd> {t('bcKeyScan')}</span>
+        <div className="pk-head-side">
+          <LabelPrinterBar
+            printer={label.printer}
+            settings={label.settings}
+            autoTitle={t('bcLabelAuto')}
+            autoHint={t('bcLabelAutoHint')}
+            summary={[order.id, t('pkSub', { products: boxCount.products, units: boxCount.units }), order.userName].join(' · ')}
+            canPrint={loadState === 'ok' && boxCount.products > 0}
+            onPrint={() => void label.print([labelText()])}
+            onPrintDialog={() => void label.viaDialog([labelText()])}
+          />
+          <div className="bc-keys" aria-hidden="true">
+            <span><kbd>↑</kbd><kbd>↓</kbd> {t('bcKeyMove')}</span>
+            <span><kbd>{t('bcKeySpace')}</kbd> {t('bcKeyCheck')}</span>
+            <span><kbd>+</kbd><kbd>−</kbd> {t('bcKeyCount')}</span>
+            <span><kbd>E</kbd> {t('bcKeyEdit')}</span>
+            <span><kbd>P</kbd> {t('bcKeyPrice')}</span>
+            <span><kbd>/</kbd> {t('bcKeyScan')}</span>
+          </div>
         </div>
       </div>
 
@@ -1441,6 +1482,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
       {serialIssues && <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />}
       {takeover.dialog}
       {mismatch.dialog}
+      {label.element}
     </div>
   );
 }

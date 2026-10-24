@@ -9,11 +9,12 @@ tested without a clock or an HTTP client.
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends
 
-from .. import deps, health
+from .. import city_queue, deps, health
 from ..db import as_utc_stamp
 from ..deps import require_admin, require_worker
 from ..schemas import (
@@ -22,6 +23,7 @@ from ..schemas import (
     HeartbeatResponse,
     WorkerList,
     WorkerOut,
+    WorkerState,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,6 +89,33 @@ def heartbeat(
             )
         except Exception:  # noqa: BLE001 - the strip is a nicety; the heartbeat is not
             logger.exception("Could not log a search cycle for worker %s", worker_id)
+
+    # A city queue lease lives as long as its worker reports HEALTHY; one that
+    # parks gives its city back now, not when the lease would have run out.
+    if payload.state is not None:
+        try:
+            now = datetime.now(timezone.utc)
+            until = now
+            if payload.state is WorkerState.HEALTHY:
+                stored = db.queue_config("settings")
+                minutes = ((stored or {}).get("body") or {}).get(
+                    "lease_minutes", city_queue.DEFAULTS["lease_minutes"]
+                )
+                until = now + timedelta(minutes=minutes)
+            stamp = now.isoformat(timespec="seconds")
+            moved = db.extend_city_leases(worker_id, until.isoformat(timespec="seconds"), stamp)
+            if until == now:
+                for lease in moved:
+                    db.log_city_event(
+                        worker_id,
+                        lease["item"],
+                        lease["city"],
+                        "released",
+                        {"reason": payload.state.value},
+                        at=stamp,
+                    )
+        except Exception:  # noqa: BLE001 - a lease runs out on its own; the heartbeat must land
+            logger.exception("Could not move the city leases of worker %s", worker_id)
 
     log_beat(worker_id, previous, payload.state.value if payload.state else None)
 

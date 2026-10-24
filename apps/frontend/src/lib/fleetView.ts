@@ -4,8 +4,10 @@
 // Kept out of the components so they can be unit-tested without React.
 
 import type {
-  AlertHitRow, Challenge, CityTierSettings, CityWrite, FleetAccount, FleetCity, FleetDoc, ReviewStatsDay, SearchSettingsWrite, StatusChange,
+  AlertHitRow, Challenge, CityStep, CityTierSettings, CityVisit, CityVisitOutcome, CityWrite, FleetAccount, FleetCity,
+  FleetDoc, FleetQueue, LedgerLogin, QueueCityState, QueueItemCounts, ReviewStatsDay, SearchSettingsWrite, StatusChange,
 } from './coordinator';
+import type { FbWorkerStint } from './facebookPool';
 import { ruleLines } from './keywordRules';
 
 export type AccountLiveness = 'live' | 'stale' | 'dead' | 'unknown' | 'none';
@@ -268,6 +270,56 @@ export function fleetActivity(fleet: FleetDoc | null, challenges: readonly Chall
     out.push({ at: ch.created_at, workerId: ch.worker_id, kind: 'checkpoint', detail: ch.kind });
   }
   return out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+}
+
+// ── One worker's History column ──
+// Everything the page knows happened on a worker, newest first: its activity
+// and status changes, each pool account signing on and leaving, and every
+// login it attempted, whichever account it was for.
+export type HistoryLine =
+  | { kind: 'event'; at: number; event: FleetEvent }
+  | { kind: 'signon'; at: number; stint: FbWorkerStint }
+  | { kind: 'left'; at: number; stint: FbWorkerStint }
+  | { kind: 'login'; at: number; since: number; count: number; accountNo: number | null; login: LedgerLogin };
+
+/** The account a login was for: the one its uid names, else the one on the
+ *  worker when it started. Null when neither is known. */
+export function loginAccountNo(login: LedgerLogin, stints: readonly FbWorkerStint[]): number | null {
+  const key = login.identity_key;
+  if (key?.startsWith('uid:')) return stints.find(s => s.uid === key.slice(4))?.accountNo ?? null;
+  const at = Date.parse(login.started_at);
+  return stints.find(s => at >= s.startedAt && (s.endedAt === null || at <= s.endedAt))?.accountNo ?? null;
+}
+
+/** Merged and sorted newest first. A run of logins for the same account with
+ *  the same trigger and outcome reads as one line, from `since` to `at`. On a
+ *  tie, an account signing on sorts above the one it replaced leaving. */
+export function workerHistory(
+  events: readonly FleetEvent[], stints: readonly FbWorkerStint[], logins: readonly LedgerLogin[],
+): HistoryLine[] {
+  const lines: HistoryLine[] = [
+    ...events.map(e => ({ kind: 'event' as const, at: Date.parse(e.at), event: e })),
+    ...stints.map(s => ({ kind: 'signon' as const, at: s.startedAt, stint: s })),
+    ...stints.flatMap(s => (s.endedAt === null ? [] : [{ kind: 'left' as const, at: s.endedAt, stint: s }])),
+    ...logins.map(l => {
+      const at = Date.parse(l.started_at);
+      return { kind: 'login' as const, at, since: at, count: 1, accountNo: loginAccountNo(l, stints), login: l };
+    }),
+  ];
+  lines.sort((a, b) => b.at - a.at);
+  const out: HistoryLine[] = [];
+  for (const line of lines) {
+    const last = out[out.length - 1];
+    if (line.kind === 'login' && last?.kind === 'login' && last.accountNo === line.accountNo
+        && last.login.trigger === line.login.trigger && last.login.outcome === line.login.outcome
+        && last.login.detail?.kind === line.login.detail?.kind) {
+      last.count += 1;
+      last.since = line.at;
+      continue;
+    }
+    out.push(line.kind === 'login' ? { ...line } : line);
+  }
+  return out;
 }
 
 // The pipeline a listing goes through, in the order the monitor and the
@@ -798,4 +850,103 @@ export function keysymsFor(text: string): number[] {
     out.push(cp <= 0xff ? cp : 0x01000000 + cp);
   }
   return out;
+}
+
+// ── The city queue ───────────────────────────────────────────────────────────
+
+export type RoundCell = {
+  slug: string;
+  name: string;
+  state: QueueCityState;
+  at: string | null;
+  by: string | null;
+};
+
+// The board reads left to right as the round does: done, under way, left to
+// do, not due yet, then the cities workers outside the queue keep.
+const ROUND_ORDER: Record<QueueCityState, number> = { searched: 0, leased: 1, due: 2, later: 3, held: 4 };
+
+/** One item's round: every city in board order, and the counts. */
+export function queueRound(queue: FleetQueue, item: string): { cells: RoundCell[]; counts: QueueItemCounts } {
+  const cells: RoundCell[] = queue.cities.map(c => {
+    const at = c.items[item] ?? { state: 'due' as const, at: null, by: null };
+    return { slug: c.slug, name: c.name ?? c.slug, state: at.state, at: at.at, by: at.by };
+  });
+  cells.sort((a, b) => ROUND_ORDER[a.state] - ROUND_ORDER[b.state] || a.name.localeCompare(b.name));
+  const tally = (state: QueueCityState) => cells.filter(c => c.state === state).length;
+  const counts = queue.items[item] ?? {
+    cities: cells.length,
+    queue: cells.length - tally('held'),
+    searched: tally('searched'),
+    leased: tally('leased'),
+    due: tally('due'),
+    later: tally('later'),
+    held: tally('held'),
+  };
+  return { cells, counts };
+}
+
+export type QueueSummary = {
+  workers: number;
+  // Enrolled and on a monitor that asks the queue.
+  pulling: number;
+  // Enrolled but on an older monitor, so still searching its own list.
+  waiting: number;
+  // Workers on an older monitor, enrolled or not.
+  older: number;
+  everyone: boolean;
+};
+
+/** Who takes their cities from the queue; null without a queue. */
+export function queueSummary(fleet: FleetDoc): QueueSummary | null {
+  if (!fleet.queue) return null;
+  let pulling = 0, waiting = 0, older = 0;
+  for (const w of fleet.workers) {
+    const q = w.queue;
+    if (!q) continue;
+    if (!q.capable) older += 1;
+    if (q.enrolled && q.capable) pulling += 1;
+    else if (q.enrolled) waiting += 1;
+  }
+  return { workers: fleet.workers.length, pulling, waiting, older, everyone: fleet.queue.everyone };
+}
+
+/** An enrolled worker's cities today: its own list, and what the queue handed it on top. */
+export function queueCitiesToday(w: FleetAccount): { home: FleetCity[]; fromQueue: string[] } {
+  const own = new Set(w.cities.map(c => c.slug));
+  return { home: w.cities, fromQueue: (w.queue?.handed ?? []).filter(slug => !own.has(slug)) };
+}
+
+/** The city name the queue knows for a slug, else the slug. */
+export function queueCityName(fleet: FleetDoc | null, slug: string): string {
+  return fleet?.queue?.cities.find(c => c.slug === slug)?.name ?? slug;
+}
+
+// ─── The city log ─────────────────────────────────────────────────────────────
+
+// The chip a visit's outcome wears: a finished city is the round's accent, a
+// city being searched is the board's "now", and a city that ended badly says
+// how badly.
+export const VISIT_TONE: Record<CityVisitOutcome, string> = {
+  finished: 'accent', searching: 'info', stopped: 'warn', released: 'muted', expired: 'neg', quiet: 'warn',
+};
+
+/** Minutes a visit took, at least 1 once it ran half a minute; null if unknown. */
+export function visitMinutes(v: Pick<CityVisit, 'seconds'>): number | null {
+  if (v.seconds === null) return null;
+  return v.seconds < 30 ? 0 : Math.max(1, Math.round(v.seconds / 60));
+}
+
+/** The timeline dot for one step, in the History column's colors. */
+export function cityStepDot(step: CityStep): string {
+  if (step.event === 'alerted' || step.event === 'finished') return 'ff-live';
+  if (step.event === 'stopped' || step.event === 'released') return 'ff-attention';
+  if (step.event === 'expired') return 'ff-offline';
+  return 'ff-tl-muted';
+}
+
+/** A step's number field, 0 when absent. */
+export function stepCount(step: CityStep, key: string): number {
+  const v = step.detail[key];
+  return typeof v === 'number' ? v : 0;
 }

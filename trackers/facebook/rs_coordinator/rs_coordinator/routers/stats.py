@@ -53,11 +53,25 @@ def report_reviews(
     worker_id = worker or payload.worker_id
     if not worker_id:
         raise HTTPException(status_code=422, detail="worker_id is required")
-    deps.db.add_review_stats(
-        worker_id, **payload.model_dump(exclude={"worker_id", "search_city"})
-    )
+    counts = payload.model_dump(exclude={"worker_id", "search_city", "item", "search_phrase"})
+    deps.db.add_review_stats(worker_id, **counts)
     if payload.search_city and payload.searches:
         deps.db.touch_search_city(worker_id, payload.search_city)
+        deps.db.log_city_search(
+            worker_id,
+            payload.search_city,
+            cards=payload.cards,
+            opened=payload.opened,
+            reviewed=payload.reviewed,
+            alerted=payload.alerted,
+            item=payload.item,
+        )
+        detail = {k: v for k, v in counts.items() if k != "searches"}
+        if payload.search_phrase:
+            detail["phrase"] = payload.search_phrase
+        deps.db.log_city_event(
+            worker_id, payload.item, payload.search_city, "searched", detail
+        )
     return StatusResponse()
 
 

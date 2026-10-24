@@ -95,6 +95,71 @@ The release flow itself (`dev` → `main` is a full release) is in the root
   addresses must skip itself while `X-Client-IP` is absent, as the per-IP
   login budget does.
 
+## Ops alerts → Telegram
+
+Every ops alert goes to the "Homelab Alerts" Telegram forum group
+(`-1004378564833`), one topic per source:
+
+| Topic (thread id) | Source | Sends as |
+| --- | --- | --- |
+| Railway · Deploy failed (2), · Crashed (3), · CPU/RAM (4), · Volumes (5) | Railway webhooks → relay `POST /` | `@Jinhu_homelab_bot` |
+| ERP · Uptime (15) | `deploy/railway-uptime/check.sh` → relay `POST /alert` | `@Jinhu_homelab_bot` |
+| Reddit · Workers (16), · Errors (17) | the reddit api's watch → relay `POST /alert` | `@Jinhu_homelab_bot` |
+| WeChat · Daily report (28) | memtrade's daily run on the Mac (`src/alert.ts`, `scripts/daily-report.sh`) → relay `POST /alert` | `@Jinhu_homelab_bot` |
+| Homelab · Prometheus (12) | Alertmanager on `10.10.60.5` (0.28.1+; 0.27 has no `message_thread_id`), its own `telegram_configs` | `@Jinhu_homelab_bot` |
+| Facebook · Fleet ops (13), · Releases (14) | the facebook coordinator and `scripts/deploy.sh` (`TELEGRAM_OPS_CHAT_ID`, `TELEGRAM_TOPIC_OPS`, `TELEGRAM_TOPIC_RELEASES`) | `@recycle_facebook_alerts_bot` |
+
+The buyers' lead alerts (the reddit leads group, Facebook's
+High/Medium/Low topics) are not ops alerts and stay where the buyers read
+them.
+
+The Alertmanager and facebook settings live outside this repo. Alertmanager's
+are in `/srv/homelab_monitoring/config/alertmanager/alertmanager.yml` and
+`docker/core/alerting.yml` (image tag) on `ubuntu@10.10.60.5`. That tree is
+rsynced from a clone of `JinhuW/homelab-monitoring`, so the clone has to
+carry the same edit or the next push reverts it. Facebook's are in the
+homelab VM's `configs/secrets.env`, read by the coordinator alone; change
+them and recreate only `rs-coordinator`.
+
+- **The relay** is the `railway-alerts` Worker (`deploy/railway-alerts/`,
+  `https://railway-alerts.jinhuwang1127.workers.dev`). All seven Railway
+  projects in the workspace send it one webhook each. Events: deploy failed,
+  crashed, OOM-killed, and CPU/RAM monitor and volume alerts, triggered and
+  resolved. PR environments are left out.
+- **Our own senders use `/alert`.** They post
+  `{topic, status, title, lines, link}` with the `ALERT_TOKEN` bearer, and
+  only `TOPICS` in `wrangler.toml` maps a topic key to a thread. A key or
+  event without a topic, or whose topic was deleted, goes to General.
+- **One bearer per route.** `WEBHOOK_SECRET` belongs to the Railway webhooks.
+  `ALERT_TOKEN` has three holders:
+  - `uptime-monitor`, as `ALERT_TOKEN`;
+  - the reddit `api`, as `OPS_ALERT_TOKEN`;
+  - memtrade, as `~/Projects/wehat_ai/memtrade/.ops-alert-token` (0600,
+    gitignored).
+
+  Rotating it means `wrangler secret put ALERT_TOKEN` and updating all three.
+- It runs on Cloudflare so an alert still gets out while Railway is down.
+  Deploy with `npx wrangler@4.146.0 deploy` from that directory, with
+  `CLOUDFLARE_API_TOKEN` unset.
+- **The homelab's Alertmanager sends as the same bot.** Revoking its token in
+  BotFather breaks both senders until each has the new token: run
+  `wrangler secret put TELEGRAM_BOT_TOKEN` here, and update Alertmanager's
+  config. A new topic comes from the Bot API's `createForumTopic` (the bot is
+  an admin with Manage Topics), and its id goes into `TOPICS`.
+- **Railway webhook headers can't be set from the CLI.** The CLI's OAuth token
+  gets "Not Authorized" on `notificationRuleUpdate`, and the Railway MCP tools
+  don't take headers. Rotating `WEBHOOK_SECRET` means
+  `wrangler secret put WEBHOOK_SECRET`, then a new `Authorization: Bearer …`
+  on all seven webhooks. Either paste it into each project's Settings →
+  Webhooks, or call `notificationRuleUpdate` from a logged-in dashboard tab.
+  `channelConfigs` is `[{type: "webhook", url, headers: {Authorization: "Bearer …"}}]`:
+  `headers` is a map, and the list-of-`{name, value}` form is refused as
+  "Invalid channel config".
+- Railway's `Test Webhook` events have an empty `details` and no service,
+  and Railway documents only the deployment shape. So the Worker lists
+  whatever monitor and volume fields arrive, and logs each payload to the
+  Worker's observability logs.
+
 ## Infrastructure (Terraform)
 
 - `infra/terraform/` owns Cloudflare side: R2 attachments bucket, custom

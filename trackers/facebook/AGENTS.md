@@ -29,6 +29,11 @@ Each component has its own `pyproject.toml`. Workers are the vendored
 `ai-marketplace-monitor` fork, which calls the coordinator over HTTP with Bearer
 tokens. README → *How it fits together* has the diagram.
 
+The coordinator's tables are described in the root
+[docs/DATABASE.md](../../docs/DATABASE.md). A change to `SCHEMA` or to an
+`*_EXTRA_COLUMNS` list in `rs_coordinator/db.py` updates that section in the
+same PR.
+
 ## Contract with the ERP
 
 The ERP backend (`apps/backend/src/routes/coordinator.ts`, `src/vncBridge.ts`)
@@ -43,15 +48,41 @@ Forwarded today:
   `/v1/challenges/{id}/screenshot`. `/v1/fleet` is composed here, so a new
   field in it is a contract change too: its `status_changes` (from the
   coordinator's `/v1/stats/status-changes`) feed the ERP's Recent activity.
+- `GET /v1/logins?worker_id=` (one worker's login ledger, without the device
+  fingerprints) for the account timeline on the ERP's worker page.
 - `POST /v1/workers/{id}/relogin`, `/v1/challenges/{id}/resolve`
 - `PUT /v1/accounts/{id}` (credentials write)
 - `PUT /v1/config/settings` (search settings; `rs_console/settings.py` lists
   the keys, and the README's *Settings saved from the ERP* says where they live)
 - `PUT /v1/workers/{id}/cities` (one worker's cities, into its own config)
+- `PUT /v1/workers/{id}/queue` and `PUT /v1/queue/everyone` (`{enrolled}`:
+  one worker, or every worker, into the city queue or out of it). `/v1/fleet`
+  also carries the queue: today's round as `queue`, and each worker's part in
+  it as its `queue`. Both are `null` against a coordinator that predates the
+  queue.
+- `GET /v1/city-log?worker_id=|city=&hours=` (the city log: each city a
+  worker searched, from handout to result, with its steps). A coordinator
+  that predates it answers 404, and the ERP then shows no log.
 - `GET/PUT /v1/city-tiers` (how often cities are searched: the rank rule and
   pins, kept by the coordinator; workers read them through
   `POST /v1/workers/{id}/search-plan`)
 - the VNC websocket
+
+**Not forwarded to the ERP: the rest of the city queue** (README → *City queue*).
+
+- **Workers** ask the coordinator directly with
+  `POST /v1/workers/{id}/next-city`, and report each city's start and end
+  with `POST /v1/workers/{id}/city-events`.
+- **rs_console** pushes the coordinator `PUT /v1/queue/roster` every 10
+  minutes.
+- **Operators** use `rsc queue status|enroll|unenroll|set|show|log` in
+  rs-coordinator for the queue and its settings (`/v1/queue/settings`,
+  `/v1/queue/status`).
+- **The replay** is the console's `POST /v1/queue/shadow`, run with
+  `python -m rs_console.queue_shadow`.
+
+The ERP reaches the queue only through `/v1/fleet` and the two enrollment
+routes above.
 
 Renaming or reshaping any of these is a change to both sides (root AGENTS.md →
 *Contracts*). Ship the console first and keep it backward-compatible until the

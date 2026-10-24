@@ -5,8 +5,8 @@ import { coordinatorApi, type FleetAccount, type FleetCity, type WorkerState } f
 import { ApiError } from '../../lib/api';
 import { handleFetchError, showSuccessToast, showWarnToast } from '../../lib/errorToast';
 import {
-  PREVIOUS_FATES, cookieHealth, heldByWorker, installCandidates, poolApi,
-  type PoolAccount, type PreviousFate,
+  PREVIOUS_FATES, cookieHealth, heldByWorker, installCandidates, poolApi, proxyMarkFor,
+  type FbProxyMark, type PoolAccount, type PreviousFate,
 } from '../../lib/facebookPool';
 import {
   isUnstampedBuild, reloginIsAutomatic, searchesPerDay, splitHighlights, vaultAccountIdFor,
@@ -200,7 +200,7 @@ const FATE_KEYS: Record<PreviousFate, string> = {
   retired: 'fbcCredFateRetired',
 };
 
-const POOL_REFUSALS = new Set(['fpWorkerTaken', 'fpNoPassword', 'fpAssignRetired', 'fpAssignHeld']);
+const POOL_REFUSALS = new Set(['fpWorkerTaken', 'fpNoPassword', 'fpAssignRetired', 'fpAssignHeld', 'fpProxyDead']);
 const COOKIE_PROBLEM = { missing: 'fpCookieMissing', mismatch: 'fpCookieMismatch', unknown: 'fpCookieUnknown' } as const;
 
 function EditCredentialsModal({ account: w, onClose, onSaved }: {
@@ -214,16 +214,23 @@ function EditCredentialsModal({ account: w, onClose, onSaved }: {
   const [pick, setPick] = useState<number | null>(null);
   const [fate, setFate] = useState<PreviousFate | null>(null);
   const [busy, setBusy] = useState(false);
+  const [marks, setMarks] = useState<FbProxyMark[] | null>(null);
 
   const reload = () => poolApi.snapshot().then(s => setPool(s.accounts));
+  const reloadMarks = () => poolApi.proxies().then(r => setMarks(r.proxies));
   useEffect(() => {
     reload().catch(e => { handleFetchError(e); setPool([]); });
+    reloadMarks().catch(() => setMarks([]));
   }, []);
 
   const held = pool ? heldByWorker(pool, w.worker_id) : undefined;
   const candidates = pool ? installCandidates(pool, query) : [];
   const picked = candidates.find(a => a.no === pick);
-  const ready = !!picked && (!held || fate !== null);
+  // A new account behind a DEAD proxy is the next one it burns; the backend
+  // refuses it too, this only says so before a pick.
+  const mark = proxyMarkFor(marks, w);
+  const dead = mark?.dead ? mark : undefined;
+  const ready = !!picked && (!held || fate !== null) && !dead;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -242,6 +249,7 @@ function EditCredentialsModal({ account: w, onClose, onSaved }: {
           showWarnToast(t(code));
           setPick(null);
           void reload().catch(() => undefined);
+          void reloadMarks().catch(() => undefined);
         } else handleFetchError(err);
       })
       .finally(() => setBusy(false));
@@ -264,6 +272,12 @@ function EditCredentialsModal({ account: w, onClose, onSaved }: {
           <div style={{ fontSize: 13.5 }}>
             <span className="muted">{t('fbcCredCurrent')}</span> {current}
           </div>
+          {dead && (
+            <div className="card-note ff-dead-note" style={{ padding: '10px 12px' }}>
+              <Icon name="alert" size={16} />
+              <span>{t('fbcCredProxyDead', { url: dead.url, n: dead.failed })}</span>
+            </div>
+          )}
           {!acct && (
             <div className="card-note" style={{ padding: '10px 12px' }}>
               <Icon name="info" size={16} />

@@ -18,7 +18,7 @@ import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   sortSheetRows, type ExportCategory,
 } from '../lib/categoryColumns';
-import { UNTYPED_ITEM, chipMarkingCanon, ddr5SpecKey, normSellPrice, ramFamily, ramFamilyLabel, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
+import { UNTYPED_ITEM, chipMarkingCanon, ddr5SpecKey, isInventorySortCol, normSellPrice, ramFamily, ramFamilyLabel, sortProductGroups, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
 import type { Ddr5SpecRow } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { diff, writeOrderEvent } from '../services/orderAudit';
@@ -963,6 +963,10 @@ inventory.get('/products', async (c) => {
   const warehouse = c.req.query('warehouse');
   const attrs = parseAttrFilters((k) => c.req.query(k));
   const hidePending = c.req.query('hidePending') === '1';
+  const sortCol = c.req.query('sort');
+  const sortDir = c.req.query('dir') ?? 'desc';
+  if (sortCol !== undefined && !isInventorySortCol(sortCol)) return c.json({ error: 'invalid sort' }, 400);
+  if (sortDir !== 'asc' && sortDir !== 'desc') return c.json({ error: 'invalid dir' }, 400);
 
   // The cap is all the working set select-all sees, so it has to stay above
   // the matching stock — Show sold already passes 2000 lines — and no higher
@@ -1115,7 +1119,9 @@ inventory.get('/products', async (c) => {
 
   const SPEC_KEYS = ['category','brand','capacity','generation','type','classification','rank','speed','interface','form_factor','description','item_type','rpm'] as const;
 
-  const capped = filteredOrder.slice(0, GROUP_CAP).map((key) => {
+  // A column sort ranks every matching product before the cap, so its top is
+  // the top of the stock rather than of the newest GROUP_CAP.
+  const built = (sortCol ? filteredOrder : filteredOrder.slice(0, GROUP_CAP)).map((key) => {
     // The warehouse pill scopes what the page shows, not just which products
     // it lists: a product kept for its DEN lot opens to its DEN lots alone,
     // and its row sums them alone, so the two can't disagree. The attribute
@@ -1189,13 +1195,17 @@ inventory.get('/products', async (c) => {
   });
 
   // Same order as the workbook — category, then brand, capacity, speed — so the
-  // grouped table and an export of the same stock read alike. Sorted after the
-  // cap, which stays recency-based (see the flat list above for why).
-  const products = sortSheetRows(capped, (p) => ({
+  // grouped table and an export of the same stock read alike. Unsorted, it is
+  // applied after the cap, which stays recency-based (see the flat list above
+  // for why); under a column sort it is what ties fall back to.
+  const sheetOrdered = sortSheetRows(built, (p) => ({
     category: p.category,
     specs: p as unknown as Record<string, unknown>,
     label: invLabel(p as unknown as Record<string, unknown>),
   }));
+  const products = sortCol
+    ? sortProductGroups(sheetOrdered, sortCol, sortDir).slice(0, GROUP_CAP)
+    : sheetOrdered;
 
   // Warehouse pill counts: drop-self warehouse facet — every warehouse shows
   // its count assuming the warehouse filter is cleared, with all attribute

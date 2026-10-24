@@ -762,6 +762,161 @@ The rule and the pins live in the coordinator's `city_tier_settings` and
 `GET/PUT /v1/city-tiers`, and `/v1/fleet` marks each city with its `per_day`,
 `pin` and `score`.
 
+**City queue.** An enrolled worker does not walk its own city list. Before
+each city of an item's sweep it asks the coordinator,
+`POST /v1/workers/<id>/next-city`. The ask reports the city it just finished,
+and the answer is one of:
+
+- **A city**, with its name and radius. It may be outside the worker's
+  config.
+- **Nothing more**, which ends the sweep. The reasons are:
+  - the round is done: every city has been searched for that item today;
+  - the account has spent its budget;
+  - it is outside its window;
+  - it is quarantined.
+- **`queue: false`**, for a worker that is not enrolled. It searches its own
+  list as before.
+
+A worker that gets no answer at all also searches its own list. That is the
+only fallback.
+
+**The rules**, with the first stage's defaults (the owner's calls,
+2026-10-23):
+
+- **Once a day.** Every city is searched once a day per item. A city is due
+  again 0.85 of a day after its last search.
+- **Budget.** An account searches at most 360 minutes per UTC day, counted
+  from its leases, and only within 8 h of one of its `start_at` times. A
+  restart outside that window, or after the round is done, searches nothing,
+  so an enrolled worker no longer runs an off-schedule sweep on every
+  deploy.
+- **Region and IP partner do not limit anyone.** Facebook was found not to
+  mind an account searching far from its IP. `regions=home` and
+  `partners=true` restore the old rules.
+- **Order.** Home cities first, then cities the worker searched in the last
+  7 days, then the rest. Within each group, the most overdue first.
+- **Held cities.** A city a live (HEALTHY, not dead), unquarantined worker
+  outside the queue still holds stays that worker's. Enrolling a few workers
+  therefore fills holes, such as a parked account's cities, and never
+  repeats a static sweep.
+- **Leases.** A handed-out (item, city) is leased to its worker. A HEALTHY
+  heartbeat renews the lease for another 30 minutes. A heartbeat in any other
+  state gives the city back at once, and the next ask closes the lease. A
+  lease that runs out unclosed returns its city to the queue.
+- **Quarantine.** An account whose searches over 48 h all return 0 cards, on
+  cities other accounts get cards from, gets nothing. Its searches count as
+  no one's visit.
+
+A visit is any of these:
+
+- a search report for that item, or one with no item, which an older worker
+  sent;
+- a search from before the log began, kept in `search_cities`;
+- a lease that was closed or is still live.
+
+The console pushes the roster every 10 minutes, at startup and after *Edit
+cities*. The roster is the catalog with each city's radius, the enabled
+items, and each worker's home cities and `start_at`. The coordinator keeps it
+in `queue_config`.
+
+**Who can pull.** Only a worker whose monitor is 0.13.14 or later asks the
+queue (`city_queue.capable`, from the version its heartbeat reports). One
+enrolled on an older monitor keeps searching its own list, so the queue
+treats its cities as held. Enrolling everyone (`*`) is therefore safe while
+old images still run. The per-worker route refuses (409) to enroll an older
+worker by itself.
+
+**In the ERP.** The Fleet tab opens with *Today's round*:
+
+- one mark per city per item, showing searched today, being searched, due,
+  not due yet, or on a worker's own list;
+- a sentence of counts;
+- a Cities table of who has what;
+- a manager's "Move every worker to the queue" (or back).
+
+In the worker list, an enrolled worker carries a Queue chip, its Searches
+ring counts minutes against the budget, and its fold adds the cities the
+queue handed it. The worker page has a *City queue* row and the button that
+moves one worker in or out.
+
+To run it on the VM:
+
+```bash
+docker exec rs-coordinator rsc queue status                  # today's round, per item and per worker
+docker exec rs-coordinator rsc queue enroll homelab-1 nyc-1  # or --all
+docker exec rs-coordinator rsc queue unenroll nyc-1          # back to its own list
+docker exec rs-coordinator rsc queue set budget_minutes=300 per_day=1 regions=any
+docker exec rs-coordinator rsc queue show
+```
+
+`rsc queue set` stores only the keys you give it, so a default changed in
+code still reaches every key nobody set.
+
+**City log.** Every city a worker searches is logged in `city_events`, from
+its start to its end, queue or not. The coordinator writes the steps it sees
+itself:
+
+- `handed`: the queue handed it out, and why (home, familiar or other);
+- `searched`: each search page, with the phrase and its funnel counts;
+- `alerted`: each alert sent, with the listing's title, price and score;
+- `released`: the worker gave its lease back, because it parked (in that
+  state) or restarted.
+
+A worker on 0.13.17 or later reports the rest, with
+`POST /v1/workers/<id>/city-events`:
+
+- `started`: the searches planned, and whether the city came from the queue
+  or its own list;
+- `finished`: the city's own counts and how long it took;
+- `stopped`: how far it got and why. The reasons are a wall (and its kind), a
+  lost session, a pause, the sweep cut short, or an error.
+
+The worker's own log carries the same start and end as `[City]` lines, the end
+with the brief report:
+`[City] Done Miami, FL for server_ram in 6 minutes: 3 searches, 84 cards, 9 opened, 5 reviewed, 1 alert.`
+
+An older worker sends pages only, and the log still reads it. Each visit's end
+comes from the first of these that applies:
+
+1. the worker's `finished`, `stopped` or `released`;
+2. its lease: closed by the next ask, or run out (`expired`);
+3. the worker moving on to another city;
+4. half an hour of silence.
+
+It is pruned with the rest of the queue's history after 14 days.
+
+```bash
+docker exec rs-coordinator rsc queue log                             # the last 24 h, one line a city
+docker exec rs-coordinator rsc queue log --worker nyc-1 --events     # each city's steps
+docker exec rs-coordinator rsc queue log --city miami --hours 72 --json
+```
+
+The ERP reads it through the console's `GET /v1/city-log?worker_id=|city=&hours=`.
+The worker page has a *City log* card, and a city's name in the round card's
+Cities table opens that city's log.
+
+**Shadow report.** `POST /v1/queue/shadow` replays the fleet through the same
+rules. It wakes each worker at its `start_at` times while its status history
+says it was up, and puts the result next to what the workers actually did:
+
+- searches and browser minutes a day per account;
+- redundant searches;
+- cities unsearched for over 26 h;
+- overdue city-hours.
+
+It uses the stored queue settings, with what-ifs on top:
+
+```bash
+docker exec rs-console python -m rs_console.queue_shadow             # last 3 days
+docker exec rs-console python -m rs_console.queue_shadow --days 7 --budget 240 --window 10
+docker exec rs-console python -m rs_console.queue_shadow --per-day 3,2,1 --json
+```
+
+What-if values change only that replay. The search log (`city_searches`)
+starts at 0.13.13, and a window that reaches further back is marked partial.
+The design and the stages are in
+[docs/superpowers/specs/2026-10-23-fleet-city-queue-design.md](../../docs/superpowers/specs/2026-10-23-fleet-city-queue-design.md).
+
 **It is built to be absorbed by the ERP.** The page is plain HTML/JS with no
 build step, and its markup uses the ERP's own tokens and classes (`card`,
 `kpi`, `chip`, `data-table`, `seg`), so moving it means adding a

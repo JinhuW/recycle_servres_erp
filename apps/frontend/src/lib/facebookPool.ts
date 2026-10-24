@@ -2,17 +2,22 @@
 // and the API apply (statuses, limit, draft validation) live in
 // @recycle-erp/shared. Never persist login secrets in the browser.
 import {
+  FB_LOGIN_OK_OUTCOMES,
   FB_POOL_LIMIT,
   FB_POOL_STATUSES,
   base32Bytes,
   cookieUid,
   totpKey,
   validateFbPoolDraft,
+  type FbAccountTimeline,
   type FbPoolDraft,
   type FbPoolEventKind,
   type FbPoolSecretField,
   type FbPoolStatus,
+  type FbProxyMark,
   type FbReportReason,
+  type FbTimelineEvent,
+  type FbWorkerStint,
 } from '@recycle-erp/shared';
 import { api } from './api';
 
@@ -338,7 +343,68 @@ export const poolApi = {
   remove: (no: number) => api.delete<PoolSnapshot>(`${BASE}/${no}`),
   importRows: (batch: string, rows: PoolDraft[]) =>
     api.post<PoolSnapshot>(`${BASE}/import`, { batch, rows }),
+  // Manager-only: proxies with failed accounts, and one worker's accounts.
+  proxies: () => api.get<{ proxies: FbProxyMark[] }>(`${BASE}/proxies`),
+  reviveProxy: (url: string) => api.post<{ proxies: FbProxyMark[] }>(`${BASE}/proxies/revive`, { url }),
+  workerAccounts: (worker: string) =>
+    api.get<{ stints: FbWorkerStint[] }>(`${BASE}/workers/${encodeURIComponent(worker)}/accounts`),
+  timeline: (no: number) => api.get<FbAccountTimeline>(`${BASE}/${no}/timeline`),
 };
+
+export type { FbAccountTimeline, FbProxyMark, FbTimelineEvent, FbWorkerStint };
+
+/** A timeline line: one event, or a run of identical logins. */
+export type TimelineLine = FbTimelineEvent & { count: number; since: number };
+
+/** Consecutive logins with the same worker, trigger, outcome and detail read
+ *  as one line with a count, from `since` to `at`: a worker that fails at
+ *  every restart is one line per streak, not one per restart. Expects the
+ *  events newest first, as the API sends them. */
+export function groupTimeline(events: readonly FbTimelineEvent[]): TimelineLine[] {
+  const out: TimelineLine[] = [];
+  for (const e of events) {
+    const last = out[out.length - 1];
+    if (last?.kind === 'login' && e.kind === 'login' && last.worker === e.worker
+        && last.trigger === e.trigger && last.outcome === e.outcome && last.detail === e.detail) {
+      last.count += 1;
+      last.since = e.at;
+      continue;
+    }
+    out.push({ ...e, count: 1, since: e.at });
+  }
+  return out;
+}
+
+export type LoginTone = 'ok' | 'warn' | 'fail' | 'pending';
+
+/** A checkpoint is a human's job rather than a dead end, so it is amber. */
+export function loginTone(outcome: string | null): LoginTone {
+  if (outcome === null) return 'pending';
+  if ((FB_LOGIN_OK_OUTCOMES as readonly string[]).includes(outcome)) return 'ok';
+  return outcome === 'challenge' ? 'warn' : 'fail';
+}
+
+/** Finished logins that signed in, and those that did not. */
+export function loginCounts(events: readonly FbTimelineEvent[]): { ok: number; failed: number } {
+  let ok = 0;
+  let failed = 0;
+  for (const e of events) {
+    if (e.kind !== 'login' || e.outcome === null) continue;
+    if (loginTone(e.outcome) === 'ok') ok += 1;
+    else failed += 1;
+  }
+  return { ok, failed };
+}
+
+/** The mark on the proxy a worker dials now; none when nothing failed on it
+ *  since its last revive, or it has no proxy. */
+export function proxyMarkFor(
+  marks: readonly FbProxyMark[] | null,
+  worker: { proxy?: { url: string | null } | null },
+): FbProxyMark | undefined {
+  const url = worker.proxy?.url;
+  return url ? marks?.find((m) => m.url === url) : undefined;
+}
 
 /** Where the account a worker held goes when another is sent to it. */
 export const PREVIOUS_FATES = ['available', 'problem', 'retired'] as const;

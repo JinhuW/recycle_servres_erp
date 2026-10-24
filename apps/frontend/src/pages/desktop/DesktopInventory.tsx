@@ -7,7 +7,8 @@ import { usePreference } from '../../lib/preferences';
 import { usePersisted, useScrollMemory, forgetPersisted } from '../../lib/listMemory';
 import { api } from '../../lib/api';
 import { forEachKeysetPage } from '../../lib/keysetPages';
-import { UNTYPED_ITEM } from '@recycle-erp/shared';
+import { UNTYPED_ITEM, isInventorySortCol, type InventorySortCol } from '@recycle-erp/shared';
+import type { SortState } from '../../components/SortTh';
 import { handleFetchError } from '../../lib/errorToast';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { fmtUSD, fmtUSD0, fmtDateShort, relTime, canonicalPartNumber } from '../../lib/format';
@@ -241,6 +242,18 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     if (next.has(id)) next.delete(id); else next.add(id);
     setColsList([...next]);
   };
+  // Click cycles desc → asc → the workbook order the server sends unsorted.
+  const [sort, setSort] = usePersisted<SortState>('desktop.inventory.sort', { col: '', dir: null });
+  const cycleSort = (col: string) => setSort(s =>
+    s.col !== col || s.dir === null ? { col, dir: 'desc' } : s.dir === 'desc' ? { col, dir: 'asc' } : { col: '', dir: null });
+  // A sort on a column the table no longer draws would order the rows by
+  // something nobody can see.
+  const sortColShown: Record<InventorySortCol, boolean> = {
+    product: true, partNumber: isVis('partNumber'), qty: isVis('qty'), lots: true,
+    warehouses: isVis('warehouse'), cost: isManager && isVis('unitCost'), sell: isVis('sellPrice'),
+  };
+  const activeSort: SortState = sort.dir && isInventorySortCol(sort.col) && sortColShown[sort.col]
+    ? sort : { col: '', dir: null };
   const [colsMenuOpen, setColsMenuOpen] = useState(false);
   const colsMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -296,6 +309,12 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     return () => { alive = false; clearTimeout(handle); };
   }, [filterQuery, reloadKey]);
 
+  // The server sorts, not the table: it lists at most 200 products, and a
+  // column sort has to rank every product the filters match.
+  const productsQuery = activeSort.dir
+    ? [filterQuery, `sort=${activeSort.col}&dir=${activeSort.dir}`].filter(Boolean).join('&')
+    : filterQuery;
+
   useEffect(() => {
     // Products endpoint is also our source of facet + warehouse counts.
     let alive = true;
@@ -306,7 +325,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         warehouse_counts?: Record<string, number>;
         total?: number;
         sellable_ids?: string[];
-      }>(`/api/inventory/products?${filterQuery}`)
+      }>(`/api/inventory/products?${productsQuery}`)
         .then(r => {
           if (!alive) return;
           setProducts(r.products);
@@ -322,7 +341,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         });
     }, 200);
     return () => { alive = false; clearTimeout(h); };
-  }, [filterQuery, reloadKey]);
+  }, [productsQuery, reloadKey]);
 
   useEffect(() => {
     let alive = true;
@@ -870,6 +889,8 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             <InventoryProductTable
               groups={products}
               isManager={isManager}
+              sort={activeSort}
+              onSort={cycleSort}
               cols={{
                 category:   isVis('category'),
                 partNumber: isVis('partNumber'),

@@ -18,6 +18,155 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.17] - 2026-10-23
+
+### Added
+
+- **A city log: every city a worker searches, from handout to result**
+  (RS-385).
+  - **Storage.** The coordinator keeps one `city_events` row per step:
+    - `handed` out by the queue;
+    - each `searched` page, with its phrase and funnel counts;
+    - each `alerted` listing, with its title, price and score;
+    - a lease `released` when the worker parks or restarts.
+  - **The monitor's side.** It reports `started`, then `finished` with the
+    city's own counts and minutes, or `stopped` with the reason (a wall and
+    its kind, a lost session, a pause, a sweep cut short, an error). It does
+    so through `POST /v1/workers/<id>/city-events`, and logs the same as
+    `[City]` lines with the brief report.
+  - **Reading it.** `rsc queue log` prints one line per city, and
+    `--events` adds the steps. The console serves the log as
+    `GET /v1/city-log` for the ERP's worker page and the round card.
+  - **Older monitors still show.** For them, a visit's end is read from the
+    lease, or from the worker moving on.
+
+### Changed
+
+- **The funnel and alert reports say more.** The per-page funnel report
+  carries the search phrase, and the alert report the listing's title and
+  price. Both are optional, so an older worker or coordinator still
+  validates.
+- **The vendored monitor is pinned at `e045334`**: per-city start, finish
+  and stop, with the reports above.
+
+## [0.13.16] - 2026-10-23
+
+### Added
+
+- **The city queue is visible, and run, from the ERP** (RS-379).
+  - `/v1/fleet` now carries today's round (`queue`), with every catalog
+    city's state for each item: searched today, being searched, due, not due
+    yet, or held by a worker outside the queue. It also gives each worker's
+    part in it (`queue`): enrolled, able to pull, minutes used, cities handed
+    out, open leases, quarantined.
+  - Two console routes move workers in or out: `PUT /v1/workers/<id>/queue`
+    for one, and `PUT /v1/queue/everyone` for all.
+  - The ERP draws these on its Fleet tab and worker page.
+
+### Changed
+
+- **Only a worker that asks the queue counts as in it.** One enrolled on a
+  monitor older than 0.13.14 keeps its cities held, so enrolling everyone
+  while old images run never makes the pilots repeat their sweeps. The
+  coordinator refuses (409) to enroll such a worker by itself.
+- **The roster names the enabled items**, so a round shows before anyone has
+  searched today.
+- **`rsc queue status` counts the round by state** and flags enrolled
+  workers that never ask.
+
+## [0.13.15] - 2026-10-23
+
+### Changed
+
+- **Ops alerts, deploy notices and fleet-verify reports can live in their own
+  chat and topics** (RS-375). `TELEGRAM_TOPIC_OPS` now also routes the
+  coordinator's ops alerts (worker down, session expiring, challenge), not
+  only fleet-verify's reports. `scripts/deploy.sh` posts its deploy notice to
+  `TELEGRAM_OPS_CHAT_ID` when that is set. `TELEGRAM_TOPIC_OPS` and
+  `TELEGRAM_TOPIC_RELEASES` name topics in that chat. With no ops chat set,
+  nothing moves. Production sets all three to the "Homelab Alerts" ops group,
+  so the buyers' listings group carries only listings.
+
+## [0.13.14] - 2026-10-23
+
+### Added
+
+- **Workers can take their cities from the coordinator's queue** (RS-372). An
+  enrolled worker asks `POST /v1/workers/<id>/next-city` before each city of
+  an item's sweep, and searches what it is handed, including cities outside
+  its own config. It stops when the queue has nothing more for it:
+  - every city has been searched once today for that item;
+  - its 6 hours of searching are spent;
+  - it is outside its window (8 h after a `start_at`);
+  - it is quarantined (every search at 0 cards where others get cards).
+
+  These are the owner's first-stage rules (2026-10-23). Facebook was found not
+  to mind an account searching far from its IP, so neither region nor IP
+  partner limits anyone; `regions=home` and `partners=true` restore those
+  rules.
+
+  How the hand-outs work:
+  - **Held cities.** A city that a live worker outside the queue still holds
+    stays that worker's, so enrolling a few accounts fills holes and never
+    repeats a static sweep.
+  - **Leases.** They last while the worker heartbeats HEALTHY and come back
+    the moment it parks.
+  - **Restarts.** A restart after the round, or outside the window, searches
+    nothing, so an enrolled worker no longer runs an off-schedule sweep on
+    every deploy.
+
+  Operators use `rsc queue status|enroll|unenroll|set|show`, and rs_console
+  pushes the roster (catalog with radius, home cities, start times) every 10
+  minutes and after *Edit cities*. Workers not enrolled, and every worker when
+  the coordinator cannot be reached, search their own lists exactly as before.
+  The shadow report now replays on the stored queue settings.
+
+### Changed
+
+- **Every search report names its item** (`city_searches.item`), so a city
+  searched for one item still counts as due for the other.
+- **The vendored monitor is pinned at `93e2566`**, which is `8979534` plus the
+  queue loop.
+
+## [0.13.13] - 2026-10-23
+
+### Added
+
+- **The console serves the login ledger to the ERP** (RS-366).
+  `GET /v1/logins?worker_id=<id>&limit=<1..500>` returns one worker's login
+  attempts from the coordinator: trigger, outcome, times, the account's
+  `identity_key` and the parsed detail. The `datr` fingerprint and device id
+  stay behind. The ERP's worker page draws each account's timeline from it;
+  until this console is deployed, that timeline shows the pool's events only.
+- **A shadow run of a pull-based city queue** (RS-370). Today each worker
+  searches a fixed list someone set by hand. On 2026-10-23 that put 92% of
+  the fleet's results on five accounts and left 123 of 127 cities with one
+  live account. It also hid four HEALTHY accounts whose searches return
+  nothing.
+
+  The coordinator now:
+  - logs every search with what it found (`city_searches`);
+  - has the queue's decision, `city_queue.pick`: due cities only, a daily
+    budget per account, home regions, IP partners kept apart, home cities
+    first, and blind accounts quarantined;
+  - replays the fleet's real availability through it with
+    `POST /v1/queue/shadow`.
+
+  `python -m rs_console.queue_shadow` prints the replay next to what the
+  workers did, with what-if budgets, windows and tiers. No worker changes
+  behaviour; the report is the evidence for the queue's budget, eligibility
+  and frequency before any worker follows it.
+
+### Changed
+
+- **The vendored monitor is pinned at `8979534` instead of `96d9204`.** The
+  code is the same; only the hash moved. `96d9204` lived only in a deleted
+  worktree's clone, so the release gate could not be run anywhere.
+  `8979534` rebuilds it from its parent `c20d341` and the one file it changed,
+  copied from the VM. It matches the deployed tree byte for byte, apart from
+  what the deploy filter keeps off the VM. `VENDOR.md` says how this was
+  checked.
+
 ## [0.13.12] - 2026-10-21
 
 ### Fixed

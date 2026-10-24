@@ -8,11 +8,15 @@ import {
   cookieUid,
   DAY,
   emptyPoolDraft,
+  groupTimeline,
   heldByWorker,
   installCandidates,
+  loginCounts,
+  loginTone,
   nextPoolAccount,
   parsePoolImport,
   poolTotp,
+  proxyMarkFor,
   totpKey,
   validatePoolDraft,
   type PoolAccount,
@@ -249,6 +253,48 @@ describe('live six-digit TOTP', () => {
   it('does not invent a code for an invalid or missing key', async () => {
     expect(await poolTotp('')).toBeNull();
     expect(await poolTotp('invalid8key')).toBeNull();
+  });
+});
+
+describe('account timeline', () => {
+  const login = (at: number, outcome: string | null, over: Record<string, unknown> = {}) =>
+    ({ kind: 'login' as const, at, worker: 'ne-1', trigger: 'boot', outcome, detail: null, url: null, ...over });
+  const assigned = { kind: 'pool' as const, at: 10, action: 'assigned' as const, status: 'fleet' as const, detail: 'ne-1', by: 'Alex' };
+
+  it('folds a run of identical logins into one line with its count and start', () => {
+    const lines = groupTimeline([
+      login(90, 'restored', { trigger: 'cookie-restore' }),
+      login(80, 'failed'), login(70, 'failed'), login(60, 'failed'),
+      login(50, 'failed', { worker: 'va-1' }),
+      login(40, 'failed'),
+      assigned,
+      login(5, 'failed'),
+    ]);
+    expect(lines.map((l) => [l.kind, l.at, l.since, l.count])).toEqual([
+      ['login', 90, 90, 1], ['login', 80, 60, 3], ['login', 50, 50, 1], ['login', 40, 40, 1],
+      ['pool', 10, 10, 1], ['login', 5, 5, 1],
+    ]);
+  });
+
+  it('keeps a checkpoint apart from a plain failure, and counts finished logins', () => {
+    expect(groupTimeline([login(2, 'challenge', { detail: 'checkpoint' }), login(1, 'challenge', { detail: '2fa' })])).toHaveLength(2);
+    expect(['restored', 'password_ok', 'watch_ok', 'challenge', 'locked', 'failed', 'timed_out', null].map(loginTone))
+      .toEqual(['ok', 'ok', 'ok', 'warn', 'fail', 'fail', 'fail', 'pending']);
+    expect(loginCounts([login(4, 'restored'), login(3, 'failed'), login(2, 'challenge'), login(1, null), assigned]))
+      .toEqual({ ok: 1, failed: 2 });
+  });
+});
+
+describe('proxyMarkFor', () => {
+  const dead = { url: 'http://gw:10001', failed: 5, dead: true, deadAt: 1, revivedAt: null, revivedBy: null };
+  it('finds the mark on the proxy the worker dials now', () => {
+    expect(proxyMarkFor([dead], { proxy: { url: 'http://gw:10001' } })).toBe(dead);
+    expect(proxyMarkFor([dead], { proxy: { url: 'http://gw:10002' } })).toBeUndefined();
+  });
+  it('has none for the VM\'s own IP, an older facade, or marks not loaded', () => {
+    expect(proxyMarkFor([dead], { proxy: { url: null } })).toBeUndefined();
+    expect(proxyMarkFor([dead], {})).toBeUndefined();
+    expect(proxyMarkFor(null, { proxy: { url: 'http://gw:10001' } })).toBeUndefined();
   });
 });
 

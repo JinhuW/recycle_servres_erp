@@ -18,7 +18,7 @@ export const TOOL_DEFS = [
       'newest-updated first. Use this to browse or search prices; call get_market_value when you already know ' +
       'a specific product. Each record includes: partNumber and a human label; lastPrice (the current reference ' +
       'price, the basis for buying decisions) with lastPriceAt and lastPriceSource; avgSell / low / high / target ' +
-      '(historical sell statistics); trend (recent change in avgSell); maxBuy (recommended maximum purchase price = ' +
+      '(historical sell statistics); trend (change in avgSell at the last scraper push, as a fraction: 0.05 = +5%); maxBuy (recommended maximum purchase price = ' +
       'basis x (1 - target margin), where basis is lastPrice or, if unset, avgSell); samples and source (how the ' +
       'stats were derived); internalSales (the team\'s own last-30-day average sell price and sample count); and ' +
       'recentPrices (up to 12 recent price events). All money values are in the workspace base currency (USD). ' +

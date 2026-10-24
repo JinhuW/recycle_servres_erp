@@ -816,6 +816,93 @@
   overflow-y: auto;
   scrollbar-width: thin;
 }
+.ff-proxy-mark {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.ff-proxy-mark small {
+  font-size: 11.5px;
+}
+/* The worker page: card, checkpoints and accounts on the left, and History
+   beside them as tall as they are, scrolling its own list. contain: size keeps
+   a long history from setting the row's height. */
+.ff-worker-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+  align-items: stretch;
+}
+.ff-worker-main {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.ff-worker-layout > .ff-history {
+  contain: size;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.ff-history-note {
+  padding: 8px 15px 0;
+  font-size: 11.5px;
+}
+@media (max-width: 1190px) {
+  .ff-worker-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ff-worker-layout > .ff-history {
+    contain: none;
+    max-height: 560px;
+  }
+}
+.ff-tl-muted {
+  --fp-color: var(--fg-subtle);
+}
+.ff-tl-toggle {
+  cursor: pointer;
+}
+.fp-table .ff-tl-row > td {
+  padding: 0;
+  white-space: normal;
+  background: var(--bg-soft);
+}
+.ff-timeline {
+  padding: 6px 0 4px 40px;
+}
+.ff-timeline-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 4px 15px 0;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.ff-timeline .fp-log {
+  max-height: 360px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.ff-timeline .fp-log li {
+  padding: 6px 15px;
+}
+.ff-timeline-note {
+  padding: 12px 55px;
+  font-size: 12px;
+}
+.ff-dead-note {
+  color: var(--neg);
+  background: var(--neg-soft);
+  border-radius: 8px;
+}
+.ff-dead-note .icon {
+  color: var(--neg);
+}
 .ff-summary {
   margin-left: auto;
   color: var(--fg-subtle);
@@ -940,6 +1027,149 @@
 }
 .ff-ring-idle {
   color: var(--fg-muted);
+}
+
+/* Today's round (FleetQueue.tsx): one mark per city per item, in the order
+   the round runs. The colours are the Today bar's: accent is searched, the
+   hatch is a worker's own list. */
+.ff-status-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ff-round-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px 18px 16px;
+}
+.ff-round-lede {
+  margin: 0;
+  max-width: 82ch;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ff-round-rules {
+  color: var(--fg-muted);
+}
+.ff-round-item {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  column-gap: 14px;
+  row-gap: 5px;
+  align-items: start;
+}
+.ff-round-name {
+  padding-top: 1px;
+  font-size: 12px;
+}
+.ff-round-board {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+}
+.ff-round-cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.ff-round-cells i,
+.ff-round-key i {
+  display: block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.ff-round-searched {
+  background: var(--accent);
+}
+.ff-round-leased {
+  background: var(--info);
+}
+.ff-round-due {
+  background: var(--bg-soft);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.ff-round-later {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.ff-round-held {
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--fg-subtle) 55%, transparent) 0 2px,
+    transparent 2px 4px
+  );
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.ff-round-kept {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 10px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.ff-round-kept i {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.ff-round-count {
+  grid-column: 2;
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ff-round-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0 0 0 146px;
+  list-style: none;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.ff-round-key li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ff-round-cities summary {
+  padding-left: 146px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.ff-round-cities .table {
+  margin-top: 8px;
+}
+.ff-round-at-leased {
+  color: var(--info-strong);
+}
+.ff-round-at-due {
+  font-weight: 500;
+}
+.ff-round-at-later,
+.ff-round-at-held {
+  color: var(--fg-subtle);
+}
+@media (max-width: 1190px) {
+  .ff-round-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ff-round-count {
+    grid-column: 1;
+  }
+  .ff-round-key,
+  .ff-round-cities summary {
+    padding-left: 0;
+  }
 }
 .ff-posts {
   white-space: nowrap;
@@ -2332,49 +2562,171 @@ tr.rt-off td:not(:nth-last-child(-n + 2)) {
   min-width: 0;
 }
 .wx-chart {
-  padding: 10px 12px 6px;
+  padding: 10px 12px 4px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 8px;
 }
-.wx-chart svg {
+.wx-hist-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin-bottom: 4px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.wx-hist-head > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.wx-hist-head .wx-hist-basis {
+  margin-left: auto;
+  color: var(--fg-subtle);
+}
+.wx-hist-buy {
+  --wx-side: var(--wx-bid);
+}
+.wx-hist-sell {
+  --wx-side: var(--wx-ask);
+}
+/* Keys mirror the marks: a stroke for each side's line, a bar for the range. */
+.wx-hist-key {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--wx-side);
+}
+.wx-hist-key-range {
+  display: inline-block;
+  width: 5px;
+  height: 11px;
+  border-radius: 3px;
+  background: var(--fg-subtle);
+  opacity: 0.4;
+}
+.wx-hist {
+  position: relative;
+}
+/* A percentage width adds nothing to the table's min-content, so the measured
+   SVG can't hold the board wider than it would be without the chart. */
+.wx-hist svg {
   display: block;
   width: 100%;
-  height: 96px;
   overflow: visible;
 }
-.wx-chart path {
+.wx-hist-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.wx-hist-tick,
+.wx-hist-end {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+.wx-hist-tick {
+  font-size: 10.5px;
+  fill: var(--fg-subtle);
+}
+.wx-hist-day {
+  font-size: 10.5px;
+  fill: var(--fg-subtle);
+}
+.wx-hist-day.is-current {
+  fill: var(--fg-muted);
+  font-weight: 600;
+}
+.wx-hist-bar {
+  fill: var(--wx-side);
+  opacity: 0.22;
+}
+.wx-hist-line,
+.wx-hist-bridge {
   fill: none;
-  stroke-width: 1.6;
+  stroke: var(--wx-side);
   stroke-linejoin: round;
   stroke-linecap: round;
-  vector-effect: non-scaling-stroke;
 }
-.wx-line-buy {
-  stroke: var(--wx-bid);
+.wx-hist-line {
+  stroke-width: 2;
 }
-.wx-line-sell {
-  stroke: var(--wx-ask);
+.wx-hist-bridge {
+  stroke-width: 1.5;
+  stroke-dasharray: 2 4;
+  opacity: 0.55;
 }
-.wx-pt-buy,
-.wx-pt-sell {
-  fill: var(--bg-elev);
-  stroke-width: 1.4;
-  vector-effect: non-scaling-stroke;
+.wx-hist-dot {
+  fill: var(--wx-side);
+  stroke: var(--bg-elev);
+  stroke-width: 2;
 }
-.wx-pt-buy {
-  stroke: var(--wx-bid);
+/* The halo keeps a latest price legible where the other side's line runs
+   behind it. */
+.wx-hist-end {
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--fg);
+  paint-order: stroke;
+  stroke: var(--bg-elev);
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }
-.wx-pt-sell {
-  stroke: var(--wx-ask);
+.wx-hist-cross {
+  stroke: var(--fg-subtle);
+  stroke-width: 1;
 }
-.wx-chart-axis {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 4px;
-  font-size: 10.5px;
+.wx-hist-hit {
+  fill: transparent;
+}
+.wx-hist-hit:focus {
+  outline: none;
+}
+.wx-hist-hit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.wx-hist-tip {
+  position: absolute;
+  top: 4px;
+  z-index: 5;
+  padding: 8px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.wx-hist-tip-title {
+  margin-bottom: 6px;
+  font-size: 11.5px;
   color: var(--fg-subtle);
+}
+.wx-hist-tip-rows {
+  display: grid;
+  grid-template-columns: 14px auto auto auto;
+  align-items: center;
+  gap: 4px 8px;
+}
+.wx-hist-tip-rows b {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.wx-hist-tip-rows small {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.wx-hist-tip-foot {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-muted);
 }
 .wx-chart-empty {
   margin: 0;
@@ -2506,4 +2858,38 @@ tr.wx-quiet td {
   .wx-split > .wx-aside > .wx-notes {
     grid-column: 1 / -1;
   }
+}
+
+/* The city log (FleetCityLog.tsx): one row a city, its steps folded under it. */
+.ff-citylog .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ff-citylog-hit {
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+.ff-citylog .fp-log a {
+  color: var(--accent-strong);
+  text-underline-offset: 2px;
+}
+.ff-round-city {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--fg);
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ff-round-city:hover {
+  text-decoration-color: currentColor;
+}
+.ff-round-city:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
 }

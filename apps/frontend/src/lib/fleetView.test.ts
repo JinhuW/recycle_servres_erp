@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetWorker } from './coordinator';
+import {
+  vncSocketUrl, type Challenge, type CityStep, type FleetAccount, type FleetDoc, type FleetQueue, type FleetQueueWorker, type FleetWorker,
+  type LedgerLogin,
+} from './coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
   externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic, reloginProgress,
@@ -8,6 +11,8 @@ import {
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyPort, sharedExits,
   applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
+  loginAccountNo, workerHistory, queueCitiesToday, queueCityName, queueRound, queueSummary,
+  cityStepDot, stepCount, visitMinutes, VISIT_TONE,
 } from './fleetView';
 
 describe('keysymsFor', () => {
@@ -592,3 +597,142 @@ describe('sortFleet', () => {
     expect(ids(sortFleet(ws, 'status', 'asc', new Set(['parked'])))).toEqual(['ok', 'parked', 'off']);
   });
 });
+
+describe('workerHistory', () => {
+  const stint = (accountNo: number, startedAt: number, endedAt: number | null, outcome: string | null = null) => ({
+    accountNo, uid: `6155620348100${accountNo}`, email: null, proxyUrl: null, proxyKnown: true,
+    startedAt, endedAt, outcome: outcome as never,
+  });
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const login = (at: number, over: Partial<LedgerLogin> = {}): LedgerLogin => ({
+    id: at, worker_id: 'ne-1', account_id: 'ne-1', identity_key: null, trigger: 'boot', outcome: 'failed',
+    started_at: iso(at), finished_at: null, detail: null, ...over,
+  });
+  const T = Date.parse('2026-10-23T09:00:00Z');
+  const old = stint(1, T, T + 3_600_000, 'problem');
+  const now = stint(2, T + 3_600_000, null);
+
+  it('names a login\'s account by uid first, then by who was on the worker', () => {
+    expect(loginAccountNo(login(T + 60_000), [old, now])).toBe(1);
+    expect(loginAccountNo(login(T + 7_200_000), [old, now])).toBe(2);
+    // A uid wins over the time: #1's login while #2 sat on the worker.
+    expect(loginAccountNo(login(T + 7_200_000, { identity_key: `uid:${old.uid}` }), [old, now])).toBe(1);
+    expect(loginAccountNo(login(T - 60_000), [old, now])).toBeNull();
+    expect(loginAccountNo(login(T, { identity_key: 'uid:999' }), [old, now])).toBeNull();
+  });
+
+  it('merges events, sign-ons, leaves and logins newest first, folding runs', () => {
+    const lines = workerHistory(
+      [{ at: iso(T + 30_000), workerId: 'ne-1', kind: 'attention', detail: 'SESSION_EXPIRED', status: 'attention' }],
+      [now, old],
+      [
+        login(T + 7_200_000, { trigger: 'cookie-restore', outcome: 'restored' }),
+        login(T + 120_000), login(T + 90_000), login(T + 60_000),
+        login(T + 10_000, { outcome: 'challenge', detail: { kind: 'checkpoint' } }),
+      ],
+    );
+    expect(lines.map(l => [l.kind, l.at - T, l.kind === 'login' ? [l.accountNo, l.count, l.since - T] : null])).toEqual([
+      ['login', 7_200_000, [2, 1, 7_200_000]],
+      ['signon', 3_600_000, null],
+      ['left', 3_600_000, null],
+      ['login', 120_000, [1, 3, 60_000]],
+      ['event', 30_000, null],
+      ['login', 10_000, [1, 1, 10_000]],
+      ['signon', 0, null],
+    ]);
+    expect(lines[1].kind === 'signon' && lines[1].stint.accountNo).toBe(2);
+    expect(lines[2].kind === 'left' && lines[2].stint.accountNo).toBe(1);
+  });
+});
+
+
+describe('the city queue', () => {
+  const at = (state: string, by: string | null = null) => ({ state, at: '2026-10-24T13:10:00+00:00', by }) as FleetQueue['cities'][number]['items'][string];
+  const queue: FleetQueue = {
+    at: '2026-10-24T14:00:00+00:00',
+    everyone: false,
+    settings: { enrolled: ['homelab-1'], per_day: 1, budget_minutes: 360, window_hours: 8 },
+    items: {},
+    quarantined: [],
+    roster_updated_at: null,
+    cities: [
+      { slug: 'reno', name: 'Reno, NV', region: 'mtn', home: [], held_by: null, items: { server_ram: at('later') } },
+      { slug: 'boston', name: 'Boston, MA', region: 'ne', home: ['ne-1'], held_by: 'ne-1', items: { server_ram: at('held', 'ne-1') } },
+      { slug: 'miami', name: 'Miami, FL', region: 'se', home: ['homelab-1'], held_by: null, items: { server_ram: at('searched', 'nyc-1') } },
+      { slug: 'dc', name: 'Washington, DC', region: 'se', home: [], held_by: null, items: { server_ram: at('leased', 'va-2') } },
+      { slug: 'atlanta', name: null, region: 'se', home: [], held_by: null, items: { server_ram: at('due') } },
+    ],
+  };
+  const part = (over: Partial<FleetQueueWorker>): FleetQueueWorker => ({
+    worker_id: 'w', enrolled: false, capable: true, version: '0.13.16', quarantined: false,
+    minutes_today: 0, budget_minutes: 360, handed_today: 0, handed: [], open: [], ...over,
+  });
+
+  it('lays a round out as it runs, done first and the kept cities last, and counts it', () => {
+    const { cells, counts } = queueRound(queue, 'server_ram');
+    expect(cells.map(c => c.state)).toEqual(['searched', 'leased', 'due', 'later', 'held']);
+    expect(cells.find(c => c.slug === 'atlanta')?.name).toBe('atlanta');
+    expect(counts).toEqual({ cities: 5, queue: 4, searched: 1, leased: 1, due: 1, later: 1, held: 1 });
+    // The served counts win when the coordinator sends them.
+    const served = { ...queue, items: { server_ram: { ...counts, due: 9 } } };
+    expect(queueRound(served, 'server_ram').counts.due).toBe(9);
+    // An item a city has no row for reads as due.
+    expect(queueRound(queue, 'enterprise_ssd').cells.every(c => c.state === 'due')).toBe(true);
+  });
+
+  it('counts who pulls, who waits on an older worker, and who is older', () => {
+    const fleet = {
+      queue,
+      workers: [
+        account({ worker_id: 'homelab-1', queue: part({ enrolled: true }) }),
+        account({ worker_id: 'ne-1', queue: part({ enrolled: true, capable: false, version: '0.13.12' }) }),
+        account({ worker_id: 'mw-1', queue: part({ capable: false }) }),
+        account({ worker_id: 'se-1', queue: null }),
+      ],
+    } as unknown as FleetDoc;
+    expect(queueSummary(fleet)).toEqual({ workers: 4, pulling: 1, waiting: 1, older: 2, everyone: false });
+    expect(queueSummary({ ...fleet, queue: null } as FleetDoc)).toBeNull();
+  });
+
+  it('splits an enrolled worker’s day into its own cities and what the queue added', () => {
+    const w = account({ queue: part({ enrolled: true, handed: ['dc', 'miami', 'reno'] }) });
+    expect(queueCitiesToday(w).fromQueue).toEqual(['miami', 'reno']);
+    expect(queueCitiesToday(account({})).fromQueue).toEqual([]);
+    const fleet = { queue } as unknown as FleetDoc;
+    expect(queueCityName(fleet, 'miami')).toBe('Miami, FL');
+    expect(queueCityName(fleet, 'nowhere')).toBe('nowhere');
+    expect(queueCityName(null, 'miami')).toBe('miami');
+  });
+});
+
+describe('the city log', () => {
+  const step = (event: CityStep['event'], detail: CityStep['detail'] = {}): CityStep =>
+    ({ at: '2026-10-24T13:42:00+00:00', event, detail });
+
+  it('reads a visit\'s minutes, rounding a short one down to none', () => {
+    expect(visitMinutes({ seconds: null })).toBeNull();
+    expect(visitMinutes({ seconds: 12 })).toBe(0);
+    expect(visitMinutes({ seconds: 40 })).toBe(1);
+    expect(visitMinutes({ seconds: 389 })).toBe(6);
+  });
+
+  it('colors each step and outcome by how it went', () => {
+    expect(cityStepDot(step('alerted'))).toBe('ff-live');
+    expect(cityStepDot(step('finished'))).toBe('ff-live');
+    expect(cityStepDot(step('stopped'))).toBe('ff-attention');
+    expect(cityStepDot(step('released'))).toBe('ff-attention');
+    expect(cityStepDot(step('expired'))).toBe('ff-offline');
+    expect(cityStepDot(step('searched'))).toBe('ff-tl-muted');
+    expect(VISIT_TONE.finished).toBe('accent');
+    expect(VISIT_TONE.expired).toBe('neg');
+  });
+
+  it('reads a step\'s counts, absent ones as zero', () => {
+    const page = step('searched', { cards: 31, phrase: 'dell poweredge', opened: null });
+    expect(stepCount(page, 'cards')).toBe(31);
+    expect(stepCount(page, 'opened')).toBe(0);
+    expect(stepCount(page, 'phrase')).toBe(0);
+    expect(stepCount(page, 'reviewed')).toBe(0);
+  });
+});
+

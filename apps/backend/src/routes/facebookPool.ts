@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
 import {
+  FB_FAILED_OUTCOMES,
   FB_POOL_LIMIT,
   FB_POOL_SECRET_FIELDS,
   FB_POOL_STATUSES,
+  FB_PROXY_DEAD_AFTER,
   FB_REPORT_REASONS,
   cookieUid,
   cookieValue,
@@ -11,10 +13,16 @@ import {
   validateFbPoolDraft,
   type FbPoolDraft,
   type FbPoolEventKind,
+  type FbAccountTimeline,
   type FbPoolStatus,
+  type FbProxyMark,
+  type FbStintOutcome,
+  type FbTimelineEvent,
+  type FbWorkerStint,
 } from '@recycle-erp/shared';
 import { authMiddleware } from '../auth';
 import { getDb, type SqlLike } from '../db';
+import { allLimited } from '../lib/concurrency';
 import { log } from '../lib/log';
 import { effectiveRole, requireManager } from '../lib/role';
 import { poolKey, sealOrNull, unsealOrEmpty } from '../lib/sealed';
@@ -449,6 +457,71 @@ function legacyDevice(cookie: string, cookieUidValue: string | null, uid: string
   return device_cookies.length ? { device_cookies } : {};
 }
 
+// The proxy a worker browses through now, as the fleet document names it
+// (scheme://host:port, login cut out; null on the VM's own IP). A worker the
+// document doesn't list, a facade that predates the exit lookup, or a document
+// that can't be read leaves it unknown, and an unknown proxy is not recorded.
+type WorkerProxy = { url: string | null; known: boolean };
+type FleetDocProxies = { workers?: { worker_id?: unknown; proxy?: { url?: unknown } | null }[] } | null;
+
+async function workerProxy(env: Env, worker: string): Promise<WorkerProxy> {
+  const fleet = await callFacade(env, 'GET', '/v1/fleet');
+  if (fleet.error) {
+    log.warn('fleet document unreadable; the proxy is left unknown', { module: 'facebookPool', workerId: worker, error: fleet.error });
+    return { url: null, known: false };
+  }
+  const w = (fleet.payload as FleetDocProxies)?.workers
+    ?.find((x) => typeof x.worker_id === 'string' && x.worker_id.toLowerCase() === worker.toLowerCase());
+  if (!w?.proxy) return { url: null, known: false };
+  return { url: typeof w.proxy.url === 'string' ? w.proxy.url : null, known: true };
+}
+
+// An unknown proxy is checked as the one the worker's last account went
+// through: proxies change far less often than accounts do.
+async function lastProxy(sql: SqlLike, worker: string): Promise<string | null> {
+  const [row] = await sql<{ proxy_url: string | null }[]>`
+    SELECT proxy_url FROM fb_worker_accounts
+    WHERE lower(worker_id) = lower(${worker}) AND proxy_known
+    ORDER BY started_at DESC LIMIT 1`;
+  return row?.proxy_url ?? null;
+}
+
+type MarkRow = { url: string; failed: number; dead_at: Date | null; revived_at: Date | null; revived_by_name: string | null };
+
+/**
+ * Each proxy's distinct failed accounts since its last revive. The account
+ * that takes it past FB_PROXY_DEAD_AFTER makes it DEAD, at the moment its
+ * stint ended. A proxy with no failures since its revive is left out.
+ */
+async function proxyMarks(sql: SqlLike, url?: string): Promise<FbProxyMark[]> {
+  const rows = await sql<MarkRow[]>`
+    WITH failed AS (
+      SELECT w.proxy_url AS url, w.account_no, MIN(w.ended_at) AS failed_at
+      FROM fb_worker_accounts w
+      LEFT JOIN fb_proxies p ON p.url = w.proxy_url
+      WHERE w.proxy_url IS NOT NULL
+        AND w.outcome = ANY(${FB_FAILED_OUTCOMES as string[]}::text[])
+        AND w.ended_at > COALESCE(p.revived_at, '-infinity'::timestamptz)
+        ${url === undefined ? sql`` : sql`AND w.proxy_url = ${url}`}
+      GROUP BY w.proxy_url, w.account_no
+    ), ranked AS (
+      SELECT url, failed_at, ROW_NUMBER() OVER (PARTITION BY url ORDER BY failed_at) AS n FROM failed
+    )
+    SELECT r.url, COUNT(*)::int AS failed,
+           MAX(r.failed_at) FILTER (WHERE r.n = ${FB_PROXY_DEAD_AFTER + 1}) AS dead_at,
+           MAX(p.revived_at) AS revived_at, MAX(p.revived_by_name) AS revived_by_name
+    FROM ranked r LEFT JOIN fb_proxies p ON p.url = r.url
+    GROUP BY r.url ORDER BY r.url`;
+  return rows.map((r) => ({
+    url: r.url,
+    failed: r.failed,
+    dead: r.failed > FB_PROXY_DEAD_AFTER,
+    deadAt: ms(r.dead_at),
+    revivedAt: ms(r.revived_at),
+    revivedBy: r.revived_by_name,
+  }));
+}
+
 const PREVIOUS_FATES = ['available', 'problem', 'retired'] as const;
 type PreviousFate = (typeof PREVIOUS_FATES)[number];
 const PREVIOUS_EVENT: Record<PreviousFate, FbPoolEventKind> = {
@@ -489,6 +562,15 @@ pool.post('/:no/assign', async (c) => {
     return c.json({ error: `#${held[0].no} is already on ${worker}`, code: 'fpWorkerTaken' }, 409);
   const password = unsealOrEmpty(row.password_enc, key);
   if (!password) return c.json({ error: 'This account has no password to sign in with', code: 'fpNoPassword' }, 409);
+  // Read before anything reaches the worker: an account sent through a proxy
+  // that has burned more than FB_PROXY_DEAD_AFTER is the next one it burns.
+  const proxy = await workerProxy(c.env, worker);
+  const checked = proxy.known ? proxy.url : await lastProxy(sql, worker);
+  if (checked) {
+    const [mark] = await proxyMarks(sql, checked);
+    if (mark?.dead)
+      return c.json({ error: `${worker}'s proxy ${checked} is DEAD: ${mark.failed} accounts failed on it`, code: 'fpProxyDead' }, 409);
+  }
   const cookie = unsealOrEmpty(row.cookie_enc, key);
   // Cookie-first: a cookie that is this account's own (its c_user matches) can
   // be restored as the worker's session — logged in with no password login,
@@ -553,6 +635,13 @@ pool.post('/:no/assign', async (c) => {
         updated_at = NOW()
       WHERE no = ${no}`;
     await writeEvent(tx, user, 'assigned', 'fleet', no, worker);
+    // The trigger opened the stint (or kept the one already running); the
+    // proxy is the one thing it can't know.
+    if (proxy.known) {
+      await tx`
+        UPDATE fb_worker_accounts SET proxy_url = ${proxy.url}, proxy_known = TRUE
+        WHERE account_no = ${no} AND ended_at IS NULL`;
+    }
     if (previous === null) return;
     const fate = previous as PreviousFate;
     // Whatever is on this worker now moves, not only what was read before the
@@ -571,6 +660,141 @@ pool.post('/:no/assign', async (c) => {
     }
   });
   return c.json(await snapshot(sql, key, user));
+});
+
+// ── Proxies and each worker's accounts ──────────────────────────────────────
+
+pool.get('/proxies', async (c) => c.json({ proxies: await proxyMarks(getDb(c.env)) }));
+
+// After the IP behind a proxy is swapped, or the failures turn out to be the
+// accounts' own fault: its count starts again from now.
+pool.post('/proxies/revive', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { url?: unknown } | null;
+  const url = body?.url;
+  if (typeof url !== 'string' || !url || url.length > 500) return c.json({ error: 'Not a proxy url' }, 400);
+  const sql = getDb(c.env);
+  const user = c.var.user;
+  await sql`
+    INSERT INTO fb_proxies (url, revived_at, revived_by, revived_by_name)
+    VALUES (${url}, NOW(), ${user.id}, ${user.name})
+    ON CONFLICT (url) DO UPDATE SET
+      revived_at = NOW(), revived_by = EXCLUDED.revived_by, revived_by_name = EXCLUDED.revived_by_name`;
+  log.info('fleet proxy revived', { module: 'facebookPool', proxyUrl: url, by: user.email });
+  return c.json({ proxies: await proxyMarks(sql) });
+});
+
+type StintRow = {
+  account_no: number;
+  uid: string;
+  email: string | null;
+  proxy_url: string | null;
+  proxy_known: boolean;
+  started_at: Date;
+  ended_at: Date | null;
+  outcome: FbStintOutcome | null;
+};
+
+pool.get('/workers/:worker/accounts', async (c) => {
+  const worker = c.req.param('worker');
+  if (!WORKER_ID.test(worker)) return c.json({ error: 'Not a valid worker id' }, 400);
+  const rows = await getDb(c.env)<StintRow[]>`
+    SELECT w.account_no, w.uid, a.email, w.proxy_url, w.proxy_known, w.started_at, w.ended_at, w.outcome
+    FROM fb_worker_accounts w LEFT JOIN fb_pool_accounts a ON a.no = w.account_no
+    WHERE lower(w.worker_id) = lower(${worker})
+    ORDER BY w.started_at DESC, w.id DESC`;
+  const stints: FbWorkerStint[] = rows.map((r) => ({
+    accountNo: r.account_no,
+    uid: r.uid,
+    email: r.email || null,
+    proxyUrl: r.proxy_url,
+    proxyKnown: r.proxy_known,
+    startedAt: r.started_at.getTime(),
+    endedAt: ms(r.ended_at),
+    outcome: r.outcome,
+  }));
+  return c.json({ stints });
+});
+
+// One account's life on the fleet, newest first: the pool's own ledger, and
+// every login the workers it was on attempted for it. The coordinator's ledger
+// names the account (`uid:<uid>`) only on newer rows; an older row is this
+// account's when it started on a worker while the account was on it.
+type LedgerRow = {
+  worker_id: string;
+  identity_key: string | null;
+  trigger: string | null;
+  outcome: string | null;
+  started_at: string;
+  detail: { kind?: unknown; url?: unknown } | null;
+};
+const LEDGER_ROWS = 500;
+const TIMELINE_POOL_EVENTS = 500;
+
+pool.get('/:no/timeline', async (c) => {
+  const no = parseNo(c.req.param('no'));
+  if (no === null) return c.json({ error: 'Not found' }, 404);
+  const sql = getDb(c.env);
+  const [[account], stints, ledger] = await allLimited([
+    () => sql<{ uid: string; added_at: Date; batch: string }[]>`
+      SELECT uid, added_at, batch FROM fb_pool_accounts WHERE no = ${no}`,
+    () => sql<{ worker_id: string; uid: string; started_at: Date; ended_at: Date | null }[]>`
+      SELECT worker_id, uid, started_at, ended_at FROM fb_worker_accounts WHERE account_no = ${no}`,
+    () => sql<EventRow[]>`
+      SELECT created_at, actor_name, kind, account_no, detail, status FROM fb_pool_events
+      WHERE account_no = ${no} AND kind NOT IN ('added', 'copied', 'revealed', 'edited')
+      ORDER BY created_at DESC LIMIT ${TIMELINE_POOL_EVENTS}`,
+  ] as const);
+  const uid = account?.uid ?? stints[0]?.uid;
+  if (!uid) return c.json({ error: 'Not found' }, 404);
+
+  const events: FbTimelineEvent[] = ledger.map((e) => ({
+    kind: 'pool', at: e.created_at.getTime(), action: e.kind, status: e.status, detail: e.detail, by: e.actor_name,
+  }));
+  if (account) events.push({ kind: 'added', at: account.added_at.getTime(), batch: account.batch });
+
+  // When the account first went on each worker. A holder that isn't a worker
+  // id has no ledger to read.
+  const firstOn = new Map<string, { worker: string; at: number }>();
+  for (const s of stints) {
+    if (!WORKER_ID.test(s.worker_id)) continue;
+    const k = s.worker_id.toLowerCase();
+    const at = s.started_at.getTime();
+    if (!firstOn.has(k) || at < firstOn.get(k)!.at) firstOn.set(k, { worker: s.worker_id, at });
+  }
+  const workers = [...firstOn.values()];
+  const reads = await allLimited(workers.map((w) => () =>
+    callFacade(c.env, 'GET', `/v1/logins?worker_id=${encodeURIComponent(w.worker)}&limit=${LEDGER_ROWS}`)));
+  // A full page whose oldest row is newer than the account's first stint there
+  // has cut off that stint's early logins.
+  const cut = reads.some((r, i) => {
+    const rows = (r.payload as { logins?: LedgerRow[] } | null)?.logins ?? [];
+    return !r.error && rows.length >= LEDGER_ROWS
+      && Math.min(...rows.map((row) => Date.parse(row.started_at))) > workers[i].at;
+  });
+  const failed = reads.filter((r) => r.error).length;
+  let logins: FbAccountTimeline['logins'] = 'ok';
+  if (reads.some((r) => r.status === 404)) logins = 'not_served';
+  else if (failed && failed === reads.length) logins = 'unreachable';
+  else if (failed || cut) logins = 'partial';
+  const key = `uid:${uid}`;
+  const onIt = (worker: string, at: number) => stints.some((s) =>
+    s.worker_id.toLowerCase() === worker.toLowerCase()
+    && at >= s.started_at.getTime() && (s.ended_at === null || at <= s.ended_at.getTime()));
+  for (const read of reads) {
+    if (read.error) continue;
+    for (const row of ((read.payload as { logins?: LedgerRow[] } | null)?.logins ?? [])) {
+      const at = Date.parse(row.started_at);
+      if (row.identity_key ? row.identity_key !== key : !onIt(row.worker_id, at)) continue;
+      const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+      events.push({
+        kind: 'login', at, worker: row.worker_id, trigger: row.trigger, outcome: row.outcome,
+        detail: str(row.detail?.kind), url: str(row.detail?.url),
+      });
+    }
+  }
+  events.sort((a, b) => b.at - a.at);
+  const body: FbAccountTimeline = { events, logins };
+  return c.json(body);
 });
 
 pool.post('/:no/retire', async (c) => {

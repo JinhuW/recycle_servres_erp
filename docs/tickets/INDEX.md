@@ -5,6 +5,29 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-389](./RS-389-fix-what-the-dev-to-prod-review-found-before-releasi.md) | done | bug | P1 | Fix what the dev-to-prod review found before releasing v1.332 | 1.332.2 |
+| [RS-388](./RS-388-phone-the-page-no-longer-zooms-in-when-a-po-line-fie.md) | done | bug | P2 | Phone: the page no longer zooms in when a PO line field is focused | 1.332.1 |
+| [RS-387](./RS-387-sort-the-inventory-table-by-column.md) | done | story | P2 | Sort the Inventory table by column | 1.332.0 |
+| [RS-386](./RS-386-paypal-sync-picks-up-pending-echeck-payments-payment.md) | done | bug | P2 | PayPal sync picks up pending eCheck payments; Payments stops offering Link on a transfer | 1.331.1 |
+| [RS-385](./RS-385-each-city-a-worker-searches-is-logged-from-handout-t.md) | done | story | P2 | Each city a worker searches is logged from handout to result | v1.331.0, facebook-tracker 0.13.17 |
+| [RS-384](./RS-384-the-label-printer-reconnects-by-itself-to-the-last-p.md) | done | story | P2 | The label printer reconnects by itself to the last printer | 1.330.0 |
+| [RS-383](./RS-383-the-scraper-s-price-push-fails-on-a-part-with-no-ave.md) | done | bug | P1 | The scraper's price push fails on a part with no average yet | 1.329.1 |
+| [RS-382](./RS-382-pack-mode-prints-a-label-for-each-product-not-one-fo.md) | done | story | P2 | Pack mode prints a label for each product, not one for the box | 1.329.0 |
+| [RS-381](./RS-381-the-bluetooth-label-printer-prints-nothing-jobs-go-t.md) | done | bug | P1 | The Bluetooth label printer prints nothing: jobs go to the wrong characteristic | 1.327.1 |
+| [RS-379](./RS-379-the-facebook-fleet-page-shows-today-s-city-round-and.md) | done | story | P2 | The Facebook fleet page shows today's city round and moves workers into the queue | v1.328.0, facebook-tracker 0.13.16 |
+| [RS-378](./RS-378-review-mode-prints-the-po-s-box-label-when-the-revie.md) | done | story | P2 | Review mode prints the PO's box label when the review is approved | 1.327.0 |
+| [RS-377](./RS-377-wechat-line-history-chart-reads-as-a-price-ladder-pe.md) | done | story | P2 | WeChat line history chart reads as a price ladder per report day | 1.326.0 |
+| [RS-376](./RS-376-reddit-worker-errors-alert-in-telegram.md) | done | story | P2 | Reddit worker errors alert in Telegram | 1.325.0 |
+| [RS-375](./RS-375-all-ops-alerts-land-in-homelab-alerts.md) | done | story | P2 | All ops alerts land in Homelab Alerts | 1.325.0 |
+| [RS-374](./RS-374-pack-mode-connects-a-bluetooth-label-printer-shows-i.md) | done | story | P2 | Pack mode connects a Bluetooth label printer, shows its status, and names the purchasers | 1.324.0 |
+| [RS-372](./RS-372-workers-pull-their-cities-from-the-coordinator-s-que.md) | done | story | P2 | Workers pull their cities from the coordinator's queue (first stage) | facebook-tracker 0.13.14 |
+| [RS-371](./RS-371-pack-mode-prints-a-box-label-once-the-order-is-packe.md) | done | story | P2 | Pack mode prints a box label once the order is packed | 1.323.0 |
+| [RS-370](./RS-370-shadow-run-a-pull-based-city-queue-against-the-live.md) | done | task | P2 | Shadow-run a pull-based city queue against the live Facebook fleet | facebook-tracker 0.13.13 |
+| [RS-368](./RS-368-railway-alerts-reach-telegram-one-topic-per-alert-ki.md) | done | story | P2 | Railway alerts reach Telegram, one topic per alert kind | 1.322.0 |
+| [RS-367](./RS-367-worker-page-a-full-height-history-column-that-tracks.md) | done | story | P2 | Worker page: a full-height History column that tracks everything | 1.321.0 |
+| [RS-366](./RS-366-timeline-of-each-account-s-logins-on-the-worker-page.md) | done | story | P2 | Timeline of each account's logins on the worker page | 1.320.0 |
+| [RS-365](./RS-365-mark-a-proxy-dead-after-its-5th-failed-account-and-k.md) | done | story | P2 | Mark a proxy DEAD after its 5th failed account, and keep each worker's account history | 1.319.0 |
+| [RS-364](./RS-364-describe-every-database-in-one-markdown-file.md) | done | task | P2 | Describe every database in one Markdown file | n/a — docs only, no release |
 | [RS-363](./RS-363-a-booked-po-s-payment-and-paid-by-are-manager-only.md) | done | bug | P1 | A booked PO's payment and Paid by are manager-only | 1.318.2 |
 | [RS-362](./RS-362-wechat-board-brand-and-generation-columns-and-a-refi.md) | done | story | P2 | WeChat board: brand and generation columns, and a refine filter | 1.318.0 |
 | [RS-361](./RS-361-refine-the-pack-page-layout.md) | done | bug | P2 | Refine the Pack page layout | 1.317.5 |
