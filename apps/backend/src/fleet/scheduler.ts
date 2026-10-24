@@ -33,7 +33,10 @@ export type ReconcileReport = {
 
 export async function notifyReady(sql: SqlLike, items: Iterable<string>): Promise<string[]> {
   const distinct = [...new Set(items)];
-  for (const item of distinct) await sql.notify(NOTIFY_CHANNEL, item);
+  // pg_notify through the caller's handle, not sql.notify: postgres.js binds
+  // notify to the pool, so inside a transaction it would fire on another
+  // connection before the task commits and wake a poll that then finds nothing.
+  for (const item of distinct) await sql`SELECT pg_notify(${NOTIFY_CHANNEL}, ${item})`;
   return distinct;
 }
 

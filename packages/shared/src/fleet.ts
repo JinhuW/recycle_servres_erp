@@ -312,11 +312,18 @@ export type NextTaskRequest = {
   done: { task_id: number; result: FleetTaskResult } | null;
   /** Longest the worker will hold the poll, seconds. */
   wait: number;
+  /**
+   * `false` closes `done` and leases nothing: a stopping worker reports its
+   * last task without being handed one it would leave leased. Default `true`.
+   */
+  take?: boolean;
 };
 
 export type NextTaskAnswer =
   | { task: HandedTask }
-  | { task: null; retry_after: number; reason: 'nothing_due' | 'budget' | 'quarantined' };
+  | { task: null; retry_after: number; reason: 'nothing_due' | 'budget' | 'quarantined' }
+  /** The answer to `take: false`: `done` is closed, nothing was leased, nothing was held. */
+  | { task: null; reason: 'done_only' };
 
 export type DesiredAnswer = {
   authoritative: boolean;

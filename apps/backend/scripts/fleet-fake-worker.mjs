@@ -127,11 +127,12 @@ while (received < tasksWanted && !stale) {
   lastSearchAt = new Date().toISOString();
   say('finished', { id: task.id });
 }
-// Report the last one done without asking for more.
+// Report the last one done without taking another, which would stay leased
+// to this worker until its lease ran out.
 if (done) {
-  const r = await call('POST', '/api/fleet/worker/next-task', { done, wait: 0 }, token);
+  const r = await call('POST', '/api/fleet/worker/next-task', { done, wait: 0, take: false }, token);
   staleExit('next-task', r);
-  say('reported', { id: done.task_id, next: r.body?.task ? r.body.task.id : null });
+  say('reported', { id: done.task_id, status: r.status, reason: r.body?.reason });
 }
 // Hand the session back the way a worker does on its 30-minute save.
 const s = await call('PUT', '/api/fleet/worker/session', { cookies: claim.account.cookies, token: claim.account.token }, token);
