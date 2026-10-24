@@ -321,6 +321,20 @@ describe('POST /api/fleet/worker/next-task', () => {
     expect(r.body.task).toMatchObject({ id: made.body.id, why: 'manual' });
   });
 
+  it('wakes a held poll within a second of a manager adding a city, with its slug check', async () => {
+    await seedSlot(1);
+    const { worker_token: token } = await claimed('lab-1');
+    const manager = await loginAs(ALEX);
+    const held = nextTask(token, null, 10);
+    await new Promise((r) => setTimeout(r, 300));
+    const asked = Date.now();
+    const made = await api('POST', '/api/fleet/cities', { token: manager.token, body: { slug: 'austin', name: 'Austin' } });
+    expect(made.status).toBe(201);
+    const r = await held;
+    expect(Date.now() - asked).toBeLessThan(1000);
+    expect(r.body.task).toMatchObject({ kind: 'verify-slug', city: { slug: 'austin' } });
+  });
+
   it('caps the hold at poll_hold_seconds and answers null after it', async () => {
     await seedSlot(1);
     await getTestDb()`INSERT INTO fleet_settings (key, value) VALUES ('poll_hold_seconds', '1')`;

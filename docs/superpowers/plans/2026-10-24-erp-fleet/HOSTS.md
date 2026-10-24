@@ -8,7 +8,7 @@
 ## Reachability of `10.10.60.14`
 
 - Earlier on 2026-10-24 the host did not answer on port 22 from the Mac mini
-  (`10.10.100.225`). At 21:30 UTC the same day it did: `ping` answered in 4 ms
+  (`10.10.100.225`). At about 20:40 UTC the same day it did: `ping` answered in 4 ms
   and `nc -z 10.10.60.14 22` connected, routed through the Mac's gateway
   `10.10.100.1` on `en1`. Nothing was logged in. If it goes dark again, the
   problem is on the Mac's side (a different subnet, `10.10.100.0/24` →

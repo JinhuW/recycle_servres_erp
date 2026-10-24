@@ -9,6 +9,7 @@ import {
 } from '@recycle-erp/shared';
 import type { SqlLike } from '../db';
 import { bad, exists, iso, notFound, taskToWire, type Refusal, type TaskRow } from './sql';
+import { notifyReady } from './scheduler';
 
 // ─── The catalog: cities, items, settings ─────────────────────────────────────
 // What the scheduler reads to decide what the fleet searches. Managers edit it
@@ -184,6 +185,9 @@ export async function createCity(sql: Sql, draft: CityDraft, userId: string): Pr
         await tx`
           INSERT INTO fleet_tasks (city, item, kind, due_at, priority, state, reason)
           VALUES (${draft.slug}, ${item.name}, 'verify-slug', NOW(), ${VERIFY_PRIORITY}, 'ready', 'verify')`;
+        // Delivered at commit. Without it a worker holding an empty poll sees
+        // the check only when its hold runs out, up to poll_hold_seconds later.
+        await notifyReady(tx, [item.name]);
       }
       return (await loadCity(tx, draft.slug))!;
     });

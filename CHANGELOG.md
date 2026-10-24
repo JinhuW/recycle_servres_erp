@@ -17,6 +17,29 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.340.0] - 2026-10-24
+
+What the fleet's first end-to-end run on a local backend turned up (RS-394,
+the login-free half of WS-F's integration: the fake worker and the host agent
+with a sleeping image, no Facebook login).
+
+- **A new city's slug check now reaches a waiting worker at once.** Adding a
+  city wrote its `verify-slug` task without the `fleet_tasks` notify, so a
+  worker already holding an empty `next-task` poll saw it only when the hold
+  ran out: 36 s late in the run, up to `poll_hold_seconds` (50 s) in general.
+  `createCity` now notifies in the same transaction, and the check was handed
+  3 ms after the manager's POST.
+- **`fleet-import.mjs` and `fleet-seed-slots.mjs` print the database name with
+  the host.** They have no local-only guard and print their target instead,
+  but the host alone reads `127.0.0.1` for every database on the local test
+  container, so it could not tell a private check database from the shared
+  one. `dbTarget()` now returns `database` too.
+- **CI runs the host agent's tests.** `backend-tests` now includes
+  `apps/fleet-agent/**` in its path filters and runs
+  `pnpm --filter recycle-erp-fleet-agent test` (its live-docker file skips
+  itself, so CI starts no container). Until now nothing gated the agent's
+  planner.
+
 ## [1.339.0] - 2026-10-24
 
 The ERP fleet's claim protocol (RS-394): the routes a worker container and a
