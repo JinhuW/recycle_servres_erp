@@ -118,11 +118,18 @@ class FakeFleet:
         self.events: List[Dict[str, Any]] = []
         self.heartbeats: List[Dict[str, Any]] = []
         self.sessions: List[Dict[str, Any]] = []
+        # The VNC relay: every parked dial, and the first bytes each viewer got.
+        self.relay_dials = 0
+        self.relay_viewers = 1
+        self.relay_screens: List[bytes] = []
         self._wake = threading.Condition()
         self._next_task_id = 124
         fleet = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                fleet.relay(self)
+
             def do_POST(self) -> None:
                 fleet.handle(self, "POST")
 
@@ -219,6 +226,55 @@ class FakeFleet:
             return 200, {"ok": True}
         return 404, {"error": "not_found"}
 
+    def relay(self, request: http.server.BaseHTTPRequestHandler) -> None:
+        """`GET /api/fleet/worker/vnc`: park, play a viewer once, read the screen's first bytes.
+
+        A bare-bones WebSocket server, enough to see a worker's relay dial in,
+        wait for the `viewer` frame and answer with its VNC server's greeting.
+        """
+        path = request.path.split("?", 1)[0]
+        bearer = request.headers.get("Authorization", "")
+        claims = read_token(bearer[7:]) if bearer.startswith("Bearer ") else None
+        status = 404 if path != "/api/fleet/worker/vnc" else 401 if claims is None else (
+            409 if claims["epoch"] != self.epoch else 101
+        )
+        key = request.headers.get("Sec-WebSocket-Key")
+        # By hand: http.server would say HTTP/1.0, which no WebSocket client accepts.
+        if status != 101 or not key:
+            request.wfile.write(
+                f"HTTP/1.1 {status if status != 101 else 426} No\r\n"
+                "Content-Length: 0\r\nConnection: close\r\n\r\n".encode()
+            )
+            request.close_connection = True
+            return
+        guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+        digest = hashlib.sha1((key + guid).encode()).digest()  # noqa: S324 - the protocol's hash
+        accept = base64.b64encode(digest).decode()
+        request.wfile.write(
+            "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+            f"Connection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n".encode()
+        )
+        request.wfile.flush()
+        self.relay_dials += 1
+        sock = request.connection
+        request.close_connection = True
+        try:
+            if len(self.relay_screens) >= self.relay_viewers:
+                # Parked with nobody watching, until the worker hangs up.
+                sock.settimeout(None)
+                while _read_frame(sock) is not None:
+                    pass
+                return
+            # A viewer at once: the text frame the relay sends on pairing.
+            sock.settimeout(10)
+            sock.sendall(b"\x81\x06viewer")
+            payload = _read_frame(sock)
+            if payload is not None:
+                self.relay_screens.append(payload)
+            sock.sendall(b"\x88\x02\x03\xe8")  # close 1000
+        except OSError:
+            pass
+
     def claim(self, body: Any, token: str) -> Tuple[int, Any]:
         if token != HOST_TOKEN:
             return 401, {"error": "unauthorized"}
@@ -256,18 +312,46 @@ class FakeFleet:
         return 200, {"task": None, "retry_after": 30, "reason": "nothing_due"}
 
 
+def _read_frame(sock: Any) -> bytes | None:
+    """One client frame's payload (clients mask theirs); None on a close frame."""
+
+    def exactly(n: int) -> bytes:
+        data = b""
+        while len(data) < n:
+            chunk = sock.recv(n - len(data))
+            if not chunk:
+                raise OSError("closed")
+            data += chunk
+        return data
+
+    head = exactly(2)
+    opcode, length = head[0] & 0x0F, head[1] & 0x7F
+    if length == 126:
+        length = int.from_bytes(exactly(2), "big")
+    elif length == 127:
+        length = int.from_bytes(exactly(8), "big")
+    mask = exactly(4) if head[1] & 0x80 else b"\0\0\0\0"
+    payload = bytes(b ^ mask[i % 4] for i, b in enumerate(exactly(length)))
+    return None if opcode == 0x8 else payload
+
+
 def main(argv: List[str]) -> int:
     port = int(argv[0]) if argv else 8790
     # All interfaces: a container reaches the host over its gateway address.
     fleet = FakeFleet(port=port, hold_seconds=50, bind="0.0.0.0").start()  # noqa: S104
     fleet.add_task()
     print(f"fake fleet on {fleet.url}; host token {HOST_TOKEN}; one task queued", flush=True)
+    reported = False
     try:
         while True:
             time.sleep(5)
             if fleet.done:
                 print(f"done so far: {fleet.done}", flush=True)
                 fleet.done.clear()
+            if fleet.relay_screens and not reported:
+                print(f"VNC relay: a viewer saw {fleet.relay_screens[0]!r} "
+                      f"({fleet.relay_dials} dial(s))", flush=True)
+                reported = True
     except KeyboardInterrupt:
         fleet.stop()
     return 0
