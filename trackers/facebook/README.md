@@ -434,6 +434,14 @@ and a slot-claim protocol with a lease epoch. The worker's side of it is
   the container is gone before Docker's SIGKILL. A task interrupted mid-search
   is not reported; its lease runs out on the server. A stale epoch reports
   nothing.
+- **Watching the browser.** The entrypoint keeps one WebSocket parked at the
+  ERP's VNC relay (`rs_worker/vnc_relay.py`, `GET /api/fleet/worker/vnc` with
+  the worker token), so a manager can watch with no port open on the host.
+  RFB's server speaks first, so the parked socket sends nothing until the
+  relay's `viewer` text frame; then it dials x11vnc on 5900 and bridges the
+  session, and parks a fresh socket when the viewer leaves. `python -m
+  rs_worker.tests.fake_fleet` plays one viewer and prints the greeting it
+  saw, which is how a built image's relay is checked without the ERP.
 - **Search settings** are copied from the claim's `settings.search` into
   `[marketplace.facebook]` verbatim, and an item's filters into its
   `[item.*]` table, so a value takes whatever shape the old configs give it:
