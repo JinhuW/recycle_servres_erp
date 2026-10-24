@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.18] - 2026-10-24
+
 ### Added
 
 - **The city round can be started now, instead of at the workers' start
