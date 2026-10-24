@@ -5,7 +5,10 @@
 // worker's own websockify dials *in* to GET /api/fleet/worker/vnc with its
 // worker token and parks the socket here under its worker_id. A manager's
 // noVNC page opens /api/fleet/vnc/<worker_id>/ws, the two sockets are paired,
-// and from then on bytes move. RFB is one session per connection, so a pair
+// and from then on bytes move. RFB's server speaks first, so a parked worker
+// cannot dial its VNC server until it knows someone is watching: on pairing
+// the relay sends it one text frame, `viewer`, before any viewer byte; every
+// other frame either way is binary. RFB is one session per connection, so a pair
 // ends together: when either side closes, the other is closed too, and the
 // worker dials in again with a fresh socket for the next viewer.
 //
@@ -31,6 +34,7 @@ const MAX_BUFFERED = 16 * 1024 * 1024;
 const REVALIDATE_MS = 60_000;
 const TERMINATE_GRACE_MS = 2_000;
 export const FLEET_VNC_SESSION_LAPSED = 4401;
+export const VIEWER_FRAME = 'viewer';
 
 const vlog = log.child({ module: 'fleet-vnc' });
 
@@ -118,6 +122,7 @@ function pair(viewer: WebSocket, workerId: string, worker: WebSocket): void {
     vlog.info('fleet vnc bridge closed', { workerId, ms: Date.now() - startedAt, bytesToBrowser: toBrowser, bytesToWorker: toWorker });
   });
   viewer.on('error', () => viewer.terminate());
+  if (worker.readyState === WebSocket.OPEN) worker.send(VIEWER_FRAME);
 }
 
 function recheck(viewer: WebSocket, check: () => Promise<number>, everyMs: number): void {

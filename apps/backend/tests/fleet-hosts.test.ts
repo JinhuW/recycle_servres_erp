@@ -336,11 +336,13 @@ describe('the fleet VNC relay', () => {
     await settle();
     expect(viewer.out.open).toBe(true);
     expect(fleetVncState()).toEqual({ parked: [], bridges: 1 });
+    // The worker hears about the viewer before it may speak.
+    expect(worker.out.messages).toEqual(['viewer']);
     worker.ws.send(Buffer.from('RFB 003.008\n'));
     viewer.ws.send(Buffer.from('RFB 003.008\n'));
     await settle();
     expect(viewer.out.messages).toEqual(['RFB 003.008\n']);
-    expect(worker.out.messages).toEqual(['RFB 003.008\n']);
+    expect(worker.out.messages).toEqual(['viewer', 'RFB 003.008\n']);
     viewer.ws.close(1000, 'done watching');
     const w = await worker.outcome;
     expect(w.close?.code).toBe(1000);

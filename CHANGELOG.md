@@ -17,6 +17,15 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.343.0] - 2026-10-24
+
+The fleet VNC relay now tells a parked worker when a manager starts watching.
+A VNC server speaks first, so a worker that may not send before a viewer
+arrives, and that heard nothing when one did, would wait forever while the
+viewer waited for the server's greeting. On pairing, the relay sends the
+worker one `viewer` text frame before any viewer byte; the worker dials its
+VNC server only then. This unblocks the worker image's relay client.
+
 ## [1.342.0] - 2026-10-24
 
 A fleet worker that stops can now report its last search without being handed

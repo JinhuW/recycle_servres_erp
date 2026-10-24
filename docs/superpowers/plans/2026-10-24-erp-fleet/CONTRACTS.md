@@ -33,6 +33,7 @@ what answers.
 | Agent: exit-code delays, crash limit, VNC port fallback, `RS_VNC_PORT` is the host port | §6, §10 | #877 |
 | Shared worker env (`OPENROUTER_API_KEY`, `TELEGRAM_*`, …) that the rendered config needs: supplier undecided | §2 | #879 |
 | `next-task` takes `take` (default `true`); `take: false` closes `done`, leases nothing and answers `{task: null, reason: "done_only"}` at once | §5 | #885 |
+| On pairing, the VNC relay sends the worker one text frame `viewer` before any viewer byte; the worker dials its VNC server only after it | §5 | this change |
 
 ## 1. Names
 
@@ -357,7 +358,10 @@ sit on any network, so the direction is reversed from the coordinator path:
 the worker's own `websockify` dials **in** here with its worker token and
 parks the socket under its `worker_id`. A manager's noVNC page opens
 `/api/fleet/vnc/:workerId/ws` (§7); the two sockets are paired and bytes move
-both ways. RFB is one session per connection, so a pair ends together: when
+both ways. RFB's server speaks first, so on pairing the relay sends the
+worker exactly one text frame, `viewer`, before any viewer byte; the worker
+opens its VNC server connection only after it, and every other frame in
+either direction is binary. RFB is one session per connection, so a pair ends together: when
 either side closes the other is closed too, and the worker dials in again
 with a fresh socket for the next viewer.
 
@@ -366,7 +370,7 @@ with a fresh socket for the next viewer.
   manager's session, role and `Origin` as on any manager route. A
   non-upgrade GET answers `426`.
 - A newer worker socket replaces the parked one (closed `1000`). A parked
-  worker socket that sends anything before a viewer arrives is closed `1008`.
+  worker socket that sends anything before the `viewer` frame is closed `1008`.
 - At most 100 parked worker sockets and 8 live viewer bridges; past that the
   upgrade is refused `503`. A viewer for a worker with no parked socket is
   accepted, then closed `1011` "`<worker>` has no VNC relay connected".
