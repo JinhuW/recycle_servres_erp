@@ -131,4 +131,50 @@ describe('paypal transaction search', () => {
     expect(txns).toHaveLength(1);
     expect(txns[0].settleStatus).toBe('settled');
   });
+
+  // The balance record of a bank-funded payment is stamped P when the money is
+  // drawn; PayPal settles it in a record outside the balance.
+  it('settles a pending balance record from its later history', async () => {
+    const drawn = (id: string) => rec(id, 'T1000', 'P', '-500.00', ago(0.9), ago(0.6));
+    stub((mode) => mode === 'Y'
+      ? [drawn('CLEARED1'), drawn('REFUNDED1'), drawn('DENIED1'), drawn('INFLIGHT1')]
+      : [
+        rec('CLEARED1', 'T1000', 'P', '-500.00', ago(0.9), ago(0.9)),
+        drawn('CLEARED1'),
+        rec('CLEARED1', 'T1000', 'S', '-500.00', ago(0.9), ago(0.6)),
+        // Refunded after settling: the money came back as a T1107 of its own.
+        drawn('REFUNDED1'),
+        rec('REFUNDED1', 'T1000', 'S', '-500.00', ago(0.9), ago(0.6)),
+        rec('REFUNDED1', 'T1000', 'V', '-500.00', ago(0.9), ago(0.3)),
+        drawn('DENIED1'),
+        rec('DENIED1', 'T1000', 'D', '-500.00', ago(0.9), ago(0.3)),
+        drawn('INFLIGHT1'),
+      ]);
+
+    const { by } = await fetchSince(ago(1));
+
+    expect(by.get('CLEARED1')?.settleStatus).toBe('settled');
+    expect(by.get('REFUNDED1')?.settleStatus).toBe('settled');
+    expect(by.get('DENIED1')?.settleStatus).toBe('failed');
+    expect(by.get('INFLIGHT1')?.settleStatus).toBe('pending');
+    // The stored record stays the one PayPal returned.
+    expect((by.get('CLEARED1')?.raw as { transaction_info: { transaction_status: string } })
+      .transaction_info.transaction_status).toBe('P');
+  });
+
+  it('keeps a settled payment settled when its seller is later reversed', async () => {
+    // A case against the seller: PayPal debits them and marks our payment V,
+    // whether or not any money ever comes back to us.
+    stub((mode) => mode === 'Y'
+      ? [rec('DISPUTED1', 'T1000', 'S', '-580.00', ago(0.9), ago(0.9))]
+      : [
+        rec('DISPUTED1', 'T1000', 'S', '-580.00', ago(0.9), ago(0.9)),
+        rec('DISPUTED1', 'T1000', 'V', '-580.00', ago(0.9), ago(0.2)),
+      ]);
+
+    const { txns } = await fetchSince(ago(1));
+
+    expect(txns).toHaveLength(1);
+    expect(txns[0].settleStatus).toBe('settled');
+  });
 });
