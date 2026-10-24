@@ -425,3 +425,65 @@ def test_the_fake_fleet_refuses_a_stale_epoch(fleet: FakeFleet) -> None:
     fleet.bump_epoch()
     assert post("/api/fleet/worker/heartbeat", {"state": "HEALTHY"}) == 409
     assert post("/api/fleet/worker/next-task", {"done": None, "wait": 0}) == 409
+
+
+def test_docker_stop_ends_the_worker_as_soon_as_the_monitor_has_gone(
+    fleet: FakeFleet, tmp_path: Path
+) -> None:
+    # The real process, as tini runs it: SIGTERM to the entrypoint only.
+    script = tmp_path / "monitor.py"
+    script.write_text(
+        textwrap.dedent(
+            """
+            import signal, sys, time
+            signal.signal(signal.SIGTERM, signal.default_int_handler)
+            open(sys.argv[1], "w").close()
+            try:
+                while True:
+                    time.sleep(0.05)
+            except KeyboardInterrupt:
+                time.sleep(0.3)  # hands back its result, saves its session
+                sys.exit(0)
+            """
+        )
+    )
+    ready = tmp_path / "ready"
+    env = fleet_env(fleet, RS_WORKER_MONITOR_CMD=f"{sys.executable} {script} {ready}")
+    # No Xvfb from this host's PATH; HOME keeps the rendered files in tmp.
+    env["PATH"] = str(Path(sys.executable).parent)
+    env["HOME"] = str(tmp_path)
+    env["PYTHONPATH"] = str(TRACKER_ROOT)
+    proc = subprocess.Popen([sys.executable, "-m", "rs_worker.entry"], env=env, cwd=tmp_path)
+    try:
+        wait_for_healthz(env["RS_WORKER_HEALTHZ_PORT"])
+        for _ in range(100):
+            if ready.exists():
+                break
+            time.sleep(0.05)
+        started = time.monotonic()
+        proc.terminate()
+        code = proc.wait(timeout=entry.MONITOR_STOP_GRACE_S + entry.DISPLAY_STOP_GRACE_S)
+        elapsed = time.monotonic() - started
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert code == 0
+    # Not the kill timer's 24 s: nothing is left waiting once the monitor exits.
+    assert elapsed < 5, elapsed
+    assert entry.MONITOR_STOP_GRACE_S + entry.DISPLAY_STOP_GRACE_S < 30  # docker stop -t 30
+
+
+def test_the_display_is_stopped_together_within_its_grace(tmp_path: Path) -> None:
+    stubborn = [
+        subprocess.Popen(
+            [sys.executable, "-c",
+             "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"]
+        )
+        for _ in range(2)
+    ]
+    time.sleep(0.2)
+    started = time.monotonic()
+    entry.stop_all(stubborn, 0.5)
+    # One shared grace, not one per process.
+    assert time.monotonic() - started < 2
+    assert all(p.poll() is not None for p in stubborn)
