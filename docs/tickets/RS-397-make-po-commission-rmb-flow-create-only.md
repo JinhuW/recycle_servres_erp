@@ -2,12 +2,12 @@
 id: RS-397
 title: Make PO commission RMB Flow create-only
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-10-25
 reporter: jinhu
 branch: fix/rmb-flow-create
-pr:
+pr: 898
 version: 1.345.1
 related: [RS-396]
 ---
