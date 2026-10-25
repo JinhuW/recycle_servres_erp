@@ -5,9 +5,14 @@
 # cities, [item.*] the items with their phrases and filters, and [fleet] the
 # worker token and epoch. Keys the claim supplies win over the ones here.
 #
-# "${VAR}" values are expanded by the monitor from the container's
-# environment (the host agent passes the shared secrets file), so no secret
-# is written into this file except what the claim itself delivers.
+# "${VAR}" values are expanded by the monitor from its environment, which
+# rs_worker.entry fills from the claim: the account's password fallback, and
+# the shared secrets in the claim's `env` (OpenRouter, Telegram, later the
+# coordinator's tokens), which the ERP's Cloudflare Worker adds from its
+# FLEET_WORKER_ENV secret. A reference left unset is dropped from the
+# rendered file, so an optional channel is simply off; the [ai.*] ones are
+# required, and the worker exits 70 without them. No secret is written into
+# this file.
 #
 # The prompt and the alert channel are copied from configs/master.toml; keep
 # them in step until the fleet's settings carry them.
@@ -37,8 +42,10 @@ rating = 4
 min_unit_count = 5
 ai = ["openrouter"]
 notify = ["recycle"]
-# The coordinator still takes this worker's listings, alert claims and
-# reviews; its URL comes with the claim, the token from the environment.
+# The coordinator, when the claim names one, takes this worker's alert
+# claims, funnel counts and challenges; its URL comes with the claim, the
+# token from the environment. Without one, this key and the alert report
+# below are left out of the rendered file.
 control_plane_token = "${RS_CONTROL_PLANE_TOKEN}"
 # The password fallback, used only when the claimed cookie session is not
 # valid. rs_worker.entry exports both from the claim answer.

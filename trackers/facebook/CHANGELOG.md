@@ -81,10 +81,45 @@ deployed?" harder to answer.
   which then simply expires. The fake fleet answers `take: false` as the
   ERP does.
 
+- **A fleet worker that cannot reach Facebook or its proxy stops and waits
+  for an operator.** Every container start is a login, so it neither
+  retries nor exits. In fleet mode a navigation that fails with one of
+  Chromium's connection errors (proxy, tunnel, DNS, refused, reset, timed
+  out) or a navigation timeout raises at once, where it used to be tried
+  eleven times and then end the process with a crash code the host agent
+  would answer with a new container. At the boot login or mid-task the
+  worker then parks for good: a result not yet reported goes back once with
+  `take: false`, `next-task` is never asked again, nothing logs in or
+  navigates, and the heartbeat says `DEAD` with `{reason: "connect_failed",
+  operator: true, error}` (one line, URL credentials removed), which
+  releases its task and keeps the slot's lease. `/healthz` stays 200 with
+  `"state": "parked"` so Docker keeps calling it healthy; `docker stop`
+  still ends it with 0. A stale epoch while parked, a park that cannot keep
+  waiting, or a monitor that dies with a crash code while parked exits 78,
+  which the agent leaves stopped. Proved on the built image against the
+  fake fleet with a proxy that does not resolve.
+- **Shared worker secrets arrive with the claim.** The entrypoint exports
+  every string in the claim answer's `env` object (which the ERP's
+  Cloudflare Worker adds from its `FLEET_WORKER_ENV` secret, so the secrets
+  stay out of Railway and Postgres) into the monitor's environment and logs
+  the key names once, never a value; `env` cannot set the fleet's own
+  variables or the account's password fallback. A `${VAR}` the template
+  references that is still unset is left out of the rendered config, so
+  Telegram or the coordinator's tokens are simply off when absent; without
+  `OPENROUTER_API_KEY` the worker exits 70 before the browser starts.
+- **Fleet workers run without the coordinator.** When the claim's
+  `settings.coordinator_url` is empty, no `control_plane_*` or
+  `alert_report_*` key is rendered and `RS_CONTROL_PLANE_URL` is removed
+  from the monitor's environment: no alert claims, funnel counts, challenge
+  escalation or alert reports, while every task is still searched, judged by
+  the AI and alerted on Telegram when that is configured. Overlapping cities
+  can alert a listing twice until the coordinator is wired back.
+
 ### Changed
 
 - **The vendored monitor is pinned at the fleet-mode commit** (VENDOR.md),
-  now `9a06d98`, which adds the hand-back above.
+  now `1bf74f7`, which adds the hand-back above and the park on a
+  connection failure.
 - **A result the fleet did not answer is sent again** with the next ask
   instead of being dropped; the fleet ignores a `done` it already took.
 - **`docker stop -t 30` fits.** The entrypoint now installs its SIGTERM

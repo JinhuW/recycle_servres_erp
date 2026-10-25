@@ -76,6 +76,11 @@ def monitor_script(tmp_path: Path) -> Path:
             import json, os, sys, time
             with open(sys.argv[1], "w") as f:
                 json.dump({k: v for k, v in os.environ.items() if k.startswith("RS_")}, f)
+            if os.environ.get("RS_TEST_PARK"):
+                # As the monitor parks for an operator.
+                with open(os.environ["RS_PARKED_FILE"], "w") as f:
+                    json.dump({"reason": "connect_failed", "operator": True,
+                               "error": os.environ["RS_TEST_PARK"]}, f)
             stop = os.environ.get("RS_TEST_STOP_FILE")
             if stop:
                 while not os.path.exists(stop):
@@ -151,6 +156,8 @@ def test_a_claim_renders_the_worker_and_runs_the_monitor(
 ) -> None:
     home = tmp_path / "home"
     env = fleet_env(fleet, RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path))
+    assert fleet.env is not None
+    fleet.env["RS_CONTROL_PLANE_TOKEN"] = "made-up-control-plane-token"  # pragma: allowlist secret
 
     assert entry.run_fleet([], env, home=home) == 0
 
@@ -219,6 +226,8 @@ def test_a_claim_renders_the_worker_and_runs_the_monitor(
     assert monitor_env["RS_FB_PASSWORD"] == ACCOUNT["password"]
     assert monitor_env["RS_FB_TOTP"] == ACCOUNT["totp_secret"]
     assert monitor_env["RS_WORKER_ID"] == "lab-1" and monitor_env["RS_HOST_ID"] == "lab"
+    assert monitor_env["RS_CONTROL_PLANE_TOKEN"] == "made-up-control-plane-token"
+    assert monitor_env["RS_PARKED_FILE"] == str(home / "parked.json")
 
 
 def fleet_device() -> Dict[str, Any]:
@@ -527,3 +536,160 @@ def test_the_vnc_relay_runs_beside_the_monitor_with_the_worker_token(
 
 def test_without_a_vnc_server_there_is_no_relay(fleet: FakeFleet, tmp_path: Path) -> None:
     assert entry.start_vnc_relay(fleet.url, "token", {}) is None
+
+
+# ---------------------------------------------------------------------------
+# the claim's env, and a fleet without a coordinator
+# ---------------------------------------------------------------------------
+def test_the_claims_env_reaches_the_monitor_and_its_values_are_never_logged(
+    fleet: FakeFleet, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    assert fleet.env is not None
+    fleet.env.update(
+        {
+            "RS_COORDINATOR_TOKEN": "made-up-coordinator-token",  # pragma: allowlist secret
+            # Not the claim's to set: the password comes from the account.
+            "RS_FB_PASSWORD": "made-up-hijack",  # pragma: allowlist secret
+            "RS_FLEET_URL": "http://elsewhere.invalid",
+            "TELEGRAM_TOPIC_HIGH": 5,
+            "bad name": "x",
+        }
+    )
+    home = tmp_path / "home"
+    env = fleet_env(fleet, RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path))
+    assert entry.run_fleet([], env, home=home) == 0
+
+    seen = json.loads((tmp_path / "monitor-env.json").read_text())
+    assert seen["RS_COORDINATOR_TOKEN"] == "made-up-coordinator-token"
+    assert seen["RS_FB_PASSWORD"] == ACCOUNT["password"]
+    assert seen["RS_FLEET_URL"] == fleet.url + "/"
+    config = tomllib.loads((home / "config.toml").read_text())
+    # Kept, since the claim's env resolves them.
+    assert config["ai"]["openrouter"]["api_key"] == "${OPENROUTER_API_KEY}"
+    assert config["user"]["recycle"]["telegram_token"] == "${TELEGRAM_TOKEN}"
+    assert config["user"]["recycle"]["alert_report_token"] == "${RS_COORDINATOR_TOKEN}"
+    # The integer topic was refused, so its reference is left out.
+    assert "telegram_topic_high" not in config["user"]["recycle"]
+
+    logged = capfd.readouterr().err
+    assert "claim env: OPENROUTER_API_KEY, RS_COORDINATOR_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_TOKEN" in logged
+    for value in ("made-up-openrouter-key", "made-up-bot-token", "made-up-coordinator-token",
+                  "made-up-hijack", ACCOUNT["password"]):
+        assert value not in logged
+
+
+def test_every_reference_in_the_template_resolves_from_the_claim_and_the_fleet_vars(
+    fleet: FakeFleet, tmp_path: Path
+) -> None:
+    """With the full shared env, nothing the template references is left unset."""
+    assert fleet.env is not None
+    fleet.env.update(
+        {
+            name: f"made-up-{name.lower()}"
+            for name in ("RS_CONTROL_PLANE_TOKEN", "RS_ALERT_REPORT_URL", "RS_COORDINATOR_TOKEN")
+        }
+    )
+    fleet.env.update({"TELEGRAM_TOPIC_HIGH": "11", "TELEGRAM_TOPIC_MEDIUM": "12", "TELEGRAM_TOPIC_LOW": "13"})
+    with open(entry.TEMPLATE, "rb") as f:
+        template = tomllib.load(f)
+    answer = entry.claim(fleet.url, "lab", HOST_TOKEN, "lab-1", "0.14.0", 5903, sleep=lambda s: None)
+    menv = entry.monitor_env({"PATH": "/usr/bin"}, answer, "lab", "lab-1", tmp_path)
+    config = entry.render_config(template, answer, fleet.url, "lab-1", tmp_path)
+    assert entry.resolve_env_refs(config, menv) == []
+    assert entry.required_env(template) == ["OPENROUTER_API_KEY"]
+
+
+def test_without_a_coordinator_nothing_of_it_is_rendered_and_the_monitor_accepts_it(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ai_marketplace_monitor.config import Config
+    from ai_marketplace_monitor.facebook import FacebookMarketplace
+
+    fleet.settings["coordinator_url"] = ""
+    # Only the AI key: Telegram and the coordinator's tokens are optional.
+    fleet.env = {"OPENROUTER_API_KEY": "made-up-openrouter-key"}  # pragma: allowlist secret
+    home = tmp_path / "home"
+    env = fleet_env(
+        fleet,
+        RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path),
+        # A stray fallback in the container must not bring a coordinator back.
+        RS_CONTROL_PLANE_URL="http://coordinator.invalid:8500",
+        RS_CONTROL_PLANE_TOKEN="made-up-control-plane-token",  # pragma: allowlist secret
+    )
+    assert entry.run_fleet([], env, home=home) == 0
+
+    seen = json.loads((tmp_path / "monitor-env.json").read_text())
+    assert "RS_CONTROL_PLANE_URL" not in seen
+    config = tomllib.loads((home / "config.toml").read_text())
+    facebook = config["marketplace"]["facebook"]
+    assert not {"control_plane_url", "control_plane_token"} & set(facebook)
+    user = config["user"]["recycle"]
+    assert not {"alert_report_url", "alert_report_token", "alert_report_worker_id"} & set(user)
+    assert not {k for k in user if k.startswith("telegram_")}
+    assert config["ai"]["openrouter"]["api_key"] == "${OPENROUTER_API_KEY}"
+
+    for name, value in seen.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "made-up-openrouter-key")
+    monkeypatch.delenv("RS_CONTROL_PLANE_URL", raising=False)
+    loaded = Config([home / "config.toml"])
+    assert loaded.fleet is not None
+    assert loaded.marketplace["facebook"].control_plane_url is None
+    assert loaded.user["recycle"].telegram_token is None
+    market = FacebookMarketplace("facebook", None)
+    market.configure(loaded.marketplace["facebook"])
+    assert market.control_plane is None
+
+
+def test_no_ai_key_anywhere_is_a_configuration_failure_before_the_monitor(
+    fleet: FakeFleet, tmp_path: Path
+) -> None:
+    fleet.env = None
+    env = fleet_env(fleet, RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path))
+    assert entry.run_fleet([], env, home=tmp_path / "home") == entry.EXIT_CONFIG
+    assert not (tmp_path / "monitor-env.json").exists()
+    assert not (tmp_path / "home" / "config.toml").exists()
+
+
+# ---------------------------------------------------------------------------
+# parked for an operator
+# ---------------------------------------------------------------------------
+def test_a_parked_monitor_is_up_on_healthz_and_never_restarted_by_its_exit(
+    fleet: FakeFleet, tmp_path: Path
+) -> None:
+    stop = tmp_path / "stop"
+    env = fleet_env(
+        fleet,
+        RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path),
+        RS_TEST_STOP_FILE=str(stop),
+        RS_TEST_PARK="net::ERR_PROXY_CONNECTION_FAILED",
+    )
+    port = env["RS_WORKER_HEALTHZ_PORT"]
+    result: List[int] = []
+    thread = threading.Thread(
+        target=lambda: result.append(entry.run_fleet([], env, home=tmp_path / "home"))
+    )
+    thread.start()
+    try:
+        deadline = time.monotonic() + 10
+        body = wait_for_healthz(port)
+        while body.get("state") != "parked" and time.monotonic() < deadline:
+            time.sleep(0.05)
+            body = wait_for_healthz(port)
+        # 200, so Docker calls it healthy and nothing replaces it.
+        assert body["state"] == "parked" and body["ok"] is False
+        assert body["parked"]["reason"] == "connect_failed" and body["parked"]["operator"] is True
+    finally:
+        # Gone with a crash code while parked: 78, which the agent leaves stopped.
+        stop.write_text("1")
+        thread.join(timeout=15)
+    assert result == [entry.EXIT_OPERATOR] == [78]
+
+
+def test_a_parked_monitor_stopped_by_docker_still_leaves_0(
+    fleet: FakeFleet, tmp_path: Path
+) -> None:
+    env = fleet_env(
+        fleet, RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path), RS_TEST_PARK="timeout"
+    )
+    assert entry.run_fleet([], env, home=tmp_path / "home") == 0

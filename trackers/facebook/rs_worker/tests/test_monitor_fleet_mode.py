@@ -9,6 +9,7 @@ and when the slot's epoch moves on it leaves with 75, still without one.
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, Iterator, List
@@ -255,3 +256,151 @@ def fleet_settings_search() -> Dict[str, Any]:
     from .fake_fleet import SETTINGS
 
     return dict(SETTINGS["search"])
+
+
+# ---------------------------------------------------------------------------
+# the MVP: no coordinator
+# ---------------------------------------------------------------------------
+def test_without_a_coordinator_the_worker_searches_judges_and_notifies(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shared_env: None
+) -> None:
+    import urllib.request
+
+    from ai_marketplace_monitor.ai import AIResponse
+    from ai_marketplace_monitor.facebook import FacebookMarketplace
+    from ai_marketplace_monitor.listing import Listing
+    from ai_marketplace_monitor.monitor import MarketplaceMonitor
+    from ai_marketplace_monitor.notification import NotificationStatus
+    from ai_marketplace_monitor.user import User
+
+    fleet.settings["coordinator_url"] = ""
+    # Even with a token about, nothing may find a coordinator.
+    monkeypatch.setenv("RS_CONTROL_PLANE_TOKEN", "made-up-control-plane-token")
+    monkeypatch.delenv("RS_CONTROL_PLANE_URL", raising=False)
+    config_path = rendered_config(fleet, tmp_path / "home")
+    task = fleet.add_task("houston", "server_ram")
+    seen = monitor_for(monkeypatch, config_path, asks_allowed=2)
+
+    lot = Listing(
+        marketplace="facebook", name="server_ram", id="9000000000001", title="24x 32GB DDR4 ECC",
+        image="", price="$400", post_url="https://www.facebook.com/marketplace/item/9000000000001/",
+        location="Houston, TX", seller="made-up seller", condition="used",
+        description="A box of 24 sticks of 32GB DDR4 ECC RDIMM.",
+    )
+
+    def search_city(self: FacebookMarketplace, item_config: Any, found: Any, city: str, *rest: Any) -> Any:
+        seen["searched"].append((item_config.name, city))
+        self.count_stage("cards", 1)
+        yield lot
+        return False
+
+    judged: List[str] = []
+    notified: List[str] = []
+
+    def evaluate_by_ai(self: MarketplaceMonitor, item: Listing, **_: Any) -> AIResponse:
+        judged.append(item.id)
+        return AIResponse(score=5, comment="24x 32GB DDR4 ECC RDIMM, $400", name="openrouter",
+                          unit_count=24)
+
+    def notify(self: User, listings: List[Listing], *_: Any) -> bool:
+        notified.append(listings[0].id)
+        return True
+
+    monkeypatch.setattr(FacebookMarketplace, "_search_city", search_city)
+    monkeypatch.setattr(MarketplaceMonitor, "evaluate_by_ai", evaluate_by_ai)
+    monkeypatch.setattr(MarketplaceMonitor, "prescreen_rejects", lambda self, *a: None)
+    monkeypatch.setattr(User, "notification_status", lambda self, listing: NotificationStatus.NOT_NOTIFIED)
+    monkeypatch.setattr(User, "notify", notify)
+    urls: List[str] = []
+    real_urlopen = urllib.request.urlopen
+
+    def urlopen(request: Any, *args: Any, **kwargs: Any) -> Any:
+        urls.append(request.full_url if hasattr(request, "full_url") else str(request))
+        return real_urlopen(request, *args, **kwargs)
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+
+    with pytest.raises(EndOfScriptError):
+        seen["monitor"].fleet_loop()
+
+    marketplace = seen["monitor"].active_marketplaces["facebook"]
+    assert marketplace.control_plane is None
+    assert judged == [lot.id] and notified == [lot.id]
+    assert fleet.done[0]["task_id"] == task["id"] and fleet.done[0]["result"]["alerted"] == 1
+    # Nothing but the fleet was spoken to: no listing post, no claim, no report.
+    assert urls and all(url.startswith(fleet.url + "/api/fleet/worker/") for url in urls)
+    assert seen["logins"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Facebook or the proxy out of reach: parked for an operator
+# ---------------------------------------------------------------------------
+class ParkEndedError(BaseException):
+    """Ends the parked wait; the park turns any Exception into an exit 78."""
+
+
+def test_a_worker_that_cannot_reach_facebook_parks_heartbeating_dead(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shared_env: None
+) -> None:
+    import time as real_time
+
+    from ai_marketplace_monitor.facebook import FacebookMarketplace
+
+    parked_file = tmp_path / "home" / "parked.json"
+    monkeypatch.setenv("RS_PARKED_FILE", str(parked_file))
+    config_path = rendered_config(fleet, tmp_path / "home")
+    fleet.add_task("houston")
+    nap = real_time.sleep  # before monitor_for records every sleep instead
+    seen = monitor_for(monkeypatch, config_path, asks_allowed=5)
+
+    def login(self: FacebookMarketplace) -> None:
+        # The real boot navigation, through a proxy that does not resolve.
+        seen["logins"] += 1
+        self.page = MagicMock()
+        self.page.goto.side_effect = RuntimeError(
+            "Page.goto: net::ERR_PROXY_CONNECTION_FAILED at https://www.facebook.com/marketplace/"
+        )
+        self.goto_url(self.marketplace_url)
+
+    def parked_wait(seconds: float) -> None:
+        seen["sleeps"].append(seconds)
+        nap(0.05)
+        dead = [h for h in fleet.heartbeats if h["state"] == "DEAD"]
+        if len(dead) >= 4:
+            raise ParkEndedError()
+        if len(seen["sleeps"]) > 200:
+            raise AssertionError("the heartbeats stopped")
+
+    monkeypatch.setattr(FacebookMarketplace, "login", login)
+    # The repeater, quick: it is what keeps the slot's lease while parked.
+    monkeypatch.setattr(FacebookMarketplace, "heartbeat_interval", 0.05)
+    from ai_marketplace_monitor import monitor as monitor_mod
+
+    monkeypatch.setattr(monitor_mod.time, "sleep", parked_wait)
+
+    marketplace = None
+    try:
+        with pytest.raises(ParkEndedError):
+            seen["monitor"].fleet_loop()
+    finally:
+        marketplace = seen["monitor"].active_marketplaces.get("facebook")
+        if marketplace is not None:
+            marketplace._heartbeat_stop.set()
+
+    assert seen["logins"] == 1
+    assert marketplace is not None and marketplace.page.goto.call_count == 1  # no retry
+    paths = [r[1] for r in fleet.requests]
+    assert "/api/fleet/worker/next-task" not in paths
+    assert len(fleet.tasks) == 1  # never taken
+    dead = [h for h in fleet.heartbeats if h["state"] == "DEAD"]
+    assert len(dead) >= 4
+    for heartbeat in dead:
+        assert heartbeat["detail"]["epoch"] == 7
+        assert heartbeat["detail"]["reason"] == "connect_failed"
+        assert heartbeat["detail"]["operator"] is True
+        assert "ERR_PROXY_CONNECTION_FAILED" in heartbeat["detail"]["error"]
+    # Nothing after the park said otherwise.
+    first_dead = next(i for i, h in enumerate(fleet.heartbeats) if h["state"] == "DEAD")
+    assert all(h["state"] == "DEAD" for h in fleet.heartbeats[first_dead:])
+    assert set(seen["sleeps"]) == {15}
+    assert json.loads(parked_file.read_text())["reason"] == "connect_failed"

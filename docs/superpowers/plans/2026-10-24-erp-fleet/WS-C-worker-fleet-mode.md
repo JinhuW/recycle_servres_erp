@@ -107,6 +107,35 @@ vendored monitor in worktrees; `facebook.py` `queued_cities` (~2071–2185),
       and the old suites pass (monitor: 547 passed, 1 skipped, the
       pre-existing 512 among them unchanged).
 
+## Exit, MVP round (owner decisions of 2026-10-24)
+
+- [x] The claim answer's optional `env` (added by the ERP's Cloudflare
+      Worker from `FLEET_WORKER_ENV`) reaches the monitor's environment:
+      strings only, reserved names refused, key names logged once and no
+      value (`test_entry.py`: `test_the_claims_env_reaches_the_monitor_and_its_values_are_never_logged`).
+      Every `${...}` in `config.template.toml` resolves from claim env, claim
+      fields or the fleet vars (`test_every_reference_in_the_template_resolves_…`);
+      an unset optional one is dropped and the monitor's loader accepts the
+      result; no `OPENROUTER_API_KEY` exits 70 before the monitor starts.
+- [x] No coordinator: `settings.coordinator_url` empty renders no
+      control-plane or alert-report keys and removes `RS_CONTROL_PLANE_URL`;
+      the monitor has no control plane and still searches, judges with the
+      AI and notifies (`test_without_a_coordinator_nothing_of_it_is_rendered_…`,
+      `test_without_a_coordinator_the_worker_searches_judges_and_notifies`:
+      nothing but `/api/fleet/worker/*` was called).
+- [x] Connect failure stops and waits for an operator: at boot or mid-task,
+      no retry, no `next-task`, no login, heartbeats `DEAD` with
+      `connect_failed` and the epoch keep coming, `/healthz` 200 parked,
+      SIGTERM still exits 0; 78 only when it cannot stay parked (monitor
+      `tests/test_fleet_mode.py`, `rs_worker/tests/test_monitor_fleet_mode.py::test_a_worker_that_cannot_reach_facebook_parks_heartbeating_dead`,
+      `test_entry.py` parked tests). Smoke: the image built on the Mac,
+      run against `fake_fleet` (made-up account, proxy `proxy.invalid`):
+      `net::ERR_PROXY_CONNECTION_FAILED` at boot, container up and
+      `healthy`, fake saw `claim` 1 and `heartbeat` 2 then 3 after 5 min,
+      never `next-task`; `docker stop -t 30` exit 0 in about 1 s; image removed.
+- [ ] Against the dev ERP behind Cloudflare with a retired pool account on
+      `worker@10.10.60.14`: the MVP agent's real-login run.
+
 ## Notes for the agent
 
 - The vendored clone is gitignored; work in a worktree that has it and
