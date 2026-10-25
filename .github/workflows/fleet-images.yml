@@ -1,3 +1,16 @@
+# SUPERSEDED FOR NOW (2026-10-24): the fleet images live in OCI Container
+# Registry, private repositories sin.ocir.io/ax6usa8hwbie/{aimm-recycle,
+# fleet-agent}, built on the Mac and pushed by
+# trackers/facebook/scripts/push-fleet-images.sh (see
+# docs/superpowers/plans/2026-10-24-erp-fleet/HOSTS.md -> Registry). Nothing
+# below runs a push while GHCR_PRIVATE_CONFIRMED and AIMM_MIRROR_* stay unset.
+# To push to OCIR from CI later: a repository secret holding an OCIR auth
+# token (preferably of a separate IAM user whose group may only manage repos
+# in the tenancy), docker/login-action against sin.ocir.io with user
+# ax6usa8hwbie/<that user>, the image names switched to the OCIR ones, the
+# GHCR privacy check replaced by an OCI API check that the repository is
+# is_public=false, and the worker job still needs the private monitor mirror.
+#
 # Build and push the two fleet images to GHCR:
 #
 #   ghcr.io/jinhuw/aimm-recycle:<facebook-tracker version>   the worker

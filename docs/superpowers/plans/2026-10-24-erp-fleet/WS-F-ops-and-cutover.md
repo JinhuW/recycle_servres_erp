@@ -41,6 +41,16 @@ first rule).
          workflow alone needed no root version bump.
    - [ ] First real build of each image (needs the mirror, the private
          packages, WS-C's Dockerfile, WS-D's Dockerfile).
+   - **Superseded for now by OCIR** (owner's decision 2026-10-24): images are
+     built on the Mac and pushed with
+     `trackers/facebook/scripts/push-fleet-images.sh` to
+     `sin.ocir.io/ax6usa8hwbie/{aimm-recycle,fleet-agent}` (`HOSTS.md` →
+     *Registry*). `fleet-images.yml` stays, inert, with a header note.
+   - [x] Two private OCIR repositories created; anonymous pull refused.
+   - [x] Push script dry run (`--no-push`) built both images for amd64.
+   - [ ] Auth token, keychain item `fleet-ocir`, `docker login` on the Mac
+         and on `worker-60-14` (blocked: the user holds two tokens already;
+         owner decision).
 2. **Railway env (dev first):** `FLEET_WORKER_TOKEN_KEY`, `FLEET_IMAGE_WORKER`,
    `FLEET_IMAGE_AGENT`, `FLEET_COORDINATOR_URL` on the `backend` service.
    Prod gets the same at cutover.
@@ -63,7 +73,7 @@ first rule).
          back. No command was run on the host; it answered `ping` and
          `tcp/22` from the Mac at about 20:40 UTC on 2026-10-24 after being
          unreachable earlier that day (`HOSTS.md` → *Reachability*).
-   - [ ] Owner runs the block and pastes the output into *Timings and
+   - [x] The block ran on 2026-10-24; output under *Timings and
          surprises* below.
 4. **Export files for WS-B's slot seed** (one-time, by hand on the VM, never
    committed): home cities per account from `rs_console` `/v1/fleet`, device
@@ -166,7 +176,36 @@ for the credentials path). Delete the scratch copies afterwards.
   resolves, over the `rs-fleet` network. The coordinator is published on
   `127.0.0.1:8500` only; `configs/secrets.coordinator-lan.env` does not exist
   on the VM, so the LAN publish is off.
-- Host checklist output: (owner pastes here)
+- Host checklist output (`worker-60-14`, 2026-10-24, read-only; the ERP
+  check ran against the Cloudflare hostnames and the registry check against
+  `ghcr.io` and `iad.ocir.io`): Ubuntu 24.04.5, `x86_64`, 8 CPUs, 62 GB RAM,
+  94 GB free on `/`; Docker 29.9.2, cgroup v2; user `worker` in group
+  `docker`; no containers; `inventory-dev.recycleservers.com` and
+  `api.dev.recycleservers.com` answer 200; `ghcr.io` and `iad.ocir.io` answer
+  401 (reachable, anonymous refused); `10.10.10.73:8500` closed; clock
+  synchronized, UTC. Every line is within the expected answers; capacity is
+  not the constraint for the 4-worker pilot.
+- 2026-10-24: `https://api.recycleservers.com` is **not** the ERP (Cloudflare
+  522); the plan's example `FLEET_URL` was wrong. Hosts use the Cloudflare
+  hostnames `inventory-dev.recycleservers.com` / `inventory.recycleservers.com`
+  (`HOSTS.md`).
+- 2026-10-24, registry: images moved from GHCR to OCIR (owner's decision).
+  The Always-Free Toronto tenancy (`jinhuwang112`) refuses OCIR
+  (`403 FREE_TIER_NOT_SUPPORTED`), so the repositories live in the
+  Pay-As-You-Go Singapore tenancy, `sin.ocir.io/ax6usa8hwbie/{aimm-recycle,fleet-agent}`,
+  private (an anonymous token pull answers `DENIED`). That tenancy's user
+  already holds the maximum two auth tokens (both described
+  `terraform-backend`, created seconds apart in 2025-05), so no token was
+  created and no `docker login` ran on the Mac or the host: one token must be
+  freed or a separate pull user created by the owner (`HOSTS.md` → *Registry*).
+  OCIR has no retention policy in the API; cleanup to the newest 3 tags is
+  manual.
+- 2026-10-24: `push-fleet-images.sh --no-push` built both images for
+  `linux/amd64` on the Mac (builder `multiarch`, Colima) in 5 min 49 s from
+  cold: worker `aimm-recycle:0.13.18` from a monitor clone at the pin
+  `9a06d98` (context 1.3 MB through `Dockerfile.worker.dockerignore`), agent
+  `fleet-agent:1.343.0`. It refused a dirty monitor clone, a clone off the
+  pin, and a push of an unreleased tracker tree.
 
 #### Integration run, login-free part (2026-10-24, on the Mac)
 
