@@ -14,11 +14,13 @@ import '../styles/accounting.css';
 // A PO's side of the managers' RMB book, inside the phone PO page's Cost
 // Payment or Commission fold. Recording opens the screen's own sheet
 // (`onRecord`); `version` is bumped by the screen after a save.
-export function PhAccountingSection({ orderId, kind, version, onRecord }: {
+export function PhAccountingSection({ orderId, kind, version, onRecord, recordLabel, recordHint }: {
   orderId: string;
   kind: 'purchase' | 'commission';
   version: number;
   onRecord: (preset: EntryPreset) => void;
+  recordLabel?: string;
+  recordHint?: string;
 }) {
   const { t, locale } = useT();
   const { ledger, reload } = useAccountingTarget({ orderId, kind });
@@ -31,11 +33,12 @@ export function PhAccountingSection({ orderId, kind, version, onRecord }: {
         <div className="acct-card-title">{t('acctCardTitle')}</div>
         {!target.payerBusiness && (
           <button type="button" className="ph-btn acct-ph-record" onClick={() => onRecord({ kind, target })}>
-            <Icon name="plus" size={12} /> {t(recordActionKey(kind, KIND_DEFAULT_DIRECTION[kind]))}
+            <Icon name="plus" size={12} /> {t(recordLabel ?? recordActionKey(kind, KIND_DEFAULT_DIRECTION[kind]))}
           </button>
         )}
       </div>
       {/* The Business Account's money is Payments', which the phone does not have. */}
+      {recordHint && !target.payerBusiness && <div className="acct-hint">{t(recordHint)}</div>}
       {target.payerBusiness && <div className="acct-card-empty">{t('acctPaidFromBusiness')}</div>}
       {ledger.entries.length === 0 ? (
         <div className="acct-card-empty">
