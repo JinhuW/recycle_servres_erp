@@ -3,12 +3,13 @@ import { Modal } from '../../../components/Modal';
 import { useT } from '../../../lib/i18n';
 
 export function ConfirmDialog({
-  title, message, confirmLabel, danger, zIndex, onCancel, onConfirm,
+  title, message, confirmLabel, danger, zIndex, busy = false, onCancel, onConfirm,
 }: {
   title: string;
   message: string;
   confirmLabel: string;
   danger?: boolean;
+  busy?: boolean;
   /** See Modal: raised for a confirm that can open over another dialog. */
   zIndex?: number;
   onCancel: () => void;
@@ -17,7 +18,7 @@ export function ConfirmDialog({
   const { t } = useT();
 
   return (
-    <Modal onClose={onCancel} shellStyle={{ maxWidth: 420 }} zIndex={zIndex}>
+    <Modal onClose={() => { if (!busy) onCancel(); }} shellStyle={{ maxWidth: 420 }} zIndex={zIndex}>
       <div className="modal-head">
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div style={{
@@ -35,8 +36,10 @@ export function ConfirmDialog({
         </div>
       </div>
       <div className="modal-foot">
-        <button className="btn" onClick={onCancel}>{t('cancel')}</button>
+        <button type="button" className="btn" onClick={onCancel} disabled={busy}>{t('cancel')}</button>
         <button
+          type="button"
+          disabled={busy}
           className="btn"
           style={danger
             ? { background: 'var(--neg)', color: 'white', borderColor: 'var(--neg)' }

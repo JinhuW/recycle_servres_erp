@@ -93,6 +93,10 @@ backward-compatible until the ERP release reaches `main`.
   deletion-protected because `delete_branch_on_merge` is on, and merging a
   release would otherwise delete it
   ([debug note](docs/debug-notes/2026-10-16-auto-delete-head-branch-deleted-dev.md)).
+- **Standing authorization.** The owner authorizes agents to push completed
+  work to `dev` through the feature-PR and squash-merge workflow without
+  asking for confirmation again. This authorization does not include
+  releasing `dev` to `main`.
 - **Staging.** Stage by explicit path. A checkout routinely holds untracked
   operational files that must stay out of commits, such as `rollback/` SQL
   with prod ids, `.env` files and tracker tokens.

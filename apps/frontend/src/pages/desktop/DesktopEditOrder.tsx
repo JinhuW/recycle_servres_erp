@@ -78,6 +78,7 @@ import { useReviewModeEntry } from './ReviewModeEntry';
 import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 import { PaymentMismatchBanner, usePaymentMismatchConfirm } from '../../components/PaymentMismatch';
 import { paymentGap } from '../../lib/paymentGap';
+import { useCommissionPayments } from '../../lib/useCommissionPayments';
 import { useCommissionPaidBy } from '../../lib/useCommissionPaidBy';
 
 // The uppercase heading over each block of the action card.
@@ -450,6 +451,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     () => members.filter(m => m.role === 'manager').map(m => ({ id: m.id, name: m.name })),
     [members],
   );
+  const commissionPayments = useCommissionPayments(order.id, !isPurchaser);
   const commissionPaidBy = useCommissionPaidBy({
     orderId: order.id,
     paidBy: order.commissionPaidBy ?? null,
@@ -460,6 +462,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // A commission booked in Accounting names its manager as the payer when
   // nobody was on file; the server says so, and the tab takes it as is.
   const onAccountingRecorded = (r: SavedEntry) => {
+    commissionPayments.reload();
     if (r.commissionPaidBy === undefined) return;
     commissionPaidBy.sync(r.commissionPaidBy);
     setActivityKey(k => k + 1);
@@ -1223,13 +1226,15 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moveQueued]);
   // The move to a stage — the panel's button and the stepper's next step call
-  // the same thing. Done asks for the commission screenshot first, unless one
-  // is already on file; leaving Draft is the checkpoint's job.
-  const advanceTo = (s: string) => {
+  // the same thing. A linked payment or legacy screenshot settles Done's
+  // evidence prompt; leaving Draft is the checkpoint's job.
+  const advanceTo = async (s: string) => {
     if (saving || statusDirty || stepDisabled(s)) return;
     if (s === 'Done') {
-      if (proof.commissionAtts.length > 0) moveTo('Done');
-      else setDoneDialogOpen(true);
+      try {
+        if (proof.commissionAtts.length > 0 || await commissionPayments.check()) moveTo('Done');
+        else setDoneDialogOpen(true);
+      } catch (e) { handleFetchError(e); }
       return;
     }
     if (s === 'In Transit' && savedStatus === 'Draft') {
@@ -1811,6 +1816,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           ),
           commission: (
             <CommissionTab
+              orderId={order.id}
+              commissionPayments={commissionPayments}
+              onPaymentLinked={() => setActivityKey(k => k + 1)}
               ownerId={ownerId} onOwner={pickOwner} ownerOptions={ownerOptions}
               commissionPct={commissionPct} onCommissionPct={setCommissionPct}
               isPurchaser={isPurchaser} orderLocked={orderLocked} isArchived={isArchived}
@@ -1832,9 +1840,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               canEditCommissionPayment={!isPurchaser}
               ledger={user?.role === 'manager' && (
                 <>
-                  <PoPaymentsLedger scope={{ orderId: order.id, kind: 'commission' }} locale={locale} />
                   {isManager && (
-                    <AccountingCard scope={{ orderId: order.id, kind: 'commission' }} onRecorded={onAccountingRecorded} />
+                    <AccountingCard key={commissionPayments.version} scope={{ orderId: order.id, kind: 'commission' }} onRecorded={onAccountingRecorded} />
                   )}
                 </>
               )}

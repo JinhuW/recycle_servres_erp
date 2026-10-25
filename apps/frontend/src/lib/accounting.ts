@@ -165,7 +165,7 @@ export const acctEntry = (id: string) =>
   api.get<{ entry: AcctEntryDetail }>(`/api/accounting/entries/${enc(id)}`);
 export const acctCreate = (body: AcctEntryBody) =>
   api.post<{ id: string; commissionPaidBy?: PaidBy }>('/api/accounting/entries', body).then(reviewChanged);
-export const acctPatch = (id: string, body: Partial<AcctEntryBody>) =>
+export const acctPatch = (id: string, body: Partial<AcctEntryBody> & { onlyUnlinked?: boolean; expectedVersion?: string }) =>
   api.patch<{ ok: true; commissionPaidBy?: PaidBy }>(`/api/accounting/entries/${enc(id)}`, body).then(reviewChanged);
 export const acctVoid = (id: string, reason: string) =>
   api.post<{ ok: true }>(`/api/accounting/entries/${enc(id)}/void`, { reason }).then(reviewChanged);
@@ -178,6 +178,12 @@ export const acctUploadAttachment = (id: string, file: File) => {
 };
 export const acctDeleteAttachment = (id: string, attachmentId: string) =>
   api.delete<{ ok: true }>(`/api/accounting/entries/${enc(id)}/attachments/${enc(attachmentId)}`);
+export type ReceiptAmount = { amount: string; currency: 'CNY' | 'USD' | null };
+export const acctReadReceipt = (file: File) => {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  return api.upload<{ receipt: ReceiptAmount | null }>('/api/accounting/scan-receipt', form);
+};
 // `counts: false` for a list whose tab counts the page already has.
 export const acctReviewQueue = (tab: AccountingReviewTab, managerId?: string, opts: { counts?: boolean } = {}) =>
   api.get<AcctReviewQueue>('/api/accounting/review?' + new URLSearchParams({

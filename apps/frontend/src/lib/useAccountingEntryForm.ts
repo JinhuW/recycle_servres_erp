@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { KIND_TARGET, type AccountingDirection, type AccountingKind } from '@recycle-erp/shared';
 import { useAuth } from './auth';
+import { MAX_UPLOAD_BYTES } from './api';
 import { handleFetchError, showWarnToast } from './errorToast';
 import { useT } from './i18n';
 import { fetchRateToUsd } from './fxRate';
@@ -8,11 +9,11 @@ import { useDebouncedValue } from './useDebouncedValue';
 import { useMembers } from './useManagers';
 import { payerChoices } from './poFacets';
 import {
-  acctCreate, acctPatch, acctTargets, acctUploadAttachment, localToday,
-  type AcctEntryDetail, type AcctTarget,
+  acctCreate, acctPatch, acctTargets, acctUploadAttachment, acctReadReceipt, localToday,
+  type AcctEntryDetail, type AcctTarget, type ReceiptAmount,
 } from './accounting';
 import {
-  applyKind, initialForm, payerLock, pickTarget, previewCny, toRequestBody,
+  applyKind, convertAmount, initialForm, orderAmount, payerLock, pickTarget, previewCny, toRequestBody,
   type EntryForm, type EntryPreset, type FormError, type FormTarget,
 } from './accountingForm';
 import type { PaidBy } from './useCommissionPaidBy';
@@ -42,6 +43,13 @@ export function useAccountingEntryForm(opts: {
   // Screenshots picked before the entry exists: they go up once it does.
   // An edit has none — the entry's own page manages its screenshots live.
   const [files, setFiles] = useState<File[]>([]);
+  const liveFiles = useRef(new Set<File>());
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const [readings, setReadings] = useState<{ file: File; receipt: ReceiptAmount }[]>([]);
+  const [reading, setReading] = useState(0);
+  const [scanNotice, setScanNotice] = useState<string | null>(null);
+  const receiptFile = useRef<File | null>(null);
 
   const targetType = KIND_TARGET[form.kind];
   const searching = !!targetType && !form.targetLocked;
@@ -56,11 +64,18 @@ export function useAccountingEntryForm(opts: {
 
   // The rate is only a hint until the entry is saved, so a miss stays quiet.
   useEffect(() => {
-    if (form.currency !== 'USD' || rate !== null) return;
+    if (rate !== null) return;
     let alive = true;
     fetchRateToUsd('CNY').then(i => { if (alive) setRate(i.oneUsdInQuote); }).catch(() => {});
     return () => { alive = false; };
-  }, [form.currency, rate]);
+  }, [rate]);
+
+  const suggested = orderAmount(form, rate);
+  useEffect(() => {
+    if (entry || form.amountSource !== 'order') return;
+    const amount = suggested != null && suggested > 0 ? suggested.toFixed(2) : '';
+    setForm(f => f.amountSource !== 'order' || f.amount === amount ? f : { ...f, amount });
+  }, [entry, suggested, form.amountSource]);
 
   // The people Paid by may name, the PO pages' own list: the active
   // managers; on a cost, the PO's purchaser, who may have paid it out of
@@ -83,7 +98,7 @@ export function useAccountingEntryForm(opts: {
   const orphan = !!entry && !entry.target && form.kind === entry.kind;
 
   const submit = async () => {
-    if (busy) return;
+    if (busy || reading > 0) return;
     const r = toRequestBody(form, { orphan, entry });
     if ('error' in r) { setError(r.error); return; }
     setBusy(true);
@@ -109,6 +124,22 @@ export function useAccountingEntryForm(opts: {
 
   return {
     form, error, busy, managers, rate, targetType, query, candidates, orphan,
+    reading: reading > 0, scanNotice, readings, suggested,
+    selectedReceiptFile: form.amountSource === 'receipt' ? receiptFile.current : null,
+    useOrderAmount: () => edit(f => {
+      const amount = orderAmount(f, rate);
+      return { ...f, amountSource: 'order', amount: amount != null && amount > 0 ? amount.toFixed(2) : '' };
+    }),
+    useReceipt: (file: File, receipt: ReceiptAmount) => {
+      if (!receipt.currency) return;
+      receiptFile.current = file;
+      edit(f => ({ ...f, amount: receipt.amount, currency: receipt.currency!, fxRate: '', amountSource: 'receipt' }));
+    },
+    setCurrency: (currency: EntryForm['currency']) => {
+      const converted = form.amount ? convertAmount(Number(form.amount), form.currency, currency, form.fxRate ? Number(form.fxRate) : rate) : null;
+      if (form.amount && converted === null) { setError('acctErrRate'); return; }
+      edit(f => ({ ...f, currency, amount: converted === null ? '' : converted.toFixed(2) }));
+    },
     preview: previewCny(form, rate),
     editing: !!entry,
     // A PO the Business Account paid takes no paid-out RMB entry: the form says so.
@@ -117,7 +148,7 @@ export function useAccountingEntryForm(opts: {
     // would lift the lock, so a changed payer can be changed back.
     payerPickLocked: payerLock({ ...form, managerId: entry?.manager.id ?? form.managerId }, entry),
     // A manager picked by hand stays put when the record changes.
-    set: (patch: Partial<EntryForm>) => edit(f => ({ ...f, ...patch, ...(patch.managerId !== undefined ? { managerTouched: true } : {}) })),
+    set: (patch: Partial<EntryForm>) => edit(f => ({ ...f, ...patch, ...(patch.managerId !== undefined ? { managerTouched: true } : {}), ...(patch.amount !== undefined ? { amountSource: 'manual' as const } : {}) })),
     setKind: (k: AccountingKind) => edit(f => applyKind(f, k)),
     setDirection: (d: AccountingDirection) => edit(f => ({ ...f, direction: d, directionTouched: true })),
     setCounterparty: (v: string) => edit(f => ({ ...f, counterparty: v, counterpartyTouched: true })),
@@ -126,9 +157,50 @@ export function useAccountingEntryForm(opts: {
     files,
     addFiles: (list: FileList | File[] | null) => {
       const picked = [...(list ?? [])].filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
-      if (picked.length) setFiles(fs => [...fs, ...picked]);
+      const accepted = picked.filter(f => f.size <= MAX_UPLOAD_BYTES);
+      if (accepted.length < picked.length) showWarnToast(t('fileTooLarge', { name: picked.find(f => f.size > MAX_UPLOAD_BYTES)!.name }));
+      if (!accepted.length) return;
+      accepted.forEach(file => liveFiles.current.add(file));
+      setFiles(fs => [...fs, ...accepted]);
+      const images = accepted.filter(file => file.type.startsWith('image/'));
+      setReading(n => n + images.length);
+      setScanNotice(null);
+      void (async () => {
+        for (const file of images) {
+          try {
+            const { receipt } = await acctReadReceipt(file);
+            if (!mounted.current || !liveFiles.current.has(file)) continue;
+            if (!receipt) { setScanNotice(t('acctReceiptUnreadable')); continue; }
+            setReadings(rs => [...rs, { file, receipt }]);
+            if (receipt.currency) {
+              setForm(f => {
+                if (f.amountSource !== 'order') return f;
+                receiptFile.current = file;
+                return { ...f, amount: receipt.amount, currency: receipt.currency!, fxRate: '', amountSource: 'receipt' };
+              });
+            } else setScanNotice(t('acctReceiptCurrencyUnknown'));
+          } catch {
+            if (mounted.current && liveFiles.current.has(file)) setScanNotice(t('acctReceiptUnreadable'));
+          } finally {
+            if (mounted.current) setReading(n => n - 1);
+          }
+        }
+      })();
     },
-    removeFile: (i: number) => setFiles(fs => fs.filter((_, j) => j !== i)),
+    removeFile: (i: number) => {
+      const file = files[i];
+      liveFiles.current.delete(file);
+      setFiles(fs => fs.filter(f => f !== file));
+      setReadings(rs => rs.filter(r => r.file !== file));
+      if (receiptFile.current === file) {
+        receiptFile.current = null;
+        edit(f => {
+          if (f.amountSource !== 'receipt') return f;
+          const amount = orderAmount(f, rate);
+          return { ...f, amountSource: 'order', amount: amount != null && amount > 0 ? amount.toFixed(2) : '' };
+        });
+      }
+    },
     submit,
   };
 }

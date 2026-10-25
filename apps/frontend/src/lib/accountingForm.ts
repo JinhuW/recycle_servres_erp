@@ -20,6 +20,9 @@ export type EntryForm = {
   // Opened from a record's own page: the record is the point, not a field.
   targetLocked: boolean;
   amount: string;
+  amountSource: 'order' | 'receipt' | 'manual';
+  // The order card may already know the unpaid part of a sale.
+  orderAmountOverride?: number;
   currency: AccountingCurrency;
   fxRate: string;
   method: AccountingMethod;
@@ -67,7 +70,7 @@ export function initialForm(opts: { meId: string; today: IsoDate; preset?: Entry
     return {
       direction: entry.direction, directionTouched: true, kind: entry.kind,
       target: entry.target ? { id: entry.target.id } : null, targetLocked: false,
-      amount: String(entry.amount), currency: entry.currency,
+      amount: String(entry.amount), amountSource: 'manual', currency: entry.currency,
       fxRate: entry.fxRate === null ? '' : String(entry.fxRate),
       method: entry.method, occurredOn: entry.occurredOn, managerId: entry.manager.id, managerTouched: true,
       counterparty: entry.counterparty ?? '', counterpartyTouched: true, note: entry.note ?? '',
@@ -80,8 +83,10 @@ export function initialForm(opts: { meId: string; today: IsoDate; preset?: Entry
     kind,
     target: preset?.target ?? null,
     targetLocked: !!preset?.target,
-    amount: preset?.amount ? String(preset.amount) : '',
-    currency: 'CNY',
+    amount: (preset?.amount ?? preset?.target?.amount) ? Number(preset?.amount ?? preset?.target?.amount).toFixed(2) : '',
+    amountSource: 'order',
+    orderAmountOverride: preset?.amount,
+    currency: preset?.target?.currency ?? 'CNY',
     fxRate: '',
     method: 'bank',
     occurredOn: opts.today,
@@ -107,6 +112,8 @@ export function applyKind(f: EntryForm, kind: AccountingKind): EntryForm {
     kind,
     direction: f.directionTouched ? f.direction : KIND_DEFAULT_DIRECTION[kind],
     target: null,
+    orderAmountOverride: undefined,
+    ...(f.amountSource === 'order' ? { amount: '' } : {}),
     counterparty: f.counterpartyTouched ? f.counterparty : '',
   };
 }
@@ -115,11 +122,27 @@ export function pickTarget(f: EntryForm, t: FormTarget | null): EntryForm {
   return {
     ...f,
     target: t,
+    orderAmountOverride: undefined,
+    ...(f.amountSource === 'order' ? { amount: t?.amount ? t.amount.toFixed(2) : '', currency: t?.currency ?? f.currency } : {}),
     counterparty: f.counterpartyTouched ? f.counterparty : t?.party ?? '',
     // The record's payer, unless one was picked by hand (or the entry is
     // being edited, which counts as picked).
     managerId: f.managerTouched ? f.managerId : payerOf(t) ?? f.managerId,
   };
+}
+
+export function convertAmount(amount: number, from: AccountingCurrency, to: AccountingCurrency, rate: number | null): number | null {
+  if (from === to) return Math.round(amount * 100) / 100;
+  if (!rate || !Number.isFinite(rate) || rate <= 0) return null;
+  return Math.round((from === 'USD' ? amount * rate : amount / rate) * 100) / 100;
+}
+
+/** The linked record's own figure, converted only with a known rate. */
+export function orderAmount(f: Pick<EntryForm, 'target' | 'currency' | 'fxRate' | 'orderAmountOverride'>, latestRate: number | null): number | null {
+  const target = f.target;
+  if (target?.amount == null || !target.currency) return null;
+  const rate = f.fxRate ? Number(f.fxRate) : latestRate;
+  return convertAmount(f.orderAmountOverride ?? target.amount, target.currency, f.currency, rate);
 }
 
 // The figure a dollar entry adds to the book, for the form's hint.

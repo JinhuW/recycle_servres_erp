@@ -20,7 +20,8 @@ import { isClosedBook } from '../services/orderAdvance';
 import { deleteAttachment, StorageUnavailableError, uploadAttachment } from '../r2';
 import { getUploadLimits } from '../lib/settings';
 import { shrinkImageToFit } from '../lib/image-shrink';
-import { maybeRenameReceipt } from '../ai/receipt';
+import { maybeRenameReceipt, readReceipt } from '../ai/receipt';
+import { createRateLimiter } from '../lib/rate-limit';
 import { log } from '../lib/log';
 import type { Env, User } from '../types';
 import {
@@ -45,6 +46,20 @@ type AcctEnv = { Bindings: Env; Variables: { user: User } };
 const accounting = new Hono<AcctEnv>()
   .use('*', authMiddleware)
   .use('*', requireManager);
+
+const receiptRateLimited = createRateLimiter(60_000, 20);
+accounting.post('/scan-receipt', async (c) => {
+  const retryAfter = receiptRateLimited(c.var.user.id);
+  if (retryAfter) return c.json({ error: 'Too many scans, please wait.' }, 429, { 'Retry-After': String(retryAfter) });
+  const form = await c.req.formData().catch(() => null);
+  if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
+  const file = form.get('file');
+  if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
+  const { maxBytes, allowedMime } = await getUploadLimits(getDb(c.env));
+  if (file.size > maxBytes) return c.json({ error: 'file too large' }, 413);
+  if (!file.type.startsWith('image/') || !allowedMime.has(file.type)) return c.json({ error: 'unsupported file type' }, 415);
+  return c.json({ receipt: await readReceipt(c.env, file) });
+});
 
 // A mistyped amount or rate is refused here rather than overflowing amount_cny.
 const MAX_AMOUNT = 1_000_000_000;
@@ -495,6 +510,7 @@ accounting.get('/entries', async (c) => {
     method ? sql`e.method = ${method}` : null,
     managerId ? payerFrag(sql, managerId) : null,
     review ? sql`e.voided_at IS NULL AND ${reviewStateSql(sql)} = ${review}` : null,
+    q('unlinked') === '1' ? sql`e.order_id IS NULL AND e.sell_order_id IS NULL AND e.after_sales_id IS NULL` : null,
     q('voided') === '1' ? null : sql`e.voided_at IS NULL`,
     search ? sql`(e.id ILIKE ${like} OR e.counterparty ILIKE ${like} OR e.reference ILIKE ${like}
                   OR e.note ILIKE ${like} OR e.order_id ILIKE ${like} OR e.sell_order_id ILIKE ${like}
@@ -710,7 +726,7 @@ const CLOSED_COST_MSG = 'the PO is Ready to Pay or Done, so who paid its cost is
 // A payer that stays is judged again only where it is written to the PO: a
 // manager deactivated since an entry was booked still paid it.
 async function payerAllowedTx(
-  tx: SqlLike, f: EntryFields, prepared: Prepared & { kind: 'ok' }, payerChanged: boolean,
+  tx: SqlLike, f: EntryFields, prepared: Prepared & { kind: 'ok' }, payerChanged: boolean, linkingUnassigned = false,
 ): Promise<Refusal | null> {
   if (prepared.cost) {
     if (prepared.cost.payment === 'company') return { status: 409, error: COMPANY_COST_MSG };
@@ -721,7 +737,7 @@ async function payerAllowedTx(
     return err ? { status: 400, error: err } : null;
   }
   if (prepared.payer?.commission_linked) return { status: 409, error: LINKED_MSG };
-  if (prepared.payer?.commission_paid_by_company) return { status: 409, error: COMPANY_COMMISSION_MSG };
+  if (prepared.payer?.commission_paid_by_company && !linkingUnassigned) return { status: 409, error: COMPANY_COMMISSION_MSG };
   if (!prepared.payer && !payerChanged) return null;
   if (prepared.owner) {
     const err = await paidByErr(tx, prepared.owner, f.managerId);
@@ -833,6 +849,8 @@ accounting.patch('/entries/:id', async (c) => {
     if (row.order_id !== pre.order_id) return { kind: 'moved' };
     if (row.voided_at) return { kind: 'voided' };
     const cur = shapeEntry(row);
+    if (body.onlyUnlinked === true && cur.target) return { kind: 'moved' };
+    if (body.expectedVersion !== undefined && body.expectedVersion !== row.version) return { kind: 'moved' };
     const was: Record<string, unknown> = {
       direction: cur.direction, kind: cur.kind, amount: cur.amount, currency: cur.currency, fxRate: cur.fxRate,
       method: cur.method, occurredOn: cur.occurredOn, managerId: cur.manager.id,
@@ -864,7 +882,7 @@ accounting.patch('/entries/:id', async (c) => {
     const prepared = linkChanged || payerChanged ? await prepareTargetTx(tx, f) : NO_PO;
     if (prepared.kind === 'missing') return prepared;
     if (linkChanged || payerChanged) {
-      const refused = await payerAllowedTx(tx, f, prepared, payerChanged);
+      const refused = await payerAllowedTx(tx, f, prepared, payerChanged, body.onlyUnlinked === true && !cur.target);
       if (refused) return { kind: 'refused', ...refused };
     }
     // Anything but the note is what a sign-off signed: changing it makes this

@@ -15,6 +15,22 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.345.0] - 2026-10-25
+
+### Added
+
+- The PO commission panel searches existing RMB Flow payments or Business
+  Account transactions and links the chosen payment directly to the
+  commission. Paid by follows the transaction, and the Done flow recognizes
+  linked payments without asking for another screenshot. Existing commission
+  screenshots remain visible (RS-396).
+- Record payment fills the amount from its linked PO cost, projected commission
+  or sell order, and reads screenshot amounts before saving. Order and screenshot
+  buttons let the manager choose either value; manual edits survive late AI
+  results. CNY/USD switches convert the amount with the selected or latest FX
+  rate. Both desktop and phone use the same behavior (RS-396).
+
+
 ## [1.344.1] - 2026-10-24
 
 ### Fixed

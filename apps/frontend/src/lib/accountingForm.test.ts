@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyKind, initialForm, payerLock, pickTarget, previewCny, toRequestBody } from './accountingForm';
+import { applyKind, convertAmount, orderAmount, initialForm, payerLock, pickTarget, previewCny, toRequestBody } from './accountingForm';
 import { markDayStarts, owedOnSale, phonePeriod, reviewActions, splitYuan, fmtCny, fmtSignedCny, type AcctEntry, type AcctReview } from './accounting';
 
 const ME = '11111111-1111-1111-1111-111111111111';
@@ -93,7 +93,7 @@ describe('the entry form', () => {
     expect(toRequestBody(f)).toEqual({ error: 'acctErrAmount' });
     expect(toRequestBody({ ...f, amount: '12.345' })).toEqual({ error: 'acctErrTarget' });
     expect(toRequestBody({ ...f, amount: '12.345' }, { orphan: true })).toMatchObject({ body: { targetId: null } });
-    const ok = toRequestBody(pickTarget({ ...f, amount: '12.345', note: '  ' }, { id: 'PO-1' }));
+    const ok = toRequestBody(pickTarget({ ...f, amount: '12.345', amountSource: 'manual', note: '  ' }, { id: 'PO-1' }));
     expect(ok).toEqual({
       body: {
         direction: 'out', kind: 'purchase', amount: 12.35, currency: 'CNY', fxRate: null, method: 'bank',
@@ -113,6 +113,32 @@ describe('the entry form', () => {
     expect(toRequestBody({ ...f, kind: 'other', amount: '5', currency: 'USD', fxRate: '700' })).toEqual({ error: 'acctErrRate' });
     // An Other entry never sends a record, whatever was picked before.
     expect(toRequestBody({ ...f, kind: 'other', amount: '5', target: { id: 'PO-1' } })).toMatchObject({ body: { targetId: null } });
+  });
+
+  it('suggests PO cost, commission and sale figures in their native currency or at a known rate', () => {
+    for (const kind of ['purchase', 'commission', 'sale'] as const) {
+      const f = pickTarget(initialForm({ meId: ME, today: TODAY, preset: { kind } }),
+        { id: kind === 'sale' ? 'SO-1' : 'PO-1', amount: 125, currency: 'USD' });
+      expect(f.currency).toBe('USD');
+      expect(orderAmount(f, null)).toBe(125);
+      expect(orderAmount({ ...f, currency: 'CNY' }, 6.7)).toBe(837.5);
+      expect(orderAmount({ ...f, currency: 'CNY' }, null)).toBeNull();
+      expect(orderAmount({ ...f, currency: 'CNY', fxRate: '7' }, 6.7)).toBe(875);
+    }
+    const f = initialForm({ meId: ME, today: TODAY, preset: { kind: 'sale', amount: 80,
+      target: { id: 'SO-1', amount: 100, currency: 'CNY' } } });
+    expect(f.amountSource).toBe('order');
+    expect(orderAmount(f, 7)).toBe(80);
+    expect(convertAmount(700, 'CNY', 'USD', 7)).toBe(100);
+    expect(convertAmount(50, 'USD', 'CNY', 0)).toBeNull();
+  });
+
+  it('keeps a manual or receipt amount when the linked order changes', () => {
+    const f = initialForm({ meId: ME, today: TODAY });
+    const target = { id: 'PO-1', amount: 100, currency: 'USD' as const };
+    expect(pickTarget({ ...f, amount: '42', amountSource: 'manual' }, target)).toMatchObject({ amount: '42', currency: 'CNY' });
+    expect(pickTarget({ ...f, amount: '42', amountSource: 'receipt' }, target)).toMatchObject({ amount: '42', currency: 'CNY' });
+    expect(pickTarget({ ...f, amount: '42' }, target)).toMatchObject({ amount: '100.00', currency: 'USD' });
   });
 
   it('previews what dollars come to in the book', () => {

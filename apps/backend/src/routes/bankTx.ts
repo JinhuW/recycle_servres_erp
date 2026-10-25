@@ -470,7 +470,7 @@ async function ledgerOf(sql: SqlClient, targetFrag: ReturnType<SqlClient>) {
 // paid figure never counts it — or a sell order, money the buyer sent us.
 bankTx.post('/:id/link', async (c) => {
   const sql = getDb(c.env);
-  type Body = { orderId?: string; sellOrderId?: string; kind?: string };
+  type Body = { orderId?: string; sellOrderId?: string; kind?: string; onlyUnlinked?: boolean };
   const body = await c.req.json<Body>().catch(() => ({} as Body));
   const orderId = body.orderId?.trim();
   const sellOrderId = body.sellOrderId?.trim();
@@ -492,6 +492,9 @@ bankTx.post('/:id/link', async (c) => {
       await lockBankGroupTx(tx, [c.req.param('id')]);
       const group = await groupOf(tx, c.req.param('id'));
       if (group.length === 0) throw new BankRefusal(404, 'Not found');
+      if (body.onlyUnlinked === true && group.some(isLinked)) {
+        throw new BankRefusal(409, 'This transaction is already linked — refresh the search');
+      }
       if (group.some((l) => l.ignored)) throw new BankRefusal(400, 'Unignore the transaction before linking it');
       // The money never left, or came back. Linking it would make the order read
       // as paid by a payment that did not happen.
