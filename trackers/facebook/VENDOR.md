@@ -13,7 +13,7 @@ all. So they are pinned here by commit instead, and
 
 | Path | Upstream | Branch | Pinned commit |
 | --- | --- | --- | --- |
-| `ai-marketplace-monitor/` | https://github.com/BoPeng/ai-marketplace-monitor | `recycle-patches` | `9a06d9849751f9dd0a038868af1d22bc3dc1110c` |
+| `ai-marketplace-monitor/` | https://github.com/BoPeng/ai-marketplace-monitor | `recycle-patches` | `1bf74f718406d5ba51e73d1a82d5e3587e843de7` |
 | `facebook-marketplace-bot/` | https://github.com/GeorgiKeranov/facebook-marketplace-bot | (as cloned) | `3bda6b40dc6be0a613c3785bed3eb0409f9b5377` |
 
 ## ai-marketplace-monitor

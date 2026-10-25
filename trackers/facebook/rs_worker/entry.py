@@ -10,7 +10,10 @@ not there at all. With them it:
 2. renders the monitor's `config.toml`, the Playwright `session.json` and
    the device's `identity.json` inside the container, never on a mount;
 3. exports `RS_FB_PASSWORD` / `RS_FB_TOTP` for the monitor's password
-   fallback, used only when the cookie session is invalid, as today;
+   fallback, used only when the cookie session is invalid, as today, and
+   the shared secrets the claim's `env` object carries (OpenRouter,
+   Telegram, later the coordinator's tokens), which the rendered config
+   references as `${VAR}`;
 4. runs the virtual display, VNC and the monitor, serving `GET /healthz` on
    8788 while the monitor is up, and leaves with the monitor's exit code;
 5. keeps a socket parked at the ERP's VNC relay (`vnc_relay.py`), so a
@@ -18,8 +21,13 @@ not there at all. With them it:
 
 Exit codes, as the host agent reads them: 75 for "no slot" or a stale epoch
 (the agent starts a fresh container after a minute), 70 for a claim or
-configuration failure (the agent backs off ten minutes), otherwise the
-monitor's own code (0 on `docker stop`).
+configuration failure (the agent backs off ten minutes), 78 for a worker
+parked for an operator that could not stay up (the agent leaves it
+stopped), otherwise the monitor's own code (0 on `docker stop`).
+
+A worker that cannot reach Facebook or its proxy does not exit at all: the
+monitor parks, heartbeats DEAD with `connect_failed`, and `/healthz` keeps
+answering 200 with `"state": "parked"`, so nothing starts it again.
 
 stdlib only: four requests and a TOML writer are not worth a dependency, and
 this runs before anything else in the image is known to work. The relay
@@ -57,6 +65,8 @@ FLEET_ENV = ("RS_FLEET_URL", "RS_FLEET_HOST_ID", "RS_FLEET_HOST_TOKEN")
 # a module.
 EXIT_RESTART = 75
 EXIT_CONFIG = 70
+# The monitor's `OPERATOR_EXIT_CODE`.
+EXIT_OPERATOR = 78
 
 HEALTHZ_PORT = 8788
 CLAIM_ATTEMPTS = 3
@@ -70,6 +80,16 @@ DISPLAY_STOP_GRACE_S = 3
 RELAY_STOP_GRACE_S = 1
 
 TEMPLATE = Path(__file__).with_name("config.template.toml")
+# Written by the monitor when it parks for an operator; read by /healthz.
+PARKED_FILE = "parked.json"
+# Names the claim's `env` may not set: the fleet's own wiring, and what this
+# entrypoint derives from the claim itself.
+RESERVED_ENV = re.compile(
+    r"^(RS_FLEET_.*|RS_WORKER_ID|RS_HOST_ID|RS_FB_PASSWORD|RS_FB_TOTP|RS_VNC_PORT|"
+    r"RS_PARKED_FILE|RS_VERSION|RS_MONITOR_COMMIT|RS_WORKER_.*|PATH|HOME|DISPLAY)$"
+)
+_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_ENV_REF = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 # Which of the account's cookies name the browser rather than the login.
 DEVICE_COOKIES = ("datr", "sb")
 
@@ -196,8 +216,14 @@ def render_config(
     facebook = config.setdefault("marketplace", {}).setdefault("facebook", {})
     facebook.update(settings.get("search") or {})
     facebook["worker_id"] = worker_id
-    if settings.get("coordinator_url"):
+    coordinator = has_coordinator(answer)
+    if coordinator:
         facebook["control_plane_url"] = str(settings["coordinator_url"])
+    else:
+        # Without a coordinator nothing is posted, claimed or escalated
+        # anywhere: no control plane, no alert report.
+        for key in COORDINATOR_KEYS:
+            facebook.pop(key, None)
     if account.get("uid"):
         facebook["username"] = str(account["uid"])
     home_cities = [str(city) for city in answer.get("home_cities") or []]
@@ -212,7 +238,10 @@ def render_config(
         items[str(item["name"])] = entry
 
     for user in config.get("user", {}).values():
-        if "alert_report_worker_id" in user:
+        if not coordinator:
+            for key in ALERT_REPORT_KEYS:
+                user.pop(key, None)
+        elif "alert_report_worker_id" in user:
             user["alert_report_worker_id"] = worker_id
 
     config["fleet"] = {
@@ -223,6 +252,79 @@ def render_config(
         "poll_hold_seconds": int(settings.get("poll_hold_seconds") or 50),
     }
     return config
+
+
+COORDINATOR_KEYS = ("control_plane_url", "control_plane_token")
+ALERT_REPORT_KEYS = ("alert_report_url", "alert_report_token", "alert_report_worker_id")
+
+
+def has_coordinator(answer: Dict[str, Any]) -> bool:
+    url = (answer.get("settings") or {}).get("coordinator_url")
+    return isinstance(url, str) and bool(url.strip())
+
+
+def claim_env(answer: Dict[str, Any]) -> Dict[str, str]:
+    """The shared secrets the claim carries in `env`, as environment variables.
+
+    The ERP's Cloudflare Worker adds `env` to a successful claim; the backend
+    never holds it. Only string values under plain names are taken, and none
+    that would override the fleet's own wiring. Values are never logged.
+    """
+    raw = answer.get("env")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        log("the claim's env is not an object; ignored")
+        return {}
+    out: Dict[str, str] = {}
+    skipped: List[str] = []
+    for name, value in raw.items():
+        if not isinstance(name, str) or not _ENV_NAME.match(name) or RESERVED_ENV.match(name):
+            skipped.append(str(name)[:64])
+        elif not isinstance(value, str):
+            skipped.append(name)
+        else:
+            out[name] = value
+    log(f"claim env: {', '.join(sorted(out)) or 'none'}")
+    if skipped:
+        log(f"claim env ignored (reserved, badly named or not a string): {', '.join(sorted(skipped))}")
+    return out
+
+
+def resolve_env_refs(config: Dict[str, Any], env: Dict[str, str]) -> List[str]:
+    """Drop every `${VAR}` value whose variable `env` leaves unset or empty.
+
+    The monitor would read such a value as None anyway; leaving the key out
+    says the same thing without a warning per key, and an optional channel
+    (Telegram, the coordinator's tokens) is then simply off. The names
+    dropped, sorted.
+    """
+    dropped: set[str] = set()
+
+    def walk(table: Dict[str, Any]) -> None:
+        for key in list(table):
+            value = table[key]
+            if isinstance(value, dict):
+                walk(value)
+                continue
+            match = _ENV_REF.match(value) if isinstance(value, str) else None
+            if match and not env.get(match.group(1)):
+                dropped.add(match.group(1))
+                del table[key]
+
+    walk(config)
+    return sorted(dropped)
+
+
+def required_env(template: Dict[str, Any]) -> List[str]:
+    """The variables the AI backends reference: without them nothing can be judged."""
+    names = set()
+    for backend in (template.get("ai") or {}).values():
+        for value in backend.values() if isinstance(backend, dict) else ():
+            match = _ENV_REF.match(value) if isinstance(value, str) else None
+            if match:
+                names.add(match.group(1))
+    return sorted(names)
 
 
 def identity_for(answer: Dict[str, Any]) -> Dict[str, Any]:
@@ -285,10 +387,22 @@ def _write_private(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
-def monitor_env(env: Dict[str, str], answer: Dict[str, Any], host_id: str, worker_id: str) -> Dict[str, str]:
-    """The monitor's environment: the container's, plus the password fallback."""
+def monitor_env(
+    env: Dict[str, str],
+    answer: Dict[str, Any],
+    host_id: str,
+    worker_id: str,
+    home: Path | None = None,
+) -> Dict[str, str]:
+    """The monitor's environment: the container's, the claim's `env`, the password fallback."""
     account = answer["account"]
     out = dict(env)
+    out.update(claim_env(answer))
+    if not has_coordinator(answer):
+        # The monitor's own fallback would otherwise find a coordinator here.
+        out.pop("RS_CONTROL_PLANE_URL", None)
+    if home is not None:
+        out["RS_PARKED_FILE"] = str(home / PARKED_FILE)
     out["RS_WORKER_ID"] = worker_id
     out["RS_HOST_ID"] = host_id
     for name, key in (("RS_FB_PASSWORD", "password"), ("RS_FB_TOTP", "totp_secret")):
@@ -404,11 +518,25 @@ def start_display(env: Dict[str, str]) -> List[subprocess.Popen]:
 class _Health:
     """What `/healthz` answers: 200 while the monitor process is up."""
 
-    def __init__(self, worker_id: str, epoch: int) -> None:
+    def __init__(self, worker_id: str, epoch: int, parked_file: Path | None = None) -> None:
         self.worker_id = worker_id
         self.epoch = epoch
+        self.parked_file = parked_file
         self.monitor: subprocess.Popen | None = None
         self.started = time.monotonic()
+
+    def parked(self) -> Dict[str, Any] | None:
+        """What the monitor wrote when it parked for an operator, if it did."""
+        if self.parked_file is None:
+            return None
+        try:
+            with open(self.parked_file, encoding="utf-8") as f:
+                parked = json.load(f)
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            return {"reason": "unknown"}
+        return parked if isinstance(parked, dict) else {"reason": "unknown"}
 
     def status(self) -> tuple[int, Dict[str, Any]]:
         monitor = self.monitor
@@ -423,6 +551,13 @@ class _Health:
             body["monitor_pid"] = monitor.pid
             if not alive:
                 body["exit"] = monitor.returncode
+        parked = self.parked() if alive else None
+        if parked is not None:
+            # Up and waiting for an operator. Still 200: an unhealthy
+            # container is one an agent may replace, and that is a login.
+            body["ok"] = False
+            body["state"] = "parked"
+            body["parked"] = parked
         return (200 if alive else 503), body
 
 
@@ -569,22 +704,35 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
         f"city/cities, proxy {'set' if (answer.get('proxy') or {}).get('url') else 'none'}"
     )
 
+    menv = monitor_env(env, answer, host_id, worker_id, home)
     try:
         with open(TEMPLATE, "rb") as f:
             template = tomllib.load(f)
+        missing = [name for name in required_env(template) if not menv.get(name)]
+        if missing:
+            raise ValueError(f"no {', '.join(missing)} in the claim's env or the container's")
         config = render_config(template, answer, fleet_url, worker_id, home)
+        dropped = resolve_env_refs(config, menv)
         write_files(home, answer, config)
     except (OSError, KeyError, TypeError, ValueError, tomllib.TOMLDecodeError) as e:
         log(f"could not render the worker's configuration: {e}; exiting {EXIT_CONFIG}")
         return EXIT_CONFIG
+    log(
+        f"coordinator {'on' if has_coordinator(answer) else 'off'}; "
+        f"unset, left out of the config: {', '.join(dropped) or 'none'}"
+    )
+    try:
+        (home / PARKED_FILE).unlink()
+    except FileNotFoundError:
+        pass
 
     relay = start_vnc_relay(fleet_url, str(answer["worker_token"]), env)
-    health = _Health(worker_id, int(answer["epoch"]))
+    health = _Health(worker_id, int(answer["epoch"]), home / PARKED_FILE)
     port = env.get("RS_WORKER_HEALTHZ_PORT") or ""
     try:
         code = run_monitor(
             monitor_command(env),
-            monitor_env(env, answer, host_id, worker_id),
+            menv,
             health,
             int(port) if port.isdigit() else HEALTHZ_PORT,
             on_stop=relay.request_stop if relay is not None else None,
@@ -592,6 +740,11 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
     finally:
         if relay is not None:
             relay.stop(timeout=RELAY_STOP_GRACE_S)
+    if code not in (0, EXIT_RESTART, EXIT_OPERATOR) and health.parked() is not None:
+        # Parked for an operator and then gone: started again it would only
+        # log in to fail the same way.
+        log(f"monitor exited {code} while parked for an operator; exiting {EXIT_OPERATOR}")
+        return EXIT_OPERATOR
     log(f"monitor exited {code}")
     return code
 

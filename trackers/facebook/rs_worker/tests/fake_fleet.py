@@ -1,7 +1,7 @@
 r"""A stand-in for the ERP's fleet worker API, for tests and local runs.
 
 Implements `/api/fleet/worker/*` as CONTRACTS.md §5 describes it: `claim`
-(host scope), `heartbeat`, `next-task` with the hold (and `take: false`,
+(host scope, with the `env` object the ERP's Cloudflare Worker adds), `heartbeat`, `next-task` with the hold (and `take: false`,
 which closes `done` and answers `done_only` at once), `events` and `session`
 (worker scope), with made-up account data. The worker token has the real
 shape (`base64url(json{worker_id, account_no, epoch, exp}) . hmac`) under a
@@ -79,6 +79,13 @@ SETTINGS = {
     "lease_minutes": 30,
     "poll_hold_seconds": 2,
 }
+# What the ERP's Cloudflare Worker adds to a 200 claim from its
+# FLEET_WORKER_ENV secret. Made up.
+CLAIM_ENV = {
+    "OPENROUTER_API_KEY": "made-up-openrouter-key",  # pragma: allowlist secret
+    "TELEGRAM_TOKEN": "123456789:made-up-bot-token",  # pragma: allowlist secret
+    "TELEGRAM_CHAT_ID": "-1001234567890",
+}
 
 
 def mint_token(worker_id: str, account_no: int, epoch: int, exp: int | None = None) -> str:
@@ -112,6 +119,10 @@ class FakeFleet:
         self.hold_seconds = hold_seconds
         # "ok", or one of "no_slot", "error", to make the claim fail that way.
         self.claim_answer = "ok"
+        # The claim's settings and `env` (None: no env key at all, as the
+        # backend answers when no Worker sits in front of it).
+        self.settings: Dict[str, Any] = dict(SETTINGS)
+        self.env: Dict[str, Any] | None = dict(CLAIM_ENV)
         self.tasks: List[Dict[str, Any]] = []
         self.requests: List[Tuple[str, str, Dict[str, Any] | None, Dict[str, str]]] = []
         self.done: List[Dict[str, Any]] = []
@@ -285,7 +296,7 @@ class FakeFleet:
         if self.claim_answer == "error":
             return 500, {"error": "internal"}
         self.epoch += 1
-        return 200, {
+        answer = {
             "worker_token": mint_token(str(body["worker_id"]), ACCOUNT["no"], self.epoch),
             "epoch": self.epoch,
             "account": ACCOUNT,
@@ -293,8 +304,11 @@ class FakeFleet:
             "device": DEVICE,
             "home_cities": ["nyc", "philly"],
             "items": ITEMS,
-            "settings": SETTINGS,
+            "settings": self.settings,
         }
+        if self.env is not None:
+            answer["env"] = self.env
+        return 200, answer
 
     def next_task(self, body: Dict[str, Any]) -> Tuple[int, Any]:
         if body.get("done"):
@@ -338,16 +352,28 @@ def _read_frame(sock: Any) -> bytes | None:
 def main(argv: List[str]) -> int:
     port = int(argv[0]) if argv else 8790
     # All interfaces: a container reaches the host over its gateway address.
-    fleet = FakeFleet(port=port, hold_seconds=50, bind="0.0.0.0").start()  # noqa: S104
+    fleet = FakeFleet(port=port, hold_seconds=50, bind="0.0.0.0")  # noqa: S104
+    # As the fleet runs before the coordinator is wired back in.
+    fleet.settings["coordinator_url"] = ""
+    fleet.start()
     fleet.add_task()
     print(f"fake fleet on {fleet.url}; host token {HOST_TOKEN}; one task queued", flush=True)
     reported = False
+    seen: Dict[str, int] = {}
     try:
         while True:
             time.sleep(5)
             if fleet.done:
                 print(f"done so far: {fleet.done}", flush=True)
                 fleet.done.clear()
+            calls: Dict[str, int] = {}
+            for _, path, _, _ in list(fleet.requests):
+                calls[path.rsplit("/", 1)[-1]] = calls.get(path.rsplit("/", 1)[-1], 0) + 1
+            if calls != seen:
+                seen = calls
+                last = fleet.heartbeats[-1] if fleet.heartbeats else {}
+                print(f"calls {calls}; last heartbeat {last.get('state')} "
+                      f"{json.dumps(last.get('detail'))}", flush=True)
             if fleet.relay_screens and not reported:
                 print(f"VNC relay: a viewer saw {fleet.relay_screens[0]!r} "
                       f"({fleet.relay_dials} dial(s))", flush=True)
