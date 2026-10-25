@@ -235,47 +235,32 @@ is not a stage but a flag beside one, set once every line has sold
   bank-payments ledger and the Accounting card — named *Payment* until
   v1.163.0, when the second payment below got a home), *Commission* (purchaser, rate, and what the
   purchaser earns — the maths that used to sit in an aside titled "Payment
-  detail" — and a **Commission payment** drop box for the screenshot that
-  shows the purchaser was paid (v1.163.0 shipped it with a PayPal/Cash picker
-  and an OCR-filled transaction ID; v1.165.0 cut it to the screenshot alone).
-  Above the drop box, **Paid by** names the manager who paid the purchaser
-  (v1.217.0): a select of the active managers, or *Not recorded*, which every
-  order starts at. Since v1.301.0 it also offers **Business Account** (named
-  *Company paid* until v1.317.0), a fixed option rather than a member, for a
-  commission paid from the company's account. A live bank payment linked as
-  the PO's commission makes it read Business Account on its own: the select
-  locks with a note saying why, and an
-  unlink or a reversal gives back the pick made by hand. Whatever this field
-  reads, the PO's Commission entries in the RMB Flow read too, and a
-  Commission entry's Paid by writes back here (v1.317.0, see *Accounting*).
-  **The screenshot's upload records the payer** (v1.302.0): a manager who uploads one while
-  Paid by reads *Not recorded* is recorded as the payer. If Paid by names
-  someone else, or reads Company paid, the upload asks *Set Paid by to you?*
-  and changes it only on a yes. The Done dialog's drop box does the same,
-  with the question opening above it. A pick in the select asks
-  *Change who paid the commission?*, naming both values, and nothing is
-  saved until it is confirmed. Migration 0189 filled Paid by once on every PO
-  that had a commission screenshot and nobody recorded, from the uploader of
-  its latest screenshot. **A commission booked in Accounting records its
-  manager the same way** (v1.310.0): a Paid commission entry on the PO fills
-  Paid by with the entry's manager while nobody is on file, the company isn't
-  recorded and no bank row is linked as the commission. A payer already on
-  file stays, and voiding or moving the entry never clears it. Since v1.310.2
-  the fill happens once, when the entry comes to pay this PO's commission.
-  Later edits leave a payer cleared on purpose alone. Correcting the entry's
-  manager moves Paid by with it, but only while Paid by still names the old
-  manager. The tab shows
-  the new payer at once. Files write through as they are dropped and a
-  confirmed pick as it is made — managers at any stage, closed book included
-  — and purchasers see both read-only. Under the drop box, managers also see the
-  **bank payments linked as this PO's commission** on the Payments page,
-  with their net, the same ledger the Cost Payment tab shows for the cost
-  (v1.257.0). Each pick is one *Commission paid by:
-  ‹from› → ‹to›* line in Activity, the names as they were at the time. **Ready to Pay →
-  Done asks for it only when it is missing** (v1.165.0): with a screenshot
-  on file the move is as plain as any other; without one the *Mark order as
-  Done* dialog opens, and a file attached there is the same file the tab
-  shows. The dialog is a prompt, not a gate — Confirm works without one),
+  detail" — and **Commission payment** transaction search, v1.345.0).
+  Managers choose **RMB Flow** or **Business Account**, search unlinked
+  outgoing payments, and confirm a transaction to link it as this PO's
+  commission. The search shows its date, counterparty, payer/method and amount.
+  Business Account candidates are settled USD Mercury/PayPal payments, with
+  transfers, ignored rows and internal transactions excluded by reconciliation.
+  An RMB entry already assigned to a record, or changed since the search,
+  cannot be taken by a stale selection; a bank row already linked is refused
+  too. The payer follows the selected transaction: the entry's manager for
+  RMB Flow, the Business Account for Mercury/PayPal. A legacy company flag
+  can be replaced by explicitly linking an RMB payment; a live bank link
+  must first be removed in Payments. Linking the Business Account voids
+  existing paid-out RMB commission entries under the book's existing rules.
+  The panel shows linked bank payments and their net, with links to Payments
+  on desktop, and the RMB Flow card lists its linked entries. Existing
+  commission screenshots remain readable; the payer select and upload box
+  have been replaced by the search on both shells. Purchasers see the payer
+  and legacy screenshots read-only.
+  **Ready to Pay → Done recognizes linked payments** (v1.345.0): a live
+  paid-out RMB commission or settled outgoing bank commission skips the
+  screenshot prompt, as an existing screenshot already did. With neither,
+  the Done dialog still offers its legacy screenshot upload and optional note;
+  it remains a prompt, and Confirm works without a screenshot. A legacy
+  screenshot upload can record its uploader as payer when nobody is on file,
+  or offer a confirmed change to the uploader when someone else is recorded
+  (v1.302.0). Commission payer changes are recorded in Activity.
   *Notes & files* (notes and Submission receipts; proof of payment is not
   repeated here), *Activity*. No fact has an input in two places any more: the
   warehouse, purchaser, rate and paid-by that appeared in *Order details*,
@@ -302,10 +287,9 @@ is not a stage but a flag beside one, set once every line has sold
   *Before you submit* list gains a *How the goods get here* row.
 - **The phone's *Order details* are the desktop's five tabs, as folds**
   (v1.162.0): Delivery (source, warehouse, label or pickup, tracking),
-  Cost Payment, **Commission** (with the commission-payment screenshot box
-  under the maths since v1.163.0, screenshot-only since v1.165.0, with the
-  *Paid by* manager select above it since v1.217.0; the fold's summary reads
-  *· Paid* once a screenshot is on file), Notes & files, Activity —
+  Cost Payment, **Commission** (RMB Flow / Business Account transaction search
+  under the maths since v1.345.0; the summary reads *· Paid* once a linked
+  payment or legacy screenshot is on file), Notes & files, Activity —
   same order, same names.
   Each is one card (`PhFold`): closed, the title with its answer read back;
   open, a tinted header ruled off from the fields in the same card. An amber
@@ -804,7 +788,7 @@ is not a stage but a flag beside one, set once every line has sold
   who paid the purchaser their commission, the same record as the Commission
   tab's *Paid by*. Since v1.302.0 it is read-only for every role; v1.301.0
   had a picker in the cell. The record is made on the PO page, by the
-  commission screenshot's upload or a confirmed pick. A manager sees a PO
+  linked commission transaction (v1.345.0) or a legacy screenshot upload. A manager sees a PO
   with a bank payment linked as its commission as a *Business Account* chip
   (*Company paid* until v1.317.0) that opens that payment. It is sortable,
   in the Columns picker and on by default. Unlike Total cost above,
@@ -2323,6 +2307,19 @@ is who paid, below).
   screenshots that prove it. Entries are numbered `AC-1001`, `AC-1002`… from
   their own counter. The form no longer asks for a reference (v1.333.0); an
   entry that has one still shows it, and an edit keeps it.
+  - **The amount fills from the linked record or screenshot** (v1.345.0,
+    RS-396). New entries open on the PO cost, projected commission, or sell
+    order's figure in its native currency. A CNY sale opened from its order
+    still offers the remaining sale payment. Switching CNY/USD converts the
+    amount using the entered or latest rate; without a known rate a nonempty
+    amount cannot silently change currencies. Screenshot recognition runs
+    before saving and can fill amount and currency. A manual edit is never
+    overwritten by a late recognition result; buttons offer the linked order
+    and each readable screenshot amount. Several screenshots are offered
+    separately, never summed automatically. Removing the selected screenshot
+    returns an automatically filled amount to the order value. Unclear
+    currencies or unreadable images leave manual entry available and keep the
+    screenshot for upload. Existing entries open on their saved amount.
   - **What it was for is the record it names.** Purchase and Commission name
     a PO, Sale a sell order, After-sales a case; Other names nothing. The API
     refuses any other pairing. The kind sets the direction — a sale is

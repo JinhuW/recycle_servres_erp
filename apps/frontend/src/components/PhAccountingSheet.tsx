@@ -1,3 +1,4 @@
+import { AccountingAmountSources } from './AccountingAmountSources';
 import { useState } from 'react';
 import { ACCOUNTING_KINDS, ACCOUNTING_METHODS, KIND_TARGET, type AccountingKind, type AccountingMethod } from '@recycle-erp/shared';
 import { PhSheet } from './PhSheet';
@@ -111,13 +112,14 @@ export function PhAccountingSheet({ preset, entry, onClose, onSaved }: {
             <div className="seg" role="group" aria-label={t('acctFieldCurrency')}>
               {(['CNY', 'USD'] as const).map(c => (
                 <button key={c} type="button" className={form.currency === c ? 'active' : ''} aria-pressed={form.currency === c}
-                        onClick={() => f.set({ currency: c })}>
+                        onClick={() => f.setCurrency(c)}>
                   {c === 'CNY' ? '¥' : '$'}
                 </button>
               ))}
             </div>
           </div>
         </div>
+        <AccountingAmountSources f={f} />
         {form.currency === 'USD' && (
           <div className="ph-field">
             <label htmlFor={id('rate')}>{t('acctFieldRate')}</label>
@@ -164,7 +166,7 @@ export function PhAccountingSheet({ preset, entry, onClose, onSaved }: {
                     onChange={e => f.set({ note: e.target.value })} style={{ resize: 'vertical', fontFamily: 'inherit' }} />
         </div>
         {f.error && <div className="acct-error" role="alert">{t(f.error)}</div>}
-        <button type="submit" className="ph-btn dark" style={{ width: '100%', height: 46 }} disabled={f.busy || f.payerLocked}>
+        <button type="submit" className="ph-btn dark" style={{ width: '100%', height: 46 }} disabled={f.busy || f.reading || f.payerLocked}>
           {f.busy ? '…' : entry ? t('acctSaveEdit') : action}
         </button>
       </form>

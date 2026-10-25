@@ -61,6 +61,18 @@ const link = (token: string, txnId: string, body: Record<string, unknown>) =>
 describe('bank transactions: sell-order and commission links', () => {
   beforeEach(async () => { await resetDb(); });
 
+  it('does not replace a link when a commission search result became stale', async () => {
+    await seed();
+    const { token } = await loginAs(ALEX);
+    const first = await createPO(token);
+    const second = await createPO(token);
+    const id = await idOf('m-commission');
+    expect((await link(token, id, { orderId: first, kind: 'commission', onlyUnlinked: true })).status).toBe(200);
+    expect((await link(token, id, { orderId: second, kind: 'commission', onlyUnlinked: true })).status).toBe(409);
+    const row = (await getTestDb()`SELECT order_id, link_kind FROM bank_transactions WHERE id = ${id}`)[0];
+    expect(row).toMatchObject({ order_id: first, link_kind: 'commission' });
+  });
+
   it('links a sell order on every leg, by sign, and the ledger nets it', async () => {
     await seed();
     const { token } = await loginAs(ALEX);

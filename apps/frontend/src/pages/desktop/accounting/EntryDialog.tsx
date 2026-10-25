@@ -1,3 +1,4 @@
+import { AccountingAmountSources } from '../../../components/AccountingAmountSources';
 import { ACCOUNTING_KINDS, ACCOUNTING_METHODS, KIND_TARGET, type AccountingKind, type AccountingMethod } from '@recycle-erp/shared';
 import { Modal } from '../../../components/Modal';
 import { Icon } from '../../../components/Icon';
@@ -52,7 +53,7 @@ export function EntryDialog({ preset, entry, onClose, onSaved, zIndex }: {
       </form>
       <div className="modal-foot">
         <button type="button" className="btn" onClick={onClose} disabled={f.busy}>{t('cancel')}</button>
-        <button type="submit" form="acct-entry-form" className="btn accent" disabled={f.busy || f.payerLocked}>
+        <button type="submit" form="acct-entry-form" className="btn accent" disabled={f.busy || f.reading || f.payerLocked}>
           {f.busy ? '…' : entry ? t('acctSaveEdit') : action}
         </button>
       </div>
@@ -122,7 +123,7 @@ function EntryFields({ f }: { f: AccountingEntryForm }) {
             <div className="seg" role="group" aria-label={t('acctFieldCurrency')}>
               {(['CNY', 'USD'] as const).map(c => (
                 <button key={c} type="button" className={form.currency === c ? 'active' : ''} aria-pressed={form.currency === c}
-                        onClick={() => f.set({ currency: c })}>
+                        onClick={() => f.setCurrency(c)}>
                   {c === 'CNY' ? '¥ CNY' : '$ USD'}
                 </button>
               ))}
@@ -138,6 +139,7 @@ function EntryFields({ f }: { f: AccountingEntryForm }) {
           </div>
         )}
       </div>
+      <AccountingAmountSources f={f} />
       {form.currency === 'USD' && f.preview != null && (
         <PreviewLine value={f.preview} />
       )}
