@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-396](./RS-396-search-commission-transactions-and-autofill-payment.md) | in-review | story | P2 | Search commission transactions and autofill payment amounts | 1.345.0 |
+| [RS-396](./RS-396-search-commission-transactions-and-autofill-payment.md) | done | story | P2 | Search commission transactions and autofill payment amounts | 1.345.0 |
 | [RS-395](./RS-395-refresh-accounting-review-evidence-after-attachment.md) | done | bug | P2 | Refresh accounting review evidence after attachment edits | 1.344.1 (dev), 1.333.2 (prod) |
 | [RS-394](./RS-394-facebook-workers-pull-cities-from-an-always-on-fleet.md) | backlog | story | P2 | Facebook workers pull cities from an always-on fleet queue in the ERP | — |
 | [RS-393](./RS-393-a-manager-can-start-the-city-round-now-instead-of-at.md) | done | story | P2 | A manager can start the city round now instead of at the workers' start time | v1.334.0, facebook-tracker 0.13.18 |

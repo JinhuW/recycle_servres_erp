@@ -2,12 +2,12 @@
 id: RS-396
 title: Search commission transactions and autofill payment amounts
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-25
 reporter: jinhu
 branch: JinhuW/yellowtail
-pr:
+pr: 897
 version: 1.345.0
 related: []
 ---
@@ -64,8 +64,8 @@ linking and accounting-entry mutation rules remain authoritative. Searches
 must not silently take a payment already linked to a different record.
 
 
-Verification: `pnpm typecheck`, `pnpm build`, and the frontend suite (90 files,
-1,069 tests) pass. Backend payment/accounting/commission suites pass; the final receipt, rename,
+Verification: `pnpm typecheck`, `pnpm build`, and the frontend suite on the latest dev base (94 files,
+1,152 tests) pass. Backend payment/accounting/commission suites pass; the final receipt, rename,
 evidence and form-source suites pass (49 tests).
 Headless Chromium against a disposable PostgreSQL 18 database verified desktop
 and phone transaction search/linking, cancellation, payer and void updates,
