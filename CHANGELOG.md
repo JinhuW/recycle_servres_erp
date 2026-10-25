@@ -17,6 +17,18 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.333.2] - 2026-10-25
+
+### Fixed
+
+- Adding or removing a payment screenshot in an accounting entry's drawer
+  refreshes the Review queue and its evidence pane. Review shows newly added
+  proof and drops deleted links without a page reload (RS-395).
+
+This production release includes the accounting screenshots feature from
+v1.333.0 and its evidence-refresh fix. The fix is v1.344.1 on dev; unrelated
+dev changes are not part of this release.
+
 ## [1.333.0] - 2026-10-24
 
 An RMB Flow entry now keeps the payment screenshots that prove it (RS-390).
