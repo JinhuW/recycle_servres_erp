@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import type { ReviewStatsDay } from '../../../lib/coordinator';
 import type { FleetCity, FleetTask } from '../../../lib/fleet';
-import { CITIES, HOSTS, NOW, RELEASE, SLOTS, TASKS } from './fixtures';
+import { CITIES, HITS, HOSTS, NOW, RELEASE, SLOTS, STATS, TASKS, WORKERS } from './fixtures';
 import {
-  boardCells, budgetTone, cityStanding, countsSentence, dueIn, dueLabel, easternClock, filterTasks, hostRunning, isQuarantined,
-  isSlug, leaseLive, liveness, maskUid, nextDue, openSearch, releaseSummary, rollProgress, roundStartPreview, slotLease, sortTasks, spanLabel,
-  utcDayStart, withCityNames,
+  alertsByCity, averageTaskSeconds, beltAxis, beltLeft, beltRow, beltSummary, budgetTone, cityBucket, cityStanding, daySeries, dueIn, dueLabel,
+  easternClock, filterCities, filterTasks, funnelCounts, funnelGaps, funnelHeadline, homeWorkerOf, hostRunning, isQuarantined, isSlug,
+  lastDoneSearch, leaseLive, liveness, logByItem, maskUid, nextDue, niceTop, openSearch, releaseSummary, rollProgress, roundStartPreview,
+  slotLease, sortTasks, spanLabel, utcDayStart, withCityNames, workersBusy,
 } from './fleetBoard';
 
 // A translator that shows its key and its numbers, so a sentence can be read
@@ -53,61 +55,160 @@ describe('due times', () => {
   });
 });
 
-describe('boardCells', () => {
-  it('ranks each city by its state, in board order, then by name', () => {
-    const { cells, counts } = boardCells(CITIES, TASKS, 'server_ram', NOW);
-    expect(cells.map(c => `${c.slug}:${c.state}`)).toEqual([
-      'nyc:done',        // searched today, though its next task waits
-      'houston:leased',  // homelab-3 holds it
-      'denver:due',      // ready, 45 min overdue
-      'philly:later',    // ready in 15 min
-      'tulsa:cancelled', // removed today
-    ]);
-    expect(counts).toEqual({ cities: 5, done: 1, leased: 1, due: 1, later: 1, cancelled: 1 });
+describe('the belt', () => {
+  it('places an instant on the 24-hour window', () => {
+    expect(beltLeft(NOW, NOW)).toBe(50);
+    expect(beltLeft(NOW - 12 * 3_600_000, NOW)).toBe(0);
+    expect(beltLeft(min(6 * 60), NOW)).toBe(75);
   });
-  it('carries the time and the worker the state turns on', () => {
-    const { cells } = boardCells(CITIES, TASKS, 'server_ram', NOW);
-    const leased = cells.find(c => c.slug === 'houston')!;
-    expect(leased.by).toBe('homelab-3');
-    expect(leased.at).toBe(TASKS[0].lease_expires_at);
-    const done = cells.find(c => c.slug === 'nyc')!;
-    expect(done.by).toBe('homelab-1');
-    expect(done.at).toBe(TASKS[8].done_at);
+  it('buckets one item’s tasks by state and quarter hour', () => {
+    const row = beltRow(TASKS, 'server_ram', NOW);
+    expect(row.counts).toEqual({ done: 1, leased: 1, due: 1, later: 1 });
+    // nyc's search finished 240 min ago: bucket -16, left of now.
+    const done = row.marks.find(m => m.kind === 'done')!;
+    expect(done.key).toBe('d-16');
+    expect(done.tasks.map(x => x.id)).toEqual([190]);
+    expect(done.left).toBeLessThan(50);
+    // houston is leased: just right of now.
+    expect(row.marks.find(m => m.kind === 'leased')!.left).toBe(50.5);
+    // philly is due in 15 min: inside the next hour, so amber.
+    const soon = row.marks.find(m => m.kind === 'soon')!;
+    expect(soon.tasks.map(x => x.id)).toEqual([207]);
+    expect(soon.left).toBeGreaterThan(50);
+    // denver is 45 min overdue: the wall, not a mark.
+    expect(row.due.map(x => x.id)).toEqual([203]);
+    // boise's slug check is not a city-item.
+    expect(row.marks.flatMap(m => m.tasks).map(x => x.id)).not.toContain(209);
   });
-  it('leaves out a verifying city and a removed city with no task today', () => {
-    const { cells } = boardCells(CITIES, [], 'server_ram', NOW);
-    expect(cells.map(c => c.slug)).not.toContain('boise');
-    expect(cells.map(c => c.slug)).not.toContain('tulsa');
+  it('leaves out what is beyond the window on either side', () => {
+    const row = beltRow(TASKS, 'enterprise_ssd', NOW);
+    // nyc's enterprise_ssd task is due in 21 h: not on the belt, not counted.
+    expect(row.counts.later).toBe(1);   // houston's, in 3 h
+    expect(row.marks.find(m => m.kind === 'later')!.tasks.map(x => x.id)).toEqual([202]);
+    const old: FleetTask = { ...TASKS[8], item: 'enterprise_ssd', done_at: min(-13 * 60) };
+    expect(beltRow([old], 'enterprise_ssd', NOW).counts.done).toBe(0);
   });
-  it('reads an enabled city with nothing open as waiting', () => {
-    const bare: FleetCity = { ...CITIES[1], open_tasks: [] };
-    const { cells } = boardCells([bare], [], 'server_ram', NOW);
-    expect(cells).toEqual([{ slug: 'denver', name: 'Denver, CO', state: 'later', at: null, by: null }]);
+  it('puts a manual task first in the due stack', () => {
+    const manual: FleetTask = { ...TASKS[2], id: 999, priority: 100, reason: 'manual', due_at: min(-1) };
+    expect(beltRow([...TASKS, manual], 'server_ram', NOW).due.map(x => x.id)).toEqual([999, 203]);
   });
-  it('does not count a finished slug check as the day’s search', () => {
-    const checked: FleetTask = { ...TASKS[13], state: 'done', done_at: min(-1) };
-    const boise: FleetCity = { ...CITIES[4], enabled: true, verified_at: min(-1), open_tasks: [] };
-    const { cells } = boardCells([boise], [checked], 'server_ram', NOW);
-    expect(cells[0].state).toBe('later');
+  it('ticks every third Eastern hour, clear of the edges and of now', () => {
+    const axis = beltAxis(NOW, 'en-US');
+    // 14:30 EDT: every third hour from 3 AM to 12 AM; 3 PM sits under the now label and 12 AM/3 AM at the edges are kept only when inside.
+    expect(axis.map(a => a.label)).toEqual(['3 AM', '6 AM', '9 AM', '12 PM', '6 PM', '9 PM', '12 AM']);
+    for (const a of axis) {
+      expect(a.left).toBeGreaterThan(1);
+      expect(a.left).toBeLessThan(99);
+      expect(Math.abs(a.left - 50)).toBeGreaterThanOrEqual(5);
+    }
   });
-  it('does not count yesterday as done today', () => {
-    const yesterday: FleetTask = { ...TASKS[8], done_at: '2026-10-23T23:59:00Z' };
-    const nyc: FleetCity = { ...CITIES[2], open_tasks: [] };
-    const { cells } = boardCells([nyc], [yesterday], 'server_ram', NOW);
-    expect(cells[0].state).toBe('later');
+  it('measures the average task from today’s finished searches', () => {
+    // 412, 290 and 500 seconds today.
+    expect(averageTaskSeconds(TASKS, NOW)).toBe(401);
+    expect(averageTaskSeconds([], NOW)).toBe(360);
+    const yesterday: FleetTask = { ...TASKS[8], done_at: '2026-10-23T12:00:00Z' };
+    expect(averageTaskSeconds([yesterday], NOW)).toBe(360);
+  });
+  it('counts the workers that can take a task, busy and idle', () => {
+    // homelab-1 idle, homelab-2 session expired, homelab-3 busy, homelab-4 degraded but idle, worker-60-14-1 busy.
+    expect(workersBusy(WORKERS, NOW)).toEqual({ busy: 2, idle: 2 });
+    expect(workersBusy([{ ...WORKERS[0], last_heartbeat_at: min(-30) }], NOW)).toEqual({ busy: 0, idle: 0 });
+  });
+  it('sums the rows into the sentence’s numbers', () => {
+    const rows = ['server_ram', 'enterprise_ssd'].map(item => beltRow(TASKS, item, NOW));
+    const s = beltSummary(rows, { busy: 2, idle: 1 }, 360);
+    expect(s).toMatchObject({ done: 3, leased: 2, due: 2, later: 2, busy: 2, idle: 1, avgSeconds: 360 });
+    // Two due at six minutes each over three hands: four minutes.
+    expect(s.clearMinutes).toBe(4);
+    expect(beltSummary(rows, { busy: 0, idle: 0 }, 360).clearMinutes).toBe(12);
   });
 });
 
-describe('countsSentence', () => {
-  it('says the round is done when every working city is searched', () => {
-    expect(countsSentence(t, { cities: 3, done: 2, leased: 0, due: 0, later: 0, cancelled: 1 })).toBe('fleetBoardDone(n=2).');
+describe('the city log', () => {
+  it('groups per item: the open task, then the last two finished', () => {
+    const logs = TASKS.filter(x => x.city === 'houston').map(x => ({ ...x, events: [] }));
+    const groups = logByItem(logs, ['server_ram', 'enterprise_ssd']);
+    expect(groups.map(g => [g.item, g.tasks.map(x => x.id)])).toEqual([
+      ['server_ram', [201]],
+      ['enterprise_ssd', [202, 192]],
+    ]);
   });
-  it('lists only the counts that are not zero, then the cancelled ones', () => {
-    expect(countsSentence(t, { cities: 5, done: 1, leased: 1, due: 0, later: 2, cancelled: 1 }))
-      .toBe('fleetBoardSearched(done=1,n=4), fleetBoardLeased(n=1), fleetBoardLater(n=2). fleetBoardCancelled(n=1)');
+  it('names the worker that calls a city home', () => {
+    expect(homeWorkerOf(SLOTS, 'houston')?.worker_id).toBe('homelab-3');
+    expect(homeWorkerOf(SLOTS, 'denver')).toBeNull();
   });
-  it('has a word for an empty round', () => {
-    expect(countsSentence(t, { cities: 1, done: 0, leased: 0, due: 0, later: 0, cancelled: 1 })).toBe('fleetBoardEmpty');
+});
+
+describe('cities tab', () => {
+  it('buckets a city for the legend', () => {
+    expect(cityBucket(CITIES[0])).toBe('pinned');
+    expect(cityBucket(CITIES[1])).toBe('enabled');
+    expect(cityBucket(CITIES[4])).toBe('verifying');
+    expect(cityBucket(CITIES[5])).toBe('disabled');
+  });
+  it('sorts verifying first, then filters by bucket, region and text', () => {
+    expect(filterCities(CITIES, { bucket: 'all', region: '', q: '' }).map(c => c.slug))
+      .toEqual(['boise', 'houston', 'denver', 'nyc', 'philly', 'tulsa']);
+    expect(filterCities(CITIES, { bucket: 'enabled', region: 'northeast', q: '' }).map(c => c.slug)).toEqual(['nyc', 'philly']);
+    expect(filterCities(CITIES, { bucket: 'all', region: '', q: 'HOU' }).map(c => c.slug)).toEqual(['houston']);
+  });
+  it('finds the newest finished search of a city-item', () => {
+    expect(lastDoneSearch(TASKS, 'nyc', 'server_ram')?.id).toBe(190);
+    expect(lastDoneSearch(TASKS, 'houston', 'server_ram')).toBeNull();
+  });
+});
+
+describe('analysis', () => {
+  it('sums the stage counters over the range, today included', () => {
+    expect(funnelCounts(STATS, 1, NOW)).toMatchObject({ search: 255, cards: 13865, ai: 1281, alert: 9 });
+    expect(funnelCounts(STATS, 7, NOW)).toMatchObject({ search: 255 + 240 + 250, ai: 1281 + 1300 + 1250, alert: 9 + 8 + 7 });
+    expect(funnelCounts(STATS, 14, NOW).search).toBe(255 + 240 + 250 + 230);
+    expect(funnelCounts(null, 1, NOW)).toEqual({});
+  });
+  it('falls back to reviewed and alerted on rows without the funnel counters', () => {
+    const old: ReviewStatsDay[] = [{ day: '2026-10-24', reviewed: 10, alerted: 1 }, { day: '2026-10-23', reviewed: 20, alerted: 2 }];
+    expect(funnelCounts(old, 7, NOW)).toEqual({ ai: 30, alert: 3 });
+  });
+  it('reads the pass rate between stages, cards per search as a ratio', () => {
+    const gaps = funnelGaps(funnelCounts(STATS, 1, NOW));
+    expect(gaps[0]).toEqual({ kind: 'ratio', value: 54, drop: false });
+    expect(gaps[1]).toEqual({ kind: 'pct', value: 44.6, drop: true });
+    expect(gaps[4]).toEqual({ kind: 'pct', value: 98, drop: false });
+    expect(funnelGaps({ ai: 3, alert: 1 })[0]).toEqual({ kind: 'ratio', value: null, drop: false });
+  });
+  it('works out the headline ratios', () => {
+    const h = funnelHeadline(funnelCounts(STATS, 1, NOW))!;
+    expect(h).toMatchObject({ cards: 13865, searches: 255, reviews: 1281, alerts: 9, cardsPerAlert: 1541, reviewsPerAlert: 142, titleDrop: 55, modelDrop: 99 });
+    expect(funnelHeadline({ ai: 5, alert: 0 })!.cardsPerAlert).toBeNull();
+    expect(funnelHeadline({})).toBeNull();
+  });
+  it('fills a day series with zeros and sums it', () => {
+    const s = daySeries(STATS, 'alerted', 14, NOW);
+    expect(s.points.length).toBe(14);
+    expect(s.points[13]).toEqual({ day: '2026-10-24', value: 9, today: true });
+    expect(s.points[0]).toEqual({ day: '2026-10-11', value: 0, today: false });
+    expect(s.total).toBe(9 + 8 + 7 + 6);
+    expect(s.max).toBe(9);
+    // The full-day average leaves today out.
+    expect(s.fullDayAverage).toBe(Math.round(21 / 13));
+  });
+  it('picks a round top for the gridlines', () => {
+    expect(niceTop(0)).toBe(1);
+    expect(niceTop(9)).toBe(10);
+    expect(niceTop(1407)).toBe(2000);
+    expect(niceTop(13)).toBe(20);
+  });
+  it('groups alerts by city with the fleet’s reviews and the home worker', () => {
+    const rows = alertsByCity(HITS, TASKS, CITIES, SLOTS);
+    expect(rows.map(r => [r.slug, r.alerts])).toEqual([['houston', 3], ['nyc', 2]]);
+    expect(rows[0]).toMatchObject({ name: 'Houston, TX', region: 'south', reviewed: 5, lastDay: '2026-10-24', homeWorker: 'homelab-3' });
+    expect(rows[0].rate).toBeNull(); // Coordinator alerts include searches outside the ERP task history.
+    const matched = alertsByCity(HITS, TASKS.map(t => t.id === 192 ? { ...t, result: { ...t.result, alerted: 3 } } : t), CITIES, SLOTS);
+    expect(matched[0].rate).toBeCloseTo(0.6);
+    expect(rows[1]).toMatchObject({ reviewed: 12, homeWorker: 'homelab-1' });
+    // An unknown slug is still a row, by its slug.
+    expect(alertsByCity([{ day: '2026-10-24', priority: null, item_name: null, search_city: 'nowhere', sent: 1, hit: 0 }], [], [], [])[0])
+      .toMatchObject({ slug: 'nowhere', name: 'nowhere', region: null, reviewed: null, rate: null, homeWorker: null });
   });
 });
 
@@ -204,20 +305,25 @@ describe('slots', () => {
 });
 
 describe('task table', () => {
+  it('keeps future searches out of the Due filter', () => {
+    expect(filterTasks(TASKS, { state: 'ready', item: '', q: '' }, NOW).map(x => x.id)).toEqual([203, 204, 209]);
+  });
   const named = withCityNames(TASKS, CITIES);
   it('names each task’s city from the city list', () => {
     expect(named[0].city_name).toBe('Houston, TX');
     expect(withCityNames([{ ...TASKS[0], city: 'gone' }], CITIES)[0].city_name).toBeNull();
   });
-  it('filters by state, item and a case-insensitive city or worker', () => {
-    expect(filterTasks(TASKS, { state: 'leased', item: '', city: '', worker: '' }).map(x => x.id)).toEqual([201, 208]);
-    expect(filterTasks(named, { state: '', item: 'enterprise_ssd', city: 'NEW YORK', worker: '' }).map(x => x.id)).toEqual([206, 191]);
-    expect(filterTasks(TASKS, { state: '', item: '', city: '', worker: 'homelab-1' }).map(x => x.id)).toEqual([190, 191]);
+  it('filters by state, item and one box over the city, worker and account', () => {
+    expect(filterTasks(TASKS, { state: 'leased', item: '', q: '' }).map(x => x.id)).toEqual([201, 208]);
+    expect(filterTasks(named, { state: '', item: 'enterprise_ssd', q: 'NEW YORK' }).map(x => x.id)).toEqual([206, 191]);
+    expect(filterTasks(TASKS, { state: '', item: '', q: 'homelab-1' }).map(x => x.id)).toEqual([190, 191]);
+    expect(filterTasks(TASKS, { state: '', item: '', q: 'account 31' }).map(x => x.id)).toEqual([208]);
   });
-  it('sorts newest activity first', () => {
-    const ids = sortTasks(TASKS).map(x => x.id);
-    // The furthest-ahead due time leads; the oldest finished task is last.
-    expect(ids[0]).toBe(206);
-    expect(ids[ids.length - 1]).toBe(170);
+  it('sorts running first, then due, then finished, then waiting for later', () => {
+    const ids = sortTasks(TASKS, NOW).map(x => x.id);
+    expect(ids.slice(0, 2)).toEqual([208, 201]);              // leased, newest lease first
+    expect(ids.slice(2, 5)).toEqual([209, 204, 203]);         // due now, newest due first
+    expect(ids[ids.length - 1]).toBe(207);                    // the soonest waiting-for-later task is last
+    expect(ids.indexOf(190)).toBeLessThan(ids.indexOf(206));  // finished before waiting-for-later
   });
 });

@@ -1,15 +1,16 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { Fragment, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Skeleton } from '../../components/Skeleton';
 import { coordinatorApi, type FilterPrompt, type FleetDoc, type ReviewStatsDay } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
-  FLOW_STAGES, STAGE_FORMS, draftChanges, flowCounts, settingsDraft, settingsPatch, utcToEastern,
+  FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch, utcToEastern,
   type FlowStage, type ItemField, type SearchField, type SettingsDraft,
 } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 import type { Translate } from '../../lib/orderPresentation';
 import { keywordCount } from '../../lib/keywordRules';
 import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
+import { funnelCounts, funnelGaps, funnelHeadline, type FunnelRange } from './fleet/fleetBoard';
 import { ListingTester, RulesPanel, STAGE_LISTS, probeVerdicts, type ItemRules, type Probe } from './FleetRules';
 
 // ─── From a search to an alert ────────────────────────────────────────────────
@@ -18,8 +19,10 @@ import { ListingTester, RulesPanel, STAGE_LISTS, probeVerdicts, type ItemRules, 
 // the cheap keyword gates first, the model only on what survives them. Each
 // stage names the code behind it and the settings it reads; a stage with
 // settings has an Edit form (STAGE_FORMS) that the console writes into every
-// worker's config. Counts are today's fleet totals from /v1/stats/reviews.
-// The phrase and keyword lists are FleetRules.tsx.
+// worker's config. Counts are the fleet's totals from /v1/stats/reviews over
+// the range the Analysis tab picked (today, 7 or 14 days); between stages the
+// pass rate, and under the pipeline the headline ratios. The phrase and
+// keyword lists are FleetRules.tsx.
 
 type Setting = { label: string; value: string; fixed?: boolean };
 
@@ -93,11 +96,13 @@ const SEARCH_LABEL: Record<SearchField, string> = {
   min_unit_count: 'fbcSetMinUnits',
 };
 
-export function FlowCard({ fleet, stats, prompt, onSaved }: {
+export function FlowCard({ fleet, stats, prompt, onSaved, range = 1, now }: {
   fleet: FleetDoc | null;
   stats: ReviewStatsDay[] | 'unavailable' | null;
   prompt: FilterPrompt | 'unavailable' | null;
   onSaved: () => void;
+  range?: FunnelRange;
+  now?: number;
 }) {
   const { t, locale } = useT();
   const [stage, setStage] = useState<FlowStage>('ai');
@@ -109,7 +114,9 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
   // The list whose "Add keyword" opened Edit, so its input has the cursor.
   const [addFocus, setAddFocus] = useState<ItemField | null>(null);
   const [probe, setProbe] = useState<Probe>({ title: '', description: '' });
-  const counts = flowCounts(Array.isArray(stats) ? stats : null);
+  const counts = funnelCounts(Array.isArray(stats) ? stats : null, range, now);
+  const gaps = funnelGaps(counts);
+  const headline = stats === null ? null : funnelHeadline(counts);
   const fmt = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const items = (fleet?.items ?? []).filter(i => i.enabled);
   const editable = !!fleet?.settings?.editable;
@@ -271,28 +278,46 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
     <section className="card ff-flow" aria-label={t('fbcFlowTitle')}>
       <div className="card-head">
         <h2 className="card-title">{t('fbcFlowTitle')}</h2>
-        <span className="card-sub">{t('fbcFlowSub')}</span>
+        <span className="card-sub">{t(`fleetFunnelSub_${range}`)}</span>
       </div>
-      <div className="ff-flow-row" role="tablist" aria-label={t('fbcFlowTitle')}>
-        {FLOW_STAGES.map(k => {
+      <div className="ff-flow-row fleet-flow-row" role="tablist" aria-label={t('fbcFlowTitle')}>
+        {FLOW_STAGES.map((k, i) => {
           const n = counts[k];
+          const gap = i > 0 ? gaps[i - 1] : null;
           return (
-            <button key={k} type="button" role="tab" aria-selected={stage === k}
-              className={`ff-stage${k === 'ai' || k === 'alert' ? ' ff-stage-key' : ''}`} onClick={() => pick(k)}>
-              <span className="ff-stage-title">{t(`fbcFlow_${k}`)}</span>
-              {stats === null ? <>
-                <span className="ff-stage-n"><Skeleton width={46} height={20} /></span>
-                <span className="ff-stage-unit"><Skeleton width={64} height={10} /></span>
-              </> : <>
-                <span className="ff-stage-n" title={n === undefined ? t('fbcFlowNotCounted') : undefined}>
-                  {n === undefined ? '—' : fmt.format(n)}
+            <Fragment key={k}>
+              {gap && (
+                <span className={`fleet-gap${gap.drop ? ' fleet-gap-drop' : ''}`}
+                  title={gap.kind === 'ratio' ? t('fleetGapCardsPerSearch') : gap.value === null ? t('fbcFlowNotCounted') : t('fleetGapOfPrevious', { pct: gap.value })}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 6l6 6-6 6" /></svg>
+                  {stats === null || gap.value === null ? '' : gap.kind === 'ratio' ? `×${fmt.format(gap.value)}` : `${gap.value}%`}
                 </span>
-                <span className="ff-stage-unit">{n === undefined ? t('fbcFlowNotCounted') : t(`fbcFlowUnit_${k}`)}</span>
-              </>}
-            </button>
+              )}
+              <button type="button" role="tab" aria-selected={stage === k}
+                className={`ff-stage${k === 'ai' || k === 'alert' ? ' ff-stage-key' : ''}`} onClick={() => pick(k)}>
+                <span className="ff-stage-title">{t(`fbcFlow_${k}`)}</span>
+                {stats === null ? <>
+                  <span className="ff-stage-n"><Skeleton width={46} height={20} /></span>
+                  <span className="ff-stage-unit"><Skeleton width={64} height={10} /></span>
+                </> : <>
+                  <span className="ff-stage-n" title={n === undefined ? t('fbcFlowNotCounted') : undefined}>
+                    {n === undefined ? '—' : fmt.format(n)}
+                  </span>
+                  <span className="ff-stage-unit">{n === undefined ? t('fbcFlowNotCounted') : t(range !== 1 && (k === 'ai' || k === 'alert') ? `fleetFlowUnitRange_${k}` : `fbcFlowUnit_${k}`)}</span>
+                </>}
+              </button>
+            </Fragment>
           );
         })}
       </div>
+      {headline && (
+        <p className="fleet-funnel-foot">
+          {t('fleetFunnelHeadline', { cards: fmt.format(headline.cards), searches: fmt.format(headline.searches), reviews: fmt.format(headline.reviews), alerts: fmt.format(headline.alerts) })}
+          {headline.cardsPerAlert !== null && headline.reviewsPerAlert !== null && <> {t('fleetFunnelPerAlert', { cards: fmt.format(headline.cardsPerAlert), reviews: fmt.format(headline.reviewsPerAlert) })}</>}
+          {headline.titleDrop !== null && <> {t('fleetFunnelTitleDrop', { pct: headline.titleDrop })}</>}
+          {headline.modelDrop !== null && <> {t('fleetFunnelModelDrop', { pct: headline.modelDrop })}</>}
+        </p>
+      )}
       {/* Every stage renders into the same cell and only the picked one shows,
           so the card is always as tall as its tallest stage: picking a stage
           never moves the page and nothing scrolls. The Edit form takes its

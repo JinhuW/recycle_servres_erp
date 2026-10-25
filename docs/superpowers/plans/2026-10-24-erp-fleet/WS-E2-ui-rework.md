@@ -123,15 +123,15 @@ Desktop only, as before.
 
 ## Exit
 
-- [ ] Five tabs; the old three paths redirect; purchasers unchanged.
-- [ ] Fleet: host strip plus one table of all accounts with Host, idle rows
+- [x] Five tabs; the old three paths redirect; purchasers unchanged.
+- [x] Fleet: host strip plus one table of all accounts with Host, idle rows
       with their reason and action, legend, host select and search working.
-- [ ] Tasks: the belt renders from `fleetApi.tasks()` with the counts
+- [x] Tasks: the belt renders from `fleetApi.tasks()` with the counts
       sentence; the city log opens beside the table.
-- [ ] Analysis: the pipeline with pass rates and range, two charts, alerts by
+- [x] Analysis: the pipeline with pass rates and range, two charts, alerts by
       city; the Fleet tab no longer shows the pipeline.
-- [ ] Account pool shows Runs on.
-- [ ] Checked locally against a private database with a made-up account and
+- [x] Account pool shows Runs on.
+- [x] Checked locally against a private database with a made-up account and
       `fleet-fake-worker.mjs`, as WS-E did; screenshots of each tab in the PR.
 
 ## Notes for the agent
@@ -142,3 +142,22 @@ Desktop only, as before.
   fleet's shape on 2026-10-24, not fixtures to copy.
 - Never cause a Facebook login (root `AGENTS.md`, first rule): nothing in
   this workstream touches a host or a worker.
+
+## Verification
+
+- Frontend: 94 files, 1,150 tests passed; workspace typecheck and production
+  frontend build passed.
+- Private Postgres on 55499: fake worker claimed an invented account,
+  completed two searches, reported `done_only`, and saved its session.
+- Local browser: all five tabs, old redirects, account search, city-log aside,
+  Analysis range and daily-value table, purchaser pool-only access and a
+  1000 px viewport checked. Screenshots are in `WS-E2-screenshots/`.
+- Backend suite: 2,640 passed, one existing budget-fixture failure. At
+  02:55 UTC its `NOW() - interval '7 hours'` lease starts yesterday, while
+  `fleet_minutes` assigns minutes to the lease's UTC date. The fixture
+  therefore does not spend today's budget. The backend implementation and
+  test are identical to `dev`; this frontend rework leaves them unchanged.
+- Analysis daily totals retain the coordinator's UTC day boundaries. City
+  alert rates stay blank when the ERP task history cannot account for the
+  coordinator alert total or hits the 1,000-row cap. No new API contract.
+- No Facebook login, worker restart, deployment or live-host change.

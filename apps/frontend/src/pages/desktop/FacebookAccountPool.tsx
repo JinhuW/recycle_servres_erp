@@ -18,6 +18,7 @@ import {
   type PoolSnapshot,
   type PoolStatus,
 } from '../../lib/facebookPool';
+import type { FleetSlot } from '../../lib/fleet';
 import { fleetStatus, parkedWorkers, vaultAccountIdFor, whoIs } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -26,7 +27,9 @@ import { useEffectiveUser } from '../../lib/tweaks';
 import { AccountEditor } from './accountPool/AccountEditor';
 import { AccountImport } from './accountPool/AccountImport';
 import { CookieLabel, PoolCode, STATUS_KEYS, StatusChip } from './accountPool/shared';
-import { StatusChip as WorkerStatusChip, statusNote } from './FleetWorkers';
+import { isQuarantined, leaseLive } from './fleet/fleetBoard';
+import { workerStateLabel } from './fleet/shared';
+import { STATUS_KEY, StatusChip as WorkerStatusChip, statusNote } from './FleetWorkers';
 import '../../styles/facebookPool.css';
 
 type Props = {
@@ -36,6 +39,8 @@ type Props = {
   // Managers only, and null until (or unless) the coordinator answers.
   fleet?: FleetDoc | null;
   challenges?: Challenge[] | null;
+  // Managers only: the ERP fleet's slots, for the Runs on column.
+  slots?: FleetSlot[] | null;
 };
 // Refusals the API names with one of the page's own keys read as a warning,
 // not as the blocking error dialog: the pool moved under the user, that's all.
@@ -50,6 +55,9 @@ const COLUMNS: { key: string; sort: (a: PoolAccount) => string | number }[] = [
   { key: 'fpNo', sort: (a) => a.no },
   { key: 'fpUid', sort: (a) => a.uid },
   { key: 'fpStatus', sort: (a) => a.status },
+  // A fleet account's holder is its worker, ERP or coordinator, so the
+  // column sorts by it.
+  { key: 'fpRunsOn', sort: (a) => a.holder ?? '' },
   { key: 'fpHolder', sort: (a) => a.holder ?? '' },
   { key: 'fpPassword', sort: (a) => a.password },
   { key: 'fpCode', sort: (a) => a.totp },
@@ -76,7 +84,7 @@ const compareBy = (sort: (a: PoolAccount) => string | number, dir: 'asc' | 'desc
     return sign * cmp;
   };
 };
-export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = null, challenges = null }: Props) {
+export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = null, challenges = null, slots = null }: Props) {
   const { t, locale } = useT();
   const user = useEffectiveUser()!;
   const manager = user.role === 'manager';
@@ -118,6 +126,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
   const [reporting, setReporting] = useState<number | null>(null);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const workers = useMemo(() => new Map((fleet?.workers ?? []).map((w) => [w.worker_id, w])), [fleet]);
+  const slotsByNo = useMemo(() => new Map((slots ?? []).map((s) => [s.account_no, s])), [slots]);
   const parked = useMemo(() => parkedWorkers(challenges), [challenges]);
   const workerOf = (a: PoolAccount) =>
     a.status === 'fleet' && a.holder ? workers.get(a.holder) : undefined;
@@ -290,6 +299,34 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
       </span>
     );
   };
+  // Where the account runs: the ERP's fleet worker that holds its slot, else
+  // the coordinator's worker, else why nothing runs it.
+  const runsOnCell = (a: PoolAccount) => {
+    const slot = slotsByNo.get(a.no);
+    if (slot?.worker && slot.worker_id && leaseLive(slot)) {
+      const path = fleetWorkerPath(slot.worker_id);
+      return (
+        <span className="fp-holder">
+          <a className="mono" href={hrefFor(path)} onClick={onLinkClick(path)}>{slot.worker_id}</a>
+          <small>{slot.worker.state ? workerStateLabel(t, slot.worker.state) : '—'}, {t('fleetEpochN', { n: slot.epoch })}</small>
+        </span>
+      );
+    }
+    const w = workerOf(a);
+    if (w) {
+      const path = fleetWorkerPath(w.worker_id);
+      return (
+        <span className="fp-holder">
+          <a className="mono" href={hrefFor(path)} onClick={onLinkClick(path)}>{w.worker_id}</a>
+          <small>{statusNote(t, w, parked, locale) ?? t(STATUS_KEY[fleetStatus(w, parked)])}</small>
+        </span>
+      );
+    }
+    if (slot && isQuarantined(slot)) return <a className="fp-muted" href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')}>{t('fpRunsOnQuarantined')}</a>;
+    if (slot?.parked) return <a className="fp-muted" href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')}>{t('fpRunsOnParked')}</a>;
+    if (a.status === 'taken') return <span className="fp-muted">{t('fpRunsOnManual', { who: a.holder ?? '—' })}</span>;
+    return <span className="fp-muted">{t(STATUS_KEYS[a.status]).toLowerCase()}</span>;
+  };
   const holderCell = (a: PoolAccount) => {
     const w = workerOf(a);
     if (w) {
@@ -416,6 +453,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
                         <td className="fp-row-number">{a.no}</td>
                         <td>{copyCell(a, 'uid', 'fpUid', a.uid, 'mono')}</td>
                         <td>{statusCell(a)}</td>
+                        <td>{runsOnCell(a)}</td>
                         <td>{holderCell(a)}</td>
                         <td>{secretCell(a, 'password', 'fpPassword')}</td>
                         <td>{copyCell(a, 'totp', 'fpCode', <PoolCode secret={a.totp} />)}</td>
@@ -445,7 +483,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
                     ))}
                     {!visible.length && (
                       <tr>
-                        <td colSpan={12} className="fp-empty">
+                        <td colSpan={COLUMNS.length + 1} className="fp-empty">
                           {t('fpNoMatch')}
                         </td>
                       </tr>

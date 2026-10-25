@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
-  accountingEntryPath, afterSalesCasePath, afterSalesNewPath, fleetWorkerPath, hrefFor, matchFleetWorker, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, navigate, navigateBack, onLinkClick,
+  accountingEntryPath, afterSalesCasePath, afterSalesNewPath, FLEET_TABS, fleetRedirect, fleetTabPath, matchFleetTab, fleetWorkerPath, hrefFor, matchFleetWorker, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, navigate, navigateBack, onLinkClick,
   parseShippingRoute, pathToDesktopView, pathToMobileView, poCheckPath, poLinePath, readPath, readPoLineQuery, readSafeNext,
   replaceRoute, sellOrderPackPath, splitHash,
   type LinkClick,
@@ -586,5 +586,25 @@ describe('Facebook pool route', () => {
     expect(matchFleetWorker(fleetWorkerPath('ne 1/x'))).toEqual({ workerId: 'ne 1/x' });
     expect(matchFleetWorker('/fleet/watch/denver-1')).toBeNull();
     expect(matchFleetWorker('/fleet')).toBeNull();
+  });
+});
+
+
+describe('fleet tab routes', () => {
+  it('keeps the new tabs under the Facebook sidebar entry', () => {
+    expect(FLEET_TABS).toEqual(['tasks', 'cities', 'analysis']);
+    for (const tab of FLEET_TABS) {
+      expect(matchFleetTab(fleetTabPath(tab))).toBe(tab);
+      expect(pathToDesktopView(fleetTabPath(tab))).toBe('coordinator');
+    }
+  });
+  it('redirects the retired tabs without consuming worker or pool routes', () => {
+    for (const [from, to] of [['/fleet/queue', '/fleet/tasks'], ['/fleet/hosts', '/fleet'], ['/fleet/slots', '/fleet']]) {
+      expect(fleetRedirect(from)).toBe(to);
+      expect(pathToDesktopView(from)).toBe('coordinator');
+      expect(matchFleetTab(from)).toBeNull();
+    }
+    expect(fleetRedirect('/fleet/pool')).toBeNull();
+    expect(fleetRedirect('/fleet/worker/hosts')).toBeNull();
   });
 });

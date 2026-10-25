@@ -15,6 +15,21 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.344.0] - 2026-10-24
+
+### Changed
+
+- Facebook fleet keeps its sidebar entry and organizes management into five
+  tabs: Fleet, Tasks, Cities, Analysis and Account pool. Fleet combines host
+  controls and every account in one filterable table, including coordinator
+  workers during the transition. Tasks shows the 24-hour task belt and a city
+  log beside the table; Cities adds verification details and fleet rules.
+- Analysis moves the search-to-alert pipeline off Fleet, adds range totals,
+  pass rates, daily charts with table views and alerts by city. Daily totals
+  retain the coordinator's UTC boundaries; city alert rates appear only when
+  ERP task results account for the same alert total. Account pool links each
+  account to its running worker. Old Queue, Hosts and Slots URLs redirect.
+
 ## [Unreleased]
 
 ## [1.343.0] - 2026-10-24

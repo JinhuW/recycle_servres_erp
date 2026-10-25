@@ -46,8 +46,8 @@ export function FleetWorkerPage({ worker: w }: { worker: FleetWorker }) {
     <>
       <div className="page-head">
         <div>
-          <a className="fl-back" href={hrefFor('/fleet/slots')} onClick={onLinkClick('/fleet/slots')}>
-            <Icon name="chevronLeft" size={13} />{t('fleetSlotsTitle')}
+          <a className="fl-back" href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')}>
+            <Icon name="chevronLeft" size={13} />{t('fpFleet')}
           </a>
           <h1 className="page-title mono">{w.worker_id}</h1>
           <div className="page-sub">{t('fleetWorkerSub', { host: w.host_id ?? '—' })}</div>

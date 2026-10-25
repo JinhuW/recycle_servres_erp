@@ -1,83 +1,112 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { ApiError } from '../../../lib/api';
-import { fleetApi, fleetErrorCode, type FleetCity, type FleetItem } from '../../../lib/fleet';
+import { fleetApi, fleetErrorCode, type FleetCity, type FleetItem, type FleetSettings, type FleetSlot, type FleetTask } from '../../../lib/fleet';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
-import { cityStanding, isSlug, marketplaceUrl, nextDue, normalizeSlug, type CityStanding } from './fleetBoard';
-import { Clock, ConfirmDialogBody, EmptyRow, TabCard, UnavailableCard, useFleetPoll, WorkerLink } from './shared';
+import {
+  CITY_BUCKETS, cityBucket, cityRegions, cityStanding, EMPTY_CITY_FILTER, easternClock, filterCities, homeWorkerOf, isSlug, lastDoneSearch,
+  marketplaceUrl, normalizeSlug, openSearch, withCityNames, type CityBucket, type CityFilter,
+} from './fleetBoard';
+import { agoLabel, ConfirmDialogBody, EmptyRow, Legend, UnavailableCard, useFleetPoll, WorkerLink } from './shared';
 
 // ─── Cities ───────────────────────────────────────────────────────────────────
 // The catalog the queue works from. A new city starts disabled with a
 // verify-slug task: a worker opens its Marketplace page and reports the
 // location label Facebook shows, because a wrong slug searches the account's
 // own area in silence. It is enabled once verified, or by hand with "Enable
-// anyway". Removing a city disables it and cancels its waiting tasks.
+// anyway" (or "Skip the check" while the worker has not reported). Removing a
+// city disables it and cancels its waiting tasks. The legend, a region select
+// and a search box narrow the table; verifying cities come first, each with
+// an inline row that says where its check stands. Per item a cell gives the
+// last search (time, cards, alerts) and the open task. The Rules dialog
+// holds the fleet-wide settings.
 
 const DEFAULT_RADIUS_KM = 500;
 const PER_DAY_CHOICES = [1, 2, 3, 4, 6] as const;
+// The finished searches the per-item cells read cards and alerts from.
+const DONE_HOURS = 48;
 
-const STANDING_CHIP: Record<CityStanding, string> = {
-  verifying: 'chip warn fleet-verifying', enabled: 'chip pos', disabled: 'chip muted', removed: 'chip muted',
+const BUCKET_CHIP: Record<CityBucket, string> = {
+  verifying: 'chip info fleet-verifying', pinned: 'chip warn', enabled: 'chip pos', disabled: 'chip muted',
 };
-const STANDING_KEY: Record<CityStanding, string> = {
-  verifying: 'fleetCityVerifying', enabled: 'fleetCityEnabled', disabled: 'fleetCityDisabled', removed: 'fleetCityRemoved',
+const BUCKET_KEY: Record<CityBucket | 'all', string> = {
+  all: 'fleetSegAll', verifying: 'fleetCityVerifying', pinned: 'fleetCityPinned', enabled: 'fleetCityEnabled', disabled: 'fleetCityDisabled',
+};
+const BUCKET_DOT: Record<CityBucket | 'all', string> = {
+  all: 'fleet-dot-all', enabled: 'fleet-dot-pos', pinned: 'fleet-dot-warn-strong', verifying: 'fleet-dot-info', disabled: 'fleet-dot-all',
 };
 
-type Data = { cities: FleetCity[]; items: FleetItem[] };
+type Data = { cities: FleetCity[]; items: FleetItem[]; done: FleetTask[]; slots: FleetSlot[] };
 
 export function FleetCitiesTab() {
   const { t } = useT();
-  const { data, reload } = useFleetPoll<Data>(() =>
-    Promise.all([fleetApi.cities(), fleetApi.items()]).then(([cities, items]) => ({ cities, items })));
+  const { data, reload } = useFleetPoll<Data>(() => {
+    const since = new Date(Date.now() - DONE_HOURS * 3_600_000).toISOString();
+    return Promise.all([
+      fleetApi.cities(), fleetApi.items(), fleetApi.tasks({ state: 'done', since }),
+      // The slots say which worker calls a city home; the table stands without them.
+      fleetApi.slots().catch(() => []),
+    ]).then(([cities, items, done, slots]) => ({ cities, items, done: withCityNames(done, cities), slots }));
+  });
   const [adding, setAdding] = useState(false);
-  const [showRemoved, setShowRemoved] = useState(false);
+  const [rules, setRules] = useState(false);
+  const [filter, setFilter] = useState<CityFilter>(EMPTY_CITY_FILTER);
 
   if (data === 'unavailable') return <UnavailableCard text={t('fleetNotServed')} />;
   const items = data?.items.filter(i => i.enabled).map(i => i.name) ?? [];
   const cities = data?.cities ?? [];
-  const shown = showRemoved ? cities : cities.filter(c => cityStanding(c) !== 'removed');
-  const removed = cities.length - cities.filter(c => cityStanding(c) !== 'removed').length;
+  const by = (b: CityBucket) => cities.filter(c => cityBucket(c) === b).length;
 
   return (
     <div className="fp-pool">
-      <TabCard title={t('fleetCitiesTitle')} className="fleet-cities"
-        sub={data ? t('fleetCitiesSub', { n: cities.filter(c => c.enabled).length, verifying: cities.filter(c => cityStanding(c) === 'verifying').length }) : ''}
-        actions={<>
-          {removed > 0 && (
-            <label className="fleet-check"><input type="checkbox" checked={showRemoved} onChange={e => setShowRemoved(e.target.checked)} />
-              {t('fleetCitiesShowRemoved', { n: removed })}</label>
-          )}
-          <button type="button" className="btn sm primary" onClick={() => setAdding(true)} disabled={!data}>
-            <Icon name="plus" size={13} />{t('fleetCityAdd')}
-          </button>
-        </>}>
-        {data === null ? <TableSkeleton rows={6} cols={8} /> : <CitiesTable cities={shown} items={items} onChanged={reload} />}
-      </TabCard>
+      <div className="fleet-tab-head">
+        <p className="fleet-lede">
+          {data ? t('fleetCitiesLede', { n: cities.length, searched: by('enabled') + by('pinned'), pinned: by('pinned'), verifying: by('verifying'), off: by('disabled') }) : ''}
+        </p>
+        <div className="page-actions">
+          <button type="button" className="btn" onClick={() => setRules(true)} disabled={!data}>{t('fleetRules')}</button>
+          <button type="button" className="btn primary" onClick={() => setAdding(true)} disabled={!data}>{t('fleetCityAdd')}</button>
+        </div>
+      </div>
+      <section className="card fleet-card" aria-label={t('fleetCitiesTitle')}>
+        {data === null ? <TableSkeleton rows={6} cols={8} />
+          : <CitiesTable cities={cities} items={items} done={data.done} slots={data.slots} filter={filter} onFilter={setFilter} onChanged={reload} />}
+      </section>
       {adding && data && (
         <AddCityDialog cities={cities} onClose={() => setAdding(false)} onChanged={reload} />
       )}
+      {rules && <RulesDialog onClose={() => setRules(false)} />}
     </div>
   );
 }
 
-export function CitiesTable({ cities, items, onChanged, now = Date.now() }: {
-  cities: readonly FleetCity[]; items: readonly string[]; onChanged: () => void; now?: number;
+export function CitiesTable({ cities, items, done, slots, filter, onFilter, onChanged, now = Date.now() }: {
+  cities: readonly FleetCity[]; items: readonly string[]; done: readonly FleetTask[]; slots: readonly FleetSlot[];
+  filter: CityFilter; onFilter: (f: CityFilter) => void; onChanged: () => void; now?: number;
 }) {
-  const { t } = useT();
+  const { t, locale } = useT();
   const [removing, setRemoving] = useState<FleetCity | null>(null);
   const [unverified, setUnverified] = useState<FleetCity | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const cols = 8 + items.length;
+  const cols = 6 + items.length;
+  const shown = useMemo(() => filterCities(cities, filter), [cities, filter]);
+  const regions = useMemo(() => cityRegions(cities), [cities]);
+  const counts = useMemo(() => {
+    const out = { all: cities.length, verifying: 0, pinned: 0, enabled: 0, disabled: 0 };
+    for (const c of cities) out[cityBucket(c)] += 1;
+    return out;
+  }, [cities]);
+  const set = (patch: Partial<CityFilter>) => onFilter({ ...filter, ...patch });
 
-  const act = async (slug: string, run: () => Promise<unknown>, done?: string, refused?: (e: unknown) => boolean) => {
+  const act = async (slug: string, run: () => Promise<unknown>, doneToast?: string, refused?: (e: unknown) => boolean) => {
     if (busy) return;
     setBusy(slug);
     try {
       await run();
-      if (done) showSuccessToast(done);
+      if (doneToast) showSuccessToast(doneToast);
       onChanged();
     } catch (e) {
       if (!refused?.(e)) handleFetchError(e);
@@ -106,88 +135,152 @@ export function CitiesTable({ cities, items, onChanged, now = Date.now() }: {
       return true;
     });
 
+  // Per item: when the city was last searched (with the cards and alerts of
+  // that search where the task is in the window) and what is open on it.
+  const itemCell = (c: FleetCity, item: string) => {
+    const open = openSearch(c, item);
+    const last = lastDoneSearch(done, c.slug, item);
+    const lastAt = c.last_done_at[item] ?? last?.done_at ?? null;
+    if (!open && !lastAt) return <span className="fp-muted">—</span>;
+    return (
+      <span className="fp-holder">
+        {lastAt ? (
+          <span>
+            {easternClock(lastAt, locale, now)}
+            {last && last.done_at === lastAt && <small className="mono"> {t('fleetResultCards', { n: last.result?.cards ?? 0 })}{last.result?.alerted ? `, ${t('fleetResultAlerts', { n: last.result.alerted })}` : ''}</small>}
+          </span>
+        ) : <small>{t('fleetNeverSearched')}</small>}
+        {open?.state === 'leased' && <span className="chip info"><span className="mono">{open.worker_id}</span></span>}
+        {open?.state === 'ready' && Date.parse(open.due_at) <= now && <span className="chip warn">{t('fleetDueWaiting', { span: agoLabel(t, open.due_at, now) })}</span>}
+        {open?.state === 'ready' && Date.parse(open.due_at) > now && <small>{t('fleetNextAt', { time: easternClock(open.due_at, locale, now) })}</small>}
+      </span>
+    );
+  };
+
   return (
-    <div className="fp-table-wrap">
-      <table className="fp-table fleet-table">
-        <thead>
-          <tr>
-            <th>{t('fleetColCity')}</th>
-            <th>{t('fleetColRegion')}</th>
-            <th>{t('fleetColStatus')}</th>
-            <th className="num">{t('fleetColPerDay')}</th>
-            <th>{t('fleetColPin')}</th>
-            {items.map(i => <th key={i}><span className="fp-holder">{t('fleetColLastDone')}<small className="mono">{i}</small></span></th>)}
-            <th>{t('fleetColNextDue')}</th>
-            <th>{t('fleetColHolder')}</th>
-            <th aria-label={t('fleetColActions')} />
-          </tr>
-        </thead>
-        <tbody>
-          {cities.length === 0 && <EmptyRow cols={cols}>{t('fleetCitiesNone')}</EmptyRow>}
-          {cities.map(c => {
-            const standing = cityStanding(c);
-            const due = nextDue(c);
-            const rowBusy = busy === c.slug;
-            return (
-              <tr key={c.slug} className={standing === 'removed' ? 'fleet-row-removed' : undefined}>
-                <td>
-                  <span className="fp-holder">
-                    <span>{c.name}{c.pinned && <Icon name="star" size={12} className="fleet-pin-mark" />}</span>
-                    <small>
-                      <a className="mono" href={marketplaceUrl(c.slug)} target="_blank" rel="noreferrer" title={t('fleetCityOpenMarketplace')}>{c.slug}</a>
-                      {' · '}{t('fleetCityRadius', { km: c.radius_km })}
-                    </small>
-                  </span>
-                </td>
-                <td>{c.region ?? <span className="fp-muted">—</span>}</td>
-                <td>
-                  <span className="fp-holder">
-                    <span className={STANDING_CHIP[standing]}>{t(STANDING_KEY[standing])}</span>
-                    {c.verified_as && <small title={t('fleetCityVerifiedAs')}>{c.verified_as}</small>}
-                    {standing === 'verifying' && (
-                      <button type="button" className="btn sm fleet-inline-action" onClick={() => enableAnyway(c)} disabled={rowBusy}>{t('fleetCityEnableAnyway')}</button>
-                    )}
-                    {standing === 'disabled' && (
-                      <button type="button" className="btn sm fleet-inline-action" onClick={() => restore(c)} disabled={rowBusy}>{t('fleetCityEnable')}</button>
-                    )}
-                  </span>
-                </td>
-                <td className="num">
-                  <select className="input fleet-perday" value={c.per_day ?? ''} aria-label={t('fleetColPerDay')}
-                    disabled={rowBusy || standing === 'removed'} onChange={e => setPerDay(c, e.target.value)}>
-                    <option value="">{t('fleetPerDayDefault')}</option>
-                    {PER_DAY_CHOICES.map(n => <option key={n} value={n}>{t('fleetPerDayN', { n })}</option>)}
-                  </select>
-                </td>
-                <td>
-                  <button type="button" className={`btn ghost icon sm${c.pinned ? ' fleet-pinned' : ''}`} onClick={() => setPin(c)}
-                    disabled={rowBusy || standing === 'removed'} aria-pressed={c.pinned}
-                    title={t(c.pinned ? 'fleetUnpin' : 'fleetPin')}>
-                    <Icon name="star" size={13} />
-                  </button>
-                </td>
-                {items.map(i => <td key={i}><Clock at={c.last_done_at[i]} now={now} /></td>)}
-                <td>{due.at ? <Clock at={due.at} now={now} /> : <span className="fp-muted">—</span>}</td>
-                <td><WorkerLink id={due.holder} /></td>
-                <td className="fleet-row-actions">
-                  {standing === 'removed' ? (
-                    <button type="button" className="btn sm" onClick={() => restore(c)} disabled={rowBusy}>{t('fleetCityRestore')}</button>
-                  ) : <>
-                    <button type="button" className="btn ghost icon sm" onClick={() => searchNow(c)} disabled={rowBusy || items.length === 0 || !c.enabled}
-                      title={`${t('fleetSearchNow')}: ${t('fleetSearchNowHint')}`} aria-label={t('fleetSearchNow')}>
-                      <Icon name="search" size={13} />
-                    </button>
-                    <button type="button" className="btn ghost icon sm" onClick={() => setRemoving(c)} disabled={rowBusy}
-                      title={t('fleetCityRemove')} aria-label={t('fleetCityRemove')}>
-                      <Icon name="trash" size={13} />
-                    </button>
-                  </>}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <>
+      <div className="fp-toolbar fleet-toolbar">
+        <Legend buckets={CITY_BUCKETS} counts={counts} value={filter.bucket} onChange={bucket => set({ bucket })}
+          label={k => t(BUCKET_KEY[k])} dotClass={k => BUCKET_DOT[k]} />
+        <select className="input fleet-select" value={filter.region} aria-label={t('fleetColRegion')} onChange={e => set({ region: e.target.value })}>
+          <option value="">{t('fleetEveryRegion')}</option>
+          {regions.map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <label className="toolbar-search">
+          <Icon name="search" size={14} />
+          <input className="input" type="search" value={filter.q} autoComplete="off" placeholder={t('fleetSearchCities')}
+            aria-label={t('fleetSearchCities')} onChange={e => set({ q: e.target.value })} />
+        </label>
+      </div>
+      <div className="fp-table-wrap fleet-table-cap fleet-table-tall">
+        <table className="fp-table fleet-table fleet-cities">
+          <thead>
+            <tr>
+              <th>{t('fleetColCity')}</th>
+              <th>{t('fleetColRegion')}</th>
+              <th>{t('fleetColStatus')}</th>
+              <th className="num">{t('fleetColPerDay')}</th>
+              {items.map(i => <th key={i} className="mono">{i}</th>)}
+              <th>{t('fleetColHomeOf')}</th>
+              <th aria-label={t('fleetColActions')} />
+            </tr>
+          </thead>
+          <tbody>
+            {shown.length === 0 && <EmptyRow cols={cols}>{cities.length === 0 ? t('fleetCitiesNone') : t('fleetCitiesNoMatch')}</EmptyRow>}
+            {shown.map(c => {
+              const bucket = cityBucket(c);
+              const standing = cityStanding(c);
+              const home = homeWorkerOf(slots, c.slug);
+              const rowBusy = busy === c.slug;
+              const checking = c.open_tasks.find(x => x.kind === 'verify-slug') ?? null;
+              const mismatch = bucket === 'verifying' && !!c.verified_as && c.verified_as.toLowerCase() !== c.name.toLowerCase();
+              return (
+                <Fragment key={c.slug}>
+                  <tr className={standing === 'removed' ? 'fleet-row-removed' : undefined}>
+                    <td>
+                      <span className="fp-holder">
+                        <span className="fleet-city-name">{c.name}</span>
+                        <small>
+                          <a className="mono" href={marketplaceUrl(c.slug)} target="_blank" rel="noreferrer" title={t('fleetCityOpenMarketplace')}>{c.slug}</a>
+                          {c.radius_km !== DEFAULT_RADIUS_KM && <> · {t('fleetCityRadius', { km: c.radius_km })}</>}
+                        </small>
+                      </span>
+                    </td>
+                    <td className="fp-muted">{c.region ?? '—'}</td>
+                    <td>
+                      <span className="fp-holder">
+                        <span className={BUCKET_CHIP[bucket]}>{t(BUCKET_KEY[bucket])}</span>
+                        {bucket !== 'verifying' && c.verified_as && c.verified_as !== 'override' && <small title={t('fleetCityVerifiedAs')}>{c.verified_as}</small>}
+                        {standing === 'disabled' && (
+                          <button type="button" className="btn sm fleet-inline-action" onClick={() => restore(c)} disabled={rowBusy}>{t('fleetCityEnable')}</button>
+                        )}
+                        {standing === 'removed' && (
+                          <button type="button" className="btn sm fleet-inline-action" onClick={() => restore(c)} disabled={rowBusy}>{t('fleetCityRestore')}</button>
+                        )}
+                      </span>
+                    </td>
+                    <td className="num">
+                      {c.enabled ? (
+                        <select className="input fleet-perday" value={c.per_day ?? ''} aria-label={t('fleetColPerDay')}
+                          disabled={rowBusy} onChange={e => setPerDay(c, e.target.value)}>
+                          <option value="">{t('fleetPerDayDefault')}</option>
+                          {PER_DAY_CHOICES.map(n => <option key={n} value={n}>{t('fleetPerDayN', { n })}</option>)}
+                        </select>
+                      ) : <span className="fp-muted">—</span>}
+                    </td>
+                    {items.map(i => <td key={i}>{c.enabled ? itemCell(c, i) : <span className="fp-muted">—</span>}</td>)}
+                    <td>
+                      {home ? (
+                        <span className="fp-holder">
+                          <WorkerLink id={home.worker_id} />
+                          <small>{t('fleetAccountN', { no: home.account_no })}</small>
+                        </span>
+                      ) : <span className="fp-muted">—</span>}
+                    </td>
+                    <td className="fleet-row-actions">
+                      {standing !== 'removed' && <>
+                        <button type="button" className={`btn ghost icon sm${c.pinned ? ' fleet-pinned' : ''}`} onClick={() => setPin(c)}
+                          disabled={rowBusy} aria-pressed={c.pinned} title={t(c.pinned ? 'fleetUnpin' : 'fleetPin')} aria-label={t('fleetColPin')}>
+                          <Icon name="star" size={13} />
+                        </button>
+                        <button type="button" className="btn ghost icon sm" onClick={() => searchNow(c)} disabled={rowBusy || items.length === 0 || !c.enabled}
+                          title={`${t('fleetSearchNow')}: ${t('fleetSearchNowHint')}`} aria-label={t('fleetSearchNow')}>
+                          <Icon name="search" size={13} />
+                        </button>
+                        <button type="button" className="btn ghost icon sm fleet-danger-text" onClick={() => setRemoving(c)} disabled={rowBusy}
+                          title={`${t('fleetCityRemove')}: ${t('fleetCityRemoveHint')}`} aria-label={t('fleetCityRemove')}>
+                          <Icon name="trash" size={13} />
+                        </button>
+                      </>}
+                    </td>
+                  </tr>
+                  {bucket === 'verifying' && (
+                    <tr className="fleet-verify-row">
+                      <td colSpan={cols}>
+                        <div className="fleet-verify-box">
+                          {mismatch ? <>
+                            <span>{t('fleetVerifyMismatch', { shown: c.verified_as ?? '', name: c.name })}</span>
+                            <button type="button" className="btn sm" onClick={() => enableAnyway(c)} disabled={rowBusy}>{t('fleetCityEnableAnyway')}</button>
+                            <button type="button" className="btn sm fleet-danger-text" onClick={() => setRemoving(c)} disabled={rowBusy}>{t('fleetCityRemove')}</button>
+                          </> : <>
+                            <span>{t('fleetVerifyPending', { ago: agoLabel(t, c.added_at, now), name: c.name })}
+                              {checking?.state === 'leased' && checking.worker_id && <> {t('fleetVerifyChecking', { worker: checking.worker_id })}</>}</span>
+                            <button type="button" className="btn sm ghost" onClick={() => enableAnyway(c)} disabled={rowBusy}>{t('fleetVerifySkip')}</button>
+                          </>}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="fp-table-foot fleet-foot">
+        <span>{t('fleetCitiesFoot', { shown: shown.length, n: cities.length })}</span>
+        <span>{t('fleetCitiesFootHint')}</span>
+      </div>
       {unverified && (
         <Modal onClose={() => setUnverified(null)} shellStyle={{ maxWidth: 460 }}>
           <ConfirmDialogBody title={t('fleetCityUnverifiedTitle', { city: unverified.name })} confirm={t('fleetCityEnableAnyway')}
@@ -199,7 +292,91 @@ export function CitiesTable({ cities, items, onChanged, now = Date.now() }: {
       {removing && (
         <RemoveCityDialog city={removing} onClose={() => setRemoving(null)} onDone={() => { setRemoving(null); onChanged(); }} />
       )}
-    </div>
+    </>
+  );
+}
+
+// The fleet-wide rules: the settings every worker reads at its next task.
+// Numbers are kept as typed until Save, which sends only what changed.
+const RULE_FIELDS = [
+  'per_day_default', 'budget_minutes', 'lease_minutes', 'task_max_minutes', 'familiar_days', 'start_fresh_hours', 'quarantine_hours', 'quarantine_probe_hours',
+] as const;
+type RuleField = (typeof RULE_FIELDS)[number];
+const RULE_MIN: Record<RuleField, number> = {
+  per_day_default: 1, budget_minutes: 1, lease_minutes: 1, task_max_minutes: 1, familiar_days: 0, start_fresh_hours: 0, quarantine_hours: 0, quarantine_probe_hours: 1,
+};
+
+function RulesDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useT();
+  const [saved, setSaved] = useState<FleetSettings | 'failed' | null>(null);
+  const [draft, setDraft] = useState<Record<RuleField, string> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    fleetApi.settings()
+      .then(s => {
+        if (!live) return;
+        setSaved(s);
+        setDraft(Object.fromEntries(RULE_FIELDS.map(f => [f, String(s[f])])) as Record<RuleField, string>);
+      })
+      .catch(() => { if (live) setSaved('failed'); });
+    return () => { live = false; };
+  }, []);
+  const set = (f: RuleField, v: string) => setDraft(d => (d ? { ...d, [f]: v } : d));
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!draft || saved === null || saved === 'failed' || busy) return;
+    const patch: Partial<FleetSettings> = {};
+    for (const f of RULE_FIELDS) {
+      const n = Number(draft[f]);
+      if (!Number.isInteger(n) || n < RULE_MIN[f]) { setProblem(t('fleetRulesBad', { field: t(`fleetRule_${f}`) })); return; }
+      if (n !== saved[f]) patch[f] = n;
+    }
+    if (Object.keys(patch).length === 0) { onClose(); return; }
+    setBusy(true);
+    setProblem(null);
+    try {
+      await fleetApi.saveSettings(patch);
+      showSuccessToast(t('fleetRulesSaved'));
+      onClose();
+    } catch (err) {
+      handleFetchError(err);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 520 }}>
+      <form onSubmit={submit}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">{t('fleetRules')}</div>
+            <div className="modal-sub">{t('fleetRulesSub')}</div>
+          </div>
+        </div>
+        <div className="modal-body fleet-form">
+          {saved === 'failed' && <p className="fp-warn">{t('fleetRulesFailed')}</p>}
+          {draft && (
+            <dl className="fleet-rules">
+              {RULE_FIELDS.map(f => (
+                <Fragment key={f}>
+                  <dt>{t(`fleetRule_${f}`)}</dt>
+                  <dd>
+                    <input className="input fleet-rule-input" type="number" min={RULE_MIN[f]} step={1} value={draft[f]} onChange={e => set(f, e.target.value)} />
+                    {' '}{t(`fleetRuleUnit_${f}`)}
+                  </dd>
+                </Fragment>
+              ))}
+            </dl>
+          )}
+          {problem && <p role="alert" className="fp-warn">{problem}</p>}
+        </div>
+        <div className="modal-foot">
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>{t('cancel')}</button>
+          <button type="submit" className="btn primary" disabled={busy || !draft}>{t('fleetRulesSave')}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

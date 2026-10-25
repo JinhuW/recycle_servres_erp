@@ -398,7 +398,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/accounting' || match('/accounting/:id', path)) return 'accounting';
   if (path === '/tracker' || path === '/tracker/prompts') return 'tracker';
   if (path === '/wechat' || matchWechatDay(path)) return 'wechat';
-  if (path === '/fleet' || path === '/fleet/pool' || matchFleetTab(path) || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
+  if (path === '/fleet' || path === '/fleet/pool' || matchFleetTab(path) || fleetRedirect(path) || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
   if (path === '/settings') return 'settings';
   return 'dashboard';
 }
@@ -439,9 +439,10 @@ export function matchWechatDay(path: string): { date: string } | null {
   return m && /^\d{4}-\d{2}-\d{2}$/.test(m.date) ? { date: m.date } : null;
 }
 
-// The ERP-owned fleet's tabs under Monitors ▸ Facebook: the city catalog,
-// the task queue, the hosts and the account slots (pages/desktop/fleet/*).
-export const FLEET_TABS = ['cities', 'queue', 'hosts', 'slots'] as const;
+// The ERP-owned fleet's tabs under Monitors ▸ Facebook beside the Fleet tab
+// at /fleet itself: the task belt, the city catalog and the analysis
+// (pages/desktop/fleet/*).
+export const FLEET_TABS = ['tasks', 'cities', 'analysis'] as const;
 export type FleetTab = (typeof FLEET_TABS)[number];
 
 export function fleetTabPath(tab: FleetTab): string {
@@ -451,6 +452,16 @@ export function fleetTabPath(tab: FleetTab): string {
 export function matchFleetTab(path: string): FleetTab | null {
   const m = match('/fleet/:tab', path);
   return m && (FLEET_TABS as readonly string[]).includes(m.tab) ? (m.tab as FleetTab) : null;
+}
+
+// The tabs the fleet page had before its rework, kept as redirects so an old
+// bookmark still lands: the queue became Tasks, hosts and slots folded into
+// the Fleet tab.
+const FLEET_TAB_MOVED: Record<string, string> = { '/fleet/queue': '/fleet/tasks', '/fleet/hosts': '/fleet', '/fleet/slots': '/fleet' };
+
+/** Where a retired fleet path now lives, or null for any other path. */
+export function fleetRedirect(path: string): string | null {
+  return FLEET_TAB_MOVED[path] ?? null;
 }
 
 // The fleet page's live-browser viewer for one Facebook worker. A sub-route of
