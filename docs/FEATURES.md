@@ -235,24 +235,24 @@ is not a stage but a flag beside one, set once every line has sold
   bank-payments ledger and the Accounting card — named *Payment* until
   v1.163.0, when the second payment below got a home), *Commission* (purchaser, rate, and what the
   purchaser earns — the maths that used to sit in an aside titled "Payment
-  detail" — and **Commission payment** transaction search, v1.345.0).
-  Managers choose **RMB Flow** or **Business Account**, search unlinked
-  outgoing payments, and confirm a transaction to link it as this PO's
-  commission. The search shows its date, counterparty, payer/method and amount.
-  Business Account candidates are settled USD Mercury/PayPal payments, with
-  transfers, ignored rows and internal transactions excluded by reconciliation.
-  An RMB entry already assigned to a record, or changed since the search,
-  cannot be taken by a stale selection; a bank row already linked is refused
-  too. The payer follows the selected transaction: the entry's manager for
-  RMB Flow, the Business Account for Mercury/PayPal. A legacy company flag
-  can be replaced by explicitly linking an RMB payment; a live bank link
-  must first be removed in Payments. Linking the Business Account voids
-  existing paid-out RMB commission entries under the book's existing rules.
+  detail" — and **Commission payment**, v1.345.0).
+  Managers choose **RMB Flow** or **Business Account**. **RMB Flow** offers
+  **Create payment** and its recorded commission payments (v1.345.1, RS-397), without
+  transaction search. A short hint explains that the PO is already linked;
+  the primary action has a larger phone touch target. Create opens the payment form with this PO's commission
+  selected, including its order/AI amount sources. Saving refreshes the ledger
+  and payer. **Business Account** searches unlinked, settled outgoing USD
+  Mercury/PayPal transactions and confirms a selected transaction to link it
+  as the commission. Transfers, ignored rows and internal transactions are
+  excluded; a bank row already linked is refused if a search result becomes
+  stale. The payer follows the RMB entry's manager or the Business Account.
+  A live bank commission must be unlinked in Payments before a paid-out RMB
+  commission can be created. Linking the Business Account voids existing
+  paid-out RMB commission entries under the book's existing rules.
   The panel shows linked bank payments and their net, with links to Payments
-  on desktop, and the RMB Flow card lists its linked entries. Existing
-  commission screenshots remain readable; the payer select and upload box
-  have been replaced by the search on both shells. Purchasers see the payer
-  and legacy screenshots read-only.
+  on desktop. Existing commission screenshots remain readable; the old payer
+  select and upload box have been replaced by these two source options on
+  both shells. Purchasers see the payer and legacy screenshots read-only.
   **Ready to Pay → Done recognizes linked payments** (v1.345.0): a live
   paid-out RMB commission or settled outgoing bank commission skips the
   screenshot prompt, as an existing screenshot already did. With neither,
@@ -287,8 +287,8 @@ is not a stage but a flag beside one, set once every line has sold
   *Before you submit* list gains a *How the goods get here* row.
 - **The phone's *Order details* are the desktop's five tabs, as folds**
   (v1.162.0): Delivery (source, warehouse, label or pickup, tracking),
-  Cost Payment, **Commission** (RMB Flow / Business Account transaction search
-  under the maths since v1.345.0; the summary reads *· Paid* once a linked
+  Cost Payment, **Commission** (RMB Flow Create / Business Account transaction search
+  under the maths since v1.345.1; the summary reads *· Paid* once a linked
   payment or legacy screenshot is on file), Notes & files, Activity —
   same order, same names.
   Each is one card (`PhFold`): closed, the title with its answer read back;

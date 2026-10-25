@@ -1841,7 +1841,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               ledger={user?.role === 'manager' && (
                 <>
                   {isManager && (
-                    <AccountingCard key={commissionPayments.version} scope={{ orderId: order.id, kind: 'commission' }} onRecorded={onAccountingRecorded} />
+                    <AccountingCard key={commissionPayments.version} recordLabel="cpCreateRmb" recordHint="cpRmbCreateHint" scope={{ orderId: order.id, kind: 'commission' }} onRecorded={onAccountingRecorded} />
                   )}
                 </>
               )}

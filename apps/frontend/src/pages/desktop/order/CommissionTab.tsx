@@ -208,11 +208,11 @@ export function CommissionTab(p: Props) {
           orderId={p.orderId}
           payments={p.commissionPayments}
           onLinked={p.onPaymentLinked}
+          rmbFlow={p.ledger}
           paidBy={p.commissionPaidBy}
           shots={p.commissionShots}
           editable={p.canEditCommissionPayment}
         />
-        {p.ledger}
       </div>
     </div>
   );
