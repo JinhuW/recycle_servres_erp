@@ -17,6 +17,11 @@ import { lockPayerTx, paidByErr, recordPayerTx, type CommissionPaidBy, type Paye
 import { writeOrderEvent, type AuditChange } from '../services/orderAudit';
 import { namePeopleInChanges } from '../services/orderHandoff';
 import { isClosedBook } from '../services/orderAdvance';
+import { deleteAttachment, StorageUnavailableError, uploadAttachment } from '../r2';
+import { getUploadLimits } from '../lib/settings';
+import { shrinkImageToFit } from '../lib/image-shrink';
+import { maybeRenameReceipt } from '../ai/receipt';
+import { log } from '../lib/log';
 import type { Env, User } from '../types';
 import {
   ACCOUNTING_DUPLICATE_DAYS, ACCOUNTING_KINDS, ACCOUNTING_QUERY_MAX, ACCOUNTING_REVIEW_TABS,
@@ -50,7 +55,8 @@ const EARLIEST = '2000-01-01';
 
 type EventKind =
   | 'created' | 'edited' | 'voided' | 'restored' | 'unlinked'
-  | 'reviewed' | 'unreviewed' | 'queried' | 'answered' | 'query_withdrawn';
+  | 'reviewed' | 'unreviewed' | 'queried' | 'answered' | 'query_withdrawn'
+  | 'attachment_added' | 'attachment_removed';
 type Frag = postgres.PendingQuery<postgres.Row[]>;
 
 // ── Reading entries ─────────────────────────────────────────────────────────
@@ -535,7 +541,7 @@ accounting.get('/entries/:id', async (c) => {
   if (!row) return c.json({ error: 'Not found' }, 404);
   const entry = shapeEntry(row);
   const lens = row.kind === 'other' ? null : LENS_OF[row.kind];
-  const [events, target] = await allLimited([
+  const [events, target, attachments] = await allLimited([
     () => sql<{
       id: string; kind: EventKind; detail: Record<string, unknown>; created_at: string;
       actor_id: string | null; actor_name: string | null;
@@ -544,10 +550,12 @@ accounting.get('/entries/:id', async (c) => {
       FROM accounting_entry_events ev LEFT JOIN users u ON u.id = ev.actor_id
       WHERE ev.entry_id = ${id} ORDER BY ev.created_at, ev.id`,
     () => (lens && entry.target ? findTargets(sql, lens, { id: entry.target.id }) : Promise.resolve([])),
+    () => attachmentsOf(sql, [id]),
   ]);
   return c.json({
     entry: {
       ...entry,
+      attachments: attachments.get(id) ?? [],
       cleared: clearedOf(row),
       targetFacts: target[0] ?? null,
       events: events.map(e => ({
@@ -972,6 +980,110 @@ accounting.post('/entries/:id/restore', async (c) => {
   return c.json({ ok: true });
 });
 
+// ── Screenshots ─────────────────────────────────────────────────────────────
+// The payment screenshots an entry is proved by (0205). Proof, not money: they
+// leave the version and the sign-off alone, so adding one never sends a
+// signed entry back to review.
+
+type AttachmentRow = {
+  id: string; entry_id: string; filename: string; size_bytes: number; mime_type: string;
+  delivery_url: string; uploaded_at: string;
+};
+
+const shapeAttachment = (r: AttachmentRow) => ({
+  id: r.id, filename: r.filename, size: r.size_bytes, mime: r.mime_type, url: r.delivery_url, uploadedAt: r.uploaded_at,
+});
+
+async function attachmentsOf(sql: SqlLike, ids: string[]) {
+  const out = new Map<string, ReturnType<typeof shapeAttachment>[]>();
+  if (ids.length === 0) return out;
+  const rows = await sql<AttachmentRow[]>`
+    SELECT id, entry_id, filename, size_bytes, mime_type, delivery_url, uploaded_at
+    FROM accounting_entry_attachments WHERE entry_id = ANY(${ids}) ORDER BY uploaded_at, id`;
+  for (const r of rows) out.set(r.entry_id, [...(out.get(r.entry_id) ?? []), shapeAttachment(r)]);
+  return out;
+}
+
+const VOIDED_READ_ONLY = 'a voided entry is read-only — restore it first';
+
+// One file per call, multipart field `file`. Stored under the name the receipt
+// OCR reads off it (<date>-<method>-<amount>.<ext>), or its own when the model
+// can't read it — the rename never fails the upload.
+accounting.post('/entries/:id/attachments', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+  const exists = (await sql<{ voided_at: string | null }[]>`
+    SELECT voided_at FROM accounting_entries WHERE id = ${id} LIMIT 1`)[0];
+  if (!exists) return c.json({ error: 'Not found' }, 404);
+  if (exists.voided_at) return c.json({ error: VOIDED_READ_ONLY }, 409);
+
+  const form = await c.req.formData().catch(() => null);
+  if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
+  const file = form.get('file') as File | null;
+  if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
+  const { maxBytes, allowedMime } = await getUploadLimits(sql);
+  if (!file.type || !allowedMime.has(file.type)) {
+    return c.json({ error: `unsupported file type: ${file.type || 'unknown'}` }, 415);
+  }
+  // Phone screenshots run to several MB; an image is shrunk to the cap
+  // rather than refused.
+  const fitted = await shrinkImageToFit(file, maxBytes);
+  if (fitted.size > maxBytes) return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
+  const stored = await maybeRenameReceipt(c.env, fitted);
+
+  const uploaded = await uploadAttachment(c.env, stored, `accounting/${id}`)
+    .catch(e => { log.error('accounting attachment upload', e); return e instanceof StorageUnavailableError ? 'unavailable' as const : null; });
+  if (uploaded === 'unavailable') return c.json({ error: 'attachment storage is not configured on this server' }, 503);
+  if (!uploaded) return c.json({ error: 'upload failed' }, 502);
+
+  // Re-read under the lock: a void can land during the OCR and the upload.
+  const row = await sql.begin(async (tx) => {
+    const live = (await tx<{ voided_at: string | null }[]>`
+      SELECT voided_at FROM accounting_entries WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0];
+    if (!live) return 'notFound' as const;
+    if (live.voided_at) return 'voided' as const;
+    const r = (await tx<AttachmentRow[]>`
+      INSERT INTO accounting_entry_attachments
+        (entry_id, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by)
+      VALUES (${id}, ${stored.name}, ${stored.size}, ${stored.type}, ${uploaded.storageKey}, ${uploaded.deliveryUrl}, ${u.id})
+      RETURNING id, entry_id, filename, size_bytes, mime_type, delivery_url, uploaded_at`)[0];
+    await writeEvent(tx, id, u.id, 'attachment_added', { attachmentId: r.id, filename: r.filename });
+    return r;
+  });
+  if (typeof row === 'string') {
+    // Nothing names the object now, so nothing would ever find it again.
+    await deleteAttachment(c.env, uploaded.storageKey).catch(e => log.error('r2 delete', e));
+    return row === 'notFound' ? c.json({ error: 'Not found' }, 404) : c.json({ error: VOIDED_READ_ONLY }, 409);
+  }
+  return c.json({ attachment: shapeAttachment(row) });
+});
+
+accounting.delete('/entries/:id/attachments/:attachmentId', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const attachmentId = c.req.param('attachmentId');
+  if (!UUID_RE.test(attachmentId)) return c.json({ error: 'Not found' }, 404);
+  const sql = getDb(c.env);
+  const removed = await sql.begin(async (tx) => {
+    const live = (await tx<{ voided_at: string | null }[]>`
+      SELECT voided_at FROM accounting_entries WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0];
+    if (!live) return 'notFound' as const;
+    if (live.voided_at) return 'voided' as const;
+    const r = (await tx<{ storage_key: string; filename: string }[]>`
+      DELETE FROM accounting_entry_attachments WHERE id = ${attachmentId} AND entry_id = ${id}
+      RETURNING storage_key, filename`)[0];
+    if (!r) return 'notFound' as const;
+    await writeEvent(tx, id, u.id, 'attachment_removed', { attachmentId, filename: r.filename });
+    return r;
+  });
+  if (removed === 'notFound') return c.json({ error: 'Not found' }, 404);
+  if (removed === 'voided') return c.json({ error: VOIDED_READ_ONLY }, 409);
+  // Outside the transaction: the slow side effect stays out of the lock.
+  await deleteAttachment(c.env, removed.storage_key).catch(e => log.error('r2 delete', e));
+  return c.json({ ok: true });
+});
+
 // ── Review ──────────────────────────────────────────────────────────────────
 // One manager who didn't write an entry signs it off (0197). The rules live
 // here, so every shell keeps them: the author can't sign off their own
@@ -1252,8 +1364,13 @@ accounting.get('/review', async (c) => {
              COUNT(*) FILTER (WHERE ${reviewTabFrag(sql, 'reviewed', me)})::int AS reviewed
       FROM accounting_entries e WHERE e.voided_at IS NULL AND ${mgr}` : Promise.resolve([])),
   ]);
+  // The proof sits beside the figure it proves, so a sign-off can see it.
+  const [faceted, attachments] = await allLimited([
+    () => withFacts(sql, rows),
+    () => attachmentsOf(sql, rows.map(r => r.id)),
+  ]);
   return c.json({
-    rows: await withFacts(sql, rows),
+    rows: faceted.map(r => ({ ...r, attachments: attachments.get(r.id) ?? [] })),
     counts: counts[0],
     truncated: rows.length === REVIEW_LIST_MAX,
   });

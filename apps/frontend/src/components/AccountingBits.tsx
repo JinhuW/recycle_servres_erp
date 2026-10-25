@@ -108,6 +108,8 @@ function eventLine(e: AcctEvent, t: Translate): string {
     case 'queried': return t('acctEvQueried', { text: e.detail.text ?? '' });
     case 'answered': return t('acctEvAnswered', { text: e.detail.text ?? '' });
     case 'query_withdrawn': return t('acctEvQueryWithdrawn');
+    case 'attachment_added': return t('acctEvAttachAdded', { name: e.detail.filename ?? '' });
+    case 'attachment_removed': return t('acctEvAttachRemoved', { name: e.detail.filename ?? '' });
   }
 }
 

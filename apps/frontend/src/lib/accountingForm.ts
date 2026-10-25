@@ -30,7 +30,6 @@ export type EntryForm = {
   managerTouched: boolean;
   counterparty: string;
   counterpartyTouched: boolean;
-  reference: string;
   note: string;
 };
 
@@ -71,8 +70,7 @@ export function initialForm(opts: { meId: string; today: IsoDate; preset?: Entry
       amount: String(entry.amount), currency: entry.currency,
       fxRate: entry.fxRate === null ? '' : String(entry.fxRate),
       method: entry.method, occurredOn: entry.occurredOn, managerId: entry.manager.id, managerTouched: true,
-      counterparty: entry.counterparty ?? '', counterpartyTouched: true,
-      reference: entry.reference ?? '', note: entry.note ?? '',
+      counterparty: entry.counterparty ?? '', counterpartyTouched: true, note: entry.note ?? '',
     };
   }
   const kind = preset?.kind ?? 'other';
@@ -94,7 +92,6 @@ export function initialForm(opts: { meId: string; today: IsoDate; preset?: Entry
     managerTouched: preset?.managerId !== undefined,
     counterparty: preset?.target?.party ?? '',
     counterpartyTouched: false,
-    reference: '',
     note: '',
   };
 }
@@ -160,7 +157,7 @@ export function toRequestBody(
       direction: f.direction, kind: f.kind, amount: Math.round(amount * 100) / 100, currency: f.currency,
       fxRate, method: f.method, occurredOn: f.occurredOn, managerId: f.managerId,
       targetId: KIND_TARGET[f.kind] ? f.target?.id ?? null : null,
-      counterparty: text(f.counterparty), reference: text(f.reference), note: text(f.note),
+      counterparty: text(f.counterparty), note: text(f.note),
     },
   };
 }

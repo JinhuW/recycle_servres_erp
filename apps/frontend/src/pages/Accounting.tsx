@@ -3,6 +3,7 @@ import { PhHeader } from '../components/PhHeader';
 import { Icon } from '../components/Icon';
 import { RouteLink } from '../components/RouteLink';
 import { HistoryLine, Yuan, recordPath } from '../components/AccountingBits';
+import { AcctAttachments } from '../components/AcctAttachments';
 import { PhAccountingSheet, PhVoidSheet } from '../components/PhAccountingSheet';
 import { useT } from '../lib/i18n';
 import { handleFetchError } from '../lib/errorToast';
@@ -284,6 +285,15 @@ function EntryScreen({ id, showToast }: { id: string } & Props) {
                 {entry.note && fact(t('acctFieldNote'), <span style={{ whiteSpace: 'pre-wrap' }}>{entry.note}</span>)}
               </dl>
             </div>
+
+            {(!entry.voided || entry.attachments.length > 0) && (
+              <>
+                <div className="ph-section-h"><span>{t('acctScreenshots')}</span></div>
+                <div className="ph-card" style={{ padding: 14, marginTop: 0 }}>
+                  <AcctAttachments key={entry.id} entryId={entry.id} initial={entry.attachments} readOnly={!!entry.voided} onChanged={load} />
+                </div>
+              </>
+            )}
 
             <div className="ph-section-h"><span>{t('acctHistory')}</span></div>
             <div className="ph-card acct-history" style={{ padding: 14, marginTop: 0 }}>

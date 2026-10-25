@@ -2304,8 +2304,10 @@ is who paid, below).
 
 - **An entry** says received or paid, what it was for, how much, how
   (bank transfer, Alipay, WeChat Pay, cash, other), on what date and through
-  which manager, with an optional counterparty, reference and note. Entries
-  are numbered `AC-1001`, `AC-1002`… from their own counter.
+  which manager, with an optional counterparty and note and the payment
+  screenshots that prove it. Entries are numbered `AC-1001`, `AC-1002`… from
+  their own counter. The form no longer asks for a reference (v1.333.0); an
+  entry that has one still shows it, and an edit keeps it.
   - **What it was for is the record it names.** Purchase and Commission name
     a PO, Sale a sell order, After-sales a case; Other names nothing. The API
     refuses any other pairing. The kind sets the direction — a sale is
@@ -2325,6 +2327,20 @@ is who paid, below).
     entry on the book without its link, and its history names the PO. The
     record is part of what was signed off, so the delete clears a sign-off
     and moves the entry's version (v1.317.4).
+  - **Payment screenshots** (v1.333.0, RS-390). Each image is stored under
+    the name the receipt OCR reads off it, `<date>-<method>-<amount>.png`,
+    the same rename a PO's payment evidence gets. When the model can't read
+    one, or no OCR key is set, the file keeps its own name. The rename never
+    fails an upload. *Record entry* takes screenshots before the entry exists
+    (pick, drop, or paste on desktop) and uploads them once it is saved. If
+    one fails, the entry stays saved and a warning says to add it again from
+    the entry. The drawer and the phone's entry screen add and remove them
+    live; Review shows them read-only beside the figure. Adding or removing
+    one is a history line and an Activity row (Added / Removed), and leaves
+    the entry's version and sign-off alone: proof is not money. A voided
+    entry's screenshots are read-only (migration 0205). Adding or removing
+    a screenshot from Review's entry drawer refreshes the queue and the
+    read-only evidence pane without a page reload (v1.333.2, RS-395).
   - **An entry's Paid by and its PO's payer are one value** (v1.317.0,
     migration 0199), kept in step both ways. *Paid by* is a person: an
     active manager, or on a Purchase entry the PO's own purchaser, who paid
@@ -2407,7 +2423,7 @@ is who paid, below).
     it), every field, the history, Edit, Void and Restore. *Record entry*
     opens the form: direction, kind, a record picker searched by id or name,
     amount in ¥ or $ with the RMB it books as, date, method, Paid by (the
-    Business Account or a person), counterparty, reference and note.
+    Business Account or a person), counterparty, screenshots and note.
 - **On the records** (managers only), an *Accounting* card shows what the book
   has against the record, what that comes to, the record's own figure and a
   Record button with the record already chosen:

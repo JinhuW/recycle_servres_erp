@@ -3,6 +3,7 @@ import { Modal } from '../../../components/Modal';
 import { Icon } from '../../../components/Icon';
 import { RouteLink } from '../../../components/RouteLink';
 import { HistoryLine, Yuan, recordPath } from '../../../components/AccountingBits';
+import { AcctAttachments } from '../../../components/AcctAttachments';
 import { useT } from '../../../lib/i18n';
 import { handleFetchError } from '../../../lib/errorToast';
 import { fmtMoney } from '../../../lib/format';
@@ -108,6 +109,13 @@ export function EntryDrawer({ id, onClose, onChanged, onToast }: Props) {
                 {entry.reference && (<><dt>{t('acctFieldReference')}</dt><dd className="mono">{entry.reference}</dd></>)}
                 {entry.note && (<><dt>{t('acctFieldNote')}</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{entry.note}</dd></>)}
               </dl>
+
+              {(!entry.voided || entry.attachments.length > 0) && (
+                <>
+                  <div className="so-section-head" style={{ marginTop: 22 }}><Icon name="paperclip" size={14} /> {t('acctScreenshots')}</div>
+                  <AcctAttachments key={entry.id} entryId={entry.id} initial={entry.attachments} readOnly={!!entry.voided} onChanged={() => { load(); onChanged(); }} />
+                </>
+              )}
 
               <ReviewCard entry={entry} onToast={onToast} onChanged={() => { load(); onChanged(); }} />
 

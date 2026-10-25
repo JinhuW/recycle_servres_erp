@@ -89,6 +89,8 @@ export const ACTIVITY_KIND_MAP: Record<
     queried:         'queried',
     answered:        'queried',
     query_withdrawn: 'queried',
+    attachment_added:   'added',
+    attachment_removed: 'removed',
   },
 };
 

@@ -65,7 +65,7 @@ export function AttachmentChip({ a, sub, onRemove }: { a: ChipAttachment; sub?: 
         </a>
       )}
       {onRemove && (
-        <button className="btn icon sm" onClick={onRemove} title={t('remove')} style={{ flexShrink: 0 }}>
+        <button type="button" className="btn icon sm" onClick={onRemove} title={t('remove')} style={{ flexShrink: 0 }}>
           <Icon name="x" size={12} />
         </button>
       )}

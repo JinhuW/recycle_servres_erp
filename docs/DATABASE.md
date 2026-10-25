@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-23:** ERP migration `0204`, Reddit tracker migration `0005`,
+**As of 2026-10-24:** ERP migration `0205`, Reddit tracker migration `0005`,
 Facebook tracker `0.13.17`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -1552,9 +1552,9 @@ tracking_number is unique, so there is one row per physical box. Status moves on
 
 ### Accounting, banking and FX
 
-Money outside the inventory tables. It covers the RMB Flow book (`accounting_entries` and its append-only events), the USD bank side synced from Mercury and PayPal (`bank_accounts`, `bank_transactions`), the manager-taught rules and records that classify bank rows (`bank_ignore_rules`, `bank_transfer_counterparties`, `internal_transactions`), and the USD→CNY rate ledger (`fx_rates`) that both sides convert with. Bank links and PO payers feed the book through the `accounting_sync_payer` triggers.
+Money outside the inventory tables. It covers the RMB Flow book (`accounting_entries`, its append-only events and its payment screenshots), the USD bank side synced from Mercury and PayPal (`bank_accounts`, `bank_transactions`), the manager-taught rules and records that classify bank rows (`bank_ignore_rules`, `bank_transfer_counterparties`, `internal_transactions`), and the USD→CNY rate ledger (`fx_rates`) that both sides convert with. Bank links and PO payers feed the book through the `accounting_sync_payer` triggers.
 
-Tables: [`accounting_entries`](#erp-accounting-entries), [`accounting_entry_events`](#erp-accounting-entry-events), [`bank_accounts`](#erp-bank-accounts), [`bank_transactions`](#erp-bank-transactions), [`bank_ignore_rules`](#erp-bank-ignore-rules), [`bank_transfer_counterparties`](#erp-bank-transfer-counterparties), [`internal_transactions`](#erp-internal-transactions), [`fx_rates`](#erp-fx-rates)
+Tables: [`accounting_entries`](#erp-accounting-entries), [`accounting_entry_events`](#erp-accounting-entry-events), [`accounting_entry_attachments`](#erp-accounting-entry-attachments), [`bank_accounts`](#erp-bank-accounts), [`bank_transactions`](#erp-bank-transactions), [`bank_ignore_rules`](#erp-bank-ignore-rules), [`bank_transfer_counterparties`](#erp-bank-transfer-counterparties), [`internal_transactions`](#erp-internal-transactions), [`fx_rates`](#erp-fx-rates)
 
 ```mermaid
 erDiagram
@@ -1562,6 +1562,7 @@ erDiagram
   orders |o--o{ accounting_entries : "order_id"
   sell_orders |o--o{ accounting_entries : "sell_order_id"
   accounting_entries ||--o{ accounting_entry_events : "entry_id"
+  accounting_entries ||--o{ accounting_entry_attachments : "entry_id"
   bank_accounts ||--o{ bank_transactions : "account_id"
   bank_ignore_rules |o--o{ bank_transactions : "ignore_rule_id"
   internal_transactions |o--o{ bank_transactions : "internal_txn_id"
@@ -1591,7 +1592,7 @@ One entry in the RMB Flow, numbered AC-n: money a manager received or paid outsi
 | `sell_order_id` | `text` |  |  | → sell_orders, on sale entries. |
 | `after_sales_id` | `text` |  |  | → after_sales_cases, on after_sales entries. |
 | `counterparty` | `text` |  |  | Supplier, customer or purchaser on the other side. Free text, up to 200 characters. |
-| `reference` | `text` |  |  | Transfer or receipt number. Free text, up to 200 characters. |
+| `reference` | `text` |  |  | Transfer or receipt number. Free text, up to 200 characters. The form stopped asking for it in v1.333.0; older entries keep theirs, and an edit leaves it alone. |
 | `note` | `text` |  |  |  |
 | `created_by` | `uuid` |  |  | → users: who recorded the entry. NULL on entries written by the migration 0196 backfill. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
@@ -1622,24 +1623,46 @@ Triggers on orders (its payer columns) and on bank_transactions call accounting_
 
 #### `accounting_entry_events`
 
-History of an RMB Flow entry: every record, edit, void, restore, unlink and review action, with who and when. Written by routes/accounting.ts, by the PO delete path and by accounting_sync_payer.
+History of an RMB Flow entry: every record, edit, void, restore, unlink, review action and screenshot added or removed, with who and when. Written by routes/accounting.ts, by the PO delete path and by accounting_sync_payer.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
 | `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
 | `entry_id` | `text` | ✓ |  |  |
-| `kind` | `text` | ✓ |  | created, edited, voided, restored, unlinked (the PO it was for was deleted), reviewed, unreviewed (a sign-off was withdrawn), queried, answered or query_withdrawn. |
-| `detail` | `jsonb` | ✓ | `'{}'::jsonb` | Kind-specific JSON: field changes, the void reason, or the question or answer text. {synced: 'po'} marks writes by the payer sync, and migration backfills carry a 'backfilled' key. |
+| `kind` | `text` | ✓ |  | created, edited, voided, restored, unlinked (the PO it was for was deleted), reviewed, unreviewed (a sign-off was withdrawn), queried, answered, query_withdrawn, attachment_added or attachment_removed. |
+| `detail` | `jsonb` | ✓ | `'{}'::jsonb` | Kind-specific JSON: field changes, the void reason, the question or answer text, or a screenshot's attachmentId and filename. {synced: 'po'} marks writes by the payer sync, and migration backfills carry a 'backfilled' key. |
 | `actor_id` | `uuid` |  |  | → users. NULL on rows from migration backfills, and on payer-sync rows when nobody acted (the bank sync). |
 | `created_at` | `timestamptz` | ✓ | `clock_timestamp()` |  |
 
 - **Primary key:** `id`
 - **References:** `actor_id` → `users.id` (on delete set null); `entry_id` → `accounting_entries.id` (on delete cascade)
-- **Checks:** `kind IN ('created', 'edited', 'voided', 'restored', 'unlinked', 'reviewed', 'unreviewed', 'queried', 'answered', 'query_withdrawn')`
+- **Checks:** `kind IN ('created', 'edited', 'voided', 'restored', 'unlinked', 'reviewed', 'unreviewed', 'queried', 'answered', 'query_withdrawn', 'attachment_added', 'attachment_removed')`
 - **Indexes:** `accounting_entry_events_actor_id_idx` (actor_id); `accounting_entry_events_entry_idx` (entry_id, created_at); `accounting_entry_events_feed_idx` (created_at DESC, id DESC)
 - **Triggers:** `accounting_entry_events_no_delete` (before delete → `accounting_entry_events_lock()`); `accounting_entry_events_no_update` (before update → `accounting_entry_events_lock()`)
 
 Append-only: BEFORE UPDATE and BEFORE DELETE triggers raise, except for deletes cascading from the entry (pg_trigger_depth() > 1). created_at defaults to clock_timestamp() rather than now(), so events written by one transaction keep their order.
+
+<a id="erp-accounting-entry-attachments"></a>
+
+#### `accounting_entry_attachments`
+
+A payment screenshot that proves an RMB Flow entry, stored in R2 under `accounting/<entry id>/`. routes/accounting.ts writes and deletes the rows, managers only, and refuses both on a voided entry. A screenshot is proof, not money: adding or removing one writes an attachment_added or attachment_removed event and leaves the entry's updated_at (its version) and sign-off alone.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
+| `entry_id` | `text` | ✓ |  |  |
+| `filename` | `text` | ✓ |  | The name the receipt OCR gave it, `<upload date>-<method>-<amount>.<ext>` (ai/receipt.ts), or the uploaded name when the model couldn't read it. |
+| `size_bytes` | `integer` | ✓ |  | After an oversized image was shrunk to the upload cap. |
+| `mime_type` | `text` | ✓ |  |  |
+| `storage_key` | `text` | ✓ |  | R2 object key ('stub-<uuid>' in dev/tests without R2). Deleted from R2 when the row is. |
+| `delivery_url` | `text` | ✓ |  | Public URL the client renders. |
+| `uploaded_at` | `timestamptz` | ✓ | `now()` |  |
+| `uploaded_by` | `uuid` |  |  | → users. Uploader. |
+
+- **Primary key:** `id`
+- **References:** `entry_id` → `accounting_entries.id` (on delete cascade); `uploaded_by` → `users.id` (on delete set null)
+- **Indexes:** `accounting_entry_attachments_entry_idx` (entry_id, uploaded_at); `accounting_entry_attachments_uploaded_by_idx` (uploaded_by)
 
 <a id="erp-bank-accounts"></a>
 
