@@ -2733,9 +2733,11 @@ const zh: Record<string, string> = {
   // ── Tracker (zh) ──
   nav_tracker: 'Reddit',
   trkTitle: 'Reddit 监控集群',
+  trkWorkflowTitle: 'Reddit 工作流',
   trkPromptsTitle: 'Reddit 提示词',
   trkViews: 'Reddit 视图',
   trkTabPrompts: '提示词',
+  trkTabWorkflow: '工作流',
   trkNotConfigured: '追踪器连接尚未配置。请在后端设置 TRACKER_API_URL 和 TRACKER_API_TOKEN 后刷新。',
   trkLegend: '节点状态',
   trkLive: '在线',

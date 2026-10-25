@@ -15,6 +15,15 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.346.0] - 2026-10-25
+
+### Added
+
+- Monitors ▸ Reddit has a Workflow tab for the “From a post to an alert”
+  card. Poll, Evaluate and Notify, their live counts and editing controls
+  now have their own page, leaving Fleet focused on workers and recent
+  matches (RS-397).
+
 ## [1.345.0] - 2026-10-25
 
 ### Added
