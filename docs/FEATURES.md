@@ -1246,6 +1246,23 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
 - Flat and grouped views. Grouped is what goes outward to vendors and buyers,
   so it carries no cost, sell price or submitter (v1.51.0); flat keeps them for
   internal use.
+- **RAM carries a market short code** (v1.347.0): Samsung's three characters
+  before the part number's dash (`M393A2G40DB0-CPB0Q` → `DB0`), SK Hynix's
+  die/package segment (`HMA42GR7MFR4N-TF` → `MFR`), or Micron's recorded
+  three-letter chip die (`D9VPP` → `VPP`). Recognized separator-free spellings
+  read the same. A Micron lot with no recognizable chip stays *Not recorded*;
+  its module number alone does not prove a die. Other brands and unsupported
+  part schemes, including Hynix HMC DDR5, have no short code.
+  - Desktop and phone RAM forms show it live from Brand, Part # and Chip #.
+    The inventory RAM editor also offers Chip #, so existing stock can gain a
+    missing code, normalized on save and recorded in its audit log.
+  - Inventory, Quick View, the sell-order builder, picker and order lines
+    show it. A product group lists its distinct codes and any unknown member;
+    its lots keep their own. Warehouse scope applies to the shown codes too.
+  - Inventory exports, PO workbooks and vendor bid sheets include **Short
+    code**. Short codes are calculated from current data. Inventory grouping
+    and market-price identity stay unchanged; the vendor bid sheet uses the
+    short-code grouping described below.
 - **The grouped view groups RAM by module family** (v1.244.0). Part numbers
   that differ only in the maker's trailing packaging or marking code
   (`M393A2K43BB1-CTD` / `-CTD7Q` / `-CTDQ`, Micron `-2G1A2II` / `-2G1A2KJ`)
@@ -1607,12 +1624,16 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   The sheet ships pre-sorted the way the desk reads it, with an autofilter
   across the header row and no sheet protection (v1.51.2). **It prices a
   part once, not per condition**: there is no Condition column, and a part
-  held in two conditions is one row with its qty summed (v1.242.0). **A DDR5
-  lot folds by spec, not part number** (v1.255.0): the same Brand + Type +
-  Capacity + Rank + Speed + Class key as Inventory's grouped view, so lots of
-  several part numbers are one row with their qty summed, and the row's Part
-  Number cell lists each part number it folds, comma-separated. The packing
-  lists and the product `#` keep folding by part number.
+  held in two conditions is one row with its qty summed (v1.242.0). **RAM
+  bids group by short code and spec** (v1.347.0): Brand + Short code + Speed +
+  Rank, with Capacity, Generation, Type and Class also kept separate. Matching
+  lots across POs, warehouses and part numbers share one row with their qty
+  summed. Equivalent speed spellings compare in MT/s. The Part Number cell
+  lists every live member, comma-separated; a zero-quantity lot stays out.
+  Without a recognized code or a complete spec, the earlier grouping applies:
+  DDR5 by Brand + Type + Capacity + Rank + Speed + Class (v1.255.0), other RAM
+  by part number and label. Known and unknown chip codes never share a bid
+  group. Packing lists and product `#` keep their existing grouping.
   - **The import half of the round trip was removed in v1.297.0** (RS-324).
     From v1.21.0 to v1.296.x the vendor filled the sheet's Unit Price column
     and the manager dropped it back on the order's edit view: the preview
@@ -1620,7 +1641,11 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     prices, and the save that followed recorded them on the Market board as
     `bid:<order>` data points (v1.138.3). Since Review mode sets each PO
     line's sell price (v1.296.0) and a sell order line starts at its lot's
-    sell price, the sheet is a quote the ERP never reads back. The
+    sell price, the returned sheet is read on the PO's Review mode instead
+    (v1.313.0). Since v1.347.0 its preview expands grouped part-number cells
+    and matches any Short code column as well, so Micron VPP and WSM under one
+    module number can take different quoted prices. Sheets without that
+    column still match by part number. The retired sell-order
     `price-import/preview` route, the `bidParts` save field (an old bundle
     sending it is ignored) and the `bid:` feed are gone; `bid:` events
     already on file still show on the Activity page. The Market page's own

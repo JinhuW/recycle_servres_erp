@@ -21,6 +21,7 @@ export type DraftItem = {
   label: string;                         // pre-formatted, e.g. "Samsung 32GB DDR4"
   subLabel?: string | null;              // "RDIMM · 3200MHz" etc
   partNumber: string | null;
+  shortCode?: string | null;
   qty: number;                           // max sellable qty
   unitCost: number;
   sellPrice: number | null;              // suggested list price
@@ -42,6 +43,7 @@ type Line = {
   label: string;
   subLabel: string | null;
   partNumber: string | null;
+  shortCode?: string | null;
   qty: number;
   maxQty: number;
   unitCost: number;
@@ -88,6 +90,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
       label:       it.label,
       subLabel:    it.subLabel ?? null,
       partNumber:  it.partNumber,
+      shortCode:   it.shortCode,
       qty:         it.qty,
       maxQty:      it.qty,
       unitCost:    it.unitCost,
@@ -304,6 +307,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
                           <td>
                             <div style={{ fontWeight: 500, fontSize: 13 }}>{l.label}</div>
                             <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
+                              {l.category === 'RAM' && <span>{t('ramShortCode')}: {l.shortCode ?? t('ramShortCodeUnknown')} · </span>}
                               <span className="mono">{l.partNumber ?? '—'}</span>
                               <span>·</span>
                               <span>{l.condition}</span>

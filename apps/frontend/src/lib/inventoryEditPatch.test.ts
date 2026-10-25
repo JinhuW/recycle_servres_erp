@@ -3,6 +3,7 @@ import { inventoryEditPatch, type InventoryEditDraft } from './inventoryEditPatc
 
 const base: InventoryEditDraft = {
   partNumber: 'MTA18ASF1G72PZ-2G6B1QG',
+  chipNumber: '',
   condition: 'Used',
   qty: '2',
   unitCost: '19',
@@ -41,6 +42,12 @@ describe('inventoryEditPatch', () => {
   it('clears a spec with null and leaves the others out', () => {
     expect(inventoryEditPatch(base, { ...base, brand: '', speed: '3200' }))
       .toEqual({ brand: null, speed: '3200' });
+  });
+
+  it('sends a newly recorded chip and can clear it', () => {
+    const filled = { ...base, chipNumber: 'VPP' };
+    expect(inventoryEditPatch(base, filled)).toEqual({ chipNumber: 'VPP' });
+    expect(inventoryEditPatch(filled, base)).toEqual({ chipNumber: null });
   });
 
   it('sends a status change on its own', () => {

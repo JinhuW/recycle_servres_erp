@@ -30,6 +30,7 @@ export type ProductLot = {
   serial_number: string | null;
   // Absent from a backend older than this bundle.
   part_number?: string | null;
+  short_code?: string | null;
 };
 
 export type ProductGroup = {
@@ -38,6 +39,7 @@ export type ProductGroup = {
   part_number: string | null;
   // Absent from a backend older than this bundle.
   part_numbers?: string[];
+  short_codes?: (string | null)[];
   category: string;
   brand: string | null;
   capacity: string | null;
@@ -211,6 +213,11 @@ export function InventoryProductTable({
                   <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
                     {productSpec(g)}
                   </div>
+                  {g.category === 'RAM' && (
+                    <div style={{ fontSize: 11.5, marginTop: 3 }}>
+                      {t('ramShortCode')}: <span className="mono">{(g.short_codes ?? [null]).map(c => c ?? t('ramShortCodeUnknown')).join(', ')}</span>
+                    </div>
+                  )}
                 </td>
                 {cols.partNumber && (
                   <td className="mono muted" style={{ fontSize: 11.5 }} title={manyPns ? pns.join('\n') : undefined}>
@@ -325,6 +332,9 @@ export function InventoryProductTable({
                                     )}
                                   </span>
                                 </span>
+                                {g.category === 'RAM' && (
+                                  <div style={{ marginTop: 4 }}>{t('ramShortCode')}: {l.short_code ?? t('ramShortCodeUnknown')}</div>
+                                )}
                                 {l.serial_number && (
                                   <div style={{ marginTop: 5 }}>
                                     <SerialNumbers raw={l.serial_number} max={4} size={10.5} />

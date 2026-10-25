@@ -107,6 +107,7 @@ type Header = {
   partCol: number;
   priceCol: number;
   priceHeader: string;
+  shortCodeCol?: number;
 };
 
 type HeaderHit = Header & { ws: ExcelJS.Worksheet; headerRow: number };
@@ -139,7 +140,8 @@ function headerIn(row: ExcelJS.Row): Header | null {
   const part = best(partScore);
   const price = part && best(priceScore, part.col);
   if (!part || !price) return null;
-  return { partCol: part.col, priceCol: price.col, priceHeader: price.text };
+  const shortCode = cells.find(c => c.h === 'shortcode' || c.h === '短码');
+  return { partCol: part.col, priceCol: price.col, priceHeader: price.text, shortCodeCol: shortCode?.col };
 }
 
 function findHeaders(wb: ExcelJS.Workbook): HeaderHit[] {
@@ -191,6 +193,8 @@ export type SheetPriceRow = {
   rowNumber: number;
   rawPart: string;
   canonPart: string;
+  /** Absent on older sheets; null within the list is an unknown chip code. */
+  shortCodes?: (string | null)[];
   price: number | null;
   priceKind: ParsedPrice['kind'];
   rawPrice: string;
@@ -226,11 +230,21 @@ export function readPriceSheetRows(wb: ExcelJS.Workbook): SheetPriceRow[] {
       // The cell's own mark first, then its number format (a typed number
       // carries its currency only there), then the column's and the tab's.
       const currency = currencyIn(rawPrice) ?? currencyIn(cell.numFmt ?? '') ?? listed;
-      rows.push({
+      const shortCodes = cols.shortCodeCol === undefined ? undefined : [...new Set(
+        cellText(row.getCell(cols.shortCodeCol).value).split(/[,，]/).map(c => {
+          const code = c.trim().toUpperCase();
+          return code === '' || code === '—' ? null : code;
+        }),
+      )];
+      // A bid row lists every part it folds; one entered price applies to all
+      // of them. Slashes stay intact because they belong to Kingston numbers.
+      const parts = [...new Set(rawPart.split(/[,，;；\r\n]+/).map(p => p.trim()).filter(Boolean))];
+      for (const part of parts) rows.push({
         sheet: ws.name,
         rowNumber: r,
-        rawPart,
-        canonPart: canonPartNumberJs(rawPart),
+        rawPart: part,
+        canonPart: canonPartNumberJs(part),
+        ...(shortCodes === undefined ? {} : { shortCodes }),
         price: price.kind === 'ok' ? price.value : null,
         priceKind: price.kind,
         rawPrice,

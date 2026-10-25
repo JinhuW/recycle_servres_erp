@@ -1,3 +1,4 @@
+import { ramShortCode } from '@recycle-erp/shared';
 import type postgres from 'postgres';
 import { inventoryLabel, inventorySpec, type InventoryAttrs } from '../lib/inventoryLabel';
 import { committedQtySql, proposalSellStatuses } from '../lib/sellCommitment';
@@ -23,6 +24,7 @@ export type SellableItem = {
   label: string;
   subLabel: string | null;
   partNumber: string | null;
+  shortCode: string | null;
   condition: string | null;
   warehouseId: string | null;
   warehouseName: string | null;
@@ -47,6 +49,7 @@ type SellableRow = InventoryAttrs & {
   order_id: string;
   line_no: number;
   part_number: string | null;
+  chip_number: string | null;
   qty: number;
   sell_price: number | null;
   warehouse_id: string | null;
@@ -68,7 +71,7 @@ export async function searchSellableInventory(
   const rows = await sql<SellableRow[]>`
     SELECT l.id, l.order_id, ${poLineNo(sql, 'l')} AS line_no, l.category, l.brand, l.capacity, l.generation, l.type,
            l.classification, l.rank, l.speed, l.interface, l.form_factor,
-           l.description, l.part_number, l.condition,
+           l.description, l.part_number, l.chip_number, l.condition,
            (l.qty - c.n) AS qty,
            l.sell_price::float AS sell_price,
            l.health::float AS health, l.rpm,
@@ -105,6 +108,7 @@ export async function searchSellableInventory(
     label: inventoryLabel(r) || r.id.slice(0, 8),
     subLabel: inventorySpec(r),
     partNumber: r.part_number,
+    shortCode: r.category === 'RAM' ? ramShortCode({ brand: r.brand, partNumber: r.part_number, chipNumber: r.chip_number }) : null,
     condition: r.condition,
     warehouseId: r.warehouse_id,
     warehouseName: r.warehouse_short,

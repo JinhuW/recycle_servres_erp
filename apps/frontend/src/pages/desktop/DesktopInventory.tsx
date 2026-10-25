@@ -44,6 +44,7 @@ type InventoryRow = {
   description: string | null;
   item_type: string | null;
   part_number: string | null;
+  short_code?: string | null;
   serial_number: string | null;
   condition: string;
   qty: number;
@@ -390,6 +391,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           // The group's part number can be a RAM family's `…-CTD*` label; a
           // sell order or a market lookup needs the lot's own.
           part_number: lot.part_number ?? g.part_number,
+          short_code: lot.short_code,
           serial_number: lot.serial_number,
           condition: lot.condition, qty: lot.qty,
           unit_cost: lot.unit_cost ?? 0, sell_price: lot.sell_price,
@@ -544,6 +546,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     label: itemLabel(r) || r.id.slice(0, 8),
     subLabel: itemSpec(r) || null,
     partNumber: r.part_number,
+    shortCode: r.short_code,
     qty: r.qty,
     unitCost: r.unit_cost,
     sellPrice: r.sell_price,
@@ -572,6 +575,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     label: itemLabel(r) || r.id.slice(0, 8),
     subLabel: itemSpec(r) || null,
     partNumber: r.part_number,
+    shortCode: r.short_code,
     condition: r.condition,
     warehouseId: r.warehouse_id,
     warehouseName: r.warehouse_short,
@@ -1197,7 +1201,10 @@ function InventoryQuickView({
               </span>
             } />
             <QVCell label="Condition" value={item.condition} borderLeft />
-            <QVCell label="Part number" value={<span className="mono" style={{ fontSize: 12 }}>{item.part_number ?? '—'}</span>} borderTop />
+            <QVCell label="Part number" value={<>
+              <span className="mono" style={{ fontSize: 12 }}>{item.part_number ?? '—'}</span>
+              {item.category === 'RAM' && <div style={{ fontSize: 11, marginTop: 4 }}>{t('ramShortCode')}: {item.short_code ?? t('ramShortCodeUnknown')}</div>}
+            </>} borderTop />
             <QVCell label="Sell price" value={
               <span className="mono" style={{ fontWeight: 600 }}>
                 {item.sell_price != null ? fmtUSD(item.sell_price, locale) : '—'}

@@ -13,11 +13,12 @@ import {
 import { LINE_STATUSES, statusTone } from '../../lib/status';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { useMarketLookup, type ResolvedMarketValue } from '../../lib/useMarketLookup';
+import { RamShortCode } from '../../components/RamShortCode';
 import { PartNumberField } from '../../components/PartNumberField';
 import { usePartQuestion } from '../../components/RamPartCheck';
 import { partQuestionKey, settlePartQuestion } from '../../lib/ramPartQuestion';
 import { CatSelect, CatCombo } from './submit/LineFields';
-import { allowedOptions, cascadePatch } from '@recycle-erp/shared';
+import { allowedOptions, cascadePatch, chipMarkingCanon } from '@recycle-erp/shared';
 import {
   CONDITIONS,
   RAM_BRANDS, RAM_CAP, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK,
@@ -32,7 +33,7 @@ type DetailRow = {
   brand: string | null; capacity: string | null; type: string | null; generation: string | null;
   classification: string | null; rank: string | null; speed: string | null;
   interface: string | null; form_factor: string | null; description: string | null;
-  part_number: string | null; condition: string;
+  part_number: string | null; chip_number: string | null; condition: string;
   qty: number; unit_cost: number; sell_price: number | null;
   status: string;
   health: number | null;
@@ -145,6 +146,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
         setEvents(r.events);
         const d: Draft = {
           partNumber: r.item.part_number ?? '',
+          chipNumber: r.item.chip_number ?? '',
           condition: r.item.condition,
           qty: String(r.item.qty),
           unitCost: String(r.item.unit_cost),
@@ -494,6 +496,11 @@ function DetailsPanel({
               <Spec label={t('type')}        ><CatSelect value={draft.type}           options={RAM_DEVICE_TYPES} onChange={v => set({ type: v })} /></Spec>
               <Spec label={t('klass')}       ><CatSelect value={draft.classification} options={allowedOptions('RAM', 'classification', draft, RAM_CLASS)} onChange={v => set({ classification: v })} /></Spec>
               <Spec label={t('rank')}        ><CatSelect value={draft.rank}           options={allowedOptions('RAM', 'rank', draft, RAM_RANK)} onChange={v => set({ rank: v })} /></Spec>
+              <Spec label={t('chipNumber')}>
+                <input className="input mono" value={draft.chipNumber}
+                  onChange={e => set({ chipNumber: e.target.value.toUpperCase() })}
+                  onBlur={e => set({ chipNumber: chipMarkingCanon(e.target.value, draft.brand) })} />
+              </Spec>
               <Spec label={t('speedMhz')}    >
                 <input className="input" value={draft.speed} onChange={e => set({ speed: e.target.value })} />
               </Spec>
@@ -522,6 +529,7 @@ function DetailsPanel({
             </Spec>
           )}
 
+          {cat === 'RAM' && <RamShortCode line={draft} />}
           <div className="divider" />
 
           <div className="grid-2">

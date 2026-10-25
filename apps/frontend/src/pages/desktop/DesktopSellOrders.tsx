@@ -97,6 +97,7 @@ type SellOrderSummary = {
 // the `sub` text snapshot. Absent from a backend older than this bundle, and
 // null on a hand-typed line.
 type LineSpec = {
+  shortCode?: string | null;
   type?: string | null;
   classification?: string | null;
   rank?: string | null;
@@ -108,7 +109,7 @@ type LineSpec = {
 
 const specOf = (l: LineSpec): LineSpec => ({
   type: l.type, classification: l.classification, rank: l.rank, speed: l.speed,
-  interface: l.interface, formFactor: l.formFactor, health: l.health,
+  interface: l.interface, formFactor: l.formFactor, health: l.health, shortCode: l.shortCode,
 });
 
 type SellOrderLine = LineSpec & {
@@ -973,6 +974,7 @@ function LineItemCell({ line, lineNo, sub, showPo, showLineNo, linkPo }: {
         ? <LineSpecChips line={chipLine} withType />
         : sub && <div style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 3 }}>{sub}</div>}
       <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+        {line.category === 'RAM' && <span>{t('ramShortCode')}: <span className="mono">{line.shortCode ?? t('ramShortCodeUnknown')}</span></span>}
         <span className="mono">{line.partNumber ?? '—'}</span>
         {line.condition && (<><span>·</span><span>{line.condition}</span></>)}
         {po && (<><span>·</span>

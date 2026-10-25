@@ -6,6 +6,7 @@ import { UUID_RE } from '../../lib/pagination';
 import { writeOrderEvent, type SqlLike } from '../../services/orderAudit';
 import { notify } from '../../lib/notify';
 import { poLineOrder } from '../../lib/poLineNo';
+import { ramShortCode } from '@recycle-erp/shared';
 import { canonPartNumberJs } from '../../lib/part-number';
 import { allLimited } from '../../lib/concurrency';
 import { convertToUsd, getLatestRateToUsd, isSupportedCurrency } from '../../lib/fx';
@@ -262,15 +263,15 @@ checksRoutes.post('/:id/price-sheet/preview', async (c) => {
 
   const currencyOf = (s: SheetPriceRow) => s.currency ?? listCurrency;
   const [lines, cny] = await allLimited([
-    () => sql<{ id: string; part_number: string | null }[]>`
-      SELECT id, part_number FROM order_lines WHERE order_id = ${id}`,
+    () => sql<{ id: string; category: string; brand: string | null; part_number: string | null; chip_number: string | null }[]>`
+      SELECT id, category, brand, part_number, chip_number FROM order_lines WHERE order_id = ${id}`,
     () => (sheetRows.some(s => currencyOf(s) === 'CNY') ? getLatestRateToUsd(sql, 'CNY') : Promise.resolve(null)),
   ]);
 
   // Every sheet row read once, into dollars or the reason it has none, under
   // its canonical part number. Junk like '-' canonicalises to '' and is no
   // part at all.
-  const byPart = new Map<string, { cell: SheetCell; status: SheetCellStatus }[]>();
+  const byPart = new Map<string, { cell: SheetCell; status: SheetCellStatus; shortCodes?: (string | null)[] }[]>();
   for (const s of sheetRows) {
     if (!s.canonPart) continue;
     const currency = currencyOf(s);
@@ -290,8 +291,8 @@ checksRoutes.post('/:id/price-sheet/preview', async (c) => {
       if (currency === 'CNY') cell.listedPrice = s.price!;
     }
     const at = byPart.get(s.canonPart);
-    if (at) at.push({ cell, status });
-    else byPart.set(s.canonPart, [{ cell, status }]);
+    if (at) at.push({ cell, status, shortCodes: s.shortCodes });
+    else byPart.set(s.canonPart, [{ cell, status, shortCodes: s.shortCodes }]);
   }
 
   const onPo = new Set<string>();
@@ -299,8 +300,13 @@ checksRoutes.post('/:id/price-sheet/preview', async (c) => {
     const canon = canonPartNumberJs(l.part_number);
     if (!canon) return { lineId: l.id, status: 'no-part' };
     onPo.add(canon);
-    const reads = byPart.get(canon);
-    if (!reads) return { lineId: l.id, status: 'not-in-sheet' };
+    const code = l.category === 'RAM'
+      ? ramShortCode({ brand: l.brand, partNumber: l.part_number, chipNumber: l.chip_number }) : null;
+    // One Micron module number can carry several dies at different prices.
+    // An older quote with no Short code column still matches by part alone.
+    const reads = byPart.get(canon)?.filter(r => l.category !== 'RAM'
+      || r.shortCodes === undefined || r.shortCodes.includes(code));
+    if (!reads?.length) return { lineId: l.id, status: 'not-in-sheet' };
     const priced = reads.filter(r => r.status === 'ok').map(r => r.cell);
     const zeros = reads.filter(r => r.status === 'zero').map(r => r.cell);
     if (priced.length === 0) {
