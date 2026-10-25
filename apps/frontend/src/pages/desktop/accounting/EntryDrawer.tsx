@@ -113,7 +113,7 @@ export function EntryDrawer({ id, onClose, onChanged, onToast }: Props) {
               {(!entry.voided || entry.attachments.length > 0) && (
                 <>
                   <div className="so-section-head" style={{ marginTop: 22 }}><Icon name="paperclip" size={14} /> {t('acctScreenshots')}</div>
-                  <AcctAttachments key={entry.id} entryId={entry.id} initial={entry.attachments} readOnly={!!entry.voided} onChanged={load} />
+                  <AcctAttachments key={entry.id} entryId={entry.id} initial={entry.attachments} readOnly={!!entry.voided} onChanged={() => { load(); onChanged(); }} />
                 </>
               )}
 
