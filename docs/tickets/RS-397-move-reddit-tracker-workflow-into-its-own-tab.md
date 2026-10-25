@@ -2,12 +2,12 @@
 id: RS-397
 title: Move Reddit tracker workflow into its own tab
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-25
 reporter: jinhu
 branch: feat/reddit-workflow-tab
-pr:
+pr: "#899"
 version: 1.346.0
 related: []
 ---
@@ -44,4 +44,4 @@ selected links and exclusive content passed. The existing workflow component
 and callbacks are reused. Browser visual verification was unavailable because
 the Browser plugin runtime could not import `node:process`.
 
-Implementation is complete locally; PR and release are pending.
+Delivered to dev through PR #899 as v1.346.0.
