@@ -152,11 +152,11 @@ Desktop only, as before.
 - Local browser: all five tabs, old redirects, account search, city-log aside,
   Analysis range and daily-value table, purchaser pool-only access and a
   1000 px viewport checked. Screenshots are in `WS-E2-screenshots/`.
-- Backend suite: 2,640 passed, one existing budget-fixture failure. At
-  02:55 UTC its `NOW() - interval '7 hours'` lease starts yesterday, while
-  `fleet_minutes` assigns minutes to the lease's UTC date. The fixture
-  therefore does not spend today's budget. The backend implementation and
-  test are identical to `dev`; this frontend rework leaves them unchanged.
+- Initial backend suite: 2,640 passed, one budget-fixture failure. Its
+  seven-hours-ago lease crossed UTC midnight before 07:00 UTC. The release
+  fix anchors the fixture's seven-hour window to today's UTC date; runtime
+  backend behavior stays unchanged. All 25 claim tests pass locally after
+  the fix.
 - Analysis daily totals retain the coordinator's UTC day boundaries. City
   alert rates stay blank when the ERP task history cannot account for the
   coordinator alert total or hits the 1,000-row cap. No new API contract.

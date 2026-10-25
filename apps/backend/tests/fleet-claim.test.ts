@@ -369,9 +369,15 @@ describe('POST /api/fleet/worker/next-task', () => {
     const no = await seedSlot(1);
     const { worker_token: token } = await claimed('lab-1');
     const waiting = await addTask('houston');
+    // Minutes belong to the lease's UTC date, even when CI runs before 07:00 UTC.
     await getTestDb()`
+      WITH today AS (
+        SELECT date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS start
+      )
       INSERT INTO fleet_tasks (city, item, due_at, state, account_no, leased_at, lease_expires_at, done_at)
-      VALUES ('denver', 'server_ram', NOW(), 'done', ${no}, NOW() - interval '7 hours', NOW() - interval '6 hours 30 minutes', NOW() - interval '1 hour')`;
+      SELECT 'denver', 'server_ram', start, 'done', ${no}, start,
+             start + interval '30 minutes', start + interval '7 hours'
+      FROM today`;
     const r = await nextTask(token, null, 5);
     expect(r.body).toEqual({ task: null, retry_after: 300, reason: 'budget' });
     expect((await taskRow(waiting)).state).toBe('ready');

@@ -17,6 +17,11 @@ at the last commit that carried each version.
 
 ## [1.344.0] - 2026-10-24
 
+### Fixed
+
+- The fleet claim-budget test uses a fixed window on today's UTC date, so
+  running CI before 07:00 UTC no longer puts its budget on yesterday's ledger.
+
 ### Changed
 
 - Facebook fleet keeps its sidebar entry and organizes management into five
