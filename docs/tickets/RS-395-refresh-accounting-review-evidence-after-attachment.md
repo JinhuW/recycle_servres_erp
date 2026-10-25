@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-24
 reporter: jinhu
 branch: fix/accounting-attachment-refresh
-pr:
+pr: 894
 version: 1.344.1
 related: [RS-390]
 ---
