@@ -2,12 +2,12 @@
 id: RS-399
 title: Add market-recognizable short codes for RAM
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-25
 reporter: jinhu
 branch: feat/ram-short-code
-pr:
+pr: "#900"
 version: 1.347.0
 related: [RS-122, RS-209, RS-214, RS-229, RS-246]
 ---
