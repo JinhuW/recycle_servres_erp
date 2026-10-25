@@ -107,6 +107,6 @@ Plan, split for several agents: `docs/superpowers/plans/2026-10-24-erp-fleet/`.
 - `10.10.60.14` was not reachable from the Mac mini on 2026-10-24 (timeout on
   22); verify from the owner's machine.
 
-- WS-E2 rework: implemented at v1.344.0; review and screenshots are recorded
+- WS-E2 rework: implemented in PR #893 at v1.344.0; review and screenshots are recorded
   in `docs/superpowers/plans/2026-10-24-erp-fleet/WS-E2-ui-rework.md`.
   The parent ticket remains open for cutover and WS-G.
