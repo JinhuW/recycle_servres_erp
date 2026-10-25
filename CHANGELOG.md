@@ -15,6 +15,24 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.347.0] - 2026-10-25
+
+### Added
+
+- RAM shows a market short code on desktop and phone forms, inventory and sell
+  orders, and in the PO/inventory workbooks and vendor bid sheet. Samsung
+  `M393A2G40DB0-CPB0Q` reads `DB0`; SK Hynix `HMA42GR7MFR4N-TF` reads `MFR`.
+  Micron uses its recorded chip die (`D9VPP` → `VPP`); unknown chips stay
+  unrecorded. Groups list every distinct code, including an unknown member,
+  while each lot keeps its own code and the existing product grouping.
+- The vendor bid sheet combines RAM with the same brand, short code, speed,
+  rank, capacity, DDR generation and module type, summing quantities across
+  lots and module numbers. Its returned prices reach every listed part in PO
+  Review mode, with chip codes distinguishing different Micron dies under one
+  part number. Unknown codes retain their earlier grouping.
+- Inventory's RAM editor now accepts Chip #, so missing Micron markings can be
+  recorded on existing stock. It normalizes the marking and audits the change.
+
 ## [1.346.0] - 2026-10-25
 
 ### Added

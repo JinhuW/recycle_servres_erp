@@ -9,6 +9,7 @@ export type SpecField = typeof SPEC_FIELDS[number];
 
 export type InventoryEditDraft = {
   partNumber: string;
+  chipNumber: string;
   condition: string;
   qty: string;
   unitCost: string;
@@ -43,6 +44,7 @@ export function inventoryEditPatch(
   // and as one it would 409 on a reviewed PO.
   if (Number(draft.unitCost) !== Number(initial.unitCost)) patch.unitCost = Number(draft.unitCost) || 0;
   if (Number(draft.qty) !== Number(initial.qty)) patch.qty = Number(draft.qty) || 0;
+  if (moved('chipNumber')) patch.chipNumber = draft.chipNumber || null;
   if (moved('condition')) patch.condition = draft.condition;
   // The route COALESCEs part number, so null is "no change" — a blanked part
   // number does not clear it, as before.

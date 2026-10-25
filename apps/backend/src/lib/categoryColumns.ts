@@ -1,4 +1,4 @@
-import { CATEGORY_ORDER, type ExportCategory } from '@recycle-erp/shared';
+import { ramShortCode, CATEGORY_ORDER, type ExportCategory } from '@recycle-erp/shared';
 import type { XlsxColumn } from './xlsx';
 
 export { CATEGORY_ORDER };
@@ -18,6 +18,7 @@ export const SPEC_COLS_BY_CATEGORY: Record<ExportCategory, XlsxColumn[]> = {
   RAM: [
     { header: 'Part #',      key: 'part',           width: 22 },
     { header: 'Chip #',      key: 'chip',           width: 22 },
+    { header: 'Short code',  key: 'shortCode',      width: 14 },
     { header: 'Brand',       key: 'brand',          width: 14 },
     { header: 'Capacity',    key: 'capacity',       width: 10 },
     { header: 'Gen',         key: 'generation',     width: 8 },
@@ -109,6 +110,7 @@ export function lineSpecFields(l: Record<string, unknown>) {
   return {
     part: l.part_number ?? '',
     chip: l.chip_number ?? '',
+    shortCode: l.category === 'RAM' ? ramShortCode({ brand: l.brand, partNumber: l.part_number, chipNumber: l.chip_number }) ?? '' : '',
     brand: l.brand ?? '',
     capacity: l.capacity ?? '',
     generation: l.generation ?? '',

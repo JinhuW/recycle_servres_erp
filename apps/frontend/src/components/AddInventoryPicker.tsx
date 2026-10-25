@@ -18,6 +18,7 @@ export type SellableItem = {
   label: string;
   subLabel: string | null;
   partNumber: string | null;
+  shortCode?: string | null;
   condition: string | null;
   warehouseId: string | null;
   warehouseName: string | null;
@@ -168,6 +169,7 @@ export function AddInventoryPicker({ excludeIds, locale, onClose, onAdd }: Props
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 500 }}>{it.subLabel ?? it.label}</div>
                         <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, marginTop: 1 }}>
+                          {it.category === 'RAM' && <span>{t('ramShortCode')}: {it.shortCode ?? t('ramShortCodeUnknown')}</span>}
                           <span>{it.warehouseName ?? t('sodNoWarehouse')}</span>
                           {it.condition && (<><span>·</span><span>{it.condition}</span></>)}
                           {it.draftCount > 0 && (

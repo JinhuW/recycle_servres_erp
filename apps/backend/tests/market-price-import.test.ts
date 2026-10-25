@@ -162,6 +162,24 @@ describe('readPriceSheetRows', () => {
       .toEqual(['USD', 'USD', 'HKD', 'CNY']);
   });
 
+  it('reads every member of a grouped bid and preserves slashes in part numbers', () => {
+    const rows = readPriceSheetRows(wbWith([
+      ['Part Number', 'Short code', 'Unit Price (USD)'],
+      ['KSM26RD8/16HDI, KSM26RD8/16MEI', '—', 25],
+    ]));
+    expect(rows.map(r => [r.rawPart, r.shortCodes, r.price])).toEqual([
+      ['KSM26RD8/16HDI', [null], 25], ['KSM26RD8/16MEI', [null], 25],
+    ]);
+  });
+
+  it('accepts a code list from the earlier template and a Chinese code header', () => {
+    const rows = readPriceSheetRows(wbWith([
+      ['Part Number', '短码', 'Unit Price (USD)'],
+      ['MTA16ATF2G64HZ-3G2J1', 'vpp， WSM， —', 25],
+    ]));
+    expect(rows[0]).toMatchObject({ shortCodes: ['VPP', 'WSM', null], price: 25 });
+  });
+
   it('throws when no tab has both columns', () => {
     expect(() => readPriceSheetRows(wbWith([['Item', 'Qty'], ['x', 1]])))
       .toThrow(PriceColumnsNotFoundError);

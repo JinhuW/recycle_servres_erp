@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { CLOSE_REASON_IDS, isRealPhotoUrl } from '@recycle-erp/shared';
+import { CLOSE_REASON_IDS, isRealPhotoUrl, ramShortCode } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { uploadAttachment, deleteAttachment, StorageUnavailableError } from '../r2';
 import { notify } from '../lib/notify';
@@ -449,6 +449,7 @@ sellOrders.get('/:id', async (c) => {
         // it.
         no: noByLine.get(l.id)!,
         category: l.category, label: l.label, sub: l.sub_label, partNumber: l.part_number,
+        shortCode: l.lot_category === 'RAM' ? ramShortCode({ brand: l.brand, partNumber: l.lot_part_number, chipNumber: l.chip_number }) : null,
         qty: l.qty, unitPrice: l.unit_price,
         // Native (order-currency) unit price; equals unitPrice for USD orders.
         nativeUnitPrice: l.source_unit_price ?? l.unit_price,
