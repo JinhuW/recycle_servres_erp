@@ -3627,9 +3627,11 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     // ── Tracker ──
     nav_tracker: 'Reddit',
     trkTitle: 'Reddit fleet',
+    trkWorkflowTitle: 'Reddit workflow',
     trkPromptsTitle: 'Reddit prompts',
     trkViews: 'Reddit views',
     trkTabPrompts: 'Prompts',
+    trkTabWorkflow: 'Workflow',
     trkNotConfigured: 'The tracker connection is not set up yet. Set TRACKER_API_URL and TRACKER_API_TOKEN on the backend, then reload.',
     trkLegend: 'Worker status',
     trkLive: 'Live',

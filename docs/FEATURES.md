@@ -2737,8 +2737,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   fails, that part shows a dash or a note.
 
   Since v1.316.0 the page has the Facebook page's tabs: **Fleet**
-  (`/tracker`, everything above) and **Prompts** (`/tracker/prompts`, the
-  card below), and the title follows the tab. The workers toolbar matches
+  (`/tracker`) and **Prompts** (`/tracker/prompts`, the card below),
+  and the title follows the tab. Since v1.346.0 (RS-398), a third tab,
+  **Workflow** (`/tracker/workflow`), holds the **From a post to an alert**
+  card with its stage counts, subreddit and rule editors, and model picker.
+  Fleet shows the worker legend, workers table and recent matches.
+  The workers toolbar matches
   the Facebook one. A search box on the left finds a worker by id or role,
   across the whole fleet rather than the rows scrolled in: while a search is
   typed, the table loads every worker the status filter allows in one

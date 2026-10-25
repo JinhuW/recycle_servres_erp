@@ -65,6 +65,9 @@ describe('pathToDesktopView — tracker', () => {
   it('keeps the Prompts tab on the tracker view', () => {
     expect(pathToDesktopView('/tracker/prompts')).toBe('tracker');
   });
+  it('keeps the Workflow tab on the tracker view', () => {
+    expect(pathToDesktopView('/tracker/workflow')).toBe('tracker');
+  });
   it('does not match other tracker sub-paths', () => {
     expect(pathToDesktopView('/tracker/x')).toBe('dashboard');
   });
