@@ -1,5 +1,5 @@
 ---
-id: RS-397
+id: RS-398
 title: Move Reddit tracker workflow into its own tab
 type: story
 status: done

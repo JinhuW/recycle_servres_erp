@@ -27,12 +27,14 @@ export const scopeKind = (s: AcctScope): Exclude<AccountingKind, 'other'> =>
 // A record's side of the managers' RMB book, on the record's own page: what
 // has been booked against it, what that comes to, and a Record button with
 // the record already chosen. The host shows it to managers only.
-export function AccountingCard({ scope, className, managerId, onRecorded }: {
+export function AccountingCard({ scope, className, managerId, onRecorded, recordLabel, recordHint }: {
   scope: AcctScope;
   className?: string;
   // Who usually holds this money — a sell order's payment receiver.
   managerId?: string | null;
   onRecorded?: (r: SavedEntry) => void;
+  recordLabel?: string;
+  recordHint?: string;
 }) {
   const { t, locale } = useT();
   const { ledger, reload } = useAccountingTarget(scope);
@@ -47,7 +49,7 @@ export function AccountingCard({ scope, className, managerId, onRecorded }: {
   const preset: EntryPreset = {
     kind, target, managerId: managerId ?? undefined, ...(owed > 0 ? { amount: owed } : {}),
   };
-  const action = t(recordActionKey(kind, KIND_DEFAULT_DIRECTION[kind]));
+  const action = t(recordLabel ?? recordActionKey(kind, KIND_DEFAULT_DIRECTION[kind]));
 
   return (
     <div className={className ?? 'oe-ledger'}>
@@ -62,6 +64,7 @@ export function AccountingCard({ scope, className, managerId, onRecorded }: {
           </button>
         )}
       </div>
+      {recordHint && !target.payerBusiness && <div className="acct-hint">{t(recordHint)}</div>}
       {target.payerBusiness && <div className="acct-card-empty">{t('acctPaidFromBusiness')}</div>}
       {ledger.entries.length === 0 ? (
         <div className="acct-card-empty">{t(EMPTY_KEY[kind])}</div>

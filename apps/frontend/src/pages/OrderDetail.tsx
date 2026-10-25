@@ -1486,11 +1486,11 @@ export function OrderDetail({
               body is shared with the fields above. */}
           <div className="ph-pay">
             <CommissionPaymentFields orderId={order.id} paidBy={commissionPaidBy} shots={commissionShots} editable={!isPurchaser}
-              payments={commissionPayments} onLinked={() => { setAcctVersion(v => v + 1); setActivityRefreshKey(k => k + 1); }} />
+              payments={commissionPayments} onLinked={() => { setAcctVersion(v => v + 1); setActivityRefreshKey(k => k + 1); }}
+              rmbFlow={showAccounting && (
+                <PhAccountingSection orderId={order.id} kind="commission" version={acctVersion} onRecord={setAcctPreset} recordLabel="cpCreateRmb" recordHint="cpRmbCreateHint" />
+              )} />
           </div>
-          {showAccounting && (
-            <PhAccountingSection orderId={order.id} kind="commission" version={acctVersion} onRecord={setAcctPreset} />
-          )}
         </PhFold>
 
         <PhFold

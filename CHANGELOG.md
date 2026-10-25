@@ -22,7 +22,18 @@ at the last commit that carried each version.
 - Monitors ▸ Reddit has a Workflow tab for the “From a post to an alert”
   card. Poll, Evaluate and Notify, their live counts and editing controls
   now have their own page, leaving Fleet focused on workers and recent
-  matches (RS-397).
+  matches (RS-398).
+
+## [1.345.1] - 2026-10-25
+
+### Fixed
+
+- The PO commission's RMB Flow option now offers **Create** directly, without
+  transaction search or an empty candidate box. It opens the existing payment
+  form with the PO linked and keeps amount autofill and screenshot AI.
+  Business Account retains transaction search. Both desktop and phone use the
+  corrected flow, with a clear primary action and larger phone touch target
+  (RS-397).
 
 ## [1.345.0] - 2026-10-25
 

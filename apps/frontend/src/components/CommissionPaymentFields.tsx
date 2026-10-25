@@ -1,20 +1,19 @@
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useState, type ReactNode } from 'react';
 import { AttachmentChip } from './AttachmentChip';
 import { useT } from '../lib/i18n';
-import { PAID_BY_COMPANY, paidByLabel, paidByLocked, type CommissionPaidBy } from '../lib/useCommissionPaidBy';
+import { PAID_BY_COMPANY, paidByLabel, type CommissionPaidBy } from '../lib/useCommissionPaidBy';
 import type { ProofAttachment } from '../lib/usePaymentProof';
 import { ConfirmDialog } from '../pages/desktop/settings/dialogs';
 import { api } from '../lib/api';
 import { RouteLink } from './RouteLink';
 import { paymentsForOrderPath } from '../lib/route';
-import { acctEntries, acctPatch } from '../lib/accounting';
 import { fmtMoney } from '../lib/format';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { showSuccessToast } from '../lib/errorToast';
 import type { CommissionPayments } from '../lib/useCommissionPayments';
 import '../styles/accounting.css';
 
-// The payment is selected from its ledger; legacy commission evidence remains readable.
+// Legacy evidence stays readable while payments live in their own ledgers.
 export type CommissionShots = {
   atts: ProofAttachment[];
   uploading: boolean;
@@ -29,11 +28,12 @@ type Props = {
   editable: boolean;
   payments: CommissionPayments;
   onLinked: () => void;
+  rmbFlow?: ReactNode;
 };
 
-type Candidate = { id: string; version?: string; day: string; party: string; amount: number; currency: string; detail: string };
+type Candidate = { id: string; day: string; party: string; amount: number; currency: string; detail: string };
 
-export function CommissionPaymentFields({ orderId, paidBy, shots, editable, payments, onLinked }: Props) {
+export function CommissionPaymentFields({ orderId, paidBy, shots, editable, payments, onLinked, rmbFlow }: Props) {
   const { t, locale } = useT();
   const id = useId();
   const [source, setSource] = useState<'rmb' | 'business'>(paidBy.paidBy?.kind === 'company' ? 'business' : 'rmb');
@@ -45,17 +45,8 @@ export function CommissionPaymentFields({ orderId, paidBy, shots, editable, paym
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Candidate | null>(null);
   const [generation, setGeneration] = useState(0);
-  const rmbBlocked = source === 'rmb' && paidByLocked(paidBy.paidBy);
   const search = useCallback(async (cursor?: string) => {
     const q = new URLSearchParams({ q: settled.trim(), direction: 'out', limit: '30', ...(cursor ? { cursor } : {}) });
-    if (source === 'rmb') {
-      q.set('unlinked', '1');
-      const r = await acctEntries(q.toString());
-      return { nextCursor: r.nextCursor, rows: r.rows.map(e => ({
-        id: e.id, version: e.review?.version, day: e.occurredOn, party: e.counterparty ?? e.manager.name,
-        amount: e.amount, currency: e.currency, detail: e.manager.name + ' · ' + t('acctMethod_' + e.method),
-      })) };
-    }
     q.set('status', 'unlinked');
     q.set('settle', 'settled');
     const r = await api.get<{ rows: BankCandidate[]; nextCursor: string | null }>('/api/bank-transactions?' + q);
@@ -63,9 +54,9 @@ export function CommissionPaymentFields({ orderId, paidBy, shots, editable, paym
       id: e.id, day: e.postedAt.slice(0, 10), party: e.counterparty ?? e.source,
       amount: Math.abs(e.amount), currency: e.currency, detail: e.paypalTxnId ?? e.description ?? e.source,
     })) };
-  }, [settled, source, t]);
+  }, [settled]);
   useEffect(() => {
-    if (!editable) return;
+    if (!editable || source !== 'business') return;
     let alive = true;
     setLoading(true);
     setResults(null);
@@ -74,20 +65,15 @@ export function CommissionPaymentFields({ orderId, paidBy, shots, editable, paym
       .catch(e => { if (alive) setError(e instanceof Error ? e.message : t('cpSearchFailed')); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [editable, search, generation]);
+  }, [editable, source, search, generation, t]);
 
   const link = async () => {
     if (!selected || busy) return;
     setBusy(true);
     setError(null);
     try {
-      if (source === 'rmb') {
-        const r = await acctPatch(selected.id, { kind: 'commission', targetId: orderId, onlyUnlinked: true, expectedVersion: selected.version });
-        if (r.commissionPaidBy !== undefined) paidBy.sync(r.commissionPaidBy);
-      } else {
-        await api.post(`/api/bank-transactions/${encodeURIComponent(selected.id)}/link`, { orderId, kind: 'commission', onlyUnlinked: true });
-        paidBy.sync({ kind: 'company', linked: true });
-      }
+      await api.post(`/api/bank-transactions/${encodeURIComponent(selected.id)}/link`, { orderId, kind: 'commission', onlyUnlinked: true });
+      paidBy.sync({ kind: 'company', linked: true });
       setSelected(null);
       setGeneration(v => v + 1);
       payments.reload();
@@ -112,37 +98,41 @@ export function CommissionPaymentFields({ orderId, paidBy, shots, editable, paym
               </button>
             ))}
           </div>
-          <label className="label" htmlFor={id}>{t('cpSearchTransactions')}</label>
-          <input id={id} className="input" type="search" value={query} disabled={busy} autoComplete="off"
-                 placeholder={t(source === 'rmb' ? 'cpSearchRmbPh' : 'cpSearchBusinessPh')}
-                 onChange={e => setQuery(e.target.value)} />
-          <div className="acct-hint">{t(rmbBlocked ? 'cpRmbBankLinkedHint' : 'cpSearchHint')}</div>
-          {loading ? <div className="acct-hint" role="status">{t('cpSearchLoading')}</div> : results && (
-            <div className="acct-pick-list commission-search-results">
-              {results.rows.length === 0 && <div className="acct-empty">{t('cpNoTransactions')}</div>}
-              {results.rows.map(row => (
-                <button key={row.id} type="button" className="acct-pick-row commission-search-row" disabled={busy || rmbBlocked}
-                        onClick={() => setSelected(row)}>
-                  <span className="commission-search-info">
-                    <strong>{row.party}</strong>
-                    <span className="acct-sub">{row.day} · {row.detail}</span>
-                    <span className="acct-sub mono">{row.id}</span>
-                  </span>
-                  <span className="mono">{fmtMoney(row.amount, row.currency, locale)}</span>
-                  <span className="commission-link-label">{t('cpLinkPayment')}</span>
-                </button>
-              ))}
-              {results.nextCursor && <button type="button" className="btn sm" disabled={busy} onClick={async () => {
-                setBusy(true);
-                try {
-                  const r = await search(results.nextCursor!);
-                  setResults(prev => prev && ({ rows: [...prev.rows, ...r.rows], nextCursor: r.nextCursor }));
-                } catch (e) { setError(e instanceof Error ? e.message : t('cpSearchFailed')); }
-                finally { setBusy(false); }
-              }}>{t('cpMoreTransactions')}</button>}
-            </div>
+          {source === 'rmb' ? rmbFlow : (
+            <>
+              <label className="label" htmlFor={id}>{t('cpSearchTransactions')}</label>
+              <input id={id} className="input" type="search" value={query} disabled={busy} autoComplete="off"
+                     placeholder={t('cpSearchBusinessPh')}
+                     onChange={e => setQuery(e.target.value)} />
+              <div className="acct-hint">{t('cpSearchHint')}</div>
+              {loading ? <div className="acct-hint" role="status">{t('cpSearchLoading')}</div> : results && (
+                <div className="acct-pick-list commission-search-results">
+                  {results.rows.length === 0 && <div className="acct-empty">{t('cpNoTransactions')}</div>}
+                  {results.rows.map(row => (
+                    <button key={row.id} type="button" className="acct-pick-row commission-search-row" disabled={busy}
+                            onClick={() => setSelected(row)}>
+                      <span className="commission-search-info">
+                        <strong>{row.party}</strong>
+                        <span className="acct-sub">{row.day} · {row.detail}</span>
+                        <span className="acct-sub mono">{row.id}</span>
+                      </span>
+                      <span className="mono">{fmtMoney(row.amount, row.currency, locale)}</span>
+                      <span className="commission-link-label">{t('cpLinkPayment')}</span>
+                    </button>
+                  ))}
+                  {results.nextCursor && <button type="button" className="btn sm" disabled={busy} onClick={async () => {
+                    setBusy(true);
+                    try {
+                      const r = await search(results.nextCursor!);
+                      setResults(prev => prev && ({ rows: [...prev.rows, ...r.rows], nextCursor: r.nextCursor }));
+                    } catch (e) { setError(e instanceof Error ? e.message : t('cpSearchFailed')); }
+                    finally { setBusy(false); }
+                  }}>{t('cpMoreTransactions')}</button>}
+                </div>
+              )}
+              {error && <div className="acct-error" role="alert">{error}</div>}
+            </>
           )}
-          {error && <div className="acct-error" role="alert">{error}</div>}
         </>
       )}
       {!!payments.data?.bank.length && (
@@ -166,7 +156,7 @@ export function CommissionPaymentFields({ orderId, paidBy, shots, editable, paym
         </div>
       )}
       {selected && (
-        <ConfirmDialog title={t('cpLinkPayment')} busy={busy} message={t(source === 'business' ? 'cpLinkBusinessConfirm' : 'cpLinkPaymentConfirm', {
+        <ConfirmDialog title={t('cpLinkPayment')} busy={busy} message={t('cpLinkBusinessConfirm', {
           amount: fmtMoney(selected.amount, selected.currency, locale), party: selected.party, id: orderId,
         })} confirmLabel={t('cpLinkPayment')} onCancel={() => { if (!busy) setSelected(null); }}
           onConfirm={() => { void link(); }} />
