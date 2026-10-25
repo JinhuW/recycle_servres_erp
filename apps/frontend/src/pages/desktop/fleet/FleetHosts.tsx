@@ -1,60 +1,24 @@
 import { useState, type FormEvent } from 'react';
 import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
-import { TableSkeleton } from '../../../components/Skeleton';
 import { ApiError } from '../../../lib/api';
 import { fleetApi, type FleetHost, type FleetHostCreated, type FleetRelease } from '../../../lib/fleet';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
 import { hostRunning, releaseSummary, rollProgress } from './fleetBoard';
-import { Clock, ConfirmDialogBody, EmptyRow, SeenChip, TabCard, UnavailableCard, useFleetPoll } from './shared';
+import { agoLabel, Clock, ConfirmDialogBody } from './shared';
 
 // ─── Hosts ────────────────────────────────────────────────────────────────────
-// The machines that run worker containers. Each runs one agent that asks the
-// ERP what it should run (count, image) and reports what it does run. A host
-// is observe-only until a manager makes it authoritative, so a freshly
-// registered agent starts nothing by accident. A release names an image and a
-// version; the ERP then replaces one idle worker at a time across the fleet,
-// and the roll's state (the latest release only) shows above the table.
+// The machines that run worker containers, as the strip of cards at the top
+// of the Fleet tab. Each runs one agent that asks the ERP what it should run
+// (count, image) and reports what it does run. A host is observe-only until a
+// manager makes it authoritative, so a freshly registered agent starts
+// nothing by accident. A release names an image and a version; the ERP then
+// replaces one idle worker at a time across the fleet, and a host's card
+// follows its part of the roll. The dialogs (add a host, roll out an image)
+// open from the tab's action row.
 
 const CAPACITY_MAX = 64;
-
-export function FleetHostsTab() {
-  const { t } = useT();
-  const { data, reload } = useFleetPoll(() => fleetApi.hosts());
-  const [adding, setAdding] = useState(false);
-  const [releasing, setReleasing] = useState(false);
-
-  if (data === 'unavailable') return <UnavailableCard text={t('fleetNotServed')} />;
-  const hosts = data?.hosts ?? [];
-  const release = data?.release ?? null;
-  const running = hosts.reduce((n, h) => n + hostRunning(h).running, 0);
-  const desired = hosts.reduce((n, h) => n + hostRunning(h).desired, 0);
-  const image = hosts.find(h => h.desired.image)?.desired.image || null;
-
-  return (
-    <div className="fp-pool">
-      <TabCard title={t('fleetHostsTitle')} className="fleet-hosts"
-        sub={data ? t('fleetHostsSub', { hosts: hosts.length, running, desired }) : ''}
-        actions={<>
-          <button type="button" className="btn sm" onClick={() => setReleasing(true)} disabled={!data || hosts.length === 0}>
-            <Icon name="upload" size={13} />{t('fleetRelease')}
-          </button>
-          <button type="button" className="btn sm primary" onClick={() => setAdding(true)} disabled={!data}>
-            <Icon name="plus" size={13} />{t('fleetHostAdd')}
-          </button>
-        </>}>
-        {release && <ReleaseBanner release={release} />}
-        {data === null ? <TableSkeleton rows={3} cols={7} /> : <HostsTable hosts={hosts} onChanged={reload} />}
-      </TabCard>
-      {image && (
-        <p className="fp-muted fleet-note">{t('fleetHostsImage', { image })}</p>
-      )}
-      {adding && <AddHostDialog onClose={() => setAdding(false)} onChanged={reload} />}
-      {releasing && <ReleaseDialog current={release?.image ?? image} onClose={() => setReleasing(false)} onDone={() => { setReleasing(false); reload(); }} />}
-    </div>
-  );
-}
 
 const RELEASE_CHIP: Record<FleetRelease['state'], string> = {
   rolling: 'chip info', done: 'chip pos', failed: 'chip neg', superseded: 'chip muted',
@@ -65,7 +29,7 @@ export function ReleaseBanner({ release, now }: { release: FleetRelease; now?: n
   const { t } = useT();
   const sum = releaseSummary(release)!;
   return (
-    <div className="card-body fleet-release">
+    <div className="card fleet-release">
       <span className="fp-holder">
         <span>
           <span className={RELEASE_CHIP[release.state]}>{t(`fleetReleaseState_${release.state}`)}</span>
@@ -83,7 +47,12 @@ export function ReleaseBanner({ release, now }: { release: FleetRelease; now?: n
   );
 }
 
-export function HostsTable({ hosts, onChanged, now = Date.now() }: { hosts: readonly FleetHost[]; onChanged: () => void; now?: number }) {
+/** One compact card per host: id, agent version, last seen, running of
+ *  capacity, the authoritative switch, the capacity stepper, and the roll's
+ *  progress line while one is on. */
+export function HostStrip({ hosts, release, onChanged, now = Date.now() }: {
+  hosts: readonly FleetHost[]; release: FleetRelease | null; onChanged: () => void; now?: number;
+}) {
   const { t } = useT();
   const [busy, setBusy] = useState<string | null>(null);
   const [removing, setRemoving] = useState<FleetHost | null>(null);
@@ -106,71 +75,61 @@ export function HostsTable({ hosts, onChanged, now = Date.now() }: { hosts: read
   };
   const authoritative = (h: FleetHost) => act(h.host_id, () => fleetApi.updateHost(h.host_id, { authoritative: !h.authoritative }));
 
+  if (hosts.length === 0) {
+    return <div className="card fleet-hosts-empty"><span className="fp-muted">{t('fleetHostsNone')}</span></div>;
+  }
   return (
-    <div className="fp-table-wrap">
-      <table className="fp-table fleet-table">
-        <thead>
-          <tr>
-            <th>{t('fleetColHost')}</th>
-            <th>{t('fleetColAuthoritative')}</th>
-            <th className="num">{t('fleetColCapacity')}</th>
-            <th>{t('fleetColAgentVersion')}</th>
-            <th>{t('fleetColLastSeen')}</th>
-            <th className="num">{t('fleetColRunning')}</th>
-            <th>{t('fleetColRoll')}</th>
-            <th aria-label={t('fleetColActions')} />
-          </tr>
-        </thead>
-        <tbody>
-          {hosts.length === 0 && <EmptyRow cols={8}>{t('fleetHostsNone')}</EmptyRow>}
-          {hosts.map(h => {
-            const run = hostRunning(h);
-            const roll = rollProgress(h);
-            const rowBusy = busy === h.host_id;
-            return (
-              <tr key={h.host_id}>
-                <td>
-                  <span className="fp-holder">
-                    <span className="mono">{h.host_id}</span>
-                    {h.desired.version && <small>{t('fleetHostWorkerVersion', { version: h.desired.version })}</small>}
-                  </span>
-                </td>
-                <td>
-                  <button type="button" role="switch" aria-checked={h.authoritative} className={`fleet-switch${h.authoritative ? ' on' : ''}`}
-                    onClick={() => authoritative(h)} disabled={rowBusy} title={t(h.authoritative ? 'fleetAuthoritativeOnHint' : 'fleetAuthoritativeOffHint')}>
-                    <i /><span>{t(h.authoritative ? 'fleetAuthoritativeOn' : 'fleetAuthoritativeOff')}</span>
-                  </button>
-                </td>
-                <td className="num">
-                  <span className="fleet-stepper">
-                    <button type="button" className="btn ghost icon sm" onClick={() => capacity(h, -1)} disabled={rowBusy || h.capacity <= 0}
-                      aria-label={t('fleetCapacityLess')}><Icon name="minus" size={12} /></button>
-                    <b className="mono">{h.capacity}</b>
-                    <button type="button" className="btn ghost icon sm" onClick={() => capacity(h, 1)} disabled={rowBusy || h.capacity >= CAPACITY_MAX}
-                      aria-label={t('fleetCapacityMore')}><Icon name="plus" size={12} /></button>
-                  </span>
-                </td>
-                <td className="mono">{h.version ?? <span className="fp-muted">—</span>}</td>
-                <td><SeenChip at={h.last_seen_at} now={now} /></td>
-                <td className="num mono">{run.running}<span className="ff-ring-of">/{run.desired}</span></td>
-                <td>
-                  {roll ? (
-                    <span className="fp-holder">
-                      <span className="chip info">{t('fleetRollProgress', { done: roll.onTarget, total: roll.total })}</span>
-                      {roll.replacing && <small>{t('fleetRollReplacing', { worker: roll.replacing })}</small>}
-                    </span>
-                  ) : <span className="fp-muted">—</span>}
-                </td>
-                <td className="fleet-row-actions">
-                  <button type="button" className="btn ghost icon sm" onClick={() => setRemoving(h)} disabled={rowBusy} title={t('fleetHostRemove')}>
-                    <Icon name="trash" size={13} />
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="fleet-hosts-strip">
+      {hosts.map(h => {
+        const run = hostRunning(h);
+        const roll = rollProgress(h);
+        const rowBusy = busy === h.host_id;
+        return (
+          <section key={h.host_id} className="card fleet-host" aria-label={h.host_id}>
+            <div className="fleet-host-line">
+              <span className="fleet-host-id mono">{h.host_id}</span>
+              <span className="fleet-host-meta">
+                {t('fleetHostAgent')} <span className="mono">{h.version ?? '—'}</span>
+                {' · '}{t('fleetHostSeen', { ago: agoLabel(t, h.last_seen_at, now) })}
+                {' · '}{t('fleetHostRunningOf', { running: run.running, capacity: h.capacity })}
+              </span>
+              <span className="fleet-host-right">
+                <button type="button" role="switch" aria-checked={h.authoritative} className={`fleet-switch${h.authoritative ? ' on' : ''}`}
+                  onClick={() => authoritative(h)} disabled={rowBusy} title={t(h.authoritative ? 'fleetAuthoritativeOnHint' : 'fleetAuthoritativeOffHint')}>
+                  <i /><span>{t(h.authoritative ? 'fleetAuthoritative' : 'fleetAuthoritativeOff')}</span>
+                </button>
+                <span className="fleet-stepper" title={t('fleetCapacityHint')}>
+                  <button type="button" className="btn ghost icon sm" onClick={() => capacity(h, -1)} disabled={rowBusy || h.capacity <= 0}
+                    aria-label={t('fleetCapacityLess')}><Icon name="minus" size={12} /></button>
+                  <b className="mono">{h.capacity}</b>
+                  <button type="button" className="btn ghost icon sm" onClick={() => capacity(h, 1)} disabled={rowBusy || h.capacity >= CAPACITY_MAX}
+                    aria-label={t('fleetCapacityMore')}><Icon name="plus" size={12} /></button>
+                  <small>{t('fleetCapacityWorkers')}</small>
+                </span>
+                <button type="button" className="btn ghost icon sm" onClick={() => setRemoving(h)} disabled={rowBusy} title={t('fleetHostRemove')}
+                  aria-label={t('fleetHostRemove')}>
+                  <Icon name="trash" size={13} />
+                </button>
+              </span>
+            </div>
+            {roll ? (
+              <div className="fleet-host-roll">
+                <span>
+                  {t('fleetHostRolling', { version: h.desired.version, done: roll.onTarget, total: roll.total })}
+                  {roll.replacing && <> {t('fleetHostRollNext', { worker: roll.replacing })}</>}
+                </span>
+                <span className="fleet-host-bar"><i style={{ width: `${roll.total ? roll.onTarget / roll.total * 100 : 0}%` }} /></span>
+              </div>
+            ) : (
+              <div className="fleet-host-meta">
+                {h.desired.version ? t('fleetHostWorkerVersion', { version: h.desired.version }) : t('fleetHostNoImage')}
+                {!h.authoritative && <> · {t('fleetHostObserveNote')}</>}
+                {release?.state === 'failed' && release.failure && <> · <span className="fp-warn">{release.failure}</span></>}
+              </div>
+            )}
+          </section>
+        );
+      })}
       {removing && (
         <RemoveHostDialog host={removing} onClose={() => setRemoving(null)} onDone={() => { setRemoving(null); onChanged(); }} />
       )}
@@ -208,7 +167,7 @@ function RemoveHostDialog({ host, onClose, onDone }: { host: FleetHost; onClose:
 
 // Register a host. The ERP answers with the host's bearer token once; it is
 // shown here with a copy button and never again, so the dialog says so.
-function AddHostDialog({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+export function AddHostDialog({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
   const { t } = useT();
   const [hostId, setHostId] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
@@ -292,7 +251,7 @@ function AddHostDialog({ onClose, onChanged }: { onClose: () => void; onChanged:
 
 // Roll the fleet onto a new worker image. One idle worker at a time per host;
 // the Roll column follows the progress.
-function ReleaseDialog({ current, onClose, onDone }: { current: string | null; onClose: () => void; onDone: () => void }) {
+export function ReleaseDialog({ current, onClose, onDone }: { current: string | null; onClose: () => void; onDone: () => void }) {
   const { t } = useT();
   const [image, setImage] = useState(current ?? 'ghcr.io/jinhuw/aimm-recycle:');
   const [version, setVersion] = useState(current?.split(':').pop() ?? '');

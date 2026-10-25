@@ -3,7 +3,7 @@ import { Icon } from '../../../components/Icon';
 import { ApiError } from '../../../lib/api';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
 import { useT } from '../../../lib/i18n';
-import { budgetTone, easternClock, easternDateTime, liveness, type Liveness } from './fleetBoard';
+import { budgetTone, easternClock, easternDateTime, liveness, spanLabel, type Liveness, type Translate } from './fleetBoard';
 
 // ─── Shared by the fleet tabs ─────────────────────────────────────────────────
 
@@ -84,15 +84,17 @@ export function SeenChip({ at, now }: { at: string | null | undefined; now?: num
   );
 }
 
-/** Minutes of searching against the day's budget: the Fleet tab's ring. */
-export function BudgetRing({ minutes, budget }: { minutes: number; budget: number }) {
+/** Minutes of searching against the day's budget: the Fleet tab's ring. With
+ *  `unit` "searches" it counts a coordinator worker's searches of its plan. */
+export function BudgetRing({ minutes, budget, unit = 'min' }: { minutes: number; budget: number; unit?: 'min' | 'searches' }) {
   const { t } = useT();
   const r = 8;
   const c = 2 * Math.PI * r;
   const frac = budget > 0 ? Math.min(minutes / budget, 1) : 0;
   const tone = budgetTone(minutes, budget);
+  const title = unit === 'min' ? t('fleetBudgetOf', { minutes: Math.round(minutes), budget }) : t('fbcSearchesOf', { done: Math.round(minutes), budget });
   return (
-    <span className={`ff-searches ff-ring-${tone}`} title={t('fleetBudgetOf', { minutes: Math.round(minutes), budget })}>
+    <span className={`ff-searches ff-ring-${tone}`} title={title}>
       <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden>
         <circle cx="11" cy="11" r={r} className="ff-ring-track" />
         {frac > 0 && (
@@ -100,9 +102,54 @@ export function BudgetRing({ minutes, budget }: { minutes: number; budget: numbe
             strokeDasharray={`${frac * c} ${c}`} transform="rotate(-90 11 11)" />
         )}
       </svg>
-      <span className="mono"><b>{Math.round(minutes)}</b><span className="ff-ring-of">/{budget} {t('fleetMin')}</span></span>
+      <span className="mono"><b>{Math.round(minutes)}</b><span className="ff-ring-of">/{budget}{unit === 'min' ? ` ${t('fleetMin')}` : ''}</span></span>
     </span>
   );
+}
+
+/** "{span} ago" for a past instant, "in {span}" for a future one, or "—". */
+export function agoLabel(t: Translate, at: string | null | undefined, now: number = Date.now()): string {
+  if (!at) return '—';
+  const diff = Math.round((now - Date.parse(at)) / 60_000);
+  if (Number.isNaN(diff)) return '—';
+  if (diff < 1 && diff > -1) return t('fleetJustNow');
+  return diff > 0 ? t('fleetAgo', { span: spanLabel(t, diff) }) : t('fleetDueIn', { span: spanLabel(t, -diff) });
+}
+
+/** The status legend every tab's toolbar starts with: a button per bucket
+ *  with its count, the pressed one the filter. */
+export function Legend<K extends string>({ buckets, counts, value, onChange, label, dotClass }: {
+  buckets: readonly K[]; counts: Record<K | 'all', number>; value: K | 'all'; onChange: (k: K | 'all') => void;
+  label: (k: K | 'all') => string; dotClass: (k: K | 'all') => string;
+}) {
+  const all = ['all', ...buckets] as (K | 'all')[];
+  return (
+    <div className="fp-legend fleet-legend" role="group">
+      {all.map(k => (
+        <button key={k} type="button" className={`fp-legend-item ${dotClass(k)}`} aria-pressed={value === k}
+          onClick={() => onChange(value === k && k !== 'all' ? 'all' : k)}>
+          <i className="fp-dot" />
+          <span>{label(k)}</span>
+          <b>{counts[k]}</b>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A worker's reported state as a chip; an unknown state shows its raw name. */
+const WORKER_STATE_CHIP: Record<string, string> = {
+  HEALTHY: 'chip pos', DEGRADED: 'chip warn', SESSION_EXPIRED: 'chip neg', CHECKPOINT: 'chip neg',
+  CHALLENGE_2FA: 'chip neg', CHALLENGE_EMAIL: 'chip neg', CHALLENGE_CAPTCHA: 'chip neg', DEAD: 'chip neg',
+};
+export function workerStateLabel(t: Translate, state: string): string {
+  const key = `fbcState_${state}`;
+  const label = t(key);
+  return label === key ? state : label;
+}
+export function WorkerStateChip({ state }: { state: string }) {
+  const { t } = useT();
+  return <span className={WORKER_STATE_CHIP[state] ?? 'chip muted'}>{workerStateLabel(t, state)}</span>;
 }
 
 /** A worker id as a link to its page. */

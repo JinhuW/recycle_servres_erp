@@ -48,6 +48,13 @@ what answers.
 | Worker entrypoint | `trackers/facebook/rs_worker/entry.py` |
 | Migration | `apps/backend/migrations/0206_fleet.sql` (0205 was taken) |
 
+The desktop management page keeps one Monitors ▸ Facebook sidebar entry.
+Its tabs are Fleet (`/fleet`), Tasks (`/fleet/tasks`), Cities (`/fleet/cities`),
+Analysis (`/fleet/analysis`) and Account pool (`/fleet/pool`). Retired UI paths
+`/fleet/queue`, `/fleet/hosts` and `/fleet/slots` redirect to Tasks, Fleet and
+Fleet respectively. Purchasers still see Account pool only. This changes no
+HTTP payloads; the manager APIs below keep their existing paths.
+
 ## 2. Environment
 
 Backend (Railway `backend`, and `.env` locally):

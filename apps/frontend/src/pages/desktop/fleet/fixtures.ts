@@ -5,6 +5,8 @@
 import type {
   FleetCityListed, FleetRelease, FleetTask as WireTask, FleetTaskLog,
 } from '@recycle-erp/shared';
+import type { AlertHitRow, FleetAccount, FleetDoc, ReviewStatsDay } from '../../../lib/coordinator';
+import type { PoolAccount } from '../../../lib/facebookPool';
 import type { FleetHost, FleetItem, FleetSettings, FleetSlot, FleetTask, FleetWorker } from '../../../lib/fleet';
 
 export const NOW = Date.parse('2026-10-24T18:30:00Z');
@@ -171,4 +173,65 @@ export const SLOTS: FleetSlot[] = [
   slot(40),
   // Parked by a manager: no worker, and the backend answers no lease for it.
   slot(44, { last_host_id: 'homelab', epoch: 9, parked: true, note: 'parked 10-24' }),
+];
+
+// The coordinator's stats: one row per UTC day, newest last, with the funnel
+// counters a current console sends. Days with nothing reported are absent.
+export const STATS: ReviewStatsDay[] = [
+  { day: '2026-10-15', reviewed: 1200, alerted: 6, searches: 230, cards: 12000, title_pass: 5500, opened: 2600, keyword_pass: 2400, fresh: 2300, coordinated: 6, sent: 6 },
+  { day: '2026-10-22', reviewed: 1250, alerted: 7, searches: 250, cards: 13000, title_pass: 5800, opened: 2800, keyword_pass: 2600, fresh: 2500, coordinated: 7, sent: 7 },
+  { day: '2026-10-23', reviewed: 1300, alerted: 8, searches: 240, cards: 13500, title_pass: 6000, opened: 2900, keyword_pass: 2700, fresh: 2600, coordinated: 8, sent: 8 },
+  { day: '2026-10-24', reviewed: 1281, alerted: 9, searches: 255, cards: 13865, title_pass: 6181, opened: 2952, keyword_pass: 2719, fresh: 2665, coordinated: 9, sent: 9 },
+];
+
+// Alerts sent per (day, item, city) from the coordinator.
+export const HITS: AlertHitRow[] = [
+  { day: '2026-10-24', priority: 'high', item_name: 'server_ram', search_city: 'houston', sent: 2, hit: 1 },
+  { day: '2026-10-22', priority: 'low', item_name: 'enterprise_ssd', search_city: 'houston', sent: 1, hit: 0 },
+  { day: '2026-10-23', priority: 'high', item_name: 'server_ram', search_city: 'nyc', sent: 2, hit: 2 },
+  { day: '2026-10-23', priority: null, item_name: null, search_city: null, sent: 4, hit: 0 },
+];
+
+// The coordinator's workers, as /v1/fleet lists them: one healthy on the
+// queue, one that never reported, one whose account the ERP now runs. Only
+// the fields the Fleet rows read are filled in.
+const coordWorker = (id: string, over: Partial<FleetAccount> = {}): FleetAccount => ({
+  worker_id: id, source: 'fleet', region: { key: 'west', name: 'West', scope: 'region' }, cities: [{ slug: 'la', name: 'Los Angeles', radius_km: 500 }],
+  session_file: null, proxy_env: null, pacing: { search_interval: null, max_search_interval: null, overridden: false }, vnc_url: 'vnc://10.0.0.1:5905',
+  health: {
+    worker_id: id, state: 'HEALTHY', status: null, region: 'west', account_id: null, session_expiry: null, session_days_left: 20,
+    last_heartbeat_at: ago(1), last_search_at: ago(3), last_listing_at: null, error_count: 0, vnc_url: null, version: '0.13.18',
+    liveness: 'live', needs_attention: false,
+  },
+  account: null, session: null,
+  queue: {
+    worker_id: id, enrolled: true, capable: true, version: '0.13.18', quarantined: false, minutes_today: 120, budget_minutes: 360,
+    handed_today: 4, handed: ['la'], open: [{ item: 'server_ram', city: 'la', leased_at: ago(5) }],
+  },
+  ...over,
+} as FleetAccount);
+
+export const COORDINATOR: FleetDoc = {
+  generated_at: ago(0), monitor_worker_id: null, sources: { master: true, fleet: true, monitor: false }, health: { ok: true, error: null },
+  versions: { console: '1.0', coordinator: '1.0' }, ai_model: null, search: {}, items: [], regions: [],
+  workers: [
+    coordWorker('homelab-5'),
+    coordWorker('homelab-9', { health: null, queue: null, vnc_url: null }),
+    coordWorker('homelab-1'),
+  ],
+};
+
+// The pool: the accounts the slots hold, one the coordinator's worker holds,
+// one a purchaser took, one retired. Made up, like everything here.
+const poolAccount = (no: number, status: PoolAccount['status'], holder: string | null = null): PoolAccount => ({
+  no, uid: `10000${no}000${no}${no}${no}`, password: '', totp: '', email: `acct${no}@example.test`, emailPassword: '', recovery: '', cookie: '',
+  token: '', note: '', status, holder, holderId: null, since: null, addedAt: NOW - 86_400_000 * 30, cookieAt: null, aliveCheckedAt: null, batch: '',
+});
+
+export const POOL: PoolAccount[] = [
+  poolAccount(4, 'fleet', 'homelab-1'), poolAccount(7, 'fleet', 'homelab-2'), poolAccount(12, 'fleet', 'homelab-3'), poolAccount(19, 'fleet', 'homelab-4'),
+  poolAccount(31, 'fleet', 'worker-60-14-1'), poolAccount(33, 'fleet'), poolAccount(35, 'problem'), poolAccount(40, 'fleet'), poolAccount(44, 'fleet'),
+  poolAccount(50, 'fleet', 'homelab-5'),
+  poolAccount(51, 'taken', 'marcus'),
+  poolAccount(52, 'retired'),
 ];

@@ -76,8 +76,9 @@ Plan, split for several agents: `docs/superpowers/plans/2026-10-24-erp-fleet/`.
 - [ ] WS-D: `apps/fleet-agent` runs the desired count of workers on a host
       with two settings, staggers starts, rolls one worker at a time, is
       observe-only until authoritative.
-- [ ] WS-E: Cities, Queue, Hosts and Slots tabs; add/remove/pin/search-now a
-      city; start the round; host capacity and tokens; slot state.
+- [x] WS-E / E2: approved Fleet, Tasks, Cities, Analysis and Account pool
+      tabs; add/remove/pin/search-now a city; start the round; host capacity
+      and tokens; merged account states; pipeline analysis. v1.344.0.
 - [ ] WS-F: images on GHCR; first host `worker@10.10.60.14` registered; pilot
       of four accounts, then the whole fleet, each step with the owner's yes;
       the VM keeps no per-worker files.
@@ -105,3 +106,7 @@ Plan, split for several agents: `docs/superpowers/plans/2026-10-24-erp-fleet/`.
   own-list sweep. Each has a fix in the design (decision 11 in the plan).
 - `10.10.60.14` was not reachable from the Mac mini on 2026-10-24 (timeout on
   22); verify from the owner's machine.
+
+- WS-E2 rework: implemented in PR #893 at v1.344.0; review and screenshots are recorded
+  in `docs/superpowers/plans/2026-10-24-erp-fleet/WS-E2-ui-rework.md`.
+  The parent ticket remains open for cutover and WS-G.

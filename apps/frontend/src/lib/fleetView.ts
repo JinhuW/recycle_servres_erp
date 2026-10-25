@@ -467,7 +467,7 @@ export function draftChanges(base: SettingsDraft, draft: SettingsDraft): number 
 
 // The coordinator column behind each stage. Workers count the first seven,
 // the coordinator the last two (ingest, then Telegram delivery).
-const FLOW_COUNTER: Record<FlowStage, keyof ReviewStatsDay> = {
+export const FLOW_COUNTER: Record<FlowStage, keyof ReviewStatsDay> = {
   search: 'searches', cards: 'cards', title: 'title_pass', open: 'opened', keywords: 'keyword_pass',
   fresh: 'fresh', ai: 'reviewed', coordinator: 'coordinated', alert: 'sent',
 };

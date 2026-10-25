@@ -1,9 +1,14 @@
-// Pure helpers behind the fleet tabs: the queue board's cells and counts, due
-// times, the round-start preview, the budget ring's tone and the masks the
-// tables show. Kept out of the components so they can be unit-tested without
-// React.
+// Pure helpers behind the fleet tabs: the task belt's buckets and sentence,
+// due times, the round-start preview, the analysis tab's sums and series, the
+// budget ring's tone and the masks the tables show. Kept out of the
+// components so they can be unit-tested without React.
 
-import type { FleetCity, FleetHost, FleetRelease, FleetSlot, FleetTask } from '../../../lib/fleet';
+import type { AlertHitRow, ReviewStatsDay } from '../../../lib/coordinator';
+import {
+  fleetStateParked, type FleetCity, type FleetCityLogTask as FleetTaskLog, type FleetHost, type FleetRelease, type FleetSlot, type FleetTask,
+  type FleetWorker,
+} from '../../../lib/fleet';
+import { FLOW_COUNTER, FLOW_STAGES, type FlowStage } from '../../../lib/fleetView';
 
 export type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -65,89 +70,142 @@ export function dueLabel(t: Translate, dueAt: string | null | undefined, now: nu
   return t('fleetDueIn', { span: spanLabel(t, d.minutes) });
 }
 
-// ── The board ────────────────────────────────────────────────────────────────
+// ── The belt ─────────────────────────────────────────────────────────────────
+// Every open task on a 24-hour window centred on now, in quarter-hour
+// buckets: finished searches to the left, the overdue stack at now, leased
+// tasks just right of it, waiting ones at their due time. Searches only: a
+// slug check or a quarantine probe is not a city-item.
 
-/** The city's open search for one item, if any. A verify-slug or probe task
- *  is open on the same pair at times; the board and the round count searches. */
+export const BELT_WINDOW_H = 12;
+export const BELT_BUCKET_MIN = 15;
+// A city-item takes four to seven browser minutes; what the sentence assumes
+// until today's finished tasks say otherwise.
+export const DEFAULT_TASK_SECONDS = 360;
+
+const HOUR = 3_600_000;
+const BUCKET_MS = BELT_BUCKET_MIN * 60_000;
+
+export type BeltMarkKind = 'done' | 'leased' | 'later' | 'soon';
+export type BeltMark = { key: string; kind: BeltMarkKind; left: number; tasks: FleetTask[] };
+export type BeltCounts = { done: number; leased: number; due: number; later: number };
+export type BeltRow = { item: string; marks: BeltMark[]; due: FleetTask[]; counts: BeltCounts };
+
+/** Where an instant sits on the belt, as a percentage of its width. */
+export const beltLeft = (at: string | number, now: number): number =>
+  (((typeof at === 'string' ? Date.parse(at) : at) - now) / HOUR + BELT_WINDOW_H) / (2 * BELT_WINDOW_H) * 100;
+
+/** The city's open search for one item, if any, as the city list carries it. */
 export function openSearch(city: FleetCity, item: string): FleetTask | null {
   return city.open_tasks.find(t => t.item === item && t.kind === 'search') ?? null;
 }
 
-// Where a city stands for one item: its open task is due (or overdue), waits
-// for its time, or a worker holds it; or nothing is open because the city was
-// searched today, or because its tasks were cancelled (the city was removed).
-export type BoardState = 'leased' | 'due' | 'done' | 'later' | 'cancelled';
-export const BOARD_ORDER: readonly BoardState[] = ['done', 'leased', 'due', 'later', 'cancelled'];
-
-export type BoardCell = {
-  slug: string;
-  name: string;
-  state: BoardState;
-  // The time the state turns on: the search's end, the lease's start, the
-  // due time, or the cancellation.
-  at: string | null;
-  by: string | null;
-};
-
-export type BoardCounts = Record<BoardState, number> & { cities: number };
-
-const ORDER_RANK = Object.fromEntries(BOARD_ORDER.map((s, i) => [s, i])) as Record<BoardState, number>;
-
-/** One item's board: a cell per city the queue works (enabled, or disabled
- *  with a cancelled task today), in board order, and the counts. */
-export function boardCells(
-  cities: readonly FleetCity[], tasks: readonly FleetTask[], item: string, now: number = Date.now(),
-): { cells: BoardCell[]; counts: BoardCounts } {
-  const today = utcDayStart(now);
-  const doneToday = new Map<string, FleetTask>();
-  const cancelledToday = new Map<string, FleetTask>();
-  for (const task of tasks) {
-    // A slug check or a quarantine probe is not the city's search for the day.
-    if (task.item !== item || task.kind !== 'search') continue;
-    if (task.state === 'done' && task.done_at && task.done_at >= today) {
-      const prev = doneToday.get(task.city);
-      if (!prev || (prev.done_at ?? '') < task.done_at) doneToday.set(task.city, task);
-    } else if (task.state === 'cancelled' && (task.done_at ?? '') >= today) {
-      cancelledToday.set(task.city, task);
+export function beltRow(tasks: readonly FleetTask[], item: string, now: number = Date.now()): BeltRow {
+  const buckets = new Map<string, BeltMark>();
+  const add = (key: string, kind: BeltMarkKind, left: number, task: FleetTask) => {
+    const b = buckets.get(key);
+    if (b) b.tasks.push(task);
+    else buckets.set(key, { key, kind, left, tasks: [task] });
+  };
+  const counts: BeltCounts = { done: 0, leased: 0, due: 0, later: 0 };
+  const due: FleetTask[] = [];
+  const window = BELT_WINDOW_H * HOUR;
+  for (const t of tasks) {
+    if (t.item !== item || t.kind !== 'search') continue;
+    if (t.state === 'done') {
+      if (!t.done_at) continue;
+      const offset = Date.parse(t.done_at) - now;
+      if (offset < -window || offset > 0) continue;
+      counts.done += 1;
+      const n = Math.floor(offset / BUCKET_MS);
+      add(`d${n}`, 'done', 50 + (n * BELT_BUCKET_MIN / 60) / (2 * BELT_WINDOW_H) * 100 - 0.4, t);
+    } else if (t.state === 'leased') {
+      counts.leased += 1;
+      add('L', 'leased', 50.5, t);
+    } else if (t.state === 'ready') {
+      const offset = Date.parse(t.due_at) - now;
+      if (offset <= 0) { counts.due += 1; due.push(t); continue; }
+      if (offset > window) continue;
+      counts.later += 1;
+      const n = Math.floor(offset / BUCKET_MS);
+      add(`f${n}`, offset < HOUR ? 'soon' : 'later', 50 + (n * BELT_BUCKET_MIN / 60) / (2 * BELT_WINDOW_H) * 100 + 0.6, t);
     }
   }
-  const cells: BoardCell[] = [];
-  for (const city of cities) {
-    const open = openSearch(city, item);
-    const done = doneToday.get(city.slug);
-    const cancelled = cancelledToday.get(city.slug);
-    if (open?.state === 'leased') {
-      cells.push({ slug: city.slug, name: city.name, state: 'leased', at: open.lease_expires_at, by: open.worker_id });
-    } else if (done) {
-      cells.push({ slug: city.slug, name: city.name, state: 'done', at: done.done_at, by: done.worker_id });
-    } else if (open) {
-      const due = Date.parse(open.due_at) <= now;
-      cells.push({ slug: city.slug, name: city.name, state: due ? 'due' : 'later', at: open.due_at, by: null });
-    } else if (cancelled) {
-      cells.push({ slug: city.slug, name: city.name, state: 'cancelled', at: cancelled.done_at, by: null });
-    } else if (city.enabled) {
-      // Enabled, nothing open and nothing done: the scheduler has not written
-      // its task yet (a city verified seconds ago). It reads as waiting.
-      cells.push({ slug: city.slug, name: city.name, state: 'later', at: null, by: null });
-    }
-  }
-  cells.sort((a, b) => ORDER_RANK[a.state] - ORDER_RANK[b.state] || a.name.localeCompare(b.name));
-  const counts = { cities: cells.length, done: 0, leased: 0, due: 0, later: 0, cancelled: 0 };
-  for (const c of cells) counts[c.state] += 1;
-  return { cells, counts };
+  due.sort((a, b) => b.priority - a.priority || a.due_at.localeCompare(b.due_at));
+  const marks = [...buckets.values()].sort((a, b) => a.left - b.left);
+  return { item, marks, due, counts };
 }
 
-/** "12 of 127 searched, 3 being searched, 40 to go, 72 not due yet." */
-export function countsSentence(t: Translate, counts: BoardCounts): string {
-  const working = counts.cities - counts.cancelled;
-  if (working === 0) return t('fleetBoardEmpty');
-  if (counts.done === working) return t('fleetBoardDone', { n: working }) + '.';
-  const parts = [t('fleetBoardSearched', { done: counts.done, n: working })];
-  if (counts.leased) parts.push(t('fleetBoardLeased', { n: counts.leased }));
-  if (counts.due) parts.push(t('fleetBoardDue', { n: counts.due }));
-  if (counts.later) parts.push(t('fleetBoardLater', { n: counts.later }));
-  const sentence = parts.join(', ') + '.';
-  return counts.cancelled ? `${sentence} ${t('fleetBoardCancelled', { n: counts.cancelled })}` : sentence;
+/** The hour ticks under the belt: every third Eastern hour, clear of the
+ *  edges and of the now label. */
+export function beltAxis(now: number, locale: string): { left: number; label: string }[] {
+  const first = new Date(now);
+  first.setUTCMinutes(0, 0, 0);
+  const out: { left: number; label: string }[] = [];
+  for (let h = -BELT_WINDOW_H; h <= BELT_WINDOW_H; h += 1) {
+    const d = new Date(first.getTime() + h * HOUR);
+    const left = beltLeft(d.getTime(), now);
+    if (left < 1 || left > 99 || Math.abs(left - 50) < 5) continue;
+    const hour = Number(d.toLocaleTimeString('en-US', { timeZone: FLEET_TZ, hour: 'numeric', hour12: false }));
+    if (hour % 3 !== 0) continue;
+    out.push({ left, label: d.toLocaleTimeString(locale, { timeZone: FLEET_TZ, hour: 'numeric' }) });
+  }
+  return out;
+}
+
+/** How long a city-item takes: the mean of today's finished searches, or the
+ *  default when none has finished yet. */
+export function averageTaskSeconds(tasks: readonly FleetTask[], now: number = Date.now()): number {
+  const today = utcDayStart(now);
+  const seconds: number[] = [];
+  for (const t of tasks) {
+    const s = t.result?.seconds;
+    if (t.kind === 'search' && t.state === 'done' && (t.done_at ?? '') >= today && typeof s === 'number' && s > 0) seconds.push(s);
+  }
+  if (seconds.length === 0) return DEFAULT_TASK_SECONDS;
+  return Math.round(seconds.reduce((a, b) => a + b, 0) / seconds.length);
+}
+
+/** Workers that can take a task now (a live heartbeat, not parked), split by
+ *  whether they hold one. */
+export function workersBusy(workers: readonly FleetWorker[], now: number = Date.now()): { busy: number; idle: number } {
+  let busy = 0;
+  let idle = 0;
+  for (const w of workers) {
+    const lv = liveness(w.last_heartbeat_at, now);
+    if (lv === 'dead' || lv === 'never' || fleetStateParked(w.state)) continue;
+    if (w.task) busy += 1; else idle += 1;
+  }
+  return { busy, idle };
+}
+
+export type BeltSummary = BeltCounts & { busy: number; idle: number; clearMinutes: number; avgSeconds: number };
+
+/** The numbers the sentence above the belt reads out: workers busy and idle,
+ *  city-items due and how long the backlog takes at the measured pace, done
+ *  in the last window and due in the next. */
+export function beltSummary(rows: readonly BeltRow[], workers: { busy: number; idle: number }, avgSeconds: number): BeltSummary {
+  const counts: BeltCounts = { done: 0, leased: 0, due: 0, later: 0 };
+  for (const r of rows) for (const k of Object.keys(counts) as (keyof BeltCounts)[]) counts[k] += r.counts[k];
+  const hands = Math.max(1, workers.busy + workers.idle);
+  return { ...counts, ...workers, avgSeconds, clearMinutes: Math.round(counts.due * avgSeconds / 60 / hands) };
+}
+
+// ── The city log aside ───────────────────────────────────────────────────────
+
+/** Per item: the open task first, then the last two finished ones. */
+export function logByItem(tasks: readonly FleetTaskLog[], items: readonly string[]): { item: string; tasks: FleetTaskLog[] }[] {
+  return items.map(item => {
+    const of = tasks.filter(t => t.item === item);
+    const open = of.filter(t => t.state === 'ready' || t.state === 'leased').sort((a, b) => a.due_at.localeCompare(b.due_at));
+    const past = of.filter(t => t.state !== 'ready' && t.state !== 'leased')
+      .sort((a, b) => (b.done_at ?? b.due_at).localeCompare(a.done_at ?? a.due_at)).slice(0, 2);
+    return { item, tasks: [...open, ...past] };
+  });
+}
+
+/** The worker that calls a city home, from the slots' home lists. */
+export function homeWorkerOf(slots: readonly FleetSlot[], slug: string): FleetSlot | null {
+  return slots.find(s => s.home_cities.includes(slug)) ?? null;
 }
 
 // ── Starting the round ───────────────────────────────────────────────────────
@@ -185,6 +243,48 @@ export function cityStanding(c: FleetCity): CityStanding {
   if (c.disabled_at && !c.enabled) return 'removed';
   if (c.enabled) return 'enabled';
   return c.verified_at ? 'disabled' : 'verifying';
+}
+
+// The Cities tab's legend: a pinned city is listed apart from the rest of the
+// enabled ones, and a removed city sits with the disabled.
+export type CityBucket = 'verifying' | 'pinned' | 'enabled' | 'disabled';
+export const CITY_BUCKETS: readonly CityBucket[] = ['enabled', 'pinned', 'verifying', 'disabled'];
+const CITY_RANK: Record<CityBucket, number> = { verifying: 0, pinned: 1, enabled: 2, disabled: 3 };
+
+export function cityBucket(c: FleetCity): CityBucket {
+  const standing = cityStanding(c);
+  if (standing === 'verifying') return 'verifying';
+  if (standing === 'enabled') return c.pinned ? 'pinned' : 'enabled';
+  return 'disabled';
+}
+
+export type CityFilter = { bucket: CityBucket | 'all'; region: string; q: string };
+export const EMPTY_CITY_FILTER: CityFilter = { bucket: 'all', region: '', q: '' };
+
+/** Verifying cities first, then pinned, enabled and disabled, each by name;
+ *  narrowed by the legend, the region and the search box. */
+export function filterCities(cities: readonly FleetCity[], f: CityFilter): FleetCity[] {
+  const q = f.q.trim().toLowerCase();
+  return cities
+    .filter(c => (f.bucket === 'all' || cityBucket(c) === f.bucket)
+      && (!f.region || (c.region ?? '') === f.region)
+      && (!q || `${c.name} ${c.slug}`.toLowerCase().includes(q)))
+    .sort((a, b) => CITY_RANK[cityBucket(a)] - CITY_RANK[cityBucket(b)] || a.name.localeCompare(b.name));
+}
+
+/** The regions the catalog uses, for the select. */
+export function cityRegions(cities: readonly FleetCity[]): string[] {
+  return [...new Set(cities.map(c => c.region).filter((r): r is string => !!r))].sort();
+}
+
+/** The newest finished search of one city-item among the tasks given. */
+export function lastDoneSearch(tasks: readonly FleetTask[], slug: string, item: string): FleetTask | null {
+  let best: FleetTask | null = null;
+  for (const t of tasks) {
+    if (t.city !== slug || t.item !== item || t.kind !== 'search' || t.state !== 'done' || !t.done_at) continue;
+    if (!best || (best.done_at ?? '') < t.done_at) best = t;
+  }
+  return best;
 }
 
 /** The soonest open task's due time across items, and its holder if leased. */
@@ -282,22 +382,151 @@ export function withCityNames(tasks: readonly FleetTask[], cities: readonly Flee
   return tasks.map(t => ({ ...t, city_name: t.city_name ?? names.get(t.city) ?? null }));
 }
 
-export type TaskFilter = { state: string; item: string; city: string; worker: string };
-export const EMPTY_TASK_FILTER: TaskFilter = { state: '', item: '', city: '', worker: '' };
+// `q` matches the city (slug or name), the worker and the account number.
+export type TaskFilter = { state: string; item: string; q: string };
+export const EMPTY_TASK_FILTER: TaskFilter = { state: '', item: '', q: '' };
 
-export function filterTasks(tasks: readonly FleetTask[], f: TaskFilter): FleetTask[] {
-  const city = f.city.trim().toLowerCase();
-  const worker = f.worker.trim().toLowerCase();
+export function filterTasks(tasks: readonly FleetTask[], f: TaskFilter, now: number = Date.now()): FleetTask[] {
+  const q = f.q.trim().toLowerCase();
   return tasks.filter(task =>
-    (!f.state || task.state === f.state)
+    (!f.state || (task.state === f.state && (f.state !== 'ready' || Date.parse(task.due_at) <= now)))
     && (!f.item || task.item === f.item)
-    && (!city || task.city.toLowerCase().includes(city) || (task.city_name ?? '').toLowerCase().includes(city))
-    && (!worker || (task.worker_id ?? '').toLowerCase().includes(worker)));
+    && (!q || [task.city, task.city_name ?? '', task.worker_id ?? '', task.account_no === null ? '' : `account ${task.account_no}`]
+      .join(' ').toLowerCase().includes(q)));
 }
 
-/** Newest activity first: a leased task by its lease, a finished one by its
- *  end, a waiting one by its due time. */
-export function sortTasks(tasks: readonly FleetTask[]): FleetTask[] {
+/** What is happening first: running tasks, then the ones due now, then
+ *  finished ones, then the ones waiting for later; newest within each. */
+export function sortTasks(tasks: readonly FleetTask[], now: number = Date.now()): FleetTask[] {
+  const rank = (t: FleetTask) =>
+    t.state === 'leased' ? 3 : t.state === 'ready' ? (Date.parse(t.due_at) <= now ? 2 : 0) : 1;
   const stamp = (t: FleetTask) => t.done_at ?? t.leased_at ?? t.due_at;
-  return [...tasks].sort((a, b) => (stamp(b) < stamp(a) ? -1 : stamp(b) > stamp(a) ? 1 : b.id - a.id));
+  return [...tasks].sort((a, b) => rank(b) - rank(a) || (stamp(b) < stamp(a) ? -1 : stamp(b) > stamp(a) ? 1 : b.id - a.id));
+}
+
+// ── Analysis ─────────────────────────────────────────────────────────────────
+
+export type FunnelRange = 1 | 7 | 14;
+export const FUNNEL_RANGES: readonly FunnelRange[] = [1, 7, 14];
+
+const DAY_MS = 86_400_000;
+const utcDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/** The stage counts summed over the last `range` UTC days, today included.
+ *  A console older than the funnel counters sends only `reviewed` and
+ *  `alerted`: the other stages then stay uncounted, as in flowCounts. */
+export function funnelCounts(days: readonly ReviewStatsDay[] | null, range: FunnelRange, now: number = Date.now()): Partial<Record<FlowStage, number>> {
+  if (!days) return {};
+  const from = utcDay(now - (range - 1) * DAY_MS);
+  const rows = days.filter(d => d.day >= from && d.day <= utcDay(now));
+  const funnel = days.length === 0 || days.some(d => d.searches !== undefined);
+  const sum = (key: keyof ReviewStatsDay) => rows.reduce((n, d) => n + (Number(d[key]) || 0), 0);
+  if (!funnel) return { ai: sum('reviewed'), alert: sum('alerted') };
+  return Object.fromEntries(FLOW_STAGES.map(s => [s, sum(FLOW_COUNTER[s])])) as Record<FlowStage, number>;
+}
+
+export type FunnelGap = { kind: 'ratio' | 'pct'; value: number | null; drop: boolean };
+
+/** What survives from each stage to the next: cards per search as a ratio,
+ *  every other step as a percentage; `drop` marks a step under half. */
+export function funnelGaps(counts: Partial<Record<FlowStage, number>>): FunnelGap[] {
+  const out: FunnelGap[] = [];
+  for (let i = 1; i < FLOW_STAGES.length; i += 1) {
+    const prev = counts[FLOW_STAGES[i - 1]];
+    const cur = counts[FLOW_STAGES[i]];
+    const known = prev !== undefined && cur !== undefined && prev > 0;
+    if (FLOW_STAGES[i] === 'cards') out.push({ kind: 'ratio', value: known ? Math.round(cur / prev) : null, drop: false });
+    else {
+      const pct = known ? Math.round(cur / prev * 1000) / 10 : null;
+      out.push({ kind: 'pct', value: pct, drop: pct !== null && pct < 50 });
+    }
+  }
+  return out;
+}
+
+export type FunnelHeadline = {
+  cards: number; searches: number; reviews: number; alerts: number;
+  cardsPerAlert: number | null; reviewsPerAlert: number | null; titleDrop: number | null; modelDrop: number | null;
+};
+
+/** The ratios the sentence under the pipeline names; null when a stage is
+ *  not counted or nothing was alerted. */
+export function funnelHeadline(counts: Partial<Record<FlowStage, number>>): FunnelHeadline | null {
+  const reviews = counts.ai;
+  const alerts = counts.alert;
+  if (reviews === undefined || alerts === undefined) return null;
+  const cards = counts.cards ?? 0;
+  const searches = counts.search ?? 0;
+  const title = counts.title;
+  return {
+    cards, searches, reviews, alerts,
+    cardsPerAlert: alerts > 0 && cards > 0 ? Math.round(cards / alerts) : null,
+    reviewsPerAlert: alerts > 0 && reviews > 0 ? Math.round(reviews / alerts) : null,
+    titleDrop: title !== undefined && cards > 0 ? Math.round((1 - title / cards) * 100) : null,
+    modelDrop: reviews > 0 ? Math.round((1 - alerts / reviews) * 100) : null,
+  };
+}
+
+export type DayPoint = { day: string; value: number; today: boolean };
+export type DaySeries = { points: DayPoint[]; total: number; fullDayAverage: number; max: number };
+
+/** One value per UTC day for the last `n` days ending today, gaps as zero. */
+export function daySeries(days: readonly ReviewStatsDay[], key: 'reviewed' | 'alerted', n: number = 14, now: number = Date.now()): DaySeries {
+  const byDay = new Map(days.map(d => [d.day, Number(d[key]) || 0]));
+  const points: DayPoint[] = [];
+  for (let i = n - 1; i >= 0; i -= 1) {
+    const day = utcDay(now - i * DAY_MS);
+    points.push({ day, value: byDay.get(day) ?? 0, today: i === 0 });
+  }
+  const total = points.reduce((s, p) => s + p.value, 0);
+  const full = points.slice(0, -1);
+  const fullDayAverage = full.length ? Math.round(full.reduce((s, p) => s + p.value, 0) / full.length) : 0;
+  return { points, total, fullDayAverage, max: Math.max(0, ...points.map(p => p.value)) };
+}
+
+/** A chart's top gridline: the smallest round number above the highest bar. */
+export function niceTop(max: number): number {
+  if (max <= 0) return 1;
+  const pow = 10 ** Math.floor(Math.log10(max));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * pow >= max) return m * pow;
+  return 10 * pow;
+}
+
+export type CityAlerts = {
+  slug: string; name: string; region: string | null; alerts: number; reviewed: number | null; rate: number | null;
+  lastDay: string | null; homeWorker: string | null;
+};
+
+/** Alerts per city over the window: the coordinator's sent counts by city,
+ *  the model reviews from the fleet's finished tasks on the same cities (null
+ *  where none finished in the window), and the worker that calls it home. */
+export function alertsByCity(
+  hits: readonly AlertHitRow[], tasks: readonly FleetTask[], cities: readonly FleetCity[], slots: readonly FleetSlot[],
+): CityAlerts[] {
+  const byCity = new Map<string, { alerts: number; lastDay: string | null }>();
+  for (const h of hits) {
+    if (!h.search_city || h.sent <= 0) continue;
+    const c = byCity.get(h.search_city) ?? { alerts: 0, lastDay: null };
+    c.alerts += h.sent;
+    if (!c.lastDay || h.day > c.lastDay) c.lastDay = h.day;
+    byCity.set(h.search_city, c);
+  }
+  const reviewed = new Map<string, number>();
+  const alerted = new Map<string, number>();
+  const incomplete = new Set<string>();
+  for (const t of tasks) {
+    if (t.state !== 'done' || t.kind !== 'search') continue;
+    if (typeof t.result?.reviewed !== 'number' || typeof t.result?.alerted !== 'number') { incomplete.add(t.city); continue; }
+    alerted.set(t.city, (alerted.get(t.city) ?? 0) + t.result.alerted);
+    reviewed.set(t.city, (reviewed.get(t.city) ?? 0) + t.result.reviewed);
+  }
+  const names = new Map(cities.map(c => [c.slug, c]));
+  return [...byCity].map(([slug, c]) => {
+    const city = names.get(slug);
+    const r = reviewed.get(slug) ?? null;
+    return {
+      slug, name: city?.name ?? slug, region: city?.region ?? null, alerts: c.alerts, reviewed: r,
+      rate: r && tasks.length < 1000 && !incomplete.has(slug) && alerted.get(slug) === c.alerts ? c.alerts / r : null, lastDay: c.lastDay, homeWorker: homeWorkerOf(slots, slug)?.worker_id ?? null,
+    };
+  }).sort((a, b) => b.alerts - a.alerts || a.name.localeCompare(b.name));
 }
