@@ -82,6 +82,16 @@ E join as they land.
 8. **Report back here.** When your PR merges, tick your exit criteria in your
    workstream file and update the status table below in the same PR.
 
+## Owner decisions 2026-10-24
+
+1. The throwaway account for the first real run is a **retired** pool account (dev's pool copy has its rows but no `*_enc` values; credentials exist only in prod's pool).
+2. The first real-login run happens on the fleet host `worker@10.10.60.14` (approved).
+3. The Python coordinator is left out of the MVP: fleet workers run without it (no listing dedupe, no alert claims, no challenge escalation) until it is wired back; `FLEET_COORDINATOR_URL` empty → `settings.coordinator_url: null`.
+4. Images live in OCI's free tier: private OCIR repositories `<region-key>.ocir.io/<namespace>/{aimm-recycle,fleet-agent}`, built on the Mac and pushed, instead of GHCR private packages and a private GitHub mirror.
+5. Shared worker secrets (`OPENROUTER_API_KEY`, Telegram, later the coordinator tokens) are the Cloudflare Worker secret `FLEET_WORKER_ENV`, added at the edge to a `200` claim answer as `env`; hosts use the Cloudflare hostname (`https://inventory-dev.recycleservers.com`, `https://inventory.recycleservers.com`) as `FLEET_URL`, never the Railway origin or `api.recycleservers.com` (not the ERP).
+6. Host prep for `worker-60-14` ran read-only: Ubuntu 24.04.5 x86_64, 8 CPUs, 62 GB RAM, 94 GB free, Docker 29.9.2 cgroup v2, user in group `docker`, no containers, inventory-dev and api.dev answer 200, ghcr.io and iad.ocir.io reachable, `10.10.10.73:8500` closed, clock synchronised.
+7. A worker that cannot connect (Facebook or its proxy unreachable, at boot or later) stops and waits for an operator: no retry loop, exit `78`, and the agent never restarts it (every restart is a login).
+
 ## Status
 
 | WS | Status | PR | Notes |
@@ -94,6 +104,7 @@ E join as they land.
 | E2 | done | #893 | v1.344.0: five approved tabs, merged account table, task belt and city-log aside, Analysis and Runs on; private-DB and browser verification, no Facebook login |
 | F | Now section done; registry moved to OCIR (repos created, token blocked on the owner); Integration: login-free part done locally, real-login part waits for the owner | #876, #883, #891 | Images now in OCIR, private: `sin.ocir.io/ax6usa8hwbie/{aimm-recycle,fleet-agent}` (Pay-As-You-Go Singapore tenancy; the Always-Free Toronto one refuses OCIR with `FREE_TIER_NOT_SUPPORTED`); built and pushed from the Mac by `trackers/facebook/scripts/push-fleet-images.sh` (dry run built both for amd64); `fleet-images.yml` marked superseded. No auth token created and no `docker login` run: the tenancy's user already holds the maximum two (`terraform-backend`). Host prep for `worker-60-14` ran read-only 2026-10-24 (all within expected; output in WS-F). Hosts use `FLEET_URL=https://inventory-dev.recycleservers.com` (prod `inventory.recycleservers.com`); `api.recycleservers.com` is not the ERP. 4 `FLEET_*` vars set on Railway **dev** (`FLEET_IMAGE_WORKER`/`_AGENT` still name GHCR refs). Local integration (fake worker + agent with a sleeping image, no login) passed; it found the city-add wake bug, fixed in v1.340.0. Owner steps: free an auth token (or a pull-only user), throwaway pool account, coordinator wiring later |
 | G | not started | | |
+| platform | merged | #890 | Cloudflare Worker adds `FLEET_WORKER_ENV` to `200` claims as `env` (test `deploy/cloudflare/worker.test.mjs`, run in `deploy-frontend.yml`); `settings.coordinator_url` is `null` without a coordinator; agent leaves exit `78` stopped and reports `operator_needed`; CONTRACTS §1/§2/§5/§6/§10 for decisions 3, 4, 5, 7; `FLEET_URL` examples now the inventory hostnames. Worker side of `env` and exit `78` is still to build in `rs_worker/entry.py` |
 
 ## Facts an agent should not have to rediscover
 

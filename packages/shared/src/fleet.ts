@@ -262,10 +262,15 @@ export type ClaimAnswer = {
   items: FleetItem[];
   settings: {
     search: FleetSearchSettings;
-    coordinator_url: string;
+    /** Null when no coordinator is configured: the worker then posts listings nowhere. */
+    coordinator_url: string | null;
     lease_minutes: number;
     poll_hold_seconds: number;
   };
+  /** The env every fleet worker shares (LLM key, Telegram, ...), added at the
+   *  Cloudflare edge from its `FLEET_WORKER_ENV` secret; the backend never
+   *  sends it, and it is absent when the secret is unset. */
+  env?: Record<string, string>;
 };
 
 export type HeartbeatRequest = {

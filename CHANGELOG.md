@@ -15,6 +15,25 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.348.0] - 2026-10-25
+
+Fleet workers get the secrets they all share without those secrets ever
+reaching Railway or Postgres. The ERP's Cloudflare Worker now holds them as
+one secret, `FLEET_WORKER_ENV` (a JSON object of variable names to values),
+and adds it as `env` to a successful answer to a worker's slot claim. The
+backend still decides who gets them, since only a claim whose host token it
+accepted is answered 200; every other answer, every other route, and the
+WebSocket and long-poll traffic of the fleet pass through unchanged. Fleet
+hosts therefore talk to the ERP through its public Cloudflare hostname.
+
+The fleet now runs without the Python coordinator for its first version: with
+no coordinator configured, a claim says so with a `null` coordinator URL
+instead of an empty string. And a worker that cannot reach Facebook or its
+proxy now has a way to say "a person must look at this": it exits 78, and the
+host agent leaves that container stopped, never restarting it (each restart
+would be one more Facebook login into the same failure), and reports it as
+`operator_needed` until someone starts or removes it by hand.
+
 ## [1.347.0] - 2026-10-25
 
 ### Added

@@ -11,7 +11,7 @@
 import type { FleetClient } from './client.js';
 import type { DockerApi, WorkerEnv } from './docker.js';
 import { type Logger, silentLogger } from './log.js';
-import { plan, recentRestarts, type Action, type Container } from './plan.js';
+import { needsOperator, OPERATOR_NEEDED_STATE, plan, recentRestarts, type Action, type Container } from './plan.js';
 import { loadDesired, loadMemory, saveDesired, saveMemory, type Memory } from './state.js';
 import { EMPTY_DESIRED, type Desired, type Report } from './types.js';
 
@@ -124,7 +124,7 @@ export class Agent {
         version: this.o.version,
         containers: [...result.containers]
           .sort((a, b) => a.worker_id.localeCompare(b.worker_id, undefined, { numeric: true }))
-          .map((c) => ({ worker_id: c.worker_id, image: c.image, state: c.status, started_at: c.started_at })),
+          .map((c) => ({ worker_id: c.worker_id, image: c.image, state: needsOperator(c) ? OPERATOR_NEEDED_STATE : c.status, started_at: c.started_at })),
       };
       result.reported = await this.o.client.report(payload);
       if (!result.reported) this.log.warn('report not taken');

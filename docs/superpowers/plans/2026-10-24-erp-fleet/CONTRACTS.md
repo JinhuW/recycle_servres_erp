@@ -33,7 +33,12 @@ what answers.
 | Agent: exit-code delays, crash limit, VNC port fallback, `RS_VNC_PORT` is the host port | §6, §10 | #877 |
 | Shared worker env (`OPENROUTER_API_KEY`, `TELEGRAM_*`, …) that the rendered config needs: supplier undecided | §2 | #879 |
 | `next-task` takes `take` (default `true`); `take: false` closes `done`, leases nothing and answers `{task: null, reason: "done_only"}` at once | §5 | #885 |
-| On pairing, the VNC relay sends the worker one text frame `viewer` before any viewer byte; the worker dials its VNC server only after it | §5 | this change |
+| On pairing, the VNC relay sends the worker one text frame `viewer` before any viewer byte; the worker dials its VNC server only after it | §5 | #888 |
+| Images are private OCIR repositories (OCI free tier), not GHCR | §1, §10 | this change |
+| `FLEET_URL` / `RS_FLEET_URL` is the ERP's Cloudflare hostname, never the Railway origin | §2 | this change |
+| Shared worker env is decided: the Worker secret `FLEET_WORKER_ENV`, added at the edge to a `200` claim answer as `env` | §2, §5 | this change |
+| No coordinator in the MVP: `FLEET_COORDINATOR_URL` may be empty, and `settings.coordinator_url` is then `null` | §2, §5 | this change |
+| Exit code `78`: the worker cannot connect and waits for an operator; the agent never restarts it | §6, §10 | this change |
 
 ## 1. Names
 
@@ -43,8 +48,9 @@ what answers.
 | Routes | `apps/backend/src/routes/fleet.ts`, mounted at `/api/fleet` |
 | Shared types | `packages/shared/src/fleet.ts` |
 | Frontend | `apps/frontend/src/pages/desktop/fleet/*`, `apps/frontend/src/lib/fleet.ts` |
-| Host agent | `apps/fleet-agent/` → image `ghcr.io/jinhuw/fleet-agent:<root version>` |
-| Worker image | `trackers/facebook/deploy/Dockerfile.worker` → `ghcr.io/jinhuw/aimm-recycle:<facebook-tracker version>` |
+| Host agent | `apps/fleet-agent/` → image `<region-key>.ocir.io/<namespace>/fleet-agent:<root version>` |
+| Worker image | `trackers/facebook/deploy/Dockerfile.worker` → `<region-key>.ocir.io/<namespace>/aimm-recycle:<facebook-tracker version>` |
+| Registry | OCI Container Registry (OCI free tier), **private** repositories. Images are built on the Mac and pushed (OCI's free compute is full). The concrete region key and tenancy namespace are in [`HOSTS.md`](HOSTS.md) |
 | Worker entrypoint | `trackers/facebook/rs_worker/entry.py` |
 | Migration | `apps/backend/migrations/0206_fleet.sql` (0205 was taken) |
 
@@ -63,16 +69,16 @@ Backend (Railway `backend`, and `.env` locally):
 | --- | --- |
 | `FB_POOL_KEY` | exists; seals pool secrets. Without it `claim` and `PUT /worker/session` answer `401 {error: "unauthorized", detail: "FB_POOL_KEY is not set"}` |
 | `FLEET_WORKER_TOKEN_KEY` | HMAC key for worker tokens (hex, 32 bytes). **Required in production**: without it every worker route and `claim` answer `401` with `detail: "FLEET_WORKER_TOKEN_KEY is not set"`, and the rest of the app boots as usual. Outside production it is optional: the key is derived from `JWT_SECRET` (HKDF-SHA256, info `fleet-worker-token`), so dev and CI need no extra variable |
-| `FLEET_IMAGE_WORKER` | default worker image ref, e.g. `ghcr.io/jinhuw/aimm-recycle:0.14.0`; `desired.image` falls back to it when no release exists or the last one failed, and `desired.version` is its tag |
+| `FLEET_IMAGE_WORKER` | default worker image ref, e.g. `<region-key>.ocir.io/<namespace>/aimm-recycle:0.14.0`; `desired.image` falls back to it when no release exists or the last one failed, and `desired.version` is its tag |
 | `FLEET_IMAGE_AGENT` | default agent image ref. Not read by the backend yet |
-| `FLEET_COORDINATOR_URL` | the Python coordinator workers post listings to (`https://…`), handed to workers at claim as `settings.coordinator_url` (`""` when unset) |
+| `FLEET_COORDINATOR_URL` | the Python coordinator workers post listings to (`https://…`), handed to workers at claim as `settings.coordinator_url`. **Empty or unset = no coordinator** (the MVP runs without one): the claim then sends `null` and workers post listings nowhere (no listing dedupe, no alert claims, no challenge escalation) |
 | `FLEET_ROLE` | unset or `worker-api`: the whole app **and** the 30 s scheduler tick. `manager-only`: the whole app, no scheduler tick (manager writes still reconcile inline). No value filters routes yet; the `worker-api` route split is future work |
 
 Host agent container:
 
 | Var | Meaning |
 | --- | --- |
-| `FLEET_URL` | ERP base URL, e.g. `https://api.recycleservers.com` |
+| `FLEET_URL` | the ERP **through its Cloudflare Worker**: `https://inventory-dev.recycleservers.com` (dev), `https://inventory.recycleservers.com` (prod). Never the Railway origin: only the Worker adds the shared worker env to a claim, and prod's backend refuses requests without the Worker's `X-Proxy-Secret`. (`api.recycleservers.com` is not the ERP.) |
 | `FLEET_HOST_ID` | host id as registered in the ERP |
 | `FLEET_HOST_TOKEN` | the host's bearer token |
 
@@ -80,23 +86,32 @@ Worker container (set by the agent):
 
 | Var | Meaning |
 | --- | --- |
-| `RS_FLEET_URL`, `RS_FLEET_HOST_ID`, `RS_FLEET_HOST_TOKEN` | fleet mode on when all three are set |
+| `RS_FLEET_URL`, `RS_FLEET_HOST_ID`, `RS_FLEET_HOST_TOKEN` | fleet mode on when all three are set; `RS_FLEET_URL` is the agent's `FLEET_URL` unchanged |
 | `RS_FLEET_WORKER_ID` | `<host_id>-<n>` chosen by the agent |
 | `RS_VNC_PORT` | the **host** port the agent published (`127.0.0.1:<port>:5900`); the worker reports it in heartbeats |
 
 These five are the only variables the agent passes today (`apps/fleet-agent/src/docker.ts`).
 
-**Open item: shared worker env.** The config the worker renders
-(`trackers/facebook/rs_worker/config.template.toml`) expands `${VAR}`
-references from the container's environment that the claim does not carry:
-`OPENROUTER_API_KEY`, `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`,
-`TELEGRAM_TOPIC_HIGH`, `TELEGRAM_TOPIC_MEDIUM`, `TELEGRAM_TOPIC_LOW`,
-`RS_ALERT_REPORT_URL`, `RS_COORDINATOR_TOKEN`, `RS_CONTROL_PLANE_TOKEN`
-(`RS_FB_PASSWORD` / `RS_FB_TOTP` are set by the entrypoint from the claim).
-**Who supplies them to a fleet worker is undecided**: the agent would need to
-pass them (from its own env or an env file on the host), or the claim answer
-would need to carry them. Until decided, a fleet worker started by the agent
-runs without them.
+**Shared worker env: a Cloudflare Worker secret.** The config the worker
+renders (`trackers/facebook/rs_worker/config.template.toml`) expands `${VAR}`
+references from the container's environment: `OPENROUTER_API_KEY`,
+`TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_TOPIC_HIGH`,
+`TELEGRAM_TOPIC_MEDIUM`, `TELEGRAM_TOPIC_LOW`, `RS_ALERT_REPORT_URL`,
+`RS_COORDINATOR_TOKEN`, `RS_CONTROL_PLANE_TOKEN` (`RS_FB_PASSWORD` /
+`RS_FB_TOTP` are set by the entrypoint from the claim). They live in one
+secret on the ERP's Cloudflare Worker (`deploy/cloudflare/worker.js`,
+`recycle-erp-dev` / `recycle-erp-prod`):
+
+| Worker secret | Meaning |
+| --- | --- |
+| `FLEET_WORKER_ENV` | a JSON object of env var name → string value. On a `200` answer to `POST /api/fleet/worker/claim` the Worker adds it to the body as `env` (§5). Absent or not an object of strings: no `env` key, and the Worker logs one line that never carries the value |
+
+The secrets never enter Railway or Postgres, and the agent never holds them.
+Who receives them is still the backend's decision: only a claim the host
+token check let through is a `200`. The worker applies `env` to its own
+environment before it renders the config (an entry the container already
+sets is not overridden). Keys for the coordinator stay out while the MVP runs
+without one.
 
 ## 3. Auth scopes
 
@@ -260,9 +275,16 @@ the field), `unauthorized` (401). Task ids are JSON **numbers** everywhere
   "device": { "user_agent": "…", "viewport": [1366, 768], "timezone": "America/New_York", "locale": "en-US" },
   "home_cities": ["nyc", "philly"],
   "items": [ { "name": "server_ram", "phrases": ["…"], "filters": { … } } ],
-  "settings": { "search": { … }, "coordinator_url": "https://…", "lease_minutes": 30, "poll_hold_seconds": 50 }
+  "settings": { "search": { … }, "coordinator_url": "https://…" | null, "lease_minutes": 30, "poll_hold_seconds": 50 },
+  "env": { "OPENROUTER_API_KEY": "…", "TELEGRAM_TOKEN": "…", … }   // added by the Cloudflare Worker, see below
 }
 ```
+
+`env` is not sent by the backend: the Cloudflare Worker adds it from its
+`FLEET_WORKER_ENV` secret to a `200` claim answer only (§2), and it is absent
+when the secret is unset, or when the claim reached the backend some other
+way. `settings.coordinator_url` is `null` when `FLEET_COORDINATOR_URL` is empty
+or unset (no coordinator).
 
 Picks the slot with `lease_expires_at IS NULL OR < now()` (a parked slot's
 infinite lease never qualifies) whose pool account has status `fleet`;
@@ -389,7 +411,7 @@ with a fresh socket for the next viewer.
 
 ```jsonc
 // GET /api/fleet/hosts/:id/desired
-{ "authoritative": true, "count": 4, "image": "ghcr.io/jinhuw/aimm-recycle:0.14.0", "version": "0.14.0",
+{ "authoritative": true, "count": 4, "image": "<region-key>.ocir.io/<namespace>/aimm-recycle:0.14.0", "version": "0.14.0",
   "vnc_ports": { "homelab-1": 5901, "homelab-2": 5902 }, "roll": { "replace": "homelab-2" } | null }
 // POST /api/fleet/hosts/:id/report
 { "version": "1.340.0", "containers": [ { "worker_id": "homelab-1", "image": "…", "state": "running", "started_at": "…" } ] }
@@ -430,9 +452,12 @@ advanced only by an agent's `desired` call:
 - At most one start per tick and none within 3 minutes of the previous one
   (`FLEET_STAGGER_SECONDS`): every start is a Facebook login. Extra workers
   beyond `count` are removed all at once (stopping is not a login).
-- Exit codes: `75` → restart after 60 s; `70` → restart after 10 min; any
-  other exit → restart after 60 s and counts as a crash; 5 crashes in 30 min
-  → the worker is left stopped. `75` and `70` never count as crashes.
+- Exit codes: `75` → restart after 60 s; `70` → restart after 10 min; `78`
+  → **never restarted**, online or offline: left stopped and reported with
+  `state: "operator_needed"` until a person starts it (`docker start`) or
+  removes it (`docker rm`, after which it is a missing worker); any other
+  exit → restart after 60 s and counts as a crash; 5 crashes in 30 min → the
+  worker is left stopped. `75`, `70` and `78` never count as crashes.
 - `roll.replace` is acted on only online, for a running container whose image
   differs from `desired.image`, and takes the tick's one start after any
   missing or exited worker.
@@ -498,12 +523,18 @@ the first version; others add fields in their own PRs.
 
 ## 10. Worker container contract (image ↔ agent)
 
-- Image: `ghcr.io/jinhuw/aimm-recycle:<ver>`, entrypoint `rs_worker/entry.py`.
+- Image: `<region-key>.ocir.io/<namespace>/aimm-recycle:<ver>` (private OCIR), entrypoint `rs_worker/entry.py`.
 - Fleet mode on when `RS_FLEET_URL`, `RS_FLEET_HOST_ID`, `RS_FLEET_HOST_TOKEN`
   are set; otherwise the image behaves exactly as today (bind-mounted config).
 - Exit codes: `0` normal stop, `75` stale epoch or no slot (agent restarts
-  after 60 s), `70` config/claim failure (agent backs off 10 min); anything
-  else is the monitor's own code and counts as a crash (§6).
+  after 60 s), `70` config/claim failure (agent backs off 10 min), `78`
+  operator needed (agent leaves it stopped, §6); anything else is the
+  monitor's own code and counts as a crash (§6).
+- **Cannot connect → stop and wait for an operator.** When Facebook or the
+  worker's proxy cannot be reached, at boot or later, the worker does not
+  retry in a loop and does not exit with a code the agent restarts: every
+  restart is a Facebook login. It sends a final heartbeat in a parked state
+  where it can, closes its pending `done` with `take: false`, and exits `78`.
 - Ports: VNC listens on 5900 inside; the agent publishes
   `127.0.0.1:<port>:5900` with `<port>` from `desired.vnc_ports` (fallback
   `5900 + n`) and passes that host port as `RS_VNC_PORT`, which the worker

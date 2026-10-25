@@ -117,7 +117,7 @@ describe('POST /api/fleet/worker/claim', () => {
     expect(a.device).toMatchObject({ viewport: [1366, 768], locale: 'en-US' });
     expect(a.home_cities).toEqual(['nyc']);
     expect(a.items.map((i) => i.name)).toEqual(['enterprise_ssd', 'server_ram']);
-    expect(a.settings).toMatchObject({ lease_minutes: 30, poll_hold_seconds: 50, coordinator_url: '' });
+    expect(a.settings).toMatchObject({ lease_minutes: 30, poll_hold_seconds: 50, coordinator_url: null });
     expect(a.settings.search).toEqual({});
 
     const db = getTestDb();

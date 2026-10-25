@@ -14,7 +14,7 @@ Then, as a user in the `docker` group:
 
 ```sh
 docker run -d --name fleet-agent --restart always \
-  -e FLEET_URL=https://api.recycleservers.com \
+  -e FLEET_URL=https://inventory-dev.recycleservers.com \
   -e FLEET_HOST_ID=worker-60-14 \
   -e FLEET_HOST_TOKEN=... \
   -v /var/run/docker.sock:/var/run/docker.sock \
@@ -34,7 +34,7 @@ Logs are one JSON object per line in `docker logs fleet-agent`.
 
 | Var | Required | Meaning |
 | --- | --- | --- |
-| `FLEET_URL` | yes | ERP base URL, e.g. `https://api.recycleservers.com` |
+| `FLEET_URL` | yes | the ERP through its Cloudflare Worker: `https://inventory-dev.recycleservers.com` (dev) or `https://inventory.recycleservers.com` (prod), never the Railway origin. The Worker adds the shared worker env to a claim answer, and prod refuses requests that skip it. Passed to workers unchanged as `RS_FLEET_URL` |
 | `FLEET_HOST_ID` | yes | the host id as registered in the ERP; worker ids are `<host>-1`, `<host>-2`, … |
 | `FLEET_HOST_TOKEN` | yes | the host's bearer token, shown once when the host is added |
 | `FLEET_INTERVAL` | no | seconds between ticks (default 30) |
@@ -60,7 +60,13 @@ Logs are one JSON object per line in `docker logs fleet-agent`.
    - restart an exited worker by its exit code: `75` (stale epoch or no
      slot) after 60 s, `70` (claim failed) after 10 min, anything else after
      60 s, counted; five such restarts in 30 min leave it stopped and
-     reported.
+     reported;
+   - never restart a worker that exited `78`: it could not reach Facebook
+     or its proxy and waits for an operator. The report shows it as
+     `operator_needed`. An operator brings it back with
+     `docker start rs-fleet-{worker_id}` (same container) or
+     `docker rm rs-fleet-{worker_id}` (the agent then runs a fresh one on its
+     next turn); either is a Facebook login.
 4. Apply. A worker is started with exactly
    `docker run -d --name rs-fleet-{worker_id} --label rs.fleet.host={id}
    --label rs.fleet.worker={worker_id} --restart no --shm-size 1g
