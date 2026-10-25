@@ -15,6 +15,14 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.344.1] - 2026-10-24
+
+### Fixed
+
+- Adding or removing a payment screenshot in an accounting entry's drawer
+  refreshes the Review queue and its evidence pane. Review shows newly added
+  proof and drops deleted links without a page reload (RS-395).
+
 ## [1.344.0] - 2026-10-24
 
 ### Fixed

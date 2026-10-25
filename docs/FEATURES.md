@@ -2353,7 +2353,9 @@ is who paid, below).
     live; Review shows them read-only beside the figure. Adding or removing
     one is a history line and an Activity row (Added / Removed), and leaves
     the entry's version and sign-off alone: proof is not money. A voided
-    entry's screenshots are read-only (migration 0205).
+    entry's screenshots are read-only (migration 0205). Adding or removing
+    a screenshot from Review's entry drawer refreshes the queue and the
+    read-only evidence pane without a page reload (v1.344.1, RS-395).
   - **An entry's Paid by and its PO's payer are one value** (v1.317.0,
     migration 0199), kept in step both ways. *Paid by* is a person: an
     active manager, or on a Purchase entry the PO's own purchaser, who paid
