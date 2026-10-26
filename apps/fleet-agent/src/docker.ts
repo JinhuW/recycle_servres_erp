@@ -13,14 +13,16 @@ import { isDigestRef } from './types.js';
 export const LABEL_HOST = 'rs.fleet.host';
 export const LABEL_WORKER = 'rs.fleet.worker';
 export const LABEL_HANDOFF = 'rs.fleet.handoff_epoch';
+/** Created with a claim ticket: `docker start` would claim with a spent one. */
+export const LABEL_TICKET = 'rs.fleet.claim_ticket';
 
 // The worker saves its session on SIGTERM; give it the time.
 export const STOP_TIMEOUT_S = 30;
 
+/** What every worker on this host is told. The host token is not among it. */
 export interface WorkerEnv {
   url: string;
   hostId: string;
-  token: string;
 }
 
 export interface RunSpec {
@@ -28,6 +30,8 @@ export interface RunSpec {
   image: string;
   port: number;
   handoff_epoch?: number;
+  /** The single-use claim ticket the ERP minted for this container. */
+  ticket: string;
 }
 
 export interface RunResult {
@@ -52,10 +56,16 @@ export interface DockerApi {
 }
 
 /**
- * The `docker run` argv for a worker. The three fleet variables and the worker
- * id are named without a value: the CLI copies them from its own environment,
- * so the host token never appears in a process list or a log line. `--` ends
- * the options, so no image name can be read as one.
+ * The `docker run` argv for a worker. The fleet variables and the worker id
+ * are named without a value: the CLI copies them from its own environment, so
+ * the ticket never appears in a process list or a log line. `--` ends the
+ * options, so no image name can be read as one.
+ *
+ * The container gets a claim ticket, never the host token: a worker runs
+ * Chromium on Facebook, and the host token claims any free account on the
+ * host and confirms its siblings stopped. The ticket also goes out as
+ * RS_FLEET_HOST_TOKEN, the only name a worker image before facebook-tracker
+ * 0.14.5 claims with; the ERP takes either on the claim.
  */
 export function runArgs(hostId: string, spec: RunSpec): string[] {
   const handoff = spec.handoff_epoch !== undefined;
@@ -65,10 +75,12 @@ export function runArgs(hostId: string, spec: RunSpec): string[] {
     '--label', `${LABEL_HOST}=${hostId}`,
     '--label', `${LABEL_WORKER}=${spec.worker_id}`,
     ...(handoff ? ['--label', `${LABEL_HANDOFF}=${spec.handoff_epoch}`] : []),
+    '--label', `${LABEL_TICKET}=1`,
     '--restart', 'no',
     '--shm-size', '1g',
     '-e', 'RS_FLEET_URL',
     '-e', 'RS_FLEET_HOST_ID',
+    '-e', 'RS_FLEET_CLAIM_TICKET',
     '-e', 'RS_FLEET_HOST_TOKEN',
     '-e', 'RS_FLEET_WORKER_ID',
     '-e', `RS_VNC_PORT=${spec.port}`,
@@ -83,7 +95,8 @@ export function runEnv(spec: RunSpec, env: WorkerEnv): Record<string, string> {
   return {
     RS_FLEET_URL: env.url,
     RS_FLEET_HOST_ID: env.hostId,
-    RS_FLEET_HOST_TOKEN: env.token,
+    RS_FLEET_CLAIM_TICKET: spec.ticket,
+    RS_FLEET_HOST_TOKEN: spec.ticket,
     RS_FLEET_WORKER_ID: spec.worker_id,
   };
 }
@@ -240,5 +253,6 @@ export function containerOf(record: unknown): Container | null {
     ...(typeof r.Id === 'string' ? { id: r.Id } : {}),
     ...(typeof r.Image === 'string' ? { image_id: r.Image } : {}),
     ...(labels[LABEL_HANDOFF] !== undefined ? { handoff: true } : {}),
+    ...(labels[LABEL_TICKET] !== undefined ? { ticket: true } : {}),
   };
 }

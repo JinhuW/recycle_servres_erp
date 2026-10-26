@@ -1,11 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import { Hono } from 'hono';
 import type { JSONValue } from 'postgres';
-import { fleetStateParked, type DesiredAnswer, type FleetHost, type FleetHostContainer, type FleetHostReport, type FleetRelease } from '@recycle-erp/shared';
+import { fleetStateParked, type ClaimTicketAnswer, type DesiredAnswer, type FleetHost, type FleetHostContainer, type FleetHostReport, type FleetRelease } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
 import type { Env } from '../types';
-import { hostAuth, managerOnly, type HostEnv, type ManagerEnv } from './auth';
+import { CLAIM_TICKET_MINUTES, hostAuth, managerOnly, newClaimTicket, type HostEnv, type ManagerEnv } from './auth';
 import { sha256hex, type FleetHostRow, type FleetSlotRow } from './sql';
 import { releaseTasks } from './claim';
 
@@ -426,6 +426,39 @@ hosts.post('/:id/stopped', hostAuth, async (c) => {
     return true;
   });
   return ok ? c.json({ ok: true }) : c.json({ error: 'stale_epoch' }, 409);
+});
+
+// The agent asks for one right before each `docker run` and hands the worker
+// that instead of its own token (fleet/auth.ts, Claim tickets). A newer ticket
+// for the same worker voids the older ones: the container they were for is
+// gone, since the agent runs a worker only where none exists.
+hosts.post('/:id/tickets', hostAuth, async (c) => {
+  const host: FleetHostRow = c.var.host;
+  const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!body || typeof body.worker_id !== 'string' || body.worker_id.length > 80 || !ownWorkerId(host.host_id, body.worker_id)) {
+    return c.json({ error: 'bad_request', detail: 'worker_id must be <host_id>-<n>' }, 422);
+  }
+  const handoff = body.handoff_epoch ?? null;
+  if (handoff !== null && !(Number.isInteger(handoff) && (handoff as number) >= 0)) {
+    return c.json({ error: 'bad_request', detail: 'handoff_epoch' }, 422);
+  }
+  const workerId = body.worker_id;
+  const agent = agentOf(c.req.header('X-Fleet-Agent-Instance'), c.req.header('X-Fleet-Docker-Daemon'));
+  const { ticket, hash } = newClaimTicket();
+  const answer = await getDb(c.env).begin(async (tx): Promise<ClaimTicketAnswer | null> => {
+    if (!await holdHost(tx, host.host_id, agent)) return null;
+    await tx`DELETE FROM fleet_claim_tickets
+      WHERE expires_at < NOW() OR (host_id = ${host.host_id} AND worker_id = ${workerId})`;
+    const [row] = await tx<{ expires_at: Date }[]>`
+      INSERT INTO fleet_claim_tickets (token_hash, host_id, worker_id, handoff_epoch, expires_at)
+      VALUES (${hash}, ${host.host_id}, ${workerId}, ${handoff as number | null},
+              NOW() + ${`${CLAIM_TICKET_MINUTES} minutes`}::interval)
+      RETURNING expires_at`;
+    return { ticket, expires_at: row.expires_at.toISOString() };
+  });
+  if (!answer) return c.json(agentConflict(host.host_id), 403);
+  hlog.info('fleet claim ticket minted', { hostId: host.host_id, workerId, handoffEpoch: handoff });
+  return c.json(answer);
 });
 
 hosts.post('/:id/report', hostAuth, async (c) => {

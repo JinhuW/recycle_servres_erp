@@ -80,6 +80,7 @@ export const eventToWire = (r: TaskEventRow): FleetTaskEvent => ({
 /** Every relation the fleet migration creates, the view included. */
 export const FLEET_TABLES = [
   'fleet_cities',
+  'fleet_claim_tickets',
   'fleet_hosts',
   'fleet_items',
   'fleet_minutes',
@@ -119,6 +120,17 @@ export type FleetSlotRow = {
   /** A handoff reservation's deadline; the lease ends with it. */
   reserved_until: Date | null;
   note: string;
+};
+
+/** A claim ticket as stored: only its hash, the worker it is for, and whether a claim spent it. */
+export type ClaimTicketRow = {
+  token_hash: string;
+  host_id: string;
+  worker_id: string;
+  handoff_epoch: number | null;
+  expires_at: Date;
+  consumed_at: Date | null;
+  claim_id: string | null;
 };
 
 export const sha256hex = (s: string): string => createHash('sha256').update(s).digest('hex');

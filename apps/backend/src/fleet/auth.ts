@@ -1,4 +1,4 @@
-import { createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
+import { createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { MiddlewareHandler } from 'hono';
 import { every } from 'hono/combine';
 import type { FleetWorkerTokenClaims } from '@recycle-erp/shared';
@@ -6,12 +6,13 @@ import { authMiddleware } from '../auth';
 import { getDb, type SqlLike } from '../db';
 import { requireManager } from '../lib/role';
 import type { Env, User } from '../types';
-import { loadHostByTokenHash, sha256hex, type FleetHostRow, type FleetSlotRow } from './sql';
+import { loadHostByTokenHash, sha256hex, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
 
 // ─── Fleet auth scopes ────────────────────────────────────────────────────────
-// Three callers reach /api/fleet: a manager in the browser (session cookie), a
-// host agent (a bearer whose sha256 is on its fleet_hosts row) and a worker (a
-// bearer the ERP minted at claim time). The worker token is not a session: it
+// Four callers reach /api/fleet: a manager in the browser (session cookie), a
+// host agent (a bearer whose sha256 is on its fleet_hosts row), a worker
+// container before its claim (a single-use claim ticket the agent minted for
+// it) and a worker after it (a bearer the ERP minted at claim time). The worker token is not a session: it
 // names the slot's lease epoch, and a slot re-claimed elsewhere moves on to the
 // next epoch, so the old worker's every call is refused with 409 and it exits.
 // That is what keeps one Facebook account off two browsers at once.
@@ -19,6 +20,8 @@ import { loadHostByTokenHash, sha256hex, type FleetHostRow, type FleetSlotRow } 
 export type ManagerEnv = { Bindings: Env; Variables: { user: User } };
 export type HostEnv = { Bindings: Env; Variables: { host: FleetHostRow } };
 export type WorkerEnv = { Bindings: Env; Variables: { worker: WorkerIdentity } };
+/** The claim's caller: the host, and the ticket when a worker container claimed with one rather than the host token. */
+export type ClaimEnv = { Bindings: Env; Variables: { host: FleetHostRow; ticket: ClaimTicketRow | null } };
 
 /** The verified token plus the slot it names, as the row stands at this call.
  *  `rotated`: signed with the previous key, so the next heartbeat re-signs it. */
@@ -128,6 +131,48 @@ export const hostAuth: MiddlewareHandler<HostEnv> = async (c, next) => {
   const id = c.req.param('id');
   if (id !== undefined && id !== host.host_id) return c.json(UNAUTHORIZED, 401);
   c.set('host', host);
+  return next();
+};
+
+// ─── Claim tickets ────────────────────────────────────────────────────────────
+// A worker container runs Chromium on Facebook; holding the host token, a
+// compromised one could claim every free account on its host (passwords, TOTP
+// seeds, cookies) and confirm its siblings stopped. A ticket can do one thing:
+// the first claim for the worker id (and handoff epoch) it was minted for.
+
+export const CLAIM_TICKET_PREFIX = 'fct_';
+export const CLAIM_TICKET_MINUTES = 10;
+
+/** A fresh ticket and the hash it is stored under. */
+export function newClaimTicket(): { ticket: string; hash: string } {
+  const ticket = CLAIM_TICKET_PREFIX + randomBytes(32).toString('base64url');
+  return { ticket, hash: sha256hex(ticket) };
+}
+
+/**
+ * `POST /worker/claim`: the host token (older agents and workers), or a
+ * claim ticket. A ticket names its host, so the host's own checks still
+ * apply; the claim itself checks its binding and spends it, under the
+ * worker's lock. Host tokens are hex, so the prefix tells the two apart.
+ */
+export const claimAuth: MiddlewareHandler<ClaimEnv> = async (c, next) => {
+  const token = bearer(c.req.header('Authorization'));
+  if (!token) return c.json(UNAUTHORIZED, 401);
+  const sql = getDb(c.env);
+  if (!token.startsWith(CLAIM_TICKET_PREFIX)) {
+    const host = await loadHostByTokenHash(sql, sha256hex(token));
+    if (!host) return c.json(UNAUTHORIZED, 401);
+    c.set('host', host);
+    c.set('ticket', null);
+    return next();
+  }
+  const [ticket] = await sql<ClaimTicketRow[]>`SELECT * FROM fleet_claim_tickets WHERE token_hash = ${sha256hex(token)}`;
+  if (!ticket) return c.json({ ...UNAUTHORIZED, detail: 'bad_ticket' }, 401);
+  if (ticket.expires_at.getTime() <= Date.now()) return c.json({ ...UNAUTHORIZED, detail: 'expired_ticket' }, 401);
+  const [host] = await sql<FleetHostRow[]>`SELECT * FROM fleet_hosts WHERE host_id = ${ticket.host_id}`;
+  if (!host) return c.json({ ...UNAUTHORIZED, detail: 'bad_ticket' }, 401);
+  c.set('host', host);
+  c.set('ticket', ticket);
   return next();
 };
 

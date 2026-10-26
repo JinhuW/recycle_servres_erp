@@ -15,6 +15,8 @@ export class FakeDocker implements DockerApi {
   commands: Command[] = [];
   /** Handoff epochs passed to each run, by container name. */
   handoffs: (number | undefined)[] = [];
+  /** The claim ticket passed to each run, in order. */
+  tickets: string[] = [];
   agents: string[] = [];
   /** What the next `run` / `start` / `stopAndRemove` answers, once; the effect still happens unless `effect` is false. */
   failNext: Partial<Record<'run' | 'start' | 'stop', { error: string; effect: boolean }>> = {};
@@ -38,11 +40,12 @@ export class FakeDocker implements DockerApi {
   async run(spec: RunSpec, env: WorkerEnv): Promise<string | null> {
     this.commands.push(['run', containerName(spec.worker_id), spec.image, spec.port, env]);
     this.handoffs.push(spec.handoff_epoch);
+    this.tickets.push(spec.ticket);
     const fail = this.take('run');
     const name = containerName(spec.worker_id);
     if (this.containers.has(name)) return `docker run: Conflict. The container name "/${name}" is already in use`;
     if (!fail || fail.effect) {
-      this.containers.set(name, { ...running(spec.worker_id, spec.image, this.now()), ...(spec.handoff_epoch !== undefined ? { handoff: true } : {}) });
+      this.containers.set(name, { ...running(spec.worker_id, spec.image, this.now()), ticket: true, ...(spec.handoff_epoch !== undefined ? { handoff: true } : {}) });
     }
     return fail ? fail.error : null;
   }

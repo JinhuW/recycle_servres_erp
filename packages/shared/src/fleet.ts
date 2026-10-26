@@ -353,6 +353,9 @@ export type NextTaskAnswer =
   /** The answer to `take: false`: `done` is closed, nothing was leased, nothing was held. */
   | { task: null; reason: 'done_only' };
 
+/** `POST /hosts/:id/tickets`: a single-use bearer for one worker container's claim. */
+export type ClaimTicketAnswer = { ticket: string; expires_at: string };
+
 export type DesiredAnswer = {
   authoritative: boolean;
   count: number;

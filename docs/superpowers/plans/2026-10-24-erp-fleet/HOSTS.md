@@ -33,6 +33,12 @@
   else on disk: no compose files, no config, no secrets, no sessions. The
   two files that do live there are that env file and the registry pull
   credential (`~/.docker/config.json`, below).
+- The host token stays in the agent. Each worker container gets a
+  single-use claim ticket the agent mints for it right before `docker run`
+  (`CONTRACTS.md` §6), so a compromised worker can claim no other account
+  and call no host route. Bring a held worker back with `docker rm
+  rs-fleet-<worker_id>`; `docker start` claims with a spent ticket, exits
+  `75` and is recreated on the agent's next turn.
 - `FLEET_URL` is the ERP's **Cloudflare** hostname,
   `https://inventory-dev.recycleservers.com` for the MVP and
   `https://inventory.recycleservers.com` for prod, never the Railway origin:

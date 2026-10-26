@@ -15,6 +15,27 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.360.0] - 2026-10-26
+
+### Security
+
+- Fleet worker containers no longer hold the host token (RS-411). Each
+  worker runs a logged-in Chromium on Facebook, and with the host token in
+  its environment one compromised container could claim every free account
+  on its host (passwords, TOTP seeds, cookies) and confirm its siblings
+  stopped. The agent now asks the ERP for a claim ticket right before each
+  `docker run` (`POST /api/fleet/hosts/:id/tickets`): single use, bound to
+  that worker id and handoff epoch, ten minutes to live, stored only as a
+  hash. The claim takes it as its bearer and spends it in the same
+  transaction; only that boot's own retries get through afterwards, and the
+  ticket opens no host route. Without a ticket the agent starts nothing.
+  The ticket also goes out under the old variable name, so worker images from
+  before facebook-tracker 0.14.5 still claim; the host token keeps working on
+  `claim` for one release for older agents. Containers carry a
+  `rs.fleet.claim_ticket` label and are recreated rather than
+  `docker start`ed, since their ticket is spent. Migration
+  `0211_fleet_claim_tickets.sql`.
+
 ## [1.359.0] - 2026-10-26
 
 ### Changed

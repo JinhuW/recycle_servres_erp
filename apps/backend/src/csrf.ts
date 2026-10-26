@@ -15,7 +15,7 @@ const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
 // The fleet's bearer-only surfaces: worker containers and host agents post
 // here with no cookie, so there is nothing to forge. The manager's own host
 // routes (PUT/DELETE /api/fleet/hosts/:id) stay guarded.
-const FLEET_HOST_REPORT = /^\/api\/fleet\/hosts\/[^/]+\/(report|stopped)$/;
+const FLEET_HOST_REPORT = /^\/api\/fleet\/hosts\/[^/]+\/(report|stopped|tickets)$/;
 function exempt(path: string): boolean {
   return path === '/api/health'
     || path.startsWith('/api/fleet/worker/')

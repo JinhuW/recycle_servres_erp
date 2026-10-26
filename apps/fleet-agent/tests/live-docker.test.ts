@@ -52,7 +52,7 @@ describe.skipIf(!live)('live docker', () => {
       stateDir,
       client: new HttpFleetClient({ baseUrl: server.url, hostId: HOST, token: TOKEN }),
       docker: new DockerCli(),
-      workerEnv: { url: server.url, hostId: HOST, token: TOKEN },
+      workerEnv: { url: server.url, hostId: HOST },
       version: 'test',
       staggerMs: 0,
       log: createLogger((l) => lines.push(l)),
@@ -83,8 +83,10 @@ describe.skipIf(!live)('live docker', () => {
       { worker_id: `${HOST}-2`, image: IMAGE, state: 'running', started_at: expect.any(String), exit_code: null, image_id: expect.stringMatching(/^sha256:/) },
     ]);
     const inspect = JSON.parse(await docker('inspect', `rs-fleet-${HOST}-2`))[0];
-    expect(inspect.Config.Labels).toMatchObject({ 'rs.fleet.host': HOST, 'rs.fleet.worker': `${HOST}-2` });
-    expect(inspect.Config.Env).toEqual(expect.arrayContaining([`RS_FLEET_URL=${server.url}`, `RS_FLEET_HOST_ID=${HOST}`, `RS_FLEET_HOST_TOKEN=${TOKEN}`, `RS_FLEET_WORKER_ID=${HOST}-2`, 'RS_VNC_PORT=45902']));
+    expect(inspect.Config.Labels).toMatchObject({ 'rs.fleet.host': HOST, 'rs.fleet.worker': `${HOST}-2`, 'rs.fleet.claim_ticket': '1' });
+    const ticket = server.tickets[1];
+    expect(inspect.Config.Env).toEqual(expect.arrayContaining([`RS_FLEET_URL=${server.url}`, `RS_FLEET_HOST_ID=${HOST}`, `RS_FLEET_CLAIM_TICKET=${ticket}`, `RS_FLEET_HOST_TOKEN=${ticket}`, `RS_FLEET_WORKER_ID=${HOST}-2`, 'RS_VNC_PORT=45902']));
+    expect(JSON.stringify(inspect.Config.Env)).not.toContain(TOKEN);
     expect(inspect.HostConfig.PortBindings['5900/tcp']).toEqual([{ HostIp: '127.0.0.1', HostPort: '45902' }]);
     expect(inspect.HostConfig.RestartPolicy.Name).toBe('no');
     expect(inspect.HostConfig.ShmSize).toBe(1073741824);

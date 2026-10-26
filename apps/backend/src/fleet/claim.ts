@@ -20,12 +20,12 @@ import { poolKey, seal, sealOrNull, unseal, unsealOrEmpty } from '../lib/sealed'
 import { WORKER_ID } from '../routes/coordinator';
 import type { Env } from '../types';
 import {
-  eligibleSlot, hostAuth, signWorkerToken, unavailable, workerAuth, workerTokenKey, WORKER_TOKEN_DAYS,
-  type HostEnv, type WorkerEnv, type WorkerIdentity,
+  claimAuth, eligibleSlot, signWorkerToken, unavailable, workerAuth, workerTokenKey, WORKER_TOKEN_DAYS,
+  type ClaimEnv, type WorkerEnv, type WorkerIdentity,
 } from './auth';
 import { loadSettings } from './cities';
 import { notifyReady } from './scheduler';
-import type { FleetHostRow, FleetSlotRow } from './sql';
+import type { ClaimTicketRow, FleetHostRow, FleetSlotRow } from './sql';
 import { loadRelease } from './hosts';
 
 // ─── The worker protocol ──────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ import { loadRelease } from './hosts';
 // here casts them to int so the wire carries numbers (a few hundred a day will
 // not reach 2^31).
 
-type Vars = HostEnv['Variables'] & WorkerEnv['Variables'];
+type Vars = ClaimEnv['Variables'] & WorkerEnv['Variables'];
 const worker = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 const BAD_REQUEST = { error: 'bad_request' } as const;
@@ -241,8 +241,11 @@ const CLAIM_SELECT = (tx: SqlLike) => tx`
   SELECT s.*, a.uid, a.password_enc, a.totp_enc, a.cookie_enc, a.token_enc
   FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no`;
 
-worker.post('/claim', hostAuth, async (c) => {
+type TicketRefusal = 'used_ticket' | 'expired_ticket';
+
+worker.post('/claim', claimAuth, async (c) => {
   const host: FleetHostRow = c.var.host;
+  const ticket: ClaimTicketRow | null = c.var.ticket;
   const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body) return c.json(BAD_REQUEST, 422);
   const { host_id, worker_id, version, vnc_port } = body;
@@ -265,9 +268,20 @@ worker.post('/claim', hostAuth, async (c) => {
       || (body.handoff_epoch !== undefined && (!Number.isInteger(body.handoff_epoch) || (body.handoff_epoch as number) < 0))) return c.json(BAD_REQUEST, 422);
   const claimId = typeof body.claim_id === 'string' ? body.claim_id : null;
   const handoff = Number.isInteger(body.handoff_epoch) ? body.handoff_epoch as number : null;
+  if (ticket && (ticket.worker_id !== worker_id || ticket.handoff_epoch !== handoff)) {
+    return c.json({ error: 'unauthorized', detail: 'ticket_mismatch' }, 401);
+  }
   const sql = getDb(c.env);
-  const answer = await sql.begin(async (tx): Promise<ClaimAnswer | null> => {
+  const answer = await sql.begin(async (tx): Promise<ClaimAnswer | TicketRefusal | null> => {
     await tx`SELECT pg_advisory_xact_lock(hashtextextended(${host.host_id + ':' + worker_id}, 0))`;
+    if (ticket) {
+      // Spent by its first claim; only that boot's own retries (its claim_id)
+      // get through after, and none once it expires.
+      const [t] = await tx<ClaimTicketRow[]>`SELECT * FROM fleet_claim_tickets WHERE token_hash = ${ticket.token_hash} FOR UPDATE`;
+      if (!t) return 'used_ticket';
+      if (t.expires_at.getTime() <= Date.now()) return 'expired_ticket';
+      if (t.consumed_at !== null && (claimId === null || t.claim_id !== claimId)) return 'used_ticket';
+    }
     const [running] = await tx`SELECT account_no FROM fleet_slots WHERE host_id = ${host.host_id} AND worker_id = ${worker_id}
       AND lease_expires_at > NOW()
       AND NOT ((${claimId}::text IS NOT NULL AND claim_id IS NOT DISTINCT FROM ${claimId})
@@ -349,6 +363,10 @@ worker.post('/claim', hostAuth, async (c) => {
         host_id = EXCLUDED.host_id, account_no = EXCLUDED.account_no, epoch = EXCLUDED.epoch,
         version = EXCLUDED.version, vnc_port = EXCLUDED.vnc_port, state = NULL, last_heartbeat_at = NULL, detail = NULL`;
 
+    if (ticket) {
+      await tx`UPDATE fleet_claim_tickets SET consumed_at = COALESCE(consumed_at, NOW()), claim_id = ${claimId}
+        WHERE token_hash = ${ticket.token_hash}`;
+    }
     const exp = Math.floor(Date.now() / 1000) + WORKER_TOKEN_DAYS * 86_400;
     const items = await loadItems(tx);
     const token = unsealOrEmpty(row.token_enc, key);
@@ -376,8 +394,9 @@ worker.post('/claim', hostAuth, async (c) => {
     };
   });
   if (!answer) return c.json({ error: 'no_slot' }, 409);
+  if (typeof answer === 'string') return c.json({ error: 'unauthorized', detail: answer }, 401);
   flog.info('fleet slot claimed', {
-    accountNo: answer.account.no, workerId: worker_id, hostId: host.host_id, epoch: answer.epoch,
+    accountNo: answer.account.no, workerId: worker_id, hostId: host.host_id, epoch: answer.epoch, by: ticket ? 'ticket' : 'host_token',
     homeCities: answer.home_cities.length, cookies: answer.account.cookies.length, proxy: answer.proxy !== null,
   });
   return c.json(answer);

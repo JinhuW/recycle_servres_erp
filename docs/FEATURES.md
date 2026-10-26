@@ -3259,6 +3259,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   `fleet-import.mjs` keeps managers' edits unless `--overwrite`, and it,
   `fleet-seed-slots.mjs` and `fleet-fake-worker.mjs` refuse a remote target
   without an explicit opt-in.
+- **Fleet claim tickets (v1.360.0, RS-411)** — worker containers never hold
+  the host token. The host agent mints a single-use claim ticket for each
+  container right before running it (bound to the worker id and any handoff
+  epoch, ten minutes, kept only as a hash) and the worker claims its account
+  with that. A compromised worker can claim no other account and call no
+  host route. A held worker comes back with `docker rm rs-fleet-<id>`; a
+  `docker start` claims with a spent ticket, exits 75 and is recreated. The
+  host token still claims for one release (older agents and worker images).
 
 - **Fleet (ERP-owned)** — since v1.337.0 (RS-394) **Monitors ▸ Facebook** is
   the page of the task queue the ERP itself runs: the backend owns the city

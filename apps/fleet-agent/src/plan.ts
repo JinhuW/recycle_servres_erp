@@ -65,6 +65,8 @@ export interface Container {
   image_id?: string;
   /** Started with a handoff epoch: `docker start` would claim with a used reservation. */
   handoff?: boolean;
+  /** Started with a claim ticket: `docker start` would claim with a spent ticket. */
+  ticket?: boolean;
 }
 
 export type Action =
@@ -304,8 +306,8 @@ export function plan(input: PlanInput): Plan {
       continue;
     }
     const recreate = canCreate && desired.leases !== undefined;
-    if (!recreate && current.handoff) {
-      notes.push(`${id}: exit ${current.exit_code}; its reservation is used, so it waits to be recreated online`);
+    if (!recreate && (current.handoff || current.ticket)) {
+      notes.push(`${id}: exit ${current.exit_code}; its ${current.handoff ? 'reservation' : 'claim ticket'} is used, so it waits to be recreated online`);
       continue;
     }
     if (!takeStart()) {
