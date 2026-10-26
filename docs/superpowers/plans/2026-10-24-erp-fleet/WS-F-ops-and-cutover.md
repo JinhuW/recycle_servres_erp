@@ -247,6 +247,13 @@ Surprises:
   coordinator's dedupe a second alert stream would duplicate the buyers'
   chat). `alerted` counts what would have been sent.
 - The run left the worker HEALTHY and searching at capacity 1 on the dev ERP.
+- **Restart check: a fenced worker kept searching.** The slot's epoch was
+  bumped at 03:36:05; the heartbeat logged the 409 at 03:36:18 and the relay
+  stopped dialing, but the worker searched `philly/server_ram` for 17 more
+  minutes and exited 75 only at 03:53:19. Capacity was 0 within 6 s, so the
+  agent's restart never ran; #37 used two logins in total. Fixed in
+  facebook-tracker 0.14.3 (monitor `f0da469`): any refused fleet call stops
+  the search before its next page.
 
 #### Coordinator wiring for fleet workers (2026-10-26 UTC, dev)
 

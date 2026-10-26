@@ -186,6 +186,57 @@ def test_a_stale_epoch_ends_the_worker_without_a_login(
     assert marketplace.page is None
 
 
+def test_a_heartbeat_refused_mid_search_stops_before_the_next_listing_and_exits_75(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shared_env: None
+) -> None:
+    """Fenced while searching: the next listing is never opened.
+
+    Another claim moves the slot on while the worker is on its first
+    listing, and the heartbeat thread's next beat gets a real 409. The
+    search stops before the next page, nothing is reported done, no session
+    is uploaded, the browser is closed and the process leaves 75, all
+    without a login. (On worker-60-14 the search ran on for 17 minutes.)
+    """
+    from ai_marketplace_monitor.facebook import FacebookMarketplace
+    from ai_marketplace_monitor.control_plane import STATE_HEALTHY
+
+    config_path = rendered_config(fleet, tmp_path / "home")
+    task = fleet.add_task("philadelphia", "server_ram")
+    seen = monitor_for(monkeypatch, config_path, asks_allowed=10)
+    opened: List[str] = []
+    fenced_at: Dict[str, int] = {}
+
+    def search_city(
+        self: FacebookMarketplace, item_config: Any, found: Any, city: str, *rest: Any
+    ) -> Any:
+        for n in range(5):
+            url = f"https://www.facebook.com/marketplace/item/{n}/"
+            self.goto_url(url)
+            opened.append(url)
+            if n == 0:
+                fleet.bump_epoch()
+                fenced_at["requests"] = len(fleet.requests)
+                # The repeater thread restates the last state; the fleet says 409.
+                self._send_heartbeat(STATE_HEALTHY, {"browser_ok": True})
+            yield from ()
+        return False
+
+    monkeypatch.setattr(FacebookMarketplace, "_search_city", search_city)
+    with pytest.raises(SystemExit) as exit_:
+        seen["monitor"].fleet_loop()
+
+    assert exit_.value.code == entry.EXIT_RESTART == 75
+    assert opened == ["https://www.facebook.com/marketplace/item/0/"]
+    assert seen["logins"] == 1
+    assert fleet.done == [] and fleet.tasks == [] and task["id"]
+    after = [r[1] for r in fleet.requests[fenced_at["requests"]:]]
+    # One refused heartbeat, then nothing: no done, no event, no session.
+    assert after == ["/api/fleet/worker/heartbeat"]
+    marketplace = seen["monitor"].active_marketplaces["facebook"]
+    assert marketplace.page is None
+    assert marketplace.take_task_result()["stopped"] == "fenced"
+
+
 def test_an_empty_fleet_is_asked_again_and_an_unreachable_one_waited_for(
     fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shared_env: None
 ) -> None:

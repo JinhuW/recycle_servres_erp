@@ -86,6 +86,9 @@ RELAY_STOP_GRACE_S = 1
 TEMPLATE = Path(__file__).with_name("config.template.toml")
 # Written by the monitor when it parks for an operator; read by /healthz.
 PARKED_FILE = "parked.json"
+# Written by the VNC relay when the fleet refuses its dial for the epoch; the
+# monitor stops its search on it before the next page, as on its own 409.
+FENCE_FILE = "fenced"
 # Names the claim's `env` may not set: the fleet's own wiring, and what this
 # entrypoint derives from the claim itself.
 RESERVED_ENV = re.compile(
@@ -275,6 +278,7 @@ def render_config(
         "url": fleet_url.rstrip("/"),
         "worker_token": str(answer["worker_token"]),
         "token_path": str(home / "fleet-token"),
+        "fence_path": str(home / FENCE_FILE),
         "epoch": int(answer["epoch"]),
         "worker_id": worker_id,
         "poll_hold_seconds": int(settings.get("poll_hold_seconds") or 50),
@@ -789,12 +793,18 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
         f"alerts {'on' if alerts else 'off (withheld)'}; "
         f"unset, left out of the config: {', '.join(dropped) or 'none'}"
     )
-    try:
-        (home / PARKED_FILE).unlink()
-    except FileNotFoundError:
-        pass
+    for stale in (PARKED_FILE, FENCE_FILE):
+        try:
+            (home / stale).unlink()
+        except FileNotFoundError:
+            pass
 
-    relay = start_vnc_relay(fleet_url, str(answer["worker_token"]), {**env, "RS_FLEET_TOKEN_PATH": str(home / "fleet-token")})
+    relay = start_vnc_relay(
+        fleet_url,
+        str(answer["worker_token"]),
+        {**env, "RS_FLEET_TOKEN_PATH": str(home / "fleet-token")},
+        fence_path=str(home / FENCE_FILE),
+    )
     health = _Health(worker_id, int(answer["epoch"]), home / PARKED_FILE)
     port = env.get("RS_WORKER_HEALTHZ_PORT") or ""
     try:
@@ -817,7 +827,9 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
     return code
 
 
-def start_vnc_relay(fleet_url: str, worker_token: str, env: Dict[str, str]) -> Any:
+def start_vnc_relay(
+    fleet_url: str, worker_token: str, env: Dict[str, str], fence_path: str | None = None
+) -> Any:
     """The relay to the ERP's VNC page, when this image has a VNC server to show."""
     if shutil.which("x11vnc") is None:
         return None
@@ -830,6 +842,7 @@ def start_vnc_relay(fleet_url: str, worker_token: str, env: Dict[str, str]) -> A
         ("127.0.0.1", int(port) if port.isdigit() else 5900),
         log=log,
         token_path=env.get("RS_FLEET_TOKEN_PATH"),
+        fence_path=fence_path,
     ).start()
 
 

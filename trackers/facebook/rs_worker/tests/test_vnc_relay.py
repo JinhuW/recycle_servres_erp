@@ -207,12 +207,14 @@ def test_no_vnc_server_closes_the_viewer_with_a_reason(relay: FakeRelay) -> None
         worker.stop()
 
 
-def test_a_stale_epoch_stops_the_relay_for_good() -> None:
+def test_a_stale_epoch_stops_the_relay_for_good_and_fences_the_monitor(tmp_path) -> None:
     relay = FakeRelay(status=409)
+    fence = tmp_path / "fenced"
     try:
-        worker = VncRelay(relay.url, "stale", backoff=(0.05, 0.2)).start()
+        worker = VncRelay(relay.url, "stale", backoff=(0.05, 0.2), fence_path=str(fence)).start()
         until(lambda: not worker.is_alive())
         assert worker.refused == 409 and worker.dials == 1
+        assert fence.read_text() == "409\n"
     finally:
         relay.close()
 

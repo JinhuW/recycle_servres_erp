@@ -171,6 +171,7 @@ def test_a_claim_renders_the_worker_and_runs_the_monitor(
 
     config = tomllib.loads((home / "config.toml").read_text())
     assert config["fleet"].pop("token_path") == str(home / "fleet-token")
+    assert config["fleet"].pop("fence_path") == str(home / "fenced")
     assert config["fleet"] == {
         "url": fleet.url,
         "worker_token": mint_token("lab-1", 12, 7, exp=json.loads(
