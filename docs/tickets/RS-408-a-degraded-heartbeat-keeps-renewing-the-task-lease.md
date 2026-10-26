@@ -2,13 +2,13 @@
 id: RS-408
 title: A DEGRADED heartbeat keeps renewing the task lease
 type: task
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-26
 reporter: jinhu
 branch: fleet/fix-degraded-lease
-pr:
-version:
+pr: "#920"
+version: 1.357.0
 related: []
 ---
 
