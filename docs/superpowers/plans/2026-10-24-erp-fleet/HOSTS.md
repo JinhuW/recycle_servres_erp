@@ -210,7 +210,8 @@ curl -sS --proxy "$PROXY_HOMELAB_NYC" --proxy-user "$PROXY_HOMELAB_NYC_USER:$PRO
    nothing):
 
    ```bash
-   docker run -d --name rs-fleet-agent --restart always \
+   docker run -d --name rs-fleet-agent --restart always --stop-timeout 120 \
+     --log-opt max-size=10m --log-opt max-file=3 \
      --env-file /home/worker/.config/fleet-agent.env \
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v /home/worker/.docker/config.json:/root/.docker/config.json:ro \
@@ -221,8 +222,19 @@ curl -sS --proxy "$PROXY_HOMELAB_NYC" --proxy-user "$PROXY_HOMELAB_NYC_USER:$PRO
 
    Replacing the agent container (a new agent version) is safe at any time:
    it runs no Facebook account, and `rs-fleet-agent-state` keeps its
-   confirmed-stop state. Never remove an `rs-fleet-worker-*` container by
-   hand while it runs an account (owner's rule, 2026-10-25).
+   confirmed-stop state, holds and instance id. Remove the old agent before
+   starting the new one: an agent that sees another running agent for the
+   same host observes only until it is gone. `--stop-timeout 120` lets a
+   tick finish its `docker stop` and write it down. Never remove an
+   `rs-fleet-worker-*` container by hand while it runs an account (owner's
+   rule, 2026-10-25).
+
+   A worker the agent holds (report `state` `operator_needed`,
+   `crash_limit` or `operator_stopped`) stays stopped until a person acts:
+   `docker rm rs-fleet-<worker_id>` lets the agent run a fresh one on its
+   turn; `docker start` works only for a container without the
+   `rs.fleet.handoff_epoch` label. `docker stop` on a worker is now a hold,
+   not a pause: the agent does not start it again.
 5. Confirm `last_seen_at` moves.
 6. **Owner's yes** → `authoritative=true`, capacity N. Each worker the agent
    starts is a Facebook login (root `AGENTS.md`).

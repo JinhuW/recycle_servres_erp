@@ -79,8 +79,8 @@ describe.skipIf(!live)('live docker', () => {
     expect(third.actions).toEqual([]);
     const report = server.reports.at(-1)!;
     expect(report.containers).toEqual([
-      { worker_id: `${HOST}-1`, image: IMAGE, state: 'running', started_at: expect.any(String) },
-      { worker_id: `${HOST}-2`, image: IMAGE, state: 'running', started_at: expect.any(String) },
+      { worker_id: `${HOST}-1`, image: IMAGE, state: 'running', started_at: expect.any(String), exit_code: null, image_id: expect.stringMatching(/^sha256:/) },
+      { worker_id: `${HOST}-2`, image: IMAGE, state: 'running', started_at: expect.any(String), exit_code: null, image_id: expect.stringMatching(/^sha256:/) },
     ]);
     const inspect = JSON.parse(await docker('inspect', `rs-fleet-${HOST}-2`))[0];
     expect(inspect.Config.Labels).toMatchObject({ 'rs.fleet.host': HOST, 'rs.fleet.worker': `${HOST}-2` });
@@ -88,6 +88,8 @@ describe.skipIf(!live)('live docker', () => {
     expect(inspect.HostConfig.PortBindings['5900/tcp']).toEqual([{ HostIp: '127.0.0.1', HostPort: '45902' }]);
     expect(inspect.HostConfig.RestartPolicy.Name).toBe('no');
     expect(inspect.HostConfig.ShmSize).toBe(1073741824);
+    expect(report.agent).toMatchObject({ instance_id: expect.any(String), daemon_id: expect.any(String) });
+    expect(first.conflict).toEqual([]);
   });
 
   it('scales down when the count drops', async () => {

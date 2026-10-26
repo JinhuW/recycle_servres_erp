@@ -5,23 +5,34 @@
 // tested without a daemon. The restraint matters more than the reach:
 //
 // * Not authoritative: nothing. Observe-only hosts start and stop nothing.
-// * Offline (the desired state is a cached copy): exited workers may be
-//   restarted, nothing is created, removed or replaced. Blind is not the time
-//   to change things.
-// * A worker that exited 78 stays stopped, online or not: it could not
-//   connect, and every restart would be one more login into the same failure.
+// * Offline (the desired state is a cached copy), or an image this host does
+//   not allow: exited workers may be restarted, nothing is created or
+//   replaced, and offline nothing is removed. Blind is not the time to change
+//   things.
+// * Left stopped, online or not, until a person acts: a worker that exited 78
+//   (it could not connect), one that hit the crash limit, and one a person
+//   stopped (`docker stop`, exit 0 or 143 while this agent ran). Every restart
+//   would be one more login.
 // * One start per tick, and never within the stagger of the previous one:
 //   each start is a Facebook login, and ten from one host at once is a
-//   pattern worth not showing.
+//   pattern worth not showing. The previous start is the later of what the
+//   agent remembers and the newest container start Docker shows.
 
-import type { Desired } from './types.js';
+import type { Desired, Hold } from './types.js';
 
 export const CONTAINER_PREFIX = 'rs-fleet-';
 export const DEFAULT_STAGGER_MS = 3 * 60_000;
 export const CRASH_WINDOW_MS = 30 * 60_000;
 export const CRASH_LIMIT = 5;
+// Exit 75 is not a crash, but a worker fenced again and again logs in again
+// and again: past this many 75/70 restarts in the window it waits longer.
+export const SOFT_LIMIT = 5;
+export const SOFT_BACKOFF_MS = 10 * 60_000;
 
 // Worker exit codes the image contract defines and what the agent owes each.
+export const EXIT_NORMAL = 0;
+// `docker stop` on a worker that did not trap SIGTERM.
+export const EXIT_SIGTERM = 143;
 export const EXIT_STALE_OR_NO_SLOT = 75;
 export const EXIT_CLAIM_FAILED = 70;
 // The worker could not reach Facebook or its proxy and stopped on purpose. A
@@ -35,6 +46,8 @@ const RESTART_DELAY_MS: Record<number, number> = {
   [EXIT_CLAIM_FAILED]: 10 * 60_000,
 };
 const RESTART_DELAY_OTHER_MS = 60_000;
+// The agent's own `docker stop` finishes after it asked; allow for clocks.
+const SELF_STOP_SLACK_MS = 5_000;
 
 /** A container carrying this host's label, as observed. */
 export interface Container {
@@ -46,13 +59,24 @@ export interface Container {
   exit_code: number | null;
   started_at: string | null;
   finished_at: string | null;
+  /** Docker's container id; a hold belongs to one container, not to a worker id. */
+  id?: string;
+  /** The local image id the container was created from. */
+  image_id?: string;
+  /** Started with a handoff epoch: `docker start` would claim with a used reservation. */
+  handoff?: boolean;
 }
 
 export type Action =
   | { kind: 'run'; worker_id: string; container: string; image: string; port: number; reason: string }
-  | { kind: 'start'; worker_id: string; container: string; reason: string; counted: boolean }
-  | { kind: 'replace'; worker_id: string; container: string; image: string; port: number; reason: string }
+  | { kind: 'start'; worker_id: string; container: string; reason: string; counted: boolean; soft: boolean }
+  | { kind: 'replace'; worker_id: string; container: string; image: string; port: number; reason: string; counted: boolean; soft: boolean }
   | { kind: 'remove'; worker_id: string; container: string; reason: string };
+
+export interface HoldEntry {
+  container: string;
+  reason: Exclude<Hold, 'operator_needed'>;
+}
 
 export interface PlanInput {
   hostId: string;
@@ -63,8 +87,18 @@ export interface PlanInput {
   now: number;
   /** When this agent last started a worker, by any means; null if never. */
   lastStartAt: number | null;
-  /** Restarts after an unexpected exit, per worker, newest last (ms). */
+  /** Restarts after a crash, per worker, newest last (ms). */
   restarts: Record<string, number[]>;
+  /** Restarts after a 75 or 70, per worker (ms). */
+  softRestarts?: Record<string, number[]>;
+  /** Workers left stopped, by worker id, for the container they were held on. */
+  held?: Record<string, HoldEntry>;
+  /** When this agent itself last stopped each worker (ms). */
+  selfStopped?: Record<string, number>;
+  /** When this agent process started (ms): an exit 0 before it is a shutdown, not a person. */
+  bootAt?: number;
+  /** False when `desired.image` is not one this host runs. */
+  imageAllowed?: boolean;
   staggerMs?: number;
 }
 
@@ -72,6 +106,10 @@ export interface Plan {
   actions: Action[];
   /** What was seen and held back, for the log. */
   notes: string[];
+  /** Holds decided this tick, to be remembered. */
+  holds: Record<string, HoldEntry>;
+  /** The previous start the stagger was measured from. */
+  lastStartAt: number | null;
 }
 
 export function containerName(workerId: string): string {
@@ -105,7 +143,8 @@ export function restartDelayMs(exitCode: number | null): number {
 
 /** True for an exit the contract did not define: it counts toward the crash limit. */
 export function isCrash(exitCode: number | null): boolean {
-  return exitCode !== EXIT_STALE_OR_NO_SLOT && exitCode !== EXIT_CLAIM_FAILED && exitCode !== EXIT_OPERATOR_NEEDED;
+  return exitCode !== EXIT_STALE_OR_NO_SLOT && exitCode !== EXIT_CLAIM_FAILED && exitCode !== EXIT_OPERATOR_NEEDED
+    && exitCode !== EXIT_NORMAL && exitCode !== EXIT_SIGTERM;
 }
 
 /** An exited worker that waits for a person, never for the agent. */
@@ -117,15 +156,58 @@ export function recentRestarts(times: number[] | undefined, now: number): number
   return (times ?? []).filter((t) => now - t < CRASH_WINDOW_MS);
 }
 
+function parseTime(s: string | null): number {
+  const t = s ? Date.parse(s) : NaN;
+  return Number.isFinite(t) ? t : NaN;
+}
+
+/**
+ * The start the stagger counts from: the later of the remembered one and the
+ * newest container start Docker shows (a start the agent did not live to
+ * write down still was a login). Never in the future.
+ */
+export function effectiveLastStart(remembered: number | null, containers: Container[], now: number): number | null {
+  let last = remembered;
+  for (const c of containers) {
+    const t = parseTime(c.started_at);
+    if (Number.isFinite(t) && (last === null || t > last)) last = t;
+  }
+  return last !== null && last > now ? now : last;
+}
+
+/** Why an exited container is left stopped, if it is. */
+export function holdOf(c: Container, input: Pick<PlanInput, 'held' | 'selfStopped' | 'bootAt'>): Hold | null {
+  if (c.running) return null;
+  if (c.exit_code === EXIT_OPERATOR_NEEDED) return 'operator_needed';
+  const kept = input.held?.[c.worker_id];
+  if (kept && c.id !== undefined && kept.container === c.id) return kept.reason;
+  if (c.exit_code === EXIT_NORMAL || c.exit_code === EXIT_SIGTERM) {
+    const finished = parseTime(c.finished_at);
+    if (!Number.isFinite(finished)) return null;
+    // Before this agent started: the host or the daemon went down, not a person.
+    if (input.bootAt === undefined || finished < input.bootAt) return null;
+    const self = input.selfStopped?.[c.worker_id];
+    if (self !== undefined && finished >= self - SELF_STOP_SLACK_MS) return null;
+    return 'operator_stopped';
+  }
+  return null;
+}
+
 export function plan(input: PlanInput): Plan {
-  const { hostId, desired, containers, online, now, lastStartAt, restarts } = input;
+  const { hostId, desired, containers, online, now, restarts } = input;
   const staggerMs = input.staggerMs ?? DEFAULT_STAGGER_MS;
   const actions: Action[] = [];
   const notes: string[] = [];
+  const holds: Record<string, HoldEntry> = {};
+  const lastStartAt = effectiveLastStart(input.lastStartAt, containers, now);
+  const canCreate = online && input.imageAllowed !== false;
 
   if (!desired.authoritative) {
     if (containers.length || desired.count) notes.push('not authoritative: observing only');
-    return { actions, notes };
+    return { actions, notes, holds, lastStartAt };
+  }
+  if (online && input.imageAllowed === false) {
+    notes.push(`image ${JSON.stringify(desired.image)} is not one this host runs (FLEET_IMAGE_PREFIX); creating and replacing nothing`);
   }
 
   // Two containers claiming one worker id is a hand's work, not the agent's;
@@ -176,7 +258,7 @@ export function plan(input: PlanInput): Plan {
     if (duplicates.has(id)) continue;
     const current = byId.get(id);
     if (!current) {
-      if (!online) continue;
+      if (!canCreate) continue;
       if (!takeStart()) {
         notes.push(`${id}: missing; waits for its turn`);
         continue;
@@ -185,36 +267,55 @@ export function plan(input: PlanInput): Plan {
       continue;
     }
     if (current.running) {
-      if (online && desired.roll?.replace === id && current.image !== desired.image) {
-        deferredReplace = { kind: 'replace', worker_id: id, container: current.name, image: desired.image, port: vncPort(desired, id, n), reason: `image ${current.image} -> ${desired.image}` };
+      if (canCreate && desired.roll?.replace === id && current.image !== desired.image) {
+        deferredReplace = { kind: 'replace', worker_id: id, container: current.name, image: desired.image, port: vncPort(desired, id, n), reason: `image ${current.image} -> ${desired.image}`, counted: false, soft: false };
       }
       continue;
     }
-    if (needsOperator(current)) {
+    const hold = holdOf(current, input);
+    if (hold === 'operator_needed') {
       notes.push(`${id}: exit ${EXIT_OPERATOR_NEEDED}, cannot connect; left stopped for an operator`);
       continue;
     }
+    if (hold) {
+      if (current.id !== undefined && input.held?.[id]?.container !== current.id) holds[id] = { container: current.id, reason: hold };
+      notes.push(hold === 'crash_limit'
+        ? `${id}: crash limit reached (last exit ${current.exit_code}); left stopped until a person starts or removes it`
+        : `${id}: stopped by hand (exit ${current.exit_code}); left stopped until a person starts or removes it`);
+      continue;
+    }
     // Exited: how long ago, and has it been doing this a lot.
-    const finished = current.finished_at ? Date.parse(current.finished_at) : NaN;
+    const finished = parseTime(current.finished_at);
     const sinceExit = Number.isFinite(finished) ? now - finished : Infinity;
-    const delay = restartDelayMs(current.exit_code);
     const crash = isCrash(current.exit_code);
+    const soft = !crash;
+    let delay = restartDelayMs(current.exit_code);
+    if (current.exit_code === EXIT_STALE_OR_NO_SLOT && recentRestarts(input.softRestarts?.[id], now).length >= SOFT_LIMIT) {
+      delay = SOFT_BACKOFF_MS;
+    }
     if (sinceExit < delay) {
       notes.push(`${id}: exit ${current.exit_code} ${Math.round(sinceExit / 1000)} s ago; restart after ${delay / 1000} s`);
       continue;
     }
     if (crash && recentRestarts(restarts[id], now).length >= CRASH_LIMIT) {
-      notes.push(`${id}: ${CRASH_LIMIT} restarts in ${CRASH_WINDOW_MS / 60_000} min (last exit ${current.exit_code}); left stopped`);
+      // Sticky: the window ageing out must not start the loop again.
+      if (current.id !== undefined) holds[id] = { container: current.id, reason: 'crash_limit' };
+      notes.push(`${id}: ${CRASH_LIMIT} restarts in ${CRASH_WINDOW_MS / 60_000} min (last exit ${current.exit_code}); left stopped until a person starts or removes it`);
+      continue;
+    }
+    const recreate = canCreate && desired.leases !== undefined;
+    if (!recreate && current.handoff) {
+      notes.push(`${id}: exit ${current.exit_code}; its reservation is used, so it waits to be recreated online`);
       continue;
     }
     if (!takeStart()) {
       notes.push(`${id}: exit ${current.exit_code}; restart waits for its turn`);
       continue;
     }
-    if (online && desired.leases !== undefined) {
-      actions.push({ kind: 'replace', worker_id: id, container: current.name, image: desired.image, port: vncPort(desired, id, n), reason: `exit ${current.exit_code}` });
+    if (recreate) {
+      actions.push({ kind: 'replace', worker_id: id, container: current.name, image: desired.image, port: vncPort(desired, id, n), reason: `exit ${current.exit_code}`, counted: crash, soft });
     } else {
-      actions.push({ kind: 'start', worker_id: id, container: current.name, reason: `exit ${current.exit_code}`, counted: crash });
+      actions.push({ kind: 'start', worker_id: id, container: current.name, reason: `exit ${current.exit_code}`, counted: crash, soft });
     }
   }
 
@@ -222,5 +323,5 @@ export function plan(input: PlanInput): Plan {
     if (takeStart()) actions.push(deferredReplace);
     else notes.push(`${deferredReplace.worker_id}: replacement waits for its turn`);
   }
-  return { actions, notes };
+  return { actions, notes, holds, lastStartAt };
 }

@@ -1,14 +1,17 @@
 // fleet-agent: keep this Docker host's Facebook workers as the ERP desires.
 //
 // Configured from the environment only: FLEET_URL, FLEET_HOST_ID,
-// FLEET_HOST_TOKEN; FLEET_INTERVAL (seconds, default 30), FLEET_STATE_DIR
-// (default /state), FLEET_STAGGER_SECONDS (default 180; lower it only in tests).
+// FLEET_HOST_TOKEN; FLEET_INTERVAL (seconds, default 30, at least 5),
+// FLEET_STATE_DIR (default /state), FLEET_STAGGER_SECONDS (default 180; lower
+// it only in tests), FLEET_IMAGE_PREFIX (comma-separated repositories the
+// host runs, default ghcr.io/jinhuw/aimm-recycle).
 
 import { Agent } from './agent.js';
 import { HttpFleetClient } from './client.js';
 import { DockerCli } from './docker.js';
 import { createLogger } from './log.js';
 import { DEFAULT_STAGGER_MS } from './plan.js';
+import { DEFAULT_IMAGE_PREFIX } from './types.js';
 import { agentVersion } from './version.js';
 
 const log = createLogger();
@@ -17,12 +20,12 @@ function env(name: string): string {
   return (process.env[name] ?? '').trim();
 }
 
-function seconds(name: string, fallback: number): number {
+function seconds(name: string, fallback: number, min = 0): number {
   const raw = env(name);
   if (!raw) return fallback;
   const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) {
-    log.warn('ignoring a setting that is not a number of seconds', { name, value: raw });
+  if (!Number.isFinite(n) || n < min) {
+    log.warn('ignoring a setting that is not a number of seconds', { name, value: raw, min });
     return fallback;
   }
   return n;
@@ -35,9 +38,10 @@ if (missing.length) {
 }
 
 const hostId = env('FLEET_HOST_ID');
-const intervalMs = seconds('FLEET_INTERVAL', 30) * 1000;
+const intervalMs = seconds('FLEET_INTERVAL', 30, 5) * 1000;
 const staggerMs = seconds('FLEET_STAGGER_SECONDS', DEFAULT_STAGGER_MS / 1000) * 1000;
 const version = agentVersion();
+const imagePrefixes = (env('FLEET_IMAGE_PREFIX') || DEFAULT_IMAGE_PREFIX).split(',').map((p) => p.trim()).filter(Boolean);
 
 const agent = new Agent({
   hostId,
@@ -53,9 +57,10 @@ const agent = new Agent({
   version,
   staggerMs,
   log,
+  imagePrefixes,
 });
 
-log.info('fleet-agent starting', { version, host_id: hostId, url: env('FLEET_URL'), interval_s: intervalMs / 1000, stagger_s: staggerMs / 1000 });
+log.info('fleet-agent starting', { version, host_id: hostId, url: env('FLEET_URL'), interval_s: intervalMs / 1000, stagger_s: staggerMs / 1000, image_prefixes: imagePrefixes });
 if (staggerMs < DEFAULT_STAGGER_MS) log.warn('start stagger below the default; every start is a Facebook login', { stagger_s: staggerMs / 1000 });
 
 let stopping = false;

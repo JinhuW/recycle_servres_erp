@@ -15,6 +15,40 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.352.0] - 2026-10-26
+
+### Fixed
+
+- The fleet host agent no longer starts Facebook workers more often than it
+  means to. A worker that hits the crash limit stays stopped on that
+  container, instead of starting again once its 30-minute window ages out
+  (it was about ten logins an hour). A worker someone stopped with
+  `docker stop` stays stopped instead of starting a minute later. A start is
+  written to `/state` before it is made, so a start whose answer was lost
+  still counts for the stagger, and the stagger also counts from the newest
+  container start Docker shows, so losing `/state` does not reset it. A
+  second agent for the same host on one daemon makes both observe only
+  rather than fence each other's live workers (RS-405).
+- A spent stop confirmation can no longer wedge a worker on a container-name
+  conflict. Offline, a worker created from a handoff is no longer restarted
+  into a claim that cannot succeed. A `401`/`403`/`404` from the ERP now
+  means observe-only rather than "act on the cache". A worker that keeps
+  exiting 75 waits 10 minutes between restarts once it has done so five
+  times in 30 minutes.
+
+### Changed
+
+- Reports mark held workers with a distinct `state` and an optional `hold`
+  (`operator_needed`, `crash_limit`, `operator_stopped`), add `exit_code` and
+  `image_id`, and name the agent (`instance_id`, `daemon_id`). The ERP can
+  then skip held workers when it picks a roll. Every call carries the agent's
+  instance and daemon ids.
+- The agent pulls and runs only images under `FLEET_IMAGE_PREFIX` (default
+  `ghcr.io/jinhuw/aimm-recycle`), puts `--` before the image, and pulls a tag
+  before every start, so a tag pushed again is picked up. While a long pull
+  or a row of stops runs, it keeps reporting so the host does not look
+  silent. A standing note is logged once, not every 30 s.
+
 ## [1.351.0] - 2026-10-26
 
 ### Changed

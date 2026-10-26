@@ -6,10 +6,13 @@
 // `docker` never takes the loop down with it.
 
 import { execFile } from 'node:child_process';
+import { hostname } from 'node:os';
 import { containerName, type Container } from './plan.js';
+import { isDigestRef } from './types.js';
 
 export const LABEL_HOST = 'rs.fleet.host';
 export const LABEL_WORKER = 'rs.fleet.worker';
+export const LABEL_HANDOFF = 'rs.fleet.handoff_epoch';
 
 // The worker saves its session on SIGTERM; give it the time.
 export const STOP_TIMEOUT_S = 30;
@@ -42,19 +45,26 @@ export interface DockerApi {
   run(spec: RunSpec, env: WorkerEnv): Promise<string | null>;
   start(name: string): Promise<string | null>;
   stopAndRemove(name: string): Promise<string | null>;
+  /** The daemon's id (`docker info`), or null when it cannot be read. */
+  daemonId?(): Promise<string | null>;
+  /** Running containers, other than this one, that are fleet agents for `hostId`; null when unknown. */
+  otherAgents?(hostId: string): Promise<string[] | null>;
 }
 
 /**
  * The `docker run` argv for a worker. The three fleet variables and the worker
  * id are named without a value: the CLI copies them from its own environment,
- * so the host token never appears in a process list or a log line.
+ * so the host token never appears in a process list or a log line. `--` ends
+ * the options, so no image name can be read as one.
  */
 export function runArgs(hostId: string, spec: RunSpec): string[] {
+  const handoff = spec.handoff_epoch !== undefined;
   return [
     'run', '-d',
     '--name', containerName(spec.worker_id),
     '--label', `${LABEL_HOST}=${hostId}`,
     '--label', `${LABEL_WORKER}=${spec.worker_id}`,
+    ...(handoff ? ['--label', `${LABEL_HANDOFF}=${spec.handoff_epoch}`] : []),
     '--restart', 'no',
     '--shm-size', '1g',
     '-e', 'RS_FLEET_URL',
@@ -62,8 +72,9 @@ export function runArgs(hostId: string, spec: RunSpec): string[] {
     '-e', 'RS_FLEET_HOST_TOKEN',
     '-e', 'RS_FLEET_WORKER_ID',
     '-e', `RS_VNC_PORT=${spec.port}`,
-    ...(spec.handoff_epoch !== undefined ? ['-e', `RS_FLEET_HANDOFF_EPOCH=${spec.handoff_epoch}`] : []),
+    ...(handoff ? ['-e', `RS_FLEET_HANDOFF_EPOCH=${spec.handoff_epoch}`] : []),
     '-p', `127.0.0.1:${spec.port}:5900`,
+    '--',
     spec.image,
   ];
 }
@@ -94,46 +105,66 @@ const defaultRunner: Runner = (args, opts) =>
     );
   });
 
+const NO_SUCH_CONTAINER = /no such container/i;
+
 export class DockerCli implements DockerApi {
-  constructor(private readonly runner: Runner = defaultRunner) {}
+  constructor(
+    private readonly runner: Runner = defaultRunner,
+    private readonly selfHostname: string = hostname(),
+  ) {}
 
   async call(args: string[], timeoutMs = 120_000, env?: Record<string, string>): Promise<[true, string] | [false, string]> {
     const done = await this.runner(args, { timeoutMs, env });
     if (done.code !== 0) {
       const lines = (done.stderr || done.stdout || '').trim().split('\n').filter(Boolean);
       const last = lines.length ? lines[lines.length - 1] : `exit ${done.code}`;
-      return [false, `docker ${args.slice(0, 2).join(' ')}: ${last}`];
+      return [false, `docker ${args.filter((a) => a !== '--').slice(0, 2).join(' ')}: ${last}`];
     }
     return [true, done.stdout];
   }
 
   async observe(hostId: string): Promise<Container[] | null> {
-    const [ok, out] = await this.call(['ps', '-a', '-q', '--no-trunc', '--filter', `label=${LABEL_HOST}=${hostId}`]);
-    if (!ok) return null;
-    const ids = out.split('\n').map((l) => l.trim()).filter(Boolean);
-    if (!ids.length) return [];
-    const [ok2, raw] = await this.call(['inspect', ...ids]);
-    if (!ok2) return null;
-    let records: unknown;
-    try {
-      records = JSON.parse(raw);
-    } catch {
-      return null;
+    // Once more when the list changed between `ps` and `inspect`.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const [ok, out] = await this.call(['ps', '-a', '-q', '--no-trunc', '--filter', `label=${LABEL_HOST}=${hostId}`]);
+      if (!ok) return null;
+      const ids = out.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (!ids.length) return [];
+      const [ok2, raw] = await this.call(['inspect', ...ids]);
+      if (!ok2) continue;
+      let records: unknown;
+      try {
+        records = JSON.parse(raw);
+      } catch {
+        return null;
+      }
+      if (!Array.isArray(records)) return null;
+      const found: Container[] = [];
+      for (const record of records) {
+        const c = containerOf(record);
+        if (c) found.push(c);
+      }
+      return found;
     }
-    if (!Array.isArray(records)) return null;
-    const found: Container[] = [];
-    for (const record of records) {
-      const c = containerOf(record);
-      if (c) found.push(c);
-    }
-    return found;
+    return null;
   }
 
+  /**
+   * A digest is immutable: present is enough. A tag can be pushed again, so it
+   * is pulled every time and the local copy is used only when the registry
+   * cannot be reached.
+   */
   async ensureImage(image: string): Promise<string | null> {
-    const [present] = await this.call(['image', 'inspect', image], 30_000);
-    if (present) return null;
-    const [ok, out] = await this.call(['pull', image], 900_000);
-    return ok ? null : out;
+    if (isDigestRef(image)) {
+      const [present] = await this.call(['image', 'inspect', '--', image], 30_000);
+      if (present) return null;
+      const [ok, out] = await this.call(['pull', '--', image], 900_000);
+      return ok ? null : out;
+    }
+    const [pulled, out] = await this.call(['pull', '--', image], 900_000);
+    if (pulled) return null;
+    const [present] = await this.call(['image', 'inspect', '--', image], 30_000);
+    return present ? null : out;
   }
 
   async run(spec: RunSpec, env: WorkerEnv): Promise<string | null> {
@@ -146,11 +177,44 @@ export class DockerCli implements DockerApi {
     return ok ? null : out;
   }
 
+  /** Stop, then remove; a container that is already gone counts as removed. */
   async stopAndRemove(name: string): Promise<string | null> {
     const [ok, out] = await this.call(['stop', '-t', String(STOP_TIMEOUT_S), name], (STOP_TIMEOUT_S + 60) * 1000);
-    if (!ok) return out;
+    if (!ok) return NO_SUCH_CONTAINER.test(out) ? null : out;
     const [ok2, out2] = await this.call(['rm', name]);
-    return ok2 ? null : out2;
+    return ok2 || NO_SUCH_CONTAINER.test(out2) ? null : out2;
+  }
+
+  async daemonId(): Promise<string | null> {
+    const [ok, out] = await this.call(['info', '--format', '{{.ID}}'], 30_000);
+    const id = out.trim();
+    return ok && id ? id : null;
+  }
+
+  async otherAgents(hostId: string): Promise<string[] | null> {
+    // Workers carry the host label and agents do not: inspect only the rest.
+    const [ok, out] = await this.call(['ps', '--no-trunc', '--format', `{{.ID}} {{.Label "${LABEL_HOST}"}}`]);
+    if (!ok) return null;
+    const ids = out.split('\n').map((l) => l.trim().split(' ')).filter((p) => p[0] && !p[1]).map((p) => p[0]);
+    if (!ids.length) return [];
+    const [ok2, raw] = await this.call(['inspect', ...ids]);
+    if (!ok2) return null;
+    let records: unknown;
+    try {
+      records = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    if (!Array.isArray(records)) return null;
+    const others: string[] = [];
+    for (const r of records as Record<string, any>[]) {
+      const env: unknown = r?.Config?.Env;
+      if (!Array.isArray(env) || !env.includes(`FLEET_HOST_ID=${hostId}`)) continue;
+      if (!env.some((e) => typeof e === 'string' && e.startsWith('FLEET_HOST_TOKEN='))) continue;
+      if (r?.Config?.Hostname === this.selfHostname) continue;
+      others.push(String(r.Name ?? r.Id ?? '').replace(/^\//, ''));
+    }
+    return others;
   }
 }
 
@@ -173,5 +237,8 @@ export function containerOf(record: unknown): Container | null {
     exit_code: running ? null : Number.isInteger(state.ExitCode) ? state.ExitCode : null,
     started_at: state.StartedAt && state.StartedAt !== NEVER ? String(state.StartedAt) : null,
     finished_at: state.FinishedAt && state.FinishedAt !== NEVER ? String(state.FinishedAt) : null,
+    ...(typeof r.Id === 'string' ? { id: r.Id } : {}),
+    ...(typeof r.Image === 'string' ? { image_id: r.Image } : {}),
+    ...(labels[LABEL_HANDOFF] !== undefined ? { handoff: true } : {}),
   };
 }
