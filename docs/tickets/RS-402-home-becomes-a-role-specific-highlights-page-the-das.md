@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-25
 reporter: jinhu
 branch: feat/home-highlights
-pr:
+pr: 907
 version: 1.350.0
 related: []
 ---
