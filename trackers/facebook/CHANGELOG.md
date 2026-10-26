@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-25
+
 ### Added
 
 - **`scripts/push-fleet-images.sh`** builds the fleet worker image and the
