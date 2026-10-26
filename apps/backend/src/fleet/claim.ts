@@ -440,15 +440,19 @@ worker.post('/heartbeat', workerAuth, async (c) => {
         host_id = EXCLUDED.host_id, account_no = EXCLUDED.account_no, epoch = EXCLUDED.epoch, state = EXCLUDED.state,
         version = COALESCE(EXCLUDED.version, fleet_workers.version), last_heartbeat_at = NOW(),
         vnc_port = COALESCE(EXCLUDED.vnc_port, fleet_workers.vnc_port), detail = EXCLUDED.detail`;
-    if (state === 'HEALTHY') {
-      await tx`
-        UPDATE fleet_tasks SET lease_expires_at = ${lease}
-        WHERE worker_id = ${w.worker_id} AND account_no = ${w.account_no} AND epoch = ${w.epoch} AND state = 'leased'`;
-    } else if (fleetStateParked(state)) {
+    if (fleetStateParked(state)) {
       // A parked account cannot search: its city goes back to the queue now,
-      // not when the lease runs out. DEGRADED keeps it (the search goes on).
+      // not when the lease runs out.
       const released = await releaseTasks(tx, { worker_id: w.worker_id, account_no: w.account_no, epoch: w.epoch }, state);
       if (released.length) flog.info('fleet tasks released by a parked worker', { workerId: w.worker_id, state, tasks: released });
+    } else {
+      // Any other state (HEALTHY, DEGRADED, …) is still searching: renewing
+      // only on HEALTHY let a search that turned DEGRADED expire mid-run, a
+      // second account search the same city and the first one's done drop.
+      // Never past task_max_minutes, where reconcile returns it anyway.
+      await tx`
+        UPDATE fleet_tasks SET lease_expires_at = LEAST(${lease}, leased_at + make_interval(mins => ${settings.task_max_minutes}))
+        WHERE worker_id = ${w.worker_id} AND account_no = ${w.account_no} AND epoch = ${w.epoch} AND state = 'leased'`;
     }
     return true;
   });

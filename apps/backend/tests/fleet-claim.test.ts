@@ -470,14 +470,26 @@ describe('POST /api/fleet/worker/heartbeat', () => {
     expect(w.last_heartbeat_at).toBeInstanceOf(Date);
   });
 
-  it('releases the task on a parked state, and keeps it on DEGRADED', async () => {
+  it('releases the task on a parked state, and keeps and renews it on DEGRADED, capped by task_max_minutes', async () => {
     await seedSlot(1);
     const { worker_token: token } = await claimed('lab-1');
     const id = await addTask('houston');
     await nextTask(token);
+    // A lease about to lapse: a DEGRADED heartbeat renews it, as HEALTHY does.
+    await getTestDb()`UPDATE fleet_tasks SET lease_expires_at = NOW() + interval '1 minute' WHERE id = ${id}`;
     expect((await heartbeat(token, 'DEGRADED')).status).toBe(200);
     expect(await taskRow(id)).toMatchObject({ state: 'leased', worker_id: 'lab-1' });
+    const [renewed] = await getTestDb()<{ minutes: number }[]>`
+      SELECT (EXTRACT(EPOCH FROM lease_expires_at - NOW()) / 60)::float8 AS minutes FROM fleet_tasks WHERE id = ${id}`;
+    expect(renewed.minutes).toBeGreaterThan(25);
     expect(await events(id)).toEqual(['handed']);
+    // Never past task_max_minutes (45) from the lease.
+    await getTestDb()`UPDATE fleet_tasks SET leased_at = NOW() - interval '40 minutes' WHERE id = ${id}`;
+    await heartbeat(token, 'DEGRADED');
+    const [capped] = await getTestDb()<{ minutes: number }[]>`
+      SELECT (EXTRACT(EPOCH FROM lease_expires_at - NOW()) / 60)::float8 AS minutes FROM fleet_tasks WHERE id = ${id}`;
+    expect(capped.minutes).toBeLessThanOrEqual(5.01);
+    expect(capped.minutes).toBeGreaterThan(4);
 
     expect((await heartbeat(token, 'CHALLENGE_CHECKPOINT')).status).toBe(200);
     const t = await taskRow(id);
