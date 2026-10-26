@@ -32,7 +32,10 @@ Each worker runs three independent loops:
 1. **poll** — claims every subreddit that is due, fetches them all in *one*
    Reddit request, and records the posts it found.
 2. **evaluate** — sends unjudged posts to OpenRouter, storing a verdict, a
-   one-line summary and the asking price.
+   one-line summary and the asking price. Since 2026-10-26 the prompt targets
+   only bulk RAM from Samsung, SK Hynix and Micron; the spec and its evidence
+   are in
+   [docs/prompt-evaluations/](docs/prompt-evaluations/2026-10-26-candidate-2-bulk-ram.md).
 3. **notify** — sends each target to Telegram once, records the message ids it
    went out as, then marks it notified.
 
