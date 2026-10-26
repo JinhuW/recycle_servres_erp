@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.355.0] - 2026-10-26
+
+The Facebook account pool has a summary that unseals nothing.
+`GET /api/facebook-pool/summary` lists every account with only what the
+fleet pages show: number, uid, email, note, status, holder, dates, batch,
+whether a cookie is saved and its `c_user`. The Fleet tab and the tab-bar
+counts poll it instead of the full snapshot, which decrypted every password,
+TOTP, cookie and token of every row on each poll. It reads no secret column,
+so a purchaser and a manager get the same answer. The page keeps its fallback
+to the snapshot for the minutes a release has the new frontend in front of
+the old backend.
+
 ## [1.354.0] - 2026-10-26
 
 ### Fixed
