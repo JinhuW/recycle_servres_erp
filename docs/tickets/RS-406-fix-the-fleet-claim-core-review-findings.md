@@ -8,7 +8,7 @@ created: 2026-10-26
 reporter: jinhu
 branch: fleet/fix-claim-core
 pr: "#916"
-version: 1.353.0
+version: 1.354.0
 related: []
 ---
 
