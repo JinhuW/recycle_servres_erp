@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-26
 reporter: jinhu
 branch: fleet/claim-tickets
-pr:
+pr: "#924"
 version: 1.360.0
 related: []
 ---
