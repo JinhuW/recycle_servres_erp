@@ -212,6 +212,8 @@ export type FleetSettings = {
   start_fresh_hours: number;
   quarantine_hours: number;
   quarantine_probe_hours: number;
+  /** Days finished tasks are kept; never fewer than familiar_days. */
+  retention_days: number;
   search: FleetSearchSettings;
 };
 
@@ -225,6 +227,7 @@ export const FLEET_SETTINGS_DEFAULTS: Omit<FleetSettings, 'search'> = {
   start_fresh_hours: 2,
   quarantine_hours: 48,
   quarantine_probe_hours: 6,
+  retention_days: 90,
 };
 
 /** What a worker token says about its bearer. `exp` is Unix seconds. The

@@ -48,6 +48,7 @@ what answers.
 | A `verify-slug` verdict comes only from `finished` with a boolean `matches` and no `detail.error` / `detail.wall` | §5 | RS-406 |
 | `PUT /session` needs `c_user` (this account) and `xs` unless `clear: true` | §5 | RS-406 |
 | Any non-parked heartbeat (DEGRADED too) renews the task lease, capped at `task_max_minutes` | §5 | RS-408 |
+| `fleet_settings` key `retention_days` (default 90, 30..730); the scheduler purges terminal task history older than it hourly; migration `0210_fleet_task_retention.sql` | §4, §8 | RS-409 |
 | Coordinator wired for fleet workers on dev: `FLEET_COORDINATOR_URL=http://10.10.10.73:8500` (LAN forwarder), coordinator tokens per worker id in `FLEET_WORKER_ENV` as `RS_CONTROL_PLANE_TOKENS`; alerts withheld unless `env` carries `RS_ALERTS=on` | §2 | facebook-tracker 0.14.2 |
 
 ## 1. Names
@@ -290,6 +291,12 @@ worker; nothing claims it.
   longer an infinite lease); index `fleet_tasks_done_account_idx` on
   `(account_no, city, done_at) WHERE state = 'done'` for the pick's familiar
   test.
+- `0209_fleet_review_fixes.sql`: index `fleet_tasks_done_pair_idx` on
+  `(city, item, done_at DESC) WHERE state = 'done' AND kind = 'search'`;
+  `fleet_hosts` agent-instance columns.
+- `0210_fleet_task_retention.sql`: index `fleet_tasks_purge_idx` on
+  `(COALESCE(done_at, leased_at, due_at), id)` over terminal tasks, for the
+  retention purge (§8 `retention_days`).
 
 Lock order everywhere: pool account (`FOR NO KEY UPDATE`), then slot, then
 tasks. The release row (`fleet_settings` key `release`) is locked only by
@@ -690,6 +697,7 @@ Session cookie plus the manager role. Errors are `{error, detail?}`:
 | `start_fresh_hours` | 2 | round start: skip city-items done this recently |
 | `quarantine_hours` | 48 | 0-card rule window (ported from the coordinator) |
 | `quarantine_probe_hours` | 6 | one probe task per quarantined slot per this interval |
+| `retention_days` | 90 | 30..730. Terminal tasks (done, cancelled, expired) older than this (by `done_at`, else `leased_at`, else `due_at`) are deleted with their events and attempts, hourly, 5,000 per run. The window is never shorter than `familiar_days`. Kept regardless of age: the newest done search per city and item, and the verify-slug task holding each city's latest verdict |
 | `search` | from `master.toml` | `date_listed`, `delivery_method`, `max_results`, page pauses |
 | `release` | none | the current or last `FleetRelease` (`{image, version, state: rolling\|done\|failed, started_at, finished_at, upgraded[], skipped[], current, failure}`); written by `POST /releases` and the roll, not by `PUT /settings` and not in its answer |
 

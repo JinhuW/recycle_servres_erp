@@ -15,6 +15,24 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.358.0] - 2026-10-26
+
+### Added
+
+- The ERP fleet keeps its task history for a set number of days instead of
+  for ever (RS-409). A new rule, **Keep task history** (`retention_days`,
+  30 to 730, default 90), sits under **Rules** on the Cities tab. Once an
+  hour the scheduler deletes finished, cancelled and expired tasks older than
+  that, with their event log and archived lease attempts, 5,000 at a time and
+  one backend at a time. The scheduler's and the pick's history reads stay
+  small as the full catalog runs. Waiting and running tasks are never
+  touched. Two kinds of row stay whatever their age, because a rule reads
+  them with no window: each city and item's last search (the cadence and the
+  Cities tab's last-search cell) and the check that holds each city's latest
+  slug verdict (whether it may be enabled again). The window never drops
+  below the familiar-city window. Migration 0210 adds the index the purge
+  reads.
+
 ## [1.357.0] - 2026-10-26
 
 ### Fixed

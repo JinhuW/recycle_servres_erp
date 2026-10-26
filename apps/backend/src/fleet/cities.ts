@@ -341,6 +341,8 @@ export const SETTING_BOUNDS: Record<NumericKey, readonly [number, number]> = {
   start_fresh_hours: [0, 48],
   quarantine_hours: [0, 720],
   quarantine_probe_hours: [1, 168],
+  // At least the city log's longest window (720 h) and the quarantine's.
+  retention_days: [30, 730],
 };
 
 // What Facebook's own filters accept (the vendored monitor's enums), and the

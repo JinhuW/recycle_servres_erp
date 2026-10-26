@@ -4845,6 +4845,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fleetRuleUnit_quarantine_hours: "hours after a 0-card search",
     fleetRule_quarantine_probe_hours: "Probe every",
     fleetRuleUnit_quarantine_probe_hours: "hours while quarantined",
+    fleetRule_retention_days: "Keep task history",
+    fleetRuleUnit_retention_days: "days (30 to 730), at least the familiar window",
     fleetFunnelSub_1: "today (UTC), all workers, both items",
     fleetFunnelSub_7: "last 7 UTC days, all workers, both items",
     fleetFunnelSub_14: "last 14 UTC days, all workers, both items",

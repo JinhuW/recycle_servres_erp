@@ -185,7 +185,7 @@ describe('settings', () => {
     const r = await api<FleetSettings>('GET', '/api/fleet/settings', { token });
     expect(r.body).toEqual({
       per_day_default: 1, budget_minutes: 360, lease_minutes: 30, task_max_minutes: 45, poll_hold_seconds: 50,
-      familiar_days: 7, start_fresh_hours: 2, quarantine_hours: 48, quarantine_probe_hours: 6, search: {},
+      familiar_days: 7, start_fresh_hours: 2, quarantine_hours: 48, quarantine_probe_hours: 6, retention_days: 90, search: {},
     });
   });
 
