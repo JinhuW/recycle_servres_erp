@@ -7,12 +7,13 @@
 #
 # "${VAR}" values are expanded by the monitor from its environment, which
 # rs_worker.entry fills from the claim: the account's password fallback, and
-# the shared secrets in the claim's `env` (OpenRouter, Telegram, later the
-# coordinator's tokens), which the Cloudflare Worker adds from its
-# FLEET_WORKER_ENV secret. A reference left unset is dropped from the
-# rendered file, so an optional channel is simply off; the [ai.*] ones are
-# required, and the worker exits 70 without them. No secret is written into
-# this file.
+# the shared secrets in the claim's `env` (OpenRouter, the coordinator's
+# per-worker tokens as RS_CONTROL_PLANE_TOKENS, Telegram), which the
+# Cloudflare Worker adds from its FLEET_WORKER_ENV secret. A reference left
+# unset is dropped from the rendered file, so an optional channel is simply
+# off; the [ai.*] ones are required, and the worker exits 70 without them.
+# The [user.*] Telegram and alert-report keys are rendered only when that env
+# carries RS_ALERTS=on. No secret is written into this file.
 #
 # The prompt and the alert channel are copied from configs/master.toml; keep
 # them in step until the fleet's settings carry them.

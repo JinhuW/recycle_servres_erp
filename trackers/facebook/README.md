@@ -424,6 +424,17 @@ and a slot-claim protocol with a lease epoch. The worker's side of it is
   still searches each task, judges with the AI and alerts on Telegram when
   that is configured. Workers whose cities overlap can then alert the same
   listing twice.
+- **Alerts are withheld until the fleet turns them on.** Unless the claim's
+  env carries `RS_ALERTS=on`, no Telegram or alert-report key is rendered and
+  `[fleet] alerts = false` keeps the monitor from claiming or sending an
+  alert and from reporting searched cities, funnel counts, walls and
+  incidents to the coordinator (each would act on the live fleet: a claim
+  never delivered holds the listing from the live workers, a reported city
+  counts as covered in the live queue, walls and incidents page the ops
+  chat). With a coordinator and alerts off a fleet worker records only its
+  login ledger there. Coordinator tokens come per worker id in the env's
+  `RS_CONTROL_PLANE_TOKENS` (a JSON object as one string, `rsc mint-token
+  --worker <id>`); the entrypoint keeps only its own.
 - **The monitor's `[fleet]` section** (`recycle-patches`) replaces the
   schedule. It logs in once, from the claimed session, then loops: while the
   page is live and logged in it asks `next-task` (the server holds the call
@@ -432,8 +443,8 @@ and a slot-claim protocol with a lease epoch. The worker's side of it is
   and reports it done with the next ask. `verify-slug` tasks open the search
   page and report the location label Facebook shows; `probe` tasks are
   ordinary searches. Heartbeats go to the fleet, with the epoch and the VNC
-  port, and a coordinator, when there is one, still gets the alert claims,
-  funnel counts and challenges. Parked (no page, a wall, a login that gave up), it
+  port, and a coordinator, when there is one and alerts are on, still gets
+  the alert claims, funnel counts and challenges. Parked (no page, a wall, a login that gave up), it
   runs only the session checks and an operator's `relogin` directive, which
   rides on the heartbeat's answer: **a wake never logs in**. With the fleet
   unreachable it backs off from 30 s to 10 min and keeps its session; there
