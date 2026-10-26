@@ -7,14 +7,17 @@ the other end: one text frame, `viewer`. Only then is the local x11vnc
 dialled and bytes moved both ways, as binary frames. When either side ends,
 both end, and a fresh socket is parked for the next viewer.
 
-Never touches the browser or the session. A `409` on the dial (the slot's
-epoch moved on) stops the relay for good and writes `fence_path`, which the
-monitor checks before every page it opens: it stops its search and exits 75
-without waiting for a 409 of its own.
+Never touches the browser or the session. A `409 stale_epoch` on the dial
+(the slot's epoch moved on), or a 401 for a bad or expired token, stops the
+relay for good and writes `fence_path`, which the monitor checks before every
+page it opens: it stops its search and exits 75 without waiting for a refusal
+of its own. A 503, or a 401 saying a server key "is not set", is the ERP's
+own misconfiguration: dialled again with backoff, nothing fenced.
 """
 
 from __future__ import annotations
 
+import json
 import socket
 from pathlib import Path
 import threading
@@ -28,6 +31,27 @@ PATH = "/api/fleet/worker/vnc"
 VIEWER = "viewer"
 CHUNK = 64 * 1024
 HEALTHY_PARK_S = 30
+
+
+def refuses_epoch(status: int, body: bytes | None) -> bool:
+    """Whether a refused dial means this worker's token is dead for good.
+
+    The same reading as the monitor's `fleet_refuses`: `409 stale_epoch`, or a
+    401 that is about the token. An unreadable 409 body still fences, since
+    the relay answers 409 for nothing else.
+    """
+    try:
+        parsed = json.loads(body or b"{}")
+    except ValueError:
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    if status == 409:
+        return parsed.get("error") in (None, "stale_epoch")
+    if status == 401:
+        detail = str(parsed.get("detail") or "").strip().rstrip(".")
+        return not detail.endswith("is not set")
+    return False
 
 
 def relay_url(fleet_url: str) -> str:
@@ -111,7 +135,7 @@ class VncRelay:
                     served = self._session(ws)
             except InvalidStatus as e:
                 status = e.response.status_code
-                if status in (401, 409):
+                if refuses_epoch(status, getattr(e.response, "body", None)):
                     self.refused = status
                     self.log("VNC relay: the fleet refuses this worker's epoch; not dialling again")
                     self._fence(status)

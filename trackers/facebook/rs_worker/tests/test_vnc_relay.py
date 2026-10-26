@@ -78,8 +78,9 @@ class FakeVnc:
 class FakeRelay:
     """The ERP's /api/fleet/worker/vnc: checks the token, parks, signals a viewer."""
 
-    def __init__(self, status: int = 101) -> None:
+    def __init__(self, status: int = 101, body: str = '{"error":"stale_epoch"}') -> None:
         self.status = status
+        self.body = body
         self.parked: List[ServerConnection] = []
         self.premature: List[Any] = []
         self.headers: List[Headers] = []
@@ -89,7 +90,7 @@ class FakeRelay:
             if request.path != "/api/fleet/worker/vnc":
                 return conn.respond(404, "")
             if self.status != 101:
-                return conn.respond(self.status, '{"error":"stale_epoch"}')
+                return conn.respond(self.status, self.body)
             if request.headers.get("Authorization") != f"Bearer {TOKEN}":
                 return conn.respond(401, "")
             return None
@@ -215,6 +216,39 @@ def test_a_stale_epoch_stops_the_relay_for_good_and_fences_the_monitor(tmp_path)
         until(lambda: not worker.is_alive())
         assert worker.refused == 409 and worker.dials == 1
         assert fence.read_text() == "409\n"
+    finally:
+        relay.close()
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (503, '{"error":"unavailable"}'),
+        (401, '{"error":"unauthorized","detail":"FLEET_WORKER_TOKEN_KEY is not set"}'),
+        (409, '{"error":"no_slot"}'),
+    ],
+)
+def test_the_erps_own_misconfiguration_is_dialled_again_and_fences_nothing(
+    tmp_path, status: int, body: str
+) -> None:
+    relay = FakeRelay(status=status, body=body)
+    fence = tmp_path / "fenced"
+    worker = VncRelay(relay.url, TOKEN, backoff=(0.05, 0.1), fence_path=str(fence)).start()
+    try:
+        until(lambda: worker.dials >= 3)
+        assert worker.refused is None and not fence.exists()
+    finally:
+        worker.stop()
+        relay.close()
+
+
+def test_a_bad_token_fences_the_monitor(tmp_path) -> None:
+    relay = FakeRelay(status=401, body='{"error":"unauthorized"}')
+    fence = tmp_path / "fenced"
+    try:
+        worker = VncRelay(relay.url, "expired", backoff=(0.05, 0.2), fence_path=str(fence)).start()
+        until(lambda: not worker.is_alive())
+        assert worker.refused == 401 and fence.read_text() == "401\n"
     finally:
         relay.close()
 

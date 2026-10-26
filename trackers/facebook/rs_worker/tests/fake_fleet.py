@@ -82,7 +82,8 @@ SETTINGS = {
 # What the ERP backend adds to a 200 claim from its
 # FLEET_WORKER_ENV secret. Made up.
 CLAIM_ENV = {
-    "RS_CONTROL_PLANE_TOKEN": "made-up-control-plane-token",  # pragma: allowlist secret
+    # The coordinator's per-worker tokens, as `rsc mint-token` makes them.
+    "RS_CONTROL_PLANE_TOKENS": json.dumps({"lab-1": "made-up-control-plane-token"}),  # pragma: allowlist secret
     "OPENROUTER_API_KEY": "made-up-openrouter-key",  # pragma: allowlist secret
     "TELEGRAM_TOKEN": "123456789:made-up-bot-token",  # pragma: allowlist secret
     "TELEGRAM_CHAT_ID": "-1001234567890",

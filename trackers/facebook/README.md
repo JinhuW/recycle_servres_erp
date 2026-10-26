@@ -413,8 +413,15 @@ and a slot-claim protocol with a lease epoch. The worker's side of it is
   channel and the coordinator's tokens. The edge adds it as env only to a
   successful host-authenticated POST /api/fleet/worker/claim. These values never
   enter Railway or Postgres, so fleet hosts must use the Cloudflare hostname.
-  The entrypoint exports claim env, logs names only and prevents overrides of
-  fleet wiring/password fallback. Missing AI keys or configured coordinator
+  The entrypoint takes from it only the names `config.template.toml` reads,
+  plus `RS_ALERTS` and `RS_CONTROL_PLANE_TOKENS` (anything else, `LD_PRELOAD`
+  or `HTTPS_PROXY` say, would reach every process); `RS_CONTROL_PLANE_TOKEN`
+  and `RS_COORDINATOR_TOKEN` are derived from the token map, never taken as
+  they are. What the container already sets wins, names are logged and values
+  never, and no `RS_FLEET_*` variable (the host token claims any account)
+  reaches the monitor or its browser. A claim value that reads as `${VAR}`
+  (a phrase, a city, a search setting) is left out, since the monitor would
+  expand it from its environment. Missing AI keys or configured coordinator
   auth fail before browser startup; optional unused channel fields are omitted.
 - **No coordinator yet.** When the claim's `settings.coordinator_url` is
   empty, the rendered config has no `control_plane_*` and no
@@ -432,7 +439,9 @@ and a slot-claim protocol with a lease epoch. The worker's side of it is
   never delivered holds the listing from the live workers, a reported city
   counts as covered in the live queue, walls and incidents page the ops
   chat). With a coordinator and alerts off a fleet worker records only its
-  login ledger there. Coordinator tokens come per worker id in the env's
+  login ledger there. A wall still reaches the **fleet**: its heartbeat turns
+  `CHECKPOINT` (or the wall's state), which releases the task and shows the
+  wall on the ERP's Fleet page. Coordinator tokens come per worker id in the env's
   `RS_CONTROL_PLANE_TOKENS` (a JSON object as one string, `rsc mint-token
   --worker <id>`); the entrypoint keeps only its own.
 - **The monitor's `[fleet]` section** (`recycle-patches`) replaces the
@@ -444,14 +453,26 @@ and a slot-claim protocol with a lease epoch. The worker's side of it is
   page and report the location label Facebook shows; `probe` tasks are
   ordinary searches. Heartbeats go to the fleet, with the epoch and the VNC
   port, and a coordinator, when there is one and alerts are on, still gets
-  the alert claims, funnel counts and challenges. Parked (no page, a wall, a login that gave up), it
-  runs only the session checks and an operator's `relogin` directive, which
-  rides on the heartbeat's answer: **a wake never logs in**. With the fleet
+  the alert claims, funnel counts and challenges. Heartbeats go every 20 s,
+  which is also how a fence lands mid-listing within seconds. Parked (no
+  page, a wall, a login that gave up), it hands a finished task back with
+  `take: false` and runs only the session checks and an operator's `relogin`
+  directive, which rides on the heartbeat's answer and arms one login when
+  it first appears (the coordinator's `restore` and `sweep` are ignored):
+  **a wake never logs in**. A task that throws is that task's `stopped:
+  error`; a dead browser, a boot login that throws, or any other surprise in
+  the loop parks for an operator (`DEAD` with `browser_failed`,
+  `login_failed` or `crashed`) instead of exiting, since an exit is a new
+  container and a new login. A slug check that lands on a wall or a login
+  form, or errors, sends `stopped` with no `matches`: no verdict. With the fleet
   unreachable it backs off from 30 s to 10 min and keeps its session; there
   is **no own-list fallback** (`queued_cities` and `planned_cities` are never
   called). A `409 stale_epoch` from any call closes the browser without
-  saving and exits 75. The 30-minute session save also uploads the session
-  to the pool (`PUT /api/fleet/worker/session`).
+  saving and exits 75; so does a 401 about the token. A 503, or a 401 whose
+  detail says a server key "is not set", is the ERP's own misconfiguration:
+  no answer, backoff, browser kept. The 30-minute session save also uploads
+  the session to the pool (`PUT /api/fleet/worker/session`), naming `token`
+  only when the worker holds one (a `null` clears the pool's stored token).
 - **Facebook or the proxy out of reach: stop and wait for an operator.**
   Every container start is a login, so a worker that cannot connect neither
   retries nor exits. In fleet mode a navigation that fails with one of
@@ -485,7 +506,16 @@ and a slot-claim protocol with a lease epoch. The worker's side of it is
   relay's `viewer` text frame; then it dials x11vnc on 5900 and bridges the
   session, and parks a fresh socket when the viewer leaves. `python -m
   rs_worker.tests.fake_fleet` plays one viewer and prints the greeting it
-  saw, which is how a built image's relay is checked without the ERP.
+  saw, which is how a built image's relay is checked without the ERP. x11vnc
+  has no password, so it lets in only loopback (the relay) and the bridge's
+  gateway (the host's `127.0.0.1:<port>` publish): another worker on the
+  agent's network cannot drive this one's browser. The monitor's web UI
+  listens on loopback in fleet mode.
+- **The image is built against frozen versions**
+  (`deploy/worker-constraints.txt`, taken from `aimm-recycle:0.14.3`), so a
+  rebuild does not move Playwright, and with it the Chromium build Facebook
+  sees under the slot's device profile. Change a pin on purpose, in a
+  release of its own.
 - **Search settings** are copied from the claim's `settings.search` into
   `[marketplace.facebook]` verbatim, and an item's filters into its
   `[item.*]` table, so a value takes whatever shape the old configs give it:
@@ -1396,7 +1426,8 @@ everything at once is `scripts/release.sh --dry-run patch`.
 
 The matching ERP (v1.349.0) preserves the Cloudflare Worker's FLEET_WORKER_ENV
 secret delivery in the claim's env object. Configure OPENROUTER_API_KEY there, Telegram values for
-alerts, and RS_CONTROL_PLANE_TOKEN when a coordinator URL is set. The entrypoint
+alerts, and RS_CONTROL_PLANE_TOKENS (the per-worker map) when a coordinator URL
+is set. The entrypoint
 checks required configured credentials before it starts the browser. Values are
 never part of manager reads, desired reports or command arguments.
 
@@ -1408,6 +1439,6 @@ by worker name alone. Operator exit 78 stays stopped in the matching agent.
 Heartbeats renew tokens before their seven-day expiry; the monitor atomically
 updates a 0600 fleet-token file read by future VNC dials. All monitor requests
 use the new token without another Facebook login. An expired/revoked token is
-terminal (exit 75); transport errors retain backoff and empty answers respect
+terminal (exit 75), a server key that is not set is not; transport errors retain backoff and empty answers respect
 retry_after with interruptible one-second waits. Backend support must precede
 these worker changes. Live deployment/cutover remains separately owner-approved.

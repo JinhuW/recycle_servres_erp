@@ -157,7 +157,6 @@ def test_a_claim_renders_the_worker_and_runs_the_monitor(
     home = tmp_path / "home"
     env = fleet_env(fleet, RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path))
     assert fleet.env is not None
-    fleet.env["RS_CONTROL_PLANE_TOKEN"] = "made-up-control-plane-token"  # pragma: allowlist secret
 
     assert entry.run_fleet([], env, home=home) == 0
 
@@ -555,10 +554,14 @@ def test_the_claims_env_reaches_the_monitor_and_its_values_are_never_logged(
     fleet.env.update(
         {
             "RS_ALERTS": "on",
+            # The fleet-wide legacy token: never taken from the claim.
             "RS_COORDINATOR_TOKEN": "made-up-coordinator-token",  # pragma: allowlist secret
             # Not the claim's to set: the password comes from the account.
             "RS_FB_PASSWORD": "made-up-hijack",  # pragma: allowlist secret
             "RS_FLEET_URL": "http://elsewhere.invalid",
+            # Nothing the template reads: it would reach every process.
+            "LD_PRELOAD": "/tmp/made-up.so",
+            "HTTPS_PROXY": "http://made-up.invalid:3128",
             "TELEGRAM_TOPIC_HIGH": 5,
             "bad name": "x",
         }
@@ -568,9 +571,12 @@ def test_the_claims_env_reaches_the_monitor_and_its_values_are_never_logged(
     assert entry.run_fleet([], env, home=home) == 0
 
     seen = json.loads((tmp_path / "monitor-env.json").read_text())
-    assert seen["RS_COORDINATOR_TOKEN"] == "made-up-coordinator-token"
+    # The worker's own token from the map, not the legacy one.
+    assert seen["RS_COORDINATOR_TOKEN"] == "made-up-control-plane-token"
     assert seen["RS_FB_PASSWORD"] == ACCOUNT["password"]
-    assert seen["RS_FLEET_URL"] == fleet.url + "/"
+    assert "LD_PRELOAD" not in seen and "HTTPS_PROXY" not in seen
+    # No fleet variable reaches the monitor: the host token claims any account.
+    assert not [k for k in seen if k.startswith("RS_FLEET_")]
     config = tomllib.loads((home / "config.toml").read_text())
     # Kept, since the claim's env resolves them.
     assert config["ai"]["openrouter"]["api_key"] == "${OPENROUTER_API_KEY}"
@@ -580,7 +586,8 @@ def test_the_claims_env_reaches_the_monitor_and_its_values_are_never_logged(
     assert "telegram_topic_high" not in config["user"]["recycle"]
 
     logged = capfd.readouterr().err
-    assert "claim env: OPENROUTER_API_KEY, RS_ALERTS, RS_CONTROL_PLANE_TOKEN, RS_COORDINATOR_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_TOKEN" in logged
+    assert "claim env: OPENROUTER_API_KEY, RS_ALERTS, RS_CONTROL_PLANE_TOKENS, TELEGRAM_CHAT_ID, TELEGRAM_TOKEN" in logged
+    assert "HTTPS_PROXY, LD_PRELOAD, RS_COORDINATOR_TOKEN, RS_FB_PASSWORD, RS_FLEET_URL, TELEGRAM_TOPIC_HIGH, bad name" in logged
     for value in ("made-up-openrouter-key", "made-up-bot-token", "made-up-coordinator-token",
                   "made-up-hijack", ACCOUNT["password"]):
         assert value not in logged
@@ -594,7 +601,7 @@ def test_every_reference_in_the_template_resolves_from_the_claim_and_the_fleet_v
     fleet.env.update(
         {
             name: f"made-up-{name.lower()}"
-            for name in ("RS_CONTROL_PLANE_TOKEN", "RS_ALERT_REPORT_URL", "RS_COORDINATOR_TOKEN")
+            for name in ("RS_ALERT_REPORT_URL",)
         }
     )
     fleet.env.update({"TELEGRAM_TOPIC_HIGH": "11", "TELEGRAM_TOPIC_MEDIUM": "12", "TELEGRAM_TOPIC_LOW": "13"})
@@ -704,7 +711,7 @@ def test_a_parked_monitor_stopped_by_docker_still_leaves_0(
 
 
 def test_missing_coordinator_auth_fails_before_browser_start(fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    fleet.env.pop('RS_CONTROL_PLANE_TOKEN', None)
+    fleet.env.pop('RS_CONTROL_PLANE_TOKENS', None)
     monkeypatch.delenv('RS_CONTROL_PLANE_TOKEN', raising=False)
     started = []
     monkeypatch.setattr(entry, 'run_monitor', lambda *args, **kwargs: started.append(True))
@@ -772,7 +779,7 @@ def test_each_worker_takes_only_its_own_coordinator_token(
     fleet: FakeFleet, tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
     assert fleet.env is not None
-    fleet.env.pop("RS_CONTROL_PLANE_TOKEN")
+    fleet.env.pop("RS_CONTROL_PLANE_TOKENS")
     fleet.env["RS_CONTROL_PLANE_TOKENS"] = json.dumps(TOKENS)
     env = fleet_env(fleet, RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path))
     assert entry.run_fleet([], env, home=tmp_path / "home") == 0
@@ -790,9 +797,73 @@ def test_a_worker_the_token_map_does_not_name_stops_before_the_browser(
     fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     assert fleet.env is not None
-    fleet.env.pop("RS_CONTROL_PLANE_TOKEN")
+    fleet.env.pop("RS_CONTROL_PLANE_TOKENS")
     fleet.env["RS_CONTROL_PLANE_TOKENS"] = json.dumps({"lab-2": TOKENS["lab-2"]})
     started: List[bool] = []
     monkeypatch.setattr(entry, "run_monitor", lambda *a, **k: started.append(True))
     assert entry.run_fleet([], fleet_env(fleet), home=tmp_path / "home") == entry.EXIT_CONFIG
     assert started == []
+
+
+# ---------------------------------------------------------------------------
+# review fixes: claim values, env precedence, what the container exposes
+# ---------------------------------------------------------------------------
+def test_claim_values_that_read_as_env_references_never_reach_the_config(
+    fleet: FakeFleet, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    answer = entry.claim(fleet.url, "lab", HOST_TOKEN, "lab-1", "0.14.0", 5903, sleep=lambda s: None)
+    answer["items"][0]["phrases"] = ["server ram", "${RS_FB_PASSWORD}"]
+    answer["items"][0]["filters"] = {"keywords": ["ram"], "description": "${OPENROUTER_API_KEY}"}
+    answer["settings"]["search"]["currency"] = "${RS_FB_TOTP}"
+    answer["home_cities"] = ["nyc", "${HOME}"]
+    with open(entry.TEMPLATE, "rb") as f:
+        template = tomllib.load(f)
+    config = entry.render_config(template, answer, fleet.url, "lab-1", tmp_path)
+
+    item = config["item"][answer["items"][0]["name"]]
+    assert item["search_phrases"] == ["server ram"] and "description" not in item
+    facebook = config["marketplace"]["facebook"]
+    assert facebook["search_city"] == ["nyc"]
+    # The template's own references are untouched.
+    assert facebook["currency"] == "USD" and facebook["password"] == "${RS_FB_PASSWORD}"
+    logged = capfd.readouterr().err
+    assert "items.phrases[]" in logged and "settings.search.currency" in logged
+    assert "RS_FB_PASSWORD}" not in logged.split("left out:")[-1]
+
+
+def test_what_the_container_sets_wins_over_the_claims_env(fleet: FakeFleet) -> None:
+    answer = entry.claim(fleet.url, "lab", HOST_TOKEN, "lab-1", "0.14.0", 5903, sleep=lambda s: None)
+    answer["env"] = {"OPENROUTER_API_KEY": "from-the-claim", "TELEGRAM_CHAT_ID": "-100"}
+    menv = entry.monitor_env(
+        {"OPENROUTER_API_KEY": "from-the-container", "RS_FLEET_HOST_TOKEN": HOST_TOKEN},
+        answer, "lab", "lab-1",
+    )
+    assert menv["OPENROUTER_API_KEY"] == "from-the-container"
+    assert menv["TELEGRAM_CHAT_ID"] == "-100"
+    assert "RS_FLEET_HOST_TOKEN" not in menv
+
+
+def test_the_claims_env_may_set_only_what_the_template_reads() -> None:
+    allowed = entry.claim_env_allowed()
+    assert {"OPENROUTER_API_KEY", "TELEGRAM_TOKEN", "RS_ALERT_REPORT_URL", "RS_ALERTS",
+            "RS_CONTROL_PLANE_TOKENS"} <= allowed
+    assert not allowed & {"RS_CONTROL_PLANE_TOKEN", "RS_COORDINATOR_TOKEN", "RS_FB_PASSWORD",
+                          "RS_FB_TOTP", "LD_PRELOAD", "PATH"}
+
+
+def test_vnc_lets_in_loopback_and_the_bridge_gateway_only(tmp_path: Path) -> None:
+    route = tmp_path / "route"
+    route.write_text(
+        "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n"
+        "eth0\t00000000\t010011AC\t0003\t0\t0\t0\t00000000\t0\t0\t0\n"
+        "eth0\t000011AC\t00000000\t0001\t0\t0\t0\t0000FFFF\t0\t0\t0\n"
+    )
+    assert entry.default_gateway(str(route)) == "172.17.0.1"
+    assert entry.vnc_allow_args(str(route)) == ["-allow", "127.0.0.1,172.17.0.1"]
+    assert entry.vnc_allow_args(str(tmp_path / "missing")) == []
+
+
+def test_in_fleet_mode_the_web_ui_listens_on_loopback_only() -> None:
+    env = {"AIMM_WEBUI_HOST": "0.0.0.0", "AIMM_WEBUI_PORT": "8467"}
+    assert entry.monitor_command(env, fleet=True)[3] == "127.0.0.1"
+    assert entry.monitor_command(env)[3] == "0.0.0.0"  # the homelab compose files
