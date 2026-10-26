@@ -9,6 +9,7 @@ import type {
   WechatHistoryDay,
   WechatPrice,
   WechatPriceBucket,
+  WechatRerun,
   WechatRow,
   WechatRowKind,
   WechatSide,
@@ -30,7 +31,13 @@ export const wechatApi = {
     api.get<{ history: WechatHistoryDay[] }>(
       `/api/wechat-market/history?kind=${kind}&key=${q(key)}&until=${q(until)}&days=${days}`,
     ).then(r => r.history),
+  rerun: (date: string) =>
+    api.post<{ rerun: WechatRerun }>(`/api/wechat-market/days/${q(date)}/rerun`, {}).then(r => r.rerun),
+  rerunStatus: (date: string) =>
+    api.get<{ rerun: WechatRerun | null }>(`/api/wechat-market/days/${q(date)}/rerun`).then(r => r.rerun),
 };
+
+export const rerunOpen = (r: WechatRerun | null): boolean => r?.status === 'queued' || r?.status === 'running';
 
 // The board leads with the brands the team trades most; memtrade writes an
 // unbranded quote as 未注明, and those go last.

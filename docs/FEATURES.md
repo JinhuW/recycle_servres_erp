@@ -2940,6 +2940,17 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     memtrade's own warnings. **Groups read**, on the Groups tab since
     v1.316.0 and always open, lists each group's messages that day and
     marks the ones joined in it.
+  - **Re-run** (v1.363.0) beside the day picker, and *Re-run with Claude*
+    in the rules banner, asks memtrade to redo the day: after Claude was
+    out, say. The ERP can't reach the office Mac, so the request is queued.
+    memtrade polls every minute, claims it, reruns the day, pushes it as
+    usual and reports back. The page shows *Queued*, then *Re-running*, and
+    reloads the day when it's done. It says so when Claude was still out
+    and memtrade fell back to its rules again, and shows memtrade's error
+    when the run failed. A second click joins the open request. A claim
+    memtrade doesn't finish within 2 hours is marked failed, so the day
+    can be asked for again. memtrade claims and finishes with the same
+    `wechat:write` token (`/push/reruns/claim`, `/push/reruns/<id>/finish`).
   - The push (`/api/wechat-market/push/*`) takes a Bearer token with the
     `wechat:write` scope from a service client a manager creates under
     Settings → Connectors. The day comes first, then its posts in batches

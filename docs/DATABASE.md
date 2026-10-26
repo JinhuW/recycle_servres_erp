@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-26:** ERP migration `0207`, Reddit tracker migration `0006`,
+**As of 2026-10-26:** ERP migration `0212`, Reddit tracker migration `0006`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -1834,9 +1834,9 @@ Ledger of USD→CNY exchange rates. A refresh loop runs every 6 hours and writes
 
 ### Market values
 
-Reference prices per part, and the WeChat market report. ref_prices is the Market values list (one row per tracked part), ref_price_events the price readings behind its last_price, and price_sources a display list; the four wechat_market_* tables hold memtrade's daily report (a day row with its board lines, groups read and evidence points), which nothing here feeds into ref_prices or orders.
+Reference prices per part, and the WeChat market report. ref_prices is the Market values list (one row per tracked part), ref_price_events the price readings behind its last_price, and price_sources a display list; the four wechat_market_* tables hold memtrade's daily report (a day row with its board lines, groups read and evidence points), which nothing here feeds into ref_prices or orders. wechat_market_reruns queues a manager's request to have a day redone, for memtrade to claim.
 
-Tables: [`ref_prices`](#erp-ref-prices), [`ref_price_events`](#erp-ref-price-events), [`price_sources`](#erp-price-sources), [`wechat_market_days`](#erp-wechat-market-days), [`wechat_market_groups`](#erp-wechat-market-groups), [`wechat_market_rows`](#erp-wechat-market-rows), [`wechat_market_points`](#erp-wechat-market-points)
+Tables: [`ref_prices`](#erp-ref-prices), [`ref_price_events`](#erp-ref-price-events), [`price_sources`](#erp-price-sources), [`wechat_market_days`](#erp-wechat-market-days), [`wechat_market_groups`](#erp-wechat-market-groups), [`wechat_market_rows`](#erp-wechat-market-rows), [`wechat_market_points`](#erp-wechat-market-points), [`wechat_market_reruns`](#erp-wechat-market-reruns)
 
 ```mermaid
 erDiagram
@@ -2063,6 +2063,28 @@ The evidence: one row per quoted item per post on a report day, linked to the bo
 - **Checks:** `currency IN ('RMB', 'USD')`; `direction IN ('buy', 'sell')`; `form_factor IN ('server', 'pc')`; `source IN ('llm', 'rules')`
 
 Read within one day only, so the primary key's report_date prefix serves as the index; a line finds its posts through row_keys.
+
+<a id="erp-wechat-market-reruns"></a>
+
+#### `wechat_market_reruns`
+
+A manager's Re-run on Monitors ▸ WeChat (v1.363.0). The ERP can't reach memtrade on the office Mac, so the request waits here until memtrade's poller claims it (`POST /api/wechat-market/push/reruns/claim`), reruns the day, pushes it as usual and finishes it. The page shows each day's latest request.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
+| `report_date` | `date` | ✓ |  | The day to redo. No foreign key: the rerun's own push deletes and re-inserts the day. |
+| `status` | `text` | ✓ | `'queued'` | queued → running (claimed) → done or failed. A claim not finished within 2 hours is marked failed. |
+| `requested_by` | `uuid` |  |  | The manager who clicked Re-run. |
+| `requested_at` | `timestamptz` | ✓ | `now()` |  |
+| `claimed_at` | `timestamptz` |  |  | When memtrade took it. |
+| `finished_at` | `timestamptz` |  |  |  |
+| `degraded` | `boolean` | ✓ | `false` | Done, but Claude was still unavailable and memtrade fell back to its rules. |
+| `error` | `text` |  |  | Why it failed, as memtrade reported it (up to 2000 characters). |
+
+- **References:** `requested_by` → `users.id` (on delete set null)
+- **Checks:** `status IN ('queued', 'running', 'done', 'failed')`
+- **Indexes:** unique `(report_date) WHERE status IN ('queued', 'running')`, one open request per day, so a second click joins the first; `(report_date, requested_at DESC)`; `(requested_by)`
 
 ### Facebook account pool
 

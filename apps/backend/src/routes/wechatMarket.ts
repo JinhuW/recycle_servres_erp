@@ -1,5 +1,6 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import {
+  WECHAT_RERUN_STALE_MS,
   isWechatRowKind,
   type WechatDay,
   type WechatDayPush,
@@ -8,6 +9,7 @@ import {
   type WechatHistoryDay,
   type WechatPoint,
   type WechatPrice,
+  type WechatRerun,
   type WechatRow,
   type WechatRowKind,
 } from '@recycle-erp/shared';
@@ -15,7 +17,7 @@ import { authMiddleware } from '../auth';
 import { getDb } from '../db';
 import { log } from '../lib/log';
 import { requireManager } from '../lib/role';
-import { isReportDate, parseDayPush, parsePointsPush, PushError } from '../lib/wechatMarket';
+import { isReportDate, isUuid, parseDayPush, parsePointsPush, parseRerunFinish, PushError } from '../lib/wechatMarket';
 import { bearerGuard } from '../oauth/guard';
 import type { Env, OAuthCtx, User } from '../types';
 
@@ -192,6 +194,137 @@ wechat.post('/push/days/:date/points', async (c) => {
   return c.json({ date, stored });
 });
 
+// ── Re-run ────────────────────────────────────────────────────────────────────
+// The ERP can't reach the Mac, so a manager's Re-run waits in
+// wechat_market_reruns until memtrade's poller claims it. The day itself comes
+// back through the ordinary push above.
+
+const STALE_ERROR = 'memtrade did not report back within 2 hours';
+const staleCutoff = () => new Date(Date.now() - WECHAT_RERUN_STALE_MS);
+
+type RerunRow = {
+  id: string;
+  date: string;
+  status: WechatRerun['status'];
+  requested_by: string | null;
+  requested_at: Date;
+  claimed_at: Date | null;
+  finished_at: Date | null;
+  degraded: boolean;
+  error: string | null;
+};
+
+const RERUN_COLUMNS = (sql: ReturnType<typeof getDb>) => sql`
+  r.id, to_char(r.report_date, 'YYYY-MM-DD') AS date, r.status, u.name AS requested_by,
+  r.requested_at, r.claimed_at, r.finished_at, r.degraded, r.error
+`;
+
+const rerunOut = (r: RerunRow): WechatRerun => ({
+  id: r.id,
+  date: r.date,
+  status: r.status,
+  requestedBy: r.requested_by,
+  requestedAt: r.requested_at.toISOString(),
+  claimedAt: r.claimed_at?.toISOString() ?? null,
+  finishedAt: r.finished_at?.toISOString() ?? null,
+  degraded: r.degraded,
+  error: r.error,
+});
+
+// A claim memtrade never finished (the Mac slept, the process was killed)
+// would hold the day's one open slot for good; past the cutoff it has failed.
+async function expireStale(sql: ReturnType<typeof getDb>) {
+  await sql`
+    UPDATE wechat_market_reruns
+       SET status = 'failed', finished_at = NOW(), error = ${STALE_ERROR}
+     WHERE status = 'running' AND claimed_at < ${staleCutoff()}
+  `;
+}
+
+async function latestRerun(sql: ReturnType<typeof getDb>, date: string): Promise<WechatRerun | null> {
+  const [r] = await sql<RerunRow[]>`
+    SELECT ${RERUN_COLUMNS(sql)}
+      FROM wechat_market_reruns r LEFT JOIN users u ON u.id = r.requested_by
+     WHERE r.report_date = ${date}
+     ORDER BY r.requested_at DESC LIMIT 1
+  `;
+  if (!r) return null;
+  // Read-only here: the next request or claim writes the expiry down.
+  if (r.status === 'running' && r.claimed_at && r.claimed_at < staleCutoff()) {
+    return rerunOut({ ...r, status: 'failed', error: STALE_ERROR });
+  }
+  return rerunOut(r);
+}
+
+wechat.post('/push/reruns/claim', async (c) => {
+  const sql = getDb(c.env);
+  await expireStale(sql);
+  const [claimed] = await sql<{ id: string; date: string }[]>`
+    UPDATE wechat_market_reruns
+       SET status = 'running', claimed_at = NOW()
+     WHERE id = (
+       SELECT id FROM wechat_market_reruns WHERE status = 'queued'
+        ORDER BY requested_at LIMIT 1 FOR UPDATE SKIP LOCKED
+     )
+    RETURNING id, to_char(report_date, 'YYYY-MM-DD') AS date
+  `;
+  if (!claimed) return c.body(null, 204);
+  log.info('wechat market rerun claimed', { module: 'wechatMarket', ...claimed, clientId: c.var.oauthCtx.clientId });
+  return c.json(claimed);
+});
+
+wechat.post('/push/reruns/:id/finish', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'not_found' }, 404);
+  let result: ReturnType<typeof parseRerunFinish>;
+  try {
+    result = parseRerunFinish(await c.req.json().catch(() => null));
+  } catch (err) {
+    if (err instanceof PushError) return c.json({ error: 'invalid_request', detail: err.message }, 400);
+    throw err;
+  }
+  const sql = getDb(c.env);
+  // Only the running claim can finish: one expired as stale has already been
+  // told to the page as failed, and may have been asked for again since.
+  const [row] = await sql<{ id: string }[]>`
+    UPDATE wechat_market_reruns
+       SET status = ${result.ok ? 'done' : 'failed'}, finished_at = NOW(),
+           degraded = ${result.degraded}, error = ${result.error || null}
+     WHERE id = ${id} AND status = 'running'
+    RETURNING id
+  `;
+  if (!row) {
+    const [known] = await sql`SELECT 1 FROM wechat_market_reruns WHERE id = ${id}`;
+    return known ? c.json({ error: 'not_running' }, 409) : c.json({ error: 'not_found' }, 404);
+  }
+  log.info('wechat market rerun finished', { module: 'wechatMarket', id, ...result });
+  return c.json({ id, status: result.ok ? 'done' : 'failed' });
+});
+
+wechat.post('/days/:date/rerun', async (c) => {
+  const date = c.req.param('date');
+  const bad = badDate(date);
+  if (bad) return c.json(bad, 400);
+  const sql = getDb(c.env);
+  const [day] = await sql`SELECT 1 FROM wechat_market_days WHERE report_date = ${date}`;
+  if (!day) return c.json({ error: 'not_found' }, 404);
+  await expireStale(sql);
+  // A second click while one is open joins it.
+  await sql`
+    INSERT INTO wechat_market_reruns (report_date, requested_by)
+    VALUES (${date}, ${c.var.user.id})
+    ON CONFLICT (report_date) WHERE status IN ('queued', 'running') DO NOTHING
+  `;
+  return c.json({ rerun: await latestRerun(sql, date) });
+});
+
+wechat.get('/days/:date/rerun', async (c) => {
+  const date = c.req.param('date');
+  const bad = badDate(date);
+  if (bad) return c.json(bad, 400);
+  return c.json({ rerun: await latestRerun(getDb(c.env), date) });
+});
+
 // ── Read ──────────────────────────────────────────────────────────────────────
 
 type DayRow = {
@@ -281,7 +414,7 @@ wechat.get('/days/:date', async (c) => {
       FROM wechat_market_days d WHERE d.report_date = ${date}
   `;
   if (!day) return c.json({ error: 'not_found' }, 404);
-  const [groups, lines] = await Promise.all([
+  const [groups, lines, rerun] = await Promise.all([
     sql<{ id: string; name: string; messages: number; candidates: number; first_seen: Date | null }[]>`
       SELECT group_id AS id, name, messages, candidates, first_seen
         FROM wechat_market_groups WHERE report_date = ${date}
@@ -295,6 +428,7 @@ wechat.get('/days/:date', async (c) => {
        WHERE r.report_date = ${date} AND r.kind = ${kind}
        ORDER BY r.buy_senders + r.sell_senders DESC, r.row_key
     `,
+    latestRerun(sql, date),
   ]);
   const out: WechatDay = {
     ...daySummary(day),
@@ -306,6 +440,7 @@ wechat.get('/days/:date', async (c) => {
     })),
     prevDate: day.prev_date,
     nextDate: day.next_date,
+    rerun,
   };
   const rows: WechatRow[] = lines.map((r) => ({
     kind: r.kind,

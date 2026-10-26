@@ -151,7 +151,32 @@ export type WechatDay = WechatDaySummary & {
   // The report day before this one, which `prev` on each row compares with.
   prevDate: string | null;
   nextDate: string | null;
+  // The day's latest re-run request, if a manager ever asked for one.
+  rerun: WechatRerun | null;
 };
+
+// ── Re-run (the page asks, memtrade polls) ────────────────────────────────────
+
+export type WechatRerunStatus = 'queued' | 'running' | 'done' | 'failed';
+
+export type WechatRerun = {
+  id: string;
+  date: string;
+  status: WechatRerunStatus;
+  requestedBy: string | null;
+  requestedAt: string;
+  claimedAt: string | null;
+  finishedAt: string | null;
+  // Done, but Claude was still unavailable and memtrade fell back to its rules.
+  degraded: boolean;
+  error: string | null;
+};
+
+/** What memtrade reports once it has rerun a claimed day. */
+export type WechatRerunFinish = { ok: boolean; degraded?: boolean; error?: string };
+
+/** A claimed request nobody finished in this long is taken as dead. */
+export const WECHAT_RERUN_STALE_MS = 2 * 60 * 60 * 1000;
 
 export type WechatRow = WechatLine & {
   // The line's headline prices on prevDate; null when it had no row that day.

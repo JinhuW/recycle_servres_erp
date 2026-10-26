@@ -74,7 +74,9 @@ contract, and both sides change together.
 One contract runs the other way. **memtrade** (on the office Mac, outside
 this repo, at `~/Projects/wehat_ai/memtrade`) pushes its daily WeChat market
 report to `/api/wechat-market/push/*` (`routes/wechatMarket.ts`) with a
-`wechat:write` service-client token. The payload is
+`wechat:write` service-client token, and with the same token polls
+`/push/reruns/claim` every minute for a day a manager asked to have redone,
+then reports through `/push/reruns/<id>/finish`. The payload is
 `packages/shared/src/wechatMarket.ts` on this side and memtrade's `src/erp.ts`
 on that one; test `apps/backend/tests/wechat-market.test.ts`. The ERP side has
 to keep accepting what the deployed memtrade sends.

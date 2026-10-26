@@ -15,6 +15,26 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.363.0] - 2026-10-26
+
+### Added
+
+- **Re-run a WeChat market day from the page** (RS-414). Monitors ▸ WeChat
+  has a **Re-run** button beside the day picker, and *Re-run with Claude* in
+  the banner of a day memtrade had to read with its rules. Oct 25 was one:
+  Claude had hit its weekly limit. Before this, redoing a day meant a shell
+  on the office Mac or waiting for the 08:00 run's repair pass.
+- How it works: the ERP can't reach the Mac, so the click queues a request
+  (`wechat_market_reruns`, one open per day). memtrade polls
+  `/api/wechat-market/push/reruns/claim` every minute with its
+  `wechat:write` token, reruns the day, pushes it as usual and reports
+  through `/push/reruns/<id>/finish`.
+- The page follows the request through *Queued* and *Re-running* and
+  reloads the day when it's done. It says when Claude was still out and
+  memtrade fell back again, and shows memtrade's error when the run failed.
+  A claim not finished within 2 hours counts as failed, so the day can be
+  asked for again.
+
 ## [1.362.0] - 2026-10-26
 
 ### Added
