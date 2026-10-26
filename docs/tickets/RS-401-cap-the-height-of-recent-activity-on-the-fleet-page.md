@@ -8,7 +8,7 @@ created: 2026-10-25
 reporter: jinhu
 branch: JinhuW/clownfish
 pr: 905
-version: 1.349.1
+version: 1.350.1
 related: []
 ---
 
@@ -48,3 +48,13 @@ Limiting how many events the feed holds, and changing the stacked layout's
 
 560px is the cap the worker page's History card (`.ff-worker-layout >
 .ff-history`) already uses.
+
+After v1.349.1 shipped the requester reported:
+
+> i can see the issue is still there
+
+The screenshot was the Fleet tab (`fleet/FleetAccountsTab.tsx`, v1.344.0),
+which renders the same `ActivityAside` under the accounts table with no
+`.ff-split` around it, so the 560px cap never applied. v1.350.1 caps the list
+itself at 480px wherever the aside appears, and keeps the Fleet tab's copy out
+of the pool aside's two-column layout below 1190px.
