@@ -1982,6 +1982,21 @@ class Database:
             )
             return [dict(row) for row in cur.fetchall()]
 
+    def list_account_rows_sealed(self: "Database") -> List[Dict[str, Any]]:
+        """`list_accounts` plus each sealed `secret_blob`, in one query.
+
+        For the vault's own presence flags only; the blob never leaves the
+        AccountStore.
+        """
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT account_id, worker_id, fb_username, fb_uid, region, proxy, vnc_url, "
+                "allow_password_login, fleet_enabled, pin_host, locked_at, locked_reason, "
+                "created_at, updated_at, secret_blob "
+                "FROM accounts ORDER BY account_id"
+            )
+            return [dict(row) for row in cur.fetchall()]
+
     def delete_account(self: "Database", account_id: str) -> bool:
         with self.cursor() as cur:
             cur.execute("DELETE FROM accounts WHERE account_id = ?", (account_id,))

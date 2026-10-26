@@ -7,6 +7,8 @@ and the dashboard shell itself is public while every data route stays
 token-guarded.
 """
 
+import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -150,11 +152,31 @@ def client(monkeypatch, tmp_path):
         "changes": httpx.Response(200, json={"rows": []}),
         "rank": httpx.Response(404, json={"detail": "Not Found"}),
         "queue": httpx.Response(404, json={"detail": "Not Found"}),
+        # The coordinator's fleet configs, by worker id; None answers like a
+        # coordinator from before the fleet.
+        "configs": None,
+        "delay_s": 0.0,
     }
+    flight = {"now": 0, "max": 0}
 
     async def fake_transport(request):
         calls.append(request)
+        flight["now"] += 1
+        flight["max"] = max(flight["max"], flight["now"])
+        try:
+            if upstream["delay_s"]:
+                await asyncio.sleep(upstream["delay_s"])
+            return route(request)
+        finally:
+            flight["now"] -= 1
+
+    def route(request):
         path = request.url.path
+        if upstream["configs"] is not None and path.startswith("/v1/fleet/configs"):
+            if path == "/v1/fleet/configs":
+                return httpx.Response(200, json={"configs": [{"worker_id": w} for w in upstream["configs"]]})
+            wid = path.rsplit("/", 1)[-1]
+            return httpx.Response(200, json={"worker_id": wid, "toml": upstream["configs"][wid]})
         if path == "/healthz":
             return httpx.Response(200, json={"status": "ok", "version": "0.5.6"})
         if path == "/v1/city-tiers/rank":
@@ -188,6 +210,7 @@ def client(monkeypatch, tmp_path):
     test_client = TestClient(console.app)
     test_client.calls = calls
     test_client.upstream = upstream
+    test_client.flight = flight
     yield test_client
 
 
@@ -270,6 +293,42 @@ def test_fleet_survives_coordinator_outage(client):
     assert len(doc["workers"]) == 3
     # No point asking for accounts or sessions when the workers call failed.
     assert [r.url.path for r in client.calls] == ["/healthz", "/v1/workers"]
+
+
+def test_fleet_asks_the_coordinator_concurrently_within_a_bound(client):
+    client.upstream["delay_s"] = 0.02
+    client.upstream["configs"] = {f"fl-{n}": "# published\n" + MASTER for n in range(24)}
+    started = time.monotonic()
+    doc = client.get("/v1/fleet", headers=AUTH).json()
+    elapsed = time.monotonic() - started
+
+    assert doc["health"] == {"ok": True, "error": None}
+    assert len(doc["workers"]) == 27
+    metas = [r for r in client.calls if r.url.path.startswith("/v1/session/")]
+    assert len(metas) == 27
+    # Concurrent, never past the bound, and far from one call after another.
+    assert 1 < client.flight["max"] <= console.FLEET_CONCURRENCY
+    assert elapsed < len(client.calls) * 0.02 / 2
+
+
+def test_fleet_is_partial_the_same_way_when_accounts_fail(client, monkeypatch):
+    # The accounts call failing stops the document where it always stopped:
+    # health rows in, no account, no session, no today.
+    real = console.httpx.AsyncClient
+
+    class FailingAccounts(real):
+        async def get(self, url, *args, **kwargs):
+            if url == "/v1/accounts":
+                raise httpx.ConnectError("down")
+            return await super().get(url, *args, **kwargs)
+
+    monkeypatch.setattr(console.httpx, "AsyncClient", FailingAccounts)
+    doc = client.get("/v1/fleet", headers=AUTH).json()
+    assert doc["health"] == {"ok": False, "error": "Coordinator is unreachable"}
+    monitor = next(w for w in doc["workers"] if w["worker_id"] == "homelab-1")
+    assert monitor["health"]["liveness"] == "live"
+    assert all(w["account"] is None and w["session"] is None for w in doc["workers"])
+    assert all(w["today"] is None for w in doc["workers"])
 
 
 def test_fleet_tolerates_an_older_coordinator_without_accounts(client):

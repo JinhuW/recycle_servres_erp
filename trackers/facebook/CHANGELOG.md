@@ -18,6 +18,28 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Changed
+
+- **The ERP's Fleet page gets its document faster from the console.** The
+  console's `/v1/fleet` waited 5–6 s, one coordinator call after another. Its
+  independent calls (accounts, the four stats, the queue, the fleet configs
+  and then each worker's session) now go out together, at most 8 in flight
+  so one page load cannot take the coordinator's 4-connection pool from the
+  workers; the city-tier rank runs beside the proxy-exit lookup. A proxy exit
+  not yet cached now holds the page 0.5 s instead of 3 s and reads `pending`
+  until the next refresh. The document is unchanged, and a failing call
+  leaves it as partial as before. Against a simulated coordinator with the
+  measured latencies, a cold build fell from 4.7 s to 1.9 s.
+- **The coordinator's `/v1/accounts` is one query.** It listed the accounts,
+  then read each one again to open its secrets for the presence flags: 42
+  round trips to Railway Postgres for 41 accounts, 2.1 s. It now reads the
+  sealed blobs in the list query. The answer is the same, a blob the key
+  cannot open still reads as no secrets, and the blob still never leaves the
+  vault.
+
+Shipping it recreates `rs-coordinator` and `rs-console` on the homelab VM
+(owner's call); the workers are not touched.
+
 ## [0.14.3] - 2026-10-26
 
 ### Fixed

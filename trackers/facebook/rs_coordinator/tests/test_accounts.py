@@ -77,6 +77,49 @@ def test_accounts_list_identity_and_presence_only(env):
         assert secret not in raw
 
 
+def test_accounts_list_answers_as_one_lookup_per_account_did(env, monkeypatch):
+    import rs_coordinator.deps as deps_module
+    from rs_coordinator.routers import accounts as accounts_router
+    from rs_coordinator.vault import Vault
+
+    store = deps_module.get_account_store()
+    store.put_account(
+        "va-1",
+        {"email": "va@example.com", "fb_token": "EAA-token"},
+        worker_id="va-1",
+        fb_username="va@example.com",
+        fb_uid="1000",
+        region="rs_southeast",
+        allow_password_login=True,
+    )
+    # Sealed under a key since rotated away: identity shown, no presence flags.
+    store.put_account("rotated", {"password": "old"}, worker_id="ne-1")
+    store.db.put_account("rotated", {"secret_blob": Vault(generate_key()).encrypt({"password": "x"})})
+
+    # The answer as it was built before: the list, then each account's secrets
+    # looked up on its own.
+    before = [
+        accounts_router._account_out(row, accounts_router._stored_secrets(store, row["account_id"]))
+        .model_dump(mode="json")
+        for row in store.list_accounts()
+    ]
+
+    lookups = []
+    real = type(store.db).get_account_row
+    monkeypatch.setattr(
+        type(store.db), "get_account_row", lambda self, aid: lookups.append(aid) or real(self, aid)
+    )
+    response = env.get("/v1/accounts", headers=ADMIN_AUTH)
+    assert response.status_code == 200
+    assert response.json()["accounts"] == before
+    assert lookups == []
+
+    rotated = next(a for a in before if a["account_id"] == "rotated")
+    assert rotated["worker_id"] == "ne-1" and not any(rotated["secrets"].values())
+    va = next(a for a in before if a["account_id"] == "va-1")
+    assert va["secrets"]["fb_token"] is True and va["allow_password_login"] is True
+
+
 # -- writes from the console ---------------------------------------------------
 #
 # The ERP's "Edit credentials" form lands here. What must stay true: the admin
