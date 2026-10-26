@@ -51,17 +51,17 @@ Owner decisions, made in planning:
 
 ## Acceptance criteria
 
-- [ ] A cross-posted listing sends one buyer alert. The second copy gets
+- [x] A cross-posted listing sends one buyer alert. The second copy gets
       status `duplicate` with `duplicate_of` set.
-- [ ] The alert footer asks for any emoji as a good catch and 👎 as not
+- [x] The alert footer asks for any emoji as a good catch and 👎 as not
       useful. Labels still count every non-👎 reaction as good.
-- [ ] Exactly one worker runs the PM tracer (`COMMENT_TRACER=on` plus a DB
+- [x] Exactly one worker runs the PM tracer (`COMMENT_TRACER=on` plus a DB
       lease). Each post is traced once it is 24 h old, up to 8 days back, and
       gets `comment_count` and `pm_count`.
-- [ ] `GET /api/analytics?window=24h|7d|30d` returns volume, feedback, speed,
+- [x] `GET /api/analytics?window=24h|7d|30d` returns volume, feedback, speed,
       PM demand, per-subreddit and per-prompt-version metrics. The ERP proxies
       it and shows it on `/tracker/analytics`.
-- [ ] Missing means a memory post with `pm_count ≥ 5` and no non-👎 reaction
+- [x] Missing means a memory post with `pm_count ≥ 5` and no non-👎 reaction
       on a buyer alert. It is shown per prompt version (PM recall) and per
       subreddit.
 
@@ -75,3 +75,44 @@ Owner decisions, made in planning:
 
 Plan: one PR covering the tracker, the ERP proxy route and the frontend tab.
 The tracker ships first and stays backward-compatible.
+
+- **Duplicate rule, calibrated on prod.** The calibration set was 380
+  same-author post pairs within 72 h over 30 days where at least one was a
+  target.
+  - Body similarity alone paired one EU seller's separate RAM lots, which
+    share a template body, so a body match counts only across subreddits.
+  - A title match must also agree on model numbers, so OptiPlex 7070 vs
+    5000 stays two listings.
+  - Different module counts or makers always mean two listings.
+  - Replaying the last 30 days of alerts, 71 of 480 would have been held
+    back as repeats.
+- **The tracer reads the comment Atom feed** (),
+  anonymous like the post feed. The PM count matched a hand count on four
+  real threads (4, 10, 11 and 20 buyers). It skips , AutoModerator
+  and the seller's "Replied" comments.
+- **The 24 h window has no traced posts**, since tracing waits a day. So
+  demand figures cover the same span shifted back a day ().
+- **No ERP  change.** The ERP's  is the funnel's three
+  stages, so trace <subcommand> [options] - record system behavior
+
+trace record: record a trace file
+    $ trace record myworkload
+        [... Ctrl-C to stop ...]
+    $ trace record myworkload --Logging:enable-logs --end-after-duration 5s
+    $ trace record myworkload --plan profile --omit Symbolication
+    $ trace record myworkload --end-on-notification stop-myworkload-trace
+        [... elsewhere `notifyutil -p stop-myworkload-trace` ...]
+    $ trace record /tmp/trace-path.atrc --compress
+
+trace amend: add data to a file
+    $ trace amend myworkload-003.atrc --add Symbolication
+
+trace trim: trim a file based on kdebug event times
+    $ trace trim myworkload-002.atrc --from +1s --to +2s
+
+trace providers: print information about Logging, Symbolication, etc.
+
+trace plans: print detailed information about tracing approaches
+
+See `man trace` for more information. was added only on the tracker side (heartbeat loops).
+  The ERP type reads  as a partial record.

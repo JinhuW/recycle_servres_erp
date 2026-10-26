@@ -2329,8 +2329,20 @@ td.rt-an-bad {
 .rt-an-table th.num {
   text-align: right;
 }
+.rt-an-table td.rt-an-post,
+.rt-an-table td.rt-an-why {
+  white-space: normal;
+}
 .rt-an-post {
+  min-width: 220px;
   max-width: 420px;
+}
+.rt-an-post a {
+  color: var(--fg);
+  text-decoration: none;
+}
+.rt-an-post a:hover {
+  text-decoration: underline;
 }
 .rt-an-why {
   max-width: 360px;
