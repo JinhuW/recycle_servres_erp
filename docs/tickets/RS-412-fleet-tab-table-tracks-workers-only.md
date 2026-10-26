@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-26
 reporter: jinhu
 branch: fleet-workers-only
-pr:
+pr: "#926"
 version: 1.361.0
 related: []
 ---
