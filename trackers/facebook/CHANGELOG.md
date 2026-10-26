@@ -18,6 +18,28 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **`scripts/export-device-profile.py` prints the device a homelab worker's
+  browser presents, as an ERP fleet slot's `device` (RS-394).** It runs on the
+  VM, read-only: it reads the worker's bind-mounted `identity.json` and
+  session sidecar, `docker inspect`, and the Playwright build inside the image,
+  and replays the monitor's own choice of user agent, viewport, screen, scale,
+  locale and timezone. Run it before moving an account to the ERP fleet, so the
+  fleet browser presents the same fingerprint (`--all --table` for the fleet).
+
+### Fixed
+
+- **A fleet worker presents a moved device's screen and scale, and leaves the
+  browser's own user agent, locale and timezone alone when the slot says so.**
+  The entrypoint used to set the screen to the viewport and drop
+  `device_scale_factor`, so a homelab browser at 1536x731 in a 1536x864 screen
+  at 1.25 would have reached the fleet as a 1536x731 screen at 1.0. A slot's
+  `device` may now carry `screen` and `device_scale_factor`, and a `native`
+  list (`user_agent`, `locale`, `timezone`) of fields to leave unset: the
+  backend fills a default user agent into every claim, and pinning even the
+  identical string changes the client hints Chromium sends beside it.
+
 ## [0.14.5] - 2026-10-26
 
 ### Security

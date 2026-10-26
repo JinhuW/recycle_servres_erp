@@ -927,3 +927,47 @@ def test_in_fleet_mode_the_web_ui_listens_on_loopback_only() -> None:
     env = {"AIMM_WEBUI_HOST": "0.0.0.0", "AIMM_WEBUI_PORT": "8467"}
     assert entry.monitor_command(env, fleet=True)[3] == "127.0.0.1"
     assert entry.monitor_command(env)[3] == "0.0.0.0"  # the homelab compose files
+
+
+def claim_with(device: Dict[str, Any]) -> Dict[str, Any]:
+    return {"account": ACCOUNT, "device": device, "worker_token": "t"}
+
+
+def test_a_moved_homelab_device_keeps_its_screen_and_scale() -> None:
+    """A homelab browser reports a screen taller than its viewport, at its own scale."""
+    device = {**fleet_device(), "viewport": [1536, 731], "screen": [1536, 864],
+              "device_scale_factor": 1.25, "timezone": "America/Los_Angeles"}
+    profile = entry.identity_for(claim_with(device))["device"]
+    assert profile["viewport"] == {"width": 1536, "height": 731}
+    assert profile["screen"] == {"width": 1536, "height": 864}
+    assert profile["device_scale_factor"] == 1.25
+    assert profile["timezone_id"] == "America/Los_Angeles"
+
+
+def test_native_fields_are_left_to_the_browser(tmp_path: Path) -> None:
+    """The backend fills a default user agent in; `native` says the browser had its own."""
+    device = {**fleet_device(), "viewport": [1280, 720], "native": ["user_agent", "locale", "timezone"]}
+    entry.write_files(tmp_path, claim_with(device), {"monitor": {}})
+    profile = json.loads((tmp_path / "identity.json").read_text())["device"]
+    assert not {"user_agent", "locale", "timezone_id"} & set(profile)
+    assert profile["screen"] == {"width": 1280, "height": 720}
+    # The monitor falls back to the sidecar's user agent; that must be empty too.
+    assert json.loads((tmp_path / "session.json.meta.json").read_text())["user_agent"] is None
+
+
+def test_the_monitor_presents_every_exported_field(tmp_path: Path) -> None:
+    """Through the monitor's own `context_options`: what reaches Playwright's new_context."""
+    from ai_marketplace_monitor.identity import context_options
+
+    device = {"user_agent": "UA", "viewport": [1600, 789], "screen": [1600, 900],
+              "device_scale_factor": 1.25, "timezone": "America/New_York", "locale": "en-US",
+              "native": ["user_agent"]}
+    entry.write_files(tmp_path, claim_with(device), {"monitor": {}})
+    options = context_options(json.loads((tmp_path / "identity.json").read_text()))
+    assert options == {
+        "viewport": {"width": 1600, "height": 789},
+        "screen": {"width": 1600, "height": 900},
+        "device_scale_factor": 1.25,
+        "locale": "en-US",
+        "timezone_id": "America/New_York",
+    }

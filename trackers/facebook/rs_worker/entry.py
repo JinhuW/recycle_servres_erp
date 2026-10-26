@@ -485,6 +485,28 @@ def required_env(template: Dict[str, Any]) -> List[str]:
     return sorted(names)
 
 
+def _pair(value: Any) -> Dict[str, int] | None:
+    if isinstance(value, (list, tuple)) and len(value) == 2:
+        return {"width": int(value[0]), "height": int(value[1])}
+    return None
+
+
+def presented_user_agent(device: Dict[str, Any]) -> str | None:
+    """The user agent to pin, or None to let the browser present its own.
+
+    A device moved from a homelab worker whose browser never had one pinned
+    lists it in `native`: the backend still fills a default in, and pinning
+    even the identical string would change the client hints the browser
+    sends beside it.
+    """
+    return None if _native(device, "user_agent") else device.get("user_agent")
+
+
+def _native(device: Dict[str, Any], field: str) -> bool:
+    native = device.get("native")
+    return isinstance(native, list) and field in native
+
+
 def identity_for(answer: Dict[str, Any]) -> Dict[str, Any]:
     """The device the claim names, in the shape the monitor caches in identity.json."""
     account = answer["account"]
@@ -493,15 +515,16 @@ def identity_for(answer: Dict[str, Any]) -> Dict[str, Any]:
     profile: Dict[str, Any] = {
         "device_id": key,
         "fb_uid": str(account["uid"]) if account.get("uid") else None,
-        "user_agent": device.get("user_agent"),
-        "locale": device.get("locale"),
-        "timezone_id": device.get("timezone"),
+        "user_agent": presented_user_agent(device),
+        "locale": None if _native(device, "locale") else device.get("locale"),
+        "timezone_id": None if _native(device, "timezone") else device.get("timezone"),
     }
-    viewport = device.get("viewport")
-    if isinstance(viewport, (list, tuple)) and len(viewport) == 2:
-        size = {"width": int(viewport[0]), "height": int(viewport[1])}
-        profile["viewport"] = size
-        profile["screen"] = size
+    viewport = _pair(device.get("viewport"))
+    if viewport:
+        profile["viewport"] = viewport
+        profile["screen"] = _pair(device.get("screen")) or viewport
+    if isinstance(device.get("device_scale_factor"), (int, float)) and device["device_scale_factor"] > 0:
+        profile["device_scale_factor"] = float(device["device_scale_factor"])
     cookies = [
         cookie
         for cookie in account.get("cookies") or []
@@ -529,7 +552,7 @@ def write_files(home: Path, answer: Dict[str, Any], config: Dict[str, Any]) -> N
         home / "session.json.meta.json",
         json.dumps(
             {
-                "user_agent": device.get("user_agent"),
+                "user_agent": presented_user_agent(device),
                 "proxy": config.get("monitor", {}).get("proxy_server"),
                 "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
                 "identity_key": f"pool-{account['no']}",
