@@ -322,6 +322,46 @@ The vendored monitor's `recycle-patches` was pushed to the private mirror
 `JinhuW/aimm-recycle-patches` the same day, fast-forward `8d9dde5` →
 `1efd1a4` (the `VENDOR.md` pin).
 
+#### Pilot on dev: four live accounts (2026-10-26 UTC, `worker-60-14`)
+
+The owner approved the pilot with four parked live accounts on the dev ERP:
+nj-1 (pool #24, Decodo `:10018`), bos-1 (#27, `:10011`), ca-3 (#22,
+`:10016`) and nyc-3b (#34, `:10013`). Alerts stayed off (no `RS_ALERTS`, no
+Telegram).
+
+| Step | When (UTC) | Outcome |
+| --- | --- | --- |
+| Nightly db-sync keeps the dev fleet (#923, v1.359.0) | 10:21 merged, 10:23 db-sync deployed | the 04:03 copy had emptied every `fleet_*` table and pool `*_enc`; from the 2026-10-27 04:00 run the fleet tables and the slotted accounts' sealed columns survive the copy (`deploy/railway-sync/keep-fleet.sql`, `restore-fleet.sql`) |
+| Host re-registered (token hash computed on the host), `fleet-import.mjs` on dev, only `nyc`, `philly`, `boston`, `reno`, `108398645850982` enabled | 10:22–10:24 | 10 ready tasks |
+| Agent replaced by 1.352.0 (`--stop-timeout 120`, log rotation) | 10:24 | ticks, `last_seen_at` moving. The owner tried the Hosts tab's capacity stepper meanwhile (capacity 5): one worker started at 10:25, claim 409 (no slot existed), removed at capacity 0; no login |
+| Re-check on the VM | 10:29 | all four parked (nj-1, bos-1, ca-3 `SESSION_EXPIRED`, nyc-3b `CHECKPOINT`), none `LOCKED` in the vault; their proxy partners nj-1b, bos-1b, ca-3b, nyc-3 all parked; no other proxy shares the four ports or IPs |
+| `rsc queue` | 10:31:20 | the queue enrolled `*`, and `unenroll` of single workers is refused then; ran `unenroll --all` and `enroll` of the 38 others in one command. The queue is now an explicit list: a new worker is not enrolled by itself |
+| `docker stop -t 30` (state and `RS_WORKER_ID` re-checked right before each) | 10:31:32 `rs-monitor-nj1`, :34 `rs-monitor-bos`, :35 `rs-monitor-ca3`, :36 `rs-monitor-nyc3b` | each exit 0; nothing else on the VM touched |
+| Pool rows copied from prod (uid checked), resealed under dev's key, `fleet`/`fleet pilot`; 4 slots with their own sealed Decodo endpoint (the VM's one shared login, piped), device from the coordinator's profiles, home cities from `/v1/fleet` (nj-1, nyc-3b Newark; bos-1 boston; ca-3 reno) | 10:32 | verified: every sealed value opens, `fleet` held through the alive check |
+| `authoritative=true`, capacity 4, one update | 10:34:00 | |
+| `worker-60-14-1` started, claimed **#22 (ca-3)** | 10:34:06 | ledger: one `boot` (`device pool-22`, session opened) at 10:34:14 |
+| Lock page | 10:34:49 heartbeat | `CHECKPOINT`, `wall: locked` (Facebook's lock page, `/checkpoint/828281030927956/`), `browser_ok` |
+| Guard: slot #22 parked, capacity 0 | 10:34:51 | no further start; the agent removed the worker at 10:35:07 (`beyond count 0`) |
+
+**Logins used: 1** (ca-3). No task was leased; no search ran. nj-1, bos-1
+and nyc-3b were never started: their slots wait unclaimed, and their homelab
+containers stay stopped. Final state: `worker-60-14` `authoritative=false`,
+capacity 0; slot #22 parked (epoch 2); no fleet worker running.
+
+What it tells us:
+- ca-3's prod cookie opened a session and went straight to the lock page.
+  ca-3 was `SESSION_EXPIRED` on the homelab; whatever parked it was not
+  cleared by the fleet's claim (same proxy exit, the pool's cookie, the
+  ledger's `device pool-22`). The lock is
+  recorded in the ERP only (the coordinator marks `LOCKED` only for worker ids
+  its vault maps, and `worker-60-14-1` is not one).
+- The next attempt needs accounts that are healthy, or freshly re-logged by a
+  person, not parked ones; and an owner's decision on whether to try the three
+  untried slots at all.
+- The guard (log every 30 s; park on `CHECKPOINT`/`CHALLENGE`/`DEAD`; lower
+  capacity on an exit) reacted within one tick of the heartbeat, before the
+  agent's 180 s stagger would have started the second account.
+
 #### Integration run, login-free part (2026-10-24, on the Mac)
 
 No worker image ran, no Facebook login happened, no pool account was used.
