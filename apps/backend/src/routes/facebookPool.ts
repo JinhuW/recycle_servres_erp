@@ -94,7 +94,7 @@ const pool = new Hono<{ Bindings: Env; Variables: Vars }>()
     return next();
   });
 
-async function writeEvent(
+export async function writeEvent(
   tx: Tx,
   user: User,
   kind: FbPoolEventKind,

@@ -212,12 +212,35 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
   return replace;
 }
 
+/**
+ * How many workers the host should run: its capacity, but no more than it has
+ * accounts for. Every worker start is a Facebook login, and a worker with no
+ * slot to claim only exits and is restarted, so the count follows the slots:
+ * the ones this host's workers hold (a lease or a handoff reservation of this
+ * host's), plus the ones any worker could claim now (a fleet account, not
+ * parked, lease free). Never below the highest-numbered worker holding a slot:
+ * the agent removes workers above `count`, and stopping one that holds an
+ * account only frees it for a fresh login elsewhere.
+ */
+async function workerCount(tx: SqlLike, host: FleetHostRow): Promise<number> {
+  if (!host.authoritative || host.capacity <= 0) return 0;
+  const rows = await tx<{ held: string | null; free: boolean }[]>`
+    SELECT CASE WHEN s.host_id = ${host.host_id} AND s.lease_expires_at > NOW() THEN COALESCE(s.worker_id, '') END AS held,
+           (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AS free
+    FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no
+    WHERE a.status = 'fleet' AND s.lease_expires_at IS DISTINCT FROM 'infinity'::timestamptz`;
+  const held = rows.filter((r) => r.held !== null);
+  const usable = held.length + rows.filter((r) => r.free).length;
+  const highest = Math.max(0, ...held.map((r) => (r.held && ownWorkerId(host.host_id, r.held) ? Number(r.held.slice(host.host_id.length + 1)) : 0)));
+  return Math.min(host.capacity, Math.max(usable, highest));
+}
+
 /** What the host's agent should run; `roll` only when `advance` is set (the agent asking), never for a manager's read. */
 async function desired(tx: SqlLike, env: Env, host: FleetHostRow, advance: boolean): Promise<DesiredAnswer> {
   const replace = advance ? await advanceRoll(tx, host) : (await loadRelease(tx))?.current;
   const release = await loadRelease(tx);
   const { image, version } = fleetImage(env, release);
-  const count = host.authoritative ? host.capacity : 0;
+  const count = await workerCount(tx, host);
   const vnc_ports: Record<string, number> = {};
   for (let n = 1; n <= count; n++) vnc_ports[`${host.host_id}-${n}`] = FIRST_VNC_PORT + n - 1;
   const roll = typeof replace === 'string'

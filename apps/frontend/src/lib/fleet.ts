@@ -8,7 +8,8 @@
 // state), the page-side type extends the shared one here.
 
 import type {
-  FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetRelease, FleetSettings, FleetSlot as FleetSlotRow,
+  FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetProxy, FleetProxyPatch, FleetProxyWrite, FleetRelease,
+  FleetSettings, FleetSlot as FleetSlotRow, FleetSlotWrite,
   FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, RoundStartAnswer,
 } from '@recycle-erp/shared';
 import { ApiError } from './api';
@@ -17,8 +18,11 @@ import { sharedApi as api } from './sharedGet';
 export type {
   FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,
   FleetTaskResult, FleetTaskState, FleetHostContainer, FleetHostReport, DesiredAnswer, RoundStartAnswer,
+  FleetProxy, FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
 } from '@recycle-erp/shared';
-export { FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked } from '@recycle-erp/shared';
+export {
+  FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
+} from '@recycle-erp/shared';
 
 // snake_case on purpose: rows come straight from the backend's SQL.
 
@@ -147,6 +151,18 @@ export const fleetApi = {
   // Lets a parked account be claimed again.
   unparkSlot: (no: number) => api.post<{ slot: FleetSlot }>(`${BASE}/slots/${no}/unpark`, {}).then(r => r.slot),
   workers: () => api.get<{ workers: FleetWorker[] }>(`${BASE}/workers`).then(r => r.workers),
+  // Puts a pool account into the fleet on a listed proxy. 409 account_busy,
+  // no_login, proxy_full or exists; the body's `detail` says which account.
+  addSlot: (body: FleetSlotWrite) => api.post<{ slot: FleetSlot }>(`${BASE}/slots`, body).then(r => r.slot),
+  // Only a slot no worker holds (409 leased otherwise); the account goes back to Available.
+  removeSlot: (no: number) => api.post<{ ok: true; pool_status: string }>(`${BASE}/slots/${no}/remove`, {}),
+
+  // ── Proxies ── never the URL back, only host:port.
+  proxies: () => api.get<FleetProxy[]>(`${BASE}/proxies`),
+  addProxy: (body: FleetProxyWrite) => api.post<FleetProxy>(`${BASE}/proxies`, body),
+  updateProxy: (id: number, patch: FleetProxyPatch) => api.put<FleetProxy>(`${BASE}/proxies/${id}`, patch),
+  // 409 in_use while an account that is not parked uses it.
+  removeProxy: (id: number) => api.delete<{ ok: true }>(`${BASE}/proxies/${id}`),
 };
 
 /**

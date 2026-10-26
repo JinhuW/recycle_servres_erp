@@ -13,6 +13,7 @@ export type Refusal = { status: 404 | 409 | 422; body: FleetError };
 export const bad = (detail: string): Refusal => ({ status: 422, body: { error: 'bad_request', detail } });
 export const notFound = (detail: string): Refusal => ({ status: 404, body: { error: 'not_found', detail } });
 export const exists = (detail: string): Refusal => ({ status: 409, body: { error: 'exists', detail } });
+export const conflict = (error: FleetError['error'], detail: string): Refusal => ({ status: 409, body: { error, detail } });
 
 export const isRefusal = (v: unknown): v is Refusal =>
   typeof v === 'object' && v !== null && 'status' in v && 'body' in v
@@ -84,6 +85,7 @@ export const FLEET_TABLES = [
   'fleet_hosts',
   'fleet_items',
   'fleet_minutes',
+  'fleet_proxies',
   'fleet_settings',
   'fleet_slots',
   'fleet_task_attempts',
@@ -119,6 +121,7 @@ export type FleetSlotRow = {
   claim_id: string | null;
   /** A handoff reservation's deadline; the lease ends with it. */
   reserved_until: Date | null;
+  proxy_id: number | null;
   note: string;
 };
 

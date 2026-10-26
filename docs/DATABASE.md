@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-26:** ERP migration `0212`, Reddit tracker migration `0006`,
+**As of 2026-10-26:** ERP migration `0213`, Reddit tracker migration `0006`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2203,7 +2203,7 @@ Only the latest revive is kept; the backend logs each one.
 
 The ERP fleet: the city task queue the Facebook Marketplace workers pull from, and the slots they run pool accounts in. fleet_cities and fleet_items are the catalog managers edit; fleet_settings holds the queue's knobs; fleet_tasks is one open task per enabled city and item, with fleet_task_events as its log; fleet_hosts are the machines that run worker containers; fleet_slots is the fleet's view of each pool account (who runs it, where, under which lease epoch) and fleet_workers the containers that heartbeat. fleet_minutes is a view that sums each account's leased minutes per UTC day for the daily budget. The accounts themselves and their secrets stay in fb_pool_accounts. Migration 0206 creates all of it; the routes under /api/fleet fill it in later releases.
 
-Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_slots`](#erp-fleet-slots), [`fleet_workers`](#erp-fleet-workers), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
+Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_proxies`](#erp-fleet-proxies), [`fleet_slots`](#erp-fleet-slots), [`fleet_workers`](#erp-fleet-workers), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
 
 <a id="erp-fleet-cities"></a>
 
@@ -2249,7 +2249,7 @@ What the fleet searches for in every city: the search phrases and filters of one
 
 #### `fleet_settings`
 
-The queue's knobs, one JSON value per key: per_day_default, budget_minutes, lease_minutes, task_max_minutes, poll_hold_seconds, familiar_days, start_fresh_hours, quarantine_hours, quarantine_probe_hours, retention_days and search (the monitor's search parameters). A missing key means its default (packages/shared/src/fleet.ts, FLEET_SETTINGS_DEFAULTS).
+The queue's knobs, one JSON value per key: per_day_default, budget_minutes, lease_minutes, task_max_minutes, poll_hold_seconds, familiar_days, start_fresh_hours, quarantine_hours, quarantine_probe_hours, retention_days, max_accounts_per_proxy (RS-415: non-parked slots one proxy may carry, default 2) and search (the monitor's search parameters). A missing key means its default (packages/shared/src/fleet.ts, FLEET_SETTINGS_DEFAULTS).
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
@@ -2272,7 +2272,7 @@ A machine that runs worker containers through one fleet-agent container. The age
 | --- | --- | :-: | --- | --- |
 | `host_id` | `text` | ✓ |  | The host's name, e.g. homelab, worker-60-14; worker ids are `<host_id>-<n>`. |
 | `token_hash` | `text` | ✓ |  | sha256 (hex) of the host's bearer token. |
-| `capacity` | `integer` | ✓ | `0` | How many workers the agent should run. |
+| `capacity` | `integer` | ✓ | `0` | The most workers the agent may run; `desired.count` is this capped at the accounts the host could run now (CONTRACTS §6). |
 | `authoritative` | `boolean` | ✓ | `false` | False means observe only: the agent reports what runs and starts nothing. |
 | `version` | `text` |  |  | The agent's version from its last report. |
 | `last_seen_at` | `timestamptz` |  |  | The last report or desired-state read. |
@@ -2302,6 +2302,28 @@ Single-use bearers the host agent mints right before each `docker run`, one per 
 - **References:** `host_id` → `fleet_hosts.host_id` (on delete cascade)
 - **Indexes:** `fleet_claim_tickets_worker_idx` (host_id, worker_id), `fleet_claim_tickets_expires_idx` (expires_at)
 
+<a id="erp-fleet-proxies"></a>
+
+#### `fleet_proxies`
+
+The proxies the ERP fleet browses through, as a list managers edit on the Account pool tab. A slot made there copies its proxy's sealed URL into `fleet_slots.proxy_url` (what a claim reads) and names the proxy in `fleet_slots.proxy_id`; editing a proxy's URL or timezone rewrites its slots' copy and device clock. No route answers the URL. Migration 0213.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `integer` | ✓ | identity |  |
+| `label` | `text` | ✓ |  | The name managers pick it by, e.g. Decodo NY 1. |
+| `url_enc` | `text` | ✓ |  | scheme://user:pass@host:port, sealed under FB_POOL_KEY (lib/sealed.ts). Never returned or logged. |
+| `host` | `text` | ✓ |  | The exit's host, lowercased, in clear for the list. |
+| `port` | `integer` | ✓ |  | The exit's port (1..65535). |
+| `timezone` | `text` | ✓ |  | IANA zone of the exit; a slot's device clock follows it. |
+| `note` | `text` | ✓ | `''` |  |
+| `created_by` | `uuid` |  |  | → users. |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `created_by` → `users.id` (on delete set null)
+- **Indexes:** `fleet_proxies_exit_idx` unique (lower(host), port), `fleet_proxies_created_by_idx` (created_by)
+
 <a id="erp-fleet-slots"></a>
 
 #### `fleet_slots`
@@ -2325,11 +2347,14 @@ The fleet's view of one pool account: which worker runs it, on which host, under
 | `reserved_until` | `timestamptz` | | | A handoff reservation's deadline (gate timeout, 20 min); the lease ends with it. NULL = not reserved. A park is still the infinite lease. |
 | `quarantine_reset_at` | `timestamptz` | | | Manual release or positive probe: earlier search results cannot re-quarantine this account. |
 | `quarantine_evidence` | `jsonb` | | | Rule, search count, cities and latest result that justified quarantine. |
+| `proxy_id` | `integer` | | | → fleet_proxies. The listed proxy the slot was made on (0213); NULL for a seeded slot or once the proxy is removed, when `proxy_url` keeps its copy. |
 | `note` | `text` | ✓ | `''` | Free text for managers. |
 
+A slot made on the Account pool tab (`POST /api/fleet/slots`) gets a generated `device`: no user agent (`native: ["user_agent"]`, Chromium's own), a common desktop screen and scale picked from the account number, a viewport of the screen less the browser chrome, the proxy's timezone and `en-US`.
+
 - **Primary key:** `account_no`
-- **References:** `account_no` → `fb_pool_accounts.no` (on delete cascade); `host_id` → `fleet_hosts.host_id` (on delete set null)
-- **Indexes:** `fleet_slots_host_id_idx` (host_id)
+- **References:** `account_no` → `fb_pool_accounts.no` (on delete cascade); `host_id` → `fleet_hosts.host_id` (on delete set null); `proxy_id` → `fleet_proxies.id` (on delete set null)
+- **Indexes:** `fleet_slots_host_id_idx` (host_id), `fleet_slots_proxy_id_idx` (proxy_id)
 
 <a id="erp-fleet-workers"></a>
 

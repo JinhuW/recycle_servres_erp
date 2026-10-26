@@ -3298,6 +3298,26 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   `docker start` claims with a spent ticket, exits 75 and is recreated. The
   host token still claims for one release (older agents and worker images).
 
+- **Add to fleet (v1.364.0, RS-415)** — a manager puts pool accounts into
+  ERP-fleet slots from **Monitors ▸ Facebook ▸ Account pool**, no seed script.
+  The **Proxies** card under the pool table lists the exits the ERP keeps
+  (label, host:port, timezone, how many accounts of the limit use each and
+  which) and adds, edits and removes them; the URL with the vendor login is
+  pasted once, sealed, and never shown again (the edit form's field starts
+  empty and leaves the saved URL alone). An available account with a
+  password and a 2FA key gets **Add to fleet** in its Runs on cell: pick a
+  proxy (a full one is greyed; two accounts per proxy by default, the
+  `Accounts per proxy` rule in Cities ▸ Rules) and optional home cities from
+  the enabled cities, and the ERP makes the slot with a desktop browser made
+  for the account (Chromium's own user agent, a common screen and scale
+  picked from the account number, the proxy's timezone). The account turns
+  *fleet* under "ERP fleet" and reads "waiting for a worker" until one claims
+  it. **Remove from fleet** takes back an account no worker holds (park it on
+  the Fleet tab first) and returns it to Available. Removing a proxy an
+  active account uses is refused. A host now starts only as many workers as
+  it has accounts to run, up to its capacity: with capacity 4 and one ready
+  account it runs one worker, and each account added brings another.
+
 - **Fleet (ERP-owned)** — since v1.337.0 (RS-394) **Monitors ▸ Facebook** is
   the page of the task queue the ERP itself runs: the backend owns the city
   catalog, the tasks, the hosts and the account slots (`/api/fleet`), and
@@ -3318,7 +3338,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     card gives the id, the agent's version, when it
     last reported, running of capacity, the **Authoritative** switch (off is
     observe-only: the agent reports and starts nothing), the capacity stepper
-    (a new worker is a Facebook login) and, while a release rolls, its
+    (a new worker is a Facebook login; since v1.364.0 the agent runs no more
+    workers than the host has accounts for) and, while a release rolls, its
     progress line with the worker replaced next; **Add host** (the token
     shown once, with the three variables the agent needs) and **Release a
     version** sit in the tab's action row, and a rolling or stopped release
@@ -3425,6 +3446,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     parked, the purchaser who took it, or the pool status). Since v1.361.0
     (RS-412) a quarantined account's cell has **Release** and a parked one's
     **Unpark** (with its confirm), which used to be on the Fleet tab.
+    Since v1.364.0 (RS-415) the cell also puts accounts into the ERP fleet
+    and takes them out (below), and a **Proxies** card sits under the table.
   - **The worker page** (`/#/fleet/worker/<id>`, v1.337.0) recognises a
     fleet worker: state, last heartbeat, account and epoch, version, the task
     it holds (city, item, since when, lease), and **Watch**, its browser
