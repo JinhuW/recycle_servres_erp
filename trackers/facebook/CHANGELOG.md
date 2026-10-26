@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-10-25
+
 ### Added
 
 - **Fleet workers can reach the coordinator without alerting anyone.** A fleet
