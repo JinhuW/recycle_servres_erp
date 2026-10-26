@@ -6,8 +6,8 @@ status: done
 priority: P2
 created: 2026-10-26
 reporter: jinhu
-branch: JinhuW/merrow-2
-pr:
+branch: feat/wechat-rerun
+pr: 930
 version: 1.363.0
 related: []
 ---
