@@ -181,6 +181,7 @@ def test_a_claim_renders_the_worker_and_runs_the_monitor(
         "epoch": 7,
         "worker_id": "lab-1",
         "poll_hold_seconds": 2,
+        "alerts": False,
     }
     assert config["monitor"] == {
         "storage_state_path": str(home / "session.json"),
@@ -205,7 +206,8 @@ def test_a_claim_renders_the_worker_and_runs_the_monitor(
         "search_phrases": ["server ram memory ddr4 ddr5 ecc"],
     }
     assert config["item"]["enterprise_ssd"] == {"search_phrases": ["ssd lot server ssd"]}
-    assert config["user"]["recycle"]["alert_report_worker_id"] == "lab-1"
+    # Alerts are off unless the claim's env turns them on.
+    assert not {k for k in config["user"]["recycle"] if k.startswith(("telegram_", "alert_report_"))}
 
     session = json.loads((home / "session.json").read_text())
     assert session == {"cookies": ACCOUNT["cookies"], "origins": []}
@@ -551,6 +553,7 @@ def test_the_claims_env_reaches_the_monitor_and_its_values_are_never_logged(
     assert fleet.env is not None
     fleet.env.update(
         {
+            "RS_ALERTS": "on",
             "RS_COORDINATOR_TOKEN": "made-up-coordinator-token",  # pragma: allowlist secret
             # Not the claim's to set: the password comes from the account.
             "RS_FB_PASSWORD": "made-up-hijack",  # pragma: allowlist secret
@@ -576,7 +579,7 @@ def test_the_claims_env_reaches_the_monitor_and_its_values_are_never_logged(
     assert "telegram_topic_high" not in config["user"]["recycle"]
 
     logged = capfd.readouterr().err
-    assert "claim env: OPENROUTER_API_KEY, RS_CONTROL_PLANE_TOKEN, RS_COORDINATOR_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_TOKEN" in logged
+    assert "claim env: OPENROUTER_API_KEY, RS_ALERTS, RS_CONTROL_PLANE_TOKEN, RS_COORDINATOR_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_TOKEN" in logged
     for value in ("made-up-openrouter-key", "made-up-bot-token", "made-up-coordinator-token",
                   "made-up-hijack", ACCOUNT["password"]):
         assert value not in logged
@@ -598,7 +601,7 @@ def test_every_reference_in_the_template_resolves_from_the_claim_and_the_fleet_v
         template = tomllib.load(f)
     answer = entry.claim(fleet.url, "lab", HOST_TOKEN, "lab-1", "0.14.0", 5903, sleep=lambda s: None)
     menv = entry.monitor_env({"PATH": "/usr/bin"}, answer, "lab", "lab-1", tmp_path)
-    config = entry.render_config(template, answer, fleet.url, "lab-1", tmp_path)
+    config = entry.render_config(template, answer, fleet.url, "lab-1", tmp_path, alerts=True)
     assert entry.resolve_env_refs(config, menv) == []
     assert entry.required_env(template) == ["OPENROUTER_API_KEY"]
 
@@ -705,4 +708,90 @@ def test_missing_coordinator_auth_fails_before_browser_start(fleet: FakeFleet, t
     started = []
     monkeypatch.setattr(entry, 'run_monitor', lambda *args, **kwargs: started.append(True))
     assert entry.run_fleet([], fleet_env(fleet), home=tmp_path / 'home') == 70
+    assert started == []
+
+
+# ---------------------------------------------------------------------------
+# alerts and the coordinator's per-worker tokens
+# ---------------------------------------------------------------------------
+TOKENS = {
+    "lab-1": "lab-1.made-up-signature-one",  # pragma: allowlist secret
+    "lab-2": "lab-2.made-up-signature-two",  # pragma: allowlist secret
+}
+
+
+def test_with_a_coordinator_alerts_stay_off_and_the_monitor_withholds_them(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ai_marketplace_monitor.config import Config
+
+    home = tmp_path / "home"
+    env = fleet_env(
+        fleet,
+        RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path),
+        # Would turn the monitor's incident reports to the coordinator on.
+        RS_CONTROL_PLANE_URL="http://coordinator.invalid:8500",
+    )
+    assert entry.run_fleet([], env, home=home) == 0
+
+    seen = json.loads((tmp_path / "monitor-env.json").read_text())
+    assert "RS_CONTROL_PLANE_URL" not in seen
+    config = tomllib.loads((home / "config.toml").read_text())
+    assert config["marketplace"]["facebook"]["control_plane_url"] == "http://coordinator.invalid:8500"
+    assert config["fleet"]["alerts"] is False
+    user = config["user"]["recycle"]
+    assert not {k for k in user if k.startswith(("telegram_", "alert_report_"))}
+
+    # TELEGRAM_* are in the claim's env, and still nothing can reach Telegram.
+    for name, value in {**fleet.env, **seen}.items():
+        monkeypatch.setenv(name, value)
+    loaded = Config([home / "config.toml"])
+    assert loaded.fleet is not None and loaded.fleet.alerts is False
+    assert loaded.user["recycle"].telegram_token is None
+
+
+def test_alerts_on_render_telegram_and_point_incidents_at_the_coordinator(
+    fleet: FakeFleet, tmp_path: Path
+) -> None:
+    assert fleet.env is not None
+    fleet.env["RS_ALERTS"] = "on"
+    home = tmp_path / "home"
+    env = fleet_env(fleet, RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path))
+    assert entry.run_fleet([], env, home=home) == 0
+
+    seen = json.loads((tmp_path / "monitor-env.json").read_text())
+    assert seen["RS_CONTROL_PLANE_URL"] == "http://coordinator.invalid:8500"
+    config = tomllib.loads((home / "config.toml").read_text())
+    assert config["fleet"]["alerts"] is True
+    assert config["user"]["recycle"]["telegram_token"] == "${TELEGRAM_TOKEN}"
+    assert config["user"]["recycle"]["alert_report_worker_id"] == "lab-1"
+
+
+def test_each_worker_takes_only_its_own_coordinator_token(
+    fleet: FakeFleet, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    assert fleet.env is not None
+    fleet.env.pop("RS_CONTROL_PLANE_TOKEN")
+    fleet.env["RS_CONTROL_PLANE_TOKENS"] = json.dumps(TOKENS)
+    env = fleet_env(fleet, RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path))
+    assert entry.run_fleet([], env, home=tmp_path / "home") == 0
+
+    seen = json.loads((tmp_path / "monitor-env.json").read_text())
+    assert seen["RS_CONTROL_PLANE_TOKEN"] == TOKENS["lab-1"]
+    assert seen["RS_COORDINATOR_TOKEN"] == TOKENS["lab-1"]
+    assert "RS_CONTROL_PLANE_TOKENS" not in seen
+    assert TOKENS["lab-2"] not in json.dumps(seen)
+    logged = capfd.readouterr().err
+    assert all(token not in logged for token in TOKENS.values())
+
+
+def test_a_worker_the_token_map_does_not_name_stops_before_the_browser(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert fleet.env is not None
+    fleet.env.pop("RS_CONTROL_PLANE_TOKEN")
+    fleet.env["RS_CONTROL_PLANE_TOKENS"] = json.dumps({"lab-2": TOKENS["lab-2"]})
+    started: List[bool] = []
+    monkeypatch.setattr(entry, "run_monitor", lambda *a, **k: started.append(True))
+    assert entry.run_fleet([], fleet_env(fleet), home=tmp_path / "home") == entry.EXIT_CONFIG
     assert started == []

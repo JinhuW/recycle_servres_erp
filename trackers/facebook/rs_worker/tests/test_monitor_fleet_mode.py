@@ -43,12 +43,12 @@ class EndOfScriptError(Exception):
     pass
 
 
-def rendered_config(fleet: FakeFleet, home: Path) -> Path:
+def rendered_config(fleet: FakeFleet, home: Path, alerts: bool = False) -> Path:
     """What rs_worker.entry writes after a claim, as the monitor reads it."""
     answer = entry.claim(fleet.url, "lab", HOST_TOKEN, "lab-1", "0.14.0", 5903, sleep=lambda s: None)
     with open(entry.TEMPLATE, "rb") as f:
         template = tomllib.load(f)
-    config = entry.render_config(template, answer, fleet.url, "lab-1", home)
+    config = entry.render_config(template, answer, fleet.url, "lab-1", home, alerts=alerts)
     entry.write_files(home, answer, config)
     return home / "config.toml"
 
@@ -263,9 +263,10 @@ def fleet_settings_search() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # the MVP: no coordinator
 # ---------------------------------------------------------------------------
-def test_without_a_coordinator_the_worker_searches_judges_and_notifies(
-    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shared_env: None
-) -> None:
+def search_one_listing(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, alerts: bool
+) -> Dict[str, Any]:
+    """One task that finds one listing the AI rates 5: what the worker did with it."""
     import urllib.request
 
     from ai_marketplace_monitor.ai import AIResponse
@@ -275,11 +276,7 @@ def test_without_a_coordinator_the_worker_searches_judges_and_notifies(
     from ai_marketplace_monitor.notification import NotificationStatus
     from ai_marketplace_monitor.user import User
 
-    fleet.settings["coordinator_url"] = ""
-    # Even with a token about, nothing may find a coordinator.
-    monkeypatch.setenv("RS_CONTROL_PLANE_TOKEN", "made-up-control-plane-token")
-    monkeypatch.delenv("RS_CONTROL_PLANE_URL", raising=False)
-    config_path = rendered_config(fleet, tmp_path / "home")
+    config_path = rendered_config(fleet, tmp_path / "home", alerts=alerts)
     task = fleet.add_task("houston", "server_ram")
     seen = monitor_for(monkeypatch, config_path, asks_allowed=2)
 
@@ -296,41 +293,72 @@ def test_without_a_coordinator_the_worker_searches_judges_and_notifies(
         yield lot
         return False
 
-    judged: List[str] = []
-    notified: List[str] = []
+    seen.update(judged=[], notified=[], urls=[], task=task, lot=lot)
 
     def evaluate_by_ai(self: MarketplaceMonitor, item: Listing, **_: Any) -> AIResponse:
-        judged.append(item.id)
+        seen["judged"].append(item.id)
         return AIResponse(score=5, comment="24x 32GB DDR4 ECC RDIMM, $400", name="openrouter",
                           unit_count=24)
 
     def notify(self: User, listings: List[Listing], *_: Any) -> bool:
-        notified.append(listings[0].id)
+        seen["notified"].append(listings[0].id)
         return True
 
     monkeypatch.setattr(FacebookMarketplace, "_search_city", search_city)
+    monkeypatch.setattr(FacebookMarketplace, "is_logged_in", lambda self: True)
     monkeypatch.setattr(MarketplaceMonitor, "evaluate_by_ai", evaluate_by_ai)
     monkeypatch.setattr(MarketplaceMonitor, "prescreen_rejects", lambda self, *a: None)
     monkeypatch.setattr(User, "notification_status", lambda self, listing: NotificationStatus.NOT_NOTIFIED)
     monkeypatch.setattr(User, "notify", notify)
-    urls: List[str] = []
     real_urlopen = urllib.request.urlopen
 
     def urlopen(request: Any, *args: Any, **kwargs: Any) -> Any:
-        urls.append(request.full_url if hasattr(request, "full_url") else str(request))
+        url = request.full_url if hasattr(request, "full_url") else str(request)
+        seen["urls"].append(url)
+        if not url.startswith(fleet.url):
+            raise AssertionError(f"only the fleet may be spoken to, not {url}")
         return real_urlopen(request, *args, **kwargs)
 
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
 
     with pytest.raises(EndOfScriptError):
         seen["monitor"].fleet_loop()
+    return seen
+
+
+def test_without_a_coordinator_the_worker_searches_judges_and_notifies(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shared_env: None
+) -> None:
+    fleet.settings["coordinator_url"] = ""
+    # Even with a token about, nothing may find a coordinator.
+    monkeypatch.setenv("RS_CONTROL_PLANE_TOKEN", "made-up-control-plane-token")
+    monkeypatch.delenv("RS_CONTROL_PLANE_URL", raising=False)
+    seen = search_one_listing(fleet, tmp_path, monkeypatch, alerts=True)
 
     marketplace = seen["monitor"].active_marketplaces["facebook"]
     assert marketplace.control_plane is None
-    assert judged == [lot.id] and notified == [lot.id]
-    assert fleet.done[0]["task_id"] == task["id"] and fleet.done[0]["result"]["alerted"] == 1
+    assert seen["judged"] == [seen["lot"].id] and seen["notified"] == [seen["lot"].id]
+    assert fleet.done[0]["task_id"] == seen["task"]["id"] and fleet.done[0]["result"]["alerted"] == 1
     # Nothing but the fleet was spoken to: no listing post, no claim, no report.
-    assert urls and all(url.startswith(fleet.url + "/api/fleet/worker/") for url in urls)
+    assert seen["urls"] and all(url.startswith(fleet.url + "/api/fleet/worker/") for url in seen["urls"])
+    assert seen["logins"] == 1
+
+
+def test_with_a_coordinator_and_alerts_off_a_find_reaches_nobody(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shared_env: None
+) -> None:
+    # The coordinator is configured and reachable in principle; the only
+    # thing that may be spoken to is still the fleet: no claim (it would hold
+    # the listing from the live workers), no searched city, no Telegram.
+    monkeypatch.setenv("RS_CONTROL_PLANE_TOKEN", "made-up-control-plane-token")
+    monkeypatch.delenv("RS_CONTROL_PLANE_URL", raising=False)
+    seen = search_one_listing(fleet, tmp_path, monkeypatch, alerts=False)
+
+    marketplace = seen["monitor"].active_marketplaces["facebook"]
+    assert marketplace.control_plane is not None and marketplace.withholds_alerts
+    assert seen["judged"] == [seen["lot"].id] and seen["notified"] == []
+    assert fleet.done[0]["task_id"] == seen["task"]["id"] and fleet.done[0]["result"]["alerted"] == 0
+    assert seen["urls"] and all(url.startswith(fleet.url + "/api/fleet/worker/") for url in seen["urls"])
     assert seen["logins"] == 1
 
 

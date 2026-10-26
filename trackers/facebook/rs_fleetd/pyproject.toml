@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rs-fleetd"
-version = "0.14.1"
+version = "0.14.2"
 description = "Host agent that runs the coordinator's desired Facebook workers on one Docker host"
 requires-python = ">=3.11"
 # Deliberately dependency-free: it runs next to the Docker socket on every

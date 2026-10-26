@@ -18,6 +18,27 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-10-25
+
+### Added
+
+- **Fleet workers can reach the coordinator without alerting anyone.** A fleet
+  worker now alerts only when the claim's `env` carries `RS_ALERTS=on`; until
+  then no Telegram channel is rendered, and the monitor (`[fleet] alerts =
+  false`, monitor `88a505d`) neither claims nor sends an alert and tells the
+  coordinator no searched city, funnel count, wall or incident. Each of those
+  would act on the live fleet: an alert claim the fleet worker never delivers
+  holds the listing from the live workers for 15 minutes, a reported city
+  counts as covered in the live city queue, and walls and incidents page the
+  ops chat. With alerts off the coordinator sees only the fleet worker's login
+  ledger.
+- **Per-worker coordinator tokens through the shared env.** The claim's `env`
+  may carry `RS_CONTROL_PLANE_TOKENS`, a JSON object of fleet worker id →
+  coordinator token (`rsc mint-token --worker <id>`). The entrypoint exports
+  only this worker's as `RS_CONTROL_PLANE_TOKEN` (and as `RS_COORDINATOR_TOKEN`
+  for alert reports) and drops the rest; a worker the map does not name exits
+  70 before the browser starts.
+
 ## [0.14.1] - 2026-10-25
 
 ### Fixed

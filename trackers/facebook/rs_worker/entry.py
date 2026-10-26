@@ -11,9 +11,12 @@ not there at all. With them it:
    the device's `identity.json` inside the container, never on a mount;
 3. exports `RS_FB_PASSWORD` / `RS_FB_TOTP` for the monitor's password
    fallback, used only when the cookie session is invalid, as today, and
-   the shared secrets the claim's `env` object carries (OpenRouter,
-   Telegram, later the coordinator's tokens), which the rendered config
-   references as `${VAR}`;
+   the shared secrets the claim's `env` object carries (OpenRouter, the
+   coordinator's per-worker tokens, Telegram), which the rendered config
+   references as `${VAR}`. Alerts stay off unless that `env` says
+   `RS_ALERTS=on`: no Telegram channel is rendered, and the monitor's
+   `[fleet] alerts = false` keeps it from claiming alerts or reporting
+   cities, walls and incidents to the coordinator;
 4. runs the virtual display, VNC and the monitor, serving `GET /healthz` on
    8788 while the monitor is up, and leaves with the monitor's exit code;
 5. keeps a socket parked at the ERP's VNC relay (`vnc_relay.py`), so a
@@ -89,6 +92,14 @@ RESERVED_ENV = re.compile(
     r"^(RS_FLEET_.*|RS_WORKER_ID|RS_HOST_ID|RS_FB_PASSWORD|RS_FB_TOTP|RS_VNC_PORT|"
     r"RS_PARKED_FILE|RS_VERSION|RS_MONITOR_COMMIT|RS_WORKER_.*|PATH|HOME|DISPLAY)$"
 )
+# The fleet's alert switch, in the claim's `env`: "on" lets a worker alert
+# (Telegram, alert claims, alert reports) and report to the coordinator what
+# the live fleet acts on. Anything else, or absent, withholds all of it.
+ALERTS_ENV = "RS_ALERTS"
+# One coordinator token per fleet worker id, as a JSON object in one string:
+# the claim's `env` is shared by every worker, and the coordinator's tokens
+# each name one worker. Only this worker's leaves the entrypoint.
+TOKENS_ENV = "RS_CONTROL_PLANE_TOKENS"
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ENV_REF = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 # Which of the account's cookies name the browser rather than the login.
@@ -198,7 +209,12 @@ def split_proxy(url: str) -> Dict[str, str]:
 
 
 def render_config(
-    template: Dict[str, Any], answer: Dict[str, Any], fleet_url: str, worker_id: str, home: Path
+    template: Dict[str, Any],
+    answer: Dict[str, Any],
+    fleet_url: str,
+    worker_id: str,
+    home: Path,
+    alerts: bool = False,
 ) -> Dict[str, Any]:
     """The template with the claim answer merged in.
 
@@ -208,7 +224,8 @@ def render_config(
     this slot's: proxy, items, search settings, home cities, the coordinator
     the listings go to, and the `[fleet]` table that puts the monitor in
     fleet mode. Search-setting and item-filter keys are copied verbatim, so
-    the ERP can carry any key the monitor's config knows.
+    the ERP can carry any key the monitor's config knows. With `alerts` off
+    no user keeps a Telegram channel or an alert report.
     """
     config = copy.deepcopy(template)
     settings = answer.get("settings") or {}
@@ -245,7 +262,10 @@ def render_config(
         items[str(item["name"])] = entry
 
     for user in config.get("user", {}).values():
-        if not coordinator:
+        if not alerts:
+            for key in [k for k in user if k.startswith("telegram_")]:
+                del user[key]
+        if not coordinator or not alerts:
             for key in ALERT_REPORT_KEYS:
                 user.pop(key, None)
         elif "alert_report_worker_id" in user:
@@ -258,6 +278,7 @@ def render_config(
         "epoch": int(answer["epoch"]),
         "worker_id": worker_id,
         "poll_hold_seconds": int(settings.get("poll_hold_seconds") or 50),
+        "alerts": alerts,
     }
     return config
 
@@ -269,6 +290,24 @@ ALERT_REPORT_KEYS = ("alert_report_url", "alert_report_token", "alert_report_wor
 def has_coordinator(answer: Dict[str, Any]) -> bool:
     url = (answer.get("settings") or {}).get("coordinator_url")
     return isinstance(url, str) and bool(url.strip())
+
+
+def alerts_on(env: Dict[str, str]) -> bool:
+    return (env.get(ALERTS_ENV) or "").strip().lower() == "on"
+
+
+def worker_coordinator_token(raw: str, worker_id: str) -> str | None:
+    """This worker's token from `TOKENS_ENV`, or None. Never logs a value."""
+    try:
+        tokens = json.loads(raw)
+    except ValueError:
+        log(f"{TOKENS_ENV} is not JSON; ignored")
+        return None
+    token = tokens.get(worker_id) if isinstance(tokens, dict) else None
+    if not isinstance(token, str) or not token.strip():
+        log(f"{TOKENS_ENV} has no token for {worker_id}")
+        return None
+    return token.strip()
 
 
 def claim_env(answer: Dict[str, Any]) -> Dict[str, str]:
@@ -407,8 +446,20 @@ def monitor_env(
     account = answer["account"]
     out = dict(env)
     out.update(claim_env(answer))
-    if not has_coordinator(answer):
-        # The monitor's own fallback would otherwise find a coordinator here.
+    tokens = out.pop(TOKENS_ENV, None)
+    coordinator = has_coordinator(answer)
+    if coordinator and tokens and not out.get("RS_CONTROL_PLANE_TOKEN"):
+        token = worker_coordinator_token(tokens, worker_id)
+        if token:
+            out["RS_CONTROL_PLANE_TOKEN"] = token
+            # The coordinator takes alert reports on the same per-worker token.
+            out.setdefault("RS_COORDINATOR_TOKEN", token)
+    if coordinator and alerts_on(out):
+        # The monitor's incident reports read the coordinator from here.
+        out["RS_CONTROL_PLANE_URL"] = str(answer["settings"]["coordinator_url"])
+    else:
+        # The monitor's own fallback would otherwise find a coordinator here,
+        # and an incident report through it pages the ops chat.
         out.pop("RS_CONTROL_PLANE_URL", None)
     if home is not None:
         out["RS_PARKED_FILE"] = str(home / PARKED_FILE)
@@ -718,22 +769,24 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
     try:
         with open(TEMPLATE, "rb") as f:
             template = tomllib.load(f)
+        alerts = alerts_on(menv)
         needed = required_env(template)
         if has_coordinator(answer):
             needed.append("RS_CONTROL_PLANE_TOKEN")
-        if menv.get("RS_ALERT_REPORT_URL"):
+        if alerts and menv.get("RS_ALERT_REPORT_URL"):
             needed.append("RS_COORDINATOR_TOKEN")
         missing = [name for name in needed if not menv.get(name)]
         if missing:
             raise ValueError(f"no {', '.join(missing)} in the claim's env or the container's")
-        config = render_config(template, answer, fleet_url, worker_id, home)
+        config = render_config(template, answer, fleet_url, worker_id, home, alerts=alerts)
         dropped = resolve_env_refs(config, menv)
         write_files(home, answer, config)
     except (OSError, KeyError, TypeError, ValueError, tomllib.TOMLDecodeError) as e:
         log(f"could not render the worker's configuration: {e}; exiting {EXIT_CONFIG}")
         return EXIT_CONFIG
     log(
-        f"coordinator {'on' if has_coordinator(answer) else 'off'}; "
+        f"coordinator {'on' if has_coordinator(answer) else 'off'}, "
+        f"alerts {'on' if alerts else 'off (withheld)'}; "
         f"unset, left out of the config: {', '.join(dropped) or 'none'}"
     )
     try:

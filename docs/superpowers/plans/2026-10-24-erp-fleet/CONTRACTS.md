@@ -40,6 +40,7 @@ what answers.
 | Shared worker env is decided: the Worker secret `FLEET_WORKER_ENV`, added at the edge to a `200` claim answer as `env` | §2, §5 | this change |
 | No coordinator in the MVP: `FLEET_COORDINATOR_URL` may be empty, and `settings.coordinator_url` is then `null` | §2, §5 | this change |
 | Exit code `78`: the worker cannot connect and waits for an operator; the agent never restarts it | §6, §10 | this change |
+| Coordinator wired for fleet workers on dev: `FLEET_COORDINATOR_URL=http://10.10.10.73:8500` (LAN forwarder), coordinator tokens per worker id in `FLEET_WORKER_ENV` as `RS_CONTROL_PLANE_TOKENS`; alerts withheld unless `env` carries `RS_ALERTS=on` | §2 | facebook-tracker 0.14.2 |
 
 ## 1. Names
 
@@ -72,7 +73,7 @@ Backend (Railway `backend`, and `.env` locally):
 | `FLEET_WORKER_TOKEN_KEY` | HMAC key for worker tokens (hex, 32 bytes). **Required in production**: without it every worker route and `claim` answer `401` with `detail: "FLEET_WORKER_TOKEN_KEY is not set"`, and the rest of the app boots as usual. Outside production it is optional: the key is derived from `JWT_SECRET` (HKDF-SHA256, info `fleet-worker-token`), so dev and CI need no extra variable |
 | `FLEET_IMAGE_WORKER` | default worker image ref, e.g. `ghcr.io/jinhuw/aimm-recycle:0.14.0`; `desired.image` falls back to it when no release exists or the last one failed, and `desired.version` is its tag |
 | `FLEET_IMAGE_AGENT` | default agent image ref. Not read by the backend yet |
-| `FLEET_COORDINATOR_URL` | the Python coordinator workers post listings to (`https://…`), handed to workers at claim as `settings.coordinator_url`. **Empty or unset = no coordinator** (the MVP runs without one): the claim then sends `null` and workers post listings nowhere (no listing dedupe, no alert claims, no challenge escalation) |
+| `FLEET_COORDINATOR_URL` | the Python coordinator, handed to workers at claim as `settings.coordinator_url`. **Empty or unset = no coordinator**: the claim then sends `null` and workers talk to no coordinator at all. Dev since 2026-10-26: `http://10.10.10.73:8500`, the LAN forwarder on the homelab VM that admits only `10.10.60.14` (`HOSTS.md` → *Coordinator route*). A worker with a coordinator but alerts off records only its login ledger there (below) |
 | `FLEET_ROLE` | unset or `worker-api`: the whole app **and** the 30 s scheduler tick. `manager-only`: the whole app, no scheduler tick (manager writes still reconcile inline). No value filters routes yet; the `worker-api` route split is future work |
 
 Host agent container:
@@ -111,8 +112,18 @@ The secrets never enter Railway or Postgres, and the agent never holds them.
 Who receives them is still the backend's decision: only a claim the host
 token check let through is a `200`. The worker applies `env` to its own
 environment before it renders the config (an entry the container already
-sets is not overridden). Keys for the coordinator stay out while the MVP runs
-without one.
+sets is not overridden).
+
+Keys the worker reads from `env` beyond the template's references
+(facebook-tracker 0.14.2):
+
+| Key | Meaning |
+| --- | --- |
+| `RS_CONTROL_PLANE_TOKENS` | **The coordinator tokens, supplied by the operator** from the VM: a JSON object (as one string) of fleet worker id → `rsc mint-token --worker <id>` (stateless HMACs of the id under the coordinator's `RS_WORKER_TOKEN_SECRET`; minting writes nothing). The entrypoint exports only its own worker's token as `RS_CONTROL_PLANE_TOKEN` and `RS_COORDINATOR_TOKEN` and drops the map; a worker id missing from it exits `70` before the browser when a coordinator is configured. Dev carries ids `worker-60-14-1` … `-8`; a new host or a capacity above 8 needs the secret re-put with more ids. The fleet-wide legacy `RS_COORDINATOR_TOKEN` is deliberately not used: with it the coordinator trusts the worker id in the request body, so one leaked container could read any worker's 2FA codes and credentials |
+| `RS_ALERTS` | `on` lets fleet workers alert. **Anything else, or absent (dev today), withholds every alert:** no `[user.*]` Telegram or alert-report key is rendered, `[fleet] alerts = false` makes the monitor skip the alert claim and the send, report no searched city, funnel count, wall or incident to the coordinator, and `RS_CONTROL_PLANE_URL` is unset so no incident goes there. Each of those acts on the live fleet: an undelivered claim holds the listing from the live workers for 15 min, a reported city counts as covered in the live city queue, walls and incidents page the ops chat. Turn it on only after the fleet ships to prod, together with `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_TOPIC_*` and `RS_ALERT_REPORT_URL` (the coordinator URL) |
+
+`FLEET_WORKER_ENV` on dev holds `OPENROUTER_API_KEY` and
+`RS_CONTROL_PLANE_TOKENS`, nothing else.
 
 ## 3. Auth scopes
 
