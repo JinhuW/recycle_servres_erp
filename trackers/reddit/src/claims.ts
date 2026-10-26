@@ -258,6 +258,22 @@ export async function markNotified(
     ${insertAlertMessages(sql, redditId, 'buyers', sent)}`;
 }
 
+/** Parks a target whose listing buyers already got through another copy. */
+export async function markDuplicate(
+  sql: Sql,
+  workerId: string,
+  redditId: string,
+  duplicateOf: string,
+): Promise<void> {
+  await sql`
+    UPDATE posts
+       SET status = 'duplicate',
+           duplicate_of = ${duplicateOf},
+           claimed_by = NULL,
+           claimed_at = NULL
+     WHERE reddit_id = ${redditId} AND claimed_by = ${workerId}`;
+}
+
 /** Records the messages a dev-chat review of a post went out as. */
 export async function recordReviewMessages(
   sql: Sql,
@@ -322,10 +338,36 @@ export async function requeuePost(sql: Sql, redditId: string): Promise<boolean> 
   return rows.length > 0;
 }
 
+/**
+ * Takes or renews the named lease. True when this worker holds it now: it
+ * already did, or the last holder let it lapse.
+ */
+export async function holdLease(
+  sql: Sql,
+  name: string,
+  workerId: string,
+  ttlSeconds: number,
+): Promise<boolean> {
+  const rows = await sql`
+    INSERT INTO loop_leases (name, worker_id, expires_at)
+    VALUES (${name}, ${workerId}, NOW() + make_interval(secs => ${ttlSeconds}))
+    ON CONFLICT (name) DO UPDATE
+      SET worker_id = EXCLUDED.worker_id, expires_at = EXCLUDED.expires_at
+      WHERE loop_leases.worker_id = EXCLUDED.worker_id OR loop_leases.expires_at < NOW()
+    RETURNING worker_id`;
+  return rows.length > 0;
+}
+
+/** Gives a lease up at once, so another worker need not wait out its TTL. */
+export async function releaseLease(sql: Sql, name: string, workerId: string): Promise<void> {
+  await sql`DELETE FROM loop_leases WHERE name = ${name} AND worker_id = ${workerId}`;
+}
+
 /** Releases claims held by this worker so a restart does not wait out the TTL. */
 export async function releaseAllClaims(sql: Sql, workerId: string): Promise<void> {
   await sql`UPDATE subreddits SET claimed_by = NULL, claimed_at = NULL
              WHERE claimed_by = ${workerId}`;
   await sql`UPDATE posts SET claimed_by = NULL, claimed_at = NULL
              WHERE claimed_by = ${workerId}`;
+  await sql`DELETE FROM loop_leases WHERE worker_id = ${workerId}`;
 }

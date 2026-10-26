@@ -360,6 +360,80 @@ describe('notifyOnce', () => {
   });
 });
 
+describe('cross-posts', () => {
+  const POSTED = new Date(Date.now() - 3600_000);
+
+  async function seedCopy(redditId: string, subreddit: string, title: string, minutesLater = 0) {
+    await insertNewPosts(db.sql, [post({
+      redditId,
+      subreddit,
+      title,
+      author: 'ramseller',
+      postedAt: new Date(POSTED.getTime() + minutesLater * 60_000),
+    })]);
+    await db.sql`
+      UPDATE posts SET status = 'target', is_target = TRUE, llm_summary = '16x 64GB DDR4 RDIMM.'
+       WHERE reddit_id = ${redditId}`;
+  }
+
+  async function duplicateOf(redditId: string): Promise<string | null> {
+    const [row] = await db.sql<Array<{duplicate_of: string | null}>>`
+      SELECT duplicate_of FROM posts WHERE reddit_id = ${redditId}`;
+    return row?.duplicate_of ?? null;
+  }
+
+  it('alerts the first copy once and parks the other as its duplicate', async () => {
+    await seedCopy('t3_hls', 'homelabsales', '[FS] [USA-NY] 16 x 64GB DDR4 ECC RAM - Paypal G&S');
+    await seedCopy('t3_hws', 'hardwareswap', '[USA-NY] [H] 16 x 64GB DDR4 ECC RAM [W] Paypal G&S', 2);
+    const spy = stubTelegram();
+
+    await notifyOnce(notifyDeps());
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(await statusOf('t3_hls')).toBe('notified');
+    expect(await statusOf('t3_hws')).toBe('duplicate');
+    expect(await duplicateOf('t3_hws')).toBe('t3_hls');
+  });
+
+  it('sends one alert when two workers each hold a copy', async () => {
+    await seedCopy('t3_hls', 'homelabsales', '[FS] [USA-NY] 16 x 64GB DDR4 ECC RAM - Paypal G&S');
+    await seedCopy('t3_hws', 'hardwareswap', '[USA-NY] [H] 16 x 64GB DDR4 ECC RAM [W] Paypal G&S', 2);
+    await db.sql`UPDATE posts SET claimed_by = 'worker-2', claimed_at = NOW() WHERE reddit_id = 't3_hls'`;
+    const spy = stubTelegram();
+
+    // worker-1 can only claim the later copy, while the earlier one is still a target.
+    await notifyOnce(notifyDeps('worker-1'));
+    await db.sql`UPDATE posts SET claimed_by = NULL, claimed_at = NULL WHERE reddit_id = 't3_hls'`;
+    await notifyOnce(notifyDeps('worker-2'));
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(await statusOf('t3_hls')).toBe('notified');
+    expect(await statusOf('t3_hws')).toBe('duplicate');
+  });
+
+  it('parks a copy judged after the alert went out', async () => {
+    await seedCopy('t3_hws', 'hardwareswap', '[USA-NY] [H] 16 x 64GB DDR4 ECC RAM [W] Paypal G&S', 2);
+    const spy = stubTelegram();
+    await notifyOnce(notifyDeps());
+    // The earlier copy was stuck behind a failing model call.
+    await seedCopy('t3_hls', 'homelabsales', '[FS] [USA-NY] 16 x 64GB DDR4 ECC RAM - Paypal G&S');
+    await notifyOnce(notifyDeps());
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(await duplicateOf('t3_hls')).toBe('t3_hws');
+  });
+
+  it('still alerts a different listing from the same seller', async () => {
+    await seedCopy('t3_one', 'homelabsales', '[FS][EU] 16x SKhynix 32GB DDR4-3200 ECC RDIMM');
+    await seedCopy('t3_two', 'homelabsales', '[FS][EU] 15x Micron 32GB DDR4-3200 ECC RDIMM', 5);
+    const spy = stubTelegram();
+
+    await notifyOnce(notifyDeps());
+
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('prompt versions', () => {
   it('records which prompt judged each post, and reuses the version while it is unchanged', async () => {
     await db.sql`DELETE FROM rules`;

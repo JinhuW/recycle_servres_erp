@@ -27,7 +27,7 @@ deduplication.
    poll → evaluate → notify        poll → evaluate…       HTTP admin + UI feed
 ```
 
-Each worker runs three independent loops:
+Each worker runs these independent loops:
 
 1. **poll** — claims every subreddit that is due, fetches them all in *one*
    Reddit request, and records the posts it found.
@@ -37,7 +37,10 @@ Each worker runs three independent loops:
    are in
    [docs/prompt-evaluations/](docs/prompt-evaluations/2026-10-26-candidate-2-bulk-ram.md).
 3. **notify** — sends each target to Telegram once, records the message ids it
-   went out as, then marks it notified.
+   went out as, then marks it notified. A target that is a copy of a listing
+   buyers already got is marked `duplicate` instead (see *Cross-posts*).
+4. **trace** — on one worker at a time, counts the buyers who commented "PM"
+   on each post once it is a day old (see *PM demand*).
 
 They are separate loops so Reddit pacing (which can mean a minute of waiting)
 never holds up evaluation, and an LLM outage never stops post discovery.
@@ -56,8 +59,8 @@ bot's updates for reactions on alert messages (see *Measuring the prompt*).
   records it. Any reaction except 👎 makes the post a **lead**; a 👎 alone
   marks it **not a lead**. This works in groups, where Telegram says who
   reacted, and in channels, where it only sends totals. Every buyer alert
-  ends by asking for that reaction ("React 👍 if you act on this, 👎 if it's
-  not useful").
+  ends by asking for that reaction ("React with any emoji if it's a good
+  catch, 👎 if it's not useful").
 - **Response schema.** The model gives its reasoning before its verdict. A
   version's identity includes the schema (`prompt_versions.response_schema`),
   so the verdicts from the earlier verdict-first schema stay in their own
@@ -90,6 +93,47 @@ Two mechanisms, both in `src/claims.ts`:
 - **`INSERT … ON CONFLICT (reddit_id) DO NOTHING`.** The Reddit fullname is the
   primary key, so a post seen by several workers is evaluated and alerted
   exactly once.
+
+### Cross-posts
+
+Sellers post one listing to r/homelabsales and r/hardwareswap, or repost it a
+day later, and each copy gets its own Reddit id. The feed carries no
+`crosspost_parent`, and most copies are pasted by hand, so `src/dedup.ts` finds
+them by author and words. Two posts are one listing when the same author posted
+them within 72 hours and either:
+
+- their titles share at least 60% of their words, once tags like `[FS]`,
+  `[USA-CA]` and the `[W]` half are dropped, and agree on model numbers and
+  capacities; or
+- they are in different subreddits and their bodies share at least 80% of
+  their words. Within one subreddit, a seller's separate lots often share a
+  template body.
+
+Titles with different module counts (`16x` vs `15x`) or different makers are
+never one listing. Notify alerts the first copy (or the one already sent) and
+marks the rest `duplicate`, with `duplicate_of` pointing at it. Every copy is
+still judged, so the prompt stats count it. Over the 30 days before this
+shipped, 71 of 480 alerts were such repeats.
+
+### PM demand
+
+On the swap subreddits a buyer comments "PM" or "chat sent" and takes the deal
+private, so the number of distinct buyers who did that is the best public
+measure of how wanted a listing was. The **trace** loop (`src/loops/trace.ts`)
+reads each post's comment feed (`<permalink>.rss`, anonymous like the post
+feed) once it is 24 hours old and up to 8 days back, newest first. It stores
+`comment_count`, and `pm_count`: commenters other than the seller and bots
+whose comment asks by PM, DM or chat.
+
+Only the worker holding the `comment_tracer` lease in `loop_leases` traces. It
+costs one request per post, about 110 a day, from that worker's pacer budget.
+A worker that Reddit blocks gives the lease up for 30 minutes so another can
+take it. `COMMENT_TRACER=off` keeps a worker out entirely.
+
+`GET /api/analytics` turns this into the prompt's second score. A memory post
+with 5 or more PMs and no good-catch reaction is **missing**, whether it never
+alerted or alerted and nobody acted. Each prompt version gets a **PM recall**:
+of the hot memory posts it judged, how many it flagged.
 
 ### Reddit access
 
@@ -146,6 +190,7 @@ through the API — no redeploy, and changes reach every worker within 60 s.
 | `WORKER_ID` | no | `hostname-pid-random` |
 | `REDDIT_USER_AGENT` | no | `recycle-servers-tracker/1.0 (contact: …)` |
 | `REDDIT_MAX_RPM` | no | `1` |
+| `COMMENT_TRACER` | no | `on` (`off` keeps this worker from taking the PM tracer lease) |
 | `LOG_LEVEL` | no | `info` |
 | `OPS_ALERT_URL` / `OPS_ALERT_TOKEN` | api role, both or neither | — (the ops watch is off) |
 
@@ -179,13 +224,14 @@ Everything except `/health` needs `Authorization: Bearer $API_TOKEN`.
 | `GET` | `/api/stats?since` | Counts by status (only posts discovered since `since`, when given), per-subreddit health, the oldest pending post, failed posts. |
 | `POST` | `/api/posts/:id/requeue` | Retry a post that gave up. |
 | `POST` | `/api/telegram/test` | Send a test message to the configured chats. |
+| `GET` | `/api/analytics?window` | The ERP's Analytics tab, over `24h`, `7d` (default) or `30d`. Volume, reactions, time to alert, duplicates, PM demand and the missing list, per subreddit and per prompt version. PM figures cover the same span a day earlier, since posts are traced a day after posting. |
 | `GET` | `/api/prompt-stats?since` | Per prompt version: posts judged, targets, buyer and dev-chat leads; for a candidate, `vsLive`, its verdicts against live on the same posts. `config` has the live and candidate prompts as configured now. |
 | `PUT` | `/api/prompt-candidate` | Start or replace a trial. `{"prompt": "…", "model": ""}`; `model` is optional, and `""` means `llm_model`. |
 | `DELETE` | `/api/prompt-candidate` | End the trial. Its verdicts stay, so its version keeps its numbers. |
 | `POST` | `/api/prompt-candidate/promote` | Make the candidate the live prompt (and model). Disables the rules, which the candidate was judged without, and clears the candidate. |
 
 The ERP's Monitors ▸ Reddit page drives the workers, rules, subreddits,
-matches, stats, prompt-stats and prompt-candidate routes through its backend
+matches, stats, prompt-stats, analytics and prompt-candidate routes through its backend
 proxy; see *Contracts* in the root `AGENTS.md`
 before changing their shapes.
 
@@ -214,8 +260,8 @@ curl localhost:8080/api/matches -H "Authorization: Bearer $API_TOKEN"
    `PUT /api/settings/telegram_dev_chat_ids` with `{"value": ["-100…"]}`.
 3. **Start a trial:** `PUT /api/settings/candidate_eval_prompt` with the full
    prompt text. Optionally set `candidate_llm_model` to trial a model too.
-4. **Label in the dev chat.** React 👍 to a review that is a real lead, and 👎
-   to one that should not have alerted. Buyers' reactions in the alert chat
+4. **Label in the dev chat.** React with any emoji to a review that is a real
+   lead, and 👎 to one that should not have alerted. Buyers' reactions in the alert chat
    count too.
 5. **Read `GET /api/prompt-stats`.** Compare the candidate's `vsLive` cells:
    - leads in `candidateOnly` are deals it adds;
@@ -321,6 +367,8 @@ a different provider.
 8. Killing a worker mid-poll: its claims free up within 5 minutes.
 9. A reaction on a new alert shows up in `GET /api/prompt-stats` within a
    minute, and the api log has no `another process is polling` warnings.
+10. `GET /api/analytics` names a `tracer` worker, and `posts.comments_checked_at`
+    fills in for posts a day old.
 
 ## Layout
 
@@ -336,7 +384,9 @@ src/
   config.ts        env parsing, fails fast on a bad boot
   db.ts            postgres.js client
   claims.ts        all fleet coordination SQL — the core of the design
-  reddit.ts        Atom feed fetch + parse
+  reddit.ts        Atom feed fetch + parse, posts and comments
+  dedup.ts         cross-post detection for notify
+  analytics.ts     the ERP Analytics tab's numbers
   pacing.ts        per-IP rate limiter and backoff
   llm.ts           OpenRouter evaluation
   rules.ts         named buying rules, composed into the eval prompt
@@ -348,7 +398,7 @@ src/
   api.ts           admin/UI HTTP surface
   settings.ts      database-backed runtime config
   logger.ts        leveled logger tagged with the worker id
-  loops/           poll, evaluate, notify, reactions (api only) + the shared ticker
+  loops/           poll, evaluate, notify, trace, reactions (api only) + the shared ticker
 tests/             vitest against real Postgres, one database per file
 infra/             OCI worker fleet (terraform) — see infra/README.md
 docs/debug-notes/  traps worth not re-hitting

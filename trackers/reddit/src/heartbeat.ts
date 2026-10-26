@@ -8,7 +8,7 @@
 import type {Sql} from './db.ts';
 
 export type WorkerRole = 'worker' | 'api';
-export type LoopName = 'poll' | 'evaluate' | 'notify';
+export type LoopName = 'poll' | 'evaluate' | 'notify' | 'trace';
 
 // Liveness thresholds, shared by the API's status filter and any UI: three
 // missed 30s beats reads as stale, ten silent minutes as dead.
@@ -40,7 +40,7 @@ export interface Problem {
   fields: Record<string, unknown>;
 }
 
-const LOOP_NAMES: readonly LoopName[] = ['poll', 'evaluate', 'notify'];
+const LOOP_NAMES: readonly LoopName[] = ['poll', 'evaluate', 'notify', 'trace'];
 
 function isLoopName(value: string): value is LoopName {
   return (LOOP_NAMES as readonly string[]).includes(value);

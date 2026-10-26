@@ -99,6 +99,8 @@ tracker.get('/stats', (c) =>
 
 tracker.get('/prompt-stats', (c) =>
   forward(c, 'GET', `/api/prompt-stats${new URL(c.req.url).search}`, false));
+tracker.get('/analytics', (c) =>
+  forward(c, 'GET', `/api/analytics${new URL(c.req.url).search}`, false));
 tracker.put('/prompt-candidate', (c) => forward(c, 'PUT', '/api/prompt-candidate', true));
 tracker.delete('/prompt-candidate', (c) => forward(c, 'DELETE', '/api/prompt-candidate', false));
 tracker.post('/prompt-candidate/promote', (c) =>

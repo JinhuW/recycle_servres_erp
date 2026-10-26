@@ -15,6 +15,37 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.362.0] - 2026-10-26
+
+### Added
+
+- **Monitors ▸ Reddit ▸ Analytics** (`/tracker/analytics`, RS-413), over
+  24 hours, 7 days or 30 days. It shows the alerts sent, the share buyers
+  reacted to as a good catch, how fast alerts go out, and the cross-posts
+  held back. It also has an hourly or daily chart, a per-subreddit table and
+  a per-prompt-version table. The page exists to judge the prompt by what
+  buyers and the market did with its alerts, not by how its wording reads.
+- **PM demand as the second score.** One tracker worker, holding a database
+  lease, reads each post's comments once it is a day old. It counts the
+  distinct buyers who asked by PM or chat. A memory post with 5 or more and
+  no good-catch reaction counts as **missing**, whether it never alerted or
+  alerted and nobody acted on it. The tab lists each one with the prompt's
+  reason for saying no, and gives every prompt version a *PM recall*.
+  Reactions alone could not score the prompt: buyers labelled almost none of
+  the 480 alerts in the 30 days before this shipped.
+
+### Changed
+
+- **A cross-posted listing alerts once.** Sellers post one listing to
+  r/homelabsales and r/hardwareswap, or repost it a day later. Each copy has
+  its own Reddit id, so buyers got every copy. The tracker now matches
+  copies by author and listing words, alerts the first, and marks the rest
+  `duplicate`. In the 30 days before this shipped, 71 of 480 alerts were
+  such repeats.
+- **The alert footer asks for any emoji as a good catch** and 👎 as not
+  useful. The tracker has always counted every reaction except 👎 as a lead;
+  the footer asked for 👍 only.
+
 ## [1.361.0] - 2026-10-26
 
 ### Changed

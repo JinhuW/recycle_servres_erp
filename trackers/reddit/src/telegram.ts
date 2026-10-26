@@ -44,10 +44,11 @@ export function escapeHtml(text: string): string {
 
 /**
  * A buyer alert: the body, then a request for the reaction that scores the
- * prompt which sent it. Without it nobody knew reactions counted.
+ * prompt which sent it. Without it nobody knew reactions counted. Any emoji
+ * but 👎 counts as a good catch (the message_labels view).
  */
 export function formatAlert(alert: AlertContent): string {
-  return `${alertBody(alert)}\n\n<i>React 👍 if you act on this, 👎 if it's not useful.</i>`;
+  return `${alertBody(alert)}\n\n<i>React with any emoji if it's a good catch, 👎 if it's not useful.</i>`;
 }
 
 /** What the item is, what it costs, where to find it. */
@@ -96,7 +97,7 @@ export function formatReview(review: ReviewContent): string {
     '',
     ...verdicts,
     '',
-    'React 👍 if this is a lead, 👎 if it should not have alerted.',
+    'React with any emoji if this is a lead, 👎 if it should not have alerted.',
   ].join('\n');
 }
 

@@ -16,7 +16,7 @@ has the repo map and workflow.
   an allowlist (`GET /api/workers`, `DELETE /api/workers/:id`,
   `GET|POST /api/rules`, `PATCH|DELETE /api/rules/:id`,
   `GET|POST /api/subreddits`, `PATCH|DELETE /api/subreddits/:name`,
-  `GET /api/matches`, `GET /api/stats`, `GET /api/prompt-stats`,
+  `GET /api/matches`, `GET /api/stats`, `GET /api/prompt-stats`, `GET /api/analytics`,
   `PUT|DELETE /api/prompt-candidate`, `POST /api/prompt-candidate/promote`,
   `PUT /api/settings/llm_model` and no other settings key)
   for the ERP's Monitors ▸ Reddit page. Changing one of those response shapes,

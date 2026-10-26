@@ -1,4 +1,4 @@
-// Reads new posts from Reddit without credentials.
+// Reads new posts, and the comments under them, from Reddit without credentials.
 //
 // The anonymous JSON API (/r/x/new.json) is 403-blocked for every User-Agent,
 // so this uses the Atom feed instead, which is still open. One request to a
@@ -139,20 +139,18 @@ function readRateLimit(headers: Headers): RateLimitHint {
   };
 }
 
-/**
- * Fetches the newest posts across every given subreddit in a single request.
- * Never throws: transport and block failures come back as typed results so the
- * poll loop can decide between backing off and retrying.
- */
-export async function fetchNewPosts(
-  subreddits: string[],
-  userAgent: string,
-): Promise<FetchResult> {
-  if (subreddits.length === 0) return {kind: 'ok', posts: [], rateLimit: {}};
+type FeedResult =
+  | {kind: 'ok'; body: string; rateLimit: RateLimitHint}
+  | {kind: 'rate_limited'; retryAfterSeconds?: number}
+  | {kind: 'blocked'; status: number}
+  | {kind: 'gone'}
+  | {kind: 'error'; message: string};
 
+/** One Atom request, with Reddit's failure modes told apart. Never throws. */
+async function fetchFeed(url: string, userAgent: string): Promise<FeedResult> {
   let response: Response;
   try {
-    response = await fetch(feedUrl(subreddits), {
+    response = await fetch(url, {
       headers: {'User-Agent': userAgent, Accept: 'application/atom+xml, application/xml'},
       signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
     });
@@ -170,6 +168,8 @@ export async function fetchNewPosts(
     return {kind: 'blocked', status: response.status};
   }
 
+  if (response.status === 404) return {kind: 'gone'};
+
   if (!response.ok) {
     return {kind: 'error', message: `HTTP ${response.status}`};
   }
@@ -183,5 +183,71 @@ export async function fetchNewPosts(
     return {kind: 'blocked', status: response.status};
   }
 
-  return {kind: 'ok', posts: parseFeed(body), rateLimit: readRateLimit(response.headers)};
+  return {kind: 'ok', body, rateLimit: readRateLimit(response.headers)};
+}
+
+/**
+ * Fetches the newest posts across every given subreddit in a single request.
+ * Never throws: transport and block failures come back as typed results so the
+ * poll loop can decide between backing off and retrying.
+ */
+export async function fetchNewPosts(
+  subreddits: string[],
+  userAgent: string,
+): Promise<FetchResult> {
+  if (subreddits.length === 0) return {kind: 'ok', posts: [], rateLimit: {}};
+  const result = await fetchFeed(feedUrl(subreddits), userAgent);
+  switch (result.kind) {
+    case 'ok':
+      return {kind: 'ok', posts: parseFeed(result.body), rateLimit: result.rateLimit};
+    case 'gone':
+      return {kind: 'error', message: 'HTTP 404'};
+    default:
+      return result;
+  }
+}
+
+export interface RedditComment {
+  author: string | null;
+  text: string;
+}
+
+export type CommentsResult =
+  | {kind: 'ok'; comments: RedditComment[]; rateLimit: RateLimitHint}
+  | {kind: 'rate_limited'; retryAfterSeconds?: number}
+  | {kind: 'blocked'; status: number}
+  | {kind: 'gone'}
+  | {kind: 'error'; message: string};
+
+/** Reddit's ceiling for one comment page; a thread longer than this is rare on a sale post. */
+const COMMENTS_LIMIT = 500;
+
+/** A post's comment feed, from its permalink. */
+export function commentsUrl(postUrl: string): string {
+  return `${postUrl.replace(/\/+$/, '')}/.rss?limit=${COMMENTS_LIMIT}`;
+}
+
+/**
+ * Parses a post's comment feed. Its first entry is the post itself (a `t3_`
+ * id); every comment after it is a `t1_`, replies included.
+ */
+export function parseComments(xml: string): RedditComment[] {
+  const comments: RedditComment[] = [];
+  for (const [, entry] of xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)) {
+    if (!entry || !tagContent(entry, 'id')?.trim().startsWith('t1_')) continue;
+    const authorRaw = tagContent(tagContent(entry, 'author') ?? '', 'name');
+    const content = tagContent(entry, 'content');
+    comments.push({
+      author: authorRaw ? authorRaw.replace(/^\/u\//, '') : null,
+      text: content ? htmlToText(content) : '',
+    });
+  }
+  return comments;
+}
+
+/** Fetches a post's comments. Never throws, like fetchNewPosts. */
+export async function fetchComments(postUrl: string, userAgent: string): Promise<CommentsResult> {
+  const result = await fetchFeed(commentsUrl(postUrl), userAgent);
+  if (result.kind !== 'ok') return result;
+  return {kind: 'ok', comments: parseComments(result.body), rateLimit: result.rateLimit};
 }

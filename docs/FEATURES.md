@@ -2849,6 +2849,25 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - Since v1.292.0, each version is labelled *verdict first* or *reasoning
     first*. That's its response schema. The tracker has asked for the
     reasoning first since RS-312.
+
+  Since v1.362.0 (RS-413), a fourth tab, **Analytics** (`/tracker/analytics`),
+  covers 24 hours, 7 days or 30 days:
+  - **Tiles:** alerts sent, the share of them buyers reacted to as a good
+    catch (any emoji but 👎), missing posts, time from post to alert, and
+    cross-posts held back.
+  - **Chart:** alerts and good catches by hour or day.
+  - **PM demand:** a tracker worker counts the buyers who commented "PM" on
+    each post once it is a day old. A memory post with 5 or more PMs and no
+    good-catch reaction is *missing*, and the tab lists each one with the
+    prompt's reason for rejecting it. PM figures cover the same span a day
+    earlier.
+  - **Per prompt version:** judged, flagged, good and 👎, and PM recall.
+  - **Per subreddit:** posts, memory posts, alerts, good-catch rate, average
+    PMs and missing.
+
+  The same release made a listing cross-posted to several subreddits, or
+  reposted within 72 hours, alert once. The other copies are held back as
+  duplicates and stay out of Recent matches.
 - **WeChat market** — **Monitors ▸ WeChat** (`/wechat`, v1.312.0), managers
   only. memtrade, a tool on the office Mac, reads the team's WeChat trading
   groups and builds a daily memory-module report for each 08:00 → 08:00 ET

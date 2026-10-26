@@ -409,7 +409,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/payments/internal') return 'internaltx';
   if (path === '/payments' || match('/payments/po/:id', path) || match('/payments/so/:id', path)) return 'payments';
   if (path === '/accounting' || match('/accounting/:id', path)) return 'accounting';
-  if (path === '/tracker' || path === '/tracker/workflow' || path === '/tracker/prompts') return 'tracker';
+  if (path === '/tracker' || path === '/tracker/workflow' || path === '/tracker/prompts' || path === '/tracker/analytics') return 'tracker';
   if (path === '/wechat' || matchWechatDay(path)) return 'wechat';
   if (path === '/fleet' || path === '/fleet/pool' || matchFleetTab(path) || fleetRedirect(path) || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
   if (path === '/settings') return 'settings';

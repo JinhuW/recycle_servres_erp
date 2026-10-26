@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-25:** ERP migration `0207`, Reddit tracker migration `0005`,
+**As of 2026-10-26:** ERP migration `0207`, Reddit tracker migration `0006`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -38,7 +38,7 @@ refresh a section.
 | Database | Owner | Engine | Where it runs | Connection | Schema source | Tables |
 | --- | --- | --- | --- | --- | --- | --- |
 | **ERP** | `apps/backend` | Postgres 18 | Railway project `recycle-erp-experiment`, with one Postgres per environment (production, dev) | `DATABASE_URL` | `apps/backend/migrations/*.sql`, applied by `scripts/migrate.mjs` | 69 |
-| **Reddit tracker** | `trackers/reddit` (`api`, `worker` and the OCI worker VMs) | Postgres | Railway project `reddits-tracker`, with public networking on so the OCI VMs can reach it | `DATABASE_URL` | `trackers/reddit/migrations/*.sql`, applied by `scripts/migrate.ts` | 15 + 1 view |
+| **Reddit tracker** | `trackers/reddit` (`api`, `worker` and the OCI worker VMs) | Postgres | Railway project `reddits-tracker`, with public networking on so the OCI VMs can reach it | `DATABASE_URL` | `trackers/reddit/migrations/*.sql`, applied by `scripts/migrate.ts` | 16 + 1 view |
 | **Facebook coordinator** | `trackers/facebook/rs_coordinator` | Postgres 16 in prod; SQLite locally and in tests | Railway project `facebook-tracker` (Terraform in `trackers/facebook/infra/`), reached by the coordinator on the homelab VM through Railway's TCP proxy | `RS_DATABASE_URL`, else `DATABASE_URL`; with neither set, SQLite at `RS_COORDINATOR_DB` | `SCHEMA` plus the `*_EXTRA_COLUMNS` lists in `rs_coordinator/db.py`, applied at boot | 32 |
 
 **The three share no database and no rows.** The ERP reaches each tracker only
@@ -2590,7 +2590,7 @@ Claims are advisory metadata, not held locks: a claim older than 300 s may be ta
 
 ### Ingest
 
-`posts` holds every post any worker fetched, deduped by its Reddit id, and carries it through the pipeline by `status`: new, then rejected or target, then notified, with failed as the dead end a post waits in for a manual requeue.
+`posts` holds every post any worker fetched, deduped by its Reddit id, and carries it through the pipeline by `status`: new, then rejected or target, then notified, with failed as the dead end a post waits in for a manual requeue. A target that is a copy of a listing buyers already got (a cross-post or a repost, `src/dedup.ts`) becomes duplicate instead of notified. A day after posting, the PM tracer (`src/loops/trace.ts`, migration 0006) counts the buyers who asked for it in the comments.
 
 Tables: [`posts`](#reddit-posts)
 
@@ -2616,7 +2616,7 @@ Every Reddit post any worker fetched that was younger than `max_post_age_hours`,
 | `url` | `text` | ✓ |  | Permalink to the post. |
 | `posted_at` | `timestamptz` | ✓ |  | Reddit's publish time; a post older than max_post_age_hours is rejected as too_old without an LLM call. |
 | `discovered_at` | `timestamptz` | ✓ | `now()` | When the first worker inserted it; the `since` filter for matches and stats. |
-| `status` | `text` | ✓ | `'new'` | new = awaiting judgement; rejected = not a buy (terminal); target = awaiting buyer alert; notified = alert reached at least one buyer chat; failed = gave up after 5 attempts at a stage. |
+| `status` | `text` | ✓ | `'new'` | new = awaiting judgement; rejected = not a buy (terminal); target = awaiting buyer alert; notified = alert reached at least one buyer chat; duplicate = a target whose listing went out through another copy (terminal); failed = gave up after 5 attempts at a stage. |
 | `is_target` | `boolean` |  |  | The live prompt's verdict; NULL until judged. |
 | `llm_summary` | `text` |  |  | The model's one-to-two-sentence summary for buyers; the alert's text. |
 | `llm_price` | `text` |  |  | Asking price exactly as written in the post (free text, no currency parsing); NULL if not stated. |
@@ -2628,13 +2628,17 @@ Every Reddit post any worker fetched that was younger than `max_post_age_hours`,
 | `claimed_at` | `timestamptz` |  |  | When the claim was taken; it lapses after 300 s. |
 | `notified_at` | `timestamptz` |  |  | When the buyer alert went out. |
 | `prompt_version_id` | `integer` |  |  | → prompt_versions: the live prompt that judged it; NULL for verdicts made before versioning existed. |
+| `duplicate_of` | `text` |  |  | → posts: for a duplicate, the copy buyers were alerted to. |
+| `comments_checked_at` | `timestamptz` |  |  | When the PM tracer read its comments; NULL until then. Set with NULL counts when the post was gone or unreadable. |
+| `comment_count` | `integer` |  |  | Comments on the post when traced. |
+| `pm_count` | `integer` |  |  | Distinct commenters, other than the seller and bots, who asked by PM or chat. Five or more on a memory post makes it "hot" in Analytics. |
 
 - **Primary key:** `reddit_id`
-- **References:** `prompt_version_id` → `prompt_versions.id` (on delete no action)
-- **Checks:** `status IN ('new', 'rejected', 'target', 'notified', 'failed')`
-- **Indexes:** `idx_posts_pending_eval` (next_retry_at) where `status = 'new'`; `idx_posts_pending_notify` (next_retry_at) where `status = 'target'`; `idx_posts_prompt_version` (prompt_version_id) where `prompt_version_id IS NOT NULL`; `CREATE INDEX idx_posts_targets ON public.posts USING btree (discovered_at DESC) WHERE is_target`
+- **References:** `prompt_version_id` → `prompt_versions.id` (on delete no action); `duplicate_of` → `posts.reddit_id` (on delete no action)
+- **Checks:** `status IN ('new', 'rejected', 'target', 'notified', 'failed', 'duplicate')`
+- **Indexes:** `idx_posts_pending_eval` (next_retry_at) where `status = 'new'`; `idx_posts_pending_notify` (next_retry_at) where `status = 'target'`; `idx_posts_prompt_version` (prompt_version_id) where `prompt_version_id IS NOT NULL`; `CREATE INDEX idx_posts_targets ON public.posts USING btree (discovered_at DESC) WHERE is_target`; `idx_posts_author` (lower(author), posted_at) where `author IS NOT NULL`, for finding a listing's copies; `idx_posts_pending_trace` (posted_at DESC) where `comments_checked_at IS NULL`
 
-Posts are never deleted. `rejected` is terminal; `failed` waits for `POST /api/posts/:id/requeue`, which sends a judged target back to notify and anything else back to evaluation.
+Posts are never deleted. `rejected` and `duplicate` are terminal; `failed` waits for `POST /api/posts/:id/requeue`, which sends a judged target back to notify and anything else back to evaluation.
 
 ### Judging
 
@@ -2844,7 +2848,7 @@ Single-row `getUpdates` cursor for the tracker's bot, so a restarted api resumes
 
 Fleet visibility, the ops watch's state and the migration ledger. Nothing in the pipeline reads any of them. The api's watch (`src/loops/watch.ts`, migration 0005) reads `workers` and `worker_errors` and sends down workers, failing loops and every warn/error line to the ops Telegram group through the alert relay.
 
-Tables: [`workers`](#reddit-workers), [`worker_errors`](#reddit-worker-errors), [`watch_alerts`](#reddit-watch-alerts), [`schema_migrations`](#reddit-schema-migrations)
+Tables: [`workers`](#reddit-workers), [`worker_errors`](#reddit-worker-errors), [`watch_alerts`](#reddit-watch-alerts), [`loop_leases`](#reddit-loop-leases), [`schema_migrations`](#reddit-schema-migrations)
 
 <a id="reddit-workers"></a>
 
@@ -2900,6 +2904,20 @@ Alerts the watch has raised and not yet resolved, so a restarted api neither pag
 | `raised_at` | `timestamptz` | ✓ | `now()` |  |
 
 - **Primary key:** `key`
+
+<a id="reddit-loop-leases"></a>
+
+#### `loop_leases`
+
+Jobs exactly one process in the fleet runs at a time (migration 0006). Today the only one is `comment_tracer`, the PM tracer. Its holder renews the row every minute or so; once `expires_at` passes, any worker started without `COMMENT_TRACER=off` may take it over. A worker Reddit blocks gives it up at once, and a clean shutdown deletes it.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `name` | `text` | ✓ |  | The job, e.g. comment_tracer. |
+| `worker_id` | `text` | ✓ |  | The worker holding it. |
+| `expires_at` | `timestamptz` | ✓ |  | When it lapses unless renewed (10 minutes after the last renewal). |
+
+- **Primary key:** `name`
 
 <a id="reddit-schema-migrations"></a>
 
