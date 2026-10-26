@@ -3244,6 +3244,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   Times read in US Eastern; Analysis daily totals keep the coordinator’s UTC day boundaries. Against a backend without the fleet routes each
   tab says so and the rest of the page is unaffected. Every tab re-reads every
   10 s while it is visible.
+  Since v1.351.0 (RS-403) the Fleet and Analysis tabs show the ERP's own rows without waiting for the coordinator, whose rows fill in when they land, read every 30 s and never while the last read is still out; the tabs and the tab-bar counts send each URL once per load and read the pool summary, not the secret-bearing snapshot.
   - **Fleet** (`/#/fleet`, v1.344.0): a strip of host cards, then one table
     of every account. A host card gives the id, the agent's version, when it
     last reported, running of capacity, the **Authoritative** switch (off is

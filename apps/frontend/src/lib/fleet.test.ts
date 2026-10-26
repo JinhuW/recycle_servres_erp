@@ -38,8 +38,9 @@ const ANSWERS: Record<string, unknown> = {
 
 const { ApiError } = await import('./api');
 const { fleetApi, fleetErrorCode, fleetVncSocketUrl } = await import('./fleet');
+const { forgetSharedGets } = await import('./sharedGet');
 
-beforeEach(() => { calls.length = 0; });
+beforeEach(() => { calls.length = 0; forgetSharedGets(); });
 
 describe('fleetApi', () => {
   it('reads the lists, unwrapping only the answers that are wrapped', async () => {

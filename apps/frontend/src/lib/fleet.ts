@@ -11,7 +11,8 @@ import type {
   FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetRelease, FleetSettings, FleetSlot as FleetSlotRow,
   FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, RoundStartAnswer,
 } from '@recycle-erp/shared';
-import { ApiError, api } from './api';
+import { ApiError } from './api';
+import { sharedApi as api } from './sharedGet';
 
 export type {
   FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,

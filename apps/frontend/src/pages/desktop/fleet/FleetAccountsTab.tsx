@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { coordinatorApi, type Challenge, type FleetDoc } from '../../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
-import { poolApi, type PoolAccount } from '../../../lib/facebookPool';
+import { poolApi } from '../../../lib/facebookPool';
 import { fleetApi, type FleetHost, type FleetRelease, type FleetSlot, type FleetWorker } from '../../../lib/fleet';
 import { queueCityName } from '../../../lib/fleetView';
 import { useT } from '../../../lib/i18n';
@@ -13,10 +13,12 @@ import { ActivityAside } from '../FleetWorkers';
 import { dueLabel, easternClock, maskUid } from './fleetBoard';
 import {
   EMPTY_FLEET_ROW_FILTER, FLEET_ROW_KINDS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning, NOT_RUNNING,
-  type FleetRow, type FleetRowFilter, type FleetRowKind,
+  type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowKind,
 } from './fleetRows';
 import { AddHostDialog, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
-import { agoLabel, BudgetRing, ConfirmDialogBody, EmptyRow, Legend, UnavailableCard, useFleetPoll, WorkerStateChip } from './shared';
+import {
+  agoLabel, BudgetRing, ConfirmDialogBody, COORDINATOR_POLL_MS, EmptyRow, Legend, UnavailableCard, useFleetPoll, WorkerStateChip,
+} from './shared';
 
 // ─── Fleet ────────────────────────────────────────────────────────────────────
 // The hosts as a strip of cards, then one table of every account: the ones
@@ -24,12 +26,15 @@ import { agoLabel, BudgetRing, ConfirmDialogBody, EmptyRow, Legend, UnavailableC
 // coordinator's workers until cutover (host "homelab"), and the accounts
 // nothing runs, each with the reason and the action that changes it. The
 // legend, the host select and the search box narrow the table. The activity
-// aside stays under the table while the coordinator's rows exist.
+// aside stays under the table while the coordinator's rows exist. The ERP's
+// own data and the coordinator's are read apart: the table shows the ERP's
+// rows at once and the coordinator's join them when its slower answer lands.
 
-type Data = {
-  slots: FleetSlot[]; workers: FleetWorker[]; hosts: FleetHost[]; release: FleetRelease | null;
-  coordinator: FleetDoc | null; challenges: Challenge[] | null; pool: PoolAccount[] | null;
+type ErpData = {
+  slots: FleetSlot[]; workers: FleetWorker[]; hosts: FleetHost[]; release: FleetRelease | null; pool: FleetPoolAccount[] | null;
 };
+type CoordinatorData = { coordinator: FleetDoc | null; challenges: Challenge[] | null };
+type Data = ErpData & CoordinatorData & { coordinatorPending?: boolean };
 
 const KIND_DOT: Record<FleetRowKind | 'all', string> = {
   all: 'fleet-dot-all', healthy: 'fleet-dot-pos', degraded: 'fleet-dot-warn', replacing: 'fleet-dot-info',
@@ -45,15 +50,25 @@ const KIND_KEY: Record<FleetRowKind | 'all', string> = {
 
 export function FleetAccountsTab() {
   const { t, locale } = useT();
-  const { data, reload } = useFleetPoll<Data>(() => Promise.all([
+  const erp = useFleetPoll<ErpData>(() => Promise.all([
     fleetApi.slots(), fleetApi.workers(), fleetApi.hosts(),
-    // The coordinator's rows go away at cutover; without the proxy the table
-    // is the ERP's fleet alone. The pool names the accounts nothing runs.
+    // The pool names the accounts nothing runs.
+    poolApi.summary().then(s => s.accounts).catch(() => null),
+  ]).then(([slots, workers, hosts, pool]) => ({ slots, workers, hosts: hosts.hosts, release: hosts.release, pool })));
+  // The coordinator's rows go away at cutover; without the proxy the table
+  // is the ERP's fleet alone.
+  const coord = useFleetPoll<CoordinatorData>(() => Promise.all([
     coordinatorApi.fleet().catch(() => null),
     coordinatorApi.listOpenChallenges().catch(() => null),
-    poolApi.snapshot().then(s => s.accounts).catch(() => null),
-  ]).then(([slots, workers, hosts, coordinator, challenges, pool]) =>
-    ({ slots, workers, hosts: hosts.hosts, release: hosts.release, coordinator, challenges, pool })));
+  ]).then(([coordinator, challenges]) => ({ coordinator, challenges })), COORDINATOR_POLL_MS);
+  const data = useMemo<Data | 'unavailable' | null>(() => {
+    if (erp.data === null || erp.data === 'unavailable') return erp.data;
+    const c = coord.data === null || coord.data === 'unavailable' ? null : coord.data;
+    return { ...erp.data, coordinator: c?.coordinator ?? null, challenges: c?.challenges ?? null, coordinatorPending: coord.data === null };
+  }, [erp.data, coord.data]);
+  const { reload: reloadErp } = erp;
+  const { reload: reloadCoordinator } = coord;
+  const reload = useCallback(() => { reloadErp(); reloadCoordinator(); }, [reloadErp, reloadCoordinator]);
   const [adding, setAdding] = useState(false);
   const [releasing, setReleasing] = useState(false);
   const [filter, setFilter] = useState<FleetRowFilter>(EMPTY_FLEET_ROW_FILTER);

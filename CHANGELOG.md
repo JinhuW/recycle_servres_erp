@@ -15,6 +15,35 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.351.0] - 2026-10-26
+
+### Changed
+
+- The Fleet tab (Monitors ▸ Facebook) no longer waits about six seconds for
+  the coordinator before showing anything. It reads the ERP's own slots,
+  workers, hosts and pool on their own, so those rows appear as soon as the
+  ERP answers, and the coordinator's workers join the table when their
+  slower answer lands. Rows already on screen keep their place: a pool
+  account that is probably a coordinator worker's waits for that answer
+  instead of showing as an idle row first and then jumping to the top. The
+  Analysis tab splits its reads the same way.
+- The page sends each URL once. The tab, the tab bar's count chips and the
+  page around them used to fetch the same addresses side by side: one load
+  sent 14 requests for 8 URLs, now it sends one request per URL. A read the
+  page already has in flight, or got back within the last two seconds, is
+  shared, and any write clears that memory so the page always re-reads after
+  an action.
+- Coordinator data is read every 30 s instead of every 10 s, and no poll
+  starts while the previous one is still out, so a slow coordinator no longer
+  piles up requests. Measured locally over one minute on the Fleet tab, the
+  page now sends 47 requests instead of 64, and the coordinator gets 6 calls
+  instead of 20.
+- The Fleet tab and the tab-bar counts read the new pool summary
+  (`/api/facebook-pool/summary`) for status, holder and uid, so a page load
+  no longer unseals every secret in the pool three times. The full snapshot
+  is read only when the Account pool tab opens. Against a backend without
+  the summary route the page falls back to the snapshot (RS-403).
+
 ## [1.350.1] - 2026-10-26
 
 ### Fixed

@@ -6,7 +6,10 @@
 // unit-tested without React.
 
 import type { Challenge, FleetAccount, FleetDoc } from '../../../lib/coordinator';
-import type { PoolAccount } from '../../../lib/facebookPool';
+import type { PoolAccountSummary } from '../../../lib/facebookPool';
+
+/** What a row reads of its pool account: a snapshot row or a summary row. */
+export type FleetPoolAccount = Pick<PoolAccountSummary, 'no' | 'uid' | 'status' | 'holder' | 'note'>;
 import { fleetStateParked, type FleetRelease, type FleetSlot, type FleetTask, type FleetWorker } from '../../../lib/fleet';
 import { parkedWorkers } from '../../../lib/fleetView';
 import { isQuarantined, leaseLive, liveness } from './fleetBoard';
@@ -45,7 +48,7 @@ export type FleetRow = {
   replacingTo: string | null;
   slot: FleetSlot | null;
   task: FleetTask | null;
-  pool: PoolAccount | null;
+  pool: FleetPoolAccount | null;
   /** The coordinator's row, for the rows it alone knows. */
   account: FleetAccount | null;
 };
@@ -56,7 +59,9 @@ export type FleetRowsInput = {
   release: FleetRelease | null;
   coordinator: FleetDoc | null;
   challenges: readonly Challenge[] | null;
-  pool: readonly PoolAccount[] | null;
+  pool: readonly FleetPoolAccount[] | null;
+  /** The coordinator has not answered yet (as opposed to answered nothing). */
+  coordinatorPending?: boolean;
 };
 
 const vncPortOf = (url: string | null | undefined): number | null => {
@@ -64,7 +69,7 @@ const vncPortOf = (url: string | null | undefined): number | null => {
   return m ? Number(m[1]) : null;
 };
 
-function erpRow(slot: FleetSlot, worker: FleetWorker | null, release: FleetRelease | null, pool: PoolAccount | null, now: number): FleetRow {
+function erpRow(slot: FleetSlot, worker: FleetWorker | null, release: FleetRelease | null, pool: FleetPoolAccount | null, now: number): FleetRow {
   const beat = worker ? liveness(worker.last_heartbeat_at, now) : 'never';
   const running = !!worker && leaseLive(slot, now) && beat !== 'dead' && beat !== 'never';
   const replacing = running && release?.state === 'rolling' && release.current?.worker_id === worker?.worker_id;
@@ -103,7 +108,7 @@ function erpRow(slot: FleetSlot, worker: FleetWorker | null, release: FleetRelea
   };
 }
 
-function coordinatorRow(w: FleetAccount, parked: ReadonlySet<string>, pool: PoolAccount | null): FleetRow {
+function coordinatorRow(w: FleetAccount, parked: ReadonlySet<string>, pool: FleetPoolAccount | null): FleetRow {
   const h = w.health;
   const live = !!h && (h.liveness === 'live' || h.liveness === 'stale');
   const state = h?.state ?? null;
@@ -139,7 +144,7 @@ function coordinatorRow(w: FleetAccount, parked: ReadonlySet<string>, pool: Pool
   };
 }
 
-function poolRow(a: PoolAccount): FleetRow {
+function poolRow(a: FleetPoolAccount): FleetRow {
   return {
     key: `pool:${a.no}`, no: a.no, uid: a.uid, kind: a.status === 'taken' ? 'taken' : 'parked', running: false, source: 'pool',
     host: null, lastHost: null, workerId: null, vncPort: null, state: null, heartbeat: null, now: null, minutes: null, budget: null,
@@ -173,7 +178,13 @@ export function fleetRows(input: FleetRowsInput, now: number = Date.now()): Flee
     rows.push(coordinatorRow(w, parked, held));
     if (held) seenNo.add(held.no);
   }
-  for (const a of pool) if (!seenNo.has(a.no)) rows.push(poolRow(a));
+  // A fleet account no ERP slot holds is most likely a coordinator worker's:
+  // shown as an idle pool row now, it would jump to the running rows when the
+  // coordinator answers. It waits for that answer instead.
+  for (const a of pool) {
+    if (seenNo.has(a.no) || (input.coordinatorPending && a.status === 'fleet')) continue;
+    rows.push(poolRow(a));
+  }
   return rows.sort((x, y) => Number(y.running) - Number(x.running)
     || (x.running && y.running ? naturally(x.workerId ?? '', y.workerId ?? '') : (x.no ?? Infinity) - (y.no ?? Infinity))
     || naturally(x.key, y.key));
