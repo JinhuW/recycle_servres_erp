@@ -35,16 +35,18 @@ router = APIRouter()
 _ACCOUNT_ID = re.compile(ACCOUNT_ID_PATTERN)
 
 
-def _account_out(store: AccountStore, row: Dict[str, Any]) -> AccountOut:
-    account_id = str(row["account_id"])
+def _stored_secrets(store: AccountStore, account_id: str) -> Dict[str, Any]:
     try:
-        stored = store.get_secret(account_id)
+        return store.get_secret(account_id)
     except VaultError:
         # A rotated or missing vault key: the account still exists and its
         # identity is still worth showing; only the presence flags are lost.
-        stored = {}
+        return {}
+
+
+def _account_out(row: Dict[str, Any], stored: Dict[str, Any]) -> AccountOut:
     return AccountOut(
-        account_id=account_id,
+        account_id=str(row["account_id"]),
         worker_id=row.get("worker_id"),
         fb_username=row.get("fb_username"),
         fb_uid=row.get("fb_uid"),
@@ -61,7 +63,9 @@ def _account_out(store: AccountStore, row: Dict[str, Any]) -> AccountOut:
 @router.get("/v1/accounts", response_model=AccountList, dependencies=[Depends(require_admin)])
 def list_accounts() -> AccountList:
     store = deps.get_account_store()
-    return AccountList(accounts=[_account_out(store, row) for row in store.list_accounts()])
+    return AccountList(
+        accounts=[_account_out(row, stored) for row, stored in store.list_accounts_with_secrets()]
+    )
 
 
 def _secret_changes(payload: AccountUpsert) -> Dict[str, Optional[str]]:
@@ -198,4 +202,4 @@ def put_account(account_id: str, payload: AccountUpsert) -> AccountOut:
         ",".join(f for f, v in secrets.items() if v is not None) or "-",
         ",".join(f for f, v in secrets.items() if v is None) or "-",
     )
-    return _account_out(store, dict(row))
+    return _account_out(dict(row), _stored_secrets(store, account_id))

@@ -100,3 +100,30 @@ def test_a_slow_lookup_reads_pending_and_keeps_running(monkeypatch):
         return await proxy_exit.resolve([key], wait_s=0.01)
 
     assert asyncio.run(scenario()) == {key: {"ip": "203.0.113.9"}}
+
+
+def test_an_empty_cache_holds_the_page_only_briefly(monkeypatch):
+    release = None
+
+    async def never(key):
+        await release.wait()
+        return {"ip": "203.0.113.9"}
+
+    monkeypatch.setattr(proxy_exit, "_lookup", never)
+    key = ("http://slow.example:1", None, None)
+
+    async def scenario():
+        nonlocal release
+        release = asyncio.Event()
+        started = asyncio.get_running_loop().time()
+        answer = await proxy_exit.resolve([key])
+        waited = asyncio.get_running_loop().time() - started
+        release.set()
+        await proxy_exit._inflight[key]
+        return answer, waited
+
+    answer, waited = asyncio.run(scenario())
+    assert answer == {key: {"pending": True}}
+    # A first load after a restart must not wait seconds on lookups that the
+    # next refresh shows anyway.
+    assert waited < 1.0

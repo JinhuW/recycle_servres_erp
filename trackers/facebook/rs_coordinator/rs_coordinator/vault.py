@@ -13,7 +13,7 @@ accounts never touches plaintext.
 
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .db import Database
 
@@ -175,6 +175,25 @@ class AccountStore:
 
     def list_accounts(self: "AccountStore") -> List[Dict[str, Any]]:
         return self.db.list_accounts()
+
+    def list_accounts_with_secrets(
+        self: "AccountStore",
+    ) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
+        """Each account's non-secret fields with its opened secrets.
+
+        One query instead of a `get_secret` round trip per account, which over
+        a remote Postgres is most of the cost. A blob the current key cannot
+        open reads as no secrets, so one bad row does not fail the list.
+        """
+        out: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+        for row in self.db.list_account_rows_sealed():
+            blob = row.pop("secret_blob", None)
+            try:
+                stored = self.vault.decrypt(blob) if blob else {}
+            except VaultError:
+                stored = {}
+            out.append((row, stored))
+        return out
 
     def delete_account(self: "AccountStore", account_id: str) -> bool:
         return self.db.delete_account(account_id)

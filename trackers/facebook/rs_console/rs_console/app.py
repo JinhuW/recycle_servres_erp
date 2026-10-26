@@ -127,6 +127,11 @@ TIMEOUT_S = 10.0
 SCREENSHOT_TIMEOUT_S = 20.0
 # The queue's shadow report replays up to two weeks of the whole fleet.
 SHADOW_TIMEOUT_S = 120.0
+# Coordinator calls one /v1/fleet build keeps in flight. Its per-worker
+# configs and session metas are ~80 calls; the coordinator queries through a
+# pool of four connections, so more than this in flight only queues there,
+# ahead of the workers' own heartbeats.
+FLEET_CONCURRENCY = 8
 # How often the city queue's roster is pushed when nothing changed.
 ROSTER_PUSH_S = 600.0
 
@@ -559,6 +564,13 @@ def _read_toml(path: str | None) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _raised(result: Any) -> Any:
+    """A gathered result, or the exception it ended in, raised here."""
+    if isinstance(result, BaseException):
+        raise result
+    return result
+
+
 @app.get("/v1/fleet", dependencies=[Depends(require_token)])
 async def fleet() -> Dict[str, Any]:
     """Who searches where, for what, whether they are alive — and as whom.
@@ -597,63 +609,80 @@ async def fleet() -> Dict[str, Any]:
     search_cities: Optional[list] = None
     status_changes: Optional[list] = None
     error: Optional[str] = None
+    queue_res: Any = None
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_S, base_url=base, headers=headers) as client:
+            # The coordinator answers each call from a remote database, so the
+            # calls that do not depend on each other go out together.
+            gate = asyncio.Semaphore(FLEET_CONCURRENCY)
+
+            async def get(path: str, **kwargs: Any) -> httpx.Response:
+                async with gate:
+                    return await client.get(path, **kwargs)
+
             # healthz is open and cheap; it names the coordinator's build.
-            hz = await client.get("/healthz")
+            hz, res = await asyncio.gather(get("/healthz"), get("/v1/workers"), return_exceptions=True)
+            hz = _raised(hz)
             if hz.status_code in (200, 503):
                 try:
                     coordinator_version = (hz.json() or {}).get("version")
                 except ValueError:
                     coordinator_version = None
-
-            res = await client.get("/v1/workers")
+            res = _raised(res)
             if res.status_code == 200:
                 rows = (res.json() or {}).get("workers") or []
             else:
                 error = f"coordinator returned {res.status_code}"
 
-            # An older coordinator answers 404: no fleet, mounted configs only.
-            listing = await client.get("/v1/fleet/configs") if rows is not None else None
-            if listing is not None and listing.status_code == 200:
-                fleet_ids = [c["worker_id"] for c in (listing.json() or {}).get("configs") or []]
-                texts = await asyncio.gather(
-                    *(client.get(f"/v1/fleet/configs/{wid}") for wid in fleet_ids),
-                    return_exceptions=True,
-                )
-                for wid, text in zip(fleet_ids, texts):
-                    if isinstance(text, httpx.Response) and text.status_code == 200:
-                        try:
-                            worker_cfgs[wid] = tomllib.loads((text.json() or {}).get("toml") or "")
-                        except (tomllib.TOMLDecodeError, ValueError):
-                            pass
-
-            if rows is not None:
-                # Accounts are one list; session metadata is per worker, so ask
-                # for every worker the config or the coordinator knows about.
-                acc = await client.get("/v1/accounts")
-                if acc.status_code == 200:
-                    accounts = (acc.json() or {}).get("accounts") or []
+            async def configs_then_sessions() -> tuple:
+                nonlocal fleet_ids
+                # An older coordinator answers 404: no fleet, mounted configs only.
+                listing = await get("/v1/fleet/configs")
+                if listing.status_code == 200:
+                    fleet_ids = [c["worker_id"] for c in (listing.json() or {}).get("configs") or []]
+                    texts = await asyncio.gather(
+                        *(get(f"/v1/fleet/configs/{wid}") for wid in fleet_ids),
+                        return_exceptions=True,
+                    )
+                    for wid, text in zip(fleet_ids, texts):
+                        if isinstance(text, httpx.Response) and text.status_code == 200:
+                            try:
+                                worker_cfgs[wid] = tomllib.loads((text.json() or {}).get("toml") or "")
+                            except (tomllib.TOMLDecodeError, ValueError):
+                                pass
+                # Session metadata is per worker, so ask for every worker the
+                # config or the coordinator knows about.
                 worker_ids = fleet_view.known_worker_ids(fleet_cfg, monitor_worker_id, rows, worker_cfgs)
                 metas = await asyncio.gather(
-                    *(client.get(f"/v1/session/{wid}/meta") for wid in worker_ids),
+                    *(get(f"/v1/session/{wid}/meta") for wid in worker_ids),
                     return_exceptions=True,
                 )
+                return worker_ids, metas
+
+            if rows is not None:
+                # Each worker's "today": two days of rows cover every US zone's
+                # local day. An older coordinator answers 404 to the stats and
+                # the queue, which leaves `today`, `status_changes` and `queue`
+                # null rather than the page broken.
+                chain, acc, cycles, reviews, cities, changes, queue_res = await asyncio.gather(
+                    configs_then_sessions(),
+                    get("/v1/accounts"),
+                    get("/v1/stats/search-cycles", params={"hours": 48}),
+                    get("/v1/stats/reviews/workers", params={"days": 2}),
+                    get("/v1/stats/search-cities"),
+                    get("/v1/stats/status-changes", params={"days": 7}),
+                    get("/v1/queue/status"),
+                    return_exceptions=True,
+                )
+                # Read in the order the calls were once made one by one, so a
+                # failure leaves the document as partial as it always did.
+                worker_ids, metas = _raised(chain)
+                acc = _raised(acc)
+                if acc.status_code == 200:
+                    accounts = (acc.json() or {}).get("accounts") or []
                 for wid, meta in zip(worker_ids, metas):
                     if isinstance(meta, httpx.Response) and meta.status_code == 200:
                         sessions[wid] = meta.json()
-
-                # Each worker's "today". Two days of rows cover every US
-                # zone's local day; an older coordinator answers 404, which
-                # leaves `today` (and `status_changes`) null rather than the
-                # page broken.
-                cycles, reviews, cities, changes = await asyncio.gather(
-                    client.get("/v1/stats/search-cycles", params={"hours": 48}),
-                    client.get("/v1/stats/reviews/workers", params={"days": 2}),
-                    client.get("/v1/stats/search-cities"),
-                    client.get("/v1/stats/status-changes", params={"days": 7}),
-                    return_exceptions=True,
-                )
                 if isinstance(cycles, httpx.Response) and cycles.status_code == 200:
                     search_cycles = (cycles.json() or {}).get("rows") or []
                 if isinstance(reviews, httpx.Response) and reviews.status_code == 200:
@@ -683,9 +712,12 @@ async def fleet() -> Dict[str, Any]:
     )
     # The week's status changes, newest first, for the ERP's Recent activity.
     doc["status_changes"] = status_changes
-    if rows is not None:
+
+    async def rank() -> Optional[Dict[str, Any]]:
         # How often each city is searched. An older coordinator answers 404,
         # which leaves the cities unmarked rather than the page broken.
+        if rows is None:
+            return None
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT_S, base_url=base, headers=headers) as client:
                 res = await client.post(
@@ -695,26 +727,26 @@ async def fleet() -> Dict[str, Any]:
                         for w in doc["workers"] if w["cities"]
                     }},
                 )
-            if res.status_code == 200:
-                fleet_view.apply_tiers(doc, res.json() or {})
+            return (res.json() or {}) if res.status_code == 200 else None
         except (httpx.HTTPError, ValueError):
-            pass
-        # Today's city round and each worker's part in it. An older
-        # coordinator answers 404, which leaves `queue` null and the ERP
-        # showing the fleet as it was.
-        queue = None
-        try:
-            async with httpx.AsyncClient(timeout=TIMEOUT_S, base_url=base, headers=headers) as client:
-                res = await client.get("/v1/queue/status")
-            if res.status_code == 200:
-                queue = res.json()
-        except (httpx.HTTPError, ValueError):
-            pass
-        fleet_view.apply_queue(doc, queue)
+            return None
+
     # Where each worker comes out, asked through its own proxy. Never fails
     # the page: a slow or dead proxy reads `pending` / `error` on its row.
     targets = fleet_view.proxy_targets(doc, dict(os.environ))
-    fleet_view.apply_proxies(doc, targets, await proxy_exit.resolve(targets.values()))
+    ranked, exits = await asyncio.gather(rank(), proxy_exit.resolve(targets.values()))
+    if rows is not None:
+        if ranked is not None:
+            fleet_view.apply_tiers(doc, ranked)
+        # Today's city round and each worker's part in it.
+        queue = None
+        if isinstance(queue_res, httpx.Response) and queue_res.status_code == 200:
+            try:
+                queue = queue_res.json()
+            except ValueError:
+                pass
+        fleet_view.apply_queue(doc, queue)
+    fleet_view.apply_proxies(doc, targets, exits)
     doc["settings"] = {
         "editable": master is not None and "error" not in saved and settings.writable(bool(fleet_ids)),
         "updated_at": saved.get("updated_at"),

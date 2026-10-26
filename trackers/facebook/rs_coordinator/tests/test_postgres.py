@@ -275,6 +275,9 @@ def test_account_round_trip_with_bytes_blob(backend):
     assert len(listed) == 1
     assert "secret_blob" not in listed[0]  # never leaves the database
     assert listed[0]["fb_username"] == "ops@example.test"
+    sealed = backend.list_account_rows_sealed()
+    assert sealed[0]["secret_blob"] == b"rotated" and isinstance(sealed[0]["secret_blob"], bytes)
+    assert {k: v for k, v in sealed[0].items() if k != "secret_blob"} == listed[0]
 
     assert backend.delete_account("denver") is True
     assert backend.delete_account("denver") is False
@@ -903,6 +906,7 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
     handle.get_account_row("a")
     handle.account_row_for_worker("w")
     handle.list_accounts()
+    handle.list_account_rows_sealed()
     handle.delete_account("a")
     handle.insert_challenge({"worker_id": "w", "kind": "captcha"})
     handle.update_challenge(1, {"vnc_url": "vnc://x"})
@@ -944,7 +948,7 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
         handle.write_alert_claim(statement, {})
     handle.get_alert_claim("facebook", "1")
 
-    assert len(handle.log) == 57
+    assert len(handle.log) == 58
     for sql in handle.log:
         assert "?" not in sql, f"SQLite placeholder left in: {sql}"
         assert not re.search(r":\w", sql), f"named SQLite placeholder left in: {sql}"
