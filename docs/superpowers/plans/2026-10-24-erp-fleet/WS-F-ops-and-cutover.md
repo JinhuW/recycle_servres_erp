@@ -296,6 +296,32 @@ To turn alerts on after prod: put `FLEET_WORKER_ENV` again with `RS_ALERTS=on`,
 `RS_ALERT_REPORT_URL` (the coordinator URL) beside the two keys above, and
 give prod's `FLEET_COORDINATOR_URL` a route the prod hosts can reach.
 
+#### Coordinator and console on 0.14.4 (2026-10-26 UTC, homelab VM)
+
+Owner's yes to recreate `rs-coordinator` and `rs-console` only, for 0.14.4's
+`/v1/fleet` and `/v1/accounts` speed-ups. Done by hand, not `deploy.sh`
+(which recreates every worker).
+
+| Step | Outcome |
+| --- | --- |
+| Where they come from | compose project `deploy`, `deploy/docker-compose.coordinator.yml` and `deploy/docker-compose.console.yml` under `~/recycle_servers/facebook_tracker` (the LAN override is not applied; `rs-coordinator-lan` is a standalone socat). Both compose files and both Dockerfiles were already identical to the tag |
+| Backup | `~/recycle_servers/backups/coord-console-0.13.18-20261026T101205Z/code.tgz` (both code dirs, Dockerfiles, compose files); images tagged `rs-coordinator:rollback-0.13.18` and `rs-console:rollback-0.13.18` |
+| Sync | `rsync --checksum` of `rs_coordinator/` and `rs_console/` from the `facebook-tracker/v0.14.4` tree: the 14 files of the 0.13.18 → 0.14.4 diff, nothing deleted, no config or secret. No coordinator schema change in the range |
+| Build, then recreate | `docker compose -p deploy -f <file> build <svc>`, then `up -d --no-deps --no-build <svc>` (dry run first): coordinator 10:12:50, console 10:13:02. Both healthy, coordinator `/healthz` `0.14.4`, no error lines in their logs |
+| `/v1/fleet` (console, in-container) | before 3.73–4.37 s (3 calls); after 1.58–1.81 s (4 calls); same 156 KB document |
+| `/v1/accounts` (coordinator) | before 1.79 s; after 0.10–0.11 s |
+| Workers | all 15 HEALTHY workers heartbeated again after 10:12:50 (by 10:17:45); every `rs-monitor-*` container (41) kept its container id and `StartedAt`; only the two recreated containers differ in `docker ps -a` |
+| LAN route | `worker-60-14` → `http://10.10.10.73:8500/healthz` 200 through `rs-coordinator-lan` |
+
+`.rs-deployed` still reads `0.13.18`: the workers run 0.13.x, so the stamp
+for a whole-tree deploy stays as it was. Rollback is `docker tag
+rs-coordinator:rollback-0.13.18 rs-coordinator:latest` (same for the
+console), then the same `up -d --no-deps --no-build` per service.
+
+The vendored monitor's `recycle-patches` was pushed to the private mirror
+`JinhuW/aimm-recycle-patches` the same day, fast-forward `8d9dde5` →
+`1efd1a4` (the `VENDOR.md` pin).
+
 #### Integration run, login-free part (2026-10-24, on the Mac)
 
 No worker image ran, no Facebook login happened, no pool account was used.
