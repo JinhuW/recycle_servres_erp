@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.6] - 2026-10-26
+
 ### Added
 
 - **`scripts/export-device-profile.py` prints the device a homelab worker's
