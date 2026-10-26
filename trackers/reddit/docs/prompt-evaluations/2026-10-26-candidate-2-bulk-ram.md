@@ -1,6 +1,6 @@
 # 2026-10-26 — candidate 2: bulk Samsung, SK Hynix and Micron RAM only
 
-The owner narrowed the target (RS-403): "We are only target bulk rams
+The owner narrowed the target (RS-404): "We are only target bulk rams
 (Samsung, SK, Micron) brand." SSDs are out. The live prompt was also sending
 far more noise than leads. This entry rebuilds the prompt around what the
 inventory buys, and measures it offline before it replaces live.

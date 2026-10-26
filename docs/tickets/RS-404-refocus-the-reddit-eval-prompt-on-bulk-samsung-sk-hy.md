@@ -1,5 +1,5 @@
 ---
-id: RS-403
+id: RS-404
 title: Refocus the Reddit eval prompt on bulk Samsung, SK Hynix and Micron RAM
 type: story
 status: done
