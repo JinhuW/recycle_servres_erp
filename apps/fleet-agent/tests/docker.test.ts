@@ -1,24 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { containerOf, DockerCli, runArgs, runEnv, type Runner, type RunResult } from '../src/docker.js';
 
-const SPEC = { worker_id: 'lab-2', image: 'ghcr.io/jinhuw/aimm-recycle:0.14.0', port: 5902 };
-const ENV = { url: 'https://erp.example', hostId: 'lab', token: 'made-up-host-token' };
+const TICKET = 'fct_made-up-claim-ticket';
+const SPEC = { worker_id: 'lab-2', image: 'ghcr.io/jinhuw/aimm-recycle:0.14.0', port: 5902, ticket: TICKET };
+const ENV = { url: 'https://erp.example', hostId: 'lab' };
 
 describe('docker run', () => {
   it('is exactly the contract\'s line', () => {
     expect(runArgs('lab', SPEC).join(' ')).toBe(
-      'run -d --name rs-fleet-lab-2 --label rs.fleet.host=lab --label rs.fleet.worker=lab-2 --restart no --shm-size 1g ' +
-        '-e RS_FLEET_URL -e RS_FLEET_HOST_ID -e RS_FLEET_HOST_TOKEN -e RS_FLEET_WORKER_ID -e RS_VNC_PORT=5902 ' +
+      'run -d --name rs-fleet-lab-2 --label rs.fleet.host=lab --label rs.fleet.worker=lab-2 --label rs.fleet.claim_ticket=1 ' +
+        '--restart no --shm-size 1g ' +
+        '-e RS_FLEET_URL -e RS_FLEET_HOST_ID -e RS_FLEET_CLAIM_TICKET -e RS_FLEET_HOST_TOKEN -e RS_FLEET_WORKER_ID -e RS_VNC_PORT=5902 ' +
         '-p 127.0.0.1:5902:5900 -- ghcr.io/jinhuw/aimm-recycle:0.14.0',
     );
   });
 
-  it('hands the token to the CLI through its environment, never argv', () => {
-    expect(runArgs('lab', SPEC).join(' ')).not.toContain(ENV.token);
+  it('hands the worker its claim ticket through the CLI\'s environment, never argv, and never the host token', () => {
+    expect(runArgs('lab', SPEC).join(' ')).not.toContain(TICKET);
+    // The ticket goes out under the old name too: a worker image before
+    // facebook-tracker 0.14.5 claims with RS_FLEET_HOST_TOKEN only.
     expect(runEnv(SPEC, ENV)).toEqual({
       RS_FLEET_URL: 'https://erp.example',
       RS_FLEET_HOST_ID: 'lab',
-      RS_FLEET_HOST_TOKEN: 'made-up-host-token',
+      RS_FLEET_CLAIM_TICKET: TICKET,
+      RS_FLEET_HOST_TOKEN: TICKET,
       RS_FLEET_WORKER_ID: 'lab-2',
     });
   });
@@ -86,6 +91,12 @@ describe('observe', () => {
       .toMatchObject({ id: 'f00', image_id: 'sha256:abc', handoff: true });
   });
 
+  it('reads the claim ticket label', () => {
+    expect(containerOf({ ...INSPECT[1], Config: { ...INSPECT[1].Config, Labels: { ...INSPECT[1].Config.Labels, 'rs.fleet.claim_ticket': '1' } } }))
+      .toMatchObject({ ticket: true });
+    expect(containerOf(INSPECT[1])).not.toHaveProperty('ticket');
+  });
+
   it('ignores a record without the worker label', () => {
     expect(containerOf(INSPECT[2])).toBeNull();
   });
@@ -147,7 +158,7 @@ describe('acting', () => {
 it('passes the confirmed stopped epoch to the replacement entrypoint', () => {
   const args = runArgs('lab', { ...SPEC, handoff_epoch: 7 });
   expect(args).toContain('RS_FLEET_HANDOFF_EPOCH=7');
-  expect(args.join(' ')).not.toContain(ENV.token);
+  expect(args.join(' ')).not.toContain(TICKET);
 });
 
 describe('other agents', () => {

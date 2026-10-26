@@ -2181,7 +2181,7 @@ Only the latest revive is kept; the backend logs each one.
 
 The ERP fleet: the city task queue the Facebook Marketplace workers pull from, and the slots they run pool accounts in. fleet_cities and fleet_items are the catalog managers edit; fleet_settings holds the queue's knobs; fleet_tasks is one open task per enabled city and item, with fleet_task_events as its log; fleet_hosts are the machines that run worker containers; fleet_slots is the fleet's view of each pool account (who runs it, where, under which lease epoch) and fleet_workers the containers that heartbeat. fleet_minutes is a view that sums each account's leased minutes per UTC day for the daily budget. The accounts themselves and their secrets stay in fb_pool_accounts. Migration 0206 creates all of it; the routes under /api/fleet fill it in later releases.
 
-Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_slots`](#erp-fleet-slots), [`fleet_workers`](#erp-fleet-workers), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
+Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_slots`](#erp-fleet-slots), [`fleet_workers`](#erp-fleet-workers), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
 
 <a id="erp-fleet-cities"></a>
 
@@ -2258,6 +2258,27 @@ A machine that runs worker containers through one fleet-agent container. The age
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
 
 - **Primary key:** `host_id`
+
+<a id="erp-fleet-claim-tickets"></a>
+
+#### `fleet_claim_tickets`
+
+Single-use bearers the host agent mints right before each `docker run`, one per worker container, so the container claims with a ticket instead of the host token. A ticket is good for one claim, for its host, worker id and handoff epoch, for 10 minutes; only its sha256 is stored. Migration 0211.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `token_hash` | `text` | ✓ |  | sha256 (hex) of the ticket (`fct_…`). |
+| `host_id` | `text` | ✓ |  | → fleet_hosts. The host that minted it. |
+| `worker_id` | `text` | ✓ |  | The only worker id it may claim for. |
+| `handoff_epoch` | `integer` |  |  | The handoff the claim must carry, or none. |
+| `expires_at` | `timestamptz` | ✓ |  | Mint time + 10 minutes; no claim after it, not even a retry. |
+| `consumed_at` | `timestamptz` |  |  | When the claim it let through committed. |
+| `claim_id` | `text` |  |  | That claim's boot id: only its retries pass afterwards. |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `token_hash`
+- **References:** `host_id` → `fleet_hosts.host_id` (on delete cascade)
+- **Indexes:** `fleet_claim_tickets_worker_idx` (host_id, worker_id), `fleet_claim_tickets_expires_idx` (expires_at)
 
 <a id="erp-fleet-slots"></a>
 

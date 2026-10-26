@@ -27,7 +27,7 @@ async function pool(uid: string, status: string, note: string) {
 async function copyLikeTheNightly(nos: number[]) {
   const sql = getTestDb();
   await sql`TRUNCATE fleet_task_attempts, fleet_task_events, fleet_tasks, fleet_workers, fleet_slots,
-                     fleet_hosts, fleet_settings, fleet_items, fleet_cities`;
+                     fleet_claim_tickets, fleet_hosts, fleet_settings, fleet_items, fleet_cities`;
   await sql.unsafe(`UPDATE fb_pool_accounts SET ${SEALED.map((c) => `${c} = NULL`).join(', ')},
                       cookie_uid = NULL, cookie_at = NULL, status = 'available', note = 'from prod'
                     WHERE no IN (${nos.join(',')})`);

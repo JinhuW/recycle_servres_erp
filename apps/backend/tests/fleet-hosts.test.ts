@@ -522,11 +522,18 @@ describe('confirmed-stop handoff with the real agent planner', () => {
         if (lost) { lost = false; return false; }
         return true;
       },
+      ticket: async (worker_id: string, handoff_epoch?: number) => {
+        const r = await api<{ ticket: string }>('POST', '/api/fleet/hosts/lab/tickets', { headers: bearer(HOST_TOKEN), body: { worker_id, handoff_epoch } });
+        expect(r.status).toBe(200);
+        return r.body.ticket;
+      },
     };
     let replacement: ClaimAnswer | null = null;
     const originalRun = docker.run.bind(docker);
     docker.run = async (spec, env) => {
-      const r = await api<ClaimAnswer>('POST', '/api/fleet/worker/claim', { headers: bearer(HOST_TOKEN), body: {
+      // The container claims with the ticket the agent minted for it, never the host token.
+      expect(Object.values(env)).not.toContain(HOST_TOKEN);
+      const r = await api<ClaimAnswer>('POST', '/api/fleet/worker/claim', { headers: bearer(spec.ticket), body: {
         host_id: 'lab', worker_id: spec.worker_id, version: '0.14.0', claim_id: 'replacement-boot', handoff_epoch: spec.handoff_epoch,
       } });
       expect(r.status).toBe(200); replacement = r.body;
@@ -534,7 +541,7 @@ describe('confirmed-stop handoff with the real agent planner', () => {
       return originalRun(spec, env);
     };
     const agent = () => new Agent({ hostId: 'lab', stateDir: dir, client, docker,
-      workerEnv: { url: 'http://test', hostId: 'lab', token: HOST_TOKEN }, version: 'test', now: () => clock });
+      workerEnv: { url: 'http://test', hostId: 'lab' }, version: 'test', now: () => clock });
     try {
       expect((await agent().tick()).actions).toEqual([]);
       expect((await desired()).body.roll).toEqual({ replace: 'lab-1' });

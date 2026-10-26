@@ -50,6 +50,7 @@ what answers.
 | Any non-parked heartbeat (DEGRADED too) renews the task lease, capped at `task_max_minutes` | §5 | RS-408 |
 | `fleet_settings` key `retention_days` (default 90, 30..730); the scheduler purges terminal task history older than it hourly; migration `0210_fleet_task_retention.sql` | §4, §8 | RS-409 |
 | Coordinator wired for fleet workers on dev: `FLEET_COORDINATOR_URL=http://10.10.10.73:8500` (LAN forwarder), coordinator tokens per worker id in `FLEET_WORKER_ENV` as `RS_CONTROL_PLANE_TOKENS`; alerts withheld unless `env` carries `RS_ALERTS=on` | §2 | facebook-tracker 0.14.2 |
+| Claim tickets: `POST /hosts/:id/tickets` mints a single-use bearer per worker container (migration `0211_fleet_claim_tickets.sql`); `claim` takes it beside the host token (deprecated for workers); the agent passes `RS_FLEET_CLAIM_TICKET` (and the same ticket as `RS_FLEET_HOST_TOKEN` for older images), never the host token; containers carry `rs.fleet.claim_ticket=1` and are recreated, not `docker start`ed | §2, §3, §4, §5, §6, §10 | claim tickets (ERP + facebook-tracker 0.14.5) |
 
 ## 1. Names
 
@@ -98,11 +99,17 @@ Worker container (set by the agent):
 
 | Var | Meaning |
 | --- | --- |
-| `RS_FLEET_URL`, `RS_FLEET_HOST_ID`, `RS_FLEET_HOST_TOKEN` | fleet mode on when all three are set; `RS_FLEET_URL` is the agent's `FLEET_URL` unchanged |
+| `RS_FLEET_URL`, `RS_FLEET_HOST_ID` | the ERP and the host; `RS_FLEET_URL` is the agent's `FLEET_URL` unchanged |
+| `RS_FLEET_CLAIM_TICKET` | the single-use claim ticket the agent minted for this container right before `docker run` (§6). Fleet mode is on when `RS_FLEET_URL`, `RS_FLEET_HOST_ID` and either this or `RS_FLEET_HOST_TOKEN` are set; the ticket wins |
+| `RS_FLEET_HOST_TOKEN` | **the same ticket** from an agent with claim tickets, so a worker image before facebook-tracker 0.14.5 (which reads only this name) still claims. From an older agent, the host token itself (deprecated for workers) |
 | `RS_FLEET_WORKER_ID` | `<host_id>-<n>` chosen by the agent |
 | `RS_VNC_PORT` | the **host** port the agent published (`127.0.0.1:<port>:5900`); the worker reports it in heartbeats |
+| `RS_FLEET_HANDOFF_EPOCH` | only on a replacement for a confirmed stop (§6, §10) |
 
-These five are the only variables the agent passes today (`apps/fleet-agent/src/docker.ts`).
+These are the only variables the agent passes (`apps/fleet-agent/src/docker.ts`).
+The host token never enters a worker container: one runs Chromium on
+Facebook, and the host token claims any free account on its host (password,
+TOTP seed, cookies) and confirms its siblings stopped.
 
 **Shared worker env: a Cloudflare Worker secret.** The config the worker
 renders (`trackers/facebook/rs_worker/config.template.toml`) expands `${VAR}`
@@ -120,7 +127,7 @@ secret on the ERP's Cloudflare Worker (`deploy/cloudflare/worker.js`,
 
 The secrets never enter Railway or Postgres, and the agent never holds them.
 Who receives them is still the backend's decision: only a claim the host
-token check let through is a `200`. The worker applies `env` to its own
+token or claim ticket check let through is a `200`. The worker applies `env` to its own
 environment before it renders the config (an entry the container already
 sets is not overridden).
 
@@ -140,7 +147,8 @@ Keys the worker reads from `env` beyond the template's references
 | Scope | How | Used by |
 | --- | --- | --- |
 | manager | existing ERP session cookie + manager role | frontend, `/api/fleet/*` except worker/host routes |
-| host | `Authorization: Bearer <host token>`; `sha256(token)` = `fleet_hosts.token_hash` | `/api/fleet/hosts/:id/*`, `POST /api/fleet/worker/claim` |
+| host | `Authorization: Bearer <host token>` (64 hex chars); `sha256(token)` = `fleet_hosts.token_hash` | `/api/fleet/hosts/:id/*`, `POST /api/fleet/worker/claim` (deprecated for workers: older agents and worker images only, kept for one release) |
+| ticket | `Authorization: Bearer fct_<base64url>`; `sha256(ticket)` = `fleet_claim_tickets.token_hash`, minted by the host (§6) | `POST /api/fleet/worker/claim` only: one claim, for the ticket's host, worker id and handoff epoch |
 | worker | `Authorization: Bearer <worker token>`: `base64url(json{worker_id, account_no, epoch, exp}) . hmac` with `FLEET_WORKER_TOKEN_KEY`; `exp` = claim + 7 days | `/api/fleet/worker/*` except `claim` |
 
 A worker token whose `epoch` ≠ `fleet_slots.epoch` for its `account_no` (or
@@ -148,7 +156,11 @@ whose slot is gone, or whose pool account left the fleet or changed holder) →
 `409 {error: "stale_epoch"}` on every worker route. A missing, bad or expired
 worker token → `401 {error: "unauthorized", detail}` (§5 lists the details).
 A missing or unknown host token, or one used on another host's `:id` → `401
-{error: "unauthorized"}`. A key missing on the ERP's side → `503 {error:
+{error: "unauthorized"}`. A ticket is not a host token: on any host route it
+is that same `401`. On `claim` a refused ticket is `401 {error:
+"unauthorized", detail}`: `bad_ticket` (unknown, or voided by a newer ticket
+for the worker), `expired_ticket`, `used_ticket` (spent by another claim),
+`ticket_mismatch` (another worker id or handoff epoch). A key missing on the ERP's side → `503 {error:
 "unavailable"}`, never 401. Manager routes answer the app's usual `401`/`403`
 for a missing session or role.
 
@@ -297,10 +309,17 @@ worker; nothing claims it.
 - `0210_fleet_task_retention.sql`: index `fleet_tasks_purge_idx` on
   `(COALESCE(done_at, leased_at, due_at), id)` over terminal tasks, for the
   retention purge (§8 `retention_days`).
+- `0211_fleet_claim_tickets.sql`: `fleet_claim_tickets` (`token_hash` PK,
+  `host_id` → `fleet_hosts` on delete cascade, `worker_id`, `handoff_epoch`,
+  `expires_at`, `consumed_at`, `claim_id`, `created_at`), indexed on
+  `(host_id, worker_id)` and `expires_at`.
 
 Lock order everywhere: pool account (`FOR NO KEY UPDATE`), then slot, then
 tasks. The release row (`fleet_settings` key `release`) is locked only by
 `desired`/`advanceRoll` and `stopped`; a pick reads it after its slot lock.
+A ticket claim locks its `fleet_claim_tickets` row right after the worker's
+claim lock (`pg_advisory_xact_lock` on `<host>:<worker>`), before the pool
+account.
 
 `LISTEN/NOTIFY` channel: `fleet_tasks` (payload: `item`), sent by the
 scheduler after every write that can make a task ready.
@@ -325,7 +344,11 @@ What a worker does with each refusal, exactly as the bodies read:
 
 Any other 5xx, and a response that never came, is transient too.
 
-### `POST /api/fleet/worker/claim` — host scope
+### `POST /api/fleet/worker/claim` — ticket or host scope
+
+The worker claims with the ticket the agent minted for its container
+(`RS_FLEET_CLAIM_TICKET`); the host token still works for one release, for
+agents and worker images from before the tickets.
 
 ```jsonc
 // request
@@ -370,6 +393,16 @@ worker id (the trigger opens the `fb_worker_accounts` stint) and writes an
 `fb_pool_events` `assigned` row. `409 no_slot` when none is free. `host_id`
 must be the token's own host (`422` otherwise); `vnc_port` may be null.
 `device` falls back to a default desktop profile for fields the slot lacks.
+
+With a ticket: the body's `worker_id` must be the ticket's and its
+`handoff_epoch` the ticket's (both absent, or equal), else `401
+ticket_mismatch` before anything is read. The ticket is locked under the
+worker's claim lock and spent (`consumed_at`, `claim_id`) in the same
+transaction as the claim it let through. A later claim with the same
+`claim_id` (that boot's HTTP retry) passes while the ticket lives and gets
+the same slot and epoch; any other claim is `401 used_ticket`, and after
+`expires_at` even the retry is `401 expired_ticket`. A `409 no_slot` leaves
+the ticket unspent.
 
 ### `POST /api/fleet/worker/heartbeat` — worker scope
 
@@ -537,11 +570,27 @@ The report keeps only containers named `<host>-<n>` (another host's worker
 ids are dropped) with `hold`, `exit_code` and `image_id` when sent, and the
 `agent` identity.
 
+```jsonc
+// POST /api/fleet/hosts/:id/tickets
+{ "worker_id": "homelab-2", "handoff_epoch": 7 }      // handoff_epoch optional (null or absent = none)
+// 200 { "ticket": "fct_…", "expires_at": "…" }        // 10 minutes
+// 422 { "error": "bad_request", "detail": "worker_id must be <host_id>-<n>" | "handoff_epoch" }
+// 403 { "error": "agent_conflict" }
+```
+
+A claim ticket for the container the agent is about to `docker run` (§3,
+§5): 32 random bytes as `fct_` + base64url, stored only as its sha256, good
+for one claim for that worker id and handoff epoch, for 10 minutes. Minting
+deletes the worker's earlier tickets (the container they were for is gone:
+the agent runs a worker only where none exists) and every expired ticket.
+The agent mints right before each run, after the image is there and any stop
+is confirmed, and starts nothing without one.
+
 **One agent per host.** The first `X-Fleet-Agent-Instance` (or report
 `agent.instance_id`) seen holds the host (`fleet_hosts.agent_instance`,
 `agent_seen_at`) until it has been silent 2 minutes; `desired` and `report`
 from any other instance answer `403 agent_conflict`, which the agent reads as
-observe-only. A call without an instance id is let through.
+observe-only; `tickets` checks it the same way. A call without an instance id is let through.
 
 `count` is the host's `capacity` when authoritative, else `0`. `vnc_ports`
 maps `<host>-<n>` to `5900 + n` for `n = 1..count`. `image`/`version` are the
@@ -608,8 +657,10 @@ already holds. Slot rows show a reservation as `reserved_until`, not as
   released with `stopped` `restart: false`.
 - Offline (the ERP unreachable, a cached `desired` in use): may restart
   exited workers; creates, removes and replaces nothing, and does not
-  `docker start` a worker created with a handoff epoch (its reservation is
-  spent; it waits to be recreated online).
+  `docker start` a worker created with a handoff epoch or a claim ticket
+  (its reservation or ticket is spent; it waits to be recreated online).
+  Online, with `leases` in `desired`, an exited worker is always recreated
+  on a fresh ticket.
 - At most one start per tick and none within 3 minutes of the previous one
   (`FLEET_STAGGER_SECONDS`): every start is a Facebook login. The previous
   start is the later of the one the agent wrote to `/state` and the newest
@@ -711,12 +762,20 @@ the first version; others add fields in their own PRs.
 ## 10. Worker container contract (image ↔ agent)
 
 - Image: `ghcr.io/jinhuw/aimm-recycle:<ver>` (private GHCR), entrypoint `rs_worker/entry.py`.
-- Fleet mode on when `RS_FLEET_URL`, `RS_FLEET_HOST_ID`, `RS_FLEET_HOST_TOKEN`
-  are set; otherwise the image behaves exactly as today (bind-mounted config).
+- Fleet mode on when `RS_FLEET_URL`, `RS_FLEET_HOST_ID` and a claim
+  credential are set: `RS_FLEET_CLAIM_TICKET`, else `RS_FLEET_HOST_TOKEN`
+  (an agent from before the tickets); otherwise the image behaves exactly as
+  today (bind-mounted config). The entrypoint claims with the ticket when
+  there is one, and keeps every `RS_FLEET_*` variable out of the monitor's
+  environment.
+- A container the agent created carries the label `rs.fleet.claim_ticket=1`.
+  Its ticket is spent by its first claim, so `docker start` on it claims with
+  a spent ticket: a `401` on a ticket claim exits `75` at once, before the
+  browser, and the agent recreates it on a fresh ticket.
 - Exit codes: `0` normal stop (`docker stop`; the agent leaves it stopped
   when it happened while the agent ran and the agent did not stop it, §6),
-  `75` stale epoch or no slot (agent restarts after 60 s, backing off when
-  it repeats), `70` config/claim failure (agent backs off 10 min), `78`
+  `75` stale epoch, no slot or a refused claim ticket (agent restarts after
+  60 s, backing off when it repeats), `70` config/claim failure (agent backs off 10 min), `78`
   operator needed (agent leaves it stopped, §6); anything else is the
   monitor's own code and counts as a crash (§6).
 - A container started with a handoff carries the label

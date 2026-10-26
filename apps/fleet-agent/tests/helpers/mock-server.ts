@@ -1,5 +1,5 @@
-// A stand-in for the ERP's host API: GET desired, POST report and stopped,
-// bearer-checked.
+// A stand-in for the ERP's host API: GET desired, POST tickets, report and
+// stopped, bearer-checked.
 
 import { createServer, type Server } from 'node:http';
 import type { Desired, Report } from '../../src/types.js';
@@ -12,12 +12,19 @@ export interface MockServer {
   stopped: Record<string, unknown>[];
   /** The answer to the next stopped calls: 200, 409 (stale), 500, or no answer at all. */
   stoppedAnswer: 200 | 409 | 500;
+  /** Bodies of POST tickets, in order, and the tickets answered. */
+  ticketRequests: Record<string, unknown>[];
+  tickets: string[];
+  /** The answer to the next tickets calls. */
+  ticketAnswer: 200 | 404 | 500;
   requests: { method: string; path: string; auth: string | undefined; instance?: string }[];
   close(): Promise<void>;
 }
 
 export async function startMockServer(hostId: string, token: string, desired: Desired): Promise<MockServer> {
-  const mock: Omit<MockServer, 'url' | 'close'> = { desired, reports: [], stopped: [], stoppedAnswer: 200, requests: [] };
+  const mock: Omit<MockServer, 'url' | 'close'> = {
+    desired, reports: [], stopped: [], stoppedAnswer: 200, ticketRequests: [], tickets: [], ticketAnswer: 200, requests: [],
+  };
   const server: Server = createServer((req, res) => {
     const path = req.url ?? '';
     const instance = req.headers['x-fleet-agent-instance'];
@@ -41,6 +48,21 @@ export async function startMockServer(hostId: string, token: string, desired: De
         mock.stopped.push(JSON.parse(body) as Record<string, unknown>);
         const status = mock.stoppedAnswer;
         res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(status === 200 ? { ok: true } : { error: status === 409 ? 'stale_epoch' : 'boom' }));
+      });
+      return;
+    }
+    if (req.method === 'POST' && path === `${base}tickets`) {
+      let body = '';
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', () => {
+        mock.ticketRequests.push(JSON.parse(body) as Record<string, unknown>);
+        if (mock.ticketAnswer !== 200) {
+          res.writeHead(mock.ticketAnswer, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'boom' }));
+          return;
+        }
+        const ticket = `fct_made-up-ticket-${String(mock.tickets.length + 1).padStart(4, '0')}`;
+        mock.tickets.push(ticket);
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ticket, expires_at: new Date(Date.now() + 600_000).toISOString() }));
       });
       return;
     }

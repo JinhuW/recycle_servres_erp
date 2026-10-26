@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Agent } from '../src/agent.js';
 import { HttpFleetClient } from '../src/client.js';
+import { runEnv } from '../src/docker.js';
 import { createLogger } from '../src/log.js';
 import type { Desired } from '../src/types.js';
 import { exited, FakeDocker, running } from './helpers/fake-docker.js';
@@ -47,7 +48,7 @@ function agent(docker: FakeDocker, over: { staggerMs?: number; url?: string; tok
     stateDir,
     client: new HttpFleetClient({ baseUrl: url, hostId: HOST, token, timeoutMs: 2000 }),
     docker,
-    workerEnv: { url, hostId: HOST, token },
+    workerEnv: { url, hostId: HOST },
     version: '1.335.0',
     now: () => clock,
     staggerMs: over.staggerMs ?? 0,
@@ -67,11 +68,14 @@ describe('online', () => {
     expect(result.observe_only).toBe(false);
     expect(docker.commands).toEqual([
       ['ensure', 'img:1'],
-      ['run', 'rs-fleet-lab-1', 'img:1', 5901, { url: server.url, hostId: HOST, token: TOKEN }],
+      ['run', 'rs-fleet-lab-1', 'img:1', 5901, { url: server.url, hostId: HOST }],
     ]);
+    expect(docker.tickets).toEqual(server.tickets);
+    expect(server.ticketRequests).toEqual([{ worker_id: 'lab-1' }]);
     expect(JSON.parse(readFileSync(join(stateDir, 'desired.json'), 'utf8'))).toEqual(desired());
     expect(server.requests.map((r) => [r.method, r.path, r.auth])).toEqual([
       ['GET', '/api/fleet/hosts/lab/desired', `Bearer ${TOKEN}`],
+      ['POST', '/api/fleet/hosts/lab/tickets', `Bearer ${TOKEN}`],
       ['POST', '/api/fleet/hosts/lab/report', `Bearer ${TOKEN}`],
     ]);
     expect(server.reports).toEqual([
@@ -313,6 +317,9 @@ describe('confirmed-stop handoff', () => {
     expect(result.errors).toEqual([]);
     expect(server.stopped).toEqual([expect.objectContaining({ worker_id: 'lab-1', account_no: 7, epoch: 3, restart: true, agent_instance: expect.any(String), daemon_id: 'fake-daemon' })]);
     expect(docker.handoffs).toEqual([3]);
+    // The ticket is bound to the handoff the replacement claims with.
+    expect(server.ticketRequests).toEqual([{ worker_id: 'lab-1', handoff_epoch: 3 }]);
+    expect(docker.tickets).toEqual(server.tickets);
     expect(JSON.parse(readFileSync(join(stateDir, 'memory.json'), 'utf8')).pending).toEqual({});
   });
 
@@ -341,6 +348,7 @@ describe('confirmed-stop handoff', () => {
     server.stoppedAnswer = 409;
     expect((await agent(docker).tick()).errors).toEqual([]);
     expect(docker.handoffs).toEqual([undefined]);
+    expect(server.ticketRequests).toEqual([{ worker_id: 'lab-1' }]);
   });
 
   it('frees the account when it removes an extra', async () => {
@@ -383,6 +391,45 @@ describe('confirmed-stop handoff', () => {
     clock += 60_000;
     expect((await agent(docker).tick()).actions).toEqual([]);
     expect(docker.commands).toEqual([]);
+  });
+});
+
+describe('claim tickets', () => {
+  it('each run gets its own fresh ticket, and the host token reaches no container', async () => {
+    const docker = new FakeDocker();
+    server.desired = desired({ count: 2 });
+    await agent(docker).tick();
+    await agent(docker).tick();
+    expect(server.tickets).toHaveLength(2);
+    expect(new Set(server.tickets).size).toBe(2);
+    expect(docker.tickets).toEqual(server.tickets);
+    expect(server.ticketRequests).toEqual([{ worker_id: 'lab-1' }, { worker_id: 'lab-2' }]);
+    for (const c of docker.commands.filter((x) => x[0] === 'run')) {
+      expect(JSON.stringify(c)).not.toContain(TOKEN);
+    }
+    const env = runEnv({ worker_id: 'lab-1', image: 'img:1', port: 5901, ticket: docker.tickets[0] }, { url: server.url, hostId: HOST });
+    expect(Object.values(env)).not.toContain(TOKEN);
+    expect(env.RS_FLEET_CLAIM_TICKET).toBe(docker.tickets[0]);
+  });
+
+  it('without a ticket nothing runs and the stagger is not spent', async () => {
+    const docker = new FakeDocker();
+    server.ticketAnswer = 500;
+    const a = agent(docker, { staggerMs: 180_000 });
+    const first = await a.tick();
+    expect(first.errors).toEqual(['lab-1: no claim ticket from the ERP; not started']);
+    expect(docker.commands).toEqual([['ensure', 'img:1']]);
+    server.ticketAnswer = 200;
+    clock += 30_000;
+    await a.tick();
+    expect(docker.commands.filter((c) => c[0] === 'run')).toHaveLength(1);
+  });
+
+  it('an older ERP without the route (404) starts nothing rather than hand out the host token', async () => {
+    const docker = new FakeDocker();
+    server.ticketAnswer = 404;
+    expect((await agent(docker).tick()).errors).toEqual(['lab-1: no claim ticket from the ERP; not started']);
+    expect(docker.commands.filter((c) => c[0] === 'run')).toEqual([]);
   });
 });
 

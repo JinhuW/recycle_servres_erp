@@ -1,5 +1,5 @@
-// The agent's calls to the ERP: the desired state in, stop confirmations and
-// a report back.
+// The agent's calls to the ERP: the desired state in, a claim ticket for each
+// worker it runs, stop confirmations and a report back.
 //
 // None of them throws. `desired` answers null for "offline" (the agent falls
 // back to what it cached; an ERP outage must never reach the workers) and
@@ -16,6 +16,8 @@ export type DesiredAnswer = Desired | null | 'refused';
 export interface FleetClient {
   desired(): Promise<DesiredAnswer>;
   stopped?(workerId: string, identity: StopIdentity): Promise<boolean | 'stale'>;
+  /** A single-use claim ticket for the container about to run; null when the ERP gave none. */
+  ticket(workerId: string, handoffEpoch?: number): Promise<string | null>;
   report(payload: Report): Promise<boolean>;
   /** Names this agent on every later call. */
   identify?(identity: AgentIdentity): void;
@@ -71,6 +73,17 @@ export class HttpFleetClient implements FleetClient {
     });
     if (!answer.ok) return answer.status === 409 ? 'stale' : false;
     return true;
+  }
+
+  async ticket(workerId: string, handoffEpoch?: number): Promise<string | null> {
+    const answer = await this.request('POST', 'tickets', {
+      worker_id: workerId, ...(handoffEpoch !== undefined ? { handoff_epoch: handoffEpoch } : {}),
+    });
+    if (!answer.ok) return null;
+    const t = (answer.body as { ticket?: unknown } | null)?.ticket;
+    if (typeof t === 'string' && /^fct_[A-Za-z0-9_-]{16,128}$/.test(t)) return t;
+    this.onFailure('tickets', 'answer carries no ticket');
+    return null;
   }
 
   async report(payload: Report): Promise<boolean> {

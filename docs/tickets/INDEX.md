@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-411](./RS-411-per-container-claim-tickets-keep-the-host-token-out.md) | done | story | P2 | Per-container claim tickets keep the host token out of fleet workers | 1.360.0 |
 | [RS-410](./RS-410-the-nightly-prod-to-dev-copy-keeps-the-dev-fleet.md) | done | task | P1 | The nightly prod-to-dev copy keeps the dev fleet | 1.359.0 |
 | [RS-409](./RS-409-fleet-task-history-retention.md) | done | task | P2 | Fleet task history retention | 1.358.0 |
 | [RS-408](./RS-408-a-degraded-heartbeat-keeps-renewing-the-task-lease.md) | done | task | P2 | A DEGRADED heartbeat keeps renewing the task lease | 1.357.0 |

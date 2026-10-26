@@ -53,7 +53,7 @@ const agent = new Agent({
     onFailure: (what, detail) => log.warn('erp call failed', { what, detail }),
   }),
   docker: new DockerCli(),
-  workerEnv: { url: env('FLEET_URL'), hostId, token: env('FLEET_HOST_TOKEN') },
+  workerEnv: { url: env('FLEET_URL'), hostId },
   version,
   staggerMs,
   log,

@@ -44,7 +44,7 @@ the same `FLEET_HOST_ID` on its daemon observes only, logs an error and puts
 | --- | --- | --- |
 | `FLEET_URL` | yes | the ERP through its Cloudflare Worker: `https://inventory-dev.recycleservers.com` (dev) or `https://inventory.recycleservers.com` (prod), never the Railway origin. The Worker adds the shared worker env to a claim answer, and prod refuses requests that skip it. Passed to workers unchanged as `RS_FLEET_URL` |
 | `FLEET_HOST_ID` | yes | the host id as registered in the ERP; worker ids are `<host>-1`, `<host>-2`, … |
-| `FLEET_HOST_TOKEN` | yes | the host's bearer token, shown once when the host is added |
+| `FLEET_HOST_TOKEN` | yes | the host's bearer token, shown once when the host is added. The agent keeps it to itself: workers get a claim ticket instead |
 | `FLEET_INTERVAL` | no | seconds between ticks (default 30, at least 5) |
 | `FLEET_STATE_DIR` | no | where the last desired answer, the start memory, the holds, the stop handoff and the agent's instance id live (default `/state`) |
 | `FLEET_IMAGE_PREFIX` | no | comma-separated repositories this host runs (default `ghcr.io/jinhuw/aimm-recycle`). A desired image outside them is never pulled or run; existing workers are left as they are |
@@ -87,20 +87,31 @@ the same `FLEET_HOST_ID` on its daemon observes only, logs an error and puts
        as usual.
 
      A person brings a held worker back with `docker rm rs-fleet-{worker_id}`
-     (the agent runs a fresh one on its next turn) or, for a container not
-     started from a handoff, `docker start rs-fleet-{worker_id}`. Either is a
-     Facebook login.
-4. Apply. A start is written to `/state` before it is made, and not made if
-   it cannot be written. A worker is started with exactly
+     (the agent runs a fresh one on its next turn). `docker start` on a
+     container this agent created claims with its spent claim ticket, exits
+     `75` before the browser opens, and is then recreated like any `75`; it
+     works only on a container from an agent before the tickets (no
+     `rs.fleet.claim_ticket` label) and not started from a handoff. A fresh
+     worker is a Facebook login.
+4. Apply. Right before each `docker run` the agent asks the ERP for a claim
+   ticket (`POST /api/fleet/hosts/{id}/tickets {worker_id, handoff_epoch?}`):
+   single use, bound to that worker id and handoff epoch, ten minutes to
+   live. Without one nothing is run and the start is not counted. A start is
+   written to `/state` before it is made, and not made if it cannot be
+   written. A worker is started with exactly
    `docker run -d --name rs-fleet-{worker_id} --label rs.fleet.host={id}
    --label rs.fleet.worker={worker_id} [--label rs.fleet.handoff_epoch={n}]
-   --restart no --shm-size 1g -e RS_FLEET_URL -e RS_FLEET_HOST_ID
+   --label rs.fleet.claim_ticket=1 --restart no --shm-size 1g
+   -e RS_FLEET_URL -e RS_FLEET_HOST_ID -e RS_FLEET_CLAIM_TICKET
    -e RS_FLEET_HOST_TOKEN -e RS_FLEET_WORKER_ID -e RS_VNC_PORT={port}
-   [-e RS_FLEET_HANDOFF_EPOCH={n}] -p 127.0.0.1:{port}:5900 -- {image}`. A
+   [-e RS_FLEET_HANDOFF_EPOCH={n}] -p 127.0.0.1:{port}:5900 -- {image}`.
+   `RS_FLEET_CLAIM_TICKET` and `RS_FLEET_HOST_TOKEN` both carry the
+   ticket: a worker image before facebook-tracker 0.14.5 claims with the
+   second name only. The host token itself never enters a container. A
    tag is pulled before every start, so a tag pushed again is picked up; a
    digest (`…@sha256:…`) is pulled only when missing. Release images should
    be digest-pinned. The variables are handed to the CLI through its
-   environment, so the token is never in a process list. A removal is
+   environment, so the ticket is never in a process list. A removal is
    `docker stop -t 30` then `docker rm`.
 5. `POST /api/fleet/hosts/{id}/report` with the agent's version, its
    identity and every labelled container (`worker_id`, `image`, `state`,
@@ -114,9 +125,10 @@ Every call to the ERP carries `X-Fleet-Agent-Instance` (a UUID kept in
 
 With `authoritative: false` the agent runs steps 1, 2 and 5 only and logs
 the plan it would have applied. Offline it restarts exited workers and
-nothing more (not a worker started from a handoff: its reservation is
-spent, so it waits to be recreated online): blind is not the time to change
-things.
+nothing more (not a worker started from a handoff or with a claim ticket:
+its reservation or ticket is spent, so it waits to be recreated online):
+blind is not the time to change things. Online, an exited worker is always
+recreated (stop confirmation, then a fresh ticket and `docker run`).
 
 ## What it never does
 
@@ -128,9 +140,11 @@ things.
   `operator_stopped`).
 - Pull or run an image outside `FLEET_IMAGE_PREFIX`.
 - Start, stop or replace anything while the ERP says `authoritative: false`.
-- Keep credentials: the host token is the only secret it holds, and it hands
-  the ERP's URL, the host id and that token to each worker, which claims its
-  own account.
+- Hand out the host token. It is the only secret the agent holds; each
+  worker gets the ERP's URL, the host id and a claim ticket good for one
+  claim for that worker, and claims its own account with it. A compromised
+  worker container can therefore claim no other account and cannot call
+  `desired`, `report`, `stopped` or `tickets`.
 
 ## Development
 

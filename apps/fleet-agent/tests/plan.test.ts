@@ -268,4 +268,15 @@ describe('images and handoffs', () => {
     expect(p.actions).toEqual([]);
     expect(p.notes.join('\n')).toMatch(/reservation is used/);
   });
+
+  it('offline does not docker-start a worker whose claim ticket is spent', () => {
+    const p = run([running('lab-1'), { ...exited('lab-2', 75, ago(120)), ticket: true }], { online: false }, { leases: {} });
+    expect(p.actions).toEqual([]);
+    expect(p.notes.join('\n')).toMatch(/claim ticket is used, so it waits to be recreated online/);
+  });
+
+  it('online recreates a ticket worker, so it runs on a fresh ticket', () => {
+    const p = run([running('lab-1'), { ...exited('lab-2', 75, ago(120)), ticket: true }], {}, { leases: {} });
+    expect(p.actions[0]).toMatchObject({ kind: 'replace', worker_id: 'lab-2' });
+  });
 });

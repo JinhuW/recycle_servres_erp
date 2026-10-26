@@ -284,11 +284,15 @@ export class Agent {
   }
 
   private async runWorker(action: Extract<Action, { kind: 'run' | 'replace' }>): Promise<string | null> {
+    const handoff = this.memory.pending[action.worker_id]?.restart ? this.memory.pending[action.worker_id].epoch : undefined;
+    // Before the start is stamped: without a ticket nothing runs, and nothing
+    // that did not run was a login.
+    const ticket = await this.o.client.ticket(action.worker_id, handoff);
+    if (!ticket) return 'no claim ticket from the ERP; not started';
     const withheld = this.stampStart(action);
     if (withheld) return withheld;
-    const handoff = this.memory.pending[action.worker_id]?.restart ? this.memory.pending[action.worker_id].epoch : undefined;
     const problem = await this.o.docker.run(
-      { worker_id: action.worker_id, image: action.image, port: action.port, ...(handoff !== undefined ? { handoff_epoch: handoff } : {}) },
+      { worker_id: action.worker_id, image: action.image, port: action.port, ticket, ...(handoff !== undefined ? { handoff_epoch: handoff } : {}) },
       this.o.workerEnv,
     );
     if (!problem) {
