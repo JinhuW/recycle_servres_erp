@@ -8,7 +8,9 @@ dialled and bytes moved both ways, as binary frames. When either side ends,
 both end, and a fresh socket is parked for the next viewer.
 
 Never touches the browser or the session. A `409` on the dial (the slot's
-epoch moved on) stops the relay for good; the monitor exits on the same 409.
+epoch moved on) stops the relay for good and writes `fence_path`, which the
+monitor checks before every page it opens: it stops its search and exits 75
+without waiting for a 409 of its own.
 """
 
 from __future__ import annotations
@@ -48,10 +50,12 @@ class VncRelay:
         log: Callable[[str], None] = lambda message: None,
         backoff: Tuple[float, float] = (1.0, 60.0),
         token_path: str | None = None,
+        fence_path: str | None = None,
     ) -> None:
         self.url = relay_url(fleet_url)
         self.worker_token = worker_token
         self.token_path = token_path
+        self.fence_path = fence_path
         self.vnc_addr = vnc_addr
         self.log = log
         self.backoff = backoff
@@ -110,6 +114,7 @@ class VncRelay:
                 if status in (401, 409):
                     self.refused = status
                     self.log("VNC relay: the fleet refuses this worker's epoch; not dialling again")
+                    self._fence(status)
                     return
                 self.log(f"VNC relay: dial refused with HTTP {status}")
             except (OSError, TimeoutError, InvalidHandshake) as e:
@@ -121,6 +126,14 @@ class VncRelay:
             if self._stop.wait(delay):
                 return
             delay = min(delay * 2, self.backoff[1])
+
+    def _fence(self, status: int) -> None:
+        if not self.fence_path:
+            return
+        try:
+            Path(self.fence_path).write_text(f"{status}\n")
+        except OSError as e:
+            self.log(f"VNC relay: could not fence the monitor: {e}")
 
     def _track(self, sock: socket.socket | None, add: bool) -> None:
         if sock is None:

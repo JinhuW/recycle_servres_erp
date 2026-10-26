@@ -18,6 +18,21 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-10-26
+
+### Fixed
+
+- **A fenced fleet worker stops searching at once.** When the fleet refused a
+  worker's epoch mid-task (another claim moved the slot on), only the idle
+  fleet loop noticed: on `worker-60-14` the heartbeat logged the refusal and
+  the worker searched its city for another 17 minutes before it exited 75,
+  with an account another container might already hold. Now any refused
+  fleet call (heartbeat thread, task event, session upload, or the VNC
+  relay, which writes `fence_path` for the monitor) fences the worker: the
+  search stops before its next phrase, listing, results scroll or
+  navigation, sends no `done`, no event and no session, closes the browser
+  and exits 75 (monitor `f0da469`). Non-fleet workers are unchanged.
+
 ## [0.14.2] - 2026-10-25
 
 ### Added
