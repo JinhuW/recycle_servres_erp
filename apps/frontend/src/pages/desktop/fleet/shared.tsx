@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '../../../components/Icon';
+import { Modal } from '../../../components/Modal';
 import { ApiError } from '../../../lib/api';
+import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
+import { fleetApi, type FleetSlot } from '../../../lib/fleet';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
 import { useT } from '../../../lib/i18n';
 import { budgetTone, easternClock, easternDateTime, liveness, spanLabel, type Liveness, type Translate } from './fleetBoard';
@@ -224,5 +227,87 @@ export function ConfirmDialogBody({ title, body, confirm, busy, onClose, onConfi
         <button type="button" className={`btn primary${danger ? ' fleet-danger' : ''}`} onClick={onConfirm} disabled={busy}>{confirm}</button>
       </div>
     </>
+  );
+}
+
+// Parking frees the account: its worker's next call is refused and the
+// container exits, so a manager must mean it.
+export function ParkDialog({ slot, onClose, onDone }: { slot: FleetSlot; onClose: () => void; onDone: () => void }) {
+  const { t } = useT();
+  const [busy, setBusy] = useState(false);
+  const confirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fleetApi.parkSlot(slot.account_no);
+      showSuccessToast(t('fleetParked', { no: slot.account_no }));
+      onDone();
+    } catch (e) {
+      handleFetchError(e);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 460 }}>
+      <ConfirmDialogBody title={t('fleetParkTitle', { no: slot.account_no })} confirm={t('fleetPark')} busy={busy} danger
+        onClose={onClose} onConfirm={confirm}
+        body={<>
+          <p>{t('fleetParkBody', { worker: slot.worker_id ?? '—' })}</p>
+          <p className="fp-warn">{t('fleetParkWarn')}</p>
+        </>} />
+    </Modal>
+  );
+}
+
+// Unparking makes the account claimable again: the next worker that asks for
+// a slot may take it, and that worker's start is a Facebook login.
+export function UnparkDialog({ slot, onClose, onDone }: { slot: FleetSlot; onClose: () => void; onDone: () => void }) {
+  const { t } = useT();
+  const [busy, setBusy] = useState(false);
+  const confirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fleetApi.unparkSlot(slot.account_no);
+      showSuccessToast(t('fleetUnparked', { no: slot.account_no }));
+      onDone();
+    } catch (e) {
+      handleFetchError(e);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 460 }}>
+      <ConfirmDialogBody title={t('fleetUnparkTitle', { no: slot.account_no })} confirm={t('fleetUnpark')} busy={busy}
+        onClose={onClose} onConfirm={confirm}
+        body={<>
+          <p>{t('fleetUnparkBody')}</p>
+          <p className="fp-warn">{t('fleetUnparkWarn')}</p>
+        </>} />
+    </Modal>
+  );
+}
+
+// Lifting a quarantine early lets the next worker that asks claim the account.
+export function ReleaseQuarantineButton({ slot, onDone }: { slot: FleetSlot; onDone: () => void }) {
+  const { t } = useT();
+  const [busy, setBusy] = useState(false);
+  const release = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fleetApi.releaseQuarantine(slot.account_no);
+      showSuccessToast(t('fleetQuarantineReleased', { no: slot.account_no }));
+      onDone();
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button type="button" className="btn sm" onClick={release} disabled={busy} title={t('fleetQuarantineReleaseHint')}>
+      {t('fleetQuarantineRelease')}
+    </button>
   );
 }

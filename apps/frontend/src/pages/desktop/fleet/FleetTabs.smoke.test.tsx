@@ -27,7 +27,7 @@ vi.mock('../../../lib/facebookPool', async () => {
 vi.mock('../../../lib/errorToast', () => ({ handleFetchError: vi.fn(), showSuccessToast: vi.fn(), showWarnToast: vi.fn() }));
 
 const { CITIES, CITY_LOG, COORDINATOR, HITS, HOSTS, NOW, POOL, RELEASE, SLOTS, STATS, TASKS, WORKERS } = await import('./fixtures');
-const { AccountsTable } = await import('./FleetAccountsTab');
+const { WorkersTable } = await import('./FleetAccountsTab');
 const { HostStrip, ReleaseBanner } = await import('./FleetHosts');
 const { Belt, CityLogAside, TaskTable } = await import('./FleetTasksTab');
 const { CitiesTable } = await import('./FleetCitiesTab');
@@ -59,26 +59,27 @@ describe('Fleet tab', () => {
     const failed = renderToString(<ReleaseBanner release={{ ...RELEASE, state: 'failed', current: null, failure: 'homelab-3 did not come back' }} now={NOW} />);
     expect(failed).toContain('homelab-3 did not come back');
   });
-  it('lists every account with its host, state, now and the idle rows’ actions', () => {
-    const html = renderToString(<AccountsTable data={fleetData} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
+  it('lists every worker with its host, account, state and now', () => {
+    const html = renderToString(<WorkersTable data={fleetData} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
     expect(html).toContain('fleetKindHealthy');
     expect(html).toContain('fleetKindReplacing');
     expect(html).toContain('fleetNowReplacing');       // homelab-3 is being replaced
     expect(html).toContain('Philadelphia, PA');        // worker-60-14-1's current task
     expect(html).toContain('fleetNowWaiting');         // homelab-1 holds no task
     expect(html).toContain('homelab-5');               // the coordinator's worker is a row
-    expect(html).toContain('fleetKindTaken');          // marcus's account
-    expect(html).toContain('fleetQuarantineRelease');  // #19
-    expect(html).toContain('fleetUnpark');             // #44, parked
+    expect(html).toContain('fleetKindOffline');        // homelab-9 never reported
+    expect(html).toContain('fleetQuarantineUntilAt');  // homelab-4's account
+    expect(html).toContain('fleetPark');
+    expect(html).not.toContain('fleetUnpark');         // idle accounts are the pool's
+    expect(html).not.toContain('fleetQuarantineRelease');
     expect(html).toContain('fleetEveryHost');
-    expect(html).toContain('fleetNotRunning');
     expect(html).not.toContain(SLOTS[0].uid!);         // uids are masked
     expect(html).toContain('ff-ring-full');            // #12 has used its budget
-    expect(html).toContain('fleetAccountsFoot');
+    expect(html).toContain('fleetWorkersFoot');
   });
   it('honours the legend filter', () => {
-    const html = renderToString(<AccountsTable data={fleetData} filter={{ ...EMPTY_FLEET_ROW_FILTER, kind: 'taken' }} onFilter={noop} onChanged={noop} now={NOW} />);
-    expect(html).toContain('fleetKindTaken');
+    const html = renderToString(<WorkersTable data={fleetData} filter={{ ...EMPTY_FLEET_ROW_FILTER, kind: 'offline' }} onFilter={noop} onChanged={noop} now={NOW} />);
+    expect(html).toContain('homelab-9');
     expect(html).not.toContain('homelab-3');
   });
 });

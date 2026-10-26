@@ -3284,34 +3284,34 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   10 s while it is visible.
   Since v1.351.0 (RS-403) the Fleet and Analysis tabs show the ERP's own rows without waiting for the coordinator, whose rows fill in when they land, read every 30 s and never while the last read is still out; the tabs and the tab-bar counts send each URL once per load and read the pool summary, not the secret-bearing snapshot.
   - **Fleet** (`/#/fleet`, v1.344.0): a strip of host cards, then one table
-    of every account. A host card gives the id, the agent's version, when it
+    of every worker (since v1.361.0, RS-412; before, every account). A host
+    card gives the id, the agent's version, when it
     last reported, running of capacity, the **Authoritative** switch (off is
     observe-only: the agent reports and starts nothing), the capacity stepper
     (a new worker is a Facebook login) and, while a release rolls, its
     progress line with the worker replaced next; **Add host** (the token
     shown once, with the three variables the agent needs) and **Release a
     version** sit in the tab's action row, and a rolling or stopped release
-    shows its banner under the strip. The table merges the ERP's slots and
-    workers by account number and, until cutover, lists the coordinator's
-    workers too (host `homelab`); an account both know is the ERP's row. Each
-    row: account number and masked uid, host, worker and VNC port, the state
-    chip with a one-line note (heartbeat age, "keeps its task" for a degraded
-    worker, the quarantine's end), **Now** (the city and item being searched
-    with the time on it and "home city"; "Waiting for a task"; or, for a
-    worker being replaced, "Stopping after this task, then back on
-    <version>"), **Today** (minutes of searching against the budget, as a
-    ring), the lease epoch and when it renews, the worker's version (muted
-    when it is not the host's), and the eye to the worker's page. An account
-    nothing runs is a row with no host: its chip says why — the worker's
-    parked state (Session expired, Checkpoint…), **Parked**, **Quarantined**
-    until when, **In manual use** with the holder, or its pool status — and
-    its Now cell holds the action: **Release quarantine**, **Unpark**, or
-    **Park** (a running row has Park too), each with the confirm the Slots
-    tab had. Running rows come first by worker id, then idle rows by account
-    number. The toolbar has the legend with counts (All accounts, Healthy,
-    Degraded, Replacing, Quarantined, Parked, In manual use), a host select
-    (every host, each host, Not running) and a search over worker, account,
-    city and host; the foot says "N of M accounts · R running on K hosts".
+    shows its banner under the strip. Since v1.361.0 (RS-412) the table is
+    one row per worker: the ERP's workers, with the slot and account each
+    holds, and, until cutover, the coordinator's (host `homelab`); a worker
+    both know is the ERP's row. An account no worker holds is not a row: the
+    Account pool tab lists it, with its Unpark and Release quarantine. A
+    worker that stopped reporting stays as **Offline** for a week after its
+    last heartbeat. Each row: worker and VNC port, host, account number and
+    masked uid, the state chip with a one-line note (heartbeat age, "keeps
+    its task" for a degraded worker, the account's quarantine end), **Now**
+    (the city and item being searched with the time on it and "home city";
+    "Waiting for a task"; or, for a worker being replaced, "Stopping after
+    this task, then back on <version>") with **Park** for a running worker,
+    **Today** (minutes of searching against the budget, as a ring), the lease
+    epoch and when it renews, the worker's version (muted when it is not the
+    host's), and the eye to the worker's page. Running workers come first,
+    then offline ones, each by worker id. The toolbar has the legend with
+    counts (All workers, Healthy, Degraded, Replacing, Parked — the worker
+    reports Session expired, Checkpoint… — and Offline), a host select and a
+    search over worker, account, city and host; the foot says "N of M
+    workers · R running on K hosts".
     The coordinator's activity aside stays under the table while its rows
     exist; since v1.350.1 it spans the full width and its list stops at 480px
     and scrolls. There is no Pause on a roll: the backend has no route for it.
@@ -3392,7 +3392,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     on** column: the ERP worker holding the account's slot with its state
     and epoch, linking to the worker page; else the coordinator's worker as
     the Holder column shows it; else why nothing runs it (quarantined,
-    parked, the purchaser who took it, or the pool status).
+    parked, the purchaser who took it, or the pool status). Since v1.361.0
+    (RS-412) a quarantined account's cell has **Release** and a parked one's
+    **Unpark** (with its confirm), which used to be on the Fleet tab.
   - **The worker page** (`/#/fleet/worker/<id>`, v1.337.0) recognises a
     fleet worker: state, last heartbeat, account and epoch, version, the task
     it holds (city, item, since when, lease), and **Watch**, its browser

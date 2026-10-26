@@ -28,7 +28,7 @@ import { AccountEditor } from './accountPool/AccountEditor';
 import { AccountImport } from './accountPool/AccountImport';
 import { CookieLabel, PoolCode, STATUS_KEYS, StatusChip } from './accountPool/shared';
 import { isQuarantined, leaseLive } from './fleet/fleetBoard';
-import { workerStateLabel } from './fleet/shared';
+import { ReleaseQuarantineButton, UnparkDialog, workerStateLabel } from './fleet/shared';
 import { STATUS_KEY, StatusChip as WorkerStatusChip, statusNote } from './FleetWorkers';
 import '../../styles/facebookPool.css';
 
@@ -39,8 +39,10 @@ type Props = {
   // Managers only, and null until (or unless) the coordinator answers.
   fleet?: FleetDoc | null;
   challenges?: Challenge[] | null;
-  // Managers only: the ERP fleet's slots, for the Runs on column.
+  // Managers only: the ERP fleet's slots, for the Runs on column and its
+  // Unpark and Release quarantine.
   slots?: FleetSlot[] | null;
+  onSlotsChanged?: () => void;
 };
 // Refusals the API names with one of the page's own keys read as a warning,
 // not as the blocking error dialog: the pool moved under the user, that's all.
@@ -84,7 +86,7 @@ const compareBy = (sort: (a: PoolAccount) => string | number, dir: 'asc' | 'desc
     return sign * cmp;
   };
 };
-export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = null, challenges = null, slots = null }: Props) {
+export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = null, challenges = null, slots = null, onSlotsChanged }: Props) {
   const { t, locale } = useT();
   const user = useEffectiveUser()!;
   const manager = user.role === 'manager';
@@ -125,6 +127,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
   const [picked, setPicked] = useState<number | null>(null);
   const [reporting, setReporting] = useState<number | null>(null);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  const [unparking, setUnparking] = useState<FleetSlot | null>(null);
   const workers = useMemo(() => new Map((fleet?.workers ?? []).map((w) => [w.worker_id, w])), [fleet]);
   const slotsByNo = useMemo(() => new Map((slots ?? []).map((s) => [s.account_no, s])), [slots]);
   const parked = useMemo(() => parkedWorkers(challenges), [challenges]);
@@ -322,8 +325,22 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
         </span>
       );
     }
-    if (slot && isQuarantined(slot)) return <a className="fp-muted" href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')}>{t('fpRunsOnQuarantined')}</a>;
-    if (slot?.parked) return <a className="fp-muted" href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')}>{t('fpRunsOnParked')}</a>;
+    if (slot && isQuarantined(slot)) {
+      return (
+        <span className="fp-holder">
+          <span className="fp-muted">{t('fpRunsOnQuarantined')}</span>
+          <span><ReleaseQuarantineButton slot={slot} onDone={() => onSlotsChanged?.()} /></span>
+        </span>
+      );
+    }
+    if (slot?.parked) {
+      return (
+        <span className="fp-holder">
+          <span className="fp-muted">{t('fpRunsOnParked')}</span>
+          <span><button type="button" className="btn sm" onClick={() => setUnparking(slot)}>{t('fleetUnpark')}</button></span>
+        </span>
+      );
+    }
     if (a.status === 'taken') return <span className="fp-muted">{t('fpRunsOnManual', { who: a.holder ?? '—' })}</span>;
     return <span className="fp-muted">{t(STATUS_KEYS[a.status]).toLowerCase()}</span>;
   };
@@ -795,6 +812,10 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
             });
           }}
         />
+      )}
+      {unparking && (
+        <UnparkDialog slot={unparking} onClose={() => setUnparking(null)}
+          onDone={() => { setUnparking(null); onSlotsChanged?.(); }} />
       )}
     </div>
   );

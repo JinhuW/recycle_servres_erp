@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { coordinatorApi, type Challenge, type FleetDoc } from '../../lib/coordinator';
 import { handleFetchError } from '../../lib/errorToast';
@@ -68,12 +68,13 @@ export function DesktopCoordinator({ showToast }: Props) {
   const [fleet, setFleet] = useState<FleetDoc | null>(null);
   const [challenges, setChallenges] = useState<Challenge[] | null>(null);
   const [slots, setSlots] = useState<FleetSlot[] | null>(null);
+  const loadSlots = useCallback(() => { fleetApi.slots().then(setSlots).catch(() => undefined); }, []);
   useEffect(() => {
     if (!manager || !poolOpen) return;
     coordinatorApi.fleet().then(setFleet).catch(() => undefined);
     coordinatorApi.listOpenChallenges().then(setChallenges).catch(() => undefined);
-    fleetApi.slots().then(setSlots).catch(() => undefined);
-  }, [manager, poolOpen]);
+    loadSlots();
+  }, [manager, poolOpen, loadSlots]);
   const counts = useTabCounts(manager && !watch && !worker);
   if (watch) {
     return (
@@ -117,7 +118,7 @@ export function DesktopCoordinator({ showToast }: Props) {
       {tabs}
       {pool
         ? <FacebookAccountPool key={user?.role} snapshot={pool} onSnapshot={setPool} showToast={showToast}
-            fleet={manager ? fleet : null} challenges={challenges} slots={manager ? slots : null} />
+            fleet={manager ? fleet : null} challenges={challenges} slots={manager ? slots : null} onSlotsChanged={loadSlots} />
         : <FormSkeleton fields={4} />}
     </>;
   }
