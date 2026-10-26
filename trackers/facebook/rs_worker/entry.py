@@ -1,12 +1,14 @@
 """The worker image's entrypoint: the old command as it was, or fleet mode.
 
-Without `RS_FLEET_URL`, `RS_FLEET_HOST_ID` and `RS_FLEET_HOST_TOKEN` this
-execs the image's command (supervisord with the bind-mounted config) and is
-not there at all. With them it:
+Without `RS_FLEET_URL`, `RS_FLEET_HOST_ID` and a claim credential
+(`RS_FLEET_CLAIM_TICKET`, or `RS_FLEET_HOST_TOKEN` from an agent before
+the tickets) this execs the image's command (supervisord with the
+bind-mounted config) and is not there at all. With them it:
 
 1. claims an account from the ERP's fleet (`POST /api/fleet/worker/claim`
-   with the host token): a slot, its sealed credentials, proxy, device, the
-   items to search and a worker token for the slot's epoch;
+   with the single-use claim ticket the host agent minted for this
+   container, or the host token): a slot, its sealed credentials, proxy,
+   device, the items to search and a worker token for the slot's epoch;
 2. renders the monitor's `config.toml`, the Playwright `session.json` and
    the device's `identity.json` inside the container, never on a mount;
 3. exports `RS_FB_PASSWORD` / `RS_FB_TOTP` for the monitor's password
@@ -22,8 +24,10 @@ not there at all. With them it:
 5. keeps a socket parked at the ERP's VNC relay (`vnc_relay.py`), so a
    manager can watch the browser with no port open on this host.
 
-Exit codes, as the host agent reads them: 75 for "no slot" or a stale epoch
-(the agent starts a fresh container after a minute), 70 for a claim or
+Exit codes, as the host agent reads them: 75 for "no slot", a stale epoch
+or a refused claim ticket (spent by an earlier boot of this container, or
+expired: the agent starts a fresh container, with a fresh ticket, after a
+minute), 70 for a claim or
 configuration failure (the agent backs off ten minutes), 78 for a worker
 parked for an operator that could not stay up (the agent leaves it
 stopped), otherwise the monitor's own code (0 on `docker stop`).
@@ -62,7 +66,12 @@ from typing import Any, Callable, Dict, List, Sequence
 
 import tomllib
 
-FLEET_ENV = ("RS_FLEET_URL", "RS_FLEET_HOST_ID", "RS_FLEET_HOST_TOKEN")
+FLEET_ENV = ("RS_FLEET_URL", "RS_FLEET_HOST_ID")
+# What the worker claims with: the ticket the agent minted for this one
+# container, else the host token an agent before the tickets passed.
+TICKET_ENV = "RS_FLEET_CLAIM_TICKET"
+HOST_TOKEN_ENV = "RS_FLEET_HOST_TOKEN"
+TICKET_PREFIX = "fct_"
 
 # The host agent's reading of how a worker left. The same 75 is in the
 # monitor's control_plane.py (`STALE_EPOCH_EXIT_CODE`); the two cannot share
@@ -129,6 +138,15 @@ class ClaimFailedError(Exception):
 # ---------------------------------------------------------------------------
 # claim
 # ---------------------------------------------------------------------------
+def fleet_credential(env: Dict[str, str]) -> str:
+    """The claim's bearer: the claim ticket when the agent passed one, else the host token."""
+    return env.get(TICKET_ENV) or env.get(HOST_TOKEN_ENV) or ""
+
+
+def fleet_mode(env: Dict[str, str]) -> bool:
+    return all(env.get(name) for name in FLEET_ENV) and bool(fleet_credential(env))
+
+
 def claim(
     fleet_url: str,
     host_id: str,
@@ -142,9 +160,14 @@ def claim(
     """Claim a slot: the fleet's answer, or `ClaimFailedError` with the exit code.
 
     `409 no_slot` is an answer (every account is taken) and leaves at once
-    with 75; anything else is retried `CLAIM_ATTEMPTS` times, 10 s apart,
-    and then leaves with 70.
+    with 75, as does a 401 on a claim ticket: it was spent by an earlier
+    boot of this container (`docker start`) or has expired, and only a
+    fresh container gets a fresh one. Anything else is retried
+    `CLAIM_ATTEMPTS` times, 10 s apart, and then leaves with 70.
+    `host_token` is either bearer; the agent may pass a ticket under the
+    host token's name, so the prefix says which it is.
     """
+    ticket = host_token.startswith(TICKET_PREFIX)
     sleep = sleep or time.sleep
     url = f"{fleet_url.rstrip('/')}/api/fleet/worker/claim"
     body = json.dumps(
@@ -173,6 +196,8 @@ def claim(
             error = _error_code(e)
             if e.code == 409 and error == "no_slot":
                 raise ClaimFailedError(EXIT_RESTART, "no free slot") from None
+            if e.code == 401 and ticket:
+                raise ClaimFailedError(EXIT_RESTART, "the claim ticket was refused") from None
             last = f"HTTP {e.code} {error or ''}".rstrip()
         except (urllib.error.URLError, OSError, ValueError) as e:
             last = str(e)
@@ -531,8 +556,9 @@ def monitor_env(
     """The monitor's environment: the container's, the claim's `env`, the password fallback.
 
     What the container already sets wins over the claim's `env` (CONTRACTS
-    §2). The fleet variables stay out: the host token can claim any account
-    on this host, and the monitor and its browser need none of them.
+    §2). The fleet variables stay out: the claim ticket (or, from an older
+    agent, the host token, which can claim any account on this host) has no
+    business in the monitor or its browser.
     """
     account = answer["account"]
     out = {k: v for k, v in env.items() if not k.startswith("RS_FLEET_")}
@@ -863,7 +889,10 @@ def run_monitor(
 # ---------------------------------------------------------------------------
 def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None) -> int:
     """Fleet mode, end to end; the exit code."""
-    fleet_url, host_id, host_token = (env[name] for name in FLEET_ENV)
+    fleet_url, host_id = (env[name] for name in FLEET_ENV)
+    host_token = fleet_credential(env)
+    if not env.get(TICKET_ENV):
+        log("no claim ticket; claiming with the host token (an agent from before the tickets)")
     worker_id = env.get("RS_FLEET_WORKER_ID") or ""
     if not worker_id:
         log("RS_FLEET_WORKER_ID is not set; the agent names each worker")
@@ -972,7 +1001,7 @@ def start_vnc_relay(
 def main(argv: Sequence[str] | None = None, env: Dict[str, str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     env = dict(os.environ if env is None else env)
-    if not all(env.get(name) for name in FLEET_ENV):
+    if not fleet_mode(env):
         if not argv:
             log("no fleet variables and no command to run")
             return EXIT_CONFIG

@@ -121,6 +121,9 @@ class FakeFleet:
         self.hold_seconds = hold_seconds
         # "ok", or one of "no_slot", "error", to make the claim fail that way.
         self.claim_answer = "ok"
+        # Claim tickets the fake ERP minted: ticket -> {"worker_id", "claim_id"}.
+        # A ticket is spent by its first claim; only that boot's retries pass.
+        self.tickets: Dict[str, Dict[str, Any]] = {}
         # The claim's settings and `env` (None: no env key at all, as the
         # backend answers when no shared environment is configured).
         self.settings: Dict[str, Any] = dict(SETTINGS)
@@ -288,15 +291,28 @@ class FakeFleet:
         except OSError:
             pass
 
+    def mint_ticket(self, worker_id: str) -> str:
+        ticket = f"fct_made-up-ticket-{len(self.tickets) + 1}"
+        self.tickets[ticket] = {"worker_id": worker_id, "claim_id": None}
+        return ticket
+
     def claim(self, body: Any, token: str) -> Tuple[int, Any]:
-        if token != HOST_TOKEN:
-            return 401, {"error": "unauthorized"}
+        ticket = self.tickets.get(token) if token.startswith("fct_") else None
+        if token != HOST_TOKEN and ticket is None:
+            return 401, {"error": "unauthorized", **({"detail": "bad_ticket"} if token.startswith("fct_") else {})}
         if not isinstance(body, dict) or not body.get("worker_id") or not body.get("host_id"):
             return 422, {"error": "bad_request"}
+        if ticket is not None:
+            if ticket["worker_id"] != body["worker_id"]:
+                return 401, {"error": "unauthorized", "detail": "ticket_mismatch"}
+            if ticket["claim_id"] is not None and ticket["claim_id"] != body.get("claim_id"):
+                return 401, {"error": "unauthorized", "detail": "used_ticket"}
         if self.claim_answer == "no_slot":
             return 409, {"error": "no_slot"}
         if self.claim_answer == "error":
             return 500, {"error": "internal"}
+        if ticket is not None:
+            ticket["claim_id"] = body.get("claim_id")
         self.epoch += 1
         answer = {
             "worker_token": mint_token(str(body["worker_id"]), ACCOUNT["no"], self.epoch),

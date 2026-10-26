@@ -1,3 +1,3 @@
 """Facebook Marketplace inbox bridge for Recycle Servers LLC."""
 
-__version__ = "0.14.4"
+__version__ = "0.14.5"
