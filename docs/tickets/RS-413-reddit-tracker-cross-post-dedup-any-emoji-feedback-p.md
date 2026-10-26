@@ -86,33 +86,12 @@ The tracker ships first and stays backward-compatible.
   - Different module counts or makers always mean two listings.
   - Replaying the last 30 days of alerts, 71 of 480 would have been held
     back as repeats.
-- **The tracer reads the comment Atom feed** (),
+- **The tracer reads the comment Atom feed** (`<permalink>.rss?limit=500`),
   anonymous like the post feed. The PM count matched a hand count on four
-  real threads (4, 10, 11 and 20 buyers). It skips , AutoModerator
+  real threads (4, 10, 11 and 20 buyers). It skips `hwsbot`, AutoModerator
   and the seller's "Replied" comments.
 - **The 24 h window has no traced posts**, since tracing waits a day. So
-  demand figures cover the same span shifted back a day ().
-- **No ERP  change.** The ERP's  is the funnel's three
-  stages, so trace <subcommand> [options] - record system behavior
-
-trace record: record a trace file
-    $ trace record myworkload
-        [... Ctrl-C to stop ...]
-    $ trace record myworkload --Logging:enable-logs --end-after-duration 5s
-    $ trace record myworkload --plan profile --omit Symbolication
-    $ trace record myworkload --end-on-notification stop-myworkload-trace
-        [... elsewhere `notifyutil -p stop-myworkload-trace` ...]
-    $ trace record /tmp/trace-path.atrc --compress
-
-trace amend: add data to a file
-    $ trace amend myworkload-003.atrc --add Symbolication
-
-trace trim: trim a file based on kdebug event times
-    $ trace trim myworkload-002.atrc --from +1s --to +2s
-
-trace providers: print information about Logging, Symbolication, etc.
-
-trace plans: print detailed information about tracing approaches
-
-See `man trace` for more information. was added only on the tracker side (heartbeat loops).
-  The ERP type reads  as a partial record.
+  demand figures cover the same span shifted back a day (`demandRange`).
+- **No ERP `LoopName` change.** The ERP's `LoopName` is the funnel's three
+  stages, so `trace` was added only on the tracker side (heartbeat loops).
+  The ERP type reads `loops` as a partial record.
