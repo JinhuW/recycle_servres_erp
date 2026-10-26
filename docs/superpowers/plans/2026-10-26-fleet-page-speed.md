@@ -123,6 +123,6 @@ pool client (add `summary()`), their tests, one line in `docs/FEATURES.md`.
 
 ## Done
 
-- [ ] S1 merged · [ ] S2 merged · [ ] S3 merged · [x] S4 merged (not deployed)
+- [ ] S1 merged · [ ] S2 merged · [x] S3 merged · [x] S4 merged (not deployed)
 - [ ] After S1–S3 are on dev: Fleet tab load on `inventory-dev` measured
       (first ERP rows, coordinator rows, request count) and recorded here.

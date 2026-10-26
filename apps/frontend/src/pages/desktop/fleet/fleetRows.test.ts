@@ -63,6 +63,22 @@ describe('fleetRows', () => {
     expect(filterFleetRows(rows, { kind: 'all', host: '', q: 'houston' }).map(r => r.key)).toEqual(['erp:12']);
     expect(filterFleetRows(rows, { kind: 'all', host: '', q: 'account 51' }).map(r => r.key)).toEqual(['pool:51']);
   });
+  it('keeps the ERP rows in place when the coordinator answers late', () => {
+    const early = fleetRows({ ...input, coordinator: null, challenges: null, coordinatorPending: true }, NOW).map(r => r.key);
+    // #50 is homelab-5's: it waits for the coordinator instead of showing as an idle pool row first.
+    expect(early).not.toContain('pool:50');
+    const late = rows.map(r => r.key);
+    expect(late.filter(k => early.includes(k))).toEqual(early);
+    expect(late.filter(k => !early.includes(k))).toEqual(['coord:homelab-5', 'coord:homelab-9']);
+  });
+  it('reads a pool summary row as it reads a snapshot row', () => {
+    const summary = POOL.map(a => ({ no: a.no, uid: a.uid, status: a.status, holder: a.holder, note: a.note }));
+    expect(fleetRows({ ...input, pool: summary }, NOW).map(r => [r.key, r.kind])).toEqual(rows.map(r => [r.key, r.kind]));
+  });
+  it('shows a fleet account as a pool row when the coordinator answered nothing', () => {
+    const none = fleetRows({ ...input, coordinator: null, challenges: null }, NOW).map(r => r.key);
+    expect(none).toContain('pool:50');
+  });
   it('stands without the coordinator and the pool', () => {
     const bare = fleetRows({ slots: SLOTS, workers: WORKERS, release: null, coordinator: null, challenges: null, pool: null }, NOW);
     expect(bare.length).toBe(SLOTS.length);

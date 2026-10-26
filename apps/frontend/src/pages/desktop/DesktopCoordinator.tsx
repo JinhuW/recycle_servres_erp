@@ -56,10 +56,13 @@ export function DesktopCoordinator({ showToast }: Props) {
     const to = fleetRedirect(path);
     if (to) replaceRoute(to);
   }, [path]);
-  // Loaded on every tab: the Pool tab's count chip reads it too.
+  // The snapshot unseals every secret of every row, so only the Pool tab
+  // reads it; the other tabs' count chip comes from the pool summary. Once
+  // read it stays, and the Pool tab keeps it current from its writes.
+  const wantPool = poolOpen && !pool;
   useEffect(() => {
-    poolApi.snapshot().then(setPool).catch(handleFetchError);
-  }, []);
+    if (wantPool) poolApi.snapshot().then(setPool).catch(handleFetchError);
+  }, [wantPool]);
   // A fleet account's holder is a worker: the Pool tab links it and shows its
   // health. Without the coordinator those rows read as plain text.
   const [fleet, setFleet] = useState<FleetDoc | null>(null);
@@ -101,7 +104,7 @@ export function DesktopCoordinator({ showToast }: Props) {
       </a>
     ))}
     <a className={`tab ${poolOpen ? 'active' : ''}`} href={hrefFor('/fleet/pool')} onClick={onLinkClick('/fleet/pool')} aria-current={poolOpen ? 'page' : undefined}>
-      <Icon name="users" size={14} />{t('fpPool')}{pool && <span className="chip muted">{pool.accounts.length}</span>}
+      <Icon name="users" size={14} />{t('fpPool')}{chip(pool ? pool.accounts.length : counts.pool)}
     </a>
   </nav> : null;
   const head = (
@@ -125,25 +128,38 @@ export function DesktopCoordinator({ showToast }: Props) {
   );
 }
 
-type TabCounts = { running: number | null; due: number | null; cities: number | null };
-const NO_COUNTS: TabCounts = { running: null, due: null, cities: null };
+type TabCounts = { running: number | null; due: number | null; cities: number | null; pool: number | null };
+const NO_COUNTS: TabCounts = { running: null, due: null, cities: null, pool: null };
 
 // The tab bar's chips: running workers (ERP and coordinator), tasks due now,
-// cities. Read on its own clock, slower than the tabs, since each tab reads
-// what it shows itself.
+// cities, pool accounts. Read on its own clock, slower than the tabs, since
+// each tab reads what it shows itself; the reads it shares with the open tab
+// go out once (lib/sharedGet.ts). The ERP's counts show at once, the running
+// count once the coordinator has answered too, so it never jumps.
 function useTabCounts(on: boolean): TabCounts {
-  const { data } = useFleetPoll(() => {
+  const { data: erp } = useFleetPoll(() => {
     if (!on) return Promise.resolve(null);
     const now = Date.now();
     return Promise.all([
       fleetApi.slots(), fleetApi.workers(), fleetApi.tasks({ state: 'ready' }), fleetApi.cities(),
-      coordinatorApi.fleet().catch(() => null), coordinatorApi.listOpenChallenges().catch(() => null),
-      poolApi.snapshot().then(s => s.accounts).catch(() => null),
-    ]).then(([slots, workers, ready, cities, coordinator, challenges, pool]) => ({
-      running: fleetRunning(fleetRows({ slots, workers, release: null, coordinator, challenges, pool }, now)).running,
+      poolApi.summary().then(s => s.accounts).catch(() => null),
+    ]).then(([slots, workers, ready, cities, pool]) => ({
+      slots, workers, pool,
       due: ready.filter(x => x.kind === 'search' && Date.parse(x.due_at) <= now).length,
       cities: cities.length,
     }));
   }, COUNTS_MS);
-  return useMemo(() => (data && data !== 'unavailable' ? data : NO_COUNTS), [data]);
+  const { data: coord } = useFleetPoll(() => {
+    if (!on) return Promise.resolve(null);
+    return Promise.all([coordinatorApi.fleet().catch(() => null), coordinatorApi.listOpenChallenges().catch(() => null)])
+      .then(([coordinator, challenges]) => ({ coordinator, challenges }));
+  }, COUNTS_MS);
+  return useMemo(() => {
+    if (!erp || erp === 'unavailable') return NO_COUNTS;
+    const c = coord && coord !== 'unavailable' ? coord : null;
+    const running = c
+      ? fleetRunning(fleetRows({ slots: erp.slots, workers: erp.workers, release: null, pool: erp.pool, ...c }, Date.now())).running
+      : null;
+    return { running, due: erp.due, cities: erp.cities, pool: erp.pool?.length ?? null };
+  }, [erp, coord]);
 }

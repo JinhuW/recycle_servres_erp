@@ -2,7 +2,7 @@
 // manager-only). The backend forwards these calls to the coordinator API with
 // its bearer token; a 501 from any of them means the proxy env vars are unset.
 
-import { api } from './api';
+import { sharedApi as api } from './sharedGet';
 
 // snake_case on purpose: these rows pass through the proxy verbatim from the
 // coordinator's own JSON.

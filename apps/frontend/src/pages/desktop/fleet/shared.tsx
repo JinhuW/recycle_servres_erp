@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '../../../components/Icon';
 import { ApiError } from '../../../lib/api';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
@@ -8,30 +8,62 @@ import { budgetTone, easternClock, easternDateTime, liveness, spanLabel, type Li
 // ─── Shared by the fleet tabs ─────────────────────────────────────────────────
 
 export const FLEET_POLL_MS = 10_000;
+// The coordinator's answers are seconds to build and change slowly; the ERP's
+// own tables stay on the 10 s clock.
+export const COORDINATOR_POLL_MS = 30_000;
 
 // null while loading; 'unavailable' when the backend has no fleet routes (a
 // release that predates them answers 404) or the call failed. The tabs show
 // their own empty state for it and never block the rest of the page.
 export type Loaded<T> = T | 'unavailable' | null;
 
+export type PollGate = { tick: () => void; reload: () => void };
+
+/**
+ * One read at a time. A tick while a read is in flight is dropped: a slow
+ * upstream would otherwise stack a request per tick. A reload then is kept
+ * and runs once the read lands, since it follows a write the page must show.
+ */
+export function pollGate(read: () => Promise<unknown>): PollGate {
+  let busy = false;
+  let again = false;
+  const run = (): void => {
+    if (busy) return;
+    busy = true;
+    read().catch(() => undefined).finally(() => {
+      busy = false;
+      if (again) {
+        again = false;
+        run();
+      }
+    });
+  };
+  return {
+    tick: run,
+    reload: () => {
+      if (busy) again = true;
+      else run();
+    },
+  };
+}
+
 /**
  * Reads `load` now and every 10 s while the tab is visible, and again the
- * moment it is shown. `reload` re-reads at once after an action.
+ * moment it is shown, never while the previous read is still out. `reload`
+ * re-reads after an action.
  */
 export function useFleetPoll<T>(load: () => Promise<T>, ms: number = FLEET_POLL_MS): { data: Loaded<T>; reload: () => void } {
   const [data, setData] = useState<Loaded<T>>(null);
   const loadRef = useRef(load);
   loadRef.current = load;
   const alive = useRef(true);
-  const read = useCallback(() => {
-    loadRef.current()
-      .then(d => { if (alive.current) setData(d); })
-      .catch(() => { if (alive.current) setData(prev => (prev === null || prev === 'unavailable' ? 'unavailable' : prev)); });
-  }, []);
+  const gate = useMemo(() => pollGate(() => loadRef.current()
+    .then(d => { if (alive.current) setData(d); })
+    .catch(() => { if (alive.current) setData(prev => (prev === null || prev === 'unavailable' ? 'unavailable' : prev)); })), []);
   useEffect(() => {
     alive.current = true;
-    read();
-    const tick = () => { if (!document.hidden) read(); };
+    gate.tick();
+    const tick = () => { if (!document.hidden) gate.tick(); };
     const timer = setInterval(tick, ms);
     document.addEventListener('visibilitychange', tick);
     return () => {
@@ -39,8 +71,8 @@ export function useFleetPoll<T>(load: () => Promise<T>, ms: number = FLEET_POLL_
       clearInterval(timer);
       document.removeEventListener('visibilitychange', tick);
     };
-  }, [read, ms]);
-  return { data, reload: read };
+  }, [gate, ms]);
+  return { data, reload: gate.reload };
 }
 
 /** A fleet route that is not there yet: an older backend, or one without the tables. */
