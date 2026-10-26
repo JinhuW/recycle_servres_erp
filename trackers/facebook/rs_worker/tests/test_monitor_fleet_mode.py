@@ -39,8 +39,9 @@ def shared_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RS_CONTROL_PLANE_TOKEN", raising=False)
 
 
-class EndOfScriptError(Exception):
-    pass
+class EndOfScriptError(BaseException):
+    """The script ran out: a way out of the loop. A BaseException, since the
+    fleet loop parks on any Exception it did not expect."""
 
 
 def rendered_config(fleet: FakeFleet, home: Path, alerts: bool = False) -> Path:

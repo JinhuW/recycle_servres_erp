@@ -89,12 +89,16 @@ PARKED_FILE = "parked.json"
 # Written by the VNC relay when the fleet refuses its dial for the epoch; the
 # monitor stops its search on it before the next page, as on its own 409.
 FENCE_FILE = "fenced"
-# Names the claim's `env` may not set: the fleet's own wiring, and what this
-# entrypoint derives from the claim itself.
+# Names the claim's `env` may never set, even were the template to name them:
+# the fleet's own wiring, and what this entrypoint derives itself.
 RESERVED_ENV = re.compile(
     r"^(RS_FLEET_.*|RS_WORKER_ID|RS_HOST_ID|RS_FB_PASSWORD|RS_FB_TOTP|RS_VNC_PORT|"
     r"RS_PARKED_FILE|RS_VERSION|RS_MONITOR_COMMIT|RS_WORKER_.*|PATH|HOME|DISPLAY)$"
 )
+# Derived from `TOKENS_ENV`, never taken from the claim as they are: one of
+# them set straight would be the fleet-wide legacy token, which lets one
+# container read every worker's 2FA codes from the coordinator.
+DERIVED_ENV = ("RS_CONTROL_PLANE_TOKEN", "RS_COORDINATOR_TOKEN")
 # The fleet's alert switch, in the claim's `env`: "on" lets a worker alert
 # (Telegram, alert claims, alert reports) and report to the coordinator what
 # the live fleet acts on. Anything else, or absent, withholds all of it.
@@ -231,6 +235,7 @@ def render_config(
     no user keeps a Telegram channel or an alert report.
     """
     config = copy.deepcopy(template)
+    answer = without_env_refs(answer)
     settings = answer.get("settings") or {}
     account = answer["account"]
 
@@ -287,6 +292,51 @@ def render_config(
     return config
 
 
+def without_env_refs(answer: Dict[str, Any]) -> Dict[str, Any]:
+    """The claim's search data with every value that reads as `${VAR}` left out.
+
+    The monitor expands such a string from its environment wherever it sits,
+    so a phrase typed as `${RS_FB_PASSWORD}` would put the password in a
+    Facebook search URL and the logs. Names are logged, never values.
+    """
+    dropped: List[str] = []
+
+    def clean(value: Any, path: str) -> Any:
+        if isinstance(value, dict):
+            kept = {}
+            for k, v in value.items():
+                if _is_env_ref(v):
+                    dropped.append(f"{path}.{k}")
+                else:
+                    kept[k] = clean(v, f"{path}.{k}")
+            return kept
+        if isinstance(value, list):
+            items = []
+            for v in value:
+                if _is_env_ref(v):
+                    dropped.append(f"{path}[]")
+                else:
+                    items.append(clean(v, path))
+            return items
+        return value
+
+    out = dict(answer)
+    for key in ("settings", "items", "home_cities"):
+        if key in out:
+            out[key] = clean(out[key], key)
+    account = out.get("account")
+    if isinstance(account, dict) and _is_env_ref(account.get("uid")):
+        out["account"] = {**account, "uid": None}
+        dropped.append("account.uid")
+    if dropped:
+        log(f"claim values that read as ${{VAR}} left out: {', '.join(sorted(set(dropped)))}")
+    return out
+
+
+def _is_env_ref(value: Any) -> bool:
+    return isinstance(value, str) and value.startswith("${") and value.endswith("}")
+
+
 COORDINATOR_KEYS = ("control_plane_url", "control_plane_token")
 ALERT_REPORT_KEYS = ("alert_report_url", "alert_report_token", "alert_report_worker_id")
 
@@ -314,12 +364,43 @@ def worker_coordinator_token(raw: str, worker_id: str) -> str | None:
     return token.strip()
 
 
-def claim_env(answer: Dict[str, Any]) -> Dict[str, str]:
+def template_env_names(template: Dict[str, Any]) -> set[str]:
+    """Every `${VAR}` the template references, anywhere."""
+    names: set[str] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            for v in value.values():
+                walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+        elif isinstance(value, str):
+            match = _ENV_REF.match(value)
+            if match:
+                names.add(match.group(1))
+
+    walk(template)
+    return names
+
+
+def claim_env_allowed(template: Dict[str, Any] | None = None) -> set[str]:
+    """The names the claim's `env` may set: what the template reads, and the switches."""
+    if template is None:
+        with open(TEMPLATE, "rb") as f:
+            template = tomllib.load(f)
+    names = template_env_names(template) | {ALERTS_ENV, TOKENS_ENV}
+    return {n for n in names if not RESERVED_ENV.match(n) and n not in DERIVED_ENV}
+
+
+def claim_env(answer: Dict[str, Any], allowed: set[str] | None = None) -> Dict[str, str]:
     """The shared secrets the claim carries in `env`, as environment variables.
 
-    The Cloudflare Worker adds its FLEET_WORKER_ENV secret to a successful claim.
-    Only string values under plain names are taken, and none
-    that would override the fleet's own wiring. Values are never logged.
+    The Cloudflare Worker adds its FLEET_WORKER_ENV secret to a successful
+    claim. Only string values under the names the template reads (plus the
+    alert switch and the coordinator's token map) are taken: anything else,
+    `LD_PRELOAD` or `HTTPS_PROXY` say, would reach every process here.
+    Values are never logged.
     """
     raw = answer.get("env")
     if raw is None:
@@ -327,10 +408,11 @@ def claim_env(answer: Dict[str, Any]) -> Dict[str, str]:
     if not isinstance(raw, dict):
         log("the claim's env is not an object; ignored")
         return {}
+    allowed = claim_env_allowed() if allowed is None else allowed
     out: Dict[str, str] = {}
     skipped: List[str] = []
     for name, value in raw.items():
-        if not isinstance(name, str) or not _ENV_NAME.match(name) or RESERVED_ENV.match(name):
+        if not isinstance(name, str) or not _ENV_NAME.match(name) or name not in allowed:
             skipped.append(str(name)[:64])
         elif not isinstance(value, str):
             skipped.append(name)
@@ -338,7 +420,7 @@ def claim_env(answer: Dict[str, Any]) -> Dict[str, str]:
             out[name] = value
     log(f"claim env: {', '.join(sorted(out)) or 'none'}")
     if skipped:
-        log(f"claim env ignored (reserved, badly named or not a string): {', '.join(sorted(skipped))}")
+        log(f"claim env ignored (not the template's, badly named or not a string): {', '.join(sorted(skipped))}")
     return out
 
 
@@ -446,10 +528,16 @@ def monitor_env(
     worker_id: str,
     home: Path | None = None,
 ) -> Dict[str, str]:
-    """The monitor's environment: the container's, the claim's `env`, the password fallback."""
+    """The monitor's environment: the container's, the claim's `env`, the password fallback.
+
+    What the container already sets wins over the claim's `env` (CONTRACTS
+    §2). The fleet variables stay out: the host token can claim any account
+    on this host, and the monitor and its browser need none of them.
+    """
     account = answer["account"]
-    out = dict(env)
-    out.update(claim_env(answer))
+    out = {k: v for k, v in env.items() if not k.startswith("RS_FLEET_")}
+    for name, value in claim_env(answer).items():
+        out.setdefault(name, value)
     tokens = out.pop(TOKENS_ENV, None)
     coordinator = has_coordinator(answer)
     if coordinator and tokens and not out.get("RS_CONTROL_PLANE_TOKEN"):
@@ -527,8 +615,13 @@ def toml_dumps(data: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # running the monitor
 # ---------------------------------------------------------------------------
-def monitor_command(env: Dict[str, str]) -> List[str]:
-    """Supervisord's `aimm` program, as flags; `RS_WORKER_MONITOR_CMD` overrides it."""
+def monitor_command(env: Dict[str, str], fleet: bool = False) -> List[str]:
+    """Supervisord's `aimm` program, as flags; `RS_WORKER_MONITOR_CMD` overrides it.
+
+    In fleet mode the web UI listens on loopback only: the image's
+    `AIMM_WEBUI_HOST=0.0.0.0` is for the homelab compose files, and on the
+    agent's bridge network every other worker could reach it.
+    """
     override = env.get("RS_WORKER_MONITOR_CMD")
     if override:
         return shlex.split(override)
@@ -536,7 +629,7 @@ def monitor_command(env: Dict[str, str]) -> List[str]:
         "aimm",
         "--webui",
         "--webui-host",
-        env.get("AIMM_WEBUI_HOST", "127.0.0.1"),
+        "127.0.0.1" if fleet else env.get("AIMM_WEBUI_HOST", "127.0.0.1"),
         "--webui-port",
         env.get("AIMM_WEBUI_PORT", "8467"),
     ]
@@ -572,11 +665,41 @@ def start_display(env: Dict[str, str]) -> List[subprocess.Popen]:
         procs.append(
             subprocess.Popen(
                 [x11vnc, "-display", display, "-nopw", "-forever", "-shared",
-                 "-rfbport", env.get("VNC_PORT", "5900")],
+                 "-rfbport", env.get("VNC_PORT", "5900"), *vnc_allow_args()],
                 env=env,
             )
         )
     return procs
+
+
+def vnc_allow_args(route_file: str = "/proc/net/route") -> List[str]:
+    """x11vnc's `-allow`: the relay (loopback) and the host's published port.
+
+    The VNC server has no password, so on the agent's bridge network any
+    other worker could drive this one's logged-in browser. The host's
+    `127.0.0.1:<port>` publish reaches the container from the bridge's
+    gateway, which is let in beside loopback; nothing else is. Without a
+    readable route table nothing is restricted (not a fleet container).
+    """
+    gateway = default_gateway(route_file)
+    if gateway is None:
+        return []
+    return ["-allow", f"127.0.0.1,{gateway}"]
+
+
+def default_gateway(route_file: str = "/proc/net/route") -> str | None:
+    """The IPv4 default gateway from the kernel's route table, or None."""
+    try:
+        with open(route_file, encoding="ascii") as f:
+            next(f, None)
+            for line in f:
+                fields = line.split()
+                if len(fields) > 2 and fields[1] == "00000000" and fields[2] != "00000000":
+                    raw = bytes.fromhex(fields[2])
+                    return ".".join(str(b) for b in reversed(raw))
+    except (OSError, ValueError):
+        return None
+    return None
 
 
 class _Health:
@@ -802,14 +925,14 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
     relay = start_vnc_relay(
         fleet_url,
         str(answer["worker_token"]),
-        {**env, "RS_FLEET_TOKEN_PATH": str(home / "fleet-token")},
+        {"VNC_PORT": env.get("VNC_PORT", ""), "RS_FLEET_TOKEN_PATH": str(home / "fleet-token")},
         fence_path=str(home / FENCE_FILE),
     )
     health = _Health(worker_id, int(answer["epoch"]), home / PARKED_FILE)
     port = env.get("RS_WORKER_HEALTHZ_PORT") or ""
     try:
         code = run_monitor(
-            monitor_command(env),
+            monitor_command(env, fleet=True),
             menv,
             health,
             int(port) if port.isdigit() else HEALTHZ_PORT,

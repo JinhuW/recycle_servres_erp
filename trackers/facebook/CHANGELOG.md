@@ -18,6 +18,58 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+Review fixes to fleet mode before cutover (monitor `1efd1a4`). Each one was a
+way for a fleet worker to cost a Facebook login, hold work it could not do, or
+leak a secret.
+
+- **A session upload no longer wipes the pool's access token.** Every upload
+  sent `"token": null`, which the ERP reads as "clear it", so the account's
+  stored token, a password-free way back in, was gone after the first boot.
+  The key is now sent only when the worker holds a token.
+- **A wall reaches the ERP with alerts off.** The wall's state went out only
+  with the coordinator escalation, which alerts-off withholds, so a walled
+  worker kept heartbeating HEALTHY, renewing its task's lease, and nobody
+  heard of the checkpoint. The fleet heartbeat now turns to the wall's state,
+  and a finished task waiting on a parked worker goes back at once with
+  `take: false`.
+- **An unexpected error parks instead of exiting.** A task that throws is that
+  task's `stopped: error`; a dead browser, a boot login that throws, or any
+  other surprise in the loop parks for an operator (`DEAD`, `browser_failed`
+  / `login_failed` / `crashed`). It used to exit 1, and the agent's restart
+  after 60 s was a fresh login, up to five in 30 minutes.
+- **A fence lands within seconds.** The fleet heartbeat went every 300 s, and
+  mid-listing nothing else spoke to the fleet; it now goes every 20 s.
+- **The ERP's own misconfiguration no longer fences the fleet.** Any 401 used
+  to end the worker, including `FB_POOL_KEY is not set` on a session upload,
+  and the restart once the key came back was a login per account. Only
+  `409 stale_epoch` or a 401 about the token fences now, in the monitor and
+  the VNC relay; a 503 or a "… is not set" detail is no answer.
+- **Fleet directives: `relogin` only, once per request.** The coordinator's
+  `restore` re-ran the boot login, password fallback included, and a
+  `relogin` the ERP kept returning would have armed a login per heartbeat.
+- **`docker stop` uploads the session to the pool** (unless fenced), so a
+  replacement does not claim a cookie up to half an hour old.
+- **A slug check gives no verdict when it could not look.** A checkpoint, a
+  login form or an error was recorded as a mismatch and the worker went on
+  into the same wall; it now sends `stopped` without `matches`, parks on a
+  wall and reports it.
+- **Claim values cannot expand secrets.** A phrase, city or search setting
+  that reads as `${VAR}` is left out of the rendered config; the monitor
+  expanded it from its environment (`${RS_FB_PASSWORD}` would have gone into
+  a Facebook search URL).
+- **The claim's `env` sets only what the template reads**, plus `RS_ALERTS`
+  and `RS_CONTROL_PLANE_TOKENS`, and never overrides the container (as
+  CONTRACTS §2 says). The fleet-wide `RS_COORDINATOR_TOKEN` is refused.
+- **Less exposed inside the container.** x11vnc lets in only loopback and the
+  bridge gateway, the web UI listens on loopback in fleet mode, and no
+  `RS_FLEET_*` variable (the host token) reaches the monitor, its browser or
+  the display.
+- **The worker image is built against frozen versions**
+  (`deploy/worker-constraints.txt`, from `aimm-recycle:0.14.3`), so a rebuild
+  no longer picks up a newer Playwright and Chromium.
+
 ### Changed
 
 - **The ERP's Fleet page gets its document faster from the console.** The

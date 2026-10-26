@@ -60,8 +60,13 @@ ENV RS_VERSION=$RS_VERSION \
 
 COPY ai-marketplace-monitor/pyproject.toml ai-marketplace-monitor/README.md ./
 COPY ai-marketplace-monitor/src ./src
+COPY deploy/worker-constraints.txt /tmp/worker-constraints.txt
 
-RUN pip install . \
+# Installed against frozen versions: the monitor's ">=" ranges let every
+# rebuild pick a newer Playwright, and so a different Chromium under the same
+# device profile. websockets is the VNC relay's (rs_worker/vnc_relay.py needs
+# 15 or later for its `proxy=` and `InvalidStatus`).
+RUN pip install -c /tmp/worker-constraints.txt . "websockets>=15" \
     && playwright install --with-deps chromium
 
 RUN mkdir -p /etc/supervisor/conf.d /var/log/supervisor /root/.ai-marketplace-monitor
