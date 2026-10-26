@@ -20,12 +20,20 @@ export type ManagerEnv = { Bindings: Env; Variables: { user: User } };
 export type HostEnv = { Bindings: Env; Variables: { host: FleetHostRow } };
 export type WorkerEnv = { Bindings: Env; Variables: { worker: WorkerIdentity } };
 
-/** The verified token plus the slot it names, as the row stands at this call. */
-export type WorkerIdentity = FleetWorkerTokenClaims & { slot: FleetSlotRow };
+/** The verified token plus the slot it names, as the row stands at this call.
+ *  `rotated`: signed with the previous key, so the next heartbeat re-signs it. */
+export type WorkerIdentity = FleetWorkerTokenClaims & { slot: FleetSlotRow; rotated: boolean };
 
 export const WORKER_TOKEN_DAYS = 7;
 
 const UNAUTHORIZED = { error: 'unauthorized' } as const;
+
+/**
+ * 503, not 401: the ERP lacks a key of its own. A worker reads 401 as "my
+ * token is dead" and exits, and every exit is a Facebook login on restart, so
+ * a missing variable during a deploy must not look like a refused token.
+ */
+export const unavailable = (variable: string) => ({ error: 'unavailable', detail: `${variable} is not set` } as const);
 
 /** Session cookie plus the manager role, the way routes/coordinator.ts gates itself. */
 export const managerOnly: MiddlewareHandler<ManagerEnv> = every(authMiddleware, requireManager);
@@ -37,7 +45,7 @@ function bearer(header: string | undefined): string | null {
 
 /**
  * The HMAC key behind worker tokens, or null when production has none: the
- * worker routes then answer 401 and say which variable is missing, while the
+ * worker routes then answer 503 and say which variable is missing, while the
  * rest of the app boots as usual. Outside production the key is derived from
  * JWT_SECRET, as the pool's sealing key is, so dev and CI need no extra
  * variable.
@@ -49,6 +57,12 @@ export function workerTokenKey(env: Env): Buffer | null {
   return Buffer.from(hkdfSync('sha256', env.JWT_SECRET, '', 'fleet-worker-token', 32));
 }
 
+/** The key a token signed before a rotation still verifies under, until the worker's next heartbeat re-signs it. */
+export function previousWorkerTokenKey(env: Env): Buffer | null {
+  const raw = env.FLEET_WORKER_TOKEN_KEY_PREVIOUS?.trim();
+  return raw ? Buffer.from(raw, 'hex') : null;
+}
+
 const hmac = (key: Buffer, payload: string): Buffer => createHmac('sha256', key).update(payload).digest();
 
 /** `base64url(json) . base64url(hmac)`; `exp` is Unix seconds. */
@@ -57,27 +71,40 @@ export function signWorkerToken(claims: FleetWorkerTokenClaims, key: Buffer): st
   return `${payload}.${hmac(key, payload).toString('base64url')}`;
 }
 
-/** The claims of a token this key signed and that has not expired; null otherwise. */
-export function verifyWorkerToken(
-  token: string,
-  key: Buffer,
-  now: Date = new Date(),
-): FleetWorkerTokenClaims | null {
+export type TokenCheck =
+  | { ok: true; claims: FleetWorkerTokenClaims; rotated: boolean }
+  | { ok: false; reason: 'bad_token' | 'expired_token' };
+
+/** Verifies under the current key, then the previous one; says why a token fails. */
+export function checkWorkerToken(token: string, key: Buffer, previous: Buffer | null = null, now: Date = new Date()): TokenCheck {
   const parts = token.split('.');
-  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return { ok: false, reason: 'bad_token' };
   const [payload, sig] = parts;
   const given = Buffer.from(sig, 'base64url');
-  const expected = hmac(key, payload);
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+  const signedBy = (k: Buffer) => {
+    const expected = hmac(k, payload);
+    return given.length === expected.length && timingSafeEqual(given, expected);
+  };
+  let rotated = false;
+  if (!signedBy(key)) {
+    if (!previous || !signedBy(previous)) return { ok: false, reason: 'bad_token' };
+    rotated = true;
+  }
   let claims: unknown;
   try {
     claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
   } catch {
-    return null;
+    return { ok: false, reason: 'bad_token' };
   }
-  if (!claimsShaped(claims)) return null;
-  if (claims.exp * 1000 <= now.getTime()) return null;
-  return claims;
+  if (!claimsShaped(claims)) return { ok: false, reason: 'bad_token' };
+  if (claims.exp * 1000 <= now.getTime()) return { ok: false, reason: 'expired_token' };
+  return { ok: true, claims, rotated };
+}
+
+/** The claims of a token this key signed and that has not expired; null otherwise. */
+export function verifyWorkerToken(token: string, key: Buffer, now: Date = new Date()): FleetWorkerTokenClaims | null {
+  const r = checkWorkerToken(token, key, null, now);
+  return r.ok ? r.claims : null;
 }
 
 function claimsShaped(v: unknown): v is FleetWorkerTokenClaims {
@@ -105,20 +132,21 @@ export const hostAuth: MiddlewareHandler<HostEnv> = async (c, next) => {
 };
 
 /**
- * A worker's bearer. A bad or expired token is 401; a good token whose epoch
- * is no longer the slot's (or whose slot is gone) is 409 stale_epoch on every
- * route, which the worker reads as "exit, let the agent claim again".
+ * A worker's bearer. A missing, bad or expired token is 401 (`detail` says
+ * which); a good token whose epoch is no longer the slot's (or whose slot is
+ * gone) is 409 stale_epoch on every route, which the worker reads as "exit,
+ * let the agent claim again". A missing server key is 503, never 401.
  */
 export const workerAuth: MiddlewareHandler<WorkerEnv> = async (c, next) => {
   const key = workerTokenKey(c.env);
-  if (!key) return c.json({ ...UNAUTHORIZED, detail: 'FLEET_WORKER_TOKEN_KEY is not set' }, 401);
+  if (!key) return c.json(unavailable('FLEET_WORKER_TOKEN_KEY'), 503);
   const token = bearer(c.req.header('Authorization'));
-  if (!token) return c.json(UNAUTHORIZED, 401);
-  const claims = verifyWorkerToken(token, key);
-  if (!claims) return c.json(UNAUTHORIZED, 401);
-  const slot = await eligibleSlot(getDb(c.env), claims);
+  if (!token) return c.json({ ...UNAUTHORIZED, detail: 'missing_token' }, 401);
+  const checked = checkWorkerToken(token, key, previousWorkerTokenKey(c.env));
+  if (!checked.ok) return c.json({ ...UNAUTHORIZED, detail: checked.reason }, 401);
+  const slot = await eligibleSlot(getDb(c.env), checked.claims);
   if (!slot) return c.json({ error: 'stale_epoch' }, 409);
-  c.set('worker', { ...claims, slot });
+  c.set('worker', { ...checked.claims, slot, rotated: checked.rotated });
   return next();
 };
 

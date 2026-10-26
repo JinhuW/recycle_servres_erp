@@ -271,17 +271,20 @@ describe('POST /api/fleet/worker/next-task', () => {
     expect(r1.body.task).toMatchObject({ id: first, kind: 'search', city: { slug: 'houston', name: 'Houston', radius_km: 500 }, item: 'server_ram', why: 'other' });
     expect(await taskRow(first)).toMatchObject({ state: 'leased', worker_id: 'lab-1', account_no: no, epoch });
     expect(await events(first)).toEqual(['handed']);
-    // denver is not due yet.
-    expect((await nextTask(token)).body.task).toBeNull();
+    // Asking again without closing it (the answer was lost) hands the same lease back.
+    expect((await nextTask(token)).body.task).toMatchObject({ id: first });
+    expect(await events(first)).toEqual(['handed', 'handed']);
 
-    await getTestDb()`UPDATE fleet_tasks SET due_at = NOW() WHERE id = ${second}`;
     const result = { cards: 115, opened: 9, reviewed: 9, alerted: 1, seconds: 412 };
     const r2 = await nextTask(token, { task_id: first, result });
-    expect(r2.body.task).toMatchObject({ id: second, item: 'enterprise_ssd' });
+    // denver is not due yet.
+    expect(r2.body.task).toBeNull();
     const done = await taskRow(first);
     expect(done).toMatchObject({ state: 'done', result });
     expect(done.done_at).toBeInstanceOf(Date);
-    expect(await events(first)).toEqual(['handed', 'done']);
+    expect(await events(first)).toEqual(['handed', 'handed', 'done']);
+    await getTestDb()`UPDATE fleet_tasks SET due_at = NOW() WHERE id = ${second}`;
+    expect((await nextTask(token)).body.task).toMatchObject({ id: second, item: 'enterprise_ssd' });
   });
 
   it('orders by priority, then home, familiar, other, then due', async () => {
@@ -440,7 +443,7 @@ describe('POST /api/fleet/worker/next-task', () => {
     expect((await nextTask(q.worker_token)).body.task).toMatchObject({ id: probe, kind: 'probe', why: 'probe' });
     // The healthy worker never sees the probe; it takes the slug check (priority 50) then the search.
     expect((await nextTask(h.worker_token)).body.task).toMatchObject({ id: verify, kind: 'verify-slug' });
-    expect((await nextTask(h.worker_token)).body.task).toMatchObject({ id: search });
+    expect((await nextTask(h.worker_token, { task_id: verify, result: {} })).body.task).toMatchObject({ id: search });
   });
 });
 
@@ -601,7 +604,7 @@ describe('fleet recovery regressions', () => {
     let write: Promise<unknown>;
     await db.begin(async tx => {
       await tx`SELECT no FROM fb_pool_accounts WHERE no = ${no} FOR NO KEY UPDATE`;
-      write = api('PUT', '/api/fleet/worker/session', { headers: bearer(w.worker_token), body: { cookies: [] } });
+      write = api('PUT', '/api/fleet/worker/session', { headers: bearer(w.worker_token), body: { cookies: [], clear: true } });
       await new Promise(resolve => setTimeout(resolve, 100));
       await tx`UPDATE fb_pool_accounts SET status = 'available', holder_name = NULL WHERE no = ${no}`;
     });
@@ -703,5 +706,130 @@ describe('deleted pool accounts', () => {
     expect((await nextTask(w.worker_token)).status).toBe(409);
     expect(await taskRow(id)).toMatchObject({ state: 'ready', worker_id: null });
     expect(await events(id)).toContain('released');
+  });
+});
+
+describe('claim-core review fixes', () => {
+  beforeEach(async () => { await resetDb(); await seedBase(); });
+
+  const prodKeys = () => ({ NODE_ENV: 'production', FLEET_WORKER_TOKEN_KEY: workerTokenKey(testEnv)!.toString('hex'), FB_POOL_KEY: key().toString('hex') });
+
+  it('answers 503 unavailable, not 401, when the ERP is missing a key of its own', async () => {
+    await seedSlot(1);
+    const body = { host_id: 'lab', worker_id: 'lab-1', version: 'test' };
+    const noPool = await api('POST', '/api/fleet/worker/claim', { headers: bearer(HOST_TOKEN), body, env: { ...prodKeys(), FB_POOL_KEY: undefined } });
+    expect(noPool).toMatchObject({ status: 503, body: { error: 'unavailable', detail: 'FB_POOL_KEY is not set' } });
+    const noToken = await api('POST', '/api/fleet/worker/claim', { headers: bearer(HOST_TOKEN), body, env: { ...prodKeys(), FLEET_WORKER_TOKEN_KEY: undefined } });
+    expect(noToken).toMatchObject({ status: 503, body: { error: 'unavailable', detail: 'FLEET_WORKER_TOKEN_KEY is not set' } });
+    const w = await claimed('lab-1');
+    const session = await api('PUT', '/api/fleet/worker/session', {
+      headers: bearer(w.worker_token), body: { cookies: [], clear: true }, env: { ...prodKeys(), FB_POOL_KEY: undefined },
+    });
+    expect(session).toMatchObject({ status: 503, body: { error: 'unavailable', detail: 'FB_POOL_KEY is not set' } });
+  });
+
+  it('re-signs a token from the previous key on the next heartbeat', async () => {
+    await seedSlot(1);
+    const w = await claimed('lab-1');
+    const fresh = '1f'.repeat(32);
+    const env = { FLEET_WORKER_TOKEN_KEY: fresh, FLEET_WORKER_TOKEN_KEY_PREVIOUS: workerTokenKey(testEnv)!.toString('hex') };
+    const r = await api<{ worker_token?: string }>('POST', '/api/fleet/worker/heartbeat', { headers: bearer(w.worker_token), body: { state: 'HEALTHY' }, env });
+    expect(r.status).toBe(200);
+    expect(r.body.worker_token).toBeTruthy();
+    const again = await api<{ worker_token?: string }>('POST', '/api/fleet/worker/heartbeat', {
+      headers: bearer(r.body.worker_token!), body: { state: 'HEALTHY' }, env: { FLEET_WORKER_TOKEN_KEY: fresh },
+    });
+    expect(again.status).toBe(200);
+    expect(again.body.worker_token).toBeUndefined();
+  });
+
+  it('claims only for the host’s own <host_id>-<n> workers', async () => {
+    await seedSlot(1);
+    expect((await claim('other-1')).body).toMatchObject({ error: 'bad_request' });
+    expect((await claim('other-1')).status).toBe(422);
+    expect((await claim('lab-x')).status).toBe(422);
+    expect((await claim('lab')).status).toBe(422);
+    expect((await claim('lab-1')).status).toBe(200);
+  });
+
+  it('takes no verdict from a slug check that errored, stopped or never said', async () => {
+    await seedSlot(1); const w = await claimed('lab-1');
+    const id = await addTask('boise', 'server_ram', { kind: 'verify-slug', reason: 'verify', priority: 50 });
+    await nextTask(w.worker_token);
+    const post = (body: Record<string, unknown>) => api('POST', '/api/fleet/worker/events', { headers: bearer(w.worker_token), body: { task_id: id, ...body } });
+    const city = async () => (await getTestDb()`SELECT verified_at, enabled FROM fleet_cities WHERE slug = 'boise'`)[0];
+    expect((await post({ kind: 'finished', detail: { matches: false, location: null, error: 'TimeoutError: goto' } })).status).toBe(200);
+    expect(await city()).toEqual({ verified_at: null, enabled: false });
+    expect((await post({ kind: 'stopped', detail: { matches: true } })).status).toBe(200);
+    expect(await city()).toEqual({ verified_at: null, enabled: false });
+    expect((await post({ kind: 'finished', detail: { location: 'Boise, Idaho' } })).status).toBe(200);
+    expect(await city()).toEqual({ verified_at: null, enabled: false });
+    expect((await post({ kind: 'finished', detail: { location: 'Boise, Idaho', matches: true } })).status).toBe(200);
+    expect((await city()).enabled).toBe(true);
+  });
+
+  it('never leases a second task to an epoch that still holds one', async () => {
+    const no = await seedSlot(1); const w = await claimed('lab-1');
+    const first = await addTask('houston'); await addTask('denver');
+    expect((await nextTask(w.worker_token)).body.task!.id).toBe(first);
+    expect((await nextTask(w.worker_token)).body.task!.id).toBe(first);
+    const leased = await getTestDb()`SELECT id FROM fleet_tasks WHERE state = 'leased' AND account_no = ${no}`;
+    expect(leased).toHaveLength(1);
+  });
+
+  it('picks while another transaction holds the release row', async () => {
+    await seedSlot(1); const w = await claimed('lab-1');
+    await getTestDb()`INSERT INTO fleet_settings (key, value) VALUES ('release', ${getTestDb().json({ image: 'x', version: '1', state: 'done', started_at: new Date().toISOString(), finished_at: null, upgraded: [], skipped: [], current: null, failure: null })})`;
+    await addTask('houston');
+    let answer: unknown;
+    await getTestDb().begin(async (tx) => {
+      await tx`SELECT value FROM fleet_settings WHERE key = 'release' FOR UPDATE`;
+      answer = await Promise.race([nextTask(w.worker_token), new Promise((r) => setTimeout(() => r('blocked'), 3000))]);
+    });
+    expect(answer).toMatchObject({ status: 200, body: { task: { city: { slug: 'houston' } } } });
+  });
+
+  it('drains the worker a roll replaces, not its replacement on a later epoch', async () => {
+    await seedSlot(1); const w = await claimed('lab-1');
+    await addTask('houston');
+    const roll = (epoch: number) => getTestDb()`INSERT INTO fleet_settings (key, value) VALUES ('release', ${getTestDb().json({
+      image: 'x', version: '1', state: 'rolling', started_at: new Date().toISOString(), finished_at: null, upgraded: [], skipped: [],
+      current: { worker_id: 'lab-1', host_id: 'lab', started_at: new Date().toISOString(), pre_state: 'HEALTHY', epoch }, failure: null })})
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+    await roll(w.epoch);
+    expect((await nextTask(w.worker_token)).body).toEqual({ task: null, reason: 'draining', retry_after: 30 });
+    await roll(w.epoch - 1);
+    expect((await nextTask(w.worker_token)).body.task).toMatchObject({ city: { slug: 'houston' } });
+  });
+
+  it('keeps holding after a wake that found nothing, and takes a task that comes later in the hold', async () => {
+    await seedSlot(1); const w = await claimed('lab-1');
+    const started = Date.now();
+    const held = nextTask(w.worker_token, null, 4);
+    await new Promise((r) => setTimeout(r, 400));
+    await notifyReady(getTestDb(), ['server_ram']);
+    await new Promise((r) => setTimeout(r, 400));
+    const id = await addTask('houston');
+    await notifyReady(getTestDb(), ['server_ram']);
+    const r = await held;
+    expect(r.body.task?.id).toBe(id);
+    expect(Date.now() - started).toBeLessThan(3500);
+  });
+
+  it('refuses a session upload that is empty, lacks a Facebook session or names another account, unless clear', async () => {
+    const no = await seedSlot(1, { uid: '61550000000077' }); const w = await claimed('lab-1');
+    const put = (body: Record<string, unknown>) => api<{ detail?: string }>('PUT', '/api/fleet/worker/session', { headers: bearer(w.worker_token), body });
+    const cookie = (name: string, value: string): FleetCookie => ({ name, value, domain: '.facebook.com', path: '/' });
+    const stored = async () => (await getTestDb()<{ cookie_enc: string | null }[]>`SELECT cookie_enc FROM fb_pool_accounts WHERE no = ${no}`)[0].cookie_enc;
+    const before = await stored();
+    expect((await put({ cookies: [] })).status).toBe(422);
+    expect((await put({ cookies: [cookie('datr', 'd')] })).status).toBe(422);
+    expect((await put({ cookies: [cookie('c_user', '61550000000077')] })).status).toBe(422);
+    const foreign = await put({ cookies: [cookie('c_user', '99999'), cookie('xs', 'x')] });
+    expect(foreign).toMatchObject({ status: 422, body: { detail: 'cookies: c_user is not this account' } });
+    expect(await stored()).toBe(before);
+    expect((await put({ cookies: [cookie('c_user', '61550000000077'), cookie('xs', 'x')] })).status).toBe(200);
+    expect((await put({ cookies: [], clear: true })).status).toBe(200);
+    expect(await stored()).toBeNull();
   });
 });

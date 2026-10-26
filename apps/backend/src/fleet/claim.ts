@@ -20,7 +20,7 @@ import { poolKey, seal, sealOrNull, unseal, unsealOrEmpty } from '../lib/sealed'
 import { WORKER_ID } from '../routes/coordinator';
 import type { Env } from '../types';
 import {
-  eligibleSlot, hostAuth, signWorkerToken, workerAuth, workerTokenKey, WORKER_TOKEN_DAYS,
+  eligibleSlot, hostAuth, signWorkerToken, unavailable, workerAuth, workerTokenKey, WORKER_TOKEN_DAYS,
   type HostEnv, type WorkerEnv, type WorkerIdentity,
 } from './auth';
 import { loadSettings } from './cities';
@@ -49,7 +49,6 @@ const worker = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 const BAD_REQUEST = { error: 'bad_request' } as const;
 const NOT_FOUND = { error: 'not_found' } as const;
-const UNAUTHORIZED = { error: 'unauthorized' } as const;
 
 // Holds past this answer null at once rather than pin another connection; a
 // fleet of forty workers never gets near it.
@@ -78,8 +77,9 @@ const minutes = (n: number) => `${n} minutes`;
 
 // ─── Wake-ups ─────────────────────────────────────────────────────────────────
 // One LISTEN per pool, on the dedicated connection postgres.js keeps for it,
-// fanned out in-process to every held next-task. A notify that lands while
-// nobody waits is simply lost; the next poll finds the task anyway.
+// fanned out in-process to every held next-task. Each poll arms its own
+// listener before its first look, so a task committed between that look and
+// the hold still wakes it.
 
 type Waker = { emitter: EventEmitter; ready: Promise<unknown> };
 const wakers = new WeakMap<postgres.Sql, Waker>();
@@ -89,23 +89,38 @@ function waker(sql: postgres.Sql): Waker {
   let w = wakers.get(sql);
   if (!w) {
     const emitter = new EventEmitter();
-    emitter.setMaxListeners(MAX_HOLDS + 10);
+    // Armed polls, held or about to look: at most one per open request.
+    emitter.setMaxListeners(0);
     const ready = sql.listen('fleet_tasks', (payload) => emitter.emit('task', payload))
-      .catch((e: unknown) => { flog.warn('fleet_tasks listener failed', e); });
+      .catch((e: unknown) => {
+        // Forget it so the next poll listens again, rather than every hold
+        // sleeping out its time for the life of the process.
+        wakers.delete(sql);
+        flog.warn('fleet_tasks listener failed', e);
+      });
     w = { emitter, ready };
     wakers.set(sql, w);
   }
   return w;
 }
 
-/** Resolves on the next fleet_tasks notify or after `seconds`, whichever first. */
-function waitForTask(sql: postgres.Sql, seconds: number): Promise<'notified' | 'timeout'> {
+type Wake = { wait: (ms: number) => Promise<void>; dispose: () => void };
+
+/** Starts listening now; `wait` resolves at once if a notify already came. */
+function armWake(sql: postgres.Sql): Wake {
   const { emitter } = waker(sql);
-  return new Promise((resolve) => {
-    const onTask = () => { clearTimeout(timer); resolve('notified'); };
-    const timer = setTimeout(() => { emitter.off('task', onTask); resolve('timeout'); }, seconds * 1000);
-    emitter.once('task', onTask);
-  });
+  let fired = false;
+  let release: (() => void) | null = null;
+  const onTask = () => { fired = true; release?.(); };
+  emitter.on('task', onTask);
+  return {
+    wait: (ms) => new Promise<void>((resolve) => {
+      if (fired) return resolve();
+      const timer = setTimeout(() => { release = null; resolve(); }, ms);
+      release = () => { clearTimeout(timer); release = null; resolve(); };
+    }),
+    dispose: () => { emitter.off('task', onTask); },
+  };
 }
 
 /** Held next-task requests right now, for tests. */
@@ -216,13 +231,25 @@ async function loadItems(sql: SqlLike): Promise<FleetItem[]> {
   return sql<FleetItem[]>`SELECT name, phrases, filters, enabled FROM fleet_items WHERE enabled ORDER BY name`;
 }
 
+/** `<host_id>-<n>`: a host claims for its own workers only, so one host's token cannot pose as another host's worker. */
+function ownWorkerId(hostId: string, workerId: string): boolean {
+  if (!workerId.startsWith(`${hostId}-`)) return false;
+  return /^\d{1,4}$/.test(workerId.slice(hostId.length + 1));
+}
+
+const CLAIM_SELECT = (tx: SqlLike) => tx`
+  SELECT s.*, a.uid, a.password_enc, a.totp_enc, a.cookie_enc, a.token_enc
+  FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no`;
+
 worker.post('/claim', hostAuth, async (c) => {
   const host: FleetHostRow = c.var.host;
   const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body) return c.json(BAD_REQUEST, 422);
   const { host_id, worker_id, version, vnc_port } = body;
   if (host_id !== host.host_id) return c.json({ ...BAD_REQUEST, detail: 'host_id is not the token\'s host' }, 422);
-  if (typeof worker_id !== 'string' || !WORKER_ID.test(worker_id)) return c.json({ ...BAD_REQUEST, detail: 'worker_id' }, 422);
+  if (typeof worker_id !== 'string' || !WORKER_ID.test(worker_id) || !ownWorkerId(host.host_id, worker_id)) {
+    return c.json({ ...BAD_REQUEST, detail: 'worker_id must be <host_id>-<n>' }, 422);
+  }
   if (typeof version !== 'string' || version.length > 64) return c.json({ ...BAD_REQUEST, detail: 'version' }, 422);
   if (vnc_port !== null && vnc_port !== undefined
     && !(Number.isInteger(vnc_port) && (vnc_port as number) > 0 && (vnc_port as number) < 65536)) {
@@ -230,13 +257,13 @@ worker.post('/claim', hostAuth, async (c) => {
   }
   const vncPort = typeof vnc_port === 'number' ? vnc_port : null;
   const key = poolKey(c.env);
-  if (!key) return c.json({ ...UNAUTHORIZED, detail: 'FB_POOL_KEY is not set' }, 401);
+  if (!key) return c.json(unavailable('FB_POOL_KEY'), 503);
   const tokenKey = workerTokenKey(c.env);
-  if (!tokenKey) return c.json({ ...UNAUTHORIZED, detail: 'FLEET_WORKER_TOKEN_KEY is not set' }, 401);
+  if (!tokenKey) return c.json(unavailable('FLEET_WORKER_TOKEN_KEY'), 503);
 
   if ((body.claim_id !== undefined && (typeof body.claim_id !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(body.claim_id)))
       || (body.handoff_epoch !== undefined && (!Number.isInteger(body.handoff_epoch) || (body.handoff_epoch as number) < 0))) return c.json(BAD_REQUEST, 422);
-  const claimId = typeof body.claim_id === 'string' && /^[a-zA-Z0-9-]{1,64}$/.test(body.claim_id) ? body.claim_id : null;
+  const claimId = typeof body.claim_id === 'string' ? body.claim_id : null;
   const handoff = Number.isInteger(body.handoff_epoch) ? body.handoff_epoch as number : null;
   const sql = getDb(c.env);
   const answer = await sql.begin(async (tx): Promise<ClaimAnswer | null> => {
@@ -244,35 +271,55 @@ worker.post('/claim', hostAuth, async (c) => {
     const [running] = await tx`SELECT account_no FROM fleet_slots WHERE host_id = ${host.host_id} AND worker_id = ${worker_id}
       AND lease_expires_at > NOW()
       AND NOT ((${claimId}::text IS NOT NULL AND claim_id IS NOT DISTINCT FROM ${claimId})
-        OR (${handoff}::int IS NOT NULL AND handoff_epoch IS NOT DISTINCT FROM ${handoff} AND lease_expires_at = 'infinity'::timestamptz))`;
+        OR (${handoff}::int IS NOT NULL AND handoff_epoch IS NOT DISTINCT FROM ${handoff} AND reserved_until > NOW()))`;
     if (running) return null;
     const settings = await loadSettings(tx);
+
+    // This boot's own slot (a retried claim) or the one held for it (a
+    // handoff) waits for its lock: skipping it would hand the same boot a
+    // second account while the first sits leased.
+    let row: ClaimRow | undefined;
+    if (claimId !== null || handoff !== null) {
+      const [mine] = await tx<{ account_no: number }[]>`
+        SELECT account_no FROM fleet_slots WHERE host_id = ${host.host_id} AND worker_id = ${worker_id}
+          AND ((${claimId}::text IS NOT NULL AND claim_id = ${claimId})
+            OR (${handoff}::int IS NOT NULL AND handoff_epoch = ${handoff} AND reserved_until > NOW()))
+        ORDER BY (claim_id IS NOT DISTINCT FROM ${claimId}) DESC LIMIT 1`;
+      if (mine) {
+        [row] = await tx<ClaimRow[]>`${CLAIM_SELECT(tx)} WHERE s.account_no = ${mine.account_no} AND a.status = 'fleet'
+          FOR NO KEY UPDATE OF a`;
+      }
+    }
+    // Otherwise any free slot. A handoff whose reservation lapsed lands here
+    // too, and its own slot (now free) still comes first.
     // The slot's own row is what the lock holds; the pool row only says the
     // account is still the fleet's. A slot's home cities nobody else is
     // covering right now count in its favour, after the host it last ran on.
-    const [row] = await tx<ClaimRow[]>`
-      SELECT s.*, a.uid, a.password_enc, a.totp_enc, a.cookie_enc, a.token_enc
-      FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no
-      WHERE a.status = 'fleet' AND (
-        (${claimId}::text IS NOT NULL AND s.claim_id = ${claimId} AND s.worker_id = ${worker_id} AND s.host_id = ${host.host_id})
-        OR (${handoff}::int IS NOT NULL AND s.handoff_epoch = ${handoff} AND s.lease_expires_at = 'infinity'::timestamptz AND s.worker_id = ${worker_id} AND s.host_id = ${host.host_id})
-        OR (${handoff}::int IS NULL AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW())))
-      ORDER BY (s.worker_id = ${worker_id}) DESC NULLS LAST, (s.claim_id = ${claimId}) DESC NULLS LAST, (s.handoff_epoch = ${handoff}) DESC NULLS LAST,
-        (s.last_host_id = ${host.host_id}) DESC NULLS LAST,
-        (SELECT COUNT(*) FROM jsonb_array_elements_text(s.home_cities) h(slug)
-          WHERE NOT EXISTS (
-            SELECT 1 FROM fleet_slots o
-            WHERE o.account_no <> s.account_no AND o.worker_id IS NOT NULL
-              AND o.lease_expires_at > NOW() AND o.home_cities ? h.slug)) DESC,
-        s.account_no
-      LIMIT 1
-      FOR NO KEY UPDATE OF a SKIP LOCKED`;
+    if (!row) {
+      [row] = await tx<ClaimRow[]>`
+        ${CLAIM_SELECT(tx)}
+        WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW())
+        ORDER BY (s.worker_id = ${worker_id}) DESC NULLS LAST,
+          (s.last_host_id = ${host.host_id}) DESC NULLS LAST,
+          (SELECT COUNT(*) FROM jsonb_array_elements_text(s.home_cities) h(slug)
+            WHERE NOT EXISTS (
+              SELECT 1 FROM fleet_slots o
+              WHERE o.account_no <> s.account_no AND o.worker_id IS NOT NULL
+                AND o.lease_expires_at > NOW() AND o.home_cities ? h.slug)) DESC,
+          s.account_no
+        LIMIT 1
+        FOR NO KEY UPDATE OF a SKIP LOCKED`;
+    }
     if (!row) return null;
 
-    const [locked] = await tx<(FleetSlotRow & { reserved: boolean })[]>`SELECT *, lease_expires_at = 'infinity'::timestamptz AS reserved FROM fleet_slots WHERE account_no = ${row.account_no} FOR UPDATE`;
-    const repeated = claimId !== null && locked.claim_id === claimId && locked.worker_id === worker_id && locked.host_id === host.host_id;
-    if (!repeated && handoff !== null && (locked.handoff_epoch !== handoff || locked.worker_id !== worker_id || locked.host_id !== host.host_id || !locked.reserved)) return null;
-    if (!repeated && handoff === null && locked.lease_expires_at !== null && !(locked.lease_expires_at < new Date())) return null;
+    const [locked] = await tx<(FleetSlotRow & { reserved: boolean; free: boolean })[]>`
+      SELECT *, COALESCE(reserved_until > NOW(), FALSE) AS reserved,
+        (lease_expires_at IS NULL OR lease_expires_at < NOW()) AS free
+      FROM fleet_slots WHERE account_no = ${row.account_no} FOR UPDATE`;
+    const ours = locked.worker_id === worker_id && locked.host_id === host.host_id;
+    const repeated = claimId !== null && locked.claim_id === claimId && ours;
+    const handedOff = !repeated && handoff !== null && locked.handoff_epoch === handoff && ours && locked.reserved;
+    if (!repeated && !handedOff && !locked.free) return null;
     let epoch = locked.epoch;
     if (!repeated) {
       // The pool trigger fences the previous holder before the new lease is installed.
@@ -281,8 +328,8 @@ worker.post('/claim', hostAuth, async (c) => {
         updated_at = NOW() WHERE no = ${row.account_no}`;
       const [slot] = await tx<{ epoch: number }[]>`
         UPDATE fleet_slots SET epoch = ${locked.epoch + 1}, worker_id = ${worker_id}, host_id = ${host.host_id},
-          last_host_id = ${host.host_id}, claim_id = ${claimId}, handoff_epoch = ${handoff},
-          lease_expires_at = NOW() + ${minutes(settings.lease_minutes)}::interval
+          last_host_id = ${host.host_id}, claim_id = ${claimId}, handoff_epoch = ${handedOff ? handoff : null},
+          reserved_until = NULL, lease_expires_at = NOW() + ${minutes(settings.lease_minutes)}::interval
         WHERE account_no = ${row.account_no} RETURNING epoch`;
       epoch = slot.epoch;
       await tx`INSERT INTO fb_pool_events (account_no, actor_id, actor_name, kind, status, detail)
@@ -406,8 +453,10 @@ worker.post('/heartbeat', workerAuth, async (c) => {
     return true;
   });
   if (!accepted) return c.json({ error: 'stale_epoch' }, 409);
+  // Re-signed with a day left, or at once when it verified under the
+  // previous key, so a key rotation drains within one heartbeat.
   const exp = Math.floor(Date.now() / 1000) + WORKER_TOKEN_DAYS * 86400;
-  const renewal = w.exp * 1000 - Date.now() < 86400000
+  const renewal = w.rotated || w.exp * 1000 - Date.now() < 86400000
     ? { worker_token: signWorkerToken({ worker_id: w.worker_id, account_no: w.account_no, epoch: w.epoch, exp }, workerTokenKey(c.env)!), token_expires_at: exp }
     : {};
   return c.json({ ok: true, directives: [], ...renewal });
@@ -430,6 +479,30 @@ function why(r: PickRow): FleetTaskWhy {
   return 'other';
 }
 
+function handed(r: PickRow, leaseExpiresAt: Date): HandedTask {
+  return {
+    id: r.id,
+    kind: r.kind,
+    city: { slug: r.city, name: r.name, radius_km: r.radius_km },
+    item: r.item,
+    lease_expires_at: leaseExpiresAt.toISOString(),
+    why: why(r),
+  };
+}
+
+/** Tasks with the city's name and whether the city is this account's home or familiar ground. */
+function taskRows(tx: SqlLike, w: WorkerIdentity, home: string[], settings: FleetSettings) {
+  return tx`
+    WITH familiar AS (
+      SELECT DISTINCT city FROM fleet_tasks
+      WHERE account_no = ${w.account_no} AND state = 'done'
+        AND done_at > NOW() - ${`${settings.familiar_days} days`}::interval
+    )
+    SELECT t.id::int AS id, t.kind, t.city, c.name, c.radius_km, t.item, t.reason, t.lease_expires_at, t.priority, t.due_at,
+      (t.city = ANY(${home}::text[])) AS home, (f.city IS NOT NULL) AS familiar
+    FROM fleet_tasks t JOIN fleet_cities c ON c.slug = t.city LEFT JOIN familiar f ON f.city = t.city`;
+}
+
 /**
  * One transaction: close what the worker finished, then take the best due
  * task for this account. Several backend instances and forty workers pick at
@@ -442,9 +515,14 @@ async function pickTask(
 ): Promise<Pick> {
   return sql.begin(async (tx): Promise<Pick> => {
     // The hold may have lasted a minute: the slot could have moved on.
-    const release = await loadRelease(tx, true);
     const slot = await eligibleSlot(tx, w, true);
     if (!slot) return { stale: true };
+    // Read under the slot's lock, not a lock of its own. advanceRoll takes
+    // the release row and then this slot's lock: a pick that waited here sees
+    // the drain it set, and one that got here first has leased before
+    // advanceRoll looks for idle workers. Locking the release row made every
+    // pick in the fleet wait in one line.
+    const release = await loadRelease(tx);
 
     if (done) {
       const closed = await tx<{ id: number; kind: string }[]>`
@@ -454,7 +532,6 @@ async function pickTask(
       if (closed.length) {
         if (closed[0].kind === 'probe' && typeof done.result.cards === 'number' && done.result.cards > 0 && !done.result.stopped) {
           await tx`UPDATE fleet_slots SET quarantined_until = NULL, quarantine_reset_at = NOW(), quarantine_evidence = NULL WHERE account_no = ${w.account_no}`;
-          slot.quarantined_until = null;
         }
         await tx`
           INSERT INTO fleet_task_events (task_id, worker_id, kind, detail)
@@ -462,11 +539,33 @@ async function pickTask(
       }
     }
     if (!take) return { task: null, reason: 'done_only' };
-    if (release?.state === 'rolling' && release.current?.worker_id === w.worker_id) {
+    const home = Array.isArray(slot.home_cities) ? slot.home_cities : [];
+
+    // A lease this epoch still holds was handed in an answer the worker never
+    // got (a timeout, a dropped connection): hand it again rather than lease a
+    // second one. Otherwise the first sits leased, renewed by every HEALTHY
+    // heartbeat until task_max_minutes, its city blocked and its minutes
+    // charged alongside the new task's.
+    const [held] = await tx<PickRow[]>`
+      ${taskRows(tx, w, home, settings)}
+      WHERE t.state = 'leased' AND t.worker_id = ${w.worker_id} AND t.account_no = ${w.account_no} AND t.epoch = ${w.epoch}
+      ORDER BY t.leased_at DESC LIMIT 1`;
+    if (held) {
+      await tx`
+        INSERT INTO fleet_task_events (task_id, worker_id, kind, detail)
+        VALUES (${held.id}, ${w.worker_id}, 'handed', ${tx.json({ why: why(held), again: true })})`;
+      return { task: handed(held, held.lease_expires_at) };
+    }
+
+    // The worker a roll is replacing finishes what it has and takes nothing
+    // new; its replacement (same id, a later epoch) is not drained.
+    const current = release?.state === 'rolling' ? release.current : null;
+    if (current?.worker_id === w.worker_id && (current.epoch === undefined || w.epoch <= current.epoch)) {
       return { task: null, reason: 'draining', retry_after: 30 };
     }
 
-    const quarantined = slot.quarantined_until !== null && slot.quarantined_until.getTime() > Date.now();
+    const [{ quarantined }] = await tx<{ quarantined: boolean }[]>`
+      SELECT COALESCE(quarantined_until > NOW(), FALSE) AS quarantined FROM fleet_slots WHERE account_no = ${w.account_no}`;
     if (!quarantined) {
       const [used] = await tx<{ minutes: number | null }[]>`
         SELECT minutes::float8 AS minutes FROM fleet_minutes
@@ -475,7 +574,6 @@ async function pickTask(
         return { task: null, retry_after: RETRY_BLOCKED, reason: 'budget' };
       }
     }
-    const home = Array.isArray(slot.home_cities) ? slot.home_cities : [];
     // A quarantined account only probes its own slot; everyone else takes
     // searches and slug checks, plus a probe aimed at them whose quarantine
     // has lapsed meanwhile.
@@ -483,19 +581,10 @@ async function pickTask(
       ? tx`t.kind = 'probe' AND t.account_no = ${w.account_no}`
       : tx`(t.kind <> 'probe' OR t.account_no = ${w.account_no})`;
     const [row] = await tx<PickRow[]>`
-      SELECT t.id::int AS id, t.kind, t.city, c.name, c.radius_km, t.item, t.reason, t.lease_expires_at,
-        (t.city = ANY(${home}::text[])) AS home,
-        EXISTS (SELECT 1 FROM fleet_tasks f
-                WHERE f.account_no = ${w.account_no} AND f.city = t.city AND f.state = 'done'
-                  AND f.done_at > NOW() - ${`${settings.familiar_days} days`}::interval) AS familiar
-      FROM fleet_tasks t JOIN fleet_cities c ON c.slug = t.city
+      ${taskRows(tx, w, home, settings)}
       WHERE t.state = 'ready' AND t.due_at <= NOW() AND ${kinds}
       ORDER BY t.priority DESC,
-        CASE WHEN t.city = ANY(${home}::text[]) THEN 0
-             WHEN EXISTS (SELECT 1 FROM fleet_tasks f
-                          WHERE f.account_no = ${w.account_no} AND f.city = t.city AND f.state = 'done'
-                            AND f.done_at > NOW() - ${`${settings.familiar_days} days`}::interval) THEN 1
-             ELSE 2 END,
+        CASE WHEN t.city = ANY(${home}::text[]) THEN 0 WHEN f.city IS NOT NULL THEN 1 ELSE 2 END,
         t.due_at
       LIMIT 1
       FOR UPDATE OF t SKIP LOCKED`;
@@ -510,20 +599,10 @@ async function pickTask(
         leased_at = NOW(), lease_expires_at = NOW() + ${minutes(settings.lease_minutes)}::interval
       WHERE id = ${row.id}
       RETURNING lease_expires_at`;
-    const reason = why(row);
     await tx`
       INSERT INTO fleet_task_events (task_id, worker_id, kind, detail)
-      VALUES (${row.id}, ${w.worker_id}, 'handed', ${tx.json({ why: reason })})`;
-    return {
-      task: {
-        id: row.id,
-        kind: row.kind,
-        city: { slug: row.city, name: row.name, radius_km: row.radius_km },
-        item: row.item,
-        lease_expires_at: leased.lease_expires_at.toISOString(),
-        why: reason,
-      },
-    };
+      VALUES (${row.id}, ${w.worker_id}, 'handed', ${tx.json({ why: why(row) })})`;
+    return { task: handed(row, leased.lease_expires_at) };
   });
 }
 
@@ -544,24 +623,36 @@ worker.post('/next-task', workerAuth, async (c) => {
   const settings = await loadSettings(sql);
   const wait = typeof body.wait === 'number' && Number.isFinite(body.wait) ? body.wait : settings.poll_hold_seconds;
   const hold = Math.max(0, Math.min(wait, settings.poll_hold_seconds));
-
-  // The listener is up before the first look, so a task written between the
-  // look and the hold still wakes it.
-  if (take && hold > 0) await waker(sql).ready;
-  let answer = await pickTask(sql, w, settings, done, take);
-  if ('stale' in answer) return c.json({ error: 'stale_epoch' }, 409);
-  if (answer.task || answer.reason !== 'nothing_due' || hold === 0) return c.json(answer);
-  if (holds >= MAX_HOLDS) return c.json(answer);
-
-  holds++;
-  try {
-    await waitForTask(sql, hold);
-  } finally {
-    holds--;
+  if (!take || hold === 0) {
+    const answer = await pickTask(sql, w, settings, done, take);
+    return 'stale' in answer ? c.json({ error: 'stale_epoch' }, 409) : c.json(answer);
   }
-  answer = await pickTask(sql, w, settings, null);
-  if ('stale' in answer) return c.json({ error: 'stale_epoch' }, 409);
-  return c.json(answer);
+
+  // Until the deadline, a wake that found nothing for this account (another
+  // worker took the task, or it was a probe for someone else) holds again
+  // instead of sending the worker away for retry_after.
+  const deadline = Date.now() + hold * 1000;
+  await waker(sql).ready;
+  let wake = armWake(sql);
+  try {
+    let answer = await pickTask(sql, w, settings, done);
+    for (;;) {
+      if ('stale' in answer) return c.json({ error: 'stale_epoch' }, 409);
+      const left = deadline - Date.now();
+      if (answer.task || answer.reason !== 'nothing_due' || left <= 0 || holds >= MAX_HOLDS) return c.json(answer);
+      holds++;
+      try {
+        await wake.wait(left);
+      } finally {
+        holds--;
+      }
+      wake.dispose();
+      wake = armWake(sql);
+      answer = await pickTask(sql, w, settings, null);
+    }
+  } finally {
+    wake.dispose();
+  }
 });
 
 // ─── Events ───────────────────────────────────────────────────────────────────
@@ -592,9 +683,13 @@ worker.post('/events', workerAuth, async (c) => {
     await tx`INSERT INTO fleet_task_events (task_id, worker_id, kind, detail)
       VALUES (${task.id}, ${w.worker_id}, ${kind}, ${detail ? tx.json(detail as postgres.JSONValue) : null})`;
     if (kind === 'started') await tx`UPDATE fleet_tasks SET started_at = COALESCE(started_at, NOW()) WHERE id = ${task.id}`;
-    if (task.kind === 'verify-slug' && (kind === 'finished' || kind === 'stopped')) {
-      const matches = detail?.matches === true;
-      const location = typeof detail?.location === 'string' ? detail.location.slice(0, 200) : null;
+    // Only a finished check that saw the page is a verdict. A stopped one, or
+    // one whose page failed (detail.error), says nothing about the slug and
+    // leaves the city unverified, so the scheduler checks it again; marking
+    // it verified would disable it for good over a slow proxy.
+    if (task.kind === 'verify-slug' && kind === 'finished' && typeof detail?.matches === 'boolean' && detail.error == null) {
+      const matches = detail.matches;
+      const location = typeof detail.location === 'string' ? detail.location.slice(0, 200) : null;
       await tx`UPDATE fleet_cities SET verified_at = NOW(), verified_as = ${location}, enabled = ${matches}
         WHERE slug = ${task.city} AND disabled_at IS NULL
           AND (verified_at IS NULL OR (verified_as IS DISTINCT FROM 'override' AND verified_at <= (SELECT leased_at FROM fleet_tasks WHERE id = ${task.id})))`;
@@ -613,26 +708,39 @@ worker.put('/session', workerAuth, async (c) => {
   const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
   const cookies = body ? parseCookies(body.cookies) : null;
   if (!cookies) return c.json({ ...BAD_REQUEST, detail: 'cookies' }, 422);
+  if (body!.clear !== undefined && typeof body!.clear !== 'boolean') return c.json({ ...BAD_REQUEST, detail: 'clear' }, 422);
+  const clear = body!.clear === true;
+  // The stored session is what spares the next boot a login. An empty list,
+  // or one without a Facebook session in it, replaces it only when the
+  // worker says so outright.
+  if (!clear && !cookies.some((k) => k.name === 'c_user')) return c.json({ ...BAD_REQUEST, detail: 'cookies: no c_user (send clear: true to empty the stored session)' }, 422);
+  if (!clear && !cookies.some((k) => k.name === 'xs')) return c.json({ ...BAD_REQUEST, detail: 'cookies: no xs (send clear: true to empty the stored session)' }, 422);
   const token = body!.token;
   if (token !== undefined && token !== null && (typeof token !== 'string' || token.length > 4096)) {
     return c.json({ ...BAD_REQUEST, detail: 'token' }, 422);
   }
   const key = poolKey(c.env);
-  if (!key) return c.json({ ...UNAUTHORIZED, detail: 'FB_POOL_KEY is not set' }, 401);
-  const text = cookieTextFromList(cookies);
+  if (!key) return c.json(unavailable('FB_POOL_KEY'), 503);
+  const keep = clear ? [] : cookies;
+  const text = cookieTextFromList(keep);
+  const uid = keep.length ? cookieUid(text) : null;
   const sql = getDb(c.env);
-  const updated = await sql.begin(async (tx) => {
-    if (!await eligibleSlot(tx, w, true)) return [];
-    return tx<{ no: number }[]>`
-    UPDATE fb_pool_accounts SET
-      cookie_enc = ${cookies.length ? seal(text, key) : null}, cookie_uid = ${cookies.length ? cookieUid(text) : null},
-      cookie_at = NOW(), updated_at = NOW(),
-      token_enc = ${token === undefined ? tx`token_enc` : sealOrNull(token ?? '', key)}
-    WHERE no = ${w.account_no}
-    RETURNING no`;
+  const updated = await sql.begin(async (tx): Promise<'stale' | 'foreign' | 'ok'> => {
+    if (!await eligibleSlot(tx, w, true)) return 'stale';
+    const [account] = await tx<{ uid: string | null }[]>`SELECT uid FROM fb_pool_accounts WHERE no = ${w.account_no}`;
+    if (uid && account.uid && uid !== account.uid) return 'foreign';
+    // An absent token key keeps the stored token; null (or "") clears it.
+    await tx`
+      UPDATE fb_pool_accounts SET
+        cookie_enc = ${keep.length ? seal(text, key) : null}, cookie_uid = ${uid},
+        cookie_at = NOW(), updated_at = NOW(),
+        token_enc = ${token === undefined ? tx`token_enc` : sealOrNull(token ?? '', key)}
+      WHERE no = ${w.account_no}`;
+    return 'ok';
   });
-  if (!updated.length) return c.json({ error: 'stale_epoch' }, 409);
-  flog.info('fleet session resealed', { accountNo: w.account_no, workerId: w.worker_id, cookies: cookies.length, token: token !== undefined });
+  if (updated === 'stale') return c.json({ error: 'stale_epoch' }, 409);
+  if (updated === 'foreign') return c.json({ ...BAD_REQUEST, detail: 'cookies: c_user is not this account' }, 422);
+  flog.info('fleet session resealed', { accountNo: w.account_no, workerId: w.worker_id, cookies: keep.length, cleared: clear, token: token !== undefined });
   return c.json({ ok: true });
 });
 

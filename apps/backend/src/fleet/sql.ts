@@ -116,6 +116,8 @@ export type FleetSlotRow = {
   quarantine_reset_at: Date | null;
   handoff_epoch: number | null;
   claim_id: string | null;
+  /** A handoff reservation's deadline; the lease ends with it. */
+  reserved_until: Date | null;
   note: string;
 };
 

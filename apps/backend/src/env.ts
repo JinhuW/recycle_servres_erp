@@ -61,6 +61,9 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
   if (src.FLEET_WORKER_TOKEN_KEY && !/^[0-9a-fA-F]{64}$/.test(src.FLEET_WORKER_TOKEN_KEY.trim())) {
     throw new Error('FLEET_WORKER_TOKEN_KEY must be 64 hex characters (openssl rand -hex 32)');
   }
+  if (src.FLEET_WORKER_TOKEN_KEY_PREVIOUS && !/^[0-9a-fA-F]{64}$/.test(src.FLEET_WORKER_TOKEN_KEY_PREVIOUS.trim())) {
+    throw new Error('FLEET_WORKER_TOKEN_KEY_PREVIOUS must be 64 hex characters');
+  }
   // Attachments: all of R2 or none of it. Four of the five variables used
   // to fall back to the stub as quietly as none did, and every receipt and
   // photo uploaded in production was recorded as stored while its bytes went
@@ -85,6 +88,7 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
     COORDINATOR_API_TOKEN: src.COORDINATOR_API_TOKEN,
     FB_POOL_KEY: src.FB_POOL_KEY,
     FLEET_WORKER_TOKEN_KEY: src.FLEET_WORKER_TOKEN_KEY,
+    FLEET_WORKER_TOKEN_KEY_PREVIOUS: src.FLEET_WORKER_TOKEN_KEY_PREVIOUS,
     FLEET_ROLE: src.FLEET_ROLE,
     FLEET_COORDINATOR_URL: src.FLEET_COORDINATOR_URL,
     FLEET_IMAGE_WORKER: src.FLEET_IMAGE_WORKER,

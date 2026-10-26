@@ -15,6 +15,50 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.354.0] - 2026-10-26
+
+### Fixed
+
+Review fixes to the fleet's claim and ownership core (RS-406). None of this
+changes a running worker until the cutover; the backend side ships first and
+stays compatible with today's workers.
+
+- **A missing server key no longer looks like a dead token.** Without
+  `FLEET_WORKER_TOKEN_KEY` or `FB_POOL_KEY` the worker routes, `claim` and
+  `PUT /session` answered 401, and since RS-400 a worker treats 401 as final:
+  it exits, and its restart is a Facebook login. One deploy that dropped a
+  variable would have re-logged the whole fleet. They now answer `503
+  {error: "unavailable"}`, and token 401s say why (`missing_token`,
+  `bad_token`, `expired_token`). `FLEET_WORKER_TOKEN_KEY_PREVIOUS` keeps
+  tokens from the old key valid through a rotation; each worker's next
+  heartbeat re-signs its token.
+- **A host claims only for its own workers.** `worker_id` must be
+  `<host_id>-<n>`. Before, any host token could claim as another host's worker,
+  overwrite its row and take over its VNC relay.
+- **One lease per worker epoch.** A `next-task` answer lost to a timeout left
+  its task leased, renewed by every heartbeat for 45 minutes, while the worker
+  took a second one. Both were charged to the budget. The leased task is now
+  handed again.
+- **Handoff reservations lapse.** A host's confirmed stop reserved the account
+  with an infinite lease, the same value a manager's park writes. A
+  replacement that never claimed left it reserved for good, shown as
+  "parked". It now has `reserved_until` (20 minutes, the roll gate's timeout).
+  Park and unpark clear the handoff.
+- **Picks no longer queue on the release row.** Every `next-task` locked it, so
+  the whole fleet picked one at a time. The pick now reads it under its slot
+  lock, and a new index serves the "familiar city" test, which scanned every
+  finished task.
+- **A slug check that failed is not a verdict.** A page error or a stopped
+  check used to mark the city verified-and-wrong for good. Only a finished
+  check with a real answer counts now.
+- **Smaller fixes:**
+  - The replacement worker in a roll is no longer drained with the one it replaces.
+  - A retried claim or a handoff waits for its own slot instead of skipping to another account.
+  - A held poll arms its wake-up before its first look, and keeps holding after a wake that found nothing.
+  - Lease checks use the database clock.
+  - A session upload must name this account's `c_user` and `xs` (or say `clear: true`).
+  - CONTRACTS §2–§6 now describe what ships, including 0207/0208.
+
 ## [1.353.0] - 2026-10-26
 
 ### Changed
