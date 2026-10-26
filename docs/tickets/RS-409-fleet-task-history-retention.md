@@ -2,12 +2,12 @@
 id: RS-409
 title: Fleet task history retention
 type: task
-status: in-review
+status: done
 priority: P2
 created: 2026-10-26
 reporter: jinhu
 branch: fleet/task-retention
-pr:
+pr: "#921"
 version: 1.358.0
 related: [RS-394]
 ---
