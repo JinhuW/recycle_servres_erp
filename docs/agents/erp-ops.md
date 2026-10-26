@@ -35,6 +35,17 @@ The release flow itself (`dev` → `main` is a full release) is in the root
   FK onto a scrubbed table fails `tests/sync-scrub.test.ts`, which is the
   point.  Qualify every name in it with `public.`, because the dump before it
   empties `search_path` (v1.211.1).
+- **The nightly copy keeps dev's Facebook fleet** (`keep-fleet.sql`,
+  `restore-fleet.sql`, v1.359.0).  Dev runs real fleet workers on live
+  accounts, and wiping their slots costs a Facebook login per worker.  The
+  fleet tables, and the slotted pool accounts' sealed columns, cookie
+  fields, status and note, go to a `sync_keep` schema before the drop and
+  come back once the redeployed backend has migrated.  A run whose restore
+  did not finish (`fleet NOT restored` in the db-sync log) leaves
+  `sync_keep`, and every later run refuses until someone runs
+  `restore-fleet.sql` against dev (`psql --single-transaction -f`) or drops
+  the schema.  The restore matches columns by name, so a fleet migration
+  needs no edit there.
 
 - `docker-compose.yml` is the prod-shaped stack.  Every service has
   `cap_drop: ALL` + `no-new-privileges` + memory caps + JSON log rotation.

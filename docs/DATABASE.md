@@ -71,7 +71,11 @@ isolation boundary (`trackers/facebook/infra/README.md`).
   every night at 04:00 UTC by the cron service in `deploy/railway-sync/`.
   1. `sync.sh` refuses any target that resolves to the prod host or carries a
      marker other than `dev`.
-  2. It resets dev's schema wholesale and restores prod's dump.
+  2. It sets dev's Facebook fleet aside in a `sync_keep` schema
+     (`keep-fleet.sql`): every `fleet_*` table, and for each pool account
+     with a `fleet_slots` row its `*_enc` columns, `cookie_uid`, `cookie_at`,
+     `status` and `note`. Then it resets dev's schema wholesale and restores
+     prod's dump.
   3. It runs `scrub.sql` in the same transaction. That truncates the live
      credentials (`refresh_tokens`, `oauth_refresh_tokens`,
      `oauth_authorization_codes`, `oauth_pending_consent`, `login_attempts`),
@@ -80,6 +84,10 @@ isolation boundary (`trackers/facebook/infra/README.md`).
      creates `env_marker`, which exists only on dev.
   4. It redeploys the dev backend, so migrations not yet on prod apply again on
      top of the restored copy.
+  5. Once every migration dev had is applied again, `restore-fleet.sql` puts
+     the fleet back in one transaction (onto the same pool accounts, matched
+     by `uid`) and drops `sync_keep`. A run that times out leaves `sync_keep`,
+     and the next run refuses until it is restored or dropped.
 - **Local.** The ERP's `docker-compose.yml` runs Postgres 16 (`recycle_pg`),
   and its data directory still needs a dump and restore before it can move to
   18. Backend tests run against a real Postgres (`recycle-erp-testdb` on

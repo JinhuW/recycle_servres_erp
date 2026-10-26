@@ -15,6 +15,20 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.359.0] - 2026-10-26
+
+### Changed
+
+- The nightly prod→dev database copy keeps dev's Facebook fleet (RS-410).
+  Dev runs real fleet workers on live accounts, and the copy used to empty
+  every `fleet_*` table and blank the pool's sealed logins, so each night
+  cost the dev fleet its host, its slots and a Facebook login per worker to
+  rebuild. The job now sets the fleet tables, and the slotted pool accounts'
+  sealed columns, cookie fields, status and note, aside before the restore
+  and puts them back once the redeployed backend has re-applied dev's
+  migrations. A run whose restore does not finish leaves the kept copy on
+  dev, and later runs refuse until it is restored or dropped.
+
 ## [1.358.0] - 2026-10-26
 
 ### Added
