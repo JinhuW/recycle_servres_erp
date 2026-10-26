@@ -137,6 +137,8 @@ def test_the_worker_claims_logs_in_once_and_takes_task_after_task(
     assert [d["task_id"] for d in fleet.done] == [first["id"], second["id"]]
     assert fleet.done[0]["result"]["cards"] == 40
     assert set(fleet.done[0]["result"]) >= {"cards", "opened", "reviewed", "alerted", "seconds"}
+    # Every fleet call names itself: Cloudflare refuses urllib's default agent.
+    assert all(not r[3].get("user-agent", "").startswith("Python-urllib") for r in fleet.requests)
     asks = [r for r in fleet.requests if r[1] == "/api/fleet/worker/next-task"]
     assert asks[0][2]["done"] is None
     assert all(a[2]["wait"] == 2 for a in asks)  # the claim's poll_hold_seconds
