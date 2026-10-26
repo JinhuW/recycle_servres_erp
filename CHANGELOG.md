@@ -15,6 +15,14 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.349.1] - 2026-10-25
+
+### Fixed
+
+- Recent activity on the Facebook fleet page now stops at 560px and scrolls on
+  wide screens. It used to stretch to the Workers card's height, so with a full
+  fleet it ran thousands of pixels down the page and never scrolled (RS-401).
+
 ## [1.349.0] - 2026-10-25
 
 ### Fixed

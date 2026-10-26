@@ -2888,7 +2888,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   attention, Offline) whose counts filter the table; a workers table that
   fits beside a **Recent activity** aside of the same height (latest sweeps,
   listings, session backups, workers gone silent and open checkpoints, rebuilt
-  from the timestamps the coordinator serves) — login, region, status with
+  from the timestamps the coordinator serves; since v1.349.1 it stops at 560px
+  and scrolls) — login, region, status with
   its reason, session days left, and since v1.266.0 the worker's **Today**
   (a 24-hour strip in its region's time zone: when the sweep started, how far
   it got, the now tick, the estimated end while it runs, the next scheduled
