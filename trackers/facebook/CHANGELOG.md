@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.4] - 2026-10-26
+
 ### Fixed
 
 Review fixes to fleet mode before cutover (monitor `1efd1a4`). Each one was a
