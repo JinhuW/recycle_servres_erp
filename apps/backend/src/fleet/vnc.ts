@@ -14,11 +14,22 @@
 //
 // Both handshakes are replayed through the Hono app as plain GETs, so the
 // worker token (fleet/auth.ts: 401 bad, 409 stale epoch) and the manager's
-// session, role and Origin are checked exactly as on any request. A manager
-// whose session lapses mid-view is cut the way vncBridge.ts does it.
+// session, role and Origin are checked exactly as on any request, and again
+// every minute while the socket lives: a manager whose session lapses is cut
+// the way vncBridge.ts does it, and a worker fenced off its account (a newer
+// claim, a park, the account leaving the fleet) loses its parked socket then,
+// rather than at its next heartbeat.
+//
+// Pairing happens in this process's memory, so both ends must reach the same
+// backend instance. One instance serves the relay: the one holding the
+// session advisory lock below (startFleetRelayLease, from server.ts). Every
+// other instance refuses both paths 503, so a second replica fails loudly
+// instead of parking a worker where its viewer never arrives. A deploy hands
+// the lock over when the old instance exits and closes its sockets.
 
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
+import type { ReservedSql, Sql } from 'postgres';
 import { WebSocket, type WebSocketServer, type RawData } from 'ws';
 import type { Hono } from 'hono';
 import { log } from '../lib/log';
@@ -34,7 +45,11 @@ const MAX_BUFFERED = 16 * 1024 * 1024;
 const REVALIDATE_MS = 60_000;
 const TERMINATE_GRACE_MS = 2_000;
 export const FLEET_VNC_SESSION_LAPSED = 4401;
+// The worker's token no longer names the slot's epoch: exit, let the agent claim.
+export const FLEET_VNC_STALE_EPOCH = 4409;
 export const VIEWER_FRAME = 'viewer';
+const RELAY_LOCK = 'fleet-vnc-relay';
+const RELAY_RETRY_MS = 5_000;
 
 const vlog = log.child({ module: 'fleet-vnc' });
 
@@ -45,6 +60,8 @@ const parked = new Map<string, WebSocket>();
 // Viewer sockets with a worker on the other end.
 const bridges = new Set<WebSocket>();
 let closing = false;
+// Whether this process holds the relay lock (see the header).
+let serving = false;
 
 function reject(socket: Duplex, status: number): void {
   socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
@@ -76,13 +93,21 @@ async function admit(app: FetchApp, env: Env, req: IncomingMessage): Promise<Res
 
 const toBuffer = (data: RawData) => (Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as ArrayBuffer));
 
-function park(workerId: string, ws: WebSocket): void {
+function park(workerId: string, ws: WebSocket, check: () => Promise<number>, everyMs: number): void {
   const previous = parked.get(workerId);
   if (previous) closeQuietly(previous, 1000, 'replaced by a newer relay socket');
   parked.set(workerId, ws);
   vlog.info('fleet vnc relay parked', { workerId, parked: parked.size });
   ws.on('close', () => {
     if (parked.get(workerId) === ws) parked.delete(workerId);
+  });
+  // For the socket's whole life, parked or paired: closing the worker's end
+  // of a pair closes the viewer's with the same code.
+  revalidate(ws, check, everyMs, (status) => {
+    if (status === 409) closeQuietly(ws, FLEET_VNC_STALE_EPOCH, 'This worker no longer holds its slot');
+    else if (status === 401) closeQuietly(ws, FLEET_VNC_SESSION_LAPSED, 'The worker token is no longer valid');
+    else return;
+    vlog.info('fleet vnc relay socket revoked', { workerId, status });
   });
   ws.on('error', () => ws.terminate());
   // Nothing should arrive before a viewer speaks; a worker that streams into
@@ -125,19 +150,25 @@ function pair(viewer: WebSocket, workerId: string, worker: WebSocket): void {
   if (worker.readyState === WebSocket.OPEN) worker.send(VIEWER_FRAME);
 }
 
-function recheck(viewer: WebSocket, check: () => Promise<number>, everyMs: number): void {
+// Re-admits a socket on its own handshake. Only the verdict codes act; a 5xx
+// means the check itself failed (the database blipped) and the next tick decides.
+function revalidate(ws: WebSocket, check: () => Promise<number>, everyMs: number, act: (status: number) => void): void {
   let inFlight = false;
   const timer = setInterval(() => {
     if (inFlight) return;
     inFlight = true;
-    check().then((status) => {
-      if (status === 401) closeQuietly(viewer, FLEET_VNC_SESSION_LAPSED, 'Your sign-in has run out');
-      else if (status === 403) closeQuietly(viewer, 1008, 'You can no longer watch this worker');
-    }, (e: unknown) => { vlog.warn('fleet vnc session re-check failed', e); })
+    check().then(act, (e: unknown) => { vlog.warn('fleet vnc re-check failed', e); })
       .finally(() => { inFlight = false; });
   }, everyMs);
   timer.unref();
-  viewer.once('close', () => clearInterval(timer));
+  ws.once('close', () => clearInterval(timer));
+}
+
+function recheck(viewer: WebSocket, check: () => Promise<number>, everyMs: number): void {
+  revalidate(viewer, check, everyMs, (status) => {
+    if (status === 401) closeQuietly(viewer, FLEET_VNC_SESSION_LAPSED, 'Your sign-in has run out');
+    else if (status === 403) closeQuietly(viewer, 1008, 'You can no longer watch this worker');
+  });
 }
 
 /**
@@ -151,16 +182,18 @@ export function handleFleetVncUpgrade(
 ): boolean {
   const path = (req.url ?? '').split('?')[0] ?? '';
   if (path === WORKER_PATH) {
+    if (!serving) { reject(socket, 503); return true; }
     admit(app, env, req).then((res) => {
       const workerId = res.headers.get('X-Fleet-Worker-Id');
       if (res.status !== 204 || !workerId) { reject(socket, res.status === 204 ? 500 : res.status); return; }
-      if (closing || (parked.size >= MAX_PARKED && !parked.has(workerId))) { reject(socket, 503); return; }
-      wss.handleUpgrade(req, socket, head, (ws) => park(workerId, ws));
+      if (closing || !serving || (parked.size >= MAX_PARKED && !parked.has(workerId))) { reject(socket, 503); return; }
+      wss.handleUpgrade(req, socket, head, (ws) => park(workerId, ws, () => admit(app, env, req).then((r) => r.status), revalidateMs));
     }).catch((e: unknown) => { vlog.error('fleet vnc worker upgrade failed', e); reject(socket, 500); });
     return true;
   }
   const match = VIEWER_PATH.exec(path);
   if (!match) return false;
+  if (!serving) { reject(socket, 503); return true; }
   let workerId: string;
   try {
     workerId = decodeURIComponent(match[1]!);
@@ -187,12 +220,80 @@ export function handleFleetVncUpgrade(
   return true;
 }
 
+function closeAll(code: number, reason: string, graceMs: number): void {
+  const all = [...parked.values(), ...bridges];
+  for (const ws of all) closeQuietly(ws, code, reason);
+  setTimeout(() => { for (const ws of all) ws.terminate(); }, graceMs).unref();
+}
+
 /** Closes every parked and paired socket, for shutdown. */
 export function closeFleetVnc({ graceMs = TERMINATE_GRACE_MS }: { graceMs?: number } = {}): void {
   closing = true;
-  const all = [...parked.values(), ...bridges];
-  for (const ws of all) closeQuietly(ws, 1001, 'The ERP is restarting — reconnect in a moment');
-  setTimeout(() => { for (const ws of all) ws.terminate(); }, graceMs).unref();
+  closeAll(1001, 'The ERP is restarting — reconnect in a moment', graceMs);
+}
+
+// A reserved connection whose pool has ended (shutdown) cannot be handed back.
+function releaseQuietly(conn: ReservedSql | null): void {
+  try { conn?.release(); } catch { /* the pool is gone, and the lock with its connection */ }
+}
+
+/**
+ * Competes for the relay lock on one reserved connection, every few seconds
+ * until it holds it, then checks the connection is still alive. A connection
+ * lost while holding means another instance may hold the lock now, so this
+ * one's sockets are closed and their workers dial again. `ready` settles
+ * after the first attempt.
+ */
+export function startFleetRelayLease(sql: Sql, { retryMs = RELAY_RETRY_MS }: { retryMs?: number } = {}): { stop(): void; ready: Promise<boolean> } {
+  let conn: ReservedSql | null = null;
+  let stopped = false;
+  let busy = false;
+  const tick = async (): Promise<boolean> => {
+    if (stopped || busy) return serving;
+    busy = true;
+    try {
+      conn ??= await sql.reserve();
+      if (serving) {
+        await conn`SELECT 1`;
+      } else {
+        const [r] = await conn<{ ok: boolean }[]>`SELECT pg_try_advisory_lock(hashtextextended(${RELAY_LOCK}, 0)) AS ok`;
+        if (r?.ok && !stopped) {
+          serving = true;
+          vlog.info('fleet vnc relay served by this instance');
+        }
+      }
+    } catch (e) {
+      if (serving) {
+        serving = false;
+        vlog.warn('fleet vnc relay lock lost; closing this instance’s relay sockets', e);
+        closeAll(1012, 'The VNC relay moved — reconnect in a moment', TERMINATE_GRACE_MS);
+      }
+      releaseQuietly(conn);
+      conn = null;
+    } finally {
+      busy = false;
+    }
+    return serving;
+  };
+  const ready = tick();
+  const timer = setInterval(() => void tick(), retryMs);
+  timer.unref?.();
+  return {
+    ready,
+    stop() {
+      stopped = true;
+      clearInterval(timer);
+      const held = conn;
+      const wasServing = serving;
+      serving = false;
+      conn = null;
+      if (held) {
+        void (wasServing ? held`SELECT pg_advisory_unlock(hashtextextended(${RELAY_LOCK}, 0))` : Promise.resolve())
+          .catch(() => {})
+          .finally(() => releaseQuietly(held));
+      }
+    },
+  };
 }
 
 /** Parked worker ids and open viewer count, for tests. */

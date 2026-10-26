@@ -3238,6 +3238,27 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   and is shown as reserved, not parked. A slug check whose page failed leaves
   the city unverified so it is checked again. A session upload must carry this
   account's `c_user` and `xs`, so it cannot wipe or replace the stored login.
+- **Fleet scheduling and rollout fixes (v1.356.0, RS-407)** — a rollout no
+  longer picks a worker the agent will not replace: a held container
+  (operator needed, crash limit, stopped by hand), one not running, or a
+  worker parked on its account is skipped with the reason in the release's
+  `skip_reasons`. A host's report keeps only its own `<host>-<n>` workers and
+  the agent's hold, exit code, image id and identity, and a second agent
+  instance for one host is refused (`403`, observe-only). Removing a host
+  frees the accounts it had reserved for a replacement. **Search now** on a
+  switched-off or unverified city is no longer cancelled by the next
+  scheduler pass, and two clicks write one task. A city's per-day change moves
+  its waiting search at once. Enabling a city needs a matching verdict (a
+  mismatch needs Enable anyway), and `reverify` sends a city back for a fresh
+  check, which is also how a removed, never-verified city returns; a check
+  that keeps ending without a verdict backs off from 15 minutes to 6 hours. Task
+  history reads newest first (up to 5000, flagged when cut), so Analysis no
+  longer shows the oldest days of its window. The fleet VNC relay is served
+  by one backend instance (an advisory lock; the others answer 503) and drops
+  a parked worker socket within a minute of its slot moving on (`4409`).
+  `fleet-import.mjs` keeps managers' edits unless `--overwrite`, and it,
+  `fleet-seed-slots.mjs` and `fleet-fake-worker.mjs` refuse a remote target
+  without an explicit opt-in.
 
 - **Fleet (ERP-owned)** — since v1.337.0 (RS-394) **Monitors ▸ Facebook** is
   the page of the task queue the ERP itself runs: the backend owns the city

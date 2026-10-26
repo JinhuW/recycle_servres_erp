@@ -90,7 +90,10 @@ first rule).
 Everything here runs on `jinhu@10.10.10.73` in
 `~/recycle_servers/facebook_tracker`, writes to `/tmp` on the VM, and is
 handed to `apps/backend/scripts/fleet-seed-slots.mjs` over an `scp` into a
-scratch directory on the operator's machine that is deleted afterwards. None
+scratch directory on the operator's machine that is deleted afterwards. Since
+v1.356.0 the seed (and `fleet-import.mjs`) writes to a non-local
+`DATABASE_URL` only with `FLEET_SEED_REMOTE=true` (`FLEET_IMPORT_REMOTE=true`),
+and the import adds only what the ERP lacks unless `--overwrite`. None
 of these files is ever committed; `home-cities.json` and `devices.json` carry
 no secret, the proxy login does and stays in the operator's shell.
 

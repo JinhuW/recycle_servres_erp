@@ -15,12 +15,14 @@
 // Re-running is safe: an existing slot keeps its epoch, lease and worker, and
 // only takes a proxy, device or home-city list the files or the stint provide.
 // --dry-run prints what would change and rolls the transaction back.
+// A DATABASE_URL that is not local needs FLEET_SEED_REMOTE=true (seeding prod
+// is this script's job, but never by a shell that forgot where it points).
 
 import postgres from 'postgres';
 import { readFileSync } from 'node:fs';
 import './load-env.mjs';
 import { poolKey, seal } from '../src/lib/sealed.ts';
-import { dbTarget } from '../src/lib/dbTarget.ts';
+import { dbTarget, destructiveRefusal } from '../src/lib/dbTarget.ts';
 
 function arg(name) {
   const i = process.argv.indexOf(name);
@@ -35,6 +37,13 @@ const url = process.env.DATABASE_URL;
 if (!url) {
   console.error('DATABASE_URL is not set. Add it to the repo-root .env');
   process.exit(1);
+}
+if (!dryRun) {
+  const refused = destructiveRefusal(url, 'fleet slot seeding', 'FLEET_SEED_REMOTE', process.env);
+  if (refused) {
+    console.error(refused);
+    process.exit(1);
+  }
 }
 const key = poolKey(process.env);
 if (!key) {

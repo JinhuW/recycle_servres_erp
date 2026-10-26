@@ -498,8 +498,17 @@ with a fresh socket for the next viewer.
   upgrade is refused `503`. A viewer for a worker with no parked socket is
   accepted, then closed `1011` "`<worker>` has no VNC relay connected".
 - The viewer's session is re-checked every 60 s; a lapsed sign-in closes it
-  `4401`, a lost role `1008`. Either side over 16 MB buffered closes `1013`.
-  On ERP shutdown every socket closes `1001`.
+  `4401`, a lost role `1008`. The worker's token is re-checked every 60 s too,
+  parked or paired: a stale epoch closes its socket `4409` (and the viewer's
+  with it), a token no longer valid `4401`. Either side over 16 MB buffered
+  closes `1013`. On ERP shutdown every socket closes `1001`.
+- **One instance serves the relay.** Pairing is in process memory, so the
+  backend instance holding the Postgres session advisory lock
+  `fleet-vnc-relay` (taken at boot, retried every 5 s) is the only one that
+  accepts either path; every other instance refuses both `503`. A deploy hands
+  it over when the old instance exits; a lost lock connection closes that
+  instance's sockets `1012`. Running more than one backend replica therefore
+  leaves the relay on one of them, and a client that reaches another retries.
 
 ## 6. Host API (`/api/fleet/hosts/:id/*`) — host scope
 
@@ -512,7 +521,18 @@ with a fresh socket for the next viewer.
     "hold"?: "operator_needed" | "crash_limit" | "operator_stopped", "exit_code"?: 0 | null, "image_id"?: "sha256:…" } ],
   "agent"?: { "instance_id": "uuid", "daemon_id": "…" | null, "conflict"?: ["other-agent-container"] } }
 // 200 { "ok": true }   (sets fleet_hosts.report, version, last_seen_at; 422 over 200 KB)
+// 403 { "error": "agent_conflict" }   on desired or report: another agent instance holds this host
 ```
+
+The report keeps only containers named `<host>-<n>` (another host's worker
+ids are dropped) with `hold`, `exit_code` and `image_id` when sent, and the
+`agent` identity.
+
+**One agent per host.** The first `X-Fleet-Agent-Instance` (or report
+`agent.instance_id`) seen holds the host (`fleet_hosts.agent_instance`,
+`agent_seen_at`) until it has been silent 2 minutes; `desired` and `report`
+from any other instance answer `403 agent_conflict`, which the agent reads as
+observe-only. A call without an instance id is let through.
 
 `count` is the host's `capacity` when authoritative, else `0`. `vnc_ports`
 maps `<host>-<n>` to `5900 + n` for `n = 1..count`. `image`/`version` are the
@@ -526,7 +546,13 @@ advanced only by an agent's `desired` call:
   replacement is pending nobody else is told to replace anything.
 - A candidate is a container on the host's last report whose image is not
   the release's and that is not already upgraded or skipped; the first idle
-  one (no leased task) is chosen. Busy workers wait.
+  one (no leased task) is chosen. Busy workers wait. A container with a
+  `hold`, one whose `state` is not `running`, and one whose worker is parked
+  (`SESSION_EXPIRED`, `CHECKPOINT`, `CHALLENGE_*`, `DEAD`) are added to
+  `skipped` instead, with the reason in `release.skip_reasons[worker_id]`
+  (`held: crash_limit`, `container exited`, `worker CHECKPOINT`): the agent
+  would never replace the first two, and rebooting a parked account is a login
+  that cannot pass the gate.
 - **Release gate:** the next step waits until the replaced worker heartbeats
   with `version` equal to the release version (or starting with
   `"<version> "`) after its replacement began, in a state no worse than
@@ -535,8 +561,11 @@ advanced only by an agent's `desired` call:
   `failed` with a `failure` text and new workers fall back to
   `FLEET_IMAGE_WORKER`.
 - Workers on observe-only hosts, or hosts silent for 2 minutes, are added to
-  `skipped`, not waited for. When nothing is pending anywhere the release is
-  `done`.
+  `skipped` (reason `host is observe-only` / `host is silent`), not waited
+  for. When nothing is pending anywhere the release is `done`.
+- Removing a host (`DELETE /hosts/:id`) frees the accounts it had reserved for
+  a replacement (handoff epoch, infinite lease: epoch + 1, no worker, no
+  lease) and drops a pending replacement on it (`skip_reasons: host removed`).
 - A manager's `GET /hosts` shows `desired.roll` from the release's `current`
   without advancing it.
 
@@ -606,8 +635,9 @@ already holds. Slot rows show a reservation as `reserved_until`, not as
   tag pushed again shows up as a different id.
 - Identity: every call carries `X-Fleet-Agent-Instance` and
   `X-Fleet-Docker-Daemon`; `report` (`agent`) and `stopped` (`agent_instance`,
-  `daemon_id`) carry them in the body. The ERP may refuse a second instance
-  for one host; today it ignores them.
+  `daemon_id`) carry them in the body. The ERP refuses a second live instance
+  for one host on `desired` and `report` (`403 agent_conflict`, above);
+  `stopped` does not check it.
 - VNC port: `desired.vnc_ports[worker_id]`, falling back to `5900 + n` for a
   worker the ERP has not mapped yet.
 
@@ -623,20 +653,20 @@ Session cookie plus the manager role. Errors are `{error, detail?}`:
 | `GET /api/fleet/health` | | `{ok, tables: string[]}` |
 | `GET /api/fleet/cities` | | `{cities: FleetCityListed[]}`; each city is `FleetCity & {open_tasks: FleetTask[], last_done_at: Record<item, ISO>}`. `open_tasks` are the city's `ready`/`leased` tasks of every kind; `last_done_at` has a key only for items with a finished search (no key = never) |
 | `POST /api/fleet/cities` | `{slug, name, radius_km? (1..500, default 500), region?}` | `201` the `FleetCityListed` itself, `enabled=false`, with a `verify-slug` task on the first enabled item (none if no item exists); `409 exists` |
-| `PUT /api/fleet/cities/:slug` | `{enabled?, per_day? (null or 1..24), pinned?, name?, override_verify?: true}`; unknown keys `422` | `200` the `FleetCityListed` after reconcile. `{enabled: true}` on an unverified city → `409 unverified`; `override_verify: true` marks it verified (`verified_as: "override"`), enables it and cancels its waiting `verify-slug` task |
+| `PUT /api/fleet/cities/:slug` | `{enabled?, per_day? (null or 1..24), pinned?, name?, override_verify?: true, reverify?: true}`; unknown keys `422` | `200` the `FleetCityListed` after reconcile. `{enabled: true}` → `409 unverified` unless the slug was confirmed: `verified_as` `override` or `imported`, or the latest verify verdict carrying `matches` said `true` (a mismatch sets `verified_at` too, and is not enough); `override_verify: true` marks it verified (`verified_as: "override"`), enables it and cancels its waiting `verify-slug` task; `reverify: true` forgets the verdict (unverified, disabled, not removed) so the scheduler writes a fresh check — also the way back for a removed city never verified; not with `enabled` or `override_verify`. A `per_day` change moves the pair's waiting cadence search at once |
 | `DELETE /api/fleet/cities/:slug` | | `200` the `FleetCityListed` after reconcile: disabled, waiting (`ready`) tasks cancelled; a leased search finishes |
 | `GET /api/fleet/items` | | `FleetItem[]` |
 | `PUT /api/fleet/items` | bare `FleetItem[]` (non-empty; `filters`, `enabled` optional) | `FleetItem[]` (all items). Upsert: an item not listed is left alone; one goes away by `enabled: false` |
 | `GET /api/fleet/settings` | | `FleetSettings` (§8 keys; `release` is not among them) |
 | `PUT /api/fleet/settings` | partial `FleetSettings`; `search` keys merge into the saved ones | `FleetSettings` |
-| `POST /api/fleet/tasks` | `{city, item}` | `201 FleetTask`. The pair's waiting search is pulled to `priority 100`, `due_at = now()`, `reason manual`; a pair with none gets a new one. `409 exists` when the pair is leased right now; `404` unknown city or item |
+| `POST /api/fleet/tasks` | `{city, item}` | `201 FleetTask`. The pair's waiting search is pulled to `priority 100`, `due_at = now()`, `reason manual`; a pair with none gets a new one, which the scheduler keeps even on a switched-off or unverified city (only a disabled item, or removing the city, cancels it). Two at once write one task. `409 exists` when the pair is leased right now; `404` unknown city or item |
 | `POST /api/fleet/round/start` | | `{started: number, skipped: number}`: every ready search due later becomes due now (`reason start`) unless the pair finished within `start_fresh_hours`; `skipped` = ready searches still due later |
-| `GET /api/fleet/tasks?state=&city=&item=&worker=&since=` | | `FleetTask[]`, at most 1000, `priority DESC, due_at, id` |
+| `GET /api/fleet/tasks?state=&city=&item=&worker=&since=` | | `FleetTask[]`. `state=ready` or `leased`: the queue, at most 1000, `priority DESC, due_at, id`. Anything else is history, at most 5000, newest first (`GREATEST(due_at, leased_at, done_at) DESC`). A capped answer carries `X-Fleet-Truncated: true` |
 | `GET /api/fleet/city-log?city=\|worker=&hours=` | `city` or `worker` required; `hours` 1..720, default 24 | `FleetTaskLog[]` (`FleetTask & {events: FleetTaskEvent[]}`), newest first |
 | `GET /api/fleet/hosts` | | `{hosts: (FleetHost & {desired: {count, image, version, roll}})[], release: FleetRelease \| null}` |
 | `POST /api/fleet/hosts` | `{host_id}` (lowercase, digits, dashes) | `200 {host: FleetHost & {desired, token}}`; the token is shown this once, only its hash is kept. `409 {error: "exists"}` |
 | `PUT /api/fleet/hosts/:id` | `{capacity? (0..99), authoritative?}` | `{host: FleetHost & {desired}}`; `404` |
-| `DELETE /api/fleet/hosts/:id` | | `{ok: true}`; `404` |
+| `DELETE /api/fleet/hosts/:id` | | `{ok: true}`; `404`. Frees the host's replacement reservations and drops its pending replacement (§6) |
 | `POST /api/fleet/releases` | `{image, version}` | `{ok: true, release: FleetRelease}`; starts a roll (§6), replacing any active one |
 | `GET /api/fleet/slots` | | `{slots: SlotView[]}`: `FleetSlot` (with `parked: boolean` and `reserved_until: ISO | null` (a live handoff reservation, §6); `lease_expires_at` is `null` when parked; `has_proxy`, never the URL) plus `uid`, `pool_status`, `minutes_today`, `budget_minutes`, `worker: WorkerView \| null` |
 | `POST /api/fleet/slots/:no/release-quarantine` | | `{slot: SlotView}`; `404` |
@@ -733,4 +763,8 @@ quarantine_hours is both the evidence lookback and the duration from latest
 qualifying result; zero disables detection. Manual release/successful positive
 probe resets the evidence window. Probes do not advance normal search cadence.
 Expired slug checks retry while unverified and not removed; only a current leased
-attempt/epoch may apply a verdict, and never over a removal or override.
+attempt/epoch may apply a verdict, and never over a removal or override. A
+retry backs off: each check of the city that ended in the last day without a
+verdict (stopped, an error or wall, an expired lease) doubles the wait from
+the last one's end, 15 min, 30 min, … up to 6 h; checks that gave a verdict
+do not count, so a `reverify` is checked at once.
