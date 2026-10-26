@@ -2,13 +2,13 @@
 id: RS-410
 title: The nightly prod-to-dev copy keeps the dev fleet
 type: task
-status: backlog
+status: done
 priority: P1
 created: 2026-10-26
 reporter: jinhu
 branch: fleet/dbsync-keep-dev-fleet
-pr:
-version:
+pr: "#923"
+version: 1.359.0
 related: [RS-394]
 ---
 
