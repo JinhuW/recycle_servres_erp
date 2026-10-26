@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-25
+
 ### Fixed
 
 - Fleet workers respect budget/quarantine retry delays and renew their token
