@@ -18,6 +18,20 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Security
+
+- **A fleet worker claims with a single-use claim ticket, not the host
+  token (RS-411).** The host agent (ERP v1.360.0) mints a ticket for each
+  container right before `docker run` and passes it as
+  `RS_FLEET_CLAIM_TICKET`; the entrypoint claims with it when it is there,
+  else with `RS_FLEET_HOST_TOKEN` as before (older agents). Fleet mode is on
+  with `RS_FLEET_URL`, `RS_FLEET_HOST_ID` and either credential. A ticket is
+  spent by its first claim, so a `401` on a ticket claim (a `docker start`
+  of a spent container, or an expired ticket) exits `75` at once, before the
+  browser, and the agent recreates the container on a fresh ticket. Neither
+  variable reaches the monitor. Images before this one keep working with the
+  new agent, which hands them the ticket under the old name.
+
 ## [0.14.4] - 2026-10-26
 
 ### Fixed

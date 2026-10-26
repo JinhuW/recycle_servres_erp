@@ -348,6 +348,66 @@ def test_other_claim_failures_retry_three_times_then_exit_70(
     assert slept == [10, 10]
 
 
+def test_a_claim_ticket_is_what_it_claims_with_and_never_reaches_the_monitor(
+    fleet: FakeFleet, tmp_path: Path
+) -> None:
+    ticket = fleet.mint_ticket("lab-1")
+    env = fleet_env(fleet, RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path), RS_FLEET_CLAIM_TICKET=ticket)
+    # The agent passes the ticket under the host token's name too, for older images.
+    env["RS_FLEET_HOST_TOKEN"] = ticket
+    assert entry.run_fleet([], env, home=tmp_path / "home") == 0
+    _, path, body, headers = fleet.requests[0]
+    assert path == "/api/fleet/worker/claim"
+    assert headers["authorization"] == f"Bearer {ticket}"
+    assert fleet.tickets[ticket]["claim_id"] == body["claim_id"]
+    menv = entry.monitor_env(env, entry.claim(fleet.url, "lab", HOST_TOKEN, "lab-1", "0.14.0", 5903, sleep=lambda s: None), "lab", "lab-1")
+    assert not any(k.startswith("RS_FLEET_") for k in menv)
+    assert ticket not in json.dumps(menv)
+
+
+def test_the_ticket_wins_over_a_host_token_and_fleet_mode_needs_only_one_of_them(fleet: FakeFleet) -> None:
+    ticket = fleet.mint_ticket("lab-1")
+    both = fleet_env(fleet, RS_FLEET_CLAIM_TICKET=ticket)
+    assert entry.fleet_credential(both) == ticket
+    only_ticket = {k: v for k, v in both.items() if k != "RS_FLEET_HOST_TOKEN"}
+    assert entry.fleet_mode(only_ticket) and entry.fleet_credential(only_ticket) == ticket
+    # An agent from before the tickets: the host token, as it always was.
+    old = fleet_env(fleet)
+    assert entry.fleet_mode(old) and entry.fleet_credential(old) == HOST_TOKEN
+    neither = {k: v for k, v in old.items() if k != "RS_FLEET_HOST_TOKEN"}
+    assert not entry.fleet_mode(neither)
+
+
+def test_a_refused_ticket_exits_75_at_once_so_the_agent_runs_a_fresh_container(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slept: List[float] = []
+    monkeypatch.setattr(entry.time, "sleep", lambda s: slept.append(s))
+    ticket = fleet.mint_ticket("lab-1")
+    fleet.tickets[ticket]["claim_id"] = "an-earlier-boot"
+    env = {k: v for k, v in fleet_env(fleet, RS_FLEET_CLAIM_TICKET=ticket).items() if k != "RS_FLEET_HOST_TOKEN"}
+    assert entry.run_fleet([], env, home=tmp_path / "home") == 75
+    assert len(fleet.requests) == 1 and slept == []
+    # The same ticket under the old name (an older entrypoint reads only that) is refused the same way.
+    assert entry.run_fleet([], fleet_env(fleet, RS_FLEET_HOST_TOKEN=ticket), home=tmp_path / "home") == 75
+    assert not (tmp_path / "home").exists()
+
+
+def test_a_transient_failure_retries_the_ticket_claim_as_the_same_boot(fleet: FakeFleet) -> None:
+    ticket = fleet.mint_ticket("lab-1")
+    fleet.claim_answer = "error"
+    calls: List[float] = []
+
+    def recover(seconds: float) -> None:
+        calls.append(seconds)
+        fleet.claim_answer = "ok"
+
+    answer = entry.claim(fleet.url, "lab", ticket, "lab-1", "0.14.5", 5903, sleep=recover)
+    assert answer["epoch"] == fleet.epoch and calls == [10]
+    first, second = (r[2]["claim_id"] for r in fleet.requests)
+    assert first == second == fleet.tickets[ticket]["claim_id"]
+
+
 # ---------------------------------------------------------------------------
 # pieces
 # ---------------------------------------------------------------------------
