@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-403](./RS-403-refocus-the-reddit-eval-prompt-on-bulk-samsung-sk-hy.md) | done | story | P2 | Refocus the Reddit eval prompt on bulk Samsung, SK Hynix and Micron RAM | — |
 | [RS-403](./RS-403-fleet-page-loads-its-data-fast.md) | in-progress | story | P2 | Fleet page loads its data fast | — |
 | [RS-402](./RS-402-home-becomes-a-role-specific-highlights-page-the-das.md) | done | story | P2 | Home becomes a role-specific highlights page; the dashboard moves to Analysis | 1.350.0 |
 | [RS-401](./RS-401-cap-the-height-of-recent-activity-on-the-fleet-page.md) | done | bug | P2 | Cap the height of Recent activity on the fleet page | 1.350.1 |

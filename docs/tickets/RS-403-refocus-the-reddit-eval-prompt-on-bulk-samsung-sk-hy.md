@@ -2,12 +2,12 @@
 id: RS-403
 title: Refocus the Reddit eval prompt on bulk Samsung, SK Hynix and Micron RAM
 type: story
-status: backlog
+status: done
 priority: P2
 created: 2026-10-26
 reporter: jinhu
 branch: JinhuW/reddit-bulk-ram-prompt
-pr:
+pr: 913
 version:
 related: []
 ---
