@@ -814,8 +814,14 @@
 .ff-activity .fp-log {
   flex: 1 1 auto;
   min-height: 0;
+  max-height: 480px;
   overflow-y: auto;
   scrollbar-width: thin;
+}
+/* On the Fleet tab the feed spans the page under the accounts table, so the
+   pool aside's two-column narrow layout would squeeze it into one half. */
+.fp-pool > .ff-activity {
+  display: block;
 }
 .ff-proxy-mark {
   display: flex;

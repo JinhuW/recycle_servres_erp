@@ -15,6 +15,16 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.350.1] - 2026-10-26
+
+### Fixed
+
+- Recent activity on the Fleet tab (Monitors ▸ Facebook) now stops at 480px
+  and scrolls. v1.349.1 only capped the copy beside the Workers card, but
+  this one sits under the accounts table, so it still ran down the page. Below
+  1190px it also spans the full width again instead of squeezing into the
+  left half (RS-401).
+
 ## [1.350.0] - 2026-10-25
 
 Home is now the page that says what is waiting on you, and the old dashboard

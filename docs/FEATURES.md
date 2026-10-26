@@ -3274,7 +3274,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     (every host, each host, Not running) and a search over worker, account,
     city and host; the foot says "N of M accounts · R running on K hosts".
     The coordinator's activity aside stays under the table while its rows
-    exist. There is no Pause on a roll: the backend has no route for it.
+    exist; since v1.350.1 it spans the full width and its list stops at 480px
+    and scrolls. There is no Pause on a roll: the backend has no route for it.
   - **Tasks** (`/#/fleet/tasks`, v1.344.0): the belt, then the task table
     with the city log beside it. **The belt** is one row per enabled item on
     a 24-hour window centred on now, in quarter-hour buckets: searches done in
