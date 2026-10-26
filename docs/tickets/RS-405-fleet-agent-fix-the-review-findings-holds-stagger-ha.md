@@ -7,7 +7,7 @@ priority: P1
 created: 2026-10-26
 reporter: jinhu
 branch: fleet/fix-agent
-pr:
+pr: 915
 version: 1.352.0
 related: [RS-394, RS-400]
 ---
