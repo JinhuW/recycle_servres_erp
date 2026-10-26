@@ -248,6 +248,44 @@ Surprises:
   chat). `alerted` counts what would have been sent.
 - The run left the worker HEALTHY and searching at capacity 1 on the dev ERP.
 
+#### Coordinator wiring for fleet workers (2026-10-26 UTC, dev)
+
+Owner's decisions the same day: wire the coordinator in; **no Telegram or
+buyer-visible alert from a fleet worker until the fleet ships to prod**; no
+running container on the VM stopped, restarted, recreated or edited; no
+fleet worker started and no Facebook login for this.
+
+| Step | Outcome |
+| --- | --- |
+| Where alerts come from today | The **worker** sends Telegram itself (`[user.recycle]` `telegram_*`, `User.notify` in `monitor.py`), after claiming the listing from the coordinator (`POST /v1/alerts/claim`, then `/claim/delivered`); `alert_report_url` then reports the Telegram message id to the coordinator (`/v1/alerts/telegram`, hit-rate stats). The **coordinator** sends Telegram on a worker's behalf for: listings posted to the legacy `/api/v1/listings` (no fleet config uses it), heartbeat state changes, challenges (`/v1/auth/escalate`), incidents (`/v1/incidents`), and a login on a foreign `datr` or a lock page (`/v1/workers/{id}/logins`, only for a worker the vault maps to an account) |
+| Why "no alerts" also means "no claims, no city reports" | A claim the fleet worker never delivers holds the listing from the live workers for `CLAIM_LEASE` (15 min); a reported search (`/v1/stats/reviews` with a city) is a *visit* in the live city queue (`city_queue.live_state`), so the live fleet would skip a city the fleet searched without alerting |
+| The switch (facebook-tracker 0.14.2, monitor `88a505d`) | `RS_ALERTS=on` in the claim's `env` turns alerts on; absent = off. Off: no Telegram or alert-report key rendered, `[fleet] alerts = false` (the monitor skips claim and send, logs `[Alert] WITHHELD`, reports no city, funnel count, wall or incident to the coordinator), `RS_CONTROL_PLANE_URL` unset. Tests: entrypoint (render, token map, exit 70 for an unmapped id) and the monitor's fleet loop against the fake fleet with a coordinator configured: one listing rated 5, judged, not sent, nothing but `/api/fleet/worker/*` spoken to |
+| Route | `rs-coordinator-lan` (socat) on the VM: `10.10.10.73:8500` → `rs-coordinator:8500`, admits only `10.10.60.14` (`HOSTS.md` → *Coordinator route*). No firewall rule changed |
+| Auth | per-worker tokens (`rsc mint-token`, stateless) for `worker-60-14-1` … `-8` in `FLEET_WORKER_ENV` as `RS_CONTROL_PLANE_TOKENS` (`CONTRACTS.md` §2). Verified from `10.10.60.14` with curl only |
+| `FLEET_WORKER_ENV` (dev) | `OPENROUTER_API_KEY` (same key as before, fingerprint-checked against the VM's) and `RS_CONTROL_PLANE_TOKENS`. Left out on purpose: `RS_ALERTS`, `TELEGRAM_*`, `RS_ALERT_REPORT_URL`, `RS_COORDINATOR_TOKEN` (the fleet-wide legacy token) |
+| Railway dev `backend` | `FLEET_COORDINATOR_URL=http://10.10.10.73:8500`, `FLEET_IMAGE_WORKER=ghcr.io/jinhuw/aimm-recycle:0.14.2`, set together |
+
+What it does **not** buy: speed. The 19–26 min per city-item in the MVP run
+come from opening every card the worker has not cached itself
+(`get_listing_details` → `Listing.from_cache`, the container's
+`~/.ai-marketplace-monitor`, gone when the container is replaced). The
+coordinator dedupes *alerts* after a listing is opened and judged; it has no
+"seen listing" check a worker could ask before opening. A worker that keeps
+its container sees the second day's cards from its cache; the levers are
+keeping that cache across containers (a volume per slot) or a shared seen-list
+in the ERP.
+
+The worker running on `worker-60-14` keeps `0.14.1` and its claim (no
+coordinator) until it is replaced; the next container the agent starts runs
+`0.14.2` with the coordinator. A `0.14.1` container started against this
+config would exit `70` before the browser (it does not read the token map,
+and RS-400 refuses a configured coordinator without a token).
+
+To turn alerts on after prod: put `FLEET_WORKER_ENV` again with `RS_ALERTS=on`,
+`TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_TOPIC_HIGH|MEDIUM|LOW` and
+`RS_ALERT_REPORT_URL` (the coordinator URL) beside the two keys above, and
+give prod's `FLEET_COORDINATOR_URL` a route the prod hosts can reach.
+
 #### Integration run, login-free part (2026-10-24, on the Mac)
 
 No worker image ran, no Facebook login happened, no pool account was used.
@@ -304,7 +342,7 @@ Still open, each needs a real Facebook login and the owner:
 | --- | --- |
 | A real claim and exactly one `boot` in the login ledger | a **throwaway** pool account (never a fleet one) imported into the dev pool, with its slot (`fleet-seed-slots.mjs` or by hand); the worker image built on the Mac from the pinned monitor (the mirror is not set up yet) |
 | A real search of a manual task | the same, plus the go to start one worker container |
-| A listing reaching the coordinator (`rsc` shows the sighting) | how a worker off the VM reaches the coordinator: the LAN publish (`configs/secrets.coordinator-lan.env` on the VM) or another route, and `FLEET_COORDINATOR_URL` set to it |
+| A listing reaching the coordinator (`rsc` shows the sighting) | route and tokens done 2026-10-26 (*Coordinator wiring* above); with alerts off a fleet worker reports no listing there by design, so this check waits for `RS_ALERTS=on` after prod |
 | Stale epoch on the real image: 409, exit 75, agent restart after 60 s, second claim | the go for a **second login** of the throwaway account (expected and noted in the ledger) |
 | The agent against the dev backend on a real host | which host (`worker-60-14` per `HOSTS.md`), the GHCR read token, and the host checklist run by the owner |
 
