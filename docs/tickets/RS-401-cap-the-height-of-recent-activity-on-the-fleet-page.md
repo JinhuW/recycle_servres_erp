@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-25
 reporter: jinhu
 branch: JinhuW/clownfish
-pr: 905
+pr: 905, 908
 version: 1.350.1
 related: []
 ---
