@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.5] - 2026-10-26
+
 ### Security
 
 - **A fleet worker claims with a single-use claim ticket, not the host
