@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-413](./RS-413-reddit-tracker-cross-post-dedup-any-emoji-feedback-p.md) | done | story | P2 | Reddit tracker: cross-post dedup, any-emoji feedback, PM tracer and Analytics tab | — |
+| [RS-414](./RS-414-re-run-a-wechat-market-day-from-the-page.md) | done | story | P2 | Re-run a WeChat market day from the page | — |
+| [RS-413](./RS-413-reddit-tracker-cross-post-dedup-any-emoji-feedback-p.md) | done | story | P2 | Reddit tracker: cross-post dedup, any-emoji feedback, PM tracer and Analytics tab | 1.362.0 |
 | [RS-412](./RS-412-fleet-tab-table-tracks-workers-only.md) | done | story | P2 | Fleet tab table tracks workers only | 1.361.0 |
 | [RS-411](./RS-411-per-container-claim-tickets-keep-the-host-token-out.md) | done | story | P2 | Per-container claim tickets keep the host token out of fleet workers | 1.360.0 |
 | [RS-410](./RS-410-the-nightly-prod-to-dev-copy-keeps-the-dev-fleet.md) | done | task | P1 | The nightly prod-to-dev copy keeps the dev fleet | 1.359.0 |

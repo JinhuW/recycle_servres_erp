@@ -2411,6 +2411,17 @@ td.rt-an-bad {
   margin: 0;
   padding-left: 16px;
 }
+.wx-banner > .btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  margin-block: -4px;
+}
+.wx-actions {
+  align-items: center;
+}
+.wx-rerun-chip {
+  gap: 5px;
+}
 .wx-empty {
   display: flex;
   gap: 12px;
