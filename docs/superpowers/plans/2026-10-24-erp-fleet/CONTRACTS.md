@@ -34,7 +34,8 @@ what answers.
 | Shared worker env (`OPENROUTER_API_KEY`, `TELEGRAM_*`, …) that the rendered config needs: supplier undecided | §2 | #879 |
 | `next-task` takes `take` (default `true`); `take: false` closes `done`, leases nothing and answers `{task: null, reason: "done_only"}` at once | §5 | #885 |
 | On pairing, the VNC relay sends the worker one text frame `viewer` before any viewer byte; the worker dials its VNC server only after it | §5 | #888 |
-| Images are private OCIR repositories (OCI free tier), not GHCR | §1, §10 | this change |
+| Images are private OCIR repositories (OCI free tier), not GHCR | §1, §10 | #890 |
+| Images are private GHCR packages after all (owner: GHCR while it works, nothing to OCI); OCIR stays an empty fallback | §1, §2, §6, §10 | MVP docs |
 | `FLEET_URL` / `RS_FLEET_URL` is the ERP's Cloudflare hostname, never the Railway origin | §2 | this change |
 | Shared worker env is decided: the Worker secret `FLEET_WORKER_ENV`, added at the edge to a `200` claim answer as `env` | §2, §5 | this change |
 | No coordinator in the MVP: `FLEET_COORDINATOR_URL` may be empty, and `settings.coordinator_url` is then `null` | §2, §5 | this change |
@@ -48,8 +49,8 @@ what answers.
 | Routes | `apps/backend/src/routes/fleet.ts`, mounted at `/api/fleet` |
 | Shared types | `packages/shared/src/fleet.ts` |
 | Frontend | `apps/frontend/src/pages/desktop/fleet/*`, `apps/frontend/src/lib/fleet.ts` |
-| Host agent | `apps/fleet-agent/` → image `<region-key>.ocir.io/<namespace>/fleet-agent:<root version>` |
-| Worker image | `trackers/facebook/deploy/Dockerfile.worker` → `<region-key>.ocir.io/<namespace>/aimm-recycle:<facebook-tracker version>` |
+| Host agent | `apps/fleet-agent/` → image `ghcr.io/jinhuw/fleet-agent:<root version>` (private) |
+| Worker image | `trackers/facebook/deploy/Dockerfile.worker` → `ghcr.io/jinhuw/aimm-recycle:<facebook-tracker version>` |
 | Registry | OCI Container Registry (OCI free tier), **private** repositories. Images are built on the Mac and pushed (OCI's free compute is full). The concrete region key and tenancy namespace are in [`HOSTS.md`](HOSTS.md) |
 | Worker entrypoint | `trackers/facebook/rs_worker/entry.py` |
 | Migration | `apps/backend/migrations/0206_fleet.sql` (0205 was taken) |
@@ -69,7 +70,7 @@ Backend (Railway `backend`, and `.env` locally):
 | --- | --- |
 | `FB_POOL_KEY` | exists; seals pool secrets. Without it `claim` and `PUT /worker/session` answer `401 {error: "unauthorized", detail: "FB_POOL_KEY is not set"}` |
 | `FLEET_WORKER_TOKEN_KEY` | HMAC key for worker tokens (hex, 32 bytes). **Required in production**: without it every worker route and `claim` answer `401` with `detail: "FLEET_WORKER_TOKEN_KEY is not set"`, and the rest of the app boots as usual. Outside production it is optional: the key is derived from `JWT_SECRET` (HKDF-SHA256, info `fleet-worker-token`), so dev and CI need no extra variable |
-| `FLEET_IMAGE_WORKER` | default worker image ref, e.g. `<region-key>.ocir.io/<namespace>/aimm-recycle:0.14.0`; `desired.image` falls back to it when no release exists or the last one failed, and `desired.version` is its tag |
+| `FLEET_IMAGE_WORKER` | default worker image ref, e.g. `ghcr.io/jinhuw/aimm-recycle:0.14.0`; `desired.image` falls back to it when no release exists or the last one failed, and `desired.version` is its tag |
 | `FLEET_IMAGE_AGENT` | default agent image ref. Not read by the backend yet |
 | `FLEET_COORDINATOR_URL` | the Python coordinator workers post listings to (`https://…`), handed to workers at claim as `settings.coordinator_url`. **Empty or unset = no coordinator** (the MVP runs without one): the claim then sends `null` and workers post listings nowhere (no listing dedupe, no alert claims, no challenge escalation) |
 | `FLEET_ROLE` | unset or `worker-api`: the whole app **and** the 30 s scheduler tick. `manager-only`: the whole app, no scheduler tick (manager writes still reconcile inline). No value filters routes yet; the `worker-api` route split is future work |
@@ -411,7 +412,7 @@ with a fresh socket for the next viewer.
 
 ```jsonc
 // GET /api/fleet/hosts/:id/desired
-{ "authoritative": true, "count": 4, "image": "<region-key>.ocir.io/<namespace>/aimm-recycle:0.14.0", "version": "0.14.0",
+{ "authoritative": true, "count": 4, "image": "ghcr.io/jinhuw/aimm-recycle:0.14.1", "version": "0.14.0",
   "vnc_ports": { "homelab-1": 5901, "homelab-2": 5902 }, "roll": { "replace": "homelab-2" } | null }
 // POST /api/fleet/hosts/:id/report
 { "version": "1.340.0", "containers": [ { "worker_id": "homelab-1", "image": "…", "state": "running", "started_at": "…" } ] }
@@ -523,7 +524,7 @@ the first version; others add fields in their own PRs.
 
 ## 10. Worker container contract (image ↔ agent)
 
-- Image: `<region-key>.ocir.io/<namespace>/aimm-recycle:<ver>` (private OCIR), entrypoint `rs_worker/entry.py`.
+- Image: `ghcr.io/jinhuw/aimm-recycle:<ver>` (private GHCR), entrypoint `rs_worker/entry.py`.
 - Fleet mode on when `RS_FLEET_URL`, `RS_FLEET_HOST_ID`, `RS_FLEET_HOST_TOKEN`
   are set; otherwise the image behaves exactly as today (bind-mounted config).
 - Exit codes: `0` normal stop, `75` stale epoch or no slot (agent restarts

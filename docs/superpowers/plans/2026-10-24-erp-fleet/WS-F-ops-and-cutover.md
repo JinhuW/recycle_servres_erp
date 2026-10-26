@@ -41,16 +41,17 @@ first rule).
          workflow alone needed no root version bump.
    - [ ] First real build of each image (needs the mirror, the private
          packages, WS-C's Dockerfile, WS-D's Dockerfile).
-   - **Superseded for now by OCIR** (owner's decision 2026-10-24): images are
-     built on the Mac and pushed with
-     `trackers/facebook/scripts/push-fleet-images.sh` to
-     `sin.ocir.io/ax6usa8hwbie/{aimm-recycle,fleet-agent}` (`HOSTS.md` →
-     *Registry*). `fleet-images.yml` stays, inert, with a header note.
-   - [x] Two private OCIR repositories created; anonymous pull refused.
+   - **Images are pushed from the Mac** with
+     `trackers/facebook/scripts/push-fleet-images.sh` to private GHCR
+     packages `ghcr.io/jinhuw/{aimm-recycle,fleet-agent}` (owner, 2026-10-25:
+     GHCR while it works, nothing to OCI; `HOSTS.md` → *Registry*).
+     `fleet-images.yml` stays, inert, with a header note.
+   - [x] Two private OCIR repositories created 2026-10-24; left empty as the fallback.
    - [x] Push script dry run (`--no-push`) built both images for amd64.
-   - [ ] Auth token, keychain item `fleet-ocir`, `docker login` on the Mac
-         and on `worker-60-14` (blocked: the user holds two tokens already;
-         owner decision).
+   - [x] First real pushes (2026-10-26 UTC): `aimm-recycle:0.14.0`, `0.14.1`,
+         `fleet-agent:1.348.0`, `1.349.0`; private, anonymous pull refused.
+   - [x] `docker login ghcr.io` on the Mac (`gh` token) and on `worker-60-14`
+         (the Reddit fleet's `read:packages` PAT).
 2. **Railway env (dev first):** `FLEET_WORKER_TOKEN_KEY`, `FLEET_IMAGE_WORKER`,
    `FLEET_IMAGE_AGENT`, `FLEET_COORDINATOR_URL` on the `backend` service.
    Prod gets the same at cutover.
@@ -206,6 +207,46 @@ for the credentials path). Delete the scratch copies afterwards.
   `9a06d98` (context 1.3 MB through `Dockerfile.worker.dockerignore`), agent
   `fleet-agent:1.343.0`. It refused a dirty monitor clone, a clone off the
   pin, and a push of an unreleased tracker tree.
+
+#### MVP run: the first real fleet worker (2026-10-26 UTC, `worker-60-14`, dev ERP)
+
+The owner approved one login on `worker-60-14` with a retired pool account,
+no coordinator, images on GHCR, the shared secrets from Cloudflare, and an
+unused proxy port.
+
+| Step | When (UTC) | Outcome |
+| --- | --- | --- |
+| Dev catalog: `fleet-import.mjs` (127 cities, 2 items), then all but `nyc`, `philly`, `boston` disabled | 02:06 | 6 ready tasks |
+| Retired account #37 copied from prod's pool, resealed under dev's `FB_POOL_KEY`; the only `fleet_slots` row; New York device profile; home cities the three | 02:08 | not in the coordinator's vault (checked by uid); no prior stints |
+| Proxy: Decodo static ISP port `10018` (NJ1) | 02:09 | ports above 10020 wrap onto the 20 IPs (10021 = 10001's IP), so no IP is free; NJ1's two homelab workers (`nj-1`, `nj-1b`) are both `SESSION_EXPIRED`, so nothing live searches through it. Re-logging either of them puts it on the same IP as #37 |
+| Host registered (SQL, token hash only), env file, agent 1.348.0 observe-only | 02:09 | ticks reported, `last_seen_at` moving |
+| capacity 1, first worker start | 02:10 | **claim 403 ×3, exit 70, no login**: Cloudflare's Browser Integrity Check (error 1010) refuses urllib's default `Python-urllib` agent. Capacity set back to 0. Fixed in facebook-tracker 0.14.1 (#903): the worker names itself `rs-worker` |
+| Agent replaced by 1.349.0 (RS-400 confirmed-stop handoff) | 02:24 | the agent container runs no account |
+| capacity 1, second start | 02:25 | claim through Cloudflare (`epoch` 1), **one login**, HEALTHY; first task leased in 0.1 s |
+| Task 2 `boston/enterprise_ssd` | 02:25 → 02:51 | `{cards 120, opened 84, reviewed 73, alerted 0, seconds 1535}` |
+| Task 1 `boston/server_ram` | 02:51 → 03:10 | `{cards 120, opened 60, reviewed 56, alerted 0, seconds 1158}` |
+| Scheduler | 02:51, 03:10 | next day's cadence tasks written for both pairs |
+| `nyc/enterprise_ssd` leased | 03:10 | worker HEALTHY, `fleet_minutes` 49.8 for #37 |
+
+**Logins used: 1.** The stale-epoch / agent-restart check was skipped (it
+costs a second login).
+
+Surprises:
+- **A city-item takes 19–26 minutes, not 4–7.** Without the coordinator
+  there is no listing dedupe, so every card worth a look is opened (60–84 per
+  search). At this rate the 360-minute budget covers ~15 city-items per
+  account per day, and the 254-pair catalog would need ~17 accounts. Wiring
+  the coordinator back (dedupe) is the first lever.
+- **The running worker is the stale 0.14.1 build** (`a9a4f6f`, without
+  RS-400's worker changes). `aimm-recycle:0.14.1` was pushed twice, and the
+  host's cached first push won because the agent pulls only a missing image.
+  The host now caches the right build; replacing the worker would cost a
+  login. Rule: never re-push a tag (`HOSTS.md` → *Registry*).
+- No alerts go anywhere: `FLEET_WORKER_ENV` carries only `OPENROUTER_API_KEY`
+  (the Facebook tracker has no dev Telegram channel, and without the
+  coordinator's dedupe a second alert stream would duplicate the buyers'
+  chat). `alerted` counts what would have been sent.
+- The run left the worker HEALTHY and searching at capacity 1 on the dev ERP.
 
 #### Integration run, login-free part (2026-10-24, on the Mac)
 
