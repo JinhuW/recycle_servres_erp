@@ -29,14 +29,14 @@ describe('tourSteps', () => {
   // A step pointing at something the purchaser's sidebar does not render
   // would sit centred over a hole in nothing.
   it('only points at places a purchaser has on desktop', () => {
-    const leaves = shownNav('purchaser', 'dashboard').flatMap(g =>
+    const leaves = shownNav('purchaser', 'home').flatMap(g =>
       g.items.flatMap(i => (i.kind === 'leaf' ? [i.leaf.id] : i.children.map(c => c.leaf.id))));
     const anchors = tourSteps('desktop').map(s => s.anchor).filter(a => a !== null);
     for (const a of anchors) expect([...leaves, 'guide']).toContain(a);
   });
 
   it('only points at tabs a purchaser has on the phone', () => {
-    const tabs = ['dashboard', 'history', 'submit', 'market', 'me'];
+    const tabs = ['home', 'history', 'submit', 'market', 'me'];
     for (const s of tourSteps('phone')) if (s.anchor) expect(tabs).toContain(s.anchor);
   });
 });

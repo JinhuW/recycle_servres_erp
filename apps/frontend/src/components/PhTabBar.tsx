@@ -3,7 +3,7 @@ import { useT } from '../lib/i18n';
 import { useEffectiveUser } from '../lib/tweaks';
 import { MOBILE_VIEW_TO_PATH, hrefFor, onLinkClick, type MobileViewId } from '../lib/route';
 
-export type View = 'dashboard' | 'history' | 'submit' | 'shipping' | 'market' | 'inventory' | 'accounting' | 'me';
+export type View = 'home' | 'analysis' | 'history' | 'submit' | 'shipping' | 'market' | 'inventory' | 'accounting' | 'me';
 
 type Props = {
   view: View;
@@ -27,7 +27,7 @@ export function PhTabBar({ view, onCenterPress }: Props) {
   // their field work is checking a price before a buy. Inventory stays a
   // quick link on Home for managers.
   const tabs: Tab[] = [
-    { id: 'dashboard', label: t('tabHome'),    icon: 'dashboard' },
+    { id: 'home',      label: t('tabHome'),    icon: 'dashboard' },
     { id: 'history',   label: t('tabOrders'),  icon: 'history' },
     { id: 'submit',    label: t('tabCapture'), icon: 'camera', center: true },
     ...(user?.role === 'purchaser'
@@ -39,7 +39,9 @@ export function PhTabBar({ view, onCenterPress }: Props) {
   return (
     <div className="ph-tabbar">
       {tabs.map(tab => {
-        const cls = 'ph-tab ' + (view === tab.id ? 'active' : '');
+        // Numbers opens from Home and keeps its tab lit.
+        const on = view === tab.id || (tab.id === 'home' && view === 'analysis');
+        const cls = 'ph-tab ' + (on ? 'active' : '');
         if (tab.center) {
           return (
             <button key={tab.id} className={cls + ' center'} onClick={onCenterPress} aria-label={tab.label} data-tour="submit">
@@ -54,7 +56,7 @@ export function PhTabBar({ view, onCenterPress }: Props) {
             className={cls}
             href={hrefFor(path)}
             onClick={onLinkClick(path)}
-            aria-current={view === tab.id ? 'page' : undefined}
+            aria-current={on ? 'page' : undefined}
             data-tour={tab.id}
           >
             <Icon name={tab.icon} size={20} />

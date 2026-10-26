@@ -10,7 +10,7 @@ import { forEachKeysetPage } from '../../lib/keysetPages';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { shareOrCopy } from '../../lib/shareOrCopy';
-import { paymentsForOrderPath } from '../../lib/route';
+import { paymentsForOrderPath, takeHashParam } from '../../lib/route';
 import { paymentGap } from '../../lib/paymentGap';
 import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
@@ -141,6 +141,17 @@ export function DesktopOrders({ onToast }: Props) {
   // the key and stays instant.
   const [warehousePick, setWarehousePick] = usePersisted<WarehousePick>('desktop.orders.warehouse', 'all');
   const [paymentPick, setPaymentPick] = usePersisted<PaymentPick>('desktop.orders.payment', 'all');
+  // A Home tile opens the list on one stage. Everything else that narrows
+  // the list is cleared too, or the rows would not add up to the tile's count.
+  useEffect(() => {
+    const stage = takeHashParam('stage');
+    if (!stage || !WORKFLOW_STAGES.some(s => s.id === stage)) return;
+    setStageFilter(stage);
+    setFilter('all'); setSearch(''); setSoldOnly(false);
+    setWarehousePick('all'); setPaymentPick('all');
+    // The persisted setters are stable; this runs once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   // A move that finds the PO elsewhere asks again from there; the row takes
   // that stage too, or the next click would ask about the old one again.

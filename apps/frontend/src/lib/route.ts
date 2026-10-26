@@ -147,6 +147,17 @@ export function replaceHashQuery(params: URLSearchParams): void {
   window.history.replaceState(window.history.state, '', next);
 }
 
+/** Reads a one-shot query param a link opened the page with (Home's
+ *  `?stage=`), and drops it so the page's own state rules from then on. */
+export function takeHashParam(name: string): string | null {
+  const q = readHashQuery();
+  const v = q.get(name);
+  if (v === null) return null;
+  q.delete(name);
+  replaceHashQuery(q);
+  return v;
+}
+
 /** Back to wherever the user came from, or `fallback` when that's off-site. */
 export function navigateBack(fallback: string): void {
   if (historyDepth() > 0) {
@@ -351,14 +362,15 @@ export function parseShippingRoute(path: string): ShippingRoute | null {
 
 // Desktop view ids ↔ URL paths. Source of truth for the sidebar/router.
 export const DESKTOP_VIEW_TO_PATH = {
-  dashboard:  '/dashboard',
+  home:       '/',
+  analysis:   '/analysis',
+  stock:      '/analysis/inventory',
   submit:     '/submit',
   history:    '/purchase-orders',
   shipping:   '/shipping',
   clients:    '/clients',
   market:     '/market',
   inventory:  '/inventory',
-  analysis:   '/inventory/analysis',
   sellorders: '/sell-orders',
   aftersales: '/after-sales',
   transfers:  '/transfers',
@@ -376,15 +388,16 @@ export const DESKTOP_VIEW_TO_PATH = {
 export type DesktopViewId = keyof typeof DESKTOP_VIEW_TO_PATH;
 
 export function pathToDesktopView(path: string): DesktopViewId {
-  if (path === '/' || path === '/dashboard') return 'dashboard';
+  if (path === '/' || path === '/home') return 'home';
+  // The money dashboard and the stock analysis became Analysis's two tabs;
+  // their old paths keep resolving for bookmarks and old links.
+  if (path === '/analysis' || path === '/dashboard') return 'analysis';
+  if (path === '/analysis/inventory' || path === '/inventory/analysis') return 'stock';
   if (path === '/submit') return 'submit';
   if (path === '/purchase-orders' || matchPurchaseOrder(path) || matchPoCheck(path)) return 'history';
   if (parseShippingRoute(path)) return 'shipping';
   if (path === '/clients' || match('/clients/:id', path)) return 'clients';
   if (path === '/market') return 'market';
-  // Analysis is a tab under Inventory — match it before the /inventory/:id edit
-  // route so it isn't read as an item id.
-  if (path === '/inventory/analysis') return 'analysis';
   if (path === '/inventory' || match('/inventory/:id', path)) return 'inventory';
   if (path === '/sell-orders' || match('/sell-orders/:id', path) || match('/sell-orders/:id/edit', path)
     || matchSellOrderPack(path)) return 'sellorders';
@@ -392,7 +405,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/transfers') return 'transfers';
   if (path === '/web-submissions' || match('/web-submissions/:id', path)) return 'websubmissions';
   if (path === '/activity') return 'activity';
-  // A tab under Payments, like Analysis under Inventory.
+  // A tab under Payments, like Inventory under Analysis.
   if (path === '/payments/internal') return 'internaltx';
   if (path === '/payments' || match('/payments/po/:id', path) || match('/payments/so/:id', path)) return 'payments';
   if (path === '/accounting' || match('/accounting/:id', path)) return 'accounting';
@@ -400,7 +413,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/wechat' || matchWechatDay(path)) return 'wechat';
   if (path === '/fleet' || path === '/fleet/pool' || matchFleetTab(path) || fleetRedirect(path) || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
   if (path === '/settings') return 'settings';
-  return 'dashboard';
+  return 'home';
 }
 
 // An after-sales case's page. `new` is the create form; `?order=SO-…`
@@ -596,7 +609,8 @@ export function readSafeNext(search: string): string | null {
 
 // Mobile view ids ↔ URL paths.
 export const MOBILE_VIEW_TO_PATH = {
-  dashboard: '/dashboard',
+  home:      '/',
+  analysis:  '/analysis',
   history:   '/purchase-orders',
   shipping:  '/shipping',
   market:    '/market',
@@ -609,13 +623,14 @@ export type MobileViewId = keyof typeof MOBILE_VIEW_TO_PATH;
 
 export function pathToMobileView(path: string): MobileViewId {
   // The Submit shortcut has no screen of its own: the shell opens the capture
-  // flow on it and lands on the dashboard.
-  if (path === '/' || path === '/dashboard' || path === '/submit') return 'dashboard';
+  // flow on it and lands on Home.
+  if (path === '/' || path === '/home' || path === '/submit') return 'home';
+  if (path === '/analysis' || path === '/dashboard') return 'analysis';
   if (path === '/purchase-orders' || matchPurchaseOrder(path)) return 'history';
   if (parseShippingRoute(path)) return 'shipping';
   if (path === '/market') return 'market';
   if (path === '/inventory') return 'inventory';
   if (path === '/accounting' || match('/accounting/:id', path)) return 'accounting';
   if (path === '/profile') return 'me';
-  return 'dashboard';
+  return 'home';
 }

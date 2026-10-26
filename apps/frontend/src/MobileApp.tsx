@@ -11,6 +11,7 @@ import { ErrorDialog, useErrorDialogQueue } from './components/ErrorDialog';
 import { Login } from './pages/Login';
 import { RolePicker } from './pages/RolePicker';
 import { Dashboard } from './pages/Dashboard';
+import { Home } from './pages/Home';
 import { Camera } from './pages/Camera';
 import { SubmitForm } from './pages/SubmitForm';
 import { OrderReview } from './pages/OrderReview';
@@ -250,14 +251,14 @@ function Shell() {
   );
 
   // The PWA's Submit shortcut and the share-target landing both arrive at
-  // `/submit`, which is no screen: it opens the capture flow and lands on the
-  // dashboard underneath. A shared photo (lib/sharedFile.ts) waits for the
+  // `/submit`, which is no screen: it opens the capture flow and lands on
+  // Home underneath. A shared photo (lib/sharedFile.ts) waits for the
   // camera, which the next product's Scan opens. A capture already open is
   // left as it is — the photo joins it — rather than reset under the user.
   useEffect(() => {
     if (path !== '/submit' || !user) return;
     const lost = readHashQuery().has('sharedLost');
-    replaceRoute('/dashboard');
+    replaceRoute('/');
     const shared = takeSharedFile();
     if (shared) sharedPhotoRef.current = shared;
     if (captureRef.current.phase === 'idle') startNewDraft();
@@ -929,14 +930,14 @@ function Shell() {
 
   return (
     <div className="phone-app">
-      {view === 'dashboard' && (
-        <Dashboard
+      {view === 'home' && (
+        <Home
           goSubmit={startSubmit}
-          goHistory={() => setView('history')}
           onOpenNotifications={() => setNotifSheet(true)}
           unreadCount={unreadCount}
         />
       )}
+      {view === 'analysis' && <Dashboard goHistory={() => setView('history')} />}
       {orderDetailOpen && (
         <OrderDetail
           order={detailOrder}

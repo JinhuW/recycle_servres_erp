@@ -15,6 +15,45 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.350.0] - 2026-10-25
+
+Home is now the page that says what is waiting on you, and the old dashboard
+moved to a new **Analysis** page (RS-402). The dashboard answered "how did we
+do"; nobody had a single place that answered "what needs me now". The answers
+were spread over a dozen pages, with a sidebar badge for RMB Flow and the
+phone's inbound card as the only signals.
+
+### Added
+
+- **Home for purchasers.** It shows a count of their POs at each stage, each
+  linking to the list filtered to that stage. Under that is a list of their
+  open POs, drafts first and then the longest-waiting. Each row says how long
+  the PO has been in its stage (tinted at 3 days, red at 7) and what it is
+  waiting for: a draft's missing hand-off pieces, the box's ETA, or the
+  manager's review. Beside the list are their packages, commission owed and
+  paid, and client follow-ups that are due.
+- **Home for managers.** A row of count tiles, then the work itself: the
+  review queue (age, box-check progress, open AI findings, who has it), with
+  purchaser edits still to check; inbound packages, problems first; money to
+  move; the sales pipeline, including sell orders waiting on this manager's
+  sign-off; and the side queues (RMB Flow, after-sales, transfers, web
+  submissions).
+- **`GET /api/home`** returns all of it in one request, scoped by the
+  effective role. Every count reuses the predicate of the page it opens, and
+  tests pin it to inbound-counts, the RMB review count and the Payments
+  unlinked tile. Days in a stage come from `order_events`, since POs have no
+  stage-changed column.
+- The PO list accepts `?stage=` and the sell-order list `?status=`, so a Home
+  tile opens the list it counted.
+
+### Changed
+
+- **Analysis** (`/analysis`) holds the old dashboard unchanged. For managers
+  it has a second tab, **Inventory**, the stock snapshot that used to be
+  Inventory ▸ Analysis. `/dashboard` and `/inventory/analysis` still resolve.
+- On the phone, Home carries the same highlights. The money view (KPIs,
+  ranking, recent activity) is the Numbers screen one row below.
+
 ## [1.349.1] - 2026-10-25
 
 ### Fixed

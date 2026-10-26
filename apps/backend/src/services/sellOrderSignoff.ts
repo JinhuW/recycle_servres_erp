@@ -1,4 +1,7 @@
+import type postgres from 'postgres';
 import type { SqlLike } from '../db';
+
+type SqlFragment = postgres.PendingQuery<postgres.Row[]>;
 
 // Done needs a sign-off from every active manager, on the order as it stands.
 
@@ -14,25 +17,31 @@ import type { SqlLike } from '../db';
 // a transfer moves where the goods ship from, not the deal.
 export async function orderFingerprint(tx: SqlLike, sellOrderId: string): Promise<string | null> {
   const [row] = await tx<{ fp: string }[]>`
-    SELECT md5(jsonb_build_array(
-      so.customer_id, so.currency_code,
-      COALESCE((
-        SELECT jsonb_agg(l.x ORDER BY l.x::text)
-        FROM (
-          SELECT jsonb_build_array(
-            sol.category, sol.label, sol.sub_label, sol.part_number, sol.condition, sol.qty,
-            COALESCE(sol.source_unit_price, sol.unit_price),
-            CASE WHEN sol.qty > 0 THEN sol.inventory_id END
-          ) AS x
-          FROM sell_order_lines sol
-          WHERE sol.sell_order_id = so.id
-        ) l
-      ), '[]'::jsonb)
-    )::text) AS fp
+    SELECT ${fingerprintSql(tx, tx`so`)} AS fp
     FROM sell_orders so
     WHERE so.id = ${sellOrderId}
   `;
   return row?.fp ?? null;
+}
+
+/** orderFingerprint as an expression over a `sell_orders` alias, for a reader
+ *  that asks "who still has to sign" of many orders in one query. */
+export function fingerprintSql(sql: SqlLike, soAlias: SqlFragment): SqlFragment {
+  return sql`md5(jsonb_build_array(
+    ${soAlias}.customer_id, ${soAlias}.currency_code,
+    COALESCE((
+      SELECT jsonb_agg(l.x ORDER BY l.x::text)
+      FROM (
+        SELECT jsonb_build_array(
+          sol.category, sol.label, sol.sub_label, sol.part_number, sol.condition, sol.qty,
+          COALESCE(sol.source_unit_price, sol.unit_price),
+          CASE WHEN sol.qty > 0 THEN sol.inventory_id END
+        ) AS x
+        FROM sell_order_lines sol
+        WHERE sol.sell_order_id = ${soAlias}.id
+      ) l
+    ), '[]'::jsonb)
+  )::text)`;
 }
 
 export type SignoffManager = {

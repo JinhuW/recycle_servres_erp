@@ -39,7 +39,7 @@ behaviour, edit the bullet here in the same PR and cite the new version.
 Two roles: **manager** and **purchaser**. The unauthenticated vendor bid
 portal was removed in v1.191.0; no bid had ever been placed through it.
 
-- Managers see everything. Purchasers see the buying side — dashboard, submit,
+- Managers see everything. Purchasers see the buying side — Home, Analysis, submit,
   history, shipping, clients, market, settings — and their own POs.
 - Desktop role gating is three-layered: the sidebar's `roles` list, a
   `DesktopApp` view bounce, and in-page filters. Missing one leaves the view
@@ -126,7 +126,8 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
 ## Purchase orders
 
 The core object. A PO is a purchase from a vendor, built line by line, that
-moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done. Sold
+moves Draft → In Transit → Reviewing → Ready to Pay → Done ("submitted" is
+the event written when it leaves Draft, not a stage). Sold
 is not a stage but a flag beside one, set once every line has sold
 (v1.246.0).
 
@@ -1136,7 +1137,7 @@ is not a stage but a flag beside one, set once every line has sold
   than landing at a stock status behind the flag (v1.138.4). An
   archived PO is frozen — edits, stage moves, delete and inventory line edits
   (Sold lines included) all refuse until it is unarchived — and both edit
-  shells render it locked and say so. The Analysis tab leaves archived goods
+  shells render it locked and say so. Analysis ▸ Inventory leaves archived goods
   out of every aggregate (v1.137.1), Sold lines excepted — they are the sales
   record and keep counting (v1.138.4).
 - **Removing a PO line is refused while an open, non-archived sell order
@@ -1238,7 +1239,7 @@ log and `orders.supplier_id`.
 
 There is **no inventory table**. Stock is `order_lines` whose PO is Done or In
 Transit. A line counted down to 0 stays on its PO but is never stock: the list,
-the export, the grouped view and the analysis page leave it out (v1.213.0). A PO whose every line has sold carries
+the export, the grouped view and Analysis ▸ Inventory leave it out (v1.213.0). A PO whose every line has sold carries
 the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Lines of an archived PO sit at the
 `Archived` status and are out of every stock view until the PO is unarchived
 (v1.137.0); like Sold, they are reachable through an explicit status filter.
@@ -2664,7 +2665,53 @@ over MCP.
 - Member/permission changes are **absent** — they write no audit rows
   anywhere today.
 
-## Dashboard
+## Home
+
+What is waiting on the viewer (v1.350.0). `/` on both shells, and where an
+unknown path lands. The money figures moved to Analysis, below. One request,
+`GET /api/home`, scoped by the effective role, so a manager previewing as a
+purchaser gets the purchaser's Home over their own work. Every count reads
+the predicate of the page it opens. Home re-reads on returning to the tab and
+every two minutes.
+
+- **Purchasers:**
+  - A count of their POs at each stage, with Done covering the last 30 days.
+    Each count opens the PO list filtered to that stage (`?stage=`).
+  - Their open POs, drafts first and then the longest-waiting. Each row
+    gives the stage, the days in it (amber at 3, red at 7) and what it is
+    waiting for: a draft's missing hand-off pieces (the hand-off's own
+    blocker list), the box's ETA or exception, a pickup, the manager's
+    review, or the commission payout.
+  - Their packages that are moving or need a hand, in the inbound-counts
+    buckets.
+  - Commission owed (Ready to Pay) and paid in the last 30 days.
+  - Client follow-ups due or due this week.
+- **Managers:**
+  - Tiles for arriving today or tomorrow, packages needing a hand, POs in
+    review, purchaser edits to check, commission to pay, sell orders to sign
+    off, unlinked payments out, and RMB Flow for them.
+  - The review queue, oldest first, with box-check progress, open AI findings
+    (error and warn) and who has it, plus unacknowledged reverts.
+  - Inbound packages, problems first, then by ETA; pickups in transit are
+    counted too.
+  - Money to move: Ready to Pay and its commission, sell orders awaiting
+    payment, unlinked payments, disputes.
+  - The sales pipeline: drafts (connector-made ones counted), Packing
+    progress, and the Shipped / Awaiting payment orders this manager has not
+    signed as they stand.
+  - The side queues: after-sales, transfers, new web submissions.
+- **Days in a stage** come from the newest stage move in `order_events`. POs
+  carry no stage-changed column.
+- **On the phone** the same highlights are compact rows. They link only where
+  the phone has a screen.
+
+## Analysis
+
+The money dashboard, at `/analysis` (it was `/dashboard`, the home page,
+until v1.350.0, and that path still resolves). Managers get a second tab,
+**Inventory** (`/analysis/inventory`), the stock snapshot that was Inventory ▸
+Analysis; a purchaser sent there lands on the first tab. On the phone it is
+the Numbers screen, opened from Home.
 
 Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
 
@@ -3762,7 +3809,7 @@ removed in v1.191.0.
   the page-sub. In the icon rail the caret hides and the open children show
   as icons.
 - **Menus and record references are real links** (v1.144.0). The sidebar,
-  the Inventory ▸ Analysis strip, the phone tab bar and Home quick links, and
+  the Analysis tab strip, the phone tab bar and Home quick links, and
   every PO, sell-order or payment id shown on another page — the inventory
   lots table, the item page, payments rows and match suggestions, shipping,
   the sell-order list, the client drawer — are anchors with the

@@ -17,7 +17,7 @@ import { api, afterSalesForOrder, type AfterSalesOrderCase, ApiError, archiveSel
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import {
   useRoute, navigate, replaceRoute, match, matchSellOrderPack, sellOrderPackPath, poLinePath,
-  afterSalesCasePath, afterSalesNewPath, hrefFor, onLinkClick,
+  afterSalesCasePath, afterSalesNewPath, hrefFor, onLinkClick, takeHashParam,
 } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { shareOrCopy } from '../../lib/shareOrCopy';
@@ -327,6 +327,11 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   // the terminal ones (Done / Closed) and also pulls in archived orders, so the
   // detail-modal Archive action never strands an order out of reach.
   const [showClosedDone, setShowClosedDone] = usePersisted<boolean>('desktop.sellOrders.showClosedDone', false);
+  // A Home row opens the list on one status.
+  useEffect(() => {
+    const status = takeHashParam('status');
+    if (status && sellOrderStatuses.some(o => o.id === status)) setStatusFilter(status as SellStatusId);
+  }, []);
   const [exporting, setExporting] = useState(false);
   const { path } = useRoute();
 

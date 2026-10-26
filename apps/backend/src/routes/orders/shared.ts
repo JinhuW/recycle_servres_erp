@@ -15,6 +15,10 @@ import { synthesizePartNumber, chipMarkingCanon, normSellPrice, CARRIERS, PACKAG
 import { type Env, type LineCategory, type User } from '../../types';
 import { normPaypalTxnId } from '../../ai/paypal';
 import { LIFECYCLE_LABEL } from '../../services/orderAdvance';
+import { soldSettleEventSql } from '../../services/orderSold';
+import type postgres from 'postgres';
+
+type SqlFragment = postgres.PendingQuery<postgres.Row[]>;
 
 export type OrdersEnv = { Bindings: Env; Variables: { user: User } };
 
@@ -395,7 +399,7 @@ export function registerIfNeeded(
 // order_events.created_at is transaction-START time, and the ack cannot see
 // the still-uncommitted row it would need to cover. Acks written before this
 // carried no ids and keep falling back to the timestamp.
-export function unackedRevertFrag(sql: SqlLike, id: string) {
+export function unackedRevertFrag(sql: SqlLike, id: string | SqlFragment) {
   return sql`
     NOT EXISTS (
       SELECT 1 FROM order_events a
@@ -403,6 +407,18 @@ export function unackedRevertFrag(sql: SqlLike, id: string) {
         AND (a.detail->'ackedIds' @> to_jsonb(e.id::text)
              OR (a.detail->'ackedIds' IS NULL AND a.created_at > e.created_at))
     )`;
+}
+
+// When a PO entered the stage it is in. There is no column for it: the newest
+// stage move in order_events says, with the old Sold settle row (which moved
+// nothing) left out, and a PO that never moved has been where it is since
+// it was created.
+export function stageSinceSql(sql: SqlLike, orderAlias: SqlFragment): SqlFragment {
+  return sql`COALESCE((
+    SELECT MAX(se.created_at) FROM order_events se
+    WHERE se.order_id = ${orderAlias}.id AND se.kind IN ('submitted', 'advanced', 'reverted')
+      AND NOT ${soldSettleEventSql(sql, sql`se`)}
+  ), ${orderAlias}.created_at)`;
 }
 
 // The box the hand-off's label path inserted, for the list's In Transit chip

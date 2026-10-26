@@ -10,7 +10,7 @@ export type TourShell = 'desktop' | 'phone';
 
 // Each is a `data-tour` attribute on something the shell already renders —
 // labels are translated, so text and class selectors would not hold.
-export type TourAnchor = 'dashboard' | 'submit' | 'history' | 'market' | 'guide' | 'me';
+export type TourAnchor = 'home' | 'submit' | 'history' | 'market' | 'guide' | 'me';
 
 export type TourVisual =
   | 'journey' | 'numbers' | 'categories' | 'handoff' | 'payment'
@@ -31,7 +31,7 @@ export function tourSteps(shell: TourShell): TourStep[] {
     { id: 'welcome', titleKey: 'onbWelcomeTitle', bodyKey: 'onbWelcomeBody', pointKeys: [], visual: 'journey', anchor: null },
     {
       id: 'home', titleKey: 'onbHomeTitle', bodyKey: desk ? 'onbHomeBodyDesktop' : 'onbHomeBodyPhone',
-      pointKeys: [], visual: 'numbers', anchor: 'dashboard',
+      pointKeys: [], visual: 'numbers', anchor: 'home',
     },
     {
       id: 'submit', titleKey: 'onbSubmitTitle', bodyKey: desk ? 'onbSubmitBodyDesktop' : 'onbSubmitBodyPhone',

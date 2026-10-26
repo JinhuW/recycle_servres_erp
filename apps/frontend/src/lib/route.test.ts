@@ -26,8 +26,29 @@ describe('real-path launches', () => {
     at('/inventory', '#/market'); expect(readPath()).toBe('/market');
   });
 
-  it('opens the phone Submit shortcut on the dashboard, where the capture flow starts', () => {
-    expect(pathToMobileView('/submit')).toBe('dashboard');
+  it('opens the phone Submit shortcut on Home, where the capture flow starts', () => {
+    expect(pathToMobileView('/submit')).toBe('home');
+  });
+});
+
+describe('Home and Analysis routes', () => {
+  it('lands both shells on Home at the root and on any unknown path', () => {
+    expect(pathToDesktopView('/')).toBe('home');
+    expect(pathToDesktopView('/no-such-page')).toBe('home');
+    expect(pathToMobileView('/')).toBe('home');
+    expect(pathToMobileView('/no-such-page')).toBe('home');
+  });
+
+  it('serves the money dashboard and the stock analysis as Analysis tabs', () => {
+    expect(pathToDesktopView('/analysis')).toBe('analysis');
+    expect(pathToDesktopView('/analysis/inventory')).toBe('stock');
+    expect(pathToMobileView('/analysis')).toBe('analysis');
+  });
+
+  it('keeps the old Dashboard and Inventory ▸ Analysis paths working', () => {
+    expect(pathToDesktopView('/dashboard')).toBe('analysis');
+    expect(pathToDesktopView('/inventory/analysis')).toBe('stock');
+    expect(pathToMobileView('/dashboard')).toBe('analysis');
   });
 });
 
