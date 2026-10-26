@@ -2,13 +2,13 @@
 id: RS-406
 title: Fix the fleet claim-core review findings
 type: task
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-26
 reporter: jinhu
 branch: fleet/fix-claim-core
-pr:
-version:
+pr: "#916"
+version: 1.353.0
 related: []
 ---
 
