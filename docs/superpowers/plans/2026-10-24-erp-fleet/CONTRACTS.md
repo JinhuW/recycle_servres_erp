@@ -45,7 +45,7 @@ what answers.
 | Claim: `worker_id` must be `<host_id>-<n>`; a claim-id retry or handoff waits for its own slot instead of skipping to another | §5 | RS-406 |
 | Handoff reservations carry `reserved_until` (gate timeout) instead of an infinite lease; slot rows add `reserved_until`; park/unpark clear the handoff | §4, §6, §7 | RS-406 |
 | `next-task` hands a lease the epoch still holds again instead of leasing a second; the replacement's later epoch is not drained; a wake that finds nothing keeps holding | §5 | RS-406 |
-| A `verify-slug` verdict comes only from `finished` with a boolean `matches` and no `detail.error` | §5 | RS-406 |
+| A `verify-slug` verdict comes only from `finished` with a boolean `matches` and no `detail.error` / `detail.wall` | §5 | RS-406 |
 | `PUT /session` needs `c_user` (this account) and `xs` unless `clear: true` | §5 | RS-406 |
 | Coordinator wired for fleet workers on dev: `FLEET_COORDINATOR_URL=http://10.10.10.73:8500` (LAN forwarder), coordinator tokens per worker id in `FLEET_WORKER_ENV` as `RS_CONTROL_PLANE_TOKENS`; alerts withheld unless `env` carries `RS_ALERTS=on` | §2 | facebook-tracker 0.14.2 |
 
@@ -451,10 +451,11 @@ stay leased for `lease_minutes`. `take` that is not a boolean is `422`.
 
 `404 not_found` when the task is not this worker's. `started` sets
 `started_at` once. On a `verify-slug` task, only `finished` with a boolean
-`detail.matches` and no `detail.error` is the city's verdict: `true` enables
+`detail.matches` and neither `detail.error` nor `detail.wall` is the city's verdict: `true` enables
 the city, `false` leaves it disabled, and either way `verified_at` is set and
-`detail.location` (≤ 200 chars) becomes `verified_as`. A `stopped` event, an
-`error`, or a missing `matches` is logged and leaves the city unverified, so
+`detail.location` (≤ 200 chars) becomes `verified_as`. A `stopped` event (the worker's
+wall/login/error shape: no `matches`, `verdict: false` plus `wall` or `error`), an
+`error` or `wall`, or a missing `matches` is logged and leaves the city unverified, so
 the scheduler checks it again. A verdict never undoes a manager's removal or
 override.
 

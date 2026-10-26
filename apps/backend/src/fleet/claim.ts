@@ -684,10 +684,11 @@ worker.post('/events', workerAuth, async (c) => {
       VALUES (${task.id}, ${w.worker_id}, ${kind}, ${detail ? tx.json(detail as postgres.JSONValue) : null})`;
     if (kind === 'started') await tx`UPDATE fleet_tasks SET started_at = COALESCE(started_at, NOW()) WHERE id = ${task.id}`;
     // Only a finished check that saw the page is a verdict. A stopped one, or
-    // one whose page failed (detail.error), says nothing about the slug and
+    // one that hit an error or a wall (detail.error, detail.wall), says nothing about the slug and
     // leaves the city unverified, so the scheduler checks it again; marking
     // it verified would disable it for good over a slow proxy.
-    if (task.kind === 'verify-slug' && kind === 'finished' && typeof detail?.matches === 'boolean' && detail.error == null) {
+    if (task.kind === 'verify-slug' && kind === 'finished' && typeof detail?.matches === 'boolean'
+      && detail.error == null && detail.wall == null) {
       const matches = detail.matches;
       const location = typeof detail.location === 'string' ? detail.location.slice(0, 200) : null;
       await tx`UPDATE fleet_cities SET verified_at = NOW(), verified_as = ${location}, enabled = ${matches}

@@ -48,9 +48,10 @@ stays compatible with today's workers.
   the whole fleet picked one at a time. The pick now reads it under its slot
   lock, and a new index serves the "familiar city" test, which scanned every
   finished task.
-- **A slug check that failed is not a verdict.** A page error or a stopped
-  check used to mark the city verified-and-wrong for good. Only a finished
-  check with a real answer counts now.
+- **A slug check that failed is not a verdict.** A page error, a wall or a
+  stopped check used to mark the city verified-and-wrong for good. Only a
+  finished check with a boolean `matches` and no `error`/`wall` counts now.
+  The city stays unverified and is checked again.
 - **Smaller fixes:**
   - The replacement worker in a roll is no longer drained with the one it replaces.
   - A retried claim or a handoff waits for its own slot instead of skipping to another account.

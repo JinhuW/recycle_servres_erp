@@ -762,6 +762,11 @@ describe('claim-core review fixes', () => {
     expect(await city()).toEqual({ verified_at: null, enabled: false });
     expect((await post({ kind: 'stopped', detail: { matches: true } })).status).toBe(200);
     expect(await city()).toEqual({ verified_at: null, enabled: false });
+    // The 0.14.4 worker's shape for a wall or a login page: stopped, no matches.
+    expect((await post({ kind: 'stopped', detail: { verdict: false, wall: 'login' } })).status).toBe(200);
+    expect(await city()).toEqual({ verified_at: null, enabled: false });
+    expect((await post({ kind: 'finished', detail: { matches: true, wall: 'checkpoint' } })).status).toBe(200);
+    expect(await city()).toEqual({ verified_at: null, enabled: false });
     expect((await post({ kind: 'finished', detail: { location: 'Boise, Idaho' } })).status).toBe(200);
     expect(await city()).toEqual({ verified_at: null, enabled: false });
     expect((await post({ kind: 'finished', detail: { location: 'Boise, Idaho', matches: true } })).status).toBe(200);
