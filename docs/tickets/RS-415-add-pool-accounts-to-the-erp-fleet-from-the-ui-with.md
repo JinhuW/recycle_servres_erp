@@ -7,7 +7,7 @@ priority: P1
 created: 2026-10-26
 reporter: Jinhu Wang
 branch: fleet/add-to-fleet
-pr:
+pr: 932
 version: 1.364.0
 related: [RS-394]
 ---
