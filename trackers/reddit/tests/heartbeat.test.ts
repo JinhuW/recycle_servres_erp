@@ -39,6 +39,7 @@ describe('LoopRegistry', () => {
       poll: {lastSuccessAt: null, lastWorkAt: null},
       evaluate: {lastSuccessAt: null, lastWorkAt: null},
       notify: {lastSuccessAt: null, lastWorkAt: null},
+      trace: {lastSuccessAt: null, lastWorkAt: null},
     });
   });
 

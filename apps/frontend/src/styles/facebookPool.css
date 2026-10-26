@@ -2220,7 +2220,8 @@ tr.rt-off td:not(:nth-last-child(-n + 2)) {
   align-items: center;
   gap: 8px;
 }
-.rt-versions tr.rt-retired td {
+.rt-versions tr.rt-retired td,
+.rt-an-table tr.rt-retired td {
   opacity: 0.55;
 }
 .rt-version {
@@ -2243,6 +2244,101 @@ tr.rt-off td:not(:nth-last-child(-n + 2)) {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* How the tracker is doing (TrackerAnalytics.tsx) */
+.rt-an-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.rt-an-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 1100px) {
+  .rt-an-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.rt-an-kpi-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.rt-an-bad .kpi-value,
+td.rt-an-bad {
+  color: var(--neg);
+}
+.rt-an-chart {
+  padding: 0;
+}
+.rt-an-legend {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-bottom: 6px;
+}
+.rt-an-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.rt-an-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.rt-an-chart .rt-an-good {
+  fill: var(--info);
+}
+.rt-an-swatch.rt-an-good {
+  background: var(--info);
+}
+.rt-an-split {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 2fr;
+  gap: 18px;
+}
+@media (max-width: 1100px) {
+  .rt-an-split { grid-template-columns: 1fr; }
+}
+.rt-an-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.rt-an-facts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+.rt-an-facts dt {
+  color: var(--fg-muted);
+}
+.rt-an-facts dd {
+  margin: 0;
+  text-align: right;
+}
+.rt-an-table td.num,
+.rt-an-table th.num {
+  text-align: right;
+}
+.rt-an-post {
+  max-width: 420px;
+}
+.rt-an-why {
+  max-width: 360px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.rt-an-other summary {
+  cursor: pointer;
 }
 
 /* ─── Monitors ▸ WeChat ─────────────────────────────────────────────────────

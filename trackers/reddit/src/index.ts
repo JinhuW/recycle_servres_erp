@@ -14,6 +14,7 @@ import {evaluateOnce} from './loops/evaluate.ts';
 import {notifyOnce} from './loops/notify.ts';
 import {pollOnce} from './loops/poll.ts';
 import {reactionsOnce} from './loops/reactions.ts';
+import {Tracer} from './loops/trace.ts';
 import {watchOnce} from './loops/watch.ts';
 import {startLoop, type LoopHandle} from './loops/runner.ts';
 import {RedditPacer} from './pacing.ts';
@@ -145,7 +146,7 @@ async function runWorker(): Promise<void> {
   const pacer = new RedditPacer({maxRpm: config.redditMaxRpm});
   const alerts = createAlertSender(config.alertTransport, config.telegramBotToken);
 
-  // Three tickers rather than one sequential pass: Reddit pacing (up to a
+  // Separate tickers rather than one sequential pass: Reddit pacing (up to a
   // minute of waiting) must never hold up LLM evaluation or alerting, and a
   // failing LLM must not stop post discovery.
   const loops: LoopHandle[] = [
@@ -183,11 +184,27 @@ async function runWorker(): Promise<void> {
     ),
     startHeartbeat('worker'),
   ];
+  if (config.commentTracer) {
+    // Idle mostly means another worker holds the lease; checking every minute
+    // is how this one notices the holder is gone.
+    const tracer = new Tracer({
+      sql,
+      workerId: config.workerId,
+      userAgent: config.redditUserAgent,
+      pacer,
+      logger: logger.child('trace'),
+    });
+    loops.push(startLoop(
+      {name: 'trace', logger: logger.child('trace'), idleMs: 60_000, busyMs: 1_000},
+      registry.wrap('trace', () => tracer.once()),
+    ));
+  }
 
   logger.info('worker started', {
     workerId: config.workerId,
     redditMaxRpm: config.redditMaxRpm,
     alertTransport: config.alertTransport,
+    commentTracer: config.commentTracer,
   });
 
   await new Promise<void>((resolve) => {

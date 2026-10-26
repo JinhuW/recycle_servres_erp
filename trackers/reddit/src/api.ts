@@ -3,6 +3,7 @@
 // database, so this can run anywhere that can reach it.
 
 import {Hono} from 'hono';
+import {analytics, ANALYTICS_WINDOWS, type AnalyticsWindow} from './analytics.ts';
 import {requeuePost} from './claims.ts';
 import type {Sql} from './db.ts';
 import {DEAD_AFTER_S, STALE_AFTER_S, type LoopName, type LoopStatus} from './heartbeat.ts';
@@ -80,7 +81,8 @@ export function createApi(deps: ApiDeps): Hono {
     await next();
   });
 
-  // The deliverable: LLM summary plus the link, newest first.
+  // The deliverable: LLM summary plus the link, newest first. A cross-post
+  // copy is left out: buyers got its listing once, through the other copy.
   app.get('/api/matches', async (c) => {
     const limit = parseLimit(c.req.query('limit'), 50);
     const sinceDate = parseSince(c.req.query('since'));
@@ -90,7 +92,7 @@ export function createApi(deps: ApiDeps): Hono {
       SELECT reddit_id, subreddit, title, llm_summary, llm_price, url,
              posted_at, discovered_at, notified_at, status
         FROM posts
-       WHERE is_target IS TRUE
+       WHERE is_target IS TRUE AND status <> 'duplicate'
          ${sinceDate ? deps.sql`AND discovered_at >= ${sinceDate}` : deps.sql``}
        ORDER BY discovered_at DESC
        LIMIT ${limit}`;
@@ -356,6 +358,22 @@ export function createApi(deps: ApiDeps): Hono {
       live: liveConfig(settings, enabledRules),
       candidate: candidateConfig(settings),
       enabledRules: enabledRules.length,
+    }));
+  });
+
+  // The ERP's Analytics tab: volume, feedback and PM demand over one window.
+  app.get('/api/analytics', async (c) => {
+    const window = c.req.query('window') ?? '7d';
+    if (!(ANALYTICS_WINDOWS as readonly string[]).includes(window)) {
+      return c.json({error: `window must be one of ${ANALYTICS_WINDOWS.join(', ')}`}, 400);
+    }
+    const settings = await deps.settings.get();
+    const enabledRules = (await listRules(deps.sql)).filter((r) => r.enabled);
+    const candidate = candidateConfig(settings);
+    return c.json(await analytics(deps.sql, {
+      window: window as AnalyticsWindow,
+      liveHash: promptHash(liveConfig(settings, enabledRules)),
+      candidateHash: candidate ? promptHash(candidate) : null,
     }));
   });
 

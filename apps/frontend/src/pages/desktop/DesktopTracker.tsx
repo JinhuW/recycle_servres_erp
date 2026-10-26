@@ -32,6 +32,7 @@ import { liveness, type Liveness } from '../../lib/workerLiveness';
 import { Hi } from './FleetAccounts';
 import { ConfirmDialog } from './settings/dialogs';
 import { Toggle } from './settings/_shared';
+import { AnalyticsCard } from './TrackerAnalytics';
 import { PromptsCard } from './TrackerPrompts';
 import '../../styles/facebookPool.css';
 
@@ -59,7 +60,8 @@ export function DesktopTracker({ showToast }: Props) {
   const { path } = useRoute();
   const promptsOpen = path === '/tracker/prompts';
   const workflowOpen = path === '/tracker/workflow';
-  const fleetOpen = !promptsOpen && !workflowOpen;
+  const analyticsOpen = path === '/tracker/analytics';
+  const fleetOpen = !promptsOpen && !workflowOpen && !analyticsOpen;
 
   const [rules, setRules] = useState<TrackerRule[] | null>(null);
   const [subs, setSubs] = useState<TrackerSubreddit[] | null>(null);
@@ -113,7 +115,7 @@ export function DesktopTracker({ showToast }: Props) {
   // Fleet and Workflow share the live post counts. A backgrounded tab polls
   // nothing and catches up the moment it's back.
   useEffect(() => {
-    if (promptsOpen) return;
+    if (promptsOpen || analyticsOpen) return;
     loadLive();
     const refresh = () => { if (!document.hidden) loadLive(); };
     const timer = setInterval(refresh, REFRESH_MS);
@@ -122,11 +124,11 @@ export function DesktopTracker({ showToast }: Props) {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [loadLive, promptsOpen]);
+  }, [loadLive, promptsOpen, analyticsOpen]);
 
   const head = (
     <div className="page-head"><div><div className="page-sub">{t('nav_monitors')} / {t('nav_tracker')}</div>
-      <h1 className="page-title">{promptsOpen ? t('trkPromptsTitle') : workflowOpen ? t('trkWorkflowTitle') : t('trkTitle')}</h1></div></div>
+      <h1 className="page-title">{promptsOpen ? t('trkPromptsTitle') : workflowOpen ? t('trkWorkflowTitle') : analyticsOpen ? t('trkAnalyticsTitle') : t('trkTitle')}</h1></div></div>
   );
   const tabs = (
     <nav className="tabs fp-view-tabs" aria-label={t('trkViews')}>
@@ -136,6 +138,8 @@ export function DesktopTracker({ showToast }: Props) {
         aria-current={workflowOpen ? 'page' : undefined}><Icon name="arrow" size={14} />{t('trkTabWorkflow')}</a>
       <a className={`tab ${promptsOpen ? 'active' : ''}`} href={hrefFor('/tracker/prompts')} onClick={onLinkClick('/tracker/prompts')}
         aria-current={promptsOpen ? 'page' : undefined}><Icon name="sparkles" size={14} />{t('trkTabPrompts')}</a>
+      <a className={`tab ${analyticsOpen ? 'active' : ''}`} href={hrefFor('/tracker/analytics')} onClick={onLinkClick('/tracker/analytics')}
+        aria-current={analyticsOpen ? 'page' : undefined}><Icon name="analytics" size={14} />{t('trkTabAnalytics')}</a>
     </nav>
   );
 
@@ -174,6 +178,8 @@ export function DesktopTracker({ showToast }: Props) {
               trackerApi.listRules().then(setRules).catch(fail);
               loadModel().catch(fail);
             }} />
+        ) : analyticsOpen ? (
+          <AnalyticsCard locale={locale} />
         ) : workflowOpen ? (
           <FlowCard stats={stats} subs={subs} rules={rules} liveModel={liveModel} locale={locale}
             onSubsChanged={setSubs} onDeleteSub={setDeletingSub}

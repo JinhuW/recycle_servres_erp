@@ -56,8 +56,8 @@ bot's updates for reactions on alert messages (see *Measuring the prompt*).
   records it. Any reaction except 👎 makes the post a **lead**; a 👎 alone
   marks it **not a lead**. This works in groups, where Telegram says who
   reacted, and in channels, where it only sends totals. Every buyer alert
-  ends by asking for that reaction ("React 👍 if you act on this, 👎 if it's
-  not useful").
+  ends by asking for that reaction ("React with any emoji if it's a good
+  catch, 👎 if it's not useful").
 - **Response schema.** The model gives its reasoning before its verdict. A
   version's identity includes the schema (`prompt_versions.response_schema`),
   so the verdicts from the earlier verdict-first schema stay in their own
@@ -146,6 +146,7 @@ through the API — no redeploy, and changes reach every worker within 60 s.
 | `WORKER_ID` | no | `hostname-pid-random` |
 | `REDDIT_USER_AGENT` | no | `recycle-servers-tracker/1.0 (contact: …)` |
 | `REDDIT_MAX_RPM` | no | `1` |
+| `COMMENT_TRACER` | no | `on` (`off` keeps this worker from taking the PM tracer lease) |
 | `LOG_LEVEL` | no | `info` |
 | `OPS_ALERT_URL` / `OPS_ALERT_TOKEN` | api role, both or neither | — (the ops watch is off) |
 
@@ -214,8 +215,8 @@ curl localhost:8080/api/matches -H "Authorization: Bearer $API_TOKEN"
    `PUT /api/settings/telegram_dev_chat_ids` with `{"value": ["-100…"]}`.
 3. **Start a trial:** `PUT /api/settings/candidate_eval_prompt` with the full
    prompt text. Optionally set `candidate_llm_model` to trial a model too.
-4. **Label in the dev chat.** React 👍 to a review that is a real lead, and 👎
-   to one that should not have alerted. Buyers' reactions in the alert chat
+4. **Label in the dev chat.** React with any emoji to a review that is a real
+   lead, and 👎 to one that should not have alerted. Buyers' reactions in the alert chat
    count too.
 5. **Read `GET /api/prompt-stats`.** Compare the candidate's `vsLive` cells:
    - leads in `candidateOnly` are deals it adds;

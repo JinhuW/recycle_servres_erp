@@ -65,7 +65,7 @@ describe('formatAlert', () => {
 
   it('ends by asking for the reaction that scores the prompt', () => {
     expect(formatAlert(alert).endsWith(
-      '<i>React 👍 if you act on this, 👎 if it\'s not useful.</i>',
+      '<i>React with any emoji if it\'s a good catch, 👎 if it\'s not useful.</i>',
     )).toBe(true);
   });
 });
@@ -180,7 +180,7 @@ describe('formatReview', () => {
     expect(text).toContain('<b>Live</b> v3 · openai/gpt-4o-mini — ❌ no alert');
     expect(text).toContain('<b>Candidate</b> v5 · openai/gpt-4o-mini — ✅ alert');
     expect(text).toContain(alert.url);
-    expect(text).toContain('React 👍 if this is a lead');
+    expect(text).toContain('React with any emoji if this is a lead');
     // The buyers' line would be a second, different request in the same message.
     expect(text).not.toContain('if you act on this');
   });

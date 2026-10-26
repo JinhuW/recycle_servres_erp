@@ -95,6 +95,21 @@ describe('Tracker proxy routes (/api/tracker)', () => {
       .toBe('http://tracker.internal:8080/api/stats?since=2026-10-17T00:00:00Z');
   });
 
+  it('forwards the analytics read with its window, to managers only', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubTracker(200, { window: '30d', volume: { alerts: 4 } });
+
+    const r = await api<{ window: string }>('GET', '/api/tracker/analytics?window=30d', { token, env: TRACKER_ENV });
+    expect(r.status).toBe(200);
+    expect(r.body.window).toBe('30d');
+    expect((spy.mock.calls[0] as [string])[0]).toBe('http://tracker.internal:8080/api/analytics?window=30d');
+
+    const purchaser = await loginAs(MARCUS);
+    const denied = await api('GET', '/api/tracker/analytics?window=7d', { token: purchaser.token, env: TRACKER_ENV });
+    expect(denied.status).toBe(403);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it('forwards the prompt trial routes: stats with their window, start, end and promote', async () => {
     const { token } = await loginAs(ALEX);
     const calls: Array<[string, string | undefined, string | undefined]> = [];
