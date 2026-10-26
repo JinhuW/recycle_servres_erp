@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-409](./RS-409-fleet-task-history-retention.md) | done | task | P2 | Fleet task history retention | 1.358.0 |
 | [RS-408](./RS-408-a-degraded-heartbeat-keeps-renewing-the-task-lease.md) | done | task | P2 | A DEGRADED heartbeat keeps renewing the task lease | 1.357.0 |
 | [RS-407](./RS-407-fleet-scheduler-catalog-hosts-and-relay-fix-the-revi.md) | done | bug | P1 | Fleet scheduler, catalog, hosts and relay: fix the review findings | 1.356.0 |
 | [RS-406](./RS-406-fix-the-fleet-claim-core-review-findings.md) | done | task | P2 | Fix the fleet claim-core review findings | 1.354.0 |

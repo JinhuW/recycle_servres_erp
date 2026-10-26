@@ -3949,6 +3949,8 @@ const zh: Record<string, string> = {
   fleetRuleUnit_quarantine_hours: "小时，在 0 卡片搜索之后",
   fleetRule_quarantine_probe_hours: "探测间隔",
   fleetRuleUnit_quarantine_probe_hours: "小时，隔离期间",
+  fleetRule_retention_days: "任务历史保留",
+  fleetRuleUnit_retention_days: "天（30 到 730），不少于熟悉城市窗口",
   fleetFunnelSub_1: "今天（UTC），所有 worker，两个品类",
   fleetFunnelSub_7: "最近 7 个 UTC 日，所有 worker，两个品类",
   fleetFunnelSub_14: "最近 14 个 UTC 日，所有 worker，两个品类",

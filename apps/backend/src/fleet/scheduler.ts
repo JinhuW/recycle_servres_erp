@@ -23,6 +23,9 @@ const FIRST_RUN_MS = 5_000;
 export const PROBE_PRIORITY = 10;
 const VERIFY_BACKOFF_BASE = '15 minutes';
 const VERIFY_BACKOFF_MAX = '6 hours';
+export const PURGE_BATCH = 5000;
+const PURGE_EVERY_MS = 3_600_000;
+const PURGE_LOCK = 'fleet:purge';
 
 export type ReconcileReport = {
   inserted: number;
@@ -227,14 +230,74 @@ async function probeCity(sql: Sql, home: string[]): Promise<string | null> {
   return any?.slug ?? null;
 }
 
+export type PurgeReport = { tasks: number; events: number; attempts: number; days: number };
+
+/**
+ * Deletes finished history older than `retention_days`: terminal tasks with
+ * their events and archived attempts, oldest first, at most `batch` tasks.
+ * Ready and leased tasks are never candidates. Two rules read further back
+ * than any window, so their rows stay whatever their age: the newest finished
+ * search per city and item (the cadence's last-done and the Cities tab's last
+ * search) and the task holding each city's latest slug verdict (slugConfirmed,
+ * which decides whether a city may be enabled again). The windowed rules all
+ * fit inside the setting's lower bound except the familiar test, so the
+ * window never drops below familiar_days.
+ *
+ * One instance purges at a time (a transaction-scoped advisory lock); the
+ * other gets null and tries again later. Rows a pick or a heartbeat holds are
+ * skipped, not waited for.
+ */
+export async function purgeHistory(sql: Sql, now: Date = new Date(), batch: number = PURGE_BATCH): Promise<PurgeReport | null> {
+  return sql.begin(async (tx) => {
+    const [{ locked }] = await tx<{ locked: boolean }[]>`SELECT pg_try_advisory_xact_lock(hashtextextended(${PURGE_LOCK}, 0)) AS locked`;
+    if (!locked) return null;
+    const settings = await loadSettings(tx);
+    const days = Math.max(settings.retention_days, settings.familiar_days);
+    const cutoff = new Date(now.getTime() - days * 86_400_000);
+    const victims = await tx<{ id: string }[]>`
+      WITH verdicts AS (
+        SELECT DISTINCT ON (t.city) t.id
+        FROM fleet_task_events e JOIN fleet_tasks t ON t.id = e.task_id
+        WHERE t.kind = 'verify-slug' AND e.kind = 'finished'
+          AND jsonb_typeof(e.detail->'matches') = 'boolean'
+          AND COALESCE(e.detail->'error', 'null'::jsonb) = 'null'::jsonb
+          AND COALESCE(e.detail->'wall', 'null'::jsonb) = 'null'::jsonb
+        ORDER BY t.city, e.at DESC, e.id DESC
+      )
+      SELECT t.id FROM fleet_tasks t
+      WHERE t.state IN ('done', 'cancelled', 'expired')
+        AND COALESCE(t.done_at, t.leased_at, t.due_at) < ${cutoff}
+        AND t.id NOT IN (SELECT id FROM verdicts)
+        AND NOT (t.kind = 'search' AND t.state = 'done' AND t.id = (
+          SELECT d.id FROM fleet_tasks d
+          WHERE d.city = t.city AND d.item = t.item AND d.kind = 'search' AND d.state = 'done'
+          ORDER BY d.done_at DESC, d.id DESC LIMIT 1))
+      ORDER BY COALESCE(t.done_at, t.leased_at, t.due_at), t.id
+      LIMIT ${batch}
+      FOR UPDATE OF t SKIP LOCKED`;
+    if (victims.length === 0) return { tasks: 0, events: 0, attempts: 0, days };
+    const ids = victims.map((v) => v.id);
+    // Attempts go with their task rather than through ON DELETE SET NULL:
+    // a nulled task_id could collide on the attempts' unique key, and an
+    // attempt this old is no longer any day's budget.
+    const attempts = await tx`DELETE FROM fleet_task_attempts WHERE task_id = ANY(${ids}::bigint[])`;
+    const events = await tx`DELETE FROM fleet_task_events WHERE task_id = ANY(${ids}::bigint[])`;
+    const tasks = await tx`DELETE FROM fleet_tasks WHERE id = ANY(${ids}::bigint[])`;
+    return { tasks: tasks.count, events: events.count, attempts: attempts.count, days };
+  });
+}
+
 /**
  * The 30 s tick. Every role that serves workers runs it: two instances
- * reconciling at once is the designed case, not a race to avoid.
+ * reconciling at once is the designed case, not a race to avoid. The purge
+ * rides along once an hour, and again on the next tick while a run comes back
+ * full, so a backlog drains in short steps.
  */
 export function startFleetSchedulerLoop(sql: Sql, env: Env): { stop(): void } {
   if (env.FLEET_ROLE === 'manager-only') return { stop() {} };
   let stopped = false;
   let busy = false;
+  let lastPurge = 0;
   const tick = async () => {
     if (stopped || busy) return;
     busy = true;
@@ -243,6 +306,16 @@ export function startFleetSchedulerLoop(sql: Sql, env: Env): { stop(): void } {
       if (r.inserted || r.cancelled || r.expired || r.probes) log.info('fleet tasks reconciled', r);
     } catch (e) {
       log.error('fleet reconcile failed', e);
+    }
+    try {
+      if (!stopped && Date.now() - lastPurge >= PURGE_EVERY_MS) {
+        const p = await purgeHistory(sql);
+        if (!p || p.tasks < PURGE_BATCH) lastPurge = Date.now();
+        if (p?.tasks) log.info('fleet history purged', p);
+      }
+    } catch (e) {
+      lastPurge = Date.now();
+      log.error('fleet history purge failed', e);
     } finally {
       busy = false;
     }

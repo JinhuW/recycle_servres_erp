@@ -299,11 +299,11 @@ export function CitiesTable({ cities, items, done, slots, filter, onFilter, onCh
 // The fleet-wide rules: the settings every worker reads at its next task.
 // Numbers are kept as typed until Save, which sends only what changed.
 const RULE_FIELDS = [
-  'per_day_default', 'budget_minutes', 'lease_minutes', 'task_max_minutes', 'familiar_days', 'start_fresh_hours', 'quarantine_hours', 'quarantine_probe_hours',
+  'per_day_default', 'budget_minutes', 'lease_minutes', 'task_max_minutes', 'familiar_days', 'start_fresh_hours', 'quarantine_hours', 'quarantine_probe_hours', 'retention_days',
 ] as const;
 type RuleField = (typeof RULE_FIELDS)[number];
 const RULE_MIN: Record<RuleField, number> = {
-  per_day_default: 1, budget_minutes: 1, lease_minutes: 1, task_max_minutes: 1, familiar_days: 0, start_fresh_hours: 0, quarantine_hours: 0, quarantine_probe_hours: 1,
+  per_day_default: 1, budget_minutes: 1, lease_minutes: 1, task_max_minutes: 1, familiar_days: 0, start_fresh_hours: 0, quarantine_hours: 0, quarantine_probe_hours: 1, retention_days: 30,
 };
 
 function RulesDialog({ onClose }: { onClose: () => void }) {

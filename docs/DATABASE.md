@@ -2219,7 +2219,7 @@ What the fleet searches for in every city: the search phrases and filters of one
 
 #### `fleet_settings`
 
-The queue's knobs, one JSON value per key: per_day_default, budget_minutes, lease_minutes, task_max_minutes, poll_hold_seconds, familiar_days, start_fresh_hours, quarantine_hours, quarantine_probe_hours and search (the monitor's search parameters). A missing key means its default (packages/shared/src/fleet.ts, FLEET_SETTINGS_DEFAULTS).
+The queue's knobs, one JSON value per key: per_day_default, budget_minutes, lease_minutes, task_max_minutes, poll_hold_seconds, familiar_days, start_fresh_hours, quarantine_hours, quarantine_probe_hours, retention_days and search (the monitor's search parameters). A missing key means its default (packages/shared/src/fleet.ts, FLEET_SETTINGS_DEFAULTS).
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
@@ -2330,7 +2330,9 @@ One search of one item in one city. The scheduler keeps exactly one open (ready 
 - **Primary key:** `id`
 - **References:** `city` → `fleet_cities.slug`; `item` → `fleet_items.name`
 - **Checks:** `state IN ('ready', 'leased', 'done', 'cancelled', 'expired')`
-- **Indexes:** `fleet_tasks_due_idx` (state, due_at); `fleet_tasks_item_idx` (item); `fleet_tasks_open_idx` UNIQUE (city, item, kind) WHERE state IN ('ready', 'leased') AND kind <> 'probe'; `fleet_tasks_probe_idx` UNIQUE (account_no) WHERE state IN ('ready','leased') AND kind = 'probe'; `fleet_tasks_worker_idx` (worker_id, leased_at DESC); `fleet_tasks_done_account_idx` (account_no, city, done_at) WHERE state = 'done'
+- **Indexes:** `fleet_tasks_due_idx` (state, due_at); `fleet_tasks_item_idx` (item); `fleet_tasks_open_idx` UNIQUE (city, item, kind) WHERE state IN ('ready', 'leased') AND kind <> 'probe'; `fleet_tasks_probe_idx` UNIQUE (account_no) WHERE state IN ('ready','leased') AND kind = 'probe'; `fleet_tasks_worker_idx` (worker_id, leased_at DESC); `fleet_tasks_done_account_idx` (account_no, city, done_at) WHERE state = 'done'; `fleet_tasks_done_pair_idx` (city, item, done_at DESC) WHERE state = 'done' AND kind = 'search'; `fleet_tasks_purge_idx` (COALESCE(done_at, leased_at, due_at), id) WHERE state IN ('done', 'cancelled', 'expired') (migration 0210)
+
+**Retention (RS-409).** Once an hour each backend that runs the scheduler deletes terminal tasks (done, cancelled, expired) whose `COALESCE(done_at, leased_at, due_at)` is older than `fleet_settings.retention_days` (default 90, 30..730, never below `familiar_days`), with their `fleet_task_events` and `fleet_task_attempts` rows, 5,000 tasks per run, oldest first, under an advisory lock so one instance purges at a time. Ready and leased tasks are never deleted. Two kinds of row stay whatever their age, because a rule reads them without a window: the newest done search per city and item (the cadence's last done, the Cities tab's last search) and the verify-slug task holding each city's latest slug verdict (whether the city may be enabled again).
 
 The scheduler sends `NOTIFY fleet_tasks` (payload: the item) after every write that can make a task ready; a worker's held next-task poll listens on it.
 
@@ -2346,7 +2348,7 @@ the minutes view until closed.
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
 | `id` | `bigint` | ✓ | sequence | |
-| `task_id` | `bigint` | | | → fleet_tasks; on delete set null preserves spent minutes. |
+| `task_id` | `bigint` | | | → fleet_tasks; on delete set null preserves spent minutes. The retention purge deletes a purged task's attempts itself. |
 | `account_no` | `integer` | | | Historical account number, retained after pool deletion. |
 | `epoch` | `integer` | | | Worker lease generation. |
 | `leased_at` | `timestamptz` | ✓ | | Attempt start. |

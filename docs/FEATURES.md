@@ -3358,7 +3358,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     **Enable anyway** instead. **Rules**, beside **Add city**, edits the
     fleet-wide settings (searches per city per item, budget per account,
     lease, longest task, familiar window, round-start skip, quarantine and
-    its probe interval); a change reaches each worker at its next task.
+    its probe interval, and since v1.358.0 how many days of task history to
+    keep, 30 to 730, default 90); a change reaches each worker at its next
+    task. Finished, cancelled and expired tasks older than that are deleted
+    hourly with their logs, except each city and item's last search and each
+    city's latest slug check.
   - **Analysis** (`/#/fleet/analysis`, v1.344.0): the search-to-alert
     pipeline that used to sit on the Fleet tab, with a range segment (Today,
     7 days, 14 days) that sums the coordinator's per-day counters for every
