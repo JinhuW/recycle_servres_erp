@@ -11,6 +11,10 @@
 // Exit codes follow the worker contract: 0 when done, 75 on no_slot or a stale
 // epoch, 70 when the claim fails otherwise. It prints one JSON line per step
 // and never prints a password, cookie, token or proxy login.
+//
+// Only a local ERP unless --i-mean-it: against a real one it would claim a real
+// account and report made-up searches (12 cards each), which move the cadence
+// and count as a positive peer in the quarantine rule for every other account.
 
 function arg(name, fallback = null) {
   const i = process.argv.indexOf(name);
@@ -26,7 +30,14 @@ const wait = Number(arg('--wait', '50'));
 const workSeconds = Number(arg('--work', '3'));
 const version = arg('--version', '0.14.0');
 if (!url || !hostId || !hostToken || !workerId) {
-  console.error('usage: fleet-fake-worker.mjs --url <erp> --host <host_id> --token <host token> --worker <worker_id> [--tasks n] [--wait s] [--work s]');
+  console.error('usage: fleet-fake-worker.mjs --url <erp> --host <host_id> --token <host token> --worker <worker_id> [--tasks n] [--wait s] [--work s] [--i-mean-it]');
+  process.exit(2);
+}
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+let target;
+try { target = new URL(url).hostname; } catch { target = ''; }
+if (!LOCAL_HOSTS.has(target) && !process.argv.includes('--i-mean-it')) {
+  console.error(`refusing ${target || url}: not a local ERP. A fake worker there claims a real account and reports made-up searches; pass --i-mean-it if that is the point.`);
   process.exit(2);
 }
 
@@ -122,7 +133,7 @@ while (received < tasksWanted && !stale) {
     await sleep(workSeconds * 1000);
     await event('searched', { phrase: 'fake', cards: 12 });
     await event('finished', { seconds: Math.round((Date.now() - started) / 1000) });
-    done = { task_id: task.id, result: { cards: 12, opened: 1, reviewed: 1, alerted: 0, seconds: Math.round((Date.now() - started) / 1000) } };
+    done = { task_id: task.id, result: { cards: 12, opened: 1, reviewed: 1, alerted: 0, seconds: Math.round((Date.now() - started) / 1000), fake: true } };
   }
   lastSearchAt = new Date().toISOString();
   say('finished', { id: task.id });

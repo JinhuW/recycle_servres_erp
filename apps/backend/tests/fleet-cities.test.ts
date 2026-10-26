@@ -93,6 +93,45 @@ describe('cities', () => {
     expect(on.body.open_tasks).toHaveLength(2);
   });
 
+  it('enables a city only on a matching verdict; a mismatch needs override_verify, and reverify checks again', async () => {
+    const db = getTestDb();
+    await addCity({ slug: 'springfield', name: 'Springfield, IL' });
+    const verdict = async (matches: boolean | null, location: string) => {
+      const [t] = await db<{ id: string }[]>`SELECT id FROM fleet_tasks WHERE city = 'springfield' AND kind = 'verify-slug' AND state IN ('ready','leased')`;
+      await db`INSERT INTO fleet_task_events (task_id, worker_id, kind, detail)
+               VALUES (${t.id}, 'lab-1', 'finished', ${db.json(matches === null ? { location } : { matches, location })})`;
+      await db`UPDATE fleet_tasks SET state = 'done', done_at = NOW() WHERE id = ${t.id}`;
+      await db`UPDATE fleet_cities SET verified_at = NOW(), verified_as = ${location}, enabled = ${matches === true} WHERE slug = 'springfield'`;
+    };
+    await verdict(false, 'Springfield, MO');
+    const refused = await putCity('springfield', { enabled: true });
+    expect(refused.status).toBe(409);
+    expect(refused.body).toMatchObject({ error: 'unverified' });
+    expect((refused.body as unknown as { detail: string }).detail).toContain('Springfield, MO');
+
+    // Back to a fresh check: unverified, disabled, a new verify-slug task.
+    expect((await putCity('springfield', { reverify: true, override_verify: true })).status).toBe(422);
+    const again = await putCity('springfield', { reverify: true });
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ enabled: false, verified_at: null, verified_as: null, disabled_at: null });
+    expect(again.body.open_tasks.map((t) => t.kind)).toEqual(['verify-slug']);
+
+    await verdict(true, 'Springfield, IL');
+    await putCity('springfield', { enabled: false });
+    const on = await putCity('springfield', { enabled: true });
+    expect(on.status).toBe(200);
+    expect(on.body.enabled).toBe(true);
+  });
+
+  it('a removed city that was never verified comes back through reverify', async () => {
+    await addCity({ slug: 'houston', name: 'Houston' });
+    await api('DELETE', '/api/fleet/cities/houston', { token });
+    expect((await putCity('houston', { enabled: true })).status).toBe(409);
+    const r = await putCity('houston', { reverify: true });
+    expect(r.body).toMatchObject({ enabled: false, disabled_at: null });
+    expect(r.body.open_tasks.map((t) => t.kind)).toEqual(['verify-slug']);
+  });
+
   it('rejects an unknown field, an empty patch and a per_day out of range', async () => {
     await addCity({ slug: 'houston', name: 'Houston' });
     expect((await putCity('houston', { radius_km: 5 })).status).toBe(422);
@@ -218,11 +257,36 @@ describe('tasks, round start, city log', () => {
     expect((await api('POST', '/api/fleet/tasks', { token, body: { city: 'nowhere', item: 'server_ram' } })).status).toBe(404);
   });
 
-  it('a manual task on a disabled city gets a task of its own', async () => {
+  it('a manual task on a disabled city gets a task of its own, which the next reconcile keeps', async () => {
     await putCity('dallas', { enabled: false });
     const r = await api<FleetTask>('POST', '/api/fleet/tasks', { token, body: { city: 'dallas', item: 'server_ram' } });
     expect(r.status).toBe(201);
     expect(r.body).toMatchObject({ city: 'dallas', priority: 100, reason: 'manual' });
+    // Any catalog write reconciles; the manager's task survives it.
+    await putCity('houston', { pinned: true });
+    expect((await tasksWhere('state=ready&city=dallas')).map((t) => t.id)).toEqual([r.body.id]);
+  });
+
+  it('two clicks at once on a pair with no task write one task, and both answer it', async () => {
+    await putCity('dallas', { enabled: false });
+    const [a, b] = await Promise.all([1, 2].map(() => api<FleetTask>('POST', '/api/fleet/tasks', { token, body: { city: 'dallas', item: 'server_ram' } })));
+    expect([a.status, b.status]).toEqual([201, 201]);
+    expect(a.body.id).toBe(b.body.id);
+    expect(await tasksWhere('state=ready&city=dallas')).toHaveLength(1);
+  });
+
+  it('history reads come newest first, and say when they were cut', async () => {
+    const db = getTestDb();
+    await db`INSERT INTO fleet_tasks (city, item, kind, due_at, state, done_at, reason)
+             SELECT 'houston', 'server_ram', 'search', NOW() - make_interval(mins => g), 'done', NOW() - make_interval(mins => g), 'cadence'
+             FROM generate_series(1, 5001) g`;
+    const r = await api<FleetTask[]>('GET', '/api/fleet/tasks?state=done', { token });
+    expect(r.body).toHaveLength(5000);
+    expect(r.headers.get('X-Fleet-Truncated')).toBe('true');
+    const newest = r.body[0];
+    expect(new Date(newest.done_at!).getTime()).toBeGreaterThan(new Date(r.body[4999].done_at!).getTime());
+    expect(new Date(newest.done_at!).getTime()).toBeGreaterThan(Date.now() - 2 * 60_000);
+    expect((await api('GET', '/api/fleet/tasks?state=ready', { token })).headers.get('X-Fleet-Truncated')).toBeNull();
   });
 
   it('round start pulls every waiting search to now except pairs finished within start_fresh_hours', async () => {

@@ -15,6 +15,56 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.356.0] - 2026-10-26
+
+### Fixed
+
+- A fleet rollout no longer stalls on a worker the host agent will never
+  replace. A held container (operator needed, crash limit, stopped by hand),
+  one that is not running, or a worker parked on its account (dead proxy,
+  checkpoint, expired session, challenge) used to be picked as the next
+  replacement. The agent ignored it, and 20 to 40 minutes later the release
+  failed and new workers fell back to the old image. Rebooting a parked
+  account would also have been one more Facebook login. These are now
+  skipped, with the reason in the release's `skip_reasons` (RS-407).
+- A host's report keeps only that host's own workers, so a report naming
+  another host's worker can no longer get it drained or chosen for a
+  replacement the wrong host cannot carry out. It now stores the agent's
+  hold, exit code, image id and instance identity. A second live agent
+  instance for one host gets `403` on desired and report, which the agent
+  reads as observe-only. Removing a host frees the accounts it had reserved
+  for a replacement.
+- **Search now** on a switched-off or unverified city is no longer cancelled
+  by the next scheduler pass, and two clicks at once write one task instead
+  of answering 500. Raising or lowering a city's searches per day moves its
+  waiting search at once, instead of after the gap it was written with.
+- A city whose slug check came back "Facebook calls this somewhere else" can
+  no longer be switched on without **Enable anyway**. The new `reverify`
+  sends a city back for a fresh check, which is also how a removed,
+  never-verified city comes back.
+- A city whose slug check keeps ending without a verdict is no longer
+  checked again on every scheduler tick: the next check waits 15 minutes,
+  doubling per verdict-less check in the last day, up to 6 hours. The enable
+  gate reads verdicts by claim's rule (a `finished` check with a boolean
+  `matches` and no error or wall).
+- Task history now reads newest first (up to 5000 rows, with
+  `X-Fleet-Truncated` when cut). The oldest-first 1000-row cap had left
+  Analysis showing only the first days of its two-week window.
+- The quarantine rule counts a search reported as `stopped: false` as
+  finished, as the probe always did. It now checks for a positive peer
+  against one set of cities instead of searching once per evidence row. The
+  last-search-per-pair reads have an index.
+- The fleet VNC relay is served by exactly one backend instance, the holder
+  of a Postgres advisory lock; any other instance answers `503` rather than
+  park a worker where its viewer never lands. A parked worker socket is now
+  re-checked every minute, and one whose slot has moved on is closed `4409`
+  instead of lingering until its next heartbeat.
+- `fleet-import.mjs` no longer undoes managers' edits: by default it writes
+  only what the ERP lacks, and `--overwrite` makes master.toml win. Its dry
+  run reports search keys the way the write merges them. The import, the
+  slot seed and the fake worker refuse a remote target without an explicit
+  opt-in (`FLEET_IMPORT_REMOTE`, `FLEET_SEED_REMOTE`, `--i-mean-it`).
+
 ## [1.355.0] - 2026-10-26
 
 The Facebook account pool has a summary that unseals nothing.

@@ -152,12 +152,18 @@ export type FleetHostContainer = {
   image: string;
   state: string;
   started_at: string | null;
+  /** Why the agent leaves it stopped until a person acts (§6). */
+  hold?: 'operator_needed' | 'crash_limit' | 'operator_stopped' | string;
+  exit_code?: number | null;
+  image_id?: string;
 };
 
 /** What the host agent last posted to `/api/fleet/hosts/:id/report`. */
 export type FleetHostReport = {
   version: string;
   containers: FleetHostContainer[];
+  /** The agent process that sent it; `conflict` names other agent containers it saw for the host. */
+  agent?: { instance_id: string; daemon_id: string | null; conflict?: string[] };
 };
 
 /** A roll of one worker image through the fleet, one idle worker at a time.
@@ -172,6 +178,9 @@ export type FleetRelease = {
    *  because their host is observe-only or silent. */
   upgraded: string[];
   skipped: string[];
+  /** Why each skipped worker was left out: an observe-only or silent host, a
+   *  container that is not running, a worker parked on its account. */
+  skip_reasons?: Record<string, string>;
   /** The worker being replaced now, and the state it was in before. */
   current: { worker_id: string; host_id: string; started_at: string; pre_state: string; epoch?: number; stopped_at?: string } | null;
   failure: string | null;

@@ -7,7 +7,7 @@ import { createAdaptorServer } from '@hono/node-server';
 import type { ClaimAnswer, DesiredAnswer, FleetHost, FleetRelease, FleetSlot, FleetWorker } from '@recycle-erp/shared';
 import app from '../src/index';
 import { attachVncBridge } from '../src/vncBridge';
-import { fleetVncState } from '../src/fleet/vnc';
+import { FLEET_VNC_STALE_EPOCH, fleetVncState, startFleetRelayLease } from '../src/fleet/vnc';
 import { gateOk } from '../src/fleet/hosts';
 import { sha256hex } from '../src/fleet/sql';
 import { getTestDb, resetDb } from './helpers/db';
@@ -58,10 +58,10 @@ async function seedSlot(n: number, over: { worker?: string; host?: string; epoch
   return a.no;
 }
 
-async function report(containers: Array<{ worker_id: string; image: string }>, token = HOST_TOKEN, host = 'lab') {
+async function report(containers: Array<{ worker_id: string; image: string; state?: string; hold?: string; exit_code?: number | null; image_id?: string }>, token = HOST_TOKEN, host = 'lab') {
   return api('POST', `/api/fleet/hosts/${host}/report`, {
     headers: { ...bearer(token), 'X-Requested-By': 'an-agent' },
-    body: { version: '1.340.0', containers: containers.map((c) => ({ ...c, state: 'running', started_at: '2026-10-24T10:00:00Z' })) },
+    body: { version: '1.340.0', containers: containers.map((c) => ({ state: 'running', ...c, started_at: '2026-10-24T10:00:00Z' })) },
   });
 }
 
@@ -211,6 +211,83 @@ describe('releases', () => {
     expect((await api('POST', '/api/fleet/releases', { token, body: { image: 'not an image!', version: '1' } })).status).toBe(422);
   });
 
+  it('leaves out a stopped container and a parked worker, with the reason, instead of naming them', async () => {
+    await seedSlot(3, { worker: 'lab-3', host: 'lab', epoch: 1 });
+    await seedSlot(4, { worker: 'lab-4', host: 'lab', epoch: 1 });
+    await getTestDb()`UPDATE fleet_workers SET state = 'CHECKPOINT' WHERE worker_id = 'lab-2'`;
+    const before = [
+      { worker_id: 'lab-1', image: IMAGE_OLD, state: 'crash_limit', hold: 'crash_limit', exit_code: 1 },
+      { worker_id: 'lab-2', image: IMAGE_OLD },
+      { worker_id: 'lab-3', image: IMAGE_OLD, image_id: 'sha256:' + 'a'.repeat(64) },
+      { worker_id: 'lab-4', image: IMAGE_OLD, state: 'exited', exit_code: 75 },
+    ];
+    await report(before);
+    // The agent's extra fields are kept with the report.
+    const [stored] = await getTestDb()<{ report: { containers: Array<Record<string, unknown>> } }[]>`SELECT report FROM fleet_hosts WHERE host_id = 'lab'`;
+    expect(stored.report.containers[0]).toMatchObject({ hold: 'crash_limit', exit_code: 1 });
+    expect(stored.report.containers[2]).toMatchObject({ image_id: 'sha256:' + 'a'.repeat(64) });
+    const { token } = await loginAs(ALEX);
+    await api('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0' } });
+    expect((await desired()).body.roll).toEqual({ replace: 'lab-3' });
+    const r = await release();
+    expect(r.skipped.sort()).toEqual(['lab-1', 'lab-2', 'lab-4']);
+    expect(r.skip_reasons).toEqual({ 'lab-1': 'held: crash_limit', 'lab-2': 'worker CHECKPOINT', 'lab-4': 'container exited' });
+    await heartbeatOnNew('lab-3');
+    await report(before.map((c) => (c.worker_id === 'lab-3' ? { ...c, image: IMAGE_NEW } : c)));
+    expect((await desired()).body.roll).toBeNull();
+    expect(await release()).toMatchObject({ state: 'done', upgraded: ['lab-3'] });
+  });
+
+  it('a report keeps only the host\'s own workers, so another host\'s worker is never rolled or drained', async () => {
+    const otherToken = 'host-' + randomBytes(8).toString('hex');
+    await seedHost('lab2', otherToken, 1, true);
+    const r = await report([{ worker_id: 'lab-1', image: IMAGE_OLD }, { worker_id: 'lab2-1', image: IMAGE_OLD }, { worker_id: 'lab2-x', image: IMAGE_OLD }], otherToken, 'lab2');
+    expect(r.status).toBe(200);
+    const [row] = await getTestDb()<{ report: { containers: Array<{ worker_id: string }> } }[]>`SELECT report FROM fleet_hosts WHERE host_id = 'lab2'`;
+    expect(row.report.containers.map((c) => c.worker_id)).toEqual(['lab2-1']);
+    const { token } = await loginAs(ALEX);
+    await api('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0' } });
+    expect((await desired(otherToken, 'lab2')).body.roll).toEqual({ replace: 'lab2-1' });
+    expect((await release()).current).toMatchObject({ worker_id: 'lab2-1', host_id: 'lab2' });
+  });
+
+  it('one agent instance holds a host: a second is refused 403 until the first has been silent two minutes', async () => {
+    const as = (instance: string) => ({ ...bearer(HOST_TOKEN), 'X-Fleet-Agent-Instance': instance, 'X-Fleet-Docker-Daemon': 'daemon-a' });
+    expect((await api('GET', '/api/fleet/hosts/lab/desired', { headers: as('first'), env: ENV })).status).toBe(200);
+    const second = await api<{ error: string }>('GET', '/api/fleet/hosts/lab/desired', { headers: as('second'), env: ENV });
+    expect(second.status).toBe(403);
+    expect(second.body.error).toBe('agent_conflict');
+    const body = { version: '1.352.0', containers: [], agent: { instance_id: 'second', daemon_id: 'daemon-a' } };
+    expect((await api('POST', '/api/fleet/hosts/lab/report', { headers: as('second'), body })).status).toBe(403);
+    // An agent from before instance ids is let through as before.
+    expect((await desired()).status).toBe(200);
+    await getTestDb()`UPDATE fleet_hosts SET agent_seen_at = NOW() - interval '3 minutes' WHERE host_id = 'lab'`;
+    expect((await api('POST', '/api/fleet/hosts/lab/report', { headers: as('second'), body })).status).toBe(200);
+    const [h] = await getTestDb()<{ agent_instance: string; report: { agent: unknown } }[]>`SELECT agent_instance, report FROM fleet_hosts WHERE host_id = 'lab'`;
+    expect(h.agent_instance).toBe('second');
+    expect(h.report.agent).toEqual({ instance_id: 'second', daemon_id: 'daemon-a' });
+    expect((await api('GET', '/api/fleet/hosts/lab/desired', { headers: as('first'), env: ENV })).status).toBe(403);
+  });
+
+  it('removing a host frees the accounts it had reserved for a replacement, and drops its pending replacement', async () => {
+    const db = getTestDb();
+    const { token } = await loginAs(ALEX);
+    await api('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0' } });
+    expect((await desired()).body.roll).toEqual({ replace: 'lab-1' });
+    // lab-1 stopped for its replacement: the account is reserved under a handoff.
+    await db`UPDATE fleet_slots SET epoch = 2, handoff_epoch = 1, reserved_until = NOW() + interval '20 minutes',
+             lease_expires_at = NOW() + interval '20 minutes' WHERE worker_id = 'lab-1'`;
+    expect((await api('DELETE', '/api/fleet/hosts/lab', { token })).status).toBe(200);
+    const slots = await db<{ worker_id: string | null; lease_expires_at: Date | null; reserved_until: Date | null; handoff_epoch: number | null; epoch: number }[]>`
+      SELECT worker_id, lease_expires_at, reserved_until, handoff_epoch, epoch FROM fleet_slots ORDER BY account_no`;
+    expect(slots[0]).toEqual({ worker_id: null, lease_expires_at: null, reserved_until: null, handoff_epoch: null, epoch: 3 });
+    // lab-2 was running, not reserved: its lease is its own to run out.
+    expect(slots[1].worker_id).toBe('lab-2');
+    const r = await release();
+    expect(r.current).toBeNull();
+    expect(r.skip_reasons).toMatchObject({ 'lab-1': 'host removed' });
+  });
+
   it('gate_ok as the coordinator had it', () => {
     expect(gateOk('HEALTHY', 'HEALTHY')).toBe(true);
     expect(gateOk('HEALTHY', 'DEGRADED')).toBe(false);
@@ -288,19 +365,29 @@ describe('the fleet VNC relay', () => {
   let port: number;
   let env: Env;
 
+  let lease: { stop(): void; ready: Promise<boolean> };
+
   beforeAll(async () => {
     env = Object.assign(Object.create(testEnv), {});
     erp = createAdaptorServer({ fetch: (req) => app.fetch(req, env) }) as Server;
-    attachVncBridge(erp, app, env);
+    attachVncBridge(erp, app, env, { revalidateMs: 150 });
     port = await new Promise<number>((resolve) => erp.listen(0, '127.0.0.1', () => resolve((erp.address() as AddressInfo).port)));
   });
 
   afterAll(async () => {
+    lease?.stop();
     erp.closeAllConnections();
     await new Promise((r) => erp.close(r));
   });
 
-  beforeEach(async () => { await resetDb(); await seedHost(); await seedCatalog(); await seedSlot(1); });
+  // resetDb drops the database under every pooled connection, the relay
+  // lock's included, so each test takes the lock afresh.
+  beforeEach(async () => {
+    lease?.stop();
+    await resetDb(); await seedHost(); await seedCatalog(); await seedSlot(1);
+    lease = startFleetRelayLease(getTestDb(), { retryMs: 100 });
+    expect(await lease.ready).toBe(true);
+  });
 
   type Outcome = { messages: string[]; close?: { code: number; reason: string }; status?: number; open?: boolean };
 
@@ -350,6 +437,41 @@ describe('the fleet VNC relay', () => {
     const w = await worker.outcome;
     expect(w.close?.code).toBe(1000);
     expect(fleetVncState()).toEqual({ parked: [], bridges: 0 });
+  });
+
+  it('closes a parked worker socket within a minute of its slot moving on, with a code the worker exits on', async () => {
+    const wt = await workerToken();
+    const worker = open('/api/fleet/worker/vnc', { Authorization: `Bearer ${wt}` });
+    await settle();
+    expect(fleetVncState().parked).toEqual(['lab-1']);
+    await getTestDb()`UPDATE fleet_slots SET epoch = epoch + 1`;
+    const w = await worker.outcome;
+    expect(w.close?.code).toBe(FLEET_VNC_STALE_EPOCH);
+    // The server's own close event lands after the client has seen the frame.
+    for (let i = 0; i < 20 && fleetVncState().parked.length; i++) await settle(50);
+    expect(fleetVncState().parked).toEqual([]);
+  });
+
+  it('only the instance holding the relay lock serves it; the rest refuse both ends', async () => {
+    // Another instance's connection cannot take the lock while this one holds it.
+    const other = await getTestDb().reserve();
+    try {
+      const [r] = await other<{ ok: boolean }[]>`SELECT pg_try_advisory_lock(hashtextextended('fleet-vnc-relay', 0)) AS ok`;
+      if (r.ok) await other`SELECT pg_advisory_unlock(hashtextextended('fleet-vnc-relay', 0))`;
+      expect(r.ok).toBe(false);
+    } finally { other.release(); }
+    lease.stop();
+    const wt = await workerToken();
+    const { token } = await loginAs(ALEX);
+    expect((await open('/api/fleet/worker/vnc', { Authorization: `Bearer ${wt}` }).outcome).status).toBe(503);
+    expect((await open('/api/fleet/vnc/lab-1/ws', { Cookie: `at=${token}`, Origin: 'http://localhost:5173' }).outcome).status).toBe(503);
+    lease = startFleetRelayLease(getTestDb(), { retryMs: 100 });
+    expect(await lease.ready).toBe(true);
+    const back = open('/api/fleet/worker/vnc', { Authorization: `Bearer ${wt}` });
+    await settle();
+    expect(back.out.open).toBe(true);
+    back.ws.close();
+    await back.outcome;
   });
 
   it('tells a viewer when the worker has no relay connected, and refuses the wrong callers', async () => {

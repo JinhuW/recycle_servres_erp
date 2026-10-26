@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { Hono } from 'hono';
-import type { DesiredAnswer, FleetHost, FleetHostReport, FleetRelease } from '@recycle-erp/shared';
+import type { JSONValue } from 'postgres';
+import { fleetStateParked, type DesiredAnswer, type FleetHost, type FleetHostContainer, type FleetHostReport, type FleetRelease } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
 import type { Env } from '../types';
@@ -96,15 +97,43 @@ function onVersion(w: WorkerRow | undefined, version: string, since: Date): bool
 
 const live = (h: FleetHostRow, now: number) => h.last_seen_at !== null && now - h.last_seen_at.getTime() < HOST_LIVE_MS;
 
+/** Whether `id` is one the host's agent names its own workers by (`{host}-{n}`). */
+export function ownWorkerId(hostId: string, id: string): boolean {
+  return id.startsWith(`${hostId}-`) && /^[1-9][0-9]*$/.test(id.slice(hostId.length + 1));
+}
+
+type Pending = { worker_id: string; state: string; hold: string | null };
+
 /** Containers on a host's last report that are not yet on the release's image, nor already dealt with. */
-function pending(h: FleetHostRow, release: FleetRelease): string[] {
+function pendingContainers(h: FleetHostRow, release: FleetRelease): Pending[] {
   const report = reportOf(h.report);
   if (!report) return [];
   return report.containers
-    .filter((c) => isRecord(c) && typeof c.worker_id === 'string' && c.image !== release.image)
-    .map((c) => c.worker_id)
-    .filter((id) => !release.upgraded.includes(id) && !release.skipped.includes(id))
-    .sort();
+    .filter((c) => isRecord(c) && typeof c.worker_id === 'string' && ownWorkerId(h.host_id, c.worker_id) && c.image !== release.image)
+    .map((c) => ({ worker_id: c.worker_id, state: typeof c.state === 'string' ? c.state : '', hold: typeof c.hold === 'string' && c.hold ? c.hold : null }))
+    .filter((c) => !release.upgraded.includes(c.worker_id) && !release.skipped.includes(c.worker_id))
+    .sort((a, b) => a.worker_id.localeCompare(b.worker_id));
+}
+
+const pending = (h: FleetHostRow, release: FleetRelease): string[] => pendingContainers(h, release).map((c) => c.worker_id);
+
+/**
+ * Why a pending worker cannot be replaced, or null when it can. The agent
+ * only replaces a running container, so a stopped one would be named and
+ * never acted on until the gate failed the release; and a worker parked on
+ * its account (checkpoint, expired session, challenge, dead proxy) would be
+ * rebooted into a fresh login that cannot pass the gate either.
+ */
+function unreplaceable(c: Pending, w: WorkerRow | undefined): string | null {
+  if (c.hold) return `held: ${c.hold}`;
+  if (c.state !== 'running') return `container ${c.state || 'not running'}`;
+  if (fleetStateParked(w?.state)) return `worker ${w!.state}`;
+  return null;
+}
+
+function skip(release: FleetRelease, worker_id: string, reason: string): void {
+  release.skipped = [...release.skipped, worker_id];
+  release.skip_reasons = { ...(release.skip_reasons ?? {}), [worker_id]: reason };
 }
 
 /**
@@ -145,8 +174,16 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
   // Workers on observe-only or silent hosts are skipped, not waited for; the
   // host asking is live by definition. A busy worker (a leased task) waits.
   for (const h of allHosts) {
-    if (h.host_id === host.host_id || (h.authoritative && live(h, now.getTime()))) continue;
-    release.skipped = [...release.skipped, ...pending(h, release)];
+    if (h.host_id === host.host_id && !host.authoritative) {
+      for (const id of pending(h, release)) skip(release, id, 'host is observe-only');
+    } else if (h.host_id !== host.host_id && !(h.authoritative && live(h, now.getTime()))) {
+      for (const id of pending(h, release)) skip(release, id, h.authoritative ? 'host is silent' : 'host is observe-only');
+    } else {
+      for (const c of pendingContainers(h, release)) {
+        const why = unreplaceable(c, workers.get(c.worker_id));
+        if (why) skip(release, c.worker_id, why);
+      }
+    }
   }
   let replace: string | null = null;
   if (host.authoritative) {
@@ -164,8 +201,6 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
         replace = idle;
       }
     }
-  } else {
-    release.skipped = [...release.skipped, ...pending(host, release)];
   }
 
   if (!release.current && allHosts.every((h) => pending(h, release).length === 0)) {
@@ -253,9 +288,29 @@ hosts.put('/:id', managerOnly, async (c) => {
 
 hosts.delete('/:id', managerOnly, async (c) => {
   const id = c.req.param('id');
-  const rows = await getDb(c.env)<{ host_id: string }[]>`DELETE FROM fleet_hosts WHERE host_id = ${id} RETURNING host_id`;
-  if (!rows.length) return c.json({ error: 'not_found' }, 404);
-  hlog.info('fleet host removed', { hostId: id, by: c.var.user.email });
+  // The release row, then the pool accounts, then the slots: the order every
+  // worker write takes. A replacement the host reserved would otherwise hold
+  // its account until the reservation lapsed, with no agent left to use it.
+  const out = await getDb(c.env).begin(async (tx) => {
+    const release = await loadRelease(tx, true);
+    await tx`SELECT no FROM fb_pool_accounts WHERE no IN (SELECT account_no FROM fleet_slots WHERE host_id = ${id}) ORDER BY no FOR NO KEY UPDATE`;
+    await tx`SELECT account_no FROM fleet_slots WHERE host_id = ${id} ORDER BY account_no FOR UPDATE`;
+    const freed = await tx<{ account_no: number }[]>`
+      UPDATE fleet_slots SET epoch = epoch + 1, worker_id = NULL, lease_expires_at = NULL, reserved_until = NULL,
+        claim_id = NULL, handoff_epoch = NULL
+      WHERE host_id = ${id} AND reserved_until IS NOT NULL
+      RETURNING account_no`;
+    const rows = await tx<{ host_id: string }[]>`DELETE FROM fleet_hosts WHERE host_id = ${id} RETURNING host_id`;
+    if (!rows.length) return null;
+    if (release?.state === 'rolling' && release.current?.host_id === id) {
+      skip(release, release.current.worker_id, 'host removed');
+      release.current = null;
+      await saveRelease(tx, release);
+    }
+    return { freed: freed.map((f) => f.account_no) };
+  });
+  if (!out) return c.json({ error: 'not_found' }, 404);
+  hlog.info('fleet host removed', { hostId: id, by: c.var.user.email, reservationsFreed: out.freed });
   return c.json({ ok: true });
 });
 
@@ -285,10 +340,57 @@ export const releases = new Hono<ManagerEnv>().post('/', managerOnly, async (c) 
 
 // ─── Host-agent routes ────────────────────────────────────────────────────────
 
+// ─── One agent per host ───────────────────────────────────────────────────────
+// Two agents for one host (a second container started by hand, a host cloned
+// with its token) would each start and replace the same workers, and every
+// start is a Facebook login. The agent names its process in
+// X-Fleet-Agent-Instance; the first instance seen holds the host until it has
+// been silent for HOST_LIVE_MS, and any other is refused 403, which the agent
+// reads as "observe only". An agent that sends no instance (before RS-405) is
+// let through as it always was.
+
+const AGENT_INSTANCE = /^[A-Za-z0-9._:-]{1,128}$/;
+export const AGENT_CONFLICT = 'agent_conflict';
+
+type AgentIdentity = { instance_id: string; daemon_id: string | null };
+
+function agentOf(header: string | undefined, daemon: string | undefined, body?: unknown): AgentIdentity | null {
+  const fromBody = isRecord(body) && isRecord(body.agent) ? body.agent : null;
+  const instance = header ?? (typeof fromBody?.instance_id === 'string' ? fromBody.instance_id : undefined);
+  if (!instance || !AGENT_INSTANCE.test(instance)) return null;
+  const d = daemon ?? (typeof fromBody?.daemon_id === 'string' ? fromBody.daemon_id : undefined);
+  return { instance_id: instance, daemon_id: d ? d.slice(0, 128) : null };
+}
+
+/** Records the asking agent as the host's, or answers false when another live instance holds it. */
+async function holdHost(sql: SqlLike, hostId: string, agent: AgentIdentity | null): Promise<boolean> {
+  if (!agent) return true;
+  const rows = await sql`
+    UPDATE fleet_hosts SET agent_instance = ${agent.instance_id}, agent_daemon = ${agent.daemon_id}, agent_seen_at = NOW()
+    WHERE host_id = ${hostId}
+      AND (agent_instance IS NULL OR agent_instance = ${agent.instance_id}
+           OR agent_seen_at IS NULL OR agent_seen_at < NOW() - make_interval(secs => ${HOST_LIVE_MS / 1000}))
+    RETURNING host_id`;
+  return rows.length > 0;
+}
+
+const agentConflict = (hostId: string) => ({
+  error: AGENT_CONFLICT,
+  detail: `another fleet agent instance is running for ${hostId}; this one may only observe`,
+});
+
 hosts.get('/:id/desired', hostAuth, async (c) => {
   const host: FleetHostRow = c.var.host;
   const sql = getDb(c.env);
-  const answer = await sql.begin((tx) => desired(tx, c.env, host, true));
+  const agent = agentOf(c.req.header('X-Fleet-Agent-Instance'), c.req.header('X-Fleet-Docker-Daemon'));
+  const answer = await sql.begin(async (tx) => {
+    if (!await holdHost(tx, host.host_id, agent)) return null;
+    return desired(tx, c.env, host, true);
+  });
+  if (!answer) {
+    hlog.warn('fleet desired refused: second agent', { hostId: host.host_id, instance: agent?.instance_id });
+    return c.json(agentConflict(host.host_id), 403);
+  }
   return c.json(answer);
 });
 
@@ -332,17 +434,43 @@ hosts.post('/:id/report', hostAuth, async (c) => {
   if (!body || typeof body.version !== 'string' || !Array.isArray(body.containers)) {
     return c.json({ error: 'bad_request', detail: 'version, containers' }, 422);
   }
-  const containers = body.containers.filter(isRecord).map((x) => ({
-    worker_id: typeof x.worker_id === 'string' ? x.worker_id : '',
-    image: typeof x.image === 'string' ? x.image : '',
-    state: typeof x.state === 'string' ? x.state : '',
-    started_at: typeof x.started_at === 'string' ? x.started_at : null,
-  })).filter((x) => x.worker_id);
-  const report: FleetHostReport = { version: body.version.slice(0, 64), containers };
+  const agent = agentOf(c.req.header('X-Fleet-Agent-Instance'), c.req.header('X-Fleet-Docker-Daemon'), body);
+  const text = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : undefined);
+  const containers: FleetHostContainer[] = body.containers.filter(isRecord).map((x) => {
+    const c: FleetHostContainer = {
+      worker_id: typeof x.worker_id === 'string' ? x.worker_id : '',
+      image: typeof x.image === 'string' ? x.image : '',
+      state: typeof x.state === 'string' ? x.state : '',
+      started_at: typeof x.started_at === 'string' ? x.started_at : null,
+    };
+    const hold = text(x.hold, 40);
+    if (hold) c.hold = hold;
+    if (x.exit_code === null || Number.isInteger(x.exit_code)) c.exit_code = x.exit_code as number | null;
+    const imageId = text(x.image_id, 100);
+    if (imageId) c.image_id = imageId;
+    return c;
+  }).filter((x) => x.worker_id);
+  // Only the host's own `{host}-{n}` workers: a report naming another host's
+  // worker would make the roll pick it for a host that cannot replace it.
+  const foreign = containers.filter((x) => !ownWorkerId(host.host_id, x.worker_id)).map((x) => x.worker_id);
+  if (foreign.length) hlog.warn('fleet host report names workers it does not own; dropped', { hostId: host.host_id, foreign: foreign.slice(0, 10) });
+  const own = containers.filter((x) => ownWorkerId(host.host_id, x.worker_id));
+  const report: FleetHostReport = { version: body.version.slice(0, 64), containers: own };
+  if (agent) {
+    const raw = isRecord(body.agent) ? body.agent : {};
+    const conflict = Array.isArray(raw.conflict) ? raw.conflict.filter((x): x is string => typeof x === 'string').slice(0, 10).map((x) => x.slice(0, 128)) : [];
+    report.agent = { instance_id: agent.instance_id, daemon_id: agent.daemon_id, ...(conflict.length ? { conflict } : {}) };
+  }
   if (JSON.stringify(report).length > MAX_REPORT_BYTES) return c.json({ error: 'bad_request', detail: 'report too large' }, 422);
-  await getDb(c.env)`
-    UPDATE fleet_hosts SET report = ${getDb(c.env).json(report)}, version = ${report.version}, last_seen_at = NOW()
-    WHERE host_id = ${host.host_id}`;
+  const sql = getDb(c.env);
+  const stored = await sql.begin(async (tx) => {
+    if (!await holdHost(tx, host.host_id, agent)) return false;
+    await tx`
+      UPDATE fleet_hosts SET report = ${tx.json(report as unknown as JSONValue)}, version = ${report.version}, last_seen_at = NOW()
+      WHERE host_id = ${host.host_id}`;
+    return true;
+  });
+  if (!stored) return c.json(agentConflict(host.host_id), 403);
   return c.json({ ok: true });
 });
 

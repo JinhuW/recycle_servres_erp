@@ -94,7 +94,9 @@ fleet.put('/settings', managerOnly, async (c) => {
 fleet.get('/tasks', managerOnly, async (c) => {
   const filter = readTaskFilter(c.req.query());
   if (isRefusal(filter)) return refuse(c, filter);
-  return c.json(await listTasks(getDb(c.env), filter));
+  const { tasks, truncated } = await listTasks(getDb(c.env), filter);
+  if (truncated) c.header('X-Fleet-Truncated', 'true');
+  return c.json(tasks);
 });
 
 fleet.post('/tasks', managerOnly, async (c) => {

@@ -250,6 +250,38 @@ describe('reconcile: import and concurrency', () => {
     expect(again.stdout).toContain('search settings: unchanged');
   });
 
+  it('keeps a manager\'s edits unless --overwrite, and refuses a remote database without the opt-in', async () => {
+    expect(importMaster().status).toBe(0);
+    const db = getTestDb();
+    await db`UPDATE fleet_cities SET enabled = FALSE, disabled_at = NOW(), name = 'Renamed' WHERE slug = 'houston'`;
+    await db`UPDATE fleet_cities SET verified_as = 'override' WHERE slug = 'boston'`;
+    await db`UPDATE fleet_items SET phrases = '["edited"]' WHERE name = 'server_ram'`;
+    await db`UPDATE fleet_settings SET value = value - 'max_results' WHERE key = 'search'`;
+
+    const dry = importMaster(['--dry-run']);
+    expect(dry.stdout).toContain('cities: 0 new, 1 changed, 126 unchanged');
+    expect(dry.stdout).toContain('differ (kept; --overwrite takes master.toml\'s): houston');
+    expect(dry.stdout).toContain('search settings: 1 new key(s): max_results');
+
+    expect(importMaster().status).toBe(0);
+    const [houston] = await db<{ enabled: boolean; name: string }[]>`SELECT enabled, name FROM fleet_cities WHERE slug = 'houston'`;
+    expect(houston).toEqual({ enabled: false, name: 'Renamed' });
+    expect((await db<{ phrases: string[] }[]>`SELECT phrases FROM fleet_items WHERE name = 'server_ram'`)[0].phrases).toEqual(['edited']);
+    expect((await loadSettings(db)).search.max_results).toBe(120);
+
+    expect(importMaster(['--overwrite']).status).toBe(0);
+    const [back] = await db<{ enabled: boolean; name: string; disabled_at: Date | null }[]>`SELECT enabled, name, disabled_at FROM fleet_cities WHERE slug = 'houston'`;
+    expect(back).toEqual({ enabled: true, name: 'Houston, TX', disabled_at: null });
+    expect((await db<{ verified_as: string }[]>`SELECT verified_as FROM fleet_cities WHERE slug = 'boston'`)[0].verified_as).toBe('override');
+    expect((await db<{ phrases: string[] }[]>`SELECT phrases FROM fleet_items WHERE name = 'server_ram'`)[0].phrases).toEqual(['server ram memory ddr4 ddr5 ecc']);
+
+    const remote = spawnSync('node', [join(backendRoot, 'scripts', 'fleet-import.mjs'), '--master', MASTER], {
+      env: { ...process.env, DATABASE_URL: 'postgres://u:p@db.example.invalid:5432/prod', NODE_ENV: 'test' }, encoding: 'utf8',
+    });
+    expect(remote.status).toBe(1);
+    expect(remote.stderr).toContain('FLEET_IMPORT_REMOTE=true');
+  });
+
   it('wakes a LISTEN fleet_tasks subscriber with the item', async () => {
     await catalog([['houston']]);
     const db = getTestDb();
@@ -318,5 +350,110 @@ describe('quarantine evidence exclusions', () => {
     await db`UPDATE fleet_tasks SET result = '{"cards":0}' WHERE state = 'done'`;
     await reconcile(db);
     expect((await db`SELECT quarantined_until FROM fleet_slots`)[0].quarantined_until).toBeNull();
+  });
+});
+
+describe('reconcile: cadence changes, manual tasks, stopped results', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('moves a waiting search when its city\'s per_day changes, but never one already due', async () => {
+    const db = getTestDb();
+    await catalog([['houston'], ['dallas']]);
+    await done('houston', 'server_ram', 1);
+    await done('dallas', 'server_ram', 30);
+    await reconcile(db, NOW);
+    expect((await tasks('open')).find((t) => t.city === 'houston')!.due_at.getTime()).toBe(at(23).getTime());
+    const dallasBefore = (await tasks('open')).find((t) => t.city === 'dallas')!;
+    expect(dallasBefore.due_at.getTime()).toBe(NOW.getTime());
+
+    // One a day to six a day: four hours after the last search, not twenty-three.
+    await db`UPDATE fleet_cities SET per_day = 6`;
+    const later = new Date(NOW.getTime() + 60_000 * 5);
+    await reconcile(db, later);
+    const open = await tasks('open');
+    expect(open.find((t) => t.city === 'houston')!.due_at.getTime()).toBe(at(3).getTime());
+    // Dallas was due already and keeps its place in line.
+    expect(open.find((t) => t.city === 'dallas')!.due_at.getTime()).toBe(NOW.getTime());
+
+    // Down to one a day again: the wait grows back. A second pass writes nothing.
+    await db`UPDATE fleet_cities SET per_day = NULL`;
+    await reconcile(db, later);
+    expect((await tasks('open')).find((t) => t.city === 'houston')!.due_at.getTime()).toBe(at(23).getTime());
+    const [{ n }] = await db<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM fleet_tasks`;
+    await reconcile(db, later);
+    expect((await db<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM fleet_tasks`)[0].n).toBe(n);
+
+    // A setting lowered so far that the next search is overdue becomes due now and wakes a poll.
+    await db`UPDATE fleet_cities SET per_day = 24 WHERE slug = 'houston'`;
+    const woke = await reconcile(db, later);
+    expect((await tasks('open')).find((t) => t.city === 'houston')!.due_at.getTime()).toBe(later.getTime());
+    expect(woke.notified).toEqual(['server_ram']);
+  });
+
+  it('keeps a manager\'s search-now on a switched-off or unverified city; a disabled item still cancels it', async () => {
+    const db = getTestDb();
+    await catalog([['houston', false]]);
+    await db`UPDATE fleet_cities SET disabled_at = ${NOW}`;
+    await db`INSERT INTO fleet_cities (slug, name) VALUES ('unverified', 'Unverified')`;
+    for (const city of ['houston', 'unverified']) {
+      await db`INSERT INTO fleet_tasks (city, item, kind, due_at, priority, state, reason)
+               VALUES (${city}, 'server_ram', 'search', ${NOW}, 100, 'ready', 'manual')`;
+    }
+    await reconcile(db, NOW);
+    expect((await tasks('open')).filter((t) => t.reason === 'manual').map((t) => t.city)).toEqual(['houston', 'unverified']);
+    await db`UPDATE fleet_items SET enabled = FALSE`;
+    await reconcile(db, NOW);
+    expect((await tasks('open')).filter((t) => t.reason === 'manual')).toEqual([]);
+  });
+
+  it('counts a result that says stopped: false as a finished search', async () => {
+    const db = getTestDb(); await catalog([['houston']]);
+    const accounts = await db<{ no: number }[]>`INSERT INTO fb_pool_accounts (uid, batch, status) VALUES
+      ('6155000000081','test','fleet'), ('6155000000082','test','fleet') RETURNING no`;
+    for (const a of accounts) await db`INSERT INTO fleet_slots (account_no) VALUES (${a.no})`;
+    for (const [index, a] of accounts.entries()) {
+      for (let i = 0; i < 2; i++) await db`INSERT INTO fleet_tasks (city,item,kind,state,due_at,done_at,account_no,result)
+        VALUES ('houston','server_ram','search','done',NOW(),NOW(),${a.no},${db.json({ cards: index === 1 ? 9 : 0, stopped: false })})`;
+    }
+    await reconcile(db);
+    const slots = await db<{ quarantined_until: Date | null }[]>`SELECT quarantined_until FROM fleet_slots ORDER BY account_no`;
+    expect(slots[0].quarantined_until).not.toBeNull();
+    expect(slots[1].quarantined_until).toBeNull();
+  });
+});
+
+describe('reconcile: verify-slug backoff', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('waits 15 min after a check that gave no verdict, doubling to 6 h, and not after one that did', async () => {
+    const db = getTestDb();
+    await db`INSERT INTO fleet_items (name, phrases) VALUES ('server_ram', '["x"]')`;
+    await db`INSERT INTO fleet_cities (slug, name) VALUES ('flaky', 'Flaky')`;
+    const fail = async (minutesAgo: number) => {
+      const done = new Date(NOW.getTime() - minutesAgo * 60_000);
+      await db`UPDATE fleet_tasks SET state = 'done', done_at = ${done} WHERE city = 'flaky' AND state = 'ready'`;
+    };
+    const open = async () => (await tasks('open')).filter((t) => t.kind === 'verify-slug');
+
+    await reconcile(db, NOW);
+    expect((await open())[0].due_at.getTime()).toBe(NOW.getTime());
+    await fail(1);
+    const r = await reconcile(db, NOW);
+    expect((await open())[0].due_at.getTime()).toBe(NOW.getTime() - 60_000 + 15 * 60_000);
+    expect(r.notified).toEqual([]);
+    await fail(1);
+    await reconcile(db, NOW);
+    expect((await open())[0].due_at.getTime()).toBe(NOW.getTime() - 60_000 + 30 * 60_000);
+    for (let i = 0; i < 8; i++) { await fail(1); await reconcile(db, NOW); }
+    expect((await open())[0].due_at.getTime()).toBe(NOW.getTime() - 60_000 + 6 * HOUR);
+
+    // Checks that ended with a verdict do not count: after a reverify the next check is due at once.
+    const ids = (await db<{ id: string }[]>`SELECT id FROM fleet_tasks WHERE city = 'flaky' AND state = 'done'`).map((t) => t.id);
+    for (const id of ids) {
+      await db`INSERT INTO fleet_task_events (task_id, worker_id, kind, detail) VALUES (${id}, 'lab-1', 'finished', '{"matches": false}')`;
+    }
+    await db`UPDATE fleet_tasks SET state = 'cancelled' WHERE city = 'flaky' AND state = 'ready'`;
+    await reconcile(db, NOW);
+    expect((await open())[0].due_at.getTime()).toBe(NOW.getTime());
   });
 });

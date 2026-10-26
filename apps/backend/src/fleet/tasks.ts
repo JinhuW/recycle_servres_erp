@@ -20,6 +20,9 @@ import {
 
 export const MANUAL_PRIORITY = 100;
 const LIST_LIMIT = 1000;
+// A history read (Analysis: two weeks of done searches) is several thousand
+// rows at the imported catalog's size; the queue itself stays at LIST_LIMIT.
+export const HISTORY_LIMIT = 5000;
 const DEFAULT_LOG_HOURS = 24;
 const MAX_LOG_HOURS = 720;
 
@@ -48,8 +51,17 @@ export function readTaskFilter(q: Record<string, string | undefined>): TaskFilte
   return f;
 }
 
-/** Due first among equals; a manager's task before the cadence's. */
-export async function listTasks(sql: SqlLike, f: TaskFilter): Promise<FleetTask[]> {
+export const isQueueRead = (f: TaskFilter): boolean => f.state === 'ready' || f.state === 'leased';
+
+/**
+ * The queue (ready or leased) in the order workers take it: a manager's task
+ * first, then due first. Anything else is history, newest first, so a cap
+ * cuts the oldest rows rather than the latest ones. `truncated` says the cap
+ * was hit.
+ */
+export async function listTasks(sql: SqlLike, f: TaskFilter): Promise<{ tasks: FleetTask[]; truncated: boolean }> {
+  const queue = isQueueRead(f);
+  const limit = queue ? LIST_LIMIT : HISTORY_LIMIT;
   const rows = await sql<TaskRow[]>`
     SELECT * FROM fleet_tasks
     WHERE TRUE
@@ -58,9 +70,9 @@ export async function listTasks(sql: SqlLike, f: TaskFilter): Promise<FleetTask[
       ${f.item ? sql`AND item = ${f.item}` : sql``}
       ${f.worker ? sql`AND worker_id = ${f.worker}` : sql``}
       ${f.since ? sql`AND GREATEST(due_at, leased_at, done_at) >= ${f.since}` : sql``}
-    ORDER BY priority DESC, due_at, id
-    LIMIT ${LIST_LIMIT}`;
-  return rows.map(taskToWire);
+    ${queue ? sql`ORDER BY priority DESC, due_at, id` : sql`ORDER BY GREATEST(due_at, leased_at, done_at) DESC, id DESC`}
+    LIMIT ${limit + 1}`;
+  return { tasks: rows.slice(0, limit).map(taskToWire), truncated: rows.length > limit };
 }
 
 export type LogQuery = { city?: string; worker?: string; hours: number };
@@ -118,11 +130,20 @@ export async function manualTask(sql: Sql, city: string, item: string, now: Date
     if (!c) return notFound(`no city ${city}`);
     const [i] = await tx<{ name: string }[]>`SELECT name FROM fleet_items WHERE name = ${item}`;
     if (!i) return notFound(`no item ${item}`);
+    // A second click, or the scheduler writing the pair's task, can land
+    // between the look above and this insert; the open-task index then
+    // refuses it, and the task that won is the one to pull forward.
     const [row] = await tx<TaskRow[]>`
       INSERT INTO fleet_tasks (city, item, kind, due_at, priority, state, reason)
       VALUES (${city}, ${item}, 'search', ${now}, ${MANUAL_PRIORITY}, 'ready', 'manual')
+      ON CONFLICT DO NOTHING
       RETURNING *`;
-    return row;
+    if (row) return row;
+    const [won] = await tx<TaskRow[]>`
+      UPDATE fleet_tasks SET priority = ${MANUAL_PRIORITY}, due_at = ${now}, reason = 'manual'
+      WHERE city = ${city} AND item = ${item} AND kind = 'search' AND state = 'ready'
+      RETURNING *`;
+    return won ?? exists(`${city} / ${item} is being searched right now`);
   });
   if ('status' in out) return out;
   await notifyReady(sql, [item]);

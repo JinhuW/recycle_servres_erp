@@ -100,11 +100,12 @@ export type CityPatch = {
   pinned?: boolean;
   name?: string;
   override_verify?: true;
+  reverify?: true;
 };
 
 export function readCityPatch(input: unknown): CityPatch | Refusal {
   if (!isObject(input)) return bad('expected an object');
-  const unknown = Object.keys(input).filter((k) => !['enabled', 'per_day', 'pinned', 'name', 'override_verify'].includes(k));
+  const unknown = Object.keys(input).filter((k) => !['enabled', 'per_day', 'pinned', 'name', 'override_verify', 'reverify'].includes(k));
   if (unknown.length) return bad(`not a city field: ${unknown.join(', ')}`);
   const patch: CityPatch = {};
   if (input.enabled !== undefined) {
@@ -129,6 +130,11 @@ export function readCityPatch(input: unknown): CityPatch | Refusal {
   if (input.override_verify !== undefined) {
     if (input.override_verify !== true) return bad('override_verify can only be true');
     patch.override_verify = true;
+  }
+  if (input.reverify !== undefined) {
+    if (input.reverify !== true) return bad('reverify can only be true');
+    if (patch.override_verify || patch.enabled === true) return bad('reverify cannot be combined with enabled or override_verify');
+    patch.reverify = true;
   }
   if (Object.keys(patch).length === 0) return bad('nothing to change');
   return patch;
@@ -197,19 +203,52 @@ export async function createCity(sql: Sql, draft: CityDraft, userId: string): Pr
   }
 }
 
+/**
+ * Whether the city's slug was confirmed: by a manager (`override`), by the
+ * import, or by the latest worker verdict (a `finished` event with a boolean
+ * `matches` and no error or wall, the rule claim.ts applies). A verdict
+ * of "Facebook calls this somewhere else" sets `verified_at` too, so that
+ * alone is not a reason to let the city be enabled.
+ */
+export async function slugConfirmed(sql: SqlLike, row: CityRow): Promise<boolean> {
+  if (!row.verified_at) return false;
+  if (row.verified_as === 'override' || row.verified_as === 'imported') return true;
+  const [v] = await sql<{ matches: boolean }[]>`
+    SELECT e.detail->'matches' = 'true'::jsonb AS matches
+    FROM fleet_task_events e JOIN fleet_tasks t ON t.id = e.task_id
+    WHERE t.city = ${row.slug} AND t.kind = 'verify-slug' AND e.kind = 'finished'
+      AND jsonb_typeof(e.detail->'matches') = 'boolean'
+      AND COALESCE(e.detail->'error', 'null'::jsonb) = 'null'::jsonb
+      AND COALESCE(e.detail->'wall', 'null'::jsonb) = 'null'::jsonb
+    ORDER BY e.at DESC, e.id DESC LIMIT 1`;
+  return v?.matches === true;
+}
+
 export async function updateCity(sql: Sql, slug: string, patch: CityPatch): Promise<FleetCityListed | Refusal> {
   return sql.begin(async (tx) => {
     const [row] = await tx<CityRow[]>`SELECT * FROM fleet_cities WHERE slug = ${slug} FOR UPDATE`;
     if (!row) return notFound(`no city ${slug}`);
     const next = { ...row };
+    // A fresh check: the slug's verdict is forgotten and the city waits,
+    // disabled, for the scheduler's next verify-slug task. This is also the
+    // way back for a removed city that was never verified.
+    if (patch.reverify) {
+      next.verified_at = null;
+      next.verified_as = null;
+      next.enabled = false;
+      next.disabled_at = null;
+    }
     if (patch.override_verify) {
       next.verified_at = new Date();
       next.verified_as = 'override';
       next.enabled = true;
       next.disabled_at = null;
     }
-    if (patch.enabled === true) {
+    if (patch.enabled === true && !patch.override_verify) {
       if (!next.verified_at) return { status: 409, body: { error: 'unverified', detail: `${slug} has not been verified; pass override_verify to enable it anyway` } };
+      if (!(await slugConfirmed(tx, next))) {
+        return { status: 409, body: { error: 'unverified', detail: `the last check did not confirm ${slug} is ${next.name}${next.verified_as ? ` (Facebook showed ${next.verified_as})` : ''}; pass override_verify to enable it anyway, or reverify to check again` } };
+      }
       next.enabled = true;
       next.disabled_at = null;
     } else if (patch.enabled === false) {
