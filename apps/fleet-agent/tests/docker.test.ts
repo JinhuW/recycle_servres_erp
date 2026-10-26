@@ -9,7 +9,7 @@ describe('docker run', () => {
     expect(runArgs('lab', SPEC).join(' ')).toBe(
       'run -d --name rs-fleet-lab-2 --label rs.fleet.host=lab --label rs.fleet.worker=lab-2 --restart no --shm-size 1g ' +
         '-e RS_FLEET_URL -e RS_FLEET_HOST_ID -e RS_FLEET_HOST_TOKEN -e RS_FLEET_WORKER_ID -e RS_VNC_PORT=5902 ' +
-        '-p 127.0.0.1:5902:5900 ghcr.io/jinhuw/aimm-recycle:0.14.0',
+        '-p 127.0.0.1:5902:5900 -- ghcr.io/jinhuw/aimm-recycle:0.14.0',
     );
   });
 
@@ -71,21 +71,51 @@ describe('observe', () => {
     expect(await new DockerCli(runner).observe('lab')).toBeNull();
   });
 
+  it('looks again when a container went away between ps and inspect', async () => {
+    let inspects = 0;
+    const runner: Runner = async (args) => {
+      if (args[0] === 'ps') return { code: 0, stdout: 'aaa\n', stderr: '' };
+      inspects++;
+      return inspects === 1 ? { code: 1, stdout: '[]', stderr: 'Error: No such object: bbb' } : { code: 0, stdout: JSON.stringify([INSPECT[0]]), stderr: '' };
+    };
+    expect((await new DockerCli(runner).observe('lab'))?.map((c) => c.worker_id)).toEqual(['lab-1']);
+  });
+
+  it('reads the container and image ids and a handoff label', () => {
+    expect(containerOf({ ...INSPECT[1], Id: 'f00', Image: 'sha256:abc', Config: { ...INSPECT[1].Config, Labels: { ...INSPECT[1].Config.Labels, 'rs.fleet.handoff_epoch': '3' } } }))
+      .toMatchObject({ id: 'f00', image_id: 'sha256:abc', handoff: true });
+  });
+
   it('ignores a record without the worker label', () => {
     expect(containerOf(INSPECT[2])).toBeNull();
   });
 });
 
 describe('acting', () => {
-  it('pulls only when the image is missing', async () => {
-    const present = recorder();
-    expect(await new DockerCli(present.runner).ensureImage('img:1')).toBeNull();
-    expect(present.calls.map((c) => c.args[0])).toEqual(['image']);
-    const absent = recorder({ 'image inspect': { code: 1, stderr: 'No such image' } });
-    expect(await new DockerCli(absent.runner).ensureImage('img:1')).toBeNull();
-    expect(absent.calls.map((c) => c.args.slice(0, 2).join(' '))).toEqual(['image inspect', 'pull img:1']);
-    const denied = recorder({ 'image inspect': { code: 1 }, 'pull img:1': { code: 1, stderr: 'pull access denied' } });
+  it('pulls a tag every time, and uses the local copy only when the registry cannot be reached', async () => {
+    const fresh = recorder();
+    expect(await new DockerCli(fresh.runner).ensureImage('img:1')).toBeNull();
+    expect(fresh.calls.map((c) => c.args)).toEqual([['pull', '--', 'img:1']]);
+    const offline = recorder({ 'pull --': { code: 1, stderr: 'registry unreachable' } });
+    expect(await new DockerCli(offline.runner).ensureImage('img:1')).toBeNull();
+    expect(offline.calls.map((c) => c.args)).toEqual([['pull', '--', 'img:1'], ['image', 'inspect', '--', 'img:1']]);
+    const denied = recorder({ 'pull --': { code: 1, stderr: 'pull access denied' }, 'image inspect': { code: 1 } });
     expect(await new DockerCli(denied.runner).ensureImage('img:1')).toBe('docker pull img:1: pull access denied');
+  });
+
+  it('pulls a digest only when it is missing: it cannot change', async () => {
+    const ref = `ghcr.io/jinhuw/aimm-recycle@sha256:${'a'.repeat(64)}`;
+    const present = recorder();
+    expect(await new DockerCli(present.runner).ensureImage(ref)).toBeNull();
+    expect(present.calls.map((c) => c.args)).toEqual([['image', 'inspect', '--', ref]]);
+    const absent = recorder({ 'image inspect': { code: 1, stderr: 'No such image' } });
+    expect(await new DockerCli(absent.runner).ensureImage(ref)).toBeNull();
+    expect(absent.calls.map((c) => c.args[0])).toEqual(['image', 'pull']);
+  });
+
+  it('never lets an image name read as an option', () => {
+    const args = runArgs('lab', { ...SPEC, image: '--privileged' });
+    expect(args.slice(-2)).toEqual(['--', '--privileged']);
   });
 
   it('runs with the worker variables in the environment', async () => {
@@ -101,6 +131,13 @@ describe('acting', () => {
     expect(calls.map((c) => c.args)).toEqual([['stop', '-t', '30', 'rs-fleet-lab-2'], ['rm', 'rs-fleet-lab-2']]);
   });
 
+  it('counts a container that is already gone as removed', async () => {
+    const gone = recorder({ 'stop -t': { code: 1, stderr: 'Error response from daemon: No such container: rs-fleet-lab-2' } });
+    expect(await new DockerCli(gone.runner).stopAndRemove('rs-fleet-lab-2')).toBeNull();
+    const stuck = recorder({ 'stop -t': { code: 1, stderr: 'Error response from daemon: cannot stop container' } });
+    expect(await new DockerCli(stuck.runner).stopAndRemove('rs-fleet-lab-2')).toMatch(/cannot stop/);
+  });
+
   it('reports the last line of a failure', async () => {
     const { runner } = recorder({ 'start rs-fleet-lab-2': { code: 1, stderr: 'Error response from daemon: No such container: rs-fleet-lab-2\n' } });
     expect(await new DockerCli(runner).start('rs-fleet-lab-2')).toBe('docker start rs-fleet-lab-2: Error response from daemon: No such container: rs-fleet-lab-2');
@@ -111,4 +148,25 @@ it('passes the confirmed stopped epoch to the replacement entrypoint', () => {
   const args = runArgs('lab', { ...SPEC, handoff_epoch: 7 });
   expect(args).toContain('RS_FLEET_HANDOFF_EPOCH=7');
   expect(args.join(' ')).not.toContain(ENV.token);
+});
+
+describe('other agents', () => {
+  const agentRecord = (name: string, hostname: string, hostId = 'lab') => ({
+    Id: name, Name: `/${name}`, Config: { Hostname: hostname, Env: [`FLEET_HOST_ID=${hostId}`, 'FLEET_HOST_TOKEN=x'] },
+  });
+
+  it('finds another agent for the same host, not itself, not workers, not other hosts', async () => {
+    const records = [agentRecord('me', 'selfhost'), agentRecord('twin', 'abc123'), agentRecord('neighbour', 'def456', 'other')];
+    const { calls, runner } = recorder({
+      'ps --no-trunc': { stdout: 'me \ntwin \nneighbour \nworker lab\n' },
+      'inspect me': { stdout: JSON.stringify(records) },
+    });
+    expect(await new DockerCli(runner, 'selfhost').otherAgents('lab')).toEqual(['twin']);
+    expect(calls[1].args).toEqual(['inspect', 'me', 'twin', 'neighbour']);
+  });
+
+  it('reads the daemon id', async () => {
+    const { runner } = recorder({ 'info --format': { stdout: 'ABCD:EFGH\n' } });
+    expect(await new DockerCli(runner).daemonId()).toBe('ABCD:EFGH');
+  });
 });

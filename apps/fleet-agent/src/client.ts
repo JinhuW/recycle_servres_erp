@@ -1,17 +1,24 @@
-// The agent's two calls to the ERP: the desired state in, a report back.
+// The agent's calls to the ERP: the desired state in, stop confirmations and
+// a report back.
 //
-// Both answer null (or false) on any failure and never throw. The agent reads
-// null as "offline" and falls back to what it cached; an ERP outage must never
-// reach the workers. One attempt each with a short timeout: the loop comes
-// round again in seconds.
+// None of them throws. `desired` answers null for "offline" (the agent falls
+// back to what it cached; an ERP outage must never reach the workers) and
+// 'refused' when the ERP answered that this host may not ask (401/403/404:
+// a deleted host or a revoked token), which the agent reads as observe-only
+// rather than as a reason to keep acting on its cache. One attempt each with
+// a short timeout: the loop comes round again in seconds.
 
 import type { StopIdentity } from './state.js';
-import { parseDesired, type Desired, type Report } from './types.js';
+import { parseDesired, type AgentIdentity, type Desired, type Report } from './types.js';
+
+export type DesiredAnswer = Desired | null | 'refused';
 
 export interface FleetClient {
-  desired(): Promise<Desired | null>;
+  desired(): Promise<DesiredAnswer>;
   stopped?(workerId: string, identity: StopIdentity): Promise<boolean | 'stale'>;
   report(payload: Report): Promise<boolean>;
+  /** Names this agent on every later call. */
+  identify?(identity: AgentIdentity): void;
 }
 
 export interface HttpClientOptions {
@@ -23,11 +30,16 @@ export interface HttpClientOptions {
   onFailure?: (what: string, detail: string) => void;
 }
 
+const REFUSED = new Set([401, 403, 404]);
+
+type Answer = { ok: true; body: unknown } | { ok: false; status: number | null };
+
 export class HttpFleetClient implements FleetClient {
   private readonly base: string;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
   private readonly onFailure: (what: string, detail: string) => void;
+  private identity: AgentIdentity | null = null;
 
   constructor(private readonly opts: HttpClientOptions) {
     this.base = opts.baseUrl.trim().replace(/\/+$/, '');
@@ -36,30 +48,42 @@ export class HttpFleetClient implements FleetClient {
     this.onFailure = opts.onFailure ?? (() => {});
   }
 
+  identify(identity: AgentIdentity): void {
+    this.identity = identity;
+  }
+
   private url(part: string): string {
     return `${this.base}/api/fleet/hosts/${encodeURIComponent(this.opts.hostId)}/${part}`;
   }
 
-  async desired(): Promise<Desired | null> {
-    const body = await this.request('GET', 'desired');
-    if (body === null) return null;
-    const desired = parseDesired(body);
+  async desired(): Promise<DesiredAnswer> {
+    const answer = await this.request('GET', 'desired');
+    if (!answer.ok) return answer.status !== null && REFUSED.has(answer.status) ? 'refused' : null;
+    const desired = parseDesired(answer.body);
     if (!desired) this.onFailure('desired', 'answer is not a desired state');
     return desired;
   }
 
   async stopped(workerId: string, identity: StopIdentity): Promise<boolean | 'stale'> {
-    const response = await this.request('POST', 'stopped', { worker_id: workerId, account_no: identity.account_no, epoch: identity.epoch, restart: identity.restart });
-    return response && typeof response === 'object' && 'stale' in response ? 'stale' : response !== null;
+    const answer = await this.request('POST', 'stopped', {
+      worker_id: workerId, account_no: identity.account_no, epoch: identity.epoch, restart: identity.restart,
+      ...(this.identity ? { agent_instance: this.identity.instance_id, daemon_id: this.identity.daemon_id } : {}),
+    });
+    if (!answer.ok) return answer.status === 409 ? 'stale' : false;
+    return true;
   }
 
   async report(payload: Report): Promise<boolean> {
-    return (await this.request('POST', 'report', payload)) !== null;
+    return (await this.request('POST', 'report', payload)).ok;
   }
 
-  private async request(method: string, part: string, payload?: unknown): Promise<unknown | null> {
+  private async request(method: string, part: string, payload?: unknown): Promise<Answer> {
     const headers: Record<string, string> = { Authorization: `Bearer ${this.opts.token}`, Accept: 'application/json' };
     if (payload !== undefined) headers['Content-Type'] = 'application/json';
+    if (this.identity) {
+      headers['X-Fleet-Agent-Instance'] = this.identity.instance_id;
+      if (this.identity.daemon_id) headers['X-Fleet-Docker-Daemon'] = this.identity.daemon_id;
+    }
     let res: Response;
     try {
       res = await this.fetchImpl(this.url(part), {
@@ -70,20 +94,20 @@ export class HttpFleetClient implements FleetClient {
       });
     } catch (e) {
       this.onFailure(part, e instanceof Error ? e.message : String(e));
-      return null;
+      return { ok: false, status: null };
     }
-    if (part === 'stopped' && res.status === 409) return { stale: true };
     if (!res.ok) {
-      this.onFailure(part, `HTTP ${res.status}`);
-      return null;
+      if (!(part === 'stopped' && res.status === 409)) this.onFailure(part, `HTTP ${res.status}`);
+      await res.body?.cancel().catch(() => undefined);
+      return { ok: false, status: res.status };
     }
     const text = await res.text().catch(() => '');
-    if (!text.trim()) return {};
+    if (!text.trim()) return { ok: true, body: {} };
     try {
-      return JSON.parse(text);
+      return { ok: true, body: JSON.parse(text) };
     } catch {
       this.onFailure(part, 'answer is not JSON');
-      return null;
+      return { ok: false, status: null };
     }
   }
 }

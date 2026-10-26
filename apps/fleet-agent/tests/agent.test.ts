@@ -3,7 +3,7 @@
 // what it runs; observe-only it runs nothing; a pull that fails leaves the old
 // container in place.
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -38,9 +38,10 @@ afterEach(async () => {
   rmSync(stateDir, { recursive: true, force: true });
 });
 
-function agent(docker: FakeDocker, over: { staggerMs?: number; url?: string; token?: string } = {}) {
+function agent(docker: FakeDocker, over: { staggerMs?: number; url?: string; token?: string; imagePrefixes?: string[]; keepaliveMs?: number } = {}) {
   const url = over.url ?? server.url;
   const token = over.token ?? TOKEN;
+  docker.now = () => new Date(clock).toISOString();
   return new Agent({
     hostId: HOST,
     stateDir,
@@ -51,6 +52,8 @@ function agent(docker: FakeDocker, over: { staggerMs?: number; url?: string; tok
     now: () => clock,
     staggerMs: over.staggerMs ?? 0,
     log: createLogger((l) => lines.push(l)),
+    ...(over.imagePrefixes ? { imagePrefixes: over.imagePrefixes } : {}),
+    ...(over.keepaliveMs ? { keepaliveMs: over.keepaliveMs } : {}),
   });
 }
 
@@ -72,8 +75,13 @@ describe('online', () => {
       ['POST', '/api/fleet/hosts/lab/report', `Bearer ${TOKEN}`],
     ]);
     expect(server.reports).toEqual([
-      { version: '1.335.0', containers: [{ worker_id: 'lab-1', image: 'img:1', state: 'running', started_at: expect.any(String) }] },
+      {
+        version: '1.335.0',
+        containers: [{ worker_id: 'lab-1', image: 'img:1', state: 'running', started_at: expect.any(String), exit_code: null }],
+        agent: { instance_id: expect.stringMatching(/^[0-9a-f-]{36}$/), daemon_id: 'fake-daemon' },
+      },
     ]);
+    expect(server.requests.every((r) => r.instance === server.reports[0].agent!.instance_id)).toBe(true);
     expect(logged().find((l) => l.msg === 'run')).toMatchObject({ level: 'info', worker_id: 'lab-1', reason: 'missing' });
     expect(lines.join('')).not.toContain(TOKEN);
   });
@@ -146,7 +154,16 @@ describe('online', () => {
     expect(logged().filter((l) => l.msg === 'note').map((l) => l.note)).toContainEqual(expect.stringMatching(/lab-2: 5 restarts in 30 min \(last exit 1\); left stopped/));
     const memory = JSON.parse(readFileSync(join(stateDir, 'memory.json'), 'utf8'));
     expect(memory.restarts['lab-2']).toHaveLength(5);
-    expect(server.reports.at(-1)!.containers[1]).toMatchObject({ worker_id: 'lab-2', state: 'exited' });
+    expect(server.reports.at(-1)!.containers[1]).toMatchObject({ worker_id: 'lab-2', state: 'crash_limit', hold: 'crash_limit', exit_code: 1 });
+    // The window ageing out does not start the loop again, nor does an agent restart.
+    clock += 60 * 60_000;
+    expect((await a.tick()).actions).toEqual([]);
+    expect((await agent(docker).tick()).actions).toEqual([]);
+    expect(docker.commands.filter((c) => c[0] === 'start')).toHaveLength(5);
+    // A person removes it: the agent runs a fresh one on its turn.
+    docker.containers.delete('rs-fleet-lab-2');
+    const fresh = await agent(docker).tick();
+    expect(fresh.actions.map((x) => [x.kind, x.worker_id])).toEqual([['run', 'lab-2']]);
   });
 
   it('leaves a worker that exited 78 stopped and reports it as needing an operator', async () => {
@@ -229,4 +246,194 @@ describe('offline', () => {
     expect(result.errors).toEqual(['docker unreachable']);
     expect(server.reports).toEqual([]);
   });
+});
+
+describe('the stagger survives what goes wrong around a start', () => {
+  it('counts a start whose answer was lost: a timed-out run that still started is not followed by another', async () => {
+    const docker = new FakeDocker();
+    server.desired = desired({ count: 2 });
+    docker.failNext.run = { error: 'docker run: signal SIGTERM (timed out)', effect: true };
+    const a = agent(docker, { staggerMs: 180_000 });
+    const first = await a.tick();
+    expect(first.errors).toEqual([expect.stringMatching(/lab-1: docker run/)]);
+    clock += 30_000;
+    expect((await a.tick()).actions).toEqual([]);
+    expect(docker.commands.filter((c) => c[0] === 'run')).toHaveLength(1);
+  });
+
+  it('measures from the newest container start when /state is lost', async () => {
+    const docker = new FakeDocker([running('lab-1', 'img:1', new Date(clock - 60_000).toISOString())]);
+    server.desired = desired({ count: 2 });
+    expect((await agent(docker, { staggerMs: 180_000 }).tick()).actions).toEqual([]);
+    clock += 120_000;
+    expect((await agent(docker, { staggerMs: 180_000 }).tick()).actions.map((x) => x.worker_id)).toEqual(['lab-2']);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('makes no start it cannot write down', async () => {
+    const docker = new FakeDocker();
+    const a = agent(docker);
+    chmodSync(stateDir, 0o500);
+    try {
+      const result = await a.tick();
+      expect(result.applied).toEqual([]);
+      expect(result.errors).toContainEqual('lab-1: start withheld: cannot record it under /state');
+      expect(docker.commands.filter((c) => c[0] === 'run')).toEqual([]);
+    } finally {
+      chmodSync(stateDir, 0o700);
+    }
+  });
+});
+
+describe('workers a person stopped', () => {
+  it('leaves an exit 0 that happened while the agent ran, and reports it', async () => {
+    const docker = new FakeDocker([running('lab-1')]);
+    const a = agent(docker);
+    clock += 60_000;
+    docker.containers.set('rs-fleet-lab-1', exited('lab-1', 0, new Date(clock - 1000).toISOString()));
+    clock += 10 * 60_000;
+    expect((await a.tick()).actions).toEqual([]);
+    expect(server.reports.at(-1)!.containers[0]).toMatchObject({ state: 'operator_stopped', hold: 'operator_stopped', exit_code: 0 });
+    // Still held after an agent restart: the hold is remembered for that container.
+    expect((await agent(docker).tick()).actions).toEqual([]);
+  });
+
+  it('restarts an exit 0 from before the agent started: the host went down, not a person', async () => {
+    const docker = new FakeDocker([exited('lab-1', 0, new Date(clock - 5 * 60_000).toISOString())]);
+    expect((await agent(docker).tick()).actions.map((x) => x.kind)).toEqual(['start']);
+  });
+});
+
+describe('confirmed-stop handoff', () => {
+  const lease = { 'lab-1': { account_no: 7, epoch: 3 } };
+
+  it('replaces a rolled worker through a confirmed stop and hands the epoch on', async () => {
+    const docker = new FakeDocker([running('lab-1', 'img:1')]);
+    server.desired = desired({ image: 'img:2', roll: { replace: 'lab-1' }, leases: lease });
+    const result = await agent(docker).tick();
+    expect(result.errors).toEqual([]);
+    expect(server.stopped).toEqual([expect.objectContaining({ worker_id: 'lab-1', account_no: 7, epoch: 3, restart: true, agent_instance: expect.any(String), daemon_id: 'fake-daemon' })]);
+    expect(docker.handoffs).toEqual([3]);
+    expect(JSON.parse(readFileSync(join(stateDir, 'memory.json'), 'utf8')).pending).toEqual({});
+  });
+
+  it('retries a lost confirmation and runs only after it, once', async () => {
+    const docker = new FakeDocker([running('lab-1', 'img:1')]);
+    server.desired = desired({ image: 'img:2', roll: { replace: 'lab-1' }, leases: lease });
+    server.stoppedAnswer = 500;
+    const first = await agent(docker).tick();
+    expect(first.errors).toEqual(['lab-1: could not replace rs-fleet-lab-1: stop confirmation not accepted']);
+    expect(docker.commands.filter((c) => c[0] === 'run')).toEqual([]);
+    // Still unconfirmed, and the agent restarts: the identity comes back from /state.
+    clock += 30_000;
+    expect((await agent(docker).tick()).errors).toEqual(['lab-1: stop confirmation not accepted']);
+    server.stoppedAnswer = 200;
+    clock += 30_000;
+    expect((await agent(docker).tick()).errors).toEqual([]);
+    expect(docker.commands.filter((c) => c[0] === 'run')).toHaveLength(1);
+    expect(docker.commands.filter((c) => c[0] === 'stop+rm')).toHaveLength(1);
+    expect(docker.handoffs).toEqual([3]);
+    expect(server.stopped.map((s) => [s.epoch, s.restart])).toEqual([[3, true], [3, true], [3, true]]);
+  });
+
+  it('runs without the reservation when the ERP calls the stop stale', async () => {
+    const docker = new FakeDocker([running('lab-1', 'img:1')]);
+    server.desired = desired({ image: 'img:2', roll: { replace: 'lab-1' }, leases: lease });
+    server.stoppedAnswer = 409;
+    expect((await agent(docker).tick()).errors).toEqual([]);
+    expect(docker.handoffs).toEqual([undefined]);
+  });
+
+  it('frees the account when it removes an extra', async () => {
+    const docker = new FakeDocker([running('lab-1'), running('lab-2')]);
+    server.desired = desired({ count: 1, leases: { 'lab-2': { account_no: 9, epoch: 4 } } });
+    expect((await agent(docker).tick()).errors).toEqual([]);
+    expect(server.stopped).toEqual([expect.objectContaining({ worker_id: 'lab-2', account_no: 9, epoch: 4, restart: false })]);
+  });
+
+  it('releases a waiting reservation when the host turns observe-only', async () => {
+    const docker = new FakeDocker();
+    writeFileSync(join(stateDir, 'memory.json'), JSON.stringify({ last_start_at: null, restarts: {}, pending: { 'lab-1': { account_no: 7, epoch: 3, restart: true, confirmed: true } } }));
+    server.desired = desired({ authoritative: false, count: 0 });
+    await agent(docker).tick();
+    expect(server.stopped).toEqual([expect.objectContaining({ worker_id: 'lab-1', restart: false })]);
+    expect(docker.commands).toEqual([]);
+  });
+
+  it('a spent handoff does not wedge the worker: an exited replacement is stopped and run again', async () => {
+    // The replacement ran, but the agent died before it forgot the handoff;
+    // then the replacement exited.
+    writeFileSync(join(stateDir, 'memory.json'), JSON.stringify({ last_start_at: null, restarts: {}, pending: { 'lab-1': { account_no: 7, epoch: 3, restart: true, confirmed: true } } }));
+    const docker = new FakeDocker([exited('lab-1', 75, new Date(clock - 120_000).toISOString())]);
+    server.desired = desired({ leases: { 'lab-1': { account_no: 7, epoch: 5 } } });
+    const result = await agent(docker).tick();
+    expect(result.errors).toEqual([]);
+    expect(docker.commands.map((c) => c[0])).toEqual(['ensure', 'stop+rm', 'run']);
+    // The fresh identity from the lease, not the spent one.
+    expect(server.stopped.map((s) => s.epoch)).toEqual([5]);
+    expect(docker.handoffs).toEqual([5]);
+  });
+
+  it('offline, a worker started with a handoff waits instead of claiming with a spent reservation', async () => {
+    const docker = new FakeDocker([{ ...exited('lab-1', 75, new Date(clock - 120_000).toISOString()), handoff: true }]);
+    server.desired = desired({ leases: {} });
+    await agent(docker).tick(); // caches the desired state (and recreates online)
+    docker.commands = [];
+    docker.containers.set('rs-fleet-lab-1', { ...exited('lab-1', 75, new Date(clock - 120_000).toISOString()), handoff: true });
+    server.desired = 'error';
+    clock += 60_000;
+    expect((await agent(docker).tick()).actions).toEqual([]);
+    expect(docker.commands).toEqual([]);
+  });
+});
+
+describe('when it must not act', () => {
+  it('a refused desired state (deleted host, revoked token) is observe-only even with a cache', async () => {
+    const docker = new FakeDocker([exited('lab-1', 75, '2026-10-24T11:00:00Z')]);
+    await agent(docker).tick();
+    docker.commands = [];
+    docker.containers.set('rs-fleet-lab-1', exited('lab-1', 75, new Date(clock - 120_000).toISOString()));
+    server.desired = null; // 404
+    const result = await agent(docker).tick();
+    expect(result.refused).toBe(true);
+    expect(result.observe_only).toBe(true);
+    expect(docker.commands).toEqual([]);
+  });
+
+  it('another agent for this host on the daemon makes it observe-only and says so in the report', async () => {
+    const docker = new FakeDocker();
+    docker.agents = ['rs-fleet-agent-old'];
+    const result = await agent(docker).tick();
+    expect(result.observe_only).toBe(true);
+    expect(docker.commands).toEqual([]);
+    expect(server.reports[0].agent).toMatchObject({ conflict: ['rs-fleet-agent-old'] });
+    expect(logged().find((l) => String(l.msg).startsWith('another fleet agent'))).toMatchObject({ level: 'error' });
+  });
+
+  it('creates nothing on an image outside FLEET_IMAGE_PREFIX', async () => {
+    const docker = new FakeDocker();
+    server.desired = desired({ image: 'docker.io/evil/miner:1' });
+    const result = await agent(docker, { imagePrefixes: ['ghcr.io/jinhuw/aimm-recycle'] }).tick();
+    expect(result.actions).toEqual([]);
+    expect(docker.commands).toEqual([]);
+  });
+
+  it('logs a standing note once, not every tick', async () => {
+    const docker = new FakeDocker([running('lab-1'), exited('lab-2', 78, '2026-10-24T09:00:00Z')]);
+    server.desired = desired({ count: 2 });
+    const a = agent(docker);
+    await a.tick();
+    await a.tick();
+    expect(logged().filter((l) => l.msg === 'note' && String(l.note).startsWith('lab-2: exit 78'))).toHaveLength(1);
+  });
+});
+
+it('keeps reporting while a long action runs', async () => {
+  const docker = new FakeDocker();
+  const slow = docker.ensureImage.bind(docker);
+  docker.ensureImage = async (image) => {
+    await new Promise((r) => setTimeout(r, 120));
+    return slow(image);
+  };
+  await agent(docker, { keepaliveMs: 30 }).tick();
+  expect(server.reports.length).toBeGreaterThanOrEqual(3);
 });

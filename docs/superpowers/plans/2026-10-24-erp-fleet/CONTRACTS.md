@@ -38,6 +38,7 @@ what answers.
 | Images are private GHCR packages after all (owner: GHCR while it works, nothing to OCI); OCIR stays an empty fallback | §1, §2, §6, §10 | MVP docs |
 | `FLEET_URL` / `RS_FLEET_URL` is the ERP's Cloudflare hostname, never the Railway origin | §2 | this change |
 | Shared worker env is decided: the Worker secret `FLEET_WORKER_ENV`, added at the edge to a `200` claim answer as `env` | §2, §5 | this change |
+| Agent holds: exit `0`/`143` while the agent ran (`operator_stopped`) and the crash limit (`crash_limit`) leave a worker stopped like `78`; report containers carry optional `hold`, `exit_code`, `image_id`, and the report an optional `agent` identity; repeated `75` backs off; `401/403/404` on `desired` means observe-only; `--` before the image; `FLEET_IMAGE_PREFIX` | §6, §10 | agent review fixes |
 | No coordinator in the MVP: `FLEET_COORDINATOR_URL` may be empty, and `settings.coordinator_url` is then `null` | §2, §5 | this change |
 | Exit code `78`: the worker cannot connect and waits for an operator; the agent never restarts it | §6, §10 | this change |
 | Coordinator wired for fleet workers on dev: `FLEET_COORDINATOR_URL=http://10.10.10.73:8500` (LAN forwarder), coordinator tokens per worker id in `FLEET_WORKER_ENV` as `RS_CONTROL_PLANE_TOKENS`; alerts withheld unless `env` carries `RS_ALERTS=on` | §2 | facebook-tracker 0.14.2 |
@@ -426,7 +427,9 @@ with a fresh socket for the next viewer.
 { "authoritative": true, "count": 4, "image": "ghcr.io/jinhuw/aimm-recycle:0.14.1", "version": "0.14.0",
   "vnc_ports": { "homelab-1": 5901, "homelab-2": 5902 }, "roll": { "replace": "homelab-2" } | null }
 // POST /api/fleet/hosts/:id/report
-{ "version": "1.340.0", "containers": [ { "worker_id": "homelab-1", "image": "…", "state": "running", "started_at": "…" } ] }
+{ "version": "1.340.0", "containers": [ { "worker_id": "homelab-1", "image": "…", "state": "running", "started_at": "…",
+    "hold"?: "operator_needed" | "crash_limit" | "operator_stopped", "exit_code"?: 0 | null, "image_id"?: "sha256:…" } ],
+  "agent"?: { "instance_id": "uuid", "daemon_id": "…" | null, "conflict"?: ["other-agent-container"] } }
 // 200 { "ok": true }   (sets fleet_hosts.report, version, last_seen_at; 422 over 200 KB)
 ```
 
@@ -458,21 +461,50 @@ advanced only by an agent's `desired` call:
 
 **Agent behaviour** (`apps/fleet-agent/src/plan.ts`), polling every 30 s:
 
-- Observe-only (`authoritative: false`): starts and stops nothing.
+- Observe-only (`authoritative: false`, a `401`/`403`/`404` answer to
+  `desired`, or a second running agent for the same host on the daemon):
+  starts and stops nothing. A reservation still waiting for a replacement is
+  released with `stopped` `restart: false`.
 - Offline (the ERP unreachable, a cached `desired` in use): may restart
-  exited workers; creates, removes and replaces nothing.
+  exited workers; creates, removes and replaces nothing, and does not
+  `docker start` a worker created with a handoff epoch (its reservation is
+  spent; it waits to be recreated online).
 - At most one start per tick and none within 3 minutes of the previous one
-  (`FLEET_STAGGER_SECONDS`): every start is a Facebook login. Extra workers
-  beyond `count` are removed all at once (stopping is not a login).
-- Exit codes: `75` → restart after 60 s; `70` → restart after 10 min; `78`
-  → **never restarted**, online or offline: left stopped and reported with
-  `state: "operator_needed"` until a person starts it (`docker start`) or
-  removes it (`docker rm`, after which it is a missing worker); any other
-  exit → restart after 60 s and counts as a crash; 5 crashes in 30 min → the
-  worker is left stopped. `75`, `70` and `78` never count as crashes.
+  (`FLEET_STAGGER_SECONDS`): every start is a Facebook login. The previous
+  start is the later of the one the agent wrote to `/state` and the newest
+  container `StartedAt`; a start is written down before it is made and not
+  made if it cannot be. Extra workers beyond `count` are removed all at once
+  (stopping is not a login).
+- Exit codes: `75` → restart after 60 s, or after 10 min once the worker has
+  had five 75/70 restarts in 30 min; `70` → restart after 10 min; any other
+  exit except `0`/`143`/`78` → restart after 60 s and counts as a crash.
+  `75`, `70`, `0`, `143` and `78` never count as crashes.
+- **Held: never restarted, online or offline**, until a person starts the
+  container (`docker start`) or removes it (`docker rm`, after which it is a
+  missing worker). The report gives each held container `state` and `hold`
+  set to the reason:
+  - `operator_needed`: it exited `78`;
+  - `crash_limit`: 5 crashes in 30 min. The hold belongs to that container
+    and outlives the window and agent restarts;
+  - `operator_stopped`: it exited `0` or `143` after the agent started, and
+    the agent had not stopped it itself (someone ran `docker stop`). An exit
+    from before the agent started is a host or daemon restart and is
+    restarted as usual.
+
+  The ERP must not choose a held (or any non-running) container as
+  `roll.replace`; the agent never replaces one.
 - `roll.replace` is acted on only online, for a running container whose image
   differs from `desired.image`, and takes the tick's one start after any
   missing or exited worker.
+- Images: only references under `FLEET_IMAGE_PREFIX` (default
+  `ghcr.io/jinhuw/aimm-recycle`) are pulled or run; `--` precedes the image in
+  every `docker pull`, `image inspect` and `run`. A tag is pulled before each
+  start; a digest only when missing. Report containers carry `image_id`, so a
+  tag pushed again shows up as a different id.
+- Identity: every call carries `X-Fleet-Agent-Instance` and
+  `X-Fleet-Docker-Daemon`; `report` (`agent`) and `stopped` (`agent_instance`,
+  `daemon_id`) carry them in the body. The ERP may refuse a second instance
+  for one host; today it ignores them.
 - VNC port: `desired.vnc_ports[worker_id]`, falling back to `5900 + n` for a
   worker the ERP has not mapped yet.
 
@@ -538,10 +570,16 @@ the first version; others add fields in their own PRs.
 - Image: `ghcr.io/jinhuw/aimm-recycle:<ver>` (private GHCR), entrypoint `rs_worker/entry.py`.
 - Fleet mode on when `RS_FLEET_URL`, `RS_FLEET_HOST_ID`, `RS_FLEET_HOST_TOKEN`
   are set; otherwise the image behaves exactly as today (bind-mounted config).
-- Exit codes: `0` normal stop, `75` stale epoch or no slot (agent restarts
-  after 60 s), `70` config/claim failure (agent backs off 10 min), `78`
+- Exit codes: `0` normal stop (`docker stop`; the agent leaves it stopped
+  when it happened while the agent ran and the agent did not stop it, §6),
+  `75` stale epoch or no slot (agent restarts after 60 s, backing off when
+  it repeats), `70` config/claim failure (agent backs off 10 min), `78`
   operator needed (agent leaves it stopped, §6); anything else is the
   monitor's own code and counts as a crash (§6).
+- A container started with a handoff carries the label
+  `rs.fleet.handoff_epoch` beside `RS_FLEET_HANDOFF_EPOCH`; `docker start` on
+  it claims with a spent reservation and exits `75`, so recover it with
+  `docker rm`.
 - **Cannot connect → stop and wait for an operator.** When Facebook or the
   worker's proxy cannot be reached, at boot or later, the worker does not
   retry in a loop and does not exit with a code the agent restarts: every

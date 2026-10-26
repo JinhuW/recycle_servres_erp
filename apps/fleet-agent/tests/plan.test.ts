@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CRASH_LIMIT, plan, type Container, type PlanInput } from '../src/plan.js';
+import { CRASH_LIMIT, effectiveLastStart, holdOf, plan, SOFT_BACKOFF_MS, SOFT_LIMIT, type Container, type PlanInput } from '../src/plan.js';
 import type { Desired } from '../src/types.js';
 import { exited, running } from './helpers/fake-docker.js';
 
@@ -195,4 +195,77 @@ describe('stagger', () => {
 
 it('does not restart an operator-parked worker', () => {
   expect(run([exited('lab-1', 78, ago(3600)), running('lab-2')]).actions).toEqual([]);
+});
+
+describe('holds', () => {
+  it('a crash past the limit is held for that container, and stays held after the window', () => {
+    const recent = Array.from({ length: CRASH_LIMIT }, (_, i) => NOW - (i + 1) * 60_000);
+    const c = exited('lab-2', 137, ago(120));
+    const p = run([running('lab-1'), c], { restarts: { 'lab-2': recent } });
+    expect(p.holds).toEqual({ 'lab-2': { container: c.id, reason: 'crash_limit' } });
+    const later = run([running('lab-1'), c], { now: NOW + 3600_000, held: p.holds });
+    expect(later.actions).toEqual([]);
+    expect(later.notes.join('\n')).toMatch(/lab-2: crash limit reached/);
+  });
+
+  it('a hold belongs to one container: a new one is not held', () => {
+    const p = run([running('lab-1'), exited('lab-2', 137, ago(120))], { held: { 'lab-2': { container: 'gone', reason: 'crash_limit' } } });
+    expect(kinds(p)).toEqual([['start', 'lab-2']]);
+  });
+
+  it('an exit 0 or 143 while the agent ran is a person\'s stop', () => {
+    for (const code of [0, 143]) {
+      const p = run([running('lab-1'), exited('lab-2', code, ago(120))], { bootAt: NOW - 3600_000 });
+      expect(p.actions).toEqual([]);
+      expect(p.holds['lab-2']).toMatchObject({ reason: 'operator_stopped' });
+    }
+  });
+
+  it('but not the agent\'s own stop, and not one from before the agent started', () => {
+    const c = exited('lab-2', 0, ago(120));
+    expect(holdOf(c, { bootAt: NOW - 3600_000, selfStopped: { 'lab-2': NOW - 125_000 } })).toBeNull();
+    expect(holdOf(c, { bootAt: NOW - 60_000 })).toBeNull();
+    expect(kinds(run([running('lab-1'), c], { bootAt: NOW - 60_000 }))).toEqual([['start', 'lab-2']]);
+  });
+
+  it('exit 0 does not count toward the crash limit', () => {
+    const p = run([running('lab-1'), exited('lab-2', 0, ago(120))], { bootAt: NOW });
+    expect(p.actions[0]).toMatchObject({ kind: 'start', counted: false, soft: true });
+  });
+});
+
+describe('repeated exit 75', () => {
+  it('waits longer once it has restarted many times in the window', () => {
+    const soft = Array.from({ length: SOFT_LIMIT }, (_, i) => NOW - (i + 1) * 60_000);
+    expect(run([running('lab-1'), exited('lab-2', 75, ago(120))], { softRestarts: { 'lab-2': soft } }).actions).toEqual([]);
+    expect(kinds(run([running('lab-1'), exited('lab-2', 75, ago(SOFT_BACKOFF_MS / 1000))], { softRestarts: { 'lab-2': soft } }))).toEqual([['start', 'lab-2']]);
+  });
+});
+
+describe('stagger from what Docker shows', () => {
+  it('counts the newest container start, and never a future one', () => {
+    expect(effectiveLastStart(null, [running('lab-1', 'img:1', ago(60))], NOW)).toBe(NOW - 60_000);
+    expect(effectiveLastStart(NOW - 600_000, [running('lab-1', 'img:1', ago(60))], NOW)).toBe(NOW - 60_000);
+    expect(effectiveLastStart(NOW + 86_400_000, [], NOW)).toBe(NOW);
+    expect(run([running('lab-1', 'img:1', ago(60))], { staggerMs: 180_000 }).actions).toEqual([]);
+  });
+});
+
+describe('images and handoffs', () => {
+  it('creates and replaces nothing on an image the host does not run, but may restart', () => {
+    const p = run([exited('lab-1', 75, ago(120)), running('lab-2', 'img:0')], { imageAllowed: false }, { roll: { replace: 'lab-2' }, count: 3 });
+    expect(kinds(p)).toEqual([['start', 'lab-1']]);
+    expect(p.notes.join('\n')).toMatch(/not one this host runs/);
+  });
+
+  it('recreates an exited worker online when the ERP sends leases', () => {
+    const p = run([running('lab-1'), exited('lab-2', 1, ago(120))], {}, { leases: {} });
+    expect(p.actions[0]).toMatchObject({ kind: 'replace', worker_id: 'lab-2', image: 'img:1', counted: true, soft: false });
+  });
+
+  it('offline does not docker-start a worker whose reservation is spent', () => {
+    const p = run([running('lab-1'), { ...exited('lab-2', 75, ago(120)), handoff: true }], { online: false }, { leases: {} });
+    expect(p.actions).toEqual([]);
+    expect(p.notes.join('\n')).toMatch(/reservation is used/);
+  });
 });
