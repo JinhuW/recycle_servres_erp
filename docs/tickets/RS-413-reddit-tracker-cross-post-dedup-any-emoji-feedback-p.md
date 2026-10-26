@@ -2,13 +2,13 @@
 id: RS-413
 title: Reddit tracker: cross-post dedup, any-emoji feedback, PM tracer and Analytics tab
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-26
 reporter: jinhu
 branch: JinhuW/reddit-analytics-pm-tracer
-pr:
-version:
+pr: 928
+version: 1.362.0
 related: []
 ---
 
