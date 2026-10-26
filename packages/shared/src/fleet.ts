@@ -170,7 +170,7 @@ export type FleetRelease = {
   upgraded: string[];
   skipped: string[];
   /** The worker being replaced now, and the state it was in before. */
-  current: { worker_id: string; host_id: string; started_at: string; pre_state: string } | null;
+  current: { worker_id: string; host_id: string; started_at: string; pre_state: string; epoch?: number; stopped_at?: string } | null;
   failure: string | null;
 };
 
@@ -242,6 +242,8 @@ export type ClaimRequest = {
   worker_id: string;
   version: string;
   vnc_port: number | null;
+  claim_id?: string;
+  handoff_epoch?: number;
 };
 
 /** The one answer that carries secrets in clear, over HTTPS to the worker that claimed the slot. */
@@ -299,6 +301,8 @@ export type HostReportRequest = FleetHostReport;
 export type HeartbeatAnswer = {
   ok: true;
   directives: Array<'relogin'>;
+  worker_token?: string;
+  token_expires_at?: number;
 };
 
 /** Why a task went to this account, as the worker logs it. */
@@ -326,7 +330,7 @@ export type NextTaskRequest = {
 
 export type NextTaskAnswer =
   | { task: HandedTask }
-  | { task: null; retry_after: number; reason: 'nothing_due' | 'budget' | 'quarantined' }
+  | { task: null; retry_after: number; reason: 'nothing_due' | 'budget' | 'quarantined' | 'draining' }
   /** The answer to `take: false`: `done` is closed, nothing was leased, nothing was held. */
   | { task: null; reason: 'done_only' };
 
@@ -336,6 +340,7 @@ export type DesiredAnswer = {
   image: string;
   version: string;
   vnc_ports: Record<string, number>;
+  leases?: Record<string, { account_no: number; epoch: number }>;
   /** At most one worker the agent should stop and recreate on `image`. */
   roll: { replace: string } | null;
 };

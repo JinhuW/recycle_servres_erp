@@ -109,7 +109,7 @@ slots.post('/:no/release-quarantine', async (c) => {
   if (no === null) return c.json({ error: 'not_found' }, 404);
   const sql = getDb(c.env);
   const rows = await sql<{ account_no: number }[]>`
-    UPDATE fleet_slots SET quarantined_until = NULL WHERE account_no = ${no} RETURNING account_no`;
+    UPDATE fleet_slots SET quarantined_until = NULL, quarantine_reset_at = NOW(), quarantine_evidence = NULL WHERE account_no = ${no} RETURNING account_no`;
   if (!rows.length) return c.json({ error: 'not_found' }, 404);
   wlog.info('fleet quarantine released', { accountNo: no, by: c.var.user.email });
   return c.json({ slot: await loadSlotView(sql, no) });
@@ -120,12 +120,13 @@ slots.post('/:no/park', async (c) => {
   if (no === null) return c.json({ error: 'not_found' }, 404);
   const sql = getDb(c.env);
   const found = await sql.begin(async (tx) => {
+    await tx`SELECT no FROM fb_pool_accounts WHERE no = ${no} FOR NO KEY UPDATE`;
     const rows = await tx<{ worker_id: string | null }[]>`
       SELECT worker_id FROM fleet_slots WHERE account_no = ${no} FOR UPDATE`;
     if (!rows.length) return false;
     await tx`
       UPDATE fleet_slots SET
-        epoch = epoch + 1, worker_id = NULL, host_id = NULL, lease_expires_at = 'infinity'::timestamptz
+        epoch = epoch + 1, worker_id = NULL, host_id = NULL, claim_id = NULL, handoff_epoch = NULL, lease_expires_at = 'infinity'::timestamptz
       WHERE account_no = ${no}`;
     const released = await releaseTasks(tx, { account_no: no }, 'parked');
     wlog.info('fleet slot parked', { accountNo: no, workerId: rows[0].worker_id, tasks: released, by: c.var.user.email });

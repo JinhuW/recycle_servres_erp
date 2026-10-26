@@ -8,6 +8,7 @@ export interface Desired {
   image: string;
   version: string;
   vnc_ports: Record<string, number>;
+  leases?: Record<string, { account_no: number; epoch: number }>;
   roll: { replace: string } | null;
 }
 
@@ -47,6 +48,17 @@ export function parseDesired(body: unknown): Desired | null {
       ports[id] = port;
     }
   }
+  const leases: NonNullable<Desired['leases']> = {};
+  if (b.leases !== undefined) {
+    if (!b.leases || typeof b.leases !== 'object' || Array.isArray(b.leases)) return null;
+    for (const [id, raw] of Object.entries(b.leases)) {
+      if (!raw || typeof raw !== 'object') return null;
+      const entry = raw as Record<string, unknown>;
+      if (!Number.isInteger(entry.account_no) || !Number.isInteger(entry.epoch)
+          || (entry.account_no as number) < 1 || (entry.epoch as number) < 0) return null;
+      leases[id] = { account_no: entry.account_no as number, epoch: entry.epoch as number };
+    }
+  }
   let roll: Desired['roll'] = null;
   if (b.roll !== undefined && b.roll !== null) {
     const r = b.roll as Record<string, unknown>;
@@ -60,5 +72,6 @@ export function parseDesired(body: unknown): Desired | null {
     version: typeof b.version === 'string' ? b.version : '',
     vnc_ports: ports,
     roll,
+    ...(b.leases !== undefined ? { leases } : {}),
   };
 }

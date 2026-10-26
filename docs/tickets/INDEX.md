@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-400](./RS-400-fix-the-fleet-review-findings-before-cutover.md) | done | bug | P1 | Fix the fleet review findings before cutover | 1.349.0 |
 | [RS-399](./RS-399-add-market-recognizable-short-codes-for-ram.md) | done | story | P2 | Add market-recognizable short codes for RAM | 1.347.0 |
 | [RS-398](./RS-398-move-reddit-tracker-workflow-into-its-own-tab.md) | done | story | P2 | Move Reddit tracker workflow into its own tab | 1.346.0 |
 | [RS-397](./RS-397-make-po-commission-rmb-flow-create-only.md) | done | bug | P2 | Make PO commission RMB Flow create-only | 1.345.1 |

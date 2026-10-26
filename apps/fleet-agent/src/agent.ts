@@ -12,7 +12,7 @@ import type { FleetClient } from './client.js';
 import type { DockerApi, WorkerEnv } from './docker.js';
 import { type Logger, silentLogger } from './log.js';
 import { needsOperator, OPERATOR_NEEDED_STATE, plan, recentRestarts, type Action, type Container } from './plan.js';
-import { loadDesired, loadMemory, saveDesired, saveMemory, type Memory } from './state.js';
+import { loadDesired, loadMemory, saveDesired, saveMemory, type Memory, type StopIdentity } from './state.js';
 import { EMPTY_DESIRED, type Desired, type Report } from './types.js';
 
 export interface AgentOptions {
@@ -86,6 +86,16 @@ export class Agent {
     }
     result.containers = observed;
 
+    if (online && !observeOnly) {
+      for (const [id, pending] of Object.entries(this.memory.pending)) {
+        if (Number(id.slice(id.lastIndexOf('-') + 1)) > desired.count) pending.restart = false;
+        if ((pending.confirmed && observed.some(c => c.worker_id === id && c.running)) || (!pending.restart && !observed.some(c => c.worker_id === id) && await this.acknowledge(id, pending))) {
+          delete this.memory.pending[id];
+          if (pending.restart) this.noteStart(null);
+          saveMemory(this.o.stateDir, this.memory);
+        }
+      }
+    }
     const now = this.now();
     const planned = plan({
       hostId: this.o.hostId,
@@ -104,7 +114,7 @@ export class Agent {
       for (const a of planned.actions) this.log.info('held', { ...a });
     } else {
       for (const action of planned.actions) {
-        const problem = await this.apply(action);
+        const problem = await this.apply(action, desired);
         if (problem) {
           errors.push(`${action.worker_id}: ${problem}`);
           this.log.error('failed', { ...action, error: problem });
@@ -132,34 +142,82 @@ export class Agent {
     return result;
   }
 
-  private async apply(action: Action): Promise<string | null> {
+  private async apply(action: Action, desired: Desired): Promise<string | null> {
     const d = this.o.docker;
     switch (action.kind) {
       case 'remove':
-        return d.stopAndRemove(action.container);
+        return this.stop(action, desired, false);
       case 'start': {
         const problem = await d.start(action.container);
         if (!problem) this.noteStart(action.counted ? action.worker_id : null);
         return problem;
       }
       case 'run': {
+        const pending = this.memory.pending[action.worker_id];
+        if (pending) {
+          pending.confirmed = true;
+          saveMemory(this.o.stateDir, this.memory);
+          if (!await this.acknowledge(action.worker_id, pending)) return 'stop confirmation not accepted';
+        }
         const missing = await d.ensureImage(action.image);
         if (missing) return `image ${action.image} is not available: ${missing}`;
-        const problem = await d.run({ worker_id: action.worker_id, image: action.image, port: action.port }, this.o.workerEnv);
-        if (!problem) this.noteStart(null);
+        const problem = await d.run({ worker_id: action.worker_id, image: action.image, port: action.port, ...(this.memory.pending[action.worker_id]?.restart ? { handoff_epoch: this.memory.pending[action.worker_id].epoch } : {}) }, this.o.workerEnv);
+        if (!problem) {
+          delete this.memory.pending[action.worker_id];
+          this.noteStart(action.reason.startsWith('exit ') ? action.worker_id : null);
+        }
         return problem;
       }
       case 'replace': {
         // The image first: a pull that fails must leave the old worker running.
         const missing = await d.ensureImage(action.image);
         if (missing) return `image ${action.image} is not available: ${missing}`;
-        const stopped = await d.stopAndRemove(action.container);
+        const stopped = await this.stop(action, desired, true);
         if (stopped) return `could not replace ${action.container}: ${stopped}`;
-        const problem = await d.run({ worker_id: action.worker_id, image: action.image, port: action.port }, this.o.workerEnv);
-        if (!problem) this.noteStart(null);
+        const problem = await d.run({ worker_id: action.worker_id, image: action.image, port: action.port, ...(this.memory.pending[action.worker_id]?.restart ? { handoff_epoch: this.memory.pending[action.worker_id].epoch } : {}) }, this.o.workerEnv);
+        if (!problem) {
+          delete this.memory.pending[action.worker_id];
+          this.noteStart(action.reason.startsWith('exit ') ? action.worker_id : null);
+        }
         return problem;
       }
     }
+  }
+
+  private async stop(action: Action, desired: Desired, restart: boolean): Promise<string | null> {
+    const id = action.worker_id;
+    const lease = desired.leases?.[id];
+    if (!this.memory.pending[id] && lease) {
+      this.memory.pending[id] = { ...lease, restart };
+      // If persistence fails, leave the browser untouched.
+      saveMemory(this.o.stateDir, this.memory);
+    }
+    const pending = this.memory.pending[id];
+    if (!pending?.confirmed) {
+      const problem = await this.o.docker.stopAndRemove(action.container);
+      if (problem) return problem;
+      if (pending) {
+        pending.confirmed = true;
+        saveMemory(this.o.stateDir, this.memory);
+      }
+    }
+    if (pending && !await this.acknowledge(id, pending)) return 'stop confirmation not accepted';
+    if (!restart) {
+      delete this.memory.pending[id];
+      saveMemory(this.o.stateDir, this.memory);
+    }
+    return null;
+  }
+
+  private async acknowledge(id: string, identity: StopIdentity): Promise<boolean> {
+    const response = await this.o.client.stopped?.(id, identity);
+    if (response === 'stale') {
+      // A pool edit or park superseded this handoff after Docker stopped.
+      // Recreate without its old reservation; claim still enforces eligibility.
+      delete this.memory.pending[id];
+      saveMemory(this.o.stateDir, this.memory);
+    }
+    return response === true || response === 'stale';
   }
 
   private noteStart(crashedWorker: string | null): void {

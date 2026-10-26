@@ -85,6 +85,7 @@ export const FLEET_TABLES = [
   'fleet_minutes',
   'fleet_settings',
   'fleet_slots',
+  'fleet_task_attempts',
   'fleet_task_events',
   'fleet_tasks',
   'fleet_workers',
@@ -112,6 +113,9 @@ export type FleetSlotRow = {
   device: unknown;
   home_cities: string[];
   quarantined_until: Date | null;
+  quarantine_reset_at: Date | null;
+  handoff_epoch: number | null;
+  claim_id: string | null;
   note: string;
 };
 

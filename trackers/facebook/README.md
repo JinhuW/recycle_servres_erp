@@ -408,21 +408,14 @@ and a slot-claim protocol with a lease epoch. The worker's side of it is
   **70** for a claim or configuration failure (the agent backs off), **78**
   for a worker parked for an operator that could not stay up (the agent
   leaves it stopped).
-- **Shared secrets come with the claim.** `OPENROUTER_API_KEY`, the Telegram
-  channel (`TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_TOPIC_*`) and,
-  once the coordinator is back, its tokens are one Cloudflare secret,
-  `FLEET_WORKER_ENV` (a JSON object of name → string) on the ERP's Worker
-  (`deploy/cloudflare/worker.js`). The Worker adds it as `env` to every 200
-  answer of `POST /api/fleet/worker/claim`, so the secrets never reach
-  Railway or Postgres, and the backend's host-token check still decides who
-  gets them. Fleet hosts therefore use the Cloudflare hostname as their
-  fleet URL (`https://inventory-dev.recycleservers.com` on dev). The
-  entrypoint exports each string in `env` to the monitor and logs the key
-  names once, never a value; it will not let `env` set the fleet's own
-  variables or the account's password fallback. A `${VAR}` the template
-  references that is still unset is dropped from the rendered config, so an
-  optional channel is simply off; without `OPENROUTER_API_KEY` nothing could
-  be judged, and the worker exits 70 before the browser starts.
+- **Shared secrets come with the claim.** The Cloudflare Worker's FLEET_WORKER_ENV
+  secret is a JSON object of string values: OPENROUTER_API_KEY, the Telegram
+  channel and the coordinator's tokens. The edge adds it as env only to a
+  successful host-authenticated POST /api/fleet/worker/claim. These values never
+  enter Railway or Postgres, so fleet hosts must use the Cloudflare hostname.
+  The entrypoint exports claim env, logs names only and prevents overrides of
+  fleet wiring/password fallback. Missing AI keys or configured coordinator
+  auth fail before browser startup; optional unused channel fields are omitted.
 - **No coordinator yet.** When the claim's `settings.coordinator_url` is
   empty, the rendered config has no `control_plane_*` and no
   `alert_report_*` keys and `RS_CONTROL_PLANE_URL` is taken out of the
@@ -491,7 +484,7 @@ and a slot-claim protocol with a lease epoch. The worker's side of it is
 Try it without a backend: `rs_worker/tests/fake_fleet.py` is a small server
 with the five routes and made-up data (`python -m rs_worker.tests.fake_fleet`
 runs it on 8790 with one task queued, no coordinator, and the made-up shared
-`env` a Cloudflare Worker would add; it prints each heartbeat, which is how a
+`env` the edge supplies; it prints each heartbeat, which is how a
 parked worker's `DEAD` is seen). The suites in `rs_worker/tests` run
 the entrypoint and the monitor's loop against it; run them from this folder in
 the monitor's venv: `.venv-aimm/bin/python -m pytest rs_worker/tests`. The
@@ -1387,3 +1380,23 @@ everything at once is `scripts/release.sh --dry-run patch`.
 - **AGPL-3.** Internal use imposes no obligations. `rs_coordinator` and
   `rs_poster` are separate processes talking over HTTP; keep it that way and do
   not distribute the patched monitor.
+
+### Fleet recovery protocol (RS-400)
+
+The matching ERP (v1.349.0) preserves the Cloudflare Worker's FLEET_WORKER_ENV
+secret delivery in the claim's env object. Configure OPENROUTER_API_KEY there, Telegram values for
+alerts, and RS_CONTROL_PLANE_TOKEN when a coordinator URL is set. The entrypoint
+checks required configured credentials before it starts the browser. Values are
+never part of manager reads, desired reports or command arguments.
+
+A process boot sends one claim_id across all HTTP retries. The agent can pass
+RS_FLEET_HANDOFF_EPOCH after confirming a previous container stopped; the backend
+reserves that account until its replacement claims it. Never bypass a live lease
+by worker name alone. Operator exit 78 stays stopped in the matching agent.
+
+Heartbeats renew tokens before their seven-day expiry; the monitor atomically
+updates a 0600 fleet-token file read by future VNC dials. All monitor requests
+use the new token without another Facebook login. An expired/revoked token is
+terminal (exit 75); transport errors retain backoff and empty answers respect
+retry_after with interruptible one-second waits. Backend support must precede
+these worker changes. Live deployment/cutover remains separately owner-approved.

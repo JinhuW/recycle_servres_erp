@@ -18,6 +18,16 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- Fleet workers respect budget/quarantine retry delays and renew their token
+  through heartbeat without logging into Facebook again. New tokens reach all
+  worker requests and future VNC relay connections through a private local file.
+- Claims carry a stable id across HTTP retries and the agent's confirmed-stop
+  handoff epoch, so replacements keep their account. Missing configured AI or
+  coordinator credentials fail before browser startup (RS-400).
+
+
 ## [0.14.0] - 2026-10-25
 
 ### Added

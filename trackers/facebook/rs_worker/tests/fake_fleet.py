@@ -79,9 +79,10 @@ SETTINGS = {
     "lease_minutes": 30,
     "poll_hold_seconds": 2,
 }
-# What the ERP's Cloudflare Worker adds to a 200 claim from its
+# What the ERP backend adds to a 200 claim from its
 # FLEET_WORKER_ENV secret. Made up.
 CLAIM_ENV = {
+    "RS_CONTROL_PLANE_TOKEN": "made-up-control-plane-token",  # pragma: allowlist secret
     "OPENROUTER_API_KEY": "made-up-openrouter-key",  # pragma: allowlist secret
     "TELEGRAM_TOKEN": "123456789:made-up-bot-token",  # pragma: allowlist secret
     "TELEGRAM_CHAT_ID": "-1001234567890",
@@ -120,7 +121,7 @@ class FakeFleet:
         # "ok", or one of "no_slot", "error", to make the claim fail that way.
         self.claim_answer = "ok"
         # The claim's settings and `env` (None: no env key at all, as the
-        # backend answers when no Worker sits in front of it).
+        # backend answers when no shared environment is configured).
         self.settings: Dict[str, Any] = dict(SETTINGS)
         self.env: Dict[str, Any] | None = dict(CLAIM_ENV)
         self.tasks: List[Dict[str, Any]] = []

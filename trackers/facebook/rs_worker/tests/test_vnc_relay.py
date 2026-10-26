@@ -256,3 +256,17 @@ def test_the_fake_fleet_relay_sees_the_screen_through_a_worker_token(vnc: FakeVn
         stale = VncRelay(fleet.url, mint_token("lab-1", 12, 2), backoff=(0.05, 0.2)).start()
         until(lambda: not stale.is_alive())
         assert stale.refused == 409
+
+
+def test_reconnection_reads_the_renewed_token(relay: FakeRelay, tmp_path) -> None:
+    token_file = tmp_path / 'fleet-token'
+    token_file.write_text(TOKEN)
+    worker = VncRelay(relay.url, TOKEN, token_path=str(token_file), backoff=(0.05, 0.1)).start()
+    try:
+        until(lambda: len(relay.parked) >= 1)
+        token_file.write_text('made-up-renewed-token')
+        relay.parked[0].close()
+        until(lambda: len(relay.headers) >= 2)
+        assert relay.headers[1]['Authorization'] == 'Bearer made-up-renewed-token'
+    finally:
+        worker.stop()

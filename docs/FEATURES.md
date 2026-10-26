@@ -3170,6 +3170,18 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     table opens that city's last 24 h across every worker and item.
   - **Older consoles.** Against an older console the card and the city links
     show nothing.
+- **Fleet recovery (v1.349.0, RS-400)** — the backend fences worker requests
+  when the pool's owner changes. Hosts confirm a stopped container before its
+  replacement reclaims the same account; repeated rollout commands and lost
+  replies do not cause another replacement. Finished or released lease attempts
+  count against the UTC day's budget, split at midnight. Lost city checks retry
+  and late results cannot undo a removal or override. An account's all-zero
+  searches quarantine it only when another account found cards in its cities;
+  a successful probe or manual release resets the evidence. Heartbeats renew
+  worker tokens without another browser login. Worker shared secrets come from
+  the Cloudflare Worker's FLEET_WORKER_ENV on its claim-only surface; deploying these
+  changes still requires the separate owner-approved cutover.
+
 - **Fleet (ERP-owned)** — since v1.337.0 (RS-394) **Monitors ▸ Facebook** is
   the page of the task queue the ERP itself runs: the backend owns the city
   catalog, the tasks, the hosts and the account slots (`/api/fleet`), and

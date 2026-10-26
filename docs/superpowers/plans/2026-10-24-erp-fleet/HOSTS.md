@@ -35,10 +35,12 @@
 - `FLEET_URL` is the ERP's **Cloudflare** hostname,
   `https://inventory-dev.recycleservers.com` for the MVP and
   `https://inventory.recycleservers.com` for prod, never the Railway origin:
-  the Worker adds the shared worker secrets (`FLEET_WORKER_ENV`) to a 200
-  claim answer, and prod's backend refuses requests that lack the Worker's
+  prod's backend refuses requests that lack the Worker's
   `X-Proxy-Secret`. `https://api.recycleservers.com` is not the ERP (it
   answers Cloudflare 522).
+- Shared worker secrets are the Cloudflare Worker secret FLEET_WORKER_ENV JSON,
+  added only to a successful host-authenticated claim. Provision the edge secret
+  before the agent/worker release; these values never enter Railway or Postgres.
 - A route to the Python coordinator for listings (`FLEET_COORDINATOR_URL`).
   Today the coordinator is published on the VM's loopback only
   (`127.0.0.1:8500`); workers on the VM reach it as `http://rs-coordinator:8500`

@@ -8,7 +8,7 @@
 # "${VAR}" values are expanded by the monitor from its environment, which
 # rs_worker.entry fills from the claim: the account's password fallback, and
 # the shared secrets in the claim's `env` (OpenRouter, Telegram, later the
-# coordinator's tokens), which the ERP's Cloudflare Worker adds from its
+# coordinator's tokens), which the Cloudflare Worker adds from its
 # FLEET_WORKER_ENV secret. A reference left unset is dropped from the
 # rendered file, so an optional channel is simply off; the [ai.*] ones are
 # required, and the worker exits 70 without them. No secret is written into

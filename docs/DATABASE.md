@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-24:** ERP migration `0206`, Reddit tracker migration `0005`,
+**As of 2026-10-25:** ERP migration `0207`, Reddit tracker migration `0005`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2269,6 +2269,10 @@ The fleet's view of one pool account: which worker runs it, on which host, under
 | `device` | `jsonb` |  |  | The browser profile the account always presents: user agent, viewport, timezone, locale, datr hints. |
 | `home_cities` | `jsonb` | ✓ | `'[]'` | City slugs this account searches first. |
 | `quarantined_until` | `timestamptz` |  |  | Set by the 0-card rule; while in the future the slot gets only probe tasks. |
+| `claim_id` | `text` | | | Idempotency key for the current process boot; unique within the host when non-null. |
+| `handoff_epoch` | `integer` | | | Epoch confirmed stopped by the host. An infinite lease reserves the slot until that replacement claims it. |
+| `quarantine_reset_at` | `timestamptz` | | | Manual release or positive probe: earlier search results cannot re-quarantine this account. |
+| `quarantine_evidence` | `jsonb` | | | Rule, search count, cities and latest result that justified quarantine. |
 | `note` | `text` | ✓ | `''` | Free text for managers. |
 
 - **Primary key:** `account_no`
@@ -2325,9 +2329,38 @@ One search of one item in one city. The scheduler keeps exactly one open (ready 
 - **Primary key:** `id`
 - **References:** `city` → `fleet_cities.slug`; `item` → `fleet_items.name`
 - **Checks:** `state IN ('ready', 'leased', 'done', 'cancelled', 'expired')`
-- **Indexes:** `fleet_tasks_due_idx` (state, due_at); `fleet_tasks_item_idx` (item); `fleet_tasks_open_idx` UNIQUE (city, item, kind) WHERE state IN ('ready', 'leased'); `fleet_tasks_worker_idx` (worker_id, leased_at DESC)
+- **Indexes:** `fleet_tasks_due_idx` (state, due_at); `fleet_tasks_item_idx` (item); `fleet_tasks_open_idx` UNIQUE (city, item, kind) WHERE state IN ('ready', 'leased') AND kind <> 'probe'; `fleet_tasks_probe_idx` UNIQUE (account_no) WHERE state IN ('ready','leased') AND kind = 'probe'; `fleet_tasks_worker_idx` (worker_id, leased_at DESC)
 
 The scheduler sends `NOTIFY fleet_tasks` (payload: the item) after every write that can make a task ready; a worker's held next-task poll listens on it.
+
+<a id="erp-fleet-task-attempts"></a>
+
+#### `fleet_task_attempts`
+
+Closed lease attempts retained independently of requeued tasks (migration 0207).
+The fleet_archive_attempt trigger inserts once when a lease ends, or on a
+terminal historical task insert. Current leased tasks remain the live part of
+the minutes view until closed.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | sequence | |
+| `task_id` | `bigint` | | | → fleet_tasks; on delete set null preserves spent minutes. |
+| `account_no` | `integer` | | | Historical account number, retained after pool deletion. |
+| `epoch` | `integer` | | | Worker lease generation. |
+| `leased_at` | `timestamptz` | ✓ | | Attempt start. |
+| `ended_at` | `timestamptz` | ✓ | | Attempt end, never before start. |
+
+Primary key id; UNIQUE NULLS NOT DISTINCT (task_id, account_no, epoch, leased_at)
+prevents duplicate charging. Index: fleet_task_attempts_account_idx
+(account_no, leased_at); that unique index covers the task FK.
+
+The fleet_fence_pool_owner trigger on pool status/holder/uid changes or deletion advances
+the slot epoch and releases its current task atomically. Worker mutations lock
+pool account, then slot, then city/task; rollout operations acquire the release
+row before those locks. Claims serialize by host/worker and lock pool before
+slot. Probes have a separate unique open index on account_no; the city's open
+task index excludes probes, so two accounts may probe the same home city.
 
 <a id="erp-fleet-task-events"></a>
 
@@ -2352,12 +2385,18 @@ What happened to a task, in order: the city log the fleet pages show.
 
 #### `fleet_minutes` (view)
 
-Each account's leased minutes per UTC day, from fleet_tasks: the time from `leased_at` to `done_at`, or to the lease's end (capped at now) for a task still open. The next-task pick skips an account whose day is at budget_minutes.
+Each account's leased minutes per UTC day, from closed fleet_task_attempts plus
+current leased tasks. Time spanning midnight is split by overlap, rather than
+assigned entirely to the starting day. Returning a task to ready preserves the
+ended attempt. Done uses the completion time; an expired/released lease is
+capped at its expiry. The next-task pick skips accounts at budget_minutes.
+Migration 0207 backfills known terminal attempts; time erased by earlier
+releases cannot be recovered.
 
 | Column | Type | Meaning |
 | --- | --- | --- |
 | `account_no` | `integer` | The account. |
-| `day` | `date` | The UTC day the lease began. |
+| `day` | `date` | The UTC day whose overlap is charged. |
 | `minutes` | `numeric` | Leased minutes that day. |
 
 ### System

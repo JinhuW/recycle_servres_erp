@@ -211,7 +211,11 @@ export function plan(input: PlanInput): Plan {
       notes.push(`${id}: exit ${current.exit_code}; restart waits for its turn`);
       continue;
     }
-    actions.push({ kind: 'start', worker_id: id, container: current.name, reason: `exit ${current.exit_code}`, counted: crash });
+    if (online && desired.leases !== undefined) {
+      actions.push({ kind: 'replace', worker_id: id, container: current.name, image: desired.image, port: vncPort(desired, id, n), reason: `exit ${current.exit_code}` });
+    } else {
+      actions.push({ kind: 'start', worker_id: id, container: current.name, reason: `exit ${current.exit_code}`, counted: crash });
+    }
   }
 
   if (deferredReplace) {

@@ -115,10 +115,10 @@ describe('hosts: agent routes', () => {
     await getTestDb()`UPDATE fleet_hosts SET authoritative = FALSE, capacity = 3 WHERE host_id = 'lab'`;
     const off = await desired();
     expect(off.status).toBe(200);
-    expect(off.body).toEqual({ authoritative: false, count: 0, image: IMAGE_OLD, version: '0.13.9', vnc_ports: {}, roll: null });
+    expect(off.body).toEqual({ authoritative: false, count: 0, image: IMAGE_OLD, version: '0.13.9', vnc_ports: {}, roll: null, leases: {} });
     await getTestDb()`UPDATE fleet_hosts SET authoritative = TRUE WHERE host_id = 'lab'`;
     const on = await desired();
-    expect(on.body).toEqual({ authoritative: true, count: 3, image: IMAGE_OLD, version: '0.13.9', vnc_ports: { 'lab-1': 5901, 'lab-2': 5902, 'lab-3': 5903 }, roll: null });
+    expect(on.body).toEqual({ authoritative: true, count: 3, image: IMAGE_OLD, version: '0.13.9', vnc_ports: { 'lab-1': 5901, 'lab-2': 5902, 'lab-3': 5903 }, roll: null, leases: {} });
     // Another host's id, or no token, is refused.
     expect((await desired(HOST_TOKEN, 'other')).status).toBe(401);
     expect((await api('GET', '/api/fleet/hosts/lab/desired')).status).toBe(401);
@@ -148,7 +148,7 @@ describe('releases', () => {
   });
 
   const heartbeatOnNew = (worker: string, state = 'HEALTHY') => getTestDb()`
-    UPDATE fleet_workers SET version = '0.14.0', state = ${state}, last_heartbeat_at = NOW() + interval '1 second' WHERE worker_id = ${worker}`;
+    UPDATE fleet_workers SET version = '0.14.0', state = ${state}, epoch = epoch + 1, last_heartbeat_at = NOW() + interval '1 second' WHERE worker_id = ${worker}`;
 
   it('replaces one idle worker at a time and gates on the replacement’s first healthy heartbeat', async () => {
     const { token } = await loginAs(ALEX);
@@ -161,13 +161,13 @@ describe('releases', () => {
                       VALUES ('houston', 'server_ram', NOW(), 'leased', 'lab-1', 1, 1, NOW(), NOW() + interval '30 minutes')`;
     const first = await desired();
     expect(first.body).toMatchObject({ image: IMAGE_NEW, version: '0.14.0', roll: { replace: 'lab-2' } });
-    // Asked again before lab-2 came back: nothing else moves.
-    expect((await desired()).body.roll).toBeNull();
+    // The same command repeats until the replacement reports back.
+    expect((await desired()).body.roll).toEqual({ replace: 'lab-2' });
     expect((await release()).current).toMatchObject({ worker_id: 'lab-2', host_id: 'lab', pre_state: 'HEALTHY' });
 
     // lab-2 comes back on the new version but DEGRADED: not good enough after HEALTHY.
     await heartbeatOnNew('lab-2', 'DEGRADED');
-    expect((await desired()).body.roll).toBeNull();
+    expect((await desired()).body.roll).toEqual({ replace: 'lab-2' });
     await heartbeatOnNew('lab-2', 'HEALTHY');
     await report([{ worker_id: 'lab-1', image: IMAGE_OLD }, { worker_id: 'lab-2', image: IMAGE_NEW }]);
     // lab-1 is still busy: upgraded moves on, but nobody is replaced yet.
@@ -198,7 +198,7 @@ describe('releases', () => {
     expect((await desired()).body.roll).toEqual({ replace: 'lab-1' });
 
     // Twenty-one minutes later lab-1 still reports the old version.
-    await getTestDb()`UPDATE fleet_settings SET value = jsonb_set(value, '{current,started_at}', to_jsonb((NOW() - interval '21 minutes')::text)) WHERE key = 'release'`;
+    await getTestDb()`UPDATE fleet_settings SET value = jsonb_set(value, '{current,stopped_at}', to_jsonb((NOW() - interval '21 minutes')::text)) WHERE key = 'release'`;
     expect((await desired()).body.roll).toBeNull();
     const failed = await release();
     expect(failed.state).toBe('failed');
@@ -369,5 +369,86 @@ describe('the fleet VNC relay', () => {
     expect((await open('/api/fleet/worker/vnc', { Authorization: `Bearer ${wt}` }).outcome).status).toBe(409);
     // The coordinator's own path and any other upgrade still behave as before.
     expect((await open('/api/orders', { Cookie: `at=${token}` }).outcome).status).toBe(404);
+  });
+});
+
+describe('confirmed-stop handoff with the real agent planner', () => {
+  beforeEach(async () => { await resetDb(); await seedHost('lab', HOST_TOKEN, 1); await seedCatalog(); });
+
+  it('survives a stagger and a lost stop reply with a full pool, then gates on the new epoch', async () => {
+    const { Agent } = await import('../../fleet-agent/src/agent');
+    const { FakeDocker, running } = await import('../../fleet-agent/tests/helpers/fake-docker');
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { saveMemory } = await import('../../fleet-agent/src/state');
+    const no = await seedSlot(1, { worker: 'lab-1', host: 'lab', epoch: 1 });
+    const dir = mkdtempSync(join(tmpdir(), 'fleet-handoff-'));
+    let clock = Date.now();
+    saveMemory(dir, { last_start_at: clock - 60_000, restarts: {}, pending: {} });
+    const docker = new FakeDocker([running('lab-1', IMAGE_OLD)], [IMAGE_OLD, IMAGE_NEW]);
+    await report([{ worker_id: 'lab-1', image: IMAGE_OLD }]);
+    const { token } = await loginAs(ALEX);
+    await api('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0' } });
+    let lost = true;
+    const client = {
+      desired: async () => (await desired()).body,
+      report: async (body: unknown) => (await api('POST', '/api/fleet/hosts/lab/report', { headers: bearer(HOST_TOKEN), body })).status === 200,
+      stopped: async (worker_id: string, identity: { account_no: number; epoch: number; restart: boolean }) => {
+        const r = await api('POST', '/api/fleet/hosts/lab/stopped', { headers: bearer(HOST_TOKEN), body: { worker_id, ...identity } });
+        expect(r.status).toBe(200);
+        if (lost) { lost = false; return false; }
+        return true;
+      },
+    };
+    let replacement: ClaimAnswer | null = null;
+    const originalRun = docker.run.bind(docker);
+    docker.run = async (spec, env) => {
+      const r = await api<ClaimAnswer>('POST', '/api/fleet/worker/claim', { headers: bearer(HOST_TOKEN), body: {
+        host_id: 'lab', worker_id: spec.worker_id, version: '0.14.0', claim_id: 'replacement-boot', handoff_epoch: spec.handoff_epoch,
+      } });
+      expect(r.status).toBe(200); replacement = r.body;
+      expect(r.body.account.no).toBe(no);
+      return originalRun(spec, env);
+    };
+    const agent = () => new Agent({ hostId: 'lab', stateDir: dir, client, docker,
+      workerEnv: { url: 'http://test', hostId: 'lab', token: HOST_TOKEN }, version: 'test', now: () => clock });
+    try {
+      expect((await agent().tick()).actions).toEqual([]);
+      expect((await desired()).body.roll).toEqual({ replace: 'lab-1' });
+      clock += 180_000;
+      expect((await agent().tick()).errors).toHaveLength(1);
+      expect(docker.containers.size).toBe(0);
+      // The old account is reserved, not available to another worker.
+      expect((await api('POST', '/api/fleet/worker/claim', { headers: bearer(HOST_TOKEN), body: { host_id: 'lab', worker_id: 'lab-2', version: 'test' } })).status).toBe(409);
+      expect((await agent().tick()).errors).toEqual([]);
+      expect(docker.commands.filter(c => c[0] === 'run')).toHaveLength(1);
+      expect(docker.commands.filter(c => c[0] === 'stop+rm')).toHaveLength(1);
+      expect(replacement!.epoch).toBeGreaterThan(1);
+      const [booting] = await getTestDb()`SELECT state, last_heartbeat_at FROM fleet_workers WHERE worker_id = 'lab-1'`;
+      expect(booting).toEqual({ state: null, last_heartbeat_at: null });
+      expect((await desired()).body.roll).toEqual({ replace: 'lab-1' });
+      const newer = replacement as unknown as ClaimAnswer;
+      await api('POST', '/api/fleet/worker/heartbeat', { headers: bearer(newer.worker_token), body: { state: 'HEALTHY', version: '0.14.0' } });
+      expect((await desired()).body.roll).toBeNull();
+      expect((await release()).state).toBe('done');
+      // A new boot cannot reuse an already-consumed handoff.
+      expect((await api('POST', '/api/fleet/worker/claim', { headers: bearer(HOST_TOKEN), body: { host_id: 'lab', worker_id: 'lab-1', version: 'test', claim_id: 'unexpected-boot', handoff_epoch: 1 } })).status).toBe(409);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('drains task allocation and rejects a stop confirmation from another host', async () => {
+    await seedSlot(1, { worker: 'lab-1', host: 'lab', epoch: 1 });
+    const { signWorkerToken, workerTokenKey } = await import('../src/fleet/auth');
+    const worker = signWorkerToken({ worker_id: 'lab-1', account_no: 1, epoch: 1, exp: Math.floor(Date.now() / 1000) + 3600 }, workerTokenKey(testEnv)!);
+    await report([{ worker_id: 'lab-1', image: IMAGE_OLD }]);
+    const { token } = await loginAs(ALEX);
+    await api('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0' } });
+    await desired();
+    await getTestDb()`INSERT INTO fleet_tasks (city,item,due_at,state) VALUES ('houston','server_ram',NOW(),'ready')`;
+    const next = await api('POST', '/api/fleet/worker/next-task', { headers: bearer(worker), body: { wait: 0 } });
+    expect(next.body).toEqual({ task: null, reason: 'draining', retry_after: 30 });
+    await seedHost('other', 'made-up-other-token');
+    expect((await api('POST', '/api/fleet/hosts/other/stopped', { headers: bearer('made-up-other-token'), body: { worker_id: 'lab-1', account_no: 1, epoch: 1, restart: true } })).status).toBe(409);
   });
 });

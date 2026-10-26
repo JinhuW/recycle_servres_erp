@@ -106,3 +106,9 @@ describe('acting', () => {
     expect(await new DockerCli(runner).start('rs-fleet-lab-2')).toBe('docker start rs-fleet-lab-2: Error response from daemon: No such container: rs-fleet-lab-2');
   });
 });
+
+it('passes the confirmed stopped epoch to the replacement entrypoint', () => {
+  const args = runArgs('lab', { ...SPEC, handoff_epoch: 7 });
+  expect(args).toContain('RS_FLEET_HANDOFF_EPOCH=7');
+  expect(args.join(' ')).not.toContain(ENV.token);
+});

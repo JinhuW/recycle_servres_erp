@@ -14,6 +14,7 @@ epoch moved on) stops the relay for good; the monitor exits on the same 409.
 from __future__ import annotations
 
 import socket
+from pathlib import Path
 import threading
 import time
 from typing import Callable, Tuple
@@ -46,9 +47,11 @@ class VncRelay:
         vnc_addr: Tuple[str, int] = ("127.0.0.1", 5900),
         log: Callable[[str], None] = lambda message: None,
         backoff: Tuple[float, float] = (1.0, 60.0),
+        token_path: str | None = None,
     ) -> None:
         self.url = relay_url(fleet_url)
         self.worker_token = worker_token
+        self.token_path = token_path
         self.vnc_addr = vnc_addr
         self.log = log
         self.backoff = backoff
@@ -91,9 +94,10 @@ class VncRelay:
             served = False
             dialled_at = time.monotonic()
             try:
+                token = Path(self.token_path).read_text().strip() if self.token_path else self.worker_token
                 with connect(
                     self.url,
-                    additional_headers={"Authorization": f"Bearer {self.worker_token}"},
+                    additional_headers={"Authorization": f"Bearer {token}"},
                     proxy=None,  # straight to the ERP, never the account's proxy
                     compression=None,
                     open_timeout=10,
@@ -103,7 +107,7 @@ class VncRelay:
                     served = self._session(ws)
             except InvalidStatus as e:
                 status = e.response.status_code
-                if status == 409:
+                if status in (401, 409):
                     self.refused = status
                     self.log("VNC relay: the fleet refuses this worker's epoch; not dialling again")
                     return

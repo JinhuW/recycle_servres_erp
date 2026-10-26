@@ -162,7 +162,7 @@ def test_the_worker_claims_logs_in_once_and_takes_task_after_task(
         "/api/fleet/worker/session",
     }
     # Only the monitor's own pause after each search; no backoff, no parked wait.
-    assert seen["sleeps"] == [5, 5]
+    assert seen["sleeps"] == [5, 5] + [1.0] * 30
 
 
 def test_a_stale_epoch_ends_the_worker_without_a_login(
@@ -193,7 +193,7 @@ def test_an_empty_fleet_is_asked_again_and_an_unreachable_one_waited_for(
         seen["monitor"].fleet_loop()
     # Two held asks, nothing due, nothing searched, no sleep of our own.
     asks: List[Any] = [r for r in fleet.requests if r[1] == "/api/fleet/worker/next-task"]
-    assert len(asks) == 2 and seen["searched"] == [] and seen["sleeps"] == []
+    assert len(asks) == 2 and seen["searched"] == [] and seen["sleeps"] == [1.0] * 60
 
     fleet.stop()
     seen = monitor_for(monkeypatch, config_path, asks_allowed=3)
