@@ -15,6 +15,38 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.364.0] - 2026-10-26
+
+### Added
+
+- **Add to fleet from the Account pool tab** (RS-415, RS-394). The owner
+  can now put new Facebook pool accounts into ERP-fleet slots without the
+  seed script. A **Proxies** card lists the exits the ERP keeps (the first
+  will be four Decodo static ISP endpoints); the URL with its login is pasted
+  once, sealed with `FB_POOL_KEY` in the new `fleet_proxies` table (migration
+  0213), and no answer or log line carries it again. **Add to fleet** on an
+  available account picks a proxy that has room (two accounts per proxy, the
+  new `max_accounts_per_proxy` rule) and optional home cities, and makes the
+  slot with a generated desktop device: Chromium's own user agent, one of
+  the coordinator's common screens with its scale and a viewport under the
+  browser chrome, fixed by the account number, on the proxy's timezone. The
+  pool row turns `fleet` under "ERP fleet" until a worker claims it.
+  **Remove from fleet** returns an account no worker holds to Available.
+  Editing a proxy's URL or timezone reaches its slots at the next claim.
+- Routes: `GET/POST /api/fleet/proxies`, `PUT/DELETE /api/fleet/proxies/:id`,
+  `POST /api/fleet/slots`, `POST /api/fleet/slots/:no/remove`
+  (CONTRACTS §7).
+
+### Changed
+
+- **A host starts only as many workers as it has accounts for.**
+  `desired.count` was the host's capacity; it is now capped at the slots
+  the host's workers hold plus the ones any worker could claim, and never
+  below its highest-numbered worker holding one (CONTRACTS §6). With
+  capacity 4 and one ready account the agent starts one worker instead of
+  four that each claim nothing and restart; every account added brings one
+  more.
+
 ## [1.363.0] - 2026-10-26
 
 ### Added

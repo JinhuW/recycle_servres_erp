@@ -50,13 +50,15 @@ what answers.
 | Any non-parked heartbeat (DEGRADED too) renews the task lease, capped at `task_max_minutes` | §5 | RS-408 |
 | `fleet_settings` key `retention_days` (default 90, 30..730); the scheduler purges terminal task history older than it hourly; migration `0210_fleet_task_retention.sql` | §4, §8 | RS-409 |
 | Coordinator wired for fleet workers on dev: `FLEET_COORDINATOR_URL=http://10.10.10.73:8500` (LAN forwarder), coordinator tokens per worker id in `FLEET_WORKER_ENV` as `RS_CONTROL_PLANE_TOKENS`; alerts withheld unless `env` carries `RS_ALERTS=on` | §2 | facebook-tracker 0.14.2 |
+| Proxy list and Add to fleet: `fleet_proxies` (migration `0213_fleet_proxies.sql`), `fleet_slots.proxy_id`; manager routes `GET/POST /proxies`, `PUT/DELETE /proxies/:id`, `POST /slots`, `POST /slots/:no/remove`; slot rows carry `proxy_id`; `fleet_settings` key `max_accounts_per_proxy` (default 2); error codes `account_busy`, `no_login`, `proxy_full`, `in_use`, `leased` | §4, §7, §8, §9 | RS-415 |
+| `desired.count` is the capacity capped at the slots the host could run now (held by its workers plus claimable), never below its highest-numbered worker holding one; the manager's `GET /hosts` shows the same count | §6 | RS-415 |
 | Claim tickets: `POST /hosts/:id/tickets` mints a single-use bearer per worker container (migration `0211_fleet_claim_tickets.sql`); `claim` takes it beside the host token (deprecated for workers); the agent passes `RS_FLEET_CLAIM_TICKET` (and the same ticket as `RS_FLEET_HOST_TOKEN` for older images), never the host token; containers carry `rs.fleet.claim_ticket=1` and are recreated, not `docker start`ed | §2, §3, §4, §5, §6, §10 | claim tickets (ERP + facebook-tracker 0.14.5) |
 
 ## 1. Names
 
 | Thing | Value |
 | --- | --- |
-| Backend module | `apps/backend/src/fleet/` (`scheduler.ts`, `claim.ts`, `tasks.ts`, `hosts.ts`, `auth.ts`, `sql.ts`, `cities.ts`, `workers.ts`, `vnc.ts`) |
+| Backend module | `apps/backend/src/fleet/` (`scheduler.ts`, `claim.ts`, `tasks.ts`, `hosts.ts`, `auth.ts`, `sql.ts`, `cities.ts`, `workers.ts`, `vnc.ts`, `proxies.ts`) |
 | Routes | `apps/backend/src/routes/fleet.ts`, mounted at `/api/fleet` |
 | Shared types | `packages/shared/src/fleet.ts` |
 | Frontend | `apps/frontend/src/pages/desktop/fleet/*`, `apps/frontend/src/lib/fleet.ts` |
@@ -313,6 +315,14 @@ worker; nothing claims it.
   `host_id` → `fleet_hosts` on delete cascade, `worker_id`, `handoff_epoch`,
   `expires_at`, `consumed_at`, `claim_id`, `created_at`), indexed on
   `(host_id, worker_id)` and `expires_at`.
+- `0213_fleet_proxies.sql`: `fleet_proxies` (`id` identity, `label`,
+  `url_enc` = the whole `scheme://user:pass@host:port` sealed with
+  `FB_POOL_KEY`, `host`, `port`, `timezone` IANA, `note`, `created_by` →
+  users on delete set null, `created_at`; unique `(lower(host), port)`), and
+  `fleet_slots.proxy_id` → `fleet_proxies` on delete set null (indexed). A
+  slot made on a proxy copies its `url_enc` into `proxy_url`, which is still
+  the only thing a claim reads; removing a proxy leaves a parked slot its
+  copy.
 
 Lock order everywhere: pool account (`FOR NO KEY UPDATE`), then slot, then
 tasks. The release row (`fleet_settings` key `release`) is locked only by
@@ -598,8 +608,28 @@ is confirmed, and starts nothing without one.
 from any other instance answer `403 agent_conflict`, which the agent reads as
 observe-only; `tickets` checks it the same way. A call without an instance id is let through.
 
-`count` is the host's `capacity` when authoritative, else `0`. `vnc_ports`
-maps `<host>-<n>` to `5900 + n` for `n = 1..count`. `image`/`version` are the
+`count` is `0` on an observe-only host. On an authoritative one it is the
+host's `capacity` **capped at the accounts it could run now**, because every
+worker start is a Facebook login and a worker with no slot only exits `75`:
+
+```
+held      = slots with host_id = this host and lease_expires_at > now()
+            (a worker's lease, or a handoff reservation for one of its workers)
+claimable = slots with lease_expires_at NULL or < now()
+            (the claim's own rule: free and not parked)
+            -- both only for pool accounts with status 'fleet', never a parked slot
+count     = min(capacity, max(held + claimable, highest n of a <host>-<n> in held))
+```
+
+So with capacity 4 and one ready account the agent runs one worker, and a
+second account added later (Account pool ▸ Add to fleet) brings a second.
+A slot reserved for another host, or leased by another host's worker, is
+neither. The floor at the highest-numbered holder is there because the agent
+removes every worker above `count`: dropping one that holds an account would
+only free it for a fresh login elsewhere. Two hosts may both count the same
+free slot; the one whose claim loses gets `409 no_slot` and its worker exits
+`75` (no browser started). The manager's `GET /hosts` shows the same count.
+`vnc_ports` maps `<host>-<n>` to `5900 + n` for `n = 1..count`. `image`/`version` are the
 latest release's unless it failed, else `FLEET_IMAGE_WORKER` and its tag.
 
 **Rolls** (`fleet/hosts.ts`, the Python coordinator's `advance_rollout`
@@ -710,8 +740,10 @@ already holds. Slot rows show a reservation as `reserved_until`, not as
 ## 7. Manager API — manager scope
 
 Session cookie plus the manager role. Errors are `{error, detail?}`:
-`422 bad_request` (`detail` says what), `404 not_found`, `409 exists`, and
-`409 unverified` (enabling a city no worker has verified). Answers are the
+`422 bad_request` (`detail` says what), `404 not_found`, `409 exists`,
+`409 unverified` (enabling a city no worker has verified), and for the fleet
+membership routes `409 account_busy`, `no_login`, `proxy_full`, `in_use` and
+`leased` (each with a `detail` a page can show). Answers are the
 **bare** row or array unless the table shows a wrapper.
 
 | Route | Body | Answer |
@@ -734,7 +766,13 @@ Session cookie plus the manager role. Errors are `{error, detail?}`:
 | `PUT /api/fleet/hosts/:id` | `{capacity? (0..99), authoritative?}` | `{host: FleetHost & {desired}}`; `404` |
 | `DELETE /api/fleet/hosts/:id` | | `{ok: true}`; `404`. Frees the host's replacement reservations and drops its pending replacement (§6) |
 | `POST /api/fleet/releases` | `{image, version}` | `{ok: true, release: FleetRelease}`; starts a roll (§6), replacing any active one |
-| `GET /api/fleet/slots` | | `{slots: SlotView[]}`: `FleetSlot` (with `parked: boolean` and `reserved_until: ISO | null` (a live handoff reservation, §6); `lease_expires_at` is `null` when parked; `has_proxy`, never the URL) plus `uid`, `pool_status`, `minutes_today`, `budget_minutes`, `worker: WorkerView \| null` |
+| `GET /api/fleet/slots` | | `{slots: SlotView[]}`: `FleetSlot` (with `parked: boolean` and `reserved_until: ISO | null` (a live handoff reservation, §6); `lease_expires_at` is `null` when parked; `has_proxy`, never the URL; `proxy_id`, the listed proxy or `null`) plus `uid`, `pool_status`, `minutes_today`, `budget_minutes`, `worker: WorkerView \| null` |
+| `POST /api/fleet/slots` | `{account_no, proxy_id, home_cities?: string[]}` (≤ 10 slugs that exist in `fleet_cities`; unknown keys `422`) | `201 {slot: SlotView}`. Puts a pool account into the fleet in one transaction (pool account, then the proxy row, then the slot): the account must exist (`404`), have a password and a 2FA key (`409 no_login`) and be `available`, or `fleet` with no holder or the holder `ERP fleet` (`409 account_busy` otherwise: a coordinator worker's or a purchaser's account is never taken); the proxy must exist (`404`) and carry fewer than `max_accounts_per_proxy` slots that are not parked (`409 proxy_full`); a slot already there is `409 exists`. The slot gets the proxy's sealed URL (`proxy_url`) and `proxy_id`, `home_cities`, and a generated `device`: no `user_agent` and `native: ["user_agent"]` (Chromium's own, as the homelab browsers), `screen` and `device_scale_factor` from the coordinator's list (1920×1080@1, 1536×864@1.25, 1440×900@1, 1366×768@1, 1600×900@1, 1280×800@1) and a `viewport` of the screen less 111, 123 or 133 px of browser chrome, both picked by FNV-1a of `fleet-device:<account_no>` (`fleetDeviceFor`, packages/shared), `timezone` the proxy's, `locale` `en-US`. The pool row turns `fleet` with holder `ERP fleet` (the pool triggers open the stint) and an `assigned` pool event; the first claim then names the worker as holder |
+| `POST /api/fleet/slots/:no/remove` | | `{ok: true, account_no, pool_status}`. Only a slot no worker holds and no reservation holds (`409 leased`: park it first); a parked one is fine. Deletes the slot and cancels the account's waiting probe; a pool row still `fleet` goes back to `available` (holder cleared, a `returned` pool event), one reported or retired meanwhile keeps its status. `404` without a slot |
+| `GET /api/fleet/proxies` | | `FleetProxy[]`, oldest first: `{id, label, host, port, timezone, note, created_at, slots: [{account_no, pool_status, parked, leased}]}`. Never the URL or its login |
+| `POST /api/fleet/proxies` | `{label (1..80), url, timezone, note? (≤ 500)}`; `url` is `http`, `https` or `socks5` `://[user:pass@]host:port`, port required, nothing after it; `timezone` an IANA zone (`America/New_York`, or `UTC`) | `201 FleetProxy`. The URL is sealed with `FB_POOL_KEY` (`503 unavailable` without it) and never echoed, not even in a `422`. `409 exists` for a host:port already listed |
+| `PUT /api/fleet/proxies/:id` | any of `{label, url, timezone, note}` | `FleetProxy`. A new `url` is resealed into every slot on the proxy, a new `timezone` into every slot's `device.timezone`; a worker picks either up at its next claim. `404`, `409 exists`, `422` as above |
+| `DELETE /api/fleet/proxies/:id` | | `{ok: true}`; `409 in_use` (detail names the accounts) while a slot that is not parked uses it; a parked slot keeps its copy of the URL and loses `proxy_id`. `404` |
 | `POST /api/fleet/slots/:no/release-quarantine` | | `{slot: SlotView}`; `404` |
 | `POST /api/fleet/slots/:no/park` | | `{slot: SlotView}`: epoch + 1 (its worker gets `409 stale_epoch` and exits), no worker, infinite lease, any handoff reservation cleared, its leased tasks released; `404` |
 | `POST /api/fleet/slots/:no/unpark` | | `{slot: SlotView}`: lease cleared so the slot is claimable again; a slot that was not parked is answered unchanged; `404` |
@@ -755,6 +793,7 @@ Session cookie plus the manager role. Errors are `{error, detail?}`:
 | `quarantine_hours` | 48 | 0-card rule window (ported from the coordinator) |
 | `quarantine_probe_hours` | 6 | one probe task per quarantined slot per this interval |
 | `retention_days` | 90 | 30..730. Terminal tasks (done, cancelled, expired) older than this (by `done_at`, else `leased_at`, else `due_at`) are deleted with their events and attempts, hourly, 5,000 per run. The window is never shorter than `familiar_days`. Kept regardless of age: the newest done search per city and item, and the verify-slug task holding each city's latest verdict |
+| `max_accounts_per_proxy` | 2 | 1..10. Slots that are not parked one proxy may carry; `POST /slots` refuses past it (`409 proxy_full`). A static ISP exit is one IP, bought in pairs |
 | `search` | from `master.toml` | `date_listed`, `delivery_method`, `max_results`, page pauses |
 | `release` | none | the current or last `FleetRelease` (`{image, version, state: rolling\|done\|failed, started_at, finished_at, upgraded[], skipped[], current, failure}`); written by `POST /releases` and the roll, not by `PUT /settings` and not in its answer |
 
@@ -762,7 +801,11 @@ Session cookie plus the manager role. Errors are `{error, detail?}`:
 
 `FleetCity`, `FleetItem`, `FleetTask`, `FleetTaskEvent`, `FleetSlot`,
 `FleetHost`, `FleetWorker`, `FleetSettings`, `ClaimAnswer`, `NextTaskAnswer`,
-`DesiredAnswer`, plus `FLEET_TASK_STATES`, `FLEET_PARKED_STATES`. WS-A writes
+`DesiredAnswer`, plus `FLEET_TASK_STATES`, `FLEET_PARKED_STATES`. RS-415
+adds `FleetDeviceProfile` (a stored device, `user_agent` optional),
+`FleetProxy`, `FleetProxyUse`, `FleetProxyWrite`, `FleetProxyPatch`,
+`FleetSlotWrite` and the helpers `fleetDeviceFor`, `parseProxyUrl`,
+`isFleetTimezone`, `proxyLoad`, which the backend and the pool page share. WS-A writes
 the first version; others add fields in their own PRs.
 
 ## 10. Worker container contract (image ↔ agent)

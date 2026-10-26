@@ -105,13 +105,139 @@ export type FleetTaskLog = FleetTask & { events: FleetTaskEvent[] };
  *  alone because their city-item finished within `start_fresh_hours`. */
 export type RoundStartAnswer = { started: number; skipped: number };
 
+/** Device fields a worker leaves to its browser instead of pinning them. */
+export type FleetNativeField = 'user_agent' | 'locale' | 'timezone';
+
 /** The browser profile a slot keeps so an account always looks like one machine. */
 export type FleetDevice = {
   user_agent: string;
   viewport: [number, number];
   timezone: string;
   locale: string;
+  /** `[w, h]`; the worker defaults it to the viewport. */
+  screen?: [number, number];
+  device_scale_factor?: number;
+  /** Filled in by the claim all the same; the worker ignores what is listed. */
+  native?: FleetNativeField[];
 };
+
+/** A device as a slot stores it: the claim fills in what is missing, so a
+ *  profile that leaves the user agent to the browser simply has none. */
+export type FleetDeviceProfile = Omit<FleetDevice, 'user_agent'> & { user_agent?: string };
+
+/** Common desktop screens that fit the worker's 1920x1080 X display, with the
+ *  scale factor each usually comes with: the coordinator's identity generator
+ *  (rs_coordinator/device_profiles.py), so ERP-made devices look like the
+ *  homelab's. */
+export const FLEET_SCREENS: readonly (readonly [number, number, number])[] = [
+  [1920, 1080, 1], [1536, 864, 1.25], [1440, 900, 1], [1366, 768, 1], [1600, 900, 1], [1280, 800, 1],
+];
+/** Height a maximised browser's toolbars and the taskbar take off the screen. */
+export const FLEET_BROWSER_CHROME_HEIGHTS: readonly number[] = [111, 123, 133];
+
+/** FNV-1a, 32 bit: the same number in the browser and in Node, no crypto needed. */
+function fnv1a(text: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+
+/**
+ * The device a slot made in the ERP gets, fixed by its account number so a
+ * re-made slot is the same machine again. The user agent is the browser's own
+ * (`native`), as the homelab browsers do: a made-up one disagrees with the
+ * client hints Chromium still sends. The viewport is the screen less the
+ * browser's chrome; the clock is the proxy's.
+ */
+export function fleetDeviceFor(accountNo: number, timezone: string): FleetDeviceProfile {
+  const seed = fnv1a(`fleet-device:${accountNo}`);
+  const [w, h, scale] = FLEET_SCREENS[seed % FLEET_SCREENS.length];
+  const chrome = FLEET_BROWSER_CHROME_HEIGHTS[Math.floor(seed / FLEET_SCREENS.length) % FLEET_BROWSER_CHROME_HEIGHTS.length];
+  return {
+    viewport: [w, h - chrome],
+    screen: [w, h],
+    device_scale_factor: scale,
+    timezone,
+    locale: 'en-US',
+    native: ['user_agent'],
+  };
+}
+
+// ─── Proxies ──────────────────────────────────────────────────────────────────
+
+export const FLEET_PROXY_SCHEMES = ['http', 'https', 'socks5'] as const;
+
+/** What a pasted proxy URL says, the login reduced to whether there is one. */
+export type ParsedProxyUrl = { scheme: (typeof FLEET_PROXY_SCHEMES)[number]; host: string; port: number; has_login: boolean };
+
+/**
+ * `scheme://user:pass@host:port`, or why not: the page checks as the manager
+ * types and the API again on write. The port is required, since a proxy
+ * vendor's endpoints differ only by it. Never echo the input back: it holds
+ * the login.
+ */
+export function parseProxyUrl(raw: string): ParsedProxyUrl | { error: string } {
+  const text = raw.trim();
+  if (!text) return { error: 'url is required' };
+  if (text.length > 500) return { error: 'url is longer than 500 characters' };
+  if (/\s/.test(text)) return { error: 'url has a space in it' };
+  // A regex, not URL: this module runs where no URL global is typed, and the
+  // shape is narrow. A login with `@`, `:` or `/` in it is percent-encoded.
+  const m = /^([a-z0-9]+):\/\/(?:([^:@/]*)(?::([^@/]*))?@)?([A-Za-z0-9.-]+)(?::(\d{1,5}))?\/?$/i.exec(text);
+  if (!m) return { error: 'url is not scheme://user:pass@host:port' };
+  const [, rawScheme, user, pass, host, rawPort] = m;
+  const scheme = rawScheme.toLowerCase();
+  if (!(FLEET_PROXY_SCHEMES as readonly string[]).includes(scheme)) return { error: `url scheme must be ${FLEET_PROXY_SCHEMES.join(', ')}` };
+  const port = Number(rawPort ?? NaN);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return { error: 'url needs a port, like host:10001' };
+  if (Boolean(user) !== Boolean(pass)) return { error: 'url login needs both user and password' };
+  return { scheme: scheme as ParsedProxyUrl['scheme'], host: host.toLowerCase(), port, has_login: Boolean(user) };
+}
+
+/** An IANA zone such as America/New_York (or UTC) that this runtime knows. */
+export function isFleetTimezone(tz: unknown): tz is string {
+  if (typeof tz !== 'string' || !/^(UTC|[A-Za-z]+(\/[A-Za-z0-9_+-]+){1,2})$/.test(tz)) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A slot on a proxy, as the proxy list names it. */
+export type FleetProxyUse = {
+  account_no: number;
+  pool_status: string;
+  parked: boolean;
+  /** A worker holds it, or a reservation for one does. */
+  leased: boolean;
+};
+
+/** A proxy as the manager reads it: never the URL, never the login. */
+export type FleetProxy = {
+  id: number;
+  label: string;
+  host: string;
+  port: number;
+  timezone: string;
+  note: string;
+  created_at: string;
+  slots: FleetProxyUse[];
+};
+
+export type FleetProxyWrite = { label: string; url: string; timezone: string; note?: string };
+/** `url` absent keeps the stored one. */
+export type FleetProxyPatch = { label?: string; url?: string; timezone?: string; note?: string };
+
+/** `POST /api/fleet/slots`: puts a pool account into the fleet. */
+export type FleetSlotWrite = { account_no: number; proxy_id: number; home_cities?: string[] };
+
+/** Slots on a proxy that count against `max_accounts_per_proxy`: every one but the parked. */
+export const proxyLoad = (p: Pick<FleetProxy, 'slots'>): number => p.slots.filter((s) => !s.parked).length;
 
 /** A pool account as the fleet runs it. Secrets never travel here: the
  *  proxy is sealed in the row and only the claim answer carries it in clear. */
@@ -124,7 +250,9 @@ export type FleetSlot = {
   lease_expires_at: string | null;
   /** Whether a proxy is set; the URL itself stays sealed. */
   has_proxy: boolean;
-  device: FleetDevice | null;
+  /** The listed proxy it was made on; null for a seeded slot or a removed proxy. */
+  proxy_id: number | null;
+  device: FleetDeviceProfile | null;
   home_cities: string[];
   quarantined_until: string | null;
   note: string;
@@ -214,6 +342,8 @@ export type FleetSettings = {
   quarantine_probe_hours: number;
   /** Days finished tasks are kept; never fewer than familiar_days. */
   retention_days: number;
+  /** Non-parked slots one proxy may carry: a static ISP exit is one IP. */
+  max_accounts_per_proxy: number;
   search: FleetSearchSettings;
 };
 
@@ -228,6 +358,7 @@ export const FLEET_SETTINGS_DEFAULTS: Omit<FleetSettings, 'search'> = {
   quarantine_hours: 48,
   quarantine_probe_hours: 6,
   retention_days: 90,
+  max_accounts_per_proxy: 2,
 };
 
 /** What a worker token says about its bearer. `exp` is Unix seconds. The
@@ -375,6 +506,14 @@ export type FleetErrorCode =
   /** The city, item or task already exists (or is already leased). */
   | 'exists'
   /** Enabling a city whose slug no worker has verified yet; `override_verify` gets past it. */
-  | 'unverified';
+  | 'unverified'
+  /** Adding to the fleet: the pool account is held, or lacks a password or 2FA key. */
+  | 'account_busy' | 'no_login'
+  /** The proxy already carries `max_accounts_per_proxy` non-parked slots. */
+  | 'proxy_full'
+  /** Removing a proxy a non-parked slot uses. */
+  | 'in_use'
+  /** Removing a slot a worker holds (or a reservation does): park it first. */
+  | 'leased';
 
 export type FleetError = { error: FleetErrorCode; detail?: string };

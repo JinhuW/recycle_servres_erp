@@ -1,0 +1,318 @@
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Icon } from '../../../components/Icon';
+import { Modal } from '../../../components/Modal';
+import { handleFetchError, showSuccessToast, showWarnToast } from '../../../lib/errorToast';
+import {
+  fleetApi, fleetDeviceFor, fleetErrorCode, proxyLoad, type FleetCity, type FleetProxy, type FleetSlot,
+} from '../../../lib/fleet';
+import { ApiError } from '../../../lib/api';
+import { useT } from '../../../lib/i18n';
+import { deviceSummary, proxyChoices, proxyDraftProblem, proxyExit, proxyPatch, type ProxyDraft } from './proxyRules';
+import { ConfirmDialogBody } from './shared';
+import '../../../styles/fleet.css';
+
+// ─── Proxies and Add to fleet ─────────────────────────────────────────────────
+// The Account pool tab's way into the ERP fleet: a card listing the proxies
+// the ERP keeps (the URL is write-only, so a row shows host:port), and the
+// dialogs that put an available account on one of them or take a fleet
+// account out again. The ERP generates the account's browser and the host
+// agent starts a worker for it; nothing here talks to a worker.
+
+const DEFAULT_LIMIT = 2;
+
+export type FleetProxyState = { proxies: FleetProxy[] | null; limit: number; reload: () => void };
+
+/** The proxy list and the per-proxy limit, for a manager's pool tab; null until read, or when the fleet API is not served. */
+export function useFleetProxies(on: boolean): FleetProxyState {
+  const [proxies, setProxies] = useState<FleetProxy[] | null>(null);
+  const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  const reload = useCallback(() => {
+    fleetApi.proxies().then(setProxies).catch(() => undefined);
+    fleetApi.settings().then((s) => setLimit(s.max_accounts_per_proxy ?? DEFAULT_LIMIT)).catch(() => undefined);
+  }, []);
+  useEffect(() => { if (on) reload(); }, [on, reload]);
+  return { proxies, limit, reload };
+}
+
+/** A refusal the backend explains in `detail`; anything else is the usual error dialog. */
+function warnOrFail(err: unknown): void {
+  const detail = err instanceof ApiError ? (err.body as { detail?: unknown } | undefined)?.detail : undefined;
+  if (err instanceof ApiError && (err.status === 409 || err.status === 422) && typeof detail === 'string') showWarnToast(detail);
+  else handleFetchError(err);
+}
+
+export function ProxiesCard({ proxies, limit, onChanged }: { proxies: FleetProxy[]; limit: number; onChanged: () => void }) {
+  const { t } = useT();
+  const [editing, setEditing] = useState<FleetProxy | 'new' | null>(null);
+  const [removing, setRemoving] = useState<FleetProxy | null>(null);
+  return (
+    <section className="card fleet-card fleet-proxies" aria-label={t('fleetProxies')}>
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t('fleetProxies')}</h2>
+          <span className="card-sub">{t('fleetProxiesSub')}</span>
+        </div>
+        <button type="button" className="btn sm" onClick={() => setEditing('new')}>
+          <Icon name="plus" size={13} />{t('fleetProxyAdd')}
+        </button>
+      </div>
+      <div className="fp-table-wrap">
+        <table className="fp-table">
+          <thead>
+            <tr>
+              <th>{t('fleetProxyLabel')}</th>
+              <th>{t('fleetProxyExit')}</th>
+              <th>{t('fleetProxyTimezone')}</th>
+              <th>{t('fleetProxyUsedBy')}</th>
+              <th>{t('fleetProxyNote')}</th>
+              <th aria-label={t('edit')} />
+            </tr>
+          </thead>
+          <tbody>
+            {proxies.length === 0 && <tr><td colSpan={6} className="fp-empty">{t('fleetProxyNone')}</td></tr>}
+            {proxies.map((p) => {
+              const load = proxyLoad(p);
+              return (
+                <tr key={p.id}>
+                  <td>{p.label}</td>
+                  <td className="mono">{proxyExit(p)}</td>
+                  <td className="mono">{p.timezone}</td>
+                  <td>
+                    <span className="fp-holder">
+                      <span className={load >= limit ? 'fp-warn' : undefined}>{t('fleetProxyUses', { n: load, max: limit })}</span>
+                      {p.slots.length > 0 && (
+                        <small>
+                          {p.slots.map((s) => `#${s.account_no}${s.parked ? ` (${t('fleetProxyParkedTag')})` : s.leased ? ` (${t('fleetProxyLeasedTag')})` : ''}`).join(', ')}
+                        </small>
+                      )}
+                    </span>
+                  </td>
+                  <td className="fp-muted">{p.note || '—'}</td>
+                  <td className="fleet-row-actions">
+                    <button type="button" className="btn ghost icon sm" onClick={() => setEditing(p)}
+                      aria-label={t('fleetProxyEditTitle', { label: p.label })} title={t('fleetProxyEditTitle', { label: p.label })}>
+                      <Icon name="edit" size={13} />
+                    </button>
+                    <button type="button" className="btn ghost icon sm" onClick={() => setRemoving(p)}
+                      aria-label={t('fleetProxyRemove')} title={t('fleetProxyRemove')}>
+                      <Icon name="trash" size={13} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {editing && (
+        <ProxyDialog proxy={editing === 'new' ? null : editing} onClose={() => setEditing(null)}
+          onDone={() => { setEditing(null); onChanged(); }} />
+      )}
+      {removing && (
+        <RemoveProxyDialog proxy={removing} onClose={() => setRemoving(null)} onDone={() => { setRemoving(null); onChanged(); }} />
+      )}
+    </section>
+  );
+}
+
+// The URL field starts empty even when editing: the ERP never sends it back.
+export function ProxyDialog({ proxy, onClose, onDone }: { proxy: FleetProxy | null; onClose: () => void; onDone: () => void }) {
+  const { t } = useT();
+  const [draft, setDraft] = useState<ProxyDraft>({
+    label: proxy?.label ?? '', url: '', timezone: proxy?.timezone ?? 'America/New_York', note: proxy?.note ?? '',
+  });
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const set = (patch: Partial<ProxyDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    const bad = proxyDraftProblem(draft, proxy !== null);
+    if (bad) { setProblem(t(bad)); return; }
+    const body = proxyPatch(draft, proxy);
+    if (proxy && Object.keys(body).length === 0) { onClose(); return; }
+    setBusy(true);
+    setProblem(null);
+    try {
+      const saved = proxy
+        ? await fleetApi.updateProxy(proxy.id, body)
+        : await fleetApi.addProxy({ label: body.label, url: body.url, timezone: body.timezone, ...(body.note ? { note: body.note } : {}) });
+      showSuccessToast(t('fleetProxySaved', { label: saved.label }));
+      onDone();
+    } catch (err) {
+      const detail = err instanceof ApiError ? (err.body as { detail?: unknown } | undefined)?.detail : undefined;
+      if (typeof detail === 'string' && err instanceof ApiError && err.status < 500) setProblem(detail);
+      else handleFetchError(err);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 520 }}>
+      <form onSubmit={submit}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">{proxy ? t('fleetProxyEditTitle', { label: proxy.label }) : t('fleetProxyAddTitle')}</div>
+            <div className="modal-sub">{t('fleetProxiesSub')}</div>
+          </div>
+        </div>
+        <div className="modal-body fleet-form">
+          <label className="fleet-field">
+            <span>{t('fleetProxyLabel')}</span>
+            <input className="input" value={draft.label} onChange={(e) => set({ label: e.target.value })} maxLength={80} autoFocus
+              placeholder="Decodo NY 1" />
+          </label>
+          <label className="fleet-field">
+            <span>{t('fleetProxyUrl')}</span>
+            <input className="input mono" type="password" value={draft.url} onChange={(e) => set({ url: e.target.value })}
+              autoComplete="new-password" spellCheck={false} placeholder={proxy ? proxyExit(proxy) : 'http://user:pass@host:port'} />
+            <small className="fp-muted">{t('fleetProxyUrlHint')}{proxy && <> {t('fleetProxyUrlKeep')}</>}</small>
+          </label>
+          <label className="fleet-field">
+            <span>{t('fleetProxyTimezone')}</span>
+            <input className="input mono" value={draft.timezone} onChange={(e) => set({ timezone: e.target.value })} spellCheck={false}
+              list="fleet-proxy-zones" />
+            <datalist id="fleet-proxy-zones">
+              {['America/New_York', 'America/Chicago', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles'].map((z) => <option key={z} value={z} />)}
+            </datalist>
+            <small className="fp-muted">{t('fleetProxyTimezoneHint')}</small>
+          </label>
+          <label className="fleet-field">
+            <span>{t('fleetProxyNote')}</span>
+            <input className="input" value={draft.note} onChange={(e) => set({ note: e.target.value })} maxLength={500} />
+          </label>
+          {problem && <p role="alert" className="fp-warn">{problem}</p>}
+        </div>
+        <div className="modal-foot">
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>{t('cancel')}</button>
+          <button type="submit" className="btn primary" disabled={busy}>{t('save')}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function RemoveProxyDialog({ proxy, onClose, onDone }: { proxy: FleetProxy; onClose: () => void; onDone: () => void }) {
+  const { t } = useT();
+  const [busy, setBusy] = useState(false);
+  const confirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fleetApi.removeProxy(proxy.id);
+      showSuccessToast(t('fleetProxyRemoved', { label: proxy.label }));
+      onDone();
+    } catch (err) {
+      warnOrFail(err);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 460 }}>
+      <ConfirmDialogBody title={t('fleetProxyRemoveTitle', { label: proxy.label })} confirm={t('fleetProxyRemove')} busy={busy} danger
+        onClose={onClose} onConfirm={confirm} body={<p>{t('fleetProxyRemoveBody')}</p>} />
+    </Modal>
+  );
+}
+
+export function AddToFleetDialog({ no, proxies, limit, onClose, onDone }: {
+  no: number; proxies: FleetProxy[]; limit: number; onClose: () => void; onDone: () => void;
+}) {
+  const { t } = useT();
+  const choices = useMemo(() => proxyChoices(proxies, limit), [proxies, limit]);
+  const [proxyId, setProxyId] = useState<number | null>(() => choices.find((c) => !c.full)?.proxy.id ?? null);
+  const [cities, setCities] = useState<FleetCity[] | null>(null);
+  const [home, setHome] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    fleetApi.cities().then((c) => { if (live) setCities(c.filter((x) => x.enabled)); }).catch(() => { if (live) setCities([]); });
+    return () => { live = false; };
+  }, []);
+  const chosen = choices.find((c) => c.proxy.id === proxyId) ?? null;
+  const device = chosen ? deviceSummary(fleetDeviceFor(no, chosen.proxy.timezone)) : null;
+  const toggle = (slug: string) => setHome((h) => (h.includes(slug) ? h.filter((x) => x !== slug) : [...h, slug]));
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy || !chosen || chosen.full) return;
+    setBusy(true);
+    try {
+      await fleetApi.addSlot({ account_no: no, proxy_id: chosen.proxy.id, ...(home.length ? { home_cities: home } : {}) });
+      showSuccessToast(t('fpAddedToFleetToast', { n: no, proxy: chosen.proxy.label }));
+      onDone();
+    } catch (err) {
+      warnOrFail(err);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 560 }}>
+      <form onSubmit={submit}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">{t('fpAddToFleetTitle', { n: no })}</div>
+            <div className="modal-sub">{t('fpAddToFleetSub')}</div>
+          </div>
+        </div>
+        <div className="modal-body fleet-form">
+          <fieldset className="fleet-field fleet-proxy-picks">
+            <span>{t('fpAddToFleetProxy')}</span>
+            {choices.length === 0 && <p className="fp-warn">{t('fpAddToFleetNoProxy')}</p>}
+            {choices.map(({ proxy, load, full }) => (
+              <label key={proxy.id} className={`fleet-proxy-pick${full ? ' fp-muted' : ''}`}>
+                <input type="radio" name="proxy" value={proxy.id} checked={proxyId === proxy.id} disabled={full}
+                  onChange={() => setProxyId(proxy.id)} />
+                <span>{proxy.label}</span>
+                <small className="mono">{proxyExit(proxy)}</small>
+                <small className="mono">{proxy.timezone}</small>
+                <small>{t('fleetProxyUses', { n: load, max: limit })}{full && <> · {t('fpAddToFleetFull')}</>}</small>
+              </label>
+            ))}
+          </fieldset>
+          <fieldset className="fleet-field">
+            <span>{t('fpAddToFleetHome')}</span>
+            {cities === null ? <small className="fp-muted">…</small> : (
+              <span className="fleet-city-picks">
+                {cities.map((c) => (
+                  <label key={c.slug} className={`chip${home.includes(c.slug) ? ' info' : ' muted'}`}>
+                    <input type="checkbox" checked={home.includes(c.slug)} onChange={() => toggle(c.slug)} />
+                    {c.name}
+                  </label>
+                ))}
+              </span>
+            )}
+            <small className="fp-muted">{t('fpAddToFleetHomeHint')}</small>
+          </fieldset>
+          {device && <p className="fp-muted">{t('fpAddToFleetDevice', device)}</p>}
+        </div>
+        <div className="modal-foot">
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>{t('cancel')}</button>
+          <button type="submit" className="btn primary" disabled={busy || !chosen || chosen.full}>{t('fpAddToFleetConfirm')}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+export function RemoveFromFleetDialog({ slot, onClose, onDone }: { slot: FleetSlot; onClose: () => void; onDone: () => void }) {
+  const { t } = useT();
+  const [busy, setBusy] = useState(false);
+  const confirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fleetApi.removeSlot(slot.account_no);
+      showSuccessToast(t('fpRemovedFromFleetToast', { n: slot.account_no }));
+      onDone();
+    } catch (err) {
+      if (fleetErrorCode(err) === 'leased') showWarnToast(t('fpRemoveFromFleetLeased'));
+      else warnOrFail(err);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 460 }}>
+      <ConfirmDialogBody title={t('fpRemoveFromFleetTitle', { n: slot.account_no })} confirm={t('fpRemoveFromFleet')} busy={busy} danger
+        onClose={onClose} onConfirm={confirm} body={<p>{t('fpRemoveFromFleetBody')}</p>} />
+    </Modal>
+  );
+}

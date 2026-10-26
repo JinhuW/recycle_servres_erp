@@ -343,6 +343,9 @@ export const SETTING_BOUNDS: Record<NumericKey, readonly [number, number]> = {
   quarantine_probe_hours: [1, 168],
   // At least the city log's longest window (720 h) and the quarantine's.
   retention_days: [30, 730],
+  // A static ISP exit is one IP; two accounts on it is what the vendor's
+  // pairs were bought for.
+  max_accounts_per_proxy: [1, 10],
 };
 
 // What Facebook's own filters accept (the vendored monitor's enums), and the

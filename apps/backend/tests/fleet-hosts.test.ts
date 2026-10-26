@@ -92,7 +92,8 @@ describe('hosts: manager routes', () => {
     expect(list.body.release).toBeNull();
 
     const put = await api<{ host: HostView }>('PUT', '/api/fleet/hosts/worker-60-14', { token, body: { capacity: 4, authoritative: true }, env: ENV });
-    expect(put.body.host).toMatchObject({ capacity: 4, authoritative: true, desired: { count: 4 } });
+    // No account to run yet, so nothing to start whatever the capacity.
+    expect(put.body.host).toMatchObject({ capacity: 4, authoritative: true, desired: { count: 0 } });
     expect((await api('PUT', '/api/fleet/hosts/worker-60-14', { token, body: { capacity: -1 } })).status).toBe(422);
     expect((await api('PUT', '/api/fleet/hosts/nobody', { token, body: { capacity: 1 } })).status).toBe(404);
     expect((await api('DELETE', '/api/fleet/hosts/worker-60-14', { token })).status).toBe(200);
@@ -117,11 +118,47 @@ describe('hosts: agent routes', () => {
     expect(off.status).toBe(200);
     expect(off.body).toEqual({ authoritative: false, count: 0, image: IMAGE_OLD, version: '0.13.9', vnc_ports: {}, roll: null, leases: {} });
     await getTestDb()`UPDATE fleet_hosts SET authoritative = TRUE WHERE host_id = 'lab'`;
+    for (const n of [1, 2, 3, 4]) await seedSlot(n);
     const on = await desired();
     expect(on.body).toEqual({ authoritative: true, count: 3, image: IMAGE_OLD, version: '0.13.9', vnc_ports: { 'lab-1': 5901, 'lab-2': 5902, 'lab-3': 5903 }, roll: null, leases: {} });
     // Another host's id, or no token, is refused.
     expect((await desired(HOST_TOKEN, 'other')).status).toBe(401);
     expect((await api('GET', '/api/fleet/hosts/lab/desired')).status).toBe(401);
+  });
+
+  it('desired starts a worker per account it could run, never above capacity or below a worker holding one', async () => {
+    const db = getTestDb();
+    await db`UPDATE fleet_hosts SET capacity = 4 WHERE host_id = 'lab'`;
+    expect((await desired()).body).toMatchObject({ count: 0, vnc_ports: {} });
+    // One ready account: one worker.
+    const first = await seedSlot(1);
+    expect((await desired()).body).toMatchObject({ count: 1, vnc_ports: { 'lab-1': 5901 } });
+    // A second account added later: a second worker.
+    await seedSlot(2);
+    expect((await desired()).body.count).toBe(2);
+    // Parked, held by another host, or out of the fleet: none of them counts.
+    const parked = await seedSlot(3);
+    await db`UPDATE fleet_slots SET lease_expires_at = 'infinity' WHERE account_no = ${parked}`;
+    await seedHost('other', 'host-other-token', 2);
+    await seedSlot(4, { worker: 'other-1', host: 'other', epoch: 1 });
+    const gone = await seedSlot(5);
+    await db`UPDATE fb_pool_accounts SET status = 'available', holder_name = NULL WHERE no = ${gone}`;
+    expect((await desired()).body.count).toBe(2);
+    // An account this host's worker holds counts, and so does a handoff
+    // reservation for one of its workers.
+    await db`UPDATE fleet_slots SET worker_id = 'lab-1', host_id = 'lab', epoch = 1, lease_expires_at = NOW() + interval '20 minutes' WHERE account_no = ${first}`;
+    expect((await desired()).body.count).toBe(2);
+    await db`UPDATE fleet_slots SET worker_id = 'lab-4', host_id = 'lab', handoff_epoch = 1, reserved_until = NOW() + interval '20 minutes',
+             lease_expires_at = NOW() + interval '20 minutes' WHERE account_no = ${parked}`;
+    // lab-4 holds the reservation, so the count does not drop below it.
+    expect((await desired()).body).toMatchObject({ count: 4, vnc_ports: { 'lab-1': 5901, 'lab-4': 5904 } });
+    // Capacity still caps it.
+    await db`UPDATE fleet_hosts SET capacity = 3 WHERE host_id = 'lab'`;
+    expect((await desired()).body.count).toBe(3);
+    // The manager's list shows the same count the agent gets.
+    const { token } = await loginAs(ALEX);
+    const list = await api<{ hosts: HostView[] }>('GET', '/api/fleet/hosts', { token, env: ENV });
+    expect(list.body.hosts.find((h) => h.host_id === 'lab')!.desired!.count).toBe(3);
   });
 
   it('report is stored with last_seen_at and version, without a CSRF header, and shows in the manager list', async () => {

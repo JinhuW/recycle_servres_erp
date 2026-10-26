@@ -7,7 +7,7 @@ import type {
 } from '@recycle-erp/shared';
 import type { AlertHitRow, FleetAccount, FleetDoc, ReviewStatsDay } from '../../../lib/coordinator';
 import type { PoolAccount } from '../../../lib/facebookPool';
-import type { FleetHost, FleetItem, FleetSettings, FleetSlot, FleetTask, FleetWorker } from '../../../lib/fleet';
+import type { FleetHost, FleetItem, FleetProxy, FleetSettings, FleetSlot, FleetTask, FleetWorker } from '../../../lib/fleet';
 
 export const NOW = Date.parse('2026-10-24T18:30:00Z');
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
@@ -20,7 +20,7 @@ export const ITEMS: FleetItem[] = [
 
 export const SETTINGS: FleetSettings = {
   per_day_default: 1, budget_minutes: 360, lease_minutes: 30, task_max_minutes: 45, poll_hold_seconds: 50,
-  familiar_days: 7, start_fresh_hours: 2, quarantine_hours: 48, quarantine_probe_hours: 6, retention_days: 90, search: {},
+  familiar_days: 7, start_fresh_hours: 2, quarantine_hours: 48, quarantine_probe_hours: 6, retention_days: 90, max_accounts_per_proxy: 2, search: {},
 };
 
 // GET /tasks answers bare rows: no city name, ids as numbers.
@@ -157,7 +157,7 @@ export const WORKERS: FleetWorker[] = [
 
 const slot = (no: number, over: Partial<FleetSlot> = {}): FleetSlot => ({
   account_no: no, uid: `10000${no}000${no}${no}${no}`, pool_status: 'fleet', worker_id: null, host_id: null, last_host_id: null,
-  epoch: 0, lease_expires_at: null, has_proxy: true, device: null, home_cities: [], quarantined_until: null, note: '', parked: false, reserved_until: null,
+  epoch: 0, lease_expires_at: null, has_proxy: true, proxy_id: null, device: null, home_cities: [], quarantined_until: null, note: '', parked: false, reserved_until: null,
   minutes_today: 0, budget_minutes: 360, worker: null,
   ...over,
 });
@@ -234,4 +234,13 @@ export const POOL: PoolAccount[] = [
   poolAccount(50, 'fleet', 'homelab-5'),
   poolAccount(51, 'taken', 'marcus'),
   poolAccount(52, 'retired'),
+];
+
+// GET /proxies: host:port and the slots on each, never the URL.
+export const PROXIES: FleetProxy[] = [
+  { id: 1, label: 'Decodo NY 1', host: 'isp.example.net', port: 10001, timezone: 'America/New_York', note: 'pair A', created_at: ago(60 * 24),
+    slots: [{ account_no: 31, pool_status: 'fleet', parked: false, leased: true }, { account_no: 40, pool_status: 'fleet', parked: false, leased: false }] },
+  { id: 2, label: 'Decodo NY 2', host: 'isp.example.net', port: 10002, timezone: 'America/New_York', note: '', created_at: ago(60 * 24),
+    slots: [{ account_no: 44, pool_status: 'fleet', parked: true, leased: false }] },
+  { id: 3, label: 'Decodo CHI 1', host: 'isp.example.net', port: 10003, timezone: 'America/Chicago', note: '', created_at: ago(60), slots: [] },
 ];

@@ -28,6 +28,8 @@ import { AccountEditor } from './accountPool/AccountEditor';
 import { AccountImport } from './accountPool/AccountImport';
 import { CookieLabel, PoolCode, STATUS_KEYS, StatusChip } from './accountPool/shared';
 import { isQuarantined, leaseLive } from './fleet/fleetBoard';
+import { fleetRowAction } from './fleet/proxyRules';
+import { AddToFleetDialog, ProxiesCard, RemoveFromFleetDialog, useFleetProxies } from './fleet/FleetProxies';
 import { ReleaseQuarantineButton, UnparkDialog, workerStateLabel } from './fleet/shared';
 import { STATUS_KEY, StatusChip as WorkerStatusChip, statusNote } from './FleetWorkers';
 import '../../styles/facebookPool.css';
@@ -128,6 +130,16 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
   const [reporting, setReporting] = useState<number | null>(null);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [unparking, setUnparking] = useState<FleetSlot | null>(null);
+  const [addingToFleet, setAddingToFleet] = useState<number | null>(null);
+  const [removingFromFleet, setRemovingFromFleet] = useState<FleetSlot | null>(null);
+  // The ERP fleet's proxies, once its slots answered: without the fleet API
+  // there is nothing to add an account to.
+  const fleetProxies = useFleetProxies(manager && slots !== null);
+  const fleetChanged = () => {
+    void poolApi.snapshot().then(onSnapshot).catch(() => undefined);
+    onSlotsChanged?.();
+    fleetProxies.reload();
+  };
   const workers = useMemo(() => new Map((fleet?.workers ?? []).map((w) => [w.worker_id, w])), [fleet]);
   const slotsByNo = useMemo(() => new Map((slots ?? []).map((s) => [s.account_no, s])), [slots]);
   const parked = useMemo(() => parkedWorkers(challenges), [challenges]);
@@ -341,8 +353,29 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
         </span>
       );
     }
+    if (slot && !leaseLive(slot)) return <span className="fp-muted">{t('fpRunsOnWaiting')}</span>;
     if (a.status === 'taken') return <span className="fp-muted">{t('fpRunsOnManual', { who: a.holder ?? '—' })}</span>;
     return <span className="fp-muted">{t(STATUS_KEYS[a.status]).toLowerCase()}</span>;
+  };
+  // Into and out of the ERP fleet, from the account's own row.
+  const fleetAction = (a: PoolAccount) => {
+    if (slots === null || fleetProxies.proxies === null) return null;
+    const action = fleetRowAction(a, slotsByNo.get(a.no));
+    if (!action) return null;
+    if (action.kind === 'add' || action.kind === 'add-blocked') {
+      return (
+        <button type="button" className="btn sm" disabled={action.kind === 'add-blocked'}
+          title={action.kind === 'add-blocked' ? t('fpAddToFleetNeedsLogin') : undefined} onClick={() => setAddingToFleet(a.no)}>
+          <Icon name="plus" size={12} />{t('fpAddToFleet')}
+        </button>
+      );
+    }
+    return (
+      <button type="button" className="btn sm" disabled={action.kind === 'remove-blocked'}
+        title={action.kind === 'remove-blocked' ? t('fpRemoveFromFleetLeased') : undefined} onClick={() => setRemovingFromFleet(action.slot)}>
+        {t('fpRemoveFromFleet')}
+      </button>
+    );
   };
   const holderCell = (a: PoolAccount) => {
     const w = workerOf(a);
@@ -470,7 +503,14 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
                         <td className="fp-row-number">{a.no}</td>
                         <td>{copyCell(a, 'uid', 'fpUid', a.uid, 'mono')}</td>
                         <td>{statusCell(a)}</td>
-                        <td>{runsOnCell(a)}</td>
+                        <td>
+                          {fleetAction(a) ? (
+                            <span className="fp-holder">
+                              {runsOnCell(a)}
+                              <span>{fleetAction(a)}</span>
+                            </span>
+                          ) : runsOnCell(a)}
+                        </td>
                         <td>{holderCell(a)}</td>
                         <td>{secretCell(a, 'password', 'fpPassword')}</td>
                         <td>{copyCell(a, 'totp', 'fpCode', <PoolCode secret={a.totp} />)}</td>
@@ -540,6 +580,9 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
               </ul>
             </aside>
           </div>
+          {fleetProxies.proxies !== null && (
+            <ProxiesCard proxies={fleetProxies.proxies} limit={fleetProxies.limit} onChanged={fleetProxies.reload} />
+          )}
         </>
       ) : (
         <>
@@ -812,6 +855,14 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
             });
           }}
         />
+      )}
+      {addingToFleet !== null && fleetProxies.proxies !== null && (
+        <AddToFleetDialog no={addingToFleet} proxies={fleetProxies.proxies} limit={fleetProxies.limit}
+          onClose={() => setAddingToFleet(null)} onDone={() => { setAddingToFleet(null); fleetChanged(); }} />
+      )}
+      {removingFromFleet && (
+        <RemoveFromFleetDialog slot={removingFromFleet} onClose={() => setRemovingFromFleet(null)}
+          onDone={() => { setRemovingFromFleet(null); fleetChanged(); }} />
       )}
       {unparking && (
         <UnparkDialog slot={unparking} onClose={() => setUnparking(null)}
