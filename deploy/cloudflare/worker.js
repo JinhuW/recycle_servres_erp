@@ -108,9 +108,60 @@ export default {
       proxied.headers.set('X-Forwarded-For', clientIp);
       proxied.headers.set('X-Client-IP', clientIp);
     }
-    return fetch(proxied, { redirect: 'manual' });
+    // Everything else streams straight back: WebSocket upgrades (the fleet VNC
+    // relay's both ends) come back as a 101 carrying the socket, and a held
+    // next-task long-poll is just a slow response.
+    const res = await fetch(proxied, { redirect: 'manual' });
+    if (request.method === 'POST' && url.pathname === FLEET_CLAIM_PATH && res.status === 200) {
+      return withWorkerEnv(res, env);
+    }
+    return res;
   },
 };
+
+const FLEET_CLAIM_PATH = '/api/fleet/worker/claim';
+
+// The env every fleet worker shares (LLM key, Telegram, ...) is a Worker
+// secret, so it never sits in Railway or Postgres. It rides only on a claim
+// the backend answered 200: the host-token check there decides who gets it.
+async function withWorkerEnv(res, env) {
+  const workerEnv = parseWorkerEnv(env.FLEET_WORKER_ENV);
+  if (!workerEnv) {
+    // Name the problem, never the value.
+    console.log(`fleet claim: FLEET_WORKER_ENV is ${env.FLEET_WORKER_ENV ? 'not a JSON object of strings' : 'not set'}; answering without env`);
+    return res;
+  }
+  const text = await res.text();
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = null;
+  }
+  const headers = new Headers(res.headers);
+  // The body is rebuilt here: the runtime sets the new length, and the bytes
+  // are no longer the encoded ones the origin described.
+  headers.delete('Content-Length');
+  headers.delete('Content-Encoding');
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return new Response(text, { status: res.status, headers });
+  }
+  headers.set('Cache-Control', 'no-store');
+  return new Response(JSON.stringify({ ...body, env: workerEnv }), { status: res.status, headers });
+}
+
+function parseWorkerEnv(raw) {
+  if (!raw) return null;
+  let value;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (!Object.values(value).every((v) => typeof v === 'string')) return null;
+  return value;
+}
 
 // A page, not a bare status: this is what a person who followed a stale or
 // mistyped link sees. Self-contained (no app bundle, no fonts) so it renders

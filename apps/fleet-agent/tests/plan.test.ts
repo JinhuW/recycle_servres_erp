@@ -136,6 +136,28 @@ describe('restarts', () => {
   });
 });
 
+describe('operator needed', () => {
+  it('exit 78 is never restarted, however long ago, online or offline, and never counts', () => {
+    for (const online of [true, false]) {
+      const p = run([running('lab-1'), exited('lab-2', 78, ago(24 * 3600))], { online });
+      expect(p.actions).toEqual([]);
+      expect(p.notes).toContain('lab-2: exit 78, cannot connect; left stopped for an operator');
+    }
+  });
+
+  it('does not hold up the others: a missing worker still starts', () => {
+    expect(kinds(run([exited('lab-1', 78, ago(120))]))).toEqual([['run', 'lab-2']]);
+  });
+
+  it('is still removed when the count drops below it', () => {
+    expect(kinds(run([running('lab-1'), exited('lab-2', 78, ago(120))], {}, { count: 1 }))).toEqual([['remove', 'lab-2']]);
+  });
+
+  it('runs again once an operator starts it', () => {
+    expect(run([running('lab-1'), running('lab-2')]).actions).toEqual([]);
+  });
+});
+
 describe('not authoritative', () => {
   it('starts, stops and restarts nothing', () => {
     const p = run([running('lab-3'), exited('lab-1', 1, ago(600))], {}, { authoritative: false, count: 2 });

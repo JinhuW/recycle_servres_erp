@@ -59,6 +59,8 @@ jobs:
       - run: pnpm --filter @recycle-erp/shared typecheck
       - run: pnpm --filter recycle-erp-frontend typecheck
       - run: pnpm --filter recycle-erp-frontend test
+      # The Worker's own proxy rules (tsx: it imports the frontend's TS).
+      - run: apps/backend/node_modules/.bin/tsx --test deploy/cloudflare/worker.test.mjs
       - run: pnpm --filter recycle-erp-frontend build
 
   deploy:

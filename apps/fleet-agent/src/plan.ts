@@ -8,6 +8,8 @@
 // * Offline (the desired state is a cached copy): exited workers may be
 //   restarted, nothing is created, removed or replaced. Blind is not the time
 //   to change things.
+// * A worker that exited 78 stays stopped, online or not: it could not
+//   connect, and every restart would be one more login into the same failure.
 // * One start per tick, and never within the stagger of the previous one:
 //   each start is a Facebook login, and ten from one host at once is a
 //   pattern worth not showing.
@@ -22,6 +24,12 @@ export const CRASH_LIMIT = 5;
 // Worker exit codes the image contract defines and what the agent owes each.
 export const EXIT_STALE_OR_NO_SLOT = 75;
 export const EXIT_CLAIM_FAILED = 70;
+// The worker could not reach Facebook or its proxy and stopped on purpose. A
+// retry is another login against the same wall, so only a person starts it
+// again (`docker start`, or `docker rm` to let the agent run a fresh one).
+export const EXIT_OPERATOR_NEEDED = 78;
+/** What the report says for a worker left for an operator, in place of docker's `exited`. */
+export const OPERATOR_NEEDED_STATE = 'operator_needed';
 const RESTART_DELAY_MS: Record<number, number> = {
   [EXIT_STALE_OR_NO_SLOT]: 60_000,
   [EXIT_CLAIM_FAILED]: 10 * 60_000,
@@ -97,7 +105,12 @@ export function restartDelayMs(exitCode: number | null): number {
 
 /** True for an exit the contract did not define: it counts toward the crash limit. */
 export function isCrash(exitCode: number | null): boolean {
-  return exitCode !== EXIT_STALE_OR_NO_SLOT && exitCode !== EXIT_CLAIM_FAILED;
+  return exitCode !== EXIT_STALE_OR_NO_SLOT && exitCode !== EXIT_CLAIM_FAILED && exitCode !== EXIT_OPERATOR_NEEDED;
+}
+
+/** An exited worker that waits for a person, never for the agent. */
+export function needsOperator(c: Container): boolean {
+  return !c.running && c.exit_code === EXIT_OPERATOR_NEEDED;
 }
 
 export function recentRestarts(times: number[] | undefined, now: number): number[] {
@@ -175,6 +188,10 @@ export function plan(input: PlanInput): Plan {
       if (online && desired.roll?.replace === id && current.image !== desired.image) {
         deferredReplace = { kind: 'replace', worker_id: id, container: current.name, image: desired.image, port: vncPort(desired, id, n), reason: `image ${current.image} -> ${desired.image}` };
       }
+      continue;
+    }
+    if (needsOperator(current)) {
+      notes.push(`${id}: exit ${EXIT_OPERATOR_NEEDED}, cannot connect; left stopped for an operator`);
       continue;
     }
     // Exited: how long ago, and has it been doing this a lot.

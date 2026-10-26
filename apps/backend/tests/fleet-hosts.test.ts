@@ -232,8 +232,11 @@ describe('slots and workers', () => {
       INSERT INTO fleet_tasks (city, item, due_at, state, worker_id, account_no, epoch, leased_at, lease_expires_at)
       VALUES ('houston', 'server_ram', NOW(), 'leased', 'lab-1', ${running}, 3, NOW() - interval '10 minutes', NOW() + interval '20 minutes')
       RETURNING id::int AS id`;
-    await db`INSERT INTO fleet_tasks (city, item, due_at, state, worker_id, account_no, epoch, leased_at, lease_expires_at, done_at)
-             VALUES ('houston', 'server_ram', NOW(), 'done', 'lab-1', ${running}, 3, NOW() - interval '2 hours', NOW() - interval '90 minutes', NOW() - interval '60 minutes')`;
+    // An hour from this UTC day's midnight: "two hours ago" is yesterday when
+    // the suite runs in the small hours, and today's minutes would miss it.
+    await db`WITH d AS (SELECT date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS midnight)
+             INSERT INTO fleet_tasks (city, item, due_at, state, worker_id, account_no, epoch, leased_at, lease_expires_at, done_at)
+             SELECT 'houston', 'server_ram', NOW(), 'done', 'lab-1', ${running}, 3, midnight, midnight + interval '30 minutes', midnight + interval '60 minutes' FROM d`;
     const { token } = await loginAs(ALEX);
     const list = await api<{ slots: SlotView[] }>('GET', '/api/fleet/slots', { token });
     expect(list.status).toBe(200);

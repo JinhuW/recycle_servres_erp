@@ -149,6 +149,19 @@ describe('online', () => {
     expect(server.reports.at(-1)!.containers[1]).toMatchObject({ worker_id: 'lab-2', state: 'exited' });
   });
 
+  it('leaves a worker that exited 78 stopped and reports it as needing an operator', async () => {
+    const docker = new FakeDocker([running('lab-1'), exited('lab-2', 78, '2026-10-24T09:00:00Z')]);
+    server.desired = desired({ count: 2 });
+    const a = agent(docker);
+    for (let i = 0; i < 3; i++) {
+      const result = await a.tick();
+      expect(result.actions).toEqual([]);
+      clock += 30 * 60_000;
+    }
+    expect(docker.commands).toEqual([]);
+    expect(server.reports.at(-1)!.containers[1]).toMatchObject({ worker_id: 'lab-2', state: 'operator_needed' });
+  });
+
   it('refuses to proceed when its token is wrong, and runs nothing', async () => {
     const docker = new FakeDocker();
     const result = await agent(docker, { token: 'wrong' }).tick();

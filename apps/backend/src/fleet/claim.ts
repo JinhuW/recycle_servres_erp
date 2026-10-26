@@ -306,7 +306,7 @@ worker.post('/claim', hostAuth, async (c) => {
       items,
       settings: {
         search: settings.search,
-        coordinator_url: c.env.FLEET_COORDINATOR_URL ?? '',
+        coordinator_url: c.env.FLEET_COORDINATOR_URL || null,
         lease_minutes: settings.lease_minutes,
         poll_hold_seconds: settings.poll_hold_seconds,
       },
