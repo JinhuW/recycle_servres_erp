@@ -41,6 +41,12 @@ what answers.
 | Agent holds: exit `0`/`143` while the agent ran (`operator_stopped`) and the crash limit (`crash_limit`) leave a worker stopped like `78`; report containers carry optional `hold`, `exit_code`, `image_id`, and the report an optional `agent` identity; repeated `75` backs off; `401/403/404` on `desired` means observe-only; `--` before the image; `FLEET_IMAGE_PREFIX` | §6, §10 | agent review fixes |
 | No coordinator in the MVP: `FLEET_COORDINATOR_URL` may be empty, and `settings.coordinator_url` is then `null` | §2, §5 | this change |
 | Exit code `78`: the worker cannot connect and waits for an operator; the agent never restarts it | §6, §10 | this change |
+| A missing server key is `503 {error: "unavailable"}`, never 401; worker 401s carry `detail` `missing_token` / `bad_token` / `expired_token`; `FLEET_WORKER_TOKEN_KEY_PREVIOUS` for rotation | §2, §3, §5 | RS-406 |
+| Claim: `worker_id` must be `<host_id>-<n>`; a claim-id retry or handoff waits for its own slot instead of skipping to another | §5 | RS-406 |
+| Handoff reservations carry `reserved_until` (gate timeout) instead of an infinite lease; slot rows add `reserved_until`; park/unpark clear the handoff | §4, §6, §7 | RS-406 |
+| `next-task` hands a lease the epoch still holds again instead of leasing a second; the replacement's later epoch is not drained; a wake that finds nothing keeps holding | §5 | RS-406 |
+| A `verify-slug` verdict comes only from `finished` with a boolean `matches` and no `detail.error` / `detail.wall` | §5 | RS-406 |
+| `PUT /session` needs `c_user` (this account) and `xs` unless `clear: true` | §5 | RS-406 |
 | Coordinator wired for fleet workers on dev: `FLEET_COORDINATOR_URL=http://10.10.10.73:8500` (LAN forwarder), coordinator tokens per worker id in `FLEET_WORKER_ENV` as `RS_CONTROL_PLANE_TOKENS`; alerts withheld unless `env` carries `RS_ALERTS=on` | §2 | facebook-tracker 0.14.2 |
 
 ## 1. Names
@@ -70,8 +76,9 @@ Backend (Railway `backend`, and `.env` locally):
 
 | Var | Meaning |
 | --- | --- |
-| `FB_POOL_KEY` | exists; seals pool secrets. Without it `claim` and `PUT /worker/session` answer `401 {error: "unauthorized", detail: "FB_POOL_KEY is not set"}` |
-| `FLEET_WORKER_TOKEN_KEY` | HMAC key for worker tokens (hex, 32 bytes). **Required in production**: without it every worker route and `claim` answer `401` with `detail: "FLEET_WORKER_TOKEN_KEY is not set"`, and the rest of the app boots as usual. Outside production it is optional: the key is derived from `JWT_SECRET` (HKDF-SHA256, info `fleet-worker-token`), so dev and CI need no extra variable |
+| `FB_POOL_KEY` | exists; seals pool secrets. Without it (production) `claim` and `PUT /worker/session` answer `503 {error: "unavailable", detail: "FB_POOL_KEY is not set"}` |
+| `FLEET_WORKER_TOKEN_KEY` | HMAC key for worker tokens (hex, 32 bytes). **Required in production**: without it every worker route and `claim` answer `503 {error: "unavailable", detail: "FLEET_WORKER_TOKEN_KEY is not set"}`, and the rest of the app boots as usual. Outside production it is optional: the key is derived from `JWT_SECRET` (HKDF-SHA256, info `fleet-worker-token`), so dev and CI need no extra variable |
+| `FLEET_WORKER_TOKEN_KEY_PREVIOUS` | optional; the key before a rotation (hex, 32 bytes). A token it signed still verifies, and the worker's next heartbeat answers a token re-signed under `FLEET_WORKER_TOKEN_KEY`. Rotate by moving the old key here and setting a new one; remove it after a day. Without it, every running worker's token is a `bad_token` 401 and the worker exits |
 | `FLEET_IMAGE_WORKER` | default worker image ref, e.g. `ghcr.io/jinhuw/aimm-recycle:0.14.0`; `desired.image` falls back to it when no release exists or the last one failed, and `desired.version` is its tag |
 | `FLEET_IMAGE_AGENT` | default agent image ref. Not read by the backend yet |
 | `FLEET_COORDINATOR_URL` | the Python coordinator, handed to workers at claim as `settings.coordinator_url`. **Empty or unset = no coordinator**: the claim then sends `null` and workers talk to no coordinator at all. Dev since 2026-10-26: `http://10.10.10.73:8500`, the LAN forwarder on the homelab VM that admits only `10.10.60.14` (`HOSTS.md` → *Coordinator route*). A worker with a coordinator but alerts off records only its login ledger there (below) |
@@ -135,10 +142,13 @@ Keys the worker reads from `env` beyond the template's references
 | worker | `Authorization: Bearer <worker token>`: `base64url(json{worker_id, account_no, epoch, exp}) . hmac` with `FLEET_WORKER_TOKEN_KEY`; `exp` = claim + 7 days | `/api/fleet/worker/*` except `claim` |
 
 A worker token whose `epoch` ≠ `fleet_slots.epoch` for its `account_no` (or
-whose slot is gone) → `409 {error: "stale_epoch"}` on every worker route. A
-bad or expired token, a missing bearer, or a host token used on another
-host's `:id` → `401 {error: "unauthorized"}`. Manager routes answer the app's
-usual `401`/`403` for a missing session or role.
+whose slot is gone, or whose pool account left the fleet or changed holder) →
+`409 {error: "stale_epoch"}` on every worker route. A missing, bad or expired
+worker token → `401 {error: "unauthorized", detail}` (§5 lists the details).
+A missing or unknown host token, or one used on another host's `:id` → `401
+{error: "unauthorized"}`. A key missing on the ERP's side → `503 {error:
+"unavailable"}`, never 401. Manager routes answer the app's usual `401`/`403`
+for a missing session or role.
 
 ## 4. Schema (`0206_fleet.sql`)
 
@@ -263,6 +273,27 @@ CREATE INDEX fleet_tasks_item_idx         ON fleet_tasks(item);
 A **parked** slot is stored as `lease_expires_at = 'infinity'` with no
 worker; nothing claims it.
 
+**Later migrations.** The block above is `0206` as it shipped. Since then:
+
+- `0207_fleet_recovery.sql`: `fleet_task_attempts` (one row per ended lease,
+  archived by trigger `fleet_archive_attempt`); `fleet_minutes` rebuilt over
+  attempts plus live leases, split at UTC midnight; `fleet_slots` gains
+  `claim_id`, `handoff_epoch`, `quarantine_reset_at`, `quarantine_evidence`
+  (unique `(host_id, claim_id)`); trigger `fleet_fence_pool_owner` on
+  `fb_pool_accounts` (status, holder, uid change or delete of a fleet account
+  → slot epoch + 1, no worker, its leased tasks back to `ready`);
+  `fleet_tasks_open_idx` now excludes probes, which get
+  `fleet_tasks_probe_idx` (one open probe per account).
+- `0208_fleet_claim_core.sql`: `fleet_slots.reserved_until` (a handoff
+  reservation's deadline, §6; the lease ends with it, so a reservation is no
+  longer an infinite lease); index `fleet_tasks_done_account_idx` on
+  `(account_no, city, done_at) WHERE state = 'done'` for the pick's familiar
+  test.
+
+Lock order everywhere: pool account (`FOR NO KEY UPDATE`), then slot, then
+tasks. The release row (`fleet_settings` key `release`) is locked only by
+`desired`/`advanceRoll` and `stopped`; a pick reads it after its slot lock.
+
 `LISTEN/NOTIFY` channel: `fleet_tasks` (payload: `item`), sent by the
 scheduler after every write that can make a task ready.
 
@@ -270,8 +301,21 @@ scheduler after every write that can make a task ready.
 
 All answers are JSON. Errors: `{error: <code>, detail?}`. Codes: `stale_epoch`
 (409), `no_slot` (409), `not_found` (404), `bad_request` (422, `detail` names
-the field), `unauthorized` (401). Task ids are JSON **numbers** everywhere
-(`BIGSERIAL` cast to int on the wire).
+the field), `unauthorized` (401), `unavailable` (503). Task ids are JSON
+**numbers** everywhere (`BIGSERIAL` cast to int on the wire).
+
+What a worker does with each refusal, exactly as the bodies read:
+
+| Status | Body | Meaning | Worker |
+| --- | --- | --- | --- |
+| 409 | `{"error":"stale_epoch"}` | the slot moved on, or the account left the fleet | fence: stop, exit 75 |
+| 401 | `{"error":"unauthorized","detail":"missing_token"}` | no bearer | fence |
+| 401 | `{"error":"unauthorized","detail":"bad_token"}` | signature under neither key, or malformed | fence |
+| 401 | `{"error":"unauthorized","detail":"expired_token"}` | past `exp` | fence |
+| 503 | `{"error":"unavailable","detail":"FLEET_WORKER_TOKEN_KEY is not set"}` | the ERP lacks its key | retry with backoff, keep the browser |
+| 503 | `{"error":"unavailable","detail":"FB_POOL_KEY is not set"}` | the ERP lacks its key (`claim`, `session`) | retry with backoff |
+
+Any other 5xx, and a response that never came, is transient too.
 
 ### `POST /api/fleet/worker/claim` — host scope
 
@@ -299,7 +343,16 @@ when the secret is unset, or when the claim reached the backend some other
 way. `settings.coordinator_url` is `null` when `FLEET_COORDINATOR_URL` is empty
 or unset (no coordinator).
 
-Picks the slot with `lease_expires_at IS NULL OR < now()` (a parked slot's
+`worker_id` must be `<host_id>-<n>` with `n` 1..4 digits (`422 bad_request`,
+`detail: "worker_id must be <host_id>-<n>"`): a host claims for its own
+workers only. Optional `claim_id` (one random id per process boot, stable
+across HTTP retries; `[a-zA-Z0-9-]{1,64}`) and `handoff_epoch` (§6). A
+repeated `claim_id` returns the same slot and epoch; a `handoff_epoch` that
+matches a live reservation for this worker takes that slot. Both wait for
+their own slot's lock rather than skip to another account. A `handoff_epoch`
+whose reservation lapsed falls back to any free slot, its own first.
+
+Otherwise picks the slot with `lease_expires_at IS NULL OR < now()` (a parked slot's
 infinite lease never qualifies) whose pool account has status `fleet`;
 quarantined slots are claimable (they then get only probe tasks), preferring
 `last_host_id = host_id`, then slots whose home cities nobody covers. Sets
@@ -331,6 +384,11 @@ own fields; the server does not read `detail.epoch`, the token's epoch is what
 is checked. `directives` is always `[]` today (`"relogin"` is reserved).
 Only `state` is required (`422` otherwise).
 
+The answer adds `{worker_token, token_expires_at}` (Unix seconds) when less
+than a day of the token remains, or when it verified under
+`FLEET_WORKER_TOKEN_KEY_PREVIOUS`: seven more days, same worker, account and
+epoch. The worker uses the new token for every later call.
+
 ### `POST /api/fleet/worker/next-task` — worker scope
 
 ```jsonc
@@ -360,6 +418,19 @@ answer `retry_after: 300`. Leases: `state='leased'`, `worker_id`,
 answers at once), retry the pick once, else answer `null` with
 `retry_after: 30`. Budget and quarantine answers are not held.
 
+**At most one lease per epoch.** If this worker and epoch still hold a
+leased task (its answer was lost to a timeout or a dropped connection) and
+`done` did not close it, that task is handed again (event `handed` with
+`{why, again: true}`) instead of a second lease. This comes before draining,
+budget and quarantine.
+
+`{task: null, reason: "draining", retry_after: 30}`: a roll is replacing
+this worker (§6). It applies to the epoch the roll chose and earlier, never to
+the replacement on a later epoch.
+
+A held poll that a notify wakes but that finds nothing for this account holds
+again until its `wait` runs out; it answers `nothing_due` only then.
+
 `done.task_id` is a JSON integer (`422` otherwise). A `done` for a task this
 worker no longer holds (not `leased`, or leased to another worker) is a
 **silent no-op**: nothing is written and the pick goes on as usual.
@@ -379,19 +450,29 @@ stay leased for `lease_minutes`. `take` that is not a boolean is `422`.
 ```
 
 `404 not_found` when the task is not this worker's. `started` sets
-`started_at` once. On a `verify-slug` task, `finished` or `stopped` is the
-city's verdict: `detail.matches === true` enables the city, and
-`detail.location` (≤ 200 chars) becomes `verified_as`.
+`started_at` once. On a `verify-slug` task, only `finished` with a boolean
+`detail.matches` and neither `detail.error` nor `detail.wall` is the city's verdict: `true` enables
+the city, `false` leaves it disabled, and either way `verified_at` is set and
+`detail.location` (≤ 200 chars) becomes `verified_as`. A `stopped` event (the worker's
+wall/login/error shape: no `matches`, `verdict: false` plus `wall` or `error`), an
+`error` or `wall`, or a missing `matches` is logged and leaves the city unverified, so
+the scheduler checks it again. A verdict never undoes a manager's removal or
+override.
 
 ### `PUT /api/fleet/worker/session` — worker scope
 
 ```jsonc
-{ "cookies": [ … ], "token": "EAA…" | null }   // resealed into fb_pool_accounts.cookie_enc / token_enc, cookie_at = now()
+{ "cookies": [ … ], "token": "EAA…" | null, "clear": false }   // resealed into fb_pool_accounts.cookie_enc / token_enc, cookie_at = now()
 // 200 { "ok": true }
 ```
 
-An empty `cookies` list clears the stored cookie; `token` omitted keeps the
-stored token, `null` clears it.
+The stored session is what spares the next boot a login, so the cookies must
+hold a Facebook session for this account: a `c_user` cookie and an `xs`
+cookie (`422`, `detail` says which is missing), and `c_user` must equal the
+account's uid (`422 {detail: "cookies: c_user is not this account"}`; nothing
+is written). An empty list is refused the same way. `clear: true` empties the
+stored cookie outright (the list is then ignored). The `token` **key absent**
+keeps the stored token; `token: null` clears it.
 
 ### `GET /api/fleet/worker/vnc` — worker scope, WebSocket
 
@@ -458,6 +539,28 @@ advanced only by an agent's `desired` call:
   `done`.
 - A manager's `GET /hosts` shows `desired.roll` from the release's `current`
   without advancing it.
+
+**Confirmed stop and handoff.** `desired` also carries `leases: {worker_id:
+{account_no, epoch}}` for this host's slots. After Docker confirms a container
+gone, the agent calls:
+
+```jsonc
+// POST /api/fleet/hosts/:id/stopped
+{ "worker_id": "homelab-2", "account_no": 12, "epoch": 7, "restart": true }
+// 200 { "ok": true }   409 { "error": "stale_epoch" }   422 { "error": "bad_request" }
+```
+
+The slot must be this host's, this worker's, on `epoch` (`409` otherwise).
+Its leased tasks are released, the epoch moves on and `handoff_epoch = epoch`.
+`restart: true` reserves the account for that worker: `reserved_until =
+lease_expires_at = now + 20 min` (the roll gate's timeout, so a reservation
+lapses when the gate would fail); its replacement claims with
+`handoff_epoch` = the stopped epoch. Unrelated workers cannot take it while
+it lasts; after it lapses anyone may. `restart: false` frees the account at
+once. A repeat for the same epoch is idempotent: `restart: false` then frees a
+reservation not yet consumed, and never touches a lease the replacement
+already holds. Slot rows show a reservation as `reserved_until`, not as
+`parked`; a manager's park clears it, and unpark clears `handoff_epoch`.
 
 **Agent behaviour** (`apps/fleet-agent/src/plan.ts`), polling every 30 s:
 
@@ -535,9 +638,9 @@ Session cookie plus the manager role. Errors are `{error, detail?}`:
 | `PUT /api/fleet/hosts/:id` | `{capacity? (0..99), authoritative?}` | `{host: FleetHost & {desired}}`; `404` |
 | `DELETE /api/fleet/hosts/:id` | | `{ok: true}`; `404` |
 | `POST /api/fleet/releases` | `{image, version}` | `{ok: true, release: FleetRelease}`; starts a roll (§6), replacing any active one |
-| `GET /api/fleet/slots` | | `{slots: SlotView[]}`: `FleetSlot` (with `parked: boolean`; `lease_expires_at` is `null` when parked; `has_proxy`, never the URL) plus `uid`, `pool_status`, `minutes_today`, `budget_minutes`, `worker: WorkerView \| null` |
+| `GET /api/fleet/slots` | | `{slots: SlotView[]}`: `FleetSlot` (with `parked: boolean` and `reserved_until: ISO | null` (a live handoff reservation, §6); `lease_expires_at` is `null` when parked; `has_proxy`, never the URL) plus `uid`, `pool_status`, `minutes_today`, `budget_minutes`, `worker: WorkerView \| null` |
 | `POST /api/fleet/slots/:no/release-quarantine` | | `{slot: SlotView}`; `404` |
-| `POST /api/fleet/slots/:no/park` | | `{slot: SlotView}`: epoch + 1 (its worker gets `409 stale_epoch` and exits), no worker, infinite lease, its leased tasks released; `404` |
+| `POST /api/fleet/slots/:no/park` | | `{slot: SlotView}`: epoch + 1 (its worker gets `409 stale_epoch` and exits), no worker, infinite lease, any handoff reservation cleared, its leased tasks released; `404` |
 | `POST /api/fleet/slots/:no/unpark` | | `{slot: SlotView}`: lease cleared so the slot is claimable again; a slot that was not parked is answered unchanged; `404` |
 | `GET /api/fleet/workers` | | `{workers: WorkerView[]}`: `FleetWorker & {task: (FleetTask & {city_name}) \| null}` (the leased task) |
 | `GET /api/fleet/vnc/:workerId/ws` | WebSocket | the manager's end of the worker VNC relay (§5); `426` without an upgrade, `403` bad Origin, `404` bad id |
@@ -605,8 +708,9 @@ HTTP retries) and `handoff_epoch`. Repeating a claim_id returns the same slot an
 epoch. Desired optionally includes `leases: {worker_id: {account_no, epoch}}`.
 After Docker confirms a container stopped, its host calls
 `POST /hosts/:id/stopped` with `{worker_id, account_no, epoch, restart}`.
-`restart: true` fences the old epoch and reserves the account for that worker;
-its replacement claims with handoff_epoch equal to the stopped epoch. Repeated
+`restart: true` fences the old epoch and reserves the account for that worker
+until `reserved_until` (20 min, §6); its replacement claims with handoff_epoch
+equal to the stopped epoch. Repeated
 stop confirmations are idempotent. Unrelated workers cannot consume a reservation.
 `restart: false` frees it. An active replacement command repeats to its own host;
 the old worker is drained (next-task returns null with reason `draining`).
@@ -614,8 +718,9 @@ the old worker is drained (next-task returns null with reason `draining`).
 A heartbeat optionally returns `{worker_token, token_expires_at}` when less than
 one day remains. It renews for seven days with the same epoch and account. Workers
 share it with all HTTP clients and future VNC dials via an in-container token file.
-401 is terminal to the worker (exit 75), rather than an infinite retry; expired
-tokens do not renew. Every null-task retry_after is an interruptible delay.
+A token 401 (`missing_token`, `bad_token`, `expired_token`) is terminal to the
+worker (exit 75), rather than an infinite retry; expired tokens do not renew.
+A `503 unavailable` is not: the ERP lacks a key, and the worker retries (§5). Every null-task retry_after is an interruptible delay.
 
 Pool ownership changes invalidate the epoch and release work in the same database
 transaction. Worker writes recheck under account-then-slot locks. Finished lease

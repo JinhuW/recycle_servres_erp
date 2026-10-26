@@ -452,3 +452,71 @@ describe('confirmed-stop handoff with the real agent planner', () => {
     expect((await api('POST', '/api/fleet/hosts/other/stopped', { headers: bearer('made-up-other-token'), body: { worker_id: 'lab-1', account_no: 1, epoch: 1, restart: true } })).status).toBe(409);
   });
 });
+
+describe('handoff reservations', () => {
+  beforeEach(async () => { await resetDb(); await seedHost(); await seedCatalog(); });
+
+  const stopped = (body: Record<string, unknown>) =>
+    api('POST', '/api/fleet/hosts/lab/stopped', { headers: bearer(HOST_TOKEN), body });
+  const claimAs = (worker_id: string, more: Record<string, unknown> = {}) =>
+    api<ClaimAnswer & { error?: string }>('POST', '/api/fleet/worker/claim', { headers: bearer(HOST_TOKEN), body: { host_id: 'lab', worker_id, version: 'test', ...more } });
+  const slotOf = async (no: number) => {
+    const { token } = await loginAs(ALEX);
+    return (await api<{ slots: SlotView[] }>('GET', '/api/fleet/slots', { token })).body.slots.find((s) => s.account_no === no)!;
+  };
+
+  it('holds the account for the gate timeout, shows it as reserved rather than parked, then frees it by itself', async () => {
+    const no = await seedSlot(1, { worker: 'lab-1', host: 'lab', epoch: 4 });
+    expect((await stopped({ worker_id: 'lab-1', account_no: no, epoch: 4, restart: true })).status).toBe(200);
+    const [row] = await getTestDb()<{ minutes: number; same: boolean }[]>`
+      SELECT (EXTRACT(EPOCH FROM reserved_until - NOW()) / 60)::float8 AS minutes, reserved_until = lease_expires_at AS same FROM fleet_slots WHERE account_no = ${no}`;
+    expect(row.minutes).toBeGreaterThan(19);
+    expect(row.minutes).toBeLessThanOrEqual(20);
+    expect(row.same).toBe(true);
+    const view = await slotOf(no);
+    expect(view.parked).toBe(false);
+    expect(view.reserved_until).not.toBeNull();
+    // Nobody else takes it, and lab-1 itself needs the handoff epoch.
+    expect((await claimAs('lab-2')).status).toBe(409);
+    expect((await claimAs('lab-1')).status).toBe(409);
+    // The replacement never came: the reservation lapses and anyone may claim.
+    await getTestDb()`UPDATE fleet_slots SET reserved_until = NOW() - interval '1 second', lease_expires_at = NOW() - interval '1 second' WHERE account_no = ${no}`;
+    expect((await slotOf(no)).reserved_until).toBeNull();
+    const taken = await claimAs('lab-2');
+    expect(taken.status).toBe(200);
+    expect(taken.body.account.no).toBe(no);
+  });
+
+  it('a replacement whose reservation lapsed still claims its own (now free) slot', async () => {
+    const no = await seedSlot(1, { worker: 'lab-1', host: 'lab', epoch: 4 });
+    await stopped({ worker_id: 'lab-1', account_no: no, epoch: 4, restart: true });
+    await getTestDb()`UPDATE fleet_slots SET reserved_until = NOW() - interval '1 second', lease_expires_at = NOW() - interval '1 second' WHERE account_no = ${no}`;
+    const r = await claimAs('lab-1', { handoff_epoch: 4, claim_id: 'late-boot' });
+    expect(r.status).toBe(200);
+    expect(r.body.account.no).toBe(no);
+    const [slot] = await getTestDb()`SELECT reserved_until, handoff_epoch FROM fleet_slots WHERE account_no = ${no}`;
+    expect(slot).toEqual({ reserved_until: null, handoff_epoch: null });
+  });
+
+  it('park clears a reservation; unpark clears the handoff too; a late restart:false retry frees nothing it should not', async () => {
+    const no = await seedSlot(1, { worker: 'lab-1', host: 'lab', epoch: 4 });
+    await stopped({ worker_id: 'lab-1', account_no: no, epoch: 4, restart: true });
+    const { token } = await loginAs(ALEX);
+    await api('POST', `/api/fleet/slots/${no}/park`, { token, body: {} });
+    let [slot] = await getTestDb()`SELECT reserved_until, handoff_epoch, worker_id FROM fleet_slots WHERE account_no = ${no}`;
+    expect(slot).toEqual({ reserved_until: null, handoff_epoch: null, worker_id: null });
+    expect((await claimAs('lab-1', { handoff_epoch: 4 })).status).toBe(409);
+    await getTestDb()`UPDATE fleet_slots SET handoff_epoch = 4 WHERE account_no = ${no}`;
+    await api('POST', `/api/fleet/slots/${no}/unpark`, { token, body: {} });
+    [slot] = await getTestDb()`SELECT reserved_until, handoff_epoch, lease_expires_at FROM fleet_slots WHERE account_no = ${no}`;
+    expect(slot).toEqual({ reserved_until: null, handoff_epoch: null, lease_expires_at: null });
+
+    // A handoff that was consumed: a delayed restart:false for it must not end the new lease.
+    const other = await seedSlot(2, { worker: 'lab-2', host: 'lab', epoch: 7 });
+    await stopped({ worker_id: 'lab-2', account_no: other, epoch: 7, restart: true });
+    expect((await claimAs('lab-2', { handoff_epoch: 7, claim_id: 'b' })).status).toBe(200);
+    expect((await stopped({ worker_id: 'lab-2', account_no: other, epoch: 7, restart: false })).status).toBe(200);
+    const [live] = await getTestDb()<{ live: boolean }[]>`SELECT lease_expires_at > NOW() AS live FROM fleet_slots WHERE account_no = ${other}`;
+    expect(live.live).toBe(true);
+  });
+});

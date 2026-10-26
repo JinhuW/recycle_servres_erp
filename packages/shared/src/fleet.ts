@@ -131,6 +131,9 @@ export type FleetSlot = {
   /** A manager parked it: nothing claims it until it is unparked, and its
    *  worker is fenced out. Stored as an infinite lease with no worker. */
   parked: boolean;
+  /** Held for its stopped worker's replacement until this instant (a host's
+   *  `stopped` with `restart`); null when not reserved. Not a park: it lapses. */
+  reserved_until: string | null;
 };
 
 export type FleetHost = {
@@ -292,8 +295,12 @@ export type FleetEventRequest = {
 
 /** The worker's current browser session, resealed into the pool row. */
 export type SessionRequest = {
+  /** Must name this account's session (`c_user` = the account uid, plus `xs`);
+   *  an empty list is refused unless `clear` is true. */
   cookies: FleetCookie[];
+  /** Absent keeps the stored token; null clears it. */
   token?: string | null;
+  clear?: boolean;
 };
 
 export type HostReportRequest = FleetHostReport;
@@ -347,6 +354,9 @@ export type DesiredAnswer = {
 
 export type FleetErrorCode =
   | 'stale_epoch' | 'no_slot' | 'not_found' | 'bad_request' | 'unauthorized'
+  /** 503: the ERP itself is missing a key (FLEET_WORKER_TOKEN_KEY, FB_POOL_KEY).
+   *  Says nothing about the caller's token; retry later. */
+  | 'unavailable'
   /** The city, item or task already exists (or is already leased). */
   | 'exists'
   /** Enabling a city whose slug no worker has verified yet; `override_verify` gets past it. */

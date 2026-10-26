@@ -3229,6 +3229,15 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   worker tokens without another browser login. Worker shared secrets come from
   the Cloudflare Worker's FLEET_WORKER_ENV on its claim-only surface; deploying these
   changes still requires the separate owner-approved cutover.
+- **Fleet claim hardening (v1.354.0, RS-406)** — a key missing on the ERP's
+  side answers workers `503 unavailable` instead of a 401 they would exit on,
+  and `FLEET_WORKER_TOKEN_KEY_PREVIOUS` lets the token key rotate without
+  restarting (or re-logging) any worker. A host claims only for its own
+  `<host_id>-<n>` workers. A lost `next-task` answer hands the same task again
+  rather than leasing a second. A handoff reservation lapses after 20 minutes
+  and is shown as reserved, not parked. A slug check whose page failed leaves
+  the city unverified so it is checked again. A session upload must carry this
+  account's `c_user` and `xs`, so it cannot wipe or replace the stored login.
 
 - **Fleet (ERP-owned)** — since v1.337.0 (RS-394) **Monitors ▸ Facebook** is
   the page of the task queue the ERP itself runs: the backend owns the city

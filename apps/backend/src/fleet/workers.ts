@@ -14,7 +14,8 @@ import { taskToWire, type TaskRow } from './sql';
 // accounts sit in quarantine. The two writes a manager has here are to lift a
 // quarantine early and to park an account: the parked slot keeps an infinite
 // lease with no worker, so nothing claims it, and its epoch moves on so the
-// worker on it is refused and exits.
+// worker on it is refused and exits. A handoff reservation is not a park: it
+// has its own deadline (reserved_until) and lapses by itself.
 
 const slots = new Hono<ManagerEnv>().use('*', managerOnly);
 const workers = new Hono<ManagerEnv>().use('*', managerOnly);
@@ -26,7 +27,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 type SlotRow = {
   account_no: number; worker_id: string | null; host_id: string | null; last_host_id: string | null; epoch: number;
   lease_expires_at: Date | null; proxy_url: string | null; device: unknown; home_cities: unknown;
-  quarantined_until: Date | null; note: string; parked: boolean;
+  quarantined_until: Date | null; note: string; parked: boolean; reserved_until: Date | null;
   uid: string | null; pool_status: string; minutes_today: number;
 };
 
@@ -42,6 +43,7 @@ const SLOT_SELECT = (sql: SqlLike) => sql`
   SELECT s.account_no, s.worker_id, s.host_id, s.last_host_id, s.epoch, s.lease_expires_at, s.proxy_url, s.device,
          s.home_cities, s.quarantined_until, s.note,
          (s.lease_expires_at IS NOT DISTINCT FROM 'infinity'::timestamptz) AS parked,
+         CASE WHEN s.reserved_until > NOW() THEN s.reserved_until END AS reserved_until,
          a.uid, a.status AS pool_status,
          COALESCE((SELECT m.minutes::float8 FROM fleet_minutes m
                    WHERE m.account_no = s.account_no AND m.day = (NOW() AT TIME ZONE 'UTC')::date), 0) AS minutes_today
@@ -77,6 +79,7 @@ function slotView(r: SlotRow, budget: number, workersById: Map<string, WorkerVie
     quarantined_until: iso(r.quarantined_until),
     note: r.note,
     parked: r.parked,
+    reserved_until: iso(r.reserved_until),
     uid: r.uid,
     pool_status: r.pool_status,
     minutes_today: Math.round(r.minutes_today),
@@ -126,7 +129,8 @@ slots.post('/:no/park', async (c) => {
     if (!rows.length) return false;
     await tx`
       UPDATE fleet_slots SET
-        epoch = epoch + 1, worker_id = NULL, host_id = NULL, claim_id = NULL, handoff_epoch = NULL, lease_expires_at = 'infinity'::timestamptz
+        epoch = epoch + 1, worker_id = NULL, host_id = NULL, claim_id = NULL, handoff_epoch = NULL, reserved_until = NULL,
+        lease_expires_at = 'infinity'::timestamptz
       WHERE account_no = ${no}`;
     const released = await releaseTasks(tx, { account_no: no }, 'parked');
     wlog.info('fleet slot parked', { accountNo: no, workerId: rows[0].worker_id, tasks: released, by: c.var.user.email });
@@ -141,7 +145,7 @@ slots.post('/:no/unpark', async (c) => {
   if (no === null) return c.json({ error: 'not_found' }, 404);
   const sql = getDb(c.env);
   const rows = await sql<{ account_no: number }[]>`
-    UPDATE fleet_slots SET lease_expires_at = NULL
+    UPDATE fleet_slots SET lease_expires_at = NULL, handoff_epoch = NULL, reserved_until = NULL
     WHERE account_no = ${no} AND lease_expires_at = 'infinity'::timestamptz
     RETURNING account_no`;
   if (!rows.length) {

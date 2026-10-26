@@ -157,7 +157,7 @@ export const WORKERS: FleetWorker[] = [
 
 const slot = (no: number, over: Partial<FleetSlot> = {}): FleetSlot => ({
   account_no: no, uid: `10000${no}000${no}${no}${no}`, pool_status: 'fleet', worker_id: null, host_id: null, last_host_id: null,
-  epoch: 0, lease_expires_at: null, has_proxy: true, device: null, home_cities: [], quarantined_until: null, note: '', parked: false,
+  epoch: 0, lease_expires_at: null, has_proxy: true, device: null, home_cities: [], quarantined_until: null, note: '', parked: false, reserved_until: null,
   minutes_today: 0, budget_minutes: 360, worker: null,
   ...over,
 });

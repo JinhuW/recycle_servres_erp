@@ -27,7 +27,7 @@ const probe = new Hono<{ Bindings: Env; Variables: HostEnv['Variables'] & Worker
   .get('/hosts/:id/desired', hostAuth, (c) => c.json({ id: c.req.param('id') }))
   .get('/worker', workerAuth, (c) => {
     const w = c.var.worker;
-    return c.json({ worker_id: w.worker_id, account_no: w.account_no, epoch: w.epoch, slot_epoch: w.slot.epoch });
+    return c.json({ worker_id: w.worker_id, account_no: w.account_no, epoch: w.epoch, slot_epoch: w.slot.epoch, rotated: w.rotated });
   });
 
 async function hit(path: string, token: string | null, env: Partial<Env> = ENV) {
@@ -135,15 +135,29 @@ describe('worker scope', () => {
   it('refuses no token, a garbage token, a host token and a token under another key', async () => {
     await getTestDb()`INSERT INTO fleet_hosts (host_id, token_hash) VALUES ('lab', ${sha256hex(HOST_TOKEN)})`;
     const no = await seedSlot(1);
-    expect((await hit('/worker', null)).status).toBe(401);
-    expect((await hit('/worker', 'garbage')).status).toBe(401);
+    // The 401 bodies the worker matches to know its token, not the ERP, is at fault.
+    expect(await hit('/worker', null)).toEqual({ status: 401, body: { error: 'unauthorized', detail: 'missing_token' } });
+    expect(await hit('/worker', 'garbage')).toEqual({ status: 401, body: { error: 'unauthorized', detail: 'bad_token' } });
     expect((await hit('/worker', HOST_TOKEN)).status).toBe(401);
+    const expired = signWorkerToken({ worker_id: 'lab-1', account_no: no, epoch: 1, exp: 1 }, KEY);
+    expect(await hit('/worker', expired)).toEqual({ status: 401, body: { error: 'unauthorized', detail: 'expired_token' } });
     const other = signWorkerToken(
       { worker_id: 'lab-1', account_no: no, epoch: 1, exp: inSevenDays() }, Buffer.from(OTHER_KEY_HEX, 'hex'),
     );
     const r = await hit('/worker', other);
     expect(r.status).toBe(401);
-    expect(r.body).toEqual({ error: 'unauthorized' });
+    expect(r.body).toEqual({ error: 'unauthorized', detail: 'bad_token' });
+  });
+
+  it('admits a token under the previous key after a rotation, and says so', async () => {
+    const no = await seedSlot(2);
+    const old = signWorkerToken({ worker_id: 'lab-1', account_no: no, epoch: 2, exp: inSevenDays() }, Buffer.from(OTHER_KEY_HEX, 'hex'));
+    const rotated: Partial<Env> = { FLEET_WORKER_TOKEN_KEY: KEY_HEX, FLEET_WORKER_TOKEN_KEY_PREVIOUS: OTHER_KEY_HEX };
+    const r = await hit('/worker', old, rotated);
+    expect(r.status).toBe(200);
+    expect(r.body?.rotated).toBe(true);
+    // Without the previous key it is just another bad signature.
+    expect((await hit('/worker', old)).body).toEqual({ error: 'unauthorized', detail: 'bad_token' });
   });
 
   it('answers 409 stale_epoch when the slot moved on, or is gone', async () => {
@@ -162,15 +176,14 @@ describe('worker scope', () => {
     const token = signWorkerToken({ worker_id: 'lab-1', account_no: no, epoch: 2, exp: inSevenDays() }, KEY);
     const r = await hit('/worker', token);
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ worker_id: 'lab-1', account_no: no, epoch: 2, slot_epoch: 2 });
+    expect(r.body).toEqual({ worker_id: 'lab-1', account_no: no, epoch: 2, slot_epoch: 2, rotated: false });
   });
 
-  it('says which variable is missing when production has no key, and derives one elsewhere', async () => {
+  it('answers 503 unavailable, never 401, when production has no key, and derives one elsewhere', async () => {
     const no = await seedSlot(0);
     const prod: Partial<Env> = { FLEET_WORKER_TOKEN_KEY: undefined, NODE_ENV: 'production' };
     const r = await hit('/worker', 'anything', prod);
-    expect(r.status).toBe(401);
-    expect(r.body?.detail).toMatch(/FLEET_WORKER_TOKEN_KEY/);
+    expect(r).toEqual({ status: 503, body: { error: 'unavailable', detail: 'FLEET_WORKER_TOKEN_KEY is not set' } });
 
     const dev: Partial<Env> = { FLEET_WORKER_TOKEN_KEY: undefined };
     const derived = workerTokenKey({ ...testEnv, ...dev });

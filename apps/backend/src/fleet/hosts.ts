@@ -305,13 +305,17 @@ hosts.post('/:id/stopped', hostAuth, async (c) => {
     const [s] = await tx<FleetSlotRow[]>`SELECT * FROM fleet_slots WHERE account_no = ${no} FOR UPDATE`;
     if (!s) return false;
     if (s.handoff_epoch === epoch && s.worker_id === body.worker_id && s.host_id === host.host_id) {
-      if (!body.restart) await tx`UPDATE fleet_slots SET lease_expires_at = NULL WHERE account_no = ${no} AND lease_expires_at = 'infinity'::timestamptz`;
+      if (!body.restart) await tx`UPDATE fleet_slots SET lease_expires_at = NULL, reserved_until = NULL WHERE account_no = ${no} AND reserved_until IS NOT NULL`;
       return true;
     }
     if (s.epoch !== epoch || s.worker_id !== body.worker_id || s.host_id !== host.host_id) return false;
     await releaseTasks(tx, { account_no: no }, 'host_stopped');
+    // The reservation lapses when the roll gate would fail (GATE_TIMEOUT_MS
+    // from stopped_at): a replacement that never claims frees the account
+    // then, for any worker, instead of holding it until a person notices.
+    const until = body.restart ? tx`NOW() + ${`${GATE_TIMEOUT_MS / 1000} seconds`}::interval` : tx`NULL`;
     await tx`UPDATE fleet_slots SET epoch = epoch + 1, claim_id = NULL, handoff_epoch = ${epoch},
-      lease_expires_at = ${body.restart ? tx`'infinity'::timestamptz` : tx`NULL`}
+      reserved_until = ${until}, lease_expires_at = ${until}
       WHERE account_no = ${no}`;
     if (r?.state === 'rolling' && r.current && r.current.worker_id === body.worker_id && r.current.host_id === host.host_id) {
       r.current.stopped_at = new Date().toISOString();

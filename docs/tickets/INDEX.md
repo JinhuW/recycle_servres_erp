@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-406](./RS-406-fix-the-fleet-claim-core-review-findings.md) | done | task | P2 | Fix the fleet claim-core review findings | 1.354.0 |
 | [RS-405](./RS-405-fleet-agent-fix-the-review-findings-holds-stagger-ha.md) | done | bug | P1 | Fleet agent: fix the review findings (holds, stagger, handoff, identity, images) | 1.352.0 |
 | [RS-404](./RS-404-refocus-the-reddit-eval-prompt-on-bulk-samsung-sk-hy.md) | done | story | P2 | Refocus the Reddit eval prompt on bulk Samsung, SK Hynix and Micron RAM | — |
 | [RS-403](./RS-403-fleet-page-loads-its-data-fast.md) | in-progress | story | P2 | Fleet page loads its data fast | — |

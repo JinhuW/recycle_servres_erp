@@ -2270,7 +2270,8 @@ The fleet's view of one pool account: which worker runs it, on which host, under
 | `home_cities` | `jsonb` | ✓ | `'[]'` | City slugs this account searches first. |
 | `quarantined_until` | `timestamptz` |  |  | Set by the 0-card rule; while in the future the slot gets only probe tasks. |
 | `claim_id` | `text` | | | Idempotency key for the current process boot; unique within the host when non-null. |
-| `handoff_epoch` | `integer` | | | Epoch confirmed stopped by the host. An infinite lease reserves the slot until that replacement claims it. |
+| `handoff_epoch` | `integer` | | | Epoch confirmed stopped by the host; the replacement claims with it while `reserved_until` lasts. |
+| `reserved_until` | `timestamptz` | | | A handoff reservation's deadline (gate timeout, 20 min); the lease ends with it. NULL = not reserved. A park is still the infinite lease. |
 | `quarantine_reset_at` | `timestamptz` | | | Manual release or positive probe: earlier search results cannot re-quarantine this account. |
 | `quarantine_evidence` | `jsonb` | | | Rule, search count, cities and latest result that justified quarantine. |
 | `note` | `text` | ✓ | `''` | Free text for managers. |
@@ -2329,7 +2330,7 @@ One search of one item in one city. The scheduler keeps exactly one open (ready 
 - **Primary key:** `id`
 - **References:** `city` → `fleet_cities.slug`; `item` → `fleet_items.name`
 - **Checks:** `state IN ('ready', 'leased', 'done', 'cancelled', 'expired')`
-- **Indexes:** `fleet_tasks_due_idx` (state, due_at); `fleet_tasks_item_idx` (item); `fleet_tasks_open_idx` UNIQUE (city, item, kind) WHERE state IN ('ready', 'leased') AND kind <> 'probe'; `fleet_tasks_probe_idx` UNIQUE (account_no) WHERE state IN ('ready','leased') AND kind = 'probe'; `fleet_tasks_worker_idx` (worker_id, leased_at DESC)
+- **Indexes:** `fleet_tasks_due_idx` (state, due_at); `fleet_tasks_item_idx` (item); `fleet_tasks_open_idx` UNIQUE (city, item, kind) WHERE state IN ('ready', 'leased') AND kind <> 'probe'; `fleet_tasks_probe_idx` UNIQUE (account_no) WHERE state IN ('ready','leased') AND kind = 'probe'; `fleet_tasks_worker_idx` (worker_id, leased_at DESC); `fleet_tasks_done_account_idx` (account_no, city, done_at) WHERE state = 'done'
 
 The scheduler sends `NOTIFY fleet_tasks` (payload: the item) after every write that can make a task ready; a worker's held next-task poll listens on it.
 
