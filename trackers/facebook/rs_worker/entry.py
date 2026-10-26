@@ -137,7 +137,12 @@ def claim(
         request = urllib.request.Request(
             url,
             data=body,
-            headers={"Authorization": f"Bearer {host_token}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Bearer {host_token}",
+                "Content-Type": "application/json",
+                # Cloudflare's Browser Integrity Check refuses urllib's default agent (403, 1010).
+                "User-Agent": f"rs-worker/{version}",
+            },
             method="POST",
         )
         try:

@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-25
+
 ### Fixed
 
 - Fleet workers respect budget/quarantine retry delays and renew their token
@@ -26,6 +28,12 @@ deployed?" harder to answer.
 - Claims carry a stable id across HTTP retries and the agent's confirmed-stop
   handoff epoch, so replacements keep their account. Missing configured AI or
   coordinator credentials fail before browser startup (RS-400).
+- **Fleet workers name themselves in `User-Agent`.** The fleet is reached
+  through the ERP's Cloudflare hostname, whose Browser Integrity Check answers
+  urllib's default `Python-urllib/x.y` agent with 403 (error 1010). The first
+  real fleet worker on `worker-60-14` failed its claim three times and exited
+  70 before any login. The entrypoint's claim now sends `rs-worker/<version>`
+  and the monitor's fleet and coordinator clients `rs-worker (…)`.
 
 
 ## [0.14.0] - 2026-10-25

@@ -166,6 +166,8 @@ def test_a_claim_renders_the_worker_and_runs_the_monitor(
     assert headers["authorization"] == f"Bearer {HOST_TOKEN}"
     assert isinstance(body.pop("claim_id"), str)
     assert body == {"host_id": "lab", "worker_id": "lab-1", "version": "0.14.0", "vnc_port": 5903}
+    # Cloudflare's Browser Integrity Check refuses "Python-urllib/x.y" with a 403.
+    assert headers["user-agent"] == "rs-worker/0.14.0"
 
     config = tomllib.loads((home / "config.toml").read_text())
     assert config["fleet"].pop("token_path") == str(home / "fleet-token")

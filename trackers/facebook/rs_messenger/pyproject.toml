@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rs-messenger"
-version = "0.14.0"
+version = "0.14.1"
 description = "Bridges the Facebook Marketplace inbox to the Recycle Servers coordinator"
 requires-python = ">=3.11"
 dependencies = [
