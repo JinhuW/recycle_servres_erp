@@ -22,9 +22,9 @@ deployed?" harder to answer.
 
 - **`scripts/push-fleet-images.sh`** builds the fleet worker image and the
   ERP's fleet agent image for `linux/amd64` on the Mac and pushes them to the
-  private OCI Container Registry repositories
-  `sin.ocir.io/ax6usa8hwbie/{aimm-recycle,fleet-agent}`, which replace GHCR
-  for now. It stamps `RS_VERSION` and `RS_MONITOR_COMMIT` the way `deploy.sh`
+  private GitHub Container Registry packages
+  `ghcr.io/jinhuw/{aimm-recycle,fleet-agent}` (the OCI Container Registry
+  repositories `sin.ocir.io/ax6usa8hwbie/...` are the fallback). It stamps `RS_VERSION` and `RS_MONITOR_COMMIT` the way `deploy.sh`
   does, refuses a monitor clone that is dirty or off the `VENDOR.md` pin, and
   refuses to push a tracker tree that is not a release; `--no-push` is a
   build-only dry run.

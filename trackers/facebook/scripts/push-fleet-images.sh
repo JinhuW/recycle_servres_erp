@@ -1,6 +1,6 @@
 #!/bin/sh
 # Build the two fleet images for linux/amd64 on this Mac and push them to the
-# private OCI Container Registry repositories:
+# private GitHub Container Registry packages:
 #
 #   <registry>/<namespace>/aimm-recycle:<trackers/facebook/VERSION>   the worker
 #   <registry>/<namespace>/fleet-agent:<root package.json version>    the host agent
@@ -10,25 +10,26 @@
 #   scripts/push-fleet-images.sh --only worker   # or --only agent
 #
 # Why by hand: the worker image carries the vendored monitor, which is
-# gitignored here (VENDOR.md), so CI cannot build it without a private mirror;
-# and the registry login lives in this Mac's keychain, not in GitHub. The
-# fleet hosts pull with the same login (docs/superpowers/plans/
+# gitignored here (VENDOR.md), so CI cannot build it without a private mirror.
+# GHCR is the registry while it works; the OCI Container Registry repositories
+# created as a fallback (sin.ocir.io/ax6usa8hwbie) stay empty unless GHCR stops
+# working. A package first pushed by a user token is private; fleet hosts pull
+# with a classic read:packages token (docs/superpowers/plans/
 # 2026-10-24-erp-fleet/HOSTS.md).
 #
-# Before a push, log in once:
-#   security find-generic-password -a fleet-ocir -s fleet-ocir -w \
-#     | docker login "$OCIR_REGISTRY" -u "$OCIR_NAMESPACE/<OCI user name>" --password-stdin
+# Before a push, log in once with the gh CLI's token (it carries write:packages):
+#   gh auth token | docker login ghcr.io -u jinhuw --password-stdin
 #
-# Environment (defaults are the production registry):
-#   OCIR_REGISTRY    sin.ocir.io        the region's registry host
-#   OCIR_NAMESPACE   ax6usa8hwbie       the tenancy's object storage namespace
+# Environment:
+#   REGISTRY         ghcr.io            registry host (sin.ocir.io for the OCI fallback)
+#   NAMESPACE        jinhuw             owner or namespace (ax6usa8hwbie on OCI)
 #   BUILDX_BUILDER   multiarch          a docker-container builder that can build amd64
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)        # trackers/facebook
 REPO=$(cd "$ROOT/../.." && pwd)               # the monorepo root
-REGISTRY=${OCIR_REGISTRY:-sin.ocir.io}
-NAMESPACE=${OCIR_NAMESPACE:-ax6usa8hwbie}
+REGISTRY=${REGISTRY:-ghcr.io}
+NAMESPACE=${NAMESPACE:-jinhuw}
 BUILDER=${BUILDX_BUILDER:-multiarch}
 PUSH=1
 ONLY=both
@@ -37,7 +38,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --no-push) PUSH=0 ;;
         --only) shift; ONLY=${1:-} ;;
-        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
     shift
