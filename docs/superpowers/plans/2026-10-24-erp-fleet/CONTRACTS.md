@@ -393,6 +393,12 @@ worker id (the trigger opens the `fb_worker_accounts` stint) and writes an
 `fb_pool_events` `assigned` row. `409 no_slot` when none is free. `host_id`
 must be the token's own host (`422` otherwise); `vnc_port` may be null.
 `device` falls back to a default desktop profile for fields the slot lacks.
+Fields beyond the four are passed through as stored: `screen` (`[w, h]`,
+default the viewport), `device_scale_factor` (default 1) and `native` (a list
+of `user_agent`, `locale`, `timezone` the worker leaves to the browser, for a
+device moved from a homelab browser that never pinned them; the worker still
+receives the filled-in value and ignores it). The homelab export
+`trackers/facebook/scripts/export-device-profile.py` prints this shape.
 
 With a ticket: the body's `worker_id` must be the ticket's and its
 `handoff_epoch` the ticket's (both absent, or equal), else `401
