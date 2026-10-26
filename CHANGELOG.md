@@ -15,6 +15,24 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.353.0] - 2026-10-26
+
+### Changed
+
+- The ERP now remembers the fleet console's answers for the Fleet page
+  (Monitors ▸ Facebook): the fleet view, open checkpoints, workers, review and
+  alert-hit stats and the filter prompt. The console rebuilds the fleet view
+  from scratch on every call, which took 5 to 6 seconds, and every manager with
+  the page open asked for it every 10 seconds. An answer under 15 seconds old
+  is served from memory; one up to 5 minutes old is served at once while one
+  refresh runs behind it; viewers who arrive together share a single console
+  call. Only successful answers are kept, a console outage serves the last good
+  copy, and any change made through the page (re-login, settings, cities,
+  queue, resolving a checkpoint, the account pool's assign) clears the cache so
+  the next read is current. Answers carry `X-Cache` and `Age` headers. The
+  console is now called at most once per 15 seconds per view however many
+  managers are watching (RS-403).
+
 ## [1.352.0] - 2026-10-26
 
 ### Fixed
