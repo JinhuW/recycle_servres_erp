@@ -191,10 +191,10 @@
 .fleet-legend .fleet-dot-warn .fp-dot { background: var(--warn); }
 .fleet-legend .fleet-dot-warn-strong .fp-dot { background: var(--warn-strong); }
 .fleet-legend .fleet-dot-info .fp-dot { background: var(--info); }
-.fleet-legend .fleet-dot-cool .fp-dot { background: var(--cool); }
+.fleet-legend .fleet-dot-muted .fp-dot { background: var(--fg-muted); }
 .fleet-legend .fleet-dot-neg .fp-dot { background: var(--neg); }
 
-/* The Fleet tab: the host strip and the accounts table */
+/* The Fleet tab: the host strip and the workers table */
 .fleet-hosts-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));

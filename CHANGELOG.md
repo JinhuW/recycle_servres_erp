@@ -15,6 +15,20 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.361.0] - 2026-10-26
+
+### Changed
+
+- **The Fleet tab's table tracks workers, not accounts (RS-412).** It used to
+  list every pool account, so in prod 49 of its 61 rows were parked accounts
+  with no worker, and those accounts were already on the Account pool tab.
+  Now it has one row per worker, ERP and coordinator, with Worker as the first
+  column and the account it holds beside it. A worker that stops reporting
+  stays as **Offline** for a week. The legend reads All workers, Healthy,
+  Degraded, Replacing, Parked and Offline. **Unpark** and **Release** for a
+  quarantine moved to the Account pool's Runs on cell; **Park** stays on a
+  running worker's row.
+
 ## [1.360.0] - 2026-10-26
 
 ### Security

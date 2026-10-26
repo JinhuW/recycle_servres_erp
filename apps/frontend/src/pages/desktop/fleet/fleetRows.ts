@@ -1,9 +1,9 @@
-// The Fleet tab's one table of every account, built from three sources that
-// know different accounts: the ERP's slots and workers (the fleet the ERP
-// runs), the coordinator's workers (the homelab fleet, until cutover) and
-// the pool itself (accounts nothing runs). An account the ERP runs is an ERP
-// row even when the coordinator still lists its worker. Pure, so it can be
-// unit-tested without React.
+// The Fleet tab's table: one row per worker, from two sources that know
+// different workers: the ERP's (with the slot, the account and the lease each
+// holds) and the coordinator's (the homelab fleet, until cutover). A worker
+// the ERP knows is an ERP row even when the coordinator still lists it. The
+// accounts nothing runs are the Account pool's, not rows here. Pure, so it
+// can be unit-tested without React.
 
 import type { Challenge, FleetAccount, FleetDoc } from '../../../lib/coordinator';
 import type { PoolAccountSummary } from '../../../lib/facebookPool';
@@ -12,10 +12,14 @@ import type { PoolAccountSummary } from '../../../lib/facebookPool';
 export type FleetPoolAccount = Pick<PoolAccountSummary, 'no' | 'uid' | 'status' | 'holder' | 'note'>;
 import { fleetStateParked, type FleetRelease, type FleetSlot, type FleetTask, type FleetWorker } from '../../../lib/fleet';
 import { parkedWorkers } from '../../../lib/fleetView';
-import { isQuarantined, leaseLive, liveness } from './fleetBoard';
+import { leaseLive, liveness } from './fleetBoard';
 
-export type FleetRowKind = 'healthy' | 'degraded' | 'replacing' | 'quarantined' | 'parked' | 'taken';
-export const FLEET_ROW_KINDS: readonly FleetRowKind[] = ['healthy', 'degraded', 'replacing', 'quarantined', 'parked', 'taken'];
+export type FleetRowKind = 'healthy' | 'degraded' | 'replacing' | 'parked' | 'offline';
+export const FLEET_ROW_KINDS: readonly FleetRowKind[] = ['healthy', 'degraded', 'replacing', 'parked', 'offline'];
+
+// Worker rows are never deleted, so one silent this long has been retired,
+// not lost.
+const OFFLINE_KEPT_MS = 7 * 24 * 60 * 60_000;
 
 // The host every coordinator worker runs on; its fleet has one machine.
 export const COORDINATOR_HOST = 'homelab';
@@ -28,12 +32,12 @@ export type FleetRow = {
   no: number | null;
   uid: string | null;
   kind: FleetRowKind;
-  /** A container holds the account right now: it has a host and a worker. */
+  /** The worker is reporting and, for an ERP worker, holds its lease. */
   running: boolean;
-  source: 'erp' | 'coordinator' | 'pool';
+  source: 'erp' | 'coordinator';
+  /** Where it runs, or ran last. */
   host: string | null;
-  lastHost: string | null;
-  workerId: string | null;
+  workerId: string;
   vncPort: number | null;
   /** The worker's reported state (HEALTHY, DEGRADED, SESSION_EXPIRED, …), or null without one. */
   state: string | null;
@@ -49,7 +53,7 @@ export type FleetRow = {
   slot: FleetSlot | null;
   task: FleetTask | null;
   pool: FleetPoolAccount | null;
-  /** The coordinator's row, for the rows it alone knows. */
+  /** The coordinator's row, for the workers it alone knows. */
   account: FleetAccount | null;
 };
 
@@ -60,8 +64,6 @@ export type FleetRowsInput = {
   coordinator: FleetDoc | null;
   challenges: readonly Challenge[] | null;
   pool: readonly FleetPoolAccount[] | null;
-  /** The coordinator has not answered yet (as opposed to answered nothing). */
-  coordinatorPending?: boolean;
 };
 
 const vncPortOf = (url: string | null | undefined): number | null => {
@@ -69,37 +71,37 @@ const vncPortOf = (url: string | null | undefined): number | null => {
   return m ? Number(m[1]) : null;
 };
 
-function erpRow(slot: FleetSlot, worker: FleetWorker | null, release: FleetRelease | null, pool: FleetPoolAccount | null, now: number): FleetRow {
-  const beat = worker ? liveness(worker.last_heartbeat_at, now) : 'never';
-  const running = !!worker && leaseLive(slot, now) && beat !== 'dead' && beat !== 'never';
-  const replacing = running && release?.state === 'rolling' && release.current?.worker_id === worker?.worker_id;
-  const quarantined = isQuarantined(slot, now);
+function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelease | null, pool: FleetPoolAccount | null, now: number): FleetRow {
+  const beat = liveness(worker.last_heartbeat_at, now);
+  // A worker between leases still reports; only its silence takes it offline.
+  const running = beat === 'live' || beat === 'stale';
+  // The account's slot may since be another worker's.
+  const holds = !!slot && slot.worker_id === worker.worker_id;
+  const replacing = running && release?.state === 'rolling' && release.current?.worker_id === worker.worker_id;
   const kind: FleetRowKind = replacing ? 'replacing'
-    : running && fleetStateParked(worker?.state) ? 'parked'
-    : quarantined ? 'quarantined'
-    : running ? (worker?.state === 'DEGRADED' ? 'degraded' : 'healthy')
-    : slot.pool_status === 'taken' ? 'taken'
-    : 'parked';
-  const task = running ? worker?.task ?? null : null;
+    : fleetStateParked(worker.state) ? 'parked'
+    : !running ? 'offline'
+    : worker.state === 'DEGRADED' ? 'degraded' : 'healthy';
+  const task = running ? worker.task ?? null : null;
+  const no = slot?.account_no ?? worker.account_no ?? null;
   return {
-    key: `erp:${slot.account_no}`,
-    no: slot.account_no,
-    uid: slot.uid ?? pool?.uid ?? null,
+    key: `erp:${worker.worker_id}`,
+    no,
+    uid: slot?.uid ?? pool?.uid ?? null,
     kind,
     running,
     source: 'erp',
-    host: running ? slot.host_id ?? worker?.host_id ?? null : null,
-    lastHost: slot.last_host_id ?? slot.host_id,
-    workerId: running ? worker?.worker_id ?? slot.worker_id : null,
-    vncPort: running ? worker?.vnc_port ?? null : null,
-    state: running || fleetStateParked(worker?.state) ? worker?.state ?? null : null,
-    heartbeat: worker?.last_heartbeat_at ?? null,
-    now: task ? { city: task.city, cityName: task.city_name ?? null, item: task.item, since: task.leased_at, home: slot.home_cities.includes(task.city) } : null,
-    minutes: slot.minutes_today,
-    budget: slot.budget_minutes,
-    epoch: slot.epoch,
-    leaseExpires: running ? slot.lease_expires_at : null,
-    version: running ? worker?.version ?? null : null,
+    host: worker.host_id ?? slot?.host_id ?? slot?.last_host_id ?? null,
+    workerId: worker.worker_id,
+    vncPort: running ? worker.vnc_port ?? null : null,
+    state: worker.state ?? null,
+    heartbeat: worker.last_heartbeat_at ?? null,
+    now: task ? { city: task.city, cityName: task.city_name ?? null, item: task.item, since: task.leased_at, home: !!slot?.home_cities.includes(task.city) } : null,
+    minutes: slot?.minutes_today ?? null,
+    budget: slot?.budget_minutes ?? null,
+    epoch: holds ? slot.epoch : null,
+    leaseExpires: running && holds && leaseLive(slot, now) ? slot.lease_expires_at : null,
+    version: worker.version ?? null,
     replacingTo: replacing ? release?.version ?? null : null,
     slot,
     task,
@@ -112,7 +114,8 @@ function coordinatorRow(w: FleetAccount, parked: ReadonlySet<string>, pool: Flee
   const h = w.health;
   const live = !!h && (h.liveness === 'live' || h.liveness === 'stale');
   const state = h?.state ?? null;
-  const kind: FleetRowKind = !live || parked.has(w.worker_id) || fleetStateParked(state) ? 'parked'
+  const kind: FleetRowKind = parked.has(w.worker_id) || fleetStateParked(state) ? 'parked'
+    : !live ? 'offline'
     : state === 'DEGRADED' ? 'degraded' : 'healthy';
   const open = w.queue?.open?.[0] ?? null;
   const minutes = w.queue?.enrolled ? w.queue.minutes_today : w.today?.searches ?? null;
@@ -124,8 +127,7 @@ function coordinatorRow(w: FleetAccount, parked: ReadonlySet<string>, pool: Flee
     kind,
     running: live,
     source: 'coordinator',
-    host: live ? COORDINATOR_HOST : null,
-    lastHost: COORDINATOR_HOST,
+    host: COORDINATOR_HOST,
     workerId: w.worker_id,
     vncPort: vncPortOf(w.vnc_url),
     state,
@@ -144,67 +146,52 @@ function coordinatorRow(w: FleetAccount, parked: ReadonlySet<string>, pool: Flee
   };
 }
 
-function poolRow(a: FleetPoolAccount): FleetRow {
-  return {
-    key: `pool:${a.no}`, no: a.no, uid: a.uid, kind: a.status === 'taken' ? 'taken' : 'parked', running: false, source: 'pool',
-    host: null, lastHost: null, workerId: null, vncPort: null, state: null, heartbeat: null, now: null, minutes: null, budget: null,
-    epoch: null, leaseExpires: null, version: null, replacingTo: null, slot: null, task: null, pool: a, account: null,
-  };
-}
-
 const naturally = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
 
-/** Every account as one row: running ones first by worker id, then the idle
- *  ones by account number. */
+/** Every worker as one row: running ones first, then the silent ones, each
+ *  by worker id. */
 export function fleetRows(input: FleetRowsInput, now: number = Date.now()): FleetRow[] {
   const pool = input.pool ?? [];
   const poolByNo = new Map(pool.map(a => [a.no, a]));
-  const workersById = new Map(input.workers.map(w => [w.worker_id, w]));
+  // A slot carries its worker; the worker list also has the ones no slot
+  // holds any more, whose account the worker row still names.
+  const workers = new Map(input.workers.map(w => [w.worker_id, w]));
+  for (const s of input.slots) if (s.worker) workers.set(s.worker.worker_id, s.worker);
+  const slotOf = (w: FleetWorker) => input.slots.find(s => s.worker_id === w.worker_id)
+    ?? input.slots.find(s => s.account_no === w.account_no) ?? null;
   const rows: FleetRow[] = [];
   const seenNo = new Set<number>();
-  const seenWorker = new Set<string>();
-  for (const slot of input.slots) {
-    const worker = slot.worker ?? (slot.worker_id ? workersById.get(slot.worker_id) ?? null : null);
-    rows.push(erpRow(slot, worker, input.release, poolByNo.get(slot.account_no) ?? null, now));
-    seenNo.add(slot.account_no);
-    if (worker) seenWorker.add(worker.worker_id);
+  for (const w of workers.values()) {
+    const row = erpRow(w, slotOf(w), input.release, null, now);
+    if (!row.running && !(row.heartbeat && now - Date.parse(row.heartbeat) < OFFLINE_KEPT_MS)) continue;
+    row.pool = row.no === null ? null : poolByNo.get(row.no) ?? null;
+    row.uid ??= row.pool?.uid ?? null;
+    rows.push(row);
+    if (row.running && row.no !== null) seenNo.add(row.no);
   }
   const parked = parkedWorkers(input.challenges ?? null);
   for (const w of input.coordinator?.workers ?? []) {
-    if (seenWorker.has(w.worker_id)) continue;
+    if (workers.has(w.worker_id)) continue;
     const held = pool.find(a => a.status === 'fleet' && a.holder?.toLowerCase() === w.worker_id.toLowerCase())
       ?? pool.find(a => !!w.session?.fb_user_id && a.uid === w.session.fb_user_id) ?? null;
     if (held && (seenNo.has(held.no) || held.status !== 'fleet')) continue;
     rows.push(coordinatorRow(w, parked, held));
-    if (held) seenNo.add(held.no);
   }
-  // A fleet account no ERP slot holds is most likely a coordinator worker's:
-  // shown as an idle pool row now, it would jump to the running rows when the
-  // coordinator answers. It waits for that answer instead.
-  for (const a of pool) {
-    if (seenNo.has(a.no) || (input.coordinatorPending && a.status === 'fleet')) continue;
-    rows.push(poolRow(a));
-  }
-  return rows.sort((x, y) => Number(y.running) - Number(x.running)
-    || (x.running && y.running ? naturally(x.workerId ?? '', y.workerId ?? '') : (x.no ?? Infinity) - (y.no ?? Infinity))
-    || naturally(x.key, y.key));
+  return rows.sort((x, y) => Number(y.running) - Number(x.running) || naturally(x.workerId, y.workerId));
 }
 
 export type FleetRowFilter = { kind: FleetRowKind | 'all'; host: string; q: string };
 export const EMPTY_FLEET_ROW_FILTER: FleetRowFilter = { kind: 'all', host: '', q: '' };
-/** The host select's value for the rows nothing runs. */
-export const NOT_RUNNING = '-';
-
 export function filterFleetRows(rows: readonly FleetRow[], f: FleetRowFilter): FleetRow[] {
   const q = f.q.trim().toLowerCase();
   return rows.filter(r => (f.kind === 'all' || r.kind === f.kind)
-    && (!f.host || (f.host === NOT_RUNNING ? !r.running : r.host === f.host))
+    && (!f.host || r.host === f.host)
     && (!q || [r.workerId, r.host, r.no === null ? '' : `account ${r.no}`, r.no === null ? '' : `no. ${r.no}`, r.uid, r.now?.cityName, r.now?.city]
       .filter(Boolean).join(' ').toLowerCase().includes(q)));
 }
 
 export function fleetRowCounts(rows: readonly FleetRow[]): Record<FleetRowKind | 'all', number> {
-  const out = { all: rows.length, healthy: 0, degraded: 0, replacing: 0, quarantined: 0, parked: 0, taken: 0 };
+  const out = { all: rows.length, healthy: 0, degraded: 0, replacing: 0, parked: 0, offline: 0 };
   for (const r of rows) out[r.kind] += 1;
   return out;
 }
