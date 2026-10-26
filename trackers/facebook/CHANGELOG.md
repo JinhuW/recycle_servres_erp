@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-10-26
+
 ### Fixed
 
 - **A fenced fleet worker stops searching at once.** When the fleet refused a
