@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { coordinatorCache } from '../src/routes/coordinator';
 
 // Same fetch stub as tracker-routes.test.ts: the facade is upstream, and the
 // only things worth asserting are the URL, the bearer header and pass-through.
@@ -15,6 +16,11 @@ const ENV = {
   COORDINATOR_API_URL: 'http://facade.internal:8600/',
   COORDINATOR_API_TOKEN: 'console-secret',
 };
+
+// The proxy's read cache is process-wide; each test starts with it empty.
+beforeEach(() => {
+  coordinatorCache.clear();
+});
 
 describe('Coordinator proxy routes (/api/coordinator)', () => {
   beforeEach(async () => {
