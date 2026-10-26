@@ -541,3 +541,41 @@ the first version; others add fields in their own PRs.
   reports in heartbeats.
 - Health: `docker inspect` health = `curl -sf localhost:8788/healthz`
   (entrypoint serves it once the monitor is up).
+
+## Review recovery protocol (RS-400)
+
+Backend support must ship before the new agent/worker. Existing fields stay
+compatible. The Cloudflare Worker's `FLEET_WORKER_ENV` secret supplies optional
+claim `env` as described in §2. The entrypoint validates the AI key and any
+configured coordinator/report credentials before browser startup. Manager reads,
+desired and reports never carry those values.
+
+Claims optionally carry `claim_id` (one random id per process boot, stable across
+HTTP retries) and `handoff_epoch`. Repeating a claim_id returns the same slot and
+epoch. Desired optionally includes `leases: {worker_id: {account_no, epoch}}`.
+After Docker confirms a container stopped, its host calls
+`POST /hosts/:id/stopped` with `{worker_id, account_no, epoch, restart}`.
+`restart: true` fences the old epoch and reserves the account for that worker;
+its replacement claims with handoff_epoch equal to the stopped epoch. Repeated
+stop confirmations are idempotent. Unrelated workers cannot consume a reservation.
+`restart: false` frees it. An active replacement command repeats to its own host;
+the old worker is drained (next-task returns null with reason `draining`).
+
+A heartbeat optionally returns `{worker_token, token_expires_at}` when less than
+one day remains. It renews for seven days with the same epoch and account. Workers
+share it with all HTTP clients and future VNC dials via an in-container token file.
+401 is terminal to the worker (exit 75), rather than an infinite retry; expired
+tokens do not renew. Every null-task retry_after is an interruptible delay.
+
+Pool ownership changes invalidate the epoch and release work in the same database
+transaction. Worker writes recheck under account-then-slot locks. Finished lease
+attempts are retained in fleet_task_attempts; fleet_minutes splits their time at
+UTC midnight and includes live leases. Time already erased before migration
+cannot be reconstructed. Quarantine uses the coordinator rule: at least two
+completed zero-card searches, all the account's completed searches in the window
+zero, with positive results from another account in at least one of those cities.
+quarantine_hours is both the evidence lookback and the duration from latest
+qualifying result; zero disables detection. Manual release/successful positive
+probe resets the evidence window. Probes do not advance normal search cadence.
+Expired slug checks retry while unverified and not removed; only a current leased
+attempt/epoch may apply a verdict, and never over a removal or override.

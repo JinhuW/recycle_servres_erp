@@ -9,7 +9,14 @@ import { EMPTY_DESIRED, parseDesired, type Desired } from './types.js';
 const DESIRED_FILE = 'desired.json';
 const MEMORY_FILE = 'memory.json';
 
+export interface StopIdentity {
+  account_no: number;
+  epoch: number;
+  restart: boolean;
+  confirmed?: boolean;
+}
 export interface Memory {
+  pending: Record<string, StopIdentity>;
   last_start_at: number | null;
   restarts: Record<string, number[]>;
 }
@@ -42,9 +49,9 @@ export function loadMemory(dir: string): Memory {
     for (const [id, times] of Object.entries(raw.restarts ?? {})) {
       if (Array.isArray(times)) restarts[id] = times.filter((t) => typeof t === 'number');
     }
-    return { last_start_at: typeof raw.last_start_at === 'number' ? raw.last_start_at : null, restarts };
+    return { pending: raw.pending ?? {}, last_start_at: typeof raw.last_start_at === 'number' ? raw.last_start_at : null, restarts };
   } catch {
-    return { last_start_at: null, restarts: {} };
+    return { last_start_at: null, restarts: {}, pending: {} };
   }
 }
 

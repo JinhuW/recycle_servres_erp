@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import type { ClaimAnswer, FleetCookie, NextTaskAnswer } from '@recycle-erp/shared';
 import { getTestDb, resetDb } from './helpers/db';
@@ -564,5 +564,144 @@ describe('PUT /api/fleet/worker/session', () => {
     expect((await api('PUT', '/api/fleet/worker/session', { headers: bearer(again.worker_token), body: { cookies, token: null } })).status).toBe(200);
     expect((await getTestDb()<{ token_enc: string | null }[]>`SELECT token_enc FROM fb_pool_accounts WHERE no = ${no}`)[0].token_enc).toBeNull();
     expect((await api('PUT', '/api/fleet/worker/session', { headers: bearer(again.worker_token), body: { cookies: 'nope' } })).status).toBe(422);
+  });
+});
+
+describe('fleet recovery regressions', () => {
+  beforeEach(async () => { await resetDb(); await seedBase(); });
+
+  it('retries a claim without taking another slot or advancing the epoch', async () => {
+    await seedSlot(1); await seedSlot(2);
+    const request = () => api<ClaimAnswer>('POST', '/api/fleet/worker/claim', {
+      headers: bearer(HOST_TOKEN), body: { host_id: 'lab', worker_id: 'lab-1', version: 'test', claim_id: 'same-boot' },
+    });
+    const first = await request(); const again = await request();
+    expect(again.body.account.no).toBe(first.body.account.no);
+    expect(again.body.epoch).toBe(first.body.epoch);
+    expect((await getTestDb()`SELECT * FROM fleet_slots WHERE worker_id = 'lab-1'`).length).toBe(1);
+  });
+
+  it.each(['available', 'problem', 'retired'])('fences every worker surface when the pool becomes %s', async status => {
+    const no = await seedSlot(1);
+    const w = await claimed('lab-1');
+    await addTask('denver');
+    const taken = await nextTask(w.worker_token);
+    await getTestDb()`UPDATE fb_pool_accounts SET status = ${status}, holder_name = NULL WHERE no = ${no}`;
+    expect((await heartbeat(w.worker_token, 'HEALTHY')).status).toBe(409);
+    expect((await nextTask(w.worker_token)).status).toBe(409);
+    expect((await api('POST', '/api/fleet/worker/events', { headers: bearer(w.worker_token), body: { task_id: taken.body.task!.id, kind: 'finished' } })).status).toBe(409);
+    expect((await api('PUT', '/api/fleet/worker/session', { headers: bearer(w.worker_token), body: { cookies: [] } })).status).toBe(409);
+    await getTestDb()`UPDATE fb_pool_accounts SET status = 'fleet', holder_name = 'lab-1' WHERE no = ${no}`;
+    expect((await heartbeat(w.worker_token, 'HEALTHY')).status).toBe(409);
+  });
+
+  it('rejects a session write admitted before a concurrent pool edit commits', async () => {
+    const no = await seedSlot(1); const w = await claimed('lab-1');
+    const db = getTestDb();
+    let write: Promise<unknown>;
+    await db.begin(async tx => {
+      await tx`SELECT no FROM fb_pool_accounts WHERE no = ${no} FOR NO KEY UPDATE`;
+      write = api('PUT', '/api/fleet/worker/session', { headers: bearer(w.worker_token), body: { cookies: [] } });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await tx`UPDATE fb_pool_accounts SET status = 'available', holder_name = NULL WHERE no = ${no}`;
+    });
+    expect(await write!).toMatchObject({ status: 409 });
+    const [account] = await db`SELECT cookie_enc FROM fb_pool_accounts WHERE no = ${no}`;
+    expect(account.cookie_enc).not.toBeNull();
+  });
+
+  it('renews a nearly expired token without changing account or epoch and refuses expiry', async () => {
+    await seedSlot(1); const w = await claimed('lab-1');
+    const token = signWorkerToken({ worker_id: 'lab-1', account_no: w.account.no, epoch: w.epoch, exp: Math.floor(Date.now() / 1000) + 60 }, workerTokenKey(testEnv)!);
+    const r = await api<{ worker_token: string; token_expires_at: number }>('POST', '/api/fleet/worker/heartbeat', { headers: bearer(token), body: { state: 'HEALTHY' } });
+    expect(r.body.token_expires_at).toBeGreaterThan(Date.now() / 1000 + 6 * 86400);
+    expect((await heartbeat(r.body.worker_token, 'HEALTHY')).status).toBe(200);
+    const expired = signWorkerToken({ worker_id: 'lab-1', account_no: w.account.no, epoch: w.epoch, exp: 1 }, workerTokenKey(testEnv)!);
+    expect((await heartbeat(expired, 'HEALTHY')).status).toBe(401);
+    expect((await getTestDb()`SELECT epoch FROM fleet_slots`)[0].epoch).toBe(w.epoch);
+  });
+
+  it('retains released minutes exactly once and splits a closed attempt at UTC midnight', async () => {
+    const no = await seedSlot(1); const w = await claimed('lab-1');
+    const id = await addTask('denver'); await nextTask(w.worker_token);
+    await getTestDb()`UPDATE fleet_tasks SET leased_at = NOW() - interval '10 minutes' WHERE id = ${id}`;
+    await heartbeat(w.worker_token, 'CHECKPOINT'); await heartbeat(w.worker_token, 'CHECKPOINT');
+    const [used] = await getTestDb()`SELECT SUM(minutes)::float8 AS minutes FROM fleet_minutes WHERE account_no = ${no}`;
+    expect(used.minutes).toBeGreaterThanOrEqual(10);
+    expect(used.minutes).toBeLessThan(10.2);
+    await getTestDb()`INSERT INTO fleet_tasks (city, item, state, due_at, account_no, leased_at, done_at)
+      VALUES ('nyc', 'server_ram', 'done', '2026-01-01T23:50Z', ${no}, '2026-01-01T23:50Z', '2026-01-02T00:10Z')`;
+    const days = await getTestDb()`SELECT minutes::float8 AS minutes FROM fleet_minutes WHERE account_no = ${no} AND day IN ('2026-01-01','2026-01-02') ORDER BY day`;
+    expect(days.map(d => d.minutes)).toEqual([10, 10]);
+  });
+
+  it.each(['remove', 'override'])('does not let a late slug verdict undo a manager %s', async action => {
+    await seedSlot(1); const w = await claimed('lab-1');
+    const id = await addTask('boise', 'server_ram', { kind: 'verify-slug' }); await nextTask(w.worker_token);
+    const { token } = await loginAs(ALEX);
+    if (action === 'remove') await api('DELETE', '/api/fleet/cities/boise', { token });
+    else await api('PUT', '/api/fleet/cities/boise', { token, body: { override_verify: true } });
+    await api('POST', '/api/fleet/worker/events', { headers: bearer(w.worker_token), body: { task_id: id, kind: 'finished', detail: { matches: action === 'remove', location: 'Wrong' } } });
+    const [city] = await getTestDb()`SELECT enabled, disabled_at, verified_as FROM fleet_cities WHERE slug = 'boise'`;
+    expect(city.enabled).toBe(action === 'override');
+    if (action === 'remove') expect(city.disabled_at).not.toBeNull();
+    else expect(city.verified_as).toBe('override');
+  });
+});
+
+
+describe('long-running worker recovery', () => {
+  beforeEach(async () => { await resetDb(); await seedBase(); });
+  it('renews across fourteen simulated days without changing the slot epoch', async () => {
+    await seedSlot(1); const w = await claimed('lab-1');
+    let token = w.worker_token;
+    const start = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      for (let halfDay = 1; halfDay <= 28; halfDay++) {
+        vi.setSystemTime(start + halfDay * 12 * 3600000);
+        const r = await api<{ worker_token?: string }>('POST', '/api/fleet/worker/heartbeat', { headers: bearer(token), body: { state: 'HEALTHY' } });
+        expect(r.status).toBe(200);
+        token = r.body.worker_token ?? token;
+      }
+      expect(token).not.toBe(w.worker_token);
+      expect((await getTestDb()`SELECT epoch FROM fleet_slots`)[0].epoch).toBe(w.epoch);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('a positive probe releases quarantine and does not create another normal search completion', async () => {
+    const no = await seedSlot(1); const w = await claimed('lab-1');
+    const db = getTestDb();
+    await db`UPDATE fleet_slots SET quarantined_until = NOW() + interval '2 days' WHERE account_no = ${no}`;
+    const probe = await addTask('denver', 'server_ram', { kind: 'probe', account_no: no });
+    expect((await nextTask(w.worker_token)).body.task!.kind).toBe('probe');
+    await api('POST', '/api/fleet/worker/next-task', { headers: bearer(w.worker_token), body: { take: false, done: { task_id: probe, result: { cards: 30, seconds: 10 } } } });
+    const [slot] = await db`SELECT quarantined_until, quarantine_reset_at FROM fleet_slots WHERE account_no = ${no}`;
+    expect(slot.quarantined_until).toBeNull(); expect(slot.quarantine_reset_at).not.toBeNull();
+    expect((await db`SELECT * FROM fleet_tasks WHERE kind = 'search' AND state = 'done'`)).toHaveLength(0);
+  });
+});
+
+describe('claim identity races', () => {
+  beforeEach(async () => { await resetDb(); await seedBase(); });
+  it('serializes simultaneous retries of one boot even with spare accounts', async () => {
+    await seedSlot(1); await seedSlot(2);
+    const request = (claim_id: string) => api<ClaimAnswer>('POST', '/api/fleet/worker/claim', { headers: bearer(HOST_TOKEN), body: { host_id: 'lab', worker_id: 'lab-1', version: 'test', claim_id } });
+    const [a, b] = await Promise.all([request('one-boot'), request('one-boot')]);
+    expect(a.status).toBe(200); expect(b.status).toBe(200);
+    expect(b.body.account.no).toBe(a.body.account.no); expect(b.body.epoch).toBe(a.body.epoch);
+    expect((await request('different-boot')).status).toBe(409);
+  });
+});
+
+describe('deleted pool accounts', () => {
+  beforeEach(async () => { await resetDb(); await seedBase(); });
+  it('immediately releases the deleted account’s task and fences its token', async () => {
+    const no = await seedSlot(1); const w = await claimed('lab-1');
+    const id = await addTask('denver'); await nextTask(w.worker_token);
+    await getTestDb()`DELETE FROM fb_pool_accounts WHERE no = ${no}`;
+    expect((await nextTask(w.worker_token)).status).toBe(409);
+    expect(await taskRow(id)).toMatchObject({ state: 'ready', worker_id: null });
+    expect(await events(id)).toContain('released');
   });
 });

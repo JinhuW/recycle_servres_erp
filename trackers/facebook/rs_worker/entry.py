@@ -53,6 +53,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Sequence
 
@@ -118,6 +119,7 @@ def claim(
     version: str,
     vnc_port: int,
     sleep: Callable[[float], None] | None = None,
+    handoff_epoch: int | None = None,
 ) -> Dict[str, Any]:
     """Claim a slot: the fleet's answer, or `ClaimFailedError` with the exit code.
 
@@ -128,7 +130,7 @@ def claim(
     sleep = sleep or time.sleep
     url = f"{fleet_url.rstrip('/')}/api/fleet/worker/claim"
     body = json.dumps(
-        {"host_id": host_id, "worker_id": worker_id, "version": version, "vnc_port": vnc_port}
+        {"host_id": host_id, "worker_id": worker_id, "version": version, "vnc_port": vnc_port, "claim_id": str(uuid.uuid4()), **({"handoff_epoch": handoff_epoch} if handoff_epoch is not None else {})}
     ).encode("utf-8")
     last = "no answer"
     for attempt in range(1, CLAIM_ATTEMPTS + 1):
@@ -247,6 +249,7 @@ def render_config(
     config["fleet"] = {
         "url": fleet_url.rstrip("/"),
         "worker_token": str(answer["worker_token"]),
+        "token_path": str(home / "fleet-token"),
         "epoch": int(answer["epoch"]),
         "worker_id": worker_id,
         "poll_hold_seconds": int(settings.get("poll_hold_seconds") or 50),
@@ -266,8 +269,8 @@ def has_coordinator(answer: Dict[str, Any]) -> bool:
 def claim_env(answer: Dict[str, Any]) -> Dict[str, str]:
     """The shared secrets the claim carries in `env`, as environment variables.
 
-    The ERP's Cloudflare Worker adds `env` to a successful claim; the backend
-    never holds it. Only string values under plain names are taken, and none
+    The Cloudflare Worker adds its FLEET_WORKER_ENV secret to a successful claim.
+    Only string values under plain names are taken, and none
     that would override the fleet's own wiring. Values are never logged.
     """
     raw = answer.get("env")
@@ -362,6 +365,7 @@ def write_files(home: Path, answer: Dict[str, Any], config: Dict[str, Any]) -> N
     account = answer["account"]
     device = answer.get("device") or {}
     _write_private(home / "config.toml", toml_dumps(config))
+    _write_private(home / "fleet-token", str(answer["worker_token"]))
     _write_private(
         home / "session.json",
         json.dumps({"cookies": account.get("cookies") or [], "origins": []}),
@@ -693,6 +697,7 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
             worker_id,
             version,
             int(vnc_port) if vnc_port.isdigit() else 5900,
+            handoff_epoch=int(env["RS_FLEET_HANDOFF_EPOCH"]) if env.get("RS_FLEET_HANDOFF_EPOCH", "").isdigit() else None,
         )
     except ClaimFailedError as e:
         log(f"{e}; exiting {e.code}")
@@ -708,7 +713,12 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
     try:
         with open(TEMPLATE, "rb") as f:
             template = tomllib.load(f)
-        missing = [name for name in required_env(template) if not menv.get(name)]
+        needed = required_env(template)
+        if has_coordinator(answer):
+            needed.append("RS_CONTROL_PLANE_TOKEN")
+        if menv.get("RS_ALERT_REPORT_URL"):
+            needed.append("RS_COORDINATOR_TOKEN")
+        missing = [name for name in needed if not menv.get(name)]
         if missing:
             raise ValueError(f"no {', '.join(missing)} in the claim's env or the container's")
         config = render_config(template, answer, fleet_url, worker_id, home)
@@ -726,7 +736,7 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
     except FileNotFoundError:
         pass
 
-    relay = start_vnc_relay(fleet_url, str(answer["worker_token"]), env)
+    relay = start_vnc_relay(fleet_url, str(answer["worker_token"]), {**env, "RS_FLEET_TOKEN_PATH": str(home / "fleet-token")})
     health = _Health(worker_id, int(answer["epoch"]), home / PARKED_FILE)
     port = env.get("RS_WORKER_HEALTHZ_PORT") or ""
     try:
@@ -761,6 +771,7 @@ def start_vnc_relay(fleet_url: str, worker_token: str, env: Dict[str, str]) -> A
         worker_token,
         ("127.0.0.1", int(port) if port.isdigit() else 5900),
         log=log,
+        token_path=env.get("RS_FLEET_TOKEN_PATH"),
     ).start()
 
 

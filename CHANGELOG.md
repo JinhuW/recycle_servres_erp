@@ -15,6 +15,22 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.349.0] - 2026-10-25
+
+### Fixed
+
+- Fleet workers retain their account through confirmed-stop handoffs, and hosts
+  keep receiving a replacement command until the new epoch reports healthy.
+  Lost replies and the start stagger no longer strand a rollout (RS-400).
+- Moving a pool account off its worker fences pending writes and task allocation.
+  Released attempts remain in the daily budget, including work across UTC midnight.
+- Expired city checks retry; late verdicts respect manager removals and overrides.
+  Zero-card evidence quarantines an account only with positive peer evidence,
+  and successful probes release it.
+- Workers validate configured credentials delivered through the Cloudflare claim;
+  heartbeats renew the seven-day token without another Facebook login. Deploy
+  backend support before the corresponding worker and agent update.
+
 ## [1.348.0] - 2026-10-25
 
 Fleet workers get the secrets they all share without those secrets ever

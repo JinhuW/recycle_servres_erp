@@ -3,10 +3,10 @@ import type { MiddlewareHandler } from 'hono';
 import { every } from 'hono/combine';
 import type { FleetWorkerTokenClaims } from '@recycle-erp/shared';
 import { authMiddleware } from '../auth';
-import { getDb } from '../db';
+import { getDb, type SqlLike } from '../db';
 import { requireManager } from '../lib/role';
 import type { Env, User } from '../types';
-import { loadHostByTokenHash, loadSlot, sha256hex, type FleetHostRow, type FleetSlotRow } from './sql';
+import { loadHostByTokenHash, sha256hex, type FleetHostRow, type FleetSlotRow } from './sql';
 
 // ─── Fleet auth scopes ────────────────────────────────────────────────────────
 // Three callers reach /api/fleet: a manager in the browser (session cookie), a
@@ -116,8 +116,19 @@ export const workerAuth: MiddlewareHandler<WorkerEnv> = async (c, next) => {
   if (!token) return c.json(UNAUTHORIZED, 401);
   const claims = verifyWorkerToken(token, key);
   if (!claims) return c.json(UNAUTHORIZED, 401);
-  const slot = await loadSlot(getDb(c.env), claims.account_no);
-  if (!slot || slot.epoch !== claims.epoch) return c.json({ error: 'stale_epoch' }, 409);
+  const slot = await eligibleSlot(getDb(c.env), claims);
+  if (!slot) return c.json({ error: 'stale_epoch' }, 409);
   c.set('worker', { ...claims, slot });
   return next();
 };
+
+/** Pool edits lock the account first; worker writes use the same order. */
+export async function eligibleSlot(sql: SqlLike, w: FleetWorkerTokenClaims, lock = false): Promise<FleetSlotRow | null> {
+  const [account] = await sql<{ status: string; holder_name: string | null }[]>`
+    SELECT status, holder_name FROM fb_pool_accounts WHERE no = ${w.account_no}
+    ${lock ? sql`FOR NO KEY UPDATE` : sql``}`;
+  if (!account || account.status !== 'fleet' || account.holder_name?.toLowerCase() !== w.worker_id.toLowerCase()) return null;
+  const [slot] = await sql<FleetSlotRow[]>`SELECT * FROM fleet_slots WHERE account_no = ${w.account_no}
+    ${lock ? sql`FOR UPDATE` : sql``}`;
+  return slot && slot.epoch === w.epoch && slot.worker_id === w.worker_id ? slot : null;
+}

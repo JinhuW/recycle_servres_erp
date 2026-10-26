@@ -20,12 +20,13 @@ import { poolKey, seal, sealOrNull, unseal, unsealOrEmpty } from '../lib/sealed'
 import { WORKER_ID } from '../routes/coordinator';
 import type { Env } from '../types';
 import {
-  hostAuth, signWorkerToken, workerAuth, workerTokenKey, WORKER_TOKEN_DAYS,
+  eligibleSlot, hostAuth, signWorkerToken, workerAuth, workerTokenKey, WORKER_TOKEN_DAYS,
   type HostEnv, type WorkerEnv, type WorkerIdentity,
 } from './auth';
 import { loadSettings } from './cities';
 import { notifyReady } from './scheduler';
 import type { FleetHostRow, FleetSlotRow } from './sql';
+import { loadRelease } from './hosts';
 
 // ─── The worker protocol ──────────────────────────────────────────────────────
 // What a worker container says to the ERP over its life: it claims a slot at
@@ -233,8 +234,18 @@ worker.post('/claim', hostAuth, async (c) => {
   const tokenKey = workerTokenKey(c.env);
   if (!tokenKey) return c.json({ ...UNAUTHORIZED, detail: 'FLEET_WORKER_TOKEN_KEY is not set' }, 401);
 
+  if ((body.claim_id !== undefined && (typeof body.claim_id !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(body.claim_id)))
+      || (body.handoff_epoch !== undefined && (!Number.isInteger(body.handoff_epoch) || (body.handoff_epoch as number) < 0))) return c.json(BAD_REQUEST, 422);
+  const claimId = typeof body.claim_id === 'string' && /^[a-zA-Z0-9-]{1,64}$/.test(body.claim_id) ? body.claim_id : null;
+  const handoff = Number.isInteger(body.handoff_epoch) ? body.handoff_epoch as number : null;
   const sql = getDb(c.env);
   const answer = await sql.begin(async (tx): Promise<ClaimAnswer | null> => {
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${host.host_id + ':' + worker_id}, 0))`;
+    const [running] = await tx`SELECT account_no FROM fleet_slots WHERE host_id = ${host.host_id} AND worker_id = ${worker_id}
+      AND lease_expires_at > NOW()
+      AND NOT ((${claimId}::text IS NOT NULL AND claim_id IS NOT DISTINCT FROM ${claimId})
+        OR (${handoff}::int IS NOT NULL AND handoff_epoch IS NOT DISTINCT FROM ${handoff} AND lease_expires_at = 'infinity'::timestamptz))`;
+    if (running) return null;
     const settings = await loadSettings(tx);
     // The slot's own row is what the lock holds; the pool row only says the
     // account is still the fleet's. A slot's home cities nobody else is
@@ -242,8 +253,12 @@ worker.post('/claim', hostAuth, async (c) => {
     const [row] = await tx<ClaimRow[]>`
       SELECT s.*, a.uid, a.password_enc, a.totp_enc, a.cookie_enc, a.token_enc
       FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no
-      WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW())
-      ORDER BY (s.last_host_id = ${host.host_id}) DESC NULLS LAST,
+      WHERE a.status = 'fleet' AND (
+        (${claimId}::text IS NOT NULL AND s.claim_id = ${claimId} AND s.worker_id = ${worker_id} AND s.host_id = ${host.host_id})
+        OR (${handoff}::int IS NOT NULL AND s.handoff_epoch = ${handoff} AND s.lease_expires_at = 'infinity'::timestamptz AND s.worker_id = ${worker_id} AND s.host_id = ${host.host_id})
+        OR (${handoff}::int IS NULL AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW())))
+      ORDER BY (s.worker_id = ${worker_id}) DESC NULLS LAST, (s.claim_id = ${claimId}) DESC NULLS LAST, (s.handoff_epoch = ${handoff}) DESC NULLS LAST,
+        (s.last_host_id = ${host.host_id}) DESC NULLS LAST,
         (SELECT COUNT(*) FROM jsonb_array_elements_text(s.home_cities) h(slug)
           WHERE NOT EXISTS (
             SELECT 1 FROM fleet_slots o
@@ -251,27 +266,28 @@ worker.post('/claim', hostAuth, async (c) => {
               AND o.lease_expires_at > NOW() AND o.home_cities ? h.slug)) DESC,
         s.account_no
       LIMIT 1
-      FOR UPDATE OF s SKIP LOCKED`;
+      FOR NO KEY UPDATE OF a SKIP LOCKED`;
     if (!row) return null;
 
-    const [slot] = await tx<{ epoch: number }[]>`
-      UPDATE fleet_slots SET
-        epoch = epoch + 1, worker_id = ${worker_id}, host_id = ${host.host_id}, last_host_id = ${host.host_id},
-        lease_expires_at = NOW() + ${minutes(settings.lease_minutes)}::interval
-      WHERE account_no = ${row.account_no}
-      RETURNING epoch`;
-    // The pool row's holder is the worker, as "Assign to fleet" sets it; the
-    // trigger on fb_pool_accounts closes the previous stint and opens this
-    // one, and the ledger says which host did it.
-    await tx`
-      UPDATE fb_pool_accounts SET
-        holder_user_id = NULL, holder_name = ${worker_id},
+    const [locked] = await tx<(FleetSlotRow & { reserved: boolean })[]>`SELECT *, lease_expires_at = 'infinity'::timestamptz AS reserved FROM fleet_slots WHERE account_no = ${row.account_no} FOR UPDATE`;
+    const repeated = claimId !== null && locked.claim_id === claimId && locked.worker_id === worker_id && locked.host_id === host.host_id;
+    if (!repeated && handoff !== null && (locked.handoff_epoch !== handoff || locked.worker_id !== worker_id || locked.host_id !== host.host_id || !locked.reserved)) return null;
+    if (!repeated && handoff === null && locked.lease_expires_at !== null && !(locked.lease_expires_at < new Date())) return null;
+    let epoch = locked.epoch;
+    if (!repeated) {
+      // The pool trigger fences the previous holder before the new lease is installed.
+      await tx`UPDATE fb_pool_accounts SET holder_user_id = NULL, holder_name = ${worker_id},
         held_since = CASE WHEN lower(holder_name) = lower(${worker_id}) THEN held_since ELSE NOW() END,
-        updated_at = NOW()
-      WHERE no = ${row.account_no}`;
-    await tx`
-      INSERT INTO fb_pool_events (account_no, actor_id, actor_name, kind, status, detail)
-      VALUES (${row.account_no}, NULL, ${`fleet host ${host.host_id}`}, 'assigned', 'fleet', ${worker_id})`;
+        updated_at = NOW() WHERE no = ${row.account_no}`;
+      const [slot] = await tx<{ epoch: number }[]>`
+        UPDATE fleet_slots SET epoch = ${locked.epoch + 1}, worker_id = ${worker_id}, host_id = ${host.host_id},
+          last_host_id = ${host.host_id}, claim_id = ${claimId}, handoff_epoch = ${handoff},
+          lease_expires_at = NOW() + ${minutes(settings.lease_minutes)}::interval
+        WHERE account_no = ${row.account_no} RETURNING epoch`;
+      epoch = slot.epoch;
+      await tx`INSERT INTO fb_pool_events (account_no, actor_id, actor_name, kind, status, detail)
+        VALUES (${row.account_no}, NULL, ${`fleet host ${host.host_id}`}, 'assigned', 'fleet', ${worker_id})`;
+    }
     const proxyUrl = row.proxy_url ? unseal(row.proxy_url, key) : null;
     const exit = proxyUrl ? proxyWithoutLogin(proxyUrl) : null;
     if (exit) {
@@ -279,19 +295,19 @@ worker.post('/claim', hostAuth, async (c) => {
         UPDATE fb_worker_accounts SET proxy_url = ${exit}, proxy_known = TRUE
         WHERE account_no = ${row.account_no} AND ended_at IS NULL`;
     }
-    await tx`
+    if (!repeated) await tx`
       INSERT INTO fleet_workers (worker_id, host_id, account_no, epoch, version, vnc_port)
-      VALUES (${worker_id}, ${host.host_id}, ${row.account_no}, ${slot.epoch}, ${version}, ${vncPort})
+      VALUES (${worker_id}, ${host.host_id}, ${row.account_no}, ${epoch}, ${version}, ${vncPort})
       ON CONFLICT (worker_id) DO UPDATE SET
         host_id = EXCLUDED.host_id, account_no = EXCLUDED.account_no, epoch = EXCLUDED.epoch,
-        version = EXCLUDED.version, vnc_port = EXCLUDED.vnc_port`;
+        version = EXCLUDED.version, vnc_port = EXCLUDED.vnc_port, state = NULL, last_heartbeat_at = NULL, detail = NULL`;
 
     const exp = Math.floor(Date.now() / 1000) + WORKER_TOKEN_DAYS * 86_400;
     const items = await loadItems(tx);
     const token = unsealOrEmpty(row.token_enc, key);
     return {
-      worker_token: signWorkerToken({ worker_id, account_no: row.account_no, epoch: slot.epoch, exp }, tokenKey),
-      epoch: slot.epoch,
+      worker_token: signWorkerToken({ worker_id, account_no: row.account_no, epoch, exp }, tokenKey),
+      epoch,
       account: {
         no: row.account_no,
         uid: row.uid,
@@ -324,14 +340,16 @@ worker.post('/claim', hostAuth, async (c) => {
 
 /** Puts a worker's leased tasks back on the queue; the ids it returned. */
 async function releaseTasks(
-  tx: SqlLike, where: { worker_id: string } | { account_no: number }, reason: string,
+  tx: SqlLike, where: { worker_id: string; account_no?: number; epoch?: number } | { account_no: number }, reason: string,
 ): Promise<number[]> {
   const rows = await tx<{ id: number; item: string }[]>`
     UPDATE fleet_tasks SET
-      state = 'ready', due_at = NOW(), worker_id = NULL, epoch = NULL, leased_at = NULL, lease_expires_at = NULL,
+      state = 'ready', due_at = NOW(), worker_id = NULL, epoch = NULL, leased_at = NULL, lease_expires_at = NULL, started_at = NULL,
       account_no = CASE WHEN kind = 'probe' THEN account_no ELSE NULL END
     WHERE state = 'leased'
       AND ${'worker_id' in where ? tx`worker_id = ${where.worker_id}` : tx`account_no = ${where.account_no}`}
+      ${'worker_id' in where && where.account_no !== undefined ? tx`AND account_no = ${where.account_no}` : tx``}
+      ${'epoch' in where ? tx`AND epoch = ${where.epoch!}` : tx``}
     RETURNING id::int AS id, item`;
   for (const r of rows) {
     await tx`
@@ -360,7 +378,8 @@ worker.post('/heartbeat', workerAuth, async (c) => {
   const detailValue: postgres.JSONValue | null = detail || lastSearch
     ? ({ ...(detail ?? {}), ...(lastSearch ? { last_search_at: lastSearch } : {}) } as postgres.JSONValue)
     : null;
-  await sql.begin(async (tx) => {
+  const accepted = await sql.begin(async (tx) => {
+    if (!await eligibleSlot(tx, w, true)) return false;
     const settings = await loadSettings(tx);
     const lease = tx`NOW() + ${minutes(settings.lease_minutes)}::interval`;
     await tx`
@@ -377,15 +396,21 @@ worker.post('/heartbeat', workerAuth, async (c) => {
     if (state === 'HEALTHY') {
       await tx`
         UPDATE fleet_tasks SET lease_expires_at = ${lease}
-        WHERE worker_id = ${w.worker_id} AND epoch = ${w.epoch} AND state = 'leased'`;
+        WHERE worker_id = ${w.worker_id} AND account_no = ${w.account_no} AND epoch = ${w.epoch} AND state = 'leased'`;
     } else if (fleetStateParked(state)) {
       // A parked account cannot search: its city goes back to the queue now,
       // not when the lease runs out. DEGRADED keeps it (the search goes on).
-      const released = await releaseTasks(tx, { worker_id: w.worker_id }, state);
+      const released = await releaseTasks(tx, { worker_id: w.worker_id, account_no: w.account_no, epoch: w.epoch }, state);
       if (released.length) flog.info('fleet tasks released by a parked worker', { workerId: w.worker_id, state, tasks: released });
     }
+    return true;
   });
-  return c.json({ ok: true, directives: [] });
+  if (!accepted) return c.json({ error: 'stale_epoch' }, 409);
+  const exp = Math.floor(Date.now() / 1000) + WORKER_TOKEN_DAYS * 86400;
+  const renewal = w.exp * 1000 - Date.now() < 86400000
+    ? { worker_token: signWorkerToken({ worker_id: w.worker_id, account_no: w.account_no, epoch: w.epoch, exp }, workerTokenKey(c.env)!), token_expires_at: exp }
+    : {};
+  return c.json({ ok: true, directives: [], ...renewal });
 });
 
 // ─── Next task ────────────────────────────────────────────────────────────────
@@ -417,22 +442,29 @@ async function pickTask(
 ): Promise<Pick> {
   return sql.begin(async (tx): Promise<Pick> => {
     // The hold may have lasted a minute: the slot could have moved on.
-    const [slot] = await tx<{ epoch: number; quarantined_until: Date | null; home_cities: string[] }[]>`
-      SELECT epoch, quarantined_until, home_cities FROM fleet_slots WHERE account_no = ${w.account_no}`;
-    if (!slot || slot.epoch !== w.epoch) return { stale: true };
+    const release = await loadRelease(tx, true);
+    const slot = await eligibleSlot(tx, w, true);
+    if (!slot) return { stale: true };
 
     if (done) {
-      const closed = await tx<{ id: number }[]>`
+      const closed = await tx<{ id: number; kind: string }[]>`
         UPDATE fleet_tasks SET state = 'done', done_at = NOW(), result = ${tx.json(done.result as postgres.JSONValue)}
-        WHERE id = ${done.task_id} AND worker_id = ${w.worker_id} AND state = 'leased'
-        RETURNING id::int AS id`;
+        WHERE id = ${done.task_id} AND worker_id = ${w.worker_id} AND account_no = ${w.account_no} AND epoch = ${w.epoch} AND state = 'leased'
+        RETURNING id::int AS id, kind`;
       if (closed.length) {
+        if (closed[0].kind === 'probe' && typeof done.result.cards === 'number' && done.result.cards > 0 && !done.result.stopped) {
+          await tx`UPDATE fleet_slots SET quarantined_until = NULL, quarantine_reset_at = NOW(), quarantine_evidence = NULL WHERE account_no = ${w.account_no}`;
+          slot.quarantined_until = null;
+        }
         await tx`
           INSERT INTO fleet_task_events (task_id, worker_id, kind, detail)
           VALUES (${done.task_id}, ${w.worker_id}, 'done', ${tx.json(done.result as postgres.JSONValue)})`;
       }
     }
     if (!take) return { task: null, reason: 'done_only' };
+    if (release?.state === 'rolling' && release.current?.worker_id === w.worker_id) {
+      return { task: null, reason: 'draining', retry_after: 30 };
+    }
 
     const quarantined = slot.quarantined_until !== null && slot.quarantined_until.getTime() > Date.now();
     if (!quarantined) {
@@ -547,30 +579,30 @@ worker.post('/events', workerAuth, async (c) => {
   }
   const kind = body.kind;
   const sql = getDb(c.env);
-  const [task] = await sql<{ id: number; kind: string; city: string; worker_id: string | null }[]>`
-    SELECT id::int AS id, kind, city, worker_id FROM fleet_tasks WHERE id = ${body.task_id as number}`;
-  if (!task || task.worker_id !== w.worker_id) return c.json(NOT_FOUND, 404);
-
-  await sql.begin(async (tx) => {
-    await tx`
-      INSERT INTO fleet_task_events (task_id, worker_id, kind, detail)
+  const accepted = await sql.begin(async (tx) => {
+    if (!await eligibleSlot(tx, w, true)) return 'stale';
+    const [task] = await tx<{ id: number; kind: string; city: string }[]>`
+      SELECT id::int AS id, kind, city FROM fleet_tasks
+      WHERE id = ${body.task_id as number} AND worker_id = ${w.worker_id} AND account_no = ${w.account_no} AND epoch = ${w.epoch} AND state = 'leased'`;
+    if (!task) return 'missing';
+    if (task.kind === 'verify-slug') await tx`SELECT slug FROM fleet_cities WHERE slug = ${task.city} FOR UPDATE`;
+    const current = await tx`SELECT id FROM fleet_tasks WHERE id = ${task.id} AND worker_id = ${w.worker_id}
+      AND account_no = ${w.account_no} AND epoch = ${w.epoch} AND state = 'leased' FOR UPDATE`;
+    if (!current.length) return 'missing';
+    await tx`INSERT INTO fleet_task_events (task_id, worker_id, kind, detail)
       VALUES (${task.id}, ${w.worker_id}, ${kind}, ${detail ? tx.json(detail as postgres.JSONValue) : null})`;
-    if (kind === 'started') {
-      await tx`UPDATE fleet_tasks SET started_at = COALESCE(started_at, NOW()) WHERE id = ${task.id}`;
-    }
-    // A slug check's verdict is the city's: it searches only once Facebook
-    // showed the place the manager meant.
+    if (kind === 'started') await tx`UPDATE fleet_tasks SET started_at = COALESCE(started_at, NOW()) WHERE id = ${task.id}`;
     if (task.kind === 'verify-slug' && (kind === 'finished' || kind === 'stopped')) {
       const matches = detail?.matches === true;
       const location = typeof detail?.location === 'string' ? detail.location.slice(0, 200) : null;
-      await tx`
-        UPDATE fleet_cities SET
-          verified_at = NOW(), verified_as = ${location}, enabled = ${matches},
-          disabled_at = CASE WHEN ${matches} THEN NULL ELSE disabled_at END
-        WHERE slug = ${task.city}`;
-      flog.info('fleet city slug verified', { city: task.city, matches, location, workerId: w.worker_id });
+      await tx`UPDATE fleet_cities SET verified_at = NOW(), verified_as = ${location}, enabled = ${matches}
+        WHERE slug = ${task.city} AND disabled_at IS NULL
+          AND (verified_at IS NULL OR (verified_as IS DISTINCT FROM 'override' AND verified_at <= (SELECT leased_at FROM fleet_tasks WHERE id = ${task.id})))`;
     }
+    return 'ok';
   });
+  if (accepted === 'stale') return c.json({ error: 'stale_epoch' }, 409);
+  if (accepted === 'missing') return c.json(NOT_FOUND, 404);
   return c.json({ ok: true });
 });
 
@@ -589,14 +621,17 @@ worker.put('/session', workerAuth, async (c) => {
   if (!key) return c.json({ ...UNAUTHORIZED, detail: 'FB_POOL_KEY is not set' }, 401);
   const text = cookieTextFromList(cookies);
   const sql = getDb(c.env);
-  const updated = await sql<{ no: number }[]>`
+  const updated = await sql.begin(async (tx) => {
+    if (!await eligibleSlot(tx, w, true)) return [];
+    return tx<{ no: number }[]>`
     UPDATE fb_pool_accounts SET
       cookie_enc = ${cookies.length ? seal(text, key) : null}, cookie_uid = ${cookies.length ? cookieUid(text) : null},
       cookie_at = NOW(), updated_at = NOW(),
-      token_enc = ${token === undefined ? sql`token_enc` : sealOrNull(token ?? '', key)}
+      token_enc = ${token === undefined ? tx`token_enc` : sealOrNull(token ?? '', key)}
     WHERE no = ${w.account_no}
     RETURNING no`;
-  if (!updated.length) return c.json(NOT_FOUND, 404);
+  });
+  if (!updated.length) return c.json({ error: 'stale_epoch' }, 409);
   flog.info('fleet session resealed', { accountNo: w.account_no, workerId: w.worker_id, cookies: cookies.length, token: token !== undefined });
   return c.json({ ok: true });
 });

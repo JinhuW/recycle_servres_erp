@@ -192,3 +192,7 @@ describe('stagger', () => {
     expect(kinds(run([], { lastStartAt: NOW - 1000, staggerMs: 500 }))).toEqual([['run', 'lab-1']]);
   });
 });
+
+it('does not restart an operator-parked worker', () => {
+  expect(run([exited('lab-1', 78, ago(3600)), running('lab-2')]).actions).toEqual([]);
+});

@@ -69,6 +69,15 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
               ${now})`;
   }
 
+  const checks = await sql<{ item: string }[]>`
+    INSERT INTO fleet_tasks (city, item, kind, due_at, priority, state, reason)
+    SELECT c.slug, i.name, 'verify-slug', ${now}, 50, 'ready', 'verify'
+    FROM fleet_cities c CROSS JOIN LATERAL (SELECT name FROM fleet_items WHERE enabled ORDER BY name LIMIT 1) i
+    WHERE c.verified_at IS NULL AND c.disabled_at IS NULL AND NOT c.enabled
+      AND NOT EXISTS (SELECT 1 FROM fleet_tasks t WHERE t.city = c.slug AND t.kind = 'verify-slug' AND t.state IN ('ready','leased'))
+    ON CONFLICT DO NOTHING RETURNING item`;
+  for (const t of checks) woke.add(t.item);
+
   // One open search per enabled pair. Due when the last finished search plus
   // the cadence says, or now: a pair never searched (or whose task just
   // expired) is due at once.
@@ -91,6 +100,30 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
     ON CONFLICT DO NOTHING
     RETURNING item, due_at`;
   for (const t of inserted) if (t.due_at.getTime() <= now.getTime()) woke.add(t.item);
+
+  // Compare completed results by account, as the coordinator did by worker.
+  // Stopped searches are not evidence that the account cannot see cards.
+  if (settings.quarantine_hours > 0) {
+    await sql`
+      WITH evidence AS (
+        SELECT t.account_no, t.city, t.done_at, (t.result->>'cards')::numeric AS cards
+        FROM fleet_tasks t
+        WHERE t.kind = 'search' AND t.state = 'done' AND jsonb_typeof(t.result->'cards') = 'number'
+          AND t.result->>'stopped' IS NULL
+          AND t.done_at > ${now}::timestamptz - make_interval(hours => ${settings.quarantine_hours})
+      ), blind AS (
+        SELECT e.account_no, MAX(e.done_at) AS latest, COUNT(*) AS searches, jsonb_agg(DISTINCT e.city) AS cities
+        FROM evidence e JOIN fleet_slots own ON own.account_no = e.account_no
+        WHERE own.quarantine_reset_at IS NULL OR e.done_at > own.quarantine_reset_at
+        GROUP BY e.account_no HAVING COUNT(*) >= 2 AND bool_and(e.cards = 0)
+          AND bool_or(EXISTS (SELECT 1 FROM evidence p WHERE p.city = e.city AND p.account_no <> e.account_no AND p.cards > 0))
+      )
+      UPDATE fleet_slots s SET quarantined_until = b.latest + make_interval(hours => ${settings.quarantine_hours}),
+        quarantine_evidence = jsonb_build_object('searches', b.searches, 'cities', b.cities, 'latest', b.latest, 'rule', 'all_zero_with_positive_peer')
+      FROM blind b WHERE s.account_no = b.account_no
+        AND (s.quarantine_reset_at IS NULL OR b.latest > s.quarantine_reset_at)
+        AND (s.quarantined_until IS NULL OR s.quarantined_until < b.latest + make_interval(hours => ${settings.quarantine_hours}))`;
+  }
 
   // A quarantined account gets one probe per interval so a quarantine can
   // end: its first home city that is still enabled, else whatever is most
@@ -122,7 +155,7 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
   }
 
   const notified = await notifyReady(sql, woke);
-  return { inserted: inserted.length, cancelled: cancelled.count, expired: expired.length, probes, notified };
+  return { inserted: inserted.length + checks.length, cancelled: cancelled.count, expired: expired.length, probes, notified };
 }
 
 async function probeCity(sql: Sql, home: string[]): Promise<string | null> {

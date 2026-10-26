@@ -5,10 +5,12 @@
 // reach the workers. One attempt each with a short timeout: the loop comes
 // round again in seconds.
 
+import type { StopIdentity } from './state.js';
 import { parseDesired, type Desired, type Report } from './types.js';
 
 export interface FleetClient {
   desired(): Promise<Desired | null>;
+  stopped?(workerId: string, identity: StopIdentity): Promise<boolean | 'stale'>;
   report(payload: Report): Promise<boolean>;
 }
 
@@ -46,6 +48,11 @@ export class HttpFleetClient implements FleetClient {
     return desired;
   }
 
+  async stopped(workerId: string, identity: StopIdentity): Promise<boolean | 'stale'> {
+    const response = await this.request('POST', 'stopped', { worker_id: workerId, account_no: identity.account_no, epoch: identity.epoch, restart: identity.restart });
+    return response && typeof response === 'object' && 'stale' in response ? 'stale' : response !== null;
+  }
+
   async report(payload: Report): Promise<boolean> {
     return (await this.request('POST', 'report', payload)) !== null;
   }
@@ -65,6 +72,7 @@ export class HttpFleetClient implements FleetClient {
       this.onFailure(part, e instanceof Error ? e.message : String(e));
       return null;
     }
+    if (part === 'stopped' && res.status === 409) return { stale: true };
     if (!res.ok) {
       this.onFailure(part, `HTTP ${res.status}`);
       return null;

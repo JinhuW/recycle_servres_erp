@@ -164,9 +164,11 @@ def test_a_claim_renders_the_worker_and_runs_the_monitor(
     method, path, body, headers = fleet.requests[0]
     assert (method, path) == ("POST", "/api/fleet/worker/claim")
     assert headers["authorization"] == f"Bearer {HOST_TOKEN}"
+    assert isinstance(body.pop("claim_id"), str)
     assert body == {"host_id": "lab", "worker_id": "lab-1", "version": "0.14.0", "vnc_port": 5903}
 
     config = tomllib.loads((home / "config.toml").read_text())
+    assert config["fleet"].pop("token_path") == str(home / "fleet-token")
     assert config["fleet"] == {
         "url": fleet.url,
         "worker_token": mint_token("lab-1", 12, 7, exp=json.loads(
@@ -219,7 +221,7 @@ def test_a_claim_renders_the_worker_and_runs_the_monitor(
     sidecar = json.loads((home / "session.json.meta.json").read_text())
     assert sidecar["user_agent"] == fleet_device()["user_agent"]
     assert sidecar["proxy"] == "http://proxy.invalid:10007"
-    for name in ("config.toml", "session.json", "session.json.meta.json", "identity.json"):
+    for name in ("config.toml", "session.json", "session.json.meta.json", "identity.json", "fleet-token"):
         assert stat.S_IMODE((home / name).stat().st_mode) == 0o600
 
     monitor_env = json.loads((tmp_path / "monitor-env.json").read_text())
@@ -572,7 +574,7 @@ def test_the_claims_env_reaches_the_monitor_and_its_values_are_never_logged(
     assert "telegram_topic_high" not in config["user"]["recycle"]
 
     logged = capfd.readouterr().err
-    assert "claim env: OPENROUTER_API_KEY, RS_COORDINATOR_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_TOKEN" in logged
+    assert "claim env: OPENROUTER_API_KEY, RS_CONTROL_PLANE_TOKEN, RS_COORDINATOR_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_TOKEN" in logged
     for value in ("made-up-openrouter-key", "made-up-bot-token", "made-up-coordinator-token",
                   "made-up-hijack", ACCOUNT["password"]):
         assert value not in logged
@@ -693,3 +695,12 @@ def test_a_parked_monitor_stopped_by_docker_still_leaves_0(
         fleet, RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path), RS_TEST_PARK="timeout"
     )
     assert entry.run_fleet([], env, home=tmp_path / "home") == 0
+
+
+def test_missing_coordinator_auth_fails_before_browser_start(fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fleet.env.pop('RS_CONTROL_PLANE_TOKEN', None)
+    monkeypatch.delenv('RS_CONTROL_PLANE_TOKEN', raising=False)
+    started = []
+    monkeypatch.setattr(entry, 'run_monitor', lambda *args, **kwargs: started.append(True))
+    assert entry.run_fleet([], fleet_env(fleet), home=tmp_path / 'home') == 70
+    assert started == []

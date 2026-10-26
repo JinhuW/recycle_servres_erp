@@ -5,7 +5,8 @@ import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
 import type { Env } from '../types';
 import { hostAuth, managerOnly, type HostEnv, type ManagerEnv } from './auth';
-import { sha256hex, type FleetHostRow } from './sql';
+import { sha256hex, type FleetHostRow, type FleetSlotRow } from './sql';
+import { releaseTasks } from './claim';
 
 // ─── Hosts and releases ───────────────────────────────────────────────────────
 // A host is a machine running one fleet-agent container. The ERP tells it what
@@ -85,7 +86,7 @@ export function gateOk(preState: string | null, postState: string | null): boole
   return postState !== 'DEAD';
 }
 
-type WorkerRow = { worker_id: string; state: string | null; version: string | null; last_heartbeat_at: Date | null };
+type WorkerRow = { worker_id: string; state: string | null; version: string | null; last_heartbeat_at: Date | null; epoch: number | null };
 
 function onVersion(w: WorkerRow | undefined, version: string, since: Date): boolean {
   if (!w || !w.last_heartbeat_at) return false;
@@ -116,17 +117,17 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
   if (!release || release.state !== 'rolling') return null;
   const allHosts = await tx<FleetHostRow[]>`SELECT * FROM fleet_hosts`;
   const workers = new Map(
-    (await tx<WorkerRow[]>`SELECT worker_id, state, version, last_heartbeat_at FROM fleet_workers`).map((w) => [w.worker_id, w]),
+    (await tx<WorkerRow[]>`SELECT worker_id, state, version, last_heartbeat_at, epoch FROM fleet_workers`).map((w) => [w.worker_id, w]),
   );
 
   if (release.current) {
     const cur = release.current;
     const w = workers.get(cur.worker_id);
     const started = new Date(cur.started_at);
-    if (onVersion(w, release.version, started) && gateOk(cur.pre_state, w?.state ?? null)) {
+    if (onVersion(w, release.version, started) && (cur.epoch === undefined || (w?.epoch ?? 0) > cur.epoch) && gateOk(cur.pre_state, w?.state ?? null)) {
       release.upgraded = [...release.upgraded, cur.worker_id];
       release.current = null;
-    } else if (now.getTime() - started.getTime() > GATE_TIMEOUT_MS) {
+    } else if (now.getTime() - new Date(cur.stopped_at ?? cur.started_at).getTime() > (cur.stopped_at ? GATE_TIMEOUT_MS : 2 * GATE_TIMEOUT_MS)) {
       release.state = 'failed';
       release.failure = `${cur.worker_id} did not come back on ${release.version} in a state no worse than `
         + `${cur.pre_state} within ${GATE_TIMEOUT_MS / 60_000} minutes `
@@ -137,7 +138,7 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
       hlog.warn('fleet release stopped', { version: release.version, failure: release.failure });
       return null;
     } else {
-      return null;
+      return cur.host_id === host.host_id ? cur.worker_id : null;
     }
   }
 
@@ -151,6 +152,7 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
   if (host.authoritative) {
     const candidates = pending(host, release);
     if (candidates.length) {
+      await tx`SELECT account_no FROM fleet_slots WHERE worker_id = ANY(${candidates}::text[]) ORDER BY account_no FOR UPDATE`;
       const busy = new Set((await tx<{ worker_id: string }[]>`
         SELECT DISTINCT worker_id FROM fleet_tasks
         WHERE state = 'leased' AND worker_id = ANY(${candidates}::text[])`).map((r) => r.worker_id));
@@ -158,7 +160,7 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
       if (idle) {
         const w = workers.get(idle);
         const fresh = w?.last_heartbeat_at && now.getTime() - w.last_heartbeat_at.getTime() < FRESH_HEARTBEAT_MS;
-        release.current = { worker_id: idle, host_id: host.host_id, started_at: now.toISOString(), pre_state: fresh ? (w?.state ?? 'DOWN') : 'DOWN' };
+        release.current = { worker_id: idle, host_id: host.host_id, started_at: now.toISOString(), pre_state: fresh ? (w?.state ?? 'DOWN') : 'DOWN', ...(w?.epoch !== null && w?.epoch !== undefined ? { epoch: w.epoch } : {}) };
         replace = idle;
       }
     }
@@ -186,7 +188,10 @@ async function desired(tx: SqlLike, env: Env, host: FleetHostRow, advance: boole
   const roll = typeof replace === 'string'
     ? { replace }
     : replace && replace.host_id === host.host_id ? { replace: replace.worker_id } : null;
-  return { authoritative: host.authoritative, count, image, version, vnc_ports, roll };
+  const slots = await tx<{ worker_id: string; account_no: number; epoch: number }[]>`
+    SELECT worker_id, account_no, epoch FROM fleet_slots WHERE host_id = ${host.host_id} AND worker_id IS NOT NULL`;
+  const leases = Object.fromEntries(slots.map(s => [s.worker_id, { account_no: s.account_no, epoch: s.epoch }]));
+  return { authoritative: host.authoritative, count, image, version, vnc_ports, roll, leases };
 }
 
 // ─── Manager routes ───────────────────────────────────────────────────────────
@@ -285,6 +290,36 @@ hosts.get('/:id/desired', hostAuth, async (c) => {
   const sql = getDb(c.env);
   const answer = await sql.begin((tx) => desired(tx, c.env, host, true));
   return c.json(answer);
+});
+
+hosts.post('/:id/stopped', hostAuth, async (c) => {
+  const host: FleetHostRow = c.var.host;
+  const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
+  if (!body || typeof body.worker_id !== 'string' || !Number.isInteger(body.account_no)
+      || !Number.isInteger(body.epoch) || typeof body.restart !== 'boolean') return c.json({ error: 'bad_request' }, 422);
+  const no = body.account_no as number;
+  const epoch = body.epoch as number;
+  const ok = await getDb(c.env).begin(async tx => {
+    const r = await loadRelease(tx, true);
+    await tx`SELECT no FROM fb_pool_accounts WHERE no = ${no} FOR NO KEY UPDATE`;
+    const [s] = await tx<FleetSlotRow[]>`SELECT * FROM fleet_slots WHERE account_no = ${no} FOR UPDATE`;
+    if (!s) return false;
+    if (s.handoff_epoch === epoch && s.worker_id === body.worker_id && s.host_id === host.host_id) {
+      if (!body.restart) await tx`UPDATE fleet_slots SET lease_expires_at = NULL WHERE account_no = ${no} AND lease_expires_at = 'infinity'::timestamptz`;
+      return true;
+    }
+    if (s.epoch !== epoch || s.worker_id !== body.worker_id || s.host_id !== host.host_id) return false;
+    await releaseTasks(tx, { account_no: no }, 'host_stopped');
+    await tx`UPDATE fleet_slots SET epoch = epoch + 1, claim_id = NULL, handoff_epoch = ${epoch},
+      lease_expires_at = ${body.restart ? tx`'infinity'::timestamptz` : tx`NULL`}
+      WHERE account_no = ${no}`;
+    if (r?.state === 'rolling' && r.current && r.current.worker_id === body.worker_id && r.current.host_id === host.host_id) {
+      r.current.stopped_at = new Date().toISOString();
+      await saveRelease(tx, r);
+    }
+    return true;
+  });
+  return ok ? c.json({ ok: true }) : c.json({ error: 'stale_epoch' }, 409);
 });
 
 hosts.post('/:id/report', hostAuth, async (c) => {

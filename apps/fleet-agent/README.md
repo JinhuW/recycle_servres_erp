@@ -111,3 +111,24 @@ removes everything it made. It never runs the worker image.
 
 The image builds from the repository root:
 `docker build -f apps/fleet-agent/Dockerfile -t ghcr.io/jinhuw/fleet-agent:$(node -p "require('./package.json').version") .`
+
+### Confirmed-stop recovery
+
+With backend v1.348.0, desired includes each worker's account/epoch in `leases`.
+The agent persists that identity under /state before stopping the container;
+after Docker confirms removal it posts `/hosts/:id/stopped`. The backend fences
+the old epoch and reserves the same account. The new container receives
+RS_FLEET_HANDOFF_EPOCH; a lost stop reply is retried and never licenses a second
+browser. Keep /state durable across agent restarts. Pending reservations can be
+cleared by parking/unparking the slot if an operator abandons the replacement.
+
+Roll commands repeat until a fresh epoch/version passes the heartbeat gate.
+The agent leaves an already-updated running container alone, preserves its
+start stagger, and leaves exit 78 (operator intervention) stopped. Exit 75 may
+be recreated through a confirmed-stop handoff when online. Offline behavior
+continues to keep running containers and uses the cached desired state.
+
+Shared credentials are supplied by the Cloudflare Worker's FLEET_WORKER_ENV secret on a
+successful claim, not by Docker arguments. Deploy backend support before the
+new agent/worker. No live restart is needed to validate this protocol: the
+backend's fleet-hosts tests compose this planner with a fake Docker driver.

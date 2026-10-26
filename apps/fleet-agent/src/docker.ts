@@ -24,6 +24,7 @@ export interface RunSpec {
   worker_id: string;
   image: string;
   port: number;
+  handoff_epoch?: number;
 }
 
 export interface RunResult {
@@ -61,6 +62,7 @@ export function runArgs(hostId: string, spec: RunSpec): string[] {
     '-e', 'RS_FLEET_HOST_TOKEN',
     '-e', 'RS_FLEET_WORKER_ID',
     '-e', `RS_VNC_PORT=${spec.port}`,
+    ...(spec.handoff_epoch !== undefined ? ['-e', `RS_FLEET_HANDOFF_EPOCH=${spec.handoff_epoch}`] : []),
     '-p', `127.0.0.1:${spec.port}:5900`,
     spec.image,
   ];

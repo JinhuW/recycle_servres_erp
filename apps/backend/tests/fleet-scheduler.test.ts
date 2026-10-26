@@ -25,7 +25,7 @@ async function catalog(cities: Array<[slug: string, enabled?: boolean, perDay?: 
   for (const [slug, enabled = true, perDay = null] of cities) {
     await db`
       INSERT INTO fleet_cities (slug, name, enabled, per_day, verified_at, verified_as)
-      VALUES (${slug}, ${slug}, ${enabled}, ${perDay}, ${enabled ? NOW : null}, ${enabled ? 'imported' : null})`;
+      VALUES (${slug}, ${slug}, ${enabled}, ${perDay}, ${NOW}, ${enabled ? 'imported' : null})`;
   }
   for (const name of items) await db`INSERT INTO fleet_items (name, phrases) VALUES (${name}, '["x"]')`;
 }
@@ -262,5 +262,61 @@ describe('reconcile: import and concurrency', () => {
     } finally {
       await sub.unlisten();
     }
+  });
+});
+
+describe('verification and quarantine recovery', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('creates the missing check after the first item, and replaces an expired check', async () => {
+    const db = getTestDb();
+    await db`INSERT INTO fleet_cities (slug, name) VALUES ('new-city', 'New city')`;
+    await reconcile(db);
+    expect((await tasks()).length).toBe(0);
+    await db`INSERT INTO fleet_items (name, phrases) VALUES ('server_ram', '["ram"]')`;
+    await reconcile(db);
+    const [first] = await tasks();
+    expect(first.kind).toBe('verify-slug');
+    await db`UPDATE fleet_tasks SET state = 'leased', leased_at = NOW() - interval '1 hour', lease_expires_at = NOW() - interval '1 minute' WHERE id = ${first.id}`;
+    await reconcile(db);
+    const open = await tasks('open');
+    expect(open).toHaveLength(1); expect(open[0].kind).toBe('verify-slug');
+    expect(open[0].id).not.toBe(first.id);
+  });
+
+  it('ports zero-card evidence, preserves a manual release, and schedules per-account probes on one city', async () => {
+    const db = getTestDb(); await catalog([['houston']]);
+    const accounts = await db`INSERT INTO fb_pool_accounts (uid, batch, status) VALUES
+      ('6155000000091','test','fleet'), ('6155000000092','test','fleet'), ('6155000000093','test','fleet') RETURNING no`;
+    for (const a of accounts) await db`INSERT INTO fleet_slots (account_no, home_cities) VALUES (${a.no}, '["houston"]')`;
+    for (const [index, a] of accounts.entries()) {
+      for (let i = 0; i < 2; i++) await db`INSERT INTO fleet_tasks (city,item,kind,state,due_at,done_at,account_no,result)
+        VALUES ('houston','server_ram','search','done',NOW(),NOW(),${a.no},${db.json({cards: index === 2 ? 20 : 0})})`;
+    }
+    await reconcile(db);
+    const slots = await db`SELECT * FROM fleet_slots ORDER BY account_no`;
+    expect(slots[0].quarantined_until).not.toBeNull(); expect(slots[1].quarantined_until).not.toBeNull();
+    expect(slots[2].quarantined_until).toBeNull();
+    const probes = await db`SELECT * FROM fleet_tasks WHERE kind = 'probe' AND state = 'ready'`;
+    expect(probes).toHaveLength(2);
+    await db`UPDATE fleet_slots SET quarantined_until = NULL, quarantine_reset_at = NOW() WHERE account_no = ${accounts[0].no}`;
+    await reconcile(db);
+    expect((await db`SELECT quarantined_until FROM fleet_slots WHERE account_no = ${accounts[0].no}`)[0].quarantined_until).toBeNull();
+  });
+});
+
+describe('quarantine evidence exclusions', () => {
+  beforeEach(async () => { await resetDb(); });
+  it('does not quarantine stopped work or cities nobody sees cards in', async () => {
+    const db = getTestDb(); await catalog([['houston']]);
+    const [a] = await db`INSERT INTO fb_pool_accounts (uid,batch,status) VALUES ('6155000000095','test','fleet') RETURNING no`;
+    await db`INSERT INTO fleet_slots (account_no) VALUES (${a.no})`;
+    for (let i = 0; i < 2; i++) await db`INSERT INTO fleet_tasks (city,item,state,due_at,done_at,account_no,result)
+      VALUES ('houston','server_ram','done',NOW(),NOW(),${a.no},'{"cards":0,"stopped":"connect failed"}')`;
+    await reconcile(db);
+    expect((await db`SELECT quarantined_until FROM fleet_slots`)[0].quarantined_until).toBeNull();
+    await db`UPDATE fleet_tasks SET result = '{"cards":0}' WHERE state = 'done'`;
+    await reconcile(db);
+    expect((await db`SELECT quarantined_until FROM fleet_slots`)[0].quarantined_until).toBeNull();
   });
 });
