@@ -1395,15 +1395,18 @@ accounting.get('/review', async (c) => {
 });
 
 // The sidebar's badge: what waits on the viewer, sign-offs and questions both.
+// Home reads the same two numbers.
 accounting.get('/review/count', async (c) => {
-  const me = c.var.user.id;
-  const sql = getDb(c.env);
+  return c.json(await reviewCounts(getDb(c.env), c.var.user.id));
+});
+
+export async function reviewCounts(sql: SqlLike, me: string): Promise<{ forMe: number; asked: number }> {
   const [r] = await sql<{ for_me: number; asked: number }[]>`
     SELECT COUNT(*) FILTER (WHERE ${reviewTabFrag(sql, 'mine', me)})::int AS for_me,
            COUNT(*) FILTER (WHERE ${reviewTabFrag(sql, 'queried', me)} AND e.query_to = ${me})::int AS asked
     FROM accounting_entries e WHERE e.voided_at IS NULL AND e.reviewed_at IS NULL`;
-  return c.json({ forMe: r.for_me, asked: r.asked });
-});
+  return { forMe: r.for_me, asked: r.asked };
+}
 
 const BULK_MAX = 200;
 

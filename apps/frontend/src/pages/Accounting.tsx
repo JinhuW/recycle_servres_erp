@@ -29,7 +29,7 @@ export function Accounting({ showToast }: Props) {
   const entryId = matchAccountingEntry(path);
   const allowed = user?.role === 'manager';
   // Manager-only, like the API: anyone else is sent home.
-  useEffect(() => { if (user && !allowed) replaceRoute('/dashboard'); }, [user, allowed]);
+  useEffect(() => { if (user && !allowed) replaceRoute('/'); }, [user, allowed]);
   if (!allowed) return null;
   return entryId ? <EntryScreen id={entryId} showToast={showToast} /> : <BookScreen showToast={showToast} />;
 }
@@ -90,7 +90,7 @@ function BookScreen({ showToast }: Props) {
         sub={t('acctPhPeriod_' + period)}
         scrolled={scrolled}
         leading={(
-          <button className="ph-icon-btn" onClick={() => navigateBack('/dashboard')} aria-label={t('back')}>
+          <button className="ph-icon-btn" onClick={() => navigateBack('/')} aria-label={t('back')}>
             <Icon name="chevronLeft" size={17} />
           </button>
         )}

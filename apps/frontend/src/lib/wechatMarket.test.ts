@@ -99,7 +99,7 @@ describe('WeChat market board', () => {
     expect(pathToDesktopView(wechatDayPath('2026-10-21'))).toBe('wechat');
     expect(matchWechatDay('/wechat/2026-10-21')).toEqual({ date: '2026-10-21' });
     expect(matchWechatDay('/wechat/latest')).toBeNull();
-    expect(pathToDesktopView('/wechat/latest')).toBe('dashboard');
+    expect(pathToDesktopView('/wechat/latest')).toBe('home');
   });
 });
 

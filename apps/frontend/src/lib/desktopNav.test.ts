@@ -29,7 +29,7 @@ const allLeaves: NavLeaf[] = DESKTOP_NAV.flatMap(g =>
 
 describe('shownNav', () => {
   it('gives purchasers the Facebook pool and Settings, with no Reddit monitor', () => {
-    const items = oversight('purchaser', 'dashboard')?.items ?? [];
+    const items = oversight('purchaser', 'home')?.items ?? [];
     expect(items.map(i => (i.kind === 'leaf' ? i.leaf.id : i.parent.tKey))).toEqual(['nav_monitors', 'settings']);
     const parent = items.find((i): i is ShownParent => i.kind === 'parent');
     expect(parent?.children.map(c => c.leaf.id)).toEqual(['coordinator']);
@@ -37,7 +37,7 @@ describe('shownNav', () => {
   });
 
   it('shows Monitors closed elsewhere, pointing at Facebook', () => {
-    const m = monitors('dashboard');
+    const m = monitors('home');
     expect(m?.open).toBe(false);
     expect(m?.target).toBe('coordinator');
     expect(m?.children.map(c => c.leaf.id)).toEqual(['coordinator', 'tracker', 'wechat']);
@@ -61,16 +61,25 @@ describe('shownNav', () => {
     expect(m?.children.map(c => [c.leaf.id, c.active])).toEqual([['coordinator', false], ['tracker', false], ['wechat', true]]);
   });
 
-  it('keeps Inventory and Payments lit on their tabs', () => {
-    expect(leaf('manager', 'analysis', 'inventory')?.active).toBe(true);
+  it('keeps Analysis and Payments lit on their tabs', () => {
+    expect(leaf('manager', 'stock', 'analysis')?.active).toBe(true);
     expect(leaf('manager', 'internaltx', 'payments')?.active).toBe(true);
-    expect(leaf('manager', 'dashboard', 'inventory')?.active).toBe(false);
+    expect(leaf('manager', 'stock', 'inventory')?.active).toBe(false);
+    expect(leaf('manager', 'home', 'analysis')?.active).toBe(false);
+  });
+
+  it('puts Home first and Analysis second for both roles', () => {
+    for (const role of ['manager', 'purchaser'] as const) {
+      const first = shownNav(role, 'home')[0].items.slice(0, 2)
+        .map(i => (i.kind === 'leaf' ? i.leaf.id : i.parent.tKey));
+      expect(first).toEqual(['home', 'analysis']);
+    }
   });
 
   it('groups Payments and the RMB Flow under Accounting, pointing at Payments', () => {
     const accounting = (view: DesktopViewId) => oversight('manager', view)?.items
       .find((i): i is ShownParent => i.kind === 'parent' && i.parent.tKey === 'nav_accounting');
-    const closed = accounting('dashboard');
+    const closed = accounting('home');
     expect(closed?.open).toBe(false);
     expect(closed?.target).toBe('payments');
     expect(closed?.children.map(c => [c.leaf.id, c.leaf.tKey])).toEqual([['payments', 'nav_payments'], ['accounting', 'nav_rmbFlow']]);
@@ -78,7 +87,7 @@ describe('shownNav', () => {
     // Internal transactions is a Payments tab: the parent opens for it too.
     expect(accounting('internaltx')?.open).toBe(true);
     expect(accounting('accounting')?.children.map(c => c.active)).toEqual([false, true]);
-    expect(oversight('purchaser', 'dashboard')?.items.some(i => i.kind === 'parent' && i.parent.tKey === 'nav_accounting')).toBe(false);
+    expect(oversight('purchaser', 'home')?.items.some(i => i.kind === 'parent' && i.parent.tKey === 'nav_accounting')).toBe(false);
   });
 });
 
