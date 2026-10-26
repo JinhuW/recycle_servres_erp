@@ -47,6 +47,7 @@ what answers.
 | `next-task` hands a lease the epoch still holds again instead of leasing a second; the replacement's later epoch is not drained; a wake that finds nothing keeps holding | §5 | RS-406 |
 | A `verify-slug` verdict comes only from `finished` with a boolean `matches` and no `detail.error` / `detail.wall` | §5 | RS-406 |
 | `PUT /session` needs `c_user` (this account) and `xs` unless `clear: true` | §5 | RS-406 |
+| Any non-parked heartbeat (DEGRADED too) renews the task lease, capped at `task_max_minutes` | §5 | RS-408 |
 | Coordinator wired for fleet workers on dev: `FLEET_COORDINATOR_URL=http://10.10.10.73:8500` (LAN forwarder), coordinator tokens per worker id in `FLEET_WORKER_ENV` as `RS_CONTROL_PLANE_TOKENS`; alerts withheld unless `env` carries `RS_ALERTS=on` | §2 | facebook-tracker 0.14.2 |
 
 ## 1. Names
@@ -371,10 +372,11 @@ must be the token's own host (`422` otherwise); `vnc_port` may be null.
 // 200 { "ok": true, "directives": [] }
 ```
 
-Renews the slot lease. `HEALTHY` also renews the current task lease. A
-**parked** state (`SESSION_EXPIRED`, `CHECKPOINT`, `CHALLENGE*`, `DEAD`)
-releases the current task (event `released` with `{reason: <state>}`, state
-back to `ready`, `due_at = now()`). `DEGRADED` changes nothing.
+Renews the slot lease. A **parked** state (`SESSION_EXPIRED`, `CHECKPOINT`,
+`CHALLENGE*`, `DEAD`) releases the current task (event `released` with
+`{reason: <state>}`, state back to `ready`, `due_at = now()`). Any other state
+(`HEALTHY`, `DEGRADED`, …) renews the current task lease to `now() +
+lease_minutes`, never past `leased_at + task_max_minutes`.
 
 `detail` is free-form: any keys are accepted and stored whole on
 `fleet_workers.detail` (with `last_search_at` merged in), replacing the

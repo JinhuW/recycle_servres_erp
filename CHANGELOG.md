@@ -15,6 +15,17 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.357.0] - 2026-10-26
+
+### Fixed
+
+- A fleet worker that turns DEGRADED in the middle of a search keeps its task
+  (RS-408). Only a HEALTHY heartbeat used to renew the task lease, so a
+  DEGRADED worker's search expired after `lease_minutes`. Another account
+  then searched the same city, and the first worker's result was dropped.
+  Every heartbeat that is not a parked state now renews the lease, never past
+  `task_max_minutes` from when the task was leased.
+
 ## [1.356.0] - 2026-10-26
 
 ### Fixed
