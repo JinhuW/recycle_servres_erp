@@ -1,6 +1,7 @@
 #!/bin/sh
 # Copy the PROD database into the DEV database. ONE-DIRECTIONAL: prod -> dev.
-# DEV is overwritten to become an exact mirror of prod. Never writes to prod.
+# DEV is overwritten to become a mirror of prod, except its Facebook fleet
+# (keep-fleet.sql, restore-fleet.sql). Never writes to prod.
 #
 # Required env (set on the Railway DEV sync service):
 #   PROD_DATABASE_URL   source — prod Postgres (read). Reached via its public
@@ -72,6 +73,16 @@ if [ "$marker" != "absent" ] && [ "$marker" != "dev" ]; then
   exit 1
 fi
 
+# A sync_keep schema left behind means an earlier run set dev's fleet aside and
+# never put it back (restore-fleet.sql). Copying over it now would replace it
+# with an empty fleet, so stop and leave dev as it is for a person to decide:
+# run restore-fleet.sql against dev, or DROP SCHEMA sync_keep CASCADE to let
+# the fleet go.
+if [ "$(psql -tA "$DEV_DATABASE_URL" -c "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'sync_keep')")" = "t" ]; then
+  echo "[sync] REFUSING: dev still holds sync_keep from a run whose fleet restore did not finish" >&2
+  exit 1
+fi
+
 # Reset dev's schema wholesale instead of pg_dump --clean: --clean orders its
 # DROPs by PROD's dependency graph, so any dev-only object (e.g. an FK from a
 # migration not yet shipped to prod) blocks a DROP and aborts the sync — this
@@ -88,11 +99,13 @@ dump="$(mktemp /tmp/prod-dump.XXXXXX)"
 trap 'rm -f "$dump"' EXIT
 pg_dump --no-owner --no-privileges "$PROD_DATABASE_URL" > "$dump"
 
-# Preamble + dump + scrub run in ONE transaction, so a mid-restore failure
-# still rolls back to an unchanged dev rather than an empty one, and no moment
-# exists where dev holds prod's live tokens. pgcrypto lives in public and is
-# dropped by the CASCADE; the dump's CREATE EXTENSION restores it.
+# Fleet keep + preamble + dump + scrub run in ONE transaction, so a
+# mid-restore failure still rolls back to an unchanged dev rather than an empty
+# one, and no moment exists where dev holds prod's live tokens. pgcrypto lives
+# in public and is dropped by the CASCADE; the dump's CREATE EXTENSION
+# restores it. keep-fleet.sql sets dev's fleet aside in sync_keep first.
 {
+  cat /usr/local/share/sync/keep-fleet.sql
   echo 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
   cat "$dump"
   cat /usr/local/share/sync/scrub.sql
@@ -115,5 +128,25 @@ case "$resp" in
     ;;
 esac
 echo "[sync] backend redeploy triggered"
+
+# The fleet tables come from migrations prod has not run (or newer than its
+# own), so they exist again only once the redeployed backend has migrated the
+# copy: wait until every migration dev had before is applied again, then put
+# the fleet back. A failed query here (the backend's migrate holding a lock, a
+# blip) is just another wait.
+wait_s=${FLEET_RESTORE_WAIT_SECONDS:-1200}
+waited=0
+while :; do
+  missing=$(psql -tA "$DEV_DATABASE_URL" -c "SELECT count(*) FROM sync_keep._migrations k WHERE NOT EXISTS (SELECT 1 FROM public.schema_migrations m WHERE m.filename = k.filename)" 2>/dev/null || echo unknown)
+  [ "$missing" = "0" ] && break
+  if [ "$waited" -ge "$wait_s" ]; then
+    echo "[sync] fleet NOT restored: ${missing} migrations still missing after ${wait_s}s; sync_keep left on dev, run restore-fleet.sql by hand" >&2
+    exit 1
+  fi
+  sleep 10
+  waited=$((waited + 10))
+done
+psql --single-transaction --set ON_ERROR_STOP=1 -f /usr/local/share/sync/restore-fleet.sql "$DEV_DATABASE_URL" >/dev/null
+echo "[sync] fleet restored after ${waited}s"
 
 echo "[sync] done $(date -u +%Y-%m-%dT%H:%M:%SZ)"
