@@ -261,6 +261,19 @@ describe('the Proxies tab API', () => {
     ]);
   });
 
+  it('answers and claims rounds when the round row is missing', async () => {
+    await addProxy('NY 1', `http://${USER}:${PASS}@127.0.0.1:${connectPort}`);
+    await getTestDb()`DELETE FROM fleet_proxy_rounds`;
+    const empty = await view();
+    expect(empty.status).toBe(200);
+    expect(empty.body.round_at).toBeNull();
+    expect(empty.body.proxies.map((p) => p.state)).toEqual(['unchecked']);
+    expect(await runProxyRound(getTestDb(), { ...testEnv, FLEET_PROXY_LOOKUP_URL: lookupUrl })).toBe(true);
+    const after = await view();
+    expect(after.body.round_at).not.toBeNull();
+    expect(after.body.proxies[0].state).toBe('up');
+  });
+
   it('starts at most one round per five minutes, and prunes checks past two weeks', async () => {
     await addProxy('NY 1', `http://${USER}:${PASS}@127.0.0.1:${connectPort}`);
     await getTestDb()`
