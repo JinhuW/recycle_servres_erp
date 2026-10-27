@@ -102,6 +102,14 @@ E join as they land.
 
 ## Status
 
+**Five-worker batch (RS-423, 2026-10-27):** nyc-1 (#16), sc-1 (#12),
+homelab-1 (#9), ca-4b (#36) and nj-2b (#33) are HEALTHY on dev workers
+worker-60-14-5 through -9. Each restored its full session once, with original
+proxy/device and listing cache, and browser starts at least three minutes
+apart. Legacy launch paths are retired; existing fleet containers and parked
+west-1 were retained. Runtime stays 0.14.10; cleanup is versioned 0.14.13.
+Alerts remain off; see [WS-H](WS-H-migration.md).
+
 **Random extension (RS-422, 2026-10-27):** denver-1 (#10) restored its full
 session in one boot and is HEALTHY as worker-60-14-4 on 0.14.10. Its exact
 proxy, pinned browser header, 21 IndexedDB databases and 28,524-entry listing

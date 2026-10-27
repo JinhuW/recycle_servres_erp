@@ -31,6 +31,7 @@ services:
 
     environment:
       RS_COORDINATOR_URL: http://coordinator:8500
+      # Retained generated template for the shared filter-prompt view.
       RS_MONITOR_CONFIG: /config/workers/homelab.toml
       RS_MASTER_CONFIG: /config/master.toml
       RS_FLEET_CONFIG: /config/fleet.toml
@@ -40,17 +41,12 @@ services:
       # lets the ERP's worker page edit that worker's cities.
       RS_SETTINGS_STATE: /state/settings.json
       RS_WORKER_CONFIGS: >-
-        homelab-1=/config/workers/homelab.toml,
         ne-1=/config/workers/homelab-ne.toml,
-        sc-1=/config/workers/homelab-sc.toml,
         mw-1=/config/workers/homelab-mw.toml,
-        nyc-1=/config/workers/homelab-nyc.toml,
         phl-1=/config/workers/homelab-phl.toml,
         va-2=/config/workers/homelab-va2.toml,
         ca-2b=/config/workers/homelab-ca2b.toml,
         va-2b=/config/workers/homelab-va2b.toml,
-        ca-4b=/config/workers/homelab-ca4b.toml,
-        nj-2b=/config/workers/homelab-nj2b.toml,
         nj-3b=/config/workers/homelab-nj3b.toml
       # RS_WORKER_ID arrives from secrets.env above — the same value the
       # monitor reports under — so the dashboard can join the phase-1
@@ -67,17 +63,12 @@ services:
       # line when a worker is added; a listed container that is not running
       # just reads "not answering" in the viewer.
       RS_VNC_TARGETS: >-
-        homelab-1=rs-monitor:5900,
         ne-1=rs-monitor-ne:5900,
-        sc-1=rs-monitor-sc:5900,
         mw-1=rs-monitor-mw:5900,
-        nyc-1=rs-monitor-nyc:5900,
         phl-1=rs-monitor-phl:5900,
         va-2=rs-monitor-va2:5900,
         ca-2b=rs-monitor-ca2b:5900,
         va-2b=rs-monitor-va2b:5900,
-        ca-4b=rs-monitor-ca4b:5900,
-        nj-2b=rs-monitor-nj2b:5900,
         nj-3b=rs-monitor-nj3b:5900
       # Optional: set to the tunnel hostname to make `vnc_url` in /v1/fleet
       # absolute for a page on another origin (the ERP). Left unset, links
@@ -93,15 +84,11 @@ services:
       # scripts/deploy.sh recreates this container after a sync.
       - ../configs/homelab.toml:/config/workers/homelab.toml
       - ../configs/homelab-ne.toml:/config/workers/homelab-ne.toml
-      - ../configs/homelab-sc.toml:/config/workers/homelab-sc.toml
       - ../configs/homelab-mw.toml:/config/workers/homelab-mw.toml
-      - ../configs/homelab-nyc.toml:/config/workers/homelab-nyc.toml
       - ../configs/homelab-phl.toml:/config/workers/homelab-phl.toml
       - ../configs/homelab-va2.toml:/config/workers/homelab-va2.toml
       - ../configs/homelab-ca2b.toml:/config/workers/homelab-ca2b.toml
       - ../configs/homelab-va2b.toml:/config/workers/homelab-va2b.toml
-      - ../configs/homelab-ca4b.toml:/config/workers/homelab-ca4b.toml
-      - ../configs/homelab-nj2b.toml:/config/workers/homelab-nj2b.toml
       - ../configs/homelab-nj3b.toml:/config/workers/homelab-nj3b.toml
       # Regions, items and the default search settings; and which worker owns
       # which region. Read-only: saved settings overlay master, never edit it.
