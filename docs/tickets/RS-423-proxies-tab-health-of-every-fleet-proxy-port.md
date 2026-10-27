@@ -2,13 +2,13 @@
 id: RS-423
 title: Proxies tab: health of every fleet proxy port
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-27
 reporter: jinhu
 branch: JinhuW/milkfish
-pr:
-version:
+pr: "#949"
+version: 1.368.0
 related: [RS-365, RS-415]
 ---
 
@@ -39,23 +39,23 @@ right now, how slow it is, or whether it dropped overnight.
 
 ## Acceptance criteria
 
-- [ ] Monitors ▸ Facebook has a **Proxies** tab (`/#/fleet/proxies`, managers
+- [x] Monitors ▸ Facebook has a **Proxies** tab (`/#/fleet/proxies`, managers
   only) after Analysis, with a chip counting the proxies that are down.
-- [ ] It lists every ERP fleet proxy and every port a homelab coordinator
+- [x] It lists every ERP fleet proxy and every port a homelab coordinator
   worker dials, one row per exit `scheme://host:port`; a worker on the VM's
   own IP adds no row.
-- [ ] Each row: label (or the homelab workers on it), host:port, source (ERP /
+- [x] Each row: label (or the homelab workers on it), host:port, source (ERP /
   homelab), state chip **Up / Degraded / Down / Unchecked** (degraded: slower than 3 s, or one missed check; down: two misses in a row), the last latency, exit
   IP with city, region and ISP, a warning when the exit IP changed, 24 h uptime
   with a strip of half-hour buckets, when it was last checked, who uses it, and
   the existing DEAD / n failed mark.
-- [ ] The backend probes each ERP proxy every 5 min through the proxy itself
+- [x] The backend probes each ERP proxy every 5 min through the proxy itself
   (http, https and socks5) and records reachability, latency, exit IP and geo,
   or the error. Homelab ports are probed by rs_console through a new
   `/v1/proxies/health`, which the backend calls on the same round.
-- [ ] **Check now** probes one row, or all of them, and the row updates.
-- [ ] Checks are kept 14 days. Two backend instances never run the same round.
-- [ ] No proxy login reaches the browser, the logs or the check table.
+- [x] **Check now** probes one row, or all of them, and the row updates.
+- [x] Checks are kept 14 days. Two backend instances never run the same round.
+- [x] No proxy login reaches the browser, the logs or the check table.
 
 ## Out of scope
 
