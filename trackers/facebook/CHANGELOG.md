@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.14] - 2026-10-27
+
 ### Fixed
 
 - Let fleet workers on homelab reach the coordinator through its LAN relay.
