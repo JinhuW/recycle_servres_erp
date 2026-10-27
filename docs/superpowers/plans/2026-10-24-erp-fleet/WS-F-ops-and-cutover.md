@@ -422,6 +422,74 @@ Still open, each needs a real Facebook login and the owner:
 | Stale epoch on the real image: 409, exit 75, agent restart after 60 s, second claim | the go for a **second login** of the throwaway account (expected and noted in the ledger) |
 | The agent against the dev backend on a real host | which host (`worker-60-14` per `HOSTS.md`), the GHCR read token, and the host checklist run by the owner |
 
+#### Retiring the 25 unhealthy homelab workers (2026-10-27 UTC, homelab VM + prod pool)
+
+The owner chose "Full retire, archive files". Done 02:30–02:37 UTC with no
+deploy, no recreate and no relogin. `rsc vault logins` shows no new row.
+
+**Retired (25):** bos-1, bos-1b, ca-1, ca-1b, ca-2, ca-3b, ca-4, denver-1b,
+homelab-1b, mw-1b, ne-1b, nj-1, nj-1b, nj-2, nj-3, nyc-1b, nyc-2, nyc-2b,
+nyc-3, nyc-3b, phl-1b, sc-1b, va-1, wc-1 and west-1b. Each one was
+re-checked just before it was removed: none was HEALTHY or DEGRADED.
+
+**Kept (16, same container ids and StartedAt before and after):** ca-2b,
+ca-3, ca-4b, denver-1, homelab-1, mw-1, ne-1, nj-2b, nj-3b, nyc-1, phl-1,
+sc-1, va-2, va-2b, wc-1b and west-1.
+
+What was done:
+
+- **Repo** (PR #935): the 24 `deploy/docker-compose.homelab-*.yml` and
+  `configs/homelab-*.toml` files left the tree. va-1's files were already
+  gone. rs-console's `RS_WORKER_CONFIGS`, `RS_VNC_TARGETS` and config mounts
+  no longer name the retired workers, so `deploy.sh` never recreates them.
+  `configs/fleet.toml` keeps `wc-1`: it is the static-region template that
+  `gen-configs` checks for coverage, and nothing deploys its output.
+- **VM containers:** `rsc queue unenroll <id>`, then `docker stop` and
+  `docker rm` by container name. The queue now enrolls the 16 plus the
+  pre-existing `se-1` placeholder.
+- **VM files:** each worker's `configs/homelab-<x>.toml`,
+  `configs/secrets.homelab-<x>.env`, `configs/sessions/homelab-<x>/` and
+  `deploy/docker-compose.homelab-<x>.yml` were moved, not deleted, to
+  `~/recycle_servers/archive/retired-2026-10-27/facebook_tracker/`. The
+  relative paths are unchanged and the folder is mode 700. The VM's previous
+  `docker-compose.console.yml` is there as `deploy/docker-compose.console.yml.before`.
+  The merged console compose was copied in, and every remaining compose file
+  passes `docker compose config`. The `aimm-home-<x>` docker volumes were
+  left in place.
+- **The running rs-console was not recreated.** Its mounts still point at
+  the moved files, which kept their inodes, so it stays harmless until the
+  next deploy picks up the new compose.
+- **Coordinator:** `retired_at = 2026-10-27T02:34:52+00:00` was set on the 25
+  `workers` rows (`db.update_worker_health`, the same field a fleet stop
+  sets), so the liveness sweep pages nobody. Their 20 open challenges were
+  resolved with `resolved_by = "retired 2026-10-27"`. va-2b's open #22 was
+  left alone. The rows stay, so the console still lists the 25, marked
+  retired.
+- **Prod pool:** 15 accounts went from `fleet` to `problem`. The worker stays
+  as holder, as `/assign` does for a problem fate. Each change was one
+  transaction with a `reported` event by Jinhu, and the stint trigger closed
+  the open stint with outcome `problem`. The accounts: #3 wc-1, #21 ca-2, #23
+  ca-4 (locked), #24 nj-1, #25 nj-2, #26 nj-3, #27 bos-1, #28 nyc-2 (locked),
+  #34 nyc-3b, #35 nyc-2b, #38 nyc-1b, #40 phl-1b, #42 bos-1b, #46 ca-3b, plus
+  #22, ca-3's earlier locked account, which was still `fleet` with an open
+  stint. None of these stints had a proxy recorded, so no proxy mark moved.
+  Accounts already `problem` without a stint were left as they were: #2, #7,
+  #13, #29, #49, #50, #51 and #54. #55, ca-3's current account, still reads
+  `available`, which is wrong; it was left untouched.
+
+Bringing one back (worker `<id>`, files `<x>`):
+
+1. On the VM, move its four paths back from the archive to the same places
+   under `~/recycle_servers/facebook_tracker/`.
+2. In the repo, restore the compose file and seed config from git
+   (`git show 015e5ec2^:trackers/facebook/deploy/docker-compose.homelab-<x>.yml`,
+   and the same for `configs/homelab-<x>.toml`). Add its lines back to the
+   console's `RS_WORKER_CONFIGS`, `RS_VNC_TARGETS` and mounts, and ship that
+   as a tracker release.
+3. Clear `retired_at` (it also clears on its next fleet start). Then
+   `rsc queue enroll <id>` and give it a pool account from the ERP. Starting
+   the container is a login: ask the owner first.
+
 ## Integration (after A, B, C merge to dev)
 
 - [ ] `pnpm dev` ERP on the Mac with the fleet migration; `fleet-import.mjs`
