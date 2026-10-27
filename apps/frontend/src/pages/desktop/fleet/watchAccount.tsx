@@ -1,28 +1,26 @@
 import { useState, type ReactNode } from 'react';
 import type { FbPoolSecretField } from '@recycle-erp/shared';
-import { Icon } from '../../components/Icon';
-import type { FleetAccount } from '../../lib/coordinator';
-import { showSuccessToast, showWarnToast } from '../../lib/errorToast';
-import { poolApi, poolTotp, type PoolAccount } from '../../lib/facebookPool';
-import { whoIs } from '../../lib/fleetView';
-import { relTime } from '../../lib/format';
-import { useT } from '../../lib/i18n';
-import { hrefFor, onLinkClick } from '../../lib/route';
-import { PoolCode } from './accountPool/shared';
-import { BuildChip, fmtDays, stateLabel } from './FleetAccounts';
-import { ProxyExit } from './FleetWorker';
-import '../../styles/facebookPool.css';
+import { Icon } from '../../../components/Icon';
+import { showSuccessToast, showWarnToast } from '../../../lib/errorToast';
+import { poolApi, poolTotp, type PoolAccount } from '../../../lib/facebookPool';
+import { useT } from '../../../lib/i18n';
+import { hrefFor, onLinkClick } from '../../../lib/route';
+import { PoolCode } from '../accountPool/shared';
+import '../../../styles/facebookPool.css';
 
 // ─── The sign-in panel beside a worker's live browser ─────────────────────────
 // What a manager needs to clear a login checkpoint without leaving the viewer:
-// the worker's pool login and its live 2FA code, then the worker's own facts.
+// the worker's pool login and its live 2FA code, then the worker's own facts,
+// which each kind of worker supplies (the coordinator's fleet document, or the
+// ERP fleet's worker row).
 //
 // Clipboard text does not reach the VNC session, so login, password and code
 // can also be typed into the remote browser as keystrokes. noVNC drops keys
 // while view-only, which is why typing waits for Take control.
 //
-// Secrets come from the Account pool, not the fleet vault: the vault only says
-// which secrets it holds. Reveals live in state and die with the page.
+// Secrets come from the Account pool snapshot, the same manager read the Pool
+// tab makes; reveals and copies are written to the pool's ledger. Reveals
+// live in state and die with the page.
 
 type Field = 'login' | 'password' | 'uid' | 'emailPassword' | 'recovery';
 type Secret = Extract<FbPoolSecretField, 'password' | 'totp' | 'emailPassword'>;
@@ -40,21 +38,27 @@ export type PoolLookup =
   | { kind: 'unavailable' }
   | { kind: 'ok'; account: PoolAccount | null };
 
+/** One row of the panel's fact lists. */
+export type WatchFact = { key: string; label: string; value: ReactNode };
+
 type Props = {
-  worker: FleetAccount | null | undefined;
-  coordinatorVersion: string | null;
   pool: PoolLookup;
+  /** The worker sits on Facebook's 2FA prompt: the code card says so. */
+  asking: boolean;
+  /** The worker's Facebook user id when it knows one; else the pool uid. */
+  profileId: string | null;
+  /** What is known of the login when the pool has no row for it. */
+  missing: WatchFact[];
+  /** The worker's own facts; null while there is no worker to describe. */
+  facts: WatchFact[] | null;
   canType: boolean;
   onType: (text: string) => boolean;
 };
 
-export function FleetWatchAccount({ worker, coordinatorVersion, pool, canType, onType }: Props) {
-  const { t, locale } = useT();
+export function WatchAccountPanel({ pool, asking, profileId, missing, facts, canType, onType }: Props) {
+  const { t } = useT();
   const [revealed, setRevealed] = useState<ReadonlySet<Field>>(new Set());
   const a = pool.kind === 'ok' ? pool.account : null;
-  const h = worker?.health ?? null;
-  const who = worker ? whoIs(worker) : null;
-  const asking = h?.state === 'CHALLENGE_2FA';
 
   const audit = (kind: 'copied' | 'revealed', field: Secret) => {
     if (a) void poolApi.event(a.no, kind, field).catch(() => undefined);
@@ -151,11 +155,10 @@ export function FleetWatchAccount({ worker, coordinatorVersion, pool, canType, o
     );
   };
 
-  const fact = (key: string, text: string, value: ReactNode) => (
+  const fact = ({ key, label: text, value }: WatchFact) => (
     <div key={key}><dt>{text}</dt><dd>{value}</dd></div>
   );
-  const muted = (text: string) => <span className="fp-muted">{text}</span>;
-  const profileId = who?.userId ?? (a && /^\d+$/.test(a.uid) ? a.uid : null);
+  const profile = profileId ?? (a && /^\d+$/.test(a.uid) ? a.uid : null);
 
   return (
     <aside className="fl-wa" aria-label={t('fbcWatchAcctTitle')}>
@@ -171,13 +174,7 @@ export function FleetWatchAccount({ worker, coordinatorVersion, pool, canType, o
       ) : !a ? (
         <div className="fl-wa-empty">
           <p>{t(pool.kind === 'unavailable' ? 'fbcWatchAcctPoolDown' : 'fbcWatchAcctNotInPool')}</p>
-          <dl className="fp-fields fl-wa-facts">
-            {fact('login', t('fbcWatchAcctLogin'), who?.login ? <span className="mono">{who.login}</span> : muted(t('fbcNotInVault')))}
-            {fact('secrets', t('fbcDetailSecrets'), (() => {
-              const stored = Object.entries(worker?.account?.secrets ?? {}).filter(([, on]) => on).map(([k]) => k);
-              return stored.length ? stored.join(', ') : muted(t('fbcNone'));
-            })())}
-          </dl>
+          <dl className="fp-fields fl-wa-facts">{missing.map(fact)}</dl>
           {pool.kind === 'ok' && (
             <a className="btn sm" href={hrefFor('/fleet/pool')} onClick={onLinkClick('/fleet/pool')}>
               <Icon name="key" size={13} />{t('fbcWatchAcctOpenPool')}
@@ -217,27 +214,20 @@ export function FleetWatchAccount({ worker, coordinatorVersion, pool, canType, o
             {a.email && fieldRow(a, 'uid', false)}
             {fieldRow(a, 'emailPassword', false)}
             {fieldRow(a, 'recovery', false)}
-            {profileId && fact('profile', t('fbcDetailFbUser'),
-              <a className="mono" href={`https://www.facebook.com/profile.php?id=${encodeURIComponent(profileId)}`}
-                target="_blank" rel="noopener">{profileId}</a>)}
-            {a.note && fact('note', t('fpNotes'), <span className="fp-muted">{a.note}</span>)}
+            {profile && fact({
+              key: 'profile', label: t('fbcDetailFbUser'),
+              value: <a className="mono" href={`https://www.facebook.com/profile.php?id=${encodeURIComponent(profile)}`}
+                target="_blank" rel="noopener">{profile}</a>,
+            })}
+            {a.note && fact({ key: 'note', label: t('fpNotes'), value: <span className="fp-muted">{a.note}</span> })}
           </dl>
         </>
       )}
 
-      {worker && (
+      {facts && (
         <>
           <header className="fl-wa-head fl-wa-sub"><span>{t('fbcWatchAcctWorker')}</span></header>
-          <dl className="fp-fields fl-wa-facts">
-            {fact('state', t('fbcWatchAcctState'), h?.state ? stateLabel(t, h.state) : muted('—'))}
-            {fact('region', t('fbcWatchAcctRegion'), worker.region.name)}
-            {fact('session', t('fbcColSession'), h?.session_expiry
-              ? <span title={h.session_expiry}>{fmtDays(t, h.session_days_left)}</span> : muted('—'))}
-            {fact('heartbeat', t('fbcWatchAcctHeartbeat'), h?.last_heartbeat_at
-              ? <span title={h.last_heartbeat_at}>{relTime(h.last_heartbeat_at, locale)}</span> : muted(t('fbcNever')))}
-            {fact('proxy', t('fbcDetailProxy'), <ProxyExit worker={worker} />)}
-            {fact('build', t('fbcColBuild'), <BuildChip health={h} coordinatorVersion={coordinatorVersion} />)}
-          </dl>
+          <dl className="fp-fields fl-wa-facts">{facts.map(fact)}</dl>
         </>
       )}
     </aside>

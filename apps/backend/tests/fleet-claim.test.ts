@@ -7,7 +7,7 @@ import { signWorkerToken, workerTokenKey } from '../src/fleet/auth';
 import { sha256hex } from '../src/fleet/sql';
 import { cookiesFromText } from '../src/fleet/claim';
 import { notifyReady } from '../src/fleet/scheduler';
-import { ALEX, loginAs } from './helpers/auth';
+import { ALEX, MARCUS, loginAs } from './helpers/auth';
 import { poolKey, seal, unseal } from '../src/lib/sealed';
 
 // The worker protocol end to end against the real schema. Every account, host,
@@ -848,5 +848,69 @@ describe('claim-core review fixes', () => {
     expect((await put({ cookies: [cookie('c_user', '61550000000077'), cookie('xs', 'x')] })).status).toBe(200);
     expect((await put({ cookies: [], clear: true })).status).toBe(200);
     expect(await stored()).toBeNull();
+  });
+});
+
+describe('POST /api/fleet/workers/:id/relogin', () => {
+  beforeEach(async () => { await resetDb(); await seedBase(); });
+
+  type ReloginAnswer = { ok: boolean; relogin: { id: string; requested_at: string; requested_by: string | null; delivered_at: string | null }; error?: string };
+  const relogin = (token: string, id = 'lab-1') => api<ReloginAnswer>('POST', `/api/fleet/workers/${id}/relogin`, { token });
+
+  it('queues one relogin that the next heartbeat delivers once, then clears', async () => {
+    await seedSlot(1);
+    const { worker_token: wt } = await claimed('lab-1');
+    expect((await heartbeat(wt, 'HEALTHY')).body.directives).toEqual([]);
+    const { token } = await loginAs(ALEX);
+    const q = await relogin(token);
+    expect(q.status).toBe(200);
+    expect(q.body.relogin).toMatchObject({ requested_by: ALEX, delivered_at: null });
+    // Pressed again while it waits: the same request, not a second login.
+    const again = await relogin(token);
+    expect(again.body.relogin.id).toBe(q.body.relogin.id);
+
+    const first = await heartbeat(wt, 'SESSION_EXPIRED');
+    expect(first.body).toMatchObject({ ok: true, directives: ['relogin'], relogin_id: q.body.relogin.id });
+    const second = await heartbeat(wt, 'HEALTHY');
+    expect(second.body.directives).toEqual([]);
+    expect(second.body).not.toHaveProperty('relogin_id');
+
+    // The worker page reads when it went out.
+    const detail = await api<{ worker: { relogin: ReloginAnswer['relogin'] } }>('GET', '/api/fleet/workers/lab-1', { token });
+    expect(detail.body.worker.relogin).toMatchObject({ id: q.body.relogin.id });
+    expect(detail.body.worker.relogin.delivered_at).not.toBeNull();
+    // A delivered one is history: the next press queues a fresh one.
+    const next = await relogin(token);
+    expect(next.body.relogin.id).not.toBe(q.body.relogin.id);
+    expect((await heartbeat(wt, 'HEALTHY')).body.directives).toEqual(['relogin']);
+  });
+
+  it('a fresh claim drops a relogin that never went out', async () => {
+    await seedSlot(1);
+    await claimed('lab-1');
+    const { token } = await loginAs(ALEX);
+    expect((await relogin(token)).status).toBe(200);
+    // The container restarted: a new boot signs in on its own.
+    const db = getTestDb();
+    await db`UPDATE fleet_slots SET lease_expires_at = NOW() - interval '1 minute'`;
+    const { worker_token: wt } = await claimed('lab-1');
+    expect((await heartbeat(wt, 'HEALTHY')).body.directives).toEqual([]);
+  });
+
+  it('refuses a worker that holds no slot, an unknown one, and anyone but a manager', async () => {
+    const no = await seedSlot(1);
+    await claimed('lab-1');
+    const { token } = await loginAs(ALEX);
+    expect((await relogin(token, 'lab-7')).status).toBe(404);
+    expect((await relogin(token, 'not a worker')).status).toBe(404);
+    const marcus = await loginAs(MARCUS);
+    expect((await relogin(marcus.token)).status).toBe(403);
+    expect((await api('POST', '/api/fleet/workers/lab-1/relogin', { token, headers: { 'X-Requested-By': 'nope' } })).status).toBe(403);
+    await api('POST', `/api/fleet/slots/${no}/park`, { token });
+    const parked = await relogin(token);
+    expect(parked.status).toBe(409);
+    expect(parked.body.error).toBe('not_running');
+    const [w] = await getTestDb()<{ relogin_id: string | null }[]>`SELECT relogin_id FROM fleet_workers WHERE worker_id = 'lab-1'`;
+    expect(w.relogin_id).toBeNull();
   });
 });

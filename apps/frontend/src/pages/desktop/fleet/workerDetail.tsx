@@ -27,6 +27,17 @@ export function initialsOf(name: string): string {
 
 export const Muted = ({ children }: { children: ReactNode }) => <span className="fp-muted">{children}</span>;
 
+/** An ERP-fleet worker's build, amber while it is behind the release the fleet rolls onto. */
+export function ErpBuildChip({ version, release }: { version: string | null; release: string | null }) {
+  const { t } = useT();
+  if (!version) return <Muted>—</Muted>;
+  const behind = !!release && version !== release;
+  return (
+    <span className={`chip ${behind ? 'warn' : 'muted'} mono fl-build`}
+      title={behind ? t('fleetBuildBehind', { v: release }) : undefined}>{version}</span>
+  );
+}
+
 export function BackToFleet() {
   const { t } = useT();
   return (

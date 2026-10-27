@@ -2373,6 +2373,10 @@ One row per worker container that has claimed a slot, kept current by its heartb
 | `last_heartbeat_at` | `timestamptz` |  |  |  |
 | `vnc_port` | `integer` |  |  | The host port the agent mapped for noVNC. |
 | `detail` | `jsonb` |  |  | Whatever the heartbeat carried: last search, page state. |
+| `relogin_id` | `text` |  |  | The latest re-login a manager queued (`POST /api/fleet/workers/:id/relogin`), a random id. Cleared by a fresh claim. Migration 0214. |
+| `relogin_requested_at` | `timestamptz` |  |  | When it was queued. |
+| `relogin_requested_by` | `text` |  |  | The manager's e-mail. |
+| `relogin_delivered_at` | `timestamptz` |  |  | When a heartbeat handed the `relogin` directive over; null while it waits. A heartbeat delivers it once. |
 
 - **Primary key:** `worker_id`
 - **References:** `account_no` → `fb_pool_accounts.no` (on delete set null); `host_id` → `fleet_hosts.host_id` (on delete cascade)

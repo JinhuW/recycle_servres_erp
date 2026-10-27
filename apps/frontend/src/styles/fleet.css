@@ -803,27 +803,6 @@
 .fleet-facts dd {
   margin: 0;
 }
-.fleet-vnc-screen {
-  position: relative;
-  aspect-ratio: 16 / 10;
-  background: #111;
-}
-.fleet-vnc-canvas {
-  position: absolute;
-  inset: 0;
-}
-.fleet-vnc-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 13px;
-}
-
 .fleet-city-pick {
   border: 0;
   padding: 0;

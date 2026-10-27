@@ -6,7 +6,7 @@
 import type { FbWorkerStint } from '@recycle-erp/shared';
 import type { CityStep, CityStepKind, CityVisit, CityVisitOutcome, FleetCity as ChipCity } from '../../../lib/coordinator';
 import { fleetStateParked, type FleetCityLogTask as FleetTaskLog, type FleetWorkerDetail, type FleetWorkerEvent } from '../../../lib/fleet';
-import type { CityHits, FleetStatus } from '../../../lib/fleetView';
+import type { CityHits, FleetStatus, ReloginProgress } from '../../../lib/fleetView';
 import { liveness } from './fleetBoard';
 
 /** Live, Stale, Needs attention or Offline, as the homelab page buckets a worker. */
@@ -73,6 +73,34 @@ export function deviceText(device: NonNullable<FleetWorkerDetail['slot']>['devic
     device.locale ?? null,
   ];
   return parts.filter(Boolean).join(' · ') || null;
+}
+
+// ─── Re-login ────────────────────────────────────────────────────────────────
+
+const RELOGIN_QUEUED_MS = 30 * 60_000;
+const RELOGIN_TAKEN_MS = 5 * 60_000;
+const RELOGIN_NEEDS_YOU_MS = 15 * 60_000;
+// The heartbeat that carried the directive, and the next one, can still
+// report the wall the re-login was pressed for.
+const RELOGIN_SETTLE_MS = 30_000;
+
+/** Where a manager's re-login has got to, for the strip on the watch page.
+ *  The fleet knows only when it was queued and when a heartbeat handed it
+ *  over; after that, a checkpoint or challenge reported once the login had
+ *  time to start is the worker stuck on Facebook's prompt. There are no login steps, so no "done" or "failed":
+ *  each phase is shown for a bounded time instead. */
+export function erpReloginProgress(w: FleetWorkerDetail['worker'], now: number = Date.now()): ReloginProgress | null {
+  const r = w.relogin;
+  if (!r) return null;
+  const shown = (phase: ReloginProgress['phase'], since: string, ms: number): ReloginProgress | null => {
+    const at = Date.parse(since);
+    return Number.isFinite(at) && now - at <= ms ? { phase, since, active: true } : null;
+  };
+  if (!r.delivered_at) return shown('queued', r.requested_at, RELOGIN_QUEUED_MS);
+  const beat = w.last_heartbeat_at ? Date.parse(w.last_heartbeat_at) : NaN;
+  const asking = w.state === 'CHECKPOINT' || !!w.state?.startsWith('CHALLENGE');
+  if (asking && beat >= Date.parse(r.delivered_at) + RELOGIN_SETTLE_MS) return shown('needs_you', r.delivered_at, RELOGIN_NEEDS_YOU_MS);
+  return shown('signing_in', r.delivered_at, RELOGIN_TAKEN_MS);
 }
 
 // ─── The city log, as the coordinator's visits ──────────────────────────────

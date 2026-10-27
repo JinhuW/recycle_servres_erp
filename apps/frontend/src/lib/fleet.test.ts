@@ -118,6 +118,15 @@ describe('fleetApi', () => {
     ]);
   });
 
+  it('queues a re-login for one worker, escaping its id', async () => {
+    await fleetApi.relogin('worker-60-14-1');
+    await fleetApi.relogin('ne 1/x');
+    expect(calls).toEqual([
+      { method: 'POST', path: '/api/fleet/workers/worker-60-14-1/relogin', body: {} },
+      { method: 'POST', path: '/api/fleet/workers/ne%201%2Fx/relogin', body: {} },
+    ]);
+  });
+
   it('reads and writes items and settings', async () => {
     await fleetApi.settings();
     await fleetApi.saveSettings({ start_fresh_hours: 3 });

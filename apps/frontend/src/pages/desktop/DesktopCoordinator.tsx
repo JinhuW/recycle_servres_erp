@@ -16,8 +16,10 @@ import { fleetRows, fleetRunning } from './fleet/fleetRows';
 import { useFleetPoll } from './fleet/shared';
 
 // The viewer carries noVNC; it is its own chunk, fetched only when a manager
-// actually opens a worker's browser. The worker page is its own chunk too.
-const FleetWatch = lazy(() => import('./FleetWatch').then(m => ({ default: m.FleetWatch })));
+// actually opens a worker's browser, and it too decides between the ERP's
+// fleet and the coordinator (pages/desktop/fleet/FleetWatchSwitch.tsx). The
+// worker page is its own chunk too.
+const FleetWatch = lazy(() => import('./fleet/FleetWatchSwitch').then(m => ({ default: m.FleetWatchSwitch })));
 // The worker page decides between the ERP's own fleet worker and the
 // coordinator's (pages/desktop/fleet/FleetWorkerSwitch.tsx).
 const FleetWorker = lazy(() => import('./fleet/FleetWorkerSwitch').then(m => ({ default: m.FleetWorkerSwitch })));

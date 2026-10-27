@@ -361,7 +361,8 @@ worker.post('/claim', claimAuth, async (c) => {
       VALUES (${worker_id}, ${host.host_id}, ${row.account_no}, ${epoch}, ${version}, ${vncPort})
       ON CONFLICT (worker_id) DO UPDATE SET
         host_id = EXCLUDED.host_id, account_no = EXCLUDED.account_no, epoch = EXCLUDED.epoch,
-        version = EXCLUDED.version, vnc_port = EXCLUDED.vnc_port, state = NULL, last_heartbeat_at = NULL, detail = NULL`;
+        version = EXCLUDED.version, vnc_port = EXCLUDED.vnc_port, state = NULL, last_heartbeat_at = NULL, detail = NULL,
+        relogin_id = NULL, relogin_requested_at = NULL, relogin_requested_by = NULL, relogin_delivered_at = NULL`;
 
     if (ticket) {
       await tx`UPDATE fleet_claim_tickets SET consumed_at = COALESCE(consumed_at, NOW()), claim_id = ${claimId}
@@ -444,7 +445,7 @@ worker.post('/heartbeat', workerAuth, async (c) => {
   const detailValue: postgres.JSONValue | null = detail || lastSearch
     ? ({ ...(detail ?? {}), ...(lastSearch ? { last_search_at: lastSearch } : {}) } as postgres.JSONValue)
     : null;
-  const accepted = await sql.begin(async (tx) => {
+  const accepted = await sql.begin(async (tx): Promise<false | { relogin: string | null }> => {
     if (!await eligibleSlot(tx, w, true)) return false;
     const settings = await loadSettings(tx);
     const lease = tx`NOW() + ${minutes(settings.lease_minutes)}::interval`;
@@ -459,6 +460,12 @@ worker.post('/heartbeat', workerAuth, async (c) => {
         host_id = EXCLUDED.host_id, account_no = EXCLUDED.account_no, epoch = EXCLUDED.epoch, state = EXCLUDED.state,
         version = COALESCE(EXCLUDED.version, fleet_workers.version), last_heartbeat_at = NOW(),
         vnc_port = COALESCE(EXCLUDED.vnc_port, fleet_workers.vnc_port), detail = EXCLUDED.detail`;
+    // The worker arms a login only when `relogin` first appears, so it goes
+    // out on exactly one answer.
+    const [relogin] = await tx<{ relogin_id: string }[]>`
+      UPDATE fleet_workers SET relogin_delivered_at = NOW()
+      WHERE worker_id = ${w.worker_id} AND relogin_id IS NOT NULL AND relogin_delivered_at IS NULL
+      RETURNING relogin_id`;
     if (fleetStateParked(state)) {
       // A parked account cannot search: its city goes back to the queue now,
       // not when the lease runs out.
@@ -473,7 +480,7 @@ worker.post('/heartbeat', workerAuth, async (c) => {
         UPDATE fleet_tasks SET lease_expires_at = LEAST(${lease}, leased_at + make_interval(mins => ${settings.task_max_minutes}))
         WHERE worker_id = ${w.worker_id} AND account_no = ${w.account_no} AND epoch = ${w.epoch} AND state = 'leased'`;
     }
-    return true;
+    return { relogin: relogin?.relogin_id ?? null };
   });
   if (!accepted) return c.json({ error: 'stale_epoch' }, 409);
   // Re-signed with a day left, or at once when it verified under the
@@ -482,7 +489,9 @@ worker.post('/heartbeat', workerAuth, async (c) => {
   const renewal = w.rotated || w.exp * 1000 - Date.now() < 86400000
     ? { worker_token: signWorkerToken({ worker_id: w.worker_id, account_no: w.account_no, epoch: w.epoch, exp }, workerTokenKey(c.env)!), token_expires_at: exp }
     : {};
-  return c.json({ ok: true, directives: [], ...renewal });
+  if (accepted.relogin) flog.info('fleet relogin delivered', { workerId: w.worker_id, reloginId: accepted.relogin, state });
+  const directives = accepted.relogin ? { directives: ['relogin'], relogin_id: accepted.relogin } : { directives: [] };
+  return c.json({ ok: true, ...directives, ...renewal });
 });
 
 // ─── Next task ────────────────────────────────────────────────────────────────

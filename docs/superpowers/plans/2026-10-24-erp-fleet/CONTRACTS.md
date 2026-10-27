@@ -53,6 +53,7 @@ what answers.
 | Proxy list and Add to fleet: `fleet_proxies` (migration `0213_fleet_proxies.sql`), `fleet_slots.proxy_id`; manager routes `GET/POST /proxies`, `PUT/DELETE /proxies/:id`, `POST /slots`, `POST /slots/:no/remove`; slot rows carry `proxy_id`; `fleet_settings` key `max_accounts_per_proxy` (default 2); error codes `account_busy`, `no_login`, `proxy_full`, `in_use`, `leased` | §4, §7, §8, §9 | RS-415 |
 | `desired.count` is the capacity capped at the slots the host could run now (held by its workers plus claimable), never below its highest-numbered worker holding one; the manager's `GET /hosts` shows the same count | §6 | RS-415 |
 | Claim tickets: `POST /hosts/:id/tickets` mints a single-use bearer per worker container (migration `0211_fleet_claim_tickets.sql`); `claim` takes it beside the host token (deprecated for workers); the agent passes `RS_FLEET_CLAIM_TICKET` (and the same ticket as `RS_FLEET_HOST_TOKEN` for older images), never the host token; containers carry `rs.fleet.claim_ticket=1` and are recreated, not `docker start`ed | §2, §3, §4, §5, §6, §10 | claim tickets (ERP + facebook-tracker 0.14.5) |
+| Re-login: `POST /api/fleet/workers/:id/relogin` (manager) queues a one-shot `relogin` the next heartbeat answers once, with `relogin_id` beside it; `409 not_running`; worker rows carry `relogin`; a fresh claim drops an undelivered one (migration `0214_fleet_worker_relogin.sql`). The viewer's input is passed as bytes; view-only is the page's noVNC | §5, §7 | RS-417 |
 
 ## 1. Names
 
@@ -426,6 +427,7 @@ the ticket unspent.
 { "state": "HEALTHY", "version": "0.14.0", "vnc_port": 5903, "last_search_at": "…",
   "detail": { "epoch": 7, "session_expiry": "…", … } }
 // 200 { "ok": true, "directives": [] }
+// 200, once after a manager's re-login: { "ok": true, "directives": ["relogin"], "relogin_id": "…" }
 ```
 
 Renews the slot lease. A **parked** state (`SESSION_EXPIRED`, `CHECKPOINT`,
@@ -439,8 +441,17 @@ lease_minutes`, never past `leased_at + task_max_minutes`.
 previous one; a `detail` over 64 KB is dropped (stored as null), not refused.
 The monitor sends the epoch as `detail.epoch` plus `session_expiry` and its
 own fields; the server does not read `detail.epoch`, the token's epoch is what
-is checked. `directives` is always `[]` today (`"relogin"` is reserved).
-Only `state` is required (`422` otherwise).
+is checked. Only `state` is required (`422` otherwise).
+
+`directives` is `[]` except on the one heartbeat after a manager queued a
+re-login (`POST /api/fleet/workers/:id/relogin`, §7): that answer carries
+`["relogin"]` and the request's id as `relogin_id`, and stamps it delivered,
+so no later answer repeats it. Directives are bare strings because the worker
+(facebook-tracker 0.14.4 and later) reads only strings, and it arms one forced
+login when `relogin` first appears in an answer, not one per answer. A
+parked heartbeat delivers it too; that is what a re-login is for. A fresh
+claim (a new boot, which signs in anyway) drops a re-login that has not gone
+out.
 
 The answer adds `{worker_token, token_expires_at}` (Unix seconds) when less
 than a day of the token remains, or when it verified under
@@ -560,6 +571,9 @@ with a fresh socket for the next viewer.
   parked or paired: a stale epoch closes its socket `4409` (and the viewer's
   with it), a token no longer valid `4401`. Either side over 16 MB buffered
   closes `1013`. On ERP shutdown every socket closes `1001`.
+- Viewer input (RFB key and pointer events) is passed to the worker as bytes,
+  as on the coordinator bridge: view-only is the watch page's noVNC, which
+  sends no input until the manager ticks Take control.
 - **One instance serves the relay.** Pairing is in process memory, so the
   backend instance holding the Postgres session advisory lock
   `fleet-vnc-relay` (taken at boot, retried every 5 s) is the only one that
@@ -777,6 +791,7 @@ membership routes `409 account_busy`, `no_login`, `proxy_full`, `in_use` and
 | `POST /api/fleet/slots/:no/park` | | `{slot: SlotView}`: epoch + 1 (its worker gets `409 stale_epoch` and exits), no worker, infinite lease, any handoff reservation cleared, its leased tasks released; `404` |
 | `POST /api/fleet/slots/:no/unpark` | | `{slot: SlotView}`: lease cleared so the slot is claimable again; a slot that was not parked is answered unchanged; `404` |
 | `GET /api/fleet/workers` | | `{workers: WorkerView[]}`: `FleetWorker & {task: (FleetTask & {city_name}) \| null}` (the leased task) |
+| `POST /api/fleet/workers/:id/relogin` | | `{ok: true, relogin: {id, requested_at, requested_by, delivered_at}}`: queues a forced Facebook login that the worker's next heartbeat delivers once (§5). Only a worker holding its slot (live lease on its epoch): `409 not_running` otherwise, `404` for an unknown id. Pressed again while one waits, it answers the waiting one rather than queue a second. Worker views (`GET /workers`, `GET /workers/:id`) carry the latest as `relogin` (`null` without one) |
 | `GET /api/fleet/vnc/:workerId/ws` | WebSocket | the manager's end of the worker VNC relay (§5); `426` without an upgrade, `403` bad Origin, `404` bad id |
 
 ## 8. Settings keys (`fleet_settings`)

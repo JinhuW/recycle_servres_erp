@@ -476,6 +476,29 @@ describe('the fleet VNC relay', () => {
     expect(fleetVncState()).toEqual({ parked: [], bridges: 0 });
   });
 
+  it('passes a viewer’s input to the worker byte for byte: view-only is the viewer’s noVNC, as on the coordinator bridge', async () => {
+    const wt = await workerToken();
+    const worker = open('/api/fleet/worker/vnc', { Authorization: `Bearer ${wt}` });
+    const got: Buffer[] = [];
+    worker.ws.on('message', (d, binary) => { if (binary) got.push(Buffer.from(d as Buffer)); });
+    await settle();
+    const { token } = await loginAs(ALEX);
+    const viewer = open('/api/fleet/vnc/lab-1/ws', { Cookie: `at=${token}`, Origin: 'http://localhost:5173' });
+    await settle();
+    // What Take control sends: an RFB KeyEvent ('a' down) and a PointerEvent (button 1 at 300,200).
+    const key = Buffer.from([4, 1, 0, 0, 0, 0, 0, 0x61]);
+    const pointer = Buffer.from([5, 1, 0x01, 0x2c, 0x00, 0xc8]);
+    viewer.ws.send(key);
+    viewer.ws.send(pointer);
+    await settle();
+    expect(Buffer.concat(got).equals(Buffer.concat([key, pointer]))).toBe(true);
+    // Nothing else reaches the worker but the one `viewer` text frame.
+    expect(worker.out.messages).toHaveLength(3);
+    expect(worker.out.messages[0]).toBe('viewer');
+    viewer.ws.close();
+    await worker.outcome;
+  });
+
   it('closes a parked worker socket within a minute of its slot moving on, with a code the worker exits on', async () => {
     const wt = await workerToken();
     const worker = open('/api/fleet/worker/vnc', { Authorization: `Bearer ${wt}` });
