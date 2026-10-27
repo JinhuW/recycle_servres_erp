@@ -18,6 +18,17 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.8] - 2026-10-27
+
+### Fixed
+
+- **A fleet handover keeps the whole saved browser session.** The entrypoint
+  restores the claim's complete Playwright snapshot, including local storage,
+  IndexedDB and partitioned cookies, and every save uploads the full state.
+  The ERP stores it encrypted and passes it to the next worker; older clients
+  remain compatible. This removes the cookies-only reset when a healthy
+  legacy worker moves into the ERP fleet (RS-419).
+
 ### Removed
 
 - **The 25 unhealthy homelab workers are retired (owner decision

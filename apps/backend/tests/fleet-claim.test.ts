@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomBytes } from 'node:crypto';
-import type { ClaimAnswer, FleetCookie, NextTaskAnswer } from '@recycle-erp/shared';
+import { cookieUid, cookieValue, type ClaimAnswer, type FleetCookie, type NextTaskAnswer } from '@recycle-erp/shared';
 import { getTestDb, resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { signWorkerToken, workerTokenKey } from '../src/fleet/auth';
@@ -552,6 +552,49 @@ describe('POST /api/fleet/worker/events', () => {
 
 describe('PUT /api/fleet/worker/session', () => {
   beforeEach(async () => { await resetDb(); await seedBase(); });
+
+  it('preserves local storage, IndexedDB and partitioned cookies through save and claim, including older clients', async () => {
+    const no = await seedSlot(1);
+    const first = await claimed('lab-1');
+    const cookies: FleetCookie[] = [...first.account.cookies, {
+      name: 'embedded', value: 'made-up', domain: '.example.com', path: '/',
+      secure: true, sameSite: 'None', partitionKey: 'https://www.facebook.com',
+    }];
+    const origins = [{
+      origin: 'https://www.facebook.com', localStorage: [{ name: 'device', value: 'made-up-device' }],
+      indexedDB: [{ name: 'client', version: 1, stores: [{ name: 'keys', keyPath: 'id', autoIncrement: false,
+        indexes: [], records: [{ value: { id: 'device', data: { buffer: 'AQID', type: 'Uint8Array' } } }] }] }],
+    }, { origin: 'https://www.fbsbx.com', localStorage: [] }];
+    const state = { cookies, origins };
+    const put = (token: string, body: unknown) => api('PUT', '/api/fleet/worker/session', { headers: bearer(token), body });
+    expect((await put(first.worker_token, { cookies, storage_state: state })).status).toBe(200);
+    const stored = async () => unseal((await getTestDb()<{ cookie_enc: string }[]>`
+      SELECT cookie_enc FROM fb_pool_accounts WHERE no = ${no}`)[0].cookie_enc, key());
+    expect(JSON.parse(await stored())).toEqual(state);
+    expect(cookieUid(await stored())).toBe(first.account.uid);
+    expect(cookieValue(await stored(), 'embedded')).toBe('made-up');
+    await getTestDb()`UPDATE fleet_slots SET lease_expires_at = NOW() - interval '1 second' WHERE account_no = ${no}`;
+    const next = await claimed('lab-2');
+    expect(next.account.storage_state).toEqual(state);
+    expect(next.account.cookies).toEqual(cookies);
+    const refreshed = cookies.map((c) => c.name === 'xs' ? { ...c, value: 'refreshed-xs' } : c);
+    expect((await put(next.worker_token, { cookies: refreshed })).status).toBe(200);
+    expect(JSON.parse(await stored())).toEqual({ cookies: refreshed, origins });
+
+    for (const invalid of [
+      { cookies: refreshed, origins: null },
+      { cookies: refreshed, origins: [{ origin: 'https://www.facebook.com', localStorage: [{}] }] },
+      { cookies: refreshed, origins: [{ origin: 'file:///tmp/session', localStorage: [] }] },
+      { cookies: refreshed, origins: [{ origin: 'https://www.facebook.com', localStorage: [], indexedDB: ['invalid'] }] },
+      { cookies: [], origins },
+    ]) expect((await put(next.worker_token, { cookies: refreshed, storage_state: invalid })).status).toBe(422);
+    expect(JSON.parse(await stored())).toEqual({ cookies: refreshed, origins });
+    const foreign = refreshed.map((c) => c.name === 'c_user' ? { ...c, value: '999999999999999' } : c);
+    expect((await put(next.worker_token, { cookies: foreign, storage_state: { cookies: foreign, origins } })).status).toBe(422);
+    expect(JSON.parse(await stored())).toEqual({ cookies: refreshed, origins });
+    expect((await put(next.worker_token, { cookies: [], clear: true })).status).toBe(200);
+    expect((await getTestDb()`SELECT cookie_enc FROM fb_pool_accounts WHERE no = ${no}`)[0].cookie_enc).toBeNull();
+  });
 
   it('reseals the cookies and token into the pool row and stamps cookie_at', async () => {
     const no = await seedSlot(1, { uid: '61550000000099' });

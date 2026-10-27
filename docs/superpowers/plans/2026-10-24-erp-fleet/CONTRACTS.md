@@ -369,7 +369,9 @@ agents and worker images from before the tickets.
   "worker_token": "…",
   "epoch": 7,
   "account": { "no": 12, "uid": "1000…", "password": "…", "totp_secret": "…",
-               "cookies": [ /* Playwright storage_state cookies */ ], "token": "EAA…" | null },
+               "cookies": [ /* Playwright storage_state cookies */ ],
+               "storage_state": { "cookies": [ … ], "origins": [ /* localStorage + indexedDB */ ] },
+               "token": "EAA…" | null },
   "proxy": { "url": "http://user:pass@host:port" } | null,
   "device": { "user_agent": "…", "viewport": [1366, 768], "timezone": "America/New_York", "locale": "en-US" },
   "home_cities": ["nyc", "philly"],
@@ -542,6 +544,18 @@ account's uid (`422 {detail: "cookies: c_user is not this account"}`; nothing
 is written). An empty list is refused the same way. `clear: true` empties the
 stored cookie outright (the list is then ignored). The `token` **key absent**
 keeps the stored token; `token: null` clears it.
+
+Since v1.367.1 / facebook-tracker 0.14.8, an upload also carries optional
+`storage_state: {cookies, origins}` and the claim returns it under `account`.
+It is the complete Playwright snapshot, including local storage and IndexedDB;
+`partitionKey` is retained on cookies. The snapshot's cookies must match the
+outer `cookies` list (422 `storage_state` otherwise). Origin URLs, localStorage
+pairs and IndexedDB containers are validated; IndexedDB records stay intact.
+The existing sealed `cookie_enc` holds this object. A cookie-only upload from
+an older worker replaces cookies but retains stored origins under the account
+lock. An explicit `clear: true` removes everything. Older claim consumers can
+continue reading `account.cookies`; workers with no `storage_state` in their
+claim render the legacy cookies-only state.
 
 ### `GET /api/fleet/worker/vnc` — worker scope, WebSocket
 

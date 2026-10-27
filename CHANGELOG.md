@@ -15,6 +15,16 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.367.1] - 2026-10-27
+
+### Fixed
+
+- Moving a Facebook worker to the ERP fleet now preserves its complete saved
+  browser session: cookies (including partitioned cookies), local storage and
+  IndexedDB. Session refreshes retain that data, and older workers refreshing
+  only cookies cannot erase it. This avoids dropping the browser state that a
+  healthy legacy account already established.
+
 ## [1.367.0] - 2026-10-26
 
 ### Fixed

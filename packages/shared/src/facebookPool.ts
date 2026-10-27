@@ -158,8 +158,9 @@ export function cookieUid(cookie: string): string | null {
     } catch {
       return null;
     }
-    if (Array.isArray(parsed)) {
-      const entry = (parsed as { name?: unknown; value?: unknown }[]).find(
+    const list = Array.isArray(parsed) ? parsed : (parsed as { cookies?: unknown } | null)?.cookies;
+    if (Array.isArray(list)) {
+      const entry = (list as { name?: unknown; value?: unknown }[]).find(
         (c) => c && typeof c === 'object' && c.name === 'c_user',
       );
       return digits(entry?.value);
@@ -180,8 +181,9 @@ export function cookieValue(cookie: string, name: string): string | null {
     } catch {
       return null;
     }
-    if (Array.isArray(parsed)) {
-      const entry = (parsed as { name?: unknown; value?: unknown }[]).find(
+    const list = Array.isArray(parsed) ? parsed : (parsed as { cookies?: unknown } | null)?.cookies;
+    if (Array.isArray(list)) {
+      const entry = (list as { name?: unknown; value?: unknown }[]).find(
         (c) => c && typeof c === 'object' && c.name === name,
       );
       return plain(entry?.value);

@@ -10,6 +10,7 @@ import {
   type FleetDevice,
   type FleetItem,
   type FleetSettings,
+  type FleetStorageState,
   type FleetTaskWhy,
   type HandedTask,
   type NextTaskAnswer,
@@ -146,6 +147,7 @@ function cookieFromRecord(c: Record<string, unknown>): FleetCookie | null {
   if (typeof c.httpOnly === 'boolean') out.httpOnly = c.httpOnly;
   if (typeof c.secure === 'boolean') out.secure = c.secure;
   if (c.sameSite === 'Strict' || c.sameSite === 'Lax' || c.sameSite === 'None') out.sameSite = c.sameSite;
+  if (typeof c.partitionKey === 'string') out.partitionKey = c.partitionKey;
   return out;
 }
 
@@ -191,6 +193,33 @@ function parseCookies(v: unknown): FleetCookie[] | null {
     out.push(cookie);
   }
   return out;
+}
+
+function parseStorageState(value: unknown): FleetStorageState | null {
+  if (!isRecord(value) || !Array.isArray(value.origins)) return null;
+  const cookies = parseCookies(value.cookies);
+  if (!cookies) return null;
+  for (const origin of value.origins) {
+    if (!isRecord(origin) || typeof origin.origin !== 'string' || !Array.isArray(origin.localStorage)) return null;
+    try {
+      const url = new URL(origin.origin);
+      if (!['https:', 'http:'].includes(url.protocol) || url.origin !== origin.origin) return null;
+    } catch { return null; }
+    if (!origin.localStorage.every((item: unknown) => isRecord(item)
+      && typeof item.name === 'string' && typeof item.value === 'string')) return null;
+    if (origin.indexedDB !== undefined && (!Array.isArray(origin.indexedDB) || !origin.indexedDB.every(isRecord))) return null;
+  }
+  return { cookies, origins: value.origins as FleetStorageState['origins'] };
+}
+
+export function storageStateFromText(text: string): FleetStorageState {
+  if (text.trim().startsWith('{')) {
+    const value: unknown = JSON.parse(text);
+    const state = parseStorageState(value);
+    if (!state) throw new Error('Invalid stored browser session');
+    return state;
+  }
+  return { cookies: cookiesFromText(text), origins: [] };
 }
 
 // ─── Claim ────────────────────────────────────────────────────────────────────
@@ -371,6 +400,7 @@ worker.post('/claim', claimAuth, async (c) => {
     const exp = Math.floor(Date.now() / 1000) + WORKER_TOKEN_DAYS * 86_400;
     const items = await loadItems(tx);
     const token = unsealOrEmpty(row.token_enc, key);
+    const storageState = storageStateFromText(unsealOrEmpty(row.cookie_enc, key));
     return {
       worker_token: signWorkerToken({ worker_id, account_no: row.account_no, epoch, exp }, tokenKey),
       epoch,
@@ -379,7 +409,8 @@ worker.post('/claim', claimAuth, async (c) => {
         uid: row.uid,
         password: unsealOrEmpty(row.password_enc, key),
         totp_secret: totpKey(unsealOrEmpty(row.totp_enc, key)),
-        cookies: cookiesFromText(unsealOrEmpty(row.cookie_enc, key)),
+        cookies: storageState.cookies,
+        storage_state: storageState,
         token: token || null,
       },
       proxy: proxyUrl ? { url: proxyUrl } : null,
@@ -741,6 +772,10 @@ worker.put('/session', workerAuth, async (c) => {
   const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
   const cookies = body ? parseCookies(body.cookies) : null;
   if (!cookies) return c.json({ ...BAD_REQUEST, detail: 'cookies' }, 422);
+  const storageState = body!.storage_state === undefined ? undefined : parseStorageState(body!.storage_state);
+  if (storageState === null || (storageState && JSON.stringify(storageState.cookies) !== JSON.stringify(cookies))) {
+    return c.json({ ...BAD_REQUEST, detail: 'storage_state' }, 422);
+  }
   if (body!.clear !== undefined && typeof body!.clear !== 'boolean') return c.json({ ...BAD_REQUEST, detail: 'clear' }, 422);
   const clear = body!.clear === true;
   // The stored session is what spares the next boot a login. An empty list,
@@ -755,13 +790,19 @@ worker.put('/session', workerAuth, async (c) => {
   const key = poolKey(c.env);
   if (!key) return c.json(unavailable('FB_POOL_KEY'), 503);
   const keep = clear ? [] : cookies;
-  const text = cookieTextFromList(keep);
-  const uid = keep.length ? cookieUid(text) : null;
+  const uid = keep.length ? cookieUid(cookieTextFromList(keep)) : null;
   const sql = getDb(c.env);
   const updated = await sql.begin(async (tx): Promise<'stale' | 'foreign' | 'ok'> => {
     if (!await eligibleSlot(tx, w, true)) return 'stale';
-    const [account] = await tx<{ uid: string | null }[]>`SELECT uid FROM fb_pool_accounts WHERE no = ${w.account_no}`;
+    const [account] = await tx<{ uid: string | null; cookie_enc: string | null }[]>`
+      SELECT uid, cookie_enc FROM fb_pool_accounts WHERE no = ${w.account_no}`;
     if (uid && account.uid && uid !== account.uid) return 'foreign';
+    // A worker on the previous protocol must not erase the browser's saved databases.
+    const previous = !clear && storageState === undefined
+      ? storageStateFromText(unsealOrEmpty(account.cookie_enc, key)) : null;
+    const origins = storageState?.origins ?? previous?.origins ?? [];
+    const text = storageState || origins.length
+      ? JSON.stringify({ cookies: keep, origins: clear ? [] : origins }) : cookieTextFromList(keep);
     // An absent token key keeps the stored token; null (or "") clears it.
     await tx`
       UPDATE fb_pool_accounts SET

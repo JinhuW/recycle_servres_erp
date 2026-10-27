@@ -388,6 +388,12 @@ account pool, a city catalog managers edit, one open task per city and item,
 and a slot-claim protocol with a lease epoch. The worker's side of it is
 **fleet mode**, and it lives in two places:
 
+Fleet claims and saves carry the complete Playwright storage state since
+facebook-tracker 0.14.8 / ERP v1.367.1: cookies, local storage and IndexedDB.
+The worker restores that state before opening the browser. An older
+cookies-only claim still works; on the backend, an older worker's cookie-only
+save retains any origins already stored for its account.
+
 - **`rs_worker/entry.py`** is the image's entrypoint (`deploy/Dockerfile.worker`,
   built from this folder so both `ai-marketplace-monitor/` and `rs_worker/`
   are in the context). Without `RS_FLEET_URL`, `RS_FLEET_HOST_ID` and

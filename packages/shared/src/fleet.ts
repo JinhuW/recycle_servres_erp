@@ -436,6 +436,17 @@ export type FleetCookie = {
   httpOnly?: boolean;
   secure?: boolean;
   sameSite?: 'Strict' | 'Lax' | 'None';
+  partitionKey?: string;
+};
+
+/** Playwright owns the IndexedDB record format; keep its JSON intact. */
+export type FleetStorageState = {
+  cookies: FleetCookie[];
+  origins: Array<{
+    origin: string;
+    localStorage: Array<{ name: string; value: string }>;
+    indexedDB?: Array<Record<string, unknown>>;
+  }>;
 };
 
 export type ClaimRequest = {
@@ -457,6 +468,7 @@ export type ClaimAnswer = {
     password: string;
     totp_secret: string;
     cookies: FleetCookie[];
+    storage_state?: FleetStorageState;
     token: string | null;
   };
   proxy: { url: string } | null;
@@ -496,6 +508,8 @@ export type SessionRequest = {
   /** Must name this account's session (`c_user` = the account uid, plus `xs`);
    *  an empty list is refused unless `clear` is true. */
   cookies: FleetCookie[];
+  /** Complete state; older cookie-only uploads keep the stored origins. */
+  storage_state?: FleetStorageState;
   /** Absent keeps the stored token; null clears it. */
   token?: string | null;
   clear?: boolean;

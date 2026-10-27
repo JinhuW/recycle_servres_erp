@@ -546,11 +546,17 @@ def write_files(home: Path, answer: Dict[str, Any], config: Dict[str, Any]) -> N
     home.mkdir(parents=True, exist_ok=True)
     account = answer["account"]
     device = answer.get("device") or {}
+    state = account.get("storage_state")
+    if state is None:
+        state = {"cookies": account.get("cookies") or [], "origins": []}
+    elif (not isinstance(state, dict) or state.get("cookies") != account.get("cookies")
+          or not isinstance(state.get("origins"), list)):
+        raise ValueError("the claimed storage state does not match the account's cookies")
     _write_private(home / "config.toml", toml_dumps(config))
     _write_private(home / "fleet-token", str(answer["worker_token"]))
     _write_private(
         home / "session.json",
-        json.dumps({"cookies": account.get("cookies") or [], "origins": []}),
+        json.dumps(state),
     )
     _write_private(
         home / "session.json.meta.json",
