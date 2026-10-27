@@ -50,6 +50,41 @@ export function pollGate(read: () => Promise<unknown>): PollGate {
   };
 }
 
+// Whether the fleet is a mirror is fixed for the backend's life, so one read
+// serves the page load. A failed read counts as not a mirror: the writes
+// stay, and the backend still refuses them if it is one.
+let mirrorRead: Promise<boolean> | null = null;
+let mirrorKnown = false;
+export function loadFleetMirror(): Promise<boolean> {
+  return mirrorRead ??= fleetApi.health().then(h => (mirrorKnown = h.mirror === true)).catch(() => false);
+}
+
+/** True when this ERP's fleet is prod's read-only copy; every control that writes hides. `on` false skips the read (a purchaser's page). */
+export function useFleetMirror(on = true): boolean {
+  const [mirror, setMirror] = useState(mirrorKnown);
+  useEffect(() => {
+    if (!on) return;
+    let alive = true;
+    void loadFleetMirror().then(m => { if (alive) setMirror(m); });
+    return () => { alive = false; };
+  }, [on]);
+  return on && mirror;
+}
+
+export const PROD_FLEET_URL = 'https://inventory.recycleservers.com/#/fleet';
+
+export function FleetMirrorBanner() {
+  const { t } = useT();
+  return (
+    <div className="card" role="status" style={{ marginBottom: 14 }}>
+      <div className="card-note">
+        <Icon name="lock" size={16} />
+        <span>{t('fleetMirrorNote')} <a href={PROD_FLEET_URL} target="_blank" rel="noreferrer">{t('fleetMirrorLink')}</a></span>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Reads `load` now and every 10 s while the tab is visible, and again the
  * moment it is shown, never while the previous read is still out. `reload`
@@ -291,6 +326,7 @@ export function UnparkDialog({ slot, onClose, onDone }: { slot: FleetSlot; onClo
 // Lifting a quarantine early lets the next worker that asks claim the account.
 export function ReleaseQuarantineButton({ slot, onDone }: { slot: FleetSlot; onDone: () => void }) {
   const { t } = useT();
+  const mirror = useFleetMirror();
   const [busy, setBusy] = useState(false);
   const release = async () => {
     if (busy) return;
@@ -305,6 +341,7 @@ export function ReleaseQuarantineButton({ slot, onDone }: { slot: FleetSlot; onD
       setBusy(false);
     }
   };
+  if (mirror) return null;
   return (
     <button type="button" className="btn sm" onClick={release} disabled={busy} title={t('fleetQuarantineReleaseHint')}>
       {t('fleetQuarantineRelease')}

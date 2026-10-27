@@ -15,6 +15,31 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.369.0] - 2026-10-27
+
+### Added
+
+- **The fleet moves to prod without a single new login; dev mirrors it
+  (RS-427).** Prod's Fleet page said "No host yet" because both hosts and
+  their 13 workers report to dev's ERP. Pointing them at prod would have
+  meant recreating every worker, and each restart is a Facebook login.
+  Instead prod takes dev's fleet as it stands, and a backend with
+  `FLEET_ROLE=mirror` becomes a read-only copy:
+  - Managers can read every Fleet tab. A banner points them at prod, and the
+    write controls are gone.
+  - The API refuses fleet writes with `409 read_only`.
+  - Agents and workers that still call the mirror get a 503, which they
+    retry, never a 401 or 409, which they exit on.
+  - The mirror runs no scheduler tick and no proxy probe.
+
+  The dev Cloudflare Worker gains `FLEET_FORWARD_URL` and
+  `FLEET_FORWARD_PROXY_SECRET`. It sends any `/api/fleet/*` call that carries
+  a bearer to prod's backend, so containers started with the dev URL keep
+  their sessions and tokens. With `SYNC_KEEP_FLEET=0`, the nightly prod→dev
+  copy brings prod's fleet to dev, with host token hashes replaced, claim
+  tickets dropped and sealed proxy URLs cleared. Until that is set, it keeps
+  dev's own fleet as before.
+
 ## [1.368.1] - 2026-10-27
 
 ### Fixed

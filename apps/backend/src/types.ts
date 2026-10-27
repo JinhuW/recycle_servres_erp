@@ -33,7 +33,9 @@ export type Env = {
   /** The key before the last rotation; tokens it signed verify until their next heartbeat re-signs them. */
   FLEET_WORKER_TOKEN_KEY_PREVIOUS?: string;
   // Which part of the fleet this instance serves (src/fleet/). Unset is all of
-  // it; 'manager-only' leaves the scheduler tick to the instance serving workers.
+  // it; 'manager-only' leaves the scheduler tick to the instance serving workers;
+  // 'mirror' serves none of it: the fleet runs on another ERP and this database
+  // holds a copy, so pages read and nothing writes (fleet/auth.ts mirrorGate).
   FLEET_ROLE?: string;
   // Where a proxy health probe asks for its exit (fleet/proxyProbe.ts); unset is
   // ipinfo.io. Tests point it at a local server.

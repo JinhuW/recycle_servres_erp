@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { getDb } from '../db';
-import { managerOnly, type ManagerEnv } from '../fleet/auth';
+import { isMirror, managerOnly, mirrorGate, type ManagerEnv } from '../fleet/auth';
 import {
   createCity, listCities, listItems, loadCity, loadSettings, readCityDraft, readCityPatch, readItems,
   readSettingsPatch, removeCity, saveSettings, updateCity, upsertItems,
@@ -26,13 +26,15 @@ import { VNC_WORKER_ID } from './coordinator';
 
 const fleet = new Hono<ManagerEnv>();
 
+fleet.use('*', mirrorGate);
+
 const refuse = (c: Context, r: Refusal) => c.json(r.body, r.status);
 const body = (c: Context): Promise<unknown> => c.req.json().catch(() => null);
 
 fleet.get('/health', managerOnly, async (c) => {
   const tables = await fleetTablesPresent(getDb(c.env));
   const ok = FLEET_TABLES.every((t) => tables.includes(t));
-  return c.json({ ok, tables });
+  return c.json({ ok, tables, mirror: isMirror(c.env) });
 });
 
 // ── Catalog: cities, items, settings (fleet/cities.ts) ──────────────────────

@@ -10,7 +10,7 @@ import {
   CITY_BUCKETS, cityBucket, cityRegions, cityStanding, EMPTY_CITY_FILTER, easternClock, filterCities, homeWorkerOf, isSlug, lastDoneSearch,
   marketplaceUrl, normalizeSlug, openSearch, withCityNames, type CityBucket, type CityFilter,
 } from './fleetBoard';
-import { agoLabel, ConfirmDialogBody, EmptyRow, Legend, UnavailableCard, useFleetPoll, WorkerLink } from './shared';
+import { agoLabel, ConfirmDialogBody, EmptyRow, Legend, UnavailableCard, useFleetMirror, useFleetPoll, WorkerLink } from './shared';
 
 // ─── Cities ───────────────────────────────────────────────────────────────────
 // The catalog the queue works from. A new city starts disabled with a
@@ -43,6 +43,7 @@ type Data = { cities: FleetCity[]; items: FleetItem[]; done: FleetTask[]; slots:
 
 export function FleetCitiesTab() {
   const { t } = useT();
+  const mirror = useFleetMirror();
   const { data, reload } = useFleetPoll<Data>(() => {
     const since = new Date(Date.now() - DONE_HOURS * 3_600_000).toISOString();
     return Promise.all([
@@ -68,7 +69,7 @@ export function FleetCitiesTab() {
         </p>
         <div className="page-actions">
           <button type="button" className="btn" onClick={() => setRules(true)} disabled={!data}>{t('fleetRules')}</button>
-          <button type="button" className="btn primary" onClick={() => setAdding(true)} disabled={!data}>{t('fleetCityAdd')}</button>
+          {!mirror && <button type="button" className="btn primary" onClick={() => setAdding(true)} disabled={!data}>{t('fleetCityAdd')}</button>}
         </div>
       </div>
       <section className="card fleet-card" aria-label={t('fleetCitiesTitle')}>
@@ -88,6 +89,7 @@ export function CitiesTable({ cities, items, done, slots, filter, onFilter, onCh
   filter: CityFilter; onFilter: (f: CityFilter) => void; onChanged: () => void; now?: number;
 }) {
   const { t, locale } = useT();
+  const mirror = useFleetMirror();
   const [removing, setRemoving] = useState<FleetCity | null>(null);
   const [unverified, setUnverified] = useState<FleetCity | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -211,16 +213,18 @@ export function CitiesTable({ cities, items, done, slots, filter, onFilter, onCh
                       <span className="fp-holder">
                         <span className={BUCKET_CHIP[bucket]}>{t(BUCKET_KEY[bucket])}</span>
                         {bucket !== 'verifying' && c.verified_as && c.verified_as !== 'override' && <small title={t('fleetCityVerifiedAs')}>{c.verified_as}</small>}
-                        {standing === 'disabled' && (
+                        {standing === 'disabled' && !mirror && (
                           <button type="button" className="btn sm fleet-inline-action" onClick={() => restore(c)} disabled={rowBusy}>{t('fleetCityEnable')}</button>
                         )}
-                        {standing === 'removed' && (
+                        {standing === 'removed' && !mirror && (
                           <button type="button" className="btn sm fleet-inline-action" onClick={() => restore(c)} disabled={rowBusy}>{t('fleetCityRestore')}</button>
                         )}
                       </span>
                     </td>
                     <td className="num">
-                      {c.enabled ? (
+                      {c.enabled && mirror ? (
+                        <span className={c.per_day == null ? 'fp-muted' : undefined}>{c.per_day == null ? t('fleetPerDayDefault') : t('fleetPerDayN', { n: c.per_day })}</span>
+                      ) : c.enabled ? (
                         <select className="input fleet-perday" value={c.per_day ?? ''} aria-label={t('fleetColPerDay')}
                           disabled={rowBusy} onChange={e => setPerDay(c, e.target.value)}>
                           <option value="">{t('fleetPerDayDefault')}</option>
@@ -238,7 +242,7 @@ export function CitiesTable({ cities, items, done, slots, filter, onFilter, onCh
                       ) : <span className="fp-muted">—</span>}
                     </td>
                     <td className="fleet-row-actions">
-                      {standing !== 'removed' && <>
+                      {standing !== 'removed' && !mirror && <>
                         <button type="button" className={`btn ghost icon sm${c.pinned ? ' fleet-pinned' : ''}`} onClick={() => setPin(c)}
                           disabled={rowBusy} aria-pressed={c.pinned} title={t(c.pinned ? 'fleetUnpin' : 'fleetPin')} aria-label={t('fleetColPin')}>
                           <Icon name="star" size={13} />
@@ -260,12 +264,14 @@ export function CitiesTable({ cities, items, done, slots, filter, onFilter, onCh
                         <div className="fleet-verify-box">
                           {mismatch ? <>
                             <span>{t('fleetVerifyMismatch', { shown: c.verified_as ?? '', name: c.name })}</span>
-                            <button type="button" className="btn sm" onClick={() => enableAnyway(c)} disabled={rowBusy}>{t('fleetCityEnableAnyway')}</button>
-                            <button type="button" className="btn sm fleet-danger-text" onClick={() => setRemoving(c)} disabled={rowBusy}>{t('fleetCityRemove')}</button>
+                            {!mirror && <>
+                              <button type="button" className="btn sm" onClick={() => enableAnyway(c)} disabled={rowBusy}>{t('fleetCityEnableAnyway')}</button>
+                              <button type="button" className="btn sm fleet-danger-text" onClick={() => setRemoving(c)} disabled={rowBusy}>{t('fleetCityRemove')}</button>
+                            </>}
                           </> : <>
                             <span>{t('fleetVerifyPending', { ago: agoLabel(t, c.added_at, now), name: c.name })}
                               {checking?.state === 'leased' && checking.worker_id && <> {t('fleetVerifyChecking', { worker: checking.worker_id })}</>}</span>
-                            <button type="button" className="btn sm ghost" onClick={() => enableAnyway(c)} disabled={rowBusy}>{t('fleetVerifySkip')}</button>
+                            {!mirror && <button type="button" className="btn sm ghost" onClick={() => enableAnyway(c)} disabled={rowBusy}>{t('fleetVerifySkip')}</button>}
                           </>}
                         </div>
                       </td>
@@ -310,6 +316,7 @@ const RULE_MIN: Record<RuleField, number> = {
 
 function RulesDialog({ onClose }: { onClose: () => void }) {
   const { t } = useT();
+  const mirror = useFleetMirror();
   const [saved, setSaved] = useState<FleetSettings | 'failed' | null>(null);
   const [draft, setDraft] = useState<Record<RuleField, string> | null>(null);
   const [busy, setBusy] = useState(false);
@@ -364,7 +371,8 @@ function RulesDialog({ onClose }: { onClose: () => void }) {
                 <Fragment key={f}>
                   <dt>{t(`fleetRule_${f}`)}</dt>
                   <dd>
-                    <input className="input fleet-rule-input" type="number" min={RULE_MIN[f]} step={1} value={draft[f]} onChange={e => set(f, e.target.value)} />
+                    <input className="input fleet-rule-input" type="number" min={RULE_MIN[f]} step={1} value={draft[f]} onChange={e => set(f, e.target.value)}
+                      disabled={mirror} />
                     {' '}{t(`fleetRuleUnit_${f}`)}
                   </dd>
                 </Fragment>
@@ -375,7 +383,7 @@ function RulesDialog({ onClose }: { onClose: () => void }) {
         </div>
         <div className="modal-foot">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>{t('cancel')}</button>
-          <button type="submit" className="btn primary" disabled={busy || !draft}>{t('fleetRulesSave')}</button>
+          {!mirror && <button type="submit" className="btn primary" disabled={busy || !draft}>{t('fleetRulesSave')}</button>}
         </div>
       </form>
     </Modal>

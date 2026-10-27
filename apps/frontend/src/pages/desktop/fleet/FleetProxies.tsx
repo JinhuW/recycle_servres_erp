@@ -8,7 +8,7 @@ import {
 import { ApiError } from '../../../lib/api';
 import { useT } from '../../../lib/i18n';
 import { deviceSummary, proxyChoices, proxyDraftProblem, proxyExit, proxyPatch, type ProxyDraft } from './proxyRules';
-import { ConfirmDialogBody } from './shared';
+import { ConfirmDialogBody, useFleetMirror } from './shared';
 import '../../../styles/fleet.css';
 
 // ─── Proxies and Add to fleet ─────────────────────────────────────────────────
@@ -43,6 +43,7 @@ function warnOrFail(err: unknown): void {
 
 export function ProxiesCard({ proxies, limit, onChanged }: { proxies: FleetProxy[]; limit: number; onChanged: () => void }) {
   const { t } = useT();
+  const mirror = useFleetMirror();
   const [editing, setEditing] = useState<FleetProxy | 'new' | null>(null);
   const [removing, setRemoving] = useState<FleetProxy | null>(null);
   return (
@@ -52,9 +53,11 @@ export function ProxiesCard({ proxies, limit, onChanged }: { proxies: FleetProxy
           <h2 className="card-title">{t('fleetProxies')}</h2>
           <span className="card-sub">{t('fleetProxiesSub')}</span>
         </div>
-        <button type="button" className="btn sm" onClick={() => setEditing('new')}>
-          <Icon name="plus" size={13} />{t('fleetProxyAdd')}
-        </button>
+        {!mirror && (
+          <button type="button" className="btn sm" onClick={() => setEditing('new')}>
+            <Icon name="plus" size={13} />{t('fleetProxyAdd')}
+          </button>
+        )}
       </div>
       <div className="fp-table-wrap">
         <table className="fp-table">
@@ -89,14 +92,16 @@ export function ProxiesCard({ proxies, limit, onChanged }: { proxies: FleetProxy
                   </td>
                   <td className="fp-muted">{p.note || '—'}</td>
                   <td className="fleet-row-actions">
-                    <button type="button" className="btn ghost icon sm" onClick={() => setEditing(p)}
-                      aria-label={t('fleetProxyEditTitle', { label: p.label })} title={t('fleetProxyEditTitle', { label: p.label })}>
-                      <Icon name="edit" size={13} />
-                    </button>
-                    <button type="button" className="btn ghost icon sm" onClick={() => setRemoving(p)}
-                      aria-label={t('fleetProxyRemove')} title={t('fleetProxyRemove')}>
-                      <Icon name="trash" size={13} />
-                    </button>
+                    {!mirror && <>
+                      <button type="button" className="btn ghost icon sm" onClick={() => setEditing(p)}
+                        aria-label={t('fleetProxyEditTitle', { label: p.label })} title={t('fleetProxyEditTitle', { label: p.label })}>
+                        <Icon name="edit" size={13} />
+                      </button>
+                      <button type="button" className="btn ghost icon sm" onClick={() => setRemoving(p)}
+                        aria-label={t('fleetProxyRemove')} title={t('fleetProxyRemove')}>
+                        <Icon name="trash" size={13} />
+                      </button>
+                    </>}
                   </td>
                 </tr>
               );
