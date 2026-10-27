@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-26
 reporter: jinhu
 branch: fleet/hide-retired
-pr:
+pr: 938
 version: 1.367.0
 related: [RS-394, RS-412]
 ---
