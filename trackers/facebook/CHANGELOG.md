@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.11] - 2026-10-27
+
 ### Removed
 
 - **Legacy west-1 and wc-1b launch paths are retired after their session
