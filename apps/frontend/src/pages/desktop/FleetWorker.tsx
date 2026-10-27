@@ -10,7 +10,7 @@ import {
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import { loginTone, poolApi, proxyMarkFor, type FbProxyMark, type FbWorkerStint } from '../../lib/facebookPool';
 import {
-  accountAlerts, browserLabel, canWatch, externalVncUrl, fleetActivity, fleetStatus, hitsByCity, parkedWorkers, searchedToday, SESSION_WARN_DAYS, whoIs,
+  accountAlerts, browserLabel, canWatch, externalVncUrl, fleetActivity, fleetStatus, hitsByCity, parkedWorkers, retiredAt, searchedToday, SESSION_WARN_DAYS, whoIs,
   workerHistory, type HistoryLine,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
@@ -97,7 +97,10 @@ export function HomelabWorkerView({ workerId, fleet, challenges, hits, marks, st
   const who = whoIs(w);
   const name = who.login ?? who.label ?? w.worker_id;
   const status = fleetStatus(w, parked);
-  const note = statusNote(t, w, parked, locale);
+  // A retired worker has no container, so its page is a record: the date
+  // replaces the status note and there is nothing to log back in.
+  const retired = retiredAt(w);
+  const note = retired ? t('fleetRetiredOn', { date: new Date(retired).toLocaleDateString(locale) }) : statusNote(t, w, parked, locale);
   const searched = searchedToday(w, status);
   const mine = (challenges ?? []).filter(c => c.worker_id === w.worker_id);
   const events = fleetActivity({
@@ -166,7 +169,7 @@ export function HomelabWorkerView({ workerId, fleet, challenges, hits, marks, st
                 : configVnc
                   ? <a className="btn" href={configVnc} target="_blank" rel="noopener"><Icon name="eye" size={13} />{t('fbcOpenVnc')}</a>
                   : <span className="fp-muted" style={{ fontSize: 12 }}>{t('fbcNoVnc')}</span>}
-              {h && <ReloginButton workerId={w.worker_id} account={w} className="btn" onQueued={onReload} offerWatch={canWatch(w)} />}
+              {h && !retired && <ReloginButton workerId={w.worker_id} account={w} className="btn" onQueued={onReload} offerWatch={canWatch(w)} />}
               <EditCredentialsButton account={w} onSaved={onReload} className="btn" />
               {w.cities_editable && <EditCitiesButton worker={w} fleet={fleet} onSaved={onReload} />}
               <QueueButton worker={w} onSaved={onReload} />

@@ -5,7 +5,7 @@ import { ApiError } from '../../../lib/api';
 import { fleetApi, type FleetHost, type FleetHostCreated, type FleetRelease } from '../../../lib/fleet';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
-import { hostRunning, releaseSummary, rollProgress } from './fleetBoard';
+import { hostLag, hostRunning, releaseSummary, rollProgress } from './fleetBoard';
 import { agoLabel, Clock, ConfirmDialogBody } from './shared';
 
 // ─── Hosts ────────────────────────────────────────────────────────────────────
@@ -49,7 +49,8 @@ export function ReleaseBanner({ release, now }: { release: FleetRelease; now?: n
 
 /** One compact card per host: id, agent version, last seen, running of
  *  capacity, the authoritative switch, the capacity stepper, and the roll's
- *  progress line while one is on. */
+ *  progress line while a release rolls. Without one, workers left on an older
+ *  image get a quiet note, not a bar: nothing is replacing them. */
 export function HostStrip({ hosts, release, onChanged, now = Date.now() }: {
   hosts: readonly FleetHost[]; release: FleetRelease | null; onChanged: () => void; now?: number;
 }) {
@@ -82,7 +83,8 @@ export function HostStrip({ hosts, release, onChanged, now = Date.now() }: {
     <div className="fleet-hosts-strip">
       {hosts.map(h => {
         const run = hostRunning(h);
-        const roll = rollProgress(h);
+        const roll = rollProgress(h, release);
+        const lag = roll ? null : hostLag(h);
         const rowBusy = busy === h.host_id;
         return (
           <section key={h.host_id} className="card fleet-host" aria-label={h.host_id}>
@@ -122,7 +124,8 @@ export function HostStrip({ hosts, release, onChanged, now = Date.now() }: {
               </div>
             ) : (
               <div className="fleet-host-meta">
-                {h.desired.version ? t('fleetHostWorkerVersion', { version: h.desired.version }) : t('fleetHostNoImage')}
+                {lag ? t('fleetHostBehind', { n: lag.behind, versions: lag.versions.join(', '), version: lag.target })
+                  : h.desired.version ? t('fleetHostWorkerVersion', { version: h.desired.version }) : t('fleetHostNoImage')}
                 {!h.authoritative && <> · {t('fleetHostObserveNote')}</>}
                 {release?.state === 'failed' && release.failure && <> · <span className="fp-warn">{release.failure}</span></>}
               </div>

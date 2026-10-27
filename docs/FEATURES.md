@@ -3340,7 +3340,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     observe-only: the agent reports and starts nothing), the capacity stepper
     (a new worker is a Facebook login; since v1.364.0 the agent runs no more
     workers than the host has accounts for) and, while a release rolls, its
-    progress line with the worker replaced next; **Add host** (the token
+    progress line with the worker replaced next (since v1.367.0 only while
+    GET /api/fleet/hosts returns a rolling release; without one, workers
+    left on an older image get a quiet "1 worker on 0.14.6; new workers
+    start on 0.14.7", no bar); **Add host** (the token
     shown once, with the three variables the agent needs) and **Release a
     version** sit in the tab's action row, and a rolling or stopped release
     shows its banner under the strip. Since v1.361.0 (RS-412) the table is
@@ -3362,7 +3365,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     counts (All workers, Healthy, Degraded, Replacing, Parked — the worker
     reports Session expired, Checkpoint… — and Offline), a host select and a
     search over worker, account, city and host; the foot says "N of M
-    workers · R running on K hosts".
+    workers · R running on K hosts". Since v1.367.0 (RS-418) a coordinator
+    worker the fleet retired (`retired_at` on its health row) is left out
+    of the rows, the counts, the host select, the tab bar's running count
+    and the activity aside; a **Retired N** chip, off by default and there
+    only while N > 0, lists them read-only with "Retired <date>", and a
+    retired worker's own page still opens, dated, without Re-login.
     The coordinator's activity aside stays under the table while its rows
     exist; since v1.350.1 it spans the full width and its list stops at 480px
     and scrolls. There is no Pause on a roll: the backend has no route for it.

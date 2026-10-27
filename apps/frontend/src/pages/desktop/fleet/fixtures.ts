@@ -193,7 +193,8 @@ export const HITS: AlertHitRow[] = [
 ];
 
 // The coordinator's workers, as /v1/fleet lists them: one healthy on the
-// queue, one that never reported, one whose account the ERP now runs. Only
+// queue, one that never reported, one whose account the ERP now runs, one
+// retired on 2026-10-22 (its row stays, its container is gone). Only
 // the fields the Fleet rows read are filled in.
 const coordWorker = (id: string, over: Partial<FleetAccount> = {}): FleetAccount => ({
   worker_id: id, source: 'fleet', region: { key: 'west', name: 'West', scope: 'region' }, cities: [{ slug: 'la', name: 'Los Angeles', radius_km: 500 }],
@@ -218,6 +219,14 @@ export const COORDINATOR: FleetDoc = {
     coordWorker('homelab-5'),
     coordWorker('homelab-9', { health: null, queue: null, vnc_url: null }),
     coordWorker('homelab-1'),
+    coordWorker('homelab-20', {
+      health: {
+        worker_id: 'homelab-20', state: 'SESSION_EXPIRED', status: null, region: 'west', account_id: null, session_expiry: null, session_days_left: null,
+        last_heartbeat_at: ago(60 * 24 * 3), last_search_at: null, last_listing_at: null, error_count: 0, vnc_url: null, version: '0.13.18',
+        retired_at: '2026-10-22T15:00:00Z', liveness: 'dead', needs_attention: false,
+      },
+      vnc_url: 'vnc://10.0.0.1:5920', queue: null,
+    }),
   ],
 };
 

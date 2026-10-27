@@ -311,14 +311,34 @@ export function hostRunning(h: FleetHost): { running: number; desired: number } 
 }
 
 /** A roll's progress on one host: workers already on the target image, of
- *  the containers it runs; null when no release is rolling. */
-export function rollProgress(h: FleetHost): { onTarget: number; total: number; replacing: string | null } | null {
+ *  the containers it runs; null unless the hosts answer carries a rolling
+ *  release. A worker left on an older image without one is hostLag's. */
+export function rollProgress(h: FleetHost, release: FleetRelease | null): { onTarget: number; total: number; replacing: string | null } | null {
+  if (release?.state !== 'rolling') return null;
   const target = h.desired.image;
   const containers = h.report?.containers ?? [];
   if (!target || containers.length === 0) return null;
   const onTarget = containers.filter(c => c.image === target).length;
   if (onTarget === containers.length && !h.desired.roll) return null;
   return { onTarget, total: containers.length, replacing: h.desired.roll?.replace ?? null };
+}
+
+/** An image's tag, its version: "…/aimm-recycle:0.14.6" → "0.14.6". A
+ *  digest-pinned or untagged image has none and reads as the image itself. */
+export function imageVersion(image: string): string {
+  if (image.includes('@')) return image;
+  return /:([^:/]+)$/.exec(image)?.[1] ?? image;
+}
+
+/** Workers on a host still running an older image than the one new workers
+ *  start on, outside any roll; null when every container is on it. */
+export function hostLag(h: FleetHost): { behind: number; versions: string[]; target: string } | null {
+  const target = h.desired.image;
+  if (!target) return null;
+  const old = (h.report?.containers ?? []).filter(c => c.image !== target);
+  if (old.length === 0) return null;
+  const versions = [...new Set(old.map(c => imageVersion(c.image)))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return { behind: old.length, versions, target: h.desired.version || imageVersion(target) };
 }
 
 /** The latest release's progress, for the Hosts tab's banner; null when none was ever started. */

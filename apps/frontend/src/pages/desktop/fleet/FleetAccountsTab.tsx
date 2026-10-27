@@ -4,13 +4,13 @@ import { TableSkeleton } from '../../../components/Skeleton';
 import { coordinatorApi, type Challenge, type FleetDoc } from '../../../lib/coordinator';
 import { poolApi } from '../../../lib/facebookPool';
 import { fleetApi, type FleetHost, type FleetRelease, type FleetSlot, type FleetWorker } from '../../../lib/fleet';
-import { queueCityName } from '../../../lib/fleetView';
+import { queueCityName, withoutRetired } from '../../../lib/fleetView';
 import { useT } from '../../../lib/i18n';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
 import { ActivityAside } from '../FleetWorkers';
 import { dueLabel, easternClock, isQuarantined, maskUid } from './fleetBoard';
 import {
-  EMPTY_FLEET_ROW_FILTER, FLEET_ROW_KINDS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning,
+  EMPTY_FLEET_ROW_FILTER, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRowKinds, fleetRows, fleetRunning,
   type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowKind,
 } from './fleetRows';
 import { AddHostDialog, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
@@ -26,7 +26,9 @@ import {
 // the search box narrow the table. The activity aside stays under the table
 // while the coordinator's rows exist. The ERP's own data and the
 // coordinator's are read apart: the table shows the ERP's rows at once and
-// the coordinator's join them when its slower answer lands.
+// the coordinator's join them when its slower answer lands. A coordinator
+// worker it retired is out of the rows, counts and hosts unless the legend's
+// Retired chip asks for it.
 
 type ErpData = {
   slots: FleetSlot[]; workers: FleetWorker[]; hosts: FleetHost[]; release: FleetRelease | null; pool: FleetPoolAccount[] | null;
@@ -36,11 +38,11 @@ type Data = ErpData & CoordinatorData;
 
 const KIND_DOT: Record<FleetRowKind | 'all', string> = {
   all: 'fleet-dot-all', healthy: 'fleet-dot-pos', degraded: 'fleet-dot-warn', replacing: 'fleet-dot-info',
-  parked: 'fleet-dot-neg', offline: 'fleet-dot-muted',
+  parked: 'fleet-dot-neg', offline: 'fleet-dot-muted', retired: 'fleet-dot-muted',
 };
 const KIND_KEY: Record<FleetRowKind | 'all', string> = {
   all: 'fleetKindAll', healthy: 'fleetKindHealthy', degraded: 'fleetKindDegraded', replacing: 'fleetKindReplacing',
-  parked: 'fleetKindParked', offline: 'fleetKindOffline',
+  parked: 'fleetKindParked', offline: 'fleetKindOffline', retired: 'fleetKindRetired',
 };
 
 export function FleetAccountsTab() {
@@ -72,7 +74,8 @@ export function FleetAccountsTab() {
   const hosts = data?.hosts ?? [];
   const release = data?.release ?? null;
   const image = hosts.find(h => h.desired.image)?.desired.image || null;
-  const coordinatorRows = (data?.coordinator?.workers.length ?? 0) > 0;
+  const active = withoutRetired(data?.coordinator ?? null);
+  const coordinatorRows = (active?.workers.length ?? 0) > 0;
 
   return (
     <div className="fp-pool">
@@ -91,7 +94,7 @@ export function FleetAccountsTab() {
           : <WorkersTable data={data} filter={filter} onFilter={setFilter} onChanged={reload} />}
       </section>
       {coordinatorRows && data && (
-        <ActivityAside fleet={data.coordinator} unavailable={false} challenges={data.challenges} locale={locale} />
+        <ActivityAside fleet={active} unavailable={false} challenges={data.challenges} locale={locale} />
       )}
       {adding && <AddHostDialog onClose={() => setAdding(false)} onChanged={reload} />}
       {releasing && <ReleaseDialog current={release?.image ?? image} onClose={() => setReleasing(false)} onDone={() => { setReleasing(false); reload(); }} />}
@@ -114,7 +117,7 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
   return (
     <>
       <div className="fp-toolbar fleet-toolbar">
-        <Legend buckets={FLEET_ROW_KINDS} counts={counts} value={filter.kind} onChange={kind => set({ kind })}
+        <Legend buckets={fleetRowKinds(counts)} counts={counts} value={filter.kind} onChange={kind => set({ kind })}
           label={k => t(KIND_KEY[k])} dotClass={k => KIND_DOT[k]} />
         <select className="input fleet-select" value={filter.host} aria-label={t('fleetColHost')} onChange={e => set({ host: e.target.value })}>
           <option value="">{t('fleetEveryHost')}</option>
@@ -142,14 +145,14 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
             </tr>
           </thead>
           <tbody>
-            {shown.length === 0 && <EmptyRow cols={9}>{rows.length === 0 ? t('fleetWorkersNone') : t('fleetWorkersNoMatch')}</EmptyRow>}
+            {shown.length === 0 && <EmptyRow cols={9}>{counts.all === 0 && filter.kind !== 'retired' ? t('fleetWorkersNone') : t('fleetWorkersNoMatch')}</EmptyRow>}
             {shown.map(r => <WorkerRow key={r.key} row={r} hostVersion={r.host ? versions.get(r.host) ?? null : null}
               cityName={slug => queueCityName(data.coordinator, slug)} onChanged={onChanged} now={now} />)}
           </tbody>
         </table>
       </div>
       <div className="fp-table-foot fleet-foot">
-        <span>{t('fleetWorkersFoot', { shown: shown.length, n: rows.length, running: running.running, hosts: running.hosts })}</span>
+        <span>{t('fleetWorkersFoot', { shown: shown.length, n: filter.kind === 'retired' ? counts.retired : counts.all, running: running.running, hosts: running.hosts })}</span>
         <span>{t('fleetMinutesNote', { budget })}</span>
       </div>
     </>
@@ -177,14 +180,16 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
         </span>
       : r.running ? <em className="fleet-hold">{t('fleetNowWaiting')}</em> : null;
 
-  const stateChip = r.kind === 'replacing' ? <span className="chip info">{t('fleetKindReplacing')}</span>
+  const stateChip = r.kind === 'retired' ? <span className="chip muted">{t('fleetKindRetired')}</span>
+    : r.kind === 'replacing' ? <span className="chip info">{t('fleetKindReplacing')}</span>
     : r.kind === 'offline' ? <span className="chip muted">{t('fleetKindOffline')}</span>
     : r.kind === 'degraded' ? <span className="chip warn">{t('fleetKindDegraded')}</span>
     : r.kind === 'healthy' ? <span className="chip pos">{t('fleetKindHealthy')}</span>
     : r.state ? <WorkerStateChip state={r.state} />
     : <span className="chip neg">{t('fleetKindParked')}</span>;
 
-  const note = quarantined
+  const note = r.retiredAt ? t('fleetRetiredOn', { date: new Date(r.retiredAt).toLocaleDateString(locale) })
+    : quarantined
     ? t('fleetQuarantineUntilAt', { time: easternClock(slot.quarantined_until, locale, now), span: dueLabel(t, slot.quarantined_until, now) })
     : r.running && r.kind === 'degraded' ? t('fleetNoteDegraded')
     : r.heartbeat ? t('fleetBeat', { ago: agoLabel(t, r.heartbeat, now) })

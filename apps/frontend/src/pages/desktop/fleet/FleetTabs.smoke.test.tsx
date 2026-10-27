@@ -53,6 +53,15 @@ describe('Fleet tab', () => {
     expect(html).toContain('1.340.0');
     expect(renderToString(<HostStrip hosts={[]} release={null} onChanged={noop} now={NOW} />)).toContain('fleetHostsNone');
   });
+  it('notes workers on an older build, with no bar, when no release rolls', () => {
+    for (const release of [null, { ...RELEASE, state: 'done' as const }]) {
+      const html = renderToString(<HostStrip hosts={HOSTS} release={release} onChanged={noop} now={NOW} />);
+      expect(html).not.toContain('fleetHostRolling');
+      expect(html).not.toContain('fleet-host-bar');
+      expect(html).toContain('fleetHostBehind');        // homelab: two on 0.13.9
+      expect(html).toContain('fleetHostWorkerVersion'); // worker-60-14 is current
+    }
+  });
   it('shows the latest roll from the hosts answer', () => {
     const html = renderToString(<ReleaseBanner release={RELEASE} now={NOW} />);
     expect(html).toContain('fleetReleaseState_rolling');
@@ -77,6 +86,21 @@ describe('Fleet tab', () => {
     expect(html).not.toContain(SLOTS[0].uid!);         // uids are masked
     expect(html).toContain('ff-ring-full');            // #12 has used its budget
     expect(html).toContain('fleetWorkersFoot');
+  });
+  it('leaves a retired worker out until the Retired chip is picked', () => {
+    const html = renderToString(<WorkersTable data={fleetData} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
+    expect(html).not.toContain('homelab-20');
+    expect(html).toContain('fleetKindRetired');          // the chip, off
+    expect(html).toMatch(/aria-pressed="false"[^>]*><i class="fp-dot"><\/i><span>fleetKindRetired<\/span><b>1<\/b>/);
+    expect(html).not.toContain('fleetRetiredOn');
+    const retired = renderToString(<WorkersTable data={fleetData} filter={{ ...EMPTY_FLEET_ROW_FILTER, kind: 'retired' }} onFilter={noop} onChanged={noop} now={NOW} />);
+    expect(retired).toContain('homelab-20');
+    expect(retired).toContain('fleetRetiredOn');
+    expect(retired).not.toContain('homelab-5');
+    expect(retired).not.toContain('fleetPark');         // read-only
+    const none = { ...fleetData, coordinator: { ...COORDINATOR, workers: COORDINATOR.workers.filter(w => !w.health?.retired_at) } };
+    expect(renderToString(<WorkersTable data={none} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />))
+      .not.toContain('fleetKindRetired');
   });
   it('honours the legend filter', () => {
     const html = renderToString(<WorkersTable data={fleetData} filter={{ ...EMPTY_FLEET_ROW_FILTER, kind: 'offline' }} onFilter={noop} onChanged={noop} now={NOW} />);
@@ -253,5 +277,14 @@ describe('Worker page', () => {
     expect(html).toContain('fbcDetailVaultAccount');
     expect(html).toContain('fbcRelogin');                     // its own actions stay
     expect(html).toContain('fbcEditCreds');
+  });
+
+  it('still opens a retired homelab worker, dated and without a re-login', () => {
+    const html = renderToString(<HomelabWorkerView workerId="homelab-20" fleet={COORDINATOR} challenges={[]} hits={HITS} marks={[]}
+      stints={[]} logins={[]} cityLog={[]} onReload={noop} onMarks={noop} />);
+    expect(html).toContain('homelab-20');
+    expect(html).toContain('fleetRetiredOn');
+    expect(html).not.toContain('fbcRelogin');
+    expect(html).not.toContain('fbcWorkerMissing');
   });
 });
