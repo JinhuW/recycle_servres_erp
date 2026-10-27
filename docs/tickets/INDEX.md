@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-423](./RS-423-migrate-five-randomly-selected-healthy-legacy-facebo.md) | done | task | P2 | Migrate five randomly selected healthy legacy Facebook workers | facebook-tracker 0.14.13 |
 | [RS-422](./RS-422-migrate-denver-1-with-its-complete-saved-session-and.md) | done | task | P2 | Migrate denver-1 with its complete saved session and original proxy | facebook-tracker 0.14.12 |
 | [RS-421](./RS-421-migrate-west-1-and-wc-1b-with-their-complete-session.md) | in-progress | task | P1 | Migrate west-1 and wc-1b with their complete sessions and existing browser identity | facebook-tracker 0.14.10 |
 | [RS-420](./RS-420-fix-what-the-dev-to-prod-review-found-before-the-v1.md) | done | bug | P2 | Fix what the dev-to-prod review found before the v1.367 release | 1.367.2 |

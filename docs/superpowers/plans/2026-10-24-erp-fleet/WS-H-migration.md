@@ -352,3 +352,76 @@ id and sufficient host capacity, restore the protected cache before boot,
 and never replace denver-1 to reuse that id. For a rollback, stop and fence
 #10 before restoring any archived legacy launch path; a new browser boot
 requires an operator decision.
+
+## Five-worker random batch (RS-423, 2026-10-27 UTC)
+
+The owner requested five more random migrations using the same full-session
+procedure. Selection without replacement from seven healthy legacy workers
+with matching active production-pool assignments and separate proxy exits
+chose the five below. No retired account was revived.
+
+| Source / account | New dev worker | Boot UTC | IndexedDB databases | Cache entries before boot | Restored login |
+| --- | --- | --- | ---: | ---: | --- |
+| nyc-1 / #16 | worker-60-14-5 | 10:30:08 | 21 | 1,832 | #564 |
+| sc-1 / #12 | worker-60-14-6 | 10:33:10 | 21 | 45,503 | #565 |
+| homelab-1 / #9 | worker-60-14-7 | 10:36:12 | 21 | 66,740 | #566 |
+| ca-4b / #36 | worker-60-14-8 | 10:39:14 | 20 | 226 | #567 |
+| nj-2b / #33 | worker-60-14-9 | 10:42:16 | 20 | 2 | #568 |
+
+Each worker passed a non-Facebook proxy check from both hosts, returning its
+existing exit IP, and an offline headed Chromium 156.0.8078.4 restoration test
+with network none. Original proxies, user agents, geometry, locale and
+timezone were preserved from the source's actual presented device. sc-1 and
+homelab-1 retain their pinned Mac Chrome/151 header and native en-US/UTC
+settings; cached native Linux profiles remain native on the other workers.
+
+Sources were rechecked HEALTHY with the expected account, unenrolled from the
+legacy queue and stopped cleanly (exit 0). Final state, sidecars, any cached
+identity and complete monitor homes were copied privately with matching SHA256
+checksums. SQLite quick_check returned ok for all five listing caches, which
+were copied into the new containers before their first start. The full states
+were resealed under the dev key with password, TOTP and access-token fallback
+omitted. Original sessions and Docker cache volumes remain on the source.
+
+Each target started exactly once, at least three minutes after the previous
+browser start, using a fresh single-use claim ticket. Each recorded one boot
+with outcome restored, retained its complete state and reported HEALTHY.
+No Facebook checkpoint or password login was observed. Runtime is the tested
+0.14.10 / monitor f4d4fdf image pinned to digest
+`b211950a591d8948b03e346bb60c4486e4362731cb0df38de569d3e10cc315f1`.
+
+Protected final backups on worker-60-14:
+
+- nyc-1: `~/fleet-handover/nyc-1-final-20261027T102938Z/`.
+- sc-1: `~/fleet-handover/sc-1-final-20261027T103045Z/`.
+- homelab-1: `~/fleet-handover/homelab-1-final-20261027T103346Z/`.
+- ca-4b: `~/fleet-handover/ca-4b-final-20261027T103649Z/`.
+- nj-2b: `~/fleet-handover/nj-2b-final-20261027T103942Z/`.
+
+The existing shared Cloudflare edge environment was preserved and its
+per-worker coordinator-token map extended from slots 1–8 to 1–9. An
+idempotent repeat of an existing claim verified the map without starting a
+browser or changing its epoch. The host was observe-only during handovers;
+its live capacity was already 13 on preflight and was retained when normal
+management resumed. Slots beyond the nine usable assignments are not started.
+Existing fleet containers 1–4 retain their container ids and original start
+times; worker 2 remains SESSION_EXPIRED and was not restarted. west-1's #15
+remains parked at epoch 2 on its original failed proxy, with no IP change.
+
+Production pool holder names and proxy records now reflect the new worker ids;
+production credentials and application deployment were unchanged. Source
+containers were removed only after their targets were verified HEALTHY. Their
+launch/config/env files were archived under
+`~/recycle_servers/archive/migrated-five-workers-2026-10-27/facebook_tracker/`
+on the old VM, with private permissions. The shared secrets.env stays in place.
+The generated homelab.toml remains a template for the existing generation
+workflow; its archived copy is retained and its old compose launch is removed.
+The generated template remains mounted for the console filter-prompt view;
+its retired worker is removed from editable config and VNC targets. The
+console compose was validated and saved without recreating the console.
+Static region templates remain for generated coverage.
+
+Tracker 0.14.13 versions only the legacy launch cleanup; no fleet release or
+worker roll was performed. This is still the dev pilot with alerts off.
+Rollback requires stopping and fencing the matching ERP slot before restoring
+an archived source launch. Do not boot both copies of an account.
