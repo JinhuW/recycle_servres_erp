@@ -3887,6 +3887,8 @@ const zh: Record<string, string> = {
   fleetDetailPoolAccount: "账号池账号",
   fleetDetailHost: "主机",
   fleetDetailSlot: "槽位",
+  fleetCitiesNote: "过去 {days} 天队列分给这个 worker 的城市，没有城市绑定在它身上。",
+  fleetCitiesNoteHome: "高亮的是它的主城市，其余是过去 {days} 天队列分给它的城市。",
   fleetSlotNone: "无槽位：账号已离开机队",
   fleetSlotFree: "未被持有：下一个请求的 worker 可以认领",
   fleetSlotReserved: "为替换的 worker 保留至 {time}",

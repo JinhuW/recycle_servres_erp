@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.371.3] - 2026-10-27
+
+### Changed
+
+- **The fleet worker page says what its Cities are** (RS-434). The row lists
+  the slot's home cities plus every city the worker searched in the last
+  7 days. With no home cities left on any slot, a worker showed a dozen
+  scattered cities that read like a list tied to it, when the queue had
+  simply handed them out one by one. A muted note under the chips now says
+  so, and when the slot does have home cities it names the highlighted ones
+  as those.
+
 ## [1.371.2] - 2026-10-27
 
 ### Fixed

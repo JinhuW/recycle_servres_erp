@@ -4782,6 +4782,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fleetDetailPoolAccount: "Pool account",
     fleetDetailHost: "Host",
     fleetDetailSlot: "Slot",
+    fleetCitiesNote: "Cities the queue handed this worker in the last {days} days. None is tied to it.",
+    fleetCitiesNoteHome: "Highlighted: its home cities. The rest the queue handed it in the last {days} days.",
     fleetSlotNone: "no slot: the account left the fleet",
     fleetSlotFree: "not held: the next worker that asks may claim it",
     fleetSlotReserved: "reserved for its replacement until {time}",
