@@ -425,3 +425,99 @@ Tracker 0.14.13 versions only the legacy launch cleanup; no fleet release or
 worker roll was performed. This is still the dev pilot with alerts off.
 Rollback requires stopping and fencing the matching ERP slot before restoring
 an archived source launch. Do not boot both copies of an account.
+
+## Remaining legacy workers → homelab fleet (RS-425, 2026-10-27 UTC)
+
+The owner installed the ERP fleet agent on homelab and expanded the request
+to every remaining legacy worker. Seven running legacy containers remained.
+Four accounts were eligible for activation; three transferred parked,
+preserving their pool status and original proxy. All stayed on the same host.
+
+| Source / account | New dev worker | Boot UTC | IndexedDB databases | Cache before boot | Restored-boot evidence |
+| --- | --- | --- | ---: | ---: | --- |
+| nj-3b / #47 | homelab-1 | 15:28:06 | 20 | 2 | container log; ledger unreachable at boot |
+| ne-1 / #11 | homelab-2 | 15:34:39 | 22 | 18,102 | #569 |
+| va-2 / #1 | homelab-3 | 15:37:41 | 21 | 3,117 | #570 |
+| va-2b / #45 | homelab-4 | 15:40:44 | 20 | 2 | #571 |
+
+| Parked source / account | Reason, no browser started | IndexedDB databases | Cache entries |
+| --- | --- | ---: | ---: |
+| mw-1 / #14 | original proxy :10003 returns 503 | 22 | 32,687 |
+| phl-1 / #4 | pool status retired | 21 | 2,766 |
+| ca-2b / #52 | pool status problem | 22 | 0 |
+
+Every source passed full-state restoration offline in headed Chromium
+156.0.8078.4 with network disabled. Original user agents, geometry, scale,
+timezone and locale were retained; ne-1 keeps its pinned Mac Chrome/151 header.
+Active proxy probes matched existing exits. va-2/va-2b keep their shared
+:10010 endpoint and 45.58.216.8 exit, with starts at least three minutes apart.
+mw-1's :10003 returned 503 before any Facebook boot; no replacement IP or
+browser retry was attempted. phl-1 stays Retired and ca-2b stays Problem.
+
+Sources were rechecked HEALTHY with the expected account, unenrolled and
+stopped cleanly. Final sessions, sidecars, cached identities where present,
+and complete monitor homes were transferred with matching SHA256 checksums.
+Every SQLite cache passed quick_check. Full states were resealed under dev's
+pool key, with dev password/TOTP/token fallback omitted. Fresh single-use
+claim tickets started the tested 0.14.10 / monitor f4d4fdf image, digest
+`b211950a591d8948b03e346bb60c4486e4362731cb0df38de569d3e10cc315f1`.
+Each active container started once, reported HEALTHY and has zero restarts.
+No checkpoint or password login was observed. Parked accounts received no
+target container and no new Facebook boot.
+
+The first new id, homelab-1, reuses a retired legacy name. Its retired vault
+worker binding was detached before boot while preserving encrypted account
+data and history. All four new names have no legacy vault binding, preventing
+access to another account's credentials. Prior binding metadata is private at
+`~/fleet-handover/retired-homelab-1-binding-before-20261027.json`. Existing
+shared edge secrets were preserved, adding coordinator tokens for homelab-1
+through -4. Loopback VNC ports 5991–5994 avoid the former workers' ports.
+
+**Coordinator routing correction:** the first canary restored, but the old
+socat relay admitted only 10.10.60.14 and rejected local Docker hairpin
+traffic from 172.24.0.1. Its initial login audit could not reach the coordinator.
+Verification checked the unchanged start, zero restarts, one claim and one
+“Session restored, skipping login” line, correct full state and HEALTHY.
+No ledger record was fabricated and no browser restarted to repair the audit.
+
+Only the LAN relay was replaced: pinned HAProxy admits 10.10.60.14/32 and
+172.24.0.1/32. Both worker hosts reach the coordinator, the VM itself remains
+rejected, and a new token is refused access to another worker's session.
+The old relay remains stopped as `rs-coordinator-lan-socat-rollback-20261027`.
+The coordinator, console and worker containers retain their ids and start
+times. The pre-existing expired #64 became parked and self-exited 75 during
+this work. Its exact stopped container received a durable operator hold;
+only the worker-60-14 agent was stopped/started to load that hold. No worker
+browser was restarted. See HOSTS.md for the tracked relay and its restrictions.
+
+Protected full backups on homelab:
+
+- nj-3b: `~/fleet-handover/nj-3b-final-20261027T152759Z/`.
+- ne-1: `~/fleet-handover/ne-1-final-20261027T153432Z/`.
+- va-2: `~/fleet-handover/va-2-final-20261027T153514Z/`.
+- va-2b: `~/fleet-handover/va-2b-final-20261027T153816Z/`.
+- mw-1: `~/fleet-handover/mw-1-final-20261027T154115Z/`.
+- phl-1: `~/fleet-handover/phl-1-final-20261027T154135Z/`.
+- ca-2b: `~/fleet-handover/ca-2b-final-20261027T154150Z/`.
+
+Device metadata, migration context and SHA256SUMS accompany the backups.
+Original session directories and Docker cache volumes remain. All seven old
+containers and dedicated launch/config/env files were retired after transfer.
+Private archives are under
+`~/recycle_servers/archive/migrated-remaining-homelab-2026-10-27/facebook_tracker/`.
+No rs-monitor container remains running. Console compose retains the shared
+prompt template, with no legacy worker/VNC targets, and was validated without
+restarting the console. Static region templates remain for generated coverage.
+
+Both agents were observe-only during handovers to avoid a competing claim.
+Normal management resumed at homelab capacity 4 and unchanged worker-60-14
+capacity 13. Production holder names for the four healthy accounts reflect
+their new ids; production credentials and parked statuses were retained.
+Existing SESSION_EXPIRED workers were not restarted. west-1 remains parked
+at epoch 2 on its original failed proxy.
+
+Tracker 0.14.14 versions the relay correction and final legacy cleanup.
+Runtime stays 0.14.10; no fleet-wide release or roll occurred. Dev alerts stay
+off. Parked activation requires an operator decision and working proxy, with
+the protected cache restored before boot. Before restoring a source launch,
+stop and fence its ERP slot; never boot both copies.
