@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.7] - 2026-10-26
+
 ### Fixed
 
 - **A fleet account with no home city starts.** The worker kept the
