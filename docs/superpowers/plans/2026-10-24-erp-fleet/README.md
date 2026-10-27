@@ -102,6 +102,13 @@ E join as they land.
 
 ## Status
 
+**Extension (RS-421, 2026-10-27):** wc-1b (#30) restored its complete
+session in one boot and is HEALTHY as worker-60-14-1 on 0.14.10. west-1
+(#15) is fully staged but parked because its unchanged proxy returns 503
+from both hosts, before Facebook login. Its IP was not changed and no
+browser retry was made. The parent cutover remains open. Details in
+[WS-H](WS-H-migration.md).
+
 **Latest live pilot (2026-10-27):** RS-419 / #940 preserved the complete
 session before moving healthy ca-3 (#55) to the dev ERP fleet as
 `worker-60-14-3`, worker 0.14.8 / ERP v1.367.1. One boot restored its session;
