@@ -15,6 +15,29 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.367.0] - 2026-10-26
+
+### Fixed
+
+- **The Fleet tab hides retired homelab workers** (RS-418, RS-394). The 25
+  homelab workers retired on 2026-10-27 lost their containers, but the
+  coordinator keeps their rows and only stamps `retired_at` on them, so the
+  tab went on listing and counting them (37 workers, 23 parked) and kept
+  `homelab` in the host select. A coordinator worker with `retired_at` is
+  now out of the table under All and every state chip, the legend counts,
+  the foot, the host select, the tab bar's running count, the activity
+  aside and the Account pool editor's worker picker. A **Retired N** chip,
+  off by default and shown only while there is one, lists them read-only
+  with "Retired <date>"; a retired worker's own page still opens, dated,
+  without Re-login.
+- **No rolling bar without a release.** A host card drew "Rolling to 0.14.7:
+  0 of 1" with a progress bar whenever a worker ran another image than the
+  host's desired one, though `desired.image` is just the default image when
+  no release exists, so a worker left on the previous build looked like a
+  stuck roll. The bar now needs a release in state `rolling` from
+  GET /api/fleet/hosts; otherwise the card says "1 worker on 0.14.6; new
+  workers start on 0.14.7", with no bar.
+
 ## [1.366.0] - 2026-10-26
 
 ### Added

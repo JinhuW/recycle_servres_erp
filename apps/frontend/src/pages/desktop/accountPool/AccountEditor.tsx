@@ -12,7 +12,7 @@ import {
   type PoolDraft,
   type PoolActivity,
 } from '../../../lib/facebookPool';
-import { fleetStatus, parkedWorkers, whoIs } from '../../../lib/fleetView';
+import { fleetStatus, parkedWorkers, retiredAt, whoIs } from '../../../lib/fleetView';
 import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
 import { StatusChip as WorkerStatusChip } from '../FleetWorkers';
@@ -191,7 +191,8 @@ export function AccountEditor({
                   {workerId && !worker && (
                     <option value={workerId}>{t('fpWorkerMissing', { id: workerId })}</option>
                   )}
-                  {workers.map((w) => {
+                  {/* A retired worker runs nothing, so it is offered only to the account it already names. */}
+                  {workers.filter((w) => !retiredAt(w) || w.worker_id === workerId).map((w) => {
                     const no = heldBy.get(w.worker_id);
                     return (
                       <option key={w.worker_id} value={w.worker_id} disabled={no !== undefined}>

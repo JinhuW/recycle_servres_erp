@@ -26,6 +26,18 @@ export const isActive = (w: FleetAccount): boolean => {
 
 export const needsAttention = (w: FleetAccount): boolean => Boolean(w.health?.needs_attention);
 
+// A retired worker's row stays in the coordinator for its history, but it
+// runs nothing, so lists and counts leave it out; its own page still opens.
+export const retiredAt = (w: FleetAccount): string | null => w.health?.retired_at ?? null;
+
+/** The fleet document without its retired workers. */
+export function withoutRetired(fleet: FleetDoc): FleetDoc;
+export function withoutRetired(fleet: FleetDoc | null): FleetDoc | null;
+export function withoutRetired(fleet: FleetDoc | null): FleetDoc | null {
+  if (!fleet || !fleet.workers.some(w => retiredAt(w))) return fleet;
+  return { ...fleet, workers: fleet.workers.filter(w => !retiredAt(w)) };
+}
+
 // Every whitespace-separated term must appear somewhere in the haystack,
 // case-insensitively. A slug like "fort-myers-fl" therefore matches "myers".
 export function queryTerms(query: string): string[] {

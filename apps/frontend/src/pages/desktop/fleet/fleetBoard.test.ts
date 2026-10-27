@@ -5,7 +5,7 @@ import { CITIES, HITS, HOSTS, NOW, RELEASE, SLOTS, STATS, TASKS, WORKERS } from 
 import {
   alertsByCity, averageTaskSeconds, beltAxis, beltLeft, beltRow, beltSummary, budgetTone, cityBucket, cityStanding, daySeries, dueIn, dueLabel,
   easternClock, filterCities, filterTasks, funnelCounts, funnelGaps, funnelHeadline, homeWorkerOf, hostRunning, isQuarantined, isSlug,
-  lastDoneSearch, leaseLive, liveness, logByItem, maskUid, nextDue, niceTop, openSearch, releaseSummary, rollProgress, roundStartPreview,
+  lastDoneSearch, leaseLive, liveness, logByItem, maskUid, nextDue, niceTop, openSearch, releaseSummary, rollProgress, hostLag, imageVersion, roundStartPreview,
   slotLease, sortTasks, spanLabel, utcDayStart, withCityNames, workersBusy,
 } from './fleetBoard';
 
@@ -260,9 +260,32 @@ describe('hosts', () => {
     expect(hostRunning(HOSTS[2])).toEqual({ running: 0, desired: 0 });
   });
   it('follows a roll and is quiet once every container is on the image', () => {
-    expect(rollProgress(HOSTS[0])).toEqual({ onTarget: 2, total: 4, replacing: 'homelab-3' });
-    expect(rollProgress(HOSTS[1])).toBeNull();
-    expect(rollProgress(HOSTS[2])).toBeNull();
+    expect(rollProgress(HOSTS[0], RELEASE)).toEqual({ onTarget: 2, total: 4, replacing: 'homelab-3' });
+    expect(rollProgress(HOSTS[1], RELEASE)).toBeNull();
+    expect(rollProgress(HOSTS[2], RELEASE)).toBeNull();
+  });
+  it('draws no roll without a rolling release, even with workers behind', () => {
+    expect(rollProgress(HOSTS[0], null)).toBeNull();
+    expect(rollProgress(HOSTS[0], { ...RELEASE, state: 'done' })).toBeNull();
+    expect(rollProgress(HOSTS[0], { ...RELEASE, state: 'failed' })).toBeNull();
+  });
+  it('names the workers left on an older image and what new ones start on', () => {
+    expect(hostLag(HOSTS[0])).toEqual({ behind: 2, versions: ['0.13.9'], target: '0.14.0' });
+    expect(hostLag(HOSTS[1])).toBeNull();
+    expect(hostLag(HOSTS[2])).toBeNull();
+    const mixed = { ...HOSTS[0], report: { version: '1', containers: [
+      { worker_id: 'a', image: 'ghcr.io/x/w:0.9.10', state: 'running', started_at: null },
+      { worker_id: 'b', image: 'ghcr.io/x/w:0.9.2', state: 'exited', started_at: null },
+      { worker_id: 'c', image: 'ghcr.io/x/w:0.9.2', state: 'running', started_at: null },
+    ] } };
+    expect(hostLag(mixed)).toEqual({ behind: 3, versions: ['0.9.2', '0.9.10'], target: '0.14.0' });
+    expect(hostLag({ ...HOSTS[0], desired: { ...HOSTS[0].desired, image: '' } })).toBeNull();
+  });
+  it('reads an image tag as its version', () => {
+    expect(imageVersion('ghcr.io/jinhuw/aimm-recycle:0.14.6')).toBe('0.14.6');
+    expect(imageVersion('localhost:5000/w:1.2')).toBe('1.2');
+    expect(imageVersion('localhost:5000/w')).toBe('localhost:5000/w');
+    expect(imageVersion('ghcr.io/x/w@sha256:abc')).toBe('ghcr.io/x/w@sha256:abc');
   });
   it('sums up the latest release', () => {
     expect(releaseSummary(RELEASE)).toEqual({ upgraded: 3, skipped: 1, replacing: 'homelab-3' });

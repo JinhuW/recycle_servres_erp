@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COORDINATOR, NOW, POOL, RELEASE, SLOTS, WORKERS } from './fixtures';
-import { filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning } from './fleetRows';
+import { FLEET_ROW_KINDS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRowKinds, fleetRows, fleetRunning } from './fleetRows';
 
 const input = { slots: SLOTS, workers: WORKERS, release: RELEASE, coordinator: COORDINATOR, challenges: null, pool: POOL };
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
@@ -17,8 +17,8 @@ describe('fleetRows', () => {
   it('is one row per worker, running ones first, by worker id; idle accounts are not rows', () => {
     expect(rows.map(r => r.key)).toEqual([
       'erp:homelab-1', 'erp:homelab-2', 'erp:homelab-3', 'erp:homelab-4', 'coord:homelab-5', 'erp:worker-60-14-1',
-      // the coordinator's worker that never reported
-      'coord:homelab-9',
+      // the coordinator's worker that never reported, then the retired one
+      'coord:homelab-9', 'coord:homelab-20',
     ]);
     expect(rows.some(r => r.no === 33 || r.no === 44 || r.no === 51)).toBe(false);
   });
@@ -50,9 +50,27 @@ describe('fleetRows', () => {
     expect(by('coord:homelab-9')).toMatchObject({ no: null, kind: 'offline', running: false, host: 'homelab', heartbeat: null });
   });
   it('counts the legend and the foot', () => {
-    expect(fleetRowCounts(rows)).toEqual({ all: 7, healthy: 3, degraded: 1, replacing: 1, parked: 1, offline: 1 });
+    expect(fleetRowCounts(rows)).toEqual({ all: 7, healthy: 3, degraded: 1, replacing: 1, parked: 1, offline: 1, retired: 1 });
     expect(fleetRunning(rows)).toEqual({ running: 5, hosts: 2 });
     expect(fleetRowHosts(rows, ['worker-60-14', 'office-mini'])).toEqual(['homelab', 'office-mini', 'worker-60-14']);
+  });
+  it('keeps a retired coordinator worker out of all, the counts and the hosts', () => {
+    expect(by('coord:homelab-20')).toMatchObject({
+      kind: 'retired', running: false, retiredAt: '2026-10-22T15:00:00Z', vncPort: null, now: null, host: 'homelab',
+    });
+    expect(filterFleetRows(rows, { kind: 'all', host: '', q: '' }).some(r => r.kind === 'retired')).toBe(false);
+    expect(filterFleetRows(rows, { kind: 'all', host: 'homelab', q: 'homelab-20' })).toEqual([]);
+    expect(filterFleetRows(rows, { kind: 'retired', host: '', q: '' }).map(r => r.key)).toEqual(['coord:homelab-20']);
+    expect(filterFleetRows(rows, { kind: 'parked', host: '', q: '' }).map(r => r.key)).toEqual(['erp:homelab-2']);
+    // Its host is offered only while something live is on it.
+    const lone = fleetRows({ ...input, workers: [], slots: [], coordinator: { ...COORDINATOR, workers: [COORDINATOR.workers[3]] } }, NOW);
+    expect(fleetRowHosts(lone, [])).toEqual([]);
+    expect(fleetRowCounts(lone)).toMatchObject({ all: 0, retired: 1 });
+    expect(fleetRunning(lone)).toEqual({ running: 0, hosts: 0 });
+  });
+  it('offers the Retired chip only while there is a retired worker', () => {
+    expect(fleetRowKinds(fleetRowCounts(rows))).toEqual([...FLEET_ROW_KINDS, 'retired']);
+    expect(fleetRowKinds(fleetRowCounts(rows.filter(r => r.kind !== 'retired')))).toEqual(FLEET_ROW_KINDS);
   });
   it('filters by kind, host and text', () => {
     expect(filterFleetRows(rows, { kind: 'offline', host: '', q: '' }).map(r => r.key)).toEqual(['coord:homelab-9']);
@@ -64,7 +82,7 @@ describe('fleetRows', () => {
     const early = fleetRows({ ...input, coordinator: null, challenges: null }, NOW).map(r => r.key);
     const late = rows.map(r => r.key);
     expect(late.filter(k => early.includes(k))).toEqual(early);
-    expect(late.filter(k => !early.includes(k))).toEqual(['coord:homelab-5', 'coord:homelab-9']);
+    expect(late.filter(k => !early.includes(k))).toEqual(['coord:homelab-5', 'coord:homelab-9', 'coord:homelab-20']);
   });
   it('reads a pool summary row as it reads a snapshot row', () => {
     const summary = POOL.map(a => ({ no: a.no, uid: a.uid, status: a.status, holder: a.holder, note: a.note }));

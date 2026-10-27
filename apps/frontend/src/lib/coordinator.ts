@@ -40,6 +40,9 @@ export type FleetWorker = {
   relogin_last_requested_at?: string | null;
   login_step?: string | null;
   login_step_at?: string | null;
+  // Set while the fleet has the worker stopped on purpose; its container is
+  // gone. Absent from a coordinator that predates it.
+  retired_at?: string | null;
   liveness: WorkerLiveness;
   needs_attention: boolean;
 };
