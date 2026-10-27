@@ -15,6 +15,21 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.371.2] - 2026-10-27
+
+### Fixed
+
+- **Quarantine probes no longer wait for ever** (RS-433). A probe can only be
+  taken by the account it tests, and an account gets a worker only when a
+  worker container boots, which is a Facebook login. So a probe for a
+  quarantined account with no worker sat "Waiting" in the Queue for good,
+  sixteen hours and counting for two Boston probes, looking like a shortage of
+  workers while healthy workers were idle. The scheduler now writes a probe
+  only for an account a worker is running (a parked one is not), and cancels a
+  waiting probe once no worker runs its account. A cancelled probe does not
+  count toward the probe interval, so the account gets a fresh one on the
+  scheduler's next pass after a worker claims it again.
+
 ## [1.371.1] - 2026-10-27
 
 ### Fixed
