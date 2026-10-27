@@ -792,10 +792,21 @@ async def proxies_health() -> Dict[str, Any]:
         url = fleet_view.public_proxy_url(raw) if name.startswith("PROXY_") else None
         if url is None or url in by_port or urlsplit(url).scheme not in PROXY_SCHEMES:
             continue
-        # The login lives in its own vars, which only a worker's config
-        # names: borrow one from a worker on the same proxy host.
+        # The login lives in its own vars, which a worker's config names:
+        # borrow one from a worker on the same proxy host, else take the
+        # `<prefix>_USER` / `_PASS` pair the var's name starts with
+        # (PROXY_HOMELAB_NYC2 -> PROXY_HOMELAB_USER).
         host = urlsplit(url).hostname
-        login = next((k[1:] for k in keys.values() if k[1] and urlsplit(k[0]).hostname == host), (None, None))
+        login = next((k[1:] for k in keys.values() if k[1] and urlsplit(k[0]).hostname == host), None)
+        parts = name.split("_")
+        for n in range(len(parts), 1, -1):
+            if login:
+                break
+            prefix = "_".join(parts[:n])
+            user, password = os.environ.get(f"{prefix}_USER"), os.environ.get(f"{prefix}_PASS")
+            if user and password:
+                login = (user, password)
+        login = login or (None, None)
         by_port[url] = {"url": url, "workers": []}
         keys[url] = (raw.strip(), *login)
     checked_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

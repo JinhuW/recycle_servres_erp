@@ -653,6 +653,35 @@ def test_fleet_shows_proxy_url_and_exit_without_any_login(client, monkeypatch, t
         assert leak not in res.text
 
 
+def test_proxies_health_lists_bought_ports_with_no_worker_config(client, monkeypatch):
+    # Every legacy launch retired: no config names a proxy or its login, so
+    # an idle port takes the login its var's name prefix holds.
+    monkeypatch.setenv("PROXY_HOMELAB_NYC2", "http://isp.example.com:10012")
+    monkeypatch.setenv("PROXY_HOMELAB_USER", "user-secret")
+    monkeypatch.setenv("PROXY_HOMELAB_PASS", "pass-secret")
+    monkeypatch.setenv("PROXY_OTHER", "socks5://other.example.com:1080")
+    client.upstream["response"] = httpx.Response(200, json={"workers": []})
+    asked = []
+
+    async def check(keys):
+        keys = list(keys)
+        asked.extend(keys)
+        return {k: {"ok": True, "latency_ms": 300} for k in keys}
+
+    monkeypatch.setattr(console.proxy_exit, "check", check)
+    res = client.get("/v1/proxies/health", headers=AUTH)
+    assert res.status_code == 200
+    assert [(r["url"], r["workers"]) for r in res.json()["proxies"]] == [
+        ("http://isp.example.com:10012", []),
+        ("socks5://other.example.com:1080", []),
+    ]
+    assert sorted(asked, key=str) == [
+        ("http://isp.example.com:10012", "user-secret", "pass-secret"),
+        ("socks5://other.example.com:1080", None, None),
+    ]
+    assert "user-secret" not in res.text and "pass-secret" not in res.text
+
+
 def test_proxies_health_probes_each_port_once_without_any_login(client, monkeypatch, tmp_path):
     assert client.get("/v1/proxies/health").status_code == 401
     (tmp_path / "monitor.toml").write_text(MONITOR.replace(
