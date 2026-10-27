@@ -31,14 +31,15 @@ export const DESKTOP_NAV: readonly NavGroup[] = [
   {
     tKey: 'workspace',
     items: [
-      { id: 'dashboard',  tKey: 'nav_dashboard',  icon: 'dashboard',  roles: ['manager', 'purchaser'] },
+      { id: 'home',       tKey: 'nav_home',       icon: 'dashboard',  roles: ['manager', 'purchaser'] },
+      { id: 'analysis',   tKey: 'nav_analysis',   icon: 'analytics',  roles: ['manager', 'purchaser'], alsoActiveOn: ['stock'] },
       { id: 'submit',     tKey: 'nav_submit',     icon: 'submit',     roles: ['manager', 'purchaser'], badge: '+' },
       { id: 'history',    tKey: 'nav_history',    icon: 'history',    roles: ['manager', 'purchaser'] },
       // Shipping is unlisted for now: tracking numbers are handed off from the
       // PO itself (the In Transit dialog). The routes still resolve by URL.
       { id: 'clients',    tKey: 'nav_clients',    icon: 'book',       roles: ['manager', 'purchaser'] },
       { id: 'market',     tKey: 'nav_market',     icon: 'tag',        roles: ['manager', 'purchaser'] },
-      { id: 'inventory',  tKey: 'nav_inventory',  icon: 'inventory',  roles: ['manager'], alsoActiveOn: ['analysis'] },
+      { id: 'inventory',  tKey: 'nav_inventory',  icon: 'inventory',  roles: ['manager'] },
       { id: 'sellorders', tKey: 'nav_sellorders', icon: 'tag',        roles: ['manager'] },
       { id: 'aftersales', tKey: 'nav_aftersales', icon: 'refresh',    roles: ['manager'] },
       { id: 'transfers',  tKey: 'nav_transfers',  icon: 'truck',      roles: ['manager'] },

@@ -20,6 +20,8 @@ export interface Config {
   readonly apiPort: number;
   readonly apiToken: string;
   readonly logLevel: string;
+  /** Whether this worker may hold the PM tracer lease (loops/trace.ts). */
+  readonly commentTracer: boolean;
   /** The ops alert relay's POST /alert; both unset turns the api's watch off. */
   readonly opsAlertUrl: string;
   readonly opsAlertToken: string;
@@ -87,6 +89,7 @@ export function loadConfig(): Config {
     apiPort,
     apiToken: role === 'api' ? required('API_TOKEN', role) : (process.env['API_TOKEN'] ?? ''),
     logLevel: process.env['LOG_LEVEL'] || 'info',
+    commentTracer: process.env['COMMENT_TRACER'] !== 'off',
     opsAlertUrl,
     opsAlertToken,
   };

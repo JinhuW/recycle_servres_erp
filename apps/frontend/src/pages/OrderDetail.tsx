@@ -51,6 +51,7 @@ import { ApiError } from '../lib/api';
 import { usePaymentProof, type ProofAttachment } from '../lib/usePaymentProof';
 import { PaymentFields } from '../components/PaymentFields';
 import { CommissionPaidByConfirm, CommissionPaymentFields, type CommissionShots } from '../components/CommissionPaymentFields';
+import { useCommissionPayments } from '../lib/useCommissionPayments';
 import { useCommissionPaidBy } from '../lib/useCommissionPaidBy';
 import {
   ORDER_STATUSES, statusTone,
@@ -331,6 +332,7 @@ export function OrderDetail({
   });
   // Only a manager handles the commission money, and picks who paid it.
   const managers = useManagerOptions();
+  const commissionPayments = useCommissionPayments(order.id, !isPurchaser);
   const commissionPaidBy = useCommissionPaidBy({
     orderId: order.id,
     paidBy: order.commissionPaidBy ?? null,
@@ -597,10 +599,12 @@ export function OrderDetail({
     // Ready to Pay fixes the commission, so the manager confirms it on the
     // way in — the sheet saves the fields and then advances.
     if (nextStatus === 'Ready to Pay') { setTakeoverAnswer(answer); setCommissionOpen(true); return; }
-    // Done asks for the commission screenshot first — unless one is already
-    // on file, in which case the move is as plain as any other. Confirming in
-    // the dialog fires the actual advance.
-    if (nextStatus === 'Done' && proof.commissionAtts.length === 0) { setTakeoverAnswer(answer); setDoneDialogOpen(true); return; }
+    // A linked payment or legacy screenshot settles the evidence prompt.
+    if (nextStatus === 'Done' && proof.commissionAtts.length === 0) {
+      try {
+        if (!await commissionPayments.check()) { setTakeoverAnswer(answer); setDoneDialogOpen(true); return; }
+      } catch (e) { handleFetchError(e); return; }
+    }
     await doAdvance(answer);
   };
 
@@ -793,7 +797,7 @@ export function OrderDetail({
   const commissionSummary = [
     ownerOptions.find(o => o.id === ownerId)?.name ?? order.userName,
     commissionPct.trim() === '' ? null : `${commissionPct}%`,
-    proof.commissionAtts.length > 0 ? t('cpPaid') : null,
+    proof.commissionAtts.length > 0 || commissionPayments.hasPayment ? t('cpPaid') : null,
   ].filter(Boolean).join(' · ');
   const notesSummary = [
     notes.trim() ? notes.trim().split('\n')[0] : t('phNoNotes'),
@@ -1481,11 +1485,12 @@ export function OrderDetail({
               the phone rules for the labels hang off that class, and the fold
               body is shared with the fields above. */}
           <div className="ph-pay">
-            <CommissionPaymentFields paidBy={commissionPaidBy} shots={commissionShots} editable={!isPurchaser} />
+            <CommissionPaymentFields orderId={order.id} paidBy={commissionPaidBy} shots={commissionShots} editable={!isPurchaser}
+              payments={commissionPayments} onLinked={() => { setAcctVersion(v => v + 1); setActivityRefreshKey(k => k + 1); }}
+              rmbFlow={showAccounting && (
+                <PhAccountingSection orderId={order.id} kind="commission" version={acctVersion} onRecord={setAcctPreset} recordLabel="cpCreateRmb" recordHint="cpRmbCreateHint" />
+              )} />
           </div>
-          {showAccounting && (
-            <PhAccountingSection orderId={order.id} kind="commission" version={acctVersion} onRecord={setAcctPreset} />
-          )}
         </PhFold>
 
         <PhFold
@@ -1910,6 +1915,7 @@ export function OrderDetail({
             // A commission entry names its manager as the payer when nobody was on file.
             if (r.commissionPaidBy !== undefined) {
               commissionPaidBy.sync(r.commissionPaidBy);
+              commissionPayments.reload();
               setActivityRefreshKey(k => k + 1);
             }
           }}

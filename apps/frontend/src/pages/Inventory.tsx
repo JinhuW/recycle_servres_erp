@@ -28,6 +28,7 @@ type InventoryItem = {
   interface: string | null;
   description: string | null;
   part_number: string | null;
+  short_code?: string | null;
   serial_number: string | null;
   qty: number;
   unit_cost: number;
@@ -169,6 +170,9 @@ export function Inventory({ onNewEntry }: Props) {
                   <span>{r.part_number ?? '—'} · qty {r.qty}</span>
                   {lowHealth && <span className="chip warn" style={{ fontSize: 10 }}>{r.health}%</span>}
                 </div>
+                {r.category === 'RAM' && (
+                  <div style={{ fontSize: 11, marginTop: 3 }}>{t('ramShortCode')}: <span className="mono">{r.short_code ?? t('ramShortCodeUnknown')}</span></div>
+                )}
                 {r.serial_number && (
                   <div style={{ marginTop: 4 }}>
                     <SerialNumbers raw={r.serial_number} max={3} size={10} />

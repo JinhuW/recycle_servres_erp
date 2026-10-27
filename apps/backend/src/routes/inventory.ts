@@ -18,7 +18,7 @@ import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   sortSheetRows, type ExportCategory,
 } from '../lib/categoryColumns';
-import { UNTYPED_ITEM, chipMarkingCanon, ddr5SpecKey, isInventorySortCol, normSellPrice, ramFamily, ramFamilyLabel, sortProductGroups, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
+import { UNTYPED_ITEM, chipMarkingCanon, ddr5SpecKey, isInventorySortCol, normSellPrice, ramFamily, ramFamilyLabel, ramShortCode, ramShortCodes, sortProductGroups, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
 import type { Ddr5SpecRow } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { diff, writeOrderEvent } from '../services/orderAudit';
@@ -50,6 +50,13 @@ const PATCH_AUDIT_COL: Record<string, string> = {
   health: 'health', rpm: 'rpm',
   ...SPEC_FIELD_TO_DB_COL,
 };
+
+const shortCodeOf = (r: Record<string, unknown>) => r.category === 'RAM'
+  ? ramShortCode({ brand: r.brand, partNumber: r.part_number, chipNumber: r.chip_number }) : null;
+
+const shortCodesOf = (rows: Record<string, unknown>[]) => ramShortCodes(rows.map(r => ({
+  brand: r.brand, partNumber: r.part_number, chipNumber: r.chip_number,
+})));
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -230,7 +237,7 @@ async function selectInventoryPage(
     : sql``;
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
-           l.interface, l.form_factor, l.description, l.item_type, l.part_number, l.serial_number, l.condition,
+           l.interface, l.form_factor, l.description, l.item_type, l.part_number, l.chip_number, l.serial_number, l.condition,
            l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            l.status, l.created_at, l.position,
            l.health::float AS health, l.rpm,
@@ -254,7 +261,7 @@ async function selectInventoryPage(
   const last = page[page.length - 1];
   const nextCursor = hasMore ? encodeCursor({ ts: last.cursor_ts, id: last.id }) : null;
   const items = sortSheetRows(
-    page.map(({ cursor_ts: _ts, ...r }) => r) as Record<string, unknown>[],
+    page.map(({ cursor_ts: _ts, ...r }) => ({ ...r, short_code: shortCodeOf(r) })) as Record<string, unknown>[],
     (r) => ({ category: String(r.category ?? ''), specs: r, label: invLabel(r) }),
   );
   return { items, nextCursor };
@@ -490,6 +497,7 @@ inventory.on(['GET', 'POST'], '/export', async (c) => {
         ...lineSpecFields(head),
         part,
         chip: repChip ?? '',
+        shortCode: head.category === 'RAM' ? shortCodesOf(lots).map(c => c ?? '—').join(', ') : '',
         condition: [...conds].join(', '),
         category: head.category ?? '',
         item: invLabel(head),
@@ -998,7 +1006,7 @@ inventory.get('/products', async (c) => {
     generation: string | null; type: string | null; classification: string | null;
     rank: string | null; speed: string | null; interface: string | null;
     form_factor: string | null; description: string | null; item_type: string | null;
-    part_number: string | null; serial_number: string | null; canon: string; rpm: number | null;
+    part_number: string | null; chip_number: string | null; serial_number: string | null; canon: string; rpm: number | null;
     condition: string; qty: number; unit_cost: number; sell_price: number | null;
     status: string; health: number | null; created_at: string;
     warehouse_id: string | null; warehouse_short: string | null;
@@ -1009,7 +1017,7 @@ inventory.get('/products', async (c) => {
     SELECT l.id, l.order_id, ${poLineNo(sql, 'l')} AS po_line_no, o.user_id,
            l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
            l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_type,
-           l.part_number, l.serial_number, ${canonCol} AS canon, l.rpm,
+           l.part_number, l.chip_number, l.serial_number, ${canonCol} AS canon, l.rpm,
            l.condition, l.qty, l.unit_cost::float AS unit_cost,
            l.sell_price::float AS sell_price, l.status, l.health::float AS health,
            l.created_at,
@@ -1160,6 +1168,7 @@ inventory.get('/products', async (c) => {
       key,
       part_number: repPn ? groupPartLabel(key, repPn, lots) : repPn,
       part_numbers: groupPartNumbers(lots),
+      short_codes: head.category === 'RAM' ? shortCodesOf(lots) : [],
       category: head.category, brand: head.brand, capacity: head.capacity,
       generation: head.generation, type: head.type, classification: head.classification,
       rank: head.rank, speed: head.speed, interface: head.interface,
@@ -1178,7 +1187,7 @@ inventory.get('/products', async (c) => {
         id: l.id, order_id: l.order_id, po_line_no: l.po_line_no, created_at: l.created_at,
         user_name: l.user_name, user_initials: l.user_initials,
         sell_price: l.sell_price, condition: l.condition, health: l.health,
-        serial_number: l.serial_number, part_number: l.part_number,
+        serial_number: l.serial_number, part_number: l.part_number, short_code: shortCodeOf(l),
         warehouse_id: l.warehouse_id, warehouse_short: l.warehouse_short,
         qty: l.qty, status: l.status, image_url: l.image_url,
         ...(isManager ? { unit_cost: l.unit_cost } : {}),
@@ -1255,6 +1264,7 @@ inventory.get('/:id', async (c) => {
   `)[0];
   if (!row) return c.json({ error: 'Not found' }, 404);
   if (u.role !== 'manager' && row.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+  row.short_code = shortCodeOf(row);
   // A lot held for a shipped sale keeps its qty and cost as well (PATCH
   // refuses them). Its own flag: the PO sits at Reviewing, so the closed
   // book's "move it back to Reviewing" would be no advice.
@@ -1319,6 +1329,7 @@ inventory.patch('/:id', async (c) => {
         qty?: number;
         condition?: string;
         partNumber?: string;
+        chipNumber?: string | null;
         health?: number | null;
         rpm?: number | null;
         brand?: string | null;
@@ -1462,9 +1473,12 @@ inventory.patch('/:id', async (c) => {
     // moved: a lot turned Micron re-cuts the marking it already holds.
     const chipBefore = before.chip_number == null ? null : String(before.chip_number);
     const brandMoved = has('brand') === 1 && specVal(body.brand) !== (before.brand ?? null);
-    const chipAfter = brandMoved && chipBefore !== null
-      ? chipMarkingCanon(chipBefore, specVal(body.brand)) || null
-      : undefined;
+    const brandAfter = has('brand') ? specVal(body.brand) : specVal(before.brand as string | null);
+    const chipAfter = has('chipNumber')
+      ? chipMarkingCanon(body.chipNumber ?? '', brandAfter) || null
+      : brandMoved && chipBefore !== null
+        ? chipMarkingCanon(chipBefore, brandAfter) || null
+        : undefined;
 
     await tx`
       UPDATE order_lines SET

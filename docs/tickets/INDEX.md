@@ -5,7 +5,36 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-395](./RS-395-refresh-accounting-review-evidence-after-attachment.md) | in-review | bug | P2 | Refresh accounting review evidence after attachment edits | 1.333.2 |
+| [RS-420](./RS-420-fix-what-the-dev-to-prod-review-found-before-the-v1.md) | done | bug | P2 | Fix what the dev-to-prod review found before the v1.367 release | — |
+| [RS-419](./RS-419-preserve-full-facebook-sessions-when-moving-a-legacy.md) | done | bug | P1 | Preserve full Facebook sessions when moving a legacy worker to the ERP fleet | 1.367.1 |
+| [RS-418](./RS-418-fleet-tab-hides-retired-homelab-workers-and-drops-th.md) | done | bug | P2 | Fleet tab hides retired homelab workers and drops the phantom rolling bar | 1.367.0 |
+| [RS-417](./RS-417-erp-fleet-workers-get-the-homelab-watch-and-operate.md) | done | story | P2 | ERP-fleet workers get the homelab watch-and-operate page | 1.366.0 |
+| [RS-416](./RS-416-erp-fleet-worker-page-matches-the-homelab-worker-pag.md) | done | story | P2 | ERP-fleet worker page matches the homelab worker page | 1.365.0 |
+| [RS-415](./RS-415-add-pool-accounts-to-the-erp-fleet-from-the-ui-with.md) | done | story | P1 | Add pool accounts to the ERP fleet from the UI, with a managed proxy list | 1.364.0 |
+| [RS-414](./RS-414-re-run-a-wechat-market-day-from-the-page.md) | done | story | P2 | Re-run a WeChat market day from the page | 1.363.0 |
+| [RS-413](./RS-413-reddit-tracker-cross-post-dedup-any-emoji-feedback-p.md) | done | story | P2 | Reddit tracker: cross-post dedup, any-emoji feedback, PM tracer and Analytics tab | 1.362.0 |
+| [RS-412](./RS-412-fleet-tab-table-tracks-workers-only.md) | done | story | P2 | Fleet tab table tracks workers only | 1.361.0 |
+| [RS-411](./RS-411-per-container-claim-tickets-keep-the-host-token-out.md) | done | story | P2 | Per-container claim tickets keep the host token out of fleet workers | 1.360.0 |
+| [RS-410](./RS-410-the-nightly-prod-to-dev-copy-keeps-the-dev-fleet.md) | done | task | P1 | The nightly prod-to-dev copy keeps the dev fleet | 1.359.0 |
+| [RS-409](./RS-409-fleet-task-history-retention.md) | done | task | P2 | Fleet task history retention | 1.358.0 |
+| [RS-408](./RS-408-a-degraded-heartbeat-keeps-renewing-the-task-lease.md) | done | task | P2 | A DEGRADED heartbeat keeps renewing the task lease | 1.357.0 |
+| [RS-407](./RS-407-fleet-scheduler-catalog-hosts-and-relay-fix-the-revi.md) | done | bug | P1 | Fleet scheduler, catalog, hosts and relay: fix the review findings | 1.356.0 |
+| [RS-406](./RS-406-fix-the-fleet-claim-core-review-findings.md) | done | task | P2 | Fix the fleet claim-core review findings | 1.354.0 |
+| [RS-405](./RS-405-fleet-agent-fix-the-review-findings-holds-stagger-ha.md) | done | bug | P1 | Fleet agent: fix the review findings (holds, stagger, handoff, identity, images) | 1.352.0 |
+| [RS-404](./RS-404-refocus-the-reddit-eval-prompt-on-bulk-samsung-sk-hy.md) | done | story | P2 | Refocus the Reddit eval prompt on bulk Samsung, SK Hynix and Micron RAM | — |
+| [RS-403](./RS-403-fleet-page-loads-its-data-fast.md) | in-progress | story | P2 | Fleet page loads its data fast | — |
+| [RS-402](./RS-402-home-becomes-a-role-specific-highlights-page-the-das.md) | done | story | P2 | Home becomes a role-specific highlights page; the dashboard moves to Analysis | 1.350.0 |
+| [RS-401](./RS-401-cap-the-height-of-recent-activity-on-the-fleet-page.md) | done | bug | P2 | Cap the height of Recent activity on the fleet page | 1.350.1 |
+| [RS-400](./RS-400-fix-the-fleet-review-findings-before-cutover.md) | done | bug | P1 | Fix the fleet review findings before cutover | 1.349.0 |
+| [RS-399](./RS-399-add-market-recognizable-short-codes-for-ram.md) | done | story | P2 | Add market-recognizable short codes for RAM | 1.347.0 |
+| [RS-398](./RS-398-move-reddit-tracker-workflow-into-its-own-tab.md) | done | story | P2 | Move Reddit tracker workflow into its own tab | 1.346.0 |
+| [RS-397](./RS-397-make-po-commission-rmb-flow-create-only.md) | done | bug | P2 | Make PO commission RMB Flow create-only | 1.345.1 |
+| [RS-396](./RS-396-search-commission-transactions-and-autofill-payment.md) | done | story | P2 | Search commission transactions and autofill payment amounts | 1.345.0 |
+| [RS-395](./RS-395-refresh-accounting-review-evidence-after-attachment.md) | done | bug | P2 | Refresh accounting review evidence after attachment edits | 1.344.1 (dev), 1.333.2 (prod) |
+| [RS-394](./RS-394-facebook-workers-pull-cities-from-an-always-on-fleet.md) | backlog | story | P2 | Facebook workers pull cities from an always-on fleet queue in the ERP | — |
+| [RS-393](./RS-393-a-manager-can-start-the-city-round-now-instead-of-at.md) | done | story | P2 | A manager can start the city round now instead of at the workers' start time | v1.334.0, facebook-tracker 0.13.18 |
+| [RS-392](./RS-392-never-re-login-facebook-unless-necessary-the-first-r.md) | done | task | P2 | Never re-login Facebook unless necessary: the first rule in AGENTS.md | n/a — docs only, no release |
+| [RS-391](./RS-391-a-bank-funded-paypal-payment-leaves-pending-when-pay.md) | done | bug | P2 | A bank-funded PayPal payment leaves pending when PayPal settles it | 1.333.1 |
 | [RS-390](./RS-390-rmb-flow-entries-take-ai-renamed-payment-screenshots.md) | done | story | P2 | RMB Flow entries take AI-renamed payment screenshots; Reference removed | 1.333.0 |
 | [RS-389](./RS-389-fix-what-the-dev-to-prod-review-found-before-releasi.md) | done | bug | P1 | Fix what the dev-to-prod review found before releasing v1.332 | 1.332.2 |
 | [RS-388](./RS-388-phone-the-page-no-longer-zooms-in-when-a-po-line-fie.md) | done | bug | P2 | Phone: the page no longer zooms in when a PO line field is focused | 1.332.1 |

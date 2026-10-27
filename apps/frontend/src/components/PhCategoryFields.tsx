@@ -5,6 +5,7 @@ import { allowedOptions, chipMarkingCanon, synthesizePartNumber } from '@recycle
 import { Combobox } from './Combobox';
 import { PartNumberField } from './PartNumberField';
 import { ItemTypePicker } from './ItemTypePicker';
+import { RamShortCode } from './RamShortCode';
 import { RamPartReadout } from './RamPartCheck';
 import { ramFieldRequired } from '../lib/ramRequired';
 import { ssdBrandRequired, SSD_BRAND_REQUIRED_OVER_GB } from '../lib/lineRequirements';
@@ -146,6 +147,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         <div className="ph-field">
           <label htmlFor={fid('partNumber')}>{t('partNumber')}{ramFieldRequired(value, 'partNumber') && <Req />}</label>
           <PartNumberField id={fid('partNumber')} className={inputClsFor('partNumber') + ' mono'} value={value.partNumber} placeholder={synthesizePartNumber('RAM', value) ?? undefined} onChange={v => onChange('partNumber', v)} />
+          <RamShortCode line={value} />
           <RamPartReadout
             line={{ ...value, category }}
             onUse={patch => {

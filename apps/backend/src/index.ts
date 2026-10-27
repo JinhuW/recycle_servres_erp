@@ -25,6 +25,7 @@ import { metricsMiddleware, metricsHandler } from './metrics';
 import authRoutes from './routes/auth';
 import meRoutes from './routes/me';
 import dashboardRoutes from './routes/dashboard';
+import homeRoutes from './routes/home';
 import ordersRoutes from './routes/orders';
 import packagesRoutes from './routes/packages';
 import shippoWebhookRoutes from './routes/shippoWebhook';
@@ -35,6 +36,7 @@ import trackerRoutes from './routes/tracker';
 import aiModelsRoutes from './routes/aiModels';
 import coordinatorRoutes from './routes/coordinator';
 import facebookPoolRoutes from './routes/facebookPool';
+import fleetRoutes from './routes/fleet';
 import wechatMarketRoutes from './routes/wechatMarket';
 import bankTxRoutes from './routes/bankTx';
 import internalTxRoutes from './routes/internalTx';
@@ -345,6 +347,8 @@ app.get('/api/mcp', (c) => {
 
 app.use('/api/me/*', authMiddleware);
 app.use('/api/dashboard/*', authMiddleware);
+app.use('/api/home', authMiddleware);
+app.use('/api/home/*', authMiddleware);
 app.use('/api/orders/*', authMiddleware);
 // /api/market/values is Bearer-only (scraper push surface); all other
 // /api/market/* paths use the SPA cookie-auth flow.
@@ -390,6 +394,7 @@ app.use('/api/suppliers/*', authMiddleware);
 
 app.route('/api/me', meRoutes);
 app.route('/api/dashboard', dashboardRoutes);
+app.route('/api/home', homeRoutes);
 app.route('/api/orders', ordersRoutes);
 app.route('/api/packages', packagesRoutes);
 app.route('/api/market', marketRoutes);
@@ -424,6 +429,9 @@ app.route('/api/coordinator', coordinatorRoutes);
 // Self-applies authMiddleware; the take/return/report routes are for every
 // role and the rest is manager-gated inside the module.
 app.route('/api/facebook-pool', facebookPoolRoutes);
+// Self-applies its scopes per route: cookie + manager gate on the pages' reads
+// and writes, a bearer on the host-agent and worker routes (src/fleet/auth.ts).
+app.route('/api/fleet', fleetRoutes);
 // Self-applies its auth: Bearer (wechat:write) on /push/*, where memtrade
 // sends each day's report; cookie + manager gate on the page's reads.
 app.route('/api/wechat-market', wechatMarketRoutes);

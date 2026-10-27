@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { CommissionPaymentFields, type CommissionShots } from '../../../components/CommissionPaymentFields';
 import { Icon } from '../../../components/Icon';
+import type { CommissionPayments } from '../../../lib/useCommissionPayments';
 import type { CommissionPaidBy } from '../../../lib/useCommissionPaidBy';
 import { fmtUSD } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
@@ -11,6 +12,9 @@ import { useT } from '../../../lib/i18n';
 // commission while "Payment" meant the vendor. One tab now.
 
 type Props = {
+  orderId: string;
+  commissionPayments: CommissionPayments;
+  onPaymentLinked: () => void;
   ownerId: string; onOwner: (id: string) => void;
   ownerOptions: { id: string; name: string }[];
   commissionPct: string; onCommissionPct: (v: string) => void;
@@ -201,11 +205,14 @@ export function CommissionTab(p: Props) {
           {t('cpHint', { name: p.firstName })}
         </div>
         <CommissionPaymentFields
+          orderId={p.orderId}
+          payments={p.commissionPayments}
+          onLinked={p.onPaymentLinked}
+          rmbFlow={p.ledger}
           paidBy={p.commissionPaidBy}
           shots={p.commissionShots}
           editable={p.canEditCommissionPayment}
         />
-        {p.ledger}
       </div>
     </div>
   );

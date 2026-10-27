@@ -4,11 +4,13 @@
 // taken under is what guarantees a single Telegram message per post no matter
 // how many workers are running. Each alert's message ids are recorded so
 // reactions on it can be traced back to the post, and with dev chats
-// configured a review copy follows it there.
+// configured a review copy follows it there. A cross-post of a listing buyers
+// already have is parked as a duplicate instead (see dedup.ts).
 
 import type {AlertSender} from '../alerts.ts';
-import {claimPosts, markNotified, releasePostFailure} from '../claims.ts';
+import {claimPosts, markDuplicate, markNotified, releasePostFailure} from '../claims.ts';
 import type {Sql} from '../db.ts';
+import {findAlertedCopy} from '../dedup.ts';
 import type {Logger} from '../logger.ts';
 import {sendReview} from '../review.ts';
 import type {SettingsStore} from '../settings.ts';
@@ -37,6 +39,17 @@ export async function notifyOnce(deps: NotifyDeps): Promise<boolean> {
   if (posts.length === 0) return false;
 
   for (const post of posts) {
+    const copyOf = await findAlertedCopy(sql, post);
+    if (copyOf) {
+      await markDuplicate(sql, workerId, post.reddit_id, copyOf);
+      logger.info('duplicate listing not alerted', {
+        redditId: post.reddit_id,
+        subreddit: post.subreddit,
+        duplicateOf: copyOf,
+      });
+      continue;
+    }
+
     const alert = {
       subreddit: post.subreddit,
       summary: post.llm_summary ?? post.title,

@@ -12,16 +12,17 @@
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]', 'postgres']);
 
-export type DbTarget = { host: string; local: boolean };
+export type DbTarget = { host: string; database: string; local: boolean };
 
 export function dbTarget(url: string): DbTarget {
-  let host: string;
+  let parsed: URL;
   try {
-    host = new URL(url).hostname;
+    parsed = new URL(url);
   } catch {
-    return { host: '(unparseable DATABASE_URL)', local: false };
+    return { host: '(unparseable DATABASE_URL)', database: '', local: false };
   }
-  return { host, local: LOCAL_HOSTS.has(host) };
+  const host = parsed.hostname;
+  return { host, database: decodeURIComponent(parsed.pathname.slice(1)), local: LOCAL_HOSTS.has(host) };
 }
 
 /** The refusal to print, or null when the script may go ahead. */

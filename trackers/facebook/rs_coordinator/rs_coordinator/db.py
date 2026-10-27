@@ -578,6 +578,9 @@ WORKER_HEALTH_COLUMNS = (
     # worker's next directive poll picks it up. Unlike relogin, this restores
     # the seeded cookie session instead of forcing a password login.
     ("restore_requested_at", "TEXT"),
+    # Set when an operator starts the city round by hand; cleared when the
+    # worker's next directive poll picks it up and starts a sweep.
+    ("sweep_requested_at", "TEXT"),
     # Where the worker's latest login has got to (picked_up, typing, submitted,
     # challenge, waiting_for_human, logged_in, failed) and when it got there.
     ("login_step", "TEXT"),
@@ -1438,6 +1441,26 @@ class Database:
             )
             return cur.rowcount > 0
 
+    def request_sweep(self: "Database", worker_id: str) -> None:
+        """Flag a worker to start a sweep on its next directive poll: the city
+        round was started by hand."""
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO workers (worker_id, sweep_requested_at) VALUES (?, ?) "
+                "ON CONFLICT(worker_id) DO UPDATE SET sweep_requested_at = excluded.sweep_requested_at",
+                (worker_id, utcnow()),
+            )
+
+    def take_sweep(self: "Database", worker_id: str) -> bool:
+        """Consume a pending sweep request, returning whether one was set."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE workers SET sweep_requested_at = NULL "
+                "WHERE worker_id = ? AND sweep_requested_at IS NOT NULL",
+                (worker_id,),
+            )
+            return cur.rowcount > 0
+
     # -- review stats ------------------------------------------------------
 
     def add_review_stats(
@@ -1955,6 +1978,21 @@ class Database:
                 "SELECT account_id, worker_id, fb_username, fb_uid, region, proxy, vnc_url, "
                 "allow_password_login, fleet_enabled, pin_host, locked_at, locked_reason, "
                 "created_at, updated_at "
+                "FROM accounts ORDER BY account_id"
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    def list_account_rows_sealed(self: "Database") -> List[Dict[str, Any]]:
+        """`list_accounts` plus each sealed `secret_blob`, in one query.
+
+        For the vault's own presence flags only; the blob never leaves the
+        AccountStore.
+        """
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT account_id, worker_id, fb_username, fb_uid, region, proxy, vnc_url, "
+                "allow_password_login, fleet_enabled, pin_host, locked_at, locked_reason, "
+                "created_at, updated_at, secret_blob "
                 "FROM accounts ORDER BY account_id"
             )
             return [dict(row) for row in cur.fetchall()]

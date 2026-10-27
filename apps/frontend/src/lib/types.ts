@@ -523,3 +523,54 @@ export type DashboardData = {
     user_id: string;
   }[];
 };
+
+// GET /api/home — what waits on the viewer. One branch per effective role;
+// the other key is absent, never null.
+export type HomePackage = {
+  id: string; carrier: string; trackingNumber: string; status: string;
+  trackingStatus: string | null; eta: string | null; orderId: string | null; creator: string | null;
+};
+
+export type PurchaserHome = {
+  stages: Record<'draft' | 'in_transit' | 'reviewing' | 'ready_to_pay' | 'done', number>;
+  openPos: {
+    count: number;
+    items: {
+      id: string; lifecycle: string; since: string; lines: number; cost: number; supplier: string | null;
+      package: { status: string; trackingStatus: string | null; eta: string | null; carrier: string | null } | null;
+      // Drafts only: the hand-off's blocker kinds (SERVER_BLOCKER_KEY).
+      blockers?: string[];
+    }[];
+  };
+  packages: { moving: number; needs: number; items: HomePackage[] };
+  commission: { owed: number; owedCount: number; paidRecent: number; recentDays: number };
+  followUps: {
+    due: number; soon: number;
+    items: { id: string; name: string; nextFollowUpAt: string; daysUntil: number }[];
+  };
+};
+
+export type ManagerHome = {
+  inbound: { moving: number; needs: number; arriving: number; pickups: number; items: HomePackage[] };
+  review: {
+    count: number; mine: number;
+    items: {
+      id: string; purchaser: string; since: string; lines: number; checked: number;
+      findings: number; manager: string | null; mine: boolean;
+    }[];
+  };
+  reverts: { count: number; items: { id: string; purchaser: string; at: string }[] };
+  readyToPay: { count: number; commission: number };
+  sales: {
+    draft: number; draftConnector: number; packing: number; shipped: number; awaitingPayment: number;
+    packingItems: { id: string; customer: string; lines: number; packed: number }[];
+  };
+  signoffs: { count: number; items: { id: string; customer: string; status: string }[] };
+  bank: { unlinked: number; unlinkedAmount: number; disputes: number };
+  rmb: { forMe: number; asked: number };
+  queues: { afterSales: number; afterSalesMine: number; transfers: number; web: number };
+};
+
+export type HomeData =
+  | { role: 'purchaser'; purchaser: PurchaserHome }
+  | { role: 'manager'; manager: ManagerHome };

@@ -5,7 +5,8 @@
 
 import type {
   AlertHitRow, Challenge, CityStep, CityTierSettings, CityVisit, CityVisitOutcome, CityWrite, FleetAccount, FleetCity,
-  FleetDoc, FleetQueue, LedgerLogin, QueueCityState, QueueItemCounts, ReviewStatsDay, SearchSettingsWrite, StatusChange,
+  FleetDoc, FleetQueue, LedgerLogin, QueueCityState, QueueItemCounts, QueueStarted, ReviewStatsDay, SearchSettingsWrite,
+  StatusChange,
 } from './coordinator';
 import type { FbWorkerStint } from './facebookPool';
 import { ruleLines } from './keywordRules';
@@ -24,6 +25,18 @@ export const isActive = (w: FleetAccount): boolean => {
 };
 
 export const needsAttention = (w: FleetAccount): boolean => Boolean(w.health?.needs_attention);
+
+// A retired worker's row stays in the coordinator for its history, but it
+// runs nothing, so lists and counts leave it out; its own page still opens.
+export const retiredAt = (w: FleetAccount): string | null => w.health?.retired_at ?? null;
+
+/** The fleet document without its retired workers. */
+export function withoutRetired(fleet: FleetDoc): FleetDoc;
+export function withoutRetired(fleet: FleetDoc | null): FleetDoc | null;
+export function withoutRetired(fleet: FleetDoc | null): FleetDoc | null {
+  if (!fleet || !fleet.workers.some(w => retiredAt(w))) return fleet;
+  return { ...fleet, workers: fleet.workers.filter(w => !retiredAt(w)) };
+}
 
 // Every whitespace-separated term must appear somewhere in the haystack,
 // case-insensitively. A slug like "fort-myers-fl" therefore matches "myers".
@@ -466,7 +479,7 @@ export function draftChanges(base: SettingsDraft, draft: SettingsDraft): number 
 
 // The coordinator column behind each stage. Workers count the first seven,
 // the coordinator the last two (ingest, then Telegram delivery).
-const FLOW_COUNTER: Record<FlowStage, keyof ReviewStatsDay> = {
+export const FLOW_COUNTER: Record<FlowStage, keyof ReviewStatsDay> = {
   search: 'searches', cards: 'cards', title: 'title_pass', open: 'opened', keywords: 'keyword_pass',
   fresh: 'fresh', ai: 'reviewed', coordinator: 'coordinated', alert: 'sent',
 };
@@ -865,6 +878,12 @@ export type RoundCell = {
 // The board reads left to right as the round does: done, under way, left to
 // do, not due yet, then the cities workers outside the queue keep.
 const ROUND_ORDER: Record<QueueCityState, number> = { searched: 0, leased: 1, due: 2, later: 3, held: 4 };
+
+/** The round a manager started by hand, while it still runs; else null. */
+export function queueStartedNow(queue: FleetQueue, now: number = Date.now()): QueueStarted | null {
+  const started = queue.started;
+  return started && Date.parse(started.until) > now ? started : null;
+}
 
 /** One item's round: every city in board order, and the counts. */
 export function queueRound(queue: FleetQueue, item: string): { cells: RoundCell[]; counts: QueueItemCounts } {

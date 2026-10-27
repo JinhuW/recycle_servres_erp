@@ -67,6 +67,9 @@ importers:
       sharp:
         specifier: ^0.35.5
         version: 0.35.5(@types/node@25.6.2)
+      smol-toml:
+        specifier: ^1.9.1
+        version: 1.9.1
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -89,6 +92,21 @@ importers:
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.5(@opentelemetry/api@1.9.1)(@types/node@25.6.2)(vite@6.4.2(@types/node@25.6.2)(terser@5.48.0)(tsx@4.23.15))
+
+  apps/fleet-agent:
+    devDependencies:
+      '@types/node':
+        specifier: ^25.6.2
+        version: 25.6.2
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -3049,6 +3067,10 @@ packages:
   smob@1.6.2:
     resolution: {integrity: sha512-RQsvleCbF8cVHEv+xuDGaA4pOizFqJ0GgjtMSRo6oP8pnN7WsigHgVGey6aILRBKv4W2YOMHLqbKdnB6hpB9fw==}
     engines: {node: '>=20.0.0'}
+
+  smol-toml@1.9.1:
+    resolution: {integrity: sha512-j7WyPdf0CJoutMzMoPLF/bVXHtKZIT9Rb4eGeEbWw8X2t5oirjPgpL+OpaENZrILYaXqYwnVH+qgUwVbl+pUJQ==}
+    engines: {node: '>= 18'}
 
   socks@2.8.10:
     resolution: {integrity: sha512-e0VyvkVTwVYViNovRkZ9aodhxVlyoMn7eJhVUPxZ+eK9P/7CBkxvvsBOHqFPEH416726W8tLXXXjKwqgTErrCQ==}
@@ -6685,6 +6707,8 @@ snapshots:
   smart-buffer@4.2.0: {}
 
   smob@1.6.2: {}
+
+  smol-toml@1.9.1: {}
 
   socks@2.8.10:
     dependencies:

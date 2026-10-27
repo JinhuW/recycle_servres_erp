@@ -20,6 +20,8 @@ import { startMailInboxLoop } from './mail/inbox';
 import { freezeLegacySellNumbers } from './services/sellOrderNumbers';
 import { startPoAiReviewLoop } from './services/poAiReview';
 import { startFbPoolAliveCheckLoop } from './services/fbPoolAliveCheck';
+import { startFleetSchedulerLoop } from './fleet/scheduler';
+import { startFleetRelayLease } from './fleet/vnc';
 
 const env = buildEnv();
 const port = Number(process.env.PORT ?? 8787);
@@ -38,6 +40,9 @@ const loops = [
   startMailInboxLoop(getDb(env), env),
   startPoAiReviewLoop(getDb(env), env),
   startFbPoolAliveCheckLoop(getDb(env), env),
+  startFleetSchedulerLoop(getDb(env), env),
+  // The fleet VNC relay pairs sockets in memory: one instance serves it.
+  startFleetRelayLease(getDb(env)),
 ];
 
 const server = serve({ fetch: (request) => app.fetch(request, env), port }, (info) => {

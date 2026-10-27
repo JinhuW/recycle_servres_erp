@@ -17,7 +17,7 @@ import { api, afterSalesForOrder, type AfterSalesOrderCase, ApiError, archiveSel
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import {
   useRoute, navigate, replaceRoute, match, matchSellOrderPack, sellOrderPackPath, poLinePath,
-  afterSalesCasePath, afterSalesNewPath, hrefFor, onLinkClick,
+  afterSalesCasePath, afterSalesNewPath, hrefFor, onLinkClick, takeHashParam,
 } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { shareOrCopy } from '../../lib/shareOrCopy';
@@ -97,6 +97,7 @@ type SellOrderSummary = {
 // the `sub` text snapshot. Absent from a backend older than this bundle, and
 // null on a hand-typed line.
 type LineSpec = {
+  shortCode?: string | null;
   type?: string | null;
   classification?: string | null;
   rank?: string | null;
@@ -108,7 +109,7 @@ type LineSpec = {
 
 const specOf = (l: LineSpec): LineSpec => ({
   type: l.type, classification: l.classification, rank: l.rank, speed: l.speed,
-  interface: l.interface, formFactor: l.formFactor, health: l.health,
+  interface: l.interface, formFactor: l.formFactor, health: l.health, shortCode: l.shortCode,
 });
 
 type SellOrderLine = LineSpec & {
@@ -326,6 +327,11 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   // the terminal ones (Done / Closed) and also pulls in archived orders, so the
   // detail-modal Archive action never strands an order out of reach.
   const [showClosedDone, setShowClosedDone] = usePersisted<boolean>('desktop.sellOrders.showClosedDone', false);
+  // A Home row opens the list on one status.
+  useEffect(() => {
+    const status = takeHashParam('status');
+    if (status && sellOrderStatuses.some(o => o.id === status)) setStatusFilter(status as SellStatusId);
+  }, []);
   const [exporting, setExporting] = useState(false);
   const { path } = useRoute();
 
@@ -973,6 +979,7 @@ function LineItemCell({ line, lineNo, sub, showPo, showLineNo, linkPo }: {
         ? <LineSpecChips line={chipLine} withType />
         : sub && <div style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 3 }}>{sub}</div>}
       <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+        {line.category === 'RAM' && <span>{t('ramShortCode')}: <span className="mono">{line.shortCode ?? t('ramShortCodeUnknown')}</span></span>}
         <span className="mono">{line.partNumber ?? '—'}</span>
         {line.condition && (<><span>·</span><span>{line.condition}</span></>)}
         {po && (<><span>·</span>

@@ -1,47 +1,45 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
-import { ApiError } from '../../lib/api';
-import {
-  coordinatorApi,
-  type AlertHitRow,
-  type Challenge,
-  type FilterPrompt,
-  type FleetDoc,
-  type ReviewStatsDay,
-} from '../../lib/coordinator';
+import { coordinatorApi, type Challenge, type FleetDoc } from '../../lib/coordinator';
 import { handleFetchError } from '../../lib/errorToast';
-import { FLEET_STATUSES, fleetStatus, parkedWorkers, type FleetStatus } from '../../lib/fleetView';
+import { fleetApi, type FleetSlot } from '../../lib/fleet';
 import { useT } from '../../lib/i18n';
-import { hrefFor, matchFleetWatch, matchFleetWorker, onLinkClick, useRoute } from '../../lib/route';
+import {
+  FLEET_TABS, fleetRedirect, fleetTabPath, hrefFor, matchFleetTab, matchFleetWatch, matchFleetWorker, onLinkClick, replaceRoute, useRoute,
+  type FleetTab,
+} from '../../lib/route';
 import { useEffectiveUser } from '../../lib/tweaks';
-import { poolApi, type FbProxyMark, type PoolSnapshot } from '../../lib/facebookPool';
+import { poolApi, type PoolSnapshot } from '../../lib/facebookPool';
 import { FacebookAccountPool } from './FacebookAccountPool';
 import { FormSkeleton } from '../../components/Skeleton';
-import { HITS_DAYS } from './FleetAccounts';
-import { FlowCard } from './FleetFlow';
-import { RoundCard } from './FleetQueue';
-import { ActivityAside, FleetLegend, WorkersCard } from './FleetWorkers';
+import { fleetRows, fleetRunning } from './fleet/fleetRows';
+import { useFleetPoll } from './fleet/shared';
 
 // The viewer carries noVNC; it is its own chunk, fetched only when a manager
-// actually opens a worker's browser. The worker page is its own chunk too.
-const FleetWatch = lazy(() => import('./FleetWatch').then(m => ({ default: m.FleetWatch })));
-const FleetWorker = lazy(() => import('./FleetWorker').then(m => ({ default: m.FleetWorker })));
+// actually opens a worker's browser, and it too decides between the ERP's
+// fleet and the coordinator (pages/desktop/fleet/FleetWatchSwitch.tsx). The
+// worker page is its own chunk too.
+const FleetWatch = lazy(() => import('./fleet/FleetWatchSwitch').then(m => ({ default: m.FleetWatchSwitch })));
+// The worker page decides between the ERP's own fleet worker and the
+// coordinator's (pages/desktop/fleet/FleetWorkerSwitch.tsx).
+const FleetWorker = lazy(() => import('./fleet/FleetWorkerSwitch').then(m => ({ default: m.FleetWorkerSwitch })));
+// The fleet tabs: their tables and dialogs are one chunk together.
+const FleetTabPage = lazy(() => import('./fleet/FleetPage').then(m => ({ default: m.FleetTabPage })));
 
 // ─── Monitors ▸ Facebook ──────────────────────────────────────────────────────
-// Two tabs in one chrome. Fleet (managers only): the status legend, the
-// workers table with the activity aside, and the pipeline from a search to an
-// alert; the eye on a row opens that worker's page (FleetWorker.tsx). Account
-// pool: the accounts purchasers take (FacebookAccountPool.tsx). Everything
-// live goes through the /api/coordinator proxy; a 501 from it means the
-// backend has no control-plane credentials, which gets its own quiet state
-// instead of error toasts.
+// Five tabs in one chrome, managers only except the last: Fleet (the hosts
+// and every account), Tasks (the belt and the task table), Cities (the
+// catalog), Analysis (the search-to-alert pipeline) and Account pool (the
+// accounts purchasers take, FacebookAccountPool.tsx). The fleet tabs read
+// /api/fleet (pages/desktop/fleet/*) and, until cutover, the coordinator
+// through the /api/coordinator proxy; the tab bar's count chips come from the
+// same calls. Purchasers see Account pool alone.
 
-const REFRESH_MS = 30_000;
-const STATS_DAYS = 14;
+const COUNTS_MS = 30_000;
 
-// Data either arrives or the card shows its own empty state — never an error
-// dialog: this page must stay a non-blocker for the rest of the ERP.
-type Unavailable = 'unavailable';
+type TabIcon = 'shield' | 'clock' | 'globe' | 'analytics' | 'users';
+const FLEET_TAB_TITLE: Record<FleetTab, string> = { tasks: 'fleetTasksTitle', cities: 'fleetCitiesTitle', analysis: 'fleetAnalysisTitle' };
+const TAB_ICON: Record<FleetTab, TabIcon> = { tasks: 'clock', cities: 'globe', analysis: 'analytics' };
 
 type Props = { showToast?: (msg: string, kind?: 'success' | 'error') => void };
 
@@ -51,22 +49,35 @@ export function DesktopCoordinator({ showToast }: Props) {
   const { t } = useT();
   const [pool, setPool] = useState<PoolSnapshot | null>(null);
   const manager = user?.role === 'manager';
+  const fleetTab: FleetTab | null = manager ? matchFleetTab(path) : null;
   const poolOpen = !manager || path === '/fleet/pool';
   const watch = manager ? matchFleetWatch(path) : null;
   const worker = manager ? matchFleetWorker(path) : null;
-  // Loaded on both tabs: the Pool tab's count chip reads it too.
+  // The tabs that went away still have their old paths bookmarked.
   useEffect(() => {
-    poolApi.snapshot().then(setPool).catch(handleFetchError);
-  }, []);
+    const to = fleetRedirect(path);
+    if (to) replaceRoute(to);
+  }, [path]);
+  // The snapshot unseals every secret of every row, so only the Pool tab
+  // reads it; the other tabs' count chip comes from the pool summary. Once
+  // read it stays, and the Pool tab keeps it current from its writes.
+  const wantPool = poolOpen && !pool;
+  useEffect(() => {
+    if (wantPool) poolApi.snapshot().then(setPool).catch(handleFetchError);
+  }, [wantPool]);
   // A fleet account's holder is a worker: the Pool tab links it and shows its
   // health. Without the coordinator those rows read as plain text.
   const [fleet, setFleet] = useState<FleetDoc | null>(null);
   const [challenges, setChallenges] = useState<Challenge[] | null>(null);
+  const [slots, setSlots] = useState<FleetSlot[] | null>(null);
+  const loadSlots = useCallback(() => { fleetApi.slots().then(setSlots).catch(() => undefined); }, []);
   useEffect(() => {
     if (!manager || !poolOpen) return;
     coordinatorApi.fleet().then(setFleet).catch(() => undefined);
     coordinatorApi.listOpenChallenges().then(setChallenges).catch(() => undefined);
-  }, [manager, poolOpen]);
+    loadSlots();
+  }, [manager, poolOpen, loadSlots]);
+  const counts = useTabCounts(manager && !watch && !worker);
   if (watch) {
     return (
       <Suspense fallback={<FormSkeleton fields={4} />}>
@@ -81,122 +92,77 @@ export function DesktopCoordinator({ showToast }: Props) {
       </Suspense>
     );
   }
+  const fleetOpen = !poolOpen && !fleetTab;
+  const chip = (n: number | null, hot = false) => n === null ? null : <span className={`chip muted${hot && n > 0 ? ' fleet-chip-hot' : ''}`}>{n}</span>;
   const tabs = manager ? <nav className="tabs fp-view-tabs" aria-label={t('fpViews')}>
-    <a className={`tab ${!poolOpen ? 'active' : ''}`} href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')} aria-current={!poolOpen ? 'page' : undefined}><Icon name="shield" size={14} />{t('fpFleet')}</a>
-    <a className={`tab ${poolOpen ? 'active' : ''}`} href={hrefFor('/fleet/pool')} onClick={onLinkClick('/fleet/pool')} aria-current={poolOpen ? 'page' : undefined}><Icon name="users" size={14} />{t('fpPool')}{pool && <span className="chip muted">{pool.accounts.length}</span>}</a>
+    <a className={`tab ${fleetOpen ? 'active' : ''}`} href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')} aria-current={fleetOpen ? 'page' : undefined}>
+      <Icon name="shield" size={14} />{t('fpFleet')}{chip(counts.running)}
+    </a>
+    {FLEET_TABS.map(tab => (
+      <a key={tab} className={`tab ${fleetTab === tab ? 'active' : ''}`} href={hrefFor(fleetTabPath(tab))} onClick={onLinkClick(fleetTabPath(tab))}
+        aria-current={fleetTab === tab ? 'page' : undefined}>
+        <Icon name={TAB_ICON[tab]} size={14} />{t(FLEET_TAB_TITLE[tab])}
+        {tab === 'tasks' && chip(counts.due, true)}
+        {tab === 'cities' && chip(counts.cities)}
+      </a>
+    ))}
+    <a className={`tab ${poolOpen ? 'active' : ''}`} href={hrefFor('/fleet/pool')} onClick={onLinkClick('/fleet/pool')} aria-current={poolOpen ? 'page' : undefined}>
+      <Icon name="users" size={14} />{t('fpPool')}{chip(pool ? pool.accounts.length : counts.pool)}
+    </a>
   </nav> : null;
   const head = (
     <div className="page-head"><div><div className="page-sub">{t('nav_monitors')} / {t('nav_coordinator')}</div>
-      <h1 className="page-title">{poolOpen ? t('fpTitle') : t('fbcFleetTitle')}</h1></div></div>
+      <h1 className="page-title">{t('fbcFleetTitle')}</h1></div></div>
   );
-  return poolOpen ? <>
-    {head}
-    {tabs}
-    {pool
-      ? <FacebookAccountPool key={user?.role} snapshot={pool} onSnapshot={setPool} showToast={showToast}
-          fleet={manager ? fleet : null} challenges={challenges} />
-      : <FormSkeleton fields={4} />}
-  </> : <FleetPage head={head} tabs={tabs} />;
+  if (poolOpen) {
+    return <>
+      {head}
+      {tabs}
+      {pool
+        ? <FacebookAccountPool key={user?.role} snapshot={pool} onSnapshot={setPool} showToast={showToast}
+            fleet={manager ? fleet : null} challenges={challenges} slots={manager ? slots : null} onSlotsChanged={loadSlots} />
+        : <FormSkeleton fields={4} />}
+    </>;
+  }
+  return (
+    <Suspense fallback={<>{head}{tabs}<FormSkeleton fields={4} /></>}>
+      <FleetTabPage key={fleetTab ?? 'fleet'} tab={fleetTab ?? 'fleet'} head={head} tabs={tabs} />
+    </Suspense>
+  );
 }
 
-function FleetPage({ head, tabs }: { head: React.ReactNode; tabs: React.ReactNode }) {
-  const { t, locale } = useT();
+type TabCounts = { running: number | null; due: number | null; cities: number | null; pool: number | null };
+const NO_COUNTS: TabCounts = { running: null, due: null, cities: null, pool: null };
 
-  const [fleet, setFleet] = useState<FleetDoc | null>(null);
-  // The fleet document needs a facade that knows /v1/fleet. An older facade
-  // (404) or an unreachable one (502) must not take the rest of the page
-  // down, so only "proxy unconfigured" (501) is fatal here; anything else
-  // leaves the fleet cards in their own unavailable state.
-  const [fleetUnavailable, setFleetUnavailable] = useState(false);
-  const [hits, setHits] = useState<AlertHitRow[] | null>(null);
-  const [challenges, setChallenges] = useState<Challenge[] | null>(null);
-  const [stats, setStats] = useState<ReviewStatsDay[] | Unavailable | null>(null);
-  const [prompt, setPrompt] = useState<FilterPrompt | Unavailable | null>(null);
-  const [marks, setMarks] = useState<FbProxyMark[] | null>(null);
-  const [notConfigured, setNotConfigured] = useState(false);
-
-  const [filter, setFilter] = useState<FleetStatus | 'all'>('all');
-
-  const fail = useCallback((err: unknown) => {
-    // 501 = proxy env vars unset; 404 = a backend that predates the proxy
-    // route entirely. Both mean "no control plane here", not an error.
-    if (err instanceof ApiError && (err.status === 501 || err.status === 404)) {
-      setNotConfigured(true);
-      return;
-    }
-    handleFetchError(err);
-  }, []);
-
-  const load = useCallback(() => {
-    coordinatorApi.fleet()
-      .then(doc => { setFleet(doc); setFleetUnavailable(false); })
-      .catch(err => {
-        if (err instanceof ApiError && err.status === 501) { fail(err); return; }
-        setFleetUnavailable(true);
-      });
-    coordinatorApi.listOpenChallenges().then(setChallenges).catch(fail);
-    // Per-city alert counts decorate the table; without them it still
-    // renders, just without the numbers.
-    coordinatorApi.alertHits(HITS_DAYS).then(setHits).catch(() => setHits([]));
-    // Failed accounts per proxy live in the pool; a pool without its key
-    // leaves the proxy column as it was.
-    poolApi.proxies().then(r => setMarks(r.proxies)).catch(() => setMarks([]));
-    // Stats and prompt only feed the flow card; it shows "—" without them.
-    coordinatorApi.reviewStats(STATS_DAYS)
-      .then(setStats)
-      .catch(() => setStats('unavailable'));
-    coordinatorApi.filterPrompt()
-      .then(p => setPrompt(p.prompt ? p : 'unavailable'))
-      .catch(() => setPrompt('unavailable'));
-  }, [fail]);
-
-  useEffect(() => { load(); }, [load]);
-
-  // Liveness and queue age both move on their own, so the whole page refetches
-  // on a timer rather than waiting for a navigation.  A backgrounded tab polls
-  // nothing and catches up the moment it's back.
-  useEffect(() => {
-    const refresh = () => { if (!document.hidden) load(); };
-    const timer = setInterval(refresh, REFRESH_MS);
-    document.addEventListener('visibilitychange', refresh);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', refresh);
-    };
-  }, [load]);
-
-  const counts = useMemo(() => {
-    const parked = parkedWorkers(challenges);
-    const out = Object.fromEntries(FLEET_STATUSES.map(s => [s, 0])) as Record<FleetStatus, number>;
-    for (const w of fleet?.workers ?? []) out[fleetStatus(w, parked)] += 1;
-    return out;
-  }, [fleet, challenges]);
-
-  // Head and tabs sit outside .fp-pool, as on the Pool tab: inside it their
-  // margins stack on its gap, and switching tabs would shift the content.
-  return <>
-    {head}
-    {tabs}
-    <div className="fp-pool">
-      {notConfigured ? (
-        <div className="card">
-          <div className="card-body" style={{ display: 'flex', gap: 10, alignItems: 'flex-start', color: 'var(--fg-muted)' }}>
-            <Icon name="info" size={16} style={{ flexShrink: 0, marginTop: 2 }} />
-            <span style={{ maxWidth: '65ch' }}>{t('fbcNotConfigured')}</span>
-          </div>
-        </div>
-      ) : (
-        <>
-          <RoundCard fleet={fleet} onSaved={load} />
-          <FleetLegend counts={counts} loading={!fleet && !fleetUnavailable} filter={filter} onFilter={setFilter} />
-          <div className="fp-split ff-split">
-            <WorkersCard fleet={fleet} unavailable={fleetUnavailable} hits={hits} challenges={challenges} marks={marks}
-              filter={filter} onClearFilter={() => setFilter('all')} locale={locale} />
-            <ActivityAside fleet={fleet} unavailable={fleetUnavailable} challenges={challenges} locale={locale} />
-          </div>
-          <FlowCard fleet={fleet} stats={stats} prompt={prompt} onSaved={load} />
-        </>
-      )}
-    </div>
-  </>;
+// The tab bar's chips: running workers (ERP and coordinator), tasks due now,
+// cities, pool accounts. Read on its own clock, slower than the tabs, since
+// each tab reads what it shows itself; the reads it shares with the open tab
+// go out once (lib/sharedGet.ts). The ERP's counts show at once, the running
+// count once the coordinator has answered too, so it never jumps.
+function useTabCounts(on: boolean): TabCounts {
+  const { data: erp } = useFleetPoll(() => {
+    if (!on) return Promise.resolve(null);
+    const now = Date.now();
+    return Promise.all([
+      fleetApi.slots(), fleetApi.workers(), fleetApi.tasks({ state: 'ready' }), fleetApi.cities(),
+      poolApi.summary().then(s => s.accounts).catch(() => null),
+    ]).then(([slots, workers, ready, cities, pool]) => ({
+      slots, workers, pool,
+      due: ready.filter(x => x.kind === 'search' && Date.parse(x.due_at) <= now).length,
+      cities: cities.length,
+    }));
+  }, COUNTS_MS);
+  const { data: coord } = useFleetPoll(() => {
+    if (!on) return Promise.resolve(null);
+    return Promise.all([coordinatorApi.fleet().catch(() => null), coordinatorApi.listOpenChallenges().catch(() => null)])
+      .then(([coordinator, challenges]) => ({ coordinator, challenges }));
+  }, COUNTS_MS);
+  return useMemo(() => {
+    if (!erp || erp === 'unavailable') return NO_COUNTS;
+    const c = coord && coord !== 'unavailable' ? coord : null;
+    const running = c
+      ? fleetRunning(fleetRows({ slots: erp.slots, workers: erp.workers, release: null, pool: erp.pool, ...c }, Date.now())).running
+      : null;
+    return { running, due: erp.due, cities: erp.cities, pool: erp.pool?.length ?? null };
+  }, [erp, coord]);
 }

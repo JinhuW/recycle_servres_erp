@@ -86,6 +86,25 @@ export type FbAccountTimeline = {
   logins: 'ok' | 'partial' | 'not_served' | 'unreachable';
 };
 
+/** One pool row without its secrets, for pages that need status and holder.
+ *  `cookieUid` is the c_user parsed when the cookie was saved; null without a cookie. */
+export type PoolAccountSummary = {
+  no: number;
+  uid: string;
+  email: string;
+  note: string;
+  status: FbPoolStatus;
+  holder: string | null;
+  holderId: string | null;
+  since: number | null;
+  addedAt: number;
+  cookieAt: number | null;
+  aliveCheckedAt: number | null;
+  batch: string;
+  hasCookie: boolean;
+  cookieUid: string | null;
+};
+
 /** Fields whose copy or reveal is worth an audit line. */
 export const FB_POOL_SECRET_FIELDS = ['password', 'totp', 'emailPassword', 'cookie', 'token'] as const;
 export type FbPoolSecretField = (typeof FB_POOL_SECRET_FIELDS)[number];
@@ -139,8 +158,9 @@ export function cookieUid(cookie: string): string | null {
     } catch {
       return null;
     }
-    if (Array.isArray(parsed)) {
-      const entry = (parsed as { name?: unknown; value?: unknown }[]).find(
+    const list = Array.isArray(parsed) ? parsed : (parsed as { cookies?: unknown } | null)?.cookies;
+    if (Array.isArray(list)) {
+      const entry = (list as { name?: unknown; value?: unknown }[]).find(
         (c) => c && typeof c === 'object' && c.name === 'c_user',
       );
       return digits(entry?.value);
@@ -161,8 +181,9 @@ export function cookieValue(cookie: string, name: string): string | null {
     } catch {
       return null;
     }
-    if (Array.isArray(parsed)) {
-      const entry = (parsed as { name?: unknown; value?: unknown }[]).find(
+    const list = Array.isArray(parsed) ? parsed : (parsed as { cookies?: unknown } | null)?.cookies;
+    if (Array.isArray(list)) {
+      const entry = (list as { name?: unknown; value?: unknown }[]).find(
         (c) => c && typeof c === 'object' && c.name === name,
       );
       return plain(entry?.value);

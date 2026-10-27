@@ -55,7 +55,8 @@ export function normalizeSubredditName(input: string): string | null {
 
 export type WorkerStatusFilter = 'all' | 'live' | 'stale' | 'dead';
 
-export type PostStatus = 'new' | 'rejected' | 'target' | 'notified' | 'failed';
+// `duplicate`: a cross-post of a listing buyers were already alerted to.
+export type PostStatus = 'new' | 'rejected' | 'target' | 'notified' | 'failed' | 'duplicate';
 
 // A post the evaluator judged a target, as GET /api/matches returns it.
 export type TrackerMatch = {
@@ -88,8 +89,8 @@ export function funnelCounts(stats: TrackerStats | null): Record<LoopName, numbe
   if (!stats) return null;
   const n = (...keys: PostStatus[]) => keys.reduce((sum, k) => sum + (stats.posts[k] ?? 0), 0);
   return {
-    poll: n('new', 'rejected', 'target', 'notified', 'failed'),
-    evaluate: n('target', 'notified'),
+    poll: n('new', 'rejected', 'target', 'notified', 'failed', 'duplicate'),
+    evaluate: n('target', 'notified', 'duplicate'),
     notify: n('notified'),
   };
 }
@@ -209,6 +210,63 @@ export function evaluatorModelProblem(
   return catalogue.some(m => m.id === id && EVALUATOR_MODEL(m)) ? null : 'unlisted';
 }
 
+// ─── Analytics (GET /api/analytics) ──────────────────────────────────────────
+// Volume, reactions and PM demand over one window. A post is "hot" with
+// `hotPms` or more buyers commenting PM, and "missing" when it is a memory
+// post that is hot and got no good-catch reaction. Demand figures cover
+// `demandRange`: the window shifted back a day, because posts are traced
+// once they are a day old.
+
+export type AnalyticsWindow = '24h' | '7d' | '30d';
+export const ANALYTICS_WINDOWS: readonly AnalyticsWindow[] = ['24h', '7d', '30d'];
+
+export type TrackerListedPost = {
+  redditId: string;
+  subreddit: string;
+  title: string;
+  url: string;
+  postedAt: string;
+  pmCount: number;
+  commentCount: number;
+  alerted: boolean;
+  reasoning: string | null;
+  promptVersionId: number | null;
+};
+
+export type TrackerAnalytics = {
+  window: AnalyticsWindow;
+  generatedAt: string;
+  range: { since: string; until: string };
+  demandRange: { since: string; until: string };
+  hotPms: number;
+  volume: {
+    posts: number; judged: number; memoryPosts: number; alerts: number;
+    duplicates: number; failed: number; alertsPerDay: number;
+  };
+  feedback: { alerts: number; good: number; bad: number; unreacted: number };
+  speed: { medianMinutes: number | null; p90Minutes: number | null };
+  demand: {
+    posts: number; traced: number; memoryTraced: number; hotMemory: number; caught: number;
+    alertedNoReaction: number; notAlerted: number; missing: number;
+    avgPmsAlerted: number | null; avgPmsRejected: number | null;
+  };
+  missing: TrackerListedPost[];
+  hotOther: TrackerListedPost[];
+  subreddits: Array<{
+    name: string; posts: number; memoryPosts: number; alerts: number; good: number;
+    traced: number; avgPms: number | null; hotMemory: number; missing: number;
+  }>;
+  prompts: Array<{
+    versionId: number; model: string; role: PromptRole; judged: number; flagged: number;
+    good: number; bad: number; hotMemoryJudged: number; hotMemoryFlagged: number;
+  }>;
+  series: {
+    bucket: 'hour' | 'day';
+    points: Array<{ until: string; posts: number; alerts: number; good: number; missing: number }>;
+  };
+  tracer: { workerId: string; expiresAt: string } | null;
+};
+
 export const trackerApi = {
   listWorkers: (params: { status: WorkerStatusFilter; limit: number; offset: number }) =>
     api.get<{ workers: TrackerWorker[]; total: number }>(
@@ -238,6 +296,8 @@ export const trackerApi = {
     api.get<TrackerStats>(`/api/tracker/stats?since=${encodeURIComponent(since.toISOString())}`),
 
   // null asks for all time.
+  analytics: (window: AnalyticsWindow) =>
+    api.get<TrackerAnalytics>(`/api/tracker/analytics?window=${window}`),
   promptStats: (since: Date | null) =>
     api.get<PromptStats>(
       `/api/tracker/prompt-stats${since ? `?since=${encodeURIComponent(since.toISOString())}` : ''}`,

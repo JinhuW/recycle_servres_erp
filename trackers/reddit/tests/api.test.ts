@@ -96,6 +96,16 @@ describe('GET /api/matches', () => {
     });
   });
 
+  it('leaves out a cross-post copy buyers got through its twin', async () => {
+    await seedTarget('t3_a', 'Lot of RAM');
+    await seedTarget('t3_b', 'Lot of RAM');
+    await db.sql`UPDATE posts SET status = 'duplicate', duplicate_of = 't3_a' WHERE reddit_id = 't3_b'`;
+
+    const body = await (await request('/api/matches')).json() as {matches: Array<{redditId: string}>};
+
+    expect(body.matches.map((m) => m.redditId)).toEqual(['t3_a']);
+  });
+
   it('leaves out posts the LLM rejected', async () => {
     await db.sql`
       INSERT INTO posts (reddit_id, subreddit, title, url, posted_at, status, is_target)
@@ -910,5 +920,29 @@ describe('prompt scoring', () => {
     const res = await request('/api/prompt-candidate/promote', {method: 'POST'});
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /api/analytics', () => {
+  it('reports the requested window, 7 days by default', async () => {
+    await seedTarget('t3_a', 'Lot of RAM');
+
+    const res = await request('/api/analytics');
+    expect(res.status).toBe(200);
+    const body = await res.json() as {window: string; volume: {alerts: number}; hotPms: number};
+    expect(body.window).toBe('7d');
+    expect(body.volume.alerts).toBe(1);
+    expect(body.hotPms).toBe(5);
+
+    expect((await (await request('/api/analytics?window=30d')).json() as {window: string}).window).toBe('30d');
+  });
+
+  it('rejects a window it does not offer', async () => {
+    const res = await request('/api/analytics?window=1y');
+    expect(res.status).toBe(400);
+  });
+
+  it('requires the API token', async () => {
+    expect((await app.request('/api/analytics')).status).toBe(401);
   });
 });

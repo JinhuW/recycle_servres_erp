@@ -1,5 +1,5 @@
-// Payment-receipt OCR for status-note attachments. Reads the uploaded
-// screenshot and renames it `<upload date>-<method>-<amount>.<ext>` so the
+// Payment-receipt OCR shared by the payment form and evidence uploads.
+// Evidence is renamed `<upload date>-<method>-<amount>.<ext>` so the
 // attachment list is scannable. Rename is strictly best-effort: any OCR
 // problem (no key, timeout, bad JSON, unreadable receipt) keeps the original
 // filename — an upload must never fail, and a canned stub name would be
@@ -17,7 +17,7 @@ const RECEIPT_METHODS = [
 export type ReceiptMethod = (typeof RECEIPT_METHODS)[number];
 
 const RECEIPT_PROMPT = `You are reading a payment receipt or payment-confirmation screenshot. It may be a Chinese Alipay (支付宝) or WeChat Pay (微信支付) screenshot, or an English bank transfer / Zelle / PayPal / Venmo confirmation. Respond with a single minified JSON object and nothing else — no markdown, no code fences, no prose:
-{"method":"alipay|weixinpay|bank|zelle|paypal|venmo|cash|other","amount":"1250.00"}
+{"method":"alipay|weixinpay|bank|zelle|paypal|venmo|cash|other","amount":"1250.00","currency":"CNY|USD|null"}
 METHOD — pick exactly one:
   alipay — Alipay / 支付宝 UI.
   weixinpay — WeChat Pay / 微信支付 UI.
@@ -26,6 +26,7 @@ METHOD — pick exactly one:
   paypal, venmo, cash — accordingly.
   other — clearly a payment receipt but the method is unclassifiable.
 AMOUNT — the main payment amount as a plain decimal with exactly 2 decimal places. Strip currency symbols (¥, ￥, $, 元) and thousands separators; convert full-width digits to ASCII: "¥1,250.00" → "1250.00", "$980" → "980.00", "１２５０元" → "1250.00". If several amounts appear, choose the amount actually paid/transferred (the prominent figure), not fees, balances, or totals-before-discount.
+CURRENCY — read the currency of the payment, CNY for RMB / 人民币 / 元 / Chinese yuan, USD for US dollars. Do not infer currency from the payment method alone. Use null when the currency is unclear or is neither CNY nor USD.
 If the image is not a payment receipt, or you cannot read the amount or method, respond {"method":null,"amount":null}.`;
 
 // Full-width digits/punctuation → ASCII, so 「１，２５０」 parses like "1,250".
@@ -48,9 +49,10 @@ export function normalizeAmount(raw: unknown): string | null {
     .replace(/[^0-9.,]/g, '')
     .replace(/,/g, '');
   if (!cleaned) return null;
-  const n = Number.parseFloat(cleaned);
+  const n = Number(cleaned);
   if (!Number.isFinite(n) || n <= 0) return null;
-  return n.toFixed(2);
+  const rounded = n.toFixed(2);
+  return Number(rounded) > 0 ? rounded : null;
 }
 
 // MIME is allowlist-validated upstream (SAFE_UPLOAD_MIME), so the map is
@@ -88,31 +90,27 @@ export function suffixFilename(name: string, suffix: string): string {
   return `${name.slice(0, dot)}-${suffix}${name.slice(dot)}`;
 }
 
-export async function maybeRenameReceipt(env: Env, file: File): Promise<File> {
-  if (!env.OPENROUTER_API_KEY) return file;
-  // Images only, as a positive check — the upload allowlist now carries
-  // spreadsheets, and anything non-image sent to the vision endpoint is a
-  // guaranteed-useless call we'd pay for on every attachment. (PDF is excluded
-  // for a different reason: it needs a different OpenRouter content shape and
-  // a parser plugin, for marginal gain.)
-  if (!file.type.startsWith('image/')) return file;
+export type ReceiptReading = { method: ReceiptMethod; amount: string; currency: 'CNY' | 'USD' | null };
 
-  const bytes = await file.arrayBuffer();
-  let json: Record<string, unknown>;
+export async function readReceipt(env: Env, file: File): Promise<ReceiptReading | null> {
+  if (!env.OPENROUTER_API_KEY || !file.type.startsWith('image/')) return null;
   try {
-    json = await openRouterImageJson(env, RECEIPT_PROMPT, bytes);
+    const json = await openRouterImageJson(env, RECEIPT_PROMPT, await file.arrayBuffer());
     ocrCallsTotal.inc({ provider: 'openrouter', outcome: 'ok' });
+    const method = typeof json.method === 'string' && (RECEIPT_METHODS as readonly string[]).includes(json.method)
+      ? json.method as ReceiptMethod : null;
+    const amount = normalizeAmount(json.amount);
+    if (!method || !amount || Number(amount) > 1_000_000_000) return null;
+    return { method, amount, currency: json.currency === 'CNY' || json.currency === 'USD' ? json.currency : null };
   } catch (e) {
     ocrCallsTotal.inc({ provider: 'openrouter', outcome: 'error' });
-    aiLog.warn('receipt auto-rename failed; keeping the original name', e);
-    return file;
+    aiLog.warn('receipt recognition failed', e);
+    return null;
   }
+}
 
-  const method = typeof json.method === 'string' && (RECEIPT_METHODS as readonly string[]).includes(json.method)
-    ? (json.method as ReceiptMethod)
-    : null;
-  const amount = normalizeAmount(json.amount);
-  if (!method || !amount) return file;
-
-  return new File([bytes], buildReceiptName(method, amount, file.name, file.type), { type: file.type });
+export async function maybeRenameReceipt(env: Env, file: File): Promise<File> {
+  const receipt = await readReceipt(env, file);
+  if (!receipt) return file;
+  return new File([await file.arrayBuffer()], buildReceiptName(receipt.method, receipt.amount, file.name, file.type), { type: file.type });
 }

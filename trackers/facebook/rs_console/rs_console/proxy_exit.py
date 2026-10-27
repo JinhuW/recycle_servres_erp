@@ -6,7 +6,10 @@ without one, which names the VM's own address.
 
 The fleet page refreshes every 30 s and the ERP gives the whole document 10 s,
 so a lookup never holds the page: whatever has not answered within `WAIT_S`
-reads `pending` and keeps running, and the next refresh finds it cached.
+reads `pending` and keeps running, and the next refresh finds it cached. The
+wait is short because an exit is cached for hours: after a console restart a
+long wait would add itself to every first load, for an answer that the next
+refresh shows anyway.
 """
 
 import asyncio
@@ -18,7 +21,7 @@ import httpx
 
 LOOKUP_URL = "https://ipinfo.io/json"
 LOOKUP_TIMEOUT_S = 8.0
-WAIT_S = 3.0
+WAIT_S = 0.5
 # A dedicated exit keeps its address for months; a failure is retried soon
 # because it is usually the proxy having a bad minute.
 OK_TTL_S = 6 * 3600

@@ -9,6 +9,7 @@ import {
   type WechatLine,
   type WechatPoint,
   type WechatPrice,
+  type WechatRerunFinish,
   type WechatSideStats,
   type WechatTotals,
 } from '@recycle-erp/shared';
@@ -240,3 +241,18 @@ export function parsePointsPush(body: unknown): { points: WechatPoint[]; pushId:
     pushId: b.pushId ?? null,
   };
 }
+
+// memtrade's error is a log line; it is shown on the page, so it is cut, not refused.
+const RERUN_ERROR_MAX = 2000;
+
+export function parseRerunFinish(body: unknown): Required<WechatRerunFinish> {
+  const b = obj(body, 'body');
+  const ok = bool(b.ok, 'ok');
+  const degraded = b.degraded === undefined ? false : bool(b.degraded, 'degraded');
+  if (b.error !== undefined && b.error !== null && typeof b.error !== 'string') throw new PushError('error: expected a string');
+  const error = typeof b.error === 'string' && b.error.trim() ? b.error.trim().slice(0, RERUN_ERROR_MAX) : '';
+  if (!ok && !error) throw new PushError('error: a failed rerun says why');
+  return { ok, degraded, error };
+}
+
+export const isUuid = (s: string) => UUID_RE.test(s);

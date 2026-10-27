@@ -19,6 +19,7 @@ import {
   type FbStintOutcome,
   type FbTimelineEvent,
   type FbWorkerStint,
+  type PoolAccountSummary,
 } from '@recycle-erp/shared';
 import { authMiddleware } from '../auth';
 import { getDb, type SqlLike } from '../db';
@@ -67,6 +68,12 @@ type Row = {
   batch: string;
 };
 
+type SummaryRow = Pick<
+  Row,
+  | 'no' | 'uid' | 'email' | 'note' | 'status' | 'holder_name' | 'holder_user_id' | 'held_since'
+  | 'added_at' | 'cookie_at' | 'alive_checked_at' | 'batch' | 'cookie_uid'
+> & { has_cookie: boolean };
+
 type EventRow = {
   created_at: Date;
   actor_name: string;
@@ -87,7 +94,7 @@ const pool = new Hono<{ Bindings: Env; Variables: Vars }>()
     return next();
   });
 
-async function writeEvent(
+export async function writeEvent(
   tx: Tx,
   user: User,
   kind: FbPoolEventKind,
@@ -200,6 +207,33 @@ function refusal(codes: string[]) {
 // ── Every role: the rack, take, return, report, audit ───────────────────────
 
 pool.get('/', async (c) => c.json(await snapshot(getDb(c.env), c.var.key, c.var.user)));
+
+// Pages that only need who holds what (the fleet table, tab counts) poll this
+// instead of the snapshot, which unseals every secret of every row per call.
+// It answers every role alike: nothing in it is held back from a purchaser.
+pool.get('/summary', async (c) => {
+  const rows = await getDb(c.env)<SummaryRow[]>`
+    SELECT no, uid, email, note, status, holder_name, holder_user_id, held_since, added_at,
+           cookie_at, alive_checked_at, batch, cookie_enc IS NOT NULL AS has_cookie, cookie_uid
+    FROM fb_pool_accounts ORDER BY no`;
+  const accounts: PoolAccountSummary[] = rows.map((r) => ({
+    no: r.no,
+    uid: r.uid,
+    email: r.email,
+    note: r.note,
+    status: r.status,
+    holder: r.holder_name,
+    holderId: r.holder_user_id,
+    since: ms(r.held_since),
+    addedAt: r.added_at.getTime(),
+    cookieAt: ms(r.cookie_at),
+    aliveCheckedAt: ms(r.alive_checked_at),
+    batch: r.batch,
+    hasCookie: r.has_cookie,
+    cookieUid: r.has_cookie ? r.cookie_uid : null,
+  }));
+  return c.json({ accounts });
+});
 
 pool.post('/:no/take', async (c) => {
   const no = parseNo(c.req.param('no'));

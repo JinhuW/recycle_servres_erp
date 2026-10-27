@@ -18,7 +18,7 @@ describe('normalizeAmount', () => {
     expect(normalizeAmount(980)).toBe('980.00');
   });
 
-  it.each([['abc'], [null], [undefined], ['0'], ['-12.50'], [''], [{}]])(
+  it.each([['0.001'], ['1.2.3'], ['abc'], [null], [undefined], ['0'], ['-12.50'], [''], [{}]])(
     'rejects %s',
     (raw) => {
       expect(normalizeAmount(raw)).toBeNull();

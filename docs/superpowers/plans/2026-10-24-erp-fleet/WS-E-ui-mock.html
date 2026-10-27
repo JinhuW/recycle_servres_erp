@@ -1,0 +1,1094 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet pages design</title>
+<meta name="description" content="Design mock for the ERP's Facebook fleet pages after RS-394: Tasks, Cities, Fleet and Account pool as four sidebar entries.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: oklch(0.99 0.003 100);
+  --bg-soft: oklch(0.975 0.004 100);
+  --bg-elev: #ffffff;
+  --border: oklch(0.92 0.005 240);
+  --border-strong: oklch(0.86 0.006 240);
+  --fg: oklch(0.22 0.012 250);
+  --fg-muted: oklch(0.48 0.012 250);
+  --fg-subtle: oklch(0.62 0.012 250);
+  --accent: oklch(0.62 0.13 165);
+  --accent-soft: oklch(0.95 0.04 165);
+  --accent-strong: oklch(0.52 0.14 165);
+  --pos: oklch(0.62 0.13 165);
+  --pos-soft: oklch(0.96 0.035 165);
+  --neg: oklch(0.62 0.16 22);
+  --neg-soft: oklch(0.96 0.04 22);
+  --warn: oklch(0.78 0.13 75);
+  --warn-strong: oklch(0.55 0.14 70);
+  --warn-soft: oklch(0.97 0.05 85);
+  --info: oklch(0.62 0.13 250);
+  --info-soft: oklch(0.96 0.035 250);
+  --info-strong: oklch(0.45 0.13 250);
+  --cool: oklch(0.62 0.13 295);
+  --cool-soft: oklch(0.96 0.04 295);
+  --radius: 10px;
+  --radius-sm: 6px;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: oklch(0.19 0.008 250);
+    --bg-soft: oklch(0.22 0.008 250);
+    --bg-elev: oklch(0.24 0.009 250);
+    --border: oklch(0.31 0.008 250);
+    --border-strong: oklch(0.38 0.01 250);
+    --fg: oklch(0.93 0.005 100);
+    --fg-muted: oklch(0.72 0.01 250);
+    --fg-subtle: oklch(0.58 0.01 250);
+    --accent-soft: oklch(0.3 0.05 165);
+    --pos-soft: oklch(0.3 0.05 165);
+    --neg-soft: oklch(0.3 0.06 22);
+    --warn-soft: oklch(0.32 0.06 80);
+    --warn-strong: oklch(0.8 0.13 75);
+    --info-soft: oklch(0.3 0.05 250);
+    --info-strong: oklch(0.78 0.1 250);
+    --cool-soft: oklch(0.3 0.05 295);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: oklch(0.19 0.008 250);
+  --bg-soft: oklch(0.22 0.008 250);
+  --bg-elev: oklch(0.24 0.009 250);
+  --border: oklch(0.31 0.008 250);
+  --border-strong: oklch(0.38 0.01 250);
+  --fg: oklch(0.93 0.005 100);
+  --fg-muted: oklch(0.72 0.01 250);
+  --fg-subtle: oklch(0.58 0.01 250);
+  --accent-soft: oklch(0.3 0.05 165);
+  --pos-soft: oklch(0.3 0.05 165);
+  --neg-soft: oklch(0.3 0.06 22);
+  --warn-soft: oklch(0.32 0.06 80);
+  --warn-strong: oklch(0.8 0.13 75);
+  --info-soft: oklch(0.3 0.05 250);
+  --info-strong: oklch(0.78 0.1 250);
+  --cool-soft: oklch(0.3 0.05 295);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 400 14px/1.45 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select { font: inherit; color: inherit; }
+a { color: inherit; text-decoration: none; }
+.mono { font-family: var(--mono); font-size: 0.93em; }
+small { font-size: 12px; }
+.muted { color: var(--fg-muted); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.subtle { color: var(--fg-subtle); }
+:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; border-radius: 4px; }
+
+/* ── Shell ─────────────────────────────────────────────────────────── */
+.shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+.sidebar {
+  border-right: 1px solid var(--border); background: var(--bg-soft);
+  padding: 18px 12px; display: flex; flex-direction: column; gap: 4px;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 16px; font-weight: 600; letter-spacing: -0.01em; }
+.brand i { width: 24px; height: 24px; border-radius: 7px; background: var(--accent); display: inline-block; }
+.nav-section { font-size: 11px; font-weight: 600; color: var(--fg-subtle); padding: 12px 10px 6px; letter-spacing: 0.02em; }
+.nav-item {
+  display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 8px;
+  font-size: 13px; color: var(--fg-muted); border: none; background: none; width: 100%; text-align: left; cursor: pointer;
+}
+.nav-item:hover { background: var(--bg-elev); color: var(--fg); }
+.nav-item svg { width: 15px; height: 15px; flex-shrink: 0; }
+.nav-item.active { background: var(--bg-elev); color: var(--fg); box-shadow: 0 1px 2px rgba(15,23,42,.06); font-weight: 500; }
+.nav-item .count { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--fg-subtle); }
+.nav-item .count.hot { color: var(--warn-strong); font-weight: 600; }
+.nav-children { display: flex; flex-direction: column; gap: 2px; padding-left: 14px; margin: 2px 0 4px; border-left: 1px solid var(--border); margin-left: 18px; }
+.nav-children .nav-item { padding: 6px 10px; }
+.nav-parent { color: var(--fg); }
+.nav-dim { opacity: .55; }
+.nav-foot { margin-top: auto; padding: 14px 10px 4px; font-size: 11px; color: var(--fg-subtle); line-height: 1.5; }
+
+main { padding: 26px 32px 60px; max-width: 1360px; width: 100%; min-width: 0; }
+.page { display: none; }
+.page.open { display: block; }
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-bottom: 20px; }
+.page-sub { font-size: 13px; color: var(--fg-subtle); margin-bottom: 4px; }
+.page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+.page-lede { margin: 8px 0 0; max-width: 72ch; color: var(--fg-muted); font-size: 13px; line-height: 1.55; }
+.page-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.stack { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+.tab { display: inline-flex; align-items: center; gap: 7px; padding: 10px 14px; font-size: 13px; font-weight: 500; color: var(--fg-subtle); background: transparent; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
+.tab svg { width: 14px; height: 14px; }
+.tab:hover { color: var(--fg); }
+.tab.active { color: var(--fg); border-bottom-color: var(--accent); }
+.tab .chip.muted { color: var(--fg-subtle); padding: 1px 7px; }
+.tab .chip.hot { color: var(--warn-strong); border-color: var(--warn); }
+.tab-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-bottom: 18px; }
+.tab-head .page-lede { margin-top: 0; }
+/* ── Primitives ────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px;
+  border: 1px solid var(--border-strong); background: var(--bg-elev); color: var(--fg);
+  font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
+}
+.btn:hover { border-color: var(--fg-subtle); }
+.btn.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.btn.sm { padding: 4px 9px; font-size: 12px; border-radius: 7px; }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--fg-muted); }
+.btn.ghost:hover { background: var(--bg-soft); color: var(--fg); }
+.btn.icon { padding: 4px; width: 26px; height: 26px; justify-content: center; }
+.btn.danger { color: var(--neg); }
+.btn svg { width: 14px; height: 14px; }
+.card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 1px 2px rgba(15,23,42,.03); min-width: 0; }
+.card-head { padding: 13px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.card-title { font-size: 13px; font-weight: 600; margin: 0; }
+.card-sub { font-size: 12px; color: var(--fg-subtle); }
+.card-body { padding: 16px 18px; }
+.card-foot { padding: 10px 18px; border-top: 1px solid var(--border); font-size: 12px; color: var(--fg-subtle); display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.toolbar .search { flex: 1 1 220px; position: relative; }
+.toolbar .search input { width: 100%; }
+.input { padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-elev); font-size: 13px; }
+.input::placeholder { color: var(--fg-subtle); }
+select.input { padding-right: 26px; }
+.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
+.seg button { padding: 5px 10px; border: none; background: transparent; font-size: 12px; color: var(--fg-muted); cursor: pointer; border-right: 1px solid var(--border); }
+.seg button:last-child { border-right: none; }
+.seg button.on { background: var(--bg-soft); color: var(--fg); font-weight: 500; }
+.seg button b { font-family: var(--mono); font-weight: 500; color: var(--fg-subtle); margin-left: 4px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 550; border: 1px solid var(--border); color: var(--fg-muted); background: var(--bg-elev); white-space: nowrap; }
+.chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c, currentColor); display: inline-block; }
+.chip.healthy { --c: var(--pos); color: var(--accent-strong); background: var(--pos-soft); border-color: transparent; }
+.chip.degraded { --c: var(--warn); color: var(--warn-strong); background: var(--warn-soft); border-color: transparent; }
+.chip.parked { --c: var(--neg); color: var(--neg); background: var(--neg-soft); border-color: transparent; }
+.chip.quarantined { --c: var(--cool); color: var(--cool); background: var(--cool-soft); border-color: transparent; }
+.chip.verifying { --c: var(--info); color: var(--info-strong); background: var(--info-soft); border-color: transparent; }
+.chip.enabled { --c: var(--pos); }
+.chip.disabled { --c: var(--fg-subtle); }
+.chip.pinned { --c: var(--warn-strong); }
+.chip.leased { --c: var(--info); color: var(--info-strong); background: var(--info-soft); border-color: transparent; }
+.chip.ready { --c: var(--warn); color: var(--warn-strong); background: var(--warn-soft); border-color: transparent; }
+.chip.done { --c: var(--pos); color: var(--accent-strong); background: var(--pos-soft); border-color: transparent; }
+.chip.cancelled, .chip.expired { --c: var(--neg); color: var(--neg); }
+.chip.manual { --c: var(--warn-strong); color: var(--warn-strong); }
+.legend { display: flex; flex-wrap: wrap; gap: 7px; }
+.legend button { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border); background: var(--bg-elev); border-radius: 999px; padding: 4px 11px 4px 9px; font-size: 12px; color: var(--fg-muted); cursor: pointer; }
+.legend button b { font-family: var(--mono); font-weight: 500; color: var(--fg); }
+.legend button.on { border-color: var(--fg); color: var(--fg); }
+.legend .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+#task-table td { white-space: nowrap; }
+#task-table td:first-child { white-space: normal; }
+th { text-align: left; font-weight: 500; font-size: 12px; color: var(--fg-subtle); padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; background: var(--bg-elev); position: sticky; top: 0; }
+td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: var(--bg-soft); }
+tr.sel td { background: var(--info-soft); }
+td .two { display: flex; flex-direction: column; gap: 1px; line-height: 1.3; white-space: nowrap; }
+td .two small { color: var(--fg-subtle); }
+.table-wrap { overflow: auto; max-height: 560px; }
+.num { text-align: right; font-family: var(--mono); font-size: 12.5px; }
+th.num { text-align: right; }
+.ring { display: inline-flex; align-items: center; gap: 6px; }
+.ring svg { width: 22px; height: 22px; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 3; }
+.ring .track { stroke: var(--border); }
+.ring .fill { stroke: var(--accent); stroke-linecap: round; }
+.ring.full .fill { stroke: var(--warn); }
+.ring b { font-family: var(--mono); font-weight: 500; font-size: 12.5px; }
+.ring span { font-family: var(--mono); font-size: 11px; color: var(--fg-subtle); }
+.note { display: flex; gap: 10px; align-items: flex-start; padding: 10px 18px; border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--fg-muted); background: var(--bg-soft); }
+.note svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 2px; }
+.note.warn { color: var(--warn-strong); background: var(--warn-soft); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; margin: 0; }
+.kv dt { color: var(--fg-subtle); }
+.kv dd { margin: 0; }
+.field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.field label { font-weight: 500; }
+.field .help { font-size: 12px; color: var(--fg-subtle); }
+dialog { border: 1px solid var(--border); border-radius: 14px; padding: 0; background: var(--bg-elev); color: var(--fg); width: min(480px, calc(100vw - 32px)); box-shadow: 0 20px 60px rgba(15,23,42,.18); }
+dialog::backdrop { background: rgba(15,23,42,.35); }
+.dlg-head { padding: 16px 20px 0; }
+.dlg-head h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+.dlg-head p { margin: 6px 0 0; font-size: 13px; color: var(--fg-muted); line-height: 1.5; }
+.dlg-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+.dlg-foot { padding: 12px 20px 16px; display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--border); }
+.token { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border: 1px dashed var(--border-strong); border-radius: 8px; background: var(--bg-soft); }
+.token code { font-family: var(--mono); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Tasks: the belt ───────────────────────────────────────────────── */
+.belt-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.belt-sentence { font-size: 13px; color: var(--fg-muted); max-width: 86ch; line-height: 1.55; margin: 0; }
+.belt-sentence b { color: var(--fg); font-weight: 600; }
+.belt { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 0 18px; }
+.belt-row { display: contents; }
+.belt-label { padding: 14px 0 10px; border-top: 1px solid var(--border); }
+.belt-label .item { font-family: var(--mono); font-weight: 500; font-size: 13px; }
+.belt-label small { display: block; color: var(--fg-subtle); margin-top: 2px; line-height: 1.4; }
+.belt-track { position: relative; height: 92px; border-top: 1px solid var(--border); }
+.belt-track .grid-line { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); opacity: .6; }
+.belt-track .now { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--fg); }
+.bucket { position: absolute; bottom: 8px; width: 9px; display: flex; flex-direction: column-reverse; gap: 2px; align-items: center; }
+.bucket i { display: block; width: 8px; height: 8px; border-radius: 2px; background: var(--c); }
+.bucket .more { font-family: var(--mono); font-size: 10px; color: var(--fg-subtle); line-height: 1; margin-bottom: 1px; }
+.bucket.done { --c: var(--pos); }
+.bucket.later { --c: transparent; }
+.bucket.later i { border: 1.5px solid var(--fg-subtle); width: 8px; height: 8px; }
+.bucket.later.soon i { border-color: var(--warn-strong); }
+.bucket.leased { --c: var(--info); }
+.bucket.due { --c: var(--warn); }
+.bucket.due i { background: var(--warn-strong); }
+.wall { position: absolute; bottom: 8px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.wall .bar { width: 10px; border-radius: 3px 3px 2px 2px; background: var(--warn-strong); }
+.wall .n { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--warn-strong); white-space: nowrap; }
+.axis { grid-column: 2; position: relative; height: 22px; }
+.axis span { position: absolute; top: 4px; transform: translateX(-50%); font-family: var(--mono); font-size: 11px; color: var(--fg-subtle); white-space: nowrap; }
+.axis span.nowlbl { color: var(--fg); font-weight: 600; top: -2px; }
+.belt-key { display: flex; flex-wrap: wrap; gap: 16px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--fg-muted); }
+.belt-key li { display: inline-flex; align-items: center; gap: 7px; }
+.belt-key i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; background: var(--c); }
+.belt-key i.outline { border: 1.5px solid var(--fg-subtle); background: transparent; }
+@media (prefers-reduced-motion: no-preference) {
+  .bucket.leased i { animation: breathe 2.4s ease-in-out infinite; }
+  @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+}
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .split { grid-template-columns: 1fr; } }
+
+/* city log */
+.log { display: flex; flex-direction: column; }
+.log-task { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.log-task:last-child { border-bottom: none; }
+.log-task .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.log-task .head .item { font-family: var(--mono); font-size: 12.5px; font-weight: 500; }
+.events { list-style: none; margin: 8px 0 0; padding: 0 0 0 10px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.events li { display: grid; grid-template-columns: 88px 1fr; gap: 8px; color: var(--fg-muted); }
+.events li .t { font-family: var(--mono); color: var(--fg-subtle); }
+.events li.live .t { color: var(--info-strong); font-weight: 600; }
+.result { display: flex; gap: 12px; margin-top: 6px; font-size: 12px; color: var(--fg-muted); }
+.result b { font-family: var(--mono); font-weight: 500; color: var(--fg); }
+
+.hosts-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; }
+.host { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; }
+.host .line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.host .id { font-family: var(--mono); font-weight: 600; font-size: 14px; }
+.host .meta { color: var(--fg-subtle); font-size: 12.5px; }
+.host .right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+.host .roll { padding: 0; border: none; }
+.host .roll .bar { flex: 1 1 120px; }
+td .hostcell { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+/* ── Fleet page ────────────────────────────────────────────────────── */
+.host-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 13px 18px; border-bottom: 1px solid var(--border); }
+.host-head .id { font-family: var(--mono); font-weight: 600; font-size: 14px; }
+.host-head .meta { color: var(--fg-subtle); font-size: 12.5px; }
+.host-head .right { margin-left: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; font-size: 12.5px; }
+.stepper button { border: none; background: transparent; width: 26px; height: 26px; cursor: pointer; color: var(--fg-muted); }
+.stepper button:hover { background: var(--bg-soft); color: var(--fg); }
+.stepper b { font-family: var(--mono); font-weight: 500; padding: 0 6px; min-width: 26px; text-align: center; border-left: 1px solid var(--border); border-right: 1px solid var(--border); line-height: 26px; }
+.stepper small { padding: 0 8px 0 6px; color: var(--fg-subtle); }
+.toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--fg-muted); cursor: pointer; }
+.toggle i { width: 30px; height: 18px; border-radius: 999px; background: var(--border-strong); position: relative; display: inline-block; transition: background .15s; }
+.toggle i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.toggle.on i { background: var(--accent); }
+.toggle.on i::after { left: 14px; }
+.roll { padding: 10px 18px; border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--fg-muted); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.roll .bar { flex: 1 1 180px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.roll .bar i { display: block; height: 100%; background: var(--info); }
+.lease { font-size: 12px; color: var(--fg-subtle); font-family: var(--mono); }
+.eye { color: var(--fg-subtle); }
+.task-now { display: flex; flex-direction: column; gap: 1px; }
+.task-now .city { font-weight: 500; }
+.task-now small { color: var(--fg-subtle); }
+.task-now .elapsed { font-family: var(--mono); }
+.hold { color: var(--fg-subtle); font-style: normal; }
+.hold.reason { color: var(--warn-strong); }
+
+/* ── Cities page ───────────────────────────────────────────────────── */
+.city-name { font-weight: 500; }
+.city-name small { display: block; color: var(--fg-subtle); font-family: var(--mono); font-size: 11.5px; font-weight: 400; }
+tr.verify-row td { padding-top: 0; background: var(--info-soft); border-bottom-color: var(--border); }
+.verify-box { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 12.5px; color: var(--info-strong); padding: 8px 0 4px 30px; }
+.verify-box .btn { margin-left: 0; }
+.row-actions { display: inline-flex; gap: 2px; opacity: .55; }
+tr:hover .row-actions { opacity: 1; }
+.pin { color: var(--warn-strong); }
+
+/* ── Analysis tab ───────────────────────────────────────────────────── */
+.funnel { display: flex; align-items: stretch; gap: 0; padding: 16px 18px 6px; }
+.stage { flex: 1 1 0; min-width: 0; border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; background: var(--bg-elev); cursor: pointer; text-align: left; font: inherit; color: inherit; display: flex; flex-direction: column; gap: 2px; }
+.stage:hover { border-color: var(--border-strong); }
+.stage.on { border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
+.stage .name { font-size: 12px; font-weight: 600; line-height: 1.25; }
+.stage .n { font-family: var(--mono); font-size: 20px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; }
+.stage.good .n { color: var(--accent-strong); }
+.stage .unit { font-size: 11.5px; color: var(--fg-subtle); }
+.gap { flex: 0 0 30px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--fg-subtle); font-size: 10.5px; font-family: var(--mono); }
+.gap svg { width: 12px; height: 12px; }
+.gap.drop { color: var(--warn-strong); }
+.funnel-foot { padding: 6px 18px 14px; font-size: 12.5px; color: var(--fg-muted); max-width: 90ch; line-height: 1.5; }
+.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 1100px) { .charts { grid-template-columns: 1fr; } }
+.chart { padding: 12px 18px 10px; }
+.chart svg { width: 100%; height: 150px; display: block; overflow: visible; }
+.chart .bar { fill: var(--accent); }
+.chart .bar.dim { fill: var(--border-strong); }
+.chart .bar:hover { fill: var(--accent-strong); }
+.chart .grid { stroke: var(--border); stroke-width: 1; }
+.chart text { font-family: var(--mono); font-size: 10.5px; fill: var(--fg-subtle); }
+.chart text.val { fill: var(--fg); font-weight: 600; font-size: 11px; }
+.chart-sum { display: flex; gap: 18px; font-size: 12.5px; color: var(--fg-muted); padding: 0 18px 12px; }
+.chart-sum b { font-family: var(--mono); color: var(--fg); font-weight: 600; }
+.stage-detail { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 0; }
+@media (max-width: 1100px) { .stage-detail { grid-template-columns: 1fr; } }
+.stage-text { padding: 16px 18px; }
+.stage-text h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; display: flex; align-items: baseline; gap: 10px; }
+.stage-text h3 .mono { font-weight: 400; color: var(--fg-subtle); font-size: 12px; }
+.stage-text p { margin: 0 0 12px; max-width: 72ch; color: var(--fg-muted); line-height: 1.55; font-size: 13px; }
+.settings { display: flex; flex-wrap: wrap; gap: 6px; }
+.setting { display: inline-flex; gap: 6px; align-items: center; padding: 4px 9px; border: 1px solid var(--border); border-radius: 7px; font-size: 12.5px; background: var(--bg-soft); }
+.setting b { font-weight: 600; }
+.setting.fixed { border-style: dashed; color: var(--fg-subtle); }
+.prompts { border-left: 1px solid var(--border); padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.prompts label { font-size: 11.5px; font-weight: 600; color: var(--fg-subtle); letter-spacing: .02em; }
+.prompts pre { margin: 4px 0 0; padding: 10px 12px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 8px; font-family: var(--mono); font-size: 11.5px; line-height: 1.5; max-height: 190px; overflow: auto; white-space: pre-wrap; }
+/* ── Pool page (existing, abridged) ────────────────────────────────── */
+.secret { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; color: var(--fg-subtle); }
+
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; flex-direction: row; flex-wrap: wrap; }
+  .nav-children { border: none; margin: 0; padding: 0; flex-direction: row; }
+  .nav-section, .nav-foot, .brand, .nav-dim, .sidebar .nav-parent { display: none; }
+  .tabs { overflow-x: auto; }
+  main { padding: 18px 16px 40px; }
+  .belt { grid-template-columns: 1fr; }
+  .belt-label { border-top: none; padding-bottom: 4px; }
+  .axis { grid-column: 1; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" aria-label="Sidebar">
+    <div class="brand"><i></i>Recycle Servers</div>
+    <div class="nav-section nav-dim">Work</div>
+    <div class="nav-dim">
+      <button class="nav-item">Dashboard</button>
+      <button class="nav-item">Purchase orders</button>
+      <button class="nav-item">Inventory</button>
+      <button class="nav-item">Sell orders</button>
+    </div>
+    <div class="nav-section">Oversight</div>
+    <button class="nav-item nav-dim">Activity</button>
+    <button class="nav-item nav-dim">Accounting</button>
+    <button class="nav-item nav-parent" aria-expanded="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/></svg>
+      Monitors
+    </button>
+    <div class="nav-children" role="group" aria-label="Monitors">
+      <button class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg>Facebook</button>
+      <button class="nav-item nav-dim">Reddit</button>
+      <button class="nav-item nav-dim">WeChat</button>
+    </div>
+    <button class="nav-item nav-dim">Settings</button>
+    <div class="nav-foot">Design mock, 2026-10-24.<br>Numbers are invented but shaped like the live fleet. Clock fixed at 11:40 Eastern.</div>
+  </aside>
+
+  <main>
+    <div class="page-head" style="margin-bottom:0">
+      <div><div class="page-sub">Monitors / Facebook</div><h1 class="page-title">Facebook fleet</h1></div>
+    </div>
+    <nav class="tabs" aria-label="Views">
+      <button class="tab" data-go="fleet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg>Fleet <span class="chip muted">15</span></button>
+      <button class="tab" data-go="tasks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Tasks <span class="chip muted hot" id="nav-due">16</span></button>
+      <button class="tab" data-go="cities"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2"/></svg>Cities <span class="chip muted">127</span></button>
+      <button class="tab" data-go="analysis"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5M4 19h16M8 15v-4M12 15V8M16 15v-6M20 15v-9"/></svg>Analysis</button>
+      <button class="tab" data-go="pool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-5-6.3"/></svg>Account pool <span class="chip muted">41</span></button>
+    </nav>
+    <!-- ═════════ Tasks ═════════ -->
+    <section class="page" id="page-tasks" aria-labelledby="t-tasks">
+      <div class="tab-head">
+        <div><h2 class="visually-hidden" id="t-tasks">Tasks</h2>
+          <p class="page-lede">Every enabled city has one open task per item. A worker takes the next due one the moment it is free, so the clock below is what the fleet is working through, not a schedule.</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" data-dlg="dlg-searchnow">Search a city now</button>
+          <button class="btn primary" data-dlg="dlg-round">Start the round now</button>
+        </div>
+      </div>
+      <div class="stack">
+        <section class="card" aria-label="Queue">
+          <div class="card-body">
+            <div class="belt-head">
+              <p class="belt-sentence" id="belt-sentence"></p>
+              <span class="card-sub">Eastern time · updates every 10 s</span>
+            </div>
+            <div class="belt" id="belt"></div>
+            <ul class="belt-key" aria-hidden="true">
+              <li><i style="--c: var(--pos)"></i>searched</li>
+              <li><i style="--c: var(--info)"></i>running now</li>
+              <li><i style="--c: var(--warn-strong)"></i>due, waiting for a worker</li>
+              <li><i class="outline"></i>due later</li>
+            </ul>
+          </div>
+        </section>
+
+        <div class="split">
+          <section class="card" aria-label="Task list">
+            <div class="toolbar">
+              <div class="seg" id="state-seg">
+                <button class="on" data-state="all">All</button>
+                <button data-state="leased">Running</button>
+                <button data-state="ready">Due</button>
+                <button data-state="done">Done</button>
+                <button data-state="cancelled">Cancelled</button>
+                <button data-state="expired">Expired</button>
+              </div>
+              <select class="input" id="item-sel"><option value="">Both items</option><option>server_ram</option><option>enterprise_ssd</option></select>
+              <div class="search"><input class="input" id="task-q" type="search" placeholder="City, worker or account"></div>
+              <select class="input"><option>Last 24 h</option><option>Last 7 days</option><option>Today (UTC)</option></select>
+            </div>
+            <div class="table-wrap">
+              <table id="task-table">
+                <thead><tr>
+                  <th>City</th><th>Item</th><th>State</th><th>Due</th><th>Worker</th><th class="num">Took</th><th class="num">Cards</th><th class="num">Alerts</th><th>Why</th>
+                </tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="card-foot"><span id="task-foot"></span><span>Click a row for the city's log</span></div>
+          </section>
+
+          <aside class="card" aria-label="City log" id="city-log"></aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═════════ Cities ═════════ -->
+    <section class="page" id="page-cities" aria-labelledby="t-cities">
+      <div class="tab-head">
+        <div><h2 class="visually-hidden" id="t-cities">Cities</h2>
+          <p class="page-lede" id="cities-lede"></p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" data-dlg="dlg-settings">Rules</button>
+          <button class="btn primary" data-dlg="dlg-addcity">Add city</button>
+        </div>
+      </div>
+      <section class="card">
+        <div class="toolbar">
+          <div class="legend" id="city-legend"></div>
+          <select class="input" id="region-sel"><option value="">Every region</option></select>
+          <div class="search"><input class="input" id="city-q" type="search" placeholder="Name or slug"></div>
+        </div>
+        <div class="table-wrap" style="max-height: 720px">
+          <table id="city-table">
+            <thead><tr>
+              <th>City</th><th>Region</th><th>Status</th><th class="num">Per day</th><th>server_ram</th><th>enterprise_ssd</th><th>Home of</th><th></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="card-foot"><span id="city-foot"></span><span>Last searched and next due, Eastern time</span></div>
+      </section>
+    </section>
+
+    <!-- ═════════ Fleet ═════════ -->
+    <section class="page" id="page-fleet" aria-labelledby="t-fleet">
+      <div class="tab-head">
+        <div><h2 class="visually-hidden" id="t-fleet">Fleet</h2>
+          <p class="page-lede">Hosts run identical worker containers. Each worker holds one pool account, its proxy and a lease epoch, and asks the queue for the next city. Every account is in the table, running or not.</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" data-dlg="dlg-release">Release a version</button>
+          <button class="btn primary" data-dlg="dlg-addhost">Add host</button>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="hosts-strip" id="hosts"></div>
+        <section class="card" aria-label="Accounts">
+          <div class="toolbar">
+            <div class="legend" id="fleet-legend"></div>
+            <select class="input" id="host-sel"><option value="">Every host</option><option value="worker-60-14">worker-60-14</option><option value="homelab">homelab</option><option value="-">Not running</option></select>
+            <div class="search"><input class="input" id="fleet-q" type="search" placeholder="Worker, account, city or host"></div>
+          </div>
+          <div class="table-wrap" style="max-height: 760px">
+            <table id="fleet-table">
+              <thead><tr><th>Account</th><th>Host</th><th>Worker</th><th>State</th><th>Now</th><th>Today</th><th>Lease</th><th>Version</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="card-foot"><span id="fleet-foot"></span><span>Minutes today count leased time per UTC day against the 360-minute budget</span></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ═════════ Analysis ═════════ -->
+    <section class="page" id="page-analysis" aria-labelledby="t-analysis">
+      <div class="tab-head">
+        <div><h2 class="visually-hidden" id="t-analysis">Analysis</h2>
+          <p class="page-lede">Where listings drop out between a search and an alert. Keywords first, then the model. Click a stage to read what it does and change its settings; a change reaches every worker at its next task.</p>
+        </div>
+        <div class="page-actions">
+          <div class="seg" id="range-seg"><button class="on" data-range="1">Today</button><button data-range="7">7 days</button><button data-range="14">14 days</button></div>
+          <select class="input"><option>All workers</option><option>worker-60-14 only</option><option>homelab only</option></select>
+          <select class="input"><option>Both items</option><option>server_ram</option><option>enterprise_ssd</option></select>
+        </div>
+      </div>
+      <div class="stack">
+        <section class="card" aria-label="From a search to an alert">
+          <div class="card-head"><h2 class="card-title">From a search to an alert</h2><span class="card-sub" id="funnel-sub">today, all workers, both items</span></div>
+          <div class="funnel" id="funnel"></div>
+          <p class="funnel-foot" id="funnel-foot"></p>
+          <div class="stage-detail" id="stage-detail"></div>
+        </section>
+        <div class="charts">
+          <section class="card" aria-label="Reviewed by the model per day">
+            <div class="card-head"><h2 class="card-title">Reviewed by the model, per day</h2><span class="card-sub">last 14 days · fresh verdicts only</span></div>
+            <div class="chart" id="chart-reviewed"></div>
+            <div class="chart-sum" id="sum-reviewed"></div>
+          </section>
+          <section class="card" aria-label="Alerts per day">
+            <div class="card-head"><h2 class="card-title">Alerts sent, per day</h2><span class="card-sub">last 14 days · after coordinator dedupe</span></div>
+            <div class="chart" id="chart-alerts"></div>
+            <div class="chart-sum" id="sum-alerts"></div>
+          </section>
+        </div>
+        <section class="card" aria-label="Alerts by city">
+          <div class="card-head"><h2 class="card-title">Where the alerts came from</h2><span class="card-sub">last 14 days · cities with at least one alert</span></div>
+          <div class="table-wrap" style="max-height: 320px">
+            <table id="hits-table"><thead><tr><th>City</th><th>Region</th><th class="num">Alerts</th><th class="num">Reviewed</th><th class="num">Alert rate</th><th>Last alert</th><th>Searched by</th></tr></thead><tbody></tbody></table>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ═════════ Account pool ═════════ -->
+    <section class="page" id="page-pool" aria-labelledby="t-pool">
+      <div class="tab-head">
+        <div><h2 class="visually-hidden" id="t-pool">Account pool</h2>
+          <p class="page-lede">The tab as it exists today. One column is new: where the account runs, linking to its worker on the Fleet tab.</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn">Import</button>
+          <button class="btn primary">Add account</button>
+        </div>
+      </div>
+      <section class="card">
+        <div class="toolbar">
+          <div class="legend">
+            <button class="on"><span class="dot" style="--c: var(--fg-subtle)"></span>All <b>41</b></button>
+            <button><span class="dot" style="--c: var(--pos)"></span>Available <b>0</b></button>
+            <button><span class="dot" style="--c: var(--info)"></span>Fleet <b>18</b></button>
+            <button><span class="dot" style="--c: var(--warn)"></span>Taken <b>2</b></button>
+            <button><span class="dot" style="--c: var(--neg)"></span>Retired <b>21</b></button>
+          </div>
+          <div class="search"><input class="input" type="search" placeholder="UID, email, holder or note"></div>
+        </div>
+        <div class="table-wrap" style="max-height: 640px">
+          <table id="pool-table">
+            <thead><tr><th class="num">No</th><th>UID</th><th>Status</th><th>Runs on</th><th>Password</th><th>Code</th><th>Email</th><th>Cookie</th><th>Notes</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="card-foot"><span>41 accounts</span><span>Secrets are revealed one at a time and the reveal is logged</span></div>
+      </section>
+    </section>
+  </main>
+</div>
+
+<!-- ═════════ Dialogs ═════════ -->
+<dialog id="dlg-addcity">
+  <div class="dlg-head"><h2>Add a city</h2><p>A worker checks the slug first. The city is searched only once the label Facebook shows matches what you typed, or once you enable it anyway.</p></div>
+  <div class="dlg-body">
+    <div class="field"><label>Marketplace slug or id</label><input class="input mono" value="boise" placeholder="e.g. boise or 112345678901234"><span class="help">The part after facebook.com/marketplace/ in the city's URL.</span></div>
+    <div class="field"><label>Name</label><input class="input" value="Boise"></div>
+    <div class="field"><label>Radius</label><select class="input" style="width: 140px"><option>500 km</option><option>250 km</option><option>100 km</option></select></div>
+    <div class="field"><label>Region</label><select class="input" style="width: 200px"><option>Mountain</option><option>Pacific</option><option>Midwest</option></select></div>
+  </div>
+  <div class="dlg-foot"><button class="btn" data-close>Cancel</button><button class="btn primary" data-close>Add and verify</button></div>
+</dialog>
+
+<dialog id="dlg-searchnow">
+  <div class="dlg-head"><h2>Search a city now</h2><p>Puts one task at the front of the queue. The next free worker takes it, whatever its home cities are.</p></div>
+  <div class="dlg-body">
+    <div class="field"><label>City</label><input class="input" value="Houston" placeholder="Start typing"></div>
+    <div class="field"><label>Item</label><div class="seg"><button class="on">server_ram</button><button>enterprise_ssd</button><button>both</button></div></div>
+    <p class="help muted" style="margin:0;font-size:12.5px">Houston · server_ram was searched 2 h 28 min ago by homelab-3 and is next due at 09:12 tomorrow.</p>
+  </div>
+  <div class="dlg-foot"><button class="btn" data-close>Cancel</button><button class="btn primary" data-close>Search now</button></div>
+</dialog>
+
+<dialog id="dlg-round">
+  <div class="dlg-head"><h2>Start the round now</h2><p>Makes every waiting task due immediately, except city-items searched in the last 2 hours.</p></div>
+  <div class="dlg-body">
+    <dl class="kv">
+      <dt>Becomes due now</dt><dd><b>134</b> city-items (62 server_ram, 72 enterprise_ssd)</dd>
+      <dt>Skipped, done recently</dt><dd>31</dd>
+      <dt>Already running</dt><dd>15</dd>
+      <dt>Workers free to take them</dt><dd>0 of 15 right now; each takes the next as it finishes</dd>
+      <dt>Budget left today</dt><dd>14 accounts have 2 h or more; 1 is at its limit</dd>
+    </dl>
+    <p class="muted" style="margin:0;font-size:12.5px">At 5 to 7 minutes per city-item, the 134 finish in about 1 h 10 min.</p>
+  </div>
+  <div class="dlg-foot"><button class="btn" data-close>Cancel</button><button class="btn primary" data-close>Start the round</button></div>
+</dialog>
+
+<dialog id="dlg-settings">
+  <div class="dlg-head"><h2>Rules</h2><p>Fleet-wide settings. A change applies to the next task each worker asks for; nothing restarts.</p></div>
+  <div class="dlg-body">
+    <dl class="kv">
+      <dt>Searches per city per item</dt><dd><input class="input" style="width:70px" value="1"> a day, unless a city is pinned</dd>
+      <dt>Budget per account</dt><dd><input class="input" style="width:70px" value="360"> minutes per UTC day</dd>
+      <dt>Lease</dt><dd><input class="input" style="width:70px" value="30"> minutes, renewed by heartbeats</dd>
+      <dt>Longest task</dt><dd><input class="input" style="width:70px" value="45"> minutes, then returned to the queue</dd>
+      <dt>Familiar city window</dt><dd><input class="input" style="width:70px" value="7"> days</dd>
+      <dt>Round start skips</dt><dd>city-items done in the last <input class="input" style="width:70px" value="2"> hours</dd>
+      <dt>Quarantine</dt><dd><input class="input" style="width:70px" value="48"> hours after a 0-card search, one probe every <input class="input" style="width:60px" value="6"> h</dd>
+    </dl>
+  </div>
+  <div class="dlg-foot"><button class="btn" data-close>Cancel</button><button class="btn primary" data-close>Save rules</button></div>
+</dialog>
+
+<dialog id="dlg-addhost">
+  <div class="dlg-head"><h2>Add a host</h2><p>Run the agent container on the machine with this token. The host starts in observe mode and launches nothing until you make it authoritative.</p></div>
+  <div class="dlg-body">
+    <div class="field"><label>Host id</label><input class="input mono" value="worker-60-15"></div>
+    <div class="field"><label>Token, shown once</label>
+      <div class="token"><code>fh_9Kq2…xV7mPz3eL8</code><button class="btn sm">Copy</button></div>
+      <span class="help">Lost tokens are replaced, not recovered. The old one stops working when you replace it.</span>
+    </div>
+    <div class="field"><label>Start the agent</label>
+      <div class="token"><code>docker run -d --name fleet-agent -e FLEET_URL=… -e FLEET_HOST_ID=worker-60-15 -e FLEET_HOST_TOKEN=… ghcr.io/jinhuw/fleet-agent:1.340.0</code><button class="btn sm">Copy</button></div>
+    </div>
+  </div>
+  <div class="dlg-foot"><button class="btn primary" data-close>Done</button></div>
+</dialog>
+
+<dialog id="dlg-release">
+  <div class="dlg-head"><h2>Release a worker version</h2><p>Hosts replace one idle worker at a time. Each replacement is a Facebook login, so a roll takes a while on purpose.</p></div>
+  <div class="dlg-body">
+    <div class="field"><label>Image</label><input class="input mono" value="ghcr.io/jinhuw/aimm-recycle:0.14.1"></div>
+    <dl class="kv">
+      <dt>Running now</dt><dd>0.14.0 on 14 workers, 0.13.18 on 1</dd>
+      <dt>Order</dt><dd>idle workers first, one per host at a time, next after the previous one reports healthy</dd>
+      <dt>Logins caused</dt><dd><b>15</b>, spread over roughly 2 hours</dd>
+    </dl>
+  </div>
+  <div class="dlg-foot"><button class="btn" data-close>Cancel</button><button class="btn primary" data-close>Start the roll</button></div>
+</dialog>
+
+<script>
+// ─── Fixed clock and helpers ────────────────────────────────────────────────
+const NOW = Date.parse('2026-10-24T15:40:00Z');       // 11:40 Eastern
+const H = 3600e3, M = 60e3;
+let seed = 20261024;
+const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+const pick = a => a[Math.floor(rnd() * a.length)];
+const et = (d, o = {}) => new Date(d).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', ...o });
+const etDay = d => new Date(d).toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
+const whenET = d => { const x = new Date(d); const sameDay = x.toLocaleDateString('en-US', { timeZone: 'America/New_York' }) === new Date(NOW).toLocaleDateString('en-US', { timeZone: 'America/New_York' }); return sameDay ? et(x) : `${etDay(x)} ${et(x)}`; };
+const ago = d => { const s = Math.round((NOW - new Date(d)) / 1000); if (s < 60) return `${s} s ago`; if (s < 3600) return `${Math.round(s / 60)} min ago`; if (s < 86400) return `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min ago`; return `${Math.floor(s / 86400)} d ago`; };
+const inTime = d => { const s = Math.round((new Date(d) - NOW) / 1000); if (s < 3600) return `in ${Math.max(1, Math.round(s / 60))} min`; return `in ${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min`; };
+const mmss = s => `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ─── Cities (127) ───────────────────────────────────────────────────────────
+const REGIONS = { NE: 'Northeast', MA: 'Mid-Atlantic', SE: 'Southeast', MW: 'Midwest', SC: 'South Central', MT: 'Mountain', PC: 'Pacific' };
+const CITY_SRC = `
+Boston:NE,Providence:NE,Hartford:NE,Worcester:NE,Springfield:NE,Manchester:NE,Portland Maine=portlandme:NE,Burlington:NE,Albany:NE,Syracuse:NE,Rochester:NE,Buffalo:NE,New York=nyc:MA,Long Island=longisland:MA,Newark:MA,Jersey City=jerseycity:MA,Philadelphia=philly:MA,Allentown:MA,Harrisburg:MA,Pittsburgh:MA,Scranton:MA,Baltimore:MA,Washington=dc:MA,Richmond:MA,Norfolk:MA,Wilmington:MA,Charlotte:SE,Raleigh:SE,Greensboro:SE,Charleston:SE,Columbia:SE,Greenville:SE,Atlanta:SE,Savannah:SE,Augusta:SE,Jacksonville:SE,Orlando:SE,Tampa:SE,Miami:SE,Fort Lauderdale=fortlauderdale:SE,West Palm Beach=westpalmbeach:SE,Tallahassee:SE,Pensacola:SE,Birmingham:SE,Huntsville:SE,Montgomery:SE,Mobile:SE,Nashville:SE,Memphis:SE,Knoxville:SE,Chattanooga:SE,Louisville:SE,Lexington:SE,Chicago:MW,Rockford:MW,Peoria:MW,Milwaukee:MW,Madison:MW,Green Bay=greenbay:MW,Minneapolis:MW,Duluth:MW,Des Moines=desmoines:MW,Cedar Rapids=cedarrapids:MW,Omaha:MW,Lincoln:MW,Kansas City=kansascity:MW,St. Louis=stlouis:MW,Springfield Missouri=springfieldmo:MW,Wichita:MW,Topeka:MW,Indianapolis:MW,Fort Wayne=fortwayne:MW,Detroit:MW,Grand Rapids=grandrapids:MW,Lansing:MW,Columbus:MW,Cleveland:MW,Cincinnati:MW,Dayton:MW,Toledo:MW,Akron:MW,Fargo:MW,Dallas:SC,Fort Worth=fortworth:SC,Houston:SC,San Antonio=sanantonio:SC,Austin:SC,El Paso=elpaso:SC,Corpus Christi=corpuschristi:SC,Lubbock:SC,Oklahoma City=okc:SC,Tulsa:SC,Little Rock=littlerock:SC,New Orleans=neworleans:SC,Baton Rouge=batonrouge:SC,Shreveport:SC,Jackson:SC,Denver:MT,Colorado Springs=coloradosprings:MT,Fort Collins=fortcollins:MT,Salt Lake City=slc:MT,Provo:MT,Boise:MT,Albuquerque:MT,Santa Fe=santafe:MT,Phoenix:MT,Tucson:MT,Las Vegas=lasvegas:MT,Reno:MT,Billings:MT,Cheyenne:MT,Seattle:PC,Tacoma:PC,Spokane:PC,Portland:PC,Eugene:PC,Sacramento:PC,San Francisco=sf:PC,San Jose=sanjose:PC,Oakland:PC,Fresno:PC,Bakersfield:PC,Los Angeles=la:PC,Riverside:PC,San Diego=sandiego:PC,Anchorage:PC,Honolulu:PC`;
+const CITIES = CITY_SRC.trim().split(',').map(s => { const [nm, r] = s.split(':'); const [name, slugOverride] = nm.split('='); return { name, slug: slugOverride || name.toLowerCase().replace(/[^a-z]/g, ''), region: r }; });
+const ITEMS = ['server_ram', 'enterprise_ssd'];
+
+// ─── Hosts & workers ────────────────────────────────────────────────────────
+const HOSTS = [
+  { id: 'worker-60-14', authoritative: true, capacity: 4, agent: '1.340.0', seen: NOW - 9e3, image: '0.14.0', note: 'The first fleet host, 10.10.60.14. Pilot of four accounts since Tuesday.' },
+  { id: 'homelab', authoritative: true, capacity: 12, agent: '1.340.0', seen: NOW - 21e3, image: '0.14.0', roll: { from: '0.13.18', to: '0.14.0', done: 7, total: 12, replacing: 'homelab-7' }, note: 'The coordinator VM, 10.10.10.73. Also runs the console and the coordinator.' },
+];
+const ACCOUNTS = Array.from({ length: 41 }, (_, i) => ({ no: i + 1, uid: `1000${String(16000000000 + Math.floor(rnd() * 8e9)).slice(0, 11)}` }));
+const WORKERS = [];
+const workerSpecs = [
+  ['worker-60-14-1', 'worker-60-14', 3, 'HEALTHY', 212, 7], ['worker-60-14-2', 'worker-60-14', 9, 'HEALTHY', 188, 7], ['worker-60-14-3', 'worker-60-14', 14, 'HEALTHY', 241, 6], ['worker-60-14-4', 'worker-60-14', 22, 'HEALTHY', 176, 8],
+  ['homelab-1', 'homelab', 1, 'HEALTHY', 301, 12], ['homelab-2', 'homelab', 2, 'HEALTHY', 294, 11], ['homelab-3', 'homelab', 5, 'HEALTHY', 352, 13], ['homelab-4', 'homelab', 7, 'HEALTHY', 266, 12], ['homelab-5', 'homelab', 11, 'DEGRADED', 143, 9],
+  ['homelab-6', 'homelab', 12, 'HEALTHY', 279, 12], ['homelab-7', 'homelab', 15, 'ROLLING', 231, 11], ['homelab-8', 'homelab', 18, 'HEALTHY', 288, 12], ['homelab-9', 'homelab', 19, 'HEALTHY', 254, 10], ['homelab-10', 'homelab', 27, 'HEALTHY', 263, 12], ['homelab-11', 'homelab', 31, 'HEALTHY', 247, 12],
+];
+for (const [id, host, no, state, minutes, epoch] of workerSpecs) WORKERS.push({ id, host, no, state, minutes, epoch, version: id === 'homelab-11' ? '0.13.18' : '0.14.0', beat: NOW - Math.floor(rnd() * 25e3), home: [] });
+// home cities: 2–3 per worker, unique
+const homePool = CITIES.slice(); let hp = 0;
+for (const w of WORKERS) { const n = 2 + (hp % 2); w.home = homePool.slice(hp, hp + n).map(c => c.slug); hp += n; }
+const homeOf = slug => WORKERS.find(w => w.home.includes(slug));
+
+// ─── Tasks ──────────────────────────────────────────────────────────────────
+// Per city-item: last done, next due; some leased now; a few never searched.
+const PINNED = new Set(['houston', 'dallas']);
+const VERIFYING = { boise: 'Boise, Idaho', santafe: 'Santa Fe, New Mexico', cheyenne: 'Cheyenne, Wyoming' };
+const VERIFY_MISMATCH = { santafe: 'Santa Fe Springs, California' };
+const DISABLED = new Set(['fresno', 'anchorage', 'honolulu']);
+const TASKS = [];
+let tid = 4100;
+const runningWorkers = WORKERS.filter(w => w.state !== 'ROLLING');
+let leasedSlots = runningWorkers.map(w => w.id);
+const cityItems = [];
+for (const c of CITIES) for (const item of ITEMS) cityItems.push({ c, item });
+// deterministic shuffle for lease assignment
+const order = cityItems.map((x, i) => [rnd(), i]).sort((a, b) => a[0] - b[0]).map(x => x[1]);
+let leaseIdx = 0;
+for (const i of order) {
+  const { c, item } = cityItems[i];
+  if (c.slug in VERIFYING || DISABLED.has(c.slug)) continue;
+  const perDay = PINNED.has(c.slug) ? 2 : 1;
+  const period = 24 * H / perDay;
+  const never = rnd() < 0.03;
+  const lastDone = never ? null : NOW - (0.5 * H + rnd() * 25 * H);
+  // yesterday's done too (for the city log)
+  if (lastDone) {
+    const took = 240 + Math.floor(rnd() * 200);
+    const w = homeOf(c.slug) && rnd() < 0.55 ? homeOf(c.slug) : pick(WORKERS);
+    TASKS.push({ id: tid++, city: c, item, state: 'done', due: lastDone - 6 * M - rnd() * 40 * M, leased_at: lastDone - took * 1e3, done: lastDone, worker: w.id, account: w.no, took, cards: 40 + Math.floor(rnd() * 150), opened: Math.floor(rnd() * 14), alerted: rnd() < 0.2 ? 1 : 0, why: w.home.includes(c.slug) ? 'home' : rnd() < 0.4 ? 'familiar' : 'other' });
+  }
+  // The scheduler hands due tasks out within minutes, so nothing waits for hours.
+  let due = lastDone ? lastDone + period : NOW - 10 * M; if (due <= NOW) due = NOW - rnd() * 45 * M;
+  if (due <= NOW && leaseIdx < leasedSlots.length) {
+    const wid = leasedSlots[leaseIdx++]; const w = WORKERS.find(x => x.id === wid);
+    const startedAgo = 20e3 + rnd() * 6.5 * M;
+    TASKS.push({ id: tid++, city: c, item, state: 'leased', due, leased_at: NOW - startedAgo, worker: w.id, account: w.no, why: w.home.includes(c.slug) ? 'home' : 'other', cards: startedAgo > 2 * M ? 30 + Math.floor(rnd() * 90) : null });
+    w.task = TASKS[TASKS.length - 1];
+  } else {
+    TASKS.push({ id: tid++, city: c, item, state: 'ready', due, why: lastDone ? 'cadence' : 'added', priority: 0 });
+  }
+}
+// a manual task at the front, two cancelled (removed city), one expired
+TASKS.push({ id: tid++, city: CITIES.find(c => c.slug === 'denver'), item: 'enterprise_ssd', state: 'ready', due: NOW - 3 * M, why: 'manual', priority: 100, by: 'jinhu' });
+for (const item of ITEMS) TASKS.push({ id: tid++, city: CITIES.find(c => c.slug === 'fresno'), item, state: 'cancelled', due: NOW - 5 * H, done: NOW - 2.2 * H, why: 'cadence', reason: 'city removed by jinhu' });
+TASKS.push({ id: tid++, city: CITIES.find(c => c.slug === 'tulsa'), item: 'server_ram', state: 'expired', due: NOW - 7 * H, leased_at: NOW - 6.4 * H, done: NOW - 5.65 * H, worker: 'homelab-5', account: 11, why: 'cadence', reason: 'ran past 45 min, returned to the queue' });
+for (const t of TASKS) t.sort = t.state === 'leased' ? 3 : t.state === 'ready' && t.due <= NOW ? 2 : t.state === 'ready' ? 0 : 1;
+
+// ─── Nav ────────────────────────────────────────────────────────────────────
+function go(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('open', p.id === `page-${page}`));
+  document.querySelectorAll('[data-go]').forEach(b => { b.classList.toggle('active', b.dataset.go === page); if (b.classList.contains('tab')) b.setAttribute('aria-current', b.dataset.go === page ? 'page' : ''); });
+  if (location.hash !== `#${page}`) history.replaceState(null, '', `#${page}`);
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => go(b.dataset.go)));
+window.addEventListener('hashchange', () => go(location.hash.slice(1) || 'fleet'));
+document.querySelectorAll('[data-dlg]').forEach(b => b.addEventListener('click', () => document.getElementById(b.dataset.dlg).showModal()));
+document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => b.closest('dialog').close()));
+
+// ─── Tasks page: the belt ───────────────────────────────────────────────────
+const WINDOW_H = 12;                  // hours either side of now
+const BUCKET_MIN = 15;
+const pct = d => ((new Date(d) - NOW) / H + WINDOW_H) / (2 * WINDOW_H) * 100;
+function renderBelt() {
+  const belt = document.getElementById('belt');
+  const counts = { done: 0, leased: 0, due: 0, later: 0 };
+  let html = '';
+  for (const item of ITEMS) {
+    const mine = TASKS.filter(t => t.item === item && (t.state === 'done' || t.state === 'leased' || t.state === 'ready'));
+    const buckets = new Map();
+    const add = (key, cls, title) => { const b = buckets.get(key) || { cls, titles: [] }; b.titles.push(title); buckets.set(key, b); };
+    const c = { done: 0, leased: 0, due: 0, later: 0 };
+    const dueTitles = [];
+    for (const t of mine) {
+      if (t.state === 'done') {
+        if (NOW - t.done > WINDOW_H * H) continue;
+        c.done++; add('d' + Math.floor((t.done - NOW) / (BUCKET_MIN * M)), 'done', `${t.city.name} · searched ${et(t.done)} by ${t.worker} · ${t.cards} cards, ${t.alerted} alert${t.alerted === 1 ? '' : 's'}`);
+      } else if (t.state === 'leased') { c.leased++; add('L', 'leased', `${t.city.name} · ${t.worker} since ${et(t.leased_at)}`); }
+      else if (t.due <= NOW) { c.due++; dueTitles.push(`${t.city.name} (due ${whenET(t.due)}${t.why === 'manual' ? ', asked by ' + t.by : ''})`); }
+      else { if (t.due - NOW > WINDOW_H * H) continue; c.later++; const soon = t.due - NOW < H; add('f' + Math.floor((t.due - NOW) / (BUCKET_MIN * M)), soon ? 'later soon' : 'later', `${t.city.name} · due ${whenET(t.due)}`); }
+    }
+    for (const k in c) counts[k] += c[k];
+    const total = CITIES.length - Object.keys(VERIFYING).length - DISABLED.size;
+    let track = '';
+    for (let h = -WINDOW_H; h <= WINDOW_H; h += 3) if (h) track += `<i class="grid-line" style="left:${(h + WINDOW_H) / (2 * WINDOW_H) * 100}%"></i>`;
+    track += `<i class="now" style="left:50%"></i>`;
+    for (const [key, b] of buckets) {
+      const left = key === 'L' ? 50.5 : key[0] === 'd' ? 50 + (Number(key.slice(1)) * BUCKET_MIN / 60) / (2 * WINDOW_H) * 100 - 0.4 : 50 + (Number(key.slice(1)) * BUCKET_MIN / 60) / (2 * WINDOW_H) * 100 + 0.6;
+      const n = b.titles.length, shown = Math.min(n, 7);
+      track += `<span class="bucket ${b.cls}" style="left:${left}%" title="${esc(b.titles.slice(0, 12).join('\n'))}${n > 12 ? '\n…' : ''}">${'<i></i>'.repeat(shown)}${n > shown ? `<span class="more">+${n - shown}</span>` : ''}</span>`;
+    }
+    if (c.due) track += `<span class="wall" style="right:calc(50% + 2px)" title="${esc(dueTitles.join('\n'))}"><span class="n">${c.due} due now</span><span class="bar" style="height:${Math.min(70, 6 + c.due * 4)}px"></span></span>`;
+    html += `<div class="belt-row">
+      <div class="belt-label"><span class="item">${item}</span><small>${c.done} of ${total} searched since ${et(NOW - WINDOW_H * H)}<br>${c.leased} running, ${c.due} due now, ${c.later} due by ${et(NOW + WINDOW_H * H)}</small></div>
+      <div class="belt-track">${track}</div></div>`;
+  }
+  // axis
+  let axis = '';
+  const firstHour = new Date(NOW); firstHour.setUTCMinutes(0, 0, 0);
+  for (let h = -WINDOW_H; h <= WINDOW_H; h++) { const d = new Date(firstHour.getTime() + h * H); const p = pct(d); if (p < 1 || p > 99 || Math.abs(p - 50) < 5) continue; const etH = Number(d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false })); if (etH % 3 === 0) axis += `<span style="left:${p}%">${et(d, { minute: undefined })}</span>`; }
+  axis += `<span class="nowlbl" style="left:50%">now ${et(NOW)}</span>`;
+  html += `<div></div><div class="axis">${axis}</div>`;
+  belt.innerHTML = html;
+  const busy = runningWorkers.length;
+  document.getElementById('belt-sentence').innerHTML = `<b>${busy} workers</b> are searching and none is waiting for work. <b>${counts.due} city-items are due</b> and will be taken as workers finish; at the current pace that backlog clears in about ${Math.round(counts.due * 6 / busy)} minutes. ${counts.done} searched in the last 12 hours, ${counts.later} come due in the next 12.`;
+  document.getElementById('nav-due').textContent = counts.due;
+}
+
+// ─── Tasks page: table and log ──────────────────────────────────────────────
+const stateChip = t => {
+  const map = { leased: ['leased', 'Running'], ready: [t.due <= NOW ? 'ready' : 'later', t.due <= NOW ? 'Due' : 'Later'], done: ['done', 'Done'], cancelled: ['cancelled', 'Cancelled'], expired: ['expired', 'Expired'] };
+  const [cls, label] = map[t.state];
+  return `<span class="chip ${cls}"><span class="dot"></span>${label}</span>${t.why === 'manual' ? ' <span class="chip manual">front of queue</span>' : ''}`;
+};
+const WHY = { home: 'home city', familiar: 'familiar', other: 'next due', cadence: 'once a day', added: 'new city', manual: 'asked for', probe: 'probe' };
+let filter = { state: 'all', item: '', q: '' }, selected = 'houston';
+function renderTasks() {
+  const rows = TASKS.filter(t => (filter.state === 'all' || t.state === filter.state) && (!filter.item || t.item === filter.item) && (!filter.q || [t.city.name, t.city.slug, t.worker, t.account].join(' ').toLowerCase().includes(filter.q)))
+    .sort((a, b) => b.sort - a.sort || (b.done || b.leased_at || b.due) - (a.done || a.leased_at || a.due));
+  const shown = rows.slice(0, 60);
+  document.querySelector('#task-table tbody').innerHTML = shown.map(t => `<tr data-slug="${t.city.slug}" class="${t.city.slug === selected ? 'sel' : ''}">
+    <td><span class="city-name">${t.city.name}</span></td>
+    <td class="mono">${t.item}</td>
+    <td>${stateChip(t)}</td>
+    <td><div class="two">${whenET(t.due)}<small>${t.state === 'ready' ? (t.due <= NOW ? `${ago(t.due)}` : inTime(t.due)) : t.state === 'leased' ? `started ${et(t.leased_at)}` : t.state === 'done' ? `done ${whenET(t.done)}` : t.reason}</small></div></td>
+    <td>${t.worker ? `<div class="two"><span class="mono">${t.worker}</span><small>account ${t.account}</small></div>` : '<span class="subtle">—</span>'}</td>
+    <td class="num">${t.state === 'leased' ? `<span class="chip leased">${mmss(Math.round((NOW - t.leased_at) / 1000))}</span>` : t.took ? mmss(t.took) : ''}</td>
+    <td class="num">${t.cards ?? ''}</td>
+    <td class="num">${t.alerted ? `<b style="color:var(--accent-strong)">${t.alerted}</b>` : t.alerted === 0 ? '0' : ''}</td>
+    <td class="subtle">${WHY[t.why] || t.why}</td></tr>`).join('');
+  document.getElementById('task-foot').textContent = `${shown.length} of ${rows.length} tasks · ${TASKS.filter(t => t.state === 'done' && NOW - t.done < 24 * H).length} done in the last 24 h`;
+  document.querySelectorAll('#task-table tbody tr').forEach(tr => tr.addEventListener('click', () => { selected = tr.dataset.slug; renderTasks(); renderLog(); }));
+}
+function renderLog() {
+  const c = CITIES.find(x => x.slug === selected);
+  const all = TASKS.filter(t => t.city.slug === selected);
+  const mine = ITEMS.flatMap(item => { const of = all.filter(t => t.item === item); const open = of.filter(t => t.state === 'ready' || t.state === 'leased'); const past = of.filter(t => t.state !== 'ready' && t.state !== 'leased').sort((a, b) => b.done - a.done).slice(0, 2); return [...open, ...past]; });
+  const home = homeOf(selected);
+  const ev = t => {
+    if (t.state === 'leased') return [[t.leased_at, 'handed to ' + t.worker], [t.leased_at + 4e3, 'started'], ...(t.cards ? [[t.leased_at + 2.2 * M, `${t.cards} cards so far`]] : []), [null, 'running']];
+    if (t.state === 'done') return [[t.leased_at, 'handed to ' + t.worker], [t.leased_at + 5e3, 'started, ' + (t.why === 'home' ? 'a home city' : t.why === 'familiar' ? 'familiar' : 'the next due')], [t.done - 12e3, `${t.cards} cards, ${t.opened} opened`], [t.done, `done in ${mmss(t.took)}${t.alerted ? `, ${t.alerted} alert` : ''}`]];
+    if (t.state === 'cancelled') return [[t.due, 'ready'], [t.done, 'cancelled: ' + t.reason]];
+    if (t.state === 'expired') return [[t.leased_at, 'handed to ' + t.worker], [t.done, 'expired: ' + t.reason]];
+    return [[t.due, t.due <= NOW ? `due, waiting for a worker` : `next search`]];
+  };
+  document.getElementById('city-log').innerHTML = `
+    <div class="card-head"><div><h2 class="card-title">${c.name}</h2><span class="card-sub mono">${c.slug}</span></div>
+      <div class="row-actions" style="opacity:1"><button class="btn sm" data-dlg="dlg-searchnow">Search now</button><a class="btn sm ghost" href="#cities">Edit</a></div></div>
+    <div class="note">${home ? `Home city of <span class="mono" style="margin:0 4px">${home.id}</span>, account ${home.no}. ${REGIONS[c.region]}, ${PINNED.has(c.slug) ? 'twice' : 'once'} a day per item.` : `${REGIONS[c.region]}. No worker calls it home; whoever is free searches it.`}</div>
+    <div class="log">${mine.slice(0, 6).map(t => `<div class="log-task">
+      <div class="head"><span class="item">${t.item}</span>${stateChip(t)}</div>
+      <ul class="events">${ev(t).map(([at, what]) => `<li class="${at === null ? 'live' : ''}"><span class="t">${at === null ? 'now' : Math.abs(at - NOW) > 20 * H ? etDay(at) + ' ' + et(at) : et(at)}</span><span>${what}</span></li>`).join('')}</ul>
+      </div>`).join('')}</div>`;
+  document.querySelectorAll('#city-log [data-dlg]').forEach(b => b.addEventListener('click', () => document.getElementById(b.dataset.dlg).showModal()));
+}
+document.querySelectorAll('#state-seg button').forEach(b => b.addEventListener('click', () => { document.querySelectorAll('#state-seg button').forEach(x => x.classList.remove('on')); b.classList.add('on'); filter.state = b.dataset.state; renderTasks(); }));
+document.getElementById('item-sel').addEventListener('change', e => { filter.item = e.target.value; renderTasks(); });
+document.getElementById('task-q').addEventListener('input', e => { filter.q = e.target.value.trim().toLowerCase(); renderTasks(); });
+
+// ─── Cities page ────────────────────────────────────────────────────────────
+let cityFilter = { status: 'all', region: '', q: '' };
+const cityStatus = c => c.slug in VERIFYING ? 'verifying' : DISABLED.has(c.slug) ? 'disabled' : PINNED.has(c.slug) ? 'pinned' : 'enabled';
+const STATUS_LABEL = { enabled: 'Enabled', verifying: 'Verifying', disabled: 'Disabled', pinned: 'Pinned' };
+function cellFor(c, item) {
+  const open = TASKS.find(t => t.city.slug === c.slug && t.item === item && (t.state === 'ready' || t.state === 'leased'));
+  const last = TASKS.filter(t => t.city.slug === c.slug && t.item === item && t.state === 'done').sort((a, b) => b.done - a.done)[0];
+  if (!open && !last) return '<span class="subtle">—</span>';
+  let next = '';
+  if (open?.state === 'leased') next = `<span class="chip leased"><span class="dot"></span>${open.worker}</span>`;
+  else if (open && open.due <= NOW) next = `<span class="chip ready"><span class="dot"></span>due, waiting ${ago(open.due).replace(' ago', '')}</span>`;
+  else if (open) next = `<small>next ${whenET(open.due)}</small>`;
+  return `<div class="two">${last ? `${whenET(last.done)} <small class="mono">${last.cards} cards${last.alerted ? ', ' + last.alerted + ' alert' : ''}</small>` : '<small>never searched</small>'}${next}</div>`;
+}
+function renderCities() {
+  const rank = { verifying: 0, pinned: 1, enabled: 2, disabled: 3 };
+  const rows = CITIES.slice().sort((a, b) => rank[cityStatus(a)] - rank[cityStatus(b)]).filter(c => (cityFilter.status === 'all' || cityStatus(c) === cityFilter.status) && (!cityFilter.region || c.region === cityFilter.region) && (!cityFilter.q || (c.name + ' ' + c.slug).toLowerCase().includes(cityFilter.q)));
+  const by = s => CITIES.filter(c => cityStatus(c) === s).length;
+  document.getElementById('city-legend').innerHTML = [['all', 'All', CITIES.length, 'var(--fg-subtle)'], ['enabled', 'Enabled', by('enabled'), 'var(--pos)'], ['pinned', 'Pinned', by('pinned'), 'var(--warn-strong)'], ['verifying', 'Verifying', by('verifying'), 'var(--info)'], ['disabled', 'Disabled', by('disabled'), 'var(--fg-subtle)']]
+    .map(([k, l, n, col]) => `<button class="${cityFilter.status === k ? 'on' : ''}" data-status="${k}"><span class="dot" style="--c:${col}"></span>${l} <b>${n}</b></button>`).join('');
+  document.querySelectorAll('#city-legend button').forEach(b => b.addEventListener('click', () => { cityFilter.status = b.dataset.status; renderCities(); }));
+  document.querySelector('#city-table tbody').innerHTML = rows.map(c => {
+    const st = cityStatus(c); const home = homeOf(c.slug);
+    const main = `<tr>
+      <td><span class="city-name">${c.name}<small>${c.slug}</small></span></td>
+      <td class="subtle">${REGIONS[c.region]}</td>
+      <td><span class="chip ${st}"><span class="dot"></span>${STATUS_LABEL[st]}</span></td>
+      <td class="num">${st === 'pinned' ? '<b>2</b>' : st === 'enabled' ? '1' : '<span class="subtle">—</span>'}</td>
+      <td>${st === 'enabled' || st === 'pinned' ? cellFor(c, 'server_ram') : '<span class="subtle">—</span>'}</td>
+      <td>${st === 'enabled' || st === 'pinned' ? cellFor(c, 'enterprise_ssd') : '<span class="subtle">—</span>'}</td>
+      <td>${home ? `<div class="two"><span class="mono">${home.id}</span><small>account ${home.no}</small></div>` : '<span class="subtle">—</span>'}</td>
+      <td><span class="row-actions">
+        <button class="btn ghost icon sm" title="${st === 'pinned' ? 'Unpin: back to once a day' : 'Pin: search twice a day'}" aria-label="Pin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="${st === 'pinned' ? 'pin' : ''}"><path d="M12 17v5M9 3h6l-1 7 3 3H7l3-3z"/></svg></button>
+        <button class="btn ghost icon sm" title="Search now" aria-label="Search now" data-dlg="dlg-searchnow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></button>
+        <button class="btn ghost icon sm danger" title="Remove: cancels its waiting tasks" aria-label="Remove"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+      </span></td></tr>`;
+    if (st !== 'verifying') return main;
+    const shown = VERIFY_MISMATCH[c.slug];
+    return main + `<tr class="verify-row"><td colspan="8"><div class="verify-box">
+      ${shown ? `<span>Facebook showed <b>${shown}</b>, not ${VERIFYING[c.slug]}. The slug may be wrong.</span><button class="btn sm">Enable anyway</button><button class="btn sm danger">Remove</button>`
+              : `<span>Added ${c.slug === 'boise' ? '14 min ago by jinhu' : '2 h ago by jinhu'}. A worker will open the slug between tasks and confirm Facebook shows <b>${VERIFYING[c.slug]}</b>.</span><button class="btn sm ghost">Skip the check</button>`}
+    </div></td></tr>`;
+  }).join('');
+  document.querySelectorAll('#city-table [data-dlg]').forEach(b => b.addEventListener('click', () => document.getElementById(b.dataset.dlg).showModal()));
+  document.getElementById('city-foot').textContent = `${rows.length} of ${CITIES.length} cities`;
+  document.getElementById('cities-lede').textContent = `${CITIES.length} cities, ${by('enabled') + by('pinned')} searched once a day per item, ${by('pinned')} pinned to twice, ${by('verifying')} waiting for a slug check, ${by('disabled')} off. Adding a city creates its tasks; removing one cancels them. Nothing restarts.`;
+}
+const regionSel = document.getElementById('region-sel');
+for (const [k, v] of Object.entries(REGIONS)) regionSel.insertAdjacentHTML('beforeend', `<option value="${k}">${v}</option>`);
+regionSel.addEventListener('change', e => { cityFilter.region = e.target.value; renderCities(); });
+document.getElementById('city-q').addEventListener('input', e => { cityFilter.q = e.target.value.trim().toLowerCase(); renderCities(); });
+
+// ─── Fleet page ─────────────────────────────────────────────────────────────
+const ring = (min, budget = 360) => { const r = 8.5, C = 2 * Math.PI * r, f = Math.min(1, min / budget); return `<span class="ring ${f > 0.95 ? 'full' : ''}" title="${min} of ${budget} minutes leased today (UTC)"><svg viewBox="0 0 22 22"><circle class="track" cx="11" cy="11" r="${r}"/><circle class="fill" cx="11" cy="11" r="${r}" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - f)}"/></svg><b>${min}</b><span>/${budget}</span></span>`; };
+const STATE_CHIP = { HEALTHY: ['healthy', 'Healthy'], DEGRADED: ['degraded', 'Degraded'], ROLLING: ['verifying', 'Replacing'], SESSION_EXPIRED: ['parked', 'Session expired'], CHECKPOINT: ['parked', 'Checkpoint'], DEAD: ['parked', 'Dead'] };
+const QUARANTINED = new Set([13, 24, 36]), TAKEN = { 6: 'marcus', 17: 'priya' };
+const acctStatus = no => QUARANTINED.has(no) ? { kind: 'quarantined', pool: 'Fleet' } : TAKEN[no] ? { kind: 'taken', pool: 'Taken', by: TAKEN[no] } : { kind: 'parked', pool: 'Retired', parked: no % 2 ? 'Session expired' : 'Checkpoint' };
+const mask = uid => uid.slice(0, 4) + '…' + uid.slice(-3);
+function renderFleet() {
+  document.getElementById('hosts').innerHTML = HOSTS.map(h => {
+    const ws = WORKERS.filter(w => w.host === h.id); const running = ws.filter(w => w.state !== 'ROLLING').length;
+    return `<section class="card host" aria-label="Host ${h.id}">
+      <div class="line"><span class="id">${h.id}</span><span class="meta">agent <span class="mono">${h.agent}</span> · seen ${ago(h.seen)} · ${running} of ${h.capacity} running</span>
+        <div class="right"><label class="toggle ${h.authoritative ? 'on' : ''}" title="Off: the agent only reports what runs and starts nothing"><i></i>${h.authoritative ? 'Authoritative' : 'Observe only'}</label>
+        <span class="stepper" title="How many workers this host should run; a new one is a Facebook login"><button aria-label="Fewer">−</button><b>${h.capacity}</b><button aria-label="More">+</button><small>workers</small></span></div></div>
+      ${h.roll ? `<div class="roll"><span>Rolling to <span class="mono">${h.roll.to}</span>: ${h.roll.done} of ${h.roll.total}, <span class="mono">${h.roll.replacing}</span> next when idle.</span><span class="bar"><i style="width:${h.roll.done / h.roll.total * 100}%"></i></span><button class="btn sm ghost">Pause</button></div>` : `<div class="meta">${h.note}</div>`}
+    </section>`; }).join('');
+  renderFleetTable();
+  // pool
+  const holderOf = no => WORKERS.find(w => w.no === no);
+  document.querySelector('#pool-table tbody').innerHTML = ACCOUNTS.map((a, i) => {
+    const w = holderOf(a.no); const st = w ? 'Fleet' : acctStatus(a.no).pool; const as = acctStatus(a.no);
+    return `<tr>
+      <td class="num">${a.no}</td><td class="mono">${a.uid}</td>
+      <td><span class="chip"><span class="dot" style="--c:${st === 'Fleet' ? 'var(--info)' : st === 'Taken' ? 'var(--warn)' : 'var(--neg)'}"></span>${st}</span></td>
+      <td>${w ? `<a href="#fleet" class="two"><span class="mono">${w.id}</span><small>${STATE_CHIP[w.state][1]}, epoch ${w.epoch}</small></a>` : as.kind === 'quarantined' ? '<a href="#fleet" class="subtle">quarantined, not running</a>' : as.kind === 'taken' ? `<span class="subtle">${as.by}, manual</span>` : `<span class="subtle">${as.parked.toLowerCase()}</span>`}</td>
+      <td><span class="secret">••••••••</span></td><td><span class="secret">••• •••</span></td>
+      <td class="subtle">acct${a.no}@…</td>
+      <td class="subtle">${w ? 'fresh, ' + ago(NOW - (a.no * 11 % 50) * M) : ago(NOW - (3 + a.no % 20) * 24 * H)}</td>
+      <td class="subtle">${a.no === 11 ? 'slow proxy, watch' : ''}</td>
+      <td><button class="btn ghost icon sm" aria-label="Edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4l10-10-4-4L4 16z"/></svg></button></td>
+    </tr>`; }).join('');
+}
+
+let fleetFilter = { kind: 'all', host: '', q: '' };
+const KIND = w => w ? (w.state === 'HEALTHY' ? 'healthy' : w.state === 'DEGRADED' ? 'degraded' : 'rolling') : null;
+function renderFleetTable() {
+  const rows = ACCOUNTS.map(a => { const w = WORKERS.find(x => x.no === a.no); const as = w ? null : acctStatus(a.no); return { a, w, as, kind: w ? KIND(w) : as.kind, host: w ? w.host : '-' }; })
+    .filter(r => (fleetFilter.kind === 'all' || r.kind === fleetFilter.kind) && (!fleetFilter.host || r.host === fleetFilter.host)
+      && (!fleetFilter.q || [r.w?.id, r.host, 'account ' + r.a.no, r.w?.task?.city.name, r.a.uid].join(' ').toLowerCase().includes(fleetFilter.q)))
+    .sort((x, y) => (x.w ? 0 : 1) - (y.w ? 0 : 1) || (x.w ? x.w.id.localeCompare(y.w.id, undefined, { numeric: true }) : x.a.no - y.a.no));
+  const counts = { all: 41, healthy: 0, degraded: 0, rolling: 0, quarantined: 0, parked: 0, taken: 0 };
+  for (const a of ACCOUNTS) { const w = WORKERS.find(x => x.no === a.no); counts[w ? KIND(w) : acctStatus(a.no).kind]++; }
+  document.getElementById('fleet-legend').innerHTML = [['all', 'All accounts', 'var(--fg-subtle)'], ['healthy', 'Healthy', 'var(--pos)'], ['degraded', 'Degraded', 'var(--warn)'], ['rolling', 'Replacing', 'var(--info)'], ['quarantined', 'Quarantined', 'var(--cool)'], ['parked', 'Parked', 'var(--neg)'], ['taken', 'In manual use', 'var(--warn-strong)']]
+    .map(([k, l, col]) => `<button class="${fleetFilter.kind === k ? 'on' : ''}" data-kind="${k}"><span class="dot" style="--c:${col}"></span>${l} <b>${counts[k]}</b></button>`).join('');
+  document.querySelectorAll('#fleet-legend button').forEach(b => b.addEventListener('click', () => { fleetFilter.kind = b.dataset.kind; renderFleetTable(); }));
+  document.querySelector('#fleet-table tbody').innerHTML = rows.map(({ a, w, as }) => {
+    const acct = `<td><div class="two"><span>No. ${a.no}</span><small class="mono">${mask(a.uid)}</small></div></td>`;
+    if (w) {
+      const h = HOSTS.find(x => x.id === w.host); const [cls, label] = STATE_CHIP[w.state]; const t = w.task;
+      const now = w.state === 'ROLLING' ? `<em class="hold">Stopping after this task, then back on ${h.roll.to}</em>`
+        : t ? `<div class="task-now"><span class="city">${t.city.name} <span class="mono subtle">${t.item}</span></span><small><span class="elapsed">${mmss(Math.round((NOW - t.leased_at) / 1000))}</span>${t.cards ? ` · ${t.cards} cards so far` : ' · opening the search'}${t.why === 'home' ? ' · home city' : ''}</small></div>`
+        : `<em class="hold">Waiting for a task</em>`;
+      return `<tr>${acct}
+        <td><span class="hostcell">${w.host}</span></td>
+        <td><div class="two"><span class="mono">${w.id}</span><small>vnc :${5900 + Number(w.id.split('-').pop())}</small></div></td>
+        <td><div class="two"><span class="chip ${cls}"><span class="dot"></span>${label}</span><small>${w.state === 'DEGRADED' ? 'slow page loads, keeps its task' : `beat ${ago(w.beat)}`}</small></div></td>
+        <td>${now}</td>
+        <td>${ring(w.minutes)}</td>
+        <td><div class="two"><span class="lease">epoch ${w.epoch}</span><small>renews ${inTime(NOW + (22 + (w.no % 7)) * M)}</small></div></td>
+        <td class="mono ${w.version !== h.image ? 'subtle' : ''}">${w.version}</td>
+        <td><a class="btn ghost icon sm eye" href="#fleet" title="Open this worker's page and browser" aria-label="Open worker"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></a></td></tr>`;
+    }
+    const since = NOW - (1 + (a.no * 37) % 19) * 24 * H; const lastHost = a.no % 4 === 0 ? 'worker-60-14' : 'homelab';
+    const chip = as.kind === 'quarantined' ? '<span class="chip quarantined"><span class="dot"></span>Quarantined</span>' : as.kind === 'taken' ? '<span class="chip"><span class="dot" style="--c:var(--warn)"></span>In manual use</span>' : `<span class="chip parked"><span class="dot"></span>${as.parked}</span>`;
+    const why = as.kind === 'quarantined' ? `until ${whenET(NOW + (5 + a.no % 30) * H)} · next probe ${inTime(NOW + (1 + a.no % 5) * H)}` : as.kind === 'taken' ? `${as.by} took it from the pool` : `since ${etDay(since)}, ${ago(since)}`;
+    const action = as.kind === 'quarantined' ? '<button class="btn sm">Release quarantine</button>' : as.kind === 'parked' ? '<button class="btn sm ghost">Retry login</button>' : '';
+    return `<tr>${acct}
+      <td><span class="hostcell subtle" title="Last ran on ${lastHost}">—</span></td>
+      <td><span class="subtle">not running</span><br><small class="subtle">last on <span class="mono">${lastHost}</span></small></td>
+      <td><div class="two">${chip}<small>${why}</small></div></td>
+      <td>${action}</td>
+      <td>${as.kind === 'quarantined' ? ring(38 + a.no) : '<span class="subtle">—</span>'}</td>
+      <td><span class="subtle">—</span></td><td><span class="subtle">—</span></td><td></td></tr>`;
+  }).join('');
+  document.getElementById('fleet-foot').textContent = `${rows.length} of 41 accounts · ${counts.healthy + counts.degraded + counts.rolling} running on ${HOSTS.length} hosts`;
+}
+document.getElementById('host-sel').addEventListener('change', e => { fleetFilter.host = e.target.value; renderFleetTable(); });
+document.getElementById('fleet-q').addEventListener('input', e => { fleetFilter.q = e.target.value.trim().toLowerCase(); renderFleetTable(); });
+
+// ─── Analysis tab ───────────────────────────────────────────────────────────
+const STAGES = [
+  ['search', 'Search', 255, 'searches', 'monitor · search()', 'Each task runs the item\'s phrases against Marketplace search for its city, with the date window and delivery filter below. One task is one city and one item.', [['Phrases', '14'], ['Date window', 'last 7 days'], ['Delivery', 'local pick up'], ['Max results', '60'], ['Pause between pages', '30 s', 1]]],
+  ['cards', 'Result cards', 13865, 'cards seen', 'monitor · search()', 'Every card on the result pages, counted once per sweep. Cards seen in an earlier sweep still count here but are dropped at New to us.', [['Max results', '60'], ['Seen once', 'per sweep', 1]]],
+  ['title', 'Title gate', 6181, 'pass', 'monitor · title_prefilter', 'Keywords and anti-keywords against the card title alone, before any page is opened. This is the cheap gate: it drops more than half of the cards at no browser cost.', [['Prefilter', 'on'], ['Keywords', '31'], ['Anti-keywords', '58']]],
+  ['open', 'Open the listing', 2952, 'pages read', 'monitor · fetch_details()', 'The worker opens each survivor, pauses between pages, and caches the page by listing id so a card seen in two cities is read once.', [['Pause', '5 s', 1], ['Cache', 'by listing id', 1], ['Affiliate listings', 'skipped', 1]]],
+  ['keyword', 'Keyword gate', 2719, 'pass', 'monitor · keyword_filter', 'The same keyword lists on the full description, plus the seller rating floor. Unrated sellers are dropped.', [['Keywords', '31'], ['Anti-keywords', '58'], ['Seller rating', '4 / 5'], ['Unrated sellers', 'dropped']]],
+  ['fresh', 'New to us', 2665, 'new listings', 'coordinator · /v1/listings', 'Listings no worker has posted to the coordinator before. A listing is notified once per user, however many workers see it.', [['Notified', 'once per user', 1]]],
+  ['ai', 'AI rating', 1281, 'reviewed today', 'worker · evaluate_by_ai()', 'The model reads the title, description, price, condition, location and seller under the item\'s prompt, and answers with a score from 1 to 5, a verdict, a one-line summary and a counted number of units. Verdicts are cached per listing; only a fresh one is billed and counted as reviewed. Then two gates: fewer than the minimum counted units never alerts whatever the score, and the score must reach the threshold. Three straight failed calls pause rating fleet-wide; listings wait, unalerted, and are re-scanned when it returns.', [['Alert at AI rating', '4 / 5'], ['Minimum units per lot', '5'], ['AI model', 'openai/gpt-5.6-luna']], 1],
+  ['coord', 'Coordinator', 9, 'new to the fleet', 'coordinator · alerts', 'Dedupes across workers by item id and claims the alert, so two workers that rate the same lot produce one message. The outbox is durable: a Telegram outage delays alerts, it does not lose them.', [['Dedupe', 'by item id', 1], ['Outbox', 'durable', 1]]],
+  ['alert', 'Telegram alert', 9, 'alerts today', 'coordinator · telegram', 'One message per listing to the topic for its lot size, with the title, price, counted units, the model\'s summary and the link.', [['Topics', '50+ / 10–49 / 5–9', 1]], 1],
+];
+let stageOn = 'ai', range = 1;
+const fmt = n => n.toLocaleString('en-US');
+function renderFunnel() {
+  const scale = range === 1 ? 1 : range === 7 ? 6.6 : 12.9;
+  document.getElementById('funnel-sub').textContent = `${range === 1 ? 'today' : `last ${range} days`}, all workers, both items`;
+  let html = '';
+  STAGES.forEach((st, i) => {
+    const [key, name, n, unit, , , , good] = st; const v = Math.round(n * scale);
+    if (i) { const prev = Math.round(STAGES[i - 1][2] * scale); const pct = key === 'cards' ? null : Math.round(v / prev * 1000) / 10; html += `<span class="gap ${pct !== null && pct < 50 ? 'drop' : ''}" title="${pct === null ? 'cards per search' : `${pct}% of the previous stage`}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>${pct === null ? `×${Math.round(v / prev)}` : `${pct}%`}</span>`; }
+    html += `<button class="stage ${key === stageOn ? 'on' : ''} ${good ? 'good' : ''}" data-stage="${key}" aria-pressed="${key === stageOn}"><span class="name">${name}</span><span class="n">${fmt(v)}</span><span class="unit">${unit}</span></button>`;
+  });
+  document.getElementById('funnel').innerHTML = html;
+  const srch = Math.round(255 * scale), cards = Math.round(13865 * scale), ai = Math.round(1281 * scale), al = Math.round(9 * scale);
+  document.getElementById('funnel-foot').innerHTML = `<b>${fmt(cards)} cards</b> from ${fmt(srch)} searches became <b>${fmt(ai)} model reviews</b> and <b>${al} alerts</b>: one alert per ${fmt(Math.round(cards / al))} cards, one per ${Math.round(ai / al)} reviews. The title gate drops ${Math.round((1 - 6181 / 13865) * 100)}% before a page is opened; the model drops ${Math.round((1 - 9 / 1281) * 100)}% of what it reads.`;
+  document.querySelectorAll('#funnel .stage').forEach(b => b.addEventListener('click', () => { stageOn = b.dataset.stage; renderFunnel(); }));
+  const st = STAGES.find(x => x[0] === stageOn);
+  const [, name, , , code, text, settings, , ] = st;
+  const prompt = stageOn === 'ai' ? `<div class="prompts">
+      <div><label>Evaluation prompt</label><pre>You are a purchasing agent for Recycle Servers LLC, a used-server hardware reseller in Denver, CO. Decide whether the Facebook Marketplace listing given at the end is a genuine FOR-SALE offer of a BULK LOT (5+ units) of a component type we buy.
+
+WE BUY exactly two component types:
+- RAM: DDR4 or DDR5 memory modules in any form factor – server ECC RDIMM/LRDIMM, desktop UDIMM, laptop SODIMM …
+- SSD: enterprise SATA/SAS/NVMe drives …</pre></div>
+      <div><label>Rating rubric</label><pre>Rate the listing from 1 to 5:
+1 – Reject: any reject rule above applies. A listing you are confident is a SINGLE unit is always a 1 – never higher on capacity, price or condition.
+2 – Unlikely: probably not a qualifying bulk component lot, or the text establishes no quantity.
+3 – Maybe: a qualifying component type but borderline quantity (around 5), unclear …
+4 – Likely: a qualifying bulk lot with a stated or clearly implied quantity of 5 or more.
+5 – Certain: an explicit bulk lot of 10+ with model numbers or photos of the lot.</pre></div>
+    </div>` : '';
+  document.getElementById('stage-detail').innerHTML = `<div class="stage-text">
+      <h3>${name} <span class="mono">${code}</span><button class="btn sm" style="margin-left:auto">Edit</button></h3>
+      <p>${text}</p>
+      <div class="settings">${settings.map(([l, v, fixed]) => `<span class="setting ${fixed ? 'fixed' : ''}" title="${fixed ? 'Behaviour in code, not a setting' : 'A setting; Edit changes it for every worker'}">${l} <b>${v}</b></span>`).join('')}</div>
+      <p style="margin-top:12px;font-size:12px;color:var(--fg-subtle)">Last saved from the ERP by rs_console.settings start-at, 10/20/2026, 2:07:25 PM</p>
+    </div>${prompt}`;
+}
+document.querySelectorAll('#range-seg button').forEach(b => b.addEventListener('click', () => { document.querySelectorAll('#range-seg button').forEach(x => x.classList.remove('on')); b.classList.add('on'); range = Number(b.dataset.range); renderFunnel(); }));
+const DAYS = Array.from({ length: 14 }, (_, i) => { const d = new Date(NOW - (13 - i) * 24 * H); const dow = d.getUTCDay(); const wk = dow === 0 || dow === 6; return { d, reviewed: i === 13 ? 1281 : Math.round((wk ? 1050 : 1320) + (rnd() - 0.5) * 260), alerted: i === 13 ? 9 : Math.round((wk ? 5 : 8) + rnd() * 7) }; });
+function bars(el, key, sumEl) {
+  const W = 560, Hh = 150, pad = { l: 36, r: 8, t: 18, b: 22 }; const max = Math.max(...DAYS.map(x => x[key])); const top = Math.ceil(max / (key === 'alerted' ? 5 : 500)) * (key === 'alerted' ? 5 : 500);
+  const bw = (W - pad.l - pad.r) / 14, y = v => pad.t + (Hh - pad.t - pad.b) * (1 - v / top);
+  let svg = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="${key} per day, last 14 days">`;
+  for (const g of [0, top / 2, top]) svg += `<line class="grid" x1="${pad.l}" x2="${W - pad.r}" y1="${y(g)}" y2="${y(g)}"/><text x="${pad.l - 6}" y="${y(g) + 3.5}" text-anchor="end">${fmt(g)}</text>`;
+  DAYS.forEach((x, i) => { const v = x[key]; const h = y(0) - y(v); const bx = pad.l + i * bw + 3; const bwd = bw - 6; const today = i === 13; const partial = today && key === 'reviewed';
+    svg += `<rect class="bar ${partial ? 'dim' : ''}" x="${bx}" y="${y(v)}" width="${bwd}" height="${h}" rx="3"><title>${x.d.toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' })}: ${fmt(v)} ${key}${partial ? ' so far today' : ''}</title></rect>`;
+    if (today || i === 0 || v === max) svg += `<text class="val" x="${bx + bwd / 2}" y="${y(v) - 5}" text-anchor="middle">${fmt(v)}</text>`;
+    if (i % 2 === 1 || today) svg += `<text x="${bx + bwd / 2}" y="${Hh - 6}" text-anchor="middle">${today ? 'today' : x.d.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric' })}</text>`; });
+  el.innerHTML = svg + '</svg>';
+  const tot = DAYS.reduce((n, x) => n + x[key], 0), prev = DAYS.slice(0, 13);
+  sumEl.innerHTML = `<span>14-day total <b>${fmt(tot)}</b></span><span>average full day <b>${fmt(Math.round(prev.reduce((n, x) => n + x[key], 0) / 13))}</b></span><span>${key === 'reviewed' ? 'today is partial, in grey' : 'weekends run lower'}</span>`;
+}
+function renderHits() {
+  const rows = CITIES.filter((c, i) => i % 9 === 2).slice(0, 12).map((c, i) => { const alerts = 1 + ((i * 7) % 11); const reviewed = 60 + ((i * 53) % 190); const w = homeOf(c.slug); return { c, alerts, reviewed, w, last: NOW - (i * 11 + 3) * H }; }).sort((a, b) => b.alerts - a.alerts);
+  document.querySelector('#hits-table tbody').innerHTML = rows.map(r => `<tr><td><span class="city-name">${r.c.name}</span></td><td class="subtle">${REGIONS[r.c.region]}</td><td class="num"><b>${r.alerts}</b></td><td class="num">${r.reviewed}</td><td class="num">${(r.alerts / r.reviewed * 100).toFixed(1)}%</td><td class="subtle">${whenET(r.last)}</td><td>${r.w ? `<span class="mono">${r.w.id}</span> <small class="subtle">home</small>` : '<span class="subtle">whoever is free</span>'}</td></tr>`).join('');
+}
+renderFunnel(); bars(document.getElementById('chart-reviewed'), 'reviewed', document.getElementById('sum-reviewed')); bars(document.getElementById('chart-alerts'), 'alerted', document.getElementById('sum-alerts')); renderHits();
+renderBelt(); renderTasks(); renderLog(); renderCities(); renderFleet();
+go(location.hash.slice(1) || 'fleet');
+</script>
+</body>
+</html>

@@ -20,7 +20,7 @@ import { confirmDiscard } from './lib/unsavedGuard';
 
 // Eager: the landing view, and the two gates a logged-out or freshly-logged-in
 // user hits before anything else. Making these lazy would only buy a spinner.
-import { DesktopDashboard } from './pages/desktop/DesktopDashboard';
+import { DesktopHome } from './pages/desktop/DesktopHome';
 import { Login } from './pages/Login';
 import { RolePicker } from './pages/RolePicker';
 import { FormSkeleton } from './components/Skeleton';
@@ -31,6 +31,7 @@ const DesktopOrders = lazy(() => import('./pages/desktop/DesktopOrders').then(m 
 const DesktopEditOrder = lazy(() => import('./pages/desktop/DesktopEditOrder').then(m => ({ default: m.DesktopEditOrder })));
 const DesktopInventory = lazy(() => import('./pages/desktop/DesktopInventory').then(m => ({ default: m.DesktopInventory })));
 const DesktopInventoryEdit = lazy(() => import('./pages/desktop/DesktopInventoryEdit').then(m => ({ default: m.DesktopInventoryEdit })));
+const DesktopDashboard = lazy(() => import('./pages/desktop/DesktopDashboard').then(m => ({ default: m.DesktopDashboard })));
 const DesktopAnalysis = lazy(() => import('./pages/desktop/DesktopAnalysis').then(m => ({ default: m.DesktopAnalysis })));
 const DesktopMarket = lazy(() => import('./pages/desktop/DesktopMarket').then(m => ({ default: m.DesktopMarket })));
 const DesktopSellOrders = lazy(() => import('./pages/desktop/DesktopSellOrders').then(m => ({ default: m.DesktopSellOrders })));
@@ -75,8 +76,8 @@ export function DesktopApp() {
   const { path } = useRoute();
   const view: DesktopView = pathToDesktopView(path);
   // /inventory/:id opens the edit page; otherwise no item is being edited.
-  // /inventory/analysis is the Analysis tab, not an item id — exclude it.
-  const editingItemId = path === '/inventory/analysis' ? null : (match('/inventory/:id', path)?.id ?? null);
+  // /inventory/analysis is the old path of Analysis ▸ Inventory, not an item id.
+  const editingItemId = view === 'inventory' ? (match('/inventory/:id', path)?.id ?? null) : null;
   // Dashboard / add-label — the parser owns the shapes.
   const shippingRoute = parseShippingRoute(path);
   // Box check takes over the whole window — no sidebar, no top bar — and
@@ -199,13 +200,15 @@ export function DesktopApp() {
     return <Suspense fallback={<FormSkeleton fields={4} />}><Authorize /></Suspense>;
   }
 
-  // Default to dashboard if a purchaser tried to navigate to a manager-only view.
-  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'aftersales' || view === 'transfers' || view === 'websubmissions' || view === 'activity' || view === 'payments' || view === 'internaltx' || view === 'accounting' || view === 'tracker' || view === 'wechat')
-    ? 'dashboard'
+  // A purchaser who reaches a manager-only view lands on Home — or, for the
+  // stock tab, on the Analysis tab they can see.
+  const view2: DesktopView = user.role === 'purchaser' && view === 'stock' ? 'analysis'
+    : user.role === 'purchaser' && (view === 'inventory' || view === 'sellorders' || view === 'aftersales' || view === 'transfers' || view === 'websubmissions' || view === 'activity' || view === 'payments' || view === 'internaltx' || view === 'accounting' || view === 'tracker' || view === 'wechat')
+    ? 'home'
     : view;
   // Review mode and Pack mode take over the whole window — no sidebar, no top
-  // bar. Pack mode only once the view stands: a bounced purchaser lands on the
-  // dashboard, which keeps its chrome.
+  // bar. Pack mode only once the view stands: a bounced purchaser lands on
+  // Home, which keeps its chrome.
   const accountingReview = view2 === 'accounting' && path === ACCOUNTING_REVIEW_PATH;
   const focus = !!boxCheck || (view2 === 'sellorders' && matchSellOrderPack(path) !== null) || accountingReview;
 
@@ -267,30 +270,32 @@ export function DesktopApp() {
           + (view2 === 'history' && editingOrder && !boxCheck ? ' page-order-edit' : '')
           + (view2 === 'market' ? ' page-market' : '')
           + (view2 === 'inventory' && !editingItemId ? ' page-inventory' : '')
-          + (view2 === 'analysis' ? ' page-analysis' : '')
-          + (view2 === 'dashboard' ? ' page-dashboard' : '')
+          + (view2 === 'home' ? ' page-home' : '')
+          + (view2 === 'stock' ? ' page-analysis' : '')
+          + (view2 === 'analysis' ? ' page-dashboard' : '')
           + (view2 === 'shipping' && shippingRoute?.kind === 'dashboard' ? ' page-shipping' : '')
           + (view2 === 'activity' ? ' page-activity' : '')}>
-          {/* Inventory ▸ Analysis tab strip — shown on the list and the
-              analysis tab, but not while editing a single item. */}
-          {((view2 === 'inventory' && !editingItemId) || view2 === 'analysis') && (
-            <div className="seg inv-tabs" role="tablist" aria-label={t('nav_inventory')}>
-              <a
-                role="tab" aria-selected={view2 === 'inventory'}
-                className={view2 === 'inventory' ? 'active' : ''}
-                href={hrefFor('/inventory')} onClick={onLinkClick('/inventory')}
-              >{t('nav_inventory')}</a>
+          {/* Analysis: the money dashboard, and for managers the stock
+              snapshot beside it. */}
+          {(view2 === 'analysis' || view2 === 'stock') && user.role === 'manager' && (
+            <div className="seg page-tabs" role="tablist" aria-label={t('nav_analysis')}>
               <a
                 role="tab" aria-selected={view2 === 'analysis'}
                 className={view2 === 'analysis' ? 'active' : ''}
-                href={hrefFor('/inventory/analysis')} onClick={onLinkClick('/inventory/analysis')}
-              >{t('nav_analysis')}</a>
+                href={hrefFor('/analysis')} onClick={onLinkClick('/analysis')}
+              >{t('analysisTabSales')}</a>
+              <a
+                role="tab" aria-selected={view2 === 'stock'}
+                className={view2 === 'stock' ? 'active' : ''}
+                href={hrefFor('/analysis/inventory')} onClick={onLinkClick('/analysis/inventory')}
+              >{t('analysisTabInventory')}</a>
             </div>
           )}
           {/* One boundary for the whole page area: every view below except the
-              dashboard is a lazy chunk, and they are mutually exclusive. */}
+              Home is a lazy chunk, and they are mutually exclusive. */}
           <Suspense fallback={<FormSkeleton fields={8} />}>
-            {view2 === 'dashboard'  && <DesktopDashboard />}
+            {view2 === 'home'       && <DesktopHome />}
+            {view2 === 'analysis'   && <DesktopDashboard />}
             {view2 === 'submit'     && (
               <DesktopSubmit
                 onDone={(toast) => {
@@ -304,7 +309,7 @@ export function DesktopApp() {
             {view2 === 'clients'    && <DesktopClients showToast={showToast} />}
             {view2 === 'market'     && <DesktopMarket />}
             {view2 === 'inventory'  && inventoryOrEdit}
-            {view2 === 'analysis'   && <DesktopAnalysis />}
+            {view2 === 'stock'      && <DesktopAnalysis />}
             {view2 === 'sellorders' && (
               <DesktopSellOrders onNewFromInventory={() => navigate('/inventory')} onToast={showToast} />
             )}

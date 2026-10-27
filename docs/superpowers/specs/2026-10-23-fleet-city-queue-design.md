@@ -319,6 +319,38 @@ workers on the day the coordinator ships, before any worker is recreated.
 city, up to 72 h), the ERP worker page's *City log* card, and the round card's
 city names.
 
+## Phase 6: start the round now (RS-393, 0.13.18, ERP 1.334.0)
+
+The owner asked for "a buttom to start the task right now instead of waiting
+for the design start time". Running the pilot round outside 13:00 had taken
+three steps: hand-set rules (`early=0.9 window_hours=12`), container restarts,
+and setting the rules back. Restarts are logins, which AGENTS.md's first rule
+now forbids for this.
+
+**A stored start, applied as settings.** `queue_config` `start` holds
+`{at, by}`, and `city_queue.with_start` turns it into a `started` key for a
+window's length. While it is there:
+
+- `next_city` skips the window check;
+- `pick` and `queue_status` treat a city as due once it was not searched in
+  the last `start_fresh_hours` (2 by default), instead of the per-day ratio
+  with `early`;
+- nothing else changes: the budget, leases, held cities and quarantine all
+  apply.
+
+Nothing is enrolled or unenrolled by a start, and it needs no cleanup.
+
+**Waking without a restart.** A new `sweep` directive rides the existing
+directive poll (every 10 s) and heartbeat, like `relogin` and `restore`. The
+monitor sets a flag. The idle loop's `doze` wake sees it, and the loop runs
+every job at once: the start-up path, now `_run_all_jobs`. Each job keeps its
+next scheduled run. Only workers on 0.13.18 or later act on it, so the
+preview names the others, which start at their usual time.
+
+**Preview first.** `GET /v1/queue/start` says what a start would do, so the
+ERP's confirmation can show who starts, who waits, and how much is due before
+anything is changed.
+
 ## Decisions to confirm (from the shadow report) — answered in phase 3
 
 1. **Which exits may search which regions**, especially the three regions with

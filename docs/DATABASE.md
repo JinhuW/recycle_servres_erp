@@ -8,8 +8,8 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-24:** ERP migration `0205`, Reddit tracker migration `0005`,
-Facebook tracker `0.13.17`. *Keeping this file current* at the end says how to
+**As of 2026-10-26:** ERP migration `0213`, Reddit tracker migration `0006`,
+Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
 - [Overview](#overview)
@@ -25,6 +25,7 @@ refresh a section.
   - [Accounting, banking and FX](#accounting-banking-and-fx)
   - [Market values](#market-values)
   - [Facebook account pool](#facebook-account-pool)
+  - [Fleet](#fleet)
   - [System](#system)
   - [SQL functions](#sql-functions)
 - [Reddit tracker database](#reddit-tracker-database)
@@ -37,7 +38,7 @@ refresh a section.
 | Database | Owner | Engine | Where it runs | Connection | Schema source | Tables |
 | --- | --- | --- | --- | --- | --- | --- |
 | **ERP** | `apps/backend` | Postgres 18 | Railway project `recycle-erp-experiment`, with one Postgres per environment (production, dev) | `DATABASE_URL` | `apps/backend/migrations/*.sql`, applied by `scripts/migrate.mjs` | 69 |
-| **Reddit tracker** | `trackers/reddit` (`api`, `worker` and the OCI worker VMs) | Postgres | Railway project `reddits-tracker`, with public networking on so the OCI VMs can reach it | `DATABASE_URL` | `trackers/reddit/migrations/*.sql`, applied by `scripts/migrate.ts` | 15 + 1 view |
+| **Reddit tracker** | `trackers/reddit` (`api`, `worker` and the OCI worker VMs) | Postgres | Railway project `reddits-tracker`, with public networking on so the OCI VMs can reach it | `DATABASE_URL` | `trackers/reddit/migrations/*.sql`, applied by `scripts/migrate.ts` | 16 + 1 view |
 | **Facebook coordinator** | `trackers/facebook/rs_coordinator` | Postgres 16 in prod; SQLite locally and in tests | Railway project `facebook-tracker` (Terraform in `trackers/facebook/infra/`), reached by the coordinator on the homelab VM through Railway's TCP proxy | `RS_DATABASE_URL`, else `DATABASE_URL`; with neither set, SQLite at `RS_COORDINATOR_DB` | `SCHEMA` plus the `*_EXTRA_COLUMNS` lists in `rs_coordinator/db.py`, applied at boot | 32 |
 
 **The three share no database and no rows.** The ERP reaches each tracker only
@@ -70,7 +71,11 @@ isolation boundary (`trackers/facebook/infra/README.md`).
   every night at 04:00 UTC by the cron service in `deploy/railway-sync/`.
   1. `sync.sh` refuses any target that resolves to the prod host or carries a
      marker other than `dev`.
-  2. It resets dev's schema wholesale and restores prod's dump.
+  2. It sets dev's Facebook fleet aside in a `sync_keep` schema
+     (`keep-fleet.sql`): every `fleet_*` table, and for each pool account
+     with a `fleet_slots` row its `*_enc` columns, `cookie_uid`, `cookie_at`,
+     `status` and `note`. Then it resets dev's schema wholesale and restores
+     prod's dump.
   3. It runs `scrub.sql` in the same transaction. That truncates the live
      credentials (`refresh_tokens`, `oauth_refresh_tokens`,
      `oauth_authorization_codes`, `oauth_pending_consent`, `login_attempts`),
@@ -79,6 +84,10 @@ isolation boundary (`trackers/facebook/infra/README.md`).
      creates `env_marker`, which exists only on dev.
   4. It redeploys the dev backend, so migrations not yet on prod apply again on
      top of the restored copy.
+  5. Once every migration dev had is applied again, `restore-fleet.sql` puts
+     the fleet back in one transaction (onto the same pool accounts, matched
+     by `uid`) and drops `sync_keep`. A run that times out leaves `sync_keep`,
+     and the next run refuses until it is restored or dropped.
 - **Local.** The ERP's `docker-compose.yml` runs Postgres 16 (`recycle_pg`),
   and its data directory still needs a dump and restore before it can move to
   18. Backend tests run against a real Postgres (`recycle-erp-testdb` on
@@ -1825,9 +1834,9 @@ Ledger of USD→CNY exchange rates. A refresh loop runs every 6 hours and writes
 
 ### Market values
 
-Reference prices per part, and the WeChat market report. ref_prices is the Market values list (one row per tracked part), ref_price_events the price readings behind its last_price, and price_sources a display list; the four wechat_market_* tables hold memtrade's daily report (a day row with its board lines, groups read and evidence points), which nothing here feeds into ref_prices or orders.
+Reference prices per part, and the WeChat market report. ref_prices is the Market values list (one row per tracked part), ref_price_events the price readings behind its last_price, and price_sources a display list; the four wechat_market_* tables hold memtrade's daily report (a day row with its board lines, groups read and evidence points), which nothing here feeds into ref_prices or orders. wechat_market_reruns queues a manager's request to have a day redone, for memtrade to claim.
 
-Tables: [`ref_prices`](#erp-ref-prices), [`ref_price_events`](#erp-ref-price-events), [`price_sources`](#erp-price-sources), [`wechat_market_days`](#erp-wechat-market-days), [`wechat_market_groups`](#erp-wechat-market-groups), [`wechat_market_rows`](#erp-wechat-market-rows), [`wechat_market_points`](#erp-wechat-market-points)
+Tables: [`ref_prices`](#erp-ref-prices), [`ref_price_events`](#erp-ref-price-events), [`price_sources`](#erp-price-sources), [`wechat_market_days`](#erp-wechat-market-days), [`wechat_market_groups`](#erp-wechat-market-groups), [`wechat_market_rows`](#erp-wechat-market-rows), [`wechat_market_points`](#erp-wechat-market-points), [`wechat_market_reruns`](#erp-wechat-market-reruns)
 
 ```mermaid
 erDiagram
@@ -2055,6 +2064,28 @@ The evidence: one row per quoted item per post on a report day, linked to the bo
 
 Read within one day only, so the primary key's report_date prefix serves as the index; a line finds its posts through row_keys.
 
+<a id="erp-wechat-market-reruns"></a>
+
+#### `wechat_market_reruns`
+
+A manager's Re-run on Monitors ▸ WeChat (v1.363.0). The ERP can't reach memtrade on the office Mac, so the request waits here until memtrade's poller claims it (`POST /api/wechat-market/push/reruns/claim`), reruns the day, pushes it as usual and finishes it. The page shows each day's latest request.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
+| `report_date` | `date` | ✓ |  | The day to redo. No foreign key: the rerun's own push deletes and re-inserts the day. |
+| `status` | `text` | ✓ | `'queued'` | queued → running (claimed) → done or failed. A claim not finished within 2 hours is marked failed. |
+| `requested_by` | `uuid` |  |  | The manager who clicked Re-run. |
+| `requested_at` | `timestamptz` | ✓ | `now()` |  |
+| `claimed_at` | `timestamptz` |  |  | When memtrade took it. |
+| `finished_at` | `timestamptz` |  |  |  |
+| `degraded` | `boolean` | ✓ | `false` | Done, but Claude was still unavailable and memtrade fell back to its rules. |
+| `error` | `text` |  |  | Why it failed, as memtrade reported it (up to 2000 characters). |
+
+- **References:** `requested_by` → `users.id` (on delete set null)
+- **Checks:** `status IN ('queued', 'running', 'done', 'failed')`
+- **Indexes:** unique `(report_date) WHERE status IN ('queued', 'running')`, one open request per day, so a second click joins the first; `(report_date, requested_at DESC)`; `(requested_by)`
+
 ### Facebook account pool
 
 The ERP-side Facebook account pool: purchased Marketplace logins that purchasers take and return and managers assign to fleet workers. fb_pool_accounts is one row per login with its secrets sealed, and fb_pool_events is the append-only ledger of who did what to which account. fb_worker_accounts is every stint an account had on a fleet worker, with the proxy it went out through, and fb_proxies holds when a manager last revived a DEAD proxy. The fleet's own worker vault lives in the Facebook tracker's database, not here.
@@ -2167,6 +2198,289 @@ A row for each proxy a manager has revived. A revive restarts the proxy's failed
 - **Indexes:** `fb_proxies_revived_by_idx` (revived_by)
 
 Only the latest revive is kept; the backend logs each one.
+
+### Fleet
+
+The ERP fleet: the city task queue the Facebook Marketplace workers pull from, and the slots they run pool accounts in. fleet_cities and fleet_items are the catalog managers edit; fleet_settings holds the queue's knobs; fleet_tasks is one open task per enabled city and item, with fleet_task_events as its log; fleet_hosts are the machines that run worker containers; fleet_slots is the fleet's view of each pool account (who runs it, where, under which lease epoch) and fleet_workers the containers that heartbeat. fleet_minutes is a view that sums each account's leased minutes per UTC day for the daily budget. The accounts themselves and their secrets stay in fb_pool_accounts. Migration 0206 creates all of it; the routes under /api/fleet fill it in later releases.
+
+Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_proxies`](#erp-fleet-proxies), [`fleet_slots`](#erp-fleet-slots), [`fleet_workers`](#erp-fleet-workers), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
+
+<a id="erp-fleet-cities"></a>
+
+#### `fleet_cities`
+
+One row per Marketplace location the fleet searches. A city a manager adds starts disabled until a worker has verified its slug (a wrong slug searches the account's own city silently) or the manager overrides the check.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `slug` | `text` | ✓ |  | The Facebook location slug or numeric id in the Marketplace URL. |
+| `name` | `text` | ✓ |  | Display name. |
+| `radius_km` | `integer` | ✓ | `500` | Search radius. |
+| `region` | `text` |  |  | Region label from master.toml, for grouping. |
+| `enabled` | `boolean` | ✓ | `false` | True once verified or overridden; only enabled cities get tasks. |
+| `per_day` | `integer` |  |  | Searches per item per day; NULL follows per_day_default (and tiers later). |
+| `pinned` | `boolean` | ✓ | `false` | Kept at the top of the cities page. |
+| `verified_at` | `timestamptz` |  |  | When a worker confirmed the slug. |
+| `verified_as` | `text` |  |  | The location label Facebook showed; 'imported' for cities taken from master.toml. |
+| `added_by` | `uuid` |  |  | → users. The manager who added it; NULL for imports. |
+| `added_at` | `timestamptz` | ✓ | `now()` |  |
+| `disabled_at` | `timestamptz` |  |  | When a manager removed it; its open tasks are cancelled then. |
+
+- **Primary key:** `slug`
+- **References:** `added_by` → `users.id` (on delete set null)
+- **Indexes:** `fleet_cities_added_by_idx` (added_by)
+
+<a id="erp-fleet-items"></a>
+
+#### `fleet_items`
+
+What the fleet searches for in every city: the search phrases and filters of one item, as the monitor's config names them.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `name` | `text` | ✓ |  | The item's key, e.g. server_ram, enterprise_ssd. |
+| `phrases` | `jsonb` | ✓ |  | Search phrases, a JSON array of strings. |
+| `filters` | `jsonb` | ✓ | `'{}'` | Marketplace filters: date_listed, delivery_method, max_results and the like. |
+| `enabled` | `boolean` | ✓ | `true` | A disabled item gets no tasks and its open ones are cancelled. |
+
+- **Primary key:** `name`
+
+<a id="erp-fleet-settings"></a>
+
+#### `fleet_settings`
+
+The queue's knobs, one JSON value per key: per_day_default, budget_minutes, lease_minutes, task_max_minutes, poll_hold_seconds, familiar_days, start_fresh_hours, quarantine_hours, quarantine_probe_hours, retention_days, max_accounts_per_proxy (RS-415: non-parked slots one proxy may carry, default 2) and search (the monitor's search parameters). A missing key means its default (packages/shared/src/fleet.ts, FLEET_SETTINGS_DEFAULTS).
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `key` | `text` | ✓ |  |  |
+| `value` | `jsonb` | ✓ |  | A number for the limits, an object for search. |
+| `updated_by` | `uuid` |  |  | → users. The manager who last changed it; NULL for an import. |
+| `updated_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `key`
+- **References:** `updated_by` → `users.id` (on delete set null)
+- **Indexes:** `fleet_settings_updated_by_idx` (updated_by)
+
+<a id="erp-fleet-hosts"></a>
+
+#### `fleet_hosts`
+
+A machine that runs worker containers through one fleet-agent container. The agent authenticates with a bearer token the ERP showed once when the host was added; only its sha256 is stored.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `host_id` | `text` | ✓ |  | The host's name, e.g. homelab, worker-60-14; worker ids are `<host_id>-<n>`. |
+| `token_hash` | `text` | ✓ |  | sha256 (hex) of the host's bearer token. |
+| `capacity` | `integer` | ✓ | `0` | The most workers the agent may run; `desired.count` is this capped at the accounts the host could run now (CONTRACTS §6). |
+| `authoritative` | `boolean` | ✓ | `false` | False means observe only: the agent reports what runs and starts nothing. |
+| `version` | `text` |  |  | The agent's version from its last report. |
+| `last_seen_at` | `timestamptz` |  |  | The last report or desired-state read. |
+| `report` | `jsonb` |  |  | The agent's last report: its version and the containers it runs. |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `host_id`
+
+<a id="erp-fleet-claim-tickets"></a>
+
+#### `fleet_claim_tickets`
+
+Single-use bearers the host agent mints right before each `docker run`, one per worker container, so the container claims with a ticket instead of the host token. A ticket is good for one claim, for its host, worker id and handoff epoch, for 10 minutes; only its sha256 is stored. Migration 0211.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `token_hash` | `text` | ✓ |  | sha256 (hex) of the ticket (`fct_…`). |
+| `host_id` | `text` | ✓ |  | → fleet_hosts. The host that minted it. |
+| `worker_id` | `text` | ✓ |  | The only worker id it may claim for. |
+| `handoff_epoch` | `integer` |  |  | The handoff the claim must carry, or none. |
+| `expires_at` | `timestamptz` | ✓ |  | Mint time + 10 minutes; no claim after it, not even a retry. |
+| `consumed_at` | `timestamptz` |  |  | When the claim it let through committed. |
+| `claim_id` | `text` |  |  | That claim's boot id: only its retries pass afterwards. |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `token_hash`
+- **References:** `host_id` → `fleet_hosts.host_id` (on delete cascade)
+- **Indexes:** `fleet_claim_tickets_worker_idx` (host_id, worker_id), `fleet_claim_tickets_expires_idx` (expires_at)
+
+<a id="erp-fleet-proxies"></a>
+
+#### `fleet_proxies`
+
+The proxies the ERP fleet browses through, as a list managers edit on the Account pool tab. A slot made there copies its proxy's sealed URL into `fleet_slots.proxy_url` (what a claim reads) and names the proxy in `fleet_slots.proxy_id`; editing a proxy's URL or timezone rewrites its slots' copy and device clock. No route answers the URL. Migration 0213.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `integer` | ✓ | identity |  |
+| `label` | `text` | ✓ |  | The name managers pick it by, e.g. Decodo NY 1. |
+| `url_enc` | `text` | ✓ |  | scheme://user:pass@host:port, sealed under FB_POOL_KEY (lib/sealed.ts). Never returned or logged. |
+| `host` | `text` | ✓ |  | The exit's host, lowercased, in clear for the list. |
+| `port` | `integer` | ✓ |  | The exit's port (1..65535). |
+| `timezone` | `text` | ✓ |  | IANA zone of the exit; a slot's device clock follows it. |
+| `note` | `text` | ✓ | `''` |  |
+| `created_by` | `uuid` |  |  | → users. |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `created_by` → `users.id` (on delete set null)
+- **Indexes:** `fleet_proxies_exit_idx` unique (lower(host), port), `fleet_proxies_created_by_idx` (created_by)
+
+<a id="erp-fleet-slots"></a>
+
+#### `fleet_slots`
+
+The fleet's view of one pool account: which worker runs it, on which host, under which lease epoch. A worker claims a free slot at boot and the claim bumps the epoch; every later call carries it in the worker's token, and a token whose epoch is no longer the slot's is refused with 409, so one account never runs in two browsers. The login itself stays in fb_pool_accounts.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `account_no` | `integer` | ✓ |  | → fb_pool_accounts. The account's #. |
+| `worker_id` | `text` |  |  | The worker holding the slot; NULL when free. |
+| `host_id` | `text` |  |  | → fleet_hosts. Where it runs now. |
+| `last_host_id` | `text` |  |  | Where it last ran; a claim from that host is preferred, so an account keeps its machine. |
+| `epoch` | `integer` | ✓ | `0` | Bumped by every claim; the worker token names it. |
+| `lease_expires_at` | `timestamptz` |  |  | Renewed by heartbeats; NULL or past means the slot is free to claim. |
+| `proxy_url` | `text` |  |  | The account's sticky proxy, scheme://user:pass@host:port, sealed under FB_POOL_KEY (lib/sealed.ts); NULL = the host's own IP. |
+| `device` | `jsonb` |  |  | The browser profile the account always presents: user agent, viewport, timezone, locale, datr hints. |
+| `home_cities` | `jsonb` | ✓ | `'[]'` | City slugs this account searches first. |
+| `quarantined_until` | `timestamptz` |  |  | Set by the 0-card rule; while in the future the slot gets only probe tasks. |
+| `claim_id` | `text` | | | Idempotency key for the current process boot; unique within the host when non-null. |
+| `handoff_epoch` | `integer` | | | Epoch confirmed stopped by the host; the replacement claims with it while `reserved_until` lasts. |
+| `reserved_until` | `timestamptz` | | | A handoff reservation's deadline (gate timeout, 20 min); the lease ends with it. NULL = not reserved. A park is still the infinite lease. |
+| `quarantine_reset_at` | `timestamptz` | | | Manual release or positive probe: earlier search results cannot re-quarantine this account. |
+| `quarantine_evidence` | `jsonb` | | | Rule, search count, cities and latest result that justified quarantine. |
+| `proxy_id` | `integer` | | | → fleet_proxies. The listed proxy the slot was made on (0213); NULL for a seeded slot or once the proxy is removed, when `proxy_url` keeps its copy. |
+| `note` | `text` | ✓ | `''` | Free text for managers. |
+
+A slot made on the Account pool tab (`POST /api/fleet/slots`) gets a generated `device`: no user agent (`native: ["user_agent"]`, Chromium's own), a common desktop screen and scale picked from the account number, a viewport of the screen less the browser chrome, the proxy's timezone and `en-US`.
+
+- **Primary key:** `account_no`
+- **References:** `account_no` → `fb_pool_accounts.no` (on delete cascade); `host_id` → `fleet_hosts.host_id` (on delete set null); `proxy_id` → `fleet_proxies.id` (on delete set null)
+- **Indexes:** `fleet_slots_host_id_idx` (host_id), `fleet_slots_proxy_id_idx` (proxy_id)
+
+<a id="erp-fleet-workers"></a>
+
+#### `fleet_workers`
+
+One row per worker container that has claimed a slot, kept current by its heartbeats. The Slots and Hosts pages read it next to fleet_slots.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `worker_id` | `text` | ✓ |  | `<host_id>-<n>`, chosen by the host agent. |
+| `host_id` | `text` |  |  | → fleet_hosts. |
+| `account_no` | `integer` |  |  | → fb_pool_accounts. The slot it holds. |
+| `epoch` | `integer` |  |  | The epoch it claimed. |
+| `state` | `text` |  |  | The monitor's state: HEALTHY, SESSION_EXPIRED, CHECKPOINT, CHALLENGE_*, DEGRADED, DEAD. A parked state releases the worker's task. |
+| `version` | `text` |  |  | The worker image's version. |
+| `last_heartbeat_at` | `timestamptz` |  |  |  |
+| `vnc_port` | `integer` |  |  | The host port the agent mapped for noVNC. |
+| `detail` | `jsonb` |  |  | Whatever the heartbeat carried: last search, page state. |
+| `relogin_id` | `text` |  |  | The latest re-login a manager queued (`POST /api/fleet/workers/:id/relogin`), a random id. Cleared by a fresh claim. Migration 0214. |
+| `relogin_requested_at` | `timestamptz` |  |  | When it was queued. |
+| `relogin_requested_by` | `text` |  |  | The manager's e-mail. |
+| `relogin_delivered_at` | `timestamptz` |  |  | When a heartbeat handed the `relogin` directive over; null while it waits. A heartbeat delivers it once. |
+
+- **Primary key:** `worker_id`
+- **References:** `account_no` → `fb_pool_accounts.no` (on delete set null); `host_id` → `fleet_hosts.host_id` (on delete cascade)
+- **Indexes:** `fleet_workers_account_no_idx` (account_no); `fleet_workers_host_id_idx` (host_id)
+
+<a id="erp-fleet-tasks"></a>
+
+#### `fleet_tasks`
+
+One search of one item in one city. The scheduler keeps exactly one open (ready or leased) task per city, item and kind; a worker leases the next due one, finishes it, and the scheduler writes the next with `due_at = done + day / per_day`. The partial unique index is what makes that safe from two backend instances.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | sequence |  |
+| `city` | `text` | ✓ |  | → fleet_cities. |
+| `item` | `text` | ✓ |  | → fleet_items. |
+| `kind` | `text` | ✓ | `'search'` | search, verify-slug (a new city's check) or probe (a quarantined slot's periodic test). |
+| `due_at` | `timestamptz` | ✓ |  | Not handed out before this. |
+| `priority` | `integer` | ✓ | `0` | Higher first; a manager's task is 100, a slug check 50. |
+| `state` | `text` | ✓ |  | ready, leased, done, cancelled or expired. |
+| `worker_id` | `text` |  |  | Who leased it. |
+| `account_no` | `integer` |  |  | The account it was searched with. No FK, so a removed account's history is kept. |
+| `epoch` | `integer` |  |  | The lease epoch of the worker that took it. |
+| `leased_at` | `timestamptz` |  |  |  |
+| `lease_expires_at` | `timestamptz` |  |  | Renewed by HEALTHY heartbeats; past it the task is expired and re-queued. |
+| `started_at` | `timestamptz` |  |  | When the worker reported the search began. |
+| `done_at` | `timestamptz` |  |  |  |
+| `reason` | `text` |  |  | Why it exists: cadence, added (a new city), manual, start (a round start), probe or verify. |
+| `result` | `jsonb` |  |  | What the search found: cards, opened, reviewed, alerted, seconds, stopped. |
+
+- **Primary key:** `id`
+- **References:** `city` → `fleet_cities.slug`; `item` → `fleet_items.name`
+- **Checks:** `state IN ('ready', 'leased', 'done', 'cancelled', 'expired')`
+- **Indexes:** `fleet_tasks_due_idx` (state, due_at); `fleet_tasks_item_idx` (item); `fleet_tasks_open_idx` UNIQUE (city, item, kind) WHERE state IN ('ready', 'leased') AND kind <> 'probe'; `fleet_tasks_probe_idx` UNIQUE (account_no) WHERE state IN ('ready','leased') AND kind = 'probe'; `fleet_tasks_worker_idx` (worker_id, leased_at DESC); `fleet_tasks_done_account_idx` (account_no, city, done_at) WHERE state = 'done'; `fleet_tasks_done_pair_idx` (city, item, done_at DESC) WHERE state = 'done' AND kind = 'search'; `fleet_tasks_purge_idx` (COALESCE(done_at, leased_at, due_at), id) WHERE state IN ('done', 'cancelled', 'expired') (migration 0210)
+
+**Retention (RS-409).** Once an hour each backend that runs the scheduler deletes terminal tasks (done, cancelled, expired) whose `COALESCE(done_at, leased_at, due_at)` is older than `fleet_settings.retention_days` (default 90, 30..730, never below `familiar_days`), with their `fleet_task_events` and `fleet_task_attempts` rows, 5,000 tasks per run, oldest first, under an advisory lock so one instance purges at a time. Ready and leased tasks are never deleted. Two kinds of row stay whatever their age, because a rule reads them without a window: the newest done search per city and item (the cadence's last done, the Cities tab's last search) and the verify-slug task holding each city's latest slug verdict (whether the city may be enabled again).
+
+The scheduler sends `NOTIFY fleet_tasks` (payload: the item) after every write that can make a task ready; a worker's held next-task poll listens on it.
+
+<a id="erp-fleet-task-attempts"></a>
+
+#### `fleet_task_attempts`
+
+Closed lease attempts retained independently of requeued tasks (migration 0207).
+The fleet_archive_attempt trigger inserts once when a lease ends, or on a
+terminal historical task insert. Current leased tasks remain the live part of
+the minutes view until closed.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | sequence | |
+| `task_id` | `bigint` | | | → fleet_tasks; on delete set null preserves spent minutes. The retention purge deletes a purged task's attempts itself. |
+| `account_no` | `integer` | | | Historical account number, retained after pool deletion. |
+| `epoch` | `integer` | | | Worker lease generation. |
+| `leased_at` | `timestamptz` | ✓ | | Attempt start. |
+| `ended_at` | `timestamptz` | ✓ | | Attempt end, never before start. |
+
+Primary key id; UNIQUE NULLS NOT DISTINCT (task_id, account_no, epoch, leased_at)
+prevents duplicate charging. Index: fleet_task_attempts_account_idx
+(account_no, leased_at); that unique index covers the task FK.
+
+The fleet_fence_pool_owner trigger on pool status/holder/uid changes or deletion advances
+the slot epoch and releases its current task atomically. Worker mutations lock
+pool account, then slot, then city/task; rollout operations acquire the release
+row before those locks. Claims serialize by host/worker and lock pool before
+slot. Probes have a separate unique open index on account_no; the city's open
+task index excludes probes, so two accounts may probe the same home city.
+
+<a id="erp-fleet-task-events"></a>
+
+#### `fleet_task_events`
+
+What happened to a task, in order: the city log the fleet pages show.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | sequence |  |
+| `task_id` | `bigint` |  |  | → fleet_tasks. |
+| `worker_id` | `text` |  |  | The worker that reported it; NULL for the scheduler's own (expired). |
+| `kind` | `text` | ✓ |  | handed, started, searched, finished, stopped, released, expired or done. |
+| `detail` | `jsonb` |  |  | Per kind: the result for done, the parked state for released, the cards seen for searched. |
+| `at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `task_id` → `fleet_tasks.id` (on delete cascade)
+- **Indexes:** `fleet_task_events_task_idx` (task_id, at)
+
+<a id="erp-fleet-minutes"></a>
+
+#### `fleet_minutes` (view)
+
+Each account's leased minutes per UTC day, from closed fleet_task_attempts plus
+current leased tasks. Time spanning midnight is split by overlap, rather than
+assigned entirely to the starting day. Returning a task to ready preserves the
+ended attempt. Done uses the completion time; an expired/released lease is
+capped at its expiry. The next-task pick skips accounts at budget_minutes.
+Migration 0207 backfills known terminal attempts; time erased by earlier
+releases cannot be recovered.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `account_no` | `integer` | The account. |
+| `day` | `date` | The UTC day whose overlap is charged. |
+| `minutes` | `numeric` | Leased minutes that day. |
 
 ### System
 
@@ -2327,7 +2641,7 @@ Claims are advisory metadata, not held locks: a claim older than 300 s may be ta
 
 ### Ingest
 
-`posts` holds every post any worker fetched, deduped by its Reddit id, and carries it through the pipeline by `status`: new, then rejected or target, then notified, with failed as the dead end a post waits in for a manual requeue.
+`posts` holds every post any worker fetched, deduped by its Reddit id, and carries it through the pipeline by `status`: new, then rejected or target, then notified, with failed as the dead end a post waits in for a manual requeue. A target that is a copy of a listing buyers already got (a cross-post or a repost, `src/dedup.ts`) becomes duplicate instead of notified. A day after posting, the PM tracer (`src/loops/trace.ts`, migration 0006) counts the buyers who asked for it in the comments.
 
 Tables: [`posts`](#reddit-posts)
 
@@ -2353,7 +2667,7 @@ Every Reddit post any worker fetched that was younger than `max_post_age_hours`,
 | `url` | `text` | ✓ |  | Permalink to the post. |
 | `posted_at` | `timestamptz` | ✓ |  | Reddit's publish time; a post older than max_post_age_hours is rejected as too_old without an LLM call. |
 | `discovered_at` | `timestamptz` | ✓ | `now()` | When the first worker inserted it; the `since` filter for matches and stats. |
-| `status` | `text` | ✓ | `'new'` | new = awaiting judgement; rejected = not a buy (terminal); target = awaiting buyer alert; notified = alert reached at least one buyer chat; failed = gave up after 5 attempts at a stage. |
+| `status` | `text` | ✓ | `'new'` | new = awaiting judgement; rejected = not a buy (terminal); target = awaiting buyer alert; notified = alert reached at least one buyer chat; duplicate = a target whose listing went out through another copy (terminal); failed = gave up after 5 attempts at a stage. |
 | `is_target` | `boolean` |  |  | The live prompt's verdict; NULL until judged. |
 | `llm_summary` | `text` |  |  | The model's one-to-two-sentence summary for buyers; the alert's text. |
 | `llm_price` | `text` |  |  | Asking price exactly as written in the post (free text, no currency parsing); NULL if not stated. |
@@ -2365,13 +2679,17 @@ Every Reddit post any worker fetched that was younger than `max_post_age_hours`,
 | `claimed_at` | `timestamptz` |  |  | When the claim was taken; it lapses after 300 s. |
 | `notified_at` | `timestamptz` |  |  | When the buyer alert went out. |
 | `prompt_version_id` | `integer` |  |  | → prompt_versions: the live prompt that judged it; NULL for verdicts made before versioning existed. |
+| `duplicate_of` | `text` |  |  | → posts: for a duplicate, the copy buyers were alerted to. |
+| `comments_checked_at` | `timestamptz` |  |  | When the PM tracer read its comments; NULL until then. Set with NULL counts when the post was gone or unreadable. |
+| `comment_count` | `integer` |  |  | Comments on the post when traced. |
+| `pm_count` | `integer` |  |  | Distinct commenters, other than the seller and bots, who asked by PM or chat. Five or more on a memory post makes it "hot" in Analytics. |
 
 - **Primary key:** `reddit_id`
-- **References:** `prompt_version_id` → `prompt_versions.id` (on delete no action)
-- **Checks:** `status IN ('new', 'rejected', 'target', 'notified', 'failed')`
-- **Indexes:** `idx_posts_pending_eval` (next_retry_at) where `status = 'new'`; `idx_posts_pending_notify` (next_retry_at) where `status = 'target'`; `idx_posts_prompt_version` (prompt_version_id) where `prompt_version_id IS NOT NULL`; `CREATE INDEX idx_posts_targets ON public.posts USING btree (discovered_at DESC) WHERE is_target`
+- **References:** `prompt_version_id` → `prompt_versions.id` (on delete no action); `duplicate_of` → `posts.reddit_id` (on delete no action)
+- **Checks:** `status IN ('new', 'rejected', 'target', 'notified', 'failed', 'duplicate')`
+- **Indexes:** `idx_posts_pending_eval` (next_retry_at) where `status = 'new'`; `idx_posts_pending_notify` (next_retry_at) where `status = 'target'`; `idx_posts_prompt_version` (prompt_version_id) where `prompt_version_id IS NOT NULL`; `CREATE INDEX idx_posts_targets ON public.posts USING btree (discovered_at DESC) WHERE is_target`; `idx_posts_author` (lower(author), posted_at) where `author IS NOT NULL`, for finding a listing's copies; `idx_posts_pending_trace` (posted_at DESC) where `comments_checked_at IS NULL`
 
-Posts are never deleted. `rejected` is terminal; `failed` waits for `POST /api/posts/:id/requeue`, which sends a judged target back to notify and anything else back to evaluation.
+Posts are never deleted. `rejected` and `duplicate` are terminal; `failed` waits for `POST /api/posts/:id/requeue`, which sends a judged target back to notify and anything else back to evaluation.
 
 ### Judging
 
@@ -2581,7 +2899,7 @@ Single-row `getUpdates` cursor for the tracker's bot, so a restarted api resumes
 
 Fleet visibility, the ops watch's state and the migration ledger. Nothing in the pipeline reads any of them. The api's watch (`src/loops/watch.ts`, migration 0005) reads `workers` and `worker_errors` and sends down workers, failing loops and every warn/error line to the ops Telegram group through the alert relay.
 
-Tables: [`workers`](#reddit-workers), [`worker_errors`](#reddit-worker-errors), [`watch_alerts`](#reddit-watch-alerts), [`schema_migrations`](#reddit-schema-migrations)
+Tables: [`workers`](#reddit-workers), [`worker_errors`](#reddit-worker-errors), [`watch_alerts`](#reddit-watch-alerts), [`loop_leases`](#reddit-loop-leases), [`schema_migrations`](#reddit-schema-migrations)
 
 <a id="reddit-workers"></a>
 
@@ -2637,6 +2955,20 @@ Alerts the watch has raised and not yet resolved, so a restarted api neither pag
 | `raised_at` | `timestamptz` | ✓ | `now()` |  |
 
 - **Primary key:** `key`
+
+<a id="reddit-loop-leases"></a>
+
+#### `loop_leases`
+
+Jobs exactly one process in the fleet runs at a time (migration 0006). Today the only one is `comment_tracer`, the PM tracer. Its holder renews the row every minute or so; once `expires_at` passes, any worker started without `COMMENT_TRACER=off` may take it over. A worker Reddit blocks gives it up at once, and a clean shutdown deletes it.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `name` | `text` | ✓ |  | The job, e.g. comment_tracer. |
+| `worker_id` | `text` | ✓ |  | The worker holding it. |
+| `expires_at` | `timestamptz` | ✓ |  | When it lapses unless renewed (10 minutes after the last renewal). |
+
+- **Primary key:** `name`
 
 <a id="reddit-schema-migrations"></a>
 
@@ -3106,14 +3438,15 @@ Pruned to 14 days on each insert. Read by `GET /v1/city-log` and `rsc queue log`
 
 #### `queue_config`
 
-The city queue's two JSON documents: `settings` and `roster`.
+The city queue's JSON documents: `settings`, `roster` and `start`.
 
 - **`settings`** holds only the keys someone set, through `rsc queue` or `PUT /v1/queue/settings`. The rest come from `city_queue.DEFAULTS`. The keys are `enrolled`, `regions`, `partners`, `per_day`, `budget_minutes`, `window_hours` and the others listed there.
 - **`roster`** is what the console last pushed: the catalog with each city's region and radius, the enabled search items, and each worker's home cities, partner key, `start_at` and phrase count.
+- **`start`** is the last round started by hand (`POST /v1/queue/start`, `rsc queue start`): `{at, by}`. For `window_hours` from `at`, every enrolled worker's window is open and a city is due once it was not searched in the last `start_fresh_hours`. Afterwards the row is inert until the next start replaces it.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
-| `key` | `text` | ✓ |  | 'settings' or 'roster'. |
+| `key` | `text` | ✓ |  | 'settings', 'roster' or 'start'. |
 | `body` | `text` | ✓ |  | The JSON document. |
 | `updated_at` | `text` | ✓ |  |  |
 | `updated_by` | `text` |  |  | 'rsc', 'rs-console', or who saved it through the API. |
@@ -3434,6 +3767,7 @@ One worker's latest reported health, upserted by each heartbeat (`POST /v1/heart
 | `relogin_requested_at` | `text` |  |  | Set when an operator presses Re-login; cleared when the worker's next heartbeat or directive poll takes it. |
 | `relogin_last_requested_at` | `text` |  |  | The same stamp, kept after pickup so the ERP can tell a queued re-login from one under way. |
 | `restore_requested_at` | `text` |  |  | Set by the ERP's cookie-first assign to restore the seeded snapshot now; cleared on pickup. |
+| `sweep_requested_at` | `text` |  |  | Set when a manager starts the city round by hand, for each worker that can start a sweep on a directive; cleared when its directive poll picks it up. |
 | `login_step` | `text` |  |  | Where the latest login has got to: picked_up, typing, submitted, challenge, waiting_for_human, logged_in or failed (free text, up to 32 chars). |
 | `login_step_at` | `text` |  |  | When login_step was reached, as the worker reported it. |
 | `host_id` | `text` |  |  | Docker host the worker reports running on (RS_HOST_ID). |

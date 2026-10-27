@@ -12,7 +12,7 @@ import {
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyPort, sharedExits,
   applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
   loginAccountNo, workerHistory, queueCitiesToday, queueCityName, queueRound, queueSummary,
-  cityStepDot, stepCount, visitMinutes, VISIT_TONE,
+  cityStepDot, stepCount, visitMinutes, VISIT_TONE, queueStartedNow, retiredAt, withoutRetired,
 } from './fleetView';
 
 describe('keysymsFor', () => {
@@ -300,6 +300,30 @@ describe('fleetView', () => {
   });
 });
 
+
+describe('retired workers', () => {
+  const beat = (worker_id: string, retired_at?: string | null): FleetWorker => ({
+    worker_id, state: 'SESSION_EXPIRED', status: null, region: null, account_id: null, session_expiry: null, session_days_left: null,
+    last_heartbeat_at: null, last_search_at: null, last_listing_at: null, error_count: 0, vnc_url: null,
+    liveness: 'dead', needs_attention: false, retired_at,
+  });
+  const live = account({ worker_id: 'a' });
+  const gone = account({ worker_id: 'b', health: beat('b', '2026-10-27T15:00:00Z') });
+  const back = account({ worker_id: 'c', health: beat('c', null) });
+
+  it('reads the retire stamp off the health row', () => {
+    expect(retiredAt(gone)).toBe('2026-10-27T15:00:00Z');
+    expect(retiredAt(back)).toBeNull();
+    expect(retiredAt(live)).toBeNull();
+  });
+  it('drops them from the fleet document and leaves an untouched one as it was', () => {
+    const doc = { workers: [live, gone, back] } as unknown as FleetDoc;
+    expect(withoutRetired(doc).workers.map(w => w.worker_id)).toEqual(['a', 'c']);
+    const clean = { workers: [live, back] } as unknown as FleetDoc;
+    expect(withoutRetired(clean)).toBe(clean);
+    expect(withoutRetired(null)).toBeNull();
+  });
+});
 
 describe('vaultAccountIdFor', () => {
   const vault = { account_id: 'personal', fb_username: 'x@example.com', region: null, vnc_url: null,
@@ -733,6 +757,22 @@ describe('the city log', () => {
     expect(stepCount(page, 'opened')).toBe(0);
     expect(stepCount(page, 'phrase')).toBe(0);
     expect(stepCount(page, 'reviewed')).toBe(0);
+  });
+});
+
+describe('a round started by hand', () => {
+  const queue = (started: FleetQueue['started']): FleetQueue => ({
+    at: '2026-10-24T08:00:00Z', everyone: true,
+    settings: { enrolled: ['*'], per_day: 1, budget_minutes: 360, window_hours: 8 },
+    items: {}, cities: [], quarantined: [], roster_updated_at: null, started,
+  });
+  const started = { at: '2026-10-24T08:00:00Z', by: 'Alex Chen', until: '2026-10-24T16:00:00Z', fresh_hours: 2 };
+
+  it('counts only while it runs', () => {
+    expect(queueStartedNow(queue(started), Date.parse('2026-10-24T09:00:00Z'))).toEqual(started);
+    expect(queueStartedNow(queue(started), Date.parse('2026-10-24T16:00:00Z'))).toBeNull();
+    expect(queueStartedNow(queue(null), Date.parse('2026-10-24T09:00:00Z'))).toBeNull();
+    expect(queueStartedNow(queue(undefined), Date.parse('2026-10-24T09:00:00Z'))).toBeNull();
   });
 });
 

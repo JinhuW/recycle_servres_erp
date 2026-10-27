@@ -4,6 +4,7 @@ import { Modal } from '../../components/Modal';
 import { coordinatorApi, type FleetAccount, type FleetCity, type WorkerState } from '../../lib/coordinator';
 import { ApiError } from '../../lib/api';
 import { handleFetchError, showSuccessToast, showWarnToast } from '../../lib/errorToast';
+import { fleetApi } from '../../lib/fleet';
 import {
   PREVIOUS_FATES, cookieHealth, heldByWorker, installCandidates, poolApi, proxyMarkFor,
   type FbProxyMark, type PoolAccount, type PreviousFate,
@@ -89,11 +90,16 @@ export function WatchButton({ workerId, className = 'btn sm' }: { workerId: stri
 // Queues a Facebook re-login for one worker, after a confirm that says what it
 // will do: the worker re-enters its username, password and 2FA code from the
 // vault within seconds.
-export function ReloginButton({ workerId, account, onQueued, offerWatch = false, className = 'btn sm' }: {
+export function ReloginButton({ workerId, account, fleet = false, disabledReason, onQueued, offerWatch = false, className = 'btn sm' }: {
   workerId: string;
   // The worker's fleet row, to say up front whether the login can finish by
   // itself. Unknown (undefined) reads as "not automatic", the safe claim.
   account?: FleetAccount | null;
+  // An ERP-fleet worker: queued through /api/fleet, and always automatic,
+  // since a slot needs a password and a 2FA key to exist at all.
+  fleet?: boolean;
+  // Set when the worker cannot take a re-login now (it is not running).
+  disabledReason?: string | null;
   onQueued?: () => void;
   // Off the Watch page, lead with opening Watch: the login is only worth
   // following live, and a captcha mid-way needs someone looking.
@@ -104,10 +110,11 @@ export function ReloginButton({ workerId, account, onQueued, offerWatch = false,
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState(false);
+  const automatic = fleet || reloginIsAutomatic(account);
 
   const confirm = (watch: boolean) => {
     setBusy(true);
-    coordinatorApi.relogin(workerId)
+    (fleet ? fleetApi.relogin(workerId) : coordinatorApi.relogin(workerId))
       .then(() => {
         setAsking(false);
         if (watch) {
@@ -125,8 +132,8 @@ export function ReloginButton({ workerId, account, onQueued, offerWatch = false,
 
   return (
     <>
-      <button type="button" className={className} disabled={busy || queued}
-        title={t('fbcReloginHint')}
+      <button type="button" className={className} disabled={busy || queued || !!disabledReason}
+        title={disabledReason || t(fleet ? 'fleetReloginHint' : 'fbcReloginHint')}
         onClick={e => { e.stopPropagation(); setAsking(true); }}>
         <Icon name="refresh" size={13} />
         {queued ? t('fbcReloginDone') : t('fbcRelogin')}
@@ -140,9 +147,9 @@ export function ReloginButton({ workerId, account, onQueued, offerWatch = false,
           </div>
           <div className="modal-body">
             <p style={{ margin: 0, fontSize: 13.5, color: 'var(--fg-muted)' }}>
-              {reloginIsAutomatic(account) ? t('fbcReloginBody') : t('fbcReloginManualBody')}
+              {fleet ? t('fleetReloginBody') : automatic ? t('fbcReloginBody') : t('fbcReloginManualBody')}
             </p>
-            {!reloginIsAutomatic(account) && (
+            {!automatic && (
               <div className="card-note" style={{ marginTop: 12, padding: '10px 12px' }}>
                 <Icon name="info" size={16} />
                 <span>{t('fbcReloginManualNote', { id: workerId })}</span>

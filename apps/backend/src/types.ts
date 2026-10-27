@@ -27,6 +27,18 @@ export type Env = {
   // Seals the Facebook account pool's credentials (lib/sealed.ts): 64 hex
   // chars. Unset in production disables the pool routes (503), nothing else.
   FB_POOL_KEY?: string;
+  // Signs the fleet's worker tokens (src/fleet/auth.ts): 64 hex chars. Unset in
+  // production answers 401 on the worker routes, nothing else; dev derives one.
+  FLEET_WORKER_TOKEN_KEY?: string;
+  /** The key before the last rotation; tokens it signed verify until their next heartbeat re-signs them. */
+  FLEET_WORKER_TOKEN_KEY_PREVIOUS?: string;
+  // Which part of the fleet this instance serves (src/fleet/). Unset is all of
+  // it; 'manager-only' leaves the scheduler tick to the instance serving workers.
+  FLEET_ROLE?: string;
+  // What a claim hands every fleet worker: the Python coordinator it posts
+  // listings to, and the worker image hosts start before the first release.
+  FLEET_COORDINATOR_URL?: string;
+  FLEET_IMAGE_WORKER?: string;
   // Shippo tracking (tracking only — never buys labels). Unset means tracking
   // is a stub that never ticks.
   SHIPPO_API_URL?: string;

@@ -2,7 +2,7 @@ import {readFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {fetchNewPosts, feedUrl, htmlToText, parseFeed} from '../src/reddit.ts';
+import {commentsUrl, fetchNewPosts, feedUrl, htmlToText, parseComments, parseFeed} from '../src/reddit.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = readFileSync(join(here, 'fixtures', 'new-listing.xml'), 'utf8');
@@ -104,6 +104,21 @@ describe('htmlToText', () => {
 
   it('decodes numeric entities', () => {
     expect(htmlToText('&lt;div class="md"&gt;a&amp;#32;b&lt;/div&gt;')).toBe('a b');
+  });
+});
+
+describe('comment feeds', () => {
+  const comments = readFileSync(join(here, 'fixtures', 'comments-feed.xml'), 'utf8');
+
+  it('reads the feed from the post permalink', () => {
+    expect(commentsUrl('https://www.reddit.com/r/hardwareswap/comments/abc/slug/'))
+      .toBe('https://www.reddit.com/r/hardwareswap/comments/abc/slug/.rss?limit=500');
+  });
+
+  it('skips the post itself and keeps each comment with its author', () => {
+    const parsed = parseComments(comments);
+    expect(parsed.map((c) => c.author)).toEqual(['hwsbot', 'cohortq', 'BeastDroid', 'tupacthepirate', 'Sintahks']);
+    expect(parsed[1]!.text).toBe('Pm');
   });
 });
 

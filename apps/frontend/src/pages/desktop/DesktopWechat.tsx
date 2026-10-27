@@ -9,6 +9,7 @@ import {
   type WechatHistoryDay,
   type WechatPrice,
   type WechatPriceBucket,
+  type WechatRerun,
   type WechatRow,
   type WechatRowKind,
   type WechatSide,
@@ -17,7 +18,7 @@ import { Icon } from '../../components/Icon';
 import { RefinePanel } from '../../components/RefinePanel';
 import { Skeleton, TableSkeleton } from '../../components/Skeleton';
 import { ApiError } from '../../lib/api';
-import { handleFetchError } from '../../lib/errorToast';
+import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { useElementWidth } from '../../lib/useElementWidth';
@@ -40,6 +41,7 @@ import {
   hasPrice,
   ladder,
   parseNotes,
+  rerunOpen,
   signalCounts,
   traders,
   wechatApi,
@@ -63,6 +65,8 @@ const KINDS: readonly WechatRowKind[] = ['quote', 'spec', 'code'];
 const KIND_KEY: Record<WechatRowKind, string> = { quote: 'wxKindQuote', spec: 'wxKindSpec', code: 'wxKindCode' };
 const TOP_N = 6;
 const HISTORY_DAYS = 30;
+// How often the page asks after an open re-run; memtrade polls every minute.
+const RERUN_POLL_MS = 15_000;
 // Report days are cut at 08:00 New York time, so their windows read in ET.
 const REPORT_TZ = 'America/New_York';
 
@@ -105,6 +109,12 @@ export function DesktopWechat() {
   // side panel both read a day's spec lines. A failed one is dropped so the
   // next look asks again.
   const dayCache = useRef(new Map<string, Promise<Loaded>>());
+  // Bumped when a re-run lands, so the effects below ask for the day again.
+  const [reloads, setReloads] = useState(0);
+  const reloadDay = useCallback((d: string) => {
+    for (const key of dayCache.current.keys()) if (key.startsWith(`${d}:`)) dayCache.current.delete(key);
+    setReloads(n => n + 1);
+  }, []);
   const loadDay = useCallback((d: string, k: WechatRowKind) => {
     const key = `${d}:${k}`;
     let p = dayCache.current.get(key);
@@ -120,7 +130,7 @@ export function DesktopWechat() {
     let alive = true;
     wechatApi.days().then(d => { if (alive) setDays(d); }).catch(handleFetchError);
     return () => { alive = false; };
-  }, []);
+  }, [reloads]);
 
   useEffect(() => {
     if (!date) return;
@@ -135,7 +145,7 @@ export function DesktopWechat() {
         else handleFetchError(err);
       });
     return () => { alive = false; };
-  }, [date, kind, loadDay]);
+  }, [date, kind, loadDay, reloads]);
 
   // The side panel ranks specs whichever family the board shows.
   useEffect(() => {
@@ -146,7 +156,7 @@ export function DesktopWechat() {
       .then(r => { if (alive) setSpecRows(r.rows); })
       .catch(() => { if (alive) setSpecRows([]); });
     return () => { alive = false; };
-  }, [date, loadDay]);
+  }, [date, loadDay, reloads]);
 
   // The rankings rank by traders, priced or not, so a pick the priced-only
   // filter, the signal or a refine chip would hide clears them.
@@ -167,6 +177,33 @@ export function DesktopWechat() {
   });
 
   const day = loaded && loaded !== 'missing' ? loaded.day : null;
+
+  // The day's re-run request, ahead of the day itself while it is open:
+  // memtrade's push replaces the day, and the page reloads it on done.
+  const [rerun, setRerun] = useState<WechatRerun | null>(null);
+  const [asking, setAsking] = useState(false);
+  useEffect(() => { setRerun(day?.rerun ?? null); }, [day]);
+  const open = rerunOpen(rerun);
+  useEffect(() => {
+    if (!date || !open) return;
+    let alive = true;
+    const id = window.setInterval(() => {
+      wechatApi.rerunStatus(date).then(r => {
+        if (!alive) return;
+        setRerun(r);
+        if (r?.status === 'done') {
+          reloadDay(date);
+          if (!r.degraded) showSuccessToast(t('wxRerunDone'));
+        }
+      }).catch(() => {});
+    }, RERUN_POLL_MS);
+    return () => { alive = false; window.clearInterval(id); };
+  }, [date, open, reloadDay, t]);
+  const askRerun = () => {
+    if (!date) return;
+    setAsking(true);
+    wechatApi.rerun(date).then(setRerun).catch(handleFetchError).finally(() => setAsking(false));
+  };
   const rows = loaded && loaded !== 'missing' ? loaded.rows : null;
   const summary = days?.find(d => d.date === date) ?? null;
   const prevSummary = day?.prevDate ? days?.find(d => d.date === day.prevDate) ?? null : null;
@@ -182,7 +219,10 @@ export function DesktopWechat() {
       <div><div className="page-sub">{t('nav_monitors')} / {t('nav_wechat')}</div>
         <h1 className="page-title">{t('wxTitle')}</h1></div>
       {days && days.length > 0 && date && (
-        <DayNav days={days} date={date} prev={day?.prevDate ?? null} next={day?.nextDate ?? null} />
+        <div className="page-actions wx-actions">
+          {day && <RerunControl rerun={rerun} asking={asking} onRerun={askRerun} />}
+          <DayNav days={days} date={date} prev={day?.prevDate ?? null} next={day?.nextDate ?? null} />
+        </div>
       )}
     </div>
   );
@@ -235,8 +275,16 @@ export function DesktopWechat() {
         {loaded === 'missing' && (
           <div className="wx-banner"><Icon name="info" size={15} /><span>{t('wxDayMissing', { date: date ?? '' })}</span></div>
         )}
+        {rerun && <RerunBanner rerun={rerun} />}
         {day?.degraded && (
-          <div className="wx-banner wx-warn"><Icon name="alert" size={15} /><span>{t('wxDegraded')}</span></div>
+          <div className="wx-banner wx-warn">
+            <Icon name="alert" size={15} /><span>{t('wxDegraded')}</span>
+            {!open && (
+              <button type="button" className="btn sm" disabled={asking} onClick={askRerun} title={t('wxRerunHint')}>
+                <Icon name="rotate" size={13} />{t('wxRerunClaude')}
+              </button>
+            )}
+          </div>
         )}
         {day && day.storedPoints < day.pointCount && (
           <div className="wx-banner wx-warn">
@@ -332,6 +380,62 @@ function DayNav({ days, date, prev, next }: {
       </button>
     </div>
   );
+}
+
+function RerunControl({ rerun, asking, onRerun }: {
+  rerun: WechatRerun | null;
+  asking: boolean;
+  onRerun: () => void;
+}) {
+  const { t } = useT();
+  if (rerunOpen(rerun)) {
+    return (
+      <span className="chip info wx-rerun-chip" role="status">
+        <Icon name="rotate" size={12} />
+        {t(rerun!.status === 'running' ? 'wxRerunChipRunning' : 'wxRerunChipQueued')}
+      </span>
+    );
+  }
+  return (
+    <button type="button" className="btn" disabled={asking} onClick={onRerun} title={t('wxRerunHint')}>
+      <Icon name="rotate" size={14} />{t('wxRerun')}
+    </button>
+  );
+}
+
+// What became of the day's latest re-run. A clean one says nothing: the day
+// it pushed is what the page shows.
+function RerunBanner({ rerun }: { rerun: WechatRerun }) {
+  const { t, locale } = useT();
+  if (rerun.status === 'queued') {
+    return (
+      <div className="wx-banner" role="status"><Icon name="rotate" size={15} />
+        <span>{t('wxRerunQueued', { age: relTime(rerun.requestedAt, locale), who: rerun.requestedBy ?? t('wxRerunSomeone') })}</span>
+      </div>
+    );
+  }
+  if (rerun.status === 'running') {
+    return (
+      <div className="wx-banner" role="status"><Icon name="rotate" size={15} />
+        <span>{t('wxRerunRunning', { age: relTime(rerun.claimedAt ?? rerun.requestedAt, locale) })}</span>
+      </div>
+    );
+  }
+  if (rerun.status === 'failed') {
+    return (
+      <div className="wx-banner wx-warn"><Icon name="alert" size={15} />
+        <span>{t('wxRerunFailed', { age: relTime(rerun.requestedAt, locale), error: rerun.error ?? '' })}</span>
+      </div>
+    );
+  }
+  if (rerun.degraded) {
+    return (
+      <div className="wx-banner wx-warn"><Icon name="alert" size={15} />
+        <span>{t('wxRerunDegraded', { age: relTime(rerun.finishedAt ?? rerun.requestedAt, locale) })}</span>
+      </div>
+    );
+  }
+  return null;
 }
 
 function SignalLegend({ counts, signal, onSignal }: {

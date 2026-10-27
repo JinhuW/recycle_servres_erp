@@ -19,7 +19,8 @@ import {
   type FbTimelineEvent,
   type FbWorkerStint,
 } from '@recycle-erp/shared';
-import { api } from './api';
+import { ApiError } from './api';
+import { sharedApi as api } from './sharedGet';
 
 export { base32Bytes, cookieUid, totpKey };
 export const POOL_STATUSES = FB_POOL_STATUSES;
@@ -322,10 +323,35 @@ export function nextPoolAccount(accounts: readonly PoolAccount[]) {
         a.addedAt - b.addedAt,
     )[0];
 }
+/** One pool row without its secrets, as GET /api/facebook-pool/summary lists it. */
+export type PoolAccountSummary = {
+  no: number; uid: string | null; email: string | null; note: string;
+  status: PoolStatus; holder: string | null; holderId: string | null;
+  since: number | null; addedAt: number; cookieAt: number | null;
+  aliveCheckedAt: number | null; batch: string | null;
+  hasCookie: boolean; cookieUid: string | null;
+};
+
+/** A snapshot row as its summary, for a backend that has no summary route yet. */
+export const poolAccountSummary = (a: PoolAccount): PoolAccountSummary => ({
+  no: a.no, uid: a.uid || null, email: a.email || null, note: a.note, status: a.status, holder: a.holder,
+  holderId: a.holderId, since: a.since, addedAt: a.addedAt, cookieAt: a.cookieAt, aliveCheckedAt: a.aliveCheckedAt,
+  batch: a.batch || null, hasCookie: !!a.cookie, cookieUid: a.cookie ? cookieUid(a.cookie) : null,
+});
+
 // Every write answers with the whole pool, so the page replaces its snapshot.
 const BASE = '/api/facebook-pool';
 export const poolApi = {
   snapshot: () => api.get<PoolSnapshot>(BASE),
+  // Status, holder and uid without unsealing a secret: what the fleet pages
+  // need. A backend that predates the route answers 404; the snapshot then
+  // stands in, at its old cost.
+  summary: () => api.get<{ accounts: PoolAccountSummary[] }>(`${BASE}/summary`).catch(err => {
+    if (err instanceof ApiError && err.status === 404) {
+      return api.get<PoolSnapshot>(BASE).then(s => ({ accounts: s.accounts.map(poolAccountSummary) }));
+    }
+    throw err;
+  }),
   take: (no: number) => api.post<PoolSnapshot>(`${BASE}/${no}/take`, {}),
   giveBack: (no: number) => api.post<PoolSnapshot>(`${BASE}/${no}/return`, {}),
   report: (no: number, reason: FbReportReason, note: string) =>

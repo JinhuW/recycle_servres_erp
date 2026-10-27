@@ -398,3 +398,31 @@
 @media (prefers-reduced-motion: reduce) {
   .modal-backdrop:has(.acct-drawer) .acct-drawer { animation: none; }
 }
+
+.acct-amount-sources { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.acct-amount-sources .acct-hint { flex-basis: 100%; }
+.acct-amount-sources [aria-pressed="true"] { border-color: var(--accent); color: var(--accent-strong); }
+.commission-transactions { display: grid; gap: 10px; }
+.commission-transactions > .seg { justify-self: start; max-width: 100%; }
+.commission-search-results { max-height: 240px; overflow-y: auto; }
+.commission-search-row { display: flex; align-items: center; gap: 12px; width: 100%; }
+.commission-search-info { min-width: 0; flex: 1; text-align: left; }
+.commission-search-info > strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commission-link-label { color: var(--accent-strong); font-size: 12px; }
+.commission-bank-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+@media (max-width: 719px) {
+  .commission-search-row { gap: 8px; }
+  .commission-link-label, .commission-bank-open { display: none; }
+  .acct-amount-sources .btn { white-space: normal; text-align: left; }
+}
+
+.commission-linked-bank { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+.commission-transactions > .oe-ledger,
+.commission-transactions > .acct-ph-section { margin-top: 0; padding-top: 4px; border-top: 0; }
+.commission-transactions .acct-card-head { align-items: center; }
+.commission-transactions .acct-card-head .btn:not(.ghost),
+.commission-transactions .acct-ph-record { background: var(--accent); border-color: var(--accent); color: white; min-height: 36px; }
+@media (max-width: 719px) {
+  .commission-transactions .acct-ph-record { min-height: 44px; border-radius: 10px; padding: 0 14px; }
+}

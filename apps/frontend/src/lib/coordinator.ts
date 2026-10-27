@@ -2,7 +2,7 @@
 // manager-only). The backend forwards these calls to the coordinator API with
 // its bearer token; a 501 from any of them means the proxy env vars are unset.
 
-import { api } from './api';
+import { sharedApi as api } from './sharedGet';
 
 // snake_case on purpose: these rows pass through the proxy verbatim from the
 // coordinator's own JSON.
@@ -40,6 +40,9 @@ export type FleetWorker = {
   relogin_last_requested_at?: string | null;
   login_step?: string | null;
   login_step_at?: string | null;
+  // Set while the fleet has the worker stopped on purpose; its container is
+  // gone. Absent from a coordinator that predates it.
+  retired_at?: string | null;
   liveness: WorkerLiveness;
   needs_attention: boolean;
 };
@@ -322,6 +325,24 @@ export type QueueItemCounts = {
   held: number;
 };
 
+// A round a manager started by hand: while `until` is ahead, every enrolled
+// worker's window is open and a city is due once it was not searched in the
+// last `fresh_hours`.
+export type QueueStarted = { at: string; by: string | null; until: string; fresh_hours: number };
+
+// What starting the round now would do: the workers it wakes, the ones on an
+// older monitor that start at their usual time, and per item how many queue
+// cities would be due.
+export type QueueStartPreview = {
+  wake: string[];
+  older: string[];
+  items: Record<string, { due: number; queue: number; leased: number }>;
+  fresh_hours: number;
+  window_hours: number;
+  until: string;
+  started: QueueStarted | null;
+};
+
 export type FleetQueue = {
   at: string;
   // Every worker is enrolled ("*").
@@ -331,6 +352,8 @@ export type FleetQueue = {
   cities: FleetQueueCity[];
   quarantined: string[];
   roster_updated_at: string | null;
+  // Absent from a coordinator that cannot start a round by hand.
+  started?: QueueStarted | null;
 };
 
 // One worker's part in the queue. `capable` is whether its monitor asks the
@@ -506,6 +529,11 @@ export const coordinatorApi = {
   // Every worker takes its cities from the queue, or none does.
   setEveryoneQueue: (enrolled: boolean) =>
     api.put<unknown>('/api/coordinator/queue/everyone', { enrolled }),
+
+  // Start the city round now instead of at the workers' start times; the
+  // preview says what that would do.
+  queueStartPreview: () => api.get<QueueStartPreview>('/api/coordinator/queue/start'),
+  startQueueRound: () => api.post<QueueStartPreview>('/api/coordinator/queue/start', {}),
 
   // One worker's cities, or one city's workers, over the last `hours`. A
   // console older than the city log answers 404.

@@ -354,6 +354,10 @@ def apply_queue(doc: Dict[str, Any], status: Optional[Dict[str, Any]]) -> None:
         "quarantined": status.get("quarantined") or [],
         "roster_updated_at": status.get("roster_updated_at"),
     }
+    # A round started by hand, or null. Left out against a coordinator that
+    # cannot start one, which is how the ERP knows to show no Start button.
+    if "started" in status:
+        doc["queue"]["started"] = status["started"]
     rows = {row.get("worker_id"): row for row in status.get("workers") or []}
     for worker in doc["workers"]:
         worker["queue"] = rows.get(worker["worker_id"])

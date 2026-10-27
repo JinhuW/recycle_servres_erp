@@ -13,7 +13,7 @@
 import type postgres from 'postgres';
 import type { SqlLike } from '../db';
 import { comparePoIds, packSections, type PoSource, type PriceTemplateProduct } from '../lib/sellOrderPriceTemplate';
-import { ddr5SpecKey } from '@recycle-erp/shared';
+import { ddr5SpecKey, ramShortCode, ramShortCodes, ramSpeedMts } from '@recycle-erp/shared';
 import { canonPartNumberJs } from '../lib/part-number';
 import { invLabel } from '../lib/inventoryLabel';
 import { poLineNo, sellLineOrder } from '../lib/poLineNo';
@@ -84,6 +84,15 @@ const publicUrl = (v: unknown): string | null =>
   typeof v === 'string' && /^https:\/\//i.test(v) ? v : null;
 const text = (v: unknown) => (v == null ? '' : String(v));
 
+function ramBidKey(r: SheetLineRow, prior: string): string {
+  const code = ramShortCode({ brand: r.brand, partNumber: r.part_number, chipNumber: r.chip_number });
+  const fields = [r.brand, r.capacity, r.generation, r.type, r.classification, r.rank, ramSpeedMts(r.speed)]
+    .map(v => text(v).trim().toUpperCase());
+  // A missing spec cannot prove that different module numbers are equivalent.
+  if (code && fields.every(Boolean)) return `ram-bid:${JSON.stringify([...fields, code])}`;
+  return `${prior}|chip:${code ?? ''}`;
+}
+
 function foldLine(r: SheetLineRow): FoldLine {
   const hasInv = r.inv_id != null;
   // Manual lines fold sub_label into the label — the sheet's spec columns
@@ -99,11 +108,11 @@ function foldLine(r: SheetLineRow): FoldLine {
   return {
     row: r, qty: Number(r.sell_qty ?? 0), label, category, part,
     key: `${canon}|${label}|${condition ?? ''}`,
-    // The bid sheet prices a part once, whatever its condition — and a DDR5
-    // lot by its spec, whatever its part number, as Inventory's grouped view
-    // does: the buyer takes any stick of that brand, type, capacity, rank,
-    // speed and form. The row then names every part number it folds.
-    bidKey: (hasInv && ddr5SpecKey(r)) || `${canon}|${label}`,
+    // A bid prices equivalent RAM once across module numbers. Unknown codes
+    // keep the older part/spec grouping, separate from recorded chip dies.
+    bidKey: hasInv && category === 'RAM'
+      ? ramBidKey(r, ddr5SpecKey(r) || `${canon}|${label}`)
+      : `${canon}|${label}`,
     // Both null for a hand-typed line, both set for a lot: order_lines.order_id
     // is NOT NULL and poLineNo is null only without a lot.
     po: r.source_order_id || null,
@@ -140,6 +149,11 @@ function foldProduct(id: string, lines: readonly FoldLine[]): SheetProduct {
       formFactor: text(lot?.form_factor), health: lot?.health ?? '', rpm: lot?.rpm ?? '',
     });
   }
+  if (first.category === 'RAM') {
+    specs.shortCode = ramShortCodes((live.length ? live : ordered).map(l => ({
+      brand: l.row.brand, partNumber: l.row.part_number, chipNumber: l.row.chip_number,
+    }))).map(c => c ?? '—').join(', ');
+  }
   const poSources: SheetSource[] = [];
   for (const l of ordered) {
     const src = poSources.find((x) => x.po === l.po && x.lineNo === l.lineNo);
@@ -150,12 +164,12 @@ function foldProduct(id: string, lines: readonly FoldLine[]): SheetProduct {
       poSources.push({ po: l.po, lineNo: l.lineNo, qty: l.qty, solIds: [l.row.sol_id] });
     }
   }
-  // Lines of one product share a part number, except on a DDR5 bid row,
-  // which folds by spec: there the cell lists each one, the spelling of the
-  // first line that carries it, so the vendor's sheet round-trips every part.
+  // A RAM bid row can span module numbers. Listing every source number lets
+  // the returned quote reach every lot rather than only its representative;
+  // a number held only at 0 has no lot to reach.
   const parts: string[] = [];
   const seenCanon = new Set<string>();
-  for (const l of [shown, ...live, ...ordered]) {
+  for (const l of live.length ? live : ordered) {
     if (!l.part) continue;
     const canon = canonPartNumberJs(l.part);
     if (seenCanon.has(canon)) continue;

@@ -60,6 +60,10 @@ Forwarded today:
   also carries the queue: today's round as `queue`, and each worker's part in
   it as its `queue`. Both are `null` against a coordinator that predates the
   queue.
+- `GET/POST /v1/queue/start` (start the city round now instead of at the
+  workers' start times: the preview, and the start, signed `updated_by`).
+  `/v1/fleet`'s `queue.started` is the running start, and is absent against
+  a coordinator that cannot start one.
 - `GET /v1/city-log?worker_id=|city=&hours=` (the city log: each city a
   worker searched, from handout to result, with its steps). A coordinator
   that predates it answers 404, and the ERP then shows no log.
@@ -75,7 +79,7 @@ Forwarded today:
   with `POST /v1/workers/{id}/city-events`.
 - **rs_console** pushes the coordinator `PUT /v1/queue/roster` every 10
   minutes.
-- **Operators** use `rsc queue status|enroll|unenroll|set|show|log` in
+- **Operators** use `rsc queue status|enroll|unenroll|set|show|start|log` in
   rs-coordinator for the queue and its settings (`/v1/queue/settings`,
   `/v1/queue/status`).
 - **The replay** is the console's `POST /v1/queue/shadow`, run with

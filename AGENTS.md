@@ -10,6 +10,34 @@ repo. It holds two things:
 rules that hold everywhere. Each area keeps its own conventions in its own
 `AGENTS.md`; read that file before working there.
 
+## First rule: never log a Facebook account in without a reason
+
+Before anything else in this repo: **don't cause a Facebook login unless the
+task can't be done without one.** Every login risks a checkpoint, and a
+checkpointed account is usually lost. On 2026-10-24, 26 of the fleet's 41
+accounts were parked on `SESSION_EXPIRED` or `CHECKPOINT`.
+
+Each of these is a login:
+
+- **Starting a worker container.** `docker restart`, `docker compose up
+  --force-recreate`, `trackers/facebook/scripts/deploy.sh` (it restarts the
+  workers) and `rsc fleet release` all open a new browser that restores the
+  account's session. The login ledger (`rsc vault logins`) records each one as
+  `boot`.
+- **Re-login** on the ERP's or the console's worker page
+  (`POST /v1/workers/{id}/relogin`).
+- **Deleting or replacing a saved session** (`trackers/facebook/configs/sessions/`).
+
+So:
+
+- Never restart a worker to make a sweep start sooner, to pick up a setting
+  faster, or to see if it helps. Wait for its schedule.
+- Ship changes that need new containers in one deploy, not one restart each.
+- Ask the owner before any restart or re-login the task doesn't strictly need.
+- An idle worker won't notice an edit to its config. The monitor watches its
+  config directory, and a host-side write to the bind-mounted `config.toml`
+  raises no event there. That is not a reason to restart it.
+
 ## Map
 
 | Path | What | Stack | Runs on | Versioned by | Agent doc |
@@ -40,13 +68,15 @@ contract, and both sides change together.
 
 | ERP side | Tracker side | Backend env | Test |
 | --- | --- | --- | --- |
-| `/api/tracker/*` → `apps/backend/src/routes/tracker.ts` (allowlist: workers, rules, subreddits, matches, stats, prompt-stats, prompt-candidate, and the single setting `settings/llm_model`); UI `pages/desktop/DesktopTracker.tsx` + `lib/tracker.ts` | `trackers/reddit/src/api.ts`, Bearer `API_TOKEN` | `TRACKER_API_URL`, `TRACKER_API_TOKEN` | `apps/backend/tests/tracker-routes.test.ts` |
+| `/api/tracker/*` → `apps/backend/src/routes/tracker.ts` (allowlist: workers, rules, subreddits, matches, stats, prompt-stats, analytics, prompt-candidate, and the single setting `settings/llm_model`); UI `pages/desktop/DesktopTracker.tsx` + `lib/tracker.ts` | `trackers/reddit/src/api.ts`, Bearer `API_TOKEN` | `TRACKER_API_URL`, `TRACKER_API_TOKEN` | `apps/backend/tests/tracker-routes.test.ts` |
 | `/api/coordinator/*` → `routes/coordinator.ts`, noVNC relay `src/vncBridge.ts`; UI `DesktopCoordinator.tsx`, `FleetAccounts.tsx`, `FleetWatch.tsx` + `lib/coordinator.ts` | rs_console, `trackers/facebook/rs_console/`, at `fbc-api.recycleservers.com`, Bearer `RS_CONSOLE_TOKEN` + Cloudflare Access | `COORDINATOR_API_URL`, `COORDINATOR_API_TOKEN`, `COORDINATOR_ACCESS_CLIENT_ID` / `_SECRET` | `apps/backend/tests/coordinator-routes.test.ts` |
 
 One contract runs the other way. **memtrade** (on the office Mac, outside
 this repo, at `~/Projects/wehat_ai/memtrade`) pushes its daily WeChat market
 report to `/api/wechat-market/push/*` (`routes/wechatMarket.ts`) with a
-`wechat:write` service-client token. The payload is
+`wechat:write` service-client token, and with the same token polls
+`/push/reruns/claim` every minute for a day a manager asked to have redone,
+then reports through `/push/reruns/<id>/finish`. The payload is
 `packages/shared/src/wechatMarket.ts` on this side and memtrade's `src/erp.ts`
 on that one; test `apps/backend/tests/wechat-market.test.ts`. The ERP side has
 to keep accepting what the deployed memtrade sends.
@@ -65,6 +95,10 @@ backward-compatible until the ERP release reaches `main`.
   deletion-protected because `delete_branch_on_merge` is on, and merging a
   release would otherwise delete it
   ([debug note](docs/debug-notes/2026-10-16-auto-delete-head-branch-deleted-dev.md)).
+- **Standing authorization.** The owner authorizes agents to push completed
+  work to `dev` through the feature-PR and squash-merge workflow without
+  asking for confirmation again. This authorization does not include
+  releasing `dev` to `main`.
 - **Staging.** Stage by explicit path. A checkout routinely holds untracked
   operational files that must stay out of commits, such as `rollback/` SQL
   with prod ids, `.env` files and tracker tokens.

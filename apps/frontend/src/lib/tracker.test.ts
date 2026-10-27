@@ -76,6 +76,11 @@ describe('funnelCounts', () => {
     expect(funnelCounts(stats)).toEqual({ poll: 42, evaluate: 7, notify: 5 });
   });
 
+  it('counts a held-back cross-post as judged a target but never sent', () => {
+    expect(funnelCounts({ posts: { rejected: 10, notified: 2, duplicate: 1 }, oldestPending: null, failed: [] }))
+      .toEqual({ poll: 13, evaluate: 3, notify: 2 });
+  });
+
   it('counts a status with no posts as zero, and no stats as nothing', () => {
     expect(funnelCounts({ posts: { notified: 3 }, oldestPending: null, failed: [] }))
       .toEqual({ poll: 3, evaluate: 3, notify: 3 });

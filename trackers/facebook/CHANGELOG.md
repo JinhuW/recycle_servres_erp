@@ -18,6 +18,385 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.10] - 2026-10-27
+
+### Fixed
+
+- **A legacy worker keeps its pinned user agent when it enters the fleet.**
+  The device export marks a user agent previously read verbatim from a
+  session sidecar; the fleet entrypoint and monitor preserve that value
+  instead of rewriting its Chrome version. Native and ordinary cached
+  profiles keep their existing behavior. This avoids changing west-1's
+  presented browser header during the approved full-session handover of
+  west-1 and wc-1b (RS-421).
+
+## [0.14.9] - 2026-10-27
+
+### Removed
+
+- **Legacy ca-3 is retired after its successful ERP-fleet handover.** Its
+  compose file, seed config and console mounts leave the tree so a later
+  homelab deploy cannot start a second browser for the migrated account. The
+  original session remains on the VM, its launch files are archived, and the
+  existing fleet worker keeps 0.14.8 without another restart (RS-419).
+
+## [0.14.8] - 2026-10-27
+
+### Fixed
+
+- **A fleet handover keeps the whole saved browser session.** The entrypoint
+  restores the claim's complete Playwright snapshot, including local storage,
+  IndexedDB and partitioned cookies, and every save uploads the full state.
+  The ERP stores it encrypted and passes it to the next worker; older clients
+  remain compatible. This removes the cookies-only reset when a healthy
+  legacy worker moves into the ERP fleet (RS-419).
+
+### Removed
+
+- **The 25 unhealthy homelab workers are retired (owner decision
+  2026-10-27).** bos-1, bos-1b, ca-1, ca-1b, ca-2, ca-3b, ca-4, denver-1b,
+  homelab-1b, mw-1b, ne-1b, nj-1, nj-1b, nj-2, nj-3, nyc-1b, nyc-2, nyc-2b,
+  nyc-3, nyc-3b, phl-1b, sc-1b, wc-1 and west-1b lose their
+  `deploy/docker-compose.homelab-*.yml` and `configs/homelab-*.toml`, and
+  rs-console's `RS_WORKER_CONFIGS`, `RS_VNC_TARGETS` and config mounts no
+  longer name them, so `scripts/deploy.sh` never recreates them (va-1's files
+  had already left the tree). Every account was parked on `SESSION_EXPIRED`,
+  `CHECKPOINT` or a Facebook lock. The 16 healthy workers are unchanged. On
+  the VM their configs, `secrets.homelab-*.env` and session folders were moved
+  to `~/recycle_servers/archive/retired-2026-10-27/`, not deleted; bringing one
+  back is in the ERP repo's
+  `docs/superpowers/plans/2026-10-24-erp-fleet/WS-F-ops-and-cutover.md`.
+  `configs/fleet.toml` keeps `wc-1`: it is the static-region template that
+  `gen-configs` checks for full coverage, and its generated configs are
+  neither tracked nor deployed.
+
+## [0.14.7] - 2026-10-26
+
+### Fixed
+
+- **A fleet account with no home city starts.** The worker kept the
+  template's `currency` while leaving `search_city` out, and the monitor
+  refuses a currency without a search city: it waited for a fixed config and
+  never logged in or sent a heartbeat. Seen on the dev ERP with an account
+  added to the fleet without home cities. The worker now drops `currency`
+  when the claim has no home city; its cities come from the tasks.
+
+## [0.14.6] - 2026-10-26
+
+### Added
+
+- **`scripts/export-device-profile.py` prints the device a homelab worker's
+  browser presents, as an ERP fleet slot's `device` (RS-394).** It runs on the
+  VM, read-only: it reads the worker's bind-mounted `identity.json` and
+  session sidecar, `docker inspect`, and the Playwright build inside the image,
+  and replays the monitor's own choice of user agent, viewport, screen, scale,
+  locale and timezone. Run it before moving an account to the ERP fleet, so the
+  fleet browser presents the same fingerprint (`--all --table` for the fleet).
+
+### Fixed
+
+- **A fleet worker presents a moved device's screen and scale, and leaves the
+  browser's own user agent, locale and timezone alone when the slot says so.**
+  The entrypoint used to set the screen to the viewport and drop
+  `device_scale_factor`, so a homelab browser at 1536x731 in a 1536x864 screen
+  at 1.25 would have reached the fleet as a 1536x731 screen at 1.0. A slot's
+  `device` may now carry `screen` and `device_scale_factor`, and a `native`
+  list (`user_agent`, `locale`, `timezone`) of fields to leave unset: the
+  backend fills a default user agent into every claim, and pinning even the
+  identical string changes the client hints Chromium sends beside it.
+
+## [0.14.5] - 2026-10-26
+
+### Security
+
+- **A fleet worker claims with a single-use claim ticket, not the host
+  token (RS-411).** The host agent (ERP v1.360.0) mints a ticket for each
+  container right before `docker run` and passes it as
+  `RS_FLEET_CLAIM_TICKET`; the entrypoint claims with it when it is there,
+  else with `RS_FLEET_HOST_TOKEN` as before (older agents). Fleet mode is on
+  with `RS_FLEET_URL`, `RS_FLEET_HOST_ID` and either credential. A ticket is
+  spent by its first claim, so a `401` on a ticket claim (a `docker start`
+  of a spent container, or an expired ticket) exits `75` at once, before the
+  browser, and the agent recreates the container on a fresh ticket. Neither
+  variable reaches the monitor. Images before this one keep working with the
+  new agent, which hands them the ticket under the old name.
+
+## [0.14.4] - 2026-10-26
+
+### Fixed
+
+Review fixes to fleet mode before cutover (monitor `1efd1a4`). Each one was a
+way for a fleet worker to cost a Facebook login, hold work it could not do, or
+leak a secret.
+
+- **A session upload no longer wipes the pool's access token.** Every upload
+  sent `"token": null`, which the ERP reads as "clear it", so the account's
+  stored token, a password-free way back in, was gone after the first boot.
+  The key is now sent only when the worker holds a token.
+- **A wall reaches the ERP with alerts off.** The wall's state went out only
+  with the coordinator escalation, which alerts-off withholds, so a walled
+  worker kept heartbeating HEALTHY, renewing its task's lease, and nobody
+  heard of the checkpoint. The fleet heartbeat now turns to the wall's state,
+  and a finished task waiting on a parked worker goes back at once with
+  `take: false`.
+- **An unexpected error parks instead of exiting.** A task that throws is that
+  task's `stopped: error`; a dead browser, a boot login that throws, or any
+  other surprise in the loop parks for an operator (`DEAD`, `browser_failed`
+  / `login_failed` / `crashed`). It used to exit 1, and the agent's restart
+  after 60 s was a fresh login, up to five in 30 minutes.
+- **A fence lands within seconds.** The fleet heartbeat went every 300 s, and
+  mid-listing nothing else spoke to the fleet; it now goes every 20 s.
+- **The ERP's own misconfiguration no longer fences the fleet.** Any 401 used
+  to end the worker, including `FB_POOL_KEY is not set` on a session upload,
+  and the restart once the key came back was a login per account. Only
+  `409 stale_epoch` or a 401 about the token fences now, in the monitor and
+  the VNC relay; a 503 or a "… is not set" detail is no answer.
+- **Fleet directives: `relogin` only, once per request.** The coordinator's
+  `restore` re-ran the boot login, password fallback included, and a
+  `relogin` the ERP kept returning would have armed a login per heartbeat.
+- **`docker stop` uploads the session to the pool** (unless fenced), so a
+  replacement does not claim a cookie up to half an hour old.
+- **A slug check gives no verdict when it could not look.** A checkpoint, a
+  login form or an error was recorded as a mismatch and the worker went on
+  into the same wall; it now sends `stopped` without `matches`, parks on a
+  wall and reports it.
+- **Claim values cannot expand secrets.** A phrase, city or search setting
+  that reads as `${VAR}` is left out of the rendered config; the monitor
+  expanded it from its environment (`${RS_FB_PASSWORD}` would have gone into
+  a Facebook search URL).
+- **The claim's `env` sets only what the template reads**, plus `RS_ALERTS`
+  and `RS_CONTROL_PLANE_TOKENS`, and never overrides the container (as
+  CONTRACTS §2 says). The fleet-wide `RS_COORDINATOR_TOKEN` is refused.
+- **Less exposed inside the container.** x11vnc lets in only loopback and the
+  bridge gateway, the web UI listens on loopback in fleet mode, and no
+  `RS_FLEET_*` variable (the host token) reaches the monitor, its browser or
+  the display.
+- **The worker image is built against frozen versions**
+  (`deploy/worker-constraints.txt`, from `aimm-recycle:0.14.3`), so a rebuild
+  no longer picks up a newer Playwright and Chromium.
+
+### Changed
+
+- **The ERP's Fleet page gets its document faster from the console.** The
+  console's `/v1/fleet` waited 5–6 s, one coordinator call after another. Its
+  independent calls (accounts, the four stats, the queue, the fleet configs
+  and then each worker's session) now go out together, at most 8 in flight
+  so one page load cannot take the coordinator's 4-connection pool from the
+  workers; the city-tier rank runs beside the proxy-exit lookup. A proxy exit
+  not yet cached now holds the page 0.5 s instead of 3 s and reads `pending`
+  until the next refresh. The document is unchanged, and a failing call
+  leaves it as partial as before. Against a simulated coordinator with the
+  measured latencies, a cold build fell from 4.7 s to 1.9 s.
+- **The coordinator's `/v1/accounts` is one query.** It listed the accounts,
+  then read each one again to open its secrets for the presence flags: 42
+  round trips to Railway Postgres for 41 accounts, 2.1 s. It now reads the
+  sealed blobs in the list query. The answer is the same, a blob the key
+  cannot open still reads as no secrets, and the blob still never leaves the
+  vault.
+
+Shipping it recreates `rs-coordinator` and `rs-console` on the homelab VM
+(owner's call); the workers are not touched.
+
+## [0.14.3] - 2026-10-26
+
+### Fixed
+
+- **A fenced fleet worker stops searching at once.** When the fleet refused a
+  worker's epoch mid-task (another claim moved the slot on), only the idle
+  fleet loop noticed: on `worker-60-14` the heartbeat logged the refusal and
+  the worker searched its city for another 17 minutes before it exited 75,
+  with an account another container might already hold. Now any refused
+  fleet call (heartbeat thread, task event, session upload, or the VNC
+  relay, which writes `fence_path` for the monitor) fences the worker: the
+  search stops before its next phrase, listing, results scroll or
+  navigation, sends no `done`, no event and no session, closes the browser
+  and exits 75 (monitor `f0da469`). Non-fleet workers are unchanged.
+
+## [0.14.2] - 2026-10-25
+
+### Added
+
+- **Fleet workers can reach the coordinator without alerting anyone.** A fleet
+  worker now alerts only when the claim's `env` carries `RS_ALERTS=on`; until
+  then no Telegram channel is rendered, and the monitor (`[fleet] alerts =
+  false`, monitor `88a505d`) neither claims nor sends an alert and tells the
+  coordinator no searched city, funnel count, wall or incident. Each of those
+  would act on the live fleet: an alert claim the fleet worker never delivers
+  holds the listing from the live workers for 15 minutes, a reported city
+  counts as covered in the live city queue, and walls and incidents page the
+  ops chat. With alerts off the coordinator sees only the fleet worker's login
+  ledger.
+- **Per-worker coordinator tokens through the shared env.** The claim's `env`
+  may carry `RS_CONTROL_PLANE_TOKENS`, a JSON object of fleet worker id →
+  coordinator token (`rsc mint-token --worker <id>`). The entrypoint exports
+  only this worker's as `RS_CONTROL_PLANE_TOKEN` (and as `RS_COORDINATOR_TOKEN`
+  for alert reports) and drops the rest; a worker the map does not name exits
+  70 before the browser starts.
+
+## [0.14.1] - 2026-10-25
+
+### Fixed
+
+- Fleet workers respect budget/quarantine retry delays and renew their token
+  through heartbeat without logging into Facebook again. New tokens reach all
+  worker requests and future VNC relay connections through a private local file.
+- Claims carry a stable id across HTTP retries and the agent's confirmed-stop
+  handoff epoch, so replacements keep their account. Missing configured AI or
+  coordinator credentials fail before browser startup (RS-400).
+- **Fleet workers name themselves in `User-Agent`.** The fleet is reached
+  through the ERP's Cloudflare hostname, whose Browser Integrity Check answers
+  urllib's default `Python-urllib/x.y` agent with 403 (error 1010). The first
+  real fleet worker on `worker-60-14` failed its claim three times and exited
+  70 before any login. The entrypoint's claim now sends `rs-worker/<version>`
+  and the monitor's fleet and coordinator clients `rs-worker (…)`.
+
+
+## [0.14.0] - 2026-10-25
+
+### Added
+
+- **`scripts/push-fleet-images.sh`** builds the fleet worker image and the
+  ERP's fleet agent image for `linux/amd64` on the Mac and pushes them to the
+  private GitHub Container Registry packages
+  `ghcr.io/jinhuw/{aimm-recycle,fleet-agent}` (the OCI Container Registry
+  repositories `sin.ocir.io/ax6usa8hwbie/...` are the fallback). It stamps `RS_VERSION` and `RS_MONITOR_COMMIT` the way `deploy.sh`
+  does, refuses a monitor clone that is dirty or off the `VENDOR.md` pin, and
+  refuses to push a tracker tree that is not a release; `--no-push` is a
+  build-only dry run.
+- **Fleet mode for the worker image** (RS-394, the ERP's fleet task queue;
+  this is the worker's half, built against the plan's contract and tested
+  against a fake fleet server until the ERP's backend lands).
+  - **`rs_worker/entry.py`**, the image's new entrypoint. Without
+    `RS_FLEET_URL`, `RS_FLEET_HOST_ID` and `RS_FLEET_HOST_TOKEN` it execs the
+    image's command unchanged, so every compose worker runs as before. With
+    them it claims an account from `POST /api/fleet/worker/claim`, renders
+    `config.toml` (from `rs_worker/config.template.toml`), `session.json` and
+    `identity.json` inside the container, hands the password fallback over as
+    `RS_FB_PASSWORD` / `RS_FB_TOTP`, runs Xvfb, x11vnc and the monitor, serves
+    `GET /healthz` on 8788, and leaves with the monitor's exit code: 75 for no
+    slot or a stale epoch, 70 for a claim or configuration failure.
+  - **`deploy/Dockerfile.worker`** builds that image from this folder (the
+    monitor plus `rs_worker/`), with the entrypoint, the healthcheck and
+    5900/8467/8788 exposed; `Dockerfile.worker.dockerignore` keeps secrets and
+    venvs out of the build context. No `VOLUME`: the claimed session must die
+    with the container.
+  - **The monitor's `[fleet]` section** (`recycle-patches`, see README →
+    *Upstream patches*): one login at boot, then `next-task` long-polls while
+    the page is live and logged in, one city per task with the radius the
+    task gives, `verify-slug` tasks that read Facebook's location label,
+    heartbeats and task events to the fleet with the epoch, the session save
+    uploaded to the pool, backoff with the session kept when the fleet is
+    unreachable, exit 75 on a stale epoch without saving, and no own-list
+    fallback. Nothing changes for a worker without the section.
+  - **`rs_worker/tests/fake_fleet.py`**, a stand-in for the five worker
+    routes with made-up data, which the entrypoint and monitor-loop suites run
+    against (`.venv-aimm/bin/python -m pytest rs_worker/tests`).
+
+- **The fleet worker dials the ERP's VNC relay** (`rs_worker/vnc_relay.py`,
+  started by the entrypoint after the claim when the image has x11vnc). It
+  parks one WebSocket at `GET {RS_FLEET_URL}/api/fleet/worker/vnc` with the
+  worker token and sends nothing until the relay's `viewer` text frame says
+  a manager's noVNC page is paired with it; only then does it dial the local
+  x11vnc on 5900 and move bytes both ways as binary frames. A pair ends
+  together, and a fresh socket is parked for the next viewer (1 s, or a
+  backoff to 60 s while the ERP is unreachable). A 409 on the dial stops it
+  for good; SIGTERM stops it with the monitor. It never touches the browser
+  or the session, and dials the ERP directly, never through the account's
+  proxy. Uses `websockets`, already in the image through the monitor's web
+  UI. Needs the relay to send the `viewer` frame on pairing.
+- **A stopping fleet worker hands its last result back.** On `docker stop`
+  (SIGTERM, which the monitor's CLI turns into KeyboardInterrupt), an
+  exception or a clean exit, a finished task waiting to be reported is sent
+  once to `next-task` with `take: false` and `wait: 0`: the fleet closes it
+  and leases nothing, answering `{task: null, reason: "done_only"}`. Before,
+  the only way to report a result was the next ask, so the worker's last
+  task stayed leased to a dead container until `lease_minutes` ran out. The
+  call has an 8 s timeout and never logs in; a stale epoch skips it (its
+  token is dead). A fleet that predates `take` would lease a task instead,
+  which then simply expires. The fake fleet answers `take: false` as the
+  ERP does.
+
+- **A fleet worker that cannot reach Facebook or its proxy stops and waits
+  for an operator.** Every container start is a login, so it neither
+  retries nor exits. In fleet mode a navigation that fails with one of
+  Chromium's connection errors (proxy, tunnel, DNS, refused, reset, timed
+  out) or a navigation timeout raises at once, where it used to be tried
+  eleven times and then end the process with a crash code the host agent
+  would answer with a new container. At the boot login or mid-task the
+  worker then parks for good: a result not yet reported goes back once with
+  `take: false`, `next-task` is never asked again, nothing logs in or
+  navigates, and the heartbeat says `DEAD` with `{reason: "connect_failed",
+  operator: true, error}` (one line, URL credentials removed), which
+  releases its task and keeps the slot's lease. `/healthz` stays 200 with
+  `"state": "parked"` so Docker keeps calling it healthy; `docker stop`
+  still ends it with 0. A stale epoch while parked, a park that cannot keep
+  waiting, or a monitor that dies with a crash code while parked exits 78,
+  which the agent leaves stopped. Proved on the built image against the
+  fake fleet with a proxy that does not resolve.
+- **Shared worker secrets arrive with the claim.** The entrypoint exports
+  every string in the claim answer's `env` object (which the ERP's
+  Cloudflare Worker adds from its `FLEET_WORKER_ENV` secret, so the secrets
+  stay out of Railway and Postgres) into the monitor's environment and logs
+  the key names once, never a value; `env` cannot set the fleet's own
+  variables or the account's password fallback. A `${VAR}` the template
+  references that is still unset is left out of the rendered config, so
+  Telegram or the coordinator's tokens are simply off when absent; without
+  `OPENROUTER_API_KEY` the worker exits 70 before the browser starts.
+- **Fleet workers run without the coordinator.** When the claim's
+  `settings.coordinator_url` is empty, no `control_plane_*` or
+  `alert_report_*` key is rendered and `RS_CONTROL_PLANE_URL` is removed
+  from the monitor's environment: no alert claims, funnel counts, challenge
+  escalation or alert reports, while every task is still searched, judged by
+  the AI and alerted on Telegram when that is configured. Overlapping cities
+  can alert a listing twice until the coordinator is wired back.
+
+### Changed
+
+- **The vendored monitor is pinned at the fleet-mode commit** (VENDOR.md),
+  now `1bf74f7`, which adds the hand-back above and the park on a
+  connection failure.
+- **A result the fleet did not answer is sent again** with the next ask
+  instead of being dropped; the fleet ignores a `done` it already took.
+- **`docker stop -t 30` fits.** The entrypoint now installs its SIGTERM
+  forwarding before it starts anything (a stop during start-up was lost),
+  gives the monitor 24 s, then stops Xvfb and x11vnc together within 3 s. Its
+  kill timer is a daemon and cancelled once the monitor exits; before, a
+  pending 25 s timer kept the entrypoint alive after a monitor that had
+  already left. The session upload on the way out has a 10 s timeout.
+- **`date_listed` as a list, as master.toml writes it**
+  (`["last 7 days", "last 7 days"]`), reaches a fleet worker unchanged through
+  the claim's `settings.search` and searches with `daysSinceListed=7` on the
+  first and later searches, exactly as on the old path. It already worked;
+  tests in both suites now pin it, for the marketplace and for an item.
+
+## [0.13.18] - 2026-10-24
+
+### Added
+
+- **The city round can be started now, instead of at the workers' start
+  times** (RS-393).
+  - **The start.** `POST /v1/queue/start`, or `rsc queue start`, stores who
+    started the round and when, in `queue_config` `start`. For a window's
+    length (8 h) from then:
+    - every enrolled worker's window is open;
+    - a city is due once it was not searched in the last
+      `start_fresh_hours` (2 by default).
+  - **Waking the workers.** The coordinator queues a new `sweep` directive for
+    every enrolled worker that is HEALTHY, live, not quarantined and on
+    0.13.18 or later. Its directive poll picks it up within about 10 s, and
+    the idle loop runs every search job then, with no restart.
+  - **The preview.** `GET /v1/queue/start` (`rsc queue start --dry-run`) says
+    who would start, who runs an older monitor and so starts at its usual
+    time, and how many cities would be due.
+  - **The console** forwards both routes, and `/v1/fleet`'s `queue.started`
+    carries a running start.
+
+### Changed
+
+- **The vendored monitor is pinned at `3a621a4`**: it acts on `sweep`. The
+  start-up run of every job and the one a `sweep` triggers now share
+  `_run_all_jobs`. Older monitors ignore the directive.
+
 ## [0.13.17] - 2026-10-23
 
 ### Added

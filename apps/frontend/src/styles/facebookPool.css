@@ -808,13 +808,20 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  max-height: 560px;
   overflow: hidden;
 }
 .ff-activity .fp-log {
   flex: 1 1 auto;
   min-height: 0;
+  max-height: 480px;
   overflow-y: auto;
   scrollbar-width: thin;
+}
+/* On the Fleet tab the feed spans the page under the accounts table, so the
+   pool aside's two-column narrow layout would squeeze it into one half. */
+.fp-pool > .ff-activity {
+  display: block;
 }
 .ff-proxy-mark {
   display: flex;
@@ -2213,7 +2220,8 @@ tr.rt-off td:not(:nth-last-child(-n + 2)) {
   align-items: center;
   gap: 8px;
 }
-.rt-versions tr.rt-retired td {
+.rt-versions tr.rt-retired td,
+.rt-an-table tr.rt-retired td {
   opacity: 0.55;
 }
 .rt-version {
@@ -2236,6 +2244,113 @@ tr.rt-off td:not(:nth-last-child(-n + 2)) {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* How the tracker is doing (TrackerAnalytics.tsx) */
+.rt-an-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.rt-an-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 1100px) {
+  .rt-an-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.rt-an-kpi-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.rt-an-bad .kpi-value,
+td.rt-an-bad {
+  color: var(--neg);
+}
+.rt-an-chart {
+  padding: 0;
+}
+.rt-an-legend {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-bottom: 6px;
+}
+.rt-an-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.rt-an-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.rt-an-chart .rt-an-good {
+  fill: var(--info);
+}
+.rt-an-swatch.rt-an-good {
+  background: var(--info);
+}
+.rt-an-split {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 2fr;
+  gap: 18px;
+}
+@media (max-width: 1100px) {
+  .rt-an-split { grid-template-columns: 1fr; }
+}
+.rt-an-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.rt-an-facts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+.rt-an-facts dt {
+  color: var(--fg-muted);
+}
+.rt-an-facts dd {
+  margin: 0;
+  text-align: right;
+}
+.rt-an-table td.num,
+.rt-an-table th.num {
+  text-align: right;
+}
+.rt-an-table td.rt-an-post,
+.rt-an-table td.rt-an-why {
+  white-space: normal;
+}
+.rt-an-post {
+  min-width: 220px;
+  max-width: 420px;
+}
+.rt-an-post a {
+  color: var(--fg);
+  text-decoration: none;
+}
+.rt-an-post a:hover {
+  text-decoration: underline;
+}
+.rt-an-why {
+  max-width: 360px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.rt-an-other summary {
+  cursor: pointer;
 }
 
 /* ─── Monitors ▸ WeChat ─────────────────────────────────────────────────────
@@ -2295,6 +2410,17 @@ tr.rt-off td:not(:nth-last-child(-n + 2)) {
 .wx-banner ul {
   margin: 0;
   padding-left: 16px;
+}
+.wx-banner > .btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  margin-block: -4px;
+}
+.wx-actions {
+  align-items: center;
+}
+.wx-rerun-chip {
+  gap: 5px;
 }
 .wx-empty {
   display: flex;
@@ -2892,4 +3018,21 @@ tr.wx-quiet td {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 2px;
+}
+
+/* Start the round now (FleetQueue.tsx). */
+.ff-round-actions {
+  display: flex;
+  gap: 8px;
+}
+.ff-round-started {
+  color: var(--info-strong);
+}
+.ff-round-start-due {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.ff-round-start-due .mono {
+  margin-right: 4px;
 }

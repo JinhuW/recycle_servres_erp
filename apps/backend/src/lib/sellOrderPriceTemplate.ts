@@ -125,6 +125,7 @@ const SPEC_COLS_BY_CATEGORY: Record<string, SpecCol[]> = {
     { header: 'Rank',        key: 'rank',           width: 8 },
     { header: 'Speed',       key: 'speed',          width: 10 },
     { header: 'Chip #',      key: 'chip',           width: 16 },
+    { header: 'Short code',  key: 'shortCode',      width: 14 },
   ],
   SSD: [
     { header: 'Brand',       key: 'brand',          width: 14 },

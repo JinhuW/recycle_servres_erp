@@ -701,6 +701,26 @@ class PostgresDatabase:
             )
             return cur.rowcount > 0
 
+    def request_sweep(self: "PostgresDatabase", worker_id: str) -> None:
+        """See `Database.request_sweep`."""
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO workers (worker_id, sweep_requested_at) VALUES (%s, %s) "
+                "ON CONFLICT(worker_id) DO UPDATE "
+                "SET sweep_requested_at = excluded.sweep_requested_at",
+                (worker_id, utcnow()),
+            )
+
+    def take_sweep(self: "PostgresDatabase", worker_id: str) -> bool:
+        """See `Database.take_sweep`."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE workers SET sweep_requested_at = NULL "
+                "WHERE worker_id = %s AND sweep_requested_at IS NOT NULL",
+                (worker_id,),
+            )
+            return cur.rowcount > 0
+
     # -- review stats ------------------------------------------------------
 
     def add_review_stats(
@@ -1210,6 +1230,21 @@ class PostgresDatabase:
                 "SELECT account_id, worker_id, fb_username, fb_uid, region, proxy, vnc_url, "
                 "allow_password_login, fleet_enabled, pin_host, locked_at, locked_reason, "
                 "created_at, updated_at "
+                "FROM accounts ORDER BY account_id"
+            )
+            return _rows(cur.fetchall())
+
+    def list_account_rows_sealed(self: "PostgresDatabase") -> List[Dict[str, Any]]:
+        """`list_accounts` plus each sealed `secret_blob`, in one query.
+
+        For the vault's own presence flags only; the blob never leaves the
+        AccountStore.
+        """
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT account_id, worker_id, fb_username, fb_uid, region, proxy, vnc_url, "
+                "allow_password_login, fleet_enabled, pin_host, locked_at, locked_reason, "
+                "created_at, updated_at, secret_blob "
                 "FROM accounts ORDER BY account_id"
             )
             return _rows(cur.fetchall())

@@ -13,7 +13,7 @@ all. So they are pinned here by commit instead, and
 
 | Path | Upstream | Branch | Pinned commit |
 | --- | --- | --- | --- |
-| `ai-marketplace-monitor/` | https://github.com/BoPeng/ai-marketplace-monitor | `recycle-patches` | `e0453344add50af860fda9e433dca49c7cb6b279` |
+| `ai-marketplace-monitor/` | https://github.com/BoPeng/ai-marketplace-monitor | `recycle-patches` | `f4d4fdf5673884958d1b71c53878b4c171d7f85a` |
 | `facebook-marketplace-bot/` | https://github.com/GeorgiKeranov/facebook-marketplace-bot | (as cloned) | `3bda6b40dc6be0a613c3785bed3eb0409f9b5377` |
 
 ## ai-marketplace-monitor
@@ -25,13 +25,18 @@ table of what those changes are and why.
 Reconstitute it:
 
 ```bash
-git clone https://github.com/BoPeng/ai-marketplace-monitor
-cd ai-marketplace-monitor && git checkout recycle-patches
+git clone git@github.com:JinhuW/aimm-recycle-patches.git ai-marketplace-monitor
+cd ai-marketplace-monitor
+git remote rename origin private-mirror
+git remote add origin https://github.com/BoPeng/ai-marketplace-monitor
+git checkout recycle-patches
 ```
 
-`recycle-patches` is local-only. It is **never pushed to `origin`** — that
-remote is the upstream author's repository, not ours. Give it a private remote
-before relying on a clone of this tree being enough to redeploy.
+`recycle-patches` is preserved in the private `JinhuW/aimm-recycle-patches`
+repository. It is **never pushed to upstream `origin`**. Push fork changes only
+to `private-mirror`, and keep VENDOR.md pinned to a commit available there.
+The mirror was created private and verified private before publishing the
+RS-400 patch. CI credentials and live image releases remain separate setup steps.
 
 Before pulling upstream, **rebase** that branch rather than merging into it, and
 re-run `scripts/check-vendor.sh` to refresh the pin above.

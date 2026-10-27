@@ -101,7 +101,7 @@ GitHub branch  dev  ───► Railway env "dev"  ── backend ── Postgr
   Each backend auto-deploys when its branch changes (watch patterns scope
   rebuilds to `apps/backend/**` + `packages/shared/**`).
 - **Sync is one-directional, prod → dev.** Dev's database is clobbered to mirror
-  prod. The job NEVER writes to prod (`deploy/railway-sync/sync.sh` refuses if
+  prod, except dev's Facebook fleet, which is kept. The job NEVER writes to prod (`deploy/railway-sync/sync.sh` refuses if
   source == target).
 
 ## Files in this repo
@@ -110,6 +110,7 @@ GitHub branch  dev  ───► Railway env "dev"  ── backend ── Postgr
 |------|---------|
 | `deploy/railway-sync/Dockerfile` | `postgres:18-alpine` sync image |
 | `deploy/railway-sync/sync.sh` | `pg_dump prod` to a temp file, then one transaction on dev: drop and recreate `public`, restore, scrub. One-way, guarded |
+| `deploy/railway-sync/keep-fleet.sql`, `restore-fleet.sql` | Keep dev's Facebook fleet across the copy (v1.359.0): set aside in `sync_keep` before the drop, put back after the redeployed backend migrates |
 | `deploy/railway-sync/scrub.sql` | Clears prod's live credentials from the copy (v1.196.1): every refresh token, OAuth grant, pending consent and login attempt, and every OAuth client secret. Password hashes stay |
 
 ## Provisioning steps (need Railway API access)

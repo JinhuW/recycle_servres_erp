@@ -15,7 +15,996 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.367.2] - 2026-10-27
+
+### Fixed
+
+What the review before the v1.367 release to production found (RS-420).
+
+- **The nightly prod→dev copy keeps the dev fleet's account holders.**
+  `restore-fleet.sql` brought back each slotted account's secrets and status
+  but left prod's holder, and a worker's token only counts while its account
+  names it as holder. Every dev worker would have exited on `stale_epoch`
+  after the copy and logged in to Facebook again, every night. The holder now
+  comes back with the rest.
+- **A release no longer skips a host that was quiet for a few minutes.** A
+  roll started just after an ERP deploy saw every other host as silent (no
+  report for 2 minutes), skipped all their workers and finished without them.
+  A briefly silent host is now waited for; only one silent past the 20-minute
+  gate timeout is skipped.
+- **Held polls stay under Cloudflare's limit.** `poll_hold_seconds` could be
+  set to 120, but the Worker proxy cuts an origin answer at 100 s, so every
+  idle `next-task` would have ended in a 524. The ceiling is now 90.
+- **The worker claim checks worker ids the way the rest of the host protocol
+  does.** It kept its own looser rule, so a host could claim as `host-0`, a
+  worker its own report then dropped as foreign.
+- **Heartbeats drop a `vnc_port` outside 1–65535 and an overlong
+  `last_search_at`**, as the claim and the `detail` size cap already did.
+- **The per-account budget check reads only today's attempts.** It went
+  through `fleet_minutes`, which spreads every attempt in the retention window
+  over its days first, on every `next-task` and once per slot on the slots
+  list.
+- **A RAM bid row holds its place when one of its lines is zeroed.** v1.347.0
+  dropped zero lines before grouping, so a row's place and label could move to
+  another PO's line. Zeros count again for the place; only the part numbers of
+  lines above 0 are listed.
+- **The purchaser's Home Done tile matches the list it opens.** It counted
+  only the last 30 days while the list shows every Done PO. It now counts them
+  all and says "all time".
+
+## [1.367.1] - 2026-10-27
+
+### Fixed
+
+- Moving a Facebook worker to the ERP fleet now preserves its complete saved
+  browser session: cookies (including partitioned cookies), local storage and
+  IndexedDB. Session refreshes retain that data, and older workers refreshing
+  only cookies cannot erase it. This avoids dropping the browser state that a
+  healthy legacy account already established.
+
+## [1.367.0] - 2026-10-26
+
+### Fixed
+
+- **The Fleet tab hides retired homelab workers** (RS-418, RS-394). The 25
+  homelab workers retired on 2026-10-27 lost their containers, but the
+  coordinator keeps their rows and only stamps `retired_at` on them, so the
+  tab went on listing and counting them (37 workers, 23 parked) and kept
+  `homelab` in the host select. A coordinator worker with `retired_at` is
+  now out of the table under All and every state chip, the legend counts,
+  the foot, the host select, the tab bar's running count, the activity
+  aside and the Account pool editor's worker picker. A **Retired N** chip,
+  off by default and shown only while there is one, lists them read-only
+  with "Retired <date>"; a retired worker's own page still opens, dated,
+  without Re-login.
+- **No rolling bar without a release.** A host card drew "Rolling to 0.14.7:
+  0 of 1" with a progress bar whenever a worker ran another image than the
+  host's desired one, though `desired.image` is just the default image when
+  no release exists, so a worker left on the previous build looked like a
+  stuck roll. The bar now needs a release in state `rolling` from
+  GET /api/fleet/hosts; otherwise the card says "1 worker on 0.14.6; new
+  workers start on 0.14.7", with no bar.
+
+## [1.366.0] - 2026-10-26
+
+### Added
+
+- **An ERP-fleet worker gets the homelab watch-and-operate page** (RS-417,
+  RS-394). The owner asked for the legacy worker's "page for watch and
+  operate" on fleet workers too. A worker such as `worker-60-14-1` used to
+  show a small view-only viewer on its worker page, with no 2FA code beside
+  it and no way to type one in, so a fleet worker on Facebook's code prompt
+  could not be cleared from the ERP. `/fleet/watch/<id>` now serves both
+  kinds on one page: the legacy page was split into a shared view
+  (`fleet/watchView.tsx`: the noVNC session, Take control, Full screen, Hide
+  account, the strip) and a shared Sign-in panel (`fleet/watchAccount.tsx`),
+  and each kind feeds it. The fleet's feed is its worker row, its slot's pool
+  account from the Pool tab's own snapshot (live 2FA code, Copy, Type into
+  browser under Take control, login, password reveal, UID; reveals and
+  copies go to the pool ledger as before), the listed proxy and the host,
+  with the live browser through the ERP's relay. The fleet worker page's
+  **Watch browser** opens it; homelab ids keep the coordinator's feed.
+- **Re-login for a fleet worker.** A manager-only
+  `POST /api/fleet/workers/:id/relogin` queues a one-shot `relogin`
+  directive (with an id) that the worker's next heartbeat delivers once and
+  then clears, which is what facebook-tracker 0.14.4 needs to arm exactly
+  one forced login; heartbeats answered `directives: []` before. A worker
+  holding no slot is refused `409 not_running`, a second press while one
+  waits answers the waiting one, and a fresh claim drops one that never went
+  out. The watch page shows the legacy confirm dialog and a strip (queued,
+  taken, needs you). Migration `0214_fleet_worker_relogin.sql` adds the
+  request's columns to `fleet_workers`; CONTRACTS §5 and §7 describe it.
+
+## [1.365.0] - 2026-10-26
+
+### Changed
+
+- **An ERP-fleet worker's page is the homelab worker page** (RS-416, RS-394).
+  The owner asked for the UI inconsistency to go: a worker such as
+  `worker-60-14-1` used to open a five-line card, while a homelab worker had
+  the full credential card, checkpoints, accounts used, city log and history.
+  The homelab page is now split into shared pieces (`fleet/workerDetail.tsx`)
+  and both pages render through them. The fleet page reads everything in one
+  call, a new manager-only `GET /api/fleet/workers/:id` (worker, slot, pool
+  account with which secrets are stored but no value, the listed proxy's
+  label and host:port, cities, 7-day stats, the 24-hour task log, task
+  events, the release version). Rows the fleet has no source for read "—"
+  rather than an invented value, homelab-only actions (re-login, credentials,
+  own cities, coordinator queue) are replaced by the fleet's own (Watch
+  browser through the ERP relay, Park / Unpark, Remove from fleet, Search a
+  city now), and a worker parked on a wall shows it as its open checkpoint.
+
+## [1.364.0] - 2026-10-26
+
+### Added
+
+- **Add to fleet from the Account pool tab** (RS-415, RS-394). The owner
+  can now put new Facebook pool accounts into ERP-fleet slots without the
+  seed script. A **Proxies** card lists the exits the ERP keeps (the first
+  will be four Decodo static ISP endpoints); the URL with its login is pasted
+  once, sealed with `FB_POOL_KEY` in the new `fleet_proxies` table (migration
+  0213), and no answer or log line carries it again. **Add to fleet** on an
+  available account picks a proxy that has room (two accounts per proxy, the
+  new `max_accounts_per_proxy` rule) and optional home cities, and makes the
+  slot with a generated desktop device: Chromium's own user agent, one of
+  the coordinator's common screens with its scale and a viewport under the
+  browser chrome, fixed by the account number, on the proxy's timezone. The
+  pool row turns `fleet` under "ERP fleet" until a worker claims it.
+  **Remove from fleet** returns an account no worker holds to Available.
+  Editing a proxy's URL or timezone reaches its slots at the next claim.
+- Routes: `GET/POST /api/fleet/proxies`, `PUT/DELETE /api/fleet/proxies/:id`,
+  `POST /api/fleet/slots`, `POST /api/fleet/slots/:no/remove`
+  (CONTRACTS §7).
+
+### Changed
+
+- **A host starts only as many workers as it has accounts for.**
+  `desired.count` was the host's capacity; it is now capped at the slots
+  the host's workers hold plus the ones any worker could claim, and never
+  below its highest-numbered worker holding one (CONTRACTS §6). With
+  capacity 4 and one ready account the agent starts one worker instead of
+  four that each claim nothing and restart; every account added brings one
+  more.
+
+## [1.363.0] - 2026-10-26
+
+### Added
+
+- **Re-run a WeChat market day from the page** (RS-414). Monitors ▸ WeChat
+  has a **Re-run** button beside the day picker, and *Re-run with Claude* in
+  the banner of a day memtrade had to read with its rules. Oct 25 was one:
+  Claude had hit its weekly limit. Before this, redoing a day meant a shell
+  on the office Mac or waiting for the 08:00 run's repair pass.
+- How it works: the ERP can't reach the Mac, so the click queues a request
+  (`wechat_market_reruns`, one open per day). memtrade polls
+  `/api/wechat-market/push/reruns/claim` every minute with its
+  `wechat:write` token, reruns the day, pushes it as usual and reports
+  through `/push/reruns/<id>/finish`.
+- The page follows the request through *Queued* and *Re-running* and
+  reloads the day when it's done. It says when Claude was still out and
+  memtrade fell back again, and shows memtrade's error when the run failed.
+  A claim not finished within 2 hours counts as failed, so the day can be
+  asked for again.
+
+## [1.362.0] - 2026-10-26
+
+### Added
+
+- **Monitors ▸ Reddit ▸ Analytics** (`/tracker/analytics`, RS-413), over
+  24 hours, 7 days or 30 days. It shows the alerts sent, the share buyers
+  reacted to as a good catch, how fast alerts go out, and the cross-posts
+  held back. It also has an hourly or daily chart, a per-subreddit table and
+  a per-prompt-version table. The page exists to judge the prompt by what
+  buyers and the market did with its alerts, not by how its wording reads.
+- **PM demand as the second score.** One tracker worker, holding a database
+  lease, reads each post's comments once it is a day old. It counts the
+  distinct buyers who asked by PM or chat. A memory post with 5 or more and
+  no good-catch reaction counts as **missing**, whether it never alerted or
+  alerted and nobody acted on it. The tab lists each one with the prompt's
+  reason for saying no, and gives every prompt version a *PM recall*.
+  Reactions alone could not score the prompt: buyers labelled almost none of
+  the 480 alerts in the 30 days before this shipped.
+
+### Changed
+
+- **A cross-posted listing alerts once.** Sellers post one listing to
+  r/homelabsales and r/hardwareswap, or repost it a day later. Each copy has
+  its own Reddit id, so buyers got every copy. The tracker now matches
+  copies by author and listing words, alerts the first, and marks the rest
+  `duplicate`. In the 30 days before this shipped, 71 of 480 alerts were
+  such repeats.
+- **The alert footer asks for any emoji as a good catch** and 👎 as not
+  useful. The tracker has always counted every reaction except 👎 as a lead;
+  the footer asked for 👍 only.
+
+## [1.361.0] - 2026-10-26
+
+### Changed
+
+- **The Fleet tab's table tracks workers, not accounts (RS-412).** It used to
+  list every pool account, so in prod 49 of its 61 rows were parked accounts
+  with no worker, and those accounts were already on the Account pool tab.
+  Now it has one row per worker, ERP and coordinator, with Worker as the first
+  column and the account it holds beside it. A worker that stops reporting
+  stays as **Offline** for a week. The legend reads All workers, Healthy,
+  Degraded, Replacing, Parked and Offline. **Unpark** and **Release** for a
+  quarantine moved to the Account pool's Runs on cell; **Park** stays on a
+  running worker's row.
+
+## [1.360.0] - 2026-10-26
+
+### Security
+
+- Fleet worker containers no longer hold the host token (RS-411). Each
+  worker runs a logged-in Chromium on Facebook, and with the host token in
+  its environment one compromised container could claim every free account
+  on its host (passwords, TOTP seeds, cookies) and confirm its siblings
+  stopped. The agent now asks the ERP for a claim ticket right before each
+  `docker run` (`POST /api/fleet/hosts/:id/tickets`): single use, bound to
+  that worker id and handoff epoch, ten minutes to live, stored only as a
+  hash. The claim takes it as its bearer and spends it in the same
+  transaction; only that boot's own retries get through afterwards, and the
+  ticket opens no host route. Without a ticket the agent starts nothing.
+  The ticket also goes out under the old variable name, so worker images from
+  before facebook-tracker 0.14.5 still claim; the host token keeps working on
+  `claim` for one release for older agents. Containers carry a
+  `rs.fleet.claim_ticket` label and are recreated rather than
+  `docker start`ed, since their ticket is spent. Migration
+  `0211_fleet_claim_tickets.sql`.
+
+## [1.359.0] - 2026-10-26
+
+### Changed
+
+- The nightly prod→dev database copy keeps dev's Facebook fleet (RS-410).
+  Dev runs real fleet workers on live accounts, and the copy used to empty
+  every `fleet_*` table and blank the pool's sealed logins, so each night
+  cost the dev fleet its host, its slots and a Facebook login per worker to
+  rebuild. The job now sets the fleet tables, and the slotted pool accounts'
+  sealed columns, cookie fields, status and note, aside before the restore
+  and puts them back once the redeployed backend has re-applied dev's
+  migrations. A run whose restore does not finish leaves the kept copy on
+  dev, and later runs refuse until it is restored or dropped.
+
+## [1.358.0] - 2026-10-26
+
+### Added
+
+- The ERP fleet keeps its task history for a set number of days instead of
+  for ever (RS-409). A new rule, **Keep task history** (`retention_days`,
+  30 to 730, default 90), sits under **Rules** on the Cities tab. Once an
+  hour the scheduler deletes finished, cancelled and expired tasks older than
+  that, with their event log and archived lease attempts, 5,000 at a time and
+  one backend at a time. The scheduler's and the pick's history reads stay
+  small as the full catalog runs. Waiting and running tasks are never
+  touched. Two kinds of row stay whatever their age, because a rule reads
+  them with no window: each city and item's last search (the cadence and the
+  Cities tab's last-search cell) and the check that holds each city's latest
+  slug verdict (whether it may be enabled again). The window never drops
+  below the familiar-city window. Migration 0210 adds the index the purge
+  reads.
+
+## [1.357.0] - 2026-10-26
+
+### Fixed
+
+- A fleet worker that turns DEGRADED in the middle of a search keeps its task
+  (RS-408). Only a HEALTHY heartbeat used to renew the task lease, so a
+  DEGRADED worker's search expired after `lease_minutes`. Another account
+  then searched the same city, and the first worker's result was dropped.
+  Every heartbeat that is not a parked state now renews the lease, never past
+  `task_max_minutes` from when the task was leased.
+
+## [1.356.0] - 2026-10-26
+
+### Fixed
+
+- A fleet rollout no longer stalls on a worker the host agent will never
+  replace. A held container (operator needed, crash limit, stopped by hand),
+  one that is not running, or a worker parked on its account (dead proxy,
+  checkpoint, expired session, challenge) used to be picked as the next
+  replacement. The agent ignored it, and 20 to 40 minutes later the release
+  failed and new workers fell back to the old image. Rebooting a parked
+  account would also have been one more Facebook login. These are now
+  skipped, with the reason in the release's `skip_reasons` (RS-407).
+- A host's report keeps only that host's own workers, so a report naming
+  another host's worker can no longer get it drained or chosen for a
+  replacement the wrong host cannot carry out. It now stores the agent's
+  hold, exit code, image id and instance identity. A second live agent
+  instance for one host gets `403` on desired and report, which the agent
+  reads as observe-only. Removing a host frees the accounts it had reserved
+  for a replacement.
+- **Search now** on a switched-off or unverified city is no longer cancelled
+  by the next scheduler pass, and two clicks at once write one task instead
+  of answering 500. Raising or lowering a city's searches per day moves its
+  waiting search at once, instead of after the gap it was written with.
+- A city whose slug check came back "Facebook calls this somewhere else" can
+  no longer be switched on without **Enable anyway**. The new `reverify`
+  sends a city back for a fresh check, which is also how a removed,
+  never-verified city comes back.
+- A city whose slug check keeps ending without a verdict is no longer
+  checked again on every scheduler tick: the next check waits 15 minutes,
+  doubling per verdict-less check in the last day, up to 6 hours. The enable
+  gate reads verdicts by claim's rule (a `finished` check with a boolean
+  `matches` and no error or wall).
+- Task history now reads newest first (up to 5000 rows, with
+  `X-Fleet-Truncated` when cut). The oldest-first 1000-row cap had left
+  Analysis showing only the first days of its two-week window.
+- The quarantine rule counts a search reported as `stopped: false` as
+  finished, as the probe always did. It now checks for a positive peer
+  against one set of cities instead of searching once per evidence row. The
+  last-search-per-pair reads have an index.
+- The fleet VNC relay is served by exactly one backend instance, the holder
+  of a Postgres advisory lock; any other instance answers `503` rather than
+  park a worker where its viewer never lands. A parked worker socket is now
+  re-checked every minute, and one whose slot has moved on is closed `4409`
+  instead of lingering until its next heartbeat.
+- `fleet-import.mjs` no longer undoes managers' edits: by default it writes
+  only what the ERP lacks, and `--overwrite` makes master.toml win. Its dry
+  run reports search keys the way the write merges them. The import, the
+  slot seed and the fake worker refuse a remote target without an explicit
+  opt-in (`FLEET_IMPORT_REMOTE`, `FLEET_SEED_REMOTE`, `--i-mean-it`).
+
+## [1.355.0] - 2026-10-26
+
+The Facebook account pool has a summary that unseals nothing.
+`GET /api/facebook-pool/summary` lists every account with only what the
+fleet pages show: number, uid, email, note, status, holder, dates, batch,
+whether a cookie is saved and its `c_user`. The Fleet tab and the tab-bar
+counts poll it instead of the full snapshot, which decrypted every password,
+TOTP, cookie and token of every row on each poll. It reads no secret column,
+so a purchaser and a manager get the same answer. The page keeps its fallback
+to the snapshot for the minutes a release has the new frontend in front of
+the old backend.
+
+## [1.354.0] - 2026-10-26
+
+### Fixed
+
+Review fixes to the fleet's claim and ownership core (RS-406). None of this
+changes a running worker until the cutover; the backend side ships first and
+stays compatible with today's workers.
+
+- **A missing server key no longer looks like a dead token.** Without
+  `FLEET_WORKER_TOKEN_KEY` or `FB_POOL_KEY` the worker routes, `claim` and
+  `PUT /session` answered 401, and since RS-400 a worker treats 401 as final:
+  it exits, and its restart is a Facebook login. One deploy that dropped a
+  variable would have re-logged the whole fleet. They now answer `503
+  {error: "unavailable"}`, and token 401s say why (`missing_token`,
+  `bad_token`, `expired_token`). `FLEET_WORKER_TOKEN_KEY_PREVIOUS` keeps
+  tokens from the old key valid through a rotation; each worker's next
+  heartbeat re-signs its token.
+- **A host claims only for its own workers.** `worker_id` must be
+  `<host_id>-<n>`. Before, any host token could claim as another host's worker,
+  overwrite its row and take over its VNC relay.
+- **One lease per worker epoch.** A `next-task` answer lost to a timeout left
+  its task leased, renewed by every heartbeat for 45 minutes, while the worker
+  took a second one. Both were charged to the budget. The leased task is now
+  handed again.
+- **Handoff reservations lapse.** A host's confirmed stop reserved the account
+  with an infinite lease, the same value a manager's park writes. A
+  replacement that never claimed left it reserved for good, shown as
+  "parked". It now has `reserved_until` (20 minutes, the roll gate's timeout).
+  Park and unpark clear the handoff.
+- **Picks no longer queue on the release row.** Every `next-task` locked it, so
+  the whole fleet picked one at a time. The pick now reads it under its slot
+  lock, and a new index serves the "familiar city" test, which scanned every
+  finished task.
+- **A slug check that failed is not a verdict.** A page error, a wall or a
+  stopped check used to mark the city verified-and-wrong for good. Only a
+  finished check with a boolean `matches` and no `error`/`wall` counts now.
+  The city stays unverified and is checked again.
+- **Smaller fixes:**
+  - The replacement worker in a roll is no longer drained with the one it replaces.
+  - A retried claim or a handoff waits for its own slot instead of skipping to another account.
+  - A held poll arms its wake-up before its first look, and keeps holding after a wake that found nothing.
+  - Lease checks use the database clock.
+  - A session upload must name this account's `c_user` and `xs` (or say `clear: true`).
+  - CONTRACTS §2–§6 now describe what ships, including 0207/0208.
+
+## [1.353.0] - 2026-10-26
+
+### Changed
+
+- The ERP now remembers the fleet console's answers for the Fleet page
+  (Monitors ▸ Facebook): the fleet view, open checkpoints, workers, review and
+  alert-hit stats and the filter prompt. The console rebuilds the fleet view
+  from scratch on every call, which took 5 to 6 seconds, and every manager with
+  the page open asked for it every 10 seconds. An answer under 15 seconds old
+  is served from memory; one up to 5 minutes old is served at once while one
+  refresh runs behind it; viewers who arrive together share a single console
+  call. Only successful answers are kept, a console outage serves the last good
+  copy, and any change made through the page (re-login, settings, cities,
+  queue, resolving a checkpoint, the account pool's assign) clears the cache so
+  the next read is current. Answers carry `X-Cache` and `Age` headers. The
+  console is now called at most once per 15 seconds per view however many
+  managers are watching (RS-403).
+
+## [1.352.0] - 2026-10-26
+
+### Fixed
+
+- The fleet host agent no longer starts Facebook workers more often than it
+  means to. A worker that hits the crash limit stays stopped on that
+  container, instead of starting again once its 30-minute window ages out
+  (it was about ten logins an hour). A worker someone stopped with
+  `docker stop` stays stopped instead of starting a minute later. A start is
+  written to `/state` before it is made, so a start whose answer was lost
+  still counts for the stagger, and the stagger also counts from the newest
+  container start Docker shows, so losing `/state` does not reset it. A
+  second agent for the same host on one daemon makes both observe only
+  rather than fence each other's live workers (RS-405).
+- A spent stop confirmation can no longer wedge a worker on a container-name
+  conflict. Offline, a worker created from a handoff is no longer restarted
+  into a claim that cannot succeed. A `401`/`403`/`404` from the ERP now
+  means observe-only rather than "act on the cache". A worker that keeps
+  exiting 75 waits 10 minutes between restarts once it has done so five
+  times in 30 minutes.
+
+### Changed
+
+- Reports mark held workers with a distinct `state` and an optional `hold`
+  (`operator_needed`, `crash_limit`, `operator_stopped`), add `exit_code` and
+  `image_id`, and name the agent (`instance_id`, `daemon_id`). The ERP can
+  then skip held workers when it picks a roll. Every call carries the agent's
+  instance and daemon ids.
+- The agent pulls and runs only images under `FLEET_IMAGE_PREFIX` (default
+  `ghcr.io/jinhuw/aimm-recycle`), puts `--` before the image, and pulls a tag
+  before every start, so a tag pushed again is picked up. While a long pull
+  or a row of stops runs, it keeps reporting so the host does not look
+  silent. A standing note is logged once, not every 30 s.
+
+## [1.351.0] - 2026-10-26
+
+### Changed
+
+- The Fleet tab (Monitors ▸ Facebook) no longer waits about six seconds for
+  the coordinator before showing anything. It reads the ERP's own slots,
+  workers, hosts and pool on their own, so those rows appear as soon as the
+  ERP answers, and the coordinator's workers join the table when their
+  slower answer lands. Rows already on screen keep their place: a pool
+  account that is probably a coordinator worker's waits for that answer
+  instead of showing as an idle row first and then jumping to the top. The
+  Analysis tab splits its reads the same way.
+- The page sends each URL once. The tab, the tab bar's count chips and the
+  page around them used to fetch the same addresses side by side: one load
+  sent 14 requests for 8 URLs, now it sends one request per URL. A read the
+  page already has in flight, or got back within the last two seconds, is
+  shared, and any write clears that memory so the page always re-reads after
+  an action.
+- Coordinator data is read every 30 s instead of every 10 s, and no poll
+  starts while the previous one is still out, so a slow coordinator no longer
+  piles up requests. Measured locally over one minute on the Fleet tab, the
+  page now sends 47 requests instead of 64, and the coordinator gets 6 calls
+  instead of 20.
+- The Fleet tab and the tab-bar counts read the new pool summary
+  (`/api/facebook-pool/summary`) for status, holder and uid, so a page load
+  no longer unseals every secret in the pool three times. The full snapshot
+  is read only when the Account pool tab opens. Against a backend without
+  the summary route the page falls back to the snapshot (RS-403).
+
+## [1.350.1] - 2026-10-26
+
+### Fixed
+
+- Recent activity on the Fleet tab (Monitors ▸ Facebook) now stops at 480px
+  and scrolls. v1.349.1 only capped the copy beside the Workers card, but
+  this one sits under the accounts table, so it still ran down the page. Below
+  1190px it also spans the full width again instead of squeezing into the
+  left half (RS-401).
+
+## [1.350.0] - 2026-10-25
+
+Home is now the page that says what is waiting on you, and the old dashboard
+moved to a new **Analysis** page (RS-402). The dashboard answered "how did we
+do"; nobody had a single place that answered "what needs me now". The answers
+were spread over a dozen pages, with a sidebar badge for RMB Flow and the
+phone's inbound card as the only signals.
+
+### Added
+
+- **Home for purchasers.** It shows a count of their POs at each stage, each
+  linking to the list filtered to that stage. Under that is a list of their
+  open POs, drafts first and then the longest-waiting. Each row says how long
+  the PO has been in its stage (tinted at 3 days, red at 7) and what it is
+  waiting for: a draft's missing hand-off pieces, the box's ETA, or the
+  manager's review. Beside the list are their packages, commission owed and
+  paid, and client follow-ups that are due.
+- **Home for managers.** A row of count tiles, then the work itself: the
+  review queue (age, box-check progress, open AI findings, who has it), with
+  purchaser edits still to check; inbound packages, problems first; money to
+  move; the sales pipeline, including sell orders waiting on this manager's
+  sign-off; and the side queues (RMB Flow, after-sales, transfers, web
+  submissions).
+- **`GET /api/home`** returns all of it in one request, scoped by the
+  effective role. Every count reuses the predicate of the page it opens, and
+  tests pin it to inbound-counts, the RMB review count and the Payments
+  unlinked tile. Days in a stage come from `order_events`, since POs have no
+  stage-changed column.
+- The PO list accepts `?stage=` and the sell-order list `?status=`, so a Home
+  tile opens the list it counted.
+
+### Changed
+
+- **Analysis** (`/analysis`) holds the old dashboard unchanged. For managers
+  it has a second tab, **Inventory**, the stock snapshot that used to be
+  Inventory ▸ Analysis. `/dashboard` and `/inventory/analysis` still resolve.
+- On the phone, Home carries the same highlights. The money view (KPIs,
+  ranking, recent activity) is the Numbers screen one row below.
+
+## [1.349.1] - 2026-10-25
+
+### Fixed
+
+- Recent activity on the Facebook fleet page now stops at 560px and scrolls on
+  wide screens. It used to stretch to the Workers card's height, so with a full
+  fleet it ran thousands of pixels down the page and never scrolled (RS-401).
+
+## [1.349.0] - 2026-10-25
+
+### Fixed
+
+- Fleet workers retain their account through confirmed-stop handoffs, and hosts
+  keep receiving a replacement command until the new epoch reports healthy.
+  Lost replies and the start stagger no longer strand a rollout (RS-400).
+- Moving a pool account off its worker fences pending writes and task allocation.
+  Released attempts remain in the daily budget, including work across UTC midnight.
+- Expired city checks retry; late verdicts respect manager removals and overrides.
+  Zero-card evidence quarantines an account only with positive peer evidence,
+  and successful probes release it.
+- Workers validate configured credentials delivered through the Cloudflare claim;
+  heartbeats renew the seven-day token without another Facebook login. Deploy
+  backend support before the corresponding worker and agent update.
+
+## [1.348.0] - 2026-10-25
+
+Fleet workers get the secrets they all share without those secrets ever
+reaching Railway or Postgres. The ERP's Cloudflare Worker now holds them as
+one secret, `FLEET_WORKER_ENV` (a JSON object of variable names to values),
+and adds it as `env` to a successful answer to a worker's slot claim. The
+backend still decides who gets them, since only a claim whose host token it
+accepted is answered 200; every other answer, every other route, and the
+WebSocket and long-poll traffic of the fleet pass through unchanged. Fleet
+hosts therefore talk to the ERP through its public Cloudflare hostname.
+
+The fleet now runs without the Python coordinator for its first version: with
+no coordinator configured, a claim says so with a `null` coordinator URL
+instead of an empty string. And a worker that cannot reach Facebook or its
+proxy now has a way to say "a person must look at this": it exits 78, and the
+host agent leaves that container stopped, never restarting it (each restart
+would be one more Facebook login into the same failure), and reports it as
+`operator_needed` until someone starts or removes it by hand.
+
+## [1.347.0] - 2026-10-25
+
+### Added
+
+- RAM shows a market short code on desktop and phone forms, inventory and sell
+  orders, and in the PO/inventory workbooks and vendor bid sheet. Samsung
+  `M393A2G40DB0-CPB0Q` reads `DB0`; SK Hynix `HMA42GR7MFR4N-TF` reads `MFR`.
+  Micron uses its recorded chip die (`D9VPP` → `VPP`); unknown chips stay
+  unrecorded. Groups list every distinct code, including an unknown member,
+  while each lot keeps its own code and the existing product grouping.
+- The vendor bid sheet combines RAM with the same brand, short code, speed,
+  rank, capacity, DDR generation and module type, summing quantities across
+  lots and module numbers. Its returned prices reach every listed part in PO
+  Review mode, with chip codes distinguishing different Micron dies under one
+  part number. Unknown codes retain their earlier grouping.
+- Inventory's RAM editor now accepts Chip #, so missing Micron markings can be
+  recorded on existing stock. It normalizes the marking and audits the change.
+
+## [1.346.0] - 2026-10-25
+
+### Added
+
+- Monitors ▸ Reddit has a Workflow tab for the “From a post to an alert”
+  card. Poll, Evaluate and Notify, their live counts and editing controls
+  now have their own page, leaving Fleet focused on workers and recent
+  matches (RS-398).
+
+## [1.345.1] - 2026-10-25
+
+### Fixed
+
+- The PO commission's RMB Flow option now offers **Create** directly, without
+  transaction search or an empty candidate box. It opens the existing payment
+  form with the PO linked and keeps amount autofill and screenshot AI.
+  Business Account retains transaction search. Both desktop and phone use the
+  corrected flow, with a clear primary action and larger phone touch target
+  (RS-397).
+
+## [1.345.0] - 2026-10-25
+
+### Added
+
+- The PO commission panel searches existing RMB Flow payments or Business
+  Account transactions and links the chosen payment directly to the
+  commission. Paid by follows the transaction, and the Done flow recognizes
+  linked payments without asking for another screenshot. Existing commission
+  screenshots remain visible (RS-396).
+- Record payment fills the amount from its linked PO cost, projected commission
+  or sell order, and reads screenshot amounts before saving. Order and screenshot
+  buttons let the manager choose either value; manual edits survive late AI
+  results. CNY/USD switches convert the amount with the selected or latest FX
+  rate. Both desktop and phone use the same behavior (RS-396).
+
+
+## [1.344.1] - 2026-10-24
+
+### Fixed
+
+- Adding or removing a payment screenshot in an accounting entry's drawer
+  refreshes the Review queue and its evidence pane. Review shows newly added
+  proof and drops deleted links without a page reload (RS-395).
+
+## [1.344.0] - 2026-10-24
+
+### Fixed
+
+- The fleet claim-budget test uses a fixed window on today's UTC date, so
+  running CI before 07:00 UTC no longer puts its budget on yesterday's ledger.
+
+### Changed
+
+- Facebook fleet keeps its sidebar entry and organizes management into five
+  tabs: Fleet, Tasks, Cities, Analysis and Account pool. Fleet combines host
+  controls and every account in one filterable table, including coordinator
+  workers during the transition. Tasks shows the 24-hour task belt and a city
+  log beside the table; Cities adds verification details and fleet rules.
+- Analysis moves the search-to-alert pipeline off Fleet, adds range totals,
+  pass rates, daily charts with table views and alerts by city. Daily totals
+  retain the coordinator's UTC boundaries; city alert rates appear only when
+  ERP task results account for the same alert total. Account pool links each
+  account to its running worker. Old Queue, Hosts and Slots URLs redirect.
+
 ## [Unreleased]
+
+## [1.343.0] - 2026-10-24
+
+The fleet VNC relay now tells a parked worker when a manager starts watching.
+A VNC server speaks first, so a worker that may not send before a viewer
+arrives, and that heard nothing when one did, would wait forever while the
+viewer waited for the server's greeting. On pairing, the relay sends the
+worker one `viewer` text frame before any viewer byte; the worker dials its
+VNC server only then. This unblocks the worker image's relay client.
+
+## [1.342.0] - 2026-10-24
+
+A fleet worker that stops can now report its last search without being handed
+another. Until now the only way to close a finished task was the `done` field
+of `POST /api/fleet/worker/next-task`, and that call always leased the next
+due city as well. A worker shutting down (a release roll, a host reboot, a
+SIGTERM) either dropped its report, leaving the finished task leased, or sent
+it and walked away with a fresh task nobody would search; either way a city
+sat leased for up to `lease_minutes` before the queue got it back.
+
+- **`take: false`.** `next-task` accepts an optional `take` (default `true`).
+  With `false` the server closes `done` exactly as before and answers
+  `{task: null, reason: "done_only"}` at once: no pick, no lease, no hold, and
+  budget and quarantine are not consulted. A stale epoch is still `409`, and a
+  `take` that is not a boolean is `422`. Workers that omit it behave as they
+  always did.
+- **Fake worker.** `apps/backend/scripts/fleet-fake-worker.mjs` sends its final
+  report with `take: false`, so a run no longer leaves a leased task behind.
+- **Wake-ups after commit.** The `fleet_tasks` notify that wakes held polls
+  went out through postgres.js's `notify`, which is bound to the pool, so a
+  notify sent inside a transaction (a new city's slug check, a released task)
+  fired on another connection before the task committed. A held poll could
+  wake, find nothing and answer `nothing_due`, leaving the worker idle for its
+  30-second retry; CI caught it as a flaky wake test. The notify now runs as
+  `pg_notify` on the caller's own handle and is delivered at commit.
+
+## [1.341.0] - 2026-10-24
+
+The fleet tabs under **Monitors ▸ Facebook** now read the routes the backend
+actually ships. They were built against mocks before the backend merged, and
+the two disagreed on most answers: the cities, items, tasks and city-log
+routes answer bare rows where the page expected envelopes, a city carries its
+open tasks as a list rather than a map per item, the round start answers
+`{started, skipped}`, and the hosts list comes with the latest release beside
+it. Against a real backend every tab would have broken on its first poll.
+
+- **Cities, Queue.** The page reads a city's `open_tasks` and counts only
+  searches on the board, so a finished slug check no longer reads as the day's
+  search. Restoring a removed city whose slug was never verified gets the
+  backend's `409 unverified` and asks whether to **Enable anyway**; Search now
+  passes over an item a worker is already searching. The task table names
+  cities from the city list, since the task rows carry slugs only.
+- **Start the round now.** The preview follows the backend's rule (only
+  searches waiting for later move; one already due is left), and the toast
+  reports the answer's started and skipped counts.
+- **Hosts.** A banner shows the latest roll from `GET /hosts`: its state,
+  version and image, workers replaced and left out, the one being replaced now
+  and, if it stopped, why.
+- **Slots.** A parked slot reads **Parked**, not free (the backend answers no
+  lease for it), with an **Unpark** action that lets the account be claimed
+  again; any slot that is not parked can be parked.
+- The fetchers' tests answer with the backend's shapes, and the fixtures the
+  smoke tests render are typed from the shared wire types, so the two cannot
+  drift apart silently again. Checked end to end against a local backend with
+  a made-up account and the fake worker.
+
+## [1.340.0] - 2026-10-24
+
+What the fleet's first end-to-end run on a local backend turned up (RS-394,
+the login-free half of WS-F's integration: the fake worker and the host agent
+with a sleeping image, no Facebook login).
+
+- **A new city's slug check now reaches a waiting worker at once.** Adding a
+  city wrote its `verify-slug` task without the `fleet_tasks` notify, so a
+  worker already holding an empty `next-task` poll saw it only when the hold
+  ran out: 36 s late in the run, up to `poll_hold_seconds` (50 s) in general.
+  `createCity` now notifies in the same transaction, and the check was handed
+  3 ms after the manager's POST.
+- **`fleet-import.mjs` and `fleet-seed-slots.mjs` print the database name with
+  the host.** They have no local-only guard and print their target instead,
+  but the host alone reads `127.0.0.1` for every database on the local test
+  container, so it could not tell a private check database from the shared
+  one. `dbTarget()` now returns `database` too.
+- **CI runs the host agent's tests.** `backend-tests` now includes
+  `apps/fleet-agent/**` in its path filters and runs
+  `pnpm --filter recycle-erp-fleet-agent test` (its live-docker file skips
+  itself, so CI starts no container). Until now nothing gated the agent's
+  planner.
+
+## [1.339.0] - 2026-10-24
+
+The ERP fleet's claim protocol (RS-394): the routes a worker container and a
+host agent talk to, and the manager's view of slots, hosts and workers. The
+live fleet is untouched; nothing calls these routes until the worker image
+runs in fleet mode against a dev backend (WS-F's integration step).
+
+- **Workers** (`/api/fleet/worker/*`, `src/fleet/claim.ts`). `claim` (host
+  scope) locks a free slot with `FOR UPDATE SKIP LOCKED`, preferring the host
+  the account last ran on and then accounts whose home cities nobody covers,
+  moves its epoch on, marks the pool account as held by the worker (the
+  stint trigger closes the old stint and opens the new one, the ledger names
+  the host), stamps the proxy exit on the stint, and answers the one payload
+  that carries secrets in clear: password, 2FA key, cookies as Playwright
+  storage state, access token, proxy URL, device, home cities, items and
+  settings, plus a seven-day worker token. `heartbeat` renews the slot lease,
+  records the worker, renews the task lease on `HEALTHY` and hands the task
+  back to the queue on a parked state (`SESSION_EXPIRED`, `CHECKPOINT`,
+  `CHALLENGE_*`, `DEAD`); `DEGRADED` changes nothing. `next-task` closes the
+  task the worker finished, picks by priority, then home, familiar (searched
+  by this account within `familiar_days`) and other, then due time; a
+  quarantined slot gets only its own probe; an account past `budget_minutes`
+  of leases today waits. With nothing due it holds on `LISTEN fleet_tasks`
+  for up to `poll_hold_seconds`, one dedicated connection fanning out to at
+  most 200 held polls, and looks once more. `events` appends to the task log,
+  and a `verify-slug` verdict enables the city or leaves it disabled.
+  `session` reseals the worker's cookies and token into the pool row.
+- **Hosts and releases** (`/api/fleet/hosts*`, `/api/fleet/releases`,
+  `src/fleet/hosts.ts`). A manager registers a host and sees its token once;
+  only the sha256 is kept. The agent reads `desired` (count = capacity when
+  authoritative, VNC ports from 5901, the image from the latest release or
+  `FLEET_IMAGE_WORKER`) and posts its `report`. A release rolls one idle
+  worker at a time across the fleet, waiting for the replacement's first
+  heartbeat on the new version in a state no worse than before, stopping the
+  release after twenty minutes without one, and skipping workers on
+  observe-only or silent hosts: the coordinator's `advance_rollout` rules.
+  The roll state lives in `fleet_settings` under `release`.
+- **Slots and workers** (`/api/fleet/slots*`, `/api/fleet/workers`,
+  `src/fleet/workers.ts`): each account's slot with its pool status, today's
+  leased minutes and the worker's current task; release a quarantine early;
+  park an account (its worker is fenced out and nothing claims it) and unpark
+  it.
+- **VNC relay** (`src/fleet/vnc.ts`): a worker dials
+  `GET /api/fleet/worker/vnc` with its token and the ERP parks the socket by
+  worker id; a manager's noVNC page on `/api/fleet/vnc/:worker/ws` is paired
+  with it. No port opens on the worker's host. The coordinator's own relay is
+  unchanged.
+- **Scripts.** `scripts/fleet-seed-slots.mjs` seeds one slot per fleet pool
+  account from the coordinator's exports (home cities, device profiles) and
+  the proxy login from the environment, sealed; `--dry-run` rolls back.
+  `scripts/fleet-fake-worker.mjs` stands in for a worker container: claim,
+  heartbeat, long-poll, events, done, session, with the contract's exit codes.
+- `FLEET_COORDINATOR_URL` and `FLEET_IMAGE_WORKER` join the backend
+  environment; the bearer-only worker routes and the host report are exempt
+  from the CSRF header.
+
+## [1.338.0] - 2026-10-24
+
+The ERP fleet's queue now fills itself (RS-394, PR A2 of the plan). Still no
+page and no worker: the live fleet keeps sweeping off the coordinator until the
+cutover, and these routes are the Cities and Queue tabs' backend, built ahead
+of them.
+
+- **Catalog routes.** `GET/POST /api/fleet/cities`, `PUT/DELETE
+  /api/fleet/cities/:slug`, `GET/PUT /api/fleet/items` and `GET/PUT
+  /api/fleet/settings`, all manager scope. A new city arrives disabled with a
+  `verify-slug` task, because a slug Facebook does not know silently searches
+  the account's own city; `override_verify` is the manager's way past the
+  check. Settings are validated against the plan's keys and bounds and the
+  monitor's own filter vocabulary (no `start_at`: the fleet has no sweep time).
+- **Scheduler.** `reconcile()` keeps one open search task per enabled city and
+  item, due when the last finished search plus `1 day / per_day` says; cancels
+  what waits on a disabled city or item; expires a lease past its time or past
+  `task_max_minutes` however faithfully its worker heartbeats (the old queue's
+  unbounded renewal); writes one probe task per quarantined slot per
+  `quarantine_probe_hours` so a quarantine can end; and sends `NOTIFY
+  fleet_tasks` with the item for anything that became ready. It runs every
+  30 s from each backend instance (unless `FLEET_ROLE=manager-only`) and after
+  every manager write, and two instances reconciling at once insert nothing
+  twice: every insert goes through the open-task unique index.
+- **Tasks routes.** `GET /api/fleet/tasks` with state, city, item, worker and
+  since filters; `POST /api/fleet/tasks` pulls a pair's waiting task to the
+  front at priority 100 (one open search per pair, so no second task); `POST
+  /api/fleet/round/start` makes every waiting search due now except pairs
+  finished within `start_fresh_hours`; `GET /api/fleet/city-log` returns a
+  city's or worker's recent tasks with their events.
+- **Import.** `apps/backend/scripts/fleet-import.mjs --master <master.toml>
+  [--dry-run]` loads the trackers' 127 cities (enabled, verified as
+  `imported`), the two items with phrases and filters, and the search
+  settings; the dry run prints what would change. `smol-toml` is the backend's
+  TOML reader.
+
+## [1.337.0] - 2026-10-24
+
+Monitors ▸ Facebook gets four tabs for the ERP-owned fleet (RS-394): **Cities**,
+**Queue**, **Hosts** and **Slots**, beside the coordinator's Fleet tab and the
+Account pool. They read the ERP's own task queue through `/api/fleet`, which
+the backend workstreams of the same ticket deliver; against a backend without
+those routes each tab says so and the rest of the page is unaffected.
+
+- **Cities** is the catalog the queue works from: name, Marketplace slug,
+  region, standing (verifying, enabled, disabled, removed), searches a day,
+  a pin, the last search per item, the next due time and the worker holding
+  it. **Add city** takes a slug, a name, a region and a radius and then
+  follows the row: "verifying…" until a worker reports the location Facebook
+  showed for the slug, with **Enable anyway** for a manager who will not
+  wait. A row can be pinned, given its own per-day count, searched now (a
+  manual task per item, ahead of everything), or removed after a confirm;
+  removed cities can be shown and restored.
+- **Queue** opens with a board per item, one cell per city in the order the
+  round runs — searched today, being searched, due, not due yet, cancelled —
+  and a counts sentence under each. **Start the round now** previews, per
+  item, how many waiting tasks fall due and how many are skipped because the
+  city was searched within the fresh window, then does it. A task table with
+  state, item, city and worker filters lists the last 24 hours and everything
+  waiting; a city's name, on the board or in the table, opens its log: its
+  tasks and each one's events.
+- **Hosts** lists the machines that run worker containers: whether the agent
+  may run workers (a switch; off is observe-only), a capacity stepper, the
+  agent's version, when it last reported, running against desired, and a
+  roll's progress. **Add host** shows the new host's token once, with a copy
+  button and the three variables its agent needs. **Release** names an image
+  and a version and starts the roll.
+- **Slots** lists each fleet account's slot: the masked uid, pool status and
+  worker state, host, worker (linked), epoch, lease, minutes of searching
+  today against the budget as a ring, and quarantine with a release button;
+  **Park** frees the account after a confirm. A button leads to the pool
+  page for the credentials.
+- **The worker page** (`/fleet/worker/<id>`) now recognises a fleet worker:
+  its state, host, account and epoch, the task it holds, and **Watch**, its
+  browser through the ERP's own VNC relay rather than the coordinator's.
+  Any other id shows the coordinator's worker page as before.
+
+Times on the new tabs read in US Eastern, like the Fleet tab's. The tabs are
+desktop-only. The fetchers live in `lib/fleet.ts`; the row types are the
+shared fleet types, extended there with what the manager routes fold in (a
+city's open task per item, a slot's worker and pool status, a host's desired
+state); pure helpers (board cells, counts,
+due times, the round preview, masks) have vitest coverage, and the tables have
+smoke tests against made-up fixtures.
+
+## [1.336.0] - 2026-10-24
+
+Groundwork for the ERP fleet, the city task queue the Facebook workers will
+pull from instead of sweeping on a clock (RS-394). No behaviour changes: the
+live fleet still runs off the coordinator's queue, no page changed, and
+nothing writes to the new tables yet.
+
+- **Schema.** Migration `0206_fleet.sql` creates `fleet_cities`,
+  `fleet_items`, `fleet_settings`, `fleet_hosts`, `fleet_slots`,
+  `fleet_workers`, `fleet_tasks`, `fleet_task_events` and the `fleet_minutes`
+  view, as the plan's contract spells them out, plus the FK indexes the rest
+  of the schema keeps. `docs/DATABASE.md` has a *Fleet* section.
+- **Three auth scopes** (`src/fleet/auth.ts`): `managerOnly` (the session
+  cookie and the manager role, as the coordinator proxy gates itself),
+  `hostAuth` (a host agent's bearer, matched by sha256 against
+  `fleet_hosts.token_hash`) and `workerAuth` (an HMAC token the ERP mints at
+  claim time, signed with `FLEET_WORKER_TOKEN_KEY`, naming the slot's lease
+  epoch). A token whose epoch is no longer the slot's gets `409 stale_epoch`
+  on every worker route, which is what keeps one account off two browsers.
+  Dev and CI derive the key from `JWT_SECRET`; production without it answers
+  401 on the worker routes and boots as usual.
+- **`/api/fleet` is mounted** with one route, `GET /api/fleet/health`
+  (manager), which lists the fleet tables present in the database.
+- **Shared types** for the whole fleet (`packages/shared/src/fleet.ts`):
+  cities, items, tasks, events, slots, hosts, workers, settings and the
+  claim, next-task and desired-state payloads the worker, the host agent and
+  the pages build against.
+
+
+## [1.335.0] - 2026-10-24
+
+The host agent for the Facebook worker fleet, `apps/fleet-agent`, the piece
+of RS-394 that turns a Docker host into a fleet host with one container and
+a token. Nothing uses it yet: the ERP routes it talks to land with the
+backend workstreams, and the first host is prepared and cut over by the ops
+one.
+
+What it does, every 30 seconds: ask the ERP how many workers this host should
+run and on which image, look at the containers carrying its label, and
+start, restart, replace or remove workers until they match, then report what
+runs. A worker is started with the fixed `docker run` line of the contract
+(labels, no restart policy, 1 GB shm, the five fleet variables, the VNC port
+on loopback); the token reaches the Docker CLI through its environment, never
+a process list. Starts are one per tick and at least three minutes apart,
+because each one is a Facebook login. Exited workers come back by exit code:
+stale epoch or no slot after a minute, a failed claim after ten, anything
+else after a minute and counted, with five such restarts in half an hour
+leaving the worker stopped and reported. A host the ERP marks
+non-authoritative is observed and reported, never touched; an unreachable
+ERP leaves the host on its last answer and restarts only.
+
+The package has no runtime dependencies (the `docker` CLI over the mounted
+socket, `fetch` for HTTP), builds with `tsc` into a `node:24-alpine` image
+with the CLI installed, and keeps its only state, the cached answer and the
+start memory, on a `/state` volume. Its planner is a pure function with a
+test for each rule, the agent runs against a fake daemon and a mock ERP, and
+an opt-in live test drives the real daemon with a sleeping `alpine:3` image
+and cleans up after itself.
+
+
+## [1.334.0] - 2026-10-24
+
+A manager can start the Facebook fleet's city round now, instead of waiting
+for the workers' start times (RS-393, facebook-tracker 0.13.18). The owner
+asked for "a buttom to start the task right now instead of waiting for the
+design start time". Running the pilot round at an odd hour had needed
+hand-set queue rules and container restarts, and a restart is a Facebook
+login.
+
+**Start the round now** sits on the round card. Its confirmation shows,
+before anything changes:
+
+- how many workers start searching within a minute;
+- which enrolled workers run an older worker and so start at their usual
+  time;
+- for each item, how many cities are due: those not searched in the last
+  2 hours;
+- when the round ends.
+
+Once started, the lede says who started it and until when.
+
+Behind it:
+
+- **The coordinator** stores the start. For 8 hours it opens every enrolled
+  worker's window and hands out every city not searched lately.
+- **Waking the workers.** It wakes each one that can start through a new
+  `sweep` directive on the poll workers already make every 10 seconds, so
+  nothing is restarted.
+- **The ERP** forwards `GET /api/coordinator/queue/start` (the preview) and
+  `POST` (the start, signed by the session).
+- **Older workers.** A worker on 0.13.17 or older ignores the directive. So
+  the button wakes workers only once they are redeployed, and until then its
+  confirmation says so.
+
+## [1.333.1] - 2026-10-24
+
+A direct-debit or eCheck PayPal payment now leaves *pending* once PayPal
+settles it (RS-391). Seven prod payments had sat pending for months: PO-1383,
+PO-1386, PO-1411 and four ignored rows. They also held every sync's window
+open back to July.
+
+For a bank-funded payment, the balance record PayPal returns marks the moment
+the money was drawn, stamped pending. The settlement arrives later, in a
+record outside the balance, which the sync never read. A pending balance
+record now takes the status of its latest record. No money moves: pending and
+settled count the same towards a PO and in the RMB ledger.
+
+The same debugging corrected a belief about reversals. PayPal's `V` on a
+payment we sent means the seller was debited for a case. It does not mean our
+money came back. PO-1399's payment carries a `V`, but its chargeback was
+decided against us and nothing came back. So a `V` there counts as settled.
+Money that does come back arrives as a credit row of its own (`T1106`,
+`T1107`), or on Mercury. FEATURES and the code comments no longer say PayPal
+reverses a payment in place.
+
+Read-only dry runs against prod changed exactly the stale rows and nothing
+else.
 
 ## [1.333.2] - 2026-10-25
 

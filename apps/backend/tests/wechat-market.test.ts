@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { WechatDay, WechatDayPush, WechatEvidence, WechatHistoryDay, WechatPoint, WechatRow } from '@recycle-erp/shared';
+import type { WechatDay, WechatDayPush, WechatRerun, WechatEvidence, WechatHistoryDay, WechatPoint, WechatRow } from '@recycle-erp/shared';
 import { createOAuthClient } from '../src/oauth/clients';
 import { generateSigningKey, signAccessToken } from '../src/oauth/tokens';
 import { api } from './helpers/app';
@@ -173,6 +173,81 @@ describe('WeChat market (/api/wechat-market)', () => {
              (SELECT degraded FROM wechat_market_days) AS degraded
     `;
     expect(counts).toEqual({ rows: 1, points: 0, degraded: true });
+  });
+
+  describe('re-run', () => {
+    const claim = (bearer = pushBearer) =>
+      api<{ id: string; date: string }>('POST', '/api/wechat-market/push/reruns/claim', {
+        headers: { authorization: `Bearer ${bearer}`, 'X-Requested-By': '' },
+      });
+    const finish = (id: string, body: unknown) =>
+      api('POST', `/api/wechat-market/push/reruns/${id}/finish`, {
+        body, headers: { authorization: `Bearer ${pushBearer}`, 'X-Requested-By': '' },
+      });
+    const ask = (token: string, date = '2026-10-21') =>
+      api<{ rerun: WechatRerun }>('POST', `/api/wechat-market/days/${date}/rerun`, { token });
+    const dayRerun = async (token: string) =>
+      (await api<{ day: WechatDay }>('GET', '/api/wechat-market/days/2026-10-21', { token })).body.day.rerun;
+
+    beforeEach(async () => {
+      await push('2026-10-21', dayPush({ degraded: true }));
+    });
+
+    it('is asked for by managers, for a stored day, once while open', async () => {
+      const { token: purchaser } = await loginAs(MARCUS);
+      expect((await ask(purchaser)).status).toBe(403);
+      const { token } = await loginAs(ALEX);
+      expect(await dayRerun(token)).toBeNull();
+      expect((await ask(token, '2026-10-22')).status).toBe(404);
+      const first = await ask(token);
+      expect(first.status).toBe(200);
+      expect(first.body.rerun).toMatchObject({ date: '2026-10-21', status: 'queued', claimedAt: null });
+      expect(first.body.rerun.requestedBy).toEqual(expect.any(String));
+      const second = await ask(token);
+      expect(second.body.rerun.id).toBe(first.body.rerun.id);
+      expect((await dayRerun(token))?.id).toBe(first.body.rerun.id);
+    });
+
+    it('is claimed by memtrade, runs and finishes', async () => {
+      const { token } = await loginAs(ALEX);
+      expect((await claim()).status).toBe(204);
+      expect((await claim(marketBearer)).status).toBe(403);
+      const { body: { rerun } } = await ask(token);
+      const c = await claim();
+      expect(c.status).toBe(200);
+      expect(c.body).toEqual({ id: rerun.id, date: '2026-10-21' });
+      expect((await claim()).status).toBe(204);
+      expect((await dayRerun(token))?.status).toBe('running');
+      // The rerun's own push replaces the day; the request survives it.
+      await push('2026-10-21', dayPush());
+      expect((await finish(rerun.id, { ok: false })).status).toBe(400);
+      expect((await finish(rerun.id, { ok: true, degraded: true })).status).toBe(200);
+      expect(await dayRerun(token)).toMatchObject({ status: 'done', degraded: true, error: null });
+      expect((await finish(rerun.id, { ok: true })).status).toBe(409);
+      expect((await finish('00000000-0000-0000-0000-000000000000', { ok: true })).status).toBe(404);
+      // Closed, so the day can be asked for again.
+      expect((await ask(token)).body.rerun.id).not.toBe(rerun.id);
+    });
+
+    it('records a failure with memtrade\'s error', async () => {
+      const { token } = await loginAs(ALEX);
+      const { body: { rerun } } = await ask(token);
+      await claim();
+      expect((await finish(rerun.id, { ok: false, error: 'claude exited 1' })).status).toBe(200);
+      expect(await dayRerun(token)).toMatchObject({ status: 'failed', error: 'claude exited 1' });
+    });
+
+    it('takes a claim nobody finished in 2 hours as failed, and lets the day be asked for again', async () => {
+      const { token } = await loginAs(ALEX);
+      const { body: { rerun } } = await ask(token);
+      await claim();
+      await getTestDb()`UPDATE wechat_market_reruns SET claimed_at = NOW() - INTERVAL '3 hours'`;
+      expect(await dayRerun(token)).toMatchObject({ id: rerun.id, status: 'failed', error: expect.stringContaining('2 hours') });
+      const again = await ask(token);
+      expect(again.body.rerun).toMatchObject({ status: 'queued' });
+      expect(again.body.rerun.id).not.toBe(rerun.id);
+      expect((await finish(rerun.id, { ok: true })).status).toBe(409);
+    });
   });
 
   describe('reads', () => {

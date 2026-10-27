@@ -108,8 +108,14 @@ packages.get('/', async (c) => {
 // the card without moving its row into "needs".
 packages.get('/inbound-counts', async (c) => {
   const u = c.var.user;
-  const sql = getDb(c.env);
   const mineOnly = c.req.query('mine') === 'true';
+  return c.json(await inboundCounts(getDb(c.env), u, mineOnly));
+});
+
+// Home's Inbound card reads these too.
+export async function inboundCounts(
+  sql: ReturnType<typeof getDb>, u: User, mineOnly: boolean,
+): Promise<{ moving: number; needs: number }> {
   const scopeFrag = effectiveRole(u) === 'manager' && !mineOnly ? sql`TRUE` : sql`created_by = ${u.id}`;
   const [row] = (await sql`
     SELECT
@@ -121,8 +127,8 @@ packages.get('/inbound-counts', async (c) => {
     FROM packages
     WHERE ${scopeFrag}
   `) as unknown as { moving: number; needs: number }[];
-  return c.json({ moving: row.moving, needs: row.needs });
-});
+  return { moving: row.moving, needs: row.needs };
+}
 
 // ── Lookup by scanned barcode ────────────────────────────────────────────────
 packages.get('/lookup', async (c) => {

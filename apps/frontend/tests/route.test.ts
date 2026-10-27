@@ -47,8 +47,8 @@ describe('pathToDesktopView — unchanged behaviour', () => {
   it('opens the PO when handed the phone products link', () => {
     expect(pathToDesktopView('/purchase-orders/PO-1444/products')).toBe('history');
   });
-  it('defaults unknown paths to dashboard', () => {
-    expect(pathToDesktopView('/nope')).toBe('dashboard');
+  it('defaults unknown paths to Home', () => {
+    expect(pathToDesktopView('/nope')).toBe('home');
   });
 });
 
@@ -65,8 +65,11 @@ describe('pathToDesktopView — tracker', () => {
   it('keeps the Prompts tab on the tracker view', () => {
     expect(pathToDesktopView('/tracker/prompts')).toBe('tracker');
   });
+  it('keeps the Workflow tab on the tracker view', () => {
+    expect(pathToDesktopView('/tracker/workflow')).toBe('tracker');
+  });
   it('does not match other tracker sub-paths', () => {
-    expect(pathToDesktopView('/tracker/x')).toBe('dashboard');
+    expect(pathToDesktopView('/tracker/x')).toBe('home');
   });
 });
 

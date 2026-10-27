@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { coordinatorCache } from '../src/routes/coordinator';
 
 // Same fetch stub as tracker-routes.test.ts: the facade is upstream, and the
 // only things worth asserting are the URL, the bearer header and pass-through.
@@ -15,6 +16,11 @@ const ENV = {
   COORDINATOR_API_URL: 'http://facade.internal:8600/',
   COORDINATOR_API_TOKEN: 'console-secret',
 };
+
+// The proxy's read cache is process-wide; each test starts with it empty.
+beforeEach(() => {
+  coordinatorCache.clear();
+});
 
 describe('Coordinator proxy routes (/api/coordinator)', () => {
   beforeEach(async () => {
@@ -486,6 +492,45 @@ describe('City queue (PUT /api/coordinator/workers/:id/queue, /queue/everyone)',
     expect((await api('PUT', PATH, { token, env: ENV, body: { enrolled: 'yes' } })).status).toBe(400);
     expect((await api('PUT', '/api/coordinator/queue/everyone', { token, env: ENV, body: {} })).status).toBe(400);
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('Start the round (GET/POST /api/coordinator/queue/start)', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('requires a manager', async () => {
+    const spy = stubFacade(200, {});
+    expect((await api('POST', '/api/coordinator/queue/start', { body: {} })).status).toBe(401);
+    const { token } = await loginAs(MARCUS);
+    expect((await api('GET', '/api/coordinator/queue/start', { token, env: ENV })).status).toBe(403);
+    expect((await api('POST', '/api/coordinator/queue/start', { token, env: ENV, body: {} })).status).toBe(403);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('forwards the preview, and a start signed by the session only', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubFacade(200, { wake: ['nyc-1'], older: [], items: {}, started: null });
+    const preview = await api<{ wake: string[] }>('GET', '/api/coordinator/queue/start', { token, env: ENV });
+    expect(preview.status).toBe(200);
+    expect(preview.body.wake).toEqual(['nyc-1']);
+    expect((spy.mock.calls[0] as [string])[0]).toBe('http://facade.internal:8600/v1/queue/start');
+
+    const r = await api('POST', '/api/coordinator/queue/start', {
+      token, env: ENV, body: { updated_by: 'someone else', at: '2020-01-01' },
+    });
+    expect(r.status).toBe(200);
+    const [url, init] = spy.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe('http://facade.internal:8600/v1/queue/start');
+    expect(init.method).toBe('POST');
+    const sent = JSON.parse(init.body as string);
+    expect(Object.keys(sent)).toEqual(['updated_by']);
+    expect(sent.updated_by).not.toBe('someone else');
   });
 });
 

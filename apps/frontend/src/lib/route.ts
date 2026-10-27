@@ -147,6 +147,17 @@ export function replaceHashQuery(params: URLSearchParams): void {
   window.history.replaceState(window.history.state, '', next);
 }
 
+/** Reads a one-shot query param a link opened the page with (Home's
+ *  `?stage=`), and drops it so the page's own state rules from then on. */
+export function takeHashParam(name: string): string | null {
+  const q = readHashQuery();
+  const v = q.get(name);
+  if (v === null) return null;
+  q.delete(name);
+  replaceHashQuery(q);
+  return v;
+}
+
 /** Back to wherever the user came from, or `fallback` when that's off-site. */
 export function navigateBack(fallback: string): void {
   if (historyDepth() > 0) {
@@ -351,14 +362,15 @@ export function parseShippingRoute(path: string): ShippingRoute | null {
 
 // Desktop view ids ↔ URL paths. Source of truth for the sidebar/router.
 export const DESKTOP_VIEW_TO_PATH = {
-  dashboard:  '/dashboard',
+  home:       '/',
+  analysis:   '/analysis',
+  stock:      '/analysis/inventory',
   submit:     '/submit',
   history:    '/purchase-orders',
   shipping:   '/shipping',
   clients:    '/clients',
   market:     '/market',
   inventory:  '/inventory',
-  analysis:   '/inventory/analysis',
   sellorders: '/sell-orders',
   aftersales: '/after-sales',
   transfers:  '/transfers',
@@ -376,15 +388,16 @@ export const DESKTOP_VIEW_TO_PATH = {
 export type DesktopViewId = keyof typeof DESKTOP_VIEW_TO_PATH;
 
 export function pathToDesktopView(path: string): DesktopViewId {
-  if (path === '/' || path === '/dashboard') return 'dashboard';
+  if (path === '/' || path === '/home') return 'home';
+  // The money dashboard and the stock analysis became Analysis's two tabs;
+  // their old paths keep resolving for bookmarks and old links.
+  if (path === '/analysis' || path === '/dashboard') return 'analysis';
+  if (path === '/analysis/inventory' || path === '/inventory/analysis') return 'stock';
   if (path === '/submit') return 'submit';
   if (path === '/purchase-orders' || matchPurchaseOrder(path) || matchPoCheck(path)) return 'history';
   if (parseShippingRoute(path)) return 'shipping';
   if (path === '/clients' || match('/clients/:id', path)) return 'clients';
   if (path === '/market') return 'market';
-  // Analysis is a tab under Inventory — match it before the /inventory/:id edit
-  // route so it isn't read as an item id.
-  if (path === '/inventory/analysis') return 'analysis';
   if (path === '/inventory' || match('/inventory/:id', path)) return 'inventory';
   if (path === '/sell-orders' || match('/sell-orders/:id', path) || match('/sell-orders/:id/edit', path)
     || matchSellOrderPack(path)) return 'sellorders';
@@ -392,15 +405,15 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/transfers') return 'transfers';
   if (path === '/web-submissions' || match('/web-submissions/:id', path)) return 'websubmissions';
   if (path === '/activity') return 'activity';
-  // A tab under Payments, like Analysis under Inventory.
+  // A tab under Payments, like Inventory under Analysis.
   if (path === '/payments/internal') return 'internaltx';
   if (path === '/payments' || match('/payments/po/:id', path) || match('/payments/so/:id', path)) return 'payments';
   if (path === '/accounting' || match('/accounting/:id', path)) return 'accounting';
-  if (path === '/tracker' || path === '/tracker/prompts') return 'tracker';
+  if (path === '/tracker' || path === '/tracker/workflow' || path === '/tracker/prompts' || path === '/tracker/analytics') return 'tracker';
   if (path === '/wechat' || matchWechatDay(path)) return 'wechat';
-  if (path === '/fleet' || path === '/fleet/pool' || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
+  if (path === '/fleet' || path === '/fleet/pool' || matchFleetTab(path) || fleetRedirect(path) || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
   if (path === '/settings') return 'settings';
-  return 'dashboard';
+  return 'home';
 }
 
 // An after-sales case's page. `new` is the create form; `?order=SO-…`
@@ -437,6 +450,31 @@ export function wechatDayPath(date: string): string {
 export function matchWechatDay(path: string): { date: string } | null {
   const m = match('/wechat/:date', path);
   return m && /^\d{4}-\d{2}-\d{2}$/.test(m.date) ? { date: m.date } : null;
+}
+
+// The ERP-owned fleet's tabs under Monitors ▸ Facebook beside the Fleet tab
+// at /fleet itself: the task belt, the city catalog and the analysis
+// (pages/desktop/fleet/*).
+export const FLEET_TABS = ['tasks', 'cities', 'analysis'] as const;
+export type FleetTab = (typeof FLEET_TABS)[number];
+
+export function fleetTabPath(tab: FleetTab): string {
+  return `/fleet/${tab}`;
+}
+
+export function matchFleetTab(path: string): FleetTab | null {
+  const m = match('/fleet/:tab', path);
+  return m && (FLEET_TABS as readonly string[]).includes(m.tab) ? (m.tab as FleetTab) : null;
+}
+
+// The tabs the fleet page had before its rework, kept as redirects so an old
+// bookmark still lands: the queue became Tasks, hosts and slots folded into
+// the Fleet tab.
+const FLEET_TAB_MOVED: Record<string, string> = { '/fleet/queue': '/fleet/tasks', '/fleet/hosts': '/fleet', '/fleet/slots': '/fleet' };
+
+/** Where a retired fleet path now lives, or null for any other path. */
+export function fleetRedirect(path: string): string | null {
+  return FLEET_TAB_MOVED[path] ?? null;
 }
 
 // The fleet page's live-browser viewer for one Facebook worker. A sub-route of
@@ -571,7 +609,8 @@ export function readSafeNext(search: string): string | null {
 
 // Mobile view ids ↔ URL paths.
 export const MOBILE_VIEW_TO_PATH = {
-  dashboard: '/dashboard',
+  home:      '/',
+  analysis:  '/analysis',
   history:   '/purchase-orders',
   shipping:  '/shipping',
   market:    '/market',
@@ -584,13 +623,14 @@ export type MobileViewId = keyof typeof MOBILE_VIEW_TO_PATH;
 
 export function pathToMobileView(path: string): MobileViewId {
   // The Submit shortcut has no screen of its own: the shell opens the capture
-  // flow on it and lands on the dashboard.
-  if (path === '/' || path === '/dashboard' || path === '/submit') return 'dashboard';
+  // flow on it and lands on Home.
+  if (path === '/' || path === '/home' || path === '/submit') return 'home';
+  if (path === '/analysis' || path === '/dashboard') return 'analysis';
   if (path === '/purchase-orders' || matchPurchaseOrder(path)) return 'history';
   if (parseShippingRoute(path)) return 'shipping';
   if (path === '/market') return 'market';
   if (path === '/inventory') return 'inventory';
   if (path === '/accounting' || match('/accounting/:id', path)) return 'accounting';
   if (path === '/profile') return 'me';
-  return 'dashboard';
+  return 'home';
 }

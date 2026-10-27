@@ -32,18 +32,11 @@ import { liveness, type Liveness } from '../../lib/workerLiveness';
 import { Hi } from './FleetAccounts';
 import { ConfirmDialog } from './settings/dialogs';
 import { Toggle } from './settings/_shared';
+import { AnalyticsCard } from './TrackerAnalytics';
 import { PromptsCard } from './TrackerPrompts';
 import '../../styles/facebookPool.css';
 
 // ─── Monitors ▸ Reddit ────────────────────────────────────────────────────────
-// The Facebook fleet page's chrome (DesktopCoordinator.tsx) with the Reddit
-// monitor's content, in two tabs. Fleet: a status legend that filters, the
-// workers table beside the newest matches, and the pipeline from a poll to an
-// alert, where the subreddits and the alert rules are edited. Prompts
-// (/tracker/prompts): which prompt finds more leads. Everything goes through
-// the /api/tracker proxy; a 501 from it means the backend has no tracker
-// credentials, which gets its own quiet state instead of error toasts.
-
 const REFRESH_MS = 30_000;
 const MATCHES_SHOWN = 30;
 const STATS_WINDOW_MS = 24 * 3600_000;
@@ -66,6 +59,9 @@ export function DesktopTracker({ showToast }: Props) {
   const { t, locale } = useT();
   const { path } = useRoute();
   const promptsOpen = path === '/tracker/prompts';
+  const workflowOpen = path === '/tracker/workflow';
+  const analyticsOpen = path === '/tracker/analytics';
+  const fleetOpen = !promptsOpen && !workflowOpen && !analyticsOpen;
 
   const [rules, setRules] = useState<TrackerRule[] | null>(null);
   const [subs, setSubs] = useState<TrackerSubreddit[] | null>(null);
@@ -73,7 +69,7 @@ export function DesktopTracker({ showToast }: Props) {
   const [matches, setMatches] = useState<TrackerMatch[] | Unavailable | null>(null);
   const [stats, setStats] = useState<TrackerStats | Unavailable | null>(null);
   const [notConfigured, setNotConfigured] = useState(false);
-  // Both live here, not in the table, so a trip to Prompts keeps them.
+  // Both live here, not in the table, so switching tabs keeps them.
   const [filter, setFilter] = useState<Liveness | 'all'>('all');
   const [query, setQuery] = useState('');
 
@@ -116,11 +112,10 @@ export function DesktopTracker({ showToast }: Props) {
     trackerApi.stats(new Date(Date.now() - STATS_WINDOW_MS)).then(setStats).catch(() => setStats('unavailable'));
   }, [fail]);
 
-  // Liveness, matches and the post counts all move on their own, and only
-  // the Fleet tab shows them. A backgrounded tab polls nothing and catches up
-  // the moment it's back.
+  // Fleet and Workflow share the live post counts. A backgrounded tab polls
+  // nothing and catches up the moment it's back.
   useEffect(() => {
-    if (promptsOpen) return;
+    if (promptsOpen || analyticsOpen) return;
     loadLive();
     const refresh = () => { if (!document.hidden) loadLive(); };
     const timer = setInterval(refresh, REFRESH_MS);
@@ -129,18 +124,22 @@ export function DesktopTracker({ showToast }: Props) {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [loadLive, promptsOpen]);
+  }, [loadLive, promptsOpen, analyticsOpen]);
 
   const head = (
     <div className="page-head"><div><div className="page-sub">{t('nav_monitors')} / {t('nav_tracker')}</div>
-      <h1 className="page-title">{promptsOpen ? t('trkPromptsTitle') : t('trkTitle')}</h1></div></div>
+      <h1 className="page-title">{promptsOpen ? t('trkPromptsTitle') : workflowOpen ? t('trkWorkflowTitle') : analyticsOpen ? t('trkAnalyticsTitle') : t('trkTitle')}</h1></div></div>
   );
   const tabs = (
     <nav className="tabs fp-view-tabs" aria-label={t('trkViews')}>
-      <a className={`tab ${!promptsOpen ? 'active' : ''}`} href={hrefFor('/tracker')} onClick={onLinkClick('/tracker')}
-        aria-current={!promptsOpen ? 'page' : undefined}><Icon name="globe" size={14} />{t('fpFleet')}</a>
+      <a className={`tab ${fleetOpen ? 'active' : ''}`} href={hrefFor('/tracker')} onClick={onLinkClick('/tracker')}
+        aria-current={fleetOpen ? 'page' : undefined}><Icon name="globe" size={14} />{t('fpFleet')}</a>
+      <a className={`tab ${workflowOpen ? 'active' : ''}`} href={hrefFor('/tracker/workflow')} onClick={onLinkClick('/tracker/workflow')}
+        aria-current={workflowOpen ? 'page' : undefined}><Icon name="arrow" size={14} />{t('trkTabWorkflow')}</a>
       <a className={`tab ${promptsOpen ? 'active' : ''}`} href={hrefFor('/tracker/prompts')} onClick={onLinkClick('/tracker/prompts')}
         aria-current={promptsOpen ? 'page' : undefined}><Icon name="sparkles" size={14} />{t('trkTabPrompts')}</a>
+      <a className={`tab ${analyticsOpen ? 'active' : ''}`} href={hrefFor('/tracker/analytics')} onClick={onLinkClick('/tracker/analytics')}
+        aria-current={analyticsOpen ? 'page' : undefined}><Icon name="analytics" size={14} />{t('trkTabAnalytics')}</a>
     </nav>
   );
 
@@ -179,6 +178,14 @@ export function DesktopTracker({ showToast }: Props) {
               trackerApi.listRules().then(setRules).catch(fail);
               loadModel().catch(fail);
             }} />
+        ) : analyticsOpen ? (
+          <AnalyticsCard locale={locale} />
+        ) : workflowOpen ? (
+          <FlowCard stats={stats} subs={subs} rules={rules} liveModel={liveModel} locale={locale}
+            onSubsChanged={setSubs} onDeleteSub={setDeletingSub}
+            onRulesChanged={setRules} onEditRule={setRuleDialog} onDeleteRule={setDeletingRule}
+            onEditModel={() => setModelDialog(true)}
+            onError={fail} showToast={showToast} />
         ) : <>
           <WorkerLegend counts={counts} filter={filter} onFilter={setFilter} />
           <div className="fp-split ff-split">
@@ -188,11 +195,6 @@ export function DesktopTracker({ showToast }: Props) {
               locale={locale} onError={fail} showToast={showToast} onRemoved={loadLive} />
             <MatchesAside matches={matches} locale={locale} />
           </div>
-          <FlowCard stats={stats} subs={subs} rules={rules} liveModel={liveModel} locale={locale}
-            onSubsChanged={setSubs} onDeleteSub={setDeletingSub}
-            onRulesChanged={setRules} onEditRule={setRuleDialog} onDeleteRule={setDeletingRule}
-            onEditModel={() => setModelDialog(true)}
-            onError={fail} showToast={showToast} />
         </>}
       </div>
 

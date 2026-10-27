@@ -1,0 +1,13 @@
+# Context for deploy/Dockerfile.worker is trackers/facebook; only the two
+# trees the image copies go in. Everything else here is secrets (configs/,
+# sessions), venvs with a browser in them, or the other components.
+*
+!ai-marketplace-monitor/pyproject.toml
+!ai-marketplace-monitor/README.md
+!ai-marketplace-monitor/src
+!ai-marketplace-monitor/docker
+!rs_worker
+!deploy/worker-constraints.txt
+rs_worker/tests
+**/__pycache__
+**/*.pyc

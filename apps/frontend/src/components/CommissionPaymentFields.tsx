@@ -1,20 +1,19 @@
-import { useId } from 'react';
+import { useCallback, useEffect, useId, useState, type ReactNode } from 'react';
 import { AttachmentChip } from './AttachmentChip';
-import { AttachmentDropzone } from './AttachmentDropzone';
-import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
-import { PAID_BY_COMPANY, paidByLabel, paidByLocked, paidByValue, type CommissionPaidBy } from '../lib/useCommissionPaidBy';
+import { PAID_BY_COMPANY, paidByLabel, type CommissionPaidBy } from '../lib/useCommissionPaidBy';
 import type { ProofAttachment } from '../lib/usePaymentProof';
 import { ConfirmDialog } from '../pages/desktop/settings/dialogs';
+import { api } from '../lib/api';
+import { RouteLink } from './RouteLink';
+import { paymentsForOrderPath } from '../lib/route';
+import { fmtMoney } from '../lib/format';
+import { useDebouncedValue } from '../lib/useDebouncedValue';
+import { showSuccessToast } from '../lib/errorToast';
+import type { CommissionPayments } from '../lib/useCommissionPayments';
+import '../styles/accounting.css';
 
-// The commission payment — who paid the purchaser, and the screenshot that
-// shows it — on the desktop Commission tab and in the phone fold, one
-// component so the two cannot drift. Both write through, with no Save: files
-// go straight to the order's Commission bucket, and the payer follows the
-// upload or a pick the manager confirms (CommissionPaidByConfirm, which the
-// page renders). The Done dialog offers the same drop box on the way to Done
-// when nothing is here yet. No panel around it.
-
+// Legacy evidence stays readable while payments live in their own ledgers.
 export type CommissionShots = {
   atts: ProofAttachment[];
   uploading: boolean;
@@ -23,59 +22,153 @@ export type CommissionShots = {
 };
 
 type Props = {
+  orderId: string;
   paidBy: CommissionPaidBy;
   shots: CommissionShots;
-  /** Managers edit; everyone else reads what is on file. */
   editable: boolean;
+  payments: CommissionPayments;
+  onLinked: () => void;
+  rmbFlow?: ReactNode;
 };
 
-export function CommissionPaymentFields({ paidBy, shots, editable }: Props) {
-  return (
-    <div style={{ display: 'grid', gap: 14 }}>
-      <PaidByField paidBy={paidBy} editable={editable} />
-      <ScreenshotField shots={shots} editable={editable} />
-    </div>
-  );
-}
+type Candidate = { id: string; day: string; party: string; amount: number; currency: string; detail: string };
 
-function PaidByField({ paidBy, editable }: { paidBy: CommissionPaidBy; editable: boolean }) {
-  const { t } = useT();
+export function CommissionPaymentFields({ orderId, paidBy, shots, editable, payments, onLinked, rmbFlow }: Props) {
+  const { t, locale } = useT();
   const id = useId();
-  const locked = paidByLocked(paidBy.paidBy);
-  if (!editable) {
-    return (
-      <div className="field" style={{ marginBottom: 0, display: 'grid', gap: 8 }}>
-        <span className="label">{t('cpPaidByLabel')}</span>
-        <div className={paidBy.paidBy ? '' : 'pay-proof-title muted'}>
-          {paidByLabel(paidBy.paidBy, t)}
-        </div>
-      </div>
-    );
-  }
+  const [source, setSource] = useState<'rmb' | 'business'>(paidBy.paidBy?.kind === 'company' ? 'business' : 'rmb');
+  const [query, setQuery] = useState('');
+  const settled = useDebouncedValue(query, 200);
+  const [results, setResults] = useState<{ rows: Candidate[]; nextCursor: string | null } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Candidate | null>(null);
+  const [generation, setGeneration] = useState(0);
+  const search = useCallback(async (cursor?: string) => {
+    const q = new URLSearchParams({ q: settled.trim(), direction: 'out', limit: '30', ...(cursor ? { cursor } : {}) });
+    q.set('status', 'unlinked');
+    q.set('settle', 'settled');
+    const r = await api.get<{ rows: BankCandidate[]; nextCursor: string | null }>('/api/bank-transactions?' + q);
+    return { nextCursor: r.nextCursor, rows: r.rows.map(e => ({
+      id: e.id, day: e.postedAt.slice(0, 10), party: e.counterparty ?? e.source,
+      amount: Math.abs(e.amount), currency: e.currency, detail: e.paypalTxnId ?? e.description ?? e.source,
+    })) };
+  }, [settled]);
+  useEffect(() => {
+    if (!editable || source !== 'business') return;
+    let alive = true;
+    setLoading(true);
+    setResults(null);
+    setError(null);
+    search().then(r => { if (alive) setResults(r); })
+      .catch(e => { if (alive) setError(e instanceof Error ? e.message : t('cpSearchFailed')); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [editable, source, search, generation, t]);
+
+  const link = async () => {
+    if (!selected || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post(`/api/bank-transactions/${encodeURIComponent(selected.id)}/link`, { orderId, kind: 'commission', onlyUnlinked: true });
+      paidBy.sync({ kind: 'company', linked: true });
+      setSelected(null);
+      setGeneration(v => v + 1);
+      payments.reload();
+      onLinked();
+      showSuccessToast(t('cpPaymentLinked'));
+    } catch (e) {
+      setSelected(null);
+      setError(e instanceof Error ? e.message : t('saveFailed'));
+    } finally { setBusy(false); }
+  };
+
   return (
-    <div className="field" style={{ marginBottom: 0, display: 'grid', gap: 8 }}>
-      <label className="label" htmlFor={id}>{t('cpPaidByLabel')}</label>
-      {/* A pick asks first; the select stays on the record until it is confirmed.
-          The company is a fixed option, not a member. */}
-      <select
-        id={id}
-        className="select"
-        value={paidByValue(paidBy.paidBy)}
-        onChange={e => paidBy.request(e.target.value)}
-        disabled={paidBy.saving || locked}
-        title={locked ? t('cpPaidByLinkedHint') : undefined}
-        style={{ width: '100%' }}
-      >
-        <option value="">{t('cpPaidByNone')}</option>
-        <option value={PAID_BY_COMPANY}>{t('payBusiness')}</option>
-        {paidBy.options.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-      </select>
-      {locked && (
-        <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('cpPaidByLinkedHint')}</div>
+    <div className="commission-transactions">
+      <div className="acct-hint">{t('cpPaidByLabel')}: {paidByLabel(paidBy.paidBy, t)}</div>
+      {editable && (
+        <>
+          <div className="seg" role="group" aria-label={t('cpPaymentSource')}>
+            {(['rmb', 'business'] as const).map(s => (
+              <button key={s} type="button" className={source === s ? 'active' : ''} aria-pressed={source === s}
+                      disabled={busy} onClick={() => { setSource(s); setSelected(null); }}>
+                {t(s === 'rmb' ? 'acctCardTitle' : 'payBusiness')}
+              </button>
+            ))}
+          </div>
+          {source === 'rmb' ? rmbFlow : (
+            <>
+              <label className="label" htmlFor={id}>{t('cpSearchTransactions')}</label>
+              <input id={id} className="input" type="search" value={query} disabled={busy} autoComplete="off"
+                     placeholder={t('cpSearchBusinessPh')}
+                     onChange={e => setQuery(e.target.value)} />
+              <div className="acct-hint">{t('cpSearchHint')}</div>
+              {loading ? <div className="acct-hint" role="status">{t('cpSearchLoading')}</div> : results && (
+                <div className="acct-pick-list commission-search-results">
+                  {results.rows.length === 0 && <div className="acct-empty">{t('cpNoTransactions')}</div>}
+                  {results.rows.map(row => (
+                    <button key={row.id} type="button" className="acct-pick-row commission-search-row" disabled={busy}
+                            onClick={() => setSelected(row)}>
+                      <span className="commission-search-info">
+                        <strong>{row.party}</strong>
+                        <span className="acct-sub">{row.day} · {row.detail}</span>
+                        <span className="acct-sub mono">{row.id}</span>
+                      </span>
+                      <span className="mono">{fmtMoney(row.amount, row.currency, locale)}</span>
+                      <span className="commission-link-label">{t('cpLinkPayment')}</span>
+                    </button>
+                  ))}
+                  {results.nextCursor && <button type="button" className="btn sm" disabled={busy} onClick={async () => {
+                    setBusy(true);
+                    try {
+                      const r = await search(results.nextCursor!);
+                      setResults(prev => prev && ({ rows: [...prev.rows, ...r.rows], nextCursor: r.nextCursor }));
+                    } catch (e) { setError(e instanceof Error ? e.message : t('cpSearchFailed')); }
+                    finally { setBusy(false); }
+                  }}>{t('cpMoreTransactions')}</button>}
+                </div>
+              )}
+              {error && <div className="acct-error" role="alert">{error}</div>}
+            </>
+          )}
+        </>
+      )}
+      {!!payments.data?.bank.length && (
+        <div className="commission-linked-bank">
+          <div className="acct-card-title">{t('payLedgerTitle')}</div>
+          {payments.data.bank.map(payment => (
+            <div key={payment.id} className="commission-bank-row">
+              <span>{payment.postedAt.slice(0, 10)} · {payment.counterparty ?? payment.source}</span>
+              <span className="mono">{fmtMoney(payment.amount, 'USD', locale)}</span>
+              <span className="chip">{t('paySettle' + payment.settleStatus[0].toUpperCase() + payment.settleStatus.slice(1))}</span>
+              <RouteLink to={paymentsForOrderPath(orderId, payment.id)} className="btn sm ghost commission-bank-open">{t('payLedgerOpen')}</RouteLink>
+            </div>
+          ))}
+          <div className="acct-card-net"><span>{t('payLedgerNet')}</span><span className="mono">{fmtMoney(payments.data.bankNet, 'USD', locale)}</span></div>
+        </div>
+      )}
+      {shots.atts.length > 0 && (
+        <div>
+          <span className="label">{t('cpShotLabel')}</span>
+          <div className="ho-chips">{shots.atts.map(a => <AttachmentChip key={a.id} a={a} />)}</div>
+        </div>
+      )}
+      {selected && (
+        <ConfirmDialog title={t('cpLinkPayment')} busy={busy} message={t('cpLinkBusinessConfirm', {
+          amount: fmtMoney(selected.amount, selected.currency, locale), party: selected.party, id: orderId,
+        })} confirmLabel={t('cpLinkPayment')} onCancel={() => { if (!busy) setSelected(null); }}
+          onConfirm={() => { void link(); }} />
       )}
     </div>
   );
 }
+
+type BankCandidate = {
+  id: string; postedAt: string; counterparty: string | null; amount: number; currency: string;
+  source: string; paypalTxnId: string | null; description: string | null;
+};
 
 // The yes behind every change to Paid by except an upload's first record: a
 // pick in the select, or an upload by a manager other than the one on file.
@@ -114,47 +207,5 @@ export function CommissionPaidByConfirm({ paidBy }: { paidBy: CommissionPaidBy }
       onCancel={paidBy.cancel}
       onConfirm={onConfirm}
     />
-  );
-}
-
-function ScreenshotField({ shots, editable }: { shots: CommissionShots; editable: boolean }) {
-  const { t } = useT();
-
-  if (!editable) {
-    return (
-      <div className="field" style={{ marginBottom: 0, display: 'grid', gap: 8 }}>
-        <span className="label">{t('cpShotLabel')}</span>
-        {shots.atts.length === 0 ? (
-          <div className="pay-proof-title muted">{t('cpNothingYet')}</div>
-        ) : (
-          <div className="ho-chips">
-            {shots.atts.map(a => <AttachmentChip key={a.id} a={a} />)}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="field" style={{ marginBottom: 0, display: 'grid', gap: 8 }}>
-      <span className="label">{t('cpShotLabel')}</span>
-      {shots.atts.length > 0 && (
-        <div className="ho-chips">
-          {shots.atts.map(a => <AttachmentChip key={a.id} a={a} onRemove={() => shots.remove(a)} />)}
-        </div>
-      )}
-      <AttachmentDropzone
-        onFiles={shots.add}
-        uploading={shots.uploading}
-        accept="image/*"
-        compact
-        boxHint={t('cpShotHint')}
-      />
-      {shots.atts.length > 0 && (
-        <div className="pay-proof-status" role="status">
-          <Icon name="check" size={13} /> {t('payProofOnFile', { n: String(shots.atts.length) })}
-        </div>
-      )}
-    </div>
   );
 }

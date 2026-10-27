@@ -10,18 +10,18 @@ import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { relTime } from '../lib/format';
 import { lineSpecLabel } from '../lib/lineGroups';
-import { RouteLink } from '../components/RouteLink';
+import { PhHeader } from '../components/PhHeader';
+import { navigateBack } from '../lib/route';
 import type { DashboardData, LeaderboardSort } from '../lib/types';
 import { Skeleton, PhoneKpiSkeleton, PhoneListSkeleton } from '../components/Skeleton';
 
 type Props = {
-  goSubmit: () => void;
   goHistory: () => void;
-  onOpenNotifications: () => void;
-  unreadCount: number;
 };
 
-export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCount }: Props) {
+// Numbers: the phone's Analysis, opened from Home. The last 30 days, the
+// ranking and the recent feed; what waits on the viewer lives on Home.
+export function Dashboard({ goHistory }: Props) {
   const { t, locale } = useT();
   const user = useEffectiveUser();
   const [data, setData] = useState<DashboardData | null>(null);
@@ -51,18 +51,6 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
     </div>
   );
 
-  // Inbound counts for the shipping card — the card is also the manager's only
-  // tab-bar-free entry to /shipping, so both roles load it. Silent on failure:
-  // a nav card that can't count just doesn't show.
-  const [inbound, setInbound] = useState<{ moving: number; needs: number } | null>(null);
-  useEffect(() => {
-    let alive = true;
-    api.get<{ moving: number; needs: number }>('/api/packages/inbound-counts?mine=true')
-      .then(r => { if (alive) setInbound(r); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [effRole]);
-
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolled = usePhScrolled(scrollRef);
 
@@ -80,40 +68,18 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
 
   return (
     <>
-      <div className={'ph-header' + (scrolled ? ' scrolled' : '')}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div className="brand-mark" style={{ width: 32, height: 32, fontSize: 13 }}>RS</div>
-          <div>
-            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('greeting')}</div>
-            <div style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em' }}>{user.name.split(' ')[0]}</div>
-          </div>
-        </div>
-        <button className="ph-icon-btn" onClick={onOpenNotifications} style={{ position: 'relative', overflow: 'visible' }}>
-          <Icon name="bell" size={16} />
-          {unreadCount > 0 && (
-            <span style={{
-              position: 'absolute', top: -2, right: -2,
-              minWidth: 15, height: 15, padding: '0 3px',
-              borderRadius: 999, background: 'var(--accent)', color: 'white',
-              fontSize: 9.5, fontWeight: 700, lineHeight: '15px', textAlign: 'center',
-              border: '2px solid var(--bg)', boxSizing: 'content-box',
-              fontFamily: 'JetBrains Mono, monospace', letterSpacing: '-0.02em',
-              pointerEvents: 'none',
-            }}>{unreadCount}</span>
-          )}
-        </button>
-      </div>
+      <PhHeader
+        title={isManager ? t('teamPerformance') : t('yourNumbers')}
+        sub={isManager ? t('last30Team', { n: totals.count }) : t('last30Mine', { n: totals.count })}
+        scrolled={scrolled}
+        leading={(
+          <button className="ph-icon-btn" onClick={() => navigateBack('/')} aria-label={t('back')}>
+            <Icon name="chevronLeft" size={17} />
+          </button>
+        )}
+      />
 
       <div className="ph-scroll" ref={scrollRef}>
-        <div style={{ marginTop: 4 }}>
-          <h1 style={{ fontSize: 26, fontWeight: 600, letterSpacing: '-0.025em', margin: 0 }}>
-            {isManager ? t('teamPerformance') : t('yourNumbers')}
-          </h1>
-          <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', marginTop: 4 }}>
-            {isManager ? t('last30Team', { n: totals.count }) : t('last30Mine', { n: totals.count })}
-          </div>
-        </div>
-
         {!data ? (
           <div className="ph-kpi" style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
             <Skeleton width={120} height={11} />
@@ -125,7 +91,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
           </div>
         ) : (
         <div className="ph-kpi" style={{
-          marginTop: 16,
+          marginTop: 4,
           background: 'linear-gradient(150deg, var(--bg-elev), color-mix(in oklch, var(--accent-soft) 60%, white))',
           border: '1px solid color-mix(in oklch, var(--accent) 22%, var(--border))',
         }}>
@@ -161,102 +127,6 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
             <div className="ph-kpi-value" style={{ fontSize: 18 }}>{fmtUSD0(totals.commission, locale)}</div>
           </div>
         </div>
-        )}
-
-        <button
-          onClick={goSubmit}
-          style={{
-            marginTop: 14, width: '100%', padding: 14,
-            background: 'var(--fg)', color: 'white',
-            border: 'none', borderRadius: 14,
-            display: 'flex', alignItems: 'center', gap: 12,
-            fontFamily: 'inherit', fontSize: 14, fontWeight: 500,
-            textAlign: 'left',
-          }}
-        >
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255,255,255,0.12)', display: 'grid', placeItems: 'center' }}>
-            <Icon name="camera" size={18} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600 }}>{t('scanWithAI')}</div>
-            <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>{t('scanWithAISub')}</div>
-          </div>
-          <Icon name="chevronRight" size={16} />
-        </button>
-
-        {/* Everyone has the Shipping tab; this row is the glanceable count.
-            Managers always see it — they receive the boxes — while for
-            purchasers it appears once there's something to glance at. */}
-        {inbound && (isManager || inbound.moving + inbound.needs > 0) && (
-          <RouteLink
-            to="/shipping"
-            className="ph-row"
-            style={{ width: '100%', marginTop: 10, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
-          >
-            <div className="ph-cat-icon" style={{ width: 36, height: 36, borderRadius: 10 }}>
-              <Icon name="truck" size={17} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>{t('shipMobInboundTitle')}</div>
-              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                {[
-                  inbound.moving > 0 ? t('shipMobMovingN', { n: inbound.moving }) : null,
-                  inbound.needs > 0 ? t('shipMobNeedsN', { n: inbound.needs }) : null,
-                ].filter(Boolean).join(' · ') || t('shipMobEmptyTitle')}
-              </div>
-            </div>
-            {inbound.needs > 0 && (
-              <span className="mono" style={{
-                minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999,
-                background: 'var(--warn)', color: 'white', fontSize: 10.5, fontWeight: 700,
-                lineHeight: '18px', textAlign: 'center',
-              }}>{inbound.needs}</span>
-            )}
-            <Icon name="chevronRight" size={15} className="arrow" />
-          </RouteLink>
-        )}
-
-        {!isManager && (
-          <RouteLink
-            to="/market"
-            className="ph-row"
-            style={{ width: '100%', marginTop: 8, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
-          >
-            <div className="ph-inv-thumb" style={{ width: 36, height: 36 }}>
-              <Icon name="tag" size={16} />
-            </div>
-            <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{t('homeMarketLink')}</div>
-            <Icon name="chevronRight" size={15} className="arrow" />
-          </RouteLink>
-        )}
-
-        {/* Inventory left the manager tab bar when Shipping took its slot;
-            this row is its home now, mirroring the Market link above. */}
-        {isManager && (
-          <RouteLink
-            to="/inventory"
-            className="ph-row"
-            style={{ width: '100%', marginTop: 8, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
-          >
-            <div className="ph-inv-thumb" style={{ width: 36, height: 36 }}>
-              <Icon name="inventory" size={16} />
-            </div>
-            <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{t('homeInventoryLink')}</div>
-            <Icon name="chevronRight" size={15} className="arrow" />
-          </RouteLink>
-        )}
-        {isManager && (
-          <RouteLink
-            to="/accounting"
-            className="ph-row"
-            style={{ width: '100%', marginTop: 8, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
-          >
-            <div className="ph-inv-thumb" style={{ width: 36, height: 36 }}>
-              <Icon name="cash" size={16} />
-            </div>
-            <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{t('homeAccountingLink')}</div>
-            <Icon name="chevronRight" size={15} className="arrow" />
-          </RouteLink>
         )}
 
         {!isManager && myRank >= 0 && (

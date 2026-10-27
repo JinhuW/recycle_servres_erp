@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { ContentfulStatusCode, StatusCode } from 'hono/utils/http-status';
 import { authMiddleware } from '../auth';
+import { AnswerCache, type Answer } from '../lib/coordinatorCache';
 import { log } from '../lib/log';
 import { allowedAppOrigin } from '../lib/origins';
 import { requireManager } from '../lib/role';
@@ -108,18 +109,17 @@ function upstreamRefused(
 // Statuses a Response may not carry a body on; building one with a body throws.
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
-async function forward(
-  c: {
-    env: Env;
-    json: (body: unknown, status?: number) => Response;
-    body: (data: null, status: StatusCode) => Response;
-  },
-  method: 'GET' | 'POST' | 'PUT',
-  path: string,
-  body?: unknown,
-): Promise<Response> {
-  const up = upstream(c.env);
-  if (!up) return c.json({ error: NOT_CONFIGURED }, 501);
+type ProxyContext = {
+  env: Env;
+  json: (body: unknown, status?: number) => Response;
+  body: (data: null, status: StatusCode) => Response;
+  header: (name: string, value: string) => void;
+};
+
+/** One facade call, reduced to what the browser is answered with. */
+async function relay(env: Env, method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<Answer> {
+  const up = upstream(env);
+  if (!up) return { status: 501, payload: { error: NOT_CONFIGURED } };
 
   const headers: Record<string, string> = { ...up.headers };
   const init: RequestInit = { method, headers, signal: AbortSignal.timeout(TIMEOUT_MS) };
@@ -132,16 +132,58 @@ async function forward(
   try {
     res = await fetch(up.base + path, init);
   } catch {
-    return c.json({ error: UNREACHABLE }, 502);
+    return { status: 502, payload: { error: UNREACHABLE } };
   }
 
   const refused = await refusalMessage(res);
-  if (refused) return upstreamRefused(c, res.status, path, refused);
-  if (NULL_BODY_STATUSES.has(res.status)) return c.body(null, res.status as StatusCode);
+  if (refused) {
+    log.warn('coordinator upstream refused the request', { module: 'coordinator', upstreamStatus: res.status, upstreamPath: path });
+    return { status: 502, payload: { error: refused } };
+  }
+  if (NULL_BODY_STATUSES.has(res.status)) return { status: res.status, payload: undefined };
   // Pass the upstream body and status through verbatim: the coordinator's 4xx
   // bodies carry actionable messages the UI shows as-is.
   const payload = await res.json().catch(() => ({ error: `coordinator returned ${res.status}` }));
-  return c.json(withError(payload), res.status as ContentfulStatusCode);
+  return { status: res.status, payload: withError(payload) };
+}
+
+function answer(c: ProxyContext, a: Answer): Response {
+  if (a.payload === undefined) return c.body(null, a.status as StatusCode);
+  return c.json(a.payload, a.status as ContentfulStatusCode);
+}
+
+const FRESH_MS = 15_000;
+const STALE_MS = 5 * 60_000;
+
+// Every manager with the Fleet page open polls these, and the console
+// rebuilds each answer from scratch, so they are shared across viewers.
+export const coordinatorCache = new AnswerCache({
+  freshMs: FRESH_MS,
+  staleMs: STALE_MS,
+  onRefreshFailed: (key, status) =>
+    log.warn('coordinator cache refresh failed; serving the last good answer', { module: 'coordinator', key, upstreamStatus: status }),
+});
+
+async function cachedGet(c: ProxyContext, path: string): Promise<Response> {
+  const up = upstream(c.env);
+  if (!up) return answer(c, await relay(c.env, 'GET', path));
+  const got = await coordinatorCache.get(up.base + path, () => relay(c.env, 'GET', path));
+  c.header('X-Cache', got.cache);
+  c.header('Age', String(got.ageS));
+  return answer(c, got);
+}
+
+async function forward(
+  c: ProxyContext,
+  method: 'GET' | 'POST' | 'PUT',
+  path: string,
+  body?: unknown,
+): Promise<Response> {
+  const a = await relay(c.env, method, path, body);
+  // A write can change anything the cached views show (a worker's state, its
+  // cities, the queue), so none of them survives it.
+  if (method !== 'GET' && a.status >= 200 && a.status < 300) coordinatorCache.clear();
+  return answer(c, a);
 }
 
 /**
@@ -171,31 +213,34 @@ export async function callFacade(
     log.warn('coordinator upstream refused the request', { module: 'coordinator', upstreamStatus: res.status, upstreamPath: path });
     return { error: refused, status: 502 };
   }
-  if (res.ok) return { error: null, status: 200, payload: method === 'GET' ? await res.json().catch(() => null) : undefined };
+  if (res.ok) {
+    if (method !== 'GET') coordinatorCache.clear();
+    return { error: null, status: 200, payload: method === 'GET' ? await res.json().catch(() => null) : undefined };
+  }
   const payload = await res.json().catch(() => null) as { detail?: unknown; error?: unknown } | null;
   const status = res.status >= 400 && res.status < 600 ? res.status : 502;
   return { error: upstreamWhy(payload) ?? `coordinator returned ${res.status}`, status: status as ContentfulStatusCode };
 }
 
-coordinator.get('/workers', (c) => forward(c, 'GET', '/v1/workers'));
+coordinator.get('/workers', (c) => cachedGet(c, '/v1/workers'));
 
 coordinator.get('/stats/reviews', (c) => {
   // Pass the days window through untouched; the facade validates it.
   const query = new URL(c.req.url).search;
-  return forward(c, 'GET', `/v1/stats/reviews${query}`);
+  return cachedGet(c, `/v1/stats/reviews${query}`);
 });
 
 coordinator.get('/stats/alert-hits', (c) => {
   const query = new URL(c.req.url).search;
-  return forward(c, 'GET', `/v1/stats/alert-hits${query}`);
+  return cachedGet(c, `/v1/stats/alert-hits${query}`);
 });
 
-coordinator.get('/filter-prompt', (c) => forward(c, 'GET', '/v1/config/filter-prompt'));
+coordinator.get('/filter-prompt', (c) => cachedGet(c, '/v1/config/filter-prompt'));
 
 // The composed fleet view: fleet.toml + master.toml + the live monitor config
 // joined to worker health, assembled by the facade so the browser never sees
 // a config file. Proxies arrive as env-var names only.
-coordinator.get('/fleet', (c) => forward(c, 'GET', '/v1/fleet'));
+coordinator.get('/fleet', (c) => cachedGet(c, '/v1/fleet'));
 
 // Queue a Facebook re-login for one worker: the coordinator rides a one-shot
 // directive back on the worker's next heartbeat, and the worker re-enters its
@@ -346,6 +391,16 @@ coordinator.put('/workers/:id/queue', async (c) => {
   });
 });
 
+// Start the city round now instead of at the workers' start times. The GET is
+// the confirmation's preview (who starts, who waits, how many cities are due);
+// the POST starts it, signed by the session.
+coordinator.get('/queue/start', (c) => forward(c, 'GET', '/v1/queue/start'));
+
+coordinator.post('/queue/start', (c) => {
+  log.info('fleet city round started by hand', { module: 'coordinator', by: c.var.user.email });
+  return forward(c, 'POST', '/v1/queue/start', { updated_by: c.var.user.name || c.var.user.email });
+});
+
 // The city log: each city a worker searched, from its handout or start to its
 // end, for the worker page (by worker) and the round card (by city). An older
 // console answers 404, and the page then shows no log.
@@ -439,7 +494,7 @@ coordinator.get('/vnc/:workerId/ws', (c) => {
 coordinator.get('/challenges', (c) => {
   // Pass the status filter through untouched; the coordinator validates it.
   const query = new URL(c.req.url).search;
-  return forward(c, 'GET', `/v1/challenges${query}`);
+  return cachedGet(c, `/v1/challenges${query}`);
 });
 
 coordinator.post('/challenges/:id/resolve', (c) =>

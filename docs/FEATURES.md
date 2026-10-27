@@ -39,7 +39,7 @@ behaviour, edit the bullet here in the same PR and cite the new version.
 Two roles: **manager** and **purchaser**. The unauthenticated vendor bid
 portal was removed in v1.191.0; no bid had ever been placed through it.
 
-- Managers see everything. Purchasers see the buying side — dashboard, submit,
+- Managers see everything. Purchasers see the buying side — Home, Analysis, submit,
   history, shipping, clients, market, settings — and their own POs.
 - Desktop role gating is three-layered: the sidebar's `roles` list, a
   `DesktopApp` view bounce, and in-page filters. Missing one leaves the view
@@ -126,7 +126,8 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
 ## Purchase orders
 
 The core object. A PO is a purchase from a vendor, built line by line, that
-moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done. Sold
+moves Draft → In Transit → Reviewing → Ready to Pay → Done ("submitted" is
+the event written when it leaves Draft, not a stage). Sold
 is not a stage but a flag beside one, set once every line has sold
 (v1.246.0).
 
@@ -235,47 +236,32 @@ is not a stage but a flag beside one, set once every line has sold
   bank-payments ledger and the Accounting card — named *Payment* until
   v1.163.0, when the second payment below got a home), *Commission* (purchaser, rate, and what the
   purchaser earns — the maths that used to sit in an aside titled "Payment
-  detail" — and a **Commission payment** drop box for the screenshot that
-  shows the purchaser was paid (v1.163.0 shipped it with a PayPal/Cash picker
-  and an OCR-filled transaction ID; v1.165.0 cut it to the screenshot alone).
-  Above the drop box, **Paid by** names the manager who paid the purchaser
-  (v1.217.0): a select of the active managers, or *Not recorded*, which every
-  order starts at. Since v1.301.0 it also offers **Business Account** (named
-  *Company paid* until v1.317.0), a fixed option rather than a member, for a
-  commission paid from the company's account. A live bank payment linked as
-  the PO's commission makes it read Business Account on its own: the select
-  locks with a note saying why, and an
-  unlink or a reversal gives back the pick made by hand. Whatever this field
-  reads, the PO's Commission entries in the RMB Flow read too, and a
-  Commission entry's Paid by writes back here (v1.317.0, see *Accounting*).
-  **The screenshot's upload records the payer** (v1.302.0): a manager who uploads one while
-  Paid by reads *Not recorded* is recorded as the payer. If Paid by names
-  someone else, or reads Company paid, the upload asks *Set Paid by to you?*
-  and changes it only on a yes. The Done dialog's drop box does the same,
-  with the question opening above it. A pick in the select asks
-  *Change who paid the commission?*, naming both values, and nothing is
-  saved until it is confirmed. Migration 0189 filled Paid by once on every PO
-  that had a commission screenshot and nobody recorded, from the uploader of
-  its latest screenshot. **A commission booked in Accounting records its
-  manager the same way** (v1.310.0): a Paid commission entry on the PO fills
-  Paid by with the entry's manager while nobody is on file, the company isn't
-  recorded and no bank row is linked as the commission. A payer already on
-  file stays, and voiding or moving the entry never clears it. Since v1.310.2
-  the fill happens once, when the entry comes to pay this PO's commission.
-  Later edits leave a payer cleared on purpose alone. Correcting the entry's
-  manager moves Paid by with it, but only while Paid by still names the old
-  manager. The tab shows
-  the new payer at once. Files write through as they are dropped and a
-  confirmed pick as it is made — managers at any stage, closed book included
-  — and purchasers see both read-only. Under the drop box, managers also see the
-  **bank payments linked as this PO's commission** on the Payments page,
-  with their net, the same ledger the Cost Payment tab shows for the cost
-  (v1.257.0). Each pick is one *Commission paid by:
-  ‹from› → ‹to›* line in Activity, the names as they were at the time. **Ready to Pay →
-  Done asks for it only when it is missing** (v1.165.0): with a screenshot
-  on file the move is as plain as any other; without one the *Mark order as
-  Done* dialog opens, and a file attached there is the same file the tab
-  shows. The dialog is a prompt, not a gate — Confirm works without one),
+  detail" — and **Commission payment**, v1.345.0).
+  Managers choose **RMB Flow** or **Business Account**. **RMB Flow** offers
+  **Create payment** and its recorded commission payments (v1.345.1, RS-397), without
+  transaction search. A short hint explains that the PO is already linked;
+  the primary action has a larger phone touch target. Create opens the payment form with this PO's commission
+  selected, including its order/AI amount sources. Saving refreshes the ledger
+  and payer. **Business Account** searches unlinked, settled outgoing USD
+  Mercury/PayPal transactions and confirms a selected transaction to link it
+  as the commission. Transfers, ignored rows and internal transactions are
+  excluded; a bank row already linked is refused if a search result becomes
+  stale. The payer follows the RMB entry's manager or the Business Account.
+  A live bank commission must be unlinked in Payments before a paid-out RMB
+  commission can be created. Linking the Business Account voids existing
+  paid-out RMB commission entries under the book's existing rules.
+  The panel shows linked bank payments and their net, with links to Payments
+  on desktop. Existing commission screenshots remain readable; the old payer
+  select and upload box have been replaced by these two source options on
+  both shells. Purchasers see the payer and legacy screenshots read-only.
+  **Ready to Pay → Done recognizes linked payments** (v1.345.0): a live
+  paid-out RMB commission or settled outgoing bank commission skips the
+  screenshot prompt, as an existing screenshot already did. With neither,
+  the Done dialog still offers its legacy screenshot upload and optional note;
+  it remains a prompt, and Confirm works without a screenshot. A legacy
+  screenshot upload can record its uploader as payer when nobody is on file,
+  or offer a confirmed change to the uploader when someone else is recorded
+  (v1.302.0). Commission payer changes are recorded in Activity.
   *Notes & files* (notes and Submission receipts; proof of payment is not
   repeated here), *Activity*. No fact has an input in two places any more: the
   warehouse, purchaser, rate and paid-by that appeared in *Order details*,
@@ -302,10 +288,9 @@ is not a stage but a flag beside one, set once every line has sold
   *Before you submit* list gains a *How the goods get here* row.
 - **The phone's *Order details* are the desktop's five tabs, as folds**
   (v1.162.0): Delivery (source, warehouse, label or pickup, tracking),
-  Cost Payment, **Commission** (with the commission-payment screenshot box
-  under the maths since v1.163.0, screenshot-only since v1.165.0, with the
-  *Paid by* manager select above it since v1.217.0; the fold's summary reads
-  *· Paid* once a screenshot is on file), Notes & files, Activity —
+  Cost Payment, **Commission** (RMB Flow Create / Business Account transaction search
+  under the maths since v1.345.1; the summary reads *· Paid* once a linked
+  payment or legacy screenshot is on file), Notes & files, Activity —
   same order, same names.
   Each is one card (`PhFold`): closed, the title with its answer read back;
   open, a tinted header ruled off from the fields in the same card. An amber
@@ -804,7 +789,7 @@ is not a stage but a flag beside one, set once every line has sold
   who paid the purchaser their commission, the same record as the Commission
   tab's *Paid by*. Since v1.302.0 it is read-only for every role; v1.301.0
   had a picker in the cell. The record is made on the PO page, by the
-  commission screenshot's upload or a confirmed pick. A manager sees a PO
+  linked commission transaction (v1.345.0) or a legacy screenshot upload. A manager sees a PO
   with a bank payment linked as its commission as a *Business Account* chip
   (*Company paid* until v1.317.0) that opens that payment. It is sortable,
   in the Columns picker and on by default. Unlike Total cost above,
@@ -1152,7 +1137,7 @@ is not a stage but a flag beside one, set once every line has sold
   than landing at a stock status behind the flag (v1.138.4). An
   archived PO is frozen — edits, stage moves, delete and inventory line edits
   (Sold lines included) all refuse until it is unarchived — and both edit
-  shells render it locked and say so. The Analysis tab leaves archived goods
+  shells render it locked and say so. Analysis ▸ Inventory leaves archived goods
   out of every aggregate (v1.137.1), Sold lines excepted — they are the sales
   record and keep counting (v1.138.4).
 - **Removing a PO line is refused while an open, non-archived sell order
@@ -1254,7 +1239,7 @@ log and `orders.supplier_id`.
 
 There is **no inventory table**. Stock is `order_lines` whose PO is Done or In
 Transit. A line counted down to 0 stays on its PO but is never stock: the list,
-the export, the grouped view and the analysis page leave it out (v1.213.0). A PO whose every line has sold carries
+the export, the grouped view and Analysis ▸ Inventory leave it out (v1.213.0). A PO whose every line has sold carries
 the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Lines of an archived PO sit at the
 `Archived` status and are out of every stock view until the PO is unarchived
 (v1.137.0); like Sold, they are reachable through an explicit status filter.
@@ -1262,6 +1247,23 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
 - Flat and grouped views. Grouped is what goes outward to vendors and buyers,
   so it carries no cost, sell price or submitter (v1.51.0); flat keeps them for
   internal use.
+- **RAM carries a market short code** (v1.347.0): Samsung's three characters
+  before the part number's dash (`M393A2G40DB0-CPB0Q` → `DB0`), SK Hynix's
+  die/package segment (`HMA42GR7MFR4N-TF` → `MFR`), or Micron's recorded
+  three-letter chip die (`D9VPP` → `VPP`). Recognized separator-free spellings
+  read the same. A Micron lot with no recognizable chip stays *Not recorded*;
+  its module number alone does not prove a die. Other brands and unsupported
+  part schemes, including Hynix HMC DDR5, have no short code.
+  - Desktop and phone RAM forms show it live from Brand, Part # and Chip #.
+    The inventory RAM editor also offers Chip #, so existing stock can gain a
+    missing code, normalized on save and recorded in its audit log.
+  - Inventory, Quick View, the sell-order builder, picker and order lines
+    show it. A product group lists its distinct codes and any unknown member;
+    its lots keep their own. Warehouse scope applies to the shown codes too.
+  - Inventory exports, PO workbooks and vendor bid sheets include **Short
+    code**. Short codes are calculated from current data. Inventory grouping
+    and market-price identity stay unchanged; the vendor bid sheet uses the
+    short-code grouping described below.
 - **The grouped view groups RAM by module family** (v1.244.0). Part numbers
   that differ only in the maker's trailing packaging or marking code
   (`M393A2K43BB1-CTD` / `-CTD7Q` / `-CTDQ`, Micron `-2G1A2II` / `-2G1A2KJ`)
@@ -1623,12 +1625,16 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   The sheet ships pre-sorted the way the desk reads it, with an autofilter
   across the header row and no sheet protection (v1.51.2). **It prices a
   part once, not per condition**: there is no Condition column, and a part
-  held in two conditions is one row with its qty summed (v1.242.0). **A DDR5
-  lot folds by spec, not part number** (v1.255.0): the same Brand + Type +
-  Capacity + Rank + Speed + Class key as Inventory's grouped view, so lots of
-  several part numbers are one row with their qty summed, and the row's Part
-  Number cell lists each part number it folds, comma-separated. The packing
-  lists and the product `#` keep folding by part number.
+  held in two conditions is one row with its qty summed (v1.242.0). **RAM
+  bids group by short code and spec** (v1.347.0): Brand + Short code + Speed +
+  Rank, with Capacity, Generation, Type and Class also kept separate. Matching
+  lots across POs, warehouses and part numbers share one row with their qty
+  summed. Equivalent speed spellings compare in MT/s. The Part Number cell
+  lists every live member, comma-separated; a zero-quantity lot stays out.
+  Without a recognized code or a complete spec, the earlier grouping applies:
+  DDR5 by Brand + Type + Capacity + Rank + Speed + Class (v1.255.0), other RAM
+  by part number and label. Known and unknown chip codes never share a bid
+  group. Packing lists and product `#` keep their existing grouping.
   - **The import half of the round trip was removed in v1.297.0** (RS-324).
     From v1.21.0 to v1.296.x the vendor filled the sheet's Unit Price column
     and the manager dropped it back on the order's edit view: the preview
@@ -1636,7 +1642,11 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     prices, and the save that followed recorded them on the Market board as
     `bid:<order>` data points (v1.138.3). Since Review mode sets each PO
     line's sell price (v1.296.0) and a sell order line starts at its lot's
-    sell price, the sheet is a quote the ERP never reads back. The
+    sell price, the returned sheet is read on the PO's Review mode instead
+    (v1.313.0). Since v1.347.0 its preview expands grouped part-number cells
+    and matches any Short code column as well, so Micron VPP and WSM under one
+    module number can take different quoted prices. Sheets without that
+    column still match by part number. The retired sell-order
     `price-import/preview` route, the `bidParts` save field (an old bundle
     sending it is ignored) and the `bid:` feed are gone; `bid:` events
     already on file still show on the Activity page. The Market page's own
@@ -2238,9 +2248,14 @@ it.
   - **Failed and reversed are records, not tasks.** Out of the queue, out of
     every tile, no actions at all. Choosing one in the filter widens the tab to
     All, since asking for them from inside the queue would always answer empty.
-  - **A reversed payment stops counting towards its order.** PayPal reverses in
-    place, reusing the transaction id, so this lands on a row already linked to
-    a PO. It stays on the ledger, badged, but leaves the PO's linked total.
+  - **A reversed payment stops counting towards its order.** It stays on the
+    ledger, badged, but leaves the PO's linked total. A PayPal payment we sent
+    is never reversed this way (v1.333.1). PayPal's `V` on it means the seller
+    was debited for a case. If money comes back to us, it arrives as a credit
+    row of its own (`T1106` reversal, `T1107` refund), or on Mercury after a
+    card chargeback. If the case goes against us, as PO-1399's did, nothing
+    comes back. Until v1.333.1 this bullet said PayPal reverses a payment in
+    place. No such record has ever arrived.
   - **A payment funded by eCheck shows up while it is pending** (v1.331.1).
     Transaction Search returns only balance-affecting records by default, and
     an eCheck affects nothing until it clears 3–6 business days later. Until
@@ -2253,6 +2268,15 @@ it.
     - failed or reversed, if it bounced or was voided;
     - dropped, if its latest record is settled. That is a hold that moved no
       money.
+  - **A bank-funded payment leaves pending once PayPal settles it**
+    (v1.333.1). For a direct debit or eCheck, PayPal's balance record marks
+    the moment the money was drawn, stamped pending, and the settlement
+    arrives later in a record outside the balance. The sync read only the
+    first record, so seven prod payments sat pending for months, PO-1383,
+    PO-1386 and PO-1411 among them, and held the sync window open back to
+    July. A pending balance record now takes the status of its latest record.
+    No money moves: pending and settled count the same towards a PO and in
+    the RMB ledger.
 
 > PayPal's Transaction Search lags ~3 hours. A fresh transaction missing from
 > Payments is usually that, not a sync bug — check `last_refreshed_datetime`
@@ -2264,8 +2288,9 @@ it.
 > **The two record modes don't line up.** With `N`, PayPal answers with one
 > record per state a transaction went through, and matches each record by its
 > update date. With the default `Y`, it returns one record per transaction,
-> matched by initiation date. `outsideBalance` in `banktx/paypal.ts` reconciles
-> the two.
+> matched by the date of its balance record. That is the initiation date,
+> except for a bank-funded payment, where it is the day the money was drawn.
+> `outsideBalance` and `currentStatus` in `banktx/paypal.ts` reconcile the two.
 
 > **The sync window is `cursor − 5 days`, plus the oldest row still pending.**
 > The overlap alone would let a payment that stays pending for weeks fall out
@@ -2308,6 +2333,19 @@ is who paid, below).
   screenshots that prove it. Entries are numbered `AC-1001`, `AC-1002`… from
   their own counter. The form no longer asks for a reference (v1.333.0); an
   entry that has one still shows it, and an edit keeps it.
+  - **The amount fills from the linked record or screenshot** (v1.345.0,
+    RS-396). New entries open on the PO cost, projected commission, or sell
+    order's figure in its native currency. A CNY sale opened from its order
+    still offers the remaining sale payment. Switching CNY/USD converts the
+    amount using the entered or latest rate; without a known rate a nonempty
+    amount cannot silently change currencies. Screenshot recognition runs
+    before saving and can fill amount and currency. A manual edit is never
+    overwritten by a late recognition result; buttons offer the linked order
+    and each readable screenshot amount. Several screenshots are offered
+    separately, never summed automatically. Removing the selected screenshot
+    returns an automatically filled amount to the order value. Unclear
+    currencies or unreadable images leave manual entry available and keep the
+    screenshot for upload. Existing entries open on their saved amount.
   - **What it was for is the record it names.** Purchase and Commission name
     a PO, Sale a sell order, After-sales a case; Other names nothing. The API
     refuses any other pairing. The kind sets the direction — a sale is
@@ -2340,7 +2378,8 @@ is who paid, below).
     the entry's version and sign-off alone: proof is not money. A voided
     entry's screenshots are read-only (migration 0205). Adding or removing
     a screenshot from Review's entry drawer refreshes the queue and the
-    read-only evidence pane without a page reload (v1.333.2, RS-395).
+    read-only evidence pane without a page reload (v1.344.1 on dev;
+    v1.333.2 in production, RS-395).
   - **An entry's Paid by and its PO's payer are one value** (v1.317.0,
     migration 0199), kept in step both ways. *Paid by* is a person: an
     active manager, or on a Purchase entry the PO's own purchaser, who paid
@@ -2626,7 +2665,53 @@ over MCP.
 - Member/permission changes are **absent** — they write no audit rows
   anywhere today.
 
-## Dashboard
+## Home
+
+What is waiting on the viewer (v1.350.0). `/` on both shells, and where an
+unknown path lands. The money figures moved to Analysis, below. One request,
+`GET /api/home`, scoped by the effective role, so a manager previewing as a
+purchaser gets the purchaser's Home over their own work. Every count reads
+the predicate of the page it opens. Home re-reads on returning to the tab and
+every two minutes.
+
+- **Purchasers:**
+  - A count of their POs at each stage, Done included in full, as the list each tile opens shows it (v1.367.2).
+    Each count opens the PO list filtered to that stage (`?stage=`).
+  - Their open POs, drafts first and then the longest-waiting. Each row
+    gives the stage, the days in it (amber at 3, red at 7) and what it is
+    waiting for: a draft's missing hand-off pieces (the hand-off's own
+    blocker list), the box's ETA or exception, a pickup, the manager's
+    review, or the commission payout.
+  - Their packages that are moving or need a hand, in the inbound-counts
+    buckets.
+  - Commission owed (Ready to Pay) and paid in the last 30 days.
+  - Client follow-ups due or due this week.
+- **Managers:**
+  - Tiles for arriving today or tomorrow, packages needing a hand, POs in
+    review, purchaser edits to check, commission to pay, sell orders to sign
+    off, unlinked payments out, and RMB Flow for them.
+  - The review queue, oldest first, with box-check progress, open AI findings
+    (error and warn) and who has it, plus unacknowledged reverts.
+  - Inbound packages, problems first, then by ETA; pickups in transit are
+    counted too.
+  - Money to move: Ready to Pay and its commission, sell orders awaiting
+    payment, unlinked payments, disputes.
+  - The sales pipeline: drafts (connector-made ones counted), Packing
+    progress, and the Shipped / Awaiting payment orders this manager has not
+    signed as they stand.
+  - The side queues: after-sales, transfers, new web submissions.
+- **Days in a stage** come from the newest stage move in `order_events`. POs
+  carry no stage-changed column.
+- **On the phone** the same highlights are compact rows. They link only where
+  the phone has a screen.
+
+## Analysis
+
+The money dashboard, at `/analysis` (it was `/dashboard`, the home page,
+until v1.350.0, and that path still resolves). Managers get a second tab,
+**Inventory** (`/analysis/inventory`), the stock snapshot that was Inventory ▸
+Analysis; a purchaser sent there lands on the first tab. On the phone it is
+the Numbers screen, opened from Home.
 
 Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
 
@@ -2724,8 +2809,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   fails, that part shows a dash or a note.
 
   Since v1.316.0 the page has the Facebook page's tabs: **Fleet**
-  (`/tracker`, everything above) and **Prompts** (`/tracker/prompts`, the
-  card below), and the title follows the tab. The workers toolbar matches
+  (`/tracker`) and **Prompts** (`/tracker/prompts`, the card below),
+  and the title follows the tab. Since v1.346.0 (RS-398), a third tab,
+  **Workflow** (`/tracker/workflow`), holds the **From a post to an alert**
+  card with its stage counts, subreddit and rule editors, and model picker.
+  Fleet shows the worker legend, workers table and recent matches.
+  The workers toolbar matches
   the Facebook one. A search box on the left finds a worker by id or role,
   across the whole fleet rather than the rows scrolled in: while a search is
   typed, the table loads every worker the status filter allows in one
@@ -2760,6 +2849,25 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - Since v1.292.0, each version is labelled *verdict first* or *reasoning
     first*. That's its response schema. The tracker has asked for the
     reasoning first since RS-312.
+
+  Since v1.362.0 (RS-413), a fourth tab, **Analytics** (`/tracker/analytics`),
+  covers 24 hours, 7 days or 30 days:
+  - **Tiles:** alerts sent, the share of them buyers reacted to as a good
+    catch (any emoji but 👎), missing posts, time from post to alert, and
+    cross-posts held back.
+  - **Chart:** alerts and good catches by hour or day.
+  - **PM demand:** a tracker worker counts the buyers who commented "PM" on
+    each post once it is a day old. A memory post with 5 or more PMs and no
+    good-catch reaction is *missing*, and the tab lists each one with the
+    prompt's reason for rejecting it. PM figures cover the same span a day
+    earlier.
+  - **Per prompt version:** judged, flagged, good and 👎, and PM recall.
+  - **Per subreddit:** posts, memory posts, alerts, good-catch rate, average
+    PMs and missing.
+
+  The same release made a listing cross-posted to several subreddits, or
+  reposted within 72 hours, alert once. The other copies are held back as
+  duplicates and stay out of Recent matches.
 - **WeChat market** — **Monitors ▸ WeChat** (`/wechat`, v1.312.0), managers
   only. memtrade, a tool on the office Mac, reads the team's WeChat trading
   groups and builds a daily memory-module report for each 08:00 → 08:00 ET
@@ -2832,6 +2940,17 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     memtrade's own warnings. **Groups read**, on the Groups tab since
     v1.316.0 and always open, lists each group's messages that day and
     marks the ones joined in it.
+  - **Re-run** (v1.363.0) beside the day picker, and *Re-run with Claude*
+    in the rules banner, asks memtrade to redo the day: after Claude was
+    out, say. The ERP can't reach the office Mac, so the request is queued.
+    memtrade polls every minute, claims it, reruns the day, pushes it as
+    usual and reports back. The page shows *Queued*, then *Re-running*, and
+    reloads the day when it's done. It says so when Claude was still out
+    and memtrade fell back to its rules again, and shows memtrade's error
+    when the run failed. A second click joins the open request. A claim
+    memtrade doesn't finish within 2 hours is marked failed, so the day
+    can be asked for again. memtrade claims and finishes with the same
+    `wechat:write` token (`/push/reruns/claim`, `/push/reruns/<id>/finish`).
   - The push (`/api/wechat-market/push/*`) takes a Bearer token with the
     `wechat:write` scope from a service client a manager creates under
     Settings → Connectors. The day comes first, then its posts in batches
@@ -2846,7 +2965,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   attention, Offline) whose counts filter the table; a workers table that
   fits beside a **Recent activity** aside of the same height (latest sweeps,
   listings, session backups, workers gone silent and open checkpoints, rebuilt
-  from the timestamps the coordinator serves) — login, region, status with
+  from the timestamps the coordinator serves; since v1.349.1 it stops at 560px
+  and scrolls) — login, region, status with
   its reason, session days left, and since v1.266.0 the worker's **Today**
   (a 24-hour strip in its region's time zone: when the sweep started, how far
   it got, the now tick, the estimated end while it runs, the next scheduled
@@ -3086,6 +3206,22 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     disabled, with the reason, for a worker on an older monitor.
   - **Older consoles.** Against an older console none of this shows.
 
+  **Starting the round now.** Since v1.334.0 (RS-393, facebook-tracker
+  0.13.18), the round card has **Start the round now**, so a manager need not
+  wait for the workers' start times.
+  - **The confirmation** says:
+    - how many workers start searching within a minute;
+    - which enrolled workers run an older worker and start at their usual
+      time;
+    - for each item, how many cities are due: those not searched in the last
+      2 hours;
+    - when the round ends (8 hours later), and that the usual start times
+      still run.
+  - **Once started**, the lede reads "Started by … at …, runs until …".
+  - **The board's due cities** follow the started round's rule.
+  - **Before the workers are redeployed** onto 0.13.18, the button wakes no
+    one and says so.
+
   **The city log.** Since v1.331.0 (RS-385, facebook-tracker 0.13.17), every
   city a worker searches is logged from its start to its end.
   - **The worker page's City log card.** It covers the last 24 h, one row a
@@ -3112,6 +3248,242 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     table opens that city's last 24 h across every worker and item.
   - **Older consoles.** Against an older console the card and the city links
     show nothing.
+- **Fleet recovery (v1.349.0, RS-400)** — the backend fences worker requests
+  when the pool's owner changes. Hosts confirm a stopped container before its
+  replacement reclaims the same account; repeated rollout commands and lost
+  replies do not cause another replacement. Finished or released lease attempts
+  count against the UTC day's budget, split at midnight. Lost city checks retry
+  and late results cannot undo a removal or override. An account's all-zero
+  searches quarantine it only when another account found cards in its cities;
+  a successful probe or manual release resets the evidence. Heartbeats renew
+  worker tokens without another browser login. Worker shared secrets come from
+  the Cloudflare Worker's FLEET_WORKER_ENV on its claim-only surface; deploying these
+  changes still requires the separate owner-approved cutover.
+- **Fleet claim hardening (v1.354.0, RS-406)** — a key missing on the ERP's
+  side answers workers `503 unavailable` instead of a 401 they would exit on,
+  and `FLEET_WORKER_TOKEN_KEY_PREVIOUS` lets the token key rotate without
+  restarting (or re-logging) any worker. A host claims only for its own
+  `<host_id>-<n>` workers. A lost `next-task` answer hands the same task again
+  rather than leasing a second. A handoff reservation lapses after 20 minutes
+  and is shown as reserved, not parked. A slug check whose page failed leaves
+  the city unverified so it is checked again. A session upload must carry this
+  account's `c_user` and `xs`, so it cannot wipe or replace the stored login.
+- **Fleet scheduling and rollout fixes (v1.356.0, RS-407)** — a rollout no
+  longer picks a worker the agent will not replace: a held container
+  (operator needed, crash limit, stopped by hand), one not running, or a
+  worker parked on its account is skipped with the reason in the release's
+  `skip_reasons`. A host's report keeps only its own `<host>-<n>` workers and
+  the agent's hold, exit code, image id and identity, and a second agent
+  instance for one host is refused (`403`, observe-only). Removing a host
+  frees the accounts it had reserved for a replacement. **Search now** on a
+  switched-off or unverified city is no longer cancelled by the next
+  scheduler pass, and two clicks write one task. A city's per-day change moves
+  its waiting search at once. Enabling a city needs a matching verdict (a
+  mismatch needs Enable anyway), and `reverify` sends a city back for a fresh
+  check, which is also how a removed, never-verified city returns; a check
+  that keeps ending without a verdict backs off from 15 minutes to 6 hours. Task
+  history reads newest first (up to 5000, flagged when cut), so Analysis no
+  longer shows the oldest days of its window. The fleet VNC relay is served
+  by one backend instance (an advisory lock; the others answer 503) and drops
+  a parked worker socket within a minute of its slot moving on (`4409`).
+  `fleet-import.mjs` keeps managers' edits unless `--overwrite`, and it,
+  `fleet-seed-slots.mjs` and `fleet-fake-worker.mjs` refuse a remote target
+  without an explicit opt-in.
+- **Fleet claim tickets (v1.360.0, RS-411)** — worker containers never hold
+  the host token. The host agent mints a single-use claim ticket for each
+  container right before running it (bound to the worker id and any handoff
+  epoch, ten minutes, kept only as a hash) and the worker claims its account
+  with that. A compromised worker can claim no other account and call no
+  host route. A held worker comes back with `docker rm rs-fleet-<id>`; a
+  `docker start` claims with a spent ticket, exits 75 and is recreated. The
+  host token still claims for one release (older agents and worker images).
+
+- **Add to fleet (v1.364.0, RS-415)** — a manager puts pool accounts into
+  ERP-fleet slots from **Monitors ▸ Facebook ▸ Account pool**, no seed script.
+  The **Proxies** card under the pool table lists the exits the ERP keeps
+  (label, host:port, timezone, how many accounts of the limit use each and
+  which) and adds, edits and removes them; the URL with the vendor login is
+  pasted once, sealed, and never shown again (the edit form's field starts
+  empty and leaves the saved URL alone). An available account with a
+  password and a 2FA key gets **Add to fleet** in its Runs on cell: pick a
+  proxy (a full one is greyed; two accounts per proxy by default, the
+  `Accounts per proxy` rule in Cities ▸ Rules) and optional home cities from
+  the enabled cities, and the ERP makes the slot with a desktop browser made
+  for the account (Chromium's own user agent, a common screen and scale
+  picked from the account number, the proxy's timezone). The account turns
+  *fleet* under "ERP fleet" and reads "waiting for a worker" until one claims
+  it. **Remove from fleet** takes back an account no worker holds (park it on
+  the Fleet tab first) and returns it to Available. Removing a proxy an
+  active account uses is refused. A host now starts only as many workers as
+  it has accounts to run, up to its capacity: with capacity 4 and one ready
+  account it runs one worker, and each account added brings another.
+
+- **Fleet (ERP-owned)** — since v1.337.0 (RS-394) **Monitors ▸ Facebook** is
+  the page of the task queue the ERP itself runs: the backend owns the city
+  catalog, the tasks, the hosts and the account slots (`/api/fleet`), and
+  identical worker containers on any host pull their next city from it.
+  Since v1.367.1 and facebook-tracker 0.14.8, fleet handovers and session
+  refreshes preserve the complete saved Playwright state, including local
+  storage and IndexedDB alongside cookies. Older cookie-only workers retain
+  those saved origins when refreshing their session.
+  Since
+  v1.344.0 the page has five tabs in the owner's approved design — **Fleet**,
+  **Tasks**, **Cities**, **Analysis**, **Account pool** — with count chips on
+  the tab bar (workers running, tasks due now in the warn colour, cities, pool
+  size) and the title "Facebook fleet" on every one; the earlier Queue, Hosts
+  and Slots tabs folded into them, and their paths (`/#/fleet/queue`,
+  `/#/fleet/hosts`, `/#/fleet/slots`) redirect. Managers only and desktop
+  only; purchasers see Account pool alone, and the phone has no fleet pages.
+  Times read in US Eastern; Analysis daily totals keep the coordinator’s UTC day boundaries. Against a backend without the fleet routes each
+  tab says so and the rest of the page is unaffected. Every tab re-reads every
+  10 s while it is visible.
+  Since v1.351.0 (RS-403) the Fleet and Analysis tabs show the ERP's own rows without waiting for the coordinator, whose rows fill in when they land, read every 30 s and never while the last read is still out; the tabs and the tab-bar counts send each URL once per load and read the pool summary, not the secret-bearing snapshot.
+  - **Fleet** (`/#/fleet`, v1.344.0): a strip of host cards, then one table
+    of every worker (since v1.361.0, RS-412; before, every account). A host
+    card gives the id, the agent's version, when it
+    last reported, running of capacity, the **Authoritative** switch (off is
+    observe-only: the agent reports and starts nothing), the capacity stepper
+    (a new worker is a Facebook login; since v1.364.0 the agent runs no more
+    workers than the host has accounts for) and, while a release rolls, its
+    progress line with the worker replaced next (since v1.367.0 only while
+    GET /api/fleet/hosts returns a rolling release; without one, workers
+    left on an older image get a quiet "1 worker on 0.14.6; new workers
+    start on 0.14.7", no bar); **Add host** (the token
+    shown once, with the three variables the agent needs) and **Release a
+    version** sit in the tab's action row, and a rolling or stopped release
+    shows its banner under the strip. Since v1.361.0 (RS-412) the table is
+    one row per worker: the ERP's workers, with the slot and account each
+    holds, and, until cutover, the coordinator's (host `homelab`); a worker
+    both know is the ERP's row. An account no worker holds is not a row: the
+    Account pool tab lists it, with its Unpark and Release quarantine. A
+    worker that stopped reporting stays as **Offline** for a week after its
+    last heartbeat. Each row: worker and VNC port, host, account number and
+    masked uid, the state chip with a one-line note (heartbeat age, "keeps
+    its task" for a degraded worker, the account's quarantine end), **Now**
+    (the city and item being searched with the time on it and "home city";
+    "Waiting for a task"; or, for a worker being replaced, "Stopping after
+    this task, then back on <version>") with **Park** for a running worker,
+    **Today** (minutes of searching against the budget, as a ring), the lease
+    epoch and when it renews, the worker's version (muted when it is not the
+    host's), and the eye to the worker's page. Running workers come first,
+    then offline ones, each by worker id. The toolbar has the legend with
+    counts (All workers, Healthy, Degraded, Replacing, Parked — the worker
+    reports Session expired, Checkpoint… — and Offline), a host select and a
+    search over worker, account, city and host; the foot says "N of M
+    workers · R running on K hosts". Since v1.367.0 (RS-418) a coordinator
+    worker the fleet retired (`retired_at` on its health row) is left out
+    of the rows, the counts, the host select, the tab bar's running count
+    and the activity aside; a **Retired N** chip, off by default and there
+    only while N > 0, lists them read-only with "Retired <date>", and a
+    retired worker's own page still opens, dated, without Re-login.
+    The coordinator's activity aside stays under the table while its rows
+    exist; since v1.350.1 it spans the full width and its list stops at 480px
+    and scrolls. There is no Pause on a roll: the backend has no route for it.
+  - **Tasks** (`/#/fleet/tasks`, v1.344.0): the belt, then the task table
+    with the city log beside it. **The belt** is one row per enabled item on
+    a 24-hour window centred on now, in quarter-hour buckets: searches done in
+    the last 12 hours as green squares to the left, the overdue stack at now
+    as one amber bar labelled "N due now", running tasks as blue marks just
+    right of now (one per worker), and waiting tasks at their due time as
+    outlined squares, amber-outlined inside the next hour; a bucket past seven
+    tasks shows "+N", hover names each task's city, time and worker, and the
+    axis ticks every third Eastern hour. Each row's label gives the item,
+    "done of total searched since <time>" and "running, due now, due by
+    <time>"; the sentence above says how many workers are searching and how
+    many wait for work, how many city-items are due and how many minutes the
+    backlog takes at the measured task length (the mean of today's finished
+    searches, six minutes before any finish), done in the last 12 hours and
+    due in the next 12. Only searches count; a slug check or a probe is not a
+    city-item. **The table** lists the range (last 24 h, last 7 days, today
+    UTC) plus everything waiting, narrowed by a state segment (All, Running,
+    Due, Done, Cancelled, Expired), an item select and one search box over
+    city, worker and account; a row gives the city, item, state (Running,
+    Due, Later, Done, Cancelled, Expired, plus "front of queue" on a manual
+    task), the due time with what happened to it, the worker and account,
+    how long it took (ticking while it runs), cards, alerts and why it
+    exists. Running rows come first, then due, then finished, then waiting
+    for later; the foot counts the rows and the last 24 hours' finished
+    searches. Clicking a row opens **the city log** in the aside: the city's
+    name, slug, home worker (or "whoever is free"), region and searches a
+    day, then per item the open task and the last two finished ones, each
+    with its events timed in Eastern, refreshed every 10 s; **Search now** and
+    **Edit** (the Cities tab) sit on it. **Search a city now** is a dialog in
+    the action row (a city, one item or both, with when it was last searched
+    and when it is next due); **Start the round now** previews and confirms
+    as before.
+  - **Cities** (`/#/fleet/cities`, v1.344.0): the catalog, with a lede that
+    counts the cities, the searched, the pinned, the verifying and the off.
+    The toolbar has the legend (All, Enabled, Pinned, Verifying, Disabled), a
+    region select and a search over name and slug. Verifying cities come
+    first, each with an inline row under it: "Added <when>. A worker will
+    open the slug between tasks and confirm Facebook shows <name>" with
+    **Skip the check**, or, when the label Facebook returned does not match
+    the name, "Facebook showed <label>, not <name>. The slug may be wrong"
+    with **Enable anyway** and **Remove**. A row gives the city with its slug
+    (linked to Marketplace) and a non-default radius, region, the status
+    chip, searches a day (Default or a fixed count), per item a cell with the
+    last search (time, cards, alerts) and the open task as a chip — the
+    worker searching it, "due, waiting N min", or "next <time>" — the worker
+    that calls it home with its account, and the row actions: pin, **Search
+    now**, **Remove**. A disabled city offers **Enable**, a removed one
+    **Restore**; a city removed before its slug was verified asks whether to
+    **Enable anyway** instead. **Rules**, beside **Add city**, edits the
+    fleet-wide settings (searches per city per item, budget per account,
+    lease, longest task, familiar window, round-start skip, quarantine and
+    its probe interval, and since v1.358.0 how many days of task history to
+    keep, 30 to 730, default 90); a change reaches each worker at its next
+    task. Finished, cancelled and expired tasks older than that are deleted
+    hourly with their logs, except each city and item's last search and each
+    city's latest slug check.
+  - **Analysis** (`/#/fleet/analysis`, v1.344.0): the search-to-alert
+    pipeline that used to sit on the Fleet tab, with a range segment (Today,
+    7 days, 14 days) that sums the coordinator's per-day counters for every
+    stage; between stages the pass rate (cards per search as "×N", every
+    other step as a percentage, amber under 50 %) and under the pipeline the
+    headline ratios: cards per alert, reviews per alert, the title gate's
+    drop before a page is opened and the model's drop of what it reads. Then
+    two per-day bar charts for the last 14 days, each on its own axis —
+    reviewed by the model, alerts sent — in one hue with today's bar grey as
+    partial, three gridlines, labels on the first, highest and today's bar, a
+    hover title per bar, the 14-day total and the full-day average. Then
+    **Where the alerts came from**: per city over 14 days, the alerts, the
+    model reviews from the fleet's finished tasks on it (the task list is
+    capped at 1000 rows), the alert rate when the finished tasks account for
+    the same alert total and the task list is not capped, the last alert's
+    day and who searches it (its home worker, or "whoever is free"). The coordinator's
+    counts are not tagged per worker, so there is no worker or item filter.
+  - **Account pool** (`/#/fleet/pool`, v1.344.0): as before, plus a **Runs
+    on** column: the ERP worker holding the account's slot with its state
+    and epoch, linking to the worker page; else the coordinator's worker as
+    the Holder column shows it; else why nothing runs it (quarantined,
+    parked, the purchaser who took it, or the pool status). Since v1.361.0
+    (RS-412) a quarantined account's cell has **Release** and a parked one's
+    **Unpark** (with its confirm), which used to be on the Fleet tab.
+    Since v1.364.0 (RS-415) the cell also puts accounts into the ERP fleet
+    and takes them out (below), and a **Proxies** card sits under the table.
+  - **The worker page** (`/#/fleet/worker/<id>`, v1.337.0) recognises a
+    fleet worker: state, last heartbeat, account and epoch, version, the task
+    it holds (city, item, since when, lease), and **Watch**, its browser
+    through the ERP's own relay, view-only (since v1.366.0, RS-417, **Watch browser** opens the
+    watch page below instead). Any other id shows the
+    coordinator's worker page as before. Its back link leads to the Fleet
+    tab (v1.344.0).
+    Since v1.365.0 (RS-416) a fleet worker gets the homelab worker page
+    itself, on the same layout (`fleet/workerDetail.tsx`) and from one read
+    (`GET /api/fleet/workers/:id`, manager-only, no secret value or proxy
+    URL): the login as title, Live / Stale / Needs attention / Offline, the
+    stat row (alerts and stopped tasks over 7 days, last finished search,
+    open checkpoints), rows for the pool account, its stored secret kinds,
+    the session expiry the worker reports, the slot's device, the pool
+    cookie's age as Session backup, the listed proxy (label, host:port,
+    timezone), the slot (epoch and lease, parked, reserved, quarantine), home
+    and recently searched cities, today's budget minutes, host and build
+    (amber when behind the latest release). Last listing and Session file
+    read "—": the fleet has no source for them. A worker parked on a wall
+    or lost session shows it under **Open checkpoints**. Actions: Watch
+    browser, Park / Unpark, Remove from fleet (once no worker holds the
+    slot), Search a city now, Release quarantine. Accounts used, the City
+    log (its 24-hour tasks) and History (task events and pool stints) follow.
 - **Facebook account pool** — a second tab at **Monitors ▸ Facebook**,
   linked directly at `/#/fleet/pool` (v1.261.0). Managers see a status legend
   with counts that filters (the key-tag rail left the manager's view in
@@ -3217,6 +3589,20 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   control stays on. A bar at the top repeats the status, Take control,
   Re-login, the panel toggle and Exit. Since facebook-tracker 0.12.4 (RS-295)
   the view is cropped to the worker's browser window, not its whole X display.
+  Since v1.366.0 (RS-417) an ERP-fleet worker (`worker-60-14-1`) gets the
+  same page at the same path, opened from its worker page's **Watch
+  browser**: the live browser through the ERP's own relay
+  (`/api/fleet/vnc/<worker>/ws`), Take control, Full screen, Hide account and
+  the Sign-in panel with its slot's pool account (Pool #N, live 2FA code with
+  Copy and Type into browser, login, password, UID, Facebook user), then
+  state, host (the fleet has no region), session, heartbeat, the listed proxy
+  (label, host:port, timezone; no exit lookup) and build. Its **Re-login**
+  shows the same confirm and queues a one-shot `relogin` directive the
+  worker's next heartbeat (within about 20 seconds) delivers once
+  (facebook-tracker 0.14.4 or later); the strip says queued, taken, or needs
+  you when the worker reports a checkpoint or challenge after it. Re-login is
+  greyed out for a worker that holds no slot. Homelab ids keep the
+  coordinator's feed.
 
 - **Web submissions** — the manager inbox for the public website forms
   (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the
@@ -3566,7 +3952,7 @@ removed in v1.191.0.
   the page-sub. In the icon rail the caret hides and the open children show
   as icons.
 - **Menus and record references are real links** (v1.144.0). The sidebar,
-  the Inventory ▸ Analysis strip, the phone tab bar and Home quick links, and
+  the Analysis tab strip, the phone tab bar and Home quick links, and
   every PO, sell-order or payment id shown on another page — the inventory
   lots table, the item page, payments rows and match suggestions, shipping,
   the sell-order list, the client drawer — are anchors with the
