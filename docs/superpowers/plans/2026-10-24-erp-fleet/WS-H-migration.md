@@ -521,3 +521,22 @@ Runtime stays 0.14.10; no fleet-wide release or roll occurred. Dev alerts stay
 off. Parked activation requires an operator decision and working proxy, with
 the protected cache restored before boot. Before restoring a source launch,
 stop and fence its ERP slot; never boot both copies.
+
+## Legacy leftovers removed (2026-10-27 ~20:10 UTC)
+
+With no `rs-monitor-*` container left on either host, the 41
+`deploy_aimm-home-<x>` volumes were removed from the VM. They held only
+monitor logs, an empty `config.toml` and the listing-dedupe `cache.db`; no
+browser state or credentials. Each was first archived as a tarball, with a
+SHA256SUMS file, under
+`~/recycle_servers/archive/legacy-monitor-volumes-2026-10-27/` (mode 700,
+78 MB). A rollback that needs a source cache restores it from there into a
+fresh volume of the same name. The 15 old local `aimm-recycle` tags
+(0.12.2–0.13.17, `candidate`) and build cache older than a day were also
+removed. `aimm-recycle:latest` (= 0.13.18) stays as the image the archived
+launch files name. No container was started, stopped or recreated.
+
+Deliberately kept: `configs/sessions/homelab-*`, the `~/fleet-handover/`
+backups, the launch-file archives, the coordinator's vault rows, the stopped
+`rs-coordinator-lan-socat-rollback-20261027` relay and the `rollback-0.13.18`
+console/coordinator images.
