@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-27
 reporter: jinhu
 branch: chore/random-worker-migration
-pr:
+pr: 947
 version: facebook-tracker 0.14.12
 related: [RS-394, RS-419, RS-421]
 ---
