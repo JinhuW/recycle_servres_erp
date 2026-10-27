@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.368.1] - 2026-10-27
+
+### Fixed
+
+- **The Proxies tab lists every proxy port, once (RS-425).** It showed the
+  ERP's 4 proxies of the 20 Decodo ports bought: the console reported only
+  the ports a live worker dials, and 34 of 42 homelab workers are retired.
+  rs_console now reports every port it holds, idle ones with nobody on them,
+  and a port on both the ERP list and the homelab is one row, the ERP's,
+  with the homelab workers beside its accounts. The homelab ports appear once
+  the console runs facebook-tracker 0.14.14.
+
 ## [1.368.0] - 2026-10-27
 
 ### Added

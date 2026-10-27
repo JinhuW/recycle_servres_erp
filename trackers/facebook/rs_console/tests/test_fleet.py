@@ -676,15 +676,29 @@ def test_proxies_health_probes_each_port_once_without_any_login(client, monkeypa
         return {k: {"ok": True, "latency_ms": 420, "ip": "203.0.113.1", "city": "Ashburn",
                     "region": "Virginia", "country": "US", "org": "AS1"} for k in keys}
 
+    # Ports bought but dialed by no live worker, one of them twice; a login
+    # var and a non-proxy value add nothing.
+    monkeypatch.setenv("PROXY_HOMELAB_NYC2", "http://isp.example.com:10012")
+    monkeypatch.setenv("PROXY_HOMELAB_WC", "http://isp.example.com:10012")
+    monkeypatch.setenv("PROXY_NOTES", "ftp://files.example.com:21")
+
     monkeypatch.setattr(console.proxy_exit, "check", check)
     res = client.get("/v1/proxies/health", headers=AUTH)
     assert res.status_code == 200
-    [row] = res.json()["proxies"]
-    assert row["url"] == "http://isp.example.com:10001"
+    rows = {r["url"]: r for r in res.json()["proxies"]}
+    assert list(rows) == ["http://isp.example.com:10001", "http://isp.example.com:10012", "http://se.example.com:8080"]
+    row = rows["http://isp.example.com:10001"]
     assert row["workers"] == ["homelab-1", "wc-1"]
     assert row["ok"] is True and row["latency_ms"] == 420 and row["ip"] == "203.0.113.1"
     assert row["checked_at"].endswith("Z")
-    # One dial per port, with the login; the answer never carries it.
-    assert asked == [("http://isp.example.com:10001", "user-secret", "pass-secret")]
+    assert rows["http://isp.example.com:10012"]["workers"] == []
+    assert rows["http://se.example.com:8080"]["workers"] == []
+    # One dial per port, with the login (an idle port borrows its host's);
+    # the answer never carries it.
+    assert sorted(asked) == [
+        ("http://isp.example.com:10001", "user-secret", "pass-secret"),
+        ("http://isp.example.com:10012", "user-secret", "pass-secret"),
+        ("http://se.example.com:8080", None, None),
+    ]
     for leak in ("user-secret", "pass-secret", "inline-secret"):
         assert leak not in res.text

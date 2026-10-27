@@ -20,11 +20,14 @@ deployed?" harder to answer.
 
 ### Added
 
-- **`GET /v1/proxies/health` on rs_console.** Every proxy port a live worker
-  dials, probed through itself now: one row per port (login cut out) with the
-  workers on it, `ok`, `latency_ms`, the exit IP and its city, region,
-  country and ISP, or a worded `error`. A worker on the VM's own IP or a
-  retired worker adds no row. Answers are shared for 60 s so repeat asks do
+- **`GET /v1/proxies/health` on rs_console.** Every proxy port the console
+  can dial, probed through itself now: one row per port (login cut out) with
+  the live workers on it, `ok`, `latency_ms`, the exit IP and its city,
+  region, country and ISP, or a worded `error`. Ports come from the workers'
+  configs and from every `PROXY_*` var holding a proxy URL, so a bought port
+  no live worker dials still gets a row (no workers, the login borrowed from
+  a worker on the same proxy host); the VM's own IP adds none (RS-425).
+  Answers are shared for 60 s so repeat asks do
   not burst through a vendor port. The ERP calls it every five minutes for
   its Proxies tab (RS-424).
 
