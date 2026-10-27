@@ -3,7 +3,7 @@
 // manager routes fold in). Nothing here is a real account, host, token or uid.
 
 import type {
-  FleetCityListed, FleetRelease, FleetTask as WireTask, FleetTaskLog,
+  FbWorkerStint, FleetCityListed, FleetRelease, FleetTask as WireTask, FleetTaskLog, FleetWorkerDetail,
 } from '@recycle-erp/shared';
 import type { AlertHitRow, FleetAccount, FleetDoc, ReviewStatsDay } from '../../../lib/coordinator';
 import type { PoolAccount } from '../../../lib/facebookPool';
@@ -243,4 +243,75 @@ export const PROXIES: FleetProxy[] = [
   { id: 2, label: 'Decodo NY 2', host: 'isp.example.net', port: 10002, timezone: 'America/New_York', note: '', created_at: ago(60 * 24),
     slots: [{ account_no: 44, pool_status: 'fleet', parked: true, leased: false }] },
   { id: 3, label: 'Decodo CHI 1', host: 'isp.example.net', port: 10003, timezone: 'America/Chicago', note: '', created_at: ago(60), slots: [] },
+];
+
+// GET /workers/worker-60-14-1: the ERP worker's page in one read. It searched
+// Philadelphia an hour ago (two alerts), was stopped by a checkpoint in Denver,
+// and holds Philadelphia's SSD search now.
+const WORKER_TASKS: FleetTaskLog[] = [
+  {
+    ...TASKS[7], started_at: ago(3),
+    events: [
+      { id: 40, task_id: 208, worker_id: 'worker-60-14-1', kind: 'handed', detail: { why: 'home' }, at: ago(4) },
+      { id: 41, task_id: 208, worker_id: 'worker-60-14-1', kind: 'started', detail: null, at: ago(3) },
+    ],
+  },
+  {
+    ...task(195, 'denver', 'server_ram', 'done', {
+      worker_id: 'worker-60-14-1', account_no: 31, epoch: 2, leased_at: ago(40), started_at: ago(39), done_at: ago(30),
+      result: { cards: 12, opened: 0, reviewed: 0, alerted: 0, seconds: 100, stopped: true },
+    }),
+    events: [
+      { id: 30, task_id: 195, worker_id: 'worker-60-14-1', kind: 'handed', detail: { why: 'other' }, at: ago(40) },
+      { id: 31, task_id: 195, worker_id: 'worker-60-14-1', kind: 'stopped', detail: { reason: 'wall', wall: 'checkpoint' }, at: ago(31) },
+      { id: 32, task_id: 195, worker_id: 'worker-60-14-1', kind: 'done', detail: { cards: 12, stopped: true }, at: ago(30) },
+    ],
+  },
+  {
+    ...task(194, 'philly', 'server_ram', 'done', {
+      worker_id: 'worker-60-14-1', account_no: 31, epoch: 2, leased_at: ago(70), started_at: ago(69), done_at: ago(60),
+      result: { cards: 90, opened: 7, reviewed: 7, alerted: 2, seconds: 520 },
+    }),
+    events: [
+      { id: 20, task_id: 194, worker_id: 'worker-60-14-1', kind: 'handed', detail: { why: 'home' }, at: ago(70) },
+      { id: 21, task_id: 194, worker_id: 'worker-60-14-1', kind: 'searched', detail: { phrase: 'server ram', cards: 50, title_pass: 20, opened: 4, reviewed: 4 }, at: ago(66) },
+      { id: 22, task_id: 194, worker_id: 'worker-60-14-1', kind: 'searched', detail: { phrase: 'ddr4 ecc', cards: 40, title_pass: 15, opened: 3, reviewed: 3 }, at: ago(63) },
+      { id: 23, task_id: 194, worker_id: 'worker-60-14-1', kind: 'finished', detail: { seconds: 520 }, at: ago(60) },
+      { id: 24, task_id: 194, worker_id: 'worker-60-14-1', kind: 'done', detail: { cards: 90, alerted: 2 }, at: ago(60) },
+    ],
+  },
+];
+
+export const WORKER_DETAIL: FleetWorkerDetail = {
+  worker: {
+    ...WORKERS[4], state: 'HEALTHY',
+    detail: { epoch: 2, session_expiry: ahead(60 * 24 * 40), browser_ok: true, last_search_at: ago(30) },
+    task: { ...TASKS[7], city_name: 'Philadelphia, PA' },
+  },
+  slot: {
+    ...SLOTS[4], proxy_id: 3, home_cities: ['philly'],
+    device: { viewport: [1366, 645], screen: [1366, 768], device_scale_factor: 1, timezone: 'America/New_York', locale: 'en-US', native: ['user_agent'] },
+  },
+  holds_slot: true,
+  proxy: { id: 3, label: 'Decodo NY 1', host: 'isp.example.net', port: 10001, timezone: 'America/New_York' },
+  account: {
+    no: 31, uid: '100031000313131', email: 'acct31@example.test', status: 'fleet', holder: 'worker-60-14-1',
+    cookie_at: ago(60 * 5), secrets: ['password', 'totp', 'cookie'],
+  },
+  cities: [
+    { slug: 'philly', name: 'Philadelphia, PA', radius_km: 500, home: true, last_done_at: ago(60), alerts: 2 },
+    { slug: 'denver', name: 'Denver, CO', radius_km: 500, home: false, last_done_at: ago(30), alerts: 0 },
+  ],
+  stats: { days: 7, searches: 2, alerts: 2, errors: 1, last_search_at: ago(30) },
+  log: WORKER_TASKS,
+  events: [
+    { ...WORKER_TASKS[1].events[2], city: 'denver', city_name: 'Denver, CO', item: 'server_ram', task_kind: 'search' },
+    { ...WORKER_TASKS[1].events[1], city: 'denver', city_name: 'Denver, CO', item: 'server_ram', task_kind: 'search' },
+    { ...WORKER_TASKS[2].events[4], city: 'philly', city_name: 'Philadelphia, PA', item: 'server_ram', task_kind: 'search' },
+  ],
+  release_version: '0.14.7',
+};
+
+export const WORKER_STINTS: FbWorkerStint[] = [
+  { accountNo: 31, uid: '100031000313131', email: 'acct31@example.test', proxyUrl: null, proxyKnown: false, startedAt: NOW - 3 * 86_400_000, endedAt: null, outcome: null },
 ];

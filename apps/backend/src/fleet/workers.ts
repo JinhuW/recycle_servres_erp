@@ -1,12 +1,17 @@
 import { Hono } from 'hono';
-import { fleetDeviceFor, type FleetSlot, type FleetTask, type FleetWorker } from '@recycle-erp/shared';
+import {
+  fleetDeviceFor, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
+} from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
 import { writeEvent } from '../routes/facebookPool';
+import { WORKER_ID } from '../routes/coordinator';
 import { releaseTasks } from './claim';
+import { loadRelease } from './hosts';
+import { cityLog } from './tasks';
 import { CITY_SLUG, loadSettings } from './cities';
 import { managerOnly, type ManagerEnv } from './auth';
-import { bad, conflict, exists, isRefusal, notFound, taskToWire, type Refusal, type TaskRow } from './sql';
+import { bad, conflict, eventToWire, exists, isRefusal, notFound, taskToWire, type Refusal, type TaskEventRow, type TaskRow } from './sql';
 
 // ─── Slots and workers, as the manager sees them ──────────────────────────────
 // A slot is one pool account's place in the fleet; a worker is the container
@@ -271,6 +276,101 @@ slots.post('/:no/unpark', async (c) => {
 workers.get('/', async (c) => {
   const byWorker = await workerViews(getDb(c.env));
   return c.json({ workers: [...byWorker.values()] });
+});
+
+// ─── One worker, for its page ─────────────────────────────────────────────────
+// Everything the worker page shows in one read, so it does not fan out over
+// the slot, pool, proxy, task and event lists. Released tasks lose their
+// worker_id, so what the worker did is read from its events, which keep it.
+
+const DETAIL_DAYS = 7;
+const DETAIL_EVENTS = 200;
+const HISTORY_KINDS = ['done', 'stopped', 'released', 'expired'];
+
+type AccountRow = {
+  no: number; uid: string | null; email: string; status: string; holder_name: string | null; cookie_at: Date | null;
+  password: boolean; totp: boolean; email_password: boolean; cookie: boolean; token: boolean;
+};
+
+workers.get('/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!WORKER_ID.test(id)) return c.json({ error: 'not_found' }, 404);
+  const sql = getDb(c.env);
+  const byWorker = await workerViews(sql);
+  const worker = byWorker.get(id);
+  if (!worker) return c.json({ error: 'not_found', detail: id }, 404);
+  const since = new Date(Date.now() - DETAIL_DAYS * 86_400_000);
+
+  const [held] = await sql<SlotRow[]>`${SLOT_SELECT(sql)} WHERE s.worker_id = ${id}`;
+  const [last] = held || worker.account_no === null ? [] : await sql<SlotRow[]>`${SLOT_SELECT(sql)} WHERE s.account_no = ${worker.account_no}`;
+  const slotRow = held ?? last ?? null;
+  const settings = await loadSettings(sql);
+  const slot = slotRow ? slotView(slotRow, settings.budget_minutes, byWorker) : null;
+  const no = slot?.account_no ?? worker.account_no;
+
+  const [proxy] = slot?.proxy_id
+    ? await sql<{ id: number; label: string; host: string; port: number; timezone: string }[]>`
+        SELECT id, label, host, port, timezone FROM fleet_proxies WHERE id = ${slot.proxy_id}`
+    : [];
+  const [acct] = no === null ? [] : await sql<AccountRow[]>`
+    SELECT no, uid, email, status, holder_name, cookie_at,
+           password_enc IS NOT NULL AS password, totp_enc IS NOT NULL AS totp,
+           email_password_enc IS NOT NULL AS email_password, cookie_enc IS NOT NULL AS cookie, token_enc IS NOT NULL AS token
+    FROM fb_pool_accounts WHERE no = ${no}`;
+
+  const [stats] = await sql<{ searches: number; alerts: number; last_search_at: Date | null }[]>`
+    SELECT COUNT(*)::int AS searches,
+           COALESCE(SUM(CASE WHEN result->>'alerted' ~ '^[0-9]+$' THEN (result->>'alerted')::int END), 0)::int AS alerts,
+           MAX(done_at) AS last_search_at
+    FROM fleet_tasks
+    WHERE worker_id = ${id} AND state = 'done' AND kind = 'search' AND done_at >= ${since}`;
+  const [{ errors }] = await sql<{ errors: number }[]>`
+    SELECT COUNT(DISTINCT task_id)::int AS errors FROM fleet_task_events
+    WHERE worker_id = ${id} AND at >= ${since}
+      AND (kind = 'stopped' OR (kind = 'done' AND detail->>'stopped' = 'true'))`;
+
+  const home = slot?.home_cities ?? [];
+  const cityRows = await sql<{ slug: string; name: string | null; radius_km: number | null; last_done_at: Date | null; alerts: number }[]>`
+    WITH mine AS (
+      SELECT city, MAX(done_at) FILTER (WHERE state = 'done') AS last_done_at,
+             COALESCE(SUM(CASE WHEN state = 'done' AND result->>'alerted' ~ '^[0-9]+$' THEN (result->>'alerted')::int END), 0)::int AS alerts
+      FROM fleet_tasks
+      WHERE worker_id = ${id} AND kind = 'search' AND GREATEST(leased_at, done_at) >= ${since}
+      GROUP BY city
+    ), wanted AS (
+      SELECT unnest(${home}::text[]) AS city UNION SELECT city FROM mine
+    )
+    SELECT w.city AS slug, c.name, c.radius_km, m.last_done_at, COALESCE(m.alerts, 0)::int AS alerts
+    FROM wanted w LEFT JOIN fleet_cities c ON c.slug = w.city LEFT JOIN mine m ON m.city = w.city`;
+  const cities = cityRows
+    .map((r) => ({ slug: r.slug, name: r.name, radius_km: r.radius_km, home: home.includes(r.slug), last_done_at: iso(r.last_done_at), alerts: r.alerts }))
+    .sort((a, b) => Number(b.home) - Number(a.home)
+      || (a.home ? home.indexOf(a.slug) - home.indexOf(b.slug) : (b.last_done_at ?? '').localeCompare(a.last_done_at ?? '')));
+
+  const events = await sql<(TaskEventRow & { city: string; city_name: string | null; item: string; task_kind: FleetTask['kind'] })[]>`
+    SELECT e.*, t.city, c.name AS city_name, t.item, t.kind AS task_kind
+    FROM fleet_task_events e JOIN fleet_tasks t ON t.id = e.task_id LEFT JOIN fleet_cities c ON c.slug = t.city
+    WHERE e.worker_id = ${id} AND e.at >= ${since} AND e.kind = ANY(${HISTORY_KINDS}::text[])
+    ORDER BY e.at DESC, e.id DESC LIMIT ${DETAIL_EVENTS}`;
+  const release = await loadRelease(sql);
+
+  const secrets: FleetSecretKind[] = acct ? FLEET_SECRET_KINDS.filter((k) => acct[k]) : [];
+  const body: FleetWorkerDetail = {
+    worker,
+    slot,
+    holds_slot: !!held,
+    proxy: proxy ?? null,
+    account: acct ? {
+      no: acct.no, uid: acct.uid, email: acct.email || null, status: acct.status, holder: acct.holder_name,
+      cookie_at: iso(acct.cookie_at), secrets,
+    } : null,
+    cities,
+    stats: { days: DETAIL_DAYS, searches: stats.searches, alerts: stats.alerts, errors, last_search_at: iso(stats.last_search_at) },
+    log: await cityLog(sql, { worker: id, hours: 24 }),
+    events: events.map((e) => ({ ...eventToWire(e), city: e.city, city_name: e.city_name, item: e.item, task_kind: e.task_kind })),
+    release_version: release?.version ?? null,
+  };
+  return c.json(body);
 });
 
 export { slots, workers };
