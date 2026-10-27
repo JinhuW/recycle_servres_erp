@@ -267,6 +267,40 @@ export type TrackerAnalytics = {
   tracer: { workerId: string; expiresAt: string } | null;
 };
 
+// ─── Seen (GET /api/seen) ────────────────────────────────────────────────────
+// The buyer alerts of the last 24 hours and who read each. Telegram reports
+// readers only for messages a user account sent, so a bot-sent alert has no
+// readers to show rather than none who read it.
+
+export type SeenAlert = {
+  chatId: string;
+  messageId: number;
+  redditId: string;
+  subreddit: string;
+  title: string;
+  url: string;
+  sentAt: string;
+  sentAs: 'bot' | 'user';
+  readers: Array<{ userId: string; readAt: string }>;
+};
+
+export type SeenPerson = {
+  userId: string;
+  name: string;
+  username: string | null;
+  seen: number;
+  lastReadAt: string | null;
+  member: boolean;
+};
+
+export type TrackerSeen = {
+  generatedAt: string;
+  since: string;
+  userSenderLive: boolean;
+  alerts: SeenAlert[];
+  people: SeenPerson[];
+};
+
 export const trackerApi = {
   listWorkers: (params: { status: WorkerStatusFilter; limit: number; offset: number }) =>
     api.get<{ workers: TrackerWorker[]; total: number }>(
@@ -298,6 +332,7 @@ export const trackerApi = {
   // null asks for all time.
   analytics: (window: AnalyticsWindow) =>
     api.get<TrackerAnalytics>(`/api/tracker/analytics?window=${window}`),
+  seen: () => api.get<TrackerSeen>('/api/tracker/seen'),
   promptStats: (since: Date | null) =>
     api.get<PromptStats>(
       `/api/tracker/prompt-stats${since ? `?since=${encodeURIComponent(since.toISOString())}` : ''}`,

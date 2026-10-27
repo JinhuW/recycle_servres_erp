@@ -291,10 +291,11 @@ function insertAlertMessages(
   sent: ReadonlyArray<SentMessage>,
 ) {
   return sql`
-    INSERT INTO alert_messages (chat_id, message_id, reddit_id, audience)
-    SELECT m.chat_id, m.message_id::bigint, ${redditId}, ${audience}
+    INSERT INTO alert_messages (chat_id, message_id, reddit_id, audience, sent_as)
+    SELECT m.chat_id, m.message_id::bigint, ${redditId}, ${audience}, m.sent_as
       FROM unnest(${sent.map((m) => m.chatId)}::text[],
-                  ${sent.map((m) => String(m.messageId))}::text[]) AS m(chat_id, message_id)
+                  ${sent.map((m) => String(m.messageId))}::text[],
+                  ${sent.map((m) => m.sentAs ?? 'bot')}::text[]) AS m(chat_id, message_id, sent_as)
     ON CONFLICT (chat_id, message_id) DO NOTHING`;
 }
 

@@ -11,14 +11,16 @@ import {createDb} from './db.ts';
 import {heartbeatOnce, LoopRegistry, removeWorker} from './heartbeat.ts';
 import {createLogger} from './logger.ts';
 import {evaluateOnce} from './loops/evaluate.ts';
-import {notifyOnce} from './loops/notify.ts';
+import {notifyOnce, releaseUserSender, renewUserSender} from './loops/notify.ts';
 import {pollOnce} from './loops/poll.ts';
 import {reactionsOnce} from './loops/reactions.ts';
+import {readsOnce} from './loops/reads.ts';
 import {Tracer} from './loops/trace.ts';
 import {watchOnce} from './loops/watch.ts';
 import {startLoop, type LoopHandle} from './loops/runner.ts';
 import {RedditPacer} from './pacing.ts';
 import {SettingsStore} from './settings.ts';
+import {connectUserClient, createUserFirstSender, type UserClient} from './userSender.ts';
 
 const config = loadConfig();
 const registry = new LoopRegistry();
@@ -120,6 +122,40 @@ async function runApi(): Promise<void> {
     : null;
   if (!watch) logger.info('ops alerts off: OPS_ALERT_URL is not set');
 
+  // With a user session, buyer alerts go out from here as that account, and
+  // their read receipts come back here; the workers stand down while it is
+  // live (loops/notify.ts). A session that will not connect leaves the
+  // workers sending through the bot, as before.
+  let user: UserClient | null = null;
+  if (config.telegramUser && config.alertTransport === 'telegram') {
+    try {
+      user = await connectUserClient(config.telegramUser, logger.child('user'));
+    } catch (e) {
+      logger.warn('telegram user session did not connect; the bot keeps sending alerts', {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+  const userLoops = user ? [
+    startLoop(
+      {name: 'user-notify', logger: logger.child('notify'), idleMs: 10_000, busyMs: 500},
+      async () => {
+        await renewUserSender(sql);
+        return notifyOnce({
+          sql,
+          workerId: config.workerId,
+          alerts: createUserFirstSender(user!, createAlertSender('telegram', config.telegramBotToken)),
+          settings,
+          logger: logger.child('notify'),
+        });
+      },
+    ),
+    startLoop(
+      {name: 'reads', logger: logger.child('reads'), idleMs: 5 * 60_000},
+      () => readsOnce({sql, user: user!, settings, logger: logger.child('reads')}),
+    ),
+  ] : [];
+
   await new Promise<void>((resolve) => {
     const shutdown = (signal: string) => {
       if (shuttingDown) return;
@@ -128,6 +164,7 @@ async function runApi(): Promise<void> {
       heartbeat.stop();
       reactions?.stop();
       watch?.stop();
+      for (const loop of userLoops) loop.stop();
       abort.abort();
       server.close(() => resolve());
     };
@@ -138,6 +175,11 @@ async function runApi(): Promise<void> {
   await heartbeat.stopped;
   await reactions?.stopped;
   await watch?.stopped;
+  await Promise.all(userLoops.map((l) => l.stopped));
+  if (user) {
+    await releaseUserSender(sql);
+    await user.disconnect();
+  }
   await deregister();
   await sql.end();
 }
@@ -180,6 +222,7 @@ async function runWorker(): Promise<void> {
         alerts,
         settings,
         logger: logger.child('notify'),
+        deferToUserSender: true,
       })),
     ),
     startHeartbeat('worker'),
