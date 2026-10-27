@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.10] - 2026-10-27
+
 ### Fixed
 
 - **A legacy worker keeps its pinned user agent when it enters the fleet.**
