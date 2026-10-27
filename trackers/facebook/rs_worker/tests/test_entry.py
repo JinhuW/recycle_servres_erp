@@ -992,3 +992,22 @@ def test_the_monitor_presents_every_exported_field(tmp_path: Path) -> None:
         "locale": "en-US",
         "timezone_id": "America/New_York",
     }
+
+
+def test_full_storage_state_reaches_the_browser_file_unchanged(tmp_path: Path) -> None:
+    answer = claim_with(fleet_device())
+    state = {
+        "cookies": answer["account"]["cookies"],
+        "origins": [{"origin": "https://www.facebook.com",
+                     "localStorage": [{"name": "device", "value": "made-up"}],
+                     "indexedDB": [{"name": "client", "version": 1,
+                                    "stores": [{"name": "keys", "records": [{"value": {"id": 1}}]}]}]}],
+    }
+    answer["account"] = {**answer["account"], "storage_state": state}
+    entry.write_files(tmp_path, answer, {"monitor": {}})
+    assert json.loads((tmp_path / "session.json").read_text()) == state
+    assert stat.S_IMODE((tmp_path / "session.json").stat().st_mode) == 0o600
+    answer["account"]["storage_state"] = {**state, "cookies": []}
+    with pytest.raises(ValueError, match="storage state"):
+        entry.write_files(tmp_path, answer, {"monitor": {}})
+    assert json.loads((tmp_path / "session.json").read_text()) == state
