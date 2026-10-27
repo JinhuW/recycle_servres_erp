@@ -3399,8 +3399,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     holds, and, until cutover, the coordinator's (host `homelab`); a worker
     both know is the ERP's row. An account no worker holds is not a row: the
     Account pool tab lists it, with its Unpark and Release quarantine. A
-    worker that stopped reporting stays as **Offline** for a week after its
-    last heartbeat. Each row: worker and VNC port, host, account number and
+    worker that stopped reporting stays as a row for a week after its last
+    heartbeat. Each row: worker and VNC port, host, account number and
     masked uid, the state chip with a one-line note (heartbeat age, "keeps
     its task" for a degraded worker, the account's quarantine end), **Now**
     (the city and item being searched with the time on it and "home city";
@@ -3409,16 +3409,17 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     **Today** (minutes of searching against the budget, as a ring), the lease
     epoch and when it renews, the worker's version (muted when it is not the
     host's), and the eye to the worker's page. Running workers come first,
-    then offline ones, each by worker id. The toolbar has the legend with
-    counts (All workers, Healthy, Degraded, Replacing, Parked — the worker
-    reports Session expired, Checkpoint… — and Offline), a host select and a
-    search over worker, account, city and host; since v1.371.0 (RS-431) the
+    then silent ones, each by worker id. Since v1.373.0 (RS-436) a worker is
+    one of two kinds: **Healthy** (running, degraded or being replaced
+    included) or **Parked** (it reports Session expired, Checkpoint,
+    Challenge or Dead, which its state chip names, or it went silent). The
+    toolbar has the legend with counts (All workers, Healthy, Parked), a
+    host select and a search over worker, account, city and host; since v1.371.0 (RS-431) the
     tab opens on Healthy rather than All workers. The foot says "N of M
     workers · R running on K hosts". Since v1.367.0 (RS-418) a coordinator
     worker the fleet retired (`retired_at` on its health row) is left out
     of the rows, the counts, the host select, the tab bar's running count
-    and the activity aside; a **Retired N** chip, off by default and there
-    only while N > 0, lists them read-only with "Retired <date>", and a
+    and the activity aside (since v1.373.0 there is no Retired chip); a
     retired worker's own page still opens, dated, without Re-login.
     The coordinator's activity aside stays under the table while its rows
     exist; since v1.350.1 it spans the full width and its list stops at 480px

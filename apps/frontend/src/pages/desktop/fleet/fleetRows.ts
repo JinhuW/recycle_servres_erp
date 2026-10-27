@@ -14,10 +14,11 @@ import { fleetStateParked, type FleetRelease, type FleetSlot, type FleetTask, ty
 import { parkedWorkers, retiredAt } from '../../../lib/fleetView';
 import { leaseLive, liveness } from './fleetBoard';
 
-// 'retired' is a coordinator worker the fleet stopped on purpose: kept as a
-// row for anyone who asks for it, but out of "all", the counts and the hosts.
-export type FleetRowKind = 'healthy' | 'degraded' | 'replacing' | 'parked' | 'offline' | 'retired';
-export const FLEET_ROW_KINDS: readonly FleetRowKind[] = ['healthy', 'degraded', 'replacing', 'parked', 'offline'];
+// Two kinds on purpose: a worker doing the work (degraded or mid-replacement
+// included) or one that is not, because its account needs a hand or it went
+// silent. The State column keeps the detail.
+export type FleetRowKind = 'healthy' | 'parked';
+export const FLEET_ROW_KINDS: readonly FleetRowKind[] = ['healthy', 'parked'];
 
 // Worker rows are never deleted, so one silent this long has been retired,
 // not lost.
@@ -52,8 +53,6 @@ export type FleetRow = {
   version: string | null;
   /** The release version a replaced worker comes back on. */
   replacingTo: string | null;
-  /** When the coordinator retired the worker. */
-  retiredAt: string | null;
   slot: FleetSlot | null;
   task: FleetTask | null;
   pool: FleetPoolAccount | null;
@@ -82,10 +81,7 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
   // The account's slot may since be another worker's.
   const holds = !!slot && slot.worker_id === worker.worker_id;
   const replacing = running && release?.state === 'rolling' && release.current?.worker_id === worker.worker_id;
-  const kind: FleetRowKind = replacing ? 'replacing'
-    : fleetStateParked(worker.state) ? 'parked'
-    : !running ? 'offline'
-    : worker.state === 'DEGRADED' ? 'degraded' : 'healthy';
+  const kind: FleetRowKind = running && !fleetStateParked(worker.state) ? 'healthy' : 'parked';
   const task = running ? worker.task ?? null : null;
   const no = slot?.account_no ?? worker.account_no ?? null;
   return {
@@ -107,7 +103,6 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
     leaseExpires: running && holds && leaseLive(slot, now) ? slot.lease_expires_at : null,
     version: worker.version ?? null,
     replacingTo: replacing ? release?.version ?? null : null,
-    retiredAt: null,
     slot,
     task,
     pool,
@@ -117,13 +112,9 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
 
 function coordinatorRow(w: FleetAccount, parked: ReadonlySet<string>, pool: FleetPoolAccount | null): FleetRow {
   const h = w.health;
-  const retired = retiredAt(w);
-  const live = !retired && !!h && (h.liveness === 'live' || h.liveness === 'stale');
+  const live = !!h && (h.liveness === 'live' || h.liveness === 'stale');
   const state = h?.state ?? null;
-  const kind: FleetRowKind = retired ? 'retired'
-    : parked.has(w.worker_id) || fleetStateParked(state) ? 'parked'
-    : !live ? 'offline'
-    : state === 'DEGRADED' ? 'degraded' : 'healthy';
+  const kind: FleetRowKind = live && !parked.has(w.worker_id) && !fleetStateParked(state) ? 'healthy' : 'parked';
   const open = live ? w.queue?.open?.[0] ?? null : null;
   const minutes = w.queue?.enrolled ? w.queue.minutes_today : w.today?.searches ?? null;
   const budget = w.queue?.enrolled ? w.queue.budget_minutes : w.plan?.per_day ?? null;
@@ -136,7 +127,7 @@ function coordinatorRow(w: FleetAccount, parked: ReadonlySet<string>, pool: Flee
     source: 'coordinator',
     host: COORDINATOR_HOST,
     workerId: w.worker_id,
-    vncPort: retired ? null : vncPortOf(w.vnc_url),
+    vncPort: vncPortOf(w.vnc_url),
     state,
     heartbeat: h?.last_heartbeat_at ?? null,
     now: open ? { city: open.city, cityName: null, item: open.item, since: open.leased_at, home: w.cities.some(c => c.slug === open.city) } : null,
@@ -146,7 +137,6 @@ function coordinatorRow(w: FleetAccount, parked: ReadonlySet<string>, pool: Flee
     leaseExpires: null,
     version: h?.version ?? null,
     replacingTo: null,
-    retiredAt: retired,
     slot: null,
     task: null,
     pool,
@@ -178,8 +168,9 @@ export function fleetRows(input: FleetRowsInput, now: number = Date.now()): Flee
     if (row.running && row.no !== null) seenNo.add(row.no);
   }
   const parked = parkedWorkers(input.challenges ?? null);
+  // A worker the coordinator retired was stopped on purpose: not a row.
   for (const w of input.coordinator?.workers ?? []) {
-    if (workers.has(w.worker_id)) continue;
+    if (workers.has(w.worker_id) || retiredAt(w)) continue;
     const held = pool.find(a => a.status === 'fleet' && a.holder?.toLowerCase() === w.worker_id.toLowerCase())
       ?? pool.find(a => !!w.session?.fb_user_id && a.uid === w.session.fb_user_id) ?? null;
     if (held && (seenNo.has(held.no) || held.status !== 'fleet')) continue;
@@ -194,30 +185,23 @@ export const EMPTY_FLEET_ROW_FILTER: FleetRowFilter = { kind: 'all', host: '', q
 export const DEFAULT_FLEET_ROW_FILTER: FleetRowFilter = { ...EMPTY_FLEET_ROW_FILTER, kind: 'healthy' };
 export function filterFleetRows(rows: readonly FleetRow[], f: FleetRowFilter): FleetRow[] {
   const q = f.q.trim().toLowerCase();
-  return rows.filter(r => (f.kind === 'all' ? r.kind !== 'retired' : r.kind === f.kind)
+  return rows.filter(r => (f.kind === 'all' || r.kind === f.kind)
     && (!f.host || r.host === f.host)
     && (!q || [r.workerId, r.host, r.no === null ? '' : `account ${r.no}`, r.no === null ? '' : `no. ${r.no}`, r.uid, r.now?.cityName, r.now?.city]
       .filter(Boolean).join(' ').toLowerCase().includes(q)));
 }
 
 export function fleetRowCounts(rows: readonly FleetRow[]): Record<FleetRowKind | 'all', number> {
-  const out = { all: 0, healthy: 0, degraded: 0, replacing: 0, parked: 0, offline: 0, retired: 0 };
-  for (const r of rows) {
-    out[r.kind] += 1;
-    if (r.kind !== 'retired') out.all += 1;
-  }
+  const out = { all: rows.length, healthy: 0, parked: 0 };
+  for (const r of rows) out[r.kind] += 1;
   return out;
 }
-
-/** The legend's chips: Retired joins the five only while there is one. */
-export const fleetRowKinds = (counts: Record<FleetRowKind | 'all', number>): readonly FleetRowKind[] =>
-  counts.retired > 0 ? [...FLEET_ROW_KINDS, 'retired'] : FLEET_ROW_KINDS;
 
 /** The hosts the select offers: the registered ones, plus the coordinator's
  *  machine while its workers are rows. */
 export function fleetRowHosts(rows: readonly FleetRow[], registered: readonly string[]): string[] {
   const hosts = new Set(registered);
-  for (const r of rows) if (r.host && r.kind !== 'retired') hosts.add(r.host);
+  for (const r of rows) if (r.host) hosts.add(r.host);
   return [...hosts].sort(naturally);
 }
 
@@ -226,7 +210,7 @@ export function fleetRunning(rows: readonly FleetRow[]): { running: number; host
   const hosts = new Set<string>();
   let running = 0;
   for (const r of rows) {
-    if (r.kind !== 'healthy' && r.kind !== 'degraded' && r.kind !== 'replacing') continue;
+    if (r.kind !== 'healthy') continue;
     running += 1;
     if (r.host) hosts.add(r.host);
   }
