@@ -181,20 +181,33 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
         AND (s.quarantined_until IS NULL OR s.quarantined_until < b.latest + make_interval(hours => ${settings.quarantine_hours}))`;
   }
 
+  // A probe only its own account may take waits for ever once no worker runs
+  // that account (a parked slot's lease is infinite and it cannot search), and
+  // only a worker boot would bring one back. The next probe is written when a
+  // worker claims the slot again.
+  const stranded = await sql`
+    UPDATE fleet_tasks t SET state = 'cancelled', done_at = ${now}
+    WHERE t.kind = 'probe' AND t.state = 'ready'
+      AND NOT EXISTS (
+        SELECT 1 FROM fleet_slots s
+        WHERE s.account_no = t.account_no AND s.lease_expires_at > ${now} AND s.lease_expires_at <> 'infinity'::timestamptz)`;
+
   // A quarantined account gets one probe per interval so a quarantine can
   // end: its first home city that is still enabled, else whatever is most
   // overdue, on the first item. The probe carries its account from the start
   // (account_no is otherwise set at lease), which is how the pick keeps it for
-  // that slot and how this step knows the slot had one recently.
+  // that slot and how this step knows the slot had one recently. A cancelled
+  // probe never ran, so it does not count as one.
   let probes = 0;
   const [item] = await sql<{ name: string }[]>`SELECT name FROM fleet_items WHERE enabled ORDER BY name LIMIT 1`;
   if (item) {
     const slots = await sql<{ account_no: number; home_cities: string[] }[]>`
       SELECT s.account_no, s.home_cities FROM fleet_slots s
       WHERE s.quarantined_until > ${now}
+        AND s.lease_expires_at > ${now} AND s.lease_expires_at <> 'infinity'::timestamptz
         AND NOT EXISTS (
           SELECT 1 FROM fleet_tasks t
-          WHERE t.kind = 'probe' AND t.account_no = s.account_no
+          WHERE t.kind = 'probe' AND t.account_no = s.account_no AND t.state <> 'cancelled'
             AND (t.state IN ('ready', 'leased')
                  OR COALESCE(t.done_at, t.due_at) > ${now}::timestamptz - make_interval(hours => ${settings.quarantine_probe_hours})))
       ORDER BY s.account_no`;
@@ -211,7 +224,7 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
   }
 
   const notified = await notifyReady(sql, woke);
-  return { inserted: inserted.length + checks.length, cancelled: cancelled.count, expired: expired.length, probes, notified };
+  return { inserted: inserted.length + checks.length, cancelled: cancelled.count + stranded.count, expired: expired.length, probes, notified };
 }
 
 async function probeCity(sql: Sql, home: string[]): Promise<string | null> {

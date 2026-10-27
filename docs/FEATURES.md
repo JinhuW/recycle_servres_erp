@@ -3274,7 +3274,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   count against the UTC day's budget, split at midnight. Lost city checks retry
   and late results cannot undo a removal or override. An account's all-zero
   searches quarantine it only when another account found cards in its cities;
-  a successful probe or manual release resets the evidence. Heartbeats renew
+  a successful probe or manual release resets the evidence. Since v1.371.2
+  (RS-433) a probe is written only while a worker runs the account, and a
+  waiting probe is cancelled once none does, so the Queue no longer shows
+  probes nobody can take. Heartbeats renew
   worker tokens without another browser login. Worker shared secrets come from
   the Cloudflare Worker's FLEET_WORKER_ENV on its claim-only surface; deploying these
   changes still requires the separate owner-approved cutover.

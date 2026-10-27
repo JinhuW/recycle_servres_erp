@@ -162,11 +162,16 @@ describe('reconcile: cancel, expire', () => {
 describe('reconcile: probes for quarantined slots', () => {
   beforeEach(async () => { await resetDb(); });
 
-  async function slot(uid: string, home: string[], quarantinedUntil: Date | null): Promise<number> {
+  // A worker runs the slot unless `lease` says otherwise: 'none' is an
+  // account no worker holds, 'parked' the infinite lease a park leaves.
+  async function slot(uid: string, home: string[], quarantinedUntil: Date | null, lease: 'held' | 'none' | 'parked' = 'held'): Promise<number> {
     const db = getTestDb();
     const [a] = await db<{ no: number }[]>`
       INSERT INTO fb_pool_accounts (uid, batch, status, holder_name) VALUES (${uid}, 'fixtures', 'fleet', 'lab') RETURNING no`;
-    await db`INSERT INTO fleet_slots (account_no, home_cities, quarantined_until) VALUES (${a.no}, ${db.json(home)}, ${quarantinedUntil})`;
+    const expires = lease === 'held' ? db`${at(1000)}::timestamptz` : lease === 'parked' ? db`'infinity'::timestamptz` : db`NULL`;
+    await db`
+      INSERT INTO fleet_slots (account_no, home_cities, quarantined_until, worker_id, lease_expires_at)
+      VALUES (${a.no}, ${db.json(home)}, ${quarantinedUntil}, ${lease === 'none' ? null : 'worker-' + uid}, ${expires})`;
     return a.no;
   }
 
@@ -189,6 +194,26 @@ describe('reconcile: probes for quarantined slots', () => {
     // And none once the quarantine has ended.
     await getTestDb()`UPDATE fleet_tasks SET state = 'done', done_at = ${at(4.2)} WHERE kind = 'probe' AND state = 'ready'`;
     expect((await reconcile(getTestDb(), at(49))).probes).toBe(0);
+  });
+
+  it('writes no probe for an account no worker runs, and cancels one left waiting when its worker goes', async () => {
+    await catalog([['dallas']], ['enterprise_ssd']);
+    await slot('61550000000014', ['dallas'], at(48), 'none');
+    await slot('61550000000015', ['dallas'], at(48), 'parked');
+    const running = await slot('61550000000016', ['dallas'], at(48));
+    expect((await reconcile(getTestDb(), NOW)).probes).toBe(1);
+    const [probe] = (await tasks()).filter((t) => t.kind === 'probe');
+    expect(probe.account_no).toBe(running);
+
+    // Its worker stops: the probe is cancelled rather than waiting for ever.
+    await getTestDb()`UPDATE fleet_slots SET lease_expires_at = ${at(0.5)} WHERE account_no = ${running}`;
+    const r = await reconcile(getTestDb(), at(1));
+    expect(r.probes).toBe(0);
+    expect((await tasks()).find((t) => t.id === probe.id)?.state).toBe('cancelled');
+
+    // Claimed again within the probe interval, it gets a fresh probe at once.
+    await getTestDb()`UPDATE fleet_slots SET lease_expires_at = ${at(1000)} WHERE account_no = ${running}`;
+    expect((await reconcile(getTestDb(), at(2))).probes).toBe(1);
   });
 
   it('falls back to the most overdue city when no home city is enabled', async () => {
@@ -320,7 +345,9 @@ describe('verification and quarantine recovery', () => {
     const db = getTestDb(); await catalog([['houston']]);
     const accounts = await db`INSERT INTO fb_pool_accounts (uid, batch, status) VALUES
       ('6155000000091','test','fleet'), ('6155000000092','test','fleet'), ('6155000000093','test','fleet') RETURNING no`;
-    for (const a of accounts) await db`INSERT INTO fleet_slots (account_no, home_cities) VALUES (${a.no}, '["houston"]')`;
+    for (const a of accounts) await db`
+      INSERT INTO fleet_slots (account_no, home_cities, worker_id, lease_expires_at)
+      VALUES (${a.no}, '["houston"]', ${'worker-' + a.no}, NOW() + interval '1 day')`;
     for (const [index, a] of accounts.entries()) {
       for (let i = 0; i < 2; i++) await db`INSERT INTO fleet_tasks (city,item,kind,state,due_at,done_at,account_no,result)
         VALUES ('houston','server_ram','search','done',NOW(),NOW(),${a.no},${db.json({cards: index === 2 ? 20 : 0})})`;
