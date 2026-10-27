@@ -45,7 +45,8 @@ describe('cities', () => {
   it('adds a city disabled, with a verify-slug task on the first item', async () => {
     const r = await addCity({ slug: 'Houston', name: ' Houston, TX ', radius_km: 100, region: 'South Central' });
     expect(r.status).toBe(201);
-    expect(r.body).toMatchObject({ slug: 'houston', name: 'Houston, TX', radius_km: 100, region: 'South Central', enabled: false, verified_at: null, pinned: false, per_day: null });
+    expect(r.body).toMatchObject({ slug: 'houston', name: 'Houston, TX', radius_km: 100, region: 'South Central', enabled: false, verified_at: null, per_day: null });
+    expect(r.body).not.toHaveProperty('pinned');
     expect(r.body.open_tasks).toHaveLength(1);
     expect(r.body.open_tasks[0]).toMatchObject({ city: 'houston', item: 'enterprise_ssd', kind: 'verify-slug', priority: 50, reason: 'verify', state: 'ready' });
     expect(r.body.last_done_at).toEqual({});
@@ -71,9 +72,9 @@ describe('cities', () => {
     expect(refused.status).toBe(409);
     expect(refused.body).toMatchObject({ error: 'unverified' });
 
-    const r = await putCity('houston', { override_verify: true, per_day: 2, pinned: true });
+    const r = await putCity('houston', { override_verify: true, per_day: 2 });
     expect(r.status).toBe(200);
-    expect(r.body).toMatchObject({ enabled: true, verified_as: 'override', per_day: 2, pinned: true, disabled_at: null });
+    expect(r.body).toMatchObject({ enabled: true, verified_as: 'override', per_day: 2, disabled_at: null });
     expect(r.body.verified_at).not.toBeNull();
     // The verify task is gone; a search task per item took its place, due now.
     expect(r.body.open_tasks.map((t) => `${t.item}/${t.kind}/${t.reason}`).sort())
@@ -135,9 +136,10 @@ describe('cities', () => {
   it('rejects an unknown field, an empty patch and a per_day out of range', async () => {
     await addCity({ slug: 'houston', name: 'Houston' });
     expect((await putCity('houston', { radius_km: 5 })).status).toBe(422);
+    expect((await putCity('houston', { pinned: true })).status).toBe(422);
     expect((await putCity('houston', {})).status).toBe(422);
     expect((await putCity('houston', { per_day: 0 })).status).toBe(422);
-    expect((await putCity('nowhere', { pinned: true })).status).toBe(404);
+    expect((await putCity('nowhere', { per_day: 2 })).status).toBe(404);
   });
 
   it('DELETE disables the city and cancels its open tasks', async () => {
@@ -263,7 +265,7 @@ describe('tasks, round start, city log', () => {
     expect(r.status).toBe(201);
     expect(r.body).toMatchObject({ city: 'dallas', priority: 100, reason: 'manual' });
     // Any catalog write reconciles; the manager's task survives it.
-    await putCity('houston', { pinned: true });
+    await putCity('houston', { name: 'Houston, TX' });
     expect((await tasksWhere('state=ready&city=dallas')).map((t) => t.id)).toEqual([r.body.id]);
   });
 

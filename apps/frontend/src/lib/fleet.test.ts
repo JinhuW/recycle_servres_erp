@@ -18,7 +18,7 @@ vi.mock('./api', async () => {
 const ANSWERS: Record<string, unknown> = {
   'GET /api/fleet/cities': { cities: [{ slug: 'houston' }] },
   'POST /api/fleet/cities': { slug: 'fort-myers', open_tasks: [{ id: 9, kind: 'verify-slug' }] },
-  'PUT /api/fleet/cities/fort-myers': { slug: 'fort-myers', pinned: true },
+  'PUT /api/fleet/cities/fort-myers': { slug: 'fort-myers', per_day: 2 },
   'DELETE /api/fleet/cities/fort-myers': { slug: 'fort-myers', enabled: false },
   'GET /api/fleet/items': [{ name: 'server_ram' }],
   'PUT /api/fleet/items': [{ name: 'server_ram' }, { name: 'enterprise_ssd' }],
@@ -59,12 +59,12 @@ describe('fleetApi', () => {
     expect(await fleetApi.addCity({ slug: 'fort-myers', name: 'Fort Myers, FL', radius_km: 300, region: 'south' }))
       .toEqual({ slug: 'fort-myers', open_tasks: [{ id: 9, kind: 'verify-slug' }] });
     await fleetApi.updateCity('fort myers', { enabled: true, override_verify: true });
-    expect(await fleetApi.updateCity('fort-myers', { per_day: null, pinned: true })).toEqual({ slug: 'fort-myers', pinned: true });
+    expect(await fleetApi.updateCity('fort-myers', { per_day: 2 })).toEqual({ slug: 'fort-myers', per_day: 2 });
     expect(await fleetApi.removeCity('fort-myers')).toEqual({ slug: 'fort-myers', enabled: false });
     expect(calls).toEqual([
       { method: 'POST', path: '/api/fleet/cities', body: { slug: 'fort-myers', name: 'Fort Myers, FL', radius_km: 300, region: 'south' } },
       { method: 'PUT', path: '/api/fleet/cities/fort%20myers', body: { enabled: true, override_verify: true } },
-      { method: 'PUT', path: '/api/fleet/cities/fort-myers', body: { per_day: null, pinned: true } },
+      { method: 'PUT', path: '/api/fleet/cities/fort-myers', body: { per_day: 2 } },
       { method: 'DELETE', path: '/api/fleet/cities/fort-myers' },
     ]);
   });
