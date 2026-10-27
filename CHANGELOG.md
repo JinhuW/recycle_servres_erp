@@ -15,6 +15,36 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.366.0] - 2026-10-26
+
+### Added
+
+- **An ERP-fleet worker gets the homelab watch-and-operate page** (RS-417,
+  RS-394). The owner asked for the legacy worker's "page for watch and
+  operate" on fleet workers too. A worker such as `worker-60-14-1` used to
+  show a small view-only viewer on its worker page, with no 2FA code beside
+  it and no way to type one in, so a fleet worker on Facebook's code prompt
+  could not be cleared from the ERP. `/fleet/watch/<id>` now serves both
+  kinds on one page: the legacy page was split into a shared view
+  (`fleet/watchView.tsx`: the noVNC session, Take control, Full screen, Hide
+  account, the strip) and a shared Sign-in panel (`fleet/watchAccount.tsx`),
+  and each kind feeds it. The fleet's feed is its worker row, its slot's pool
+  account from the Pool tab's own snapshot (live 2FA code, Copy, Type into
+  browser under Take control, login, password reveal, UID; reveals and
+  copies go to the pool ledger as before), the listed proxy and the host,
+  with the live browser through the ERP's relay. The fleet worker page's
+  **Watch browser** opens it; homelab ids keep the coordinator's feed.
+- **Re-login for a fleet worker.** A manager-only
+  `POST /api/fleet/workers/:id/relogin` queues a one-shot `relogin`
+  directive (with an id) that the worker's next heartbeat delivers once and
+  then clears, which is what facebook-tracker 0.14.4 needs to arm exactly
+  one forced login; heartbeats answered `directives: []` before. A worker
+  holding no slot is refused `409 not_running`, a second press while one
+  waits answers the waiting one, and a fresh claim drops one that never went
+  out. The watch page shows the legacy confirm dialog and a strip (queued,
+  taken, needs you). Migration `0214_fleet_worker_relogin.sql` adds the
+  request's columns to `fleet_workers`; CONTRACTS §5 and §7 describe it.
+
 ## [1.365.0] - 2026-10-26
 
 ### Changed

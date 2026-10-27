@@ -8,6 +8,7 @@
 // state), the page-side type extends the shared one here.
 
 import type {
+  FleetWorkerRelogin,
   FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetProxy, FleetProxyPatch, FleetProxyWrite, FleetRelease,
   FleetSettings, FleetSlot as FleetSlotRow, FleetSlotWrite,
   FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, FleetWorkerDetail, RoundStartAnswer,
@@ -19,7 +20,7 @@ export type {
   FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,
   FleetTaskResult, FleetTaskState, FleetHostContainer, FleetHostReport, DesiredAnswer, RoundStartAnswer,
   FleetProxy, FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
-  FleetSecretKind, FleetWorkerDetail, FleetWorkerEvent,
+  FleetSecretKind, FleetWorkerDetail, FleetWorkerEvent, FleetWorkerRelogin,
 } from '@recycle-erp/shared';
 export {
   FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
@@ -154,6 +155,10 @@ export const fleetApi = {
   workers: () => api.get<{ workers: FleetWorker[] }>(`${BASE}/workers`).then(r => r.workers),
   // One worker with its slot, account, proxy, cities, stats, log and history; 404 for an id the fleet never saw.
   worker: (id: string) => api.get<FleetWorkerDetail>(`${BASE}/workers/${slug(id)}`),
+  // Queues a forced Facebook login that the worker's next heartbeat hands it
+  // once; 409 not_running for a worker holding no slot. A queued one that has
+  // not gone out yet is answered again, not doubled.
+  relogin: (id: string) => api.post<{ ok: true; relogin: FleetWorkerRelogin }>(`${BASE}/workers/${slug(id)}/relogin`, {}),
   // Puts a pool account into the fleet on a listed proxy. 409 account_busy,
   // no_login, proxy_full or exists; the body's `detail` says which account.
   addSlot: (body: FleetSlotWrite) => api.post<{ slot: FleetSlot }>(`${BASE}/slots`, body).then(r => r.slot),

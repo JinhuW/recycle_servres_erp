@@ -3451,7 +3451,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - **The worker page** (`/#/fleet/worker/<id>`, v1.337.0) recognises a
     fleet worker: state, last heartbeat, account and epoch, version, the task
     it holds (city, item, since when, lease), and **Watch**, its browser
-    through the ERP's own relay, view-only. Any other id shows the
+    through the ERP's own relay, view-only (since v1.366.0, RS-417, **Watch browser** opens the
+    watch page below instead). Any other id shows the
     coordinator's worker page as before. Its back link leads to the Fleet
     tab (v1.344.0).
     Since v1.365.0 (RS-416) a fleet worker gets the homelab worker page
@@ -3575,6 +3576,20 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   control stays on. A bar at the top repeats the status, Take control,
   Re-login, the panel toggle and Exit. Since facebook-tracker 0.12.4 (RS-295)
   the view is cropped to the worker's browser window, not its whole X display.
+  Since v1.366.0 (RS-417) an ERP-fleet worker (`worker-60-14-1`) gets the
+  same page at the same path, opened from its worker page's **Watch
+  browser**: the live browser through the ERP's own relay
+  (`/api/fleet/vnc/<worker>/ws`), Take control, Full screen, Hide account and
+  the Sign-in panel with its slot's pool account (Pool #N, live 2FA code with
+  Copy and Type into browser, login, password, UID, Facebook user), then
+  state, host (the fleet has no region), session, heartbeat, the listed proxy
+  (label, host:port, timezone; no exit lookup) and build. Its **Re-login**
+  shows the same confirm and queues a one-shot `relogin` directive the
+  worker's next heartbeat (within about 20 seconds) delivers once
+  (facebook-tracker 0.14.4 or later); the strip says queued, taken, or needs
+  you when the worker reports a checkpoint or challenge after it. Re-login is
+  greyed out for a worker that holds no slot. Homelab ids keep the
+  coordinator's feed.
 
 - **Web submissions** — the manager inbox for the public website forms
   (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the

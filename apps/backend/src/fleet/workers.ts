@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
   fleetDeviceFor, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
+  type FleetWorkerRelogin,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
@@ -46,7 +48,16 @@ type SlotRow = {
 type WorkerRow = {
   worker_id: string; host_id: string | null; account_no: number | null; epoch: number | null; state: string | null;
   version: string | null; last_heartbeat_at: Date | null; vnc_port: number | null; detail: unknown;
+  relogin_id: string | null; relogin_requested_at: Date | null; relogin_requested_by: string | null; relogin_delivered_at: Date | null;
 };
+
+function reloginOf(w: WorkerRow): FleetWorkerRelogin | null {
+  if (!w.relogin_id || !w.relogin_requested_at) return null;
+  return {
+    id: w.relogin_id, requested_at: iso(w.relogin_requested_at)!, requested_by: w.relogin_requested_by,
+    delivered_at: iso(w.relogin_delivered_at),
+  };
+}
 
 type WorkerView = FleetWorker & { task: (FleetTask & { city_name: string | null }) | null };
 type SlotView = FleetSlot & { uid: string | null; pool_status: string; minutes_today: number; budget_minutes: number; worker: WorkerView | null };
@@ -69,9 +80,16 @@ async function workerViews(sql: SqlLike): Promise<Map<string, WorkerView>> {
     WHERE t.state = 'leased' AND t.worker_id IS NOT NULL`;
   const byWorker = new Map(tasks.map((t) => [t.worker_id!, { ...taskToWire(t), city_name: t.city_name }]));
   return new Map(rows.map((w) => [w.worker_id, {
-    ...w,
+    worker_id: w.worker_id,
+    host_id: w.host_id,
+    account_no: w.account_no,
+    epoch: w.epoch,
+    state: w.state,
+    version: w.version,
     last_heartbeat_at: iso(w.last_heartbeat_at),
+    vnc_port: w.vnc_port,
     detail: isRecord(w.detail) ? w.detail : null,
+    relogin: reloginOf(w),
     task: byWorker.get(w.worker_id) ?? null,
   }]));
 }
@@ -276,6 +294,41 @@ slots.post('/:no/unpark', async (c) => {
 workers.get('/', async (c) => {
   const byWorker = await workerViews(getDb(c.env));
   return c.json({ workers: [...byWorker.values()] });
+});
+
+// ─── Re-login ─────────────────────────────────────────────────────────────────
+// The fleet's twin of the coordinator's Re-login: the worker drops its session
+// and signs in again with the pool account's password and 2FA key. Nothing is
+// sent now; the request waits on the worker's row and its next heartbeat (every
+// 20 s) carries `relogin` once (fleet/claim.ts). Only a worker that holds its
+// slot can take it, so a stopped or fenced one is refused rather than handed
+// a login at its next boot, which logs in anyway. Pressing it again while one
+// waits answers the waiting one: two would still be one login.
+
+workers.post('/:id/relogin', async (c) => {
+  const id = c.req.param('id');
+  if (!WORKER_ID.test(id)) return c.json({ error: 'not_found' }, 404);
+  const user = c.var.user;
+  const sql = getDb(c.env);
+  const out = await sql.begin(async (tx): Promise<Refusal | { relogin: FleetWorkerRelogin; fresh: boolean }> => {
+    const [w] = await tx<WorkerRow[]>`SELECT * FROM fleet_workers WHERE worker_id = ${id} FOR UPDATE`;
+    if (!w) return notFound(id);
+    const [held] = await tx<{ account_no: number }[]>`
+      SELECT account_no FROM fleet_slots
+      WHERE worker_id = ${id} AND epoch = ${w.epoch} AND account_no = ${w.account_no}
+        AND lease_expires_at > NOW() AND lease_expires_at <> 'infinity'::timestamptz`;
+    if (!held) return conflict('not_running', `${id} holds no slot right now`);
+    const pending = reloginOf(w);
+    if (pending && pending.delivered_at === null) return { relogin: pending, fresh: false };
+    const [row] = await tx<WorkerRow[]>`
+      UPDATE fleet_workers SET relogin_id = ${randomUUID()}, relogin_requested_at = NOW(),
+        relogin_requested_by = ${user.email}, relogin_delivered_at = NULL
+      WHERE worker_id = ${id} RETURNING *`;
+    return { relogin: reloginOf(row)!, fresh: true };
+  });
+  if (isRefusal(out)) return c.json(out.body, out.status);
+  wlog.info('fleet relogin queued', { workerId: id, reloginId: out.relogin.id, fresh: out.fresh, by: user.email });
+  return c.json({ ok: true, relogin: out.relogin });
 });
 
 // ─── One worker, for its page ─────────────────────────────────────────────────

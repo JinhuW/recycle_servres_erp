@@ -369,6 +369,17 @@ export type FleetWorker = {
   last_heartbeat_at: string | null;
   vnc_port: number | null;
   detail: Record<string, unknown> | null;
+  /** A manager's re-login, in the manager's views only (the worker never reads it). */
+  relogin?: FleetWorkerRelogin | null;
+};
+
+/** The latest re-login a manager queued for a worker. `delivered_at` is null
+ *  until a heartbeat hands the `relogin` directive over, which it does once. */
+export type FleetWorkerRelogin = {
+  id: string;
+  requested_at: string;
+  requested_by: string | null;
+  delivered_at: string | null;
 };
 
 /** The search parameters handed to every worker; keys follow the monitor's config. */
@@ -494,7 +505,10 @@ export type HostReportRequest = FleetHostReport;
 
 export type HeartbeatAnswer = {
   ok: true;
+  /** `relogin` once, on the heartbeat after a manager queued one; else empty. */
   directives: Array<'relogin'>;
+  /** The id of the re-login a `relogin` directive delivers. */
+  relogin_id?: string;
   worker_token?: string;
   token_expires_at?: number;
 };
@@ -558,6 +572,8 @@ export type FleetErrorCode =
   /** Removing a proxy a non-parked slot uses. */
   | 'in_use'
   /** Removing a slot a worker holds (or a reservation does): park it first. */
-  | 'leased';
+  | 'leased'
+  /** Re-login for a worker that holds no slot right now. */
+  | 'not_running';
 
 export type FleetError = { error: FleetErrorCode; detail?: string };

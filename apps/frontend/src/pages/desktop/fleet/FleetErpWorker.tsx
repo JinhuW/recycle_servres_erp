@@ -6,7 +6,7 @@ import { fleetApi, type FleetCity, type FleetSlot, type FleetWorkerDetail } from
 import { browserLabel, SESSION_WARN_DAYS } from '../../../lib/fleetView';
 import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
-import { CityChip, fmtDays, HITS_DAYS, stateLabel } from '../FleetAccounts';
+import { CityChip, fmtDays, HITS_DAYS, stateLabel, WatchButton } from '../FleetAccounts';
 import { CityLogCard } from '../FleetCityLog';
 import { RemoveFromFleetDialog } from './FleetProxies';
 import { SearchNowDialog } from './FleetTasksTab';
@@ -15,19 +15,18 @@ import {
   deviceText, erpCheckpoint, erpCityChips, erpCityLog, erpHistory, erpHistoryDot, erpProxyText, erpWorkerStatus, sessionDaysLeft,
   type ErpHistoryLine,
 } from './fleetWorkerView';
-import { FleetVncView } from './FleetVncView';
 import { ParkDialog, ReleaseQuarantineButton, UnparkDialog } from './shared';
 import {
-  AccountsUsed, CheckpointsCard, Muted, NoThumb, WorkerCard, WorkerHead, WorkerHistory, type HistoryEntry, type WorkerField,
+  AccountsUsed, CheckpointsCard, ErpBuildChip, Muted, NoThumb, WorkerCard, WorkerHead, WorkerHistory, type HistoryEntry, type WorkerField,
 } from './workerDetail';
 
 // ─── One ERP-fleet worker ─────────────────────────────────────────────────────
 // The homelab worker page (FleetWorker.tsx), fed by the ERP's own fleet: the
 // worker row, the slot it holds (or its account's last one), the pool account
 // without a secret, the listed proxy, and its tasks and events
-// (GET /api/fleet/workers/:id). The actions are the fleet's: watch through the
-// ERP's relay, park or unpark the slot, take the account out of the fleet,
-// search a city now. A row the fleet has no source for reads "—".
+// (GET /api/fleet/workers/:id). The actions are the fleet's: watch (the watch
+// page, FleetErpWatch.tsx, through the ERP's relay), park or unpark the slot,
+// take the account out of the fleet, search a city now. A row the fleet has no source for reads "—".
 
 type Dialog = 'park' | 'unpark' | 'remove' | 'search' | null;
 
@@ -35,7 +34,6 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
   detail: FleetWorkerDetail; stints: FbWorkerStint[] | null; onReload: () => void; now?: number;
 }) {
   const { t, locale } = useT();
-  const [watching, setWatching] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
   const w = d.worker;
   const acct = d.account;
@@ -112,18 +110,18 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
       : <Muted>—</Muted> },
     { label: t('fbcDetailSessionFile'), value: <Muted>—</Muted> },
     { label: t('fleetDetailHost'), value: w.host_id ? <span className="mono">{w.host_id}</span> : <Muted>—</Muted> },
-    { label: t('fbcColBuild'), value: w.version
-      ? <span className={`chip ${!d.release_version || w.version === d.release_version ? 'muted' : 'warn'} mono fl-build`}
-          title={d.release_version && w.version !== d.release_version ? t('fleetBuildBehind', { v: d.release_version }) : undefined}>{w.version}</span>
-      : <Muted>—</Muted> },
+    { label: t('fbcColBuild'), value: <ErpBuildChip version={w.version} release={d.release_version} /> },
   ];
 
-  const watchButton = (cls: string) => (
-    <button type="button" className={cls} onClick={() => setWatching(v => !v)} disabled={!canWatch}
-      title={canWatch ? undefined : running ? t('fleetWatchNoVnc') : t('fleetWorkerNotRunning')}>
-      <Icon name="eye" size={13} />{t(watching ? 'fleetWatchHide' : 'fbcWatchBrowser')}
-    </button>
-  );
+  // The watch page, as the homelab worker's Watch browser opens it; a worker
+  // with nothing to show gets the button greyed out with the reason.
+  const watchButton = (cls: string) => canWatch
+    ? <WatchButton workerId={w.worker_id} className={cls} />
+    : (
+      <button type="button" className={cls} disabled title={running ? t('fleetWatchNoVnc') : t('fleetWorkerNotRunning')}>
+        <Icon name="eye" size={13} />{t('fbcWatchBrowser')}
+      </button>
+    );
   // Removing deletes the slot, which only a slot nobody holds allows.
   const removable = !!slot && (slot.parked || !leaseLive(slot, now)) && !slot.reserved_until;
 
@@ -156,8 +154,6 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
               <button type="button" className="btn" onClick={() => setDialog('search')}>{t('fleetSearchCityNow')}</button>
               {slot?.quarantined_until && Date.parse(slot.quarantined_until) > now && <ReleaseQuarantineButton slot={slot} onDone={onReload} />}
             </>} />
-
-          {watching && <FleetVncView workerId={w.worker_id} />}
 
           <CheckpointsCard sub={t('fleetCheckpointsSub')} items={checkpoint ? [{
             key: 'wall',

@@ -20,6 +20,10 @@
 // claim, a park, the account leaving the fleet) loses its parked socket then,
 // rather than at its next heartbeat.
 //
+// View-only vs control is the viewer's business, as on the coordinator bridge:
+// the watch page keeps noVNC view-only, which sends no key or pointer event,
+// until the manager ticks Take control. RFB input is just bytes here.
+//
 // Pairing happens in this process's memory, so both ends must reach the same
 // backend instance. One instance serves the relay: the one holding the
 // session advisory lock below (startFleetRelayLease, from server.ts). Every
