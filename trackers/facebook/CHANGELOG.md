@@ -18,6 +18,14 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Removed
+
+- **Legacy ca-3 is retired after its successful ERP-fleet handover.** Its
+  compose file, seed config and console mounts leave the tree so a later
+  homelab deploy cannot start a second browser for the migrated account. The
+  original session remains on the VM, its launch files are archived, and the
+  existing fleet worker keeps 0.14.8 without another restart (RS-419).
+
 ## [0.14.8] - 2026-10-27
 
 ### Fixed

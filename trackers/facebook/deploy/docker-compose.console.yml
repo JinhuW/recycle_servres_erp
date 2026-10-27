@@ -49,7 +49,6 @@ services:
         nyc-1=/config/workers/homelab-nyc.toml,
         phl-1=/config/workers/homelab-phl.toml,
         va-2=/config/workers/homelab-va2.toml,
-        ca-3=/config/workers/homelab-ca3.toml,
         ca-2b=/config/workers/homelab-ca2b.toml,
         wc-1b=/config/workers/homelab-wc1b.toml,
         va-2b=/config/workers/homelab-va2b.toml,
@@ -80,7 +79,6 @@ services:
         nyc-1=rs-monitor-nyc:5900,
         phl-1=rs-monitor-phl:5900,
         va-2=rs-monitor-va2:5900,
-        ca-3=rs-monitor-ca3:5900,
         ca-2b=rs-monitor-ca2b:5900,
         wc-1b=rs-monitor-wc1b:5900,
         va-2b=rs-monitor-va2b:5900,
@@ -108,7 +106,6 @@ services:
       - ../configs/homelab-nyc.toml:/config/workers/homelab-nyc.toml
       - ../configs/homelab-phl.toml:/config/workers/homelab-phl.toml
       - ../configs/homelab-va2.toml:/config/workers/homelab-va2.toml
-      - ../configs/homelab-ca3.toml:/config/workers/homelab-ca3.toml
       - ../configs/homelab-ca2b.toml:/config/workers/homelab-ca2b.toml
       - ../configs/homelab-wc1b.toml:/config/workers/homelab-wc1b.toml
       - ../configs/homelab-va2b.toml:/config/workers/homelab-va2b.toml
