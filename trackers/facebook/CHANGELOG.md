@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.8] - 2026-10-27
+
 ### Fixed
 
 - **A fleet handover keeps the whole saved browser session.** The entrypoint
