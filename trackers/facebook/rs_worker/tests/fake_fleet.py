@@ -127,6 +127,7 @@ class FakeFleet:
         # The claim's settings and `env` (None: no env key at all, as the
         # backend answers when no shared environment is configured).
         self.settings: Dict[str, Any] = dict(SETTINGS)
+        self.home_cities: List[str] = ["nyc", "philly"]
         self.env: Dict[str, Any] | None = dict(CLAIM_ENV)
         self.tasks: List[Dict[str, Any]] = []
         self.requests: List[Tuple[str, str, Dict[str, Any] | None, Dict[str, str]]] = []
@@ -320,7 +321,7 @@ class FakeFleet:
             "account": ACCOUNT,
             "proxy": PROXY,
             "device": DEVICE,
-            "home_cities": ["nyc", "philly"],
+            "home_cities": self.home_cities,
             "items": ITEMS,
             "settings": self.settings,
         }

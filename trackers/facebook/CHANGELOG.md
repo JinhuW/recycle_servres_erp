@@ -18,6 +18,15 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A fleet account with no home city starts.** The worker kept the
+  template's `currency` while leaving `search_city` out, and the monitor
+  refuses a currency without a search city: it waited for a fixed config and
+  never logged in or sent a heartbeat. Seen on the dev ERP with an account
+  added to the fleet without home cities. The worker now drops `currency`
+  when the claim has no home city; its cities come from the tasks.
+
 ## [0.14.6] - 2026-10-26
 
 ### Added

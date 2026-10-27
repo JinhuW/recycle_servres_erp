@@ -287,6 +287,10 @@ def render_config(
     if home_cities:
         facebook["search_city"] = home_cities
         facebook["city_name"] = home_cities
+    else:
+        # The monitor refuses a currency without a search city, and a fleet
+        # account may have no home city: its cities come from the tasks.
+        facebook.pop("currency", None)
 
     items = config.setdefault("item", {})
     for item in answer.get("items") or []:

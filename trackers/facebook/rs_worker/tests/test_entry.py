@@ -716,6 +716,27 @@ def test_without_a_coordinator_nothing_of_it_is_rendered_and_the_monitor_accepts
     assert market.control_plane is None
 
 
+def test_an_account_with_no_home_city_renders_a_config_the_monitor_accepts(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ai_marketplace_monitor.config import Config
+
+    fleet.home_cities = []
+    home = tmp_path / "home"
+    env = fleet_env(fleet, RS_WORKER_MONITOR_CMD=monitor_cmd(tmp_path))
+    assert entry.run_fleet([], env, home=home) == 0
+
+    facebook = tomllib.loads((home / "config.toml").read_text())["marketplace"]["facebook"]
+    assert "search_city" not in facebook and "currency" not in facebook
+
+    seen = json.loads((tmp_path / "monitor-env.json").read_text())
+    for name, value in seen.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "made-up-openrouter-key")
+    loaded = Config([home / "config.toml"])
+    assert loaded.marketplace["facebook"].search_city is None
+
+
 def test_no_ai_key_anywhere_is_a_configuration_failure_before_the_monitor(
     fleet: FakeFleet, tmp_path: Path
 ) -> None:
