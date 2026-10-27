@@ -42,7 +42,6 @@ services:
       RS_WORKER_CONFIGS: >-
         homelab-1=/config/workers/homelab.toml,
         ne-1=/config/workers/homelab-ne.toml,
-        denver-1=/config/workers/homelab-denver.toml,
         sc-1=/config/workers/homelab-sc.toml,
         mw-1=/config/workers/homelab-mw.toml,
         nyc-1=/config/workers/homelab-nyc.toml,
@@ -70,7 +69,6 @@ services:
       RS_VNC_TARGETS: >-
         homelab-1=rs-monitor:5900,
         ne-1=rs-monitor-ne:5900,
-        denver-1=rs-monitor-denver:5900,
         sc-1=rs-monitor-sc:5900,
         mw-1=rs-monitor-mw:5900,
         nyc-1=rs-monitor-nyc:5900,
@@ -95,7 +93,6 @@ services:
       # scripts/deploy.sh recreates this container after a sync.
       - ../configs/homelab.toml:/config/workers/homelab.toml
       - ../configs/homelab-ne.toml:/config/workers/homelab-ne.toml
-      - ../configs/homelab-denver.toml:/config/workers/homelab-denver.toml
       - ../configs/homelab-sc.toml:/config/workers/homelab-sc.toml
       - ../configs/homelab-mw.toml:/config/workers/homelab-mw.toml
       - ../configs/homelab-nyc.toml:/config/workers/homelab-nyc.toml
