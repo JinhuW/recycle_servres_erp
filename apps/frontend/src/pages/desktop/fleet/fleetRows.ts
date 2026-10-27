@@ -190,6 +190,8 @@ export function fleetRows(input: FleetRowsInput, now: number = Date.now()): Flee
 
 export type FleetRowFilter = { kind: FleetRowKind | 'all'; host: string; q: string };
 export const EMPTY_FLEET_ROW_FILTER: FleetRowFilter = { kind: 'all', host: '', q: '' };
+// The tab opens on the workers doing the work; All workers is one click away.
+export const DEFAULT_FLEET_ROW_FILTER: FleetRowFilter = { ...EMPTY_FLEET_ROW_FILTER, kind: 'healthy' };
 export function filterFleetRows(rows: readonly FleetRow[], f: FleetRowFilter): FleetRow[] {
   const q = f.q.trim().toLowerCase();
   return rows.filter(r => (f.kind === 'all' ? r.kind !== 'retired' : r.kind === f.kind)

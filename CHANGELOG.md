@@ -15,6 +15,15 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.371.0] - 2026-10-27
+
+### Changed
+
+- The Facebook fleet's Fleet tab opens on the **Healthy** chip instead of
+  All workers, so the table starts with the workers doing the searching
+  rather than the offline and parked ones. All workers is one click away and
+  the counts are unchanged (RS-431).
+
 ## [1.370.3] - 2026-10-27
 
 ### Fixed

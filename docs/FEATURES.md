@@ -3402,7 +3402,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     then offline ones, each by worker id. The toolbar has the legend with
     counts (All workers, Healthy, Degraded, Replacing, Parked — the worker
     reports Session expired, Checkpoint… — and Offline), a host select and a
-    search over worker, account, city and host; the foot says "N of M
+    search over worker, account, city and host; since v1.371.0 (RS-431) the
+    tab opens on Healthy rather than All workers. The foot says "N of M
     workers · R running on K hosts". Since v1.367.0 (RS-418) a coordinator
     worker the fleet retired (`retired_at` on its health row) is left out
     of the rows, the counts, the host select, the tab bar's running count
