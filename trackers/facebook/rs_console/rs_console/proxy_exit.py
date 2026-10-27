@@ -87,3 +87,57 @@ async def resolve(keys: Iterable[Key], wait_s: float = WAIT_S) -> Dict[Key, Dict
     for key, task in waiting.items():
         out[key] = task.result() if task.done() else {"pending": True}
     return out
+
+
+# The health check is a fresh dial every time, so a proxy that went down an
+# hour ago is not reported up from the exit cache. Repeat asks within
+# CHECK_TTL_S share one answer: the ERP probes every five minutes, and a
+# manager's "Check now" must not turn into a burst through a vendor port.
+CHECK_TTL_S = 60.0
+CHECK_CONCURRENCY = 8
+_checks: Dict[Key, Tuple[float, Dict[str, Any]]] = {}
+
+
+async def _check(key: Key) -> Dict[str, Any]:
+    proxy, user, password = key
+    started = time.monotonic()
+    try:
+        async with httpx.AsyncClient(
+            timeout=LOOKUP_TIMEOUT_S,
+            proxy=with_credentials(proxy, user, password) if proxy else None,
+        ) as client:
+            res = await client.get(LOOKUP_URL, headers={"Accept": "application/json"})
+            res.raise_for_status()
+            body = res.json() or {}
+        found: Dict[str, Any] = {"ok": True, **{k: body.get(k) for k in EXIT_KEYS}}
+    except httpx.ProxyError:
+        found = {"ok": False, "error": "Proxy refused the connection"}
+    except httpx.TimeoutException:
+        found = {"ok": False, "error": "Timed out"}
+    except httpx.HTTPStatusError as e:
+        found = {"ok": False, "error": f"Lookup answered {e.response.status_code}"}
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError):
+        found = {"ok": False, "error": "Could not connect"}
+    found["latency_ms"] = round((time.monotonic() - started) * 1000)
+    # A good answer also refreshes the exit the fleet page shows.
+    if found["ok"]:
+        _cache[key] = (time.monotonic() + OK_TTL_S, {k: found[k] for k in EXIT_KEYS})
+    return found
+
+
+async def check(keys: Iterable[Key]) -> Dict[Key, Dict[str, Any]]:
+    """Probe each proxy now, through itself: ok, latency_ms and the exit, or
+    error. Never names the login; the error is worded here, not passed on."""
+    gate = asyncio.Semaphore(CHECK_CONCURRENCY)
+
+    async def one(key: Key) -> Dict[str, Any]:
+        hit = _checks.get(key)
+        if hit and hit[0] > time.monotonic():
+            return hit[1]
+        async with gate:
+            found = await _check(key)
+        _checks[key] = (time.monotonic() + CHECK_TTL_S, found)
+        return found
+
+    unique = list(dict.fromkeys(keys))
+    return dict(zip(unique, await asyncio.gather(*(one(k) for k in unique))))

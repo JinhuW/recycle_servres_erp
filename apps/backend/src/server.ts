@@ -21,6 +21,7 @@ import { freezeLegacySellNumbers } from './services/sellOrderNumbers';
 import { startPoAiReviewLoop } from './services/poAiReview';
 import { startFbPoolAliveCheckLoop } from './services/fbPoolAliveCheck';
 import { startFleetSchedulerLoop } from './fleet/scheduler';
+import { startProxyHealthLoop } from './fleet/proxyHealth';
 import { startFleetRelayLease } from './fleet/vnc';
 
 const env = buildEnv();
@@ -41,6 +42,7 @@ const loops = [
   startPoAiReviewLoop(getDb(env), env),
   startFbPoolAliveCheckLoop(getDb(env), env),
   startFleetSchedulerLoop(getDb(env), env),
+  startProxyHealthLoop(getDb(env), env),
   // The fleet VNC relay pairs sockets in memory: one instance serves it.
   startFleetRelayLease(getDb(env)),
 ];

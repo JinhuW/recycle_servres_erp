@@ -15,6 +15,24 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.368.0] - 2026-10-27
+
+### Added
+
+- **Monitors ▸ Facebook has a Proxies tab (RS-424).** Until now nothing said
+  whether a proxy port was up right now, how slow it was, or whether it had
+  dropped overnight; the only signals were the exit-IP lookup on the legacy
+  Fleet table and the DEAD mark after failed accounts. The backend now checks
+  every proxy on the ERP's list every five minutes by dialing through it
+  (http, https or socks5) to an IP-geo lookup, and asks rs_console to check
+  the homelab workers' ports the same way, since only it holds their logins.
+  Each answer is kept 14 days. The tab shows each port's state (Up, Degraded,
+  Down, Unchecked), latency, exit IP and place, a warning when the exit IP
+  changed, the day as half-hour ticks with its uptime, and who uses it, with
+  **Check all now** and a per-proxy check. The tab bar counts the ports down.
+  One instance runs each round, and no proxy login reaches the browser, the
+  logs or the table.
+
 ## [1.367.2] - 2026-10-27
 
 ### Fixed

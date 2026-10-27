@@ -35,6 +35,9 @@ export type Env = {
   // Which part of the fleet this instance serves (src/fleet/). Unset is all of
   // it; 'manager-only' leaves the scheduler tick to the instance serving workers.
   FLEET_ROLE?: string;
+  // Where a proxy health probe asks for its exit (fleet/proxyProbe.ts); unset is
+  // ipinfo.io. Tests point it at a local server.
+  FLEET_PROXY_LOOKUP_URL?: string;
   // What a claim hands every fleet worker: the Python coordinator it posts
   // listings to, and the worker image hosts start before the first release.
   FLEET_COORDINATOR_URL?: string;

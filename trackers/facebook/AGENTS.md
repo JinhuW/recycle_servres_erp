@@ -50,6 +50,10 @@ Forwarded today:
   coordinator's `/v1/stats/status-changes`) feed the ERP's Recent activity.
 - `GET /v1/logins?worker_id=` (one worker's login ledger, without the device
   fingerprints) for the account timeline on the ERP's worker page.
+- `GET /v1/proxies/health` (each proxy port a live worker dials, probed
+  through itself, no login in the answer). The ERP backend calls it from its
+  five-minute proxy round, not from a browser; a console without it answers
+  404 and the ERP's Proxies tab shows its own proxies alone.
 - `POST /v1/workers/{id}/relogin`, `/v1/challenges/{id}/resolve`
 - `PUT /v1/accounts/{id}` (credentials write)
 - `PUT /v1/config/settings` (search settings; `rs_console/settings.py` lists
