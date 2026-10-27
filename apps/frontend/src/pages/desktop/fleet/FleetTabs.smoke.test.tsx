@@ -167,7 +167,8 @@ describe('Cities tab', () => {
       <CitiesTable cities={CITIES} items={items} done={withCityNames(TASKS, CITIES)} slots={SLOTS} filter={EMPTY_CITY_FILTER} onFilter={noop} onChanged={noop} now={NOW} />,
     );
     expect(html).toContain('Houston, TX');
-    expect(html).toContain('fleetCityPinned');
+    expect(html).toContain('fleetCityEnabled');
+    expect(html).not.toContain('fleetColPin');
     expect(html).toContain('fleetCityVerifying');
     expect(html).toContain('fleetVerifyPending');      // boise's inline row
     expect(html).toContain('fleetVerifySkip');

@@ -44,7 +44,6 @@ export type FleetCityWrite = { slug: string; name: string; radius_km?: number; r
 export type FleetCityPatch = {
   enabled?: boolean;
   per_day?: number | null;
-  pinned?: boolean;
   name?: string;
   override_verify?: true;
 };

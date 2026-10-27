@@ -3456,8 +3456,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     and when it is next due); **Start the round now** previews and confirms
     as before.
   - **Cities** (`/#/fleet/cities`, v1.344.0): the catalog, with a lede that
-    counts the cities, the searched, the pinned, the verifying and the off.
-    The toolbar has the legend (All, Enabled, Pinned, Verifying, Disabled), a
+    counts the cities, the searched, the verifying and the off.
+    The toolbar has the legend (All, Enabled, Verifying, Disabled; Pinned
+    went in v1.372.0, since nothing read it), a
     region select and a search over name and slug. Verifying cities come
     first, each with an inline row under it: "Added <when>. A worker will
     open the slug between tasks and confirm Facebook shows <name>" with
@@ -3468,7 +3469,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     chip, searches a day (Default or a fixed count), per item a cell with the
     last search (time, cards, alerts) and the open task as a chip — the
     worker searching it, "due, waiting N min", or "next <time>" — the worker
-    that calls it home with its account, and the row actions: pin, **Search
+    that calls it home with its account, and the row actions: **Search
     now**, **Remove**. A disabled city offers **Enable**, a removed one
     **Restore**; a city removed before its slug was verified asks whether to
     **Enable anyway** instead. **Rules**, beside **Add city**, edits the

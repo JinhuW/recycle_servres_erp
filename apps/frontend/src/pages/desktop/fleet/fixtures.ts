@@ -59,7 +59,7 @@ export const TASKS: WireTask[] = [
 // GET /cities: each city carries its open tasks (the same rows) and, per
 // item, when its last search finished; an item never searched is absent.
 const city = (slug: string, name: string, region: string, over: Partial<FleetCityListed> = {}): FleetCityListed => ({
-  slug, name, radius_km: 500, region, enabled: true, per_day: null, pinned: false,
+  slug, name, radius_km: 500, region, enabled: true, per_day: null,
   verified_at: ago(60 * 24 * 3), verified_as: name, added_by: null, added_at: ago(60 * 24 * 5), disabled_at: null,
   open_tasks: TASKS.filter(t => t.city === slug && (t.state === 'ready' || t.state === 'leased')),
   last_done_at: {},
@@ -69,7 +69,7 @@ const city = (slug: string, name: string, region: string, over: Partial<FleetCit
 export const CITIES: FleetCityListed[] = [
   city('houston', 'Houston, TX', 'south', {
     last_done_at: { server_ram: ago(60 * 25), enterprise_ssd: ago(90) },
-    pinned: true, per_day: 2,
+    per_day: 2,
   }),
   city('denver', 'Denver, CO', 'mountain', {
     last_done_at: { server_ram: ago(60 * 25), enterprise_ssd: ago(60 * 26) },

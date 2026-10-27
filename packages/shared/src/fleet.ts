@@ -35,7 +35,6 @@ export type FleetCity = {
   enabled: boolean;
   /** Searches per item per day; null follows the default (and tiers later). */
   per_day: number | null;
-  pinned: boolean;
   verified_at: string | null;
   /** The location label Facebook showed when the slug was verified. */
   verified_as: string | null;

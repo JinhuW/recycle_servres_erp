@@ -15,6 +15,19 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.372.0] - 2026-10-27
+
+### Removed
+
+- **Fleet cities lose the Pinned status** (RS-435). A third of the catalog
+  (55 cities) sat under a Pinned legend segment with a star button to toggle
+  it, but the scheduler never read the flag: how often a city is searched has
+  only ever come from its Per day setting. The pin was set aside for tiers,
+  which were never built. Migration 0216 drops `fleet_cities.pinned`, so those
+  cities now list as Enabled and keep their 2× or 3× a day. The legend, the
+  lede's pinned count and the row's star are gone, and a city write carrying
+  `pinned` is refused as an unknown field.
+
 ## [1.371.3] - 2026-10-27
 
 ### Changed
