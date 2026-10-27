@@ -264,6 +264,50 @@ export type FleetSlot = {
   reserved_until: string | null;
 };
 
+/** Which of a pool account's secrets are stored. Never a value. */
+export type FleetSecretKind = 'password' | 'totp' | 'email_password' | 'cookie' | 'token';
+export const FLEET_SECRET_KINDS: readonly FleetSecretKind[] = ['password', 'totp', 'email_password', 'cookie', 'token'];
+
+/** A task event with the task it belongs to, for a worker's history. */
+export type FleetWorkerEvent = FleetTaskEvent & {
+  city: string;
+  city_name: string | null;
+  item: string;
+  task_kind: FleetTaskKind;
+};
+
+/**
+ * `GET /api/fleet/workers/:id`: one worker and what its page shows, in one
+ * read. The slot is the one the worker holds, else its account's last one;
+ * `holds_slot` says which. No secret value and no proxy URL travel here.
+ */
+export type FleetWorkerDetail = {
+  worker: FleetWorker & { task: (FleetTask & { city_name: string | null }) | null };
+  slot: (FleetSlot & { uid: string | null; pool_status: string; minutes_today: number; budget_minutes: number }) | null;
+  holds_slot: boolean;
+  proxy: { id: number; label: string; host: string; port: number; timezone: string } | null;
+  account: {
+    no: number;
+    uid: string | null;
+    email: string | null;
+    status: string;
+    holder: string | null;
+    cookie_at: string | null;
+    secrets: FleetSecretKind[];
+  } | null;
+  /** Its home cities, then the other cities it searched in the window, each
+   *  with its last finished search by this worker. */
+  cities: { slug: string; name: string | null; radius_km: number | null; home: boolean; last_done_at: string | null; alerts: number }[];
+  /** Over the last `days` days, by this worker. `errors` counts tasks it stopped. */
+  stats: { days: number; searches: number; alerts: number; errors: number; last_search_at: string | null };
+  /** Its tasks of the last 24 hours with their events, newest first. */
+  log: FleetTaskLog[];
+  /** Its finished, stopped, released and expired task events of the window, newest first. */
+  events: FleetWorkerEvent[];
+  /** The version the latest release rolls the fleet onto, if a release exists. */
+  release_version: string | null;
+};
+
 export type FleetHost = {
   host_id: string;
   capacity: number;

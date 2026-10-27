@@ -10,7 +10,7 @@
 import type {
   FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetProxy, FleetProxyPatch, FleetProxyWrite, FleetRelease,
   FleetSettings, FleetSlot as FleetSlotRow, FleetSlotWrite,
-  FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, RoundStartAnswer,
+  FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, FleetWorkerDetail, RoundStartAnswer,
 } from '@recycle-erp/shared';
 import { ApiError } from './api';
 import { sharedApi as api } from './sharedGet';
@@ -19,6 +19,7 @@ export type {
   FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,
   FleetTaskResult, FleetTaskState, FleetHostContainer, FleetHostReport, DesiredAnswer, RoundStartAnswer,
   FleetProxy, FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
+  FleetSecretKind, FleetWorkerDetail, FleetWorkerEvent,
 } from '@recycle-erp/shared';
 export {
   FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
@@ -151,6 +152,8 @@ export const fleetApi = {
   // Lets a parked account be claimed again.
   unparkSlot: (no: number) => api.post<{ slot: FleetSlot }>(`${BASE}/slots/${no}/unpark`, {}).then(r => r.slot),
   workers: () => api.get<{ workers: FleetWorker[] }>(`${BASE}/workers`).then(r => r.workers),
+  // One worker with its slot, account, proxy, cities, stats, log and history; 404 for an id the fleet never saw.
+  worker: (id: string) => api.get<FleetWorkerDetail>(`${BASE}/workers/${slug(id)}`),
   // Puts a pool account into the fleet on a listed proxy. 409 account_busy,
   // no_login, proxy_full or exists; the body's `detail` says which account.
   addSlot: (body: FleetSlotWrite) => api.post<{ slot: FleetSlot }>(`${BASE}/slots`, body).then(r => r.slot),

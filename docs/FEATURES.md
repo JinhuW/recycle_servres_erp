@@ -3454,6 +3454,22 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     through the ERP's own relay, view-only. Any other id shows the
     coordinator's worker page as before. Its back link leads to the Fleet
     tab (v1.344.0).
+    Since v1.365.0 (RS-416) a fleet worker gets the homelab worker page
+    itself, on the same layout (`fleet/workerDetail.tsx`) and from one read
+    (`GET /api/fleet/workers/:id`, manager-only, no secret value or proxy
+    URL): the login as title, Live / Stale / Needs attention / Offline, the
+    stat row (alerts and stopped tasks over 7 days, last finished search,
+    open checkpoints), rows for the pool account, its stored secret kinds,
+    the session expiry the worker reports, the slot's device, the pool
+    cookie's age as Session backup, the listed proxy (label, host:port,
+    timezone), the slot (epoch and lease, parked, reserved, quarantine), home
+    and recently searched cities, today's budget minutes, host and build
+    (amber when behind the latest release). Last listing and Session file
+    read "—": the fleet has no source for them. A worker parked on a wall
+    or lost session shows it under **Open checkpoints**. Actions: Watch
+    browser, Park / Unpark, Remove from fleet (once no worker holds the
+    slot), Search a city now, Release quarantine. Accounts used, the City
+    log (its 24-hour tasks) and History (task events and pool stints) follow.
 - **Facebook account pool** — a second tab at **Monitors ▸ Facebook**,
   linked directly at `/#/fleet/pool` (v1.261.0). Managers see a status legend
   with counts that filters (the key-tag rail left the manager's view in

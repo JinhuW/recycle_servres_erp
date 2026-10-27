@@ -26,14 +26,15 @@ vi.mock('../../../lib/facebookPool', async () => {
 });
 vi.mock('../../../lib/errorToast', () => ({ handleFetchError: vi.fn(), showSuccessToast: vi.fn(), showWarnToast: vi.fn() }));
 
-const { CITIES, CITY_LOG, COORDINATOR, HITS, HOSTS, NOW, POOL, RELEASE, SLOTS, STATS, TASKS, WORKERS } = await import('./fixtures');
+const { CITIES, CITY_LOG, COORDINATOR, HITS, HOSTS, NOW, POOL, RELEASE, SLOTS, STATS, TASKS, WORKER_DETAIL, WORKER_STINTS, WORKERS } = await import('./fixtures');
 const { WorkersTable } = await import('./FleetAccountsTab');
 const { HostStrip, ReleaseBanner } = await import('./FleetHosts');
 const { Belt, CityLogAside, TaskTable } = await import('./FleetTasksTab');
 const { CitiesTable } = await import('./FleetCitiesTab');
 const { DayChart, HitsTable } = await import('./FleetAnalysisTab');
 const { FlowCard } = await import('../FleetFlow');
-const { FleetWorkerPage } = await import('./FleetWorkerSwitch');
+const { ErpWorkerView } = await import('./FleetErpWorker');
+const { HomelabWorkerView } = await import('../FleetWorker');
 const { alertsByCity, daySeries, EMPTY_CITY_FILTER, EMPTY_TASK_FILTER, withCityNames } = await import('./fleetBoard');
 const { EMPTY_FLEET_ROW_FILTER } = await import('./fleetRows');
 
@@ -192,14 +193,65 @@ describe('Analysis tab', () => {
 });
 
 describe('Worker page', () => {
-  it('names the host, the account and the task a fleet worker holds', () => {
-    const html = renderToString(<FleetWorkerPage worker={WORKERS[2]} />);
-    expect(html).toContain('homelab-3');
-    expect(html).toContain('#12');
-    expect(html).toContain('Houston, TX');
-    expect(html).toContain('fleetWatch');
+  // Both kinds of worker render on the same layout: the head, the credential
+  // card with the same stat row and rows, checkpoints, accounts used, the city
+  // log and the history column.
+  const LAYOUT = ['ff-worker-layout', 'fp-credential ff-worker-card', 'ff-ledger', 'ff-history', 'fbcAccountsUsed', 'fbcCityLog', 'fbcOpenCheckpoints'];
+  const ROWS = ['fbcDetailFbLogin', 'fbcDetailFbUser', 'fbcDetailSecrets', 'fbcColSession', 'fbcDetailUa', 'fbcDetailBackup', 'fbcDetailProxy', 'fbcFoldPacing', 'fbcDetailSessionFile', 'fbcColBuild'];
+  const STATS_ROW = ['fbcColAlerts', 'fbcColLastSearch', 'fbcDetailLastListing', 'fbcDetailErrors'];
+
+  it('shows an ERP-fleet worker on the homelab layout, from its one read', () => {
+    const html = renderToString(<ErpWorkerView detail={WORKER_DETAIL} stints={WORKER_STINTS} onReload={noop} now={NOW} />);
+    for (const k of [...LAYOUT, ...ROWS, ...STATS_ROW]) expect(html, k).toContain(k);
+    expect(html).toContain('acct31@example.test');          // the login is the title
+    expect(html).toContain('worker-60-14-1');
+    expect(html).toContain('fleetNoteSearching');            // what it is doing now
+    expect(html).toContain('ff-live');                       // Live
+    expect(html).toContain('Decodo NY 1');                   // the listed proxy, by label
+    expect(html).toContain('isp.example.net:10001');
+    expect(html).toContain('Philadelphia, PA');               // home city chip
+    expect(html).toContain('fleetPacingBudget');
+    expect(html).toContain('fleetDetailHost');
+    expect(html).toContain('0.14.0');                         // build, behind the 0.14.7 release
+    expect(html).toContain('fleetBuildBehind');
+    expect(html).toContain('fbcWatchBrowser');
+    expect(html).toContain('fleetPark');
+    expect(html).toContain('fpRemoveFromFleet');
+    expect(html).toContain('fleetSearchCityNow');
+    expect(html).toContain('fleetHist_done');                 // history from task events
+    expect(html).toContain('fbcHistSignOn');                  // and the pool stint
+    expect(html).toContain('fbcNoCheckpoint');
+    // Homelab-only actions are not offered.
+    for (const k of ['fbcRelogin', 'fbcEditCreds', 'fbcEditCities', 'fbcQueueField']) expect(html).not.toContain(k);
+    expect(html).not.toContain('password_enc');
   });
-  it('says so when the worker holds no task', () => {
-    expect(renderToString(<FleetWorkerPage worker={WORKERS[0]} />)).toContain('fleetTaskNone');
+
+  it('shows a parked worker\'s wall as its open checkpoint', () => {
+    const parked = { ...WORKER_DETAIL, worker: { ...WORKER_DETAIL.worker, state: 'CHECKPOINT', task: null, detail: { reason: 'wall', wall: 'checkpoint', url: 'https://www.facebook.com/checkpoint/9' } } };
+    const html = renderToString(<ErpWorkerView detail={parked} stints={[]} onReload={noop} now={NOW} />);
+    expect(html).toContain('ff-attention');
+    expect(html).toContain('fbcAttnParked');
+    expect(html).toContain('https://www.facebook.com/checkpoint/9');
+    expect(html).not.toContain('fbcNoCheckpoint');
+  });
+
+  it('offers Unpark for a parked slot and reads "—" without a slot', () => {
+    const html = renderToString(<ErpWorkerView detail={{ ...WORKER_DETAIL, holds_slot: false, slot: { ...WORKER_DETAIL.slot!, parked: true, worker_id: null } }} stints={[]} onReload={noop} now={NOW} />);
+    expect(html).toContain('fleetUnpark');
+    const bare = renderToString(<ErpWorkerView detail={{ ...WORKER_DETAIL, slot: null, proxy: null, account: null }} stints={null} onReload={noop} now={NOW} />);
+    expect(bare).toContain('fleetSlotNone');
+    expect(bare).toContain('fleetNoPoolAccount');
+    expect(bare).not.toContain('fleetPark');
+  });
+
+  it('shows a homelab worker on the same layout', () => {
+    const html = renderToString(<HomelabWorkerView workerId="homelab-5" fleet={COORDINATOR} challenges={[]} hits={HITS} marks={[]}
+      stints={[]} logins={[]} cityLog={[]} onReload={noop} onMarks={noop} />);
+    for (const k of [...LAYOUT, ...ROWS, ...STATS_ROW]) expect(html, k).toContain(k);
+    expect(html).toContain('homelab-5');
+    expect(html).toContain('Los Angeles');
+    expect(html).toContain('fbcDetailVaultAccount');
+    expect(html).toContain('fbcRelogin');                     // its own actions stay
+    expect(html).toContain('fbcEditCreds');
   });
 });

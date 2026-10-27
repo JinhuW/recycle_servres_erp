@@ -15,6 +15,25 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.365.0] - 2026-10-26
+
+### Changed
+
+- **An ERP-fleet worker's page is the homelab worker page** (RS-416, RS-394).
+  The owner asked for the UI inconsistency to go: a worker such as
+  `worker-60-14-1` used to open a five-line card, while a homelab worker had
+  the full credential card, checkpoints, accounts used, city log and history.
+  The homelab page is now split into shared pieces (`fleet/workerDetail.tsx`)
+  and both pages render through them. The fleet page reads everything in one
+  call, a new manager-only `GET /api/fleet/workers/:id` (worker, slot, pool
+  account with which secrets are stored but no value, the listed proxy's
+  label and host:port, cities, 7-day stats, the 24-hour task log, task
+  events, the release version). Rows the fleet has no source for read "—"
+  rather than an invented value, homelab-only actions (re-login, credentials,
+  own cities, coordinator queue) are replaced by the fleet's own (Watch
+  browser through the ERP relay, Park / Unpark, Remove from fleet, Search a
+  city now), and a worker parked on a wall shows it as its open checkpoint.
+
 ## [1.364.0] - 2026-10-26
 
 ### Added
