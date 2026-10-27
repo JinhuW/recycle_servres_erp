@@ -15,6 +15,74 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.371.0] - 2026-10-27
+
+### Changed
+
+- The Facebook fleet's Fleet tab opens on the **Healthy** chip instead of
+  All workers, so the table starts with the workers doing the searching
+  rather than the offline and parked ones. All workers is one click away and
+  the counts are unchanged (RS-431).
+
+## [1.370.3] - 2026-10-27
+
+### Fixed
+
+- **The Proxies tab loads on prod again** (RS-429). After the RS-427 cut-over
+  copied dev's fleet tables into prod, `fleet_proxy_rounds` was left without its
+  single row. Every read of the tab then failed with a 500, and the tab showed
+  "This backend has no fleet routes yet". The same missing row stopped the proxy
+  round from running, because the round claim was an `UPDATE` with no row to
+  update. The claim is now an upsert that puts the row back, and the tab reads a
+  missing row as "no round yet".
+
+## [1.370.2] - 2026-10-27
+
+### Fixed
+
+- **The Telegram user session survives a redeploy of the reddit api
+  (RS-430).** Railway starts the new api before stopping the old one, and
+  both used to open the user session at once, which is exactly what makes
+  Telegram revoke it. The api now takes a hold in `telegram_state` before it
+  connects; a new copy waits until the old one has disconnected and let go.
+  An old copy shutting down no longer clears the new copy's hold either, so
+  alerts don't slip back to the bot mid-handover.
+- **Seen counts each person and alert within their own chat.** With more than
+  one buyer chat, everyone looked like they skipped half the alerts, because
+  reads were divided by every alert in every chat.
+- **A partial member list no longer marks the whole group as left.** When
+  Telegram lists fewer people than the chat holds (hidden members), the roster
+  stays as it was.
+- **Fewer read-receipt calls on the user account.** The reads loop asks only
+  about the 24 hours the tab shows, and skips alerts everyone already read,
+  which keeps it clear of Telegram's flood limits.
+- A buyer chat added after the api started now resolves instead of falling
+  back to the bot until a restart. A session that fails partway through
+  connecting no longer leaves a client reconnecting in the background.
+  Basic groups get alerts from the bot, because their message ids differ per
+  account and reactions on a user-sent alert matched no post.
+
+## [1.370.0] - 2026-10-27
+
+### Added
+
+- **Reddit ▸ Seen shows who read each buyer alert of the last 24 hours
+  (RS-428).** The page lists every alert with the names of the people who
+  read it. It also lists everyone in the alert group, with how many alerts
+  each saw and when they last read one, so the buyers who never open them
+  stand out. Telegram gives read receipts only to the user account that sent
+  a message, never to a bot. So the tracker's api can now send buyer alerts
+  as a Telegram user account (`TELEGRAM_API_ID`, `TELEGRAM_API_HASH`,
+  `TELEGRAM_USER_SESSION`, created with `scripts/telegram-login.ts`).
+  - The bot stays as the fallback. A chat the user account can't reach gets
+    the alert from the bot, with an ops warning.
+  - The workers stand down while the api's user session is live, and take
+    over through the bot within two minutes of it going quiet.
+  - Every 5 minutes the api pulls each recent alert's readers and the group's
+    member list (tracker migration 0007).
+  - Until the session is set up, nothing changes: the bot sends, and the tab
+    marks each alert *no receipts* and explains why.
+
 ## [1.369.0] - 2026-10-27
 
 ### Added

@@ -2,6 +2,7 @@
 // process polls Reddit (on the VMs) or serves the admin API (next to the
 // database).
 
+import {randomUUID} from 'node:crypto';
 import {serve} from '@hono/node-server';
 import {createAlertSender} from './alerts.ts';
 import {createApi} from './api.ts';
@@ -11,14 +12,16 @@ import {createDb} from './db.ts';
 import {heartbeatOnce, LoopRegistry, removeWorker} from './heartbeat.ts';
 import {createLogger} from './logger.ts';
 import {evaluateOnce} from './loops/evaluate.ts';
-import {notifyOnce} from './loops/notify.ts';
+import {acquireUserSender, notifyOnce, releaseUserSender, renewUserSender} from './loops/notify.ts';
 import {pollOnce} from './loops/poll.ts';
 import {reactionsOnce} from './loops/reactions.ts';
+import {readsOnce} from './loops/reads.ts';
 import {Tracer} from './loops/trace.ts';
 import {watchOnce} from './loops/watch.ts';
 import {startLoop, type LoopHandle} from './loops/runner.ts';
 import {RedditPacer} from './pacing.ts';
 import {SettingsStore} from './settings.ts';
+import {connectUserClient, createUserFirstSender, type UserClient, type UserCredentials} from './userSender.ts';
 
 const config = loadConfig();
 const registry = new LoopRegistry();
@@ -120,26 +123,102 @@ async function runApi(): Promise<void> {
     : null;
   if (!watch) logger.info('ops alerts off: OPS_ALERT_URL is not set');
 
-  await new Promise<void>((resolve) => {
-    const shutdown = (signal: string) => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      logger.info('shutting down', {signal});
-      heartbeat.stop();
-      reactions?.stop();
-      watch?.stop();
-      abort.abort();
-      server.close(() => resolve());
-    };
-    process.once('SIGTERM', () => shutdown('SIGTERM'));
-    process.once('SIGINT', () => shutdown('SIGINT'));
+  const stopping = new Promise<string>((resolve) => {
+    process.once('SIGTERM', () => resolve('SIGTERM'));
+    process.once('SIGINT', () => resolve('SIGINT'));
   });
+
+  // With a user session, buyer alerts go out from here as that account, and
+  // their read receipts come back here; the workers stand down while it is
+  // live (loops/notify.ts). A session that will not connect leaves the
+  // workers sending through the bot, as before.
+  const owner = `${config.workerId}:${randomUUID()}`;
+  let user: UserClient | null = null;
+  if (config.telegramUser && config.alertTransport === 'telegram') {
+    user = await connectWhenFree(config.telegramUser, owner, stopping);
+  }
+  const userLoops = user ? [
+    startLoop(
+      {name: 'user-notify', logger: logger.child('notify'), idleMs: 10_000, busyMs: 500},
+      async () => {
+        if (!await renewUserSender(sql, owner)) {
+          logger.warn('another api holds the telegram user session; not sending as the user');
+          return false;
+        }
+        return notifyOnce({
+          sql,
+          workerId: config.workerId,
+          alerts: createUserFirstSender(user!, createAlertSender('telegram', config.telegramBotToken)),
+          settings,
+          logger: logger.child('notify'),
+        });
+      },
+    ),
+    startLoop(
+      {name: 'reads', logger: logger.child('reads'), idleMs: 5 * 60_000},
+      () => readsOnce({sql, user: user!, settings, logger: logger.child('reads')}),
+    ),
+  ] : [];
+
+  const signal = await stopping;
+  shuttingDown = true;
+  logger.info('shutting down', {signal});
+  heartbeat.stop();
+  reactions?.stop();
+  watch?.stop();
+  for (const loop of userLoops) loop.stop();
+  abort.abort();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
 
   await heartbeat.stopped;
   await reactions?.stopped;
   await watch?.stopped;
+  await Promise.all(userLoops.map((l) => l.stopped));
+  if (user) {
+    // Disconnect before releasing: the next api connects the moment the
+    // hold clears.
+    await user.disconnect();
+    await releaseUserSender(sql, owner);
+  }
   await deregister();
   await sql.end();
+}
+
+const USER_SESSION_WAIT_MS = 5_000;
+
+/**
+ * Waits until no other api holds the user session (a redeploy's outgoing
+ * copy), then connects. Null if the session will not connect, or if this
+ * process is told to stop first.
+ */
+async function connectWhenFree(
+  creds: UserCredentials,
+  owner: string,
+  stopping: Promise<string>,
+): Promise<UserClient | null> {
+  let stopped = false;
+  void stopping.then(() => { stopped = true; });
+  let waiting = false;
+  while (!stopped) {
+    try {
+      if (await acquireUserSender(sql, owner)) break;
+    } catch (e) {
+      logger.warn('could not take the telegram user session', {error: e instanceof Error ? e.message : String(e)});
+    }
+    if (!waiting) logger.info('another api holds the telegram user session; waiting for it to let go');
+    waiting = true;
+    await Promise.race([stopping, new Promise((r) => setTimeout(r, USER_SESSION_WAIT_MS))]);
+  }
+  if (stopped) return null;
+  try {
+    return await connectUserClient(creds, logger.child('user'));
+  } catch (e) {
+    logger.warn('telegram user session did not connect; the bot keeps sending alerts', {
+      error: e instanceof Error ? e.message : String(e),
+    });
+    await releaseUserSender(sql, owner).catch(() => {});
+    return null;
+  }
 }
 
 async function runWorker(): Promise<void> {
@@ -180,6 +259,7 @@ async function runWorker(): Promise<void> {
         alerts,
         settings,
         logger: logger.child('notify'),
+        deferToUserSender: true,
       })),
     ),
     startHeartbeat('worker'),

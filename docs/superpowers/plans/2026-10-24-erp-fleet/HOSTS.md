@@ -51,9 +51,26 @@
   (`FLEET_FORWARD_URL`, `FLEET_FORWARD_PROXY_SECRET`, both Worker secrets so a
   deploy keeps them). A new or re-pointed agent takes the prod URL. The
   forward is removed once no container holds the dev URL.
+  Both agents were re-pointed at prod on 2026-10-27 at 17:55 (`homelab`) and
+  18:01 (`worker-60-14`) UTC. Each change was an `FLEET_URL` edit in
+  `~/.config/fleet-agent.env` plus a replaced `rs-fleet-agent` container;
+  no running worker was recreated. Workers started before then keep the dev
+  URL until the agent replaces them. Before removing the forward, check
+  that this prints nothing on either host:
+
+  ```bash
+  docker ps -aq --filter name=rs-fleet- \
+    | xargs docker inspect -f '{{.Name}} {{range .Config.Env}}{{.}} {{end}}' \
+    | grep inventory-dev | cut -d' ' -f1
+  ```
 - Shared worker secrets are the Cloudflare Worker secret FLEET_WORKER_ENV JSON,
   added only to a successful host-authenticated claim. Provision the edge secret
   before the agent/worker release; these values never enter Railway or Postgres.
+  Prod's and dev's Workers both hold `OPENROUTER_API_KEY` plus
+  `RS_CONTROL_PLANE_TOKENS` for `homelab-1..16` and `worker-60-14-1..16`
+  (built on the VM by `rsc mint-token`, piped into `wrangler secret put`).
+  A worker id without a token exits 70 before its browser opens. Raising a
+  host's capacity past 16 needs the secret rebuilt first.
 - A route to the Python coordinator (`FLEET_COORDINATOR_URL`), below.
 
 ## Coordinator route

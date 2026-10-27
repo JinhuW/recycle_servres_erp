@@ -2868,6 +2868,25 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   The same release made a listing cross-posted to several subreddits, or
   reposted within 72 hours, alert once. The other copies are held back as
   duplicates and stay out of Recent matches.
+
+  Since v1.370.0 (RS-428), a fifth tab, **Seen** (`/tracker/seen`), shows who
+  read the buyer alerts of the last 24 hours:
+  - **Tiles:** alerts sent, how many someone saw, and how many people in the
+    alert group read any.
+  - **People:** everyone in the alert group (and anyone who read an alert and
+    then left), with how many alerts each saw and when they last read one.
+    Since v1.370.2 (RS-430), "saw x of n" counts only the alerts sent to that
+    person's own chats.
+  - **Alerts:** each alert with the names of the people who read it, out of
+    the people in that alert's chat (v1.370.2).
+
+  Telegram gives read receipts only to the user account that sent a message,
+  never to a bot. So when the tracker's api has a Telegram user session
+  (`TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_USER_SESSION`), buyer
+  alerts go out as that account. If that account can't send to a chat, the
+  bot sends there instead. The bot still gathers reactions and sends the
+  dev-chat reviews. Without the session, the bot sends everything as before,
+  and the tab marks those alerts *no receipts* and explains why.
 - **WeChat market** — **Monitors ▸ WeChat** (`/wechat`, v1.312.0), managers
   only. memtrade, a tool on the office Mac, reads the team's WeChat trading
   groups and builds a daily memory-module report for each 08:00 → 08:00 ET
@@ -3383,7 +3402,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     then offline ones, each by worker id. The toolbar has the legend with
     counts (All workers, Healthy, Degraded, Replacing, Parked — the worker
     reports Session expired, Checkpoint… — and Offline), a host select and a
-    search over worker, account, city and host; the foot says "N of M
+    search over worker, account, city and host; since v1.371.0 (RS-431) the
+    tab opens on Healthy rather than All workers. The foot says "N of M
     workers · R running on K hosts". Since v1.367.0 (RS-418) a coordinator
     worker the fleet retired (`retired_at` on its health row) is left out
     of the rows, the counts, the host select, the tab bar's running count

@@ -3036,3 +3036,51 @@ tr.wx-quiet td {
 .ff-round-start-due .mono {
   margin-right: 4px;
 }
+
+/* ─── Reddit ▸ Seen ─── */
+.rt-seen-kpis {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.rt-seen-note {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--radius, 8px);
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+.rt-seen-note svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.rt-seen-bar {
+  display: grid;
+  grid-template-columns: 64px minmax(80px, 200px);
+  align-items: center;
+  gap: 10px;
+}
+.rt-seen-bar i {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+.rt-seen-bar i::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--w);
+  background: var(--accent);
+}
+.rt-an-table td.rt-seen-cell {
+  white-space: normal;
+}
+.rt-seen-readers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}

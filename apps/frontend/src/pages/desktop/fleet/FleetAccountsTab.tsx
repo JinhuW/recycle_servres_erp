@@ -10,7 +10,7 @@ import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
 import { ActivityAside } from '../FleetWorkers';
 import { dueLabel, easternClock, isQuarantined, maskUid } from './fleetBoard';
 import {
-  EMPTY_FLEET_ROW_FILTER, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRowKinds, fleetRows, fleetRunning,
+  DEFAULT_FLEET_ROW_FILTER, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRowKinds, fleetRows, fleetRunning,
   type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowKind,
 } from './fleetRows';
 import { AddHostDialog, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
@@ -69,7 +69,7 @@ export function FleetAccountsTab() {
   const reload = useCallback(() => { reloadErp(); reloadCoordinator(); }, [reloadErp, reloadCoordinator]);
   const [adding, setAdding] = useState(false);
   const [releasing, setReleasing] = useState(false);
-  const [filter, setFilter] = useState<FleetRowFilter>(EMPTY_FLEET_ROW_FILTER);
+  const [filter, setFilter] = useState<FleetRowFilter>(DEFAULT_FLEET_ROW_FILTER);
 
   if (data === 'unavailable') return <UnavailableCard text={t('fleetNotServed')} />;
   const hosts = data?.hosts ?? [];

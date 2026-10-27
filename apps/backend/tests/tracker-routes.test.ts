@@ -110,6 +110,21 @@ describe('Tracker proxy routes (/api/tracker)', () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
+  it('forwards the seen read, to managers only', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubTracker(200, { userSenderLive: true, alerts: [], people: [] });
+
+    const r = await api<{ userSenderLive: boolean }>('GET', '/api/tracker/seen', { token, env: TRACKER_ENV });
+    expect(r.status).toBe(200);
+    expect(r.body.userSenderLive).toBe(true);
+    expect((spy.mock.calls[0] as [string])[0]).toBe('http://tracker.internal:8080/api/seen');
+
+    const purchaser = await loginAs(MARCUS);
+    const denied = await api('GET', '/api/tracker/seen', { token: purchaser.token, env: TRACKER_ENV });
+    expect(denied.status).toBe(403);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it('forwards the prompt trial routes: stats with their window, start, end and promote', async () => {
     const { token } = await loginAs(ALEX);
     const calls: Array<[string, string | undefined, string | undefined]> = [];

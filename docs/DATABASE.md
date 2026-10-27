@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-27:** ERP migration `0215`, Reddit tracker migration `0006`,
+**As of 2026-10-27:** ERP migration `0215`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -38,7 +38,7 @@ refresh a section.
 | Database | Owner | Engine | Where it runs | Connection | Schema source | Tables |
 | --- | --- | --- | --- | --- | --- | --- |
 | **ERP** | `apps/backend` | Postgres 18 | Railway project `recycle-erp-experiment`, with one Postgres per environment (production, dev) | `DATABASE_URL` | `apps/backend/migrations/*.sql`, applied by `scripts/migrate.mjs` | 69 |
-| **Reddit tracker** | `trackers/reddit` (`api`, `worker` and the OCI worker VMs) | Postgres | Railway project `reddits-tracker`, with public networking on so the OCI VMs can reach it | `DATABASE_URL` | `trackers/reddit/migrations/*.sql`, applied by `scripts/migrate.ts` | 16 + 1 view |
+| **Reddit tracker** | `trackers/reddit` (`api`, `worker` and the OCI worker VMs) | Postgres | Railway project `reddits-tracker`, with public networking on so the OCI VMs can reach it | `DATABASE_URL` | `trackers/reddit/migrations/*.sql`, applied by `scripts/migrate.ts` | 18 + 1 view |
 | **Facebook coordinator** | `trackers/facebook/rs_coordinator` | Postgres 16 in prod; SQLite locally and in tests | Railway project `facebook-tracker` (Terraform in `trackers/facebook/infra/`), reached by the coordinator on the homelab VM through Railway's TCP proxy | `RS_DATABASE_URL`, else `DATABASE_URL`; with neither set, SQLite at `RS_COORDINATOR_DB` | `SCHEMA` plus the `*_EXTRA_COLUMNS` lists in `rs_coordinator/db.py`, applied at boot | 32 |
 
 **The three share no database and no rows.** The ERP reaches each tracker only
@@ -2810,10 +2810,11 @@ One Telegram message an alert or a review went out as, one row per chat that rec
 | `reddit_id` | `text` | ✓ |  | → posts; deleted with the post. |
 | `audience` | `text` | ✓ |  | buyers = the alert in a telegram_chat_ids chat; dev = a review copy carrying each prompt's verdict and reasoning, in a telegram_dev_chat_ids chat. |
 | `sent_at` | `timestamptz` | ✓ | `now()` |  |
+| `sent_as` | `text` | ✓ | `'bot'` | user = sent by the api's Telegram user account, so its readers can be fetched; bot = sent by the bot, which Telegram gives no read receipts (migration 0007). |
 
 - **Primary key:** `chat_id, message_id`
 - **References:** `reddit_id` → `posts.reddit_id` (on delete cascade)
-- **Checks:** `audience IN ('buyers', 'dev')`
+- **Checks:** `audience IN ('buyers', 'dev')`, `sent_as IN ('bot', 'user')`
 - **Indexes:** `idx_alert_messages_post` (reddit_id)
 
 Buyer rows are inserted in the same statement that marks the post notified, so a post is never notified without the message ids its reactions will arrive under.
@@ -2930,9 +2931,55 @@ Single-row `getUpdates` cursor for the tracker's bot, so a restarted api resumes
 | `id` | `boolean` | ✓ | `true` | Always TRUE; the CHECK keeps the table to one row. |
 | `next_offset` | `bigint` | ✓ | `0` | Next getUpdates offset (last handled update_id + 1); advanced past every update, handled or not. |
 | `updated_at` | `timestamptz` | ✓ | `now()` |  |
+| `user_sender_at` | `timestamptz` |  |  | Renewed by the api on every pass while its Telegram user session sends buyer alerts. While it is under two minutes old, the workers' notify loops stand down. Cleared on a clean api shutdown; null means the bot sends (migration 0007). |
+| `user_sender_owner` | `text` |  |  | The api process holding the user session (`<worker id>:<uuid>`). A redeploy's new api waits for it to clear or for `user_sender_at` to go stale before connecting, so the session is never live twice; renew and release touch only the holder's own row (migration 0008). |
 
 - **Primary key:** `id`
 - **Checks:** `id`
+
+### Read receipts
+
+Who read each buyer alert, for the ERP's Reddit ▸ Seen tab (migration 0007). Telegram reports a message's readers only to the user account that sent it, only in groups of up to 100 members, and only for 7 days. So the api's `reads` loop (`src/loops/reads.ts`) asks again every 5 minutes for the user-sent alerts of the last 24 hours that someone in the chat has not read yet, and keeps what it gets. It also refreshes the buyer chats' member list, so the tab can list people who read nothing. `GET /api/seen` reads both.
+
+Tables: [`message_reads`](#reddit-message-reads), [`chat_members`](#reddit-chat-members)
+
+```mermaid
+erDiagram
+  alert_messages ||--o{ message_reads : "chat_id, message_id"
+```
+
+<a id="reddit-message-reads"></a>
+
+#### `message_reads`
+
+One person who read one user-sent alert. Written only by the api's reads loop. Telegram's own read list expires after 7 days, so a row here outlives it.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `chat_id` | `text` | ✓ |  | → alert_messages, with message_id; deleted with it. |
+| `message_id` | `bigint` | ✓ |  |  |
+| `user_id` | `text` | ✓ |  | Telegram user id of the reader. The sending account itself is never recorded. |
+| `read_at` | `timestamptz` | ✓ |  | When Telegram says they read it. |
+
+- **Primary key:** `chat_id, message_id, user_id`
+- **References:** `chat_id, message_id` → `alert_messages` (on delete cascade)
+
+<a id="reddit-chat-members"></a>
+
+#### `chat_members`
+
+The people in each buyer chat, as of the reads loop's last pass, without bots or the sending account.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `chat_id` | `text` | ✓ |  | A telegram_chat_ids chat. |
+| `user_id` | `text` | ✓ |  | Telegram user id. |
+| `name` | `text` | ✓ |  | First and last name, or the username or id when Telegram has neither. |
+| `username` | `text` |  |  | Telegram @username, without the @. |
+| `left_at` | `timestamptz` |  |  | Set when a pass no longer finds them; cleared if they come back. Null = still in the chat. |
+| `updated_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `chat_id, user_id`
 
 ### Operations
 
