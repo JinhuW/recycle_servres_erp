@@ -99,9 +99,12 @@ async function insertChecks(sql: SqlLike, rows: CheckRow[], at: Date | null): Pr
  * proxy and every coordinator port. False when the round was someone else's.
  */
 export async function runProxyRound(sql: Sql, env: Env, gapMs = FLEET_PROXY_ROUND_MS - 10_000): Promise<boolean> {
+  // An upsert, not an UPDATE: a table copied without its one row would
+  // otherwise never claim a round again.
   const [claimed] = await sql<{ started_at: Date }[]>`
-    UPDATE fleet_proxy_rounds SET started_at = NOW()
-    WHERE started_at <= NOW() - make_interval(secs => ${gapMs / 1000})
+    INSERT INTO fleet_proxy_rounds (started_at) VALUES (NOW())
+    ON CONFLICT (id) DO UPDATE SET started_at = NOW()
+    WHERE fleet_proxy_rounds.started_at <= NOW() - make_interval(secs => ${gapMs / 1000})
     RETURNING started_at`;
   if (!claimed) return false;
   const [erp, coordinator] = await Promise.all([probeErp(sql, env), probeCoordinator(env)]);
@@ -158,8 +161,10 @@ function summarise(checks: HistoryRow[], latest: HistoryRow | undefined, now: nu
 export async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAnswer> {
   const [[round], proxies, history, latest] = await Promise.all([
     // The database's clock, which stamped every check, places them in buckets.
-    sql<{ started_at: Date; coordinator: CoordinatorStatus | null; coordinator_at: Date | null; now: Date }[]>`
-      SELECT started_at, coordinator, coordinator_at, NOW() AS now FROM fleet_proxy_rounds`,
+    // A missing round row reads as no round yet.
+    sql<{ started_at: Date | null; coordinator: CoordinatorStatus | null; coordinator_at: Date | null; now: Date }[]>`
+      SELECT r.started_at, r.coordinator, r.coordinator_at, NOW() AS now
+      FROM (SELECT 1) one LEFT JOIN fleet_proxy_rounds r ON TRUE`,
     listProxies(sql),
     sql<(HistoryRow & { workers: string[] })[]>`
       SELECT exit, source, proxy_id, workers, checked_at, ok, latency_ms, exit_ip, city, region, country, org, error
@@ -203,7 +208,7 @@ export async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAns
   }
   return {
     proxies: out,
-    round_at: Number.isFinite(round.started_at.getTime()) ? round.started_at.toISOString() : null,
+    round_at: round.started_at && Number.isFinite(round.started_at.getTime()) ? round.started_at.toISOString() : null,
     coordinator: round.coordinator,
   };
 }

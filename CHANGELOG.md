@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.370.3] - 2026-10-27
+
+### Fixed
+
+- **The Proxies tab loads on prod again** (RS-429). After the RS-427 cut-over
+  copied dev's fleet tables into prod, `fleet_proxy_rounds` was left without its
+  single row. Every read of the tab then failed with a 500, and the tab showed
+  "This backend has no fleet routes yet". The same missing row stopped the proxy
+  round from running, because the round claim was an `UPDATE` with no row to
+  update. The claim is now an upsert that puts the row back, and the tab reads a
+  missing row as "no round yet".
+
 ## [1.370.2] - 2026-10-27
 
 ### Fixed
