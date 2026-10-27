@@ -37,6 +37,12 @@ export type Env = {
   // 'mirror' serves none of it: the fleet runs on another ERP and this database
   // holds a copy, so pages read and nothing writes (fleet/auth.ts mirrorGate).
   FLEET_ROLE?: string;
+  // On a mirror, the ERP the fleet runs on and a service client there holding
+  // fleet:read: the pages' reads are answered from it live rather than from the
+  // nightly copy (fleet/mirror.ts). Unset reads the copy.
+  FLEET_MIRROR_URL?: string;
+  FLEET_MIRROR_CLIENT_ID?: string;
+  FLEET_MIRROR_CLIENT_SECRET?: string;
   // Where a proxy health probe asks for its exit (fleet/proxyProbe.ts); unset is
   // ipinfo.io. Tests point it at a local server.
   FLEET_PROXY_LOOKUP_URL?: string;
@@ -135,6 +141,7 @@ export const OAUTH_SCOPES = [
   'sellorder:read',
   'sellorder:write',
   'wechat:write',
+  'fleet:read',
 ] as const;
 
 export type OAuthScope = typeof OAUTH_SCOPES[number];

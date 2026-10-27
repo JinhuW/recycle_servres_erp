@@ -3330,6 +3330,13 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   managers' cookie calls stay on dev. With `SYNC_KEEP_FLEET=0`, the nightly
   prod→dev copy brings prod's fleet over like any other table. Host token
   hashes are replaced, claim tickets dropped, and sealed proxy URLs cleared.
+  Since v1.371.1 (RS-432), a mirror with `FLEET_MIRROR_URL`,
+  `FLEET_MIRROR_CLIENT_ID` and `FLEET_MIRROR_CLIENT_SECRET` set answers its
+  managers' fleet reads from prod, live. It signs in there as a service client
+  holding `fleet:read`, a scope only Settings → Connectors grants. The banner
+  then says the page is live. Without the variables, the reads come from the
+  copy, whose heartbeats age into Offline between syncs. If prod can't be
+  reached, a read answers 502, never the copy.
 - **Add to fleet (v1.364.0, RS-415)** — a manager puts pool accounts into
   ERP-fleet slots from **Monitors ▸ Facebook ▸ Account pool**, no seed script.
   The **Proxies** card under the pool table lists the exits the ERP keeps

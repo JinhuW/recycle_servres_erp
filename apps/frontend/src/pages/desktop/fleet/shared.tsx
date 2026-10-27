@@ -55,8 +55,12 @@ export function pollGate(read: () => Promise<unknown>): PollGate {
 // stay, and the backend still refuses them if it is one.
 let mirrorRead: Promise<boolean> | null = null;
 let mirrorKnown = false;
+let mirrorLive = false;
 export function loadFleetMirror(): Promise<boolean> {
-  return mirrorRead ??= fleetApi.health().then(h => (mirrorKnown = h.mirror === true)).catch(() => false);
+  return mirrorRead ??= fleetApi.health().then(h => {
+    mirrorLive = h.mirror_live === true;
+    return (mirrorKnown = h.mirror === true);
+  }).catch(() => false);
 }
 
 /** True when this ERP's fleet is prod's read-only copy; every control that writes hides. `on` false skips the read (a purchaser's page). */
@@ -79,7 +83,7 @@ export function FleetMirrorBanner() {
     <div className="card" role="status" style={{ marginBottom: 14 }}>
       <div className="card-note">
         <Icon name="lock" size={16} />
-        <span>{t('fleetMirrorNote')} <a href={PROD_FLEET_URL} target="_blank" rel="noreferrer">{t('fleetMirrorLink')}</a></span>
+        <span>{t(mirrorLive ? 'fleetMirrorLiveNote' : 'fleetMirrorNote')} <a href={PROD_FLEET_URL} target="_blank" rel="noreferrer">{t('fleetMirrorLink')}</a></span>
       </div>
     </div>
   );

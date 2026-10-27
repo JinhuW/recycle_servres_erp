@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-431](./RS-431-fleet-tab-opens-on-the-healthy-filter.md) | done | story | P2 | Fleet tab opens on the Healthy filter | — |
+| [RS-432](./RS-432-dev-s-fleet-page-reads-prod-s-fleet-live.md) | in-progress | bug | P2 | Dev's Fleet page reads prod's fleet live | — |
+| [RS-431](./RS-431-fleet-tab-opens-on-the-healthy-filter.md) | done | story | P2 | Fleet tab opens on the Healthy filter | 1.371.0 |
 | [RS-430](./RS-430-seen-tab-review-fixes-before-release.md) | done | bug | P1 | Seen tab review fixes before release | 1.370.2 |
 | [RS-429](./RS-429-proxies-tab-500s-on-prod-fleet-proxy-rounds-has-no-r.md) | done | bug | P1 | Proxies tab 500s on prod: fleet_proxy_rounds has no row | 1.370.3 |
 | [RS-428](./RS-428-reddit-seen-tab-who-saw-each-alert-in-the-last-24-ho.md) | done | story | P2 | Reddit Seen tab: who saw each alert in the last 24 hours | 1.370.0 |

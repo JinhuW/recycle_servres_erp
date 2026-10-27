@@ -732,6 +732,7 @@ const zh: Record<string, string> = {
   connectorsScopeSellOrderRead: '搜索可售库存 (sellorder:read)',
   connectorsScopeSellOrderWrite: '创建销售订单草稿 (sellorder:write)',
   connectorsScopeWechatWrite: '推送微信行情报告 (wechat:write)',
+  connectorsScopeFleetRead: '读取 Facebook 机队，供开发环境 ERP 实时查看 (fleet:read)',
   connectorsNamePlaceholder: '例如：ebay-scraper-prod',
   connectorsCreate: '创建',
   connectorsSecretOnce: '客户端密钥（仅显示一次 — 立即复制）：',
@@ -3707,6 +3708,7 @@ const zh: Record<string, string> = {
   // ── ERP 自有机队（pages/desktop/fleet/*） ──
   fleetNotServed: "这个后端还没有机队接口。机队版本上线后这些标签页会自动填上。",
   fleetMirrorNote: "这是生产环境机队的只读副本。主机和 worker 都在生产环境运行，改动请到生产环境操作。",
+  fleetMirrorLiveNote: "此页实时显示生产环境的机队，只读。主机和 worker 都在生产环境运行，改动请到生产环境操作。",
   fleetMirrorLink: "打开生产环境机队 inventory.recycleservers.com",
   fleetCitiesTitle: "城市",
   fleetCitiesNone: "还没有城市。添加一个，或导入现有列表。",

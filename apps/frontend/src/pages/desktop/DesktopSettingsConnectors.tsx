@@ -28,13 +28,14 @@ type Client = {
 // The scopes the backend grants (OAUTH_SCOPES in apps/backend/src/types.ts).
 // Order is fixed here so the checkbox list renders stably; labels resolve via
 // i18n. wechat:write is for memtrade's service client, which pushes the WeChat
-// market report.
+// market report; fleet:read for the dev ERP's, which shows prod's fleet live.
 const SCOPE_OPTIONS = [
   { scope: 'market:read', labelKey: 'connectorsScopeMarketRead' },
   { scope: 'market:write', labelKey: 'connectorsScopeMarketWrite' },
   { scope: 'sellorder:read', labelKey: 'connectorsScopeSellOrderRead' },
   { scope: 'sellorder:write', labelKey: 'connectorsScopeSellOrderWrite' },
   { scope: 'wechat:write', labelKey: 'connectorsScopeWechatWrite' },
+  { scope: 'fleet:read', labelKey: 'connectorsScopeFleetRead' },
 ] as const;
 
 // Callback URLs each host uses for MCP connector OAuth. Presets, not
