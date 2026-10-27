@@ -18,6 +18,17 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.16] - 2026-10-27
+
+### Fixed
+
+- **`/v1/proxies/health` dials an idle port with its env login.** With every
+  legacy launch retired no worker config names a proxy login, so an idle
+  port found only in a `PROXY_*` var was dialed without one and read Down.
+  When no worker on the same proxy host lends a login, it now takes the
+  `<prefix>_USER` / `_PASS` pair its var's name starts with
+  (`PROXY_HOMELAB_NYC2` → `PROXY_HOMELAB_USER`) (RS-425).
+
 ## [0.14.15] - 2026-10-27
 
 - Include the homelab coordinator relay and final legacy launch cleanup from

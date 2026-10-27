@@ -57,3 +57,8 @@ Shipped through a console-only rebuild
 (`docker compose -f deploy/docker-compose.console.yml up -d --build
 --force-recreate console`), never `deploy.sh`, which restarts the workers and
 so logs every Facebook account in.
+
+Before the console went out, the homelab's console compose had already
+dropped every legacy worker config (PR #951), so no worker lent a login and
+every idle port would have read Down. A follow-up gives an idle port the
+`<prefix>_USER` / `_PASS` pair its `PROXY_*` var's name starts with.
