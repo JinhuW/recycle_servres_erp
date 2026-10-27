@@ -7,8 +7,8 @@ priority: P1
 created: 2026-10-27
 reporter: jinhu
 branch: fix/west-wc1b-session-migration
-pr:
-version:
+pr: 944
+version: facebook-tracker 0.14.10
 related: [RS-394, RS-419]
 ---
 
@@ -35,12 +35,12 @@ handover is ready.
       claim, cached identity and the monitor's actual new_context options.
 - [x] Default and native user-agent behavior remain unchanged; tests use no
       Facebook access.
-- [ ] Each worker's full saved state, sidecar, identity when present, and
+- [x] Each worker's full saved state, sidecar, identity when present, and
       monitor cache are copied and verified after a clean stop.
 - [ ] Each new slot uses the same account, proxy and presented browser settings,
       with no password fallback and one restored-session boot.
 - [ ] Both workers report HEALTHY; stop on a checkpoint or failed restore.
-- [ ] Retire the old launch paths and record backups and rollback order.
+- [x] Retire the old launch paths and record backups and rollback order.
 
 ## Out of scope
 
@@ -51,3 +51,15 @@ and enabling alerts on the dev fleet.
 
 Continue the same approved handover from RS-419. Existing workers keep their
 images and container ids. The parent RS-394 remains open for broader cutover.
+
+### Live outcome, 2026-10-27 UTC
+
+wc-1b (#30) is HEALTHY as worker-60-14-1 on 0.14.10, with one restored
+boot (#562), all 20 IndexedDB databases and the same proxy IP. west-1 (#15)
+has its complete session and 8,493-entry cache transferred, but remains
+parked at epoch 2: its original isp.decodo.com:10004 returns 503 from both
+hosts. The network failure happened before any Facebook login; no login
+ledger row exists for worker-60-14-4. No checkpoint was reported and no
+browser retry was made. The owner was asked whether to retain the original
+proxy or approve an IP change. This ticket stays in progress until west-1
+can be activated safely. Backups and detailed timings are in WS-H-migration.md.

@@ -3298,6 +3298,19 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   `docker start` claims with a spent ticket, exits 75 and is recreated. The
   host token still claims for one release (older agents and worker images).
 
+- **One fleet, on prod; dev mirrors it (v1.369.0, RS-427)** — the hosts and
+  workers belong to prod's ERP. A backend with `FLEET_ROLE=mirror` (dev) holds
+  a copy: managers can read every Fleet tab, which carries a banner pointing at
+  inventory.recycleservers.com, but every write control is gone and the API
+  refuses fleet writes with `409 read_only`. Any agent or worker that still
+  calls it gets a 503, never a 401 or 409, so no worker exits (an exit is a
+  Facebook login on restart), and the mirror runs neither the scheduler tick
+  nor the proxy probe. A worker started with the dev URL keeps working: the dev
+  Cloudflare Worker sends any `/api/fleet/*` call that carries a bearer to
+  `FLEET_FORWARD_URL` with that ERP's `FLEET_FORWARD_PROXY_SECRET`, while
+  managers' cookie calls stay on dev. With `SYNC_KEEP_FLEET=0`, the nightly
+  prod→dev copy brings prod's fleet over like any other table. Host token
+  hashes are replaced, claim tickets dropped, and sealed proxy URLs cleared.
 - **Add to fleet (v1.364.0, RS-415)** — a manager puts pool accounts into
   ERP-fleet slots from **Monitors ▸ Facebook ▸ Account pool**, no seed script.
   The **Proxies** card under the pool table lists the exits the ERP keeps
@@ -3328,7 +3341,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   those saved origins when refreshing their session.
   Since
   v1.344.0 the page has five tabs in the owner's approved design — **Fleet**,
-  **Tasks**, **Cities**, **Analysis**, **Account pool** — with count chips on
+  **Tasks**, **Cities**, **Analysis**, **Account pool** (since v1.368.0 a
+  sixth, **Proxies**, before Account pool) — with count chips on
   the tab bar (workers running, tasks due now in the warn colour, cities, pool
   size) and the title "Facebook fleet" on every one; the earlier Queue, Hosts
   and Slots tabs folded into them, and their paths (`/#/fleet/queue`,
@@ -3452,6 +3466,30 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     the same alert total and the task list is not capped, the last alert's
     day and who searches it (its home worker, or "whoever is free"). The coordinator's
     counts are not tagged per worker, so there is no worker or item filter.
+  - **Proxies** (`/#/fleet/proxies`, v1.368.0, RS-424): the health of every
+    proxy port the fleet browses through, between Analysis and Account pool,
+    with the number down as a warn-coloured chip on the tab bar. Rows are the
+    ERP's proxies (Account pool ▸ Proxies, by label) and every port the homelab
+    console holds, dialed or idle (by host:port, marked Homelab; v1.368.1,
+    RS-425). A port on both lists is one row, the ERP's. Every five
+    minutes one backend instance checks each ERP proxy through the proxy
+    itself, http, https or socks5, with a lookup at ipinfo.io, and calls
+    rs_console's `/v1/proxies/health` to do the same for the homelab ports
+    (facebook-tracker 0.14.14); a console without it leaves those rows
+    out with a note, and one that stops answering keeps them as last
+    reported. A row gives the state — **Up**, **Degraded** (slower than 3 s,
+    or one missed check after answering), **Down** (two misses in a row) or
+    **Unchecked** — with the error under it and the RS-365 DEAD chip, the
+    last latency, the exit IP with its city, region and country (ISP on
+    hover) and "was <ip>" when it changed in the last 24 hours, the day as 48
+    half-hour ticks in each bucket's worst state with the uptime over its
+    checks, when it was last checked, and who uses it (the ERP accounts on it
+    with "parked" and the homelab workers, linked, or "Nobody"). Down rows come first. The
+    toolbar has the legend with counts, a source select and a search over
+    label, port, exit IP, city, worker and account. **Check all now** runs a
+    round unless one started in the last 15 s; the row button checks one ERP
+    proxy (homelab ports are checked together). Checks are kept 14 days. No
+    proxy login reaches the browser, the log or the table.
   - **Account pool** (`/#/fleet/pool`, v1.344.0): as before, plus a **Runs
     on** column: the ERP worker holding the account's slot with its state
     and epoch, linking to the worker page; else the coordinator's worker as

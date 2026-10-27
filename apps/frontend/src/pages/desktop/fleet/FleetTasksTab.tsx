@@ -14,7 +14,7 @@ import {
   lastDoneSearch, logByItem, roundStartPreview, sortTasks, withCityNames, workersBusy,
   type BeltMark, type BeltRow, type TaskFilter, type Translate,
 } from './fleetBoard';
-import { agoLabel, Clock, EmptyRow, UnavailableCard, useFleetPoll, WorkerLink } from './shared';
+import { agoLabel, Clock, EmptyRow, UnavailableCard, useFleetMirror, useFleetPoll, WorkerLink } from './shared';
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
 // What the fleet is working through. The belt: one row per enabled item on a
@@ -70,6 +70,7 @@ export function FleetTasksTab() {
     if (first.current) { first.current = false; return; }
     reload();
   }, [range, reload]);
+  const mirror = useFleetMirror();
   const [starting, setStarting] = useState(false);
   const [searching, setSearching] = useState<string | null>(null);
   const [filter, setFilter] = useState<TaskFilter>(EMPTY_TASK_FILTER);
@@ -84,10 +85,12 @@ export function FleetTasksTab() {
     <div className="fp-pool">
       <div className="fleet-tab-head">
         <p className="fleet-lede">{t('fleetTasksLede')}</p>
-        <div className="page-actions">
-          <button type="button" className="btn" onClick={() => setSearching('')} disabled={!data || items.length === 0}>{t('fleetSearchCityNow')}</button>
-          <button type="button" className="btn primary" onClick={() => setStarting(true)} disabled={!data}>{t('fleetRoundStart')}</button>
-        </div>
+        {!mirror && (
+          <div className="page-actions">
+            <button type="button" className="btn" onClick={() => setSearching('')} disabled={!data || items.length === 0}>{t('fleetSearchCityNow')}</button>
+            <button type="button" className="btn primary" onClick={() => setStarting(true)} disabled={!data}>{t('fleetRoundStart')}</button>
+          </div>
+        )}
       </div>
       <section className="card fleet-card" aria-label={t('fleetBeltTitle')}>
         <div className="card-body">
@@ -354,6 +357,7 @@ export function CityLogAside({ city, items, slots, onSearchNow, now = Date.now()
   city: FleetCity | null; items: readonly string[]; slots: readonly FleetSlot[]; onSearchNow: (slug: string) => void; now?: number;
 }) {
   const { t, locale } = useT();
+  const mirror = useFleetMirror();
   const [log, setLog] = useState<LogState>(null);
   const slug = city?.slug ?? null;
   useEffect(() => {
@@ -385,7 +389,7 @@ export function CityLogAside({ city, items, slots, onSearchNow, now = Date.now()
           <span className="card-sub mono">{city.slug}</span>
         </div>
         <div className="fleet-actions">
-          <button type="button" className="btn sm" onClick={() => onSearchNow(city.slug)} disabled={!city.enabled}>{t('fleetSearchNow')}</button>
+          {!mirror && <button type="button" className="btn sm" onClick={() => onSearchNow(city.slug)} disabled={!city.enabled}>{t('fleetSearchNow')}</button>}
           <a className="btn sm ghost" href={hrefFor(fleetTabPath('cities'))} onClick={onLinkClick(fleetTabPath('cities'))}>{t('fleetCityEdit')}</a>
         </div>
       </div>

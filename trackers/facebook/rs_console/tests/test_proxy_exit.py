@@ -127,3 +127,29 @@ def test_an_empty_cache_holds_the_page_only_briefly(monkeypatch):
     # A first load after a restart must not wait seconds on lookups that the
     # next refresh shows anyway.
     assert waited < 1.0
+
+
+def test_check_dials_fresh_and_shares_an_answer_for_a_minute(geo):
+    key = ("http://isp.example:10001", "user", "pw")
+    proxy_exit._checks.clear()
+    first = asyncio.run(proxy_exit.check([key, key]))[key]
+    assert first["ok"] is True and first["ip"] == IPINFO["ip"]
+    assert isinstance(first["latency_ms"], int)
+    assert geo["proxies"] == ["http://user:pw@isp.example:10001"]
+    # A good check refreshes the exit the fleet page shows.
+    assert proxy_exit._cache[key][1]["city"] == "Ashburn"
+
+    asyncio.run(proxy_exit.check([key]))
+    assert len(geo["calls"]) == 1
+    proxy_exit._checks.clear()
+    asyncio.run(proxy_exit.check([key]))
+    assert len(geo["calls"]) == 2
+
+
+def test_a_failed_check_is_worded_here_and_names_no_login(geo):
+    proxy_exit._checks.clear()
+    geo["response"] = httpx.Response(502, text="bad gateway user:pw")
+    key = ("http://isp.example:10001", "user", "pw")
+    found = asyncio.run(proxy_exit.check([key]))[key]
+    assert found["ok"] is False and found["error"] == "Lookup answered 502"
+    assert "pw" not in str(found)

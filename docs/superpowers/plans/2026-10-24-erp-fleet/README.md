@@ -102,6 +102,36 @@ E join as they land.
 
 ## Status
 
+**Remaining legacy cutover (RS-426, 2026-10-27):** nj-3b, ne-1, va-2 and
+va-2b are HEALTHY as homelab-1 through -4. mw-1 transferred parked on its failed
+proxy; phl-1/ca-2b keep Retired/Problem status, with no new browser boot.
+All seven legacy launches are retired with full session/cache backups.
+The coordinator relay now admits local Docker traffic and worker-60-14;
+the first canary's initial ledger gap is explicit in [WS-H](WS-H-migration.md).
+Runtime stays 0.14.10, relay/cleanup release is 0.14.15, dev alerts stay off.
+
+**Five-worker batch (RS-423, 2026-10-27):** nyc-1 (#16), sc-1 (#12),
+homelab-1 (#9), ca-4b (#36) and nj-2b (#33) are HEALTHY on dev workers
+worker-60-14-5 through -9. Each restored its full session once, with original
+proxy/device and listing cache, and browser starts at least three minutes
+apart. Legacy launch paths are retired; existing fleet containers and parked
+west-1 were retained. Runtime stays 0.14.10; cleanup is versioned 0.14.13.
+Alerts remain off; see [WS-H](WS-H-migration.md).
+
+**Random extension (RS-422, 2026-10-27):** denver-1 (#10) restored its full
+session in one boot and is HEALTHY as worker-60-14-4 on 0.14.10. Its exact
+proxy, pinned browser header, 21 IndexedDB databases and 28,524-entry listing
+cache were preserved. Legacy launch files are retired; other workers and
+west-1's parked slot were unchanged. This remains a dev pilot with alerts off;
+see [WS-H](WS-H-migration.md).
+
+**Extension (RS-421, 2026-10-27):** wc-1b (#30) restored its complete
+session in one boot and is HEALTHY as worker-60-14-1 on 0.14.10. west-1
+(#15) is fully staged but parked because its unchanged proxy returns 503
+from both hosts, before Facebook login. Its IP was not changed and no
+browser retry was made. The parent cutover remains open. Details in
+[WS-H](WS-H-migration.md).
+
 **Latest live pilot (2026-10-27):** RS-419 / #940 preserved the complete
 session before moving healthy ca-3 (#55) to the dev ERP fleet as
 `worker-60-14-3`, worker 0.14.8 / ERP v1.367.1. One boot restored its session;

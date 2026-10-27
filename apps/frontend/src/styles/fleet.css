@@ -861,3 +861,11 @@
     grid-template-columns: auto minmax(0, 1fr);
   }
 }
+
+/* Proxies: the day's checks as half-hour ticks, oldest first. */
+.fleet-proxy-strip { display: inline-flex; gap: 1px; align-items: stretch; height: 14px; }
+.fleet-proxy-strip i { width: 4px; border-radius: 1px; background: var(--border); }
+.fleet-proxy-strip i.is-up { background: var(--pos); }
+.fleet-proxy-strip i.is-degraded { background: var(--warn); }
+.fleet-proxy-strip i.is-down { background: var(--neg); }
+.fleet-proxy-workers { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; }

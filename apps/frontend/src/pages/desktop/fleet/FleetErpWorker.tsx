@@ -15,7 +15,7 @@ import {
   deviceText, erpCheckpoint, erpCityChips, erpCityLog, erpHistory, erpHistoryDot, erpProxyText, erpWorkerStatus, sessionDaysLeft,
   type ErpHistoryLine,
 } from './fleetWorkerView';
-import { ParkDialog, ReleaseQuarantineButton, UnparkDialog } from './shared';
+import { ParkDialog, ReleaseQuarantineButton, UnparkDialog, useFleetMirror } from './shared';
 import {
   AccountsUsed, CheckpointsCard, ErpBuildChip, Muted, NoThumb, WorkerCard, WorkerHead, WorkerHistory, type HistoryEntry, type WorkerField,
 } from './workerDetail';
@@ -34,6 +34,7 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
   detail: FleetWorkerDetail; stints: FbWorkerStint[] | null; onReload: () => void; now?: number;
 }) {
   const { t, locale } = useT();
+  const mirror = useFleetMirror();
   const [dialog, setDialog] = useState<Dialog>(null);
   const w = d.worker;
   const acct = d.account;
@@ -145,13 +146,15 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
             fields={fields}
             actions={<>
               {watchButton('btn')}
-              {slot && !slot.parked && <button type="button" className="btn" onClick={() => setDialog('park')}>{t('fleetPark')}</button>}
-              {slot?.parked && <button type="button" className="btn" onClick={() => setDialog('unpark')}>{t('fleetUnpark')}</button>}
-              {slot && (
-                <button type="button" className="btn" onClick={() => setDialog('remove')} disabled={!removable}
-                  title={removable ? undefined : t('fleetRemoveHeld')}>{t('fpRemoveFromFleet')}</button>
-              )}
-              <button type="button" className="btn" onClick={() => setDialog('search')}>{t('fleetSearchCityNow')}</button>
+              {!mirror && <>
+                {slot && !slot.parked && <button type="button" className="btn" onClick={() => setDialog('park')}>{t('fleetPark')}</button>}
+                {slot?.parked && <button type="button" className="btn" onClick={() => setDialog('unpark')}>{t('fleetUnpark')}</button>}
+                {slot && (
+                  <button type="button" className="btn" onClick={() => setDialog('remove')} disabled={!removable}
+                    title={removable ? undefined : t('fleetRemoveHeld')}>{t('fpRemoveFromFleet')}</button>
+                )}
+                <button type="button" className="btn" onClick={() => setDialog('search')}>{t('fleetSearchCityNow')}</button>
+              </>}
               {slot?.quarantined_until && Date.parse(slot.quarantined_until) > now && <ReleaseQuarantineButton slot={slot} onDone={onReload} />}
             </>} />
 
@@ -167,7 +170,7 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
             </>,
             actions: <>
               {watchButton('btn sm')}
-              {slot && !slot.parked && <button type="button" className="btn sm" onClick={() => setDialog('park')}>{t('fleetPark')}</button>}
+              {slot && !slot.parked && !mirror && <button type="button" className="btn sm" onClick={() => setDialog('park')}>{t('fleetPark')}</button>}
             </>,
           }] : []} />
 

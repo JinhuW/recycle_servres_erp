@@ -30,7 +30,7 @@ import { CookieLabel, PoolCode, STATUS_KEYS, StatusChip } from './accountPool/sh
 import { isQuarantined, leaseLive } from './fleet/fleetBoard';
 import { fleetRowAction } from './fleet/proxyRules';
 import { AddToFleetDialog, ProxiesCard, RemoveFromFleetDialog, useFleetProxies } from './fleet/FleetProxies';
-import { ReleaseQuarantineButton, UnparkDialog, workerStateLabel } from './fleet/shared';
+import { ReleaseQuarantineButton, UnparkDialog, useFleetMirror, workerStateLabel } from './fleet/shared';
 import { STATUS_KEY, StatusChip as WorkerStatusChip, statusNote } from './FleetWorkers';
 import '../../styles/facebookPool.css';
 
@@ -135,6 +135,9 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
   // The ERP fleet's proxies, once its slots answered: without the fleet API
   // there is nothing to add an account to.
   const fleetProxies = useFleetProxies(manager && slots !== null);
+  // The pool is this ERP's own, but its fleet buttons write to /api/fleet,
+  // which a mirror refuses.
+  const fleetMirror = useFleetMirror(manager);
   const fleetChanged = () => {
     void poolApi.snapshot().then(onSnapshot).catch(() => undefined);
     onSlotsChanged?.();
@@ -349,7 +352,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
       return (
         <span className="fp-holder">
           <span className="fp-muted">{t('fpRunsOnParked')}</span>
-          <span><button type="button" className="btn sm" onClick={() => setUnparking(slot)}>{t('fleetUnpark')}</button></span>
+          {!fleetMirror && <span><button type="button" className="btn sm" onClick={() => setUnparking(slot)}>{t('fleetUnpark')}</button></span>}
         </span>
       );
     }
@@ -359,7 +362,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
   };
   // Into and out of the ERP fleet, from the account's own row.
   const fleetAction = (a: PoolAccount) => {
-    if (slots === null || fleetProxies.proxies === null) return null;
+    if (slots === null || fleetProxies.proxies === null || fleetMirror) return null;
     const action = fleetRowAction(a, slotsByNo.get(a.no));
     if (!action) return null;
     if (action.kind === 'add' || action.kind === 'add-blocked') {

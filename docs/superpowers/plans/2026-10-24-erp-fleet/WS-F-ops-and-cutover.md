@@ -526,6 +526,12 @@ Bringing one back (worker `<id>`, files `<x>`):
 
 ## Cutover runbook (prod)
 
+> **Superseded by RS-427 (2026-10-27).** The fleet went to prod without new
+> logins: prod took dev's fleet rows, slotted pool rows (resealed) and worker
+> token key, dev became a mirror (`FLEET_ROLE=mirror`), and the dev Worker
+> forwards agent and worker calls to prod. The ticket has the steps; the
+> runbook below is kept as the original plan.
+
 0. Owner's yes to start. dev → main release carrying A–E (ERP) and the
    tracker release with the new worker image. Prod env vars set. Imports and
    slot seed run against prod (`memory: fb-pool-prod-import` for creds).

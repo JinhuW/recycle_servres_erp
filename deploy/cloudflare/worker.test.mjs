@@ -97,3 +97,42 @@ test('a response the Worker did not rewrite is the origin response itself (strea
   assert.equal(seen[0].headers.get('Upgrade'), 'websocket');
   assert.equal(seen[0].headers.get('Authorization'), 'Bearer w');
 });
+
+const FORWARD = { FLEET_FORWARD_URL: 'https://prod-backend.example/', FLEET_FORWARD_PROXY_SECRET: 'prod-secret', PROXY_SECRET: 'dev-secret' };
+
+test('with FLEET_FORWARD_URL, an agent or worker call goes to that ERP with its proxy secret', async () => {
+  const res = await worker.fetch(claim(), env(FORWARD));
+  assert.deepEqual(await res.json(), { ...CLAIM, env: SHARED });
+  assert.equal(seen[0].url, 'https://prod-backend.example/api/fleet/worker/claim');
+  assert.equal(seen[0].headers.get('X-Proxy-Secret'), 'prod-secret');
+  assert.equal(seen[0].headers.get('Authorization'), 'Bearer host');
+
+  seen = [];
+  const desired = new Request('https://inventory-dev.example/api/fleet/hosts/lab/desired?x=1', { headers: { Authorization: 'Bearer h' } });
+  await worker.fetch(desired, env(FORWARD));
+  assert.equal(seen[0].url, 'https://prod-backend.example/api/fleet/hosts/lab/desired?x=1');
+
+  seen = [];
+  const relay = new Request('https://inventory-dev.example/api/fleet/worker/vnc', {
+    headers: { Upgrade: 'websocket', Connection: 'Upgrade', Authorization: 'Bearer w' },
+  });
+  const origin = new Response('held', { status: 200 });
+  answer = () => origin;
+  assert.equal(await worker.fetch(relay, env(FORWARD)), origin);
+  assert.equal(seen[0].url, 'https://prod-backend.example/api/fleet/worker/vnc');
+});
+
+test('with FLEET_FORWARD_URL, a manager call and any non-fleet call stay on BACKEND_URL', async () => {
+  answer = () => new Response('{}', { status: 200 });
+  const reqs = [
+    new Request('https://inventory-dev.example/api/fleet/hosts', { headers: { Cookie: 'at=x' } }),
+    new Request('https://inventory-dev.example/api/mcp', { method: 'POST', headers: { Authorization: 'Bearer oauth' }, body: '{}' }),
+    new Request('https://inventory-dev.example/api/fleetish', { headers: { Authorization: 'Bearer w' } }),
+  ];
+  for (const req of reqs) {
+    seen = [];
+    await worker.fetch(req, env(FORWARD));
+    assert.ok(seen[0].url.startsWith('https://backend.example/'), seen[0].url);
+    assert.equal(seen[0].headers.get('X-Proxy-Secret'), 'dev-secret');
+  }
+});

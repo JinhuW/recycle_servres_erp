@@ -78,7 +78,11 @@ fi
 # with an empty fleet, so stop and leave dev as it is for a person to decide:
 # run restore-fleet.sql against dev, or DROP SCHEMA sync_keep CASCADE to let
 # the fleet go.
-if [ "$(psql -tA "$DEV_DATABASE_URL" -c "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'sync_keep')")" = "t" ]; then
+# SYNC_KEEP_FLEET=0 once the fleet runs on prod: dev then takes prod's fleet
+# like everything else, scrubbed, and its backend (FLEET_ROLE=mirror) only
+# shows it.
+keep_fleet=${SYNC_KEEP_FLEET:-1}
+if [ "$keep_fleet" = "1" ] && [ "$(psql -tA "$DEV_DATABASE_URL" -c "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'sync_keep')")" = "t" ]; then
   echo "[sync] REFUSING: dev still holds sync_keep from a run whose fleet restore did not finish" >&2
   exit 1
 fi
@@ -105,7 +109,7 @@ pg_dump --no-owner --no-privileges "$PROD_DATABASE_URL" > "$dump"
 # in public and is dropped by the CASCADE; the dump's CREATE EXTENSION
 # restores it. keep-fleet.sql sets dev's fleet aside in sync_keep first.
 {
-  cat /usr/local/share/sync/keep-fleet.sql
+  if [ "$keep_fleet" = "1" ]; then cat /usr/local/share/sync/keep-fleet.sql; fi
   echo 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
   cat "$dump"
   cat /usr/local/share/sync/scrub.sql
@@ -134,6 +138,10 @@ echo "[sync] backend redeploy triggered"
 # copy: wait until every migration dev had before is applied again, then put
 # the fleet back. A failed query here (the backend's migrate holding a lock, a
 # blip) is just another wait.
+if [ "$keep_fleet" != "1" ]; then
+  echo "[sync] done $(date -u +%Y-%m-%dT%H:%M:%SZ); dev's fleet is prod's copy"
+  exit 0
+fi
 wait_s=${FLEET_RESTORE_WAIT_SECONDS:-1200}
 waited=0
 while :; do

@@ -2,8 +2,8 @@
 
 | host_id | Address | Role today | Role in the fleet | Status |
 | --- | --- | --- | --- | --- |
-| `homelab` | `jinhu@10.10.10.73` | Runs the Python coordinator, console, 41 compose workers, OpenSearch logs; since 2026-10-26 also `rs-coordinator-lan` (the fleet's coordinator route, below) | Keeps the coordinator (alerts); becomes a fleet host after cutover (WS-F) | live, do not touch outside WS-F |
-| `worker-60-14` | `ssh worker@10.10.60.14` | — | **First fleet host.** Pilot workers run here (WS-F) | named by the owner 2026-10-24; read-only host prep ran the same day (Ubuntu 24.04.5, 8 CPUs, 62 GB, Docker 29.9.2), no container on it. See *Reachability* below |
+| `homelab` | `jinhu@10.10.10.73` | Python coordinator, console, OpenSearch and four ERP fleet workers; all legacy monitor launches retired | Active dev fleet host, capacity 4 | RS-426, 2026-10-27; sessions restored once, alerts off |
+| `worker-60-14` | `worker@10.10.60.14` | Eight running ERP worker containers and one parked container on operator hold | First dev fleet host, capacity 13 | Existing containers retained during RS-426; SESSION_EXPIRED workers left untouched |
 
 ## Reachability of `10.10.60.14`
 
@@ -45,6 +45,12 @@
   prod's backend refuses requests that lack the Worker's
   `X-Proxy-Secret`. `https://api.recycleservers.com` is not the ERP (it
   answers Cloudflare 522).
+  Since RS-427 the fleet lives on prod and dev is a read-only mirror
+  (`FLEET_ROLE=mirror`). Agents and workers started with the dev URL still
+  work: the dev Worker forwards their bearer calls to prod
+  (`FLEET_FORWARD_URL`, `FLEET_FORWARD_PROXY_SECRET`, both Worker secrets so a
+  deploy keeps them). A new or re-pointed agent takes the prod URL. The
+  forward is removed once no container holds the dev URL.
 - Shared worker secrets are the Cloudflare Worker secret FLEET_WORKER_ENV JSON,
   added only to a successful host-authenticated claim. Provision the edge secret
   before the agent/worker release; these values never enter Railway or Postgres.
@@ -52,46 +58,47 @@
 
 ## Coordinator route
 
-The coordinator container (`rs-coordinator`) publishes only on the VM's
-loopback (`127.0.0.1:8500`); compose workers on the VM reach it as
-`http://rs-coordinator:8500` over the `rs-fleet` Docker network. A fleet host
-reaches it through a separate forwarder, added on 2026-10-26 without
-touching any running container (the LAN publish in
-`deploy/docker-compose.coordinator-lan.yml` would recreate the coordinator,
-which serves the live workers):
+The coordinator publishes only on loopback (`127.0.0.1:8500`). Legacy
+containers reached it by name on `rs-fleet`; ERP workers use the separate LAN
+relay at `10.10.10.73:8500`, so the coordinator does not need recreation.
 
-| What | Value |
+The original socat relay (2026-10-26) admitted only worker-60-14. During the
+2026-10-27 homelab migration it rejected local Docker hairpin traffic, seen
+as `172.24.0.1`. RS-426 replaced only that relay with pinned HAProxy. No coordinator, console or worker browser was restarted. The peer host agent
+was reloaded once to hold its pre-existing expired, stopped worker.
+
+| What | Current value |
 | --- | --- |
-| Container | `rs-coordinator-lan` on the VM, image `alpine/socat:1.8.0.3`, network `rs-fleet`, `--restart unless-stopped`, 64 MB, logs capped at 2 × 1 MB |
-| Listens | `10.10.10.73:8500` (the VM's LAN address; loopback `:8500` stays the coordinator's own publish) |
-| Forwards to | `rs-coordinator:8500` |
-| Admits | **only `10.10.60.14`** (`socat … range=10.10.60.14/32`); anything else is refused at accept, the VM itself included. Docker keeps the client's address, so the range works |
-| `FLEET_COORDINATOR_URL` (Railway dev, `backend`) | `http://10.10.10.73:8500` |
-| Firewall | none changed. Ports Docker publishes are reached from `10.10.60.14` (8080, 3000, 5601 answered before), and `:8500` answered as soon as the forwarder ran |
+| Container | `rs-coordinator-lan`, pinned `haproxy:3.2-alpine@sha256:5893840576071e6217cd52ebdcc14f454c6f7a631056fa6f4e0f40d3cac4215b` |
+| Compose/config | `trackers/facebook/deploy/docker-compose.coordinator-relay.yml` and `coordinator-relay.cfg` |
+| Listens | `10.10.10.73:8500`; the coordinator keeps its separate loopback publish |
+| Destination | `rs-coordinator:8500` on `rs-fleet`, with Docker DNS re-resolution |
+| Allowed sources | `10.10.60.14/32` and local Docker hairpin gateway `172.24.0.1/32` |
+| Limits | 64 MB, one HAProxy thread, 128 connections, capped logs |
+| Backend setting | Dev `FLEET_COORDINATOR_URL=http://10.10.10.73:8500`, unchanged |
+| Rollback | Original socat container retained stopped as `rs-coordinator-lan-socat-rollback-20261027` |
 
-Started with:
+Manage only the relay from the tracker directory on homelab:
 
 ```bash
-ssh jinhu@10.10.10.73 docker run -d --name rs-coordinator-lan --restart unless-stopped \
-  --network rs-fleet -p 10.10.10.73:8500:8500 --memory 64m \
-  --log-opt max-size=1m --log-opt max-file=2 \
-  --label com.recycleservers.purpose=coordinator-lan-forwarder \
-  alpine/socat:1.8.0.3 -d TCP-LISTEN:8500,fork,reuseaddr,range=10.10.60.14/32 TCP:rs-coordinator:8500
+docker compose -f deploy/docker-compose.coordinator-relay.yml config --quiet
+docker compose -f deploy/docker-compose.coordinator-relay.yml run --rm --no-deps --entrypoint haproxy coordinator-relay -c -f /usr/local/etc/haproxy/haproxy.cfg
+docker compose -f deploy/docker-compose.coordinator-relay.yml up -d --no-deps coordinator-relay
 ```
 
-Checked from `10.10.60.14` on 2026-10-26: `GET /healthz` 200 (coordinator
-0.13.18), `POST /v1/heartbeat` without a token 401, and with a token minted
-for `worker-60-14-1`: `POST /v1/workers/worker-60-14-1/directives` 200
-`{"directives":[]}`, the same with a forged signature 401,
-`GET /v1/session/worker-60-14-1/restore` 404 (no backup) and
-`/v1/session/homelab-1/restore` 403 (a worker reaches only its own). From the
-VM itself the forwarder refuses the connection (range).
+Both worker hosts returned 200 from `/healthz` after the change. The homelab
+VM itself remains rejected because its LAN source address is not allowed.
+A homelab worker token was authenticated but refused (403) when requesting
+another worker's session. Extend the explicit ACL and validate it before
+adding another host; do not open it to the whole LAN. The older
+`docker-compose.coordinator-lan.yml` is a coordinator port override, not
+this relay's compose file.
 
-A second fleet host: widen the range (stop and remove `rs-coordinator-lan`,
-run it again with `range=<a>/32` per host, or a subnet) — the forwarder runs
-no account, so replacing it is safe — and add the host's worker ids to
-`RS_CONTROL_PLANE_TOKENS` (`CONTRACTS.md` §2). Removing the route: `docker rm
--f rs-coordinator-lan` and unset `FLEET_COORDINATOR_URL`.
+The first canary restored before the relay correction, so its coordinator
+ledger request was lost. Its one restored boot is verified from container
+start/claim/log evidence; no audit row was fabricated and no browser rebooted.
+All subsequent active handovers recorded one restored boot in the ledger.
+Full details and backup references are in WS-H-migration.md.
 
 Auth: per-worker tokens, `docker exec rs-coordinator rsc mint-token --worker
 <worker id>`, carried to the workers in the Cloudflare secret
@@ -180,7 +187,7 @@ ssh worker@10.10.60.14 '
 | `docker ps -a` | empty, or only things the owner knows | anything else sharing the host is worth knowing before the pilot |
 | `erp 200` | 200 within a second or two | no outbound HTTPS: the host is useless for the fleet |
 | `ghcr 401` | 401 (anonymous is refused, but the host reaches the registry) | a 000 means no route to GitHub |
-| `10.10.10.73:8500` | `open` from `10.10.60.14` since 2026-10-26 (`rs-coordinator-lan`); `closed` from any other host | the forwarder is down (`docker ps` on the VM) or the host is not in its range |
+| `10.10.10.73:8500` | `open` from `10.10.60.14` since 2026-10-26 (`rs-coordinator-lan`); `closed` from any other host | the forwarder is down (`docker ps` on the VM) or the host is not in its source allowlist |
 | time | synchronized, any zone | worker tokens expire by wall clock; fix NTP first |
 
 Paste the whole output back; it goes into *Timings and surprises* in

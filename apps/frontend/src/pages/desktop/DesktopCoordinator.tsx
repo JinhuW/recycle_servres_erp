@@ -13,7 +13,7 @@ import { poolApi, type PoolSnapshot } from '../../lib/facebookPool';
 import { FacebookAccountPool } from './FacebookAccountPool';
 import { FormSkeleton } from '../../components/Skeleton';
 import { fleetRows, fleetRunning } from './fleet/fleetRows';
-import { useFleetPoll } from './fleet/shared';
+import { FleetMirrorBanner, useFleetMirror, useFleetPoll } from './fleet/shared';
 
 // The viewer carries noVNC; it is its own chunk, fetched only when a manager
 // actually opens a worker's browser, and it too decides between the ERP's
@@ -37,9 +37,11 @@ const FleetTabPage = lazy(() => import('./fleet/FleetPage').then(m => ({ default
 
 const COUNTS_MS = 30_000;
 
-type TabIcon = 'shield' | 'clock' | 'globe' | 'analytics' | 'users';
-const FLEET_TAB_TITLE: Record<FleetTab, string> = { tasks: 'fleetTasksTitle', cities: 'fleetCitiesTitle', analysis: 'fleetAnalysisTitle' };
-const TAB_ICON: Record<FleetTab, TabIcon> = { tasks: 'clock', cities: 'globe', analysis: 'analytics' };
+type TabIcon = 'shield' | 'clock' | 'globe' | 'analytics' | 'zap' | 'users';
+const FLEET_TAB_TITLE: Record<FleetTab, string> = {
+  tasks: 'fleetTasksTitle', cities: 'fleetCitiesTitle', analysis: 'fleetAnalysisTitle', proxies: 'fleetProxiesTitle',
+};
+const TAB_ICON: Record<FleetTab, TabIcon> = { tasks: 'clock', cities: 'globe', analysis: 'analytics', proxies: 'zap' };
 
 type Props = { showToast?: (msg: string, kind?: 'success' | 'error') => void };
 
@@ -78,6 +80,7 @@ export function DesktopCoordinator({ showToast }: Props) {
     loadSlots();
   }, [manager, poolOpen, loadSlots]);
   const counts = useTabCounts(manager && !watch && !worker);
+  const mirror = useFleetMirror(manager);
   if (watch) {
     return (
       <Suspense fallback={<FormSkeleton fields={4} />}>
@@ -104,6 +107,7 @@ export function DesktopCoordinator({ showToast }: Props) {
         <Icon name={TAB_ICON[tab]} size={14} />{t(FLEET_TAB_TITLE[tab])}
         {tab === 'tasks' && chip(counts.due, true)}
         {tab === 'cities' && chip(counts.cities)}
+        {tab === 'proxies' && chip(counts.proxiesDown, true)}
       </a>
     ))}
     <a className={`tab ${poolOpen ? 'active' : ''}`} href={hrefFor('/fleet/pool')} onClick={onLinkClick('/fleet/pool')} aria-current={poolOpen ? 'page' : undefined}>
@@ -126,16 +130,16 @@ export function DesktopCoordinator({ showToast }: Props) {
   }
   return (
     <Suspense fallback={<>{head}{tabs}<FormSkeleton fields={4} /></>}>
-      <FleetTabPage key={fleetTab ?? 'fleet'} tab={fleetTab ?? 'fleet'} head={head} tabs={tabs} />
+      <FleetTabPage key={fleetTab ?? 'fleet'} tab={fleetTab ?? 'fleet'} head={<>{head}{mirror && <FleetMirrorBanner />}</>} tabs={tabs} />
     </Suspense>
   );
 }
 
-type TabCounts = { running: number | null; due: number | null; cities: number | null; pool: number | null };
-const NO_COUNTS: TabCounts = { running: null, due: null, cities: null, pool: null };
+type TabCounts = { running: number | null; due: number | null; cities: number | null; pool: number | null; proxiesDown: number | null };
+const NO_COUNTS: TabCounts = { running: null, due: null, cities: null, pool: null, proxiesDown: null };
 
 // The tab bar's chips: running workers (ERP and coordinator), tasks due now,
-// cities, pool accounts. Read on its own clock, slower than the tabs, since
+// cities, proxies down, pool accounts. Read on its own clock, slower than the tabs, since
 // each tab reads what it shows itself; the reads it shares with the open tab
 // go out once (lib/sharedGet.ts). The ERP's counts show at once, the running
 // count once the coordinator has answered too, so it never jumps.
@@ -146,8 +150,9 @@ function useTabCounts(on: boolean): TabCounts {
     return Promise.all([
       fleetApi.slots(), fleetApi.workers(), fleetApi.tasks({ state: 'ready' }), fleetApi.cities(),
       poolApi.summary().then(s => s.accounts).catch(() => null),
-    ]).then(([slots, workers, ready, cities, pool]) => ({
-      slots, workers, pool,
+      fleetApi.proxyHealth().then(h => h.proxies.filter(p => p.state === 'down').length).catch(() => null),
+    ]).then(([slots, workers, ready, cities, pool, proxiesDown]) => ({
+      slots, workers, pool, proxiesDown,
       due: ready.filter(x => x.kind === 'search' && Date.parse(x.due_at) <= now).length,
       cities: cities.length,
     }));
@@ -163,6 +168,6 @@ function useTabCounts(on: boolean): TabCounts {
     const running = c
       ? fleetRunning(fleetRows({ slots: erp.slots, workers: erp.workers, release: null, pool: erp.pool, ...c }, Date.now())).running
       : null;
-    return { running, due: erp.due, cities: erp.cities, pool: erp.pool?.length ?? null };
+    return { running, due: erp.due, cities: erp.cities, pool: erp.pool?.length ?? null, proxiesDown: erp.proxiesDown };
   }, [erp, coord]);
 }

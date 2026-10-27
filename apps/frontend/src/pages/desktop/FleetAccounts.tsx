@@ -16,6 +16,7 @@ import {
 import { useT } from '../../lib/i18n';
 import type { Translate } from '../../lib/orderPresentation';
 import { fleetWatchPath, hrefFor, navigate, onLinkClick } from '../../lib/route';
+import { useFleetMirror } from './fleet/shared';
 
 // ─── Fleet building blocks ────────────────────────────────────────────────────
 // The pieces the fleet list (FleetWorkers.tsx), the worker page
@@ -110,6 +111,7 @@ export function ReloginButton({ workerId, account, fleet = false, disabledReason
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState(false);
+  const mirror = useFleetMirror(fleet);
   const automatic = fleet || reloginIsAutomatic(account);
 
   const confirm = (watch: boolean) => {
@@ -130,6 +132,7 @@ export function ReloginButton({ workerId, account, fleet = false, disabledReason
       .finally(() => setBusy(false));
   };
 
+  if (mirror) return null;
   return (
     <>
       <button type="button" className={className} disabled={busy || queued || !!disabledReason}

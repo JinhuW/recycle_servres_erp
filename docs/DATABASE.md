@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-26:** ERP migration `0213`, Reddit tracker migration `0006`,
+**As of 2026-10-27:** ERP migration `0215`, Reddit tracker migration `0006`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2203,7 +2203,7 @@ Only the latest revive is kept; the backend logs each one.
 
 The ERP fleet: the city task queue the Facebook Marketplace workers pull from, and the slots they run pool accounts in. fleet_cities and fleet_items are the catalog managers edit; fleet_settings holds the queue's knobs; fleet_tasks is one open task per enabled city and item, with fleet_task_events as its log; fleet_hosts are the machines that run worker containers; fleet_slots is the fleet's view of each pool account (who runs it, where, under which lease epoch) and fleet_workers the containers that heartbeat. fleet_minutes is a view that sums each account's leased minutes per UTC day for the daily budget. The accounts themselves and their secrets stay in fb_pool_accounts. Migration 0206 creates all of it; the routes under /api/fleet fill it in later releases.
 
-Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_proxies`](#erp-fleet-proxies), [`fleet_slots`](#erp-fleet-slots), [`fleet_workers`](#erp-fleet-workers), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
+Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_proxies`](#erp-fleet-proxies), [`fleet_proxy_checks`](#erp-fleet-proxy-checks), [`fleet_proxy_rounds`](#erp-fleet-proxy-rounds), [`fleet_slots`](#erp-fleet-slots), [`fleet_workers`](#erp-fleet-workers), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
 
 <a id="erp-fleet-cities"></a>
 
@@ -2323,6 +2323,45 @@ The proxies the ERP fleet browses through, as a list managers edit on the Accoun
 - **Primary key:** `id`
 - **References:** `created_by` → `users.id` (on delete set null)
 - **Indexes:** `fleet_proxies_exit_idx` unique (lower(host), port), `fleet_proxies_created_by_idx` (created_by)
+
+<a id="erp-fleet-proxy-checks"></a>
+
+#### `fleet_proxy_checks`
+
+One health check of one proxy port, dialed through the proxy itself to an IP-geo lookup (`fleet/proxyProbe.ts`). Every five minutes a round checks each `fleet_proxies` row from the backend and each port the homelab workers dial through rs_console's `/v1/proxies/health`; **Check now** on the Proxies tab adds rows between rounds. Kept 14 days; each round prunes older rows. No login is stored. Migration 0215.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | identity |  |
+| `exit` | `text` | ✓ |  | `scheme://host:port`, login cut out, the name `fb_worker_accounts.proxy_url` uses. |
+| `source` | `text` | ✓ |  | `erp` (a `fleet_proxies` row) or `coordinator` (a homelab port). |
+| `proxy_id` | `integer` |  |  | → fleet_proxies; NULL for a coordinator port or a removed proxy. |
+| `workers` | `text[]` | ✓ | `'{}'` | The homelab workers dialing a coordinator port at the time. |
+| `checked_at` | `timestamptz` | ✓ | `now()` | A round's rows share its `fleet_proxy_rounds.started_at`. |
+| `ok` | `boolean` | ✓ |  | The lookup answered through the proxy. |
+| `latency_ms` | `integer` |  |  | Connect, tunnel and lookup, end to end. |
+| `exit_ip` | `text` |  |  | The address the lookup saw. |
+| `city` / `region` / `country` / `org` | `text` |  |  | Where the exit IP is, and its ISP. |
+| `error` | `text` |  |  | Why a failed check failed, worded by the probe (never a raw socket message). |
+
+- **Primary key:** `id`
+- **References:** `proxy_id` → `fleet_proxies.id` (on delete set null)
+- **Indexes:** `fleet_proxy_checks_exit_idx` (source, exit, checked_at desc), `fleet_proxy_checks_at_idx` (checked_at), `fleet_proxy_checks_proxy_id_idx` (proxy_id)
+
+<a id="erp-fleet-proxy-rounds"></a>
+
+#### `fleet_proxy_rounds`
+
+A single row. A backend instance claims a round by moving `started_at` forward with a conditional UPDATE, so two instances never run the same one. Migration 0215.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `boolean` | ✓ | `true` | Always true: the one row. |
+| `started_at` | `timestamptz` | ✓ | `'-infinity'` | When the last full round started. |
+| `coordinator` | `text` |  |  | What rs_console said last round: ok, not_configured, unsupported, unreachable. |
+| `coordinator_at` | `timestamptz` |  |  | The last round the console answered; its rows are the homelab ports in use. |
+
+- **Primary key:** `id`
 
 <a id="erp-fleet-slots"></a>
 

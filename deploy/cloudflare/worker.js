@@ -67,7 +67,12 @@ export default {
       headers.set('Cache-Control', 'no-cache');
       return new Response(index.body, { status: 200, headers });
     }
-    const backend = env.BACKEND_URL.replace(/\/$/, '');
+    // FLEET_FORWARD_URL: this ERP's fleet moved to another one, and its hosts
+    // and workers still call here. Their calls (a bearer under /api/fleet; a
+    // manager's carry a cookie) go to the ERP that runs the fleet now, so no
+    // container has to restart onto a new URL: each restart is a Facebook login.
+    const forward = Boolean(env.FLEET_FORWARD_URL) && isFleetMachineCall(request, url);
+    const backend = (forward ? env.FLEET_FORWARD_URL : env.BACKEND_URL).replace(/\/$/, '');
     const target = backend + url.pathname + url.search;
     // new Request(target, request) copies method, headers (Cookie,
     // X-Requested-By, Content-Type) and body. redirect:'manual' lets OAuth
@@ -76,7 +81,8 @@ export default {
     // Prove this request came from the Worker so the backend can refuse direct
     // hits to its public Railway origin. PROXY_SECRET is a Worker secret; when
     // it's unset the backend gate is off, so this header is simply omitted.
-    if (env.PROXY_SECRET) proxied.headers.set('X-Proxy-Secret', env.PROXY_SECRET);
+    const proxySecret = forward ? env.FLEET_FORWARD_PROXY_SECRET : env.PROXY_SECRET;
+    if (proxySecret) proxied.headers.set('X-Proxy-Secret', proxySecret);
     // Preserve the hostname the user actually reached us on. `new Request(target,
     // request)` rewrites Host to the Railway origin, so without this the backend
     // cannot tell which of our custom domains was used and its OAuth discovery
@@ -120,6 +126,10 @@ export default {
 };
 
 const FLEET_CLAIM_PATH = '/api/fleet/worker/claim';
+
+function isFleetMachineCall(request, url) {
+  return url.pathname.startsWith('/api/fleet/') && /^Bearer\s/i.test(request.headers.get('Authorization') ?? '');
+}
 
 // The env every fleet worker shares (LLM key, Telegram, ...) is a Worker
 // secret, so it never sits in Railway or Postgres. It rides only on a claim

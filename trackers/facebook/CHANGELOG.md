@@ -18,6 +18,88 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.16] - 2026-10-27
+
+### Fixed
+
+- **`/v1/proxies/health` dials an idle port with its env login.** With every
+  legacy launch retired no worker config names a proxy login, so an idle
+  port found only in a `PROXY_*` var was dialed without one and read Down.
+  When no worker on the same proxy host lends a login, it now takes the
+  `<prefix>_USER` / `_PASS` pair its var's name starts with
+  (`PROXY_HOMELAB_NYC2` → `PROXY_HOMELAB_USER`) (RS-425).
+
+## [0.14.15] - 2026-10-27
+
+- Include the homelab coordinator relay and final legacy launch cleanup from
+  0.14.14 alongside the latest console proxy-listing fix, keeping the release
+  snapshot complete without rolling existing workers.
+
+## [0.14.14] - 2026-10-27
+
+### Fixed
+
+- Let fleet workers on homelab reach the coordinator through its LAN relay.
+  A tracked, pinned HAProxy relay admits the remote worker host and local
+  Docker gateway while retaining the coordinator and worker browsers.
+
+### Removed
+
+- Retire the seven remaining legacy monitor launches after preserving their
+  full sessions and caches. Four accounts restored on homelab workers 1–4;
+  mw-1 stays parked on its failed proxy, and phl-1/ca-2b retain Retired/Problem
+  status without a new boot. Keep protected rollback data and the shared
+  console prompt template.
+
+### Added
+
+- **`GET /v1/proxies/health` on rs_console.** Every proxy port the console
+  can dial, probed through itself now: one row per port (login cut out) with
+  the live workers on it, `ok`, `latency_ms`, the exit IP and its city,
+  region, country and ISP, or a worded `error`. Ports come from the workers'
+  configs and from every `PROXY_*` var holding a proxy URL, so a bought port
+  no live worker dials still gets a row (no workers, the login borrowed from
+  a worker on the same proxy host); the VM's own IP adds none (RS-425).
+  Answers are shared for 60 s so repeat asks do
+  not burst through a vendor port. The ERP calls it every five minutes for
+  its Proxies tab (RS-424).
+
+## [0.14.13] - 2026-10-27
+
+### Removed
+
+- Retire the legacy nyc-1, sc-1, homelab-1, ca-4b and nj-2b container launch
+  paths after their full sessions and listing caches moved to dev fleet
+  workers 5–9. Keep original proxies/devices and protected rollback copies;
+  retain the generated shared prompt template. This cleanup
+  does not roll running workers or enable dev alerts.
+
+## [0.14.12] - 2026-10-27
+
+### Removed
+
+- **Legacy denver-1 is retired after its full-session handover to the dev
+  ERP fleet.** The old compose/config and console references leave the tree
+  so a later homelab deploy cannot start a duplicate browser for its account.
+  The new worker restored its full session in one boot; source sessions and
+  the cache volume are preserved, and launch files archived. The static
+  denver-1 template stays in fleet.toml for generated region coverage and is
+  not deployed. Running workers keep their existing images without a roll
+  or restart (RS-422).
+
+## [0.14.11] - 2026-10-27
+
+### Removed
+
+- **Legacy west-1 and wc-1b launch paths are retired after their session
+  handovers.** wc-1b is healthy in the ERP fleet; west-1 is staged and
+  parked because its original proxy returns 503 from both hosts, before
+  any Facebook login. Their old compose/config and console references
+  leave the tree to prevent duplicate browsers on a future deploy. All
+  original sessions and cache volumes are preserved, and the launch files
+  are archived on the VM. Running workers keep their current images and
+  are not restarted by this cleanup (RS-421).
+
 ## [0.14.10] - 2026-10-27
 
 ### Fixed

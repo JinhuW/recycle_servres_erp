@@ -67,4 +67,26 @@ describe('prod→dev sync scrub', () => {
       ...Object.fromEntries(sealed.map((col) => [col, null])),
     }]);
   });
+
+  it('leaves prod\'s fleet readable but no host token, ticket or proxy login usable', async () => {
+    const sql = getTestDb();
+    await sql`INSERT INTO fleet_hosts (host_id, token_hash, capacity, authoritative) VALUES ('lab', 'hash-of-a-live-token', 2, TRUE)`;
+    await sql`INSERT INTO fleet_claim_tickets (token_hash, host_id, worker_id, expires_at)
+              VALUES ('hash-of-a-ticket', 'lab', 'lab-1', NOW() + interval '5 minutes')`;
+    const [a] = await sql<{ no: number }[]>`
+      INSERT INTO fb_pool_accounts (uid, batch, status) VALUES ('61556203481175', 'Batch', 'fleet') RETURNING no`;
+    await sql`INSERT INTO fleet_slots (account_no, worker_id, host_id, epoch, proxy_url)
+              VALUES (${a.no}, 'lab-1', 'lab', 4, 'v1.a.b.c')`;
+
+    await sql.begin(async (tx) => {
+      await tx`SELECT pg_catalog.set_config('search_path', '', true)`;
+      await tx.unsafe(scrub);
+    });
+
+    const [host] = await sql<{ token_hash: string; capacity: number }[]>`SELECT token_hash, capacity FROM fleet_hosts`;
+    expect(host.capacity).toBe(2);
+    expect(host.token_hash).not.toBe('hash-of-a-live-token');
+    expect((await sql`SELECT 1 FROM fleet_claim_tickets`).length).toBe(0);
+    expect(await sql`SELECT worker_id, epoch, proxy_url FROM fleet_slots`).toEqual([{ worker_id: 'lab-1', epoch: 4, proxy_url: null }]);
+  });
 });

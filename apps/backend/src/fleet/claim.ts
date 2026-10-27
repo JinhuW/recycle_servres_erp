@@ -247,7 +247,7 @@ function deviceOf(stored: unknown): FleetDevice {
 }
 
 /** `scheme://host:port` of a proxy URL, the login cut out, as fb_worker_accounts names it. */
-function proxyWithoutLogin(url: string): string | null {
+export function proxyWithoutLogin(url: string): string | null {
   try {
     const u = new URL(url);
     return `${u.protocol}//${u.host}`;

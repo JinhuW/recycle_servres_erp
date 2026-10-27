@@ -119,6 +119,26 @@ function claimsShaped(v: unknown): v is FleetWorkerTokenClaims {
     && typeof c.exp === 'number' && Number.isFinite(c.exp);
 }
 
+export const isMirror = (env: Env): boolean => env.FLEET_ROLE === 'mirror';
+
+/**
+ * FLEET_ROLE=mirror: the fleet runs on another ERP and this database holds a
+ * copy of it. Managers may read; their writes would land on the copy and be
+ * lost at the next sync, so they are refused. Any agent or worker that still
+ * reaches this instance gets a 503, never a 401 or 409: those make a worker
+ * exit, and every restart is a Facebook login.
+ */
+export const mirrorGate: MiddlewareHandler = async (c, next) => {
+  if (!isMirror(c.env as Env)) return next();
+  if (bearer(c.req.header('Authorization'))) {
+    return c.json({ error: 'unavailable', detail: 'this ERP mirrors the fleet; it runs on another one' }, 503);
+  }
+  if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+    return c.json({ error: 'read_only', detail: 'this ERP mirrors the fleet; change it where the fleet runs' }, 409);
+  }
+  return next();
+};
+
 /**
  * A host agent's bearer. The stored hash is the lookup key, so a token never
  * sits in the database; a route with an `:id` must be the token's own host.

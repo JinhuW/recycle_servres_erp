@@ -5,7 +5,14 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-420](./RS-420-fix-what-the-dev-to-prod-review-found-before-the-v1.md) | done | bug | P2 | Fix what the dev-to-prod review found before the v1.367 release | — |
+| [RS-427](./RS-427-fleet-runs-on-prod-dev-mirrors-it-read-only.md) | in-progress | task | P1 | Fleet runs on prod; dev mirrors it read-only | — |
+| [RS-426](./RS-426-migrate-remaining-legacy-workers-to-homelab-fleet.md) | done | task | P2 | Migrate the remaining legacy workers into the new homelab Facebook fleet | facebook-tracker 0.14.15 |
+| [RS-425](./RS-425-proxies-tab-list-every-proxy-port-used-or-idle-once.md) | done | bug | P2 | Proxies tab: list every proxy port, used or idle, once | 1.368.1 |
+| [RS-424](./RS-424-proxies-tab-health-of-every-fleet-proxy-port.md) | done | story | P2 | Proxies tab: health of every fleet proxy port | 1.368.0 |
+| [RS-423](./RS-423-migrate-five-randomly-selected-healthy-legacy-facebo.md) | done | task | P2 | Migrate five randomly selected healthy legacy Facebook workers | facebook-tracker 0.14.13 |
+| [RS-422](./RS-422-migrate-denver-1-with-its-complete-saved-session-and.md) | done | task | P2 | Migrate denver-1 with its complete saved session and original proxy | facebook-tracker 0.14.12 |
+| [RS-421](./RS-421-migrate-west-1-and-wc-1b-with-their-complete-session.md) | in-progress | task | P1 | Migrate west-1 and wc-1b with their complete sessions and existing browser identity | facebook-tracker 0.14.10 |
+| [RS-420](./RS-420-fix-what-the-dev-to-prod-review-found-before-the-v1.md) | done | bug | P2 | Fix what the dev-to-prod review found before the v1.367 release | 1.367.2 |
 | [RS-419](./RS-419-preserve-full-facebook-sessions-when-moving-a-legacy.md) | done | bug | P1 | Preserve full Facebook sessions when moving a legacy worker to the ERP fleet | 1.367.1 |
 | [RS-418](./RS-418-fleet-tab-hides-retired-homelab-workers-and-drops-th.md) | done | bug | P2 | Fleet tab hides retired homelab workers and drops the phantom rolling bar | 1.367.0 |
 | [RS-417](./RS-417-erp-fleet-workers-get-the-homelab-watch-and-operate.md) | done | story | P2 | ERP-fleet workers get the homelab watch-and-operate page | 1.366.0 |

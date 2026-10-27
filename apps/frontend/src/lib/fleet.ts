@@ -9,7 +9,7 @@
 
 import type {
   FleetWorkerRelogin,
-  FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetProxy, FleetProxyPatch, FleetProxyWrite, FleetRelease,
+  FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetProxy, FleetProxyHealthAnswer, FleetProxyPatch, FleetProxyWrite, FleetRelease,
   FleetSettings, FleetSlot as FleetSlotRow, FleetSlotWrite,
   FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, FleetWorkerDetail, RoundStartAnswer,
 } from '@recycle-erp/shared';
@@ -19,11 +19,13 @@ import { sharedApi as api } from './sharedGet';
 export type {
   FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,
   FleetTaskResult, FleetTaskState, FleetHostContainer, FleetHostReport, DesiredAnswer, RoundStartAnswer,
-  FleetProxy, FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
+  FleetProxy, FleetProxyCheck, FleetProxyHealth, FleetProxyHealthAnswer, FleetProxyHealthState, FleetProxySource,
+  FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
   FleetSecretKind, FleetWorkerDetail, FleetWorkerEvent, FleetWorkerRelogin,
 } from '@recycle-erp/shared';
 export {
   FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
+  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_SLOW_MS,
 } from '@recycle-erp/shared';
 
 // snake_case on purpose: rows come straight from the backend's SQL.
@@ -105,6 +107,10 @@ function query(params: Record<string, string | number | undefined>): string {
 }
 
 export const fleetApi = {
+  // `mirror`: this ERP holds a read-only copy of prod's fleet and answers
+  // every write with 409 read_only.
+  health: () => api.get<{ ok: boolean; tables: unknown; mirror?: boolean }>(`${BASE}/health`),
+
   // ── Cities ──
   cities: () => api.get<{ cities: FleetCity[] }>(`${BASE}/cities`).then(r => r.cities),
   // The city starts disabled with a verify-slug task; 409 exists when the slug is taken.
@@ -171,6 +177,11 @@ export const fleetApi = {
   updateProxy: (id: number, patch: FleetProxyPatch) => api.put<FleetProxy>(`${BASE}/proxies/${id}`, patch),
   // 409 in_use while an account that is not parked uses it.
   removeProxy: (id: number) => api.delete<{ ok: true }>(`${BASE}/proxies/${id}`),
+  // Each proxy's last check and its day. A check probes through the proxy, so it takes seconds.
+  proxyHealth: () => api.get<FleetProxyHealthAnswer>(`${BASE}/proxies/health`),
+  // One ERP proxy, or every proxy (homelab ports included) without one.
+  checkProxies: (proxyId?: number) =>
+    api.post<FleetProxyHealthAnswer>(`${BASE}/proxies/health/check`, proxyId === undefined ? {} : { proxy_id: proxyId }),
 };
 
 /**

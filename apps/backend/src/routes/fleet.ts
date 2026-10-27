@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { getDb } from '../db';
-import { managerOnly, type ManagerEnv } from '../fleet/auth';
+import { isMirror, managerOnly, mirrorGate, type ManagerEnv } from '../fleet/auth';
 import {
   createCity, listCities, listItems, loadCity, loadSettings, readCityDraft, readCityPatch, readItems,
   readSettingsPatch, removeCity, saveSettings, updateCity, upsertItems,
@@ -11,6 +11,7 @@ import { cityLog, listTasks, manualTask, readLogQuery, readTaskFilter, startRoun
 import worker from '../fleet/claim';
 import hosts, { releases } from '../fleet/hosts';
 import proxies from '../fleet/proxies';
+import proxyHealth from '../fleet/proxyHealth';
 import { slots, workers } from '../fleet/workers';
 import { allowedAppOrigin } from '../lib/origins';
 import { VNC_WORKER_ID } from './coordinator';
@@ -25,13 +26,15 @@ import { VNC_WORKER_ID } from './coordinator';
 
 const fleet = new Hono<ManagerEnv>();
 
+fleet.use('*', mirrorGate);
+
 const refuse = (c: Context, r: Refusal) => c.json(r.body, r.status);
 const body = (c: Context): Promise<unknown> => c.req.json().catch(() => null);
 
 fleet.get('/health', managerOnly, async (c) => {
   const tables = await fleetTablesPresent(getDb(c.env));
   const ok = FLEET_TABLES.every((t) => tables.includes(t));
-  return c.json({ ok, tables });
+  return c.json({ ok, tables, mirror: isMirror(c.env) });
 });
 
 // ── Catalog: cities, items, settings (fleet/cities.ts) ──────────────────────
@@ -122,13 +125,15 @@ fleet.get('/city-log', managerOnly, async (c) => {
 // Each module mounts its own scope: claim is hostAuth, the rest of the worker
 // protocol workerAuth (fleet/claim.ts); hosts carry managerOnly on the list
 // and hostAuth on desired/report (fleet/hosts.ts); slots and workers are the
-// manager's (fleet/workers.ts), and so are the proxies (fleet/proxies.ts).
+// manager's (fleet/workers.ts), and so are the proxies (fleet/proxies.ts) and
+// their health (fleet/proxyHealth.ts).
 
 fleet.route('/worker', worker);
 fleet.route('/hosts', hosts);
 fleet.route('/releases', releases);
 fleet.route('/slots', slots);
 fleet.route('/workers', workers);
+fleet.route('/proxies/health', proxyHealth);
 fleet.route('/proxies', proxies);
 
 // The manager's end of a fleet worker's VNC relay (fleet/vnc.ts). Like the

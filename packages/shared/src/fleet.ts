@@ -239,6 +239,71 @@ export type FleetSlotWrite = { account_no: number; proxy_id: number; home_cities
 /** Slots on a proxy that count against `max_accounts_per_proxy`: every one but the parked. */
 export const proxyLoad = (p: Pick<FleetProxy, 'slots'>): number => p.slots.filter((s) => !s.parked).length;
 
+// ─── Proxy health ─────────────────────────────────────────────────────────────
+
+/** Answered, but slower than a Marketplace page load tolerates. */
+export const FLEET_PROXY_SLOW_MS = 3000;
+/** One round every five minutes; the history strip is half-hour buckets over a day. */
+export const FLEET_PROXY_ROUND_MS = 5 * 60_000;
+export const FLEET_PROXY_BUCKET_MS = 30 * 60_000;
+export const FLEET_PROXY_BUCKETS = 48;
+
+/** Degraded: answered slower than FLEET_PROXY_SLOW_MS, or missed one check after answering. */
+export type FleetProxyHealthState = 'up' | 'degraded' | 'down' | 'unchecked';
+/** ERP: a proxy on the ERP's list. Coordinator: a port a homelab worker dials. */
+export type FleetProxySource = 'erp' | 'coordinator';
+
+/** One probe through a proxy. Never carries the login. */
+export type FleetProxyCheck = {
+  at: string;
+  ok: boolean;
+  latency_ms: number | null;
+  exit_ip: string | null;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  org: string | null;
+  error: string | null;
+};
+
+export type FleetProxyHealth = {
+  /** `scheme://host:port`, the login cut out, as fb_worker_accounts names it. */
+  exit: string;
+  source: FleetProxySource;
+  /** The ERP list's id and label; null for a coordinator port. */
+  proxy_id: number | null;
+  label: string | null;
+  host: string;
+  port: number;
+  /** The ERP slots on it, and the homelab workers dialing it. */
+  slots: FleetProxyUse[];
+  workers: string[];
+  state: FleetProxyHealthState;
+  last: FleetProxyCheck | null;
+  /** The exit IP before the last one, when it changed in the last 24 h. */
+  previous_ip: string | null;
+  /** Share of the last 24 h's checks that answered, null with none. */
+  uptime: number | null;
+  checks: number;
+  /** Oldest first, FLEET_PROXY_BUCKETS of them ending now: each bucket's worst state, null with no check. */
+  buckets: (Exclude<FleetProxyHealthState, 'unchecked'> | null)[];
+};
+
+export type FleetProxyHealthAnswer = {
+  proxies: FleetProxyHealth[];
+  /** When the last full round ran, and what the console said for the coordinator's ports. */
+  round_at: string | null;
+  coordinator: 'ok' | 'not_configured' | 'unsupported' | 'unreachable' | null;
+};
+
+/** Newest check first. Down is two misses in a row (or a miss with nothing before it), so one blip is degraded, not dead. */
+export function proxyHealthState(recent: readonly Pick<FleetProxyCheck, 'ok' | 'latency_ms'>[]): FleetProxyHealthState {
+  const [last, before] = recent;
+  if (!last) return 'unchecked';
+  if (!last.ok) return before && before.ok ? 'degraded' : 'down';
+  return (last.latency_ms ?? 0) >= FLEET_PROXY_SLOW_MS ? 'degraded' : 'up';
+}
+
 /** A pool account as the fleet runs it. Secrets never travel here: the
  *  proxy is sealed in the row and only the claim answer carries it in clear. */
 export type FleetSlot = {

@@ -453,9 +453,9 @@ export function matchWechatDay(path: string): { date: string } | null {
 }
 
 // The ERP-owned fleet's tabs under Monitors ▸ Facebook beside the Fleet tab
-// at /fleet itself: the task belt, the city catalog and the analysis
-// (pages/desktop/fleet/*).
-export const FLEET_TABS = ['tasks', 'cities', 'analysis'] as const;
+// at /fleet itself: the task belt, the city catalog, the analysis and the
+// proxies' health (pages/desktop/fleet/*).
+export const FLEET_TABS = ['tasks', 'cities', 'analysis', 'proxies'] as const;
 export type FleetTab = (typeof FLEET_TABS)[number];
 
 export function fleetTabPath(tab: FleetTab): string {

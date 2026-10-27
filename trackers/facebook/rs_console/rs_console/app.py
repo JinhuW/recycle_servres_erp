@@ -78,6 +78,7 @@ import time
 import tomllib
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import (
@@ -132,6 +133,8 @@ SHADOW_TIMEOUT_S = 120.0
 # pool of four connections, so more than this in flight only queues there,
 # ahead of the workers' own heartbeats.
 FLEET_CONCURRENCY = 8
+# What a `PROXY_*` var must hold to count as a port on the Proxies tab.
+PROXY_SCHEMES = ("http", "https", "socks5", "socks5h")
 # How often the city queue's roster is pushed when nothing changed.
 ROSTER_PUSH_S = 600.0
 
@@ -573,7 +576,14 @@ def _raised(result: Any) -> Any:
 
 @app.get("/v1/fleet", dependencies=[Depends(require_token)])
 async def fleet() -> Dict[str, Any]:
-    """Who searches where, for what, whether they are alive — and as whom.
+    return (await _fleet())[0]
+
+
+async def _fleet() -> tuple:
+    """The /v1/fleet document, and each worker's proxy target with its login,
+    which the document itself never carries.
+
+    Who searches where, for what, whether they are alive — and as whom.
 
     Config comes from the mounted TOMLs; health, the vault's account list and
     each worker's session metadata (Facebook user id, browser identity, backup
@@ -753,7 +763,58 @@ async def fleet() -> Dict[str, Any]:
         "updated_by": saved.get("updated_by"),
         "error": saved.get("error"),
     }
-    return doc
+    return doc, targets
+
+
+@app.get("/v1/proxies/health", dependencies=[Depends(require_token)])
+async def proxies_health() -> Dict[str, Any]:
+    """Every proxy port the console can dial, probed through itself now: one
+    row per port (login cut out) with the live workers on it. A port no live
+    worker dials is still bought, so a `PROXY_*` var with a proxy URL in it
+    adds a row with no workers. The ERP stores the rounds and draws the
+    history; this only answers the moment. The VM's own IP adds no row."""
+    doc, targets = await _fleet()
+    live = {
+        w["worker_id"] for w in doc["workers"]
+        if not ((w.get("health") or {}).get("retired_at"))
+    }
+    by_port: Dict[str, Dict[str, Any]] = {}
+    keys = {}
+    for wid, key in targets.items():
+        url = fleet_view.public_proxy_url(key[0])
+        if url is None:
+            continue
+        row = by_port.setdefault(url, {"url": url, "workers": []})
+        if wid in live:
+            row["workers"].append(wid)
+        keys.setdefault(url, key)
+    for name, raw in sorted(os.environ.items()):
+        url = fleet_view.public_proxy_url(raw) if name.startswith("PROXY_") else None
+        if url is None or url in by_port or urlsplit(url).scheme not in PROXY_SCHEMES:
+            continue
+        # The login lives in its own vars, which a worker's config names:
+        # borrow one from a worker on the same proxy host, else take the
+        # `<prefix>_USER` / `_PASS` pair the var's name starts with
+        # (PROXY_HOMELAB_NYC2 -> PROXY_HOMELAB_USER).
+        host = urlsplit(url).hostname
+        login = next((k[1:] for k in keys.values() if k[1] and urlsplit(k[0]).hostname == host), None)
+        parts = name.split("_")
+        for n in range(len(parts), 1, -1):
+            if login:
+                break
+            prefix = "_".join(parts[:n])
+            user, password = os.environ.get(f"{prefix}_USER"), os.environ.get(f"{prefix}_PASS")
+            if user and password:
+                login = (user, password)
+        login = login or (None, None)
+        by_port[url] = {"url": url, "workers": []}
+        keys[url] = (raw.strip(), *login)
+    checked_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    found = await proxy_exit.check(keys.values())
+    for url, row in by_port.items():
+        row.update(found[keys[url]], checked_at=checked_at)
+        row["workers"].sort()
+    return {"proxies": sorted(by_port.values(), key=lambda r: r["url"])}
 
 
 # One save at a time: two interleaved saves would each write the worker
