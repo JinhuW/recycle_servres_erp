@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rs-coordinator"
-version = "0.14.8"
+version = "0.14.9"
 description = "Central coordinator for the Recycle Servers Facebook Marketplace worker fleet"
 requires-python = ">=3.11"
 dependencies = [

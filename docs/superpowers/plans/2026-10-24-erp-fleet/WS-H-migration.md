@@ -161,3 +161,63 @@ Remaining differences:
 exactly as the homelab browser presents it. Eight accounts have no logged-in
 session (no `c_user`), so they have nothing to hand over: moving one is a
 fresh login, which this plan rules out.
+
+## ca-3 pilot: complete session handover (2026-10-27 UTC)
+
+RS-419 / PR #940 fixed the cookies-only handover before this move: ERP
+v1.367.1 and worker 0.14.8, monitor `7ee3acb`. The owner approved the fix,
+then migration of ca-3 only. This is a **dev fleet pilot**, with alerts still
+off under the earlier owner decision; it is not a production fleet release.
+
+- The current healthy legacy ca-3 was pool **#55**, not the locked #22 from
+  the earlier attempt. Its original proxy remains Decodo `isp.decodo.com:10016`
+  (the same exit), with the browser's native user agent, Chromium
+  156.0.8078.4, viewport 1920x947, screen 1920x1080 at scale 1, en-US and
+  America/Los_Angeles. No proxy check or extra Facebook navigation was used.
+- A protected pre-copy on worker-60-14 was followed by an offline smoke test
+  of the released image with **network none**: the entrypoint wrote the whole
+  state unchanged, and Chromium restored all 3 origins and 21 IndexedDB
+  databases. Backend 2,798 tests, frontend 1,212, worker 66 and the monitor
+  and tracker release suites passed before the live move.
+- The host agent was briefly set observe-only. Its capacity stayed 4 and
+  the existing worker's container was untouched. ca-3 was unenrolled from
+  the legacy queue, then stopped cleanly at **04:59:21** (exit 0, 3.7 s).
+- The final saved state (11 cookies, 3 origins, 21 databases), sidecar,
+  identity and complete monitor home (including the 270-entry listing cache)
+  were copied to `~/fleet-handover/ca-3-final-20261027T045926Z/` on
+  worker-60-14, mode 700 / files 600. Every checksum matched and SQLite's
+  quick_check returned ok. No secret is in this repository.
+- The full state was resealed under dev's key into #55 and checked after
+  reading it back. The slot kept its exact presented device and original
+  proxy. Password, TOTP and access-token fallback were omitted on dev for
+  this pilot, so a failed restore waits for an operator.
+- `worker-60-14-3` was created with the normal agent labels and a fresh
+  single-use claim ticket. Its complete monitor cache was copied in **before
+  its first start**, at **05:00:40**, on worker image
+  `ghcr.io/jinhuw/aimm-recycle:0.14.8@sha256:52b0a58a30416be5c35d81f9836f5ed1ac0eb357ec6dff223021833aba9ad1c3`.
+- It claimed #55, epoch 3, and logged **Session restored, skipping login**
+  at **05:00:50**. Coordinator login #561 is its single `boot`, outcome
+  `restored`; the legacy worker's last login stays #556. The fleet heartbeat
+  is HEALTHY, and its saved session still contains all 21 databases.
+- Normal host management was restored. The production pool's #55 was
+  corrected from Available to Fleet / worker-60-14-3, with an assignment
+  event and the same proxy, so the active account cannot be assigned again.
+  Production credentials and application deployment were unchanged.
+- One manual Reno / server_ram task (#19) was queued at 05:03:25 to check
+  the actual queue path. It completed at **05:10:11**: 120 cards, 15 opened,
+  45 reviewed, 394 seconds, no stop/wall. The worker then took the next due
+  task normally.
+
+### Legacy launch paths
+
+The stopped `rs-monitor-ca3` container was removed. Its launch config,
+worker-specific environment file and compose file were moved to
+`~/recycle_servers/archive/migrated-ca3-2026-10-27/facebook_tracker/` on the
+VM. The original `configs/sessions/homelab-ca3/` and Docker cache volume are
+preserved. The coordinator's legacy row is retired. The repo removes its
+compose/config and console entries so a future deploy cannot recreate it;
+the console itself was not restarted.
+
+Rollback requires an operator decision: stop and fence the ERP slot first,
+restore the archived launch files, then explicitly start the legacy worker.
+That would be another browser boot; never run both copies together.
