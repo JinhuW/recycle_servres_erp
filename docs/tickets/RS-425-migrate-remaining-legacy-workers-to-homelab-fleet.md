@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-27
 reporter: jinhu
 branch: chore/homelab-worker-migration
-pr:
+pr: 951
 version: facebook-tracker 0.14.14
 related: [RS-419, RS-421, RS-423]
 ---
