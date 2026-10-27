@@ -651,3 +651,40 @@ def test_fleet_shows_proxy_url_and_exit_without_any_login(client, monkeypatch, t
     assert (None, None, None) in asked
     for leak in ("user-secret", "pass-secret", "inline-secret", "proxy_user_env", "proxy_pass_env"):
         assert leak not in res.text
+
+
+def test_proxies_health_probes_each_port_once_without_any_login(client, monkeypatch, tmp_path):
+    assert client.get("/v1/proxies/health").status_code == 401
+    (tmp_path / "monitor.toml").write_text(MONITOR.replace(
+        'proxy_password = "hunter2-literal"',
+        'proxy_username = "${PROXY_HOMELAB_USER}"\nproxy_password = "${PROXY_HOMELAB_PASS}"',
+    ))
+    monkeypatch.setenv("PROXY_HOMELAB", "http://isp.example.com:10001")
+    monkeypatch.setenv("PROXY_HOMELAB_USER", "user-secret")
+    monkeypatch.setenv("PROXY_HOMELAB_PASS", "pass-secret")
+    # wc-1 dials the same port; se-1 has its own but is retired.
+    monkeypatch.setenv("PROXY_WEST", "http://inline:inline-secret@isp.example.com:10001")
+    monkeypatch.setenv("PROXY_SOUTHEAST", "http://se.example.com:8080")
+    retired = {**HOMELAB_ROW, "worker_id": "se-1", "retired_at": "2026-10-22T15:00:00Z"}
+    client.upstream["response"] = httpx.Response(200, json={"workers": [HOMELAB_ROW, retired]})
+
+    asked = []
+
+    async def check(keys):
+        keys = list(keys)
+        asked.extend(keys)
+        return {k: {"ok": True, "latency_ms": 420, "ip": "203.0.113.1", "city": "Ashburn",
+                    "region": "Virginia", "country": "US", "org": "AS1"} for k in keys}
+
+    monkeypatch.setattr(console.proxy_exit, "check", check)
+    res = client.get("/v1/proxies/health", headers=AUTH)
+    assert res.status_code == 200
+    [row] = res.json()["proxies"]
+    assert row["url"] == "http://isp.example.com:10001"
+    assert row["workers"] == ["homelab-1", "wc-1"]
+    assert row["ok"] is True and row["latency_ms"] == 420 and row["ip"] == "203.0.113.1"
+    assert row["checked_at"].endswith("Z")
+    # One dial per port, with the login; the answer never carries it.
+    assert asked == [("http://isp.example.com:10001", "user-secret", "pass-secret")]
+    for leak in ("user-secret", "pass-secret", "inline-secret"):
+        assert leak not in res.text

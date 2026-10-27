@@ -18,6 +18,16 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **`GET /v1/proxies/health` on rs_console.** Every proxy port a live worker
+  dials, probed through itself now: one row per port (login cut out) with the
+  workers on it, `ok`, `latency_ms`, the exit IP and its city, region,
+  country and ISP, or a worded `error`. A worker on the VM's own IP or a
+  retired worker adds no row. Answers are shared for 60 s so repeat asks do
+  not burst through a vendor port. The ERP calls it every five minutes for
+  its Proxies tab (RS-423).
+
 ## [0.14.13] - 2026-10-27
 
 ### Removed

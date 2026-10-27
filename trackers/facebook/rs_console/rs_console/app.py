@@ -573,7 +573,14 @@ def _raised(result: Any) -> Any:
 
 @app.get("/v1/fleet", dependencies=[Depends(require_token)])
 async def fleet() -> Dict[str, Any]:
-    """Who searches where, for what, whether they are alive — and as whom.
+    return (await _fleet())[0]
+
+
+async def _fleet() -> tuple:
+    """The /v1/fleet document, and each worker's proxy target with its login,
+    which the document itself never carries.
+
+    Who searches where, for what, whether they are alive — and as whom.
 
     Config comes from the mounted TOMLs; health, the vault's account list and
     each worker's session metadata (Facebook user id, browser identity, backup
@@ -753,7 +760,34 @@ async def fleet() -> Dict[str, Any]:
         "updated_by": saved.get("updated_by"),
         "error": saved.get("error"),
     }
-    return doc
+    return doc, targets
+
+
+@app.get("/v1/proxies/health", dependencies=[Depends(require_token)])
+async def proxies_health() -> Dict[str, Any]:
+    """Every proxy port a worker dials, probed through itself now: one row per
+    port (login cut out) with the workers on it. The ERP stores the rounds and
+    draws the history; this only answers the moment. A worker on the VM's own
+    IP and a retired worker add no row."""
+    doc, targets = await _fleet()
+    live = {
+        w["worker_id"] for w in doc["workers"]
+        if not ((w.get("health") or {}).get("retired_at"))
+    }
+    by_port: Dict[str, Dict[str, Any]] = {}
+    keys = {}
+    for wid, key in targets.items():
+        url = fleet_view.public_proxy_url(key[0])
+        if wid not in live or url is None:
+            continue
+        by_port.setdefault(url, {"url": url, "workers": []})["workers"].append(wid)
+        keys.setdefault(url, key)
+    checked_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    found = await proxy_exit.check(keys.values())
+    for url, row in by_port.items():
+        row.update(found[keys[url]], checked_at=checked_at)
+        row["workers"].sort()
+    return {"proxies": sorted(by_port.values(), key=lambda r: r["url"])}
 
 
 # One save at a time: two interleaved saves would each write the worker

@@ -613,7 +613,7 @@ describe('Facebook pool route', () => {
 
 describe('fleet tab routes', () => {
   it('keeps the new tabs under the Facebook sidebar entry', () => {
-    expect(FLEET_TABS).toEqual(['tasks', 'cities', 'analysis']);
+    expect(FLEET_TABS).toEqual(['tasks', 'cities', 'analysis', 'proxies']);
     for (const tab of FLEET_TABS) {
       expect(matchFleetTab(fleetTabPath(tab))).toBe(tab);
       expect(pathToDesktopView(fleetTabPath(tab))).toBe('coordinator');

@@ -192,12 +192,12 @@ async function forward(
  * `status` is what to answer with in that case. A GET's answer is `payload`.
  */
 export async function callFacade(
-  env: Env, method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown,
+  env: Env, method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown, timeoutMs = TIMEOUT_MS,
 ): Promise<{ error: string | null; status: ContentfulStatusCode; payload?: unknown }> {
   const up = upstream(env);
   if (!up) return { error: NOT_CONFIGURED, status: 501 };
   const headers: Record<string, string> = { ...up.headers };
-  const init: RequestInit = { method, headers, signal: AbortSignal.timeout(TIMEOUT_MS) };
+  const init: RequestInit = { method, headers, signal: AbortSignal.timeout(timeoutMs) };
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
