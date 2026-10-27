@@ -2,13 +2,13 @@
 id: RS-430
 title: Seen tab review fixes before release
 type: bug
-status: in-review
+status: done
 priority: P1
 created: 2026-10-27
 reporter: jinhu
 branch: JinhuW/seen-review-fixes
-pr:
-version:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/959
+version: 1.370.2
 related: [RS-428]
 ---
 
