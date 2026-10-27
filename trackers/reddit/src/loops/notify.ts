@@ -23,7 +23,15 @@ export interface NotifyDeps {
   alerts: AlertSender;
   settings: SettingsStore;
   logger: Logger;
+  /**
+   * A worker sets this: while the api's user session is up, buyer alerts are
+   * its to send, so they come with read receipts.
+   */
+  deferToUserSender?: boolean;
 }
+
+/** How long the api's user session may go unrenewed before workers take over. */
+export const USER_SENDER_STALE_S = 120;
 
 export async function notifyOnce(deps: NotifyDeps): Promise<boolean> {
   const {sql, workerId, logger} = deps;
@@ -34,6 +42,8 @@ export async function notifyOnce(deps: NotifyDeps): Promise<boolean> {
     // them notified, so they go out once a chat id is added via the API.
     return false;
   }
+
+  if (deps.deferToUserSender && await userSenderLive(sql)) return false;
 
   const posts = await claimPosts(sql, workerId, 'target', NOTIFY_BATCH_SIZE);
   if (posts.length === 0) return false;
@@ -75,6 +85,9 @@ export async function notifyOnce(deps: NotifyDeps): Promise<boolean> {
         delivered: report.delivered.length,
         failed: report.failed.length,
       });
+      if (report.fellBack?.length) {
+        logger.warn('user account could not send the alert, the bot did', {failures: report.fellBack});
+      }
       if (report.failed.length > 0) {
         logger.warn('some chats did not receive the alert', {failures: report.failed});
       }
@@ -91,4 +104,21 @@ export async function notifyOnce(deps: NotifyDeps): Promise<boolean> {
   }
 
   return true;
+}
+
+async function userSenderLive(sql: Sql): Promise<boolean> {
+  const [row] = await sql<Array<{live: boolean}>>`
+    SELECT COALESCE(user_sender_at > NOW() - make_interval(secs => ${USER_SENDER_STALE_S}), false) AS live
+      FROM telegram_state`;
+  return row?.live ?? false;
+}
+
+/** The api renews this on every pass while its user session sends alerts. */
+export async function renewUserSender(sql: Sql): Promise<void> {
+  await sql`UPDATE telegram_state SET user_sender_at = NOW()`;
+}
+
+/** On shutdown, so workers take over at once instead of after the stale window. */
+export async function releaseUserSender(sql: Sql): Promise<void> {
+  await sql`UPDATE telegram_state SET user_sender_at = NULL`;
 }

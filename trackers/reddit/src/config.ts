@@ -5,6 +5,7 @@
 import {hostname} from 'node:os';
 import 'dotenv/config';
 import type {AlertTransport} from './alerts.ts';
+import type {UserCredentials} from './userSender.ts';
 
 export type Role = 'worker' | 'api';
 
@@ -25,6 +26,8 @@ export interface Config {
   /** The ops alert relay's POST /alert; both unset turns the api's watch off. */
   readonly opsAlertUrl: string;
   readonly opsAlertToken: string;
+  /** Buyer alerts go out as this user account when set (userSender.ts). */
+  readonly telegramUser: UserCredentials | null;
 }
 
 const DEFAULT_USER_AGENT = 'recycle-servers-tracker/1.0 (contact: develop.jinhu@gmail.com)';
@@ -73,6 +76,17 @@ export function loadConfig(): Config {
     throw new Error('OPS_ALERT_URL and OPS_ALERT_TOKEN are set together or not at all');
   }
 
+  // The user account buyer alerts go out as, for their read receipts. All
+  // three or none; only the api opens the session (see userSender.ts).
+  const userEnv = ['TELEGRAM_API_ID', 'TELEGRAM_API_HASH', 'TELEGRAM_USER_SESSION'].map((k) => process.env[k] ?? '');
+  if (userEnv.some(Boolean) && !userEnv.every(Boolean)) {
+    throw new Error('TELEGRAM_API_ID, TELEGRAM_API_HASH and TELEGRAM_USER_SESSION are set together or not at all');
+  }
+  const telegramUser = userEnv[0] ? {apiId: Number(userEnv[0]), apiHash: userEnv[1]!, session: userEnv[2]!} : null;
+  if (telegramUser && !Number.isInteger(telegramUser.apiId)) {
+    throw new Error(`TELEGRAM_API_ID must be a number, got "${userEnv[0]}"`);
+  }
+
   return {
     databaseUrl: required('DATABASE_URL', role),
     alertTransport,
@@ -92,5 +106,6 @@ export function loadConfig(): Config {
     commentTracer: process.env['COMMENT_TRACER'] !== 'off',
     opsAlertUrl,
     opsAlertToken,
+    telegramUser,
   };
 }

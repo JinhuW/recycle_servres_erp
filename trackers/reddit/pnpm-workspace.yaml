@@ -1,6 +1,11 @@
 # pnpm 11 reads build-script approvals from here (`allowBuilds`), not from a
 # `pnpm.onlyBuiltDependencies` block in package.json. esbuild ships a platform
 # binary that its install script unpacks; vitest and tsx both need it, so
-# leaving it unapproved makes every `pnpm` command exit 1.
+# leaving it unapproved makes every `pnpm` command exit 1. The other three come
+# with GramJS: optional native speedups for its websocket, which it runs
+# without.
 allowBuilds:
+  bufferutil: false
+  es5-ext: false
   esbuild: true
+  utf-8-validate: false

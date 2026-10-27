@@ -15,6 +15,27 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.370.0] - 2026-10-27
+
+### Added
+
+- **Reddit ▸ Seen shows who read each buyer alert of the last 24 hours
+  (RS-428).** The page lists every alert with the names of the people who
+  read it. It also lists everyone in the alert group, with how many alerts
+  each saw and when they last read one, so the buyers who never open them
+  stand out. Telegram gives read receipts only to the user account that sent
+  a message, never to a bot. So the tracker's api can now send buyer alerts
+  as a Telegram user account (`TELEGRAM_API_ID`, `TELEGRAM_API_HASH`,
+  `TELEGRAM_USER_SESSION`, created with `scripts/telegram-login.ts`).
+  - The bot stays as the fallback. A chat the user account can't reach gets
+    the alert from the bot, with an ops warning.
+  - The workers stand down while the api's user session is live, and take
+    over through the bot within two minutes of it going quiet.
+  - Every 5 minutes the api pulls each recent alert's readers and the group's
+    member list (tracker migration 0007).
+  - Until the session is set up, nothing changes: the bot sends, and the tab
+    marks each alert *no receipts* and explains why.
+
 ## [1.369.0] - 2026-10-27
 
 ### Added

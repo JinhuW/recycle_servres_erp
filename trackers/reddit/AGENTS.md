@@ -17,6 +17,7 @@ has the repo map and workflow.
   `GET|POST /api/rules`, `PATCH|DELETE /api/rules/:id`,
   `GET|POST /api/subreddits`, `PATCH|DELETE /api/subreddits/:name`,
   `GET /api/matches`, `GET /api/stats`, `GET /api/prompt-stats`, `GET /api/analytics`,
+  `GET /api/seen`,
   `PUT|DELETE /api/prompt-candidate`, `POST /api/prompt-candidate/promote`,
   `PUT /api/settings/llm_model` and no other settings key)
   for the ERP's Monitors ▸ Reddit page. Changing one of those response shapes,
@@ -92,6 +93,9 @@ Breaking any of these breaks the fleet. The tests that cover them are
    bot token, and a second one splits the reactions between them. The
    reactions loop starts only in the api role with `ALERT_TRANSPORT=telegram`.
    The Facebook tracker uses a different bot, so the two never collide.
+8. **The Telegram user session lives in the api alone.** Used from two IPs
+   at once it gets revoked. Workers only stand down while
+   `telegram_state.user_sender_at` is fresh. They never open the session.
 
 ## Conventions
 

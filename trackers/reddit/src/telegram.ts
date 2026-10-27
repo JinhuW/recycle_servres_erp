@@ -14,12 +14,16 @@ export interface AlertContent {
 export interface SentMessage {
   chatId: string;
   messageId: number;
+  /** Only a user account's messages report who read them. Absent means bot. */
+  sentAs?: 'bot' | 'user';
 }
 
 export interface SendReport {
   delivered: string[];
   sent: SentMessage[];
   failed: Array<{chatId: string; error: string}>;
+  /** Chats the user account could not send to, so the bot sent instead. */
+  fellBack?: Array<{chatId: string; error: string}>;
 }
 
 /** One prompt's verdict on a post, as a review shows it. */

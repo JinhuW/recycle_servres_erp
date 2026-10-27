@@ -9,6 +9,7 @@ import type {Sql} from './db.ts';
 import {DEAD_AFTER_S, STALE_AFTER_S, type LoopName, type LoopStatus} from './heartbeat.ts';
 import {candidateConfig, liveConfig, promptHash, promptStats} from './prompts.ts';
 import {createRule, deleteRule, listRules, updateRule} from './rules.ts';
+import {seen} from './seen.ts';
 import {isSettingKey, SETTING_KEYS, type SettingsStore} from './settings.ts';
 import {sendMessage} from './telegram.ts';
 
@@ -376,6 +377,10 @@ export function createApi(deps: ApiDeps): Hono {
       candidateHash: candidate ? promptHash(candidate) : null,
     }));
   });
+
+  // The ERP's Seen tab: who read each buyer alert of the last day.
+  app.get('/api/seen', async (c) =>
+    c.json(await seen(deps.sql, (await deps.settings.get()).telegramChatIds)));
 
   // Starts or replaces the trial. Its own route rather than two settings PUTs
   // so the ERP can drive trials without being let at the rest of settings.
