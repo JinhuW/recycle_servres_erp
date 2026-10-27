@@ -3545,7 +3545,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     the session expiry the worker reports, the slot's device, the pool
     cookie's age as Session backup, the listed proxy (label, host:port,
     timezone), the slot (epoch and lease, parked, reserved, quarantine), home
-    and recently searched cities, today's budget minutes, host and build
+    and recently searched cities (since v1.371.3, RS-434, with a note that
+    the grey ones are what the queue handed it in the last 7 days, not a list
+    tied to it), today's budget minutes, host and build
     (amber when behind the latest release). Last listing and Session file
     read "—": the fleet has no source for them. A worker parked on a wall
     or lost session shows it under **Open checkpoints**. Actions: Watch

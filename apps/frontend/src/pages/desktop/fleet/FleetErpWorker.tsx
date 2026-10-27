@@ -100,12 +100,16 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
         <><br /><small className="fp-warn">{t('fleetQuarantinedUntil', { time: dueLabel(t, slot.quarantined_until, now) })}</small></>
       )}
     </>, wrap: true },
-    { label: t('fbcColCities'), wrap: true, value: cityCount
-      ? <span className="fl-cities ff-wrap-cell">
-          {chips.home.map(c => <CityChip key={c.slug} city={c} hits={chips.hits} terms={[]} tone="accent" />)}
-          {chips.other.map(c => <CityChip key={c.slug} city={c} hits={chips.hits} terms={[]} tone="muted" />)}
-        </span>
-      : <Muted>{t('fbcNoCities')}</Muted> },
+    { label: t('fbcColCities'), wrap: true, value: <>
+      {cityCount
+        ? <span className="fl-cities ff-wrap-cell">
+            {chips.home.map(c => <CityChip key={c.slug} city={c} hits={chips.hits} terms={[]} tone="accent" />)}
+            {chips.other.map(c => <CityChip key={c.slug} city={c} hits={chips.hits} terms={[]} tone="muted" />)}
+          </span>
+        : <Muted>{t('fbcNoCities')}</Muted>}
+      {/* Read as an assigned list otherwise: the queue picks every city. */}
+      <small className="fp-muted" style={{ display: 'block', marginTop: 4 }}>{t(chips.home.length ? 'fleetCitiesNoteHome' : 'fleetCitiesNote', { days: d.stats.days })}</small>
+    </> },
     { label: t('fbcFoldPacing'), value: slot
       ? t('fleetPacingBudget', { used: slot.minutes_today, budget: slot.budget_minutes })
       : <Muted>—</Muted> },

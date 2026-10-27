@@ -240,6 +240,11 @@ describe('Worker page', () => {
     expect(html).toContain('Decodo NY 1');                   // the listed proxy, by label
     expect(html).toContain('isp.example.net:10001');
     expect(html).toContain('Philadelphia, PA');               // home city chip
+    expect(html).toContain('fleetCitiesNoteHome');            // says which chips are home
+    const queueOnly = renderToString(<ErpWorkerView detail={{ ...WORKER_DETAIL, cities: WORKER_DETAIL.cities.map(c => ({ ...c, home: false })) }}
+      stints={[]} onReload={noop} now={NOW} />);
+    expect(queueOnly).toContain('fleetCitiesNote');
+    expect(queueOnly).not.toContain('fleetCitiesNoteHome');
     expect(html).toContain('fleetPacingBudget');
     expect(html).toContain('fleetDetailHost');
     expect(html).toContain('0.14.0');                         // build, behind the 0.14.7 release
