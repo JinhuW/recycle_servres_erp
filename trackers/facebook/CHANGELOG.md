@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.13] - 2026-10-27
+
 ### Removed
 
 - Retire the legacy nyc-1, sc-1, homelab-1, ca-4b and nj-2b container launch
