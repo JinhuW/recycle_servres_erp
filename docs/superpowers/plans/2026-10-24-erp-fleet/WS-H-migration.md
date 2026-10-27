@@ -224,3 +224,72 @@ the console itself was not restarted.
 Rollback requires an operator decision: stop and fence the ERP slot first,
 restore the archived launch files, then explicitly start the legacy worker.
 That would be another browser boot; never run both copies together.
+
+## west-1 and wc-1b handover (2026-10-27 UTC)
+
+The owner requested the same process for these two workers (RS-421).
+PR #944 / worker **0.14.10**, monitor `f4d4fdf`, preserves a sidecar-pinned
+legacy user agent verbatim. The new image is pinned to
+`ghcr.io/jinhuw/aimm-recycle:0.14.10@sha256:b211950a591d8948b03e346bb60c4486e4362731cb0df38de569d3e10cc315f1`.
+Existing workers kept their image and container id; only the new starts
+use 0.14.10. This remains a dev fleet pilot, with alerts off.
+
+| Source | Pool | Target | Cookies / origins / IndexedDB | Listing cache | Outcome |
+| --- | --- | --- | --- | --- | --- |
+| west-1 | #15 | worker-60-14-4 | 10 / 1 / 22 | 8,493 entries | Staged; parked because original proxy returns 503 |
+| wc-1b | #30 | worker-60-14-1 | 9 / 1 / 20 | 2 entries | HEALTHY; one boot restored the session |
+
+Before stopping either source, an offline headed-Chromium test with
+**network none** restored the entire snapshot and checked the exact user
+agent, timezone and viewport. 74 worker/export tests, 611 monitor tests and
+all tracker release gates/component suites passed. The host agent was
+briefly observe-only; its capacity stayed 4. It was restored afterwards.
+
+**west-1:** the Mac Chrome/151 header, 1280x720 viewport/screen, scale 1,
+native en-US/UTC defaults and original Decodo port **10004** were preserved.
+It stopped cleanly at 05:27:57. The final checksummed state, sidecar and
+monitor home are in `~/fleet-handover/west-final-20261027T052800Z/` on
+worker-60-14 (private directories/files); no identity file existed on the
+source, and none was invented from the coordinator's generated profile.
+The full state was resealed under dev's key, and the cache copied before
+the new container started at **05:28:23**. At **05:29:06**, Chromium reported
+`ERR_TUNNEL_CONNECTION_FAILED`; the guard parked #15 at epoch 2 and stopped
+the container. It never reached Facebook login: the coordinator's login
+ledger for worker-60-14-4 is empty. Its rendered proxy server, username and
+password match the source exactly. An independent non-Facebook request
+through port 10004 returned **503 Service Unavailable from both hosts**.
+No new proxy/IP was selected and no browser was retried. Activation waits
+for original-proxy recovery or an owner's decision to change its IP.
+
+**wc-1b:** native Linux Chromium 156.0.8078.4, viewport 1280x677, screen
+1280x800, scale 1, en-US / America/New_York and Decodo **10009** were
+preserved. Non-Facebook checks from both hosts returned the same original
+exit IP, **45.58.221.17**. It stopped cleanly at **05:33:47**, and the final
+checksummed state, sidecar, identity and monitor home are in
+`~/fleet-handover/wc1b-final-20261027T053351Z/` on worker-60-14. Its new
+container started at **05:33:57**, over five minutes after west-1's start,
+claimed #30 epoch 1 and reported HEALTHY at **05:34:09**. Login #562 is one
+`boot`, outcome `restored`; the worker logged **Session restored, skipping
+login**. All 20 databases remain in its saved state. The production pool
+now names worker-60-14-1 as holder, with an assignment event and the same
+proxy; production credentials and deployment were unchanged.
+
+The two old containers were removed only after clean stops. Their launch
+configs, worker-specific environment files and compose files were archived
+at `~/recycle_servers/archive/migrated-west-wc1b-2026-10-27/facebook_tracker/`
+on the VM, mode 700. The original session folders and Docker cache volumes
+are preserved. Legacy coordinator rows are retired and queue enrollment
+removed. The repo and the host's console compose remove their launch/mount
+references; the console was not restarted. This cleanup does not activate
+west-1: its new slot stays parked. Rollback still requires stopping and
+fencing the ERP slot before restoring any legacy launch file.
+
+When west-1's original proxy recovers (or an owner approves a replacement),
+verify the proxy without Facebook first. Temporarily make the host observe-only,
+create a fresh worker with a new claim ticket, and restore its monitor home
+from the protected `west-final-20261027T052800Z/monitor-home.tar` **before**
+unparking #15 and starting it. Do not simply unpark it under the agent: the
+failed container has been removed, and an ordinary new container would lose
+its listing cache. Check one restored boot and HEALTHY before resuming the
+host. The account, full encrypted storage state and presented-device metadata
+already remain in its parked slot.
