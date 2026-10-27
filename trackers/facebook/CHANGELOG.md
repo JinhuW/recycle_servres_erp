@@ -18,6 +18,20 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- Let fleet workers on homelab reach the coordinator through its LAN relay.
+  A tracked, pinned HAProxy relay admits the remote worker host and local
+  Docker gateway while retaining the coordinator and worker browsers.
+
+### Removed
+
+- Retire the seven remaining legacy monitor launches after preserving their
+  full sessions and caches. Four accounts restored on homelab workers 1–4;
+  mw-1 stays parked on its failed proxy, and phl-1/ca-2b retain Retired/Problem
+  status without a new boot. Keep protected rollback data and the shared
+  console prompt template.
+
 ### Added
 
 - **`GET /v1/proxies/health` on rs_console.** Every proxy port a live worker

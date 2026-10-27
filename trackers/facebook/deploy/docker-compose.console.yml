@@ -35,41 +35,10 @@ services:
       RS_MONITOR_CONFIG: /config/workers/homelab.toml
       RS_MASTER_CONFIG: /config/master.toml
       RS_FLEET_CONFIG: /config/fleet.toml
-      # Settings saved from the ERP's flow card (rs_console/settings.py) are
-      # kept here and written into every worker config below. Each config is
-      # named by the worker that runs it (its RS_WORKER_ID), which is what
-      # lets the ERP's worker page edit that worker's cities.
+      # The generated template keeps the shared prompt view available.
       RS_SETTINGS_STATE: /state/settings.json
-      RS_WORKER_CONFIGS: >-
-        ne-1=/config/workers/homelab-ne.toml,
-        mw-1=/config/workers/homelab-mw.toml,
-        phl-1=/config/workers/homelab-phl.toml,
-        va-2=/config/workers/homelab-va2.toml,
-        ca-2b=/config/workers/homelab-ca2b.toml,
-        va-2b=/config/workers/homelab-va2b.toml,
-        nj-3b=/config/workers/homelab-nj3b.toml
-      # RS_WORKER_ID arrives from secrets.env above — the same value the
-      # monitor reports under — so the dashboard can join the phase-1
-      # monitor's heartbeat row to its config.
-      #
-      # Which workers' browsers the dashboard's "Watch" button can reach:
-      # `<RS_WORKER_ID>=<container_name>:5900`. The id is what the container
-      # heartbeats as (`docker exec <name> printenv RS_WORKER_ID` — the
-      # regional workers use their fleet.toml names, not "homelab-<region>").
-      # Every monitor container runs x11vnc on 5900 inside its own namespace,
-      # and this service shares the rs-fleet network with them, so the
-      # container name resolves directly. The bridge (rs_console/vnc.py) is
-      # token-gated and ticketed; nothing here publishes a VNC port. Add a
-      # line when a worker is added; a listed container that is not running
-      # just reads "not answering" in the viewer.
-      RS_VNC_TARGETS: >-
-        ne-1=rs-monitor-ne:5900,
-        mw-1=rs-monitor-mw:5900,
-        phl-1=rs-monitor-phl:5900,
-        va-2=rs-monitor-va2:5900,
-        ca-2b=rs-monitor-ca2b:5900,
-        va-2b=rs-monitor-va2b:5900,
-        nj-3b=rs-monitor-nj3b:5900
+      RS_WORKER_CONFIGS: ""
+      RS_VNC_TARGETS: ""
       # Optional: set to the tunnel hostname to make `vnc_url` in /v1/fleet
       # absolute for a page on another origin (the ERP). Left unset, links
       # are paths on this host, which is right for the standalone dashboard
@@ -77,19 +46,8 @@ services:
       # RS_CONSOLE_PUBLIC_URL: https://fbc-api.recycleservers.com
 
     volumes:
-      # Every worker's live config. Writable so a settings save reaches the
-      # workers, file by file rather than the configs directory, because that
-      # directory also holds secrets.env and the Facebook sessions. A
-      # single-file mount pins an inode: settings.py rewrites in place, and
-      # scripts/deploy.sh recreates this container after a sync.
+      # Legacy launches are retired; retain the generated prompt template.
       - ../configs/homelab.toml:/config/workers/homelab.toml
-      - ../configs/homelab-ne.toml:/config/workers/homelab-ne.toml
-      - ../configs/homelab-mw.toml:/config/workers/homelab-mw.toml
-      - ../configs/homelab-phl.toml:/config/workers/homelab-phl.toml
-      - ../configs/homelab-va2.toml:/config/workers/homelab-va2.toml
-      - ../configs/homelab-ca2b.toml:/config/workers/homelab-ca2b.toml
-      - ../configs/homelab-va2b.toml:/config/workers/homelab-va2b.toml
-      - ../configs/homelab-nj3b.toml:/config/workers/homelab-nj3b.toml
       # Regions, items and the default search settings; and which worker owns
       # which region. Read-only: saved settings overlay master, never edit it.
       - ../configs/master.toml:/config/master.toml:ro
