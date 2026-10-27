@@ -1011,3 +1011,28 @@ def test_full_storage_state_reaches_the_browser_file_unchanged(tmp_path: Path) -
     with pytest.raises(ValueError, match="storage state"):
         entry.write_files(tmp_path, answer, {"monitor": {}})
     assert json.loads((tmp_path / "session.json").read_text()) == state
+
+
+def test_legacy_sidecar_user_agent_reaches_the_actual_browser_context_unchanged(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+    from ai_marketplace_monitor.facebook import FacebookMarketplace, FacebookMarketplaceConfig
+    from ai_marketplace_monitor.utils import MonitorConfig
+
+    ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/151.0.0.0 Safari/537.36"
+    device = {"user_agent": ua, "preserve_user_agent": True, "viewport": [1280, 720],
+              "screen": [1280, 720], "native": ["locale", "timezone"]}
+    answer = claim_with(device)
+    entry.write_files(tmp_path, answer, {"monitor": {}})
+    identity = json.loads((tmp_path / "identity.json").read_text())
+    config = FacebookMarketplaceConfig(name="facebook")
+    config.monitor_config = MonitorConfig(name="monitor", storage_state_path=str(tmp_path / "session.json"))
+    market = FacebookMarketplace("facebook", None)
+    market.configure(config)
+    assert identity["device"]["preserve_user_agent"] is True
+    market.browser = MagicMock(version="156.0.8078.4")
+    market.page = None
+    market.create_page()
+    kwargs = market.browser.new_context.call_args.kwargs
+    assert kwargs["user_agent"] == ua
+    assert kwargs["viewport"] == {"width": 1280, "height": 720}
+    assert "locale" not in kwargs and "timezone_id" not in kwargs
