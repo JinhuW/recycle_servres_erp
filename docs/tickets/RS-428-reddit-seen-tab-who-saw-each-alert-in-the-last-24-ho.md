@@ -2,13 +2,13 @@
 id: RS-428
 title: Reddit Seen tab: who saw each alert in the last 24 hours
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-27
 reporter: jinhu
 branch: JinhuW/reddit-seen
-pr:
-version:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/954
+version: 1.370.0
 related: []
 ---
 
