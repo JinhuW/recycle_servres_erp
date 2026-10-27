@@ -19,7 +19,7 @@ import type { Env, User } from '../types';
 const home = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
 const LIST_MAX = 6;
-// "Done lately" and "paid lately" share one window.
+// The window "paid lately" reads over.
 const RECENT_DAYS = 30;
 
 type Sql = ReturnType<typeof getDb>;
@@ -43,7 +43,6 @@ async function purchaserHome(sql: Sql, u: User) {
     () => sql<{ lifecycle: string; n: number }[]>`
       SELECT o.lifecycle, COUNT(*)::int AS n FROM orders o
       WHERE ${mine}
-        AND (o.lifecycle <> 'done' OR ${since} >= NOW() - make_interval(days => ${RECENT_DAYS}))
       GROUP BY o.lifecycle`,
     // Drafts first (they wait on the purchaser), then the longest-waiting.
     () => sql<{

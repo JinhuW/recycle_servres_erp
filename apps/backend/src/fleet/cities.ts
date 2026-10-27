@@ -336,7 +336,9 @@ export const SETTING_BOUNDS: Record<NumericKey, readonly [number, number]> = {
   budget_minutes: [1, 1440],
   lease_minutes: [1, 180],
   task_max_minutes: [1, 240],
-  poll_hold_seconds: [1, 120],
+  // Held polls go through the Cloudflare proxy, which cuts an origin answer
+  // off at 100 s.
+  poll_hold_seconds: [1, 90],
   familiar_days: [0, 90],
   start_fresh_hours: [0, 48],
   quarantine_hours: [0, 720],

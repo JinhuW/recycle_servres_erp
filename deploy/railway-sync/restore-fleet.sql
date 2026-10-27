@@ -25,11 +25,16 @@ BEGIN
   IF pg_catalog.to_regclass('sync_keep._pool') IS NOT NULL THEN
     -- Only onto the same account: a pool number that prod now gives to someone
     -- else gets none of the kept secrets, and its slot is not brought back.
-    SELECT string_agg(pg_catalog.format('%I = k.%I', c.column_name, c.column_name), ', ')
+    -- The holder comes back too: a worker's token is only honoured while its
+    -- account names it as holder. A holding user the copy no longer has gets
+    -- what the foreign key's ON DELETE SET NULL would have given it.
+    SELECT string_agg(CASE WHEN c.column_name = 'holder_user_id'
+                        THEN 'holder_user_id = (SELECT u.id FROM public.users u WHERE u.id = k.holder_user_id)'
+                        ELSE pg_catalog.format('%I = k.%I', c.column_name, c.column_name) END, ', ')
     INTO cols
     FROM information_schema.columns c
     WHERE c.table_schema = 'public' AND c.table_name = 'fb_pool_accounts'
-      AND (c.column_name ~ '_enc$' OR c.column_name IN ('cookie_uid', 'cookie_at', 'status', 'note'))
+      AND (c.column_name ~ '_enc$' OR c.column_name IN ('cookie_uid', 'cookie_at', 'status', 'note', 'holder_user_id', 'holder_name', 'held_since'))
       AND EXISTS (SELECT 1 FROM information_schema.columns k
                   WHERE k.table_schema = 'sync_keep' AND k.table_name = '_pool' AND k.column_name = c.column_name);
     EXECUTE pg_catalog.format(

@@ -13,7 +13,7 @@ import { loadRelease } from './hosts';
 import { cityLog } from './tasks';
 import { CITY_SLUG, loadSettings } from './cities';
 import { managerOnly, type ManagerEnv } from './auth';
-import { bad, conflict, eventToWire, exists, isRefusal, notFound, taskToWire, type Refusal, type TaskEventRow, type TaskRow } from './sql';
+import { bad, conflict, eventToWire, exists, isRefusal, minutesTodaySql, notFound, taskToWire, type Refusal, type TaskEventRow, type TaskRow } from './sql';
 
 // ─── Slots and workers, as the manager sees them ──────────────────────────────
 // A slot is one pool account's place in the fleet; a worker is the container
@@ -68,8 +68,7 @@ const SLOT_SELECT = (sql: SqlLike) => sql`
          (s.lease_expires_at IS NOT DISTINCT FROM 'infinity'::timestamptz) AS parked,
          CASE WHEN s.reserved_until > NOW() THEN s.reserved_until END AS reserved_until,
          a.uid, a.status AS pool_status,
-         COALESCE((SELECT m.minutes::float8 FROM fleet_minutes m
-                   WHERE m.account_no = s.account_no AND m.day = (NOW() AT TIME ZONE 'UTC')::date), 0) AS minutes_today
+         ${minutesTodaySql(sql, sql`s.account_no`)} AS minutes_today
   FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no`;
 
 /** Every worker row with the task it holds, keyed by worker id. */

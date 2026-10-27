@@ -1277,7 +1277,7 @@ const zh: Record<string, string> = {
   homeStageSub_in_transit: '运输中',
   homeStageSub_reviewing: '核对中',
   homeStageSub_ready_to_pay: '待付佣金',
-  homeStageDoneSub: '最近 30 天',
+  homeStageDoneSub: '全部',
   homeOpenPos: '进行中的采购订单',
   homeOpenPosSub: '{n} 张进行中 · 草稿在前，其余按等待时间排序',
   homeOpenPosSubOne: '1 张进行中',

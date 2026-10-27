@@ -248,6 +248,26 @@ describe('releases', () => {
     expect((await api('POST', '/api/fleet/releases', { token, body: { image: 'not an image!', version: '1' } })).status).toBe(422);
   });
 
+  it('waits for a host silent only a few minutes, and skips one silent past the gate timeout', async () => {
+    const otherToken = 'host-' + randomBytes(8).toString('hex');
+    await seedHost('far', otherToken, 1, true);
+    await report([{ worker_id: 'far-1', image: IMAGE_OLD }], otherToken, 'far');
+    // Both lab workers busy, so the roll names no replacement and keeps judging the far host.
+    await getTestDb()`INSERT INTO fleet_tasks (city, item, kind, due_at, state, worker_id, account_no, epoch, leased_at, lease_expires_at)
+                      VALUES ('houston', 'server_ram', 'search', NOW(), 'leased', 'lab-1', 1, 1, NOW(), NOW() + interval '30 minutes'),
+                             ('houston', 'server_ram', 'slug', NOW(), 'leased', 'lab-2', 2, 1, NOW(), NOW() + interval '30 minutes')`;
+    // An ERP deploy: the far host has not reported for five minutes.
+    await getTestDb()`UPDATE fleet_hosts SET last_seen_at = NOW() - interval '5 minutes' WHERE host_id = 'far'`;
+    const { token } = await loginAs(ALEX);
+    await api('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0' } });
+    await desired();
+    expect((await release()).skipped).toEqual([]);
+
+    await getTestDb()`UPDATE fleet_hosts SET last_seen_at = NOW() - interval '21 minutes' WHERE host_id = 'far'`;
+    await desired();
+    expect(await release()).toMatchObject({ skipped: ['far-1'], skip_reasons: { 'far-1': 'host is silent' } });
+  });
+
   it('leaves out a stopped container and a parked worker, with the reason, instead of naming them', async () => {
     await seedSlot(3, { worker: 'lab-3', host: 'lab', epoch: 1 });
     await seedSlot(4, { worker: 'lab-4', host: 'lab', epoch: 1 });

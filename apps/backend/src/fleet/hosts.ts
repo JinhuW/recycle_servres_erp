@@ -171,13 +171,19 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
     }
   }
 
-  // Workers on observe-only or silent hosts are skipped, not waited for; the
-  // host asking is live by definition. A busy worker (a leased task) waits.
+  // Workers on observe-only or long-silent hosts are skipped, not waited for;
+  // the host asking is live by definition. A host only briefly silent (an ERP
+  // deploy, a network blip) is waited for, or the roll would finish without
+  // it. A busy worker (a leased task) waits.
   for (const h of allHosts) {
     if (h.host_id === host.host_id && !host.authoritative) {
       for (const id of pending(h, release)) skip(release, id, 'host is observe-only');
-    } else if (h.host_id !== host.host_id && !(h.authoritative && live(h, now.getTime()))) {
-      for (const id of pending(h, release)) skip(release, id, h.authoritative ? 'host is silent' : 'host is observe-only');
+    } else if (h.host_id !== host.host_id && !h.authoritative) {
+      for (const id of pending(h, release)) skip(release, id, 'host is observe-only');
+    } else if (h.host_id !== host.host_id && !live(h, now.getTime())) {
+      if (!h.last_seen_at || now.getTime() - h.last_seen_at.getTime() > GATE_TIMEOUT_MS) {
+        for (const id of pending(h, release)) skip(release, id, 'host is silent');
+      }
     } else {
       for (const c of pendingContainers(h, release)) {
         const why = unreplaceable(c, workers.get(c.worker_id));
@@ -369,8 +375,8 @@ export const releases = new Hono<ManagerEnv>().post('/', managerOnly, async (c) 
 // start is a Facebook login. The agent names its process in
 // X-Fleet-Agent-Instance; the first instance seen holds the host until it has
 // been silent for HOST_LIVE_MS, and any other is refused 403, which the agent
-// reads as "observe only". An agent that sends no instance (before RS-405) is
-// let through as it always was.
+// reads as "observe only". An agent too old to send an instance is let
+// through as it always was.
 
 const AGENT_INSTANCE = /^[A-Za-z0-9._:-]{1,128}$/;
 export const AGENT_CONFLICT = 'agent_conflict';

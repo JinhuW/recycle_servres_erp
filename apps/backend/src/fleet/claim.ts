@@ -26,8 +26,8 @@ import {
 } from './auth';
 import { loadSettings } from './cities';
 import { notifyReady } from './scheduler';
-import type { ClaimTicketRow, FleetHostRow, FleetSlotRow } from './sql';
-import { loadRelease } from './hosts';
+import { minutesTodaySql, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
+import { loadRelease, ownWorkerId } from './hosts';
 
 // ─── The worker protocol ──────────────────────────────────────────────────────
 // What a worker container says to the ERP over its life: it claims a slot at
@@ -260,12 +260,6 @@ async function loadItems(sql: SqlLike): Promise<FleetItem[]> {
   return sql<FleetItem[]>`SELECT name, phrases, filters, enabled FROM fleet_items WHERE enabled ORDER BY name`;
 }
 
-/** `<host_id>-<n>`: a host claims for its own workers only, so one host's token cannot pose as another host's worker. */
-function ownWorkerId(hostId: string, workerId: string): boolean {
-  if (!workerId.startsWith(`${hostId}-`)) return false;
-  return /^\d{1,4}$/.test(workerId.slice(hostId.length + 1));
-}
-
 const CLAIM_SELECT = (tx: SqlLike) => tx`
   SELECT s.*, a.uid, a.password_enc, a.totp_enc, a.cookie_enc, a.token_enc
   FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no`;
@@ -468,9 +462,10 @@ worker.post('/heartbeat', workerAuth, async (c) => {
   }
   const state = body.state;
   const version = typeof body.version === 'string' ? body.version.slice(0, 64) : null;
-  const vncPort = Number.isInteger(body.vnc_port) ? (body.vnc_port as number) : null;
+  const vncPort = Number.isInteger(body.vnc_port) && (body.vnc_port as number) > 0 && (body.vnc_port as number) < 65536
+    ? (body.vnc_port as number) : null;
   const detail = isRecord(body.detail) && JSON.stringify(body.detail).length <= MAX_DETAIL_BYTES ? body.detail : null;
-  const lastSearch = typeof body.last_search_at === 'string' ? body.last_search_at : null;
+  const lastSearch = typeof body.last_search_at === 'string' && body.last_search_at.length <= 64 ? body.last_search_at : null;
 
   const sql = getDb(c.env);
   const detailValue: postgres.JSONValue | null = detail || lastSearch
@@ -630,10 +625,8 @@ async function pickTask(
     const [{ quarantined }] = await tx<{ quarantined: boolean }[]>`
       SELECT COALESCE(quarantined_until > NOW(), FALSE) AS quarantined FROM fleet_slots WHERE account_no = ${w.account_no}`;
     if (!quarantined) {
-      const [used] = await tx<{ minutes: number | null }[]>`
-        SELECT minutes::float8 AS minutes FROM fleet_minutes
-        WHERE account_no = ${w.account_no} AND day = (NOW() AT TIME ZONE 'UTC')::date`;
-      if ((used?.minutes ?? 0) >= settings.budget_minutes) {
+      const [used] = await tx<{ minutes: number }[]>`SELECT ${minutesTodaySql(tx, w.account_no)} AS minutes`;
+      if (used.minutes >= settings.budget_minutes) {
         return { task: null, retry_after: RETRY_BLOCKED, reason: 'budget' };
       }
     }
