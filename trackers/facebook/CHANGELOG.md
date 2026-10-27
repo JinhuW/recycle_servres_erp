@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.15] - 2026-10-27
+
 - Include the homelab coordinator relay and final legacy launch cleanup from
   0.14.14 alongside the latest console proxy-listing fix, keeping the release
   snapshot complete without rolling existing workers.
