@@ -18,6 +18,28 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.15] - 2026-10-27
+
+- Include the homelab coordinator relay and final legacy launch cleanup from
+  0.14.14 alongside the latest console proxy-listing fix, keeping the release
+  snapshot complete without rolling existing workers.
+
+## [0.14.14] - 2026-10-27
+
+### Fixed
+
+- Let fleet workers on homelab reach the coordinator through its LAN relay.
+  A tracked, pinned HAProxy relay admits the remote worker host and local
+  Docker gateway while retaining the coordinator and worker browsers.
+
+### Removed
+
+- Retire the seven remaining legacy monitor launches after preserving their
+  full sessions and caches. Four accounts restored on homelab workers 1–4;
+  mw-1 stays parked on its failed proxy, and phl-1/ca-2b retain Retired/Problem
+  status without a new boot. Keep protected rollback data and the shared
+  console prompt template.
+
 ### Added
 
 - **`GET /v1/proxies/health` on rs_console.** Every proxy port the console

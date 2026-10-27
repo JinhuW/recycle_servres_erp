@@ -1,3 +1,3 @@
 """Facebook Marketplace buy-ad poster for Recycle Servers LLC."""
 
-__version__ = "0.14.13"
+__version__ = "0.14.15"

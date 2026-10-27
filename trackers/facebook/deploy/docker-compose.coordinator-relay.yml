@@ -1,0 +1,29 @@
+# Keep the coordinator running while extending its worker-host allowlist.
+services:
+  coordinator-relay:
+    image: haproxy:3.2-alpine@sha256:5893840576071e6217cd52ebdcc14f454c6f7a631056fa6f4e0f40d3cac4215b
+    container_name: rs-coordinator-lan
+    restart: unless-stopped
+    ports:
+      - "10.10.10.73:8500:8500"
+    volumes:
+      - ./coordinator-relay.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - rs-fleet
+    mem_limit: 64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    labels:
+      com.recycleservers.purpose: coordinator-lan-forwarder
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "2"
+
+networks:
+  rs-fleet:
+    name: rs-fleet
+    external: true
