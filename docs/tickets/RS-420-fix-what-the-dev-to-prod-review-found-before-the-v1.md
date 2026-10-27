@@ -2,13 +2,13 @@
 id: RS-420
 title: Fix what the dev-to-prod review found before the v1.367 release
 type: bug
-status: backlog
+status: done
 priority: P2
 created: 2026-10-27
 reporter: jinhu
 branch: JinhuW/sauger
-pr:
-version:
+pr: 941
+version: 1.367.2
 related: [RS-394, RS-396, RS-399, RS-402, RS-405]
 ---
 

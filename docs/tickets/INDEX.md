@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-420](./RS-420-fix-what-the-dev-to-prod-review-found-before-the-v1.md) | done | bug | P2 | Fix what the dev-to-prod review found before the v1.367 release | — |
 | [RS-419](./RS-419-preserve-full-facebook-sessions-when-moving-a-legacy.md) | done | bug | P1 | Preserve full Facebook sessions when moving a legacy worker to the ERP fleet | 1.367.1 |
 | [RS-418](./RS-418-fleet-tab-hides-retired-homelab-workers-and-drops-th.md) | done | bug | P2 | Fleet tab hides retired homelab workers and drops the phantom rolling bar | 1.367.0 |
 | [RS-417](./RS-417-erp-fleet-workers-get-the-homelab-watch-and-operate.md) | done | story | P2 | ERP-fleet workers get the homelab watch-and-operate page | 1.366.0 |
