@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-27
 reporter: jinhu
 branch: JinhuW/milkfish
-pr: "#949"
+pr: 949
 version: 1.368.0
 related: [RS-365, RS-415]
 ---
