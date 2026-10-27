@@ -516,7 +516,7 @@ their new ids; production credentials and parked statuses were retained.
 Existing SESSION_EXPIRED workers were not restarted. west-1 remains parked
 at epoch 2 on its original failed proxy.
 
-Tracker 0.14.14 versions the relay correction and final legacy cleanup.
+Tracker 0.14.15 versions the relay correction and final legacy cleanup.
 Runtime stays 0.14.10; no fleet-wide release or roll occurred. Dev alerts stay
 off. Parked activation requires an operator decision and working proxy, with
 the protected cache restored before boot. Before restoring a source launch,

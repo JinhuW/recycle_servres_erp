@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-426](./RS-426-migrate-remaining-legacy-workers-to-homelab-fleet.md) | done | task | P2 | Migrate the remaining legacy workers into the new homelab Facebook fleet | facebook-tracker 0.14.14 |
+| [RS-426](./RS-426-migrate-remaining-legacy-workers-to-homelab-fleet.md) | done | task | P2 | Migrate the remaining legacy workers into the new homelab Facebook fleet | facebook-tracker 0.14.15 |
+| [RS-425](./RS-425-proxies-tab-list-every-proxy-port-used-or-idle-once.md) | done | bug | P2 | Proxies tab: list every proxy port, used or idle, once | 1.368.1 |
 | [RS-424](./RS-424-proxies-tab-health-of-every-fleet-proxy-port.md) | done | story | P2 | Proxies tab: health of every fleet proxy port | 1.368.0 |
 | [RS-423](./RS-423-migrate-five-randomly-selected-healthy-legacy-facebo.md) | done | task | P2 | Migrate five randomly selected healthy legacy Facebook workers | facebook-tracker 0.14.13 |
 | [RS-422](./RS-422-migrate-denver-1-with-its-complete-saved-session-and.md) | done | task | P2 | Migrate denver-1 with its complete saved session and original proxy | facebook-tracker 0.14.12 |

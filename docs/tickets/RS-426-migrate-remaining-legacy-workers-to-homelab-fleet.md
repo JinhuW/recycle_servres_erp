@@ -8,7 +8,7 @@ created: 2026-10-27
 reporter: jinhu
 branch: chore/homelab-worker-migration
 pr: 951
-version: facebook-tracker 0.14.14
+version: facebook-tracker 0.14.15
 related: [RS-419, RS-421, RS-423]
 ---
 

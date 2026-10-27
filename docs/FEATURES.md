@@ -3456,12 +3456,13 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - **Proxies** (`/#/fleet/proxies`, v1.368.0, RS-424): the health of every
     proxy port the fleet browses through, between Analysis and Account pool,
     with the number down as a warn-coloured chip on the tab bar. Rows are the
-    ERP's proxies (Account pool ▸ Proxies, by label) and the ports the homelab
-    coordinator's workers dial (by host:port, marked Homelab). Every five
+    ERP's proxies (Account pool ▸ Proxies, by label) and every port the homelab
+    console holds, dialed or idle (by host:port, marked Homelab; v1.368.1,
+    RS-425). A port on both lists is one row, the ERP's. Every five
     minutes one backend instance checks each ERP proxy through the proxy
     itself, http, https or socks5, with a lookup at ipinfo.io, and calls
     rs_console's `/v1/proxies/health` to do the same for the homelab ports
-    (facebook-tracker after 0.14.13); a console without it leaves those rows
+    (facebook-tracker 0.14.14); a console without it leaves those rows
     out with a note, and one that stops answering keeps them as last
     reported. A row gives the state — **Up**, **Degraded** (slower than 3 s,
     or one missed check after answering), **Down** (two misses in a row) or
@@ -3470,7 +3471,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     hover) and "was <ip>" when it changed in the last 24 hours, the day as 48
     half-hour ticks in each bucket's worst state with the uptime over its
     checks, when it was last checked, and who uses it (the ERP accounts on it
-    with "parked", or the homelab workers, linked). Down rows come first. The
+    with "parked" and the homelab workers, linked, or "Nobody"). Down rows come first. The
     toolbar has the legend with counts, a source select and a search over
     label, port, exit IP, city, worker and account. **Check all now** runs a
     round unless one started in the last 15 s; the row button checks one ERP
