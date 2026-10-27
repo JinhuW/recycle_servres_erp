@@ -36,7 +36,7 @@ const { FlowCard } = await import('../FleetFlow');
 const { ErpWorkerView } = await import('./FleetErpWorker');
 const { HomelabWorkerView } = await import('../FleetWorker');
 const { alertsByCity, daySeries, EMPTY_CITY_FILTER, EMPTY_TASK_FILTER, withCityNames } = await import('./fleetBoard');
-const { EMPTY_FLEET_ROW_FILTER } = await import('./fleetRows');
+const { DEFAULT_FLEET_ROW_FILTER, EMPTY_FLEET_ROW_FILTER } = await import('./fleetRows');
 
 const noop = () => undefined;
 const items = ['server_ram', 'enterprise_ssd'];
@@ -101,6 +101,12 @@ describe('Fleet tab', () => {
     const none = { ...fleetData, coordinator: { ...COORDINATOR, workers: COORDINATOR.workers.filter(w => !w.health?.retired_at) } };
     expect(renderToString(<WorkersTable data={none} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />))
       .not.toContain('fleetKindRetired');
+  });
+  it('opens on the Healthy chip', () => {
+    const html = renderToString(<WorkersTable data={fleetData} filter={DEFAULT_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
+    expect(html).toMatch(/aria-pressed="true"[^>]*><i class="fp-dot"><\/i><span>fleetKindHealthy<\/span>/);
+    expect(html).not.toContain('homelab-9');          // offline
+    expect(html).not.toContain('fleetNowReplacing');  // homelab-3
   });
   it('honours the legend filter', () => {
     const html = renderToString(<WorkersTable data={fleetData} filter={{ ...EMPTY_FLEET_ROW_FILTER, kind: 'offline' }} onFilter={noop} onChanged={noop} now={NOW} />);
