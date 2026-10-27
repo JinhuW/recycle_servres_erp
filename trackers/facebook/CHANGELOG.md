@@ -18,6 +18,25 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Removed
+
+- **The 25 unhealthy homelab workers are retired (owner decision
+  2026-10-27).** bos-1, bos-1b, ca-1, ca-1b, ca-2, ca-3b, ca-4, denver-1b,
+  homelab-1b, mw-1b, ne-1b, nj-1, nj-1b, nj-2, nj-3, nyc-1b, nyc-2, nyc-2b,
+  nyc-3, nyc-3b, phl-1b, sc-1b, wc-1 and west-1b lose their
+  `deploy/docker-compose.homelab-*.yml` and `configs/homelab-*.toml`, and
+  rs-console's `RS_WORKER_CONFIGS`, `RS_VNC_TARGETS` and config mounts no
+  longer name them, so `scripts/deploy.sh` never recreates them (va-1's files
+  had already left the tree). Every account was parked on `SESSION_EXPIRED`,
+  `CHECKPOINT` or a Facebook lock. The 16 healthy workers are unchanged. On
+  the VM their configs, `secrets.homelab-*.env` and session folders were moved
+  to `~/recycle_servers/archive/retired-2026-10-27/`, not deleted; bringing one
+  back is in the ERP repo's
+  `docs/superpowers/plans/2026-10-24-erp-fleet/WS-F-ops-and-cutover.md`.
+  `configs/fleet.toml` keeps `wc-1`: it is the static-region template that
+  `gen-configs` checks for full coverage, and its generated configs are
+  neither tracked nor deployed.
+
 ## [0.14.7] - 2026-10-26
 
 ### Fixed
