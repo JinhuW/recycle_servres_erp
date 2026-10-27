@@ -2,13 +2,13 @@
 id: RS-417
 title: ERP-fleet workers get the homelab watch-and-operate page
 type: story
-status: backlog
+status: done
 priority: P2
 created: 2026-10-26
 reporter: jinhu
 branch: fleet/watch-page-parity
-pr:
-version:
+pr: 937
+version: 1.366.0
 related: [RS-394, RS-416]
 ---
 
