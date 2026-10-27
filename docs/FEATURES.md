@@ -3319,6 +3319,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   account it runs one worker, and each account added brings another.
 
 - **Fleet (ERP-owned)** — since v1.337.0 (RS-394) **Monitors ▸ Facebook** is
+  Since v1.367.1 and facebook-tracker 0.14.8, fleet handovers and session
+  refreshes preserve the complete saved Playwright state, including local
+  storage and IndexedDB alongside cookies. Older cookie-only workers retain
+  those saved origins when refreshing their session.
   the page of the task queue the ERP itself runs: the backend owns the city
   catalog, the tasks, the hosts and the account slots (`/api/fleet`), and
   identical worker containers on any host pull their next city from it. Since
