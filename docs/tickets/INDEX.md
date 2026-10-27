@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-436](./RS-436-fleet-tab-shows-two-worker-statuses-healthy-and-park.md) | done | story | P2 | Fleet tab shows two worker statuses: Healthy and Parked | 1.373.0 |
 | [RS-435](./RS-435-fleet-cities-retire-the-pinned-status.md) | done | task | P2 | Fleet cities: retire the Pinned status | 1.372.0 |
 | [RS-434](./RS-434-explain-the-cities-field-on-the-fleet-worker-page.md) | done | story | P3 | Explain the Cities field on the fleet worker page | 1.371.3 |
 | [RS-433](./RS-433-quarantine-probes-only-for-accounts-a-worker-is-runn.md) | done | bug | P2 | Quarantine probes only for accounts a worker is running | 1.371.2 |

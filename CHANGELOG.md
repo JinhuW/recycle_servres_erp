@@ -15,6 +15,20 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.373.0] - 2026-10-27
+
+### Changed
+
+- **The Fleet tab has two worker statuses: Healthy and Parked** (RS-436).
+  The legend had grown to six chips (Healthy, Degraded, Replacing, Parked,
+  Offline, Retired), more than anyone needed to answer "which workers are
+  working and which need me". A worker now counts as Healthy while it runs,
+  degraded or mid-replacement included, and as Parked when its account
+  reports Session expired, Checkpoint, Challenge or Dead, or when it has
+  gone silent. The state chip still names the reason a parked worker
+  stopped, and a worker being replaced still says so under Now. Retired
+  coordinator workers are no longer rows at all.
+
 ## [1.372.0] - 2026-10-27
 
 ### Removed
