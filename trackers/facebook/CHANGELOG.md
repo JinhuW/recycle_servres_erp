@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.16] - 2026-10-27
+
 ### Fixed
 
 - **`/v1/proxies/health` dials an idle port with its env login.** With every
