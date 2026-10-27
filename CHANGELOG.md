@@ -19,7 +19,7 @@ at the last commit that carried each version.
 
 ### Added
 
-- **Monitors ▸ Facebook has a Proxies tab (RS-423).** Until now nothing said
+- **Monitors ▸ Facebook has a Proxies tab (RS-424).** Until now nothing said
   whether a proxy port was up right now, how slow it was, or whether it had
   dropped overnight; the only signals were the exit-IP lookup on the legacy
   Fleet table and the DEAD mark after failed accounts. The backend now checks

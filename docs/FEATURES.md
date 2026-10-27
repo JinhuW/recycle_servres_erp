@@ -3453,7 +3453,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     the same alert total and the task list is not capped, the last alert's
     day and who searches it (its home worker, or "whoever is free"). The coordinator's
     counts are not tagged per worker, so there is no worker or item filter.
-  - **Proxies** (`/#/fleet/proxies`, v1.368.0, RS-423): the health of every
+  - **Proxies** (`/#/fleet/proxies`, v1.368.0, RS-424): the health of every
     proxy port the fleet browses through, between Analysis and Account pool,
     with the number down as a warn-coloured chip on the tab bar. Rows are the
     ERP's proxies (Account pool ▸ Proxies, by label) and the ports the homelab

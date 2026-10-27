@@ -1,5 +1,5 @@
 ---
-id: RS-423
+id: RS-424
 title: Proxies tab: health of every fleet proxy port
 type: story
 status: done

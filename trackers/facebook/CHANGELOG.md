@@ -26,7 +26,7 @@ deployed?" harder to answer.
   country and ISP, or a worded `error`. A worker on the VM's own IP or a
   retired worker adds no row. Answers are shared for 60 s so repeat asks do
   not burst through a vendor port. The ERP calls it every five minutes for
-  its Proxies tab (RS-423).
+  its Proxies tab (RS-424).
 
 ## [0.14.13] - 2026-10-27
 
