@@ -7,7 +7,7 @@ priority: P3
 created: 2026-10-27
 reporter: jinhu
 branch: JinhuW/fleet-cities-note
-pr:
+pr: 965
 version: 1.371.3
 related: []
 ---
