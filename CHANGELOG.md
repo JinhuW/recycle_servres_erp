@@ -15,6 +15,19 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.371.1] - 2026-10-27
+
+### Fixed
+
+- **Dev's Fleet page shows prod's fleet live** (RS-432). Since the RS-427
+  cut-over, nothing reports to dev, so its fleet tables were a copy frozen at
+  17:44 UTC. The page judges a worker by how old its last heartbeat is, so
+  within minutes dev showed 0 healthy and every worker Offline, though the
+  fleet was fine on prod. The nightly copy would only have reset that clock
+  once a day. Now the mirror checks the dev manager and then fetches the same
+  read from prod, as a service client with the new `fleet:read` scope. Prod
+  accepts that scope on its fleet reads only: writes and the VNC socket still
+  need a manager's session, and dynamic client registration never grants it.
 ## [1.371.0] - 2026-10-27
 
 ### Changed

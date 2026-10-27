@@ -108,8 +108,8 @@ function query(params: Record<string, string | number | undefined>): string {
 
 export const fleetApi = {
   // `mirror`: this ERP holds a read-only copy of prod's fleet and answers
-  // every write with 409 read_only.
-  health: () => api.get<{ ok: boolean; tables: unknown; mirror?: boolean }>(`${BASE}/health`),
+  // every write with 409 read_only. `mirror_live`: its reads come from prod.
+  health: () => api.get<{ ok: boolean; tables: unknown; mirror?: boolean; mirror_live?: boolean }>(`${BASE}/health`),
 
   // ── Cities ──
   cities: () => api.get<{ cities: FleetCity[] }>(`${BASE}/cities`).then(r => r.cities),
