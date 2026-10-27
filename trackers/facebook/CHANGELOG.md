@@ -18,6 +18,17 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Removed
+
+- **Legacy west-1 and wc-1b launch paths are retired after their session
+  handovers.** wc-1b is healthy in the ERP fleet; west-1 is staged and
+  parked because its original proxy returns 503 from both hosts, before
+  any Facebook login. Their old compose/config and console references
+  leave the tree to prevent duplicate browsers on a future deploy. All
+  original sessions and cache volumes are preserved, and the launch files
+  are archived on the VM. Running workers keep their current images and
+  are not restarted by this cleanup (RS-421).
+
 ## [0.14.10] - 2026-10-27
 
 ### Fixed

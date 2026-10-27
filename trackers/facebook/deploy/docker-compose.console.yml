@@ -45,12 +45,10 @@ services:
         denver-1=/config/workers/homelab-denver.toml,
         sc-1=/config/workers/homelab-sc.toml,
         mw-1=/config/workers/homelab-mw.toml,
-        west-1=/config/workers/homelab-west.toml,
         nyc-1=/config/workers/homelab-nyc.toml,
         phl-1=/config/workers/homelab-phl.toml,
         va-2=/config/workers/homelab-va2.toml,
         ca-2b=/config/workers/homelab-ca2b.toml,
-        wc-1b=/config/workers/homelab-wc1b.toml,
         va-2b=/config/workers/homelab-va2b.toml,
         ca-4b=/config/workers/homelab-ca4b.toml,
         nj-2b=/config/workers/homelab-nj2b.toml,
@@ -75,12 +73,10 @@ services:
         denver-1=rs-monitor-denver:5900,
         sc-1=rs-monitor-sc:5900,
         mw-1=rs-monitor-mw:5900,
-        west-1=rs-monitor-west:5900,
         nyc-1=rs-monitor-nyc:5900,
         phl-1=rs-monitor-phl:5900,
         va-2=rs-monitor-va2:5900,
         ca-2b=rs-monitor-ca2b:5900,
-        wc-1b=rs-monitor-wc1b:5900,
         va-2b=rs-monitor-va2b:5900,
         ca-4b=rs-monitor-ca4b:5900,
         nj-2b=rs-monitor-nj2b:5900,
@@ -102,12 +98,10 @@ services:
       - ../configs/homelab-denver.toml:/config/workers/homelab-denver.toml
       - ../configs/homelab-sc.toml:/config/workers/homelab-sc.toml
       - ../configs/homelab-mw.toml:/config/workers/homelab-mw.toml
-      - ../configs/homelab-west.toml:/config/workers/homelab-west.toml
       - ../configs/homelab-nyc.toml:/config/workers/homelab-nyc.toml
       - ../configs/homelab-phl.toml:/config/workers/homelab-phl.toml
       - ../configs/homelab-va2.toml:/config/workers/homelab-va2.toml
       - ../configs/homelab-ca2b.toml:/config/workers/homelab-ca2b.toml
-      - ../configs/homelab-wc1b.toml:/config/workers/homelab-wc1b.toml
       - ../configs/homelab-va2b.toml:/config/workers/homelab-va2b.toml
       - ../configs/homelab-ca4b.toml:/config/workers/homelab-ca4b.toml
       - ../configs/homelab-nj2b.toml:/config/workers/homelab-nj2b.toml
