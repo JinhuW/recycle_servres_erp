@@ -2,13 +2,13 @@
 id: RS-419
 title: Preserve full Facebook sessions when moving a legacy worker to the ERP fleet
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-27
 reporter: jinhu
 branch: fix/ca3-full-session-handover
-pr:
-version:
+pr: 940
+version: 1.367.1
 related: [RS-394, RS-291]
 ---
 
@@ -38,9 +38,9 @@ identity were staged privately on worker-60-14 before any stop.
 - [x] Cookie-only clients remain compatible and cannot erase stored origins.
 - [x] Invalid or foreign-account uploads are refused without replacing state.
 - [x] Regression tests cover upload → sealed storage → claim → rendered state.
-- [ ] Only ca-3 is migrated, using a fresh snapshot after its clean stop and
+- [x] Only ca-3 is migrated, using a fresh snapshot after its clean stop and
       the same proxy, Chromium build and presented device settings.
-- [ ] Verify one restored-session boot and a healthy fleet heartbeat; stop on
+- [x] Verify one restored-session boot and a healthy fleet heartbeat; stop on
       any checkpoint or challenge without automatic login retries.
 
 ## Out of scope
@@ -55,3 +55,7 @@ Approved in the conversation on 2026-10-27. The additive protocol uses optional
 existing encrypted pool cookie column holds the complete state; no schema
 change is needed. Old uploads retain origins under the same account lock.
 See `docs/superpowers/plans/2026-10-24-erp-fleet/WS-H-migration.md`.
+
+The live pilot restored the full session as worker-60-14-3, HEALTHY, with one
+restored-session boot. Timings, backups and the first search are recorded in
+WS-H-migration.md; the parent RS-394 remains open for broader cutover.

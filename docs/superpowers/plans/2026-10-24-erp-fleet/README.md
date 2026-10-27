@@ -102,6 +102,15 @@ E join as they land.
 
 ## Status
 
+**Latest live pilot (2026-10-27):** RS-419 / #940 preserved the complete
+session before moving healthy ca-3 (#55) to the dev ERP fleet as
+`worker-60-14-3`, worker 0.14.8 / ERP v1.367.1. One boot restored its session;
+it is HEALTHY, with the same proxy and presented device and the listing cache
+copied before startup. Legacy ca-3 is retired, other workers were untouched,
+and alerts remain off on dev. See [WS-H](WS-H-migration.md) for the exact
+checks, backups and first-search result. The earlier #22 lock belongs to a
+different account and does not describe this handover.
+
 | WS | Status | PR | Notes |
 | --- | --- | --- | --- |
 | A | A1 and A2 merged | #875, #880 | migration landed as `0206_fleet.sql` (0205 was taken); `GET /api/fleet/health` is manager scope; worker-token key derives from `JWT_SECRET` outside production. A2 (v1.338.0): catalog, tasks and round routes, `reconcile()` on a 30 s tick (`FLEET_ROLE=manager-only` skips it) and after every manager write, `fleet-import.mjs`; probe tasks carry their slot's `account_no` from insert; DELETE cancels waiting tasks only, a leased one finishes; `GET /items` and `GET /tasks` answer bare arrays, `GET /cities` answers `{cities}` |
