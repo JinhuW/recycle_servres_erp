@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.12] - 2026-10-27
+
 ### Removed
 
 - **Legacy denver-1 is retired after its full-session handover to the dev
