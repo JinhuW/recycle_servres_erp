@@ -2,13 +2,13 @@
 id: RS-416
 title: ERP-fleet worker page matches the homelab worker page
 type: story
-status: backlog
+status: done
 priority: P2
 created: 2026-10-26
 reporter: jinhu
 branch: fleet/worker-page-parity
-pr:
-version:
+pr: 934
+version: 1.365.0
 related: [RS-394, RS-412, RS-415]
 ---
 
