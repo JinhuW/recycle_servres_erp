@@ -293,3 +293,62 @@ failed container has been removed, and an ordinary new container would lose
 its listing cache. Check one restored boot and HEALTHY before resuming the
 host. The account, full encrypted storage state and presented-device metadata
 already remain in its parked slot.
+
+## Random-worker handover: denver-1 (2026-10-27 UTC)
+
+The owner requested another random worker (RS-422). The first health-only
+candidate was left untouched because its pool account was Retired. A new
+random draw among eight healthy workers with matching active pool assignments,
+known proxy exits and no active legacy proxy partner selected **denver-1**.
+No retired account was reactivated.
+
+- Source: `rs-monitor-denver`, account **#10**; original Decodo endpoint
+  `isp.decodo.com:10006`. Non-Facebook checks from the old and new host
+  both returned **72.1.143.239** before the stop. No IP change was made.
+- Browser: native Chromium 156.0.8078.4 underneath the already-pinned Mac
+  Chrome/151 header, viewport/screen 1280x720 at scale 1, native en-US/UTC
+  defaults. `preserve_user_agent: true` retains that header. No cached
+  identity existed on the source, and no coordinator-generated profile
+  replaced its observed device.
+- An offline headed-browser test with **network none** restored the full
+  snapshot and checked the exact user agent, timezone and viewport. The
+  host agent was briefly observe-only; existing workers kept running.
+- The source was rechecked HEALTHY with the expected account and stopped
+  cleanly at **09:58:50** (exit 0). The final checksummed state and sidecar
+  (10 cookies, 1 origin, **21 IndexedDB databases**) and complete monitor
+  home were copied to `~/fleet-handover/denver-final-20261027T095854Z/` on
+  worker-60-14, in private directories/files. SQLite quick_check returned ok;
+  the listing cache contained **28,524 entries** and was copied in before boot.
+- Dev #10 received the whole state resealed under dev's key and the exact
+  device, proxy and 18 home cities. Password, TOTP and access-token fallback
+  were omitted, so a failed restore would park instead of logging in again.
+- A fresh single-use claim ticket started **worker-60-14-4** at
+  **09:59:37** on worker **0.14.10** (monitor `f4d4fdf`, image digest
+  `b211950a591d8948b03e346bb60c4486e4362731cb0df38de569d3e10cc315f1`).
+  It claimed #10 epoch 1, logged **Session restored, skipping login**, and
+  reported HEALTHY at **10:00:01**. Login **#563** is one `boot`, outcome
+  `restored`. Its saved state retains all 21 databases and its cached device
+  retains the exact Mac Chrome/151 header. The login table does not store a
+  user-agent column; header preservation was verified through the offline
+  browser test and the rendered identity, not inferred from that ledger.
+- Production pool #10 now names worker-60-14-4, with an assignment event and
+  the same proxy. Production credentials and application deployment were
+  unchanged. Host management resumed with capacity still **4**. Existing
+  workers 1, 2 and 3 kept their container ids and StartedAt values.
+- The source container was removed only after the new worker was HEALTHY.
+  Its launch config, worker-specific environment file and compose file were
+  archived at `~/recycle_servers/archive/migrated-denver-2026-10-27/facebook_tracker/`
+  on the VM. The original session folder and Docker cache volume remain.
+  Legacy queue enrollment is removed and its coordinator row retired. The
+  console compose loses its references without restarting the console.
+- Tracker **0.14.12** versions the launch-file cleanup. The running worker
+  stays **0.14.10**; no worker roll was requested. The static denver-1 entry
+  in fleet.toml remains for generated region coverage and is not deployed.
+
+This is still a **dev fleet pilot with alerts off**. west-1's #15 slot
+remains parked on its original failing proxy. Worker id **worker-60-14-4 now
+belongs to denver-1**, so a future west-1 activation must choose a free worker
+id and sufficient host capacity, restore the protected cache before boot,
+and never replace denver-1 to reuse that id. For a rollback, stop and fence
+#10 before restoring any archived legacy launch path; a new browser boot
+requires an operator decision.

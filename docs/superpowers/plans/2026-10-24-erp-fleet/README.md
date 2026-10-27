@@ -102,6 +102,13 @@ E join as they land.
 
 ## Status
 
+**Random extension (RS-422, 2026-10-27):** denver-1 (#10) restored its full
+session in one boot and is HEALTHY as worker-60-14-4 on 0.14.10. Its exact
+proxy, pinned browser header, 21 IndexedDB databases and 28,524-entry listing
+cache were preserved. Legacy launch files are retired; other workers and
+west-1's parked slot were unchanged. This remains a dev pilot with alerts off;
+see [WS-H](WS-H-migration.md).
+
 **Extension (RS-421, 2026-10-27):** wc-1b (#30) restored its complete
 session in one boot and is HEALTHY as worker-60-14-1 on 0.14.10. west-1
 (#15) is fully staged but parked because its unchanged proxy returns 503
