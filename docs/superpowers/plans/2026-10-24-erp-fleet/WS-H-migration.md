@@ -102,8 +102,11 @@ Remaining differences:
   worker always caches an identity, and the monitor then rewrites a pinned
   user agent to the browser's version, so they arrive as `Chrome/156`. To
   Facebook that reads as a browser update on the same IP and cookies. Keeping
-  151 would take a change to the vendored monitor. The homelab browser already
-  pairs that Mac string with Linux Chromium 156 underneath.
+  151 used to require a change to the vendored monitor. Since worker 0.14.10
+  (RS-421), the export marks these sidecar-pinned profiles with
+  `preserve_user_agent: true`, and the entrypoint and monitor retain their
+  exact header. The homelab browser already pairs that Mac string with Linux
+  Chromium 156 underneath; the move preserves that existing combination.
 - **Things outside the device profile**: CPU count, memory and the WebGL
   renderer come from the host (10.10.60.14 instead of the VM). Fonts come from
   the image, which is the same aimm base on both.

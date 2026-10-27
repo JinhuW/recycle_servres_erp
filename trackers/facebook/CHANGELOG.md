@@ -18,6 +18,18 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.10] - 2026-10-27
+
+### Fixed
+
+- **A legacy worker keeps its pinned user agent when it enters the fleet.**
+  The device export marks a user agent previously read verbatim from a
+  session sidecar; the fleet entrypoint and monitor preserve that value
+  instead of rewriting its Chrome version. Native and ordinary cached
+  profiles keep their existing behavior. This avoids changing west-1's
+  presented browser header during the approved full-session handover of
+  west-1 and wc-1b (RS-421).
+
 ## [0.14.9] - 2026-10-27
 
 ### Removed

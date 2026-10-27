@@ -529,6 +529,8 @@ def identity_for(answer: Dict[str, Any]) -> Dict[str, Any]:
         profile["screen"] = _pair(device.get("screen")) or viewport
     if isinstance(device.get("device_scale_factor"), (int, float)) and device["device_scale_factor"] > 0:
         profile["device_scale_factor"] = float(device["device_scale_factor"])
+    if device.get("preserve_user_agent") is True:
+        profile["preserve_user_agent"] = True
     cookies = [
         cookie
         for cookie in account.get("cookies") or []

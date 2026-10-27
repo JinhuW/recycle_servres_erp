@@ -116,7 +116,7 @@ def presented_device(
         ua = device.get("user_agent") or sidecar_ua
         if ua:
             source["user_agent"] = "identity.json" if device.get("user_agent") else "sidecar"
-            if browser_version:
+            if browser_version and not device.get("preserve_user_agent"):
                 ua = with_browser_version(str(ua), browser_version)
                 source["user_agent"] += " + browser version"
         source["geometry"] = "identity.json"
@@ -150,6 +150,8 @@ def presented_device(
     }
     if native:
         out["native"] = native
+    if ua and ((device is None and sidecar_ua) or (device and device.get("preserve_user_agent") is True)):
+        out["preserve_user_agent"] = True
     return out, source
 
 
@@ -186,6 +188,7 @@ def assess(
     ua_major = _CHROME_VERSION.search(device.get("user_agent") or "")
     if (
         "user_agent" not in device.get("native", [])
+        and device.get("preserve_user_agent") is not True
         and ua_major
         and major.isdigit()
         and ua_major.group(1).split(".", 1)[0] != major

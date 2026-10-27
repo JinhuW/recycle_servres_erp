@@ -915,3 +915,13 @@ retry backs off: each check of the city that ended in the last day without a
 verdict (stopped, an error or wall, an expired lease) doubles the wait from
 the last one's end, 15 min, 30 min, … up to 6 h; checks that gave a verdict
 do not count, so a `reverify` is checked at once.
+
+### Preserved legacy user agents (worker 0.14.10)
+
+`fleet_slots.device` may carry `preserve_user_agent: true`. The export sets
+it when a legacy worker with no cached identity read its pinned user agent
+verbatim from the session sidecar. The backend passes device metadata through
+unchanged; the entrypoint caches the flag and the monitor then leaves that
+user-agent string unchanged. Absent or false keeps normal browser-version
+rewriting; a native user agent is still left to Chromium. This reproduces the
+browser identity already in use before moving the saved session.

@@ -54,6 +54,7 @@ def test_no_identity_is_playwrights_defaults_and_the_sidecars_user_agent_as_is()
     device, source = edp.presented_device(None, {"user_agent": MAC_151}, CHROME, ENV)
     assert device == {
         "user_agent": MAC_151,  # no identity, so the monitor does not rewrite its version
+        "preserve_user_agent": True,
         "viewport": [1280, 720],
         "screen": [1280, 720],
         "device_scale_factor": 1.0,
@@ -90,7 +91,7 @@ def test_assess_flags_what_would_not_carry_over():
     assert facts["session"] is False and facts["datr"] is False
     assert "no logged-in session to hand over" in facts["flags"]
     assert "session saved under another device than the cached one" in facts["flags"]
-    assert "fleet presents Chrome/156 (browser-version rewrite)" in facts["flags"]
+    assert not any("browser-version rewrite" in flag for flag in facts["flags"])
 
 
 def test_worker_names_resolve_to_session_folders():
