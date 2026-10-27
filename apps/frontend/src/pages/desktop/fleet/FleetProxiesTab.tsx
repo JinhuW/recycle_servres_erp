@@ -10,7 +10,7 @@ import {
 import { useT } from '../../../lib/i18n';
 import { ProxyDeadChip } from '../FleetWorkers';
 import { easternClock } from './fleetBoard';
-import { agoLabel, Clock, EmptyRow, Legend, UnavailableCard, useFleetPoll, WorkerLink } from './shared';
+import { agoLabel, Clock, EmptyRow, Legend, UnavailableCard, useFleetMirror, useFleetPoll, WorkerLink } from './shared';
 
 // ─── Proxies ──────────────────────────────────────────────────────────────────
 // Every proxy port the fleet browses through: the ERP's list, and the ports
@@ -47,6 +47,7 @@ export function proxyMatches(p: FleetProxyHealth, q: string): boolean {
 
 export function FleetProxiesTab() {
   const { t } = useT();
+  const mirror = useFleetMirror();
   const { data, reload } = useFleetPoll<Data>(() => Promise.all([
     fleetApi.proxyHealth(),
     // The failed-account marks are the pool's; the table stands without them.
@@ -82,17 +83,19 @@ export function FleetProxiesTab() {
             ? t('fleetProxiesLede', { n: rows.length, up: count('up'), degraded: count('degraded'), down: count('down'), ago: agoLabel(t, health.round_at) })
             : t('fleetProxiesLedeNever', { n: rows.length }))}
         </p>
-        <div className="page-actions">
-          <button type="button" className="btn primary" onClick={() => check()} disabled={!health || busy !== null}>
-            <Icon name="refresh" size={14} />{t('fleetProxyCheckAll')}
-          </button>
-        </div>
+        {!mirror && (
+          <div className="page-actions">
+            <button type="button" className="btn primary" onClick={() => check()} disabled={!health || busy !== null}>
+              <Icon name="refresh" size={14} />{t('fleetProxyCheckAll')}
+            </button>
+          </div>
+        )}
       </div>
       {health?.coordinator === 'unsupported' && <UnavailableCard text={t('fleetProxyCoordUnsupported')} />}
       {health?.coordinator === 'unreachable' && <UnavailableCard text={t('fleetProxyCoordUnreachable')} />}
       <section className="card fleet-card" aria-label={t('fleetProxiesTitle')}>
         {data === null ? <TableSkeleton rows={6} cols={8} />
-          : <ProxiesHealthTable rows={rows} marks={data.marks} filter={filter} onFilter={setFilter} busy={busy} onCheck={check} />}
+          : <ProxiesHealthTable rows={rows} marks={data.marks} filter={filter} onFilter={setFilter} busy={busy} onCheck={mirror ? undefined : check} />}
       </section>
     </div>
   );
@@ -100,7 +103,8 @@ export function FleetProxiesTab() {
 
 export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onCheck, now = Date.now() }: {
   rows: readonly FleetProxyHealth[]; marks: readonly FbProxyMark[] | null; filter: Filter; onFilter: (f: Filter) => void;
-  busy: number | 'all' | null; onCheck: (id?: number) => void; now?: number;
+  // Without one the rows carry no check button: a mirror's checks are prod's.
+  busy: number | 'all' | null; onCheck?: (id?: number) => void; now?: number;
 }) {
   const { t, locale } = useT();
   const counts = useMemo(() => {
@@ -206,11 +210,13 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
                     {!p.slots.length && !p.workers.length && <span className="fp-muted">{t('fleetProxyNobody')}</span>}
                   </td>
                   <td className="fleet-row-actions">
-                    <button type="button" className="btn ghost icon sm" onClick={() => onCheck(p.proxy_id ?? undefined)}
-                      disabled={busy !== null || p.proxy_id === null} aria-busy={rowBusy}
-                      title={p.proxy_id === null ? t('fleetProxyCheckOneHomelab') : t('fleetProxyCheckOne')} aria-label={t('fleetProxyCheckOne')}>
-                      <Icon name="refresh" size={13} />
-                    </button>
+                    {onCheck && (
+                      <button type="button" className="btn ghost icon sm" onClick={() => onCheck(p.proxy_id ?? undefined)}
+                        disabled={busy !== null || p.proxy_id === null} aria-busy={rowBusy}
+                        title={p.proxy_id === null ? t('fleetProxyCheckOneHomelab') : t('fleetProxyCheckOne')} aria-label={t('fleetProxyCheckOne')}>
+                        <Icon name="refresh" size={13} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               );

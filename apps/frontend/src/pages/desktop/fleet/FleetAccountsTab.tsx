@@ -15,7 +15,7 @@ import {
 } from './fleetRows';
 import { AddHostDialog, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
 import {
-  agoLabel, BudgetRing, COORDINATOR_POLL_MS, EmptyRow, Legend, ParkDialog, UnavailableCard, useFleetPoll, WorkerStateChip,
+  agoLabel, BudgetRing, COORDINATOR_POLL_MS, EmptyRow, Legend, ParkDialog, UnavailableCard, useFleetMirror, useFleetPoll, WorkerStateChip,
 } from './shared';
 
 // ─── Fleet ────────────────────────────────────────────────────────────────────
@@ -47,6 +47,7 @@ const KIND_KEY: Record<FleetRowKind | 'all', string> = {
 
 export function FleetAccountsTab() {
   const { t, locale } = useT();
+  const mirror = useFleetMirror();
   const erp = useFleetPoll<ErpData>(() => Promise.all([
     fleetApi.slots(), fleetApi.workers(), fleetApi.hosts(),
     // The pool names the account a coordinator worker holds.
@@ -81,10 +82,12 @@ export function FleetAccountsTab() {
     <div className="fp-pool">
       <div className="fleet-tab-head">
         <p className="fleet-lede">{t('fleetLede')}</p>
-        <div className="page-actions">
-          <button type="button" className="btn" onClick={() => setReleasing(true)} disabled={!data || hosts.length === 0}>{t('fleetReleaseAction')}</button>
-          <button type="button" className="btn primary" onClick={() => setAdding(true)} disabled={!data}>{t('fleetHostAdd')}</button>
-        </div>
+        {!mirror && (
+          <div className="page-actions">
+            <button type="button" className="btn" onClick={() => setReleasing(true)} disabled={!data || hosts.length === 0}>{t('fleetReleaseAction')}</button>
+            <button type="button" className="btn primary" onClick={() => setAdding(true)} disabled={!data}>{t('fleetHostAdd')}</button>
+          </div>
+        )}
       </div>
       {data === null ? <div className="card fleet-host"><TableSkeleton rows={1} cols={4} /></div>
         : <HostStrip hosts={hosts} release={release} onChanged={reload} />}
@@ -163,6 +166,7 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
   row: FleetRow; hostVersion: string | null; cityName: (slug: string) => string; onChanged: () => void; now: number;
 }) {
   const { t, locale } = useT();
+  const mirror = useFleetMirror();
   const [parking, setParking] = useState(false);
   // Park acts on the account this worker holds now, so it needs the slot to
   // still be this worker's.
@@ -222,7 +226,7 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
       <td>
         <span className="fp-holder">
           {nowCell}
-          {r.running && slot && !slot.parked && (
+          {r.running && slot && !slot.parked && !mirror && (
             <span className="fleet-now-actions">
               <button type="button" className="btn sm ghost" onClick={() => setParking(true)}>{t('fleetPark')}</button>
             </span>

@@ -45,3 +45,11 @@ BEGIN
     EXECUTE pg_catalog.format('UPDATE public.%I SET %I = NULL WHERE %I IS NOT NULL', c.tbl, c.col, c.col);
   END LOOP;
 END $$;
+
+-- Prod's fleet arrives with the rest. A host token's hash would let whoever
+-- holds that token talk to dev as the host, and a claim ticket is a live
+-- credential; a slot's proxy URL is sealed but not named *_enc. The hashes are
+-- replaced rather than cleared (the column is NOT NULL) with ones no token has.
+UPDATE public.fleet_hosts SET token_hash = pg_catalog.md5(pg_catalog.gen_random_uuid()::text);
+TRUNCATE public.fleet_claim_tickets;
+UPDATE public.fleet_slots SET proxy_url = NULL WHERE proxy_url IS NOT NULL;

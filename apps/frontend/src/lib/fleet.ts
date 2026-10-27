@@ -107,6 +107,10 @@ function query(params: Record<string, string | number | undefined>): string {
 }
 
 export const fleetApi = {
+  // `mirror`: this ERP holds a read-only copy of prod's fleet and answers
+  // every write with 409 read_only.
+  health: () => api.get<{ ok: boolean; tables: unknown; mirror?: boolean }>(`${BASE}/health`),
+
   // ── Cities ──
   cities: () => api.get<{ cities: FleetCity[] }>(`${BASE}/cities`).then(r => r.cities),
   // The city starts disabled with a verify-slug task; 409 exists when the slug is taken.

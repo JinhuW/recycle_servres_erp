@@ -13,7 +13,7 @@ import { poolApi, type PoolSnapshot } from '../../lib/facebookPool';
 import { FacebookAccountPool } from './FacebookAccountPool';
 import { FormSkeleton } from '../../components/Skeleton';
 import { fleetRows, fleetRunning } from './fleet/fleetRows';
-import { useFleetPoll } from './fleet/shared';
+import { FleetMirrorBanner, useFleetMirror, useFleetPoll } from './fleet/shared';
 
 // The viewer carries noVNC; it is its own chunk, fetched only when a manager
 // actually opens a worker's browser, and it too decides between the ERP's
@@ -80,6 +80,7 @@ export function DesktopCoordinator({ showToast }: Props) {
     loadSlots();
   }, [manager, poolOpen, loadSlots]);
   const counts = useTabCounts(manager && !watch && !worker);
+  const mirror = useFleetMirror(manager);
   if (watch) {
     return (
       <Suspense fallback={<FormSkeleton fields={4} />}>
@@ -129,7 +130,7 @@ export function DesktopCoordinator({ showToast }: Props) {
   }
   return (
     <Suspense fallback={<>{head}{tabs}<FormSkeleton fields={4} /></>}>
-      <FleetTabPage key={fleetTab ?? 'fleet'} tab={fleetTab ?? 'fleet'} head={head} tabs={tabs} />
+      <FleetTabPage key={fleetTab ?? 'fleet'} tab={fleetTab ?? 'fleet'} head={<>{head}{mirror && <FleetMirrorBanner />}</>} tabs={tabs} />
     </Suspense>
   );
 }

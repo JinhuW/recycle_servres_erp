@@ -45,6 +45,12 @@
   prod's backend refuses requests that lack the Worker's
   `X-Proxy-Secret`. `https://api.recycleservers.com` is not the ERP (it
   answers Cloudflare 522).
+  Since RS-427 the fleet lives on prod and dev is a read-only mirror
+  (`FLEET_ROLE=mirror`). Agents and workers started with the dev URL still
+  work: the dev Worker forwards their bearer calls to prod
+  (`FLEET_FORWARD_URL`, `FLEET_FORWARD_PROXY_SECRET`, both Worker secrets so a
+  deploy keeps them). A new or re-pointed agent takes the prod URL. The
+  forward is removed once no container holds the dev URL.
 - Shared worker secrets are the Cloudflare Worker secret FLEET_WORKER_ENV JSON,
   added only to a successful host-authenticated claim. Provision the edge secret
   before the agent/worker release; these values never enter Railway or Postgres.

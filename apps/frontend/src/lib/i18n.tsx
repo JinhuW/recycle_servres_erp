@@ -4577,6 +4577,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fbcWatchExitFullscreen: 'Exit full screen',
     // ── The ERP-owned fleet (pages/desktop/fleet/*) ──
     fleetNotServed: "This backend has no fleet routes yet. The tabs fill in once the fleet release is deployed.",
+    fleetMirrorNote: "This is a read-only copy of prod's fleet. The hosts and workers run on prod, so make changes there.",
+    fleetMirrorLink: "Open prod's fleet at inventory.recycleservers.com",
     fleetCitiesTitle: "Cities",
     fleetCitiesNone: "No cities yet. Add one, or import the current list.",
     fleetCityAdd: "Add city",

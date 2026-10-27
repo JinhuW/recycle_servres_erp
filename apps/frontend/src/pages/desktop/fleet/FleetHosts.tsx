@@ -6,7 +6,7 @@ import { fleetApi, type FleetHost, type FleetHostCreated, type FleetRelease } fr
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
 import { hostLag, hostRunning, releaseSummary, rollProgress } from './fleetBoard';
-import { agoLabel, Clock, ConfirmDialogBody } from './shared';
+import { agoLabel, Clock, ConfirmDialogBody, useFleetMirror } from './shared';
 
 // ─── Hosts ────────────────────────────────────────────────────────────────────
 // The machines that run worker containers, as the strip of cards at the top
@@ -55,6 +55,7 @@ export function HostStrip({ hosts, release, onChanged, now = Date.now() }: {
   hosts: readonly FleetHost[]; release: FleetRelease | null; onChanged: () => void; now?: number;
 }) {
   const { t } = useT();
+  const mirror = useFleetMirror();
   const [busy, setBusy] = useState<string | null>(null);
   const [removing, setRemoving] = useState<FleetHost | null>(null);
 
@@ -97,21 +98,23 @@ export function HostStrip({ hosts, release, onChanged, now = Date.now() }: {
               </span>
               <span className="fleet-host-right">
                 <button type="button" role="switch" aria-checked={h.authoritative} className={`fleet-switch${h.authoritative ? ' on' : ''}`}
-                  onClick={() => authoritative(h)} disabled={rowBusy} title={t(h.authoritative ? 'fleetAuthoritativeOnHint' : 'fleetAuthoritativeOffHint')}>
+                  onClick={() => authoritative(h)} disabled={rowBusy || mirror} title={t(h.authoritative ? 'fleetAuthoritativeOnHint' : 'fleetAuthoritativeOffHint')}>
                   <i /><span>{t(h.authoritative ? 'fleetAuthoritative' : 'fleetAuthoritativeOff')}</span>
                 </button>
                 <span className="fleet-stepper" title={t('fleetCapacityHint')}>
-                  <button type="button" className="btn ghost icon sm" onClick={() => capacity(h, -1)} disabled={rowBusy || h.capacity <= 0}
-                    aria-label={t('fleetCapacityLess')}><Icon name="minus" size={12} /></button>
+                  {!mirror && <button type="button" className="btn ghost icon sm" onClick={() => capacity(h, -1)} disabled={rowBusy || h.capacity <= 0}
+                    aria-label={t('fleetCapacityLess')}><Icon name="minus" size={12} /></button>}
                   <b className="mono">{h.capacity}</b>
-                  <button type="button" className="btn ghost icon sm" onClick={() => capacity(h, 1)} disabled={rowBusy || h.capacity >= CAPACITY_MAX}
-                    aria-label={t('fleetCapacityMore')}><Icon name="plus" size={12} /></button>
+                  {!mirror && <button type="button" className="btn ghost icon sm" onClick={() => capacity(h, 1)} disabled={rowBusy || h.capacity >= CAPACITY_MAX}
+                    aria-label={t('fleetCapacityMore')}><Icon name="plus" size={12} /></button>}
                   <small>{t('fleetCapacityWorkers')}</small>
                 </span>
-                <button type="button" className="btn ghost icon sm" onClick={() => setRemoving(h)} disabled={rowBusy} title={t('fleetHostRemove')}
-                  aria-label={t('fleetHostRemove')}>
-                  <Icon name="trash" size={13} />
-                </button>
+                {!mirror && (
+                  <button type="button" className="btn ghost icon sm" onClick={() => setRemoving(h)} disabled={rowBusy} title={t('fleetHostRemove')}
+                    aria-label={t('fleetHostRemove')}>
+                    <Icon name="trash" size={13} />
+                  </button>
+                )}
               </span>
             </div>
             {roll ? (

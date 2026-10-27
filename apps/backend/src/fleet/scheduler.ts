@@ -294,7 +294,7 @@ export async function purgeHistory(sql: Sql, now: Date = new Date(), batch: numb
  * full, so a backlog drains in short steps.
  */
 export function startFleetSchedulerLoop(sql: Sql, env: Env): { stop(): void } {
-  if (env.FLEET_ROLE === 'manager-only') return { stop() {} };
+  if (env.FLEET_ROLE === 'manager-only' || env.FLEET_ROLE === 'mirror') return { stop() {} };
   let stopped = false;
   let busy = false;
   let lastPurge = 0;

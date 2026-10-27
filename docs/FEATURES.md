@@ -3298,6 +3298,19 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   `docker start` claims with a spent ticket, exits 75 and is recreated. The
   host token still claims for one release (older agents and worker images).
 
+- **One fleet, on prod; dev mirrors it (v1.369.0, RS-427)** — the hosts and
+  workers belong to prod's ERP. A backend with `FLEET_ROLE=mirror` (dev) holds
+  a copy: managers can read every Fleet tab, which carries a banner pointing at
+  inventory.recycleservers.com, but every write control is gone and the API
+  refuses fleet writes with `409 read_only`. Any agent or worker that still
+  calls it gets a 503, never a 401 or 409, so no worker exits (an exit is a
+  Facebook login on restart), and the mirror runs neither the scheduler tick
+  nor the proxy probe. A worker started with the dev URL keeps working: the dev
+  Cloudflare Worker sends any `/api/fleet/*` call that carries a bearer to
+  `FLEET_FORWARD_URL` with that ERP's `FLEET_FORWARD_PROXY_SECRET`, while
+  managers' cookie calls stay on dev. With `SYNC_KEEP_FLEET=0`, the nightly
+  prod→dev copy brings prod's fleet over like any other table. Host token
+  hashes are replaced, claim tickets dropped, and sealed proxy URLs cleared.
 - **Add to fleet (v1.364.0, RS-415)** — a manager puts pool accounts into
   ERP-fleet slots from **Monitors ▸ Facebook ▸ Account pool**, no seed script.
   The **Proxies** card under the pool table lists the exits the ERP keeps

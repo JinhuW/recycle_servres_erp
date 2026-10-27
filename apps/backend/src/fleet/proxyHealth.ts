@@ -210,7 +210,7 @@ export async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAns
 
 /** The 30 s tick that starts a round once five minutes have passed. One instance wins each round. */
 export function startProxyHealthLoop(sql: Sql, env: Env): { stop(): void } {
-  if (env.FLEET_ROLE === 'manager-only') return { stop() {} };
+  if (env.FLEET_ROLE === 'manager-only' || env.FLEET_ROLE === 'mirror') return { stop() {} };
   let stopped = false;
   let busy = false;
   const tick = async () => {
