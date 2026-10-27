@@ -2097,7 +2097,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     homeStageSub_in_transit: 'on the way',
     homeStageSub_reviewing: 'being checked',
     homeStageSub_ready_to_pay: 'commission owed',
-    homeStageDoneSub: 'last 30 days',
+    homeStageDoneSub: 'all time',
     homeOpenPos: 'Your open purchase orders',
     homeOpenPosSub: '{n} open · drafts first, then the longest waiting',
     homeOpenPosSubOne: '1 open',

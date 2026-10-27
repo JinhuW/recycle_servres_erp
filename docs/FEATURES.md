@@ -2675,7 +2675,7 @@ the predicate of the page it opens. Home re-reads on returning to the tab and
 every two minutes.
 
 - **Purchasers:**
-  - A count of their POs at each stage, with Done covering the last 30 days.
+  - A count of their POs at each stage, Done included in full, as the list each tile opens shows it (v1.367.2).
     Each count opens the PO list filtered to that stage (`?stage=`).
   - Their open POs, drafts first and then the longest-waiting. Each row
     gives the stage, the days in it (amber at 3, red at 7) and what it is

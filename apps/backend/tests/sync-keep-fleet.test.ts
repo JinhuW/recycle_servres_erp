@@ -29,7 +29,8 @@ async function copyLikeTheNightly(nos: number[]) {
   await sql`TRUNCATE fleet_task_attempts, fleet_task_events, fleet_tasks, fleet_workers, fleet_slots,
                      fleet_claim_tickets, fleet_hosts, fleet_settings, fleet_items, fleet_cities`;
   await sql.unsafe(`UPDATE fb_pool_accounts SET ${SEALED.map((c) => `${c} = NULL`).join(', ')},
-                      cookie_uid = NULL, cookie_at = NULL, status = 'available', note = 'from prod'
+                      cookie_uid = NULL, cookie_at = NULL, status = 'available', note = 'from prod',
+                      holder_name = NULL, held_since = NULL
                     WHERE no IN (${nos.join(',')})`);
 }
 

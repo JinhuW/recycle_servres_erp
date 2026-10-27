@@ -78,6 +78,24 @@ export const eventToWire = (r: TaskEventRow): FleetTaskEvent => ({
   at: r.at.toISOString(),
 });
 
+/**
+ * An account's search minutes so far today (UTC), as fleet_minutes counts
+ * them. That view spreads every attempt in the retention window over its days
+ * before a day can be picked; this reads only attempts that can reach today
+ * (none outlives a day: lease and task limits are hours).
+ */
+export const minutesTodaySql = (sql: SqlLike, accountNo: ReturnType<SqlLike> | number) => sql`
+  (SELECT COALESCE(SUM(GREATEST(0, EXTRACT(EPOCH FROM LEAST(x.ended_at, d.e) - GREATEST(x.leased_at, d.s)))), 0)::float8 / 60
+   FROM (SELECT date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS s,
+                (date_trunc('day', NOW() AT TIME ZONE 'UTC') + interval '1 day') AT TIME ZONE 'UTC' AS e) d
+   CROSS JOIN LATERAL (
+     SELECT a.leased_at, a.ended_at FROM fleet_task_attempts a
+     WHERE a.account_no = ${accountNo} AND a.leased_at >= d.s - interval '1 day' AND a.ended_at > d.s
+     UNION ALL
+     SELECT t.leased_at, LEAST(NOW(), t.lease_expires_at) FROM fleet_tasks t
+     WHERE t.account_no = ${accountNo} AND t.state = 'leased' AND t.leased_at IS NOT NULL
+   ) x)`;
+
 /** Every relation the fleet migration creates, the view included. */
 export const FLEET_TABLES = [
   'fleet_cities',

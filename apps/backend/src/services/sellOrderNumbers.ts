@@ -165,10 +165,11 @@ function foldProduct(id: string, lines: readonly FoldLine[]): SheetProduct {
     }
   }
   // A RAM bid row can span module numbers. Listing every source number lets
-  // the returned quote reach every lot rather than only its representative.
+  // the returned quote reach every lot rather than only its representative;
+  // a number held only at 0 has no lot to reach.
   const parts: string[] = [];
   const seenCanon = new Set<string>();
-  for (const l of [shown, ...live, ...ordered]) {
+  for (const l of live.length ? live : ordered) {
     if (!l.part) continue;
     const canon = canonPartNumberJs(l.part);
     if (seenCanon.has(canon)) continue;
@@ -350,7 +351,7 @@ export function foldSheetLines(rows: readonly SheetLineRow[], nextNo: number) {
     })
     .filter((w) => w.pos.length > 0);
 
-  return { products: foldProducts(lines.filter(l => l.qty > 0), byBidKey), warehouses, poWarehouses };
+  return { products: foldProducts(lines, byBidKey).flatMap(live), warehouses, poWarehouses };
 }
 
 // An order's lines as the fold reads them. Read under the order's lock by the

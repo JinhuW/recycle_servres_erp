@@ -8,7 +8,8 @@
 -- backend has migrated the fresh copy.
 --
 -- Kept: every fleet_* table, and for each pool account that has a slot the
--- columns dev owns (every *_enc, cookie_uid, cookie_at, status, note).
+-- columns dev owns (every *_enc, cookie_uid, cookie_at, status, note, and the
+-- holder: a worker's token is only good while the account names it as holder).
 CREATE SCHEMA sync_keep;
 CREATE TABLE sync_keep._migrations AS SELECT filename FROM public.schema_migrations;
 

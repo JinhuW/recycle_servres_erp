@@ -15,6 +15,43 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.367.2] - 2026-10-27
+
+### Fixed
+
+What the review before the v1.367 release to production found (RS-420).
+
+- **The nightly prod→dev copy keeps the dev fleet's account holders.**
+  `restore-fleet.sql` brought back each slotted account's secrets and status
+  but left prod's holder, and a worker's token only counts while its account
+  names it as holder. Every dev worker would have exited on `stale_epoch`
+  after the copy and logged in to Facebook again, every night. The holder now
+  comes back with the rest.
+- **A release no longer skips a host that was quiet for a few minutes.** A
+  roll started just after an ERP deploy saw every other host as silent (no
+  report for 2 minutes), skipped all their workers and finished without them.
+  A briefly silent host is now waited for; only one silent past the 20-minute
+  gate timeout is skipped.
+- **Held polls stay under Cloudflare's limit.** `poll_hold_seconds` could be
+  set to 120, but the Worker proxy cuts an origin answer at 100 s, so every
+  idle `next-task` would have ended in a 524. The ceiling is now 90.
+- **The worker claim checks worker ids the way the rest of the host protocol
+  does.** It kept its own looser rule, so a host could claim as `host-0`, a
+  worker its own report then dropped as foreign.
+- **Heartbeats drop a `vnc_port` outside 1–65535 and an overlong
+  `last_search_at`**, as the claim and the `detail` size cap already did.
+- **The per-account budget check reads only today's attempts.** It went
+  through `fleet_minutes`, which spreads every attempt in the retention window
+  over its days first, on every `next-task` and once per slot on the slots
+  list.
+- **A RAM bid row holds its place when one of its lines is zeroed.** v1.347.0
+  dropped zero lines before grouping, so a row's place and label could move to
+  another PO's line. Zeros count again for the place; only the part numbers of
+  lines above 0 are listed.
+- **The purchaser's Home Done tile matches the list it opens.** It counted
+  only the last 30 days while the list shows every Done PO. It now counts them
+  all and says "all time".
+
 ## [1.367.1] - 2026-10-27
 
 ### Fixed
