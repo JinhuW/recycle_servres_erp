@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.9] - 2026-10-27
+
 ### Removed
 
 - **Legacy ca-3 is retired after its successful ERP-fleet handover.** Its
