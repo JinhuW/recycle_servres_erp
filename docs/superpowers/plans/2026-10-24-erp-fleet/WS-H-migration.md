@@ -426,7 +426,7 @@ worker roll was performed. This is still the dev pilot with alerts off.
 Rollback requires stopping and fencing the matching ERP slot before restoring
 an archived source launch. Do not boot both copies of an account.
 
-## Remaining legacy workers → homelab fleet (RS-425, 2026-10-27 UTC)
+## Remaining legacy workers → homelab fleet (RS-426, 2026-10-27 UTC)
 
 The owner installed the ERP fleet agent on homelab and expanded the request
 to every remaining legacy worker. Seven running legacy containers remained.

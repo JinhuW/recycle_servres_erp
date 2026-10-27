@@ -102,7 +102,7 @@ E join as they land.
 
 ## Status
 
-**Remaining legacy cutover (RS-425, 2026-10-27):** nj-3b, ne-1, va-2 and
+**Remaining legacy cutover (RS-426, 2026-10-27):** nj-3b, ne-1, va-2 and
 va-2b are HEALTHY as homelab-1 through -4. mw-1 transferred parked on its failed
 proxy; phl-1/ca-2b keep Retired/Problem status, with no new browser boot.
 All seven legacy launches are retired with full session/cache backups.

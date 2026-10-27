@@ -2,8 +2,8 @@
 
 | host_id | Address | Role today | Role in the fleet | Status |
 | --- | --- | --- | --- | --- |
-| `homelab` | `jinhu@10.10.10.73` | Python coordinator, console, OpenSearch and four ERP fleet workers; all legacy monitor launches retired | Active dev fleet host, capacity 4 | RS-425, 2026-10-27; sessions restored once, alerts off |
-| `worker-60-14` | `worker@10.10.60.14` | Eight running ERP worker containers and one parked container on operator hold | First dev fleet host, capacity 13 | Existing containers retained during RS-425; SESSION_EXPIRED workers left untouched |
+| `homelab` | `jinhu@10.10.10.73` | Python coordinator, console, OpenSearch and four ERP fleet workers; all legacy monitor launches retired | Active dev fleet host, capacity 4 | RS-426, 2026-10-27; sessions restored once, alerts off |
+| `worker-60-14` | `worker@10.10.60.14` | Eight running ERP worker containers and one parked container on operator hold | First dev fleet host, capacity 13 | Existing containers retained during RS-426; SESSION_EXPIRED workers left untouched |
 
 ## Reachability of `10.10.60.14`
 
@@ -58,7 +58,7 @@ relay at `10.10.10.73:8500`, so the coordinator does not need recreation.
 
 The original socat relay (2026-10-26) admitted only worker-60-14. During the
 2026-10-27 homelab migration it rejected local Docker hairpin traffic, seen
-as `172.24.0.1`. RS-425 replaced only that relay with pinned HAProxy. No coordinator, console or worker browser was restarted. The peer host agent
+as `172.24.0.1`. RS-426 replaced only that relay with pinned HAProxy. No coordinator, console or worker browser was restarted. The peer host agent
 was reloaded once to hold its pre-existing expired, stopped worker.
 
 | What | Current value |
