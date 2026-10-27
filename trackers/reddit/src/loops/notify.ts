@@ -120,7 +120,9 @@ export async function userSenderLive(sql: Sql): Promise<boolean> {
 export async function acquireUserSender(sql: Sql, owner: string): Promise<boolean> {
   const rows = await sql`
     UPDATE telegram_state SET user_sender_owner = ${owner}, user_sender_at = NOW()
-     WHERE user_sender_owner IS NULL OR user_sender_owner = ${owner}
+     WHERE user_sender_owner = ${owner}
+        -- Free or abandoned. A fresh timestamp holds even without an owner:
+        -- an api from before owners existed renews only the timestamp.
         OR user_sender_at IS NULL
         OR user_sender_at <= NOW() - make_interval(secs => ${USER_SENDER_STALE_S})
     RETURNING 1`;

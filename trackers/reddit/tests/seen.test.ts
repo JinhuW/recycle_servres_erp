@@ -170,6 +170,14 @@ describe('user session hold', () => {
     expect(await acquireUserSender(db.sql, 'old')).toBe(true);
     expect(await renewUserSender(db.sql, 'new')).toBe(false);
   });
+
+  it('waits for an api that renews without an owner', async () => {
+    await db.sql`UPDATE telegram_state SET user_sender_owner = NULL, user_sender_at = NOW()`;
+    expect(await acquireUserSender(db.sql, 'new')).toBe(false);
+
+    await db.sql`UPDATE telegram_state SET user_sender_at = NULL`;
+    expect(await acquireUserSender(db.sql, 'new')).toBe(true);
+  });
 });
 
 describe('reads and /api/seen', () => {
