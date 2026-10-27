@@ -187,10 +187,17 @@ export async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAns
   const at = round.coordinator_at?.getTime();
   const ports = at === undefined ? [] : history.filter((c) => c.source === 'coordinator' && c.checked_at.getTime() === at);
   for (const port of ports) {
+    // A port in the ERP list too is one port: its row gains the homelab workers.
+    const { host, port: n } = hostPort(port.exit);
+    const both = out.find((p) => p.source === 'erp' && p.host === host && p.port === n);
+    if (both) {
+      both.workers = port.workers;
+      continue;
+    }
     const mine = history.filter((c) => c.source === 'coordinator' && c.exit === port.exit);
     const last = latest.find((c) => c.source === 'coordinator' && c.exit === port.exit);
     out.push({
-      exit: port.exit, source: 'coordinator', proxy_id: null, label: null, ...hostPort(port.exit),
+      exit: port.exit, source: 'coordinator', proxy_id: null, label: null, host, port: n,
       slots: [], workers: port.workers, ...summarise(mine, last, now),
     });
   }

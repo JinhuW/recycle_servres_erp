@@ -275,7 +275,7 @@ export type FleetProxyHealth = {
   label: string | null;
   host: string;
   port: number;
-  /** ERP: the slots on it. Coordinator: the workers dialing it. */
+  /** The ERP slots on it, and the homelab workers dialing it. */
   slots: FleetProxyUse[];
   workers: string[];
   state: FleetProxyHealthState;

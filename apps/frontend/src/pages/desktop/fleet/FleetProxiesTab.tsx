@@ -197,13 +197,13 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
                   </td>
                   <td><Clock at={last?.at} now={now} /></td>
                   <td>
-                    {p.source === 'erp'
-                      ? (p.slots.length
-                        ? <span className="fp-holder">{p.slots.map(s => (
-                            <small key={s.account_no}>{t('fleetAccountN', { no: s.account_no })}{s.parked && ` · ${t('fleetProxyParked')}`}</small>
-                          ))}</span>
-                        : <span className="fp-muted">{t('fleetProxyNobody')}</span>)
-                      : <span className="fleet-proxy-workers">{p.workers.map(w => <WorkerLink key={w} id={w} />)}</span>}
+                    {p.slots.length > 0 && (
+                      <span className="fp-holder">{p.slots.map(s => (
+                        <small key={s.account_no}>{t('fleetAccountN', { no: s.account_no })}{s.parked && ` · ${t('fleetProxyParked')}`}</small>
+                      ))}</span>
+                    )}
+                    {p.workers.length > 0 && <span className="fleet-proxy-workers">{p.workers.map(w => <WorkerLink key={w} id={w} />)}</span>}
+                    {!p.slots.length && !p.workers.length && <span className="fp-muted">{t('fleetProxyNobody')}</span>}
                   </td>
                   <td className="fleet-row-actions">
                     <button type="button" className="btn ghost icon sm" onClick={() => onCheck(p.proxy_id ?? undefined)}

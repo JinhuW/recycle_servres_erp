@@ -248,6 +248,19 @@ describe('the Proxies tab API', () => {
     expect(later.body.proxies).toHaveLength(1);
   });
 
+  it('shows a port in both lists once, on the ERP row, with the homelab workers on it', async () => {
+    const p = await addProxy('NY 1', `http://${USER}:${PASS}@127.0.0.1:${connectPort}`);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ proxies: [
+      { url: `http://127.0.0.1:${connectPort}`, workers: ['nyc-1'], ok: true, latency_ms: 300, checked_at: '2026-10-27T15:00:00Z' },
+      { url: 'http://isp.example.com:10019', workers: [], ok: true, latency_ms: 500, checked_at: '2026-10-27T15:00:00Z' },
+    ] }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const res = await check({}, { COORDINATOR_API_URL: 'http://console.test', COORDINATOR_API_TOKEN: 'console-token' });
+    expect(res.body.proxies.map((r) => [r.source, r.proxy_id, r.port, r.workers])).toEqual([
+      ['erp', p.id, connectPort, ['nyc-1']],
+      ['coordinator', null, 10019, []],
+    ]);
+  });
+
   it('starts at most one round per five minutes, and prunes checks past two weeks', async () => {
     await addProxy('NY 1', `http://${USER}:${PASS}@127.0.0.1:${connectPort}`);
     await getTestDb()`
