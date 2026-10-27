@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-27
 reporter: jinhu
 branch: JinhuW/stranded-probes
-pr:
+pr: 964
 version: 1.371.2
 related: []
 ---
