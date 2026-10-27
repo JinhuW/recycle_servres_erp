@@ -2,13 +2,13 @@
 id: RS-432
 title: Dev's Fleet page reads prod's fleet live
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-27
 reporter: jinhu
 branch: JinhuW/fleet-mirror-live
-pr:
-version:
+pr: 963
+version: 1.371.1
 related: [RS-427]
 ---
 
