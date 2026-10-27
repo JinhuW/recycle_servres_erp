@@ -101,7 +101,20 @@ Cutover, 2026-10-27 UTC (owner's yes at each step):
 - Every slot kept its epoch, and every container kept its uptime (homelab 2 h,
   worker-60-14 7–13 h), so there were no new logins.
 
-Still open: set `SYNC_KEEP_FLEET=0` on the db-sync service. Until then the
-nightly copy keeps dev's frozen fleet rather than prod's. Before the agents
-are pointed at prod, prod's Worker needs `FLEET_WORKER_ENV`. After that, the
-forward can come off, and dev's `FLEET_WORKER_TOKEN_KEY` should be rotated.
+Follow-ups, 2026-10-27 UTC (owner's go-ahead):
+
+- `SYNC_KEEP_FLEET=0` on the dev `db-sync` service.
+- Dev's `FLEET_WORKER_TOKEN_KEY` replaced with a fresh one. Dev is a mirror
+  and refuses every worker call.
+- Prod's Worker got `FLEET_WORKER_ENV`, and dev's was refreshed: the same
+  OpenRouter key (fingerprint matched a live worker) and coordinator tokens for
+  ids 1–16 on both hosts. The first version had only `homelab-1..4`, as dev's
+  had. The owner had meanwhile added accounts #58–#63 and raised homelab's
+  capacity to 8 on prod, so `homelab-5`/`-6` and `worker-60-14-10..12` exited
+  70 (no token) before opening a browser. With the tokens they start, and the
+  owner chose that ("increase the worker").
+- Both agents re-pointed at `https://inventory.recycleservers.com` without
+  recreating a running worker.
+
+Still open: remove the dev Worker's forward once no container holds the dev
+URL (the check is in `HOSTS.md`).
