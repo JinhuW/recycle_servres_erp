@@ -9,6 +9,7 @@ import { trackerApi, type SeenAlert, type SeenPerson, type TrackerSeen } from '.
 // Read receipts come only for alerts the tracker's user account sent; the bot
 // gets none from Telegram. So a bot alert reads "no receipts", never "nobody",
 // and the people table counts against the alerts that could report a read.
+// With several buyer chats, each person and alert is counted within its own.
 
 const REFRESH_MS = 60_000;
 
@@ -89,12 +90,12 @@ function Body({ s, locale }: { s: TrackerSeen | null; locale: string }) {
 
       <div className="rt-an-panel">
         <div className="fp-section-label">{t('trkSeenPeople')}</div>
-        <PeopleTable people={s?.people ?? null} total={withReceipts.length} locale={locale} />
+        <PeopleTable people={s?.people ?? null} locale={locale} />
       </div>
 
       <div className="rt-an-panel">
         <div className="fp-section-label">{t('trkSeenAlerts')}</div>
-        <AlertsTable alerts={s?.alerts ?? null} names={names} members={members.length} locale={locale} />
+        <AlertsTable alerts={s?.alerts ?? null} names={names} locale={locale} />
       </div>
     </>
   );
@@ -104,7 +105,7 @@ function who(p: SeenPerson | undefined, userId: string): string {
   return p ? p.name : userId;
 }
 
-function PeopleTable({ people, total, locale }: { people: SeenPerson[] | null; total: number; locale: string }) {
+function PeopleTable({ people, locale }: { people: SeenPerson[] | null; locale: string }) {
   const { t } = useT();
   return (
     <div className="fp-table-wrap">
@@ -128,8 +129,8 @@ function PeopleTable({ people, total, locale }: { people: SeenPerson[] | null; t
               </td>
               <td>
                 <div className="rt-seen-bar">
-                  <span className="mono">{t('trkPromptOf', { x: p.seen, n: total })}</span>
-                  <i style={{ '--w': total ? `${(p.seen / total) * 100}%` : '0%' } as CSSProperties} />
+                  <span className="mono">{t('trkPromptOf', { x: p.seen, n: p.reachable })}</span>
+                  <i style={{ '--w': p.reachable ? `${Math.min(p.seen / p.reachable, 1) * 100}%` : '0%' } as CSSProperties} />
                 </div>
               </td>
               <td className="fp-muted">{p.lastReadAt ? relTime(p.lastReadAt, locale) : '—'}</td>
@@ -141,8 +142,8 @@ function PeopleTable({ people, total, locale }: { people: SeenPerson[] | null; t
   );
 }
 
-function AlertsTable({ alerts, names, members, locale }: {
-  alerts: SeenAlert[] | null; names: Map<string, SeenPerson>; members: number; locale: string;
+function AlertsTable({ alerts, names, locale }: {
+  alerts: SeenAlert[] | null; names: Map<string, SeenPerson>; locale: string;
 }) {
   const { t } = useT();
   return (
@@ -171,7 +172,7 @@ function AlertsTable({ alerts, names, members, locale }: {
                   : a.readers.length === 0
                     ? <span className="fp-muted">{t('trkSeenNobody')}</span>
                     : <>
-                      <span className="mono">{members ? t('trkPromptOf', { x: a.readers.length, n: members }) : a.readers.length}</span>
+                      <span className="mono">{a.members ? t('trkPromptOf', { x: a.readers.length, n: a.members }) : a.readers.length}</span>
                       {a.readers.map(r => (
                         <span key={r.userId} className="fp-chip" title={new Date(r.readAt).toLocaleString(locale)}>
                           {who(names.get(r.userId), r.userId)}

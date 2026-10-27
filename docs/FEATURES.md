@@ -2875,7 +2875,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     alert group read any.
   - **People:** everyone in the alert group (and anyone who read an alert and
     then left), with how many alerts each saw and when they last read one.
-  - **Alerts:** each alert with the names of the people who read it.
+    Since v1.370.2 (RS-430), "saw x of n" counts only the alerts sent to that
+    person's own chats.
+  - **Alerts:** each alert with the names of the people who read it, out of
+    the people in that alert's chat (v1.370.2).
 
   Telegram gives read receipts only to the user account that sent a message,
   never to a bot. So when the tracker's api has a Telegram user session

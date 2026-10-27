@@ -282,6 +282,8 @@ export type SeenAlert = {
   sentAt: string;
   sentAs: 'bot' | 'user';
   readers: Array<{ userId: string; readAt: string }>;
+  // People in this alert's chat now.
+  members: number;
 };
 
 export type SeenPerson = {
@@ -289,6 +291,8 @@ export type SeenPerson = {
   name: string;
   username: string | null;
   seen: number;
+  // Receipt-bearing alerts that went to this person's chats: what seen is out of.
+  reachable: number;
   lastReadAt: string | null;
   member: boolean;
 };

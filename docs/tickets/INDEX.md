@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-430](./RS-430-seen-tab-review-fixes-before-release.md) | in-review | bug | P1 | Seen tab review fixes before release | — |
 | [RS-428](./RS-428-reddit-seen-tab-who-saw-each-alert-in-the-last-24-ho.md) | done | story | P2 | Reddit Seen tab: who saw each alert in the last 24 hours | 1.370.0 |
 | [RS-427](./RS-427-fleet-runs-on-prod-dev-mirrors-it-read-only.md) | done | task | P1 | Fleet runs on prod; dev mirrors it read-only | 1.369.0 |
 | [RS-426](./RS-426-migrate-remaining-legacy-workers-to-homelab-fleet.md) | done | task | P2 | Migrate the remaining legacy workers into the new homelab Facebook fleet | facebook-tracker 0.14.15 |

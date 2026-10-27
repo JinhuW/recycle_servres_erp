@@ -106,19 +106,42 @@ export async function notifyOnce(deps: NotifyDeps): Promise<boolean> {
   return true;
 }
 
-async function userSenderLive(sql: Sql): Promise<boolean> {
+export async function userSenderLive(sql: Sql): Promise<boolean> {
   const [row] = await sql<Array<{live: boolean}>>`
     SELECT COALESCE(user_sender_at > NOW() - make_interval(secs => ${USER_SENDER_STALE_S}), false) AS live
       FROM telegram_state`;
   return row?.live ?? false;
 }
 
-/** The api renews this on every pass while its user session sends alerts. */
-export async function renewUserSender(sql: Sql): Promise<void> {
-  await sql`UPDATE telegram_state SET user_sender_at = NOW()`;
+/**
+ * Takes the user session for this process unless another holds it fresh. The
+ * api only connects once this succeeds, so two copies never hold it at once.
+ */
+export async function acquireUserSender(sql: Sql, owner: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE telegram_state SET user_sender_owner = ${owner}, user_sender_at = NOW()
+     WHERE user_sender_owner IS NULL OR user_sender_owner = ${owner}
+        OR user_sender_at IS NULL
+        OR user_sender_at <= NOW() - make_interval(secs => ${USER_SENDER_STALE_S})
+    RETURNING 1`;
+  return rows.length > 0;
 }
 
-/** On shutdown, so workers take over at once instead of after the stale window. */
-export async function releaseUserSender(sql: Sql): Promise<void> {
-  await sql`UPDATE telegram_state SET user_sender_at = NULL`;
+/** False once another process has taken the session over. */
+export async function renewUserSender(sql: Sql, owner: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE telegram_state SET user_sender_at = NOW()
+     WHERE user_sender_owner = ${owner} RETURNING 1`;
+  return rows.length > 0;
+}
+
+/**
+ * After disconnecting, so the next api may connect and workers take over at
+ * once. Only this process's hold: during a redeploy the other one may already
+ * have its own.
+ */
+export async function releaseUserSender(sql: Sql, owner: string): Promise<void> {
+  await sql`
+    UPDATE telegram_state SET user_sender_owner = NULL, user_sender_at = NULL
+     WHERE user_sender_owner = ${owner}`;
 }

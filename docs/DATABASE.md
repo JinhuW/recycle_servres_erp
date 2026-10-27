@@ -2932,13 +2932,14 @@ Single-row `getUpdates` cursor for the tracker's bot, so a restarted api resumes
 | `next_offset` | `bigint` | ✓ | `0` | Next getUpdates offset (last handled update_id + 1); advanced past every update, handled or not. |
 | `updated_at` | `timestamptz` | ✓ | `now()` |  |
 | `user_sender_at` | `timestamptz` |  |  | Renewed by the api on every pass while its Telegram user session sends buyer alerts. While it is under two minutes old, the workers' notify loops stand down. Cleared on a clean api shutdown; null means the bot sends (migration 0007). |
+| `user_sender_owner` | `text` |  |  | The api process holding the user session (`<worker id>:<uuid>`). A redeploy's new api waits for it to clear or for `user_sender_at` to go stale before connecting, so the session is never live twice; renew and release touch only the holder's own row (migration 0008). |
 
 - **Primary key:** `id`
 - **Checks:** `id`
 
 ### Read receipts
 
-Who read each buyer alert, for the ERP's Reddit ▸ Seen tab (migration 0007). Telegram reports a message's readers only to the user account that sent it, only in groups of up to 100 members, and only for 7 days. So the api's `reads` loop (`src/loops/reads.ts`) asks again every 5 minutes for the user-sent alerts of the last 48 hours and keeps what it gets. It also refreshes the buyer chats' member list, so the tab can list people who read nothing. `GET /api/seen` reads both.
+Who read each buyer alert, for the ERP's Reddit ▸ Seen tab (migration 0007). Telegram reports a message's readers only to the user account that sent it, only in groups of up to 100 members, and only for 7 days. So the api's `reads` loop (`src/loops/reads.ts`) asks again every 5 minutes for the user-sent alerts of the last 24 hours that someone in the chat has not read yet, and keeps what it gets. It also refreshes the buyer chats' member list, so the tab can list people who read nothing. `GET /api/seen` reads both.
 
 Tables: [`message_reads`](#reddit-message-reads), [`chat_members`](#reddit-chat-members)
 

@@ -96,6 +96,9 @@ Breaking any of these breaks the fleet. The tests that cover them are
 8. **The Telegram user session lives in the api alone.** Used from two IPs
    at once it gets revoked. Workers only stand down while
    `telegram_state.user_sender_at` is fresh. They never open the session.
+   Even two api copies during a redeploy must not overlap: the api connects
+   only after `acquireUserSender` succeeds, and disconnects before
+   `releaseUserSender`.
 
 ## Conventions
 
