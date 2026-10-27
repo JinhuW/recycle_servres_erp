@@ -18,6 +18,19 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.12] - 2026-10-27
+
+### Removed
+
+- **Legacy denver-1 is retired after its full-session handover to the dev
+  ERP fleet.** The old compose/config and console references leave the tree
+  so a later homelab deploy cannot start a duplicate browser for its account.
+  The new worker restored its full session in one boot; source sessions and
+  the cache volume are preserved, and launch files archived. The static
+  denver-1 template stays in fleet.toml for generated region coverage and is
+  not deployed. Running workers keep their existing images without a roll
+  or restart (RS-422).
+
 ## [0.14.11] - 2026-10-27
 
 ### Removed

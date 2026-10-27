@@ -1,3 +1,3 @@
 """Central coordinator for the Recycle Servers Facebook Marketplace fleet."""
 
-__version__ = "0.14.11"
+__version__ = "0.14.12"
