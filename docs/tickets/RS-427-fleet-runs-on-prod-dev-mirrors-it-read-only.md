@@ -2,13 +2,13 @@
 id: RS-427
 title: Fleet runs on prod; dev mirrors it read-only
 type: task
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-27
 reporter: jinhu
 branch: JinhuW/fleet-prod-mirror
-pr:
-version:
+pr: 953
+version: 1.369.0
 related: [RS-394]
 ---
 
@@ -50,9 +50,9 @@ URL and never restart:
 - [x] With `FLEET_ROLE=mirror`, the Fleet page says the fleet runs on prod, links there, and offers no write controls.
 - [x] The Cloudflare Worker forwards `/api/fleet/*` requests that carry a bearer to `FLEET_FORWARD_URL` when it is set, with that origin's proxy secret, WebSockets and the claim's `FLEET_WORKER_ENV` merge included; cookie requests stay on `BACKEND_URL`.
 - [x] With `SYNC_KEEP_FLEET=0`, the nightly prod→dev sync gives dev prod's fleet with host tokens and claim tickets scrubbed, instead of keeping dev's own.
-- [ ] Prod's Fleet page shows hosts `homelab` and `worker-60-14` and the same workers, heartbeats seconds old.
-- [ ] The switch caused no `boot` in `rsc vault logins` and recreated no container.
-- [ ] Every sealed value copied to prod opens under prod's `FB_POOL_KEY`.
+- [x] Prod's Fleet page shows hosts `homelab` and `worker-60-14` and the same workers, heartbeats seconds old.
+- [x] The switch caused no `boot` in `rsc vault logins` and recreated no container.
+- [x] Every sealed value copied to prod opens under prod's `FB_POOL_KEY`.
 
 ## Out of scope
 
@@ -85,3 +85,23 @@ sealed values opened under prod's key.
 Re-pointing an agent's `FLEET_URL` later recreates no worker: the agent
 replaces a running container only on an image roll or an exit
 (`apps/fleet-agent/src/plan.ts`).
+
+Cutover, 2026-10-27 UTC (owner's yes at each step):
+
+- Release #955 put v1.369.0 on prod. Prod's backend got dev's
+  `FLEET_WORKER_TOKEN_KEY`, `FLEET_IMAGE_AGENT`, `FLEET_IMAGE_WORKER` and
+  `FLEET_COORDINATOR_URL`.
+- 17:44:07: dev `FLEET_ROLE=mirror`. Dev's last fleet write was at 17:44:46.
+- 17:45:21: the copy was committed to prod: 13 workers, 22 slots, 764 tasks,
+  51 values resealed, 70 opening under prod's key.
+- 17:45:31: the dev Worker got `FLEET_FORWARD_URL` (prod's Railway origin) and
+  `FLEET_FORWARD_PROXY_SECRET`.
+- By 17:46:05 all 10 healthy workers and both hosts were heartbeating on prod,
+  and tasks were handed out and finished there.
+- Every slot kept its epoch, and every container kept its uptime (homelab 2 h,
+  worker-60-14 7–13 h), so there were no new logins.
+
+Still open: set `SYNC_KEEP_FLEET=0` on the db-sync service. Until then the
+nightly copy keeps dev's frozen fleet rather than prod's. Before the agents
+are pointed at prod, prod's Worker needs `FLEET_WORKER_ENV`. After that, the
+forward can come off, and dev's `FLEET_WORKER_TOKEN_KEY` should be rotated.
