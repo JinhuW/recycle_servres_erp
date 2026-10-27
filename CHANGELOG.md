@@ -15,6 +15,32 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.370.2] - 2026-10-27
+
+### Fixed
+
+- **The Telegram user session survives a redeploy of the reddit api
+  (RS-430).** Railway starts the new api before stopping the old one, and
+  both used to open the user session at once, which is exactly what makes
+  Telegram revoke it. The api now takes a hold in `telegram_state` before it
+  connects; a new copy waits until the old one has disconnected and let go.
+  An old copy shutting down no longer clears the new copy's hold either, so
+  alerts don't slip back to the bot mid-handover.
+- **Seen counts each person and alert within their own chat.** With more than
+  one buyer chat, everyone looked like they skipped half the alerts, because
+  reads were divided by every alert in every chat.
+- **A partial member list no longer marks the whole group as left.** When
+  Telegram lists fewer people than the chat holds (hidden members), the roster
+  stays as it was.
+- **Fewer read-receipt calls on the user account.** The reads loop asks only
+  about the 24 hours the tab shows, and skips alerts everyone already read,
+  which keeps it clear of Telegram's flood limits.
+- A buyer chat added after the api started now resolves instead of falling
+  back to the bot until a restart. A session that fails partway through
+  connecting no longer leaves a client reconnecting in the background.
+  Basic groups get alerts from the bot, because their message ids differ per
+  account and reactions on a user-sent alert matched no post.
+
 ## [1.370.0] - 2026-10-27
 
 ### Added

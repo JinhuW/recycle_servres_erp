@@ -57,18 +57,26 @@ never to a bot, and only in groups of up to 100 members for 7 days. So with
 api, buyer alerts go out as that user account:
 
 - **user-notify** sends targets as the user account. If it cannot reach a
-  chat, the bot sends there instead and a warning goes to ops. Each pass
+  chat, the bot sends there instead and a warning goes to ops. A basic group
+  (a `-123…` id without `-100`) always gets the bot: its message ids differ
+  per account, so the bot's reactions would match no alert. Each pass
   renews `telegram_state.user_sender_at`. While that is under two minutes
   old, the workers' notify loops stand down, and once it goes stale they take
   over through the bot. The claim still guarantees one alert per post across
   the handover.
 - **reads** runs every 5 minutes. It records the readers of every user-sent
-  buyer alert from the last 48 hours in `message_reads`, and the buyer chats'
-  people in `chat_members`. `GET /api/seen` serves both to the ERP's
+  buyer alert from the last 24 hours that someone in its chat has not read
+  yet in `message_reads`, and the buyer chats' people in `chat_members`. A
+  member list Telegram returns only part of (hidden members) marks nobody as
+  left. `GET /api/seen` serves both to the ERP's
   Reddit ▸ Seen tab.
 
 The session lives in the api alone. A user session used from several IPs at
-once gets revoked, so never give it to the workers. To create one, get an
+once gets revoked, so never give it to the workers. A Railway redeploy
+starts the new api before the old one stops, so the api takes
+`telegram_state.user_sender_owner` before it connects. The new copy waits,
+and keeps serving the API meanwhile, until the old one has disconnected and
+let go, or its hold is two minutes stale. To create one, get an
 api id and hash from my.telegram.org, then run
 `TELEGRAM_API_ID=… TELEGRAM_API_HASH=… pnpm tsx scripts/telegram-login.ts`.
 It asks for the phone number and the login code and prints the session

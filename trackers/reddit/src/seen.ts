@@ -4,7 +4,7 @@
 // "nobody saw it" from "no way to know".
 
 import type {Sql} from './db.ts';
-import {USER_SENDER_STALE_S} from './loops/notify.ts';
+import {userSenderLive} from './loops/notify.ts';
 
 export const SEEN_HOURS = 24;
 
@@ -18,6 +18,8 @@ export interface SeenAlert {
   sentAt: string;
   sentAs: 'bot' | 'user';
   readers: Array<{userId: string; readAt: string}>;
+  /** People in this alert's chat now, the most who could read it. */
+  members: number;
 }
 
 export interface SeenPerson {
@@ -26,6 +28,11 @@ export interface SeenPerson {
   username: string | null;
   /** Alerts in the window this person read. */
   seen: number;
+  /**
+   * Alerts in the window that went to this person's chats with receipts,
+   * what seen is out of. Another buyer chat's alerts never reached them.
+   */
+  reachable: number;
   lastReadAt: string | null;
   /** Still in a buyer chat; false for a reader who has since left. */
   member: boolean;
@@ -55,8 +62,10 @@ export async function seen(sql: Sql, chatIds: string[]): Promise<Seen> {
     sent_at: Date;
     sent_as: 'bot' | 'user';
     readers: Array<{userId: string; readAt: string}>;
+    members: number;
   }>>`
     SELECT a.chat_id, a.message_id::text, a.reddit_id, p.subreddit, p.title, p.url, a.sent_at, a.sent_as,
+           (SELECT count(*)::int FROM chat_members m WHERE m.chat_id = a.chat_id AND m.left_at IS NULL) AS members,
            COALESCE((SELECT json_agg(json_build_object('userId', r.user_id, 'readAt', r.read_at) ORDER BY r.read_at)
                        FROM message_reads r
                       WHERE r.chat_id = a.chat_id AND r.message_id = a.message_id), '[]') AS readers
@@ -73,6 +82,7 @@ export async function seen(sql: Sql, chatIds: string[]): Promise<Seen> {
     name: string | null;
     username: string | null;
     seen: number;
+    reachable: number;
     last_read_at: Date | null;
     member: boolean;
   }>>`
@@ -82,6 +92,19 @@ export async function seen(sql: Sql, chatIds: string[]): Promise<Seen> {
         JOIN alert_messages a USING (chat_id, message_id)
        WHERE a.audience = 'buyers' AND a.sent_at >= ${since}
        GROUP BY r.user_id
+    ), reachable AS (
+      -- An alert reached someone who was in its chat when it went out (or
+      -- read it, for a reader the roster never saw).
+      SELECT u.user_id, count(DISTINCT (a.chat_id, a.message_id))::int AS reachable
+        FROM alert_messages a
+        JOIN (SELECT chat_id, user_id, left_at FROM chat_members
+              UNION ALL
+              SELECT DISTINCT r.chat_id, r.user_id, NULL::timestamptz FROM message_reads r
+               WHERE NOT EXISTS (SELECT 1 FROM chat_members c
+                                  WHERE c.chat_id = r.chat_id AND c.user_id = r.user_id)) u
+          ON u.chat_id = a.chat_id AND (u.left_at IS NULL OR u.left_at > a.sent_at)
+       WHERE a.audience = 'buyers' AND a.sent_as = 'user' AND a.sent_at >= ${since}
+       GROUP BY u.user_id
     ), roster AS (
       SELECT DISTINCT ON (user_id) user_id, name, username
         FROM chat_members
@@ -94,23 +117,20 @@ export async function seen(sql: Sql, chatIds: string[]): Promise<Seen> {
                       WHERE mr.reactor = u.user_id AND reactor_name IS NOT NULL
                       ORDER BY updated_at DESC LIMIT 1)) AS name,
            COALESCE(ro.username, cm.username) AS username,
-           COALESCE(rd.seen, 0) AS seen, rd.last_read_at,
+           COALESCE(rd.seen, 0) AS seen, COALESCE(rc.reachable, 0) AS reachable, rd.last_read_at,
            ro.user_id IS NOT NULL AS member
       FROM (SELECT user_id FROM roster UNION SELECT user_id FROM reads) u
       LEFT JOIN roster ro USING (user_id)
       LEFT JOIN reads rd USING (user_id)
+      LEFT JOIN reachable rc USING (user_id)
       LEFT JOIN LATERAL (SELECT name, username FROM chat_members c
                           WHERE c.user_id = u.user_id ORDER BY updated_at DESC LIMIT 1) cm ON TRUE
      ORDER BY COALESCE(rd.seen, 0) DESC, rd.last_read_at DESC NULLS LAST, name`;
 
-  const [state] = await sql<Array<{live: boolean}>>`
-    SELECT COALESCE(user_sender_at > NOW() - make_interval(secs => ${USER_SENDER_STALE_S}), false) AS live
-      FROM telegram_state`;
-
   return {
     generatedAt: now.toISOString(),
     since: since.toISOString(),
-    userSenderLive: state?.live ?? false,
+    userSenderLive: await userSenderLive(sql),
     alerts: alerts.map((a) => ({
       chatId: a.chat_id,
       messageId: Number(a.message_id),
@@ -121,12 +141,14 @@ export async function seen(sql: Sql, chatIds: string[]): Promise<Seen> {
       sentAt: a.sent_at.toISOString(),
       sentAs: a.sent_as,
       readers: a.readers.map((r) => ({userId: r.userId, readAt: new Date(r.readAt).toISOString()})),
+      members: a.members,
     })),
     people: people.map((p) => ({
       userId: p.user_id,
       name: p.name ?? p.user_id,
       username: p.username,
       seen: p.seen,
+      reachable: p.reachable,
       lastReadAt: p.last_read_at?.toISOString() ?? null,
       member: p.member,
     })),

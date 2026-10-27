@@ -6,7 +6,7 @@ import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 import type {AlertSender} from '../src/alerts.ts';
 import {insertNewPosts} from '../src/claims.ts';
 import {createLogger} from '../src/logger.ts';
-import {notifyOnce, releaseUserSender, renewUserSender} from '../src/loops/notify.ts';
+import {acquireUserSender, notifyOnce, releaseUserSender, renewUserSender} from '../src/loops/notify.ts';
 import {readsOnce} from '../src/loops/reads.ts';
 import {seen} from '../src/seen.ts';
 import {SettingsStore} from '../src/settings.ts';
@@ -30,7 +30,7 @@ beforeEach(async () => {
   await db.sql`DELETE FROM posts`;
   await db.sql`UPDATE settings SET value = '["chat-1"]'::jsonb WHERE key = 'telegram_chat_ids'`;
   await db.sql`UPDATE settings SET value = '[]'::jsonb WHERE key = 'telegram_dev_chat_ids'`;
-  await releaseUserSender(db.sql);
+  await db.sql`UPDATE telegram_state SET user_sender_owner = NULL, user_sender_at = NULL`;
 });
 
 async function seedTarget(redditId: string): Promise<void> {
@@ -53,6 +53,7 @@ class FakeUser implements UserClient {
   failChats = new Set<string>();
   receipts = new Map<number, ReadReceipt[]>();
   roster: ChatMember[] = [];
+  rosterComplete = true;
   private nextId = 100;
 
   async sendHtml(chatId: string, html: string): Promise<number> {
@@ -65,8 +66,8 @@ class FakeUser implements UserClient {
     if (!r) throw new Error('MSG_TOO_OLD');
     return r;
   }
-  async members(): Promise<ChatMember[]> {
-    return this.roster;
+  async members(_chatId: string): Promise<{members: ChatMember[]; complete: boolean}> {
+    return {members: this.roster, complete: this.rosterComplete};
   }
   async disconnect(): Promise<void> {}
 }
@@ -127,13 +128,55 @@ describe('user-first alerts', () => {
     await seedTarget('t3_c');
     const bot = fakeBot();
 
-    await renewUserSender(db.sql);
+    expect(await acquireUserSender(db.sql, 'api-a')).toBe(true);
     expect(await notifyOnce(deps(bot, {deferToUserSender: true}))).toBe(false);
     expect(bot.sent).toHaveLength(0);
 
     await db.sql`UPDATE telegram_state SET user_sender_at = NOW() - interval '10 minutes'`;
     expect(await notifyOnce(deps(bot, {deferToUserSender: true}))).toBe(true);
     expect(bot.sent).toHaveLength(1);
+  });
+
+  it('sends to a basic group through the bot, so reactions match its message ids', async () => {
+    await db.sql`UPDATE settings SET value = '["-100123","-456"]'::jsonb WHERE key = 'telegram_chat_ids'`;
+    await seedTarget('t3_h');
+    const user = new FakeUser();
+    const bot = fakeBot();
+
+    const report = await createUserFirstSender(user, bot).send(['-100123', '-456'], {
+      subreddit: 'homelabsales', summary: 's', price: null, url: 'u', title: 't',
+    });
+
+    expect(user.sent.map((m) => m.chatId)).toEqual(['-100123']);
+    expect(bot.sent).toEqual([['-456']]);
+    expect(report.fellBack).toBeUndefined();
+  });
+});
+
+describe('user session hold', () => {
+  it('lets one api hold the session until it lets go or goes stale', async () => {
+    expect(await acquireUserSender(db.sql, 'old')).toBe(true);
+    expect(await acquireUserSender(db.sql, 'new')).toBe(false);
+    expect(await renewUserSender(db.sql, 'new')).toBe(false);
+
+    await releaseUserSender(db.sql, 'old');
+    expect(await acquireUserSender(db.sql, 'new')).toBe(true);
+
+    // The outgoing api letting go late leaves the new hold alone.
+    await releaseUserSender(db.sql, 'old');
+    expect(await renewUserSender(db.sql, 'new')).toBe(true);
+
+    await db.sql`UPDATE telegram_state SET user_sender_at = NOW() - interval '10 minutes'`;
+    expect(await acquireUserSender(db.sql, 'old')).toBe(true);
+    expect(await renewUserSender(db.sql, 'new')).toBe(false);
+  });
+
+  it('waits for an api that renews without an owner', async () => {
+    await db.sql`UPDATE telegram_state SET user_sender_owner = NULL, user_sender_at = NOW()`;
+    expect(await acquireUserSender(db.sql, 'new')).toBe(false);
+
+    await db.sql`UPDATE telegram_state SET user_sender_at = NULL`;
+    expect(await acquireUserSender(db.sql, 'new')).toBe(true);
   });
 });
 
@@ -168,11 +211,12 @@ describe('reads and /api/seen', () => {
     const readersOf = (id: number) => result.alerts.find((a) => a.messageId === id)!.readers.map((r) => r.userId);
     expect(readersOf(ids[0]!).sort()).toEqual(['7', '8']);
     expect(readersOf(ids[1]!)).toEqual(['7']);
-    expect(result.people.map((p) => [p.name, p.seen, p.member])).toEqual([
-      ['Ana', 2, true],
-      ['Bo', 1, true],
-      ['Cy', 0, true],
+    expect(result.people.map((p) => [p.name, p.seen, p.reachable, p.member])).toEqual([
+      ['Ana', 2, 2, true],
+      ['Bo', 1, 2, true],
+      ['Cy', 0, 2, true],
     ]);
+    expect(result.alerts.map((a) => a.members)).toEqual([3, 3]);
   });
 
   it('marks someone who left the chat, and keeps what they read', async () => {
@@ -191,6 +235,46 @@ describe('reads and /api/seen', () => {
     expect(result.people).toEqual([
       expect.objectContaining({userId: '7', name: 'Ana', seen: 1, member: false}),
     ]);
+  });
+
+  it('keeps the roster when Telegram lists only part of it', async () => {
+    const user = new FakeUser();
+    user.roster = [{userId: '7', name: 'Ana', username: 'ana'}, {userId: '8', name: 'Bo', username: null}];
+    await readsOnce({sql: db.sql, user, settings: new SettingsStore(db.sql, 0), logger});
+
+    user.roster = [];
+    user.rosterComplete = false;
+    await readsOnce({sql: db.sql, user, settings: new SettingsStore(db.sql, 0), logger});
+
+    expect((await seen(db.sql, ['chat-1'])).people.map((p) => [p.userId, p.member])).toEqual([
+      ['7', true], ['8', true],
+    ]);
+  });
+
+  it('counts each person against their own chat, and stops asking once everyone read', async () => {
+    await db.sql`UPDATE settings SET value = '["chat-1","chat-2"]'::jsonb WHERE key = 'telegram_chat_ids'`;
+    await seedTarget('t3_i');
+    const user = new FakeUser();
+    // Ana is only in chat-1, Bo only in chat-2.
+    user.members = async (chatId: string) => ({
+      members: chatId === 'chat-1' ? [{userId: '7', name: 'Ana', username: null}] : [{userId: '8', name: 'Bo', username: null}],
+      complete: true,
+    });
+    await notifyOnce(deps(createUserFirstSender(user, fakeBot())));
+    const msgs = await db.sql<Array<{chat_id: string; message_id: number}>>`
+      SELECT chat_id, message_id::int FROM alert_messages ORDER BY chat_id`;
+    user.receipts.set(msgs[0]!.message_id, [{userId: '7', readAt: new Date()}]);
+    user.receipts.set(msgs[1]!.message_id, [{userId: '8', readAt: new Date()}]);
+    await readsOnce({sql: db.sql, user, settings: new SettingsStore(db.sql, 0), logger});
+
+    const result = await seen(db.sql, ['chat-1', 'chat-2']);
+    expect(result.people.map((p) => [p.name, p.seen, p.reachable])).toEqual([['Ana', 1, 1], ['Bo', 1, 1]]);
+    expect(result.alerts.map((a) => [a.readers.length, a.members])).toEqual([[1, 1], [1, 1]]);
+
+    let asked = 0;
+    user.readers = async () => { asked++; return []; };
+    await readsOnce({sql: db.sql, user, settings: new SettingsStore(db.sql, 0), logger});
+    expect(asked).toBe(0);
   });
 
   it('leaves alerts outside the last 24 hours out', async () => {

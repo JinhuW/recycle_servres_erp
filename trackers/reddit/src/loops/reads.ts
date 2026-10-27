@@ -6,10 +6,8 @@
 import type {Sql} from '../db.ts';
 import type {Logger} from '../logger.ts';
 import type {SettingsStore} from '../settings.ts';
+import {SEEN_HOURS} from '../seen.ts';
 import type {UserClient} from '../userSender.ts';
-
-/** Reads keep arriving for days, but the Seen tab looks at one day. */
-export const READS_LOOKBACK_HOURS = 48;
 
 export interface ReadsDeps {
   sql: Sql;
@@ -23,18 +21,30 @@ export async function readsOnce(deps: ReadsDeps): Promise<boolean> {
 
   for (const chatId of (await deps.settings.get()).telegramChatIds) {
     try {
-      await refreshMembers(sql, chatId, (await user.members(chatId)).filter((m) => m.userId !== user.selfId));
+      const {members, complete} = await user.members(chatId);
+      await refreshMembers(sql, chatId, members.filter((m) => m.userId !== user.selfId), complete);
+      if (!complete) logger.info('chat lists only part of its members; nobody marked as left', {chatId});
     } catch (e) {
       logger.info('could not list chat members', {chatId, error: errorText(e)});
     }
   }
 
+  // One request per alert on a user account, so only the alerts the Seen tab
+  // shows, and not one everybody in its chat has already read.
   const messages = await sql<Array<{chat_id: string; message_id: string}>>`
-    SELECT chat_id, message_id::text
-      FROM alert_messages
-     WHERE sent_as = 'user'
-       AND audience = 'buyers'
-       AND sent_at > NOW() - make_interval(hours => ${READS_LOOKBACK_HOURS})`;
+    SELECT a.chat_id, a.message_id::text
+      FROM alert_messages a
+     WHERE a.sent_as = 'user'
+       AND a.audience = 'buyers'
+       AND a.sent_at > NOW() - make_interval(hours => ${SEEN_HOURS})
+       AND (EXISTS (SELECT 1 FROM chat_members m
+                     WHERE m.chat_id = a.chat_id AND m.left_at IS NULL
+                       AND NOT EXISTS (SELECT 1 FROM message_reads r
+                                        WHERE r.chat_id = a.chat_id AND r.message_id = a.message_id
+                                          AND r.user_id = m.user_id))
+            -- No roster (it could not be listed): no way to know who is left.
+            OR NOT EXISTS (SELECT 1 FROM chat_members m
+                            WHERE m.chat_id = a.chat_id AND m.left_at IS NULL))`;
 
   for (const m of messages) {
     let receipts;
@@ -63,6 +73,7 @@ async function refreshMembers(
   sql: Sql,
   chatId: string,
   members: ReadonlyArray<{userId: string; name: string; username: string | null}>,
+  complete: boolean,
 ): Promise<void> {
   await sql.begin(async (tx) => {
     await tx`
@@ -74,6 +85,7 @@ async function refreshMembers(
       ON CONFLICT (chat_id, user_id) DO UPDATE
         SET name = EXCLUDED.name, username = EXCLUDED.username,
             left_at = NULL, updated_at = NOW()`;
+    if (!complete) return;
     await tx`
       UPDATE chat_members SET left_at = NOW(), updated_at = NOW()
        WHERE chat_id = ${chatId} AND left_at IS NULL
