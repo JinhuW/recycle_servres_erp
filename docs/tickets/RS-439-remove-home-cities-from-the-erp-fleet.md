@@ -2,13 +2,13 @@
 id: RS-439
 title: Remove home cities from the ERP fleet
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-27
 reporter: jinhu
 branch: JinhuW/bonito
-pr:
-version:
+pr: 971
+version: 1.374.0
 related: [RS-394]
 ---
 
@@ -37,15 +37,15 @@ Owner's scope, asked before planning: the ERP fleet only, and the history-based
 
 ## Acceptance criteria
 
-- [ ] Cities tab has no "Home of" column.
-- [ ] Add to fleet (Proxies) has no home-cities picker; `POST /api/fleet/slots` refuses `home_cities` as an unknown field.
-- [ ] Slot claim order: own worker, last host, account no — no home term; the claim answer has no `home_cities`.
-- [ ] Task pick order: priority, familiar, due; `why` is `familiar | other | manual | probe`.
-- [ ] Quarantine probe city: the most overdue enabled search city, else the first enabled city.
-- [ ] Worker page: city chips are the cities it searched; no home group or note; Search now preselects the first.
-- [ ] The Tasks city log, the Accounts "home city" tag on ERP rows and the Analysis home-worker column are gone.
-- [ ] `FleetSlot`, `FleetSlotWrite`, `ClaimAnswer` and `FleetWorkerDetail.cities` carry no `home*`; unused i18n keys are removed (en + zh).
-- [ ] `docs/FEATURES.md` and `docs/DATABASE.md` updated.
+- [x] Cities tab has no "Home of" column.
+- [x] Add to fleet (Proxies) has no home-cities picker; `POST /api/fleet/slots` refuses `home_cities` as an unknown field.
+- [x] Slot claim order: own worker, last host, account no — no home term; the claim answer has no `home_cities`.
+- [x] Task pick order: priority, familiar, due; `why` is `familiar | other | manual | probe`.
+- [x] Quarantine probe city: the most overdue enabled search city, else the first enabled city.
+- [x] Worker page: city chips are the cities it searched; no home group or note; Search now preselects the first.
+- [x] The Tasks city log, the Accounts "home city" tag on ERP rows and the Analysis home-worker column are gone.
+- [x] `FleetSlot`, `FleetSlotWrite`, `ClaimAnswer` and `FleetWorkerDetail.cities` carry no `home*`; unused i18n keys are removed (en + zh).
+- [x] `docs/FEATURES.md` and `docs/DATABASE.md` updated.
 
 ## Out of scope
 
