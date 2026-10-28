@@ -15,6 +15,23 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.376.1] - 2026-10-28
+
+### Fixed
+
+- **The fleet's proxy list counts the accounts seeded at cutover** (RS-444).
+  The 20 slots `fleet-seed-slots.mjs` wrote carried a proxy URL but no link
+  to the proxy list, and the list, its "Used by" column and the Add to fleet
+  limit count only linked slots. So the Proxies tab read "Nobody" on homelab
+  ports that running accounts browse through, while Add to fleet offered only
+  the four listed proxies, all full. The new `scripts/fleet-link-proxies.mjs`
+  unseals each unlinked slot's exit, lists it as a proxy when it isn't one
+  (the slot's sealed URL, its device's timezone) and links the slot; homelab
+  ports from the last console round on a host whose login it holds are
+  listed too, which brought in the one unused port. It has `--dry-run`, needs
+  `FLEET_LINK_REMOTE=true` for a remote database, prints no login and is
+  idempotent. No claim reads the link, so no worker restarted.
+
 ## [1.376.0] - 2026-10-28
 
 ### Changed
