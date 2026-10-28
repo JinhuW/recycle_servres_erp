@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-448](./RS-448-show-the-sell-price-on-the-mobile-market-value-page.md) | done | bug | P2 | Show the sell price on the mobile Market value page | — |
 | [RS-447](./RS-447-protect-unsaved-sell-order-edits-on-cancel-and-after.md) | done | bug | P2 | Protect unsaved sell-order edits on Cancel and after Save | 1.377.2 |
 | [RS-446](./RS-446-fleet-analysis-counts-from-the-erp-s-finished-tasks.md) | done | bug | P2 | Fleet Analysis counts from the ERP's finished tasks | 1.377.1 |
 | [RS-445](./RS-445-keep-the-pool-s-session-backup-current-in-every-work.md) | done | story | P2 | Keep the pool's session backup current in every worker state, and show it on the Account Pool page | 1.377.0 (ERP), facebook-tracker 0.14.17 |

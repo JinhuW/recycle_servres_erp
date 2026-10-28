@@ -2603,6 +2603,10 @@ over MCP.
   as sources in its confidence note. It says "no cost data" and "no feed
   connected" instead, and counts only the team's own sales.
 - A line can be priced while the buy can still change (v1.54.0).
+- **Phone Market value cards** headline the sell price that Max buy is
+  computed from (the last price, else the average sell), labelled and shown
+  to the cent. When an average sell price exists and differs, the expanded
+  card lists it too (v1.377.3).
 - **Four feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
   on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
