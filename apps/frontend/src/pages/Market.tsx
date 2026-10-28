@@ -94,6 +94,9 @@ export function Market() {
             const trendColor = trendUp ? 'var(--pos)' : trendDown ? 'var(--neg)' : 'var(--fg-subtle)';
             const hasTarget = r.target != null && r.maxBuy != null;
             const onTarget = hasTarget && r.target! <= r.maxBuy!;
+            // Max buy is derived from last_price first, and most SKUs have no
+            // avg_sell, so showing avgSell alone left the headline blank.
+            const sell = r.lastPrice ?? r.avgSell;
             return (
               <div key={r.id} className="ph-inv-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 0, padding: 0, cursor: 'pointer' }} onClick={() => setOpenId(open ? null : r.id)}>
                 <div style={{ padding: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -114,7 +117,8 @@ export function Market() {
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.sub}</div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--pos)' }}>{fmtUSD0(r.avgSell, locale)}</div>
+                    <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('sellPrice')}</div>
+                    <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--pos)' }}>{fmtUSD(sell, locale)}</div>
                     <div style={{ fontSize: 10.5, color: trendColor, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
                       <Icon name={trendUp ? 'arrowUp' : trendDown ? 'arrowDown' : 'minus'} size={9} />
                       {Math.abs(r.trend * 100).toFixed(1)}%
@@ -143,6 +147,12 @@ export function Market() {
                         {fmtUSD(r.target, locale)} {hasTarget && (onTarget ? '✓' : '↑ over')}
                       </span>
                     </div>
+                    {r.avgSell != null && r.avgSell !== sell && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                        <span style={{ color: 'var(--fg-muted)' }}>{t('mktAvgSellPrice')}</span>
+                        <span className="mono">{fmtUSD(r.avgSell, locale)}</span>
+                      </div>
+                    )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                       <span style={{ color: 'var(--fg-muted)' }}>{t('rangeSeen')}</span>
                       <span className="mono">{fmtUSD0(r.low, locale)} – {fmtUSD0(r.high, locale)}</span>

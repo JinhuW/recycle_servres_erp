@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.377.3] - 2026-10-28
+
+### Fixed
+
+- **The phone's Market value cards show the sell price again** (RS-448). Each
+  card's headline read `avg_sell`, which most parts don't have, so it showed a
+  bare "–" next to a populated Max buy. It now shows the price Max buy is
+  computed from: the last recorded sell price, else the average. The two
+  numbers always agree, and Max buy is 70% of the figure above it. The price is
+  labelled and shown to the cent. When a part also has an average sell price
+  that differs, the expanded card lists it.
+
 ## [1.377.2] - 2026-10-28
 
 ### Fixed
