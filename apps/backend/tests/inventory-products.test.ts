@@ -65,6 +65,22 @@ describe('GET /api/inventory/products', () => {
     expect(g.unit_cost_avg).toBeCloseTo((4 * 70 + 6 * 90 + 1 * 80) / 11, 4);
   });
 
+  it('gives each lot of a mixed-spec group its own spec, not the head\'s', async () => {
+    const { token } = await loginAs(ALEX);
+    await po(token, { brand: 'MIXSPECA', partNumber: 'MIXSPEC', generation: 'DDR3', rank: '2Rx4', speed: '12800' });
+    await po(token, { brand: 'MIXSPECB', partNumber: 'mixspec', generation: 'DDR4', rank: '1Rx8', speed: '2666' });
+
+    type SpecLot = Lot & { brand: string; generation: string; rank: string; speed: string };
+    const r = await api<{ products: (Group & { brand: string; lines: SpecLot[] })[] }>(
+      'GET', '/api/inventory/products?q=mixspec', { token });
+    expect(r.status).toBe(200);
+    expect(r.body.products.length).toBe(1);
+    const g = r.body.products[0];
+    expect(g.lines.length).toBe(2);
+    const specs = g.lines.map((l) => [l.brand, l.generation, l.rank, l.speed]).sort();
+    expect(specs).toEqual([['MIXSPECA', 'DDR3', '2Rx4', '12800'], ['MIXSPECB', 'DDR4', '1Rx8', '2666']]);
+  });
+
   it('groups RAM by module family: suffix variants merge, module forms stay apart', async () => {
     const { token } = await loginAs(ALEX);
     await po(token, { brand: 'Samsung', partNumber: 'M393A2K43BB1-CTD7Q', qty: 23 });

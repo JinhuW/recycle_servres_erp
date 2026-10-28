@@ -15,6 +15,21 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.374.1] - 2026-10-28
+
+### Fixed
+
+- **A lot picked from a grouped inventory row goes onto a sell order under
+  its own spec** (RS-440). The Inventory page groups lots by part number, and
+  a part number such as "Mixed" puts unrelated modules in one group. A lot
+  selected there was handed to Create sell order, Add to sell order and
+  Transfer with the group head's brand, capacity, generation and speed, and
+  the order saved that as the line's label. SO-4095 shows two DDR3 RDIMM lots
+  as "Kingston 8GB DDR4 SODIMM", while its packing list and bid sheet, which
+  read the lot, print them as DDR3. `/api/inventory/products` now sends each
+  lot's own spec, and the page builds the selection from it. Lines already
+  saved keep the label they were saved with.
+
 ## [1.374.0] - 2026-10-27
 
 ### Removed

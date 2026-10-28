@@ -31,6 +31,20 @@ export type ProductLot = {
   // Absent from a backend older than this bundle.
   part_number?: string | null;
   short_code?: string | null;
+  // The lot's own spec, which can differ from its group's head. Absent from a
+  // backend older than this bundle.
+  brand?: string | null;
+  capacity?: string | null;
+  generation?: string | null;
+  type?: string | null;
+  classification?: string | null;
+  rank?: string | null;
+  speed?: string | null;
+  interface?: string | null;
+  form_factor?: string | null;
+  description?: string | null;
+  item_type?: string | null;
+  rpm?: number | null;
 };
 
 export type ProductGroup = {
