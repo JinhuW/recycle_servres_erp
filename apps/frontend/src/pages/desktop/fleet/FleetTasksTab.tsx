@@ -242,6 +242,10 @@ export function TaskTable({ tasks, items, filter, onFilter, range, onRange, sele
   const { t, locale } = useT();
   const rows = useMemo(() => sortTasks(filterTasks(tasks, filter, now), now), [tasks, filter, now]);
   const shown = rows.slice(0, TABLE_MAX);
+  // Each segment's count is the rows it would show under the item and search
+  // filters already set.
+  const segCounts = useMemo(() => Object.fromEntries(STATE_SEG.map(s => [s, filterTasks(tasks, { ...filter, state: s }, now).length])),
+    [tasks, filter, now]);
   const set = (patch: Partial<TaskFilter>) => onFilter({ ...filter, ...patch });
   const doneDay = tasks.filter(x => x.state === 'done' && x.done_at && now - Date.parse(x.done_at) < 86_400_000).length;
   return (
@@ -249,7 +253,9 @@ export function TaskTable({ tasks, items, filter, onFilter, range, onRange, sele
       <div className="fp-toolbar fleet-toolbar">
         <div className="seg fleet-seg" role="group" aria-label={t('fleetColState')}>
           {STATE_SEG.map(s => (
-            <button key={s} type="button" className={filter.state === s ? 'active' : undefined} onClick={() => set({ state: s })}>{t(STATE_SEG_KEY[s])}</button>
+            <button key={s} type="button" className={filter.state === s ? 'active' : undefined} onClick={() => set({ state: s })}>
+              {t(STATE_SEG_KEY[s])}<span className="fleet-seg-n">{segCounts[s]}</span>
+            </button>
           ))}
         </div>
         <select className="input fleet-select" value={filter.item} aria-label={t('fleetColItem')} onChange={e => set({ item: e.target.value })}>

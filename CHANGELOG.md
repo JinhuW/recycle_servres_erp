@@ -15,6 +15,21 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.373.2] - 2026-10-27
+
+### Fixed
+
+- **The Facebook fleet tab bar counts what the tabs show** (RS-438). The
+  Tasks chip read 0 while two searches ran and probes sat overdue: it counted
+  only due searches, never running tasks and never probes. It now counts
+  running plus due tasks of every kind, the same rows as the table's Running
+  and Due segments. The Proxies chip counted proxies down, so a healthy fleet
+  read 0; it now counts healthy proxies. The warn colour meant for a chip
+  with work due never showed, because the generic muted chip style outranked
+  it; it now does.
+- **The Tasks table's state segment shows a count on each button**, worked
+  out under the item and search filters already set.
+
 ## [1.373.1] - 2026-10-27
 
 ### Fixed

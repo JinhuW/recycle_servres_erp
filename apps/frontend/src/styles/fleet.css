@@ -138,6 +138,11 @@
   padding: 4px 9px;
   font-size: 12px;
 }
+.fleet-seg-n {
+  margin-left: 5px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
 .fleet-table-cap {
   max-height: 560px;
   overflow: auto;
@@ -172,7 +177,7 @@
 .fleet-alerted {
   color: var(--accent-strong);
 }
-.fleet-chip-hot {
+.chip.fleet-chip-hot {
   color: var(--warn-strong);
   border-color: var(--warn);
   font-weight: 600;

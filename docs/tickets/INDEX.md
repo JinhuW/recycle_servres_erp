@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-437](./RS-437-fix-the-dev-to-main-review-findings-before-releasing.md) | done | bug | P2 | Fix the dev-to-main review findings before releasing | — |
+| [RS-438](./RS-438-fleet-tabs-state-counts-on-tasks-healthy-proxies-chi.md) | done | bug | P2 | Fleet tabs: state counts on Tasks, healthy proxies chip, real Tasks chip | — |
+| [RS-437](./RS-437-fix-the-dev-to-main-review-findings-before-releasing.md) | done | bug | P2 | Fix the dev-to-main review findings before releasing | 1.373.1 |
 | [RS-436](./RS-436-fleet-tab-shows-two-worker-statuses-healthy-and-park.md) | done | story | P2 | Fleet tab shows two worker statuses: Healthy and Parked | 1.373.0 |
 | [RS-435](./RS-435-fleet-cities-retire-the-pinned-status.md) | done | task | P2 | Fleet cities: retire the Pinned status | 1.372.0 |
 | [RS-434](./RS-434-explain-the-cities-field-on-the-fleet-worker-page.md) | done | story | P3 | Explain the Cities field on the fleet worker page | 1.371.3 |
