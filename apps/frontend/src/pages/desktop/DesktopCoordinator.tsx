@@ -96,7 +96,7 @@ export function DesktopCoordinator({ showToast }: Props) {
     );
   }
   const fleetOpen = !poolOpen && !fleetTab;
-  const chip = (n: number | null, hot = false) => n === null ? null : <span className={`chip muted${hot && n > 0 ? ' fleet-chip-hot' : ''}`}>{n}</span>;
+  const chip = (n: number | null, hot = false) => n === null ? null : <span className={`chip muted${hot ? ' fleet-chip-hot' : ''}`}>{n}</span>;
   const tabs = manager ? <nav className="tabs fp-view-tabs" aria-label={t('fpViews')}>
     <a className={`tab ${fleetOpen ? 'active' : ''}`} href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')} aria-current={fleetOpen ? 'page' : undefined}>
       <Icon name="shield" size={14} />{t('fpFleet')}{chip(counts.running)}
@@ -105,9 +105,9 @@ export function DesktopCoordinator({ showToast }: Props) {
       <a key={tab} className={`tab ${fleetTab === tab ? 'active' : ''}`} href={hrefFor(fleetTabPath(tab))} onClick={onLinkClick(fleetTabPath(tab))}
         aria-current={fleetTab === tab ? 'page' : undefined}>
         <Icon name={TAB_ICON[tab]} size={14} />{t(FLEET_TAB_TITLE[tab])}
-        {tab === 'tasks' && chip(counts.due, true)}
+        {tab === 'tasks' && chip(counts.tasks, !!counts.due)}
         {tab === 'cities' && chip(counts.cities)}
-        {tab === 'proxies' && chip(counts.proxiesDown, true)}
+        {tab === 'proxies' && chip(counts.proxiesUp)}
       </a>
     ))}
     <a className={`tab ${poolOpen ? 'active' : ''}`} href={hrefFor('/fleet/pool')} onClick={onLinkClick('/fleet/pool')} aria-current={poolOpen ? 'page' : undefined}>
@@ -135,11 +135,12 @@ export function DesktopCoordinator({ showToast }: Props) {
   );
 }
 
-type TabCounts = { running: number | null; due: number | null; cities: number | null; pool: number | null; proxiesDown: number | null };
-const NO_COUNTS: TabCounts = { running: null, due: null, cities: null, pool: null, proxiesDown: null };
+type TabCounts = { running: number | null; tasks: number | null; due: number | null; cities: number | null; pool: number | null; proxiesUp: number | null };
+const NO_COUNTS: TabCounts = { running: null, tasks: null, due: null, cities: null, pool: null, proxiesUp: null };
 
-// The tab bar's chips: running workers (ERP and coordinator), tasks due now,
-// cities, proxies down, pool accounts. Read on its own clock, slower than the tabs, since
+// The tab bar's chips: running workers (ERP and coordinator), tasks running
+// or due now (the table's Running and Due rows, every kind, hot while any is
+// due), cities, healthy proxies, pool accounts. Read on its own clock, slower than the tabs, since
 // each tab reads what it shows itself; the reads it shares with the open tab
 // go out once (lib/sharedGet.ts). The ERP's counts show at once, the running
 // count once the coordinator has answered too, so it never jumps.
@@ -148,14 +149,13 @@ function useTabCounts(on: boolean): TabCounts {
     if (!on) return Promise.resolve(null);
     const now = Date.now();
     return Promise.all([
-      fleetApi.slots(), fleetApi.workers(), fleetApi.tasks({ state: 'ready' }), fleetApi.cities(),
+      fleetApi.slots(), fleetApi.workers(), fleetApi.tasks({ state: 'leased' }), fleetApi.tasks({ state: 'ready' }), fleetApi.cities(),
       poolApi.summary().then(s => s.accounts).catch(() => null),
-      fleetApi.proxyHealth().then(h => h.proxies.filter(p => p.state === 'down').length).catch(() => null),
-    ]).then(([slots, workers, ready, cities, pool, proxiesDown]) => ({
-      slots, workers, pool, proxiesDown,
-      due: ready.filter(x => x.kind === 'search' && Date.parse(x.due_at) <= now).length,
-      cities: cities.length,
-    }));
+      fleetApi.proxyHealth().then(h => h.proxies.filter(p => p.state === 'up').length).catch(() => null),
+    ]).then(([slots, workers, leased, ready, cities, pool, proxiesUp]) => {
+      const due = ready.filter(x => Date.parse(x.due_at) <= now).length;
+      return { slots, workers, pool, proxiesUp, due, tasks: leased.length + due, cities: cities.length };
+    });
   }, COUNTS_MS);
   const { data: coord } = useFleetPoll(() => {
     if (!on) return Promise.resolve(null);
@@ -168,6 +168,6 @@ function useTabCounts(on: boolean): TabCounts {
     const running = c
       ? fleetRunning(fleetRows({ slots: erp.slots, workers: erp.workers, release: null, pool: erp.pool, ...c }, Date.now())).running
       : null;
-    return { running, due: erp.due, cities: erp.cities, pool: erp.pool?.length ?? null, proxiesDown: erp.proxiesDown };
+    return { running, tasks: erp.tasks, due: erp.due, cities: erp.cities, pool: erp.pool?.length ?? null, proxiesUp: erp.proxiesUp };
   }, [erp, coord]);
 }

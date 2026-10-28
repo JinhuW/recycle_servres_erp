@@ -133,6 +133,9 @@ describe('Tasks tab', () => {
     expect(html).toContain('6m 52s');                   // nyc's search took 412 s
     expect(html).toContain('fleet-alerted');            // and alerted once
     expect(html).toContain('fleetRange_7d');
+    // Every state button carries its count; All counts every row.
+    expect(html).toContain(`fleetSegAll<span class="fleet-seg-n">${TASKS.length}</span>`);
+    expect(html.match(/fleet-seg-n/g)).toHaveLength(6);
   });
   it('honours a filter and marks the selected city', () => {
     const html = renderToString(

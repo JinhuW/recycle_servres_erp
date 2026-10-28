@@ -3376,8 +3376,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   v1.344.0 the page has five tabs in the owner's approved design — **Fleet**,
   **Tasks**, **Cities**, **Analysis**, **Account pool** (since v1.368.0 a
   sixth, **Proxies**, before Account pool) — with count chips on
-  the tab bar (workers running, tasks due now in the warn colour, cities, pool
-  size) and the title "Facebook fleet" on every one; the earlier Queue, Hosts
+  the tab bar (workers running; tasks running or due now, every kind, in the
+  warn colour while any is due; cities; healthy proxies; pool size — since
+  v1.373.2) and the title "Facebook fleet" on every one; the earlier Queue, Hosts
   and Slots tabs folded into them, and their paths (`/#/fleet/queue`,
   `/#/fleet/hosts`, `/#/fleet/slots`) redirect. Managers only and desktop
   only; purchasers see Account pool alone, and the phone has no fleet pages.
@@ -3446,7 +3447,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     due in the next 12. Only searches count; a slug check or a probe is not a
     city-item. **The table** lists the range (last 24 h, last 7 days, today
     UTC) plus everything waiting, narrowed by a state segment (All, Running,
-    Due, Done, Cancelled, Expired), an item select and one search box over
+    Due, Done, Cancelled, Expired, each with its count under the other
+    filters since v1.373.2), an item select and one search box over
     city, worker and account; a row gives the city, item, state (Running,
     Due, Later, Done, Cancelled, Expired, plus "front of queue" on a manual
     task), the due time with what happened to it, the worker and account,
