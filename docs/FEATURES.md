@@ -1271,7 +1271,8 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   part numbers, and the lots table adds a Part # column. A dashed tail
   (`HMA82GR7CJR8N-VK-TF`) groups with its dash-free spelling (v1.247.1). Lots
   picked in the grouped view carry their own part number into a sell order
-  or Quick View, never the family's `…*` (v1.247.1). Module form, dies,
+  or Quick View, never the family's `…*` (v1.247.1), and their own spec too,
+  never the group head's: "Mixed" groups unrelated modules (v1.374.1). Module form, dies,
   organisation and speed still separate products, so RDIMM `M393…` and ECC
   UDIMM `M391…` are two. Samsung, SK Hynix DDR3/4 and Micron are read; other
   part numbers group by exact canonical part number as before. The export

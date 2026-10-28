@@ -1190,6 +1190,13 @@ inventory.get('/products', async (c) => {
         serial_number: l.serial_number, part_number: l.part_number, short_code: shortCodeOf(l),
         warehouse_id: l.warehouse_id, warehouse_short: l.warehouse_short,
         qty: l.qty, status: l.status, image_url: l.image_url,
+        // The lot's own spec, not the head's: a part number such as "Mixed"
+        // groups unrelated modules, and a lot picked from the group goes onto
+        // a sell order or transfer under the label built from these.
+        brand: l.brand, capacity: l.capacity, generation: l.generation, type: l.type,
+        classification: l.classification, rank: l.rank, speed: l.speed,
+        interface: l.interface, form_factor: l.form_factor, description: l.description,
+        item_type: l.item_type, rpm: l.rpm,
         ...(isManager ? { unit_cost: l.unit_cost } : {}),
       })),
     };
