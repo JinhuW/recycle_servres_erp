@@ -81,7 +81,8 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
   // The account's slot may since be another worker's.
   const holds = !!slot && slot.worker_id === worker.worker_id;
   const replacing = running && release?.state === 'rolling' && release.current?.worker_id === worker.worker_id;
-  const kind: FleetRowKind = running && !fleetStateParked(worker.state) ? 'healthy' : 'parked';
+  // A manager's park holds the slot whatever state the worker still reports.
+  const kind: FleetRowKind = running && !fleetStateParked(worker.state) && !(holds && slot.parked) ? 'healthy' : 'parked';
   const task = running ? worker.task ?? null : null;
   const no = slot?.account_no ?? worker.account_no ?? null;
   return {

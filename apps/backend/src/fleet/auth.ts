@@ -1,12 +1,12 @@
 import { createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
-import type { MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
 import { every } from 'hono/combine';
 import type { FleetWorkerTokenClaims } from '@recycle-erp/shared';
 import { authMiddleware } from '../auth';
 import { getDb, type SqlLike } from '../db';
 import { requireManager } from '../lib/role';
 import { bearerGuard } from '../oauth/guard';
-import type { Env, User } from '../types';
+import type { Env, OAuthCtx, User } from '../types';
 import { forwardsReads, forwardRead } from './mirror';
 import { loadHostByTokenHash, sha256hex, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
 
@@ -43,17 +43,26 @@ export const unavailable = (variable: string) => ({ error: 'unavailable', detail
 /** Session cookie plus the manager role, the way routes/coordinator.ts gates itself. */
 export const managerSession: MiddlewareHandler<ManagerEnv> = every(authMiddleware, requireManager);
 
-const fleetReader = bearerGuard({ scopes: ['fleet:read'] }) as unknown as MiddlewareHandler<ManagerEnv>;
+const fleetReader = bearerGuard({ scopes: ['fleet:read'] }) as unknown as MiddlewareHandler<ManagerEnv & { Variables: { oauthCtx: OAuthCtx } }>;
 
 /**
  * A manager's session, or for a read a service client's fleet:read bearer:
- * the dev ERP mirroring this fleet reads it that way (fleet/mirror.ts). No
- * read handler looks at the user. The VNC socket is not a read and takes
- * managerSession.
+ * the dev ERP mirroring this fleet reads it that way (fleet/mirror.ts). A
+ * token a user consented to is refused: nothing rechecks that its user is
+ * still a manager. No read handler looks at the user. The VNC socket is not a
+ * read and takes managerSession.
  */
 export const managerOnly: MiddlewareHandler<ManagerEnv> = (c, next) => {
   const read = c.req.method === 'GET' || c.req.method === 'HEAD';
-  return read && c.req.header('Authorization') ? fleetReader(c, next) : managerSession(c, next);
+  if (!read || !c.req.header('Authorization')) return managerSession(c, next);
+  const cc = c as unknown as Context<ManagerEnv & { Variables: { oauthCtx: OAuthCtx } }>;
+  return fleetReader(cc, async () => {
+    if (cc.get('oauthCtx').userId) {
+      c.res = c.json({ error: 'insufficient_scope', detail: 'fleet:read is for service clients' }, 403);
+      return;
+    }
+    await next();
+  });
 };
 
 function bearer(header: string | undefined): string | null {
@@ -152,16 +161,15 @@ export const mirrorGate: MiddlewareHandler = async (c, next) => {
     return c.json({ error: 'read_only', detail: 'this ERP mirrors the fleet; change it where the fleet runs' }, 409);
   }
   // A copy only says what the fleet looked like at the last sync, and every
-  // heartbeat in it ages into Offline, so reads go to the fleet itself. Health
-  // stays here because it is what tells the page this ERP is a mirror.
+  // heartbeat in it ages into Offline, so reads go to the fleet itself, and
+  // fall back to the copy when it can't answer. Health stays here because it
+  // is what tells the page this ERP is a mirror.
   if (forwardsReads(c.env as Env) && !c.req.path.endsWith('/fleet/health') && !c.req.header('upgrade')) {
-    // The two checks by hand: every() keeps a nested answer on c.res rather
-    // than handing it back.
-    let out: Response | undefined;
-    const noSession = await authMiddleware(c as never, async () => {
-      out = (await requireManager(c as never, async () => { out = await forwardRead(c.env as Env, c.req.raw); })) ?? out;
+    return managerSession(c as Context<ManagerEnv>, async () => {
+      const res = await forwardRead(c.env as Env, c.req.raw);
+      if (res) c.res = res;
+      else await next();
     });
-    return noSession ?? out;
   }
   return next();
 };

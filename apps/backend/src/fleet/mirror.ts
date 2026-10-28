@@ -13,15 +13,16 @@ const TIMEOUT_MS = 10_000;
 const EARLY_MS = 60_000;
 
 let cached: { key: string; token: string; until: number } | null = null;
+// One mint for every read that finds the cache cold: the Fleet page opens with
+// six reads at once.
+let minting: { key: string; token: Promise<string | null> } | null = null;
 
 export const forwardsReads = (env: Env): boolean =>
   !!(env.FLEET_MIRROR_URL && env.FLEET_MIRROR_CLIENT_ID && env.FLEET_MIRROR_CLIENT_SECRET);
 
 const base = (env: Env): string => env.FLEET_MIRROR_URL!.replace(/\/+$/, '');
 
-async function mirrorToken(env: Env): Promise<string | null> {
-  const key = `${base(env)} ${env.FLEET_MIRROR_CLIENT_ID}`;
-  if (cached?.key === key && cached.until > Date.now()) return cached.token;
+async function mint(env: Env, key: string): Promise<string | null> {
   const res = await fetch(`${base(env)}/oauth/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -37,39 +38,86 @@ async function mirrorToken(env: Env): Promise<string | null> {
     mlog.warn('fleet mirror token refused', { upstreamStatus: res.status });
     return null;
   }
-  const body = await res.json() as { access_token: string; expires_in: number };
-  cached = { key, token: body.access_token, until: Date.now() + body.expires_in * 1000 - EARLY_MS };
+  const body = await res.json() as { access_token: string; expires_in?: number };
+  // RFC 6749 makes expires_in optional; without it, hold the token five minutes.
+  const ttl = Number.isFinite(body.expires_in) && body.expires_in! > 0 ? body.expires_in! : 300;
+  cached = { key, token: body.access_token, until: Date.now() + Math.max(ttl * 1000 - EARLY_MS, ttl * 500) };
   return body.access_token;
 }
 
-const unreachable = () => Response.json({ error: 'mirror_unreachable', detail: 'the ERP the fleet runs on did not answer' }, { status: 502 });
+async function mirrorToken(env: Env, fresh = false): Promise<string | null> {
+  const key = `${base(env)} ${env.FLEET_MIRROR_CLIENT_ID}`;
+  if (!fresh && cached?.key === key && cached.until > Date.now()) return cached.token;
+  if (minting?.key !== key) {
+    const token = mint(env, key).finally(() => { if (minting?.token === token) minting = null; });
+    minting = { key, token };
+  }
+  return minting.token;
+}
 
-/** The fleet's own answer to this read, status and body as they came. */
-export async function forwardRead(env: Env, req: Request): Promise<Response> {
+/** Whether the fleet's ERP hands this mirror a token: what /health reports as live. */
+export async function mirrorAnswers(env: Env): Promise<boolean> {
+  try {
+    return !!(await mirrorToken(env));
+  } catch {
+    return false;
+  }
+}
+
+// Hop-by-hop and framing headers belong to the upstream connection, cookies to
+// the upstream origin; everything else (X-Fleet-Truncated, ETag) is the answer.
+const DROPPED = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-length', 'content-encoding', 'set-cookie']);
+
+/**
+ * The fleet's own answer to this read, status, headers and body as they came,
+ * or null when it can't be had (no answer, or a route the fleet's older
+ * release lacks): the caller then serves the copy in this database.
+ */
+export async function forwardRead(env: Env, req: Request): Promise<Response | null> {
   const url = new URL(req.url);
+  const get = (token: string) => fetch(`${base(env)}${url.pathname}${url.search}`, {
+    method: req.method,
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
   let res: Response;
   try {
     const token = await mirrorToken(env);
-    if (!token) return unreachable();
-    res = await fetch(`${base(env)}${url.pathname}${url.search}`, {
-      method: req.method,
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch {
-    return unreachable();
+    if (!token) return null;
+    res = await get(token);
+    // invalid_token is the token itself refused (a revoked client, a rotated
+    // signing key): one fresh token, once. Any other 401/403 is the route's
+    // own answer and goes back as it came.
+    if (res.status === 401 && res.headers.get('WWW-Authenticate')?.includes('invalid_token')) {
+      const again = await mirrorToken(env, true);
+      if (!again) return null;
+      res = await get(again);
+    }
+  } catch (e) {
+    mlog.warn('fleet mirror read failed', { upstreamPath: url.pathname, error: (e as Error).message });
+    return null;
   }
-  // A revoked client or a rotated signing key: take a fresh token next time.
-  if (res.status === 401 || res.status === 403) {
-    cached = null;
-    mlog.warn('fleet mirror read refused', { upstreamStatus: res.status, upstreamPath: url.pathname });
-    return unreachable();
+  if (res.status >= 500) {
+    mlog.warn('fleet mirror read failed', { upstreamStatus: res.status, upstreamPath: url.pathname });
+    return null;
   }
-  return new Response(res.body, {
-    status: res.status,
-    headers: { 'Content-Type': res.headers.get('Content-Type') ?? 'application/json', 'Cache-Control': 'no-store' },
-  });
+  // The app-wide 404, not a fleet refusal (those say not_found): the fleet's
+  // ERP runs an older release that lacks this read.
+  if (res.status === 404) {
+    const text = await res.text();
+    if (text === JSON.stringify({ error: 'Not found' })) return null;
+    return reply(res, text);
+  }
+  return reply(res, res.body);
+}
+
+function reply(res: Response, body: ReadableStream | string | null): Response {
+  const headers = new Headers();
+  res.headers.forEach((v, k) => { if (!DROPPED.has(k)) headers.set(k, v); });
+  headers.set('Cache-Control', 'no-store');
+  headers.set('X-Fleet-Source', 'live');
+  return new Response(body, { status: res.status, headers });
 }
 
 /** Tests only: forget the cached token. */
-export const resetMirrorToken = (): void => { cached = null; };
+export const resetMirrorToken = (): void => { cached = null; minting = null; };

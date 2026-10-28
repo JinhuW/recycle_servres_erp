@@ -15,6 +15,24 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.373.1] - 2026-10-27
+
+### Fixed
+
+- **The dev-to-main review's findings, fixed before the release** (RS-437).
+  The dev mirror's live view of prod's fleet now falls back to its own copy
+  when prod can't answer, or lacks a read dev added, instead of failing every
+  tab with a 502. It mints one token for the six reads the Fleet page opens
+  with, keeps that token through an ordinary 401 from a host-only route, and
+  passes prod's headers on, `X-Fleet-Truncated` included. The banner calls
+  the page live only when prod actually hands over a token. On prod, a
+  `fleet:read` bearer is accepted from a service client only, so a connector
+  token a demoted manager still holds no longer reads the fleet. A running
+  worker whose slot a manager parked now reads Parked, not Healthy. The
+  `fleet_cities.pinned` drop moves to a later release, so the old backend's
+  city edits keep working while a deploy overlaps, and a page cached from
+  before the pin was retired can still save a city.
+
 ## [1.373.0] - 2026-10-27
 
 ### Changed

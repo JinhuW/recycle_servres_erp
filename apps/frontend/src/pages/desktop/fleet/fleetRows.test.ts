@@ -29,6 +29,11 @@ describe('fleetRows', () => {
     expect(by('erp:homelab-2')).toMatchObject({ kind: 'parked', running: true, state: 'SESSION_EXPIRED' });
     expect(by('erp:worker-60-14-1').now).toMatchObject({ city: 'philly', home: false });
   });
+  it('reads a running worker whose slot a manager parked as parked', () => {
+    const parkedSlots = SLOTS.map(s => s.account_no === 4 ? { ...s, parked: true } : s);
+    const row = fleetRows({ ...input, slots: parkedSlots }, NOW).find(r => r.key === 'erp:homelab-1');
+    expect(row).toMatchObject({ kind: 'parked', running: true, state: 'HEALTHY' });
+  });
   it('keeps a silent worker as parked for a week, then drops it', () => {
     const silent = { ...WORKERS[4], worker_id: 'worker-60-14-2', account_no: 33, task: null, last_heartbeat_at: ago(120) };
     const gone = { ...WORKERS[4], worker_id: 'worker-60-14-3', account_no: 40, task: null, last_heartbeat_at: ago(60 * 24 * 8) };

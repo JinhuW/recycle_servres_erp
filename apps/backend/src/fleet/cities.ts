@@ -102,7 +102,8 @@ export type CityPatch = {
 
 export function readCityPatch(input: unknown): CityPatch | Refusal {
   if (!isObject(input)) return bad('expected an object');
-  const unknown = Object.keys(input).filter((k) => !['enabled', 'per_day', 'name', 'override_verify', 'reverify'].includes(k));
+  // pinned is retired; a page cached from before still sends it, so it is let through and ignored.
+  const unknown = Object.keys(input).filter((k) => !['enabled', 'per_day', 'pinned', 'name', 'override_verify', 'reverify'].includes(k));
   if (unknown.length) return bad(`not a city field: ${unknown.join(', ')}`);
   const patch: CityPatch = {};
   if (input.enabled !== undefined) {
