@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-28
 reporter: jinhu
 branch: JinhuW/gudgeon-2
-pr:
+pr: 975
 version: 1.375.0
 related: []
 ---
