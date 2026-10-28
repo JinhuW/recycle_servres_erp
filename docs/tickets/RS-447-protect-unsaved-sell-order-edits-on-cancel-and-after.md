@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-28
 reporter: jinhu
 branch: fix/sell-order-unsaved-edits
-pr:
+pr: 981
 version: 1.377.2
 related: [RS-441]
 ---
