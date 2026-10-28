@@ -60,8 +60,13 @@ export type FleetItem = {
 
 export type FleetTaskResult = {
   cards?: number;
+  title_pass?: number;
   opened?: number;
+  keyword_pass?: number;
+  fresh?: number;
   reviewed?: number;
+  passed?: number;
+  withheld?: number;
   alerted?: number;
   seconds?: number;
   stopped?: boolean;
@@ -88,13 +93,19 @@ export type FleetTask = {
   result: FleetTaskResult | null;
 };
 
-/** One UTC day of finished searches, summed from their results. */
+/** One UTC day of finished searches, summed from their results. The stages
+ *  workers began reporting later are null on a day no result carried them. */
 export type FleetFunnelDay = {
   day: string;
   searches: number;
   cards: number;
+  title_pass: number | null;
   opened: number;
+  keyword_pass: number | null;
+  fresh: number | null;
   reviewed: number;
+  passed: number | null;
+  withheld: number | null;
   alerted: number;
 };
 

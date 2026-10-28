@@ -89,6 +89,8 @@ export function readFunnelDays(q: Record<string, string | undefined>): number | 
  * The Analysis funnel: finished searches per UTC day over the last `days`
  * (today included), with what their results counted. Days with no search are
  * left out; the page fills them. Retention bounds how far back this reaches.
+ * The later stages sum to NULL, not 0, on a day only older workers reported:
+ * their results never counted those stages.
  */
 export async function funnelDays(sql: SqlLike, days: number, now: Date = new Date()): Promise<FleetFunnelDay[]> {
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
@@ -97,8 +99,13 @@ export async function funnelDays(sql: SqlLike, days: number, now: Date = new Dat
     SELECT to_char(done_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
            COUNT(*)::int AS searches,
            COALESCE(SUM(CASE WHEN result->>'cards' ~ '^[0-9]+$' THEN (result->>'cards')::int END), 0)::int AS cards,
+           SUM(CASE WHEN result->>'title_pass' ~ '^[0-9]+$' THEN (result->>'title_pass')::int END)::int AS title_pass,
            COALESCE(SUM(CASE WHEN result->>'opened' ~ '^[0-9]+$' THEN (result->>'opened')::int END), 0)::int AS opened,
+           SUM(CASE WHEN result->>'keyword_pass' ~ '^[0-9]+$' THEN (result->>'keyword_pass')::int END)::int AS keyword_pass,
+           SUM(CASE WHEN result->>'fresh' ~ '^[0-9]+$' THEN (result->>'fresh')::int END)::int AS fresh,
            COALESCE(SUM(CASE WHEN result->>'reviewed' ~ '^[0-9]+$' THEN (result->>'reviewed')::int END), 0)::int AS reviewed,
+           SUM(CASE WHEN result->>'passed' ~ '^[0-9]+$' THEN (result->>'passed')::int END)::int AS passed,
+           SUM(CASE WHEN result->>'withheld' ~ '^[0-9]+$' THEN (result->>'withheld')::int END)::int AS withheld,
            COALESCE(SUM(CASE WHEN result->>'alerted' ~ '^[0-9]+$' THEN (result->>'alerted')::int END), 0)::int AS alerted
     FROM fleet_tasks
     WHERE state = 'done' AND kind = 'search' AND done_at >= ${since}

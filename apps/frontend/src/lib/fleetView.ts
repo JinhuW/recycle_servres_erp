@@ -338,14 +338,15 @@ export function workerHistory(
 // The pipeline a listing goes through, in the order the monitor and the
 // coordinator run it: facebook.py search() → get_listings() → check_listing()
 // on the card, the page visit, check_listing() with the description;
-// monitor.py's already-notified skip and evaluate_by_ai(); the coordinator's
-// dedupe by item id; the Telegram alert.
-export type FlowStage = 'search' | 'cards' | 'title' | 'open' | 'keywords' | 'fresh' | 'ai' | 'coordinator' | 'alert';
-export const FLOW_STAGES: readonly FlowStage[] = ['search', 'cards', 'title', 'open', 'keywords', 'fresh', 'ai', 'coordinator', 'alert'];
+// monitor.py's already-notified skip and evaluate_by_ai(); the score and unit
+// gates the verdict must pass; the Telegram alert, claimed from the
+// coordinator so the fleet sends it once.
+export type FlowStage = 'search' | 'cards' | 'title' | 'open' | 'keywords' | 'fresh' | 'ai' | 'passed' | 'alert';
+export const FLOW_STAGES: readonly FlowStage[] = ['search', 'cards', 'title', 'open', 'keywords', 'fresh', 'ai', 'passed', 'alert'];
 
 // ── Editing a stage's settings ──
 // What each stage's Edit form changes: the same settings its chips show. The
-// stages left out (open, fresh, coordinator, alert) read no setting; what
+// stages left out (open, fresh, passed, alert) read no setting; what
 // they do is code in the monitor or the coordinator.
 export type SearchField =
   | 'start_at' | 'date_listed' | 'delivery_method' | 'max_results' | 'search_interval'

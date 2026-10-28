@@ -425,63 +425,100 @@ export const FUNNEL_RANGES: readonly FunnelRange[] = [1, 7, 14];
 const DAY_MS = 86_400_000;
 const utcDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-// The stages a finished task's result counts. The gates between (title,
-// keywords, new to us) and the coordinator's two stages are not in it, so
-// those stay uncounted.
-const ERP_COUNTER: Partial<Record<FlowStage, keyof Omit<FleetFunnelDay, 'day'>>> = {
-  search: 'searches', cards: 'cards', open: 'opened', ai: 'reviewed', alert: 'alerted',
+type FunnelKey = keyof Omit<FleetFunnelDay, 'day'>;
+
+// The task-result sum behind each stage.
+const ERP_COUNTER: Record<FlowStage, FunnelKey> = {
+  search: 'searches', cards: 'cards', title: 'title_pass', open: 'opened', keywords: 'keyword_pass',
+  fresh: 'fresh', ai: 'reviewed', passed: 'passed', alert: 'alerted',
 };
 
-/** The stage counts summed over the last `range` UTC days, today included. */
-export function funnelCounts(days: readonly FleetFunnelDay[] | null, range: FunnelRange, now: number = Date.now()): Partial<Record<FlowStage, number>> {
+export type FunnelCounts = Partial<Record<FlowStage, number>> & { withheld?: number; partial?: readonly FlowStage[] };
+
+/** The stage counts summed over the last `range` UTC days, today included.
+ *  Workers began reporting the gates, what passed the model and what they
+ *  withheld later than the rest: a stage no day in the range reported stays
+ *  undefined, so it reads as not counted rather than as 0, and one only some
+ *  days reported is `partial`, summed over fewer days than the stages around
+ *  it. `withheld` is the part of `passed` that workers with fleet alerts off
+ *  held back. */
+export function funnelCounts(days: readonly FleetFunnelDay[] | null, range: FunnelRange, now: number = Date.now()): FunnelCounts {
   if (!days) return {};
   const from = utcDay(now - (range - 1) * DAY_MS);
   const rows = days.filter(d => d.day >= from && d.day <= utcDay(now));
-  return Object.fromEntries(Object.entries(ERP_COUNTER).map(([stage, key]) => [stage, rows.reduce((n, d) => n + d[key], 0)]));
+  const sum = (key: FunnelKey): number | undefined => {
+    const late = key === 'title_pass' || key === 'keyword_pass' || key === 'fresh' || key === 'passed' || key === 'withheld';
+    if (late && !rows.some(d => d[key] != null)) return undefined;
+    return rows.reduce((n, d) => n + (d[key] ?? 0), 0);
+  };
+  const out: FunnelCounts = {};
+  const partial: FlowStage[] = [];
+  for (const [stage, key] of Object.entries(ERP_COUNTER) as [FlowStage, FunnelKey][]) {
+    const n = sum(key);
+    if (n === undefined) continue;
+    out[stage] = n;
+    if (rows.some(d => d[key] == null)) partial.push(stage);
+  }
+  const withheld = sum('withheld');
+  if (withheld !== undefined) out.withheld = withheld;
+  if (partial.length) out.partial = partial;
+  return out;
 }
 
-export type FunnelGap = { kind: 'ratio' | 'pct'; value: number | null; drop: boolean };
+export type FunnelGap = { kind: 'ratio' | 'pct'; value: number | null; drop: boolean; mixed?: boolean };
 
 /** What survives into each stage from the last counted one before it: cards
  *  per search as a ratio, every other step as a percentage; `drop` marks a
- *  step under half. An uncounted stage gets no gap of its own. */
-export function funnelGaps(counts: Partial<Record<FlowStage, number>>): FunnelGap[] {
+ *  step under half. An uncounted stage gets no gap of its own, and neither
+ *  does a step between a partial stage and a whole one: they were summed over
+ *  different days. */
+export function funnelGaps(counts: FunnelCounts): FunnelGap[] {
   const out: FunnelGap[] = [];
+  const partial = (k: FlowStage) => !!counts.partial?.includes(k);
   let last = counts[FLOW_STAGES[0]];
+  let lastStage = FLOW_STAGES[0];
   for (let i = 1; i < FLOW_STAGES.length; i += 1) {
     const prev = last;
     const cur = counts[FLOW_STAGES[i]];
-    const known = prev !== undefined && cur !== undefined && prev > 0;
+    const mixed = cur !== undefined && partial(lastStage) !== partial(FLOW_STAGES[i]);
+    const known = prev !== undefined && cur !== undefined && prev > 0 && !mixed;
     if (FLOW_STAGES[i] === 'cards') out.push({ kind: 'ratio', value: known ? Math.round(cur / prev) : null, drop: false });
     else {
       const pct = known ? Math.round(cur / prev * 1000) / 10 : null;
-      out.push({ kind: 'pct', value: pct, drop: pct !== null && pct < 50 });
+      out.push({ kind: 'pct', value: pct, drop: pct !== null && pct < 50, ...(mixed ? { mixed } : {}) });
     }
-    if (cur !== undefined) last = cur;
+    if (cur !== undefined) { last = cur; lastStage = FLOW_STAGES[i]; }
   }
   return out;
 }
 
 export type FunnelHeadline = {
   cards: number; searches: number; reviews: number; alerts: number;
+  passed: number | null; withheld: number;
   cardsPerAlert: number | null; reviewsPerAlert: number | null; titleDrop: number | null; modelDrop: number | null;
 };
 
 /** The ratios the sentence under the pipeline names; null when a stage is
- *  not counted or nothing was alerted. */
-export function funnelHeadline(counts: Partial<Record<FlowStage, number>>): FunnelHeadline | null {
+ *  not counted or nothing was alerted. The model's drop is read against what
+ *  passed it where that is counted: a listing a worker withheld with fleet
+ *  alerts off passed the model, it just was not sent. */
+export function funnelHeadline(counts: FunnelCounts): FunnelHeadline | null {
   const reviews = counts.ai;
   const alerts = counts.alert;
   if (reviews === undefined || alerts === undefined) return null;
   const cards = counts.cards ?? 0;
   const searches = counts.search ?? 0;
-  const title = counts.title;
+  const partial = counts.partial ?? [];
+  // A partial count read against a whole one would understate what passed.
+  const title = partial.includes('title') ? undefined : counts.title;
+  const passed = counts.passed ?? null;
+  const modelOut = passed === null ? alerts : partial.includes('passed') ? null : passed;
   return {
-    cards, searches, reviews, alerts,
+    cards, searches, reviews, alerts, passed, withheld: counts.withheld ?? 0,
     cardsPerAlert: alerts > 0 && cards > 0 ? Math.round(cards / alerts) : null,
     reviewsPerAlert: alerts > 0 && reviews > 0 ? Math.round(reviews / alerts) : null,
     titleDrop: title !== undefined && cards > 0 ? Math.round((1 - title / cards) * 100) : null,
-    modelDrop: reviews > 0 ? Math.round((1 - alerts / reviews) * 100) : null,
+    modelDrop: reviews > 0 && modelOut !== null ? Math.round((1 - modelOut / reviews) * 100) : null,
   };
 }
 

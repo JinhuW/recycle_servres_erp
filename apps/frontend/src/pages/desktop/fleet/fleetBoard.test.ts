@@ -155,31 +155,57 @@ describe('cities tab', () => {
 
 describe('analysis', () => {
   it('sums the stage counters over the range, today included', () => {
-    expect(funnelCounts(STATS, 1, NOW)).toEqual({ search: 255, cards: 13865, open: 2952, ai: 1281, alert: 9 });
+    expect(funnelCounts(STATS, 1, NOW)).toStrictEqual({
+      search: 255, cards: 13865, title: 3500, open: 2952, keywords: 2100, fresh: 1900, ai: 1281, passed: 40, alert: 9, withheld: 25,
+    });
     expect(funnelCounts(STATS, 7, NOW)).toMatchObject({ search: 255 + 240 + 250, ai: 1281 + 1300 + 1250, alert: 9 + 8 + 7 });
     expect(funnelCounts(STATS, 14, NOW).search).toBe(255 + 240 + 250 + 230);
     expect(funnelCounts(null, 1, NOW)).toEqual({});
   });
-  it('leaves the stages a task result does not count uncounted', () => {
-    const c = funnelCounts([], 1, NOW);
-    expect(c).toEqual({ search: 0, cards: 0, open: 0, ai: 0, alert: 0 });
-    expect(c.title).toBeUndefined();
-    expect(c.coordinator).toBeUndefined();
+  it('sums a later stage over the days that reported it, and marks it partial', () => {
+    // Only the newest day counted what passed the model.
+    const c = funnelCounts(STATS, 7, NOW);
+    expect(c).toMatchObject({ title: 3500, passed: 40, withheld: 25 });
+    expect(c.partial).toEqual(['title', 'keywords', 'fresh', 'passed']);
+    expect(funnelCounts(STATS, 1, NOW).partial).toBeUndefined();
+  });
+  it('gives no rate or drop between a partial stage and a whole one', () => {
+    const c = funnelCounts(STATS, 7, NOW);
+    const gaps = funnelGaps(c);
+    // cards → title, title → open, open → keywords, fresh → ai, ai → passed, passed → alert
+    for (const i of [1, 2, 3, 5, 6, 7]) expect(gaps[i]).toMatchObject({ value: null, mixed: true });
+    expect(gaps[4].value).toBe(90.5);                                    // fresh of the keyword passes
+    expect(funnelHeadline(c)).toMatchObject({ titleDrop: null, modelDrop: null, passed: 40, withheld: 25 });
+  });
+  it('leaves a later stage uncounted while no day in the range reported it', () => {
+    const c = funnelCounts(STATS.slice(0, 3), 7, NOW);
+    expect(c).toEqual({ search: 250 + 240, cards: 13000 + 13500, open: 2800 + 2900, ai: 1250 + 1300, alert: 7 + 8 });
+    expect(funnelCounts([], 1, NOW)).toEqual({ search: 0, cards: 0, open: 0, ai: 0, alert: 0 });
   });
   it('reads the pass rate from the last counted stage, cards per search as a ratio', () => {
-    // search, cards, title, open, keywords, fresh, ai, coordinator, alert
+    // search, cards, title, open, keywords, fresh, ai, passed, alert
     const gaps = funnelGaps(funnelCounts(STATS, 1, NOW));
     expect(gaps[0]).toEqual({ kind: 'ratio', value: 54, drop: false });
-    expect(gaps[1]).toEqual({ kind: 'pct', value: null, drop: false });
-    expect(gaps[2]).toEqual({ kind: 'pct', value: 21.3, drop: true });   // opened of the cards
-    expect(gaps[5]).toEqual({ kind: 'pct', value: 43.4, drop: true });   // reviewed of the opened
-    expect(gaps[7]).toEqual({ kind: 'pct', value: 0.7, drop: true });    // alerted of the reviewed
+    expect(gaps[1]).toEqual({ kind: 'pct', value: 25.2, drop: true });   // title of the cards
+    expect(gaps[2]).toEqual({ kind: 'pct', value: 84.3, drop: false });  // opened of the title passes
+    expect(gaps[6]).toEqual({ kind: 'pct', value: 3.1, drop: true });    // passed of the reviewed
+    expect(gaps[7]).toEqual({ kind: 'pct', value: 22.5, drop: true });   // alerted of the passed
+    // Without the later stages, each gap reads from the last counted one.
+    const old = funnelGaps(funnelCounts(STATS.slice(0, 3), 1, Date.parse('2026-10-23T12:00:00Z')));
+    expect(old[1]).toEqual({ kind: 'pct', value: null, drop: false });
+    expect(old[2]).toEqual({ kind: 'pct', value: 21.5, drop: true });    // opened of the cards
     expect(funnelGaps({ ai: 3, alert: 1 })[0]).toEqual({ kind: 'ratio', value: null, drop: false });
   });
-  it('works out the headline ratios', () => {
+  it('works out the headline ratios, the model read against what passed it', () => {
     const h = funnelHeadline(funnelCounts(STATS, 1, NOW))!;
-    expect(h).toMatchObject({ cards: 13865, searches: 255, reviews: 1281, alerts: 9, cardsPerAlert: 1541, reviewsPerAlert: 142, titleDrop: null, modelDrop: 99 });
-    expect(funnelHeadline({ ai: 5, alert: 0 })!.cardsPerAlert).toBeNull();
+    expect(h).toMatchObject({
+      cards: 13865, searches: 255, reviews: 1281, alerts: 9, passed: 40, withheld: 25,
+      cardsPerAlert: 1541, reviewsPerAlert: 142, titleDrop: 75, modelDrop: 97,
+    });
+    // With nothing alerted and nothing passed counted, the model takes the blame.
+    expect(funnelHeadline({ ai: 5, alert: 0 })).toMatchObject({ cardsPerAlert: null, passed: null, withheld: 0, modelDrop: 100 });
+    // Withheld listings passed the model: it did not drop them.
+    expect(funnelHeadline({ ai: 100, passed: 20, withheld: 20, alert: 0 })!.modelDrop).toBe(80);
     expect(funnelHeadline({})).toBeNull();
   });
   it('fills a day series with zeros and sums it', () => {
