@@ -34,7 +34,7 @@ async function seed(): Promise<{ no: number; proxyId: number }> {
     token: manager, body: { label: 'NY 1', url: `http://${PROXY_LOGIN}:${PROXY_PASS}@isp.example.net:10001`, timezone: 'America/New_York' },
   });
   expect(proxy.status).toBe(201);
-  const slot = await api('POST', '/api/fleet/slots', { token: manager, body: { account_no: a.no, proxy_id: proxy.body.id, home_cities: ['nyc'] } });
+  const slot = await api('POST', '/api/fleet/slots', { token: manager, body: { account_no: a.no, proxy_id: proxy.body.id } });
   expect(slot.status).toBe(201);
   return { no: a.no, proxyId: proxy.body.id };
 }
@@ -86,17 +86,18 @@ describe('GET /api/fleet/workers/:id', () => {
     expect(d.worker.detail).toMatchObject({ session_expiry: '2026-12-01T00:00:00Z', browser_ok: true });
     expect(d.worker.task).toMatchObject({ id: secondId, city: 'denver', city_name: 'Denver' });
     expect(d.holds_slot).toBe(true);
-    expect(d.slot).toMatchObject({ account_no: no, worker_id: 'lab-1', proxy_id: proxyId, home_cities: ['nyc'], parked: false });
+    expect(d.slot).toMatchObject({ account_no: no, worker_id: 'lab-1', proxy_id: proxyId, parked: false });
     expect(d.proxy).toEqual({ id: proxyId, label: 'NY 1', host: 'isp.example.net', port: 10001, timezone: 'America/New_York' });
     expect(d.account).toMatchObject({ no, uid: '61550000000001', email: 'acct1@example.test', status: 'fleet', holder: 'lab-1' });
     expect(d.account!.secrets).toEqual(['password', 'totp', 'cookie']);
     expect(d.account!.cookie_at).not.toBeNull();
     expect(d.stats).toMatchObject({ days: 7, searches: 1, alerts: 2, errors: 1 });
     expect(d.stats.last_search_at).not.toBeNull();
-    // Home first, then the cities it searched; a home city never searched has no date.
-    expect(d.cities.map((c) => [c.slug, c.home])).toEqual([['nyc', true], ['houston', false], ['denver', false]]);
-    expect(d.cities.find((c) => c.slug === 'houston')).toMatchObject({ name: 'Houston', alerts: 2 });
-    expect(d.cities[0].last_done_at).toBeNull();
+    // The cities it searched, the latest finished first; one still leased has no date.
+    expect(d.cities.map((c) => c.slug)).toEqual(['houston', 'denver']);
+    expect(d.cities[0]).toMatchObject({ name: 'Houston', alerts: 2 });
+    expect(d.cities[0].last_done_at).not.toBeNull();
+    expect(d.cities[1].last_done_at).toBeNull();
     expect(d.log.map((t) => t.id)).toEqual([secondId, firstId]);
     expect(d.events.map((e) => [e.kind, e.city])).toEqual([['stopped', 'denver'], ['done', 'houston']]);
     expect(d.release_version).toBeNull();

@@ -53,7 +53,6 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
   const ua = browserLabel(device?.user_agent) ?? (device?.native?.includes('user_agent') ? t('fleetUaNative') : null);
   const proxy = erpProxyText(d);
   const heldLease = !!slot && d.holds_slot && leaseLive(slot, now);
-  const cityCount = chips.home.length + chips.other.length;
 
   const note = status === 'offline'
     ? (w.last_heartbeat_at ? t('fbcNoteSilent', { age: relTime(w.last_heartbeat_at, locale) }) : t('fbcNeverReported'))
@@ -101,14 +100,13 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
       )}
     </>, wrap: true },
     { label: t('fbcColCities'), wrap: true, value: <>
-      {cityCount
+      {chips.cities.length
         ? <span className="fl-cities ff-wrap-cell">
-            {chips.home.map(c => <CityChip key={c.slug} city={c} hits={chips.hits} terms={[]} tone="accent" />)}
-            {chips.other.map(c => <CityChip key={c.slug} city={c} hits={chips.hits} terms={[]} tone="muted" />)}
+            {chips.cities.map(c => <CityChip key={c.slug} city={c} hits={chips.hits} terms={[]} tone="muted" />)}
           </span>
         : <Muted>{t('fbcNoCities')}</Muted>}
       {/* Read as an assigned list otherwise: the queue picks every city. */}
-      <small className="fp-muted" style={{ display: 'block', marginTop: 4 }}>{t(chips.home.length ? 'fleetCitiesNoteHome' : 'fleetCitiesNote', { days: d.stats.days })}</small>
+      <small className="fp-muted" style={{ display: 'block', marginTop: 4 }}>{t('fleetCitiesNote', { days: d.stats.days })}</small>
     </> },
     { label: t('fbcFoldPacing'), value: slot
       ? t('fleetPacingBudget', { used: slot.minutes_today, budget: slot.budget_minutes })
@@ -139,7 +137,7 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
         <div className="ff-worker-main">
           <WorkerCard name={name} status={status} userId={acct?.email ? acct.uid : null}
             stubNote={w.last_heartbeat_at ? t('fbcHeartbeatAge', { age: relTime(w.last_heartbeat_at, locale) }) : t('fbcNeverReported')}
-            headSub={<>{w.host_id ?? '—'} · {t('fbcCities', { n: cityCount })}</>}
+            headSub={<>{w.host_id ?? '—'} · {t('fbcCities', { n: chips.cities.length })}</>}
             stats={[
               { label: t('fbcColAlerts', { days: HITS_DAYS }), value: d.stats.alerts },
               { label: t('fbcColLastSearch'), value: d.stats.last_search_at ? relTime(d.stats.last_search_at, locale) : '—' },
@@ -220,7 +218,7 @@ function ErpHistoryText({ line }: { line: ErpHistoryLine }) {
 }
 
 // Search now needs the city list and the items, which the page does not keep;
-// they are read when the dialog opens. The worker's home city comes first.
+// they are read when the dialog opens.
 function SearchCityDialog({ detail, onClose, onDone }: { detail: FleetWorkerDetail; onClose: () => void; onDone: () => void }) {
   const [catalog, setCatalog] = useState<{ cities: FleetCity[]; items: string[] } | null>(null);
   const closeRef = useRef(onClose);
@@ -233,6 +231,6 @@ function SearchCityDialog({ detail, onClose, onDone }: { detail: FleetWorkerDeta
     return () => { live = false; };
   }, []);
   if (!catalog) return null;
-  const initial = detail.cities.find(c => c.home)?.slug ?? detail.cities[0]?.slug ?? '';
+  const initial = detail.cities[0]?.slug ?? '';
   return <SearchNowDialog cities={catalog.cities} items={catalog.items} tasks={detail.log} initial={initial} onClose={onClose} onDone={onDone} />;
 }

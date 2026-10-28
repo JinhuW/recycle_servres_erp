@@ -42,16 +42,14 @@ export function sessionDaysLeft(w: FleetWorkerDetail['worker'], now: number = Da
   return Number.isFinite(ms) ? (ms - now) / 86_400_000 : null;
 }
 
-/** The cities as the homelab chips take them, home first, and the alerts each
- *  sent in the window. */
-export function erpCityChips(d: FleetWorkerDetail, now: number = Date.now()): { home: ChipCity[]; other: ChipCity[]; hits: Map<string, CityHits>; searched: Set<string> } {
+/** The cities as the homelab chips take them, and the alerts each sent in the window. */
+export function erpCityChips(d: FleetWorkerDetail, now: number = Date.now()): { cities: ChipCity[]; hits: Map<string, CityHits>; searched: Set<string> } {
   const chip = (c: FleetWorkerDetail['cities'][number]): ChipCity => ({ slug: c.slug, name: c.name ?? c.slug, radius_km: c.radius_km });
   const hits = new Map<string, CityHits>();
   for (const c of d.cities) if (c.alerts > 0) hits.set(c.slug, { sent: c.alerts, hit: 0 });
   const today = new Date(now).toISOString().slice(0, 10);
   return {
-    home: d.cities.filter(c => c.home).map(chip),
-    other: d.cities.filter(c => !c.home).map(chip),
+    cities: d.cities.map(chip),
     hits,
     searched: new Set(d.cities.filter(c => c.last_done_at?.slice(0, 10) === today).map(c => c.slug)),
   };

@@ -164,21 +164,21 @@ describe('reconcile: probes for quarantined slots', () => {
 
   // A worker runs the slot unless `lease` says otherwise: 'none' is an
   // account no worker holds, 'parked' the infinite lease a park leaves.
-  async function slot(uid: string, home: string[], quarantinedUntil: Date | null, lease: 'held' | 'none' | 'parked' = 'held'): Promise<number> {
+  async function slot(uid: string, quarantinedUntil: Date | null, lease: 'held' | 'none' | 'parked' = 'held'): Promise<number> {
     const db = getTestDb();
     const [a] = await db<{ no: number }[]>`
       INSERT INTO fb_pool_accounts (uid, batch, status, holder_name) VALUES (${uid}, 'fixtures', 'fleet', 'lab') RETURNING no`;
     const expires = lease === 'held' ? db`${at(1000)}::timestamptz` : lease === 'parked' ? db`'infinity'::timestamptz` : db`NULL`;
     await db`
-      INSERT INTO fleet_slots (account_no, home_cities, quarantined_until, worker_id, lease_expires_at)
-      VALUES (${a.no}, ${db.json(home)}, ${quarantinedUntil}, ${lease === 'none' ? null : 'worker-' + uid}, ${expires})`;
+      INSERT INTO fleet_slots (account_no, quarantined_until, worker_id, lease_expires_at)
+      VALUES (${a.no}, ${quarantinedUntil}, ${lease === 'none' ? null : 'worker-' + uid}, ${expires})`;
     return a.no;
   }
 
-  it('writes one probe per quarantined slot on its first enabled home city, once per quarantine_probe_hours', async () => {
-    await catalog([['houston'], ['dallas'], ['boise', false]], ['enterprise_ssd', 'server_ram']);
-    const quarantined = await slot('61550000000011', ['boise', 'dallas'], at(48));
-    await slot('61550000000012', ['houston'], null);
+  it('writes one probe per quarantined slot on an enabled city, once per quarantine_probe_hours', async () => {
+    await catalog([['dallas'], ['boise', false]], ['enterprise_ssd', 'server_ram']);
+    const quarantined = await slot('61550000000011', at(48));
+    await slot('61550000000012', null);
     const r = await reconcile(getTestDb(), NOW);
     expect(r.probes).toBe(1);
     const probes = (await tasks()).filter((t) => t.kind === 'probe');
@@ -198,9 +198,9 @@ describe('reconcile: probes for quarantined slots', () => {
 
   it('writes no probe for an account no worker runs, and cancels one left waiting when its worker goes', async () => {
     await catalog([['dallas']], ['enterprise_ssd']);
-    await slot('61550000000014', ['dallas'], at(48), 'none');
-    await slot('61550000000015', ['dallas'], at(48), 'parked');
-    const running = await slot('61550000000016', ['dallas'], at(48));
+    await slot('61550000000014', at(48), 'none');
+    await slot('61550000000015', at(48), 'parked');
+    const running = await slot('61550000000016', at(48));
     expect((await reconcile(getTestDb(), NOW)).probes).toBe(1);
     const [probe] = (await tasks()).filter((t) => t.kind === 'probe');
     expect(probe.account_no).toBe(running);
@@ -216,12 +216,12 @@ describe('reconcile: probes for quarantined slots', () => {
     expect((await reconcile(getTestDb(), at(2))).probes).toBe(1);
   });
 
-  it('falls back to the most overdue city when no home city is enabled', async () => {
+  it('probes the most overdue city', async () => {
     await catalog([['houston'], ['dallas']]);
     await done('dallas', 'server_ram', 30);
     await done('houston', 'server_ram', 2);
     await reconcile(getTestDb(), NOW); // dallas due now, houston due in 22 h
-    await slot('61550000000013', ['nowhere'], at(48));
+    await slot('61550000000013', at(48));
     await reconcile(getTestDb(), NOW);
     const [probe] = (await tasks()).filter((t) => t.kind === 'probe');
     expect(probe.city).toBe('dallas');
@@ -346,8 +346,8 @@ describe('verification and quarantine recovery', () => {
     const accounts = await db`INSERT INTO fb_pool_accounts (uid, batch, status) VALUES
       ('6155000000091','test','fleet'), ('6155000000092','test','fleet'), ('6155000000093','test','fleet') RETURNING no`;
     for (const a of accounts) await db`
-      INSERT INTO fleet_slots (account_no, home_cities, worker_id, lease_expires_at)
-      VALUES (${a.no}, '["houston"]', ${'worker-' + a.no}, NOW() + interval '1 day')`;
+      INSERT INTO fleet_slots (account_no, worker_id, lease_expires_at)
+      VALUES (${a.no}, ${'worker-' + a.no}, NOW() + interval '1 day')`;
     for (const [index, a] of accounts.entries()) {
       for (let i = 0; i < 2; i++) await db`INSERT INTO fleet_tasks (city,item,kind,state,due_at,done_at,account_no,result)
         VALUES ('houston','server_ram','search','done',NOW(),NOW(),${a.no},${db.json({cards: index === 2 ? 20 : 0})})`;

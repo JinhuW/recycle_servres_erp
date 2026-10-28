@@ -62,9 +62,9 @@ describe('prod→dev sync keeps the dev fleet', () => {
     await sql`INSERT INTO fleet_cities (slug, name, enabled) VALUES ('nyc', 'New York', TRUE), ('reno', 'Reno', TRUE)`;
     await sql`INSERT INTO fleet_items (name, phrases) VALUES ('server_ram', '["server ram"]')`;
     await sql`INSERT INTO fleet_settings (key, value) VALUES ('lease_minutes', '30')`;
-    await sql`INSERT INTO fleet_slots (account_no, worker_id, host_id, epoch, proxy_url, device, home_cities)
-              VALUES (${a}, 'worker-1-1', 'worker-1', 3, 'v1.proxy', '{"timezone":"America/New_York"}', '["nyc"]'),
-                     (${b}, NULL, NULL, 1, 'v1.proxy2', NULL, '["reno"]')`;
+    await sql`INSERT INTO fleet_slots (account_no, worker_id, host_id, epoch, proxy_url, device)
+              VALUES (${a}, 'worker-1-1', 'worker-1', 3, 'v1.proxy', '{"timezone":"America/New_York"}'),
+                     (${b}, NULL, NULL, 1, 'v1.proxy2', NULL)`;
     await sql`INSERT INTO fleet_workers (worker_id, host_id, account_no, epoch, state)
               VALUES ('worker-1-1', 'worker-1', ${a}, 3, 'HEALTHY')`;
     // A finished task: its insert trigger archives the attempt once.

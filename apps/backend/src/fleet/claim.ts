@@ -330,19 +330,13 @@ worker.post('/claim', claimAuth, async (c) => {
     // Otherwise any free slot. A handoff whose reservation lapsed lands here
     // too, and its own slot (now free) still comes first.
     // The slot's own row is what the lock holds; the pool row only says the
-    // account is still the fleet's. A slot's home cities nobody else is
-    // covering right now count in its favour, after the host it last ran on.
+    // account is still the fleet's.
     if (!row) {
       [row] = await tx<ClaimRow[]>`
         ${CLAIM_SELECT(tx)}
         WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW())
         ORDER BY (s.worker_id = ${worker_id}) DESC NULLS LAST,
           (s.last_host_id = ${host.host_id}) DESC NULLS LAST,
-          (SELECT COUNT(*) FROM jsonb_array_elements_text(s.home_cities) h(slug)
-            WHERE NOT EXISTS (
-              SELECT 1 FROM fleet_slots o
-              WHERE o.account_no <> s.account_no AND o.worker_id IS NOT NULL
-                AND o.lease_expires_at > NOW() AND o.home_cities ? h.slug)) DESC,
           s.account_no
         LIMIT 1
         FOR NO KEY UPDATE OF a SKIP LOCKED`;
@@ -409,7 +403,6 @@ worker.post('/claim', claimAuth, async (c) => {
       },
       proxy: proxyUrl ? { url: proxyUrl } : null,
       device: deviceOf(row.device),
-      home_cities: Array.isArray(row.home_cities) ? row.home_cities : [],
       items,
       settings: {
         search: settings.search,
@@ -423,7 +416,7 @@ worker.post('/claim', claimAuth, async (c) => {
   if (typeof answer === 'string') return c.json({ error: 'unauthorized', detail: answer }, 401);
   flog.info('fleet slot claimed', {
     accountNo: answer.account.no, workerId: worker_id, hostId: host.host_id, epoch: answer.epoch, by: ticket ? 'ticket' : 'host_token',
-    homeCities: answer.home_cities.length, cookies: answer.account.cookies.length, proxy: answer.proxy !== null,
+    cookies: answer.account.cookies.length, proxy: answer.proxy !== null,
   });
   return c.json(answer);
 });
@@ -524,7 +517,7 @@ worker.post('/heartbeat', workerAuth, async (c) => {
 
 type PickRow = {
   id: number; kind: HandedTask['kind']; city: string; name: string; radius_km: number; item: string;
-  reason: string | null; lease_expires_at: Date; home: boolean; familiar: boolean;
+  reason: string | null; lease_expires_at: Date; familiar: boolean;
 };
 
 type Pick = NextTaskAnswer | { stale: true };
@@ -532,7 +525,6 @@ type Pick = NextTaskAnswer | { stale: true };
 function why(r: PickRow): FleetTaskWhy {
   if (r.kind === 'probe') return 'probe';
   if (r.reason === 'manual') return 'manual';
-  if (r.home) return 'home';
   if (r.familiar) return 'familiar';
   return 'other';
 }
@@ -548,8 +540,8 @@ function handed(r: PickRow, leaseExpiresAt: Date): HandedTask {
   };
 }
 
-/** Tasks with the city's name and whether the city is this account's home or familiar ground. */
-function taskRows(tx: SqlLike, w: WorkerIdentity, home: string[], settings: FleetSettings) {
+/** Tasks with the city's name and whether this account searched the city lately. */
+function taskRows(tx: SqlLike, w: WorkerIdentity, settings: FleetSettings) {
   return tx`
     WITH familiar AS (
       SELECT DISTINCT city FROM fleet_tasks
@@ -557,7 +549,7 @@ function taskRows(tx: SqlLike, w: WorkerIdentity, home: string[], settings: Flee
         AND done_at > NOW() - ${`${settings.familiar_days} days`}::interval
     )
     SELECT t.id::int AS id, t.kind, t.city, c.name, c.radius_km, t.item, t.reason, t.lease_expires_at, t.priority, t.due_at,
-      (t.city = ANY(${home}::text[])) AS home, (f.city IS NOT NULL) AS familiar
+      (f.city IS NOT NULL) AS familiar
     FROM fleet_tasks t JOIN fleet_cities c ON c.slug = t.city LEFT JOIN familiar f ON f.city = t.city`;
 }
 
@@ -597,7 +589,6 @@ async function pickTask(
       }
     }
     if (!take) return { task: null, reason: 'done_only' };
-    const home = Array.isArray(slot.home_cities) ? slot.home_cities : [];
 
     // A lease this epoch still holds was handed in an answer the worker never
     // got (a timeout, a dropped connection): hand it again rather than lease a
@@ -605,7 +596,7 @@ async function pickTask(
     // heartbeat until task_max_minutes, its city blocked and its minutes
     // charged alongside the new task's.
     const [held] = await tx<PickRow[]>`
-      ${taskRows(tx, w, home, settings)}
+      ${taskRows(tx, w, settings)}
       WHERE t.state = 'leased' AND t.worker_id = ${w.worker_id} AND t.account_no = ${w.account_no} AND t.epoch = ${w.epoch}
       ORDER BY t.leased_at DESC LIMIT 1`;
     if (held) {
@@ -637,10 +628,10 @@ async function pickTask(
       ? tx`t.kind = 'probe' AND t.account_no = ${w.account_no}`
       : tx`(t.kind <> 'probe' OR t.account_no = ${w.account_no})`;
     const [row] = await tx<PickRow[]>`
-      ${taskRows(tx, w, home, settings)}
+      ${taskRows(tx, w, settings)}
       WHERE t.state = 'ready' AND t.due_at <= NOW() AND ${kinds}
       ORDER BY t.priority DESC,
-        CASE WHEN t.city = ANY(${home}::text[]) THEN 0 WHEN f.city IS NOT NULL THEN 1 ELSE 2 END,
+        (f.city IS NOT NULL) DESC,
         t.due_at
       LIMIT 1
       FOR UPDATE OF t SKIP LOCKED`;

@@ -3,14 +3,14 @@ import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { ApiError } from '../../../lib/api';
-import { fleetApi, fleetErrorCode, type FleetCity, type FleetItem, type FleetSettings, type FleetSlot, type FleetTask } from '../../../lib/fleet';
+import { fleetApi, fleetErrorCode, type FleetCity, type FleetItem, type FleetSettings, type FleetTask } from '../../../lib/fleet';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
 import {
-  CITY_BUCKETS, cityBucket, cityRegions, cityStanding, EMPTY_CITY_FILTER, easternClock, filterCities, homeWorkerOf, isSlug, lastDoneSearch,
+  CITY_BUCKETS, cityBucket, cityRegions, cityStanding, EMPTY_CITY_FILTER, easternClock, filterCities, isSlug, lastDoneSearch,
   marketplaceUrl, normalizeSlug, openSearch, withCityNames, type CityBucket, type CityFilter,
 } from './fleetBoard';
-import { agoLabel, ConfirmDialogBody, EmptyRow, Legend, UnavailableCard, useFleetMirror, useFleetPoll, WorkerLink } from './shared';
+import { agoLabel, ConfirmDialogBody, EmptyRow, Legend, UnavailableCard, useFleetMirror, useFleetPoll } from './shared';
 
 // ─── Cities ───────────────────────────────────────────────────────────────────
 // The catalog the queue works from. A new city starts disabled with a
@@ -39,18 +39,15 @@ const BUCKET_DOT: Record<CityBucket | 'all', string> = {
   all: 'fleet-dot-all', enabled: 'fleet-dot-pos', verifying: 'fleet-dot-info', disabled: 'fleet-dot-all',
 };
 
-type Data = { cities: FleetCity[]; items: FleetItem[]; done: FleetTask[]; slots: FleetSlot[] };
+type Data = { cities: FleetCity[]; items: FleetItem[]; done: FleetTask[] };
 
 export function FleetCitiesTab() {
   const { t } = useT();
   const mirror = useFleetMirror();
   const { data, reload } = useFleetPoll<Data>(() => {
     const since = new Date(Date.now() - DONE_HOURS * 3_600_000).toISOString();
-    return Promise.all([
-      fleetApi.cities(), fleetApi.items(), fleetApi.tasks({ state: 'done', since }),
-      // The slots say which worker calls a city home; the table stands without them.
-      fleetApi.slots().catch(() => []),
-    ]).then(([cities, items, done, slots]) => ({ cities, items, done: withCityNames(done, cities), slots }));
+    return Promise.all([fleetApi.cities(), fleetApi.items(), fleetApi.tasks({ state: 'done', since })])
+      .then(([cities, items, done]) => ({ cities, items, done: withCityNames(done, cities) }));
   });
   const [adding, setAdding] = useState(false);
   const [rules, setRules] = useState(false);
@@ -74,7 +71,7 @@ export function FleetCitiesTab() {
       </div>
       <section className="card fleet-card" aria-label={t('fleetCitiesTitle')}>
         {data === null ? <TableSkeleton rows={6} cols={8} />
-          : <CitiesTable cities={cities} items={items} done={data.done} slots={data.slots} filter={filter} onFilter={setFilter} onChanged={reload} />}
+          : <CitiesTable cities={cities} items={items} done={data.done} filter={filter} onFilter={setFilter} onChanged={reload} />}
       </section>
       {adding && data && (
         <AddCityDialog cities={cities} onClose={() => setAdding(false)} onChanged={reload} />
@@ -84,8 +81,8 @@ export function FleetCitiesTab() {
   );
 }
 
-export function CitiesTable({ cities, items, done, slots, filter, onFilter, onChanged, now = Date.now() }: {
-  cities: readonly FleetCity[]; items: readonly string[]; done: readonly FleetTask[]; slots: readonly FleetSlot[];
+export function CitiesTable({ cities, items, done, filter, onFilter, onChanged, now = Date.now() }: {
+  cities: readonly FleetCity[]; items: readonly string[]; done: readonly FleetTask[];
   filter: CityFilter; onFilter: (f: CityFilter) => void; onChanged: () => void; now?: number;
 }) {
   const { t, locale } = useT();
@@ -93,7 +90,7 @@ export function CitiesTable({ cities, items, done, slots, filter, onFilter, onCh
   const [removing, setRemoving] = useState<FleetCity | null>(null);
   const [unverified, setUnverified] = useState<FleetCity | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const cols = 6 + items.length;
+  const cols = 5 + items.length;
   const shown = useMemo(() => filterCities(cities, filter), [cities, filter]);
   const regions = useMemo(() => cityRegions(cities), [cities]);
   const counts = useMemo(() => {
@@ -182,7 +179,6 @@ export function CitiesTable({ cities, items, done, slots, filter, onFilter, onCh
               <th>{t('fleetColStatus')}</th>
               <th className="num">{t('fleetColPerDay')}</th>
               {items.map(i => <th key={i} className="mono">{i}</th>)}
-              <th>{t('fleetColHomeOf')}</th>
               <th aria-label={t('fleetColActions')} />
             </tr>
           </thead>
@@ -191,7 +187,6 @@ export function CitiesTable({ cities, items, done, slots, filter, onFilter, onCh
             {shown.map(c => {
               const bucket = cityBucket(c);
               const standing = cityStanding(c);
-              const home = homeWorkerOf(slots, c.slug);
               const rowBusy = busy === c.slug;
               const checking = c.open_tasks.find(x => x.kind === 'verify-slug') ?? null;
               const mismatch = bucket === 'verifying' && !!c.verified_as && c.verified_as.toLowerCase() !== c.name.toLowerCase();
@@ -232,14 +227,6 @@ export function CitiesTable({ cities, items, done, slots, filter, onFilter, onCh
                       ) : <span className="fp-muted">—</span>}
                     </td>
                     {items.map(i => <td key={i}>{c.enabled ? itemCell(c, i) : <span className="fp-muted">—</span>}</td>)}
-                    <td>
-                      {home ? (
-                        <span className="fp-holder">
-                          <WorkerLink id={home.worker_id} />
-                          <small>{t('fleetAccountN', { no: home.account_no })}</small>
-                        </span>
-                      ) : <span className="fp-muted">—</span>}
-                    </td>
                     <td className="fleet-row-actions">
                       {standing !== 'removed' && !mirror && <>
                         <button type="button" className="btn ghost icon sm" onClick={() => searchNow(c)} disabled={rowBusy || items.length === 0 || !c.enabled}

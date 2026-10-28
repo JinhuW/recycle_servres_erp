@@ -203,10 +203,6 @@ export function logByItem(tasks: readonly FleetTaskLog[], items: readonly string
   });
 }
 
-/** The worker that calls a city home, from the slots' home lists. */
-export function homeWorkerOf(slots: readonly FleetSlot[], slug: string): FleetSlot | null {
-  return slots.find(s => s.home_cities.includes(slug)) ?? null;
-}
 
 // ── Starting the round ───────────────────────────────────────────────────────
 
@@ -511,14 +507,14 @@ export function niceTop(max: number): number {
 
 export type CityAlerts = {
   slug: string; name: string; region: string | null; alerts: number; reviewed: number | null; rate: number | null;
-  lastDay: string | null; homeWorker: string | null;
+  lastDay: string | null;
 };
 
 /** Alerts per city over the window: the coordinator's sent counts by city,
- *  the model reviews from the fleet's finished tasks on the same cities (null
- *  where none finished in the window), and the worker that calls it home. */
+ *  and the model reviews from the fleet's finished tasks on the same cities
+ *  (null where none finished in the window). */
 export function alertsByCity(
-  hits: readonly AlertHitRow[], tasks: readonly FleetTask[], cities: readonly FleetCity[], slots: readonly FleetSlot[],
+  hits: readonly AlertHitRow[], tasks: readonly FleetTask[], cities: readonly FleetCity[],
 ): CityAlerts[] {
   const byCity = new Map<string, { alerts: number; lastDay: string | null }>();
   for (const h of hits) {
@@ -543,7 +539,7 @@ export function alertsByCity(
     const r = reviewed.get(slug) ?? null;
     return {
       slug, name: city?.name ?? slug, region: city?.region ?? null, alerts: c.alerts, reviewed: r,
-      rate: r && tasks.length < 1000 && !incomplete.has(slug) && alerted.get(slug) === c.alerts ? c.alerts / r : null, lastDay: c.lastDay, homeWorker: homeWorkerOf(slots, slug)?.worker_id ?? null,
+      rate: r && tasks.length < 1000 && !incomplete.has(slug) && alerted.get(slug) === c.alerts ? c.alerts / r : null, lastDay: c.lastDay,
     };
   }).sort((a, b) => b.alerts - a.alerts || a.name.localeCompare(b.name));
 }

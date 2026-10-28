@@ -3,14 +3,14 @@ import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { FormSkeleton, TableSkeleton } from '../../../components/Skeleton';
 import {
-  fleetApi, fleetErrorCode, type FleetCity, type FleetCityLogTask, type FleetItem, type FleetSettings, type FleetSlot, type FleetTask,
+  fleetApi, fleetErrorCode, type FleetCity, type FleetCityLogTask, type FleetItem, type FleetSettings, type FleetTask,
   type FleetTaskEvent, type FleetWorker,
 } from '../../../lib/fleet';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
 import { fleetTabPath, hrefFor, onLinkClick } from '../../../lib/route';
 import {
-  averageTaskSeconds, BELT_WINDOW_H, beltAxis, beltRow, beltSummary, dueLabel, EMPTY_TASK_FILTER, easternClock, filterTasks, homeWorkerOf,
+  averageTaskSeconds, BELT_WINDOW_H, beltAxis, beltRow, beltSummary, dueLabel, EMPTY_TASK_FILTER, easternClock, filterTasks,
   lastDoneSearch, logByItem, roundStartPreview, sortTasks, withCityNames, workersBusy,
   type BeltMark, type BeltRow, type TaskFilter, type Translate,
 } from './fleetBoard';
@@ -37,7 +37,7 @@ const STATE_SEG_KEY: Record<(typeof STATE_SEG)[number], string> = {
   '': 'fleetSegAll', leased: 'fleetSegRunning', ready: 'fleetSegDue', done: 'fleetSegDone', cancelled: 'fleetSegCancelled', expired: 'fleetSegExpired',
 };
 
-type Data = { cities: FleetCity[]; items: FleetItem[]; tasks: FleetTask[]; workers: FleetWorker[]; slots: FleetSlot[]; settings: FleetSettings | null };
+type Data = { cities: FleetCity[]; items: FleetItem[]; tasks: FleetTask[]; workers: FleetWorker[]; settings: FleetSettings | null };
 
 function sinceFor(range: RangeKey, now: number): string {
   if (range === 'today') return new Date(now).toISOString().slice(0, 10) + 'T00:00:00.000Z';
@@ -60,10 +60,10 @@ export function FleetTasksTab() {
         const seen = new Set(a.map(x => x.id));
         return [...a, ...b.filter(x => !seen.has(x.id))];
       }),
-      fleetApi.workers(), fleetApi.slots(),
+      fleetApi.workers(),
       fleetApi.settings().catch(() => null),
-    ]).then(([cities, items, tasks, workers, slots, settings]) =>
-      ({ cities, items, tasks: withCityNames(tasks, cities), workers, slots, settings }));
+    ]).then(([cities, items, tasks, workers, settings]) =>
+      ({ cities, items, tasks: withCityNames(tasks, cities), workers, settings }));
   });
   const first = useRef(true);
   useEffect(() => {
@@ -104,7 +104,7 @@ export function FleetTasksTab() {
             : <TaskTable tasks={data.tasks} items={items} filter={filter} onFilter={setFilter} range={range} onRange={setRange}
                 selected={selected} onSelect={setSelected} />}
         </section>
-        <CityLogAside city={city} items={items} slots={data?.slots ?? []} onSearchNow={slug => setSearching(slug)} />
+        <CityLogAside city={city} items={items} onSearchNow={slug => setSearching(slug)} />
       </div>
       {starting && data && (
         <StartRoundDialog cities={data.cities} items={items} freshHours={freshHours}
@@ -359,8 +359,8 @@ function detailText(detail: Record<string, unknown> | null): string {
     .join(', ');
 }
 
-export function CityLogAside({ city, items, slots, onSearchNow, now = Date.now() }: {
-  city: FleetCity | null; items: readonly string[]; slots: readonly FleetSlot[]; onSearchNow: (slug: string) => void; now?: number;
+export function CityLogAside({ city, items, onSearchNow, now = Date.now() }: {
+  city: FleetCity | null; items: readonly string[]; onSearchNow: (slug: string) => void; now?: number;
 }) {
   const { t, locale } = useT();
   const mirror = useFleetMirror();
@@ -384,7 +384,6 @@ export function CityLogAside({ city, items, slots, onSearchNow, now = Date.now()
       </aside>
     );
   }
-  const home = homeWorkerOf(slots, city.slug);
   const groups = Array.isArray(log) ? logByItem(log, items) : [];
   const perDay = city.per_day ?? null;
   return (
@@ -400,11 +399,8 @@ export function CityLogAside({ city, items, slots, onSearchNow, now = Date.now()
         </div>
       </div>
       <div className="fleet-log-note">
-        {home
-          ? t('fleetLogHome', { worker: home.worker_id ?? '—', no: home.account_no })
-          : t('fleetLogNoHome')}
-        {city.region && <> {t('fleetLogRegion', { region: city.region })}</>}
-        {' '}{perDay ? t('fleetLogPerDay', { n: perDay }) : t('fleetLogPerDayDefault')}
+        {city.region && <>{t('fleetLogRegion', { region: city.region })} </>}
+        {perDay ? t('fleetLogPerDay', { n: perDay }) : t('fleetLogPerDayDefault')}
       </div>
       <div className="fleet-log-tasks">
         {log === null && <div className="card-body"><FormSkeleton fields={2} withHeader={false} /></div>}

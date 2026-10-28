@@ -315,7 +315,7 @@ describe('tasks, round start, city log', () => {
     const db = getTestDb();
     const [t] = await db<{ id: string }[]>`SELECT id FROM fleet_tasks WHERE city = 'houston' AND item = 'server_ram' AND state = 'ready'`;
     await db`UPDATE fleet_tasks SET state = 'leased', worker_id = 'lab-1', leased_at = NOW(), lease_expires_at = NOW() + interval '30 min' WHERE id = ${t.id}`;
-    await db`INSERT INTO fleet_task_events (task_id, worker_id, kind, detail) VALUES (${t.id}, 'lab-1', 'handed', '{"why":"home"}'), (${t.id}, 'lab-1', 'started', NULL)`;
+    await db`INSERT INTO fleet_task_events (task_id, worker_id, kind, detail) VALUES (${t.id}, 'lab-1', 'handed', '{"why":"familiar"}'), (${t.id}, 'lab-1', 'started', NULL)`;
 
     const byCity = await api<FleetTaskLog[]>('GET', '/api/fleet/city-log?city=houston', { token });
     expect(byCity.status).toBe(200);
@@ -323,7 +323,7 @@ describe('tasks, round start, city log', () => {
       .toEqual(['enterprise_ssd/search/ready', 'enterprise_ssd/verify-slug/cancelled', 'server_ram/search/leased']);
     const leased = byCity.body.find((x) => x.state === 'leased')!;
     expect(leased.events.map((e) => e.kind)).toEqual(['handed', 'started']);
-    expect(leased.events[0]).toMatchObject({ task_id: Number(t.id), worker_id: 'lab-1', detail: { why: 'home' } });
+    expect(leased.events[0]).toMatchObject({ task_id: Number(t.id), worker_id: 'lab-1', detail: { why: 'familiar' } });
 
     const byWorker = await api<FleetTaskLog[]>('GET', '/api/fleet/city-log?worker=lab-1&hours=1', { token });
     expect(byWorker.body.map((x) => x.id)).toEqual([Number(t.id)]);

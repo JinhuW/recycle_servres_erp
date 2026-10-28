@@ -15,6 +15,26 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.374.0] - 2026-10-27
+
+### Removed
+
+- **ERP fleet workers no longer have home cities** (RS-439). The concept had
+  spread across the fleet: a slot's `home_cities` decided which slot a worker
+  claimed, ranked a home city above every other task, picked where a
+  quarantine probe went, and showed up as the Cities tab's "Home of" column,
+  the Add to fleet picker, a line in the Tasks city log, Analysis' "Searched
+  by" column, and a highlighted group on the worker page. No slot on dev had
+  one, so all of that was empty columns and code nobody exercised. A worker
+  now claims the slot it last held, then one from the host it last ran on,
+  then the lowest account; tasks go by priority, then a city the account
+  searched lately, then due time; a probe takes the most overdue city.
+  `POST /api/fleet/slots` refuses `home_cities`, and the claim answer no
+  longer carries it (the worker image already handles it missing). The column
+  stays in `fleet_slots` until this release is on prod, so the old backend
+  instance can still claim during the deploy; a later migration drops it.
+  The legacy coordinator fleet keeps its own home cities.
+
 ## [1.373.2] - 2026-10-27
 
 ### Fixed

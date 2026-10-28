@@ -97,7 +97,7 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
     vncPort: running ? worker.vnc_port ?? null : null,
     state: worker.state ?? null,
     heartbeat: worker.last_heartbeat_at ?? null,
-    now: task ? { city: task.city, cityName: task.city_name ?? null, item: task.item, since: task.leased_at, home: !!slot?.home_cities.includes(task.city) } : null,
+    now: task ? { city: task.city, cityName: task.city_name ?? null, item: task.item, since: task.leased_at, home: false } : null,
     minutes: slot?.minutes_today ?? null,
     budget: slot?.budget_minutes ?? null,
     epoch: holds ? slot.epoch : null,
