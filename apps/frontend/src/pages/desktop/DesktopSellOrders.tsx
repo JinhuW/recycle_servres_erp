@@ -16,7 +16,7 @@ import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
 import { api, afterSalesForOrder, type AfterSalesOrderCase, ApiError, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import {
-  useRoute, navigate, replaceRoute, match, matchSellOrderPack, sellOrderPackPath, poLinePath,
+  useRoute, navigate, match, matchSellOrderPack, sellOrderPackPath, poLinePath,
   afterSalesCasePath, afterSalesNewPath, hrefFor, onLinkClick, takeHashParam,
 } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
@@ -37,7 +37,7 @@ import { AttachmentChip } from '../../components/AttachmentChip';
 import { SellOrderAttachments, type SellAttachment } from '../../components/SellOrderAttachments';
 import { usePreference } from '../../lib/preferences';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
-import { filterLineGroups, groupSellOrderLines, type SellOrderLineGroup } from '../../lib/sellOrderLineGroups';
+import { filterLineGroups, groupSellOrderLines, type SellOrderLineGroup, type SellOrderLineGroupBy } from '../../lib/sellOrderLineGroups';
 import { isPackable, lotWarehouse, packWarehouseOptions, UNASSIGNED } from '../../lib/sellOrderPack';
 import { peekSellOrderPrefill, clearSellOrderPrefill } from '../../lib/sellOrderPrefill';
 import { missingSigners, signoffSig } from '../../lib/sellOrderSignoff';
@@ -66,8 +66,8 @@ type StatusMetaEntry = {
 type StatusMetaMap = Record<MetaStatus, StatusMetaEntry>;
 
 // The per-status evidence (note + attachments) captured at Shipped / Awaiting
-// payment / Done. Edit mode surfaces it through the stepper + StatusChangeDialog;
-// view mode has no stepper, so without this the attachments are unreachable.
+// payment / Done. The editor surfaces it through the stepper + StatusChangeDialog;
+// a locked order has no stepper, so without this the attachments are unreachable.
 function evidenceEntries(meta: StatusMetaMap | null) {
   if (!meta) return [];
   return sellOrderStatuses
@@ -353,12 +353,11 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
       setExporting(false);
     }
   };
-  const editMatch = match('/sell-orders/:id/edit', path);
-  const viewMatch = match('/sell-orders/:id', path);
+  // `/edit` is the old editor's address; links to it still open the order.
+  const detailMatch = match('/sell-orders/:id', path) ?? match('/sell-orders/:id/edit', path);
   const packMatch = matchSellOrderPack(path);
-  const open: { id: string; mode: 'view' | 'edit' | 'pack' } | null =
-    editMatch ? { id: editMatch.id, mode: 'edit' }
-    : viewMatch ? { id: viewMatch.id, mode: 'view' }
+  const open: { id: string; mode: 'detail' | 'pack' } | null =
+    detailMatch ? { id: detailMatch.id, mode: 'detail' }
     : packMatch ? { id: packMatch.id, mode: 'pack' }
     : null;
 
@@ -438,7 +437,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
     return <DesktopSellOrderPack key={open.id} id={open.id} onToast={onToast} />;
   }
   if (open) {
-    return <SellOrderDetail key={`${open.id}:${open.mode}`} id={open.id} mode={open.mode} onToast={onToast} />;
+    return <SellOrderDetail key={open.id} id={open.id} onToast={onToast} />;
   }
 
   return (
@@ -619,11 +618,6 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                       <RouteLink to={'/sell-orders/' + o.id} className="btn icon sm" title={t('soViewTooltip')}>
                         <Icon name="eye" size={12} />
                       </RouteLink>
-                      {o.status !== 'Done' && o.status !== 'Closed' && (
-                        <RouteLink to={'/sell-orders/' + o.id + '/edit'} className="btn icon sm" title={t('editOrder')}>
-                          <Icon name="edit" size={12} />
-                        </RouteLink>
-                      )}
                       {CASEABLE_SELL_STATUSES.has(o.status) && (
                         <RouteLink to={afterSalesNewPath(o.id)} className="btn icon sm" title={t('soAfterSalesOpen')} aria-label={t('soAfterSalesOpen')}>
                           <Icon name="refresh" size={12} />
@@ -928,7 +922,7 @@ type ItemCellLine = LineSpec & {
   sourceLineNo?: number | null;
 };
 
-function LineItemCell({ line, lineNo, sub, showPo, showLineNo, linkPo }: {
+function LineItemCell({ line, lineNo, sub, showPo, showLineNo }: {
   line: ItemCellLine;
   // The product's # on this sell order — the number its items are labelled
   // with. Null for a line added in the editor: the save numbers it.
@@ -940,7 +934,6 @@ function LineItemCell({ line, lineNo, sub, showPo, showLineNo, linkPo }: {
   // By PO: the card already names the PO, so the line's # on it rides as a
   // badge by the name — a "#" column read as the sell order's own row number.
   showLineNo: boolean;
-  linkPo: boolean;
 }) {
   const { t } = useT();
   // Condition stays in the text row, so the SSD/HDD chips don't repeat it.
@@ -983,19 +976,16 @@ function LineItemCell({ line, lineNo, sub, showPo, showLineNo, linkPo }: {
         <span className="mono">{line.partNumber ?? '—'}</span>
         {line.condition && (<><span>·</span><span>{line.condition}</span></>)}
         {po && (<><span>·</span>
-          {linkPo
-            ? <RouteLink to={poLinePath(po, n)} className="mono rec-link">{from}</RouteLink>
-            : <span className="mono">{from}</span>}
+          <RouteLink to={poLinePath(po, n)} className="mono rec-link">{from}</RouteLink>
         </>)}
       </div>
     </td>
   );
 }
 
-function LineGroupHead({ group, by, linkPo }: {
+function LineGroupHead({ group, by }: {
   group: SellOrderLineGroup<unknown>;
   by: 'warehouse' | 'po';
-  linkPo: boolean;
 }) {
   const { t } = useT();
   return (
@@ -1005,9 +995,7 @@ function LineGroupHead({ group, by, linkPo }: {
           <Icon name="history" size={12} />
           {group.poId === null
             ? <span>{t('sodNoPo')}</span>
-            : linkPo
-              ? <RouteLink to={'/purchase-orders/' + group.poId} className="mono rec-link">{group.poId}</RouteLink>
-              : <span className="mono">{group.poId}</span>}
+            : <RouteLink to={'/purchase-orders/' + group.poId} className="mono rec-link">{group.poId}</RouteLink>}
         </>
       ) : (
         <>
@@ -1020,14 +1008,16 @@ function LineGroupHead({ group, by, linkPo }: {
   );
 }
 
+const GROUP_LABEL = { warehouse: 'sodGroupByWarehouse', po: 'sodGroupByPo', none: 'sodGroupCombined' } as const;
+
 function LineGroupSwitch({ value, onChange }: {
-  value: 'warehouse' | 'po';
-  onChange: (v: 'warehouse' | 'po') => void;
+  value: SellOrderLineGroupBy;
+  onChange: (v: SellOrderLineGroupBy) => void;
 }) {
   const { t } = useT();
   return (
     <div className="seg so-group-seg" role="group" aria-label={t('sodGroupLabel')}>
-      {(['warehouse', 'po'] as const).map(v => (
+      {(['warehouse', 'po', 'none'] as const).map(v => (
         <button
           key={v}
           type="button"
@@ -1035,22 +1025,20 @@ function LineGroupSwitch({ value, onChange }: {
           aria-pressed={value === v}
           onClick={() => onChange(v)}
         >
-          {v === 'warehouse' ? t('sodGroupByWarehouse') : t('sodGroupByPo')}
+          {t(GROUP_LABEL[v])}
         </button>
       ))}
     </div>
   );
 }
 
-// ─── Detail / edit page ──────────────────────────────────────────────────────
-// View mode is read-only. Edit mode is the full builder (same as a new sell
-// order): re-pick the customer, edit line qty / unit price, drop lines, plus
-// advance the status and edit internal notes. Saved via PATCH /sell-orders/:id.
-// The list mounts one instance per id *and mode*, so every switch between view
-// and edit starts from a fresh fetch — never from a draft left behind.
-function SellOrderDetail({ id, mode, onToast }: {
+// ─── Detail page ─────────────────────────────────────────────────────────────
+// An open order is the full builder (same as a new sell order): re-pick the
+// customer, edit line qty / unit price, drop lines, plus advance the status and
+// edit internal notes. Saved via PATCH /sell-orders/:id. Done and Closed are
+// locked, so they read as a record whose receiver and notes still save alone.
+function SellOrderDetail({ id, onToast }: {
   id: string;
-  mode: 'view' | 'edit';
   onToast?: (msg: string, kind?: 'success' | 'error') => void;
 }) {
   const { t, locale } = useT();
@@ -1060,21 +1048,23 @@ function SellOrderDetail({ id, mode, onToast }: {
   // (Archive / Discard / Unarchive) are hidden while it is in play. Held in
   // state: the stash is cleared on unmount, and StrictMode's rehearsal unmount
   // keeps state.
-  const [prefillEntry] = useState(() => (mode === 'edit' ? peekSellOrderPrefill(id) : null));
+  const [prefillEntry, setPrefillEntry] = useState(() => peekSellOrderPrefill(id));
   const prefill = prefillEntry?.items;
   useEffect(() => () => clearSellOrderPrefill(id), [id]);
   const [lineGroup, setLineGroup] = usePreference('sellOrders.lineGroup', 'warehouse');
 
   const toList = () => navigate('/sell-orders');
-  // View and edit share one history entry (replace, not push), so browser Back
-  // from an order returns to wherever it was opened from — never to the other
-  // mode of the same order.
-  const toView = () => replaceRoute('/sell-orders/' + id);
-  const toEdit = () => replaceRoute('/sell-orders/' + id + '/edit');
+  // The page stays on the order after a save, so the prefill's errand ends here
+  // and the lifecycle exits come back.
   const afterSave = () => {
     prefillEntry?.onSaved?.();
+    if (prefillEntry) {
+      clearSellOrderPrefill(id);
+      setPrefillEntry(null);
+      setPrefillAllPresent(false);
+    }
     onToast?.(t('invAddToSoSavedToast', { id }), 'success');
-    toView();
+    setRefreshKey(k => k + 1);
   };
   const [order, setOrder] = useState<SellOrderDetailType | null>(null);
   const [draft, setDraft] = useState<{
@@ -1109,13 +1099,10 @@ function SellOrderDetail({ id, mode, onToast }: {
   const [refreshKey, setRefreshKey] = useState(0);
   // Bumped after every successful mutation so <SellOrderHistory> re-fetches.
   const [historyKey, setHistoryKey] = useState(0);
-  // Inline negotiated-total editor. In the view modal an applied target hits
-  // the server immediately (the order is otherwise read-only there); in the
-  // edit modal it becomes part of the draft (`pendingAdjust`) and is applied
-  // on Save alongside the other edits — so it's never disabled.
+  // Inline negotiated-total editor. An applied target becomes part of the
+  // draft (`pendingAdjust`) and is applied on Save alongside the other edits.
   const [adjusting, setAdjusting] = useState(false);
   const [adjustInput, setAdjustInput] = useState('');
-  const [adjustSaving, setAdjustSaving] = useState(false);
   const [receiverSaving, setReceiverSaving] = useState(false);
   const [pendingAdjust, setPendingAdjust] = useState<number | null>(null);
   const prefilled = useRef(false);
@@ -1135,7 +1122,7 @@ function SellOrderDetail({ id, mode, onToast }: {
         const loaded = r.order.lines.map(toEditLine);
         // Marked here, past the `alive` check, not when the effect starts:
         // StrictMode's discarded first run would otherwise eat the prefill.
-        const canPrefill = !!prefill && !prefilled.current && mode === 'edit'
+        const canPrefill = !!prefill && !prefilled.current
           && r.order.status !== 'Done' && r.order.status !== 'Closed';
         // The rate for a CNY order loads after this, so its prefilled lots
         // start at 0 as before; a USD order's start at their sell price.
@@ -1172,27 +1159,25 @@ function SellOrderDetail({ id, mode, onToast }: {
     return () => { alive = false; };
   }, [draftCurrency]);
 
-  // Customer list — only needed when editing (re-pick the customer).
+  // Customer list — the editor re-picks the customer.
   useEffect(() => {
-    if (mode !== 'edit') return;
     let alive = true;
     api.get<{ items: Customer[] }>('/api/customers')
       .then(r => { if (alive) setCustomers(r.items); })
       .catch(handleFetchError);
     return () => { alive = false; };
-  }, [mode]);
+  }, []);
 
   // After-sales cases on this order. Read whenever the page opens: a case
   // made from the button comes back here through the browser's Back.
   const [asCases, setAsCases] = useState<AfterSalesOrderCase[]>([]);
   useEffect(() => {
-    if (mode !== 'view') return;
     let alive = true;
     afterSalesForOrder(id)
       .then(r => { if (alive) setAsCases(r.cases); })
       .catch(handleFetchError);
     return () => { alive = false; };
-  }, [id, mode]);
+  }, [id]);
   const asEligible = !!order && CASEABLE_SELL_STATUSES.has(order.status);
 
   // "locked" = no structural edits or status moves allowed. Done is the
@@ -1200,7 +1185,7 @@ function SellOrderDetail({ id, mode, onToast }: {
   // are all frozen until the order is Reopened). Both the list-page edit
   // pencil and the in-page status stepper / line inputs respect this guard.
   const locked = !!order && (order.status === 'Done' || order.status === 'Closed');
-  const editable = mode === 'edit' && !locked;
+  const editable = !locked;
 
   const customerChanged = !!order && !!draft && draft.customerId !== order.customer.id;
   const currencyChanged = !!order && !!draft && draft.currency !== order.currency;
@@ -1251,7 +1236,7 @@ function SellOrderDetail({ id, mode, onToast }: {
   }, [draft, order, draftRateToUsd]);
 
   // Breakdown for the order-summary card: Subtotal / Adjustment / Total.
-  // A pending (unsaved) target wins in edit mode — subtotal tracks the live
+  // A pending (unsaved) target wins — subtotal tracks the live
   // draft while the buyer's number stays fixed, so the delta recomputes as
   // lines are edited. A saved adjustment shows the stored baseline, but only
   // while the draft's priced set still matches what it describes (a line or
@@ -1289,48 +1274,27 @@ function SellOrderDetail({ id, mode, onToast }: {
       ? (draftRateToUsd != null ? +(summary.total * draftRateToUsd).toFixed(2) : null)
       : order.total;
 
-  const applyAdjust = async () => {
-    if (!order) return;
+  // The target joins the draft and is applied on Save with the rest of the
+  // edits — nothing hits the server here.
+  const applyAdjust = () => {
     const target = Number(adjustInput);
     if (!Number.isFinite(target) || target <= 0) return;
-    const rounded = +target.toFixed(2);
-    // Edit mode: the target joins the draft and is applied on Save with the
-    // rest of the edits — nothing hits the server here.
-    if (editable) {
-      setPendingAdjust(rounded);
-      setAdjusting(false);
-      return;
-    }
-    setAdjustSaving(true);
-    try {
-      // The server prorates line prices and returns the achieved total (the
-      // typed value may be unreachable at 2dp granularity) — re-fetch instead
-      // of trusting the input.
-      await api.post(`/api/sell-orders/${order.id}/adjust-price`, {
-        targetTotal: rounded,
-      });
-      setAdjusting(false);
-      setRefreshKey(k => k + 1);
-      setHistoryKey(k => k + 1);
-    } catch (e) {
-      handleFetchError(e);
-    } finally {
-      setAdjustSaving(false);
-    }
+    setPendingAdjust(+target.toFixed(2));
+    setAdjusting(false);
   };
 
-  // View-mode receiver change: no draft, no Save button — it hits the server
-  // at once (the edit form folds the receiver into its PATCH instead). The
+  // A locked order's receiver change: no draft, no Save button — it hits the
+  // server at once (the editor folds the receiver into its PATCH instead). The
   // detail and history reload.
-  // View-mode notes save on their own, in any status, as the receiver does:
-  // the server locks only products and customer once an order is Done.
+  // Its notes save on their own too: the server locks only products and
+  // customer once an order is Done.
   const [notesDraft, setNotesDraft] = useState('');
   const [notesSaving, setNotesSaving] = useState(false);
   const savedNotes = order?.notes ?? '';
   useEffect(() => { setNotesDraft(savedNotes); }, [savedNotes]);
-  // Back and Cancel left the edit page with its edits and no word — and the
-  // view page with a typed note.
-  useUnsavedGuard((mode === 'edit' && !!dirty) || (mode === 'view' && notesDraft !== savedNotes));
+  // Back left the editor with its edits and no word — and a locked order with
+  // a typed note.
+  useUnsavedGuard(editable ? !!dirty : notesDraft !== savedNotes);
   const saveNotes = async () => {
     if (!order || notesDraft === savedNotes) return;
     setNotesSaving(true);
@@ -1502,7 +1466,7 @@ function SellOrderDetail({ id, mode, onToast }: {
     }
   };
 
-  const shownLines: readonly { qty: number; no?: number | null }[] = editable ? (draft?.lines ?? []) : (order?.lines ?? []);
+  const shownLines: readonly { qty: number; no?: number | null; warehouse: string | null; packWarehouse?: string | null }[] = editable ? (draft?.lines ?? []) : (order?.lines ?? []);
   const shownGroups = editable ? editGroups : viewGroups;
   const shownUnits = shownLines.reduce((a, l) => a + l.qty, 0);
   const lineSummary = lineGroup === 'po'
@@ -1510,7 +1474,10 @@ function SellOrderDetail({ id, mode, onToast }: {
         units: shownUnits, lines: productCount(shownLines),
         pos: shownGroups.filter(g => g.poId !== null).length,
       })
-    : t('sodLineSummary', { units: shownUnits, lines: productCount(shownLines), whs: shownGroups.length });
+    : t('sodLineSummary', {
+        units: shownUnits, lines: productCount(shownLines),
+        whs: lineGroup === 'none' ? new Set(shownLines.map(l => lotWarehouse(l))).size : shownGroups.length,
+      });
 
   const closeReasonLabel = order?.closeReasonId
     ? t(closeReasonLabelKey(order.closeReasonId))
@@ -1558,7 +1525,6 @@ function SellOrderDetail({ id, mode, onToast }: {
                     {order.currency}
                   </span>
                 )}
-                {editable && <span className="chip accent" style={{ fontSize: 10 }}>{t('subStatusEditing')}</span>}
               </div>
               <div className="page-sub">
                 {t('soColCreated')} {fmtDate(order.createdAt, locale)} · {t('soColUpdated')} {fmtDate(order.updatedAt, locale)} · {order.customer.region}
@@ -1625,19 +1591,28 @@ function SellOrderDetail({ id, mode, onToast }: {
                 <Icon name="edit" size={14} /> {t('sodReopen')}
               </button>
             )}
-            {!editable && !prefill && asEligible && (
+            {!prefill && asEligible && (
               <button className="btn" onClick={() => navigate(afterSalesNewPath(order.id))}>
                 <Icon name="refresh" size={14} /> {t('soAfterSales')}
               </button>
             )}
-            {!editable && !prefill && (
+            {!prefill && (
               <button className="btn" onClick={() => navigate(sellOrderPackPath(order.id))} title={t('pkOpenTip')}>
                 <Icon name="package" size={14} /> {t('pkOpen')}
               </button>
             )}
-            {!editable && !locked && (
-              <button className="btn accent" onClick={toEdit}>
-                <Icon name="edit" size={14} /> {t('editOrder')}
+            {/* Close as off-ramp: everywhere except Done (terminal),
+                Closed (locked — Reopen instead) and a reopened sale, which
+                only goes back to Done (the backend 409s it). Manager-only
+                surface is enforced at the page level so no extra role check. */}
+            {!prefill && !locked && !order.doneAt && (
+              <button
+                className="btn"
+                onClick={() => setShowCloseDialog(true)}
+                title={t('soDiscardTooltip')}
+                style={{ color: 'var(--neg, #c0392b)', borderColor: 'var(--border-strong)' }}
+              >
+                {t('sodDiscard')}
               </button>
             )}
           </div>
@@ -1866,12 +1841,12 @@ function SellOrderDetail({ id, mode, onToast }: {
 
                   {!editable && listedViewGroups.map(g => (
                     <div key={g.key} style={{ marginBottom: 14 }}>
-                      <LineGroupHead group={g} by={lineGroup} linkPo />
+                      {lineGroup !== 'none' && <LineGroupHead group={g} by={lineGroup} />}
                       <table className="so-line-table">
                         <thead>
                           <tr>
                             <th>{t('item')}</th>
-                            {lineGroup === 'po' && <th style={{ width: 100 }}>{t('warehouse')}</th>}
+                            {lineGroup !== 'warehouse' && <th style={{ width: 100 }}>{t('warehouse')}</th>}
                             <th className="num" style={{ width: 110 }}>{t('qty')}</th>
                             <th className="num" style={{ width: 140 }}>{t('fieldUnitPrice')}</th>
                             <th className="num" style={{ width: 140 }}>{t('sodLineTotal')}</th>
@@ -1880,8 +1855,8 @@ function SellOrderDetail({ id, mode, onToast }: {
                         <tbody>
                           {g.items.map(({ line: l, idx }) => (
                             <tr key={l.id}>
-                              <LineItemCell line={l} lineNo={l.no} sub={l.sub} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo />
-                              {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
+                              <LineItemCell line={l} lineNo={l.no} sub={l.sub} showPo={lineGroup !== 'po'} showLineNo={lineGroup === 'po'} />
+                              {lineGroup !== 'warehouse' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
                               <td className="num mono">{l.qty}</td>
                               <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
                               <td className="num mono" style={{ fontWeight: 500 }}>
@@ -1901,12 +1876,12 @@ function SellOrderDetail({ id, mode, onToast }: {
 
                   {editable && listedEditGroups.map(g => (
                     <div key={g.key} style={{ marginBottom: 14 }}>
-                      <LineGroupHead group={g} by={lineGroup} linkPo={false} />
+                      {lineGroup !== 'none' && <LineGroupHead group={g} by={lineGroup} />}
                       <table className="so-line-table">
                         <thead>
                           <tr>
                             <th>{t('item')}</th>
-                            {lineGroup === 'po' && <th style={{ width: 100 }}>{t('warehouse')}</th>}
+                            {lineGroup !== 'warehouse' && <th style={{ width: 100 }}>{t('warehouse')}</th>}
                             <th className="num" style={{ width: 130 }}>{t('qty')}</th>
                             <th className="num" style={{ width: 130 }}>{t('fieldUnitPrice')}</th>
                             <th className="num" style={{ width: 120 }}>{t('sodLineTotal')}</th>
@@ -1925,8 +1900,8 @@ function SellOrderDetail({ id, mode, onToast }: {
                             const cap = l.inventoryId === null ? MAX_LINE_QTY : Math.max(0, Math.min(MAX_LINE_QTY, l.maxQty));
                             return (
                             <tr key={l._cid} className={l.inventoryId !== null && justAdded.has(l.inventoryId) ? 'so-line-added' : undefined}>
-                              <LineItemCell line={l} lineNo={l.saved ? l.no : null} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
-                              {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
+                              <LineItemCell line={l} lineNo={l.saved ? l.no : null} sub={l.subLabel} showPo={lineGroup !== 'po'} showLineNo={lineGroup === 'po'} />
+                              {lineGroup !== 'warehouse' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
                               <td className="num">
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                                   <input
@@ -2080,10 +2055,9 @@ function SellOrderDetail({ id, mode, onToast }: {
                         step={0.01}
                         autoFocus
                         value={adjustInput}
-                        disabled={adjustSaving}
                         onChange={e => setAdjustInput(e.target.value)}
                         onKeyDown={e => {
-                          if (e.key === 'Enter') void applyAdjust();
+                          if (e.key === 'Enter') applyAdjust();
                           if (e.key === 'Escape') { e.stopPropagation(); setAdjusting(false); }
                         }}
                         style={{ width: 110, textAlign: 'right' }}
@@ -2091,15 +2065,13 @@ function SellOrderDetail({ id, mode, onToast }: {
                       <button
                         className="btn icon sm"
                         title={t('soAdjustApply')}
-                        disabled={adjustSaving}
-                        onClick={() => void applyAdjust()}
+                        onClick={applyAdjust}
                       >
                         <Icon name="check" size={12} />
                       </button>
                       <button
                         className="btn icon sm"
                         title={t('cancel')}
-                        disabled={adjustSaving}
                         onClick={() => setAdjusting(false)}
                       >
                         <Icon name="x" size={12} />
@@ -2131,15 +2103,16 @@ function SellOrderDetail({ id, mode, onToast }: {
                   orderId={order.id}
                   signoff={order.signoff}
                   open={!CLOSED_DONE_STATUSES.has(order.status)}
-                  editing={editable}
+                  editing={editable && !!dirty}
                   voidsOnSave={editable && voidsSignoff}
                   onChanged={() => { setRefreshKey(k => k + 1); setHistoryKey(k => k + 1); }}
                 />
               )}
 
               {/* Tracking & evidence — read-only view of the per-status notes and
-                  attachments. Edit mode reaches these via the stepper dialog; view
-                  mode has no stepper, so this is the only place to open the files. */}
+                  attachments. The editor reaches these via the stepper dialog; a
+                  locked order has no stepper, so this is the only place to open
+                  the files. */}
               {!editable && evidenceEntries(statusMeta).length > 0 && (
                 <div className="card so-page-card">
                   <div className="so-section-head"><Icon name="paperclip" size={14} /> {t('soEvidenceSection')}</div>
@@ -2165,10 +2138,10 @@ function SellOrderDetail({ id, mode, onToast }: {
                 </div>
               )}
 
-              {/* Payment receiver — live picker in view mode, Done and Closed
-                  included: who took the money is often only known after the
-                  deal is closed. Edit mode has the select up in the Customer
-                  block, saved with the rest of the form. */}
+              {/* Payment receiver — live picker on a Done or Closed order: who
+                  took the money is often only known after the deal is closed.
+                  The editor has the select up in the Customer block, saved with
+                  the rest of the form. */}
               {!editable && (
                 <div className="card so-page-card">
                   <div className="so-section-head"><Icon name="user" size={14} /> {t('paymentReceiverLabel')}</div>
@@ -2184,23 +2157,19 @@ function SellOrderDetail({ id, mode, onToast }: {
 
               {/* What the bank received for this order, linked on the Payments
                   page. Renders nothing until something is linked. */}
-              {!editable && (
-                <PoPaymentsLedger scope={{ sellOrderId: order.id }} locale={locale} className="card so-page-card" />
-              )}
+              <PoPaymentsLedger scope={{ sellOrderId: order.id }} locale={locale} className="card so-page-card" />
 
               {/* The managers' RMB book for this order: receipts, and its cases'
                   refunds. The payment receiver is who usually holds it. */}
-              {!editable && (
-                <AccountingCard
-                  scope={{ sellOrderId: order.id }}
-                  className="card so-page-card"
-                  managerId={order.paymentReceivedBy?.id ?? null}
-                />
-              )}
+              <AccountingCard
+                scope={{ sellOrderId: order.id }}
+                className="card so-page-card"
+                managerId={order.paymentReceivedBy?.id ?? null}
+              />
 
-              {/* After-sales cases — view mode only; a sold order can take a
-                  new one, an older order shows what it already has. */}
-              {!editable && (asEligible || asCases.length > 0) && (
+              {/* After-sales cases — a sold order can take a new one, an older
+                  order shows what it already has. */}
+              {(asEligible || asCases.length > 0) && (
                 <div className="card so-page-card">
                   <div className="so-section-head"><Icon name="refresh" size={14} /> {t('soAfterSalesCases')}</div>
                   {asCases.length === 0 ? (
@@ -2229,8 +2198,8 @@ function SellOrderDetail({ id, mode, onToast }: {
                 </div>
               )}
 
-              {/* Internal notes — writable in both modes. Editing folds them
-                  into the form's Save; viewing saves them on their own. */}
+              {/* Internal notes — the editor folds them into the form's Save;
+                  a locked order saves them on their own. */}
               <div className="card so-page-card">
                 <div className="so-section-head"><Icon name="edit" size={14} /> {t('ieInternalNotes')}</div>
                 <textarea
@@ -2254,7 +2223,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                 )}
               </div>
               {/* The order's own files — the sale record, the invoice sent.
-                  Live-saved in both modes, so a drop mid-edit survives Cancel. */}
+                  Live-saved, so a drop mid-edit survives Cancel. */}
               {order.attachments && (
                 <SellOrderAttachments
                   key={order.id}
@@ -2276,28 +2245,14 @@ function SellOrderDetail({ id, mode, onToast }: {
             </div>
           </div>
 
-          {editable && (
+          {editable && dirty && (
             <div className="so-footer so-page-foot">
               <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-                {dirty ? t('sodUnsavedChanges') : t('sodNoChanges')}
+                {t('sodUnsavedChanges')}
               </span>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                {/* Close as off-ramp: everywhere except Done (terminal),
-                    Closed (locked, so never editable — Reopen instead) and a
-                    reopened sale, which only goes back to Done (the backend
-                    409s it). Manager-only surface is enforced at the page
-                    level so no extra role check. */}
-                {!prefill && order.status !== 'Done' && !order.doneAt && (
-                  <button
-                    className="btn"
-                    onClick={() => setShowCloseDialog(true)}
-                    title={t('soDiscardTooltip')}
-                    style={{ color: 'var(--neg, #c0392b)', borderColor: 'var(--border-strong)' }}
-                  >
-                    {t('sodDiscard')}
-                  </button>
-                )}
-                <button className="btn" onClick={leaving(toView)} disabled={saving}>
+                {/* Reloads the saved order over the draft. */}
+                <button className="btn" onClick={() => setRefreshKey(k => k + 1)} disabled={saving}>
                   {t('cancel')}
                 </button>
                 <button

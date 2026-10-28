@@ -15,6 +15,32 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.375.0] - 2026-10-28
+
+### Changed
+
+- **A sell order opens ready to edit** (RS-441). Opening an order used to land
+  on a read-only page, and every change started with an Edit order click that
+  swapped to `/edit` and fetched the order again. Now an open order (anything
+  short of Done or Closed) opens straight in the editor: stepper, line inputs,
+  customer and currency. The Save / Cancel bar stays hidden until something
+  changes, Cancel puts the saved order back in place, and Save stays on the
+  order and reloads it. The red Discard (close the order) moved up beside Pack
+  mode, and Pack mode, After-sales, the Payments ledger, RMB Flow and the
+  After-sales cases card now sit on the editor as they did on the read page.
+  PO references stay links while editing, since leaving with unsaved edits
+  already asks first. Sign-off buttons hide only while there are unsaved
+  edits, because a sign-off approves the order as saved. Done and Closed
+  orders read as before, and old `/sell-orders/<id>/edit` links still open the
+  order.
+
+### Added
+
+- **A Combined view of a sell order's products** (RS-441). Beside By warehouse
+  and By PO, Combined lists every line in one table in the order's # order,
+  with a Warehouse column and the "From PO-… #n" reference under each item.
+  The choice is remembered per user like the other two.
+
 ## [1.374.1] - 2026-10-28
 
 ### Fixed

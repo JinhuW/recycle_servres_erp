@@ -1175,7 +1175,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
                     </button>
                   )}
                   {(blockers.short > 0 || blockers.zero > 0) && (
-                    <button type="button" className="btn" onClick={() => navigate(`/sell-orders/${id}/edit`)}>
+                    <button type="button" className="btn" onClick={() => navigate(`/sell-orders/${id}`)}>
                       <Icon name="edit" size={15} /> {t('editOrder')}
                     </button>
                   )}

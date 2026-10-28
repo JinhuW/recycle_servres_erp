@@ -1009,7 +1009,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           locale={locale}
           onClose={() => setAddToOrder(null)}
           onPick={id => {
-            // The order's edit page appends the lots. The selection stays put
+            // The order's page appends the lots. The selection stays put
             // until that save lands, so backing out of the page keeps it.
             stashSellOrderPrefill({
               orderId: id,
@@ -1017,7 +1017,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
               onSaved: () => forgetPersisted('desktop.inventory.selected', 'desktop.inventory.selectedRows'),
             });
             setAddToOrder(null);
-            navigate('/sell-orders/' + id + '/edit');
+            navigate('/sell-orders/' + id);
           }}
         />
       )}
