@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-28
 reporter: jinhu
 branch: JinhuW/langouste
-pr:
+pr: 977
 version: 1.376.0
 related: []
 ---
