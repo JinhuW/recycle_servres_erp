@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.18] - 2026-10-28
+
 ### Added
 
 - **Each fleet task's result counts every funnel stage.** Besides cards,
