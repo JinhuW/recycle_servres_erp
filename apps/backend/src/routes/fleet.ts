@@ -7,7 +7,7 @@ import {
 } from '../fleet/cities';
 import { reconcile } from '../fleet/scheduler';
 import { FLEET_TABLES, fleetTablesPresent, isRefusal, type Refusal } from '../fleet/sql';
-import { cityLog, listTasks, manualTask, readLogQuery, readTaskFilter, startRound } from '../fleet/tasks';
+import { cityLog, funnelDays, listTasks, manualTask, readFunnelDays, readLogQuery, readTaskFilter, startRound } from '../fleet/tasks';
 import worker from '../fleet/claim';
 import { forwardsReads, mirrorAnswers } from '../fleet/mirror';
 import hosts, { releases } from '../fleet/hosts';
@@ -118,6 +118,13 @@ fleet.post('/tasks', managerOnly, async (c) => {
 });
 
 fleet.post('/round/start', managerOnly, async (c) => c.json(await startRound(getDb(c.env))));
+
+// The Analysis tab's search-to-alert counts, from the fleet's finished tasks.
+fleet.get('/stats/funnel', managerOnly, async (c) => {
+  const days = readFunnelDays(c.req.query());
+  if (isRefusal(days)) return refuse(c, days);
+  return c.json({ days: await funnelDays(getDb(c.env), days) });
+});
 
 fleet.get('/city-log', managerOnly, async (c) => {
   const q = readLogQuery(c.req.query());

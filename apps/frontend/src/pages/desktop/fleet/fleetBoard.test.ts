@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { ReviewStatsDay } from '../../../lib/coordinator';
 import type { FleetCity, FleetTask } from '../../../lib/fleet';
 import { CITIES, HITS, HOSTS, NOW, RELEASE, SLOTS, STATS, TASKS, WORKERS } from './fixtures';
 import {
@@ -156,25 +155,30 @@ describe('cities tab', () => {
 
 describe('analysis', () => {
   it('sums the stage counters over the range, today included', () => {
-    expect(funnelCounts(STATS, 1, NOW)).toMatchObject({ search: 255, cards: 13865, ai: 1281, alert: 9 });
+    expect(funnelCounts(STATS, 1, NOW)).toEqual({ search: 255, cards: 13865, open: 2952, ai: 1281, alert: 9 });
     expect(funnelCounts(STATS, 7, NOW)).toMatchObject({ search: 255 + 240 + 250, ai: 1281 + 1300 + 1250, alert: 9 + 8 + 7 });
     expect(funnelCounts(STATS, 14, NOW).search).toBe(255 + 240 + 250 + 230);
     expect(funnelCounts(null, 1, NOW)).toEqual({});
   });
-  it('falls back to reviewed and alerted on rows without the funnel counters', () => {
-    const old: ReviewStatsDay[] = [{ day: '2026-10-24', reviewed: 10, alerted: 1 }, { day: '2026-10-23', reviewed: 20, alerted: 2 }];
-    expect(funnelCounts(old, 7, NOW)).toEqual({ ai: 30, alert: 3 });
+  it('leaves the stages a task result does not count uncounted', () => {
+    const c = funnelCounts([], 1, NOW);
+    expect(c).toEqual({ search: 0, cards: 0, open: 0, ai: 0, alert: 0 });
+    expect(c.title).toBeUndefined();
+    expect(c.coordinator).toBeUndefined();
   });
-  it('reads the pass rate between stages, cards per search as a ratio', () => {
+  it('reads the pass rate from the last counted stage, cards per search as a ratio', () => {
+    // search, cards, title, open, keywords, fresh, ai, coordinator, alert
     const gaps = funnelGaps(funnelCounts(STATS, 1, NOW));
     expect(gaps[0]).toEqual({ kind: 'ratio', value: 54, drop: false });
-    expect(gaps[1]).toEqual({ kind: 'pct', value: 44.6, drop: true });
-    expect(gaps[4]).toEqual({ kind: 'pct', value: 98, drop: false });
+    expect(gaps[1]).toEqual({ kind: 'pct', value: null, drop: false });
+    expect(gaps[2]).toEqual({ kind: 'pct', value: 21.3, drop: true });   // opened of the cards
+    expect(gaps[5]).toEqual({ kind: 'pct', value: 43.4, drop: true });   // reviewed of the opened
+    expect(gaps[7]).toEqual({ kind: 'pct', value: 0.7, drop: true });    // alerted of the reviewed
     expect(funnelGaps({ ai: 3, alert: 1 })[0]).toEqual({ kind: 'ratio', value: null, drop: false });
   });
   it('works out the headline ratios', () => {
     const h = funnelHeadline(funnelCounts(STATS, 1, NOW))!;
-    expect(h).toMatchObject({ cards: 13865, searches: 255, reviews: 1281, alerts: 9, cardsPerAlert: 1541, reviewsPerAlert: 142, titleDrop: 55, modelDrop: 99 });
+    expect(h).toMatchObject({ cards: 13865, searches: 255, reviews: 1281, alerts: 9, cardsPerAlert: 1541, reviewsPerAlert: 142, titleDrop: null, modelDrop: 99 });
     expect(funnelHeadline({ ai: 5, alert: 0 })!.cardsPerAlert).toBeNull();
     expect(funnelHeadline({})).toBeNull();
   });

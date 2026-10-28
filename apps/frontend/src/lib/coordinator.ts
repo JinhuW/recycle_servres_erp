@@ -69,13 +69,6 @@ export const challengeScreenshotUrl = (id: number) =>
 
 export type FleetFilter = 'all' | 'active' | 'attention';
 
-// One row per UTC day the fleet reported anything; gap days are absent. The
-// funnel counters are optional because a console older than them sends only
-// `reviewed` and `alerted`.
-export type FunnelCounter =
-  | 'searches' | 'cards' | 'title_pass' | 'opened' | 'keyword_pass' | 'fresh' | 'coordinated' | 'sent';
-export type ReviewStatsDay = { day: string; reviewed: number; alerted: number } & Partial<Record<FunnelCounter, number>>;
-
 export type FilterPrompt = {
   prompt: string | null;
   rating_prompt: string | null;
@@ -474,10 +467,6 @@ export type LedgerLogin = {
 export const coordinatorApi = {
   listWorkers: () =>
     api.get<{ workers: FleetWorker[] }>('/api/coordinator/workers').then(r => r.workers),
-
-  reviewStats: (days: number) =>
-    api.get<{ days: ReviewStatsDay[] }>(`/api/coordinator/stats/reviews?days=${days}`)
-      .then(r => r.days),
 
   filterPrompt: () => api.get<FilterPrompt>('/api/coordinator/filter-prompt'),
 

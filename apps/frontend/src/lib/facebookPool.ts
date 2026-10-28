@@ -45,6 +45,8 @@ export type PoolAccount = {
   since: number | null;
   addedAt: number;
   cookieAt: number | null;
+  /** Who last saved the cookie: a fleet worker's id or a manager's name. */
+  cookieBy: string | null;
   aliveCheckedAt: number | null;
   batch: string;
 };
@@ -98,6 +100,30 @@ export function cookieHealth(
   const days = a.cookieAt === null ? null : Math.max(0, Math.floor((now - a.cookieAt) / DAY));
   if (days === null) return { kind: 'unknown', days: 0 } as const;
   return { kind: days > 21 ? 'stale' : 'fresh', days } as const;
+}
+/**
+ * What a stored session holds. A worker uploads the browser's whole storage
+ * state (`{cookies, origins}`), which also restores the site storage Facebook
+ * keeps its device in; a pasted cookie is cookies alone.
+ */
+export function sessionContents(cookie: string): { cookies: number; origins: number } | null {
+  const text = cookie.trim();
+  if (!text) return null;
+  if (text.startsWith('[') || text.startsWith('{')) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    if (Array.isArray(parsed)) return { cookies: parsed.length, origins: 0 };
+    const state = parsed as { cookies?: unknown; origins?: unknown } | null;
+    if (state && Array.isArray(state.cookies)) {
+      return { cookies: state.cookies.length, origins: Array.isArray(state.origins) ? state.origins.length : 0 };
+    }
+    return state && typeof state === 'object' ? { cookies: Object.keys(state).length, origins: 0 } : null;
+  }
+  return { cookies: text.split(';').filter((part) => part.indexOf('=') > 0).length, origins: 0 };
 }
 export async function poolTotp(secret: string, now = Date.now()): Promise<string | null> {
   const bytes = base32Bytes(secret);

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-// The Proxies card and the Add / Remove dialogs render to markup with the
+// The proxy form and the Add / Remove dialogs render to markup with the
 // fetchers swapped out and the modal shell reduced to its children (it reads
 // `document`). With no language provider `t` answers its key.
 vi.mock('../../../lib/fleet', async () => {
@@ -14,22 +14,10 @@ vi.mock('../../../components/Modal', () => ({ Modal: ({ children }: { children: 
 vi.mock('../../../lib/errorToast', () => ({ handleFetchError: vi.fn(), showSuccessToast: vi.fn(), showWarnToast: vi.fn() }));
 
 const { PROXIES, SLOTS } = await import('./fixtures');
-const { AddToFleetDialog, ProxiesCard, ProxyDialog, RemoveFromFleetDialog } = await import('./FleetProxies');
+const { AddToFleetDialog, ProxyDialog, RemoveFromFleetDialog } = await import('./FleetProxies');
 const noop = () => undefined;
 
-describe('Proxies card', () => {
-  it('lists each proxy by host:port with its load and the accounts on it, never a login', () => {
-    const html = renderToString(<ProxiesCard proxies={PROXIES} limit={2} onChanged={noop} />);
-    expect(html).toContain('Decodo NY 1');
-    expect(html).toContain('isp.example.net:10001');
-    expect(html).toContain('America/Chicago');
-    expect(html).toContain('fleetProxyUses');
-    expect(html).toContain('#31 (fleetProxyLeasedTag)');
-    expect(html).toContain('#44 (fleetProxyParkedTag)');
-    expect(html).toContain('fp-warn');                 // proxy 1 is at its limit
-    expect(html).not.toContain('@');
-    expect(renderToString(<ProxiesCard proxies={[]} limit={2} onChanged={noop} />)).toContain('fleetProxyNone');
-  });
+describe('Proxy form', () => {
   it('opens the edit form with the URL field empty and write-only', () => {
     const html = renderToString(<ProxyDialog proxy={PROXIES[0]} onClose={noop} onDone={noop} />);
     expect(html).toContain('type="password"');

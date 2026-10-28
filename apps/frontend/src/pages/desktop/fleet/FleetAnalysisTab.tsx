@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Skeleton, TableSkeleton } from '../../../components/Skeleton';
 import { ApiError } from '../../../lib/api';
-import { coordinatorApi, type AlertHitRow, type FilterPrompt, type FleetDoc, type ReviewStatsDay } from '../../../lib/coordinator';
-import { fleetApi, type FleetCity, type FleetTask } from '../../../lib/fleet';
+import { coordinatorApi, type AlertHitRow, type FilterPrompt, type FleetDoc } from '../../../lib/coordinator';
+import { fleetApi, type FleetCity, type FleetFunnelDay, type FleetTask } from '../../../lib/fleet';
 import { useT } from '../../../lib/i18n';
 import { FlowCard } from '../FleetFlow';
 import { alertsByCity, daySeries, FUNNEL_RANGES, niceTop, type DaySeries, type FunnelRange } from './fleetBoard';
@@ -11,15 +11,14 @@ import { COORDINATOR_POLL_MS, EmptyRow, UnavailableCard, useFleetPoll } from './
 // ─── Analysis ─────────────────────────────────────────────────────────────────
 // Where listings drop out between a search and an alert. The pipeline card
 // (FleetFlow.tsx) with a range, two per-day charts for the last 14 days, and
-// the cities the alerts came from. The counts are the coordinator's, which
-// are not tagged per worker: there is no worker or item filter here.
+// the cities the alerts came from. The counts are the ERP fleet's finished
+// searches; the coordinator still holds the settings, the prompt and the
+// alerts it sent.
 
 const DAYS = 14;
 
-type CoordinatorData = {
-  stats: ReviewStatsDay[] | 'unavailable'; hits: AlertHitRow[]; fleet: FleetDoc | null; prompt: FilterPrompt | 'unavailable';
-};
-type ErpData = { cities: FleetCity[]; done: FleetTask[] };
+type CoordinatorData = { hits: AlertHitRow[]; fleet: FleetDoc | null; prompt: FilterPrompt | 'unavailable' };
+type ErpData = { stats: FleetFunnelDay[] | 'unavailable'; cities: FleetCity[]; done: FleetTask[] };
 
 export function FleetAnalysisTab() {
   const { t } = useT();
@@ -27,29 +26,30 @@ export function FleetAnalysisTab() {
   // The coordinator's counts and the ERP's tasks are read apart, so neither
   // waits on the other; the city table needs both.
   const { data, reload } = useFleetPoll<CoordinatorData>(() => Promise.all([
-    coordinatorApi.reviewStats(DAYS).then(s => s as ReviewStatsDay[] | 'unavailable').catch(err => {
-      // 501 = no control plane here; the tab says so and shows nothing else.
-      if (err instanceof ApiError && (err.status === 501 || err.status === 404)) throw err;
-      return 'unavailable' as const;
-    }),
     coordinatorApi.alertHits(DAYS).catch(() => []),
     coordinatorApi.fleet().catch(() => null),
     coordinatorApi.filterPrompt().then(p => (p.prompt ? p : 'unavailable' as const)).catch(() => 'unavailable' as const),
-  ]).then(([stats, hits, fleet, prompt]) => ({ stats, hits, fleet, prompt })), COORDINATOR_POLL_MS);
+  ]).then(([hits, fleet, prompt]) => ({ hits, fleet, prompt })), COORDINATOR_POLL_MS);
   const { data: erp } = useFleetPoll<ErpData>(() => {
     const since = new Date(Date.now() - DAYS * 86_400_000).toISOString();
     return Promise.all([
+      fleetApi.funnel(DAYS).catch(err => {
+        // 501 = no fleet here; the tab says so and shows nothing else.
+        if (err instanceof ApiError && (err.status === 501 || err.status === 404)) throw err;
+        return 'unavailable' as const;
+      }),
       fleetApi.cities().catch(() => []),
       // The model reviews per city come from the fleet's finished tasks; the
       // list is capped at 1000 rows, which a long window can reach.
       fleetApi.tasks({ state: 'done', since }).catch(() => []),
-    ]).then(([cities, done]) => ({ cities, done }));
+    ]).then(([stats, cities, done]) => ({ stats, cities, done }));
   }, COORDINATOR_POLL_MS);
 
-  if (data === 'unavailable') return <UnavailableCard text={t('fbcNotConfigured')} />;
-  const stats = data === null ? null : data.stats === 'unavailable' ? 'unavailable' : data.stats;
+  if (erp === 'unavailable') return <UnavailableCard text={t('fbcNotConfigured')} />;
+  const erpRows = erp === null ? null : erp;
+  const stats = erpRows === null ? null : erpRows.stats;
   const days = Array.isArray(stats) ? stats : [];
-  const erpRows = erp === null || erp === 'unavailable' ? null : erp;
+  const coordinator = data === null || data === 'unavailable' ? null : data;
 
   return (
     <div className="fp-pool">
@@ -63,11 +63,11 @@ export function FleetAnalysisTab() {
           </div>
         </div>
       </div>
-      <FlowCard fleet={data?.fleet ?? null} stats={stats} prompt={data?.prompt ?? null} onSaved={reload} range={range} />
+      <FlowCard fleet={coordinator?.fleet ?? null} stats={stats} prompt={coordinator?.prompt ?? null} onSaved={reload} range={range} />
       <div className="fleet-charts">
-        <DayChart title={t('fleetChartReviewed')} sub={t('fleetChartReviewedSub')} series={data ? daySeries(days, 'reviewed', DAYS) : null} unavailable={stats === 'unavailable'}
+        <DayChart title={t('fleetChartReviewed')} sub={t('fleetChartReviewedSub')} series={erpRows ? daySeries(days, 'reviewed', DAYS) : null} unavailable={stats === 'unavailable'}
           unit="reviewed" />
-        <DayChart title={t('fleetChartAlerts')} sub={t('fleetChartAlertsSub')} series={data ? daySeries(days, 'alerted', DAYS) : null} unavailable={stats === 'unavailable'}
+        <DayChart title={t('fleetChartAlerts')} sub={t('fleetChartAlertsSub')} series={erpRows ? daySeries(days, 'alerted', DAYS) : null} unavailable={stats === 'unavailable'}
           unit="alerted" />
       </div>
       <section className="card fleet-card" aria-label={t('fleetHitsTitle')}>
@@ -77,8 +77,8 @@ export function FleetAnalysisTab() {
             <span className="card-sub">{t('fleetHitsSub', { days: DAYS })}</span>
           </div>
         </div>
-        {data === null || erpRows === null ? <TableSkeleton rows={5} cols={6} />
-          : <HitsTable rows={alertsByCity(data.hits, erpRows.done, erpRows.cities)} />}
+        {coordinator === null || erpRows === null ? <TableSkeleton rows={5} cols={6} />
+          : <HitsTable rows={alertsByCity(coordinator.hits, erpRows.done, erpRows.cities)} />}
       </section>
       <p className="fp-muted fleet-note">{t('fleetAnalysisNoFilter')}</p>
     </div>

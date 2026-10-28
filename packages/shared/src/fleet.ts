@@ -88,6 +88,16 @@ export type FleetTask = {
   result: FleetTaskResult | null;
 };
 
+/** One UTC day of finished searches, summed from their results. */
+export type FleetFunnelDay = {
+  day: string;
+  searches: number;
+  cards: number;
+  opened: number;
+  reviewed: number;
+  alerted: number;
+};
+
 export type FleetTaskEvent = {
   id: number;
   task_id: number | null;

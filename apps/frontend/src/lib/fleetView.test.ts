@@ -5,8 +5,8 @@ import {
 } from './coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
-  externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic, reloginProgress,
-  matchesTerms, offersRelogin, queryTerms, reviewedToday, searchedToday,
+  externalVncUrl, fleetActivity, fleetStatus, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic, reloginProgress,
+  matchesTerms, offersRelogin, queryTerms, searchedToday,
   sortFleet, splitHighlights, vaultAccountIdFor, whoIs, easternToUtc, utcToEastern,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyPort, sharedExits,
@@ -190,26 +190,6 @@ describe('fleetView', () => {
     });
   });
 
-  it('counts every stage from today’s funnel row', () => {
-    const now = Date.parse('2026-10-04T12:00:00Z');
-    const today = {
-      day: '2026-10-04', searches: 12, cards: 300, title_pass: 60, opened: 25, keyword_pass: 14,
-      fresh: 9, reviewed: 8, alerted: 3, coordinated: 2, sent: 2,
-    };
-    expect(flowCounts([{ ...today, day: '2026-10-03', searches: 99 }, today], now)).toEqual({
-      search: 12, cards: 300, title: 60, open: 25, keywords: 14, fresh: 9, ai: 8, coordinator: 2, alert: 2,
-    });
-    // Reported yesterday, quiet so far today: every stage reads 0.
-    expect(flowCounts([{ ...today, day: '2026-10-03' }], now).search).toBe(0);
-    expect(flowCounts([], now).alert).toBe(0);
-    expect(flowCounts(null, now)).toEqual({});
-  });
-
-  it('falls back to the two old counters against an older console', () => {
-    const now = Date.parse('2026-10-04T12:00:00Z');
-    expect(flowCounts([{ day: '2026-10-04', reviewed: 40, alerted: 3 }], now)).toEqual({ ai: 40, alert: 3 });
-  });
-
   it('watches only what the facade can bridge to', () => {
     expect(canWatch(account({ vnc_live: true }))).toBe(true);
     expect(canWatch(account({ vnc_url: 'http://somewhere:6080' }))).toBe(false);
@@ -221,17 +201,6 @@ describe('fleetView', () => {
       .toBe('wss://inventory.recycleservers.com/api/coordinator/vnc/ne-1/ws');
     expect(vncSocketUrl('a b', { protocol: 'http:', host: 'localhost:5173' }))
       .toBe('ws://localhost:5173/api/coordinator/vnc/a%20b/ws');
-  });
-
-  it('counts today in UTC and the trailing seven days', () => {
-    const now = Date.parse('2026-10-04T03:00:00Z');
-    const days = [
-      { day: '2026-09-27', reviewed: 1000, alerted: 0 },
-      { day: '2026-09-28', reviewed: 10, alerted: 1 },
-      { day: '2026-10-04', reviewed: 36, alerted: 2 },
-    ];
-    expect(reviewedToday(days, now)).toEqual({ today: 36, alertedToday: 2, last7: 46 });
-    expect(reviewedToday([], now)).toEqual({ today: 0, alertedToday: 0, last7: 0 });
   });
 
   it('opens only absolute config VNC links, never a facade-relative path', () => {

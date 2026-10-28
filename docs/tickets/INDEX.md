@@ -5,7 +5,14 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-440](./RS-440-a-lot-picked-from-a-grouped-inventory-row-keeps-its.md) | done | bug | P1 | A lot picked from a grouped inventory row keeps its own spec | — |
+| [RS-447](./RS-447-protect-unsaved-sell-order-edits-on-cancel-and-after.md) | in-progress | bug | P2 | Protect unsaved sell-order edits on Cancel and after Save | 1.377.2 |
+| [RS-446](./RS-446-fleet-analysis-counts-from-the-erp-s-finished-tasks.md) | done | bug | P2 | Fleet Analysis counts from the ERP's finished tasks | 1.377.1 |
+| [RS-445](./RS-445-keep-the-pool-s-session-backup-current-in-every-work.md) | done | story | P2 | Keep the pool's session backup current in every worker state, and show it on the Account Pool page | 1.377.0 (ERP), facebook-tracker 0.14.17 |
+| [RS-444](./RS-444-link-imported-fleet-slots-to-erp-proxies-so-proxy-us.md) | done | bug | P1 | Link imported fleet slots to ERP proxies so proxy use and the limit count them | 1.376.1 |
+| [RS-443](./RS-443-move-proxy-management-from-account-pool-to-the-proxi.md) | done | story | P2 | Move proxy management from Account pool to the Proxies tab | 1.376.0 |
+| [RS-442](./RS-442-pool-table-card-matches-the-right-side-column-height.md) | done | bug | P3 | Pool table card matches the right-side column height | 1.375.1 |
+| [RS-441](./RS-441-open-sell-orders-in-edit-mode-drop-read-mode.md) | done | story | P2 | Open sell orders in edit mode, drop read mode | 1.375.0 |
+| [RS-440](./RS-440-a-lot-picked-from-a-grouped-inventory-row-keeps-its.md) | done | bug | P1 | A lot picked from a grouped inventory row keeps its own spec | 1.374.1 |
 | [RS-439](./RS-439-remove-home-cities-from-the-erp-fleet.md) | done | story | P2 | Remove home cities from the ERP fleet | 1.374.0 |
 | [RS-438](./RS-438-fleet-tabs-state-counts-on-tasks-healthy-proxies-chi.md) | done | bug | P2 | Fleet tabs: state counts on Tasks, healthy proxies chip, real Tasks chip | 1.373.2 |
 | [RS-437](./RS-437-fix-the-dev-to-main-review-findings-before-releasing.md) | done | bug | P2 | Fix the dev-to-main review findings before releasing | 1.373.1 |

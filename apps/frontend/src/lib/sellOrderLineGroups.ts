@@ -1,7 +1,8 @@
 import { canonicalPartNumber } from '@recycle-erp/shared';
 import { lotWarehouse } from './sellOrderPack';
 
-export type SellOrderLineGroupBy = 'warehouse' | 'po';
+// 'none' is the combined view: every line in one group, in # order.
+export type SellOrderLineGroupBy = 'warehouse' | 'po' | 'none';
 
 type GroupableLine = {
   warehouse: string | null;
@@ -39,10 +40,15 @@ export function groupSellOrderLines<T extends GroupableLine>(
   lines.forEach((line, idx) => {
     const poId = line.sourceOrderId ?? null;
     const warehouse = lotWarehouse(line);
-    const key = by === 'po' ? (poId ?? '__none') : (warehouse ?? '__none');
+    const key = by === 'none' ? '__all' : by === 'po' ? (poId ?? '__none') : (warehouse ?? '__none');
     let g = map.get(key);
     if (!g) {
-      g = { key, warehouse, poId: by === 'po' ? poId : null, items: [] };
+      g = {
+        key,
+        warehouse: by === 'none' ? null : warehouse,
+        poId: by === 'po' ? poId : null,
+        items: [],
+      };
       map.set(key, g);
     }
     g.items.push({ line, idx });

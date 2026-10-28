@@ -1360,32 +1360,38 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
 
 ## Sell orders
 
-- **A sell order is a full page** (v1.194.0), `#/sell-orders/:id` and
-  `/:id/edit`, rendered in place of the list as a PO's page is. It was a
-  popup before.
+- **A sell order is a full page** (v1.194.0), `#/sell-orders/:id`, rendered
+  in place of the list as a PO's page is. It was a popup before.
+  - **An open order is the editor** (v1.375.0): anything short of Done or
+    Closed opens with the stepper, line inputs and customer ready to change;
+    there is no read-only page or Edit order button any more. The old
+    `/:id/edit` address opens the same page. Done and Closed orders stay
+    read-only, with Reopen.
   - The line items and editing controls are on the left. The order summary,
     payment receiver, evidence and internal notes are on the right; under
     1100px everything stacks into one column.
-  - The page head carries the downloads, Edit order, Reopen, and Archive /
-    Unarchive.
-  - Editing adds a sticky footer: Discard, Cancel and Save. Save lands on the
-    order's view page with a toast.
+  - The page head carries the downloads, Pack mode, After-sales, Discard
+    (close the order), Reopen, and Archive / Unarchive.
+  - A sticky Cancel / Save footer appears once something is changed
+    (v1.375.0). Cancel confirms before putting the saved order back
+    (v1.377.2); Save stays on the order, reloads it and shows a toast.
+    Controls stay disabled through Save and its reload, so a delayed response
+    cannot erase fresh edits (v1.377.2). Sign / Withdraw sign-off hide while
+    there are unsaved edits, since a sign-off approves the order as saved.
   - A line can grow to what its lot still has free. A line whose lot has
     nothing left to offer reads "No longer available — set it to 0 or remove
     it" (v1.194.1, v1.219.0). That covers a lot that left Reviewing or Done,
     one whose PO was archived, and one that other committed orders hold in
     full. Saving refuses such a line above 0.
-  - View and edit share one history entry, so browser Back returns to where
-    the order was opened from.
   - **Add inventory sits in the products toolbar while editing** (v1.250.0),
     the accent button beside the search box, where it was a small button
     under the last line. Adding clears the search, scrolls to the first line
     added and flashes each new one.
-  - **Internal notes can be written at any time** (v1.249.0), from the
-    order's view page in any status, Done and Closed included: the notes
-    box is live, and Save / Cancel appear once it differs from what is
-    saved; leaving the page with it unsaved asks first (v1.255.1), as the
-    edit form does. Edit mode still folds notes into the form's own Save.
+  - **Internal notes can be written at any time** (v1.249.0), Done and
+    Closed included: on those the notes box saves on its own, with Save /
+    Cancel once it differs from what is saved; leaving the page with it
+    unsaved asks first (v1.255.1). An open order folds notes into the
+    editor's own Save.
   - **The order keeps its own files in an Attachments card** (v1.294.0),
     between Internal notes and History, in view and edit mode alike. A
     manager drops or picks the marketplace sale record, the invoice sent or
@@ -1469,9 +1475,12 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   at 0 alone (v1.220.2): it is not a conflict and is not removed. Removing
   the PO line it names doesn't block either: the sell line becomes a
   hand-typed line and keeps its # (v1.235.0).
-- **Products group By warehouse or By PO** (v1.194.0), in both view and edit.
-  The switch on the Products header is remembered per user (preference
-  `sellOrders.lineGroup`, default by warehouse).
+- **Products group By warehouse or By PO, or show Combined** (v1.194.0;
+  Combined since v1.375.0). The switch on the Products header is remembered
+  per user (preference `sellOrders.lineGroup`: `warehouse`, `po` or `none`,
+  default by warehouse).
+  - Combined is one table in the order's # order, with a Warehouse column and
+    the "From PO-…" reference under each line.
   - By PO orders the groups numerically and puts hand-typed lines last under
     "No PO", matching the "Packing list by PO" download. It shows a Warehouse
     column. Inside a group, either way, the lines keep the order's # order
@@ -1480,8 +1489,8 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     packing lists file it under (v1.221.0; the warehouse the line was saved
     with before, which a transfer left behind) — and shows the "From PO-…"
     reference under each line. By PO's Warehouse column reads the same.
-  - PO references are links in view mode and plain text while editing, since
-    the edit page has no leave guard.
+  - PO references are links, while editing too (v1.375.0): leaving with
+    unsaved edits asks first.
 - **A line carries its number on the source PO** (v1.196.0): the `#` the PO
   page shows for that line.
   - By PO shows it as a grey `PO #3` badge after the item name, in view and
@@ -3348,9 +3357,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   `X-Fleet-Source: live` and prod's own headers.
 - **Add to fleet (v1.364.0, RS-415)** — a manager puts pool accounts into
   ERP-fleet slots from **Monitors ▸ Facebook ▸ Account pool**, no seed script.
-  The **Proxies** card under the pool table lists the exits the ERP keeps
-  (label, host:port, timezone, how many accounts of the limit use each and
-  which) and adds, edits and removes them; the URL with the vendor login is
+  The exits the ERP keeps are added, edited and removed on the **Proxies**
+  tab (until v1.376.0, RS-443, on a Proxies card under the pool table); the URL with the vendor login is
   pasted once, sealed, and never shown again (the edit form's field starts
   empty and leaves the saved URL alone). An available account with a
   password and a 2FA key gets **Add to fleet** in its Runs on cell: pick a
@@ -3384,7 +3392,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   and Slots tabs folded into them, and their paths (`/#/fleet/queue`,
   `/#/fleet/hosts`, `/#/fleet/slots`) redirect. Managers only and desktop
   only; purchasers see Account pool alone, and the phone has no fleet pages.
-  Times read in US Eastern; Analysis daily totals keep the coordinator’s UTC day boundaries. Against a backend without the fleet routes each
+  Times read in US Eastern; Analysis daily totals use UTC day boundaries. Against a backend without the fleet routes each
   tab says so and the rest of the page is unaffected. Every tab re-reads every
   10 s while it is visible.
   Since v1.351.0 (RS-403) the Fleet and Analysis tabs show the ERP's own rows without waiting for the coordinator, whose rows fill in when they land, read every 30 s and never while the last read is still out; the tabs and the tab-bar counts send each URL once per load and read the pool summary, not the secret-bearing snapshot.
@@ -3493,13 +3501,18 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     city's latest slug check.
   - **Analysis** (`/#/fleet/analysis`, v1.344.0): the search-to-alert
     pipeline that used to sit on the Fleet tab, with a range segment (Today,
-    7 days, 14 days) that sums the coordinator's per-day counters for every
-    stage; between stages the pass rate (cards per search as "×N", every
-    other step as a percentage, amber under 50 %) and under the pipeline the
+    7 days, 14 days) that sums the ERP fleet's finished searches per UTC day
+    (`GET /api/fleet/stats/funnel`, since v1.377.1, RS-446; before, the
+    coordinator's counters, which the ERP fleet's workers do not report to,
+    so every stage read 0): searches, result cards, listings opened, model
+    reviews and alerts. The title gate, keyword gate, new-to-us and
+    coordinator stages are not in a task's result and show "—". Between
+    stages the pass rate from the last counted stage (cards per search as
+    "×N", every other step as a percentage, amber under 50 %) and under the pipeline the
     headline ratios: cards per alert, reviews per alert, the title gate's
     drop before a page is opened and the model's drop of what it reads. Then
-    two per-day bar charts for the last 14 days, each on its own axis —
-    reviewed by the model, alerts sent — in one hue with today's bar grey as
+    two per-day bar charts for the last 14 days from the same counts, each
+    on its own axis — reviewed by the model, alerts — in one hue with today's bar grey as
     partial, three gridlines, labels on the first, highest and today's bar, a
     hover title per bar, the 14-day total and the full-day average. Then
     **Where the alerts came from**: per city over 14 days, the alerts, the
@@ -3511,7 +3524,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - **Proxies** (`/#/fleet/proxies`, v1.368.0, RS-424): the health of every
     proxy port the fleet browses through, between Analysis and Account pool,
     with the number down as a warn-coloured chip on the tab bar. Rows are the
-    ERP's proxies (Account pool ▸ Proxies, by label) and every port the homelab
+    ERP's proxies (by label) and every port the homelab
     console holds, dialed or idle (by host:port, marked Homelab; v1.368.1,
     RS-425). A port on both lists is one row, the ERP's. Every five
     minutes one backend instance checks each ERP proxy through the proxy
@@ -3526,12 +3539,20 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     hover) and "was <ip>" when it changed in the last 24 hours, the day as 48
     half-hour ticks in each bucket's worst state with the uptime over its
     checks, when it was last checked, and who uses it (the ERP accounts on it
-    with "parked" and the homelab workers, linked, or "Nobody"). Down rows come first. The
+    with "parked" and the homelab workers, linked, or "Nobody"). An account
+    counts on a row, and against its proxy's limit, through its slot's proxy;
+    the slots seeded at cutover named none, so `fleet-link-proxies.mjs` lists
+    their exits and links them (v1.376.1, RS-444). Down rows come first. The
     toolbar has the legend with counts, a source select and a search over
     label, port, exit IP, city, worker and account. **Check all now** runs a
     round unless one started in the last 15 s; the row button checks one ERP
     proxy (homelab ports are checked together). Checks are kept 14 days. No
     proxy login reaches the browser, the log or the table.
+    Since v1.376.0 (RS-443) the tab is also where the ERP's proxies are
+    managed: **Add proxy** beside Check all, and Edit and Remove on each ERP
+    row, the same forms the Account pool card had (homelab ports stay
+    read-only; a mirror shows neither). An ERP row's Used by leads with how
+    many accounts of the per-proxy limit use it, warn-coloured when full.
   - **Account pool** (`/#/fleet/pool`, v1.344.0): as before, plus a **Runs
     on** column: the ERP worker holding the account's slot with its state
     and epoch, linking to the worker page; else the coordinator's worker as
@@ -3540,7 +3561,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     (RS-412) a quarantined account's cell has **Release** and a parked one's
     **Unpark** (with its confirm), which used to be on the Fleet tab.
     Since v1.364.0 (RS-415) the cell also puts accounts into the ERP fleet
-    and takes them out (below), and a **Proxies** card sits under the table.
+    and takes them out (below). The Proxies card that sat under the table
+    moved to the Proxies tab in v1.376.0 (RS-443).
   - **The worker page** (`/#/fleet/worker/<id>`, v1.337.0) recognises a
     fleet worker: state, last heartbeat, account and epoch, version, the task
     it holds (city, item, since when, lease), and **Watch**, its browser
@@ -3598,8 +3620,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   beside them, and the editor opens from the pencil at the row's end. A cookie may be
   pasted as a header line or as the JSON a cookie extension exports, and a
   2FA key as the base32 key or an `otpauth://` link, on the Pool tab as on
-  the Fleet tab (v1.262.1). The import maps a pasted header row by column
-  name. Since v1.310.1 a second Password column after the e-mail is the
+  the Fleet tab (v1.262.1). Since v1.377.0 the Cookie cell says how long
+  ago the session was saved ("Saved 12 min. ago"), with the exact time and
+  who saved it (the fleet worker that uploaded it, or the manager who pasted
+  it) on hover. The editor adds what the stored session holds: cookies and
+  the site storages a worker's upload carries. The import maps a pasted
+  header row by column name. Since v1.310.1 a second Password column after the e-mail is the
   mailbox's, and any other repeated column refuses the rows that fill it.
   Every row splits on the header's delimiter. Without a header, columns are
   read by position, and a note in the older place right after the cookie
@@ -3628,7 +3654,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   (RS-284). Since v1.306.0 the manager's table shows about ten rows and scrolls
   for the rest with the header pinned, and every column header sorts the rows —
   a first click ascending, a second descending — so the pool can be read by
-  UID, status, holder, cookie freshness or any other field (RS-336).
+  UID, status, holder, cookie freshness or any other field (RS-336). Since
+  v1.375.1 the table card runs as tall as the Recent activity and Pool rules
+  column beside it, showing more rows when that column is taller (RS-442).
 - **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
   Chromium a Facebook worker is driving, through noVNC, view-only until
   "Take control" is ticked (and handed back when the tab is hidden), with

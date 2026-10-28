@@ -18,6 +18,21 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.17] - 2026-10-28
+
+### Fixed
+
+- **A parked or walled worker keeps the pool's session current.** A worker
+  parked for an operator (connect_failed, login_failed, crashed,
+  browser_failed) or stopped behind a wall no longer skipped its half-hourly
+  save. The pool's copy, which is what a replacement container restores,
+  froze at the park: homelab-4's was 17 h behind its browser on
+  2026-10-28. The vendored monitor (`1550b6e`) now saves and uploads every
+  `session_save_s` in both states, first as the worker parks. It never
+  navigates, logs in or changes the reported state. A logged-out browser,
+  or one on a checkpoint URL, still saves nothing, so the pool keeps its last
+  good session (RS-445).
+
 ## [0.14.16] - 2026-10-27
 
 ### Fixed

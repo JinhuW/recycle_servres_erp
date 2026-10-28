@@ -35,7 +35,7 @@ const SCHEMA: Record<string, Validator> = {
   // A camera's device label (e.g. "Jinhu's iPhone Camera"); deviceIds are
   // re-issued per session, labels aren't.
   'scan.cameraLabel':         isShortString,
-  'sellOrders.lineGroup':     isOneOf('warehouse', 'po'),
+  'sellOrders.lineGroup':     isOneOf('warehouse', 'po', 'none'),
   'pack.labelAuto':           isBoolean,
   'review.labelAuto':         isBoolean,
   'pack.labelSize':           isOneOf('50x25mm', '4x6', '4x3', '2.25x1.25'),

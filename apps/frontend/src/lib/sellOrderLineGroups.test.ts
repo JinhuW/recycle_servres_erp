@@ -49,6 +49,15 @@ describe('groupSellOrderLines', () => {
     expect(g[3].items.map(i => i.line.id)).toEqual(['b']);
   });
 
+  it('combines every line into one group in input order', () => {
+    const g = groupSellOrderLines(lines, 'none');
+    expect(g).toHaveLength(1);
+    expect(g[0]).toMatchObject({ key: '__all', warehouse: null, poId: null });
+    expect(g[0].items.map(i => [i.line.id, i.idx])).toEqual([
+      ['a', 0], ['b', 1], ['c', 2], ['d', 3], ['e', 4],
+    ]);
+  });
+
   it('keeps each line\'s flat index', () => {
     const g = groupSellOrderLines(lines, 'po');
     expect(g.flatMap(x => x.items).map(i => [i.line.id, i.idx]).sort()).toEqual([

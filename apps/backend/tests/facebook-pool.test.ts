@@ -6,7 +6,7 @@ import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
 type Account = {
   no: number; uid: string; password: string; totp: string; email: string; emailPassword: string;
   recovery: string; cookie: string; token: string; note: string; status: string; holder: string | null;
-  holderId: string | null; since: number | null; addedAt: number; cookieAt: number | null; batch: string;
+  holderId: string | null; since: number | null; addedAt: number; cookieAt: number | null; cookieBy: string | null; batch: string;
 };
 type Activity = { at: number; who: string; action: string; accountNo?: number; detail?: string; status: string };
 type Snapshot = { accounts: Account[]; activity: Activity[] };
@@ -50,6 +50,7 @@ describe('facebook account pool', () => {
       status: 'available', holder: null, batch: 'By hand' });
     expect(a.cookie).toContain('xs=session-1');
     expect(a.cookieAt).not.toBeNull();
+    expect(a.cookieBy).toBe('Alex Chen');
     expect(r.body.activity[0]).toMatchObject({ who: 'Alex Chen', action: 'added', accountNo: 1, status: 'available' });
 
     const db = getTestDb();
@@ -112,7 +113,7 @@ describe('facebook account pool', () => {
     const token = await manager();
     const first = (await seedPool(token, 1)).accounts[0];
     const db = getTestDb();
-    await db`UPDATE fb_pool_accounts SET cookie_at = NOW() - INTERVAL '10 days' WHERE no = 1`;
+    await db`UPDATE fb_pool_accounts SET cookie_at = NOW() - INTERVAL '10 days', cookie_by = 'homelab-3' WHERE no = 1`;
 
     const r = await api<Snapshot>('PUT', `${BASE}/1`, {
       token, body: { draft: draft(1, { note: 'edited', status: 'taken', holder: 'marcus wright' }) },
@@ -123,6 +124,7 @@ describe('facebook account pool', () => {
     expect(a).toMatchObject({ note: 'edited', status: 'taken', holder: 'marcus wright', holderId: marcus });
     expect(a.since).not.toBeNull();
     expect(first.cookieAt! - a.cookieAt!).toBeGreaterThan(9 * 86_400_000);
+    expect(a.cookieBy).toBe('homelab-3');
 
     // Same holder spelled the same way keeps its clock; a new cookie is fresh today.
     const r2 = await api<Snapshot>('PUT', `${BASE}/1`, {
@@ -132,6 +134,7 @@ describe('facebook account pool', () => {
     expect(b.since).toBe(a.since);
     expect(b.holderId).toBe(marcus);
     expect(Date.now() - b.cookieAt!).toBeLessThan(60_000);
+    expect(b.cookieBy).toBe('Alex Chen');
 
     // A worker id is a holder with no member behind it; dropping the holder status clears both.
     const r3 = await api<Snapshot>('PUT', `${BASE}/1`, { token, body: { draft: draft(1, { status: 'fleet', holder: 'denver-1' }) } });

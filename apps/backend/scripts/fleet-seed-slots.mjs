@@ -14,6 +14,8 @@
 // Re-running is safe: an existing slot keeps its epoch, lease and worker, and
 // only takes a proxy or device the file or the stint provides.
 // --dry-run prints what would change and rolls the transaction back.
+// The slots it writes name no proxy_id; run fleet-link-proxies.mjs after, or
+// the proxy list and its per-proxy limit do not count them.
 // A DATABASE_URL that is not local needs FLEET_SEED_REMOTE=true (seeding prod
 // is this script's job, but never by a shell that forgot where it points).
 

@@ -29,7 +29,7 @@ import { AccountImport } from './accountPool/AccountImport';
 import { CookieLabel, PoolCode, STATUS_KEYS, StatusChip } from './accountPool/shared';
 import { isQuarantined, leaseLive } from './fleet/fleetBoard';
 import { fleetRowAction } from './fleet/proxyRules';
-import { AddToFleetDialog, ProxiesCard, RemoveFromFleetDialog, useFleetProxies } from './fleet/FleetProxies';
+import { AddToFleetDialog, RemoveFromFleetDialog, useFleetProxies } from './fleet/FleetProxies';
 import { ReleaseQuarantineButton, UnparkDialog, useFleetMirror, workerStateLabel } from './fleet/shared';
 import { STATUS_KEY, StatusChip as WorkerStatusChip, statusNote } from './FleetWorkers';
 import '../../styles/facebookPool.css';
@@ -436,7 +436,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
       {manager ? (
         <>
           {rack()}
-          <div className="fp-split">
+          <div className="fp-split fp-pool-split">
             <section className="card fp-accounts" aria-label={t('fpPool')}>
               <div className="fp-toolbar">
                 <label className="toolbar-search">
@@ -583,9 +583,6 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
               </ul>
             </aside>
           </div>
-          {fleetProxies.proxies !== null && (
-            <ProxiesCard proxies={fleetProxies.proxies} limit={fleetProxies.limit} onChanged={fleetProxies.reload} />
-          )}
         </>
       ) : (
         <>

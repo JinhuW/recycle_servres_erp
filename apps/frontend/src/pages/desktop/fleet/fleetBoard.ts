@@ -3,12 +3,12 @@
 // budget ring's tone and the masks the tables show. Kept out of the
 // components so they can be unit-tested without React.
 
-import type { AlertHitRow, ReviewStatsDay } from '../../../lib/coordinator';
+import type { AlertHitRow } from '../../../lib/coordinator';
 import {
-  fleetStateParked, type FleetCity, type FleetCityLogTask as FleetTaskLog, type FleetHost, type FleetRelease, type FleetSlot, type FleetTask,
+  fleetStateParked, type FleetCity, type FleetCityLogTask as FleetTaskLog, type FleetFunnelDay, type FleetHost, type FleetRelease, type FleetSlot, type FleetTask,
   type FleetWorker,
 } from '../../../lib/fleet';
-import { FLOW_COUNTER, FLOW_STAGES, type FlowStage } from '../../../lib/fleetView';
+import { FLOW_STAGES, type FlowStage } from '../../../lib/fleetView';
 
 export type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -425,27 +425,31 @@ export const FUNNEL_RANGES: readonly FunnelRange[] = [1, 7, 14];
 const DAY_MS = 86_400_000;
 const utcDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-/** The stage counts summed over the last `range` UTC days, today included.
- *  A console older than the funnel counters sends only `reviewed` and
- *  `alerted`: the other stages then stay uncounted, as in flowCounts. */
-export function funnelCounts(days: readonly ReviewStatsDay[] | null, range: FunnelRange, now: number = Date.now()): Partial<Record<FlowStage, number>> {
+// The stages a finished task's result counts. The gates between (title,
+// keywords, new to us) and the coordinator's two stages are not in it, so
+// those stay uncounted.
+const ERP_COUNTER: Partial<Record<FlowStage, keyof Omit<FleetFunnelDay, 'day'>>> = {
+  search: 'searches', cards: 'cards', open: 'opened', ai: 'reviewed', alert: 'alerted',
+};
+
+/** The stage counts summed over the last `range` UTC days, today included. */
+export function funnelCounts(days: readonly FleetFunnelDay[] | null, range: FunnelRange, now: number = Date.now()): Partial<Record<FlowStage, number>> {
   if (!days) return {};
   const from = utcDay(now - (range - 1) * DAY_MS);
   const rows = days.filter(d => d.day >= from && d.day <= utcDay(now));
-  const funnel = days.length === 0 || days.some(d => d.searches !== undefined);
-  const sum = (key: keyof ReviewStatsDay) => rows.reduce((n, d) => n + (Number(d[key]) || 0), 0);
-  if (!funnel) return { ai: sum('reviewed'), alert: sum('alerted') };
-  return Object.fromEntries(FLOW_STAGES.map(s => [s, sum(FLOW_COUNTER[s])])) as Record<FlowStage, number>;
+  return Object.fromEntries(Object.entries(ERP_COUNTER).map(([stage, key]) => [stage, rows.reduce((n, d) => n + d[key], 0)]));
 }
 
 export type FunnelGap = { kind: 'ratio' | 'pct'; value: number | null; drop: boolean };
 
-/** What survives from each stage to the next: cards per search as a ratio,
- *  every other step as a percentage; `drop` marks a step under half. */
+/** What survives into each stage from the last counted one before it: cards
+ *  per search as a ratio, every other step as a percentage; `drop` marks a
+ *  step under half. An uncounted stage gets no gap of its own. */
 export function funnelGaps(counts: Partial<Record<FlowStage, number>>): FunnelGap[] {
   const out: FunnelGap[] = [];
+  let last = counts[FLOW_STAGES[0]];
   for (let i = 1; i < FLOW_STAGES.length; i += 1) {
-    const prev = counts[FLOW_STAGES[i - 1]];
+    const prev = last;
     const cur = counts[FLOW_STAGES[i]];
     const known = prev !== undefined && cur !== undefined && prev > 0;
     if (FLOW_STAGES[i] === 'cards') out.push({ kind: 'ratio', value: known ? Math.round(cur / prev) : null, drop: false });
@@ -453,6 +457,7 @@ export function funnelGaps(counts: Partial<Record<FlowStage, number>>): FunnelGa
       const pct = known ? Math.round(cur / prev * 1000) / 10 : null;
       out.push({ kind: 'pct', value: pct, drop: pct !== null && pct < 50 });
     }
+    if (cur !== undefined) last = cur;
   }
   return out;
 }
@@ -484,8 +489,8 @@ export type DayPoint = { day: string; value: number; today: boolean };
 export type DaySeries = { points: DayPoint[]; total: number; fullDayAverage: number; max: number };
 
 /** One value per UTC day for the last `n` days ending today, gaps as zero. */
-export function daySeries(days: readonly ReviewStatsDay[], key: 'reviewed' | 'alerted', n: number = 14, now: number = Date.now()): DaySeries {
-  const byDay = new Map(days.map(d => [d.day, Number(d[key]) || 0]));
+export function daySeries(days: readonly FleetFunnelDay[], key: 'reviewed' | 'alerted', n: number = 14, now: number = Date.now()): DaySeries {
+  const byDay = new Map(days.map(d => [d.day, d[key]]));
   const points: DayPoint[] = [];
   for (let i = n - 1; i >= 0; i -= 1) {
     const day = utcDay(now - i * DAY_MS);

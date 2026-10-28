@@ -15,6 +15,114 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.377.2] - 2026-10-28
+
+### Fixed
+
+- Sell-order Cancel asks before discarding edits. The editor stays disabled
+  through Save and the following reload, preventing a slow response from
+  silently erasing new quantities, prices or notes.
+
+## [1.377.1] - 2026-10-28
+
+### Fixed
+
+- **Fleet ▸ Analysis counts the fleet's searches again** (RS-446). Every stage
+  of "From a search to an alert" and both daily charts read 0, even on a day
+  with 540 finished searches, 36,242 result cards and 5,510 model reviews. The
+  tab summed the old coordinator's counters, and the ERP fleet's workers record
+  each search in their task's result instead of reporting to the coordinator.
+  The tab now reads a new `GET /api/fleet/stats/funnel`, which sums finished
+  searches per UTC day from `fleet_tasks.result`: searches, cards, listings
+  opened, model reviews and alerts. The title gate, keyword gate, new-to-us and
+  coordinator stages are not in a task's result and show "—", and each pass
+  rate is measured from the last counted stage. The coordinator still supplies
+  the stage settings, the prompt and the alerts-by-city table. Alerts stay at 0
+  while the fleet runs with `RS_ALERTS` unset, which is deliberate before
+  cutover.
+
+## [1.377.0] - 2026-10-28
+
+### Added
+
+- **The Account Pool shows when each session was saved, and by whom**
+  (RS-445). The Cookie cell read whole days, so a session a worker uploaded
+  minutes ago and one a day old both said "0 d old". It now reads "Saved 12
+  min. ago" (a date once it is over a week old). The tooltip gives the exact
+  time and who saved it: the fleet worker whose upload wrote it, or the
+  manager who pasted it. The editor also says what the stored session holds,
+  for example "3 cookies and 2 site storages". The new
+  `fb_pool_accounts.cookie_by` column records the writer. Worker uploads set
+  it to the worker id, and pool imports and edits that change the cookie set
+  it to the manager's name.
+
+## [1.376.1] - 2026-10-28
+
+### Fixed
+
+- **The fleet's proxy list counts the accounts seeded at cutover** (RS-444).
+  The 20 slots `fleet-seed-slots.mjs` wrote carried a proxy URL but no link
+  to the proxy list, and the list, its "Used by" column and the Add to fleet
+  limit count only linked slots. So the Proxies tab read "Nobody" on homelab
+  ports that running accounts browse through, while Add to fleet offered only
+  the four listed proxies, all full. The new `scripts/fleet-link-proxies.mjs`
+  unseals each unlinked slot's exit, lists it as a proxy when it isn't one
+  (the slot's sealed URL, its device's timezone) and links the slot; homelab
+  ports from the last console round on a host whose login it holds are
+  listed too, which brought in the one unused port. It has `--dry-run`, needs
+  `FLEET_LINK_REMOTE=true` for a remote database, prints no login and is
+  idempotent. No claim reads the link, so no worker restarted.
+
+## [1.376.0] - 2026-10-28
+
+### Changed
+
+- **Proxies are managed on the Proxies tab, not under the Account pool**
+  (RS-443). The pool page carried a Proxies card with its own table of the
+  ERP's proxies, which the Proxies tab already lists with their health. The
+  card is gone; the tab gained **Add proxy** beside Check all, Edit and Remove
+  on each ERP row (the same dialogs, with the URL still write-only), and an
+  "n of 2 accounts" load line in Used by. Homelab ports stay read-only, and
+  Add to fleet on the pool page still picks from the same list.
+
+## [1.375.1] - 2026-10-28
+
+### Fixed
+
+- **The Account Pool table card is as tall as the column beside it**
+  (RS-442). The manager's pool table stopped at a fixed ten-row height while
+  Recent activity and Pool rules ran on below it, leaving an empty band under
+  the table. The card now stretches to that column's height and the table's
+  scroll area fills it, so a taller activity log shows more accounts instead
+  of blank space. Ten rows stay the minimum, and below 1190px, where the
+  column drops under the table, the old ten-row height is kept.
+
+## [1.375.0] - 2026-10-28
+
+### Changed
+
+- **A sell order opens ready to edit** (RS-441). Opening an order used to land
+  on a read-only page, and every change started with an Edit order click that
+  swapped to `/edit` and fetched the order again. Now an open order (anything
+  short of Done or Closed) opens straight in the editor: stepper, line inputs,
+  customer and currency. The Save / Cancel bar stays hidden until something
+  changes, Cancel puts the saved order back in place, and Save stays on the
+  order and reloads it. The red Discard (close the order) moved up beside Pack
+  mode, and Pack mode, After-sales, the Payments ledger, RMB Flow and the
+  After-sales cases card now sit on the editor as they did on the read page.
+  PO references stay links while editing, since leaving with unsaved edits
+  already asks first. Sign-off buttons hide only while there are unsaved
+  edits, because a sign-off approves the order as saved. Done and Closed
+  orders read as before, and old `/sell-orders/<id>/edit` links still open the
+  order.
+
+### Added
+
+- **A Combined view of a sell order's products** (RS-441). Beside By warehouse
+  and By PO, Combined lists every line in one table in the order's # order,
+  with a Warehouse column and the "From PO-… #n" reference under each item.
+  The choice is remembered per user like the other two.
+
 ## [1.374.1] - 2026-10-28
 
 ### Fixed

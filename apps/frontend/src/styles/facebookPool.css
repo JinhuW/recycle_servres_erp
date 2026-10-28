@@ -240,6 +240,21 @@
   max-height: calc(10 * 41px + 34px);
   overflow: auto;
 }
+/* On the pool page the card runs as tall as the aside beside it and the table
+   fills the rest. height: 0 keeps 65 rows from setting that height themselves. */
+.fp-pool-split {
+  align-items: stretch;
+}
+.fp-pool-split .fp-accounts {
+  display: flex;
+  flex-direction: column;
+}
+.fp-pool-split .fp-accounts .fp-table-wrap {
+  flex: 1 1 auto;
+  height: 0;
+  max-height: none;
+  min-height: calc(10 * 41px + 34px);
+}
 .fp-accounts .fp-table thead th {
   position: sticky;
   top: 0;
@@ -1887,6 +1902,11 @@ button.ff-expr-text {
 @media (max-width: 1190px) {
   .fp-split {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .fp-pool-split .fp-accounts .fp-table-wrap {
+    height: auto;
+    max-height: calc(10 * 41px + 34px);
+    min-height: 0;
   }
   .fp-activity {
     display: grid;
