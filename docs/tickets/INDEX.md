@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-446](./RS-446-fleet-analysis-counts-from-the-erp-s-finished-tasks.md) | in-review | bug | P2 | Fleet Analysis counts from the ERP's finished tasks | — |
+| [RS-446](./RS-446-fleet-analysis-counts-from-the-erp-s-finished-tasks.md) | done | bug | P2 | Fleet Analysis counts from the ERP's finished tasks | 1.377.1 |
 | [RS-445](./RS-445-keep-the-pool-s-session-backup-current-in-every-work.md) | done | story | P2 | Keep the pool's session backup current in every worker state, and show it on the Account Pool page | 1.377.0 (ERP), facebook-tracker 0.14.17 |
 | [RS-444](./RS-444-link-imported-fleet-slots-to-erp-proxies-so-proxy-us.md) | done | bug | P1 | Link imported fleet slots to ERP proxies so proxy use and the limit count them | 1.376.1 |
 | [RS-443](./RS-443-move-proxy-management-from-account-pool-to-the-proxi.md) | done | story | P2 | Move proxy management from Account pool to the Proxies tab | 1.376.0 |

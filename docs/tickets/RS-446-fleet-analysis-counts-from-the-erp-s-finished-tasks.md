@@ -2,13 +2,13 @@
 id: RS-446
 title: Fleet Analysis counts from the ERP's finished tasks
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-10-28
 reporter: jinhu
-branch: JinhuW/tubesnout
-pr:
-version:
+branch: JinhuW/rs-446-fleet-analysis-funnel
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/980
+version: 1.377.1
 related: []
 ---
 
