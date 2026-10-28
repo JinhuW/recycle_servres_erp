@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-27
 reporter: jinhu
 branch: JinhuW/barb
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/968
 version: 1.373.1
 related: []
 ---
