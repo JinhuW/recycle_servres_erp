@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-28
 reporter: jinhu
 branch: JinhuW/lanternfish
-pr:
+pr: 979
 version: 1.377.0 (ERP), facebook-tracker 0.14.17
 related: []
 ---
