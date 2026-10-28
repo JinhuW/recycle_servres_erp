@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.17] - 2026-10-28
+
 ### Fixed
 
 - **A parked or walled worker keeps the pool's session current.** A worker
