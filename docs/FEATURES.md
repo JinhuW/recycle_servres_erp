@@ -3635,7 +3635,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   (RS-284). Since v1.306.0 the manager's table shows about ten rows and scrolls
   for the rest with the header pinned, and every column header sorts the rows —
   a first click ascending, a second descending — so the pool can be read by
-  UID, status, holder, cookie freshness or any other field (RS-336).
+  UID, status, holder, cookie freshness or any other field (RS-336). Since
+  v1.375.1 the table card runs as tall as the Recent activity and Pool rules
+  column beside it, showing more rows when that column is taller (RS-442).
 - **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
   Chromium a Facebook worker is driving, through noVNC, view-only until
   "Take control" is ticked (and handed back when the tab is hidden), with

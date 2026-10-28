@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.375.1] - 2026-10-28
+
+### Fixed
+
+- **The Account Pool table card is as tall as the column beside it**
+  (RS-442). The manager's pool table stopped at a fixed ten-row height while
+  Recent activity and Pool rules ran on below it, leaving an empty band under
+  the table. The card now stretches to that column's height and the table's
+  scroll area fills it, so a taller activity log shows more accounts instead
+  of blank space. Ten rows stay the minimum, and below 1190px, where the
+  column drops under the table, the old ten-row height is kept.
+
 ## [1.375.0] - 2026-10-28
 
 ### Changed

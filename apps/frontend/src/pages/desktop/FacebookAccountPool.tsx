@@ -436,7 +436,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
       {manager ? (
         <>
           {rack()}
-          <div className="fp-split">
+          <div className="fp-split fp-pool-split">
             <section className="card fp-accounts" aria-label={t('fpPool')}>
               <div className="fp-toolbar">
                 <label className="toolbar-search">
