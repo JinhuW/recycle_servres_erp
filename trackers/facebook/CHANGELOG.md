@@ -18,6 +18,20 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.14.18] - 2026-10-28
+
+### Added
+
+- **Each fleet task's result counts every funnel stage.** Besides cards,
+  opened, reviewed and alerted, a finished task now reports `title_pass`,
+  `keyword_pass` and `fresh`, which the worker already counted per city, and
+  two new counts: `passed`, a fresh verdict that clears the score and
+  minimum-units gates, and `withheld`, the part of that a worker with fleet
+  alerts off held back. The ERP's Analysis funnel showed those stages as "not
+  counted yet", and with alerts off it read every withheld listing as one the
+  model rejected. `passed` and `withheld` go only to the ERP, never into the
+  coordinator's review stats. Vendored monitor `ac161ad`.
+
 ## [0.14.17] - 2026-10-28
 
 ### Fixed

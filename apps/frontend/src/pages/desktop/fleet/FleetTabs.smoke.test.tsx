@@ -194,10 +194,17 @@ describe('Analysis tab', () => {
     const html = renderToString(<FlowCard fleet={null} stats={STATS} prompt="unavailable" onSaved={noop} range={7} now={NOW} />);
     expect(html).toContain('fleetFunnelSub_7');
     expect(html).toContain('fleet-gap');
-    expect(html).toContain('fleet-gap-drop');          // the title gate drops over half
     expect(html).toContain('×5');                      // cards per search
     expect(html).toContain('fleetFunnelHeadline');
     expect(html).toContain('fleetFlowUnitRange_ai');
+  });
+  it('shows what passed the model and what was held back', () => {
+    const html = renderToString(<FlowCard fleet={null} stats={STATS} prompt="unavailable" onSaved={noop} range={1} now={NOW} />);
+    expect(html).toContain('fleet-gap-drop');          // the title gate drops over half
+    expect(html).toContain('fbcFlow_passed');
+    expect(html).toContain('fleetFlowWithheld');
+    expect(html).toContain('fleetFunnelWithheld');
+    expect(html).not.toContain('fbcFlowNotCounted');
   });
   it('draws a per-day chart with three gridlines, a grey today and the sums', () => {
     const html = renderToString(<DayChart title="t" sub="s" series={daySeries(STATS, 'alerted', 14, NOW)} unit="alerted" locale="en-US" />);
