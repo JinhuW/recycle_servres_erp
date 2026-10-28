@@ -3942,7 +3942,7 @@ const zh: Record<string, string> = {
   fleetProxyUptime: "{n} 次检查中 {pct}% 成功",
   fleetProxyBucket: "{time}：{state}",
   fleetProxyBucketNone: "{time}：无检查",
-  fleetProxiesNone: "还没有代理。请在 账号池 ▸ 代理 中添加。",
+  fleetProxiesNone: "还没有代理。请用“添加代理”添加一个。",
   fleetProxiesNoMatch: "没有匹配的代理。",
   fleetProxyNobody: "无人使用",
   fleetProxyParked: "已停放",

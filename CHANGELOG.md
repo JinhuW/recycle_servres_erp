@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.376.0] - 2026-10-28
+
+### Changed
+
+- **Proxies are managed on the Proxies tab, not under the Account pool**
+  (RS-443). The pool page carried a Proxies card with its own table of the
+  ERP's proxies, which the Proxies tab already lists with their health. The
+  card is gone; the tab gained **Add proxy** beside Check all, Edit and Remove
+  on each ERP row (the same dialogs, with the URL still write-only), and an
+  "n of 2 accounts" load line in Used by. Homelab ports stay read-only, and
+  Add to fleet on the pool page still picks from the same list.
+
 ## [1.375.1] - 2026-10-28
 
 ### Fixed

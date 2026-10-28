@@ -17,6 +17,7 @@ vi.mock('../../../lib/facebookPool', async () => {
 });
 vi.mock('../../../lib/errorToast', () => ({ handleFetchError: vi.fn(), showSuccessToast: vi.fn(), showWarnToast: vi.fn() }));
 
+const { PROXIES } = await import('./fixtures');
 const { ProxiesHealthTable, proxyMatches } = await import('./FleetProxiesTab');
 
 const NOW = Date.parse('2026-10-27T15:00:00Z');
@@ -65,5 +66,17 @@ describe('Proxies tab', () => {
     expect(proxyMatches(DOWN, 'ashburn')).toBe(false);
     expect(renderToString(<ProxiesHealthTable rows={[]} marks={null} filter={filter} onFilter={noop} busy={null} onCheck={noop} now={NOW} />))
       .toContain('fleetProxiesNone');
+  });
+
+  it("edits the ERP's own rows, with each one's load, and leaves the homelab's ports alone", () => {
+    const editing = { proxies: PROXIES, limit: 2, onEdit: noop, onRemove: noop };
+    const html = renderToString(<ProxiesHealthTable rows={[UP, DOWN]} marks={null} filter={filter} onFilter={noop} busy={null} onCheck={noop} editing={editing} now={NOW} />);
+    expect(html.match(/fleetProxyEditTitle/g)).toHaveLength(2);   // aria-label and title, one row
+    expect(html.match(/aria-label="fleetProxyRemove"/g)).toHaveLength(1);
+    expect(html).toContain('fleetProxyUses');
+    expect(html).toContain('fp-warn');                 // proxy 1 is at its limit
+    const readOnly = renderToString(<ProxiesHealthTable rows={[UP]} marks={null} filter={filter} onFilter={noop} busy={null} editing={{ proxies: PROXIES, limit: 2 }} now={NOW} />);
+    expect(readOnly).toContain('fleetProxyUses');
+    expect(readOnly).not.toContain('fleetProxyRemove');
   });
 });
