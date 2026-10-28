@@ -15,6 +15,21 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.377.0] - 2026-10-28
+
+### Added
+
+- **The Account Pool shows when each session was saved, and by whom**
+  (RS-445). The Cookie cell read whole days, so a session a worker uploaded
+  minutes ago and one a day old both said "0 d old". It now reads "Saved 12
+  min. ago" (a date once it is over a week old). The tooltip gives the exact
+  time and who saved it: the fleet worker whose upload wrote it, or the
+  manager who pasted it. The editor also says what the stored session holds,
+  for example "3 cookies and 2 site storages". The new
+  `fb_pool_accounts.cookie_by` column records the writer. Worker uploads set
+  it to the worker id, and pool imports and edits that change the cookie set
+  it to the manager's name.
+
 ## [1.376.1] - 2026-10-28
 
 ### Fixed

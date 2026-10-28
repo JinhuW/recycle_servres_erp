@@ -64,6 +64,7 @@ type Row = {
   held_since: Date | null;
   added_at: Date;
   cookie_at: Date | null;
+  cookie_by: string | null;
   alive_checked_at: Date | null;
   batch: string;
 };
@@ -139,6 +140,7 @@ async function snapshot(sql: SqlLike, key: Buffer, user: User) {
       since: ms(r.held_since),
       addedAt: r.added_at.getTime(),
       cookieAt: ms(r.cookie_at),
+      cookieBy: r.cookie_by,
       aliveCheckedAt: ms(r.alive_checked_at),
       batch: r.batch,
     };
@@ -388,11 +390,11 @@ async function insertAccount(tx: Tx, d: FbPoolDraft, key: Buffer, batch: string,
     INSERT INTO fb_pool_accounts (
       uid, password_enc, totp_enc, email, email_password_enc, recovery_email,
       cookie_enc, cookie_uid, token_enc, note, status, holder_user_id, holder_name, held_since,
-      cookie_at, batch, created_by
+      cookie_at, cookie_by, batch, created_by
     ) VALUES (
       ${d.uid}, ${s.password_enc}, ${s.totp_enc}, ${d.email}, ${s.email_password_enc}, ${d.recovery},
       ${s.cookie_enc}, ${s.cookie_uid}, ${s.token_enc}, ${d.note}, ${d.status}, ${holderId}, ${d.holder},
-      ${d.holder ? tx`NOW()` : null}, ${d.cookie ? tx`NOW()` : null}, ${batch}, ${user.id}
+      ${d.holder ? tx`NOW()` : null}, ${d.cookie ? tx`NOW()` : null}, ${d.cookie ? user.name : null}, ${batch}, ${user.id}
     ) RETURNING no`;
   return row.no;
 }
@@ -449,6 +451,7 @@ pool.put('/:no', async (c) => {
         recovery_email = ${draft.recovery}, cookie_enc = ${s.cookie_enc}, cookie_uid = ${s.cookie_uid},
         token_enc = ${tokenSent ? s.token_enc : cur.token_enc},
         cookie_at = ${cookieUnchanged ? cur.cookie_at : draft.cookie ? tx`NOW()` : null},
+        cookie_by = ${cookieUnchanged ? cur.cookie_by : draft.cookie ? user.name : null},
         note = ${draft.note}, status = ${draft.status},
         holder_user_id = ${holderId}, holder_name = ${draft.holder},
         held_since = ${draft.holder ? (sameHolder && cur.held_since ? cur.held_since : tx`NOW()`) : null},

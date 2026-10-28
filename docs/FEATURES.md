@@ -3613,8 +3613,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   beside them, and the editor opens from the pencil at the row's end. A cookie may be
   pasted as a header line or as the JSON a cookie extension exports, and a
   2FA key as the base32 key or an `otpauth://` link, on the Pool tab as on
-  the Fleet tab (v1.262.1). The import maps a pasted header row by column
-  name. Since v1.310.1 a second Password column after the e-mail is the
+  the Fleet tab (v1.262.1). Since v1.377.0 the Cookie cell says how long
+  ago the session was saved ("Saved 12 min. ago"), with the exact time and
+  who saved it (the fleet worker that uploaded it, or the manager who pasted
+  it) on hover. The editor adds what the stored session holds: cookies and
+  the site storages a worker's upload carries. The import maps a pasted
+  header row by column name. Since v1.310.1 a second Password column after the e-mail is the
   mailbox's, and any other repeated column refuses the rows that fill it.
   Every row splits on the header's delimiter. Without a header, columns are
   read by position, and a note in the older place right after the cookie

@@ -17,6 +17,7 @@ import {
   parsePoolImport,
   poolTotp,
   proxyMarkFor,
+  sessionContents,
   totpKey,
   validatePoolDraft,
   type PoolAccount,
@@ -39,6 +40,7 @@ const fixture = (
     recovery: '',
     cookie: cookieDays === null ? '' : `c_user=${uid}; xs=s${i}`,
     cookieAt: cookieDays === null ? null : now - cookieDays * DAY,
+    cookieBy: null,
     aliveCheckedAt: null,
     token: '',
     note: '',
@@ -223,6 +225,16 @@ describe('pool allocation and editing', () => {
     expect(
       validatePoolDraft({ ...emptyPoolDraft(), uid, password: 'pass', status: 'taken' }, []),
     ).toContain('fpHolderRequired');
+  });
+  it('counts what a stored session holds, in every form a cookie is saved in', () => {
+    const cookies = [{ name: 'c_user', value: uid }, { name: 'xs', value: 'demo' }];
+    const origins = [{ origin: 'https://www.facebook.com', localStorage: [] }];
+    expect(sessionContents(JSON.stringify({ cookies, origins }))).toEqual({ cookies: 2, origins: 1 });
+    expect(sessionContents(JSON.stringify(cookies))).toEqual({ cookies: 2, origins: 0 });
+    expect(sessionContents(JSON.stringify({ c_user: uid, xs: 'demo', datr: 'd' }))).toEqual({ cookies: 3, origins: 0 });
+    expect(sessionContents(`c_user=${uid}; xs=demo`)).toEqual({ cookies: 2, origins: 0 });
+    expect(sessionContents('')).toBeNull();
+    expect(sessionContents('{not json')).toBeNull();
   });
   it('marks cookies stale after 21 full days and validates c_user as a whole value', () => {
     const now = Date.now(),
