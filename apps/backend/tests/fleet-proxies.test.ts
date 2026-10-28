@@ -137,13 +137,13 @@ describe('add to fleet', () => {
     await getTestDb()`INSERT INTO fleet_cities (slug, name, enabled) VALUES ('nyc', 'New York', TRUE), ('philly', 'Philadelphia', TRUE)`;
   });
 
-  it('makes the slot with the proxy, a generated device and home cities, and puts the pool row in the fleet', async () => {
+  it('makes the slot with the proxy and a generated device, and puts the pool row in the fleet', async () => {
     const no = await account(1);
-    const r = await addSlot({ account_no: no, proxy_id: proxyId, home_cities: ['nyc', 'philly', 'nyc'] });
+    const r = await addSlot({ account_no: no, proxy_id: proxyId });
     expect(r.status).toBe(201);
     noSecret(r.body);
     expect(r.body.slot).toMatchObject({
-      account_no: no, has_proxy: true, proxy_id: proxyId, home_cities: ['nyc', 'philly'], parked: false, worker_id: null,
+      account_no: no, has_proxy: true, proxy_id: proxyId, parked: false, worker_id: null,
       pool_status: 'fleet', epoch: 0,
     });
     expect(r.body.slot.device).toEqual(fleetDeviceFor(no, 'America/New_York'));
@@ -209,8 +209,7 @@ describe('add to fleet', () => {
     await expectRefusal({ account_no: 9999, proxy_id: proxyId }, 404, 'not_found');
     const ok = await account(5);
     await expectRefusal({ account_no: ok, proxy_id: 9999 }, 404, 'not_found');
-    await expectRefusal({ account_no: ok, proxy_id: proxyId, home_cities: ['atlantis'] }, 422, 'bad_request');
-    await expectRefusal({ account_no: ok, proxy_id: proxyId, home_cities: 'nyc' }, 422, 'bad_request');
+    await expectRefusal({ account_no: ok, proxy_id: proxyId, home_cities: ['nyc'] }, 422, 'bad_request');
     await expectRefusal({ account_no: 'x', proxy_id: proxyId }, 422, 'bad_request');
     // None of the refusals touched the pool row.
     expect(await pool(ok)).toEqual({ status: 'available', holder_name: null });

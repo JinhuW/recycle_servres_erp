@@ -134,7 +134,6 @@ export type FleetSlotRow = {
   lease_expires_at: Date | null;
   proxy_url: string | null;
   device: unknown;
-  home_cities: string[];
   quarantined_until: Date | null;
   quarantine_reset_at: Date | null;
   handoff_epoch: number | null;

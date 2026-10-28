@@ -193,16 +193,15 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
         WHERE s.account_no = t.account_no AND s.lease_expires_at > ${now} AND s.lease_expires_at <> 'infinity'::timestamptz)`;
 
   // A quarantined account gets one probe per interval so a quarantine can
-  // end: its first home city that is still enabled, else whatever is most
-  // overdue, on the first item. The probe carries its account from the start
-  // (account_no is otherwise set at lease), which is how the pick keeps it for
-  // that slot and how this step knows the slot had one recently. A cancelled
-  // probe never ran, so it does not count as one.
+  // end: whatever city is most overdue, on the first item. The probe carries
+  // its account from the start (account_no is otherwise set at lease), which
+  // is how the pick keeps it for that slot and how this step knows the slot
+  // had one recently. A cancelled probe never ran, so it does not count as one.
   let probes = 0;
   const [item] = await sql<{ name: string }[]>`SELECT name FROM fleet_items WHERE enabled ORDER BY name LIMIT 1`;
   if (item) {
-    const slots = await sql<{ account_no: number; home_cities: string[] }[]>`
-      SELECT s.account_no, s.home_cities FROM fleet_slots s
+    const slots = await sql<{ account_no: number }[]>`
+      SELECT s.account_no FROM fleet_slots s
       WHERE s.quarantined_until > ${now}
         AND s.lease_expires_at > ${now} AND s.lease_expires_at <> 'infinity'::timestamptz
         AND NOT EXISTS (
@@ -212,7 +211,7 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
                  OR COALESCE(t.done_at, t.due_at) > ${now}::timestamptz - make_interval(hours => ${settings.quarantine_probe_hours})))
       ORDER BY s.account_no`;
     for (const s of slots) {
-      const city = await probeCity(sql, s.home_cities);
+      const city = await probeCity(sql);
       if (!city) continue;
       const rows = await sql`
         INSERT INTO fleet_tasks (city, item, kind, due_at, priority, state, reason, account_no)
@@ -227,14 +226,7 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
   return { inserted: inserted.length + checks.length, cancelled: cancelled.count + stranded.count, expired: expired.length, probes, notified };
 }
 
-async function probeCity(sql: Sql, home: string[]): Promise<string | null> {
-  const homes = Array.isArray(home) ? home.filter((h) => typeof h === 'string') : [];
-  if (homes.length) {
-    const [h] = await sql<{ slug: string }[]>`
-      SELECT slug FROM fleet_cities WHERE enabled AND slug = ANY(${homes}::text[])
-      ORDER BY array_position(${homes}::text[], slug) LIMIT 1`;
-    if (h) return h.slug;
-  }
+async function probeCity(sql: Sql): Promise<string | null> {
   const [overdue] = await sql<{ city: string }[]>`
     SELECT t.city FROM fleet_tasks t JOIN fleet_cities c ON c.slug = t.city
     WHERE t.state = 'ready' AND t.kind = 'search' AND c.enabled ORDER BY t.due_at LIMIT 1`;

@@ -133,6 +133,9 @@ describe('Tasks tab', () => {
     expect(html).toContain('6m 52s');                   // nyc's search took 412 s
     expect(html).toContain('fleet-alerted');            // and alerted once
     expect(html).toContain('fleetRange_7d');
+    // Every state button carries its count; All counts every row.
+    expect(html).toContain(`fleetSegAll<span class="fleet-seg-n">${TASKS.length}</span>`);
+    expect(html.match(/fleet-seg-n/g)).toHaveLength(6);
   });
   it('honours a filter and marks the selected city', () => {
     const html = renderToString(
@@ -144,19 +147,18 @@ describe('Tasks tab', () => {
     expect(html).toContain('fleet-row-sel');
   });
   it('asks for a row before it shows a city log', () => {
-    expect(renderToString(<CityLogAside city={null} items={items} slots={SLOTS} onSearchNow={noop} now={NOW} />)).toContain('fleetCityLogPick');
-    const html = renderToString(<CityLogAside city={CITIES[0]} items={items} slots={SLOTS} onSearchNow={noop} now={NOW} />);
+    expect(renderToString(<CityLogAside city={null} items={items} onSearchNow={noop} now={NOW} />)).toContain('fleetCityLogPick');
+    const html = renderToString(<CityLogAside city={CITIES[0]} items={items} onSearchNow={noop} now={NOW} />);
     expect(html).toContain('Houston, TX');
-    expect(html).toContain('fleetLogHome');            // homelab-3 calls it home
     expect(html).toContain('fleetLogPerDay');          // twice a day
     expect(CITY_LOG.length).toBeGreaterThan(0);
   });
 });
 
 describe('Cities tab', () => {
-  it('lists every city with its legend bucket, the per-item cells, Home of and the verify row', () => {
+  it('lists every city with its legend bucket, the per-item cells and the verify row', () => {
     const html = renderToString(
-      <CitiesTable cities={CITIES} items={items} done={withCityNames(TASKS, CITIES)} slots={SLOTS} filter={EMPTY_CITY_FILTER} onFilter={noop} onChanged={noop} now={NOW} />,
+      <CitiesTable cities={CITIES} items={items} done={withCityNames(TASKS, CITIES)} filter={EMPTY_CITY_FILTER} onFilter={noop} onChanged={noop} now={NOW} />,
     );
     expect(html).toContain('Houston, TX');
     expect(html).toContain('fleetCityEnabled');
@@ -176,13 +178,13 @@ describe('Cities tab', () => {
   it('names a slug mismatch', () => {
     const santafe = { ...CITIES[4], slug: 'santafe', name: 'Santa Fe, NM', verified_as: 'Santa Fe Springs, California' };
     const html = renderToString(
-      <CitiesTable cities={[santafe]} items={items} done={[]} slots={[]} filter={EMPTY_CITY_FILTER} onFilter={noop} onChanged={noop} now={NOW} />,
+      <CitiesTable cities={[santafe]} items={items} done={[]} filter={EMPTY_CITY_FILTER} onFilter={noop} onChanged={noop} now={NOW} />,
     );
     expect(html).toContain('fleetVerifyMismatch');
     expect(html).toContain('fleetCityEnableAnyway');
   });
   it('has an empty row without cities', () => {
-    expect(renderToString(<CitiesTable cities={[]} items={items} done={[]} slots={[]} filter={EMPTY_CITY_FILTER} onFilter={noop} onChanged={noop} now={NOW} />))
+    expect(renderToString(<CitiesTable cities={[]} items={items} done={[]} filter={EMPTY_CITY_FILTER} onFilter={noop} onChanged={noop} now={NOW} />))
       .toContain('fleetCitiesNone');
   });
 });
@@ -207,10 +209,9 @@ describe('Analysis tab', () => {
     expect(html).toContain('<title>');
   });
   it('lists the cities the alerts came from', () => {
-    const html = renderToString(<HitsTable rows={alertsByCity(HITS, TASKS, CITIES, SLOTS)} />);
+    const html = renderToString(<HitsTable rows={alertsByCity(HITS, TASKS, CITIES)} />);
     expect(html).toContain('Houston, TX');
     expect(html).toContain('fleetColAlertRate');
-    expect(html).toContain('fleetHitsHome');
     expect(renderToString(<HitsTable rows={[]} />)).toContain('fleetHitsNone');
   });
 });
@@ -232,12 +233,8 @@ describe('Worker page', () => {
     expect(html).toContain('ff-live');                       // Live
     expect(html).toContain('Decodo NY 1');                   // the listed proxy, by label
     expect(html).toContain('isp.example.net:10001');
-    expect(html).toContain('Philadelphia, PA');               // home city chip
-    expect(html).toContain('fleetCitiesNoteHome');            // says which chips are home
-    const queueOnly = renderToString(<ErpWorkerView detail={{ ...WORKER_DETAIL, cities: WORKER_DETAIL.cities.map(c => ({ ...c, home: false })) }}
-      stints={[]} onReload={noop} now={NOW} />);
-    expect(queueOnly).toContain('fleetCitiesNote');
-    expect(queueOnly).not.toContain('fleetCitiesNoteHome');
+    expect(html).toContain('Philadelphia, PA');               // a city chip
+    expect(html).toContain('fleetCitiesNote');
     expect(html).toContain('fleetPacingBudget');
     expect(html).toContain('fleetDetailHost');
     expect(html).toContain('0.14.0');                         // build, behind the 0.14.7 release

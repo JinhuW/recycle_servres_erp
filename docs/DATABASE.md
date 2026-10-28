@@ -2379,7 +2379,7 @@ The fleet's view of one pool account: which worker runs it, on which host, under
 | `lease_expires_at` | `timestamptz` |  |  | Renewed by heartbeats; NULL or past means the slot is free to claim. |
 | `proxy_url` | `text` |  |  | The account's sticky proxy, scheme://user:pass@host:port, sealed under FB_POOL_KEY (lib/sealed.ts); NULL = the host's own IP. |
 | `device` | `jsonb` |  |  | The browser profile the account always presents: user agent, viewport, timezone, locale, datr hints. |
-| `home_cities` | `jsonb` | ✓ | `'[]'` | City slugs this account searches first. |
+| `home_cities` | `jsonb` | ✓ | `'[]'` | Unused since v1.374.0 (RS-439): nothing reads or writes it; a later migration drops it. |
 | `quarantined_until` | `timestamptz` |  |  | Set by the 0-card rule; while in the future the slot gets only probe tasks. |
 | `claim_id` | `text` | | | Idempotency key for the current process boot; unique within the host when non-null. |
 | `handoff_epoch` | `integer` | | | Epoch confirmed stopped by the host; the replacement claims with it while `reserved_until` lasts. |
@@ -2482,7 +2482,7 @@ the slot epoch and releases its current task atomically. Worker mutations lock
 pool account, then slot, then city/task; rollout operations acquire the release
 row before those locks. Claims serialize by host/worker and lock pool before
 slot. Probes have a separate unique open index on account_no; the city's open
-task index excludes probes, so two accounts may probe the same home city.
+task index excludes probes, so two accounts may probe the same city.
 
 <a id="erp-fleet-task-events"></a>
 

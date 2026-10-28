@@ -3254,8 +3254,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
       expired session), **Expired** (the worker went silent), or **No word
       since** a time.
   - **A row's steps.** A row opens to its steps, each timed to the second:
-    - handed out by the queue, and why: a home city, a city it searched
-      lately, or another city;
+    - handed out by the queue, and why: a city it searched lately or another
+      city (a coordinator worker's home city too; ERP workers have none since
+      v1.374.0, RS-439);
     - started, and how many searches were planned;
     - each search's phrase and what it found;
     - each alert, with the listing's title linking to Facebook, its price and
@@ -3353,8 +3354,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   empty and leaves the saved URL alone). An available account with a
   password and a 2FA key gets **Add to fleet** in its Runs on cell: pick a
   proxy (a full one is greyed; two accounts per proxy by default, the
-  `Accounts per proxy` rule in Cities ▸ Rules) and optional home cities from
-  the enabled cities, and the ERP makes the slot with a desktop browser made
+  `Accounts per proxy` rule in Cities ▸ Rules; there are no home cities to
+  pick since v1.374.0, RS-439), and the ERP makes the slot with a desktop browser made
   for the account (Chromium's own user agent, a common screen and scale
   picked from the account number, the proxy's timezone). The account turns
   *fleet* under "ERP fleet" and reads "waiting for a worker" until one claims
@@ -3376,8 +3377,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   v1.344.0 the page has five tabs in the owner's approved design — **Fleet**,
   **Tasks**, **Cities**, **Analysis**, **Account pool** (since v1.368.0 a
   sixth, **Proxies**, before Account pool) — with count chips on
-  the tab bar (workers running, tasks due now in the warn colour, cities, pool
-  size) and the title "Facebook fleet" on every one; the earlier Queue, Hosts
+  the tab bar (workers running; tasks running or due now, every kind, in the
+  warn colour while any is due; cities; healthy proxies; pool size — since
+  v1.373.2) and the title "Facebook fleet" on every one; the earlier Queue, Hosts
   and Slots tabs folded into them, and their paths (`/#/fleet/queue`,
   `/#/fleet/hosts`, `/#/fleet/slots`) redirect. Managers only and desktop
   only; purchasers see Account pool alone, and the phone has no fleet pages.
@@ -3407,7 +3409,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     heartbeat. Each row: worker and VNC port, host, account number and
     masked uid, the state chip with a one-line note (heartbeat age, "keeps
     its task" for a degraded worker, the account's quarantine end), **Now**
-    (the city and item being searched with the time on it and "home city";
+    (the city and item being searched with the time on it, "home city" on a
+    coordinator worker's;
     "Waiting for a task"; or, for a worker being replaced, "Stopping after
     this task, then back on <version>") with **Park** for a running worker,
     **Today** (minutes of searching against the budget, as a ring), the lease
@@ -3446,7 +3449,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     due in the next 12. Only searches count; a slug check or a probe is not a
     city-item. **The table** lists the range (last 24 h, last 7 days, today
     UTC) plus everything waiting, narrowed by a state segment (All, Running,
-    Due, Done, Cancelled, Expired), an item select and one search box over
+    Due, Done, Cancelled, Expired, each with its count under the other
+    filters since v1.373.2), an item select and one search box over
     city, worker and account; a row gives the city, item, state (Running,
     Due, Later, Done, Cancelled, Expired, plus "front of queue" on a manual
     task), the due time with what happened to it, the worker and account,
@@ -3454,8 +3458,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     exists. Running rows come first, then due, then finished, then waiting
     for later; the foot counts the rows and the last 24 hours' finished
     searches. Clicking a row opens **the city log** in the aside: the city's
-    name, slug, home worker (or "whoever is free"), region and searches a
-    day, then per item the open task and the last two finished ones, each
+    name, slug, region and searches a day (no home worker since v1.374.0,
+    RS-439), then per item the open task and the last two finished ones, each
     with its events timed in Eastern, refreshed every 10 s; **Search now** and
     **Edit** (the Cities tab) sit on it. **Search a city now** is a dialog in
     the action row (a city, one item or both, with when it was last searched
@@ -3474,8 +3478,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     (linked to Marketplace) and a non-default radius, region, the status
     chip, searches a day (Default or a fixed count), per item a cell with the
     last search (time, cards, alerts) and the open task as a chip — the
-    worker searching it, "due, waiting N min", or "next <time>" — the worker
-    that calls it home with its account, and the row actions: **Search
+    worker searching it, "due, waiting N min", or "next <time>" — and the
+    row actions (the Home of column went in v1.374.0, RS-439): **Search
     now**, **Remove**. A disabled city offers **Enable**, a removed one
     **Restore**; a city removed before its slug was verified asks whether to
     **Enable anyway** instead. **Rules**, beside **Add city**, edits the
@@ -3501,7 +3505,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     model reviews from the fleet's finished tasks on it (the task list is
     capped at 1000 rows), the alert rate when the finished tasks account for
     the same alert total and the task list is not capped, the last alert's
-    day and who searches it (its home worker, or "whoever is free"). The coordinator's
+    day (the Searched by column went in v1.374.0, RS-439). The coordinator's
     counts are not tagged per worker, so there is no worker or item filter.
   - **Proxies** (`/#/fleet/proxies`, v1.368.0, RS-424): the health of every
     proxy port the fleet browses through, between Analysis and Account pool,
@@ -3551,11 +3555,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     open checkpoints), rows for the pool account, its stored secret kinds,
     the session expiry the worker reports, the slot's device, the pool
     cookie's age as Session backup, the listed proxy (label, host:port,
-    timezone), the slot (epoch and lease, parked, reserved, quarantine), home
-    and recently searched cities (since v1.371.3, RS-434, with a note that
-    the grey ones are what the queue handed it in the last 7 days, not a list
-    tied to it), today's budget minutes, host and build
-    (amber when behind the latest release). Last listing and Session file
+    timezone), the slot (epoch and lease, parked, reserved, quarantine), the
+    cities it searched lately, latest first (since v1.371.3, RS-434, with a
+    note that they are what the queue handed it in the last 7 days, not a list
+    tied to it; no home cities since v1.374.0, RS-439), today's budget
+    minutes, host and build (amber when behind the latest release). Last listing and Session file
     read "—": the fleet has no source for them. A worker parked on a wall
     or lost session shows it under **Open checkpoints**. Actions: Watch
     browser, Park / Unpark, Remove from fleet (once no worker holds the

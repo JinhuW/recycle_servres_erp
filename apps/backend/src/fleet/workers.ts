@@ -11,7 +11,7 @@ import { WORKER_ID } from '../routes/coordinator';
 import { releaseTasks } from './claim';
 import { loadRelease } from './hosts';
 import { cityLog } from './tasks';
-import { CITY_SLUG, loadSettings } from './cities';
+import { loadSettings } from './cities';
 import { managerOnly, type ManagerEnv } from './auth';
 import { bad, conflict, eventToWire, exists, isRefusal, minutesTodaySql, notFound, taskToWire, type Refusal, type TaskEventRow, type TaskRow } from './sql';
 
@@ -40,7 +40,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 
 type SlotRow = {
   account_no: number; worker_id: string | null; host_id: string | null; last_host_id: string | null; epoch: number;
-  lease_expires_at: Date | null; proxy_url: string | null; proxy_id: number | null; device: unknown; home_cities: unknown;
+  lease_expires_at: Date | null; proxy_url: string | null; proxy_id: number | null; device: unknown;
   quarantined_until: Date | null; note: string; parked: boolean; reserved_until: Date | null;
   uid: string | null; pool_status: string; minutes_today: number;
 };
@@ -64,7 +64,7 @@ type SlotView = FleetSlot & { uid: string | null; pool_status: string; minutes_t
 
 const SLOT_SELECT = (sql: SqlLike) => sql`
   SELECT s.account_no, s.worker_id, s.host_id, s.last_host_id, s.epoch, s.lease_expires_at, s.proxy_url, s.proxy_id, s.device,
-         s.home_cities, s.quarantined_until, s.note,
+         s.quarantined_until, s.note,
          (s.lease_expires_at IS NOT DISTINCT FROM 'infinity'::timestamptz) AS parked,
          CASE WHEN s.reserved_until > NOW() THEN s.reserved_until END AS reserved_until,
          a.uid, a.status AS pool_status,
@@ -105,7 +105,6 @@ function slotView(r: SlotRow, budget: number, workersById: Map<string, WorkerVie
     has_proxy: r.proxy_url !== null,
     proxy_id: r.proxy_id,
     device: device as FleetSlot['device'],
-    home_cities: Array.isArray(r.home_cities) ? (r.home_cities as string[]) : [],
     quarantined_until: iso(r.quarantined_until),
     note: r.note,
     parked: r.parked,
@@ -141,21 +140,16 @@ slots.get('/', async (c) => {
 
 /** The pool holder a slot made here carries until a worker claims it. */
 export const FLEET_HOLDER = 'ERP fleet';
-const MAX_HOME_CITIES = 10;
 
-type SlotWrite = { account_no: number; proxy_id: number; home_cities: string[] };
+type SlotWrite = { account_no: number; proxy_id: number };
 
 function readSlotWrite(input: unknown): SlotWrite | Refusal {
   if (!isRecord(input)) return bad('expected an object');
-  for (const k of Object.keys(input)) if (!['account_no', 'proxy_id', 'home_cities'].includes(k)) return bad(`not a slot field: ${k}`);
-  const { account_no, proxy_id, home_cities = [] } = input;
+  for (const k of Object.keys(input)) if (!['account_no', 'proxy_id'].includes(k)) return bad(`not a slot field: ${k}`);
+  const { account_no, proxy_id } = input;
   if (!Number.isInteger(account_no) || (account_no as number) < 1) return bad('account_no');
   if (!Number.isInteger(proxy_id) || (proxy_id as number) < 1) return bad('proxy_id');
-  if (!Array.isArray(home_cities) || home_cities.length > MAX_HOME_CITIES
-      || !home_cities.every((h) => typeof h === 'string' && CITY_SLUG.test(h))) {
-    return bad(`home_cities must list at most ${MAX_HOME_CITIES} city slugs`);
-  }
-  return { account_no: account_no as number, proxy_id: proxy_id as number, home_cities: [...new Set(home_cities as string[])] };
+  return { account_no: account_no as number, proxy_id: proxy_id as number };
 }
 
 // Lock order: the pool account, then the proxy (which serialises two adds on
@@ -163,7 +157,7 @@ function readSlotWrite(input: unknown): SlotWrite | Refusal {
 slots.post('/', async (c) => {
   const input = readSlotWrite(await c.req.json().catch(() => null));
   if (isRefusal(input)) return c.json(input.body, input.status);
-  const { account_no: no, proxy_id: proxyId, home_cities: home } = input;
+  const { account_no: no, proxy_id: proxyId } = input;
   const user = c.var.user;
   const sql = getDb(c.env);
   const out = await sql.begin(async (tx): Promise<Refusal | { exit: string; device: string }> => {
@@ -188,11 +182,6 @@ slots.post('/', async (c) => {
       SELECT COUNT(*)::int AS n FROM fleet_slots
       WHERE proxy_id = ${proxyId} AND lease_expires_at IS DISTINCT FROM 'infinity'::timestamptz`;
     if (n >= limit) return conflict('proxy_full', `${proxy.host}:${proxy.port} carries ${n} of ${limit} accounts`);
-    if (home.length) {
-      const known = new Set((await tx<{ slug: string }[]>`SELECT slug FROM fleet_cities WHERE slug = ANY(${home}::text[])`).map((r) => r.slug));
-      const unknown = home.filter((h) => !known.has(h));
-      if (unknown.length) return bad(`home_cities: unknown ${unknown.join(', ')}`);
-    }
     const device = fleetDeviceFor(no, proxy.timezone);
     await tx`
       UPDATE fb_pool_accounts SET status = 'fleet', holder_user_id = NULL, holder_name = ${FLEET_HOLDER},
@@ -200,12 +189,12 @@ slots.post('/', async (c) => {
       WHERE no = ${no}`;
     await writeEvent(tx, user, 'assigned', 'fleet', no, FLEET_HOLDER);
     await tx`
-      INSERT INTO fleet_slots (account_no, proxy_url, proxy_id, device, home_cities)
-      VALUES (${no}, ${proxy.url_enc}, ${proxyId}, ${tx.json(device)}, ${tx.json(home)})`;
+      INSERT INTO fleet_slots (account_no, proxy_url, proxy_id, device)
+      VALUES (${no}, ${proxy.url_enc}, ${proxyId}, ${tx.json(device)})`;
     return { exit: `${proxy.host}:${proxy.port}`, device: `${device.screen![0]}x${device.screen![1]}@${device.device_scale_factor}` };
   });
   if (isRefusal(out)) return c.json(out.body, out.status);
-  wlog.info('fleet slot added', { accountNo: no, proxyId, exit: out.exit, device: out.device, homeCities: home.length, by: user.email });
+  wlog.info('fleet slot added', { accountNo: no, proxyId, exit: out.exit, device: out.device, by: user.email });
   return c.json({ slot: await loadSlotView(sql, no) }, 201);
 });
 
@@ -381,7 +370,6 @@ workers.get('/:id', async (c) => {
     WHERE worker_id = ${id} AND at >= ${since}
       AND (kind = 'stopped' OR (kind = 'done' AND detail->>'stopped' = 'true'))`;
 
-  const home = slot?.home_cities ?? [];
   const cityRows = await sql<{ slug: string; name: string | null; radius_km: number | null; last_done_at: Date | null; alerts: number }[]>`
     WITH mine AS (
       SELECT city, MAX(done_at) FILTER (WHERE state = 'done') AS last_done_at,
@@ -389,15 +377,11 @@ workers.get('/:id', async (c) => {
       FROM fleet_tasks
       WHERE worker_id = ${id} AND kind = 'search' AND GREATEST(leased_at, done_at) >= ${since}
       GROUP BY city
-    ), wanted AS (
-      SELECT unnest(${home}::text[]) AS city UNION SELECT city FROM mine
     )
-    SELECT w.city AS slug, c.name, c.radius_km, m.last_done_at, COALESCE(m.alerts, 0)::int AS alerts
-    FROM wanted w LEFT JOIN fleet_cities c ON c.slug = w.city LEFT JOIN mine m ON m.city = w.city`;
-  const cities = cityRows
-    .map((r) => ({ slug: r.slug, name: r.name, radius_km: r.radius_km, home: home.includes(r.slug), last_done_at: iso(r.last_done_at), alerts: r.alerts }))
-    .sort((a, b) => Number(b.home) - Number(a.home)
-      || (a.home ? home.indexOf(a.slug) - home.indexOf(b.slug) : (b.last_done_at ?? '').localeCompare(a.last_done_at ?? '')));
+    SELECT m.city AS slug, c.name, c.radius_km, m.last_done_at, m.alerts
+    FROM mine m LEFT JOIN fleet_cities c ON c.slug = m.city
+    ORDER BY m.last_done_at DESC NULLS LAST, m.city`;
+  const cities = cityRows.map((r) => ({ slug: r.slug, name: r.name, radius_km: r.radius_km, last_done_at: iso(r.last_done_at), alerts: r.alerts }));
 
   const events = await sql<(TaskEventRow & { city: string; city_name: string | null; item: string; task_kind: FleetTask['kind'] })[]>`
     SELECT e.*, t.city, c.name AS city_name, t.item, t.kind AS task_kind

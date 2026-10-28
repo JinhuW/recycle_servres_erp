@@ -91,7 +91,7 @@ export const CITY_LOG: FleetTaskLog[] = [
   {
     ...TASKS[8],
     events: [
-      { id: 1, task_id: 190, worker_id: 'homelab-1', kind: 'handed', detail: { why: 'home' }, at: ago(250) },
+      { id: 1, task_id: 190, worker_id: 'homelab-1', kind: 'handed', detail: { why: 'familiar' }, at: ago(250) },
       { id: 2, task_id: 190, worker_id: 'homelab-1', kind: 'started', detail: null, at: ago(249) },
       { id: 3, task_id: 190, worker_id: 'homelab-1', kind: 'searched', detail: { phrase: 'server ram', cards: 60 }, at: ago(246) },
       { id: 4, task_id: 190, worker_id: 'homelab-1', kind: 'searched', detail: { phrase: 'ddr4 ecc', cards: 55 }, at: ago(243) },
@@ -157,15 +157,15 @@ export const WORKERS: FleetWorker[] = [
 
 const slot = (no: number, over: Partial<FleetSlot> = {}): FleetSlot => ({
   account_no: no, uid: `10000${no}000${no}${no}${no}`, pool_status: 'fleet', worker_id: null, host_id: null, last_host_id: null,
-  epoch: 0, lease_expires_at: null, has_proxy: true, proxy_id: null, device: null, home_cities: [], quarantined_until: null, note: '', parked: false, reserved_until: null,
+  epoch: 0, lease_expires_at: null, has_proxy: true, proxy_id: null, device: null, quarantined_until: null, note: '', parked: false, reserved_until: null,
   minutes_today: 0, budget_minutes: 360, worker: null,
   ...over,
 });
 
 export const SLOTS: FleetSlot[] = [
-  slot(4, { worker_id: 'homelab-1', host_id: 'homelab', last_host_id: 'homelab', epoch: 3, lease_expires_at: ahead(28), home_cities: ['nyc', 'philly'], minutes_today: 212, worker: WORKERS[0] }),
+  slot(4, { worker_id: 'homelab-1', host_id: 'homelab', last_host_id: 'homelab', epoch: 3, lease_expires_at: ahead(28), minutes_today: 212, worker: WORKERS[0] }),
   slot(7, { worker_id: 'homelab-2', host_id: 'homelab', last_host_id: 'homelab', epoch: 5, lease_expires_at: ahead(26), minutes_today: 40, worker: WORKERS[1] }),
-  slot(12, { worker_id: 'homelab-3', host_id: 'homelab', last_host_id: 'homelab', epoch: 7, lease_expires_at: ahead(29), home_cities: ['houston'], minutes_today: 360, worker: WORKERS[2] }),
+  slot(12, { worker_id: 'homelab-3', host_id: 'homelab', last_host_id: 'homelab', epoch: 7, lease_expires_at: ahead(29), minutes_today: 360, worker: WORKERS[2] }),
   slot(19, { worker_id: 'homelab-4', host_id: 'homelab', last_host_id: 'homelab', epoch: 2, lease_expires_at: ahead(25), quarantined_until: ahead(60 * 30), minutes_today: 15, worker: WORKERS[3] }),
   slot(31, { worker_id: 'worker-60-14-1', host_id: 'worker-60-14', last_host_id: 'worker-60-14', epoch: 2, lease_expires_at: ahead(29), minutes_today: 95, worker: WORKERS[4] }),
   slot(33, { last_host_id: 'homelab', epoch: 4, lease_expires_at: ago(60 * 5) }),
@@ -261,7 +261,7 @@ const WORKER_TASKS: FleetTaskLog[] = [
   {
     ...TASKS[7], started_at: ago(3),
     events: [
-      { id: 40, task_id: 208, worker_id: 'worker-60-14-1', kind: 'handed', detail: { why: 'home' }, at: ago(4) },
+      { id: 40, task_id: 208, worker_id: 'worker-60-14-1', kind: 'handed', detail: { why: 'familiar' }, at: ago(4) },
       { id: 41, task_id: 208, worker_id: 'worker-60-14-1', kind: 'started', detail: null, at: ago(3) },
     ],
   },
@@ -282,7 +282,7 @@ const WORKER_TASKS: FleetTaskLog[] = [
       result: { cards: 90, opened: 7, reviewed: 7, alerted: 2, seconds: 520 },
     }),
     events: [
-      { id: 20, task_id: 194, worker_id: 'worker-60-14-1', kind: 'handed', detail: { why: 'home' }, at: ago(70) },
+      { id: 20, task_id: 194, worker_id: 'worker-60-14-1', kind: 'handed', detail: { why: 'familiar' }, at: ago(70) },
       { id: 21, task_id: 194, worker_id: 'worker-60-14-1', kind: 'searched', detail: { phrase: 'server ram', cards: 50, title_pass: 20, opened: 4, reviewed: 4 }, at: ago(66) },
       { id: 22, task_id: 194, worker_id: 'worker-60-14-1', kind: 'searched', detail: { phrase: 'ddr4 ecc', cards: 40, title_pass: 15, opened: 3, reviewed: 3 }, at: ago(63) },
       { id: 23, task_id: 194, worker_id: 'worker-60-14-1', kind: 'finished', detail: { seconds: 520 }, at: ago(60) },
@@ -298,7 +298,7 @@ export const WORKER_DETAIL: FleetWorkerDetail = {
     task: { ...TASKS[7], city_name: 'Philadelphia, PA' },
   },
   slot: {
-    ...SLOTS[4], proxy_id: 3, home_cities: ['philly'],
+    ...SLOTS[4], proxy_id: 3,
     device: { viewport: [1366, 645], screen: [1366, 768], device_scale_factor: 1, timezone: 'America/New_York', locale: 'en-US', native: ['user_agent'] },
   },
   holds_slot: true,
@@ -308,8 +308,8 @@ export const WORKER_DETAIL: FleetWorkerDetail = {
     cookie_at: ago(60 * 5), secrets: ['password', 'totp', 'cookie'],
   },
   cities: [
-    { slug: 'philly', name: 'Philadelphia, PA', radius_km: 500, home: true, last_done_at: ago(60), alerts: 2 },
-    { slug: 'denver', name: 'Denver, CO', radius_km: 500, home: false, last_done_at: ago(30), alerts: 0 },
+    { slug: 'denver', name: 'Denver, CO', radius_km: 500, last_done_at: ago(30), alerts: 0 },
+    { slug: 'philly', name: 'Philadelphia, PA', radius_km: 500, last_done_at: ago(60), alerts: 2 },
   ],
   stats: { days: 7, searches: 2, alerts: 2, errors: 1, last_search_at: ago(30) },
   log: WORKER_TASKS,
