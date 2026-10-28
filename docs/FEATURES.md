@@ -3336,10 +3336,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   Since v1.371.1 (RS-432), a mirror with `FLEET_MIRROR_URL`,
   `FLEET_MIRROR_CLIENT_ID` and `FLEET_MIRROR_CLIENT_SECRET` set answers its
   managers' fleet reads from prod, live. It signs in there as a service client
-  holding `fleet:read`, a scope only Settings → Connectors grants. The banner
-  then says the page is live. Without the variables, the reads come from the
-  copy, whose heartbeats age into Offline between syncs. If prod can't be
-  reached, a read answers 502, never the copy.
+  holding `fleet:read`, a scope only Settings → Connectors grants and only a
+  service client's token may use (since v1.373.1, RS-437, a token a user
+  consented to is refused). The banner says the page is live only when prod
+  actually hands over a token. Without the variables, the reads come from the
+  copy, whose heartbeats age into Offline between syncs. Since v1.373.1 a read
+  prod can't answer (unreachable, a 5xx, or a route prod's older release
+  lacks) falls back to the copy rather than a 502; a live answer carries
+  `X-Fleet-Source: live` and prod's own headers.
 - **Add to fleet (v1.364.0, RS-415)** — a manager puts pool accounts into
   ERP-fleet slots from **Monitors ▸ Facebook ▸ Account pool**, no seed script.
   The **Proxies** card under the pool table lists the exits the ERP keeps
@@ -3412,7 +3416,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     then silent ones, each by worker id. Since v1.373.0 (RS-436) a worker is
     one of two kinds: **Healthy** (running, degraded or being replaced
     included) or **Parked** (it reports Session expired, Checkpoint,
-    Challenge or Dead, which its state chip names, or it went silent). The
+    Challenge or Dead, which its state chip names, or it went silent; since
+    v1.373.1 (RS-437) also when a manager parked its slot). The
     toolbar has the legend with counts (All workers, Healthy, Parked), a
     host select and a search over worker, account, city and host; since v1.371.0 (RS-431) the
     tab opens on Healthy rather than All workers. The foot says "N of M

@@ -9,7 +9,7 @@ import { reconcile } from '../fleet/scheduler';
 import { FLEET_TABLES, fleetTablesPresent, isRefusal, type Refusal } from '../fleet/sql';
 import { cityLog, listTasks, manualTask, readLogQuery, readTaskFilter, startRound } from '../fleet/tasks';
 import worker from '../fleet/claim';
-import { forwardsReads } from '../fleet/mirror';
+import { forwardsReads, mirrorAnswers } from '../fleet/mirror';
 import hosts, { releases } from '../fleet/hosts';
 import proxies from '../fleet/proxies';
 import proxyHealth from '../fleet/proxyHealth';
@@ -35,7 +35,10 @@ const body = (c: Context): Promise<unknown> => c.req.json().catch(() => null);
 fleet.get('/health', managerOnly, async (c) => {
   const tables = await fleetTablesPresent(getDb(c.env));
   const ok = FLEET_TABLES.every((t) => tables.includes(t));
-  return c.json({ ok, tables, mirror: isMirror(c.env), mirror_live: isMirror(c.env) && forwardsReads(c.env) });
+  // Live only when the fleet's ERP hands over a token: a wrong secret or a
+  // revoked client leaves the pages on the copy, and the banner says so.
+  const live = isMirror(c.env) && forwardsReads(c.env) && await mirrorAnswers(c.env);
+  return c.json({ ok, tables, mirror: isMirror(c.env), mirror_live: live });
 });
 
 // ── Catalog: cities, items, settings (fleet/cities.ts) ──────────────────────

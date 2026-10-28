@@ -136,7 +136,9 @@ describe('cities', () => {
   it('rejects an unknown field, an empty patch and a per_day out of range', async () => {
     await addCity({ slug: 'houston', name: 'Houston' });
     expect((await putCity('houston', { radius_km: 5 })).status).toBe(422);
+    // A page cached from before the pin was retired still sends it.
     expect((await putCity('houston', { pinned: true })).status).toBe(422);
+    expect((await putCity('houston', { pinned: true, per_day: 2 })).status).toBe(200);
     expect((await putCity('houston', {})).status).toBe(422);
     expect((await putCity('houston', { per_day: 0 })).status).toBe(422);
     expect((await putCity('nowhere', { per_day: 2 })).status).toBe(404);

@@ -141,7 +141,8 @@ describe('fleet mirror reading prod live', () => {
     const { token } = await loginAs(ALEX);
     const health = await api<{ mirror: boolean; mirror_live: boolean }>('GET', '/api/fleet/health', { token, env: LIVE() });
     expect(health.body).toMatchObject({ mirror: true, mirror_live: true });
-    expect(upstream).toEqual([]);
+    // Health asks prod for a token, never for the fleet.
+    expect(upstream).toEqual(['POST /oauth/token']);
   });
 
   it('checks the caller here before asking prod anything', async () => {
@@ -151,12 +152,49 @@ describe('fleet mirror reading prod live', () => {
     expect(upstream).toEqual([]);
   });
 
-  it('answers 502 when prod cannot be reached, never the stale copy', async () => {
+  it('reads the copy when prod cannot be reached', async () => {
     const { token } = await loginAs(ALEX);
     prodDown = true;
-    const r = await api<{ error: string }>('GET', '/api/fleet/cities', { token, env: LIVE() });
-    expect(r.status).toBe(502);
-    expect(r.body.error).toBe('mirror_unreachable');
+    const r = await api<{ cities: Array<{ slug: string }> }>('GET', '/api/fleet/cities', { token, env: LIVE() });
+    expect(r.status).toBe(200);
+    expect(r.body.cities.map((c) => c.slug)).toEqual(['houston']);
+  });
+
+  it('reads the copy for a route prod does not have yet, but passes prod\'s own 404s on', async () => {
+    const { token } = await loginAs(ALEX);
+    const realApp = app.fetch.bind(app);
+    vi.mocked(globalThis.fetch).mockImplementationOnce(async (input, init) => {
+      // The token mint goes to prod as usual.
+      upstream.push(`${init?.method ?? 'GET'} ${String(input).slice(PROD.length)}`);
+      return realApp(new Request(String(input).replace(PROD, 'http://localhost:8787'), init), testEnv);
+    }).mockImplementationOnce(async () => Response.json({ error: 'Not found' }, { status: 404 }));
+    expect((await api('GET', '/api/fleet/cities', { token, env: LIVE() })).status).toBe(200);
+    const missing = await api<{ error: string }>('GET', '/api/fleet/workers/nobody', { token, env: LIVE() });
+    expect(missing.status).toBe(404);
+    expect(missing.body.error).toBe('not_found');
+    expect(upstream).toContain('GET /api/fleet/workers/nobody');
+  });
+
+  it('mints one token for reads that arrive together', async () => {
+    const { token } = await loginAs(ALEX);
+    await Promise.all(['cities', 'hosts', 'workers', 'slots'].map((p) => api('GET', `/api/fleet/${p}`, { token, env: LIVE() })));
+    expect(upstream.filter((u) => u === 'POST /oauth/token')).toHaveLength(1);
+  });
+
+  it('keeps prod\'s headers and its own 401s, and keeps the token', async () => {
+    const { token } = await loginAs(ALEX);
+    const tasks = await api('GET', '/api/fleet/tasks?limit=1', { token, env: LIVE() });
+    expect(tasks.status).toBe(200);
+    expect(tasks.headers.get('X-Fleet-Source')).toBe('live');
+    // A host route: prod refuses the client's bearer as not a host token.
+    expect((await api('GET', '/api/fleet/hosts/lab/desired', { token, env: LIVE() })).status).toBe(401);
+    expect(upstream.filter((u) => u === 'POST /oauth/token')).toHaveLength(1);
+  });
+
+  it('says the reads are not live when prod refuses the client', async () => {
+    const { token } = await loginAs(ALEX);
+    const health = await api<{ mirror_live: boolean }>('GET', '/api/fleet/health', { token, env: { ...LIVE(), FLEET_MIRROR_CLIENT_SECRET: 'wrong' } });
+    expect(health.body.mirror_live).toBe(false);
   });
 
   it('still refuses writes and reads its copy without the variables', async () => {
@@ -199,5 +237,16 @@ describe('fleet:read on the fleet the mirror reads', () => {
     expect((await api('GET', '/api/fleet/vnc/lab-1/ws', { headers: { ...bearer(read), Upgrade: 'websocket' } })).status).toBe(401);
     const market = await bearerFor(['market:read']);
     expect((await api('GET', '/api/fleet/workers', { headers: bearer(market) })).status).toBe(403);
+  });
+
+  it('refuses a fleet:read token a user consented to', async () => {
+    const db = getTestDb();
+    const [{ id: manager }] = await db<{ id: string }[]>`SELECT id FROM users WHERE email = ${ALEX}`;
+    const client = await createOAuthClient(db, {
+      name: 'connector', redirectUris: ['http://localhost/cb'], grantTypes: ['authorization_code'], scopes: ['fleet:read'], createdBy: manager, public: false,
+    });
+    const env = { OAUTH_ISSUER_URL: 'http://localhost:8787', OAUTH_SIGNING_KEY_CURRENT: process.env.__TEST_OAUTH_KEY__ } as never;
+    const userBound = await signAccessToken(env, { clientId: client.clientId, userId: manager, scopes: ['fleet:read'] });
+    expect((await api('GET', '/api/fleet/workers', { headers: bearer(userBound) })).status).toBe(403);
   });
 });
