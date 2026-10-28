@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Skeleton } from '../../components/Skeleton';
-import { coordinatorApi, type FilterPrompt, type FleetDoc, type ReviewStatsDay } from '../../lib/coordinator';
+import { coordinatorApi, type FilterPrompt, type FleetDoc } from '../../lib/coordinator';
+import type { FleetFunnelDay } from '../../lib/fleet';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch, utcToEastern,
@@ -19,10 +20,11 @@ import { ListingTester, RulesPanel, STAGE_LISTS, probeVerdicts, type ItemRules, 
 // the cheap keyword gates first, the model only on what survives them. Each
 // stage names the code behind it and the settings it reads; a stage with
 // settings has an Edit form (STAGE_FORMS) that the console writes into every
-// worker's config. Counts are the fleet's totals from /v1/stats/reviews over
-// the range the Analysis tab picked (today, 7 or 14 days); between stages the
-// pass rate, and under the pipeline the headline ratios. The phrase and
-// keyword lists are FleetRules.tsx.
+// worker's config. Counts are the ERP fleet's finished searches
+// (/api/fleet/stats/funnel) over the range the Analysis tab picked (today, 7
+// or 14 days); a stage a task's result does not count shows a dash. Between
+// stages the pass rate, and under the pipeline the headline ratios. The
+// phrase and keyword lists are FleetRules.tsx.
 
 type Setting = { label: string; value: string; fixed?: boolean };
 
@@ -98,7 +100,7 @@ const SEARCH_LABEL: Record<SearchField, string> = {
 
 export function FlowCard({ fleet, stats, prompt, onSaved, range = 1, now }: {
   fleet: FleetDoc | null;
-  stats: ReviewStatsDay[] | 'unavailable' | null;
+  stats: FleetFunnelDay[] | 'unavailable' | null;
   prompt: FilterPrompt | 'unavailable' | null;
   onSaved: () => void;
   range?: FunnelRange;

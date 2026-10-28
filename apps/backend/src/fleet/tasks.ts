@@ -1,6 +1,7 @@
 import type { Sql } from 'postgres';
 import {
   FLEET_TASK_STATES,
+  type FleetFunnelDay,
   type FleetTask,
   type FleetTaskLog,
   type FleetTaskState,
@@ -73,6 +74,35 @@ export async function listTasks(sql: SqlLike, f: TaskFilter): Promise<{ tasks: F
     ${queue ? sql`ORDER BY priority DESC, due_at, id` : sql`ORDER BY GREATEST(due_at, leased_at, done_at) DESC, id DESC`}
     LIMIT ${limit + 1}`;
   return { tasks: rows.slice(0, limit).map(taskToWire), truncated: rows.length > limit };
+}
+
+export const MAX_FUNNEL_DAYS = 92;
+
+export function readFunnelDays(q: Record<string, string | undefined>): number | Refusal {
+  if (q.days === undefined) return 14;
+  const days = Number(q.days);
+  if (!Number.isInteger(days) || days < 1 || days > MAX_FUNNEL_DAYS) return bad(`days must be a whole number from 1 to ${MAX_FUNNEL_DAYS}`);
+  return days;
+}
+
+/**
+ * The Analysis funnel: finished searches per UTC day over the last `days`
+ * (today included), with what their results counted. Days with no search are
+ * left out; the page fills them. Retention bounds how far back this reaches.
+ */
+export async function funnelDays(sql: SqlLike, days: number, now: Date = new Date()): Promise<FleetFunnelDay[]> {
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const since = new Date(today - (days - 1) * 86_400_000);
+  return sql<FleetFunnelDay[]>`
+    SELECT to_char(done_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
+           COUNT(*)::int AS searches,
+           COALESCE(SUM(CASE WHEN result->>'cards' ~ '^[0-9]+$' THEN (result->>'cards')::int END), 0)::int AS cards,
+           COALESCE(SUM(CASE WHEN result->>'opened' ~ '^[0-9]+$' THEN (result->>'opened')::int END), 0)::int AS opened,
+           COALESCE(SUM(CASE WHEN result->>'reviewed' ~ '^[0-9]+$' THEN (result->>'reviewed')::int END), 0)::int AS reviewed,
+           COALESCE(SUM(CASE WHEN result->>'alerted' ~ '^[0-9]+$' THEN (result->>'alerted')::int END), 0)::int AS alerted
+    FROM fleet_tasks
+    WHERE state = 'done' AND kind = 'search' AND done_at >= ${since}
+    GROUP BY 1 ORDER BY 1`;
 }
 
 export type LogQuery = { city?: string; worker?: string; hours: number };

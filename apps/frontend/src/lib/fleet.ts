@@ -11,13 +11,13 @@ import type {
   FleetWorkerRelogin,
   FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetProxy, FleetProxyHealthAnswer, FleetProxyPatch, FleetProxyWrite, FleetRelease,
   FleetSettings, FleetSlot as FleetSlotRow, FleetSlotWrite,
-  FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, FleetWorkerDetail, RoundStartAnswer,
+  FleetFunnelDay, FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, FleetWorkerDetail, RoundStartAnswer,
 } from '@recycle-erp/shared';
 import { ApiError } from './api';
 import { sharedApi as api } from './sharedGet';
 
 export type {
-  FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,
+  FleetFunnelDay, FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,
   FleetTaskResult, FleetTaskState, FleetHostContainer, FleetHostReport, DesiredAnswer, RoundStartAnswer,
   FleetProxy, FleetProxyCheck, FleetProxyHealth, FleetProxyHealthAnswer, FleetProxyHealthState, FleetProxySource,
   FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
@@ -135,6 +135,8 @@ export const fleetApi = {
   // Every waiting search falls due now unless its city-item finished lately.
   startRound: () => api.post<RoundStartAnswer>(`${BASE}/round/start`, {}),
   tasks: (q: FleetTaskQuery = {}) => api.get<FleetTask[]>(`${BASE}/tasks${query(q)}`),
+  // Finished searches per UTC day over the last `days`, summed from their results.
+  funnel: (days: number) => api.get<{ days: FleetFunnelDay[] }>(`${BASE}/stats/funnel${query({ days })}`).then(r => r.days),
   // One city's, or one worker's, tasks with their events over the last `hours`.
   cityLog: (q: { city?: string; worker?: string; hours?: number }) =>
     api.get<FleetCityLogTask[]>(`${BASE}/city-log${query({ city: q.city, worker: q.worker, hours: q.hours ?? 24 })}`),

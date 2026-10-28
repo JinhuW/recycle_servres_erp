@@ -5,7 +5,7 @@
 
 import type {
   AlertHitRow, Challenge, CityStep, CityTierSettings, CityVisit, CityVisitOutcome, CityWrite, FleetAccount, FleetCity,
-  FleetDoc, FleetQueue, LedgerLogin, QueueCityState, QueueItemCounts, QueueStarted, ReviewStatsDay, SearchSettingsWrite,
+  FleetDoc, FleetQueue, LedgerLogin, QueueCityState, QueueItemCounts, QueueStarted, SearchSettingsWrite,
   StatusChange,
 } from './coordinator';
 import type { FbWorkerStint } from './facebookPool';
@@ -475,40 +475,6 @@ export function draftChanges(base: SettingsDraft, draft: SettingsDraft): number 
     }
   }
   return n;
-}
-
-// The coordinator column behind each stage. Workers count the first seven,
-// the coordinator the last two (ingest, then Telegram delivery).
-export const FLOW_COUNTER: Record<FlowStage, keyof ReviewStatsDay> = {
-  search: 'searches', cards: 'cards', title: 'title_pass', open: 'opened', keywords: 'keyword_pass',
-  fresh: 'fresh', ai: 'reviewed', coordinator: 'coordinated', alert: 'sent',
-};
-
-// Today's count per stage (UTC, as the coordinator buckets). A console older
-// than the funnel counters sends rows without them: those stages stay
-// uncounted, and the alert stage falls back to the workers' own `alerted`.
-export function flowCounts(days: readonly ReviewStatsDay[] | null, now: number = Date.now()): Partial<Record<FlowStage, number>> {
-  if (!days) return {};
-  const funnel = days.length === 0 || days.some(d => d.searches !== undefined);
-  const today = days.find(d => d.day === new Date(now).toISOString().slice(0, 10));
-  if (!funnel) return { ai: today?.reviewed ?? 0, alert: today?.alerted ?? 0 };
-  return Object.fromEntries(FLOW_STAGES.map(s => [s, today?.[FLOW_COUNTER[s]] ?? 0])) as Record<FlowStage, number>;
-}
-
-// Listings reviewed on the current UTC day (the coordinator buckets in UTC),
-// with today's alerts and the trailing seven days' reviews.
-export function reviewedToday(
-  days: ReadonlyArray<{ day: string; reviewed: number; alerted: number }>,
-  now: number = Date.now(),
-): { today: number; alertedToday: number; last7: number } {
-  const today = new Date(now).toISOString().slice(0, 10);
-  const cutoff = new Date(now - 6 * 86_400_000).toISOString().slice(0, 10);
-  const row = days.find(d => d.day === today);
-  return {
-    today: row?.reviewed ?? 0,
-    alertedToday: row?.alerted ?? 0,
-    last7: days.filter(d => d.day >= cutoff).reduce((n, d) => n + d.reviewed, 0),
-  };
 }
 
 // ── Today ─────────────────────────────────────────────────────────────────────

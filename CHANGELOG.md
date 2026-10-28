@@ -15,6 +15,24 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.377.1] - 2026-10-28
+
+### Fixed
+
+- **Fleet ▸ Analysis counts the fleet's searches again** (RS-446). Every stage
+  of "From a search to an alert" and both daily charts read 0, even on a day
+  with 540 finished searches, 36,242 result cards and 5,510 model reviews. The
+  tab summed the old coordinator's counters, and the ERP fleet's workers record
+  each search in their task's result instead of reporting to the coordinator.
+  The tab now reads a new `GET /api/fleet/stats/funnel`, which sums finished
+  searches per UTC day from `fleet_tasks.result`: searches, cards, listings
+  opened, model reviews and alerts. The title gate, keyword gate, new-to-us and
+  coordinator stages are not in a task's result and show "—", and each pass
+  rate is measured from the last counted stage. The coordinator still supplies
+  the stage settings, the prompt and the alerts-by-city table. Alerts stay at 0
+  while the fleet runs with `RS_ALERTS` unset, which is deliberate before
+  cutover.
+
 ## [1.377.0] - 2026-10-28
 
 ### Added
