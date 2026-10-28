@@ -3252,6 +3252,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     sodGroupLabel: 'Group products',
     sodGroupByWarehouse: 'By warehouse',
     sodGroupByPo: 'By PO',
+    sodGroupCombined: 'Combined',
     sodNoPo: 'No PO',
     backToSellOrders: 'Back to sell orders',
     sodNoWarehouse: 'No warehouse',

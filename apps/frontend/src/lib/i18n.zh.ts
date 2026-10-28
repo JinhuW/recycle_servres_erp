@@ -2363,6 +2363,7 @@ const zh: Record<string, string> = {
   sodGroupLabel: '产品分组',
   sodGroupByWarehouse: '按仓库',
   sodGroupByPo: '按采购单',
+  sodGroupCombined: '合并',
   sodNoPo: '无采购单',
   backToSellOrders: '返回销售订单',
   sodNoWarehouse: '无仓库',

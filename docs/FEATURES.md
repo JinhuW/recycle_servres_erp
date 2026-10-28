@@ -1360,32 +1360,36 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
 
 ## Sell orders
 
-- **A sell order is a full page** (v1.194.0), `#/sell-orders/:id` and
-  `/:id/edit`, rendered in place of the list as a PO's page is. It was a
-  popup before.
+- **A sell order is a full page** (v1.194.0), `#/sell-orders/:id`, rendered
+  in place of the list as a PO's page is. It was a popup before.
+  - **An open order is the editor** (v1.375.0): anything short of Done or
+    Closed opens with the stepper, line inputs and customer ready to change;
+    there is no read-only page or Edit order button any more. The old
+    `/:id/edit` address opens the same page. Done and Closed orders stay
+    read-only, with Reopen.
   - The line items and editing controls are on the left. The order summary,
     payment receiver, evidence and internal notes are on the right; under
     1100px everything stacks into one column.
-  - The page head carries the downloads, Edit order, Reopen, and Archive /
-    Unarchive.
-  - Editing adds a sticky footer: Discard, Cancel and Save. Save lands on the
-    order's view page with a toast.
+  - The page head carries the downloads, Pack mode, After-sales, Discard
+    (close the order), Reopen, and Archive / Unarchive.
+  - A sticky Cancel / Save footer appears once something is changed
+    (v1.375.0). Cancel puts the saved order back; Save stays on the order,
+    reloads it and shows a toast. Sign / Withdraw sign-off hide while there
+    are unsaved edits, since a sign-off approves the order as saved.
   - A line can grow to what its lot still has free. A line whose lot has
     nothing left to offer reads "No longer available — set it to 0 or remove
     it" (v1.194.1, v1.219.0). That covers a lot that left Reviewing or Done,
     one whose PO was archived, and one that other committed orders hold in
     full. Saving refuses such a line above 0.
-  - View and edit share one history entry, so browser Back returns to where
-    the order was opened from.
   - **Add inventory sits in the products toolbar while editing** (v1.250.0),
     the accent button beside the search box, where it was a small button
     under the last line. Adding clears the search, scrolls to the first line
     added and flashes each new one.
-  - **Internal notes can be written at any time** (v1.249.0), from the
-    order's view page in any status, Done and Closed included: the notes
-    box is live, and Save / Cancel appear once it differs from what is
-    saved; leaving the page with it unsaved asks first (v1.255.1), as the
-    edit form does. Edit mode still folds notes into the form's own Save.
+  - **Internal notes can be written at any time** (v1.249.0), Done and
+    Closed included: on those the notes box saves on its own, with Save /
+    Cancel once it differs from what is saved; leaving the page with it
+    unsaved asks first (v1.255.1). An open order folds notes into the
+    editor's own Save.
   - **The order keeps its own files in an Attachments card** (v1.294.0),
     between Internal notes and History, in view and edit mode alike. A
     manager drops or picks the marketplace sale record, the invoice sent or
@@ -1469,9 +1473,12 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   at 0 alone (v1.220.2): it is not a conflict and is not removed. Removing
   the PO line it names doesn't block either: the sell line becomes a
   hand-typed line and keeps its # (v1.235.0).
-- **Products group By warehouse or By PO** (v1.194.0), in both view and edit.
-  The switch on the Products header is remembered per user (preference
-  `sellOrders.lineGroup`, default by warehouse).
+- **Products group By warehouse or By PO, or show Combined** (v1.194.0;
+  Combined since v1.375.0). The switch on the Products header is remembered
+  per user (preference `sellOrders.lineGroup`: `warehouse`, `po` or `none`,
+  default by warehouse).
+  - Combined is one table in the order's # order, with a Warehouse column and
+    the "From PO-…" reference under each line.
   - By PO orders the groups numerically and puts hand-typed lines last under
     "No PO", matching the "Packing list by PO" download. It shows a Warehouse
     column. Inside a group, either way, the lines keep the order's # order
@@ -1480,8 +1487,8 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     packing lists file it under (v1.221.0; the warehouse the line was saved
     with before, which a transfer left behind) — and shows the "From PO-…"
     reference under each line. By PO's Warehouse column reads the same.
-  - PO references are links in view mode and plain text while editing, since
-    the edit page has no leave guard.
+  - PO references are links, while editing too (v1.375.0): leaving with
+    unsaved edits asks first.
 - **A line carries its number on the source PO** (v1.196.0): the `#` the PO
   page shows for that line.
   - By PO shows it as a grey `PO #3` badge after the item name, in view and

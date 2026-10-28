@@ -21,6 +21,7 @@ import {
 import { api } from './api';
 import { createPrefSaver, type PrefSaver } from './prefSaver';
 import { useAuth } from './auth';
+import type { SellOrderLineGroupBy } from './sellOrderLineGroups';
 
 // ── Schema ─────────────────────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ export type PrefMap = {
   'scan.cameraLabel': string;
   // How a sell order's lines are grouped: where they ship from, or which PO
   // they came in on.
-  'sellOrders.lineGroup': 'warehouse' | 'po';
+  'sellOrders.lineGroup': SellOrderLineGroupBy;
   // The bench labels: Pack mode's per product, printed by itself as each is
   // packed, and Review mode's per PO box, printed by itself on approval. The
   // stock (width × height as it feeds) and the language the Bluetooth printer
