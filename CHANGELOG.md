@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.377.4] - 2026-10-28
+
+### Fixed
+
+- **Fleet ▸ Tasks: the table loads more rows as you scroll** (RS-449). The
+  table stopped at 60 rows, so a busy day read "60 of 1241 tasks" and the
+  rest could not be reached. Reaching the end of the table now adds the next
+  60, and keeps adding them until every matching row is shown. The rows are
+  already in the browser, so no request is made. Changing the state, item,
+  search or range goes back to the top and the first 60. The 10-second poll
+  keeps the rows already added.
+
 ## [1.377.3] - 2026-10-28
 
 ### Fixed

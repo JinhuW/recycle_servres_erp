@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { FormSkeleton, TableSkeleton } from '../../../components/Skeleton';
@@ -9,6 +9,7 @@ import {
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
 import { fleetTabPath, hrefFor, onLinkClick } from '../../../lib/route';
+import { useSentinel } from '../../../lib/useSentinel';
 import {
   averageTaskSeconds, BELT_WINDOW_H, beltAxis, beltRow, beltSummary, dueLabel, EMPTY_TASK_FILTER, easternClock, filterTasks,
   lastDoneSearch, logByItem, roundStartPreview, sortTasks, withCityNames, workersBusy,
@@ -241,7 +242,18 @@ export function TaskTable({ tasks, items, filter, onFilter, range, onRange, sele
 }) {
   const { t, locale } = useT();
   const rows = useMemo(() => sortTasks(filterTasks(tasks, filter, now), now), [tasks, filter, now]);
-  const shown = rows.slice(0, TABLE_MAX);
+  // The table grows a page at a time as its end scrolls into view. A new
+  // filter or range starts again from the first page; a poll doesn't.
+  const [limit, setLimit] = useState(TABLE_MAX);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    setLimit(TABLE_MAX);
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [filter, range]);
+  const shown = rows.slice(0, limit);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const more = useCallback(() => setLimit(limit + TABLE_MAX), [limit]);
+  useSentinel(sentinelRef, more, limit < rows.length, { root: scrollRef, rootMargin: '200px 0px' });
   // Each segment's count is the rows it would show under the item and search
   // filters already set.
   const segCounts = useMemo(() => Object.fromEntries(STATE_SEG.map(s => [s, filterTasks(tasks, { ...filter, state: s }, now).length])),
@@ -271,7 +283,7 @@ export function TaskTable({ tasks, items, filter, onFilter, range, onRange, sele
           {RANGES.map(r => <option key={r.key} value={r.key}>{t(`fleetRange_${r.key}`)}</option>)}
         </select>
       </div>
-      <div className="fp-table-wrap fleet-table-cap">
+      <div ref={scrollRef} className="fp-table-wrap fleet-table-cap">
         <table className="fp-table fleet-table fleet-tasks">
           <thead>
             <tr>
@@ -332,6 +344,7 @@ export function TaskTable({ tasks, items, filter, onFilter, range, onRange, sele
             })}
           </tbody>
         </table>
+        <div ref={sentinelRef} className="fleet-sentinel" aria-hidden="true" />
       </div>
       <div className="fp-table-foot fleet-foot">
         <span>{t('fleetTasksFoot', { shown: shown.length, n: rows.length, done: doneDay })}</span>

@@ -3470,7 +3470,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     how long it took (ticking while it runs), cards, alerts and why it
     exists. Running rows come first, then due, then finished, then waiting
     for later; the foot counts the rows and the last 24 hours' finished
-    searches. Clicking a row opens **the city log** in the aside: the city's
+    searches. It shows 60 rows and, since v1.377.4, adds the next 60 each
+    time its end scrolls into view; a new filter or range starts again at the
+    top. Clicking a row opens **the city log** in the aside: the city's
     name, slug, region and searches a day (no home worker since v1.374.0,
     RS-439), then per item the open task and the last two finished ones, each
     with its events timed in Eastern, refreshed every 10 s; **Search now** and

@@ -147,6 +147,7 @@
   max-height: 560px;
   overflow: auto;
 }
+.fleet-sentinel { height: 1px; }
 .fleet-table-cap thead th {
   position: sticky;
   top: 0;
