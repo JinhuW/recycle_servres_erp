@@ -3532,7 +3532,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     hover) and "was <ip>" when it changed in the last 24 hours, the day as 48
     half-hour ticks in each bucket's worst state with the uptime over its
     checks, when it was last checked, and who uses it (the ERP accounts on it
-    with "parked" and the homelab workers, linked, or "Nobody"). Down rows come first. The
+    with "parked" and the homelab workers, linked, or "Nobody"). An account
+    counts on a row, and against its proxy's limit, through its slot's proxy;
+    the slots seeded at cutover named none, so `fleet-link-proxies.mjs` lists
+    their exits and links them (v1.376.1, RS-444). Down rows come first. The
     toolbar has the legend with counts, a source select and a search over
     label, port, exit IP, city, worker and account. **Check all now** runs a
     round unless one started in the last 15 s; the row button checks one ERP
