@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-441](./RS-441-open-sell-orders-in-edit-mode-drop-read-mode.md) | done | story | P2 | Open sell orders in edit mode, drop read mode | — |
+| [RS-442](./RS-442-pool-table-card-matches-the-right-side-column-height.md) | done | bug | P3 | Pool table card matches the right-side column height | 1.375.1 |
+| [RS-441](./RS-441-open-sell-orders-in-edit-mode-drop-read-mode.md) | done | story | P2 | Open sell orders in edit mode, drop read mode | 1.375.0 |
 | [RS-440](./RS-440-a-lot-picked-from-a-grouped-inventory-row-keeps-its.md) | done | bug | P1 | A lot picked from a grouped inventory row keeps its own spec | 1.374.1 |
 | [RS-439](./RS-439-remove-home-cities-from-the-erp-fleet.md) | done | story | P2 | Remove home cities from the ERP fleet | 1.374.0 |
 | [RS-438](./RS-438-fleet-tabs-state-counts-on-tasks-healthy-proxies-chi.md) | done | bug | P2 | Fleet tabs: state counts on Tasks, healthy proxies chip, real Tasks chip | 1.373.2 |
