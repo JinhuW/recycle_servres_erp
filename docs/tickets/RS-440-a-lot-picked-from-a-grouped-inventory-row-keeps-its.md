@@ -7,7 +7,7 @@ priority: P1
 created: 2026-10-27
 reporter: jinhu
 branch: JinhuW/opaleye
-pr:
+pr: 973
 version: 1.374.1
 related: [RS-213]
 ---
