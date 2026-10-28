@@ -15,6 +15,14 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.377.2] - 2026-10-28
+
+### Fixed
+
+- Sell-order Cancel asks before discarding edits. The editor stays disabled
+  through Save and the following reload, preventing a slow response from
+  silently erasing new quantities, prices or notes.
+
 ## [1.377.1] - 2026-10-28
 
 ### Fixed
