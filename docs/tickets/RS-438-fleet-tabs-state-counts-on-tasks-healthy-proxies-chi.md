@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-27
 reporter: jinhu
 branch: JinhuW/geoduck-2
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/970
 version: 1.373.2
 related: []
 ---
