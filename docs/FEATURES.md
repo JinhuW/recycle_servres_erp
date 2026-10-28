@@ -1373,9 +1373,11 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   - The page head carries the downloads, Pack mode, After-sales, Discard
     (close the order), Reopen, and Archive / Unarchive.
   - A sticky Cancel / Save footer appears once something is changed
-    (v1.375.0). Cancel puts the saved order back; Save stays on the order,
-    reloads it and shows a toast. Sign / Withdraw sign-off hide while there
-    are unsaved edits, since a sign-off approves the order as saved.
+    (v1.375.0). Cancel confirms before putting the saved order back
+    (v1.377.2); Save stays on the order, reloads it and shows a toast.
+    Controls stay disabled through Save and its reload, so a delayed response
+    cannot erase fresh edits (v1.377.2). Sign / Withdraw sign-off hide while
+    there are unsaved edits, since a sign-off approves the order as saved.
   - A line can grow to what its lot still has free. A line whose lot has
     nothing left to offer reads "No longer available — set it to 0 or remove
     it" (v1.194.1, v1.219.0). That covers a lot that left Reviewing or Done,

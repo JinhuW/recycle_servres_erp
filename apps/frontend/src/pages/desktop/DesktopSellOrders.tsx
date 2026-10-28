@@ -1064,7 +1064,7 @@ function SellOrderDetail({ id, onToast }: {
       setPrefillAllPresent(false);
     }
     onToast?.(t('invAddToSoSavedToast', { id }), 'success');
-    setRefreshKey(k => k + 1);
+    refreshOrder();
   };
   const [order, setOrder] = useState<SellOrderDetailType | null>(null);
   const [draft, setDraft] = useState<{
@@ -1097,6 +1097,11 @@ function SellOrderDetail({ id, onToast }: {
   // Bumped after a Close/Reopen succeeds so the order effect re-fetches —
   // simpler than pulling a stale callback through the dialog props.
   const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(true);
+  const refreshOrder = () => {
+    setRefreshing(true);
+    setRefreshKey(k => k + 1);
+  };
   // Bumped after every successful mutation so <SellOrderHistory> re-fetches.
   const [historyKey, setHistoryKey] = useState(0);
   // Inline negotiated-total editor. An applied target becomes part of the
@@ -1143,7 +1148,8 @@ function SellOrderDetail({ id, onToast }: {
         });
         setPendingAdjust(null);
       })
-      .catch(handleFetchError);
+      .catch(handleFetchError)
+      .finally(() => { if (alive) setRefreshing(false); });
     return () => { alive = false; };
   }, [id, refreshKey]);
 
@@ -1300,7 +1306,7 @@ function SellOrderDetail({ id, onToast }: {
     setNotesSaving(true);
     try {
       await api.patch(`/api/sell-orders/${order.id}`, { notes: notesDraft });
-      setRefreshKey(k => k + 1);
+      refreshOrder();
       setHistoryKey(k => k + 1);
     } catch (e) {
       handleFetchError(e);
@@ -1314,7 +1320,7 @@ function SellOrderDetail({ id, onToast }: {
     setReceiverSaving(true);
     try {
       await api.patch(`/api/sell-orders/${order.id}`, { paymentReceivedBy: userId || null });
-      setRefreshKey(k => k + 1);
+      refreshOrder();
       setHistoryKey(k => k + 1);
     } catch (e) {
       handleFetchError(e);
@@ -1489,8 +1495,9 @@ function SellOrderDetail({ id, onToast }: {
     ? ((statusMeta as Record<string, StatusMetaEntry> | null)?.Closed?.note ?? null)
     : null;
 
+  // A reload replaces the draft, so edits must wait for its response.
   return (
-    <>
+    <fieldset disabled={saving || refreshing} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <div className="page-head" style={{ alignItems: 'flex-start' }}>
         <div style={{ minWidth: 0 }}>
           <button
@@ -2105,7 +2112,7 @@ function SellOrderDetail({ id, onToast }: {
                   open={!CLOSED_DONE_STATUSES.has(order.status)}
                   editing={editable && !!dirty}
                   voidsOnSave={editable && voidsSignoff}
-                  onChanged={() => { setRefreshKey(k => k + 1); setHistoryKey(k => k + 1); }}
+                  onChanged={() => { refreshOrder(); setHistoryKey(k => k + 1); }}
                 />
               )}
 
@@ -2252,15 +2259,15 @@ function SellOrderDetail({ id, onToast }: {
               </span>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                 {/* Reloads the saved order over the draft. */}
-                <button className="btn" onClick={() => setRefreshKey(k => k + 1)} disabled={saving}>
+                <button className="btn" onClick={leaving(refreshOrder)} disabled={saving || refreshing}>
                   {t('cancel')}
                 </button>
                 <button
                   className="btn accent"
                   onClick={save}
-                  disabled={!dirty || saving || (draftCurrency !== 'USD' && draftRateToUsd == null)}
+                  disabled={!dirty || saving || refreshing || (draftCurrency !== 'USD' && draftRateToUsd == null)}
                 >
-                  <Icon name="check2" size={14} /> {saving ? t('sodSaving') : t('saveChanges')}
+                  <Icon name="check2" size={14} /> {saving || refreshing ? t('sodSaving') : t('saveChanges')}
                 </button>
               </div>
             </div>
@@ -2324,12 +2331,12 @@ function SellOrderDetail({ id, onToast }: {
             // Stay on the order so the user can continue editing it, now Draft
             // or Awaiting payment. refreshKey re-runs the GET so
             // status/locked/header-strip flip.
-            setRefreshKey(k => k + 1);
+            refreshOrder();
             setHistoryKey(k => k + 1);
           }}
         />
       )}
-    </>
+    </fieldset>
   );
 }
 
