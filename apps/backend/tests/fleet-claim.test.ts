@@ -33,7 +33,7 @@ async function seedBase(): Promise<void> {
 }
 
 type SlotOpts = {
-  uid?: string; home?: string[]; lastHost?: string | null; proxy?: string | null; cookie?: string;
+  uid?: string; lastHost?: string | null; proxy?: string | null; cookie?: string;
   quarantinedUntil?: string | null; status?: string;
 };
 
@@ -50,9 +50,8 @@ async function seedSlot(n: number, o: SlotOpts = {}): Promise<number> {
     RETURNING no`;
   const proxy = o.proxy === undefined ? `http://proxy-user:proxy-pass@exit-${n}.example:10000` : o.proxy;
   await db`
-    INSERT INTO fleet_slots (account_no, last_host_id, proxy_url, home_cities, quarantined_until)
-    VALUES (${a.no}, ${o.lastHost ?? null}, ${proxy ? seal(proxy, k) : null}, ${db.json(o.home ?? [])},
-            ${o.quarantinedUntil ?? null})`;
+    INSERT INTO fleet_slots (account_no, last_host_id, proxy_url, quarantined_until)
+    VALUES (${a.no}, ${o.lastHost ?? null}, ${proxy ? seal(proxy, k) : null}, ${o.quarantinedUntil ?? null})`;
   return a.no;
 }
 
@@ -105,7 +104,7 @@ describe('POST /api/fleet/worker/claim', () => {
   beforeEach(async () => { await resetDb(); await seedBase(); });
 
   it('hands the slot with its secrets unsealed, opens the stint and mints a token for epoch 1', async () => {
-    const no = await seedSlot(1, { home: ['nyc'], lastHost: 'lab' });
+    const no = await seedSlot(1, { lastHost: 'lab' });
     const r = await claim('lab-1');
     expect(r.status).toBe(200);
     const a = r.body;
@@ -115,7 +114,7 @@ describe('POST /api/fleet/worker/claim', () => {
     expect(a.account.cookies[1]).toMatchObject({ value: 'xs-secret-1', domain: '.facebook.com', path: '/', httpOnly: true, secure: true, sameSite: 'None' });
     expect(a.proxy).toEqual({ url: 'http://proxy-user:proxy-pass@exit-1.example:10000' });
     expect(a.device).toMatchObject({ viewport: [1366, 768], locale: 'en-US' });
-    expect(a.home_cities).toEqual(['nyc']);
+    expect(a).not.toHaveProperty('home_cities');
     expect(a.items.map((i) => i.name)).toEqual(['enterprise_ssd', 'server_ram']);
     expect(a.settings).toMatchObject({ lease_minutes: 30, poll_hold_seconds: 50, coordinator_url: null });
     expect(a.settings.search).toEqual({});
@@ -159,18 +158,14 @@ describe('POST /api/fleet/worker/claim', () => {
     expect(won.map((r) => r.body.epoch)).toEqual([1, 1]);
   });
 
-  it('prefers the slot that last ran on this host, then home cities nobody covers', async () => {
-    const elsewhere = await seedSlot(1, { lastHost: 'other', home: ['nyc', 'denver'] });
-    const here = await seedSlot(2, { lastHost: 'lab' });
-    const uncovered = await seedSlot(3, { home: ['houston'] });
-    const covered = await seedSlot(4, { home: ['nyc'] });
+  it('prefers the slot that last ran on this host, then one that ran anywhere, then the lowest account', async () => {
+    const never = await seedSlot(1);
+    const elsewhere = await seedSlot(2, { lastHost: 'other' });
+    const here = await seedSlot(3, { lastHost: 'lab' });
     expect((await claimed('lab-1')).account.no).toBe(here);
-    // nyc is covered by #1 only once #1 runs; with nobody running, #1's two
-    // uncovered cities beat #3's one.
     expect((await claimed('lab-2')).account.no).toBe(elsewhere);
-    expect((await claimed('lab-3')).account.no).toBe(uncovered);
-    expect((await claimed('lab-4')).account.no).toBe(covered);
-    expect((await claim('lab-5')).status).toBe(409);
+    expect((await claimed('lab-3')).account.no).toBe(never);
+    expect((await claim('lab-4')).status).toBe(409);
   });
 
   it('skips accounts that left the fleet, parked slots and live leases, and takes an expired one with the next epoch', async () => {
@@ -287,8 +282,8 @@ describe('POST /api/fleet/worker/next-task', () => {
     expect((await nextTask(token)).body.task).toMatchObject({ id: second, item: 'enterprise_ssd' });
   });
 
-  it('orders by priority, then home, familiar, other, then due', async () => {
-    const no = await seedSlot(1, { home: ['nyc'] });
+  it('orders by priority, then familiar, then due', async () => {
+    const no = await seedSlot(1);
     const { worker_token: token } = await claimed('lab-1');
     // denver is familiar: this account searched it two days ago.
     await getTestDb()`
@@ -296,7 +291,7 @@ describe('POST /api/fleet/worker/next-task', () => {
       VALUES ('denver', 'server_ram', NOW() - interval '2 days', 'done', ${no}, NOW() - interval '2 days', NOW() - interval '2 days')`;
     const other = await addTask('houston', 'server_ram', { due_at: new Date(Date.now() - 3 * 3_600_000).toISOString() });
     const familiar = await addTask('denver', 'server_ram', { due_at: new Date(Date.now() - 2 * 3_600_000).toISOString() });
-    const home = await addTask('nyc', 'server_ram', { due_at: new Date(Date.now() - 3_600_000).toISOString() });
+    const later = await addTask('nyc', 'server_ram', { due_at: new Date(Date.now() - 3_600_000).toISOString() });
     // On denver, which is familiar already: a done manual task would otherwise make its city familiar too.
     const manual = await addTask('denver', 'enterprise_ssd', { priority: 100, reason: 'manual' });
 
@@ -308,7 +303,7 @@ describe('POST /api/fleet/worker/next-task', () => {
       order.push([t.id, t.why]);
       done = { task_id: t.id, result: {} };
     }
-    expect(order).toEqual([[manual, 'manual'], [home, 'home'], [familiar, 'familiar'], [other, 'other']]);
+    expect(order).toEqual([[manual, 'manual'], [familiar, 'familiar'], [other, 'other'], [later, 'other']]);
   });
 
   it('wakes a held poll within a second of a manager\u2019s search-now', async () => {

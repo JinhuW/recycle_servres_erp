@@ -74,7 +74,7 @@ for (let attempt = 1; ; attempt++) {
 }
 const token = claim.worker_token;
 say('claimed', {
-  account_no: claim.account.no, epoch: claim.epoch, home_cities: claim.home_cities, items: claim.items.map((i) => i.name),
+  account_no: claim.account.no, epoch: claim.epoch, items: claim.items.map((i) => i.name),
   cookies: claim.account.cookies.length, has_proxy: claim.proxy !== null, has_token: claim.account.token !== null,
   device: claim.device.timezone, settings: claim.settings,
 });

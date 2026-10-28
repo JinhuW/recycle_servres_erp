@@ -233,7 +233,7 @@ export type FleetProxyWrite = { label: string; url: string; timezone: string; no
 export type FleetProxyPatch = { label?: string; url?: string; timezone?: string; note?: string };
 
 /** `POST /api/fleet/slots`: puts a pool account into the fleet. */
-export type FleetSlotWrite = { account_no: number; proxy_id: number; home_cities?: string[] };
+export type FleetSlotWrite = { account_no: number; proxy_id: number };
 
 /** Slots on a proxy that count against `max_accounts_per_proxy`: every one but the parked. */
 export const proxyLoad = (p: Pick<FleetProxy, 'slots'>): number => p.slots.filter((s) => !s.parked).length;
@@ -317,7 +317,6 @@ export type FleetSlot = {
   /** The listed proxy it was made on; null for a seeded slot or a removed proxy. */
   proxy_id: number | null;
   device: FleetDeviceProfile | null;
-  home_cities: string[];
   quarantined_until: string | null;
   note: string;
   /** A manager parked it: nothing claims it until it is unparked, and its
@@ -359,9 +358,9 @@ export type FleetWorkerDetail = {
     cookie_at: string | null;
     secrets: FleetSecretKind[];
   } | null;
-  /** Its home cities, then the other cities it searched in the window, each
-   *  with its last finished search by this worker. */
-  cities: { slug: string; name: string | null; radius_km: number | null; home: boolean; last_done_at: string | null; alerts: number }[];
+  /** The cities it searched in the window, latest first, each with its last
+   *  finished search by this worker. */
+  cities: { slug: string; name: string | null; radius_km: number | null; last_done_at: string | null; alerts: number }[];
   /** Over the last `days` days, by this worker. `errors` counts tasks it stopped. */
   stats: { days: number; searches: number; alerts: number; errors: number; last_search_at: string | null };
   /** Its tasks of the last 24 hours with their events, newest first. */
@@ -537,7 +536,6 @@ export type ClaimAnswer = {
   };
   proxy: { url: string } | null;
   device: FleetDevice;
-  home_cities: string[];
   items: FleetItem[];
   settings: {
     search: FleetSearchSettings;
@@ -592,7 +590,7 @@ export type HeartbeatAnswer = {
 };
 
 /** Why a task went to this account, as the worker logs it. */
-export type FleetTaskWhy = 'home' | 'familiar' | 'other' | 'manual' | 'probe';
+export type FleetTaskWhy = 'familiar' | 'other' | 'manual' | 'probe';
 
 export type HandedTask = {
   id: number;

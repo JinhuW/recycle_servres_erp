@@ -839,19 +839,6 @@
 .fleet-proxy-pick:has(input:checked) {
   border-color: var(--accent);
 }
-.fleet-city-picks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.fleet-city-picks label {
-  cursor: pointer;
-}
-.fleet-city-picks input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
 @media (max-width: 640px) {
   .fleet-proxy-pick {
     grid-template-columns: auto minmax(0, 1fr);

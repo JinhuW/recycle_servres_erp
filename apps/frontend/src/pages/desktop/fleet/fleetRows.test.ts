@@ -24,7 +24,7 @@ describe('fleetRows', () => {
   });
   it('reads an ERP worker with the slot it holds', () => {
     expect(by('erp:homelab-1')).toMatchObject({ no: 4, kind: 'healthy', running: true, host: 'homelab', workerId: 'homelab-1', epoch: 3, minutes: 212, budget: 360, version: '0.14.0', source: 'erp' });
-    expect(by('erp:homelab-3')).toMatchObject({ kind: 'healthy', replacingTo: '0.14.0', now: { city: 'houston', cityName: 'Houston, TX', item: 'server_ram', home: true } });
+    expect(by('erp:homelab-3')).toMatchObject({ kind: 'healthy', replacingTo: '0.14.0', now: { city: 'houston', cityName: 'Houston, TX', item: 'server_ram', home: false } });
     expect(by('erp:homelab-4')).toMatchObject({ kind: 'healthy', running: true, state: 'DEGRADED' });
     expect(by('erp:homelab-2')).toMatchObject({ kind: 'parked', running: true, state: 'SESSION_EXPIRED' });
     expect(by('erp:worker-60-14-1').now).toMatchObject({ city: 'philly', home: false });

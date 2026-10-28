@@ -48,20 +48,19 @@ describe('the card rows', () => {
     expect(deviceText({ viewport: [1440, 900], device_scale_factor: 1.25, timezone: 'UTC', locale: 'en-US' })).toBe('1440×900 @1.25 · UTC · en-US');
     expect(deviceText(null)).toBeNull();
   });
-  it('puts home cities first and counts their alerts', () => {
+  it('keeps the cities in their order and counts their alerts', () => {
     const chips = erpCityChips(WORKER_DETAIL, NOW);
-    expect(chips.home.map(c => c.slug)).toEqual(['philly']);
-    expect(chips.other.map(c => c.name)).toEqual(['Denver, CO']);
+    expect(chips.cities.map(c => c.name)).toEqual(['Denver, CO', 'Philadelphia, PA']);
     expect(chips.hits.get('philly')).toEqual({ sent: 2, hit: 0 });
     expect(chips.hits.has('denver')).toBe(false);
-    expect([...chips.searched]).toEqual(['philly', 'denver']);
+    expect([...chips.searched]).toEqual(['denver', 'philly']);
   });
 });
 
 describe('erpCityLog', () => {
   it('turns each task into a city visit with its counts and outcome', () => {
     const [now, stopped, done] = erpCityLog(WORKER_DETAIL);
-    expect(now).toMatchObject({ outcome: 'searching', name: 'Philadelphia, PA', why: 'home', worker_id: 'worker-60-14-1' });
+    expect(now).toMatchObject({ outcome: 'searching', name: 'Philadelphia, PA', why: 'familiar', worker_id: 'worker-60-14-1' });
     expect(stopped).toMatchObject({ outcome: 'stopped', reason: 'wall', wall: 'checkpoint', name: 'Denver, CO', reported: true });
     expect(done).toMatchObject({ outcome: 'finished', seconds: 520, reported: true });
     expect(done.totals).toMatchObject({ searches: 2, cards: 90, title_pass: 35, opened: 7, alerted: 2 });

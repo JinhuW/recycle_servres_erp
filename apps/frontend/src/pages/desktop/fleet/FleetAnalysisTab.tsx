@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react';
 import { Skeleton, TableSkeleton } from '../../../components/Skeleton';
 import { ApiError } from '../../../lib/api';
 import { coordinatorApi, type AlertHitRow, type FilterPrompt, type FleetDoc, type ReviewStatsDay } from '../../../lib/coordinator';
-import { fleetApi, type FleetCity, type FleetSlot, type FleetTask } from '../../../lib/fleet';
+import { fleetApi, type FleetCity, type FleetTask } from '../../../lib/fleet';
 import { useT } from '../../../lib/i18n';
 import { FlowCard } from '../FleetFlow';
 import { alertsByCity, daySeries, FUNNEL_RANGES, niceTop, type DaySeries, type FunnelRange } from './fleetBoard';
-import { COORDINATOR_POLL_MS, EmptyRow, UnavailableCard, useFleetPoll, WorkerLink } from './shared';
+import { COORDINATOR_POLL_MS, EmptyRow, UnavailableCard, useFleetPoll } from './shared';
 
 // ─── Analysis ─────────────────────────────────────────────────────────────────
 // Where listings drop out between a search and an alert. The pipeline card
@@ -19,7 +19,7 @@ const DAYS = 14;
 type CoordinatorData = {
   stats: ReviewStatsDay[] | 'unavailable'; hits: AlertHitRow[]; fleet: FleetDoc | null; prompt: FilterPrompt | 'unavailable';
 };
-type ErpData = { cities: FleetCity[]; slots: FleetSlot[]; done: FleetTask[] };
+type ErpData = { cities: FleetCity[]; done: FleetTask[] };
 
 export function FleetAnalysisTab() {
   const { t } = useT();
@@ -40,11 +40,10 @@ export function FleetAnalysisTab() {
     const since = new Date(Date.now() - DAYS * 86_400_000).toISOString();
     return Promise.all([
       fleetApi.cities().catch(() => []),
-      fleetApi.slots().catch(() => []),
       // The model reviews per city come from the fleet's finished tasks; the
       // list is capped at 1000 rows, which a long window can reach.
       fleetApi.tasks({ state: 'done', since }).catch(() => []),
-    ]).then(([cities, slots, done]) => ({ cities, slots, done }));
+    ]).then(([cities, done]) => ({ cities, done }));
   }, COORDINATOR_POLL_MS);
 
   if (data === 'unavailable') return <UnavailableCard text={t('fbcNotConfigured')} />;
@@ -78,8 +77,8 @@ export function FleetAnalysisTab() {
             <span className="card-sub">{t('fleetHitsSub', { days: DAYS })}</span>
           </div>
         </div>
-        {data === null || erpRows === null ? <TableSkeleton rows={5} cols={7} />
-          : <HitsTable rows={alertsByCity(data.hits, erpRows.done, erpRows.cities, erpRows.slots)} />}
+        {data === null || erpRows === null ? <TableSkeleton rows={5} cols={6} />
+          : <HitsTable rows={alertsByCity(data.hits, erpRows.done, erpRows.cities)} />}
       </section>
       <p className="fp-muted fleet-note">{t('fleetAnalysisNoFilter')}</p>
     </div>
@@ -184,11 +183,10 @@ export function HitsTable({ rows }: { rows: ReturnType<typeof alertsByCity> }) {
             <th className="num">{t('fleetColReviewed')}</th>
             <th className="num">{t('fleetColAlertRate')}</th>
             <th>{t('fleetColLastAlert')}</th>
-            <th>{t('fleetColSearchedBy')}</th>
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 && <EmptyRow cols={7}>{t('fleetHitsNone')}</EmptyRow>}
+          {rows.length === 0 && <EmptyRow cols={6}>{t('fleetHitsNone')}</EmptyRow>}
           {rows.map(r => (
             <tr key={r.slug}>
               <td><span className="fleet-city-name">{r.name}</span></td>
@@ -197,7 +195,6 @@ export function HitsTable({ rows }: { rows: ReturnType<typeof alertsByCity> }) {
               <td className="num">{r.reviewed ?? <span className="fp-muted">—</span>}</td>
               <td className="num">{r.rate === null ? <span className="fp-muted">—</span> : `${(r.rate * 100).toFixed(1)}%`}</td>
               <td className="fp-muted">{r.lastDay ? dayLabel(r.lastDay) : '—'}</td>
-              <td>{r.homeWorker ? <><WorkerLink id={r.homeWorker} /> <small className="fp-muted">{t('fleetHitsHome')}</small></> : <span className="fp-muted">{t('fleetHitsWhoever')}</span>}</td>
             </tr>
           ))}
         </tbody>

@@ -3,7 +3,7 @@ import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { handleFetchError, showSuccessToast, showWarnToast } from '../../../lib/errorToast';
 import {
-  fleetApi, fleetDeviceFor, fleetErrorCode, proxyLoad, type FleetCity, type FleetProxy, type FleetSlot,
+  fleetApi, fleetDeviceFor, fleetErrorCode, proxyLoad, type FleetProxy, type FleetSlot,
 } from '../../../lib/fleet';
 import { ApiError } from '../../../lib/api';
 import { useT } from '../../../lib/i18n';
@@ -225,23 +225,15 @@ export function AddToFleetDialog({ no, proxies, limit, onClose, onDone }: {
   const { t } = useT();
   const choices = useMemo(() => proxyChoices(proxies, limit), [proxies, limit]);
   const [proxyId, setProxyId] = useState<number | null>(() => choices.find((c) => !c.full)?.proxy.id ?? null);
-  const [cities, setCities] = useState<FleetCity[] | null>(null);
-  const [home, setHome] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    let live = true;
-    fleetApi.cities().then((c) => { if (live) setCities(c.filter((x) => x.enabled)); }).catch(() => { if (live) setCities([]); });
-    return () => { live = false; };
-  }, []);
   const chosen = choices.find((c) => c.proxy.id === proxyId) ?? null;
   const device = chosen ? deviceSummary(fleetDeviceFor(no, chosen.proxy.timezone)) : null;
-  const toggle = (slug: string) => setHome((h) => (h.includes(slug) ? h.filter((x) => x !== slug) : [...h, slug]));
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (busy || !chosen || chosen.full) return;
     setBusy(true);
     try {
-      await fleetApi.addSlot({ account_no: no, proxy_id: chosen.proxy.id, ...(home.length ? { home_cities: home } : {}) });
+      await fleetApi.addSlot({ account_no: no, proxy_id: chosen.proxy.id });
       showSuccessToast(t('fpAddedToFleetToast', { n: no, proxy: chosen.proxy.label }));
       onDone();
     } catch (err) {
@@ -272,20 +264,6 @@ export function AddToFleetDialog({ no, proxies, limit, onClose, onDone }: {
                 <small>{t('fleetProxyUses', { n: load, max: limit })}{full && <> · {t('fpAddToFleetFull')}</>}</small>
               </label>
             ))}
-          </fieldset>
-          <fieldset className="fleet-field">
-            <span>{t('fpAddToFleetHome')}</span>
-            {cities === null ? <small className="fp-muted">…</small> : (
-              <span className="fleet-city-picks">
-                {cities.map((c) => (
-                  <label key={c.slug} className={`chip${home.includes(c.slug) ? ' info' : ' muted'}`}>
-                    <input type="checkbox" checked={home.includes(c.slug)} onChange={() => toggle(c.slug)} />
-                    {c.name}
-                  </label>
-                ))}
-              </span>
-            )}
-            <small className="fp-muted">{t('fpAddToFleetHomeHint')}</small>
           </fieldset>
           {device && <p className="fp-muted">{t('fpAddToFleetDevice', device)}</p>}
         </div>

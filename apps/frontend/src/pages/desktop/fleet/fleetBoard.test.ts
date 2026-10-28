@@ -4,7 +4,7 @@ import type { FleetCity, FleetTask } from '../../../lib/fleet';
 import { CITIES, HITS, HOSTS, NOW, RELEASE, SLOTS, STATS, TASKS, WORKERS } from './fixtures';
 import {
   alertsByCity, averageTaskSeconds, beltAxis, beltLeft, beltRow, beltSummary, budgetTone, cityBucket, cityStanding, daySeries, dueIn, dueLabel,
-  easternClock, filterCities, filterTasks, funnelCounts, funnelGaps, funnelHeadline, homeWorkerOf, hostRunning, isQuarantined, isSlug,
+  easternClock, filterCities, filterTasks, funnelCounts, funnelGaps, funnelHeadline, hostRunning, isQuarantined, isSlug,
   lastDoneSearch, leaseLive, liveness, logByItem, maskUid, nextDue, niceTop, openSearch, releaseSummary, rollProgress, hostLag, imageVersion, roundStartPreview,
   slotLease, sortTasks, spanLabel, utcDayStart, withCityNames, workersBusy,
 } from './fleetBoard';
@@ -133,10 +133,6 @@ describe('the city log', () => {
       ['enterprise_ssd', [202, 192]],
     ]);
   });
-  it('names the worker that calls a city home', () => {
-    expect(homeWorkerOf(SLOTS, 'houston')?.worker_id).toBe('homelab-3');
-    expect(homeWorkerOf(SLOTS, 'denver')).toBeNull();
-  });
 });
 
 describe('cities tab', () => {
@@ -198,17 +194,17 @@ describe('analysis', () => {
     expect(niceTop(1407)).toBe(2000);
     expect(niceTop(13)).toBe(20);
   });
-  it('groups alerts by city with the fleet’s reviews and the home worker', () => {
-    const rows = alertsByCity(HITS, TASKS, CITIES, SLOTS);
+  it('groups alerts by city with the fleet’s reviews', () => {
+    const rows = alertsByCity(HITS, TASKS, CITIES);
     expect(rows.map(r => [r.slug, r.alerts])).toEqual([['houston', 3], ['nyc', 2]]);
-    expect(rows[0]).toMatchObject({ name: 'Houston, TX', region: 'south', reviewed: 5, lastDay: '2026-10-24', homeWorker: 'homelab-3' });
+    expect(rows[0]).toMatchObject({ name: 'Houston, TX', region: 'south', reviewed: 5, lastDay: '2026-10-24' });
     expect(rows[0].rate).toBeNull(); // Coordinator alerts include searches outside the ERP task history.
-    const matched = alertsByCity(HITS, TASKS.map(t => t.id === 192 ? { ...t, result: { ...t.result, alerted: 3 } } : t), CITIES, SLOTS);
+    const matched = alertsByCity(HITS, TASKS.map(t => t.id === 192 ? { ...t, result: { ...t.result, alerted: 3 } } : t), CITIES);
     expect(matched[0].rate).toBeCloseTo(0.6);
-    expect(rows[1]).toMatchObject({ reviewed: 12, homeWorker: 'homelab-1' });
+    expect(rows[1]).toMatchObject({ reviewed: 12 });
     // An unknown slug is still a row, by its slug.
-    expect(alertsByCity([{ day: '2026-10-24', priority: null, item_name: null, search_city: 'nowhere', sent: 1, hit: 0 }], [], [], [])[0])
-      .toMatchObject({ slug: 'nowhere', name: 'nowhere', region: null, reviewed: null, rate: null, homeWorker: null });
+    expect(alertsByCity([{ day: '2026-10-24', priority: null, item_name: null, search_city: 'nowhere', sent: 1, hit: 0 }], [], [])[0])
+      .toMatchObject({ slug: 'nowhere', name: 'nowhere', region: null, reviewed: null, rate: null });
   });
 });
 
