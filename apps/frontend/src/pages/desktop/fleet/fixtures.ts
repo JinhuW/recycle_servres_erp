@@ -5,9 +5,9 @@
 import type {
   FbWorkerStint, FleetCityListed, FleetRelease, FleetTask as WireTask, FleetTaskLog, FleetWorkerDetail,
 } from '@recycle-erp/shared';
-import type { AlertHitRow, FleetAccount, FleetDoc, ReviewStatsDay } from '../../../lib/coordinator';
+import type { AlertHitRow, FleetAccount, FleetDoc } from '../../../lib/coordinator';
 import type { PoolAccount } from '../../../lib/facebookPool';
-import type { FleetHost, FleetItem, FleetProxy, FleetSettings, FleetSlot, FleetTask, FleetWorker } from '../../../lib/fleet';
+import type { FleetFunnelDay, FleetHost, FleetItem, FleetProxy, FleetSettings, FleetSlot, FleetTask, FleetWorker } from '../../../lib/fleet';
 
 export const NOW = Date.parse('2026-10-24T18:30:00Z');
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
@@ -175,13 +175,13 @@ export const SLOTS: FleetSlot[] = [
   slot(44, { last_host_id: 'homelab', epoch: 9, parked: true, note: 'parked 10-24' }),
 ];
 
-// The coordinator's stats: one row per UTC day, newest last, with the funnel
-// counters a current console sends. Days with nothing reported are absent.
-export const STATS: ReviewStatsDay[] = [
-  { day: '2026-10-15', reviewed: 1200, alerted: 6, searches: 230, cards: 12000, title_pass: 5500, opened: 2600, keyword_pass: 2400, fresh: 2300, coordinated: 6, sent: 6 },
-  { day: '2026-10-22', reviewed: 1250, alerted: 7, searches: 250, cards: 13000, title_pass: 5800, opened: 2800, keyword_pass: 2600, fresh: 2500, coordinated: 7, sent: 7 },
-  { day: '2026-10-23', reviewed: 1300, alerted: 8, searches: 240, cards: 13500, title_pass: 6000, opened: 2900, keyword_pass: 2700, fresh: 2600, coordinated: 8, sent: 8 },
-  { day: '2026-10-24', reviewed: 1281, alerted: 9, searches: 255, cards: 13865, title_pass: 6181, opened: 2952, keyword_pass: 2719, fresh: 2665, coordinated: 9, sent: 9 },
+// The fleet's finished searches, one row per UTC day, newest last. Days with
+// no search are absent.
+export const STATS: FleetFunnelDay[] = [
+  { day: '2026-10-15', searches: 230, cards: 12000, opened: 2600, reviewed: 1200, alerted: 6 },
+  { day: '2026-10-22', searches: 250, cards: 13000, opened: 2800, reviewed: 1250, alerted: 7 },
+  { day: '2026-10-23', searches: 240, cards: 13500, opened: 2900, reviewed: 1300, alerted: 8 },
+  { day: '2026-10-24', searches: 255, cards: 13865, opened: 2952, reviewed: 1281, alerted: 9 },
 ];
 
 // Alerts sent per (day, item, city) from the coordinator.

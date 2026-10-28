@@ -3390,7 +3390,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   and Slots tabs folded into them, and their paths (`/#/fleet/queue`,
   `/#/fleet/hosts`, `/#/fleet/slots`) redirect. Managers only and desktop
   only; purchasers see Account pool alone, and the phone has no fleet pages.
-  Times read in US Eastern; Analysis daily totals keep the coordinator’s UTC day boundaries. Against a backend without the fleet routes each
+  Times read in US Eastern; Analysis daily totals use UTC day boundaries. Against a backend without the fleet routes each
   tab says so and the rest of the page is unaffected. Every tab re-reads every
   10 s while it is visible.
   Since v1.351.0 (RS-403) the Fleet and Analysis tabs show the ERP's own rows without waiting for the coordinator, whose rows fill in when they land, read every 30 s and never while the last read is still out; the tabs and the tab-bar counts send each URL once per load and read the pool summary, not the secret-bearing snapshot.
@@ -3499,13 +3499,18 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     city's latest slug check.
   - **Analysis** (`/#/fleet/analysis`, v1.344.0): the search-to-alert
     pipeline that used to sit on the Fleet tab, with a range segment (Today,
-    7 days, 14 days) that sums the coordinator's per-day counters for every
-    stage; between stages the pass rate (cards per search as "×N", every
-    other step as a percentage, amber under 50 %) and under the pipeline the
+    7 days, 14 days) that sums the ERP fleet's finished searches per UTC day
+    (`GET /api/fleet/stats/funnel`, since v1.377.1, RS-446; before, the
+    coordinator's counters, which the ERP fleet's workers do not report to,
+    so every stage read 0): searches, result cards, listings opened, model
+    reviews and alerts. The title gate, keyword gate, new-to-us and
+    coordinator stages are not in a task's result and show "—". Between
+    stages the pass rate from the last counted stage (cards per search as
+    "×N", every other step as a percentage, amber under 50 %) and under the pipeline the
     headline ratios: cards per alert, reviews per alert, the title gate's
     drop before a page is opened and the model's drop of what it reads. Then
-    two per-day bar charts for the last 14 days, each on its own axis —
-    reviewed by the model, alerts sent — in one hue with today's bar grey as
+    two per-day bar charts for the last 14 days from the same counts, each
+    on its own axis — reviewed by the model, alerts — in one hue with today's bar grey as
     partial, three gridlines, labels on the first, highest and today's bar, a
     hover title per bar, the 14-day total and the full-day average. Then
     **Where the alerts came from**: per city over 14 days, the alerts, the
