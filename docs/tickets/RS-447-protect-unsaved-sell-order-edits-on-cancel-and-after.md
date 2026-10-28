@@ -2,7 +2,7 @@
 id: RS-447
 title: Protect unsaved sell-order edits on Cancel and after Save
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-28
 reporter: jinhu
@@ -29,7 +29,7 @@ typed while that GET was pending.
 - [x] Confirmed Cancel reloads the order in place.
 - [x] The editor stays disabled during Save and until its detail reload settles.
 - [x] A failed reload releases the controls and preserves the draft.
-- [ ] Regression checks pass, and dev is released to production.
+- [x] Regression checks pass, and dev is released to production.
 
 ## Out of scope
 
@@ -46,3 +46,8 @@ Vite app: decline and confirm Cancel; hold PATCH, then hold the detail GET;
 check notes/quantity/price/status/receiver controls; fail the detail GET and
 confirm the draft remains editable. All passed. Typecheck, production build,
 1,214 frontend tests and seven Worker proxy tests passed.
+
+All 2,834 backend tests and 90 fleet-agent tests also passed locally (three
+agent tests skipped). PR #981 passed CI and was squash-merged to dev; release
+PR #982 merged dev to main with a merge commit for v1.377.2. The release tree
+matches the tested feature-PR tree exactly. Production deployment follows main.
