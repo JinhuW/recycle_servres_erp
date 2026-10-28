@@ -4838,7 +4838,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fleetProxyUptime: "{pct}% of {n} checks",
     fleetProxyBucket: "{time}: {state}",
     fleetProxyBucketNone: "{time}: no check",
-    fleetProxiesNone: "No proxies yet. Add one under Account pool ▸ Proxies.",
+    fleetProxiesNone: "No proxies yet. Add one with Add proxy.",
     fleetProxiesNoMatch: "No proxy matches.",
     fleetProxyNobody: "Nobody",
     fleetProxyParked: "parked",

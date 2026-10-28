@@ -4,11 +4,12 @@ import { TableSkeleton } from '../../../components/Skeleton';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { poolApi, proxyMarkFor, type FbProxyMark } from '../../../lib/facebookPool';
 import {
-  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_SLOW_MS, fleetApi,
-  type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxyHealthState, type FleetProxySource,
+  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_SLOW_MS, fleetApi, proxyLoad,
+  type FleetProxy, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxyHealthState, type FleetProxySource,
 } from '../../../lib/fleet';
 import { useT } from '../../../lib/i18n';
 import { ProxyDeadChip } from '../FleetWorkers';
+import { ProxyDialog, RemoveProxyDialog } from './FleetProxies';
 import { easternClock } from './fleetBoard';
 import { agoLabel, Clock, EmptyRow, Legend, UnavailableCard, useFleetMirror, useFleetPoll, WorkerLink } from './shared';
 
@@ -17,7 +18,8 @@ import { agoLabel, Clock, EmptyRow, Legend, UnavailableCard, useFleetMirror, use
 // the homelab workers dial (rs_console checks those, since it holds their
 // logins). The backend checks each through itself every five minutes and
 // keeps the answers, so a row says how the port answers now and how it did
-// over the day. Editing the list stays in Account pool ▸ Proxies.
+// over the day. The ERP's own rows are also where that list is edited; the
+// homelab's ports belong to rs_console and stay read-only here.
 
 const STATES = ['up', 'degraded', 'down', 'unchecked'] as const;
 const STATE_CHIP: Record<FleetProxyHealthState, string> = { up: 'chip pos', degraded: 'chip warn', down: 'chip neg', unchecked: 'chip muted' };
@@ -31,7 +33,10 @@ const SOURCE_KEY: Record<FleetProxySource, string> = { erp: 'fleetProxySourceErp
 // Down first: the row that needs a hand is the one to see.
 const STATE_ORDER: Record<FleetProxyHealthState, number> = { down: 0, degraded: 1, unchecked: 2, up: 3 };
 
-type Data = { health: FleetProxyHealthAnswer; marks: FbProxyMark[] | null };
+type Data = { health: FleetProxyHealthAnswer; marks: FbProxyMark[] | null; proxies: FleetProxy[]; limit: number };
+/** The ERP's proxy list behind the rows, for the Used by load and the edit actions. */
+type Editing = { proxies: readonly FleetProxy[]; limit: number; onEdit?: (p: FleetProxy) => void; onRemove?: (p: FleetProxy) => void };
+const DEFAULT_LIMIT = 2;
 type Filter = { state: FleetProxyHealthState | 'all'; source: FleetProxySource | ''; q: string };
 
 /** Whether a row matches the search box: label, host:port, exit, city, worker or account. */
@@ -52,9 +57,13 @@ export function FleetProxiesTab() {
     fleetApi.proxyHealth(),
     // The failed-account marks are the pool's; the table stands without them.
     poolApi.proxies().then(r => r.proxies).catch(() => null),
-  ]).then(([health, marks]) => ({ health, marks })));
+    fleetApi.proxies(),
+    fleetApi.settings().then(s => s.max_accounts_per_proxy ?? DEFAULT_LIMIT).catch(() => DEFAULT_LIMIT),
+  ]).then(([health, marks, proxies, limit]) => ({ health, marks, proxies, limit })));
   const [busy, setBusy] = useState<number | 'all' | null>(null);
   const [filter, setFilter] = useState<Filter>({ state: 'all', source: '', q: '' });
+  const [editing, setEditing] = useState<FleetProxy | 'new' | null>(null);
+  const [removing, setRemoving] = useState<FleetProxy | null>(null);
 
   if (data === 'unavailable') return <UnavailableCard text={t('fleetNotServed')} />;
   const health = data?.health;
@@ -85,6 +94,9 @@ export function FleetProxiesTab() {
         </p>
         {!mirror && (
           <div className="page-actions">
+            <button type="button" className="btn" onClick={() => setEditing('new')}>
+              <Icon name="plus" size={14} />{t('fleetProxyAdd')}
+            </button>
             <button type="button" className="btn primary" onClick={() => check()} disabled={!health || busy !== null}>
               <Icon name="refresh" size={14} />{t('fleetProxyCheckAll')}
             </button>
@@ -95,16 +107,24 @@ export function FleetProxiesTab() {
       {health?.coordinator === 'unreachable' && <UnavailableCard text={t('fleetProxyCoordUnreachable')} />}
       <section className="card fleet-card" aria-label={t('fleetProxiesTitle')}>
         {data === null ? <TableSkeleton rows={6} cols={8} />
-          : <ProxiesHealthTable rows={rows} marks={data.marks} filter={filter} onFilter={setFilter} busy={busy} onCheck={mirror ? undefined : check} />}
+          : <ProxiesHealthTable rows={rows} marks={data.marks} filter={filter} onFilter={setFilter} busy={busy} onCheck={mirror ? undefined : check}
+              editing={{ proxies: data.proxies, limit: data.limit, ...(mirror ? {} : { onEdit: setEditing, onRemove: setRemoving }) }} />}
       </section>
+      {editing && (
+        <ProxyDialog proxy={editing === 'new' ? null : editing} onClose={() => setEditing(null)}
+          onDone={() => { setEditing(null); reload(); }} />
+      )}
+      {removing && (
+        <RemoveProxyDialog proxy={removing} onClose={() => setRemoving(null)} onDone={() => { setRemoving(null); reload(); }} />
+      )}
     </div>
   );
 }
 
-export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onCheck, now = Date.now() }: {
+export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onCheck, editing, now = Date.now() }: {
   rows: readonly FleetProxyHealth[]; marks: readonly FbProxyMark[] | null; filter: Filter; onFilter: (f: Filter) => void;
   // Without one the rows carry no check button: a mirror's checks are prod's.
-  busy: number | 'all' | null; onCheck?: (id?: number) => void; now?: number;
+  busy: number | 'all' | null; onCheck?: (id?: number) => void; editing?: Editing; now?: number;
 }) {
   const { t, locale } = useT();
   const counts = useMemo(() => {
@@ -159,6 +179,8 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
               const last = p.last;
               const where = last ? [last.city, last.region, last.country].filter(Boolean).join(', ') : '';
               const rowBusy = busy === 'all' || (p.proxy_id !== null && busy === p.proxy_id);
+              const own = p.proxy_id === null ? undefined : editing?.proxies.find(x => x.id === p.proxy_id);
+              const load = own ? proxyLoad(own) : 0;
               return (
                 <tr key={`${p.source}:${p.proxy_id ?? p.exit}`}>
                   <td>
@@ -201,13 +223,18 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
                   </td>
                   <td><Clock at={last?.at} now={now} /></td>
                   <td>
-                    {p.slots.length > 0 && (
-                      <span className="fp-holder">{p.slots.map(s => (
-                        <small key={s.account_no}>{t('fleetAccountN', { no: s.account_no })}{s.parked && ` · ${t('fleetProxyParked')}`}</small>
-                      ))}</span>
+                    {(own || p.slots.length > 0) && (
+                      <span className="fp-holder">
+                        {own && editing && (
+                          <span className={load >= editing.limit ? 'fp-warn' : undefined}>{t('fleetProxyUses', { n: load, max: editing.limit })}</span>
+                        )}
+                        {p.slots.map(s => (
+                          <small key={s.account_no}>{t('fleetAccountN', { no: s.account_no })}{s.parked && ` · ${t('fleetProxyParked')}`}</small>
+                        ))}
+                      </span>
                     )}
                     {p.workers.length > 0 && <span className="fleet-proxy-workers">{p.workers.map(w => <WorkerLink key={w} id={w} />)}</span>}
-                    {!p.slots.length && !p.workers.length && <span className="fp-muted">{t('fleetProxyNobody')}</span>}
+                    {!own && !p.slots.length && !p.workers.length && <span className="fp-muted">{t('fleetProxyNobody')}</span>}
                   </td>
                   <td className="fleet-row-actions">
                     {onCheck && (
@@ -215,6 +242,18 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
                         disabled={busy !== null || p.proxy_id === null} aria-busy={rowBusy}
                         title={p.proxy_id === null ? t('fleetProxyCheckOneHomelab') : t('fleetProxyCheckOne')} aria-label={t('fleetProxyCheckOne')}>
                         <Icon name="refresh" size={13} />
+                      </button>
+                    )}
+                    {own && editing?.onEdit && (
+                      <button type="button" className="btn ghost icon sm" onClick={() => editing.onEdit?.(own)}
+                        aria-label={t('fleetProxyEditTitle', { label: own.label })} title={t('fleetProxyEditTitle', { label: own.label })}>
+                        <Icon name="edit" size={13} />
+                      </button>
+                    )}
+                    {own && editing?.onRemove && (
+                      <button type="button" className="btn ghost icon sm" onClick={() => editing.onRemove?.(own)}
+                        aria-label={t('fleetProxyRemove')} title={t('fleetProxyRemove')}>
+                        <Icon name="trash" size={13} />
                       </button>
                     )}
                   </td>

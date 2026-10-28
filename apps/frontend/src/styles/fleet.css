@@ -813,13 +813,7 @@
 .fleet-chart-data { margin: 0 20px 16px; }
 .fleet-chart-data summary { cursor: pointer; color: var(--fg-subtle); }
 
-/* Proxies card and Add to fleet (FleetProxies.tsx, on the Account pool tab) */
-.fleet-proxies {
-  margin-top: 16px;
-}
-.fleet-proxies .card-head {
-  padding: 14px 16px 10px;
-}
+/* Add to fleet (FleetProxies.tsx, on the Account pool tab) */
 .fleet-form fieldset.fleet-field {
   border: 0;
   margin: 0;

@@ -1,21 +1,19 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { handleFetchError, showSuccessToast, showWarnToast } from '../../../lib/errorToast';
 import {
-  fleetApi, fleetDeviceFor, fleetErrorCode, proxyLoad, type FleetProxy, type FleetSlot,
+  fleetApi, fleetDeviceFor, fleetErrorCode, type FleetProxy, type FleetSlot,
 } from '../../../lib/fleet';
 import { ApiError } from '../../../lib/api';
 import { useT } from '../../../lib/i18n';
 import { deviceSummary, proxyChoices, proxyDraftProblem, proxyExit, proxyPatch, type ProxyDraft } from './proxyRules';
-import { ConfirmDialogBody, useFleetMirror } from './shared';
+import { ConfirmDialogBody } from './shared';
 import '../../../styles/fleet.css';
 
 // ─── Proxies and Add to fleet ─────────────────────────────────────────────────
-// The Account pool tab's way into the ERP fleet: a card listing the proxies
-// the ERP keeps (the URL is write-only, so a row shows host:port), and the
-// dialogs that put an available account on one of them or take a fleet
-// account out again. The ERP generates the account's browser and the host
+// The Account pool tab's way into the ERP fleet: the dialogs that put an
+// available account on one of the ERP's proxies or take a fleet account out
+// again, and the proxy add/edit/remove dialogs the Proxies tab opens. The ERP generates the account's browser and the host
 // agent starts a worker for it; nothing here talks to a worker.
 
 const DEFAULT_LIMIT = 2;
@@ -39,85 +37,6 @@ function warnOrFail(err: unknown): void {
   const detail = err instanceof ApiError ? (err.body as { detail?: unknown } | undefined)?.detail : undefined;
   if (err instanceof ApiError && (err.status === 409 || err.status === 422) && typeof detail === 'string') showWarnToast(detail);
   else handleFetchError(err);
-}
-
-export function ProxiesCard({ proxies, limit, onChanged }: { proxies: FleetProxy[]; limit: number; onChanged: () => void }) {
-  const { t } = useT();
-  const mirror = useFleetMirror();
-  const [editing, setEditing] = useState<FleetProxy | 'new' | null>(null);
-  const [removing, setRemoving] = useState<FleetProxy | null>(null);
-  return (
-    <section className="card fleet-card fleet-proxies" aria-label={t('fleetProxies')}>
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t('fleetProxies')}</h2>
-          <span className="card-sub">{t('fleetProxiesSub')}</span>
-        </div>
-        {!mirror && (
-          <button type="button" className="btn sm" onClick={() => setEditing('new')}>
-            <Icon name="plus" size={13} />{t('fleetProxyAdd')}
-          </button>
-        )}
-      </div>
-      <div className="fp-table-wrap">
-        <table className="fp-table">
-          <thead>
-            <tr>
-              <th>{t('fleetProxyLabel')}</th>
-              <th>{t('fleetProxyExit')}</th>
-              <th>{t('fleetProxyTimezone')}</th>
-              <th>{t('fleetProxyUsedBy')}</th>
-              <th>{t('fleetProxyNote')}</th>
-              <th aria-label={t('edit')} />
-            </tr>
-          </thead>
-          <tbody>
-            {proxies.length === 0 && <tr><td colSpan={6} className="fp-empty">{t('fleetProxyNone')}</td></tr>}
-            {proxies.map((p) => {
-              const load = proxyLoad(p);
-              return (
-                <tr key={p.id}>
-                  <td>{p.label}</td>
-                  <td className="mono">{proxyExit(p)}</td>
-                  <td className="mono">{p.timezone}</td>
-                  <td>
-                    <span className="fp-holder">
-                      <span className={load >= limit ? 'fp-warn' : undefined}>{t('fleetProxyUses', { n: load, max: limit })}</span>
-                      {p.slots.length > 0 && (
-                        <small>
-                          {p.slots.map((s) => `#${s.account_no}${s.parked ? ` (${t('fleetProxyParkedTag')})` : s.leased ? ` (${t('fleetProxyLeasedTag')})` : ''}`).join(', ')}
-                        </small>
-                      )}
-                    </span>
-                  </td>
-                  <td className="fp-muted">{p.note || '—'}</td>
-                  <td className="fleet-row-actions">
-                    {!mirror && <>
-                      <button type="button" className="btn ghost icon sm" onClick={() => setEditing(p)}
-                        aria-label={t('fleetProxyEditTitle', { label: p.label })} title={t('fleetProxyEditTitle', { label: p.label })}>
-                        <Icon name="edit" size={13} />
-                      </button>
-                      <button type="button" className="btn ghost icon sm" onClick={() => setRemoving(p)}
-                        aria-label={t('fleetProxyRemove')} title={t('fleetProxyRemove')}>
-                        <Icon name="trash" size={13} />
-                      </button>
-                    </>}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {editing && (
-        <ProxyDialog proxy={editing === 'new' ? null : editing} onClose={() => setEditing(null)}
-          onDone={() => { setEditing(null); onChanged(); }} />
-      )}
-      {removing && (
-        <RemoveProxyDialog proxy={removing} onClose={() => setRemoving(null)} onDone={() => { setRemoving(null); onChanged(); }} />
-      )}
-    </section>
-  );
 }
 
 // The URL field starts empty even when editing: the ERP never sends it back.
@@ -196,7 +115,7 @@ export function ProxyDialog({ proxy, onClose, onDone }: { proxy: FleetProxy | nu
   );
 }
 
-function RemoveProxyDialog({ proxy, onClose, onDone }: { proxy: FleetProxy; onClose: () => void; onDone: () => void }) {
+export function RemoveProxyDialog({ proxy, onClose, onDone }: { proxy: FleetProxy; onClose: () => void; onDone: () => void }) {
   const { t } = useT();
   const [busy, setBusy] = useState(false);
   const confirm = async () => {

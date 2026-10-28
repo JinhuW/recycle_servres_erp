@@ -3355,9 +3355,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   `X-Fleet-Source: live` and prod's own headers.
 - **Add to fleet (v1.364.0, RS-415)** — a manager puts pool accounts into
   ERP-fleet slots from **Monitors ▸ Facebook ▸ Account pool**, no seed script.
-  The **Proxies** card under the pool table lists the exits the ERP keeps
-  (label, host:port, timezone, how many accounts of the limit use each and
-  which) and adds, edits and removes them; the URL with the vendor login is
+  The exits the ERP keeps are added, edited and removed on the **Proxies**
+  tab (until v1.376.0, RS-443, on a Proxies card under the pool table); the URL with the vendor login is
   pasted once, sealed, and never shown again (the edit form's field starts
   empty and leaves the saved URL alone). An available account with a
   password and a 2FA key gets **Add to fleet** in its Runs on cell: pick a
@@ -3518,7 +3517,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - **Proxies** (`/#/fleet/proxies`, v1.368.0, RS-424): the health of every
     proxy port the fleet browses through, between Analysis and Account pool,
     with the number down as a warn-coloured chip on the tab bar. Rows are the
-    ERP's proxies (Account pool ▸ Proxies, by label) and every port the homelab
+    ERP's proxies (by label) and every port the homelab
     console holds, dialed or idle (by host:port, marked Homelab; v1.368.1,
     RS-425). A port on both lists is one row, the ERP's. Every five
     minutes one backend instance checks each ERP proxy through the proxy
@@ -3539,6 +3538,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     round unless one started in the last 15 s; the row button checks one ERP
     proxy (homelab ports are checked together). Checks are kept 14 days. No
     proxy login reaches the browser, the log or the table.
+    Since v1.376.0 (RS-443) the tab is also where the ERP's proxies are
+    managed: **Add proxy** beside Check all, and Edit and Remove on each ERP
+    row, the same forms the Account pool card had (homelab ports stay
+    read-only; a mirror shows neither). An ERP row's Used by leads with how
+    many accounts of the per-proxy limit use it, warn-coloured when full.
   - **Account pool** (`/#/fleet/pool`, v1.344.0): as before, plus a **Runs
     on** column: the ERP worker holding the account's slot with its state
     and epoch, linking to the worker page; else the coordinator's worker as
@@ -3547,7 +3551,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     (RS-412) a quarantined account's cell has **Release** and a parked one's
     **Unpark** (with its confirm), which used to be on the Fleet tab.
     Since v1.364.0 (RS-415) the cell also puts accounts into the ERP fleet
-    and takes them out (below), and a **Proxies** card sits under the table.
+    and takes them out (below). The Proxies card that sat under the table
+    moved to the Proxies tab in v1.376.0 (RS-443).
   - **The worker page** (`/#/fleet/worker/<id>`, v1.337.0) recognises a
     fleet worker: state, last heartbeat, account and epoch, version, the task
     it holds (city, item, since when, lease), and **Watch**, its browser
