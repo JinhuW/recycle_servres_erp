@@ -2116,6 +2116,7 @@ One row per Facebook Marketplace login in the shared pool. Managers add, import,
 | `held_since` | `timestamptz` |  |  | When the current holder got it. |
 | `added_at` | `timestamptz` | ✓ | `now()` |  |
 | `cookie_at` | `timestamptz` |  |  | When the cookie was last set; drives the cookie-freshness display. |
+| `cookie_by` | `text` |  |  | Who last set it: the fleet worker id that uploaded the session, or the manager who imported or edited the cookie; NULL for older rows. |
 | `batch` | `text` | ✓ |  | Label of the purchase batch it came in; Manual or Imported when none is given. |
 | `created_by` | `uuid` |  |  | → users. The manager who added it. |
 | `updated_at` | `timestamptz` | ✓ | `now()` |  |

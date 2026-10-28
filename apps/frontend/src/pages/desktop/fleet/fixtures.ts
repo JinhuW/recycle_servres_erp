@@ -234,7 +234,7 @@ export const COORDINATOR: FleetDoc = {
 // one a purchaser took, one retired. Made up, like everything here.
 const poolAccount = (no: number, status: PoolAccount['status'], holder: string | null = null): PoolAccount => ({
   no, uid: `10000${no}000${no}${no}${no}`, password: '', totp: '', email: `acct${no}@example.test`, emailPassword: '', recovery: '', cookie: '',
-  token: '', note: '', status, holder, holderId: null, since: null, addedAt: NOW - 86_400_000 * 30, cookieAt: null, aliveCheckedAt: null, batch: '',
+  token: '', note: '', status, holder, holderId: null, since: null, addedAt: NOW - 86_400_000 * 30, cookieAt: null, cookieBy: null, aliveCheckedAt: null, batch: '',
 });
 
 export const POOL: PoolAccount[] = [

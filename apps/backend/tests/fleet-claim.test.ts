@@ -600,11 +600,12 @@ describe('PUT /api/fleet/worker/session', () => {
     ];
     const r = await api('PUT', '/api/fleet/worker/session', { headers: bearer(token), body: { cookies, token: 'EAA-new' } });
     expect(r.status).toBe(200);
-    const [row] = await getTestDb()<{ cookie_enc: string; cookie_uid: string; cookie_at: Date; token_enc: string }[]>`
-      SELECT cookie_enc, cookie_uid, cookie_at, token_enc FROM fb_pool_accounts WHERE no = ${no}`;
+    const [row] = await getTestDb()<{ cookie_enc: string; cookie_uid: string; cookie_at: Date; cookie_by: string; token_enc: string }[]>`
+      SELECT cookie_enc, cookie_uid, cookie_at, cookie_by, token_enc FROM fb_pool_accounts WHERE no = ${no}`;
     expect(JSON.parse(unseal(row.cookie_enc, key()))).toEqual(cookies);
     expect(row.cookie_uid).toBe('61550000000099');
     expect(row.cookie_at).toBeInstanceOf(Date);
+    expect(row.cookie_by).toBe('lab-1');
     expect(unseal(row.token_enc, key())).toBe('EAA-new');
     // The next claim hands back exactly what was stored.
     await getTestDb()`UPDATE fleet_slots SET lease_expires_at = NOW() - interval '1 second' WHERE account_no = ${no}`;

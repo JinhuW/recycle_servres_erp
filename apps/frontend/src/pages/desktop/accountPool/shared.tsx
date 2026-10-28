@@ -5,8 +5,10 @@ import {
   cookieHealth,
   poolTotp,
   type PoolAccount,
+  sessionContents,
   type PoolStatus,
 } from '../../../lib/facebookPool';
+import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
 export const STATUS_KEYS: Record<PoolStatus, string> = {
   available: 'fpAvailable',
@@ -27,9 +29,9 @@ export function StatusChip({ status }: { status: PoolStatus }) {
 export function CookieLabel({
   account,
 }: {
-  account: Pick<PoolAccount, 'uid' | 'cookie' | 'cookieAt'>;
+  account: Pick<PoolAccount, 'uid' | 'cookie' | 'cookieAt'> & { cookieBy?: string | null };
 }) {
-  const { t } = useT();
+  const { t, locale } = useT();
   const health = cookieHealth(account);
   const key = {
     none: 'fpNoCookie',
@@ -39,10 +41,32 @@ export function CookieLabel({
     fresh: 'fpCookieAge',
     stale: 'fpCookieAge',
   }[health.kind];
+  // Whole days hid a worker's half-hourly saves: a backup minutes old and
+  // one 23 h old both read "0 d".
+  const at = health.kind === 'fresh' || health.kind === 'stale' ? new Date(account.cookieAt!) : null;
+  const title = at
+    ? t(account.cookieBy ? 'fpCookieSavedBy' : 'fpCookieSavedAt', {
+        when: at.toLocaleString(locale),
+        who: account.cookieBy ?? '',
+      })
+    : undefined;
   return (
-    <span className={`fp-cookie fp-cookie-${health.kind}`}>
+    <span className={`fp-cookie fp-cookie-${health.kind}`} title={title}>
       {health.kind === 'fresh' && '✓ '}
-      {t(key, { n: health.days })}
+      {at ? t(key, { age: relTime(at, locale) }) : t(key)}
+    </span>
+  );
+}
+/** What the stored session holds, and who saved it: the editor's line under the cookie. */
+export function SessionSummary({ cookie, cookieBy }: { cookie: string; cookieBy: string | null }) {
+  const { t } = useT();
+  const held = sessionContents(cookie);
+  if (!held) return null;
+  return (
+    <span className="fp-muted">
+      {' · '}
+      {t(held.origins ? 'fpSessionHolds' : 'fpSessionCookiesOnly', held)}
+      {cookieBy && <> · {t('fpSessionBy', { who: cookieBy })}</>}
     </span>
   );
 }

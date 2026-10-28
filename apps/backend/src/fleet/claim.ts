@@ -791,7 +791,7 @@ worker.put('/session', workerAuth, async (c) => {
     await tx`
       UPDATE fb_pool_accounts SET
         cookie_enc = ${keep.length ? seal(text, key) : null}, cookie_uid = ${uid},
-        cookie_at = NOW(), updated_at = NOW(),
+        cookie_at = NOW(), cookie_by = ${w.worker_id}, updated_at = NOW(),
         token_enc = ${token === undefined ? tx`token_enc` : sealOrNull(token ?? '', key)}
       WHERE no = ${w.account_no}`;
     return 'ok';

@@ -16,7 +16,7 @@ import { fleetStatus, parkedWorkers, retiredAt, whoIs } from '../../../lib/fleet
 import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
 import { StatusChip as WorkerStatusChip } from '../FleetWorkers';
-import { CloseButton, CookieLabel, STATUS_KEYS, StatusChip } from './shared';
+import { CloseButton, CookieLabel, SessionSummary, STATUS_KEYS, StatusChip } from './shared';
 
 export function AccountEditor({
   account,
@@ -166,12 +166,19 @@ export function AccountEditor({
               />
               <small>
                 {draft.cookie ? (
-                  <CookieLabel
-                    account={{
-                      ...draft,
-                      cookieAt: draft.cookie === account?.cookie ? account.cookieAt : Date.now(),
-                    }}
-                  />
+                  <>
+                    <CookieLabel
+                      account={
+                        draft.cookie === account?.cookie
+                          ? { ...draft, cookieAt: account.cookieAt, cookieBy: account.cookieBy }
+                          : { ...draft, cookieAt: Date.now(), cookieBy: null }
+                      }
+                    />
+                    <SessionSummary
+                      cookie={draft.cookie}
+                      cookieBy={draft.cookie === account?.cookie ? account.cookieBy : null}
+                    />
+                  </>
                 ) : (
                   t('fpCookieHelp')
                 )}
