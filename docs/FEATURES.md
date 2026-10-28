@@ -3510,13 +3510,21 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     7 days, 14 days) that sums the ERP fleet's finished searches per UTC day
     (`GET /api/fleet/stats/funnel`, since v1.377.1, RS-446; before, the
     coordinator's counters, which the ERP fleet's workers do not report to,
-    so every stage read 0): searches, result cards, listings opened, model
-    reviews and alerts. The title gate, keyword gate, new-to-us and
-    coordinator stages are not in a task's result and show "—". Between
+    so every stage read 0): searches, result cards, the title gate, listings
+    opened, the keyword gate, new to us, model reviews, **Passed the model**
+    and alerts. Since v1.378.0 (RS-450, facebook-tracker 0.14.18) a task's
+    result counts the three gates and what passed the model: a fresh verdict
+    that clears the score and minimum-units gates. Passed the model replaced
+    the Coordinator stage, which the ERP fleet never counted; its card also
+    shows how many of those a worker held back because fleet alerts are off,
+    and the claim and de-duplication text moved to Telegram alert. A stage
+    no day in the range reported shows "—"; one only some days reported
+    gives no pass rate against a stage counted on every day. Between
     stages the pass rate from the last counted stage (cards per search as
     "×N", every other step as a percentage, amber under 50 %) and under the pipeline the
-    headline ratios: cards per alert, reviews per alert, the title gate's
-    drop before a page is opened and the model's drop of what it reads. Then
+    headline ratios: what passed the model and what was held back, cards per
+    alert, reviews per alert, the title gate's drop before a page is opened
+    and the model's drop of what it reads, read against what passed it. Then
     two per-day bar charts for the last 14 days from the same counts, each
     on its own axis — reviewed by the model, alerts — in one hue with today's bar grey as
     partial, three gridlines, labels on the first, highest and today's bar, a

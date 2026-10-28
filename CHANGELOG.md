@@ -15,6 +15,24 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.378.0] - 2026-10-28
+
+### Added
+
+- **Fleet ▸ Analysis counts every stage, and shows what passed the model**
+  (RS-450). Title gate, Keyword gate and New to us read "not counted yet":
+  the workers counted them, but their task results did not report them.
+  Workers on facebook-tracker 0.14.18 report them, and the funnel sums them.
+  The Coordinator stage, which nothing in the ERP fleet counted, becomes
+  **Passed the model**: listings whose fresh verdict cleared the score and
+  minimum-units gates. Its card also says how many a worker held back because
+  fleet alerts are off. Before this, a day with listings held back read "0
+  alerts, the model drops 100%". Now the headline names them, and the model's
+  drop is measured against what passed it. Days from before the release have
+  no such counts. A range that mixes them leaves out any pass rate that
+  compares stages counted over different days, instead of showing rates
+  above 100%.
+
 ## [1.377.4] - 2026-10-28
 
 ### Fixed
