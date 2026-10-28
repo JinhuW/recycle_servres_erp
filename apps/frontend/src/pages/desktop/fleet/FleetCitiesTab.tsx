@@ -30,13 +30,13 @@ const PER_DAY_CHOICES = [1, 2, 3, 4, 6] as const;
 const DONE_HOURS = 48;
 
 const BUCKET_CHIP: Record<CityBucket, string> = {
-  verifying: 'chip info fleet-verifying', pinned: 'chip warn', enabled: 'chip pos', disabled: 'chip muted',
+  verifying: 'chip info fleet-verifying', enabled: 'chip pos', disabled: 'chip muted',
 };
 const BUCKET_KEY: Record<CityBucket | 'all', string> = {
-  all: 'fleetSegAll', verifying: 'fleetCityVerifying', pinned: 'fleetCityPinned', enabled: 'fleetCityEnabled', disabled: 'fleetCityDisabled',
+  all: 'fleetSegAll', verifying: 'fleetCityVerifying', enabled: 'fleetCityEnabled', disabled: 'fleetCityDisabled',
 };
 const BUCKET_DOT: Record<CityBucket | 'all', string> = {
-  all: 'fleet-dot-all', enabled: 'fleet-dot-pos', pinned: 'fleet-dot-warn-strong', verifying: 'fleet-dot-info', disabled: 'fleet-dot-all',
+  all: 'fleet-dot-all', enabled: 'fleet-dot-pos', verifying: 'fleet-dot-info', disabled: 'fleet-dot-all',
 };
 
 type Data = { cities: FleetCity[]; items: FleetItem[]; done: FleetTask[]; slots: FleetSlot[] };
@@ -65,7 +65,7 @@ export function FleetCitiesTab() {
     <div className="fp-pool">
       <div className="fleet-tab-head">
         <p className="fleet-lede">
-          {data ? t('fleetCitiesLede', { n: cities.length, searched: by('enabled') + by('pinned'), pinned: by('pinned'), verifying: by('verifying'), off: by('disabled') }) : ''}
+          {data ? t('fleetCitiesLede', { n: cities.length, searched: by('enabled'), verifying: by('verifying'), off: by('disabled') }) : ''}
         </p>
         <div className="page-actions">
           <button type="button" className="btn" onClick={() => setRules(true)} disabled={!data}>{t('fleetRules')}</button>
@@ -97,7 +97,7 @@ export function CitiesTable({ cities, items, done, slots, filter, onFilter, onCh
   const shown = useMemo(() => filterCities(cities, filter), [cities, filter]);
   const regions = useMemo(() => cityRegions(cities), [cities]);
   const counts = useMemo(() => {
-    const out = { all: cities.length, verifying: 0, pinned: 0, enabled: 0, disabled: 0 };
+    const out = { all: cities.length, verifying: 0, enabled: 0, disabled: 0 };
     for (const c of cities) out[cityBucket(c)] += 1;
     return out;
   }, [cities]);
@@ -124,7 +124,6 @@ export function CitiesTable({ cities, items, done, slots, filter, onFilter, onCh
       const failed = out.find((r): r is PromiseRejectedResult => r.status === 'rejected' && fleetErrorCode(r.reason) !== 'exists');
       if (failed) throw failed.reason;
     }, t('fleetSearchNowDone', { city: c.name }));
-  const setPin = (c: FleetCity) => act(c.slug, () => fleetApi.updateCity(c.slug, { pinned: !c.pinned }));
   const setPerDay = (c: FleetCity, v: string) => act(c.slug, () => fleetApi.updateCity(c.slug, { per_day: v === '' ? null : Number(v) }));
   const enableAnyway = (c: FleetCity) =>
     act(c.slug, () => fleetApi.updateCity(c.slug, { enabled: true, override_verify: true }), t('fleetCityEnabledToast', { city: c.name }));
@@ -243,10 +242,6 @@ export function CitiesTable({ cities, items, done, slots, filter, onFilter, onCh
                     </td>
                     <td className="fleet-row-actions">
                       {standing !== 'removed' && !mirror && <>
-                        <button type="button" className={`btn ghost icon sm${c.pinned ? ' fleet-pinned' : ''}`} onClick={() => setPin(c)}
-                          disabled={rowBusy} aria-pressed={c.pinned} title={t(c.pinned ? 'fleetUnpin' : 'fleetPin')} aria-label={t('fleetColPin')}>
-                          <Icon name="star" size={13} />
-                        </button>
                         <button type="button" className="btn ghost icon sm" onClick={() => searchNow(c)} disabled={rowBusy || items.length === 0 || !c.enabled}
                           title={`${t('fleetSearchNow')}: ${t('fleetSearchNowHint')}`} aria-label={t('fleetSearchNow')}>
                           <Icon name="search" size={13} />

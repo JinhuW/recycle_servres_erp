@@ -72,12 +72,11 @@ describe('Fleet tab', () => {
   it('lists every worker with its host, account, state and now', () => {
     const html = renderToString(<WorkersTable data={fleetData} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
     expect(html).toContain('fleetKindHealthy');
-    expect(html).toContain('fleetKindReplacing');
     expect(html).toContain('fleetNowReplacing');       // homelab-3 is being replaced
     expect(html).toContain('Philadelphia, PA');        // worker-60-14-1's current task
     expect(html).toContain('fleetNowWaiting');         // homelab-1 holds no task
     expect(html).toContain('homelab-5');               // the coordinator's worker is a row
-    expect(html).toContain('fleetKindOffline');        // homelab-9 never reported
+    expect(html).toContain('fleetKindParked');         // homelab-9 never reported
     expect(html).toContain('fleetQuarantineUntilAt');  // homelab-4's account
     expect(html).toContain('fleetPark');
     expect(html).not.toContain('fleetUnpark');         // idle accounts are the pool's
@@ -87,30 +86,23 @@ describe('Fleet tab', () => {
     expect(html).toContain('ff-ring-full');            // #12 has used its budget
     expect(html).toContain('fleetWorkersFoot');
   });
-  it('leaves a retired worker out until the Retired chip is picked', () => {
+  it('has only the Healthy and Parked chips, and no retired worker', () => {
     const html = renderToString(<WorkersTable data={fleetData} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
+    expect(html.match(/<i class="fp-dot"><\/i><span>(\w+)<\/span>/g)?.map(m => m.match(/<span>(\w+)/)![1]))
+      .toEqual(['fleetKindAll', 'fleetKindHealthy', 'fleetKindParked']);
     expect(html).not.toContain('homelab-20');
-    expect(html).toContain('fleetKindRetired');          // the chip, off
-    expect(html).toMatch(/aria-pressed="false"[^>]*><i class="fp-dot"><\/i><span>fleetKindRetired<\/span><b>1<\/b>/);
     expect(html).not.toContain('fleetRetiredOn');
-    const retired = renderToString(<WorkersTable data={fleetData} filter={{ ...EMPTY_FLEET_ROW_FILTER, kind: 'retired' }} onFilter={noop} onChanged={noop} now={NOW} />);
-    expect(retired).toContain('homelab-20');
-    expect(retired).toContain('fleetRetiredOn');
-    expect(retired).not.toContain('homelab-5');
-    expect(retired).not.toContain('fleetPark');         // read-only
-    const none = { ...fleetData, coordinator: { ...COORDINATOR, workers: COORDINATOR.workers.filter(w => !w.health?.retired_at) } };
-    expect(renderToString(<WorkersTable data={none} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />))
-      .not.toContain('fleetKindRetired');
   });
   it('opens on the Healthy chip', () => {
     const html = renderToString(<WorkersTable data={fleetData} filter={DEFAULT_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
     expect(html).toMatch(/aria-pressed="true"[^>]*><i class="fp-dot"><\/i><span>fleetKindHealthy<\/span>/);
-    expect(html).not.toContain('homelab-9');          // offline
-    expect(html).not.toContain('fleetNowReplacing');  // homelab-3
+    expect(html).not.toContain('homelab-9');          // silent, so parked
+    expect(html).toContain('fleetNowReplacing');      // homelab-3 still runs
   });
   it('honours the legend filter', () => {
-    const html = renderToString(<WorkersTable data={fleetData} filter={{ ...EMPTY_FLEET_ROW_FILTER, kind: 'offline' }} onFilter={noop} onChanged={noop} now={NOW} />);
+    const html = renderToString(<WorkersTable data={fleetData} filter={{ ...EMPTY_FLEET_ROW_FILTER, kind: 'parked' }} onFilter={noop} onChanged={noop} now={NOW} />);
     expect(html).toContain('homelab-9');
+    expect(html).toContain('homelab-2');
     expect(html).not.toContain('homelab-3');
   });
 });
@@ -167,7 +159,8 @@ describe('Cities tab', () => {
       <CitiesTable cities={CITIES} items={items} done={withCityNames(TASKS, CITIES)} slots={SLOTS} filter={EMPTY_CITY_FILTER} onFilter={noop} onChanged={noop} now={NOW} />,
     );
     expect(html).toContain('Houston, TX');
-    expect(html).toContain('fleetCityPinned');
+    expect(html).toContain('fleetCityEnabled');
+    expect(html).not.toContain('fleetColPin');
     expect(html).toContain('fleetCityVerifying');
     expect(html).toContain('fleetVerifyPending');      // boise's inline row
     expect(html).toContain('fleetVerifySkip');
@@ -240,6 +233,11 @@ describe('Worker page', () => {
     expect(html).toContain('Decodo NY 1');                   // the listed proxy, by label
     expect(html).toContain('isp.example.net:10001');
     expect(html).toContain('Philadelphia, PA');               // home city chip
+    expect(html).toContain('fleetCitiesNoteHome');            // says which chips are home
+    const queueOnly = renderToString(<ErpWorkerView detail={{ ...WORKER_DETAIL, cities: WORKER_DETAIL.cities.map(c => ({ ...c, home: false })) }}
+      stints={[]} onReload={noop} now={NOW} />);
+    expect(queueOnly).toContain('fleetCitiesNote');
+    expect(queueOnly).not.toContain('fleetCitiesNoteHome');
     expect(html).toContain('fleetPacingBudget');
     expect(html).toContain('fleetDetailHost');
     expect(html).toContain('0.14.0');                         // build, behind the 0.14.7 release

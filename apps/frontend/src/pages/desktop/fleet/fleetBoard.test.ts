@@ -141,14 +141,14 @@ describe('the city log', () => {
 
 describe('cities tab', () => {
   it('buckets a city for the legend', () => {
-    expect(cityBucket(CITIES[0])).toBe('pinned');
+    expect(cityBucket(CITIES[0])).toBe('enabled');
     expect(cityBucket(CITIES[1])).toBe('enabled');
     expect(cityBucket(CITIES[4])).toBe('verifying');
     expect(cityBucket(CITIES[5])).toBe('disabled');
   });
   it('sorts verifying first, then filters by bucket, region and text', () => {
     expect(filterCities(CITIES, { bucket: 'all', region: '', q: '' }).map(c => c.slug))
-      .toEqual(['boise', 'houston', 'denver', 'nyc', 'philly', 'tulsa']);
+      .toEqual(['boise', 'denver', 'houston', 'nyc', 'philly', 'tulsa']);
     expect(filterCities(CITIES, { bucket: 'enabled', region: 'northeast', q: '' }).map(c => c.slug)).toEqual(['nyc', 'philly']);
     expect(filterCities(CITIES, { bucket: 'all', region: '', q: 'HOU' }).map(c => c.slug)).toEqual(['houston']);
   });

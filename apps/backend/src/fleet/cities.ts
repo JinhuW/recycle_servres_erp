@@ -26,7 +26,6 @@ export type CityRow = {
   region: string | null;
   enabled: boolean;
   per_day: number | null;
-  pinned: boolean;
   verified_at: Date | null;
   verified_as: string | null;
   added_by: string | null;
@@ -58,7 +57,6 @@ const cityToWire = (r: CityRow): FleetCity => ({
   region: r.region,
   enabled: r.enabled,
   per_day: r.per_day,
-  pinned: r.pinned,
   verified_at: iso(r.verified_at),
   verified_as: r.verified_as,
   added_by: r.added_by,
@@ -97,7 +95,6 @@ export function readCityDraft(input: unknown): CityDraft | Refusal {
 export type CityPatch = {
   enabled?: boolean;
   per_day?: number | null;
-  pinned?: boolean;
   name?: string;
   override_verify?: true;
   reverify?: true;
@@ -105,6 +102,7 @@ export type CityPatch = {
 
 export function readCityPatch(input: unknown): CityPatch | Refusal {
   if (!isObject(input)) return bad('expected an object');
+  // pinned is retired; a page cached from before still sends it, so it is let through and ignored.
   const unknown = Object.keys(input).filter((k) => !['enabled', 'per_day', 'pinned', 'name', 'override_verify', 'reverify'].includes(k));
   if (unknown.length) return bad(`not a city field: ${unknown.join(', ')}`);
   const patch: CityPatch = {};
@@ -117,10 +115,6 @@ export function readCityPatch(input: unknown): CityPatch | Refusal {
       return bad(`per_day must be null or a whole number from 1 to ${MAX_PER_DAY}`);
     }
     patch.per_day = input.per_day;
-  }
-  if (input.pinned !== undefined) {
-    if (typeof input.pinned !== 'boolean') return bad('pinned must be true or false');
-    patch.pinned = input.pinned;
   }
   if (input.name !== undefined) {
     const name = typeof input.name === 'string' ? input.name.trim() : '';
@@ -256,11 +250,10 @@ export async function updateCity(sql: Sql, slug: string, patch: CityPatch): Prom
       next.disabled_at = next.disabled_at ?? new Date();
     }
     if (patch.per_day !== undefined) next.per_day = patch.per_day;
-    if (patch.pinned !== undefined) next.pinned = patch.pinned;
     if (patch.name !== undefined) next.name = patch.name;
     await tx`
       UPDATE fleet_cities SET
-        name = ${next.name}, enabled = ${next.enabled}, per_day = ${next.per_day}, pinned = ${next.pinned},
+        name = ${next.name}, enabled = ${next.enabled}, per_day = ${next.per_day},
         verified_at = ${next.verified_at}, verified_as = ${next.verified_as}, disabled_at = ${next.disabled_at}
       WHERE slug = ${slug}`;
     // A manager who vouches for the slug has no use for the worker's check.

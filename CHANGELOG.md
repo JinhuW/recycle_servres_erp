@@ -15,6 +15,91 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.373.1] - 2026-10-27
+
+### Fixed
+
+- **The dev-to-main review's findings, fixed before the release** (RS-437).
+  The dev mirror's live view of prod's fleet now falls back to its own copy
+  when prod can't answer, or lacks a read dev added, instead of failing every
+  tab with a 502. It mints one token for the six reads the Fleet page opens
+  with, keeps that token through an ordinary 401 from a host-only route, and
+  passes prod's headers on, `X-Fleet-Truncated` included. The banner calls
+  the page live only when prod actually hands over a token. On prod, a
+  `fleet:read` bearer is accepted from a service client only, so a connector
+  token a demoted manager still holds no longer reads the fleet. A running
+  worker whose slot a manager parked now reads Parked, not Healthy. The
+  `fleet_cities.pinned` drop moves to a later release, so the old backend's
+  city edits keep working while a deploy overlaps, and a page cached from
+  before the pin was retired can still save a city.
+
+## [1.373.0] - 2026-10-27
+
+### Changed
+
+- **The Fleet tab has two worker statuses: Healthy and Parked** (RS-436).
+  The legend had grown to six chips (Healthy, Degraded, Replacing, Parked,
+  Offline, Retired), more than anyone needed to answer "which workers are
+  working and which need me". A worker now counts as Healthy while it runs,
+  degraded or mid-replacement included, and as Parked when its account
+  reports Session expired, Checkpoint, Challenge or Dead, or when it has
+  gone silent. The state chip still names the reason a parked worker
+  stopped, and a worker being replaced still says so under Now. Retired
+  coordinator workers are no longer rows at all.
+
+## [1.372.0] - 2026-10-27
+
+### Removed
+
+- **Fleet cities lose the Pinned status** (RS-435). A third of the catalog
+  (55 cities) sat under a Pinned legend segment with a star button to toggle
+  it, but the scheduler never read the flag: how often a city is searched has
+  only ever come from its Per day setting. The pin was set aside for tiers,
+  which were never built. Migration 0216 drops `fleet_cities.pinned`, so those
+  cities now list as Enabled and keep their 2× or 3× a day. The legend, the
+  lede's pinned count and the row's star are gone, and a city write carrying
+  `pinned` is refused as an unknown field.
+
+## [1.371.3] - 2026-10-27
+
+### Changed
+
+- **The fleet worker page says what its Cities are** (RS-434). The row lists
+  the slot's home cities plus every city the worker searched in the last
+  7 days. With no home cities left on any slot, a worker showed a dozen
+  scattered cities that read like a list tied to it, when the queue had
+  simply handed them out one by one. A muted note under the chips now says
+  so, and when the slot does have home cities it names the highlighted ones
+  as those.
+
+## [1.371.2] - 2026-10-27
+
+### Fixed
+
+- **Quarantine probes no longer wait for ever** (RS-433). A probe can only be
+  taken by the account it tests, and an account gets a worker only when a
+  worker container boots, which is a Facebook login. So a probe for a
+  quarantined account with no worker sat "Waiting" in the Queue for good,
+  sixteen hours and counting for two Boston probes, looking like a shortage of
+  workers while healthy workers were idle. The scheduler now writes a probe
+  only for an account a worker is running (a parked one is not), and cancels a
+  waiting probe once no worker runs its account. A cancelled probe does not
+  count toward the probe interval, so the account gets a fresh one on the
+  scheduler's next pass after a worker claims it again.
+
+## [1.371.1] - 2026-10-27
+
+### Fixed
+
+- **Dev's Fleet page shows prod's fleet live** (RS-432). Since the RS-427
+  cut-over, nothing reports to dev, so its fleet tables were a copy frozen at
+  17:44 UTC. The page judges a worker by how old its last heartbeat is, so
+  within minutes dev showed 0 healthy and every worker Offline, though the
+  fleet was fine on prod. The nightly copy would only have reset that clock
+  once a day. Now the mirror checks the dev manager and then fetches the same
+  read from prod, as a service client with the new `fleet:read` scope. Prod
+  accepts that scope on its fleet reads only: writes and the VNC socket still
+  need a manager's session, and dynamic client registration never grants it.
 ## [1.371.0] - 2026-10-27
 
 ### Changed

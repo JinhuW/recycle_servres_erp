@@ -88,14 +88,6 @@
 .fleet-table .fleet-row-actions .btn.sm {
   padding: 4px 8px;
 }
-.fleet-pin-mark {
-  margin-left: 5px;
-  color: var(--warn-strong);
-  vertical-align: -1px;
-}
-.fleet-pinned {
-  color: var(--warn-strong);
-}
 .fleet-verifying {
   animation: fleet-pulse 1.6s ease-in-out infinite;
 }
@@ -189,7 +181,6 @@
 .fleet-legend .fleet-dot-all .fp-dot { background: var(--fg-subtle); }
 .fleet-legend .fleet-dot-pos .fp-dot { background: var(--pos); }
 .fleet-legend .fleet-dot-warn .fp-dot { background: var(--warn); }
-.fleet-legend .fleet-dot-warn-strong .fp-dot { background: var(--warn-strong); }
 .fleet-legend .fleet-dot-info .fp-dot { background: var(--info); }
 .fleet-legend .fleet-dot-muted .fp-dot { background: var(--fg-muted); }
 .fleet-legend .fleet-dot-neg .fp-dot { background: var(--neg); }

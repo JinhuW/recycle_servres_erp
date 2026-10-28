@@ -245,23 +245,20 @@ export function cityStanding(c: FleetCity): CityStanding {
   return c.verified_at ? 'disabled' : 'verifying';
 }
 
-// The Cities tab's legend: a pinned city is listed apart from the rest of the
-// enabled ones, and a removed city sits with the disabled.
-export type CityBucket = 'verifying' | 'pinned' | 'enabled' | 'disabled';
-export const CITY_BUCKETS: readonly CityBucket[] = ['enabled', 'pinned', 'verifying', 'disabled'];
-const CITY_RANK: Record<CityBucket, number> = { verifying: 0, pinned: 1, enabled: 2, disabled: 3 };
+// The Cities tab's legend: a removed city sits with the disabled.
+export type CityBucket = 'verifying' | 'enabled' | 'disabled';
+export const CITY_BUCKETS: readonly CityBucket[] = ['enabled', 'verifying', 'disabled'];
+const CITY_RANK: Record<CityBucket, number> = { verifying: 0, enabled: 1, disabled: 2 };
 
 export function cityBucket(c: FleetCity): CityBucket {
   const standing = cityStanding(c);
-  if (standing === 'verifying') return 'verifying';
-  if (standing === 'enabled') return c.pinned ? 'pinned' : 'enabled';
-  return 'disabled';
+  return standing === 'removed' ? 'disabled' : standing;
 }
 
 export type CityFilter = { bucket: CityBucket | 'all'; region: string; q: string };
 export const EMPTY_CITY_FILTER: CityFilter = { bucket: 'all', region: '', q: '' };
 
-/** Verifying cities first, then pinned, enabled and disabled, each by name;
+/** Verifying cities first, then enabled and disabled, each by name;
  *  narrowed by the legend, the region and the search box. */
 export function filterCities(cities: readonly FleetCity[], f: CityFilter): FleetCity[] {
   const q = f.q.trim().toLowerCase();

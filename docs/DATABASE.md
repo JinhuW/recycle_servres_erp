@@ -2219,7 +2219,7 @@ One row per Marketplace location the fleet searches. A city a manager adds start
 | `region` | `text` |  |  | Region label from master.toml, for grouping. |
 | `enabled` | `boolean` | ✓ | `false` | True once verified or overridden; only enabled cities get tasks. |
 | `per_day` | `integer` |  |  | Searches per item per day; NULL follows per_day_default (and tiers later). |
-| `pinned` | `boolean` | ✓ | `false` | Kept at the top of the cities page. |
+| `pinned` | `boolean` | ✓ | `false` | Retired in v1.372.0 (RS-435): nothing reads or writes it. Kept until no running release writes it, then dropped. |
 | `verified_at` | `timestamptz` |  |  | When a worker confirmed the slug. |
 | `verified_as` | `text` |  |  | The location label Facebook showed; 'imported' for cities taken from master.toml. |
 | `added_by` | `uuid` |  |  | → users. The manager who added it; NULL for imports. |

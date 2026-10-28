@@ -3274,7 +3274,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   count against the UTC day's budget, split at midnight. Lost city checks retry
   and late results cannot undo a removal or override. An account's all-zero
   searches quarantine it only when another account found cards in its cities;
-  a successful probe or manual release resets the evidence. Heartbeats renew
+  a successful probe or manual release resets the evidence. Since v1.371.2
+  (RS-433) a probe is written only while a worker runs the account, and a
+  waiting probe is cancelled once none does, so the Queue no longer shows
+  probes nobody can take. Heartbeats renew
   worker tokens without another browser login. Worker shared secrets come from
   the Cloudflare Worker's FLEET_WORKER_ENV on its claim-only surface; deploying these
   changes still requires the separate owner-approved cutover.
@@ -3330,6 +3333,17 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   managers' cookie calls stay on dev. With `SYNC_KEEP_FLEET=0`, the nightly
   prod→dev copy brings prod's fleet over like any other table. Host token
   hashes are replaced, claim tickets dropped, and sealed proxy URLs cleared.
+  Since v1.371.1 (RS-432), a mirror with `FLEET_MIRROR_URL`,
+  `FLEET_MIRROR_CLIENT_ID` and `FLEET_MIRROR_CLIENT_SECRET` set answers its
+  managers' fleet reads from prod, live. It signs in there as a service client
+  holding `fleet:read`, a scope only Settings → Connectors grants and only a
+  service client's token may use (since v1.373.1, RS-437, a token a user
+  consented to is refused). The banner says the page is live only when prod
+  actually hands over a token. Without the variables, the reads come from the
+  copy, whose heartbeats age into Offline between syncs. Since v1.373.1 a read
+  prod can't answer (unreachable, a 5xx, or a route prod's older release
+  lacks) falls back to the copy rather than a 502; a live answer carries
+  `X-Fleet-Source: live` and prod's own headers.
 - **Add to fleet (v1.364.0, RS-415)** — a manager puts pool accounts into
   ERP-fleet slots from **Monitors ▸ Facebook ▸ Account pool**, no seed script.
   The **Proxies** card under the pool table lists the exits the ERP keeps
@@ -3389,8 +3403,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     holds, and, until cutover, the coordinator's (host `homelab`); a worker
     both know is the ERP's row. An account no worker holds is not a row: the
     Account pool tab lists it, with its Unpark and Release quarantine. A
-    worker that stopped reporting stays as **Offline** for a week after its
-    last heartbeat. Each row: worker and VNC port, host, account number and
+    worker that stopped reporting stays as a row for a week after its last
+    heartbeat. Each row: worker and VNC port, host, account number and
     masked uid, the state chip with a one-line note (heartbeat age, "keeps
     its task" for a degraded worker, the account's quarantine end), **Now**
     (the city and item being searched with the time on it and "home city";
@@ -3399,16 +3413,18 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     **Today** (minutes of searching against the budget, as a ring), the lease
     epoch and when it renews, the worker's version (muted when it is not the
     host's), and the eye to the worker's page. Running workers come first,
-    then offline ones, each by worker id. The toolbar has the legend with
-    counts (All workers, Healthy, Degraded, Replacing, Parked — the worker
-    reports Session expired, Checkpoint… — and Offline), a host select and a
-    search over worker, account, city and host; since v1.371.0 (RS-431) the
+    then silent ones, each by worker id. Since v1.373.0 (RS-436) a worker is
+    one of two kinds: **Healthy** (running, degraded or being replaced
+    included) or **Parked** (it reports Session expired, Checkpoint,
+    Challenge or Dead, which its state chip names, or it went silent; since
+    v1.373.1 (RS-437) also when a manager parked its slot). The
+    toolbar has the legend with counts (All workers, Healthy, Parked), a
+    host select and a search over worker, account, city and host; since v1.371.0 (RS-431) the
     tab opens on Healthy rather than All workers. The foot says "N of M
     workers · R running on K hosts". Since v1.367.0 (RS-418) a coordinator
     worker the fleet retired (`retired_at` on its health row) is left out
     of the rows, the counts, the host select, the tab bar's running count
-    and the activity aside; a **Retired N** chip, off by default and there
-    only while N > 0, lists them read-only with "Retired <date>", and a
+    and the activity aside (since v1.373.0 there is no Retired chip); a
     retired worker's own page still opens, dated, without Re-login.
     The coordinator's activity aside stays under the table while its rows
     exist; since v1.350.1 it spans the full width and its list stops at 480px
@@ -3446,8 +3462,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     and when it is next due); **Start the round now** previews and confirms
     as before.
   - **Cities** (`/#/fleet/cities`, v1.344.0): the catalog, with a lede that
-    counts the cities, the searched, the pinned, the verifying and the off.
-    The toolbar has the legend (All, Enabled, Pinned, Verifying, Disabled), a
+    counts the cities, the searched, the verifying and the off.
+    The toolbar has the legend (All, Enabled, Verifying, Disabled; Pinned
+    went in v1.372.0, since nothing read it), a
     region select and a search over name and slug. Verifying cities come
     first, each with an inline row under it: "Added <when>. A worker will
     open the slug between tasks and confirm Facebook shows <name>" with
@@ -3458,7 +3475,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     chip, searches a day (Default or a fixed count), per item a cell with the
     last search (time, cards, alerts) and the open task as a chip — the
     worker searching it, "due, waiting N min", or "next <time>" — the worker
-    that calls it home with its account, and the row actions: pin, **Search
+    that calls it home with its account, and the row actions: **Search
     now**, **Remove**. A disabled city offers **Enable**, a removed one
     **Restore**; a city removed before its slug was verified asks whether to
     **Enable anyway** instead. **Rules**, beside **Add city**, edits the
@@ -3535,7 +3552,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     the session expiry the worker reports, the slot's device, the pool
     cookie's age as Session backup, the listed proxy (label, host:port,
     timezone), the slot (epoch and lease, parked, reserved, quarantine), home
-    and recently searched cities, today's budget minutes, host and build
+    and recently searched cities (since v1.371.3, RS-434, with a note that
+    the grey ones are what the queue handed it in the last 7 days, not a list
+    tied to it), today's budget minutes, host and build
     (amber when behind the latest release). Last listing and Session file
     read "—": the fleet has no source for them. A worker parked on a wall
     or lost session shows it under **Open checkpoints**. Actions: Watch

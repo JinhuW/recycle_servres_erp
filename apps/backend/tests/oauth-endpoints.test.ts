@@ -205,13 +205,15 @@ describe('DCR /oauth/register', () => {
     );
   });
 
-  it('never registers a connector for wechat:write, asked for or not', async () => {
-    for (const scope of [undefined, 'market:read wechat:write']) {
+  it('never registers a connector for a service-only scope, asked for or not', async () => {
+    for (const scope of [undefined, 'market:read wechat:write fleet:read']) {
       const r = await api('POST', '/oauth/register', {
         body: { client_name: 'wechat', redirect_uris: ['https://example.com/cb'], ...(scope ? { scope } : {}) },
       });
       expect(r.status).toBe(201);
-      expect(((r.body as Record<string, unknown>).scope as string).split(' ')).not.toContain('wechat:write');
+      const granted = ((r.body as Record<string, unknown>).scope as string).split(' ');
+      expect(granted).not.toContain('wechat:write');
+      expect(granted).not.toContain('fleet:read');
     }
   });
 

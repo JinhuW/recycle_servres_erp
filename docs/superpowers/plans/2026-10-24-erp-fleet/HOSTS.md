@@ -63,6 +63,11 @@
     | xargs docker inspect -f '{{.Name}} {{range .Config.Env}}{{.}} {{end}}' \
     | grep inventory-dev | cut -d' ' -f1
   ```
+  Dev's own Fleet page reads prod live (RS-432). Dev's backend has
+  `FLEET_MIRROR_URL=https://inventory.recycleservers.com` plus the id and
+  secret of a prod service client with `fleet:read`, minted under prod's
+  Settings → Connectors. That traffic goes in the opposite direction from the
+  forward above and is unrelated to it.
 - Shared worker secrets are the Cloudflare Worker secret FLEET_WORKER_ENV JSON,
   added only to a successful host-authenticated claim. Provision the edge secret
   before the agent/worker release; these values never enter Railway or Postgres.

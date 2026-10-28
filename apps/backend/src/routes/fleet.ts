@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { getDb } from '../db';
-import { isMirror, managerOnly, mirrorGate, type ManagerEnv } from '../fleet/auth';
+import { isMirror, managerOnly, managerSession, mirrorGate, type ManagerEnv } from '../fleet/auth';
 import {
   createCity, listCities, listItems, loadCity, loadSettings, readCityDraft, readCityPatch, readItems,
   readSettingsPatch, removeCity, saveSettings, updateCity, upsertItems,
@@ -9,6 +9,7 @@ import { reconcile } from '../fleet/scheduler';
 import { FLEET_TABLES, fleetTablesPresent, isRefusal, type Refusal } from '../fleet/sql';
 import { cityLog, listTasks, manualTask, readLogQuery, readTaskFilter, startRound } from '../fleet/tasks';
 import worker from '../fleet/claim';
+import { forwardsReads, mirrorAnswers } from '../fleet/mirror';
 import hosts, { releases } from '../fleet/hosts';
 import proxies from '../fleet/proxies';
 import proxyHealth from '../fleet/proxyHealth';
@@ -34,7 +35,10 @@ const body = (c: Context): Promise<unknown> => c.req.json().catch(() => null);
 fleet.get('/health', managerOnly, async (c) => {
   const tables = await fleetTablesPresent(getDb(c.env));
   const ok = FLEET_TABLES.every((t) => tables.includes(t));
-  return c.json({ ok, tables, mirror: isMirror(c.env) });
+  // Live only when the fleet's ERP hands over a token: a wrong secret or a
+  // revoked client leaves the pages on the copy, and the banner says so.
+  const live = isMirror(c.env) && forwardsReads(c.env) && await mirrorAnswers(c.env);
+  return c.json({ ok, tables, mirror: isMirror(c.env), mirror_live: live });
 });
 
 // ── Catalog: cities, items, settings (fleet/cities.ts) ──────────────────────
@@ -139,7 +143,7 @@ fleet.route('/proxies', proxies);
 // The manager's end of a fleet worker's VNC relay (fleet/vnc.ts). Like the
 // coordinator path, the handshake is replayed here as a GET so the session,
 // the role and the Origin are checked before a socket exists.
-fleet.get('/vnc/:workerId/ws', managerOnly, (c) => {
+fleet.get('/vnc/:workerId/ws', managerSession, (c) => {
   if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
     return c.json({ error: 'Expected a WebSocket upgrade' }, 426);
   }
