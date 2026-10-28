@@ -25,7 +25,7 @@ import { TableSkeleton } from '../../components/Skeleton';
 import { SerialNumbers } from '../../components/SerialNumbers';
 import { RefinePanel } from '../../components/RefinePanel';
 import { InventoryProductTable } from './InventoryProductTable';
-import type { ProductGroup } from './InventoryProductTable';
+import type { ProductGroup, ProductLot } from './InventoryProductTable';
 import { loadWarehouses } from '../../lib/warehouses';
 import { rememberSelectedRows, resolveSelectedRows } from '../../lib/inventorySelection';
 
@@ -374,20 +374,25 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
 
   // Selected lot ids can originate in the grouped product view, whose lots
   // are NOT in the flat `items` list (different endpoint + caps). Synthesise
-  // an InventoryRow-equivalent from each ProductGroup's spec + its ProductLot
+  // an InventoryRow-equivalent from each ProductLot and its ProductGroup
   // so bulk actions (sell order / transfer) and the selection totals see
   // grouped-view selections too — not just the flat 200-row slice.
   const groupedRowsById = useMemo(() => {
     const m = new Map<string, InventoryRow>();
     for (const g of products) {
       for (const lot of g.lines) {
+        // The lot's spec, not the group head's: "Mixed" groups a Kingston DDR4
+        // SODIMM with DDR3 RDIMMs, and the sell order stores the label built
+        // from this row. The group's only stands in for an older backend.
+        const own = <K extends keyof ProductLot & keyof ProductGroup>(k: K) =>
+          (lot[k] !== undefined ? lot[k] : g[k]) as ProductGroup[K];
         m.set(lot.id, {
           id: lot.id,
           category: g.category as InventoryRow['category'],
-          brand: g.brand, capacity: g.capacity, generation: g.generation,
-          type: g.type, classification: g.classification, rank: g.rank,
-          speed: g.speed, interface: g.interface, form_factor: g.form_factor,
-          description: g.description, item_type: g.item_type,
+          brand: own('brand'), capacity: own('capacity'), generation: own('generation'),
+          type: own('type'), classification: own('classification'), rank: own('rank'),
+          speed: own('speed'), interface: own('interface'), form_factor: own('form_factor'),
+          description: own('description'), item_type: own('item_type'),
           // The group's part number can be a RAM family's `…-CTD*` label; a
           // sell order or a market lookup needs the lot's own.
           part_number: lot.part_number ?? g.part_number,
@@ -395,7 +400,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           serial_number: lot.serial_number,
           condition: lot.condition, qty: lot.qty,
           unit_cost: lot.unit_cost ?? 0, sell_price: lot.sell_price,
-          status: lot.status, health: lot.health, rpm: g.rpm,
+          status: lot.status, health: lot.health, rpm: own('rpm'),
           warehouse_id: lot.warehouse_id, warehouse_short: lot.warehouse_short,
           warehouse_region: null,
           user_initials: lot.user_initials, user_name: lot.user_name,
