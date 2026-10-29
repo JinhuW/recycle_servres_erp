@@ -447,6 +447,19 @@ async function releaseTasks(
 
 export { releaseTasks };
 
+/** Deletes an account's slot with what it held: its leased tasks go back on
+ *  the queue (the pool trigger only does that for an account leaving
+ *  `fleet`), and its quarantine probe, which nothing else would close, is
+ *  cancelled. False when it had no slot. */
+export async function dropSlot(tx: SqlLike, no: number, reason: string): Promise<boolean> {
+  const [slot] = await tx<{ account_no: number }[]>`SELECT account_no FROM fleet_slots WHERE account_no = ${no} FOR UPDATE`;
+  if (!slot) return false;
+  await releaseTasks(tx, { account_no: no }, reason);
+  await tx`UPDATE fleet_tasks SET state = 'cancelled', done_at = NOW() WHERE account_no = ${no} AND kind = 'probe' AND state = 'ready'`;
+  await tx`DELETE FROM fleet_slots WHERE account_no = ${no}`;
+  return true;
+}
+
 worker.post('/heartbeat', workerAuth, async (c) => {
   const w: WorkerIdentity = c.var.worker;
   const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;

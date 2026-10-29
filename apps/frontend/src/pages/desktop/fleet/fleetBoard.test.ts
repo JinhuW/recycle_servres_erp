@@ -175,7 +175,8 @@ describe('analysis', () => {
     // cards → title, title → open, open → keywords, fresh → ai, ai → passed, passed → alert
     for (const i of [1, 2, 3, 5, 6, 7]) expect(gaps[i]).toMatchObject({ value: null, mixed: true });
     expect(gaps[4].value).toBe(90.5);                                    // fresh of the keyword passes
-    expect(funnelHeadline(c)).toMatchObject({ titleDrop: null, modelDrop: null, passed: 40, withheld: 25 });
+    // One day's passes would read as the week's beside the week's reviews.
+    expect(funnelHeadline(c)).toMatchObject({ titleDrop: null, modelDrop: null, passed: null, withheld: 0 });
   });
   it('leaves a later stage uncounted while no day in the range reported it', () => {
     const c = funnelCounts(STATS.slice(0, 3), 7, NOW);
@@ -189,7 +190,11 @@ describe('analysis', () => {
     expect(gaps[1]).toEqual({ kind: 'pct', value: 25.2, drop: true });   // title of the cards
     expect(gaps[2]).toEqual({ kind: 'pct', value: 84.3, drop: false });  // opened of the title passes
     expect(gaps[6]).toEqual({ kind: 'pct', value: 3.1, drop: true });    // passed of the reviewed
-    expect(gaps[7]).toEqual({ kind: 'pct', value: 22.5, drop: true });   // alerted of the passed
+    expect(gaps[7]).toEqual({ kind: 'pct', value: 60, drop: false });    // alerted of the 15 passes not withheld
+    // Everything withheld leaves nothing an alert could have come from.
+    expect(funnelGaps({ ai: 10, passed: 3, withheld: 3, alert: 0 })[7]).toEqual({ kind: 'pct', value: null, drop: false });
+    // An alert on a cached verdict counts with no pass beside it: not a rate.
+    expect(funnelGaps({ ai: 10, passed: 1, alert: 2 })[7]).toEqual({ kind: 'pct', value: null, drop: false, over: true });
     // Without the later stages, each gap reads from the last counted one.
     const old = funnelGaps(funnelCounts(STATS.slice(0, 3), 1, Date.parse('2026-10-23T12:00:00Z')));
     expect(old[1]).toEqual({ kind: 'pct', value: null, drop: false });

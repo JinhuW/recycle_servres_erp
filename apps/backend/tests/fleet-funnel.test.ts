@@ -37,21 +37,29 @@ describe('funnelDays', () => {
     ]);
   });
 
-  it('sums the later stages where a result counted them, and leaves them null on a day none did', async () => {
+  it('sums the later stages on a day every result counted them, and leaves them null on a day any did not', async () => {
     const full = { cards: 100, title_pass: 30, opened: 20, keyword_pass: 12, fresh: 10, reviewed: 8, passed: 3, withheld: 3, alerted: 0 };
     await task('2026-10-28T08:00:00Z', 'done', full);
     await task('2026-10-28T09:00:00Z', 'done', full);
-    // An older worker on the same day adds its four counts and nothing else.
-    await task('2026-10-28T10:00:00Z', 'done', { cards: 50, opened: 5, reviewed: 2, alerted: 0 });
+    // A stopped search counted nothing, so it does not make the day partial.
+    await task('2026-10-28T09:30:00Z', 'done', { stopped: true });
+    // An older worker adds its four counts and nothing else: summing the rest
+    // over the newer workers alone would read 30 title passes out of 150 cards.
+    await task('2026-10-27T09:00:00Z', 'done', full);
     await task('2026-10-27T10:00:00Z', 'done', { cards: 50, opened: 5, reviewed: 2, alerted: 0 });
 
     expect(await funnelDays(getTestDb(), 2, NOW)).toEqual([
-      { day: '2026-10-27', searches: 1, cards: 50, opened: 5, reviewed: 2, alerted: 0, title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null },
+      { day: '2026-10-27', searches: 2, cards: 150, opened: 25, reviewed: 10, alerted: 0, title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null },
       {
-        day: '2026-10-28', searches: 3, cards: 250, title_pass: 60, opened: 45, keyword_pass: 24, fresh: 20,
-        reviewed: 18, passed: 6, withheld: 6, alerted: 0,
+        day: '2026-10-28', searches: 3, cards: 200, title_pass: 60, opened: 40, keyword_pass: 24, fresh: 20,
+        reviewed: 16, passed: 6, withheld: 6, alerted: 0,
       },
     ]);
+  });
+
+  it('leaves out a count too large to be a sweep instead of failing the day', async () => {
+    await task('2026-10-28T09:00:00Z', 'done', { cards: 100, opened: 10, reviewed: 99999999999, alerted: 1 });
+    expect(await funnelDays(getTestDb(), 1, NOW)).toMatchObject([{ day: '2026-10-28', cards: 100, reviewed: 0, alerted: 1 }]);
   });
 
   it('counts a search whose result is missing or malformed, and none of its numbers', async () => {

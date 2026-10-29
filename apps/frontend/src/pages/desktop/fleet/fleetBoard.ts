@@ -465,29 +465,35 @@ export function funnelCounts(days: readonly FleetFunnelDay[] | null, range: Funn
   return out;
 }
 
-export type FunnelGap = { kind: 'ratio' | 'pct'; value: number | null; drop: boolean; mixed?: boolean };
+export type FunnelGap = { kind: 'ratio' | 'pct'; value: number | null; drop: boolean; mixed?: boolean; over?: boolean };
 
 /** What survives into each stage from the last counted one before it: cards
  *  per search as a ratio, every other step as a percentage; `drop` marks a
  *  step under half. An uncounted stage gets no gap of its own, and neither
  *  does a step between a partial stage and a whole one: they were summed over
- *  different days. */
+ *  different days. The alert is read against what passed the model less what
+ *  was withheld, which could never be sent. A step over 100% is `over`, not a
+ *  rate: a worker counts an alert sent on a cached verdict but not the pass,
+ *  so the two stages did not count the same listings. */
 export function funnelGaps(counts: FunnelCounts): FunnelGap[] {
   const out: FunnelGap[] = [];
   const partial = (k: FlowStage) => !!counts.partial?.includes(k);
   let last = counts[FLOW_STAGES[0]];
   let lastStage = FLOW_STAGES[0];
   for (let i = 1; i < FLOW_STAGES.length; i += 1) {
-    const prev = last;
-    const cur = counts[FLOW_STAGES[i]];
-    const mixed = cur !== undefined && partial(lastStage) !== partial(FLOW_STAGES[i]);
+    const stage = FLOW_STAGES[i];
+    const prev = stage === 'alert' && lastStage === 'passed' && last !== undefined && counts.withheld !== undefined
+      ? last - counts.withheld : last;
+    const cur = counts[stage];
+    const mixed = cur !== undefined && partial(lastStage) !== partial(stage);
     const known = prev !== undefined && cur !== undefined && prev > 0 && !mixed;
-    if (FLOW_STAGES[i] === 'cards') out.push({ kind: 'ratio', value: known ? Math.round(cur / prev) : null, drop: false });
+    if (stage === 'cards') out.push({ kind: 'ratio', value: known ? Math.round(cur / prev) : null, drop: false });
     else {
-      const pct = known ? Math.round(cur / prev * 1000) / 10 : null;
-      out.push({ kind: 'pct', value: pct, drop: pct !== null && pct < 50, ...(mixed ? { mixed } : {}) });
+      const over = known && cur > prev;
+      const pct = known && !over ? Math.round(cur / prev * 1000) / 10 : null;
+      out.push({ kind: 'pct', value: pct, drop: pct !== null && pct < 50, ...(mixed ? { mixed } : {}), ...(over ? { over } : {}) });
     }
-    if (cur !== undefined) { last = cur; lastStage = FLOW_STAGES[i]; }
+    if (cur !== undefined) { last = cur; lastStage = stage; }
   }
   return out;
 }
@@ -511,10 +517,12 @@ export function funnelHeadline(counts: FunnelCounts): FunnelHeadline | null {
   const partial = counts.partial ?? [];
   // A partial count read against a whole one would understate what passed.
   const title = partial.includes('title') ? undefined : counts.title;
-  const passed = counts.passed ?? null;
-  const modelOut = passed === null ? alerts : partial.includes('passed') ? null : passed;
+  // What passed and what was withheld only stand beside the range's other
+  // totals when every day in it counted them.
+  const passed = partial.includes('passed') ? null : counts.passed ?? null;
+  const modelOut = counts.passed === undefined ? alerts : passed;
   return {
-    cards, searches, reviews, alerts, passed, withheld: counts.withheld ?? 0,
+    cards, searches, reviews, alerts, passed, withheld: passed === null ? 0 : counts.withheld ?? 0,
     cardsPerAlert: alerts > 0 && cards > 0 ? Math.round(cards / alerts) : null,
     reviewsPerAlert: alerts > 0 && reviews > 0 ? Math.round(reviews / alerts) : null,
     titleDrop: title !== undefined && cards > 0 ? Math.round((1 - title / cards) * 100) : null,

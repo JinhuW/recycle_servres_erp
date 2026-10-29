@@ -15,6 +15,41 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.379.1] - 2026-10-29
+
+### Fixed
+
+Review fixes before the v1.379 production cut (RS-452).
+
+- **Retire & free no longer offers to retire a healthy account.** The Fleet
+  tab showed it on every parked row, and a row is parked when its worker
+  merely went silent, so a host reboot put a one-click retire on working
+  accounts. It now shows only when the worker reports a lost account, a
+  manager parked the slot, or the pool already took the account out, and not
+  for a worker parked for an operator, whose fault is its proxy. The rule is
+  one shared function, and `POST /api/fleet/slots/:no/retire` applies it too,
+  refusing anything else with 409 `not_lost`, so a page a poll behind a
+  Re-login cannot retire the account it just brought back.
+- **Retiring from the Account Pool page drops the fleet slot too.** Both
+  pages now go through one `retireAccount`, which also returns the slot's
+  leased tasks to the queue when the account had already left the fleet
+  (the pool trigger only does that on the way out of `fleet`), so a city or
+  a probe is no longer stuck behind a deleted slot. Retiring an account that
+  is already retired writes no second event.
+- A rolling release no longer fails when the worker it is replacing comes
+  back on a different account with a lower slot epoch.
+- The Retire dialog no longer promises a replacement worker: with no free
+  account left, the host runs one fewer.
+- **Analysis no longer mixes old and new workers' counts on one day.** A
+  day's title, keyword, new-to-us, passed and withheld totals now count only
+  when every search that day reported them, so release day reads "not
+  counted" instead of 60 title passes out of 700 cards. A counter past seven
+  digits is dropped instead of overflowing and failing the whole funnel. The
+  passed-to-alert rate leaves out what was held back with fleet alerts off,
+  a step over 100% shows no number and explains why, and a stage summed
+  over fewer days than its neighbours is starred and footnoted.
+- Park, Unpark and Retire now share one confirm dialog.
+
 ## [1.379.0] - 2026-10-28
 
 ### Added

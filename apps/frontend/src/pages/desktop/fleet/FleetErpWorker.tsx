@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { handleFetchError } from '../../../lib/errorToast';
 import type { FbWorkerStint } from '../../../lib/facebookPool';
-import { fleetStateParked, fleetApi, type FleetCity, type FleetSlot, type FleetWorkerDetail } from '../../../lib/fleet';
+import { fleetSlotRetirable, fleetApi, type FleetCity, type FleetSlot, type FleetWorkerDetail } from '../../../lib/fleet';
 import { browserLabel, SESSION_WARN_DAYS } from '../../../lib/fleetView';
 import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
@@ -127,8 +127,9 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
     );
   // Removing deletes the slot, which only a slot nobody holds allows.
   const removable = !!slot && (slot.parked || !leaseLive(slot, now)) && !slot.reserved_until;
-  // A lost account: this worker's own slot, or one a manager parked.
-  const retirable = !!slot && (d.holds_slot || slot.worker_id === null) && (slot.parked || fleetStateParked(w.state));
+  // A lost account on this worker's own slot, or on one parked with none.
+  const retirable = !!slot && (d.holds_slot || slot.worker_id === null)
+    && fleetSlotRetirable({ parked: slot.parked, poolStatus: slot.pool_status, state: w.state, operator: w.detail?.operator === true });
 
   return (
     <div className="fp-pool">

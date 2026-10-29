@@ -27,6 +27,15 @@ export type FleetParkedState = (typeof FLEET_PARKED_STATES)[number];
 export const fleetStateParked = (state: string | null | undefined): boolean =>
   !!state && (state.startsWith('CHALLENGE') || (FLEET_PARKED_STATES as readonly string[]).includes(state));
 
+/** Whether an account's fleet slot may be retired as lost: a manager parked
+ *  it, the pool already took it out of the fleet, or its worker reports a
+ *  parked state. A worker that only went silent is not lost, and one parked
+ *  for an operator (DEAD connect_failed) has a proxy fault, not a dead
+ *  account; a manager who disagrees parks it first. */
+export const fleetSlotRetirable = (s: {
+  parked: boolean; poolStatus?: string | null; state: string | null | undefined; operator: boolean;
+}): boolean => s.parked || (!!s.poolStatus && s.poolStatus !== 'fleet') || (fleetStateParked(s.state) && !s.operator);
+
 export type FleetCity = {
   slug: string;
   name: string;
@@ -438,7 +447,7 @@ export type FleetRelease = {
    *  container that is not running, a worker parked on its account. */
   skip_reasons?: Record<string, string>;
   /** The worker being replaced now, and the state it was in before. */
-  current: { worker_id: string; host_id: string; started_at: string; pre_state: string; epoch?: number; stopped_at?: string } | null;
+  current: { worker_id: string; host_id: string; started_at: string; pre_state: string; epoch?: number; account_no?: number; stopped_at?: string } | null;
   failure: string | null;
 };
 
@@ -671,6 +680,8 @@ export type FleetErrorCode =
   /** Removing a slot a worker holds (or a reservation does): park it first. */
   | 'leased'
   /** Re-login for a worker that holds no slot right now. */
-  | 'not_running';
+  | 'not_running'
+  /** Retiring an account fleetSlotRetirable does not call lost: park it first. */
+  | 'not_lost';
 
 export type FleetError = { error: FleetErrorCode; detail?: string };

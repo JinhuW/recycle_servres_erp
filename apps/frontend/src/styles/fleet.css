@@ -852,3 +852,7 @@
 .fleet-proxy-strip i.is-degraded { background: var(--warn); }
 .fleet-proxy-strip i.is-down { background: var(--neg); }
 .fleet-proxy-workers { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; }
+
+/* A stage summed over fewer days than the ones beside it. */
+.ff-stage-partial { margin-left: 1px; color: var(--fg-muted); font-weight: 500; }
+.ff-stage-partial-note { display: block; margin-top: 4px; font-size: 11px; color: var(--fg-muted); }
