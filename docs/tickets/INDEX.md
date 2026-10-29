@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-452](./RS-452-release-review-fixes-for-the-v1-379-prod-cut.md) | done | bug | P1 | Release-review fixes for the v1.379 prod cut | 1.379.1 |
 | [RS-451](./RS-451-retire-a-parked-worker-s-account-and-free-the-worker.md) | done | story | P2 | Retire a parked worker's account and free the worker | 1.379.0 |
 | [RS-450](./RS-450-count-the-title-keyword-and-new-to-us-stages-and-sho.md) | done | story | P2 | Count the title, keyword and new-to-us stages and show what passed the model | 1.378.0 |
 | [RS-449](./RS-449-load-more-fleet-task-rows-as-the-table-scrolls.md) | done | bug | P2 | Load more fleet task rows as the table scrolls | 1.377.4 |

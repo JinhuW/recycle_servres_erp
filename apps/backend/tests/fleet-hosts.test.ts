@@ -224,6 +224,23 @@ describe('releases', () => {
     expect(list.body.hosts[0].desired).toEqual({ count: 2, image: IMAGE_NEW, version: '0.14.0', roll: null });
   });
 
+  it('passes the gate for a replacement that comes back on another account at a lower epoch', async () => {
+    const { token } = await loginAs(ALEX);
+    await api('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0' } });
+    await seedSlot(3, { epoch: 0 });
+    await getTestDb()`UPDATE fleet_slots SET epoch = 5 WHERE account_no = 1`;
+    await getTestDb()`UPDATE fleet_workers SET epoch = 5 WHERE worker_id = 'lab-1'`;
+    await getTestDb()`INSERT INTO fleet_tasks (city, item, due_at, state, worker_id, account_no, epoch, leased_at, lease_expires_at)
+                      VALUES ('houston', 'server_ram', NOW(), 'leased', 'lab-2', 2, 1, NOW(), NOW() + interval '30 minutes')`;
+    expect((await desired()).body.roll).toEqual({ replace: 'lab-1' });
+    expect((await release()).current).toMatchObject({ worker_id: 'lab-1', epoch: 5, account_no: 1 });
+    // Account 1 was retired meanwhile; lab-1 comes back on account 3, epoch 1.
+    await getTestDb()`UPDATE fleet_workers SET version = '0.14.0', state = 'HEALTHY', account_no = 3, epoch = 1,
+                      last_heartbeat_at = NOW() + interval '1 second' WHERE worker_id = 'lab-1'`;
+    await desired();
+    expect((await release()).upgraded).toEqual(['lab-1']);
+  });
+
   it('skips workers on observe-only hosts, stops a release whose worker does not come back, and supersedes an active one', async () => {
     const otherToken = 'host-' + randomBytes(8).toString('hex');
     await seedHost('obs', otherToken, 1, false);

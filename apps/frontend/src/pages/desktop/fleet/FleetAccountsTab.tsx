@@ -3,7 +3,7 @@ import { Icon } from '../../../components/Icon';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { coordinatorApi, type Challenge, type FleetDoc } from '../../../lib/coordinator';
 import { poolApi } from '../../../lib/facebookPool';
-import { fleetApi, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetWorker } from '../../../lib/fleet';
+import { fleetApi, fleetSlotRetirable, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetWorker } from '../../../lib/fleet';
 import { queueCityName, withoutRetired } from '../../../lib/fleetView';
 import { useT } from '../../../lib/i18n';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
@@ -173,7 +173,10 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
   // The account's slot, held by this worker or parked with none; one another
   // worker has claimed since is not this row's to retire.
   const ownSlot = r.slot && (r.slot.worker_id === null || r.slot.worker_id === r.workerId) ? r.slot : null;
-  const retirable = r.source === 'erp' && r.kind === 'parked' && !!ownSlot && !mirror;
+  // Only an account its worker reports lost, or a manager parked: a worker
+  // that went silent shows as parked too, with a healthy account.
+  const retirable = r.source === 'erp' && !!ownSlot && !mirror
+    && fleetSlotRetirable({ parked: ownSlot.parked, poolStatus: ownSlot.pool_status, state: r.state, operator: r.operator });
 
   const since = r.now?.since ? Math.max(0, Math.round((now - Date.parse(r.now.since)) / 1000)) : null;
   const elapsed = since === null ? '' : `${Math.floor(since / 60)}m ${String(since % 60).padStart(2, '0')}s`;

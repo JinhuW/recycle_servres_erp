@@ -24,7 +24,7 @@ export type {
   FleetSecretKind, FleetWorkerDetail, FleetWorkerEvent, FleetWorkerRelogin,
 } from '@recycle-erp/shared';
 export {
-  FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
+  FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
   FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_SLOW_MS,
 } from '@recycle-erp/shared';
 

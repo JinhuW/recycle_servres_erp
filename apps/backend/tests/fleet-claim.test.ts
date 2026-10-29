@@ -541,6 +541,45 @@ describe('POST /api/fleet/slots/:no/retire', () => {
     const { token: purchaser } = await loginAs(MARCUS);
     expect((await api('POST', `/api/fleet/slots/${spare}/retire`, { token: purchaser, body: {} })).status).toBe(403);
   });
+
+  it('refuses a healthy, silent or operator-parked worker’s account until a manager parks it', async () => {
+    const no = await seedSlot(1);
+    const { worker_token: token } = await claimed('lab-1');
+    const { token: manager } = await loginAs(ALEX);
+    const retire = () => api<{ error: string }>('POST', `/api/fleet/slots/${no}/retire`, { token: manager, body: {} });
+    expect((await heartbeat(token, 'HEALTHY')).status).toBe(200);
+    expect(await retire()).toMatchObject({ status: 409, body: { error: 'not_lost' } });
+    expect((await heartbeat(token, 'DEAD', { detail: { operator: true } })).status).toBe(200);
+    expect(await retire()).toMatchObject({ status: 409, body: { error: 'not_lost' } });
+    expect((await api('POST', `/api/fleet/slots/${no}/park`, { token: manager, body: {} })).status).toBe(200);
+    expect((await retire()).status).toBe(200);
+  });
+
+  it('frees what the slot held when the pool had already taken the account out of the fleet', async () => {
+    const no = await seedSlot(1);
+    const { worker_token: token } = await claimed('lab-1');
+    const id = await addTask('houston');
+    await nextTask(token);
+    const db = getTestDb();
+    // The alive check marks it a problem straight in the table; the worker still holds its task.
+    await db`UPDATE fb_pool_accounts SET status = 'problem' WHERE no = ${no}`;
+    await db`UPDATE fleet_tasks SET state = 'leased', worker_id = 'lab-1', account_no = ${no}, leased_at = NOW(), lease_expires_at = NOW() + interval '10 minutes' WHERE id = ${id}`;
+    const { token: manager } = await loginAs(ALEX);
+    expect((await api('POST', `/api/fleet/slots/${no}/retire`, { token: manager, body: {} })).status).toBe(200);
+    expect(await taskRow(id)).toMatchObject({ state: 'ready', worker_id: null });
+    expect(await db`SELECT 1 FROM fleet_slots WHERE account_no = ${no}`).toHaveLength(0);
+    // Retiring it again from the pool page writes no second event.
+    expect((await api('POST', `/api/facebook-pool/${no}/retire`, { token: manager })).status).toBe(200);
+    expect(await db`SELECT 1 FROM fb_pool_events WHERE account_no = ${no} AND kind = 'retired'`).toHaveLength(1);
+  });
+
+  it('drops the slot when the pool page retires the account', async () => {
+    const no = await seedSlot(1);
+    await claimed('lab-1');
+    const { token: manager } = await loginAs(ALEX);
+    expect((await api('POST', `/api/facebook-pool/${no}/retire`, { token: manager })).status).toBe(200);
+    expect(await getTestDb()`SELECT 1 FROM fleet_slots WHERE account_no = ${no}`).toHaveLength(0);
+  });
 });
 
 describe('POST /api/fleet/worker/events', () => {

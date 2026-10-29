@@ -3437,7 +3437,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     (RS-451) a parked ERP-fleet row, and that worker's page, have **Retire &
     free**: the pool account is retired and its slot deleted, the worker is
     refused on its next call and exits, and its host's next container claims
-    another free account (a worker parked for an operator stays stopped). The
+    another free account (a worker parked for an operator stays stopped).
+    Since v1.379.1 (RS-452) only when its worker reports Session expired,
+    Checkpoint, Challenge or Dead (not Dead for an operator, a proxy fault),
+    or a manager parked the slot, or the pool already took the account out:
+    a row parked only because its worker went silent has none, and the API
+    refuses any other slot with `not_lost`. Retire on the Account Pool page
+    deletes the account's fleet slot too, and with no free account left the
+    host runs one worker fewer instead of replacing it. The
     toolbar has the legend with counts (All workers, Healthy, Parked), a
     host select and a search over worker, account, city and host; since v1.371.0 (RS-431) the
     tab opens on Healthy rather than All workers. The foot says "N of M
@@ -3523,7 +3530,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     shows how many of those a worker held back because fleet alerts are off,
     and the claim and de-duplication text moved to Telegram alert. A stage
     no day in the range reported shows "—"; one only some days reported
-    gives no pass rate against a stage counted on every day. Between
+    gives no pass rate against a stage counted on every day. Since v1.379.1
+    (RS-452) a day counts those stages only when every search that day
+    counted them, a stage summed over fewer days is starred with a footnote,
+    the alert's rate leaves out what was held back, and a step over 100 %
+    shows no number. Between
     stages the pass rate from the last counted stage (cards per search as
     "×N", every other step as a percentage, amber under 50 %) and under the pipeline the
     headline ratios: what passed the model and what was held back, cards per

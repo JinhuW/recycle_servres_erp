@@ -89,24 +89,33 @@ export function readFunnelDays(q: Record<string, string | undefined>): number | 
  * The Analysis funnel: finished searches per UTC day over the last `days`
  * (today included), with what their results counted. Days with no search are
  * left out; the page fills them. Retention bounds how far back this reaches.
- * The later stages sum to NULL, not 0, on a day only older workers reported:
- * their results never counted those stages.
+ * The later stages are NULL, not 0, on a day where any search that counted
+ * cards lacked them:
+ * older workers' results never counted them, and summing only the newer
+ * workers' would set a part of the day against the whole of it. A count
+ * past seven digits is a worker bug, not a sweep, and is left out rather
+ * than let one bad result overflow the day.
  */
 export async function funnelDays(sql: SqlLike, days: number, now: Date = new Date()): Promise<FleetFunnelDay[]> {
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   const since = new Date(today - (days - 1) * 86_400_000);
+  const n = (key: string) => sql`CASE WHEN result->>${key} ~ '^[0-9]{1,7}$' THEN (result->>${key})::int END`;
+  const whole = (key: string) => sql`COALESCE(SUM(${n(key)}), 0)::int`;
+  // A result with no cards (a stopped search) counted nothing at all, so it
+  // takes nothing from a day's other stages either.
+  const late = (key: string) => sql`CASE WHEN COUNT(${n(key)}) = COUNT(${n('cards')}) THEN SUM(${n(key)})::int END`;
   return sql<FleetFunnelDay[]>`
     SELECT to_char(done_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
            COUNT(*)::int AS searches,
-           COALESCE(SUM(CASE WHEN result->>'cards' ~ '^[0-9]+$' THEN (result->>'cards')::int END), 0)::int AS cards,
-           SUM(CASE WHEN result->>'title_pass' ~ '^[0-9]+$' THEN (result->>'title_pass')::int END)::int AS title_pass,
-           COALESCE(SUM(CASE WHEN result->>'opened' ~ '^[0-9]+$' THEN (result->>'opened')::int END), 0)::int AS opened,
-           SUM(CASE WHEN result->>'keyword_pass' ~ '^[0-9]+$' THEN (result->>'keyword_pass')::int END)::int AS keyword_pass,
-           SUM(CASE WHEN result->>'fresh' ~ '^[0-9]+$' THEN (result->>'fresh')::int END)::int AS fresh,
-           COALESCE(SUM(CASE WHEN result->>'reviewed' ~ '^[0-9]+$' THEN (result->>'reviewed')::int END), 0)::int AS reviewed,
-           SUM(CASE WHEN result->>'passed' ~ '^[0-9]+$' THEN (result->>'passed')::int END)::int AS passed,
-           SUM(CASE WHEN result->>'withheld' ~ '^[0-9]+$' THEN (result->>'withheld')::int END)::int AS withheld,
-           COALESCE(SUM(CASE WHEN result->>'alerted' ~ '^[0-9]+$' THEN (result->>'alerted')::int END), 0)::int AS alerted
+           ${whole('cards')} AS cards,
+           ${late('title_pass')} AS title_pass,
+           ${whole('opened')} AS opened,
+           ${late('keyword_pass')} AS keyword_pass,
+           ${late('fresh')} AS fresh,
+           ${whole('reviewed')} AS reviewed,
+           ${late('passed')} AS passed,
+           ${late('withheld')} AS withheld,
+           ${whole('alerted')} AS alerted
     FROM fleet_tasks
     WHERE state = 'done' AND kind = 'search' AND done_at >= ${since}
     GROUP BY 1 ORDER BY 1`;
