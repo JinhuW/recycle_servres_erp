@@ -327,6 +327,38 @@ export function UnparkDialog({ slot, onClose, onDone }: { slot: FleetSlot; onClo
   );
 }
 
+// For a lost account: retiring it drops the slot, and the worker's next
+// container claims another free account, which is a Facebook login. A worker
+// parked for an operator exits 78 instead and its host leaves it stopped.
+export function RetireSlotDialog({ accountNo, workerId, operator, onClose, onDone }: {
+  accountNo: number; workerId: string | null; operator: boolean; onClose: () => void; onDone: () => void;
+}) {
+  const { t } = useT();
+  const [busy, setBusy] = useState(false);
+  const confirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fleetApi.retireSlot(accountNo);
+      showSuccessToast(t('fleetRetiredFreed', { no: accountNo }));
+      onDone();
+    } catch (e) {
+      handleFetchError(e);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 460 }}>
+      <ConfirmDialogBody title={t('fleetRetireTitle', { no: accountNo })} confirm={t('fleetRetireFree')} busy={busy} danger
+        onClose={onClose} onConfirm={confirm}
+        body={<>
+          <p>{t('fleetRetireBody', { worker: workerId ?? '—' })}</p>
+          <p className="fp-warn">{operator ? t('fleetRetireOperator') : t('fleetRetireWarn')}</p>
+        </>} />
+    </Modal>
+  );
+}
+
 // Lifting a quarantine early lets the next worker that asks claim the account.
 export function ReleaseQuarantineButton({ slot, onDone }: { slot: FleetSlot; onDone: () => void }) {
   const { t } = useT();

@@ -159,6 +159,9 @@ export const fleetApi = {
   parkSlot: (no: number) => api.post<{ slot: FleetSlot }>(`${BASE}/slots/${no}/park`, {}).then(r => r.slot),
   // Lets a parked account be claimed again.
   unparkSlot: (no: number) => api.post<{ slot: FleetSlot }>(`${BASE}/slots/${no}/unpark`, {}).then(r => r.slot),
+  // Retires the pool account and deletes its slot, held or not: its worker is
+  // refused, exits, and its next container claims another free account.
+  retireSlot: (no: number) => api.post<{ ok: true; account_no: number; worker_id: string | null }>(`${BASE}/slots/${no}/retire`, {}),
   workers: () => api.get<{ workers: FleetWorker[] }>(`${BASE}/workers`).then(r => r.workers),
   // One worker with its slot, account, proxy, cities, stats, log and history; 404 for an id the fleet never saw.
   worker: (id: string) => api.get<FleetWorkerDetail>(`${BASE}/workers/${slug(id)}`),

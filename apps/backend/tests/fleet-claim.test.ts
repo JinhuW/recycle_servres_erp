@@ -505,6 +505,44 @@ describe('POST /api/fleet/worker/heartbeat', () => {
   });
 });
 
+describe('POST /api/fleet/slots/:no/retire', () => {
+  beforeEach(async () => { await resetDb(); await seedBase(); });
+
+  it('retires a parked worker’s account, drops its slot and frees the worker for the next account', async () => {
+    const lost = await seedSlot(1);
+    const spare = await seedSlot(2);
+    const { worker_token: token } = await claimed('lab-1');
+    const id = await addTask('houston');
+    await nextTask(token);
+    const probe = await addTask('denver', 'server_ram', { kind: 'probe', account_no: lost });
+    expect((await heartbeat(token, 'SESSION_EXPIRED')).status).toBe(200);
+
+    const { token: manager } = await loginAs(ALEX);
+    const r = await api<{ ok: boolean; account_no: number; worker_id: string }>('POST', `/api/fleet/slots/${lost}/retire`, { token: manager, body: {} });
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ ok: true, account_no: lost, worker_id: 'lab-1' });
+
+    const db = getTestDb();
+    const [a] = await db<{ status: string; holder_name: string | null }[]>`SELECT status, holder_name FROM fb_pool_accounts WHERE no = ${lost}`;
+    expect(a).toEqual({ status: 'retired', holder_name: null });
+    expect(await db`SELECT 1 FROM fleet_slots WHERE account_no = ${lost}`).toHaveLength(0);
+    expect(await taskRow(id)).toMatchObject({ state: 'ready', worker_id: null });
+    expect(await taskRow(probe)).toMatchObject({ state: 'cancelled' });
+    const ev = await db<{ status: string; detail: string }[]>`
+      SELECT status, detail FROM fb_pool_events WHERE account_no = ${lost} AND kind = 'retired'`;
+    expect(ev).toEqual([{ status: 'retired', detail: 'retired from the ERP fleet' }]);
+
+    // The worker is refused and exits; the container its host starts next takes the spare.
+    expect((await heartbeat(token, 'SESSION_EXPIRED')).status).toBe(409);
+    const next = await claimed('lab-1');
+    expect(next.account.no).toBe(spare);
+
+    expect((await api('POST', '/api/fleet/slots/999/retire', { token: manager, body: {} })).status).toBe(404);
+    const { token: purchaser } = await loginAs(MARCUS);
+    expect((await api('POST', `/api/fleet/slots/${spare}/retire`, { token: purchaser, body: {} })).status).toBe(403);
+  });
+});
+
 describe('POST /api/fleet/worker/events', () => {
   beforeEach(async () => { await resetDb(); await seedBase(); });
 

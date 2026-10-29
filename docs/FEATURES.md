@@ -3433,7 +3433,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     one of two kinds: **Healthy** (running, degraded or being replaced
     included) or **Parked** (it reports Session expired, Checkpoint,
     Challenge or Dead, which its state chip names, or it went silent; since
-    v1.373.1 (RS-437) also when a manager parked its slot). The
+    v1.373.1 (RS-437) also when a manager parked its slot). Since v1.379.0
+    (RS-451) a parked ERP-fleet row, and that worker's page, have **Retire &
+    free**: the pool account is retired and its slot deleted, the worker is
+    refused on its next call and exits, and its host's next container claims
+    another free account (a worker parked for an operator stays stopped). The
     toolbar has the legend with counts (All workers, Healthy, Parked), a
     host select and a search over worker, account, city and host; since v1.371.0 (RS-431) the
     tab opens on Healthy rather than All workers. The foot says "N of M
