@@ -10,7 +10,7 @@ nothing the ERP edits needs a container restart (which is a Facebook login).
 | --- | --- | --- |
 | `search` (rating gate, `min_unit_count`, prompts, `title_prefilter`, …) | claim, rendered into `config.toml` at boot | `next-task` answer, applied between tasks |
 | Alerts on/off | `RS_ALERTS` in `FLEET_WORKER_ENV`, at boot | `fleet_settings.alerts.on`, live |
-| Topic routing | `alert_priority` in the monitor (units only) | `fleet_settings.alerts.rating_topics` + the unit buckets, live |
+| Topic routing | `alert_priority` in the monitor, by unit count | unchanged: by unit count, whatever the rating (owner, 2026-10-29) |
 | Telegram chat and topic ids | `FLEET_WORKER_ENV`, at boot | `fleet_settings.alerts` (not secret), live |
 | Telegram bot token, OpenRouter key, coordinator tokens | `FLEET_WORKER_ENV`, at boot | the same secret, also served by `POST /api/fleet/worker/env` |
 | Proxy, account, browser profile | claim | claim (boot-only by nature) |
@@ -18,9 +18,8 @@ nothing the ERP edits needs a container restart (which is a Facebook login).
 ## 1. ERP backend
 
 - `fleet_settings` gains an `alerts` row:
-  `{on: boolean, chat_id: string, topics: {high, medium, low}, rating_topics: {"4": "low"}}`.
-  Default `on: false` until the owner turns it on; `rating_topics` default
-  `{"4": "low"}`. Validation in `apps/backend/src/fleet/cities.ts` beside
+  `{on: boolean, chat_id: string, topics: {high, medium, low}}`.
+  Default `on: false` until the owner turns it on. Validation in `apps/backend/src/fleet/cities.ts` beside
   `SEARCH_FIELDS`.
 - `loadSettings` returns a `version`: a short hash of `search` + `alerts`.
 - `POST /api/fleet/worker/next-task` takes an optional `settings_version`
@@ -37,7 +36,7 @@ nothing the ERP edits needs a container restart (which is a Facebook login).
 ## 2. ERP frontend
 
 - Fleet ▸ Analysis, the Telegram alert stage: an **Edit** form for alerts on,
-  the chat and topic ids, and the rating-to-topic rule, like the other
+  the chat and the topic ids, like the other
   stages' forms. FEATURES.md updated.
 
 ## 3. Worker (facebook-tracker release + image)
@@ -52,8 +51,6 @@ nothing the ERP edits needs a container restart (which is a Facebook login).
     token, and sets the control-plane URL for claims;
   - when it turns alerts on without the secrets, asks
     `POST /api/fleet/worker/env` once and keeps the answer in memory only.
-- `alert_priority` takes the rating: `rating_topics` first, then the unit
-  buckets.
 - The entrypoint keeps rendering the boot config from the claim, so the
   first task runs as today.
 - Tests: the monitor's fleet loop against the fake fleet (a version change
@@ -79,4 +76,4 @@ nothing the ERP edits needs a container restart (which is a Facebook login).
 
 - Should `RS_ALERTS` in `FLEET_WORKER_ENV` stay as a master kill switch over
   the ERP's `alerts.on`, or go away?
-- Rating 5 with no unit count: General (today) or Low?
+- An alert with no unit count: General (today) or Low?
