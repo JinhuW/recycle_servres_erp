@@ -16,8 +16,8 @@ with the verdicts beside them; this sends each one the way a worker would:
   3. mark the claim delivered and report the message id (`/v1/alerts/telegram`)
      for the hit-rate stats.
 
-Topic: rating 4 goes to the Low topic; rating 5 by the model's unit count
-(50+ High, 10-49 Medium, 5-9 Low, uncounted General), as the monitor routes.
+Topic: by the model's unit count, whatever the rating (50+ High, 10-49
+Medium, 5-9 Low, uncounted General), as the monitor routes.
 
 Runs on the homelab VM, where the coordinator, the secrets and OpenSearch are:
 
@@ -99,9 +99,8 @@ def verdict(listing_id: str) -> dict:
     return next((r for r in rows if r.get("unit_count") is not None), rows[0] if rows else {})
 
 
-def priority(score: int, units: int | None) -> str | None:
-    if score == 4:
-        return "low"
+def priority(units: int | None) -> str | None:
+    """The monitor's `alert_priority`: by counted units, whatever the rating."""
     if units is None:
         return None
     return "high" if units >= 50 else "medium" if units >= 10 else "low" if units >= 5 else None
@@ -167,7 +166,7 @@ def run_once(hours: int, dry_run: bool, env: dict, tokens: dict) -> tuple[int, i
         if lid in state:
             continue
         v = verdict(lid)
-        level = priority(alert["score"], v.get("unit_count"))
+        level = priority(v.get("unit_count"))
         title, body = message(alert, v)
         if level:
             title = f"{PRIORITY_EMOJI[level]} {title}"

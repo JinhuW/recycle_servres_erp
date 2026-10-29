@@ -26,6 +26,10 @@ related: [RS-453, RS-394]
 >
 > also send the lgeacy alerts in the past 24 hours to the telegram with RS alerts account.
 
+> leave it as it.
+>
+> I still hope to send to different priority based on the counts instead of rate.
+
 ## Context
 
 A fleet worker reads everything once, at boot. The entrypoint
@@ -41,8 +45,9 @@ once and runs every task on that copy. So:
 - Alerts were left off at the ERP-fleet cutover (`RS_ALERTS` absent from
   `FLEET_WORKER_ENV`). Turning them on (2026-10-29) reaches a worker only at
   its next start, and every start is a Facebook login.
-- Topic routing is fixed in the monitor (`alert_priority`: by unit count
-  only), so "rating 4 to Low" needs a new image.
+- Topic routing stays by unit count (`alert_priority`), as the owner decided
+  on 2026-10-29 ("send to different priority based on the counts instead of
+  rate"); only the topic ids move to the ERP.
 
 The worker already asks the ERP for work every few seconds
 (`POST /api/fleet/worker/next-task`), and that handler loads the settings on
@@ -50,7 +55,7 @@ every call (`apps/backend/src/fleet/claim.ts`). That is the channel.
 
 Stopgap, live since 2026-10-29: `trackers/facebook/scripts/fleet-alert-sender.py`
 (cron on the homelab VM) sends what running workers withheld, through the
-coordinator's claim dedupe, rating 4 to Low; it sent the 24 h backlog (23
+coordinator's claim dedupe, routed by unit count; it sent the 24 h backlog (23
 alerts, 19 already alerted on 10-23/10-27, 3 price drops).
 
 ## Acceptance criteria
@@ -60,8 +65,8 @@ alerts, 19 already alerted on 10-23/10-27, 3 price drops).
 - [ ] A worker applies a new version between tasks, without a new browser or
       a restart: the rating gate, minimum units, prompts, the title prefilter,
       and alerts on/off.
-- [ ] `fleet_settings.alerts` holds the switch and the rating-to-topic rules
-      (default: rating 4 to Low, rating 5 by unit count); the alert stage on
+- [ ] `fleet_settings.alerts` holds the switch, the chat and the topic ids
+      (routing stays by unit count); the alert stage on
       Fleet ▸ Analysis edits them.
 - [ ] Secrets (Telegram bot token, OpenRouter key) come from a worker-token
       route the Cloudflare Worker fills from `FLEET_WORKER_ENV`, as the claim

@@ -31,7 +31,7 @@ deployed?" harder to answer.
   `listing_alert` / `withheld` documents `ai-verdict-bridge.py` now also
   ships, claims each listing from the coordinator with the withholding
   worker's token so the fleet-wide dedupe holds, and posts the worker's own
-  message: rating 4 to the Low topic, rating 5 by unit count. Cron on the
+  message, in the topic for its unit count as a worker would. Cron on the
   homelab VM every 5 minutes; on its first run it sent the 24-hour backlog.
 - `ai-verdict-bridge.py` ships the model's `unit_count` and `count_phrase`,
   and each `[Alert] WITHHELD` line as a `listing_alert` document.
