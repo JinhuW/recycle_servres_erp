@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-28
 reporter: jinhu
 branch: JinhuW/pelican
-pr:
+pr: 988
 version: 1.379.0
 related: [RS-436, RS-394]
 ---
