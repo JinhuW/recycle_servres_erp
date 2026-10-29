@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-450](./RS-450-count-the-title-keyword-and-new-to-us-stages-and-sho.md) | done | story | P2 | Count the title, keyword and new-to-us stages and show what passed the model | — |
+| [RS-451](./RS-451-retire-a-parked-worker-s-account-and-free-the-worker.md) | done | story | P2 | Retire a parked worker's account and free the worker | 1.379.0 |
+| [RS-450](./RS-450-count-the-title-keyword-and-new-to-us-stages-and-sho.md) | done | story | P2 | Count the title, keyword and new-to-us stages and show what passed the model | 1.378.0 |
 | [RS-449](./RS-449-load-more-fleet-task-rows-as-the-table-scrolls.md) | done | bug | P2 | Load more fleet task rows as the table scrolls | 1.377.4 |
 | [RS-448](./RS-448-show-the-sell-price-on-the-mobile-market-value-page.md) | done | bug | P2 | Show the sell price on the mobile Market value page | 1.377.3 |
 | [RS-447](./RS-447-protect-unsaved-sell-order-edits-on-cancel-and-after.md) | done | bug | P2 | Protect unsaved sell-order edits on Cancel and after Save | 1.377.2 |

@@ -230,6 +230,32 @@ slots.post('/:no/remove', async (c) => {
   return c.json({ ok: true, account_no: no, pool_status: out.status });
 });
 
+// For an account that is lost (a checkpoint, an expired session): retiring
+// the pool row fences the slot through the pool trigger, so its worker is
+// refused on its next call and exits, and the container its host starts next
+// claims another free slot. Unlike /remove, a held slot is fine here.
+slots.post('/:no/retire', async (c) => {
+  const no = parseNo(c.req.param('no'));
+  if (no === null) return c.json({ error: 'not_found' }, 404);
+  const user = c.var.user;
+  const sql = getDb(c.env);
+  const out = await sql.begin(async (tx): Promise<Refusal | { worker_id: string | null }> => {
+    const [account] = await tx<{ status: string }[]>`SELECT status FROM fb_pool_accounts WHERE no = ${no} FOR NO KEY UPDATE`;
+    const [slot] = await tx<{ worker_id: string | null }[]>`SELECT worker_id FROM fleet_slots WHERE account_no = ${no} FOR UPDATE`;
+    if (!account || !slot) return notFound(`slot #${no}`);
+    await tx`
+      UPDATE fb_pool_accounts SET status = 'retired', holder_user_id = NULL, holder_name = NULL, held_since = NULL, updated_at = NOW()
+      WHERE no = ${no}`;
+    await tx`UPDATE fleet_tasks SET state = 'cancelled', done_at = NOW() WHERE account_no = ${no} AND kind = 'probe' AND state = 'ready'`;
+    await tx`DELETE FROM fleet_slots WHERE account_no = ${no}`;
+    await writeEvent(tx, user, 'retired', 'retired', no, `retired from the ${FLEET_HOLDER}`);
+    return { worker_id: slot.worker_id };
+  });
+  if (isRefusal(out)) return c.json(out.body, out.status);
+  wlog.info('fleet slot retired', { accountNo: no, workerId: out.worker_id, by: user.email });
+  return c.json({ ok: true, account_no: no, worker_id: out.worker_id });
+});
+
 slots.post('/:no/release-quarantine', async (c) => {
   const no = parseNo(c.req.param('no'));
   if (no === null) return c.json({ error: 'not_found' }, 404);

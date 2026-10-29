@@ -49,6 +49,11 @@
   text-align: right;
   white-space: nowrap;
 }
+/* A row's dialogs mount in this cell; they must not inherit its alignment. */
+.fleet-table .fleet-row-actions .modal-backdrop {
+  text-align: left;
+  white-space: normal;
+}
 .fleet-table .fleet-row-actions .btn + .btn {
   margin-left: 6px;
 }

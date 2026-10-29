@@ -15,6 +15,27 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.379.0] - 2026-10-28
+
+### Added
+
+- **Fleet ▸ Retire & free on a parked worker** (RS-451). A worker whose
+  account is lost (Session expired, Checkpoint, Challenge, Dead) kept its slot
+  and its place on the host while searching nothing. Freeing it took Park on
+  the Fleet tab and Retire on the Account Pool page, and the dead slot stayed
+  behind. A parked row on the Fleet tab, and the worker's page, now have
+  **Retire & free**: one confirm retires the pool account and deletes its
+  slot (`POST /api/fleet/slots/:no/retire`). The pool trigger moves the slot's
+  epoch on, so the worker is refused on its next call and exits, and the
+  container its host starts a minute later signs in to the next free account.
+  A worker parked for an operator is left stopped by its host, and the dialog
+  says so.
+
+### Fixed
+
+- A Fleet tab row's dialogs no longer inherit the actions cell's right
+  alignment and no-wrap, which clipped the Park dialog's text.
+
 ## [1.378.0] - 2026-10-28
 
 ### Added
