@@ -27,6 +27,18 @@ describe('docker run', () => {
       RS_FLEET_WORKER_ID: 'lab-2',
     });
   });
+
+  it('passes the OpenSearch target only when the agent has one', () => {
+    const opensearch = { url: 'http://10.0.0.5:9200', index: 'fb-tracker' };
+    const args = runArgs('lab', SPEC, { ...ENV, opensearch }).join(' ');
+    expect(args).toContain('-e RS_VNC_PORT=5902 -e AIMM_OPENSEARCH_URL -e AIMM_OPENSEARCH_INDEX -p 127.0.0.1:5902:5900');
+    expect(runEnv(SPEC, { ...ENV, opensearch })).toMatchObject({
+      AIMM_OPENSEARCH_URL: 'http://10.0.0.5:9200',
+      AIMM_OPENSEARCH_INDEX: 'fb-tracker',
+    });
+    expect(runArgs('lab', SPEC, ENV)).toEqual(runArgs('lab', SPEC));
+    expect(runEnv(SPEC, ENV)).not.toHaveProperty('AIMM_OPENSEARCH_URL');
+  });
 });
 
 function recorder(answers: Record<string, Partial<RunResult>> = {}) {
@@ -134,6 +146,10 @@ describe('acting', () => {
     expect(await new DockerCli(runner).run(SPEC, ENV)).toBeNull();
     expect(calls[0].args).toEqual(runArgs('lab', SPEC));
     expect(calls[0].env).toEqual(runEnv(SPEC, ENV));
+    const withSearch = { ...ENV, opensearch: { url: 'http://10.0.0.5:9200', index: 'fb-tracker' } };
+    expect(await new DockerCli(runner).run(SPEC, withSearch)).toBeNull();
+    expect(calls[1].args).toContain('AIMM_OPENSEARCH_URL');
+    expect(calls[1].env).toMatchObject({ AIMM_OPENSEARCH_URL: 'http://10.0.0.5:9200' });
   });
 
   it('stops with time to save the session, then removes', async () => {

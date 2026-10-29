@@ -18,10 +18,15 @@ docker run -d --name fleet-agent --restart always --stop-timeout 120 \
   -e FLEET_URL=https://inventory-dev.recycleservers.com \
   -e FLEET_HOST_ID=worker-60-14 \
   -e FLEET_HOST_TOKEN=... \
+  -e FLEET_OPENSEARCH_URL=http://10.10.10.73:9200 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v fleet-agent-state:/state \
   ghcr.io/jinhuw/fleet-agent:<root version>
 ```
+
+The agent's settings reach only workers it starts afterwards: re-running
+the agent with a new one does not touch running workers, which pick it up
+the next time it starts them.
 
 Nothing else goes on the host: no compose files, no config, no secrets, no
 session files. A new host is this command and a row in the Hosts tab. Leave
@@ -49,6 +54,8 @@ the same `FLEET_HOST_ID` on its daemon observes only, logs an error and puts
 | `FLEET_STATE_DIR` | no | where the last desired answer, the start memory, the holds, the stop handoff and the agent's instance id live (default `/state`) |
 | `FLEET_IMAGE_PREFIX` | no | comma-separated repositories this host runs (default `ghcr.io/jinhuw/aimm-recycle`). A desired image outside them is never pulled or run; existing workers are left as they are |
 | `FLEET_STAGGER_SECONDS` | no | minimum seconds between two worker starts (default 180). Lower it only in tests: every start is a Facebook login |
+| `FLEET_OPENSEARCH_URL` | no | where the workers ship their structured events (`ai_eval`, `listing_skip`, `listing_alert`, …), passed to each worker it starts as `AIMM_OPENSEARCH_URL`. Unset, no worker ships any, and a rated listing is only in the container's text log, about three hours deep. The fleet's is the homelab's, `http://10.10.10.73:9200`; `host.docker.internal` does not resolve in a worker |
+| `FLEET_OPENSEARCH_INDEX` | no | the index prefix, passed as `AIMM_OPENSEARCH_INDEX` (default `fb-tracker`; daily indices `fb-tracker-YYYY.MM.DD`) |
 | `FLEET_AGENT_VERSION` | no | overrides the version in reports (the image bakes the root version in) |
 
 ## What one tick does
@@ -104,7 +111,9 @@ the same `FLEET_HOST_ID` on its daemon observes only, logs an error and puts
    --label rs.fleet.claim_ticket=1 --restart no --shm-size 1g
    -e RS_FLEET_URL -e RS_FLEET_HOST_ID -e RS_FLEET_CLAIM_TICKET
    -e RS_FLEET_HOST_TOKEN -e RS_FLEET_WORKER_ID -e RS_VNC_PORT={port}
-   [-e RS_FLEET_HANDOFF_EPOCH={n}] -p 127.0.0.1:{port}:5900 -- {image}`.
+   [-e RS_FLEET_HANDOFF_EPOCH={n}] [-e AIMM_OPENSEARCH_URL
+   -e AIMM_OPENSEARCH_INDEX] -p 127.0.0.1:{port}:5900 -- {image}`, the
+   OpenSearch pair only when `FLEET_OPENSEARCH_URL` is set.
    `RS_FLEET_CLAIM_TICKET` and `RS_FLEET_HOST_TOKEN` both carry the
    ticket: a worker image before facebook-tracker 0.14.5 claims with the
    second name only. The host token itself never enters a container. A
