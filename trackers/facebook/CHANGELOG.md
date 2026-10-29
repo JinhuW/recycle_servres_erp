@@ -20,6 +20,12 @@ deployed?" harder to answer.
 
 ### Added
 
+- `scripts/fleet-log-follow.py` follows each fleet worker's log (`docker exec
+  tail -F`) and indexes its verdicts and withheld alerts as they are logged,
+  and `fleet-alert-sender.py --follow` checks for new ones every 10 seconds,
+  so a withheld alert reaches Telegram 10-15 s after the worker withheld it
+  instead of up to 10 minutes. Both are kept alive by cron and `flock`; the
+  5-minute bridge stays as the catch-up.
 - `scripts/fleet-alert-sender.py`, a stopgap that sends the Telegram alerts
   fleet workers withheld while their alerts were off (RS-455). It reads the
   `listing_alert` / `withheld` documents `ai-verdict-bridge.py` now also

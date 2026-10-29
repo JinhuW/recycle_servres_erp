@@ -109,7 +109,9 @@ def unwrap(lines: list[str]) -> list[str]:
     return out
 
 
-def parse(lines: list[str], worker: str) -> list[tuple[str, dict]]:
+def parse(lines: list[str], worker: str, fallback_ts: float | None = None) -> list[tuple[str, dict]]:
+    """The documents in `lines`. `fallback_ts` times what comes before the first
+    fresh verdict; the follower passes now, the cron run leaves those out."""
     lines = unwrap(lines)
     docs: list[tuple[str, dict]] = []
     listings: dict[str, dict] = {}
@@ -117,7 +119,7 @@ def parse(lines: list[str], worker: str) -> list[tuple[str, dict]]:
     item = None
     prompt: dict | None = None
     response: dict | None = None
-    last_created = None
+    last_created = fallback_ts
     for line in lines:
         if block is not None:
             if line.startswith(")"):
