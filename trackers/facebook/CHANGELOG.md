@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-29
+
 ### Fixed
 
 - **One slow page no longer parks a fleet worker for good (RS-454).** In fleet
