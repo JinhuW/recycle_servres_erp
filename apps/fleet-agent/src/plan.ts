@@ -254,6 +254,13 @@ export function plan(input: PlanInput): Plan {
     notes.push(`last start ${Math.round((now - (lastStartAt as number)) / 1000)} s ago; next in ${Math.ceil((staggerMs - (now - (lastStartAt as number))) / 1000)} s`);
   }
 
+  // A 75/70 retries a claim that just found no slot; while a release waits on
+  // this host's replacement, those retries would take every start and the
+  // release would time out behind them.
+  const rollTarget = desired.roll?.replace ? byId.get(desired.roll.replace) : undefined;
+  const replaceDue = canCreate && rollTarget !== undefined && rollTarget.running && rollTarget.image !== desired.image
+    && workerIndex(hostId, rollTarget.worker_id)! <= desired.count;
+
   let deferredReplace: Action | null = null;
   for (let n = 1; n <= desired.count; n++) {
     const id = workerId(hostId, n);
@@ -308,6 +315,10 @@ export function plan(input: PlanInput): Plan {
     const recreate = canCreate && desired.leases !== undefined;
     if (!recreate && (current.handoff || current.ticket)) {
       notes.push(`${id}: exit ${current.exit_code}; its ${current.handoff ? 'reservation' : 'claim ticket'} is used, so it waits to be recreated online`);
+      continue;
+    }
+    if (soft && replaceDue) {
+      notes.push(`${id}: exit ${current.exit_code}; restart waits for ${desired.roll!.replace}'s replacement`);
       continue;
     }
     if (!takeStart()) {
