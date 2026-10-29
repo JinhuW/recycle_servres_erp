@@ -4,7 +4,8 @@
 // FLEET_HOST_TOKEN; FLEET_INTERVAL (seconds, default 30, at least 5),
 // FLEET_STATE_DIR (default /state), FLEET_STAGGER_SECONDS (default 180; lower
 // it only in tests), FLEET_IMAGE_PREFIX (comma-separated repositories the
-// host runs, default ghcr.io/jinhuw/aimm-recycle).
+// host runs, default ghcr.io/jinhuw/aimm-recycle), FLEET_OPENSEARCH_URL and
+// FLEET_OPENSEARCH_INDEX (default fb-tracker) for the workers' events.
 
 import { Agent } from './agent.js';
 import { HttpFleetClient } from './client.js';
@@ -41,6 +42,9 @@ const hostId = env('FLEET_HOST_ID');
 const intervalMs = seconds('FLEET_INTERVAL', 30, 5) * 1000;
 const staggerMs = seconds('FLEET_STAGGER_SECONDS', DEFAULT_STAGGER_MS / 1000) * 1000;
 const version = agentVersion();
+const opensearch = env('FLEET_OPENSEARCH_URL')
+  ? { url: env('FLEET_OPENSEARCH_URL'), index: env('FLEET_OPENSEARCH_INDEX') || 'fb-tracker' }
+  : undefined;
 const imagePrefixes = (env('FLEET_IMAGE_PREFIX') || DEFAULT_IMAGE_PREFIX).split(',').map((p) => p.trim()).filter(Boolean);
 
 const agent = new Agent({
@@ -53,14 +57,14 @@ const agent = new Agent({
     onFailure: (what, detail) => log.warn('erp call failed', { what, detail }),
   }),
   docker: new DockerCli(),
-  workerEnv: { url: env('FLEET_URL'), hostId },
+  workerEnv: { url: env('FLEET_URL'), hostId, ...(opensearch ? { opensearch } : {}) },
   version,
   staggerMs,
   log,
   imagePrefixes,
 });
 
-log.info('fleet-agent starting', { version, host_id: hostId, url: env('FLEET_URL'), interval_s: intervalMs / 1000, stagger_s: staggerMs / 1000, image_prefixes: imagePrefixes });
+log.info('fleet-agent starting', { version, host_id: hostId, url: env('FLEET_URL'), interval_s: intervalMs / 1000, stagger_s: staggerMs / 1000, image_prefixes: imagePrefixes, opensearch: opensearch ?? 'off' });
 if (staggerMs < DEFAULT_STAGGER_MS) log.warn('start stagger below the default; every start is a Facebook login', { stagger_s: staggerMs / 1000 });
 
 let stopping = false;

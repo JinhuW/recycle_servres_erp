@@ -15,6 +15,22 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.379.2] - 2026-10-29
+
+### Fixed
+
+- **The fleet's AI verdicts reach OpenSearch again (RS-453).** Since the
+  fleet agent took over starting workers on 10-27, no worker shipped its
+  structured events: the agent's `docker run` never set `AIMM_OPENSEARCH_URL`,
+  which the compose workers had from `fleet-worker.env`. The `fb-tracker-*`
+  index stopped at 10-27 15:41 UTC, and a listing's score, the model's comment
+  and what it was shown survived only in the container's text log, about
+  three hours deep. The agent now takes `FLEET_OPENSEARCH_URL` (and
+  `FLEET_OPENSEARCH_INDEX`, default `fb-tracker`) and hands them to every
+  worker it starts. Unset, the run line is unchanged. Workers already running
+  get it when the agent next starts them; nothing is restarted for it, since
+  every start is a Facebook login.
+
 ## [1.379.1] - 2026-10-29
 
 ### Fixed

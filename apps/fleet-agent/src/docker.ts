@@ -23,6 +23,8 @@ export const STOP_TIMEOUT_S = 30;
 export interface WorkerEnv {
   url: string;
   hostId: string;
+  /** Where the worker ships its structured events (`ai_eval` and the rest); none ships without it. */
+  opensearch?: { url: string; index: string };
 }
 
 export interface RunSpec {
@@ -67,7 +69,7 @@ export interface DockerApi {
  * RS_FLEET_HOST_TOKEN, the only name a worker image before facebook-tracker
  * 0.14.5 claims with; the ERP takes either on the claim.
  */
-export function runArgs(hostId: string, spec: RunSpec): string[] {
+export function runArgs(hostId: string, spec: RunSpec, env?: WorkerEnv): string[] {
   const handoff = spec.handoff_epoch !== undefined;
   return [
     'run', '-d',
@@ -85,6 +87,7 @@ export function runArgs(hostId: string, spec: RunSpec): string[] {
     '-e', 'RS_FLEET_WORKER_ID',
     '-e', `RS_VNC_PORT=${spec.port}`,
     ...(handoff ? ['-e', `RS_FLEET_HANDOFF_EPOCH=${spec.handoff_epoch}`] : []),
+    ...(env?.opensearch ? ['-e', 'AIMM_OPENSEARCH_URL', '-e', 'AIMM_OPENSEARCH_INDEX'] : []),
     '-p', `127.0.0.1:${spec.port}:5900`,
     '--',
     spec.image,
@@ -98,6 +101,7 @@ export function runEnv(spec: RunSpec, env: WorkerEnv): Record<string, string> {
     RS_FLEET_CLAIM_TICKET: spec.ticket,
     RS_FLEET_HOST_TOKEN: spec.ticket,
     RS_FLEET_WORKER_ID: spec.worker_id,
+    ...(env.opensearch ? { AIMM_OPENSEARCH_URL: env.opensearch.url, AIMM_OPENSEARCH_INDEX: env.opensearch.index } : {}),
   };
 }
 
@@ -181,7 +185,7 @@ export class DockerCli implements DockerApi {
   }
 
   async run(spec: RunSpec, env: WorkerEnv): Promise<string | null> {
-    const [ok, out] = await this.call(runArgs(env.hostId, spec), 300_000, runEnv(spec, env));
+    const [ok, out] = await this.call(runArgs(env.hostId, spec, env), 300_000, runEnv(spec, env));
     return ok ? null : out;
   }
 
