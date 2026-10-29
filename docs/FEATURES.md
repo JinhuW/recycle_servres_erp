@@ -3539,16 +3539,19 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     shows how many of those a worker held back because fleet alerts are off,
     and the claim and de-duplication text moved to Telegram alert. A stage
     no day in the range reported shows "—"; one only some days reported
-    gives no pass rate against a stage counted on every day. Since v1.379.1
-    (RS-452) a day counts those stages only when every search that day
-    counted them, a stage summed over fewer days is starred with a footnote,
+    gives no pass rate against a stage counted on every day. Since v1.380.2
+    (RS-457) a day sums those stages over the searches that reported them,
+    and one where only some did (an older worker searched) makes them partial:
+    a stage summed over fewer searches is starred with a footnote naming how
+    many of the range's searches counted it,
     the alert's rate leaves out what was held back, and a step over 100 %
     shows no number. Between
     stages the pass rate from the last counted stage (cards per search as
     "×N", every other step as a percentage, amber under 50 %) and under the pipeline the
     headline ratios: what passed the model and what was held back, cards per
     alert, reviews per alert, the title gate's drop before a page is opened
-    and the model's drop of what it reads, read against what passed it. Then
+    and the model's drop of what it reads, read against what passed it and
+    left out when that is not wholly counted (v1.380.2). Then
     two per-day bar charts for the last 14 days from the same counts, each
     on its own axis — reviewed by the model, alerts — in one hue with today's bar grey as
     partial, three gridlines, labels on the first, highest and today's bar, a

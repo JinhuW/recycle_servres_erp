@@ -15,6 +15,25 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.380.2] - 2026-10-29
+
+### Fixed
+
+- **The fleet Analysis funnel keeps what newer workers counted on a mixed
+  day** (RS-457). Only workers on 0.14.18 or later report the title gate, the
+  keyword gate, new to us and what passed the model. A day still had to have
+  every search report them, so on the 0.15.0 release day 376 old searches hid
+  the one new search's counts, and those four stages read "not counted yet".
+  `/api/fleet/stats/funnel` now sums them over the searches that reported
+  them, and returns how many did (`counted` of `carded`). Such a day reads as
+  partial: the stages are starred, the footnote says "counted from N of M
+  searches", and no rate is drawn between them and a whole stage.
+- **The headline no longer reads withheld alerts as the model rejecting
+  them.** Without a counted Passed the model it fell back to the alerts, so a
+  day whose workers withheld all 91 passes because fleet alerts were off said
+  "the model drops 100% of what it reads". It passed about 2%. The model's
+  drop is now stated only against a whole passed count.
+
 ## [1.380.1] - 2026-10-29
 
 ### Fixed

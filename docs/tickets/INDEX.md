@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-456](./RS-456-fleet-agent-replaces-a-release-worker-before-no-slot.md) | done | bug | P1 | Fleet agent replaces a release worker before no-slot retries | — |
+| [RS-457](./RS-457-fleet-analysis-count-a-mixed-day-never-read-withheld.md) | done | bug | P2 | Fleet Analysis: count a mixed day, never read withheld as rejected | 1.380.2 |
+| [RS-456](./RS-456-fleet-agent-replaces-a-release-worker-before-no-slot.md) | done | bug | P1 | Fleet agent replaces a release worker before no-slot retries | 1.380.1 |
 | [RS-455](./RS-455-fleet-workers-take-settings-and-alert-config-from-th.md) | backlog | story | P1 | Fleet workers take settings and alert config from the ERP while running | — |
 | [RS-454](./RS-454-fleet-workers-survive-a-slow-page-and-can-be-marked.md) | done | bug | P1 | Fleet workers survive a slow page and can be marked healthy | 1.380.0 |
 | [RS-453](./RS-453-fleet-workers-ship-their-ai-verdicts-to-opensearch-a.md) | done | bug | P2 | Fleet workers ship their AI verdicts to OpenSearch again | 1.379.2 |
