@@ -136,6 +136,9 @@ export type FleetFunnelDay = {
   passed: number | null;
   withheld: number | null;
   alerted: number;
+  /** Searches with cards that reported the later stages, of `carded`. */
+  counted: number;
+  carded: number;
 };
 
 export type FleetTaskEvent = {

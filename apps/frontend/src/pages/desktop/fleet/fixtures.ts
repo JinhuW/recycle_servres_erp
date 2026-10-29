@@ -178,14 +178,14 @@ export const SLOTS: FleetSlot[] = [
 // The fleet's finished searches, one row per UTC day, newest last. Days with
 // no search are absent. Only the newest day's workers report the gates, what
 // passed the model and what they withheld.
-const OLDER = { title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null };
+const OLDER = { title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null, counted: 0 };
 export const STATS: FleetFunnelDay[] = [
-  { day: '2026-10-15', searches: 230, cards: 12000, opened: 2600, reviewed: 1200, alerted: 6, ...OLDER },
-  { day: '2026-10-22', searches: 250, cards: 13000, opened: 2800, reviewed: 1250, alerted: 7, ...OLDER },
-  { day: '2026-10-23', searches: 240, cards: 13500, opened: 2900, reviewed: 1300, alerted: 8, ...OLDER },
+  { day: '2026-10-15', searches: 230, carded: 230, cards: 12000, opened: 2600, reviewed: 1200, alerted: 6, ...OLDER },
+  { day: '2026-10-22', searches: 250, carded: 250, cards: 13000, opened: 2800, reviewed: 1250, alerted: 7, ...OLDER },
+  { day: '2026-10-23', searches: 240, carded: 240, cards: 13500, opened: 2900, reviewed: 1300, alerted: 8, ...OLDER },
   {
     day: '2026-10-24', searches: 255, cards: 13865, title_pass: 3500, opened: 2952, keyword_pass: 2100, fresh: 1900,
-    reviewed: 1281, passed: 40, withheld: 25, alerted: 9,
+    reviewed: 1281, passed: 40, withheld: 25, alerted: 9, counted: 255, carded: 255,
   },
 ];
 

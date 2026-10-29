@@ -32,27 +32,30 @@ describe('funnelDays', () => {
     await task(null, 'leased', null);
 
     expect(await funnelDays(getTestDb(), 2, NOW)).toEqual([
-      { day: '2026-10-27', searches: 1, cards: 5, opened: 1, reviewed: 1, alerted: 0, title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null },
-      { day: '2026-10-28', searches: 2, cards: 200, opened: 80, reviewed: 32, alerted: 1, title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null },
+      { day: '2026-10-27', searches: 1, cards: 5, opened: 1, reviewed: 1, alerted: 0, title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null, counted: 0, carded: 1 },
+      { day: '2026-10-28', searches: 2, cards: 200, opened: 80, reviewed: 32, alerted: 1, title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null, counted: 0, carded: 2 },
     ]);
   });
 
-  it('sums the later stages on a day every result counted them, and leaves them null on a day any did not', async () => {
+  it('sums the later stages over the searches that counted them, and says how many of the day\'s did', async () => {
     const full = { cards: 100, title_pass: 30, opened: 20, keyword_pass: 12, fresh: 10, reviewed: 8, passed: 3, withheld: 3, alerted: 0 };
     await task('2026-10-28T08:00:00Z', 'done', full);
     await task('2026-10-28T09:00:00Z', 'done', full);
     // A stopped search counted nothing, so it does not make the day partial.
     await task('2026-10-28T09:30:00Z', 'done', { stopped: true });
-    // An older worker adds its four counts and nothing else: summing the rest
-    // over the newer workers alone would read 30 title passes out of 150 cards.
+    // An older worker adds its four counts and nothing else; the newer one's
+    // still count, over one of the day's two searches.
     await task('2026-10-27T09:00:00Z', 'done', full);
     await task('2026-10-27T10:00:00Z', 'done', { cards: 50, opened: 5, reviewed: 2, alerted: 0 });
 
     expect(await funnelDays(getTestDb(), 2, NOW)).toEqual([
-      { day: '2026-10-27', searches: 2, cards: 150, opened: 25, reviewed: 10, alerted: 0, title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null },
+      {
+        day: '2026-10-27', searches: 2, cards: 150, title_pass: 30, opened: 25, keyword_pass: 12, fresh: 10,
+        reviewed: 10, passed: 3, withheld: 3, alerted: 0, counted: 1, carded: 2,
+      },
       {
         day: '2026-10-28', searches: 3, cards: 200, title_pass: 60, opened: 40, keyword_pass: 24, fresh: 20,
-        reviewed: 16, passed: 6, withheld: 6, alerted: 0,
+        reviewed: 16, passed: 6, withheld: 6, alerted: 0, counted: 2, carded: 2,
       },
     ]);
   });
@@ -66,7 +69,7 @@ describe('funnelDays', () => {
     await task('2026-10-28T09:00:00Z', 'done', null);
     await task('2026-10-28T09:30:00Z', 'done', { cards: 'many', stopped: true });
     expect(await funnelDays(getTestDb(), 1, NOW)).toEqual([
-      { day: '2026-10-28', searches: 2, cards: 0, opened: 0, reviewed: 0, alerted: 0, title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null },
+      { day: '2026-10-28', searches: 2, cards: 0, opened: 0, reviewed: 0, alerted: 0, title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null, counted: 0, carded: 0 },
     ]);
   });
 });
