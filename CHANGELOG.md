@@ -15,6 +15,19 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.380.1] - 2026-10-29
+
+### Fixed
+
+- **A fleet release no longer stalls behind workers that find no slot**
+  (RS-456). The host agent gives each tick one start, and it used to hand it
+  to an exited worker's restart before the release's replacement. On a host
+  whose capacity exceeds its claimable accounts, the spare containers exit 75
+  ("no free slot") and retry every few minutes, so the replacement never got a
+  turn and the 0.15.0 release would have timed out on homelab-1. While the
+  release names one of the host's running workers, a 75/70 retry now waits for
+  it; crashed and missing workers still go first.
+
 ## [1.380.0] - 2026-10-29
 
 ### Added

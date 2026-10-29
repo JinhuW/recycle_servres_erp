@@ -99,6 +99,24 @@ describe('roll', () => {
     expect(kinds(p)).toEqual([['run', 'lab-1']]);
     expect(p.notes).toContain('lab-2: replacement waits for its turn');
   });
+
+  it('goes before a 75/70 retry, which would otherwise take every start', () => {
+    for (const code of [75, 70]) {
+      const p = run([exited('lab-1', code, ago(3600)), running('lab-2', 'img:1')], {}, { image: 'img:2', roll: { replace: 'lab-2' } });
+      expect(kinds(p)).toEqual([['replace', 'lab-2']]);
+      expect(p.notes).toContain(`lab-1: exit ${code}; restart waits for lab-2's replacement`);
+    }
+  });
+
+  it('still lets a crashed worker restart first', () => {
+    const p = run([exited('lab-1', 1, ago(3600)), running('lab-2', 'img:1')], {}, { image: 'img:2', roll: { replace: 'lab-2' } });
+    expect(kinds(p)).toEqual([['start', 'lab-1']]);
+  });
+
+  it('does not hold a 75 retry for a replacement already done', () => {
+    const p = run([exited('lab-1', 75, ago(3600)), running('lab-2', 'img:2')], {}, { image: 'img:2', roll: { replace: 'lab-2' } });
+    expect(kinds(p)).toEqual([['start', 'lab-1']]);
+  });
 });
 
 describe('restarts', () => {
