@@ -7,7 +7,7 @@ priority: P1
 created: 2026-10-29
 reporter: jinhu
 branch: JinhuW/review-fixes-1.379
-pr:
+pr: 989
 version: 1.379.1
 related: [RS-450, RS-451]
 ---
