@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-454](./RS-454-fleet-workers-survive-a-slow-page-and-can-be-marked.md) | done | bug | P1 | Fleet workers survive a slow page and can be marked healthy | — |
+| [RS-455](./RS-455-fleet-workers-take-settings-and-alert-config-from-th.md) | backlog | story | P1 | Fleet workers take settings and alert config from the ERP while running | — |
+| [RS-454](./RS-454-fleet-workers-survive-a-slow-page-and-can-be-marked.md) | done | bug | P1 | Fleet workers survive a slow page and can be marked healthy | 1.380.0 |
 | [RS-453](./RS-453-fleet-workers-ship-their-ai-verdicts-to-opensearch-a.md) | done | bug | P2 | Fleet workers ship their AI verdicts to OpenSearch again | 1.379.2 |
 | [RS-452](./RS-452-release-review-fixes-for-the-v1-379-prod-cut.md) | done | bug | P1 | Release-review fixes for the v1.379 prod cut | 1.379.1 |
 | [RS-451](./RS-451-retire-a-parked-worker-s-account-and-free-the-worker.md) | done | story | P2 | Retire a parked worker's account and free the worker | 1.379.0 |
