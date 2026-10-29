@@ -18,6 +18,14 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/ai-verdict-bridge.py`, a stopgap that rebuilds `ai_eval` events
+  from the text log of every fleet worker started without
+  `AIMM_OPENSEARCH_URL` and indexes them into the `fb-tracker-*` indices with
+  `bridged: true` (RS-453). It runs every 5 minutes from cron on the homelab VM
+  and on `10.10.60.14`; remove both cron lines once every worker ships its own.
+
 ## [0.15.0] - 2026-10-29
 
 ### Fixed

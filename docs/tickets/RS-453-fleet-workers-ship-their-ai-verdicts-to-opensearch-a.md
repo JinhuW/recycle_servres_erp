@@ -64,3 +64,14 @@ address has to be one each host's agent is told, not a fixed default.
 Rolling it out means re-running each host's `fleet-agent` container with the
 new image and `-e FLEET_OPENSEARCH_URL=http://10.10.10.73:9200`. Recreating
 the agent is not a login: running workers are adopted by label.
+
+Rolled out 2026-10-29: `fleet-agent:1.379.2` on both hosts with
+`FLEET_OPENSEARCH_URL=http://10.10.10.73:9200` in `~/.config/fleet-agent.env`.
+The events field is `kind` (`kind: ai_eval`), not `event`.
+
+The 13 workers already running were started without the variable, so
+`trackers/facebook/scripts/ai-verdict-bridge.py` rebuilds their verdicts from
+the text log (listing from the `Listing(` block or the prompt line, model and
+time from the response) every 5 minutes from cron on both hosts
+(`~/fleet-ai-bridge/`), marked `bridged: true`. It skips any worker that has
+the variable, so remove the cron lines once none is left without it.
