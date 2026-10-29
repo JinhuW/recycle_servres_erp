@@ -20,6 +20,15 @@ deployed?" harder to answer.
 
 ### Added
 
+- `scripts/fleet-alert-sender.py`, a stopgap that sends the Telegram alerts
+  fleet workers withheld while their alerts were off (RS-455). It reads the
+  `listing_alert` / `withheld` documents `ai-verdict-bridge.py` now also
+  ships, claims each listing from the coordinator with the withholding
+  worker's token so the fleet-wide dedupe holds, and posts the worker's own
+  message: rating 4 to the Low topic, rating 5 by unit count. Cron on the
+  homelab VM every 5 minutes; on its first run it sent the 24-hour backlog.
+- `ai-verdict-bridge.py` ships the model's `unit_count` and `count_phrase`,
+  and each `[Alert] WITHHELD` line as a `listing_alert` document.
 - `scripts/ai-verdict-bridge.py`, a stopgap that rebuilds `ai_eval` events
   from the text log of every fleet worker started without
   `AIMM_OPENSEARCH_URL` and indexes them into the `fb-tracker-*` indices with

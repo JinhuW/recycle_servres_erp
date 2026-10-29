@@ -13,7 +13,10 @@ that lacks the variable, rebuilds the `ai_eval` document from the text log
 time, the `concludes` line) and bulk-indexes it into the same daily
 `fb-tracker-*` indices with `bridged: true`. A cached verdict prints no `Listing(` block, so the
 listing comes from the prompt's "found a listing titled" line when there is
-one. A worker that has the variable is
+one. Each `[Alert] WITHHELD` line, the monitor's record that a listing passed
+every gate while fleet alerts were off, becomes a `listing_alert` document with
+`withheld: true`, as a worker shipping its own events writes it; the fleet
+alert sender reads those. A worker that has the variable is
 skipped, so nothing is counted twice. Once every worker ships its own, remove
 the cron line.
 
@@ -54,6 +57,11 @@ PROMPT_LISTING = re.compile(
     r'^The user found a listing titled "(?P<title>.*)" in (?P<condition>.*?) condition, '
     r"priced at (?P<price>.*?), located in (?P<location>.*?), posted at (?P<post_url>\S+)"
 )
+WITHHELD = re.compile(
+    r"^\[\w+\]\[Alert\]\[/\w+\] WITHHELD \(fleet alerts off\) rating (?P<score>\d) >= (?P<threshold>\d) "
+    r"\| (?P<listing_id>\d+) \| \[cyan\](?P<title>.*)\[/cyan\] \| (?P<url>\S+)$"
+)
+CONTENT = re.compile(r"""^\s+content=(['"])(?P<json>\{.*\})\1,?$""")
 ITEM_ID = re.compile(r"/marketplace/item/(\d+)")
 MARKUP = re.compile(r"\[/?(?:red|green|blue|cyan|yellow|magenta|white|bold|dim)\]")
 LISTING_KEYS = ("id", "title", "price", "post_url", "location", "seller", "condition")
@@ -83,15 +91,16 @@ def read_log(container: str) -> list[str]:
 
 
 def unwrap(lines: list[str]) -> list[str]:
-    """Rejoin a `concludes` line the console wrapped at its width."""
+    """Rejoin a `concludes` or `WITHHELD` line the console wrapped at its width."""
     out: list[str] = []
     i = 0
     while i < len(lines):
         line = lines[i]
-        if " concludes [" in line and not CONCLUDES.match(line):
+        pattern = CONCLUDES if " concludes [" in line else WITHHELD if "] WITHHELD (" in line else None
+        if pattern and not pattern.match(line):
             for n in range(1, 4):
                 tail = lines[i + 1 : i + 1 + n]
-                joined = next((j for j in ("".join([line, *tail]), " ".join([line, *tail])) if CONCLUDES.match(j)), None)
+                joined = next((j for j in ("".join([line, *tail]), " ".join([line, *tail])) if pattern.match(j)), None)
                 if joined:
                     line, i = joined, i + n
                     break
@@ -142,6 +151,36 @@ def parse(lines: list[str], worker: str) -> list[tuple[str, dict]]:
                 response["model"] = m["s"]
             elif m and m["k"] == "created" and m["n"]:
                 response["created"] = float(m["n"])
+            else:
+                c = CONTENT.match(line)
+                if c:
+                    try:
+                        verdict = json.loads(c["json"])
+                    except ValueError:
+                        verdict = {}
+                    if isinstance(verdict, dict):
+                        response["unit_count"] = verdict.get("unit_count")
+                        response["count_phrase"] = verdict.get("count_phrase") or None
+        w = WITHHELD.match(line)
+        if w and last_created is not None:
+            doc = {
+                "@timestamp": datetime.fromtimestamp(last_created, tz=timezone.utc).isoformat(timespec="milliseconds"),
+                "worker": worker,
+                "level": "INFO",
+                "message": MARKUP.sub("", line).strip(),
+                "kind": "listing_alert",
+                "bridged": True,
+                "delivered": False,
+                "withheld": True,
+                "listing_id": w["listing_id"],
+                "title": w["title"],
+                "url": w["url"],
+                "item": item,
+                "score": int(w["score"]),
+                "threshold": int(w["threshold"]),
+            }
+            docs.append((hashlib.sha1(f"bridge|withheld|{worker}|{w['listing_id']}|{w['score']}".encode()).hexdigest(), doc))
+            continue
         m = CONCLUDES.match(line)
         if not m:
             continue
@@ -175,6 +214,8 @@ def parse(lines: list[str], worker: str) -> list[tuple[str, dict]]:
             "comment": m["comment"],
             "ai_name": m["ai"],
             "model": response.get("model") if fresh else None,
+            "unit_count": response.get("unit_count") if fresh else None,
+            "count_phrase": response.get("count_phrase") if fresh else None,
             "item": item,
             "location": listing.get("location"),
             "condition": listing.get("condition"),
@@ -217,7 +258,7 @@ def main() -> int:
         except subprocess.CalledProcessError as e:
             print(f"{stamp} {worker}: could not read the log: {e.stderr.strip()}", file=sys.stderr)
             continue
-        fresh = sum(1 for _, d in docs if not d["cached"])
+        fresh = sum(1 for _, d in docs if d["kind"] == "ai_eval" and not d["cached"])
         if args.dry_run:
             print(f"{worker}: {len(docs)} verdicts ({fresh} fresh)")
             if docs:
