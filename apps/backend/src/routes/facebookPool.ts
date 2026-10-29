@@ -28,6 +28,7 @@ import { log } from '../lib/log';
 import { effectiveRole, requireManager } from '../lib/role';
 import { poolKey, sealOrNull, unsealOrEmpty } from '../lib/sealed';
 import type { Env, User } from '../types';
+import { dropSlot } from '../fleet/claim';
 import { ACCOUNT_ID, WORKER_ID, callFacade } from './coordinator';
 
 // ─── Facebook account pool ────────────────────────────────────────────────────
@@ -106,6 +107,22 @@ export async function writeEvent(
   await tx`
     INSERT INTO fb_pool_events (account_no, actor_id, actor_name, kind, status, detail)
     VALUES (${accountNo}, ${user.id}, ${user.name}, ${kind}, ${status}, ${detail})`;
+}
+
+/** Retires an account and drops its fleet slot, so no dead slot is left for
+ *  a worker to sit on. One already retired gets no second event. False when
+ *  there is no such account. */
+export async function retireAccount(tx: Tx, user: User, no: number, detail: string | null): Promise<boolean> {
+  const [account] = await tx<{ status: string }[]>`SELECT status FROM fb_pool_accounts WHERE no = ${no} FOR NO KEY UPDATE`;
+  if (!account) return false;
+  if (account.status !== 'retired') {
+    await tx`
+      UPDATE fb_pool_accounts SET status = 'retired', holder_user_id = NULL, holder_name = NULL, held_since = NULL, updated_at = NOW()
+      WHERE no = ${no}`;
+    await writeEvent(tx, user, 'retired', 'retired', no, detail);
+  }
+  await dropSlot(tx, no, 'retired');
+  return true;
 }
 
 /**
@@ -839,15 +856,7 @@ pool.post('/:no/retire', async (c) => {
   if (no === null) return c.json({ error: 'Not found' }, 404);
   const sql = getDb(c.env);
   const user = c.var.user;
-  const found = await sql.begin(async (tx) => {
-    const rows = await tx`
-      UPDATE fb_pool_accounts
-      SET status = 'retired', holder_user_id = NULL, holder_name = NULL, held_since = NULL, updated_at = NOW()
-      WHERE no = ${no} RETURNING no`;
-    if (!rows.length) return false;
-    await writeEvent(tx, user, 'retired', 'retired', no, null);
-    return true;
-  });
+  const found = await sql.begin((tx) => retireAccount(tx, user, no, null));
   if (!found) return c.json({ error: 'Not found' }, 404);
   return c.json(await snapshot(sql, c.var.key, user));
 });

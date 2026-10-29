@@ -2603,6 +2603,10 @@ over MCP.
   as sources in its confidence note. It says "no cost data" and "no feed
   connected" instead, and counts only the team's own sales.
 - A line can be priced while the buy can still change (v1.54.0).
+- **Phone Market value cards** headline the sell price that Max buy is
+  computed from (the last price, else the average sell), labelled and shown
+  to the cent. When an average sell price exists and differs, the expanded
+  card lists it too (v1.377.3).
 - **Four feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
   on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
@@ -3429,7 +3433,18 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     one of two kinds: **Healthy** (running, degraded or being replaced
     included) or **Parked** (it reports Session expired, Checkpoint,
     Challenge or Dead, which its state chip names, or it went silent; since
-    v1.373.1 (RS-437) also when a manager parked its slot). The
+    v1.373.1 (RS-437) also when a manager parked its slot). Since v1.379.0
+    (RS-451) a parked ERP-fleet row, and that worker's page, have **Retire &
+    free**: the pool account is retired and its slot deleted, the worker is
+    refused on its next call and exits, and its host's next container claims
+    another free account (a worker parked for an operator stays stopped).
+    Since v1.379.1 (RS-452) only when its worker reports Session expired,
+    Checkpoint, Challenge or Dead (not Dead for an operator, a proxy fault),
+    or a manager parked the slot, or the pool already took the account out:
+    a row parked only because its worker went silent has none, and the API
+    refuses any other slot with `not_lost`. Retire on the Account Pool page
+    deletes the account's fleet slot too, and with no free account left the
+    host runs one worker fewer instead of replacing it. The
     toolbar has the legend with counts (All workers, Healthy, Parked), a
     host select and a search over worker, account, city and host; since v1.371.0 (RS-431) the
     tab opens on Healthy rather than All workers. The foot says "N of M
@@ -3466,7 +3481,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     how long it took (ticking while it runs), cards, alerts and why it
     exists. Running rows come first, then due, then finished, then waiting
     for later; the foot counts the rows and the last 24 hours' finished
-    searches. Clicking a row opens **the city log** in the aside: the city's
+    searches. It shows 60 rows and, since v1.377.4, adds the next 60 each
+    time its end scrolls into view; a new filter or range starts again at the
+    top. Clicking a row opens **the city log** in the aside: the city's
     name, slug, region and searches a day (no home worker since v1.374.0,
     RS-439), then per item the open task and the last two finished ones, each
     with its events timed in Eastern, refreshed every 10 s; **Search now** and
@@ -3504,13 +3521,25 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     7 days, 14 days) that sums the ERP fleet's finished searches per UTC day
     (`GET /api/fleet/stats/funnel`, since v1.377.1, RS-446; before, the
     coordinator's counters, which the ERP fleet's workers do not report to,
-    so every stage read 0): searches, result cards, listings opened, model
-    reviews and alerts. The title gate, keyword gate, new-to-us and
-    coordinator stages are not in a task's result and show "—". Between
+    so every stage read 0): searches, result cards, the title gate, listings
+    opened, the keyword gate, new to us, model reviews, **Passed the model**
+    and alerts. Since v1.378.0 (RS-450, facebook-tracker 0.14.18) a task's
+    result counts the three gates and what passed the model: a fresh verdict
+    that clears the score and minimum-units gates. Passed the model replaced
+    the Coordinator stage, which the ERP fleet never counted; its card also
+    shows how many of those a worker held back because fleet alerts are off,
+    and the claim and de-duplication text moved to Telegram alert. A stage
+    no day in the range reported shows "—"; one only some days reported
+    gives no pass rate against a stage counted on every day. Since v1.379.1
+    (RS-452) a day counts those stages only when every search that day
+    counted them, a stage summed over fewer days is starred with a footnote,
+    the alert's rate leaves out what was held back, and a step over 100 %
+    shows no number. Between
     stages the pass rate from the last counted stage (cards per search as
     "×N", every other step as a percentage, amber under 50 %) and under the pipeline the
-    headline ratios: cards per alert, reviews per alert, the title gate's
-    drop before a page is opened and the model's drop of what it reads. Then
+    headline ratios: what passed the model and what was held back, cards per
+    alert, reviews per alert, the title gate's drop before a page is opened
+    and the model's drop of what it reads, read against what passed it. Then
     two per-day bar charts for the last 14 days from the same counts, each
     on its own axis — reviewed by the model, alerts — in one hue with today's bar grey as
     partial, three gridlines, labels on the first, highest and today's bar, a

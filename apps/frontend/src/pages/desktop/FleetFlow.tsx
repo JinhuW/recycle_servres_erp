@@ -22,7 +22,7 @@ import { ListingTester, RulesPanel, STAGE_LISTS, probeVerdicts, type ItemRules, 
 // settings has an Edit form (STAGE_FORMS) that the console writes into every
 // worker's config. Counts are the ERP fleet's finished searches
 // (/api/fleet/stats/funnel) over the range the Analysis tab picked (today, 7
-// or 14 days); a stage a task's result does not count shows a dash. Between
+// or 14 days); a stage no task in the range counted shows a dash. Between
 // stages the pass rate, and under the pipeline the headline ratios. The
 // phrase and keyword lists are FleetRules.tsx.
 
@@ -40,6 +40,11 @@ function stageSettings(t: Translate, stage: FlowStage, fleet: FleetDoc | null): 
   const window = Array.isArray(s.date_listed) ? s.date_listed[s.date_listed.length - 1] : s.date_listed;
   const sum = (f: (i: (typeof items)[number]) => number) => items.reduce((n, i) => n + f(i), 0);
   const v = (x: unknown) => (x === undefined || x === null || x === '' ? '—' : String(x));
+  // The score and unit gates the model's verdict must clear.
+  const verdictGates: Setting[] = [
+    { label: t('fbcSetRating'), value: s.rating == null ? '—' : `${s.rating} / 5` },
+    { label: t('fbcSetMinUnits'), value: v(s.min_unit_count) },
+  ];
   switch (stage) {
     case 'search': return [
       { label: t('fbcSetPhrases'), value: String(sum(i => i.search_phrases.length)) },
@@ -71,16 +76,13 @@ function stageSettings(t: Translate, stage: FlowStage, fleet: FleetDoc | null): 
       { label: t('fbcSetUnrated'), value: s.exclude_unrated_sellers == null ? '—' : s.exclude_unrated_sellers ? t('fbcSetDropped') : t('fbcSetAllowed') },
     ];
     case 'fresh': return [{ label: t('fbcFixedNotified'), value: t('fbcFixedPerUser'), fixed: true }];
-    case 'ai': return [
-      { label: t('fbcSetRating'), value: s.rating == null ? '—' : `${s.rating} / 5` },
-      { label: t('fbcSetMinUnits'), value: v(s.min_unit_count) },
-      { label: t('fbcSetModel'), value: v(fleet?.ai_model) },
-    ];
-    case 'coordinator': return [
+    case 'ai': return [...verdictGates, { label: t('fbcSetModel'), value: v(fleet?.ai_model) }];
+    case 'passed': return verdictGates;
+    case 'alert': return [
       { label: t('fbcFixedDedupe'), value: t('fbcFixedItemId'), fixed: true },
       { label: t('fbcFixedOutbox'), value: t('fbcFixedDurable'), fixed: true },
+      { label: t('fbcFixedTopics'), value: '50+ / 10–49 / 5–9', fixed: true },
     ];
-    case 'alert': return [{ label: t('fbcFixedTopics'), value: '50+ / 10–49 / 5–9', fixed: true }];
   }
 }
 
@@ -118,6 +120,7 @@ export function FlowCard({ fleet, stats, prompt, onSaved, range = 1, now }: {
   const [probe, setProbe] = useState<Probe>({ title: '', description: '' });
   const counts = funnelCounts(Array.isArray(stats) ? stats : null, range, now);
   const gaps = funnelGaps(counts);
+  const partial = new Set(counts.partial ?? []);
   const headline = stats === null ? null : funnelHeadline(counts);
   const fmt = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const items = (fleet?.items ?? []).filter(i => i.enabled);
@@ -290,22 +293,25 @@ export function FlowCard({ fleet, stats, prompt, onSaved, range = 1, now }: {
             <Fragment key={k}>
               {gap && (
                 <span className={`fleet-gap${gap.drop ? ' fleet-gap-drop' : ''}`}
-                  title={gap.kind === 'ratio' ? t('fleetGapCardsPerSearch') : gap.value === null ? t('fbcFlowNotCounted') : t('fleetGapOfPrevious', { pct: gap.value })}>
+                  title={gap.kind === 'ratio' ? t('fleetGapCardsPerSearch') : gap.mixed ? t('fleetGapMixed') : gap.over ? t('fleetGapOver') : gap.value === null ? t('fbcFlowNotCounted') : t('fleetGapOfPrevious', { pct: gap.value })}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 6l6 6-6 6" /></svg>
                   {stats === null || gap.value === null ? '' : gap.kind === 'ratio' ? `×${fmt.format(gap.value)}` : `${gap.value}%`}
                 </span>
               )}
               <button type="button" role="tab" aria-selected={stage === k}
-                className={`ff-stage${k === 'ai' || k === 'alert' ? ' ff-stage-key' : ''}`} onClick={() => pick(k)}>
+                className={`ff-stage${k === 'ai' || k === 'passed' || k === 'alert' ? ' ff-stage-key' : ''}`} onClick={() => pick(k)}>
                 <span className="ff-stage-title">{t(`fbcFlow_${k}`)}</span>
                 {stats === null ? <>
                   <span className="ff-stage-n"><Skeleton width={46} height={20} /></span>
                   <span className="ff-stage-unit"><Skeleton width={64} height={10} /></span>
                 </> : <>
-                  <span className="ff-stage-n" title={n === undefined ? t('fbcFlowNotCounted') : undefined}>
-                    {n === undefined ? '—' : fmt.format(n)}
+                  <span className="ff-stage-n" title={n === undefined ? t('fbcFlowNotCounted') : partial.has(k) ? t('fleetFlowPartial') : undefined}>
+                    {n === undefined ? '—' : fmt.format(n)}{partial.has(k) && <sup className="ff-stage-partial">*</sup>}
                   </span>
-                  <span className="ff-stage-unit">{n === undefined ? t('fbcFlowNotCounted') : t(range !== 1 && (k === 'ai' || k === 'alert') ? `fleetFlowUnitRange_${k}` : `fbcFlowUnit_${k}`)}</span>
+                  <span className="ff-stage-unit">
+                    {n === undefined ? t('fbcFlowNotCounted') : t(range !== 1 && (k === 'ai' || k === 'alert') ? `fleetFlowUnitRange_${k}` : `fbcFlowUnit_${k}`)}
+                    {k === 'passed' && !partial.has(k) && !!counts.withheld && <> · {t('fleetFlowWithheld', { n: fmt.format(counts.withheld) })}</>}
+                  </span>
                 </>}
               </button>
             </Fragment>
@@ -315,9 +321,11 @@ export function FlowCard({ fleet, stats, prompt, onSaved, range = 1, now }: {
       {headline && (
         <p className="fleet-funnel-foot">
           {t('fleetFunnelHeadline', { cards: fmt.format(headline.cards), searches: fmt.format(headline.searches), reviews: fmt.format(headline.reviews), alerts: fmt.format(headline.alerts) })}
+          {headline.withheld > 0 && headline.passed !== null && <> {t('fleetFunnelWithheld', { passed: fmt.format(headline.passed), withheld: fmt.format(headline.withheld) })}</>}
           {headline.cardsPerAlert !== null && headline.reviewsPerAlert !== null && <> {t('fleetFunnelPerAlert', { cards: fmt.format(headline.cardsPerAlert), reviews: fmt.format(headline.reviewsPerAlert) })}</>}
           {headline.titleDrop !== null && <> {t('fleetFunnelTitleDrop', { pct: headline.titleDrop })}</>}
           {headline.modelDrop !== null && <> {t('fleetFunnelModelDrop', { pct: headline.modelDrop })}</>}
+          {partial.size > 0 && <span className="ff-stage-partial-note">* {t('fleetFlowPartial')}</span>}
         </p>
       )}
       {/* Every stage renders into the same cell and only the picked one shows,

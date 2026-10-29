@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  fleetDeviceFor, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
+  fleetDeviceFor, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
   type FleetWorkerRelogin,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
-import { writeEvent } from '../routes/facebookPool';
+import { retireAccount, writeEvent } from '../routes/facebookPool';
 import { WORKER_ID } from '../routes/coordinator';
 import { releaseTasks } from './claim';
 import { loadRelease } from './hosts';
@@ -228,6 +228,40 @@ slots.post('/:no/remove', async (c) => {
   if (isRefusal(out)) return c.json(out.body, out.status);
   wlog.info('fleet slot removed', { accountNo: no, poolStatus: out.status, by: user.email });
   return c.json({ ok: true, account_no: no, pool_status: out.status });
+});
+
+// For an account that is lost (a checkpoint, an expired session): retiring
+// the pool row fences the slot through the pool trigger, so its worker is
+// refused on its next call and exits, and the container its host starts next
+// claims another free slot. Unlike /remove, a held slot is fine here, but only
+// one fleetSlotRetirable calls lost: the page's row may be a poll behind a
+// Re-login that brought the worker back.
+slots.post('/:no/retire', async (c) => {
+  const no = parseNo(c.req.param('no'));
+  if (no === null) return c.json({ error: 'not_found' }, 404);
+  const user = c.var.user;
+  const sql = getDb(c.env);
+  const out = await sql.begin(async (tx): Promise<Refusal | { worker_id: string | null }> => {
+    const [account] = await tx<{ status: string }[]>`SELECT status FROM fb_pool_accounts WHERE no = ${no} FOR NO KEY UPDATE`;
+    const [slot] = await tx<{ worker_id: string | null; parked: boolean }[]>`
+      SELECT worker_id, (lease_expires_at IS NOT DISTINCT FROM 'infinity'::timestamptz) AS parked
+      FROM fleet_slots WHERE account_no = ${no} FOR UPDATE`;
+    if (!account || !slot) return notFound(`slot #${no}`);
+    // The last worker on the account says what became of it, even once the
+    // slot has let it go.
+    const [worker] = await tx<{ worker_id: string; state: string | null; detail: unknown }[]>`
+      SELECT worker_id, state, detail FROM fleet_workers WHERE account_no = ${no}
+      ORDER BY (worker_id = ${slot.worker_id}) DESC, last_heartbeat_at DESC NULLS LAST LIMIT 1`;
+    const operator = isRecord(worker?.detail) && worker.detail.operator === true;
+    if (!fleetSlotRetirable({ parked: slot.parked, poolStatus: account.status, state: worker?.state, operator })) {
+      return conflict('not_lost', `#${no} is not parked; park it first`);
+    }
+    await retireAccount(tx, user, no, `retired from the ${FLEET_HOLDER}`);
+    return { worker_id: slot.worker_id };
+  });
+  if (isRefusal(out)) return c.json(out.body, out.status);
+  wlog.info('fleet slot retired', { accountNo: no, workerId: out.worker_id, by: user.email });
+  return c.json({ ok: true, account_no: no, worker_id: out.worker_id });
 });
 
 slots.post('/:no/release-quarantine', async (c) => {

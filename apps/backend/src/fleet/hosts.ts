@@ -87,7 +87,7 @@ export function gateOk(preState: string | null, postState: string | null): boole
   return postState !== 'DEAD';
 }
 
-type WorkerRow = { worker_id: string; state: string | null; version: string | null; last_heartbeat_at: Date | null; epoch: number | null };
+type WorkerRow = { worker_id: string; state: string | null; version: string | null; last_heartbeat_at: Date | null; epoch: number | null; account_no: number | null };
 
 function onVersion(w: WorkerRow | undefined, version: string, since: Date): boolean {
   if (!w || !w.last_heartbeat_at) return false;
@@ -146,14 +146,17 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
   if (!release || release.state !== 'rolling') return null;
   const allHosts = await tx<FleetHostRow[]>`SELECT * FROM fleet_hosts`;
   const workers = new Map(
-    (await tx<WorkerRow[]>`SELECT worker_id, state, version, last_heartbeat_at, epoch FROM fleet_workers`).map((w) => [w.worker_id, w]),
+    (await tx<WorkerRow[]>`SELECT worker_id, state, version, last_heartbeat_at, epoch, account_no FROM fleet_workers`).map((w) => [w.worker_id, w]),
   );
 
   if (release.current) {
     const cur = release.current;
     const w = workers.get(cur.worker_id);
     const started = new Date(cur.started_at);
-    if (onVersion(w, release.version, started) && (cur.epoch === undefined || (w?.epoch ?? 0) > cur.epoch) && gateOk(cur.pre_state, w?.state ?? null)) {
+    // A slot's epoch only orders claims on that one account: the replacement
+    // may come back on another (its old account was retired meanwhile).
+    const reclaimed = cur.epoch === undefined || (cur.account_no !== undefined && w?.account_no !== cur.account_no) || (w?.epoch ?? 0) > cur.epoch;
+    if (onVersion(w, release.version, started) && reclaimed && gateOk(cur.pre_state, w?.state ?? null)) {
       release.upgraded = [...release.upgraded, cur.worker_id];
       release.current = null;
     } else if (now.getTime() - new Date(cur.stopped_at ?? cur.started_at).getTime() > (cur.stopped_at ? GATE_TIMEOUT_MS : 2 * GATE_TIMEOUT_MS)) {
@@ -203,7 +206,7 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
       if (idle) {
         const w = workers.get(idle);
         const fresh = w?.last_heartbeat_at && now.getTime() - w.last_heartbeat_at.getTime() < FRESH_HEARTBEAT_MS;
-        release.current = { worker_id: idle, host_id: host.host_id, started_at: now.toISOString(), pre_state: fresh ? (w?.state ?? 'DOWN') : 'DOWN', ...(w?.epoch !== null && w?.epoch !== undefined ? { epoch: w.epoch } : {}) };
+        release.current = { worker_id: idle, host_id: host.host_id, started_at: now.toISOString(), pre_state: fresh ? (w?.state ?? 'DOWN') : 'DOWN', ...(w?.epoch !== null && w?.epoch !== undefined ? { epoch: w.epoch } : {}), ...(w?.account_no != null ? { account_no: w.account_no } : {}) };
         replace = idle;
       }
     }

@@ -53,6 +53,8 @@ export type FleetRow = {
   version: string | null;
   /** The release version a replaced worker comes back on. */
   replacingTo: string | null;
+  /** Parked until a person acts (DEAD connect_failed): a fenced one is left stopped, not replaced. */
+  operator: boolean;
   slot: FleetSlot | null;
   task: FleetTask | null;
   pool: FleetPoolAccount | null;
@@ -104,6 +106,7 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
     leaseExpires: running && holds && leaseLive(slot, now) ? slot.lease_expires_at : null,
     version: worker.version ?? null,
     replacingTo: replacing ? release?.version ?? null : null,
+    operator: worker.detail?.operator === true,
     slot,
     task,
     pool,
@@ -138,6 +141,7 @@ function coordinatorRow(w: FleetAccount, parked: ReadonlySet<string>, pool: Flee
     leaseExpires: null,
     version: h?.version ?? null,
     replacingTo: null,
+    operator: false,
     slot: null,
     task: null,
     pool,

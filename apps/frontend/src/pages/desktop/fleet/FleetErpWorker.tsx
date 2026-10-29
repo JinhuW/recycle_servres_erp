@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { handleFetchError } from '../../../lib/errorToast';
 import type { FbWorkerStint } from '../../../lib/facebookPool';
-import { fleetApi, type FleetCity, type FleetSlot, type FleetWorkerDetail } from '../../../lib/fleet';
+import { fleetSlotRetirable, fleetApi, type FleetCity, type FleetSlot, type FleetWorkerDetail } from '../../../lib/fleet';
 import { browserLabel, SESSION_WARN_DAYS } from '../../../lib/fleetView';
 import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
@@ -15,7 +15,7 @@ import {
   deviceText, erpCheckpoint, erpCityChips, erpCityLog, erpHistory, erpHistoryDot, erpProxyText, erpWorkerStatus, sessionDaysLeft,
   type ErpHistoryLine,
 } from './fleetWorkerView';
-import { ParkDialog, ReleaseQuarantineButton, UnparkDialog, useFleetMirror } from './shared';
+import { ParkDialog, ReleaseQuarantineButton, RetireSlotDialog, UnparkDialog, useFleetMirror } from './shared';
 import {
   AccountsUsed, CheckpointsCard, ErpBuildChip, Muted, NoThumb, WorkerCard, WorkerHead, WorkerHistory, type HistoryEntry, type WorkerField,
 } from './workerDetail';
@@ -28,7 +28,7 @@ import {
 // page, FleetErpWatch.tsx, through the ERP's relay), park or unpark the slot,
 // take the account out of the fleet, search a city now. A row the fleet has no source for reads "—".
 
-type Dialog = 'park' | 'unpark' | 'remove' | 'search' | null;
+type Dialog = 'park' | 'unpark' | 'remove' | 'retire' | 'search' | null;
 
 export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }: {
   detail: FleetWorkerDetail; stints: FbWorkerStint[] | null; onReload: () => void; now?: number;
@@ -127,6 +127,9 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
     );
   // Removing deletes the slot, which only a slot nobody holds allows.
   const removable = !!slot && (slot.parked || !leaseLive(slot, now)) && !slot.reserved_until;
+  // A lost account on this worker's own slot, or on one parked with none.
+  const retirable = !!slot && (d.holds_slot || slot.worker_id === null)
+    && fleetSlotRetirable({ parked: slot.parked, poolStatus: slot.pool_status, state: w.state, operator: w.detail?.operator === true });
 
   return (
     <div className="fp-pool">
@@ -155,6 +158,7 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
                   <button type="button" className="btn" onClick={() => setDialog('remove')} disabled={!removable}
                     title={removable ? undefined : t('fleetRemoveHeld')}>{t('fpRemoveFromFleet')}</button>
                 )}
+                {retirable && <button type="button" className="btn fleet-danger-text" onClick={() => setDialog('retire')}>{t('fleetRetireFree')}</button>}
                 <button type="button" className="btn" onClick={() => setDialog('search')}>{t('fleetSearchCityNow')}</button>
               </>}
               {slot?.quarantined_until && Date.parse(slot.quarantined_until) > now && <ReleaseQuarantineButton slot={slot} onDone={onReload} />}
@@ -185,6 +189,8 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
       {dialog === 'park' && slot && <ParkDialog slot={slot} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); }} />}
       {dialog === 'unpark' && slot && <UnparkDialog slot={slot} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); }} />}
       {dialog === 'remove' && slot && <RemoveFromFleetDialog slot={slot} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); }} />}
+      {dialog === 'retire' && slot && <RetireSlotDialog accountNo={slot.account_no} workerId={w.worker_id} operator={w.detail?.operator === true}
+        onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); }} />}
       {dialog === 'search' && <SearchCityDialog detail={d} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); }} />}
     </div>
   );

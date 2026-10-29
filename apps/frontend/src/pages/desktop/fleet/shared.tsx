@@ -269,62 +269,66 @@ export function ConfirmDialogBody({ title, body, confirm, busy, onClose, onConfi
   );
 }
 
-// Parking frees the account: its worker's next call is refused and the
-// container exits, so a manager must mean it.
-export function ParkDialog({ slot, onClose, onDone }: { slot: FleetSlot; onClose: () => void; onDone: () => void }) {
-  const { t } = useT();
+// One confirm for a write on a slot: busy while it runs, a toast when done.
+function SlotActionDialog({ title, confirm: confirmLabel, body, warn, danger, run, done, onClose, onDone }: {
+  title: string; confirm: string; body: string; warn: string; danger?: boolean;
+  run: () => Promise<unknown>; done: string; onClose: () => void; onDone: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const confirm = async () => {
     if (busy) return;
     setBusy(true);
     try {
-      await fleetApi.parkSlot(slot.account_no);
-      showSuccessToast(t('fleetParked', { no: slot.account_no }));
+      await run();
+      showSuccessToast(done);
       onDone();
     } catch (e) {
       handleFetchError(e);
       setBusy(false);
     }
   };
+  const close = () => { if (!busy) onClose(); };
   return (
-    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 460 }}>
-      <ConfirmDialogBody title={t('fleetParkTitle', { no: slot.account_no })} confirm={t('fleetPark')} busy={busy} danger
-        onClose={onClose} onConfirm={confirm}
+    <Modal onClose={close} shellStyle={{ maxWidth: 460 }}>
+      <ConfirmDialogBody title={title} confirm={confirmLabel} busy={busy} danger={danger} onClose={close} onConfirm={confirm}
         body={<>
-          <p>{t('fleetParkBody', { worker: slot.worker_id ?? '—' })}</p>
-          <p className="fp-warn">{t('fleetParkWarn')}</p>
+          <p>{body}</p>
+          <p className="fp-warn">{warn}</p>
         </>} />
     </Modal>
   );
+}
+
+// Parking frees the account: its worker's next call is refused and the
+// container exits, so a manager must mean it.
+export function ParkDialog({ slot, onClose, onDone }: { slot: FleetSlot; onClose: () => void; onDone: () => void }) {
+  const { t } = useT();
+  const no = slot.account_no;
+  return <SlotActionDialog title={t('fleetParkTitle', { no })} confirm={t('fleetPark')} danger
+    body={t('fleetParkBody', { worker: slot.worker_id ?? '—' })} warn={t('fleetParkWarn')}
+    run={() => fleetApi.parkSlot(no)} done={t('fleetParked', { no })} onClose={onClose} onDone={onDone} />;
 }
 
 // Unparking makes the account claimable again: the next worker that asks for
 // a slot may take it, and that worker's start is a Facebook login.
 export function UnparkDialog({ slot, onClose, onDone }: { slot: FleetSlot; onClose: () => void; onDone: () => void }) {
   const { t } = useT();
-  const [busy, setBusy] = useState(false);
-  const confirm = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await fleetApi.unparkSlot(slot.account_no);
-      showSuccessToast(t('fleetUnparked', { no: slot.account_no }));
-      onDone();
-    } catch (e) {
-      handleFetchError(e);
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 460 }}>
-      <ConfirmDialogBody title={t('fleetUnparkTitle', { no: slot.account_no })} confirm={t('fleetUnpark')} busy={busy}
-        onClose={onClose} onConfirm={confirm}
-        body={<>
-          <p>{t('fleetUnparkBody')}</p>
-          <p className="fp-warn">{t('fleetUnparkWarn')}</p>
-        </>} />
-    </Modal>
-  );
+  const no = slot.account_no;
+  return <SlotActionDialog title={t('fleetUnparkTitle', { no })} confirm={t('fleetUnpark')}
+    body={t('fleetUnparkBody')} warn={t('fleetUnparkWarn')}
+    run={() => fleetApi.unparkSlot(no)} done={t('fleetUnparked', { no })} onClose={onClose} onDone={onDone} />;
+}
+
+// For a lost account: retiring it drops the slot, and the worker's next
+// container claims another free account, which is a Facebook login. A worker
+// parked for an operator exits 78 instead and its host leaves it stopped.
+export function RetireSlotDialog({ accountNo: no, workerId, operator, onClose, onDone }: {
+  accountNo: number; workerId: string | null; operator: boolean; onClose: () => void; onDone: () => void;
+}) {
+  const { t } = useT();
+  return <SlotActionDialog title={t('fleetRetireTitle', { no })} confirm={t('fleetRetireFree')} danger
+    body={t('fleetRetireBody', { worker: workerId ?? '—' })} warn={operator ? t('fleetRetireOperator') : t('fleetRetireWarn')}
+    run={() => fleetApi.retireSlot(no)} done={t('fleetRetiredFreed', { no })} onClose={onClose} onDone={onDone} />;
 }
 
 // Lifting a quarantine early lets the next worker that asks claim the account.

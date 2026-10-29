@@ -15,6 +15,104 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.379.1] - 2026-10-29
+
+### Fixed
+
+Review fixes before the v1.379 production cut (RS-452).
+
+- **Retire & free no longer offers to retire a healthy account.** The Fleet
+  tab showed it on every parked row, and a row is parked when its worker
+  merely went silent, so a host reboot put a one-click retire on working
+  accounts. It now shows only when the worker reports a lost account, a
+  manager parked the slot, or the pool already took the account out, and not
+  for a worker parked for an operator, whose fault is its proxy. The rule is
+  one shared function, and `POST /api/fleet/slots/:no/retire` applies it too,
+  refusing anything else with 409 `not_lost`, so a page a poll behind a
+  Re-login cannot retire the account it just brought back.
+- **Retiring from the Account Pool page drops the fleet slot too.** Both
+  pages now go through one `retireAccount`, which also returns the slot's
+  leased tasks to the queue when the account had already left the fleet
+  (the pool trigger only does that on the way out of `fleet`), so a city or
+  a probe is no longer stuck behind a deleted slot. Retiring an account that
+  is already retired writes no second event.
+- A rolling release no longer fails when the worker it is replacing comes
+  back on a different account with a lower slot epoch.
+- The Retire dialog no longer promises a replacement worker: with no free
+  account left, the host runs one fewer.
+- **Analysis no longer mixes old and new workers' counts on one day.** A
+  day's title, keyword, new-to-us, passed and withheld totals now count only
+  when every search that day reported them, so release day reads "not
+  counted" instead of 60 title passes out of 700 cards. A counter past seven
+  digits is dropped instead of overflowing and failing the whole funnel. The
+  passed-to-alert rate leaves out what was held back with fleet alerts off,
+  a step over 100% shows no number and explains why, and a stage summed
+  over fewer days than its neighbours is starred and footnoted.
+- Park, Unpark and Retire now share one confirm dialog.
+
+## [1.379.0] - 2026-10-28
+
+### Added
+
+- **Fleet ▸ Retire & free on a parked worker** (RS-451). A worker whose
+  account is lost (Session expired, Checkpoint, Challenge, Dead) kept its slot
+  and its place on the host while searching nothing. Freeing it took Park on
+  the Fleet tab and Retire on the Account Pool page, and the dead slot stayed
+  behind. A parked row on the Fleet tab, and the worker's page, now have
+  **Retire & free**: one confirm retires the pool account and deletes its
+  slot (`POST /api/fleet/slots/:no/retire`). The pool trigger moves the slot's
+  epoch on, so the worker is refused on its next call and exits, and the
+  container its host starts a minute later signs in to the next free account.
+  A worker parked for an operator is left stopped by its host, and the dialog
+  says so.
+
+### Fixed
+
+- A Fleet tab row's dialogs no longer inherit the actions cell's right
+  alignment and no-wrap, which clipped the Park dialog's text.
+
+## [1.378.0] - 2026-10-28
+
+### Added
+
+- **Fleet ▸ Analysis counts every stage, and shows what passed the model**
+  (RS-450). Title gate, Keyword gate and New to us read "not counted yet":
+  the workers counted them, but their task results did not report them.
+  Workers on facebook-tracker 0.14.18 report them, and the funnel sums them.
+  The Coordinator stage, which nothing in the ERP fleet counted, becomes
+  **Passed the model**: listings whose fresh verdict cleared the score and
+  minimum-units gates. Its card also says how many a worker held back because
+  fleet alerts are off. Before this, a day with listings held back read "0
+  alerts, the model drops 100%". Now the headline names them, and the model's
+  drop is measured against what passed it. Days from before the release have
+  no such counts. A range that mixes them leaves out any pass rate that
+  compares stages counted over different days, instead of showing rates
+  above 100%.
+
+## [1.377.4] - 2026-10-28
+
+### Fixed
+
+- **Fleet ▸ Tasks: the table loads more rows as you scroll** (RS-449). The
+  table stopped at 60 rows, so a busy day read "60 of 1241 tasks" and the
+  rest could not be reached. Reaching the end of the table now adds the next
+  60, and keeps adding them until every matching row is shown. The rows are
+  already in the browser, so no request is made. Changing the state, item,
+  search or range goes back to the top and the first 60. The 10-second poll
+  keeps the rows already added.
+
+## [1.377.3] - 2026-10-28
+
+### Fixed
+
+- **The phone's Market value cards show the sell price again** (RS-448). Each
+  card's headline read `avg_sell`, which most parts don't have, so it showed a
+  bare "–" next to a populated Max buy. It now shows the price Max buy is
+  computed from: the last recorded sell price, else the average. The two
+  numbers always agree, and Max buy is 70% of the figure above it. The price is
+  labelled and shown to the cent. When a part also has an average sell price
+  that differs, the expanded card lists it.
+
 ## [1.377.2] - 2026-10-28
 
 ### Fixed

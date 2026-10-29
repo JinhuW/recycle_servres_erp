@@ -3,7 +3,7 @@ import { Icon } from '../../../components/Icon';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { coordinatorApi, type Challenge, type FleetDoc } from '../../../lib/coordinator';
 import { poolApi } from '../../../lib/facebookPool';
-import { fleetApi, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetWorker } from '../../../lib/fleet';
+import { fleetApi, fleetSlotRetirable, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetWorker } from '../../../lib/fleet';
 import { queueCityName, withoutRetired } from '../../../lib/fleetView';
 import { useT } from '../../../lib/i18n';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
@@ -15,7 +15,7 @@ import {
 } from './fleetRows';
 import { AddHostDialog, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
 import {
-  agoLabel, BudgetRing, COORDINATOR_POLL_MS, EmptyRow, Legend, ParkDialog, UnavailableCard, useFleetMirror, useFleetPoll, WorkerStateChip,
+  agoLabel, BudgetRing, COORDINATOR_POLL_MS, EmptyRow, Legend, ParkDialog, RetireSlotDialog, UnavailableCard, useFleetMirror, useFleetPoll, WorkerStateChip,
 } from './shared';
 
 // ─── Fleet ────────────────────────────────────────────────────────────────────
@@ -165,10 +165,18 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
   const { t, locale } = useT();
   const mirror = useFleetMirror();
   const [parking, setParking] = useState(false);
+  const [retiring, setRetiring] = useState(false);
   // Park acts on the account this worker holds now, so it needs the slot to
   // still be this worker's.
   const slot = r.slot && r.slot.worker_id === r.workerId ? r.slot : null;
   const quarantined = !!slot && isQuarantined(slot, now);
+  // The account's slot, held by this worker or parked with none; one another
+  // worker has claimed since is not this row's to retire.
+  const ownSlot = r.slot && (r.slot.worker_id === null || r.slot.worker_id === r.workerId) ? r.slot : null;
+  // Only an account its worker reports lost, or a manager parked: a worker
+  // that went silent shows as parked too, with a healthy account.
+  const retirable = r.source === 'erp' && !!ownSlot && !mirror
+    && fleetSlotRetirable({ parked: ownSlot.parked, poolStatus: ownSlot.pool_status, state: r.state, operator: r.operator });
 
   const since = r.now?.since ? Math.max(0, Math.round((now - Date.parse(r.now.since)) / 1000)) : null;
   const elapsed = since === null ? '' : `${Math.floor(since / 60)}m ${String(since % 60).padStart(2, '0')}s`;
@@ -219,9 +227,11 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
       <td>
         <span className="fp-holder">
           {nowCell}
-          {r.running && slot && !slot.parked && !mirror && (
+          {((r.running && slot && !slot.parked && !mirror) || retirable) && (
             <span className="fleet-now-actions">
-              <button type="button" className="btn sm ghost" onClick={() => setParking(true)}>{t('fleetPark')}</button>
+              {r.running && slot && !slot.parked && !mirror
+                && <button type="button" className="btn sm ghost" onClick={() => setParking(true)}>{t('fleetPark')}</button>}
+              {retirable && <button type="button" className="btn sm ghost fleet-danger-text" onClick={() => setRetiring(true)}>{t('fleetRetireFree')}</button>}
             </span>
           )}
         </span>
@@ -248,6 +258,8 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
           <Icon name="eye" size={14} />
         </a>
         {parking && slot && <ParkDialog slot={slot} onClose={() => setParking(false)} onDone={() => { setParking(false); onChanged(); }} />}
+        {retiring && ownSlot && <RetireSlotDialog accountNo={ownSlot.account_no} workerId={r.workerId} operator={r.operator}
+          onClose={() => setRetiring(false)} onDone={() => { setRetiring(false); onChanged(); }} />}
       </td>
     </tr>
   );
