@@ -2,13 +2,13 @@
 id: RS-454
 title: Fleet workers survive a slow page and can be marked healthy
 type: bug
-status: backlog
+status: done
 priority: P1
 created: 2026-10-29
 reporter: jinhu
-branch: JinhuW/pleco
-pr:
-version:
+branch: JinhuW/rs-454-fleet-mark-healthy
+pr: 992
+version: 1.380.0
 related: []
 ---
 
