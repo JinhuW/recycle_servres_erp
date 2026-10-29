@@ -22,9 +22,13 @@ Topic: rating 4 goes to the Low topic; rating 5 by the model's unit count
 Runs on the homelab VM, where the coordinator, the secrets and OpenSearch are:
 
     python3 fleet-alert-sender.py --dry-run        # what would be sent
-    python3 fleet-alert-sender.py --hours 24       # send (default: last 24 h)
+    python3 fleet-alert-sender.py --hours 24       # one pass (default: last 24 h)
+    python3 fleet-alert-sender.py --follow         # a pass every 10 s, for good
 
-    2-59/5 * * * * python3 ~/fleet-ai-bridge/fleet-alert-sender.py >> ~/fleet-ai-bridge/sender.log 2>&1
+With fleet-log-follow.py indexing withheld alerts as they are logged, --follow
+sends one 10-15 s after the worker withheld it. Kept alive by cron and flock:
+
+    * * * * * flock -n $HOME/fleet-ai-bridge/sender.lock python3 $HOME/fleet-ai-bridge/fleet-alert-sender.py --follow >> $HOME/fleet-ai-bridge/sender.log 2>&1
 """
 
 import argparse
@@ -44,6 +48,7 @@ SECRETS = os.path.expanduser("~/recycle_servers/facebook_tracker/configs/secrets
 STATE = os.path.expanduser("~/fleet-ai-bridge/sender-state.json")
 # Telegram allows about 20 messages a minute into one group.
 SEND_GAP_S = 3.5
+FOLLOW_S = 10
 PRIORITY_EMOJI = {"high": "🔥", "medium": "⚡", "low": "🐢"}
 CATEGORY_TAGS = [("ram", "RAM"), ("memory", "RAM"), ("cpu", "CPU"), ("processor", "CPU"), ("ssd", "SSD"),
                  ("storage", "SSD"), ("drive", "SSD"), ("networking", "SSD"), ("server", "Server")]
@@ -148,22 +153,16 @@ def worker_token(worker: str, cache: dict) -> str:
     return cache[worker]
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--hours", type=int, default=24)
-    ap.add_argument("--dry-run", action="store_true")
-    args = ap.parse_args()
+def run_once(hours: int, dry_run: bool, env: dict, tokens: dict) -> tuple[int, int]:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     try:
         state = json.load(open(STATE))
     except (OSError, ValueError):
         state = {}
-    env = secrets()
     topics = {"high": env.get("TELEGRAM_TOPIC_HIGH"), "medium": env.get("TELEGRAM_TOPIC_MEDIUM"),
               "low": env.get("TELEGRAM_TOPIC_LOW")}
-    tokens: dict = {}
     sent = skipped = 0
-    for alert in withheld(args.hours):
+    for alert in withheld(hours):
         lid = alert["listing_id"]
         if lid in state:
             continue
@@ -172,7 +171,7 @@ def main() -> int:
         title, body = message(alert, v)
         if level:
             title = f"{PRIORITY_EMOJI[level]} {title}"
-        if args.dry_run:
+        if dry_run:
             print(f"{alert['@timestamp'][:16]} {alert['worker']:<16} {alert['score']} {level or 'general':<7} "
                   f"units={v.get('unit_count')} {lid} {alert['title'][:60]}")
             continue
@@ -197,11 +196,36 @@ def main() -> int:
         with open(STATE, "w") as f:
             json.dump(state, f)
         time.sleep(SEND_GAP_S)
-    if not args.dry_run:
+    if not dry_run:
         with open(STATE, "w") as f:
             json.dump(state, f)
-        print(f"{stamp} sent {sent}, skipped {skipped} (already alerted or held by another worker)")
-    return 0
+    return sent, skipped
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--hours", type=int, default=24)
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--follow", action="store_true", help=f"keep going, a pass every {FOLLOW_S} s")
+    args = ap.parse_args()
+    env = secrets()
+    tokens: dict = {}
+    while True:
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            sent, skipped = run_once(args.hours, args.dry_run, env, tokens)
+            if not args.dry_run and (sent or skipped or not args.follow):
+                print(f"{stamp} sent {sent}, skipped {skipped} (already alerted or held by another worker)", flush=True)
+        except Exception as e:
+            # One failed pass (OpenSearch, the coordinator, Telegram) is retried
+            # on the next; a claim it left undelivered is this worker's own and
+            # answers `new` again.
+            print(f"{stamp} pass failed: {e}", flush=True)
+            if not args.follow:
+                return 1
+        if not args.follow:
+            return 0
+        time.sleep(FOLLOW_S)
 
 
 if __name__ == "__main__":
