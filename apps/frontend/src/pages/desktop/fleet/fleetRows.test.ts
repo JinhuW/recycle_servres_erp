@@ -29,6 +29,16 @@ describe('fleetRows', () => {
     expect(by('erp:homelab-2')).toMatchObject({ kind: 'parked', running: true, state: 'SESSION_EXPIRED' });
     expect(by('erp:worker-60-14-1').now).toMatchObject({ city: 'philly', home: false });
   });
+  it('reads a worker parked on a page that would not load as resumable, with its error', () => {
+    // A slot carries its worker, and the row reads that one.
+    const reporting = (state: string, detail: Record<string, unknown>) => fleetRows({
+      ...input, slots: SLOTS.map(s => s.account_no === 4 ? { ...s, worker: { ...s.worker!, state, detail } } : s),
+    }, NOW).find(r => r.key === 'erp:homelab-1')!;
+    expect(reporting('DEAD', { reason: 'connect_failed', operator: true, error: 'Page.goto: Timeout 60000ms exceeded.' }))
+      .toMatchObject({ kind: 'parked', running: true, resumable: true, parkError: 'Page.goto: Timeout 60000ms exceeded.', resume: null });
+    expect(reporting('DEAD', { reason: 'login_failed' }).resumable).toBe(false);
+    expect(by('coord:homelab-5').resumable).toBe(false);
+  });
   it('reads a running worker whose slot a manager parked as parked', () => {
     const parkedSlots = SLOTS.map(s => s.account_no === 4 ? { ...s, parked: true } : s);
     const row = fleetRows({ ...input, slots: parkedSlots }, NOW).find(r => r.key === 'erp:homelab-1');

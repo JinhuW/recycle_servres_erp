@@ -8,7 +8,7 @@
 // state), the page-side type extends the shared one here.
 
 import type {
-  FleetWorkerRelogin,
+  FleetWorkerRelogin, FleetWorkerResume,
   FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetProxy, FleetProxyHealthAnswer, FleetProxyPatch, FleetProxyWrite, FleetRelease,
   FleetSettings, FleetSlot as FleetSlotRow, FleetSlotWrite,
   FleetFunnelDay, FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, FleetWorkerDetail, RoundStartAnswer,
@@ -21,10 +21,10 @@ export type {
   FleetTaskResult, FleetTaskState, FleetHostContainer, FleetHostReport, DesiredAnswer, RoundStartAnswer,
   FleetProxy, FleetProxyCheck, FleetProxyHealth, FleetProxyHealthAnswer, FleetProxyHealthState, FleetProxySource,
   FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
-  FleetSecretKind, FleetWorkerDetail, FleetWorkerEvent, FleetWorkerRelogin,
+  FleetSecretKind, FleetWorkerDetail, FleetWorkerEvent, FleetWorkerRelogin, FleetWorkerResume,
 } from '@recycle-erp/shared';
 export {
-  FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
+  FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetResumable, fleetTakesResume, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
   FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_SLOW_MS,
 } from '@recycle-erp/shared';
 
@@ -169,6 +169,10 @@ export const fleetApi = {
   // once; 409 not_running for a worker holding no slot. A queued one that has
   // not gone out yet is answered again, not doubled.
   relogin: (id: string) => api.post<{ ok: true; relogin: FleetWorkerRelogin }>(`${BASE}/workers/${slug(id)}/relogin`, {}),
+  // Marks a worker parked on a page that would not load healthy: its next
+  // heartbeat hands it `resume` once, and it tries again in the same browser.
+  // 409 not_parked for any other state, not_running without a slot.
+  resume: (id: string) => api.post<{ ok: true; resume: FleetWorkerResume }>(`${BASE}/workers/${slug(id)}/resume`, {}),
   // Puts a pool account into the fleet on a listed proxy. 409 account_busy,
   // no_login, proxy_full or exists; the body's `detail` says which account.
   addSlot: (body: FleetSlotWrite) => api.post<{ slot: FleetSlot }>(`${BASE}/slots`, body).then(r => r.slot),

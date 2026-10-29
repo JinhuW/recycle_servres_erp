@@ -15,6 +15,41 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.380.0] - 2026-10-29
+
+### Added
+
+- **Mark healthy for a fleet worker parked on a page that would not load
+  (RS-454).** Three workers on worker-60-14 showed Dead all day while they
+  heartbeat every 20 seconds: each had hit one Facebook page timeout, which
+  the monitor read as an unreachable proxy (their proxies passed every
+  check), and parked DEAD `connect_failed` for an operator. Only a restart,
+  which is a login, could free them. The fleet page now reads such a worker
+  as **Page didn't load**, with its error on hover, and its row and watch
+  page offer **Mark healthy**: `POST /api/fleet/workers/:id/resume` queues a
+  one-shot `resume` heartbeat directive, like Re-login (migration 0217,
+  `fleet_workers.resume_*`), and the worker tries again in the same browser.
+  It is refused (`not_parked`) for any other state, including the Dead parks
+  whose browser is in an unknown state. Workers need facebook-tracker 0.15.0,
+  which also retries a timed-out page twice before it parks at all; on an
+  older build the button is disabled and says why.
+
+## [1.379.2] - 2026-10-29
+
+### Fixed
+
+- **The fleet's AI verdicts reach OpenSearch again (RS-453).** Since the
+  fleet agent took over starting workers on 10-27, no worker shipped its
+  structured events: the agent's `docker run` never set `AIMM_OPENSEARCH_URL`,
+  which the compose workers had from `fleet-worker.env`. The `fb-tracker-*`
+  index stopped at 10-27 15:41 UTC, and a listing's score, the model's comment
+  and what it was shown survived only in the container's text log, about
+  three hours deep. The agent now takes `FLEET_OPENSEARCH_URL` (and
+  `FLEET_OPENSEARCH_INDEX`, default `fb-tracker`) and hands them to every
+  worker it starts. Unset, the run line is unchanged. Workers already running
+  get it when the agent next starts them; nothing is restarted for it, since
+  every start is a Facebook login.
+
 ## [1.379.1] - 2026-10-29
 
 ### Fixed

@@ -46,6 +46,7 @@ describe('fleet mirror', () => {
       api('POST', '/api/fleet/round/start', { token, env: MIRROR }),
       api('POST', '/api/fleet/hosts', { token, env: MIRROR, body: { host_id: 'other' } }),
       api('POST', '/api/fleet/workers/lab-1/relogin', { token, env: MIRROR }),
+      api('POST', '/api/fleet/workers/lab-1/resume', { token, env: MIRROR }),
     ];
     for (const res of await Promise.all(writes)) {
       expect(res.status).toBe(409);

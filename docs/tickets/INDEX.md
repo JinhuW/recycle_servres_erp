@@ -5,6 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-454](./RS-454-fleet-workers-survive-a-slow-page-and-can-be-marked.md) | done | bug | P1 | Fleet workers survive a slow page and can be marked healthy | — |
+| [RS-453](./RS-453-fleet-workers-ship-their-ai-verdicts-to-opensearch-a.md) | done | bug | P2 | Fleet workers ship their AI verdicts to OpenSearch again | 1.379.2 |
 | [RS-452](./RS-452-release-review-fixes-for-the-v1-379-prod-cut.md) | done | bug | P1 | Release-review fixes for the v1.379 prod cut | 1.379.1 |
 | [RS-451](./RS-451-retire-a-parked-worker-s-account-and-free-the-worker.md) | done | story | P2 | Retire a parked worker's account and free the worker | 1.379.0 |
 | [RS-450](./RS-450-count-the-title-keyword-and-new-to-us-stages-and-sho.md) | done | story | P2 | Count the title, keyword and new-to-us stages and show what passed the model | 1.378.0 |

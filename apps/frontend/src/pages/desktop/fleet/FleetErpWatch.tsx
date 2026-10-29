@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { poolApi } from '../../../lib/facebookPool';
-import { fleetApi, fleetVncSocketUrl, type FleetWorkerDetail } from '../../../lib/fleet';
+import { fleetApi, fleetResumable, fleetVncSocketUrl, type FleetWorkerDetail } from '../../../lib/fleet';
 import type { ReloginPhase } from '../../../lib/fleetView';
 import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
 import { fleetWorkerPath } from '../../../lib/route';
 import { fmtDays, ReloginButton, stateLabel } from '../FleetAccounts';
 import { erpProxyText, erpReloginProgress, erpWorkerStatus, sessionDaysLeft } from './fleetWorkerView';
-import { useFleetPoll } from './shared';
+import { MarkHealthyButton, useFleetPoll } from './shared';
 import { WatchAccountPanel, type PoolLookup, type WatchFact } from './watchAccount';
 import { WatchView } from './watchView';
 import { ErpBuildChip, Muted } from './workerDetail';
@@ -95,8 +95,12 @@ export function FleetErpWatch({ initial, now = Date.now() }: { initial: FleetWor
           ? <> · {t('fbcWatchHeartbeat', { age: relTime(w.last_heartbeat_at, locale) })}</>
           : <> · {t('fbcNeverReported')}</>}
       </>}
-      relogin={<ReloginButton workerId={workerId} fleet onQueued={reload}
-        disabledReason={offline || !d.holds_slot ? t('fleetWorkerNotRunning') : null} />}
+      relogin={<>
+        {fleetResumable(w.state, w.detail) && !offline && d.holds_slot
+          && <MarkHealthyButton workerId={workerId} version={w.version} resume={w.resume ?? null} state={w.state} onQueued={reload} className="btn sm" />}
+        <ReloginButton workerId={workerId} fleet onQueued={reload}
+          disabledReason={offline || !d.holds_slot ? t('fleetWorkerNotRunning') : null} />
+      </>}
       strip={relogin && stripKey ? { phase: relogin.phase, text: t(stripKey, { age: relTime(relogin.since, locale) }) } : null}
       panel={typing => (
         <WatchAccountPanel pool={pool} asking={w.state === 'CHALLENGE_2FA'}

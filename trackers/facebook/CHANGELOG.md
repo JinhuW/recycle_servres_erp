@@ -18,6 +18,28 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-29
+
+### Fixed
+
+- **One slow page no longer parks a fleet worker for good (RS-454).** In fleet
+  mode the monitor treated the first navigation timeout as "Facebook or the
+  proxy is out of reach" and parked DEAD `connect_failed`, waiting for an
+  operator whom only `docker stop` (a new container, so a login) could
+  answer. On 2026-10-29 three workers on worker-60-14 parked that way while
+  their proxies passed every check. A timeout is now tried twice more in the
+  same page, 10 s and 30 s apart; Chromium's proxy and connection errors
+  still park at once.
+
+### Added
+
+- **Mark healthy: the `resume` directive (RS-454).** A worker parked with
+  `connect_failed` takes the ERP's one-shot `resume` heartbeat directive
+  (from **Mark healthy** on the fleet page, ERP 1.380.0): it removes its
+  parked file, reports HEALTHY and asks for a task again in the same
+  browser, with no login. A boot the timeout cut off runs again first. The
+  other parks (`login_failed`, `browser_failed`, `crashed`) ignore it.
+
 ## [0.14.18] - 2026-10-28
 
 ### Added
