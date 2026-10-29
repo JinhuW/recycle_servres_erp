@@ -10,7 +10,7 @@ import type { PoolAccountSummary } from '../../../lib/facebookPool';
 
 /** What a row reads of its pool account: a snapshot row or a summary row. */
 export type FleetPoolAccount = Pick<PoolAccountSummary, 'no' | 'uid' | 'status' | 'holder' | 'note'>;
-import { fleetStateParked, type FleetRelease, type FleetSlot, type FleetTask, type FleetWorker } from '../../../lib/fleet';
+import { fleetResumable, fleetStateParked, type FleetRelease, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume } from '../../../lib/fleet';
 import { parkedWorkers, retiredAt } from '../../../lib/fleetView';
 import { leaseLive, liveness } from './fleetBoard';
 
@@ -55,6 +55,12 @@ export type FleetRow = {
   replacingTo: string | null;
   /** Parked until a person acts (DEAD connect_failed): a fenced one is left stopped, not replaced. */
   operator: boolean;
+  /** Parked DEAD on a page that would not load: a manager may mark it healthy. */
+  resumable: boolean;
+  /** The worker's own words for why it parked, when it says. */
+  parkError: string | null;
+  /** The latest Mark healthy queued for it. */
+  resume: FleetWorkerResume | null;
   slot: FleetSlot | null;
   task: FleetTask | null;
   pool: FleetPoolAccount | null;
@@ -107,6 +113,9 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
     version: worker.version ?? null,
     replacingTo: replacing ? release?.version ?? null : null,
     operator: worker.detail?.operator === true,
+    resumable: fleetResumable(worker.state, worker.detail),
+    parkError: typeof worker.detail?.error === 'string' ? worker.detail.error : null,
+    resume: worker.resume ?? null,
     slot,
     task,
     pool,
@@ -142,6 +151,9 @@ function coordinatorRow(w: FleetAccount, parked: ReadonlySet<string>, pool: Flee
     version: h?.version ?? null,
     replacingTo: null,
     operator: false,
+    resumable: false,
+    parkError: null,
+    resume: null,
     slot: null,
     task: null,
     pool,

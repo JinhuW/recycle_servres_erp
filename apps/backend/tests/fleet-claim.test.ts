@@ -967,6 +967,73 @@ describe('claim-core review fixes', () => {
   });
 });
 
+describe('POST /api/fleet/workers/:id/resume', () => {
+  beforeEach(async () => { await resetDb(); await seedBase(); });
+
+  type ResumeAnswer = { ok: boolean; resume: { id: string; requested_by: string | null; delivered_at: string | null }; error?: string };
+  const resume = (token: string, id = 'lab-1') => api<ResumeAnswer>('POST', `/api/fleet/workers/${id}/resume`, { token });
+  const connectFailed = { detail: { reason: 'connect_failed', operator: true, error: 'Page.goto: Timeout 60000ms exceeded.' } };
+
+  it('queues one resume for a connect_failed park that the next heartbeat delivers once', async () => {
+    await seedSlot(1);
+    const { worker_token: wt } = await claimed('lab-1');
+    await heartbeat(wt, 'DEAD', connectFailed);
+    const { token } = await loginAs(ALEX);
+    const q = await resume(token);
+    expect(q.status).toBe(200);
+    expect(q.body.resume).toMatchObject({ requested_by: ALEX, delivered_at: null });
+    expect((await resume(token)).body.resume.id).toBe(q.body.resume.id);
+
+    const first = await heartbeat(wt, 'DEAD', connectFailed);
+    expect(first.body).toMatchObject({ ok: true, directives: ['resume'], resume_id: q.body.resume.id });
+    expect((await heartbeat(wt, 'HEALTHY')).body.directives).toEqual([]);
+    const detail = await api<{ worker: { resume: ResumeAnswer['resume'] } }>('GET', '/api/fleet/workers/lab-1', { token });
+    expect(detail.body.worker.resume.delivered_at).not.toBeNull();
+  });
+
+  it('goes out beside a relogin on the same answer', async () => {
+    await seedSlot(1);
+    const { worker_token: wt } = await claimed('lab-1');
+    await heartbeat(wt, 'DEAD', connectFailed);
+    const { token } = await loginAs(ALEX);
+    await api('POST', '/api/fleet/workers/lab-1/relogin', { token });
+    await resume(token);
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual(['relogin', 'resume']);
+  });
+
+  it('refuses a worker that is not parked on connect_failed, holds no slot, or is unknown', async () => {
+    const no = await seedSlot(1);
+    const { worker_token: wt } = await claimed('lab-1');
+    const { token } = await loginAs(ALEX);
+    await heartbeat(wt, 'HEALTHY');
+    expect((await resume(token)).body.error).toBe('not_parked');
+    await heartbeat(wt, 'DEAD', { detail: { reason: 'login_failed', operator: true } });
+    const loginFailed = await resume(token);
+    expect(loginFailed.status).toBe(409);
+    expect(loginFailed.body.error).toBe('not_parked');
+    await heartbeat(wt, 'CHECKPOINT');
+    expect((await resume(token)).body.error).toBe('not_parked');
+    expect((await resume(token, 'lab-7')).status).toBe(404);
+    expect((await resume((await loginAs(MARCUS)).token)).status).toBe(403);
+    await heartbeat(wt, 'DEAD', connectFailed);
+    await api('POST', `/api/fleet/slots/${no}/park`, { token });
+    expect((await resume(token)).body.error).toBe('not_running');
+    const [w] = await getTestDb()<{ resume_id: string | null }[]>`SELECT resume_id FROM fleet_workers WHERE worker_id = 'lab-1'`;
+    expect(w.resume_id).toBeNull();
+  });
+
+  it('a fresh claim drops a resume that never went out', async () => {
+    await seedSlot(1);
+    const { worker_token: old } = await claimed('lab-1');
+    await heartbeat(old, 'DEAD', connectFailed);
+    const { token } = await loginAs(ALEX);
+    expect((await resume(token)).status).toBe(200);
+    await getTestDb()`UPDATE fleet_slots SET lease_expires_at = NOW() - interval '1 minute'`;
+    const { worker_token: wt } = await claimed('lab-1');
+    expect((await heartbeat(wt, 'HEALTHY')).body.directives).toEqual([]);
+  });
+});
+
 describe('POST /api/fleet/workers/:id/relogin', () => {
   beforeEach(async () => { await resetDb(); await seedBase(); });
 

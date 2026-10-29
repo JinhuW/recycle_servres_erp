@@ -3,7 +3,7 @@ import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { ApiError } from '../../../lib/api';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
-import { fleetApi, type FleetSlot } from '../../../lib/fleet';
+import { fleetApi, fleetTakesResume, type FleetSlot, type FleetWorkerResume } from '../../../lib/fleet';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
 import { useT } from '../../../lib/i18n';
 import { budgetTone, easternClock, easternDateTime, liveness, spanLabel, type Liveness, type Translate } from './fleetBoard';
@@ -224,6 +224,40 @@ export function workerStateLabel(t: Translate, state: string): string {
 export function WorkerStateChip({ state }: { state: string }) {
   const { t } = useT();
   return <span className={WORKER_STATE_CHIP[state] ?? 'chip muted'}>{workerStateLabel(t, state)}</span>;
+}
+
+/** A Mark healthy that waits for the worker's next heartbeat, or that went
+ *  out and the worker has not yet reported anything but DEAD since. */
+export function resumeWaiting(resume: FleetWorkerResume | null | undefined, state: string | null): boolean {
+  return !!resume && (resume.delivered_at === null || state === 'DEAD');
+}
+
+/** Marks a worker parked on a page that would not load healthy: it tries the
+ *  page again in the browser it has, so no confirm, and no login. A build
+ *  before the directive cannot take it, and says so. */
+export function MarkHealthyButton({ workerId, version, resume, state, onQueued, className = 'btn sm ghost' }: {
+  workerId: string; version: string | null; resume: FleetWorkerResume | null; state: string | null;
+  onQueued?: () => void; className?: string;
+}) {
+  const { t } = useT();
+  const mirror = useFleetMirror();
+  const [busy, setBusy] = useState(false);
+  const waiting = resumeWaiting(resume, state);
+  const disabledReason = fleetTakesResume(version) ? null : t('fleetMarkHealthyTooOld');
+  const mark = () => {
+    setBusy(true);
+    fleetApi.resume(workerId)
+      .then(() => { showSuccessToast(t('fleetMarkHealthyQueued', { id: workerId })); onQueued?.(); })
+      .catch(handleFetchError)
+      .finally(() => setBusy(false));
+  };
+  if (mirror) return null;
+  return (
+    <button type="button" className={className} disabled={busy || waiting || !!disabledReason}
+      title={disabledReason ?? t('fleetMarkHealthyHint')} onClick={e => { e.stopPropagation(); mark(); }}>
+      {waiting ? t('fleetMarkHealthySent') : t('fleetMarkHealthy')}
+    </button>
+  );
 }
 
 /** A worker id as a link to its page. */

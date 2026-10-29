@@ -27,6 +27,26 @@ export type FleetParkedState = (typeof FLEET_PARKED_STATES)[number];
 export const fleetStateParked = (state: string | null | undefined): boolean =>
   !!state && (state.startsWith('CHALLENGE') || (FLEET_PARKED_STATES as readonly string[]).includes(state));
 
+/** Whether a manager may mark a worker healthy: it parked DEAD on a page that
+ *  would not load (`connect_failed`), and waits in a browser that still works.
+ *  The other DEAD reasons leave the browser in a state nobody knows. */
+export const fleetResumable = (state: string | null | undefined, detail: unknown): boolean =>
+  state === 'DEAD' && !!detail && typeof detail === 'object' && (detail as Record<string, unknown>).reason === 'connect_failed';
+
+/** The first worker build that takes the `resume` directive. */
+export const FLEET_RESUME_SINCE = [0, 15, 0] as const;
+
+/** Whether a worker's reported build ("0.15.0 (abc1234)") takes `resume`. */
+export function fleetTakesResume(version: string | null | undefined): boolean {
+  const m = version?.match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return false;
+  for (let i = 0; i < 3; i++) {
+    const n = Number(m[i + 1]);
+    if (n !== FLEET_RESUME_SINCE[i]) return n > FLEET_RESUME_SINCE[i];
+  }
+  return true;
+}
+
 /** Whether an account's fleet slot may be retired as lost: a manager parked
  *  it, the pool already took it out of the fleet, or its worker reports a
  *  parked state. A worker that only went silent is not lost, and one parked
@@ -464,6 +484,7 @@ export type FleetWorker = {
   detail: Record<string, unknown> | null;
   /** A manager's re-login, in the manager's views only (the worker never reads it). */
   relogin?: FleetWorkerRelogin | null;
+  resume?: FleetWorkerResume | null;
 };
 
 /** The latest re-login a manager queued for a worker. `delivered_at` is null
@@ -474,6 +495,10 @@ export type FleetWorkerRelogin = {
   requested_by: string | null;
   delivered_at: string | null;
 };
+
+/** The latest "Mark healthy" a manager queued for a worker parked with
+ *  `connect_failed`; delivered once, like a re-login. */
+export type FleetWorkerResume = FleetWorkerRelogin;
 
 /** The search parameters handed to every worker; keys follow the monitor's config. */
 export type FleetSearchSettings = Record<string, unknown>;
@@ -679,8 +704,10 @@ export type FleetErrorCode =
   | 'in_use'
   /** Removing a slot a worker holds (or a reservation does): park it first. */
   | 'leased'
-  /** Re-login for a worker that holds no slot right now. */
+  /** Re-login or Mark healthy for a worker that holds no slot right now. */
   | 'not_running'
+  /** Mark healthy for a worker that is not parked with `connect_failed`. */
+  | 'not_parked'
   /** Retiring an account fleetSlotRetirable does not call lost: park it first. */
   | 'not_lost';
 

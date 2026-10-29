@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-27:** ERP migration `0215`, Reddit tracker migration `0007`,
+**As of 2026-10-29:** ERP migration `0217`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2417,6 +2417,10 @@ One row per worker container that has claimed a slot, kept current by its heartb
 | `relogin_requested_at` | `timestamptz` |  |  | When it was queued. |
 | `relogin_requested_by` | `text` |  |  | The manager's e-mail. |
 | `relogin_delivered_at` | `timestamptz` |  |  | When a heartbeat handed the `relogin` directive over; null while it waits. A heartbeat delivers it once. |
+| `resume_id` | `text` |  |  | The latest "Mark healthy" a manager queued (`POST /api/fleet/workers/:id/resume`) for a worker parked DEAD with `connect_failed`, a random id. Cleared by a fresh claim. Migration 0217. |
+| `resume_requested_at` | `timestamptz` |  |  | When it was queued. |
+| `resume_requested_by` | `text` |  |  | The manager's e-mail. |
+| `resume_delivered_at` | `timestamptz` |  |  | When a heartbeat handed the `resume` directive over; null while it waits. A heartbeat delivers it once. |
 
 - **Primary key:** `worker_id`
 - **References:** `account_no` → `fb_pool_accounts.no` (on delete set null); `host_id` → `fleet_hosts.host_id` (on delete cascade)

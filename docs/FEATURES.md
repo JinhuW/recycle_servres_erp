@@ -3444,7 +3444,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     a row parked only because its worker went silent has none, and the API
     refuses any other slot with `not_lost`. Retire on the Account Pool page
     deletes the account's fleet slot too, and with no free account left the
-    host runs one worker fewer instead of replacing it. The
+    host runs one worker fewer instead of replacing it. Since v1.380.0
+    (RS-454) a worker parked Dead because a Facebook page would not load
+    (`connect_failed`) reads **Page didn't load**, with the worker's error on
+    hover, rather than Dead, and the row and its watch page offer **Mark
+    healthy**: its next heartbeat hands it `resume` once, and it tries again in
+    the same browser, with no new browser and no login. The row reads "Mark
+    healthy sent" until the worker reports anything but Dead. A worker build
+    before facebook-tracker 0.15.0 cannot take it, and the button says so.
+    The worker itself now tries a page that times out twice more, 10 s then
+    30 s apart, before it parks. The
     toolbar has the legend with counts (All workers, Healthy, Parked), a
     host select and a search over worker, account, city and host; since v1.371.0 (RS-431) the
     tab opens on Healthy rather than All workers. The foot says "N of M

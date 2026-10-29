@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  fleetDeviceFor, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
-  type FleetWorkerRelogin,
+  fleetDeviceFor, fleetResumable, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
+  type FleetWorkerRelogin, type FleetWorkerResume,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
@@ -49,6 +49,7 @@ type WorkerRow = {
   worker_id: string; host_id: string | null; account_no: number | null; epoch: number | null; state: string | null;
   version: string | null; last_heartbeat_at: Date | null; vnc_port: number | null; detail: unknown;
   relogin_id: string | null; relogin_requested_at: Date | null; relogin_requested_by: string | null; relogin_delivered_at: Date | null;
+  resume_id: string | null; resume_requested_at: Date | null; resume_requested_by: string | null; resume_delivered_at: Date | null;
 };
 
 function reloginOf(w: WorkerRow): FleetWorkerRelogin | null {
@@ -56,6 +57,14 @@ function reloginOf(w: WorkerRow): FleetWorkerRelogin | null {
   return {
     id: w.relogin_id, requested_at: iso(w.relogin_requested_at)!, requested_by: w.relogin_requested_by,
     delivered_at: iso(w.relogin_delivered_at),
+  };
+}
+
+function resumeOf(w: WorkerRow): FleetWorkerResume | null {
+  if (!w.resume_id || !w.resume_requested_at) return null;
+  return {
+    id: w.resume_id, requested_at: iso(w.resume_requested_at)!, requested_by: w.resume_requested_by,
+    delivered_at: iso(w.resume_delivered_at),
   };
 }
 
@@ -89,6 +98,7 @@ async function workerViews(sql: SqlLike): Promise<Map<string, WorkerView>> {
     vnc_port: w.vnc_port,
     detail: isRecord(w.detail) ? w.detail : null,
     relogin: reloginOf(w),
+    resume: resumeOf(w),
     task: byWorker.get(w.worker_id) ?? null,
   }]));
 }
@@ -351,6 +361,41 @@ workers.post('/:id/relogin', async (c) => {
   if (isRefusal(out)) return c.json(out.body, out.status);
   wlog.info('fleet relogin queued', { workerId: id, reloginId: out.relogin.id, fresh: out.fresh, by: user.email });
   return c.json({ ok: true, relogin: out.relogin });
+});
+
+// ─── Mark healthy ─────────────────────────────────────────────────────────────
+// A worker that could not load a page parks with `connect_failed` and waits in
+// its open browser; this tells it, on its next heartbeat, to try again there,
+// with no new browser and no login. Only that park: the others leave the
+// browser in a state nobody knows. Queued and delivered like a re-login.
+
+workers.post('/:id/resume', async (c) => {
+  const id = c.req.param('id');
+  if (!WORKER_ID.test(id)) return c.json({ error: 'not_found' }, 404);
+  const user = c.var.user;
+  const sql = getDb(c.env);
+  const out = await sql.begin(async (tx): Promise<Refusal | { resume: FleetWorkerResume; fresh: boolean }> => {
+    const [w] = await tx<WorkerRow[]>`SELECT * FROM fleet_workers WHERE worker_id = ${id} FOR UPDATE`;
+    if (!w) return notFound(id);
+    const [held] = await tx<{ account_no: number }[]>`
+      SELECT account_no FROM fleet_slots
+      WHERE worker_id = ${id} AND epoch = ${w.epoch} AND account_no = ${w.account_no}
+        AND lease_expires_at > NOW() AND lease_expires_at <> 'infinity'::timestamptz`;
+    if (!held) return conflict('not_running', `${id} holds no slot right now`);
+    const pending = resumeOf(w);
+    if (pending && pending.delivered_at === null) return { resume: pending, fresh: false };
+    if (!fleetResumable(w.state, w.detail)) {
+      return conflict('not_parked', `${id} is not parked on a page that would not load`);
+    }
+    const [row] = await tx<WorkerRow[]>`
+      UPDATE fleet_workers SET resume_id = ${randomUUID()}, resume_requested_at = NOW(),
+        resume_requested_by = ${user.email}, resume_delivered_at = NULL
+      WHERE worker_id = ${id} RETURNING *`;
+    return { resume: resumeOf(row)!, fresh: true };
+  });
+  if (isRefusal(out)) return c.json(out.body, out.status);
+  wlog.info('fleet resume queued', { workerId: id, resumeId: out.resume.id, fresh: out.fresh, by: user.email });
+  return c.json({ ok: true, resume: out.resume });
 });
 
 // ─── One worker, for its page ─────────────────────────────────────────────────

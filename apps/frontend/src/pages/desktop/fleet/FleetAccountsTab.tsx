@@ -15,7 +15,8 @@ import {
 } from './fleetRows';
 import { AddHostDialog, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
 import {
-  agoLabel, BudgetRing, COORDINATOR_POLL_MS, EmptyRow, Legend, ParkDialog, RetireSlotDialog, UnavailableCard, useFleetMirror, useFleetPoll, WorkerStateChip,
+  agoLabel, BudgetRing, COORDINATOR_POLL_MS, EmptyRow, Legend, MarkHealthyButton, ParkDialog, RetireSlotDialog, resumeWaiting, UnavailableCard, useFleetMirror, useFleetPoll,
+  WorkerStateChip,
 } from './shared';
 
 // ─── Fleet ────────────────────────────────────────────────────────────────────
@@ -189,13 +190,16 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
         </span>
       : r.running ? <em className="fleet-hold">{t('fleetNowWaiting')}</em> : null;
 
-  // A parked worker names why when its account is the reason.
+  // A parked worker names why when its account is the reason. One that could
+  // not load a page is not dead: its browser waits for Mark healthy.
   const stateChip = r.kind === 'healthy' ? <span className="chip pos">{t('fleetKindHealthy')}</span>
+    : r.resumable ? <span className="chip warn" title={r.parkError ?? undefined}>{t('fleetStateNoPage')}</span>
     : fleetStateParked(r.state) ? <WorkerStateChip state={r.state!} />
     : <span className="chip neg">{t('fleetKindParked')}</span>;
 
   const note = quarantined
     ? t('fleetQuarantineUntilAt', { time: easternClock(slot.quarantined_until, locale, now), span: dueLabel(t, slot.quarantined_until, now) })
+    : r.running && r.resumable && resumeWaiting(r.resume, r.state) ? t('fleetNoteResumeSent')
     : r.running && r.state === 'DEGRADED' ? t('fleetNoteDegraded')
     : r.heartbeat ? t('fleetBeat', { ago: agoLabel(t, r.heartbeat, now) })
     : r.source === 'coordinator' ? t('fbcNeverReported')
@@ -229,6 +233,8 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
           {nowCell}
           {((r.running && slot && !slot.parked && !mirror) || retirable) && (
             <span className="fleet-now-actions">
+              {r.resumable && r.running && slot && !slot.parked && !mirror
+                && <MarkHealthyButton workerId={r.workerId} version={r.version} resume={r.resume} state={r.state} onQueued={onChanged} />}
               {r.running && slot && !slot.parked && !mirror
                 && <button type="button" className="btn sm ghost" onClick={() => setParking(true)}>{t('fleetPark')}</button>}
               {retirable && <button type="button" className="btn sm ghost fleet-danger-text" onClick={() => setRetiring(true)}>{t('fleetRetireFree')}</button>}
