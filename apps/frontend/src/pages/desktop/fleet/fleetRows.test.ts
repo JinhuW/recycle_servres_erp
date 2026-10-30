@@ -68,9 +68,9 @@ describe('fleetRows', () => {
     expect(more.find(r => r.workerId === 'homelab-7')).toMatchObject({ kind: 'free', running: false, no: 70, slot: null });
     expect(fleetRowCounts(more)).toMatchObject({ free: 1 });
     expect(fleetRunning(more)).toEqual(fleetRunning(rows));
-    // Still reporting, it is not free yet: its next call is refused.
+    // Still reporting, it is free already (its next call is refused) but still counts as running.
     const live = fleetRows({ ...input, workers: [...WORKERS, { ...silent('homelab-7', 70), last_heartbeat_at: ago(0.2) }] }, NOW);
-    expect(live.find(r => r.workerId === 'homelab-7')?.kind).not.toBe('free');
+    expect(live.find(r => r.workerId === 'homelab-7')).toMatchObject({ kind: 'free', running: true });
   });
   it('reads a stopped worker of a deleted host as parked, not free: no agent starts it', () => {
     const gone = { ...WORKERS[0], worker_id: 'gone-1', host_id: 'gone', account_no: 70, task: null, last_heartbeat_at: ago(30) };

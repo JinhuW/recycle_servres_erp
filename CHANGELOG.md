@@ -15,6 +15,17 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.387.2] - 2026-10-30
+
+### Fixed
+
+- **A released worker reads Free at once** (RS-469). After **Release parked**
+  or **Retire & free**, the worker's slot is gone, and its next call is
+  refused, so it exits. The Fleet tab still called the row Parked for up to 15
+  minutes, until the worker's last heartbeat aged out. A worker whose account
+  has no slot now reads Free straight away. It still counts as running until
+  it stops reporting. A worker of a deleted host still reads Parked.
+
 ## [1.387.1] - 2026-10-30
 
 ### Fixed
