@@ -1433,6 +1433,11 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     warehouse tab, same part / label / condition — joins that product's #.
     Both packing lists keep their sorted rows, so a later product prints in
     its sorted place with its later # (`#1, #2, #9, #3`).
+  - **Removing a packed line asks first** (v1.387.0). Its ✕ opens *Remove a
+    packed item?*, naming the part, because the save drops the line's Pack
+    mode tick for good. A line not yet packed, or one added in this edit,
+    goes at once. The editor learns which lines are packed from
+    `GET /api/sell-orders/:id/pack`; if that read fails, nothing asks.
   - **Nothing renumbers** (v1.235.0). Removing a lot leaves a gap. A lot
     removed and added back in a later save is a new product with the next
     #; within one save it keeps its #. A spec edit, a transfer, a warehouse
@@ -1790,6 +1795,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     or none at all (red, *Not packed*), and lowering a packed lot unticks it.
     The tick confirms the count as shown. Undo reverses the last tick, a whole
     product's included, from a toast.
+  - **Unpacking asks first** (v1.387.0). Taking the tick off a packed lot,
+    or off a packed product (every lot), opens *Unpack this item?*; Unpack
+    does what the tick did before, Undo toast included, and Cancel leaves it
+    packed. Packing and scanning ask nothing.
   - **A packed product sinks under *Packed*** (v1.228.0), newest first, as
     Review mode's checked lines do. The products still to pack stay on top in
     # order, and *Hide* / *Show* folds the group away (hidden rows leave the

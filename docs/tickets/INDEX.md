@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-465](./RS-465-confirm-before-removing-a-packed-item-from-a-sell-or.md) | done | story | P2 | Confirm before removing a packed item from a sell order | — |
 | [RS-464](./RS-464-evaluate-panel-shows-the-live-prompt-not-the-rule-ed.md) | done | story | P2 | Evaluate panel shows the live prompt, not the rule editor | 1.386.0 |
 | [RS-463](./RS-463-fleet-hosts-never-remove-a-worker-drop-the-removed-s.md) | done | story | P2 | Fleet hosts never remove a worker; drop the Removed status | 1.385.0 |
 | [RS-462](./RS-462-reddit-analytics-missed-lead-tables-in-their-own-car.md) | done | story | P3 | Reddit analytics: missed-lead tables in their own card, sortable, height-capped | 1.384.0 |

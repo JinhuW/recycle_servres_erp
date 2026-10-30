@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.387.0] - 2026-10-30
+
+### Changed
+
+- **Taking a packed item off a sell order asks first** (RS-465). In the order
+  editor, ✕ on a line already ticked in Pack mode opens *Remove a packed
+  item?*: saving without it deleted the line's pack tick with no warning, and
+  the packer's work was gone. Unpacked lines and lines added in this edit
+  still remove in one click. In Pack mode, unticking a packed lot or product
+  now asks *Unpack this item?* instead of acting on the first tap, so a stray
+  touch on the iPad can't undo a pack; Undo still follows a confirmed unpack.
+
 ## [1.386.0] - 2026-10-29
 
 ### Changed
