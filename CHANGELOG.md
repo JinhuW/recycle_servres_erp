@@ -15,6 +15,24 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.382.0] - 2026-10-29
+
+### Added
+
+- **Lowering a host's capacity below its running workers asks first**
+  (RS-459). The host agent removes every container numbered above the new
+  count at once. On 2026-10-29 two clicks took homelab from 14 to 5 and
+  removed homelab-6 to -14, live signed-in browsers among them, with no
+  warning. A − that would cut a running container now opens a dialog. It
+  names the containers to be stopped and removed, says their Facebook
+  sessions are lost and that raising the capacity later costs a login per
+  container, and saves only on confirm. Cutting only stopped containers still
+  saves straight away.
+- **The Fleet Workers table sorts by any column title** (RS-460). Clicking
+  Worker, Host, Account, State, Now, Today, Lease or Version sorts
+  descending, then ascending, then back to the table's own order. Worker ids
+  and versions sort naturally, and empty cells go last in both directions.
+
 ## [1.381.0] - 2026-10-29
 
 ### Changed

@@ -5,6 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-460](./RS-460-fleet-workers-table-sort-by-clicking-a-column-title.md) | done | story | P3 | Fleet Workers table: sort by clicking a column title | 1.382.0 |
+| [RS-459](./RS-459-fleet-hosts-confirm-before-capacity-drops-below-runn.md) | done | story | P2 | Fleet hosts: confirm before capacity drops below running workers | 1.382.0 |
 | [RS-458](./RS-458-fleet-label-a-worker-its-host-removed-as-removed-not.md) | done | bug | P2 | Fleet: label a worker its host removed as Removed, not Parked | 1.381.0 |
 | [RS-457](./RS-457-fleet-analysis-count-a-mixed-day-never-read-withheld.md) | done | bug | P2 | Fleet Analysis: count a mixed day, never read withheld as rejected | 1.380.2 |
 | [RS-456](./RS-456-fleet-agent-replaces-a-release-worker-before-no-slot.md) | done | bug | P1 | Fleet agent replaces a release worker before no-slot retries | 1.380.1 |

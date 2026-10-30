@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COORDINATOR, HOSTS, NOW, POOL, RELEASE, SLOTS, WORKERS } from './fixtures';
-import { FLEET_ROW_KINDS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning } from './fleetRows';
+import { FLEET_ROW_KINDS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning, sortFleetRows } from './fleetRows';
 
 const input = { slots: SLOTS, workers: WORKERS, release: RELEASE, coordinator: COORDINATOR, challenges: null, pool: POOL };
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
@@ -97,6 +97,16 @@ describe('fleetRows', () => {
     const lone = fleetRows({ ...input, workers: [], slots: [], coordinator: { ...COORDINATOR, workers: [COORDINATOR.workers[3]] } }, NOW);
     expect(lone).toEqual([]);
     expect(fleetRowHosts(lone, [])).toEqual([]);
+  });
+  it('sorts by a column, empty cells last either way', () => {
+    const ids = (col: Parameters<typeof sortFleetRows>[1], dir: 'asc' | 'desc') => sortFleetRows(rows, col, dir).map(r => r.workerId);
+    expect(ids('worker', 'desc')).toEqual(['worker-60-14-1', 'homelab-9', 'homelab-5', 'homelab-4', 'homelab-3', 'homelab-2', 'homelab-1']);
+    expect(ids('state', 'asc').slice(-2).sort()).toEqual(['homelab-2', 'homelab-9']);
+    // homelab-9 has no account: last whichever way.
+    expect(ids('account', 'asc').at(-1)).toBe('homelab-9');
+    expect(ids('account', 'desc').at(-1)).toBe('homelab-9');
+    const today = sortFleetRows(rows, 'today', 'desc').map(r => r.minutes);
+    expect(today.filter(m => m !== null)).toEqual([...today.filter(m => m !== null)].sort((a, b) => b! - a!));
   });
   it('filters by kind, host and text', () => {
     expect(filterFleetRows(rows, { kind: 'healthy', host: 'homelab', q: 'homelab-3' }).map(r => r.key)).toEqual(['erp:homelab-3']);
