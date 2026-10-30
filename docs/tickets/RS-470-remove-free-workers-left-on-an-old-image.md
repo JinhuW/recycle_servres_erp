@@ -7,7 +7,7 @@ priority: P3
 created: 2026-10-30
 reporter: jinhu
 branch: ticket/fleet-remove-stale-free
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1013
 version: 1.388.0
 related: []
 ---
