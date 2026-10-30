@@ -1,6 +1,7 @@
 import type { Sql } from 'postgres';
 import {
   FLEET_TASK_STATES,
+  FLEET_TZ,
   type FleetFunnelDay,
   type FleetTask,
   type FleetTaskLog,
@@ -86,8 +87,9 @@ export function readFunnelDays(q: Record<string, string | undefined>): number | 
 }
 
 /**
- * The Analysis funnel: finished searches per UTC day over the last `days`
- * (today included), with what their results counted. Days with no search are
+ * The Analysis funnel: finished searches per office (Eastern) day over the
+ * last `days` (today included), with what their results counted. The window
+ * starts at Eastern midnight, worked out in SQL so a DST day stays whole. Days with no search are
  * left out; the page fills them. Retention bounds how far back this reaches.
  * The later stages are NULL, not 0, on a day no search reported them, and
  * otherwise summed over the `counted` searches that did. A count
@@ -95,8 +97,6 @@ export function readFunnelDays(q: Record<string, string | undefined>): number | 
  * than let one bad result overflow the day.
  */
 export async function funnelDays(sql: SqlLike, days: number, now: Date = new Date()): Promise<FleetFunnelDay[]> {
-  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  const since = new Date(today - (days - 1) * 86_400_000);
   const n = (key: string) => sql`CASE WHEN result->>${key} ~ '^[0-9]{1,7}$' THEN (result->>${key})::int END`;
   const whole = (key: string) => sql`COALESCE(SUM(${n(key)}), 0)::int`;
   // Only workers from 0.14.18 report these. A day that mixes builds sums
@@ -105,7 +105,7 @@ export async function funnelDays(sql: SqlLike, days: number, now: Date = new Dat
   // the whole day's cards, a part would look like a gate dropping the rest.
   const late = (key: string) => sql`SUM(${n(key)})::int`;
   return sql<FleetFunnelDay[]>`
-    SELECT to_char(done_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
+    SELECT to_char(done_at AT TIME ZONE ${FLEET_TZ}, 'YYYY-MM-DD') AS day,
            COUNT(*)::int AS searches,
            ${whole('cards')} AS cards,
            ${late('title_pass')} AS title_pass,
@@ -119,7 +119,8 @@ export async function funnelDays(sql: SqlLike, days: number, now: Date = new Dat
            COUNT(${n('passed')})::int AS counted,
            COUNT(${n('cards')})::int AS carded
     FROM fleet_tasks
-    WHERE state = 'done' AND kind = 'search' AND done_at >= ${since}
+    WHERE state = 'done' AND kind = 'search'
+      AND done_at >= ((${now}::timestamptz AT TIME ZONE ${FLEET_TZ})::date - ${days - 1}::int)::timestamp AT TIME ZONE ${FLEET_TZ}
     GROUP BY 1 ORDER BY 1`;
 }
 

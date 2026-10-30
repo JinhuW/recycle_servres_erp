@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-473](./RS-473-fleet-funnel-counts-days-in-eastern-time-not-utc.md) | done | story | P2 | Fleet funnel counts days in Eastern time, not UTC | 1.390.0 |
 | [RS-472](./RS-472-fleet-agent-removal-keeps-operator-holds-and-the-sta.md) | done | bug | P2 | Fleet-agent removal keeps operator holds and the stagger | 1.389.1 |
 | [RS-471](./RS-471-add-to-fleet-random-proxy-by-default-pick-one-from-a.md) | done | feature | P2 | Add to fleet: random proxy by default, pick one from a dropdown | 1.389.0 |
 | [RS-470](./RS-470-remove-free-workers-left-on-an-old-image.md) | done | story | P3 | Remove Free workers left on an old image | 1.388.0 |

@@ -15,6 +15,20 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.390.0] - 2026-10-30
+
+### Changed
+
+- **The fleet Analysis tab counts days from midnight Eastern, not UTC**
+  (RS-473). The funnel's Today / 7 / 14 ranges and both 14-day charts summed
+  searches by UTC day. UTC midnight is 8 PM Eastern, so an evening's
+  alerts landed on "today" while Telegram showed them under yesterday. On
+  Oct 30 the funnel said 13 alerts against 9 in the chat since midnight.
+  `/api/fleet/stats/funnel` now buckets by the office day (`FLEET_TZ`, shared
+  by both apps), the window is cut in SQL so the 25-hour day DST ends on stays
+  whole, and the labels read ET. The minutes budget still runs per UTC day,
+  as the scheduler counts it.
+
 ## [1.389.1] - 2026-10-30
 
 ### Fixed
