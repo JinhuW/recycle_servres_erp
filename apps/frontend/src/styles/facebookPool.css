@@ -2372,6 +2372,25 @@ td.rt-an-bad {
 .rt-an-other summary {
   cursor: pointer;
 }
+.rt-an-missed-count {
+  font-size: 13px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+/* About eight rows, then the table scrolls under its pinned header. A
+   collapsed border stays with the table when the header sticks, so the
+   header's rule is drawn as a shadow that moves with the cell. */
+.rt-an-cap {
+  max-height: 520px;
+  overflow-y: auto;
+}
+.rt-an-cap .fp-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 var(--border);
+}
 
 /* ─── Monitors ▸ WeChat ─────────────────────────────────────────────────────
    One colour per side of the market, everywhere on the page: blue is what

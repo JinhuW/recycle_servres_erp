@@ -2878,6 +2878,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - **Per prompt version:** judged, flagged, good and 👎, and PM recall.
   - **Per subreddit:** posts, memory posts, alerts, good-catch rate, average
     PMs and missing.
+  - **Missed leads** (1.384.0): the missing posts, the per-subreddit table and
+    the other posts buyers wanted sit in their own card under the rest. Each
+    column title sorts, and each table scrolls past 520px under a pinned
+    header.
 
   The same release made a listing cross-posted to several subreddits, or
   reposted within 72 hours, alert once. The other copies are held back as
