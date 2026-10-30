@@ -3430,10 +3430,15 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     epoch and when it renews, the worker's version (muted when it is not the
     host's), and the eye to the worker's page. Running workers come first,
     then silent ones, each by worker id. Since v1.373.0 (RS-436) a worker is
-    one of two kinds: **Healthy** (running, degraded or being replaced
+    one of two kinds (three since v1.381.0): **Healthy** (running, degraded or being replaced
     included) or **Parked** (it reports Session expired, Checkpoint,
     Challenge or Dead, which its state chip names, or it went silent; since
-    v1.373.1 (RS-437) also when a manager parked its slot). Since v1.379.0
+    v1.373.1 (RS-437) also when a manager parked its slot). Since v1.381.0
+    (RS-458) a third kind, **Removed**: a silent worker that its host's
+    latest report no longer lists (the agent removed it, as it does when the
+    host's capacity is lowered) reads **Removed by host** in grey instead of
+    Parked. A row whose account another worker now holds shows no minutes.
+    Since v1.379.0
     (RS-451) a parked ERP-fleet row, and that worker's page, have **Retire &
     free**: the pool account is retired and its slot deleted, the worker is
     refused on its next call and exits, and its host's next container claims

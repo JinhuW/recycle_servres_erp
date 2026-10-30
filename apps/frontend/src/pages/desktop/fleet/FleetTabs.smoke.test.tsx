@@ -86,10 +86,10 @@ describe('Fleet tab', () => {
     expect(html).toContain('ff-ring-full');            // #12 has used its budget
     expect(html).toContain('fleetWorkersFoot');
   });
-  it('has only the Healthy and Parked chips, and no retired worker', () => {
+  it('has the Healthy, Parked and Removed chips, and no retired worker', () => {
     const html = renderToString(<WorkersTable data={fleetData} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
     expect(html.match(/<i class="fp-dot"><\/i><span>(\w+)<\/span>/g)?.map(m => m.match(/<span>(\w+)/)![1]))
-      .toEqual(['fleetKindAll', 'fleetKindHealthy', 'fleetKindParked']);
+      .toEqual(['fleetKindAll', 'fleetKindHealthy', 'fleetKindParked', 'fleetKindRemoved']);
     expect(html).not.toContain('homelab-20');
     expect(html).not.toContain('fleetRetiredOn');
   });
