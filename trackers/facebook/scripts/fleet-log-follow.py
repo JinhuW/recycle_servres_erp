@@ -53,13 +53,15 @@ def follow(container: str, worker: str, alive: set) -> None:
     try:
         for line in proc.stdout:
             buffer.append(line.rstrip("\n"))
-            # A wrapped line completes on the next one or two, so parse those too.
+            # A wrapped line completes on up to three more, so parse those too.
             if any(t in line for t in TRIGGERS):
-                pending = 3
+                pending = 4
             if pending == 0:
                 continue
             pending -= 1
-            docs = [(i, d) for i, d in bridge.parse(list(buffer), worker, time.time()) if i not in shipped]
+            # Only what ends in the lines just read: an older verdict whose
+            # response block left the buffer would come back as a cached one.
+            docs = [(i, d) for i, d in bridge.parse(list(buffer), worker, time.time(), tail=4) if i not in shipped]
             if not docs:
                 continue
             try:
