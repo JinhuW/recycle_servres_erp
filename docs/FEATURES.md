@@ -2826,7 +2826,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   (`/tracker`) and **Prompts** (`/tracker/prompts`, the card below),
   and the title follows the tab. Since v1.346.0 (RS-398), a third tab,
   **Workflow** (`/tracker/workflow`), holds the **From a post to an alert**
-  card with its stage counts, subreddit and rule editors, and model picker.
+  card with its stage counts, subreddit editor and model picker. Since
+  v1.386.0 (RS-464), Evaluate shows the live prompt read-only (base prompt
+  plus enabled rules) where the rule editor was; prompts change through a
+  trial on Prompts.
   Fleet shows the worker legend, workers table and recent matches.
   The workers toolbar matches
   the Facebook one. A search box on the left finds a worker by id or role,

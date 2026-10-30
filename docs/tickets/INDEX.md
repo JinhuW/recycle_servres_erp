@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-464](./RS-464-evaluate-panel-shows-the-live-prompt-not-the-rule-ed.md) | done | story | P2 | Evaluate panel shows the live prompt, not the rule editor | 1.386.0 |
 | [RS-463](./RS-463-fleet-hosts-never-remove-a-worker-drop-the-removed-s.md) | done | story | P2 | Fleet hosts never remove a worker; drop the Removed status | 1.385.0 |
 | [RS-462](./RS-462-reddit-analytics-missed-lead-tables-in-their-own-car.md) | done | story | P3 | Reddit analytics: missed-lead tables in their own card, sortable, height-capped | 1.384.0 |
 | [RS-461](./RS-461-fleet-release-every-parked-worker-s-account-in-one-c.md) | done | story | P2 | Fleet: release every parked worker's account in one click, and show freed workers as Free | 1.383.0 |

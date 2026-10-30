@@ -322,11 +322,6 @@ export const trackerApi = {
 
   listRules: () =>
     api.get<{ rules: TrackerRule[] }>('/api/tracker/rules').then(r => r.rules),
-  createRule: (input: { name: string; prompt: string }) =>
-    api.post<{ rule: TrackerRule }>('/api/tracker/rules', input).then(r => r.rule),
-  updateRule: (id: number, patch: { name?: string; prompt?: string; enabled?: boolean }) =>
-    api.patch<{ rule: TrackerRule }>(`/api/tracker/rules/${id}`, patch).then(r => r.rule),
-  deleteRule: (id: number) => api.delete(`/api/tracker/rules/${id}`),
 
   listMatches: (limit: number) =>
     api.get<{ matches: TrackerMatch[] }>(`/api/tracker/matches?limit=${limit}`).then(r => r.matches),
