@@ -15,6 +15,25 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.388.0] - 2026-10-30
+
+### Added
+
+- **A Free worker left on an old image is removed** (RS-470). When a worker's
+  account leaves the fleet, its host's count drops below it, and its exited
+  container stayed on the host for good, because the fleet-agent removed
+  nothing. The Fleet tab kept the row, still showing the build it last ran
+  (homelab-11 and -13 on 0.14.10, worker-60-14-2 on 0.14.7). The worker could
+  never come back on that build: the agent recreates an exited container on
+  the current image whenever it starts it again. Now an online agent removes
+  a stopped container numbered above the count when its image is not the one
+  new workers start on. A running worker, one held for a person (exit 78,
+  crash limit, stopped by hand), and one waiting for its release replacement
+  are left alone. A removal is not a login and takes no start. The Fleet tab
+  leaves out a Free row whose container its host no longer reports. The
+  worker's database row stays as history. The removal begins once each host
+  runs the new agent image.
+
 ## [1.387.2] - 2026-10-30
 
 ### Fixed

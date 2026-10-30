@@ -72,6 +72,16 @@ describe('fleetRows', () => {
     const live = fleetRows({ ...input, workers: [...WORKERS, { ...silent('homelab-7', 70), last_heartbeat_at: ago(0.2) }] }, NOW);
     expect(live.find(r => r.workerId === 'homelab-7')).toMatchObject({ kind: 'free', running: true });
   });
+  it('leaves out a free worker once its host no longer reports its container', () => {
+    const free = { ...WORKERS[0], worker_id: 'homelab-7', host_id: 'homelab', account_no: 70, task: null, last_heartbeat_at: ago(30) };
+    const report = (ids: string[]) => ({ version: '1', containers: ids.map(worker_id => ({ worker_id, image: 'img:1', state: 'exited', started_at: null })) });
+    const rowsWith = (hosts: Parameters<typeof fleetRows>[0]['hosts']) =>
+      fleetRows({ ...input, workers: [...WORKERS, free], hosts }, NOW).find(r => r.workerId === 'homelab-7');
+    expect(rowsWith([{ host_id: 'homelab', report: report(['homelab-1']) }])).toBeUndefined();
+    expect(rowsWith([{ host_id: 'homelab', report: report(['homelab-1', 'homelab-7']) }])?.kind).toBe('free');
+    // No report yet: unknown is not gone.
+    expect(rowsWith([{ host_id: 'homelab', report: null }])?.kind).toBe('free');
+  });
   it('reads a stopped worker of a deleted host as parked, not free: no agent starts it', () => {
     const gone = { ...WORKERS[0], worker_id: 'gone-1', host_id: 'gone', account_no: 70, task: null, last_heartbeat_at: ago(30) };
     const more = fleetRows({ ...input, workers: [...WORKERS, gone], hosts: [{ host_id: 'homelab' }] }, NOW);

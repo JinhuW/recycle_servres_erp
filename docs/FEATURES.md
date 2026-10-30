@@ -3425,8 +3425,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     workers than the host has accounts for; since v1.382.0 (RS-459) a − that
     would leave a running container numbered above the new capacity asks
     first, naming the containers above it; since v1.385.0 (RS-463) the agent
-    never removes a worker: one above the count keeps running, and once it
-    stops it waits until the count reaches it again) and, while a release rolls, its
+    never removes a running worker: one above the count keeps running, and once it
+    stops it waits until the count reaches it again; since v1.388.0 (RS-470)
+    the agent removes a stopped one above the count whose image new workers
+    no longer start on, which is not a login) and, while a release rolls, its
     progress line with the worker replaced next (since v1.367.0 only while
     GET /api/fleet/hosts returns a rolling release; without one, workers
     left on an older image get a quiet "1 worker on 0.14.6; new workers
@@ -3481,7 +3483,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     Parked. Since v1.387.2 (RS-469) a worker reads Free as soon as
     its account's slot is gone, for example straight after Release parked,
     without waiting for it to go silent: its next call is refused. A stopped worker of a deleted host reads Parked, not Free: no
-    agent is left to start it (v1.387.1). Retire on the Account Pool page
+    agent is left to start it (v1.387.1). A Free worker whose container its
+    host no longer reports (the agent removed it for being on an old image)
+    is left out of the table (v1.388.0). Retire on the Account Pool page
     deletes the account's fleet slot too, and with no free account left the
     host runs one worker fewer instead of replacing it. Since v1.380.0
     (RS-454) a worker parked Dead because a Facebook page would not load

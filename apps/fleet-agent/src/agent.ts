@@ -281,6 +281,8 @@ export class Agent {
         if (stopped) return `could not replace ${action.container}: ${stopped}`;
         return this.runWorker(action);
       }
+      case 'remove':
+        return d.stopAndRemove(action.container);
     }
   }
 

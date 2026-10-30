@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-469](./RS-469-a-released-worker-reads-free-at-once-not-parked-for.md) | done | bug | P2 | A released worker reads Free at once, not Parked for 15 minutes | — |
+| [RS-470](./RS-470-remove-free-workers-left-on-an-old-image.md) | done | story | P3 | Remove Free workers left on an old image | 1.388.0 |
+| [RS-469](./RS-469-a-released-worker-reads-free-at-once-not-parked-for.md) | done | bug | P2 | A released worker reads Free at once, not Parked for 15 minutes | 1.387.2 |
 | [RS-468](./RS-468-fleet-tab-a-removed-worker-whose-account-another-wor.md) | backlog | bug | P3 | Fleet tab: a removed worker whose account another worker holds reads Replaced, not Parked | — |
 | [RS-467](./RS-467-fleet-alert-stopgaps-string-unit-counts-price-drops.md) | done | bug | P2 | Fleet alert stopgaps: string unit counts, price drops, logged literals, follower re-emits | n/a — trackers/facebook scripts only, no ERP release |
 | [RS-466](./RS-466-fix-the-dev-main-review-findings-alert-sender-verdic.md) | done | bug | P2 | Fix the dev→main review findings: alert sender, verdict bridge, agent replacements, Free rows | 1.387.1 |

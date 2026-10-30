@@ -46,7 +46,7 @@ describe('scale up', () => {
 });
 
 describe('scale down', () => {
-  it('never removes an extra: a running one keeps running', () => {
+  it('never removes a running extra', () => {
     const p = run([running('lab-1'), running('lab-2'), running('lab-3'), running('lab-4')]);
     expect(p.actions).toEqual([]);
     expect(p.notes).toEqual(['lab-3: beyond count 2; left running', 'lab-4: beyond count 2; left running']);
@@ -57,6 +57,37 @@ describe('scale down', () => {
     expect(p.actions).toEqual([]);
     expect(p.notes).toContain('lab-3: beyond count 1; left stopped');
     expect(kinds(run([running('lab-1'), running('lab-2'), exited('lab-3', 75, ago(600))], {}, { count: 3 }))).toEqual([['start', 'lab-3']]);
+  });
+
+  it('removes a stopped extra on an image new workers no longer start on', () => {
+    const p = run([running('lab-1', 'img:2'), exited('lab-3', 75, ago(600), 'img:1')], {}, { count: 1, image: 'img:2' });
+    expect(p.actions).toEqual([{ kind: 'remove', worker_id: 'lab-3', container: 'rs-fleet-lab-3', reason: 'beyond count 1 on img:1, not img:2' }]);
+  });
+
+  it('a removal is not a start: a missing worker still runs in the same tick, and inside the stagger', () => {
+    const p = run([exited('lab-3', 75, ago(600), 'img:1')], {}, { count: 1, image: 'img:2' });
+    expect(kinds(p)).toEqual([['remove', 'lab-3'], ['run', 'lab-1']]);
+    const staggered = run([running('lab-1', 'img:2'), exited('lab-3', 75, ago(600), 'img:1')], { lastStartAt: NOW - 1000 }, { count: 1, image: 'img:2' });
+    expect(kinds(staggered)).toEqual([['remove', 'lab-3']]);
+  });
+
+  it('keeps an old-image extra that runs, is held, waits for its replacement, or sits within the count', () => {
+    const d = { count: 1, image: 'img:2' };
+    expect(run([running('lab-1', 'img:2'), running('lab-3', 'img:1')], {}, d).actions).toEqual([]);
+    expect(run([running('lab-1', 'img:2'), exited('lab-3', 78, ago(600), 'img:1')], {}, d).actions).toEqual([]);
+    const crashed = exited('lab-3', 1, ago(600), 'img:1');
+    expect(run([running('lab-1', 'img:2'), crashed], { held: { 'lab-3': { container: crashed.id!, reason: 'crash_limit' } } }, d).actions).toEqual([]);
+    expect(run([running('lab-1', 'img:2'), exited('lab-3', 0, ago(60), 'img:1')], { bootAt: NOW - 3600_000 }, d).actions).toEqual([]);
+    expect(run([running('lab-1', 'img:2'), exited('lab-3', 75, ago(600), 'img:1')], { restarting: ['lab-3'] }, d).actions).toEqual([]);
+    expect(kinds(run([running('lab-1', 'img:2'), exited('lab-2', 75, ago(600), 'img:1')], {}, { ...d, count: 2 }))).toEqual([['start', 'lab-2']]);
+  });
+
+  it('removes nothing offline, observe-only, or when the image is not one this host runs', () => {
+    const cs = () => [running('lab-1', 'img:2'), exited('lab-3', 75, ago(600), 'img:1')];
+    const d = { count: 1, image: 'img:2' };
+    expect(run(cs(), { online: false }, d).actions).toEqual([]);
+    expect(run(cs(), { imageAllowed: false }, d).actions).toEqual([]);
+    expect(run(cs(), {}, { ...d, authoritative: false }).actions).toEqual([]);
   });
 
   it('still replaces a running extra the release names', () => {
