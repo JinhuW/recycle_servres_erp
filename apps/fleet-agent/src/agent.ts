@@ -237,9 +237,9 @@ export class Agent {
 
   private async settlePending(desired: Desired, observed: Container[]): Promise<void> {
     for (const [id, pending] of Object.entries(this.memory.pending)) {
-      // Above the count is no reason to drop the restart: hosts never remove
-      // a worker, so a stopped one was stopped to be replaced. Observe-only,
-      // nothing will run it.
+      // Above the count is no reason to drop the restart: hosts remove only a
+      // stopped extra on an old image, never one stopped to be replaced.
+      // Observe-only, nothing will run it.
       if (workerIndex(this.o.hostId, id) === null || !desired.authoritative) pending.restart = false;
       const exists = observed.some((c) => c.worker_id === id);
       // A container for the id again after a confirmed stop: the replacement
@@ -288,7 +288,9 @@ export class Agent {
           this.memory.last_start_at = lastStartAt;
           if (!this.save('start')) return 'cannot record the last start under /state; left in place';
         }
-        return d.stopAndRemove(action.container);
+        // No stop: a person may have started it since it was observed, and
+        // `docker rm` refuses a running container where a stop would sign it out.
+        return d.removeStopped(action.container);
     }
   }
 

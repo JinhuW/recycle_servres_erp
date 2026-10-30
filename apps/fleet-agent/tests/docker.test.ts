@@ -165,6 +165,16 @@ describe('acting', () => {
     expect(await new DockerCli(stuck.runner).stopAndRemove('rs-fleet-lab-2')).toMatch(/cannot stop/);
   });
 
+  it('removes a stopped container without stopping it, and counts one already gone', async () => {
+    const { calls, runner } = recorder();
+    expect(await new DockerCli(runner).removeStopped('rs-fleet-lab-3')).toBeNull();
+    expect(calls.map((c) => c.args)).toEqual([['rm', 'rs-fleet-lab-3']]);
+    const gone = recorder({ 'rm rs-fleet-lab-3': { code: 1, stderr: 'Error response from daemon: No such container: rs-fleet-lab-3' } });
+    expect(await new DockerCli(gone.runner).removeStopped('rs-fleet-lab-3')).toBeNull();
+    const live = recorder({ 'rm rs-fleet-lab-3': { code: 1, stderr: 'Error response from daemon: You cannot remove a running container' } });
+    expect(await new DockerCli(live.runner).removeStopped('rs-fleet-lab-3')).toMatch(/running container/);
+  });
+
   it('reports the last line of a failure', async () => {
     const { runner } = recorder({ 'start rs-fleet-lab-2': { code: 1, stderr: 'Error response from daemon: No such container: rs-fleet-lab-2\n' } });
     expect(await new DockerCli(runner).start('rs-fleet-lab-2')).toBe('docker start rs-fleet-lab-2: Error response from daemon: No such container: rs-fleet-lab-2');

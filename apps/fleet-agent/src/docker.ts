@@ -51,6 +51,8 @@ export interface DockerApi {
   run(spec: RunSpec, env: WorkerEnv): Promise<string | null>;
   start(name: string): Promise<string | null>;
   stopAndRemove(name: string): Promise<string | null>;
+  /** Removes a stopped container; Docker refuses a running one. */
+  removeStopped(name: string): Promise<string | null>;
   /** The daemon's id (`docker info`), or null when it cannot be read. */
   daemonId?(): Promise<string | null>;
   /** Running containers, other than this one, that are fleet agents for `hostId`; null when unknown. */
@@ -200,6 +202,11 @@ export class DockerCli implements DockerApi {
     if (!ok) return NO_SUCH_CONTAINER.test(out) ? null : out;
     const [ok2, out2] = await this.call(['rm', name]);
     return ok2 || NO_SUCH_CONTAINER.test(out2) ? null : out2;
+  }
+
+  async removeStopped(name: string): Promise<string | null> {
+    const [ok, out] = await this.call(['rm', name]);
+    return ok || NO_SUCH_CONTAINER.test(out) ? null : out;
   }
 
   async daemonId(): Promise<string | null> {

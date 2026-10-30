@@ -4153,6 +4153,7 @@ const zh: Record<string, string> = {
   fpAddToFleetSub: "在一个代理上建一个位置，并为这个账号生成一台桌面浏览器。有空闲的 ERP 车队 worker 时会登录它。",
   fpAddToFleetProxy: "代理",
   fpAddToFleetFull: "已满",
+  fpAddToFleetPickGone: "你选的代理已满或已删除。请另选一个，或选择任意有空位的代理。",
   fpAddToFleetRandom: "任一有空位的代理（随机）",
   fpAddToFleetAllFull: "所有代理都已满。请在“代理”里添加代理，或调高每个代理的账号数。",
   fpAddToFleetNoProxy: "请先在“代理”里添加一个代理。",

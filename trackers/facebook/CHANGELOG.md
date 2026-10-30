@@ -20,6 +20,18 @@ deployed?" harder to answer.
 
 ### Fixed
 
+- `fleet-alert-sender.py` claims a re-sighted listing at its new price.
+  That price comes from the WITHHELD document, or else from the newest
+  verdict, instead of an older counted verdict at the old price. A sighting
+  at another price is asked about even when it is stamped no later than the
+  last one, so a drop evaluated from the cache still reaches the coordinator
+  as `discounted`. Counts are coerced once, so a stored `0` no longer beats
+  a real count. A timestamp Python 3.10 cannot read (`Z`, 7 digits) no
+  longer aborts the pass (RS-474).
+- `ai-verdict-bridge.py` reads a `NaN` or `Infinity` unit count as no count
+  instead of raising and stopping every run. A withheld alert carries the
+  listing's price, and a new price makes a new document, which
+  `fleet-log-follow.py` ships at once (RS-474).
 - `fleet-alert-sender.py`:
   - It routes a unit count indexed as a string (`"12"`) the way the monitor
     does. Before, the comparison raised and aborted every pass from that
