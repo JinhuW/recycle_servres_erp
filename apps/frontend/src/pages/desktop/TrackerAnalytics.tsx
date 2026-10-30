@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Skeleton } from '../../components/Skeleton';
+import { SortTh, type SortState } from '../../components/SortTh';
 import { useT } from '../../lib/i18n';
+import { usePersisted } from '../../lib/listMemory';
 import { useElementWidth } from '../../lib/useElementWidth';
 import {
   ANALYTICS_WINDOWS,
@@ -47,28 +49,89 @@ export function AnalyticsCard({ locale }: Props) {
   const a = data && data !== 'unavailable' ? data : null;
 
   return (
-    <section className="card rt-analytics" aria-label={t('trkAnTitle')} aria-busy={!data}>
+    <>
+      <section className="card rt-analytics" aria-label={t('trkAnTitle')} aria-busy={!data}>
+        <div className="card-head">
+          <div>
+            <h2 className="card-title">{t('trkAnTitle')}</h2>
+            <span className="card-sub">{t('trkAnSub')}</span>
+          </div>
+          <div className="seg" role="tablist" aria-label={t('trkAnWindow')}>
+            {ANALYTICS_WINDOWS.map(w => (
+              <button key={w} type="button" role="tab" aria-selected={win === w}
+                className={win === w ? 'active' : ''} onClick={() => setWin(w)}>
+                {t(`trkAnWindow_${w}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="card-body rt-an-body">
+          {data === 'unavailable'
+            ? <p className="fp-muted rt-note">{t('trkAnUnavailable')}</p>
+            : <Body a={a} locale={locale} />}
+        </div>
+      </section>
+      {data !== 'unavailable' && <MissedCard a={a} locale={locale} />}
+    </>
+  );
+}
+
+// The leads the tracker let through get their own card, under the same window.
+function MissedCard({ a, locale }: { a: TrackerAnalytics | null; locale: string }) {
+  const { t } = useT();
+  const fmt = useMemo(() => new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }), [locale]);
+  const pct = useMemo(() => new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 0 }), [locale]);
+  const share = (part: number, whole: number) => (whole > 0 ? pct.format(part / whole) : '—');
+  return (
+    <section className="card rt-analytics" aria-label={t('trkAnMissedTitle')} aria-busy={!a}>
       <div className="card-head">
         <div>
-          <h2 className="card-title">{t('trkAnTitle')}</h2>
-          <span className="card-sub">{t('trkAnSub')}</span>
+          <h2 className="card-title">{t('trkAnMissedTitle')}</h2>
+          <span className="card-sub">{t('trkAnMissedSub', { pms: a?.hotPms ?? 5, window: a ? t(`trkAnWindow_${a.window}`) : '…' })}</span>
         </div>
-        <div className="seg" role="tablist" aria-label={t('trkAnWindow')}>
-          {ANALYTICS_WINDOWS.map(w => (
-            <button key={w} type="button" role="tab" aria-selected={win === w}
-              className={win === w ? 'active' : ''} onClick={() => setWin(w)}>
-              {t(`trkAnWindow_${w}`)}
-            </button>
-          ))}
-        </div>
+        {a && <span className={`mono rt-an-missed-count${a.demand.missing > 0 ? ' rt-an-bad' : ''}`}>
+          {t('trkAnMissedCount', { n: fmt.format(a.demand.missing), hot: fmt.format(a.demand.hotMemory) })}
+        </span>}
       </div>
       <div className="card-body rt-an-body">
-        {data === 'unavailable'
-          ? <p className="fp-muted rt-note">{t('trkAnUnavailable')}</p>
-          : <Body a={a} locale={locale} />}
+        <div className="rt-an-panel">
+          <div className="fp-section-label">{t('trkAnMissingTitle', { pms: a?.hotPms ?? 5 })}</div>
+          <PostsTable sortKey="missing" posts={a?.missing ?? null} empty={t('trkAnMissingNone')} showReason locale={locale} />
+        </div>
+
+        <div className="rt-an-panel">
+          <div className="fp-section-label">{t('trkAnSubreddits')}</div>
+          <SubredditsTable a={a} fmt={fmt} share={share} />
+        </div>
+
+        {a && a.hotOther.length > 0 && (
+          <details className="rt-an-panel rt-an-other">
+            <summary className="fp-section-label">{t('trkAnHotOther', { n: a.hotOther.length })}</summary>
+            <PostsTable sortKey="other" posts={a.hotOther} empty="" locale={locale} />
+          </details>
+        )}
       </div>
     </section>
   );
+}
+
+// Click cycles desc → asc → the order the tracker sent. Blanks sort last.
+function useSort(key: string): [SortState, (col: string) => void] {
+  const [sort, setSort] = usePersisted<SortState>(`desktop.tracker.analytics.${key}.sort`, { col: '', dir: null });
+  const cycle = (col: string) => setSort(s =>
+    s.col !== col || s.dir === null ? { col, dir: 'desc' } : s.dir === 'desc' ? { col, dir: 'asc' } : { col: '', dir: null });
+  return [sort, cycle];
+}
+
+function sortRows<T>(rows: T[], sort: SortState, value: (row: T, col: string) => string | number | null): T[] {
+  if (!sort.dir) return rows;
+  const sign = sort.dir === 'asc' ? 1 : -1;
+  return [...rows].sort((x, y) => {
+    const a = value(x, sort.col);
+    const b = value(y, sort.col);
+    if (a === null || b === null) return a === b ? 0 : a === null ? 1 : -1;
+    return sign * (typeof a === 'string' ? a.localeCompare(b as string) : a - (b as number));
+  });
 }
 
 function Body({ a, locale }: { a: TrackerAnalytics | null; locale: string }) {
@@ -135,23 +198,6 @@ function Body({ a, locale }: { a: TrackerAnalytics | null; locale: string }) {
           <PromptsTable a={a} fmt={fmt} share={share} />
         </div>
       </div>
-
-      <div className="rt-an-panel">
-        <div className="fp-section-label">{t('trkAnMissingTitle', { pms: a?.hotPms ?? 5 })}</div>
-        <PostsTable posts={a?.missing ?? null} empty={t('trkAnMissingNone')} showReason locale={locale} />
-      </div>
-
-      <div className="rt-an-panel">
-        <div className="fp-section-label">{t('trkAnSubreddits')}</div>
-        <SubredditsTable a={a} fmt={fmt} share={share} />
-      </div>
-
-      {a && a.hotOther.length > 0 && (
-        <details className="rt-an-panel rt-an-other">
-          <summary className="fp-section-label">{t('trkAnHotOther', { n: a.hotOther.length })}</summary>
-          <PostsTable posts={a.hotOther} empty="" locale={locale} />
-        </details>
-      )}
     </>
   );
 }
@@ -250,24 +296,39 @@ function SubredditsTable({ a, fmt, share }: {
   a: TrackerAnalytics | null; fmt: Intl.NumberFormat; share: (x: number, n: number) => string;
 }) {
   const { t } = useT();
+  const [sort, onSort] = useSort('subreddits');
+  const rows = sortRows(a?.subreddits ?? [], sort, (s, col) => {
+    switch (col) {
+      case 'name': return s.name;
+      case 'posts': return s.posts;
+      case 'memory': return s.memoryPosts;
+      case 'alerts': return s.alerts;
+      case 'good': return s.alerts > 0 ? s.good / s.alerts : null;
+      case 'avgPms': return s.avgPms;
+      case 'hot': return s.hotMemory;
+      default: return s.missing;
+    }
+  });
+  const th = (col: string, label: string, title?: string) =>
+    <SortTh col={col} sort={sort} onSort={onSort} align={col === 'name' ? undefined : 'right'} title={title}>{label}</SortTh>;
   return (
-    <div className="fp-table-wrap">
+    <div className="fp-table-wrap rt-an-cap">
       <table className="fp-table rt-an-table">
         <thead>
           <tr>
-            <th>{t('trkAnColSub')}</th>
-            <th className="num">{t('trkAnColPosts')}</th>
-            <th className="num">{t('trkAnColMemory')}</th>
-            <th className="num">{t('trkAnChartAlerts')}</th>
-            <th className="num">{t('trkAnColGoodRate')}</th>
-            <th className="num" title={t('trkAnColAvgPmsHint')}>{t('trkAnColAvgPms')}</th>
-            <th className="num">{t('trkAnColHot', { pms: a?.hotPms ?? 5 })}</th>
-            <th className="num">{t('trkAnKpiMissing')}</th>
+            {th('name', t('trkAnColSub'))}
+            {th('posts', t('trkAnColPosts'))}
+            {th('memory', t('trkAnColMemory'))}
+            {th('alerts', t('trkAnChartAlerts'))}
+            {th('good', t('trkAnColGoodRate'))}
+            {th('avgPms', t('trkAnColAvgPms'), t('trkAnColAvgPmsHint'))}
+            {th('hot', t('trkAnColHot', { pms: a?.hotPms ?? 5 }))}
+            {th('missing', t('trkAnKpiMissing'))}
           </tr>
         </thead>
         <tbody>
           {!a && <tr><td colSpan={8}><Skeleton width="100%" height={12} /></td></tr>}
-          {a?.subreddits.map(s => (
+          {rows.map(s => (
             <tr key={s.name}>
               <td className="mono">r/{s.name}</td>
               <td className="num mono">{fmt.format(s.posts)}</td>
@@ -285,32 +346,43 @@ function SubredditsTable({ a, fmt, share }: {
   );
 }
 
-function PostsTable({ posts, empty, showReason = false, locale }: {
-  posts: TrackerListedPost[] | null; empty: string; showReason?: boolean; locale: string;
+function PostsTable({ sortKey, posts, empty, showReason = false, locale }: {
+  sortKey: string; posts: TrackerListedPost[] | null; empty: string; showReason?: boolean; locale: string;
 }) {
   const { t } = useT();
-  const cols = showReason ? 5 : 4;
+  const [sort, onSort] = useSort(sortKey);
+  const rows = sortRows(posts ?? [], sort, (p, col) => {
+    switch (col) {
+      case 'post': return p.title;
+      case 'sub': return p.subreddit;
+      case 'alerted': return p.alerted ? 1 : 0;
+      case 'posted': return Date.parse(p.postedAt);
+      default: return p.pmCount;
+    }
+  });
+  const cols = showReason ? 6 : 5;
   return (
-    <div className="fp-table-wrap">
+    <div className="fp-table-wrap rt-an-cap">
       <table className="fp-table rt-an-table">
         <thead>
           <tr>
-            <th>{t('trkAnColPost')}</th>
-            <th className="num">{t('trkAnColPms')}</th>
-            <th>{t('trkAnColAlerted')}</th>
+            <SortTh col="post" sort={sort} onSort={onSort}>{t('trkAnColPost')}</SortTh>
+            <SortTh col="sub" sort={sort} onSort={onSort}>{t('trkAnColSub')}</SortTh>
+            <SortTh col="pms" sort={sort} onSort={onSort} align="right">{t('trkAnColPms')}</SortTh>
+            <SortTh col="alerted" sort={sort} onSort={onSort}>{t('trkAnColAlerted')}</SortTh>
             {showReason && <th>{t('trkAnColWhy')}</th>}
-            <th>{t('trkAnColPosted')}</th>
+            <SortTh col="posted" sort={sort} onSort={onSort}>{t('trkAnColPosted')}</SortTh>
           </tr>
         </thead>
         <tbody>
           {posts === null && <tr><td colSpan={cols}><Skeleton width="100%" height={12} /></td></tr>}
           {posts?.length === 0 && <tr><td colSpan={cols} className="fp-muted">{empty}</td></tr>}
-          {posts?.map(p => (
+          {rows.map(p => (
             <tr key={p.redditId}>
               <td className="rt-an-post">
                 <a href={p.url} target="_blank" rel="noreferrer">{p.title}</a>
-                <span className="mono fp-muted"> r/{p.subreddit}</span>
               </td>
+              <td className="mono fp-muted">r/{p.subreddit}</td>
               <td className="num mono">{p.pmCount}</td>
               <td>{p.alerted ? t('trkAnAlertedYes') : t('trkAnAlertedNo')}</td>
               {showReason && <td className="fp-muted rt-an-why">{p.reasoning ?? '—'}</td>}

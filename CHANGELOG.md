@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.384.0] - 2026-10-29
+
+### Changed
+
+- **Missed leads get their own card on Reddit analytics** (RS-462). The
+  missing-posts table, By subreddit and Other posts buyers wanted sat at the
+  bottom of How the tracker is doing, and the missing table's multi-line
+  reasons pushed the page long. They now sit in a Missed leads card under it,
+  which follows the same window and leads with "N of M missing". Every column
+  title sorts, the subreddit is its own column on the post tables, and each
+  table stops at 520px and scrolls under a pinned header.
+
 ## [1.383.0] - 2026-10-29
 
 ### Added
