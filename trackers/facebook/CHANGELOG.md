@@ -18,6 +18,19 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- `fleet-alert-sender.py` records a listing the moment Telegram takes its
+  message and only retries the coordinator report after that, so a failed
+  `claim/delivered` no longer sends the lead again. It records only a
+  `duplicate` claim as final, so a listing held by another worker's claim
+  that lapses is still sent. Its withheld query is collapsed per listing and
+  newest first, so a busy 24-hour window no longer cuts off new withheld
+  alerts. It mints a worker token again on a 401 (RS-466).
+- `ai-verdict-bridge.py` re-indexes a doc into the daily index already
+  holding its `_id`, so a line stamped on either side of midnight is not
+  counted twice (RS-466).
+
 ### Added
 
 - `scripts/fleet-log-follow.py` follows each fleet worker's log (`docker exec

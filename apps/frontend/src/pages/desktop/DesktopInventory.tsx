@@ -8,7 +8,7 @@ import { usePersisted, useScrollMemory, forgetPersisted } from '../../lib/listMe
 import { api } from '../../lib/api';
 import { forEachKeysetPage } from '../../lib/keysetPages';
 import { UNTYPED_ITEM, isInventorySortCol, type InventorySortCol } from '@recycle-erp/shared';
-import type { SortState } from '../../components/SortTh';
+import { nextSort, type SortState } from '../../components/SortTh';
 import { handleFetchError } from '../../lib/errorToast';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { fmtUSD, fmtUSD0, fmtDateShort, relTime, canonicalPartNumber } from '../../lib/format';
@@ -245,8 +245,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   };
   // Click cycles desc → asc → the workbook order the server sends unsorted.
   const [sort, setSort] = usePersisted<SortState>('desktop.inventory.sort', { col: '', dir: null });
-  const cycleSort = (col: string) => setSort(s =>
-    s.col !== col || s.dir === null ? { col, dir: 'desc' } : s.dir === 'desc' ? { col, dir: 'asc' } : { col: '', dir: null });
+  const cycleSort = (col: string) => setSort(s => nextSort(s, col));
   // A sort on a column the table no longer draws would order the rows by
   // something nobody can see.
   const sortColShown: Record<InventorySortCol, boolean> = {

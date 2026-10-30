@@ -303,9 +303,9 @@ export function hostRunning(h: FleetHost): { running: number; desired: number } 
   return { running, desired: h.desired.count };
 }
 
-/** The containers a host's agent stops and removes at capacity `next`: every
- *  one numbered above it, as `apps/fleet-agent/src/plan.ts` reads
- *  `<host_id>-<n>`, highest first. */
+/** The containers above capacity `next`: every one numbered above it, as
+ *  `apps/fleet-agent/src/plan.ts` reads `<host_id>-<n>`, highest first. The
+ *  agent removes none of them; it only stops restarting them. */
 export function capacityCuts(h: Pick<FleetHost, 'host_id' | 'report'>, next: number): FleetHostContainer[] {
   const index = (id: string) => {
     const m = id.startsWith(`${h.host_id}-`) ? /^[1-9]\d*$/.exec(id.slice(h.host_id.length + 1)) : null;

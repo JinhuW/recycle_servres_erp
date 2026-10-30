@@ -104,6 +104,8 @@ export interface PlanInput {
   /** False when `desired.image` is not one this host runs. */
   imageAllowed?: boolean;
   staggerMs?: number;
+  /** Workers this agent stopped for a replacement and has not run again. */
+  restarting?: string[];
 }
 
 export interface Plan {
@@ -251,13 +253,31 @@ export function plan(input: PlanInput): Plan {
     notes.push(`last start ${Math.round((now - (lastStartAt as number)) / 1000)} s ago; next in ${Math.ceil((staggerMs - (now - (lastStartAt as number))) / 1000)} s`);
   }
 
-  // A 75/70 retries a claim that just found no slot; while a release waits on
-  // this host's replacement, those retries would take every start and the
-  // release would time out behind them.
+  // The release's replacement takes the tick's start before anything else.
+  // A 75/70 retry, or a run the ERP refuses a ticket, fails without moving
+  // the stagger and would take the start every tick, so the release would
+  // time out behind it. A release replaces one worker at a time; the rest
+  // wait one stagger. A running extra is the release's like any other.
   const rollTarget = desired.roll?.replace ? byId.get(desired.roll.replace) : undefined;
-  const replaceDue = canCreate && rollTarget !== undefined && rollTarget.running && rollTarget.image !== desired.image;
+  if (canCreate && rollTarget?.running && rollTarget.image !== desired.image) {
+    const n = workerIndex(hostId, rollTarget.worker_id)!;
+    const replace: Action = { kind: 'replace', worker_id: rollTarget.worker_id, container: rollTarget.name, image: desired.image, port: vncPort(desired, rollTarget.worker_id, n), reason: `image ${rollTarget.image} -> ${desired.image}`, counted: false, soft: false };
+    if (takeStart()) actions.push(replace);
+    else notes.push(`${replace.worker_id}: replacement waits for its turn`);
+  }
 
-  let deferredReplace: Action | null = null;
+  // Stopped for a replacement whose run then failed: the release's worker,
+  // so it is run again even above the count, never left removed.
+  for (const id of input.restarting ?? []) {
+    const n = workerIndex(hostId, id);
+    if (n === null || n <= desired.count || byId.has(id) || !canCreate) continue;
+    if (!takeStart()) {
+      notes.push(`${id}: stopped for its replacement; run waits for its turn`);
+      continue;
+    }
+    actions.push({ kind: 'run', worker_id: id, container: containerName(id), image: desired.image, port: vncPort(desired, id, n), reason: 'replacement' });
+  }
+
   for (let n = 1; n <= desired.count; n++) {
     const id = workerId(hostId, n);
     if (duplicates.has(id)) continue;
@@ -271,12 +291,7 @@ export function plan(input: PlanInput): Plan {
       actions.push({ kind: 'run', worker_id: id, container: containerName(id), image: desired.image, port: vncPort(desired, id, n), reason: 'missing' });
       continue;
     }
-    if (current.running) {
-      if (canCreate && desired.roll?.replace === id && current.image !== desired.image) {
-        deferredReplace = { kind: 'replace', worker_id: id, container: current.name, image: desired.image, port: vncPort(desired, id, n), reason: `image ${current.image} -> ${desired.image}`, counted: false, soft: false };
-      }
-      continue;
-    }
+    if (current.running) continue;
     const hold = holdOf(current, input);
     if (hold === 'operator_needed') {
       notes.push(`${id}: exit ${EXIT_OPERATOR_NEEDED}, cannot connect; left stopped for an operator`);
@@ -313,10 +328,6 @@ export function plan(input: PlanInput): Plan {
       notes.push(`${id}: exit ${current.exit_code}; its ${current.handoff ? 'reservation' : 'claim ticket'} is used, so it waits to be recreated online`);
       continue;
     }
-    if (soft && replaceDue) {
-      notes.push(`${id}: exit ${current.exit_code}; restart waits for ${desired.roll!.replace}'s replacement`);
-      continue;
-    }
     if (!takeStart()) {
       notes.push(`${id}: exit ${current.exit_code}; restart waits for its turn`);
       continue;
@@ -328,15 +339,5 @@ export function plan(input: PlanInput): Plan {
     }
   }
 
-  // A running extra is the release's like any other worker; left on the old
-  // image, the roll would wait on it until the gate failed the release.
-  if (replaceDue && workerIndex(hostId, rollTarget!.worker_id)! > desired.count) {
-    const n = workerIndex(hostId, rollTarget!.worker_id)!;
-    deferredReplace = { kind: 'replace', worker_id: rollTarget!.worker_id, container: rollTarget!.name, image: desired.image, port: vncPort(desired, rollTarget!.worker_id, n), reason: `image ${rollTarget!.image} -> ${desired.image}`, counted: false, soft: false };
-  }
-  if (deferredReplace) {
-    if (takeStart()) actions.push(deferredReplace);
-    else notes.push(`${deferredReplace.worker_id}: replacement waits for its turn`);
-  }
   return { actions, notes, holds, lastStartAt };
 }

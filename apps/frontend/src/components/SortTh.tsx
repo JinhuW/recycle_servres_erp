@@ -3,6 +3,10 @@ import type { ReactNode } from 'react';
 export type SortDir = 'asc' | 'desc' | null;
 export type SortState = { col: string; dir: SortDir };
 
+/** A header click: desc, then asc, then the table's own order. */
+export const nextSort = (s: SortState, col: string): SortState =>
+  s.col !== col || s.dir === null ? { col, dir: 'desc' } : s.dir === 'desc' ? { col, dir: 'asc' } : { col: '', dir: null };
+
 function SortCaret({ active, dir }: { active: boolean; dir: SortDir }) {
   return (
     <svg

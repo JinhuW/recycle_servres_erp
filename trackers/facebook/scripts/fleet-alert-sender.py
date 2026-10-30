@@ -82,14 +82,16 @@ def search(query: dict) -> list[dict]:
 
 
 def withheld(hours: int) -> list[dict]:
-    """One per listing, the first sighting, oldest first."""
-    rows = search({"size": 5000, "sort": [{"@timestamp": "asc"}], "query": {"bool": {"filter": [
-        {"term": {"kind": "listing_alert"}}, {"term": {"withheld": True}},
-        {"range": {"@timestamp": {"gte": f"now-{hours}h"}}}]}}})
-    first: dict[str, dict] = {}
-    for r in rows:
-        first.setdefault(r["listing_id"], r)
-    return list(first.values())
+    """One per listing, oldest first.
+
+    Collapsed by listing and fetched newest first, so a window holding more
+    withheld lines than one page cuts off the old, already-sent listings and
+    never the new ones."""
+    rows = search({"size": 10000, "sort": [{"@timestamp": "desc"}],
+                   "collapse": {"field": "listing_id.keyword"}, "query": {"bool": {"filter": [
+                       {"term": {"kind": "listing_alert"}}, {"term": {"withheld": True}},
+                       {"range": {"@timestamp": {"gte": f"now-{hours}h"}}}]}}})
+    return rows[::-1]
 
 
 def verdict(listing_id: str) -> dict:
@@ -145,11 +147,33 @@ def telegram(env: dict, text: str, topic: str | None) -> dict:
     raise RuntimeError("telegram kept rate-limiting")
 
 
-def worker_token(worker: str, cache: dict) -> str:
-    if worker not in cache:
-        cache[worker] = subprocess.run(["docker", "exec", "rs-coordinator", "rsc", "mint-token", "--worker", worker],
-                                       check=True, capture_output=True, text=True).stdout.strip()
-    return cache[worker]
+def coordinator(path: str, body: dict, worker: str, tokens: dict) -> dict:
+    """Call the coordinator as `worker`. --follow runs for good, so a token
+    the coordinator stopped accepting (a rotated secret) is minted again."""
+    for retry in (False, True):
+        if worker not in tokens:
+            tokens[worker] = subprocess.run(
+                ["docker", "exec", "rs-coordinator", "rsc", "mint-token", "--worker", worker],
+                check=True, capture_output=True, text=True).stdout.strip()
+        try:
+            return call(f"{COORDINATOR}{path}", body, tokens[worker])
+        except urllib.error.HTTPError as e:
+            if e.code != 401 or retry:
+                raise
+            del tokens[worker]
+    raise AssertionError
+
+
+def report(entry: dict, tokens: dict) -> None:
+    """Close the claim of an alert already in the chat and count its hit."""
+    coordinator("/v1/alerts/claim/delivered", {"listing_id": entry["report"]["listing_id"]}, entry["worker"], tokens)
+    coordinator("/v1/alerts/telegram", entry["report"], entry["worker"], tokens)
+    del entry["report"]
+
+
+def save(state: dict) -> None:
+    with open(STATE, "w") as f:
+        json.dump(state, f)
 
 
 def run_once(hours: int, dry_run: bool, env: dict, tokens: dict) -> tuple[int, int]:
@@ -161,6 +185,12 @@ def run_once(hours: int, dry_run: bool, env: dict, tokens: dict) -> tuple[int, i
     topics = {"high": env.get("TELEGRAM_TOPIC_HIGH"), "medium": env.get("TELEGRAM_TOPIC_MEDIUM"),
               "low": env.get("TELEGRAM_TOPIC_LOW")}
     sent = skipped = 0
+    # Sent on an earlier pass whose coordinator calls failed: the message is
+    # in the chat, so only the report is retried, never the send.
+    for entry in state.values():
+        if "report" in entry and not dry_run:
+            report(entry, tokens)
+            save(state)
     for alert in withheld(hours):
         lid = alert["listing_id"]
         if lid in state:
@@ -174,30 +204,31 @@ def run_once(hours: int, dry_run: bool, env: dict, tokens: dict) -> tuple[int, i
             print(f"{alert['@timestamp'][:16]} {alert['worker']:<16} {alert['score']} {level or 'general':<7} "
                   f"units={v.get('unit_count')} {lid} {alert['title'][:60]}")
             continue
-        token = worker_token(alert["worker"], tokens)
-        claim = call(f"{COORDINATOR}/v1/alerts/claim", {"listing_id": lid, "price": v.get("price")}, token)
+        claim = coordinator("/v1/alerts/claim", {"listing_id": lid, "price": v.get("price")}, alert["worker"], tokens)
         if not claim["send"]:
-            state[lid] = {"verdict": claim["verdict"], "at": stamp}
-            skipped += 1
+            # Pending is another worker's claim on a lease; it may lapse
+            # undelivered, so the listing is asked about again next pass.
+            if claim["verdict"] == "duplicate":
+                state[lid] = {"verdict": claim["verdict"], "at": stamp}
+                skipped += 1
             continue
         text = f"*{escape(title)}*\n\n{escape(body)}"
         result = telegram(env, text, topics.get(level or ""))
-        call(f"{COORDINATOR}/v1/alerts/claim/delivered", {"listing_id": lid}, token)
-        call(f"{COORDINATOR}/v1/alerts/telegram", {
+        state[lid] = entry = {"verdict": claim["verdict"], "sent": result["message_id"], "at": stamp,
+                              "worker": alert["worker"], "report": {
             "chat_id": str(result["chat"]["id"]), "message_id": result["message_id"],
             "topic_id": int(topics[level]) if level and topics.get(level) else None, "priority": level,
             "listing_id": lid, "post_url": alert["url"], "item_name": alert.get("item"),
             "ai_score": alert["score"], "unit_count": v.get("unit_count"),
             "title": alert["title"][:300], "price": (v.get("price") or "")[:60] or None,
-        }, token)
-        state[lid] = {"verdict": claim["verdict"], "sent": result["message_id"], "at": stamp}
+        }}
+        save(state)
         sent += 1
-        with open(STATE, "w") as f:
-            json.dump(state, f)
+        report(entry, tokens)
+        save(state)
         time.sleep(SEND_GAP_S)
     if not dry_run:
-        with open(STATE, "w") as f:
-            json.dump(state, f)
+        save(state)
     return sent, skipped
 
 
@@ -217,8 +248,9 @@ def main() -> int:
                 print(f"{stamp} sent {sent}, skipped {skipped} (already alerted or held by another worker)", flush=True)
         except Exception as e:
             # One failed pass (OpenSearch, the coordinator, Telegram) is retried
-            # on the next; a claim it left undelivered is this worker's own and
-            # answers `new` again.
+            # on the next. A message already sent is in the state file, so the
+            # next pass only reports it; a claim left before the send is this
+            # worker's own and answers `new` again.
             print(f"{stamp} pass failed: {e}", flush=True)
             if not args.follow:
                 return 1

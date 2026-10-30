@@ -229,11 +229,30 @@ def parse(lines: list[str], worker: str, fallback_ts: float | None = None) -> li
     return docs
 
 
+def placed(doc_ids: list[str]) -> dict[str, str]:
+    """The daily index already holding each id. The same line can be stamped
+    on either side of midnight (the follower's now, the cron bridge's nearest
+    `created`), and the _id is unique only within one index."""
+    found: dict[str, str] = {}
+    for i in range(0, len(doc_ids), 1000):
+        req = urllib.request.Request(
+            f"{OPENSEARCH_URL}/{INDEX_PREFIX}-*/_search",
+            data=json.dumps({"size": 1000, "_source": False,
+                             "query": {"ids": {"values": doc_ids[i:i + 1000]}}}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=60) as res:
+            found.update((h["_id"], h["_index"]) for h in json.load(res)["hits"]["hits"])
+    return found
+
+
 def index(docs: list[tuple[str, dict]]) -> int:
+    where = placed([doc_id for doc_id, _ in docs])
     body = []
     for doc_id, doc in docs:
         day = doc["@timestamp"][:10].replace("-", ".")
-        body.append(json.dumps({"index": {"_index": f"{INDEX_PREFIX}-{day}", "_id": doc_id}}))
+        target = where.get(doc_id, f"{INDEX_PREFIX}-{day}")
+        body.append(json.dumps({"index": {"_index": target, "_id": doc_id}}))
         body.append(json.dumps(doc, ensure_ascii=False))
     req = urllib.request.Request(
         f"{OPENSEARCH_URL}/_bulk",

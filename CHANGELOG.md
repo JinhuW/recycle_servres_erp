@@ -15,6 +15,33 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.387.1] - 2026-10-30
+
+### Fixed
+
+- **Release review of RS-453 to RS-464** (RS-466). The fleet agent and
+  release replacements:
+  - A release replacement now takes a tick's start before any other run or
+    restart. Before, a missing worker the ERP refused a ticket kept taking
+    that start without moving the stagger, so the release waited behind it
+    until the gate failed.
+  - A worker above the count that was stopped to be replaced, and whose run
+    then failed, used to have its account released and was never run again.
+    That was a removal, which hosts no longer make. It now keeps its
+    reservation and is run again.
+- On the Workers table, a stopped worker of a deleted host reads Parked
+  instead of Free. Free tells a manager that adding an account starts the
+  worker, and no agent is left to do that.
+- In the homelab stopgaps (`trackers/facebook/scripts/`),
+  `fleet-alert-sender.py` no longer sends a lead twice when a coordinator
+  call fails after Telegram took the message. It retries a listing held by
+  another worker's lapsed claim. A full 24-hour window no longer cuts off
+  the newest withheld alerts, and it mints a worker token again when the
+  coordinator answers 401. `ai-verdict-bridge.py` no longer indexes one line
+  into two daily indices across midnight.
+- The capacity comments no longer claim the agent removes workers above the
+  count. The four sortable tables share one `nextSort`.
+
 ## [1.387.0] - 2026-10-30
 
 ### Changed

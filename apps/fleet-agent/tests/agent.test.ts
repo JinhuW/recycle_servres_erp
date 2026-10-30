@@ -360,6 +360,25 @@ describe('confirmed-stop handoff', () => {
     expect(docker.commands.filter((c) => c[0] === 'stop+rm')).toEqual([]);
   });
 
+  it('runs again an extra stopped for its replacement when the first run failed', async () => {
+    const docker = new FakeDocker([running('lab-1', 'img:2'), running('lab-3', 'img:1')]);
+    server.desired = desired({ count: 1, image: 'img:2', roll: { replace: 'lab-3' }, vnc_ports: { 'lab-1': 5901, 'lab-3': 5903 }, leases: { 'lab-3': { account_no: 9, epoch: 4 } } });
+    server.ticketAnswer = 404;
+    const a = agent(docker);
+    await a.tick();
+    expect(docker.commands.map((c) => c[0])).toEqual(['ensure', 'stop+rm']);
+    clock += 60_000;
+    await a.tick();
+    // The stop is not turned into a removal: the account stays reserved.
+    expect(server.stopped.filter((s) => s.restart === false)).toEqual([]);
+    server.ticketAnswer = 200;
+    clock += 60_000;
+    docker.commands = [];
+    expect((await a.tick()).errors).toEqual([]);
+    expect(docker.commands.map((c) => c[0])).toContain('run');
+    expect(docker.handoffs).toEqual([4]);
+  });
+
   it('releases a waiting reservation when the host turns observe-only', async () => {
     const docker = new FakeDocker();
     writeFileSync(join(stateDir, 'memory.json'), JSON.stringify({ last_start_at: null, restarts: {}, pending: { 'lab-1': { account_no: 7, epoch: 3, restart: true, confirmed: true } } }));

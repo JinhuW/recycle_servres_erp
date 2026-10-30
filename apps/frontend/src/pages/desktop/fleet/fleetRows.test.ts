@@ -72,6 +72,11 @@ describe('fleetRows', () => {
     const live = fleetRows({ ...input, workers: [...WORKERS, { ...silent('homelab-7', 70), last_heartbeat_at: ago(0.2) }] }, NOW);
     expect(live.find(r => r.workerId === 'homelab-7')?.kind).not.toBe('free');
   });
+  it('reads a stopped worker of a deleted host as parked, not free: no agent starts it', () => {
+    const gone = { ...WORKERS[0], worker_id: 'gone-1', host_id: 'gone', account_no: 70, task: null, last_heartbeat_at: ago(30) };
+    const more = fleetRows({ ...input, workers: [...WORKERS, gone], hosts: [{ host_id: 'homelab' }] }, NOW);
+    expect(more.find(r => r.workerId === 'gone-1')?.kind).toBe('parked');
+  });
   it('releases the lost and the manager-parked accounts, once each, and counts the rest', () => {
     const silent = { ...WORKERS[0], worker_id: 'worker-60-14-2', host_id: 'worker-60-14', account_no: 33, task: null, last_heartbeat_at: ago(120) };
     const parked = { ...WORKERS[0], worker_id: 'homelab-8', account_no: 44, state: 'CHECKPOINT', task: null, last_heartbeat_at: ago(120) };
