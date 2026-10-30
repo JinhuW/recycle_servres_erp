@@ -249,6 +249,10 @@ export function parseProxyUrl(raw: string): ParsedProxyUrl | { error: string } {
   return { scheme: scheme as ParsedProxyUrl['scheme'], host: host.toLowerCase(), port, has_login: Boolean(user) };
 }
 
+// The office's zone. Workers keep UTC, but the fleet pages read clocks and
+// count days in this one, and so does the Analysis funnel the backend sums.
+export const FLEET_TZ = 'America/New_York';
+
 /** An IANA zone such as America/New_York (or UTC) that this runtime knows. */
 export function isFleetTimezone(tz: unknown): tz is string {
   if (typeof tz !== 'string' || !/^(UTC|[A-Za-z]+(\/[A-Za-z0-9_+-]+){1,2})$/.test(tz)) return false;

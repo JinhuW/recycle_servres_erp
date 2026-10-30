@@ -135,7 +135,7 @@ export const fleetApi = {
   // Every waiting search falls due now unless its city-item finished lately.
   startRound: () => api.post<RoundStartAnswer>(`${BASE}/round/start`, {}),
   tasks: (q: FleetTaskQuery = {}) => api.get<FleetTask[]>(`${BASE}/tasks${query(q)}`),
-  // Finished searches per UTC day over the last `days`, summed from their results.
+  // Finished searches per office (Eastern) day over the last `days`, summed from their results.
   funnel: (days: number) => api.get<{ days: FleetFunnelDay[] }>(`${BASE}/stats/funnel${query({ days })}`).then(r => r.days),
   // One city's, or one worker's, tasks with their events over the last `hours`.
   cityLog: (q: { city?: string; worker?: string; hours?: number }) =>

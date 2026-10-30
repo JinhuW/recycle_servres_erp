@@ -175,7 +175,7 @@ export const SLOTS: FleetSlot[] = [
   slot(44, { last_host_id: 'homelab', epoch: 9, parked: true, note: 'parked 10-24' }),
 ];
 
-// The fleet's finished searches, one row per UTC day, newest last. Days with
+// The fleet's finished searches, one row per office (Eastern) day, newest last. Days with
 // no search are absent. Only the newest day's workers report the gates, what
 // passed the model and what they withheld.
 const OLDER = { title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null, counted: 0 };

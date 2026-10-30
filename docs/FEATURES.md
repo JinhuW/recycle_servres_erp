@@ -3413,7 +3413,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   and Slots tabs folded into them, and their paths (`/#/fleet/queue`,
   `/#/fleet/hosts`, `/#/fleet/slots`) redirect. Managers only and desktop
   only; purchasers see Account pool alone, and the phone has no fleet pages.
-  Times read in US Eastern; Analysis daily totals use UTC day boundaries. Against a backend without the fleet routes each
+  Times read in US Eastern, and since v1.390.0 (RS-473) so do the Analysis daily totals and ranges (they used UTC days before); the minutes budget still counts per UTC day. Against a backend without the fleet routes each
   tab says so and the rest of the page is unaffected. Every tab re-reads every
   10 s while it is visible.
   Since v1.351.0 (RS-403) the Fleet and Analysis tabs show the ERP's own rows without waiting for the coordinator, whose rows fill in when they land, read every 30 s and never while the last read is still out; the tabs and the tab-bar counts send each URL once per load and read the pool summary, not the secret-bearing snapshot.
