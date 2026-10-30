@@ -3872,6 +3872,7 @@ const zh: Record<string, string> = {
   fleetCopy: "复制",
   fleetCopied: "已复制",
   fleetUidMasked: "uid 已遮盖；账号池页面可以查看。",
+  fleetAccountOpenHint: "点击在账号池中打开。",
   fleetQuarantineRelease: "解除",
   fleetQuarantineReleaseHint: "解除隔离：账号重新接普通任务",
   fleetQuarantineReleased: "#{no} 已回到轮换",

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { FB_POOL_SECRET_FIELDS, type FbPoolSecretField, type FbReportReason } from '@recycle-erp/shared';
 import { Icon } from '../../components/Icon';
 import { ApiError } from '../../lib/api';
@@ -22,7 +22,7 @@ import type { FleetSlot } from '../../lib/fleet';
 import { fleetStatus, parkedWorkers, vaultAccountIdFor, whoIs } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
-import { fleetWorkerPath, hrefFor, onLinkClick } from '../../lib/route';
+import { FLEET_POOL_ACCOUNT_PARAM, fleetWorkerPath, hrefFor, onLinkClick, takeHashParam } from '../../lib/route';
 import { useEffectiveUser } from '../../lib/tweaks';
 import { AccountEditor } from './accountPool/AccountEditor';
 import { AccountImport } from './accountPool/AccountImport';
@@ -125,6 +125,13 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
   const sortBy = (col: number) =>
     setSort((s) => (s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' }));
   const [editor, setEditor] = useState<PoolAccount | 'new' | null>(null);
+  // The Fleet table's account links land here with the account to open.
+  useEffect(() => {
+    const no = Number(takeHashParam(FLEET_POOL_ACCOUNT_PARAM));
+    const account = manager && no ? accounts.find((a) => a.no === no) : undefined;
+    if (account) setEditor(account);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [importing, setImporting] = useState(false);
   const [picked, setPicked] = useState<number | null>(null);
   const [reporting, setReporting] = useState<number | null>(null);
