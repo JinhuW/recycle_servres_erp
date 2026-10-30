@@ -15,6 +15,26 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.383.0] - 2026-10-29
+
+### Added
+
+- **Release every parked worker's account in one click** (RS-461). The Fleet
+  tab had 15 workers parked on Checkpoint or Session expired, and the only way
+  to let their accounts go was Retire & free, one row at a time. The workers
+  table's toolbar now has **Release parked (N)**. It opens a confirmation that
+  lists each account with its worker and state, says how many parked rows it
+  leaves alone (silent with a good account, the coordinator's, an operator's),
+  and warns that each account added to the fleet afterwards starts a worker,
+  which is a Facebook login. Confirming retires them one by one through the
+  per-row endpoint, so each keeps its lost-account guard, and any it refuses
+  are named.
+- **A worker without an account reads Free** (RS-461). Once its account left
+  the fleet, a stopped worker still read Parked, as if the worker were broken.
+  It is now a fourth row kind, **Free**, with a grey legend chip and a hint to
+  add an account on the Account pool tab. Free takes precedence over Removed
+  and Parked.
+
 ## [1.382.0] - 2026-10-29
 
 ### Added

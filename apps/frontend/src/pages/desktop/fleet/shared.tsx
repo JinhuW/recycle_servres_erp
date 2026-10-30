@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { ApiError } from '../../../lib/api';
-import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
+import { handleFetchError, showSuccessToast, showWarnToast } from '../../../lib/errorToast';
 import { fleetApi, fleetTakesResume, type FleetSlot, type FleetWorkerResume } from '../../../lib/fleet';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
 import { useT } from '../../../lib/i18n';
 import { budgetTone, easternClock, easternDateTime, liveness, spanLabel, type Liveness, type Translate } from './fleetBoard';
+import type { FleetRow } from './fleetRows';
 
 // ─── Shared by the fleet tabs ─────────────────────────────────────────────────
 
@@ -363,6 +364,60 @@ export function RetireSlotDialog({ accountNo: no, workerId, operator, onClose, o
   return <SlotActionDialog title={t('fleetRetireTitle', { no })} confirm={t('fleetRetireFree')} danger
     body={t('fleetRetireBody', { worker: workerId ?? '—' })} warn={operator ? t('fleetRetireOperator') : t('fleetRetireWarn')}
     run={() => fleetApi.retireSlot(no)} done={t('fleetRetiredFreed', { no })} onClose={onClose} onDone={onDone} />;
+}
+
+// Retires the accounts one at a time through the per-row endpoint, so each
+// keeps its own lost-account guard: one a Re-login revived since the page's
+// poll is refused, and the rest still go.
+export function ReleaseParkedDialog({ rows, skipped, onClose, onDone }: {
+  rows: readonly FleetRow[]; skipped: number; onClose: () => void; onDone: () => void;
+}) {
+  const { t } = useT();
+  const [busy, setBusy] = useState(false);
+  const confirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    let released = 0;
+    let failed: unknown = null;
+    const refused: number[] = [];
+    for (const r of rows) {
+      const no = r.slot!.account_no;
+      try {
+        await fleetApi.retireSlot(no);
+        released += 1;
+      } catch (e) {
+        failed ??= e;
+        refused.push(no);
+      }
+    }
+    if (released > 0) showSuccessToast(t('fleetReleasedN', { n: released }));
+    if (refused.length > 0) {
+      showWarnToast(t('fleetReleaseRefused', { list: refused.map(no => `#${no}`).join(', ') }));
+      if (released === 0) handleFetchError(failed);
+    }
+    onDone();
+  };
+  const close = () => { if (!busy) onClose(); };
+  return (
+    <Modal onClose={close} shellStyle={{ maxWidth: 520 }}>
+      <ConfirmDialogBody title={t('fleetReleaseParkedTitle', { n: rows.length })} confirm={t('fleetReleaseParkedConfirm', { n: rows.length })}
+        busy={busy} danger onClose={close} onConfirm={confirm}
+        body={<>
+          <p>{t('fleetReleaseParkedBody')}</p>
+          <ul className="fleet-release-list">
+            {rows.map(r => (
+              <li key={r.key}>
+                <span>{t('fleetAccountNo', { no: r.slot!.account_no })}</span>
+                <span className="mono">{r.workerId}</span>
+                {r.state ? <WorkerStateChip state={r.state} /> : <span className="chip neg">{t('fleetKindParked')}</span>}
+              </li>
+            ))}
+          </ul>
+          {skipped > 0 && <p className="fp-muted">{t('fleetReleaseParkedSkipped', { n: skipped })}</p>}
+          <p className="fp-warn">{t('fleetReleaseParkedWarn')}</p>
+        </>} />
+    </Modal>
+  );
 }
 
 // Lifting a quarantine early lets the next worker that asks claim the account.

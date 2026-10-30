@@ -10,17 +10,18 @@ import type { PoolAccountSummary } from '../../../lib/facebookPool';
 
 /** What a row reads of its pool account: a snapshot row or a summary row. */
 export type FleetPoolAccount = Pick<PoolAccountSummary, 'no' | 'uid' | 'status' | 'holder' | 'note'>;
-import { fleetResumable, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume } from '../../../lib/fleet';
+import { fleetResumable, fleetSlotRetirable, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume } from '../../../lib/fleet';
 import { parkedWorkers, retiredAt } from '../../../lib/fleetView';
 import { leaseLive, liveness } from './fleetBoard';
 
-// A worker doing the work (degraded or mid-replacement included), one that is
-// not because its account needs a hand or it went silent, or one whose host
-// removed its container (a lowered capacity): that last one is no account's
-// problem, and its account is free for another worker. The State column keeps
-// the detail.
-export type FleetRowKind = 'healthy' | 'parked' | 'removed';
-export const FLEET_ROW_KINDS: readonly FleetRowKind[] = ['healthy', 'parked', 'removed'];
+// A worker doing the work (degraded or mid-replacement included), one that
+// stopped once its account left the fleet (retired or removed) and waits for
+// another, one that is not working because its account needs a hand or it
+// went silent, or one whose host removed its container (a lowered capacity):
+// that last one is no account's problem, and its account is free for another
+// worker. The State column keeps the detail.
+export type FleetRowKind = 'healthy' | 'free' | 'parked' | 'removed';
+export const FLEET_ROW_KINDS: readonly FleetRowKind[] = ['healthy', 'free', 'parked', 'removed'];
 
 // Worker rows are never deleted, so one silent this long has been retired,
 // not lost.
@@ -94,7 +95,10 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
   const holds = !!slot && slot.worker_id === worker.worker_id;
   const replacing = running && release?.state === 'rolling' && release.current?.worker_id === worker.worker_id;
   // A manager's park holds the slot whatever state the worker still reports.
+  // Without a slot the account is out of the fleet: the host starts the
+  // worker again only for an account added since, whatever it did with it.
   const kind: FleetRowKind = running && !fleetStateParked(worker.state) && !(holds && slot.parked) ? 'healthy'
+    : !running && !slot ? 'free'
     : !running && removed ? 'removed' : 'parked';
   const task = running ? worker.task ?? null : null;
   const no = slot?.account_no ?? worker.account_no ?? null;
@@ -212,7 +216,7 @@ export function fleetRows(input: FleetRowsInput, now: number = Date.now()): Flee
 export type FleetRowSortCol = 'worker' | 'host' | 'account' | 'state' | 'now' | 'today' | 'lease' | 'version';
 export const FLEET_ROW_SORT_COLS: readonly FleetRowSortCol[] = ['worker', 'host', 'account', 'state', 'now', 'today', 'lease', 'version'];
 
-const KIND_ORDER: Record<FleetRowKind, number> = { healthy: 0, parked: 1, removed: 2 };
+const KIND_ORDER: Record<FleetRowKind, number> = { healthy: 0, free: 1, parked: 2, removed: 3 };
 
 function sortValue(col: FleetRowSortCol, r: FleetRow): string | number | null {
   switch (col) {
@@ -253,7 +257,7 @@ export function filterFleetRows(rows: readonly FleetRow[], f: FleetRowFilter): F
 }
 
 export function fleetRowCounts(rows: readonly FleetRow[]): Record<FleetRowKind | 'all', number> {
-  const out = { all: rows.length, healthy: 0, parked: 0, removed: 0 };
+  const out = { all: rows.length, healthy: 0, free: 0, parked: 0, removed: 0 };
   for (const r of rows) out[r.kind] += 1;
   return out;
 }
@@ -276,4 +280,35 @@ export function fleetRunning(rows: readonly FleetRow[]): { running: number; host
     if (r.host) hosts.add(r.host);
   }
   return { running, hosts: hosts.size };
+}
+
+/** The slot a row's Retire & free acts on: the account's, held by this worker
+ *  or parked with none; one another worker has claimed since is not its. */
+export function rowOwnSlot(r: FleetRow): FleetSlot | null {
+  return r.slot && (r.slot.worker_id === null || r.slot.worker_id === r.workerId) ? r.slot : null;
+}
+
+/** Only an account its worker reports lost, or a manager parked: a worker
+ *  that went silent shows as parked too, with a healthy account. */
+export function rowRetirable(r: FleetRow): boolean {
+  const own = rowOwnSlot(r);
+  return r.source === 'erp' && !!own
+    && fleetSlotRetirable({ parked: own.parked, poolStatus: own.pool_status, state: r.state, operator: r.operator });
+}
+
+/** What Release parked retires, one per account, and how many parked rows it
+ *  leaves alone (silent with a good account, the coordinator's, an operator's). */
+export function releasableRows(rows: readonly FleetRow[]): { release: FleetRow[]; skipped: number } {
+  const release: FleetRow[] = [];
+  const accounts = new Set<number>();
+  let skipped = 0;
+  for (const r of rows) {
+    if (r.kind !== 'parked') continue;
+    const own = rowOwnSlot(r);
+    if (!rowRetirable(r) || !own) { skipped += 1; continue; }
+    if (accounts.has(own.account_no)) continue;
+    accounts.add(own.account_no);
+    release.push(r);
+  }
+  return { release, skipped };
 }
