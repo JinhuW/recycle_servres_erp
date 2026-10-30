@@ -68,9 +68,29 @@ describe('fleetRows', () => {
     expect(more.find(r => r.workerId === 'homelab-7')).toMatchObject({ kind: 'free', running: false, no: 70, slot: null });
     expect(fleetRowCounts(more)).toMatchObject({ free: 1 });
     expect(fleetRunning(more)).toEqual(fleetRunning(rows));
-    // Still reporting, it is not free yet: its next call is refused.
+    // Still reporting, it is free already (its next call is refused) but still counts as running.
     const live = fleetRows({ ...input, workers: [...WORKERS, { ...silent('homelab-7', 70), last_heartbeat_at: ago(0.2) }] }, NOW);
-    expect(live.find(r => r.workerId === 'homelab-7')?.kind).not.toBe('free');
+    expect(live.find(r => r.workerId === 'homelab-7')).toMatchObject({ kind: 'free', running: true });
+  });
+  it('leaves out a free worker once its host no longer reports its container', () => {
+    const free = { ...WORKERS[0], worker_id: 'homelab-7', host_id: 'homelab', account_no: 70, task: null, last_heartbeat_at: ago(30) };
+    const report = (ids: string[]) => ({ version: '1', containers: ids.map(worker_id => ({ worker_id, image: 'img:1', state: 'exited', started_at: null })) });
+    const rowsWith = (hosts: Parameters<typeof fleetRows>[0]['hosts']) =>
+      fleetRows({ ...input, workers: [...WORKERS, free], hosts }, NOW).find(r => r.workerId === 'homelab-7');
+    expect(rowsWith([{ host_id: 'homelab', report: report(['homelab-1']) }])).toBeUndefined();
+    expect(rowsWith([{ host_id: 'homelab', report: report(['homelab-1', 'homelab-7']) }])?.kind).toBe('free');
+    // No report yet: unknown is not gone.
+    expect(rowsWith([{ host_id: 'homelab', report: null }])?.kind).toBe('free');
+  });
+  it('leaves out a parked worker above the count once its host removed its container', () => {
+    const parked = { ...WORKERS[0], worker_id: 'homelab-7', host_id: 'homelab', state: 'CHECKPOINT', task: null, last_heartbeat_at: ago(30) };
+    const report = { version: '1', containers: [{ worker_id: 'homelab-1', image: 'img:2', state: 'running', started_at: null }] };
+    const rowWith = (count: number) => fleetRows({
+      ...input, workers: [...WORKERS, parked], hosts: [{ host_id: 'homelab', report, desired: { count, image: 'img:2', version: '0.14.0', roll: null as never } }],
+    }, NOW).find(r => r.workerId === 'homelab-7');
+    expect(rowWith(4)).toBeUndefined();
+    // Within the count the agent runs it again: still a row.
+    expect(rowWith(8)?.kind).toBe('parked');
   });
   it('reads a stopped worker of a deleted host as parked, not free: no agent starts it', () => {
     const gone = { ...WORKERS[0], worker_id: 'gone-1', host_id: 'gone', account_no: 70, task: null, last_heartbeat_at: ago(30) };

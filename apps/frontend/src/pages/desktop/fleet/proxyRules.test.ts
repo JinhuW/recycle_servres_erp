@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fleetDeviceFor, parseProxyUrl } from '../../../lib/fleet';
 import { NOW, PROXIES, SLOTS } from './fixtures';
-import { deviceSummary, fleetRowAction, proxyChoices, proxyDraftProblem, proxyPatch } from './proxyRules';
+import { deviceSummary, fleetRowAction, proxyChoices, proxyDraftProblem, proxyPatch, randomOpenProxy } from './proxyRules';
 
 const row = (status: string, over: Partial<{ holder: string | null; password: string; totp: string }> = {}) =>
   ({ status, holder: null, password: 'pw', totp: 'KEY', ...over });
@@ -33,6 +33,12 @@ describe('proxyChoices', () => {
     const c = proxyChoices(PROXIES, 2);
     expect(c.map((x) => [x.proxy.id, x.load, x.full])).toEqual([[3, 0, false], [2, 0, false], [1, 2, true]]);
     expect(proxyChoices(PROXIES, 3).find((x) => x.proxy.id === 1)!.full).toBe(false);
+  });
+  it('draws the random proxy only from those with room', () => {
+    const c = proxyChoices(PROXIES, 2);
+    expect(randomOpenProxy(c, () => 0)!.id).toBe(3);
+    expect(randomOpenProxy(c, () => 0.99)!.id).toBe(2);
+    expect(randomOpenProxy(proxyChoices(PROXIES, 0))).toBeNull();
   });
 });
 

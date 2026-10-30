@@ -6,7 +6,7 @@ import {
 } from '../../../lib/fleet';
 import { ApiError } from '../../../lib/api';
 import { useT } from '../../../lib/i18n';
-import { deviceSummary, proxyChoices, proxyDraftProblem, proxyExit, proxyPatch, type ProxyDraft } from './proxyRules';
+import { deviceSummary, proxyChoices, proxyDraftProblem, proxyExit, proxyPatch, randomOpenProxy, type ProxyDraft } from './proxyRules';
 import { ConfirmDialogBody } from './shared';
 import '../../../styles/fleet.css';
 
@@ -143,17 +143,22 @@ export function AddToFleetDialog({ no, proxies, limit, onClose, onDone }: {
 }) {
   const { t } = useT();
   const choices = useMemo(() => proxyChoices(proxies, limit), [proxies, limit]);
-  const [proxyId, setProxyId] = useState<number | null>(() => choices.find((c) => !c.full)?.proxy.id ?? null);
+  // null is "any proxy with room", drawn when the form is sent.
+  const [proxyId, setProxyId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
-  const chosen = choices.find((c) => c.proxy.id === proxyId) ?? null;
+  const chosen = proxyId === null ? null : choices.find((c) => c.proxy.id === proxyId) ?? null;
+  const roomLeft = choices.some((c) => !c.full);
+  // A pick a reload removed or filled is not swapped for a random one.
+  const pickGone = proxyId !== null && (!chosen || chosen.full);
   const device = chosen ? deviceSummary(fleetDeviceFor(no, chosen.proxy.timezone)) : null;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (busy || !chosen || chosen.full) return;
+    const proxy = chosen ? chosen.proxy : randomOpenProxy(choices);
+    if (busy || pickGone || !proxy) return;
     setBusy(true);
     try {
-      await fleetApi.addSlot({ account_no: no, proxy_id: chosen.proxy.id });
-      showSuccessToast(t('fpAddedToFleetToast', { n: no, proxy: chosen.proxy.label }));
+      await fleetApi.addSlot({ account_no: no, proxy_id: proxy.id });
+      showSuccessToast(t('fpAddedToFleetToast', { n: no, proxy: proxy.label }));
       onDone();
     } catch (err) {
       warnOrFail(err);
@@ -161,7 +166,7 @@ export function AddToFleetDialog({ no, proxies, limit, onClose, onDone }: {
     }
   };
   return (
-    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 560 }}>
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 520 }}>
       <form onSubmit={submit}>
         <div className="modal-head">
           <div>
@@ -170,25 +175,28 @@ export function AddToFleetDialog({ no, proxies, limit, onClose, onDone }: {
           </div>
         </div>
         <div className="modal-body fleet-form">
-          <fieldset className="fleet-field fleet-proxy-picks">
-            <span>{t('fpAddToFleetProxy')}</span>
-            {choices.length === 0 && <p className="fp-warn">{t('fpAddToFleetNoProxy')}</p>}
-            {choices.map(({ proxy, load, full }) => (
-              <label key={proxy.id} className={`fleet-proxy-pick${full ? ' fp-muted' : ''}`}>
-                <input type="radio" name="proxy" value={proxy.id} checked={proxyId === proxy.id} disabled={full}
-                  onChange={() => setProxyId(proxy.id)} />
-                <span>{proxy.label}</span>
-                <small className="mono">{proxyExit(proxy)}</small>
-                <small className="mono">{proxy.timezone}</small>
-                <small>{t('fleetProxyUses', { n: load, max: limit })}{full && <> · {t('fpAddToFleetFull')}</>}</small>
-              </label>
-            ))}
-          </fieldset>
+          {roomLeft ? (
+            <label className="fleet-field">
+              <span>{t('fpAddToFleetProxy')}</span>
+              <select className="input" value={proxyId ?? ''} disabled={busy}
+                onChange={(e) => setProxyId(e.target.value === '' ? null : Number(e.target.value))}>
+                <option value="">{t('fpAddToFleetRandom')}</option>
+                {choices.map(({ proxy, load, full }) => (
+                  <option key={proxy.id} value={proxy.id} disabled={full}>
+                    {proxy.label}, {t('fleetProxyUses', { n: load, max: limit })}{full && `, ${t('fpAddToFleetFull')}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <p className="fp-warn">{t(choices.length ? 'fpAddToFleetAllFull' : 'fpAddToFleetNoProxy')}</p>
+          )}
+          {roomLeft && pickGone && <p className="fp-warn">{t('fpAddToFleetPickGone')}</p>}
           {device && <p className="fp-muted">{t('fpAddToFleetDevice', device)}</p>}
         </div>
         <div className="modal-foot">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>{t('cancel')}</button>
-          <button type="submit" className="btn primary" disabled={busy || !chosen || chosen.full}>{t('fpAddToFleetConfirm')}</button>
+          <button type="submit" className="btn primary" disabled={busy || !roomLeft || pickGone}>{t('fpAddToFleetConfirm')}</button>
         </div>
       </form>
     </Modal>

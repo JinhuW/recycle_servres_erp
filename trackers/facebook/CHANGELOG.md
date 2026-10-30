@@ -20,6 +20,32 @@ deployed?" harder to answer.
 
 ### Fixed
 
+- `fleet-alert-sender.py` claims a re-sighted listing at its new price.
+  That price comes from the WITHHELD document, or else from the newest
+  verdict, instead of an older counted verdict at the old price. A sighting
+  at another price is asked about even when it is stamped no later than the
+  last one, so a drop evaluated from the cache still reaches the coordinator
+  as `discounted`. Counts are coerced once, so a stored `0` no longer beats
+  a real count. A timestamp Python 3.10 cannot read (`Z`, 7 digits) no
+  longer aborts the pass (RS-474).
+- `ai-verdict-bridge.py` reads a `NaN` or `Infinity` unit count as no count
+  instead of raising and stopping every run. A withheld alert carries the
+  listing's price, and a new price makes a new document, which
+  `fleet-log-follow.py` ships at once (RS-474).
+- `fleet-alert-sender.py`:
+  - It routes a unit count indexed as a string (`"12"`) the way the monitor
+    does. Before, the comparison raised and aborted every pass from that
+    alert on.
+  - A listing that a worker withholds again after it was sent or found a
+    duplicate goes back to the coordinator, so a price drop is sent as
+    `discounted`.
+- `ai-verdict-bridge.py` decodes the logged Python literal before reading
+  the model's JSON. Escaped quotes, a trailing `\n` or prose around the
+  JSON no longer lose the unit count, and the count is coerced as the
+  monitor does.
+- `fleet-log-follow.py` ships only the verdicts whose line it has just read.
+  An older one whose response block has left its buffer is no longer
+  shipped again as cached under another id (RS-467).
 - `fleet-alert-sender.py` records a listing the moment Telegram takes its
   message and only retries the coordinator report after that, so a failed
   `claim/delivered` no longer sends the lead again. It records only a

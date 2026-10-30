@@ -15,6 +15,94 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.390.1] - 2026-10-30
+
+### Fixed
+
+- **The fleet agent never stops a worker to remove it** (RS-474). The
+  removal added in v1.388.0 stopped the container before removing it. A
+  worker that a person started between the agent's look and its removal
+  was therefore signed out and thrown away. The agent now runs a plain
+  `docker rm`, which Docker refuses for a running container.
+- **The Fleet tab drops a Parked worker that its host removed.** v1.388.0
+  hid only Free rows once the host stopped reporting the container. A
+  stopped worker above the count whose account still had a slot read as
+  Parked for a week, with actions for a container that no longer existed.
+- **Add to fleet keeps the proxy you picked.** If a reload removed or filled
+  the picked proxy, the dialog used to send a random one, or a full one the
+  backend refused. It now says so and waits for another pick.
+
+## [1.390.0] - 2026-10-30
+
+### Changed
+
+- **The fleet Analysis tab counts days from midnight Eastern, not UTC**
+  (RS-473). The funnel's Today / 7 / 14 ranges and both 14-day charts summed
+  searches by UTC day. UTC midnight is 8 PM Eastern, so an evening's
+  alerts landed on "today" while Telegram showed them under yesterday. On
+  Oct 30 the funnel said 13 alerts against 9 in the chat since midnight.
+  `/api/fleet/stats/funnel` now buckets by the office day (`FLEET_TZ`, shared
+  by both apps), the window is cut in SQL so the 25-hour day DST ends on stays
+  whole, and the labels read ET. The minutes budget still runs per UTC day,
+  as the scheduler counts it.
+
+## [1.389.1] - 2026-10-30
+
+### Fixed
+
+- **A fleet-agent removal no longer forgets a stop by hand or a recent
+  start** (RS-472). Since v1.388.0 the agent removes a stopped worker above
+  the count on an old image. Two safeguards lived only on that container.
+  A worker a person stopped above the count was protected only while the
+  same agent process ran, so after an agent restart it read as a host
+  shutdown and was removed; the hold is now written down, as it already was
+  within the count. And a start the agent did not make itself (a `docker
+  start` by hand) was known only from the container's own start time, so
+  removing it moved the stagger back and let the next worker log in early.
+  The agent now records that start before it removes the container.
+
+## [1.389.0] - 2026-10-30
+
+### Changed
+
+- **Add to fleet picks a random proxy unless you choose one** (RS-471). The
+  dialog listed every proxy as a radio card with its label, exit, timezone and
+  load side by side, and at its width each label wrapped over three or four
+  lines, so the list ran far past the fold. The proxy is now one dropdown
+  whose default, "Any proxy with room (random)", draws among the proxies that
+  are not full when you add; each proxy below it is one line with its load,
+  and a full one is disabled. The toast names the proxy the account landed on.
+
+## [1.388.0] - 2026-10-30
+
+### Added
+
+- **A Free worker left on an old image is removed** (RS-470). When a worker's
+  account leaves the fleet, its host's count drops below it, and its exited
+  container stayed on the host for good, because the fleet-agent removed
+  nothing. The Fleet tab kept the row, still showing the build it last ran
+  (homelab-11 and -13 on 0.14.10, worker-60-14-2 on 0.14.7). The worker could
+  never come back on that build: the agent recreates an exited container on
+  the current image whenever it starts it again. Now an online agent removes
+  a stopped container numbered above the count when its image is not the one
+  new workers start on. A running worker, one held for a person (exit 78,
+  crash limit, stopped by hand), and one waiting for its release replacement
+  are left alone. A removal is not a login and takes no start. The Fleet tab
+  leaves out a Free row whose container its host no longer reports. The
+  worker's database row stays as history. The removal begins once each host
+  runs the new agent image.
+
+## [1.387.2] - 2026-10-30
+
+### Fixed
+
+- **A released worker reads Free at once** (RS-469). After **Release parked**
+  or **Retire & free**, the worker's slot is gone, and its next call is
+  refused, so it exits. The Fleet tab still called the row Parked for up to 15
+  minutes, until the worker's last heartbeat aged out. A worker whose account
+  has no slot now reads Free straight away. It still counts as running until
+  it stops reporting. A worker of a deleted host still reads Parked.
+
 ## [1.387.1] - 2026-10-30
 
 ### Fixed

@@ -27,15 +27,21 @@ describe('Proxy form', () => {
 });
 
 describe('Add to fleet', () => {
-  it('offers the proxies with their load, the full one disabled, and previews the device', () => {
+  it('defaults to a random proxy with room and lists each proxy with its load, the full one disabled', () => {
     const html = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={2} onClose={noop} onDone={noop} />);
     expect(html).toContain('fpAddToFleetTitle');
+    expect(html).toMatch(/<option value=""[^>]*selected=""[^>]*>fpAddToFleetRandom/);
     expect(html).toContain('Decodo NY 2');
     expect(html).toContain('Decodo CHI 1');
-    expect(html.match(/type="radio"/g)?.length).toBe(3);
-    expect(html).toMatch(/<input[^>]*disabled=""[^>]*value="1"|<input[^>]*value="1"[^>]*disabled=""/);    // Decodo NY 1 carries two
+    expect(html.match(/<option/g)?.length).toBe(4);
+    expect(html).toMatch(/<option[^>]*value="1"[^>]*disabled=""|<option[^>]*disabled=""[^>]*value="1"/);    // Decodo NY 1 carries two
     expect(html).toContain('fpAddToFleetFull');
-    expect(html).toContain('fpAddToFleetDevice');
+    expect(html).not.toContain('fpAddToFleetDevice');     // no proxy picked, so no timezone to show yet
+  });
+  it('says every proxy is full when none has room', () => {
+    const html = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={0} onClose={noop} onDone={noop} />);
+    expect(html).toContain('fpAddToFleetAllFull');
+    expect(html).not.toContain('<select');
   });
   it('says to add a proxy first when there is none', () => {
     const html = renderToString(<AddToFleetDialog no={40} proxies={[]} limit={2} onClose={noop} onDone={noop} />);

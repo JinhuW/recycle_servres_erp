@@ -8,10 +8,13 @@
 // * Offline (the desired state is a cached copy), or an image this host does
 //   not allow: exited workers may be restarted, nothing is created or
 //   replaced. Blind is not the time to change things.
-// * Nothing is ever removed. A worker numbered above the count keeps running
-//   (stopping it throws away a signed-in browser, and starting one again is
-//   a login); once it exits it waits, stopped, until the count reaches it
-//   again. A release still replaces it while it runs.
+// * Nothing running is removed. A worker numbered above the count keeps
+//   running (stopping it throws away a signed-in browser, and starting one
+//   again is a login); once it exits it waits, stopped, until the count
+//   reaches it again. A release still replaces it while it runs. A stopped
+//   one on an image new workers no longer start on is removed: it would be
+//   recreated on the current image anyway, and left there it only shows an
+//   old build. Removing a stopped container is not a login.
 // * Left stopped, online or not, until a person acts: a worker that exited 78
 //   (it could not connect), one that hit the crash limit, and one a person
 //   stopped (`docker stop`, exit 0 or 143 while this agent ran). Every restart
@@ -75,7 +78,8 @@ export interface Container {
 export type Action =
   | { kind: 'run'; worker_id: string; container: string; image: string; port: number; reason: string }
   | { kind: 'start'; worker_id: string; container: string; reason: string; counted: boolean; soft: boolean }
-  | { kind: 'replace'; worker_id: string; container: string; image: string; port: number; reason: string; counted: boolean; soft: boolean };
+  | { kind: 'replace'; worker_id: string; container: string; image: string; port: number; reason: string; counted: boolean; soft: boolean }
+  | { kind: 'remove'; worker_id: string; container: string; reason: string };
 
 export interface HoldEntry {
   container: string;
@@ -238,6 +242,17 @@ export function plan(input: PlanInput): Plan {
     .filter((c) => workerIndex(hostId, c.worker_id)! > desired.count)
     .sort((a, b) => workerIndex(hostId, a.worker_id)! - workerIndex(hostId, b.worker_id)!);
   for (const c of extras) {
+    // A held one waits for a person, and one stopped for its replacement is
+    // the release's to run again. A stop by hand is only seen while this
+    // agent runs: unremembered, the next agent would remove it.
+    const hold = holdOf(c, input);
+    if (hold && hold !== 'operator_needed' && c.id !== undefined && input.held?.[c.worker_id]?.container !== c.id) {
+      holds[c.worker_id] = { container: c.id, reason: hold };
+    }
+    if (canCreate && !c.running && c.image !== desired.image && hold === null && !input.restarting?.includes(c.worker_id)) {
+      actions.push({ kind: 'remove', worker_id: c.worker_id, container: c.name, reason: `beyond count ${desired.count} on ${c.image}, not ${desired.image}` });
+      continue;
+    }
     notes.push(`${c.worker_id}: beyond count ${desired.count}; left ${c.running ? 'running' : 'stopped'}`);
   }
 

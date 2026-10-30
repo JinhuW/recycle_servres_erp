@@ -5,6 +5,14 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-474](./RS-474-dev-to-main-review-fixes-agent-removal-race-alert-pr.md) | done | bug | P2 | dev to main review fixes: agent removal race, alert price drops, NaN counts, Fleet leftovers | 1.390.1 |
+| [RS-473](./RS-473-fleet-funnel-counts-days-in-eastern-time-not-utc.md) | done | story | P2 | Fleet funnel counts days in Eastern time, not UTC | 1.390.0 |
+| [RS-472](./RS-472-fleet-agent-removal-keeps-operator-holds-and-the-sta.md) | done | bug | P2 | Fleet-agent removal keeps operator holds and the stagger | 1.389.1 |
+| [RS-471](./RS-471-add-to-fleet-random-proxy-by-default-pick-one-from-a.md) | done | feature | P2 | Add to fleet: random proxy by default, pick one from a dropdown | 1.389.0 |
+| [RS-470](./RS-470-remove-free-workers-left-on-an-old-image.md) | done | story | P3 | Remove Free workers left on an old image | 1.388.0 |
+| [RS-469](./RS-469-a-released-worker-reads-free-at-once-not-parked-for.md) | done | bug | P2 | A released worker reads Free at once, not Parked for 15 minutes | 1.387.2 |
+| [RS-468](./RS-468-fleet-tab-a-removed-worker-whose-account-another-wor.md) | backlog | bug | P3 | Fleet tab: a removed worker whose account another worker holds reads Replaced, not Parked | — |
+| [RS-467](./RS-467-fleet-alert-stopgaps-string-unit-counts-price-drops.md) | done | bug | P2 | Fleet alert stopgaps: string unit counts, price drops, logged literals, follower re-emits | n/a — trackers/facebook scripts only, no ERP release |
 | [RS-466](./RS-466-fix-the-dev-main-review-findings-alert-sender-verdic.md) | done | bug | P2 | Fix the dev→main review findings: alert sender, verdict bridge, agent replacements, Free rows | 1.387.1 |
 | [RS-465](./RS-465-confirm-before-removing-a-packed-item-from-a-sell-or.md) | done | story | P2 | Confirm before removing a packed item from a sell order | 1.387.0 |
 | [RS-464](./RS-464-evaluate-panel-shows-the-live-prompt-not-the-rule-ed.md) | done | story | P2 | Evaluate panel shows the live prompt, not the rule editor | 1.386.0 |

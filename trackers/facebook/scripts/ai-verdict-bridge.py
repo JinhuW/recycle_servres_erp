@@ -33,8 +33,10 @@ The text log has no timestamps: a fresh verdict takes the response's
 """
 
 import argparse
+import ast
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -61,10 +63,50 @@ WITHHELD = re.compile(
     r"^\[\w+\]\[Alert\]\[/\w+\] WITHHELD \(fleet alerts off\) rating (?P<score>\d) >= (?P<threshold>\d) "
     r"\| (?P<listing_id>\d+) \| \[cyan\](?P<title>.*)\[/cyan\] \| (?P<url>\S+)$"
 )
-CONTENT = re.compile(r"""^\s+content=(['"])(?P<json>\{.*\})\1,?$""")
+# pretty_repr logs the answer as a Python literal: quotes and newlines escaped.
+CONTENT = re.compile(r"""^\s+content=(?P<literal>(['"]).*\2),?$""")
 ITEM_ID = re.compile(r"/marketplace/item/(\d+)")
 MARKUP = re.compile(r"\[/?(?:red|green|blue|cyan|yellow|magenta|white|bold|dim)\]")
 LISTING_KEYS = ("id", "title", "price", "post_url", "location", "seller", "condition")
+
+
+def answer(literal: str) -> dict:
+    """The model's JSON from the logged literal, read as the monitor reads it:
+    the first object in the text, the unit count an integer of at least 1."""
+    try:
+        text = ast.literal_eval(literal)
+    except (ValueError, SyntaxError):
+        return {}
+    decoder = json.JSONDecoder()
+    i = text.find("{") if isinstance(text, str) else -1
+    while i != -1:
+        try:
+            found, _ = decoder.raw_decode(text, i)
+        except ValueError:
+            found = None
+        if isinstance(found, dict):
+            return found
+        i = text.find("{", i + 1)
+    return {}
+
+
+def unit_count(value) -> int | None:
+    """The monitor's `_coerce_unit_count`."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, float):
+        # The JSON decoder reads NaN and Infinity, which int() refuses.
+        if not math.isfinite(value):
+            return None
+        value = int(value)
+    elif isinstance(value, str):
+        try:
+            value = int(value.strip())
+        except ValueError:
+            return None
+    elif not isinstance(value, int):
+        return None
+    return value if value >= 1 else None
 
 
 def docker(*args: str) -> str:
@@ -90,9 +132,10 @@ def read_log(container: str) -> list[str]:
     return docker("exec", container, "sh", "-c", script).splitlines()
 
 
-def unwrap(lines: list[str]) -> list[str]:
-    """Rejoin a `concludes` or `WITHHELD` line the console wrapped at its width."""
-    out: list[str] = []
+def unwrap(lines: list[str]) -> list[tuple[str, int]]:
+    """Rejoin a `concludes` or `WITHHELD` line the console wrapped at its width,
+    each with the index of the last line it took."""
+    out: list[tuple[str, int]] = []
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -104,15 +147,19 @@ def unwrap(lines: list[str]) -> list[str]:
                 if joined:
                     line, i = joined, i + n
                     break
-        out.append(line)
+        out.append((line, i))
         i += 1
     return out
 
 
-def parse(lines: list[str], worker: str, fallback_ts: float | None = None) -> list[tuple[str, dict]]:
+def parse(lines: list[str], worker: str, fallback_ts: float | None = None,
+          tail: int | None = None) -> list[tuple[str, dict]]:
     """The documents in `lines`. `fallback_ts` times what comes before the first
-    fresh verdict; the follower passes now, the cron run leaves those out."""
-    lines = unwrap(lines)
+    fresh verdict; the follower passes now, the cron run leaves those out.
+    `tail` keeps only the documents whose line ends in the last `tail` lines:
+    the follower's window has lost the response block of an older verdict and
+    would read it again as a cached one, under another id."""
+    first_new = len(lines) - tail if tail is not None else 0
     docs: list[tuple[str, dict]] = []
     listings: dict[str, dict] = {}
     block: dict | None = None
@@ -120,7 +167,9 @@ def parse(lines: list[str], worker: str, fallback_ts: float | None = None) -> li
     prompt: dict | None = None
     response: dict | None = None
     last_created = fallback_ts
-    for line in lines:
+    # The price each listing was last evaluated at: the WITHHELD line has none.
+    prices: dict[str, str] = {}
+    for line, end in unwrap(lines):
         if block is not None:
             if line.startswith(")"):
                 if block.get("title"):
@@ -156,15 +205,11 @@ def parse(lines: list[str], worker: str, fallback_ts: float | None = None) -> li
             else:
                 c = CONTENT.match(line)
                 if c:
-                    try:
-                        verdict = json.loads(c["json"])
-                    except ValueError:
-                        verdict = {}
-                    if isinstance(verdict, dict):
-                        response["unit_count"] = verdict.get("unit_count")
-                        response["count_phrase"] = verdict.get("count_phrase") or None
+                    verdict = answer(c["literal"])
+                    response["unit_count"] = unit_count(verdict.get("unit_count"))
+                    response["count_phrase"] = verdict.get("count_phrase") or None
         w = WITHHELD.match(line)
-        if w and last_created is not None:
+        if w and last_created is not None and end >= first_new:
             doc = {
                 "@timestamp": datetime.fromtimestamp(last_created, tz=timezone.utc).isoformat(timespec="milliseconds"),
                 "worker": worker,
@@ -180,8 +225,12 @@ def parse(lines: list[str], worker: str, fallback_ts: float | None = None) -> li
                 "item": item,
                 "score": int(w["score"]),
                 "threshold": int(w["threshold"]),
+                "price": prices.get(w["listing_id"]),
             }
-            docs.append((hashlib.sha1(f"bridge|withheld|{worker}|{w['listing_id']}|{w['score']}".encode()).hexdigest(), doc))
+            # The price in the id: a sighting at a new price is a new document,
+            # which the follower ships at once and the sender asks about anew.
+            key = f"{worker}|{w['listing_id']}|{w['score']}" + (f"|{doc['price']}" if doc["price"] else "")
+            docs.append((hashlib.sha1(f"bridge|withheld|{key}".encode()).hexdigest(), doc))
             continue
         m = CONCLUDES.match(line)
         if not m:
@@ -199,6 +248,8 @@ def parse(lines: list[str], worker: str, fallback_ts: float | None = None) -> li
             if found:
                 listing.setdefault("id", found[1])
         prompt = None
+        if listing.get("id") and listing.get("price"):
+            prices[listing["id"]] = listing["price"]
         doc = {
             "@timestamp": datetime.fromtimestamp(last_created, tz=timezone.utc).isoformat(timespec="milliseconds"),
             "worker": worker,
@@ -224,7 +275,8 @@ def parse(lines: list[str], worker: str, fallback_ts: float | None = None) -> li
             "seller": listing.get("seller"),
         }
         key = response["id"] if fresh else f"{worker}|{listing.get('id') or m['title']}|{m['comment']}|cached"
-        docs.append((hashlib.sha1(f"bridge|{key}".encode()).hexdigest(), doc))
+        if end >= first_new:
+            docs.append((hashlib.sha1(f"bridge|{key}".encode()).hexdigest(), doc))
         response = None
     return docs
 

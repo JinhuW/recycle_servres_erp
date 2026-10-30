@@ -3,6 +3,7 @@
 // budget ring's tone and the masks the tables show. Kept out of the
 // components so they can be unit-tested without React.
 
+import { FLEET_TZ } from '@recycle-erp/shared';
 import type { AlertHitRow } from '../../../lib/coordinator';
 import {
   fleetStateParked, type FleetCity, type FleetCityLogTask as FleetTaskLog, type FleetFunnelDay, type FleetHost, type FleetHostContainer, type FleetRelease, type FleetSlot, type FleetTask,
@@ -12,9 +13,10 @@ import { FLOW_STAGES, type FlowStage } from '../../../lib/fleetView';
 
 export type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
-// The clocks the fleet pages show: the office's. Workers keep UTC, and a time
-// in the browser's own zone would read differently on every manager's laptop.
-export const FLEET_TZ = 'America/New_York';
+// The clocks the fleet pages show, and the days the Analysis tab counts: the
+// office's. Workers keep UTC, and a time in the browser's own zone would read
+// differently on every manager's laptop.
+export { FLEET_TZ };
 
 export function easternClock(at: string | null | undefined, locale: string, now: number = Date.now()): string {
   if (!at) return '';
@@ -435,8 +437,13 @@ export function sortTasks(tasks: readonly FleetTask[], now: number = Date.now())
 export type FunnelRange = 1 | 7 | 14;
 export const FUNNEL_RANGES: readonly FunnelRange[] = [1, 7, 14];
 
-const DAY_MS = 86_400_000;
-const utcDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+// The office day `back` days before the one `now` falls in, as YYYY-MM-DD.
+// Stepped on the calendar, not in 24-hour jumps, which a 23- or 25-hour DST
+// day would push onto the wrong date.
+function fleetDay(now: number, back = 0): string {
+  const [y, m, d] = new Date(now).toLocaleDateString('en-CA', { timeZone: FLEET_TZ }).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d - back)).toISOString().slice(0, 10);
+}
 
 type FunnelKey = keyof Omit<FleetFunnelDay, 'day'>;
 
@@ -454,7 +461,7 @@ export type FunnelCounts = Partial<Record<FlowStage, number>> & {
   coverage?: { counted: number; carded: number };
 };
 
-/** The stage counts summed over the last `range` UTC days, today included.
+/** The stage counts summed over the last `range` office days, today included.
  *  Workers began reporting the gates, what passed the model and what they
  *  withheld later than the rest: a stage no search in the range reported
  *  stays undefined, so it reads as not counted rather than as 0, and one only
@@ -463,8 +470,8 @@ export type FunnelCounts = Partial<Record<FlowStage, number>> & {
  *  fleet alerts off held back. */
 export function funnelCounts(days: readonly FleetFunnelDay[] | null, range: FunnelRange, now: number = Date.now()): FunnelCounts {
   if (!days) return {};
-  const from = utcDay(now - (range - 1) * DAY_MS);
-  const rows = days.filter(d => d.day >= from && d.day <= utcDay(now));
+  const from = fleetDay(now, range - 1);
+  const rows = days.filter(d => d.day >= from && d.day <= fleetDay(now));
   const sum = (key: FunnelKey): number | undefined => {
     if (LATE_KEYS.has(key) && !rows.some(d => d[key] != null)) return undefined;
     return rows.reduce((n, d) => n + (d[key] ?? 0), 0);
@@ -553,12 +560,12 @@ export function funnelHeadline(counts: FunnelCounts): FunnelHeadline | null {
 export type DayPoint = { day: string; value: number; today: boolean };
 export type DaySeries = { points: DayPoint[]; total: number; fullDayAverage: number; max: number };
 
-/** One value per UTC day for the last `n` days ending today, gaps as zero. */
+/** One value per office day for the last `n` days ending today, gaps as zero. */
 export function daySeries(days: readonly FleetFunnelDay[], key: 'reviewed' | 'alerted', n: number = 14, now: number = Date.now()): DaySeries {
   const byDay = new Map(days.map(d => [d.day, d[key]]));
   const points: DayPoint[] = [];
   for (let i = n - 1; i >= 0; i -= 1) {
-    const day = utcDay(now - i * DAY_MS);
+    const day = fleetDay(now, i);
     points.push({ day, value: byDay.get(day) ?? 0, today: i === 0 });
   }
   const total = points.reduce((s, p) => s + p.value, 0);

@@ -22,18 +22,32 @@ describe('funnelDays', () => {
     await db`INSERT INTO fleet_items (name, phrases) VALUES ('server_ram', '["x"]')`;
   });
 
-  it('sums finished searches per UTC day, from the first day of the window', async () => {
+  it('sums finished searches per Eastern day, from the first day of the window', async () => {
+    // 00:10Z on the 28th is 20:10 Eastern on the 27th.
     await task('2026-10-28T00:10:00Z', 'done', { cards: 120, opened: 50, reviewed: 22, alerted: 1, seconds: 900 });
     await task('2026-10-28T14:00:00Z', 'done', { cards: 80, opened: 30, reviewed: 10, alerted: 0 });
-    await task('2026-10-27T23:59:00Z', 'done', { cards: 5, opened: 1, reviewed: 1, alerted: 0 });
-    // Before the window, not a search, not finished: none of them counts.
-    await task('2026-10-26T23:59:00Z', 'done', { cards: 999 });
+    await task('2026-10-27T04:00:00Z', 'done', { cards: 5, opened: 1, reviewed: 1, alerted: 0 });
+    // Before the window (23:59 Eastern on the 26th), not a search, not
+    // finished: none of them counts.
+    await task('2026-10-27T03:59:00Z', 'done', { cards: 999 });
     await task('2026-10-28T10:00:00Z', 'done', { cards: 999 }, 'verify-slug');
     await task(null, 'leased', null);
 
     expect(await funnelDays(getTestDb(), 2, NOW)).toEqual([
-      { day: '2026-10-27', searches: 1, cards: 5, opened: 1, reviewed: 1, alerted: 0, title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null, counted: 0, carded: 1 },
-      { day: '2026-10-28', searches: 2, cards: 200, opened: 80, reviewed: 32, alerted: 1, title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null, counted: 0, carded: 2 },
+      { day: '2026-10-27', searches: 2, cards: 125, opened: 51, reviewed: 23, alerted: 1, title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null, counted: 0, carded: 2 },
+      { day: '2026-10-28', searches: 1, cards: 80, opened: 30, reviewed: 10, alerted: 0, title_pass: null, keyword_pass: null, fresh: null, passed: null, withheld: null, counted: 0, carded: 1 },
+    ]);
+  });
+
+  it('keeps the 25-hour day DST ends on whole', async () => {
+    // Clocks fall back at 06:00Z on Nov 1, so that day runs 04:00Z to 05:00Z.
+    await task('2026-11-01T03:30:00Z', 'done', { cards: 999 });
+    await task('2026-11-01T04:30:00Z', 'done', { cards: 1 });
+    await task('2026-11-02T04:30:00Z', 'done', { cards: 2 });
+    await task('2026-11-02T05:30:00Z', 'done', { cards: 4 });
+    expect(await funnelDays(getTestDb(), 2, new Date('2026-11-02T15:00:00Z'))).toMatchObject([
+      { day: '2026-11-01', searches: 2, cards: 3 },
+      { day: '2026-11-02', searches: 1, cards: 4 },
     ]);
   });
 

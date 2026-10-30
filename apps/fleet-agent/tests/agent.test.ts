@@ -100,6 +100,44 @@ describe('online', () => {
     expect(logged().filter((l) => l.msg === 'note').map((l) => l.note)).toEqual(['lab-2: beyond count 1; left running', 'lab-3: beyond count 1; left running']);
   });
 
+  it('removes a stopped worker above the count on an old image, and stamps no start', async () => {
+    const docker = new FakeDocker([running('lab-1', 'img:2'), exited('lab-3', 75, '2026-10-23T12:00:00Z', 'img:1')]);
+    server.desired = desired({ image: 'img:2' });
+    const result = await agent(docker).tick();
+    expect(docker.commands).toEqual([['rm', 'rs-fleet-lab-3']]);
+    expect(server.reports[0].containers.map((c) => c.worker_id)).toEqual(['lab-1']);
+    expect(result.applied.map((a) => a.kind)).toEqual(['remove']);
+    // No start stamped now: what is kept is the newest start Docker showed (lab-1's).
+    expect(JSON.parse(readFileSync(join(stateDir, 'memory.json'), 'utf8')).last_start_at).toBe(Date.parse('2026-10-24T10:00:00Z'));
+  });
+
+  it('leaves an extra running when a person starts it between observe and remove', async () => {
+    const docker = new FakeDocker([running('lab-1', 'img:2'), exited('lab-3', 75, '2026-10-23T12:00:00Z', 'img:1')]);
+    const observe = docker.observe.bind(docker);
+    docker.observe = async (hostId) => {
+      const seen = await observe(hostId);
+      const c = docker.containers.get('rs-fleet-lab-3')!;
+      docker.containers.set(c.name, { ...c, running: true, status: 'running', exit_code: null });
+      return seen;
+    };
+    server.desired = desired({ image: 'img:2' });
+    await agent(docker).tick();
+    expect(docker.commands).toEqual([['rm', 'rs-fleet-lab-3']]);
+    expect(docker.containers.get('rs-fleet-lab-3')?.running).toBe(true);
+  });
+
+  it('keeps the stagger of a start made by hand on an extra it then removes', async () => {
+    const extra = { ...exited('lab-3', 1, new Date(clock - 20_000).toISOString(), 'img:1'), started_at: new Date(clock - 40_000).toISOString() };
+    const docker = new FakeDocker([extra]);
+    server.desired = desired({ image: 'img:2' });
+    const a = agent(docker, { staggerMs: 180_000 });
+    expect((await a.tick()).applied.map((x) => [x.kind, x.worker_id])).toEqual([['remove', 'lab-3']]);
+    clock += 30_000;
+    expect((await a.tick()).actions).toEqual([]);
+    clock += 120_000;
+    expect((await a.tick()).actions.map((x) => [x.kind, x.worker_id])).toEqual([['run', 'lab-1']]);
+  });
+
   it('staggers starts across ticks and remembers the last one on disk', async () => {
     const docker = new FakeDocker();
     server.desired = desired({ count: 2 });
@@ -300,6 +338,18 @@ describe('workers a person stopped', () => {
     expect(server.reports.at(-1)!.containers[0]).toMatchObject({ state: 'operator_stopped', hold: 'operator_stopped', exit_code: 0 });
     // Still held after an agent restart: the hold is remembered for that container.
     expect((await agent(docker).tick()).actions).toEqual([]);
+  });
+
+  it('remembers a stop by hand above the count, so a restarted agent does not remove it', async () => {
+    const docker = new FakeDocker([running('lab-1', 'img:2'), running('lab-3', 'img:1')]);
+    server.desired = desired({ image: 'img:2' });
+    const a = agent(docker);
+    clock += 60_000;
+    docker.containers.set('rs-fleet-lab-3', exited('lab-3', 0, new Date(clock - 1000).toISOString(), 'img:1'));
+    clock += 10 * 60_000;
+    expect((await a.tick()).actions).toEqual([]);
+    expect((await agent(docker).tick()).actions).toEqual([]);
+    expect(docker.commands).toEqual([]);
   });
 
   it('restarts an exit 0 from before the agent started: the host went down, not a person', async () => {

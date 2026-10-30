@@ -234,6 +234,16 @@ describe('analysis', () => {
     // The full-day average leaves today out.
     expect(s.fullDayAverage).toBe(Math.round(21 / 13));
   });
+  it('counts office days: just past UTC midnight is still yesterday in Eastern', () => {
+    // 02:00Z on the 25th is 22:00 Eastern on the 24th.
+    const late = Date.parse('2026-10-25T02:00:00Z');
+    expect(funnelCounts(STATS, 1, late)).toMatchObject({ search: 255, alert: 9 });
+    expect(daySeries(STATS, 'alerted', 14, late).points[13]).toEqual({ day: '2026-10-24', value: 9, today: true });
+  });
+  it('steps the calendar across the day DST ends, missing and repeating none', () => {
+    const days = daySeries([], 'alerted', 3, Date.parse('2026-11-02T04:30:00Z')).points.map(p => p.day);
+    expect(days).toEqual(['2026-10-30', '2026-10-31', '2026-11-01']);
+  });
   it('picks a round top for the gridlines', () => {
     expect(niceTop(0)).toBe(1);
     expect(niceTop(9)).toBe(10);
