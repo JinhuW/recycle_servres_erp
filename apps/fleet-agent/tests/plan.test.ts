@@ -82,6 +82,13 @@ describe('scale down', () => {
     expect(kinds(run([running('lab-1', 'img:2'), exited('lab-2', 75, ago(600), 'img:1')], {}, { ...d, count: 2 }))).toEqual([['start', 'lab-2']]);
   });
 
+  it('remembers a stop by hand on an extra, as within the count', () => {
+    const c = exited('lab-3', 0, ago(60), 'img:1');
+    const p = run([running('lab-1', 'img:2'), c], { bootAt: NOW - 3600_000 }, { count: 1, image: 'img:2' });
+    expect(p.actions).toEqual([]);
+    expect(p.holds).toEqual({ 'lab-3': { container: c.id, reason: 'operator_stopped' } });
+  });
+
   it('removes nothing offline, observe-only, or when the image is not one this host runs', () => {
     const cs = () => [running('lab-1', 'img:2'), exited('lab-3', 75, ago(600), 'img:1')];
     const d = { count: 1, image: 'img:2' };

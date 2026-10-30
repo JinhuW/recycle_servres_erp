@@ -3,7 +3,7 @@
 // what it runs; observe-only it runs nothing; a pull that fails leaves the old
 // container in place.
 
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -107,8 +107,20 @@ describe('online', () => {
     expect(docker.commands).toEqual([['stop+rm', 'rs-fleet-lab-3']]);
     expect(server.reports[0].containers.map((c) => c.worker_id)).toEqual(['lab-1']);
     expect(result.applied.map((a) => a.kind)).toEqual(['remove']);
-    // Nothing to remember: no start was stamped.
-    expect(existsSync(join(stateDir, 'memory.json'))).toBe(false);
+    // No start stamped now: what is kept is the newest start Docker showed (lab-1's).
+    expect(JSON.parse(readFileSync(join(stateDir, 'memory.json'), 'utf8')).last_start_at).toBe(Date.parse('2026-10-24T10:00:00Z'));
+  });
+
+  it('keeps the stagger of a start made by hand on an extra it then removes', async () => {
+    const extra = { ...exited('lab-3', 1, new Date(clock - 20_000).toISOString(), 'img:1'), started_at: new Date(clock - 40_000).toISOString() };
+    const docker = new FakeDocker([extra]);
+    server.desired = desired({ image: 'img:2' });
+    const a = agent(docker, { staggerMs: 180_000 });
+    expect((await a.tick()).applied.map((x) => [x.kind, x.worker_id])).toEqual([['remove', 'lab-3']]);
+    clock += 30_000;
+    expect((await a.tick()).actions).toEqual([]);
+    clock += 120_000;
+    expect((await a.tick()).actions.map((x) => [x.kind, x.worker_id])).toEqual([['run', 'lab-1']]);
   });
 
   it('staggers starts across ticks and remembers the last one on disk', async () => {
@@ -311,6 +323,18 @@ describe('workers a person stopped', () => {
     expect(server.reports.at(-1)!.containers[0]).toMatchObject({ state: 'operator_stopped', hold: 'operator_stopped', exit_code: 0 });
     // Still held after an agent restart: the hold is remembered for that container.
     expect((await agent(docker).tick()).actions).toEqual([]);
+  });
+
+  it('remembers a stop by hand above the count, so a restarted agent does not remove it', async () => {
+    const docker = new FakeDocker([running('lab-1', 'img:2'), running('lab-3', 'img:1')]);
+    server.desired = desired({ image: 'img:2' });
+    const a = agent(docker);
+    clock += 60_000;
+    docker.containers.set('rs-fleet-lab-3', exited('lab-3', 0, new Date(clock - 1000).toISOString(), 'img:1'));
+    clock += 10 * 60_000;
+    expect((await a.tick()).actions).toEqual([]);
+    expect((await agent(docker).tick()).actions).toEqual([]);
+    expect(docker.commands).toEqual([]);
   });
 
   it('restarts an exit 0 from before the agent started: the host went down, not a person', async () => {

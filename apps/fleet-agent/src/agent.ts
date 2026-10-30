@@ -172,7 +172,7 @@ export class Agent {
         : null;
       try {
         for (const action of planned.actions) {
-          const problem = await this.apply(action, desired);
+          const problem = await this.apply(action, desired, planned.lastStartAt);
           if (problem) {
             errors.push(`${action.worker_id}: ${problem}`);
             this.log.error('failed', { ...action, error: problem });
@@ -254,7 +254,7 @@ export class Agent {
     }
   }
 
-  private async apply(action: Action, desired: Desired): Promise<string | null> {
+  private async apply(action: Action, desired: Desired, lastStartAt: number | null): Promise<string | null> {
     const d = this.o.docker;
     switch (action.kind) {
       case 'start': {
@@ -282,6 +282,12 @@ export class Agent {
         return this.runWorker(action);
       }
       case 'remove':
+        // The container may carry the only record of the newest start (one
+        // made by hand); gone, the stagger would no longer see that login.
+        if (lastStartAt !== null && (this.memory.last_start_at === null || lastStartAt > this.memory.last_start_at)) {
+          this.memory.last_start_at = lastStartAt;
+          if (!this.save('start')) return 'cannot record the last start under /state; left in place';
+        }
         return d.stopAndRemove(action.container);
     }
   }

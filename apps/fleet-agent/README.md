@@ -79,8 +79,12 @@ the same `FLEET_HOST_ID` on its daemon observes only, logs an error and puts
      answer was lost still counts;
    - leave workers beyond `count` alone: one running keeps running (its
      browser is signed in, and starting one again is a login), one stopped
-     stays stopped until the count reaches it again. Since v1.385.0 nothing
-     is removed;
+     stays stopped until the count reaches it again, unless it is on an
+     image new workers no longer start on: that one is removed (v1.388.0),
+     once nothing holds it. A stop by hand above the count is remembered
+     like one within it, and before a removal the agent writes down the
+     newest start, since that container may be the only record of it
+     (v1.389.1);
    - replace the one worker `roll.replace` names if it is not yet on the
      desired image (stop, then run on the new image), beyond `count` too.
      It takes the tick's start before any other run or restart, which could
