@@ -17,8 +17,8 @@ import { leaseLive, liveness } from './fleetBoard';
 // A worker doing the work (degraded or mid-replacement included), one that
 // stopped once its account left the fleet (retired or removed) and waits for
 // another, or one that is not working because its account needs a hand or it
-// went silent. Hosts never remove a worker, so there is no fourth. The State
-// column keeps the detail.
+// went silent. A host removes only a stopped worker above its count, and that
+// worker is then no row at all. The State column keeps the detail.
 export type FleetRowKind = 'healthy' | 'free' | 'parked';
 export const FLEET_ROW_KINDS: readonly FleetRowKind[] = ['healthy', 'free', 'parked'];
 
@@ -78,7 +78,7 @@ export type FleetRowsInput = {
   challenges: readonly Challenge[] | null;
   pool: readonly FleetPoolAccount[] | null;
   /** The hosts that exist: a worker of a deleted host is free for no one. */
-  hosts?: readonly (Pick<FleetHost, 'host_id'> & Partial<Pick<FleetHost, 'report'>>)[];
+  hosts?: readonly (Pick<FleetHost, 'host_id'> & Partial<Pick<FleetHost, 'report' | 'desired'>>)[];
 };
 
 const vncPortOf = (url: string | null | undefined): number | null => {
@@ -185,15 +185,24 @@ export function fleetRows(input: FleetRowsInput, now: number = Date.now()): Flee
   const slotOf = (w: FleetWorker) => input.slots.find(s => s.worker_id === w.worker_id)
     ?? input.slots.find(s => s.account_no === w.account_no) ?? null;
   const hosts = input.hosts && new Set(input.hosts.map(h => h.host_id));
-  // The containers each reporting host still has: the agent removes a free
-  // worker's stopped container once new workers start on another image.
+  // The containers each reporting host still has: the agent removes a stopped
+  // container above the count once new workers start on another image.
   const onHost = new Map((input.hosts ?? []).flatMap(h => h.report ? [[h.host_id, new Set(h.report.containers.map(c => c.worker_id))] as const] : []));
+  const countOf = new Map((input.hosts ?? []).flatMap(h => h.desired ? [[h.host_id, h.desired.count] as const] : []));
+  // A container missing within the count is about to be run again; above it, the agent removed it for good.
+  const removed = (w: FleetWorker, row: FleetRow) => {
+    if (row.running || !w.host_id || onHost.get(w.host_id)?.has(w.worker_id) !== false) return false;
+    if (row.kind === 'free') return true;
+    const n = w.worker_id.startsWith(`${w.host_id}-`) ? Number(w.worker_id.slice(w.host_id.length + 1)) : NaN;
+    const count = countOf.get(w.host_id);
+    return count !== undefined && Number.isInteger(n) && n > count;
+  };
   const rows: FleetRow[] = [];
   const seenNo = new Set<number>();
   for (const w of workers.values()) {
     const row = erpRow(w, slotOf(w), input.release, null, now, !!hosts && !!w.host_id && !hosts.has(w.host_id));
     if (!row.running && !(row.heartbeat && now - Date.parse(row.heartbeat) < OFFLINE_KEPT_MS)) continue;
-    if (row.kind === 'free' && w.host_id && onHost.get(w.host_id)?.has(w.worker_id) === false) continue;
+    if (removed(w, row)) continue;
     row.pool = row.no === null ? null : poolByNo.get(row.no) ?? null;
     row.uid ??= row.pool?.uid ?? null;
     rows.push(row);

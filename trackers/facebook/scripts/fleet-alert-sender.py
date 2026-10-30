@@ -54,6 +54,7 @@ PRIORITY_EMOJI = {"high": "🔥", "medium": "⚡", "low": "🐢"}
 CATEGORY_TAGS = [("ram", "RAM"), ("memory", "RAM"), ("cpu", "CPU"), ("processor", "CPU"), ("ssd", "SSD"),
                  ("storage", "SSD"), ("drive", "SSD"), ("networking", "SSD"), ("server", "Server")]
 MARKDOWN_V2 = re.compile(r"([_*\[\]()~`>#+\-=|{}.!\\])")
+FRACTION = re.compile(r"(\.\d+)")
 
 _spec = importlib.util.spec_from_file_location("bridge", os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                                        "ai-verdict-bridge.py"))
@@ -101,10 +102,14 @@ def withheld(hours: int) -> list[dict]:
 
 
 def verdict(listing_id: str) -> dict:
-    """The newest verdict for the listing, preferring one that counted units."""
+    """The newest verdict for the listing, preferring one that counted units,
+    with the newest price: a relisting at a lower price is often evaluated
+    from the cache, with no count, and the counted verdict is the old price's."""
     rows = search({"size": 20, "sort": [{"@timestamp": "desc"}], "query": {"bool": {"filter": [
         {"term": {"kind": "ai_eval"}}, {"term": {"listing_id.keyword": listing_id}}]}}})
-    return next((r for r in rows if r.get("unit_count") is not None), rows[0] if rows else {})
+    counted = next((r for r in rows if bridge.unit_count(r.get("unit_count")) is not None), rows[0] if rows else {})
+    price = next((r["price"] for r in rows if (r.get("price") or "").strip()), None)
+    return {**counted, "unit_count": bridge.unit_count(counted.get("unit_count")), "price": price}
 
 
 def priority(count) -> str | None:
@@ -180,16 +185,27 @@ def report(entry: dict, tokens: dict) -> None:
     del entry["report"]
 
 
-def instant(stamp: str) -> datetime:
-    moment = datetime.fromisoformat(stamp.replace(" ", "T"))
+def instant(stamp: str) -> datetime | None:
+    """None for a stamp it cannot read. Before 3.11, fromisoformat takes no
+    `Z` and only 3 or 6 fractional digits, and native workers write either."""
+    text = FRACTION.sub(lambda m: m[1][:7].ljust(7, "0"), stamp.replace(" ", "T").replace("Z", "+00:00"))
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return None
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
 def handled(entry: dict, alert: dict) -> bool:
     """Whether this sighting is one the entry already answered. A worker that
     withholds the listing again later (it was repriced, say) is asked about
-    anew, so the coordinator can grant a price drop as `discounted`."""
-    return instant(alert["@timestamp"]) <= instant(entry.get("seen") or entry["at"])
+    anew, so the coordinator can grant a price drop as `discounted`. A
+    sighting stamped no later, from a cached verdict, still counts as new at
+    another price."""
+    if alert.get("price") and entry.get("price") and alert["price"] != entry["price"]:
+        return False
+    at, seen = instant(alert["@timestamp"]), instant(entry.get("seen") or entry["at"])
+    return at is not None and seen is not None and at <= seen
 
 
 def save(state: dict) -> None:
@@ -217,6 +233,9 @@ def run_once(hours: int, dry_run: bool, env: dict, tokens: dict) -> tuple[int, i
         if lid in state and handled(state[lid], alert):
             continue
         v = verdict(lid)
+        # The withheld line's own price is the sighting's; the verdict's may be older.
+        if alert.get("price"):
+            v = {**v, "price": alert["price"]}
         level = priority(v.get("unit_count"))
         title, body = message(alert, v)
         if level:
@@ -231,17 +250,17 @@ def run_once(hours: int, dry_run: bool, env: dict, tokens: dict) -> tuple[int, i
             # undelivered, so the listing is asked about again next pass.
             if claim["verdict"] == "duplicate":
                 state[lid] = {**state.get(lid, {}), "verdict": claim["verdict"], "at": stamp,
-                              "seen": alert["@timestamp"]}
+                              "seen": alert["@timestamp"], "price": v.get("price")}
                 skipped += 1
             continue
         text = f"*{escape(title)}*\n\n{escape(body)}"
         result = telegram(env, text, topics.get(level or ""))
         state[lid] = entry = {"verdict": claim["verdict"], "sent": result["message_id"], "at": stamp,
-                              "seen": alert["@timestamp"], "worker": alert["worker"], "report": {
+                              "seen": alert["@timestamp"], "price": v.get("price"), "worker": alert["worker"], "report": {
             "chat_id": str(result["chat"]["id"]), "message_id": result["message_id"],
             "topic_id": int(topics[level]) if level and topics.get(level) else None, "priority": level,
             "listing_id": lid, "post_url": alert["url"], "item_name": alert.get("item"),
-            "ai_score": alert["score"], "unit_count": bridge.unit_count(v.get("unit_count")),
+            "ai_score": alert["score"], "unit_count": v.get("unit_count"),
             "title": alert["title"][:300], "price": (v.get("price") or "")[:60] or None,
         }}
         save(state)

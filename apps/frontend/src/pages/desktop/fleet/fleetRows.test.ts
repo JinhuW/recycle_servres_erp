@@ -82,6 +82,16 @@ describe('fleetRows', () => {
     // No report yet: unknown is not gone.
     expect(rowsWith([{ host_id: 'homelab', report: null }])?.kind).toBe('free');
   });
+  it('leaves out a parked worker above the count once its host removed its container', () => {
+    const parked = { ...WORKERS[0], worker_id: 'homelab-7', host_id: 'homelab', state: 'CHECKPOINT', task: null, last_heartbeat_at: ago(30) };
+    const report = { version: '1', containers: [{ worker_id: 'homelab-1', image: 'img:2', state: 'running', started_at: null }] };
+    const rowWith = (count: number) => fleetRows({
+      ...input, workers: [...WORKERS, parked], hosts: [{ host_id: 'homelab', report, desired: { count, image: 'img:2', version: '0.14.0', roll: null as never } }],
+    }, NOW).find(r => r.workerId === 'homelab-7');
+    expect(rowWith(4)).toBeUndefined();
+    // Within the count the agent runs it again: still a row.
+    expect(rowWith(8)?.kind).toBe('parked');
+  });
   it('reads a stopped worker of a deleted host as parked, not free: no agent starts it', () => {
     const gone = { ...WORKERS[0], worker_id: 'gone-1', host_id: 'gone', account_no: 70, task: null, last_heartbeat_at: ago(30) };
     const more = fleetRows({ ...input, workers: [...WORKERS, gone], hosts: [{ host_id: 'homelab' }] }, NOW);

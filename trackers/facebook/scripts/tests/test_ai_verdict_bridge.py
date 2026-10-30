@@ -59,3 +59,29 @@ def test_tail_leaves_out_a_verdict_whose_response_block_scrolled_away():
     [(cached_id, cached)] = bridge.parse(later, "homelab-1", 1761800000.0)
     assert cached["cached"] is True and cached_id != fresh_id
     assert bridge.parse(later, "homelab-1", 1761800000.0, tail=4) == []
+
+
+def test_a_count_of_nan_or_infinity_is_no_count():
+    assert bridge.unit_count(float("nan")) is None and bridge.unit_count(float("inf")) is None
+    lines = response("""'{"rating":4,"unit_count":NaN,"summary":"ok"}'""")
+    [(_, doc)] = bridge.parse([*lines, CONCLUDES], "homelab-1")
+    assert doc["unit_count"] is None
+
+
+def withheld_at(price: str) -> list[str]:
+    return [
+        *response("""'{"rating":4,"unit_count":50,"summary":"ok"}'"""),
+        f'The user found a listing titled "Lot of RAM" in used condition, priced at {price}, located in Denver, CO, '
+        "posted at https://www.facebook.com/marketplace/item/111/",
+        CONCLUDES,
+        "[info][Alert][/info] WITHHELD (fleet alerts off) rating 4 >= 3 | 111 | [cyan]Lot of RAM[/cyan] | "
+        "https://www.facebook.com/marketplace/item/111/",
+    ]
+
+
+def test_a_withheld_alert_carries_its_price_and_a_new_price_is_a_new_document():
+    [(_, _), (first_id, first)] = bridge.parse(withheld_at("$500"), "homelab-1")
+    [(_, _), (again_id, _)] = bridge.parse(withheld_at("$500"), "homelab-1")
+    [(_, _), (drop_id, drop)] = bridge.parse(withheld_at("$300"), "homelab-1")
+    assert first["kind"] == "listing_alert" and first["price"] == "$500" and drop["price"] == "$300"
+    assert first_id == again_id != drop_id

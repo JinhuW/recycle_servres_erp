@@ -3383,7 +3383,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   empty and leaves the saved URL alone). An available account with a
   password and a 2FA key gets **Add to fleet** in its Runs on cell: the
   proxy defaults to a random one with room, or pick one from the dropdown
-  (since v1.389.0, RS-471; a full one is disabled; two accounts per proxy by default, the
+  (since v1.389.0, RS-471; a full one is disabled, and since v1.390.1 a
+  picked proxy a reload removed or filled is not swapped for a random one:
+  the dialog says so and waits for another pick; two accounts per proxy by default, the
   `Accounts per proxy` rule in Cities ▸ Rules; there are no home cities to
   pick since v1.374.0, RS-439), and the ERP makes the slot with a desktop browser made
   for the account (Chromium's own user agent, a common screen and scale
@@ -3429,7 +3431,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     never removes a running worker: one above the count keeps running, and once it
     stops it waits until the count reaches it again; since v1.388.0 (RS-470)
     the agent removes a stopped one above the count whose image new workers
-    no longer start on, which is not a login) and, while a release rolls, its
+    no longer start on, which is not a login; since v1.390.1 with a plain
+    `docker rm`, so one a person started meanwhile keeps running) and, while a release rolls, its
     progress line with the worker replaced next (since v1.367.0 only while
     GET /api/fleet/hosts returns a rolling release; without one, workers
     left on an older image get a quiet "1 worker on 0.14.6; new workers
@@ -3486,7 +3489,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     without waiting for it to go silent: its next call is refused. A stopped worker of a deleted host reads Parked, not Free: no
     agent is left to start it (v1.387.1). A Free worker whose container its
     host no longer reports (the agent removed it for being on an old image)
-    is left out of the table (v1.388.0). Retire on the Account Pool page
+    is left out of the table (v1.388.0); since v1.390.1 so is a Parked one
+    above the host's count. Retire on the Account Pool page
     deletes the account's fleet slot too, and with no free account left the
     host runs one worker fewer instead of replacing it. Since v1.380.0
     (RS-454) a worker parked Dead because a Facebook page would not load

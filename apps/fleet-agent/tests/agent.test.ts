@@ -104,11 +104,26 @@ describe('online', () => {
     const docker = new FakeDocker([running('lab-1', 'img:2'), exited('lab-3', 75, '2026-10-23T12:00:00Z', 'img:1')]);
     server.desired = desired({ image: 'img:2' });
     const result = await agent(docker).tick();
-    expect(docker.commands).toEqual([['stop+rm', 'rs-fleet-lab-3']]);
+    expect(docker.commands).toEqual([['rm', 'rs-fleet-lab-3']]);
     expect(server.reports[0].containers.map((c) => c.worker_id)).toEqual(['lab-1']);
     expect(result.applied.map((a) => a.kind)).toEqual(['remove']);
     // No start stamped now: what is kept is the newest start Docker showed (lab-1's).
     expect(JSON.parse(readFileSync(join(stateDir, 'memory.json'), 'utf8')).last_start_at).toBe(Date.parse('2026-10-24T10:00:00Z'));
+  });
+
+  it('leaves an extra running when a person starts it between observe and remove', async () => {
+    const docker = new FakeDocker([running('lab-1', 'img:2'), exited('lab-3', 75, '2026-10-23T12:00:00Z', 'img:1')]);
+    const observe = docker.observe.bind(docker);
+    docker.observe = async (hostId) => {
+      const seen = await observe(hostId);
+      const c = docker.containers.get('rs-fleet-lab-3')!;
+      docker.containers.set(c.name, { ...c, running: true, status: 'running', exit_code: null });
+      return seen;
+    };
+    server.desired = desired({ image: 'img:2' });
+    await agent(docker).tick();
+    expect(docker.commands).toEqual([['rm', 'rs-fleet-lab-3']]);
+    expect(docker.containers.get('rs-fleet-lab-3')?.running).toBe(true);
   });
 
   it('keeps the stagger of a start made by hand on an extra it then removes', async () => {

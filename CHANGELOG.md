@@ -15,6 +15,23 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.390.1] - 2026-10-30
+
+### Fixed
+
+- **The fleet agent never stops a worker to remove it** (RS-474). The
+  removal added in v1.388.0 stopped the container before removing it. A
+  worker that a person started between the agent's look and its removal
+  was therefore signed out and thrown away. The agent now runs a plain
+  `docker rm`, which Docker refuses for a running container.
+- **The Fleet tab drops a Parked worker that its host removed.** v1.388.0
+  hid only Free rows once the host stopped reporting the container. A
+  stopped worker above the count whose account still had a slot read as
+  Parked for a week, with actions for a container that no longer existed.
+- **Add to fleet keeps the proxy you picked.** If a reload removed or filled
+  the picked proxy, the dialog used to send a random one, or a full one the
+  backend refused. It now says so and waits for another pick.
+
 ## [1.390.0] - 2026-10-30
 
 ### Changed

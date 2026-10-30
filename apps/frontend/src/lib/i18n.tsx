@@ -5049,6 +5049,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fpAddToFleetSub: "A slot on a proxy, with a desktop browser made for this account. An ERP fleet worker signs it in when one is free.",
     fpAddToFleetProxy: "Proxy",
     fpAddToFleetFull: "full",
+    fpAddToFleetPickGone: "The proxy you picked is full or gone. Pick another, or Any proxy with room.",
     fpAddToFleetRandom: "Any proxy with room (random)",
     fpAddToFleetAllFull: "Every proxy is full. Add a proxy under Proxies or raise the accounts per proxy.",
     fpAddToFleetNoProxy: "Add a proxy under Proxies first.",

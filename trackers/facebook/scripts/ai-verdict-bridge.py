@@ -36,6 +36,7 @@ import argparse
 import ast
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -94,6 +95,9 @@ def unit_count(value) -> int | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, float):
+        # The JSON decoder reads NaN and Infinity, which int() refuses.
+        if not math.isfinite(value):
+            return None
         value = int(value)
     elif isinstance(value, str):
         try:
@@ -163,6 +167,8 @@ def parse(lines: list[str], worker: str, fallback_ts: float | None = None,
     prompt: dict | None = None
     response: dict | None = None
     last_created = fallback_ts
+    # The price each listing was last evaluated at: the WITHHELD line has none.
+    prices: dict[str, str] = {}
     for line, end in unwrap(lines):
         if block is not None:
             if line.startswith(")"):
@@ -219,8 +225,12 @@ def parse(lines: list[str], worker: str, fallback_ts: float | None = None,
                 "item": item,
                 "score": int(w["score"]),
                 "threshold": int(w["threshold"]),
+                "price": prices.get(w["listing_id"]),
             }
-            docs.append((hashlib.sha1(f"bridge|withheld|{worker}|{w['listing_id']}|{w['score']}".encode()).hexdigest(), doc))
+            # The price in the id: a sighting at a new price is a new document,
+            # which the follower ships at once and the sender asks about anew.
+            key = f"{worker}|{w['listing_id']}|{w['score']}" + (f"|{doc['price']}" if doc["price"] else "")
+            docs.append((hashlib.sha1(f"bridge|withheld|{key}".encode()).hexdigest(), doc))
             continue
         m = CONCLUDES.match(line)
         if not m:
@@ -238,6 +248,8 @@ def parse(lines: list[str], worker: str, fallback_ts: float | None = None,
             if found:
                 listing.setdefault("id", found[1])
         prompt = None
+        if listing.get("id") and listing.get("price"):
+            prices[listing["id"]] = listing["price"]
         doc = {
             "@timestamp": datetime.fromtimestamp(last_created, tz=timezone.utc).isoformat(timespec="milliseconds"),
             "worker": worker,

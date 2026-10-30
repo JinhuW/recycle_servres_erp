@@ -135,3 +135,30 @@ def test_a_rejected_token_is_minted_again(world):
     assert world.run() == (1, 0)
     assert world.minted == 2
     assert world.calls[0][1] == "token-1" and world.calls[1][1] == "token-2"
+
+
+def test_reads_the_stamps_native_workers_write():
+    at = sender.instant("2026-10-30T01:00:00.1234567Z")
+    assert at is not None and at.isoformat() == "2026-10-30T01:00:00.123456+00:00"
+    assert sender.instant("2026-10-30 02:00:00") is not None
+    assert sender.instant("yesterday") is None
+    assert sender.handled({"verdict": "new", "at": "2026-10-30 02:00:00"}, alert("yesterday")) is False
+
+
+def test_the_verdict_counts_from_the_counted_doc_and_prices_from_the_newest(monkeypatch):
+    rows = [{"unit_count": None, "price": "$300"}, {"unit_count": 0}, {"unit_count": "60", "price": "$500"}]
+    monkeypatch.setattr(sender, "search", lambda query: rows)
+    v = sender.verdict("111")
+    assert v["unit_count"] == 60 and v["price"] == "$300"
+
+
+def test_a_sighting_at_a_new_price_is_asked_about_even_stamped_no_later(world):
+    world.alerts = [{**alert(), "price": "$500"}]
+    world.claims = ["new"]
+    assert world.run() == (1, 0)
+    assert world.state()["111"]["price"] == "$500"
+    # Same stamp (a cached verdict), lower price: the claim carries the new price.
+    world.alerts = [{**alert(), "price": "$300"}]
+    world.claims = ["discounted"]
+    assert world.run() == (1, 0)
+    assert "Price: $300" in world.sent[-1].replace("\\", "")

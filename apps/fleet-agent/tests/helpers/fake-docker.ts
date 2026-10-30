@@ -4,7 +4,7 @@
 import type { DockerApi, RunSpec, WorkerEnv } from '../../src/docker.js';
 import { containerName, type Container } from '../../src/plan.js';
 
-export type Command = ['ensure', string] | ['run', string, string, number, WorkerEnv] | ['start', string] | ['stop+rm', string];
+export type Command = ['ensure', string] | ['run', string, string, number, WorkerEnv] | ['start', string] | ['stop+rm', string] | ['rm', string];
 
 let serial = 0;
 
@@ -68,6 +68,14 @@ export class FakeDocker implements DockerApi {
       if (fail.effect) this.containers.delete(name);
       return fail.error;
     }
+    this.containers.delete(name);
+    return null;
+  }
+
+  async removeStopped(name: string): Promise<string | null> {
+    this.commands.push(['rm', name]);
+    const c = this.containers.get(name);
+    if (c?.running) return `docker rm: Error response from daemon: You cannot remove a running container ${name}`;
     this.containers.delete(name);
     return null;
   }

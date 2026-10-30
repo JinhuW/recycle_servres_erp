@@ -148,11 +148,13 @@ export function AddToFleetDialog({ no, proxies, limit, onClose, onDone }: {
   const [busy, setBusy] = useState(false);
   const chosen = proxyId === null ? null : choices.find((c) => c.proxy.id === proxyId) ?? null;
   const roomLeft = choices.some((c) => !c.full);
+  // A pick a reload removed or filled is not swapped for a random one.
+  const pickGone = proxyId !== null && (!chosen || chosen.full);
   const device = chosen ? deviceSummary(fleetDeviceFor(no, chosen.proxy.timezone)) : null;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const proxy = chosen ? chosen.proxy : randomOpenProxy(choices);
-    if (busy || !proxy) return;
+    if (busy || pickGone || !proxy) return;
     setBusy(true);
     try {
       await fleetApi.addSlot({ account_no: no, proxy_id: proxy.id });
@@ -189,11 +191,12 @@ export function AddToFleetDialog({ no, proxies, limit, onClose, onDone }: {
           ) : (
             <p className="fp-warn">{t(choices.length ? 'fpAddToFleetAllFull' : 'fpAddToFleetNoProxy')}</p>
           )}
+          {roomLeft && pickGone && <p className="fp-warn">{t('fpAddToFleetPickGone')}</p>}
           {device && <p className="fp-muted">{t('fpAddToFleetDevice', device)}</p>}
         </div>
         <div className="modal-foot">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>{t('cancel')}</button>
-          <button type="submit" className="btn primary" disabled={busy || !roomLeft}>{t('fpAddToFleetConfirm')}</button>
+          <button type="submit" className="btn primary" disabled={busy || !roomLeft || pickGone}>{t('fpAddToFleetConfirm')}</button>
         </div>
       </form>
     </Modal>
