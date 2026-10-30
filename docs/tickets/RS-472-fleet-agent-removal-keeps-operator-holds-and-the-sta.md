@@ -2,13 +2,13 @@
 id: RS-472
 title: Fleet-agent removal keeps operator holds and the stagger
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-30
 reporter: jinhu
 branch: ticket/fleet-agent-remove-review
-pr:
-version:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1015
+version: 1.389.1
 related: [RS-470]
 ---
 
