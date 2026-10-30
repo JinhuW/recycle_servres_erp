@@ -18,6 +18,42 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- `fleet-alert-sender.py` records a listing the moment Telegram takes its
+  message and only retries the coordinator report after that, so a failed
+  `claim/delivered` no longer sends the lead again. It records only a
+  `duplicate` claim as final, so a listing held by another worker's claim
+  that lapses is still sent. Its withheld query is collapsed per listing and
+  newest first, so a busy 24-hour window no longer cuts off new withheld
+  alerts. It mints a worker token again on a 401 (RS-466).
+- `ai-verdict-bridge.py` re-indexes a doc into the daily index already
+  holding its `_id`, so a line stamped on either side of midnight is not
+  counted twice (RS-466).
+
+### Added
+
+- `scripts/fleet-log-follow.py` follows each fleet worker's log (`docker exec
+  tail -F`) and indexes its verdicts and withheld alerts as they are logged,
+  and `fleet-alert-sender.py --follow` checks for new ones every 10 seconds,
+  so a withheld alert reaches Telegram 10-15 s after the worker withheld it
+  instead of up to 10 minutes. Both are kept alive by cron and `flock`; the
+  5-minute bridge stays as the catch-up.
+- `scripts/fleet-alert-sender.py`, a stopgap that sends the Telegram alerts
+  fleet workers withheld while their alerts were off (RS-455). It reads the
+  `listing_alert` / `withheld` documents `ai-verdict-bridge.py` now also
+  ships, claims each listing from the coordinator with the withholding
+  worker's token so the fleet-wide dedupe holds, and posts the worker's own
+  message, in the topic for its unit count as a worker would. Cron on the
+  homelab VM every 5 minutes; on its first run it sent the 24-hour backlog.
+- `ai-verdict-bridge.py` ships the model's `unit_count` and `count_phrase`,
+  and each `[Alert] WITHHELD` line as a `listing_alert` document.
+- `scripts/ai-verdict-bridge.py`, a stopgap that rebuilds `ai_eval` events
+  from the text log of every fleet worker started without
+  `AIMM_OPENSEARCH_URL` and indexes them into the `fb-tracker-*` indices with
+  `bridged: true` (RS-453). It runs every 5 minutes from cron on the homelab VM
+  and on `10.10.60.14`; remove both cron lines once every worker ships its own.
+
 ## [0.15.0] - 2026-10-29
 
 ### Fixed

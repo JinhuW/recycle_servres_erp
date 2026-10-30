@@ -1433,6 +1433,11 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     warehouse tab, same part / label / condition — joins that product's #.
     Both packing lists keep their sorted rows, so a later product prints in
     its sorted place with its later # (`#1, #2, #9, #3`).
+  - **Removing a packed line asks first** (v1.387.0). Its ✕ opens *Remove a
+    packed item?*, naming the part, because the save drops the line's Pack
+    mode tick for good. A line not yet packed, or one added in this edit,
+    goes at once. The editor learns which lines are packed from
+    `GET /api/sell-orders/:id/pack`; if that read fails, nothing asks.
   - **Nothing renumbers** (v1.235.0). Removing a lot leaves a gap. A lot
     removed and added back in a later save is a new product with the next
     #; within one save it keeps its #. A spec edit, a transfer, a warehouse
@@ -1790,6 +1795,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     or none at all (red, *Not packed*), and lowering a packed lot unticks it.
     The tick confirms the count as shown. Undo reverses the last tick, a whole
     product's included, from a toast.
+  - **Unpacking asks first** (v1.387.0). Taking the tick off a packed lot,
+    or off a packed product (every lot), opens *Unpack this item?*; Unpack
+    does what the tick did before, Undo toast included, and Cancel leaves it
+    packed. Packing and scanning ask nothing.
   - **A packed product sinks under *Packed*** (v1.228.0), newest first, as
     Review mode's checked lines do. The products still to pack stay on top in
     # order, and *Hide* / *Show* folds the group away (hidden rows leave the
@@ -2826,7 +2835,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   (`/tracker`) and **Prompts** (`/tracker/prompts`, the card below),
   and the title follows the tab. Since v1.346.0 (RS-398), a third tab,
   **Workflow** (`/tracker/workflow`), holds the **From a post to an alert**
-  card with its stage counts, subreddit and rule editors, and model picker.
+  card with its stage counts, subreddit editor and model picker. Since
+  v1.386.0 (RS-464), Evaluate shows the live prompt read-only (base prompt
+  plus enabled rules) where the rule editor was; prompts change through a
+  trial on Prompts.
   Fleet shows the worker legend, workers table and recent matches.
   The workers toolbar matches
   the Facebook one. A search box on the left finds a worker by id or role,
@@ -2878,6 +2890,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - **Per prompt version:** judged, flagged, good and 👎, and PM recall.
   - **Per subreddit:** posts, memory posts, alerts, good-catch rate, average
     PMs and missing.
+  - **Missed leads** (1.384.0): the missing posts, the per-subreddit table and
+    the other posts buyers wanted sit in their own card under the rest. Each
+    column title sorts, and each table scrolls past 520px under a pinned
+    header.
 
   The same release made a listing cross-posted to several subreddits, or
   reposted within 72 hours, alert once. The other copies are held back as
@@ -3406,7 +3422,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     last reported, running of capacity, the **Authoritative** switch (off is
     observe-only: the agent reports and starts nothing), the capacity stepper
     (a new worker is a Facebook login; since v1.364.0 the agent runs no more
-    workers than the host has accounts for) and, while a release rolls, its
+    workers than the host has accounts for; since v1.382.0 (RS-459) a − that
+    would leave a running container numbered above the new capacity asks
+    first, naming the containers above it; since v1.385.0 (RS-463) the agent
+    never removes a worker: one above the count keeps running, and once it
+    stops it waits until the count reaches it again) and, while a release rolls, its
     progress line with the worker replaced next (since v1.367.0 only while
     GET /api/fleet/hosts returns a rolling release; without one, workers
     left on an older image get a quiet "1 worker on 0.14.6; new workers
@@ -3430,10 +3450,18 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     epoch and when it renews, the worker's version (muted when it is not the
     host's), and the eye to the worker's page. Running workers come first,
     then silent ones, each by worker id. Since v1.373.0 (RS-436) a worker is
-    one of two kinds: **Healthy** (running, degraded or being replaced
+    one of two kinds (three since v1.381.0): **Healthy** (running, degraded or being replaced
     included) or **Parked** (it reports Session expired, Checkpoint,
     Challenge or Dead, which its state chip names, or it went silent; since
-    v1.373.1 (RS-437) also when a manager parked its slot). Since v1.379.0
+    v1.373.1 (RS-437) also when a manager parked its slot). Since v1.381.0
+    (RS-458) a third kind, **Removed**: a silent worker that its host's
+    latest report no longer lists (the agent removed it, as it does when the
+    host's capacity is lowered) reads **Removed by host** in grey instead of
+    Parked; since v1.385.0 (RS-463) hosts no longer remove workers and the
+    kind is gone. A row whose account another worker now holds shows no minutes.
+    Since v1.382.0 (RS-460) every column title sorts the table (descending,
+    ascending, then its own order; empty cells last).
+    Since v1.379.0
     (RS-451) a parked ERP-fleet row, and that worker's page, have **Retire &
     free**: the pool account is retired and its slot deleted, the worker is
     refused on its next call and exits, and its host's next container claims
@@ -3442,7 +3470,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     Checkpoint, Challenge or Dead (not Dead for an operator, a proxy fault),
     or a manager parked the slot, or the pool already took the account out:
     a row parked only because its worker went silent has none, and the API
-    refuses any other slot with `not_lost`. Retire on the Account Pool page
+    refuses any other slot with `not_lost`. Since v1.383.0 (RS-461) the toolbar has
+    **Release parked (N)** whenever such rows exist: a confirmation lists each
+    account, worker and state, counts the parked rows it leaves alone, and
+    warns that every account added to the fleet afterwards starts a worker (a
+    login); confirming retires them one by one through the same endpoint. A
+    worker that has stopped and whose account no longer has a slot (retired or
+    removed from the fleet) is its own kind, **Free**, grey, waiting for an
+    account added on the Account pool tab; Free comes before
+    Parked. A stopped worker of a deleted host reads Parked, not Free: no
+    agent is left to start it (v1.387.1). Retire on the Account Pool page
     deletes the account's fleet slot too, and with no free account left the
     host runs one worker fewer instead of replacing it. Since v1.380.0
     (RS-454) a worker parked Dead because a Facebook page would not load
@@ -3454,7 +3491,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     before facebook-tracker 0.15.0 cannot take it, and the button says so.
     The worker itself now tries a page that times out twice more, 10 s then
     30 s apart, before it parks. The
-    toolbar has the legend with counts (All workers, Healthy, Parked), a
+    toolbar has the legend with counts (All workers, Healthy, Free, Parked), a
     host select and a search over worker, account, city and host; since v1.371.0 (RS-431) the
     tab opens on Healthy rather than All workers. The foot says "N of M
     workers · R running on K hosts". Since v1.367.0 (RS-418) a coordinator
@@ -3539,16 +3576,19 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     shows how many of those a worker held back because fleet alerts are off,
     and the claim and de-duplication text moved to Telegram alert. A stage
     no day in the range reported shows "—"; one only some days reported
-    gives no pass rate against a stage counted on every day. Since v1.379.1
-    (RS-452) a day counts those stages only when every search that day
-    counted them, a stage summed over fewer days is starred with a footnote,
+    gives no pass rate against a stage counted on every day. Since v1.380.2
+    (RS-457) a day sums those stages over the searches that reported them,
+    and one where only some did (an older worker searched) makes them partial:
+    a stage summed over fewer searches is starred with a footnote naming how
+    many of the range's searches counted it,
     the alert's rate leaves out what was held back, and a step over 100 %
     shows no number. Between
     stages the pass rate from the last counted stage (cards per search as
     "×N", every other step as a percentage, amber under 50 %) and under the pipeline the
     headline ratios: what passed the model and what was held back, cards per
     alert, reviews per alert, the title gate's drop before a page is opened
-    and the model's drop of what it reads, read against what passed it. Then
+    and the model's drop of what it reads, read against what passed it and
+    left out when that is not wholly counted (v1.380.2). Then
     two per-day bar charts for the last 14 days from the same counts, each
     on its own axis — reviewed by the model, alerts — in one hue with today's bar grey as
     partial, three gridlines, labels on the first, highest and today's bar, a

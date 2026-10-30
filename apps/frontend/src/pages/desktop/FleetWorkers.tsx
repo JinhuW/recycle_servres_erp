@@ -2,7 +2,7 @@ import { FB_PROXY_DEAD_AFTER } from '@recycle-erp/shared';
 import { Fragment, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Skeleton } from '../../components/Skeleton';
-import { SortTh, type SortState } from '../../components/SortTh';
+import { nextSort, SortTh, type SortState } from '../../components/SortTh';
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
@@ -93,8 +93,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, marks, filte
   const all = fleet?.workers ?? [];
   // Click cycles desc → asc → the fleet document's own order.
   const [sort, setSort] = usePersisted<SortState>('desktop.fleet.sort', { col: '', dir: null });
-  const cycleSort = (col: string) => setSort(s =>
-    s.col !== col || s.dir === null ? { col, dir: 'desc' } : s.dir === 'desc' ? { col, dir: 'asc' } : { col: '', dir: null });
+  const cycleSort = (col: string) => setSort(s => nextSort(s, col));
   const filtered = all.filter(w =>
     (filter === 'all' || fleetStatus(w, parked) === filter) && matchesTerms(accountHaystack(w), terms));
   const shown = sort.dir ? sortFleet(filtered, sort.col as FleetSortCol, sort.dir, parked) : filtered;

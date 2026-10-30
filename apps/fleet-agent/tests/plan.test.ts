@@ -46,14 +46,23 @@ describe('scale up', () => {
 });
 
 describe('scale down', () => {
-  it('removes extras, highest first, all in one tick', () => {
+  it('never removes an extra: a running one keeps running', () => {
     const p = run([running('lab-1'), running('lab-2'), running('lab-3'), running('lab-4')]);
-    expect(kinds(p)).toEqual([['remove', 'lab-4'], ['remove', 'lab-3']]);
+    expect(p.actions).toEqual([]);
+    expect(p.notes).toEqual(['lab-3: beyond count 2; left running', 'lab-4: beyond count 2; left running']);
   });
 
-  it('removes an exited extra too', () => {
-    const p = run([running('lab-1'), exited('lab-3', 0, ago(5))], {}, { count: 1 });
-    expect(kinds(p)).toEqual([['remove', 'lab-3']]);
+  it('leaves an exited extra stopped, and starts it once the count reaches it', () => {
+    const p = run([running('lab-1'), exited('lab-3', 75, ago(600))], {}, { count: 1 });
+    expect(p.actions).toEqual([]);
+    expect(p.notes).toContain('lab-3: beyond count 1; left stopped');
+    expect(kinds(run([running('lab-1'), running('lab-2'), exited('lab-3', 75, ago(600))], {}, { count: 3 }))).toEqual([['start', 'lab-3']]);
+  });
+
+  it('still replaces a running extra the release names', () => {
+    const p = run([running('lab-1', 'img:2'), running('lab-3', 'img:1')], {}, { count: 1, image: 'img:2', roll: { replace: 'lab-3' } });
+    expect(kinds(p)).toEqual([['replace', 'lab-3']]);
+    expect(p.actions[0]).toMatchObject({ image: 'img:2', reason: 'image img:1 -> img:2' });
   });
 
   it('never touches a container whose id this host did not assign', () => {
@@ -94,10 +103,42 @@ describe('roll', () => {
     expect(p.actions).toEqual([]);
   });
 
-  it('is one of the tick\'s single start: a missing worker goes first', () => {
+  it('takes the tick\'s single start before a missing worker', () => {
+    // A run the ERP refuses a ticket never moves the stagger, so going first
+    // it would take the start every tick and the release would time out.
     const p = run([running('lab-2', 'img:1')], {}, { image: 'img:2', roll: { replace: 'lab-2' } });
-    expect(kinds(p)).toEqual([['run', 'lab-1']]);
+    expect(kinds(p)).toEqual([['replace', 'lab-2']]);
+    expect(p.notes).toContain('lab-1: missing; waits for its turn');
+  });
+
+  it('goes before any restart, a 75/70 retry or a crash', () => {
+    for (const code of [75, 70, 0, 1]) {
+      const p = run([exited('lab-1', code, ago(3600)), running('lab-2', 'img:1')], {}, { image: 'img:2', roll: { replace: 'lab-2' } });
+      expect(kinds(p)).toEqual([['replace', 'lab-2']]);
+      expect(p.notes).toContain(`lab-1: exit ${code}; restart waits for its turn`);
+    }
+  });
+
+  it('waits for the stagger like any start', () => {
+    const p = run([running('lab-1', 'img:1'), running('lab-2', 'img:1')], { lastStartAt: NOW - 1000 }, { image: 'img:2', roll: { replace: 'lab-2' } });
+    expect(p.actions).toEqual([]);
     expect(p.notes).toContain('lab-2: replacement waits for its turn');
+  });
+
+  it('runs again a worker above the count stopped for its replacement', () => {
+    const p = run([running('lab-1', 'img:2')], { restarting: ['lab-3'] }, { count: 1, image: 'img:2', vnc_ports: { 'lab-1': 5901, 'lab-3': 5903 } });
+    expect(kinds(p)).toEqual([['run', 'lab-3']]);
+    expect(p.actions[0]).toMatchObject({ image: 'img:2', port: 5903, reason: 'replacement' });
+  });
+
+  it('leaves a restarting id that already has a container to the usual rules', () => {
+    const p = run([running('lab-1', 'img:2'), running('lab-3', 'img:2')], { restarting: ['lab-3'] }, { count: 1, image: 'img:2' });
+    expect(p.actions).toEqual([]);
+  });
+
+  it('does not hold a 75 retry for a replacement already done', () => {
+    const p = run([exited('lab-1', 75, ago(3600)), running('lab-2', 'img:2')], {}, { image: 'img:2', roll: { replace: 'lab-2' } });
+    expect(kinds(p)).toEqual([['start', 'lab-1']]);
   });
 });
 
@@ -149,8 +190,8 @@ describe('operator needed', () => {
     expect(kinds(run([exited('lab-1', 78, ago(120))]))).toEqual([['run', 'lab-2']]);
   });
 
-  it('is still removed when the count drops below it', () => {
-    expect(kinds(run([running('lab-1'), exited('lab-2', 78, ago(120))], {}, { count: 1 }))).toEqual([['remove', 'lab-2']]);
+  it('is left stopped when the count drops below it', () => {
+    expect(run([running('lab-1'), exited('lab-2', 78, ago(120))], {}, { count: 1 }).actions).toEqual([]);
   });
 
   it('runs again once an operator starts it', () => {
@@ -167,10 +208,10 @@ describe('not authoritative', () => {
 });
 
 describe('offline', () => {
-  it('restarts an exited worker but creates, removes and replaces nothing', () => {
+  it('restarts an exited worker but creates and replaces nothing', () => {
     const p = run([exited('lab-1', 75, ago(120)), running('lab-3', 'img:1')], { online: false }, { count: 2, image: 'img:2', roll: { replace: 'lab-3' } });
     expect(kinds(p)).toEqual([['start', 'lab-1']]);
-    expect(p.notes).toContain('lab-3: beyond count 2 but offline; kept');
+    expect(p.notes).toContain('lab-3: beyond count 2; left running');
   });
 });
 
@@ -182,9 +223,9 @@ describe('stagger', () => {
     expect(kinds(run([exited('lab-1', 75, ago(120))], { lastStartAt: NOW - 180_000 }))).toEqual([['start', 'lab-1'], ]);
   });
 
-  it('allows one start per tick, but any number of removals', () => {
+  it('allows one start per tick', () => {
     const p = run([exited('lab-1', 75, ago(120)), running('lab-5'), running('lab-6')], {}, { count: 3 });
-    expect(kinds(p)).toEqual([['remove', 'lab-6'], ['remove', 'lab-5'], ['start', 'lab-1']]);
+    expect(kinds(p)).toEqual([['start', 'lab-1']]);
     expect(p.notes).toContain('lab-2: missing; waits for its turn');
   });
 

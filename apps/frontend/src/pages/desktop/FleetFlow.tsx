@@ -325,7 +325,9 @@ export function FlowCard({ fleet, stats, prompt, onSaved, range = 1, now }: {
           {headline.cardsPerAlert !== null && headline.reviewsPerAlert !== null && <> {t('fleetFunnelPerAlert', { cards: fmt.format(headline.cardsPerAlert), reviews: fmt.format(headline.reviewsPerAlert) })}</>}
           {headline.titleDrop !== null && <> {t('fleetFunnelTitleDrop', { pct: headline.titleDrop })}</>}
           {headline.modelDrop !== null && <> {t('fleetFunnelModelDrop', { pct: headline.modelDrop })}</>}
-          {partial.size > 0 && <span className="ff-stage-partial-note">* {t('fleetFlowPartial')}</span>}
+          {partial.size > 0 && <span className="ff-stage-partial-note">* {counts.coverage
+            ? t('fleetFlowPartialOf', { counted: fmt.format(counts.coverage.counted), carded: fmt.format(counts.coverage.carded) })
+            : t('fleetFlowPartial')}</span>}
         </p>
       )}
       {/* Every stage renders into the same cell and only the picked one shows,

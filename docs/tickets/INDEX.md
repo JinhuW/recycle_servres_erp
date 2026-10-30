@@ -5,7 +5,19 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-454](./RS-454-fleet-workers-survive-a-slow-page-and-can-be-marked.md) | done | bug | P1 | Fleet workers survive a slow page and can be marked healthy | — |
+| [RS-466](./RS-466-fix-the-dev-main-review-findings-alert-sender-verdic.md) | done | bug | P2 | Fix the dev→main review findings: alert sender, verdict bridge, agent replacements, Free rows | 1.387.1 |
+| [RS-465](./RS-465-confirm-before-removing-a-packed-item-from-a-sell-or.md) | done | story | P2 | Confirm before removing a packed item from a sell order | 1.387.0 |
+| [RS-464](./RS-464-evaluate-panel-shows-the-live-prompt-not-the-rule-ed.md) | done | story | P2 | Evaluate panel shows the live prompt, not the rule editor | 1.386.0 |
+| [RS-463](./RS-463-fleet-hosts-never-remove-a-worker-drop-the-removed-s.md) | done | story | P2 | Fleet hosts never remove a worker; drop the Removed status | 1.385.0 |
+| [RS-462](./RS-462-reddit-analytics-missed-lead-tables-in-their-own-car.md) | done | story | P3 | Reddit analytics: missed-lead tables in their own card, sortable, height-capped | 1.384.0 |
+| [RS-461](./RS-461-fleet-release-every-parked-worker-s-account-in-one-c.md) | done | story | P2 | Fleet: release every parked worker's account in one click, and show freed workers as Free | 1.383.0 |
+| [RS-460](./RS-460-fleet-workers-table-sort-by-clicking-a-column-title.md) | done | story | P3 | Fleet Workers table: sort by clicking a column title | 1.382.0 |
+| [RS-459](./RS-459-fleet-hosts-confirm-before-capacity-drops-below-runn.md) | done | story | P2 | Fleet hosts: confirm before capacity drops below running workers | 1.382.0 |
+| [RS-458](./RS-458-fleet-label-a-worker-its-host-removed-as-removed-not.md) | done | bug | P2 | Fleet: label a worker its host removed as Removed, not Parked | 1.381.0 |
+| [RS-457](./RS-457-fleet-analysis-count-a-mixed-day-never-read-withheld.md) | done | bug | P2 | Fleet Analysis: count a mixed day, never read withheld as rejected | 1.380.2 |
+| [RS-456](./RS-456-fleet-agent-replaces-a-release-worker-before-no-slot.md) | done | bug | P1 | Fleet agent replaces a release worker before no-slot retries | 1.380.1 |
+| [RS-455](./RS-455-fleet-workers-take-settings-and-alert-config-from-th.md) | backlog | story | P1 | Fleet workers take settings and alert config from the ERP while running | — |
+| [RS-454](./RS-454-fleet-workers-survive-a-slow-page-and-can-be-marked.md) | done | bug | P1 | Fleet workers survive a slow page and can be marked healthy | 1.380.0 |
 | [RS-453](./RS-453-fleet-workers-ship-their-ai-verdicts-to-opensearch-a.md) | done | bug | P2 | Fleet workers ship their AI verdicts to OpenSearch again | 1.379.2 |
 | [RS-452](./RS-452-release-review-fixes-for-the-v1-379-prod-cut.md) | done | bug | P1 | Release-review fixes for the v1.379 prod cut | 1.379.1 |
 | [RS-451](./RS-451-retire-a-parked-worker-s-account-and-free-the-worker.md) | done | story | P2 | Retire a parked worker's account and free the worker | 1.379.0 |

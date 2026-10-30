@@ -5,7 +5,7 @@ import { ApiError } from '../../../lib/api';
 import { fleetApi, type FleetHost, type FleetHostCreated, type FleetRelease } from '../../../lib/fleet';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
-import { hostLag, hostRunning, releaseSummary, rollProgress } from './fleetBoard';
+import { capacityCuts, hostLag, hostRunning, releaseSummary, rollProgress } from './fleetBoard';
 import { agoLabel, Clock, ConfirmDialogBody, useFleetMirror } from './shared';
 
 // ─── Hosts ────────────────────────────────────────────────────────────────────
@@ -58,6 +58,7 @@ export function HostStrip({ hosts, release, onChanged, now = Date.now() }: {
   const mirror = useFleetMirror();
   const [busy, setBusy] = useState<string | null>(null);
   const [removing, setRemoving] = useState<FleetHost | null>(null);
+  const [lowering, setLowering] = useState<{ host: FleetHost; next: number } | null>(null);
 
   const act = async (id: string, run: () => Promise<unknown>) => {
     if (busy) return;
@@ -73,7 +74,11 @@ export function HostStrip({ hosts, release, onChanged, now = Date.now() }: {
   };
   const capacity = (h: FleetHost, delta: number) => {
     const next = Math.min(CAPACITY_MAX, Math.max(0, h.capacity + delta));
-    if (next !== h.capacity) void act(h.host_id, () => fleetApi.updateHost(h.host_id, { capacity: next }));
+    if (next === h.capacity) return;
+    // The agent leaves every container above the new count in place, but a
+    // running one then goes on past the capacity: say so before saving.
+    if (capacityCuts(h, next).some(c => c.state === 'running')) setLowering({ host: h, next });
+    else void act(h.host_id, () => fleetApi.updateHost(h.host_id, { capacity: next }));
   };
   const authoritative = (h: FleetHost) => act(h.host_id, () => fleetApi.updateHost(h.host_id, { authoritative: !h.authoritative }));
 
@@ -139,7 +144,47 @@ export function HostStrip({ hosts, release, onChanged, now = Date.now() }: {
       {removing && (
         <RemoveHostDialog host={removing} onClose={() => setRemoving(null)} onDone={() => { setRemoving(null); onChanged(); }} />
       )}
+      {lowering && (
+        <LowerCapacityDialog host={lowering.host} next={lowering.next} onClose={() => setLowering(null)}
+          onDone={() => { setLowering(null); onChanged(); }} />
+      )}
     </div>
+  );
+}
+
+export function LowerCapacityDialog({ host, next, onClose, onDone }: { host: FleetHost; next: number; onClose: () => void; onDone: () => void }) {
+  const { t } = useT();
+  const [busy, setBusy] = useState(false);
+  const cuts = capacityCuts(host, next);
+  const running = cuts.filter(c => c.state === 'running').length;
+  const confirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fleetApi.updateHost(host.host_id, { capacity: next });
+      onDone();
+    } catch (e) {
+      handleFetchError(e);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 460 }}>
+      <ConfirmDialogBody title={t('fleetCapacityLowerTitle', { host: host.host_id, n: next })} confirm={t('fleetCapacityLowerConfirm')} busy={busy}
+        onClose={onClose} onConfirm={confirm}
+        body={<>
+          <p>{t('fleetCapacityLowerBody', { n: cuts.length })}</p>
+          <ul className="fleet-capacity-cuts">
+            {cuts.map(c => (
+              <li key={c.worker_id}>
+                <span className="mono">{c.worker_id}</span>{' '}
+                <span className={c.state === 'running' ? 'chip pos' : 'chip'}>{c.state}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="fp-warn">{t('fleetCapacityLowerRunning', { n: running })}</p>
+        </>} />
+    </Modal>
   );
 }
 

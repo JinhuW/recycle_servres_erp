@@ -94,12 +94,12 @@ describe.skipIf(!live)('live docker', () => {
     expect(first.conflict).toEqual([]);
   });
 
-  it('scales down when the count drops', async () => {
+  it('keeps a worker above a lowered count', async () => {
     server.desired = desired({ count: 1 });
     const result = await agent.tick();
-    expect(result.applied.map((a) => [a.kind, a.worker_id])).toEqual([['remove', `${HOST}-2`]]);
-    expect(await labelled()).toEqual([`rs-fleet-${HOST}-1`]);
-    expect(server.reports.at(-1)!.containers.map((c) => c.worker_id)).toEqual([`${HOST}-1`]);
+    expect(result.applied).toEqual([]);
+    expect(await labelled()).toEqual([`rs-fleet-${HOST}-1`, `rs-fleet-${HOST}-2`]);
+    expect(server.reports.at(-1)!.containers.map((c) => c.worker_id)).toEqual([`${HOST}-1`, `${HOST}-2`]);
   });
 
   it('stays observe-only when not authoritative', async () => {

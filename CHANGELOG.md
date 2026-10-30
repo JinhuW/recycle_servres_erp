@@ -15,6 +15,174 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.387.1] - 2026-10-30
+
+### Fixed
+
+- **Release review of RS-453 to RS-464** (RS-466). The fleet agent and
+  release replacements:
+  - A release replacement now takes a tick's start before any other run or
+    restart. Before, a missing worker the ERP refused a ticket kept taking
+    that start without moving the stagger, so the release waited behind it
+    until the gate failed.
+  - A worker above the count that was stopped to be replaced, and whose run
+    then failed, used to have its account released and was never run again.
+    That was a removal, which hosts no longer make. It now keeps its
+    reservation and is run again.
+- On the Workers table, a stopped worker of a deleted host reads Parked
+  instead of Free. Free tells a manager that adding an account starts the
+  worker, and no agent is left to do that.
+- In the homelab stopgaps (`trackers/facebook/scripts/`),
+  `fleet-alert-sender.py` no longer sends a lead twice when a coordinator
+  call fails after Telegram took the message. It retries a listing held by
+  another worker's lapsed claim. A full 24-hour window no longer cuts off
+  the newest withheld alerts, and it mints a worker token again when the
+  coordinator answers 401. `ai-verdict-bridge.py` no longer indexes one line
+  into two daily indices across midnight.
+- The capacity comments no longer claim the agent removes workers above the
+  count. The four sortable tables share one `nextSort`.
+
+## [1.387.0] - 2026-10-30
+
+### Changed
+
+- **Taking a packed item off a sell order asks first** (RS-465). In the order
+  editor, ✕ on a line already ticked in Pack mode opens *Remove a packed
+  item?*: saving without it deleted the line's pack tick with no warning, and
+  the packer's work was gone. Unpacked lines and lines added in this edit
+  still remove in one click. In Pack mode, unticking a packed lot or product
+  now asks *Unpack this item?* instead of acting on the first tap, so a stray
+  touch on the iPad can't undo a pack; Undo still follows a confirmed unpack.
+
+## [1.386.0] - 2026-10-29
+
+### Changed
+
+- **Reddit Workflow's Evaluate stage shows the live prompt** (RS-464). The
+  Alert rules editor beside it (New rule, toggle, edit, delete) is gone; in its
+  place is the full prompt the model reads today: the base prompt with every
+  enabled rule composed in, read-only. Rules had already moved into the prompt:
+  promoting a trial on the Prompts tab folds them into the base prompt and
+  switches them off, so the editor was a second, older way to change what the
+  model reads. The note under the panel points to Prompts. The rules
+  themselves, the "Rules on" count and the tracker's rule endpoints are
+  unchanged.
+
+## [1.385.0] - 2026-10-29
+
+### Changed
+
+- **Fleet hosts never remove a worker** (RS-463). The host agent used to stop
+  and `docker rm` every container numbered above its desired count, all at
+  once. The count falls when a manager lowers capacity, and also on its own
+  when accounts are retired, because it follows the claimable slots. Each
+  removed container threw away a signed-in browser, and bringing one back is
+  a Facebook login. Now a worker above the count keeps running. Once it stops,
+  it waits, stopped, until the count reaches it again, and then the agent
+  starts it as usual. A release still replaces a running one, so a roll cannot
+  stall on it. The **Removed** row kind (v1.381.0) is gone: a stopped worker
+  reads Free when its account left the fleet, otherwise Parked. The
+  lower-capacity confirmation now says the workers above the new capacity keep
+  running and are not removed. Hosts pick this up when the fleet-agent
+  1.385.0 image is pushed (`trackers/facebook/scripts/push-fleet-images.sh`)
+  and their agent container is re-run on it.
+
+## [1.384.0] - 2026-10-29
+
+### Changed
+
+- **Missed leads get their own card on Reddit analytics** (RS-462). The
+  missing-posts table, By subreddit and Other posts buyers wanted sat at the
+  bottom of How the tracker is doing, and the missing table's multi-line
+  reasons pushed the page long. They now sit in a Missed leads card under it,
+  which follows the same window and leads with "N of M missing". Every column
+  title sorts, the subreddit is its own column on the post tables, and each
+  table stops at 520px and scrolls under a pinned header.
+
+## [1.383.0] - 2026-10-29
+
+### Added
+
+- **Release every parked worker's account in one click** (RS-461). The Fleet
+  tab had 15 workers parked on Checkpoint or Session expired, and the only way
+  to let their accounts go was Retire & free, one row at a time. The workers
+  table's toolbar now has **Release parked (N)**. It opens a confirmation that
+  lists each account with its worker and state, says how many parked rows it
+  leaves alone (silent with a good account, the coordinator's, an operator's),
+  and warns that each account added to the fleet afterwards starts a worker,
+  which is a Facebook login. Confirming retires them one by one through the
+  per-row endpoint, so each keeps its lost-account guard, and any it refuses
+  are named.
+- **A worker without an account reads Free** (RS-461). Once its account left
+  the fleet, a stopped worker still read Parked, as if the worker were broken.
+  It is now a fourth row kind, **Free**, with a grey legend chip and a hint to
+  add an account on the Account pool tab. Free takes precedence over Removed
+  and Parked.
+
+## [1.382.0] - 2026-10-29
+
+### Added
+
+- **Lowering a host's capacity below its running workers asks first**
+  (RS-459). The host agent removes every container numbered above the new
+  count at once. On 2026-10-29 two clicks took homelab from 14 to 5 and
+  removed homelab-6 to -14, live signed-in browsers among them, with no
+  warning. A − that would cut a running container now opens a dialog. It
+  names the containers to be stopped and removed, says their Facebook
+  sessions are lost and that raising the capacity later costs a login per
+  container, and saves only on confirm. Cutting only stopped containers still
+  saves straight away.
+- **The Fleet Workers table sorts by any column title** (RS-460). Clicking
+  Worker, Host, Account, State, Now, Today, Lease or Version sorts
+  descending, then ascending, then back to the table's own order. Worker ids
+  and versions sort naturally, and empty cells go last in both directions.
+
+## [1.381.0] - 2026-10-29
+
+### Changed
+
+- **A worker its host removed reads Removed by host, not Parked** (RS-458).
+  When homelab's capacity was lowered, its agent removed the containers above
+  the new count. Their rows stayed on the Workers tab as red **Parked**, so
+  homelab-14 looked as if its account had failed, even though account No. 1
+  had already moved to homelab-3. A silent worker that is missing from its
+  host's latest container report now gets a grey **Removed by host** chip and
+  its own **Removed** legend bucket, outside the Parked count. A stopped
+  container the host still keeps stays Parked. A row whose account slot now
+  belongs to another worker no longer shows that worker's minutes as its own.
+
+## [1.380.2] - 2026-10-29
+
+### Fixed
+
+- **The fleet Analysis funnel keeps what newer workers counted on a mixed
+  day** (RS-457). Only workers on 0.14.18 or later report the title gate, the
+  keyword gate, new to us and what passed the model. A day still had to have
+  every search report them, so on the 0.15.0 release day 376 old searches hid
+  the one new search's counts, and those four stages read "not counted yet".
+  `/api/fleet/stats/funnel` now sums them over the searches that reported
+  them, and returns how many did (`counted` of `carded`). Such a day reads as
+  partial: the stages are starred, the footnote says "counted from N of M
+  searches", and no rate is drawn between them and a whole stage.
+- **The headline no longer reads withheld alerts as the model rejecting
+  them.** Without a counted Passed the model it fell back to the alerts, so a
+  day whose workers withheld all 91 passes because fleet alerts were off said
+  "the model drops 100% of what it reads". It passed about 2%. The model's
+  drop is now stated only against a whole passed count.
+
+## [1.380.1] - 2026-10-29
+
+### Fixed
+
+- **A fleet release no longer stalls behind workers that find no slot**
+  (RS-456). The host agent gives each tick one start, and it used to hand it
+  to an exited worker's restart before the release's replacement. On a host
+  whose capacity exceeds its claimable accounts, the spare containers exit 75
+  ("no free slot") and retry every few minutes, so the replacement never got a
+  turn and the 0.15.0 release would have timed out on homelab-1. While the
+  release names one of the host's running workers, a 75/70 retry now waits for
+  it; crashed and missing workers still go first.
+
 ## [1.380.0] - 2026-10-29
 
 ### Added

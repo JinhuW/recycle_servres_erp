@@ -89,10 +89,8 @@ export function readFunnelDays(q: Record<string, string | undefined>): number | 
  * The Analysis funnel: finished searches per UTC day over the last `days`
  * (today included), with what their results counted. Days with no search are
  * left out; the page fills them. Retention bounds how far back this reaches.
- * The later stages are NULL, not 0, on a day where any search that counted
- * cards lacked them:
- * older workers' results never counted them, and summing only the newer
- * workers' would set a part of the day against the whole of it. A count
+ * The later stages are NULL, not 0, on a day no search reported them, and
+ * otherwise summed over the `counted` searches that did. A count
  * past seven digits is a worker bug, not a sweep, and is left out rather
  * than let one bad result overflow the day.
  */
@@ -101,9 +99,11 @@ export async function funnelDays(sql: SqlLike, days: number, now: Date = new Dat
   const since = new Date(today - (days - 1) * 86_400_000);
   const n = (key: string) => sql`CASE WHEN result->>${key} ~ '^[0-9]{1,7}$' THEN (result->>${key})::int END`;
   const whole = (key: string) => sql`COALESCE(SUM(${n(key)}), 0)::int`;
-  // A result with no cards (a stopped search) counted nothing at all, so it
-  // takes nothing from a day's other stages either.
-  const late = (key: string) => sql`CASE WHEN COUNT(${n(key)}) = COUNT(${n('cards')}) THEN SUM(${n(key)})::int END`;
+  // Only workers from 0.14.18 report these. A day that mixes builds sums
+  // them over `counted` of its `carded` searches (a stopped search has no
+  // cards and counted nothing), and the page reads it as partial: set against
+  // the whole day's cards, a part would look like a gate dropping the rest.
+  const late = (key: string) => sql`SUM(${n(key)})::int`;
   return sql<FleetFunnelDay[]>`
     SELECT to_char(done_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
            COUNT(*)::int AS searches,
@@ -115,7 +115,9 @@ export async function funnelDays(sql: SqlLike, days: number, now: Date = new Dat
            ${whole('reviewed')} AS reviewed,
            ${late('passed')} AS passed,
            ${late('withheld')} AS withheld,
-           ${whole('alerted')} AS alerted
+           ${whole('alerted')} AS alerted,
+           COUNT(${n('passed')})::int AS counted,
+           COUNT(${n('cards')})::int AS carded
     FROM fleet_tasks
     WHERE state = 'done' AND kind = 'search' AND done_at >= ${since}
     GROUP BY 1 ORDER BY 1`;

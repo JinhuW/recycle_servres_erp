@@ -2045,39 +2045,27 @@ button.ff-expr-text {
 .rt-panel > .fp-empty {
   padding: 22px 16px !important;
 }
-.rt-rule {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--border);
-}
-.rt-rule:first-child {
-  border-top: 0;
-}
-.rt-rule-text {
-  flex: 1;
-  min-width: 0;
-  font-size: 12.5px;
-}
-.rt-rule-text p {
-  margin: 2px 0 0;
-  max-width: 75ch;
-  color: var(--fg-muted);
-  font-size: 12px;
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.rt-off .rt-rule-text,
 tr.rt-off td:not(:nth-last-child(-n + 2)) {
   opacity: 0.55;
+}
+.rt-live-prompt {
+  padding: 12px 14px;
+}
+.rt-live-prompt pre {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg);
 }
 .rt-help {
   font-size: 11px;
   line-height: 1.5;
+}
+.rt-help a {
+  color: var(--accent-strong);
 }
 .rt-add {
   display: flex;
@@ -2371,6 +2359,25 @@ td.rt-an-bad {
 }
 .rt-an-other summary {
   cursor: pointer;
+}
+.rt-an-missed-count {
+  font-size: 13px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+/* About eight rows, then the table scrolls under its pinned header. A
+   collapsed border stays with the table when the header sticks, so the
+   header's rule is drawn as a shadow that moves with the cell. */
+.rt-an-cap {
+  max-height: 520px;
+  overflow-y: auto;
+}
+.rt-an-cap .fp-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 var(--border);
 }
 
 /* ─── Monitors ▸ WeChat ─────────────────────────────────────────────────────

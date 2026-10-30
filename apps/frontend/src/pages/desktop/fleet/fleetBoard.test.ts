@@ -3,7 +3,7 @@ import type { FleetCity, FleetTask } from '../../../lib/fleet';
 import { CITIES, HITS, HOSTS, NOW, RELEASE, SLOTS, STATS, TASKS, WORKERS } from './fixtures';
 import {
   alertsByCity, averageTaskSeconds, beltAxis, beltLeft, beltRow, beltSummary, budgetTone, cityBucket, cityStanding, daySeries, dueIn, dueLabel,
-  easternClock, filterCities, filterTasks, funnelCounts, funnelGaps, funnelHeadline, hostRunning, isQuarantined, isSlug,
+  capacityCuts, easternClock, filterCities, filterTasks, funnelCounts, funnelGaps, funnelHeadline, hostRunning, isQuarantined, isSlug,
   lastDoneSearch, leaseLive, liveness, logByItem, maskUid, nextDue, niceTop, openSearch, releaseSummary, rollProgress, hostLag, imageVersion, roundStartPreview,
   slotLease, sortTasks, spanLabel, utcDayStart, withCityNames, workersBusy,
 } from './fleetBoard';
@@ -167,7 +167,17 @@ describe('analysis', () => {
     const c = funnelCounts(STATS, 7, NOW);
     expect(c).toMatchObject({ title: 3500, passed: 40, withheld: 25 });
     expect(c.partial).toEqual(['title', 'keywords', 'fresh', 'passed']);
+    expect(c.coverage).toEqual({ counted: 255, carded: 240 + 250 + 255 });
     expect(funnelCounts(STATS, 1, NOW).partial).toBeUndefined();
+  });
+  it('keeps what a day\'s newer workers counted when older ones searched too, as partial', () => {
+    // The day a release rolls: one search of 377 reported the later stages.
+    const mixed = { ...STATS[3], searches: 377, carded: 377, counted: 1, title_pass: 48, passed: 1, withheld: 0 };
+    const c = funnelCounts([...STATS.slice(0, 3), mixed], 1, NOW);
+    expect(c).toMatchObject({ search: 377, title: 48, passed: 1, coverage: { counted: 1, carded: 377 } });
+    expect(c.partial).toEqual(['title', 'keywords', 'fresh', 'passed']);
+    expect(funnelGaps(c)[1]).toMatchObject({ value: null, mixed: true });
+    expect(funnelHeadline(c)).toMatchObject({ titleDrop: null, modelDrop: null, passed: null });
   });
   it('gives no rate or drop between a partial stage and a whole one', () => {
     const c = funnelCounts(STATS, 7, NOW);
@@ -207,8 +217,9 @@ describe('analysis', () => {
       cards: 13865, searches: 255, reviews: 1281, alerts: 9, passed: 40, withheld: 25,
       cardsPerAlert: 1541, reviewsPerAlert: 142, titleDrop: 75, modelDrop: 97,
     });
-    // With nothing alerted and nothing passed counted, the model takes the blame.
-    expect(funnelHeadline({ ai: 5, alert: 0 })).toMatchObject({ cardsPerAlert: null, passed: null, withheld: 0, modelDrop: 100 });
+    // With nothing passed counted, no alert says what the model dropped: they
+    // may all have been withheld.
+    expect(funnelHeadline({ ai: 5, alert: 0 })).toMatchObject({ cardsPerAlert: null, passed: null, withheld: 0, modelDrop: null });
     // Withheld listings passed the model: it did not drop them.
     expect(funnelHeadline({ ai: 100, passed: 20, withheld: 20, alert: 0 })!.modelDrop).toBe(80);
     expect(funnelHeadline({})).toBeNull();
@@ -289,6 +300,15 @@ describe('hosts', () => {
     expect(hostRunning(HOSTS[0])).toEqual({ running: 4, desired: 4 });
     expect(hostRunning(HOSTS[1])).toEqual({ running: 1, desired: 2 });
     expect(hostRunning(HOSTS[2])).toEqual({ running: 0, desired: 0 });
+  });
+  it('names the containers a lower capacity removes, highest first', () => {
+    expect(capacityCuts(HOSTS[0], 4)).toEqual([]);
+    expect(capacityCuts(HOSTS[0], 2).map(c => c.worker_id)).toEqual(['homelab-4', 'homelab-3']);
+    expect(capacityCuts(HOSTS[0], 0)).toHaveLength(4);
+    // Another host's ids, or no report, are never cut.
+    const odd = { ...HOSTS[0], report: { ...HOSTS[0].report!, containers: [{ ...HOSTS[0].report!.containers[0], worker_id: 'homelab-x' }, { ...HOSTS[0].report!.containers[0], worker_id: 'worker-60-14-9' }] } };
+    expect(capacityCuts(odd, 0)).toEqual([]);
+    expect(capacityCuts(HOSTS[2], 0)).toEqual([]);
   });
   it('follows a roll and is quiet once every container is on the image', () => {
     expect(rollProgress(HOSTS[0], RELEASE)).toEqual({ onTarget: 2, total: 4, replacing: 'homelab-3' });

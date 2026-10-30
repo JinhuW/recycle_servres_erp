@@ -1086,6 +1086,10 @@ function SellOrderDetail({ id, onToast }: {
   // Pending transition into a meta-status. null = no dialog showing.
   const [pending, setPending] = useState<MetaStatus | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
+  // Saved lines already ticked in Pack mode. Removing one drops its tick on
+  // save, so the ✕ asks first.
+  const [packedIds, setPackedIds] = useState<ReadonlySet<string>>(new Set());
+  const [confirmRemove, setConfirmRemove] = useState<EditLine | null>(null);
   const [adding, setAdding] = useState(false);
   const [unarchiving, setUnarchiving] = useState(false);
   // Close (Draft/Shipped/Awaiting → Closed) and Reopen (Closed → Draft).
@@ -1150,6 +1154,15 @@ function SellOrderDetail({ id, onToast }: {
       })
       .catch(handleFetchError)
       .finally(() => { if (alive) setRefreshing(false); });
+    return () => { alive = false; };
+  }, [id, refreshKey]);
+
+  // Only feeds the confirm: a failed read means no confirm, not a broken editor.
+  useEffect(() => {
+    let alive = true;
+    api.get<{ lines: { lineId: string; packedAt: string | null }[] }>(`/api/sell-orders/${id}/pack`)
+      .then(r => { if (alive) setPackedIds(new Set(r.lines.filter(l => l.packedAt).map(l => l.lineId))); })
+      .catch(() => { if (alive) setPackedIds(new Set()); });
     return () => { alive = false; };
   }, [id, refreshKey]);
 
@@ -1364,8 +1377,13 @@ function SellOrderDetail({ id, onToast }: {
   // user shouldn't have to retype it per warehouse.
   const setPrice = (key: string, unitPrice: number) =>
     setDraft(d => d && { ...d, lines: d.lines.map(l => (productKey(l) === key ? { ...l, unitPrice } : l)) });
-  const removeLine = (idx: number) =>
-    setDraft(d => d && { ...d, lines: d.lines.filter((_, i) => i !== idx) });
+  // By client id, not index: the dialog can outlive a re-sort of the lines.
+  const removeLine = (cid: string) =>
+    setDraft(d => d && { ...d, lines: d.lines.filter(l => l._cid !== cid) });
+  const askRemoveLine = (l: EditLine) => {
+    if (l.id && packedIds.has(l.id)) setConfirmRemove(l);
+    else removeLine(l._cid);
+  };
 
   // A filter left in the search box would hide the lines just added, and a
   // line lands in its warehouse's or PO's group, often below the fold — so
@@ -1950,7 +1968,7 @@ function SellOrderDetail({ id, onToast }: {
                                   className="btn icon sm"
                                   title={t('soRemoveLineTooltip')}
                                   disabled={draft.lines.length === 1}
-                                  onClick={() => removeLine(idx)}
+                                  onClick={() => askRemoveLine(l)}
                                 >
                                   <Icon name="x" size={12} />
                                 </button>
@@ -2300,6 +2318,28 @@ function SellOrderDetail({ id, onToast }: {
           onClose={() => setAdding(false)}
           onAdd={addLines}
         />
+      )}
+      {confirmRemove && (
+        <Modal onClose={() => setConfirmRemove(null)} shellStyle={{ maxWidth: 420, width: 'calc(100vw - 80px)' }}>
+          <div className="modal-head">
+            <div className="modal-title">{t('soRemovePackedTitle')}</div>
+          </div>
+          <div className="modal-body" style={{ padding: 20 }}>
+            <p style={{ margin: 0, fontSize: 13.5 }}>
+              {t('soRemovePackedBody', { pn: confirmRemove.partNumber || confirmRemove.label })}
+            </p>
+          </div>
+          <div className="modal-foot">
+            <button className="btn" autoFocus onClick={() => setConfirmRemove(null)}>{t('cancel')}</button>
+            <button
+              className="btn danger"
+              onClick={() => { removeLine(confirmRemove._cid); setConfirmRemove(null); }}
+              style={{ background: 'var(--neg, #c0392b)', color: '#fff', borderColor: 'transparent' }}
+            >
+              {t('soRemovePackedConfirm')}
+            </button>
+          </div>
+        </Modal>
       )}
       {confirmArchive && order && (
         <ArchiveSellOrderDialog

@@ -5,7 +5,7 @@
 
 import type { AlertHitRow } from '../../../lib/coordinator';
 import {
-  fleetStateParked, type FleetCity, type FleetCityLogTask as FleetTaskLog, type FleetFunnelDay, type FleetHost, type FleetRelease, type FleetSlot, type FleetTask,
+  fleetStateParked, type FleetCity, type FleetCityLogTask as FleetTaskLog, type FleetFunnelDay, type FleetHost, type FleetHostContainer, type FleetRelease, type FleetSlot, type FleetTask,
   type FleetWorker,
 } from '../../../lib/fleet';
 import { FLOW_STAGES, type FlowStage } from '../../../lib/fleetView';
@@ -303,6 +303,19 @@ export function hostRunning(h: FleetHost): { running: number; desired: number } 
   return { running, desired: h.desired.count };
 }
 
+/** The containers above capacity `next`: every one numbered above it, as
+ *  `apps/fleet-agent/src/plan.ts` reads `<host_id>-<n>`, highest first. The
+ *  agent removes none of them; it only stops restarting them. */
+export function capacityCuts(h: Pick<FleetHost, 'host_id' | 'report'>, next: number): FleetHostContainer[] {
+  const index = (id: string) => {
+    const m = id.startsWith(`${h.host_id}-`) ? /^[1-9]\d*$/.exec(id.slice(h.host_id.length + 1)) : null;
+    return m ? Number(m[0]) : null;
+  };
+  return (h.report?.containers ?? [])
+    .filter(c => (index(c.worker_id) ?? 0) > next)
+    .sort((a, b) => index(b.worker_id)! - index(a.worker_id)!);
+}
+
 /** A roll's progress on one host: workers already on the target image, of
  *  the containers it runs; null unless the hosts answer carries a rolling
  *  release. A worker left on an older image without one is hostLag's. */
@@ -433,22 +446,27 @@ const ERP_COUNTER: Record<FlowStage, FunnelKey> = {
   fresh: 'fresh', ai: 'reviewed', passed: 'passed', alert: 'alerted',
 };
 
-export type FunnelCounts = Partial<Record<FlowStage, number>> & { withheld?: number; partial?: readonly FlowStage[] };
+const LATE_KEYS: ReadonlySet<FunnelKey> = new Set(['title_pass', 'keyword_pass', 'fresh', 'passed', 'withheld']);
+
+export type FunnelCounts = Partial<Record<FlowStage, number>> & {
+  withheld?: number; partial?: readonly FlowStage[];
+  /** With `partial`: how many of the range's searches with cards reported the later stages. */
+  coverage?: { counted: number; carded: number };
+};
 
 /** The stage counts summed over the last `range` UTC days, today included.
  *  Workers began reporting the gates, what passed the model and what they
- *  withheld later than the rest: a stage no day in the range reported stays
- *  undefined, so it reads as not counted rather than as 0, and one only some
- *  days reported is `partial`, summed over fewer days than the stages around
- *  it. `withheld` is the part of `passed` that workers with fleet alerts off
- *  held back. */
+ *  withheld later than the rest: a stage no search in the range reported
+ *  stays undefined, so it reads as not counted rather than as 0, and one only
+ *  some searches reported is `partial`, summed over fewer searches than the
+ *  stages around it. `withheld` is the part of `passed` that workers with
+ *  fleet alerts off held back. */
 export function funnelCounts(days: readonly FleetFunnelDay[] | null, range: FunnelRange, now: number = Date.now()): FunnelCounts {
   if (!days) return {};
   const from = utcDay(now - (range - 1) * DAY_MS);
   const rows = days.filter(d => d.day >= from && d.day <= utcDay(now));
   const sum = (key: FunnelKey): number | undefined => {
-    const late = key === 'title_pass' || key === 'keyword_pass' || key === 'fresh' || key === 'passed' || key === 'withheld';
-    if (late && !rows.some(d => d[key] != null)) return undefined;
+    if (LATE_KEYS.has(key) && !rows.some(d => d[key] != null)) return undefined;
     return rows.reduce((n, d) => n + (d[key] ?? 0), 0);
   };
   const out: FunnelCounts = {};
@@ -457,11 +475,14 @@ export function funnelCounts(days: readonly FleetFunnelDay[] | null, range: Funn
     const n = sum(key);
     if (n === undefined) continue;
     out[stage] = n;
-    if (rows.some(d => d[key] == null)) partial.push(stage);
+    if (LATE_KEYS.has(key) && rows.some(d => d.counted < d.carded)) partial.push(stage);
   }
   const withheld = sum('withheld');
   if (withheld !== undefined) out.withheld = withheld;
-  if (partial.length) out.partial = partial;
+  if (partial.length) {
+    out.partial = partial;
+    out.coverage = { counted: rows.reduce((n, d) => n + d.counted, 0), carded: rows.reduce((n, d) => n + d.carded, 0) };
+  }
   return out;
 }
 
@@ -505,9 +526,9 @@ export type FunnelHeadline = {
 };
 
 /** The ratios the sentence under the pipeline names; null when a stage is
- *  not counted or nothing was alerted. The model's drop is read against what
- *  passed it where that is counted: a listing a worker withheld with fleet
- *  alerts off passed the model, it just was not sent. */
+ *  not counted or nothing was alerted. The model's drop is read only against
+ *  what passed it, never against the alerts: a listing a worker withheld with
+ *  fleet alerts off passed the model, it just was not sent. */
 export function funnelHeadline(counts: FunnelCounts): FunnelHeadline | null {
   const reviews = counts.ai;
   const alerts = counts.alert;
@@ -520,13 +541,12 @@ export function funnelHeadline(counts: FunnelCounts): FunnelHeadline | null {
   // What passed and what was withheld only stand beside the range's other
   // totals when every day in it counted them.
   const passed = partial.includes('passed') ? null : counts.passed ?? null;
-  const modelOut = counts.passed === undefined ? alerts : passed;
   return {
     cards, searches, reviews, alerts, passed, withheld: passed === null ? 0 : counts.withheld ?? 0,
     cardsPerAlert: alerts > 0 && cards > 0 ? Math.round(cards / alerts) : null,
     reviewsPerAlert: alerts > 0 && reviews > 0 ? Math.round(reviews / alerts) : null,
     titleDrop: title !== undefined && cards > 0 ? Math.round((1 - title / cards) * 100) : null,
-    modelDrop: reviews > 0 && modelOut !== null ? Math.round((1 - modelOut / reviews) * 100) : null,
+    modelDrop: reviews > 0 && passed !== null ? Math.round((1 - passed / reviews) * 100) : null,
   };
 }
 

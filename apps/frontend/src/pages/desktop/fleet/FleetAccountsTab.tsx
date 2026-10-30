@@ -1,21 +1,24 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Icon } from '../../../components/Icon';
+import { nextSort, SortTh, type SortState } from '../../../components/SortTh';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { coordinatorApi, type Challenge, type FleetDoc } from '../../../lib/coordinator';
 import { poolApi } from '../../../lib/facebookPool';
-import { fleetApi, fleetSlotRetirable, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetWorker } from '../../../lib/fleet';
+import { fleetApi, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetWorker } from '../../../lib/fleet';
 import { queueCityName, withoutRetired } from '../../../lib/fleetView';
 import { useT } from '../../../lib/i18n';
+import { usePersisted } from '../../../lib/listMemory';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
 import { ActivityAside } from '../FleetWorkers';
 import { dueLabel, easternClock, isQuarantined, maskUid } from './fleetBoard';
 import {
-  DEFAULT_FLEET_ROW_FILTER, FLEET_ROW_KINDS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning,
-  type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowKind,
+  DEFAULT_FLEET_ROW_FILTER, FLEET_ROW_KINDS, FLEET_ROW_SORT_COLS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning,
+  releasableRows, rowOwnSlot, rowRetirable, sortFleetRows,
+  type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowKind, type FleetRowSortCol,
 } from './fleetRows';
 import { AddHostDialog, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
 import {
-  agoLabel, BudgetRing, COORDINATOR_POLL_MS, EmptyRow, Legend, MarkHealthyButton, ParkDialog, RetireSlotDialog, resumeWaiting, UnavailableCard, useFleetMirror, useFleetPoll,
+  agoLabel, BudgetRing, COORDINATOR_POLL_MS, EmptyRow, Legend, MarkHealthyButton, ParkDialog, ReleaseParkedDialog, RetireSlotDialog, resumeWaiting, UnavailableCard, useFleetMirror, useFleetPoll,
   WorkerStateChip,
 } from './shared';
 
@@ -37,10 +40,10 @@ type CoordinatorData = { coordinator: FleetDoc | null; challenges: Challenge[] |
 type Data = ErpData & CoordinatorData;
 
 const KIND_DOT: Record<FleetRowKind | 'all', string> = {
-  all: 'fleet-dot-all', healthy: 'fleet-dot-pos', parked: 'fleet-dot-neg',
+  all: 'fleet-dot-all', healthy: 'fleet-dot-pos', free: 'fleet-dot-muted', parked: 'fleet-dot-neg',
 };
 const KIND_KEY: Record<FleetRowKind | 'all', string> = {
-  all: 'fleetKindAll', healthy: 'fleetKindHealthy', parked: 'fleetKindParked',
+  all: 'fleetKindAll', healthy: 'fleetKindHealthy', free: 'fleetKindFree', parked: 'fleetKindParked',
 };
 
 export function FleetAccountsTab() {
@@ -107,8 +110,18 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
   data: Data; filter: FleetRowFilter; onFilter: (f: FleetRowFilter) => void; onChanged: () => void; now?: number;
 }) {
   const { t } = useT();
+  const mirror = useFleetMirror();
+  const [releasing, setReleasing] = useState(false);
   const rows = useMemo(() => fleetRows(data, now), [data, now]);
-  const shown = useMemo(() => filterFleetRows(rows, filter), [rows, filter]);
+  const releasable = useMemo(() => releasableRows(rows), [rows]);
+  // Click cycles desc → asc → the table's own order (running first, by worker id).
+  const [sort, setSort] = usePersisted<SortState>('desktop.fleet.workers.sort', { col: '', dir: null });
+  const cycleSort = (col: string) => setSort(s => nextSort(s, col));
+  const shown = useMemo(() => {
+    const filtered = filterFleetRows(rows, filter);
+    return sort.dir && (FLEET_ROW_SORT_COLS as readonly string[]).includes(sort.col)
+      ? sortFleetRows(filtered, sort.col as FleetRowSortCol, sort.dir) : filtered;
+  }, [rows, filter, sort]);
   const counts = useMemo(() => fleetRowCounts(rows), [rows]);
   const hostIds = useMemo(() => fleetRowHosts(rows, data.hosts.map(h => h.host_id)), [rows, data.hosts]);
   const running = fleetRunning(rows);
@@ -129,19 +142,26 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
           <input className="input" type="search" value={filter.q} autoComplete="off" placeholder={t('fleetSearchWorkers')}
             aria-label={t('fleetSearchWorkers')} onChange={e => set({ q: e.target.value })} />
         </label>
+        {!mirror && releasable.release.length > 0 && (
+          <button type="button" className="btn fleet-danger-text" onClick={() => setReleasing(true)}>
+            {t('fleetReleaseParked', { n: releasable.release.length })}
+          </button>
+        )}
       </div>
+      {releasing && <ReleaseParkedDialog rows={releasable.release} skipped={releasable.skipped}
+        onClose={() => setReleasing(false)} onDone={() => { setReleasing(false); onChanged(); }} />}
       <div className="fp-table-wrap fleet-table-cap">
         <table className="fp-table fleet-table fleet-accounts">
           <thead>
             <tr>
-              <th>{t('fleetColWorker')}</th>
-              <th>{t('fleetColHost')}</th>
-              <th>{t('fleetColAccount')}</th>
-              <th>{t('fleetColState')}</th>
-              <th>{t('fleetColNow')}</th>
-              <th>{t('fleetColToday')}</th>
-              <th>{t('fleetColLease')}</th>
-              <th>{t('fleetColVersion')}</th>
+              <SortTh col="worker" sort={sort} onSort={cycleSort}>{t('fleetColWorker')}</SortTh>
+              <SortTh col="host" sort={sort} onSort={cycleSort}>{t('fleetColHost')}</SortTh>
+              <SortTh col="account" sort={sort} onSort={cycleSort}>{t('fleetColAccount')}</SortTh>
+              <SortTh col="state" sort={sort} onSort={cycleSort}>{t('fleetColState')}</SortTh>
+              <SortTh col="now" sort={sort} onSort={cycleSort}>{t('fleetColNow')}</SortTh>
+              <SortTh col="today" sort={sort} onSort={cycleSort}>{t('fleetColToday')}</SortTh>
+              <SortTh col="lease" sort={sort} onSort={cycleSort}>{t('fleetColLease')}</SortTh>
+              <SortTh col="version" sort={sort} onSort={cycleSort}>{t('fleetColVersion')}</SortTh>
               <th aria-label={t('fbcOpenWorker')} />
             </tr>
           </thead>
@@ -171,13 +191,8 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
   // still be this worker's.
   const slot = r.slot && r.slot.worker_id === r.workerId ? r.slot : null;
   const quarantined = !!slot && isQuarantined(slot, now);
-  // The account's slot, held by this worker or parked with none; one another
-  // worker has claimed since is not this row's to retire.
-  const ownSlot = r.slot && (r.slot.worker_id === null || r.slot.worker_id === r.workerId) ? r.slot : null;
-  // Only an account its worker reports lost, or a manager parked: a worker
-  // that went silent shows as parked too, with a healthy account.
-  const retirable = r.source === 'erp' && !!ownSlot && !mirror
-    && fleetSlotRetirable({ parked: ownSlot.parked, poolStatus: ownSlot.pool_status, state: r.state, operator: r.operator });
+  const ownSlot = rowOwnSlot(r);
+  const retirable = !mirror && rowRetirable(r);
 
   const since = r.now?.since ? Math.max(0, Math.round((now - Date.parse(r.now.since)) / 1000)) : null;
   const elapsed = since === null ? '' : `${Math.floor(since / 60)}m ${String(since % 60).padStart(2, '0')}s`;
@@ -193,6 +208,7 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
   // A parked worker names why when its account is the reason. One that could
   // not load a page is not dead: its browser waits for Mark healthy.
   const stateChip = r.kind === 'healthy' ? <span className="chip pos">{t('fleetKindHealthy')}</span>
+    : r.kind === 'free' ? <span className="chip" title={t('fleetStateFreeHint')}>{t('fleetStateFree')}</span>
     : r.resumable ? <span className="chip warn" title={r.parkError ?? undefined}>{t('fleetStateNoPage')}</span>
     : fleetStateParked(r.state) ? <WorkerStateChip state={r.state!} />
     : <span className="chip neg">{t('fleetKindParked')}</span>;
