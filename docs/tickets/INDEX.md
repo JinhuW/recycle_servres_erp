@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-466](./RS-466-fix-the-dev-main-review-findings-alert-sender-verdic.md) | in-review | bug | P2 | Fix the dev→main review findings: alert sender, verdict bridge, agent replacements, Free rows | 1.387.1 |
+| [RS-466](./RS-466-fix-the-dev-main-review-findings-alert-sender-verdic.md) | done | bug | P2 | Fix the dev→main review findings: alert sender, verdict bridge, agent replacements, Free rows | 1.387.1 |
 | [RS-465](./RS-465-confirm-before-removing-a-packed-item-from-a-sell-or.md) | done | story | P2 | Confirm before removing a packed item from a sell order | 1.387.0 |
 | [RS-464](./RS-464-evaluate-panel-shows-the-live-prompt-not-the-rule-ed.md) | done | story | P2 | Evaluate panel shows the live prompt, not the rule editor | 1.386.0 |
 | [RS-463](./RS-463-fleet-hosts-never-remove-a-worker-drop-the-removed-s.md) | done | story | P2 | Fleet hosts never remove a worker; drop the Removed status | 1.385.0 |

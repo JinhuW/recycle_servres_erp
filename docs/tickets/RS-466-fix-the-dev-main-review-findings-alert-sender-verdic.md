@@ -2,12 +2,12 @@
 id: RS-466
 title: Fix the dev→main review findings: alert sender, verdict bridge, agent replacements, Free rows
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-10-30
 reporter: jinhu
 branch: JinhuW/rs-466-review-fixes
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1007
 version: 1.387.1
 related: [RS-453, RS-455, RS-456, RS-461, RS-463]
 ---
