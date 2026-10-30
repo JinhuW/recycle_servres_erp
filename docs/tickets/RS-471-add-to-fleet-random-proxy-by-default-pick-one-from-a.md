@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-30
 reporter: jinhu
 branch: JinhuW/cormorant
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1014
 version: 1.389.0
 related: []
 ---
