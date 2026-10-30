@@ -7,8 +7,11 @@
 // * Not authoritative: nothing. Observe-only hosts start and stop nothing.
 // * Offline (the desired state is a cached copy), or an image this host does
 //   not allow: exited workers may be restarted, nothing is created or
-//   replaced, and offline nothing is removed. Blind is not the time to change
-//   things.
+//   replaced. Blind is not the time to change things.
+// * Nothing is ever removed. A worker numbered above the count keeps running
+//   (stopping it throws away a signed-in browser, and starting one again is
+//   a login); once it exits it waits, stopped, until the count reaches it
+//   again. A release still replaces it while it runs.
 // * Left stopped, online or not, until a person acts: a worker that exited 78
 //   (it could not connect), one that hit the crash limit, and one a person
 //   stopped (`docker stop`, exit 0 or 143 while this agent ran). Every restart
@@ -72,8 +75,7 @@ export interface Container {
 export type Action =
   | { kind: 'run'; worker_id: string; container: string; image: string; port: number; reason: string }
   | { kind: 'start'; worker_id: string; container: string; reason: string; counted: boolean; soft: boolean }
-  | { kind: 'replace'; worker_id: string; container: string; image: string; port: number; reason: string; counted: boolean; soft: boolean }
-  | { kind: 'remove'; worker_id: string; container: string; reason: string };
+  | { kind: 'replace'; worker_id: string; container: string; image: string; port: number; reason: string; counted: boolean; soft: boolean };
 
 export interface HoldEntry {
   container: string;
@@ -230,16 +232,11 @@ export function plan(input: PlanInput): Plan {
   }
   for (const id of duplicates) byId.delete(id);
 
-  // Extras go first and all at once: stopping is not a login.
   const extras = [...byId.values()]
     .filter((c) => workerIndex(hostId, c.worker_id)! > desired.count)
-    .sort((a, b) => workerIndex(hostId, b.worker_id)! - workerIndex(hostId, a.worker_id)!);
+    .sort((a, b) => workerIndex(hostId, a.worker_id)! - workerIndex(hostId, b.worker_id)!);
   for (const c of extras) {
-    if (!online) {
-      notes.push(`${c.worker_id}: beyond count ${desired.count} but offline; kept`);
-      continue;
-    }
-    actions.push({ kind: 'remove', worker_id: c.worker_id, container: c.name, reason: `beyond count ${desired.count}` });
+    notes.push(`${c.worker_id}: beyond count ${desired.count}; left ${c.running ? 'running' : 'stopped'}`);
   }
 
   const startAllowed = lastStartAt === null || now - lastStartAt >= staggerMs;
@@ -258,8 +255,7 @@ export function plan(input: PlanInput): Plan {
   // this host's replacement, those retries would take every start and the
   // release would time out behind them.
   const rollTarget = desired.roll?.replace ? byId.get(desired.roll.replace) : undefined;
-  const replaceDue = canCreate && rollTarget !== undefined && rollTarget.running && rollTarget.image !== desired.image
-    && workerIndex(hostId, rollTarget.worker_id)! <= desired.count;
+  const replaceDue = canCreate && rollTarget !== undefined && rollTarget.running && rollTarget.image !== desired.image;
 
   let deferredReplace: Action | null = null;
   for (let n = 1; n <= desired.count; n++) {
@@ -332,6 +328,12 @@ export function plan(input: PlanInput): Plan {
     }
   }
 
+  // A running extra is the release's like any other worker; left on the old
+  // image, the roll would wait on it until the gate failed the release.
+  if (replaceDue && workerIndex(hostId, rollTarget!.worker_id)! > desired.count) {
+    const n = workerIndex(hostId, rollTarget!.worker_id)!;
+    deferredReplace = { kind: 'replace', worker_id: rollTarget!.worker_id, container: rollTarget!.name, image: desired.image, port: vncPort(desired, rollTarget!.worker_id, n), reason: `image ${rollTarget!.image} -> ${desired.image}`, counted: false, soft: false };
+  }
   if (deferredReplace) {
     if (takeStart()) actions.push(deferredReplace);
     else notes.push(`${deferredReplace.worker_id}: replacement waits for its turn`);

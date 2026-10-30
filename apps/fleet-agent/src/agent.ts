@@ -254,8 +254,6 @@ export class Agent {
   private async apply(action: Action, desired: Desired): Promise<string | null> {
     const d = this.o.docker;
     switch (action.kind) {
-      case 'remove':
-        return this.stop(action, desired, false);
       case 'start': {
         const withheld = this.stampStart(action);
         if (withheld) return withheld;
@@ -276,7 +274,7 @@ export class Agent {
         // The image first: a pull that fails must leave the old worker running.
         const missing = await d.ensureImage(action.image);
         if (missing) return `image ${action.image} is not available: ${missing}`;
-        const stopped = await this.stop(action, desired, true);
+        const stopped = await this.stop(action, desired);
         if (stopped) return `could not replace ${action.container}: ${stopped}`;
         return this.runWorker(action);
       }
@@ -302,15 +300,15 @@ export class Agent {
     return problem;
   }
 
-  private async stop(action: Action, desired: Desired, restart: boolean): Promise<string | null> {
+  private async stop(action: Action, desired: Desired): Promise<string | null> {
     const id = action.worker_id;
     // The action names a container that exists, so a confirmed stop from
     // before is spent: that container is its replacement.
     if (this.memory.pending[id]?.confirmed) delete this.memory.pending[id];
     const lease = desired.leases?.[id];
-    if (!this.memory.pending[id] && lease) this.memory.pending[id] = { ...lease, restart };
+    if (!this.memory.pending[id] && lease) this.memory.pending[id] = { ...lease, restart: true };
     const pending = this.memory.pending[id];
-    if (pending) pending.restart = restart;
+    if (pending) pending.restart = true;
     this.memory.self_stopped[id] = this.now();
     // Unrecorded, a stop could not be confirmed after an agent restart; leave
     // the browser untouched instead.
@@ -321,10 +319,6 @@ export class Agent {
       pending.confirmed = true;
       this.save('pending');
       if (!await this.acknowledge(id, pending)) return 'stop confirmation not accepted';
-    }
-    if (!restart && this.memory.pending[id]) {
-      delete this.memory.pending[id];
-      this.save('pending');
     }
     return null;
   }

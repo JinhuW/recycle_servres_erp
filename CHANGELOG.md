@@ -15,6 +15,25 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.385.0] - 2026-10-29
+
+### Changed
+
+- **Fleet hosts never remove a worker** (RS-463). The host agent used to stop
+  and `docker rm` every container numbered above its desired count, all at
+  once. The count falls when a manager lowers capacity, and also on its own
+  when accounts are retired, because it follows the claimable slots. Each
+  removed container threw away a signed-in browser, and bringing one back is
+  a Facebook login. Now a worker above the count keeps running. Once it stops,
+  it waits, stopped, until the count reaches it again, and then the agent
+  starts it as usual. A release still replaces a running one, so a roll cannot
+  stall on it. The **Removed** row kind (v1.381.0) is gone: a stopped worker
+  reads Free when its account left the fleet, otherwise Parked. The
+  lower-capacity confirmation now says the workers above the new capacity keep
+  running and are not removed. Hosts pick this up when the fleet-agent
+  1.385.0 image is pushed (`trackers/facebook/scripts/push-fleet-images.sh`)
+  and their agent container is re-run on it.
+
 ## [1.384.0] - 2026-10-29
 
 ### Changed
