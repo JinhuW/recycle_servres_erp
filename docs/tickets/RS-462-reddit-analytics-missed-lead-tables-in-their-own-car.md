@@ -2,13 +2,13 @@
 id: RS-462
 title: Reddit analytics: missed-lead tables in their own card, sortable, height-capped
 type: story
-status: backlog
+status: done
 priority: P3
 created: 2026-10-29
 reporter: jinhu
 branch: JinhuW/rs-tracker-missed-leads
-pr:
-version:
+pr: 1003
+version: 1.384.0
 related: []
 ---
 
