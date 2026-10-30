@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COORDINATOR, HOSTS, NOW, POOL, RELEASE, SLOTS, WORKERS } from './fixtures';
+import { COORDINATOR, NOW, POOL, RELEASE, SLOTS, WORKERS } from './fixtures';
 import { FLEET_ROW_KINDS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning, releasableRows, sortFleetRows } from './fleetRows';
 
 const input = { slots: SLOTS, workers: WORKERS, release: RELEASE, coordinator: COORDINATOR, challenges: null, pool: POOL };
@@ -54,36 +54,20 @@ describe('fleetRows', () => {
     expect(more.at(-1)?.key).toBe('erp:worker-60-14-2');
     expect(more.some(r => r.key === 'erp:worker-60-14-3')).toBe(false);
   });
-  it('reads a silent worker its host no longer runs as removed, not parked', () => {
-    const silent = (worker_id: string, host_id: string, account_no: number) =>
-      ({ ...WORKERS[0], worker_id, host_id, account_no, task: null, last_heartbeat_at: ago(280) });
-    const exited = { worker_id: 'homelab-12', image: 'ghcr.io/jinhuw/aimm-recycle:0.14.0', state: 'exited', started_at: ago(300) };
-    const hosts = HOSTS.map(h => h.host_id === 'homelab' ? { ...h, report: { ...h.report!, containers: [...h.report!.containers, exited] } } : h);
-    const more = fleetRows({
-      ...input, hosts,
-      workers: [...WORKERS, silent('homelab-14', 'homelab', 4), silent('homelab-12', 'homelab', 33), silent('office-mini-1', 'office-mini', 40)],
-    }, NOW);
-    const row = (id: string) => more.find(r => r.workerId === id)!;
+  it('reads a silent worker as parked whatever its host reports', () => {
+    const silent = { ...WORKERS[0], worker_id: 'homelab-14', account_no: 4, task: null, last_heartbeat_at: ago(280) };
+    const row = fleetRows({ ...input, workers: [...WORKERS, silent] }, NOW).find(r => r.workerId === 'homelab-14')!;
     // Account 4 is homelab-1's now: the row names it, but not homelab-1's minutes.
-    expect(row('homelab-14')).toMatchObject({ kind: 'removed', running: false, no: 4, epoch: null, minutes: null, budget: null });
-    // A stopped container the host still keeps, and a host that never reported.
-    expect(row('homelab-12').kind).toBe('parked');
-    expect(row('office-mini-1').kind).toBe('parked');
-    // A running worker is never removed, whatever the report says.
-    expect(fleetRows({ ...input, hosts: [{ ...HOSTS[0], report: { ...HOSTS[0].report!, containers: [] } }] }, NOW)
-      .find(r => r.workerId === 'homelab-1')?.kind).toBe('healthy');
-    expect(fleetRowCounts(more)).toMatchObject({ removed: 1 });
-    expect(filterFleetRows(more, { kind: 'removed', host: '', q: '' }).map(r => r.workerId)).toEqual(['homelab-14']);
+    expect(row).toMatchObject({ kind: 'parked', running: false, no: 4, epoch: null, minutes: null, budget: null });
   });
-  it('reads a stopped worker whose account left the fleet as free, before removed', () => {
+  it('reads a stopped worker whose account left the fleet as free', () => {
     const silent = (worker_id: string, account_no: number) =>
       ({ ...WORKERS[0], worker_id, account_no, task: null, last_heartbeat_at: ago(30) });
-    // Account 70 has no slot (retired); the host's report no longer lists homelab-7 either.
-    const hosts = HOSTS.map(h => h.host_id === 'homelab' ? { ...h, report: { ...h.report!, containers: [] } } : h);
-    const more = fleetRows({ ...input, hosts, workers: [...WORKERS, silent('homelab-7', 70)] }, NOW);
+    // Account 70 has no slot (retired).
+    const more = fleetRows({ ...input, workers: [...WORKERS, silent('homelab-7', 70)] }, NOW);
     expect(more.find(r => r.workerId === 'homelab-7')).toMatchObject({ kind: 'free', running: false, no: 70, slot: null });
     expect(fleetRowCounts(more)).toMatchObject({ free: 1 });
-    expect(fleetRunning(more)).toEqual(fleetRunning(fleetRows({ ...input, hosts }, NOW)));
+    expect(fleetRunning(more)).toEqual(fleetRunning(rows));
     // Still reporting, it is not free yet: its next call is refused.
     const live = fleetRows({ ...input, workers: [...WORKERS, { ...silent('homelab-7', 70), last_heartbeat_at: ago(0.2) }] }, NOW);
     expect(live.find(r => r.workerId === 'homelab-7')?.kind).not.toBe('free');
@@ -110,12 +94,12 @@ describe('fleetRows', () => {
     expect(by('coord:homelab-9')).toMatchObject({ no: null, kind: 'parked', running: false, host: 'homelab', heartbeat: null });
   });
   it('counts the legend and the foot', () => {
-    expect(fleetRowCounts(rows)).toEqual({ all: 7, healthy: 5, free: 0, parked: 2, removed: 0 });
+    expect(fleetRowCounts(rows)).toEqual({ all: 7, healthy: 5, free: 0, parked: 2 });
     expect(fleetRunning(rows)).toEqual({ running: 5, hosts: 2 });
     expect(fleetRowHosts(rows, ['worker-60-14', 'office-mini'])).toEqual(['homelab', 'office-mini', 'worker-60-14']);
   });
-  it('has four kinds, and no row for a retired coordinator worker', () => {
-    expect(FLEET_ROW_KINDS).toEqual(['healthy', 'free', 'parked', 'removed']);
+  it('has three kinds, and no row for a retired coordinator worker', () => {
+    expect(FLEET_ROW_KINDS).toEqual(['healthy', 'free', 'parked']);
     expect(rows.some(r => r.workerId === 'homelab-20')).toBe(false);
     expect(filterFleetRows(rows, { kind: 'parked', host: '', q: '' }).map(r => r.key)).toEqual(['erp:homelab-2', 'coord:homelab-9']);
     const lone = fleetRows({ ...input, workers: [], slots: [], coordinator: { ...COORDINATOR, workers: [COORDINATOR.workers[3]] } }, NOW);

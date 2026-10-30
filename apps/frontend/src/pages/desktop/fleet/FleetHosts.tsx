@@ -75,8 +75,8 @@ export function HostStrip({ hosts, release, onChanged, now = Date.now() }: {
   const capacity = (h: FleetHost, delta: number) => {
     const next = Math.min(CAPACITY_MAX, Math.max(0, h.capacity + delta));
     if (next === h.capacity) return;
-    // The agent removes every container above the new count at once, open
-    // browsers included, and bringing one back is a login.
+    // The agent leaves every container above the new count in place, but a
+    // running one then goes on past the capacity: say so before saving.
     if (capacityCuts(h, next).some(c => c.state === 'running')) setLowering({ host: h, next });
     else void act(h.host_id, () => fleetApi.updateHost(h.host_id, { capacity: next }));
   };
@@ -170,7 +170,7 @@ export function LowerCapacityDialog({ host, next, onClose, onDone }: { host: Fle
   };
   return (
     <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 460 }}>
-      <ConfirmDialogBody title={t('fleetCapacityLowerTitle', { host: host.host_id, n: next })} confirm={t('fleetCapacityLowerConfirm')} busy={busy} danger
+      <ConfirmDialogBody title={t('fleetCapacityLowerTitle', { host: host.host_id, n: next })} confirm={t('fleetCapacityLowerConfirm')} busy={busy}
         onClose={onClose} onConfirm={confirm}
         body={<>
           <p>{t('fleetCapacityLowerBody', { n: cuts.length })}</p>

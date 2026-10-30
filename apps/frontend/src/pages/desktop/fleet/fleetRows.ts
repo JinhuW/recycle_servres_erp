@@ -10,18 +10,17 @@ import type { PoolAccountSummary } from '../../../lib/facebookPool';
 
 /** What a row reads of its pool account: a snapshot row or a summary row. */
 export type FleetPoolAccount = Pick<PoolAccountSummary, 'no' | 'uid' | 'status' | 'holder' | 'note'>;
-import { fleetResumable, fleetSlotRetirable, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume } from '../../../lib/fleet';
+import { fleetResumable, fleetSlotRetirable, fleetStateParked, type FleetRelease, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume } from '../../../lib/fleet';
 import { parkedWorkers, retiredAt } from '../../../lib/fleetView';
 import { leaseLive, liveness } from './fleetBoard';
 
 // A worker doing the work (degraded or mid-replacement included), one that
 // stopped once its account left the fleet (retired or removed) and waits for
-// another, one that is not working because its account needs a hand or it
-// went silent, or one whose host removed its container (a lowered capacity):
-// that last one is no account's problem, and its account is free for another
-// worker. The State column keeps the detail.
-export type FleetRowKind = 'healthy' | 'free' | 'parked' | 'removed';
-export const FLEET_ROW_KINDS: readonly FleetRowKind[] = ['healthy', 'free', 'parked', 'removed'];
+// another, or one that is not working because its account needs a hand or it
+// went silent. Hosts never remove a worker, so there is no fourth. The State
+// column keeps the detail.
+export type FleetRowKind = 'healthy' | 'free' | 'parked';
+export const FLEET_ROW_KINDS: readonly FleetRowKind[] = ['healthy', 'free', 'parked'];
 
 // Worker rows are never deleted, so one silent this long has been retired,
 // not lost.
@@ -78,8 +77,6 @@ export type FleetRowsInput = {
   coordinator: FleetDoc | null;
   challenges: readonly Challenge[] | null;
   pool: readonly FleetPoolAccount[] | null;
-  /** The hosts' last reports, to tell a removed worker from a parked one. */
-  hosts?: readonly Pick<FleetHost, 'host_id' | 'report'>[];
 };
 
 const vncPortOf = (url: string | null | undefined): number | null => {
@@ -87,7 +84,7 @@ const vncPortOf = (url: string | null | undefined): number | null => {
   return m ? Number(m[1]) : null;
 };
 
-function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelease | null, pool: FleetPoolAccount | null, now: number, removed = false): FleetRow {
+function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelease | null, pool: FleetPoolAccount | null, now: number): FleetRow {
   const beat = liveness(worker.last_heartbeat_at, now);
   // A worker between leases still reports; only its silence takes it offline.
   const running = beat === 'live' || beat === 'stale';
@@ -98,8 +95,7 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
   // Without a slot the account is out of the fleet: the host starts the
   // worker again only for an account added since, whatever it did with it.
   const kind: FleetRowKind = running && !fleetStateParked(worker.state) && !(holds && slot.parked) ? 'healthy'
-    : !running && !slot ? 'free'
-    : !running && removed ? 'removed' : 'parked';
+    : !running && !slot ? 'free' : 'parked';
   const task = running ? worker.task ?? null : null;
   const no = slot?.account_no ?? worker.account_no ?? null;
   return {
@@ -184,17 +180,10 @@ export function fleetRows(input: FleetRowsInput, now: number = Date.now()): Flee
   for (const s of input.slots) if (s.worker) workers.set(s.worker.worker_id, s.worker);
   const slotOf = (w: FleetWorker) => input.slots.find(s => s.worker_id === w.worker_id)
     ?? input.slots.find(s => s.account_no === w.account_no) ?? null;
-  // A host's report names every container it has, stopped ones included, so
-  // a worker missing from it was removed, not parked.
-  const reports = new Map((input.hosts ?? []).filter(h => h.report).map(h => [h.host_id, h.report!]));
-  const removed = (w: FleetWorker) => {
-    const report = w.host_id ? reports.get(w.host_id) : undefined;
-    return !!report && !report.containers.some(c => c.worker_id === w.worker_id);
-  };
   const rows: FleetRow[] = [];
   const seenNo = new Set<number>();
   for (const w of workers.values()) {
-    const row = erpRow(w, slotOf(w), input.release, null, now, removed(w));
+    const row = erpRow(w, slotOf(w), input.release, null, now);
     if (!row.running && !(row.heartbeat && now - Date.parse(row.heartbeat) < OFFLINE_KEPT_MS)) continue;
     row.pool = row.no === null ? null : poolByNo.get(row.no) ?? null;
     row.uid ??= row.pool?.uid ?? null;
@@ -216,7 +205,7 @@ export function fleetRows(input: FleetRowsInput, now: number = Date.now()): Flee
 export type FleetRowSortCol = 'worker' | 'host' | 'account' | 'state' | 'now' | 'today' | 'lease' | 'version';
 export const FLEET_ROW_SORT_COLS: readonly FleetRowSortCol[] = ['worker', 'host', 'account', 'state', 'now', 'today', 'lease', 'version'];
 
-const KIND_ORDER: Record<FleetRowKind, number> = { healthy: 0, free: 1, parked: 2, removed: 3 };
+const KIND_ORDER: Record<FleetRowKind, number> = { healthy: 0, free: 1, parked: 2 };
 
 function sortValue(col: FleetRowSortCol, r: FleetRow): string | number | null {
   switch (col) {
@@ -257,7 +246,7 @@ export function filterFleetRows(rows: readonly FleetRow[], f: FleetRowFilter): F
 }
 
 export function fleetRowCounts(rows: readonly FleetRow[]): Record<FleetRowKind | 'all', number> {
-  const out = { all: rows.length, healthy: 0, free: 0, parked: 0, removed: 0 };
+  const out = { all: rows.length, healthy: 0, free: 0, parked: 0 };
   for (const r of rows) out[r.kind] += 1;
   return out;
 }

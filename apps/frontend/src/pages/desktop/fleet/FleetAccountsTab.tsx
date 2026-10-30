@@ -40,10 +40,10 @@ type CoordinatorData = { coordinator: FleetDoc | null; challenges: Challenge[] |
 type Data = ErpData & CoordinatorData;
 
 const KIND_DOT: Record<FleetRowKind | 'all', string> = {
-  all: 'fleet-dot-all', healthy: 'fleet-dot-pos', free: 'fleet-dot-muted', parked: 'fleet-dot-neg', removed: 'fleet-dot-muted',
+  all: 'fleet-dot-all', healthy: 'fleet-dot-pos', free: 'fleet-dot-muted', parked: 'fleet-dot-neg',
 };
 const KIND_KEY: Record<FleetRowKind | 'all', string> = {
-  all: 'fleetKindAll', healthy: 'fleetKindHealthy', free: 'fleetKindFree', parked: 'fleetKindParked', removed: 'fleetKindRemoved',
+  all: 'fleetKindAll', healthy: 'fleetKindHealthy', free: 'fleetKindFree', parked: 'fleetKindParked',
 };
 
 export function FleetAccountsTab() {
@@ -210,7 +210,6 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
   // not load a page is not dead: its browser waits for Mark healthy.
   const stateChip = r.kind === 'healthy' ? <span className="chip pos">{t('fleetKindHealthy')}</span>
     : r.kind === 'free' ? <span className="chip" title={t('fleetStateFreeHint')}>{t('fleetStateFree')}</span>
-    : r.kind === 'removed' ? <span className="chip" title={t('fleetStateRemovedHint')}>{t('fleetStateRemoved')}</span>
     : r.resumable ? <span className="chip warn" title={r.parkError ?? undefined}>{t('fleetStateNoPage')}</span>
     : fleetStateParked(r.state) ? <WorkerStateChip state={r.state!} />
     : <span className="chip neg">{t('fleetKindParked')}</span>;

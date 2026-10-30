@@ -3412,7 +3412,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     (a new worker is a Facebook login; since v1.364.0 the agent runs no more
     workers than the host has accounts for; since v1.382.0 (RS-459) a − that
     would leave a running container numbered above the new capacity asks
-    first, naming the containers the agent will stop and remove) and, while a release rolls, its
+    first, naming the containers above it; since v1.385.0 (RS-463) the agent
+    never removes a worker: one above the count keeps running, and once it
+    stops it waits until the count reaches it again) and, while a release rolls, its
     progress line with the worker replaced next (since v1.367.0 only while
     GET /api/fleet/hosts returns a rolling release; without one, workers
     left on an older image get a quiet "1 worker on 0.14.6; new workers
@@ -3443,7 +3445,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     (RS-458) a third kind, **Removed**: a silent worker that its host's
     latest report no longer lists (the agent removed it, as it does when the
     host's capacity is lowered) reads **Removed by host** in grey instead of
-    Parked. A row whose account another worker now holds shows no minutes.
+    Parked; since v1.385.0 (RS-463) hosts no longer remove workers and the
+    kind is gone. A row whose account another worker now holds shows no minutes.
     Since v1.382.0 (RS-460) every column title sorts the table (descending,
     ascending, then its own order; empty cells last).
     Since v1.379.0
@@ -3461,8 +3464,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     warns that every account added to the fleet afterwards starts a worker (a
     login); confirming retires them one by one through the same endpoint. A
     worker that has stopped and whose account no longer has a slot (retired or
-    removed from the fleet) is a fourth kind, **Free**, grey, waiting for an
-    account added on the Account pool tab; Free comes before Removed and
+    removed from the fleet) is its own kind, **Free**, grey, waiting for an
+    account added on the Account pool tab; Free comes before
     Parked. Retire on the Account Pool page
     deletes the account's fleet slot too, and with no free account left the
     host runs one worker fewer instead of replacing it. Since v1.380.0
@@ -3475,7 +3478,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     before facebook-tracker 0.15.0 cannot take it, and the button says so.
     The worker itself now tries a page that times out twice more, 10 s then
     30 s apart, before it parks. The
-    toolbar has the legend with counts (All workers, Healthy, Free, Parked, Removed), a
+    toolbar has the legend with counts (All workers, Healthy, Free, Parked), a
     host select and a search over worker, account, city and host; since v1.371.0 (RS-431) the
     tab opens on Healthy rather than All workers. The foot says "N of M
     workers · R running on K hosts". Since v1.367.0 (RS-418) a coordinator

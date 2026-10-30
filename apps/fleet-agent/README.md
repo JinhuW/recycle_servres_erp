@@ -3,7 +3,8 @@
 One container per Docker host. It keeps the host's Facebook workers as the
 ERP desires: it asks the ERP every 30 s how many workers this host should
 run and on which image, compares that with the containers carrying its
-label, and starts, restarts, replaces or removes workers to match. It then
+label, and starts, restarts or replaces workers to match. It never removes
+one. It then
 reports what runs. The workers themselves claim an account from the ERP and
 pull their own cities; the agent never sees a password, a cookie or a city.
 
@@ -75,10 +76,12 @@ the same `FLEET_HOST_ID` on its daemon observes only, logs an error and puts
      previous start is the later of the one the agent wrote down and the
      newest `StartedAt` Docker shows, so a lost `/state` or a start whose
      answer was lost still counts;
-   - remove workers beyond `count`, highest id first (only when the ERP
-     says `authoritative` and answered this tick);
+   - leave workers beyond `count` alone: one running keeps running (its
+     browser is signed in, and starting one again is a login), one stopped
+     stays stopped until the count reaches it again. Since v1.385.0 nothing
+     is removed;
    - replace the one worker `roll.replace` names if it is not yet on the
-     desired image (stop, then run on the new image);
+     desired image (stop, then run on the new image), beyond `count` too;
    - restart an exited worker by its exit code: `75` (stale epoch or no
      slot) after 60 s, or after 10 min once it has had five 75/70 restarts
      in 30 min; `70` (claim failed) after 10 min; any other code after 60 s,
@@ -120,8 +123,8 @@ the same `FLEET_HOST_ID` on its daemon observes only, logs an error and puts
    tag is pulled before every start, so a tag pushed again is picked up; a
    digest (`…@sha256:…`) is pulled only when missing. Release images should
    be digest-pinned. The variables are handed to the CLI through its
-   environment, so the ticket is never in a process list. A removal is
-   `docker stop -t 30` then `docker rm`.
+   environment, so the ticket is never in a process list. A replacement
+   stops the old container with `docker stop -t 30` then `docker rm`.
 5. `POST /api/fleet/hosts/{id}/report` with the agent's version, its
    identity and every labelled container (`worker_id`, `image`, `state`,
    `started_at`, and the optional `hold`, `exit_code`, `image_id`). While a

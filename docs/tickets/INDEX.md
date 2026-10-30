@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-462](./RS-462-reddit-analytics-missed-lead-tables-in-their-own-car.md) | done | story | P3 | Reddit analytics: missed-lead tables in their own card, sortable, height-capped | — |
+| [RS-463](./RS-463-fleet-hosts-never-remove-a-worker-drop-the-removed-s.md) | done | story | P2 | Fleet hosts never remove a worker; drop the Removed status | 1.385.0 |
+| [RS-462](./RS-462-reddit-analytics-missed-lead-tables-in-their-own-car.md) | done | story | P3 | Reddit analytics: missed-lead tables in their own card, sortable, height-capped | 1.384.0 |
 | [RS-461](./RS-461-fleet-release-every-parked-worker-s-account-in-one-c.md) | done | story | P2 | Fleet: release every parked worker's account in one click, and show freed workers as Free | 1.383.0 |
 | [RS-460](./RS-460-fleet-workers-table-sort-by-clicking-a-column-title.md) | done | story | P3 | Fleet Workers table: sort by clicking a column title | 1.382.0 |
 | [RS-459](./RS-459-fleet-hosts-confirm-before-capacity-drops-below-runn.md) | done | story | P2 | Fleet hosts: confirm before capacity drops below running workers | 1.382.0 |

@@ -90,13 +90,14 @@ describe('online', () => {
     expect(lines.join('')).not.toContain(TOKEN);
   });
 
-  it('scales down when the count drops, highest first', async () => {
+  it('keeps the workers above a lowered count, and says so', async () => {
     const docker = new FakeDocker([running('lab-1'), running('lab-2'), running('lab-3')]);
     server.desired = desired({ count: 1 });
     const result = await agent(docker).tick();
-    expect(docker.commands).toEqual([['stop+rm', 'rs-fleet-lab-3'], ['stop+rm', 'rs-fleet-lab-2']]);
-    expect(result.containers.map((c) => c.worker_id)).toEqual(['lab-1']);
-    expect(server.reports[0].containers.map((c) => c.worker_id)).toEqual(['lab-1']);
+    expect(docker.commands).toEqual([]);
+    expect(result.containers.map((c) => c.worker_id)).toEqual(['lab-1', 'lab-2', 'lab-3']);
+    expect(server.reports[0].containers.map((c) => c.worker_id)).toEqual(['lab-1', 'lab-2', 'lab-3']);
+    expect(logged().filter((l) => l.msg === 'note').map((l) => l.note)).toEqual(['lab-2: beyond count 1; left running', 'lab-3: beyond count 1; left running']);
   });
 
   it('staggers starts across ticks and remembers the last one on disk', async () => {
@@ -219,7 +220,7 @@ describe('offline', () => {
     docker.containers.set('rs-fleet-lab-3', running('lab-3'));
     docker.containers.set('rs-fleet-lab-1', exited('lab-1', 75, new Date(clock - 61_000).toISOString()));
     await a.tick();
-    expect(docker.commands).toEqual([['start', 'rs-fleet-lab-1']]); // no run of lab-2, no removal of lab-3
+    expect(docker.commands).toEqual([['start', 'rs-fleet-lab-1']]); // no run of lab-2
     docker.commands = [];
     await a.tick();
     expect(docker.commands).toEqual([]);
@@ -230,7 +231,7 @@ describe('offline', () => {
     const back = await a.tick();
     expect(back.online).toBe(true);
     expect(logged().filter((l) => l.msg === 'back online')).toHaveLength(1);
-    expect(docker.commands).toEqual([['stop+rm', 'rs-fleet-lab-3'], ['ensure', 'img:1'], ['run', 'rs-fleet-lab-2', 'img:1', 5902, expect.anything()]]);
+    expect(docker.commands).toEqual([['ensure', 'img:1'], ['run', 'rs-fleet-lab-2', 'img:1', 5902, expect.anything()]]);
   });
 
   it('with nothing cached touches nothing', async () => {
@@ -351,11 +352,12 @@ describe('confirmed-stop handoff', () => {
     expect(server.ticketRequests).toEqual([{ worker_id: 'lab-1' }]);
   });
 
-  it('frees the account when it removes an extra', async () => {
+  it('leaves an extra and its account alone', async () => {
     const docker = new FakeDocker([running('lab-1'), running('lab-2')]);
     server.desired = desired({ count: 1, leases: { 'lab-2': { account_no: 9, epoch: 4 } } });
     expect((await agent(docker).tick()).errors).toEqual([]);
-    expect(server.stopped).toEqual([expect.objectContaining({ worker_id: 'lab-2', account_no: 9, epoch: 4, restart: false })]);
+    expect(server.stopped).toEqual([]);
+    expect(docker.commands.filter((c) => c[0] === 'stop+rm')).toEqual([]);
   });
 
   it('releases a waiting reservation when the host turns observe-only', async () => {
