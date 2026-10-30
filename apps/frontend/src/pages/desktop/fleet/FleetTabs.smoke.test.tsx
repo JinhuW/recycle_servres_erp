@@ -94,6 +94,8 @@ describe('Fleet tab', () => {
     expect(html).not.toContain('fleetQuarantineRelease');
     expect(html).toContain('fleetEveryHost');
     expect(html).not.toContain(SLOTS[0].uid!);         // uids are masked
+    expect(html).toContain('href="#/fleet/pool?account=31"'); // each account opens on the pool tab
+    expect(html).toContain('fleetAccountOpenHint');
     expect(html).toContain('ff-ring-full');            // #12 has used its budget
     expect(html).toContain('fleetWorkersFoot');
   });

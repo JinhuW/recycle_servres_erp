@@ -3440,7 +3440,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     Account pool tab lists it, with its Unpark and Release quarantine. A
     worker that stopped reporting stays as a row for a week after its last
     heartbeat. Each row: worker and VNC port, host, account number and
-    masked uid, the state chip with a one-line note (heartbeat age, "keeps
+    masked uid (since v1.388.0, RS-470, the number links to the Account pool
+    tab with that account's editor open, and hovering the cell shows its pool
+    status, a holder other than the worker, and its note), the state chip with a one-line note (heartbeat age, "keeps
     its task" for a degraded worker, the account's quarantine end), **Now**
     (the city and item being searched with the time on it, "home city" on a
     coordinator worker's;

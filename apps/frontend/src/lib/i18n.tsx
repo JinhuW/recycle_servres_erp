@@ -4767,6 +4767,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fleetCopy: "Copy",
     fleetCopied: "Copied",
     fleetUidMasked: "The uid is masked; the pool page shows it.",
+    fleetAccountOpenHint: "Click to open it in the account pool.",
     fleetQuarantineRelease: "Release",
     fleetQuarantineReleaseHint: "Release the quarantine: the account takes ordinary tasks again",
     fleetQuarantineReleased: "#{no} is back in the rotation",

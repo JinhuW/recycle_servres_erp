@@ -8,7 +8,8 @@ import { fleetApi, fleetStateParked, type FleetHost, type FleetRelease, type Fle
 import { queueCityName, withoutRetired } from '../../../lib/fleetView';
 import { useT } from '../../../lib/i18n';
 import { usePersisted } from '../../../lib/listMemory';
-import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
+import { fleetPoolAccountPath, fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
+import { STATUS_KEYS } from '../accountPool/shared';
 import { ActivityAside } from '../FleetWorkers';
 import { dueLabel, easternClock, isQuarantined, maskUid } from './fleetBoard';
 import {
@@ -213,6 +214,15 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
     : fleetStateParked(r.state) ? <WorkerStateChip state={r.state!} />
     : <span className="chip neg">{t('fleetKindParked')}</span>;
 
+  // What the pool says about the account; a fleet account's holder is this
+  // worker, so only a different holder is worth naming.
+  const accountHint = r.no === null ? undefined : [
+    [`#${r.no}`, r.pool && t(STATUS_KEYS[r.pool.status]), r.pool?.holder && r.pool.holder !== r.workerId ? r.pool.holder : null]
+      .filter(Boolean).join(' · '),
+    r.pool?.note || null,
+    t('fleetAccountOpenHint'),
+  ].filter(Boolean).join('\n');
+
   const note = quarantined
     ? t('fleetQuarantineUntilAt', { time: easternClock(slot.quarantined_until, locale, now), span: dueLabel(t, slot.quarantined_until, now) })
     : r.running && r.resumable && resumeWaiting(r.resume, r.state) ? t('fleetNoteResumeSent')
@@ -233,8 +243,9 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
         {r.host ? <span className="mono fleet-hostcell">{r.host}</span> : <span className="fp-muted">—</span>}
       </td>
       <td>
-        <span className="fp-holder">
-          <span>{r.no === null ? <span className="fp-muted">—</span> : t('fleetAccountNo', { no: r.no })}</span>
+        <span className="fp-holder" title={accountHint}>
+          <span>{r.no === null ? <span className="fp-muted">—</span>
+            : <a href={hrefFor(fleetPoolAccountPath(r.no))} onClick={onLinkClick(fleetPoolAccountPath(r.no))}>{t('fleetAccountNo', { no: r.no })}</a>}</span>
           <small className="mono" title={t('fleetUidMasked')}>{maskUid(r.uid)}</small>
         </span>
       </td>

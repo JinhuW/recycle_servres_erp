@@ -500,6 +500,13 @@ export function matchFleetWorker(path: string): { workerId: string } | null {
   return m?.workerId ? { workerId: m.workerId } : null;
 }
 
+// The Account pool tab with one account's editor open; the tab takes the
+// param once, so closing the editor or reloading leaves the plain list.
+export const FLEET_POOL_ACCOUNT_PARAM = 'account';
+export function fleetPoolAccountPath(no: number): string {
+  return `/fleet/pool?${FLEET_POOL_ACCOUNT_PARAM}=${no}`;
+}
+
 // The Payments page focused on one PO's linked payments. A path for
 // navigate(); the page reads the id back with match('/payments/po/:id').
 // With a transaction id the page opens that row instead of the first.

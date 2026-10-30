@@ -15,6 +15,19 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.388.0] - 2026-10-30
+
+### Added
+
+- **The Fleet table's accounts link to the pool** (RS-470). On Monitors ▸
+  Facebook ▸ Fleet, the Account column's "No. N" was plain text over a masked
+  uid. To see the account behind a worker, you had to switch to the Account pool
+  tab and search for it. The number is now a link to `/fleet/pool?account=N`,
+  which opens that account's editor: credentials, notes, status and activity.
+  The tab reads the param once, so closing the editor or reloading shows the
+  plain list. Hovering the cell shows what the pool knows without leaving the
+  page: the pool status, a holder other than the worker itself, and the note.
+
 ## [1.387.2] - 2026-10-30
 
 ### Fixed
