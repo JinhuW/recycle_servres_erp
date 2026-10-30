@@ -96,9 +96,10 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
   // A manager's park holds the slot whatever state the worker still reports.
   // Without a slot the account is out of the fleet: the host starts the
   // worker again only for an account added since, whatever it did with it;
-  // a deleted host has no agent to start it.
-  const kind: FleetRowKind = running && !fleetStateParked(worker.state) && !(holds && slot.parked) ? 'healthy'
-    : !running && !slot && !hostless ? 'free' : 'parked';
+  // a deleted host has no agent to start it. Free does not wait for the
+  // worker to go silent: its next call is refused and it exits.
+  const kind: FleetRowKind = !slot && !hostless ? 'free'
+    : running && !fleetStateParked(worker.state) && !(holds && slot.parked) ? 'healthy' : 'parked';
   const task = running ? worker.task ?? null : null;
   const no = slot?.account_no ?? worker.account_no ?? null;
   return {
