@@ -3,6 +3,7 @@ import { parseSerials } from '@recycle-erp/shared';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
+import { Modal } from '../../components/Modal';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { api, ApiError, rawFetch } from '../../lib/api';
 import { fmtDate } from '../../lib/format';
@@ -116,6 +117,8 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const [shipping, setShipping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
+  // A packed tick taken back waits here for a yes.
+  const [unpacking, setUnpacking] = useState<{ pn: string; run: () => void } | null>(null);
   const label = useLabelPrint('pack.labelAuto', name => onToast?.(t('pkLabelPrinted', { id: name })));
   // The products this visit printed a label for by itself, by warehouse and
   // #: ticking one back and on again doesn't print another.
@@ -413,8 +416,10 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     if (!ready) return;
     const c = checkOf(l.id);
     if (lineState(l, c) === 'done') {
-      save({ ...c, checkedAt: null });
-      flashUndo({ prev: [c], msg: t('pkUnpackedToast', { pn: pnOf(l) }) });
+      setUnpacking({ pn: pnOf(l), run: () => {
+        save({ ...c, checkedAt: null });
+        flashUndo({ prev: [c], msg: t('pkUnpackedToast', { pn: pnOf(l) }) });
+      } });
       return;
     }
     pack(l);
@@ -427,8 +432,10 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     setChoose(new Set());
     if (plan.untick.length) {
       const prev = plan.untick.map(l => checkOf(l.id));
-      prev.forEach(c => save({ ...c, checkedAt: null }));
-      flashUndo({ prev, msg: t('pkUnpackedToast', { pn }) });
+      setUnpacking({ pn, run: () => {
+        prev.forEach(c => save({ ...c, checkedAt: null }));
+        flashUndo({ prev, msg: t('pkUnpackedToast', { pn }) });
+      } });
       return;
     }
     if (plan.left.length) {
@@ -1216,6 +1223,26 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
         />
       )}
       {zoom && <ImageLightbox url={zoom} onClose={() => setZoom(null)} />}
+      {unpacking && (
+        <Modal onClose={() => setUnpacking(null)} shellStyle={{ maxWidth: 420, width: 'calc(100vw - 80px)' }}>
+          <div className="modal-head">
+            <div className="modal-title">{t('pkUnpackConfirmTitle')}</div>
+          </div>
+          <div className="modal-body" style={{ padding: 20 }}>
+            <p style={{ margin: 0, fontSize: 13.5 }}>{t('pkUnpackConfirmBody', { pn: unpacking.pn })}</p>
+          </div>
+          <div className="modal-foot">
+            <button className="btn" autoFocus onClick={() => setUnpacking(null)}>{t('cancel')}</button>
+            <button
+              className="btn danger"
+              onClick={() => { unpacking.run(); setUnpacking(null); }}
+              style={{ background: 'var(--neg, #c0392b)', color: '#fff', borderColor: 'transparent' }}
+            >
+              {t('pkUnpackConfirm')}
+            </button>
+          </div>
+        </Modal>
+      )}
       {label.element}
     </div>
   );
