@@ -243,8 +243,13 @@ export function plan(input: PlanInput): Plan {
     .sort((a, b) => workerIndex(hostId, a.worker_id)! - workerIndex(hostId, b.worker_id)!);
   for (const c of extras) {
     // A held one waits for a person, and one stopped for its replacement is
-    // the release's to run again.
-    if (canCreate && !c.running && c.image !== desired.image && holdOf(c, input) === null && !input.restarting?.includes(c.worker_id)) {
+    // the release's to run again. A stop by hand is only seen while this
+    // agent runs: unremembered, the next agent would remove it.
+    const hold = holdOf(c, input);
+    if (hold && hold !== 'operator_needed' && c.id !== undefined && input.held?.[c.worker_id]?.container !== c.id) {
+      holds[c.worker_id] = { container: c.id, reason: hold };
+    }
+    if (canCreate && !c.running && c.image !== desired.image && hold === null && !input.restarting?.includes(c.worker_id)) {
       actions.push({ kind: 'remove', worker_id: c.worker_id, container: c.name, reason: `beyond count ${desired.count} on ${c.image}, not ${desired.image}` });
       continue;
     }

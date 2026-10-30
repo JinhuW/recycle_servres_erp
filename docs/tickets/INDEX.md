@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-471](./RS-471-add-to-fleet-random-proxy-by-default-pick-one-from-a.md) | done | feature | P2 | Add to fleet: random proxy by default, pick one from a dropdown | — |
+| [RS-472](./RS-472-fleet-agent-removal-keeps-operator-holds-and-the-sta.md) | done | bug | P2 | Fleet-agent removal keeps operator holds and the stagger | 1.389.1 |
+| [RS-471](./RS-471-add-to-fleet-random-proxy-by-default-pick-one-from-a.md) | done | feature | P2 | Add to fleet: random proxy by default, pick one from a dropdown | 1.389.0 |
 | [RS-470](./RS-470-remove-free-workers-left-on-an-old-image.md) | done | story | P3 | Remove Free workers left on an old image | 1.388.0 |
 | [RS-469](./RS-469-a-released-worker-reads-free-at-once-not-parked-for.md) | done | bug | P2 | A released worker reads Free at once, not Parked for 15 minutes | 1.387.2 |
 | [RS-468](./RS-468-fleet-tab-a-removed-worker-whose-account-another-wor.md) | backlog | bug | P3 | Fleet tab: a removed worker whose account another worker holds reads Replaced, not Parked | — |

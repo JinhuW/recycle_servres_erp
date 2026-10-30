@@ -15,6 +15,21 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.389.1] - 2026-10-30
+
+### Fixed
+
+- **A fleet-agent removal no longer forgets a stop by hand or a recent
+  start** (RS-472). Since v1.388.0 the agent removes a stopped worker above
+  the count on an old image. Two safeguards lived only on that container.
+  A worker a person stopped above the count was protected only while the
+  same agent process ran, so after an agent restart it read as a host
+  shutdown and was removed; the hold is now written down, as it already was
+  within the count. And a start the agent did not make itself (a `docker
+  start` by hand) was known only from the container's own start time, so
+  removing it moved the stagger back and let the next worker log in early.
+  The agent now records that start before it removes the container.
+
 ## [1.389.0] - 2026-10-30
 
 ### Changed
