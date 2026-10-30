@@ -3,7 +3,7 @@
 // what it runs; observe-only it runs nothing; a pull that fails leaves the old
 // container in place.
 
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -98,6 +98,17 @@ describe('online', () => {
     expect(result.containers.map((c) => c.worker_id)).toEqual(['lab-1', 'lab-2', 'lab-3']);
     expect(server.reports[0].containers.map((c) => c.worker_id)).toEqual(['lab-1', 'lab-2', 'lab-3']);
     expect(logged().filter((l) => l.msg === 'note').map((l) => l.note)).toEqual(['lab-2: beyond count 1; left running', 'lab-3: beyond count 1; left running']);
+  });
+
+  it('removes a stopped worker above the count on an old image, and stamps no start', async () => {
+    const docker = new FakeDocker([running('lab-1', 'img:2'), exited('lab-3', 75, '2026-10-23T12:00:00Z', 'img:1')]);
+    server.desired = desired({ image: 'img:2' });
+    const result = await agent(docker).tick();
+    expect(docker.commands).toEqual([['stop+rm', 'rs-fleet-lab-3']]);
+    expect(server.reports[0].containers.map((c) => c.worker_id)).toEqual(['lab-1']);
+    expect(result.applied.map((a) => a.kind)).toEqual(['remove']);
+    // Nothing to remember: no start was stamped.
+    expect(existsSync(join(stateDir, 'memory.json'))).toBe(false);
   });
 
   it('staggers starts across ticks and remembers the last one on disk', async () => {

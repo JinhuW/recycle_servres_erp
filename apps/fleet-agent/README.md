@@ -3,8 +3,9 @@
 One container per Docker host. It keeps the host's Facebook workers as the
 ERP desires: it asks the ERP every 30 s how many workers this host should
 run and on which image, compares that with the containers carrying its
-label, and starts, restarts or replaces workers to match. It never removes
-one. It then
+label, and starts, restarts or replaces workers to match. It removes only a
+stopped worker above the count whose image new workers no longer start on,
+which is not a login. It then
 reports what runs. The workers themselves claim an account from the ERP and
 pull their own cities; the agent never sees a password, a cookie or a city.
 

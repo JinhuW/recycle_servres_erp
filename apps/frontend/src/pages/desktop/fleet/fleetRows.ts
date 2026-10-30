@@ -78,7 +78,7 @@ export type FleetRowsInput = {
   challenges: readonly Challenge[] | null;
   pool: readonly FleetPoolAccount[] | null;
   /** The hosts that exist: a worker of a deleted host is free for no one. */
-  hosts?: readonly Pick<FleetHost, 'host_id'>[];
+  hosts?: readonly (Pick<FleetHost, 'host_id'> & Partial<Pick<FleetHost, 'report'>>)[];
 };
 
 const vncPortOf = (url: string | null | undefined): number | null => {
@@ -185,11 +185,15 @@ export function fleetRows(input: FleetRowsInput, now: number = Date.now()): Flee
   const slotOf = (w: FleetWorker) => input.slots.find(s => s.worker_id === w.worker_id)
     ?? input.slots.find(s => s.account_no === w.account_no) ?? null;
   const hosts = input.hosts && new Set(input.hosts.map(h => h.host_id));
+  // The containers each reporting host still has: the agent removes a free
+  // worker's stopped container once new workers start on another image.
+  const onHost = new Map((input.hosts ?? []).flatMap(h => h.report ? [[h.host_id, new Set(h.report.containers.map(c => c.worker_id))] as const] : []));
   const rows: FleetRow[] = [];
   const seenNo = new Set<number>();
   for (const w of workers.values()) {
     const row = erpRow(w, slotOf(w), input.release, null, now, !!hosts && !!w.host_id && !hosts.has(w.host_id));
     if (!row.running && !(row.heartbeat && now - Date.parse(row.heartbeat) < OFFLINE_KEPT_MS)) continue;
+    if (row.kind === 'free' && w.host_id && onHost.get(w.host_id)?.has(w.worker_id) === false) continue;
     row.pool = row.no === null ? null : poolByNo.get(row.no) ?? null;
     row.uid ??= row.pool?.uid ?? null;
     rows.push(row);
