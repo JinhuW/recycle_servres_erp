@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COORDINATOR, HOSTS, NOW, POOL, RELEASE, SLOTS, WORKERS } from './fixtures';
-import { FLEET_ROW_KINDS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning, sortFleetRows } from './fleetRows';
+import { FLEET_ROW_KINDS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning, releasableRows, sortFleetRows } from './fleetRows';
 
 const input = { slots: SLOTS, workers: WORKERS, release: RELEASE, coordinator: COORDINATOR, challenges: null, pool: POOL };
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
@@ -75,6 +75,30 @@ describe('fleetRows', () => {
     expect(fleetRowCounts(more)).toMatchObject({ removed: 1 });
     expect(filterFleetRows(more, { kind: 'removed', host: '', q: '' }).map(r => r.workerId)).toEqual(['homelab-14']);
   });
+  it('reads a stopped worker whose account left the fleet as free, before removed', () => {
+    const silent = (worker_id: string, account_no: number) =>
+      ({ ...WORKERS[0], worker_id, account_no, task: null, last_heartbeat_at: ago(30) });
+    // Account 70 has no slot (retired); the host's report no longer lists homelab-7 either.
+    const hosts = HOSTS.map(h => h.host_id === 'homelab' ? { ...h, report: { ...h.report!, containers: [] } } : h);
+    const more = fleetRows({ ...input, hosts, workers: [...WORKERS, silent('homelab-7', 70)] }, NOW);
+    expect(more.find(r => r.workerId === 'homelab-7')).toMatchObject({ kind: 'free', running: false, no: 70, slot: null });
+    expect(fleetRowCounts(more)).toMatchObject({ free: 1 });
+    expect(fleetRunning(more)).toEqual(fleetRunning(fleetRows({ ...input, hosts }, NOW)));
+    // Still reporting, it is not free yet: its next call is refused.
+    const live = fleetRows({ ...input, workers: [...WORKERS, { ...silent('homelab-7', 70), last_heartbeat_at: ago(0.2) }] }, NOW);
+    expect(live.find(r => r.workerId === 'homelab-7')?.kind).not.toBe('free');
+  });
+  it('releases the lost and the manager-parked accounts, once each, and counts the rest', () => {
+    const silent = { ...WORKERS[0], worker_id: 'worker-60-14-2', host_id: 'worker-60-14', account_no: 33, task: null, last_heartbeat_at: ago(120) };
+    const parked = { ...WORKERS[0], worker_id: 'homelab-8', account_no: 44, state: 'CHECKPOINT', task: null, last_heartbeat_at: ago(120) };
+    const more = fleetRows({ ...input, workers: [...WORKERS, silent, parked] }, NOW);
+    const { release, skipped } = releasableRows(more);
+    // homelab-2 reports SESSION_EXPIRED on its own slot; slot 44 is parked.
+    expect(release.map(r => [r.workerId, r.slot?.account_no])).toEqual([['homelab-2', 7], ['homelab-8', 44]]);
+    // The silent worker on a good account and the coordinator's homelab-9.
+    expect(skipped).toBe(2);
+    expect(releasableRows(rows.filter(r => r.kind === 'healthy'))).toEqual({ release: [], skipped: 0 });
+  });
   it('lets the ERP win when both sources know a worker', () => {
     expect(rows.some(r => r.key === 'coord:homelab-1')).toBe(false);
   });
@@ -86,12 +110,12 @@ describe('fleetRows', () => {
     expect(by('coord:homelab-9')).toMatchObject({ no: null, kind: 'parked', running: false, host: 'homelab', heartbeat: null });
   });
   it('counts the legend and the foot', () => {
-    expect(fleetRowCounts(rows)).toEqual({ all: 7, healthy: 5, parked: 2, removed: 0 });
+    expect(fleetRowCounts(rows)).toEqual({ all: 7, healthy: 5, free: 0, parked: 2, removed: 0 });
     expect(fleetRunning(rows)).toEqual({ running: 5, hosts: 2 });
     expect(fleetRowHosts(rows, ['worker-60-14', 'office-mini'])).toEqual(['homelab', 'office-mini', 'worker-60-14']);
   });
-  it('has three kinds, and no row for a retired coordinator worker', () => {
-    expect(FLEET_ROW_KINDS).toEqual(['healthy', 'parked', 'removed']);
+  it('has four kinds, and no row for a retired coordinator worker', () => {
+    expect(FLEET_ROW_KINDS).toEqual(['healthy', 'free', 'parked', 'removed']);
     expect(rows.some(r => r.workerId === 'homelab-20')).toBe(false);
     expect(filterFleetRows(rows, { kind: 'parked', host: '', q: '' }).map(r => r.key)).toEqual(['erp:homelab-2', 'coord:homelab-9']);
     const lone = fleetRows({ ...input, workers: [], slots: [], coordinator: { ...COORDINATOR, workers: [COORDINATOR.workers[3]] } }, NOW);

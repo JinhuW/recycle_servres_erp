@@ -565,6 +565,25 @@
 .fleet-danger-text {
   color: var(--neg);
 }
+.fleet-release-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.fleet-release-list li {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+}
+.fleet-release-list li + li {
+  border-top: 1px solid var(--border);
+}
 .fleet-rules {
   display: grid;
   grid-template-columns: max-content 1fr;

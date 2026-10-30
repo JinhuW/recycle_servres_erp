@@ -3451,7 +3451,15 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     Checkpoint, Challenge or Dead (not Dead for an operator, a proxy fault),
     or a manager parked the slot, or the pool already took the account out:
     a row parked only because its worker went silent has none, and the API
-    refuses any other slot with `not_lost`. Retire on the Account Pool page
+    refuses any other slot with `not_lost`. Since v1.383.0 (RS-461) the toolbar has
+    **Release parked (N)** whenever such rows exist: a confirmation lists each
+    account, worker and state, counts the parked rows it leaves alone, and
+    warns that every account added to the fleet afterwards starts a worker (a
+    login); confirming retires them one by one through the same endpoint. A
+    worker that has stopped and whose account no longer has a slot (retired or
+    removed from the fleet) is a fourth kind, **Free**, grey, waiting for an
+    account added on the Account pool tab; Free comes before Removed and
+    Parked. Retire on the Account Pool page
     deletes the account's fleet slot too, and with no free account left the
     host runs one worker fewer instead of replacing it. Since v1.380.0
     (RS-454) a worker parked Dead because a Facebook page would not load
@@ -3463,7 +3471,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     before facebook-tracker 0.15.0 cannot take it, and the button says so.
     The worker itself now tries a page that times out twice more, 10 s then
     30 s apart, before it parks. The
-    toolbar has the legend with counts (All workers, Healthy, Parked), a
+    toolbar has the legend with counts (All workers, Healthy, Free, Parked, Removed), a
     host select and a search over worker, account, city and host; since v1.371.0 (RS-431) the
     tab opens on Healthy rather than All workers. The foot says "N of M
     workers · R running on K hosts". Since v1.367.0 (RS-418) a coordinator
