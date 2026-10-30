@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-30
 reporter: jinhu
 branch: JinhuW/rudderfish-review-fixes
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1017
 version: 1.390.1
 related: [RS-467, RS-469, RS-470, RS-471, RS-472]
 ---
