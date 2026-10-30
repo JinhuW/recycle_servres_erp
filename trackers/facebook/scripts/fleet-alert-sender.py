@@ -32,6 +32,7 @@ sends one 10-15 s after the worker withheld it. Kept alive by cron and flock:
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -53,6 +54,11 @@ PRIORITY_EMOJI = {"high": "🔥", "medium": "⚡", "low": "🐢"}
 CATEGORY_TAGS = [("ram", "RAM"), ("memory", "RAM"), ("cpu", "CPU"), ("processor", "CPU"), ("ssd", "SSD"),
                  ("storage", "SSD"), ("drive", "SSD"), ("networking", "SSD"), ("server", "Server")]
 MARKDOWN_V2 = re.compile(r"([_*\[\]()~`>#+\-=|{}.!\\])")
+
+_spec = importlib.util.spec_from_file_location("bridge", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                       "ai-verdict-bridge.py"))
+bridge = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(bridge)
 
 
 def escape(text: str) -> str:
@@ -101,8 +107,11 @@ def verdict(listing_id: str) -> dict:
     return next((r for r in rows if r.get("unit_count") is not None), rows[0] if rows else {})
 
 
-def priority(units: int | None) -> str | None:
-    """The monitor's `alert_priority`: by counted units, whatever the rating."""
+def priority(count) -> str | None:
+    """The monitor's `alert_priority`: by counted units, whatever the rating.
+    Docs indexed before the bridge read counts as the monitor does can hold
+    "12" or 0."""
+    units = bridge.unit_count(count)
     if units is None:
         return None
     return "high" if units >= 50 else "medium" if units >= 10 else "low" if units >= 5 else None
@@ -171,6 +180,18 @@ def report(entry: dict, tokens: dict) -> None:
     del entry["report"]
 
 
+def instant(stamp: str) -> datetime:
+    moment = datetime.fromisoformat(stamp.replace(" ", "T"))
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def handled(entry: dict, alert: dict) -> bool:
+    """Whether this sighting is one the entry already answered. A worker that
+    withholds the listing again later (it was repriced, say) is asked about
+    anew, so the coordinator can grant a price drop as `discounted`."""
+    return instant(alert["@timestamp"]) <= instant(entry.get("seen") or entry["at"])
+
+
 def save(state: dict) -> None:
     with open(STATE, "w") as f:
         json.dump(state, f)
@@ -193,7 +214,7 @@ def run_once(hours: int, dry_run: bool, env: dict, tokens: dict) -> tuple[int, i
             save(state)
     for alert in withheld(hours):
         lid = alert["listing_id"]
-        if lid in state:
+        if lid in state and handled(state[lid], alert):
             continue
         v = verdict(lid)
         level = priority(v.get("unit_count"))
@@ -209,17 +230,18 @@ def run_once(hours: int, dry_run: bool, env: dict, tokens: dict) -> tuple[int, i
             # Pending is another worker's claim on a lease; it may lapse
             # undelivered, so the listing is asked about again next pass.
             if claim["verdict"] == "duplicate":
-                state[lid] = {"verdict": claim["verdict"], "at": stamp}
+                state[lid] = {**state.get(lid, {}), "verdict": claim["verdict"], "at": stamp,
+                              "seen": alert["@timestamp"]}
                 skipped += 1
             continue
         text = f"*{escape(title)}*\n\n{escape(body)}"
         result = telegram(env, text, topics.get(level or ""))
         state[lid] = entry = {"verdict": claim["verdict"], "sent": result["message_id"], "at": stamp,
-                              "worker": alert["worker"], "report": {
+                              "seen": alert["@timestamp"], "worker": alert["worker"], "report": {
             "chat_id": str(result["chat"]["id"]), "message_id": result["message_id"],
             "topic_id": int(topics[level]) if level and topics.get(level) else None, "priority": level,
             "listing_id": lid, "post_url": alert["url"], "item_name": alert.get("item"),
-            "ai_score": alert["score"], "unit_count": v.get("unit_count"),
+            "ai_score": alert["score"], "unit_count": bridge.unit_count(v.get("unit_count")),
             "title": alert["title"][:300], "price": (v.get("price") or "")[:60] or None,
         }}
         save(state)
