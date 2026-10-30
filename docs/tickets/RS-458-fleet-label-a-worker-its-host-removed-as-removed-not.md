@@ -2,13 +2,13 @@
 id: RS-458
 title: Fleet: label a worker its host removed as Removed, not Parked
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-29
 reporter: jinhu
 branch: JinhuW/frogfish-2
-pr:
-version:
+pr: 1000
+version: 1.381.0
 related: []
 ---
 
