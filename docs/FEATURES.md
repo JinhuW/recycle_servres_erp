@@ -3381,8 +3381,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   tab (until v1.376.0, RS-443, on a Proxies card under the pool table); the URL with the vendor login is
   pasted once, sealed, and never shown again (the edit form's field starts
   empty and leaves the saved URL alone). An available account with a
-  password and a 2FA key gets **Add to fleet** in its Runs on cell: pick a
-  proxy (a full one is greyed; two accounts per proxy by default, the
+  password and a 2FA key gets **Add to fleet** in its Runs on cell: the
+  proxy defaults to a random one with room, or pick one from the dropdown
+  (since v1.389.0, RS-471; a full one is disabled; two accounts per proxy by default, the
   `Accounts per proxy` rule in Cities ▸ Rules; there are no home cities to
   pick since v1.374.0, RS-439), and the ERP makes the slot with a desktop browser made
   for the account (Chromium's own user agent, a common screen and scale

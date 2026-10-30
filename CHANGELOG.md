@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.389.0] - 2026-10-30
+
+### Changed
+
+- **Add to fleet picks a random proxy unless you choose one** (RS-471). The
+  dialog listed every proxy as a radio card with its label, exit, timezone and
+  load side by side, and at its width each label wrapped over three or four
+  lines, so the list ran far past the fold. The proxy is now one dropdown
+  whose default, "Any proxy with room (random)", draws among the proxies that
+  are not full when you add; each proxy below it is one line with its load,
+  and a full one is disabled. The toast names the proxy the account landed on.
+
 ## [1.388.0] - 2026-10-30
 
 ### Added

@@ -838,32 +838,6 @@
 .fleet-chart-data { margin: 0 20px 16px; }
 .fleet-chart-data summary { cursor: pointer; color: var(--fg-subtle); }
 
-/* Add to fleet (FleetProxies.tsx, on the Account pool tab) */
-.fleet-form fieldset.fleet-field {
-  border: 0;
-  margin: 0;
-  padding: 0;
-  min-width: 0;
-}
-.fleet-proxy-pick {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-  align-items: center;
-  gap: 4px 10px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  cursor: pointer;
-}
-.fleet-proxy-pick:has(input:checked) {
-  border-color: var(--accent);
-}
-@media (max-width: 640px) {
-  .fleet-proxy-pick {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-}
-
 /* Proxies: the day's checks as half-hour ticks, oldest first. */
 .fleet-proxy-strip { display: inline-flex; gap: 1px; align-items: stretch; height: 14px; }
 .fleet-proxy-strip i { width: 4px; border-radius: 1px; background: var(--border); }

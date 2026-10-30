@@ -44,6 +44,12 @@ export function proxyChoices(proxies: readonly FleetProxy[], limit: number): Pro
     .sort((a, b) => Number(a.full) - Number(b.full) || a.load - b.load || a.proxy.label.localeCompare(b.proxy.label));
 }
 
+/** A proxy with room, any of them alike: the dialog's default when the manager does not pick one. */
+export function randomOpenProxy(choices: readonly ProxyChoice[], rand: () => number = Math.random): FleetProxy | null {
+  const open = choices.filter((c) => !c.full);
+  return open.length ? open[Math.floor(rand() * open.length)]!.proxy : null;
+}
+
 export const proxyExit = (p: Pick<FleetProxy, 'host' | 'port'>): string => `${p.host}:${p.port}`;
 
 export type ProxyDraft = { label: string; url: string; timezone: string; note: string };
