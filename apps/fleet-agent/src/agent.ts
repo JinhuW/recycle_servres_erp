@@ -155,6 +155,7 @@ export class Agent {
       bootAt: this.bootAt,
       imageAllowed: imageAllowed(desired.image, this.o.imagePrefixes),
       staggerMs: this.o.staggerMs,
+      restarting: Object.entries(this.memory.pending).filter(([, p]) => p.restart && p.confirmed).map(([id]) => id),
     });
     result.actions = planned.actions;
     if (Object.keys(planned.holds).length) {
@@ -236,8 +237,10 @@ export class Agent {
 
   private async settlePending(desired: Desired, observed: Container[]): Promise<void> {
     for (const [id, pending] of Object.entries(this.memory.pending)) {
-      const n = workerIndex(this.o.hostId, id);
-      if (n === null || n > desired.count) pending.restart = false;
+      // Above the count is no reason to drop the restart: hosts never remove
+      // a worker, so a stopped one was stopped to be replaced. Observe-only,
+      // nothing will run it.
+      if (workerIndex(this.o.hostId, id) === null || !desired.authoritative) pending.restart = false;
       const exists = observed.some((c) => c.worker_id === id);
       // A container for the id again after a confirmed stop: the replacement
       // was run and the handoff is spent.

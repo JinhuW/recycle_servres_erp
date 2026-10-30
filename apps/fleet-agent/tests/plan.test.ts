@@ -103,23 +103,37 @@ describe('roll', () => {
     expect(p.actions).toEqual([]);
   });
 
-  it('is one of the tick\'s single start: a missing worker goes first', () => {
+  it('takes the tick\'s single start before a missing worker', () => {
+    // A run the ERP refuses a ticket never moves the stagger, so going first
+    // it would take the start every tick and the release would time out.
     const p = run([running('lab-2', 'img:1')], {}, { image: 'img:2', roll: { replace: 'lab-2' } });
-    expect(kinds(p)).toEqual([['run', 'lab-1']]);
-    expect(p.notes).toContain('lab-2: replacement waits for its turn');
+    expect(kinds(p)).toEqual([['replace', 'lab-2']]);
+    expect(p.notes).toContain('lab-1: missing; waits for its turn');
   });
 
-  it('goes before a 75/70 retry, which would otherwise take every start', () => {
-    for (const code of [75, 70]) {
+  it('goes before any restart, a 75/70 retry or a crash', () => {
+    for (const code of [75, 70, 0, 1]) {
       const p = run([exited('lab-1', code, ago(3600)), running('lab-2', 'img:1')], {}, { image: 'img:2', roll: { replace: 'lab-2' } });
       expect(kinds(p)).toEqual([['replace', 'lab-2']]);
-      expect(p.notes).toContain(`lab-1: exit ${code}; restart waits for lab-2's replacement`);
+      expect(p.notes).toContain(`lab-1: exit ${code}; restart waits for its turn`);
     }
   });
 
-  it('still lets a crashed worker restart first', () => {
-    const p = run([exited('lab-1', 1, ago(3600)), running('lab-2', 'img:1')], {}, { image: 'img:2', roll: { replace: 'lab-2' } });
-    expect(kinds(p)).toEqual([['start', 'lab-1']]);
+  it('waits for the stagger like any start', () => {
+    const p = run([running('lab-1', 'img:1'), running('lab-2', 'img:1')], { lastStartAt: NOW - 1000 }, { image: 'img:2', roll: { replace: 'lab-2' } });
+    expect(p.actions).toEqual([]);
+    expect(p.notes).toContain('lab-2: replacement waits for its turn');
+  });
+
+  it('runs again a worker above the count stopped for its replacement', () => {
+    const p = run([running('lab-1', 'img:2')], { restarting: ['lab-3'] }, { count: 1, image: 'img:2', vnc_ports: { 'lab-1': 5901, 'lab-3': 5903 } });
+    expect(kinds(p)).toEqual([['run', 'lab-3']]);
+    expect(p.actions[0]).toMatchObject({ image: 'img:2', port: 5903, reason: 'replacement' });
+  });
+
+  it('leaves a restarting id that already has a container to the usual rules', () => {
+    const p = run([running('lab-1', 'img:2'), running('lab-3', 'img:2')], { restarting: ['lab-3'] }, { count: 1, image: 'img:2' });
+    expect(p.actions).toEqual([]);
   });
 
   it('does not hold a 75 retry for a replacement already done', () => {

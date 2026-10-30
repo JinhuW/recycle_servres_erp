@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Icon } from '../../../components/Icon';
-import { SortTh, type SortState } from '../../../components/SortTh';
+import { nextSort, SortTh, type SortState } from '../../../components/SortTh';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { coordinatorApi, type Challenge, type FleetDoc } from '../../../lib/coordinator';
 import { poolApi } from '../../../lib/facebookPool';
@@ -116,8 +116,7 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
   const releasable = useMemo(() => releasableRows(rows), [rows]);
   // Click cycles desc → asc → the table's own order (running first, by worker id).
   const [sort, setSort] = usePersisted<SortState>('desktop.fleet.workers.sort', { col: '', dir: null });
-  const cycleSort = (col: string) => setSort(s =>
-    s.col !== col || s.dir === null ? { col, dir: 'desc' } : s.dir === 'desc' ? { col, dir: 'asc' } : { col: '', dir: null });
+  const cycleSort = (col: string) => setSort(s => nextSort(s, col));
   const shown = useMemo(() => {
     const filtered = filterFleetRows(rows, filter);
     return sort.dir && (FLEET_ROW_SORT_COLS as readonly string[]).includes(sort.col)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Skeleton } from '../../components/Skeleton';
-import { SortTh, type SortState } from '../../components/SortTh';
+import { nextSort, SortTh, type SortState } from '../../components/SortTh';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { useElementWidth } from '../../lib/useElementWidth';
@@ -118,8 +118,7 @@ function MissedCard({ a, locale }: { a: TrackerAnalytics | null; locale: string 
 // Click cycles desc → asc → the order the tracker sent. Blanks sort last.
 function useSort(key: string): [SortState, (col: string) => void] {
   const [sort, setSort] = usePersisted<SortState>(`desktop.tracker.analytics.${key}.sort`, { col: '', dir: null });
-  const cycle = (col: string) => setSort(s =>
-    s.col !== col || s.dir === null ? { col, dir: 'desc' } : s.dir === 'desc' ? { col, dir: 'asc' } : { col: '', dir: null });
+  const cycle = (col: string) => setSort(s => nextSort(s, col));
   return [sort, cycle];
 }
 

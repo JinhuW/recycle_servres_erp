@@ -10,7 +10,7 @@ import type { PoolAccountSummary } from '../../../lib/facebookPool';
 
 /** What a row reads of its pool account: a snapshot row or a summary row. */
 export type FleetPoolAccount = Pick<PoolAccountSummary, 'no' | 'uid' | 'status' | 'holder' | 'note'>;
-import { fleetResumable, fleetSlotRetirable, fleetStateParked, type FleetRelease, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume } from '../../../lib/fleet';
+import { fleetResumable, fleetSlotRetirable, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume } from '../../../lib/fleet';
 import { parkedWorkers, retiredAt } from '../../../lib/fleetView';
 import { leaseLive, liveness } from './fleetBoard';
 
@@ -77,6 +77,8 @@ export type FleetRowsInput = {
   coordinator: FleetDoc | null;
   challenges: readonly Challenge[] | null;
   pool: readonly FleetPoolAccount[] | null;
+  /** The hosts that exist: a worker of a deleted host is free for no one. */
+  hosts?: readonly Pick<FleetHost, 'host_id'>[];
 };
 
 const vncPortOf = (url: string | null | undefined): number | null => {
@@ -84,7 +86,7 @@ const vncPortOf = (url: string | null | undefined): number | null => {
   return m ? Number(m[1]) : null;
 };
 
-function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelease | null, pool: FleetPoolAccount | null, now: number): FleetRow {
+function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelease | null, pool: FleetPoolAccount | null, now: number, hostless = false): FleetRow {
   const beat = liveness(worker.last_heartbeat_at, now);
   // A worker between leases still reports; only its silence takes it offline.
   const running = beat === 'live' || beat === 'stale';
@@ -93,9 +95,10 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
   const replacing = running && release?.state === 'rolling' && release.current?.worker_id === worker.worker_id;
   // A manager's park holds the slot whatever state the worker still reports.
   // Without a slot the account is out of the fleet: the host starts the
-  // worker again only for an account added since, whatever it did with it.
+  // worker again only for an account added since, whatever it did with it;
+  // a deleted host has no agent to start it.
   const kind: FleetRowKind = running && !fleetStateParked(worker.state) && !(holds && slot.parked) ? 'healthy'
-    : !running && !slot ? 'free' : 'parked';
+    : !running && !slot && !hostless ? 'free' : 'parked';
   const task = running ? worker.task ?? null : null;
   const no = slot?.account_no ?? worker.account_no ?? null;
   return {
@@ -180,10 +183,11 @@ export function fleetRows(input: FleetRowsInput, now: number = Date.now()): Flee
   for (const s of input.slots) if (s.worker) workers.set(s.worker.worker_id, s.worker);
   const slotOf = (w: FleetWorker) => input.slots.find(s => s.worker_id === w.worker_id)
     ?? input.slots.find(s => s.account_no === w.account_no) ?? null;
+  const hosts = input.hosts && new Set(input.hosts.map(h => h.host_id));
   const rows: FleetRow[] = [];
   const seenNo = new Set<number>();
   for (const w of workers.values()) {
-    const row = erpRow(w, slotOf(w), input.release, null, now);
+    const row = erpRow(w, slotOf(w), input.release, null, now, !!hosts && !!w.host_id && !hosts.has(w.host_id));
     if (!row.running && !(row.heartbeat && now - Date.parse(row.heartbeat) < OFFLINE_KEPT_MS)) continue;
     row.pool = row.no === null ? null : poolByNo.get(row.no) ?? null;
     row.uid ??= row.pool?.uid ?? null;

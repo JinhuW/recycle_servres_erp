@@ -228,8 +228,8 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
  * the ones this host's workers hold (a lease or a handoff reservation of this
  * host's), plus the ones any worker could claim now (a fleet account, not
  * parked, lease free). Never below the highest-numbered worker holding a slot:
- * the agent removes workers above `count`, and stopping one that holds an
- * account only frees it for a fresh login elsewhere.
+ * the agent leaves a worker above `count` alone, so one that exits is not
+ * restarted and its account waits for a fresh login elsewhere.
  */
 async function workerCount(tx: SqlLike, host: FleetHostRow): Promise<number> {
   if (!host.authoritative || host.capacity <= 0) return 0;

@@ -3478,7 +3478,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     worker that has stopped and whose account no longer has a slot (retired or
     removed from the fleet) is its own kind, **Free**, grey, waiting for an
     account added on the Account pool tab; Free comes before
-    Parked. Retire on the Account Pool page
+    Parked. A stopped worker of a deleted host reads Parked, not Free: no
+    agent is left to start it (v1.387.1). Retire on the Account Pool page
     deletes the account's fleet slot too, and with no free account left the
     host runs one worker fewer instead of replacing it. Since v1.380.0
     (RS-454) a worker parked Dead because a Facebook page would not load

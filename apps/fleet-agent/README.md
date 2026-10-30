@@ -81,7 +81,11 @@ the same `FLEET_HOST_ID` on its daemon observes only, logs an error and puts
      stays stopped until the count reaches it again. Since v1.385.0 nothing
      is removed;
    - replace the one worker `roll.replace` names if it is not yet on the
-     desired image (stop, then run on the new image), beyond `count` too;
+     desired image (stop, then run on the new image), beyond `count` too.
+     It takes the tick's start before any other run or restart, which could
+     fail without moving the stagger and hold the release up. A worker
+     stopped for its replacement whose run failed is run again, beyond
+     `count` too, and keeps its account reserved meanwhile;
    - restart an exited worker by its exit code: `75` (stale epoch or no
      slot) after 60 s, or after 10 min once it has had five 75/70 restarts
      in 30 min; `70` (claim failed) after 10 min; any other code after 60 s,
