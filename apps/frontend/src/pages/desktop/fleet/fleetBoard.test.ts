@@ -3,7 +3,7 @@ import type { FleetCity, FleetTask } from '../../../lib/fleet';
 import { CITIES, HITS, HOSTS, NOW, RELEASE, SLOTS, STATS, TASKS, WORKERS } from './fixtures';
 import {
   alertsByCity, averageTaskSeconds, beltAxis, beltLeft, beltRow, beltSummary, budgetTone, cityBucket, cityStanding, daySeries, dueIn, dueLabel,
-  easternClock, filterCities, filterTasks, funnelCounts, funnelGaps, funnelHeadline, hostRunning, isQuarantined, isSlug,
+  capacityCuts, easternClock, filterCities, filterTasks, funnelCounts, funnelGaps, funnelHeadline, hostRunning, isQuarantined, isSlug,
   lastDoneSearch, leaseLive, liveness, logByItem, maskUid, nextDue, niceTop, openSearch, releaseSummary, rollProgress, hostLag, imageVersion, roundStartPreview,
   slotLease, sortTasks, spanLabel, utcDayStart, withCityNames, workersBusy,
 } from './fleetBoard';
@@ -300,6 +300,15 @@ describe('hosts', () => {
     expect(hostRunning(HOSTS[0])).toEqual({ running: 4, desired: 4 });
     expect(hostRunning(HOSTS[1])).toEqual({ running: 1, desired: 2 });
     expect(hostRunning(HOSTS[2])).toEqual({ running: 0, desired: 0 });
+  });
+  it('names the containers a lower capacity removes, highest first', () => {
+    expect(capacityCuts(HOSTS[0], 4)).toEqual([]);
+    expect(capacityCuts(HOSTS[0], 2).map(c => c.worker_id)).toEqual(['homelab-4', 'homelab-3']);
+    expect(capacityCuts(HOSTS[0], 0)).toHaveLength(4);
+    // Another host's ids, or no report, are never cut.
+    const odd = { ...HOSTS[0], report: { ...HOSTS[0].report!, containers: [{ ...HOSTS[0].report!.containers[0], worker_id: 'homelab-x' }, { ...HOSTS[0].report!.containers[0], worker_id: 'worker-60-14-9' }] } };
+    expect(capacityCuts(odd, 0)).toEqual([]);
+    expect(capacityCuts(HOSTS[2], 0)).toEqual([]);
   });
   it('follows a roll and is quiet once every container is on the image', () => {
     expect(rollProgress(HOSTS[0], RELEASE)).toEqual({ onTarget: 2, total: 4, replacing: 'homelab-3' });

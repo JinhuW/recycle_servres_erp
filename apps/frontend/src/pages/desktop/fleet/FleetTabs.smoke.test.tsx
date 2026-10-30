@@ -24,11 +24,13 @@ vi.mock('../../../lib/facebookPool', async () => {
   const never = () => new Promise(() => undefined);
   return { ...actual, poolApi: Object.fromEntries(Object.keys(actual.poolApi).map(k => [k, vi.fn(never)])) };
 });
+// Modal reads document on mount; a dialog's body renders the same without it.
+vi.mock('../../../components/Modal', () => ({ Modal: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 vi.mock('../../../lib/errorToast', () => ({ handleFetchError: vi.fn(), showSuccessToast: vi.fn(), showWarnToast: vi.fn() }));
 
 const { CITIES, CITY_LOG, COORDINATOR, HITS, HOSTS, NOW, POOL, RELEASE, SLOTS, STATS, TASKS, WORKER_DETAIL, WORKER_STINTS, WORKERS } = await import('./fixtures');
 const { WorkersTable } = await import('./FleetAccountsTab');
-const { HostStrip, ReleaseBanner } = await import('./FleetHosts');
+const { HostStrip, LowerCapacityDialog, ReleaseBanner } = await import('./FleetHosts');
 const { Belt, CityLogAside, TaskTable } = await import('./FleetTasksTab');
 const { CitiesTable } = await import('./FleetCitiesTab');
 const { DayChart, HitsTable } = await import('./FleetAnalysisTab');
@@ -52,6 +54,15 @@ describe('Fleet tab', () => {
     expect(html).toContain('fleetHostRolling');
     expect(html).toContain('1.340.0');
     expect(renderToString(<HostStrip hosts={[]} release={null} onChanged={noop} now={NOW} />)).toContain('fleetHostsNone');
+  });
+  it('names the containers a lower capacity removes, and the login it costs', () => {
+    const html = renderToString(<LowerCapacityDialog host={HOSTS[0]} next={2} onClose={noop} onDone={noop} />);
+    expect(html).toContain('fleetCapacityLowerTitle');
+    expect(html).toContain('homelab-4');
+    expect(html).toContain('homelab-3');
+    expect(html).not.toContain('homelab-2');
+    expect(html).toContain('fleetCapacityLowerRunning');
+    expect(html).toContain('fleetCapacityLowerConfirm');
   });
   it('notes workers on an older build, with no bar, when no release rolls', () => {
     for (const release of [null, { ...RELEASE, state: 'done' as const }]) {

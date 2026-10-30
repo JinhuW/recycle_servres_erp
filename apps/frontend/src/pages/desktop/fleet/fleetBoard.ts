@@ -5,7 +5,7 @@
 
 import type { AlertHitRow } from '../../../lib/coordinator';
 import {
-  fleetStateParked, type FleetCity, type FleetCityLogTask as FleetTaskLog, type FleetFunnelDay, type FleetHost, type FleetRelease, type FleetSlot, type FleetTask,
+  fleetStateParked, type FleetCity, type FleetCityLogTask as FleetTaskLog, type FleetFunnelDay, type FleetHost, type FleetHostContainer, type FleetRelease, type FleetSlot, type FleetTask,
   type FleetWorker,
 } from '../../../lib/fleet';
 import { FLOW_STAGES, type FlowStage } from '../../../lib/fleetView';
@@ -301,6 +301,19 @@ export const marketplaceUrl = (slug: string): string => `https://www.facebook.co
 export function hostRunning(h: FleetHost): { running: number; desired: number } {
   const running = (h.report?.containers ?? []).filter(c => c.state === 'running').length;
   return { running, desired: h.desired.count };
+}
+
+/** The containers a host's agent stops and removes at capacity `next`: every
+ *  one numbered above it, as `apps/fleet-agent/src/plan.ts` reads
+ *  `<host_id>-<n>`, highest first. */
+export function capacityCuts(h: Pick<FleetHost, 'host_id' | 'report'>, next: number): FleetHostContainer[] {
+  const index = (id: string) => {
+    const m = id.startsWith(`${h.host_id}-`) ? /^[1-9]\d*$/.exec(id.slice(h.host_id.length + 1)) : null;
+    return m ? Number(m[0]) : null;
+  };
+  return (h.report?.containers ?? [])
+    .filter(c => (index(c.worker_id) ?? 0) > next)
+    .sort((a, b) => index(b.worker_id)! - index(a.worker_id)!);
 }
 
 /** A roll's progress on one host: workers already on the target image, of

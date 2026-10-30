@@ -3406,7 +3406,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     last reported, running of capacity, the **Authoritative** switch (off is
     observe-only: the agent reports and starts nothing), the capacity stepper
     (a new worker is a Facebook login; since v1.364.0 the agent runs no more
-    workers than the host has accounts for) and, while a release rolls, its
+    workers than the host has accounts for; since v1.382.0 (RS-459) a − that
+    would leave a running container numbered above the new capacity asks
+    first, naming the containers the agent will stop and remove) and, while a release rolls, its
     progress line with the worker replaced next (since v1.367.0 only while
     GET /api/fleet/hosts returns a rolling release; without one, workers
     left on an older image get a quiet "1 worker on 0.14.6; new workers
@@ -3438,6 +3440,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     latest report no longer lists (the agent removed it, as it does when the
     host's capacity is lowered) reads **Removed by host** in grey instead of
     Parked. A row whose account another worker now holds shows no minutes.
+    Since v1.382.0 (RS-460) every column title sorts the table (descending,
+    ascending, then its own order; empty cells last).
     Since v1.379.0
     (RS-451) a parked ERP-fleet row, and that worker's page, have **Retire &
     free**: the pool account is retired and its slot deleted, the worker is

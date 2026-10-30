@@ -1,17 +1,19 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Icon } from '../../../components/Icon';
+import { SortTh, type SortState } from '../../../components/SortTh';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { coordinatorApi, type Challenge, type FleetDoc } from '../../../lib/coordinator';
 import { poolApi } from '../../../lib/facebookPool';
 import { fleetApi, fleetSlotRetirable, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetWorker } from '../../../lib/fleet';
 import { queueCityName, withoutRetired } from '../../../lib/fleetView';
 import { useT } from '../../../lib/i18n';
+import { usePersisted } from '../../../lib/listMemory';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
 import { ActivityAside } from '../FleetWorkers';
 import { dueLabel, easternClock, isQuarantined, maskUid } from './fleetBoard';
 import {
-  DEFAULT_FLEET_ROW_FILTER, FLEET_ROW_KINDS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning,
-  type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowKind,
+  DEFAULT_FLEET_ROW_FILTER, FLEET_ROW_KINDS, FLEET_ROW_SORT_COLS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning, sortFleetRows,
+  type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowKind, type FleetRowSortCol,
 } from './fleetRows';
 import { AddHostDialog, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
 import {
@@ -108,7 +110,15 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
 }) {
   const { t } = useT();
   const rows = useMemo(() => fleetRows(data, now), [data, now]);
-  const shown = useMemo(() => filterFleetRows(rows, filter), [rows, filter]);
+  // Click cycles desc → asc → the table's own order (running first, by worker id).
+  const [sort, setSort] = usePersisted<SortState>('desktop.fleet.workers.sort', { col: '', dir: null });
+  const cycleSort = (col: string) => setSort(s =>
+    s.col !== col || s.dir === null ? { col, dir: 'desc' } : s.dir === 'desc' ? { col, dir: 'asc' } : { col: '', dir: null });
+  const shown = useMemo(() => {
+    const filtered = filterFleetRows(rows, filter);
+    return sort.dir && (FLEET_ROW_SORT_COLS as readonly string[]).includes(sort.col)
+      ? sortFleetRows(filtered, sort.col as FleetRowSortCol, sort.dir) : filtered;
+  }, [rows, filter, sort]);
   const counts = useMemo(() => fleetRowCounts(rows), [rows]);
   const hostIds = useMemo(() => fleetRowHosts(rows, data.hosts.map(h => h.host_id)), [rows, data.hosts]);
   const running = fleetRunning(rows);
@@ -134,14 +144,14 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
         <table className="fp-table fleet-table fleet-accounts">
           <thead>
             <tr>
-              <th>{t('fleetColWorker')}</th>
-              <th>{t('fleetColHost')}</th>
-              <th>{t('fleetColAccount')}</th>
-              <th>{t('fleetColState')}</th>
-              <th>{t('fleetColNow')}</th>
-              <th>{t('fleetColToday')}</th>
-              <th>{t('fleetColLease')}</th>
-              <th>{t('fleetColVersion')}</th>
+              <SortTh col="worker" sort={sort} onSort={cycleSort}>{t('fleetColWorker')}</SortTh>
+              <SortTh col="host" sort={sort} onSort={cycleSort}>{t('fleetColHost')}</SortTh>
+              <SortTh col="account" sort={sort} onSort={cycleSort}>{t('fleetColAccount')}</SortTh>
+              <SortTh col="state" sort={sort} onSort={cycleSort}>{t('fleetColState')}</SortTh>
+              <SortTh col="now" sort={sort} onSort={cycleSort}>{t('fleetColNow')}</SortTh>
+              <SortTh col="today" sort={sort} onSort={cycleSort}>{t('fleetColToday')}</SortTh>
+              <SortTh col="lease" sort={sort} onSort={cycleSort}>{t('fleetColLease')}</SortTh>
+              <SortTh col="version" sort={sort} onSort={cycleSort}>{t('fleetColVersion')}</SortTh>
               <th aria-label={t('fbcOpenWorker')} />
             </tr>
           </thead>

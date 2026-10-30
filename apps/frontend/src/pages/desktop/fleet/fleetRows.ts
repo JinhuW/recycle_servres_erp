@@ -209,6 +209,37 @@ export function fleetRows(input: FleetRowsInput, now: number = Date.now()): Flee
   return rows.sort((x, y) => Number(y.running) - Number(x.running) || naturally(x.workerId, y.workerId));
 }
 
+export type FleetRowSortCol = 'worker' | 'host' | 'account' | 'state' | 'now' | 'today' | 'lease' | 'version';
+export const FLEET_ROW_SORT_COLS: readonly FleetRowSortCol[] = ['worker', 'host', 'account', 'state', 'now', 'today', 'lease', 'version'];
+
+const KIND_ORDER: Record<FleetRowKind, number> = { healthy: 0, parked: 1, removed: 2 };
+
+function sortValue(col: FleetRowSortCol, r: FleetRow): string | number | null {
+  switch (col) {
+    case 'worker': return r.workerId;
+    case 'host': return r.host;
+    case 'account': return r.no;
+    case 'state': return `${KIND_ORDER[r.kind]} ${r.state ?? ''}`;
+    case 'now': return r.now ? r.now.cityName ?? r.now.city : null;
+    case 'today': return r.minutes;
+    case 'lease': return r.leaseExpires ? Date.parse(r.leaseExpires) : null;
+    case 'version': return r.version;
+  }
+}
+
+/** Rows by one column; a row with nothing in it goes last either way, and
+ *  ties keep the table's own order. */
+export function sortFleetRows(rows: readonly FleetRow[], col: FleetRowSortCol, dir: 'asc' | 'desc'): FleetRow[] {
+  const sign = dir === 'asc' ? 1 : -1;
+  return rows.map((r, i) => ({ r, i, v: sortValue(col, r) }))
+    .sort((a, b) => {
+      if (a.v === null || b.v === null) return a.v === b.v ? a.i - b.i : a.v === null ? 1 : -1;
+      const d = typeof a.v === 'number' && typeof b.v === 'number' ? a.v - b.v : naturally(String(a.v), String(b.v));
+      return d * sign || a.i - b.i;
+    })
+    .map(x => x.r);
+}
+
 export type FleetRowFilter = { kind: FleetRowKind | 'all'; host: string; q: string };
 export const EMPTY_FLEET_ROW_FILTER: FleetRowFilter = { kind: 'all', host: '', q: '' };
 // The tab opens on the workers doing the work; All workers is one click away.
