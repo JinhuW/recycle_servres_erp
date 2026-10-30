@@ -2,12 +2,12 @@
 id: RS-467
 title: Fleet alert stopgaps: string unit counts, price drops, logged literals, follower re-emits
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-10-30
 reporter: jinhu
 branch: JinhuW/bluegill
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1009
 version: n/a — trackers/facebook scripts only, no ERP release
 related: [RS-453, RS-455, RS-466]
 ---
