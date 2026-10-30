@@ -15,6 +15,20 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.381.0] - 2026-10-29
+
+### Changed
+
+- **A worker its host removed reads Removed by host, not Parked** (RS-458).
+  When homelab's capacity was lowered, its agent removed the containers above
+  the new count. Their rows stayed on the Workers tab as red **Parked**, so
+  homelab-14 looked as if its account had failed, even though account No. 1
+  had already moved to homelab-3. A silent worker that is missing from its
+  host's latest container report now gets a grey **Removed by host** chip and
+  its own **Removed** legend bucket, outside the Parked count. A stopped
+  container the host still keeps stays Parked. A row whose account slot now
+  belongs to another worker no longer shows that worker's minutes as its own.
+
 ## [1.380.2] - 2026-10-29
 
 ### Fixed
