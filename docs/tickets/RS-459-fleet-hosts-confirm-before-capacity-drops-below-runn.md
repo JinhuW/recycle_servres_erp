@@ -2,13 +2,13 @@
 id: RS-459
 title: Fleet hosts: confirm before capacity drops below running workers
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-29
 reporter: jinhu
 branch: JinhuW/rs-capacity-lower-warn
-pr:
-version:
+pr: 1001
+version: 1.382.0
 related: [RS-458]
 ---
 
