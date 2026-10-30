@@ -15,6 +15,20 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.386.0] - 2026-10-29
+
+### Changed
+
+- **Reddit Workflow's Evaluate stage shows the live prompt** (RS-464). The
+  Alert rules editor beside it (New rule, toggle, edit, delete) is gone; in its
+  place is the full prompt the model reads today: the base prompt with every
+  enabled rule composed in, read-only. Rules had already moved into the prompt:
+  promoting a trial on the Prompts tab folds them into the base prompt and
+  switches them off, so the editor was a second, older way to change what the
+  model reads. The note under the panel points to Prompts. The rules
+  themselves, the "Rules on" count and the tracker's rule endpoints are
+  unchanged.
+
 ## [1.385.0] - 2026-10-29
 
 ### Changed

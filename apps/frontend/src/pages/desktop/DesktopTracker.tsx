@@ -21,6 +21,7 @@ import {
   WORKERS_SEARCH_LIMIT,
   type LoopName,
   type PostStatus,
+  type ConfiguredPrompt,
   type TrackerMatch,
   type TrackerRule,
   type TrackerStats,
@@ -75,11 +76,9 @@ export function DesktopTracker({ showToast }: Props) {
   const [filter, setFilter] = useState<Liveness | 'all'>('all');
   const [query, setQuery] = useState('');
 
-  const [liveModel, setLiveModel] = useState<string | null>(null);
+  const [live, setLive] = useState<ConfiguredPrompt | null>(null);
 
-  const [ruleDialog, setRuleDialog] = useState<TrackerRule | 'new' | null>(null);
   const [modelDialog, setModelDialog] = useState(false);
-  const [deletingRule, setDeletingRule] = useState<TrackerRule | null>(null);
   const [deletingSub, setDeletingSub] = useState<TrackerSubreddit | null>(null);
 
   const fail = useCallback((err: unknown) => {
@@ -90,19 +89,19 @@ export function DesktopTracker({ showToast }: Props) {
     handleFetchError(err);
   }, []);
 
-  // The live model only arrives inside prompt-stats; the window keeps that
-  // read cheap, and `config` does not depend on it.
-  const loadModel = useCallback(() =>
-    trackerApi.promptStats(new Date(Date.now() - STATS_WINDOW_MS)).then(s => setLiveModel(s.config.live.model)),
+  // The live model and prompt only arrive inside prompt-stats; the window
+  // keeps that read cheap, and `config` does not depend on it.
+  const loadLivePrompt = useCallback(() =>
+    trackerApi.promptStats(new Date(Date.now() - STATS_WINDOW_MS)).then(s => setLive(s.config.live)),
   []);
 
   useEffect(() => {
     let alive = true;
     trackerApi.listRules().then(r => { if (alive) setRules(r); }).catch(err => { if (alive) fail(err); });
     trackerApi.listSubreddits().then(s => { if (alive) setSubs(s); }).catch(err => { if (alive) fail(err); });
-    loadModel().catch(err => { if (alive) fail(err); });
+    loadLivePrompt().catch(err => { if (alive) fail(err); });
     return () => { alive = false; };
-  }, [fail, loadModel]);
+  }, [fail, loadLivePrompt]);
 
   const loadLive = useCallback(() => {
     // A failed refresh keeps the last counts; a first one that fails reads "—".
@@ -180,16 +179,15 @@ export function DesktopTracker({ showToast }: Props) {
             onPromoted={() => {
               // Promote rewrites the live model along with the prompt.
               trackerApi.listRules().then(setRules).catch(fail);
-              loadModel().catch(fail);
+              loadLivePrompt().catch(fail);
             }} />
         ) : analyticsOpen ? (
           <AnalyticsCard locale={locale} />
         ) : seenOpen ? (
           <SeenCard locale={locale} />
         ) : workflowOpen ? (
-          <FlowCard stats={stats} subs={subs} rules={rules} liveModel={liveModel} locale={locale}
+          <FlowCard stats={stats} subs={subs} rules={rules} live={live} locale={locale}
             onSubsChanged={setSubs} onDeleteSub={setDeletingSub}
-            onRulesChanged={setRules} onEditRule={setRuleDialog} onDeleteRule={setDeletingRule}
             onEditModel={() => setModelDialog(true)}
             onError={fail} showToast={showToast} />
         ) : <>
@@ -204,53 +202,16 @@ export function DesktopTracker({ showToast }: Props) {
         </>}
       </div>
 
-      {modelDialog && liveModel !== null && (
+      {modelDialog && live !== null && (
         <ModelModal
-          model={liveModel}
+          model={live.model}
           onClose={() => setModelDialog(false)}
           onSaved={saved => {
-            setLiveModel(saved);
+            setLive(l => l && { ...l, model: saved });
             setModelDialog(false);
             showToast?.(t('trkModelSaved'));
           }}
           onError={fail}
-        />
-      )}
-
-      {ruleDialog && (
-        <RuleModal
-          rule={ruleDialog === 'new' ? null : ruleDialog}
-          onClose={() => setRuleDialog(null)}
-          onSaved={saved => {
-            setRules(rs => {
-              const list = rs ?? [];
-              return list.some(r => r.id === saved.id)
-                ? list.map(r => r.id === saved.id ? saved : r)
-                : [...list, saved];
-            });
-            setRuleDialog(null);
-            showToast?.(t('trkRuleSaved'));
-          }}
-          onError={fail}
-        />
-      )}
-
-      {deletingRule && (
-        <ConfirmDialog
-          title={t('trkDeleteRule')}
-          message={t('trkDeleteRuleMsg', { name: deletingRule.name })}
-          confirmLabel={t('trkDeleteRule')}
-          danger
-          onCancel={() => setDeletingRule(null)}
-          onConfirm={() => {
-            trackerApi.deleteRule(deletingRule.id)
-              .then(() => {
-                setRules(rs => (rs ?? []).filter(r => r.id !== deletingRule.id));
-                showToast?.(t('trkRuleDeleted'));
-              })
-              .catch(fail)
-              .finally(() => setDeletingRule(null));
-          }}
         />
       )}
 
@@ -600,22 +561,19 @@ function MatchesAside({ matches, locale }: { matches: TrackerMatch[] | Unavailab
 // each. Counts cover the posts discovered in the last STATS_WINDOW_MS, one
 // cohort, so the stages read as a funnel; the tracker never prunes posts, so
 // all-time totals only grow. Poll is where the subreddits are edited and
-// Evaluate where the model and the alert rules are; Notify has no settings
+// Evaluate where the model is, beside the live prompt; Notify has no settings
 // this page may change.
 
 type Setting = { label: string; value: string; fixed?: boolean; onEdit?: () => void; editLabel?: string };
 
-function FlowCard({ stats, subs, rules, liveModel, locale, onSubsChanged, onDeleteSub, onRulesChanged, onEditRule, onDeleteRule, onEditModel, onError, showToast }: {
+function FlowCard({ stats, subs, rules, live, locale, onSubsChanged, onDeleteSub, onEditModel, onError, showToast }: {
   stats: TrackerStats | Unavailable | null;
   subs: TrackerSubreddit[] | null;
   rules: TrackerRule[] | null;
-  liveModel: string | null;
+  live: ConfiguredPrompt | null;
   locale: string;
   onSubsChanged: (update: (prev: TrackerSubreddit[] | null) => TrackerSubreddit[] | null) => void;
   onDeleteSub: (sub: TrackerSubreddit) => void;
-  onRulesChanged: (update: (prev: TrackerRule[] | null) => TrackerRule[] | null) => void;
-  onEditRule: (rule: TrackerRule | 'new') => void;
-  onDeleteRule: (rule: TrackerRule) => void;
   onEditModel: () => void;
   onError: (err: unknown) => void;
   showToast?: (msg: string, kind?: 'success' | 'error') => void;
@@ -643,8 +601,8 @@ function FlowCard({ stats, subs, rules, liveModel, locale, onSubsChanged, onDele
       case 'evaluate': {
         const oldest = stats && stats !== 'unavailable' ? stats.oldestPending : null;
         return [
-          { label: t('trkSetModel'), value: liveModel ?? '—',
-            onEdit: liveModel === null ? undefined : onEditModel, editLabel: t('trkEditModel') },
+          { label: t('trkSetModel'), value: live?.model ?? '—',
+            onEdit: live === null ? undefined : onEditModel, editLabel: t('trkEditModel') },
           { label: t('trkSetRules'), value: rules ? `${rules.filter(r => r.enabled).length} / ${rules.length}` : '—' },
           { label: t('trkSetPending'), value: v(n('new')) },
           { label: t('trkSetRejected'), value: v(n('rejected')) },
@@ -718,8 +676,7 @@ function FlowCard({ stats, subs, rules, liveModel, locale, onSubsChanged, onDele
                     onError={onError} showToast={showToast} />
                 )}
                 {k === 'evaluate' && (
-                  <RulesPanel rules={rules} onChanged={onRulesChanged} onEdit={onEditRule} onDelete={onDeleteRule}
-                    onError={onError} />
+                  <LivePromptPanel prompt={live?.systemPrompt ?? null} />
                 )}
                 {k === 'notify' && (
                   <>
@@ -745,54 +702,24 @@ function FlowCard({ stats, subs, rules, liveModel, locale, onSubsChanged, onDele
   );
 }
 
-function RulesPanel({ rules, onChanged, onEdit, onDelete, onError }: {
-  rules: TrackerRule[] | null;
-  onChanged: (update: (prev: TrackerRule[] | null) => TrackerRule[] | null) => void;
-  onEdit: (rule: TrackerRule | 'new') => void;
-  onDelete: (rule: TrackerRule) => void;
-  onError: (err: unknown) => void;
-}) {
+// Read-only: prompt changes go through a trial on the Prompts tab, and
+// promoting one folds the enabled rules into the base prompt.
+function LivePromptPanel({ prompt }: { prompt: string | null }) {
   const { t } = useT();
   return (
     <>
-      <div className="fp-row fp-between">
-        <div className="fp-section-label">{t('trkRulesTitle')}</div>
-        <button className="btn primary sm" onClick={() => onEdit('new')}>
-          <Icon name="plus" size={13} />
-          {t('trkNewRule')}
-        </button>
-      </div>
-      <div className="rt-panel">
-        {!rules && [0, 1, 2].map(i => (
-          <div key={i} className="rt-rule" aria-hidden>
-            <div className="ff-skel-lines"><Skeleton width={140} height={13} /><Skeleton width={260} height={10} /></div>
-          </div>
-        ))}
-        {rules?.length === 0 && <div className="fp-empty">{t('trkRulesEmpty')}</div>}
-        {(rules ?? []).map(rule => (
-          <div key={rule.id} className={`rt-rule${rule.enabled ? '' : ' rt-off'}`}>
-            <div className="rt-rule-text">
-              <b>{rule.name}</b>
-              <p>{rule.prompt}</p>
+      <div className="fp-section-label">{t('trkLivePromptTitle')}</div>
+      <div className="rt-panel rt-live-prompt">
+        {prompt === null
+          ? <div className="ff-skel-lines" aria-hidden>
+              <Skeleton width={320} height={10} /><Skeleton width={280} height={10} /><Skeleton width={300} height={10} />
             </div>
-            <Toggle
-              checked={rule.enabled}
-              onChange={enabled => {
-                trackerApi.updateRule(rule.id, { enabled })
-                  .then(updated => onChanged(rs => (rs ?? []).map(r => r.id === updated.id ? updated : r)))
-                  .catch(onError);
-              }}
-            />
-            <button className="btn ghost icon sm" title={t('trkEditRule')} onClick={() => onEdit(rule)}>
-              <Icon name="edit" size={13} />
-            </button>
-            <button className="btn ghost icon sm" title={t('trkDeleteRule')} onClick={() => onDelete(rule)}>
-              <Icon name="trash" size={13} />
-            </button>
-          </div>
-        ))}
+          : <pre>{prompt}</pre>}
       </div>
-      <span className="fp-muted rt-help">{t('trkRulesSub')}</span>
+      <span className="fp-muted rt-help">
+        {t('trkLivePromptSub')}{' '}
+        <a href={hrefFor('/tracker/prompts')} onClick={onLinkClick('/tracker/prompts')}>{t('trkTabPrompts')}</a>
+      </span>
     </>
   );
 }
@@ -977,55 +904,6 @@ function ModelModal({ model, onClose, onSaved, onError }: {
           <span className={`help${hint !== null ? ' rt-help-invalid' : ''}`}>
             {hint ?? t('trkModelHelp')}
           </span>
-        </div>
-      </div>
-      <div className="modal-foot">
-        <button className="btn" onClick={onClose}>{t('cancel')}</button>
-        <button className="btn primary" disabled={!canSave || saving} onClick={save}>
-          {t('save')}
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
-function RuleModal({ rule, onClose, onSaved, onError }: {
-  rule: TrackerRule | null;
-  onClose: () => void;
-  onSaved: (rule: TrackerRule) => void;
-  onError: (err: unknown) => void;
-}) {
-  const { t } = useT();
-  const [name, setName] = useState(rule?.name ?? '');
-  const [prompt, setPrompt] = useState(rule?.prompt ?? '');
-  const [saving, setSaving] = useState(false);
-  const canSave = name.trim() !== '' && prompt.trim() !== '';
-
-  function save() {
-    if (!canSave || saving) return;
-    setSaving(true);
-    const request = rule
-      ? trackerApi.updateRule(rule.id, { name: name.trim(), prompt: prompt.trim() })
-      : trackerApi.createRule({ name: name.trim(), prompt: prompt.trim() });
-    request.then(onSaved).catch(onError).finally(() => setSaving(false));
-  }
-
-  return (
-    <Modal onClose={onClose} ariaLabel={rule ? t('trkEditRule') : t('trkNewRule')} shellStyle={{ width: 520 }}>
-      <div className="modal-head">
-        <div className="modal-title">{rule ? t('trkEditRule') : t('trkNewRule')}</div>
-      </div>
-      <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div className="field">
-          <label className="label" htmlFor="trk-rule-name">{t('trkRuleName')}</label>
-          <input id="trk-rule-name" className="input" value={name}
-            onChange={e => setName(e.target.value)} />
-        </div>
-        <div className="field">
-          <label className="label" htmlFor="trk-rule-prompt">{t('trkRulePrompt')}</label>
-          <textarea id="trk-rule-prompt" className="textarea" rows={6} value={prompt}
-            onChange={e => setPrompt(e.target.value)} />
-          <span className="help">{t('trkRulePromptHelp')}</span>
         </div>
       </div>
       <div className="modal-foot">
