@@ -2463,7 +2463,8 @@ is who paid, below).
     fails an upload. *Record entry* takes screenshots before the entry exists
     (pick, drop, or paste on desktop) and uploads them once it is saved. If
     one fails, the entry stays saved and a warning says to add it again from
-    the entry. The drawer and the phone's entry screen add and remove them
+    the entry. Each picked screenshot shows its receipt name as soon as
+    the scan reads it, before the entry is saved (v1.398.0). The drawer and the phone's entry screen add and remove them
     live; Review shows them read-only beside the figure. Adding or removing
     one is a history line and an Activity row (Added / Removed), and leaves
     the entry's version and sign-off alone: proof is not money. A voided

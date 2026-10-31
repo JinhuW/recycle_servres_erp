@@ -35,7 +35,10 @@ describe('commission transaction search and receipt amounts', () => {
     model({ method: 'alipay', amount: '￥１，２５０', currency: 'CNY' });
     const r = await scan();
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ receipt: { method: 'alipay', amount: '1250.00', currency: 'CNY' } });
+    expect(r.body).toEqual({
+      receipt: { method: 'alipay', amount: '1250.00', currency: 'CNY' },
+      filename: expect.stringMatching(/^\d{4}-\d{2}-\d{2}-alipay-1250\.00\.png$/),
+    });
     expect((await getTestDb()`SELECT COUNT(*)::int AS n FROM accounting_entries`)[0].n).toBe(0);
     model({ method: 'bank', amount: '100.50', currency: 'USD' });
     expect((await scan()).body).toMatchObject({ receipt: { amount: '100.50', currency: 'USD' } });
@@ -45,9 +48,9 @@ describe('commission transaction search and receipt amounts', () => {
     model({ method: 'bank', amount: '1250.00', currency: 'EUR' });
     expect((await scan()).body).toMatchObject({ receipt: { currency: null } });
     model({ method: 'bank', amount: '1.2.3', currency: 'CNY' });
-    expect((await scan()).body).toEqual({ receipt: null });
+    expect((await scan()).body).toEqual({ receipt: null, filename: null });
     expect((await multipart('/api/accounting/scan-receipt', { file: png() }, { token: alex.token })).body)
-      .toEqual({ receipt: null });
+      .toEqual({ receipt: null, filename: null });
   });
 
   it('gates receipt recognition on manager access and image upload limits', async () => {

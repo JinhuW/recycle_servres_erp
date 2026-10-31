@@ -15,6 +15,20 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.398.0] - 2026-10-31
+
+### Changed
+
+- **A payment screenshot shows its receipt name as soon as it is added**
+  (RS-491). On *Record entry* / *Record payment* the screenshots wait for the
+  entry to be saved before they upload, and the server's rename to
+  `<date>-<method>-<amount>` only happened at that upload. Until then the list
+  showed whatever the phone or screenshot tool called the file, such as a hash
+  or `iShot_…`. The form already read each image as it was dropped, to fill in
+  the amount. That scan now also returns the name, so the chip takes it right
+  away and the saved attachment carries the same name. Images the model can't
+  read, and PDFs, keep their own names, as before.
+
 ## [1.397.0] - 2026-10-31
 
 ### Added

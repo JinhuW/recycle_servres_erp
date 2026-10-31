@@ -182,7 +182,7 @@ export type ReceiptAmount = { amount: string; currency: 'CNY' | 'USD' | null };
 export const acctReadReceipt = (file: File) => {
   const form = new FormData();
   form.append('file', file, file.name);
-  return api.upload<{ receipt: ReceiptAmount | null }>('/api/accounting/scan-receipt', form);
+  return api.upload<{ receipt: ReceiptAmount | null; filename: string | null }>('/api/accounting/scan-receipt', form);
 };
 // `counts: false` for a list whose tab counts the page already has.
 export const acctReviewQueue = (tab: AccountingReviewTab, managerId?: string, opts: { counts?: boolean } = {}) =>
