@@ -15,6 +15,22 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.397.0] - 2026-10-31
+
+### Added
+
+- **A PO's Cost Payment picks RMB Flow or Business Account with a switch,
+  as Commission does** (RS-490). The Business Account used to be the first
+  option of Paid by, with the RMB Flow card underneath. On a Business-paid
+  PO that card could only say the money belonged on Payments. Managers now
+  get a `[RMB Flow | Business Account]` switch on the desktop and phone PO
+  pages. RMB Flow names who paid (from people only, defaulting to the
+  current payer or the signed-in manager) and shows the RMB Flow card with
+  Record. Business Account shows Method, the proof panel and the Payments
+  ledger. A PO is still paid from one source: the book still refuses RMB
+  entries on a PO saved as Business-paid, so moving the switch asks for a
+  Save before Record appears.
+
 ## [1.396.1] - 2026-10-31
 
 ### Fixed

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { AttachmentChip } from './AttachmentChip';
 import { AttachmentDropzone } from './AttachmentDropzone';
 import { Icon } from './Icon';
@@ -44,25 +45,39 @@ type Props = {
   canEditProof?: boolean;
   /** Keeps element ids unique when two instances share a page. */
   idPrefix?: string;
+  /** A manager's PO page: the payment's source is a switch, as on the
+   *  Commission tab — the RMB Flow (a person paid, booked on the RMB book) or
+   *  the Business Account (the USD bank's, on Payments) — and each side brings
+   *  its own ledger. The select then names people only. */
+  sources?: { rmb: ReactNode; business: ReactNode };
+  /** Who the RMB side names when the switch moves there and nobody is on file. */
+  defaultPayerId?: string | null;
 };
 
 export function PaymentFields({
   paidBy, paidByUserId, payers, onPaidBy, method, onMethod, txnId, onTxnId,
   txnRequired = false, disabled = false, payerLocked = false, compact = false,
-  proof, canEditProof = true, idPrefix = 'pay',
+  proof, canEditProof = true, idPrefix = 'pay', sources, defaultPayerId = null,
 }: Props) {
   const { t } = useT();
   const company = paidBy === 'company';
   const p = idPrefix;
+  const pickSource = (s: 'rmb' | 'business') => {
+    if (s === 'business') { if (!company) onPaidBy('company', null); return; }
+    if (!company) return;
+    const keep = paidByUserId && payers.some(m => m.id === paidByUserId) ? paidByUserId : null;
+    onPaidBy('self', keep ?? defaultPayerId ?? payers[0]?.id ?? null);
+  };
   // A self-paid record naming nobody (an older backend, or a payer dropped
   // from the list) keeps a row of its own, or the select could not show it.
   const stale = !company && (paidByUserId === null || !payers.some(m => m.id === paidByUserId));
   const value = company ? BUSINESS_ACCOUNT : stale ? 'self' : paidByUserId!;
 
-  return (
+  const fields = (
     <div className={'pay-fields' + (compact ? ' compact' : '')}>
       <div className="pay-row">
-        <div className="field">
+        {/* With the switch, the Business Account is the switch's to name. */}
+        {!(sources && company) && <div className="field">
           <label className="label" htmlFor={`${p}-paidby`}>{t('hoPaidBy')}</label>
           <select
             id={`${p}-paidby`}
@@ -75,12 +90,12 @@ export function PaymentFields({
               onPaidBy(v === BUSINESS_ACCOUNT ? 'company' : 'self', v === BUSINESS_ACCOUNT || v === 'self' ? null : v);
             }}
           >
-            <option value={BUSINESS_ACCOUNT}>{t(compact ? 'payBusinessShort' : 'payBusiness')}</option>
+            {!sources && <option value={BUSINESS_ACCOUNT}>{t(compact ? 'payBusinessShort' : 'payBusiness')}</option>}
             {stale && <option value="self">{t(compact ? 'paySelfShort' : 'paySelf')}</option>}
             {payers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
           {payerLocked && <div className="field-hint" id={`${p}-paidby-locked`}>{t('payPayerLocked')}</div>}
-        </div>
+        </div>}
         {company && (
           <div className="field pay-reveal">
             <span className="label" id={`${p}-method`}>{t('hoMethod')}</span>
@@ -101,6 +116,26 @@ export function PaymentFields({
           proof={proof} canEdit={canEditProof && !disabled} idPrefix={p}
         />
       )}
+    </div>
+  );
+  if (!sources) return fields;
+  const locked = disabled || payerLocked;
+  return (
+    <div className="pay-sourced">
+      <div className="seg" role="group" aria-label={t('cpPaymentSource')}>
+        {(['rmb', 'business'] as const).map(s => {
+          const on = (s === 'business') === company;
+          return (
+            <button key={s} type="button" className={on ? 'active' : ''} aria-pressed={on}
+                    disabled={locked} onClick={() => pickSource(s)}>
+              {t(s === 'rmb' ? 'acctCardTitle' : 'payBusiness')}
+            </button>
+          );
+        })}
+      </div>
+      {payerLocked && company && <div className="field-hint">{t('payPayerLocked')}</div>}
+      {fields}
+      {company ? sources.business : sources.rmb}
     </div>
   );
 }
