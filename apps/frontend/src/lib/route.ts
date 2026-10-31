@@ -382,6 +382,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   tracker:    '/tracker',
   wechat:     '/wechat',
   coordinator: '/fleet',
+  leadsReddit: '/leads/reddit',
   settings:   '/settings',
 } as const;
 
@@ -412,6 +413,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/tracker' || path === '/tracker/workflow' || path === '/tracker/prompts' || path === '/tracker/analytics' || path === '/tracker/seen') return 'tracker';
   if (path === '/wechat' || matchWechatDay(path)) return 'wechat';
   if (path === '/fleet' || path === '/fleet/pool' || matchFleetTab(path) || fleetRedirect(path) || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
+  if (path === '/leads/reddit' || matchLeadsTab(path)) return 'leadsReddit';
   if (path === '/settings') return 'settings';
   return 'home';
 }
@@ -450,6 +452,20 @@ export function wechatDayPath(date: string): string {
 export function matchWechatDay(path: string): { date: string } | null {
   const m = match('/wechat/:date', path);
   return m && /^\d{4}-\d{2}-\d{2}$/.test(m.date) ? { date: m.date } : null;
+}
+
+// Leads ▸ Reddit's tabs beside Pool at /leads/reddit itself. Team and Import
+// are the managers'.
+export const LEADS_TABS = ['mine', 'network', 'team', 'import'] as const;
+export type LeadsTab = (typeof LEADS_TABS)[number];
+
+export function leadsTabPath(tab: LeadsTab | 'pool'): string {
+  return tab === 'pool' ? '/leads/reddit' : `/leads/reddit/${tab}`;
+}
+
+export function matchLeadsTab(path: string): LeadsTab | null {
+  const m = match('/leads/reddit/:tab', path);
+  return m && (LEADS_TABS as readonly string[]).includes(m.tab) ? (m.tab as LeadsTab) : null;
 }
 
 // The ERP-owned fleet's tabs under Monitors ▸ Facebook beside the Fleet tab

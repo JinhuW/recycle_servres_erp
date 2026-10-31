@@ -51,6 +51,9 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   bank and internal transactions, the RMB Flow (v1.310.0, named Accounting until v1.317.0), tracker,
   the WeChat market (v1.312.0), coordinator, connectors, FX rates, inventory export and analysis, a line's
   linked sell orders) answer 403. The
+  Reddit leads (`/api/leads/reddit`, v1.392.0) are open to every role, but a
+  purchaser reading a seller someone else holds gets only `claimed: true`:
+  no holder, stage, follow-up, reply or history; import is manager-only. The
   Facebook account pool (`/api/facebook-pool`, v1.262.0) is the exception
   under Monitors: every role reads the rack and may take, return and report,
   while add, import, edit, retire and remove answer 403 to a purchaser;
@@ -1234,6 +1237,56 @@ log and `orders.supplier_id`.
 - **Changing a client's owner goes through one endpoint only.** A handover has
   to leave a trace on the same timeline as the calls, so it is a reassign, never
   a field edit (v1.114.1).
+
+## Leads (Reddit sellers)
+
+**Leads ▸ Reddit** (`#/leads/reddit`, v1.392.0, RS-477) is a pool of sellers to
+buy from. They are found in the swap subreddits' public trade records: u/LabB0T
+on r/homelabsales and u/hwsbot on r/hardwareswap log every confirmed sale
+and buy. Purchasers claim a seller and work it as a sales pipeline. The page
+uses Monitors ▸ Facebook's layout: icon tabs with counts, and a line under them
+saying what the tab is for.
+
+- **Pool** lists every unclaimed seller, most confirmed sales first. Each row
+  shows the deal record the way the bots write it (`289 Sale | 4 Buy`), the
+  last deal and what they sold lately. **Claim** moves the seller to the
+  claimer's My leads, and everyone else then sees it as claimed. When two
+  purchasers claim at once, the second gets a warning (409 `rlTakenElsewhere`).
+  There is no claim limit.
+- **My leads** is the claimer's queue: Claimed → DM sent → Replied →
+  Negotiating → Deal made, or closed as No stock now / Not interested. It is
+  ordered by urgency: follow-ups that are due, then sellers still waiting for a
+  first DM, then open talks, then closed. A List view shows the stage, next step
+  and the seller's last reply; a Board view shows a column per stage. The
+  choice is the `leads.view` preference. The sidebar badge counts leads needing
+  a first DM or a due follow-up.
+- **The lead panel** runs the workflow for one seller:
+  - a stage bar, and the next step spelled out;
+  - a DM writer with Bulk inventory, Specific item and Follow-up templates,
+    filled in from the seller's record. **Open in Reddit** opens Reddit's
+    compose page with the message filled in, and the purchaser presses Send
+    there. Confirming "sent" marks the DM sent and sets a follow-up 3 days
+    out;
+  - logging the seller's reply, which clears the follow-up;
+  - setting the next follow-up (Tomorrow, In 3 days, Next week or a date);
+  - closing the lead (Deal made; No stock now, which comes back in 30 days;
+    Not interested), reopening it, and releasing the seller;
+  - the lead's history, read from an append-only ledger.
+- **Buyer network** lists the top 50 buyers. Picking one, say u/Frank202312,
+  shows a tree of every seller they bought from, biggest sellers first. Each
+  node shows the seller's record, whether they are available and **Claim**;
+  under it are the trades between the two, each linking to the bot's
+  confirmation comment. "Only unclaimed sellers" and "Claim the top 5
+  unclaimed" pull a big buyer's suppliers into the queue.
+- **Team** (managers) has a board per purchaser: claimed, stale (claimed over
+  48 h ago with no DM), follow-ups due, DM sent with the contact rate,
+  replied, negotiating and deals. Below it is every claim, stale first, each
+  with **Release**.
+- **Import** (managers) takes the harvest file. The JSON carries sellers, top
+  buyers and their trades; the sellers CSV carries sellers only. Re-importing
+  updates counts and items and keeps every claim, stage and history. The
+  harvest itself is a hand-run script that reads the bots' monthly
+  confirmed-trade threads, so its counts are a floor, not a total.
 
 ## Inventory
 

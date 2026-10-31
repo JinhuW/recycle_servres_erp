@@ -46,6 +46,7 @@ const DesktopAccountingReview = lazy(() => import('./pages/desktop/DesktopAccoun
 const DesktopSettings = lazy(() => import('./pages/desktop/DesktopSettings').then(m => ({ default: m.DesktopSettings })));
 const DesktopTracker = lazy(() => import('./pages/desktop/DesktopTracker').then(m => ({ default: m.DesktopTracker })));
 const DesktopWechat = lazy(() => import('./pages/desktop/DesktopWechat').then(m => ({ default: m.DesktopWechat })));
+const LeadsReddit = lazy(() => import('./pages/desktop/LeadsReddit').then(m => ({ default: m.LeadsReddit })));
 const DesktopCoordinator = lazy(() => import('./pages/desktop/DesktopCoordinator').then(m => ({ default: m.DesktopCoordinator })));
 const DesktopSubmit = lazy(() => import('./pages/desktop/DesktopSubmit').then(m => ({ default: m.DesktopSubmit })));
 const DesktopShipping = lazy(() => import('./pages/desktop/DesktopShipping').then(m => ({ default: m.DesktopShipping })));
@@ -325,6 +326,7 @@ export function DesktopApp() {
             {view2 === 'tracker'   && <DesktopTracker showToast={showToast} />}
             {view2 === 'wechat'    && <DesktopWechat />}
             {view2 === 'coordinator' && <DesktopCoordinator showToast={showToast} />}
+            {view2 === 'leadsReddit' && <LeadsReddit showToast={showToast} />}
             {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}
           </Suspense>
         </div>
