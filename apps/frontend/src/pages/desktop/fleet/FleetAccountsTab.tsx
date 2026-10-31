@@ -16,6 +16,7 @@ import {
   releasableRows, rowOwnSlot, rowRetirable, sortFleetRows,
   type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowKind, type FleetRowSortCol,
 } from './fleetRows';
+import { AccountBriefCell } from './accountBrief';
 import { AddHostDialog, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
 import {
   agoLabel, BudgetRing, COORDINATOR_POLL_MS, EmptyRow, Legend, MarkHealthyButton, ParkDialog, ReleaseParkedDialog, RetireSlotDialog, resumeWaiting, UnavailableCard, useFleetMirror, useFleetPoll,
@@ -233,10 +234,16 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
         {r.host ? <span className="mono fleet-hostcell">{r.host}</span> : <span className="fp-muted">—</span>}
       </td>
       <td>
-        <span className="fp-holder">
-          <span>{r.no === null ? <span className="fp-muted">—</span> : t('fleetAccountNo', { no: r.no })}</span>
-          <small className="mono" title={t('fleetUidMasked')}>{maskUid(r.uid)}</small>
-        </span>
+        {r.no === null
+          ? <span className="fp-holder"><span className="fp-muted">—</span><small className="mono">{maskUid(r.uid)}</small></span>
+          : (
+            <AccountBriefCell no={r.no} uid={r.uid} pool={r.pool}>
+              <span className="fp-holder">
+                <span>{t('fleetAccountNo', { no: r.no })}</span>
+                <small className="mono">{maskUid(r.uid)}</small>
+              </span>
+            </AccountBriefCell>
+          )}
       </td>
       <td>
         <span className="fp-holder">

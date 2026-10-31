@@ -106,6 +106,12 @@ interface Sibling {
   posted_at: Date;
 }
 
+/** Another copy of a listing; `sent` once buyers have it. */
+export interface AlertedCopy {
+  redditId: string;
+  sent: boolean;
+}
+
 /**
  * The copy of this listing that buyers got (or are about to get), or null when
  * this post is the one to alert. Whichever target sorts first on
@@ -116,7 +122,7 @@ interface Sibling {
 export async function findAlertedCopy(
   sql: Sql,
   post: {reddit_id: string; subreddit: string; author: string | null; title: string; selftext: string; posted_at: Date},
-): Promise<string | null> {
+): Promise<AlertedCopy | null> {
   if (!post.author || post.author.toLowerCase() === '[deleted]') return null;
   const siblings = await sql<Sibling[]>`
     SELECT reddit_id, subreddit, status, title, selftext, author, posted_at
@@ -130,11 +136,11 @@ export async function findAlertedCopy(
   const self = toListing(post);
   const copies = siblings.filter((s) => isSameListing(self, toListing(s)));
   const alerted = copies.find((s) => s.status === 'notified');
-  if (alerted) return alerted.reddit_id;
+  if (alerted) return {redditId: alerted.reddit_id, sent: true};
   const earlier = copies.find((s) =>
     s.posted_at.getTime() < post.posted_at.getTime()
     || (s.posted_at.getTime() === post.posted_at.getTime() && s.reddit_id < post.reddit_id));
-  return earlier?.reddit_id ?? null;
+  return earlier ? {redditId: earlier.reddit_id, sent: false} : null;
 }
 
 function toListing(p: {

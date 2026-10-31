@@ -2,6 +2,7 @@ import type { Sql } from 'postgres';
 import {
   FLEET_TASK_STATES,
   FLEET_TZ,
+  type FleetAccountBrief,
   type FleetFunnelDay,
   type FleetTask,
   type FleetTaskLog,
@@ -122,6 +123,39 @@ export async function funnelDays(sql: SqlLike, days: number, now: Date = new Dat
     WHERE state = 'done' AND kind = 'search'
       AND done_at >= ((${now}::timestamptz AT TIME ZONE ${FLEET_TZ})::date - ${days - 1}::int)::timestamp AT TIME ZONE ${FLEET_TZ}
     GROUP BY 1 ORDER BY 1`;
+}
+
+export const BRIEF_DAYS = 7;
+
+/**
+ * An account's last week of searches and its stints, for the Fleet table's
+ * hover card. A count past seven digits is left out, as in funnelDays.
+ */
+export async function accountBrief(sql: SqlLike, no: number, now: Date = new Date()): Promise<FleetAccountBrief> {
+  const n = (key: string) => sql`COALESCE(SUM(CASE WHEN result->>${key} ~ '^[0-9]{1,7}$' THEN (result->>${key})::int END), 0)::int`;
+  const [[work], [stints]] = await Promise.all([
+    sql<{ searches: number; cards: number; opened: number; alerted: number; seconds: number; last_search_at: Date | null }[]>`
+      SELECT COUNT(*)::int AS searches, ${n('cards')} AS cards, ${n('opened')} AS opened,
+             ${n('alerted')} AS alerted, ${n('seconds')} AS seconds, MAX(done_at) AS last_search_at
+      FROM fleet_tasks
+      WHERE account_no = ${no} AND state = 'done' AND kind = 'search'
+        AND done_at >= ${now}::timestamptz - make_interval(days => ${BRIEF_DAYS})`,
+    sql<{ stints: number; problems: number; retired: number; on_worker_since: Date | null; on_worker: string | null }[]>`
+      SELECT COUNT(*)::int AS stints,
+             COUNT(*) FILTER (WHERE outcome = 'problem')::int AS problems,
+             COUNT(*) FILTER (WHERE outcome = 'retired')::int AS retired,
+             MAX(started_at) FILTER (WHERE ended_at IS NULL) AS on_worker_since,
+             MAX(worker_id) FILTER (WHERE ended_at IS NULL) AS on_worker
+      FROM fb_worker_accounts WHERE account_no = ${no}`,
+  ]);
+  return {
+    account_no: no,
+    days: BRIEF_DAYS,
+    ...work,
+    last_search_at: work.last_search_at?.toISOString() ?? null,
+    ...stints,
+    on_worker_since: stints.on_worker_since?.toISOString() ?? null,
+  };
 }
 
 export type LogQuery = { city?: string; worker?: string; hours: number };

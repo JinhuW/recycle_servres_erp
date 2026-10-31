@@ -122,6 +122,27 @@ export type FleetTask = {
   result: FleetTaskResult | null;
 };
 
+/** One account's record, for the brief the Fleet table shows on hover. */
+export type FleetAccountBrief = {
+  account_no: number;
+  /** The searches it finished in the last `days` days. */
+  days: number;
+  searches: number;
+  cards: number;
+  opened: number;
+  alerted: number;
+  seconds: number;
+  last_search_at: string | null;
+  /** Its stints on fleet workers, all time. */
+  stints: number;
+  /** Stints that ended with the account in trouble (problem) or retired. */
+  problems: number;
+  retired: number;
+  /** When its current stint began, while it has one. */
+  on_worker_since: string | null;
+  on_worker: string | null;
+};
+
 /** One UTC day of finished searches, summed from their results. The stages
  *  workers began reporting later are null on a day no result carried them. */
 export type FleetFunnelDay = {

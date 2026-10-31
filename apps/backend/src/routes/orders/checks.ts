@@ -304,8 +304,12 @@ checksRoutes.post('/:id/price-sheet/preview', async (c) => {
       ? ramShortCode({ brand: l.brand, partNumber: l.part_number, chipNumber: l.chip_number }) : null;
     // One Micron module number can carry several dies at different prices.
     // An older quote with no Short code column still matches by part alone.
-    const reads = byPart.get(canon)?.filter(r => l.category !== 'RAM'
+    // A line whose die is not known yet (no chip marking) falls back to every
+    // row of its part: several dies at several prices read as a conflict.
+    const rows = byPart.get(canon);
+    const exact = rows?.filter(r => l.category !== 'RAM'
       || r.shortCodes === undefined || r.shortCodes.includes(code));
+    const reads = exact?.length || code !== null ? exact : rows;
     if (!reads?.length) return { lineId: l.id, status: 'not-in-sheet' };
     const priced = reads.filter(r => r.status === 'ok').map(r => r.cell);
     const zeros = reads.filter(r => r.status === 'zero').map(r => r.cell);

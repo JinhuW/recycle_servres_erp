@@ -137,14 +137,24 @@ async function runApi(): Promise<void> {
   if (config.telegramUser && config.alertTransport === 'telegram') {
     user = await connectWhenFree(config.telegramUser, owner, stopping);
   }
+  // Once another api has taken the hold, this one must not touch the session
+  // again: the same session from two IPs gets revoked.
+  let lost = false;
+  const holdStillOurs = async (): Promise<boolean> => {
+    if (lost) return false;
+    if (await renewUserSender(sql, owner)) return true;
+    if (lost) return false;
+    lost = true;
+    let error: string | undefined;
+    await user!.disconnect().catch((e: unknown) => { error = e instanceof Error ? e.message : String(e); });
+    logger.info('another api took the telegram user session; disconnected it here', error ? {error} : {});
+    return false;
+  };
   const userLoops = user ? [
     startLoop(
       {name: 'user-notify', logger: logger.child('notify'), idleMs: 10_000, busyMs: 500},
       async () => {
-        if (!await renewUserSender(sql, owner)) {
-          logger.warn('another api holds the telegram user session; not sending as the user');
-          return false;
-        }
+        if (!await holdStillOurs()) return false;
         return notifyOnce({
           sql,
           workerId: config.workerId,
@@ -156,7 +166,8 @@ async function runApi(): Promise<void> {
     ),
     startLoop(
       {name: 'reads', logger: logger.child('reads'), idleMs: 5 * 60_000},
-      () => readsOnce({sql, user: user!, settings, logger: logger.child('reads')}),
+      async () => await holdStillOurs()
+        && readsOnce({sql, user: user!, settings, logger: logger.child('reads')}),
     ),
   ] : [];
 
@@ -177,7 +188,7 @@ async function runApi(): Promise<void> {
   if (user) {
     // Disconnect before releasing: the next api connects the moment the
     // hold clears.
-    await user.disconnect();
+    if (!lost) await user.disconnect();
     await releaseUserSender(sql, owner);
   }
   await deregister();

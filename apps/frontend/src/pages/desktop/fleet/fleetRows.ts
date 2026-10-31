@@ -9,7 +9,8 @@ import type { Challenge, FleetAccount, FleetDoc } from '../../../lib/coordinator
 import type { PoolAccountSummary } from '../../../lib/facebookPool';
 
 /** What a row reads of its pool account: a snapshot row or a summary row. */
-export type FleetPoolAccount = Pick<PoolAccountSummary, 'no' | 'uid' | 'status' | 'holder' | 'note'>;
+export type FleetPoolAccount = Pick<PoolAccountSummary, 'no' | 'uid' | 'status' | 'holder' | 'note'>
+  & Partial<Pick<PoolAccountSummary, 'addedAt' | 'batch'>>;
 import { fleetResumable, fleetSlotRetirable, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume } from '../../../lib/fleet';
 import { parkedWorkers, retiredAt } from '../../../lib/fleetView';
 import { leaseLive, liveness } from './fleetBoard';

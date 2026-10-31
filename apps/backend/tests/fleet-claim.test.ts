@@ -208,6 +208,18 @@ describe('POST /api/fleet/worker/claim', () => {
     expect(cookiesFromText(JSON.stringify({ cookies: [{ name: 'xs', value: 'v' }], origins: [] }))).toEqual([{ name: 'xs', value: 'v', domain: '.facebook.com', path: '/' }]);
     expect(cookiesFromText('')).toEqual([]);
     expect(cookiesFromText('{not json')).toEqual([]);
+    expect(cookiesFromText('{"c_user":"1","xs":"v"}').map((c) => [c.name, c.value])).toEqual([['c_user', '1'], ['xs', 'v']]);
+  });
+
+  it.each([
+    ['keyed by name', (uid: string) => JSON.stringify({ c_user: uid, xs: 'xs-secret' })],
+    ['cookies with no origins', (uid: string) => JSON.stringify({ cookies: [{ name: 'c_user', value: uid }, { name: 'xs', value: 'xs-secret' }] })],
+  ])('claims an account whose pool cookie is JSON %s', async (_, cookie) => {
+    await seedSlot(1, { cookie: cookie('61550000000001') });
+    const r = await claim('lab-1');
+    expect(r.status).toBe(200);
+    expect((r.body as { account: { storage_state: { cookies: { name: string }[]; origins: unknown[] } } }).account.storage_state)
+      .toMatchObject({ cookies: [{ name: 'c_user' }, { name: 'xs' }], origins: [] });
   });
 });
 
@@ -367,10 +379,10 @@ describe('POST /api/fleet/worker/next-task', () => {
     const no = await seedSlot(1);
     const { worker_token: token } = await claimed('lab-1');
     const waiting = await addTask('houston');
-    // Minutes belong to the lease's UTC date, even when CI runs before 07:00 UTC.
+    // Minutes belong to the lease's Eastern date (FLEET_TZ), whenever CI runs.
     await getTestDb()`
       WITH today AS (
-        SELECT date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS start
+        SELECT date_trunc('day', NOW() AT TIME ZONE 'America/New_York') AT TIME ZONE 'America/New_York' AS start
       )
       INSERT INTO fleet_tasks (city, item, due_at, state, account_no, leased_at, lease_expires_at, done_at)
       SELECT 'denver', 'server_ram', start, 'done', ${no}, start,
@@ -752,7 +764,7 @@ describe('fleet recovery regressions', () => {
     expect((await getTestDb()`SELECT epoch FROM fleet_slots`)[0].epoch).toBe(w.epoch);
   });
 
-  it('retains released minutes exactly once and splits a closed attempt at UTC midnight', async () => {
+  it('retains released minutes exactly once and splits a closed attempt at Eastern midnight', async () => {
     const no = await seedSlot(1); const w = await claimed('lab-1');
     const id = await addTask('denver'); await nextTask(w.worker_token);
     await getTestDb()`UPDATE fleet_tasks SET leased_at = NOW() - interval '10 minutes' WHERE id = ${id}`;
@@ -761,7 +773,7 @@ describe('fleet recovery regressions', () => {
     expect(used.minutes).toBeGreaterThanOrEqual(10);
     expect(used.minutes).toBeLessThan(10.2);
     await getTestDb()`INSERT INTO fleet_tasks (city, item, state, due_at, account_no, leased_at, done_at)
-      VALUES ('nyc', 'server_ram', 'done', '2026-01-01T23:50Z', ${no}, '2026-01-01T23:50Z', '2026-01-02T00:10Z')`;
+      VALUES ('nyc', 'server_ram', 'done', '2026-01-02T04:50Z', ${no}, '2026-01-02T04:50Z', '2026-01-02T05:10Z')`;
     const days = await getTestDb()`SELECT minutes::float8 AS minutes FROM fleet_minutes WHERE account_no = ${no} AND day IN ('2026-01-01','2026-01-02') ORDER BY day`;
     expect(days.map(d => d.minutes)).toEqual([10, 10]);
   });

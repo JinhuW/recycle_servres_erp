@@ -8,7 +8,7 @@ import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
 import { retireAccount, writeEvent } from '../routes/facebookPool';
 import { WORKER_ID } from '../routes/coordinator';
-import { releaseTasks } from './claim';
+import { dropSlot, releaseTasks } from './claim';
 import { loadRelease } from './hosts';
 import { cityLog } from './tasks';
 import { loadSettings } from './cities';
@@ -222,9 +222,7 @@ slots.post('/:no/remove', async (c) => {
       FROM fleet_slots WHERE account_no = ${no} FOR UPDATE`;
     if (!account || !slot) return notFound(`slot #${no}`);
     if (slot.leased) return conflict('leased', `#${no} is held by a worker; park it first`);
-    await tx`DELETE FROM fleet_slots WHERE account_no = ${no}`;
-    // A quarantine probe belongs to the account; nothing else would close it.
-    await tx`UPDATE fleet_tasks SET state = 'cancelled', done_at = NOW() WHERE account_no = ${no} AND kind = 'probe' AND state = 'ready'`;
+    await dropSlot(tx, no, 'slot_removed');
     // Only a fleet account goes back on the rack; one reported or retired
     // meanwhile keeps what the pool says about it.
     if (account.status === 'fleet') {

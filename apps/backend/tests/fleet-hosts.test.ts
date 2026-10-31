@@ -161,6 +161,20 @@ describe('hosts: agent routes', () => {
     expect(list.body.hosts.find((h) => h.host_id === 'lab')!.desired!.count).toBe(3);
   });
 
+  it('shares the free accounts out among live hosts instead of offering each host all of them', async () => {
+    const db = getTestDb();
+    await db`UPDATE fleet_hosts SET capacity = 4, last_seen_at = NOW() WHERE host_id = 'lab'`;
+    await seedHost('other', 'host-other-token', 4);
+    await db`UPDATE fleet_hosts SET last_seen_at = NOW() WHERE host_id = 'other'`;
+    for (const n of [1, 2, 3]) await seedSlot(n);
+    const lab = (await desired()).body.count;
+    const other = (await desired('host-other-token', 'other')).body.count;
+    expect([lab, other]).toEqual([2, 1]);
+    // A silent host gets no share; the one asking takes them all.
+    await db`UPDATE fleet_hosts SET last_seen_at = NOW() - interval '1 day' WHERE host_id = 'other'`;
+    expect((await desired()).body.count).toBe(3);
+  });
+
   it('report is stored with last_seen_at and version, without a CSRF header, and shows in the manager list', async () => {
     const r = await report([{ worker_id: 'lab-1', image: IMAGE_OLD }]);
     expect(r.status).toBe(200);
@@ -383,9 +397,9 @@ describe('slots and workers', () => {
       INSERT INTO fleet_tasks (city, item, due_at, state, worker_id, account_no, epoch, leased_at, lease_expires_at)
       VALUES ('houston', 'server_ram', NOW(), 'leased', 'lab-1', ${running}, 3, NOW() - interval '10 minutes', NOW() + interval '20 minutes')
       RETURNING id::int AS id`;
-    // An hour from this UTC day's midnight: "two hours ago" is yesterday when
+    // An hour from this Eastern day's midnight: "two hours ago" is yesterday when
     // the suite runs in the small hours, and today's minutes would miss it.
-    await db`WITH d AS (SELECT date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS midnight)
+    await db`WITH d AS (SELECT date_trunc('day', NOW() AT TIME ZONE 'America/New_York') AT TIME ZONE 'America/New_York' AS midnight)
              INSERT INTO fleet_tasks (city, item, due_at, state, worker_id, account_no, epoch, leased_at, lease_expires_at, done_at)
              SELECT 'houston', 'server_ram', NOW(), 'done', 'lab-1', ${running}, 3, midnight, midnight + interval '30 minutes', midnight + interval '60 minutes' FROM d`;
     const { token } = await loginAs(ALEX);
