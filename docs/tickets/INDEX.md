@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-477](./RS-477-fix-purchaser-manager-access-control-review-findings.md) | done | bug | P1 | Fix purchaser/manager access-control review findings | — |
 | [RS-476](./RS-476-fix-the-7-day-review-findings-2026-10-31.md) | done | bug | P1 | Fix the 7-day review findings (2026-10-31) | 1.391.1 |
 | [RS-475](./RS-475-fleet-account-cell-shows-a-brief-on-hover.md) | done | story | P2 | Fleet account cell shows a brief on hover | 1.391.0 |
 | [RS-474](./RS-474-dev-to-main-review-fixes-agent-removal-race-alert-pr.md) | done | bug | P2 | dev to main review fixes: agent removal race, alert price drops, NaN counts, Fleet leftovers | 1.390.1 |

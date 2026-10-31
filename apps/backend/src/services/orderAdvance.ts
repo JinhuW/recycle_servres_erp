@@ -528,6 +528,10 @@ export async function advanceOrderTx(
         has_package: boolean }
     | undefined;
   if (!cur) return { kind: 'notFound' };
+  // Someone else's PO is not found for a purchaser, the same answer GET /:id's
+  // scope gives: the guard's refusals below would otherwise describe an order
+  // they can't open, and a teammate submitting it now goes through the owner.
+  if (actor.role !== 'manager' && cur.user_id !== actor.id) return { kind: 'notFound' };
   // The lines sit at 'Archived'; a cascade here would put them back in stock
   // behind the archive's back.
   if (cur.archived_at) return { kind: 'archived' };
@@ -561,9 +565,8 @@ export async function advanceOrderTx(
   // an `advanced` event for a transition that never happened — the stale page
   // that sent it is better told the order has moved.
   if (nextStageId === cur.lifecycle) return { kind: 'sameStage', lifecycle: cur.lifecycle };
-  // Purchaser can only advance Draft → in_transit — but ANY
-  // purchaser may, not just the PO's creator: whoever handles the goods
-  // submits the order. Every other transition stays manager-only.
+  // A purchaser can only advance their own Draft → in_transit; every other
+  // transition stays manager-only.
   if (actor.role !== 'manager' && !(cur.lifecycle === 'draft' && nextStageId === 'in_transit')) {
     return { kind: 'forbidden', msg: 'Purchasers can only advance Draft to In Transit' };
   }

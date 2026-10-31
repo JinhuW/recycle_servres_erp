@@ -10,8 +10,10 @@ type Validator = (v: unknown) => boolean;
 const isOneOf = <T extends string>(...allowed: T[]): Validator =>
   (v) => typeof v === 'string' && (allowed as readonly string[]).includes(v);
 
+// Column and section ids: a few dozen short names at most. The row is read on
+// every request, so an unbounded list would be a cost every call pays.
 const isStringArray: Validator = (v) =>
-  Array.isArray(v) && v.every((x) => typeof x === 'string');
+  Array.isArray(v) && v.length <= 100 && v.every((x) => typeof x === 'string' && x.length <= 64);
 
 const isBoolean: Validator = (v) => typeof v === 'boolean';
 

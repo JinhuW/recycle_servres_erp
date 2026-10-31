@@ -276,7 +276,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
     if (showSold) params.set('includeSold', '1');
-    if (hidePending) params.set('hidePending', '1');
+    if (isManager && hidePending) params.set('hidePending', '1');
     if (warehouseFilter !== 'all') params.set('warehouse', warehouseFilter);
     if (search.trim()) params.set('q', search.trim());
     for (const spec of attrSchema) {
@@ -766,17 +766,19 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
               </span>
               <span>{t('invShowSold')}</span>
             </label>
-            <label className="inv-sold-toggle" title={t('invHidePendingTip')}>
-              <span className="toggle">
-                <input
-                  type="checkbox"
-                  checked={hidePending}
-                  onChange={e => setHidePending(e.target.checked)}
-                />
-                <span className="toggle-track"><span className="toggle-thumb" /></span>
-              </span>
-              <span>{t('invHidePending')}</span>
-            </label>
+            {isManager && (
+              <label className="inv-sold-toggle" title={t('invHidePendingTip')}>
+                <span className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={hidePending}
+                    onChange={e => setHidePending(e.target.checked)}
+                  />
+                  <span className="toggle-track"><span className="toggle-thumb" /></span>
+                </span>
+                <span>{t('invHidePending')}</span>
+              </label>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{ position: 'relative' }}>

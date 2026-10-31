@@ -66,14 +66,23 @@ describe('facebook pool summary', () => {
     expect(again.body.accounts.find((a) => a.uid === uid(3))).toMatchObject({ hasCookie: true, cookieUid: null });
   });
 
-  it('gives a purchaser the same answer as a manager, and nothing when signed out', async () => {
+  it('cuts the logins a purchaser does not hold, and answers nothing when signed out', async () => {
     const managerToken = await seed();
+    const purchaser = (await loginAs(MARCUS)).token;
+    expect((await api('POST', `${BASE}/1/take`, { token: purchaser })).status).toBe(200);
     const asManager = await api<{ accounts: PoolAccountSummary[] }>('GET', `${BASE}/summary`, { token: managerToken });
-    const asPurchaser = await api<{ accounts: PoolAccountSummary[] }>('GET', `${BASE}/summary`, {
-      token: (await loginAs(MARCUS)).token,
-    });
+    const asPurchaser = await api<{ accounts: PoolAccountSummary[] }>('GET', `${BASE}/summary`, { token: purchaser });
     expect(asPurchaser.status).toBe(200);
-    expect(asPurchaser.body).toEqual(asManager.body);
+    const cut = (u: string) => u.slice(0, 4) + u.slice(-4);
+    const [held, other, noCookie] = asPurchaser.body.accounts;
+    expect(held).toEqual(asManager.body.accounts[0]);
+    expect(other).toEqual({
+      ...asManager.body.accounts[1], uid: cut(uid(1)), email: 'ac•••@outlook.example', cookieUid: cut(uid(1)),
+    });
+    expect(noCookie).toMatchObject({ uid: cut(uid(2)), email: 'ac•••@outlook.example', cookieUid: null });
+    const text = JSON.stringify([other, noCookie]);
+    expect(text).not.toContain(uid(1));
+    expect(text).not.toContain('acct1@');
     expect((await api('GET', `${BASE}/summary`)).status).toBe(401);
   });
 });

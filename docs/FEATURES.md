@@ -56,12 +56,16 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   while add, import, edit, retire and remove answer 403 to a purchaser;
   each account's sealed secrets — password, 2FA key, email password, session
   cookie and, from v1.307.0, the Facebook access token — are revealed only to a
-  manager or the purchaser currently holding it; shared reads are scoped to the
+  manager or the purchaser currently holding it, and from v1.391.2 a purchaser
+  reads the rest of the rack's logins cut to what the page shows (the UID's
+  first and last four digits, the email's first two letters and domain); shared reads are scoped to the
   caller's own rows and leave the manager-only fields out: the PO figures `finalSellPrice`, `finalSoldQty`, `realized` and
   `sellOrders` (v1.177.1), and the linked-payment total, the pending
   change-review, the leaderboard peers' money and email, the warehouse
   manager's contact, and the sell-order ids in an edit refusal and the
-  archive log line (v1.177.2), and the bank-link count on a saved or handed-off
+  archive log line (v1.177.2), the sell- and transfer-order ids and unit-cost
+  values in a line's inventory history and the *Hide pending* filter (v1.391.2),
+  and the bank-link count on a saved or handed-off
   PO (v1.177.3 — a purchaser who saves a matching PayPal id now sees a plain
   "Saved", not "its bank payment is now linked"). "Non-manager" is the
   *effective* role, so a manager previewing as purchaser gets the purchaser
@@ -713,6 +717,10 @@ is not a stage but a flag beside one, set once every line has sold
   once a PayPal account has synced into the environment, so a dev box
   without keys is unaffected; a linked, ignored, pending or reversed row
   still counts as existing, and Mercury legs do not.
+- **A purchaser submits only their own Draft** (v1.391.2). `POST /api/orders/:id/advance`
+  answered any purchaser for Draft → In Transit; it now answers 404 for
+  someone else's PO, the same as opening it, so the refusal no longer
+  describes an order the caller can't see. The hand-off already took this rule.
 - **Leaving Draft is a hand-off, asked in one dialog** (v1.142.0; a
   *checkpoint* since v1.159.0 — each section the order already answers folds
   to a ✓ row with a *Change* button, only the unmet ones open, and a page that
@@ -1004,7 +1012,8 @@ is not a stage but a flag beside one, set once every line has sold
   keep a PO from reading Sold.
 - Line specs are per-category: RAM carries Part #, Chip #, Brand, Capacity,
   Generation, Type, Class, Rank and Speed; SSD/HDD carry Interface, Form
-  factor, Health % and RPM; Other carries a free item type (v1.47.0).
+  factor, Health % and RPM; Other carries a free item type (v1.47.0); anyone may add one, but adding a
+  type a manager retired leaves it retired unless a manager adds it (v1.391.2).
   Rank covers the plain JEDEC grid plus the high-density packaging codes —
   dual-die (`4DRx4`, `8DRx4`) and 3DS stacks (`2S2Rx4`, `2S4Rx4`, `4S2Rx4`),
   which a label scan now keeps instead of flattening to the plain rank
@@ -3897,7 +3906,9 @@ inventory search, sell-order draft creation.
 - **Interactive consent lets the user choose which permissions a connector
   gets** (v1.48.0), ceilinged by role: a manager can grant any scope, everyone
   else keeps `market:read` only (v1.67.x). Manager-minted service clients are
-  exempt. The phone shell shows the same consent screen (v1.239.2).
+  exempt. The phone shell shows the same consent screen (v1.239.2). Demoting a
+  manager ends their connector tokens and unredeemed codes at once (v1.391.2),
+  instead of letting manager scopes run to the access token's expiry.
 - Purchasers can reach the connect page (v1.66.0).
 - `wechat:write` (v1.312.0) is for memtrade's service client, which pushes the
   WeChat market report. Self-registration never grants it, even to a client
@@ -3912,7 +3923,10 @@ inventory search, sell-order draft creation.
   `set_market_price` use the most recently updated one, like the scraper push
   (v1.219.1).
 - DCR is open by default, rate-limited per IP (per /64 for IPv6 since
-  v1.200.1) and globally. A registration names at most 10 redirect URIs of up to 2048
+  v1.200.1) and globally. Before anyone signs in, `/oauth/authorize` answers a
+  self-registered client's request errors in place rather than redirecting to
+  its URI (v1.391.2), so an ERP link can't bounce a stranger to the registrant's page;
+  a parked consent is readable only by the user who parked it. A registration names at most 10 redirect URIs of up to 2048
   characters each (v1.239.2).
 - **Consent says where the code goes** (v1.195.0). Any app can register itself
   under any name, "Claude" included. The consent page therefore names the

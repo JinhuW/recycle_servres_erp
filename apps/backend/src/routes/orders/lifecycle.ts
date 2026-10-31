@@ -348,10 +348,13 @@ lifecycleRoutes.post('/:id/advance', async (c) => {
 
   // Only a live Draft meets the guard, so only one is worth a pull — the tx
   // refuses an archived order before it reads the id.
-  const [rule] = await sql<(TxnRuleRow & { lifecycle: string; archived_at: Date | null })[]>`
-    SELECT lifecycle, archived_at, payment, payment_method, paypal_txn_id, created_at
+  const [rule] = await sql<(TxnRuleRow & {
+    lifecycle: string; archived_at: Date | null; user_id: string })[]>`
+    SELECT lifecycle, archived_at, user_id, payment, payment_method, paypal_txn_id, created_at
     FROM orders WHERE id = ${id}`;
-  const pullError = rule?.lifecycle === 'draft' && !rule.archived_at
+  // The tx refuses a purchaser someone else's PO; it must not cost a pull first.
+  const mayAdvance = rule && (u.role === 'manager' || rule.user_id === u.id);
+  const pullError = mayAdvance && rule.lifecycle === 'draft' && !rule.archived_at
     ? await pullPaypalIfUnknown(c.env, sql, u.id, rule)
     : null;
 

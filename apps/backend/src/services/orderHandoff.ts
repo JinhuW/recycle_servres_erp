@@ -368,8 +368,7 @@ export async function handoffOrderTx(
   `)[0] as OrderRow | undefined;
   if (!before) throw new HandoffRefused({ kind: 'notFound' });
   // Owner or manager: the hand-off writes the same fields PATCH does (warehouse,
-  // payment, commission), so it takes PATCH's rule rather than /advance's
-  // any-purchaser one — and only the owner can attach the chat screenshot the
+  // payment, commission), and only the owner can attach the chat screenshot the
   // self-paid rule asks for anyway.
   if (actor.role !== 'manager' && before.user_id !== actor.id) {
     throw new HandoffRefused({ kind: 'forbidden' });
