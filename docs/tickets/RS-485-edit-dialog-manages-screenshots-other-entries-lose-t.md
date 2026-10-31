@@ -2,13 +2,13 @@
 id: RS-485
 title: Edit dialog manages screenshots; Other entries lose the deleted-record banner
 type: bug
-status: backlog
+status: done
 priority: P2
 created: 2026-10-31
 reporter: jinhu
 branch: rs-485-acct-edit-screenshots
-pr:
-version:
+pr: 1034
+version: 1.396.0
 related: []
 ---
 
