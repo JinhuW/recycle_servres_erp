@@ -2563,7 +2563,13 @@ is who paid, below).
   Record button with the record already chosen:
   - the PO's **Cost Payment** tab (Purchase entries, net paid, the PO's cost ≈
     ¥ at the latest rate) and **Commission** tab (Commission entries, net
-    paid, the projected commission);
+    paid, the projected commission). Since v1.397.0 (RS-490) a manager's Cost
+    Payment opens on a **RMB Flow | Business Account** switch, as Commission
+    does: RMB Flow names the person who paid and carries this card; Business
+    Account picks PayPal or Cash and carries the Payments ledger. A PO still
+    saved as Business-paid asks for a Save before the card can record.
+    Purchasers, the create pages and the hand-off keep the single Paid by
+    select;
   - the **sell order**, beside the bank payments (Sale entries plus its cases'
     refunds, net received, the order total in its own currency); a receipt
     starts on the order's payment receiver, and on a CNY order with the

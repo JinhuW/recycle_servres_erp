@@ -1807,11 +1807,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                 proof={proof}
                 canEditProof={canAnnotate}
                 idPrefix="eo"
+                defaultPayerId={user?.id ?? null}
+                sources={isManager ? {
+                  // Bank payments linked to this PO on the Payments page;
+                  // invisible until something links.
+                  business: <PoPaymentsLedger scope={{ orderId: order.id, kind: 'cost' }} locale={locale} />,
+                  // The book refuses a PO saved as Business-paid, so the
+                  // switch has to be saved before Record means anything.
+                  rmb: order.payment === 'company'
+                    ? <div className="acct-hint">{t('paySaveFirstRmb')}</div>
+                    : <AccountingCard key={order.paidBy?.id ?? ''} scope={{ orderId: order.id, kind: 'purchase' }} />,
+                } : undefined}
               />
-              {/* Bank payments linked to this PO on the Payments page. Manager-only
-                  (the API 403s everyone else) and invisible until something links. */}
-              {user?.role === 'manager' && <PoPaymentsLedger scope={{ orderId: order.id, kind: 'cost' }} locale={locale} />}
-              {isManager && <AccountingCard scope={{ orderId: order.id, kind: 'purchase' }} />}
             </div>
           ),
           commission: (

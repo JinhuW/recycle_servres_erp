@@ -662,6 +662,7 @@ const zh: Record<string, string> = {
   commissionRate: '佣金比率 (%)',
   paySelfShort: '自费',
   payBusinessShort: '公司',
+  paySaveFirstRmb: '先保存，把此采购单的成本改为人民币流水，再在这里记录付款。',
   payPayerLocked: '经理已记账此采购单的成本，只有经理可以更改付款人。',
 
   // ── Mobile OrderDetail ──
