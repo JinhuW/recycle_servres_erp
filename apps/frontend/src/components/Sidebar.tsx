@@ -5,6 +5,7 @@ import { useAuth } from '../lib/auth';
 import { useEffectiveUser } from '../lib/tweaks';
 import { shownNav, type ShownLeaf } from '../lib/desktopNav';
 import { useAcctReviewCount } from '../lib/accounting';
+import { useLeadsAttention } from '../lib/redditLeads';
 import { DESKTOP_VIEW_TO_PATH, hrefFor, onLinkClick, type DesktopViewId } from '../lib/route';
 
 export type DesktopView = DesktopViewId;
@@ -50,6 +51,8 @@ function NavLink({ view, className, label, icon, current, tour, children }: {
   );
 }
 
+const countHint = (id: string) => (id === 'leadsReddit' ? 'rlNavHint' : 'acctReviewModeHint');
+
 // `count` is live work waiting on the viewer, where the leaf's static badge
 // is a mark.
 function LeafLink({ item, sub, count }: { item: ShownLeaf; sub?: boolean; count?: number }) {
@@ -66,7 +69,7 @@ function LeafLink({ item, sub, count }: { item: ShownLeaf; sub?: boolean; count?
     >
       {leaf.badge && <span className="badge">{leaf.badge}</span>}
       {!leaf.badge && !!count && (
-        <span className="badge due" title={t('acctReviewModeHint', { n: count })}>{count}</span>
+        <span className="badge due" title={t(countHint(leaf.id), { n: count })}>{count}</span>
       )}
     </NavLink>
   );
@@ -78,7 +81,9 @@ export function Sidebar({ view, folded, onToggleFold }: Props) {
   const user = useEffectiveUser();
   // The Accounting entries and questions waiting on this manager.
   const reviewCount = useAcctReviewCount(user?.role === 'manager');
-  const countOf = (item: ShownLeaf) => item.leaf.id === 'accounting' ? reviewCount : undefined;
+  const leadsCount = useLeadsAttention();
+  const countOf = (item: ShownLeaf) =>
+    item.leaf.id === 'accounting' ? reviewCount : item.leaf.id === 'leadsReddit' ? leadsCount : undefined;
   if (!user) return null;
   const foldLabel = folded ? t('sidebarExpand') : t('sidebarCollapse');
   return (
@@ -121,7 +126,7 @@ export function Sidebar({ view, folded, onToggleFold }: Props) {
                   label={label}
                   icon={item.parent.icon}
                 >
-                  {!!folded && <span className="badge due" title={t('acctReviewModeHint', { n: folded })}>{folded}</span>}
+                  {!!folded && <span className="badge due" title={t(countHint(item.children[0].leaf.id), { n: folded })}>{folded}</span>}
                   <span className="nav-caret">
                     <Icon name={item.open ? 'chevronDown' : 'chevronRight'} size={13} />
                   </span>

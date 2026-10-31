@@ -18,7 +18,7 @@ export type IconName =
   | 'truck' | 'cash' | 'refresh' | 'label' | 'package' | 'printer'
   | 'paperclip' | 'file' | 'image' | 'invoice' | 'analytics' | 'calendar'
   | 'note' | 'copy' | 'key' | 'eyeOff' | 'users' | 'keyboard' | 'panelRight'
-  | 'maximize' | 'minimize' | 'chats';
+  | 'maximize' | 'minimize' | 'chats' | 'target' | 'tree';
 
 type Props = {
   name: IconName;
@@ -108,6 +108,8 @@ const PATHS: Record<IconName, JSX.Element> = {
   image: <><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="M21 15l-5-5L5 21"/></>,
   invoice: <><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></>,
   calendar: <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4M16 3v4"/></>,
+  target: <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></>,
+  tree: <><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M6 12h10"/></>,
   note: <><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8z"/><path d="M15 3v4a2 2 0 0 0 2 2h4"/></>,
 };
 

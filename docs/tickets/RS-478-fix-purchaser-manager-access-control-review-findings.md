@@ -1,5 +1,5 @@
 ---
-id: RS-477
+id: RS-478
 title: Fix purchaser/manager access-control review findings
 type: bug
 status: done
@@ -8,7 +8,7 @@ created: 2026-10-31
 reporter: jinhu
 branch: fix/acl-review
 pr: 1023
-version: 1.391.2
+version: 1.392.1
 related: []
 ---
 

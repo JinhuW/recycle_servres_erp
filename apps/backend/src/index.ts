@@ -36,6 +36,7 @@ import trackerRoutes from './routes/tracker';
 import aiModelsRoutes from './routes/aiModels';
 import coordinatorRoutes from './routes/coordinator';
 import facebookPoolRoutes from './routes/facebookPool';
+import redditLeadsRoutes from './routes/redditLeads';
 import fleetRoutes from './routes/fleet';
 import wechatMarketRoutes from './routes/wechatMarket';
 import bankTxRoutes from './routes/bankTx';
@@ -291,6 +292,14 @@ const isUploadPath = (path: string): boolean =>
   // The sell order sheet dropped on Review mode is the same kind of file.
   /^\/api\/orders\/[^/]+\/price-sheet\/preview$/.test(path);
 
+// A Reddit leads harvest is ~2k sellers plus the buyer network's trades,
+// about 1.3 MB of JSON; manager-only, and the route caps its own row count.
+const LEADS_IMPORT_LIMIT = 8 * 1024 * 1024;
+const leadsImportBodyLimit = bodyLimit({
+  maxSize: LEADS_IMPORT_LIMIT,
+  onError: (c) => c.json({ error: 'Payload too large' }, 413),
+});
+
 // All other routes: apply the 1 MiB JSON cap.
 const jsonBodyLimit = bodyLimit({
   maxSize: JSON_BODY_LIMIT,
@@ -300,6 +309,7 @@ app.use('*', (c, next) => {
   // The ram4cash sell form sends label photos with its payload.
   if (c.req.path === '/api/public/intake') return intakeBodyLimit(c, next);
   if (isUploadPath(c.req.path)) return uploadBodyLimit(c, next);
+  if (c.req.path === '/api/leads/reddit/import') return leadsImportBodyLimit(c, next);
   return jsonBodyLimit(c, next);
 });
 
@@ -429,6 +439,9 @@ app.route('/api/coordinator', coordinatorRoutes);
 // Self-applies authMiddleware; the take/return/report routes are for every
 // role and the rest is manager-gated inside the module.
 app.route('/api/facebook-pool', facebookPoolRoutes);
+// Self-applies authMiddleware; claim and the lead work are for every role,
+// /import is manager-gated inside the module.
+app.route('/api/leads/reddit', redditLeadsRoutes);
 // Self-applies its scopes per route: cookie + manager gate on the pages' reads
 // and writes, a bearer on the host-agent and worker routes (src/fleet/auth.ts).
 app.route('/api/fleet', fleetRoutes);
