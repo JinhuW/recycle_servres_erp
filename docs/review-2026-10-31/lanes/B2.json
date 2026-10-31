@@ -1,0 +1,159 @@
+{
+ "lane": "B2",
+ "files_read": [
+  "docs/review-2026-10-31/BRIEF.md",
+  "docs/review-2026-10-13/infrastructure-integrations-todo.md",
+  "deploy/cloudflare/wrangler.toml",
+  "deploy/cloudflare/deploy.sh",
+  "deploy/cloudflare/worker.js",
+  "deploy/cloudflare/.gitignore",
+  "deploy/railway-alerts/wrangler.toml",
+  "deploy/railway-alerts/worker.js",
+  ".github/workflows/deploy-frontend.yml",
+  "infra/terraform/environments/prod/main.tf",
+  "infra/terraform/environments/prod/backend.tf",
+  "infra/terraform/environments/prod/prod.tfvars",
+  "infra/terraform/environments/prod/README.md",
+  "infra/terraform/environments/experiment-backups/main.tf",
+  "infra/terraform/environments/experiment-backups/backend.tf",
+  "infra/terraform/environments/experiment-dns/main.tf",
+  "infra/terraform/environments/experiment-dns/backend.tf",
+  "infra/terraform/environments/experiment-dns/README.md",
+  "infra/terraform/modules/cloudflare/r2.tf",
+  "infra/terraform/modules/cloudflare/token.tf",
+  "infra/terraform/modules/cloudflare/variables.tf",
+  "infra/terraform/modules/cloudflare/domain.tf",
+  "infra/terraform/modules/cloudflare/outputs.tf",
+  "trackers/reddit/infra/terraform/main.tf",
+  "trackers/facebook/infra/terraform/main.tf",
+  "trackers/facebook/infra/terraform/.gitignore",
+  "backup/backup.sh",
+  "backup/railway.toml",
+  "backup/README.md",
+  "docs/deployment-railway-cloudflare-backups.md (restore + bucket sections)",
+  "docs/agents/erp-ops.md (alert relay section)",
+  "apps/backend/src/index.ts:152-167 (PROXY_SECRET gate)",
+  "apps/backend/src/routes/coordinator.ts:37-43",
+  "apps/frontend/src/lib/linePhotos.ts:277-295",
+  "LIVE: wrangler 4.146.0 deployments list --env prod / --env dev, railway-alerts",
+  "LIVE: wrangler secret list (recycle-erp-prod, recycle-erp-dev, railway-alerts) — names only",
+  "LIVE: wrangler versions view 617b0de0 (railway-alerts) --json",
+  "LIVE: CF API GET workers/scripts, /scripts/*/settings, /scripts/*/subdomain, /scripts/railway-alerts/content/v2, /workers/domains, /workers/subdomain",
+  "LIVE: CF API GET r2/buckets, recycle-db-backup objects, lifecycle/cors/domains/lock for 4 buckets, recycle-erp-tfstate object names+sizes (contents not read)",
+  "LIVE: CF API GET access/apps, access/service_tokens (empty — OAuth scope), dns_records (auth error), tokens (unauthorized)",
+  "LIVE: gh run list deploy-frontend.yml",
+  "LIVE: unauthenticated curl/dig of inventory*, static, api.prod/api.dev, fbc-api, recycle-erp-experiment.*.workers.dev",
+  "LIVE: terraform plan -lock=false trackers/reddit/infra/terraform (No changes); trackers/facebook/infra/terraform (failed: no RAILWAY_TOKEN)"
+ ],
+ "findings": [
+  {
+   "id": "B2-01",
+   "severity": "P2",
+   "title": "[cross-lane] fbc-api.recycleservers.com is not behind Cloudflare Access; only the console bearer guards relogin/session endpoints",
+   "location": "fbc-api.recycleservers.com (zone recycleservers.com); docs claim at AGENTS.md:72, trackers/facebook/AGENTS.md:43, apps/backend/src/routes/coordinator.ts:37-43",
+   "evidence": "Unauthenticated GETs (no CF-Access-Client-* headers, no cookie) reach the rs_console origin: /v1/workers -> 401 {\"detail\":\"Missing bearer token\"} (FastAPI body, not an Access 302/403), / -> 200 the Fleet console HTML, /openapi.json -> 200 listing all 24 routes incl. /v1/workers/{id}/relogin, /restore-session, /session, /v1/vnc/{id}/ticket. An Access-protected host answers a header-less request with a 302 to cloudflareaccess.com or an Access 403 before the origin. CF API access/apps returned an empty list (the wrangler OAuth token likely lacks the Access scope, so the app list itself is unverified).",
+   "failure_scenario": "RS_CONSOLE_TOKEN is the single factor. It lives in Railway env (COORDINATOR_API_TOKEN), which leaked once on 2026-10-21. Anyone holding a leaked or old token can call POST /v1/workers/{id}/relogin or restore-session from anywhere on the internet, forcing Facebook logins that checkpoint accounts (the repo's top rule). The documented second factor (Access service token) is not being enforced, so the ERP's COORDINATOR_ACCESS_CLIENT_* headers protect nothing.",
+   "proposed_fix": "Owner: confirm in the Zero Trust dashboard whether an Access app exists for fbc-api.recycleservers.com; if absent or set to Bypass, create a self-hosted app with a Service Auth policy for the ERP's service token (keep /healthz bypass if a monitor needs it). If public exposure is intended, correct AGENTS.md and coordinator.ts comments.",
+   "regression_test": "Scheduled probe: curl -s -o /dev/null -w '%{http_code}' https://fbc-api.recycleservers.com/v1/workers must be 302/403 from Access (cf-access headers or cloudflareaccess.com Location), never the origin's 401 JSON.",
+   "confidence": "high"
+  },
+  {
+   "id": "B2-02",
+   "severity": "P2",
+   "title": "R2 attachments CORS fix (INF-02) was committed but never applied: live bucket allows only inventory.recycleservers.com",
+   "location": "R2 bucket recycle-erp-attachments CORS; infra/terraform/environments/prod/main.tf:32-36; tfstate key prod/terraform.tfstate last written 2026-06-19T14:13:52Z",
+   "evidence": "GET r2/buckets/recycle-erp-attachments/cors -> origins [\"https://inventory.recycleservers.com\"] only. Repo (commit 169b93d2, 2026-10-14) sets three origins. prod/terraform.tfstate last modified 2026-06-19, so no apply since. Live probe of a real object on static.recycleservers.com: Origin inventory.recycleservers.com gets access-control-allow-origin; Origins inventory-prod and inventory-dev get 200 with no ACAO header.",
+   "failure_scenario": "A user on inventory-prod.recycleservers.com (a declared prod route) carries photos into a replacement line: photoSourceFile() (apps/frontend/src/lib/linePhotos.ts:283-295) fetch() is blocked by CORS, returns null, and the photo is dropped and reported missing. The 10-13 review checked INF-02 off as fixed, so nobody is looking.",
+   "proposed_fix": "Owner runs terraform plan/apply in infra/terraform/environments/prod with the Cloudflare + R2 state credentials; expect a 1-resource in-place update to cloudflare_r2_bucket_cors.attachments. Add a post-apply curl check with each Origin.",
+   "regression_test": "curl -sI -H 'Origin: https://inventory-prod.recycleservers.com' https://static.recycleservers.com/<known object> | grep -i access-control-allow-origin, for each origin in prod/main.tf.",
+   "confidence": "high"
+  },
+  {
+   "id": "B2-03",
+   "severity": "P2",
+   "title": "Offsite DB backups are deletable by their own writer: no bucket lock, no versioning, and the R2 rotation after the Railway leak is still pending",
+   "location": "R2 bucket recycle-db-backup (lock rules []; lifecycle only multipart-abort); backup/backup.sh:102-111 (prune via the same credential)",
+   "evidence": "GET r2/buckets/recycle-db-backup/lock -> {\"rules\": []}. R2 has no object versioning. backup.sh deletes with the same R2_ACCESS_KEY_ID it uploads with, so the token held in Railway env can delete every dump. Owner notes from 2026-10-23 list 'R2 x3' as not yet rotated after Railway's 2026-10-21 env-var disclosure. Freshness is fine: newest railway-erp/recycle_erp_railway_20261031T033047Z.dump.gz at 03:30:50Z today (~17h old), 30 daily dumps kept.",
+   "failure_scenario": "Whoever holds the leaked Railway env (or a prune bug, e.g. BACKUP_KEEP misparsed) deletes railway-erp/*; prod DB loss then has no offsite copy. Railway's own volume backups sit with the same provider that leaked.",
+   "proposed_fix": "Rotate the backup R2 token. Add an R2 bucket lock rule on prefix railway-erp/ (retention >= 7 days) and let the lifecycle rule, not the writer, expire old dumps (drop the rclone deletefile prune or give the writer a write-only token).",
+   "regression_test": "After the lock: an attempted delete of a <7-day dump with the backup token returns 403 (manual, by owner).",
+   "confidence": "medium"
+  },
+  {
+   "id": "B2-04",
+   "severity": "P3",
+   "title": "406 stale hourly full-DB dumps from June–July sit at the backup bucket root forever",
+   "location": "R2 bucket recycle-db-backup, keys recycle_erp_20260614T180401Z.dump.gz … recycle_erp_20260704T010001Z.dump.gz",
+   "evidence": "Object list: 436 objects; 30 under railway-erp/ (pruned), 406 at the root from the retired self-hosted stack (2026-06-14 to 2026-07-04). backup.sh prunes only ${R2_DST}=railway-erp/, and the bucket has no expiry lifecycle.",
+   "failure_scenario": "Three weeks of full prod snapshots (users, password hashes, customer and order data) are retained indefinitely and are readable by any R2 credential scoped to this bucket, including one leaked with Railway env.",
+   "proposed_fix": "Owner decides retention; delete the root-level recycle_erp_2026*.dump.gz objects or move one to cold storage, and add a lifecycle rule for the root prefix.",
+   "regression_test": "r2 object list on recycle-db-backup shows no keys outside railway-erp/.",
+   "confidence": "high"
+  },
+  {
+   "id": "B2-05",
+   "severity": "P3",
+   "title": "Terraform does not describe the live backup and dev buckets; experiment-backups code would create a third bucket",
+   "location": "infra/terraform/environments/experiment-backups/main.tf:33-104; tfstate keys experiment-backups (181 bytes = empty) and experiment-attachments-dev (no code in repo); docs/deployment-railway-cloudflare-backups.md:104-116",
+   "evidence": "Live buckets: recycle-db-backup and recycle-erp-attachments-dev (r2.dev public URL enabled) exist with no Terraform code. recycle-erp-backups, the bucket experiment-backups declares (30-day lifecycle), does not exist and its state is empty. State key experiment-attachments-dev/terraform.tfstate has no matching directory. The deployment doc's restore commands point at r2:recycle-erp-backups/postgres/, which does not exist; backup/README.md correctly names recycle-db-backup/railway-erp/.",
+   "failure_scenario": "During an incident someone follows docs/deployment-railway-cloudflare-backups.md and finds no backups. Or someone runs terraform apply in experiment-backups and creates an unused bucket plus token. Lifecycle, lock and CORS changes to the real buckets go unreviewed.",
+   "proposed_fix": "Import recycle-db-backup (and attachments-dev) into a managed environment, delete experiment-backups and the orphan state key, and fix or remove the stale doc section.",
+   "regression_test": "terraform plan per environment shows no changes after import.",
+   "confidence": "high"
+  },
+  {
+   "id": "B2-06",
+   "severity": "P3",
+   "title": "Retired Worker recycle-erp-experiment is still live on workers.dev and is wrangler.toml's default target",
+   "location": "Worker recycle-erp-experiment (modified 2026-06-18, workers.dev enabled); deploy/cloudflare/wrangler.toml:1",
+   "evidence": "https://recycle-erp-experiment.<acct>.workers.dev serves a June SPA build and proxies to BACKEND_URL=https://backend-production-7b10.up.railway.app with no PROXY_SECRET (so /api/me -> 403; /api/health -> 200 with prod's version). The top-level name in wrangler.toml is still recycle-erp-experiment, with no top-level vars.",
+   "failure_scenario": "A bare `wrangler deploy` (forgetting --env) in deploy/cloudflare publishes the current build there with BACKEND_URL unset, so every API call throws. It is also a stale public copy of the app on a URL nobody monitors.",
+   "proposed_fix": "Owner deletes the recycle-erp-experiment Worker. Rename the top-level name to something deploy.sh refuses, or make deploy.sh the only documented path (it always passes --env).",
+   "regression_test": "GET workers/scripts lists no recycle-erp-experiment.",
+   "confidence": "high"
+  },
+  {
+   "id": "B2-07",
+   "severity": "P3",
+   "title": "ERP Workers have no observability, and deployed versions carry no commit tag",
+   "location": "deploy/cloudflare/wrangler.toml (no [observability]); deploy/cloudflare/deploy.sh:43; live settings recycle-erp-prod/dev observability=null",
+   "evidence": "Script settings: recycle-erp-prod and recycle-erp-dev observability None, logpush false (railway-alerts has it enabled). Every version in `wrangler deployments list` shows Tag '-' and Message '-'. Deployed vs repo could only be matched by timestamps: prod 47a8436e at 18:56:29Z = deploy-frontend run for main fb4afda4 (18:54-18:56Z); dev 97dc995a at 20:16:04Z = run for dev 8ad4e918.",
+   "failure_scenario": "After an edge incident (e.g. the RS-221 blank-page class, or a FLEET_WORKER_ENV parse failure that only console.logs) there are no persisted Worker logs. A rollback has to map version ids to commits by hand.",
+   "proposed_fix": "Add [observability] enabled=true (with a sampling rate) to wrangler.toml, and pass --tag ${GITHUB_SHA::8} --message \"$GITHUB_REF_NAME\" to wrangler deploy in deploy.sh.",
+   "regression_test": "After the next deploy, `wrangler deployments list --env prod` shows the commit sha as the tag.",
+   "confidence": "high"
+  }
+ ],
+ "carryover": [
+  {
+   "old_id": "INF-01",
+   "status": "fixed",
+   "evidence": ".github/workflows/deploy-frontend.yml:46-66 has deploy needs: verify (typecheck, tests, worker.test.mjs, build); recent runs all success."
+  },
+  {
+   "old_id": "INF-02",
+   "status": "still open",
+   "evidence": "Checked off in the 10-13 review, and the repo was fixed in 169b93d2, but it was never applied. Live CORS still allows only inventory.recycleservers.com. See B2-02."
+  },
+  {
+   "old_id": "INF-06",
+   "status": "still open",
+   "evidence": "No restore drill exists: no workflow, script or cron under .github/, backup/ or deploy/ restores a dump. The only mention is a 'do this periodically' sentence in docs/deployment-railway-cloudflare-backups.md:118. Nothing shows a drill was ever run (no drill bucket, service or log in the repo). Dumps are fresh (17h) and integrity-gated by pg_restore --list only."
+  },
+  {
+   "old_id": "INF-07",
+   "status": "still open",
+   "evidence": "A worker behaviour test exists (deploy/cloudflare/worker.test.mjs, run in CI), but there is still no typecheck and no observability live. See B2-07."
+  }
+ ],
+ "needs_owner": [
+  "terraform plan -lock=false for infra/terraform/environments/{prod,experiment-dns,experiment-backups}: needs CLOUDFLARE_API_TOKEN (terraform-scoped) and the R2 state AWS_ACCESS_KEY_ID/SECRET, none of which are in this shell. Drift was checked through the CF API instead (B2-02, B2-05).",
+  "terraform plan for trackers/facebook/infra/terraform failed with 'Missing API token': it needs RAILWAY_TOKEN. trackers/reddit plan ran: No changes.",
+  "Cloudflare Access apps and service tokens for fbc-api: the wrangler OAuth token returns an empty list (no Access scope). The owner should list apps and service-token names/expiry in the Zero Trust dashboard (see B2-01).",
+  "DNS record inventory: the OAuth token gets 'Authentication error' on zones/.../dns_records. Checked by dig only for inventory*, static, fbc-api, api.prod, api.dev (all resolve as the repo expects).",
+  "Age of R2 API tokens (backend_r2, backup, attachments-dev) and of the Telegram bot token after the 2026-10-21 Railway leak: /user/tokens is unauthorized for this token. Secret ages are not exposed by wrangler.",
+  "Telegram forum topics 2,3,4,5,15,16,17,28 exist in 'Homelab Alerts': there is no read-only Telegram call that lists topics without sending, so this was not checked. TOPICS in the repo equals the live railway-alerts binding exactly.",
+  "Restore drill (INF-06): it needs a download of a prod dump plus a disposable PG18. That is outside read-only scope for this lane and holds PII."
+ ],
+ "notes": "Verified with no drift: Worker custom domains (GET workers/domains: inventory, inventory-prod → recycle-erp-prod; inventory-dev → recycle-erp-dev) exactly match wrangler.toml routes, so there is no dashboard-only domain. BACKEND_URL vars match the repo. Prod and dev deployments map to the latest successful deploy-frontend runs (prod = main fb4afda4, v1.394.0, 2 commits behind dev as expected; dev = 8ad4e918 v1.395.1). The railway-alerts live version 617b0de0 (2026-10-23T19:42Z, a manual deploy 8 min before a28fdc21 merged) has TOPICS/CHAT_ID identical to the repo, and the downloaded script has the /alert route, MAX_ALERT_CHARS and the thread-not-found fallback (spot-checked, not byte-diffed). Secrets by name: prod {FLEET_WORKER_ENV, PROXY_SECRET}; dev adds FLEET_FORWARD_URL/FLEET_FORWARD_PROXY_SECRET; railway-alerts {ALERT_TOKEN, TELEGRAM_BOT_TOKEN, WEBHOOK_SECRET}. Backend Railway origins and api.prod/api.dev hostnames return 403 without X-Proxy-Secret (only /api/health is exempt). Out of scope: unrelated account Workers huanhuaun and ram4cash-site, and buckets inventory-images and huanhuaun-photos. Prod dump size grew 3.96 MB → 9.63 MB from 10-26 to 10-31; that may interest the DB lane. Live checks used only GETs, the wrangler list/view commands and terraform plan -lock=false. No tfstate contents or secret values were read."
+}

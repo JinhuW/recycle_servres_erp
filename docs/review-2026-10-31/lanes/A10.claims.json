@@ -1,0 +1,149 @@
+[
+ {
+  "id": "A10-01",
+  "severity": "P1",
+  "title": "The coordinator's master secrets go to every container that reads secrets.env; live, the internet-facing rs-console holds the vault key, worker-token secret and coordinator DB URL",
+  "location": "trackers/facebook/deploy/docker-compose.console.yml:29-30; deploy/docker-compose.fleetd.yml:52,61; deploy/docker-compose.messenger.yml:37; deploy/docker-compose.poster.yml:36; configs/secrets.env.example:111-121; live container rs-console on 10.10.10.73",
+  "failure_scenario": "rs-console parses ERP traffic and relays VNC websockets behind the Cloudflare tunnel. An RCE or SSRF-to-env in it, or `docker inspect` access on the VM, yields the key that decrypts every account's password and TOTP, the secret that mints any worker or host token, and direct DB access. That is the whole vault, from the one service designed to be 'read-mostly'."
+ },
+ {
+  "id": "A10-02",
+  "severity": "P2",
+  "title": "deploy.sh, AGENTS.md and README describe a VM topology that no longer exists; a deploy now 'verifies' zero workers and posts 'verified' to Telegram",
+  "location": "trackers/facebook/scripts/deploy.sh:71-73,78-85,182-210,383-416,431-435; trackers/facebook/AGENTS.md 'Versioning, releases, deploys'; VM 10.10.10.73 docker ps",
+  "failure_scenario": "An operator who follows AGENTS.md runs deploy.sh. It force-recreates the coordinator and the console, builds an aimm-recycle:latest image nothing uses, and reports to the Releases topic that the version is on '0 workers - verified running this tree'. The fleet stays on whatever GHCR tag the ERP released. Meanwhile /healthz versions (0.14.x) disagree with the code, so version-based drift checks give wrong answers. AGENTS.md also still says to use `rsc fleet release`, which now drives an agent that is not running."
+ },
+ {
+  "id": "A10-03",
+  "severity": "P2",
+  "title": "deploy.sh never checks the vendored monitor against VENDOR.md; it ships and builds whatever clone is on disk",
+  "location": "trackers/facebook/scripts/deploy.sh:237-238,279-294,339-344; scripts/check-release-tag.sh:44",
+  "failure_scenario": "A deploy from a worktree whose clone sits on a different commit, or carries uncommitted edits, ships an unpinned monitor under a valid release tag. Today's worktrees show four different clone HEADs (gar-2 ac161ad, milkfish f4d4fdf, telescopefish 93e2566, pin 3576db7). The Releases log then names a version whose engine nobody can reconstruct, which is the 'lost pin' incident of 2026-10-23 again."
+ },
+ {
+  "id": "A10-04",
+  "severity": "P2",
+  "title": "A seeded pool cookie (cookie-first Assign) is overwritten by the slot's previous login's backup, and the restore the ERP queued then 409s; the worker falls back to a password login",
+  "location": "trackers/facebook/rs_coordinator/rs_coordinator/routers/session.py:151-215 (backup_session), 219-282 (seed_session); db.py:2059-2069 / pg.py:1316-1328 (upsert_snapshot)",
+  "failure_scenario": "The ERP assigns a pool account by cookie: PUT /session, then POST /restore-session. The worker's periodic backup of the old login lands first, and the seeded cookie is lost. The restore is refused, so the worker logs in by password + 2FA. That is the checkpoint-prone path the cookie-first assign exists to avoid."
+ },
+ {
+  "id": "A10-05",
+  "severity": "P2",
+  "title": "Telegram MarkdownV2 escaping omits the backslash and truncates after escaping; such an alert fails with 400 and is retried forever",
+  "location": "trackers/facebook/rs_coordinator/rs_coordinator/telegram_notify.py:18-22,69; background.py:151-153",
+  "failure_scenario": "A seller title ending in '\\' (e.g. 'R730 64GB\\') escapes the template's closing '*'. Telegram answers 400 'can't find end of Bold entity'. The outbox retries every 15 min forever, the listing is stored as seen, and the buy lead is never alerted. A 4096-char cut through an escape pair does the same."
+ },
+ {
+  "id": "A10-06",
+  "severity": "P2",
+  "title": "Nothing enforces one account per worker; the CLI skips the API's 409",
+  "location": "trackers/facebook/rs_coordinator/rs_coordinator/db.py:397,1970; pg.py:1222; cli.py:390; routers/accounts.py:147-155",
+  "failure_scenario": "Two rows map to va-1. On Postgres, which row comes back can change after any UPDATE. The worker is then handed the other account's password or TOTP, identity and restore checks run against the wrong uid, and a login under the wrong device follows."
+ },
+ {
+  "id": "A10-07",
+  "severity": "P2",
+  "title": "Any worker token can ack another worker's queued Messenger reply, and fetch has no claim/lease, so replies can be dropped or sent twice",
+  "location": "trackers/facebook/rs_coordinator/rs_coordinator/routers/messages.py:139-176",
+  "failure_scenario": "Two rs-router pollers, or a slow ack overlapping the next poll, both send the same staff reply to a seller. Or a buggy or compromised worker acks someone else's reply as sent and it is silently lost."
+ },
+ {
+  "id": "A10-08",
+  "severity": "P2",
+  "title": "Concurrent incident reports lose votes and can page DOWN twice",
+  "location": "trackers/facebook/rs_coordinator/rs_coordinator/routers/incidents.py:37-46",
+  "failure_scenario": "An AI-provider outage makes the whole fleet report 'down' within seconds. Two handlers both see 'closed' and both page DOWN. The last writer's reporters JSON wins, so a later single 'up' closes the incident and pages 'recovered' while workers whose votes were lost are still down, and they never re-vote."
+ },
+ {
+  "id": "A10-09",
+  "severity": "P2",
+  "title": "A worker with no account mapping can lock any account it names",
+  "location": "trackers/facebook/rs_coordinator/rs_coordinator/routers/escalation.py:47-60,108-112",
+  "failure_scenario": "A freshly provisioned or detached worker (or a compromised one) posts {kind:'locked', account_id:<any>}. From then on no worker is handed that account's password until `rsc vault unlock`, and the healthy account silently drops out of the fleet."
+ },
+ {
+  "id": "A10-10",
+  "severity": "P2",
+  "title": "A listing whose alert enqueue fails is stored as seen and never alerted",
+  "location": "trackers/facebook/rs_coordinator/rs_coordinator/routers/listings.py:105-128,159-180",
+  "failure_scenario": "A DB blip or pool timeout between claim and enqueue leaves the listing committed. Every later sighting is a DUPLICATE, so the lead is lost. For a DISCOUNTED listing the new price is already stored, so the drop can't be detected again."
+ },
+ {
+  "id": "A10-11",
+  "severity": "P2",
+  "title": "Settings save writes some worker configs, fails on a fleet write, and leaves settings.json on the old values",
+  "location": "trackers/facebook/rs_console/rs_console/settings.py:534-538; app.py:850-857",
+  "failure_scenario": "During a coordinator blip the ERP reports 'save failed', yet some workers already search with the new keywords or cities while the saved state and /v1/fleet show the old ones. The next render (deploy, or the next save) silently reverts those workers."
+ },
+ {
+  "id": "A10-12",
+  "severity": "P2",
+  "title": "A blocking coordinator call inside the async VNC/fleet handlers, behind a threading.Lock, stalls the whole console; an unauthenticated websocket can trigger it",
+  "location": "trackers/facebook/rs_console/rs_console/app.py:475-503,538-541,718; settings.py:379-382",
+  "failure_scenario": "With a slow coordinator, every cache refresh freezes the event loop for up to 10 s. Live VNC bridges stall and the ERP's proxied reads time out. Anyone who can reach the console's websocket can trigger a refresh without a token."
+ },
+ {
+  "id": "A10-13",
+  "severity": "P2",
+  "title": "A worker-supplied vnc_url is rendered as a clickable href with no scheme check",
+  "location": "trackers/facebook/rs_console/rs_console/static/fleet.js:81-84,349,366,470,667-668; rs_coordinator/routers/health.py:64; schemas.py:212",
+  "failure_scenario": "A compromised worker heartbeats vnc_url 'javascript:...'. An operator clicks Watch on the console page, where the console token sits in localStorage. Whether it executes depends on browser handling of target=_blank/noopener, so this is a path, not a demonstrated exploit. The ERP's React page consumes the same field."
+ },
+ {
+  "id": "A10-14",
+  "severity": "P2",
+  "title": "The documented ERP contract omits the two session routes the ERP uses, and rs_console's safety docstring overstates its blast radius",
+  "location": "trackers/facebook/AGENTS.md:45-75; rs_console/rs_console/app.py:9-35,281,360",
+  "failure_scenario": "Someone pruning routes 'not in the contract' breaks Assign. Or someone sizes the console token's risk from the docstring and under-protects it."
+ },
+ {
+  "id": "A10-15",
+  "severity": "P2",
+  "title": "The poster/messenger account lock checks liveness by PID across separate containers' PID namespaces",
+  "location": "trackers/facebook/rs_poster/rs_poster/session.py:41-59,77-93; deploy/Dockerfile.messenger:25; tests/test_poster.py:225-232",
+  "failure_scenario": "A messenger killed while holding the lock restarts with the same PID, sees 'itself' alive and exits with SessionLockedError, and the bridge stays down until someone deletes account.lock. Or the other container sees 'no such process' and breaks a live lock, so poster and messenger drive one Facebook account at once, which is the very thing the lock exists to prevent."
+ },
+ {
+  "id": "A10-16",
+  "severity": "P2",
+  "title": "A legacy Mac monitor and a daily headless session probe still run from the archived checkout, outside the fleet and its device and proxy rules",
+  "location": "launchd jobs com.recycleservers.fbmonitor (live pid running ~/Projects/recycle_servers/facebook_tracker/.venv-aimm/bin/aimm) and com.recycleservers.search-probe; trackers/facebook/scripts/probe-search-url.py:163-166; deploy/com.recycleservers.search-probe.plist",
+  "failure_scenario": "A Facebook account is logged in daily from the office IP with a headless fingerprint, and a full monitor keeps searching from stale code. Neither shows up in the fleet ledger, so a checkpoint on that account looks unexplained."
+ },
+ {
+  "id": "A10-17",
+  "severity": "P2",
+  "title": "browse-session.py saves the session every 5 s without a logged-in guard, proxy fallback, device identity or lock",
+  "location": "trackers/facebook/scripts/browse-session.py:33-47,64",
+  "failure_scenario": "A checkpoint or logout while warming a session, or a forgotten --proxy, overwrites a good saved session with a logged-out jar or replays it from the operator's IP. Rebuilding costs a password + 2FA login."
+ },
+ {
+  "id": "A10-18",
+  "severity": "P2",
+  "title": "`rs-session check` opens a live session under a different device, and the README schedules `check --save-refreshed`",
+  "location": "trackers/facebook/rs_poster/rs_poster/session_cli.py:557-586; deploy/README.md 'Keeping sessions alive'",
+  "failure_scenario": "A routine cron check presents a second device fingerprint on the account and can revert the worker's rotated cookies, leading to session invalidation and a re-login."
+ },
+ {
+  "id": "A10-19",
+  "severity": "P2",
+  "title": "Re-capturing a session without --proxy keeps the old proxy in its sidecar",
+  "location": "trackers/facebook/rs_poster/rs_poster/cookies.py:311-318; session_cli.py:269-274,504-509",
+  "failure_scenario": "A session first captured through proxy X is re-captured on the house IP. PosterSession (session.py:200) and check then replay it through X, the IP-mismatch pattern master.toml says causes revocations."
+ },
+ {
+  "id": "A10-20",
+  "severity": "P2",
+  "title": "rs-router reuses Matrix transaction ids after each restart, and treats transient errors as permanent; staff replies are silently dropped",
+  "location": "trackers/facebook/rs_router/rs_router/matrix.py:40,80-84; cli.py:150-157",
+  "failure_scenario": "After any router restart, the first N staff replies return 200 with an old event id and are acked 'sent', so the seller never gets them. During a homeserver restart, replies are marked permanently failed."
+ },
+ {
+  "id": "A10-21",
+  "severity": "P2",
+  "title": "check-secrets.sh misses the files .gitignore protects as credentials and unquoted or lowercase secret values",
+  "location": "trackers/facebook/scripts/check-secrets.sh:40-41,94-104; trackers/facebook/.gitignore:7-13,70-76",
+  "failure_scenario": "A force-added secrets.fleetd.env or account_info.txt passes the release gate (release.sh runs it) and lands in history."
+ }
+]

@@ -1,0 +1,12 @@
+A4-03(b) take status: 200 | assign status: 200 | facade calls: GET /v1/fleet, PUT /v1/accounts/nyc-1, POST /v1/workers/nyc-1/relogin | row: {"status":"fleet","holder_name":"nyc-1"}
+A4-03(a) statuses: 200 200 | relogins queued: /v1/workers/rs-ne-1/relogin, /v1/workers/rs-ca-3/relogin | row: {"status":"fleet","holder_name":"rs-ca-3"}
+     × (b) a purchaser Take that lands while the login is in flight is not silently flipped to fleet 4347ms
+     × (a) two managers assigning one account to two workers at once send the login to only one 2477ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  ../../docs/review-2026-10-31/repro/A4-verify/a4-03-assign-race.test.ts > A4-03 assign races > (b) a purchaser Take that lands while the login is in flight is not silently flipped to fleet
+AssertionError: expected 'fleet' to be 'taken' // Object.is equality
+     39|     console.log('A4-03(b) take status:', took, '| assign status:', r.s…
+ FAIL  ../../docs/review-2026-10-31/repro/A4-verify/a4-03-assign-race.test.ts > A4-03 assign races > (a) two managers assigning one account to two workers at once send the login to only one
+AssertionError: expected 2 to be 1 // Object.is equality
+     61|     console.log('A4-03(a) statuses:', r1.status, r2.status, '| relogin…
+      Tests  2 failed (2)

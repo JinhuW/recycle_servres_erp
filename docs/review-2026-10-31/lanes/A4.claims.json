@@ -1,0 +1,23 @@
+[
+ {
+  "id": "A4-01",
+  "severity": "P2",
+  "title": "A lease that lapsed during an ERP/DB outage is claimable while its worker is still alive, so the agents' next desired poll can start new workers that steal live workers' slots (a cascade of Facebook logins)",
+  "location": "apps/backend/src/fleet/claim.ts:347-355; apps/backend/src/fleet/hosts.ts:239-265; apps/backend/src/fleet/auth.ts:254-261",
+  "failure_scenario": "Hosts A and B (capacity 10 each), A runs A-1..A-8, B runs B-1..B-4. The ERP (or its Postgres) is unreachable for >30 min, so every slot's lease lapses. On recovery B's agent polls /desired before B-1..B-4 heartbeat: held(B)=0, all 12 slots are 'free', round-robin gives B a share of 6, so desired.count rises to 6 and the agent docker-runs B-5 and B-6. B-5 claims first the slots whose last_host_id = B, i.e. B-1's lapsed slot: epoch bumps, B-1's next heartbeat gets 409 stale_epoch, B-1 exits, the agent restarts it, it claims another lapsed slot (A's), and so on. Every one of those boots is a Facebook login, against the repo's first rule."
+ },
+ {
+  "id": "A4-02",
+  "severity": "P2",
+  "title": "Saving the pool editor overwrites a session a fleet worker resealed after the page loaded (lost update of the stored browser session)",
+  "location": "apps/backend/src/routes/facebookPool.ts:456-492 (cookie written at :484, compare at :476)",
+  "failure_scenario": "A manager opens the Accounts page (snapshot holds account #12's storage state S1), a fleet worker on #12 saves its rotated session S2 (PUT /worker/session), then the manager edits #12's note and saves. The PUT writes S1 back over S2 and stamps cookie_at/cookie_by as the manager. The next claim of #12 restores S1, whose xs Facebook may already have invalidated, so the worker falls back to a password login (or SESSION_EXPIRED), i.e. a login the system was built to avoid."
+ },
+ {
+  "id": "A4-03",
+  "severity": "P2",
+  "title": "POST /facebook-pool/:no/assign fires its Facebook-login side effects before any durable or locked state, and its final write has no status guard",
+  "location": "apps/backend/src/routes/facebookPool.ts:620-632, 656-696, 699-706",
+  "failure_scenario": "(a) Two managers assign #7 to rs-ne-1 and rs-ca-3 within a second: both pass the unlocked checks, both vault writes and relogins go out, two workers sign in to one account from two IPs (the location churn that gets accounts checkpointed); the last UPDATE wins the pool row. (b) A purchaser takes #7 between the check and the final UPDATE: the UPDATE silently flips it from 'taken' to 'fleet', the purchaser keeps using the login while the worker logs in too. (c) The backend restarts after the relogin was queued but before the UPDATE: the worker logs in, the pool still says 'available', and the next Take hands the same login to a purchaser."
+ }
+]

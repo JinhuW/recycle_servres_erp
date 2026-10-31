@@ -1,0 +1,4 @@
+pages DOWN: True True
+votes kept: ['va-2']
+after va-2 up: open= 0 recovered page: True
+1 passed, 1 warning in 0.27s

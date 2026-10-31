@@ -1,0 +1,11 @@
+migrations applied: 218
+--- scrub run:
+ set_config 
+------------
+ 
+(1 row)
+
+ERROR:  null value in column "url_enc" of relation "fleet_proxies" violates not-null constraint
+DETAIL:  Failing row contains (1, p1, null, 1.2.3.4, 8080, America/Denver, , null, 2026-10-31 20:28:29.774304+00).
+CONTEXT:  SQL statement "UPDATE public.fleet_proxies SET url_enc = NULL WHERE url_enc IS NOT NULL"
+PL/pgSQL function inline_code_block line 12 at EXECUTE

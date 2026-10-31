@@ -1,0 +1,22 @@
+$ scripts/ticket.sh list --status backlog | grep RS-29[01]
+RS-291   backlog      P1     A worker's saved login survives any restart until Facebook expires it
+RS-290   backlog      P1     Idle session check reads a stale page URL and misses a login finished over Watch
+$ grep status/pr/version
+docs/tickets/RS-290-idle-session-check-reads-a-stale-page-url-and-misses.md:5:status: backlog
+docs/tickets/RS-290-idle-session-check-reads-a-stale-page-url-and-misses.md:10:pr:
+docs/tickets/RS-290-idle-session-check-reads-a-stale-page-url-and-misses.md:11:version:
+docs/tickets/RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md:5:status: backlog
+docs/tickets/RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md:10:pr:
+docs/tickets/RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md:11:version:
+$ git tag --contains (fix commits)
+f705cef6: fix(facebook): read the page URL after the cookies in the login check (RS-290) (#722) -> facebook-tracker/v0.10.4
+0eed999a: fix(facebook): a saved session survives power cuts and slow shutdowns (RS-291) (#723) -> facebook-tracker/v0.10.5
+51191d67: fix(facebook): the coordinator refuses a session backup with no session (RS-291) (#725) -> facebook-tracker/v0.10.6
+$ acceptance boxes
+docs/tickets/RS-290-idle-session-check-reads-a-stale-page-url-and-misses.md:44:- [x] `is_logged_in()` asks for the cookies before it reads `page.url`, and a
+docs/tickets/RS-290-idle-session-check-reads-a-stale-page-url-and-misses.md:46:- [ ] On the live fleet, a login finished over Watch on an idle worker reads
+docs/tickets/RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md:44:- [x] Each save fsyncs the file and its directory before it trusts the rename.
+docs/tickets/RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md:45:- [x] Workers get 30 s to stop (`stop_grace_period`), and supervisord waits
+docs/tickets/RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md:47:- [x] At login, a worker whose session file is missing or holds no session
+docs/tickets/RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md:50:- [x] The coordinator refuses a backup with no session in it, so a logged-out
+docs/tickets/RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md:52:- [x] On the live fleet, a logged-in worker restarted with `docker restart`

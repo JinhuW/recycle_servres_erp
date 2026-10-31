@@ -1,0 +1,9 @@
+[
+ {
+  "id": "C3-01",
+  "severity": "P2",
+  "title": "RS-290 and RS-291 (Facebook session bugs, RS-291 is P1) sit in backlog although both shipped in facebook-tracker 0.10.4-0.10.6",
+  "location": "docs/tickets/RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md:5; docs/tickets/RS-290-idle-session-check-reads-a-stale-page-url-and-misses.md:5; docs/tickets/INDEX.md (RS-290, RS-291 rows)",
+  "failure_scenario": "An agent asked to pick up open Facebook work lists backlog tickets (`scripts/ticket.sh list --status backlog`) and finds a P1 'saved login survives any restart'. RS-291's unchecked-looking live acceptance step is 'a logged-in worker restarted with docker restart ... comes back logged in' and RS-290's open box is a live login over Watch; re-verifying a shipped fix that way is exactly the worker restart / login the root AGENTS.md first rule forbids, risking a checkpointed account."
+ }
+]

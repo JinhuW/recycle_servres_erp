@@ -1,0 +1,23 @@
+[
+ {
+  "id": "A9-01",
+  "severity": "P2",
+  "title": "Worker shutdown waits out the Reddit pacer, so docker stop -t 35 / Railway usually SIGKILLs it before claims and the fleet row are released",
+  "location": "trackers/reddit/src/loops/runner.ts:66-70; src/pacing.ts:48-55; src/loops/poll.ts:36-42; src/index.ts:301-326; scripts/deploy-workers.sh:63",
+  "failure_scenario": "During scripts/deploy-workers.sh, each VM gets SIGTERM while its poll loop is about 40 s into a 60 s pacer wait, which is the common case. The loop wakes after about 20 s, claims a batch and starts the fetch, and docker SIGKILLs it at 35 s. The batch stays claimed and invisible for the 5-minute CLAIM_TTL. Evaluate/notify claims held by the process are kept too. Its `workers` row is never deleted, and the new container gets a new hostname-pid id. About 10 minutes later the ops watch pages 'Reddit worker down: <old id>' for every redeployed VM. This is exactly what docs/debug-notes/signals-must-reach-node.md set out to prevent."
+ },
+ {
+  "id": "A9-02",
+  "severity": "P2",
+  "title": "A worker running ALERT_TRANSPORT=console against the shared DB marks buyer targets notified without sending them; the deploy script defaults to console",
+  "location": "trackers/reddit/src/alerts.ts:44-64; src/loops/notify.ts:41-48,83-88; scripts/deploy-workers.sh:33; scripts/secrets.env.example:19; README.md:378-380",
+  "failure_scenario": "The owner runs deploy-workers.sh with a secrets.env that leaves out ALERT_TRANSPORT, or a dev runs `pnpm dev` with ALERT_TRANSPORT=console against the prod DATABASE_URL. That worker wins the claim on roughly 1/N of the targets, prints them to docker logs and marks them notified. Buyers silently miss those leads. Analytics counts them as alerts with no reaction, and dedup parks their cross-posts as duplicates of an alert nobody saw."
+ },
+ {
+  "id": "A9-03",
+  "severity": "P2",
+  "title": "The Railway worker has a fixed WORKER_ID, so during a redeploy overlap the old process's shutdown releases the new process's claims and lease and deletes its fleet row",
+  "location": "railway reddits-tracker/production service worker (eed8d23f) variable WORKER_ID; trackers/reddit/src/config.ts:100; src/claims.ts:383-389; src/heartbeat.ts:211-213; src/index.ts:318-325",
+  "failure_scenario": "A redeploy happens while the new worker is mid-notify on target P, or mid-evaluate. The old copy's shutdown nulls P's claim, an OCI worker claims P, and buyers get a second alert. The new worker's later markNotified is a no-op because claimed_by no longer matches, but its message ids are still inserted. The new worker's fleet row also vanishes until its next 30 s beat, and its comment_tracer lease is dropped. This needs the overlap to outlast the old process's loop drain; Railway's draining/overlap settings weren't checked."
+ }
+]

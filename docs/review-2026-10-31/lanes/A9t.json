@@ -1,0 +1,126 @@
+{
+ "lane": "A9t",
+ "files_read": [
+  "trackers/reddit/docs/prompt-evaluations/2026-10-18-baseline.md",
+  "trackers/reddit/docs/prompt-evaluations/2026-10-19-candidate-1-offline.md",
+  "trackers/reddit/docs/prompt-evaluations/2026-10-26-candidate-2-bulk-ram.md",
+  "trackers/reddit/infra/terraform/.terraform.lock.hcl",
+  "trackers/reddit/pnpm-lock.yaml",
+  "trackers/reddit/tests/analytics.test.ts",
+  "trackers/reddit/tests/api.test.ts",
+  "trackers/reddit/tests/claims.test.ts",
+  "trackers/reddit/tests/dedup.test.ts",
+  "trackers/reddit/tests/fixtures/comments-feed.xml",
+  "trackers/reddit/tests/fixtures/new-listing.xml",
+  "trackers/reddit/tests/heartbeat.test.ts",
+  "trackers/reddit/tests/helpers/db.ts",
+  "trackers/reddit/tests/llm.test.ts",
+  "trackers/reddit/tests/logger.test.ts",
+  "trackers/reddit/tests/pacing.test.ts",
+  "trackers/reddit/tests/pipeline.test.ts",
+  "trackers/reddit/tests/poll.test.ts",
+  "trackers/reddit/tests/reactions.test.ts",
+  "trackers/reddit/tests/reddit.test.ts",
+  "trackers/reddit/tests/rules.test.ts",
+  "trackers/reddit/tests/seen.test.ts",
+  "trackers/reddit/tests/telegram.test.ts",
+  "trackers/reddit/tests/trace.test.ts",
+  "trackers/reddit/tests/watch.test.ts",
+  "(context, A9-owned, read for comparison) trackers/reddit/src/claims.ts, src/llm.ts, src/dedup.ts, src/pacing.ts, src/telegram.ts, src/prompts.ts, src/settings.ts (FALLBACKS), src/api.ts:285-470, src/loops/{poll,evaluate,notify,runner}.ts, AGENTS.md, README.md, docs/tickets/RS-404"
+ ],
+ "findings": [
+  {
+   "id": "A9t-01",
+   "severity": "P3",
+   "title": "Design invariant 2 (take the Reddit rate-limit slot before claiming) has no test: moving pacer.acquire() after the claim passes the whole suite",
+   "location": "trackers/reddit/src/loops/poll.ts:36-38; tests/poll.test.ts:45; trackers/reddit/AGENTS.md:69-80",
+   "evidence": "Every poll test builds RedditPacer({maxRpm: 60_000, sleep: async () => {}}), so acquire() never waits and nothing checks the order of acquire and claim. AGENTS.md:71 names poll.test.ts as the test that covers the invariants. Mutation M1 (claim first, then acquire) left tests/poll.test.ts green, 13/13. See docs/review-2026-10-31/repro/A9t/mutation.log and docs/review-2026-10-31/repro/A9t/mutate.py.",
+   "failure_scenario": "A refactor puts claimDueSubreddits before pacer.acquire(). A worker in block backoff (up to 18 min, pacing.ts:89) then holds a 20-subreddit claim while it sleeps. Past the 300 s claim TTL, a second worker re-claims and fetches the same batch, so one blocked IP hides or duplicates the fleet's work. Nothing in CI catches it: root CI doesn't run tracker tests, and the tracker's own suite passes.",
+   "proposed_fix": "Add a poll test with a pacer whose acquire() counts claimed subreddits (SELECT count(*) FROM subreddits WHERE claimed_by IS NOT NULL) and asserts 0 at that moment.",
+   "regression_test": "tests/poll.test.ts: 'holds no claim while waiting on the pacer', with the acquire spy above; it must fail under mutation M1.",
+   "confidence": "high"
+  },
+  {
+   "id": "A9t-02",
+   "severity": "P3",
+   "title": "Retry gating is untested: claimPosts can ignore next_retry_at, and poll can skip pacer.recordSuccess(), with all tests green",
+   "location": "trackers/reddit/src/claims.ts:180; src/loops/poll.ts:69; tests/claims.test.ts:310-320; tests/pipeline.test.ts:420-435; tests/poll.test.ts:168-204",
+   "evidence": "Mutation M5 removed 'AND next_retry_at <= NOW()' from claimPosts: claims + pipeline tests stayed at 54/54. The backoff tests only read the stored next_retry_at ('backs a retry off exponentially', 'defers a later copy … due_later'); none claims again and expects nothing back. Mutation M4 deleted pacer.recordSuccess() from pollOnce: poll + pacing tests stayed at 27/27. Clearing the backoff is tested only on the pacer object, never through pollOnce.",
+   "failure_scenario": "M5 regression: a post whose OpenRouter call fails is re-claimed on the next busy tick (busyMs). It burns its 5 attempts, which are paid calls, within seconds and parks as 'failed' instead of backing off up to 15 min. A deferred cross-post copy is re-claimed at once, so the notify loop busy-spins. M4 regression: after one 403, consecutiveBlocks never resets, every later transient block doubles the pause toward 15 min, and poll throughput collapses with no failing test.",
+   "proposed_fix": "Test that releasePostFailure / deferPost really hide the row from the next claimPosts, and that pollOnce resets the pacer after a success that follows a block.",
+   "regression_test": "claims.test.ts: after releasePostFailure, claimPosts(...'new') returns []. poll.test.ts: a 403 poll, then a 200 poll, then pacer.waitMs() is just the request gap.",
+   "confidence": "high"
+  },
+  {
+   "id": "A9t-03",
+   "severity": "P3",
+   "title": "The 'review a candidate-only post at evaluate time' condition is untested: dropping '&& !evaluation.isTarget' double-sends dev reviews unnoticed",
+   "location": "trackers/reddit/src/loops/evaluate.ts:129-141; tests/pipeline.test.ts (describe 'candidate prompt trial')",
+   "evidence": "No pipeline test has live TARGET + candidate TARGET + a dev chat. Mutation M2 (condition reduced to candidateVerdict?.isTarget) kept pipeline.test.ts at 34/34.",
+   "failure_scenario": "Someone simplifies the condition. Every post both prompts flag then gets a dev review from the evaluate loop and another from the notify loop. The dev chat sees duplicates, and alert_messages gets two 'dev' rows per post, which inflates review and lead counts per prompt version.",
+   "proposed_fix": "Add the both-flag case.",
+   "regression_test": "pipeline.test.ts: live TARGET, candidate TARGET, dev chat set; after evaluateOnce + notifyOnce, exactly one telegram call to dev-1, saying 'flagged by live and candidate'.",
+   "confidence": "high"
+  },
+  {
+   "id": "A9t-04",
+   "severity": "P3",
+   "title": "startLoop (loop runner) has no test: making an iteration's throw kill the loop passes all 281 tests",
+   "location": "trackers/reddit/src/loops/runner.ts:47-63",
+   "evidence": "No test imports runner.ts (grep). Mutation M6 (rethrow inside the catch) ran the full tracker suite: 17 files, 281 tests passed. The stop()/wake path behind A9-01 (shutdown waits on the pacer) is also undriven by any test.",
+   "failure_scenario": "A regression lets one transient DB error escape the loop. That loop (poll, evaluate or notify) exits for good while the heartbeat loop keeps beating. watch.ts pages only for a silent heartbeat or for consecutiveFailures, and a dead loop records neither, so polling or alerting stops with no page.",
+   "proposed_fix": "Unit-test startLoop: it survives a throw, uses busyMs vs idleMs, and stop() resolves `stopped` during an idle sleep. A watch-side check of loops.<name>.lastSuccessAt age would also catch a dead loop.",
+   "regression_test": "tests/runner.test.ts: iteration throws once then returns true; expect a second call and logger.error once; stop() mid-sleep resolves within ~10 ms.",
+   "confidence": "high"
+  },
+  {
+   "id": "A9t-05",
+   "severity": "P3",
+   "title": "[cross-lane] POST /api/posts/:id/requeue requeues a post in any status, so requeueing an alerted post alerts buyers again; tests cover only 'failed'",
+   "location": "trackers/reddit/src/claims.ts:344-355; src/api.ts:342-345; tests/claims.test.ts:273-308; tests/api.test.ts:406-420; README.md:263",
+   "evidence": "requeuePost's WHERE is just reddit_id. It sets status to 'target' when is_target is true, else 'new', whatever the current status. README documents the route as 'Retry a post that gave up'. Repro docs/review-2026-10-31/repro/A9t/requeue-notified.test.ts fails today: 'expected vi.fn() to be called 1 times, but got 2 times'. With 'AND status = 'failed'' added (F1 in mutation.log) the repro passes and claims + api tests stay at 82/82.",
+   "failure_scenario": "An operator with the API token requeues a notified post: say, an id copied from /api/matches instead of the stats failed list, or a script that loops over posts. notifyOnce sends buyers a second alert for the listing. Requeueing a 'rejected' post spends a paid LLM call and can alert it under a newer prompt. The ERP allowlist doesn't proxy this route, so only bearer-token callers can hit it.",
+   "proposed_fix": "Add AND status = 'failed' to requeuePost, so the route 404s on anything else, or 409s with the current status.",
+   "regression_test": "docs/review-2026-10-31/repro/A9t/requeue-notified.test.ts (copy into trackers/reddit/tests/), plus an api.test.ts case: requeue of a notified post returns a non-200 and leaves status 'notified'.",
+   "confidence": "high"
+  },
+  {
+   "id": "A9t-06",
+   "severity": "P3",
+   "title": "The prompt-evaluation log stops before the outcome and has stale statements; the repo can't show the shipped prompt",
+   "location": "trackers/reddit/docs/prompt-evaluations/2026-10-26-candidate-2-bulk-ram.md:100,102-114; docs/prompt-evaluations/2026-10-18-baseline.md:5-9,139-141; README.md:312; docs/tickets/RS-404-*.md:81; src/settings.ts:21-23; migrations/0001_init.sql:14",
+   "evidence": "The baseline asks every entry to record 'the prompt version under test (GET /api/prompt-stats ids)', and README step 7 says to record the outcome. The candidate-2 entry gives no version id for candidate 2 and ends at '## Decision: Promote'. The promotion (2026-10-26 05:03 UTC, rule 1 disabled) appears only in RS-404. The baseline still says candidate 1's trial 'has been running in prod since 2026-10-19', but promote cleared the candidate. Candidate-2 calls cross-post alerts 'the known dedup gap, out of scope', yet RS-413 (v1.362.0, commit 72472d7d) shipped dedup the same day. The shipped text and model (candidate 2 final on openai/gpt-6-luna-pro, per the doc) live only in prod settings. The repo's seeds are the original prompt (0001_init.sql) and FALLBACKS gpt-4o-mini, so a fresh or dev database judges with a prompt prod retired. The doc's text agrees with src/llm.ts: reasoning-first schema, RESPONSE_SCHEMA_ID, buildUserMessage, the 4000-char body cut.",
+   "failure_scenario": "The next person to trial a prompt reads the log, takes candidate 1 as still on trial and the dedup gap as open, and has no version id to compare against in /api/prompt-stats. A rollback needs 'the old text', which exists only in prompt_versions in prod. Local and dev results (seeded prompt, gpt-4o-mini) aren't comparable with prod verdicts.",
+   "proposed_fix": "Add a 'Result' section to the candidate-2 entry: promoted 2026-10-26 05:03 UTC, the new live version id, the retired version 66/68 ids, rule 1 disabled. Add a superseded note to the baseline's candidate-1 result. Correct the dedup line. Optionally keep the live prompt as a checked-in file the docs cite.",
+   "regression_test": "Docs only; no test.",
+   "confidence": "high"
+  },
+  {
+   "id": "A9t-07",
+   "severity": "P3",
+   "title": "The Telegram user-session client depends on telegram@2.26.22 (GramJS), which the lockfile marks deprecated and archived",
+   "location": "trackers/reddit/pnpm-lock.yaml:23-25,652-654; package.json dependencies.telegram; src/userSender.ts",
+   "evidence": "pnpm-lock.yaml:654: 'deprecated: This package is archived and no longer maintained. Development continues in teleproto'. package.json pins it exactly at 2.26.22. It is the MTProto client holding the owner's Telegram user session in the api (AGENTS invariant 8).",
+   "failure_scenario": "A Telegram protocol or layer change, or a vulnerability in the archived client, gets no upstream fix. User-first sending and read receipts break or stay exposed, and alerts silently fall back to the bot (fellBack). That client holds a full user session for the account, so an unpatched bug there is worse than one in a bot client.",
+   "proposed_fix": "Track a migration to teleproto (the API is largely compatible) as a ticket. Until then, review advisories for the pinned version by hand.",
+   "regression_test": "tests/seen.test.ts already covers createUserFirstSender through a fake UserClient; add a thin adapter test against the replacement library's types.",
+   "confidence": "medium"
+  },
+  {
+   "id": "A9t-08",
+   "severity": "P3",
+   "title": "The feed fixture has only self-posts, so link/image posts send Reddit's 'submitted by … [link] [comments]' footer to the LLM untested; some asserts are tautological",
+   "location": "trackers/reddit/tests/fixtures/new-listing.xml; src/reddit.ts:69; tests/reddit.test.ts:60-65; tests/rules.test.ts:44-57,89-99; tests/dedup.test.ts:78-83",
+   "evidence": "All 9 fixture entries carry <div class=\"md\">. None is a link, image or gallery post, a [deleted] author, or a markdown table. For a link post, htmlToText falls back to the whole content: run against a Reddit link-post body it returns 'submitted by /u/seller to r/homelabsales \\n [link] [comments]' instead of an empty body, so buildUserMessage never sends '(no body text)'. The same footer text feeds dedup's body comparison. rules.test.ts:89-99 filters the rules itself and asserts on its own filter, so evaluate.ts's filter goes untested there (pipeline.test.ts covers it). rules.test.ts:55-56 uses toBeGreaterThanOrEqual, which passes when updated_at is never bumped. The dedup test titled 'a week later' uses 4 days.",
+   "failure_scenario": "An image-only '[FS] 24x 32GB RDIMM' post reaches the model with a body of Reddit boilerplate that names the author and subreddit, which can sway a count-based verdict. No test shows what the model gets for such posts. Two link posts by one seller in different subreddits share a near-identical footer, and the BODY_MATCH path (dedup.ts:74-76) sees it as matching body text. MIN_BODY_CHARS=80 mostly keeps short footers out, so this is low risk.",
+   "proposed_fix": "Add one captured link post and one image post to new-listing.xml (adjusting the 9-entry counts) and make htmlToText return '' when no md div exists. Make the rules tests exercise liveConfig/evaluate, and assert updated_at strictly increases.",
+   "regression_test": "reddit.test.ts: parseFeed on the link-post entry gives selftext ''; llm.test.ts: buildUserMessage then contains '(no body text)'.",
+   "confidence": "medium"
+  }
+ ],
+ "carryover": [],
+ "needs_owner": [
+  "Confirm prod reddits-tracker settings: eval_prompt equals the candidate-2 final text in docs/prompt-evaluations/2026-10-26-candidate-2-bulk-ram.md, llm_model = openai/gpt-6-luna-pro, candidate_eval_prompt = '', and rule 1 disabled. That takes GET /api/settings + /api/prompt-stats with the tracker API_TOKEN (a secret), so it was not done here."
+ ],
+ "notes": "Read all 25 lane files in full except pnpm-lock.yaml (skimmed: importers block, plus a grep for deprecations) and .terraform.lock.hcl (2 providers, oci 6.37.0 and cloudinit 2.4.0, both match the ~> constraints; zh hashes cover every platform, h1 one each, so it's fine). Both fixtures are valid and parse. Tests were run only from a scratch copy of trackers/reddit (node_modules symlinked) against my own postgres:18 container review1031-a9t on 127.0.0.1:55691, which is now removed; the worktree is unchanged. 9 checks ran: 8 mutations plus F1, a candidate fix. M1, M2, M4, M5 and M6 survived; M3, M7 and M8 were killed; F1 passed. Tests that are strong: claims (SKIP LOCKED disjointness, TTL steal, release by non-holder), pipeline (exactly-once alert across workers, partial delivery, cross-post defer/park, candidate never reaches buyers), the LLM parse/error paths, pacing math, reactions cursor idempotency, and the heartbeat/watch paging. The LLM judge itself is only stubbed; prompt quality is evidenced solely by the offline write-ups. Not checked: src/index.ts wiring of deferToUserSender per role, and the analytics SQL beyond its tests. No prior-review (2026-10-13) IDs cover trackers/reddit, which was imported 2026-10-16, so there is no carryover. A9 findings were not repeated; A9t-04 adds only the missing-test angle to A9-01."
+}

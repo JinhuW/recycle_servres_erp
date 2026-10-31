@@ -1,0 +1,6 @@
+sed: deploy/docker-compose.homelab*.yml: No such file or directory
+verify loop iterations=0
+sed: deploy/docker-compose.homelab*.yml: No such file or directory
+WORKER_COUNT=0
+sed: deploy/docker-compose.homelab*.yml: No such file or directory
+restart loop done

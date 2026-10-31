@@ -1,0 +1,9 @@
+[
+ {
+  "id": "A7-01",
+  "severity": "P2",
+  "title": "Mobile capture: a failed new-line autosave deletes the draft PO even when an earlier line already landed in it (photos and scan images deleted from R2)",
+  "location": "apps/frontend/src/MobileApp.tsx:627, :667-673 (with :170-175, :467-483); apps/backend/src/routes/orders/lifecycle.ts:62-110",
+  "failure_scenario": "On a slow cellular link a purchaser saves line A, which kicks off the draft POST, then adds line B and saves it while the POST is still pending. A syncs and its photos upload. B's PATCH hits a network error, so the app deletes PO D, including A's row, A's photos and A's label-scan image in R2. Because draftId was cleared, Submit then POSTs a new PO with both lines. A's line comes back, but its photos are gone and its scanImageId points at a deleted R2 object, so the thumbnail is broken. The user only saw a 'sync failed' toast for B."
+ }
+]

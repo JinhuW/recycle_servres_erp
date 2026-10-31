@@ -1,0 +1,9 @@
+[
+ {
+  "id": "A2t-01",
+  "severity": "P2",
+  "title": "resetDb is not serialised: a reset that outlives its hook timeout races the next test's reset, turning one slow test into a cascade of unrelated failures",
+  "location": "apps/backend/tests/helpers/db.ts:134-155",
+  "failure_scenario": "A loaded CI runner or a dev box running two suites (the release gate racing a local run, which global-setup.ts was written for) slows one reset past 30 s; instead of one timeout the file reports a timeout plus N \"database already exists\"/unhandled-error failures in unrelated tests, and vitest flags \"This might cause false positive tests\". The 44-failure baseline reads like 20 broken files when none is broken, so real regressions hide in the noise and people learn to rerun until green."
+ }
+]

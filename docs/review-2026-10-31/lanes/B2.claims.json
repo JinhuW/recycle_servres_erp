@@ -1,0 +1,23 @@
+[
+ {
+  "id": "B2-01",
+  "severity": "P2",
+  "title": "[cross-lane] fbc-api.recycleservers.com is not behind Cloudflare Access; only the console bearer guards relogin/session endpoints",
+  "location": "fbc-api.recycleservers.com (zone recycleservers.com); docs claim at AGENTS.md:72, trackers/facebook/AGENTS.md:43, apps/backend/src/routes/coordinator.ts:37-43",
+  "failure_scenario": "RS_CONSOLE_TOKEN is the single factor. It lives in Railway env (COORDINATOR_API_TOKEN), which leaked once on 2026-10-21. Anyone holding a leaked or old token can call POST /v1/workers/{id}/relogin or restore-session from anywhere on the internet, forcing Facebook logins that checkpoint accounts (the repo's top rule). The documented second factor (Access service token) is not being enforced, so the ERP's COORDINATOR_ACCESS_CLIENT_* headers protect nothing."
+ },
+ {
+  "id": "B2-02",
+  "severity": "P2",
+  "title": "R2 attachments CORS fix (INF-02) was committed but never applied: live bucket allows only inventory.recycleservers.com",
+  "location": "R2 bucket recycle-erp-attachments CORS; infra/terraform/environments/prod/main.tf:32-36; tfstate key prod/terraform.tfstate last written 2026-06-19T14:13:52Z",
+  "failure_scenario": "A user on inventory-prod.recycleservers.com (a declared prod route) carries photos into a replacement line: photoSourceFile() (apps/frontend/src/lib/linePhotos.ts:283-295) fetch() is blocked by CORS, returns null, and the photo is dropped and reported missing. The 10-13 review checked INF-02 off as fixed, so nobody is looking."
+ },
+ {
+  "id": "B2-03",
+  "severity": "P2",
+  "title": "Offsite DB backups are deletable by their own writer: no bucket lock, no versioning, and the R2 rotation after the Railway leak is still pending",
+  "location": "R2 bucket recycle-db-backup (lock rules []; lifecycle only multipart-abort); backup/backup.sh:102-111 (prune via the same credential)",
+  "failure_scenario": "Whoever holds the leaked Railway env (or a prune bug, e.g. BACKUP_KEEP misparsed) deletes railway-erp/*; prod DB loss then has no offsite copy. Railway's own volume backups sit with the same provider that leaked."
+ }
+]

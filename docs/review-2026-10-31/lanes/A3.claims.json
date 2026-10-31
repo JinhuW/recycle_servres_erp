@@ -1,0 +1,16 @@
+[
+ {
+  "id": "A3-01",
+  "severity": "P2",
+  "title": "Manual FX override has no upper bound; a typo becomes the rate every CNY sale and USD book entry uses",
+  "location": "apps/backend/src/routes/fxRates.ts:65; apps/backend/src/lib/fx.ts:142-162,76-92; apps/backend/src/routes/accounting.ts:781,871; apps/backend/migrations/0191_accounting_entries.sql:18",
+  "failure_scenario": "A manager types 7100 for 7.10 on the FX page and gets a 201. Until someone notices, a CNY sell order saved in that window stores unit_price = \u00a5 \u00d7 1/7100 (about 1000x too low), and that USD figure goes straight into dashboard revenue and profit. Every RMB Flow entry in USD without an explicit rate fails the CHECK and returns a 500. A rate under 5e-9 rounds to 0 in NUMERIC(18,8) and 500s on fx_rates' own CHECK. Repro A3-01 confirms the 201 then the 500."
+ },
+ {
+  "id": "A3-02",
+  "severity": "P2",
+  "title": "Archived POs still count in the purchaser projection, the leaderboard and the contribution revenue/profit cards, though spend and Home exclude them",
+  "location": "apps/backend/src/routes/dashboard.ts:59-62,268-287; apps/backend/src/services/contributions.ts:69-70,132",
+  "failure_scenario": "A manager archives a Done PO that was a duplicate entry. The purchaser's dashboard keeps its projected revenue, profit and commission in the KPI tiles, the profit and revenue cards and the chart. The leaderboard keeps its cost and commission for every viewer, so the purchaser ranks higher and the manager reads inflated commission owed. Meanwhile the spend card, the chart's cost bars and Home leave it out. Repro A3-02 (archived Done PO, cost 100, sell 200, rate 0.1): contrib.cost.total = 0, but kpis.commission = 10, kpis.profit = 100 and leaderboard cost/commission = 100/10."
+ }
+]

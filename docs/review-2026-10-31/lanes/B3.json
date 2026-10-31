@@ -1,0 +1,118 @@
+{
+  "lane": "B3",
+  "files_read": [
+    "docs/review-2026-10-31/BRIEF.md",
+    "trackers/facebook/VERSION",
+    "trackers/facebook/VENDOR.md",
+    "trackers/facebook/configs/fleet.toml",
+    "trackers/facebook/configs/homelab.toml",
+    "trackers/facebook/scripts/deploy.rsync-filter",
+    "trackers/facebook/scripts/deploy.sh",
+    "trackers/facebook/scripts/ai-verdict-bridge.py",
+    "trackers/facebook/scripts/fleet-alert-sender.py",
+    "trackers/facebook/scripts/fleet-log-follow.py",
+    "trackers/facebook/deploy/healthcheck.sh",
+    "trackers/facebook/rs_coordinator/rs_coordinator/schemas.py",
+    "trackers/facebook/rs_worker/entry.py",
+    "apps/fleet-agent/src/plan.ts",
+    "apps/fleet-agent/src/docker.ts",
+    "resource: ssh jinhu@10.10.10.73 — docker ps / docker inspect (all 23 containers), docker images, docker system df",
+    "resource: 10.10.10.73 df -h, crontab -l, ss -ltn, /etc/docker/daemon.json (absent), /etc/logrotate.d/",
+    "resource: 10.10.10.73 ~/recycle_servers/facebook_tracker/{.rs-deployed,VERSION} and rsync -anc --itemize-changes of rs_console/, rs_coordinator/, deploy/, configs/ (sessions and *.env excluded), scripts/ vs git archive facebook-tracker/v0.15.0 and origin/dev",
+    "resource: 10.10.10.73 ~/fleet-ai-bridge/*.py (diffed against origin/dev scripts/), bridge.log/sender.log/follow.log sizes",
+    "resource: 10.10.10.73 ~/bin/sync-worker-logs.sh and ~/worker-logs/sync.log",
+    "resource: 10.10.10.73 ~/opensearch/docker-compose.yml and fluent-bit/fluent-bit.conf",
+    "resource: OpenSearch localhost:9200 — _cluster/health, _cat/indices, _cat/allocation, _plugins/_ism/explain/fb-tracker-*, fb-tracker-* mapping and aggregations (kind, via, date histogram)",
+    "resource: docker logs --since 24h rs-coordinator, rs-console, rs-fleet-agent, rs-coordinator-lan, rs-console-tunnel (aggregated status codes / error lines only)",
+    "resource: docker exec rs-coordinator rsc vault logins --limit 2000 (aggregated counts only; raw dump deleted from VM /tmp)",
+    "resource: rs-console GET /v1/workers and /v1/fleet on 127.0.0.1:8600 (state counts only)",
+    "resource: rs-fleet-homelab-1..9 .State.Health log output; read-only grep of /app/src/ai_marketplace_monitor/{facebook.py,control_plane.py} inside rs-fleet-homelab-4"
+  ],
+  "findings": [
+    {
+      "id": "B3-01",
+      "severity": "P1",
+      "title": "[cross-lane] 31 Facebook boot logins in the last 24 h, 20 of them ended challenge/locked/failed; driven by fleet count changes and exit-75 fences, not crashes",
+      "location": "resource: rs-coordinator `rsc vault logins` (10.10.10.73); rs-fleet-agent docker logs 2026-10-30T20:15Z..2026-10-31T20:15Z; apps/fleet-agent/src/plan.ts:33-36",
+      "evidence": "The ledger has 105 logins in 7 days: 100 boot, 3 relogin, 1 cookie-restore, 1 token-refresh. Outcomes were 62 restored, 21 challenge, 14 locked, 6 failed and 2 open. By day: 10-26 7, 10-27 25, 10-28 7, 10-29 27, 10-30 8, 10-31 31. In the last 24 h (homelab-N and worker-60-14-N together) there were 31 logins and only 11 restored: 9 locked, 8 challenge, 2 failed. homelab-5 alone booted 6 times plus 1 relogin. Its outcomes, in order: locked 02:57, locked 10:27, restored 17:02, relogin failed 17:06, challenge 17:16, locked 18:26. Each boot comes straight after a fleet-agent action. The agent logged `remove … reason: beyond count 6` at 10:25 and 15:25, then `beyond count 4` at 17:01, then `run … reason: missing` as the count rose back to 9 (18:23-18:38). It also logged `replace … reason: exit 75, soft:true` (02:57, 03:00, 03:03, 10:26, 10:29, 17:10, 17:13, 17:16, 18:26, 18:29, 18:32), and the ledger shows a boot 10-15 s after each one. Every one of the 5 containers created at 18:26-18:38 today logged in again. 3 of those 5 came back locked or challenge.",
+      "failure_scenario": "The desired count for the homelab host was changed four times today (9→6→6→4→9). Each change removes or fences running workers, and each replacement boots a browser, which is a Facebook login. A worker whose account is already locked gets fenced (exit 75) and started again a minute later against the same wall. plan.ts only backs off after 5 soft restarts in 30 min, so a few restarts spread over a day never trip it. Accounts that hit 'locked' are logged in again hours later, and this is the checkpoint-and-lose pattern the repo's first rule warns about. The pool shrinks: 20 of the last 31 logins already ended in a wall.",
+      "proposed_fix": "Owner decision first: find who or what changed the homelab desired count today and stop it changing several times a day. In the fleet code (the A-lane that owns apps/fleet-agent and apps/backend fleet): (1) do not re-run a worker id whose last ledger outcome was locked/challenge until a person clears it, and treat that like exit 78; (2) debounce count decreases, so a temporary scale-down never fences a HEALTHY worker; (3) count soft restarts per account per day, not per 30-min window.",
+      "regression_test": "fleet-agent plan.ts unit test: a worker whose last login outcome is locked gets exit 75 and the agent leaves it stopped. Backend test: lowering the count and then raising it within N minutes leaves existing claims and epochs alone.",
+      "confidence": "medium"
+    },
+    {
+      "id": "B3-02",
+      "severity": "P2",
+      "title": "Coordinator rejects every fleet-task city 'started' event with 422: the worker sends via=\"other\", the schema allows only queue/own",
+      "location": "trackers/facebook/rs_coordinator/rs_coordinator/schemas.py:309; image ghcr.io/jinhuw/aimm-recycle:0.15.0 /app/src/ai_marketplace_monitor/facebook.py:2560,2577",
+      "evidence": "rs-coordinator logs, last 24 h: 4805 404 and 808 422. 705 of the 422s are `POST /v1/workers/<id>/city-events`, from homelab-4 and worker-60-14-N. The same workers' other city-events (finished, which carry no `via`) return 200. In OpenSearch fb-tracker-*, city_start/city_done by `via`: until 10-27 it was 'queue' or none. From 10-29 (the ERP-fleet cutover) it is 'other' (84, 562, 777 per day) or none, with no 'queue' left. In the image, `_city_start` sends `via=via` and logs 'from the fleet (other)' when a task_id is set. `CityEventReport.via` is `Literal[\"queue\", \"own\"] | None`.",
+      "failure_scenario": "Since 10-29 every city an ERP-fleet worker starts loses its 'started' row in the coordinator's city log. Anything built on that log sees cities that finish without ever starting: started-vs-finished counts, how long a city took, and the 'still running' view. The rejected posts also fill the log with about 700 422 lines a day.",
+      "proposed_fix": "Widen `via` in CityEventReport to accept the fleet values (or `str` with max_length=20), or map fleet tasks to via='queue' in the worker. Ship it on the coordinator side first, because it is backward-compatible.",
+      "regression_test": "rs_coordinator test: POST city-events with event=started, via=other returns 200 and is stored.",
+      "confidence": "high"
+    },
+    {
+      "id": "B3-03",
+      "severity": "P3",
+      "title": "OpenSearch on 10.10.10.73 is reachable from the office LAN without auth (9200 and 5601, security plugin disabled), with no retention policy and 156 unassigned replica shards",
+      "location": "resource: 10.10.10.73 ~/opensearch/docker-compose.yml (DISABLE_SECURITY_PLUGIN=true, ports 9200:9200, 5601:5601); _cluster/health",
+      "evidence": "`ss -ltn` shows 0.0.0.0:9200. From the office Mac (10.10.100.x), GET http://10.10.10.73:9200/ answers 200 and :5601/api/status answers 200. ufw state could not be read (it needs sudo). Cluster health is yellow: 161 active shards, 156 unassigned, because the indices ask for 1 replica on a single node. ISM explain shows policy_id null on every fb-tracker-* index. There are 71 fb-tracker-* and 78 worker-logs-* daily indices dating back to August. Disk is fine: 1.1 GB of indices, 8% of / used. The fb-tracker mapping holds seller, seller_rating, title, price, url and listing_id for every listing the fleet reviewed.",
+      "failure_scenario": "Anything on the LAN can read seller and listing data and also write or delete indices with an unauthenticated DELETE /fb-tracker-*. That would erase the AI-verdict history the fleet-alert sender and verdict bridge rely on. The indices grow without bound, and health never reports green, so a real red/yellow problem is masked.",
+      "proposed_fix": "Bind 9200/5601 to 127.0.0.1 (or the docker network) unless LAN access is needed; set number_of_replicas=0 in an index template; add an ISM policy that deletes indices after e.g. 90 days.",
+      "regression_test": "none (ops config); check: curl from a LAN host is refused, and _cluster/health is green.",
+      "confidence": "high"
+    },
+    {
+      "id": "B3-04",
+      "severity": "P3",
+      "title": "Railway worker log sync on the VM has failed every 5 minutes since 2026-08-18 (CLI unauthorized)",
+      "location": "resource: 10.10.10.73 crontab `*/5 * * * * /home/jinhu/bin/sync-worker-logs.sh`; ~/worker-logs/sync.log",
+      "evidence": "sync.log has 2911 `FAIL railway logs exit=1` lines, the first at 2026-08-18T07:05:31Z, with 245 so far today. The CLI prints 'Unauthorized. Please login with `railway login`'. sync.log itself is 1.1 MB and is never rotated. The OCI rsync legs mostly work (one sg-1 failure today).",
+      "failure_scenario": "The reddits-tracker Railway `worker` service's logs have not reached worker-logs-* in OpenSearch for 2.5 months. Anyone searching there for a Railway-worker incident finds nothing and may conclude it was quiet.",
+      "proposed_fix": "Either give the VM a Railway project token, scoped read-only to logs if possible and rotated with the 10-21 disclosure set, or remove the Railway leg from the script. Also rotate sync.log.",
+      "regression_test": "none (ops); check: `grep -c 'FAIL railway' ~/worker-logs/sync.log` stops growing.",
+      "confidence": "high"
+    },
+    {
+      "id": "B3-05",
+      "severity": "P3",
+      "title": "[cross-lane] Fleet worker containers run with no log size cap (json-file, no max-size; no /etc/docker/daemon.json)",
+      "location": "apps/fleet-agent/src/docker.ts:74-96 (runArgs has no --log-opt); resource: docker inspect rs-fleet-homelab-1..9 LogConfig {}",
+      "evidence": "Every rs-fleet-homelab-N has LogConfig type json-file and config {}. /etc/docker/daemon.json does not exist. rs-fleet-homelab-1 wrote 3.0 MB of docker logs in 47 h. The compose-managed services do set limits (rs-coordinator 5x20m, rs-console 3x10m, rs-fleet-agent 3x10m).",
+      "failure_scenario": "A long-lived worker, or one that starts logging a loop, grows its json log without bound under /var/lib/docker. At the current ~1.5 MB/day per worker this is slow (808 GB free), so the risk is a noisy-loop worker, not the steady state.",
+      "proposed_fix": "Add `--log-opt max-size=10m --log-opt max-file=3` to runArgs, or set log-opts in daemon.json on each fleet host.",
+      "regression_test": "apps/fleet-agent/tests/docker.test.ts: runArgs includes --log-opt max-size.",
+      "confidence": "high"
+    },
+    {
+      "id": "B3-06",
+      "severity": "P3",
+      "title": "The VM tree is a mix of versions: .rs-deployed/VERSION say 0.13.18, the running images are 0.15.0, and configs/fleet.toml carries a hand edit that deploy.sh would revert",
+      "location": "resource: 10.10.10.73 ~/recycle_servers/facebook_tracker/.rs-deployed ('0.13.18 4bac0336 2026-10-24T11:41:41Z'), VERSION; trackers/facebook/configs/fleet.toml:66-110",
+      "evidence": "All 9 workers run ghcr.io/jinhuw/aimm-recycle:0.15.0 (sha256:462d29f2…), matching the repo's VERSION 0.15.0 and tag facebook-tracker/v0.15.0. rs-console:latest was built 10-27 and rs-coordinator:latest 10-26. rsync -anc against the v0.15.0 tag shows only the version strings differ in rs_console/ and rs_coordinator/ (pyproject.toml, __init__.py); v0.14.16..v0.15.0 changed nothing else there, so the console and coordinator behave the same as 0.15.0. deploy/ on the VM lacks Dockerfile.worker, Dockerfile.worker.dockerignore and worker-constraints.txt. On the VM, configs/fleet.toml has the legacy [worker.*] region pins commented out ('retired 2026-10-27'), while the repo still has them active. fleet.toml is not in deploy.rsync-filter's VM-owned list, so a deploy.sh run with --delete would send the repo copy back. The host-side cron scripts (~/fleet-ai-bridge/ai-verdict-bridge.py, fleet-alert-sender.py, fleet-log-follow.py) match origin/dev byte for byte, but they are post-v0.15.0, unreleased, and live outside the tracker tree.",
+      "failure_scenario": "Anyone trusting .rs-deployed or VERSION on the VM reads the deployed version as 0.13.18. The next deploy.sh, or a whole-tree sync, puts the retired legacy worker pins back into the console's fleet config.",
+      "proposed_fix": "Commit the fleet.toml retirement to the repo. Have the release or console-only deploy path rewrite .rs-deployed and VERSION. Release the host scripts so the VM copy is tied to a tag.",
+      "regression_test": "none (ops); check: rsync -anc of configs/fleet.toml shows no 'c' flag.",
+      "confidence": "high"
+    },
+    {
+      "id": "B3-07",
+      "severity": "P3",
+      "title": "rs-console polls session meta for all 41 retired legacy workers, about 4800 404s a day on the coordinator",
+      "location": "resource: rs-coordinator docker logs (source 172.24.0.4 = rs-console network peer), GET /v1/session/<id>/meta",
+      "evidence": "In 24 h, `GET /v1/session/{west-1b,wc-1,va-1,sc-1b,ne-1b,mw-1b,homelab-1b,denver-1b}/meta` returned 404 598 times each. The other legacy ids return 200 on the same cadence. Per rs-console /v1/workers, all 41 have retired_at set (10-27) and liveness 'dead'.",
+      "failure_scenario": "4.8k 404s a day hide real 404s in the coordinator log, and the console keeps doing work for a fleet that no longer exists.",
+      "proposed_fix": "Skip workers with retired_at in the console's session-meta poll.",
+      "regression_test": "rs_console test: the poll loop does not request meta for a retired worker.",
+      "confidence": "medium"
+    }
+  ],
+  "carryover": [],
+  "needs_owner": [
+    "B3-01: who changed the homelab fleet desired count four times on 2026-10-31 (9→6→6→4→9)? Decide whether locked/challenge accounts should be held instead of re-booted. No worker was touched by this review.",
+    "Live park state of the ERP-fleet accounts (homelab-N, worker-60-14-N) is in the ERP DB, not the coordinator. The worker /healthz carries no login state, so this lane could not count them; the prod-DB lane should count fleet slots/accounts by state.",
+    "ufw status on 10.10.10.73 needs sudo (not available non-interactively). Confirm whether 9200/5601 are reachable beyond the office LAN.",
+    "The Railway token for sync-worker-logs.sh (B3-04): needs a credential decision; not attempted."
+  ],
+  "notes": "Read-only. No restart, recreate, compose up, relogin, or session file access. Worker containers were only inspected; one read-only grep ran inside rs-fleet-homelab-4. Login ledger and console data are recorded as aggregate counts only; the raw ledger dump written to the VM's /tmp was deleted. Legacy roster (coordinator /v1/workers): 41 workers, all retired 2026-10-27, states HEALTHY 16 / SESSION_EXPIRED 13 / CHECKPOINT 12, so 25 are parked. Live containers: 9 rs-fleet-homelab workers, all on aimm-recycle:0.15.0 = repo VERSION, plus fleet-agent 1.380.1. Disk: / 8% used (68G of 914G); docker images have 21.5 GB reclaimable (old aimm-recycle 0.13.18 / <none> images, rollback tags) and the build cache is 6.8 GB, neither urgent. Error rates in 24 h: rs-coordinator 35.5k lines with 4 ERRORs (Telegram getUpdates timeouts / 502), statuses 29923 200 / 4805 404 / 808 422 and no 5xx; rs-console 2178 lines, all 200; fleet-agent had no errors. fb-tracker-* has no index for 2026-10-28; that day falls in the 10-27→10-29 cutover, so it is historical only. The 422s other than city-events (about 100) were not broken down. Not checked: the OCI worker host 10.10.60.14, the ERP DB, and VNC screenshots."
+}

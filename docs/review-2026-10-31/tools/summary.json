@@ -1,0 +1,505 @@
+{
+ "kept": 312,
+ "counts": {
+  "P2": 48,
+  "P3": 258,
+  "P1": 6
+ },
+ "rejected": [
+  "A6-04",
+  "A9-03"
+ ],
+ "dupes": {
+  "A10-14": "C2-02",
+  "A10-16": "B5-01",
+  "A11-04": "A5-01",
+  "A11-05": "B1-05",
+  "A8-01": "C2-02",
+  "B1-01": "A11-01",
+  "B1-03": "A5-01",
+  "B2-03": "A11-02"
+ },
+ "unread": [],
+ "groups": [
+  [
+   "security-todo.md",
+   "Security and platform",
+   6,
+   {
+    "P2": 1,
+    "P3": 5
+   }
+  ],
+  [
+   "backend-domain-todo.md",
+   "Backend domain: PO/SO/inventory and test suite",
+   28,
+   {
+    "P2": 2,
+    "P3": 26
+   }
+  ],
+  [
+   "finance-todo.md",
+   "Finance",
+   12,
+   {
+    "P2": 1,
+    "P3": 11
+   }
+  ],
+  [
+   "fleet-integrations-todo.md",
+   "Fleet and integrations",
+   6,
+   {
+    "P2": 3,
+    "P3": 3
+   }
+  ],
+  [
+   "schema-todo.md",
+   "Schema and data",
+   5,
+   {
+    "P2": 1,
+    "P3": 4
+   }
+  ],
+  [
+   "frontend-todo.md",
+   "Frontend desktop, shared components and lib",
+   84,
+   {
+    "P3": 76,
+    "P2": 8
+   }
+  ],
+  [
+   "mobile-pwa-todo.md",
+   "Mobile and PWA",
+   5,
+   {
+    "P2": 1,
+    "P3": 4
+   }
+  ],
+  [
+   "contracts-todo.md",
+   "Shared package and contracts",
+   5,
+   {
+    "P3": 5
+   }
+  ],
+  [
+   "reddit-tracker-todo.md",
+   "Reddit tracker",
+   17,
+   {
+    "P3": 17
+   }
+  ],
+  [
+   "facebook-tracker-todo.md",
+   "Facebook tracker",
+   42,
+   {
+    "P1": 1,
+    "P2": 9,
+    "P3": 32
+   }
+  ],
+  [
+   "tooling-deps-todo.md",
+   "Tooling, CI and dependencies",
+   8,
+   {
+    "P1": 2,
+    "P2": 1,
+    "P3": 5
+   }
+  ],
+  [
+   "live-resources.md",
+   "Live resources",
+   40,
+   {
+    "P1": 3,
+    "P2": 13,
+    "P3": 24
+   }
+  ],
+  [
+   "docs-drift.md",
+   "Documentation drift",
+   54,
+   {
+    "P3": 46,
+    "P2": 8
+   }
+  ]
+ ],
+ "needs_owner": [
+  [
+   "A1",
+   "Live row counts and sizes of login_attempts, refresh_tokens, oauth_refresh_tokens, oauth_pending_consent and oauth_authorization_codes on prod (BEGIN READ ONLY), to size A1-03. Not run: this worktree has no Railway link and no psql, and pulling the DB URL needs the owner's go-ahead."
+  ],
+  [
+   "A1",
+   "Presence-only check that the Railway dev backend has PROXY_SECRET set when NODE_ENV=production. env.ts:30 enforces it only when RAILWAY_ENVIRONMENT is present, and without it X-Client-IP is caller-controlled, so the per-address login and DCR budgets can be bypassed there."
+  ],
+  [
+   "A1",
+   "A hash-equality check, run in a terminal without printing either value, that prod and dev use different JWT_SECRET and OAUTH_SIGNING_KEY_CURRENT. Cookie verifyToken never checks `iss` (auth.ts:106), so cross-environment separation rests on scrub.sql truncating refresh_tokens and on the fid check."
+  ],
+  [
+   "A10",
+   "Rotate RS_VAULT_KEY / RS_WORKER_TOKEN_SECRET after splitting secrets.env (A10-01). Recreating workers is a login, so the owner plans it."
+  ],
+  [
+   "A10",
+   "Decide whether the legacy Mac launchd jobs com.recycleservers.fbmonitor (running aimm from the archived checkout), search-probe and keyword-eval should keep running (A10-16). Not stopped by this review."
+  ],
+  [
+   "A10",
+   "Confirm the running rs-coordinator/rs-console versions via /healthz (needs docker exec or a curl on the VM, outside the allowed commands). Code matches 0.15.0, but the version strings on the VM are 0.14.4/0.14.16 and the stamp says 0.13.18."
+  ],
+  [
+   "A10",
+   "Whether RS_COORDINATOR_TOKEN (legacy fleet token) is still set on the live coordinator. If so, A10-04's legacy-token snapshot overwrite and the P3 directive drain are live. Checking needs reading env values."
+  ],
+  [
+   "A10",
+   "Delete the obsolete secrets.env.bak-* files on the VM."
+  ],
+  [
+   "A10",
+   "Whether a parked monitor can stay log-silent 75 min and trip deploy/healthcheck.sh's aimm restart (a new browser = login) repeatedly; depends on vendored monitor code."
+  ],
+  [
+   "A10",
+   "A10-16: stop/unload the legacy launchd jobs com.recycleservers.fbmonitor (pid 14535) and com.recycleservers.search-probe on the office Mac. Each opens or holds a Facebook session outside the fleet ledger; not touched by the verifier."
+  ],
+  [
+   "A10",
+   "A10-01: removing RS_VAULT_KEY / RS_WORKER_TOKEN_SECRET / RS_DATABASE_URL from rs-console requires recreating the console container on 10.10.10.73 (not a worker, but a live restart). Owner decision."
+  ],
+  [
+   "A10",
+   "A10-06: an aggregate read-only check of the prod coordinator DB for duplicate accounts.worker_id (SELECT worker_id, count(*) ... HAVING count(*)>1 inside BEGIN READ ONLY) was not run. The only route on the VM is docker exec into rs-coordinator, which is outside the allowed VM command set."
+  ],
+  [
+   "A10",
+   "A10-05: confirming the actual Telegram 400 needs a real send, which is forbidden; inferred from the MarkdownV2 escaping rules."
+  ],
+  [
+   "A11",
+   "Restore the uptime-monitor cron (needs a redeploy or a service-settings change, both forbidden in this review) and decide what the probe should do on a 429 (A11-01)."
+  ],
+  [
+   "A11",
+   "Confirm whether the pg-r2-backup R2 key (and the other 'R2 x3') were rotated after the 2026-10-21 Railway disclosure; values and ages were not read (A11-02)."
+  ],
+  [
+   "A11",
+   "Enable required status checks on main/dev and Railway 'Wait for CI' for the backend (A11-03); align prod watchPatterns (A11-05)."
+  ],
+  [
+   "A11",
+   "terraform plan -lock=false was not run: it needs CLOUDFLARE_API_TOKEN and the R2 state credentials, which this review must not handle. Live R2 CORS, lifecycle and lock state is unverified."
+  ],
+  [
+   "A11",
+   "wrangler deployments list / secret list not run: wrangler is not installed locally and npx would download it. Worker secret presence (PROXY_SECRET, FLEET_WORKER_ENV, FLEET_FORWARD_*) is unverified."
+  ],
+  [
+   "A11",
+   "A11-02: confirm whether pg-r2-backup's R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY (and the backend's R2 key) were rotated after the 2026-10-21 Railway breach. Reading values or ages is out of bounds for reviewers."
+  ],
+  [
+   "A11",
+   "A11-02: check bucket lock/versioning on the live R2 bucket recycle-db-backup ('wrangler r2 bucket lock list recycle-db-backup'). wrangler isn't installed in this checkout and pnpm install is forbidden."
+  ],
+  [
+   "A11",
+   "A11-01: getting the uptime-monitor running again needs a redeploy, a write action. The 2026-10-31T18:00Z redeploy attempt 3506ce25 failed with 'failed to fetch snapshot'."
+  ],
+  [
+   "A2",
+   "A2-01: confirm whether manual Sold->Done (resurrecting stock) in the inventory editor is an intended manager correction path before it is blocked."
+  ],
+  [
+   "A3",
+   "A3-02: decide whether an archived reviewed/Done PO should keep its projected commission/profit on the dashboard (commission history) or drop out like spend; the fix direction depends on that intent."
+  ],
+  [
+   "A4",
+   "A4-01 depends on what a fleet worker does when the ERP is unreachable for longer than lease_minutes (keeps its browser and resumes heartbeats, or exits). That logic is in the vendored monitor under trackers/facebook, outside this lane; confirming it live would need a worker outage test, which is a login risk. Owner to confirm, and to state prod's fleet_settings.lease_minutes (read-only query not run in this lane)."
+  ],
+  [
+   "A4",
+   "A4-06: confirm the Shippo dashboard webhook points at the public hostname with a long random secret, and how old the secret is (dashboard access needed; not inspected)."
+  ],
+  [
+   "A4",
+   "Whether the Cloudflare Worker in front of the ERP normalises or rejects %2E%2E in paths (affects A4-05 reachability); a live probe would hit the coordinator facade and was not sent."
+  ],
+  [
+   "A5",
+   "A5-01: decide how dev should hold prod's fleet_proxies (delete rows vs sentinel) and ship the scrub fix; until then dev stays on the 2026-10-27 copy. The first run after the fix will DROP dev's public schema and redeploy dev's backend (dev FLEET_ROLE=mirror, SYNC_KEEP_FLEET=0) \u2014 confirm no dev fleet worker depends on dev's current fleet tables before letting it run."
+  ],
+  [
+   "A5",
+   "Before ever setting SYNC_KEEP_FLEET=1 again, remove the orphan '0216_fleet_cities_drop_pinned.sql' ledger row on dev (or let one successful sync replace the ledger) \u2014 see A5-02. Not done here (write to dev DB)."
+  ],
+  [
+   "A5",
+   "Add alerting on db-sync failures: Railway reports the cron deployment as SUCCESS while the script exits non-zero."
+  ],
+  [
+   "A6",
+   "Policy call: should every fleet control that starts a worker container (host Authoritative switch, capacity +, account-pool Resend login) require a confirm step, per the root AGENTS.md first rule? Findings report them as P2; owner decides the UX."
+  ],
+  [
+   "A6",
+   "Real-browser verification of the fleet login-causing controls was not done on purpose (it would cause Facebook logins); review is source-only."
+  ],
+  [
+   "A7",
+   "Real-device checks not run: iOS installed PWA camera/getUserMedia and share-target, CLABEL CT221D over Web Bluetooth (office Chrome; per memory, real tests go via inventory-dev), and the desk scanner bridge on 127.0.0.1:47811 (Chrome Private Network Access preflight is the bridge repo's concern)."
+  ],
+  [
+   "A7",
+   "Decide whether CSP moves to enforcing and where reports go (A7-05)."
+  ],
+  [
+   "A8",
+   "memtrade's production push health (latest pushed report_date, max groups_total against WECHAT_MAX_GROUPS=500) needs a prod DB read. Not done in this lane; the static check below found the shapes compatible."
+  ],
+  [
+   "A9",
+   "Confirm ALERT_TRANSPORT=telegram in scripts/secrets.env and on every OCI VM's /opt/reddits_tracker/.env, and on the Railway worker. The variable exists there, but its value wasn't read under the secrets rule. This decides whether A9-02 is live."
+  ],
+  [
+   "A9",
+   "Confirm which image tag the OCI fleet runs. RS-476 was deployed to Railway at 09:15Z, but the OCI deploy was out of scope and can't be checked without SSH/terraform output."
+  ],
+  [
+   "A9",
+   "Check the Railway worker's WORKER_ID value, and the RAILWAY_DEPLOYMENT_OVERLAP/DRAINING settings, for A9-03."
+  ],
+  [
+   "A9",
+   "baseline/reddit-test.log didn't exist when this lane finished, and trackers/reddit has no node_modules, so the reddit suite wasn't run here. Read the baseline result when it lands."
+  ],
+  [
+   "A9",
+   "Probe live whether Reddit's multireddit Atom feed 403s/404s when one sub is banned or private (A9-04)."
+  ],
+  [
+   "A9",
+   "A9-02: confirm ALERT_TRANSPORT on each OCI worker VM (/opt/reddits_tracker/.env; secret-bearing file, and there is no terraform output/IPs in this worktree) and in the owner's scripts/secrets.env. If any is 'console', A9-02 becomes P2."
+  ],
+  [
+   "A9t",
+   "Confirm prod reddits-tracker settings: eval_prompt equals the candidate-2 final text in docs/prompt-evaluations/2026-10-26-candidate-2-bulk-ram.md, llm_model = openai/gpt-6-luna-pro, candidate_eval_prompt = '', and rule 1 disabled. That takes GET /api/settings + /api/prompt-stats with the tracker API_TOKEN (a secret), so it was not done here."
+  ],
+  [
+   "B1",
+   "B1-01: fresh deploy of uptime-monitor (a deploy action, forbidden to reviewers) and finding what triggers the ~4h10m redeploys of the c881951f snapshot."
+  ],
+  [
+   "B1",
+   "B1-02: rotate the facebook-tracker Postgres password. Consumers are homelab containers, and restarting workers is a Facebook login, so the owner must plan it."
+  ],
+  [
+   "B1",
+   "Secret-rotation status by variable age: neither Railway MCP nor the audit log exposes per-variable update timestamps (the audit log has no Variable.* events in 2026-10-19..31). Rotation of ERP OpenRouter (dev), Mercury, PayPal, Shippo, R2 x3, Telegram x2 (reddit api/worker TELEGRAM_BOT_TOKEN, TELEGRAM_USER_SESSION), eBay, SMTP (MAIL_PASSWORD dev), ODOO_ADMIN_PASSWORD and FB_POOL_KEY can't be confirmed read-only. Treat all as still pending per the 2026-10-23 memory note. Confirmed rotated by audit event: DB passwords for ERP prod+dev, reddit, aio, recycle-odoo (2026-10-22), bucket credentials ERP prod + aio (2026-10-21), db-sync project token (2026-10-22). Confirmed not rotated: facebook-tracker and ebay-tracker DB passwords."
+  ],
+  [
+   "B1",
+   "B1-06: confirm the vaultwarden SIGNUPS_ALLOWED value and enable volume backups."
+  ],
+  [
+   "B1",
+   "B1-04: Cloudflare WAF/rate rules that 429 Railway egress (Cloudflare lane / owner)."
+  ],
+  [
+   "B1",
+   "B1-02: confirm whether the facebook-tracker Postgres password was rotated out of band since 2026-10-21. Verifying needs the secret or a login test, both forbidden here. If not, Regenerate it and update the ~42 homelab containers (a worker recreate is a Facebook login, so batch it into one deploy)."
+  ],
+  [
+   "B1",
+   "B1-06: check the value of vaultwarden SIGNUPS_ALLOWED (redacted to this session) and decide on a backup schedule."
+  ],
+  [
+   "B1",
+   "B1-01: re-arming the uptime-monitor cron needs a redeploy, which is forbidden in this review."
+  ],
+  [
+   "B1",
+   "B1-04: find the Cloudflare rule that answered 429 to Railway egress 152.55.181.187 (dashboard security events)."
+  ],
+  [
+   "B2",
+   "terraform plan -lock=false for infra/terraform/environments/{prod,experiment-dns,experiment-backups}: needs CLOUDFLARE_API_TOKEN (terraform-scoped) and the R2 state AWS_ACCESS_KEY_ID/SECRET, none of which are in this shell. Drift was checked through the CF API instead (B2-02, B2-05)."
+  ],
+  [
+   "B2",
+   "terraform plan for trackers/facebook/infra/terraform failed with 'Missing API token': it needs RAILWAY_TOKEN. trackers/reddit plan ran: No changes."
+  ],
+  [
+   "B2",
+   "Cloudflare Access apps and service tokens for fbc-api: the wrangler OAuth token returns an empty list (no Access scope). The owner should list apps and service-token names/expiry in the Zero Trust dashboard (see B2-01)."
+  ],
+  [
+   "B2",
+   "DNS record inventory: the OAuth token gets 'Authentication error' on zones/.../dns_records. Checked by dig only for inventory*, static, fbc-api, api.prod, api.dev (all resolve as the repo expects)."
+  ],
+  [
+   "B2",
+   "Age of R2 API tokens (backend_r2, backup, attachments-dev) and of the Telegram bot token after the 2026-10-21 Railway leak: /user/tokens is unauthorized for this token. Secret ages are not exposed by wrangler."
+  ],
+  [
+   "B2",
+   "Telegram forum topics 2,3,4,5,15,16,17,28 exist in 'Homelab Alerts': there is no read-only Telegram call that lists topics without sending, so this was not checked. TOPICS in the repo equals the live railway-alerts binding exactly."
+  ],
+  [
+   "B2",
+   "Restore drill (INF-06): it needs a download of a prod dump plus a disposable PG18. That is outside read-only scope for this lane and holds PII."
+  ],
+  [
+   "B2",
+   "Confirm whether the R2 API tokens (backup writer included) were rotated after 2026-10-23; I can't check token age read-only without the dashboard."
+  ],
+  [
+   "B2",
+   "Decide whether fbc-api.recycleservers.com should get a Cloudflare Access application (service-token policy) to match the documented contract. The ERP already sends COORDINATOR_ACCESS_CLIENT_* headers."
+  ],
+  [
+   "B3",
+   "B3-01: who changed the homelab fleet desired count four times on 2026-10-31 (9\u21926\u21926\u21924\u21929)? Decide whether locked/challenge accounts should be held instead of re-booted. No worker was touched by this review."
+  ],
+  [
+   "B3",
+   "Live park state of the ERP-fleet accounts (homelab-N, worker-60-14-N) is in the ERP DB, not the coordinator. The worker /healthz carries no login state, so this lane could not count them; the prod-DB lane should count fleet slots/accounts by state."
+  ],
+  [
+   "B3",
+   "ufw status on 10.10.10.73 needs sudo (not available non-interactively). Confirm whether 9200/5601 are reachable beyond the office LAN."
+  ],
+  [
+   "B3",
+   "The Railway token for sync-worker-logs.sh (B3-04): needs a credential decision; not attempted."
+  ],
+  [
+   "B3",
+   "B3-01: confirm that a device profile is bound 1:1 to a pool account. I compared device ids rather than account ids to stay clear of PII. If one device can carry several accounts, the 'no repeat login of a locked account' result needs rechecking against the ledger's account ids."
+  ],
+  [
+   "B3",
+   "B3-01: decide whether a 68% boot wall rate (21/31) is expected for fresh pool accounts, or a pool/proxy quality problem; it is outside the code."
+  ],
+  [
+   "B4",
+   "B4-01: swap rs-fleet-agent on 10.10.60.14 (and homelab) to an agent image \u2265 v1.390.1. Not a login, but it replaces a live container, so it needs your yes. It also needs a check that a fleet-agent image newer than 1.380.1 was ever pushed to GHCR; I could not list private GHCR tags read-only."
+  ],
+  [
+   "B4",
+   "B4-03: add RAILWAY_API_TOKEN (read-only) plus a backboard.railway.com allowance to cloud env env_01LUc7Gka7hUDXMtor55tYnf, and add 'git fetch origin dev' to the routine prompt."
+  ],
+  [
+   "B4",
+   "B4-07: decide whether to docker rm rs-fleet-worker-60-14-2. The recreated worker's first claim is a Facebook login."
+  ],
+  [
+   "B4",
+   "B4-04/B4-06: edit the homelab-monitoring prometheus.yml. The repo clone is not on this Mac under ~/Projects, so Alertmanager config drift could not be diffed against source."
+  ],
+  [
+   "B4",
+   "B4-02: confirming the radius cause needs a VNC screenshot of a worker's search page or a monitor code read. Both are read-only, but the screenshot goes through the console, so it belongs to the facebook-tracker lane."
+  ],
+  [
+   "B4",
+   "Homelab VM 10.10.10.73 fleet agent and workers were not inspected here; that belongs to the facebook-tracker live lane."
+  ],
+  [
+   "B4",
+   "B4-02: inspecting or fixing rs-fleet-worker-60-14-5's account/session (VNC, relogin, session files) is forbidden to reviewers; the owner should check why that account's searches show the logged-out style 'within 40 miles' empty result and park it."
+  ],
+  [
+   "B4",
+   "B4-05: delete or move the untracked secrets backup in the main checkout (reviewers must not touch secret files)."
+  ],
+  [
+   "B5",
+   "Unload com.recycleservers.fbmonitor and com.recycleservers.fbmonitor-watchdog (B5-01). Not done: stopping a live monitor is an owner decision under the First Rule even though it is not a login."
+  ],
+  [
+   "B5",
+   "Unload or port com.recycleservers.search-probe (B5-02) and com.recycleservers.keyword-eval (B5-03)."
+  ],
+  [
+   "B5",
+   "Confirm which Facebook account configs/sessions/personal.json in ~/Projects/recycle_servers/facebook_tracker belongs to and whether it is also a fleet/pool account; I did not open the file."
+  ],
+  [
+   "B5",
+   "Archive the stale checkouts listed in B5-04 and `railway unlink` ~/Projects/recycle_servers_v2/recycle_servres_erp-handfish (linked to production)."
+  ],
+  [
+   "B5",
+   "Commit/back up ~/Projects/wehat_ai/memtrade (B5-05)."
+  ],
+  [
+   "B5",
+   "Decide whether ~/archify-previews and memtrade-web should stay on 0.0.0.0 with the firewall off (B5-07)."
+  ],
+  [
+   "B5",
+   "B5-01/B5-02: unloading com.recycleservers.fbmonitor (+ -watchdog) and com.recycleservers.search-probe is the fix but changes live state; owner decision. Not done."
+  ],
+  [
+   "B5",
+   "B5-02: whether configs/sessions/personal.json is the same Facebook account as any fleet worker needs reading session contents (forbidden); owner to confirm."
+  ],
+  [
+   "C1",
+   "Decide whether trackers/facebook/README.md should be restructured around the ERP fleet (apps/fleet-agent) with the homelab coordinator material moved to a 'Legacy' appendix; C1-06 proposes inserts but the doc's framing is an owner call."
+  ],
+  [
+   "C1",
+   "Confirm whether the coordinator RoundCard / FleetLegend / WorkersCard code should be deleted (dead since v1.344.0) or FEATURES kept as history (C1-03)."
+  ],
+  [
+   "C1",
+   "C1-10 live impact (a local api with the production bot token consuming prod getUpdates) was not exercised: it needs the production Telegram bot token, which ground rule 3 forbids handling."
+  ],
+  [
+   "C2",
+   "C2-01: the owner should confirm the exact list of ERP-fleet actions that count as a login (host capacity or authoritative change, release, unpark/resume, ERP relogin, docker rm rs-fleet-*) before the First rule wording is merged. B3-01/B4-01 hold the live evidence."
+  ],
+  [
+   "C2",
+   "Host and port claims I did not probe live (10.10.10.73 compose layout, 10.10.60.5 Alertmanager paths, 'seven Railway projects' webhooks, facebook-tracker 'postgres-ssl:16'): defer to B1-B5. B1 confirms 7 Railway projects and the service names used in C2-03."
+  ],
+  [
+   "C3",
+   "RS-305: confirm a real Telegram reaction has reached GET /api/prompt-stats (its stated done condition) before closing; not queried live in this lane."
+  ],
+  [
+   "C3",
+   "RS-421: west-1 still parked on isp.decodo.com:10004 (503) awaiting the owner's proxy decision; ticket correctly in-progress."
+  ],
+  [
+   "C3",
+   "RS-293 / RS-403 keep one live acceptance item each (va-1 legacy datr login; homelab console/coordinator deploy) that need the owner's yes; recommend recording them as owner follow-ups and closing the tickets."
+  ],
+  [
+   "C3",
+   "Whether RS-290's unchecked live acceptance (login finished over Watch reads Healthy within a minute) was ever observed on the fleet; verifying it needs a Facebook login, so only the owner can confirm or waive it."
+  ]
+ ]
+}

@@ -1,0 +1,9 @@
+[
+ {
+  "id": "A5-01",
+  "severity": "P2",
+  "title": "Nightly prod\u2192dev sync has failed 4 nights running: scrub.sql's *_enc loop NULLs fleet_proxies.url_enc, which is NOT NULL",
+  "location": "deploy/railway-sync/scrub.sql:34-47; apps/backend/migrations/0213_fleet_proxies.sql:14; railway recycle-erp-experiment/dev/db-sync (service 006cd405-7bee-4a66-8ebc-6ca6fdaa44ad)",
+  "failure_scenario": "Every night the restore transaction rolls back (good: dev is not wiped, no prod tokens leak), but dev keeps serving the 2026-10-27 copy of prod: 4+ days of stale data so far and growing; anyone testing on dev against 'real data' (accounting, fleet, Reddit leads 0219 which prod now has) is testing against an old snapshot, and dev's own schema drift (e.g. fleet_cities.pinned dropped on dev only, see A5-02) is no longer being healed. It will stay broken until scrub.sql changes."
+ }
+]

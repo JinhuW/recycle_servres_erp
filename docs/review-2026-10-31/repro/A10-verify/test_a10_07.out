@@ -1,0 +1,3 @@
+two polls before ack both get: [1] [1]
+va-9 acks va-1's reply: 200 {'status': 'ok', 'outcome': 'sent', 'attempts': 1}
+1 passed, 1 warning in 0.37s

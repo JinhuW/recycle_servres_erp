@@ -1,0 +1,3 @@
+$ env -i PATH=$PATH ROLE=api API_TOKEN=devtoken DATABASE_URL=postgres://x@127.0.0.1:1/x TELEGRAM_BOT_TOKEN=<dummy> tsx c1-10-config.mts
+{"role":"api","alertTransport":"telegram","reactionsLoopStarts":true}
+rc=0

@@ -1,0 +1,9 @@
+[
+ {
+  "id": "A1-01",
+  "severity": "P2",
+  "title": "A refresh rotation in flight during a password change or deactivation leaves the rotated session alive (cookie and OAuth)",
+  "location": "apps/backend/src/routes/me.ts:186-204; apps/backend/src/auth.ts:200-221; apps/backend/src/oauth/tokens.ts:176-221,243-251; apps/backend/src/services/members.ts:218-233",
+  "failure_scenario": "A user's laptop is stolen, or a cookie leaks. The user signs in elsewhere and changes their password, the documented way to end every other session. The stolen session's client refreshes in a loop; /api/auth/refresh has no rate limit. If one rotation is in flight when the revoke runs, its successor survives, and the thief keeps a sliding 14-day refresh family with fresh, valid access tokens indefinitely. The same holds for a connector's OAuth grant (30-day sliding). With a deactivation, the leftover row is refused while the account is inactive (auth.ts:217, tokens.ts:200) but comes back if a manager later reactivates the account. That contradicts members.ts:220-221 ('tokens minted before the deactivation stay dead')."
+ }
+]

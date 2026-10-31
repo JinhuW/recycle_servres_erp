@@ -1,0 +1,58 @@
+[
+ {
+  "id": "A6-01",
+  "severity": "P2",
+  "title": "Archived customers are offered in both sell-order customer pickers, and the new-draft modal preselects the alphabetically first customer, archived or not",
+  "location": "apps/frontend/src/pages/desktop/DesktopSellOrderDraft.tsx:106",
+  "failure_scenario": "A manager archives a defunct customer 'Acme Ltd'. Later another manager opens Inventory > New sell order. The picker already shows 'Acme Ltd' (first alphabetically). The manager fills prices and clicks Save draft without touching the customer, and the order is filed under the archived customer. Archived customers also stay pickable in the edit page's picker."
+ },
+ {
+  "id": "A6-02",
+  "severity": "P2",
+  "title": "Warehouse 'Active' toggle archives the warehouse on one click, with no confirmation and no in-app undo",
+  "location": "apps/frontend/src/pages/desktop/settings/WarehousesPanel.tsx:56",
+  "failure_scenario": "A manager means to look at the disabled 'Accepting receipts' toggle and clicks 'Active' on the Denver card instead. The warehouse vanishes from the panel and from every warehouse picker (PO submit, transfers, pack lists). Getting it back takes a database edit."
+ },
+ {
+  "id": "A6-03",
+  "severity": "P2",
+  "title": "After-sales case: changing status or adding a note silently discards unsaved Resolution-card edits",
+  "location": "apps/frontend/src/pages/desktop/DesktopAfterSales.tsx:283",
+  "failure_scenario": "A manager types a refund amount of 120 and switches the currency to RMB, then clicks 'Resolve' in the header before 'Save details'. The status move succeeds, load() writes the server values back into the draft, the amount is gone, and the case is now Resolved and read-only (closed disables every field), so the amount can't be entered any more. Adding a timeline note after editing the issue text loses the edit the same way."
+ },
+ {
+  "id": "A6-04",
+  "severity": "P2",
+  "title": "Payments shows a CNY sell order's total with a $ sign, in the linked-row cell and in the Link picker",
+  "location": "apps/frontend/src/pages/desktop/DesktopPayments.tsx:935",
+  "failure_scenario": "A manager links a $1,400 incoming PayPal payment to a \u00a510,000 sell order. The row reads 'SO-123 $10,000.00 Payment', so the payment looks $8,600 short of a $10,000 order. In the picker a \u00a51,400 order whose figure happens to equal the USD amount is badged 'Exact amount' and listed first."
+ },
+ {
+  "id": "A6-05",
+  "severity": "P2",
+  "title": "Host 'Authoritative' switch and capacity '+' start worker containers (Facebook logins) on a single click with no confirm",
+  "location": "apps/frontend/src/pages/desktop/fleet/FleetHosts.tsx:83",
+  "failure_scenario": "A manager misclicks the switch on an observe-only host with capacity 8: on the agent's next poll the ERP answers count=min(8, free slots) and up to 8 containers boot, each restoring a session (a login in the vault ledger) - exactly what AGENTS.md's first rule forbids doing without reason. Each '+' click likewise boots one more worker."
+ },
+ {
+  "id": "A6-06",
+  "severity": "P2",
+  "title": "Account pool 'Resend login' queues a Facebook Re-login with one click, no confirm",
+  "location": "apps/frontend/src/pages/desktop/FacebookAccountPool.tsx:827",
+  "failure_scenario": "A manager opening an account in the editor clicks 'Resend login to homelab-3' to see what it does; the worker immediately re-enters the password/2FA, risking a checkpoint on an account that was healthy - a login AGENTS.md says must never happen without a reason."
+ },
+ {
+  "id": "A6-07",
+  "severity": "P2",
+  "title": "Submit form drops queued line photos and buffered evidence files on navigation/reload without a prompt",
+  "location": "apps/frontend/src/pages/desktop/DesktopSubmit.tsx:144",
+  "failure_scenario": "Purchaser submits a PO; the line photo upload fails, the page shows 'Retry N photos' and stays. They click a sidebar link (or reload/close the tab): no unsaved prompt fires, the File objects are gone and the photos are lost for good. Same for evidence files dropped onto a PO whose lines were all confirmed one by one: a reload before Submit loses them silently."
+ },
+ {
+  "id": "A6-08",
+  "severity": "P2",
+  "title": "[cross-lane] List memory (usePersisted) survives logout, so the next user inherits the previous user's inventory selection, filters and search",
+  "location": "apps/frontend/src/pages/desktop/DesktopInventory.tsx:148",
+  "failure_scenario": "Manager A selects 30 lots and searches 'DDR5' on Inventory, logs out; manager B logs in on the same tab. Inventory opens with A's search term, filters and the floating bar 'N lines / $X est. revenue'; B can press Create sell order and draft a sell order out of A's picks without having chosen them. A purchaser logging in after a manager sees the manager's search/filters applied to their own list."
+ }
+]

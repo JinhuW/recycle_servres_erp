@@ -1,0 +1,22 @@
+{
+  "lane": "A3",
+  "verdicts": [
+    {
+      "id": "A3-01",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": null,
+      "evidence": "repro/A3-verify/a3-01-fx-override.test.ts (run log repro/A3-verify/run.out.txt, 3/3 pass on disposable PG18 :55703): POST /api/workspace/fx-rates {quote:'CNY', rate:7100} -> 201; a CNY sell order line of 710 CNY is then stored with unit_price = 0.10 USD (should be ~100); POST /api/accounting/entries in USD with no fxRate -> 500 'accounting_entries_fx_rate_check' (accounting.ts:795); rate 1e-9 -> 500 'fx_rates_rate_check' from storeManualOverride (fx.ts:151). Code: fxRates.ts:65 and fx.ts:149 check only finite && > 0; fx_rates CHECK (0056) is only rate > 0; frontend FxRatesPanel.tsx:72 and input min=\"0\" add no upper bound.",
+      "reason": "Could not disprove: no layer bounds the override above. The accounting module already refuses an explicit fxRate of 7100 with a 400 (tests/accounting.test.ts:144) and its column CHECKs <= 100, so the missing bound on the ledger that feeds it is an inconsistency, not a design choice. A one-keystroke manager typo silently corrupts frozen USD snapshots on new CNY sell orders and turns USD RMB-Flow entries into 500s; P2 stands (manager-only, needs a typo, but the damage is persisted money figures)."
+    },
+    {
+      "id": "A3-02",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": "P3",
+      "evidence": "repro/A3-verify/a3-02-archived-po.test.ts (2/2 pass): archived Done PO for Marcus (total_cost 100, line cost 100 / sell 200, rate 0.1). Purchaser GET /api/dashboard?range=7d -> contrib.cost.total = 0 but kpis {cost:100, revenue:200, profit:100, commission:10}, contrib.profit.total = 100, own leaderboard row cost 100 / commission 10. Manager view: contrib.cost.total = 0, Marcus's leaderboard row cost 100 / commission 10. Code: dashboard.ts:59-62 (projDateWin) and :274/:285 (leaderboard CTEs) have no archived_at filter, while spendWin dashboard.ts:69-71 and contributions.ts:73 do; contributions.ts:69-70 'reviewed' has none.",
+      "reason": "The mismatch is real and reproduced: the same archived PO is out of spend but in the projected KPIs, profit/revenue cards and leaderboard cost, contradicting dashboard.ts:66-67 ('An archived PO is out of every stock and cost reader'). Downgraded to P3 because archiving is documented as keeping business records for 'commission history' (routes/orders/lifecycle.ts:168-171): a Done PO's commission was owed and paid, so keeping it in commission/profit is defensible; the defect narrows to leaderboard/KPI cost disagreeing with the spend card for the rare archived-after-review PO, a display inconsistency with no persisted money effect."
+    }
+  ],
+  "needs_owner": [
+    "A3-02: decide whether an archived reviewed/Done PO should keep its projected commission/profit on the dashboard (commission history) or drop out like spend; the fix direction depends on that intent."
+  ]
+}
