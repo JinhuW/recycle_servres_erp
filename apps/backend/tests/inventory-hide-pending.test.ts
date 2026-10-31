@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
-import { loginAs, ALEX } from './helpers/auth';
+import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
 import { firstCustomerId } from './helpers/fixtures';
 
@@ -64,6 +64,21 @@ describe('GET /api/inventory — hidePending filter', () => {
 
     const hidden = await api<{ items: { id: string }[] }>('GET', '/api/inventory?status=Reviewing&hidePending=1', { token });
     expect(hidden.body.items.some(i => i.id === line.id)).toBe(true);
+  });
+
+  it('is ignored for a purchaser, who must not learn which lots a sell order holds', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    await draftSellOrderOn(token, line);
+    const marcus = await loginAs(MARCUS);
+    await getTestDb()`
+      UPDATE orders SET user_id = ${marcus.user.id}
+      WHERE id = (SELECT order_id FROM order_lines WHERE id = ${line.id})`;
+    for (const path of ['/api/inventory?status=Reviewing&hidePending=1', '/api/inventory/products?status=Reviewing&hidePending=1']) {
+      const r = await api('GET', path, { token: marcus.token });
+      expect(r.status).toBe(200);
+      expect(JSON.stringify(r.body)).toContain(line.id);
+    }
   });
 
   it('applies to the grouped products endpoint too', async () => {

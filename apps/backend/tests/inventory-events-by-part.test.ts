@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { resetDb } from './helpers/db';
+import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 
@@ -90,5 +90,35 @@ describe('GET /api/inventory/events/by-part — union across same-part-number pe
     const r = await eventsByPart(buyer.token, 'XYZ-9');
     expect(r.status).toBe(200);
     expect(r.body.events.length).toBe(0);
+  });
+});
+
+describe('inventory event details a purchaser reads', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('drop sell and transfer order ids and unit-cost values on every event reader', async () => {
+    const marcus = (await loginAs(MARCUS)).token;
+    const lineId = await createPoLine(marcus, 'EVT-777');
+    await getTestDb()`
+      INSERT INTO inventory_events (order_line_id, kind, detail) VALUES
+        (${lineId}, 'sold',        ${getTestDb().json({ soldQty: 1, remainingQty: 3, sellOrder: 'SO-9001' })}),
+        (${lineId}, 'transferred', ${getTestDb().json({ from: 'WH-LA1', to: 'WH-DAL', qty: 1, transfer_order_id: 'TO-9001' })}),
+        (${lineId}, 'edited',      ${getTestDb().json({ field: 'unitCost', from: '78.5', to: '91.25' })})`;
+
+    const reads = async (token: string) => [
+      (await api<{ events: unknown[] }>('GET', `/api/inventory/${lineId}`, { token })).body.events,
+      (await api<{ events: unknown[] }>('GET', '/api/inventory/events/all', { token })).body.events,
+      (await eventsByPart(token, 'EVT-777')).body.events,
+    ];
+    for (const events of await reads(marcus)) {
+      const text = JSON.stringify(events);
+      expect(text).toContain('"soldQty":1');
+      expect(text).toContain('"field":"unitCost"');
+      for (const leak of ['SO-9001', 'TO-9001', '91.25', '"sellOrder"']) expect(text).not.toContain(leak);
+    }
+    for (const events of await reads((await loginAs(ALEX)).token)) {
+      const text = JSON.stringify(events);
+      for (const kept of ['SO-9001', 'TO-9001', '91.25']) expect(text).toContain(kept);
+    }
   });
 });

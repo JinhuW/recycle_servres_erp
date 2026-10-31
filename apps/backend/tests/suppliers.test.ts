@@ -84,7 +84,18 @@ describe('clients — who can see whose book', () => {
     const dup = await api<{ error: string }>('POST', '/api/suppliers', {
       token: marcus.token, body: { name: '  johns   SERVERS ', zip: '80012' } });
     expect(dup.status).toBe(409);
-    expect(dup.body.error).toMatch(/already in/i);
+    expect(dup.body.error).toBe("John's Servers is already in your clients");
+  });
+
+  it('names the caller\'s own book even when a colleague holds the same name', async () => {
+    const priya = await loginAs(PRIYA);
+    await mkClient(priya.token, "John's Servers", { zip: '10001' });
+    const marcus = await loginAs(MARCUS);
+    await mkClient(marcus.token, "John's Servers", { zip: '80012' });
+    const dup = await api<{ error: string }>('POST', '/api/suppliers', {
+      token: marcus.token, body: { name: "John's Servers", zip: '80012' } });
+    expect(dup.status).toBe(409);
+    expect(dup.body.error).not.toContain('Priya');
   });
 });
 
@@ -237,6 +248,7 @@ describe('clients — the follow-up loop', () => {
     const noteId = d.body.timeline[0].id;
 
     const priya = await loginAs(PRIYA);
+    expect((await api('POST', `/api/suppliers/${id}/notes`, { token: priya.token, body: { kind: 'note', body: 'hi' } })).status).toBe(404);
     expect((await api('DELETE', `/api/suppliers/${id}/notes/${noteId}`, { token: priya.token })).status).toBe(404);
     expect((await api('DELETE', `/api/suppliers/${id}/notes/${noteId}`, { token: marcus.token })).status).toBe(200);
   });

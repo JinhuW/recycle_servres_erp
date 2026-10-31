@@ -39,6 +39,15 @@ const SPEC_PATCH_FIELDS = [
 ] as const;
 const IS_SPEC_PATCH_FIELD = new Set<string>(SPEC_PATCH_FIELDS);
 
+// An event's detail as a purchaser may read it. Sell and transfer orders are
+// manager-only, so their ids stay out, and an edit to unit_cost keeps its row
+// but not its values: cost stays out of every inventory read a purchaser gets.
+function eventDetailCol(sql: SqlLike, isManager: boolean) {
+  if (isManager) return sql`e.detail`;
+  return sql`(CASE WHEN e.detail->>'field' = 'unitCost' THEN e.detail - 'from' - 'to'
+                   ELSE e.detail END) - 'sellOrder' - 'transfer_order_id'`;
+}
+
 // Fields PATCH /:id audits, and the order_lines column each one is read from.
 const PATCH_AUDIT_FIELDS = [
   'status', 'sellPrice', 'unitCost', 'qty', 'condition', 'partNumber', 'health', 'rpm',
@@ -143,7 +152,8 @@ function inventoryWhereFrag(
   const search = c.req.query('q')?.toLowerCase().trim();
   const warehouse = c.req.query('warehouse');
   const attrs = parseAttrFilters((k) => c.req.query(k));
-  const hidePending = c.req.query('hidePending') === '1';
+  // Sell orders are a manager's; for anyone else this would say which lots one holds.
+  const hidePending = isManager && c.req.query('hidePending') === '1';
 
   const scopeFrag    = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
   const categoryFrag = category ? sql`l.category = ${category}` : sql`TRUE`;
@@ -598,7 +608,7 @@ inventory.get('/events/all', async (c) => {
 
   const rows = await sql`
     SELECT
-      e.id, e.kind, e.detail, e.created_at,
+      e.id, e.kind, ${eventDetailCol(sql, isManager)} AS detail, e.created_at,
       l.id AS line_id, l.category, l.brand, l.capacity, l.generation, l.type,
       l.interface, l.description, l.part_number, l.rpm,
       act.name AS actor_name, act.initials AS actor_initials
@@ -801,7 +811,7 @@ inventory.get('/events/by-part', async (c) => {
 
   const rows = await sql`
     SELECT
-      e.id, e.kind, e.detail, e.created_at,
+      e.id, e.kind, ${eventDetailCol(sql, isManager)} AS detail, e.created_at,
       l.id AS line_id, l.category, l.brand, l.capacity, l.generation, l.type,
       l.interface, l.description, l.part_number, l.rpm,
       act.name AS actor_name, act.initials AS actor_initials
@@ -970,7 +980,8 @@ inventory.get('/products', async (c) => {
   const search = c.req.query('q')?.toLowerCase().trim();
   const warehouse = c.req.query('warehouse');
   const attrs = parseAttrFilters((k) => c.req.query(k));
-  const hidePending = c.req.query('hidePending') === '1';
+  // Sell orders are a manager's; for anyone else this would say which lots one holds.
+  const hidePending = isManager && c.req.query('hidePending') === '1';
   const sortCol = c.req.query('sort');
   const sortDir = c.req.query('dir') ?? 'desc';
   if (sortCol !== undefined && !isInventorySortCol(sortCol)) return c.json({ error: 'invalid sort' }, 400);
@@ -1278,7 +1289,8 @@ inventory.get('/:id', async (c) => {
   row.line_held = (await heldLines(sql, [id])).size > 0;
 
   const events = await sql`
-    SELECT e.id, e.kind, e.detail, e.created_at, u.name AS actor_name, u.initials AS actor_initials
+    SELECT e.id, e.kind, ${eventDetailCol(sql, u.role === 'manager')} AS detail, e.created_at,
+           u.name AS actor_name, u.initials AS actor_initials
     FROM inventory_events e
     LEFT JOIN users u ON u.id = e.actor_id
     WHERE e.order_line_id = ${id}

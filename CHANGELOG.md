@@ -15,6 +15,64 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.392.1] - 2026-10-31
+
+### Fixed
+
+- **Purchasers can no longer submit a colleague's draft PO** (RS-478). The
+  advance route let any purchaser move any Draft to In Transit, and its
+  refusals described orders the caller couldn't open. It now answers 404 for
+  someone else's PO, as opening it does, and runs no PayPal pull first.
+- **A line's inventory history no longer carries manager-only data to its
+  purchaser.** Sell- and transfer-order ids and the before/after values of a
+  unit-cost edit are left out of `/api/inventory/:id` and both `/events/*`
+  reads, and *Hide pending* is a manager filter, since diffing it told a
+  purchaser which of their lots a sell order held.
+- **The Facebook pool sends a purchaser only the logins they hold.** Every
+  other account's UID and email arrived in full from the snapshot and the
+  summary while the page masked them. They now arrive cut to what the page
+  showed.
+- **Demoting a manager ends their connector tokens at once**, instead of
+  leaving manager MCP scopes alive until the access token expired.
+- **OAuth hardening:** before anyone signs in, a self-registered client's
+  request errors are answered in place rather than redirected to its URI (an
+  open redirect from the ERP domain), and a parked consent is readable only by
+  the user who parked it.
+- **Smaller leaks:** a purchaser adding a retired item type no longer revives
+  it; the duplicate-client message looks in the book being written to rather
+  than naming whichever colleague held the same name; a note on someone
+  else's client answers 404 like the client does; preference lists are
+  bounded.
+## [1.392.0] - 2026-10-31
+
+### Added
+
+- **Leads ▸ Reddit: a pool of proven sellers the purchasing team works to a
+  deal (RS-477).** A new sidebar group, Leads, opens Reddit sellers taken from
+  the swap subreddits' trade-bot records (u/LabB0T on r/homelabsales, u/hwsbot
+  on r/hardwareswap). Each seller shows their deal record, such as
+  `289 Sale | 4 Buy`. A purchaser claims a seller from **Pool**, and from then
+  on everyone else sees them as claimed, so two people never message the same
+  seller.
+  - **My leads** tracks each seller through Claimed → DM sent → Replied →
+    Negotiating → Deal made, urgent first, as a list or a board.
+  - **The lead panel** writes the DM from a template and opens Reddit's
+    compose page with it filled in. Marking it sent schedules a follow-up in
+    3 days. The panel also logs the seller's reply, sets the next follow-up,
+    and closes or releases the lead.
+  - **Buyer network** picks a top buyer, such as u/Frank202312, and shows a
+    tree of every seller they bought from, with the trades and a Claim on each
+    node.
+  - **Team** and **Import** are the managers'. The team board shows stale
+    claims and follow-ups due per purchaser.
+  - The API keeps other purchasers' conversations to the holder and managers.
+- The import starts from a hand-run harvest of 60 monthly confirmed-trade
+  threads (~28.7k trades). It gives 2,171 sellers with at least one confirmed
+  sale, the top 50 buyers and 2,366 of their trades. That is the list that was
+  previously a one-off CSV. Migration 0219 adds the tables. The import route
+  gets an 8 MiB body cap of its own, because the harvest JSON is larger than
+  the 1 MiB API default.
+
 ## [1.391.1] - 2026-10-31
 
 ### Fixed

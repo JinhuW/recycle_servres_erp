@@ -76,6 +76,16 @@ type SummaryRow = Pick<
   | 'added_at' | 'cookie_at' | 'alive_checked_at' | 'batch' | 'cookie_uid'
 > & { has_cookie: boolean };
 
+// A login a purchaser doesn't hold, cut to what the rack shows: the UID's
+// first and last four digits, the email's first two letters and domain. The
+// cut UID stays digits, so the c_user built from it still matches the UID
+// check exactly when the real ones match.
+const cutUid = (uid: string): string => (uid.length > 8 ? uid.slice(0, 4) + uid.slice(-4) : uid);
+function cutEmail(email: string): string {
+  const at = email.lastIndexOf('@');
+  return at < 0 ? email.slice(0, 2) + '•••' : email.slice(0, 2) + '•••' + email.slice(at);
+}
+
 type EventRow = {
   created_at: Date;
   actor_name: string;
@@ -139,13 +149,13 @@ async function snapshot(sql: SqlLike, key: Buffer, user: User) {
     const full = manager || (r.holder_user_id === user.id && r.status === 'taken');
     let cookie = '';
     if (full) cookie = unsealOrEmpty(r.cookie_enc, key);
-    else if (r.cookie_enc) cookie = r.cookie_uid ? `c_user=${r.cookie_uid}` : 'xs=redacted';
+    else if (r.cookie_enc) cookie = r.cookie_uid ? `c_user=${cutUid(r.cookie_uid)}` : 'xs=redacted';
     return {
       no: r.no,
-      uid: r.uid,
+      uid: full ? r.uid : cutUid(r.uid),
       password: full ? unsealOrEmpty(r.password_enc, key) : '',
       totp: full ? unsealOrEmpty(r.totp_enc, key) : '',
-      email: r.email,
+      email: full || !r.email ? r.email : cutEmail(r.email),
       emailPassword: full ? unsealOrEmpty(r.email_password_enc, key) : '',
       recovery: full ? r.recovery_email : '',
       cookie,
@@ -229,28 +239,33 @@ pool.get('/', async (c) => c.json(await snapshot(getDb(c.env), c.var.key, c.var.
 
 // Pages that only need who holds what (the fleet table, tab counts) poll this
 // instead of the snapshot, which unseals every secret of every row per call.
-// It answers every role alike: nothing in it is held back from a purchaser.
+// A purchaser gets the logins cut the way the snapshot cuts them.
 pool.get('/summary', async (c) => {
+  const user = c.var.user;
+  const manager = effectiveRole(user) === 'manager';
   const rows = await getDb(c.env)<SummaryRow[]>`
     SELECT no, uid, email, note, status, holder_name, holder_user_id, held_since, added_at,
            cookie_at, alive_checked_at, batch, cookie_enc IS NOT NULL AS has_cookie, cookie_uid
     FROM fb_pool_accounts ORDER BY no`;
-  const accounts: PoolAccountSummary[] = rows.map((r) => ({
-    no: r.no,
-    uid: r.uid,
-    email: r.email,
-    note: r.note,
-    status: r.status,
-    holder: r.holder_name,
-    holderId: r.holder_user_id,
-    since: ms(r.held_since),
-    addedAt: r.added_at.getTime(),
-    cookieAt: ms(r.cookie_at),
-    aliveCheckedAt: ms(r.alive_checked_at),
-    batch: r.batch,
-    hasCookie: r.has_cookie,
-    cookieUid: r.has_cookie ? r.cookie_uid : null,
-  }));
+  const accounts: PoolAccountSummary[] = rows.map((r) => {
+    const full = manager || (r.holder_user_id === user.id && r.status === 'taken');
+    return {
+      no: r.no,
+      uid: full ? r.uid : cutUid(r.uid),
+      email: full || !r.email ? r.email : cutEmail(r.email),
+      note: r.note,
+      status: r.status,
+      holder: r.holder_name,
+      holderId: r.holder_user_id,
+      since: ms(r.held_since),
+      addedAt: r.added_at.getTime(),
+      cookieAt: ms(r.cookie_at),
+      aliveCheckedAt: ms(r.alive_checked_at),
+      batch: r.batch,
+      hasCookie: r.has_cookie,
+      cookieUid: r.has_cookie && r.cookie_uid ? (full ? r.cookie_uid : cutUid(r.cookie_uid)) : null,
+    };
+  });
   return c.json({ accounts });
 });
 

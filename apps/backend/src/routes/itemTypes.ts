@@ -41,15 +41,18 @@ itemTypes.post('/', async (c) => {
 
   const sql = getDb(c.env);
   // Idempotent on lower(name): typing "cpu" when "CPU" exists selects the
-  // existing type instead of minting a twin. A retired type is revived
-  // rather than duplicated.
-  const [row] = await sql<{ id: string; name: string }[]>`
+  // existing type instead of minting a twin. A manager's add revives a
+  // retired type rather than duplicating it; anyone else's leaves it retired,
+  // since retiring is a manager's call.
+  const revive = c.var.user.role === 'manager';
+  const [row] = await sql<{ id: string; name: string; active: boolean }[]>`
     INSERT INTO item_types (name, created_by)
     VALUES (${name}, ${c.var.user.id})
-    ON CONFLICT (lower(name)) DO UPDATE SET active = TRUE
-    RETURNING id, name
+    ON CONFLICT (lower(name)) DO UPDATE SET active = item_types.active OR ${revive}
+    RETURNING id, name, active
   `;
-  return c.json(row, 201);
+  if (!row.active) return c.json({ error: `"${row.name}" was retired by a manager` }, 409);
+  return c.json({ id: row.id, name: row.name }, 201);
 });
 
 itemTypes.patch('/:id', async (c) => {

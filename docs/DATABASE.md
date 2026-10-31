@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-31:** ERP migration `0218`, Reddit tracker migration `0007`,
+**As of 2026-10-31:** ERP migration `0219`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -26,6 +26,7 @@ refresh a section.
   - [Market values](#market-values)
   - [Facebook account pool](#facebook-account-pool)
   - [Fleet](#fleet)
+  - [Reddit leads](#reddit-leads)
   - [System](#system)
   - [SQL functions](#sql-functions)
 - [Reddit tracker database](#reddit-tracker-database)
@@ -114,28 +115,31 @@ isolation boundary (`trackers/facebook/infra/README.md`).
 ### Conventions
 
 - **Keys.**
-  - 36 tables use `uuid` keys (`gen_random_uuid()`).
+  - 37 tables use `uuid` keys (`gen_random_uuid()`).
   - Business records people quote use `text` keys allocated by `lib/id-seq.ts`
     from `id_counters`, never by counting rows. These are `orders`,
     `sell_orders`, `transfer_orders`, `after_sales_cases`,
     `accounting_entries` and `web_submissions`.
-  - 12 more tables use other `text` keys:
+  - 14 more tables use other `text` keys:
     - slugs, for the lookups `categories`, `warehouses`, `price_sources`,
       `sell_order_statuses`, `workspace_settings` and `id_counters`;
     - OAuth identifiers, for `oauth_clients`, `oauth_authorization_codes`
       (the code's hash) and `oauth_pending_consent`;
     - an app-made uuid string, for `ref_prices`;
     - the canonical part number, for `part_number_lookups`;
-    - the file name, for `schema_migrations`.
+    - the file name, for `schema_migrations`;
+    - the lower-cased Reddit username, for `reddit_leads` and
+      `reddit_lead_buyers`.
   - Number keys:
-    - `fb_pool_accounts.no` and `fb_worker_accounts.id` are identity columns;
+    - `fb_pool_accounts.no`, `fb_worker_accounts.id` and
+      `reddit_lead_trades.id` are identity columns;
     - `fb_proxies` is keyed by the proxy's `url`;
     - `fx_rates`, `login_attempts`, `oauth_refresh_tokens` and
       `public_form_reservations` use `bigserial`;
     - `wechat_market_days` is keyed by `report_date`.
   - The rest use composite keys: status meta, sign-offs, packs, suggestion
     dismissals, `mail_sync_state` and the other WeChat tables.
-- **Foreign keys.** There are 122. Each table's *References* line gives the
+- **Foreign keys.** There are 125. Each table's *References* line gives the
   delete rule.
   - **Delete rules.** `0041_fk_on_delete.sql` set most rules on purpose.
     15 FKs still have no `ON DELETE` clause, which means `NO ACTION`, so
@@ -2527,6 +2531,109 @@ releases cannot be recovered.
 | `day` | `date` | The UTC day whose overlap is charged. |
 | `minutes` | `numeric` | Leased minutes that day. |
 
+### Reddit leads
+
+Sellers from the swap subreddits' trade-bot records (u/LabB0T on
+r/homelabsales, u/hwsbot on r/hardwareswap), which purchasers claim and work
+from a first DM to a deal on Leads ▸ Reddit (`routes/redditLeads.ts`, RS-477).
+A manager loads them from a harvest file through `POST /api/leads/reddit/import`.
+That import upserts sellers by name, so a claim and its conversation outlive a
+refresh, and it replaces the buyer network whole. A purchaser sees only that
+someone else holds a seller. Who holds it, the stage, the follow-up and the
+replies go to the holder and to managers. Migration 0219.
+
+Tables: [`reddit_leads`](#erp-reddit-leads), [`reddit_lead_buyers`](#erp-reddit-lead-buyers), [`reddit_lead_trades`](#erp-reddit-lead-trades), [`reddit_lead_events`](#erp-reddit-lead-events)
+
+<a id="erp-reddit-leads"></a>
+
+#### `reddit_leads`
+
+One seller, with their deal record from the latest harvest and, while claimed, where their purchaser has got to.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `username` | `text` | ✓ |  | Reddit name lower-cased (names are case-insensitive); 2–30 of `a-z0-9_-`. |
+| `display_name` | `text` | ✓ |  | The spelling the bot used last. |
+| `sales` / `buys` | `integer` | ✓ | `0` | Confirmed sales and buys: LabB0T's lifetime flair where seen, plus hwsbot pairs. A floor, not a total. |
+| `record_source` | `text` | ✓ | `''` | `LabB0T flair` or `bot thread pairs`. |
+| `subreddits` | `text[]` | ✓ | `'{}'` | Where the seller traded or was alerted on. |
+| `last_deal` | `date` |  |  | Their most recent confirmed trade. |
+| `items_sold` | `text[]` | ✓ | `'{}'` | Up to eight recent items, newest first. |
+| `latest_post_title` / `latest_post_url` | `text` | ✓ | `''` | The Reddit tracker's latest alert on them, if any. |
+| `tracker_alerts` | `integer` | ✓ | `0` | How many of their posts the Reddit tracker alerted on. |
+| `claimed_by` | `uuid` |  |  | → users; NULL = in the pool. |
+| `claimed_name` | `text` |  |  | Holder's name at claim time. |
+| `claimed_at` | `timestamptz` |  |  | A claim with no DM 48 h on is stale. |
+| `stage` | `text` | ✓ | `'claimed'` | claimed, dm, replied, talks (negotiating) or won. |
+| `closed` | `text` | ✓ | `''` | `''` open, `nostock` (comes back as a follow-up in 30 days) or `lost`. |
+| `follow_up` | `date` |  |  | When the holder should get back to them; a DM sets it 3 days out, a reply clears it. |
+| `dm_at` | `timestamptz` |  |  | Last DM the holder marked sent. |
+| `imported_at` | `timestamptz` | ✓ | `now()` | Last import that touched the row. |
+| `updated_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `username`
+- **References:** `claimed_by` → `users.id` (on delete set null)
+- **Checks:** `username = lower(username)` and the name pattern; `stage IN ('claimed','dm','replied','talks','won')`; `closed IN ('','nostock','lost')`; `sales >= 0`, `buys >= 0`
+- **Indexes:** `reddit_leads_claimed_by_idx` (claimed_by), `reddit_leads_sales_idx` (sales DESC)
+
+A release or a new claim resets stage, closed, follow-up and dm_at; the
+earlier holder's history stays in `reddit_lead_events`.
+
+<a id="erp-reddit-lead-buyers"></a>
+
+#### `reddit_lead_buyers`
+
+A top buyer from the harvest, the root of a Buyer network tree. Replaced by every import that carries buyers.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `username` | `text` | ✓ |  | Lower-cased Reddit name. |
+| `display_name` | `text` | ✓ |  |  |
+| `buys` / `sales` | `integer` | ✓ | `0` | The buyer's confirmed buys and sales. |
+
+- **Primary key:** `username`
+
+<a id="erp-reddit-lead-trades"></a>
+
+#### `reddit_lead_trades`
+
+One confirmed trade between a top buyer and a seller, from the bot threads.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `integer` | ✓ | identity |  |
+| `buyer` | `text` | ✓ |  | → reddit_lead_buyers. |
+| `seller` | `text` | ✓ |  | Lower-cased seller name; matches `reddit_leads.username` by value (a seller may have no lead row). |
+| `item` | `text` | ✓ | `''` | What the confirmation said was traded. |
+| `traded_on` | `date` |  |  |  |
+| `url` | `text` | ✓ | `''` | The bot's confirmation comment; only reddit.com links are kept. |
+| `subreddit` | `text` | ✓ | `''` |  |
+
+- **Primary key:** `id`
+- **References:** `buyer` → `reddit_lead_buyers.username` (on delete cascade)
+- **Indexes:** `reddit_lead_trades_buyer_idx` (buyer), `reddit_lead_trades_seller_idx` (seller)
+
+<a id="erp-reddit-lead-events"></a>
+
+#### `reddit_lead_events`
+
+Who did what to which seller, including the seller replies purchasers log. Append-only; the lead's History.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
+| `username` | `text` |  |  | The seller; no FK, so history survives an import that drops them. NULL for an import. |
+| `actor_id` | `uuid` |  |  | → users. |
+| `actor_name` | `text` | ✓ |  | Name snapshot. |
+| `kind` | `text` | ✓ |  | imported, claimed, released, dm, reply, stage, follow_up, closed, reopened. |
+| `detail` | `text` | ✓ | `''` | The DM template, the reply text, the new stage, the date or the closing reason. |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `actor_id` → `users.id` (on delete set null)
+- **Indexes:** `reddit_lead_events_username_idx` (username, created_at), `reddit_lead_events_actor_id_idx` (actor_id)
+- **Triggers:** `reddit_lead_events_no_update` and `reddit_lead_events_no_delete` raise (`reddit_lead_events_lock()`), as `fb_pool_events` does.
+
 ### System
 
 Workspace-wide configuration and plumbing: key/value settings (workspace_settings), the counters behind human-readable ids such as PO-1289 (id_counters), and the migration runner's ledger (schema_migrations).
@@ -2587,7 +2694,7 @@ These are the app's own functions. The rest of `public`'s functions belong to
 
 | Function | Returns | What it does |
 | --- | --- | --- |
-| `accounting_entry_events_lock()` | `trigger` | Trigger functions behind the BEFORE UPDATE and BEFORE DELETE triggers (<table>_no_update, <table>_no_delete) on accounting_entry_events, fb_pool_events, inventory_events, order_events and sell_order_events: they raise, which makes those ledgers append-only. The inventory, order and accounting-entry versions let a DELETE through when another trigger fired it (pg_trigger_depth() > 1), so a parent's FK cascade can still remove its history; the fb_pool and sell-order versions refuse every update and delete. |
+| `accounting_entry_events_lock()` | `trigger` | Trigger functions behind the BEFORE UPDATE and BEFORE DELETE triggers (<table>_no_update, <table>_no_delete) on accounting_entry_events, fb_pool_events, inventory_events, order_events, reddit_lead_events and sell_order_events: they raise, which makes those ledgers append-only. The inventory, order and accounting-entry versions let a DELETE through when another trigger fired it (pg_trigger_depth() > 1), so a parent's FK cascade can still remove its history; the fb_pool, reddit-lead and sell-order versions refuse every update and delete. |
 | `accounting_sync_payer(p_order_id text, p_detail jsonb)` | `void` | Applies a PO's payer to its live paid-out commission and purchase RMB Flow entries: voids them as 'Paid from the Business Account' when the company paid (unless a manager restored the entry), otherwise moves their Paid by to the PO's person payer and clears any review, logging voided or edited events. Called by the orders_sync_accounting_payer and bank_transactions_sync_accounting_payer trigger functions, and by routes/accounting.ts when an entry is restored. |
 | `bank_transactions_sync_accounting_payer()` | `trigger` | Trigger function on bank_transactions (AFTER INSERT or DELETE, and AFTER UPDATE when order_id, link_kind or settle_status actually changes, via the bank_transactions_sync_accounting_payer and _update triggers) that runs accounting_sync_payer for the previously and newly linked PO. |
 | `fb_pool_events_lock()` | `trigger` | Trigger functions behind the BEFORE UPDATE and BEFORE DELETE triggers (<table>_no_update, <table>_no_delete) on accounting_entry_events, fb_pool_events, inventory_events, order_events and sell_order_events: they raise, which makes those ledgers append-only. The inventory, order and accounting-entry versions let a DELETE through when another trigger fired it (pg_trigger_depth() > 1), so a parent's FK cascade can still remove its history; the fb_pool and sell-order versions refuse every update and delete. |

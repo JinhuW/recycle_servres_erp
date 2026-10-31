@@ -28,6 +28,16 @@ const allLeaves: NavLeaf[] = DESKTOP_NAV.flatMap(g =>
   g.items.flatMap(i => ('children' in i ? [...i.children] : [i])));
 
 describe('shownNav', () => {
+  it('gives both roles Leads ▸ Reddit, open only on its page', () => {
+    for (const role of ['manager', 'purchaser'] as const) {
+      expect(leaf(role, 'home', 'leadsReddit')?.active).toBe(false);
+      expect(leaf(role, 'leadsReddit', 'leadsReddit')?.active).toBe(true);
+      const parent = shownNav(role, 'home').flatMap(g => g.items)
+        .find((i): i is ShownParent => i.kind === 'parent' && i.parent.tKey === 'nav_leads');
+      expect(parent?.target).toBe('leadsReddit');
+    }
+  });
+
   it('gives purchasers the Facebook pool and Settings, with no Reddit monitor', () => {
     const items = oversight('purchaser', 'home')?.items ?? [];
     expect(items.map(i => (i.kind === 'leaf' ? i.leaf.id : i.parent.tKey))).toEqual(['nav_monitors', 'settings']);

@@ -178,10 +178,14 @@ describe('facebook account pool', () => {
       expect(a.token).toBe('');
       expect(a.cookie).not.toContain('xs=session');
     }
-    expect(before.body.accounts[0].cookie).toBe(`c_user=${uid(1)}`);
+    // The logins are cut to what the rack shows, and the cut c_user still
+    // matches the cut UID, so the UID check reads the same.
+    const cut = (u: string) => u.slice(0, 4) + u.slice(-4);
+    expect(before.body.accounts[0].cookie).toBe(`c_user=${cut(uid(1))}`);
     expect(before.body.accounts[0].cookieAt).not.toBeNull();
     expect(before.body.accounts[2].cookie).toBe('xs=redacted');
-    expect(before.body.accounts.map((a) => a.uid)).toEqual([uid(1), uid(2), uid(3)]);
+    expect(before.body.accounts.map((a) => a.uid)).toEqual([cut(uid(1)), cut(uid(2)), cut(uid(3))]);
+    for (const a of before.body.accounts) expect(a.email).toMatch(/^.{2}•••@/);
 
     const took = await api<Snapshot>('POST', `${BASE}/2/take`, { token: marcus.token });
     expect(took.status).toBe(200);
@@ -196,7 +200,8 @@ describe('facebook account pool', () => {
     // Another purchaser sees who holds #2 but none of its login.
     const priya = await api<Snapshot>('GET', BASE, { token: (await loginAs(PRIYA)).token });
     const theirs = priya.body.accounts.find((a) => a.no === 2)!;
-    expect(theirs).toMatchObject({ status: 'taken', holder: 'Marcus Wright', password: '', totp: '' });
+    expect(theirs).toMatchObject({ status: 'taken', holder: 'Marcus Wright', password: '', totp: '', uid: cut(uid(2)) });
+    expect(mine.uid).toBe(uid(2));
 
     // A manager previewing as a purchaser reads like one.
     const db = getTestDb();

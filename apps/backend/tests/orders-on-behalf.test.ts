@@ -96,9 +96,9 @@ describe('POST /api/orders onBehalfOfUserId', () => {
     expect(r.body.error).toMatch(/member/i);
   });
 
-  // Ownership never grants stage rights: the actor's role does, whoever the
-  // order belongs to.
-  it('a manager-owned order still cannot be advanced past In Transit by a purchaser', async () => {
+  // A purchaser advances only their own order; a manager's is not theirs to
+  // touch at any stage.
+  it('a manager-owned order cannot be advanced by a purchaser', async () => {
     const alex = await loginAs(ALEX);
     const sofia = await loginAs(SOFIA);
     const marcus = await loginAs(MARCUS);
@@ -112,9 +112,10 @@ describe('POST /api/orders onBehalfOfUserId', () => {
     expect(created.status).toBe(201);
 
     const submit = await api('POST', `/api/orders/${created.body.id}/advance`, { token: marcus.token });
-    expect(submit.status).toBe(200);
+    expect(submit.status).toBe(404);
+    expect((await api('POST', `/api/orders/${created.body.id}/advance`, { token: sofia.token })).status).toBe(200);
     const review = await api('POST', `/api/orders/${created.body.id}/advance`, { token: marcus.token });
-    expect(review.status).toBe(403);
+    expect(review.status).toBe(404);
   });
 
   it('rejects an unknown target user', async () => {
