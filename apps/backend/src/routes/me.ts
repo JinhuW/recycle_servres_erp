@@ -7,7 +7,6 @@ import { reserveAttempt } from '../lib/loginAttempts';
 import { epochSeconds, hashPassword, verifyPassword, verifyToken } from '../auth';
 import { revokeUserOAuthTokens } from '../oauth/tokens';
 import { validatePreferencePatch } from '../preferences';
-import { log } from '../lib/log';
 import { effUnitCost, poFeeBasis } from '../lib/po-cost';
 import type { Env, User } from '../types';
 

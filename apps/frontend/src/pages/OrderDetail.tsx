@@ -23,7 +23,7 @@ import { matchPurchaseOrder, navigate, poProductsPath, type PoScreen } from '../
 import { confirmDiscard, useUnsavedGuard } from '../lib/unsavedGuard';
 import { OrderProductsBody, itemLabel } from './OrderProductsBody';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
-import { fmtUSD, fmtUSD0 } from '../lib/format';
+import { fmtUSD } from '../lib/format';
 import { productCount } from '../lib/productNo';
 import { costPayerLabel, profitTone } from '../lib/orderPresentation';
 import { costPayerDraft, payerAfterOwnerChange, payerChoices } from '../lib/poFacets';

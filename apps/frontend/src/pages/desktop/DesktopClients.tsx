@@ -11,14 +11,14 @@ import { RhythmStrip } from '../../components/RhythmStrip';
 import { TableSkeleton } from '../../components/Skeleton';
 import { api } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
-import { fmtUSD0, fmtDate } from '../../lib/format';
+import { fmtUSD0 } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { useAuth } from '../../lib/auth';
 import { match, navigate, useRoute } from '../../lib/route';
 import {
   type Client, type ClientList, type Suggestion,
-  TIER_KEY, HEALTH_KEY, HEALTH_TONE, dueLabel, dueTone, rhythmMarks,
+  TIER_KEY, HEALTH_KEY, HEALTH_TONE, dueLabel, dueTone,
 } from '../../lib/clients';
 import { ClientDrawer } from './clients/ClientDrawer';
 import { AddClientModal } from './clients/AddClientModal';

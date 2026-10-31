@@ -15,7 +15,7 @@
 // submission's reference.
 
 import { Hono, type MiddlewareHandler } from 'hono';
-import { getDb, type SqlLike } from '../db';
+import { getDb } from '../db';
 import { log } from '../lib/log';
 import { isEmail } from '../lib/email';
 import { nextHumanId } from '../lib/id-seq';

@@ -24,8 +24,8 @@ export type {
   FleetSecretKind, FleetWorkerDetail, FleetWorkerEvent, FleetWorkerRelogin, FleetWorkerResume,
 } from '@recycle-erp/shared';
 export {
-  FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetResumable, fleetTakesResume, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
-  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_SLOW_MS,
+  fleetStateParked, fleetResumable, fleetTakesResume, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
+  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_SLOW_MS,
 } from '@recycle-erp/shared';
 
 // snake_case on purpose: rows come straight from the backend's SQL.

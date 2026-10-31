@@ -49,6 +49,21 @@ So:
 | `trackers/reddit/` | Reddit for-sale monitor: polls subreddits, LLM-judges posts, alerts Telegram | Hono, Node 24, Postgres; **standalone pnpm project** | Railway `reddits-tracker` (`api`, `worker`) + OCI worker fleet | its `package.json`, no tags | [trackers/reddit/AGENTS.md](trackers/reddit/AGENTS.md) |
 | `trackers/facebook/` | Facebook Marketplace fleet: coordinator, console, poster, messenger, router | Python, FastAPI, Playwright | Homelab VM `10.10.10.73` (Compose) + Railway Postgres `facebook-tracker` | `VERSION`, its `CHANGELOG.md`, `facebook-tracker/v*` tags | [trackers/facebook/AGENTS.md](trackers/facebook/AGENTS.md) |
 
+## Navigating the code
+
+[docs/CODEMAP.md](docs/CODEMAP.md) maps modules, flows and commands. To keep
+context small:
+
+1. Read the code map first.
+2. Pick the modules the task touches.
+3. Search for the specific symbols and paths.
+4. Read only the implementation and tests the task needs.
+5. Widen the read when a dependency or a doubt calls for it.
+6. Update the map when an entry point, module boundary or command changes.
+
+The map is a guide, not a source of truth. Check the source before relying
+on a detail.
+
 ## Boundaries
 
 - **The root pnpm workspace is `apps/*` and `packages/*` only.**
@@ -214,6 +229,7 @@ Four things worth knowing:
 
 ## Pointers
 
+- Where the code is, by module: `docs/CODEMAP.md`.
 - What the system does today, by area: `docs/FEATURES.md`.
 - Every database (ERP, Reddit tracker, Facebook coordinator), table by
   table: `docs/DATABASE.md`.

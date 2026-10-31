@@ -17,13 +17,6 @@ export type AccountLiveness = 'live' | 'stale' | 'dead' | 'unknown' | 'none';
 // 'unknown' = it has a row but the worker has never heartbeated.
 export const liveness = (w: FleetAccount): AccountLiveness => w.health?.liveness ?? 'none';
 
-// Live or stale: a worker whose city list is being searched right now. Stale
-// counts because one missed cycle is normal on a jittered 45–75 min interval.
-export const isActive = (w: FleetAccount): boolean => {
-  const lv = liveness(w);
-  return lv === 'live' || lv === 'stale';
-};
-
 export const needsAttention = (w: FleetAccount): boolean => Boolean(w.health?.needs_attention);
 
 // A retired worker's row stays in the coordinator for its history, but it

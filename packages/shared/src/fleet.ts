@@ -21,7 +21,6 @@ export type FleetTaskEventKind = (typeof FLEET_TASK_EVENT_KINDS)[number];
 /** Worker states that mean the account cannot search: a heartbeat in one of
  *  them releases the worker's current task. DEGRADED is not one of them. */
 export const FLEET_PARKED_STATES = ['SESSION_EXPIRED', 'CHECKPOINT', 'CHALLENGE', 'DEAD'] as const;
-export type FleetParkedState = (typeof FLEET_PARKED_STATES)[number];
 
 /** `CHALLENGE_*` states all count as parked. */
 export const fleetStateParked = (state: string | null | undefined): boolean =>

@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HoldEntry } from './plan.js';
-import { EMPTY_DESIRED, parseDesired, type Desired } from './types.js';
+import { parseDesired, type Desired } from './types.js';
 
 const DESIRED_FILE = 'desired.json';
 const MEMORY_FILE = 'memory.json';
@@ -122,5 +122,3 @@ export function loadInstanceId(dir: string): string {
   }
   return id;
 }
-
-export { EMPTY_DESIRED };

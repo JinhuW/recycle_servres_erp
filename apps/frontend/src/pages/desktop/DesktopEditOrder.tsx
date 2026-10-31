@@ -19,11 +19,11 @@ import {
   ORDER_STATUSES, LIFECYCLE_STATUS, lifecycleOf,
 } from '../../lib/status';
 import { poEffectiveCost, parseFeeInput, feeEq, rateEq, readStoredGoodsTotal } from '../../lib/poTotals';
-import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
+import type { Category, Order, Warehouse } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
 import {
   blankLine, brandConfirmPending, duplicatesByIndex, findDuplicatePartNumbers, lineBlockerMessages,
-  patchEditsLine, type DuplicatePartGroup, type Line,
+  patchEditsLine, type DuplicatePartGroup,
 } from './submit/line';
 import { usePartQuestion } from '../../components/RamPartCheck';
 import { settlePartQuestions } from '../../lib/ramPartQuestion';

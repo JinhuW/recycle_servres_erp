@@ -88,9 +88,4 @@ export class RedditPacer {
     const jittered = base * (1 + (this.random() * 2 - 1) * JITTER);
     this.blockedUntil = this.now() + Math.min(jittered, MAX_BACKOFF_MS * (1 + JITTER));
   }
-
-  /** Exposed for the health endpoint. */
-  blockedUntilTimestamp(): number {
-    return this.blockedUntil;
-  }
 }

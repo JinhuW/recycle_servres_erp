@@ -11,7 +11,7 @@ import {
 } from '../../lib/facebookPool';
 import {
   isUnstampedBuild, reloginIsAutomatic, searchesPerDay, splitHighlights, vaultAccountIdFor,
-  type AccountLiveness, type CityHits,
+  type CityHits,
 } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 import type { Translate } from '../../lib/orderPresentation';
@@ -37,25 +37,6 @@ export function Hi({ text, terms }: { text: string; terms: readonly string[] }) 
     </>
   );
 }
-
-export const LIVENESS_CHIP: Record<AccountLiveness, { chip: string; key: string }> = {
-  live: { chip: 'chip pos', key: 'fbcLive' },
-  stale: { chip: 'chip warn', key: 'fbcStale' },
-  dead: { chip: 'chip neg', key: 'fbcDead' },
-  unknown: { chip: 'chip muted', key: 'fbcNeverReported' },
-  none: { chip: 'chip muted', key: 'fbcNotDeployed' },
-};
-
-export const STATE_CHIP: Record<WorkerState, string> = {
-  HEALTHY: 'chip pos',
-  DEGRADED: 'chip warn',
-  SESSION_EXPIRED: 'chip warn',
-  CHALLENGE_2FA: 'chip accent',
-  CHALLENGE_EMAIL: 'chip accent',
-  CHALLENGE_CAPTCHA: 'chip accent',
-  CHECKPOINT: 'chip accent',
-  DEAD: 'chip neg',
-};
 
 // The control plane can add states faster than this UI ships, so an unknown
 // one falls back to its raw name rather than a blank cell.

@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
-import { ApiError } from '../../../lib/api';
 import { handleFetchError, showSuccessToast, showWarnToast } from '../../../lib/errorToast';
 import { fleetApi, fleetTakesResume, type FleetSlot, type FleetWorkerResume } from '../../../lib/fleet';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
 import { useT } from '../../../lib/i18n';
-import { budgetTone, easternClock, easternDateTime, liveness, spanLabel, type Liveness, type Translate } from './fleetBoard';
+import { budgetTone, easternClock, easternDateTime, spanLabel, type Translate } from './fleetBoard';
 import type { FleetRow } from './fleetRows';
 
 // ─── Shared by the fleet tabs ─────────────────────────────────────────────────
@@ -118,10 +117,6 @@ export function useFleetPoll<T>(load: () => Promise<T>, ms: number = FLEET_POLL_
   return { data, reload: gate.reload };
 }
 
-/** A fleet route that is not there yet: an older backend, or one without the tables. */
-export const isNotServed = (err: unknown): boolean =>
-  err instanceof ApiError && (err.status === 404 || err.status === 501 || err.status === 503);
-
 export function UnavailableCard({ text }: { text: string }) {
   return (
     <div className="card">
@@ -142,21 +137,6 @@ export function Clock({ at, now }: { at: string | null | undefined; now?: number
   const { locale } = useT();
   if (!at) return <span className="fp-muted">—</span>;
   return <time dateTime={at} title={easternDateTime(at, locale)}>{easternClock(at, locale, now)}</time>;
-}
-
-const LIVENESS_CHIP: Record<Liveness, string> = { live: 'chip pos', stale: 'chip warn', dead: 'chip neg', never: 'chip muted' };
-const LIVENESS_KEY: Record<Liveness, string> = {
-  live: 'fleetSeenLive', stale: 'fleetSeenStale', dead: 'fleetSeenDead', never: 'fleetSeenNever',
-};
-
-export function SeenChip({ at, now }: { at: string | null | undefined; now?: number }) {
-  const { t, locale } = useT();
-  const lv = liveness(at, now);
-  return (
-    <span className={LIVENESS_CHIP[lv]} title={at ? easternDateTime(at, locale) : undefined}>
-      {t(LIVENESS_KEY[lv])}{at && lv !== 'never' ? ` · ${easternClock(at, locale, now)}` : ''}
-    </span>
-  );
 }
 
 /** Minutes of searching against the day's budget: the Fleet tab's ring. With
@@ -266,25 +246,6 @@ export function WorkerLink({ id }: { id: string | null | undefined }) {
   if (!id) return <span className="fp-muted">—</span>;
   const path = fleetWorkerPath(id);
   return <a className="mono fleet-link" href={hrefFor(path)} onClick={onLinkClick(path)}>{id}</a>;
-}
-
-/** The chrome every tab shares: a card with a title, an optional sub line and
- *  actions on the right. */
-export function TabCard({ title, sub, actions, children, className = '' }: {
-  title: string; sub?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string;
-}) {
-  return (
-    <section className={`card fleet-card ${className}`.trim()} aria-label={title}>
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{title}</h2>
-          {sub !== undefined && <span className="card-sub">{sub}</span>}
-        </div>
-        {actions && <div className="fleet-actions">{actions}</div>}
-      </div>
-      {children}
-    </section>
-  );
 }
 
 /** Confirm one destructive action; the body says what it does. */

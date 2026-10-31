@@ -16,7 +16,7 @@ import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../../services/orderGoo
 import { synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, normalizeTracking, isMaterialPatch, type Carrier, type PackageSource } from '@recycle-erp/shared';
 import { normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
-import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, committedLinesBody, describeSellOrders, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, movesPayer, paidByAfter, pickedPaidByErr, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, orderCostBooked, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, stageMovedBody, type StoredLine, storedLineCols, supplierErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, trackInput, warehouseErr } from './shared';
+import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, movesPayer, paidByAfter, pickedPaidByErr, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, orderCostBooked, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, stageMovedBody, type StoredLine, storedLineCols, supplierErr, trackingErr, trackInput, warehouseErr } from './shared';
 import { OrderRefusal, refusalResponse } from './refusal';
 
 const patchRoutes = new Hono<OrdersEnv>();

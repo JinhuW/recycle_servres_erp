@@ -39,7 +39,6 @@ function isIos(): boolean {
 type Phase = 'hidden' | 'card' | 'sheet';
 
 export function PwaInstallPrompt() {
-  const { t } = useT();
   const [phase, setPhase] = useState<Phase>('hidden');
   const [evt, setEvt] = useState<BeforeInstallPromptEvent | null>(null);
   const ios = isIos();

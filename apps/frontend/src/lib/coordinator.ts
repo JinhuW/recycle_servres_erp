@@ -67,8 +67,6 @@ export type Challenge = {
 export const challengeScreenshotUrl = (id: number) =>
   `/api/coordinator/challenges/${id}/screenshot`;
 
-export type FleetFilter = 'all' | 'active' | 'attention';
-
 export type FilterPrompt = {
   prompt: string | null;
   rating_prompt: string | null;
@@ -323,19 +321,6 @@ export type QueueItemCounts = {
 // last `fresh_hours`.
 export type QueueStarted = { at: string; by: string | null; until: string; fresh_hours: number };
 
-// What starting the round now would do: the workers it wakes, the ones on an
-// older monitor that start at their usual time, and per item how many queue
-// cities would be due.
-export type QueueStartPreview = {
-  wake: string[];
-  older: string[];
-  items: Record<string, { due: number; queue: number; leased: number }>;
-  fresh_hours: number;
-  window_hours: number;
-  until: string;
-  started: QueueStarted | null;
-};
-
 export type FleetQueue = {
   at: string;
   // Every worker is enrolled ("*").
@@ -514,15 +499,6 @@ export const coordinatorApi = {
     api.put<{ worker_id: string; enrolled: boolean; everyone: boolean }>(
       `/api/coordinator/workers/${encodeURIComponent(workerId)}/queue`, { enrolled },
     ),
-
-  // Every worker takes its cities from the queue, or none does.
-  setEveryoneQueue: (enrolled: boolean) =>
-    api.put<unknown>('/api/coordinator/queue/everyone', { enrolled }),
-
-  // Start the city round now instead of at the workers' start times; the
-  // preview says what that would do.
-  queueStartPreview: () => api.get<QueueStartPreview>('/api/coordinator/queue/start'),
-  startQueueRound: () => api.post<QueueStartPreview>('/api/coordinator/queue/start', {}),
 
   // One worker's cities, or one city's workers, over the last `hours`. A
   // console older than the city log answers 404.

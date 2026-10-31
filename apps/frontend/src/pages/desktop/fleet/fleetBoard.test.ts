@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { FleetCity, FleetTask } from '../../../lib/fleet';
+import type { FleetTask } from '../../../lib/fleet';
 import { CITIES, HITS, HOSTS, NOW, RELEASE, SLOTS, STATS, TASKS, WORKERS } from './fixtures';
 import {
   alertsByCity, averageTaskSeconds, beltAxis, beltLeft, beltRow, beltSummary, budgetTone, cityBucket, cityStanding, daySeries, dueIn, dueLabel,
