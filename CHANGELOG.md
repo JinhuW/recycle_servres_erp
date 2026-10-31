@@ -15,6 +15,19 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.396.1] - 2026-10-31
+
+### Fixed
+
+- **An after-sales case opened without a currency is USD again** (RS-489).
+  Since v1.395.0 such a case took its sell order's currency. The only clients
+  that leave the currency out are desktop tabs still on the older bundle, whose
+  field says "Amount (USD)", so on an RMB order a dollar refund would have been
+  saved as RMB. The current form still starts at the order's currency and always
+  says which one it means. The frontend also reads a case that comes back
+  without a currency as USD, so a Worker deployed ahead of the backend shows
+  "$10.00" rather than "undefined 10.00".
+
 ## [1.396.0] - 2026-10-31
 
 ### Added

@@ -2054,7 +2054,8 @@ lower price (**Discount**). Purchasers never see the page or the API.
   issue is required; resolution, amount and assignee are optional
   at this point. The issue sits in the Resolution card beside them
   (v1.395.0). The amount is in USD or RMB, chosen beside the field and
-  starting at the sell order's currency (v1.395.0). Cases are numbered `AS-1001`, `AS-1002`… from their own
+  starting at the sell order's currency (v1.395.0). A request that names no currency is
+  taken as USD (v1.396.1). Cases are numbered `AS-1001`, `AS-1002`… from their own
   counter. The products are snapshotted (label, part #, qty, unit price):
   a sell-order save rewrites its line rows, so the case keeps its own copy
   and the link to the live line only while that row exists.

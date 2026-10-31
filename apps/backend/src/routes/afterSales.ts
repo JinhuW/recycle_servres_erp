@@ -275,8 +275,8 @@ afterSales.post('/', async (c) => {
     | { kind: 'created'; id: string };
   const outcome = await sql.begin(async (tx): Promise<Outcome> => {
     // The order is locked so its lines can't be rewritten under the snapshot.
-    const so = (await tx<{ status: string; currency_code: string }[]>`
-      SELECT status, currency_code FROM sell_orders WHERE id = ${sellOrderId} LIMIT 1 FOR NO KEY UPDATE
+    const so = (await tx<{ status: string }[]>`
+      SELECT status FROM sell_orders WHERE id = ${sellOrderId} LIMIT 1 FOR NO KEY UPDATE
     `)[0];
     if (!so) return { kind: 'notFound' };
     if (!CASEABLE_SELL_STATUSES.has(so.status)) return { kind: 'status', status: so.status };
@@ -295,8 +295,9 @@ afterSales.post('/', async (c) => {
       }
     }
 
-    // Unsaid, the case is in the currency the customer was billed in.
-    const currency = (body.currency as string | null | undefined) ?? so.currency_code;
+    // USD when unsaid: only clients from before the currency field omit it, and
+    // their amount input is labelled USD.
+    const currency = (body.currency as string | null | undefined) ?? 'USD';
     const id = await nextHumanId(tx, 'AS', 'AS');
     await tx`
       INSERT INTO after_sales_cases (id, sell_order_id, issue, resolution, amount, currency_code, assignee_id, created_by)
