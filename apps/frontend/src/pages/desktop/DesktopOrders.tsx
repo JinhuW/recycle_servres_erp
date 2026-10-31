@@ -582,26 +582,21 @@ export function DesktopOrders({ onToast }: Props) {
           })}
           <span className="status-rail-sep" aria-hidden />
           <span className="rail-label"><Icon name="dollar" size={12} />{t('payment')}</span>
-          {[
-            { id: 'all', label: t('all') },
-            { id: BUSINESS_ACCOUNT, label: t('payBusinessShort') },
-            ...payers.map(p => ({ id: p.id, label: p.name ?? t('paySelfShort') })),
-          ].map(p => {
-            const n = facets.payment[p.id] ?? 0;
-            const active = paymentFacet === p.id;
-            return (
-              <button
-                key={p.id}
-                type="button"
-                className={'status-chip' + (n === 0 ? ' empty' : '')}
-                aria-pressed={active}
-                onClick={() => setPaymentPick(active && p.id !== 'all' ? 'all' : p.id)}
-              >
-                {p.label}
-                <span className="mono sc-n">{n}</span>
-              </button>
-            );
-          })}
+          {/* A dropdown, not chips: one chip per payer outgrew the row. */}
+          <select
+            className={'select facet-select' + (paymentFacet !== 'all' ? ' active' : '')}
+            aria-label={t('payment')}
+            value={paymentFacet}
+            onChange={e => setPaymentPick(e.target.value)}
+          >
+            {[
+              { id: 'all', label: t('all') },
+              { id: BUSINESS_ACCOUNT, label: t('payBusinessShort') },
+              ...payers.map(p => ({ id: p.id, label: p.name ?? t('paySelfShort') })),
+            ].map(p => (
+              <option key={p.id} value={p.id}>{p.label} ({facets.payment[p.id] ?? 0})</option>
+            ))}
+          </select>
         </div>
 
         <div className="table-scroll" ref={tableScrollRef}>

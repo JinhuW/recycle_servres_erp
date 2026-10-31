@@ -5,6 +5,9 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-481](./RS-481-po-list-payment-filter-as-a-dropdown.md) | done | story | P2 | PO list payment filter as a dropdown | 1.394.0 |
+| [RS-480](./RS-480-account-pool-editor-save-does-nothing-on-fleet-accou.md) | done | bug | P1 | Account pool editor: Save does nothing on fleet accounts with a saved session | 1.393.1 |
+| [RS-479](./RS-479-leads-pool-loads-the-next-50-sellers-on-scroll.md) | done | story | P2 | Leads Pool loads the next 50 sellers on scroll | 1.393.0 |
 | [RS-478](./RS-478-fix-purchaser-manager-access-control-review-findings.md) | done | bug | P1 | Fix purchaser/manager access-control review findings | 1.392.1 |
 | [RS-477](./RS-477-leads-reddit-a-seller-pool-purchasers-claim-dm-and-w.md) | done | story | P2 | Leads ▸ Reddit: a seller pool purchasers claim, DM and work to a deal | 1.392.0 |
 | [RS-476](./RS-476-fix-the-7-day-review-findings-2026-10-31.md) | done | bug | P1 | Fix the 7-day review findings (2026-10-31) | 1.391.1 |

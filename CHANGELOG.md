@@ -15,6 +15,43 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.394.0] - 2026-10-31
+
+### Changed
+
+- **The PO list's Payment filter is a dropdown** (RS-481). The desktop list
+  had one chip per payer: All, Business, then every person who paid a PO in
+  scope. With ten payers the row ran the card's full width and most chips read
+  0. It is now one select in the same rail, each option carrying its count
+  (`Harrison (2)`), drawn at chip height and pressed while a payer is picked.
+  The filtering, the counts and the remembered pick are unchanged, and the
+  Warehouse chips stay as chips.
+
+## [1.393.1] - 2026-10-31
+
+### Fixed
+
+- **The account pool editor saves accounts whose session a fleet worker
+  saved** (RS-480). An ERP fleet worker stores the browser's whole storage
+  state, cookies and site data, in the account's cookie field, routinely tens
+  of thousands of characters, while the editor allowed 8,000. Every Save
+  sent that cookie back and was refused, so a status could not be changed on
+  any account the fleet had run (#128 was the one reported). The limit now
+  applies only to a cookie that was changed, in the editor and on the server;
+  an unchanged one keeps its age. The refusal itself was drawn at the top of
+  the drawer, out of sight of the Save button at its foot, so it looked like
+  a dead button; a refused save now scrolls its error into view.
+
+## [1.393.0] - 2026-10-31
+
+### Added
+
+- **Leads ▸ Reddit Pool loads more sellers as you scroll** (RS-479). The pool
+  showed 50 sellers and a **Show 50 more** button, so walking a pool of two
+  thousand took forty-odd clicks. Reaching the foot of the table now reveals
+  the next 50 on its own, a screenful early, until the whole pool is shown.
+  The button stays as a fallback.
+
 ## [1.392.1] - 2026-10-31
 
 ### Fixed
