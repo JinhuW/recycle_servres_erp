@@ -1,0 +1,107 @@
+{
+ "workstream": "WS-D-deploy-gates",
+ "scope": "Deploy and release gates: CI required before prod deploy, Railway watchPatterns, fleet-agent image release path, facebook deploy.sh/topology, vendor pin check, version-check/tooling, dependency advisories.",
+ "findings": [
+  {
+   "id": "A10-02",
+   "sev": "P2",
+   "verdict": "CONFIRMED",
+   "title": "deploy.sh, AGENTS.md and README describe a VM topology that no longer exists; a deploy now 'verifies' zero workers and posts 'verified' to Telegram",
+   "location": "trackers/facebook/scripts/deploy.sh:71-73,78-85,182-210,383-416,431-435; trackers/facebook/AGENTS.md 'Versioning, releases, deploys'; VM 10.10.10.73 docker ps",
+   "proposed_fix": "Retire or rewrite deploy.sh for the current split: coordinator and console only, workers via push-fleet-images.sh plus the ERP's POST /api/fleet/releases. Make verify fail when it found zero workers. Update AGENTS.md/README/deploy/README.md. Stamp the VM's VERSION and pyprojects consistently (needs owner).",
+   "regression_test": "test: run deploy.sh's verify with an empty homelab_workers list and assert a non-zero exit.",
+   "lane_file": "docs/review-2026-10-31/lanes/A10.json",
+   "dupes": []
+  },
+  {
+   "id": "A10-03",
+   "sev": "P3",
+   "verdict": "CONFIRMED",
+   "title": "deploy.sh never checks the vendored monitor against VENDOR.md; it ships and builds whatever clone is on disk",
+   "location": "trackers/facebook/scripts/deploy.sh:237-238,279-294,339-344; scripts/check-release-tag.sh:44",
+   "proposed_fix": "Call `sh scripts/check-vendor.sh` in deploy.sh's version gate, before the rsync.",
+   "regression_test": "scripts/tests: fixture repo with a vendored clone off-pin; assert deploy.sh's gate step refuses.",
+   "lane_file": "docs/review-2026-10-31/lanes/A10.json",
+   "dupes": []
+  },
+  {
+   "id": "A11-03",
+   "sev": "P2",
+   "verdict": "CONFIRMED",
+   "title": "Merging to main deploys the prod backend (and runs its migrations) without waiting for CI; no branch protection requires a check",
+   "location": "Railway backend service 26d2f448-d4f2-4f67-b2ef-1628ef27a5c0 source.checkSuites=false (production/main and dev/dev); GitHub branch protection main+dev required_status_checks=null; .github/workflows/backend-tests.yml:11-13; apps/backend/Dockerfile:68",
+   "proposed_fix": "Add required status checks on main and dev (backend-tests / test, version-check / version-tag-check, deploy-frontend / verify where it applies) with strict up-to-date. Turn on Railway 'Wait for CI' (checkSuites) for backend prod and dev. Correct the backend-tests.yml comment.",
+   "regression_test": "Throwaway PR to a scratch branch with a deliberately failing test: GitHub refuses the merge, and Railway shows the deployment WAITING until checks pass.",
+   "lane_file": "docs/review-2026-10-31/lanes/A11.json",
+   "dupes": []
+  },
+  {
+   "id": "A11-06",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "The Worker behaviour test never gates a PR; it runs only after merge",
+   "location": ".github/workflows/deploy-frontend.yml:13-33,62-63; .github/workflows/backend-tests.yml:35,57,120-133",
+   "proposed_fix": "Add the worker.test.mjs step to backend-tests (it is already on its path filter).",
+   "regression_test": "A PR that edits worker.js to drop X-Client-IP clearing fails backend-tests.",
+   "lane_file": "docs/review-2026-10-31/lanes/A11.json",
+   "dupes": []
+  },
+  {
+   "id": "A11-07",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "Dependency gate is high-only and ERP-only; prod tree carries 6 moderate advisories; tracker dependency trees are never audited",
+   "location": ".github/workflows/dependency-audit.yml:11-44; pnpm-lock.yaml (nodemailer@10.0.13, @hono/node-server@1.19.17); trackers/reddit/pnpm-lock.yaml:467 (hono@4.13.2); trackers/facebook/deploy/worker-constraints.txt; trackers/facebook/rs_*/pyproject.toml",
+   "proposed_fix": "Refresh nodemailer to >=10.1.4. Add trackers/reddit and a pip-audit of worker-constraints.txt (and of locks to add for the five unpinned services) to the weekly dependency-audit run. Record moderate dispositions next to auditConfig.",
+   "regression_test": "Weekly dependency-audit run shows three jobs (ERP, reddit, facebook) green.",
+   "lane_file": "docs/review-2026-10-31/lanes/A11.json",
+   "dupes": []
+  },
+  {
+   "id": "A11-08",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "version-check has no concurrency group; two quick dev pushes can tag a version on the wrong commit",
+   "location": ".github/workflows/version-check.yml:18-26,88-108",
+   "proposed_fix": "Add `concurrency: {group: version-check-${{ github.ref }}, cancel-in-progress: false}`.",
+   "regression_test": "Two quick pushes are queued one after the other; the second fails with 'Code changed since vX but package.json is still X'.",
+   "lane_file": "docs/review-2026-10-31/lanes/A11.json",
+   "dupes": []
+  },
+  {
+   "id": "A11-09",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "The backend image's defaults fail open when NODE_ENV is missing",
+   "location": "apps/backend/Dockerfile:41-49; apps/backend/src/env.ts:18-60",
+   "proposed_fix": "Default the image to NODE_ENV=production and leave secret defaults to docker-compose / the local .env. Or refuse to boot when RAILWAY_ENVIRONMENT is set and NODE_ENV is not 'production'.",
+   "regression_test": "Unit test on buildEnv: RAILWAY_ENVIRONMENT set, NODE_ENV unset, so it throws.",
+   "lane_file": "docs/review-2026-10-31/lanes/A11.json",
+   "dupes": []
+  },
+  {
+   "id": "A11-10",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "Ops services drift from the release model and the docs",
+   "location": "Railway production uptime-monitor source.branch=dev; backup/README.md:3-4 and backup/railway.toml:1 (call the backup service 'db-sync'); Railway pg-r2-backup logs",
+   "proposed_fix": "Point the uptime-monitor at main (or document it as an exception), fix the service name in the backup docs, and pass `--config /dev/null` or set RCLONE_CONFIG to silence the notice.",
+   "regression_test": "None (config/docs).",
+   "lane_file": "docs/review-2026-10-31/lanes/A11.json",
+   "dupes": []
+  },
+  {
+   "id": "B1-05",
+   "sev": "P2",
+   "verdict": "CONFIRMED",
+   "title": "Prod backend watchPatterns omit package.json / pnpm-lock.yaml / tsconfig.base.json that dev has",
+   "location": "railway:recycle-erp-experiment/production/backend 26d2f448-d4f2-4f67-b2ef-1628ef27a5c0 build.watchPatterns",
+   "proposed_fix": "Set prod watchPatterns equal to dev's, ideally through config-as-code (a railway.toml for the backend, so the two environments can't drift).",
+   "regression_test": "Compare get-service-config watchPatterns for both environments in a CI or ops script; fail on difference.",
+   "lane_file": "docs/review-2026-10-31/lanes/B1.json",
+   "dupes": [
+    "A11-05"
+   ]
+  }
+ ]
+}
