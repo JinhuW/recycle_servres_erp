@@ -1,0 +1,294 @@
+{
+ "workstream": "WS-A-login-safety",
+ "scope": "Facebook-login safety: every path that causes or risks a Facebook login (ERP fleet claim/lease, pool assign/editor, login-causing UI controls, legacy Mac jobs, homelab boot churn, fleet-agent behaviour, one-account-per-worker, account locking).",
+ "findings": [
+  {
+   "id": "A10-04",
+   "sev": "P2",
+   "verdict": "CONFIRMED",
+   "title": "A seeded pool cookie (cookie-first Assign) is overwritten by the slot's previous login's backup, and the restore the ERP queued then 409s; the worker falls back to a password login",
+   "location": "trackers/facebook/rs_coordinator/rs_coordinator/routers/session.py:151-215 (backup_session), 219-282 (seed_session); db.py:2059-2069 / pg.py:1316-1328 (upsert_snapshot)",
+   "proposed_fix": "In backup_session, when the slot's account has a uid and the incoming session's uid differs, refuse with 409 (or store it in a side column), never replacing a restorable snapshot. Require require_own_worker semantics (no legacy token) for backups.",
+   "regression_test": "The repro test above, inverted: assert the stale backup is refused and restore still returns 200.",
+   "lane_file": "docs/review-2026-10-31/lanes/A10.json",
+   "dupes": []
+  },
+  {
+   "id": "A10-06",
+   "sev": "P2",
+   "verdict": "CONFIRMED",
+   "title": "Nothing enforces one account per worker; the CLI skips the API's 409",
+   "location": "trackers/facebook/rs_coordinator/rs_coordinator/db.py:397,1970; pg.py:1222; cli.py:390; routers/accounts.py:147-155",
+   "proposed_fix": "Partial unique index on accounts(worker_id) WHERE worker_id IS NOT NULL in both backends, after a dedupe. The CLI refuses like the API.",
+   "regression_test": "test_accounts: second set-account for the same worker via CLI raises; DB-level unique violation test.",
+   "lane_file": "docs/review-2026-10-31/lanes/A10.json",
+   "dupes": []
+  },
+  {
+   "id": "A10-09",
+   "sev": "P2",
+   "verdict": "CONFIRMED",
+   "title": "A worker with no account mapping can lock any account it names",
+   "location": "trackers/facebook/rs_coordinator/rs_coordinator/routers/escalation.py:47-60,108-112",
+   "proposed_fix": "Lock only the account resolved from the worker's own mapping; keep the claimed id only as challenge metadata.",
+   "regression_test": "test_escalation: unmapped worker posting locked for account X leaves X unlocked.",
+   "lane_file": "docs/review-2026-10-31/lanes/A10.json",
+   "dupes": []
+  },
+  {
+   "id": "A10-17",
+   "sev": "P3",
+   "verdict": "PLAUSIBLE",
+   "title": "browse-session.py saves the session every 5 s without a logged-in guard, proxy fallback, device identity or lock",
+   "location": "trackers/facebook/scripts/browse-session.py:33-47,64",
+   "proposed_fix": "Reuse PosterSession (device_context_options and proxy_settings from the sidecar). Save via atomic_write_text only when xs is present. Take the account lock.",
+   "regression_test": "Unit test with a fake context whose cookies lack xs: assert the file is unchanged.",
+   "lane_file": "docs/review-2026-10-31/lanes/A10.json",
+   "dupes": []
+  },
+  {
+   "id": "A10-18",
+   "sev": "P3",
+   "verdict": "PLAUSIBLE",
+   "title": "`rs-session check` opens a live session under a different device, and the README schedules `check --save-refreshed`",
+   "location": "trackers/facebook/rs_poster/rs_poster/session_cli.py:557-586; deploy/README.md 'Keeping sessions alive'",
+   "proposed_fix": "Apply device_context_options and account_lock as session.py:195-197 does. Document `info` as the cron-safe command and `check` as an operator action.",
+   "regression_test": "test_session_cli: check builds context kwargs identical to PosterSession's for the same sidecar.",
+   "lane_file": "docs/review-2026-10-31/lanes/A10.json",
+   "dupes": []
+  },
+  {
+   "id": "A10-19",
+   "sev": "P3",
+   "verdict": "CONFIRMED",
+   "title": "Re-capturing a session without --proxy keeps the old proxy in its sidecar",
+   "location": "trackers/facebook/rs_poster/rs_poster/cookies.py:311-318; session_cli.py:269-274,504-509",
+   "proposed_fix": "On capture and import, write proxy explicitly, deleting it when absent.",
+   "regression_test": "test_cookies: capture with proxy, then without; assert meta has no proxy.",
+   "lane_file": "docs/review-2026-10-31/lanes/A10.json",
+   "dupes": []
+  },
+  {
+   "id": "A4-01",
+   "sev": "P2",
+   "verdict": "CONFIRMED",
+   "title": "A lease that lapsed during an ERP/DB outage is claimable while its worker is still alive, so the agents' next desired poll can start new workers that steal live workers' slots (a cascade of Facebook logins)",
+   "location": "apps/backend/src/fleet/claim.ts:347-355; apps/backend/src/fleet/hosts.ts:239-265; apps/backend/src/fleet/auth.ts:254-261",
+   "proposed_fix": "Treat a lapsed slot whose worker heartbeated within the last N minutes (or whose worker_id appears as a running container in its host's latest report) as held, both in workerCount and in claim's free-slot query; or add a boot grace: for lease_minutes after the ERP process starts, claim only slots that were free (lease NULL) or whose worker is gone from every host report. Count held slots per host from the report as well as from leases so 'count' cannot jump after an outage.",
+   "regression_test": "tests/fleet-claim.test.ts + fleet-hosts.test.ts: seed two hosts with live workers and slots, set every lease to NOW()-1min with last_heartbeat_at 2 min ago and the containers in the host reports; assert GET /hosts/B/desired keeps count at B's running workers and a claim by a new worker id on B returns 409 no_slot instead of taking B-1's slot.",
+   "lane_file": "docs/review-2026-10-31/lanes/A4.json",
+   "dupes": []
+  },
+  {
+   "id": "A4-02",
+   "sev": "P2",
+   "verdict": "CONFIRMED",
+   "title": "Saving the pool editor overwrites a session a fleet worker resealed after the page loaded (lost update of the stored browser session)",
+   "location": "apps/backend/src/routes/facebookPool.ts:456-492 (cookie written at :484, compare at :476)",
+   "proposed_fix": "Make the cookie (and token) write conditional: the client sends the cookie_at (or a hash of the cookie) it loaded; if the stored cookie changed since and the draft's cookie equals the loaded one, keep the stored cookie; if both changed, answer 409 so the manager reloads. Alternatively only write cookie_enc when the request carries an explicit cookieChanged flag.",
+   "regression_test": "tests/facebook-pool.test.ts: load the snapshot, reseal the account's session through PUT /api/fleet/worker/session, then PUT the account with the earlier draft and a new note; assert cookie_enc still unseals to the worker's session and cookie_by is the worker id.",
+   "lane_file": "docs/review-2026-10-31/lanes/A4.json",
+   "dupes": []
+  },
+  {
+   "id": "A4-03",
+   "sev": "P2",
+   "verdict": "CONFIRMED",
+   "title": "POST /facebook-pool/:no/assign fires its Facebook-login side effects before any durable or locked state, and its final write has no status guard",
+   "location": "apps/backend/src/routes/facebookPool.ts:620-632, 656-696, 699-706",
+   "proposed_fix": "Claim first, act second: in one transaction lock the row (FOR NO KEY UPDATE), re-check status/holder, and mark it with a durable 'assigning to <worker>' state (status or a pending column with requested_at); commit; then call the facade; then settle to 'fleet' (or roll back to the prior status on a refused call) with `WHERE no = $1 AND <pending marker matches>`. A sweep expires a stale pending marker the way wechat_market_reruns does.",
+   "regression_test": "tests/facebook-pool.test.ts: stub the facade, start two /assign requests for the same account to different workers concurrently and assert exactly one reaches the facade relogin/restore; and take the account as a purchaser while a stubbed facade call is blocked, assert the assign returns 409 and the row stays 'taken'.",
+   "lane_file": "docs/review-2026-10-31/lanes/A4.json",
+   "dupes": []
+  },
+  {
+   "id": "A4-04",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "Deleting a fleet proxy leaves parked slots holding its sealed URL; unparking them sends a worker out through the removed exit and outside the per-proxy cap",
+   "location": "apps/backend/src/fleet/proxies.ts:159-173; apps/backend/migrations/0213_fleet_proxies.sql:25; apps/backend/src/fleet/workers.ts:308-315; apps/backend/src/fleet/claim.ts:382",
+   "proposed_fix": "On proxy delete, either refuse while any slot (parked included) references it, or null fleet_slots.proxy_url together with proxy_id; and have /unpark (and claim) refuse a slot with proxy_url NULL or proxy_id NULL, answering 'pick a proxy first'.",
+   "regression_test": "tests/fleet-proxies.test.ts: add a slot, park it, delete its proxy, unpark it; assert unpark is refused (or the claim answers no proxy), never the deleted URL.",
+   "lane_file": "docs/review-2026-10-31/lanes/A4.json",
+   "dupes": []
+  },
+  {
+   "id": "A4-05",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "Coordinator and tracker allowlists pass unvalidated path params, so a '..' id resolves to a parent upstream path",
+   "location": "apps/backend/src/routes/coordinator.ts:249-250, 500-506, 520-524; apps/backend/src/routes/tracker.ts:85-93, 113-116",
+   "proposed_fix": "Validate every forwarded id against its pattern before building the path (WORKER_ID for workers/:id, a uuid/int rule for challenges and rules, the subreddit name rule for subreddits), and reject '.'/'..' outright.",
+   "regression_test": "tests/coordinator-routes.test.ts and tracker-routes.test.ts: request each param route with %2E%2E and assert 400 and that the upstream fetch mock was never called.",
+   "lane_file": "docs/review-2026-10-31/lanes/A4.json",
+   "dupes": []
+  },
+  {
+   "id": "A4-06",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "The Shippo webhook applies the pushed payload as truth; a leaked URL secret can mark any registered package delivered (terminal) and notify its creator",
+   "location": "apps/backend/src/routes/shippoWebhook.ts:39-67; apps/backend/src/shipping/status.ts:12; apps/backend/src/shipping/track.ts:87-96",
+   "proposed_fix": "Treat a push as a hint: on track_updated, re-read GET /tracks/{carrier}/{number} with SHIPPO_API_TOKEN (already done by the poll) and apply that answer; or at least require the pushed status to be confirmed by the API before the terminal 'delivered' move. Ignore payloads with test: true in production.",
+   "regression_test": "tests/shippo-webhook.test.ts: with a mocked Shippo API that reports TRANSIT, POST a DELIVERED push and assert the package stays in_transit and no notification is written.",
+   "lane_file": "docs/review-2026-10-31/lanes/A4.json",
+   "dupes": []
+  },
+  {
+   "id": "A6-05",
+   "sev": "P2",
+   "verdict": "PLAUSIBLE",
+   "title": "Host 'Authoritative' switch and capacity '+' start worker containers (Facebook logins) on a single click with no confirm",
+   "location": "apps/frontend/src/pages/desktop/fleet/FleetHosts.tsx:83",
+   "proposed_fix": "Route turning authoritative ON (and raising capacity when it would raise the desired count) through a ConfirmDialogBody like LowerCapacityDialog, stating how many workers will start (desired count delta) and that each is a Facebook login. Turning it OFF can stay one click.",
+   "regression_test": "Render HostStrip with an observe-only host, click the switch, assert fleetApi.updateHost is not called until the confirm button in the dialog is pressed; same for the capacity '+' button.",
+   "lane_file": "docs/review-2026-10-31/lanes/A6.json",
+   "dupes": []
+  },
+  {
+   "id": "A6-06",
+   "sev": "P2",
+   "verdict": "PLAUSIBLE",
+   "title": "Account pool 'Resend login' queues a Facebook Re-login with one click, no confirm",
+   "location": "apps/frontend/src/pages/desktop/FacebookAccountPool.tsx:827",
+   "proposed_fix": "Gate onSendLogin behind the same confirm used by ReloginButton (or reuse ReloginButton's modal body): name the worker, say it is a Facebook login, and only then call sendLogin. Note: the button markup lives in accountPool/AccountEditor.tsx (possibly another lane); the wiring is here.",
+   "regression_test": "Render FacebookAccountPool as manager with a fleet account, open the editor, click 'fpSendLogin' and assert poolApi.assign is not called before a confirm.",
+   "lane_file": "docs/review-2026-10-31/lanes/A6.json",
+   "dupes": []
+  },
+  {
+   "id": "B3-01",
+   "sev": "P2",
+   "verdict": "PLAUSIBLE",
+   "title": "[cross-lane] 31 Facebook boot logins in the last 24 h, 20 of them ended challenge/locked/failed; driven by fleet count changes and exit-75 fences, not crashes",
+   "location": "resource: rs-coordinator `rsc vault logins` (10.10.10.73); rs-fleet-agent docker logs 2026-10-30T20:15Z..2026-10-31T20:15Z; apps/fleet-agent/src/plan.ts:33-36",
+   "proposed_fix": "Owner decision first: find who or what changed the homelab desired count today and stop it changing several times a day. In the fleet code (the A-lane that owns apps/fleet-agent and apps/backend fleet): (1) do not re-run a worker id whose last ledger outcome was locked/challenge until a person clears it, and treat that like exit 78; (2) debounce count decreases, so a temporary scale-down never fences a HEALTHY worker; (3) count soft restarts per account per day, not per 30-min window.",
+   "regression_test": "fleet-agent plan.ts unit test: a worker whose last login outcome is locked gets exit 75 and the agent leaves it stopped. Backend test: lowering the count and then raising it within N minutes leaves existing claims and epochs alone.",
+   "lane_file": "docs/review-2026-10-31/lanes/B3.json",
+   "dupes": []
+  },
+  {
+   "id": "B3-03",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "OpenSearch on 10.10.10.73 is reachable from the office LAN without auth (9200 and 5601, security plugin disabled), with no retention policy and 156 unassigned replica shards",
+   "location": "resource: 10.10.10.73 ~/opensearch/docker-compose.yml (DISABLE_SECURITY_PLUGIN=true, ports 9200:9200, 5601:5601); _cluster/health",
+   "proposed_fix": "Bind 9200/5601 to 127.0.0.1 (or the docker network) unless LAN access is needed; set number_of_replicas=0 in an index template; add an ISM policy that deletes indices after e.g. 90 days.",
+   "regression_test": "none (ops config); check: curl from a LAN host is refused, and _cluster/health is green.",
+   "lane_file": "docs/review-2026-10-31/lanes/B3.json",
+   "dupes": []
+  },
+  {
+   "id": "B3-04",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "Railway worker log sync on the VM has failed every 5 minutes since 2026-08-18 (CLI unauthorized)",
+   "location": "resource: 10.10.10.73 crontab `*/5 * * * * /home/jinhu/bin/sync-worker-logs.sh`; ~/worker-logs/sync.log",
+   "proposed_fix": "Either give the VM a Railway project token, scoped read-only to logs if possible and rotated with the 10-21 disclosure set, or remove the Railway leg from the script. Also rotate sync.log.",
+   "regression_test": "none (ops); check: `grep -c 'FAIL railway' ~/worker-logs/sync.log` stops growing.",
+   "lane_file": "docs/review-2026-10-31/lanes/B3.json",
+   "dupes": []
+  },
+  {
+   "id": "B3-05",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "[cross-lane] Fleet worker containers run with no log size cap (json-file, no max-size; no /etc/docker/daemon.json)",
+   "location": "apps/fleet-agent/src/docker.ts:74-96 (runArgs has no --log-opt); resource: docker inspect rs-fleet-homelab-1..9 LogConfig {}",
+   "proposed_fix": "Add `--log-opt max-size=10m --log-opt max-file=3` to runArgs, or set log-opts in daemon.json on each fleet host.",
+   "regression_test": "apps/fleet-agent/tests/docker.test.ts: runArgs includes --log-opt max-size.",
+   "lane_file": "docs/review-2026-10-31/lanes/B3.json",
+   "dupes": []
+  },
+  {
+   "id": "B3-06",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "The VM tree is a mix of versions: .rs-deployed/VERSION say 0.13.18, the running images are 0.15.0, and configs/fleet.toml carries a hand edit that deploy.sh would revert",
+   "location": "resource: 10.10.10.73 ~/recycle_servers/facebook_tracker/.rs-deployed ('0.13.18 4bac0336 2026-10-24T11:41:41Z'), VERSION; trackers/facebook/configs/fleet.toml:66-110",
+   "proposed_fix": "Commit the fleet.toml retirement to the repo. Have the release or console-only deploy path rewrite .rs-deployed and VERSION. Release the host scripts so the VM copy is tied to a tag.",
+   "regression_test": "none (ops); check: rsync -anc of configs/fleet.toml shows no 'c' flag.",
+   "lane_file": "docs/review-2026-10-31/lanes/B3.json",
+   "dupes": []
+  },
+  {
+   "id": "B3-07",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "rs-console polls session meta for all 41 retired legacy workers, about 4800 404s a day on the coordinator",
+   "location": "resource: rs-coordinator docker logs (source 172.24.0.4 = rs-console network peer), GET /v1/session/<id>/meta",
+   "proposed_fix": "Skip workers with retired_at in the console's session-meta poll.",
+   "regression_test": "rs_console test: the poll loop does not request meta for a retired worker.",
+   "lane_file": "docs/review-2026-10-31/lanes/B3.json",
+   "dupes": []
+  },
+  {
+   "id": "B4-01",
+   "sev": "P2",
+   "verdict": "CONFIRMED",
+   "title": "Fleet host runs fleet-agent 1.380.1; five agent fixes since (RS-463/466/470/472/474) never reached it, and 1.380.1 still removes signed-in workers beyond the host count",
+   "location": "worker@10.10.60.14 container rs-fleet-agent image ghcr.io/jinhuw/fleet-agent:1.380.1@sha256:fb02c2f3\u2026ec74; apps/fleet-agent/src/plan.ts:242 at v1.380.1 vs plan.ts:253-256 at 62f53dec",
+   "proposed_fix": "Push the agent image at the current root version and swap the agent container on both hosts. The memory recipe covers it: copy the FLEET_* env, stop -t 120, run new with the same mounts. It is not a login. Until then, do not lower a host's count.",
+   "regression_test": "apps/fleet-agent/tests/plan.test.ts already covers 'beyond count stays' at HEAD. Add a host-version check: the Hosts tab or /api/fleet report should flag an agent whose reported version is below the minimum the backend expects.",
+   "lane_file": "docs/review-2026-10-31/lanes/B4.json",
+   "dupes": []
+  },
+  {
+   "id": "B4-02",
+   "sev": "P2",
+   "verdict": "CONFIRMED",
+   "title": "[cross-lane] 45% of fleet city searches on 10.10.60.14 end with 0 cards: Facebook answers 'No listings found within 40 miles' though the monitor asks for radius=100",
+   "location": "worker@10.10.60.14 rs-fleet-worker-60-14-{1,3..10} logs (24h to 2026-10-31T20:15Z); vendored monitor search/retrieve in image aimm-recycle:0.15.0@sha256:462d29f2",
+   "proposed_fix": "The facebook-tracker lane should check how the vendored monitor applies the radius: the URL parameter versus the location dialog that sets the account's saved radius. It should also check whether the query strings ('server ram memory ddr4 ddr5 ecc', 'ssd lot server ssd samsung micron') are too specific, and fix the card parser's index assumption. Confirm on one worker's VNC screenshot, read-only, before any change.",
+   "regression_test": "Monitor unit test: a search URL built for radius=100 carries the radius parameter Facebook honours. Parser fixture test with a current card HTML that previously raised IndexError.",
+   "lane_file": "docs/review-2026-10-31/lanes/B4.json",
+   "dupes": []
+  },
+  {
+   "id": "B4-07",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "Exited worker rs-fleet-worker-60-14-2 (0.14.7, dev FLEET_URL) blocks removal of the dev\u2192prod fleet forward and leaves one slot idle",
+   "location": "worker@10.10.60.14 container rs-fleet-worker-60-14-2; docs/superpowers/plans/2026-10-24-erp-fleet/HOSTS.md:53",
+   "proposed_fix": "Owner decision: 'docker rm rs-fleet-worker-60-14-2' frees the slot. The agent then recreates it on the prod URL, and its first claim is a login. After that the forward can go.",
+   "regression_test": "The HOSTS.md grep prints nothing on both hosts.",
+   "lane_file": "docs/review-2026-10-31/lanes/B4.json",
+   "dupes": []
+  },
+  {
+   "id": "B5-01",
+   "sev": "P1",
+   "verdict": "CONFIRMED",
+   "title": "The 'retired' laptop Facebook monitor is still loaded and running on this Mac, replaying a logged-in session from the house IP with its proxy unset",
+   "location": "launchd gui/501/com.recycleservers.fbmonitor (pid 14535, KeepAlive, runs=3, started 2026-10-30 05:30) -> ~/Projects/recycle_servers/facebook_tracker/scripts/run-monitor.sh:16; configs/master.toml:15,37-40; scripts/watchdog.sh:14-22",
+   "proposed_fix": "Owner decision: `launchctl bootout gui/501/com.recycleservers.fbmonitor` and move the plist out of ~/Library/LaunchAgents (stopping it is not a login; it closes a browser). Do the same for the watchdog. Do not touch personal.json until it is unloaded.",
+   "regression_test": "`launchctl list | grep fbmonitor` returns nothing and `pgrep -f chrome-headless-shell` shows no process parented by aimm; add a check to the review checklist that no com.recycleservers.* job references ~/Projects/recycle_servers/facebook_tracker.",
+   "lane_file": "docs/review-2026-10-31/lanes/B5.json",
+   "dupes": [
+    "A10-16"
+   ]
+  },
+  {
+   "id": "B5-02",
+   "sev": "P1",
+   "verdict": "CONFIRMED",
+   "title": "search-probe opens Marketplace every morning with the personal.json logged-in session, from the house IP, out of the stale legacy checkout",
+   "location": "launchd gui/501/com.recycleservers.search-probe (07:45 daily, last exit 0, runs=10) -> ~/Projects/recycle_servers/facebook_tracker/scripts/probe-search-url.sh:34; scripts/probe-search-url.py:42,145,165",
+   "proposed_fix": "Unload com.recycleservers.search-probe (owner decision), or if the probe is still wanted, port it to trackers/facebook/ and run it logged-out (the logged-out /marketplace/<city>/ resolver from memory fb-city-slug-logged-out-resolver works without a session).",
+   "regression_test": "launchctl list shows no search-probe job referencing the legacy path; reports/ stops gaining search-probe-<date>.md.",
+   "lane_file": "docs/review-2026-10-31/lanes/B5.json",
+   "dupes": []
+  },
+  {
+   "id": "C2-01",
+   "sev": "P2",
+   "verdict": "CONFIRMED",
+   "title": "[cross-lane] Root AGENTS.md map and its Facebook-login rule omit the ERP fleet (apps/fleet-agent, apps/backend/src/fleet, /api/fleet), which now runs the live Facebook workers",
+   "location": "AGENTS.md:22-31 (First rule), AGENTS.md:43-50 (Map); trackers/facebook/AGENTS.md:113-122",
+   "proposed_fix": "AGENTS.md:22, after the 'Starting a worker container' bullet, add: \"- **Anything that makes the ERP fleet start a worker.** The fleet-agent (`apps/fleet-agent/`, one `rs-fleet-agent` container per host) starts, replaces and removes `rs-fleet-*` workers to match the ERP. So raising or lowering a host's capacity or `authoritative` flag (Monitors \u25b8 Facebook \u25b8 Hosts, `/api/fleet/hosts`), a release (`POST /api/fleet/releases`), a slot unpark/resume, `POST /api/fleet/workers/{id}/relogin`, and `docker rm rs-fleet-<id>` on a host are each a login.\" AGENTS.md Map: add the row \"| `apps/fleet-agent/` | Fleet host agent: runs the ERP fleet's Facebook worker containers on each Docker host | TypeScript, Node 24, docker CLI | homelab `10.10.10.73` and `worker@10.10.60.14`, image `ghcr.io/jinhuw/fleet-agent:<root version>` | root | [apps/fleet-agent/README.md](apps/fleet-agent/README.md) |\", and change row 50 to \"... + the legacy coordinator fleet (workers retired 2026-10-27; live workers belong to the ERP fleet)\". trackers/facebook/AGENTS.md:113: add \"The legacy compose workers were retired on 2026-10-27; live workers are the ERP fleet's (`apps/fleet-agent/`).\"",
+   "regression_test": "docs-lint: a test that fails when a top-level directory under apps/ or trackers/ has no row in the AGENTS.md Map table.",
+   "lane_file": "docs/review-2026-10-31/lanes/C2.json",
+   "dupes": []
+  }
+ ]
+}
