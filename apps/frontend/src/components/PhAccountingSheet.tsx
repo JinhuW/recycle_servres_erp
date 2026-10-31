@@ -8,7 +8,7 @@ import { fmtMoney } from '../lib/format';
 import type { AcctEntryDetail, AcctTarget } from '../lib/accounting';
 import type { EntryPreset, FormTarget } from '../lib/accountingForm';
 import { useAccountingEntryForm, type SavedEntry } from '../lib/useAccountingEntryForm';
-import { AcctPendingAttachments } from './AcctAttachments';
+import { AcctAttachments, AcctPendingAttachments } from './AcctAttachments';
 import '../styles/accounting.css';
 
 const PICK_LABEL = { po: 'acctFieldPo', so: 'acctFieldSo', as: 'acctFieldAs' } as const;
@@ -36,11 +36,13 @@ function PhTarget({ kind, target }: { kind: Exclude<AccountingKind, 'other'>; ta
 // The phone's record form: the desktop dialog's fields, one column, in a
 // sheet. Mounted by the screen that owns it — a sheet sits inside the phone
 // frame, so one opened from inside a fold would be clipped.
-export function PhAccountingSheet({ preset, entry, onClose, onSaved }: {
+export function PhAccountingSheet({ preset, entry, onClose, onSaved, onAttachmentsChanged }: {
   preset?: EntryPreset;
   entry?: AcctEntryDetail;
   onClose: () => void;
   onSaved: (r: SavedEntry) => void;
+  // An existing entry's screenshots save as they change, not with the form.
+  onAttachmentsChanged?: () => void;
 }) {
   const { t } = useT();
   const f = useAccountingEntryForm({ preset, entry, onSaved });
@@ -157,7 +159,12 @@ export function PhAccountingSheet({ preset, entry, onClose, onSaved }: {
           <input id={id('party')} className="input" value={form.counterparty} maxLength={200}
                  placeholder={t('acctCounterpartyPh')} onChange={e => f.setCounterparty(e.target.value)} />
         </div>
-        {!f.editing && (
+        {entry ? (
+          <div className="ph-field">
+            <label>{t('acctScreenshots')}</label>
+            <AcctAttachments entryId={entry.id} initial={entry.attachments} onChanged={onAttachmentsChanged} />
+          </div>
+        ) : (
           <AcctPendingAttachments files={f.files} onAdd={f.addFiles} onRemove={f.removeFile} busy={f.busy} />
         )}
         <div className="ph-field">

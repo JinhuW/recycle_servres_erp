@@ -15,6 +15,26 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.396.0] - 2026-10-31
+
+### Added
+
+- **An accounting entry's Edit dialog carries its screenshots** (RS-486). The
+  desktop Edit dialog and the phone edit sheet hid the screenshot box, so a
+  receipt could be added or removed only from the entry's drawer. They now
+  list the screenshots, and they take a dropped, picked or (on desktop) pasted
+  image. As in the drawer, a change saves right away, not with Save changes,
+  and the drawer underneath shows the new list.
+
+### Fixed
+
+- **Other entries no longer say their record was deleted** (RS-486). The
+  banner "The record this entry was for has been deleted" meant only that the
+  entry had no linked record. An Other entry never has one, so every Other
+  entry opened in Edit showed the banner. It now shows only for a Purchase,
+  Commission, Sale or After-sales entry whose PO, SO or case was deleted. That
+  entry stays in the book unlinked and its money still counts.
+
 ## [1.395.2] - 2026-10-31
 
 ### Changed

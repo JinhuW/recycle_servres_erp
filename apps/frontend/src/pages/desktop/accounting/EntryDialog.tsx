@@ -3,7 +3,7 @@ import { ACCOUNTING_KINDS, ACCOUNTING_METHODS, KIND_TARGET, type AccountingKind,
 import { Modal } from '../../../components/Modal';
 import { Icon } from '../../../components/Icon';
 import { FIGURE_KEY, Yuan, recordActionKey, targetStatusLabel } from '../../../components/AccountingBits';
-import { AcctPendingAttachments } from '../../../components/AcctAttachments';
+import { AcctAttachments, AcctPendingAttachments } from '../../../components/AcctAttachments';
 import { useT } from '../../../lib/i18n';
 import { fmtMoney } from '../../../lib/format';
 import type { AcctEntryDetail, AcctTarget } from '../../../lib/accounting';
@@ -15,11 +15,13 @@ const PICK_LABEL = { po: 'acctFieldPo', so: 'acctFieldSo', as: 'acctFieldAs' } a
 // Record or edit one entry. Opened from the Accounting page, from an entry's
 // drawer (Edit, layered above it), or from a record's card with that record
 // fixed.
-export function EntryDialog({ preset, entry, onClose, onSaved, zIndex }: {
+export function EntryDialog({ preset, entry, onClose, onSaved, onAttachmentsChanged, zIndex }: {
   preset?: EntryPreset;
   entry?: AcctEntryDetail;
   onClose: () => void;
   onSaved: (r: SavedEntry) => void;
+  // An existing entry's screenshots save as they change, not with the form.
+  onAttachmentsChanged?: () => void;
   zIndex?: number;
 }) {
   const { t } = useT();
@@ -49,7 +51,7 @@ export function EntryDialog({ preset, entry, onClose, onSaved, zIndex }: {
         {entry?.review?.state === 'reviewed' && (
           <div className="acct-banner">{t('acctEditClearsReview', { name: entry.review.by?.name ?? '—' })}</div>
         )}
-        <EntryFields f={f} />
+        <EntryFields f={f} entry={entry} onAttachmentsChanged={onAttachmentsChanged} />
       </form>
       <div className="modal-foot">
         <button type="button" className="btn" onClick={onClose} disabled={f.busy}>{t('cancel')}</button>
@@ -83,7 +85,11 @@ export function TargetLine({ kind, target }: { kind: Exclude<AccountingKind, 'ot
   );
 }
 
-function EntryFields({ f }: { f: AccountingEntryForm }) {
+function EntryFields({ f, entry, onAttachmentsChanged }: {
+  f: AccountingEntryForm;
+  entry?: AcctEntryDetail;
+  onAttachmentsChanged?: () => void;
+}) {
   const { t } = useT();
   const { form } = f;
   const id = (k: string) => 'acct-dlg-' + k;
@@ -175,7 +181,12 @@ function EntryFields({ f }: { f: AccountingEntryForm }) {
         </div>
       </div>
 
-      {!f.editing && (
+      {entry ? (
+        <div>
+          <div className="label">{t('acctScreenshots')}</div>
+          <AcctAttachments entryId={entry.id} initial={entry.attachments} paste onChanged={onAttachmentsChanged} />
+        </div>
+      ) : (
         <AcctPendingAttachments files={f.files} onAdd={f.addFiles} onRemove={f.removeFile} busy={f.busy} paste />
       )}
       <div className="field">
