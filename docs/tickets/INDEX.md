@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-487](./RS-487-full-estate-review-2026-10-31.md) | done | task | P2 | Full estate review 2026-10-31 | — (docs only) |
 | [RS-486](./RS-486-edit-dialog-manages-screenshots-other-entries-lose-t.md) | done | bug | P2 | Edit dialog manages screenshots; Other entries lose the deleted-record banner | 1.396.0 |
 | [RS-485](./RS-485-phone-market-card-shows-part-number-and-last-updated.md) | done | story | P2 | Phone Market card shows part number and last updated time | 1.395.2 |
 | [RS-484](./RS-484-phone-market-card-shows-the-full-sku-spec.md) | done | bug | P2 | Phone Market card shows the full SKU spec | 1.395.1 |

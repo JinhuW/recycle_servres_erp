@@ -1,0 +1,10 @@
+# B5 verify — commands run 2026-10-31 (all read-only; no secrets printed)
+- launchctl print gui/501/com.recycleservers.{fbmonitor,search-probe,keyword-eval} -> repro/B5-verify/launchctl.txt
+- ps -p 14535: aimm --config ~/Projects/recycle_servers/facebook_tracker/configs/master.toml, started Fri Oct 30 05:30:23, child playwright driver 19018
+- grep -oE '^[A-Z_]+=' configs/secrets.env -> no PROXY_HOMELAB* names; monitor.err.log + search-probe.err.log: "Environment variable PROXY_HOMELAB is not set — ignored"
+- ~/.ai-marketplace-monitor/ai-marketplace-monitor.log l.1640-1655: after launch, "Navigating to https://www.facebook.com/marketplace/" then login page, "Not authenticated"; later runs "Skipping ...: saved session ... personal.json is not valid ... searching resumes on its own once the file changes"
+- probe-search-url.py: new_context(storage_state=personal.json), chromium.launch() with no proxy (grep proxy -> none); search-probe.out.log ran 2026-10-31 07:45-07:46, report search-probe-2026-10-31.md has 16 results for server_ram
+- eval-keywords.sh:22-23,49-62 ssh docker logs rs-monitor; ssh VM `docker ps -a | grep -c ^rs-monitor$` -> 0; out.log: last "done" 2026-10-24, every day 10-25..10-31 only "fetching"; err.log "could not read docker logs rs-monitor"; .claude-oauth-token present, 0600, 108 B
+- ERP clones package.json: recycle_servres_erp 1.268.0, -dev-2 1.261.0, -dev-3 1.266.0, -dev-4 1.268.0, -main-3 1.262.0 (all HEAD 2026-10-17); handfish 1.291.1 (2026-10-19); ~/.railway/config.json maps handfish -> recycle-erp-experiment production, serviceName null
+- legacy facebook_tracker VERSION 0.5.5 (HEAD 8f06fbc 2026-10-16); scripts/deploy.sh REMOTE=recycle_servers/facebook_tracker, rsync -az --delete, then `docker compose ... up -d --force-recreate monitor` (l.209); VM's recycle_servers/facebook_tracker/VERSION = 0.13.18 (same path the current deploy.sh uses)
+- memtrade: git rev-list --all --count -> 0, "does not have any commits yet", no remote, data/memtrade.sqlite 303,599,616 B; tmutil destinationinfo -> "No destinations configured"; no backup app/process found

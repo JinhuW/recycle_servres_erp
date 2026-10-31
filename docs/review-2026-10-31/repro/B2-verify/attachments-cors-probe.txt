@@ -1,0 +1,7 @@
+Origin https://inventory.recycleservers.com:
+HTTP/2 200 
+access-control-allow-origin: https://inventory.recycleservers.com
+Origin https://inventory-prod.recycleservers.com:
+HTTP/2 200 
+Origin https://inventory-dev.recycleservers.com:
+HTTP/2 200 

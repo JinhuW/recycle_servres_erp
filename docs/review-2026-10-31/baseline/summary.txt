@@ -1,0 +1,8 @@
+install rc=0 secs=2
+typecheck rc=0 secs=10
+frontend-test rc=0 secs=3
+backend-test rc=1 secs=1218
+build rc=0 secs=13
+audit rc=1 secs=1
+reddit-test rc=0
+DONE

@@ -1,0 +1,37 @@
+[
+ {
+  "id": "B4-01",
+  "severity": "P2",
+  "title": "Fleet host runs fleet-agent 1.380.1; five agent fixes since (RS-463/466/470/472/474) never reached it, and 1.380.1 still removes signed-in workers beyond the host count",
+  "location": "worker@10.10.60.14 container rs-fleet-agent image ghcr.io/jinhuw/fleet-agent:1.380.1@sha256:fb02c2f3\u2026ec74; apps/fleet-agent/src/plan.ts:242 at v1.380.1 vs plan.ts:253-256 at 62f53dec",
+  "failure_scenario": "An operator lowers worker-60-14's capacity on prod's Fleet page, for example from 10 to 8 to free accounts. Agent 1.380.1 stops and removes rs-fleet-worker-60-14-9 and -10, throwing away two signed-in browsers. Raising the count later costs two fresh Facebook logins, each of which risks a checkpoint. The UI copy written for RS-463 tells the operator that hosts never remove a worker, so nothing warns them."
+ },
+ {
+  "id": "B4-02",
+  "severity": "P2",
+  "title": "[cross-lane] 45% of fleet city searches on 10.10.60.14 end with 0 cards: Facebook answers 'No listings found within 40 miles' though the monitor asks for radius=100",
+  "location": "worker@10.10.60.14 rs-fleet-worker-60-14-{1,3..10} logs (24h to 2026-10-31T20:15Z); vendored monitor search/retrieve in image aimm-recycle:0.15.0@sha256:462d29f2",
+  "failure_scenario": "Each zero-card item still spends a task from the ~665/day search budget, which already trails ~972/day of demand after the 416-city catalog push. Nearly half the budget therefore buys nothing, and leads within 40-100 miles of the city are never searched. The radius filter is probably not applied, or the multi-word query is too narrow for the 40-mile default. The parse errors silently drop cards from pages that did load."
+ },
+ {
+  "id": "B4-03",
+  "severity": "P2",
+  "title": "Nightly Railway inspection routine has been blocked every night since at least 2026-07-14, yet each run reports SUCCEEDED; even unblocked, its prompt needs origin/dev, which the sandbox clone lacks",
+  "location": "RemoteTrigger trig_01W3wmHwWNUGr63STjr9e5UT, env env_01LUc7Gka7hUDXMtor55tYnf, last run cse_01LBzvMzLrheVx4xnowf9c4X (2026-10-31T06:09Z)",
+  "failure_scenario": "Production backend errors go untriaged every night while the routine dashboard shows green, and a crash loop or failing pg-r2-backup is never surfaced. After the owner adds a token, the routine still cannot branch off or compare against dev. That run could open a PR against a stale base or abort mid-fix."
+ },
+ {
+  "id": "B4-04",
+  "severity": "P2",
+  "title": "Fleet host 10.10.60.14 is not scraped by Prometheus, so its down, disk and memory states never alert",
+  "location": "http://10.10.60.5:9090/api/v1/targets (job node_exporter); worker@10.10.60.14:9100",
+  "failure_scenario": "Each worker image is 2.59 GB and old tags are never pruned (13.1 GB reclaimable today). With more releases, or a hung host, / fills or the box drops off the network and Telegram stays silent. The fleet then loses 9 workers' capacity until someone notices on the ERP page."
+ },
+ {
+  "id": "B4-05",
+  "severity": "P2",
+  "title": "Secrets backup trackers/reddit/scripts/secrets.env.bak-20261022-192641 sits untracked and not gitignored in the main checkout",
+  "location": "~/Projects/recycle_servers_v2/recycle_servres_erp/trackers/reddit/scripts/secrets.env.bak-20261022-192641; trackers/reddit/.gitignore:9",
+  "failure_scenario": "Any 'git add -A', 'git add trackers/reddit' or IDE 'stage all' in the main checkout commits pre-rotation or current tracker secrets to GitHub. The owner's own staging rule is the only thing stopping it, and agents run in that checkout too."
+ }
+]

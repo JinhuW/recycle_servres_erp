@@ -1,0 +1,14 @@
+C2-01: fleet mentions in root/area AGENTS.md (expect none):
+ls: apps/fleet-agent/AGENTS.md: No such file or directory
+ls: apps/fleet-agent/CLAUDE.md: No such file or directory
+C2-02: console session routes called by facebookPool.ts vs documented:
+680:    const seed = await callFacade(c.env, 'PUT', `/v1/workers/${encodeURIComponent(worker)}/session`, { cookie, reason: `assign #${no}` });
+689:      const restore = await callFacade(c.env, 'POST', `/v1/workers/${encodeURIComponent(worker)}/restore-session`);
+694:    const relogin = await callFacade(c.env, 'POST', `/v1/workers/${encodeURIComponent(worker)}/relogin`);
+AGENTS.md:29:- **Deleting or replacing a saved session** (`trackers/facebook/configs/sessions/`).
+AGENTS.md:110:  [docs/agents/session-isolation.md](docs/agents/session-isolation.md).
+trackers/facebook/AGENTS.md:137:  `configs/secrets.env`, `configs/sessions/`, the Matrix bridge configs and
+C2-03: service names in backup docs:
+backup/README.md:3:A **Railway cron service** (`db-sync` in the `recycle-erp-experiment` project)
+backup/railway.toml:1:# Railway config-as-code for the `db-sync` service (the daily Postgres -> R2
+deploy/railway-sync/railway.toml:1:# Railway config for the db-sync cron service. Read from this service's root

@@ -1,0 +1,4 @@
+escape_markdown('a\\b') = 'a\\b'
+good first line: *New match: R730 64GB* unescaped * = 4
+bad  first line: *New match: R730 64GB\* unescaped * = 3
+len before cut 10077 cut ends with '\\.\\' dangling backslash: True

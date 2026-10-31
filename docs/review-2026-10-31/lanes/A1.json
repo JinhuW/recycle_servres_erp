@@ -1,0 +1,255 @@
+{
+ "lane": "A1",
+ "files_read": [
+  "apps/backend/src/auth.ts",
+  "apps/backend/src/csrf.ts",
+  "apps/backend/src/env.ts",
+  "apps/backend/src/index.ts",
+  "apps/backend/src/lib/bcryptGate.ts",
+  "apps/backend/src/lib/clientIp.ts",
+  "apps/backend/src/lib/concurrency.ts",
+  "apps/backend/src/lib/dbTarget.ts",
+  "apps/backend/src/lib/email.ts",
+  "apps/backend/src/lib/error-log.ts",
+  "apps/backend/src/lib/id-seq.ts",
+  "apps/backend/src/lib/log.ts",
+  "apps/backend/src/lib/loginAttempts.ts",
+  "apps/backend/src/lib/notify.ts",
+  "apps/backend/src/lib/origins.ts",
+  "apps/backend/src/lib/pagination.ts",
+  "apps/backend/src/lib/rate-limit.ts",
+  "apps/backend/src/lib/role.ts",
+  "apps/backend/src/lib/sealed.ts",
+  "apps/backend/src/lib/secret.ts",
+  "apps/backend/src/lib/semaphore.ts",
+  "apps/backend/src/lib/settings.ts",
+  "apps/backend/src/lib/shutdown.ts",
+  "apps/backend/src/lib/version.ts",
+  "apps/backend/src/lib/webSubmissionPurge.ts",
+  "apps/backend/src/mcp/server.ts",
+  "apps/backend/src/mcp/tools/market.ts",
+  "apps/backend/src/mcp/tools/sellOrders.ts",
+  "apps/backend/src/metrics.ts",
+  "apps/backend/src/oauth/clients.ts",
+  "apps/backend/src/oauth/guard.ts",
+  "apps/backend/src/oauth/metadata.ts",
+  "apps/backend/src/oauth/pkce.ts",
+  "apps/backend/src/oauth/server.ts",
+  "apps/backend/src/oauth/tokens.ts",
+  "apps/backend/src/preferences.ts",
+  "apps/backend/src/routes/auth.ts",
+  "apps/backend/src/routes/clientErrors.ts",
+  "apps/backend/src/routes/clientTimings.ts",
+  "apps/backend/src/routes/me.ts",
+  "apps/backend/src/routes/members.ts",
+  "apps/backend/src/routes/publicForms.ts",
+  "apps/backend/src/routes/webSubmissions.ts",
+  "apps/backend/src/routes/workspace.ts",
+  "apps/backend/src/server.ts",
+  "apps/backend/src/types.ts",
+  "apps/backend/tests/auth-cookies.test.ts",
+  "apps/backend/tests/auth-input-boundaries.test.ts",
+  "apps/backend/tests/chip-number-canon.test.ts",
+  "apps/backend/tests/client-errors.test.ts",
+  "apps/backend/tests/client-ip.test.ts",
+  "apps/backend/tests/customers-authz.test.ts",
+  "apps/backend/tests/dashboard-role-preview.test.ts",
+  "apps/backend/tests/env.test.ts",
+  "apps/backend/tests/helpers/auth.ts",
+  "apps/backend/tests/login-rate-limit.test.ts",
+  "apps/backend/tests/market-chips.test.ts",
+  "apps/backend/tests/mcp-sell-orders.test.ts",
+  "apps/backend/tests/mcp-server.test.ts",
+  "apps/backend/tests/members-patch-guards.test.ts",
+  "apps/backend/tests/members-service.test.ts",
+  "apps/backend/tests/members-validation.test.ts",
+  "apps/backend/tests/members.test.ts",
+  "apps/backend/tests/metrics-role.test.ts",
+  "apps/backend/tests/micron-chip-die-lookup-migration.test.ts",
+  "apps/backend/tests/oauth-clients.test.ts",
+  "apps/backend/tests/oauth-endpoints.test.ts",
+  "apps/backend/tests/oauth-guard.test.ts",
+  "apps/backend/tests/oauth-input-boundaries.test.ts",
+  "apps/backend/tests/oauth-pkce.test.ts",
+  "apps/backend/tests/oauth-redirect-match.test.ts",
+  "apps/backend/tests/oauth-schema.test.ts",
+  "apps/backend/tests/oauth-tokens.test.ts",
+  "apps/backend/tests/orders-role-preview.test.ts",
+  "apps/backend/tests/po-shipped-lines-held.test.ts",
+  "apps/backend/tests/public-intake-filename.test.ts",
+  "apps/backend/tests/rate-limit.test.ts",
+  "apps/backend/tests/receipt-rename-route.test.ts",
+  "apps/backend/tests/receipt.test.ts",
+  "apps/backend/tests/sealed.test.ts",
+  "apps/backend/tests/shutdown.test.ts",
+  "apps/backend/tests/workspace-authz.test.ts",
+  "apps/backend/tests/workspace-upload-cap.test.ts",
+  "apps/backend/tests/workspace.test.ts",
+  "apps/backend/src/services/members.ts (updateMember/deactivateMember/lock helpers)",
+  "apps/backend/src/vncBridge.ts (admit/recheck/bounds)",
+  "apps/backend/src/r2.ts (stub/production paths)",
+  "apps/backend/src/fleet/claim.ts, fleet/hosts.ts (guards on CSRF-exempt paths only)",
+  "apps/backend/src/db.ts (closeSharedDb)",
+  "server.ts loop stop() implementations: lib/fx.ts, shipping/track.ts, banktx/sync.ts, mail/inbox.ts, services/fbPoolAliveCheck.ts, fleet/scheduler.ts, fleet/proxyHealth.ts, fleet/vnc.ts",
+  "deploy/cloudflare/worker.js (proxied prefixes, X-Client-IP / X-Proxy-Secret handling)",
+  "deploy/railway-sync/scrub.sql (session tables truncated on prod->dev copy)",
+  "apps/backend/migrations/0032,0034,0046,0047,0147,0179 (session/attempt/reservation tables and indexes)",
+  "docs/review-2026-10-13/security-todo.md, architecture-todo.md"
+ ],
+ "findings": [
+  {
+   "id": "A1-01",
+   "severity": "P2",
+   "title": "A refresh rotation in flight during a password change or deactivation leaves the rotated session alive (cookie and OAuth)",
+   "location": "apps/backend/src/routes/me.ts:186-204; apps/backend/src/auth.ts:200-221; apps/backend/src/oauth/tokens.ts:176-221,243-251; apps/backend/src/services/members.ts:218-233",
+   "evidence": "The revocations are a single READ COMMITTED `UPDATE refresh_tokens|oauth_refresh_tokens ... WHERE user_id = X AND revoked_at IS NULL` (me.ts:194-200, tokens.ts:244-247, members.ts:232-233). Both rotations lock only the token row (`FOR UPDATE OF rt`, auth.ts:213, tokens.ts:188) and then INSERT the successor. When the revoke statement blocks on the row a rotation holds, it re-checks that row after the rotation commits (now revoked, so skipped). Its snapshot predates the successor row, so it never revokes it. Neither rotation re-checks credential_version, so the successor keeps working: rotateRefresh checks only `u.active` (auth.ts:217), and rotateRefreshToken returns the live `user_cv` (tokens.ts:184,219), so the next access token carries the new cv. The self password change and deactivation take only a no-key UPDATE on users (me.ts:189-192, members.ts:222-224), which does not conflict with the FOR KEY SHARE the successor INSERT's FK check takes, so nothing serialises the two transactions. Code redemption already solves this by taking the user row FOR SHARE first (oauth/server.ts:571-583); neither refresh rotation does. Reproduced: docs/review-2026-10-31/repro/A1/refresh-vs-reset-race.test.ts, 'A1-01' block (2/2 pass twice on PG18). After a 200 from POST /api/me/password, the other family's rotated rt refreshes again (200) and GET /api/me with the new at returns 200. The OAuth family rotates again with credentialVersion equal to the post-change cv.",
+   "failure_scenario": "A user's laptop is stolen, or a cookie leaks. The user signs in elsewhere and changes their password, the documented way to end every other session. The stolen session's client refreshes in a loop; /api/auth/refresh has no rate limit. If one rotation is in flight when the revoke runs, its successor survives, and the thief keeps a sliding 14-day refresh family with fresh, valid access tokens indefinitely. The same holds for a connector's OAuth grant (30-day sliding). With a deactivation, the leftover row is refused while the account is inactive (auth.ts:217, tokens.ts:200) but comes back if a manager later reactivates the account. That contradicts members.ts:220-221 ('tokens minted before the deactivation stay dead').",
+   "proposed_fix": "Serialise rotation with credential changes on the user row. In rotateRefresh and rotateRefreshToken, lock `users` FOR SHARE (or FOR KEY SHARE) before the token row, matching the code-redemption order. Make every credential change take `SELECT ... FROM users WHERE id = X FOR UPDATE` before its revoke. Better still, stamp the family with the credential_version it was issued under and refuse rotation when it differs, so a missed row cannot outlive the change. That is the 'centralize session and credential validity' carryover.",
+   "regression_test": "Keep the repro's two A1-01 cases with the assertions flipped: after a password change, the rotated other-family rt and OAuth refresh token must be refused, and /api/me must return 401. Add deactivate -> reactivate -> old rotated rt refused.",
+   "confidence": "high"
+  },
+  {
+   "id": "A1-02",
+   "severity": "P3",
+   "title": "A refresh rotation racing a manager password reset deadlocks (40P01) and one request answers 500",
+   "location": "apps/backend/src/services/members.ts:160,176-177; apps/backend/src/auth.ts:209-219; apps/backend/src/oauth/tokens.ts:182-215",
+   "evidence": "updateMember takes `SELECT role FROM users ... FOR UPDATE` (members.ts:160) and then revokes refresh rows (176-177). The rotation holds the old token row (`FOR UPDATE OF rt`), and its successor INSERT needs FOR KEY SHARE on the same users row for the FK check. If the reset locks the user between the rotation's SELECT and its INSERT, each waits on the other. Reproduced in docs/review-2026-10-31/repro/A1/refresh-vs-reset-race.test.ts ('A1-02', with a BEFORE INSERT delay): one side failed with PostgresError 40P01, surfaced as HTTP 500. The OAuth variant also logged 40P01 from issueRefreshToken in the first repro run.",
+   "failure_scenario": "A manager resets a member's password, or demotes or deactivates them through PATCH, at the moment that member's tab refreshes. One of the two requests fails with 500 and an error-sink record. A failed refresh clears nothing, so the client retries, but a failed reset can look to the manager as if it partly applied. The window is narrow, which is why this is P3.",
+   "proposed_fix": "Same lock order as A1-01: rotations take the user row first, so the reset and the rotation queue rather than deadlock.",
+   "regression_test": "Repro 'A1-02' with the assertion flipped: both requests return non-5xx.",
+   "confidence": "high"
+  },
+  {
+   "id": "A1-03",
+   "severity": "P3",
+   "title": "No retention for session, attempt and OAuth tables; login_attempts takes anonymous writes",
+   "location": "apps/backend/src/lib/loginAttempts.ts:51-55; apps/backend/src/auth.ts:182; apps/backend/src/oauth/tokens.ts:148; apps/backend/src/oauth/server.ts:324-328",
+   "evidence": "Nothing deletes old login_attempts, refresh_tokens, oauth_refresh_tokens, oauth_authorization_codes, oauth_pending_consent or expired public_form_reservations. The only deletes are the reservation release (loginAttempts.ts:60), unconsumed codes on credential changes (tokens.ts:248-251), and the prod->dev scrub (deploy/railway-sync/scrub.sql:18-20). grep over apps/backend/src, scripts, deploy, backup and infra finds no sweeper. Every anonymous login with a well-formed email adds a row. Every hourly cookie refresh and every OAuth refresh adds a row. Every /oauth/authorize by a signed-in user parks a row that is never removed once expired.",
+   "failure_scenario": "The tables and their indexes grow for the life of the database. login_attempts is the one an outsider can drive. Each address gets 30 failures per 15 min, the bcrypt gate admits about 4 at a time, and random emails dodge the per-email lock, so a spread-out credential-stuffing run turns into permanent rows and index bloat on the hot login path. Nothing is broken today; it grows without bound.",
+   "proposed_fix": "Add a daily sweep, for example in the web-submission purge loop or a sibling: login_attempts older than about 1 day, refresh rows revoked or expired more than N days ago (keep enough for reuse detection), expired codes and pending consent, and public_form_reservations older than 10 minutes.",
+   "regression_test": "Sweep test: seed expired and old rows plus live rows; only the expired ones go, and reuse detection still works for a family's recently revoked rows.",
+   "confidence": "medium"
+  },
+  {
+   "id": "A1-04",
+   "severity": "P3",
+   "title": "MCP tool failures return raw error messages, including Postgres errors, and unvalidated `limit` args reach SQL",
+   "location": "apps/backend/src/mcp/server.ts:145-147; apps/backend/src/mcp/tools/market.ts:93; apps/backend/src/mcp/tools/sellOrders.ts:99,146",
+   "evidence": "The tools/call catch returns `e.message` for any error (server.ts:146). index.ts:468-471 says err.message must never reach a client because postgres.js errors embed SQL detail. `limit` arrives unvalidated. `Math.min(Math.max('x', 1), 200)` is NaN, and `Math.min(-5, 100)` is -5 (sellOrders.ts:99), so LIMIT fails in Postgres. `create_sell_order_draft` casts caller ids with `::uuid[]` (sellOrders.ts:146), so a non-UUID id raises a Postgres syntax error whose text is returned verbatim.",
+   "failure_scenario": "Any connector token, including a purchaser's market:read grant, can send `{\"limit\":\"x\"}` or a junk inventoryId and read Postgres error text (type, column and operator detail) in the tool result. The schema exposure is small, but it is the exact class onError was hardened against, and every malformed call also lands in the error log.",
+   "proposed_fix": "Validate numeric and UUID args at the tool boundary with clean messages. In the catch, return e.message only for errors the tools throw on purpose (a ToolError class), and a generic 'tool call failed' otherwise.",
+   "regression_test": "mcp-server.test: list_market_values with limit 'x' and -5, and create_sell_order_draft with inventoryId 'nope', return isError with a clean message containing no 'syntax'/'type' Postgres text.",
+   "confidence": "high"
+  },
+  {
+   "id": "A1-05",
+   "severity": "P3",
+   "title": "Workspace PATCH stores unvalidated values for keys the public-form budget and MCP read",
+   "location": "apps/backend/src/routes/workspace.ts:13-26,51-56; apps/backend/src/lib/settings.ts:15-19; apps/backend/src/routes/publicForms.ts:75-99",
+   "evidence": "KNOWN_SETTINGS validates six keys, and any other key or value is upserted as-is. getWorkspaceSetting does no type check (it returns the stored JSON when not null). public_form_daily_submissions and public_form_daily_bytes feed `n < maxSubmissions && Number(bytes)+incoming <= maxBytes` (publicForms.ts:98). mcp.sellOrderCustomerId feeds createSellOrderDraft (mcp/tools/sellOrders.ts:166-167).",
+   "failure_scenario": "A manager, or a buggy settings UI, saves public_form_daily_submissions as a string such as \"300 \" or an object. The comparison goes false or NaN, and both public website forms return 429 'not taking more submissions today' to every seller until someone finds the setting. A bad mcp.sellOrderCustomerId makes every MCP draft fail.",
+   "proposed_fix": "Add validators for the budget keys (positive integers) and mcp.sellOrderCustomerId (UUID of an existing customer), or have getWorkspaceSetting fall back when the stored type differs from the fallback's.",
+   "regression_test": "workspace PATCH with public_form_daily_submissions:'abc' returns 400; the intake form still admits after a bad legacy row is present.",
+   "confidence": "high"
+  },
+  {
+   "id": "A1-06",
+   "severity": "P3",
+   "title": "Shutdown stops loops without waiting for an in-flight tick; the web-submission purge loop has no stop flag",
+   "location": "apps/backend/src/lib/shutdown.ts:37-44; apps/backend/src/lib/webSubmissionPurge.ts:89-112,63-79",
+   "evidence": "onShutdown calls loop.stop() and then closes the pool after server.close (shutdown.ts:37-42). stop() only clears timers. Running ticks are neither awaited nor told to stop: startWebSubmissionPurgeLoop's run() keeps batching through MAX_BATCHES_PER_RUN, and closeSharedDb ends the pool after 5 s (db.ts:66). The purge deletes R2 objects (webSubmissionPurge.ts:63) before its row DELETE (70-75).",
+   "failure_scenario": "A deploy lands while the daily purge is mid-batch. Its photos are deleted from R2, then the DELETE or claim release fails on the closed pool. The rows stay claimed, so a manager's PATCH or convert answers 409 'being purged' until the claim expires (1 h) and the next daily run finishes the deletion. Nothing is lost that was not already slated for deletion. It only adds noise and a stuck state.",
+   "proposed_fix": "Give the purge loop a `stopped` flag checked between batches. Have loops expose the promise of their current tick so onShutdown can await it (bounded by graceMs) before closeDb.",
+   "regression_test": "shutdown.test: a loop whose tick is pending delays closeDb until it settles or graceMs passes; purge stops between batches after stop().",
+   "confidence": "medium"
+  }
+ ],
+ "carryover": [
+  {
+   "old_id": "SEC-01",
+   "status": "fixed",
+   "evidence": "Code redemption locks the user row FOR SHARE, refuses inactive users, re-derives scopes from the live role and signs with the live cv (oauth/server.ts:579-625). Credential changes delete unconsumed codes (oauth/tokens.ts:248-251). The refresh-rotation analogue is new finding A1-01."
+  },
+  {
+   "old_id": "SEC-02",
+   "status": "fixed",
+   "evidence": "authMiddleware requires the JWT's fid family to have an unrevoked, unexpired row (auth.ts:144-158). VNC admit/recheck replays the request through the app (vncBridge.ts:101-109,241-257,310)."
+  },
+  {
+   "old_id": "SEC-03",
+   "status": "fixed",
+   "evidence": "The cv claim is checked against users.credential_version in authMiddleware (auth.ts:140-143) and bearerGuard (oauth/guard.ts:41-42), and bumped by self-change, reset, deactivation and demotion (me.ts:191, services/members.ts:173,223)."
+  },
+  {
+   "old_id": "SEC-04",
+   "status": "fixed",
+   "evidence": "Advisory lock 'members:active-managers' with the count under it (services/members.ts:21-27,155,219). Covered by members-patch-guards.test.ts:75,88."
+  },
+  {
+   "old_id": "SEC-05",
+   "status": "fixed",
+   "evidence": "env.ts:71-77 refuses a partial R2 config in production. r2.ts:107-108 and 177-178 throw StorageUnavailableError in production instead of stubbing. /api/health reports attachments (index.ts:251)."
+  },
+  {
+   "old_id": "SEC-06",
+   "status": "fixed",
+   "evidence": "vncBridge.ts:46-53: maxPayload 256 KiB, a 1 MiB pending cap and a 16 MiB buffered check on both directions (163,170,213)."
+  },
+  {
+   "old_id": "SEC-07",
+   "status": "fixed",
+   "evidence": "reserveDailyBudget takes an advisory lock and counts live reservations before any image work (publicForms.ts:72-116,380), and releases on every failure path (387-391,458-463)."
+  },
+  {
+   "old_id": "SEC-08",
+   "status": "fixed",
+   "evidence": "DCR re-counts under pg_advisory_xact_lock('oauth:dcr') inside the insert transaction (oauth/server.ts:229-242)."
+  },
+  {
+   "old_id": "SEC-09",
+   "status": "fixed",
+   "evidence": "Purge claims rows with purge_claimed_at under FOR UPDATE SKIP LOCKED (webSubmissionPurge.ts:36-57). PATCH and convert refuse claimed rows (webSubmissions.ts:186,297-301). The final DELETE is predicated on the claim and state (70-75)."
+  },
+  {
+   "old_id": "SEC-10",
+   "status": "fixed",
+   "evidence": "The password change reserves through the shared reserveAttempt before bcrypt (me.ts:157-163; lib/loginAttempts.ts:49-66)."
+  },
+  {
+   "old_id": "SEC-11",
+   "status": "fixed",
+   "evidence": "Object.hasOwn plus a null-prototype cleaned object (preferences.ts:65-67)."
+  },
+  {
+   "old_id": "SEC-12",
+   "status": "fixed",
+   "evidence": "JSONB merge and removal against the live row in one UPDATE; language is written only when the patch carries it (me.ts:94-118)."
+  },
+  {
+   "old_id": "SEC-13",
+   "status": "fixed",
+   "evidence": "Rotation names carry a per-process sequence plus an existence check (error-log.ts:162-172); the prune regex accepts the suffix (177)."
+  },
+  {
+   "old_id": "SEC-14",
+   "status": "fixed",
+   "evidence": "isEmail (254-char cap, linear regex) and MAX_PASSWORD_LEN run before any attempt row or bcrypt (routes/auth.ts:36-38; lib/email.ts). login-rate-limit.test.ts:35."
+  },
+  {
+   "old_id": "SEC-15",
+   "status": "fixed",
+   "evidence": "sellOrders.ts:1107 and 1214 delete the uploaded object when the attachment transaction fails (source glance only; the domain lane owns the file)."
+  },
+  {
+   "old_id": "ARCH: Centralize session and credential validity",
+   "status": "still open",
+   "evidence": "Validity is still decided in six places with different lock orders and checks: authMiddleware (auth.ts:136-158), bearerGuard (guard.ts:35-48), cookie rotateRefresh (auth.ts:200-221; checks active, not cv), OAuth rotateRefreshToken (tokens.ts:176-221; checks active and role, not cv), code redemption (server.ts:570-620; user lock first) and the VNC replay. That drift is what A1-01 and A1-02 are. A family carries no credential version, so revocation depends on one UPDATE catching every row."
+  }
+ ],
+ "needs_owner": [
+  "Live row counts and sizes of login_attempts, refresh_tokens, oauth_refresh_tokens, oauth_pending_consent and oauth_authorization_codes on prod (BEGIN READ ONLY), to size A1-03. Not run: this worktree has no Railway link and no psql, and pulling the DB URL needs the owner's go-ahead.",
+  "Presence-only check that the Railway dev backend has PROXY_SECRET set when NODE_ENV=production. env.ts:30 enforces it only when RAILWAY_ENVIRONMENT is present, and without it X-Client-IP is caller-controlled, so the per-address login and DCR budgets can be bypassed there.",
+  "A hash-equality check, run in a terminal without printing either value, that prod and dev use different JWT_SECRET and OAUTH_SIGNING_KEY_CURRENT. Cookie verifyToken never checks `iss` (auth.ts:106), so cross-environment separation rests on scrub.sql truncating refresh_tokens and on the fid check."
+ ],
+ "notes": "Read every file in A1.files.txt. Read src/ files in full. Read the tests by their case lists and the setup sections relevant to auth, OAuth, members, rate limits, client IP, workspace, MCP and shutdown. Skimmed the domain-specific tests in the list (chip-number-canon, market-chips, micron-chip-die-lookup-migration, po-shipped-lines-held, receipt*, orders/dashboard-role-preview, customers-authz) for auth usage only. Repro: docs/review-2026-10-31/repro/A1/refresh-vs-reset-race.test.ts plus its vitest.config.ts. 3/3 cases pass twice against a disposable postgres:18 on 55601, since removed. They assert the current defective behaviour, widened with a sleeping trigger in that disposable DB. Checked and found sound: the PROXY_SECRET gate; the Worker strips caller X-Client-IP and X-Proxy-Secret and does not proxy /metrics (deploy/cloudflare/worker.js:7,76-117); CSRF exemptions cover only bearer-only fleet/wechat/market surfaces; every cookie-auth sub-app self-applies authMiddleware and manager gates where intended; Hono '/x/*' middleware also covers the bare '/x' (verified empirically); CORS fails closed; consent is bound to user and req; PKCE S256 is mandatory; redirect URIs match exactly at /token; DCR caps; public-form validation, honeypot and budget; error-sink redaction; sealed AES-GCM. Hardening observations, deliberately not filed: cookie JWT `iss` is stamped but not verified (auth.ts:90 vs 106); /oauth/token reports expires_in with parseInt while signing uses the sec() fallback, so the two disagree only under a malformed OAUTH_ACCESS_TOKEN_TTL_SEC (server.ts:631 vs tokens.ts:77); cookie and OAuth refresh families slide with no absolute lifetime; the open-DCR quota can be exhausted by a distributed registrant, which closes registration for legitimate connectors for up to 24 h (by design, server.ts:101-127). Not reviewed: the rest of vncBridge.ts pump logic, fleet/auth.ts token crypto, and wechatMarket's isPush guard (other lanes). The baseline backend-test log shows 2 failures in fleet-mirror and bank-transactions-disputes, outside this lane."
+}

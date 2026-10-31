@@ -1,0 +1,23 @@
+[
+ {
+  "id": "A2-01",
+  "severity": "P2",
+  "title": "Inventory PATCH can move a line out of Sold or off a pending transfer, bypassing the PO cascade's status rules",
+  "location": "apps/backend/src/routes/inventory.ts:1376-1378,1461-1467",
+  "failure_scenario": "(a) A lot sold out by a Done SO keeps its qty and is Sold; a manager PATCHes status Sold->Done: no committed claim exists, so the sold units become sellable again and can be sold twice. (b) A line In Transit under a Pending transfer is PATCHed to Done: receive skips it (inventory.ts:~2002) and discard refuses it (inventory.ts:~2168), so the transfer is stuck. (c) Setting a line to Draft leaves Draft/Packing SOs naming it unpromotable."
+ },
+ {
+  "id": "A2-02",
+  "severity": "P2",
+  "title": "Deleting a transfer's source warehouse (no transferTo) makes discard of that transfer fail with an FK 500 forever",
+  "location": "apps/backend/src/routes/warehouses.ts:331-348; apps/backend/src/routes/inventory.ts:2186-2192",
+  "failure_scenario": "TO-1 Pending WH-A->WH-B; manager deletes WH-A without transferTo; discard TO-1 runs UPDATE order_lines SET warehouse_id='WH-A' -> FK violation -> 500; TO-1 can never be discarded and its lines stay In Transit."
+ },
+ {
+  "id": "A2-03",
+  "severity": "P2",
+  "title": "Archive's removeFromSellOrders is a bare boolean; the removal set is recomputed after the manager confirms",
+  "location": "apps/backend/src/routes/orders/lifecycle.ts:184-190; apps/backend/src/services/orderAdvance.ts:374-440",
+  "failure_scenario": "Manager A archives PO-1, sees a 409 naming SO-1 (Draft). Manager B adds a PO-1 line to SO-2 and ships it. A confirms: the archive silently deletes the line from Shipped SO-2 and clears its negotiated total, which A never saw. Under the concurrent variant, a save on SO-2 racing the archive can deadlock (40P01 -> 500)."
+ }
+]

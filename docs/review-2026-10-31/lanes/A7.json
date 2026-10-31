@@ -1,0 +1,167 @@
+{
+ "lane": "A7",
+ "files_read": [
+  "apps/frontend/index.html",
+  "apps/frontend/public/_headers",
+  "apps/frontend/public/fonts/inter-latin-ext.a28eb6d3.woff2",
+  "apps/frontend/public/fonts/inter-latin.c9407645.woff2",
+  "apps/frontend/public/fonts/jetbrains-mono-latin-ext.9c38cb2d.woff2",
+  "apps/frontend/public/fonts/jetbrains-mono-latin.2c32b9b3.woff2",
+  "apps/frontend/public/icons/apple-splash-1125-2436.png",
+  "apps/frontend/public/icons/apple-splash-1170-2532.png",
+  "apps/frontend/public/icons/apple-splash-1179-2556.png",
+  "apps/frontend/public/icons/apple-splash-1206-2622.png",
+  "apps/frontend/public/icons/apple-splash-1242-2208.png",
+  "apps/frontend/public/icons/apple-splash-1242-2688.png",
+  "apps/frontend/public/icons/apple-splash-1260-2736.png",
+  "apps/frontend/public/icons/apple-splash-1284-2778.png",
+  "apps/frontend/public/icons/apple-splash-1290-2796.png",
+  "apps/frontend/public/icons/apple-splash-1320-2868.png",
+  "apps/frontend/public/icons/apple-splash-1488-2266.png",
+  "apps/frontend/public/icons/apple-splash-1536-2048.png",
+  "apps/frontend/public/icons/apple-splash-1620-2160.png",
+  "apps/frontend/public/icons/apple-splash-1640-2360.png",
+  "apps/frontend/public/icons/apple-splash-1668-2224.png",
+  "apps/frontend/public/icons/apple-splash-1668-2388.png",
+  "apps/frontend/public/icons/apple-splash-2048-2732.png",
+  "apps/frontend/public/icons/apple-splash-640-1136.png",
+  "apps/frontend/public/icons/apple-splash-750-1334.png",
+  "apps/frontend/public/icons/apple-splash-828-1792.png",
+  "apps/frontend/public/icons/apple-touch-icon-180.png",
+  "apps/frontend/public/icons/icon-192.png",
+  "apps/frontend/public/icons/icon-512.png",
+  "apps/frontend/public/icons/icon-maskable-512.png",
+  "apps/frontend/public/recycle-servers-icon.png",
+  "apps/frontend/src/MobileApp.tsx",
+  "apps/frontend/src/components/SnScanner.tsx",
+  "apps/frontend/src/lib/deskScan.test.ts",
+  "apps/frontend/src/lib/deskScan.ts",
+  "apps/frontend/src/lib/labelPrinter.test.ts",
+  "apps/frontend/src/lib/labelPrinter.ts",
+  "apps/frontend/src/lib/pwa.ts",
+  "apps/frontend/src/lib/scanError.test.ts",
+  "apps/frontend/src/lib/scanError.ts",
+  "apps/frontend/src/lib/scanValidation.test.ts",
+  "apps/frontend/src/lib/scanValidation.ts",
+  "apps/frontend/src/lib/scannerBridge.ts",
+  "apps/frontend/src/lib/useScanFilter.ts",
+  "apps/frontend/src/pages/Camera.tsx",
+  "apps/frontend/src/pages/desktop/LabelPrint.tsx",
+  "apps/frontend/src/pages/desktop/ShippingAddLabel.tsx",
+  "apps/frontend/src/pages/desktop/submit/DeskCamera.tsx",
+  "apps/frontend/src/pages/desktop/submit/RamSheetScanDialog.tsx",
+  "apps/frontend/src/styles/pwa.css",
+  "apps/frontend/src/sw.ts",
+  "apps/frontend/tests/pwa-update-check.test.ts",
+  "apps/frontend/vite.config.ts",
+  "apps/frontend/src/main.tsx",
+  "apps/frontend/src/App.tsx",
+  "apps/frontend/src/lib/orderSubmit.ts",
+  "apps/frontend/src/pages/OrderReview.tsx",
+  "apps/frontend/src/pages/SubmitForm.tsx (capture-state parts)",
+  "apps/frontend/src/lib/sharedFile.ts",
+  "apps/frontend/src/lib/qr.ts",
+  "apps/frontend/src/lib/image-compress.ts",
+  "apps/frontend/src/lib/unsavedGuard.tsx",
+  "apps/frontend/src/components/PwaUpdateToast.tsx",
+  "apps/frontend/src/components/PwaInstallPrompt.tsx",
+  "apps/backend/src/routes/orders/lifecycle.ts (DELETE /:id)",
+  "apps/backend/src/routes/scan.ts (/label)",
+  "live: https://inventory.recycleservers.com/sw.js (precache manifest, GET only)",
+  "live: https://inventory.recycleservers.com/ response headers + csp-rev (GET/HEAD only)"
+ ],
+ "findings": [
+  {
+   "id": "A7-01",
+   "severity": "P2",
+   "title": "Mobile capture: a failed new-line autosave deletes the draft PO even when an earlier line already landed in it (photos and scan images deleted from R2)",
+   "location": "apps/frontend/src/MobileApp.tsx:627, :667-673 (with :170-175, :467-483); apps/backend/src/routes/orders/lifecycle.ts:62-110",
+   "evidence": "onSaveLine computes `mintedHere = !editingId && !draftId` from the render-time snapshot (:627). ensureDraftId memoises one POST in draftIdPromise, so line A and a later line B saved before that POST resolved both get mintedHere=true and the same draft D. The write queue serialises them: A's PATCH lands and A is marked _confirmed with D's line id, and its photos are flushed to D. If B's PATCH then fails, its catch (:667) runs deleteOrder(D) without checking whether any line on the list is already confirmed (cancelCapture at :439 does check `!lines.some(l => l._confirmed)`, but this path doesn't). The backend DELETE removes a never-submitted draft with its lines and collects order_line_photos.storage_key and order_lines.scan_image_id for R2 deletion. A variant: A mints D and A's PATCH fails, so the fire-and-forget deleteOrder(D) races B's PATCH, which was queued with draftId=D; if B lands first, B's row and photos go with D.",
+   "failure_scenario": "On a slow cellular link a purchaser saves line A, which kicks off the draft POST, then adds line B and saves it while the POST is still pending. A syncs and its photos upload. B's PATCH hits a network error, so the app deletes PO D, including A's row, A's photos and A's label-scan image in R2. Because draftId was cleared, Submit then POSTs a new PO with both lines. A's line comes back, but its photos are gone and its scanImageId points at a deleted R2 object, so the thumbnail is broken. The user only saw a 'sync failed' toast for B.",
+   "proposed_fix": "Only delete a self-minted draft when nothing on it is confirmed: re-check via captureRef/setCapture at failure time (the same rule as cancelCapture), or track 'lines written to draft' per draft id. Better still, fold this into the shared capture state machine (carryover FE arch item), where a draft's lifetime is owned in one place.",
+   "regression_test": "Render MobileApp (or extract onSaveLine), defer createDraftOrder, save A then B before it resolves, let A's addLines succeed and B's fail, and assert no DELETE /api/orders/D is sent and Submit PATCHes D rather than POSTing.",
+   "confidence": "medium"
+  },
+  {
+   "id": "A7-02",
+   "severity": "P3",
+   "title": "Service worker precaches no .wasm, so the iPhone QR/DataMatrix serial scanner needs the network and fails silently without it",
+   "location": "apps/frontend/vite.config.ts:51; apps/frontend/src/lib/qr.ts:~85-95; apps/frontend/src/components/SnScanner.tsx:125-154",
+   "evidence": "The injectManifest globPatterns are js,css,html,svg,png,webp,woff,woff2. The live sw.js on inventory.recycleservers.com lists 142 entries: every JS/CSS chunk referenced by the bundle (122/122, including assets/zxing_reader-*.js), but neither assets/zxing_reader-BxB2YfIY.wasm nor assets/mozjpeg_enc-DO-zoExo.wasm (both 200 application/wasm). qr.ts's own comment says 'the PWA must not depend on' a CDN fetch, yet the wasm still comes from the network. iOS has no BarcodeDetector, so it always takes the zxing path. In SnScanner the decode loop is an async IIFE whose `await createFrameDecoder()` has no catch.",
+   "failure_scenario": "An iPhone purchaser in a warehouse dead spot opens the serial scanner. The wasm fetch fails, createFrameDecoder rejects as an unhandled rejection, and the scan line keeps animating with no error. Nothing ever decodes, and there's no hint to switch to AI or typing. MozJPEG falls back to the canvas encoder, so only the QR path breaks.",
+   "proposed_fix": "Add 'wasm' to globPatterns, and raise maximumFileSizeToCacheInBytes if the reader exceeds 2 MiB. Catch the createFrameDecoder rejection in SnScanner and set camError or a 'decoder unavailable, use AI/typing' note.",
+   "regression_test": "A build-output test asserting every assets/*.wasm is in the injected precache manifest. A unit test where a rejecting createFrameDecoder makes SnScanner surface an error state.",
+   "confidence": "high"
+  },
+  {
+   "id": "A7-03",
+   "severity": "P3",
+   "title": "Camera shutter uploads an 8-byte fake PNG when the live stream isn't up (permission denied or still starting)",
+   "location": "apps/frontend/src/pages/Camera.tsx:112-127, :168-178, :317-321",
+   "evidence": "captureFrame returns a synthetic 8-byte PNG when videoWidth is 0, commented 'The stub OCR ignores the bytes anyway', and the shutter is enabled whenever phase==='framing'. In production /api/scan/label (apps/backend/src/routes/scan.ts:84-120) accepts image/png, uploads it to R2 and sends it to the OpenRouter OCR model.",
+   "failure_scenario": "An iOS PWA user who denied the camera, or taps before the stream attaches, presses the shutter. A junk object is written to R2 label-scans, a billed LLM call runs and counts against the 20/min scan limit, and the user gets an unreadable or garbage result instead of a 'camera unavailable — upload a photo' prompt.",
+   "proposed_fix": "Without a live frame, disable the shutter or route it to the file picker. Keep the placeholder only behind import.meta.env.DEV.",
+   "regression_test": "Camera with getUserMedia rejected: pressing the shutter makes no /api/scan/label request and opens the picker or shows cameraUnavailable.",
+   "confidence": "high"
+  },
+  {
+   "id": "A7-04",
+   "severity": "P3",
+   "title": "Mobile review screen holds unsynced lines with no unsaved-change guard, so the PWA update toast or a layout switch drops them without asking",
+   "location": "apps/frontend/src/MobileApp.tsx:912-927; apps/frontend/src/components/PwaUpdateToast.tsx:55-65; apps/frontend/src/lib/unsavedGuard.tsx:60-64",
+   "evidence": "Only SubmitForm calls useUnsavedGuard. Capture state lives in MobileApp's useState, and in the review phase lines can be unconfirmed (sync failed or blocked), _dirty, or still in flight (pendingWrites>0). No guard is registered for that, so confirmDiscard() resolves true and the update toast reloads straight away. iOS shows no beforeunload, as PwaUpdateToast's own comment notes.",
+   "failure_scenario": "A line's autosave fails ('sync failed', kept locally for Submit). The user then taps 'Update' on the new-version toast. The page reloads and the unsynced line is gone without any prompt.",
+   "proposed_fix": "Register useUnsavedGuard(capture.phase==='review' && (pendingWrites>0 || lines.some(l => !l._confirmed || l._dirty)), () => true) in MobileApp, or in OrderReview with the same inputs.",
+   "regression_test": "Review with an unconfirmed line: confirmDiscard() resolves only after the discard dialog is answered.",
+   "confidence": "medium"
+  },
+  {
+   "id": "A7-05",
+   "severity": "P3",
+   "title": "CSP has been report-only for 4 weeks with no reporting endpoint, and the shared-photo handoff already violates it",
+   "location": "apps/frontend/public/_headers:13-14, :28; apps/frontend/src/pages/Camera.tsx:134",
+   "evidence": "The policy has been Content-Security-Policy-Report-Only since b9ad1719 (2026-10-02, v1.194.2) and has no report-uri or report-to, so violations show only in each user's console and the 'until a release shows no violations' exit can't be observed. Camera.tsx:134 calls fetch(sharedDataUrl) on a data: URL from sharedFile.ts, and connect-src lists no data:, so the Web Share flow is an existing violation that would break the moment the policy is enforced. The live header matches the repo, and csp-rev=1 is consistent: the CSP is unchanged since csp-rev was introduced, so there's no missing bump.",
+   "failure_scenario": "Someone flips the header to enforcing because 'no violations were seen' (there was no channel to see them). Sharing a photo into the installed app then fails with cameraUnavailable on every share.",
+   "proposed_fix": "Add a report-to/report-uri endpoint, or a small backend collector, before deciding on enforcement. Convert the data URL with a non-fetch decode (atob → Blob), or add data: to connect-src. Bump csp-rev with any header change.",
+   "regression_test": "A test that parses _headers and asserts connect-src covers every fetch() scheme used in src. A share-target e2e run under an enforced policy.",
+   "confidence": "high"
+  }
+ ],
+ "carryover": [
+  {
+   "old_id": "FE-02",
+   "status": "fixed",
+   "evidence": "MobileApp.tsx:161-175 adds a serialised writeQueue. submitOrder awaits it (:776) and reads captureRef (:777), and OrderReview blocks Submit while saving=pendingWrites>0 (OrderReview.tsx:80-92), so a click can't land between the write and its state update. The queue's in-run setCapture and the pendingWrites decrement render in the same batch. ensureDraftId memoises one POST. Residual: the 'read state after await' relies on that UI gate, not on captureRef being fresh, because React 18 renders setState from a promise in a later macrotask. Related new issue: A7-01."
+  },
+  {
+   "old_id": "FE-03",
+   "status": "fixed",
+   "evidence": "A failed or blocked PATCH of an id-bearing line calls markDirty(line,true) (MobileApp.tsx:576, :606). OrderReview shows a lineUnsaved chip. submitOrder re-validates dirty lines (:783-786), and buildOrderSubmit sends them as `lines:[{id,...}]` updates, not inserts (orderSubmit.ts:89-104). SubmitForm merges existingLine, so id, _confirmed and _dirty survive an edit (SubmitForm.tsx:161-165)."
+  },
+  {
+   "old_id": "FE-14",
+   "status": "fixed",
+   "evidence": "Camera.tsx:41-52 has aliveRef plus a handoffTimer cleared on unmount, and runScan checks aliveRef before setPhase and onDetected (:154-159). SnScanner has the same pattern (:44-54, :160-162)."
+  },
+  {
+   "old_id": "FE-05",
+   "status": "fixed",
+   "evidence": "sharedFile.ts now has a single reader, takeSharedFile, consumed at MobileApp.tsx:262 into sharedPhotoRef and handed only to a new product's camera (:871). The SW's relative Response.redirect resolves against the SW's base URL in browsers. See A7-05 for the CSP connect-src gap on the data: fetch."
+  },
+  {
+   "old_id": "FE-11",
+   "status": "fixed",
+   "evidence": "index.html:31 viewport has no user-scalable=no. main.tsx:26-28 adds maximum-scale=1 on iOS/iPadOS only, and Safari still allows pinch."
+  },
+  {
+   "old_id": "frontend-todo arch: 'Extract one persisted PO capture/edit state machine (pending/saved/failed, stable line IDs) used by desktop and mobile'",
+   "status": "still open",
+   "evidence": "Mobile capture is still about 500 lines of ad-hoc state in MobileApp.tsx (CaptureState union, draftIdPromise, captureGen, writeQueue, pendingWrites, captureRef, markDirty, _cid/_confirmed/_dirty flags), with the 'same shape as the desktop editor's save queue' re-implemented rather than shared. A7-01 is a direct consequence: draft lifetime is decided in three places (ensureDraftId, the onSaveLine catch, cancelCapture) with different rules."
+  }
+ ],
+ "needs_owner": [
+  "Real-device checks not run: iOS installed PWA camera/getUserMedia and share-target, CLABEL CT221D over Web Bluetooth (office Chrome; per memory, real tests go via inventory-dev), and the desk scanner bridge on 127.0.0.1:47811 (Chrome Private Network Access preflight is the bridge repo's concern).",
+  "Decide whether CSP moves to enforcing and where reports go (A7-05)."
+ ],
+ "notes": "Static review plus read-only GETs of the production sw.js, index.html and headers. No build was run: the baseline build hadn't finished, and the live sw.js was used to check the precache instead. No repro tests were written. A7-01 is from source tracing of MobileApp/onSaveLine and the backend DELETE, not executed. Mobile pages outside the file list (SubmitForm, OrderReview, OrderDetail, Shipping) were read only where they touch capture state. pwa.css and the binary assets (fonts, splash and icons) were skimmed and listed, not reviewed in depth. The label printer TSPL path matches the CT221D notes (ISSC 8841 write port; it answers no status, so check() just times out at 1 s every 15 s, which is harmless). No defects found in labelPrinter.ts, LabelPrint.tsx, deskScan.ts, DeskCamera.tsx, RamSheetScanDialog.tsx, scanValidation.ts, scanError.ts, useScanFilter.ts, ShippingAddLabel.tsx or pwa.ts beyond the above. _headers cache rules for sw.js, manifest and index.html are no-cache as intended, and the live '/' is max-age=0 must-revalidate."
+}

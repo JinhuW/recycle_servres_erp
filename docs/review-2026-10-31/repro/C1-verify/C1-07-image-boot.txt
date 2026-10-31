@@ -1,0 +1,11 @@
+# Replays the backend image CMD (migrate.mjs && init-admin.mjs) with the Dockerfile ENV defaults, then counts users
+{"ts":"2026-10-31T21:07:36.975Z","level":"info","version":"1.395.0","commit":"unknown","message":"applying migration","module":"migrate","file":"0220_after_sales_currency.sql"}
+{"ts":"2026-10-31T21:07:36.977Z","level":"info","version":"1.395.0","commit":"unknown","message":"migrations applied","module":"migrate","applied":218,"total":218}
+{"ts":"2026-10-31T21:07:37.121Z","level":"info","version":"1.395.0","commit":"unknown","message":"created admin","module":"init-admin","role":"manager","email":"admin@recycle.local"}
+{"ts":"2026-10-31T21:07:37.122Z","level":"warn","version":"1.395.0","commit":"unknown","message":"using DEFAULT password \"admin\" — set ADMIN_PASSWORD in repo-root .env before exposing the service.","module":"init-admin"}
+$ SELECT email, role FROM users;
+        email        |  role   
+---------------------+---------
+ admin@recycle.local | manager
+(1 row)
+

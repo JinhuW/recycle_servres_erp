@@ -1,0 +1,23 @@
+[
+ {
+  "id": "C2-01",
+  "severity": "P2",
+  "title": "[cross-lane] Root AGENTS.md map and its Facebook-login rule omit the ERP fleet (apps/fleet-agent, apps/backend/src/fleet, /api/fleet), which now runs the live Facebook workers",
+  "location": "AGENTS.md:22-31 (First rule), AGENTS.md:43-50 (Map); trackers/facebook/AGENTS.md:113-122",
+  "failure_scenario": "An agent asked to 'get more workers running' or 'roll the new worker image' follows the documented rule, sees nothing about the ERP Hosts tab, host capacity, POST /api/fleet/releases or the fleet-agent, and changes a host count or starts a release. Each start or replacement is a boot login (B3-01: 20 of 31 in a day were challenged or locked), and the account can be lost. The Map also gives no AGENTS.md entry point for apps/fleet-agent, so its own login traps (docker rm rs-fleet-*, FLEET_STAGGER_SECONDS) are never read."
+ },
+ {
+  "id": "C2-02",
+  "severity": "P2",
+  "title": "[cross-lane] The rs_console contract docs miss facebookPool.ts, the ERP caller that seeds sessions and triggers restore or re-login",
+  "location": "AGENTS.md:72; trackers/facebook/AGENTS.md:45-77",
+  "failure_scenario": "Someone reshapes or tightens /v1/workers/{id}/session or restore-session on the console side while trusting the 'Forwarded today' list. The Pool Assign flow then breaks: cookie-first Assign falls back to POST /relogin (facebookPool.ts:694), a password login, on every assign. Or the endpoints are removed as unused. A reviewer checking the contract test also misses that facebookPool.ts has no row."
+ },
+ {
+  "id": "C2-03",
+  "severity": "P2",
+  "title": "backup/README.md and backup/railway.toml call the R2 backup cron `db-sync`, but `db-sync` is the prod\u2192dev copy; the backup service is `pg-r2-backup`",
+  "location": "backup/README.md:3; backup/railway.toml:1",
+  "failure_scenario": "Someone checking whether backups ran opens db-sync's logs per backup/README.md:3. Since 2026-10-27 those are failed prod\u2192dev syncs (B1-03), so they conclude backups are failing and act on the wrong service, or treat the sync's failures as backup noise. Meanwhile the real backup service goes unwatched."
+ }
+]

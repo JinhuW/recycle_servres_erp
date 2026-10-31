@@ -1,0 +1,37 @@
+[
+ {
+  "id": "B5-01",
+  "severity": "P1",
+  "title": "The 'retired' laptop Facebook monitor is still loaded and running on this Mac, replaying a logged-in session from the house IP with its proxy unset",
+  "location": "launchd gui/501/com.recycleservers.fbmonitor (pid 14535, KeepAlive, runs=3, started 2026-10-30 05:30) -> ~/Projects/recycle_servers/facebook_tracker/scripts/run-monitor.sh:16; configs/master.toml:15,37-40; scripts/watchdog.sh:14-22",
+  "failure_scenario": "The process stays up (KeepAlive) and retries daily at 10:00. The moment personal.json is rewritten (an rs-session capture/check --save-refreshed for that account, or a copy from the fleet), it silently resumes scraping Marketplace from the office NAT IP, unproxied, alongside the 9 fleet workers on the same LAN, which is exactly the double-traffic/location-change pattern the repo's First Rule exists to prevent. The personal.json session already went invalid on 2026-10-29/30 while this was running; this host is a plausible contributor."
+ },
+ {
+  "id": "B5-02",
+  "severity": "P1",
+  "title": "search-probe opens Marketplace every morning with the personal.json logged-in session, from the house IP, out of the stale legacy checkout",
+  "location": "launchd gui/501/com.recycleservers.search-probe (07:45 daily, last exit 0, runs=10) -> ~/Projects/recycle_servers/facebook_tracker/scripts/probe-search-url.sh:34; scripts/probe-search-url.py:42,145,165",
+  "failure_scenario": "A scheduled job nobody watches restores a Facebook session and browses Marketplace from the office IP every day; each run is a session restore of the kind the First Rule counts as a login risk. If personal.json is the same account as a fleet worker (not verified; needs_owner), it is the same account seen from two IPs on the same morning."
+ },
+ {
+  "id": "B5-03",
+  "severity": "P2",
+  "title": "keyword-eval has failed every day since 2026-10-25 because the rs-monitor container it reads no longer exists",
+  "location": "launchd gui/501/com.recycleservers.keyword-eval (last exit code 1, runs=10) -> ~/Projects/recycle_servers/facebook_tracker/scripts/eval-keywords.sh:22-23,49-62",
+  "failure_scenario": "The owner believes a daily keyword review is produced; none has been for 7 days and nothing alerts (launchd just records exit 1). It also holds a long-lived Claude OAuth token in the legacy checkout for a job that cannot succeed."
+ },
+ {
+  "id": "B5-04",
+  "severity": "P2",
+  "title": "Stale deployable checkouts: five ERP clones at v1.261-1.268, one linked to Railway production, and the legacy facebook_tracker clone with a working deploy.sh",
+  "location": "~/Projects/recycle_servers/recycle_servres_erp{,-dev-2,-dev-3,-dev-4,-main-3}; ~/Projects/recycle_servers_v2/recycle_servres_erp-handfish (~/.railway/config.json -> recycle-erp-experiment production); ~/Projects/recycle_servers/facebook_tracker/scripts/deploy.sh:29,164; deploy/cloudflare/deploy.sh",
+  "failure_scenario": "An agent or the owner opens one of these folders (they are still named like the live repo) and runs `railway up` in handfish -> production backend rolled back ~100 versions with migrations missing; or `deploy/cloudflare/deploy.sh` in recycle_servers/recycle_servres_erp -> prod Worker rolled back to v1.268. A deploy.sh from the legacy facebook_tracker clone rsyncs stale code to the homelab VM and restarts containers, i.e. Facebook logins."
+ },
+ {
+  "id": "B5-05",
+  "severity": "P2",
+  "title": "[cross-lane] memtrade, the far side of the /api/wechat-market/push contract, has no commits and no backup",
+  "location": "~/Projects/wehat_ai/memtrade (.git with zero commits; tmutil: no destinations configured)",
+  "failure_scenario": "A disk failure, an accidental `rm`, or an agent edit to src/erp.ts leaves no way to recover or even diff what the ERP contract counterpart sends; the 300 MB data/memtrade.sqlite history is equally unbacked."
+ }
+]

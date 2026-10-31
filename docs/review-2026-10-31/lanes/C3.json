@@ -1,0 +1,193 @@
+{
+ "lane": "C3",
+ "files_read": [
+  "docs/review-2026-10-31/BRIEF.md",
+  "docs/tickets/INDEX.md",
+  "docs/tickets/README.md",
+  "docs/tickets/RS-*.md (all 456 tickets, frontmatter parsed; bodies of every open/flagged ticket read)",
+  "scripts/ticket.sh",
+  "scripts/changelog.sh (Unreleased handling)",
+  "CHANGELOG.md (all ## headers, sections 1.114.2, 1.333.x, 1.343-1.344, 1.351-1.352)",
+  "git tag -l 'v*' (670 tags) and tag dates",
+  "trackers/facebook/CHANGELOG.md",
+  "trackers/facebook/VERSION",
+  "git tag -l 'facebook-tracker/v*' (68 tags)",
+  "docs/superpowers/plans/*.md (status lines and checkbox counts for all)",
+  "docs/superpowers/plans/2026-10-*.md (headers)",
+  "docs/superpowers/plans/2026-10-24-erp-fleet/README.md",
+  "docs/superpowers/plans/finished/",
+  "docs/debug-notes/*.md (57; status/fix lines all, full text of the Facebook and transfer-order notes)",
+  "trackers/reddit/docs/debug-notes/*.md (5, status lines)",
+  "trackers/facebook/docs/",
+  "apps/backend/tests/transfer-orders.test.ts:1-40",
+  "apps/backend/src/routes/inventory.ts (ORDER BY lines)",
+  "AGENTS.md",
+  "docs/FEATURES.md (grep)",
+  "docs/DATABASE.md (grep)",
+  "gh pr view 226 227 231 283 418 731 732 736 737 744 753 766 913 958 996",
+  "docs/review-2026-10-13/ (README, todo files grep)"
+ ],
+ "findings": [
+  {
+   "id": "C3-01",
+   "severity": "P2",
+   "title": "RS-290 and RS-291 (Facebook session bugs, RS-291 is P1) sit in backlog although both shipped in facebook-tracker 0.10.4-0.10.6",
+   "location": "docs/tickets/RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md:5; docs/tickets/RS-290-idle-session-check-reads-a-stale-page-url-and-misses.md:5; docs/tickets/INDEX.md (RS-290, RS-291 rows)",
+   "evidence": "RS-290 status: backlog, pr/version empty; fixed by f705cef6 (#722), released dcf869a9 facebook-tracker v0.10.4, trackers/facebook/CHANGELOG.md:1290-1300 ('A login finished over Watch is picked up between sweeps'), and docs/debug-notes/2026-10-17-login-finished-over-watch-stays-session-expired.md:59 says 'RS-290, fixed in 0.10.4'. RS-291 status: backlog, priority P1, all 5 acceptance boxes [x]; fixed by 0eed999a (#723, v0.10.5) and 51191d67 (#725, v0.10.6), CHANGELOG 0.10.5 'A saved session survives a restart of any kind'. RS-291's own Context (line 29) already cites RS-290 as fixed in 0.10.4.",
+   "failure_scenario": "An agent asked to pick up open Facebook work lists backlog tickets (`scripts/ticket.sh list --status backlog`) and finds a P1 'saved login survives any restart'. RS-291's unchecked-looking live acceptance step is 'a logged-in worker restarted with docker restart ... comes back logged in' and RS-290's open box is a live login over Watch; re-verifying a shipped fix that way is exactly the worker restart / login the root AGENTS.md first rule forbids, risking a checkpointed account.",
+   "proposed_fix": "RS-290: line 5 `status: done`, line 10 `pr: 722`, line 11 `version: facebook-tracker 0.10.4`. RS-291: line 5 `status: done`, `pr: 723, 725`, `version: facebook-tracker 0.10.5, 0.10.6`. Then `scripts/ticket.sh index`.",
+   "regression_test": "A ticket lint (C3-repro idea): for every ticket not done/wont-do, grep `git log origin/dev --grep=<id>` for a `Release facebook-tracker` or `v1.x` commit and fail if the ticket has none of pr/version but its id appears in a released commit.",
+   "confidence": "high"
+  },
+  {
+   "id": "C3-02",
+   "severity": "P3",
+   "title": "Twelve more tickets still in-review/in-progress although their PR merged and their version is tagged (and on main)",
+   "location": "docs/tickets/RS-003-*.md:5, RS-004-*.md:5, RS-007-*.md:5, RS-029-*.md:5, RS-117-*.md:5 (+pr empty at :10), RS-280-*.md:5 (+pr empty), RS-293-*.md:5, RS-296-*.md:5, RS-297-*.md:5, RS-300-*.md:5, RS-312-*.md:5, RS-305-*.md:5",
+   "evidence": "gh pr view: #226 MERGED 2026-08-31 (v1.109.0), #227 MERGED (v1.113.0), #231 MERGED (v1.114.2, CHANGELOG.md:11004 describes the fix), #283 MERGED (v1.130.0), #418 MERGED (RS-117, v1.183.0, CHANGELOG.md:8311), a3d183ae #708 (RS-280, v1.277.0, CHANGELOG.md:3885), #731/#732 MERGED (RS-293), #736/#737/#744 MERGED (v1.282.0/1.283.0/1.285.0, on main), #766 MERGED (v1.292.0, ancestor of origin/main). All referenced v* tags exist. RS-305's note says 'moves to done once a real reaction shows up in GET /api/prompt-stats'; CHANGELOG.md:3474 ('Since RS-305 the Reddit tracker scores...') indicates reactions are being scored.",
+   "failure_scenario": "INDEX.md reports 10 in-review and 5 in-progress tickets, most of them shipped weeks ago; anyone using the index or `ticket.sh list --status in-review` to find unfinished work re-opens shipped features, and the real open items (RS-394, RS-403, RS-421, RS-455, RS-468) are buried.",
+   "proposed_fix": "Set `status: done` on each; fill RS-117 `pr: 418`, RS-280 `pr: 708`; for RS-007/RS-117 tick the acceptance boxes the CHANGELOG entry confirms (or note 'verified by CHANGELOG [1.114.2]/[1.183.0]'). RS-293 and RS-305 keep a one-line note that their unticked item is a live check the owner owns (RS-293:60 'Live: after deploy... va-1') rather than staying in-review. Re-run `scripts/ticket.sh index`.",
+   "regression_test": "Same lint as C3-01.",
+   "confidence": "high"
+  },
+  {
+   "id": "C3-03",
+   "severity": "P3",
+   "title": "RS-394 (ERP fleet, the live cutover project) is marked backlog with WS-A..D unchecked although they shipped",
+   "location": "docs/tickets/RS-394-facebook-workers-pull-cities-from-an-always-on-fleet.md:5 and :66-77",
+   "evidence": "status: backlog; acceptance WS-A..WS-D '- [ ]' while docs/superpowers/plans/2026-10-24-erp-fleet/README.md:146-151 records A merged (#875,#880), B merged (#881,#885), C done (#879,#886,#887,#892), D (apps/fleet-agent exists), E/E2 done; migrations 0206-0217 fleet_* exist; docs/FEATURES.md:3472 'since v1.337.0 (RS-394)'; docs/DATABASE.md:2209 lists the fleet tables (WS acceptance line 86-87 also met). Line 66 still names `0205_fleet.sql`, which landed as 0206.",
+   "failure_scenario": "The ticket for the largest in-flight project reads as not started; an agent planning fleet work from the ticket rebuilds WS-A..D or assumes the coordinator still owns the fleet.",
+   "proposed_fix": "Line 5 `status: in-progress`; tick WS-A..WS-D and the docs item (line 86) with their PRs/versions; change line 66 `0205_fleet.sql` -> `0206_fleet.sql`; leave WS-F/WS-G open.",
+   "regression_test": "None (docs).",
+   "confidence": "high"
+  },
+  {
+   "id": "C3-04",
+   "severity": "P3",
+   "title": "RS-014 (bank ignore rules) left in-progress although the same feature shipped as RS-105 (v1.177.0)",
+   "location": "docs/tickets/RS-014-a-taught-ignore-rule-hides-a-recurring-pattern-of-ba.md:5,12",
+   "evidence": "RS-014 ask: 'i can ignore certain pattern of transaction in the mercury. like a ignore rule'; status in-progress, 12 unchecked, no pr/version, related: []. RS-105 'Ignore rules for bank transactions' is done, pr #403, version 1.177.0, all boxes ticked; CHANGELOG.md:8566 '**Ignore rules on the Payments page** (RS-105)'. RS-014's design doc docs/superpowers/specs/2026-09-02-bank-ignore-rules-design.md is the only spec on the topic.",
+   "failure_scenario": "The oldest in-progress ticket in the index is a duplicate; someone picking it up builds a second ignore-rule system next to bank_ignore rules.",
+   "proposed_fix": "Line 5 `status: wont-do`, related: [RS-105], and a Notes line 'Superseded by RS-105, shipped in v1.177.0.' (or `done` + `version: 1.177.0` if the owner considers RS-105 its delivery).",
+   "regression_test": "None.",
+   "confidence": "medium"
+  },
+  {
+   "id": "C3-05",
+   "severity": "P3",
+   "title": "Done tickets missing pr:/version: (or with a malformed frontmatter line)",
+   "location": "docs/tickets/RS-321-table-action-column-stays-visible-while-the-other-co.md:10; RS-294-*.md:10; RS-429-*.md:10; RS-456-*.md:10; RS-404-*.md:11; RS-258-*.md:11",
+   "evidence": "RS-321 line 10 is `pr: \"#785\"version: 1.294.1` (newline lost), so field() reads no version and INDEX shows '—' though d2d6a86b is v1.294.1. RS-294 pr empty (merged as #768, 1b25ac72). RS-429 pr empty (93f112f3 = #958, v1.370.3). RS-456 pr empty (9372b7af = #996, v1.380.1). RS-404 version empty (#913 is a docs-only prompt candidate). RS-258 version 'n/a — trackers/facebook [Unreleased]' but its fix (7ac27331, #661) is in facebook-tracker/v0.6.0 and trackers/facebook/CHANGELOG.md:1690 under [0.6.0].",
+   "failure_scenario": "The pr:/version: fields are the join from ticket to CHANGELOG (AGENTS.md 'Tickets' step 4); lookups by version or PR miss these six, and RS-258 claims its fix never shipped.",
+   "proposed_fix": "RS-321: split line 10 into `pr: \"#785\"` and `version: 1.294.1`. RS-294: `pr: 768`. RS-429: `pr: 958`. RS-456: `pr: 996`. RS-404: `version: n/a — reddit prompt candidate, docs only, no release`. RS-258: `version: facebook-tracker 0.6.0`. Re-run index.",
+   "regression_test": "scripts/ticket.sh index could warn when a done ticket has an empty pr or version, like its duplicate-id warning.",
+   "confidence": "high"
+  },
+  {
+   "id": "C3-06",
+   "severity": "P3",
+   "title": "INDEX.md is stale for RS-483: Shipped shows '—' though the ticket says 1.395.0",
+   "location": "docs/tickets/INDEX.md:8",
+   "evidence": "INDEX.md:8 `| ... After-sales case amount can be in RMB | — |`; docs/tickets/RS-483-after-sales-case-amount-can-be-in-rmb.md:11 `version: 1.395.0`. Regenerating with the reindex logic changes only this row. The close commit 62f53dec filled version: without re-running `scripts/ticket.sh index`.",
+   "failure_scenario": "The newest release's ticket reads unshipped in the index anyone reads first.",
+   "proposed_fix": "INDEX.md:8 replace `| — |` with `| 1.395.0 |` (i.e. run `scripts/ticket.sh index`).",
+   "regression_test": "None; ticket-workflow skill's close step could run index after filling version.",
+   "confidence": "high"
+  },
+  {
+   "id": "C3-07",
+   "severity": "P3",
+   "title": "CHANGELOG.md has an empty stray `## [Unreleased]` heading in the middle of the file",
+   "location": "CHANGELOG.md:1589",
+   "evidence": "The only `## [Unreleased]` heading sits between [1.344.0] (line 1569) and [1.343.0] (line 1591), with no body. scripts/changelog.sh:152-189 treats an Unreleased section specially and :264 tells authors to write 'under ## [Unreleased]'.",
+   "failure_scenario": "An author following changelog.sh's hint adds notes under the heading they find, 1,500 lines down among 2026-10-24 releases, and the notes never appear at the top; backfill may also fold it oddly.",
+   "proposed_fix": "Delete CHANGELOG.md:1589 and its following blank line.",
+   "regression_test": "None.",
+   "confidence": "high"
+  },
+  {
+   "id": "C3-08",
+   "severity": "P3",
+   "title": "CHANGELOG.md [1.333.2] sits below [1.333.1], breaking newest-first order",
+   "location": "CHANGELOG.md:1914-1950",
+   "evidence": "Order is [1.333.1] (1914), [1.333.2] (1938), [1.333.0] (1950); the file header says 'newest first'. v1.333.2 is the prod hotfix tagged 2026-10-24 23:55 -0400.",
+   "failure_scenario": "Readers scanning top-down meet the hotfix after the release it fixed; scripts comparing adjacent headers see an inversion.",
+   "proposed_fix": "Move the [1.333.2] block (lines 1938-1949) above `## [1.333.1] - 2026-10-24` at line 1914.",
+   "regression_test": "None.",
+   "confidence": "high"
+  },
+  {
+   "id": "C3-09",
+   "severity": "P3",
+   "title": "facebook-tracker tag v0.13.3 has no CHANGELOG section (renamed to 0.13.4)",
+   "location": "trackers/facebook/CHANGELOG.md:911-922; tag facebook-tracker/v0.13.3 (ba8bfd3a)",
+   "evidence": "At the v0.13.3 tag CHANGELOG had `## [0.13.3] - 2026-10-19` (pre-screen default model, RS-317). Five minutes later 53be6069 'Release facebook-tracker v0.13.4' renamed that section to [0.13.4] and corrected RS-317->RS-319, so the current file has [0.13.4] then [0.13.2]. Every other facebook-tracker/v* tag has a section; 0.1.0 and 0.4.0 have sections but no tags (pre-import history, see AGENTS.md 'Imported hashes').",
+   "failure_scenario": "Someone checking what the fleet ran on 0.13.3 (e.g. from `docker inspect` labels or the login ledger) finds no entry and may assume the tag is bogus.",
+   "proposed_fix": "Insert before line 922: `## [0.13.3] - 2026-10-19\\n\\nSame tree as 0.13.4; re-cut because this section cited the wrong ticket (RS-317 for RS-319).`",
+   "regression_test": "None.",
+   "confidence": "high"
+  },
+  {
+   "id": "C3-10",
+   "severity": "P3",
+   "title": "Two debug notes still say the transfer-orders test flake is unfixed; the fixture was fixed in v1.191.0",
+   "location": "docs/debug-notes/2026-07-29-transfer-order-reopen-test-flake.md:4; docs/debug-notes/2026-08-03-transfer-orders-draft-so-test-flake.md:3",
+   "evidence": "Notes say 'Status: diagnosed, not fixed' / 'pre-existing, unfixed' and tell readers to run the file 4-6 times. apps/backend/tests/transfer-orders.test.ts:27-34 now filters `!committed.has(i.id)` via committedLineIds() (added b43b89c2, v1.191.0, RS-130), and inventory.ts:266 has the `l.id` tiebreaker (ec0eb4c9, v1.258.5). The two notes also duplicate each other.",
+   "failure_scenario": "A developer who sees a real transfer-orders failure dismisses it as 'the known flake' per these notes and ships a regression.",
+   "proposed_fix": "Replace 2026-07-29 line 4 with `**Status:** fixed in v1.191.0 (RS-130): transferOne() skips lines a committed sell order holds.` and 2026-08-03 line 3 with `**Status:** fixed in v1.191.0 (RS-130); the inventory list gained the l.id tiebreaker in v1.258.5. A failure here is now real.`",
+   "regression_test": "None.",
+   "confidence": "high"
+  },
+  {
+   "id": "C3-11",
+   "severity": "P3",
+   "title": "Debug note says the new-worker logged-out search is fixed, then says the monitor 'still has the gap'",
+   "location": "docs/debug-notes/2026-10-17-new-worker-without-session-file-searches-logged-out.md:50-52",
+   "evidence": "Line 3: 'Fixed in facebook-tracker 0.10.1 (RS-286): a missing file now has a fingerprint of its own'; lines 50-52: 'The monitor itself still has the gap. The real fix ... is a vendored-monitor change'. RS-286 is done at facebook-tracker 0.10.1.",
+   "failure_scenario": "A reader stops at the end and seeds empty fb_state.json files by hand on new workers (a write into configs/sessions/, which the ground rules treat as login-sensitive).",
+   "proposed_fix": "Replace lines 50-52 with: `0.10.1 (RS-286) made that vendored-monitor change: a missing file parks the worker, so the empty-file step is history.`",
+   "regression_test": "None.",
+   "confidence": "medium"
+  },
+  {
+   "id": "C3-12",
+   "severity": "P3",
+   "title": "erp-fleet plan README carries two contradictory WS-F status rows and a status section frozen at 2026-10-27",
+   "location": "docs/superpowers/plans/2026-10-24-erp-fleet/README.md:41, :103-153",
+   "evidence": "Row at :41 says the MVP run, coordinator wiring and dev pilot are done; the Status table row F at :152 still says 'registry moved to OCIR ... token blocked on the owner ... Owner steps: free an auth token'. :153 'G not started'. Last edit f2015d6b 2026-10-27; since then RS-454/456/461/463/469/472 (v1.380-1.389) run the fleet on worker-60-14 and homelab hosts (RS-468 notes: 15 accounts leased in prod).",
+   "failure_scenario": "An agent following the plan's README 'update the status table' rule (line 91) reads F as blocked on an OCIR token and re-does host prep, or treats the fleet as dev-only.",
+   "proposed_fix": "Replace README.md:152 with `| F | MVP, coordinator wiring, dev pilot and legacy migration done (RS-419..RS-426, #940-#951); fleet live on worker-60-14 and homelab | #876, #883, #891, #902, #903, #940-#951 | see rows above and WS-H |` and add a dated line under '## Status' pointing to RS-454+ for post-cutover work.",
+   "regression_test": "None.",
+   "confidence": "medium"
+  },
+  {
+   "id": "C3-13",
+   "severity": "P3",
+   "title": "docs/superpowers/plans/finished/ convention abandoned: ~33 shipped or dropped plans from May-July stay at top level with no status",
+   "location": "docs/superpowers/plans/ (top level, 2026-05-11 .. 2026-07-05); AGENTS.md:223",
+   "evidence": "finished/ holds 5 plans moved in May (eefd5691); nothing since. Top-level plans with every box unticked include shipped work (2026-05-16-transfer-orders.md: transfer orders exist, 1de98259; 2026-05-22-sell-order-archive.md; 2026-06-08-sell-order-packing-list.md: RS-029 v1.130.0; 2026-05-17-per-order-commission-rate.md) beside likely-dropped ones (2026-05-21-system-metrics-sidecar.md: no sidecar in compose/deploy). Only 2026-05-16-orphan-label-scan-sweep.md has a status line ('DEFERRED'). AGENTS.md:223 calls the folder 'in-flight and finished'.",
+   "failure_scenario": "A reader cannot tell in-flight from finished plans; an agent executing 'the plan' for a feature re-runs tasks for something already shipped (unticked boxes read as to-do).",
+   "proposed_fix": "Either move shipped plans into finished/ and add `> **Status:** abandoned (<date>)` to dropped ones, or drop the finished/ folder and require a first-line status in each plan; update AGENTS.md:223 to name the convention.",
+   "regression_test": "None.",
+   "confidence": "medium"
+  },
+  {
+   "id": "C3-14",
+   "severity": "P3",
+   "title": "AGENTS.md says each tracker keeps its debug notes under its own docs/, but Facebook's live in the root docs/debug-notes",
+   "location": "AGENTS.md:227-228",
+   "evidence": "trackers/facebook/docs/ holds only architecture.drawio; the Facebook notes (2026-10-17-2zie-2fa-is-plain-totp.md, -login-finished-over-watch..., 2026-10-18-va-1-locked..., 2026-10-20-facebook-duplicate-alerts..., 2026-10-20-forty-workers...) are in docs/debug-notes/, and trackers/facebook/README.md:206 links there.",
+   "failure_scenario": "An agent debugging a worker looks in trackers/facebook/docs per AGENTS.md, finds nothing, and misses the va-1 lock note that says to count logins before a Re-login.",
+   "proposed_fix": "AGENTS.md:227-228: `... their debug notes under trackers/reddit/docs/debug-notes/ and, for Facebook, docs/debug-notes/ (files named for the fleet).`",
+   "regression_test": "None.",
+   "confidence": "high"
+  }
+ ],
+ "carryover": [],
+ "needs_owner": [
+  "RS-305: confirm a real Telegram reaction has reached GET /api/prompt-stats (its stated done condition) before closing; not queried live in this lane.",
+  "RS-421: west-1 still parked on isp.decodo.com:10004 (503) awaiting the owner's proxy decision; ticket correctly in-progress.",
+  "RS-293 / RS-403 keep one live acceptance item each (va-1 legacy datr login; homelab console/coordinator deploy) that need the owner's yes; recommend recording them as owner follow-ups and closing the tickets."
+ ],
+ "notes": "No C3.files.txt existed; scope taken from the task brief. Prior review docs/review-2026-10-13 has no IDs in this lane (tickets/changelog/plans/debug notes), so carryover is empty. Checked: INDEX vs every ticket via the reindex logic (only RS-483 differs; no duplicate ids, no id/filename mismatches); every done ticket's version strings resolve to existing v*/facebook-tracker/v* tags; ERP CHANGELOG sections vs v* tags are 1:1 (670/670) plus the stray Unreleased; header dates vs tag dates differ >1 day only for 4 tags backfilled on 2026-08-31 (expected). facebook-tracker [Unreleased] content (RS-453/455/467/474 scripts) is genuinely after v0.15.0. Not done: full read of all 57 debug-note bodies (status lines grep'd, ~12 read in full); plan-by-plan shipped/abandoned verification for every May-July plan (sampled 5). RS-455 (backlog) and RS-468 (backlog) are genuinely open. No live resources touched."
+}

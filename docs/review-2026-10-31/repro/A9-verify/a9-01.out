@@ -1,0 +1,9 @@
+(node:69143) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jinhu/orca/workspaces/recycle_servres_erp/brant/docs/review-2026-10-31/repro/A9-verify/a9-01-shutdown-waits-pacer.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jinhu/orca/workspaces/recycle_servres_erp/brant/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+claim#1 at 0ms
+stop() at 501ms
+claim#2 at 2001ms
+stopped resolved at 2001ms
+REPRODUCED: claim taken after stop(); shutdown waited the pacer gap

@@ -1,0 +1,37 @@
+[
+ {
+  "id": "A11-01",
+  "severity": "P1",
+  "title": "Prod uptime monitor has not run since 2026-10-28T21:11Z; its last run misread HTTP 429 as an outage and could not send the alert",
+  "location": "Railway recycle-erp-experiment/production/uptime-monitor (service 365b9538-3ecc-455e-85a0-527b080e7484), deployment f458bd19-04b6-417d-901c-1943ff492510 status CRASHED; deploy/railway-uptime/check.sh:21-24,30,37-43,52-58",
+  "failure_scenario": "Prod goes down (as on 2026-07-12) and nobody hears about it: the only probe of the public hostname is not running, and Railway's own dashboards stay green when only the Cloudflare layer breaks. It has been in this state for about 3 days. When it does run, a Cloudflare rate-limit (429) on Railway's shared egress IP raises a false 'DOWN, redeploy the Worker' alert, and the same rate-limit blocks that alert from reaching the relay."
+ },
+ {
+  "id": "A11-02",
+  "severity": "P1",
+  "title": "One credential can both read and delete every prod DB backup; no object lock or versioning, and the R2 keys were in the 2026-10-21 Railway env exposure",
+  "location": "backup/backup.sh:97-111; backup/Dockerfile:15; infra/terraform/environments/experiment-backups/main.tf:33-36,54-61,96-104; docs/backups-cloud-runbook.md:11-17; Railway pg-r2-backup (3224fca5-f6cc-47f9-8dba-6b1db81fda1c) vars R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY",
+  "failure_scenario": "Anyone holding the leaked or still-unrotated backup key can download all 30 full prod dumps (customers, orders, financials) and then delete them. A compromised Railway env or bad run can also prune every dump. Either way, no offsite copy is left for the next data-loss incident."
+ },
+ {
+  "id": "A11-03",
+  "severity": "P2",
+  "title": "Merging to main deploys the prod backend (and runs its migrations) without waiting for CI; no branch protection requires a check",
+  "location": "Railway backend service 26d2f448-d4f2-4f67-b2ef-1628ef27a5c0 source.checkSuites=false (production/main and dev/dev); GitHub branch protection main+dev required_status_checks=null; .github/workflows/backend-tests.yml:11-13; apps/backend/Dockerfile:68",
+  "failure_scenario": "A release whose main merge ref fails typecheck or the backend suite (a hotfix on main that dev lacks, a bad merge resolution, or a PR merged while red) deploys to prod anyway. Its migrations run against the prod database before anyone sees the red check, and migrations cannot be rolled back."
+ },
+ {
+  "id": "A11-04",
+  "severity": "P2",
+  "title": "[cross-lane] Nightly prod-to-dev db-sync has failed every night since 2026-10-28, with no alert",
+  "location": "deploy/railway-sync/scrub.sql:32-45 (generic *_enc nulling); apps/backend/migrations/0213_fleet_proxies.sql:14 (url_enc TEXT NOT NULL); deploy/railway-sync/sync.sh:111-116; Railway dev db-sync 006cd405-7bee-4a66-8ebc-6ca6fdaa44ad deployment 5fecc5a6 (status SUCCESS)",
+  "failure_scenario": "Dev stays frozen at the 2026-10-27 prod copy. Data-migration dry runs and QA on dev then test against a stale schema and data shape while everyone assumes it refreshes nightly. The failure is visible only in logs."
+ },
+ {
+  "id": "A11-05",
+  "severity": "P2",
+  "title": "Prod backend watch patterns leave out root manifests, unlike dev; neither environment watches pnpm-workspace.yaml",
+  "location": "Railway backend production build.watchPatterns=[apps/backend/**, packages/shared/**]; dev=[apps/backend/**, packages/shared/**, package.json, pnpm-lock.yaml, tsconfig.base.json]; pnpm-workspace.yaml:15-21; .github/workflows/backend-tests.yml:36-43",
+  "failure_scenario": "A lockfile- or override-only security fix (e.g. a nodemailer refresh, see A11-09) merges to main. Prod backend is not rebuilt and keeps the vulnerable dependency until some unrelated backend change triggers a deploy. Dev, which watches the lockfile, gets the fix, so a check on dev wrongly suggests prod has it too."
+ }
+]

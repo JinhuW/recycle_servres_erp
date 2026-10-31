@@ -1,0 +1,9 @@
+A4-02 snapshot cookie: c_user=61550000000077; xs=S1-old
+A4-02 stored after worker save: [{"name":"c_user","value":"61550000000077","domain":".facebook.com","path":"/","expires":1828038488,"httpOnly":false,"secure":true,"sameSite":"None"},{"name":"xs","value":"S2-rotated","domain":".facebook.com","path":"/","expires":1828038488,"httpOnly":true,"secure":true,"sameSite":"None"}]
+A4-02 manager save status: 200 ""
+A4-02 stored after manager save: c_user=61550000000077; xs=S1-old | cookie_by: Alex Chen
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  ../../docs/review-2026-10-31/repro/A4-verify/a4-02-editor-lost-update.test.ts > A4-02 pool editor vs worker session save > a manager save of an unrelated field does not overwrite a newer worker-saved session
+AssertionError: expected 'c_user=61550000000077; xs=S1-old' to contain 'S2-rotated'
+     53|     console.log('A4-02 stored after manager save:', after, '| cookie_b…
+      Tests  1 failed (1)

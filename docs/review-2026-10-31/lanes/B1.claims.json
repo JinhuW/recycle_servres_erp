@@ -1,0 +1,44 @@
+[
+ {
+  "id": "B1-01",
+  "severity": "P1",
+  "title": "Prod uptime-monitor has not probed since 2026-10-28 21:11Z; stuck in a failing redeploy loop",
+  "location": "railway:recycle-erp-experiment/production/uptime-monitor 365b9538-3ecc-455e-85a0-527b080e7484 (active deployment f458bd19-04b6-417d-901c-1943ff492510 CRASHED; latest 3506ce25-43c9-477c-979a-b5b5dc5e0ce4 FAILED)",
+  "failure_scenario": "Prod has been unmonitored for about 3 days. An outage of the Cloudflare edge, Worker binding or Railway origin (the 2026-07-12 HTTP 523 kind) would page no one through the ERP Uptime topic. The only signal left is the Deployment.failed webhook noise from the loop itself, which trains people to ignore it."
+ },
+ {
+  "id": "B1-02",
+  "severity": "P1",
+  "title": "facebook-tracker Postgres password never rotated after the 2026-10-21 Railway env-var breach, and it is on a public TCP proxy",
+  "location": "railway:facebook-tracker/production/postgres 3e0f3ebf-8677-40b8-86e5-d65c59216a54 (TCP proxy 1d2141e7-0379-44a6-b85a-fb7c8ccb4f48, shortline.proxy.rlwy.net:21141 ACTIVE)",
+  "failure_scenario": "Whoever read Railway's customer env vars on 2026-10-21 holds this password. They connect to shortline.proxy.rlwy.net:21141 and read or alter the coordinator database (worker/account state for the Facebook fleet, about 1.19 GB on disk)."
+ },
+ {
+  "id": "B1-03",
+  "severity": "P2",
+  "title": "Nightly prod->dev db-sync has failed 4 nights running (scrub nulls a NOT NULL *_enc column); dev frozen at 2026-10-27 and nobody is told",
+  "location": "deploy/railway-sync/scrub.sql:34-46; apps/backend/migrations/0213_fleet_proxies.sql:14; railway:recycle-erp-experiment/dev/db-sync 006cd405-7bee-4a66-8ebc-6ca6fdaa44ad",
+  "failure_scenario": "Dev, and every e2e/dry-run that relies on 'dev mirrors prod' (data-migration dry runs, the FLEET_ROLE mirror pages), runs on data and schema 4+ days old. A prod migration dry-run passes on dev against the wrong row set, and the gap keeps growing until someone reads the logs."
+ },
+ {
+  "id": "B1-04",
+  "severity": "P2",
+  "title": "[cross-lane] Cloudflare answered 429 to the Railway uptime probe, for both the app and the alert relay, while origin was 200",
+  "location": "railway:uptime-monitor deployment f458bd19-04b6-417d-901c-1943ff492510 logs 2026-10-28T21:11Z; backend http log 2026-10-28T21:11:39Z /api/health 200 from 152.55.181.187",
+  "failure_scenario": "The probe reports a false 'prod DOWN (edge layer)'. When the edge really throttles Railway egress, the alert that would report it is throttled by the same edge, so a genuine outage goes unreported. It also triggered the crash in B1-01."
+ },
+ {
+  "id": "B1-05",
+  "severity": "P2",
+  "title": "Prod backend watchPatterns omit package.json / pnpm-lock.yaml / tsconfig.base.json that dev has",
+  "location": "railway:recycle-erp-experiment/production/backend 26d2f448-d4f2-4f67-b2ef-1628ef27a5c0 build.watchPatterns",
+  "failure_scenario": "A release whose backend-relevant change is only in the lockfile (e.g. a pnpm audit fix of a transitive backend dependency) or the root tsconfig merges to main. Dev rebuilds, prod is SKIPPED and keeps running the vulnerable or old dependency tree, and nothing shows it. The same happens to the root version bump: prod /api/health keeps reporting an older version than main."
+ },
+ {
+  "id": "B1-06",
+  "severity": "P2",
+  "title": "Vaultwarden (password.jinhu.us) volume has no backups recorded",
+  "location": "railway:vaultwarden/production/vaultwarden d11069e2-3d89-42eb-9c63-7e2604e38ece, volume 3c4b4b10-2783-4c06-a9ba-ee8e498aec76 (/data)",
+  "failure_scenario": "A volume loss or corruption, or a bad image upgrade, destroys the password vault with no restore point. If SIGNUPS_ALLOWED is true, anyone on the internet can also register an account on it."
+ }
+]

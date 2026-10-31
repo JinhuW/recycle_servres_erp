@@ -1,0 +1,1 @@
+sidecar after re-capture without --proxy: proxy = http://proxy-x:10003 user_agent = UA2

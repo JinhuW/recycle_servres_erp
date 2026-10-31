@@ -1,0 +1,1 @@
+{"success":true,"errors":[],"messages":[],"result":{"domains":[{"domain":"static.recycleservers.com","status":{"ssl":"active","ownership":"active"},"zoneId":"dd2a6dc1b973dc1f98b1cb009edae6d1","zoneName":"recycleservers.com","minTLS":"1.2","enabled":true}]}}

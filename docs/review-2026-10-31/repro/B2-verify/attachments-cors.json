@@ -1,0 +1,1 @@
+{"success":true,"errors":[],"messages":[],"result":{"rules":[{"allowed":{"origins":["https://inventory.recycleservers.com"],"methods":["GET","HEAD"],"headers":["*"]},"maxAgeSeconds":3600}]}}

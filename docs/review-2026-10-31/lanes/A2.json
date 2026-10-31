@@ -1,0 +1,350 @@
+{
+ "lane": "A2",
+ "files_read": [
+  "apps/backend/src/lib/categoryColumns.ts",
+  "apps/backend/src/lib/image-shrink.ts",
+  "apps/backend/src/lib/inventoryLabel.ts",
+  "apps/backend/src/lib/linePhotos.ts",
+  "apps/backend/src/lib/orderInput.ts",
+  "apps/backend/src/lib/part-number.ts",
+  "apps/backend/src/lib/poLineNo.ts",
+  "apps/backend/src/lib/sellCommitment.ts",
+  "apps/backend/src/lib/sellOrderMarket.ts",
+  "apps/backend/src/lib/sellOrderPriceTemplate.ts",
+  "apps/backend/src/lib/xlsx.ts",
+  "apps/backend/src/routes/activity.ts",
+  "apps/backend/src/routes/afterSales.ts",
+  "apps/backend/src/routes/categories.ts",
+  "apps/backend/src/routes/customers.ts",
+  "apps/backend/src/routes/inventory.ts",
+  "apps/backend/src/routes/itemTypes.ts",
+  "apps/backend/src/routes/lookups.ts",
+  "apps/backend/src/routes/notifications.ts",
+  "apps/backend/src/routes/orders/aiReview.ts",
+  "apps/backend/src/routes/orders/checks.ts",
+  "apps/backend/src/routes/orders/create.ts",
+  "apps/backend/src/routes/orders/detail.ts",
+  "apps/backend/src/routes/orders/evidence.ts",
+  "apps/backend/src/routes/orders/index.ts",
+  "apps/backend/src/routes/orders/lifecycle.ts",
+  "apps/backend/src/routes/orders/list.ts",
+  "apps/backend/src/routes/orders/patch.ts",
+  "apps/backend/src/routes/orders/refusal.ts",
+  "apps/backend/src/routes/orders/shared.ts",
+  "apps/backend/src/routes/orders/spreadsheet.ts",
+  "apps/backend/src/routes/packages.ts",
+  "apps/backend/src/routes/scan.ts",
+  "apps/backend/src/routes/sellOrderPack.ts",
+  "apps/backend/src/routes/sellOrders.ts",
+  "apps/backend/src/routes/suppliers.ts",
+  "apps/backend/src/routes/warehouses.ts",
+  "apps/backend/src/services/auditDiff.ts",
+  "apps/backend/src/services/members.ts",
+  "apps/backend/src/services/orderAdvance.ts",
+  "apps/backend/src/services/orderAudit.ts",
+  "apps/backend/src/services/orderCategory.ts",
+  "apps/backend/src/services/orderDraft.ts",
+  "apps/backend/src/services/orderGoodsTotal.ts",
+  "apps/backend/src/services/orderHandoff.ts",
+  "apps/backend/src/services/orderLocks.ts",
+  "apps/backend/src/services/orderSold.ts",
+  "apps/backend/src/services/orderTxnRule.ts",
+  "apps/backend/src/services/poAiReview.ts",
+  "apps/backend/src/services/poRealized.ts",
+  "apps/backend/src/services/poReviewChecks.ts",
+  "apps/backend/src/services/priceSheet.ts",
+  "apps/backend/src/services/sellOrderAudit.ts",
+  "apps/backend/src/services/sellOrderCreate.ts",
+  "apps/backend/src/services/sellOrderLineMatch.ts",
+  "apps/backend/src/services/sellOrderNumbers.ts",
+  "apps/backend/src/services/sellOrderPriceAdjust.ts",
+  "apps/backend/src/services/sellOrderSignoff.ts",
+  "apps/backend/src/services/sellableInventory.ts",
+  "apps/backend/src/services/supplierCrm.ts",
+  "apps/backend/tests/tier1-data-integrity.test.ts",
+  "apps/backend/migrations/0220_after_sales_currency.sql",
+  "apps/backend/migrations/0127_sell_order_lines_inventory_set_null.sql",
+  "apps/backend/migrations/0151 (grep)",
+  "apps/backend/src/lib/fx.ts",
+  "apps/backend/src/services/orderLocks.ts",
+  "docs/DATABASE.md (order_lines, sell_orders, after_sales sections)",
+  "git show 62f53dec (RS-483 backend diff)",
+  "docs/review-2026-10-13/backend-domain-todo.md",
+  "docs/review-2026-10-13/schema-and-supporting-domain-todo.md",
+  "docs/review-2026-10-13/architecture-todo.md"
+ ],
+ "findings": [
+  {
+   "id": "A2-01",
+   "severity": "P2",
+   "title": "Inventory PATCH can move a line out of Sold or off a pending transfer, bypassing the PO cascade's status rules",
+   "location": "apps/backend/src/routes/inventory.ts:1376-1378,1461-1467",
+   "evidence": "The only status guard is LINE_STATUSES membership plus 'committed claims > 0' (committedClaimsByLine counts Shipped/Awaiting payment, not Done). The PO cascade refuses the same moves: leaving Sold (orderAdvance.ts:261-263), lines claimed by a Pending transfer (transferClaimedLineIds, orderAdvance.ts:166-169), and lines named by open Draft/Packing sell orders (orderAdvance.ts:205-211).",
+   "failure_scenario": "(a) A lot sold out by a Done SO keeps its qty and is Sold; a manager PATCHes status Sold->Done: no committed claim exists, so the sold units become sellable again and can be sold twice. (b) A line In Transit under a Pending transfer is PATCHed to Done: receive skips it (inventory.ts:~2002) and discard refuses it (inventory.ts:~2168), so the transfer is stuck. (c) Setting a line to Draft leaves Draft/Packing SOs naming it unpromotable.",
+   "proposed_fix": "Share cascadeBlockers' rules with the inventory editor: refuse leaving Sold, refuse status changes on lines whose transfer_order_id is a Pending transfer, and when the new status is not sellable also check open draft/packing claims (or require a confirm).",
+   "regression_test": "Sell a lot out to Done, PATCH /api/inventory/:id {status:'Done'} -> 409; PATCH an In Transit line under a Pending transfer -> 409.",
+   "confidence": "high"
+  },
+  {
+   "id": "A2-02",
+   "severity": "P2",
+   "title": "Deleting a transfer's source warehouse (no transferTo) makes discard of that transfer fail with an FK 500 forever",
+   "location": "apps/backend/src/routes/warehouses.ts:331-348; apps/backend/src/routes/inventory.ts:2186-2192",
+   "evidence": "Delete only blocks on to_warehouse_id; it sets transfer_orders.from_warehouse_id = NULL (transferTo is null). Discard computes origin = ord.from_warehouse_id ?? detail.from, and detail.from in the append-only 'transferred' inventory_event still names the deleted warehouse. Mixed-source transfers (from_warehouse_id NULL) hit it even with transferTo. The delete also rewrites order_lines.warehouse_id without inventory_events.",
+   "failure_scenario": "TO-1 Pending WH-A->WH-B; manager deletes WH-A without transferTo; discard TO-1 runs UPDATE order_lines SET warehouse_id='WH-A' -> FK violation -> 500; TO-1 can never be discarded and its lines stay In Transit.",
+   "proposed_fix": "Refuse warehouse delete while Pending transfers have lines whose transferred events name it, or have discard verify the origin exists and fall back to NULL / transferTo; write a warehouse_reassigned inventory_event per moved line.",
+   "regression_test": "Create pending transfer from WH-A, DELETE /api/warehouses/WH-A, POST discard -> 200 (or 409 on the delete), never 500.",
+   "confidence": "high"
+  },
+  {
+   "id": "A2-03",
+   "severity": "P2",
+   "title": "Archive's removeFromSellOrders is a bare boolean; the removal set is recomputed after the manager confirms",
+   "location": "apps/backend/src/routes/orders/lifecycle.ts:184-190; apps/backend/src/services/orderAdvance.ts:374-440",
+   "evidence": "The 409 lists the claimed SO lines; the retry sends only removeFromSellOrders:true and archiveOrderLinesTx deletes whatever 'claimed' finds now (openSellStatuses includes committed statuses). Also the SO pre-lock at :374-381 uses an EXISTS subquery evaluated on the statement snapshot, so an SO that gains a claim while the line lock (cascadeBlockers) waits is first locked by the UPDATE sell_orders at :422 \u2014 lines before SO header, against the documented order in orderLocks.ts.",
+   "failure_scenario": "Manager A archives PO-1, sees a 409 naming SO-1 (Draft). Manager B adds a PO-1 line to SO-2 and ships it. A confirms: the archive silently deletes the line from Shipped SO-2 and clears its negotiated total, which A never saw. Under the concurrent variant, a save on SO-2 racing the archive can deadlock (40P01 -> 500).",
+   "proposed_fix": "Have the client echo the confirmed sol_id set and return a fresh 409 if claimed differs; lock the SOs named by claimed before the line lock (re-read until stable).",
+   "regression_test": "Archive -> 409 listing SO-1; add line to SO-2 and ship; retry with removeFromSellOrders -> expect 409 listing SO-2, SO-2 unchanged.",
+   "confidence": "medium"
+  },
+  {
+   "id": "A2-04",
+   "severity": "P3",
+   "title": "Transfer receive/reopen/discard lock lines with no ORDER BY",
+   "location": "apps/backend/src/routes/inventory.ts:1999-2004,2083-2088,2155-2160,2198-2203",
+   "evidence": "FOR UPDATE OF l without ORDER BY, while the PO cascade and delete lock a PO's lines ORDER BY id; discard locks peers after clones.",
+   "failure_scenario": "A transfer holding two lines of one PO is received while that PO advances stage: heap-order vs id-order locking can deadlock (40P01 surfaced as 500).",
+   "proposed_fix": "Add ORDER BY l.id to the locking SELECTs; lock clones and peers together in sorted order.",
+   "regression_test": "Add receive-vs-advance pair to tests/stock-lock-order.test.ts.",
+   "confidence": "medium"
+  },
+  {
+   "id": "A2-05",
+   "severity": "P3",
+   "title": "Reopen + discard of a transfer can delete a clone lot a Draft sell order names",
+   "location": "apps/backend/src/routes/inventory.ts:2098-2100,2166-2168,2201,2231",
+   "evidence": "Reopen and discard only count committed claims; discard's sell-order guard is on the peer, not the clone it deletes. sell_order_lines.inventory_id is ON DELETE SET NULL (migration 0127).",
+   "failure_scenario": "Partial transfer creates clone C, received, C added to Draft SO-1, transfer reopened (no committed claim) and discarded: C merges back and is deleted; SO-1's line silently loses its source.",
+   "proposed_fix": "Give reopen the proposal/confirmDrafts check transfer create uses; in discard refuse (or skip merge) when an open SO names the clone.",
+   "regression_test": "The scenario above returns 409 or keeps C referenced.",
+   "confidence": "medium"
+  },
+  {
+   "id": "A2-06",
+   "severity": "P3",
+   "title": "PATCH can blank required names (remaining half of BD-08); supplier PATCH 500s on duplicate match_key and bad nextFollowUpAt/cadenceDays",
+   "location": "apps/backend/src/routes/customers.ts:115-117; apps/backend/src/routes/categories.ts:98; apps/backend/src/routes/suppliers.ts:551-573,607-609",
+   "evidence": "COALESCE('', name) stores empty string; suppliers PATCH writes name untrimmed (null -> NOT NULL 500) and has no catch for suppliers_owner_match_idx unlike POST/adopt; nextFollowUpAt/cadenceDays unvalidated.",
+   "failure_scenario": "PATCH customer {name:''} -> 200 blank customer; rename client B to client A's name in same book -> 500 instead of 409; nextFollowUpAt:'x' -> 22007 500.",
+   "proposed_fix": "Require nonblank trimmed name/label in PATCH validators; map unique violation to 409; validate date and integer cadence.",
+   "regression_test": "PATCH {name:''} on each -> 400; duplicate rename -> 409.",
+   "confidence": "high"
+  },
+  {
+   "id": "A2-07",
+   "severity": "P3",
+   "title": "Sell-order unitPrice has no upper bound or scale check: numeric overflow is a 500",
+   "location": "apps/backend/src/routes/sellOrders.ts:599",
+   "evidence": "lineInputError checks only finite and >= 0; unit_price/source_unit_price are NUMERIC(12,2). RMB prices with 3+ decimals are stored rounded while USD is converted from the unrounded value (sellOrders.ts:~911, sellOrderCreate.ts:~191).",
+   "failure_scenario": "POST /api/sell-orders with unitPrice 1e10 -> SQLSTATE 22003 inside the txn -> 500.",
+   "proposed_fix": "Cap unitPrice (like afterSales MAX_AMOUNT) and reject >2 decimals before conversion.",
+   "regression_test": "POST unitPrice:1e10 -> 400.",
+   "confidence": "high"
+  },
+  {
+   "id": "A2-08",
+   "severity": "P3",
+   "title": "After-sales summary silently drops RMB cases when no USD/CNY rate exists, and uses a different rate than accounting",
+   "location": "apps/backend/src/routes/afterSales.ts:124-130; apps/backend/src/lib/fx.ts:55-62; apps/backend/src/routes/accounting.ts:~1489",
+   "evidence": "cnyPerUsdOnFrag returns NULL with empty fx_rates; amount/NULL is NULL and SUM skips it while COUNT(*) counts it. Summary converts at the case-open-day rate, accounting target at the latest rate.",
+   "failure_scenario": "Fresh dev/test DB, one RMB case of 700: tile shows {count:1, amount:0}. In prod the same case shows two different USD figures on the after-sales tiles and the accounting page.",
+   "proposed_fix": "Return an unconverted count (or fall back to latest rate) and pick one conversion rule for both screens.",
+   "regression_test": "Summary with an RMB case and empty fx_rates does not report a silent 0.",
+   "confidence": "high"
+  },
+  {
+   "id": "A2-09",
+   "severity": "P3",
+   "title": "RS-483 did not update docs/DATABASE.md for after_sales_cases.currency_code",
+   "location": "docs/DATABASE.md:1404-1421; apps/backend/migrations/0220_after_sales_currency.sql",
+   "evidence": "The after_sales_cases section has no currency_code row or CHECK and still describes amount as USD; apps/backend/AGENTS.md requires the doc change in the same PR.",
+   "failure_scenario": "A reader of DATABASE.md sums after_sales_cases.amount as USD and mixes RMB refunds into USD totals.",
+   "proposed_fix": "Add currency_code char(3) NOT NULL DEFAULT 'USD', CHECK IN ('USD','CNY'), 'amount is in currency_code'.",
+   "regression_test": "n/a (docs)",
+   "confidence": "high"
+  },
+  {
+   "id": "A2-10",
+   "severity": "P3",
+   "title": "Duplicate-lot sell-order diff pairs occurrences by position, mislabelling removals as edits (residual of BD-07)",
+   "location": "apps/backend/src/services/sellOrderLineMatch.ts:64-75",
+   "evidence": "Within a lot bucket the n-th before occurrence is paired with the n-th after occurrence in position order.",
+   "failure_scenario": "Lot X at pos0 {2,New} and pos1 {3,Used}; manager deletes pos0. Timeline records line_edited X 2->3 New->Used plus line_removed {3,Used} instead of removed {2,New}; a pure reorder writes two phantom line_edited events.",
+   "proposed_fix": "Cancel identical snapshots first (tupleKey multiset), then pair the remainder by fewest changed fields.",
+   "regression_test": "diffSellOrderLines([X/2/New,X/3/Used],[X/3/Used]) -> removed=[X/2/New], edited=[]; swapped order -> empty diff.",
+   "confidence": "high"
+  },
+  {
+   "id": "A2-11",
+   "severity": "P3",
+   "title": "Sub-cent PO values revert a submitted PO to Draft for an edit that never lands",
+   "location": "apps/backend/src/routes/orders/shared.ts:557-566,648-657; apps/backend/src/routes/orders/patch.ts:462-473,930-941",
+   "evidence": "changesMaterialField compares numbers at 1e-9 while columns are NUMERIC(12,2) and validateLineInput does not limit decimals.",
+   "failure_scenario": "Purchaser saves a Reviewing PO with unitCost 33.333 (stored 33.33): PO reverts to Draft, managers notified, stored value unchanged and a 'reverted' event with empty changes is written.",
+   "proposed_fix": "Round money inputs to 2 dp before comparing; only write reverted when something changed.",
+   "regression_test": "PATCH Reviewing PO with stored+0.003 -> lifecycle stays reviewing, no reverted event.",
+   "confidence": "medium"
+  },
+  {
+   "id": "A2-12",
+   "severity": "P3",
+   "title": "Draft PO delete reads sell-order claims without locking the lines",
+   "location": "apps/backend/src/routes/orders/lifecycle.ts:93-98,143; apps/backend/src/services/sellOrderCreate.ts:56",
+   "evidence": "Delete checks sell_order_lines unlocked, then deletes the order; SO create locks only the lines.",
+   "failure_scenario": "A Draft PO line hand-set to Done is claimed by a SO committing between the check and the DELETE; cascade sets sell_order_lines.inventory_id NULL, orphaning the SO line.",
+   "proposed_fix": "Lock the PO's lines ORDER BY id FOR UPDATE before the claim check.",
+   "regression_test": "Two-connection interleave -> 409 or clean, never NULL inventory_id.",
+   "confidence": "medium"
+  },
+  {
+   "id": "A2-13",
+   "severity": "P3",
+   "title": "Package subqueries inside locking SELECTs read a pre-wait snapshot",
+   "location": "apps/backend/src/services/orderAdvance.ts:521; apps/backend/src/routes/orders/patch.ts:331-333",
+   "evidence": "has_package / pkg subqueries are evaluated with the statement snapshot taken before the FOR NO KEY UPDATE wait (same class as BD-02).",
+   "failure_scenario": "PATCH adding a tracking number commits while /advance enforce:'all' waits on the PO lock: advance wrongly refuses missingTracking.",
+   "proposed_fix": "Read packages in a separate statement after the lock.",
+   "regression_test": "Barrier test: advance waits on PATCH inserting a package, then succeeds.",
+   "confidence": "medium"
+  },
+  {
+   "id": "A2-14",
+   "severity": "P3",
+   "title": "'submitted' order event records raw line sum, ignoring a negotiated lot price",
+   "location": "apps/backend/src/services/orderAdvance.ts:608-618",
+   "evidence": "Computes SUM(qty*unit_cost) rather than the goods total syncOrderGoodsTotal maintains (pinned orders.total_cost, qty_purchased).",
+   "failure_scenario": "PO with agreed $8,500 lot price over lines summing $9,000 shows 'submitted at $9,000' in the audit timeline.",
+   "proposed_fix": "Record COALESCE(o.total_cost, SUM(COALESCE(qty_purchased,qty)*unit_cost)).",
+   "regression_test": "Submit a pinned-total PO and assert detail.totalCost.",
+   "confidence": "high"
+  },
+  {
+   "id": "A2-15",
+   "severity": "P3",
+   "title": "GET /api/inventory/:id leaks transfer_order_id to purchasers",
+   "location": "apps/backend/src/routes/inventory.ts:1268-1269,1301-1306",
+   "evidence": "Selects l.* and the purchaser branch strips only cost fields, while event reads strip transfer ids because transfer orders are manager-only (:42-48).",
+   "failure_scenario": "A purchaser GETs a transferred line of their own PO and sees the manager-only transfer order id.",
+   "proposed_fix": "delete r.transfer_order_id in the purchaser branch.",
+   "regression_test": "Purchaser GET asserts no transfer_order_id.",
+   "confidence": "medium"
+  },
+  {
+   "id": "A2-16",
+   "severity": "P3",
+   "title": "[carryover BD-11] services/orderAdvance.ts and routes/sellOrders.ts import packing persistence from a route module",
+   "location": "apps/backend/src/services/orderAdvance.ts:15; apps/backend/src/routes/sellOrders.ts:49; apps/backend/src/routes/sellOrderPack.ts:38",
+   "evidence": "import { prunePackRows } from '../routes/sellOrderPack' \u2014 service depends on HTTP registration (route->service->route cycle).",
+   "failure_scenario": "Structural: a change to sellOrderPack.ts route registration or its imports affects the archive lifecycle path; blocks an import-boundary check.",
+   "proposed_fix": "Move keyedLines/prunePackRows into services/sellOrderPack.ts; add an import-boundary lint.",
+   "regression_test": "Existing sell-order-pack / orders-archive tests stay green; boundary check passes.",
+   "confidence": "high"
+  }
+ ],
+ "carryover": [
+  {
+   "old_id": "BD-01",
+   "status": "still open",
+   "evidence": "Out of lane (routes/bankTx.ts) \u2014 not re-verified by A2."
+  },
+  {
+   "old_id": "BD-02",
+   "status": "fixed",
+   "evidence": "inventory.ts:2083-2098 reads committed claims in a separate statement after the line lock; transfer create :1780-1801, discard :2155-2166, PATCH :1440-1462 also separate."
+  },
+  {
+   "old_id": "BD-03",
+   "status": "still open",
+   "evidence": "Out of lane (bankTx.ts/internalTx.ts) \u2014 not re-verified by A2."
+  },
+  {
+   "old_id": "BD-04",
+   "status": "still open",
+   "evidence": "Out of lane (dashboard.ts/contributions.ts) \u2014 not re-verified by A2."
+  },
+  {
+   "old_id": "BD-05",
+   "status": "fixed",
+   "evidence": "Owner re-read under lock: inventory.ts:1425-1431; PATCH/evidence/handoff/advance re-check owner on the locked PO row (orders agent sweep)."
+  },
+  {
+   "old_id": "BD-06",
+   "status": "fixed",
+   "evidence": "orderLocks.ts documents orders->sell_orders->order_lines; SO Done locks source POs then header then lots (sellOrders.ts:1472-1484) and re-reads owner POs after the header lock (:1551-1560); archive orderAdvance.ts:374-382. Residual gap in A2-03 (EXISTS subquery snapshot)."
+  },
+  {
+   "old_id": "BD-07",
+   "status": "fixed",
+   "evidence": "sellOrderLineMatch.ts now matches duplicate lots as a multiset; edits are no longer lost. Residual mislabelling recorded as A2-10."
+  },
+  {
+   "old_id": "BD-08",
+   "status": "still open",
+   "evidence": "POST now uses PATCH validators (customers.ts:95-96, categories.ts:57-58) but PATCH accepts blank name/label \u2014 A2-06."
+  },
+  {
+   "old_id": "BD-09",
+   "status": "fixed",
+   "evidence": "itemTypes.ts:87-89 locks the row FOR UPDATE before the rename sweep."
+  },
+  {
+   "old_id": "BD-10",
+   "status": "fixed",
+   "evidence": "tier1-data-integrity.test.ts uses sellableLine(token, 3) for the partial sale and a separate full-sell Sold assertion."
+  },
+  {
+   "old_id": "BD-11",
+   "status": "still open",
+   "evidence": "orderAdvance.ts:15 and sellOrders.ts:49 import prunePackRows from routes/sellOrderPack.ts \u2014 A2-16."
+  },
+  {
+   "old_id": "SUP-01",
+   "status": "fixed",
+   "evidence": "suppliers.ts:551-555 (PATCH), :611-616 (note POST), :647-651 (note DELETE) re-check owner under FOR NO KEY UPDATE."
+  },
+  {
+   "old_id": "SUP-02",
+   "status": "fixed",
+   "evidence": "packages.ts:301-309 compares supplier_name_key(name) = supplier_name_key(seller)."
+  },
+  {
+   "old_id": "SUP-03",
+   "status": "fixed",
+   "evidence": "suppliers.ts:214-250 filters follow/health over the full scoped book before paging."
+  },
+  {
+   "old_id": "SUP-04",
+   "status": "still open",
+   "evidence": "Out of lane (scripts/seed.mjs) \u2014 not re-verified by A2."
+  },
+  {
+   "old_id": "SUP-05",
+   "status": "fixed",
+   "evidence": "lib/xlsx.ts:22-46 handles illegal chars, 31-char cap, apostrophes and case-insensitive duplicates."
+  },
+  {
+   "old_id": "ARCH: Define one domain transaction/lock protocol",
+   "status": "still open",
+   "evidence": "orderLocks.ts documents PO/SO/line order but transfer paths lock lines unordered (A2-04), archive discovers SOs via a pre-wait snapshot (A2-03), Draft delete checks claims unlocked (A2-12); no shared protocol module beyond lockOrdersTx."
+  },
+  {
+   "old_id": "ARCH: Move packing persistence below HTTP registration",
+   "status": "still open",
+   "evidence": "See BD-11 / A2-16."
+  }
+ ],
+ "needs_owner": [
+  "A2-01: confirm whether manual Sold->Done (resurrecting stock) in the inventory editor is an intended manager correction path before it is blocked."
+ ],
+ "notes": "Out-of-lane carryover items (BD-01/03/04, SUP-04) were marked 'still open' only because A2 did not re-verify them, not because they regressed; other lanes own them. Source files were read in full (split across three reviewer passes, every P2 re-verified against the code by the lane owner). lib/sellOrderPriceTemplate.ts was only scanned (the shell treats it as binary; export-only). The ~150 test files in A2.files.txt were not reviewed one by one: only tier1-data-integrity.test.ts (BD-10) was read, and stock-lock-order/review-lock-protocol were checked for existence. No tests were run, because the backend baseline had not finished (no DONE in baseline/summary.txt) and no repro tests were written. Money: stored amounts are numeric(12,2) and the ::float use is display/export only, so no integer-cents defect was found beyond A2-07/A2-11. RS-483: the currency enum matches the DB CHECK, POST/PATCH validation agree, audit events carry currency, and old rows default to USD. No live resources touched."
+}

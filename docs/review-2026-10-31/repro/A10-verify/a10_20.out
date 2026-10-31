@@ -1,0 +1,2 @@
+txn ids sent by process 1 and process 2: ['rsrouter-1', 'rsrouter-1']
+homeserver down raises MatrixError (-> ack failed, permanent=True): PUT /_matrix/client/v3/rooms/%21room%3Ahs/send/m.room.message/rsrouter-1 failed: <urlopen error [Errno 61] Connection refused>

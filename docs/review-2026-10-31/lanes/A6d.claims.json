@@ -1,0 +1,37 @@
+[
+ {
+  "id": "A6d-01",
+  "severity": "P2",
+  "title": "Phone line form: the Total cost box rewrites itself on every keystroke, so you can't type a lot total into it",
+  "location": "apps/frontend/src/pages/SubmitForm.tsx:641",
+  "failure_scenario": "Qty 1, the purchaser starts typing 150 in Total cost. After '1' the box shows '1.00'. Typing '5' makes '1.005', which parses to unit 1.00 and shows '1.00' again, so the value stays at $1. With qty 3, '1' shows as '0.99' (unit 0.33). Backspace to empty parses as NaN and returns early, so the box can't be cleared either. The comment above the row says this field exists so a purchaser 'can enter the negotiated bulk total', and on the phone that only works by pasting."
+ },
+ {
+  "id": "A6d-02",
+  "severity": "P2",
+  "title": "Double-tapping Add item when adding a line from an existing PO's products screen inserts the line twice",
+  "location": "apps/frontend/src/pages/SubmitForm.tsx:707 (with apps/frontend/src/MobileApp.tsx:552-565, 636-641)",
+  "failure_scenario": "A purchaser on slow dock Wi-Fi adds a RAM line (qty 10) to an existing PO from the products screen and taps Add item twice. Two addLines PATCHes run back to back through the write queue. The PO now has two identical lines (20 units of phantom stock, double the cost), and the second may also re-flush the buffered photos."
+ },
+ {
+  "id": "A6d-03",
+  "severity": "P2",
+  "title": "[cross-lane] fmtDate/fmtDateShort render calendar dates as UTC instants: Home follow-up dates and package ETAs show the previous day in Denver",
+  "location": "apps/frontend/src/lib/format.ts:50-54 (callers apps/frontend/src/pages/desktop/DesktopHome.tsx:125, :153, :356; apps/frontend/src/pages/Home.tsx:195)",
+  "failure_scenario": "A supplier's follow-up falls due tomorrow, 2026-11-03 (daysUntil=1). In Denver the Home 'Follow-ups' row reads 'Nov 2', which is today, while the row is not styled as due today. A package with ETA 2026-11-05T00:00:00Z reads 'ETA Nov 4' on Home and 'Thu, Nov 5' on the Shipping page."
+ },
+ {
+  "id": "A6d-04",
+  "severity": "P2",
+  "title": "Inventory editor: clearing the Unit cost field saves the lot at $0 cost",
+  "location": "apps/frontend/src/lib/inventoryEditPatch.ts:45",
+  "failure_scenario": "A manager selects the unit cost '19' to retype it, gets distracted and clicks Save with the field empty. The lot's unit_cost becomes 0, which feeds inventory value, profit and commission ((unit_price - unit_cost) * qty) with no warning."
+ },
+ {
+  "id": "A6d-05",
+  "severity": "P2",
+  "title": "[cross-lane] Review/Commission-tab commission preview disagrees with the commission the backend owes (unpriced lines' cost charged, negative not clamped)",
+  "location": "apps/frontend/src/lib/reviewPricing.ts:81-88 (same formula at apps/frontend/src/pages/desktop/DesktopEditOrder.tsx:696-701)",
+  "failure_scenario": "PO with lines A 4x$10 sold @$25, B 2x$30 unpriced, C 1x$5 @$8, fees $7, rate 50% (the reviewPricing test fixture). Box Check / Commission tab shows profit -$4, commission -$2, 'earns' -$2 (red). Backend: projected_profit = priced lines only, roughly (25-10)*4+(8-5) minus their fee share \u2248 +$56, commission \u2248 $28; that is what the bank-link picker matches against and what Accounting/Home report as owed. Likewise any fully priced PO below cost shows a negative commission the server treats as $0. The manager approving on the Review page sees a different payout than the system books."
+ }
+]

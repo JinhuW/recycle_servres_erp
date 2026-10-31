@@ -1,0 +1,3 @@
+healthz baseline: 0.00s
+ws (no ticket) ended: InvalidStatus
+healthz while an unauthenticated ws is open: 9.51s

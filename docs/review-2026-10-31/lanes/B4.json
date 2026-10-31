@@ -1,0 +1,147 @@
+{
+  "lane": "B4",
+  "files_read": [
+    "docs/review-2026-10-31/BRIEF.md",
+    "docs/superpowers/plans/2026-10-24-erp-fleet/HOSTS.md",
+    "docs/superpowers/plans/2026-10-24-erp-fleet/CONTRACTS.md (env table, release fallback)",
+    "apps/fleet-agent/src/agent.ts (v1.380.1 vs 62f53dec)",
+    "apps/fleet-agent/src/plan.ts (v1.380.1 vs 62f53dec)",
+    "apps/fleet-agent/src/version.ts",
+    "trackers/reddit/AGENTS.md",
+    "trackers/reddit/infra/README.md",
+    "trackers/reddit/scripts/deploy-workers.sh",
+    "trackers/reddit/.gitignore",
+    "trackers/facebook/VERSION",
+    "trackers/facebook/scripts/ai-verdict-bridge.py (header)",
+    "memory: erp-fleet-task-queue-project.md, fleet-mark-healthy-rollout.md, railway-routine-needs-env-token.md, fleet-ai-verdict-logs.md",
+    "resource: ssh worker@10.10.60.14 (docker ps -a, docker images, docker inspect, docker logs --since 24h, docker system df, df, free, systemctl --failed, list-timers, crontab -l, /etc/docker/daemon.json, ~/fleet-ai-bridge/*.log, file modes)",
+    "resource: ssh ubuntu@161.118.231.106, 161.118.217.15, 168.107.77.128, 161.118.245.210, 40.233.71.45 (OCI reddit workers: docker ps/inspect/logs, df, systemctl --failed, .env mode)",
+    "resource: terraform output -json worker_ips (main checkout trackers/reddit/infra/terraform, state read only)",
+    "resource: http://10.10.60.5:9093/api/v2/status, /api/v2/silences, /api/v2/alerts (Alertmanager)",
+    "resource: http://10.10.60.5:9090/api/v1/targets, /rules, /status/buildinfo, /alertmanagers (Prometheus)",
+    "resource: http://10.10.10.73:9200/fb-tracker-2026.10.31/_search (aggregate ai_eval count per worker)",
+    "resource: RemoteTrigger get + list_runs + get_run_log trig_01W3wmHwWNUGr63STjr9e5UT (run cse_01LBzvMzLrheVx4xnowf9c4X)"
+  ],
+  "findings": [
+    {
+      "id": "B4-01",
+      "severity": "P2",
+      "title": "Fleet host runs fleet-agent 1.380.1; five agent fixes since (RS-463/466/470/472/474) never reached it, and 1.380.1 still removes signed-in workers beyond the host count",
+      "location": "worker@10.10.60.14 container rs-fleet-agent image ghcr.io/jinhuw/fleet-agent:1.380.1@sha256:fb02c2f3…ec74; apps/fleet-agent/src/plan.ts:242 at v1.380.1 vs plan.ts:253-256 at 62f53dec",
+      "evidence": "docker inspect rs-fleet-agent shows 1.380.1, started 2026-10-29T21:00Z. git log v1.380.1..62f53dec -- apps/fleet-agent lists f979adc8 (RS-463 'hosts never remove a worker'), 224e7673 (RS-466 agent replacements), 3de8be34 (RS-470), 724af2d4 (RS-472 'a removal keeps operator holds and the stagger'), eaf187f7 (RS-474 'agent removal race'). At v1.380.1 plan.ts:242 pushes {kind:'remove', reason:'beyond count N'} for any worker numbered above desired.count. Current plan.ts:256 instead leaves it running and removes only a worker beyond count on an old image (253). Prod ERP (main fb4afda4) already ships the backend/UI half of these changes, for example the dropped Removed status.",
+      "failure_scenario": "An operator lowers worker-60-14's capacity on prod's Fleet page, for example from 10 to 8 to free accounts. Agent 1.380.1 stops and removes rs-fleet-worker-60-14-9 and -10, throwing away two signed-in browsers. Raising the count later costs two fresh Facebook logins, each of which risks a checkpoint. The UI copy written for RS-463 tells the operator that hosts never remove a worker, so nothing warns them.",
+      "proposed_fix": "Push the agent image at the current root version and swap the agent container on both hosts. The memory recipe covers it: copy the FLEET_* env, stop -t 120, run new with the same mounts. It is not a login. Until then, do not lower a host's count.",
+      "regression_test": "apps/fleet-agent/tests/plan.test.ts already covers 'beyond count stays' at HEAD. Add a host-version check: the Hosts tab or /api/fleet report should flag an agent whose reported version is below the minimum the backend expects.",
+      "confidence": "high"
+    },
+    {
+      "id": "B4-02",
+      "severity": "P2",
+      "title": "[cross-lane] 45% of fleet city searches on 10.10.60.14 end with 0 cards: Facebook answers 'No listings found within 40 miles' though the monitor asks for radius=100",
+      "location": "worker@10.10.60.14 rs-fleet-worker-60-14-{1,3..10} logs (24h to 2026-10-31T20:15Z); vendored monitor search/retrieve in image aimm-recycle:0.15.0@sha256:462d29f2",
+      "evidence": "The last 24h hold 629 '[City] Done' items. 281 of them had '1 search, 0 cards', and 277 of those followed '[Retrieve] No listings found for \"<query>\" within 40 miles' with an ERROR '[Search] Failed to get search results'. Meanwhile 618 searches logged 'with radius=100' and 15 'radius=60', and Facebook reported 40 miles every time. Large metros come back empty repeatedly: Atlanta GA 4x, Tampa 4x, San Jose 3x. A separate parser error, '[Retrieve] Failed to parse search results N listing: list index out of range', appears about 1,550 times in 24h. It hits individual cards on pages that did load 120 cards.",
+      "failure_scenario": "Each zero-card item still spends a task from the ~665/day search budget, which already trails ~972/day of demand after the 416-city catalog push. Nearly half the budget therefore buys nothing, and leads within 40-100 miles of the city are never searched. The radius filter is probably not applied, or the multi-word query is too narrow for the 40-mile default. The parse errors silently drop cards from pages that did load.",
+      "proposed_fix": "The facebook-tracker lane should check how the vendored monitor applies the radius: the URL parameter versus the location dialog that sets the account's saved radius. It should also check whether the query strings ('server ram memory ddr4 ddr5 ecc', 'ssd lot server ssd samsung micron') are too specific, and fix the card parser's index assumption. Confirm on one worker's VNC screenshot, read-only, before any change.",
+      "regression_test": "Monitor unit test: a search URL built for radius=100 carries the radius parameter Facebook honours. Parser fixture test with a current card HTML that previously raised IndexError.",
+      "confidence": "medium"
+    },
+    {
+      "id": "B4-03",
+      "severity": "P2",
+      "title": "Nightly Railway inspection routine has been blocked every night since at least 2026-07-14, yet each run reports SUCCEEDED; even unblocked, its prompt needs origin/dev, which the sandbox clone lacks",
+      "location": "RemoteTrigger trig_01W3wmHwWNUGr63STjr9e5UT, env env_01LUc7Gka7hUDXMtor55tYnf, last run cse_01LBzvMzLrheVx4xnowf9c4X (2026-10-31T06:09Z)",
+      "evidence": "get: enabled, cron '0 6 * * *', last_run.status ROUTINE_RUN_STATUS_SUCCEEDED, next_run_at 2026-11-01T06:08Z. The run log shows no RAILWAY_* env and no Railway MCP. The egress proxy returned 'connect_rejected' for backboard.railway.com:443. The run wrote 'blocked for the 5th night in a row' to inspection-reports (d6d1b0ab) and ended 'result: success'. All 10 listed runs lasted about 60s. The same log also shows 'git log origin/dev … unknown revision', because the sandbox cloned only main. The prompt's Step 3/4 (check origin/dev, branch off origin/dev) would fail even after the token is added.",
+      "failure_scenario": "Production backend errors go untriaged every night while the routine dashboard shows green, and a crash loop or failing pg-r2-backup is never surfaced. After the owner adds a token, the routine still cannot branch off or compare against dev. That run could open a PR against a stale base or abort mid-fix.",
+      "proposed_fix": "Owner: add a read-only RAILWAY_API_TOKEN network secret and allow backboard.railway.com in env_01LUc7Gka7hUDXMtor55tYnf. Edit the prompt to start with 'git fetch origin dev inspection-reports'. Have a blocked run end with a non-success outcome or a push title, so it is not counted as green.",
+      "regression_test": "After the change, list_runs/get_run_log on the next run shows a get-logs call returning data and a successful 'git rev-parse origin/dev'.",
+      "confidence": "high"
+    },
+    {
+      "id": "B4-04",
+      "severity": "P2",
+      "title": "Fleet host 10.10.60.14 is not scraped by Prometheus, so its down, disk and memory states never alert",
+      "location": "http://10.10.60.5:9090/api/v1/targets (job node_exporter); worker@10.10.60.14:9100",
+      "evidence": "Prometheus has 8 active targets. node_exporter covers 10.10.60.5, .60.10, .60.11, 10.10.50.3 and 10.10.10.73, but not 10.10.60.14. node_exporter on 10.10.60.14 is listening (ss shows :9100, curl localhost:9100/metrics returns 200). server_alerts (ServerDown, DiskSpace*, HighMemory*) therefore never evaluate for the host that runs 9 of the fleet's signed-in workers.",
+      "failure_scenario": "Each worker image is 2.59 GB and old tags are never pruned (13.1 GB reclaimable today). With more releases, or a hung host, / fills or the box drops off the network and Telegram stays silent. The fleet then loses 9 workers' capacity until someone notices on the ERP page.",
+      "proposed_fix": "Add 10.10.60.14:9100 to the node_exporter job in the homelab-monitoring repo's prometheus.yml, and confirm the 10.10.60.5→10.10.60.14:9100 route. Optionally add 10.10.60.14's cadvisor.",
+      "regression_test": "curl 10.10.60.5:9090/api/v1/targets shows instance 10.10.60.14:9100 health=up.",
+      "confidence": "high"
+    },
+    {
+      "id": "B4-05",
+      "severity": "P2",
+      "title": "Secrets backup trackers/reddit/scripts/secrets.env.bak-20261022-192641 sits untracked and not gitignored in the main checkout",
+      "location": "~/Projects/recycle_servers_v2/recycle_servres_erp/trackers/reddit/scripts/secrets.env.bak-20261022-192641; trackers/reddit/.gitignore:9",
+      "evidence": "git status --porcelain shows '?? trackers/reddit/scripts/secrets.env.bak-20261022-192641'. git check-ignore matches only secrets.env (.gitignore:9 is the exact name 'secrets.env'). The file is mode 0600, from 2026-10-22 (the Railway-disclosure rotation day), and per deploy-workers.sh it holds DATABASE_URL, OPENROUTER_API_KEY, GHCR_READ_TOKEN and TELEGRAM_BOT_TOKEN. The contents were not read.",
+      "failure_scenario": "Any 'git add -A', 'git add trackers/reddit' or IDE 'stage all' in the main checkout commits pre-rotation or current tracker secrets to GitHub. The owner's own staging rule is the only thing stopping it, and agents run in that checkout too.",
+      "proposed_fix": "Change .gitignore:9 to 'secrets.env*' with '!secrets.env.example'. Owner: delete the .bak once the rotation is confirmed complete.",
+      "regression_test": "git check-ignore trackers/reddit/scripts/secrets.env.bak-x prints a match.",
+      "confidence": "high"
+    },
+    {
+      "id": "B4-06",
+      "severity": "P3",
+      "title": "UPS alert rules are dead: their exporter job 'cyberpower' is not a Prometheus target",
+      "location": "http://10.10.60.5:9090/api/v1/rules group ups_alerts; /api/v1/targets",
+      "evidence": "UPSExporterDown is 'up{job=\"cyberpower\"} == 0'. No cyberpower target exists among the 8 active targets, so the series is absent and the rule can never fire. UPSOnBattery, UPSLowBattery, UPSBatteryCritical and UPSOverload have no data.",
+      "failure_scenario": "A power cut puts the homelab on battery and nothing alerts, so the VM hosting coordinator, console and 4 fleet workers drops hard when the battery runs out.",
+      "proposed_fix": "Re-add the cyberpower exporter scrape job, or change UPSExporterDown to absent(up{job=\"cyberpower\"}) so a missing target alerts.",
+      "regression_test": "promtool test rules case with no cyberpower series expects UPSExporterDown firing.",
+      "confidence": "medium"
+    },
+    {
+      "id": "B4-07",
+      "severity": "P3",
+      "title": "Exited worker rs-fleet-worker-60-14-2 (0.14.7, dev FLEET_URL) blocks removal of the dev→prod fleet forward and leaves one slot idle",
+      "location": "worker@10.10.60.14 container rs-fleet-worker-60-14-2; docs/superpowers/plans/2026-10-24-erp-fleet/HOSTS.md:53",
+      "evidence": "The container exited 75 on 2026-10-27, and its env has FLEET_URL=https://inventory-dev.recycleservers.com. Agent note at 2026-10-29T21:00Z: 'worker-60-14-2: stopped by hand (exit 75); left stopped'. HOSTS.md's pre-removal check (grep inventory-dev over rs-fleet- containers) still matches it. The agent reports count 10 with 10 containers, but only 9 run.",
+      "failure_scenario": "The dev Worker's FLEET_FORWARD_URL and FLEET_FORWARD_PROXY_SECRET stay live indefinitely, so a bearer path into prod's /api/fleet through the dev hostname remains. Meanwhile one capacity slot on the host does nothing.",
+      "proposed_fix": "Owner decision: 'docker rm rs-fleet-worker-60-14-2' frees the slot. The agent then recreates it on the prod URL, and its first claim is a login. After that the forward can go.",
+      "regression_test": "The HOSTS.md grep prints nothing on both hosts.",
+      "confidence": "high"
+    },
+    {
+      "id": "B4-08",
+      "severity": "P3",
+      "title": "ai-verdict-bridge cron on 10.10.60.14 is obsolete (every worker now ships to OpenSearch) and indexes 0 every 5 minutes",
+      "location": "worker@10.10.60.14 crontab: '*/5 … ai-verdict-bridge.py' and '* * * * * … fleet-log-follow.py'; ~/fleet-ai-bridge/bridge.log",
+      "evidence": "All 9 running workers have AIMM_OPENSEARCH_URL in their env. bridge.log ends with 'indexed 0' every 5 minutes. follow.log has not changed since 2026-10-29 21:22. OpenSearch fb-tracker-2026.10.31 holds ai_eval events from worker-60-14-1/3/4/5/6/7/10 directly. The memory note fleet-ai-verdict-logs says to remove the cron lines once no worker lacks the variable.",
+      "failure_scenario": "A later worker log format change makes the bridge re-index old lines as duplicate 'bridged' verdicts, which double-counts AI ratings in dashboards. It also adds noise when debugging.",
+      "proposed_fix": "Owner: remove both cron lines on 10.10.60.14 and check the homelab VM the same way. This is not a login.",
+      "regression_test": "crontab -l on the host has no fleet-ai-bridge lines.",
+      "confidence": "high"
+    },
+    {
+      "id": "B4-09",
+      "severity": "P3",
+      "title": "[cross-lane] deploy-workers.sh puts GHCR_READ_TOKEN in the ssh command line",
+      "location": "trackers/reddit/scripts/deploy-workers.sh:58",
+      "evidence": "\"echo '${GHCR_READ_TOKEN}' | sudo docker login …\" is interpolated into the remote command string. The token is therefore in local ps argv for the ssh process and in the remote sshd/bash command line, and in any auditd or shell history that records it. The env file a few lines above is correctly piped over stdin.",
+      "failure_scenario": "Anyone with process listing on the Mac or an OCI VM during a deploy, or with access to remote audit logs, reads the read:packages PAT. The same PAT is the fleet hosts' GHCR pull credential.",
+      "proposed_fix": "Pipe the token over stdin: printf '%s' \"$GHCR_READ_TOKEN\" | ssh … \"sudo docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin\".",
+      "regression_test": "shellcheck plus a grep check that no '${GHCR_READ_TOKEN}' appears inside a quoted ssh command.",
+      "confidence": "high"
+    },
+    {
+      "id": "B4-10",
+      "severity": "P3",
+      "title": "Fleet host keeps 13.1 GB of superseded worker and agent images with no prune policy",
+      "location": "worker@10.10.60.14 docker system df",
+      "evidence": "14 images, 3 active, 13.14 GB reclaimable. Worker images 0.14.0, 0.14.1, 0.14.4, 0.14.6 and 0.14.7, plus two untagged 2.59 GB builds, and agents 1.348.0, 1.349.0, 1.352.0 and 1.379.2 all remain. Disk is 22G/96G (23%) today.",
+      "failure_scenario": "At about one 2.6 GB worker release every 1-2 days, the disk reaches the 80% DiskSpaceWarning line in roughly a month. No alert covers this host (B4-04).",
+      "proposed_fix": "Have the agent prune images not used by any rs-fleet- container after a successful release, or add a weekly 'docker image prune -a --filter until=168h' timer. Keep 0.14.7 while worker-60-14-2 exists.",
+      "regression_test": "Agent unit test: after a release completes, images not referenced by any container are removed.",
+      "confidence": "medium"
+    }
+  ],
+  "carryover": [],
+  "needs_owner": [
+    "B4-01: swap rs-fleet-agent on 10.10.60.14 (and homelab) to an agent image ≥ v1.390.1. Not a login, but it replaces a live container, so it needs your yes. It also needs a check that a fleet-agent image newer than 1.380.1 was ever pushed to GHCR; I could not list private GHCR tags read-only.",
+    "B4-03: add RAILWAY_API_TOKEN (read-only) plus a backboard.railway.com allowance to cloud env env_01LUc7Gka7hUDXMtor55tYnf, and add 'git fetch origin dev' to the routine prompt.",
+    "B4-07: decide whether to docker rm rs-fleet-worker-60-14-2. The recreated worker's first claim is a Facebook login.",
+    "B4-04/B4-06: edit the homelab-monitoring prometheus.yml. The repo clone is not on this Mac under ~/Projects, so Alertmanager config drift could not be diffed against source.",
+    "B4-02: confirming the radius cause needs a VNC screenshot of a worker's search page or a monitor code read. Both are read-only, but the screenshot goes through the console, so it belongs to the facebook-tracker lane.",
+    "Homelab VM 10.10.10.73 fleet agent and workers were not inspected here; that belongs to the facebook-tracker live lane."
+  ],
+  "notes": "Live state 2026-10-31 ~20:15 UTC. Fleet host worker-60-14: Ubuntu kernel 6.8.0-147, up 7 days, Docker 29.9.2, 62 GB RAM (42 available), / 23% used, no failed systemd units, clock synced. The agent is fleet-agent 1.380.1 (repo root 1.395.0). Nine workers run aimm-recycle:0.15.0@sha256:462d29f2…dd1, which matches facebook-tracker VERSION 0.15.0 and the RS-454 rollout digest, all healthy and all on the prod FLEET_URL. Worker -2 has been exited since 10-27 on 0.14.7. The agent logged 0 errors or warnings in 24h. Workers -8 and -9 were recreated by the agent at 18:27 and 18:30 UTC today after exit-75 retries; that is the agent's normal no-free-slot loop, and each new claim is a login. daemon.json caps logs at 10m x 5, and env and docker config files are 0600. OCI Reddit fleet: the 4 Singapore A1 hosts and 1 Toronto micro from terraform output all run ghcr.io/jinhuw/reddits_tracker:af37edd8 (one image id f719128e), which equals the newest commit touching trackers/reddit (af37edd8, RS-476). Containers started 09:25-09:29 UTC today with 0 restarts, disks are 18-20% used, there are no failed units, .env is 0600, and the only 'error' log matches were post titles. Alertmanager on 10.10.60.5 is 0.28.1 (meets ≥0.28.1), up since 2026-10-23, and routes all severities to one Telegram receiver with bot_token_file (no inline secret). Critical inhibits warning and info; there are no active alerts and no silences. Its API on :9093 is unauthenticated and reachable from the office LAN (10.10.100.x), so anyone there can create silences. That is LAN-only, so it is not raised as a finding, but it is worth a reverse-proxy auth. Prometheus is 2.55.1 with 8 targets, all up. Config drift against the homelab-monitoring repo was NOT checked because no clone exists under ~/Projects or ~/orca. Scheduled jobs: the cloud routine is blocked (B4-03). Host crons on 60.14 run but are obsolete (B4-08). Railway crons (db-sync, uptime, pg-r2-backup) and Cloudflare/Telegram jobs were not inspected here; they belong to the ERP-ops lanes. Commands used: ssh docker ps/inspect/logs/system df, df, free, systemctl --failed/list-timers, crontab -l, cat, curl GET to Prometheus, Alertmanager and OpenSearch, terraform output, and RemoteTrigger get/list_runs/get_run_log. Nothing was restarted, pulled, edited or logged in."
+}

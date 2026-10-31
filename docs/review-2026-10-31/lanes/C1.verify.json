@@ -1,0 +1,78 @@
+{
+  "lane": "C1",
+  "verdicts": [
+    {
+      "id": "C1-01",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": "P3",
+      "evidence": "docs/FEATURES.md:108 says 'Managers can reassign a PO's purchaser until it is Done'; apps/backend/src/routes/orders/patch.ts:366-389 throws doneLocked for body.onBehalfOfUserId when isClosedBook(lifecycle) (REVIEWED_LIFECYCLES = ['ready_to_pay','done'], services/orderAdvance.ts:50). Repro: TEST_DATABASE_URL=...:55731 npx vitest run tests/orders-ready-to-pay.test.ts -t ownership -> 1 passed; the manager PATCH onBehalfOfUserId at Ready to Pay returns 409 'Order is Ready to Pay or Done and cannot be modified' (repro/C1-verify/C1-01-ready-to-pay-reassign.txt).",
+      "reason": "The doc line is wrong, but FEATURES itself states the correct rule at :358 ('ownership freeze' at Ready to Pay), and the code fails safe with a clear 409. Self-contradictory doc, no data risk: P3."
+    },
+    {
+      "id": "C1-02",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": "P3",
+      "evidence": "docs/FEATURES.md:3083-3125 describes the Fleet tab with a Live/Stale/Needs attention/Offline legend, Searches/Posts columns and a per-row Proxy column. The Fleet tab now renders fleet/FleetPage.tsx -> FleetAccountsTab (DesktopCoordinator.tsx:27,133); FleetLegend and FleetWorkers.WorkersCard (pages/desktop/FleetWorkers.tsx:53,74) have no importers (grep: only ActivityAside, eventDetail, statusNote, ProxyDeadChip are imported). FEATURES:3481-3500 describes the v1.344.0 replacement.",
+      "reason": "Stale description of components that are no longer rendered. The current behaviour is documented later in the same file and the stale text prescribes no login-causing action, so the harm is confusion, not a bad operation: P3."
+    },
+    {
+      "id": "C1-03",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": "P3",
+      "evidence": "RoundCard is defined at apps/frontend/src/pages/desktop/FleetQueue.tsx:67 and referenced nowhere else (grep -rn RoundCard apps/frontend/src -> only the definition); 'Move every worker to the queue' (fbcQueueEveryone) is used only inside RoundCard (FleetQueue.tsx:109). FEATURES:3301-3341 still presents Today's round and the bulk move on the Fleet tab.",
+      "reason": "Partly overstated: 'Start the round now' still exists, moved to the Tasks tab (fleet/FleetTasksTab.tsx:92, fleetRoundStart), so only its location is wrong; the round board and the bulk queue move are gone. Doc drift with dead code, no unsafe instruction: P3."
+    },
+    {
+      "id": "C1-04",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": null,
+      "evidence": "trackers/facebook/README.md:496 'Only `docker stop` ends it' and :465-468 list only the relogin directive for a parked worker. trackers/facebook/CHANGELOG.md [0.15.0] adds the one-shot `resume` directive (Mark healthy, ERP 1.380.0) and timeout retries; the vendored monitor at the VENDOR.md pin 3576db7b handles it (src/ai_marketplace_monitor/facebook.py:2210-2218, tests/test_fleet_mode.py:1834); ERP side apps/backend/src/fleet/workers.ts:52-67 (resume_id). Live homelab runs aimm-recycle:0.15.0 (docker ps, read-only).",
+      "reason": "The README steers an operator to docker stop, which is a new container and therefore a Facebook login, when Mark healthy resumes in the same browser. Directly contradicts the repo's first rule: P2 stands."
+    },
+    {
+      "id": "C1-05",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": null,
+      "evidence": "trackers/facebook/README.md:1208-1209: 'After editing, regenerate worker configs with `rsc gen-configs` and restart the workers.' AGENTS.md 'First rule' forbids restarting a worker to pick up a setting; FEATURES (search-to-alert Edit, v1.265.0) says saves reach workers between jobs.",
+      "reason": "A written instruction to restart the whole fleet, i.e. one login per worker. P2 stands."
+    },
+    {
+      "id": "C1-06",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": null,
+      "evidence": "Read-only `ssh 10.10.10.73 docker ps`: the homelab VM runs rs-fleet-agent (ghcr.io/jinhuw/fleet-agent:1.380.1) and rs-fleet-homelab-1..9 (aimm-recycle:0.15.0), plus coordinator/console; no compose region workers and no rs_fleetd agent. README.md:5-7, :55 ('statically pinned to one region'), :251-300 (scripts/deploy.sh restarts workers), :339-382 (rs_fleetd / rolling releases) present those as the live path. docs/tickets/RS-418 records 25 homelab workers retired on 2026-10-27. apps/fleet-agent is not named in the README (grep 'fleet-agent' -> 0 hits).",
+      "reason": "Overstated in one respect: the README does have a ~150-line 'Fleet mode' section on /api/fleet (:384-540), so the ERP fleet is not 'barely mentioned', though it is framed as 'growing' and the host agent is never named. The core claim holds: the deploy/upgrade instructions point at retired machinery whose scripts restart workers (logins). P2 stands."
+    },
+    {
+      "id": "C1-07",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": null,
+      "evidence": "Replayed the backend image CMD (apps/backend/Dockerfile: migrate.mjs && init-admin.mjs) with the Dockerfile ENV defaults on a disposable PG18: SELECT email, role FROM users -> 1 row, admin@recycle.local / manager (repro/C1-verify/C1-07-image-boot.txt). marcus@ comes only from scripts/seed.mjs, which the image never runs, and seed passwords are 'demo' (seed.mjs:414), not 'any password'; ENABLE_DEMO_ACCOUNTS only gates GET /api/auth/demo-accounts (routes/auth.ts:112-114). Login checks bcrypt (auth.ts verifyPassword).",
+      "reason": "The documented first login fails on a fresh `docker compose up`; the working credential (admin@recycle.local / admin) is not in the quick start. P2 (supported onboarding flow broken)."
+    },
+    {
+      "id": "C1-08",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": null,
+      "evidence": "docker-compose.override.yml is gitignored (.gitignore:56, git check-ignore) and absent from the tree (git ls-files has none); docker-compose.yml's postgres service publishes no host port ('No host port' comment). README.md:94-101 runs `docker compose up -d postgres` then `pnpm db:migrate` against localhost and only mentions the override as existing, never how to create it.",
+      "reason": "On a fresh clone the host-side loop cannot reach Postgres. Not run end to end (would need the user's compose stack), but the absence of any published port is deterministic from the files. P2 stands."
+    },
+    {
+      "id": "C1-09",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": "P3",
+      "evidence": "README.md:252-266 'Production deploy: Single-host Docker Compose' and :60-74 Caddy architecture; AGENTS.md Map: backend on Railway recycle-erp-experiment, frontend on Cloudflare Workers recycle-erp-prod/-dev; deploy/ has cloudflare/, railway-*; docs/agents/erp-ops.md documents Railway/Workers. README itself names Railway Postgres (:42) and the Railway backup cron (:271).",
+      "reason": "Wrong, but the operational docs agents and owners are directed to (AGENTS.md, erp-ops.md) are correct, and the README already mentions Railway in two places, so misdirecting a real release or incident is unlikely. Drift, not a trap: P3."
+    },
+    {
+      "id": "C1-10",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": null,
+      "evidence": "trackers/reddit/README.md:201 `ROLE=api API_TOKEN=devtoken pnpm dev` sets no ALERT_TRANSPORT; src/config.ts:70-71 defaults to 'telegram'; src/index.ts:94-106 starts the getUpdates reactions loop whenever transport is telegram. Offline repro: loadConfig() with the README env plus a dummy bot token -> {role:'api', alertTransport:'telegram', reactionsLoopStarts:true} (repro/C1-verify/C1-10-reddit-api-transport.txt). The local offset starts from a fresh telegram_state, so a poll with the prod token acknowledges prod's pending updates (reactions.ts:85-90). .env.example has a single TELEGRAM_BOT_TOKEN slot; src/loops/reactions.ts:4-7 says only the telegram transport should poll 'so a local api never takes production's updates'.",
+      "reason": "Not exercised against Telegram (that would need the prod token, a forbidden action); the impact depends on the developer's .env holding the production bot token, which the .env.example invites. The user-session sender part needs TELEGRAM_USER_SESSION too, so it is less likely. P2 stands."
+    }
+  ],
+  "needs_owner": [
+    "C1-10 live impact (a local api with the production bot token consuming prod getUpdates) was not exercised: it needs the production Telegram bot token, which ground rule 3 forbids handling."
+  ]
+}

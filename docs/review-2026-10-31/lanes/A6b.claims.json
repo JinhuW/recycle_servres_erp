@@ -1,0 +1,9 @@
+[
+ {
+  "id": "A6b-01",
+  "severity": "P2",
+  "title": "Sign-out skips the unsaved-changes guard and drops pending line saves",
+  "location": "apps/frontend/src/components/Sidebar.tsx:151; apps/frontend/src/pages/Profile.tsx:151; apps/frontend/src/lib/auth.tsx:142-148; apps/frontend/src/App.tsx:66-71; apps/frontend/src/lib/useLineSaveQueue.ts:159",
+  "failure_scenario": "A manager edits a PO, inventory item or sell order (dirty, guard registered) and clicks the sidebar sign-out icon next to their name. The edits are discarded with no prompt. In Review mode, ticking a line and signing out within the 400 ms debounce sends that tick without a session, and it is lost silently: the count never reaches the server."
+ }
+]
