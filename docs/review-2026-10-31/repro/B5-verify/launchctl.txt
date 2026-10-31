@@ -1,0 +1,38 @@
+== fbmonitor
+	path = /Users/jinhu/Library/LaunchAgents/com.recycleservers.fbmonitor.plist
+	state = running
+	program = /bin/sh
+	arguments = {
+	stdout path = /Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/monitor.out.log
+	stderr path = /Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/monitor.err.log
+	runs = 3
+	pid = 14535
+		state = active
+		state = active
+	properties = keepalive | runatload | inferred program | system service | managed LWCR | has LWCR | tle system
+== search-probe
+	path = /Users/jinhu/Library/LaunchAgents/com.recycleservers.search-probe.plist
+	state = not running
+	program = /bin/sh
+	arguments = {
+	stdout path = /Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/search-probe.out.log
+	stderr path = /Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/search-probe.err.log
+	runs = 10
+	last exit code = 0
+			keepalive = 0
+		state = active
+		state = active
+	properties = inferred program | system service | managed LWCR | has LWCR | tle system
+== keyword-eval
+	path = /Users/jinhu/Library/LaunchAgents/com.recycleservers.keyword-eval.plist
+	state = not running
+	program = /bin/sh
+	arguments = {
+	stdout path = /Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/keyword-eval.out.log
+	stderr path = /Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/keyword-eval.err.log
+	runs = 10
+	last exit code = 1
+			keepalive = 0
+		state = active
+		state = active
+	properties = inferred program | system service | managed LWCR | has LWCR | tle system

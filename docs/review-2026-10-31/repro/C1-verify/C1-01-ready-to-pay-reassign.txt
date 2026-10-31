@@ -1,0 +1,53 @@
+npm notice run recycle-erp-backend@0.1.0 npx
+npm notice run 'vitest' run tests/orders-ready-to-pay.test.ts -t ownership --reporter=verbose
+
+ RUN  v4.1.5 /Users/jinhu/orca/workspaces/recycle_servres_erp/brant/apps/backend
+
+ ↓ tests/orders-ready-to-pay.test.ts > Ready to Pay sits between Reviewing and Done > a bodiless manager advance from Reviewing lands on ready_to_pay with Done lines, then Done, then nothing
+ ↓ tests/orders-ready-to-pay.test.ts > Ready to Pay sits between Reviewing and Done > a purchaser cannot take the order from Reviewing to Ready to Pay
+ ↓ tests/orders-ready-to-pay.test.ts > Ready to Pay sits between Reviewing and Done > the list reports the stage label and keeps it when Done is hidden
+ ↓ tests/orders-ready-to-pay.test.ts > Ready to Pay sits between Reviewing and Done > entering Ready to Pay notifies the managers and the owner; a reopen into it does not
+ ↓ tests/orders-ready-to-pay.test.ts > moves between Reviewing, Ready to Pay and Done > a Draft sell order on a Done line blocks neither Ready to Pay ↔ Done nor the move back to Reviewing
+ ↓ tests/orders-ready-to-pay.test.ts > moves between Reviewing, Ready to Pay and Done > Ready to Pay ↔ Done both succeed while a Done line sits on a committed sell order; back to Reviewing leaves that line Done
+ ↓ tests/orders-ready-to-pay.test.ts > moves between Reviewing, Ready to Pay and Done > a manager may still jump Reviewing → Done, and reopen Done → Reviewing
+ ↓ tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > the purchaser is read-only, notes included
+stdout | tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > a manager may append a note but not touch costs, lines or ownership
+{"ts":"2026-10-31T21:07:45.345Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"5a55834b-b143-4f74-bb14-936b9344d1f1","method":"POST","path":"/api/auth/login","status":200,"ms":87}
+
+stdout | tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > a manager may append a note but not touch costs, lines or ownership
+{"ts":"2026-10-31T21:07:45.408Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"d3df63ac-c743-472c-9ce3-451609ef52b8","method":"POST","path":"/api/auth/login","status":200,"ms":62}
+
+stdout | tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > a manager may append a note but not touch costs, lines or ownership
+{"ts":"2026-10-31T21:07:45.424Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"22de2b3a-0441-4658-8316-4711c97745be","userId":"bb24060c-cd29-4fd7-9719-effc2e58e9a5","method":"POST","path":"/api/orders","status":201,"ms":16}
+
+stdout | tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > a manager may append a note but not touch costs, lines or ownership
+{"ts":"2026-10-31T21:07:45.436Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"70edfa77-2f2a-4267-828f-9db0d92048f6","userId":"bb24060c-cd29-4fd7-9719-effc2e58e9a5","method":"POST","path":"/api/orders/PO-1370/advance","status":200,"ms":11}
+
+stdout | tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > a manager may append a note but not touch costs, lines or ownership
+{"ts":"2026-10-31T21:07:45.444Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"96ea24b4-12e3-413f-b674-da3d83cf006e","userId":"75a0da1c-001d-4db7-bce8-6bffe57c319b","method":"POST","path":"/api/orders/PO-1370/advance","status":200,"ms":8}
+
+stdout | tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > a manager may append a note but not touch costs, lines or ownership
+{"ts":"2026-10-31T21:07:45.451Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"f8713b06-b300-4aa7-8b1e-df195f7f584e","userId":"75a0da1c-001d-4db7-bce8-6bffe57c319b","method":"POST","path":"/api/orders/PO-1370/advance","status":200,"ms":6}
+
+stdout | tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > a manager may append a note but not touch costs, lines or ownership
+{"ts":"2026-10-31T21:07:45.457Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"0f64d612-3a0e-4b0d-9f53-baa6bc38546d","userId":"75a0da1c-001d-4db7-bce8-6bffe57c319b","method":"PATCH","path":"/api/orders/PO-1370","status":200,"ms":7}
+
+stdout | tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > a manager may append a note but not touch costs, lines or ownership
+{"ts":"2026-10-31T21:07:45.461Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"7500e949-345a-4636-a1e2-1ad786e07327","userId":"75a0da1c-001d-4db7-bce8-6bffe57c319b","method":"PATCH","path":"/api/orders/PO-1370","status":409,"ms":3,"error":"Order is Ready to Pay or Done and cannot be modified. Move it back to Reviewing first."}
+
+stdout | tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > a manager may append a note but not touch costs, lines or ownership
+{"ts":"2026-10-31T21:07:45.464Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"4df3b362-a64f-4541-9235-c7e5a29155f8","userId":"75a0da1c-001d-4db7-bce8-6bffe57c319b","method":"PATCH","path":"/api/orders/PO-1370","status":409,"ms":3,"error":"Order is Ready to Pay or Done and cannot be modified. Move it back to Reviewing first."}
+
+ ✓ tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > a manager may append a note but not touch costs, lines or ownership 363ms
+ ↓ tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > goods edits on the lines refuse
+ ↓ tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > a manager can still reprice a line; the purchaser cannot
+ ↓ tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > non-goods line edits land on a Done PO, and on it once Sold
+ ↓ tests/orders-ready-to-pay.test.ts > the book closes at Ready to Pay > the line read flags a closed book from Ready to Pay on
+ ↓ tests/orders-ready-to-pay.test.ts > line status stays the inventory vocabulary > a stage label is not a line status
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 13 skipped (14)
+   Start at  17:07:42
+   Duration  2.83s (transform 564ms, setup 19ms, import 881ms, tests 1.83s, environment 0ms)
+
+rc=0

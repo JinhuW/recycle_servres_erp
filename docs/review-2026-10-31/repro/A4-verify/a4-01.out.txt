@@ -1,0 +1,9 @@
+A4-01 desired(b) before outage: 4
+A4-01 desired(b) after recovery: 6
+A4-01 b-5 claim: 200 account 9 | b-1 slot now held by b-5
+A4-01 b-1 heartbeat after b-5 claim: 409 {"error":"stale_epoch"}
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  ../../docs/review-2026-10-31/repro/A4-verify/a4-01-lapsed-lease.test.ts > A4-01 lapsed leases after an ERP outage > does not start or let a new worker fence a live one whose lease lapsed during an outage
+AssertionError: expected 6 to be 4 // Object.is equality
+     59|     console.log('A4-01 b-1 heartbeat after b-5 claim:', hb.status, JSO…
+      Tests  1 failed (1)

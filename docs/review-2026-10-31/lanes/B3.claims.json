@@ -1,0 +1,16 @@
+[
+ {
+  "id": "B3-01",
+  "severity": "P1",
+  "title": "[cross-lane] 31 Facebook boot logins in the last 24 h, 20 of them ended challenge/locked/failed; driven by fleet count changes and exit-75 fences, not crashes",
+  "location": "resource: rs-coordinator `rsc vault logins` (10.10.10.73); rs-fleet-agent docker logs 2026-10-30T20:15Z..2026-10-31T20:15Z; apps/fleet-agent/src/plan.ts:33-36",
+  "failure_scenario": "The desired count for the homelab host was changed four times today (9\u21926\u21926\u21924\u21929). Each change removes or fences running workers, and each replacement boots a browser, which is a Facebook login. A worker whose account is already locked gets fenced (exit 75) and started again a minute later against the same wall. plan.ts only backs off after 5 soft restarts in 30 min, so a few restarts spread over a day never trip it. Accounts that hit 'locked' are logged in again hours later, and this is the checkpoint-and-lose pattern the repo's first rule warns about. The pool shrinks: 20 of the last 31 logins already ended in a wall."
+ },
+ {
+  "id": "B3-02",
+  "severity": "P2",
+  "title": "Coordinator rejects every fleet-task city 'started' event with 422: the worker sends via=\"other\", the schema allows only queue/own",
+  "location": "trackers/facebook/rs_coordinator/rs_coordinator/schemas.py:309; image ghcr.io/jinhuw/aimm-recycle:0.15.0 /app/src/ai_marketplace_monitor/facebook.py:2560,2577",
+  "failure_scenario": "Since 10-29 every city an ERP-fleet worker starts loses its 'started' row in the coordinator's city log. Anything built on that log sees cities that finish without ever starting: started-vs-finished counts, how long a city took, and the 'still running' view. The rejected posts also fill the log with about 700 422 lines a day."
+ }
+]

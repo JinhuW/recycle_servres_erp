@@ -1,0 +1,168 @@
+{
+  "lane": "B1",
+  "files_read": [
+    "docs/review-2026-10-31/BRIEF.md",
+    "~/.claude/projects/-Users-jinhu-Projects-recycle-servers-v2-recycle-servres-erp/memory/railway-security-disclosure-2026-10-21.md",
+    "docs/review-2026-10-13/infrastructure-integrations-todo.md",
+    "deploy/railway-uptime/check.sh",
+    "deploy/railway-uptime/Dockerfile",
+    "deploy/railway-uptime/railway.toml",
+    "deploy/railway-sync/sync.sh",
+    "deploy/railway-sync/scrub.sql",
+    "deploy/railway-sync/railway.toml",
+    "deploy/railway-alerts/worker.js",
+    "backup/railway.toml",
+    "trackers/reddit/railway.toml",
+    "trackers/reddit/src/config.ts (env names)",
+    "apps/backend/src/env.ts",
+    "apps/backend/src/server.ts:50-72",
+    "apps/backend/src/fleet/claim.ts:75-125,692-740",
+    "apps/backend/src/fleet/mirror.ts:1-30",
+    "apps/backend/src/routes/coordinator.ts:30-60",
+    "apps/backend/migrations/0213_fleet_proxies.sql",
+    "railway:workspace 0556aaa2-93c8-4aeb-8a0d-5f71fc83671b (list-projects: 7 projects; auditLogs 2026-10-19..2026-10-31, event types/project/env only)",
+    "railway:project e811d744 recycle-erp-experiment (envs production 75358457, dev b20fb714; services backend 26d2f448, Postgres 4e8431c0, pg-r2-backup 3224fca5, uptime-monitor 365b9538, db-sync 006cd405): environment-status 168h, describe-service, list-deployments, get-logs (deploy/build/http), http-error-rate, http-response-time, get-service-metrics, list-webhooks, domain-status api.prod/api.dev",
+    "railway:project 900f22dc reddits-tracker (api 28c57e0b, worker eed8d23f, Postgres 72cbe855): environment-status, describe-service, list-deployments, http-error-rate, http-response-time, metrics, list-webhooks",
+    "railway:project ca12c55b facebook-tracker (postgres 3e0f3ebf): environment-status, describe-service, metrics, list-webhooks",
+    "railway:project 68d1360c ebay-tracker (tracker f0a2070c, Postgres 4d7e3e25): environment-status, list-webhooks",
+    "railway:project 0d8eadcc aio-manufacturing-solution (odoo f9f7e374, Postgres a865bba3): environment-status, list-webhooks",
+    "railway:project 2b32f371 recycle-server-odoo-erp (odoo c0a7cf8b, recycle-odoo b3490140, Postgres 7048217a): environment-status, list-webhooks",
+    "railway:project 1f5ba707 vaultwarden (vaultwarden d11069e2): environment-status, describe-service, domain-status password.jinhu.us, list-webhooks"
+  ],
+  "findings": [
+    {
+      "id": "B1-01",
+      "severity": "P1",
+      "title": "Prod uptime-monitor has not probed since 2026-10-28 21:11Z; stuck in a failing redeploy loop",
+      "location": "railway:recycle-erp-experiment/production/uptime-monitor 365b9538-3ecc-455e-85a0-527b080e7484 (active deployment f458bd19-04b6-417d-901c-1943ff492510 CRASHED; latest 3506ce25-43c9-477c-979a-b5b5dc5e0ce4 FAILED)",
+      "evidence": "Deployment f458bd19 (2026-10-23, commit a28fdc21) logged '[uptime] ok' every 5 min until 2026-10-28 21:11:43Z. That run got 429 x3 from the public URL, then 'curl: (22) ... 429' posting the alert and '[uptime] alert post failed'. After that its status is CRASHED, and logs from 21:12Z to now are empty for the deployment and for the service. Since then 22 deployments (2026-10-28 21:15Z to 2026-10-31 18:00Z, roughly every 4h10m, reason 'redeploy', all of commit c881951f) have FAILED at build with 'failed to fetch snapshot' repeated for 5 min. Later git pushes (8ad4e918, 62f53dec, ...) are SKIPPED by watchPatterns, so nothing replaces the crashed deployment. environment-status: replicaStatus crashed 1, running 0, 'Crashed 3 days ago'.",
+      "failure_scenario": "Prod has been unmonitored for about 3 days. An outage of the Cloudflare edge, Worker binding or Railway origin (the 2026-07-12 HTTP 523 kind) would page no one through the ERP Uptime topic. The only signal left is the Deployment.failed webhook noise from the loop itself, which trains people to ignore it.",
+      "proposed_fix": "Owner: deploy uptime-monitor fresh from the current dev commit (e.g. railway up deploy/railway-uptime, or a dashboard deploy of the latest commit), not a redeploy of the c881951f snapshot. Confirm cronSchedule */5 and restartPolicy NEVER are live, and find what keeps re-triggering redeploys every ~4h10m (the audit log shows Deployment.redeployed under the owner's identity; no local crontab or LaunchAgent mentions railway). Add a dead-man check: something outside Railway (the Cloudflare relay's cron) alerts when no 'ok' run has happened in 15 min.",
+      "regression_test": "Dead-man probe: relay cron reads the last uptime success timestamp (KV written by check.sh on ok) and fires erp_uptime if it is older than 15 min; unit test the age comparison in deploy/railway-alerts.",
+      "confidence": "high"
+    },
+    {
+      "id": "B1-02",
+      "severity": "P1",
+      "title": "facebook-tracker Postgres password never rotated after the 2026-10-21 Railway env-var breach, and it is on a public TCP proxy",
+      "location": "railway:facebook-tracker/production/postgres 3e0f3ebf-8677-40b8-86e5-d65c59216a54 (TCP proxy 1d2141e7-0379-44a6-b85a-fb7c8ccb4f48, shortline.proxy.rlwy.net:21141 ACTIVE)",
+      "evidence": "Audit log 2026-10-19..31 has DatabasePassword.regenerated only for recycle-erp-experiment prod+dev, reddits-tracker, aio and recycle-server-odoo-erp, and none for facebook-tracker. The service's only deployment is 0b89f3e6 from 2026-08-19, and it carries POSTGRES_PASSWORD (name only). The memory note lists 'facebook-tracker DB password (in ~42 homelab containers)' as still pending on 2026-10-23, and nothing has changed since. The proxy is public (syncStatus ACTIVE), so the leaked credential works from anywhere.",
+      "failure_scenario": "Whoever read Railway's customer env vars on 2026-10-21 holds this password. They connect to shortline.proxy.rlwy.net:21141 and read or alter the coordinator database (worker/account state for the Facebook fleet, about 1.19 GB on disk).",
+      "proposed_fix": "Owner: plan a coordinated rotation. Regenerate in the dashboard, then update the homelab containers' DSN in one batch. Note that updating worker containers means restarts, which are Facebook logins, so do it within a single planned deploy, or first move worker DB access behind rs_console so only the coordinator/console need the new DSN. If the TCP proxy isn't needed, remove it, or restrict it until the rotation is done.",
+      "regression_test": "After rotation: psql with the old password via the proxy must fail (by fingerprint, no value printed); audit log shows DatabasePassword.regenerated for project ca12c55b.",
+      "confidence": "high"
+    },
+    {
+      "id": "B1-03",
+      "severity": "P2",
+      "title": "Nightly prod->dev db-sync has failed 4 nights running (scrub nulls a NOT NULL *_enc column); dev frozen at 2026-10-27 and nobody is told",
+      "location": "deploy/railway-sync/scrub.sql:34-46; apps/backend/migrations/0213_fleet_proxies.sql:14; railway:recycle-erp-experiment/dev/db-sync 006cd405-7bee-4a66-8ebc-6ca6fdaa44ad",
+      "evidence": "db-sync logs: 2026-10-28, -29, -30 and -31 at ~04:0xZ each end with 'ERROR: null value in column \"url_enc\" of relation \"fleet_proxies\" violates not-null constraint' (CONTEXT 'UPDATE public.fleet_proxies SET url_enc = NULL WHERE url_enc IS NOT NULL'). The last '[sync] done' was 2026-10-27 04:03Z. The generic DO block nulls every column matching _enc$, but 0213 declares url_enc TEXT NOT NULL, and prod gained fleet_proxies rows (row 1, 'NJ1 (Decodo...)', created 2026-10-26). --single-transaction rolls back cleanly, so dev is intact but stale. The deployment stays SUCCESS; environment-status shows only warningCount 1 / state cronReady, and cron-run failures don't emit Deployment.failed, so the railway-alerts webhook never fires.",
+      "failure_scenario": "Dev, and every e2e/dry-run that relies on 'dev mirrors prod' (data-migration dry runs, the FLEET_ROLE mirror pages), runs on data and schema 4+ days old. A prod migration dry-run passes on dev against the wrong row set, and the gap keeps growing until someone reads the logs.",
+      "proposed_fix": "In scrub.sql, delete the rows or write a non-null sentinel for NOT NULL *_enc columns (check a.attnotnull in the loop: DELETE FROM the table, or SET col = '' / a dev-sealed placeholder), and handle fleet_proxies explicitly. Make sync.sh's failure visible: post to the relay /alert (topic e.g. erp_dbsync) on any non-zero exit.",
+      "regression_test": "Repro: migrate a scratch DB, insert one fleet_proxies row with url_enc set, then run scrub.sql with psql ON_ERROR_STOP=1. It must succeed and leave no non-null url_enc; currently it errors with 23502.",
+      "confidence": "high"
+    },
+    {
+      "id": "B1-04",
+      "severity": "P2",
+      "title": "[cross-lane] Cloudflare answered 429 to the Railway uptime probe, for both the app and the alert relay, while origin was 200",
+      "location": "railway:uptime-monitor deployment f458bd19-04b6-417d-901c-1943ff492510 logs 2026-10-28T21:11Z; backend http log 2026-10-28T21:11:39Z /api/health 200 from 152.55.181.187",
+      "evidence": "inventory.recycleservers.com/api/health returned 429 three times 20 s apart. The origin probe in the same run got 200 (seen in the backend http log). The POST to ALERT_URL (the railway-alerts relay) also got 429. The relay code (deploy/railway-alerts/worker.js) never returns 429; it only returns 204/401/400/404/502. So the 429s came from Cloudflare's edge, plausibly a rate or bot rule keyed on Railway's shared egress IP. The backend's own 429 paths (oauth, scan, me, publicForms) don't cover /api/health.",
+      "failure_scenario": "The probe reports a false 'prod DOWN (edge layer)'. When the edge really throttles Railway egress, the alert that would report it is throttled by the same edge, so a genuine outage goes unreported. It also triggered the crash in B1-01.",
+      "proposed_fix": "Cloudflare lane: exempt /api/health and the relay /alert from rate/bot rules for this probe (custom header or a WAF skip rule), or probe from somewhere other than Railway. In check.sh, treat 429 as 'probe throttled', distinct from DOWN.",
+      "regression_test": "check.sh against a fake endpoint returning 429: it should classify the result as throttled, not as an edge outage.",
+      "confidence": "medium"
+    },
+    {
+      "id": "B1-05",
+      "severity": "P2",
+      "title": "Prod backend watchPatterns omit package.json / pnpm-lock.yaml / tsconfig.base.json that dev has",
+      "location": "railway:recycle-erp-experiment/production/backend 26d2f448-d4f2-4f67-b2ef-1628ef27a5c0 build.watchPatterns",
+      "evidence": "Prod watchPatterns are ['apps/backend/**','packages/shared/**']. Dev watchPatterns for the same service are ['apps/backend/**','packages/shared/**','package.json','pnpm-lock.yaml','tsconfig.base.json'].",
+      "failure_scenario": "A release whose backend-relevant change is only in the lockfile (e.g. a pnpm audit fix of a transitive backend dependency) or the root tsconfig merges to main. Dev rebuilds, prod is SKIPPED and keeps running the vulnerable or old dependency tree, and nothing shows it. The same happens to the root version bump: prod /api/health keeps reporting an older version than main.",
+      "proposed_fix": "Set prod watchPatterns equal to dev's, ideally through config-as-code (a railway.toml for the backend, so the two environments can't drift).",
+      "regression_test": "Compare get-service-config watchPatterns for both environments in a CI or ops script; fail on difference.",
+      "confidence": "medium"
+    },
+    {
+      "id": "B1-06",
+      "severity": "P2",
+      "title": "Vaultwarden (password.jinhu.us) volume has no backups recorded",
+      "location": "railway:vaultwarden/production/vaultwarden d11069e2-3d89-42eb-9c63-7e2604e38ece, volume 3c4b4b10-2783-4c06-a9ba-ee8e498aec76 (/data)",
+      "evidence": "Audit log 2026-10-19..31: Backup.created events exist for recycle-erp-experiment (11), aio (12) and recycle-server-odoo-erp (13), and none for vaultwarden. The project has one service and no backup job. Image vaultwarden/server:1.37.1, deployed once on 2026-10-13. Variables include SIGNUPS_ALLOWED; its value was not read.",
+      "failure_scenario": "A volume loss or corruption, or a bad image upgrade, destroys the password vault with no restore point. If SIGNUPS_ALLOWED is true, anyone on the internet can also register an account on it.",
+      "proposed_fix": "Owner: enable Railway volume backups on the vaultwarden volume, or add an encrypted export to R2. Confirm that SIGNUPS_ALLOWED is false and that an ADMIN_TOKEN policy is intended.",
+      "regression_test": "Audit log shows Backup.created for project 1f5ba707 daily.",
+      "confidence": "medium"
+    },
+    {
+      "id": "B1-07",
+      "severity": "P3",
+      "title": "Next-task long-polls and VNC sockets error on every prod deploy",
+      "location": "apps/backend/src/server.ts:58-72; apps/backend/src/fleet/claim.ts:692-740; railway:backend 26d2f448 production drainingSeconds 30",
+      "evidence": "In the 7-day window: 538 5xx out of 465,949 requests (0.115%). Since 2026-10-28, every 5xx is a burst at a deploy (15:23Z, 18:55Z on 10-31): about 20 x 503 on /api/fleet/worker/vnc in 2 ms, and 502 on /api/fleet/worker/next-task after 35-44 s ('connection closed unexpectedly'). next-task holds poll_hold_seconds (p50 = 30000 ms), while shutdown closes connections at graceMs 20 s. The 30000 ms p95 seen on the backend comes entirely from these holds; interactive paths are fine (/api/inventory p95 48 ms).",
+      "failure_scenario": "Each release gives fleet workers a 502 and drops VNC viewers. That is harmless only as long as the clients keep retrying. Any latency or error alert built on the service-wide p95 or 5xx rate will be noise.",
+      "proposed_fix": "On SIGTERM, answer held next-task polls immediately with 'nothing_due' (wake every hold) before server.close. Exclude long-poll paths from any latency alert.",
+      "regression_test": "Backend test: with a held next-task, calling the shutdown hook resolves the request with a 200 nothing_due within 1 s.",
+      "confidence": "medium"
+    },
+    {
+      "id": "B1-08",
+      "severity": "P3",
+      "title": "Prod-environment uptime-monitor builds from branch dev, with no release gate",
+      "location": "railway:recycle-erp-experiment/production/uptime-monitor 365b9538 source.branch=dev",
+      "evidence": "get-service-config production: source {branch: 'dev', rootDirectory: 'deploy/railway-uptime'}. Prod backend and pg-r2-backup track main.",
+      "failure_scenario": "A change to check.sh merged to dev reaches the prod probe immediately, before the dev->main release review, and could silence prod monitoring with no release.",
+      "proposed_fix": "Point the production uptime-monitor at main, or document why dev is intended.",
+      "regression_test": "",
+      "confidence": "high"
+    },
+    {
+      "id": "B1-09",
+      "severity": "P3",
+      "title": "Reddit tracker deploys carry no commit, healthcheck or draining window",
+      "location": "railway:reddits-tracker/production api 28c57e0b-d6a8-4c10-a33a-3ec5ccc4e941, worker eed8d23f-0462-4a84-8a2e-14edf0a880de",
+      "evidence": "Deployments 1ca1fcad and 5e40e87b (2026-10-31 09:15Z) have meta {reason: 'deploy'} with no commitHash (railway up uploads), so the running code can't be compared with dev 62f53dec or main fb4afda4. describe-service shows no healthcheckPath and no drainingSeconds on api. Health in the last 7 days is good: 1,081 requests, 0 5xx, p95 <= 290 ms, worker RAM about 0.12 GB.",
+      "failure_scenario": "After an incident, nobody can tell which tracker commit was live. A broken api deploy goes live with no healthcheck to stop it.",
+      "proposed_fix": "Record the git SHA in an env/var or log line at deploy time (deploy script sets GIT_SHA). Set healthcheckPath=/health on the api service via a service-level override, since the shared railway.toml can't carry one.",
+      "regression_test": "",
+      "confidence": "high"
+    },
+    {
+      "id": "B1-10",
+      "severity": "P3",
+      "title": "Dormant resources still running with unrotated or stale state",
+      "location": "railway:ebay-tracker/Postgres 4d7e3e25-6aad-4207-9a65-9e7ca105e4d6; railway:recycle-server-odoo-erp/recycle-odoo b3490140-f725-49e9-a4b9-41f6dbb5856e; railway:aio-manufacturing-solution env 71b749cb staged patch 0f1cd121",
+      "evidence": "ebay-tracker: the tracker service has been offline since 2026-09-18, its Postgres is still online with a volume, there has been no DatabasePassword.regenerated since the breach, and 4 ContainerAccess events were logged in the window. recycle-odoo: offline, with no deployments. aio: an empty staged EnvironmentPatch has been pending since 2026-06-30.",
+      "failure_scenario": "These cost money and still hold breached credentials. A stray 'deploy staged changes' on aio applies a forgotten patch.",
+      "proposed_fix": "Owner: archive or delete the ebay-tracker project, or rotate its DB password; delete recycle-odoo if it isn't needed; discard the aio staged patch.",
+      "regression_test": "",
+      "confidence": "high"
+    },
+    {
+      "id": "B1-11",
+      "severity": "P3",
+      "title": "Backend variable names drift from env.ts",
+      "location": "apps/backend/src/env.ts:80-110 vs railway:backend 26d2f448 production/dev variableNames",
+      "evidence": "Set on Railway but never read by apps/packages/deploy: FLEET_IMAGE_AGENT (prod and dev); ADMIN_PASSWORD, read only by scripts/init-admin.mjs, so it is a standing admin secret in the runtime env. Read by code but absent on both environments: COORDINATOR_ACCESS_CLIENT_ID/_SECRET (root AGENTS.md lists them as contract env; optional in routes/coordinator.ts:39-44, and coordinator traffic shows no 5xx since 10-28, so Access is evidently not enforced). Dev sets FLEET_ROLE but no FLEET_MIRROR_URL/_CLIENT_ID/_SECRET, so fleet/mirror.ts:20-21 forwardsReads() is false and dev's mirror pages read the local copy, which B1-03 has frozen at 10-27. Prod lacks MAIL_* (mail dark on prod) and dev lacks MERCURY/PAYPAL/SHIPPO (stubs), which looks intended. Reddit api/worker names match trackers/reddit/src (TELEGRAM_API_ID/HASH/USER_SESSION are read in config.ts:81).",
+      "failure_scenario": "A leftover ADMIN_PASSWORD widens what a future env-var leak exposes. The AGENTS.md contract table misleads whoever debugs a coordinator 403. Dev fleet pages silently show stale data.",
+      "proposed_fix": "Remove FLEET_IMAGE_AGENT and (after confirming init-admin isn't run at boot) ADMIN_PASSWORD from the runtime env. Either set the FLEET_MIRROR_* trio on dev or document local-copy mode. Mark COORDINATOR_ACCESS_* optional in AGENTS.md.",
+      "regression_test": "",
+      "confidence": "medium"
+    }
+  ],
+  "carryover": [
+    {"old_id": "INF-04", "status": "fixed", "evidence": "deploy/railway-sync/sync.sh now requires EXPECTED_DEV_DB_HOST plus an env_marker check; the variable is present on dev db-sync 006cd405."},
+    {"old_id": "INF-05", "status": "fixed", "evidence": "check.sh escapes JSON and uses curl -f, reporting 'alert post failed' (seen live 2026-10-28 21:11Z). The relay answers 204/502."},
+    {"old_id": "INF-06", "status": "still open", "evidence": "pg-r2-backup ran daily 03:30Z through 2026-10-31 (9.2M dump, 30-day prune), but no restore-drill service exists in any Railway project."}
+  ],
+  "needs_owner": [
+    "B1-01: fresh deploy of uptime-monitor (a deploy action, forbidden to reviewers) and finding what triggers the ~4h10m redeploys of the c881951f snapshot.",
+    "B1-02: rotate the facebook-tracker Postgres password. Consumers are homelab containers, and restarting workers is a Facebook login, so the owner must plan it.",
+    "Secret-rotation status by variable age: neither Railway MCP nor the audit log exposes per-variable update timestamps (the audit log has no Variable.* events in 2026-10-19..31). Rotation of ERP OpenRouter (dev), Mercury, PayPal, Shippo, R2 x3, Telegram x2 (reddit api/worker TELEGRAM_BOT_TOKEN, TELEGRAM_USER_SESSION), eBay, SMTP (MAIL_PASSWORD dev), ODOO_ADMIN_PASSWORD and FB_POOL_KEY can't be confirmed read-only. Treat all as still pending per the 2026-10-23 memory note. Confirmed rotated by audit event: DB passwords for ERP prod+dev, reddit, aio, recycle-odoo (2026-10-22), bucket credentials ERP prod + aio (2026-10-21), db-sync project token (2026-10-22). Confirmed not rotated: facebook-tracker and ebay-tracker DB passwords.",
+    "B1-06: confirm the vaultwarden SIGNUPS_ALLOWED value and enable volume backups.",
+    "B1-04: Cloudflare WAF/rate rules that 429 Railway egress (Cloudflare lane / owner)."
+  ],
+  "notes": "Enumerated all 7 projects (recycle-erp-experiment, reddits-tracker, facebook-tracker, ebay-tracker, aio-manufacturing-solution, recycle-server-odoo-erp, vaultwarden). Deployed commits: prod backend = fb4afda4 (= main, 2026-10-31 18:54Z SUCCESS); prod pg-r2-backup on main; dev backend = 8ad4e918 (v1.395.1, one commit ahead of the brief's dev 62f53dec, pushed during the review); dev db-sync deploys from dev; reddit api/worker are railway-up uploads (no SHA). Last 10 deploys: the only FAILED/CRASHED are the uptime-monitor loop (B1-01) and one dev backend FAILED on 2026-10-27 (fd2f030b), later superseded. Health: prod backend /api/health through the custom domain is healthy per uptime logs up to 10-28; certificates and DNS valid for api.prod, api.dev and password.jinhu.us. 7-day prod backend: 465,949 requests, 5xx 0.115% (deploy-time, B1-07), interactive p95 under 200 ms; CPU avg 0.01 vCPU of 24, RAM avg 0.22 GB (max 0.60). Prod Postgres: disk 0.88 GB of a 5 GB volume, RAM max 0.87 GB, WAL_ARCHIVE_* configured. facebook-tracker PG 1.19 GB of 50 GB; reddit PG 1.22 GB. Crons: pg-r2-backup last success 2026-10-31 03:30:51Z; db-sync last success 2026-10-27 (B1-03); uptime-monitor last success 2026-10-28 21:05Z (B1-01). drainingSeconds: backend prod 30, dev 30 (meets >=30); facebook-tracker postgres 0; others unset (default). Webhooks: every one of the 7 projects has the railway-alerts.jinhuwang1127.workers.dev webhook (Deployment failed/crashed/oom, Monitor, VolumeAlert; Authorization header), includesPreviewEnvironments=false. PR environments: none exist in any project. Cron-run failures (non-zero exit with deployment SUCCESS) are not among the webhook events, which is why B1-03 is silent. Variable comparison used names only (describe-service variableNames); list-variables was deliberately not called, so no values entered this session. Not checked: Railway Monitors/alert rules (no MCP read), volume alert thresholds, the content of R2 backups, odoo/aio app health beyond Railway status."
+}

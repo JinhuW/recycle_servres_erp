@@ -1,0 +1,72 @@
+[
+ {
+  "id": "C1-01",
+  "severity": "P2",
+  "title": "FEATURES says managers can reassign a PO's purchaser until Done; code freezes ownership at Ready to Pay",
+  "location": "docs/FEATURES.md:108",
+  "failure_scenario": "A manager or agent reading FEATURES tries to move a Ready-to-Pay PO to another purchaser (e.g. to fix commission attribution) and gets doneLocked; an agent writing a fix/test from FEATURES encodes the wrong rule."
+ },
+ {
+  "id": "C1-02",
+  "severity": "P2",
+  "title": "FEATURES describes the coordinator Fleet tab as it was before v1.344.0 (legend Live/Stale/..., Searches/Posts/Proxy columns)",
+  "location": "docs/FEATURES.md:3083-3125",
+  "failure_scenario": "A manager/agent following 3083-3125 looks for a Live/Stale legend, a Posts column or a per-row Proxy column that no longer exist, and the two contradictory descriptions make the doc untrustworthy for the fleet, where a wrong action can mean a Facebook login."
+ },
+ {
+  "id": "C1-03",
+  "severity": "P2",
+  "title": "FEATURES documents 'Today's round', 'Start the round now' and 'Move every worker to the queue' on the coordinator Fleet tab, but RoundCard is no longer rendered",
+  "location": "docs/FEATURES.md:3301-3368",
+  "failure_scenario": "An operator looks for the bulk 'Move every worker to the queue' or the round board on the Fleet tab and cannot find it, or an agent adds behaviour to dead RoundCard code believing it is live."
+ },
+ {
+  "id": "C1-04",
+  "severity": "P2",
+  "title": "Facebook README tells operators a connect_failed park ends only with docker stop (a new container = a Facebook login); 0.15.0 added Mark healthy / resume and timeout retries",
+  "location": "trackers/facebook/README.md:482-498 (\"Only `docker stop` ends it\" at :496), :465-468, :1324",
+  "failure_scenario": "An operator with a worker parked on 'Page didn't load' follows the README and docker-stops it; the replacement container restores the session, i.e. a Facebook login the AGENTS.md first rule forbids, when Mark healthy would have resumed in the same browser."
+ },
+ {
+  "id": "C1-05",
+  "severity": "P2",
+  "title": "Facebook README says to restart workers after editing search settings, contradicting the repo's first rule",
+  "location": "trackers/facebook/README.md:1208-1209",
+  "failure_scenario": "An operator tuning search_interval follows the README and restarts the fleet: every worker logs in again, risking checkpoints (26 of 41 accounts were already parked on 2026-10-24)."
+ },
+ {
+  "id": "C1-06",
+  "severity": "P2",
+  "title": "Facebook README presents retired homelab compose workers, rs_fleetd and `rsc fleet release` as the live fleet; the ERP fleet (apps/fleet-agent, /api/fleet) is barely mentioned",
+  "location": "trackers/facebook/README.md:5-7, :37-78 (\"Six workers divide the lower 48\" :55), :251-300 (deploy steps), :339-382 (fleet agent / rolling releases), :386",
+  "failure_scenario": "A new operator or agent treats rs_fleetd / `rsc fleet release` as the upgrade path and runs it (every recreated worker logs in), or debugs region-pinned workers that no longer exist instead of the ERP fleet."
+ },
+ {
+  "id": "C1-07",
+  "severity": "P2",
+  "title": "Root README quick start signs in as marcus@ with 'any password', but the Docker image never seeds demo users",
+  "location": "README.md:79-81",
+  "failure_scenario": "A new developer runs `docker compose up`, tries the documented login and gets refused; the first step of onboarding fails."
+ },
+ {
+  "id": "C1-08",
+  "severity": "P2",
+  "title": "Root README relies on a docker-compose.override.yml that is gitignored and absent, so the documented host-side db:migrate cannot reach Postgres",
+  "location": "README.md:21, :94-101",
+  "failure_scenario": "On a fresh clone, `pnpm db:migrate` / `pnpm dev` against localhost:5432 (README :94-101) fails with connection refused."
+ },
+ {
+  "id": "C1-09",
+  "severity": "P2",
+  "title": "Root README says production is single-host Docker Compose behind Caddy; it runs on Railway + Cloudflare Workers",
+  "location": "README.md:37-69, :252-278",
+  "failure_scenario": "Someone handling an incident or a release follows the README and looks for a compose host / Caddy config that is not production, or deploys a parallel stack."
+ },
+ {
+  "id": "C1-10",
+  "severity": "P2",
+  "title": "Reddit README's local api command defaults to the Telegram transport and can take production's bot getUpdates",
+  "location": "trackers/reddit/README.md:201",
+  "failure_scenario": "A developer runs the documented command with a real .env: the local api consumes production's Telegram updates (reactions/labels lost from prod) and may run the user-session sender."
+ }
+]

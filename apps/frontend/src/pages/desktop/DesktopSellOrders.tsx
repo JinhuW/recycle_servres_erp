@@ -2215,7 +2215,7 @@ function SellOrderDetail({ id, onToast }: {
                           <span style={{ color: 'var(--fg-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                             {c.issue}
                           </span>
-                          {c.amount != null && <span className="mono">{fmtUSD(c.amount, locale)}</span>}
+                          {c.amount != null && <span className="mono">{fmtMoney(c.amount, c.currency, locale)}</span>}
                         </a>
                       ))}
                     </div>

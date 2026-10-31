@@ -1,0 +1,27 @@
+{
+  "lane": "A4",
+  "verdicts": [
+    {
+      "id": "A4-01",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": null,
+      "evidence": "repro/A4-verify/a4-01-lapsed-lease.test.ts (out: repro/A4-verify/a4-01.out.txt), run against a disposable PG18 on :55704. Hosts a,b cap 10, a-1..a-8 and b-1..b-4 claimed normally; GET /api/fleet/hosts/b/desired = 4. All leases set lapsed (outage > lease_minutes 30). Then desired(b) = 6; POST /worker/claim b-5 = 200 with account 9, which was b-1's (last_host_id b ordering, claim.ts:347-355); b-1's next POST /worker/heartbeat = 409 stale_epoch. Code: workerCount (hosts.ts:239-265) counts lapsed-lease slots as free and drops them from held(); heartbeat (claim.ts:497-500) renews a lapsed lease only if it gets there first; eligibleSlot (auth.ts:254-261) checks epoch, not lease, so b-5's epoch bump fences b-1.",
+      "reason": "Reproduced end to end. Mitigations that narrow it but do not close it: workers heartbeat every 20 s (vendored monitor fleet_heartbeat_interval=20) and keep heartbeating through the outage, and the agent starts at most one worker per tick with a 3 min stagger (fleet-agent plan.ts). The window is the first agent tick after recovery (30 s poll) before every held slot has re-heartbeated, which is likely, and one steal is enough to start the 75 -> restart -> claim chain. It also gets worse when the peer host is not yet live (last_seen_at > 2 min): peers then excludes it and the polling host's share grows toward its full capacity. It needs an ERP/DB outage longer than lease_minutes, so P2 stands rather than P1."
+    },
+    {
+      "id": "A4-02",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": null,
+      "evidence": "repro/A4-verify/a4-02-editor-lost-update.test.ts (out: repro/A4-verify/a4-02.out.txt). Manager GET /api/facebook-pool returns cookie 'c_user=..; xs=S1-old'; worker PUT /api/fleet/worker/session stores xs=S2-rotated; manager PUT /api/facebook-pool/:no with the snapshot-seeded draft (note changed only) returns 200 and the stored cookie is back to 'xs=S1-old' with cookie_by='Alex Chen'. Code: AccountEditor.tsx seeds draft.cookie from the snapshot account; facebookPool.ts:484 writes cookie_enc = draft cookie unconditionally; :476 cookieUnchanged compares against the current stored cookie (S2), so it also restamps cookie_at/cookie_by. There is no updated_at or version check.",
+      "reason": "Reproduced. It needs a page left open across a worker reseal followed by a save, which is common for a manager editing notes. The cost is a stale session restored at the next claim, and so a likely password login. P2 is right."
+    },
+    {
+      "id": "A4-03",
+      "verdict": "CONFIRMED",
+      "severity_adjusted": null,
+      "evidence": "repro/A4-verify/a4-03-assign-race.test.ts (out: repro/A4-verify/a4-03.out.txt), facade stubbed via fetch. (b) The purchaser POST /:no/take lands during the vault PUT and returns 200; assign returns 200 after PUT /v1/accounts/nyc-1 and POST /v1/workers/nyc-1/relogin; the row ends status=fleet, holder=nyc-1, so the purchaser's take is silently overwritten. (a) Concurrent assigns by alex (rs-ne-1) and sofia (rs-ca-3) both return 200 and both queue relogin (/v1/workers/rs-ne-1/relogin and /v1/workers/rs-ca-3/relogin); the row ends with holder rs-ca-3. Code: facebookPool.ts:620-632 plain SELECT (no lock) for the held/taken checks, :656-696 facade side effects, :699-706 UPDATE ... WHERE no = ${no} with no status/holder guard.",
+      "reason": "Scenarios (a) and (b) reproduced. Scenario (c), a crash between the relogin and the UPDATE, follows from the non-transactional ordering but was not reproduced. The route is manager-only and the window is a few facade round trips, but a double login from two IPs and a purchaser silently losing an account are both real. P2 stands."
+    }
+  ],
+  "needs_owner": []
+}

@@ -5,6 +5,14 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-489](./RS-489-after-sales-case-without-a-currency-defaults-to-usd.md) | done | bug | P1 | After-sales case without a currency defaults to USD, not the order's | — |
+| [RS-488](./RS-488-implementation-plan-for-the-2026-10-31-review-fixes.md) | done | task | P2 | Implementation plan for the 2026-10-31 review fixes | — (docs only) |
+| [RS-487](./RS-487-full-estate-review-2026-10-31.md) | done | task | P2 | Full estate review 2026-10-31 | — (docs only) |
+| [RS-486](./RS-486-edit-dialog-manages-screenshots-other-entries-lose-t.md) | done | bug | P2 | Edit dialog manages screenshots; Other entries lose the deleted-record banner | 1.396.0 |
+| [RS-485](./RS-485-phone-market-card-shows-part-number-and-last-updated.md) | done | story | P2 | Phone Market card shows part number and last updated time | 1.395.2 |
+| [RS-484](./RS-484-phone-market-card-shows-the-full-sku-spec.md) | done | bug | P2 | Phone Market card shows the full SKU spec | 1.395.1 |
+| [RS-483](./RS-483-after-sales-case-amount-can-be-in-rmb.md) | done | story | P2 | After-sales case amount can be in RMB | 1.395.0 |
+| [RS-482](./RS-482-accounting-drawer-review-card-clipped-to-a-sliver.md) | done | bug | P2 | Accounting drawer: Review card clipped to a sliver | 1.394.1 |
 | [RS-481](./RS-481-po-list-payment-filter-as-a-dropdown.md) | done | story | P2 | PO list payment filter as a dropdown | 1.394.0 |
 | [RS-480](./RS-480-account-pool-editor-save-does-nothing-on-fleet-accou.md) | done | bug | P1 | Account pool editor: Save does nothing on fleet accounts with a saved session | 1.393.1 |
 | [RS-479](./RS-479-leads-pool-loads-the-next-50-sellers-on-scroll.md) | done | story | P2 | Leads Pool loads the next 50 sellers on scroll | 1.393.0 |

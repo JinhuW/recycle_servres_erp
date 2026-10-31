@@ -1,0 +1,2 @@
+first: {'accepted': 0, 'duplicates': 0, 'queued': 0, 'failed': 1} retry: {'accepted': 0, 'duplicates': 1, 'queued': 0} telegram sends: 0
+1 passed, 1 warning in 0.25s

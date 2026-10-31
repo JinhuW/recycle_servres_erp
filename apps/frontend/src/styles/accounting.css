@@ -127,6 +127,9 @@
   border-radius: 0; display: flex; flex-direction: column;
 }
 .acct-drawer .modal-body { flex: 1; max-height: none; overflow: auto; }
+/* The body scrolls, so its sections keep their height: a flex item with
+   overflow: hidden (the Review card) would otherwise shrink to a sliver. */
+.acct-drawer .modal-body > * { flex-shrink: 0; }
 .acct-hero { padding: 6px 0 16px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
 .acct-hero-dir { font-size: 12.5px; color: var(--fg-muted); font-weight: 500; }
 .acct-hero .acct-fig { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; }

@@ -1,0 +1,193 @@
+{
+ "workstream": "WS-H-reddit-tracker",
+ "scope": "Reddit tracker (trackers/reddit) defects and test gaps.",
+ "findings": [
+  {
+   "id": "A9-01",
+   "sev": "P3",
+   "verdict": "CONFIRMED",
+   "title": "Worker shutdown waits out the Reddit pacer, so docker stop -t 35 / Railway usually SIGKILLs it before claims and the fleet row are released",
+   "location": "trackers/reddit/src/loops/runner.ts:66-70; src/pacing.ts:48-55; src/loops/poll.ts:36-42; src/index.ts:301-326; scripts/deploy-workers.sh:63",
+   "proposed_fix": "Give RedditPacer.acquire an AbortSignal, or a stopping flag the runner flips, and return false from pollOnce/Tracer.once when it's aborted before claiming. Also raise docker stop -t above minGap + FEED_TIMEOUT (for example 90).",
+   "regression_test": "Unit: start the poll loop with a fake pacer whose acquire blocks, call stop(), and assert `stopped` resolves without claimDueSubreddits being called.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9.json",
+   "dupes": []
+  },
+  {
+   "id": "A9-02",
+   "sev": "P3",
+   "verdict": "CONFIRMED",
+   "title": "A worker running ALERT_TRANSPORT=console against the shared DB marks buyer targets notified without sending them; the deploy script defaults to console",
+   "location": "trackers/reddit/src/alerts.ts:44-64; src/loops/notify.ts:41-48,83-88; scripts/deploy-workers.sh:33; scripts/secrets.env.example:19; README.md:378-380",
+   "proposed_fix": "Make console mode never claim 'target' rows when telegram_chat_ids is non-empty, or refuse to start in console mode when it is. Make deploy-workers.sh require ALERT_TRANSPORT explicitly, with no console default.",
+   "regression_test": "pipeline test: with telegram_chat_ids set, a console-transport notifyOnce leaves the target in status 'target'.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9.json",
+   "dupes": []
+  },
+  {
+   "id": "A9-04",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "One unreadable subreddit fails its whole 20-sub multireddit batch, and the batch stays welded together through backoff",
+   "location": "trackers/reddit/src/loops/poll.ts:54-63; src/claims.ts:122-141; src/reddit.ts:167-171,203-204",
+   "proposed_fix": "On a batch failure, retry its subs singly (or bisect) before backing off everyone. Treat 404 as per-sub and don't feed it to the IP pacer.",
+   "regression_test": "poll test with a feed mock that 404s when one named sub is in the path: the other subs still get polled within one interval.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9.json",
+   "dupes": []
+  },
+  {
+   "id": "A9-05",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "The 300 s claim TTL can expire inside one evaluate/notify batch, allowing a duplicate LLM call or a duplicate buyer alert",
+   "location": "trackers/reddit/src/claims.ts:19; src/loops/evaluate.ts:26,85,103; src/llm.ts:24; src/loops/notify.ts:19,83; src/telegram.ts:43,133-139",
+   "proposed_fix": "Re-claim (touch claimed_at) before each post, or process claimed rows one at a time.",
+   "regression_test": "Unit with fake slow sender asserting claimed_at is refreshed per post.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9.json",
+   "dupes": []
+  },
+  {
+   "id": "A9-06",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "A group upgraded to a supergroup still fails every alert silently until a person edits telegram_chat_ids",
+   "location": "trackers/reddit/src/telegram.ts:142-151; docs/debug-notes/telegram-supergroup-migration.md",
+   "proposed_fix": "Surface migrate_to_chat_id in the failure and, on the api, rewrite the setting (or at least log it as an error with the new id).",
+   "regression_test": "telegram test: 400 with migrate_to_chat_id reports the new id.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9.json",
+   "dupes": []
+  },
+  {
+   "id": "A9-07",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "The api's user-notify loop, the sole buyer-alert sender while the user session is live, never trips the 'failing' page",
+   "location": "trackers/reddit/src/index.ts:153-171; src/heartbeat.ts:11,43,119-133",
+   "proposed_fix": "Wrap the api's user-notify in registry.wrap('notify', \u2026), or add 'user-notify' to LOOP_NAMES without exposing it in the ERP loops contract.",
+   "regression_test": "heartbeat test asserting api notify failures raise loop_failures.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9.json",
+   "dupes": []
+  },
+  {
+   "id": "A9-08",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "OCI workers accept SSH from 0.0.0.0/0 by default while holding a full-privilege public prod DB URL",
+   "location": "trackers/reddit/infra/terraform/variables.tf:16-20; infra/terraform/network.tf:44-51,98-105; infra/terraform/terraform.tfvars.example:5; scripts/secrets.env.example:5-8",
+   "proposed_fix": "Restrict ssh_ingress_cidr to the office/VPN, and give workers a least-privilege DB role.",
+   "regression_test": "n/a (infra)",
+   "lane_file": "docs/review-2026-10-31/lanes/A9.json",
+   "dupes": []
+  },
+  {
+   "id": "A9-09",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "deploy-workers.sh interpolates GHCR_READ_TOKEN into the ssh command line",
+   "location": "trackers/reddit/scripts/deploy-workers.sh:57-58",
+   "proposed_fix": "Pipe the token over stdin, as the env file already is (printf | ssh 'docker login --password-stdin').",
+   "regression_test": "n/a",
+   "lane_file": "docs/review-2026-10-31/lanes/A9.json",
+   "dupes": []
+  },
+  {
+   "id": "A9-10",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "API bearer token compared with !==",
+   "location": "trackers/reddit/src/api.ts:76-83",
+   "proposed_fix": "Use crypto.timingSafeEqual on equal-length buffers.",
+   "regression_test": "api test unchanged.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9.json",
+   "dupes": []
+  },
+  {
+   "id": "A9t-01",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "Design invariant 2 (take the Reddit rate-limit slot before claiming) has no test: moving pacer.acquire() after the claim passes the whole suite",
+   "location": "trackers/reddit/src/loops/poll.ts:36-38; tests/poll.test.ts:45; trackers/reddit/AGENTS.md:69-80",
+   "proposed_fix": "Add a poll test with a pacer whose acquire() counts claimed subreddits (SELECT count(*) FROM subreddits WHERE claimed_by IS NOT NULL) and asserts 0 at that moment.",
+   "regression_test": "tests/poll.test.ts: 'holds no claim while waiting on the pacer', with the acquire spy above; it must fail under mutation M1.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9t.json",
+   "dupes": []
+  },
+  {
+   "id": "A9t-02",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "Retry gating is untested: claimPosts can ignore next_retry_at, and poll can skip pacer.recordSuccess(), with all tests green",
+   "location": "trackers/reddit/src/claims.ts:180; src/loops/poll.ts:69; tests/claims.test.ts:310-320; tests/pipeline.test.ts:420-435; tests/poll.test.ts:168-204",
+   "proposed_fix": "Test that releasePostFailure / deferPost really hide the row from the next claimPosts, and that pollOnce resets the pacer after a success that follows a block.",
+   "regression_test": "claims.test.ts: after releasePostFailure, claimPosts(...'new') returns []. poll.test.ts: a 403 poll, then a 200 poll, then pacer.waitMs() is just the request gap.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9t.json",
+   "dupes": []
+  },
+  {
+   "id": "A9t-03",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "The 'review a candidate-only post at evaluate time' condition is untested: dropping '&& !evaluation.isTarget' double-sends dev reviews unnoticed",
+   "location": "trackers/reddit/src/loops/evaluate.ts:129-141; tests/pipeline.test.ts (describe 'candidate prompt trial')",
+   "proposed_fix": "Add the both-flag case.",
+   "regression_test": "pipeline.test.ts: live TARGET, candidate TARGET, dev chat set; after evaluateOnce + notifyOnce, exactly one telegram call to dev-1, saying 'flagged by live and candidate'.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9t.json",
+   "dupes": []
+  },
+  {
+   "id": "A9t-04",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "startLoop (loop runner) has no test: making an iteration's throw kill the loop passes all 281 tests",
+   "location": "trackers/reddit/src/loops/runner.ts:47-63",
+   "proposed_fix": "Unit-test startLoop: it survives a throw, uses busyMs vs idleMs, and stop() resolves `stopped` during an idle sleep. A watch-side check of loops.<name>.lastSuccessAt age would also catch a dead loop.",
+   "regression_test": "tests/runner.test.ts: iteration throws once then returns true; expect a second call and logger.error once; stop() mid-sleep resolves within ~10 ms.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9t.json",
+   "dupes": []
+  },
+  {
+   "id": "A9t-05",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "[cross-lane] POST /api/posts/:id/requeue requeues a post in any status, so requeueing an alerted post alerts buyers again; tests cover only 'failed'",
+   "location": "trackers/reddit/src/claims.ts:344-355; src/api.ts:342-345; tests/claims.test.ts:273-308; tests/api.test.ts:406-420; README.md:263",
+   "proposed_fix": "Add AND status = 'failed' to requeuePost, so the route 404s on anything else, or 409s with the current status.",
+   "regression_test": "docs/review-2026-10-31/repro/A9t/requeue-notified.test.ts (copy into trackers/reddit/tests/), plus an api.test.ts case: requeue of a notified post returns a non-200 and leaves status 'notified'.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9t.json",
+   "dupes": []
+  },
+  {
+   "id": "A9t-06",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "The prompt-evaluation log stops before the outcome and has stale statements; the repo can't show the shipped prompt",
+   "location": "trackers/reddit/docs/prompt-evaluations/2026-10-26-candidate-2-bulk-ram.md:100,102-114; docs/prompt-evaluations/2026-10-18-baseline.md:5-9,139-141; README.md:312; docs/tickets/RS-404-*.md:81; src/settings.ts:21-23; migrations/0001_init.sql:14",
+   "proposed_fix": "Add a 'Result' section to the candidate-2 entry: promoted 2026-10-26 05:03 UTC, the new live version id, the retired version 66/68 ids, rule 1 disabled. Add a superseded note to the baseline's candidate-1 result. Correct the dedup line. Optionally keep the live prompt as a checked-in file the docs cite.",
+   "regression_test": "Docs only; no test.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9t.json",
+   "dupes": []
+  },
+  {
+   "id": "A9t-07",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "The Telegram user-session client depends on telegram@2.26.22 (GramJS), which the lockfile marks deprecated and archived",
+   "location": "trackers/reddit/pnpm-lock.yaml:23-25,652-654; package.json dependencies.telegram; src/userSender.ts",
+   "proposed_fix": "Track a migration to teleproto (the API is largely compatible) as a ticket. Until then, review advisories for the pinned version by hand.",
+   "regression_test": "tests/seen.test.ts already covers createUserFirstSender through a fake UserClient; add a thin adapter test against the replacement library's types.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9t.json",
+   "dupes": []
+  },
+  {
+   "id": "A9t-08",
+   "sev": "P3",
+   "verdict": "unverified",
+   "title": "The feed fixture has only self-posts, so link/image posts send Reddit's 'submitted by \u2026 [link] [comments]' footer to the LLM untested; some asserts are tautological",
+   "location": "trackers/reddit/tests/fixtures/new-listing.xml; src/reddit.ts:69; tests/reddit.test.ts:60-65; tests/rules.test.ts:44-57,89-99; tests/dedup.test.ts:78-83",
+   "proposed_fix": "Add one captured link post and one image post to new-listing.xml (adjusting the 9-entry counts) and make htmlToText return '' when no md div exists. Make the rules tests exercise liveConfig/evaluate, and assert updated_at strictly increases.",
+   "regression_test": "reddit.test.ts: parseFeed on the link-post entry gives selftext ''; llm.test.ts: buildUserMessage then contains '(no body text)'.",
+   "lane_file": "docs/review-2026-10-31/lanes/A9t.json",
+   "dupes": []
+  }
+ ]
+}

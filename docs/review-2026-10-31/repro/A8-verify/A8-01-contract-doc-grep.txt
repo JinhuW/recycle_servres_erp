@@ -1,0 +1,8 @@
+/v1/fleet listed_in_trackers/facebook/AGENTS.md: 5
+/v1/accounts/{id} listed_in_trackers/facebook/AGENTS.md: 1
+/v1/workers/{id}/session listed_in_trackers/facebook/AGENTS.md: 0
+/v1/workers/{id}/restore-session listed_in_trackers/facebook/AGENTS.md: 0
+/v1/workers/{id}/relogin listed_in_trackers/facebook/AGENTS.md: 1
+/v1/logins listed_in_trackers/facebook/AGENTS.md: 1
+facebookPool named in root AGENTS.md: 0
+facebookPool named in trackers/facebook/AGENTS.md: 0

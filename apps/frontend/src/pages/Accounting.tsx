@@ -321,6 +321,7 @@ function EntryScreen({ id, showToast }: { id: string } & Props) {
         <PhAccountingSheet
           entry={entry}
           onClose={() => setEditing(false)}
+          onAttachmentsChanged={load}
           onSaved={() => { setEditing(false); showToast(t('acctSavedToast', { id: entry.id })); load(); }}
         />
       )}

@@ -41,7 +41,7 @@ export function useAccountingEntryForm(opts: {
   const [candidates, setCandidates] = useState<AcctTarget[] | null>(null);
   const [rate, setRate] = useState<number | null>(null);
   // Screenshots picked before the entry exists: they go up once it does.
-  // An edit has none — the entry's own page manages its screenshots live.
+  // An edit has none: its screenshots save live through AcctAttachments.
   const [files, setFiles] = useState<File[]>([]);
   const liveFiles = useRef(new Set<File>());
   const mounted = useRef(true);
@@ -94,8 +94,9 @@ export function useAccountingEntryForm(opts: {
   }, [entry, members, managers, form.managerId, meId]);
 
   const edit = (next: (f: EntryForm) => EntryForm) => { setForm(next); setError(null); };
-  // An entry whose record was deleted keeps its kind with no link.
-  const orphan = !!entry && !entry.target && form.kind === entry.kind;
+  // An entry whose record was deleted keeps its kind with no link. An Other
+  // entry never had one.
+  const orphan = !!entry && !!KIND_TARGET[entry.kind] && !entry.target && form.kind === entry.kind;
 
   const submit = async () => {
     if (busy || reading > 0) return;

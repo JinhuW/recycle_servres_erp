@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getDb, type SqlLike } from '../db';
 import { nextHumanId } from '../lib/id-seq';
 import { isActiveManager } from '../services/members';
+import { cnyPerUsdOnFrag, isSupportedCurrency } from '../lib/fx';
 import {
   clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, escapeLike, UUID_RE,
 } from '../lib/pagination';
@@ -75,7 +76,7 @@ afterSales.get('/', async (c) => {
     : sql`AND TRUE`;
 
   const rows = await sql<{
-    id: string; status: string; resolution: string | null; issue: string; amount: number | null;
+    id: string; status: string; resolution: string | null; issue: string; amount: number | null; currency: string;
     created_at: string; updated_at: string; closed_at: string | null; cursor_ts: string;
     sell_order_id: string; sell_order_status: string; currency_code: string;
     customer_id: string; customer_name: string; customer_short: string | null;
@@ -83,7 +84,7 @@ afterSales.get('/', async (c) => {
     line_count: number; qty: number;
   }[]>`
     SELECT
-      c.id, c.status, c.resolution, c.issue, c.amount::float AS amount,
+      c.id, c.status, c.resolution, c.issue, c.amount::float AS amount, c.currency_code AS currency,
       c.created_at, c.updated_at, c.closed_at,
       ${cursorTsSelect(sql, sql`c.created_at`)} AS cursor_ts,
       so.id AS sell_order_id, so.status AS sell_order_status, so.currency_code,
@@ -104,7 +105,7 @@ afterSales.get('/', async (c) => {
   const last = slice[slice.length - 1];
   return c.json({
     rows: slice.map(r => ({
-      id: r.id, status: r.status, resolution: r.resolution, issue: r.issue, amount: r.amount,
+      id: r.id, status: r.status, resolution: r.resolution, issue: r.issue, amount: r.amount, currency: r.currency,
       createdAt: r.created_at, updatedAt: r.updated_at, closedAt: r.closed_at,
       sellOrder: { id: r.sell_order_id, status: r.sell_order_status, currency: r.currency_code },
       customer: { id: r.customer_id, name: r.customer_name, short: r.customer_short },
@@ -116,12 +117,16 @@ afterSales.get('/', async (c) => {
 });
 
 // The page's tiles: every case in scope, not the page the list has loaded.
+// Totals are USD; an RMB case converts at the ledger rate of the day it opened.
 afterSales.get('/summary', async (c) => {
   if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
   const rows = await sql<{ status: string; count: number; amount: number }[]>`
-    SELECT status, COUNT(*)::int AS count, COALESCE(SUM(amount), 0)::float AS amount
-    FROM after_sales_cases GROUP BY status
+    SELECT c.status, COUNT(*)::int AS count,
+           COALESCE(SUM(CASE WHEN c.currency_code = 'CNY'
+                             THEN c.amount / ${cnyPerUsdOnFrag(sql, sql`c.created_at::date`)}
+                             ELSE c.amount END), 0)::float AS amount
+    FROM after_sales_cases c GROUP BY c.status
   `;
   const byStatus: Record<string, { count: number; amount: number }> = {};
   for (const s of AFTER_SALES_STATUSES) byStatus[s] = { count: 0, amount: 0 };
@@ -133,16 +138,16 @@ afterSales.get('/by-order/:sellOrderId', async (c) => {
   if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
   const rows = await sql<{
-    id: string; status: string; resolution: string | null; amount: number | null; issue: string;
+    id: string; status: string; resolution: string | null; amount: number | null; currency: string; issue: string;
     created_at: string; closed_at: string | null;
   }[]>`
-    SELECT id, status, resolution, amount::float AS amount, issue, created_at, closed_at
+    SELECT id, status, resolution, amount::float AS amount, currency_code AS currency, issue, created_at, closed_at
     FROM after_sales_cases WHERE sell_order_id = ${c.req.param('sellOrderId')}
     ORDER BY created_at DESC, id DESC
   `;
   return c.json({
     cases: rows.map(r => ({
-      id: r.id, status: r.status, resolution: r.resolution, amount: r.amount, issue: r.issue,
+      id: r.id, status: r.status, resolution: r.resolution, amount: r.amount, currency: r.currency, issue: r.issue,
       createdAt: r.created_at, closedAt: r.closed_at,
     })),
   });
@@ -153,7 +158,7 @@ afterSales.get('/:id', async (c) => {
   const sql = getDb(c.env);
   const id = c.req.param('id');
   const head = (await sql<{
-    id: string; status: string; resolution: string | null; issue: string; amount: number | null;
+    id: string; status: string; resolution: string | null; issue: string; amount: number | null; currency: string;
     created_at: string; updated_at: string; closed_at: string | null;
     assignee_id: string | null; assignee_name: string | null;
     created_by: string | null; created_by_name: string | null;
@@ -161,7 +166,7 @@ afterSales.get('/:id', async (c) => {
     customer_id: string; customer_name: string; customer_short: string | null;
   }[]>`
     SELECT
-      c.id, c.status, c.resolution, c.issue, c.amount::float AS amount,
+      c.id, c.status, c.resolution, c.issue, c.amount::float AS amount, c.currency_code AS currency,
       c.created_at, c.updated_at, c.closed_at,
       a.id AS assignee_id, a.name AS assignee_name,
       cb.id AS created_by, cb.name AS created_by_name,
@@ -200,6 +205,7 @@ afterSales.get('/:id', async (c) => {
   return c.json({
     case: {
       id: head.id, status: head.status, resolution: head.resolution, issue: head.issue, amount: head.amount,
+      currency: head.currency,
       createdAt: head.created_at, updatedAt: head.updated_at, closedAt: head.closed_at,
       assignee: head.assignee_id ? { id: head.assignee_id, name: head.assignee_name } : null,
       createdBy: head.created_by ? { id: head.created_by, name: head.created_by_name } : null,
@@ -223,7 +229,7 @@ afterSales.post('/', async (c) => {
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const body = (await c.req.json().catch(() => null)) as {
     sellOrderId?: unknown; issue?: unknown; lines?: unknown;
-    resolution?: unknown; amount?: unknown; assigneeId?: unknown;
+    resolution?: unknown; amount?: unknown; currency?: unknown; assigneeId?: unknown;
   } | null;
   if (!body) return c.json({ error: 'invalid JSON body' }, 400);
   const sellOrderId = typeof body.sellOrderId === 'string' ? body.sellOrderId : '';
@@ -251,6 +257,9 @@ afterSales.post('/', async (c) => {
   }
   const amount = parseAmount(body.amount);
   if (amount === undefined) return c.json({ error: 'amount must be a non-negative number' }, 400);
+  if (body.currency != null && !isSupportedCurrency(body.currency)) {
+    return c.json({ error: 'currency must be USD or CNY' }, 400);
+  }
   const assigneeId = body.assigneeId == null || body.assigneeId === '' ? null : body.assigneeId;
   if (assigneeId !== null && typeof assigneeId !== 'string') return c.json({ error: 'invalid assigneeId' }, 400);
 
@@ -286,10 +295,13 @@ afterSales.post('/', async (c) => {
       }
     }
 
+    // USD when unsaid: only clients from before the currency field omit it, and
+    // their amount input is labelled USD.
+    const currency = (body.currency as string | null | undefined) ?? 'USD';
     const id = await nextHumanId(tx, 'AS', 'AS');
     await tx`
-      INSERT INTO after_sales_cases (id, sell_order_id, issue, resolution, amount, assignee_id, created_by)
-      VALUES (${id}, ${sellOrderId}, ${issue}, ${resolution}, ${amount}, ${assigneeId}, ${u.id})
+      INSERT INTO after_sales_cases (id, sell_order_id, issue, resolution, amount, currency_code, assignee_id, created_by)
+      VALUES (${id}, ${sellOrderId}, ${issue}, ${resolution}, ${amount}, ${currency}, ${assigneeId}, ${u.id})
     `;
     for (const l of lines) {
       await tx`
@@ -298,7 +310,7 @@ afterSales.post('/', async (c) => {
       `;
     }
     await writeEvent(tx, id, u.id, 'created', {
-      to: 'Open', detail: { sellOrderId, resolution, amount, lines: lines.length },
+      to: 'Open', detail: { sellOrderId, resolution, amount, currency, lines: lines.length },
     });
     return { kind: 'created', id };
   });
@@ -316,11 +328,13 @@ afterSales.patch('/:id', async (c) => {
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
   const body = (await c.req.json().catch(() => null)) as {
-    issue?: unknown; resolution?: unknown; amount?: unknown; assigneeId?: unknown;
+    issue?: unknown; resolution?: unknown; amount?: unknown; currency?: unknown; assigneeId?: unknown;
   } | null;
   if (!body) return c.json({ error: 'invalid JSON body' }, 400);
 
-  const patch: { issue?: string; resolution?: string | null; amount?: number | null; assignee_id?: string | null } = {};
+  const patch: {
+    issue?: string; resolution?: string | null; amount?: number | null; currency_code?: string; assignee_id?: string | null;
+  } = {};
   if (body.issue !== undefined) {
     const issue = cleanText(body.issue);
     if (!issue) return c.json({ error: 'issue cannot be empty' }, 400);
@@ -337,6 +351,10 @@ afterSales.patch('/:id', async (c) => {
     const a = parseAmount(body.amount);
     if (a === undefined) return c.json({ error: 'amount must be a non-negative number' }, 400);
     patch.amount = a;
+  }
+  if (body.currency !== undefined) {
+    if (!isSupportedCurrency(body.currency)) return c.json({ error: 'currency must be USD or CNY' }, 400);
+    patch.currency_code = body.currency;
   }
   if (body.assigneeId !== undefined) {
     const a = body.assigneeId === null || body.assigneeId === '' ? null : body.assigneeId;
@@ -357,9 +375,10 @@ afterSales.patch('/:id', async (c) => {
     | { kind: 'ok' };
   const outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const cur = (await tx<{
-      status: string; issue: string; resolution: string | null; amount: number | null; assignee_id: string | null;
+      status: string; issue: string; resolution: string | null; amount: number | null; currency_code: string;
+      assignee_id: string | null;
     }[]>`
-      SELECT status, issue, resolution, amount::float AS amount, assignee_id
+      SELECT status, issue, resolution, amount::float AS amount, currency_code, assignee_id
       FROM after_sales_cases WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
     if (!cur) return { kind: 'notFound' };

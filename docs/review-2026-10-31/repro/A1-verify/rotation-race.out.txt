@@ -1,0 +1,26 @@
+{
+ "selfPasswordChange": {
+  "rotationInFlight_ok": true,
+  "thiefFamilyLiveRowsAfterRevoke": 1,
+  "successorStillRotates": true
+ },
+ "control_noOverlap": {
+  "rotate_ok": false
+ },
+ "deactivation": {
+  "rotationInFlight_ok": true,
+  "refusedWhileInactive": true,
+  "successorRotatesAfterReactivation": true,
+  "liveRows": 1
+ },
+ "oauthSelfPasswordChange": {
+  "rotationInFlight_ok": true,
+  "liveRowsAfter": 1,
+  "successorStillRotates": true,
+  "cvMatchesCurrent": true
+ },
+ "oauthDeactivateThenReactivate": {
+  "rotationInFlight_ok": true,
+  "successorRotatesAfterReactivation": true
+ }
+}

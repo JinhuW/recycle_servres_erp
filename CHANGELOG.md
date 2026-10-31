@@ -15,6 +15,88 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.396.1] - 2026-10-31
+
+### Fixed
+
+- **An after-sales case opened without a currency is USD again** (RS-489).
+  Since v1.395.0 such a case took its sell order's currency. The only clients
+  that leave the currency out are desktop tabs still on the older bundle, whose
+  field says "Amount (USD)", so on an RMB order a dollar refund would have been
+  saved as RMB. The current form still starts at the order's currency and always
+  says which one it means. The frontend also reads a case that comes back
+  without a currency as USD, so a Worker deployed ahead of the backend shows
+  "$10.00" rather than "undefined 10.00".
+
+## [1.396.0] - 2026-10-31
+
+### Added
+
+- **An accounting entry's Edit dialog carries its screenshots** (RS-486). The
+  desktop Edit dialog and the phone edit sheet hid the screenshot box, so a
+  receipt could be added or removed only from the entry's drawer. They now
+  list the screenshots, and they take a dropped, picked or (on desktop) pasted
+  image. As in the drawer, a change saves right away, not with Save changes,
+  and the drawer underneath shows the new list.
+
+### Fixed
+
+- **Other entries no longer say their record was deleted** (RS-486). The
+  banner "The record this entry was for has been deleted" meant only that the
+  entry had no linked record. An Other entry never has one, so every Other
+  entry opened in Edit showed the banner. It now shows only for a Purchase,
+  Commission, Sale or After-sales entry whose PO, SO or case was deleted. That
+  entry stays in the book unlinked and its money still counts.
+
+## [1.395.2] - 2026-10-31
+
+### Changed
+
+- **Phone Market cards show the part number and the last updated time**
+  (RS-485). The API already sent both, and the desktop table already shows
+  them, but on a phone the part number was missing and the updated time was
+  only inside the tap-to-expand panel. Each card now lists the part number in
+  mono under the name, then "Updated 3 days ago". A buyer can match a listing
+  and judge how fresh the price is without opening every card.
+
+## [1.395.1] - 2026-10-31
+
+### Fixed
+
+- **Phone Market cards show the whole SKU name** (RS-484). The name was cut to
+  one line with an ellipsis, and the sell-price column beside it keeps its
+  width, so on a phone a RAM card read "Samsung 32GB Server RDIMM 2…" and lost
+  the rank, speed and part number a buyer matches a listing against. The name
+  now wraps onto as many lines as it needs, and a long part number with no
+  spaces breaks instead of overflowing the card.
+
+## [1.395.0] - 2026-10-31
+
+### Added
+
+- **An after-sales case's amount can be in RMB (RS-483).** The refund or
+  discount was USD only, so a manager refunding a Chinese buyer in RMB had to
+  convert by hand. The Amount field now has a USD / RMB choice, a new case
+  starts in the sell order's currency, and the list, the case page and the
+  sell order's cases panel show ¥ or $. The status tiles still total in USD,
+  converting an RMB case at the ledger rate of the day it was opened, and
+  Accounting's after-sales target reports the case's own currency. Existing
+  cases stay USD.
+
+### Changed
+
+- **The issue moved into the Resolution card** on the new-case form and the
+  case page, so what the customer reported sits beside how it is settled.
+
+## [1.394.1] - 2026-10-31
+
+### Fixed
+
+- **The accounting drawer's Review card no longer collapses to a sliver
+  (RS-482).** On an entry long enough to scroll, the card was squeezed to fit
+  the drawer, cutting off its status line, detail and footer. The drawer's
+  sections now keep their height and the body scrolls.
+
 ## [1.394.0] - 2026-10-31
 
 ### Changed

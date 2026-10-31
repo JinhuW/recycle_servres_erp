@@ -2052,7 +2052,10 @@ lower price (**Discount**). Purchasers never see the page or the API.
   lists its products with a checkbox and a quantity capped at the line's
   qty (typed freely, clamped when the field loses focus — v1.255.1). The
   issue is required; resolution, amount and assignee are optional
-  at this point. Cases are numbered `AS-1001`, `AS-1002`… from their own
+  at this point. The issue sits in the Resolution card beside them
+  (v1.395.0). The amount is in USD or RMB, chosen beside the field and
+  starting at the sell order's currency (v1.395.0). A request that names no currency is
+  taken as USD (v1.396.1). Cases are numbered `AS-1001`, `AS-1002`… from their own
   counter. The products are snapshotted (label, part #, qty, unit price):
   a sell-order save rewrites its line rows, so the case keeps its own copy
   and the link to the live line only while that row exists.
@@ -2073,7 +2076,8 @@ lower price (**Discount**). Purchasers never see the page or the API.
   who and when. A Resolved or Cancelled case is read-only until reopened;
   the timeline still takes notes.
 - **The list** (`#/after-sales`): five tiles (one per status, clicking one
-  filters) counting every case and summing its amounts, a status select, a
+  filters) counting every case and summing its amounts in USD — an RMB
+  case converts at the ledger rate of the day it opened (v1.395.0) — a status select, a
   search over case id, sell order id, customer and issue, and a table with
   case, sell order (a link), customer, issue, units, resolution, amount,
   assignee, status and last update. A row opens the case.
@@ -2550,6 +2554,10 @@ is who paid, below).
     opens the form: direction, kind, a record picker searched by id or name,
     amount in ¥ or $ with the RMB it books as, date, method, Paid by (the
     Business Account or a person), counterparty, screenshots and note.
+    Edit opens the same form with the entry's screenshots, which save as
+    they are added (drop, pick or paste) or removed (v1.396.0). An entry
+    whose PO, SO or case was deleted stays in the book unlinked, and its
+    Edit says so; an Other entry never had a record.
 - **On the records** (managers only), an *Accounting* card shows what the book
   has against the record, what that comes to, the record's own figure and a
   Record button with the record already chosen:
@@ -2683,7 +2691,10 @@ over MCP.
 - **Phone Market value cards** headline the sell price that Max buy is
   computed from (the last price, else the average sell), labelled and shown
   to the cent. When an average sell price exists and differs, the expanded
-  card lists it too (v1.377.3).
+  card lists it too (v1.377.3). The SKU name wraps onto as many lines as it
+  needs, so a RAM card shows its full spec: rank, speed and part number
+  (v1.395.1). Under the name each card shows the part number and when the
+  SKU was last updated, without tapping to expand (v1.395.2).
 - **Four feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
   on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),

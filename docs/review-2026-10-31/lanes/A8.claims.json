@@ -1,0 +1,9 @@
+[
+ {
+  "id": "A8-01",
+  "severity": "P2",
+  "title": "[cross-lane] ERP depends on five rs_console routes that neither contract doc lists (facebookPool.ts calls the console directly)",
+  "location": "apps/backend/src/routes/facebookPool.ts:538,656,680,689,694,836; AGENTS.md:72; trackers/facebook/AGENTS.md:45-80",
+  "failure_scenario": "A console change that tightens ACCOUNT_WRITE_FIELDS to match coordinator.ts, or that renames or removes /v1/workers/{id}/session or /restore-session as unused by the ERP, passes the console's suite. After deploy, every pool Assign either drops fb_uid, so the worker signs in the new account from the previous account's device identity, or falls back from cookie-first to a password Re-login, which is a Facebook login from the worker IP and the checkpoint risk the root AGENTS.md calls the first rule."
+ }
+]

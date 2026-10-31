@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /Users/jinhu/orca/workspaces/recycle_servres_erp/brant/docs/review-2026-10-31/repro/A9-verify
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  16:51:51
+   Duration  389ms (transform 74ms, setup 0ms, import 105ms, tests 204ms, environment 0ms)
+

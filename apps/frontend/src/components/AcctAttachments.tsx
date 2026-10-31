@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AttachmentChip } from './AttachmentChip';
 import { AttachmentDropzone } from './AttachmentDropzone';
 import { MAX_UPLOAD_BYTES } from '../lib/api';
@@ -11,22 +11,26 @@ const ACCEPT = '.png,.jpg,.jpeg,.webp,.pdf,image/*,application/pdf';
 // An entry's payment screenshots, saved live like the sell order's
 // attachments. The server names each by what the receipt OCR reads off it,
 // so the chip shows the date, method and amount without opening the image.
-// Mount it keyed by the entry: the editable list is seeded once.
-export function AcctAttachments({ entryId, initial, readOnly, onChanged }: {
+// Mount it keyed by the entry. A re-read list (the edit dialog changed it
+// above the drawer) replaces the local one unless an upload is under way.
+export function AcctAttachments({ entryId, initial, readOnly, onChanged, paste }: {
   entryId: string;
   initial: AcctAttachment[];
   // A voided entry, or a page that only shows them.
   readOnly?: boolean;
   // After an upload or a removal lands, so the history re-reads.
   onChanged?: () => void;
+  // The desktop edit dialog takes a pasted screenshot from anywhere in it.
+  paste?: boolean;
 }) {
   const { t, locale } = useT();
   const [items, setItems] = useState(initial);
   const visibleItems = readOnly ? initial : items;
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => { if (!uploading) setItems(initial); }, [initial]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const addFiles = async (list: FileList | null) => {
+  const addFiles = async (list: FileList | File[] | null) => {
     const files = Array.from(list ?? []);
     if (!files.length) return;
     setUploading(true);
@@ -59,6 +63,19 @@ export function AcctAttachments({ entryId, initial, readOnly, onChanged }: {
     }
   };
 
+  // A paste with no image in it is left to the field it lands in.
+  const addRef = useRef(addFiles);
+  addRef.current = addFiles;
+  useEffect(() => {
+    if (!paste || readOnly) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const images = [...(e.clipboardData?.files ?? [])].filter(x => x.type.startsWith('image/'));
+      if (images.length) { e.preventDefault(); void addRef.current(images); }
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [paste, readOnly]);
+
   if (readOnly && visibleItems.length === 0) return null;
   return (
     <div>
@@ -75,7 +92,7 @@ export function AcctAttachments({ entryId, initial, readOnly, onChanged }: {
           compact
           accept={ACCEPT}
           uploading={uploading}
-          boxHint={uploading ? t('acctScreenshotsUploading') : t('acctScreenshotsBox')}
+          boxHint={uploading ? t('acctScreenshotsUploading') : t(paste ? 'acctScreenshotsBoxPaste' : 'acctScreenshotsBox')}
           onFiles={files => void addFiles(files)}
         />
       )}

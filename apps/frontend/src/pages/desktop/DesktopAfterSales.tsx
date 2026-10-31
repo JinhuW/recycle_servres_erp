@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   api, addAfterSalesNote, afterSalesSummary, createAfterSalesCase, getAfterSalesCase, listAfterSalesCases,
   patchAfterSalesCase, setAfterSalesStatus,
-  type AfterSalesCase, type AfterSalesResolution, type AfterSalesRow, type AfterSalesStatus,
+  type AfterSalesCase, type AfterSalesCurrency, type AfterSalesResolution, type AfterSalesRow, type AfterSalesStatus,
 } from '../../lib/api';
 import { forEachKeysetPage } from '../../lib/keysetPages';
 import { useT } from '../../lib/i18n';
 import { handleFetchError } from '../../lib/errorToast';
-import { fmtUSD, fmtDateShort } from '../../lib/format';
+import { fmtUSD, fmtMoney, fmtDateShort } from '../../lib/format';
 import { statusTone } from '../../lib/status';
 import {
   afterSalesCasePath, afterSalesNewPath, hrefFor, match, navigate, navigateBack, onLinkClick, readHashQuery, useRoute,
@@ -191,7 +191,7 @@ function CaseList() {
                   </td>
                   <td style={{ textAlign: 'right' }} className="mono">{r.qty}</td>
                   <td><ResolutionLabel r={r.resolution} /></td>
-                  <td style={{ textAlign: 'right' }} className="mono">{r.amount != null ? fmtUSD(r.amount, locale) : '—'}</td>
+                  <td style={{ textAlign: 'right' }} className="mono">{r.amount != null ? fmtMoney(r.amount, r.currency, locale) : '—'}</td>
                   <td style={{ color: r.assignee ? 'inherit' : 'var(--fg-subtle)' }}>{r.assignee?.name ?? t('asUnassigned')}</td>
                   <td><StatusChip status={r.status} /></td>
                   <td style={{ color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>{fmtDateShort(r.updatedAt, locale)}</td>
@@ -219,8 +219,10 @@ function CaseDetail({ id, onToast }: { id: string } & Props) {
   const { t, locale } = useT();
   const managers = useManagerOptions();
   const [c, setC] = useState<AfterSalesCase | null>(null);
-  const [draft, setDraft] = useState<{ issue: string; resolution: '' | AfterSalesResolution; amount: string; assigneeId: string }>({
-    issue: '', resolution: '', amount: '', assigneeId: '',
+  const [draft, setDraft] = useState<{
+    issue: string; resolution: '' | AfterSalesResolution; amount: string; currency: AfterSalesCurrency; assigneeId: string;
+  }>({
+    issue: '', resolution: '', amount: '', currency: 'USD', assigneeId: '',
   });
   const [saving, setSaving] = useState(false);
   const [moveTo, setMoveTo] = useState<AfterSalesStatus | null>(null);
@@ -237,6 +239,7 @@ function CaseDetail({ id, onToast }: { id: string } & Props) {
         issue: r.case.issue,
         resolution: r.case.resolution ?? '',
         amount: r.case.amount == null ? '' : String(r.case.amount),
+        currency: r.case.currency,
         assigneeId: r.case.assignee?.id ?? '',
       });
     } catch (e) {
@@ -254,6 +257,7 @@ function CaseDetail({ id, onToast }: { id: string } & Props) {
   const dirty = draft.issue.trim() !== c.issue
     || (draft.resolution || null) !== c.resolution
     || (draft.amount === '' ? null : Number(draft.amount)) !== c.amount
+    || draft.currency !== c.currency
     || (draft.assigneeId || null) !== (c.assignee?.id ?? null);
 
   const save = async () => {
@@ -264,6 +268,7 @@ function CaseDetail({ id, onToast }: { id: string } & Props) {
         issue: draft.issue.trim(),
         resolution: draft.resolution || null,
         amount: draft.amount === '' ? null : Number(draft.amount),
+        currency: draft.currency,
         assigneeId: draft.assigneeId || null,
       });
       onToast?.(t('asSavedToast'));
@@ -312,7 +317,7 @@ function CaseDetail({ id, onToast }: { id: string } & Props) {
 
   const soPath = '/sell-orders/' + c.sellOrder.id;
   const fieldLabel = (f: string) => ({
-    issue: t('asIssue'), resolution: t('asResolution'), amount: t('asAmount'), assignee_id: t('asAssignee'),
+    issue: t('asIssue'), resolution: t('asResolution'), amount: t('asAmount'), currency_code: t('asCurrency'), assignee_id: t('asAssignee'),
   } as Record<string, string>)[f] ?? f;
 
   return (
@@ -357,18 +362,6 @@ function CaseDetail({ id, onToast }: { id: string } & Props) {
             </div>
           )}
           <div className="card so-page-card">
-            <div className="so-section-head"><Icon name="alert" size={14} /> {t('asIssue')}</div>
-            <textarea
-              className="input"
-              rows={4}
-              disabled={closed}
-              value={draft.issue}
-              onChange={e => setDraft({ ...draft, issue: e.target.value })}
-              style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
-            />
-          </div>
-
-          <div className="card so-page-card">
             <div className="so-section-head"><Icon name="box" size={14} /> {t('asLines')}</div>
             <table className="data-table">
               <thead>
@@ -399,6 +392,12 @@ function CaseDetail({ id, onToast }: { id: string } & Props) {
             <div className="so-section-head"><Icon name="edit" size={14} /> {t('asResolution')}</div>
             <div style={{ display: 'grid', gap: 10 }}>
               <label style={{ display: 'grid', gap: 4, fontSize: 12.5 }}>
+                <span>{t('asIssue')}</span>
+                <textarea className="input" rows={4} disabled={closed} value={draft.issue}
+                          onChange={e => setDraft({ ...draft, issue: e.target.value })}
+                          style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
+              </label>
+              <label style={{ display: 'grid', gap: 4, fontSize: 12.5 }}>
                 <span>{t('asResolution')}</span>
                 <select className="select" disabled={closed || awaitingReturn} value={draft.resolution}
                         title={awaitingReturn ? t('asResLockedAwaiting') : undefined}
@@ -409,8 +408,9 @@ function CaseDetail({ id, onToast }: { id: string } & Props) {
               </label>
               <label style={{ display: 'grid', gap: 4, fontSize: 12.5 }}>
                 <span>{t('asAmount')}</span>
-                <input className="input" type="number" min={0} step="0.01" disabled={closed} value={draft.amount}
-                       onChange={e => setDraft({ ...draft, amount: e.target.value })} />
+                <AmountInput disabled={closed} amount={draft.amount} currency={draft.currency}
+                             onAmount={amount => setDraft({ ...draft, amount })}
+                             onCurrency={currency => setDraft({ ...draft, currency })} />
                 <span style={{ color: 'var(--fg-subtle)', fontSize: 11.5 }}>{t('asAmountHint')}</span>
               </label>
               <label style={{ display: 'grid', gap: 4, fontSize: 12.5 }}>
@@ -493,7 +493,7 @@ function CaseDetail({ id, onToast }: { id: string } & Props) {
 // ── New case ────────────────────────────────────────────────────────────────
 
 type OrderLine = { id: string; no: number; label: string; partNumber: string | null; qty: number; unitPrice: number };
-type OrderHead = { id: string; status: string; customer: { name: string }; lines: OrderLine[] };
+type OrderHead = { id: string; status: string; currency: AfterSalesCurrency; customer: { name: string }; lines: OrderLine[] };
 
 function NewCaseForm({ onToast }: Props) {
   const { t, locale } = useT();
@@ -509,6 +509,7 @@ function NewCaseForm({ onToast }: Props) {
   const [issue, setIssue] = useState('');
   const [resolution, setResolution] = useState<'' | AfterSalesResolution>('');
   const [amount, setAmount] = useState('');
+  const [currency, setCurrency] = useState<AfterSalesCurrency>('USD');
   const [assigneeId, setAssigneeId] = useState('');
   const [creating, setCreating] = useState(false);
 
@@ -519,6 +520,7 @@ function NewCaseForm({ onToast }: Props) {
     try {
       const r = await api.get<{ order: OrderHead }>(`/api/sell-orders/${encodeURIComponent(trimmed)}`);
       setOrder(r.order);
+      setCurrency(r.order.currency);
       setPicked({});
       setQtyText({});
     } catch (e) {
@@ -546,6 +548,7 @@ function NewCaseForm({ onToast }: Props) {
         lines: Object.entries(picked).filter(([, q]) => q > 0).map(([sellOrderLineId, qty]) => ({ sellOrderLineId, qty })),
         resolution: resolution || null,
         amount: amount === '' ? null : Number(amount),
+        currency,
         assigneeId: assigneeId || null,
       });
       onToast?.(t('asCreatedToast', { id: r.id }));
@@ -661,15 +664,6 @@ function NewCaseForm({ onToast }: Props) {
               </table>
             </div>
           )}
-
-          {order && eligible && (
-            <div className="card so-page-card">
-              <div className="so-section-head"><Icon name="alert" size={14} /> {t('asIssue')}</div>
-              <textarea className="input" rows={4} placeholder={t('asIssuePh')} value={issue}
-                        onChange={e => setIssue(e.target.value)}
-                        style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
-            </div>
-          )}
         </div>
 
         {order && eligible && (
@@ -677,6 +671,12 @@ function NewCaseForm({ onToast }: Props) {
             <div className="card so-page-card">
               <div className="so-section-head"><Icon name="edit" size={14} /> {t('asResolution')}</div>
               <div style={{ display: 'grid', gap: 10 }}>
+                <label style={{ display: 'grid', gap: 4, fontSize: 12.5 }}>
+                  <span>{t('asIssue')}</span>
+                  <textarea className="input" rows={4} placeholder={t('asIssuePh')} value={issue}
+                            onChange={e => setIssue(e.target.value)}
+                            style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
+                </label>
                 <label style={{ display: 'grid', gap: 4, fontSize: 12.5 }}>
                   <span>{t('asResolution')}</span>
                   <select className="select" value={resolution} onChange={e => setResolution(e.target.value as '' | AfterSalesResolution)}>
@@ -686,7 +686,7 @@ function NewCaseForm({ onToast }: Props) {
                 </label>
                 <label style={{ display: 'grid', gap: 4, fontSize: 12.5 }}>
                   <span>{t('asAmount')}</span>
-                  <input className="input" type="number" min={0} step="0.01" value={amount} onChange={e => setAmount(e.target.value)} />
+                  <AmountInput amount={amount} currency={currency} onAmount={setAmount} onCurrency={setCurrency} />
                   <span style={{ color: 'var(--fg-subtle)', fontSize: 11.5 }}>{t('asAmountHint')}</span>
                 </label>
                 <label style={{ display: 'grid', gap: 4, fontSize: 12.5 }}>
@@ -707,5 +707,23 @@ function NewCaseForm({ onToast }: Props) {
         )}
       </div>
     </>
+  );
+}
+
+function AmountInput({ amount, currency, disabled, onAmount, onCurrency }: {
+  amount: string; currency: AfterSalesCurrency; disabled?: boolean;
+  onAmount: (v: string) => void; onCurrency: (c: AfterSalesCurrency) => void;
+}) {
+  const { t } = useT();
+  return (
+    <div style={{ display: 'flex', gap: 6 }}>
+      <input className="input" type="number" min={0} step="0.01" disabled={disabled} value={amount}
+             onChange={e => onAmount(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+      <select className="select" disabled={disabled} value={currency} aria-label={t('asCurrency')}
+              onChange={e => onCurrency(e.target.value as AfterSalesCurrency)} style={{ width: 84 }}>
+        <option value="USD">USD $</option>
+        <option value="CNY">RMB ¥</option>
+      </select>
+    </div>
   );
 }

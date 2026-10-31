@@ -1,0 +1,77 @@
+
+ RUN  v4.1.5 /Users/jinhu/orca/workspaces/recycle_servres_erp/brant/apps/backend
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-02-archived-po.test.ts > A3-02 archived PO in dashboard > purchaser: spend excludes it, projection keeps it
+{"ts":"2026-10-31T20:33:50.850Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"8737d525-70e5-49c7-a37d-dc4b4230a09f","method":"POST","path":"/api/auth/login","status":200,"ms":74}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-02-archived-po.test.ts > A3-02 archived PO in dashboard > purchaser: spend excludes it, projection keeps it
+{"ts":"2026-10-31T20:33:50.871Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"067fa6a5-6352-46b5-b08b-851c06480ac1","userId":"df863890-51ea-40dc-9fb6-b88392075388","method":"GET","path":"/api/dashboard","status":200,"ms":21}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-02-archived-po.test.ts > A3-02 archived PO in dashboard > purchaser: spend excludes it, projection keeps it
+A3-02 purchaser {"kpis":{"count":1,"cost":100,"revenue":200,"profit":100,"commission":10,"prev":{"revenue":0,"profit":0},"unknownCost":{"lines":0,"revenue":0}},"contribCost":0,"contribRev":200,"contribProfit":100,"me":{"id":"df863890-51ea-40dc-9fb6-b88392075388","name":"Marcus Wright","initials":"MW","role":"purchaser","count":1,"email":"marcus@recycleservers.io","cost":100,"revenue":200,"profit":100,"commission":10}}
+
+ ✓ ../../docs/review-2026-10-31/repro/A3-verify/a3-02-archived-po.test.ts > A3-02 archived PO in dashboard > purchaser: spend excludes it, projection keeps it 219ms
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-02-archived-po.test.ts > A3-02 archived PO in dashboard > manager leaderboard keeps it too
+{"ts":"2026-10-31T20:33:51.213Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"8eb77f6a-4c0f-48ae-9596-31693283c23e","method":"POST","path":"/api/auth/login","status":200,"ms":81}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-02-archived-po.test.ts > A3-02 archived PO in dashboard > manager leaderboard keeps it too
+{"ts":"2026-10-31T20:33:51.231Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"cf4a503f-be24-4795-b3a3-e5ac8d10f075","userId":"6d1454a9-b465-49c2-821e-6f9cfb862308","method":"GET","path":"/api/dashboard","status":200,"ms":16}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-02-archived-po.test.ts > A3-02 archived PO in dashboard > manager leaderboard keeps it too
+A3-02 manager {"contribCost":0,"row":{"id":"df863890-51ea-40dc-9fb6-b88392075388","name":"Marcus Wright","initials":"MW","role":"purchaser","count":1,"email":"marcus@recycleservers.io","cost":100,"revenue":200,"profit":100,"commission":10}}
+
+ ✓ ../../docs/review-2026-10-31/repro/A3-verify/a3-02-archived-po.test.ts > A3-02 archived PO in dashboard > manager leaderboard keeps it too 359ms
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > 7100 (typo for 7.10) is accepted and then prices a CNY sell order ~1000x low
+{"ts":"2026-10-31T20:33:51.691Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"65893724-ddcc-4d31-806f-8ad93ee46512","method":"POST","path":"/api/auth/login","status":200,"ms":82}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > 7100 (typo for 7.10) is accepted and then prices a CNY sell order ~1000x low
+{"ts":"2026-10-31T20:33:51.695Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"7271f59c-c962-4919-898d-3f17ca32aae6","userId":"6d1454a9-b465-49c2-821e-6f9cfb862308","method":"POST","path":"/api/workspace/fx-rates","status":201,"ms":3}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > 7100 (typo for 7.10) is accepted and then prices a CNY sell order ~1000x low
+{"ts":"2026-10-31T20:33:51.701Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"2e847425-3156-4370-a985-4a4ec675a06a","userId":"6d1454a9-b465-49c2-821e-6f9cfb862308","method":"GET","path":"/api/inventory","status":200,"ms":5}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > 7100 (typo for 7.10) is accepted and then prices a CNY sell order ~1000x low
+{"ts":"2026-10-31T20:33:51.703Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"ab4472f9-d805-4d07-be83-4513da96b7ac","userId":"6d1454a9-b465-49c2-821e-6f9cfb862308","method":"GET","path":"/api/inventory/51fa5dd7-9bb8-43cd-b79d-961676940077/sell-orders","status":200,"ms":2}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > 7100 (typo for 7.10) is accepted and then prices a CNY sell order ~1000x low
+{"ts":"2026-10-31T20:33:51.706Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"16e59258-a782-4174-9ce9-581393126883","userId":"6d1454a9-b465-49c2-821e-6f9cfb862308","method":"GET","path":"/api/inventory/7d7a5261-6fd3-4d75-b966-3478b66ad2b4/sell-orders","status":200,"ms":2}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > 7100 (typo for 7.10) is accepted and then prices a CNY sell order ~1000x low
+{"ts":"2026-10-31T20:33:51.708Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"8e9c2381-b24f-482a-914d-3f854811b661","userId":"6d1454a9-b465-49c2-821e-6f9cfb862308","method":"GET","path":"/api/customers","status":200,"ms":2}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > 7100 (typo for 7.10) is accepted and then prices a CNY sell order ~1000x low
+{"ts":"2026-10-31T20:33:51.721Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"dea1b596-916c-48db-8cf8-84312438578b","userId":"6d1454a9-b465-49c2-821e-6f9cfb862308","method":"POST","path":"/api/sell-orders","status":201,"ms":13}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > 7100 (typo for 7.10) is accepted and then prices a CNY sell order ~1000x low
+A3-01 CNY 710 stored as USD unit_price = 0.10
+
+ ✓ ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > 7100 (typo for 7.10) is accepted and then prices a CNY sell order ~1000x low 208ms
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > a USD RMB-Flow entry with no explicit rate then 500s on the fx_rate <= 100 CHECK
+{"ts":"2026-10-31T20:33:51.873Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"85ec0e6e-a528-43a2-870f-89161969800c","method":"POST","path":"/api/auth/login","status":200,"ms":71}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > a USD RMB-Flow entry with no explicit rate then 500s on the fx_rate <= 100 CHECK
+{"ts":"2026-10-31T20:33:51.875Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"711271dc-38c7-462a-ac13-28222013af53","userId":"6d1454a9-b465-49c2-821e-6f9cfb862308","method":"POST","path":"/api/workspace/fx-rates","status":201,"ms":2}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > a USD RMB-Flow entry with no explicit rate then 500s on the fx_rate <= 100 CHECK
+{"ts":"2026-10-31T20:33:51.889Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"a19a09f1-03e3-4365-a343-462d2cfd2da7","userId":"6d1454a9-b465-49c2-821e-6f9cfb862308","method":"POST","path":"/api/accounting/entries","status":500,"ms":13}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > a USD RMB-Flow entry with no explicit rate then 500s on the fx_rate <= 100 CHECK
+A3-01 accounting entry status = 500 { error: 'Internal error' }
+
+ ✓ ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > a USD RMB-Flow entry with no explicit rate then 500s on the fx_rate <= 100 CHECK 161ms
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > a tiny positive rate passes the route check then 500s on fx_rates CHECK (rate > 0)
+{"ts":"2026-10-31T20:33:52.042Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"bdf6dc47-28c9-438c-85dc-8949cdbc9944","method":"POST","path":"/api/auth/login","status":200,"ms":70}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > a tiny positive rate passes the route check then 500s on fx_rates CHECK (rate > 0)
+{"ts":"2026-10-31T20:33:52.045Z","level":"info","version":"1.395.0","commit":"unknown","message":"request","requestId":"152a6b6e-19ed-466f-b033-85abe3858adc","userId":"6d1454a9-b465-49c2-821e-6f9cfb862308","method":"POST","path":"/api/workspace/fx-rates","status":500,"ms":3}
+
+stdout | ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > a tiny positive rate passes the route check then 500s on fx_rates CHECK (rate > 0)
+A3-01 tiny rate status = 500
+
+ ✓ ../../docs/review-2026-10-31/repro/A3-verify/a3-01-fx-override.test.ts > A3-01 manual FX override bound > a tiny positive rate passes the route check then 500s on fx_rates CHECK (rate > 0) 156ms
+
+ Test Files  2 passed (2)
+      Tests  5 passed (5)
+   Start at  16:33:48
+   Duration  3.57s (transform 555ms, setup 30ms, import 935ms, tests 2.45s, environment 0ms)
+

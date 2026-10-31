@@ -172,6 +172,7 @@ export function EntryDrawer({ id, onClose, onChanged, onToast }: Props) {
           entry={entry}
           zIndex={110}
           onClose={() => setEditing(false)}
+          onAttachmentsChanged={() => { load(); onChanged(); }}
           onSaved={() => {
             setEditing(false);
             onToast?.(t('acctSavedToast', { id: entry.id }));
