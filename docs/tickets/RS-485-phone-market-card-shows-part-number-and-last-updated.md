@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-31
 reporter: jinhu
 branch: JinhuW/whelk-rs485
-pr:
+pr: 1033
 version: 1.395.2
 related: [RS-484]
 ---
