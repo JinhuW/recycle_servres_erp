@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-31
 reporter: jinhu
 branch: JinhuW/darter
-pr:
+pr: "#1019"
 version: 1.391.0
 related: []
 ---
