@@ -158,10 +158,13 @@ export function validatePoolDraft(
   draft: PoolDraft,
   accounts: readonly PoolAccount[],
   no?: number,
+  storedCookie?: string,
 ): string[] {
   return validateFbPoolDraft(
     draft,
     new Set(accounts.filter((a) => a.no !== no).map((a) => a.uid)),
+    undefined,
+    storedCookie,
   );
 }
 type ImportField =

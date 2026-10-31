@@ -15,6 +15,21 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.393.1] - 2026-10-31
+
+### Fixed
+
+- **The account pool editor saves accounts whose session a fleet worker
+  saved** (RS-480). An ERP fleet worker stores the browser's whole storage
+  state, cookies and site data, in the account's cookie field, routinely tens
+  of thousands of characters, while the editor allowed 8,000. Every Save
+  sent that cookie back and was refused, so a status could not be changed on
+  any account the fleet had run (#128 was the one reported). The limit now
+  applies only to a cookie that was changed, in the editor and on the server;
+  an unchanged one keeps its age. The refusal itself was drawn at the top of
+  the drawer, out of sight of the Save button at its foot, so it looked like
+  a dead button; a refused save now scrolls its error into view.
+
 ## [1.393.0] - 2026-10-31
 
 ### Added

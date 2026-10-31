@@ -468,11 +468,12 @@ pool.put('/:no', async (c) => {
   const result = await sql.begin(async (tx) => {
     const [cur] = await tx<Row[]>`SELECT * FROM fb_pool_accounts WHERE no = ${no} FOR NO KEY UPDATE`;
     if (!cur) return { status: 404, body: { error: 'Not found' } } as const;
-    const codes = validateFbPoolDraft(draft, await existingUids(tx), cur.uid);
+    const storedCookie = unsealOrEmpty(cur.cookie_enc, key);
+    const codes = validateFbPoolDraft(draft, await existingUids(tx), cur.uid, storedCookie);
     if (codes.length) return refusal(codes);
     const s = sealDraft(draft, key);
     // A cookie that reads the same keeps its age; a new one is fresh today.
-    const cookieUnchanged = draft.cookie === unsealOrEmpty(cur.cookie_enc, key);
+    const cookieUnchanged = draft.cookie === storedCookie;
     const sameHolder =
       !!draft.holder && !!cur.holder_name && draft.holder.toLowerCase() === cur.holder_name.toLowerCase();
     const holderId = sameHolder ? cur.holder_user_id : await resolveHolder(tx, draft.holder);
