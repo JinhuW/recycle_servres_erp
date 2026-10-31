@@ -15,6 +15,16 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.393.0] - 2026-10-31
+
+### Added
+
+- **Leads ▸ Reddit Pool loads more sellers as you scroll** (RS-479). The pool
+  showed 50 sellers and a **Show 50 more** button, so walking a pool of two
+  thousand took forty-odd clicks. Reaching the foot of the table now reveals
+  the next 50 on its own, a screenful early, until the whole pool is shown.
+  The button stays as a fallback.
+
 ## [1.392.1] - 2026-10-31
 
 ### Fixed

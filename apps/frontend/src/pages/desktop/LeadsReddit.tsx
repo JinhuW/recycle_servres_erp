@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   REDDIT_LEAD_STAGES, redditLeadIsDue, redditLeadIsOpen, redditLeadIsStale, redditLeadNeedsAction, redditLeadRank,
   type RedditLeadStage,
@@ -9,6 +9,7 @@ import { ApiError } from '../../lib/api';
 import { handleFetchError, showWarnToast } from '../../lib/errorToast';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { useSentinel } from '../../lib/useSentinel';
 import { usePreference } from '../../lib/preferences';
 import {
   leadsApi, leadsChanged, parseLeadsFile, type RedditBuyer, type RedditLead,
@@ -207,6 +208,12 @@ function PoolTab({ leads, max, q, busy, onOpen, onClaim, onClear }: {
   const { t, locale } = useT();
   const [shown, setShown] = useState(PAGE);
   useEffect(() => setShown(PAGE), [q]);
+  // The pool is already in memory, so reaching the foot just reveals the next
+  // page, a screenful early. A new callback per page re-arms the observer, so
+  // a foot still in view after one page fires again for the next.
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const more = useCallback(() => setShown(shown + PAGE), [shown]);
+  useSentinel(sentinelRef, more, shown < leads.length, { rootMargin: '400px 0px' });
   if (!leads.length) {
     return <Empty>{q
       ? <><p>{t('rlNoPoolMatch', { q })}</p><button className="btn ghost" onClick={onClear}>{t('rlClearSearch')}</button></>
@@ -215,8 +222,9 @@ function PoolTab({ leads, max, q, busy, onOpen, onClaim, onClear }: {
   return (
     <Table
       head={<><th>{t('rlSeller')}</th><th>{t('rlDealRecord')}</th><th>{t('rlLastDeal')}</th><th>{t('rlSoldLately')}</th><th className="rl-act" /></>}
-      foot={<div className="rl-between"><span>{t('rlUnclaimedShown', { n: leads.length.toLocaleString(locale), shown: Math.min(shown, leads.length) })}</span>
-        {shown < leads.length && <button className="btn sm ghost" onClick={() => setShown(shown + PAGE)}>{t('rlShowMore', { n: Math.min(PAGE, leads.length - shown) })}</button>}</div>}
+      foot={<><div className="rl-between"><span>{t('rlUnclaimedShown', { n: leads.length.toLocaleString(locale), shown: Math.min(shown, leads.length) })}</span>
+        {shown < leads.length && <button className="btn sm ghost" onClick={more}>{t('rlShowMore', { n: Math.min(PAGE, leads.length - shown) })}</button>}
+        </div><div ref={sentinelRef} aria-hidden="true" /></>}
     >
       {leads.slice(0, shown).map(l => (
         <tr key={l.username}>

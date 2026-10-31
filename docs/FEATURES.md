@@ -1261,7 +1261,9 @@ saying what the tab is for.
   last deal and what they sold lately. **Claim** moves the seller to the
   claimer's My leads, and everyone else then sees it as claimed. When two
   purchasers claim at once, the second gets a warning (409 `rlTakenElsewhere`).
-  There is no claim limit.
+  There is no claim limit. The list shows 50 sellers at a time and reveals
+  the next 50 as you scroll to its foot (v1.393.0); **Show 50 more** does the
+  same by hand.
 - **My leads** is the claimer's queue: Claimed → DM sent → Replied →
   Negotiating → Deal made, or closed as No stock now / Not interested. It is
   ordered by urgency: follow-ups that are due, then sellers still waiting for a
