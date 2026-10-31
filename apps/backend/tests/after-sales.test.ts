@@ -234,7 +234,7 @@ describe('after-sales cases', () => {
     expect(forOrder.body.cases.map(c => c.id)).toEqual([b, a]);
   });
 
-  it('keeps the amount in the case currency, defaulting to the order\'s, and totals tiles in USD', async () => {
+  it('keeps the amount in the case currency, defaulting to USD, and totals tiles in USD', async () => {
     const { token } = await loginAs(ALEX);
     const sql = getTestDb();
     await sql`
@@ -246,7 +246,8 @@ describe('after-sales cases', () => {
     const usd = await openCase(token, so, { amount: 10 });
     const rmb = await openCase(token, so, { amount: 70, currency: 'CNY' });
     await sql`UPDATE sell_orders SET currency_code = 'CNY' WHERE id = ${so.id}`;
-    const inherited = await openCase(token, so, { amount: 140 });
+    // The order is in RMB now, but a client that names no currency means USD.
+    const unsaid = await openCase(token, so, { amount: 20 });
 
     const bad = await api<{ error: string }>('POST', '/api/after-sales', {
       token, body: { sellOrderId: so.id, issue: 'x', lines: [{ sellOrderLineId: so.lines[0].id, qty: 1 }], currency: 'EUR' },
@@ -255,7 +256,7 @@ describe('after-sales cases', () => {
 
     const list = await api<{ rows: Row[] }>('GET', '/api/after-sales', { token });
     const cur = Object.fromEntries(list.body.rows.map(r => [r.id, r.currency]));
-    expect(cur).toEqual({ [usd]: 'USD', [rmb]: 'CNY', [inherited]: 'CNY' });
+    expect(cur).toEqual({ [usd]: 'USD', [rmb]: 'CNY', [unsaid]: 'USD' });
 
     const sum = await api<{ byStatus: Record<string, { count: number; amount: number }> }>('GET', '/api/after-sales/summary', { token });
     expect(sum.body.byStatus.Open).toEqual({ count: 3, amount: 40 });
@@ -268,7 +269,7 @@ describe('after-sales cases', () => {
     expect(d.body.case.events.at(-1)?.detail.changes).toEqual({ currency_code: { from: 'CNY', to: 'USD' } });
 
     const byOrder = await api<{ cases: Row[] }>('GET', `/api/after-sales/by-order/${so.id}`, { token });
-    expect(byOrder.body.cases.find(c => c.id === inherited)?.currency).toBe('CNY');
+    expect(byOrder.body.cases.find(c => c.id === unsaid)?.currency).toBe('USD');
   });
 
   it('keeps the snapshot when the sell order is edited and its lines rewritten', async () => {

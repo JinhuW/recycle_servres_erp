@@ -342,12 +342,16 @@ export type AfterSalesOrderCase = {
   id: string; status: AfterSalesStatus; resolution: AfterSalesResolution | null; amount: number | null;
   currency: AfterSalesCurrency; issue: string; createdAt: string; closedAt: string | null;
 };
+// A backend from before the currency column sends none; every case then was USD.
+const caseCurrency = <T extends { currency: AfterSalesCurrency }>(r: T): T => ({ ...r, currency: r.currency ?? 'USD' });
 export const listAfterSalesCases = (query: string) =>
-  api.get<{ rows: AfterSalesRow[]; nextCursor: string | null }>('/api/after-sales' + (query ? '?' + query : ''));
+  api.get<{ rows: AfterSalesRow[]; nextCursor: string | null }>('/api/after-sales' + (query ? '?' + query : ''))
+    .then(b => ({ ...b, rows: b.rows.map(caseCurrency) }));
 export const afterSalesSummary = () =>
   api.get<{ byStatus: Record<string, { count: number; amount: number }> }>('/api/after-sales/summary');
 export const getAfterSalesCase = (id: string) =>
-  api.get<{ case: AfterSalesCase }>(`/api/after-sales/${encodeURIComponent(id)}`);
+  api.get<{ case: AfterSalesCase }>(`/api/after-sales/${encodeURIComponent(id)}`)
+    .then(b => ({ case: caseCurrency(b.case) }));
 export const createAfterSalesCase = (body: {
   sellOrderId: string; issue: string; lines: { sellOrderLineId: string; qty: number }[];
   resolution?: AfterSalesResolution | null; amount?: number | null; currency?: AfterSalesCurrency;
@@ -362,7 +366,8 @@ export const setAfterSalesStatus = (id: string, to: AfterSalesStatus, note?: str
 export const addAfterSalesNote = (id: string, note: string) =>
   api.post<{ ok: true }>(`/api/after-sales/${encodeURIComponent(id)}/notes`, { note });
 export const afterSalesForOrder = (sellOrderId: string) =>
-  api.get<{ cases: AfterSalesOrderCase[] }>(`/api/after-sales/by-order/${encodeURIComponent(sellOrderId)}`);
+  api.get<{ cases: AfterSalesOrderCase[] }>(`/api/after-sales/by-order/${encodeURIComponent(sellOrderId)}`)
+    .then(b => ({ cases: b.cases.map(caseCurrency) }));
 
 // `removeFromSellOrders` is the user's answer to the 409 the first call
 // returns when the goods sit on open sell orders (see lib/archiveConflict.ts).
