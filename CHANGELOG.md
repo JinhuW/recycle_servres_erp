@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.394.0] - 2026-10-31
+
+### Changed
+
+- **The PO list's Payment filter is a dropdown** (RS-481). The desktop list
+  had one chip per payer: All, Business, then every person who paid a PO in
+  scope. With ten payers the row ran the card's full width and most chips read
+  0. It is now one select in the same rail, each option carrying its count
+  (`Harrison (2)`), drawn at chip height and pressed while a payer is picked.
+  The filtering, the counts and the remembered pick are unchanged, and the
+  Warehouse chips stay as chips.
+
 ## [1.393.1] - 2026-10-31
 
 ### Fixed

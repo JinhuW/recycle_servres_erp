@@ -687,6 +687,23 @@ html.desktop, body.desktop, .desktop #root {
   color: var(--fg-subtle);
 }
 .facet-rail .status-rail-sep { margin: 2px 6px; }
+/* Chip height and shape, so the dropdown sits in the rail as one more chip. */
+.facet-rail .facet-select {
+  width: auto; height: auto;
+  padding: 4px 28px 4px 10px;
+  border-color: var(--border);
+  border-radius: 999px;
+  background-color: transparent;
+  font-size: 12px; font-weight: 500;
+  color: var(--fg-muted);
+  background-position: right 9px center;
+  cursor: pointer;
+}
+.facet-rail .facet-select.active {
+  background-color: var(--bg-soft);
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
 /* The table after a facet pick: a short settle, not a hard cut. */
 .facet-swap { animation: facet-swap 0.18s ease-out; }
 @keyframes facet-swap { from { opacity: 0.35; transform: translateY(3px); } to { opacity: 1; transform: none; } }
