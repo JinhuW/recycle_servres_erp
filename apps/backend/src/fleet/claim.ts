@@ -161,7 +161,14 @@ export function cookiesFromText(text: string): FleetCookie[] {
     } catch {
       return [];
     }
-    const list = Array.isArray(parsed) ? parsed : isRecord(parsed) && Array.isArray(parsed.cookies) ? parsed.cookies : [];
+    if (isRecord(parsed) && !Array.isArray(parsed.cookies)) {
+      // Keyed by name ({"c_user": "…", "xs": "…"}), a form the pool accepts
+      // because cookieUid reads it: the same cookies as the header line.
+      return cookiesFromText(Object.entries(parsed)
+        .filter(([, v]) => typeof v === 'string' || typeof v === 'number')
+        .map(([k, v]) => `${k}=${String(v)}`).join('; '));
+    }
+    const list = Array.isArray(parsed) ? parsed : isRecord(parsed) ? parsed.cookies as unknown[] : [];
     return (list as unknown[]).filter(isRecord).map(cookieFromRecord).filter((c): c is FleetCookie => c !== null);
   }
   const expires = Math.floor(Date.now() / 1000) + DEVICE_COOKIE_DAYS * 86_400;
@@ -212,12 +219,18 @@ function parseStorageState(value: unknown): FleetStorageState | null {
   return { cookies, origins: value.origins as FleetStorageState['origins'] };
 }
 
+/** Only a worker-saved state (with `origins`) is held to the strict shape; any
+ *  other form is a supplier's cookie, and one account's odd paste must not
+ *  fail the claim that every free worker would pick it for. */
 export function storageStateFromText(text: string): FleetStorageState {
   if (text.trim().startsWith('{')) {
-    const value: unknown = JSON.parse(text);
-    const state = parseStorageState(value);
-    if (!state) throw new Error('Invalid stored browser session');
-    return state;
+    let value: unknown = null;
+    try { value = JSON.parse(text); } catch { /* read as cookies below */ }
+    if (isRecord(value) && Array.isArray(value.origins)) {
+      const state = parseStorageState(value);
+      if (!state) throw new Error('Invalid stored browser session');
+      return state;
+    }
   }
   return { cookies: cookiesFromText(text), origins: [] };
 }

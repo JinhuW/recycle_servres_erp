@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-29:** ERP migration `0217`, Reddit tracker migration `0007`,
+**As of 2026-10-31:** ERP migration `0218`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2202,7 +2202,7 @@ Only the latest revive is kept; the backend logs each one.
 
 ### Fleet
 
-The ERP fleet: the city task queue the Facebook Marketplace workers pull from, and the slots they run pool accounts in. fleet_cities and fleet_items are the catalog managers edit; fleet_settings holds the queue's knobs; fleet_tasks is one open task per enabled city and item, with fleet_task_events as its log; fleet_hosts are the machines that run worker containers; fleet_slots is the fleet's view of each pool account (who runs it, where, under which lease epoch) and fleet_workers the containers that heartbeat. fleet_minutes is a view that sums each account's leased minutes per UTC day for the daily budget. The accounts themselves and their secrets stay in fb_pool_accounts. Migration 0206 creates all of it; the routes under /api/fleet fill it in later releases.
+The ERP fleet: the city task queue the Facebook Marketplace workers pull from, and the slots they run pool accounts in. fleet_cities and fleet_items are the catalog managers edit; fleet_settings holds the queue's knobs; fleet_tasks is one open task per enabled city and item, with fleet_task_events as its log; fleet_hosts are the machines that run worker containers; fleet_slots is the fleet's view of each pool account (who runs it, where, under which lease epoch) and fleet_workers the containers that heartbeat. fleet_minutes is a view that sums each account's leased minutes per Eastern day (UTC before 0218) for the daily budget. The accounts themselves and their secrets stay in fb_pool_accounts. Migration 0206 creates all of it; the routes under /api/fleet fill it in later releases.
 
 Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_proxies`](#erp-fleet-proxies), [`fleet_proxy_checks`](#erp-fleet-proxy-checks), [`fleet_proxy_rounds`](#erp-fleet-proxy-rounds), [`fleet_slots`](#erp-fleet-slots), [`fleet_workers`](#erp-fleet-workers), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
 
@@ -2512,7 +2512,8 @@ What happened to a task, in order: the city log the fleet pages show.
 
 #### `fleet_minutes` (view)
 
-Each account's leased minutes per UTC day, from closed fleet_task_attempts plus
+Each account's leased minutes per Eastern day (`America/New_York`, FLEET_TZ;
+UTC until migration 0218), from closed fleet_task_attempts plus
 current leased tasks. Time spanning midnight is split by overlap, rather than
 assigned entirely to the starting day. Returning a task to ready preserves the
 ended attempt. Done uses the completion time; an expired/released lease is

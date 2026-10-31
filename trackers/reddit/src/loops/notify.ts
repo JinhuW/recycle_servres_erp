@@ -5,10 +5,11 @@
 // how many workers are running. Each alert's message ids are recorded so
 // reactions on it can be traced back to the post, and with dev chats
 // configured a review copy follows it there. A cross-post of a listing buyers
-// already have is parked as a duplicate instead (see dedup.ts).
+// already have is parked as a duplicate instead, and one whose earlier copy is
+// still queued waits for it (see dedup.ts).
 
 import type {AlertSender} from '../alerts.ts';
-import {claimPosts, markDuplicate, markNotified, releasePostFailure} from '../claims.ts';
+import {claimPosts, deferPost, markDuplicate, markNotified, releasePostFailure} from '../claims.ts';
 import type {Sql} from '../db.ts';
 import {findAlertedCopy} from '../dedup.ts';
 import type {Logger} from '../logger.ts';
@@ -16,6 +17,7 @@ import {sendReview} from '../review.ts';
 import type {SettingsStore} from '../settings.ts';
 
 export const NOTIFY_BATCH_SIZE = 5;
+const COPY_WAIT_SECONDS = 30;
 
 export interface NotifyDeps {
   sql: Sql;
@@ -49,13 +51,24 @@ export async function notifyOnce(deps: NotifyDeps): Promise<boolean> {
   if (posts.length === 0) return false;
 
   for (const post of posts) {
-    const copyOf = await findAlertedCopy(sql, post);
-    if (copyOf) {
-      await markDuplicate(sql, workerId, post.reddit_id, copyOf);
+    const copy = await findAlertedCopy(sql, post);
+    if (copy?.sent) {
+      await markDuplicate(sql, workerId, post.reddit_id, copy.redditId);
       logger.info('duplicate listing not alerted', {
         redditId: post.reddit_id,
         subreddit: post.subreddit,
-        duplicateOf: copyOf,
+        duplicateOf: copy.redditId,
+      });
+      continue;
+    }
+    if (copy) {
+      // Parking is final, so wait for the earlier copy to go out: should its
+      // send fail for good, this copy is the lead buyers still get.
+      await deferPost(sql, workerId, post.reddit_id, COPY_WAIT_SECONDS);
+      logger.info('copy of a listing waits for the earlier copy to be sent', {
+        redditId: post.reddit_id,
+        subreddit: post.subreddit,
+        copyOf: copy.redditId,
       });
       continue;
     }

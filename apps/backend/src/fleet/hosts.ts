@@ -144,6 +144,8 @@ function skip(release: FleetRelease, worker_id: string, reason: string): void {
 async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): Promise<string | null> {
   const release = await loadRelease(tx, true);
   if (!release || release.state !== 'rolling') return null;
+  // Every host polls every 30 s; most polls change nothing and need not write.
+  const before = JSON.stringify(release);
   const allHosts = await tx<FleetHostRow[]>`SELECT * FROM fleet_hosts`;
   const workers = new Map(
     (await tx<WorkerRow[]>`SELECT worker_id, state, version, last_heartbeat_at, epoch, account_no FROM fleet_workers`).map((w) => [w.worker_id, w]),
@@ -217,7 +219,7 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
     release.finished_at = now.toISOString();
     hlog.info('fleet release done', { version: release.version, upgraded: release.upgraded.length, skipped: release.skipped });
   }
-  await saveRelease(tx, release);
+  if (JSON.stringify(release) !== before) await saveRelease(tx, release);
   return replace;
 }
 
@@ -227,21 +229,39 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
  * slot to claim only exits and is restarted, so the count follows the slots:
  * the ones this host's workers hold (a lease or a handoff reservation of this
  * host's), plus the ones any worker could claim now (a fleet account, not
- * parked, lease free). Never below the highest-numbered worker holding a slot:
- * the agent leaves a worker above `count` alone, so one that exits is not
- * restarted and its account waits for a fresh login elsewhere.
+ * parked, lease free). The free ones are shared out among the live
+ * authoritative hosts, one at a time in host order up to each one's spare
+ * room, so two hosts do not both start a worker for the same account. Never
+ * below the highest-numbered worker holding a slot: the agent leaves a worker
+ * above `count` alone, so one that exits is not restarted and its account
+ * waits for a fresh login elsewhere.
  */
-async function workerCount(tx: SqlLike, host: FleetHostRow): Promise<number> {
+async function workerCount(tx: SqlLike, host: FleetHostRow, now = Date.now()): Promise<number> {
   if (!host.authoritative || host.capacity <= 0) return 0;
-  const rows = await tx<{ held: string | null; free: boolean }[]>`
-    SELECT CASE WHEN s.host_id = ${host.host_id} AND s.lease_expires_at > NOW() THEN COALESCE(s.worker_id, '') END AS held,
+  const rows = await tx<{ host_id: string | null; worker_id: string | null; free: boolean }[]>`
+    SELECT CASE WHEN s.lease_expires_at > NOW() THEN s.host_id END AS host_id, s.worker_id,
            (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AS free
     FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no
     WHERE a.status = 'fleet' AND s.lease_expires_at IS DISTINCT FROM 'infinity'::timestamptz`;
-  const held = rows.filter((r) => r.held !== null);
-  const usable = held.length + rows.filter((r) => r.free).length;
-  const highest = Math.max(0, ...held.map((r) => (r.held && ownWorkerId(host.host_id, r.held) ? Number(r.held.slice(host.host_id.length + 1)) : 0)));
-  return Math.min(host.capacity, Math.max(usable, highest));
+  const heldBy = (id: string) => rows.filter((r) => r.host_id === id);
+  const held = heldBy(host.host_id);
+  const peers = (await tx<FleetHostRow[]>`
+    SELECT * FROM fleet_hosts WHERE authoritative AND capacity > 0 ORDER BY host_id`)
+    .filter((h) => h.host_id === host.host_id || live(h, now));
+  const spare = new Map(peers.map((h) => [h.host_id, Math.max(0, h.capacity - heldBy(h.host_id).length)]));
+  let free = rows.filter((r) => r.free).length;
+  let share = 0;
+  while (free > 0 && [...spare.values()].some((n) => n > 0)) {
+    for (const h of peers) {
+      if (free === 0) break;
+      if (!spare.get(h.host_id)) continue;
+      spare.set(h.host_id, spare.get(h.host_id)! - 1);
+      free--;
+      if (h.host_id === host.host_id) share++;
+    }
+  }
+  const highest = Math.max(0, ...held.map((r) => (r.worker_id && ownWorkerId(host.host_id, r.worker_id) ? Number(r.worker_id.slice(host.host_id.length + 1)) : 0)));
+  return Math.min(host.capacity, Math.max(held.length + share, highest));
 }
 
 /** What the host's agent should run; `roll` only when `advance` is set (the agent asking), never for a manager's read. */
