@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-31
 reporter: jinhu
 branch: JinhuW/blenny
-pr:
+pr: "#1027"
 version: 1.394.0
 related: []
 ---
