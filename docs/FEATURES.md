@@ -2686,7 +2686,9 @@ over MCP.
 - **Phone Market value cards** headline the sell price that Max buy is
   computed from (the last price, else the average sell), labelled and shown
   to the cent. When an average sell price exists and differs, the expanded
-  card lists it too (v1.377.3).
+  card lists it too (v1.377.3). The SKU name wraps onto as many lines as it
+  needs, so a RAM card shows its full spec: rank, speed and part number
+  (v1.395.1).
 - **Four feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
   on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),

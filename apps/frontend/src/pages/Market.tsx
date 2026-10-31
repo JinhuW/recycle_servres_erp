@@ -99,7 +99,7 @@ export function Market() {
             const sell = r.lastPrice ?? r.avgSell;
             return (
               <div key={r.id} className="ph-inv-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 0, padding: 0, cursor: 'pointer' }} onClick={() => setOpenId(open ? null : r.id)}>
-                <div style={{ padding: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ padding: 12, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                   <div className="ph-inv-thumb" style={{
                     background: r.category === 'RAM' ? 'var(--info-soft)'
                               : r.category === 'SSD' ? 'var(--pos-soft)'
@@ -113,7 +113,7 @@ export function Market() {
                     <Icon name={r.category === 'RAM' ? 'chip' : (r.category === 'SSD' || r.category === 'HDD') ? 'drive' : 'box'} size={16} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</div>
+                    <div style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.3, overflowWrap: 'anywhere' }}>{r.label}</div>
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.sub}</div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
