@@ -351,9 +351,10 @@ async function findTargets(
     : like ? sql`(c.id ILIKE ${like} OR so.id ILIKE ${like} OR cu.name ILIKE ${like})`
     : sql`TRUE`;
   const rows = await sql<{
-    id: string; status: string; party: string | null; amount: number | null; recorded: number;
+    id: string; status: string; party: string | null; amount: number | null; currency: AccountingCurrency;
+    recorded: number;
   }[]>`
-    SELECT c.id, c.status, cu.name AS party, c.amount::float AS amount,
+    SELECT c.id, c.status, cu.name AS party, c.amount::float AS amount, c.currency_code AS currency,
            ${recordedFrag(sql, 'as', sql`c.id`)} AS recorded
     FROM after_sales_cases c
     JOIN sell_orders so ON so.id = c.sell_order_id
@@ -361,7 +362,7 @@ async function findTargets(
     WHERE ${scope}
     ORDER BY (c.status IN ('Resolved', 'Cancelled')), c.created_at DESC
     LIMIT ${limit}`;
-  return rows.map(r => ({ ...r, currency: 'USD' as const, recordedCny: r.recorded }));
+  return rows.map(r => ({ ...r, recordedCny: r.recorded }));
 }
 
 // CNY per 1 USD, the way the book stores it; the fx module works the other
