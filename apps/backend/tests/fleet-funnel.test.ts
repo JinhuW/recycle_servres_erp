@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getTestDb, resetDb } from './helpers/db';
-import { funnelDays, readFunnelDays } from '../src/fleet/tasks';
+import { accountBrief, funnelDays, readFunnelDays } from '../src/fleet/tasks';
 
 // The Analysis funnel's daily sums over finished searches, with a pinned clock.
 
@@ -95,5 +95,49 @@ describe('readFunnelDays', () => {
     expect(readFunnelDays({ days: '0' })).toMatchObject({ status: 422 });
     expect(readFunnelDays({ days: '93' })).toMatchObject({ status: 422 });
     expect(readFunnelDays({ days: 'x' })).toMatchObject({ status: 422 });
+  });
+});
+
+describe('accountBrief', () => {
+  beforeEach(async () => {
+    await resetDb();
+    const db = getTestDb();
+    await db`INSERT INTO fleet_cities (slug, name, enabled, verified_at, verified_as) VALUES ('houston', 'Houston', TRUE, ${NOW}, 'imported')`;
+    await db`INSERT INTO fleet_items (name, phrases) VALUES ('server_ram', '["x"]')`;
+  });
+
+  async function search(no: number, done: string, result: unknown, kind = 'search', state = 'done') {
+    const db = getTestDb();
+    await db`
+      INSERT INTO fleet_tasks (city, item, kind, due_at, state, done_at, account_no, result)
+      VALUES ('houston', 'server_ram', ${kind}, ${done}, ${state}, ${done}, ${no}, ${db.json(result as never)})`;
+  }
+
+  it('sums the last seven days of its own searches and counts its stints', async () => {
+    await search(47, '2026-10-28T10:00:00Z', { cards: 100, opened: 20, alerted: 1, seconds: 600 });
+    await search(47, '2026-10-22T16:00:00Z', { cards: 50, opened: 5, alerted: 0, seconds: 300 });
+    // Older than seven days, another account, not a search: none counts.
+    await search(47, '2026-10-21T14:00:00Z', { cards: 999 });
+    await search(11, '2026-10-28T10:00:00Z', { cards: 999 });
+    await search(47, '2026-10-28T11:00:00Z', { cards: 999 }, 'probe');
+    const db = getTestDb();
+    await db`
+      INSERT INTO fb_worker_accounts (worker_id, account_no, uid, started_at, ended_at, outcome) VALUES
+        ('homelab-2', 47, '615067', '2026-10-01T00:00:00Z', '2026-10-05T00:00:00Z', 'problem'),
+        ('homelab-3', 47, '615067', '2026-10-06T00:00:00Z', '2026-10-10T00:00:00Z', 'fleet'),
+        ('homelab-1', 47, '615067', '2026-10-10T00:00:00Z', NULL, NULL)`;
+
+    expect(await accountBrief(db, 47, NOW)).toEqual({
+      account_no: 47, days: 7, searches: 2, cards: 150, opened: 25, alerted: 1, seconds: 900,
+      last_search_at: '2026-10-28T10:00:00.000Z',
+      stints: 3, problems: 1, retired: 0,
+      on_worker_since: '2026-10-10T00:00:00.000Z', on_worker: 'homelab-1',
+    });
+  });
+
+  it('answers an empty record for an account the fleet never ran', async () => {
+    expect(await accountBrief(getTestDb(), 5, NOW)).toMatchObject({
+      searches: 0, cards: 0, last_search_at: null, stints: 0, on_worker_since: null, on_worker: null,
+    });
   });
 });

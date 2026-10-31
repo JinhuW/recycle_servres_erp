@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-475](./RS-475-fleet-account-cell-shows-a-brief-on-hover.md) | done | story | P2 | Fleet account cell shows a brief on hover | — |
 | [RS-474](./RS-474-dev-to-main-review-fixes-agent-removal-race-alert-pr.md) | done | bug | P2 | dev to main review fixes: agent removal race, alert price drops, NaN counts, Fleet leftovers | 1.390.1 |
 | [RS-473](./RS-473-fleet-funnel-counts-days-in-eastern-time-not-utc.md) | done | story | P2 | Fleet funnel counts days in Eastern time, not UTC | 1.390.0 |
 | [RS-472](./RS-472-fleet-agent-removal-keeps-operator-holds-and-the-sta.md) | done | bug | P2 | Fleet-agent removal keeps operator holds and the stagger | 1.389.1 |
