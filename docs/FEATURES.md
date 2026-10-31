@@ -2553,6 +2553,10 @@ is who paid, below).
     opens the form: direction, kind, a record picker searched by id or name,
     amount in ¥ or $ with the RMB it books as, date, method, Paid by (the
     Business Account or a person), counterparty, screenshots and note.
+    Edit opens the same form with the entry's screenshots, which save as
+    they are added (drop, pick or paste) or removed (v1.396.0). An entry
+    whose PO, SO or case was deleted stays in the book unlinked, and its
+    Edit says so; an Other entry never had a record.
 - **On the records** (managers only), an *Accounting* card shows what the book
   has against the record, what that comes to, the record's own figure and a
   Record button with the record already chosen:
