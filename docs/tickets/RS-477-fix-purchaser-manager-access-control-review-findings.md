@@ -7,7 +7,7 @@ priority: P1
 created: 2026-10-31
 reporter: jinhu
 branch: fix/acl-review
-pr:
+pr: 1023
 version: 1.391.2
 related: []
 ---
