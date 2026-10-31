@@ -15,6 +15,17 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.395.1] - 2026-10-31
+
+### Fixed
+
+- **Phone Market cards show the whole SKU name** (RS-484). The name was cut to
+  one line with an ellipsis, and the sell-price column beside it keeps its
+  width, so on a phone a RAM card read "Samsung 32GB Server RDIMM 2…" and lost
+  the rank, speed and part number a buyer matches a listing against. The name
+  now wraps onto as many lines as it needs, and a long part number with no
+  spaces breaks instead of overflowing the card.
+
 ## [1.395.0] - 2026-10-31
 
 ### Added
