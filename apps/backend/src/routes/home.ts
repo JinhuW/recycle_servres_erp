@@ -96,11 +96,12 @@ async function purchaserHome(sql: Sql, u: User) {
   const openCount = stages.draft + stages.in_transit + stages.reviewing + stages.ready_to_pay;
 
   // The same list the hand-off refuses on, for the few drafts shown.
+  const blockerKinds = await allLimited(openRows.map(r => async () => r.lifecycle === 'draft'
+    ? (await leaveDraftBlockers(sql, r, { cutoffs })).map(b => b.kind)
+    : undefined));
   const openPos = [];
-  for (const r of openRows) {
-    const blockers = r.lifecycle === 'draft'
-      ? (await leaveDraftBlockers(sql, r, { cutoffs })).map(b => b.kind)
-      : undefined;
+  for (const [i, r] of openRows.entries()) {
+    const blockers = blockerKinds[i];
     openPos.push({
       id: r.id, lifecycle: r.lifecycle, since: r.since, lines: r.lines, cost: r.cost, supplier: r.supplier,
       package: r.pkg_status

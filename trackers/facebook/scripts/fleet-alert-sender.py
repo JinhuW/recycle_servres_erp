@@ -19,6 +19,13 @@ with the verdicts beside them; this sends each one the way a worker would:
 Topic: by the model's unit count, whatever the rating (50+ High, 10-49
 Medium, 5-9 Low, uncounted General), as the monitor routes.
 
+Alerts go oldest first, so one listing that keeps failing must not hold up
+the rest: a failure is logged and counted on that listing alone, and after
+5, or at once when Telegram rejects the message (400), it is parked and
+never tried again. A parked report is dropped, since the message is already
+in the chat. An outage (nothing answered, or Telegram refusing the bot)
+still fails the whole pass, since every listing would fail the same way.
+
 Runs on the homelab VM, where the coordinator, the secrets and OpenSearch are:
 
     python3 fleet-alert-sender.py --dry-run        # what would be sent
@@ -50,6 +57,10 @@ STATE = os.path.expanduser("~/fleet-ai-bridge/sender-state.json")
 # Telegram allows about 20 messages a minute into one group.
 SEND_GAP_S = 3.5
 FOLLOW_S = 10
+PARK_AFTER = 5
+# Counted after entity parsing, so the escaped text in UTF-16 units is a
+# bound that always fits.
+TELEGRAM_MAX = 4096
 PRIORITY_EMOJI = {"high": "🔥", "medium": "⚡", "low": "🐢"}
 CATEGORY_TAGS = [("ram", "RAM"), ("memory", "RAM"), ("cpu", "CPU"), ("processor", "CPU"), ("ssd", "SSD"),
                  ("storage", "SSD"), ("drive", "SSD"), ("networking", "SSD"), ("server", "Server")]
@@ -62,8 +73,36 @@ bridge = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bridge)
 
 
+class TelegramError(RuntimeError):
+    def __init__(self, code: int, description: str | None):
+        super().__init__(f"telegram {code}: {description}")
+        self.code = code
+
+
 def escape(text: str) -> str:
     return MARKDOWN_V2.sub(r"\\\1", text)
+
+
+def size(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
+
+
+def compose(title: str, body: str) -> str:
+    """The MarkdownV2 message, cut to Telegram's limit. The cut falls on the
+    raw text before escaping, so it never splits an escape, and it eats the
+    body from just above the link, where the model's comment is."""
+    head, _, link = body.rpartition("\n")
+    text = f"*{escape(title)}*\n\n{escape(head)}\n{escape(link)}"
+    if size(text) <= TELEGRAM_MAX:
+        return text
+    budget = TELEGRAM_MAX - size(f"*{escape(title)}*\n\n…\n{escape(link)}")
+    keep = 0
+    for ch in head:
+        budget -= size(escape(ch))
+        if budget < 0:
+            break
+        keep += 1
+    return f"*{escape(title)}*\n\n{escape(head[:keep].rstrip())}…\n{escape(link)}"
 
 
 def secrets() -> dict:
@@ -156,9 +195,9 @@ def telegram(env: dict, text: str, topic: str | None) -> dict:
             answer = json.loads(e.read() or b"{}")
             wait = (answer.get("parameters") or {}).get("retry_after")
             if e.code != 429 or not wait:
-                raise RuntimeError(f"telegram {e.code}: {answer.get('description')}") from None
+                raise TelegramError(e.code, answer.get("description")) from None
             time.sleep(wait + 1)
-    raise RuntimeError("telegram kept rate-limiting")
+    raise TelegramError(429, "kept rate-limiting")
 
 
 def coordinator(path: str, body: dict, worker: str, tokens: dict) -> dict:
@@ -201,7 +240,12 @@ def handled(entry: dict, alert: dict) -> bool:
     withholds the listing again later (it was repriced, say) is asked about
     anew, so the coordinator can grant a price drop as `discounted`. A
     sighting stamped no later, from a cached verdict, still counts as new at
-    another price."""
+    another price. A parked listing is answered for good; one that has only
+    failed so far has answered nothing."""
+    if entry.get("parked"):
+        return True
+    if "verdict" not in entry:
+        return False
     if alert.get("price") and entry.get("price") and alert["price"] != entry["price"]:
         return False
     at, seen = instant(alert["@timestamp"]), instant(entry.get("seen") or entry["at"])
@@ -211,6 +255,26 @@ def handled(entry: dict, alert: dict) -> bool:
 def save(state: dict) -> None:
     with open(STATE, "w") as f:
         json.dump(state, f)
+
+
+def outage(e: Exception) -> bool:
+    """A failure every listing would hit: nothing answered, or Telegram
+    refusing the bot itself (a revoked token, the bot out of the chat)."""
+    if isinstance(e, TelegramError):
+        return e.code in (401, 403, 404)
+    return isinstance(e, OSError) and not isinstance(e, urllib.error.HTTPError)
+
+
+def failed(state: dict, lid: str, e: Exception, stamp: str) -> None:
+    entry = state.setdefault(lid, {})
+    entry["fails"] = entry.get("fails", 0) + 1
+    rejected = isinstance(e, TelegramError) and e.code == 400
+    print(f"{stamp} {lid} failed ({entry['fails']}): {e}", flush=True)
+    if rejected or entry["fails"] >= PARK_AFTER:
+        entry["parked"] = str(e)
+        dropped = entry.pop("report", None)
+        print(f"{stamp} {lid} parked{', report dropped' if dropped else ''}: {e}", flush=True)
+    save(state)
 
 
 def run_once(hours: int, dry_run: bool, env: dict, tokens: dict) -> tuple[int, int]:
@@ -224,50 +288,64 @@ def run_once(hours: int, dry_run: bool, env: dict, tokens: dict) -> tuple[int, i
     sent = skipped = 0
     # Sent on an earlier pass whose coordinator calls failed: the message is
     # in the chat, so only the report is retried, never the send.
-    for entry in state.values():
-        if "report" in entry and not dry_run:
-            report(entry, tokens)
-            save(state)
+    for lid, entry in list(state.items()):
+        if "report" in entry and not entry.get("parked") and not dry_run:
+            try:
+                report(entry, tokens)
+                save(state)
+            except Exception as e:
+                if outage(e):
+                    raise
+                failed(state, lid, e, stamp)
     for alert in withheld(hours):
         lid = alert["listing_id"]
         if lid in state and handled(state[lid], alert):
             continue
-        v = verdict(lid)
-        # The withheld line's own price is the sighting's; the verdict's may be older.
-        if alert.get("price"):
-            v = {**v, "price": alert["price"]}
-        level = priority(v.get("unit_count"))
-        title, body = message(alert, v)
-        if level:
-            title = f"{PRIORITY_EMOJI[level]} {title}"
-        if dry_run:
-            print(f"{alert['@timestamp'][:16]} {alert['worker']:<16} {alert['score']} {level or 'general':<7} "
-                  f"units={v.get('unit_count')} {lid} {alert['title'][:60]}")
-            continue
-        claim = coordinator("/v1/alerts/claim", {"listing_id": lid, "price": v.get("price")}, alert["worker"], tokens)
-        if not claim["send"]:
-            # Pending is another worker's claim on a lease; it may lapse
-            # undelivered, so the listing is asked about again next pass.
-            if claim["verdict"] == "duplicate":
-                state[lid] = {**state.get(lid, {}), "verdict": claim["verdict"], "at": stamp,
-                              "seen": alert["@timestamp"], "price": v.get("price")}
-                skipped += 1
-            continue
-        text = f"*{escape(title)}*\n\n{escape(body)}"
-        result = telegram(env, text, topics.get(level or ""))
-        state[lid] = entry = {"verdict": claim["verdict"], "sent": result["message_id"], "at": stamp,
-                              "seen": alert["@timestamp"], "price": v.get("price"), "worker": alert["worker"], "report": {
-            "chat_id": str(result["chat"]["id"]), "message_id": result["message_id"],
-            "topic_id": int(topics[level]) if level and topics.get(level) else None, "priority": level,
-            "listing_id": lid, "post_url": alert["url"], "item_name": alert.get("item"),
-            "ai_score": alert["score"], "unit_count": v.get("unit_count"),
-            "title": alert["title"][:300], "price": (v.get("price") or "")[:60] or None,
-        }}
-        save(state)
-        sent += 1
-        report(entry, tokens)
-        save(state)
-        time.sleep(SEND_GAP_S)
+        posted = sent
+        try:
+            v = verdict(lid)
+            # The withheld line's own price is the sighting's; the verdict's may be older.
+            if alert.get("price"):
+                v = {**v, "price": alert["price"]}
+            level = priority(v.get("unit_count"))
+            title, body = message(alert, v)
+            if level:
+                title = f"{PRIORITY_EMOJI[level]} {title}"
+            if dry_run:
+                print(f"{alert['@timestamp'][:16]} {alert['worker']:<16} {alert['score']} {level or 'general':<7} "
+                      f"units={v.get('unit_count')} {lid} {alert['title'][:60]}")
+                continue
+            claim = coordinator("/v1/alerts/claim", {"listing_id": lid, "price": v.get("price")}, alert["worker"],
+                                tokens)
+            if not claim["send"]:
+                # Pending is another worker's claim on a lease; it may lapse
+                # undelivered, so the listing is asked about again next pass.
+                if claim["verdict"] == "duplicate":
+                    state[lid] = {**state.get(lid, {}), "verdict": claim["verdict"], "at": stamp,
+                                  "seen": alert["@timestamp"], "price": v.get("price")}
+                    state[lid].pop("fails", None)
+                    skipped += 1
+                continue
+            result = telegram(env, compose(title, body), topics.get(level or ""))
+            state[lid] = entry = {"verdict": claim["verdict"], "sent": result["message_id"], "at": stamp,
+                                  "seen": alert["@timestamp"], "price": v.get("price"), "worker": alert["worker"],
+                                  "report": {
+                "chat_id": str(result["chat"]["id"]), "message_id": result["message_id"],
+                "topic_id": int(topics[level]) if level and topics.get(level) else None, "priority": level,
+                "listing_id": lid, "post_url": alert["url"], "item_name": alert.get("item"),
+                "ai_score": alert["score"], "unit_count": v.get("unit_count"),
+                "title": alert["title"][:300], "price": (v.get("price") or "")[:60] or None,
+            }}
+            save(state)
+            sent += 1
+            report(entry, tokens)
+            save(state)
+        except Exception as e:
+            if outage(e) or dry_run:
+                raise
+            failed(state, lid, e, stamp)
+        if sent > posted:
+            time.sleep(SEND_GAP_S)
     if not dry_run:
         save(state)
     return sent, skipped
@@ -288,10 +366,10 @@ def main() -> int:
             if not args.dry_run and (sent or skipped or not args.follow):
                 print(f"{stamp} sent {sent}, skipped {skipped} (already alerted or held by another worker)", flush=True)
         except Exception as e:
-            # One failed pass (OpenSearch, the coordinator, Telegram) is retried
-            # on the next. A message already sent is in the state file, so the
-            # next pass only reports it; a claim left before the send is this
-            # worker's own and answers `new` again.
+            # One failed pass (OpenSearch, or an outage of the coordinator or
+            # Telegram) is retried on the next. A message already sent is in
+            # the state file, so the next pass only reports it; a claim left
+            # before the send is this worker's own and answers `new` again.
             print(f"{stamp} pass failed: {e}", flush=True)
             if not args.follow:
                 return 1

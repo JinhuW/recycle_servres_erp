@@ -1661,7 +1661,9 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     (v1.313.0). Since v1.347.0 its preview expands grouped part-number cells
     and matches any Short code column as well, so Micron VPP and WSM under one
     module number can take different quoted prices. Sheets without that
-    column still match by part number. The retired sell-order
+    column still match by part number, and since v1.391.1 (RS-476) so does a
+    Micron line whose chip marking is not entered yet (several dies at
+    several prices read as a conflict). The retired sell-order
     `price-import/preview` route, the `bidParts` save field (an old bundle
     sending it is ignored) and the `bid:` feed are gone; `bid:` events
     already on file still show on the Activity page. The Market page's own
@@ -3302,7 +3304,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   when the pool's owner changes. Hosts confirm a stopped container before its
   replacement reclaims the same account; repeated rollout commands and lost
   replies do not cause another replacement. Finished or released lease attempts
-  count against the UTC day's budget, split at midnight. Lost city checks retry
+  count against the day's budget, split at midnight (an Eastern day since
+  v1.391.1, RS-476; a UTC day before). Lost city checks retry
   and late results cannot undo a removal or override. An account's all-zero
   searches quarantine it only when another account found cards in its cities;
   a successful probe or manual release resets the evidence. Since v1.371.2
@@ -3415,7 +3418,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   and Slots tabs folded into them, and their paths (`/#/fleet/queue`,
   `/#/fleet/hosts`, `/#/fleet/slots`) redirect. Managers only and desktop
   only; purchasers see Account pool alone, and the phone has no fleet pages.
-  Times read in US Eastern, and since v1.390.0 (RS-473) so do the Analysis daily totals and ranges (they used UTC days before); the minutes budget still counts per UTC day. Against a backend without the fleet routes each
+  Times read in US Eastern, and since v1.390.0 (RS-473) so do the Analysis daily totals and ranges (they used UTC days before); since v1.391.1 (RS-476) the minutes budget counts per Eastern day too. Against a backend without the fleet routes each
   tab says so and the rest of the page is unaffected. Every tab re-reads every
   10 s while it is visible.
   Since v1.351.0 (RS-403) the Fleet and Analysis tabs show the ERP's own rows without waiting for the coordinator, whose rows fill in when they land, read every 30 s and never while the last read is still out; the tabs and the tab-bar counts send each URL once per load and read the pool summary, not the secret-bearing snapshot.

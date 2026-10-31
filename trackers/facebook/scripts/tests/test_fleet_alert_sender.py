@@ -35,6 +35,8 @@ class World:
         self.verdict = {"unit_count": "60", "price": "$500", "location": "Denver, CO"}
         self.claims: list[str] = ["new"]
         self.fail_delivered = 0
+        self.refuse_delivered = False
+        self.rejected: set[str] = set()
         self.unauthorized = 0
         self.sent: list[str] = []
         self.calls: list[tuple[str, str | None]] = []
@@ -53,6 +55,9 @@ class World:
 
     def call(self, url: str, body: dict | None = None, token: str | None = None) -> dict:
         if "api.telegram.org" in url:
+            if any(f"/item/{lid}/" in body["text"] for lid in self.rejected):
+                raise urllib.error.HTTPError(url, 400, "no", {},
+                                             io.BytesIO(b'{"description": "Bad Request: message thread not found"}'))
             self.sent.append(body["text"])
             return {"result": {"message_id": len(self.sent), "chat": {"id": -100}}}
         path = url.split("8500", 1)[1]
@@ -63,6 +68,8 @@ class World:
         if path == "/v1/alerts/claim":
             verdict = self.claims.pop(0)
             return {"send": verdict in ("new", "discounted"), "verdict": verdict}
+        if path == "/v1/alerts/claim/delivered" and self.refuse_delivered:
+            raise urllib.error.HTTPError(url, 404, "no", {}, io.BytesIO(b"{}"))
         if path == "/v1/alerts/claim/delivered" and self.fail_delivered:
             self.fail_delivered -= 1
             raise urllib.error.URLError("coordinator timed out")
@@ -162,3 +169,53 @@ def test_a_sighting_at_a_new_price_is_asked_about_even_stamped_no_later(world):
     world.claims = ["discounted"]
     assert world.run() == (1, 0)
     assert "Price: $300" in world.sent[-1].replace("\\", "")
+
+
+def test_a_message_telegram_rejects_is_parked_and_the_next_still_goes(world):
+    world.alerts = [alert(), {**alert("2026-10-30T02:00:00.000+00:00"), "listing_id": "222",
+                              "url": "https://www.facebook.com/marketplace/item/222/"}]
+    world.claims = ["new", "new"]
+    world.rejected = {"111"}
+    assert world.run() == (1, 0)
+    assert len(world.sent) == 1 and "/item/222/" in world.sent[0]
+    assert "thread not found" in world.state()["111"]["parked"]
+    claims = len(world.calls)
+    assert world.run() == (0, 0)  # parked: never claimed or sent again
+    world.alerts[0] = {**alert("2026-10-30T09:00:00.000+00:00"), "price": "$1"}
+    assert world.run() == (0, 0)  # not even sighted again at a new price
+    assert len(world.calls) == claims and len(world.sent) == 1
+
+
+def test_a_report_that_keeps_failing_is_parked_and_dropped(world):
+    world.refuse_delivered = True
+    for _ in range(sender.PARK_AFTER):
+        world.run()
+    entry = world.state()["111"]
+    assert entry["fails"] == sender.PARK_AFTER and entry["parked"] and "report" not in entry
+    calls = len(world.calls)
+    world.run()
+    assert len(world.calls) == calls and len(world.sent) == 1
+
+
+def test_a_failing_report_does_not_hold_up_later_alerts(world):
+    world.refuse_delivered = True
+    world.run()
+    world.refuse_delivered = False
+    world.alerts = [alert(), {**alert("2026-10-30T02:00:00.000+00:00"), "listing_id": "222",
+                              "url": "https://www.facebook.com/marketplace/item/222/"}]
+    world.claims = ["new"]
+    world.refuse_delivered = True
+    assert world.run() == (1, 0)
+    assert [p for p, _ in world.calls].count("/v1/alerts/claim") == 2
+    assert world.state()["111"]["fails"] == 2 and world.state()["222"]["fails"] == 1
+
+
+def test_a_long_comment_is_cut_to_fit_and_keeps_the_link():
+    v = {"price": "$500", "location": "Denver, CO", "comment": "a.b_c " * 1500 + "😀" * 50}
+    title, body = sender.message(alert(), v)
+    text = sender.compose(f"🔥 {title}", body)
+    assert sender.size(text) <= sender.TELEGRAM_MAX
+    assert text.endswith("\n" + sender.escape("https://www.facebook.com/marketplace/item/111/"))
+    head = text.rsplit("\n", 1)[0]
+    assert head.endswith("…") and not head[:-1].endswith("\\")
+    assert sender.compose("t", "short\nhttps://x/") == "*t*\n\nshort\nhttps://x/"

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { FleetError, FleetTask, FleetTaskEvent } from '@recycle-erp/shared';
+import { FLEET_TZ, type FleetError, type FleetTask, type FleetTaskEvent } from '@recycle-erp/shared';
 import type { SqlLike } from '../db';
 
 // Row shapes and the few queries more than one fleet module runs. Handlers keep
@@ -79,15 +79,16 @@ export const eventToWire = (r: TaskEventRow): FleetTaskEvent => ({
 });
 
 /**
- * An account's search minutes so far today (UTC), as fleet_minutes counts
- * them. That view spreads every attempt in the retention window over its days
- * before a day can be picked; this reads only attempts that can reach today
- * (none outlives a day: lease and task limits are hours).
+ * An account's search minutes so far today (an Eastern day, FLEET_TZ, as the
+ * Analysis funnel counts days), as fleet_minutes counts them. That view
+ * spreads every attempt in the retention window over its days before a day
+ * can be picked; this reads only attempts that can reach today (none outlives
+ * a day: lease and task limits are hours).
  */
 export const minutesTodaySql = (sql: SqlLike, accountNo: ReturnType<SqlLike> | number) => sql`
   (SELECT COALESCE(SUM(GREATEST(0, EXTRACT(EPOCH FROM LEAST(x.ended_at, d.e) - GREATEST(x.leased_at, d.s)))), 0)::float8 / 60
-   FROM (SELECT date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS s,
-                (date_trunc('day', NOW() AT TIME ZONE 'UTC') + interval '1 day') AT TIME ZONE 'UTC' AS e) d
+   FROM (SELECT date_trunc('day', NOW() AT TIME ZONE ${FLEET_TZ}) AT TIME ZONE ${FLEET_TZ} AS s,
+                (date_trunc('day', NOW() AT TIME ZONE ${FLEET_TZ}) + interval '1 day') AT TIME ZONE ${FLEET_TZ} AS e) d
    CROSS JOIN LATERAL (
      SELECT a.leased_at, a.ended_at FROM fleet_task_attempts a
      WHERE a.account_no = ${accountNo} AND a.leased_at >= d.s - interval '1 day' AND a.ended_at > d.s

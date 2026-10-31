@@ -376,6 +376,10 @@ describe('cross-posts', () => {
        WHERE reddit_id = ${redditId}`;
   }
 
+  async function retryNow(redditId: string): Promise<void> {
+    await db.sql`UPDATE posts SET next_retry_at = NOW() WHERE reddit_id = ${redditId}`;
+  }
+
   async function duplicateOf(redditId: string): Promise<string | null> {
     const [row] = await db.sql<Array<{duplicate_of: string | null}>>`
       SELECT duplicate_of FROM posts WHERE reddit_id = ${redditId}`;
@@ -405,10 +409,59 @@ describe('cross-posts', () => {
     await notifyOnce(notifyDeps('worker-1'));
     await db.sql`UPDATE posts SET claimed_by = NULL, claimed_at = NULL WHERE reddit_id = 't3_hls'`;
     await notifyOnce(notifyDeps('worker-2'));
+    await retryNow('t3_hws');
+    await notifyOnce(notifyDeps('worker-1'));
 
     expect(spy).toHaveBeenCalledTimes(1);
     expect(await statusOf('t3_hls')).toBe('notified');
     expect(await statusOf('t3_hws')).toBe('duplicate');
+  });
+
+  it('defers a later copy while the earlier one is still unsent, without counting an attempt', async () => {
+    await seedCopy('t3_hls', 'homelabsales', '[FS] [USA-NY] 16 x 64GB DDR4 ECC RAM - Paypal G&S');
+    await seedCopy('t3_hws', 'hardwareswap', '[USA-NY] [H] 16 x 64GB DDR4 ECC RAM [W] Paypal G&S', 2);
+    await db.sql`UPDATE posts SET claimed_by = 'worker-2', claimed_at = NOW() WHERE reddit_id = 't3_hls'`;
+    const spy = stubTelegram();
+
+    await notifyOnce(notifyDeps('worker-1'));
+
+    expect(spy).not.toHaveBeenCalled();
+    const [row] = await db.sql<Array<{
+      status: string; duplicate_of: string | null; attempts: number; claimed_by: string | null; due_later: boolean;
+    }>>`
+      SELECT status, duplicate_of, attempts, claimed_by, next_retry_at > NOW() + INTERVAL '20 seconds' AS due_later
+        FROM posts WHERE reddit_id = 't3_hws'`;
+    expect(row).toEqual({status: 'target', duplicate_of: null, attempts: 0, claimed_by: null, due_later: true});
+  });
+
+  it('parks a later copy once the earlier one went out', async () => {
+    await seedCopy('t3_hls', 'homelabsales', '[FS] [USA-NY] 16 x 64GB DDR4 ECC RAM - Paypal G&S');
+    await seedCopy('t3_hws', 'hardwareswap', '[USA-NY] [H] 16 x 64GB DDR4 ECC RAM [W] Paypal G&S', 2);
+    await db.sql`UPDATE posts SET status = 'notified', notified_at = NOW() WHERE reddit_id = 't3_hls'`;
+    const spy = stubTelegram();
+
+    await notifyOnce(notifyDeps());
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(await statusOf('t3_hws')).toBe('duplicate');
+    expect(await duplicateOf('t3_hws')).toBe('t3_hls');
+  });
+
+  it('alerts a later copy when the earlier one failed for good', async () => {
+    await seedCopy('t3_hls', 'homelabsales', '[FS] [USA-NY] 16 x 64GB DDR4 ECC RAM - Paypal G&S');
+    await seedCopy('t3_hws', 'hardwareswap', '[USA-NY] [H] 16 x 64GB DDR4 ECC RAM [W] Paypal G&S', 2);
+    await db.sql`UPDATE posts SET claimed_by = 'worker-2', claimed_at = NOW() WHERE reddit_id = 't3_hls'`;
+    const spy = stubTelegram();
+
+    await notifyOnce(notifyDeps('worker-1'));
+    await db.sql`UPDATE posts SET status = 'failed', claimed_by = NULL, claimed_at = NULL
+                  WHERE reddit_id = 't3_hls'`;
+    await retryNow('t3_hws');
+    await notifyOnce(notifyDeps('worker-1'));
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(await statusOf('t3_hws')).toBe('notified');
+    expect(await duplicateOf('t3_hws')).toBeNull();
   });
 
   it('parks a copy judged after the alert went out', async () => {

@@ -274,6 +274,21 @@ export async function markDuplicate(
      WHERE reddit_id = ${redditId} AND claimed_by = ${workerId}`;
 }
 
+/** Puts a post back for a later pass without counting it as a failed attempt. */
+export async function deferPost(
+  sql: Sql,
+  workerId: string,
+  redditId: string,
+  seconds: number,
+): Promise<void> {
+  await sql`
+    UPDATE posts
+       SET next_retry_at = NOW() + make_interval(secs => ${seconds}),
+           claimed_by = NULL,
+           claimed_at = NULL
+     WHERE reddit_id = ${redditId} AND claimed_by = ${workerId}`;
+}
+
 /** Records the messages a dev-chat review of a post went out as. */
 export async function recordReviewMessages(
   sql: Sql,

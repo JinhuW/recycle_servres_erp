@@ -15,6 +15,44 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.391.1] - 2026-10-31
+
+### Fixed
+
+These come from the seven-day review of `dev` (RS-476).
+
+- **One odd pool cookie no longer stops every fleet claim.** A cookie stored
+  as JSON without `origins`, such as the keyed-object form the pool accepts,
+  threw inside the claim transaction. Free slots are picked by account
+  number, so every new worker in the fleet hit that same account and failed.
+  These forms are now read as plain cookies. Only an invalid state saved by a
+  worker is still refused.
+- **Free accounts are shared out among the hosts.** Each live authoritative
+  host used to be told to start a worker for every free slot in the fleet.
+  With two hosts, the extra containers found nothing to claim and were
+  restarted in a loop. Free slots now go to one host at a time, up to each
+  host's spare capacity. A rolling release also stops rewriting the release
+  row on every agent poll, and writes it only when the roll moves.
+- **The search budget day is an Eastern day.** The Analysis funnel has used
+  Eastern days since v1.390.0. The per-account budget still refilled at
+  8 PM Eastern (UTC midnight), so it now uses the same day (migration 0218
+  re-creates `fleet_minutes`).
+- **A Micron line with no chip marking matches its sheet row again.** On a
+  quote with a Short code column, a line with an unknown die read as "not in
+  sheet". It now falls back to every row for its part number. Several dies
+  at several prices show as a conflict to settle by hand.
+- **Home reads the open drafts' blockers four at a time** instead of one
+  after another. Slot remove now goes through the same `dropSlot` that every
+  other path uses.
+- **Trackers** (run on their own, not part of this release's deploy):
+  - The Facebook withheld-alert sender handles each alert on its own. An
+    alert that keeps failing is parked, and no longer blocks every alert
+    behind it. Messages are cut to fit Telegram's 4096-character limit.
+  - The Reddit api disconnects its Telegram user session once another api
+    takes the hold, so the session is never live from two places.
+  - A Reddit cross-post now waits for an earlier copy that has not been sent
+    yet, instead of being parked behind it. If that copy fails, the lead
+    still goes out.
 ## [1.391.0] - 2026-10-31
 
 ### Added

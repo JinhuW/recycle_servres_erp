@@ -145,7 +145,10 @@ them within 72 hours and either:
 
 Titles with different module counts (`16x` vs `15x`) or different makers are
 never one listing. Notify alerts the first copy (or the one already sent) and
-marks the rest `duplicate`, with `duplicate_of` pointing at it. Every copy is
+marks the rest `duplicate`, with `duplicate_of` pointing at it. A later copy
+whose earlier one has not gone out yet waits 30 s and is looked at again, since
+`duplicate` is final: if the earlier copy's send fails for good, the later copy
+is alerted instead. Every copy is
 still judged, so the prompt stats count it. Over the 30 days before this
 shipped, 71 of 480 alerts were such repeats.
 

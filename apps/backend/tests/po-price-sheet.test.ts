@@ -126,6 +126,24 @@ describe('POST /api/orders/:id/price-sheet/preview', () => {
     expect(prices.every(p => p.sell_price === null)).toBe(true);
   });
 
+  it('matches a Micron line with no chip marking yet by part number on a sheet with a Short code column', async () => {
+    const { id, lineIds } = await createReviewing(pur, mgr, ['MTA36ASF4G72PZ-3G2', 'MTA18ASF2G72PZ-3G2']);
+    const [one, two] = lineIds as [string, string];
+    await getTestDb()`UPDATE order_lines SET brand = 'Micron', chip_number = NULL WHERE id IN (${one}, ${two})`;
+    const file = await sheet([
+      ['Part Number', 'Short code', 'Unit Price'],
+      ['MTA36ASF4G72PZ-3G2', 'AQB', 40],
+      ['MTA18ASF2G72PZ-3G2', 'AQB', 20],
+      ['MTA18ASF2G72PZ-3G2', 'AQD', 22],
+    ]);
+    const res = await preview(id, { file }, mgr);
+    expect(res.status).toBe(200);
+    const byLine = new Map((res.body as Preview).lines.map(m => [m.lineId, m]));
+    expect(byLine.get(one)).toMatchObject({ status: 'matched', cell: { price: 40 } });
+    // Two dies at two prices: which one this lot is cannot be told yet.
+    expect(byLine.get(two)!.status).toBe('conflict');
+  });
+
   it('converts yuan at the FX ledger rate and keeps the yuan beside the dollars', async () => {
     await seedRate();
     const { id, lineIds } = await createReviewing(pur, mgr, ['SHEET-CNY1', 'SHEET-CNY2']);
