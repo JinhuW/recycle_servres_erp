@@ -15,6 +15,15 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.394.1] - 2026-10-31
+
+### Fixed
+
+- **The accounting drawer's Review card no longer collapses to a sliver
+  (RS-482).** On an entry long enough to scroll, the card was squeezed to fit
+  the drawer, cutting off its status line, detail and footer. The drawer's
+  sections now keep their height and the body scrolls.
+
 ## [1.394.0] - 2026-10-31
 
 ### Changed
