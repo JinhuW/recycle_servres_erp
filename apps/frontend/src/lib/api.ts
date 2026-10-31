@@ -318,9 +318,11 @@ export const discardTransferOrder = (id: string) =>
 
 // ── After-sales cases (manager-only) ──
 export type { AfterSalesStatus, AfterSalesResolution } from '@recycle-erp/shared';
+// A case's amount is in its own currency, which defaults to the sell order's.
+export type AfterSalesCurrency = 'USD' | 'CNY';
 export type AfterSalesRow = {
   id: string; status: AfterSalesStatus; resolution: AfterSalesResolution | null; issue: string;
-  amount: number | null; createdAt: string; updatedAt: string; closedAt: string | null;
+  amount: number | null; currency: AfterSalesCurrency; createdAt: string; updatedAt: string; closedAt: string | null;
   sellOrder: { id: string; status: string; currency: string };
   customer: { id: string; name: string; short: string | null };
   assignee: { id: string; name: string } | null;
@@ -338,7 +340,7 @@ export type AfterSalesCase = Omit<AfterSalesRow, 'lineCount' | 'qty'> & {
 };
 export type AfterSalesOrderCase = {
   id: string; status: AfterSalesStatus; resolution: AfterSalesResolution | null; amount: number | null;
-  issue: string; createdAt: string; closedAt: string | null;
+  currency: AfterSalesCurrency; issue: string; createdAt: string; closedAt: string | null;
 };
 export const listAfterSalesCases = (query: string) =>
   api.get<{ rows: AfterSalesRow[]; nextCursor: string | null }>('/api/after-sales' + (query ? '?' + query : ''));
@@ -348,10 +350,12 @@ export const getAfterSalesCase = (id: string) =>
   api.get<{ case: AfterSalesCase }>(`/api/after-sales/${encodeURIComponent(id)}`);
 export const createAfterSalesCase = (body: {
   sellOrderId: string; issue: string; lines: { sellOrderLineId: string; qty: number }[];
-  resolution?: AfterSalesResolution | null; amount?: number | null; assigneeId?: string | null;
+  resolution?: AfterSalesResolution | null; amount?: number | null; currency?: AfterSalesCurrency;
+  assigneeId?: string | null;
 }) => api.post<{ id: string }>('/api/after-sales', body);
 export const patchAfterSalesCase = (id: string, body: {
-  issue?: string; resolution?: AfterSalesResolution | null; amount?: number | null; assigneeId?: string | null;
+  issue?: string; resolution?: AfterSalesResolution | null; amount?: number | null; currency?: AfterSalesCurrency;
+  assigneeId?: string | null;
 }) => api.patch<{ ok: true }>(`/api/after-sales/${encodeURIComponent(id)}`, body);
 export const setAfterSalesStatus = (id: string, to: AfterSalesStatus, note?: string) =>
   api.post<{ ok: true; status: AfterSalesStatus }>(`/api/after-sales/${encodeURIComponent(id)}/status`, { to, note });

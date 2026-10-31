@@ -1,5 +1,5 @@
 import { beforeEach, describe, it, expect } from 'vitest';
-import { resetDb } from './helpers/db';
+import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, SOFIA, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
@@ -232,6 +232,43 @@ describe('after-sales cases', () => {
 
     const forOrder = await api<{ cases: { id: string }[] }>('GET', `/api/after-sales/by-order/${so.id}`, { token });
     expect(forOrder.body.cases.map(c => c.id)).toEqual([b, a]);
+  });
+
+  it('keeps the amount in the case currency, defaulting to the order\'s, and totals tiles in USD', async () => {
+    const { token } = await loginAs(ALEX);
+    const sql = getTestDb();
+    await sql`
+      INSERT INTO fx_rates (base_currency, quote_currency, rate, source, effective_date)
+      VALUES ('USD', 'CNY', 7.0, 'manual', '2020-01-01')`;
+    const so = await shippedOrder(token);
+    type Row = { id: string; amount: number | null; currency: string };
+
+    const usd = await openCase(token, so, { amount: 10 });
+    const rmb = await openCase(token, so, { amount: 70, currency: 'CNY' });
+    await sql`UPDATE sell_orders SET currency_code = 'CNY' WHERE id = ${so.id}`;
+    const inherited = await openCase(token, so, { amount: 140 });
+
+    const bad = await api<{ error: string }>('POST', '/api/after-sales', {
+      token, body: { sellOrderId: so.id, issue: 'x', lines: [{ sellOrderLineId: so.lines[0].id, qty: 1 }], currency: 'EUR' },
+    });
+    expect(bad.status).toBe(400);
+
+    const list = await api<{ rows: Row[] }>('GET', '/api/after-sales', { token });
+    const cur = Object.fromEntries(list.body.rows.map(r => [r.id, r.currency]));
+    expect(cur).toEqual({ [usd]: 'USD', [rmb]: 'CNY', [inherited]: 'CNY' });
+
+    const sum = await api<{ byStatus: Record<string, { count: number; amount: number }> }>('GET', '/api/after-sales/summary', { token });
+    expect(sum.body.byStatus.Open).toEqual({ count: 3, amount: 40 });
+
+    expect((await api('PATCH', `/api/after-sales/${rmb}`, { token, body: { currency: 'EUR' } })).status).toBe(400);
+    expect((await api('PATCH', `/api/after-sales/${rmb}`, { token, body: { currency: 'USD' } })).status).toBe(200);
+    const d = await api<{ case: Row & { events: { kind: string; detail: { changes?: Record<string, unknown> } }[] } }>(
+      'GET', `/api/after-sales/${rmb}`, { token });
+    expect(d.body.case.currency).toBe('USD');
+    expect(d.body.case.events.at(-1)?.detail.changes).toEqual({ currency_code: { from: 'CNY', to: 'USD' } });
+
+    const byOrder = await api<{ cases: Row[] }>('GET', `/api/after-sales/by-order/${so.id}`, { token });
+    expect(byOrder.body.cases.find(c => c.id === inherited)?.currency).toBe('CNY');
   });
 
   it('keeps the snapshot when the sell order is edited and its lines rewritten', async () => {

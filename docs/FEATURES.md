@@ -2052,7 +2052,9 @@ lower price (**Discount**). Purchasers never see the page or the API.
   lists its products with a checkbox and a quantity capped at the line's
   qty (typed freely, clamped when the field loses focus — v1.255.1). The
   issue is required; resolution, amount and assignee are optional
-  at this point. Cases are numbered `AS-1001`, `AS-1002`… from their own
+  at this point. The issue sits in the Resolution card beside them
+  (v1.395.0). The amount is in USD or RMB, chosen beside the field and
+  starting at the sell order's currency (v1.395.0). Cases are numbered `AS-1001`, `AS-1002`… from their own
   counter. The products are snapshotted (label, part #, qty, unit price):
   a sell-order save rewrites its line rows, so the case keeps its own copy
   and the link to the live line only while that row exists.
@@ -2073,7 +2075,8 @@ lower price (**Discount**). Purchasers never see the page or the API.
   who and when. A Resolved or Cancelled case is read-only until reopened;
   the timeline still takes notes.
 - **The list** (`#/after-sales`): five tiles (one per status, clicking one
-  filters) counting every case and summing its amounts, a status select, a
+  filters) counting every case and summing its amounts in USD — an RMB
+  case converts at the ledger rate of the day it opened (v1.395.0) — a status select, a
   search over case id, sell order id, customer and issue, and a table with
   case, sell order (a link), customer, issue, units, resolution, amount,
   assignee, status and last update. A row opens the case.

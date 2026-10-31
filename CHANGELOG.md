@@ -15,6 +15,24 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.395.0] - 2026-10-31
+
+### Added
+
+- **An after-sales case's amount can be in RMB (RS-483).** The refund or
+  discount was USD only, so a manager refunding a Chinese buyer in RMB had to
+  convert by hand. The Amount field now has a USD / RMB choice, a new case
+  starts in the sell order's currency, and the list, the case page and the
+  sell order's cases panel show ¥ or $. The status tiles still total in USD,
+  converting an RMB case at the ledger rate of the day it was opened, and
+  Accounting's after-sales target reports the case's own currency. Existing
+  cases stay USD.
+
+### Changed
+
+- **The issue moved into the Resolution card** on the new-case form and the
+  case page, so what the customer reported sits beside how it is settled.
+
 ## [1.394.1] - 2026-10-31
 
 ### Fixed

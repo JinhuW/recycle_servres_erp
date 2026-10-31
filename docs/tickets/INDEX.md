@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-482](./RS-482-accounting-drawer-review-card-clipped-to-a-sliver.md) | done | bug | P2 | Accounting drawer: Review card clipped to a sliver | — |
+| [RS-483](./RS-483-after-sales-case-amount-can-be-in-rmb.md) | done | story | P2 | After-sales case amount can be in RMB | — |
+| [RS-482](./RS-482-accounting-drawer-review-card-clipped-to-a-sliver.md) | done | bug | P2 | Accounting drawer: Review card clipped to a sliver | 1.394.1 |
 | [RS-481](./RS-481-po-list-payment-filter-as-a-dropdown.md) | done | story | P2 | PO list payment filter as a dropdown | 1.394.0 |
 | [RS-480](./RS-480-account-pool-editor-save-does-nothing-on-fleet-accou.md) | done | bug | P1 | Account pool editor: Save does nothing on fleet accounts with a saved session | 1.393.1 |
 | [RS-479](./RS-479-leads-pool-loads-the-next-50-sellers-on-scroll.md) | done | story | P2 | Leads Pool loads the next 50 sellers on scroll | 1.393.0 |
