@@ -1,5 +1,5 @@
 ---
-id: RS-485
+id: RS-486
 title: Edit dialog manages screenshots; Other entries lose the deleted-record banner
 type: bug
 status: done

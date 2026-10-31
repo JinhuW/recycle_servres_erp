@@ -19,7 +19,7 @@ at the last commit that carried each version.
 
 ### Added
 
-- **An accounting entry's Edit dialog carries its screenshots** (RS-485). The
+- **An accounting entry's Edit dialog carries its screenshots** (RS-486). The
   desktop Edit dialog and the phone edit sheet hid the screenshot box, so a
   receipt could be added or removed only from the entry's drawer. They now
   list the screenshots, and they take a dropped, picked or (on desktop) pasted
@@ -28,7 +28,7 @@ at the last commit that carried each version.
 
 ### Fixed
 
-- **Other entries no longer say their record was deleted** (RS-485). The
+- **Other entries no longer say their record was deleted** (RS-486). The
   banner "The record this entry was for has been deleted" meant only that the
   entry had no linked record. An Other entry never has one, so every Other
   entry opened in Edit showed the banner. It now shows only for a Purchase,
