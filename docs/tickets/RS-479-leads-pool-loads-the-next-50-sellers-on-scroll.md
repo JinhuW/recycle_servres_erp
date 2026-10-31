@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-31
 reporter: jinhu
 branch: JinhuW/oystercatcher
-pr:
+pr: 1025
 version: 1.393.0
 related: []
 ---
