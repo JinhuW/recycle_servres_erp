@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-31
 reporter: jinhu
 branch: JinhuW/sardine-2
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1040
 version: 1.397.0
 related: []
 ---
