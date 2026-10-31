@@ -15,6 +15,17 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.395.2] - 2026-10-31
+
+### Changed
+
+- **Phone Market cards show the part number and the last updated time**
+  (RS-485). The API already sent both, and the desktop table already shows
+  them, but on a phone the part number was missing and the updated time was
+  only inside the tap-to-expand panel. Each card now lists the part number in
+  mono under the name, then "Updated 3 days ago". A buyer can match a listing
+  and judge how fresh the price is without opening every card.
+
 ## [1.395.1] - 2026-10-31
 
 ### Fixed

@@ -297,6 +297,7 @@ const zh: Record<string, string> = {
   marketHint: '收购价低于绿色上限可达成 30% 毛利目标。售价上升 = 更多议价空间。',
   rangeSeen: '价格区间', status: '状态', units: '{n} 件',
   updatedRel: '更新于 {rel} · {s} 个数据点',
+  mktCardUpdated: '更新于 {rel}',
   inventoryTitle: '库存', invAcrossTeams: '所有团队', invItemsYou: '我提交的项目',
   readonlyMgr: '只读 — 成本与利润仅经理可见。',
   activeItems: '在库项目', activeUnits: '在库件数',

@@ -2688,7 +2688,8 @@ over MCP.
   to the cent. When an average sell price exists and differs, the expanded
   card lists it too (v1.377.3). The SKU name wraps onto as many lines as it
   needs, so a RAM card shows its full spec: rank, speed and part number
-  (v1.395.1).
+  (v1.395.1). Under the name each card shows the part number and when the
+  SKU was last updated, without tapping to expand (v1.395.2).
 - **Four feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
   on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
