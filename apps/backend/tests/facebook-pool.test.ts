@@ -1,6 +1,7 @@
 import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
-import { api } from './helpers/app';
+import { api, testEnv } from './helpers/app';
+import { poolKey, seal } from '../src/lib/sealed';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
 
 type Account = {
@@ -159,6 +160,24 @@ describe('facebook account pool', () => {
 
     const cleared = await api<Snapshot>('PUT', `${BASE}/1`, { token, body: { draft: draft(1, { token: '' }) } });
     expect(cleared.body.accounts[0].token).toBe('');
+  });
+
+  it('saves an edit over a fleet-resealed session past the paste limit while the session is unchanged', async () => {
+    const token = await manager();
+    await seedPool(token, 1);
+    const session = JSON.stringify({
+      cookies: [{ name: 'c_user', value: uid(1) }, { name: 'xs', value: 'x' }],
+      origins: [{ origin: 'https://www.facebook.com', localStorage: [{ name: 'k', value: 'v'.repeat(9000) }] }],
+    });
+    const db = getTestDb();
+    await db`UPDATE fb_pool_accounts SET cookie_enc = ${seal(session, poolKey(testEnv)!)},
+      cookie_at = '2026-10-01T00:00:00Z', cookie_by = 'homelab-9' WHERE no = 1`;
+    const saved = await api<Snapshot>('PUT', `${BASE}/1`, { token, body: { draft: draft(1, { cookie: session, status: 'problem', holder: 'homelab-9' }) } });
+    expect(saved.status).toBe(200);
+    expect(saved.body.accounts[0]).toMatchObject({ status: 'problem', cookie: session, cookieBy: 'homelab-9', cookieAt: Date.parse('2026-10-01T00:00:00Z') });
+    const changed = await api<{ code: string }>('PUT', `${BASE}/1`, { token, body: { draft: draft(1, { cookie: session.replace('"v', '"w') }) } });
+    expect(changed.status).toBe(400);
+    expect(changed.body.code).toBe('fpTooLong');
   });
 
   it('shows a purchaser the rack but only the logins they hold', async () => {

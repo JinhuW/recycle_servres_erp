@@ -226,6 +226,16 @@ describe('pool allocation and editing', () => {
       validatePoolDraft({ ...emptyPoolDraft(), uid, password: 'pass', status: 'taken' }, []),
     ).toContain('fpHolderRequired');
   });
+  it('saves a fleet-resealed session past the paste limit only while it is unchanged', () => {
+    const session = JSON.stringify({
+      cookies: [{ name: 'c_user', value: uid }, { name: 'xs', value: 'x' }],
+      origins: [{ origin: 'https://www.facebook.com', localStorage: [{ name: 'k', value: 'v'.repeat(9000) }] }],
+    });
+    const draft = { ...emptyPoolDraft(), uid, password: 'pass', cookie: session };
+    expect(validatePoolDraft(draft, [], undefined, session)).toEqual([]);
+    expect(validatePoolDraft({ ...draft, cookie: session.replace('"v', '"w') }, [], undefined, session)).toEqual(['fpTooLong']);
+    expect(validatePoolDraft(draft, [])).toEqual(['fpTooLong']);
+  });
   it('counts what a stored session holds, in every form a cookie is saved in', () => {
     const cookies = [{ name: 'c_user', value: uid }, { name: 'xs', value: 'demo' }];
     const origins = [{ origin: 'https://www.facebook.com', localStorage: [] }];

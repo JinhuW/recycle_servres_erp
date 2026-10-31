@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import type { Challenge, FleetDoc } from '../../../lib/coordinator';
@@ -46,6 +46,12 @@ export function AccountEditor({
     account ? { ...account } : emptyPoolDraft(),
   );
   const [errors, setErrors] = useState<string[]>([]);
+  // The errors sit atop a long drawer whose Save is at the foot; unseen, a
+  // refused save reads as a dead button.
+  const errorsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (errors.length) errorsRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [errors]);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [removing, setRemoving] = useState(false);
   // With the fleet loaded, a worker is picked rather than typed, and Fleet is
@@ -117,7 +123,7 @@ export function AccountEditor({
             totp: totpKey(draft.totp),
             holder: draft.holder?.trim() || null,
           };
-          const issues = validatePoolDraft(normalized, accounts, account?.no);
+          const issues = validatePoolDraft(normalized, accounts, account?.no, account?.cookie);
           setErrors(issues);
           if (!issues.length) onSave(normalized);
         }}
@@ -134,7 +140,7 @@ export function AccountEditor({
         </div>
         <div className="modal-body">
           {errors.length > 0 && (
-            <div className="fp-errors" role="alert">
+            <div className="fp-errors" role="alert" ref={errorsRef}>
               {errors.map((key) => (
                 <div key={key}>{t(key)}</div>
               ))}

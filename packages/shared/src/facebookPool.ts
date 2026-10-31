@@ -256,13 +256,16 @@ export function normalizeFbPoolDraft(draft: FbPoolDraft): FbPoolDraft {
 /**
  * Validation codes for a normalized draft. `existingUids` holds every other
  * account's uid; pass `selfUid` when editing so the account doesn't collide
- * with itself.
+ * with itself, and `storedCookie` so a cookie the fleet resealed (a whole
+ * storage state, far past the paste limit) still saves unchanged.
  */
 export function validateFbPoolDraft(
   draft: FbPoolDraft,
   existingUids: ReadonlySet<string>,
   selfUid?: string,
+  storedCookie?: string,
 ): string[] {
+  const keptCookie = storedCookie !== undefined && draft.cookie === storedCookie.trim();
   const errors: string[] = [];
   if (!fbUidValid(draft.uid)) errors.push('fpInvalidUid');
   if (existingUids.has(draft.uid) && draft.uid !== selfUid) errors.push('fpDuplicate');
@@ -272,7 +275,7 @@ export function validateFbPoolDraft(
     errors.push('fpHolderRequired');
   if (
     (Object.keys(FB_POOL_FIELD_MAX) as (keyof typeof FB_POOL_FIELD_MAX)[]).some(
-      (field) => (draft[field] ?? '').length > FB_POOL_FIELD_MAX[field],
+      (field) => !(field === 'cookie' && keptCookie) && (draft[field] ?? '').length > FB_POOL_FIELD_MAX[field],
     )
   )
     errors.push('fpTooLong');
