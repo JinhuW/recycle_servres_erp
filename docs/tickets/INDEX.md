@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-484](./RS-484-phone-market-card-shows-the-full-sku-spec.md) | done | bug | P2 | Phone Market card shows the full SKU spec | — |
+| [RS-485](./RS-485-phone-market-card-shows-part-number-and-last-updated.md) | done | story | P2 | Phone Market card shows part number and last updated time | — |
+| [RS-484](./RS-484-phone-market-card-shows-the-full-sku-spec.md) | done | bug | P2 | Phone Market card shows the full SKU spec | 1.395.1 |
 | [RS-483](./RS-483-after-sales-case-amount-can-be-in-rmb.md) | done | story | P2 | After-sales case amount can be in RMB | 1.395.0 |
 | [RS-482](./RS-482-accounting-drawer-review-card-clipped-to-a-sliver.md) | done | bug | P2 | Accounting drawer: Review card clipped to a sliver | 1.394.1 |
 | [RS-481](./RS-481-po-list-payment-filter-as-a-dropdown.md) | done | story | P2 | PO list payment filter as a dropdown | 1.394.0 |

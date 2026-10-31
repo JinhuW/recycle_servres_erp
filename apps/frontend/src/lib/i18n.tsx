@@ -392,6 +392,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     status: 'Status',
     units: '{n} units',
     updatedRel: 'Updated {rel} · {s} data points',
+    mktCardUpdated: 'Updated {rel}',
     inventoryTitle: 'Inventory',
     invAcrossTeams: 'Across all teams',
     invItemsYou: 'Items you submitted',

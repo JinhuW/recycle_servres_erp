@@ -114,7 +114,15 @@ export function Market() {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.3, overflowWrap: 'anywhere' }}>{r.label}</div>
-                    <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.sub}</div>
+                    {r.partNumber && (
+                      <div className="mono" style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 3, overflowWrap: 'anywhere' }}>{r.partNumber}</div>
+                    )}
+                    {r.sub && (
+                      <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.sub}</div>
+                    )}
+                    <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                      {t('mktCardUpdated', { rel: relTime(r.updatedAt, locale) })}
+                    </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
                     <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('sellPrice')}</div>
