@@ -7,7 +7,7 @@ priority: P1
 created: 2026-10-31
 reporter: jinhu
 branch: JinhuW/shovelnose-2
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1026
 version: 1.393.1
 related: []
 ---
