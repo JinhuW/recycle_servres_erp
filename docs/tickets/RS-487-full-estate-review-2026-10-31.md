@@ -7,8 +7,8 @@ priority: P2
 created: 2026-10-31
 reporter: jinhu
 branch: JinhuW/brant
-pr:
-version:
+pr: 1036
+version: — (docs only)
 related: []
 ---
 
