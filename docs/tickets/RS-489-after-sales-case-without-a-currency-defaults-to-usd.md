@@ -2,13 +2,13 @@
 id: RS-489
 title: After-sales case without a currency defaults to USD, not the order's
 type: bug
-status: backlog
+status: done
 priority: P1
 created: 2026-10-31
 reporter: jinhu
 branch: fix/after-sales-currency-compat
-pr:
-version:
+pr: 1038
+version: 1.396.1
 related: [RS-483]
 ---
 

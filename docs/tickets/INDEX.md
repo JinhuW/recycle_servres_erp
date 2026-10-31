@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-489](./RS-489-after-sales-case-without-a-currency-defaults-to-usd.md) | done | bug | P1 | After-sales case without a currency defaults to USD, not the order's | — |
 | [RS-488](./RS-488-implementation-plan-for-the-2026-10-31-review-fixes.md) | done | task | P2 | Implementation plan for the 2026-10-31 review fixes | — (docs only) |
 | [RS-487](./RS-487-full-estate-review-2026-10-31.md) | done | task | P2 | Full estate review 2026-10-31 | — (docs only) |
 | [RS-486](./RS-486-edit-dialog-manages-screenshots-other-entries-lose-t.md) | done | bug | P2 | Edit dialog manages screenshots; Other entries lose the deleted-record banner | 1.396.0 |
