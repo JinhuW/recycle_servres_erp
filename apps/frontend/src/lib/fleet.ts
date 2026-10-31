@@ -8,7 +8,7 @@
 // state), the page-side type extends the shared one here.
 
 import type {
-  FleetWorkerRelogin, FleetWorkerResume,
+  FleetAccountBrief, FleetWorkerRelogin, FleetWorkerResume,
   FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetProxy, FleetProxyHealthAnswer, FleetProxyPatch, FleetProxyWrite, FleetRelease,
   FleetSettings, FleetSlot as FleetSlotRow, FleetSlotWrite,
   FleetFunnelDay, FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, FleetWorkerDetail, RoundStartAnswer,
@@ -17,7 +17,7 @@ import { ApiError } from './api';
 import { sharedApi as api } from './sharedGet';
 
 export type {
-  FleetFunnelDay, FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,
+  FleetAccountBrief, FleetFunnelDay, FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,
   FleetTaskResult, FleetTaskState, FleetHostContainer, FleetHostReport, DesiredAnswer, RoundStartAnswer,
   FleetProxy, FleetProxyCheck, FleetProxyHealth, FleetProxyHealthAnswer, FleetProxyHealthState, FleetProxySource,
   FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
@@ -136,6 +136,7 @@ export const fleetApi = {
   startRound: () => api.post<RoundStartAnswer>(`${BASE}/round/start`, {}),
   tasks: (q: FleetTaskQuery = {}) => api.get<FleetTask[]>(`${BASE}/tasks${query(q)}`),
   // Finished searches per office (Eastern) day over the last `days`, summed from their results.
+  accountBrief: (no: number) => api.get<FleetAccountBrief>(`${BASE}/accounts/${no}/brief`),
   funnel: (days: number) => api.get<{ days: FleetFunnelDay[] }>(`${BASE}/stats/funnel${query({ days })}`).then(r => r.days),
   // One city's, or one worker's, tasks with their events over the last `hours`.
   cityLog: (q: { city?: string; worker?: string; hours?: number }) =>

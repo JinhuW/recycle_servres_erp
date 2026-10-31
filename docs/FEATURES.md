@@ -3467,6 +3467,13 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     kind is gone. A row whose account another worker now holds shows no minutes.
     Since v1.382.0 (RS-460) every column title sorts the table (descending,
     ascending, then its own order; empty cells last).
+    Since v1.391.0 (RS-475) hovering or focusing the account opens a brief:
+    pool status, when it was imported (date and age) and its batch, its note,
+    the worker it is on and since when, its last 7 days of searches (searches,
+    cards, opened, alerts, minutes), its last search, and its stints with how
+    many ended needing attention or retired. The import and note come from the
+    pool summary the tab holds; the rest from GET /api/fleet/accounts/:no/brief
+    on the first hover, kept for a minute.
     Since v1.379.0
     (RS-451) a parked ERP-fleet row, and that worker's page, have **Retire &
     free**: the pool account is retired and its slot deleted, the worker is

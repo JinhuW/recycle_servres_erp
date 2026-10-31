@@ -15,6 +15,20 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.391.0] - 2026-10-31
+
+### Added
+
+- **The Fleet table's account shows a brief on hover** (RS-475). Judging
+  whether an account earns its slot used to mean opening the Account pool
+  for its import date and note, then the worker page for its history. Hover
+  or focus the account number and a card shows its pool status, when it was
+  imported and from which batch, its note, the worker it is on and since
+  when, its last week of searches (searches, cards, opened, alerts,
+  minutes), when it last searched, and how many of its stints ended needing
+  attention or retired. The week's record comes from a new manager route,
+  `GET /api/fleet/accounts/:no/brief`, read on the first hover.
+
 ## [1.390.1] - 2026-10-30
 
 ### Fixed

@@ -7,7 +7,7 @@ import {
 } from '../fleet/cities';
 import { reconcile } from '../fleet/scheduler';
 import { FLEET_TABLES, fleetTablesPresent, isRefusal, type Refusal } from '../fleet/sql';
-import { cityLog, funnelDays, listTasks, manualTask, readFunnelDays, readLogQuery, readTaskFilter, startRound } from '../fleet/tasks';
+import { accountBrief, cityLog, funnelDays, listTasks, manualTask, readFunnelDays, readLogQuery, readTaskFilter, startRound } from '../fleet/tasks';
 import worker from '../fleet/claim';
 import { forwardsReads, mirrorAnswers } from '../fleet/mirror';
 import hosts, { releases } from '../fleet/hosts';
@@ -124,6 +124,14 @@ fleet.get('/stats/funnel', managerOnly, async (c) => {
   const days = readFunnelDays(c.req.query());
   if (isRefusal(days)) return refuse(c, days);
   return c.json({ days: await funnelDays(getDb(c.env), days) });
+});
+
+// The Fleet table's hover card. Any pool number answers, so an account the
+// coordinator runs gets its (empty) ERP record rather than a 404.
+fleet.get('/accounts/:no/brief', managerOnly, async (c) => {
+  const raw = c.req.param('no');
+  if (!/^\d{1,9}$/.test(raw)) return c.json({ error: 'not_found' }, 404);
+  return c.json(await accountBrief(getDb(c.env), Number(raw)));
 });
 
 fleet.get('/city-log', managerOnly, async (c) => {
