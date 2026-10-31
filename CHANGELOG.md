@@ -15,6 +15,34 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.392.1] - 2026-10-31
+
+### Fixed
+
+- **Purchasers can no longer submit a colleague's draft PO** (RS-478). The
+  advance route let any purchaser move any Draft to In Transit, and its
+  refusals described orders the caller couldn't open. It now answers 404 for
+  someone else's PO, as opening it does, and runs no PayPal pull first.
+- **A line's inventory history no longer carries manager-only data to its
+  purchaser.** Sell- and transfer-order ids and the before/after values of a
+  unit-cost edit are left out of `/api/inventory/:id` and both `/events/*`
+  reads, and *Hide pending* is a manager filter, since diffing it told a
+  purchaser which of their lots a sell order held.
+- **The Facebook pool sends a purchaser only the logins they hold.** Every
+  other account's UID and email arrived in full from the snapshot and the
+  summary while the page masked them. They now arrive cut to what the page
+  showed.
+- **Demoting a manager ends their connector tokens at once**, instead of
+  leaving manager MCP scopes alive until the access token expired.
+- **OAuth hardening:** before anyone signs in, a self-registered client's
+  request errors are answered in place rather than redirected to its URI (an
+  open redirect from the ERP domain), and a parked consent is readable only by
+  the user who parked it.
+- **Smaller leaks:** a purchaser adding a retired item type no longer revives
+  it; the duplicate-client message looks in the book being written to rather
+  than naming whichever colleague held the same name; a note on someone
+  else's client answers 404 like the client does; preference lists are
+  bounded.
 ## [1.392.0] - 2026-10-31
 
 ### Added

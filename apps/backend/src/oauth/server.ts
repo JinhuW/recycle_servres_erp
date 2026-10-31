@@ -280,10 +280,17 @@ oauth.get('/authorize', async (c) => {
       presented: q.redirect_uri ?? null,
     }, 400);
   }
+  // Signature-only on purpose: this just parks the request. The consent POST
+  // that issues the code sits behind authMiddleware, which checks the user.
+  const at = getCookie(c, 'at');
+  const payload = at ? await verifyToken(c.env, at) : null;
   // Per RFC 6749 §4.1.2.1, once client_id + redirect_uri are validated,
   // subsequent errors must redirect back so the client sees a structured
-  // error rather than a 400 page.
+  // error rather than a 400 page. Not for a self-registered client before
+  // anyone signed in: anybody can register one, and the redirect would make
+  // an ERP link land a stranger on the registrant's page (RFC 9700 §4.11.2).
   const redirectWithError = (code: string) => {
+    if (client.created_by === null && !payload) return c.json({ error: code }, 400);
     const u = new URL(q.redirect_uri!);
     u.searchParams.set('error', code);
     if (q.state) u.searchParams.set('state', q.state);
@@ -302,10 +309,6 @@ oauth.get('/authorize', async (c) => {
     ? [...client.scopes]
     : requestedRaw.filter(s => client.scopes.includes(s));
   if (requested.length === 0) return redirectWithError('invalid_scope');
-  // Signature-only on purpose: this just parks the request. The consent POST
-  // that issues the code sits behind authMiddleware, which checks the user.
-  const at = getCookie(c, 'at');
-  const payload = at ? await verifyToken(c.env, at) : null;
   if (!payload) {
     const next = encodeURIComponent('/oauth/authorize?' + new URLSearchParams(q).toString());
     return c.redirect(`/login?next=${next}`, 302);
@@ -728,6 +731,7 @@ oauth.get('/authorize/pending/:req', authMiddleware, async (c) => {
     SELECT client_id, redirect_uri, scopes, code_challenge, state
     FROM oauth_pending_consent
     WHERE req = ${c.req.param('req')} AND expires_at > NOW()
+      AND user_id_from_cookie = ${c.var.user.id}
     LIMIT 1
   `)[0];
   if (!row) return c.json({ error: 'expired_or_unknown' }, 404);

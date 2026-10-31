@@ -153,6 +153,13 @@ export async function updateMember(
   const endsManagership = input.active === false || (input.role !== undefined && input.role !== 'manager');
   await sql.begin(async (tx) => {
     if (endsManagership) await assertNotLastManagerTx(tx, id);
+    // An OAuth token's scopes were ceilinged by the role it was granted under;
+    // a demotion has to end them now rather than at the next refresh. The cv
+    // bump stops the access tokens already issued — cookie sessions read the
+    // role from the row anyway and just re-mint.
+    const [cur] = await tx<{ role: MemberRole }[]>`SELECT role FROM users WHERE id = ${id} FOR UPDATE`;
+    const demoted = cur?.role === 'manager' && input.role !== undefined && input.role !== 'manager';
+    const bumpsCv = endsSessions || demoted;
     await tx`
       UPDATE users SET
         name               = COALESCE(${input.name ?? null},       name),
@@ -163,13 +170,11 @@ export async function updateMember(
         active             = COALESCE(${input.active ?? null},     active),
         password_hash      = COALESCE(${hash},                     password_hash),
         tokens_valid_after = COALESCE(to_timestamp(${resetAt}),    tokens_valid_after),
-        credential_version = credential_version + (CASE WHEN ${endsSessions} THEN 1 ELSE 0 END)
+        credential_version = credential_version + (CASE WHEN ${bumpsCv} THEN 1 ELSE 0 END)
       WHERE id = ${id}
     `;
-    if (endsSessions) {
-      await revokeUserRefreshTokens(tx, id);
-      await revokeUserOAuthTokens(tx, id);
-    }
+    if (endsSessions) await revokeUserRefreshTokens(tx, id);
+    if (bumpsCv) await revokeUserOAuthTokens(tx, id);
   });
 }
 

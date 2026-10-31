@@ -60,6 +60,17 @@ describe('item types', () => {
     expect(again.body.name).toBe('Backplane');
   });
 
+  it('leaves a retired type retired when a purchaser adds it; a manager revives it', async () => {
+    const manager = (await loginAs(ALEX)).token;
+    const made = await api<{ id: string }>('POST', '/api/item-types', { token: manager, body: { name: 'Riser' } });
+    expect((await api('PATCH', `/api/item-types/${made.body.id}`, { token: manager, body: { active: false } })).status).toBe(200);
+    const purchaser = (await loginAs(MARCUS)).token;
+    expect((await api('POST', '/api/item-types', { token: purchaser, body: { name: 'riser' } })).status).toBe(409);
+    const [row] = await getTestDb()<{ active: boolean }[]>`SELECT active FROM item_types WHERE id = ${made.body.id}`;
+    expect(row.active).toBe(false);
+    expect((await api('POST', '/api/item-types', { token: manager, body: { name: 'riser' } })).status).toBe(201);
+  });
+
   it('rejects a blank or over-long name', async () => {
     const { token } = await loginAs(MARCUS);
     expect((await api('POST', '/api/item-types', { token, body: { name: '   ' } })).status).toBe(400);

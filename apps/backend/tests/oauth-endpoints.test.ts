@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
-import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { loginAs, ALEX, MARCUS, SOFIA } from './helpers/auth';
 import { generateVerifier, challengeS256 } from '../src/oauth/pkce';
 
 describe('OAuth discovery', () => {
@@ -346,6 +346,31 @@ describe('/oauth/authorize', () => {
     const r = await api('GET', `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb&code_challenge=ch&code_challenge_method=S256&scope=market:read&state=s1`);
     expect(r.status).toBe(302);
     expect(r.headers.get('location')).toMatch(/^\/login\?next=/);
+  });
+
+  it('answers a self-registered client\'s pre-consent errors in place until someone signs in', async () => {
+    const sql = getTestDb();
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'dcr-redirect', redirectUris: ['https://evil.example/x'],
+      grantTypes: ['authorization_code'], scopes: ['market:read'], createdBy: null, public: true,
+    });
+    const url = `/oauth/authorize?client_id=${c.clientId}&redirect_uri=https://evil.example/x&response_type=token`;
+    const anon = await api('GET', url);
+    expect(anon.status).toBe(400);
+    expect(anon.body).toEqual({ error: 'unsupported_response_type' });
+    const signedIn = await api('GET', url, { token: (await loginAs(ALEX)).token });
+    expect(signedIn.status).toBe(302);
+    expect(signedIn.headers.get('location')).toMatch(/^https:\/\/evil\.example\/x\?error=/);
+  });
+
+  it('shows a parked consent only to the user who parked it', async () => {
+    const c = await aClient();
+    const { token } = await loginAs(ALEX);
+    const r = await api('GET', `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb&code_challenge=ch&code_challenge_method=S256&scope=market:read&state=s1`, { token });
+    const req = new URLSearchParams(r.headers.get('location')!.split('?')[1]).get('req')!;
+    expect((await api('GET', `/oauth/authorize/pending/${req}`, { token: (await loginAs(SOFIA)).token })).status).toBe(404);
+    expect((await api('GET', `/oauth/authorize/pending/${req}`, { token })).status).toBe(200);
   });
 
   it('renders the consent page when logged in (302 to /authorize?...)', async () => {
@@ -771,7 +796,6 @@ describe('/oauth/token', () => {
     });
     return { userId: session.user.id, redeem };
   }
-  const SOFIA = 'sofia@recycleservers.io';
 
   // Reset revoked refresh tokens and stamped the cutoff, but a code minted
   // before it still redeemed within its ten minutes — to a token whose fresh
@@ -792,13 +816,19 @@ describe('/oauth/token', () => {
     expect((await redeem()).status).toBe(400);
   });
 
-  it('a code consented as a manager redeems with the demoted role\'s scopes', async () => {
+  it('a demotion voids a code consented as a manager and the access tokens already issued', async () => {
     const { userId, redeem } = await consentedCode();
+    const cv = async () => (await getTestDb()<{ v: number }[]>`
+      SELECT credential_version AS v FROM users WHERE id = ${userId}`)[0].v;
+    const before = await cv();
     const manager = await loginAs(SOFIA);
     expect((await api('PATCH', `/api/members/${userId}`, { token: manager.token, body: { role: 'purchaser' } })).status).toBe(200);
+    expect(await cv()).toBe(before + 1);
     const r = await redeem();
-    expect(r.status).toBe(200);
-    expect(((r.body as Record<string, unknown>).scope as string).split(' ')).toEqual(['market:read']);
+    expect(r.status).toBe(400);
+    // Re-sending the same role is no demotion and ends nothing.
+    expect((await api('PATCH', `/api/members/${userId}`, { token: manager.token, body: { role: 'purchaser' } })).status).toBe(200);
+    expect(await cv()).toBe(before + 1);
   });
 
   it('interactive flow grants market:write when the consenter is a manager', async () => {

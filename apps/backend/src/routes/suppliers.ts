@@ -451,19 +451,22 @@ suppliers.post('/', async (c) => {
     return c.json({ id: r[0].id }, 201);
   } catch (e) {
     if (String(e).includes('suppliers_owner_match_idx')) {
+      // The index is per owner, so the twin is in the book being written to —
+      // look it up there, not across every book by name alone, which named
+      // whichever colleague happened to hold the same name.
       const dup = await sql`
-        SELECT s.name, u2.name AS owner FROM suppliers s
+        SELECT s.name, s.owner_id, u2.name AS owner FROM suppliers s
         LEFT JOIN users u2 ON u2.id = s.owner_id
-        WHERE supplier_name_key(s.name) = supplier_name_key(${body.name})
+        WHERE s.owner_id IS NOT DISTINCT FROM ${ownerId}
+          AND s.match_key = supplier_name_key(${body.name}) || '|' || COALESCE(${str(body.zip)}, '')
         LIMIT 1
       `;
-      // Naming the owner is a deliberate, narrow exception to owner-scoping: it
-      // costs a little privacy and stops two purchasers cold-calling the same
-      // seller in the same week, which is worse.
+      const d = dup[0];
       return c.json({
-        error: dup[0]?.owner
-          ? `${dup[0].name} is already in ${dup[0].owner}'s clients`
-          : 'That client is already in the book',
+        error: !d ? 'That client is already in the book'
+          : d.owner_id === u.id ? `${d.name} is already in your clients`
+          : d.owner ? `${d.name} is already in ${d.owner}'s clients`
+          : `${d.name} is already in the book`,
       }, 409);
     }
     throw e;
@@ -595,8 +598,8 @@ suppliers.post('/:id/notes', async (c) => {
     ${rollup(sql, s.tierFloorUsd, u)} WHERE s.id = ${id}
   `) as unknown as Row[];
   const cur = rows[0];
-  if (!cur) return c.json({ error: 'Not found' }, 404);
-  if (!canWrite(u, cur.owner_id)) return c.json({ error: 'Forbidden' }, 403);
+  // Someone else's client is not found, as GET /:id answers.
+  if (!cur || !canWrite(u, cur.owner_id)) return c.json({ error: 'Not found' }, 404);
 
   const view = toApi(cur, s);
   // Explicit date wins; otherwise schedule from their cadence so doing nothing

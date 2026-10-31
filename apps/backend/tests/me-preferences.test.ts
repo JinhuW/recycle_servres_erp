@@ -63,6 +63,16 @@ describe('PATCH /api/me/preferences allowlist', () => {
       token, body: { 'pack.labelSize': '6x4' },
     });
     expect(badStock.status).toBe(400);
+
+    const longList = await api('PATCH', '/api/me/preferences', {
+      token, body: { 'orders.cols': Array.from({ length: 101 }, (_, i) => `c${i}`) },
+    });
+    expect(longList.status).toBe(400);
+
+    const longId = await api('PATCH', '/api/me/preferences', {
+      token, body: { 'analysis.collapsed': ['x'.repeat(65)] },
+    });
+    expect(longId.status).toBe(400);
   });
 
   // `SCHEMA[key]` on a plain object found Object.prototype members: `toString`
