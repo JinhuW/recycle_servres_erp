@@ -1118,7 +1118,9 @@ is not a stage but a flag beside one, set once every line has sold
   (v1.252.0): a Warehouse group (All, one chip per warehouse the loaded POs
   use, No warehouse when some PO has none) and a Payment group (All,
   Business, one chip per person who paid a loaded PO — since v1.317.0; All,
-  Company, Self-paid before), for every role. Each chip's count is what its click
+  Company, Self-paid before), for every role. Since v1.394.0 the Payment
+  group is one dropdown, each option with its count, because a chip per payer
+  outgrew the row. Each count is what that pick
   would show given every other filter — search, Done, stage, Sold and the
   other group; the active chip clicked again clears its group. The filter is
   client-side, so the table swaps in place with no refetch, and the picks
