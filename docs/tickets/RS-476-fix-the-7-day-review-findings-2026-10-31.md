@@ -2,13 +2,13 @@
 id: RS-476
 title: Fix the 7-day review findings (2026-10-31)
 type: bug
-status: backlog
+status: done
 priority: P1
 created: 2026-10-31
 reporter: jinhu
 branch: fix/review-findings-2026-10-31
-pr:
-version:
+pr: "#1020"
+version: 1.391.1
 related: []
 ---
 
