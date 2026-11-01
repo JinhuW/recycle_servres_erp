@@ -15,6 +15,15 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.400.0] - 2026-11-01
+
+### Changed
+
+- **RMB Flow opens on Oct 31, 2026 → today** (RS-494). It used to open on
+  *This month*, which at the start of a month shows almost nothing. Entries
+  before Oct 31 still make up the Opening balance, and any other period can
+  still be picked from the date chip.
+
 ## [1.399.0] - 2026-11-01
 
 ### Added
