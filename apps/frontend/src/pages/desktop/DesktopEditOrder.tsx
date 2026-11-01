@@ -1810,8 +1810,15 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                 defaultPayerId={user?.id ?? null}
                 sources={isManager ? {
                   // Bank payments linked to this PO on the Payments page;
-                  // invisible until something links.
-                  business: <PoPaymentsLedger scope={{ orderId: order.id, kind: 'cost' }} locale={locale} />,
+                  // invisible until something links. A PO saved as
+                  // Business-paid still shows its RMB book, read-only, so
+                  // the entries voided by the move stay reachable.
+                  business: (
+                    <>
+                      <PoPaymentsLedger scope={{ orderId: order.id, kind: 'cost' }} locale={locale} />
+                      {order.payment === 'company' && <AccountingCard scope={{ orderId: order.id, kind: 'purchase' }} />}
+                    </>
+                  ),
                   // The book refuses a PO saved as Business-paid, so the
                   // switch has to be saved before Record means anything.
                   rmb: order.payment === 'company'
@@ -1819,6 +1826,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                     : <AccountingCard key={order.paidBy?.id ?? ''} scope={{ orderId: order.id, kind: 'purchase' }} />,
                 } : undefined}
               />
+              {/* The ledger follows the real role, as its API does: a manager
+                  previewing as a purchaser still sees the bank payments. */}
+              {!isManager && user?.role === 'manager' && <PoPaymentsLedger scope={{ orderId: order.id, kind: 'cost' }} locale={locale} />}
             </div>
           ),
           commission: (

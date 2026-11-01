@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { AttachmentChip } from './AttachmentChip';
 import { AttachmentDropzone } from './AttachmentDropzone';
 import { Icon } from './Icon';
@@ -62,10 +62,16 @@ export function PaymentFields({
   const { t } = useT();
   const company = paidBy === 'company';
   const p = idPrefix;
+  // Both pages drop the person when the payment goes to the Business Account,
+  // so the switch remembers who it was: a click there and back must not
+  // change who paid.
+  const lastPayer = useRef(paidByUserId);
+  if (paidByUserId) lastPayer.current = paidByUserId;
   const pickSource = (s: 'rmb' | 'business') => {
     if (s === 'business') { if (!company) onPaidBy('company', null); return; }
     if (!company) return;
-    const keep = paidByUserId && payers.some(m => m.id === paidByUserId) ? paidByUserId : null;
+    const prev = lastPayer.current;
+    const keep = prev && payers.some(m => m.id === prev) ? prev : null;
     onPaidBy('self', keep ?? defaultPayerId ?? payers[0]?.id ?? null);
   };
   // A self-paid record naming nobody (an older backend, or a payer dropped
@@ -119,23 +125,31 @@ export function PaymentFields({
     </div>
   );
   if (!sources) return fields;
-  const locked = disabled || payerLocked;
+  // `sources` is a manager's, and payerLocked never holds for a manager.
   return (
     <div className="pay-sourced">
-      <div className="seg" role="group" aria-label={t('cpPaymentSource')}>
-        {(['rmb', 'business'] as const).map(s => {
-          const on = (s === 'business') === company;
-          return (
-            <button key={s} type="button" className={on ? 'active' : ''} aria-pressed={on}
-                    disabled={locked} onClick={() => pickSource(s)}>
-              {t(s === 'rmb' ? 'acctCardTitle' : 'payBusiness')}
-            </button>
-          );
-        })}
-      </div>
-      {payerLocked && company && <div className="field-hint">{t('payPayerLocked')}</div>}
+      <PaymentSourceSwitch value={company ? 'business' : 'rmb'} onChange={pickSource} disabled={disabled} />
       {fields}
       {company ? sources.business : sources.rmb}
+    </div>
+  );
+}
+
+/** RMB Flow | Business Account — the Cost Payment and the Commission tab. */
+export function PaymentSourceSwitch({ value, onChange, disabled }: {
+  value: 'rmb' | 'business';
+  onChange: (v: 'rmb' | 'business') => void;
+  disabled?: boolean;
+}) {
+  const { t } = useT();
+  return (
+    <div className="seg" role="group" aria-label={t('cpPaymentSource')}>
+      {(['rmb', 'business'] as const).map(s => (
+        <button key={s} type="button" className={value === s ? 'active' : ''} aria-pressed={value === s}
+                disabled={disabled} onClick={() => onChange(s)}>
+          {t(s === 'rmb' ? 'acctCardTitle' : 'payBusiness')}
+        </button>
+      ))}
     </div>
   );
 }
