@@ -2464,7 +2464,8 @@ is who paid, below).
     (pick, drop, or paste on desktop) and uploads them once it is saved. If
     one fails, the entry stays saved and a warning says to add it again from
     the entry. Each picked screenshot shows its receipt name as soon as
-    the scan reads it, before the entry is saved (v1.398.0). The drawer and the phone's entry screen add and remove them
+    the scan reads it, before the entry is saved (v1.398.0), and is stored
+    under that name without a second read (v1.398.1). The drawer and the phone's entry screen add and remove them
     live; Review shows them read-only beside the figure. Adding or removing
     one is a history line and an Activity row (Added / Removed), and leaves
     the entry's version and sign-off alone: proof is not money. A voided
@@ -2568,7 +2569,9 @@ is who paid, below).
     Payment opens on a **RMB Flow | Business Account** switch, as Commission
     does: RMB Flow names the person who paid and carries this card; Business
     Account picks PayPal or Cash and carries the Payments ledger. A PO still
-    saved as Business-paid asks for a Save before the card can record.
+    saved as Business-paid asks for a Save before the card can record, and
+    shows its RMB book read-only under Business Account. Moving the switch
+    away and back keeps the person who paid (v1.398.1).
     Purchasers, the create pages and the hand-off keep the single Paid by
     select;
   - the **sell order**, beside the bank payments (Sale entries plus its cases'

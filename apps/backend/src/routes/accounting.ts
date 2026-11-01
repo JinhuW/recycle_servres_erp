@@ -56,11 +56,15 @@ accounting.post('/scan-receipt', async (c) => {
   const file = form.get('file');
   if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
   const { maxBytes, allowedMime } = await getUploadLimits(getDb(c.env));
-  if (file.size > maxBytes) return c.json({ error: 'file too large' }, 413);
   if (!file.type.startsWith('image/') || !allowedMime.has(file.type)) return c.json({ error: 'unsupported file type' }, 415);
-  const receipt = await readReceipt(c.env, file);
-  // The form shows a picked screenshot under the name its upload will get.
-  const filename = receipt ? buildReceiptName(receipt.method, receipt.amount, file.name, file.type) : null;
+  // Shrunk as the upload will be: the large phone screenshots are the ones
+  // that most need reading.
+  const fitted = await shrinkImageToFit(file, maxBytes);
+  if (fitted.size > maxBytes) return c.json({ error: 'file too large' }, 413);
+  const receipt = await readReceipt(c.env, fitted);
+  // The form shows a picked screenshot under this name, and the upload keeps
+  // it (maybeRenameReceipt skips a name already in this form).
+  const filename = receipt ? buildReceiptName(receipt.method, receipt.amount, fitted.name, fitted.type) : null;
   return c.json({ receipt, filename });
 });
 

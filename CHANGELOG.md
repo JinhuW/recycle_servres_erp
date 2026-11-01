@@ -15,6 +15,26 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.398.1] - 2026-10-31
+
+### Fixed
+
+- **The Cost Payment switch keeps who paid** (RS-492). Moving it to Business
+  Account and back to RMB Flow named the signed-in manager rather than the
+  person already on the PO, and saving would have moved that purchaser's RMB
+  entries to the manager. The switch now remembers the payer.
+- **A screenshot is stored under the name the form showed** (RS-492). The
+  upload read each receipt a second time and renamed from that reading, so the
+  stored name could differ from the chip, for example when the UTC date rolled
+  over between picking and saving, and every image cost two model calls. A
+  file that already carries a receipt name now keeps it. The scan also shrinks
+  an oversized phone screenshot the way the upload does, instead of refusing
+  it, so those get their name and amount too.
+- **A PO saved as Business-paid shows its RMB book again** (RS-492), read-only
+  under Business Account on both the desktop and the phone, so entries voided
+  by the move stay reachable. A manager previewing as a purchaser keeps the
+  PO's Payments ledger, which follows the real role as its API does.
+
 ## [1.398.0] - 2026-10-31
 
 ### Changed
