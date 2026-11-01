@@ -4827,3 +4827,8 @@ a.home-money-row:hover .home-money-label { color: var(--accent-strong); }
   .home-tiles { grid-template-columns: repeat(2, 1fr); }
   .home-pipeline { grid-template-columns: repeat(3, 1fr); }
 }
+/* The manager's Cost Payment: the source switch, then that source's fields
+   and ledger (CommissionPaymentFields reads the same way). */
+.pay-sourced { display: grid; gap: 12px; }
+.pay-sourced > .seg { justify-self: start; max-width: 100%; }
+.pay-sourced > .field-hint { margin-top: -6px; }

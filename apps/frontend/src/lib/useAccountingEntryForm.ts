@@ -169,14 +169,22 @@ export function useAccountingEntryForm(opts: {
       void (async () => {
         for (const file of images) {
           try {
-            const { receipt } = await acctReadReceipt(file);
+            const { receipt, filename } = await acctReadReceipt(file);
             if (!mounted.current || !liveFiles.current.has(file)) continue;
             if (!receipt) { setScanNotice(t('acctReceiptUnreadable')); continue; }
-            setReadings(rs => [...rs, { file, receipt }]);
+            // The name the server would give it on save, shown now rather
+            // than only once the entry is recorded.
+            const named = filename ? new File([file], filename, { type: file.type, lastModified: file.lastModified }) : file;
+            if (named !== file) {
+              liveFiles.current.delete(file);
+              liveFiles.current.add(named);
+              setFiles(fs => fs.map(f => f === file ? named : f));
+            }
+            setReadings(rs => [...rs, { file: named, receipt }]);
             if (receipt.currency) {
               setForm(f => {
                 if (f.amountSource !== 'order') return f;
-                receiptFile.current = file;
+                receiptFile.current = named;
                 return { ...f, amount: receipt.amount, currency: receipt.currency!, fxRate: '', amountSource: 'receipt' };
               });
             } else setScanNotice(t('acctReceiptCurrencyUnknown'));

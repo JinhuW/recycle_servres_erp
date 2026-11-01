@@ -109,7 +109,14 @@ export async function readReceipt(env: Env, file: File): Promise<ReceiptReading 
   }
 }
 
+// A name buildReceiptName made. The entry form names a screenshot at scan
+// time; reading it again on upload would pay for a second model call and
+// could rename it away from what the form showed.
+const RECEIPT_NAME = new RegExp(`^\\d{4}-\\d{2}-\\d{2}-(${RECEIPT_METHODS.join('|')})-\\d+\\.\\d{2}\\.[a-z0-9]+$`);
+export const isReceiptName = (name: string) => RECEIPT_NAME.test(name);
+
 export async function maybeRenameReceipt(env: Env, file: File): Promise<File> {
+  if (isReceiptName(file.name)) return file;
   const receipt = await readReceipt(env, file);
   if (!receipt) return file;
   return new File([await file.arrayBuffer()], buildReceiptName(receipt.method, receipt.amount, file.name, file.type), { type: file.type });

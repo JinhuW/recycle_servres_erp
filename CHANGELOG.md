@@ -15,6 +15,56 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.398.1] - 2026-10-31
+
+### Fixed
+
+- **The Cost Payment switch keeps who paid** (RS-492). Moving it to Business
+  Account and back to RMB Flow named the signed-in manager rather than the
+  person already on the PO, and saving would have moved that purchaser's RMB
+  entries to the manager. The switch now remembers the payer.
+- **A screenshot is stored under the name the form showed** (RS-492). The
+  upload read each receipt a second time and renamed from that reading, so the
+  stored name could differ from the chip, for example when the UTC date rolled
+  over between picking and saving, and every image cost two model calls. A
+  file that already carries a receipt name now keeps it. The scan also shrinks
+  an oversized phone screenshot the way the upload does, instead of refusing
+  it, so those get their name and amount too.
+- **A PO saved as Business-paid shows its RMB book again** (RS-492), read-only
+  under Business Account on both the desktop and the phone, so entries voided
+  by the move stay reachable. A manager previewing as a purchaser keeps the
+  PO's Payments ledger, which follows the real role as its API does.
+
+## [1.398.0] - 2026-10-31
+
+### Changed
+
+- **A payment screenshot shows its receipt name as soon as it is added**
+  (RS-491). On *Record entry* / *Record payment* the screenshots wait for the
+  entry to be saved before they upload, and the server's rename to
+  `<date>-<method>-<amount>` only happened at that upload. Until then the list
+  showed whatever the phone or screenshot tool called the file, such as a hash
+  or `iShot_…`. The form already read each image as it was dropped, to fill in
+  the amount. That scan now also returns the name, so the chip takes it right
+  away and the saved attachment carries the same name. Images the model can't
+  read, and PDFs, keep their own names, as before.
+
+## [1.397.0] - 2026-10-31
+
+### Added
+
+- **A PO's Cost Payment picks RMB Flow or Business Account with a switch,
+  as Commission does** (RS-490). The Business Account used to be the first
+  option of Paid by, with the RMB Flow card underneath. On a Business-paid
+  PO that card could only say the money belonged on Payments. Managers now
+  get a `[RMB Flow | Business Account]` switch on the desktop and phone PO
+  pages. RMB Flow names who paid (from people only, defaulting to the
+  current payer or the signed-in manager) and shows the RMB Flow card with
+  Record. Business Account shows Method, the proof panel and the Payments
+  ledger. A PO is still paid from one source: the book still refuses RMB
+  entries on a PO saved as Business-paid, so moving the switch asks for a
+  Save before Record appears.
+
 ## [1.396.1] - 2026-10-31
 
 ### Fixed

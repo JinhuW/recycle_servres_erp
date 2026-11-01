@@ -89,6 +89,14 @@ describe('maybeRenameReceipt', () => {
     expect(out.name).toMatch(/-weixinpay-1250\.00\.png$/);
   });
 
+  it('keeps a name the scan already gave it, without reading it again', async () => {
+    const fn = mockModel('{"method":"bank","amount":"9.00"}');
+    const named = new File([new Uint8Array([1])], '2026-10-31-alipay-1250.00.png', { type: 'image/png' });
+    const out = await maybeRenameReceipt({ OPENROUTER_API_KEY: 'k' } as Env, named);
+    expect(out).toBe(named);
+    expect(fn).not.toHaveBeenCalled();
+  });
+
   it('keeps the original name when the model returns nulls', async () => {
     mockModel('{"method":null,"amount":null}');
     const out = await maybeRenameReceipt({ OPENROUTER_API_KEY: 'k' } as Env, png());

@@ -1458,10 +1458,20 @@ export function OrderDetail({
             proof={proof}
             canEditProof={canAnnotate}
             idPrefix="ph"
+            defaultPayerId={user?.id ?? null}
+            sources={showAccounting ? {
+              // Payments, the Business Account's ledger, is desktop-only. A PO
+              // saved as Business-paid still shows its RMB book, read-only,
+              // so the entries voided by the move stay reachable.
+              business: order.payment === 'company'
+                ? <PhAccountingSection orderId={order.id} kind="purchase" version={acctVersion} onRecord={setAcctPreset} />
+                : null,
+              // The book refuses a PO saved as Business-paid: save the switch first.
+              rmb: order.payment === 'company'
+                ? <div className="acct-hint">{t('paySaveFirstRmb')}</div>
+                : <PhAccountingSection key={order.paidBy?.id ?? ''} orderId={order.id} kind="purchase" version={acctVersion} onRecord={setAcctPreset} />,
+            } : undefined}
           />
-          {showAccounting && (
-            <PhAccountingSection orderId={order.id} kind="purchase" version={acctVersion} onRecord={setAcctPreset} />
-          )}
         </PhFold>
 
         <PhFold

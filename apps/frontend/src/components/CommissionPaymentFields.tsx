@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useState, type ReactNode } from 'react';
 import { AttachmentChip } from './AttachmentChip';
+import { PaymentSourceSwitch } from './PaymentFields';
 import { useT } from '../lib/i18n';
 import { PAID_BY_COMPANY, paidByLabel, type CommissionPaidBy } from '../lib/useCommissionPaidBy';
 import type { ProofAttachment } from '../lib/usePaymentProof';
@@ -90,14 +91,8 @@ export function CommissionPaymentFields({ orderId, paidBy, shots, editable, paym
       <div className="acct-hint">{t('cpPaidByLabel')}: {paidByLabel(paidBy.paidBy, t)}</div>
       {editable && (
         <>
-          <div className="seg" role="group" aria-label={t('cpPaymentSource')}>
-            {(['rmb', 'business'] as const).map(s => (
-              <button key={s} type="button" className={source === s ? 'active' : ''} aria-pressed={source === s}
-                      disabled={busy} onClick={() => { setSource(s); setSelected(null); }}>
-                {t(s === 'rmb' ? 'acctCardTitle' : 'payBusiness')}
-              </button>
-            ))}
-          </div>
+          <PaymentSourceSwitch value={source} disabled={busy}
+                               onChange={s => { setSource(s); setSelected(null); }} />
           {source === 'rmb' ? rmbFlow : (
             <>
               <label className="label" htmlFor={id}>{t('cpSearchTransactions')}</label>

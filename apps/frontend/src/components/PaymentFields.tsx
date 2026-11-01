@@ -1,3 +1,4 @@
+import { useRef, type ReactNode } from 'react';
 import { AttachmentChip } from './AttachmentChip';
 import { AttachmentDropzone } from './AttachmentDropzone';
 import { Icon } from './Icon';
@@ -44,25 +45,45 @@ type Props = {
   canEditProof?: boolean;
   /** Keeps element ids unique when two instances share a page. */
   idPrefix?: string;
+  /** A manager's PO page: the payment's source is a switch, as on the
+   *  Commission tab — the RMB Flow (a person paid, booked on the RMB book) or
+   *  the Business Account (the USD bank's, on Payments) — and each side brings
+   *  its own ledger. The select then names people only. */
+  sources?: { rmb: ReactNode; business: ReactNode };
+  /** Who the RMB side names when the switch moves there and nobody is on file. */
+  defaultPayerId?: string | null;
 };
 
 export function PaymentFields({
   paidBy, paidByUserId, payers, onPaidBy, method, onMethod, txnId, onTxnId,
   txnRequired = false, disabled = false, payerLocked = false, compact = false,
-  proof, canEditProof = true, idPrefix = 'pay',
+  proof, canEditProof = true, idPrefix = 'pay', sources, defaultPayerId = null,
 }: Props) {
   const { t } = useT();
   const company = paidBy === 'company';
   const p = idPrefix;
+  // Both pages drop the person when the payment goes to the Business Account,
+  // so the switch remembers who it was: a click there and back must not
+  // change who paid.
+  const lastPayer = useRef(paidByUserId);
+  if (paidByUserId) lastPayer.current = paidByUserId;
+  const pickSource = (s: 'rmb' | 'business') => {
+    if (s === 'business') { if (!company) onPaidBy('company', null); return; }
+    if (!company) return;
+    const prev = lastPayer.current;
+    const keep = prev && payers.some(m => m.id === prev) ? prev : null;
+    onPaidBy('self', keep ?? defaultPayerId ?? payers[0]?.id ?? null);
+  };
   // A self-paid record naming nobody (an older backend, or a payer dropped
   // from the list) keeps a row of its own, or the select could not show it.
   const stale = !company && (paidByUserId === null || !payers.some(m => m.id === paidByUserId));
   const value = company ? BUSINESS_ACCOUNT : stale ? 'self' : paidByUserId!;
 
-  return (
+  const fields = (
     <div className={'pay-fields' + (compact ? ' compact' : '')}>
       <div className="pay-row">
-        <div className="field">
+        {/* With the switch, the Business Account is the switch's to name. */}
+        {!(sources && company) && <div className="field">
           <label className="label" htmlFor={`${p}-paidby`}>{t('hoPaidBy')}</label>
           <select
             id={`${p}-paidby`}
@@ -75,12 +96,12 @@ export function PaymentFields({
               onPaidBy(v === BUSINESS_ACCOUNT ? 'company' : 'self', v === BUSINESS_ACCOUNT || v === 'self' ? null : v);
             }}
           >
-            <option value={BUSINESS_ACCOUNT}>{t(compact ? 'payBusinessShort' : 'payBusiness')}</option>
+            {!sources && <option value={BUSINESS_ACCOUNT}>{t(compact ? 'payBusinessShort' : 'payBusiness')}</option>}
             {stale && <option value="self">{t(compact ? 'paySelfShort' : 'paySelf')}</option>}
             {payers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
           {payerLocked && <div className="field-hint" id={`${p}-paidby-locked`}>{t('payPayerLocked')}</div>}
-        </div>
+        </div>}
         {company && (
           <div className="field pay-reveal">
             <span className="label" id={`${p}-method`}>{t('hoMethod')}</span>
@@ -101,6 +122,34 @@ export function PaymentFields({
           proof={proof} canEdit={canEditProof && !disabled} idPrefix={p}
         />
       )}
+    </div>
+  );
+  if (!sources) return fields;
+  // `sources` is a manager's, and payerLocked never holds for a manager.
+  return (
+    <div className="pay-sourced">
+      <PaymentSourceSwitch value={company ? 'business' : 'rmb'} onChange={pickSource} disabled={disabled} />
+      {fields}
+      {company ? sources.business : sources.rmb}
+    </div>
+  );
+}
+
+/** RMB Flow | Business Account — the Cost Payment and the Commission tab. */
+export function PaymentSourceSwitch({ value, onChange, disabled }: {
+  value: 'rmb' | 'business';
+  onChange: (v: 'rmb' | 'business') => void;
+  disabled?: boolean;
+}) {
+  const { t } = useT();
+  return (
+    <div className="seg" role="group" aria-label={t('cpPaymentSource')}>
+      {(['rmb', 'business'] as const).map(s => (
+        <button key={s} type="button" className={value === s ? 'active' : ''} aria-pressed={value === s}
+                disabled={disabled} onClick={() => onChange(s)}>
+          {t(s === 'rmb' ? 'acctCardTitle' : 'payBusiness')}
+        </button>
+      ))}
     </div>
   );
 }
