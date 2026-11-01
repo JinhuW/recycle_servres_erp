@@ -2,13 +2,13 @@
 id: RS-492
 title: Review fixes for the Cost Payment switch and receipt names
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-10-31
 reporter: jinhu
 branch: fix/rs-490-491-review
-pr:
-version:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1042
+version: 1.398.1
 related: [RS-490, RS-491]
 ---
 
