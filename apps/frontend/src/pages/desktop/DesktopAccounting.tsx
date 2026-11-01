@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { usePersisted } from '../../lib/listMemory';
 import {
   ACCOUNTING_KINDS, ACCOUNTING_METHODS, ACCOUNTING_REVIEW_STATES, resolvePreset,
   type AccountingDirection, type AccountingKind, type AccountingMethod, type AccountingReviewState,
@@ -37,15 +38,15 @@ export function DesktopAccounting({ onToast }: Props) {
   const waiting = useAcctReviewCount(true);
   const openId = matchAccountingEntry(path);
   const today = useMemo(() => localToday(), []);
-  const [range, setRange] = useState<RangeValue>(() => ({ ...resolvePreset('mtd', today, null), preset: 'mtd' }));
-  const [managerId, setManagerId] = useState('');
-  const [direction, setDirection] = useState<'' | AccountingDirection>('');
-  const [kind, setKind] = useState<'' | AccountingKind>('');
-  const [method, setMethod] = useState<'' | AccountingMethod>('');
-  const [review, setReview] = useState<'' | AccountingReviewState>('');
-  const [search, setSearch] = useState('');
+  const [range, setRange] = usePersisted<RangeValue>('desktop.acct.range', { ...resolvePreset('mtd', today, null), preset: 'mtd' });
+  const [managerId, setManagerId] = usePersisted('desktop.acct.manager', '');
+  const [direction, setDirection] = usePersisted<'' | AccountingDirection>('desktop.acct.direction', '');
+  const [kind, setKind] = usePersisted<'' | AccountingKind>('desktop.acct.kind', '');
+  const [method, setMethod] = usePersisted<'' | AccountingMethod>('desktop.acct.method', '');
+  const [review, setReview] = usePersisted<'' | AccountingReviewState>('desktop.acct.review', '');
+  const [search, setSearch] = usePersisted('desktop.acct.search', '');
   const q = useDebouncedValue(search.trim(), 250);
-  const [showVoided, setShowVoided] = useState(false);
+  const [showVoided, setShowVoided] = usePersisted('desktop.acct.voided', false);
   const [summary, setSummary] = useState<AcctSummary | null>(null);
   const [rows, setRows] = useState<AcctRow[]>([]);
   const [loaded, setLoaded] = useState(false);
