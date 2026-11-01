@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-493](./RS-493-rmb-flow-keeps-its-filters-when-you-leave-and-come-b.md) | done | story | P2 | RMB Flow keeps its filters when you leave and come back | — |
 | [RS-492](./RS-492-review-fixes-for-the-cost-payment-switch-and-receipt.md) | done | bug | P2 | Review fixes for the Cost Payment switch and receipt names | 1.398.1 |
 | [RS-491](./RS-491-payment-screenshots-take-their-ai-name-on-upload.md) | done | story | P2 | Payment screenshots take their AI name on upload | 1.398.0 |
 | [RS-490](./RS-490-cost-payment-picks-rmb-flow-or-business-account-like.md) | done | story | P2 | Cost Payment picks RMB Flow or Business Account like Commission | 1.397.0 |

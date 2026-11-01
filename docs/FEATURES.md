@@ -2538,6 +2538,8 @@ is who paid, below).
   beside Accounting ▸ Payments; the page-sub prints the breadcrumb).
   - The period (the dashboard's chip, *This month* by default) and the
     manager (all, or one) are the band's scope.
+  - The period, manager and every table filter are remembered while you
+    visit other pages and come back; a reload starts fresh (v1.399.0).
   - **The band** states the period as an identity: *Opening + Received − Paid
     = Closing*, with Received and Paid broken down by kind, the closing figure
     double-ruled. Under it, *Held by* gives each manager's balance on the
