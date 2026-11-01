@@ -15,6 +15,17 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.399.0] - 2026-11-01
+
+### Added
+
+- **RMB Flow remembers its filters while you are elsewhere** (RS-493). The
+  period, manager, All/Received/Paid, kind, method, review state, search and
+  Show voided used to reset whenever you opened Log, Review mode, a PO or any
+  other page and came back. They now stay as you left them for the rest of
+  the page load, like the Orders and Inventory lists; a full reload still
+  starts from this month with no filters.
+
 ## [1.398.1] - 2026-10-31
 
 ### Fixed
