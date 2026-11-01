@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePersisted } from '../../lib/listMemory';
 import {
-  ACCOUNTING_KINDS, ACCOUNTING_METHODS, ACCOUNTING_REVIEW_STATES, resolvePreset,
+  ACCOUNTING_KINDS, ACCOUNTING_METHODS, ACCOUNTING_REVIEW_STATES,
   type AccountingDirection, type AccountingKind, type AccountingMethod, type AccountingReviewState,
 } from '@recycle-erp/shared';
 import { Icon } from '../../components/Icon';
@@ -26,6 +26,10 @@ import '../../styles/accounting.css';
 
 type Props = { onToast?: (msg: string, kind?: 'success' | 'error') => void };
 
+// The owner asked for the page to open on Oct 31, 2026 rather than the month
+// so far; earlier entries still make up the Opening balance.
+const DEFAULT_FROM = '2026-10-31';
+
 // The managers' RMB book. The period and the manager are the book's scope;
 // the band states it (opening + received − paid = closing) and the table is
 // the book itself. Filters on the table only hide rows: a balance is what
@@ -38,7 +42,7 @@ export function DesktopAccounting({ onToast }: Props) {
   const waiting = useAcctReviewCount(true);
   const openId = matchAccountingEntry(path);
   const today = useMemo(() => localToday(), []);
-  const [range, setRange] = usePersisted<RangeValue>('desktop.acct.range', { ...resolvePreset('mtd', today, null), preset: 'mtd' });
+  const [range, setRange] = usePersisted<RangeValue>('desktop.acct.range', { from: DEFAULT_FROM, to: today, preset: 'custom' });
   const [managerId, setManagerId] = usePersisted('desktop.acct.manager', '');
   const [direction, setDirection] = usePersisted<'' | AccountingDirection>('desktop.acct.direction', '');
   const [kind, setKind] = usePersisted<'' | AccountingKind>('desktop.acct.kind', '');
