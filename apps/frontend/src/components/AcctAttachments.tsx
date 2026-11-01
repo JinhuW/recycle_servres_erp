@@ -102,8 +102,8 @@ export function AcctAttachments({ entryId, initial, readOnly, onChanged, paste }
 }
 
 // The same list on a form whose entry doesn't exist yet: the files wait here
-// and go up once it is saved (useAccountingEntryForm), when the server names
-// them.
+// and go up once it is saved (useAccountingEntryForm). Each takes its receipt
+// name as soon as the scan reads it.
 export function AcctPendingAttachments({ files, onAdd, onRemove, busy, paste }: {
   files: File[];
   onAdd: (files: FileList | null) => void;
