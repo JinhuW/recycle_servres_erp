@@ -116,6 +116,15 @@ ALERTS_ENV = "RS_ALERTS"
 # the claim's `env` is shared by every worker, and the coordinator's tokens
 # each name one worker. Only this worker's leaves the entrypoint.
 TOKENS_ENV = "RS_CONTROL_PLANE_TOKENS"
+# CloakBrowser's license, for a worker whose device runs it. The binary reads
+# it from its own environment, so it is not a config key (the monitor's
+# config would refuse one) and so it is never written into config.toml.
+BROWSER_ENV = ("CLOAKBROWSER_LICENSE_KEY",)
+ENGINE_CLOAK = "cloak"
+# What Xvfb runs at unless a cloak device names its screen.
+DEFAULT_GEOMETRY = "1920x1080x24"
+# Where Dockerfile.worker bakes the binary's version; absent in a stock-only image.
+CLOAK_VERSION_FILE = Path("/opt/cloakbrowser/VERSION")
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ENV_REF = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 # Which of the account's cookies name the browser rather than the login.
@@ -418,7 +427,7 @@ def claim_env_allowed(template: Dict[str, Any] | None = None) -> set[str]:
     if template is None:
         with open(TEMPLATE, "rb") as f:
             template = tomllib.load(f)
-    names = template_env_names(template) | {ALERTS_ENV, TOKENS_ENV}
+    names = template_env_names(template) | {ALERTS_ENV, TOKENS_ENV, *BROWSER_ENV}
     return {n for n in names if not RESERVED_ENV.match(n) and n not in DERIVED_ENV}
 
 
@@ -502,8 +511,40 @@ def presented_user_agent(device: Dict[str, Any]) -> str | None:
     lists it in `native`: the backend still fills a default in, and pinning
     even the identical string would change the client hints the browser
     sends beside it.
+
+    A CloakBrowser device presents the binary's own user agent, which matches
+    the client hints it derives from its seed; a pinned one would not.
     """
-    return None if _native(device, "user_agent") else device.get("user_agent")
+    if is_cloak(device) or _native(device, "user_agent"):
+        return None
+    return device.get("user_agent")
+
+
+def is_cloak(device: Dict[str, Any]) -> bool:
+    return device.get("browser_engine") == ENGINE_CLOAK
+
+
+def screen_geometry(device: Dict[str, Any]) -> str:
+    """Xvfb's screen for this device.
+
+    A CloakBrowser window is the screen (no viewport emulation), so the screen
+    is the device's. Stock keeps the fixed screen it always had: its viewport
+    is emulated inside it.
+    """
+    screen = _pair(device.get("screen")) if is_cloak(device) else None
+    if not screen or screen["width"] <= 0 or screen["height"] <= 0:
+        return DEFAULT_GEOMETRY
+    return f"{screen['width']}x{screen['height']}x24"
+
+
+def cloak_version(env: Dict[str, str], version_file: Path = CLOAK_VERSION_FILE) -> str | None:
+    """The CloakBrowser build baked into this image, or None for a stock-only image."""
+    if env.get("RS_CLOAK_VERSION"):
+        return env["RS_CLOAK_VERSION"]
+    try:
+        return version_file.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
 
 
 def _native(device: Dict[str, Any], field: str) -> bool:
@@ -531,6 +572,13 @@ def identity_for(answer: Dict[str, Any]) -> Dict[str, Any]:
         profile["device_scale_factor"] = float(device["device_scale_factor"])
     if device.get("preserve_user_agent") is True:
         profile["preserve_user_agent"] = True
+    # The engine and its persona; the monitor refuses a cloak device missing either.
+    if isinstance(device.get("browser_engine"), str):
+        profile["browser_engine"] = device["browser_engine"]
+    if isinstance(device.get("cloak_seed"), int) and not isinstance(device["cloak_seed"], bool):
+        profile["cloak_seed"] = device["cloak_seed"]
+    if isinstance(device.get("cloak_gpu"), str):
+        profile["cloak_gpu"] = device["cloak_gpu"]
     cookies = [
         cookie
         for cookie in account.get("cookies") or []
@@ -957,6 +1005,18 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
     )
 
     menv = monitor_env(env, answer, host_id, worker_id, home)
+    device = answer.get("device") or {}
+    menv["SCREEN_GEOMETRY"] = screen_geometry(device) if is_cloak(device) else env.get(
+        "SCREEN_GEOMETRY", DEFAULT_GEOMETRY
+    )
+    baked = cloak_version(env)
+    if baked:
+        menv["RS_CLOAK_VERSION"] = baked
+    if is_cloak(device):
+        log(
+            f"browser: CloakBrowser {baked or 'not in this image'}, screen {menv['SCREEN_GEOMETRY']}, "
+            f"license {'set' if menv.get('CLOAKBROWSER_LICENSE_KEY') else 'missing'}"
+        )
     try:
         with open(TEMPLATE, "rb") as f:
             template = tomllib.load(f)
