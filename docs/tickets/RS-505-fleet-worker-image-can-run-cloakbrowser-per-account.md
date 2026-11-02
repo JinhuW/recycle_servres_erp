@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-02
 reporter: jinhu
 branch: JinhuW/damselfish
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1060
 version: facebook-tracker 0.16.0 (no ERP release)
 related: []
 ---

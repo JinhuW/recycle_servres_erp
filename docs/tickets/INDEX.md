@@ -6,6 +6,7 @@ See [README.md](./README.md) for what the fields mean.
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
 | [RS-506](./RS-506-fleet-keeps-a-history-of-worker-states-and-reports-a.md) | done | story | P2 | Fleet keeps a history of worker states and reports account loss per browser engine | 1.408.0 |
+| [RS-505](./RS-505-fleet-worker-image-can-run-cloakbrowser-per-account.md) | in-review | story | P2 | Fleet worker image can run CloakBrowser per account | facebook-tracker 0.16.0 (no ERP release) |
 | [RS-504](./RS-504-po-list-payment-gap-note-text-overflows-its-box.md) | done | bug | P2 | PO list payment-gap note text overflows its box | 1.407.1 |
 | [RS-503](./RS-503-ram-short-code-reads-the-chip-die-on-kingston-and-ot.md) | done | story | P2 | RAM short code reads the chip die on Kingston and other brands | 1.407.0 |
 | [RS-502](./RS-502-rmb-flow-shows-the-record-s-amount-and-flags-a-misma.md) | done | story | P2 | RMB Flow shows the record's amount and flags a mismatch | 1.406.0 |
