@@ -683,4 +683,18 @@ describe('sell order #: one RAM series shares one #', () => {
     expect(await saveLines(mgr, id, await detailLines(mgr, id)).then(r => r.status)).toBe(200);
     expect((await numbers(mgr, id)).sort()).toEqual(SERIES.map((pn, i) => [pn, i + 1]));
   });
+
+  it('on an order numbered before, a new lot of a part joins that part\'s #, not the series\' lowest', async () => {
+    const { ids } = await lots([
+      ...SERIES.map(pn => ({ pn, brand: 'Samsung', warehouse: 'WH-LA1' })),
+      { pn: SERIES[1]!, brand: 'Samsung', warehouse: 'WH-LA1' },
+    ]);
+    const id = await createOrder(mgr, SERIES.map((pn, i) => lotLine(ids[i]!, pn, 'WH-LA1')));
+    for (const [i, pn] of SERIES.entries()) {
+      await getTestDb()`UPDATE sell_order_lines SET product_no = ${i + 1} WHERE sell_order_id = ${id} AND part_number = ${pn}`;
+    }
+    await getTestDb()`UPDATE sell_orders SET next_product_no = 4 WHERE id = ${id}`;
+    await addLines(mgr, id, [lotLine(ids[3]!, SERIES[1]!, 'WH-LA1')]);
+    expect((await numbers(mgr, id)).sort()).toEqual([[SERIES[0], 1], [SERIES[1], 2], [SERIES[1], 2], [SERIES[2], 3]]);
+  });
 });

@@ -333,7 +333,8 @@ export async function cashRefused(sql: SqlLike, orderId: string | null, method: 
   if (orderId === null) return true;
   const rows = await sql<{ payment_method: string | null }[]>`
     SELECT payment_method FROM orders WHERE id = ${orderId}`;
-  return rows[0]?.payment_method !== 'cash';
+  // No such order is the route's 404 to give, not a cash refusal.
+  return rows.length > 0 && rows[0].payment_method !== 'cash';
 }
 
 // The hand-off facts, validated the same way whichever door writes them —

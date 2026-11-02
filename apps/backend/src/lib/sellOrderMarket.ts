@@ -27,6 +27,9 @@ type RecordOptions = {
   source: string;
   // Lines to record, by canonical part number. Absent = every line.
   only?: Set<string>;
+  // The order's earlier points under `source` for these parts are withdrawn
+  // first, so a re-priced bid replaces its quote rather than repeating it.
+  replace?: boolean;
 };
 
 // One market data point per distinct product (canonical part number) on a
@@ -82,6 +85,7 @@ async function recordSellOrderDataPoints(
   `;
   const idByCanon = new Map<string, string>();
   for (const r of idRows) if (!idByCanon.has(r.canon)) idByCanon.set(r.canon, r.id);
+  if (opts.replace) await retractPriceEvents(tx, opts.source, [...idByCanon.values()]);
 
   let recorded = 0;
   for (const [canon, g] of byCanon) {
@@ -126,7 +130,8 @@ export async function retractSaleDataPoints(
 // customer's accepted quote is a market signal weeks before the deal closes.
 // `parts` are the part numbers the manager confirmed in the preview — the
 // sheet prices a part once, across its conditions; the order's other lines
-// keep whatever price they had and are not a bid. Runs inside the save's tx, after
+// keep whatever price they had and are not a bid. A later save of the same
+// part replaces its bid. Runs inside the save's tx, after
 // the lines are rewritten, so it reads the saved USD values.
 export async function recordBidDataPoints(
   tx: TransactionSql,
@@ -141,7 +146,19 @@ export async function recordBidDataPoints(
   }
   if (only.size === 0) return { recorded: 0 };
   return recordSellOrderDataPoints(tx, sellOrderId, actorUserId, {
-    source: `bid:${sellOrderId}`,
+    source: bidSource(sellOrderId),
     only,
+    replace: true,
   });
+}
+
+const bidSource = (sellOrderId: string) => `bid:${sellOrderId}`;
+
+// A sell order closed without a sale was never the customer's price, so its
+// bids leave the Market board with it.
+export async function retractBidDataPoints(
+  tx: TransactionSql,
+  sellOrderId: string,
+): Promise<WithdrawnPrice[]> {
+  return retractPriceEvents(tx, bidSource(sellOrderId));
 }

@@ -15,7 +15,7 @@ import type { PriceApplyRow } from '../../lib/priceImport';
 // confirming fills the edit form's inputs, and the manager saves as usual.
 
 type PreviewRowStatus =
-  | 'matched' | 'not-in-order' | 'no-price' | 'invalid-price' | 'duplicate' | 'ambiguous' | 'per-condition';
+  | 'matched' | 'not-in-order' | 'no-price' | 'invalid-price' | 'duplicate' | 'per-condition';
 
 type PreviewRow = {
   // The template ships one tab per category, so a row's identity is
@@ -64,10 +64,13 @@ function StepBadge({ n }: { n: number }) {
 }
 
 export function PriceImportSection({
-  orderId, currency, locale, onApply,
+  orderId, currency, savedCurrency, locale, onApply,
 }: {
   orderId: string;
   currency: string;
+  // The template and the preview price in the order's saved currency, so a
+  // switch not saved yet would put those numbers into the other currency.
+  savedCurrency: string;
   locale: string;
   onApply: (rows: PriceApplyRow[]) => void;
 }) {
@@ -148,6 +151,11 @@ export function PriceImportSection({
           </div>
         </div>
         <div style={{ flex: '1 1 260px' }}>
+          {currency !== savedCurrency ? (
+            <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', padding: 12 }}>
+              {t('soPriceImportSaveCurrency')}
+            </div>
+          ) : (
           <AttachmentDropzone
             onFiles={onFiles}
             uploading={uploading}
@@ -155,16 +163,20 @@ export function PriceImportSection({
             accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             boxHint={t('soPriceImportDropHint')}
           />
+          )}
         </div>
       </div>
       {preview && (
         <PriceImportPreviewDialog
           preview={preview}
-          currency={currency}
           locale={locale}
           onCancel={() => setPreview(null)}
           onConfirm={rows => {
             setPreview(null);
+            if (preview.currency !== currency) {
+              showErrorDialog(t('soPriceImportSaveCurrency'));
+              return;
+            }
             onApply(rows);
             window.__showToast?.(t('soPriceImportApplied', { n: String(rows.length) }), 'success');
           }}
@@ -179,15 +191,13 @@ const WARNING_LABEL_KEY: Record<Exclude<PreviewRowStatus, 'matched'>, string> = 
   'no-price': 'soPriceImportNoPrice',
   'invalid-price': 'soPriceImportInvalid',
   duplicate: 'soPriceImportDuplicate',
-  ambiguous: 'soPriceImportAmbiguous',
   'per-condition': 'soPriceImportPerCondition',
 };
 
 function PriceImportPreviewDialog({
-  preview, currency, locale, onCancel, onConfirm,
+  preview, locale, onCancel, onConfirm,
 }: {
   preview: PreviewResponse;
-  currency: string;
   locale: string;
   onCancel: () => void;
   onConfirm: (rows: PriceApplyRow[]) => void;
@@ -217,7 +227,7 @@ function PriceImportPreviewDialog({
     })));
 
   const money = (n: number | null | undefined) =>
-    n == null ? '—' : fmtMoney(n, currency, locale);
+    n == null ? '—' : fmtMoney(n, preview.currency, locale);
 
   return (
     <Modal onClose={onCancel} shellStyle={{ maxWidth: 680, width: 'calc(100vw - 80px)' }}>

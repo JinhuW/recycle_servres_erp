@@ -1534,7 +1534,9 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     the same label and condition take one # in a warehouse tab, whatever their
     speed, so `M471A1K43CB1-CRC` and `…CB1-CTD` are both `#1`, while
     `…EB1-CWE` (E-die) gets its own #, as do `HMAA2GU6AJR8N` and
-    `HMAA2GU6CJR8N`. Lines numbered earlier keep their own #s. The packing
+    `HMAA2GU6CJR8N`. Lines numbered earlier keep their own #s, and since
+    v1.409.1 (RS-508) a new lot of a part numbered that way joins that part's
+    #, not the lowest of its series. The packing
     lists still print each part number as its own row under the shared #.
     Inventory's grouped view keeps its stricter module-family rule.
   - **The order table folds a series into one row** (v1.404.0). In view and
@@ -1774,11 +1776,17 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     price import* card (`POST /api/sell-orders/:id/price-import/preview`,
     manager only, 8 MB, refused on Done/Closed). The preview matches rows by
     canonical part number, a grouped cell's parts each at the row's price,
-    and flags rows not in the order, unpriced, invalid, duplicated,
-    ambiguous or priced per condition on a pre-v1.242.0 sheet. Confirming
+    and flags rows not in the order, unpriced, invalid, duplicated or
+    priced per condition on a pre-v1.242.0 sheet. Confirming
     fills every line of each matched part. Nothing is written until Save,
     which records the confirmed parts' saved prices on the Market board as
-    `bid:<order>` data points (v1.138.3); Cancel records nothing. It reads
+    `bid:<order>` data points (v1.138.3); Cancel records nothing. Since
+    v1.409.1 (RS-508) a part whose price was typed over after the import is
+    not recorded as a bid, a later bid save of a part replaces the order's
+    earlier bid for it, closing the order withdraws its bids (the history's
+    *closed* entry lists them), and the card is shut while the order's
+    currency is switched but not saved, since the template and the preview
+    price in the saved one. It reads
     the sheet through the reader the Market import and Review mode share.
   - **The same sheet prices the PO in Review mode** (v1.313.0). Since
     v1.347.0 that preview expands grouped part-number cells and matches any
