@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-31:** ERP migration `0219`, Reddit tracker migration `0007`,
+**As of 2026-11-02:** ERP migration `0221`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -1408,7 +1408,8 @@ A customer coming back about goods on a sell order that is Shipped, Awaiting pay
 | `status` | `text` | ✓ | `'Open'` | Open, In progress, Awaiting return (waiting for the goods to come back), Resolved or Cancelled. Resolved and Cancelled are closed and can be reopened to Open. |
 | `resolution` | `text` |  |  | return (the goods come back) or discount (the customer keeps them at a lower price). NULL until decided. |
 | `issue` | `text` | ✓ |  | What the customer reported. |
-| `amount` | `numeric(12,2)` |  |  | USD refund (return) or price reduction (discount), ≥ 0. Needed to resolve the case; 0 is allowed. |
+| `amount` | `numeric(12,2)` |  |  | Refund (return) or price reduction (discount) in `currency_code`, ≥ 0. Needed to resolve the case; 0 is allowed. |
+| `currency_code` | `char(3)` | ✓ | `'USD'` | `USD` or `CNY`: RMB buyers are refunded in RMB. Cases before migration 0220 are USD. |
 | `assignee_id` | `uuid` |  |  | → users: the manager handling the case. |
 | `created_by` | `uuid` |  |  |  |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
@@ -1417,7 +1418,7 @@ A customer coming back about goods on a sell order that is Shipped, Awaiting pay
 
 - **Primary key:** `id`
 - **References:** `assignee_id` → `users.id` (on delete set null); `created_by` → `users.id` (on delete set null); `sell_order_id` → `sell_orders.id` (on delete cascade)
-- **Checks:** `amount >= 0`; `resolution IN ('return', 'discount')`; `status IN ('Open', 'In progress', 'Awaiting return', 'Resolved', 'Cancelled')`
+- **Checks:** `amount >= 0`; `currency_code IN ('USD', 'CNY')`; `resolution IN ('return', 'discount')`; `status IN ('Open', 'In progress', 'Awaiting return', 'Resolved', 'Cancelled')`
 - **Indexes:** `after_sales_cases_assignee_id_idx` (assignee_id); `after_sales_cases_created_by_idx` (created_by); `after_sales_cases_sell_order_id_idx` (sell_order_id); `after_sales_cases_status_created_idx` (status, created_at DESC)
 
 routes/afterSales.ts enforces the transitions. Awaiting return requires resolution = return, and Resolved requires both a resolution and an amount. Money actually refunded is booked separately, as after_sales entries in accounting_entries.
@@ -2206,9 +2207,9 @@ Only the latest revive is kept; the backend logs each one.
 
 ### Fleet
 
-The ERP fleet: the city task queue the Facebook Marketplace workers pull from, and the slots they run pool accounts in. fleet_cities and fleet_items are the catalog managers edit; fleet_settings holds the queue's knobs; fleet_tasks is one open task per enabled city and item, with fleet_task_events as its log; fleet_hosts are the machines that run worker containers; fleet_slots is the fleet's view of each pool account (who runs it, where, under which lease epoch) and fleet_workers the containers that heartbeat. fleet_minutes is a view that sums each account's leased minutes per Eastern day (UTC before 0218) for the daily budget. The accounts themselves and their secrets stay in fb_pool_accounts. Migration 0206 creates all of it; the routes under /api/fleet fill it in later releases.
+The ERP fleet: the city task queue the Facebook Marketplace workers pull from, and the slots they run pool accounts in. fleet_cities and fleet_items are the catalog managers edit; fleet_settings holds the queue's knobs; fleet_tasks is one open task per enabled city and item, with fleet_task_events as its log; fleet_hosts are the machines that run worker containers; fleet_slots is the fleet's view of each pool account (who runs it, where, under which lease epoch) and fleet_workers the containers that heartbeat, with fleet_worker_state_events keeping each change of their state (0221). fleet_minutes is a view that sums each account's leased minutes per Eastern day (UTC before 0218) for the daily budget. The accounts themselves and their secrets stay in fb_pool_accounts. Migration 0206 creates all of it; the routes under /api/fleet fill it in later releases.
 
-Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_proxies`](#erp-fleet-proxies), [`fleet_proxy_checks`](#erp-fleet-proxy-checks), [`fleet_proxy_rounds`](#erp-fleet-proxy-rounds), [`fleet_slots`](#erp-fleet-slots), [`fleet_workers`](#erp-fleet-workers), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
+Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_proxies`](#erp-fleet-proxies), [`fleet_proxy_checks`](#erp-fleet-proxy-checks), [`fleet_proxy_rounds`](#erp-fleet-proxy-rounds), [`fleet_slots`](#erp-fleet-slots), [`fleet_workers`](#erp-fleet-workers), [`fleet_worker_state_events`](#erp-fleet-worker-state-events), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
 
 <a id="erp-fleet-cities"></a>
 
@@ -2429,6 +2430,26 @@ One row per worker container that has claimed a slot, kept current by its heartb
 - **Primary key:** `worker_id`
 - **References:** `account_no` → `fb_pool_accounts.no` (on delete set null); `host_id` → `fleet_hosts.host_id` (on delete cascade)
 - **Indexes:** `fleet_workers_account_no_idx` (account_no); `fleet_workers_host_id_idx` (host_id)
+
+<a id="erp-fleet-worker-state-events"></a>
+
+#### `fleet_worker_state_events`
+
+Every change of an ERP-fleet worker's reported state, written by the heartbeat that changed it, in the same transaction, and never for a repeat of the same state. A claim's reset of fleet_workers.state to NULL writes no row. `GET /api/fleet/stats/engine-loss` reads it to compare account loss per browser engine. Migration 0221.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | `nextval(…)` |  |
+| `account_no` | `integer` |  |  | The pool account the worker held. No foreign key, so the history outlives a deleted account. |
+| `worker_id` | `text` | ✓ |  | The worker that reported it. |
+| `engine` | `text` | ✓ | `'stock'` | The slot's `device->>'browser_engine'` at that moment: `stock` or `cloak`, `stock` when the device names none. |
+| `from_state` | `text` |  |  | fleet_workers.state before the change; null on the first heartbeat after a claim. |
+| `to_state` | `text` | ✓ |  | The state reported: HEALTHY, SESSION_EXPIRED, CHECKPOINT, CHALLENGE_*, DEGRADED, DEAD. |
+| `reason` | `text` |  |  | The heartbeat detail's `reason`, when it carried one (at most 200 characters). |
+| `at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **Indexes:** `fleet_worker_state_events_account_idx` (account_no, at); `fleet_worker_state_events_at_idx` (at)
 
 <a id="erp-fleet-tasks"></a>
 

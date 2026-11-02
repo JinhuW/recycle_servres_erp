@@ -3778,6 +3778,15 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     the same alert total and the task list is not capped, the last alert's
     day (the Searched by column went in v1.374.0, RS-439). The coordinator's
     counts are not tagged per worker, so there is no worker or item filter.
+    Since v1.408.0 (RS-506) the backend also keeps every change of an ERP
+    worker's state, stamped with its slot's browser engine, and
+    `GET /api/fleet/stats/engine-loss?days=30` (manager-only, 1 to 365 days)
+    answers per engine the account-days on a worker, the entries into
+    SESSION_EXPIRED, CHECKPOINT and CHALLENGE_* (a re-entry without a
+    healthy state between is the same loss) and losses per 100
+    account-days, with a `retro` block from the stint ledger's `problem`
+    and `retired` endings as the stock baseline from before the history.
+    No page shows it yet.
   - **Proxies** (`/#/fleet/proxies`, v1.368.0, RS-424): the health of every
     proxy port the fleet browses through, between Analysis and Account pool,
     with the number down as a warn-coloured chip on the tab bar. Rows are the

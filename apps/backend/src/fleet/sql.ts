@@ -112,6 +112,7 @@ export const FLEET_TABLES = [
   'fleet_task_attempts',
   'fleet_task_events',
   'fleet_tasks',
+  'fleet_worker_state_events',
   'fleet_workers',
 ] as const;
 

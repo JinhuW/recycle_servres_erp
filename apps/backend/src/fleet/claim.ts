@@ -28,6 +28,7 @@ import { loadSettings } from './cities';
 import { notifyReady } from './scheduler';
 import { minutesTodaySql, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
 import { loadRelease, ownWorkerId } from './hosts';
+import { recordStateChange } from './stateEvents';
 
 // ─── The worker protocol ──────────────────────────────────────────────────────
 // What a worker container says to the ERP over its life: it claims a slot at
@@ -498,6 +499,7 @@ worker.post('/heartbeat', workerAuth, async (c) => {
     await tx`
       UPDATE fleet_slots SET lease_expires_at = ${lease}
       WHERE account_no = ${w.account_no} AND epoch = ${w.epoch}`;
+    await recordStateChange(tx, w, state, detail);
     await tx`
       INSERT INTO fleet_workers (worker_id, host_id, account_no, epoch, state, version, last_heartbeat_at, vnc_port, detail)
       VALUES (${w.worker_id}, ${w.slot.host_id}, ${w.account_no}, ${w.epoch}, ${state}, ${version}, NOW(), ${vncPort},

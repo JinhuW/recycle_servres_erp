@@ -15,6 +15,23 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.408.0] - 2026-11-02
+
+### Added
+
+- **The ERP fleet keeps a history of its workers' states and reports account
+  loss per browser engine** (RS-506). `fleet_workers.state` held only the
+  latest report, so there was no way to say how often an account fell to
+  SESSION_EXPIRED, CHECKPOINT or a challenge. Every heartbeat that changes a
+  worker's state now writes a row to the new `fleet_worker_state_events`
+  (migration 0221), stamped with the slot's browser engine, `stock` until an
+  account is switched to CloakBrowser. `GET /api/fleet/stats/engine-loss`
+  turns it into account-days, losses and losses per 100 account-days for each
+  engine, and adds a stock baseline from the stint ledger's `problem` and
+  `retired` endings so the comparison has a number before the history
+  builds up. It ships ahead of the CloakBrowser switch so the stock baseline
+  is already accumulating when the first account moves. No page shows it yet.
+
 ## [1.407.1] - 2026-11-02
 
 ### Fixed

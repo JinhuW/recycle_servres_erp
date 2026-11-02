@@ -740,3 +740,25 @@ export type FleetErrorCode =
   | 'not_lost';
 
 export type FleetError = { error: FleetErrorCode; detail?: string };
+
+/** One browser engine's account loss over a window (GET /api/fleet/stats/engine-loss). */
+export type FleetEngineLossRow = {
+  /** `stock` or `cloak` (fleet_slots.device.browser_engine; absent is stock). */
+  engine: string;
+  /** Time accounts spent on a worker in the window, in days. */
+  account_days: number;
+  /** Losses by the state entered (SESSION_EXPIRED, CHECKPOINT, CHALLENGE_*), or by stint outcome in `retro`. */
+  losses: Record<string, number>;
+  total_losses: number;
+  /** null with no account-days. */
+  losses_per_100_account_days: number | null;
+};
+
+export type FleetEngineLoss = {
+  days: number;
+  since: string;
+  /** From the worker state history; always lists `stock` and `cloak`. */
+  engines: FleetEngineLossRow[];
+  /** From fb_worker_accounts stints ending `problem` or `retired`: the baseline from before the history. */
+  retro: FleetEngineLossRow;
+};
