@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-499](./RS-499-sell-order-table-folds-same-series-ram.md) | done | story | P2 | Sell order table folds same-series RAM | 1.404.0 |
 | [RS-498](./RS-498-business-account-payments-link-to-paypal-or-mercury.md) | done | story | P2 | Business Account payments link to PayPal or Mercury, no Cash | 1.403.0 |
 | [RS-497](./RS-497-restore-the-sell-order-s-vendor-price-import.md) | done | story | P2 | Restore the sell order's vendor price import | 1.402.0 |
 | [RS-496](./RS-496-uptime-monitor-crash-loop-floods-telegram-with-deplo.md) | done | bug | P2 | Uptime monitor crash loop floods Telegram with deploy alerts | 1.401.1 |

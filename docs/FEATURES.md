@@ -1519,6 +1519,28 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     warehouse tab, same part / label / condition — joins that product's #.
     Both packing lists keep their sorted rows, so a later product prints in
     its sorted place with its later # (`#1, #2, #9, #3`).
+  - **One RAM series is one #** (v1.404.0, RS-499). A series is the module
+    up to its organisation: Samsung `M471A1K43`, SK Hynix `HMA81GS6`, Micron
+    through the module code before the speed. Lots of one series with the
+    same label and condition take one # in a warehouse tab, whatever their
+    die or speed, so `M471A1K43CB1-CRC`, `…CB1-CTD` and `…EB1-CWE` are all
+    `#1`. Lines numbered earlier keep their own #s. The packing lists still
+    print each part number as its own row under the shared #. Inventory's
+    grouped view keeps its stricter module-family rule.
+  - **The order table folds a series into one row** (v1.404.0). In view and
+    edit, and in every grouping, two or more lines of one series show as one
+    row, closed by default. The row shows its # (`#1`, or `#1–3` on an order
+    numbered earlier), the label, every short code its lots carry, the spec
+    chips, with differing values joined (`2400/2666/3200MHz`), and the series
+    as `M471A1K43*`, whose part numbers are listed on hover. Qty and total are
+    summed. When the lots share a unit price, it shows as one value, and in
+    the editor that field sets every lot's price at once. Otherwise the row
+    shows the price range. The chevron opens the row onto its lots, each with
+    its own qty, price and ✕. A fold that holds a lot just added opens by
+    itself.
+  - **A RAM line's title carries its short code** (v1.404.0), next to the
+    item name; a line with no code still says *Short code: Not recorded*
+    under it.
   - **Removing a packed line asks first** (v1.387.0). Its ✕ opens *Remove a
     packed item?*, naming the part, because the save drops the line's Pack
     mode tick for good. A line not yet packed, or one added in this edit,

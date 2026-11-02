@@ -1160,6 +1160,24 @@ html.desktop, body.desktop, .desktop #root {
 }
 .so-line-table tr:last-child td { border-bottom: none; }
 .so-line-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.so-short-code {
+  font-size: 10.5px; padding: 1px 6px; margin-left: 8px;
+  font-weight: 600; color: var(--fg-muted);
+}
+.so-fold-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; margin: 0 6px 0 -4px; padding: 0;
+  border: 1px solid var(--border); border-radius: 5px;
+  background: var(--bg-elev); color: var(--fg-subtle); cursor: pointer;
+}
+.so-fold-toggle:hover { color: var(--fg); background: var(--bg-soft); }
+.so-fold-row td { background: var(--bg-soft); }
+.so-fold-meta {
+  font-size: 11px; color: var(--fg-subtle); margin-top: 4px;
+  display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center;
+}
+.so-fold-meta > span { white-space: nowrap; }
+.so-fold-member td:first-child { padding-left: 34px; box-shadow: inset 3px 0 0 var(--border); }
 .so-mini-input {
   width: 92px;
   padding: 6px 8px;

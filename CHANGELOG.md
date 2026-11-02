@@ -15,6 +15,26 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.404.0] - 2026-11-02
+
+### Added
+
+- **A sell order folds same-series RAM into one row and one #** (RS-499).
+  Samsung `M471A1K43CB1-CRC`, `…CB1-CTD` and `…EB1-CWE` used to take three
+  rows and three #s, and one SK Hynix part from two POs took two rows. A new
+  shared `ramSeries()` reads the module up to its organisation (Samsung
+  `M471A1K43`, SK Hynix `HMA81GS6`, Micron through the module code). Lines of
+  one series with the same label and condition now:
+  - take one # when numbered, so the packer labels one product;
+  - show as one folded row on the order page, with the short codes, the
+    spec they share or differ on, the summed qty and total, and one price
+    field that sets every lot's price when they agree.
+
+  Stored #s never move, so an older order shows `#1–3` on its folded row.
+  The packing lists keep one row per part number under the shared #, and
+  Inventory keeps its stricter module-family grouping. Every RAM row's title
+  now carries its short code.
+
 ## [1.403.0] - 2026-11-02
 
 ### Changed
