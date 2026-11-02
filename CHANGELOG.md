@@ -15,6 +15,17 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.407.1] - 2026-11-02
+
+### Fixed
+
+- **The payment-gap note on the PO list fits its box again** (RS-504). The
+  note opened by the red `!` beside a PO id sits inside the order-id cell. It
+  inherited that cell's no-wrap, so the "Payment doesn't match the total cost"
+  text and the *Open Payments* link ran past the right edge of the amber box,
+  over the row. The note now wraps its text inside the box, with the link on
+  its last line.
+
 ## [1.407.0] - 2026-11-02
 
 ### Added

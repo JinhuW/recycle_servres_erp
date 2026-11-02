@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-504](./RS-504-po-list-payment-gap-note-text-overflows-its-box.md) | done | bug | P2 | PO list payment-gap note text overflows its box | — |
 | [RS-503](./RS-503-ram-short-code-reads-the-chip-die-on-kingston-and-ot.md) | done | story | P2 | RAM short code reads the chip die on Kingston and other brands | 1.407.0 |
 | [RS-502](./RS-502-rmb-flow-shows-the-record-s-amount-and-flags-a-misma.md) | done | story | P2 | RMB Flow shows the record's amount and flags a mismatch | 1.406.0 |
 | [RS-501](./RS-501-sell-order-fold-keeps-different-ram-dies-apart.md) | done | bug | P2 | Sell order fold keeps different RAM dies apart | 1.405.1 |
