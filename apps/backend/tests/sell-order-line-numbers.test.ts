@@ -617,8 +617,8 @@ describe('sell order #: what a deploy, a re-spec and a typed line can do', () =>
   });
 });
 
-// One RAM series — Samsung M471A1K43, SK Hynix HMA81GS6 — is one # on a line
-// numbered from now on, whatever its die or speed; each part number still
+// One RAM series — Samsung M471A1K43CB1, SK Hynix HMA81GS6AFR — is one # on a
+// line numbered from now on, whatever its speed; another die is another #; each part number still
 // prints as its own row under that #. A # already stored never moves.
 describe('sell order #: one RAM series shares one #', () => {
   let mgr: string;
@@ -627,7 +627,7 @@ describe('sell order #: one RAM series shares one #', () => {
     mgr = (await loginAs(ALEX)).token;
   });
 
-  const SERIES = ['M471A1K43CB1-CRC', 'M471A1K43CB1-CTD', 'M471A1K43EB1-CWE'];
+  const SERIES = ['M471A1K43CB1-CRC', 'M471A1K43CB1-CTD', 'M471A1K43CB1-CWE'];
 
   it('a new order gives a series one #, and the sheet one row per part number under it', async () => {
     const { ids } = await lots([
@@ -653,6 +653,13 @@ describe('sell order #: one RAM series shares one #', () => {
     const id = await createOrder(mgr, [lotLine(ids[0]!, SERIES[0]!, 'WH-LA1')]);
     await addLines(mgr, id, [lotLine(ids[1]!, SERIES[2]!, 'WH-LA1'), lotLine(ids[2]!, SERIES[1]!, 'WH-NJ2')]);
     expect((await numbers(mgr, id)).sort()).toEqual([[SERIES[0], 1], [SERIES[1], 2], [SERIES[2], 1]]);
+  });
+
+  it('another die of the module is a # of its own', async () => {
+    const pns = ['HMAA2GU6AJR8N-XN', 'HMAA2GU6CJR8N-XN'];
+    const { ids } = await lots(pns.map(pn => ({ pn, brand: 'SK Hynix', warehouse: 'WH-LA1' })));
+    const id = await createOrder(mgr, pns.map((pn, i) => lotLine(ids[i]!, pn, 'WH-LA1')));
+    expect(new Set((await numbers(mgr, id)).map(([, no]) => no)).size).toBe(2);
   });
 
   it('a different capacity of the series is a # of its own', async () => {
