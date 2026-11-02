@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-495](./RS-495-payments-table-sorts-by-its-columns.md) | done | story | P2 | Payments table sorts by its columns | 1.401.0 |
 | [RS-494](./RS-494-rmb-flow-opens-on-oct-31-2026-to-today.md) | done | story | P2 | RMB Flow opens on Oct 31, 2026 to today | 1.400.0 |
 | [RS-493](./RS-493-rmb-flow-keeps-its-filters-when-you-leave-and-come-b.md) | done | story | P2 | RMB Flow keeps its filters when you leave and come back | 1.399.0 |
 | [RS-492](./RS-492-review-fixes-for-the-cost-payment-switch-and-receipt.md) | done | bug | P2 | Review fixes for the Cost Payment switch and receipt names | 1.398.1 |

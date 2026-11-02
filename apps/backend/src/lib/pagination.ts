@@ -87,6 +87,7 @@ const ALLOWED_SORT: Record<string, Set<string>> = {
   orders: new Set(['created_at', 'total_cost', 'lifecycle']),
   inventory: new Set(['created_at', 'qty', 'sell_price', 'unit_cost']),
   'sell-orders': new Set(['created_at', 'status']),
+  'bank-tx': new Set(['posted_at', 'source', 'counterparty', 'amount', 'owner', 'status']),
 };
 
 export function parseSort(scope: keyof typeof ALLOWED_SORT, raw: string | null | undefined):
