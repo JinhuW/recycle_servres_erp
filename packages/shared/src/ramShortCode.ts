@@ -1,4 +1,4 @@
-import { chipMarkingCanon } from './chipNumber.js';
+import { chipDieCode, chipMarkingCanon } from './chipNumber.js';
 import { canonicalPartNumber } from './partNumberCanon.js';
 
 export type RamShortCodeInput = {
@@ -27,7 +27,9 @@ export function ramShortCode(row: RamShortCodeInput): string | null {
     // market code. HMC DDR5 uses another scheme and must not be sliced here.
     return pn.match(/^HM[AT][1-58A][A-Z0-9]{2}[URLSPV][67]([A-Z0-9]{2}[A-Z])[468][A-Z](?:[A-Z][A-Z0-9]+)?$/)?.[1] ?? null;
   }
-  return null;
+  // A Kingston or white-label stick names no die in its module number; the
+  // chip it carries does.
+  return chipDieCode(text(row.chipNumber));
 }
 
 /** Distinct codes in a group, with an unknown member kept visible too. */
