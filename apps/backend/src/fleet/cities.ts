@@ -321,7 +321,9 @@ export async function upsertItems(sql: SqlLike, items: FleetItem[]): Promise<Fle
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
-type NumericKey = keyof typeof FLEET_SETTINGS_DEFAULTS;
+type FlagKey = 'cloak_enabled';
+type NumericKey = Exclude<keyof typeof FLEET_SETTINGS_DEFAULTS, FlagKey>;
+const FLAG_KEYS: readonly FlagKey[] = ['cloak_enabled'];
 
 /** Inclusive bounds per numeric key; the console's limits where it had one. */
 export const SETTING_BOUNDS: Record<NumericKey, readonly [number, number]> = {
@@ -341,6 +343,8 @@ export const SETTING_BOUNDS: Record<NumericKey, readonly [number, number]> = {
   // A static ISP exit is one IP; two accounts on it is what the vendor's
   // pairs were bought for.
   max_accounts_per_proxy: [1, 10],
+  // 0 stops new switches as cloak_enabled does; a license sells seats in tens.
+  cloak_max_slots: [0, 100],
 };
 
 // What Facebook's own filters accept (the vendored monitor's enums), and the
@@ -400,6 +404,11 @@ export function readSettingsPatch(input: unknown): SettingsPatch | Refusal {
       patch.search = search;
       continue;
     }
+    if ((FLAG_KEYS as readonly string[]).includes(key)) {
+      if (typeof value !== 'boolean') return bad(`${key} must be true or false`);
+      patch[key as FlagKey] = value;
+      continue;
+    }
     if (!(key in SETTING_BOUNDS)) return bad(`not a setting: ${key}`);
     const [lo, hi] = SETTING_BOUNDS[key as NumericKey];
     if (!isInt(value, lo, hi)) return bad(`${key} must be a whole number from ${lo} to ${hi}`);
@@ -416,6 +425,7 @@ export async function loadSettings(sql: SqlLike): Promise<FleetSettings> {
   for (const r of rows) {
     if (r.key === 'search') { if (isObject(r.value)) out.search = r.value; continue; }
     if (r.key in SETTING_BOUNDS && typeof r.value === 'number') out[r.key as NumericKey] = r.value;
+    if ((FLAG_KEYS as readonly string[]).includes(r.key) && typeof r.value === 'boolean') out[r.key as FlagKey] = r.value;
   }
   return out;
 }
@@ -435,7 +445,7 @@ export async function saveSettings(sql: Sql, patch: SettingsPatch, userId: strin
       }
       await tx`
         INSERT INTO fleet_settings (key, value, updated_by, updated_at)
-        VALUES (${key}, ${tx.json(value as number)}, ${userId}, NOW())
+        VALUES (${key}, ${tx.json(value as number | boolean)}, ${userId}, NOW())
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = NOW()`;
     }
     return loadSettings(tx);

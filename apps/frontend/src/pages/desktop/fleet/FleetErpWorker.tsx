@@ -15,7 +15,7 @@ import {
   deviceText, erpCheckpoint, erpCityChips, erpCityLog, erpHistory, erpHistoryDot, erpProxyText, erpWorkerStatus, sessionDaysLeft,
   type ErpHistoryLine,
 } from './fleetWorkerView';
-import { ParkDialog, ReleaseQuarantineButton, RetireSlotDialog, UnparkDialog, useFleetMirror } from './shared';
+import { EngineChip, ParkDialog, ReleaseQuarantineButton, RetireSlotDialog, UnparkDialog, useFleetMirror } from './shared';
 import {
   AccountsUsed, CheckpointsCard, ErpBuildChip, Muted, NoThumb, WorkerCard, WorkerHead, WorkerHistory, type HistoryEntry, type WorkerField,
 } from './workerDetail';
@@ -87,6 +87,7 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
           {deviceText(device) && <><br /><small className="fp-muted">{deviceText(device)}</small></>}
         </span>
       : <Muted>—</Muted> },
+    { label: t('fleetDetailEngine'), value: slot ? <span className="fp-holder"><EngineChip slot={slot} /></span> : <Muted>—</Muted> },
     { label: t('fbcDetailBackup'), value: acct?.cookie_at
       ? <span title={acct.cookie_at}>{relTime(acct.cookie_at, locale)}</span>
       : <Muted>{t('fbcNeverBackedUp')}</Muted> },

@@ -15,6 +15,38 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.409.0] - 2026-11-02
+
+### Added
+
+- **A fleet account can move to CloakBrowser, one at a time and only while it
+  has no live session** (RS-507). CloakBrowser is a stealth Chromium whose
+  fingerprint is set by a seed. A slot's device now carries `browser_engine`,
+  `cloak_seed` and `cloak_gpu`, derived from the account number so that the
+  same account always gets the same values, and the claim hands them to the
+  worker. `POST /api/fleet/slots/:no/engine` makes the switch. Because the
+  new fingerprint is a new machine to Facebook, it allows only an account
+  that has already lost its session, or one never logged in. A parked account
+  isn't enough on its own, since its saved session goes out with the next
+  claim. The account's state is read for that account only, never from a
+  worker row that has since moved to another account. It also refuses while the new `cloak_enabled`
+  setting is off (the default), once `cloak_max_slots` slots (default 1, the
+  free license's session limit) run CloakBrowser, and for a slot switched
+  before. Going back to stock is allowed only while the cloak session never
+  reached HEALTHY and no worker can be starting on the slot. State events now
+  record the engine the worker says it launched (`detail.engine`), not just
+  the slot's setting. The claim leaves a cloak slot unclaimed rather than
+  hand it to a worker older than 0.16.0, which would run it on stock. Re-login
+  and Mark healthy are refused (`engine_mismatch`) while a worker runs a
+  different engine from its slot's, so no fresh session is minted on the old
+  fingerprint. On the Fleet tab the table gains an Engine column and a
+  "Switch to CloakBrowser" action wherever the guard would allow it, behind
+  a confirmation that says the move is one way, and a CloakBrowser row offers
+  Back to stock. A Browser engine card holds
+  the on/off switch, the seats and the loss rate per 100 account-days for
+  each engine against the stint baseline from v1.408.0. Slot lists carry each
+  account's `account_state` and `has_session` for the row's guard.
+
 ## [1.408.0] - 2026-11-02
 
 ### Added

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { randomBytes } from 'node:crypto';
-import type { ClaimAnswer, FleetEngineLoss } from '@recycle-erp/shared';
+import { FLEET_CLOAK_MIN_WORKER_VERSION, type ClaimAnswer, type FleetEngineLoss } from '@recycle-erp/shared';
 import { getTestDb, resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { ALEX, MARCUS, loginAs } from './helpers/auth';
@@ -31,14 +31,14 @@ async function seedAccount(n: number, device: Record<string, unknown> | null = n
 
 async function claim(workerId: string): Promise<ClaimAnswer> {
   const r = await api<ClaimAnswer>('POST', '/api/fleet/worker/claim', {
-    headers: bearer(HOST_TOKEN), body: { host_id: 'lab', worker_id: workerId, version: '0.15.0', vnc_port: 5901 },
+    headers: bearer(HOST_TOKEN), body: { host_id: 'lab', worker_id: workerId, version: FLEET_CLOAK_MIN_WORKER_VERSION, vnc_port: 5901 },
   });
   expect(r.status).toBe(200);
   return r.body;
 }
 
 const heartbeat = (token: string, state: string, detail: Record<string, unknown> | null = null) =>
-  api('POST', '/api/fleet/worker/heartbeat', { headers: bearer(token), body: { state, version: '0.15.0', detail } });
+  api('POST', '/api/fleet/worker/heartbeat', { headers: bearer(token), body: { state, version: FLEET_CLOAK_MIN_WORKER_VERSION, detail } });
 
 const stateEvents = () => getTestDb()<{ account_no: number; worker_id: string; engine: string; from_state: string | null; to_state: string; reason: string | null }[]>`
   SELECT account_no, worker_id, engine, from_state, to_state, reason FROM fleet_worker_state_events ORDER BY id`;
@@ -62,13 +62,22 @@ describe('fleet_worker_state_events', () => {
     ]);
   });
 
-  it('stamps the engine the slot\'s device names at that moment', async () => {
+  it('stamps the engine the slot\'s device names at that moment when the worker names none', async () => {
     const no = await seedAccount(2, { user_agent: 'x', browser_engine: 'cloak', cloak_seed: 12345 });
     const { worker_token } = await claim('lab-2');
     await heartbeat(worker_token, 'HEALTHY');
     await getTestDb()`UPDATE fleet_slots SET device = device - 'browser_engine' WHERE account_no = ${no}`;
     await heartbeat(worker_token, 'SESSION_EXPIRED');
     expect((await stateEvents()).map((e) => [e.engine, e.to_state])).toEqual([['cloak', 'HEALTHY'], ['stock', 'SESSION_EXPIRED']]);
+  });
+
+  it('stamps the engine the worker says it launched over the slot\'s', async () => {
+    const no = await seedAccount(2, { user_agent: 'x', browser_engine: 'cloak', cloak_seed: 12345 });
+    const { worker_token } = await claim('lab-2');
+    await heartbeat(worker_token, 'HEALTHY', { engine: 'stock' });
+    await getTestDb()`UPDATE fleet_slots SET device = device - 'browser_engine' WHERE account_no = ${no}`;
+    await heartbeat(worker_token, 'SESSION_EXPIRED', { engine: 'cloak' });
+    expect((await stateEvents()).map((e) => [e.engine, e.to_state])).toEqual([['stock', 'HEALTHY'], ['cloak', 'SESSION_EXPIRED']]);
   });
 
   it('writes nothing for a heartbeat refused on a stale epoch', async () => {
