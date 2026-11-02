@@ -4746,11 +4746,13 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
   cursor: help;
 }
 .pay-gap-mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* The mark's note: the PO page's amber banner, floated. Normal weight and
-   font — the mark sits in the mono, bold order-id cell. */
+/* The mark's note: the PO page's amber banner, floated. Normal weight, font
+   and wrapping — the mark sits in the mono, bold, nowrap order-id cell, and
+   without the reset the text runs out of the box. */
 .pay-gap-note {
   z-index: 90; max-width: 420px;
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: flex-start; gap: 8px;
+  white-space: normal;
   padding: 8px 12px; border-radius: 8px;
   background: var(--warn-soft); color: var(--warn-strong);
   border: 1px solid color-mix(in oklch, var(--warn) 45%, transparent);
@@ -4758,6 +4760,8 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
   font-family: 'Inter', system-ui, sans-serif; font-size: 12.5px; font-weight: 500; line-height: 1.4;
   text-align: left; cursor: default;
 }
+.pay-gap-note > svg { margin-top: 2px; }
+.pay-gap-note > .rec-link { align-self: flex-end; }
 
 /* ── Home: what waits on the viewer ──────────────────────────────────────── */
 .home-body { display: flex; flex-direction: column; gap: var(--gap, 16px); }
