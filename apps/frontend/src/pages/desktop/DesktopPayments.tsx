@@ -8,6 +8,7 @@ import { fmtDate, fmtDateShort, fmtMoney, fmtSigned, fmtUSD, relTime } from '../
 import { useT } from '../../lib/i18n';
 import type { Translate } from '../../lib/orderPresentation';
 import { usePersisted } from '../../lib/listMemory';
+import { nextSort, SortTh, type SortState } from '../../components/SortTh';
 import { match, readHashQuery, useRoute } from '../../lib/route';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useSentinel } from '../../lib/useSentinel';
@@ -352,6 +353,9 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   const [disputed, setDisputed] = usePersisted('desktop.payments.disputed', false);
   const [settle, setSettle] = usePersisted('desktop.payments.settle', 'all');
   const [assignee, setAssignee] = usePersisted('desktop.payments.assignee', 'all');
+  // Sorted by the server: the list is paged, so a sort over the loaded rows
+  // would reorder one page and misstate the rest.
+  const [sort, setSort] = usePersisted<SortState>('desktop.payments.sort', { col: '', dir: null });
   // The owner picker and the filter share one list.
   const members: Member[] = useMembers();
   const [feed, setFeed] = useState<Feed | null>(null);
@@ -405,9 +409,10 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
       if (settle !== 'all') p.set('settle', settle);
       if (assignee !== 'all') p.set('assignee', assignee);
     }
+    if (sort.dir) p.set('sort', `${sort.col}:${sort.dir}`);
     if (cursor) p.set('cursor', cursor);
     return p.toString();
-  }, [focusOrder, focusSo, status, source, direction, settledQ, hasMatch, disputed, settle, assignee]);
+  }, [focusOrder, focusSo, status, source, direction, settledQ, hasMatch, disputed, settle, assignee, sort]);
 
   // The unlinked and suggested tiles are scoped to the same direction as the
   // list, so the number on the tile and the rows under it can never disagree —
@@ -417,6 +422,8 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     const p = direction !== 'all' ? `?direction=${direction}` : '';
     api.get<Stats>(`/api/bank-transactions/stats${p}`).then(setStats).catch(handleFetchError);
   }, [direction]);
+
+  const onSort = useCallback((col: string) => setSort(s => nextSort(s, col)), [setSort]);
 
   const reload = useCallback(() => {
     const id = ++reqId.current;
@@ -752,12 +759,12 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
               <thead>
                 <tr>
                   <th style={{ width: 26 }} />
-                  <th>{t('payColDate')}</th>
-                  <th>{t('payColSource')}</th>
-                  <th>{t('payColCounterparty')}</th>
-                  <th className="num">{t('payColAmount')}</th>
-                  <th>{t('payColOwner')}</th>
-                  <th>{t('payColStatus')}</th>
+                  <SortTh col="posted_at" sort={sort} onSort={onSort}>{t('payColDate')}</SortTh>
+                  <SortTh col="source" sort={sort} onSort={onSort}>{t('payColSource')}</SortTh>
+                  <SortTh col="counterparty" sort={sort} onSort={onSort}>{t('payColCounterparty')}</SortTh>
+                  <SortTh col="amount" sort={sort} onSort={onSort} align="right">{t('payColAmount')}</SortTh>
+                  <SortTh col="owner" sort={sort} onSort={onSort}>{t('payColOwner')}</SortTh>
+                  <SortTh col="status" sort={sort} onSort={onSort}>{t('payColStatus')}</SortTh>
                   {/* The rail's contents name themselves; a visible heading
                       over two buttons is a label nobody reads. */}
                   <th className="pay-actions" aria-label={t('payColActions')} />

@@ -15,6 +15,19 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.401.0] - 2026-11-01
+
+### Added
+
+- **The Payments table sorts by its columns** (RS-495). Date, Source, Payee,
+  Amount, Owner and Status headers now sort. The list is paged as you scroll,
+  so the sort runs on the server and the cursor follows the sorted column:
+  every page continues the same order without skipping or repeating a row.
+  Amount sorts by size, since the default money-out view is all negative
+  numbers; Status groups sell orders, POs, ignored, transfers and open rows;
+  ties within a payee, owner or status stay newest first. The choice is
+  remembered across navigation.
+
 ## [1.400.0] - 2026-11-01
 
 ### Changed

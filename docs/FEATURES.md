@@ -2151,6 +2151,11 @@ it.
   loop behind a manager-only API (v1.91.0), and a Payments page (v1.92.0).
   Search waits 200 ms after typing stops; filter chips apply at once
   (v1.179.0).
+- **The table sorts by Date, Source, Payee, Amount, Owner or Status**
+  (v1.401.0). A header click sorts the whole filtered list on the server, not
+  just the loaded rows: descending, then ascending, then back to newest first.
+  Amount sorts by size, so money out puts the biggest payment first. The sort
+  is remembered while you are elsewhere, like the filters.
 - **Internal Mercury↔PayPal transfers are classified out of the unlinked
   queue** (v1.93.0) by counterparty and Mercury kind rules (v1.94.0).
 - **Automatic pairing is stricter about what it guesses** (v1.198.3).

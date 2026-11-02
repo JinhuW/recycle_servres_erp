@@ -259,6 +259,64 @@ describe('bank transactions API', () => {
     expect(new Set(seen).size).toBe(5);
   });
 
+  it('sorts the whole list by any column and pages without skips or duplicates', async () => {
+    // Two rows share a payee and two share an amount, so ties cross a page
+    // boundary at limit=2.
+    const txns: TxnSpec[] = [
+      { externalId: 'm-a', amount: -300, counterparty: 'bravo', postedAt: new Date(NOW - 1 * DAY) },
+      { externalId: 'm-b', amount: -50, counterparty: 'Alpha', postedAt: new Date(NOW - 2 * DAY) },
+      { externalId: 'm-c', amount: -300, counterparty: null, postedAt: new Date(NOW - 3 * DAY) },
+      { externalId: 'm-d', amount: 900, counterparty: 'alpha', postedAt: new Date(NOW - 4 * DAY) },
+      { externalId: 'm-e', amount: -10, counterparty: 'Charlie', postedAt: new Date(NOW - 5 * DAY) },
+    ];
+    await syncBankTransactions(testEnv, [fakeProvider('mercury', txns)]);
+    await getTestDb()`UPDATE bank_transactions SET ignored = true WHERE external_id = 'm-e'`;
+    const { token } = await loginAs(ALEX);
+    const extOf = new Map<string, string>();
+    for (const t of txns) extOf.set(await idOf(t.externalId), t.externalId);
+
+    const walk = async (sort: string): Promise<string[]> => {
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      for (;;) {
+        const url: string = `/api/bank-transactions?limit=2&sort=${sort}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+        const page = await api<{ rows: PaymentRow[]; nextCursor: string | null }>('GET', url, { token });
+        expect(page.status, sort).toBe(200);
+        seen.push(...page.body.rows.map((r) => extOf.get(r.id)!));
+        if (!page.body.nextCursor) break;
+        cursor = page.body.nextCursor;
+      }
+      return seen;
+    };
+
+    expect(await walk('posted_at:asc')).toEqual(['m-e', 'm-d', 'm-c', 'm-b', 'm-a']);
+    // By size; equal amounts break on id, so only the group is fixed.
+    const byAmount = await walk('amount:desc');
+    expect(byAmount[0]).toBe('m-d');
+    expect(new Set(byAmount.slice(1, 3))).toEqual(new Set(['m-a', 'm-c']));
+    expect(byAmount.slice(3)).toEqual(['m-b', 'm-e']);
+    // Case-folded; a missing payee sorts as empty; equal payees newest first.
+    expect(await walk('counterparty:asc')).toEqual(['m-c', 'm-d', 'm-b', 'm-a', 'm-e']);
+    expect(await walk('counterparty:desc')).toEqual(['m-e', 'm-a', 'm-b', 'm-d', 'm-c']);
+    // Open rows (5) after ignored (3); within a status, by date.
+    expect(await walk('status:asc')).toEqual(['m-e', 'm-d', 'm-c', 'm-b', 'm-a']);
+    for (const col of ['source', 'owner']) {
+      for (const dir of ['asc', 'desc']) {
+        const seen = await walk(`${col}:${dir}`);
+        expect(new Set(seen).size, `${col}:${dir}`).toBe(5);
+      }
+    }
+
+    const bad = await api('GET', '/api/bank-transactions?sort=description:asc', { token });
+    expect(bad.status).toBe(400);
+    // A date cursor handed to an amount sort falls back to page one.
+    const first = await api<{ nextCursor: string }>('GET', '/api/bank-transactions?limit=2', { token });
+    const mixed = await api<{ rows: PaymentRow[] }>('GET',
+      `/api/bank-transactions?limit=2&sort=amount:desc&cursor=${encodeURIComponent(first.body.nextCursor)}`, { token });
+    expect(mixed.status).toBe(200);
+    expect(extOf.get(mixed.body.rows[0].id)).toBe('m-d');
+  });
+
   it('link writes every leg, unlink tombstones, and the ledger nets payment + refund', async () => {
     await seedPairedAndSingles();
     const { token } = await loginAs(ALEX);
