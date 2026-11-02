@@ -324,6 +324,18 @@ export function isPaymentMethod(v: unknown): v is 'paypal' | 'cash' | null | und
   return v === undefined || v === null || v === 'paypal' || v === 'cash';
 }
 
+// A company payment is now always a PayPal or Mercury transaction, so cash is
+// no longer a choice. A PO saved as cash before that keeps it: echoing the
+// stored value back is not choosing it.
+export const CASH_RETIRED_MSG = 'Cash is no longer a company payment method — pay through PayPal or Mercury and link the transaction.';
+export async function cashRefused(sql: SqlLike, orderId: string | null, method: unknown): Promise<boolean> {
+  if (method !== 'cash') return false;
+  if (orderId === null) return true;
+  const rows = await sql<{ payment_method: string | null }[]>`
+    SELECT payment_method FROM orders WHERE id = ${orderId}`;
+  return rows[0]?.payment_method !== 'cash';
+}
+
 // The hand-off facts, validated the same way whichever door writes them —
 // the checkpoint (POST /handoff) or the page (PATCH). Each returns the 400
 // message or null.

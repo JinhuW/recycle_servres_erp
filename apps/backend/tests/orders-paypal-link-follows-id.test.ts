@@ -122,6 +122,8 @@ describe('PayPal links follow the PO transaction id', () => {
     const { token, user } = await loginAs(MARCUS);
     const id = await createPO(token);
     await patch(token, id, { paymentMethod: 'paypal', paypalTxnId: TXN_A });
+    // Cash is no longer a choice; a PO saved as cash before keeps it.
+    await getTestDb()`UPDATE orders SET payment_method = 'cash' WHERE id = ${id}`;
     const shot = await multipart(`/api/orders/${id}/status-meta/Payment/attachments`,
       { file: new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'cash.png', { type: 'image/png' }) },
       { token });

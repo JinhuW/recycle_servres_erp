@@ -16,7 +16,7 @@ import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../../services/orderGoo
 import { synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, normalizeTracking, isMaterialPatch, type Carrier, type PackageSource } from '@recycle-erp/shared';
 import { normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
-import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, committedLinesBody, describeSellOrders, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, movesPayer, paidByAfter, pickedPaidByErr, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, orderCostBooked, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, stageMovedBody, type StoredLine, storedLineCols, supplierErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, trackInput, warehouseErr } from './shared';
+import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, committedLinesBody, describeSellOrders, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, cashRefused, CASH_RETIRED_MSG, movesPayer, paidByAfter, pickedPaidByErr, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, orderCostBooked, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, stageMovedBody, type StoredLine, storedLineCols, supplierErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, trackInput, warehouseErr } from './shared';
 import { OrderRefusal, refusalResponse } from './refusal';
 
 const patchRoutes = new Hono<OrdersEnv>();
@@ -91,6 +91,7 @@ patchRoutes.patch('/:id', async (c) => {
   if (!isPaymentMethod(body.paymentMethod)) {
     return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
   }
+  if (await cashRefused(sql, id, body.paymentMethod)) return c.json({ error: CASH_RETIRED_MSG }, 400);
   // The hand-off facts, now the page's to edit. Same validators as the
   // checkpoint; the collector is resolved here so the audit can name them.
   const srcErr = sourceErr(body.source);

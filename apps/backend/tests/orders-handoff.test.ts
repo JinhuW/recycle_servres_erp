@@ -53,6 +53,11 @@ type OrderRead = {
     } | null;
   };
 };
+// Cash is no longer a choice; a PO saved as cash before keeps it.
+async function legacyCash(id: string): Promise<void> {
+  await getTestDb()`UPDATE orders SET payment_method = 'cash' WHERE id = ${id}`;
+}
+
 async function readOrder(token: string, id: string) {
   const got = await api<OrderRead>('GET', `/api/orders/${id}`, { token });
   expect(got.status).toBe(200);
@@ -139,7 +144,7 @@ describe('hand-off — local pickup', () => {
     expect(evs.map(e => e.kind)).toContain('submitted');
   });
 
-  it('company card + PayPal needs the transaction ID; cash needs the amount screenshot', async () => {
+  it('company card + PayPal needs the transaction ID; a legacy cash PO needs the amount screenshot', async () => {
     const { token, user } = await loginAs(MARCUS);
     const id = await createOrder(token, 'company');
     const base = { warehouseId: 'WH-LA1', source: 'local', handoff: pickup(user.id), payment: 'company' };
@@ -151,13 +156,21 @@ describe('hand-off — local pickup', () => {
     expect(noId.body.error).toMatch(/transaction ID/i);
     expect((await readOrder(token, id)).lifecycle).toBe('draft');
 
+    // Cash is not a new choice.
+    const refused = await api<{ error: string }>('POST', `/api/orders/${id}/handoff`, {
+      token, body: { ...base, paymentMethod: 'cash' },
+    });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toMatch(/PayPal or Mercury/);
+
+    await legacyCash(id);
     const noShot = await api<{ error: string }>('POST', `/api/orders/${id}/handoff`, {
       token, body: { ...base, paymentMethod: 'cash' },
     });
     expect(noShot.status).toBe(409);
     expect(noShot.body.error).toMatch(/paid in cash/i);
-    // The refusal rolled the method back with everything else.
-    expect((await readOrder(token, id)).paymentMethod).toBeNull();
+    // The refusal rolled back everything else; the saved method stands.
+    expect((await readOrder(token, id)).paymentMethod).toBe('cash');
 
     await attachPaymentShot(token, id);
     const cash = await api('POST', `/api/orders/${id}/handoff`, {
@@ -215,6 +228,7 @@ describe('hand-off — shipping label', () => {
   it('creates the package linked to the PO, carrying its source, and advances', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await createOrder(token, 'company');
+    await legacyCash(id);
     await attachPaymentShot(token, id);
     const r = await api<{ packageId: string | null }>('POST', `/api/orders/${id}/handoff`, {
       token, body: {
@@ -258,6 +272,7 @@ describe('hand-off — shipping label', () => {
   it('the carrier\'s updates reach the list chip and the PO page', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await createOrder(token, 'company');
+    await legacyCash(id);
     await attachPaymentShot(token, id);
     const r = await api<{ packageId: string | null }>('POST', `/api/orders/${id}/handoff`, {
       token, body: {
@@ -302,6 +317,7 @@ describe('hand-off — shipping label', () => {
   it('a tracking number already on file refuses and leaves the PO in Draft', async () => {
     const { token } = await loginAs(MARCUS);
     const first = await createOrder(token, 'company');
+    await legacyCash(first);
     await attachPaymentShot(token, first);
     const body = {
       warehouseId: 'WH-LA1', source: 'facebook', handoff: label, payment: 'company', paymentMethod: 'cash',
@@ -309,6 +325,7 @@ describe('hand-off — shipping label', () => {
     expect((await api('POST', `/api/orders/${first}/handoff`, { token, body })).status).toBe(200);
 
     const second = await createOrder(token, 'company');
+    await legacyCash(second);
     await attachPaymentShot(token, second);
     const r = await api<{ error: string }>('POST', `/api/orders/${second}/handoff`, { token, body });
     expect(r.status).toBe(409);
@@ -321,6 +338,7 @@ describe('hand-off — shipping label', () => {
   it('rejects a malformed tracking number or carrier', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await createOrder(token, 'company');
+    await legacyCash(id);
     const base = { warehouseId: 'WH-LA1', source: 'facebook', payment: 'company', paymentMethod: 'cash' };
     const bad = await api('POST', `/api/orders/${id}/handoff`, {
       token, body: { ...base, handoff: { method: 'label', trackingNumber: 'abc!!', carrier: 'UPS' } },
@@ -336,7 +354,7 @@ describe('hand-off — shipping label', () => {
 describe('hand-off — validation and permissions', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('400s on a bad source, a missing warehouse, or a bad method; a company row with no method is a 409', async () => {
+  it('400s on a bad source, a missing warehouse, or a bad method; a company row with no method is PayPal', async () => {
     const { token, user } = await loginAs(MARCUS);
     const id = await createOrder(token, 'self');
     await attachChat(token, id);
@@ -348,13 +366,13 @@ describe('hand-off — validation and permissions', () => {
     expect((await api('POST', `/api/orders/${id}/handoff`, {
       token, body: { ...good, paymentMethod: 'venmo' },
     })).status).toBe(400);
-    // Absent method is not a bad request — it is the merged row's blocker,
-    // judged inside the transaction like every other missing fact.
+    // Absent method is not a bad request: a company row is PayPal, and the
+    // missing id is judged inside the transaction like every other fact.
     const noMethod = await api('POST', `/api/orders/${id}/handoff`, {
       token, body: { ...good, payment: 'company' },
     });
     expect(noMethod.status).toBe(409);
-    expect((noMethod.body as { error: string }).error).toMatch(/PayPal or cash/);
+    expect((noMethod.body as { error: string }).error).toMatch(/transaction ID/i);
     expect((await api('POST', `/api/orders/${id}/handoff`, {
       token, body: { ...good, handoff: { method: 'pickup', byUserId: 'not-a-uuid' } },
     })).status).toBe(400);
@@ -422,9 +440,10 @@ describe('hand-off facts on the page', () => {
     const { token } = await loginAs(MARCUS);
     const id = await createOrder(token, 'company');
     expect((await readOrder(token, id)).blockers)
-      .toEqual(['missingSource', 'missingDelivery', 'missingMethod', 'missingTxnId']);
+      .toEqual(['missingSource', 'missingDelivery', 'missingTxnId']);
 
-    expect((await patch(token, id, { source: 'facebook', handoffMethod: 'pickup', paymentMethod: 'cash' })).status).toBe(200);
+    await legacyCash(id);
+    expect((await patch(token, id, { source: 'facebook', handoffMethod: 'pickup' })).status).toBe(200);
     expect((await readOrder(token, id)).blockers).toEqual(['missingDelivery', 'missingCashShot']);
 
     const { user } = await loginAs(MARCUS);
@@ -610,9 +629,9 @@ describe('hand-off — the pre-release review fixes', () => {
     expect(o.paypalTxnId).toBeNull();
     expect((await sql`SELECT 1 FROM bank_transactions WHERE order_id = ${selfId}`).length).toBe(0);
 
-    // Same for cash: the id belongs to the PayPal method only.
+    // Same for a legacy cash PO: the id belongs to the PayPal method only.
     const cashId = await createOrder(token, 'company');
-    expect((await patch(token, cashId, { paymentMethod: 'paypal', paypalTxnId: '7AB12345CD678901E' })).status).toBe(200);
+    await sql`UPDATE orders SET payment_method = 'cash', paypal_txn_id = '7AB12345CD678901E' WHERE id = ${cashId}`;
     await attachPaymentShot(token, cashId);
     expect((await api('POST', `/api/orders/${cashId}/handoff`, {
       token, body: { warehouseId: 'WH-LA1', source: 'other', handoff: pickup(user.id), payment: 'company', paymentMethod: 'cash' },
@@ -620,7 +639,7 @@ describe('hand-off — the pre-release review fixes', () => {
     expect((await readOrder(token, cashId)).paypalTxnId).toBeNull();
   });
 
-  it('PATCH clears the PayPal id on a flip to Self or Cash, and only on the flip', async () => {
+  it('PATCH clears the PayPal id on a flip to Self, and only on the flip', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await createOrder(token, 'company');
     expect((await patch(token, id, { paymentMethod: 'paypal', paypalTxnId: '7AB12345CD678901E' })).status).toBe(200);
@@ -633,8 +652,6 @@ describe('hand-off — the pre-release review fixes', () => {
     await sql`UPDATE orders SET paypal_txn_id = 'SCANNED000000001' WHERE id = ${id}`;
     expect((await patch(token, id, { notes: 'still here' })).status).toBe(200);
     expect((await readOrder(token, id)).paypalTxnId).toBe('SCANNED000000001');
-    expect((await patch(token, id, { payment: 'company', paymentMethod: 'cash' })).status).toBe(200);
-    expect((await readOrder(token, id)).paypalTxnId).toBeNull();
   });
 
   it('a deactivated saved collector is no collector: the empty-body hand-off refuses', async () => {

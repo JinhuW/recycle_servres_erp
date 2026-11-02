@@ -20,7 +20,8 @@ export type HandoffRules = {
   trackingValid: boolean;
   carrier: Carrier | null;
   paidBy: 'company' | 'self';
-  /** Null is a company order that was never asked — the dialog asks. */
+  /** Null is a company order that was never asked, read as PayPal. Cash is
+   *  only ever a saved legacy value: nothing offers it any more. */
   method: HandoffMethod | null;
   txnId: string;
   chatAttachmentCount: number;
@@ -52,8 +53,7 @@ export function handoffBlockerKeys(r: HandoffRules): string[] {
     if (!r.trackingValid) out.push('hoNeedTracking');
     else if (!r.carrier) out.push('hoNeedCarrier');
   }
-  if (r.paidBy === 'company' && r.method === null) out.push('hoNeedMethod');
-  if (r.paidBy === 'company' && r.method === 'paypal' && !r.txnId.trim()) {
+  if (r.paidBy === 'company' && r.method !== 'cash' && !r.txnId.trim()) {
     const exempt = r.saved.payment === 'company' && r.saved.paymentMethod !== 'cash'
       && r.saved.txnRequired === false;
     if (!exempt) out.push('poTxnRequired');
@@ -95,7 +95,7 @@ export type HandoffDraft = {
   paidBy: 'company' | 'self';
   /** The person on a self-paid order; null lets the server keep or default. */
   paidByUserId: string | null;
-  /** Non-null for a company order by the time submit is allowed (blocker). */
+  /** Null on a company order is PayPal. */
   method: HandoffMethod | null;
   txnId: string;
   /** Manager-only; undefined leaves the owner / rate untouched. */
@@ -115,11 +115,11 @@ export function buildHandoffBody(d: HandoffDraft): HandoffBody {
     payment: d.paidBy,
   };
   if (d.paidBy === 'self' && d.paidByUserId) body.paidByUserId = d.paidByUserId;
-  if (d.paidBy === 'company' && d.method) {
-    body.paymentMethod = d.method;
+  if (d.paidBy === 'company') {
+    body.paymentMethod = d.method ?? 'paypal';
     // The PayPal screenshot is not in the body: it was uploaded as a Payment
     // attachment the moment it was dropped.
-    if (d.method === 'paypal' && d.txnId.trim()) body.paypalTxnId = d.txnId.trim();
+    if (body.paymentMethod === 'paypal' && d.txnId.trim()) body.paypalTxnId = d.txnId.trim();
   }
   if (d.ownerId !== undefined) body.onBehalfOfUserId = d.ownerId;
   if (d.commissionRate !== undefined) body.commissionRate = d.commissionRate;

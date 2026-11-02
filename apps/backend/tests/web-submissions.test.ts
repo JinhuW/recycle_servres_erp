@@ -341,7 +341,7 @@ describe('/api/web-submissions (manager)', () => {
     expect(line.type).toBeNull();
   });
 
-  it('converts a pickup lot as cash at a pickup, and refuses a quote', async () => {
+  it('converts a pickup lot as a PayPal-paid pickup, and refuses a quote', async () => {
     const lot = await submit({ email: 'local@example.com', source: 'facebook', handoff: 'pickup', pickup_location: 'chicago', lines: [ssdLine] });
     const q = await submitQuote(quote);
     const { token } = await loginAs(ALEX);
@@ -352,7 +352,7 @@ describe('/api/web-submissions (manager)', () => {
       SELECT o.payment_method, o.handoff_method, o.source, o.notes, s.source AS supplier_source
       FROM orders o JOIN suppliers s ON s.id = o.supplier_id WHERE o.id = ${conv.body.orderId}
     `;
-    expect(po).toMatchObject({ payment_method: 'cash', handoff_method: 'pickup', source: 'facebook', supplier_source: 'facebook' });
+    expect(po).toMatchObject({ payment_method: 'paypal', handoff_method: 'pickup', source: 'facebook', supplier_source: 'facebook' });
     expect(po.notes).toContain('chicago');
 
     expect((await api('POST', `/api/web-submissions/${q.body.ref}/convert`, { token })).status).toBe(400);

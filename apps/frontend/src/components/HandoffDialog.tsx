@@ -80,11 +80,10 @@ export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }
     f.delivery === 'pickup' ? [t('hoPickup'), collector].filter(Boolean).join(' · ')
       : f.delivery === 'label' ? [f.carrier, f.tn].filter(Boolean).join(' ') : null,
   ].filter(Boolean).join(' · ');
-  const proofN = f.paidBy === 'self' ? f.proof.chatAtts.length
-    : f.method === 'cash' || f.method === 'paypal' ? f.proof.proofAtts.length : 0;
+  const proofN = f.paidBy === 'self' ? f.proof.chatAtts.length : f.proof.proofAtts.length;
   const paymentSummary = [
     costPayerLabel({ payment: f.paidBy, paidBy: f.payer }, t, true),
-    f.paidBy === 'company' ? (f.method === 'cash' ? t('hoMethodCash') : f.method === 'paypal' ? t('hoMethodPaypal') : null) : null,
+    f.paidBy === 'company' ? (f.method === 'cash' ? t('hoMethodCash') : t('hoMethodPaypal')) : null,
     f.paidBy === 'company' && f.method === 'paypal' ? f.txnId.trim() || null : null,
     proofN > 0 ? t('payProofOnFile', { n: proofN }) : null,
   ].filter(Boolean).join(' · ');
@@ -200,7 +199,7 @@ export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }
       <HandoffSection item={itemFor(f, 'payment')} title={t('hoPayment')} summary={paymentSummary} phone={phone}>
         <PaymentFields
           paidBy={f.paidBy} paidByUserId={f.paidByUserId} payers={f.payers} onPaidBy={f.setPaidBy}
-          method={f.method} onMethod={f.setMethod}
+          method={f.method}
           txnId={f.txnId} onTxnId={f.setTxnId}
           txnRequired
           payerLocked={f.order.payerLocked === true}

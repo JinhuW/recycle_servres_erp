@@ -140,7 +140,7 @@ detailRoutes.get('/:id', async (c) => {
     // it depends on lives in the DB, so a shell that decided for itself would
     // block exactly the pre-cutoff drafts the rule exempts.
     () => txnRequiredFor(
-      sql, order as { payment: string; payment_method: string | null; created_at: Date }, cutoffs),
+      sql, order as { id: string; payment: string; payment_method: string | null; created_at: Date }, cutoffs),
     () => chatShotRequiredFor(
       sql, order as { payment: string; created_at: Date }, cutoffs),
     () => cashShotRequiredFor(

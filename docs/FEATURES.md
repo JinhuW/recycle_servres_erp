@@ -115,8 +115,9 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
 - **A new purchaser gets a walkthrough on first sign-in** (v1.299.0), on both
   shells. Nine steps cover the home numbers, adding products (Submit order on
   desktop, the camera button on the phone), Mark as In Transit and what it
-  asks for, the payment proof for Company card PayPal, Company card cash and
-  Self-paid, the manager review and the edit window until Ready to Pay, the
+  asks for, the payment proof for Company card PayPal and Self-paid (Company
+  card cash too, until v1.403.0), the manager review and the edit window
+  until Ready to Pay, the
   commission formula with a worked example, and the buying tools. A step with
   a place in the app spotlights it: the sidebar item on desktop, the tab-bar
   item on the phone. The card switches between English and 中文 in place, and
@@ -735,10 +736,12 @@ is not a stage but a flag beside one, set once every line has sold
   how the goods get here: **Local pickup** (who collected it, from a member
   picker) or **Shipping label** (paste the tracking number; the carrier is
   recognised from its shape, as on Add-package). Then who paid. The
-  **Business Account** (*Company card* until v1.317.0) names a method, PayPal
+  **Business Account** (*Company card* until v1.317.0) named a method, PayPal
   or Cash: PayPal keeps the transaction-ID rule and offers the optional
-  screenshot that reads the ID; Cash lifts that rule but needs its own proof
-  (v1.153.0, below). **A person** — any active manager by name, or the
+  screenshot that reads the ID; Cash lifted that rule but needed its own proof
+  (v1.153.0, below). Since v1.403.0 the Business Account is always PayPal or
+  Mercury, and Cash is gone (see *Business Account payments* below).
+  **A person** — any active manager by name, or the
   purchaser (*Self-paid* until v1.317.0) — asks for no method and no ID — it
   is reimbursed, not matched against the bank — but **requires the chat with
   the seller** as a Submission attachment (any
@@ -871,6 +874,25 @@ is not a stage but a flag beside one, set once every line has sold
   (`paymentMethod` on POST / PATCH), logged, and cleared when the PO flips to
   Self-paid; `GET /api/orders/:id` reports `cashShotRequired` beside
   `txnRequired` and `chatShotRequired`.
+- **Business Account payments are a PayPal or Mercury transaction, never
+  cash** (v1.403.0, RS-498).
+  - **No Cash anywhere.** The *Method* toggle is gone from the Submit and
+    edit pages, the phone, the hand-off dialog and the sheet. A company PO
+    is PayPal, and one whose method was never set reads as PayPal, so the
+    *Say how the company paid* blocker (`missingMethod`) is gone too.
+  - **Refused at every door.** Create, PATCH and hand-off refuse
+    `paymentMethod: 'cash'` with a 400. The exception is a PO already saved
+    as cash, which keeps it: it reads *Cash — saved before cash was retired*
+    with its screenshots, and its screenshot rule still applies.
+  - **Website pickups.** A ram4cash pickup converts as PayPal.
+  - **Search and link.** On a manager's PO page, the Cost Payment tab's
+    Business Account side has the Commission tab's search, over unlinked,
+    settled, outgoing PayPal and Mercury rows. Picking one asks to confirm,
+    then links it to the PO as its cost, and the ledger below refreshes.
+  - **A link counts as the transaction.** A linked cost payment answers the
+    transaction-ID rule, so a Mercury-paid PO leaves Draft with no id typed,
+    and `txnRequired` reads false. A linked PayPal row also fills the PO's id
+    when it is empty, as before.
 - **`payment` is `company` or `self`, at every door** (v1.191.0): create, draft,
   PATCH and hand-off refuse anything else with a 400, and a CHECK constraint
   backs it. Every proof rule above keys on one of the two values, so a third
@@ -2575,7 +2597,8 @@ is who paid, below).
     paid, the projected commission). Since v1.397.0 (RS-490) a manager's Cost
     Payment opens on a **RMB Flow | Business Account** switch, as Commission
     does: RMB Flow names the person who paid and carries this card; Business
-    Account picks PayPal or Cash and carries the Payments ledger. A PO still
+    Account carries the Payments ledger, and since v1.403.0 a search that
+    links a PayPal or Mercury payment to the PO (Cash is gone). A PO still
     saved as Business-paid asks for a Save before the card can record, and
     shows its RMB book read-only under Business Account. Moving the switch
     away and back keeps the person who paid (v1.398.1).
@@ -3916,7 +3939,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   photos, a status + staff-note triage panel and its email conversation. **Create
   Draft PO** converts a sell lot once into a Draft PO owned by the clicking
   manager (lines at cost 0, photos copied, seller filed as a house-account
-  supplier with source `web`, PayPal or cash + pickup per the seller's choice).
+  supplier with source `web`; a pickup per the seller's choice, paid by PayPal —
+  a pickup converted as cash until v1.403.0).
   Both endpoints allow 5 submissions a minute per IP and drop a filled honeypot
   silently.
 - **The public forms have a daily ceiling and their own CORS** (v1.195.0).
