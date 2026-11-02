@@ -28,9 +28,9 @@ vi.mock('../../../lib/facebookPool', async () => {
 vi.mock('../../../components/Modal', () => ({ Modal: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 vi.mock('../../../lib/errorToast', () => ({ handleFetchError: vi.fn(), showSuccessToast: vi.fn(), showWarnToast: vi.fn() }));
 
-const { CITIES, CITY_LOG, COORDINATOR, HITS, HOSTS, NOW, POOL, RELEASE, SLOTS, STATS, TASKS, WORKER_DETAIL, WORKER_STINTS, WORKERS } = await import('./fixtures');
-const { WorkersTable } = await import('./FleetAccountsTab');
-const { HostStrip, LowerCapacityDialog, ReleaseBanner } = await import('./FleetHosts');
+const { CITIES, CITY_LOG, COORDINATOR, HITS, HOSTS, NOW, POOL, RELEASE, SETTINGS, SLOTS, STATS, TASKS, WORKER_DETAIL, WORKER_STINTS, WORKERS } = await import('./fixtures');
+const { EngineSwitchDialog, WorkersTable } = await import('./FleetAccountsTab');
+const { EngineCard, EngineLossLine, HostStrip, LowerCapacityDialog, ReleaseBanner } = await import('./FleetHosts');
 const { Belt, CityLogAside, TaskTable } = await import('./FleetTasksTab');
 const { CitiesTable } = await import('./FleetCitiesTab');
 const { DayChart, HitsTable } = await import('./FleetAnalysisTab');
@@ -111,6 +111,44 @@ describe('Fleet tab', () => {
     expect(html).toMatch(/aria-pressed="true"[^>]*><i class="fp-dot"><\/i><span>fleetKindHealthy<\/span>/);
     expect(html).not.toContain('homelab-9');          // silent, so parked
     expect(html).toContain('fleetNowReplacing');      // homelab-3 still runs
+  });
+  it('has an Engine column, and offers CloakBrowser only where the guard would', () => {
+    const cloaked = SLOTS.map(s => s.account_no === 31
+      ? { ...s, device: { viewport: [1366, 645] as [number, number], timezone: 'UTC', locale: 'en-US', browser_engine: 'cloak' as const, cloak_seed: 48213, cloak_gpu: 'Intel' as const } } : s);
+    const off = renderToString(<WorkersTable data={{ ...fleetData, slots: cloaked }} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
+    expect(off).toContain('fleetColEngine');
+    expect(off).toContain('fleetEngine_stock');
+    expect(off).toContain('fleetEngine_cloak');
+    expect(off).toContain('fleetCloakSeed');
+    expect(off).not.toContain('fleetCloakSwitch');        // no settings: nothing offered
+    expect(off.match(/fleetStockSwitch/g)).toHaveLength(1); // #31 runs CloakBrowser
+    const settings = { ...SETTINGS, cloak_enabled: true, cloak_max_slots: 2 };
+    const on = renderToString(<WorkersTable data={{ ...fleetData, slots: cloaked, settings }} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
+    expect(on.match(/fleetCloakSwitch/g)).toHaveLength(1);   // homelab-2 lost its session
+    const full = renderToString(<WorkersTable data={{ ...fleetData, slots: cloaked, settings: { ...settings, cloak_max_slots: 1 } }} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
+    expect(full).not.toContain('fleetCloakSwitch');
+  });
+  it('says the switch is one way and when the new device shows', () => {
+    const html = renderToString(<EngineSwitchDialog accountNo={7} engine="cloak" onClose={noop} onDone={noop} />);
+    expect(html).toContain('fleetCloakTitle');
+    expect(html).toContain('fleetCloakBody');
+    expect(html).toContain('fleetCloakWarn');
+    const back = renderToString(<EngineSwitchDialog accountNo={7} engine="stock" onClose={noop} onDone={noop} />);
+    expect(back).toContain('fleetStockTitle');
+    expect(back).toContain('fleetStockWarn');
+  });
+  it('shows the engine card with its switch, seats and loss rates', () => {
+    const html = renderToString(<EngineCard settings={{ ...SETTINGS, cloak_enabled: true }} used={1} onChanged={noop} />);
+    expect(html).toContain('fleetEngineCard');
+    expect(html).toContain('fleetEngineSeatsUsed');
+    expect(html).toContain('role="switch"');
+    expect(html).toContain('fleetEngineCloakOn');
+    const row = (engine: string, rate: number | null) => ({ engine, account_days: 12.5, losses: {}, total_losses: 1, losses_per_100_account_days: rate });
+    const loss = renderToString(<EngineLossLine loss={{ days: 30, since: '2026-10-03T00:00:00Z', engines: [row('stock', 8), row('cloak', null)], retro: row('retro', 4.25) }} />);
+    expect(loss).toContain('8.00');
+    expect(loss).toContain('fleetEngineLossNone');
+    expect(loss).toContain('4.25');
+    expect(loss).toContain('fleetEngineRetro');
   });
   it('honours the legend filter', () => {
     const html = renderToString(<WorkersTable data={fleetData} filter={{ ...EMPTY_FLEET_ROW_FILTER, kind: 'parked' }} onFilter={noop} onChanged={noop} now={NOW} />);

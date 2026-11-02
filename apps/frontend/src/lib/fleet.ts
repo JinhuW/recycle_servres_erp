@@ -8,7 +8,7 @@
 // state), the page-side type extends the shared one here.
 
 import type {
-  FleetAccountBrief, FleetWorkerRelogin, FleetWorkerResume,
+  FleetBrowserEngine, FleetEngineLoss, FleetAccountBrief, FleetWorkerRelogin, FleetWorkerResume,
   FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetProxy, FleetProxyHealthAnswer, FleetProxyPatch, FleetProxyWrite, FleetRelease,
   FleetSettings, FleetSlot as FleetSlotRow, FleetSlotWrite,
   FleetFunnelDay, FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, FleetWorkerDetail, RoundStartAnswer,
@@ -22,10 +22,12 @@ export type {
   FleetProxy, FleetProxyCheck, FleetProxyHealth, FleetProxyHealthAnswer, FleetProxyHealthState, FleetProxySource,
   FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
   FleetSecretKind, FleetWorkerDetail, FleetWorkerEvent, FleetWorkerRelogin, FleetWorkerResume,
+  FleetBrowserEngine, FleetCloakGpu, FleetEngineLoss, FleetEngineLossRow,
 } from '@recycle-erp/shared';
 export {
   FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetResumable, fleetTakesResume, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
   FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_SLOW_MS,
+  fleetCloakFor, fleetCloakSwitchable, fleetSessionLost,
 } from '@recycle-erp/shared';
 
 // snake_case on purpose: rows come straight from the backend's SQL.
@@ -94,6 +96,10 @@ export function fleetErrorCode(err: unknown): string | null {
   const body = err.body as { error?: unknown } | undefined;
   return typeof body?.error === 'string' ? body.error : null;
 }
+
+/** A device's engine; one that names none runs stock Chromium. */
+export const fleetEngineOf = (device: { browser_engine?: FleetBrowserEngine } | null | undefined): FleetBrowserEngine =>
+  device?.browser_engine === 'cloak' ? 'cloak' : 'stock';
 
 const BASE = '/api/fleet';
 const slug = (s: string) => encodeURIComponent(s);
@@ -177,6 +183,14 @@ export const fleetApi = {
   // Puts a pool account into the fleet on a listed proxy. 409 account_busy,
   // no_login, proxy_full or exists; the body's `detail` says which account.
   addSlot: (body: FleetSlotWrite) => api.post<{ slot: FleetSlot }>(`${BASE}/slots`, body).then(r => r.slot),
+  // To CloakBrowser only for an account with no live session, while
+  // cloak_enabled is on and a seat is free: 409 cloak_seeded,
+  // engine_live_session, cloak_disabled or cloak_slots_full. Back to stock
+  // only while its cloak session never got HEALTHY (409 cloak_proven).
+  setSlotEngine: (no: number, engine: FleetBrowserEngine) =>
+    api.post<{ slot: FleetSlot }>(`${BASE}/slots/${no}/engine`, { engine }).then(r => r.slot),
+  // Losses per engine over the last `days`, with the stint ledger's baseline.
+  engineLoss: (days = 30) => api.get<FleetEngineLoss>(`${BASE}/stats/engine-loss${query({ days })}`),
   // Only a slot no worker holds (409 leased otherwise); the account goes back to Available.
   removeSlot: (no: number) => api.post<{ ok: true; pool_status: string }>(`${BASE}/slots/${no}/remove`, {}),
 

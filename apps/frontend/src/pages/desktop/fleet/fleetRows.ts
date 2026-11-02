@@ -11,7 +11,10 @@ import type { PoolAccountSummary } from '../../../lib/facebookPool';
 /** What a row reads of its pool account: a snapshot row or a summary row. */
 export type FleetPoolAccount = Pick<PoolAccountSummary, 'no' | 'uid' | 'status' | 'holder' | 'note'>
   & Partial<Pick<PoolAccountSummary, 'addedAt' | 'batch'>>;
-import { fleetResumable, fleetSlotRetirable, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume } from '../../../lib/fleet';
+import {
+  fleetCloakSwitchable, fleetEngineOf, fleetResumable, fleetSlotRetirable, fleetStateParked,
+  type FleetHost, type FleetRelease, type FleetSettings, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume,
+} from '../../../lib/fleet';
 import { parkedWorkers, retiredAt } from '../../../lib/fleetView';
 import { leaseLive, liveness } from './fleetBoard';
 
@@ -294,6 +297,27 @@ export function fleetRunning(rows: readonly FleetRow[]): { running: number; host
  *  or parked with none; one another worker has claimed since is not its. */
 export function rowOwnSlot(r: FleetRow): FleetSlot | null {
   return r.slot && (r.slot.worker_id === null || r.slot.worker_id === r.workerId) ? r.slot : null;
+}
+
+/** The fleet-wide half of the CloakBrowser guard: switched on, a seat free. */
+export type FleetCloakRoom = { enabled: boolean; used: number; max: number };
+
+export function fleetCloakRoom(settings: Pick<FleetSettings, 'cloak_enabled' | 'cloak_max_slots'> | null | undefined, slots: readonly FleetSlot[]): FleetCloakRoom {
+  return {
+    enabled: settings?.cloak_enabled === true,
+    used: slots.filter(s => fleetEngineOf(s.device) === 'cloak').length,
+    max: settings?.cloak_max_slots ?? 0,
+  };
+}
+
+/** Whether the row offers Switch to CloakBrowser: the backend's guard, read
+ *  from the page's last poll, so a refusal can still come back. */
+export function rowCloakSwitchable(r: FleetRow, room: FleetCloakRoom): boolean {
+  const own = rowOwnSlot(r);
+  if (r.source !== 'erp' || !own || !room.enabled || room.used >= room.max) return false;
+  return fleetCloakSwitchable({
+    parked: own.parked, worker_id: own.worker_id, state: own.worker_id === r.workerId ? r.state : own.worker?.state, device: own.device,
+  });
 }
 
 /** Only an account its worker reports lost, or a manager parked: a worker

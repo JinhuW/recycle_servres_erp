@@ -15,6 +15,30 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.409.0] - 2026-11-02
+
+### Added
+
+- **A fleet account can move to CloakBrowser, one at a time and only while it
+  has no live session** (RS-505). CloakBrowser is a stealth Chromium whose
+  fingerprint is set by a seed. A slot's device now carries `browser_engine`,
+  `cloak_seed` and `cloak_gpu`, derived from the account number so that the
+  same account always gets the same values, and the claim hands them to the
+  worker. `POST /api/fleet/slots/:no/engine` makes the switch. Because the
+  new fingerprint is a new machine to Facebook, it refuses any account with a
+  live session and allows only one with no worker, a parked one, or one that
+  already lost its session. It also refuses while the new `cloak_enabled`
+  setting is off (the default), once `cloak_max_slots` slots (default 1, the
+  free license's session limit) run CloakBrowser, and for a slot switched
+  before. Going back to stock is allowed only while the cloak session never
+  reached HEALTHY. On the Fleet tab the table gains an Engine column and a
+  "Switch to CloakBrowser" action wherever the guard would allow it, behind
+  a confirmation that says the move is one way, and a CloakBrowser row offers
+  Back to stock. A Browser engine card holds
+  the on/off switch, the seats and the loss rate per 100 account-days for
+  each engine against the stint baseline from v1.408.0. Workers that cannot
+  read the keys yet carry on with stock Chromium.
+
 ## [1.408.0] - 2026-11-02
 
 ### Added

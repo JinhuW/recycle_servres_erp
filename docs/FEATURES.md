@@ -3681,6 +3681,28 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     The coordinator's activity aside stays under the table while its rows
     exist; since v1.350.1 it spans the full width and its list stops at 480px
     and scrolls. There is no Pause on a roll: the backend has no route for it.
+    Since v1.409.0 (RS-505) each ERP account can run CloakBrowser, a stealth
+    Chromium, instead of stock Chromium. The slot's device carries
+    `browser_engine`, a `cloak_seed` and a `cloak_gpu` derived from the
+    account number, and the claim hands them to the worker, which uses them
+    from its next normal start. The table has an **Engine** column (Stock,
+    or a CloakBrowser chip with its seed and GPU). A row offers **Switch to
+    CloakBrowser** only while its account has no live session: no worker,
+    parked, or reporting Session expired, Checkpoint or a challenge, never
+    switched before, with CloakBrowser on and a seat free. The confirmation
+    names the fingerprint and says the move is one way and that Facebook
+    sees a new device on the account's next normal start. A refusal from
+    `POST /api/fleet/slots/:no/engine` reads as a sentence: a live session,
+    CloakBrowser off, every seat taken, or switched before. A CloakBrowser
+    row offers **Back to stock**, another new device, which is refused once
+    the cloak session has been healthy. A
+    **Browser engine** card under the host cards has the **CloakBrowser on**
+    switch (`cloak_enabled`, default off; off stops new switches and leaves
+    switched accounts alone), the seats stepper (`cloak_max_slots`, default
+    1, the license's session limit; parked cloak slots count) and the
+    losses per 100 account-days over 30 days for stock, CloakBrowser and the
+    stint baseline. The ERP worker page shows the engine, seed and GPU under
+    the browser.
   - **Tasks** (`/#/fleet/tasks`, v1.344.0): the belt, then the task table
     with the city log beside it. **The belt** is one row per enabled item on
     a 24-hour window centred on now, in quarter-hour buckets: searches done in
@@ -3786,7 +3808,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     healthy state between is the same loss) and losses per 100
     account-days, with a `retro` block from the stint ledger's `problem`
     and `retired` endings as the stock baseline from before the history.
-    No page shows it yet.
+    Since v1.409.0 the Fleet tab's Browser engine card shows it.
   - **Proxies** (`/#/fleet/proxies`, v1.368.0, RS-424): the health of every
     proxy port the fleet browses through, between Analysis and Account pool,
     with the number down as a warn-coloured chip on the tab bar. Rows are the
