@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-01
 reporter: jinhu
 branch: fix/uptime-monitor-crash-loop
-pr:
+pr: 1050
 version: 1.401.1
 related: []
 ---
