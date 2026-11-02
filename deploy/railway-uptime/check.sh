@@ -3,10 +3,12 @@
 # origin — Railway's own dashboards stayed green during the 2026-07-12 outage
 # because only the Cloudflare→Worker→domain layer was broken (HTTP 523).
 #
-# On failure the run exits 1 (shows as FAILED in Railway) and, when ALERT_URL
-# is set, posts to the ops alert relay (deploy/railway-alerts, POST /alert),
-# which puts it in the "ERP · Uptime" Telegram topic with the layer that broke
-# (edge vs origin).
+# On failure it posts to the ops alert relay (deploy/railway-alerts, POST
+# /alert), which puts it in the "ERP · Uptime" Telegram topic with the layer
+# that broke (edge vs origin). The run exits 1 only when that alert didn't get
+# out: a non-zero exit marks the deployment CRASHED, and on 2026-10-28 one
+# crashed run left Railway re-running the service from a snapshot it could no
+# longer fetch, a "Deploy failed" every four hours and no probes for four days.
 #
 # Env (all optional):
 #   PUBLIC_URL   default https://inventory.recycleservers.com/api/health
@@ -49,14 +51,18 @@ if [ -n "${ALERT_URL:-}" ]; then
   # Telegram refused it.
   esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
   body="{\"topic\":\"erp_uptime\",\"status\":\"firing\",\"title\":\"recycle-erp prod DOWN\",\"lines\":[\"$(esc "$PUBLIC_URL") -> HTTP $public_status\",\"Failing layer: $(esc "$layer")\"],\"link\":\"$(esc "$PUBLIC_URL")\"}"
-  if curl -fsS -m 15 -o /dev/null -X POST "$ALERT_URL" \
+  post() {
+    curl -fsS -m 15 -o /dev/null -X POST "$ALERT_URL" \
       -H "Authorization: Bearer ${ALERT_TOKEN:-}" \
       -H 'Content-Type: application/json' \
-      -d "$body"; then
+      -d "$body"
+  }
+  # The relay sits on the same Cloudflare edge that may be the thing failing.
+  if post || { sleep 20; post; }; then
     echo "[uptime] alert delivered"
-  else
-    echo "[uptime] alert post failed"
+    exit 0
   fi
+  echo "[uptime] alert post failed"
 fi
 
 exit 1

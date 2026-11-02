@@ -8,7 +8,7 @@ dockerfilePath = "Dockerfile"
 [deploy]
 # Probe every 5 minutes (Railway's minimum cron granularity). The container
 # runs check.sh and exits; NEVER restart so a completed run isn't relooped —
-# a non-zero exit still shows the run as FAILED, which is the alert signal
-# when no ALERT_URL is configured.
+# a non-zero exit (only when the alert couldn't be sent) shows the run as
+# CRASHED, which Railway's own webhook reports.
 cronSchedule = "*/5 * * * *"
 restartPolicyType = "NEVER"
