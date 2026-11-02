@@ -14,6 +14,10 @@ certifi==2026.10.23
 cffi==2.1.1
 charset_normalizer==3.5.2
 click==8.5.0
+# Exact on purpose: the monitor's browser_engine.py launches the binary from
+# cloakbrowser 0.7.0's internals (build_args, the license env and guard), so
+# this pin moves only together with a monitor change that is tested against it.
+cloakbrowser==0.7.0
 cloudpickle==3.1.2
 cryptography==50.0.2
 currencyconverter==0.18.22

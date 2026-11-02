@@ -15,6 +15,11 @@
 # The [user.*] Telegram and alert-report keys are rendered only when that env
 # carries RS_ALERTS=on. No secret is written into this file.
 #
+# CloakBrowser's CLOAKBROWSER_LICENSE_KEY is the one claim variable this file
+# does not name: the binary reads it from its environment, and the monitor's
+# [monitor] table refuses keys it does not know. rs_worker.entry lets it
+# through by name (BROWSER_ENV), so it never reaches the rendered file.
+#
 # The prompt and the alert channel are copied from configs/master.toml; keep
 # them in step until the fleet's settings carry them.
 

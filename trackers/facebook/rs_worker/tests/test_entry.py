@@ -1036,3 +1036,160 @@ def test_legacy_sidecar_user_agent_reaches_the_actual_browser_context_unchanged(
     assert kwargs["user_agent"] == ua
     assert kwargs["viewport"] == {"width": 1280, "height": 720}
     assert "locale" not in kwargs and "timezone_id" not in kwargs
+
+
+# ---------------------------------------------------------------------------
+# the browser engine (CloakBrowser)
+# ---------------------------------------------------------------------------
+LICENSE = "cb_made-up-license-for-tests"  # pragma: allowlist secret
+
+
+def cloak_device(**extra: Any) -> Dict[str, Any]:
+    return {**fleet_device(), "screen": [1536, 864], "browser_engine": "cloak",
+            "cloak_seed": 48213, "cloak_gpu": "NVIDIA", **extra}
+
+
+def test_identity_carries_the_engine_and_its_persona() -> None:
+    profile = entry.identity_for(claim_with(cloak_device()))["device"]
+    assert profile["browser_engine"] == "cloak"
+    assert profile["cloak_seed"] == 48213
+    assert profile["cloak_gpu"] == "NVIDIA"
+
+
+def test_a_stock_device_carries_no_engine_keys() -> None:
+    profile = entry.identity_for(claim_with(fleet_device()))["device"]
+    assert not {"browser_engine", "cloak_seed", "cloak_gpu"} & set(profile)
+    assert profile["user_agent"] == fleet_device()["user_agent"]
+
+
+def test_a_seed_that_is_not_an_integer_is_not_passed_on() -> None:
+    profile = entry.identity_for(claim_with(cloak_device(cloak_seed=True)))["device"]
+    assert "cloak_seed" not in profile
+
+
+def test_a_cloak_device_pins_no_user_agent_anywhere(tmp_path: Path) -> None:
+    entry.write_files(tmp_path, claim_with(cloak_device()), {"monitor": {}})
+    profile = json.loads((tmp_path / "identity.json").read_text())["device"]
+    assert "user_agent" not in profile
+    assert json.loads((tmp_path / "session.json.meta.json").read_text())["user_agent"] is None
+
+
+def test_the_monitor_launches_cloak_from_the_written_identity(tmp_path: Path) -> None:
+    """Through the monitor's own `browser_engine`: the flags the binary gets."""
+    from ai_marketplace_monitor import browser_engine
+
+    entry.write_files(tmp_path, claim_with(cloak_device()), {"monitor": {}})
+    identity = json.loads((tmp_path / "identity.json").read_text())
+    assert browser_engine.cloak_args(identity) == [
+        "--fingerprint=48213",
+        "--fingerprint-platform=windows",
+        "--fingerprint-gpu-vendor=NVIDIA",
+        "--window-position=0,0",
+        "--window-size=1536,864",
+    ]
+    assert browser_engine.cloak_locale(identity) == ("America/New_York", "en-US")
+
+
+def test_a_cloak_device_without_a_viewport_keeps_its_screen() -> None:
+    device = {k: v for k, v in cloak_device().items() if k != "viewport"}
+    profile = entry.identity_for(claim_with(device))["device"]
+    assert profile["screen"] == {"width": 1536, "height": 864}
+    assert "viewport" not in profile
+
+
+@pytest.mark.parametrize(
+    ("device", "geometry"),
+    [
+        (cloak_device(), "1536x864x24"),
+        ({**cloak_device(), "screen": None}, "1920x1080x24"),
+        ({**cloak_device(), "screen": [0, 0]}, "1920x1080x24"),
+        # Stock emulates its viewport inside the screen it always had.
+        ({**fleet_device(), "screen": [1536, 864]}, "1920x1080x24"),
+    ],
+)
+def test_the_screen_is_the_cloak_devices(device: Dict[str, Any], geometry: str) -> None:
+    assert entry.screen_geometry(device) == geometry
+
+
+def test_the_claims_env_may_carry_the_cloak_license() -> None:
+    assert "CLOAKBROWSER_LICENSE_KEY" in entry.claim_env_allowed()
+
+
+def run_capturing_env(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, device: Dict[str, Any],
+    **extra: str,
+) -> Dict[str, str]:
+    from . import fake_fleet
+
+    monkeypatch.setattr(fake_fleet, "DEVICE", device)
+    assert fleet.env is not None
+    fleet.env["CLOAKBROWSER_LICENSE_KEY"] = LICENSE
+    seen: Dict[str, str] = {}
+
+    def run_monitor(command: Any, env: Dict[str, str], *args: Any, **kwargs: Any) -> int:
+        seen.update(env)
+        return 0
+
+    monkeypatch.setattr(entry, "run_monitor", run_monitor)
+    assert entry.run_fleet([], fleet_env(fleet, **extra), home=tmp_path / "home") == 0
+    return seen
+
+
+def test_a_cloak_worker_gets_its_screen_license_and_version(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seen = run_capturing_env(
+        fleet, tmp_path, monkeypatch, cloak_device(),
+        SCREEN_GEOMETRY="1920x1080x24", RS_CLOAK_VERSION="145.0.7632.159.2",
+    )
+    assert seen["SCREEN_GEOMETRY"] == "1536x864x24"
+    assert seen["RS_WORKER_WINDOW_MANAGER"] == "openbox"
+    assert seen["CLOAKBROWSER_LICENSE_KEY"] == LICENSE
+    assert seen["RS_CLOAK_VERSION"] == "145.0.7632.159.2"
+    # The license reaches the browser's environment only: not the config, not the log.
+    assert LICENSE not in (tmp_path / "home" / "config.toml").read_text()
+    out = capsys.readouterr()
+    assert LICENSE not in out.out + out.err
+    assert "CloakBrowser 145.0.7632.159.2" in out.out + out.err
+
+
+def test_a_stock_worker_keeps_the_containers_screen(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    device = {**fleet_device(), "screen": [1536, 864]}
+    seen = run_capturing_env(
+        fleet, tmp_path, monkeypatch, device, SCREEN_GEOMETRY="1280x800x24",
+        RS_WORKER_WINDOW_MANAGER="openbox",
+    )
+    assert seen["SCREEN_GEOMETRY"] == "1280x800x24"
+    # Stock keeps the window it always had: no window manager.
+    assert "RS_WORKER_WINDOW_MANAGER" not in seen
+
+
+def test_the_display_starts_the_window_manager_it_is_told_to(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    started: List[List[str]] = []
+
+    class Proc:
+        def __init__(self, args: List[str], **kwargs: Any) -> None:
+            started.append(list(args))
+
+    monkeypatch.setattr(entry.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(entry.subprocess, "Popen", Proc)
+    monkeypatch.setattr(entry, "vnc_allow_args", lambda: [])
+    monkeypatch.setattr(entry.Path, "exists", lambda self: True)
+    entry.start_display({"DISPLAY": ":99", "RS_WORKER_WINDOW_MANAGER": "openbox"})
+    assert [p[0] for p in started] == ["/usr/bin/Xvfb", "/usr/bin/openbox", "/usr/bin/x11vnc"]
+    started.clear()
+    entry.start_display({"DISPLAY": ":99"})
+    assert [p[0] for p in started] == ["/usr/bin/Xvfb", "/usr/bin/x11vnc"]
+
+
+def test_the_baked_cloak_version_is_read_from_the_image(tmp_path: Path) -> None:
+    baked = tmp_path / "VERSION"
+    assert entry.cloak_version({}, baked) is None
+    baked.write_text("145.0.7632.159.2\n")
+    assert entry.cloak_version({}, baked) == "145.0.7632.159.2"
+    assert entry.cloak_version({"RS_CLOAK_VERSION": "146.0"}, baked) == "146.0"
