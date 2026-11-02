@@ -41,7 +41,7 @@ import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
 } from '../lib/fx';
-import { recordSaleDataPoints, retractSaleDataPoints, recordBidDataPoints, type BidPart } from '../lib/sellOrderMarket';
+import { recordSaleDataPoints, retractSaleDataPoints, recordBidDataPoints, retractBidDataPoints, type BidPart } from '../lib/sellOrderMarket';
 import type { WithdrawnPrice } from '../lib/refPriceEvents';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
@@ -1844,10 +1844,12 @@ sellOrders.post('/:id/status', async (c) => {
     // Audit-event writes for close + reopen. Done's audit story is the
     // inventory_events rows below; archive lives in its own handler.
     if (body.to === 'Closed') {
+      const withdrawnBids = await retractBidDataPoints(tx, id);
       await writeSellOrderEvent(tx, id, u.id, 'closed', {
         reasonId: body.closeReasonId!,
         note: body.note ?? null,
         fromStatus: cur.status,
+        ...(withdrawnBids.length ? { withdrawnPrices: withdrawnBids } : {}),
       });
     } else if (reopening || reopeningSale) {
       // The withdrawn market prices are named here, the one record left of

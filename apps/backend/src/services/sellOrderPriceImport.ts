@@ -20,7 +20,6 @@ export type ParsedRowStatus =
   | 'no-price'
   | 'invalid-price'
   | 'duplicate'
-  | 'ambiguous'
   // A sheet from before v1.242.0 priced the part apart per condition.
   | 'per-condition';
 
@@ -51,6 +50,8 @@ export type PriceImportPreview = {
     noPrice: number;
     invalid: number;
     duplicate: number;
+    // Rows this file can't price on its own: today, a part priced apart per
+    // condition (the name predates that status).
     ambiguous: number;
   };
 };
@@ -98,16 +99,16 @@ export function matchPriceRows(
   orderProducts: OrderProduct[],
 ): PriceImportPreview {
   const manualProducts: OrderProduct[] = [];
-  const byCanon = new Map<string, { product: OrderProduct; index: number }[]>();
+  // groupOrderProducts folds every line of a part number into one product, so
+  // a part number names at most one.
+  const byCanon = new Map<string, { product: OrderProduct; index: number }>();
   orderProducts.forEach((product, index) => {
     const canon = product.partNumber ? canonPartNumberJs(product.partNumber) : '';
     if (canon === '') {
       manualProducts.push(product);
       return;
     }
-    const list = byCanon.get(canon) ?? [];
-    list.push({ product, index });
-    byCanon.set(canon, list);
+    byCanon.set(canon, { product, index });
   });
 
   const rows: ParsedPriceRow[] = [];
@@ -134,43 +135,36 @@ export function matchPriceRows(
       status: 'no-price',
     };
 
-    const candidates = byCanon.get(parsed.canonPart);
-    if (!candidates) {
+    const target = byCanon.get(parsed.canonPart);
+    if (!target) {
       parsed.status = 'not-in-order';
+    } else if (sheetRow.priceKind === 'empty' || sheetRow.price === 0) {
+      // A 0 on a bid is "not bidding"; as a price it would also be recorded
+      // as the part's market bid and zero its max buy.
+      parsed.status = 'no-price';
+    } else if (sheetRow.priceKind === 'invalid') {
+      parsed.status = 'invalid-price';
+    } else if (perCondition.has(target.index)) {
+      parsed.status = 'per-condition';
     } else {
-      // A part under two labels (a typed line re-worded) can't be told
-      // apart by part number alone.
-      const target = candidates.length === 1 ? candidates[0] : null;
-      if (!target) {
-        parsed.status = 'ambiguous';
-      } else if (sheetRow.priceKind === 'empty' || sheetRow.price === 0) {
-        // A 0 on a bid is "not bidding"; as a price it would also be recorded
-        // as the part's market bid and zero its max buy.
-        parsed.status = 'no-price';
-      } else if (sheetRow.priceKind === 'invalid') {
-        parsed.status = 'invalid-price';
-      } else if (perCondition.has(target.index)) {
+      const prior = winnerByProduct.get(target.index);
+      const cond = condKey(sheetRow.condition);
+      const priorCond = winnerCondition.get(target.index) ?? '';
+      if (prior && cond && priorCond && cond !== priorCond && prior.price !== sheetRow.price) {
+        prior.status = 'per-condition';
         parsed.status = 'per-condition';
+        perCondition.add(target.index);
+        winnerByProduct.delete(target.index);
       } else {
-        const prior = winnerByProduct.get(target.index);
-        const cond = condKey(sheetRow.condition);
-        const priorCond = winnerCondition.get(target.index) ?? '';
-        if (prior && cond && priorCond && cond !== priorCond && prior.price !== sheetRow.price) {
-          prior.status = 'per-condition';
-          parsed.status = 'per-condition';
-          perCondition.add(target.index);
-          winnerByProduct.delete(target.index);
-        } else {
-          parsed.status = 'matched';
-          parsed.partNumber = target.product.partNumber;
-          parsed.label = target.product.label;
-          parsed.oldPrice = target.product.oldPrice;
-          parsed.qty = target.product.qty;
-          parsed.lineCount = target.product.lineCount;
-          if (prior) prior.status = 'duplicate';
-          winnerByProduct.set(target.index, parsed);
-          winnerCondition.set(target.index, cond);
-        }
+        parsed.status = 'matched';
+        parsed.partNumber = target.product.partNumber;
+        parsed.label = target.product.label;
+        parsed.oldPrice = target.product.oldPrice;
+        parsed.qty = target.product.qty;
+        parsed.lineCount = target.product.lineCount;
+        if (prior) prior.status = 'duplicate';
+        winnerByProduct.set(target.index, parsed);
+        winnerCondition.set(target.index, cond);
       }
     }
     rows.push(parsed);
@@ -187,7 +181,7 @@ export function matchPriceRows(
     else if (row.status === 'no-price') summary.noPrice++;
     else if (row.status === 'invalid-price') summary.invalid++;
     else if (row.status === 'duplicate') summary.duplicate++;
-    // A part this file can't price on its own, like an ambiguous one.
+    // A part this file can't price on its own.
     else summary.ambiguous++;
   }
 

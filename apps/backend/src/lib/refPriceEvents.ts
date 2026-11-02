@@ -51,19 +51,24 @@ export async function appendPriceEvent(
 export type WithdrawnPrice = { partNumber: string; price: number };
 
 /**
- * Withdraw every event recorded under `source`. A part whose current reading
- * came from one falls back to its newest remaining event, or to no reading.
- * Returns the points it removed.
+ * Withdraw every event recorded under `source`, or only those of the parts
+ * `refPriceIds` names. A part whose current reading came from one falls back
+ * to its newest remaining event, or to no reading. Returns the points it
+ * removed.
  */
 export async function retractPriceEvents(
   tx: postgres.TransactionSql,
   source: string,
+  refPriceIds?: readonly string[],
 ): Promise<WithdrawnPrice[]> {
+  const ids = refPriceIds ? [...refPriceIds] : null;
   // One statement: the DELETE and the fallback read see the same snapshot, in
   // which the withdrawn rows still exist — hence the explicit source filter.
   const rows = await tx<{ part_number: string; price: number }[]>`
     WITH gone AS (
-      DELETE FROM ref_price_events WHERE source = ${source}
+      DELETE FROM ref_price_events
+       WHERE source = ${source}
+         AND (${ids}::text[] IS NULL OR ref_price_id::text = ANY(${ids}::text[]))
       RETURNING ref_price_id, price
     ),
     reset AS (

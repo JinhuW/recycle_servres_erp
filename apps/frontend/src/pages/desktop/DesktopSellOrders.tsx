@@ -36,7 +36,7 @@ import { AddInventoryPicker, type SellableItem } from '../../components/AddInven
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { SellOrderAttachments, type SellAttachment } from '../../components/SellOrderAttachments';
 import { PriceImportSection } from './SellOrderPriceImportDialog';
-import { applyPriceRows, type BidPart, mergeBidParts } from '../../lib/priceImport';
+import { applyPriceRows, confirmedBidParts, type ImportedBid, mergeBidParts } from '../../lib/priceImport';
 import { usePreference } from '../../lib/preferences';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { filterLineGroups, foldEntries, groupSellOrderLines, noRange, type SellOrderLineGroup, type SellOrderLineGroupBy, type SeriesFold } from '../../lib/sellOrderLineGroups';
@@ -1215,7 +1215,7 @@ function SellOrderDetail({ id, onToast }: {
     // confirmed vendor price import. Save sends them so the backend records
     // the accepted prices on the Market value board, and clears them the
     // moment that PATCH lands so a retry of a later step re-sends no bids.
-    bidParts: BidPart[];
+    bidParts: ImportedBid[];
   } | null>(null);
   // FX snapshot for the draft's currency (null for USD or until it loads).
   const [fx, setFx] = useState<FxInfo | null>(null);
@@ -1362,7 +1362,7 @@ function SellOrderDetail({ id, onToast }: {
     || receiverChanged
     || currencyChanged
     || linesChanged
-    || draft.bidParts.length > 0
+    || confirmedBidParts(draft.lines, draft.bidParts).length > 0
     || pendingAdjust != null
   );
   // Done waits on every manager's sign-off of the order as saved. Edits that
@@ -1549,6 +1549,14 @@ function SellOrderDetail({ id, onToast }: {
       if (open) n.delete(k); else n.add(k);
       return n;
     });
+    // A just-added lot holds its fold open, so closing it lets go of them.
+    if (open) {
+      setJustAdded(s => {
+        const n = new Set(s);
+        for (const m of f.members) if (m.line.inventoryId !== null) n.delete(m.line.inventoryId);
+        return n;
+      });
+    }
   };
   const addLines = (picked: SellableItem[]) => {
     if (!draft) return;
@@ -1588,7 +1596,8 @@ function SellOrderDetail({ id, onToast }: {
       if (currencyChanged) patchBody.currency = draft.currency;
       // A confirmed import is a bid even when the vendor re-quoted the current
       // prices, so the line set goes with it regardless of a diff.
-      if (linesChanged || currencyChanged || draft.bidParts.length > 0) {
+      const bidParts = confirmedBidParts(draft.lines, draft.bidParts);
+      if (linesChanged || currencyChanged || bidParts.length > 0) {
         patchBody.lines = draft.lines.map(l => ({
           id:          l.id,
           inventoryId: l.inventoryId,
@@ -1601,7 +1610,7 @@ function SellOrderDetail({ id, onToast }: {
           warehouseId: l.warehouseId,
           condition:   l.condition,
         }));
-        if (draft.bidParts.length > 0) patchBody.bidParts = draft.bidParts;
+        if (bidParts.length > 0) patchBody.bidParts = bidParts;
         if (linesBase.current) patchBody.linesVersion = linesBase.current;
       }
       if (Object.keys(patchBody).length > 0) {
@@ -2192,6 +2201,7 @@ function SellOrderDetail({ id, onToast }: {
                   <PriceImportSection
                     orderId={order.id}
                     currency={draft.currency}
+                    savedCurrency={order.currency}
                     locale={locale}
                     onApply={rows =>
                       setDraft(d => d && {

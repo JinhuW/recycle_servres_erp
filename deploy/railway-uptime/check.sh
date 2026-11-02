@@ -13,7 +13,8 @@
 # Env (all optional):
 #   PUBLIC_URL   default https://inventory.recycleservers.com/api/health
 #   ORIGIN_URL   default https://backend-production-7b10.up.railway.app/api/health
-#   ALERT_URL    the relay's /alert URL; unset = rely on Railway FAILED status
+#   ALERT_URL    the relay's /alert URL; unset = the outage is only logged,
+#                since a failed run would crash the service again
 #   ALERT_TOKEN  the relay's ALERT_TOKEN bearer
 set -eu
 
@@ -63,6 +64,8 @@ if [ -n "${ALERT_URL:-}" ]; then
     exit 0
   fi
   echo "[uptime] alert post failed"
+  exit 1
 fi
 
-exit 1
+echo "[uptime] ALERT_URL unset; not alerting"
+exit 0

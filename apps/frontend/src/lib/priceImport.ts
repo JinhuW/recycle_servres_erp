@@ -16,16 +16,29 @@ export type PriceApplyRow = {
   price: number;
 };
 
-// What the save sends the backend as a confirmed bid: the parts the sheet
-// priced. Keyed the way applyPriceRows matches, so a second import of the
-// same part replaces rather than repeats it.
+// The parts the sheet priced, at the price it gave. Keyed the way
+// applyPriceRows matches, so a second import of the same part replaces rather
+// than repeats it.
+export type ImportedBid = { partNumber: string; price: number };
+// What the save sends the backend as a confirmed bid.
 export type BidPart = { partNumber: string };
 
-export function mergeBidParts(current: BidPart[], rows: PriceApplyRow[]): BidPart[] {
-  const byPart = new Map<string, BidPart>();
+export function mergeBidParts(current: ImportedBid[], rows: PriceApplyRow[]): ImportedBid[] {
+  const byPart = new Map<string, ImportedBid>();
   for (const p of current) byPart.set(p.partNumber, p);
-  for (const r of rows) byPart.set(r.canonPart, { partNumber: r.canonPart });
+  for (const r of rows) byPart.set(r.canonPart, { partNumber: r.canonPart, price: r.price });
   return [...byPart.values()];
+}
+
+// The imported parts still at the sheet's price on every line. A price typed
+// over the import afterwards is the manager's, not the customer's bid.
+export function confirmedBidParts(lines: PriceApplyLine[], bids: ImportedBid[]): BidPart[] {
+  return bids
+    .filter(b => {
+      const own = lines.filter(l => canonicalPartNumber(l.partNumber) === b.partNumber);
+      return own.length > 0 && own.every(l => l.unitPrice === b.price);
+    })
+    .map(b => ({ partNumber: b.partNumber }));
 }
 
 export function applyPriceRows<L extends PriceApplyLine>(

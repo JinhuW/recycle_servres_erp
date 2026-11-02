@@ -127,6 +127,12 @@ describe('company-pay POs need a transaction ID to leave Draft', () => {
     expect(await lifecycleOf(token, id)).toBe('in_transit');
   });
 
+  it('answers a cash edit of a PO that does not exist with 404, not the cash refusal', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('PATCH', '/api/orders/SO-NOPE-0', { token, body: { paymentMethod: 'cash' } });
+    expect(r.status).toBe(404);
+  });
+
   it('holds a manager stage-jump to the same rule', async () => {
     const { token: pTok } = await loginAs(MARCUS);
     const id = await createOrder(pTok, 'company');

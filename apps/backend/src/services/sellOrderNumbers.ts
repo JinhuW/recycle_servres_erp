@@ -228,18 +228,24 @@ function byWarehouseTab(lines: readonly FoldLine[]): [string, FoldLine[]][] {
 // save's products follow every other.
 function plannedNos(lines: readonly FoldLine[], next: number): { assigned: Map<string, number>; next: number } {
   const slot = (l: FoldLine) => `${warehouseOf(l)}\u0000${l.numKey}`;
+  // An order numbered before series shared a # holds one series under several
+  // #s, so a lot joins its own product's # before its series' lowest.
+  const own = (l: FoldLine) => `${warehouseOf(l)}\u0000${l.key}`;
   const existing = new Map<string, number>();
+  const existingOwn = new Map<string, number>();
   for (const l of lines) {
     const no = l.row.product_no;
     if (no == null) continue;
     const had = existing.get(slot(l));
     if (had == null || no < had) existing.set(slot(l), no);
+    const hadOwn = existingOwn.get(own(l));
+    if (hadOwn == null || no < hadOwn) existingOwn.set(own(l), no);
   }
   const assigned = new Map<string, number>();
   const newcomers: FoldLine[] = [];
   for (const l of lines) {
     if (l.row.product_no != null) continue;
-    const joins = existing.get(slot(l));
+    const joins = existingOwn.get(own(l)) ?? existing.get(slot(l));
     if (joins != null) assigned.set(l.row.sol_id, joins);
     else newcomers.push(l);
   }

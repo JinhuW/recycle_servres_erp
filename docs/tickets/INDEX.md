@@ -5,6 +5,9 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-510](./RS-510-ledger-mismatch-flag-converts-usd-records-at-today-s.md) | backlog | bug | P2 | Ledger mismatch flag converts USD records at today's rate, not the booked one | — |
+| [RS-509](./RS-509-chip-die-code-accepts-any-three-letters-and-misses-a.md) | backlog | bug | P2 | Chip die code accepts any three letters and misses a bare HYNIX prefix | — |
+| [RS-508](./RS-508-fix-sell-order-numbering-bid-recording-and-review-fi.md) | done | bug | P1 | Fix sell-order numbering, bid recording and review findings before release | 1.409.1 |
 | [RS-507](./RS-507-fleet-slots-can-switch-to-the-cloakbrowser-engine.md) | done | story | P2 | Fleet slots can switch to the CloakBrowser engine | 1.409.0 |
 | [RS-506](./RS-506-fleet-keeps-a-history-of-worker-states-and-reports-a.md) | done | story | P2 | Fleet keeps a history of worker states and reports account loss per browser engine | 1.408.0 |
 | [RS-505](./RS-505-fleet-worker-image-can-run-cloakbrowser-per-account.md) | in-review | story | P2 | Fleet worker image can run CloakBrowser per account | facebook-tracker 0.16.0 (no ERP release) |

@@ -15,6 +15,38 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.409.1] - 2026-11-02
+
+### Fixed
+
+- **Fixes from the pre-release review of v1.401.0–v1.409.0** (RS-508). Three of
+  them would have written wrong data on prod once `dev` was released:
+  - **Sell-order #.** On an order numbered before v1.404.0, one RAM series
+    sits under several #s. A new lot of one of its parts joined the series'
+    lowest # and split the part across two #s on the packing list and the bid
+    sheet. It now joins its own part's #, and only a part new to the order
+    takes the series' #.
+  - **Bids from the vendor price import.** A price typed over the import
+    before Save was still recorded on the Market board as the customer's bid.
+    Now only parts still at the sheet's price are sent. A re-imported sheet
+    stacked a second bid for each part, and nothing ever withdrew them. A
+    later bid save now replaces the order's earlier bid for the part, and
+    closing the order withdraws its bids, so `last_price` falls back to the
+    part's previous reading. The *closed* history entry names the withdrawn
+    prices, as a reopened sale's does.
+  - **Currency.** The bid template and the preview price in the order's saved
+    currency. With a currency switch not saved yet, the sheet's numbers went
+    into the other currency's lines. The import card now says to save the
+    currency change first, and the preview formats in its own currency.
+- A series fold holding a lot just added now collapses when its chevron is
+  clicked.
+- The uptime probe exits 0 when `ALERT_URL` is unset. A failing run used to
+  mark the deployment CRASHED, the loop from 2026-10-28.
+- A cash edit or hand-off of a PO that does not exist answers 404 instead of
+  the cash-retired 400.
+- The price import's `ambiguous` row status is gone. Lines are folded by part
+  number before matching, so it could never occur.
+
 ## [1.409.0] - 2026-11-02
 
 ### Added

@@ -276,17 +276,6 @@ describe('part-number matching', () => {
     expect(res.rows.map(r => [r.rawPart, r.price])).toEqual([['ABC123', 40], ['XYZ-9', 140]]);
   });
 
-  it('marks ambiguous when one part sits under two labels', () => {
-    const wb = wbWith([
-      ['Part Number', 'Unit Price (USD)'],
-      ['ABC123', 100],
-    ]);
-    const products = [product({}), product({ label: 'RAM 16GB (typed)' })];
-    const res = parsePriceWorkbook(wb, products);
-    expect(res.rows[0].status).toBe('ambiguous');
-    expect(res.summary.ambiguous).toBe(1);
-  });
-
   it('folds one part in two conditions into one product', () => {
     const products = groupOrderProducts([
       { label: 'RAM 16GB', part_number: 'ABC-123', qty: 10, unit_price: 40, source_unit_price: null },
@@ -642,6 +631,38 @@ describe('PATCH /api/sell-orders/:id with bidParts', () => {
     expect(res.status).toBe(200);
     expect((await refPrice('BID-A1'))?.last_price).toBe(55);
     expect(await refPrice('BID-B2')).toBeUndefined();
+  });
+
+  it('a second bid save of a part replaces the order\'s earlier bid, not adds to it', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    for (const price of [55, 60]) {
+      expect((await api('PATCH', `/api/sell-orders/${id}`, {
+        token, body: { lines: repriced(price, 120), bidParts: bid('BID-A1') },
+      })).status).toBe(200);
+    }
+    const a = await refPrice('BID-A1');
+    expect(a?.last_price).toBe(60);
+    expect(await eventsFor(a!.id)).toEqual([{ price: 60, source: `bid:${id}` }]);
+  });
+
+  it('closing the order withdraws its bids, and the part falls back to its previous reading', async () => {
+    const { token } = await loginAs(ALEX);
+    const earlier = await createOrder(token, BID_LINES);
+    await api('PATCH', `/api/sell-orders/${earlier}`, { token, body: { lines: repriced(30, 90), bidParts: bid('BID-A1') } });
+    const id = await createOrder(token, BID_LINES);
+    await api('PATCH', `/api/sell-orders/${id}`, { token, body: { lines: repriced(55, 90), bidParts: bid('BID-A1') } });
+    expect((await refPrice('BID-A1'))?.last_price).toBe(55);
+
+    expect((await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Closed', closeReasonId: 'other' },
+    })).status).toBe(200);
+    const a = await refPrice('BID-A1');
+    expect(a).toMatchObject({ last_price: 30, last_price_source: `bid:${earlier}` });
+    expect(await eventsFor(a!.id)).toEqual([{ price: 30, source: `bid:${earlier}` }]);
+    const [ev] = await getTestDb()<{ detail: { withdrawnPrices?: unknown } }[]>`
+      SELECT detail FROM sell_order_events WHERE sell_order_id = ${id} AND kind = 'closed'`;
+    expect(ev?.detail.withdrawnPrices).toEqual([{ partNumber: 'BID-A1', price: 55 }]);
   });
 
   it('rolls the same part on two lines into one qty-weighted point', async () => {
