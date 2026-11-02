@@ -28,16 +28,26 @@ deployed?" harder to answer.
     `cloak_seed` and `cloak_gpu`, its timezone and locale, and a Windows
     persona. A cloak device with no seed is refused, never given a random
     one, because a new seed is a new device to Facebook. A cloak context
-    emulates nothing (no user agent, viewport, screen, locale or timezone),
-    and Xvfb takes the device's screen. The session, the proxy and the
-    account's `datr`/`sb` cookies carry over as before.
+    emulates nothing (no user agent, viewport, screen, locale or timezone);
+    the locale and timezone go to the binary through cloakbrowser's own
+    flags. Xvfb takes the device's screen, and the window is placed and sized
+    as that screen under a window manager (openbox, started for cloak only),
+    so it is the screen's width with a frame, as on Windows. Stock keeps the
+    display it always had. The session, the proxy and the account's
+    `datr`/`sb` cookies carry over as before.
   - **License failures park, distinctly.** A refused license (the binary's
     exits 76-79: seats, key, server, local config) parks the worker `DEAD`
     with `license_denied` and the exit code, apart from a crashed browser.
-    No Facebook page has loaded by then, so it is not a login. A cloak device
-    on an image without the binary parks `browser_failed` rather than exiting
-    into a new container.
-  - **Heartbeats** carry `detail.cloak_version`, the baked build.
+    No Facebook page has loaded by then, so it is not a login. A stock
+    Chromium leaving with one of those codes is a crash, not a license
+    refusal. A cloak device on an image without the binary, or on a
+    cloakbrowser whose internals moved, parks `browser_failed` rather than
+    exiting into a new container; the image build itself fails when those
+    internals are missing.
+  - **Heartbeats** carry `detail.engine`, the engine the browser was
+    launched with (`stock` or `cloak`), so the ERP can record what ran rather
+    than the slot's setting, and, for cloak only, `detail.cloak_version`,
+    the baked build.
   - **The worker image** carries both engines. Built with `CLOAK_BAKE=1` and
     the license as the `cloak_key` BuildKit secret (`push-fleet-images.sh`
     does this when `CLOAKBROWSER_LICENSE_KEY` is set), it bakes the binary
@@ -54,11 +64,14 @@ deployed?" harder to answer.
     environment, never into `config.toml` or a log.
   - **Probe.** `scripts/fingerprint-probe.py` measures, with no account, what
     a worker's browser presents: `webdriver`, the client hints, WebGL, canvas,
-    fonts, the window, and the exit IP of the page and of `context.request`
-    through the slot's proxy. `docs/debug-notes/2026-11-02-cloakbrowser-fingerprint-probe.md`
-    has its first results: cloak hides `webdriver`, both legs use the proxy,
-    and different seeds give different fingerprints, stable across
-    containers.
+    fonts, the window and its frame, the languages and the Accept-Language
+    header, and the exit IP of the page and of `context.request` through the
+    slot's proxy. `docs/debug-notes/2026-11-02-cloakbrowser-fingerprint-probe.md`
+    has its arm64 results: cloak hides `webdriver`, both legs use the proxy,
+    the window is the framed screen, and different seeds give different
+    fingerprints, stable across containers. The amd64 run is still to come,
+    on the dev host, as part of R1: no Chromium runs under this Mac's amd64
+    emulation.
 
 ### Fixed
 

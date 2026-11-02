@@ -314,8 +314,13 @@ def main(argv: List[str] | None = None) -> int:
         rows = compare(runs)
         print(json.dumps(rows, indent=2))
         return 0 if all(r["pass"] for r in rows) else 1
+    # The display's children (x11vnc prints PORT=…) write to stderr; stdout
+    # carries the JSON alone.
+    out = os.fdopen(os.dup(1), "w")
+    os.dup2(2, 1)
     result = probe(args)
-    print(json.dumps(result, indent=2, sort_keys=True))
+    print(json.dumps(result, indent=2, sort_keys=True), file=out)
+    out.flush()
     return 1 if result.get("error") else 0
 
 
