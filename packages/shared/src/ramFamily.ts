@@ -72,6 +72,38 @@ export function ramFamilyLabel(raw: string, family: RamFamily): string {
   return `${splitRamPartFamily(raw, family.length)[0]}*`;
 }
 
+// A sell order goes looser than the family: one series is the module up to its
+// organisation — Samsung M471A1K43, SK Hynix HMA81GS6, Micron MTA18ASF2G72PZ —
+// so CB1-CRC, CB1-CTD and EB1-CWE are one row and one # on the order, with die
+// and speed read off each lot. Inventory keeps the family above.
+const SAMSUNG_SERIES = 9;   // M · module · generation · depth · organisation
+const HYNIX_SERIES = 8;     // HM · generation · density · depth · form · organisation
+const MICRON_SERIES_RE = /^(MTA?\d{1,2}[A-Z]{2,3}(?:256|512|1G|2G|4G|8G|16G)(?:64|72)[A-Z0-9]*?Z)[123]G\d/;
+
+/** The module series of a RAM part number (`M471A1K43`); null when no scheme reads it. */
+export function ramSeries(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const canon = canonicalPartNumber(raw);
+  if (SAMSUNG_RE.test(canon)) return canon.slice(0, SAMSUNG_SERIES);
+  if (canon.startsWith('HM') && hynixLength(raw, canon) != null) return canon.slice(0, HYNIX_SERIES);
+  return canon.match(MICRON_SERIES_RE)?.[1] ?? null;
+}
+
+export type SellSeriesLine = {
+  category?: string | null; partNumber?: string | null; label: string; condition?: string | null;
+};
+
+/**
+ * What folds sell-order lines into one row and one #: the RAM series with the
+ * label and condition, so a different capacity, brand or grade stays apart.
+ * Null for anything without a series; the caller keeps its own product key.
+ */
+export function sellSeriesKey(l: SellSeriesLine): string | null {
+  if (l.category !== 'RAM') return null;
+  const series = ramSeries(l.partNumber);
+  return series ? `ramseries:${series}|${l.label}|${l.condition ?? ''}` : null;
+}
+
 // DDR5 trades by spec, not by stick: a buyer asking for Samsung 32GB 2Rx4
 // 4800 RDIMM takes M321R4GA3BB6-CQK and -CQKET alike, and the family rule
 // above reads only three makers anyway. So a DDR5 lot keys on the six fields
