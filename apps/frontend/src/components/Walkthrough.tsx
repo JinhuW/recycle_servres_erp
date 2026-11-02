@@ -289,7 +289,6 @@ function Payment() {
   const { t } = useT();
   const opts: { icon: IconName; title: string; need: string }[] = [
     { icon: 'dollar', title: t('onbPayPaypalTitle'), need: t('onbPayPaypalNeed') },
-    { icon: 'cash', title: t('onbPayCashTitle'), need: t('onbPayCashNeed') },
     { icon: 'user', title: t('onbPaySelfTitle'), need: t('onbPaySelfNeed') },
   ];
   return (

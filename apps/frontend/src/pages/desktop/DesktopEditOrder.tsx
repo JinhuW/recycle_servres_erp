@@ -67,6 +67,7 @@ import { StagePanel, type RefreshState } from './order/StagePanel';
 import { StageLookback } from './order/StageLookback';
 import { OrderFooter } from './order/OrderFooter';
 import { PoPaymentsLedger } from './order/PoPaymentsLedger';
+import { BankTxnLinkPicker } from '../../components/BankTxnLinkPicker';
 import { AccountingCard } from './accounting/AccountingCard';
 import type { SavedEntry } from '../../lib/useAccountingEntryForm';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
@@ -226,6 +227,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     }
   };
   const [activityKey, setActivityKey] = useState(0);
+  const [costLedgerKey, setCostLedgerKey] = useState(0);
   const [lines, setLines] = useState<EditLine[]>(() => order.lines.map(orderLineToEditLine));
   // Files picked for a line that has no DB id to hang them off yet — one added
   // in this session and not yet confirmed. Keyed by _cid, the only handle such
@@ -293,7 +295,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     setPayment(v);
     setPaidByUserId(v === 'self' ? userId : null);
   };
-  const [paymentMethod, setPaymentMethod] = useState<HandoffMethod | null>(order.paymentMethod ?? null);
+  // Nothing picks a method any more: a company PO is PayPal (null reads as
+  // PayPal), and cash is only ever a legacy PO's saved value.
+  const paymentMethod: HandoffMethod | null = order.paymentMethod ?? null;
   // The hand-off's facts, now the Delivery tab's to edit: where the goods came
   // from, how they travel, who collected them, which box carries them. The
   // box is read from the order's newest package and kept locally so a Refresh
@@ -591,9 +595,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const notesDirty = (notes || '') !== (order.notes || '');
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
   const paymentDirty = payment !== order.payment;
-  // Only a company order carries a method; the server clears it on a flip to
-  // self, so the local value is not a change until the order is company again.
-  const methodDirty = payment === 'company' && paymentMethod !== (order.paymentMethod ?? null);
   // Same for the payer: only a self-paid order names one.
   const payerDirty = payerDraft.dirty;
   // '' = explicitly unset (null). Non-numeric intermediate input (e.g. "5e")
@@ -705,7 +706,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const dirtyBy = {
     products: linesDirty || otherFeesDirty || otherFeesNoteDirty,
     delivery: warehouseDirty || sourceDirty || deliveryDirty || byUserDirty || trackingDirty,
-    payment: paymentDirty || methodDirty || payerDirty || paypalDirty,
+    payment: paymentDirty || payerDirty || paypalDirty,
     commission: commissionDirty || ownerDirty,
     notes: notesDirty,
   };
@@ -726,7 +727,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // What the backend reads as a change to the order itself — the set that
   // sends a purchaser's submitted order back to Draft. A note is not one.
   const materialDirty =
-    linesDirty || warehouseDirty || paymentDirty || methodDirty || payerDirty || otherFeesDirty
+    linesDirty || warehouseDirty || paymentDirty || payerDirty || otherFeesDirty
     || otherFeesNoteDirty || paypalDirty || sourceDirty || deliveryDirty || byUserDirty || trackingDirty;
 
   // What still stands between this Draft and In Transit — the one rule every
@@ -941,7 +942,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         notes:         notesDirty     ? notes                  : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
-        paymentMethod: methodDirty    ? paymentMethod          : undefined,
         paidByUserId:  payerDirty     ? paidByUserId           : undefined,
         commissionRate: commissionDirty ? commissionRateValue : undefined,
         paypalTxnId:   paypalDirty     ? (paypalTxn || null)   : undefined,
@@ -1275,8 +1275,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     ].filter(Boolean).join(' · '),
     payment: [
       costPayerLabel({ payment, paidBy: payerDraft.payer }, t, true),
-      payment === 'company' ? (paymentMethod === 'cash' ? t('hoMethodCash') : paymentMethod === 'paypal' ? t('hoMethodPaypal') : null) : null,
-      payment === 'company' && paymentMethod === 'paypal' ? paypalTxn.trim() || null : null,
+      payment === 'company' ? (paymentMethod === 'cash' ? t('hoMethodCash') : t('hoMethodPaypal')) : null,
+      payment === 'company' && paymentMethod !== 'cash' ? paypalTxn.trim() || null : null,
     ].filter(Boolean).join(' · '),
     commission: [ownerOptions.find(o => o.id === ownerId)?.name ?? order.userName, `${commissionPct || '0'}%`].join(' · '),
   };
@@ -1289,7 +1289,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     }
     setTab(target);
     const focusId = target === 'delivery' ? (source ? (delivery === 'label' ? 'oe-tracking' : 'oe-by') : 'oe-source')
-      : target === 'payment' ? (paymentMethod === 'paypal' ? 'eo-txn' : 'eo-paidby')
+      : target === 'payment' ? (payment === 'company' && paymentMethod !== 'cash' ? 'eo-txn' : 'eo-paidby')
       : 'eo-rate';
     requestAnimationFrame(() => {
       const el = document.getElementById(focusId) ?? document.getElementById('oe-tab-' + target);
@@ -1799,7 +1799,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             <div className="oe-tabpad oe-pay">
               <PaymentFields
                 paidBy={payment} paidByUserId={paidByUserId} payers={payers} onPaidBy={setPayer}
-                method={paymentMethod} onMethod={setPaymentMethod}
+                method={paymentMethod}
                 txnId={paypalTxn} onTxnId={setPaypalTxn}
                 txnRequired={order.txnRequired === true}
                 disabled={!canEditOrder}
@@ -1815,7 +1815,17 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                   // the entries voided by the move stay reachable.
                   business: (
                     <>
-                      <PoPaymentsLedger scope={{ orderId: order.id, kind: 'cost' }} locale={locale} />
+                      {canEditOrder && (
+                        <BankTxnLinkPicker orderId={order.id} kind="cost" onLinked={() => {
+                          setCostLedgerKey(k => k + 1);
+                          setActivityKey(k => k + 1);
+                          // A reload remounts the page, which would drop
+                          // unsaved edits; a clean page picks up the filled
+                          // transaction id and the cleared blocker.
+                          if (!dirty) void onReload?.();
+                        }} />
+                      )}
+                      <PoPaymentsLedger key={costLedgerKey} scope={{ orderId: order.id, kind: 'cost' }} locale={locale} />
                       {order.payment === 'company' && <AccountingCard scope={{ orderId: order.id, kind: 'purchase' }} />}
                     </>
                   ),

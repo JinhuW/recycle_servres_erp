@@ -436,9 +436,9 @@ describe('accounting', () => {
     expect((await patch(id, { managerId: priya.id })).status).toBe(400);
     // Flipped to the company's account on the PO, the entry leaves the RMB
     // Flow — by a manager; the purchaser's flip would void their entry.
-    expect((await api('PATCH', `/api/orders/${self}`, { token: marcus.token, body: { payment: 'company', paymentMethod: 'cash' } })).status).toBe(403);
+    expect((await api('PATCH', `/api/orders/${self}`, { token: marcus.token, body: { payment: 'company', paymentMethod: 'paypal' } })).status).toBe(403);
     expect((await entryOf(alex.token, id)).voided).toBeNull();
-    expect((await api('PATCH', `/api/orders/${self}`, { token: alex.token, body: { payment: 'company', paymentMethod: 'cash' } })).status).toBe(200);
+    expect((await api('PATCH', `/api/orders/${self}`, { token: alex.token, body: { payment: 'company', paymentMethod: 'paypal' } })).status).toBe(200);
     expect((await entryOf(alex.token, id)).voided).toMatchObject({ reason: 'Paid from the Business Account' });
     const company = await record(alex.token, base({ kind: 'purchase', targetId: self }));
     expect(company.status).toBe(409);
@@ -480,7 +480,7 @@ describe('accounting', () => {
 
     // Refused before the purchaser's edit would send the PO back to Draft.
     expect((await api('PATCH', `/api/orders/${self}`, {
-      token: marcus.token, body: { payment: 'company', paymentMethod: 'cash' },
+      token: marcus.token, body: { payment: 'company', paymentMethod: 'paypal' },
     })).status).toBe(403);
     expect(await stage()).toBe('in_transit');
     expect(await getTestDb()`SELECT 1 FROM order_events WHERE order_id = ${self} AND kind = 'reverted'`).toHaveLength(0);

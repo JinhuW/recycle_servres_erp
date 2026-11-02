@@ -13,7 +13,7 @@ import { syncOrderGoodsTotal } from '../../services/orderGoodsTotal';
 import { serialIssue } from '@recycle-erp/shared';
 import { type LineCategory } from '../../types';
 import { normPaypalTxnId } from '../../ai/paypal';
-import { type OrdersEnv, assertCategoriesEnabled, badFees, identityErr, isOrderPayment, isPaymentMethod, paidByAfter, paidByErr, type LineInput, newLineRow, normFeeNote, resolveOrderOwner, serialErr, supplierErr, trackInput, warehouseErr } from './shared';
+import { type OrdersEnv, assertCategoriesEnabled, badFees, identityErr, isOrderPayment, isPaymentMethod, cashRefused, CASH_RETIRED_MSG, paidByAfter, paidByErr, type LineInput, newLineRow, normFeeNote, resolveOrderOwner, serialErr, supplierErr, trackInput, warehouseErr } from './shared';
 
 const createRoutes = new Hono<OrdersEnv>();
 
@@ -65,6 +65,9 @@ createRoutes.post('/', async (c) => {
   if (!isOrderPayment(body.payment)) return c.json({ error: 'payment must be company or self' }, 400);
   if (!isPaymentMethod(body.paymentMethod)) {
     return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
+  }
+  if ((body.payment ?? 'company') === 'company' && await cashRefused(sql, null, body.paymentMethod)) {
+    return c.json({ error: CASH_RETIRED_MSG }, 400);
   }
   const newPaymentMethod = (body.payment ?? 'company') === 'company' ? (body.paymentMethod ?? null) : null;
   const pbErr = await paidByErr(sql, owner.ownerId, body.paidByUserId);

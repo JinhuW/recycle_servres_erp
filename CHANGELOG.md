@@ -15,6 +15,22 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.403.0] - 2026-11-02
+
+### Changed
+
+- **Business Account payments link to a PayPal or Mercury transaction; Cash
+  is gone** (RS-498). Every company payment should be backed by a real bank
+  row, and a cash PO never was. The Business Account's PayPal | Cash toggle
+  is gone from every page, and a company PO is PayPal. A manager's Cost
+  Payment tab gets the Commission tab's search: pick an unlinked outgoing
+  PayPal or Mercury payment and it is linked as the PO's cost. A linked
+  payment now satisfies the transaction-ID rule, so a Mercury-paid PO can
+  leave Draft without a typed id.
+- The API refuses a new `paymentMethod: 'cash'` on create, PATCH and
+  hand-off, and website pickups convert as PayPal. POs already saved as cash
+  keep it, with their screenshots and screenshot rule.
+
 ## [1.402.0] - 2026-11-01
 
 ### Added

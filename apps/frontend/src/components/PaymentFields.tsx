@@ -10,10 +10,12 @@ import type { PaymentProof } from '../lib/usePaymentProof';
 
 // How a PO was paid, and the proof that goes with it — one component behind
 // the create pages, both PO pages, the hand-off dialog and the phone sheet.
-// Paid by — the Business Account, or the person who paid — then (for the
-// Business Account) the method, then a proof panel whose heading names
-// exactly what the chosen path needs, so the requirement is read before
-// anything is typed. The rules live in lib/handoff.ts; this file is markup.
+// Paid by — the Business Account, or the person who paid — then a proof
+// panel whose heading names exactly what the chosen path needs, so the
+// requirement is read before anything is typed. The Business Account pays
+// through PayPal or Mercury; a PO saved as cash before cash was retired keeps
+// it, labelled, with its screenshot panel. The rules live in lib/handoff.ts;
+// this file is markup.
 // Without `proof` (the create pages — no order to attach to yet) only the
 // picker renders.
 
@@ -26,8 +28,8 @@ type Props = {
   payers: { id: string; name: string }[];
   /** One pick sets both: the Business Account, or self plus the person. */
   onPaidBy: (v: 'company' | 'self', userId: string | null) => void;
+  /** Null on a company order reads as PayPal; 'cash' is a legacy PO's. */
   method: HandoffMethod | null;
-  onMethod: (v: HandoffMethod) => void;
   txnId: string;
   onTxnId: (v: string) => void;
   /** Star on the transaction id. The hand-off passes true; the PO pages pass
@@ -55,7 +57,7 @@ type Props = {
 };
 
 export function PaymentFields({
-  paidBy, paidByUserId, payers, onPaidBy, method, onMethod, txnId, onTxnId,
+  paidBy, paidByUserId, payers, onPaidBy, method, txnId, onTxnId,
   txnRequired = false, disabled = false, payerLocked = false, compact = false,
   proof, canEditProof = true, idPrefix = 'pay', sources, defaultPayerId = null,
 }: Props) {
@@ -102,15 +104,10 @@ export function PaymentFields({
           </select>
           {payerLocked && <div className="field-hint" id={`${p}-paidby-locked`}>{t('payPayerLocked')}</div>}
         </div>}
-        {company && (
+        {company && method === 'cash' && (
           <div className="field pay-reveal">
-            <span className="label" id={`${p}-method`}>{t('hoMethod')}</span>
-            <div className="seg ho-seg" role="radiogroup" aria-labelledby={`${p}-method`}>
-              <button type="button" role="radio" aria-checked={method === 'paypal'} className={method === 'paypal' ? 'active' : ''}
-                disabled={disabled} onClick={() => onMethod('paypal')}>{t('hoMethodPaypal')}</button>
-              <button type="button" role="radio" aria-checked={method === 'cash'} className={method === 'cash' ? 'active' : ''}
-                disabled={disabled} onClick={() => onMethod('cash')}>{t('hoMethodCash')}</button>
-            </div>
+            <span className="label">{t('hoMethod')}</span>
+            <div className="field-hint">{t('payLegacyCash')}</div>
           </div>
         )}
       </div>
@@ -168,7 +165,7 @@ function ProofPanel({
   idPrefix: string;
 }) {
   const { t } = useT();
-  const path = paidBy === 'self' ? 'self' : method;
+  const path = paidBy === 'self' ? 'self' : method ?? 'paypal';
   const txnLooksOdd = txnId !== '' && !isStrictPaypalTxnId(txnId);
 
   // The left rule is the panel's one colour: quiet while something required
@@ -176,17 +173,8 @@ function ProofPanel({
   const satisfied =
     path === 'paypal' ? txnId.trim() !== ''
     : path === 'cash' ? proof.proofAtts.length > 0
-    : path === 'self' ? proof.chatAtts.length > 0
-    : false;
+    : proof.chatAtts.length > 0;
   const cls = 'pay-proof' + (satisfied ? ' ok' : '');
-
-  if (path === null) {
-    return (
-      <div className={cls} aria-live="polite">
-        <div className="pay-proof-title muted">{t('payMethodPick')}</div>
-      </div>
-    );
-  }
 
   if (path === 'paypal') {
     return (

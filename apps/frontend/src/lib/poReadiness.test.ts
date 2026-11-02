@@ -50,9 +50,9 @@ describe('poReadiness', () => {
     expect(byTab(items)).toEqual({
       products: [],
       delivery: ['hoNeedSource', 'hoNeedTracking'],
-      payment: ['hoNeedMethod'],
+      payment: ['poTxnRequired'],
     });
-    expect(readinessBlockerKeys(items)).toEqual(['hoNeedSource', 'hoNeedTracking', 'hoNeedMethod']);
+    expect(readinessBlockerKeys(items)).toEqual(['hoNeedSource', 'hoNeedTracking', 'poTxnRequired']);
   });
 
   it('every key the per-field rule can emit has a section', () => {
@@ -61,13 +61,12 @@ describe('poReadiness', () => {
       { source: null, delivery: null },
       { delivery: 'label', trackingValid: false },
       { delivery: 'label', trackingValid: true, carrier: null },
-      { method: null },
       { method: 'paypal', txnId: '' },
       { method: 'cash', proofAttachmentCount: 0 },
       { paidBy: 'self', chatAttachmentCount: 0, saved: { payment: 'self', chatShotRequired: true } },
     ];
     for (const v of variants) handoffBlockerKeys({ ...rules, ...v }).forEach(k => emitted.add(k));
-    expect(emitted.size).toBeGreaterThanOrEqual(7);
+    expect(emitted.size).toBeGreaterThanOrEqual(6);
     for (const k of emitted) expect(BLOCKER_TAB[k], k).toBeDefined();
     for (const k of Object.values(SERVER_BLOCKER_KEY)) expect(BLOCKER_TAB[k], k).toBeDefined();
   });
