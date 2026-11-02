@@ -1,5 +1,6 @@
 // Manager-only inbox for the public website forms (routes/publicForms.ts):
 //   GET    /api/web-submissions            list, filter by site/status/q, keyset paged
+//   GET    /api/web-submissions/count      how many are still `new` (the nav badge)
 //   GET    /api/web-submissions/:id        one submission with its photos
 //   PATCH  /api/web-submissions/:id        triage: status, staff note
 //   POST   /api/web-submissions/:id/convert  a ram4cash sell lot → Draft PO
@@ -150,6 +151,14 @@ async function loadOne(sql: ReturnType<typeof getDb>, id: string) {
     })),
   };
 }
+
+// The sidebar badge: what nobody has triaged yet.
+webSubmissions.get('/count', async (c) => {
+  const [r] = await getDb(c.env)<{ n: number }[]>`
+    SELECT COUNT(*)::int AS n FROM web_submissions WHERE status = 'new'
+  `;
+  return c.json({ n: r!.n });
+});
 
 webSubmissions.get('/:id', async (c) => {
   const one = await loadOne(getDb(c.env), c.req.param('id'));

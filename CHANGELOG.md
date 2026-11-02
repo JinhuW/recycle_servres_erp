@@ -15,6 +15,19 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.405.0] - 2026-11-02
+
+### Added
+
+- **The Web submissions nav item counts what is waiting** (RS-500). A badge
+  beside it shows how many submissions are still in status `new`, so a
+  manager sees a form arrive without opening the page. Submissions come from
+  the public websites, not from inside the ERP, so the count polls once a
+  minute while the tab is visible and re-reads the moment the tab comes back.
+  A status change, a Create Draft PO or a sent reply on the thread page
+  updates it at once. The count comes from the new manager-only
+  `GET /api/web-submissions/count`.
+
 ## [1.404.0] - 2026-11-02
 
 ### Added

@@ -470,6 +470,7 @@ const zh: Record<string, string> = {
   transfersColDate: '调拨时间',
   nav_websubmissions: '网站提交',
   webSubTitle: '网站提交',
+  webSubNavHint: '{n} 条新提交待处理',
   webSubSubtitle: '来自 ram4cash.com 的出售请求和 recycleservers.com 的报价请求。',
   webSubSiteAll: '全部网站',
   webSubStatusAll: '全部',

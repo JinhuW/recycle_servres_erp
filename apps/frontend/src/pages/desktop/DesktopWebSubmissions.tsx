@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from '../../lib/api';
+import { webSubChanged } from '../../lib/webSubmissions';
 import { useT } from '../../lib/i18n';
 import { match, navigate, useRoute } from '../../lib/route';
 import { Icon } from '../../components/Icon';
@@ -283,6 +284,7 @@ function SubmissionDetail({ id, onToast }: Props & { id: string }) {
     try {
       const r = await api.patch<{ submission: WebSubmission }>(`/api/web-submissions/${encodeURIComponent(id)}`, body);
       setS(r.submission);
+      webSubChanged();
       onToast?.(t('webSubSaved'));
     } catch (e) {
       onToast?.(errMsg(e), 'error');
@@ -297,6 +299,7 @@ function SubmissionDetail({ id, onToast }: Props & { id: string }) {
       const r = await api.post<{ orderId: string; submission: WebSubmission }>(
         `/api/web-submissions/${encodeURIComponent(id)}/convert`, {});
       setS(r.submission);
+      webSubChanged();
       onToast?.(t('webSubConverted', { id: r.orderId }));
     } catch (e) {
       onToast?.(errMsg(e), 'error');

@@ -3964,7 +3964,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   supplier with source `web`; a pickup per the seller's choice, paid by PayPal —
   a pickup converted as cash until v1.403.0).
   Both endpoints allow 5 submissions a minute per IP and drop a filled honeypot
-  silently.
+  silently. The sidebar item carries a badge with the number still `new`
+  (v1.405.0). It polls each minute while the tab is visible, re-reads when the
+  tab returns, and follows a triage, conversion or reply at once.
 - **The public forms have a daily ceiling and their own CORS** (v1.195.0).
   Together they accept 300 submissions or 2 GB of photos per UTC day
   (workspace settings `public_form_daily_submissions` and
