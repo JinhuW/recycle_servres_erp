@@ -1340,8 +1340,16 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   die/package segment (`HMA42GR7MFR4N-TF` → `MFR`), or Micron's recorded
   three-letter chip die (`D9VPP` → `VPP`). Recognized separator-free spellings
   read the same. A Micron lot with no recognizable chip stays *Not recorded*;
-  its module number alone does not prove a die. Other brands and unsupported
-  part schemes, including Hynix HMC DDR5, have no short code.
+  its module number alone does not prove a die. Unsupported part schemes,
+  including Hynix HMC DDR5, have no short code.
+  - **Kingston and other module brands take the die from Chip #** (v1.407.0,
+    RS-503). A Micron FBGA code (`8DE75 D9VPP`, `MICRON-0ZE75D9WFL` → `VPP`,
+    `WFL`), a full Hynix marking (`SK-H5ANAG8NCJRXNC240VS` → `CJR`) or a bare
+    die code (`CB1`, `SAMSUNG CB1`, `SK-CJR`) all count. These stay *Not
+    recorded*: placeholders (`NA`, `OTHER`, `SHELL`), Samsung `K4A…` markings,
+    which name only the revision, and Hynix markings cut before the package
+    letter (`H5ANAG8NCJ`). On the vendor bid sheet, such lots now group by
+    Brand + Short code + spec like the three chip makers' own sticks.
   - Desktop and phone RAM forms show it live from Brand, Part # and Chip #.
     The inventory RAM editor also offers Chip #, so existing stock can gain a
     missing code, normalized on save and recorded in its audit log.

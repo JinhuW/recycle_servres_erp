@@ -41,6 +41,32 @@ describe('RAM market short codes', () => {
     expect(ramShortCode(row)).toBeNull();
   });
 
+  it.each([
+    ['Kingston', '8DE75D9VPP', 'VPP'],
+    ['Kingston', 'MICRON-0ZE75D9WFL', 'WFL'],
+    ['Kingston', '4GF75 D8CJV', 'CJV'],
+    ['Other', 'MICRON 3QF75C9BMX', 'BMX'],
+    ['Other', 'H5AN8G8NAFR-UHC', 'AFR'],
+    ['Kingston', 'SK-H5ANAG8NCJRXNC240VS', 'CJR'],
+    ['Kingston', 'CB1', 'CB1'],
+    ['Kingston', 'SAMSUNG CB1', 'CB1'],
+    ['Kingston', 'SK CJR', 'CJR'],
+    ['Kingston', 'SK-CJR', 'CJR'],
+    ['Other', 'tbh', 'TBH'],
+  ])('reads the die a %s stick carries from chip %s', (brand, chipNumber, code) => {
+    expect(ramShortCode({ brand, partNumber: 'KCP426NS8/8', chipNumber })).toBe(code);
+  });
+
+  it.each(['', 'NA', 'N/A', 'OTHER', 'SHELL', '1', 'KINGSTON', 'SAMSUNG', 'K4A8G085WC-BCTD', 'H5ANAG8NCJ', 'SK H5AN4G4NAFA', 'SK NCJ', 'MICRON-8QB75DTBH'])(
+    'keeps third-party chip %s unknown', chipNumber => {
+      expect(ramShortCode({ brand: 'Kingston', partNumber: 'KCP426NS8/8', chipNumber })).toBeNull();
+    });
+
+  it('leaves the module-number brands on their own rule', () => {
+    expect(ramShortCode({ brand: 'Samsung', partNumber: 'M471A2K43CB1-CTD', chipNumber: 'D9VPP' })).toBe('CB1');
+    expect(ramShortCode({ brand: 'SK Hynix', partNumber: 'NA', chipNumber: 'CJR' })).toBeNull();
+  });
+
   it('retains distinct dies and an unknown lot within one part-number group', () => {
     expect(ramShortCodes(['VPP', 'WSM', 'VPP', null].map(chipNumber => ({ brand: 'Micron', chipNumber })))).toEqual(['VPP', 'WSM', null]);
   });
@@ -83,6 +109,16 @@ describe('RAM bid groups', () => {
       bidLot(1, { part_number: 'M393A2G40MFR-CPB' }),
       bidLot(2, { brand: 'Micron', part_number: 'MTA18ASF2G72PDZ-2G1A1', chip_number: 'MFR' }),
     ], 3).products).toHaveLength(2);
+  });
+
+  it('folds third-party lots by the die their chip names', () => {
+    const kingston = { brand: 'Kingston', type: 'Desktop', classification: 'UDIMM', rank: '1Rx8', capacity: '8GB', speed: '2666' };
+    const { products } = foldSheetLines([
+      bidLot(1, { ...kingston, part_number: 'KCP426NS8/8', chip_number: '8DE75D9VPP' }),
+      bidLot(2, { ...kingston, part_number: '9995702-008.A00G', chip_number: 'VPP' }),
+    ], 3);
+    expect(products).toHaveLength(1);
+    expect(products[0]).toMatchObject({ qty: 3, specs: { shortCode: 'VPP' } });
   });
 
   it('recognizes equivalent speed spellings', () => {

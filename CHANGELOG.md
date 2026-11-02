@@ -15,6 +15,21 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.407.0] - 2026-11-02
+
+### Added
+
+- **Kingston and other-brand RAM shows a short code read from its Chip #**
+  (RS-503). Before, a third-party stick showed *Not recorded* even when its
+  chip marking named the die, such as `MICRON-0ZE75D9WFL`,
+  `SK-H5ANAG8NCJRXNC240VS` or `SAMSUNG CB1`. Since v1.347.0 the short code had
+  read only Samsung and SK Hynix part numbers and the Micron brand's chip. Now
+  any other brand reads the die from a Micron FBGA code, a full Hynix `H5AN`
+  marking or a bare die code. In prod data that gives 132 DDR4 lots a code.
+  Placeholders, Samsung `K4A` markings and cut Hynix markings stay unknown,
+  because each would be a guess. Such lots now join the short-code grouping
+  on the vendor bid sheet. Samsung, SK Hynix and Micron lots are unchanged.
+
 ## [1.406.0] - 2026-11-02
 
 ### Added
