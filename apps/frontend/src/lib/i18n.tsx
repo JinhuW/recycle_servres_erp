@@ -1220,6 +1220,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     dim_brand: 'Brand',
     nav_websubmissions: 'Web submissions',
     webSubTitle: 'Web submissions',
+    webSubNavHint: '{n} new submissions waiting for triage',
     webSubSubtitle: 'Sell requests from ram4cash.com and quote requests from recycleservers.com.',
     webSubSiteAll: 'All sites',
     webSubStatusAll: 'All',

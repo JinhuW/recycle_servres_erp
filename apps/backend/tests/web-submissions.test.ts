@@ -242,6 +242,20 @@ describe('/api/web-submissions (manager)', () => {
     expect((await api('GET', `/api/web-submissions/${lot.body.ref}`, { token: purchaser.token })).status).toBe(403);
   });
 
+  it('counts only untriaged submissions for the nav badge; purchasers get 403', async () => {
+    const lot = await submit({ email: 'lot@example.com', source: 'reddit', lines: [ramLine] });
+    await submitQuote(quote);
+    const { token } = await loginAs(ALEX);
+    const count = () => api<{ n: number }>('GET', '/api/web-submissions/count', { token });
+    expect((await count()).body).toEqual({ n: 2 });
+
+    await api('PATCH', `/api/web-submissions/${lot.body.ref}`, { token, body: { status: 'contacted' } });
+    expect((await count()).body).toEqual({ n: 1 });
+
+    const purchaser = await loginAs(MARCUS);
+    expect((await api('GET', '/api/web-submissions/count', { token: purchaser.token })).status).toBe(403);
+  });
+
   it('shows one submission with photos and triages it', async () => {
     const payload = JSON.stringify({ email: 'p@example.com', source: 'web', lines: [ramLine] });
     const r = await multipart('/api/public/intake', { payload, 'photo-0-0': jpeg('a.jpg') },

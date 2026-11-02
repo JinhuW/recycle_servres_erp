@@ -6,6 +6,7 @@ import { useEffectiveUser } from '../lib/tweaks';
 import { shownNav, type ShownLeaf } from '../lib/desktopNav';
 import { useAcctReviewCount } from '../lib/accounting';
 import { useLeadsAttention } from '../lib/redditLeads';
+import { useWebSubNewCount } from '../lib/webSubmissions';
 import { DESKTOP_VIEW_TO_PATH, hrefFor, onLinkClick, type DesktopViewId } from '../lib/route';
 
 export type DesktopView = DesktopViewId;
@@ -51,7 +52,8 @@ function NavLink({ view, className, label, icon, current, tour, children }: {
   );
 }
 
-const countHint = (id: string) => (id === 'leadsReddit' ? 'rlNavHint' : 'acctReviewModeHint');
+const COUNT_HINTS: Record<string, string> = { leadsReddit: 'rlNavHint', websubmissions: 'webSubNavHint' };
+const countHint = (id: string) => COUNT_HINTS[id] ?? 'acctReviewModeHint';
 
 // `count` is live work waiting on the viewer, where the leaf's static badge
 // is a mark.
@@ -82,8 +84,11 @@ export function Sidebar({ view, folded, onToggleFold }: Props) {
   // The Accounting entries and questions waiting on this manager.
   const reviewCount = useAcctReviewCount(user?.role === 'manager');
   const leadsCount = useLeadsAttention();
-  const countOf = (item: ShownLeaf) =>
-    item.leaf.id === 'accounting' ? reviewCount : item.leaf.id === 'leadsReddit' ? leadsCount : undefined;
+  const webSubCount = useWebSubNewCount(user?.role === 'manager');
+  const counts: Partial<Record<string, number>> = {
+    accounting: reviewCount, leadsReddit: leadsCount, websubmissions: webSubCount,
+  };
+  const countOf = (item: ShownLeaf) => counts[item.leaf.id];
   if (!user) return null;
   const foldLabel = folded ? t('sidebarExpand') : t('sidebarCollapse');
   return (

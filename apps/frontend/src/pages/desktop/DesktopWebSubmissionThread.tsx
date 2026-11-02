@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
+import { webSubChanged } from '../../lib/webSubmissions';
 import { mailDate, mailSnippet, splitQuotedReply } from '../../lib/mailQuote';
 import { Icon } from '../../components/Icon';
 import type { WebSubmission } from './DesktopWebSubmissions';
@@ -118,6 +119,7 @@ export function SubmissionThread({ submission, composerRef, onMode, onSent, onTo
       setDraft('');
       setThread(prev => prev && { ...prev, messages: [...prev.messages, r.message] });
       onSent(r.submission);
+      webSubChanged();
       onToast?.(t('webSubThreadSent'));
       // The draft's Subject turns into `Re: …` once something has gone out.
       void load();
