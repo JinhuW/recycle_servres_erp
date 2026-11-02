@@ -15,6 +15,25 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.406.0] - 2026-11-02
+
+### Added
+
+- **The RMB Flow book shows the order amount, and a red ! when the book is
+  more than 2% off it** (RS-502). A new *Order amount* column sits between
+  Method and Received. It shows the figure of the record the entry pays: the
+  PO's commission on a Commission row, the PO's cost with other fees on a
+  Purchase row, the sell order's total on a Sale row and the case's amount on
+  an After-sales row, each in the record's own currency. Before this, a
+  commission that didn't match the PO stayed out of sight until Review mode.
+  When every live entry of that kind on the record adds up to more than 2%
+  away from that figure, in either direction, each of the record's rows
+  carries a red ! whose tooltip gives both ¥ figures and the gap. A dollar
+  figure converts at the latest rate. The record form says the same thing
+  while you type: a red line under Amount gives the total the book would hold
+  after this entry, and Save turns into *Save anyway*, which needs a second
+  click. This applies on desktop and on the phone sheet.
+
 ## [1.405.1] - 2026-11-02
 
 ### Fixed

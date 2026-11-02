@@ -13,7 +13,7 @@ import {
   type AcctEntryDetail, type AcctTarget, type ReceiptAmount,
 } from './accounting';
 import {
-  applyKind, convertAmount, initialForm, orderAmount, payerLock, pickTarget, previewCny, toRequestBody,
+  applyKind, convertAmount, formMismatch, initialForm, orderAmount, payerLock, pickTarget, previewCny, toRequestBody,
   type EntryForm, type EntryPreset, type FormError, type FormTarget,
 } from './accountingForm';
 import type { PaidBy } from './useCommissionPaidBy';
@@ -98,10 +98,17 @@ export function useAccountingEntryForm(opts: {
   // entry never had one.
   const orphan = !!entry && !!KIND_TARGET[entry.kind] && !entry.target && form.kind === entry.kind;
 
+  // A total more than 2% off the record asks for a second click; any change
+  // to what it weighs asks again.
+  const mismatch = formMismatch(form, rate, entry);
+  const [mismatchSeen, setMismatchSeen] = useState(false);
+  useEffect(() => { setMismatchSeen(false); }, [form.amount, form.currency, form.fxRate, form.target?.id, form.kind, form.direction]);
+
   const submit = async () => {
     if (busy || reading > 0) return;
     const r = toRequestBody(form, { orphan, entry });
     if ('error' in r) { setError(r.error); return; }
+    if (mismatch && !mismatchSeen) { setMismatchSeen(true); return; }
     setBusy(true);
     try {
       if (entry) {
@@ -142,6 +149,7 @@ export function useAccountingEntryForm(opts: {
       edit(f => ({ ...f, currency, amount: converted === null ? '' : converted.toFixed(2) }));
     },
     preview: previewCny(form, rate),
+    mismatch, confirmMismatch: !!mismatch && mismatchSeen,
     editing: !!entry,
     // A PO the Business Account paid takes no paid-out RMB entry: the form says so.
     payerLocked: payerLock(form, entry),

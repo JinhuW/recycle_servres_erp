@@ -1,5 +1,5 @@
-import type { AccountingDirection, AccountingKind, AccountingTargetType } from '@recycle-erp/shared';
-import { splitYuan, type AcctEntry, type AcctEvent } from '../lib/accounting';
+import type { AccountingDirection, AccountingKind, AccountingMismatch, AccountingTargetType } from '@recycle-erp/shared';
+import { fmtCny, splitYuan, type AcctEntry, type AcctEvent } from '../lib/accounting';
 import { afterSalesCasePath } from '../lib/route';
 import { poStageName, type Translate } from '../lib/orderPresentation';
 import { sellOrderStatusShort } from '../lib/lookups';
@@ -18,6 +18,27 @@ export function Yuan({ value, locale, signed, className }: {
     <span className={'acct-fig' + (className ? ' ' + className : '')}>
       {sign}<span className="acct-cur">¥</span>{s.whole}<span className="acct-fen">{s.fraction}</span>
     </span>
+  );
+}
+
+/** The book's total for a record against the record's figure, as the red ! says it. */
+const mismatchVars = (m: AccountingMismatch, locale: string) => ({
+  recorded: fmtCny(m.recordedCny, locale), figure: fmtCny(m.figureCny, locale),
+  pct: (m.pct > 0 ? '+' : '−') + (Math.abs(m.pct) * 100).toFixed(1) + '%',
+});
+
+export function mismatchText(t: Translate, m: AccountingMismatch, locale: string): string {
+  return t('acctMismatchHint', mismatchVars(m, locale));
+}
+
+/** The form's red line under Amount: the book total after this entry is more than 2% off. */
+export function MismatchWarn({ m, t, locale }: { m: AccountingMismatch | null; t: Translate; locale: string }) {
+  if (!m) return null;
+  return (
+    <div className="acct-mismatch-warn" role="alert">
+      <span className="acct-mismatch" aria-hidden>!</span>
+      <span>{t('acctMismatchWarn', mismatchVars(m, locale))}</span>
+    </div>
   );
 }
 

@@ -2610,7 +2610,16 @@ is who paid, below).
     amount in ¥ or $ with the RMB it books as, date, method, Paid by (the
     Business Account or a person), counterparty, screenshots and note.
     Edit opens the same form with the entry's screenshots, which save as
-    they are added (drop, pick or paste) or removed (v1.396.0). An entry
+    they are added (drop, pick or paste) or removed (v1.396.0).
+  - **Order amount** (v1.406.0), between Method and Received, is the
+    record's own figure in its own currency: the PO's commission, the PO's
+    cost with other fees, the sell order's total, the case's amount. When
+    the whole book's total for that kind on the record is more than 2% off
+    it either way (in ¥, with a dollar figure at the latest rate), each of
+    the record's rows carries a red ! whose tooltip gives both figures. The
+    form warns the same way while you type: a red line under Amount, and
+    Save becomes *Save anyway*, which needs a second click (desktop and
+    phone). An entry
     whose PO, SO or case was deleted stays in the book unlinked, and its
     Edit says so; an Other entry never had a record.
 - **On the records** (managers only), an *Accounting* card shows what the book

@@ -6,7 +6,7 @@ import {
 } from '@recycle-erp/shared';
 import { Icon } from '../../components/Icon';
 import { RouteLink } from '../../components/RouteLink';
-import { Yuan, recordPath } from '../../components/AccountingBits';
+import { Yuan, mismatchText, recordPath } from '../../components/AccountingBits';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { handleFetchError } from '../../lib/errorToast';
@@ -188,6 +188,7 @@ export function DesktopAccounting({ onToast }: Props) {
                   <th>{t('acctFieldKind')}</th>
                   <th>{t('acctFieldPaidBy')}</th>
                   <th>{t('acctFieldMethod')}</th>
+                  <th className="acct-num">{t('acctColRecordAmount')}</th>
                   <th className="acct-num">{t('acctReceived')}</th>
                   <th className="acct-num">{t('acctPaid')}</th>
                   <th className="acct-num" title={t('acctBalanceHint')}>{t('acctBalance')}</th>
@@ -226,6 +227,7 @@ export function DesktopAccounting({ onToast }: Props) {
                       </td>
                       <td style={{ whiteSpace: 'nowrap' }}>{r.manager.name}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{t('acctMethod_' + r.method)}</td>
+                      <td className="acct-num"><RecordAmount row={r} /></td>
                       <td className="acct-num">
                         {r.direction === 'in' && <Amount row={r} locale={locale} />}
                       </td>
@@ -278,6 +280,24 @@ function Amount({ row, locale }: { row: AcctRow; locale: string }) {
         <span className="acct-sub">{fmtMoney(row.amount, 'USD', locale)} @ {row.fxRate.toFixed(2)}</span>
       )}
     </>
+  );
+}
+
+// The record's own figure, with a red ! when the whole book's total for it
+// is more than 2% off.
+function RecordAmount({ row }: { row: AcctRow }) {
+  const { t, locale } = useT();
+  const rec = row.record;
+  if (!rec || rec.amount === null) return null;
+  const m = row.mismatch;
+  return (
+    <span className="acct-rec-amt">
+      {m && (
+        <span className="acct-mismatch" role="img" aria-label={t('acctMismatchShort')}
+              title={mismatchText(t, m, locale)}>!</span>
+      )}
+      <span className="acct-fig">{fmtMoney(rec.amount, rec.currency, locale)}</span>
+    </span>
   );
 }
 

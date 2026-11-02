@@ -27,7 +27,7 @@ import type { Env, User } from '../types';
 import {
   ACCOUNTING_DUPLICATE_DAYS, ACCOUNTING_KINDS, ACCOUNTING_QUERY_MAX, ACCOUNTING_REVIEW_TABS,
   ACCOUNTING_UNREVIEWED_FIELDS, KIND_TARGET,
-  accountingChecks, addDays, foldChanges, hasAccountingWarning, isAccountingCurrency, isAccountingDirection,
+  accountingChecks, addDays, foldChanges, hasAccountingWarning, recordMismatch, isAccountingCurrency, isAccountingDirection,
   accountingReviewRefusal, isAccountingKind, isAccountingMethod, isAccountingReviewState, isIsoDate, todayIn,
   type AccountingChanges, type AccountingCurrency, type AccountingDirection, type AccountingKind,
   type AccountingMethod, type AccountingReviewAction, type AccountingReviewFacts, type AccountingReviewRefusal,
@@ -549,8 +549,18 @@ accounting.get('/entries', async (c) => {
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
   const last = page[page.length - 1];
+  // In turn: the lookup already fans out to the limit.
+  const targetFor = await targetsByRow(sql, page);
+  const fx = await latestCnyPerUsd(sql);
   return c.json({
-    rows: page.map(r => ({ ...shapeEntry(r), balance: r.balance })),
+    rows: page.map(r => {
+      const t = targetFor(r);
+      const record = t ? { amount: t.amount, currency: t.currency, recordedCny: t.recordedCny } : null;
+      return {
+        ...shapeEntry(r), balance: r.balance, record,
+        mismatch: record ? recordMismatch(record, record.recordedCny, fx.rate) : null,
+      };
+    }),
     nextCursor: hasMore && last ? encodeCursor({ ts: `${last.occurred_on}_${last.cursor_ts}`, id: last.id }) : null,
   });
 });
@@ -1323,18 +1333,27 @@ function reviewFactCols(sql: SqlLike) {
 
 type FactRow = ClearedRow & { ledger_rate: number | null; duplicate_of: string | null; business_received: boolean };
 
-async function withFacts(sql: SqlLike, rows: FactRow[]) {
+// Every record a page of rows names, looked up once per lens.
+async function targetsByRow(sql: SqlLike, rows: EntryRow[]) {
   const ids: Record<TargetLens, Set<string>> = { purchase: new Set(), commission: new Set(), so: new Set(), as: new Set() };
   for (const r of rows) {
     const t = targetOf(r);
     if (t && r.kind !== 'other') ids[LENS_OF[r.kind]].add(t.id);
   }
-  const lenses = Object.keys(ids) as TargetLens[];
+  const lenses = (Object.keys(ids) as TargetLens[]).filter(l => ids[l].size > 0);
   const found = await allLimited(lenses.map(l => () => findTargets(sql, l, { ids: [...ids[l]] })));
   const byLens = new Map(lenses.map((l, i) => [l, new Map(found[i].map(t => [t.id, t]))]));
+  return (r: EntryRow): TargetFacts | null => {
+    const t = targetOf(r);
+    return t && r.kind !== 'other' ? byLens.get(LENS_OF[r.kind])?.get(t.id) ?? null : null;
+  };
+}
+
+async function withFacts(sql: SqlLike, rows: FactRow[]) {
+  const targetFor = await targetsByRow(sql, rows);
   return rows.map(r => {
     const t = targetOf(r);
-    const target = t && r.kind !== 'other' ? byLens.get(LENS_OF[r.kind])?.get(t.id) ?? null : null;
+    const target = targetFor(r);
     const facts: AccountingReviewFacts = {
       record: target ? { amount: target.amount, currency: target.currency, recordedCny: target.recordedCny } : null,
       ledgerRate: r.ledger_rate,

@@ -136,6 +136,46 @@ describe('accounting', () => {
     expect(got.events.map(e => e.kind)).toEqual(['created']);
   });
 
+  it('lists each entry with its record\'s figure, flagged when the book is more than 2% off', async () => {
+    type Row = Entry & {
+      record: { amount: number | null; currency: string; recordedCny: number } | null;
+      mismatch: { figureCny: number; recordedCny: number; pct: number } | null;
+    };
+    const rows = async () => (await listOf(alex.token, '')).rows as Row[];
+    // Two sticks at $10: $20, ¥144 at the ledger's 7.2.
+    const po = await draftPO(alex.token, { payment: 'self' });
+    const exact = await recorded(alex.token, base({ kind: 'purchase', targetId: po, amount: 144 }));
+    const other = await recorded(alex.token, base({}));
+    let got = await rows();
+    expect(got.find(r => r.id === exact)).toMatchObject({
+      record: { amount: 20, currency: 'USD', recordedCny: 144 }, mismatch: null,
+    });
+    expect(got.find(r => r.id === other)).toMatchObject({ record: null, mismatch: null });
+
+    // ¥2.88 more is exactly 2%; a cent past it flags every row of the record.
+    await recorded(alex.token, base({ kind: 'purchase', targetId: po, amount: 2.88 }));
+    expect((await rows()).find(r => r.id === exact)?.mismatch).toBeNull();
+    const extra = await recorded(alex.token, base({ kind: 'purchase', targetId: po, amount: 0.01 }));
+    got = await rows();
+    for (const id of [exact, extra]) {
+      expect(got.find(r => r.id === id)?.mismatch).toMatchObject({ figureCny: 144, recordedCny: 146.89 });
+    }
+
+    const commissionPo = await donePO();
+    const commission = await recorded(alex.token, base({ kind: 'commission', targetId: commissionPo, amount: 1 }));
+    const facts = (await api<{ entry: { targetFacts: { amount: number } } }>(
+      'GET', `/api/accounting/entries/${commission}`, { token: alex.token })).body.entry.targetFacts;
+    const row = (await rows()).find(r => r.id === commission);
+    expect(row?.record).toMatchObject({ amount: facts.amount, currency: 'USD', recordedCny: 1 });
+    expect(row?.mismatch).not.toBeNull();
+
+    const so = await shippedSO(alex.token);
+    const sale = await recorded(alex.token, base({ kind: 'sale', direction: 'in', targetId: so.id, amount: 90, currency: 'USD', fxRate: 7.2 }));
+    expect((await rows()).find(r => r.id === sale)).toMatchObject({
+      record: { amount: 90, currency: 'USD', recordedCny: 648 }, mismatch: null,
+    });
+  });
+
   it('books dollars into RMB at the typed rate, or the FX ledger\'s', async () => {
     const typed = await recorded(alex.token, base({ currency: 'USD', amount: 100, fxRate: 7.1 }));
     const latest = await recorded(alex.token, base({ currency: 'USD', amount: 100 }));
