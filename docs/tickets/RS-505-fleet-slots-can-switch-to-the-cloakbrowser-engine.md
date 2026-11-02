@@ -2,12 +2,12 @@
 id: RS-505
 title: Fleet slots can switch to the CloakBrowser engine
 type: story
-status: backlog
+status: done
 priority: P2
 created: 2026-11-02
 reporter: jinhu
 branch: JinhuW/chiton
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1059
 version: 1.409.0
 related: [RS-504]
 ---
