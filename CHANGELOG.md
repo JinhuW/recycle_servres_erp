@@ -15,6 +15,22 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.402.0] - 2026-11-01
+
+### Added
+
+- **The sell order's Vendor price import is back** (RS-497). Drop the
+  vendor's filled bid sheet on the card at the top of an open order's side
+  column. A preview matches its rows to the order by part number. Confirming
+  fills those lines' sell prices, and the save records them on the Market
+  board as `bid:<order>` data points, as before v1.297.0. RS-324 removed the
+  card after reading "drop our sell order spreadsheet" as *remove* rather
+  than *drag and drop*, which left managers typing every price from the
+  vendor's sheet by hand. The matcher now reads through the price-sheet
+  reader that the Market import and Review mode share. That reader reads a
+  Condition column again on request, so an older per-condition sheet is
+  still caught. A lot added to an order keeps starting at its sell price.
+
 ## [1.401.1] - 2026-11-01
 
 ### Fixed

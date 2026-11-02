@@ -1470,12 +1470,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   - **The order's History is the last card in the right-hand column, folded**
     (v1.248.0; in the side column since v1.248.2); a click on its heading
     opens it.
-  - **The Vendor price import card is gone** (v1.297.0, RS-324). It sat at
-    the top of the right-hand column from v1.248.3 (first in the left card in
-    v1.248.1, under the products before that). A sell order's prices come
-    from its lots' sell prices now; see *Vendor bid sheet* below. The filled
-    sheet is dropped on the PO's Review mode instead (v1.313.0), which sets
-    those sell prices.
+  - **The Vendor price import card is at the top of the right-hand column**
+    on an open order (v1.248.3; first in the left card in v1.248.1, under
+    the products before that). It was removed in v1.297.0 (RS-324) and
+    restored in v1.402.0 (RS-497); see *Vendor bid sheet* below.
   - **A search box over the products narrows the list** (v1.248.0), in view
     and edit, like Pack mode's: a part #, serial or PO number matches with or
     without its dashes, and words match the item's name and spec chips
@@ -1716,28 +1714,29 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   DDR5 by Brand + Type + Capacity + Rank + Speed + Class (v1.255.0), other RAM
   by part number and label. Known and unknown chip codes never share a bid
   group. Packing lists and product `#` keep their existing grouping.
-  - **The import half of the round trip was removed in v1.297.0** (RS-324).
-    From v1.21.0 to v1.296.x the vendor filled the sheet's Unit Price column
-    and the manager dropped it back on the order's edit view: the preview
-    matched rows by canonical part number, confirming filled the form's
-    prices, and the save that followed recorded them on the Market board as
-    `bid:<order>` data points (v1.138.3). Since Review mode sets each PO
-    line's sell price (v1.296.0) and a sell order line starts at its lot's
-    sell price, the returned sheet is read on the PO's Review mode instead
-    (v1.313.0). Since v1.347.0 its preview expands grouped part-number cells
-    and matches any Short code column as well, so Micron VPP and WSM under one
-    module number can take different quoted prices. Sheets without that
-    column still match by part number, and since v1.391.1 (RS-476) so does a
-    Micron line whose chip marking is not entered yet (several dies at
-    several prices read as a conflict). The retired sell-order
-    `price-import/preview` route, the `bidParts` save field (an old bundle
-    sending it is ignored) and the `bid:` feed are gone; `bid:` events
-    already on file still show on the Activity page. The Market page's own
-    price-list import stays and still reads these sheets. A lot added to an
-    existing order's edit view starts at its sell price too, in the order's
-    currency (a CNY order's prefilled lots still start at 0, since the rate
-    loads after them); before v1.297.0 it started at 0 unless the product was
-    already on the order.
+  - **The filled sheet fills the order's sell prices** (v1.21.0; removed in
+    v1.297.0 by RS-324, restored in v1.402.0 by RS-497). The vendor fills
+    the Unit Price column and the manager drops it on the order's *Vendor
+    price import* card (`POST /api/sell-orders/:id/price-import/preview`,
+    manager only, 8 MB, refused on Done/Closed). The preview matches rows by
+    canonical part number, a grouped cell's parts each at the row's price,
+    and flags rows not in the order, unpriced, invalid, duplicated,
+    ambiguous or priced per condition on a pre-v1.242.0 sheet. Confirming
+    fills every line of each matched part. Nothing is written until Save,
+    which records the confirmed parts' saved prices on the Market board as
+    `bid:<order>` data points (v1.138.3); Cancel records nothing. It reads
+    the sheet through the reader the Market import and Review mode share.
+  - **The same sheet prices the PO in Review mode** (v1.313.0). Since
+    v1.347.0 that preview expands grouped part-number cells and matches any
+    Short code column as well, so Micron VPP and WSM under one module number
+    can take different quoted prices. Sheets without that column still match
+    by part number, and since v1.391.1 (RS-476) so does a Micron line whose
+    chip marking is not entered yet (several dies at several prices read as
+    a conflict).
+  - A lot added to an existing order's edit view starts at its sell price,
+    in the order's currency (v1.297.0; a CNY order's prefilled lots still
+    start at 0, since the rate loads after them); before that it started at
+    0 unless the product was already on the order.
 - The price template splits into one worksheet per category with per-attribute
   spec columns and image URLs (v1.25.0, v1.27.0). **The RAM tab groups its rows
   with merged label columns left of `#`** — "Desktop & laptop" / "Server", then
@@ -2713,13 +2712,13 @@ over MCP.
   needs, so a RAM card shows its full spec: rank, speed and part number
   (v1.395.1). Under the name each card shows the part number and when the
   SKU was last updated, without tapping to expand (v1.395.2).
-- **Four feeds write `last_price`**, each tagged in the event's source: the
+- **Five feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
   on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
   and a price-list import on the Market page (`import:<email>`, v1.247.0).
-  A fifth, a sell-order save that followed a confirmed vendor price import
-  (`bid:<order>`, v1.138.3), was retired with that import in v1.297.0; its
-  events stay on file. The Activity page shows the source per row; the
+  A fifth is a sell-order save that followed a confirmed vendor price import
+  (`bid:<order>`, v1.138.3). It was off from v1.297.0 to v1.401.x and came
+  back with the import in v1.402.0. The Activity page shows the source per row; the
   Market page shows only the price and its age.
   - **The scraper's push** (`POST /api/market/values`, bearer
     `market:write`) works on a part that has no price yet (v1.329.1). Until

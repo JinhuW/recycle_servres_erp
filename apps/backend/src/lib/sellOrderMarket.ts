@@ -3,6 +3,8 @@ import { canonPartCol, canonPartNumberJs } from './part-number';
 import { autoTrackParts, type TrackablePart } from './marketAutoTrack';
 import { appendPriceEvent, retractPriceEvents, type WithdrawnPrice } from './refPriceEvents';
 
+export type BidPart = { partNumber: string };
+
 type LineRow = {
   part_number: string | null;
   unit_price: number;
@@ -23,6 +25,8 @@ type Group = {
 
 type RecordOptions = {
   source: string;
+  // Lines to record, by canonical part number. Absent = every line.
+  only?: Set<string>;
 };
 
 // One market data point per distinct product (canonical part number) on a
@@ -49,6 +53,7 @@ async function recordSellOrderDataPoints(
     if (!raw) continue;
     const canon = canonPartNumberJs(raw);
     if (!canon) continue;
+    if (opts.only && !opts.only.has(canon)) continue;
     const g = byCanon.get(canon);
     if (g) {
       g.priceQty += l.unit_price * l.qty;
@@ -115,4 +120,28 @@ export async function retractSaleDataPoints(
   sellOrderId: string,
 ): Promise<WithdrawnPrice[]> {
   return retractPriceEvents(tx, `sale:${sellOrderId}`);
+}
+
+// On a line save whose prices came from a confirmed vendor price import: the
+// customer's accepted quote is a market signal weeks before the deal closes.
+// `parts` are the part numbers the manager confirmed in the preview — the
+// sheet prices a part once, across its conditions; the order's other lines
+// keep whatever price they had and are not a bid. Runs inside the save's tx, after
+// the lines are rewritten, so it reads the saved USD values.
+export async function recordBidDataPoints(
+  tx: TransactionSql,
+  sellOrderId: string,
+  actorUserId: string,
+  parts: BidPart[],
+): Promise<{ recorded: number }> {
+  const only = new Set<string>();
+  for (const p of parts) {
+    const canon = canonPartNumberJs(p.partNumber);
+    if (canon) only.add(canon);
+  }
+  if (only.size === 0) return { recorded: 0 };
+  return recordSellOrderDataPoints(tx, sellOrderId, actorUserId, {
+    source: `bid:${sellOrderId}`,
+    only,
+  });
 }

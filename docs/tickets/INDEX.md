@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-497](./RS-497-restore-the-sell-order-s-vendor-price-import.md) | done | story | P2 | Restore the sell order's vendor price import | 1.402.0 |
 | [RS-496](./RS-496-uptime-monitor-crash-loop-floods-telegram-with-deplo.md) | done | bug | P2 | Uptime monitor crash loop floods Telegram with deploy alerts | 1.401.1 |
 | [RS-495](./RS-495-payments-table-sorts-by-its-columns.md) | done | story | P2 | Payments table sorts by its columns | 1.401.0 |
 | [RS-494](./RS-494-rmb-flow-opens-on-oct-31-2026-to-today.md) | done | story | P2 | RMB Flow opens on Oct 31, 2026 to today | 1.400.0 |
