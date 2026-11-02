@@ -108,6 +108,8 @@ type Header = {
   priceCol: number;
   priceHeader: string;
   shortCodeCol?: number;
+  // A pre-v1.242.0 bid sheet priced a part per condition, in its own column.
+  conditionCol?: number;
 };
 
 type HeaderHit = Header & { ws: ExcelJS.Worksheet; headerRow: number };
@@ -141,7 +143,12 @@ function headerIn(row: ExcelJS.Row): Header | null {
   const price = part && best(priceScore, part.col);
   if (!part || !price) return null;
   const shortCode = cells.find(c => c.h === 'shortcode' || c.h === '短码');
-  return { partCol: part.col, priceCol: price.col, priceHeader: price.text, shortCodeCol: shortCode?.col };
+  const condition = cells.find(c => c.col !== part.col && c.col !== price.col
+    && (c.h === 'condition' || c.h.includes('成色')));
+  return {
+    partCol: part.col, priceCol: price.col, priceHeader: price.text,
+    shortCodeCol: shortCode?.col, conditionCol: condition?.col,
+  };
 }
 
 function findHeaders(wb: ExcelJS.Workbook): HeaderHit[] {
@@ -200,9 +207,14 @@ export type SheetPriceRow = {
   rawPrice: string;
   /** The currency the row is marked in, or null when nothing names one. */
   currency: string | null;
+  /** Read only when asked for and the sheet has a Condition column. */
+  condition?: string | null;
 };
 
-export function readPriceSheetRows(wb: ExcelJS.Workbook): SheetPriceRow[] {
+// The sell order's import asks for the Condition cell; the other readers don't.
+export type ReadOptions = { condition?: boolean };
+
+export function readPriceSheetRows(wb: ExcelJS.Workbook, opts: ReadOptions = {}): SheetPriceRow[] {
   const hits = findHeaders(wb);
   if (hits.length === 0) throw new PriceColumnsNotFoundError();
 
@@ -238,6 +250,9 @@ export function readPriceSheetRows(wb: ExcelJS.Workbook): SheetPriceRow[] {
       )];
       // A bid row lists every part it folds; one entered price applies to all
       // of them. Slashes stay intact because they belong to Kingston numbers.
+      const condition = !opts.condition || cols.conditionCol === undefined
+        ? undefined
+        : cellText(row.getCell(cols.conditionCol).value).trim() || null;
       const parts = [...new Set(rawPart.split(/[,，;；\r\n]+/).map(p => p.trim()).filter(Boolean))];
       for (const part of parts) rows.push({
         sheet: ws.name,
@@ -249,6 +264,7 @@ export function readPriceSheetRows(wb: ExcelJS.Workbook): SheetPriceRow[] {
         priceKind: price.kind,
         rawPrice,
         currency,
+        ...(condition === undefined ? {} : { condition }),
       });
     });
   }
@@ -265,7 +281,9 @@ export type PriceSheetUpload =
   | { ok: true; rows: SheetPriceRow[]; listCurrency: SupportedCurrency }
   | { ok: false; status: 400 | 413; body: { error: string; code?: string } };
 
-export async function readPriceSheetUpload(form: FormData | null): Promise<PriceSheetUpload> {
+export async function readPriceSheetUpload(
+  form: FormData | null, opts: ReadOptions = {},
+): Promise<PriceSheetUpload> {
   const refuse = (status: 400 | 413, error: string, code?: string): PriceSheetUpload =>
     ({ ok: false, status, body: code ? { error, code } : { error } });
   if (!form) return refuse(400, 'multipart/form-data required');
@@ -286,7 +304,7 @@ export async function readPriceSheetUpload(form: FormData | null): Promise<Price
     return refuse(400, 'not a valid .xlsx file');
   }
   try {
-    return { ok: true, rows: readPriceSheetRows(wb), listCurrency };
+    return { ok: true, rows: readPriceSheetRows(wb, opts), listCurrency };
   } catch (e) {
     if (e instanceof PriceColumnsNotFoundError) return refuse(400, e.message, 'columns-not-found');
     throw e;

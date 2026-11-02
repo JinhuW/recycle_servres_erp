@@ -289,6 +289,8 @@ const isUploadPath = (path: string): boolean =>
   // embeds item photos and routinely exceeds the JSON cap. The route enforces
   // its own 8 MB limit.
   path === '/api/market/price-import/preview' ||
+  // So is a vendor's filled bid sheet dropped on a sell order.
+  /^\/api\/sell-orders\/[^/]+\/price-import\/preview$/.test(path) ||
   // The sell order sheet dropped on Review mode is the same kind of file.
   /^\/api\/orders\/[^/]+\/price-sheet\/preview$/.test(path);
 

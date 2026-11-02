@@ -35,6 +35,8 @@ import { useAuth } from '../../lib/auth';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { SellOrderAttachments, type SellAttachment } from '../../components/SellOrderAttachments';
+import { PriceImportSection } from './SellOrderPriceImportDialog';
+import { applyPriceRows, type BidPart, mergeBidParts } from '../../lib/priceImport';
 import { usePreference } from '../../lib/preferences';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { filterLineGroups, groupSellOrderLines, type SellOrderLineGroup, type SellOrderLineGroupBy } from '../../lib/sellOrderLineGroups';
@@ -1074,6 +1076,11 @@ function SellOrderDetail({ id, onToast }: {
     paymentReceivedBy: string;   // '' = not assigned
     currency: Currency;
     lines: EditLine[];
+    // Products — (canonical part, condition) — whose prices came from a
+    // confirmed vendor price import. Save sends them so the backend records
+    // the accepted prices on the Market value board, and clears them the
+    // moment that PATCH lands so a retry of a later step re-sends no bids.
+    bidParts: BidPart[];
   } | null>(null);
   // FX snapshot for the draft's currency (null for USD or until it loads).
   const [fx, setFx] = useState<FxInfo | null>(null);
@@ -1149,6 +1156,7 @@ function SellOrderDetail({ id, onToast }: {
           paymentReceivedBy: r.order.paymentReceivedBy?.id ?? '',
           currency: r.order.currency,
           lines: merged.lines,
+          bidParts: [],
         });
         setPendingAdjust(null);
       })
@@ -1219,6 +1227,7 @@ function SellOrderDetail({ id, onToast }: {
     || receiverChanged
     || currencyChanged
     || linesChanged
+    || draft.bidParts.length > 0
     || pendingAdjust != null
   );
   // Done waits on every manager's sign-off of the order as saved. Edits that
@@ -1427,7 +1436,9 @@ function SellOrderDetail({ id, onToast }: {
       // requires the full line set alongside it — resend lines whenever either
       // the currency or the lines themselves changed.
       if (currencyChanged) patchBody.currency = draft.currency;
-      if (linesChanged || currencyChanged) {
+      // A confirmed import is a bid even when the vendor re-quoted the current
+      // prices, so the line set goes with it regardless of a diff.
+      if (linesChanged || currencyChanged || draft.bidParts.length > 0) {
         patchBody.lines = draft.lines.map(l => ({
           id:          l.id,
           inventoryId: l.inventoryId,
@@ -1440,11 +1451,15 @@ function SellOrderDetail({ id, onToast }: {
           warehouseId: l.warehouseId,
           condition:   l.condition,
         }));
+        if (draft.bidParts.length > 0) patchBody.bidParts = draft.bidParts;
         if (linesBase.current) patchBody.linesVersion = linesBase.current;
       }
       if (Object.keys(patchBody).length > 0) {
         const saved = await api.patch<{ linesVersion?: string | null }>(`/api/sell-orders/${order.id}`, patchBody);
         if (saved.linesVersion) linesBase.current = saved.linesVersion;
+        // The bids are recorded with that PATCH; if the adjust or status step
+        // below fails, the retry must not record them again.
+        setDraft(d => d && { ...d, bidParts: [] });
         setHistoryKey(k => k + 1);
       }
       // A pending negotiated total applies AFTER the line rewrite (the server
@@ -1997,6 +2012,22 @@ function SellOrderDetail({ id, onToast }: {
               </div>
             </div>
             <div className="so-page-side">
+              {/* Above the summary: on a long order, under the lines was a scroll past every one. */}
+              {editable && (
+                <div className="card so-page-card">
+                  <PriceImportSection
+                    orderId={order.id}
+                    currency={draft.currency}
+                    locale={locale}
+                    onApply={rows =>
+                      setDraft(d => d && {
+                        ...d,
+                        lines: applyPriceRows(d.lines, rows),
+                        bidParts: mergeBidParts(d.bidParts, rows),
+                      })}
+                  />
+                </div>
+              )}
               {summary && (
               <div className="so-summary">
                 <div
