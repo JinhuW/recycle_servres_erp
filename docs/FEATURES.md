@@ -3681,21 +3681,31 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     The coordinator's activity aside stays under the table while its rows
     exist; since v1.350.1 it spans the full width and its list stops at 480px
     and scrolls. There is no Pause on a roll: the backend has no route for it.
-    Since v1.409.0 (RS-505) each ERP account can run CloakBrowser, a stealth
+    Since v1.409.0 (RS-507) each ERP account can run CloakBrowser, a stealth
     Chromium, instead of stock Chromium. The slot's device carries
     `browser_engine`, a `cloak_seed` and a `cloak_gpu` derived from the
     account number, and the claim hands them to the worker, which uses them
     from its next normal start. The table has an **Engine** column (Stock,
     or a CloakBrowser chip with its seed and GPU). A row offers **Switch to
-    CloakBrowser** only while its account has no live session: no worker,
-    parked, or reporting Session expired, Checkpoint or a challenge, never
+    CloakBrowser** only while its account has no live session: its own last
+    state (its worker's report for this lease, else its latest state event)
+    is Session expired, Checkpoint or a challenge, or no worker has ever held
+    it and it has no saved session. Parking alone is not enough, since the
+    saved session goes out again with the next claim. It also has to be never
     switched before, with CloakBrowser on and a seat free. The confirmation
     names the fingerprint and says the move is one way and that Facebook
-    sees a new device on the account's next normal start. A refusal from
+    sees a new device on the account's next normal start. It also says not to
+    re-login the account before then: Re-login and Mark healthy answer 409
+    `engine_mismatch` while the worker runs a different engine from its
+    slot's. A worker older than 0.16.0 is never handed a CloakBrowser slot,
+    which waits for one that can run it. A proxy timezone edit rewrites the
+    timezone of every slot on it, which for a CloakBrowser slot changes its
+    `--fingerprint-timezone`. A refusal from
     `POST /api/fleet/slots/:no/engine` reads as a sentence: a live session,
     CloakBrowser off, every seat taken, or switched before. A CloakBrowser
-    row offers **Back to stock**, another new device, which is refused once
-    the cloak session has been healthy. A
+    row offers **Back to stock**, another new device, only while no worker
+    can be starting on it (parked, no worker, or a lost session). It is
+    refused once the cloak session has been healthy. A
     **Browser engine** card under the host cards has the **CloakBrowser on**
     switch (`cloak_enabled`, default off; off stops new switches and leaves
     switched accounts alone), the seats stepper (`cloak_max_slots`, default

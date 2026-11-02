@@ -18,7 +18,7 @@ import { ActivityAside } from '../FleetWorkers';
 import { dueLabel, easternClock, isQuarantined, maskUid } from './fleetBoard';
 import {
   DEFAULT_FLEET_ROW_FILTER, FLEET_ROW_KINDS, FLEET_ROW_SORT_COLS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning,
-  fleetCloakRoom, releasableRows, rowCloakSwitchable, rowOwnSlot, rowRetirable, sortFleetRows,
+  fleetCloakRoom, releasableRows, rowCloakSwitchable, rowOwnSlot, rowStockRevertible, rowRetirable, sortFleetRows,
   type FleetCloakRoom, type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowKind, type FleetRowSortCol,
 } from './fleetRows';
 import { AccountBriefCell } from './accountBrief';
@@ -210,8 +210,7 @@ function WorkerRow({ row: r, hostVersion, cityName, room, onChanged, now }: {
   const retirable = !mirror && rowRetirable(r);
   const cloakable = !mirror && rowCloakSwitchable(r, room);
   const engineSlot = r.source === 'erp' ? ownSlot ?? slot : null;
-  // Whether its cloak session was ever healthy is the route's to say (409 cloak_proven).
-  const stockable = !mirror && !!ownSlot && fleetEngineOf(ownSlot.device) === 'cloak';
+  const stockable = !mirror && rowStockRevertible(r);
 
   const since = r.now?.since ? Math.max(0, Math.round((now - Date.parse(r.now.since)) / 1000)) : null;
   const elapsed = since === null ? '' : `${Math.floor(since / 60)}m ${String(since % 60).padStart(2, '0')}s`;
@@ -367,12 +366,14 @@ export function EngineSwitchDialog({ accountNo: no, engine, onClose, onDone }: {
           body={<>
             <p>{t('fleetCloakBody', { seed: cloak.cloak_seed, gpu: cloak.cloak_gpu })}</p>
             <p className="fp-warn">{t('fleetCloakWarn')}</p>
+            <p className="fp-warn">{t('fleetEngineNoRelogin')}</p>
           </>} />
       ) : (
         <ConfirmDialogBody title={t('fleetStockTitle', { no })} confirm={t('fleetStockSwitch')} busy={busy} danger onClose={close} onConfirm={confirm}
           body={<>
             <p>{t('fleetStockBody')}</p>
             <p className="fp-warn">{t('fleetStockWarn')}</p>
+            <p className="fp-warn">{t('fleetEngineNoRelogin')}</p>
           </>} />
       )}
     </Modal>

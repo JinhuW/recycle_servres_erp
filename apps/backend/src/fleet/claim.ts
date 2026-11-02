@@ -3,6 +3,8 @@ import { Hono } from 'hono';
 import type postgres from 'postgres';
 import {
   cookieUid,
+  FLEET_CLOAK_MIN_WORKER_VERSION,
+  fleetVersionAtLeast,
   fleetStateParked,
   totpKey,
   type ClaimAnswer,
@@ -325,6 +327,10 @@ worker.post('/claim', claimAuth, async (c) => {
         OR (${handoff}::int IS NOT NULL AND handoff_epoch IS NOT DISTINCT FROM ${handoff} AND reserved_until > NOW()))`;
     if (running) return null;
     const settings = await loadSettings(tx);
+    // A worker too old to launch CloakBrowser would run a cloak slot on stock
+    // and log in there; the slot waits for one that can.
+    const engineRuns = fleetVersionAtLeast(version, FLEET_CLOAK_MIN_WORKER_VERSION)
+      ? tx`TRUE` : tx`s.device->>'browser_engine' IS DISTINCT FROM 'cloak'`;
 
     // This boot's own slot (a retried claim) or the one held for it (a
     // handoff) waits for its lock: skipping it would hand the same boot a
@@ -338,7 +344,7 @@ worker.post('/claim', claimAuth, async (c) => {
         ORDER BY (claim_id IS NOT DISTINCT FROM ${claimId}) DESC LIMIT 1`;
       if (mine) {
         [row] = await tx<ClaimRow[]>`${CLAIM_SELECT(tx)} WHERE s.account_no = ${mine.account_no} AND a.status = 'fleet'
-          FOR NO KEY UPDATE OF a`;
+          AND ${engineRuns} FOR NO KEY UPDATE OF a`;
       }
     }
     // Otherwise any free slot. A handoff whose reservation lapsed lands here
@@ -348,7 +354,7 @@ worker.post('/claim', claimAuth, async (c) => {
     if (!row) {
       [row] = await tx<ClaimRow[]>`
         ${CLAIM_SELECT(tx)}
-        WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW())
+        WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AND ${engineRuns}
         ORDER BY (s.worker_id = ${worker_id}) DESC NULLS LAST,
           (s.last_host_id = ${host.host_id}) DESC NULLS LAST,
           s.account_no

@@ -12,7 +12,7 @@ import type { PoolAccountSummary } from '../../../lib/facebookPool';
 export type FleetPoolAccount = Pick<PoolAccountSummary, 'no' | 'uid' | 'status' | 'holder' | 'note'>
   & Partial<Pick<PoolAccountSummary, 'addedAt' | 'batch'>>;
 import {
-  fleetCloakSwitchable, fleetEngineOf, fleetResumable, fleetSlotRetirable, fleetStateParked,
+  fleetCloakSwitchable, fleetEngineOf, fleetResumable, fleetStockRevertible, fleetSlotRetirable, fleetStateParked,
   type FleetHost, type FleetRelease, type FleetSettings, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume,
 } from '../../../lib/fleet';
 import { parkedWorkers, retiredAt } from '../../../lib/fleetView';
@@ -310,14 +310,22 @@ export function fleetCloakRoom(settings: Pick<FleetSettings, 'cloak_enabled' | '
   };
 }
 
-/** Whether the row offers Switch to CloakBrowser: the backend's guard, read
- *  from the page's last poll, so a refusal can still come back. */
+/** Whether the row offers Switch to CloakBrowser: the backend's guard on the
+ *  account's own last state, which the slot carries (a worker row may since
+ *  hold another account), read from the page's last poll, so a refusal can
+ *  still come back. */
 export function rowCloakSwitchable(r: FleetRow, room: FleetCloakRoom): boolean {
   const own = rowOwnSlot(r);
   if (r.source !== 'erp' || !own || !room.enabled || room.used >= room.max) return false;
-  return fleetCloakSwitchable({
-    parked: own.parked, worker_id: own.worker_id, state: own.worker_id === r.workerId ? r.state : own.worker?.state, device: own.device,
-  });
+  return fleetCloakSwitchable(own);
+}
+
+/** Whether the row offers Back to stock: a CloakBrowser slot no worker can be
+ *  starting on. Whether its cloak session was ever healthy is the route's to
+ *  say (409 cloak_proven). */
+export function rowStockRevertible(r: FleetRow): boolean {
+  const own = rowOwnSlot(r);
+  return r.source === 'erp' && !!own && fleetEngineOf(own.device) === 'cloak' && fleetStockRevertible(own);
 }
 
 /** Only an account its worker reports lost, or a manager parked: a worker

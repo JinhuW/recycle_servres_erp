@@ -1,10 +1,10 @@
-import type { FleetEngineLoss, FleetEngineLossRow } from '@recycle-erp/shared';
+import { FLEET_BROWSER_ENGINES, type FleetEngineLoss, type FleetEngineLossRow } from '@recycle-erp/shared';
 import type { SqlLike } from '../db';
 import { bad, type Refusal } from './sql';
 
 // ─── Worker state history and account loss per browser engine ────────────────
 // fleet_workers.state keeps only the latest report; fleet_worker_state_events
-// keeps each change, stamped with the slot's engine at that moment, so the
+// keeps each change, stamped with the engine the worker ran, so the
 // loss rate of one engine can be held against another's.
 
 const MAX_REASON = 200;
@@ -19,12 +19,16 @@ export async function recordStateChange(
     SELECT state FROM fleet_workers WHERE worker_id = ${w.worker_id} FOR UPDATE`;
   const from = prev?.state ?? null;
   if (from === state) return;
-  const raw = detail && typeof detail === 'object' ? (detail as Record<string, unknown>).reason : null;
-  const reason = typeof raw === 'string' ? raw.slice(0, MAX_REASON) : null;
+  const d = detail && typeof detail === 'object' ? detail as Record<string, unknown> : {};
+  const reason = typeof d.reason === 'string' ? d.reason.slice(0, MAX_REASON) : null;
+  // The engine the worker launched, when it says: a slot switched while it
+  // runs would otherwise relabel the run. Older images say nothing, and fall
+  // back to the slot's setting.
+  const ran = (FLEET_BROWSER_ENGINES as readonly unknown[]).includes(d.engine) ? d.engine as string : null;
   await tx`
     INSERT INTO fleet_worker_state_events (account_no, worker_id, engine, from_state, to_state, reason)
     SELECT ${w.account_no}, ${w.worker_id},
-           COALESCE((SELECT device->>'browser_engine' FROM fleet_slots WHERE account_no = ${w.account_no}), 'stock'),
+           COALESCE(${ran}::text, (SELECT device->>'browser_engine' FROM fleet_slots WHERE account_no = ${w.account_no}), 'stock'),
            ${from}, ${state}, ${reason}`;
 }
 

@@ -27,7 +27,7 @@ export type {
 export {
   FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetResumable, fleetTakesResume, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
   FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_SLOW_MS,
-  fleetCloakFor, fleetCloakSwitchable, fleetSessionLost,
+  fleetCloakFor, fleetCloakSwitchable, fleetSessionLost, fleetStockRevertible,
 } from '@recycle-erp/shared';
 
 // snake_case on purpose: rows come straight from the backend's SQL.
@@ -173,20 +173,23 @@ export const fleetApi = {
   // One worker with its slot, account, proxy, cities, stats, log and history; 404 for an id the fleet never saw.
   worker: (id: string) => api.get<FleetWorkerDetail>(`${BASE}/workers/${slug(id)}`),
   // Queues a forced Facebook login that the worker's next heartbeat hands it
-  // once; 409 not_running for a worker holding no slot. A queued one that has
+  // once; 409 not_running for a worker holding no slot, engine_mismatch while
+  // the worker runs another engine than its slot names. A queued one that has
   // not gone out yet is answered again, not doubled.
   relogin: (id: string) => api.post<{ ok: true; relogin: FleetWorkerRelogin }>(`${BASE}/workers/${slug(id)}/relogin`, {}),
   // Marks a worker parked on a page that would not load healthy: its next
   // heartbeat hands it `resume` once, and it tries again in the same browser.
-  // 409 not_parked for any other state, not_running without a slot.
+  // 409 not_parked for any other state, not_running without a slot,
+  // engine_mismatch as for relogin.
   resume: (id: string) => api.post<{ ok: true; resume: FleetWorkerResume }>(`${BASE}/workers/${slug(id)}/resume`, {}),
   // Puts a pool account into the fleet on a listed proxy. 409 account_busy,
   // no_login, proxy_full or exists; the body's `detail` says which account.
   addSlot: (body: FleetSlotWrite) => api.post<{ slot: FleetSlot }>(`${BASE}/slots`, body).then(r => r.slot),
-  // To CloakBrowser only for an account with no live session, while
-  // cloak_enabled is on and a seat is free: 409 cloak_seeded,
+  // To CloakBrowser only for an account that lost its session or was never
+  // logged in, while cloak_enabled is on and a seat is free: 409 cloak_seeded,
   // engine_live_session, cloak_disabled or cloak_slots_full. Back to stock
-  // only while its cloak session never got HEALTHY (409 cloak_proven).
+  // only with no worker starting on it (engine_live_session) and while its
+  // cloak session never got HEALTHY (cloak_proven).
   setSlotEngine: (no: number, engine: FleetBrowserEngine) =>
     api.post<{ slot: FleetSlot }>(`${BASE}/slots/${no}/engine`, { engine }).then(r => r.slot),
   // Losses per engine over the last `days`, with the stint ledger's baseline.

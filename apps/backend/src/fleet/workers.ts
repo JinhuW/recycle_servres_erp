@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  fleetCloakFor, fleetCloakSwitchable, fleetDeviceFor, fleetResumable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
+  fleetCloakFor, fleetCloakSwitchable, fleetDeviceFor, fleetReportedEngine, fleetStockRevertible, fleetResumable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
   type FleetWorkerRelogin, type FleetWorkerResume,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
@@ -42,7 +42,7 @@ type SlotRow = {
   account_no: number; worker_id: string | null; host_id: string | null; last_host_id: string | null; epoch: number;
   lease_expires_at: Date | null; proxy_url: string | null; proxy_id: number | null; device: unknown;
   quarantined_until: Date | null; note: string; parked: boolean; reserved_until: Date | null;
-  uid: string | null; pool_status: string; minutes_today: number;
+  uid: string | null; pool_status: string; minutes_today: number; account_state: string | null; has_session: boolean;
 };
 
 type WorkerRow = {
@@ -71,13 +71,27 @@ function resumeOf(w: WorkerRow): FleetWorkerResume | null {
 type WorkerView = FleetWorker & { task: (FleetTask & { city_name: string | null }) | null };
 type SlotView = FleetSlot & { uid: string | null; pool_status: string; minutes_today: number; budget_minutes: number; worker: WorkerView | null };
 
+// The account's own last state, never another account's: a worker row is one
+// container and is overwritten when it claims a different account, so only
+// the row for this account's current lease counts (a NULL there is a boot in
+// progress), and otherwise the account's latest recorded change.
+const ACCOUNT_STATE = (sql: SqlLike) => sql`
+  CASE WHEN EXISTS (SELECT 1 FROM fleet_workers w WHERE w.account_no = s.account_no AND w.epoch = s.epoch)
+    THEN (SELECT w.state FROM fleet_workers w WHERE w.account_no = s.account_no AND w.epoch = s.epoch
+          ORDER BY w.last_heartbeat_at DESC NULLS FIRST LIMIT 1)
+    ELSE (SELECT e.to_state FROM fleet_worker_state_events e WHERE e.account_no = s.account_no
+          ORDER BY e.at DESC, e.id DESC LIMIT 1)
+  END`;
+
 const SLOT_SELECT = (sql: SqlLike) => sql`
   SELECT s.account_no, s.worker_id, s.host_id, s.last_host_id, s.epoch, s.lease_expires_at, s.proxy_url, s.proxy_id, s.device,
          s.quarantined_until, s.note,
          (s.lease_expires_at IS NOT DISTINCT FROM 'infinity'::timestamptz) AS parked,
          CASE WHEN s.reserved_until > NOW() THEN s.reserved_until END AS reserved_until,
          a.uid, a.status AS pool_status,
-         ${minutesTodaySql(sql, sql`s.account_no`)} AS minutes_today
+         ${minutesTodaySql(sql, sql`s.account_no`)} AS minutes_today,
+         ${ACCOUNT_STATE(sql)} AS account_state,
+         COALESCE(a.cookie_enc, '') <> '' AS has_session
   FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no`;
 
 /** Every worker row with the task it holds, keyed by worker id. */
@@ -119,6 +133,8 @@ function slotView(r: SlotRow, budget: number, workersById: Map<string, WorkerVie
     note: r.note,
     parked: r.parked,
     reserved_until: iso(r.reserved_until),
+    account_state: r.account_state,
+    has_session: r.has_session,
     uid: r.uid,
     pool_status: r.pool_status,
     minutes_today: Math.round(r.minutes_today),
@@ -324,11 +340,13 @@ slots.post('/:no/unpark', async (c) => {
 // ─── Browser engine ───────────────────────────────────────────────────────────
 // A slot moves to CloakBrowser only while its account has no live session:
 // the new fingerprint is a new machine, and a logged-in account that changes
-// machine under Facebook's eyes is the checkpoint this exists to avoid. The
-// worker reads the engine at its next claim. Going back to stock is a second
-// new machine, so it is only for a slot whose cloak session never got
-// HEALTHY. The seed and GPU stay on the device either way: they are the
-// fingerprint that account has shown, and the slot is not switched again.
+// machine under Facebook's eyes is the checkpoint this exists to avoid. A park
+// keeps the saved session, and the next claim hands it out again, so only a
+// lost session or an account never logged in counts. The worker reads the
+// engine at its next claim. Going back to stock is a second new machine, so it
+// is only for a slot whose cloak session never got HEALTHY, and none may be
+// starting on it. The seed and GPU stay on the device either way: they are
+// the fingerprint that account has shown, and the slot is not switched again.
 
 const ENGINE_LOCK = 'fleet-slot-engine';
 
@@ -344,29 +362,28 @@ slots.post('/:no/engine', async (c) => {
   const out = await sql.begin(async (tx): Promise<Refusal | { changed: boolean }> => {
     // Serialises switches, so two at once cannot both take the last cloak seat.
     await tx`SELECT pg_advisory_xact_lock(hashtext(${ENGINE_LOCK}))`;
-    const [slot] = await tx<{ worker_id: string | null; parked: boolean; device: unknown }[]>`
-      SELECT worker_id, (lease_expires_at IS NOT DISTINCT FROM 'infinity'::timestamptz) AS parked, device
-      FROM fleet_slots WHERE account_no = ${no} FOR UPDATE`;
+    const [slot] = await tx<SlotRow[]>`${SLOT_SELECT(tx)} WHERE s.account_no = ${no} FOR UPDATE OF s`;
     if (!slot) return notFound(`slot #${no}`);
-    const device = isRecord(slot.device) ? slot.device : null;
+    const device = isRecord(slot.device) ? slot.device as FleetSlot['device'] : null;
     const current = device?.browser_engine === 'cloak' ? 'cloak' : 'stock';
     if (engine === current) return { changed: false };
+    const where = `${slot.worker_id ?? 'no worker'}, ${slot.account_state ?? (slot.epoch === 0 ? 'never claimed' : 'no state yet')}`;
 
     if (engine === 'stock') {
       const [proven] = await tx`
         SELECT 1 FROM fleet_worker_state_events
         WHERE account_no = ${no} AND engine = 'cloak' AND to_state = 'HEALTHY' LIMIT 1`;
       if (proven) return conflict('cloak_proven', `#${no} has been HEALTHY on CloakBrowser; going back would be another new machine`);
+      if (!fleetStockRevertible(slot)) {
+        return conflict('engine_live_session', `#${no} may be running on CloakBrowser (${where}); park it or wait for it to lose its session`);
+      }
       await tx`UPDATE fleet_slots SET device = device || '{"browser_engine":"stock"}'::jsonb WHERE account_no = ${no}`;
       return { changed: true };
     }
 
-    const [worker] = slot.worker_id
-      ? await tx<{ state: string | null }[]>`SELECT state FROM fleet_workers WHERE worker_id = ${slot.worker_id}`
-      : [];
     if (device?.cloak_seed !== undefined) return conflict('cloak_seeded', `#${no} has had a CloakBrowser seed already`);
-    if (!fleetCloakSwitchable({ parked: slot.parked, worker_id: slot.worker_id, state: worker?.state, device: null })) {
-      return conflict('engine_live_session', `#${no} is on ${slot.worker_id} (${worker?.state ?? 'starting'}); park it or wait for it to lose its session`);
+    if (!fleetCloakSwitchable({ ...slot, device })) {
+      return conflict('engine_live_session', `#${no} may still hold a live session (${where}); only an account that lost its session, or one never logged in, switches`);
     }
     const settings = await loadSettings(tx);
     if (!settings.cloak_enabled) return conflict('cloak_disabled', 'CloakBrowser is off in the fleet settings');
@@ -396,6 +413,18 @@ workers.get('/', async (c) => {
 // a login at its next boot, which logs in anyway. Pressing it again while one
 // waits answers the waiting one: two would still be one login.
 
+/** A worker whose slot was switched since it started runs the old engine
+ *  until its next claim; a session it mints now would be loaded into the new
+ *  fingerprint at that claim, so neither a login nor a resume goes to it. */
+async function engineMismatch(tx: SqlLike, w: WorkerRow): Promise<Refusal | null> {
+  const [slot] = await tx<{ device: unknown }[]>`SELECT device FROM fleet_slots WHERE account_no = ${w.account_no}`;
+  const device = slot && isRecord(slot.device) ? slot.device : null;
+  const configured = device?.browser_engine === 'cloak' ? 'cloak' : 'stock';
+  const running = fleetReportedEngine(isRecord(w.detail) ? w.detail : null);
+  if (configured === running) return null;
+  return conflict('engine_mismatch', `${w.worker_id} runs ${running} but #${w.account_no} is set to ${configured}; it changes at its next normal start`);
+}
+
 workers.post('/:id/relogin', async (c) => {
   const id = c.req.param('id');
   if (!WORKER_ID.test(id)) return c.json({ error: 'not_found' }, 404);
@@ -409,6 +438,8 @@ workers.post('/:id/relogin', async (c) => {
       WHERE worker_id = ${id} AND epoch = ${w.epoch} AND account_no = ${w.account_no}
         AND lease_expires_at > NOW() AND lease_expires_at <> 'infinity'::timestamptz`;
     if (!held) return conflict('not_running', `${id} holds no slot right now`);
+    const mismatch = await engineMismatch(tx, w);
+    if (mismatch) return mismatch;
     const pending = reloginOf(w);
     if (pending && pending.delivered_at === null) return { relogin: pending, fresh: false };
     const [row] = await tx<WorkerRow[]>`
@@ -441,6 +472,8 @@ workers.post('/:id/resume', async (c) => {
       WHERE worker_id = ${id} AND epoch = ${w.epoch} AND account_no = ${w.account_no}
         AND lease_expires_at > NOW() AND lease_expires_at <> 'infinity'::timestamptz`;
     if (!held) return conflict('not_running', `${id} holds no slot right now`);
+    const mismatch = await engineMismatch(tx, w);
+    if (mismatch) return mismatch;
     const pending = resumeOf(w);
     if (pending && pending.delivered_at === null) return { resume: pending, fresh: false };
     if (!fleetResumable(w.state, w.detail)) {

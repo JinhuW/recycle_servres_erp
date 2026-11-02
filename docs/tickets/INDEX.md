@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-505](./RS-505-fleet-slots-can-switch-to-the-cloakbrowser-engine.md) | done | story | P2 | Fleet slots can switch to the CloakBrowser engine | 1.409.0 |
+| [RS-507](./RS-507-fleet-slots-can-switch-to-the-cloakbrowser-engine.md) | done | story | P2 | Fleet slots can switch to the CloakBrowser engine | 1.409.0 |
 | [RS-506](./RS-506-fleet-keeps-a-history-of-worker-states-and-reports-a.md) | done | story | P2 | Fleet keeps a history of worker states and reports account loss per browser engine | 1.408.0 |
 | [RS-505](./RS-505-fleet-worker-image-can-run-cloakbrowser-per-account.md) | in-review | story | P2 | Fleet worker image can run CloakBrowser per account | facebook-tracker 0.16.0 (no ERP release) |
 | [RS-504](./RS-504-po-list-payment-gap-note-text-overflows-its-box.md) | done | bug | P2 | PO list payment-gap note text overflows its box | 1.407.1 |

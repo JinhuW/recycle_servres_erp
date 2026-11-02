@@ -2442,7 +2442,7 @@ Every change of an ERP-fleet worker's reported state, written by the heartbeat t
 | `id` | `bigint` | ✓ | `nextval(…)` |  |
 | `account_no` | `integer` |  |  | The pool account the worker held. No foreign key, so the history outlives a deleted account. |
 | `worker_id` | `text` | ✓ |  | The worker that reported it. |
-| `engine` | `text` | ✓ | `'stock'` | The slot's `device->>'browser_engine'` at that moment: `stock` or `cloak`, `stock` when the device names none. |
+| `engine` | `text` | ✓ | `'stock'` | The engine the worker says it launched (heartbeat `detail.engine`), else the slot's `device->>'browser_engine'` at that moment: `stock` or `cloak`, `stock` when neither names one. |
 | `from_state` | `text` |  |  | fleet_workers.state before the change; null on the first heartbeat after a claim. |
 | `to_state` | `text` | ✓ |  | The state reported: HEALTHY, SESSION_EXPIRED, CHECKPOINT, CHALLENGE_*, DEGRADED, DEAD. |
 | `reason` | `text` |  |  | The heartbeat detail's `reason`, when it carried one (at most 200 characters). |

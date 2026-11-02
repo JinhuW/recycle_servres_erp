@@ -121,7 +121,10 @@ describe('Fleet tab', () => {
     expect(off).toContain('fleetEngine_cloak');
     expect(off).toContain('fleetCloakSeed');
     expect(off).not.toContain('fleetCloakSwitch');        // no settings: nothing offered
-    expect(off.match(/fleetStockSwitch/g)).toHaveLength(1); // #31 runs CloakBrowser
+    expect(off).not.toContain('fleetStockSwitch');          // #31's cloak worker is running
+    const lost = cloaked.map(s => s.account_no === 31 ? { ...s, account_state: 'CHECKPOINT' } : s);
+    const back = renderToString(<WorkersTable data={{ ...fleetData, slots: lost }} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
+    expect(back.match(/fleetStockSwitch/g)).toHaveLength(1); // ...until its account loses its session
     const settings = { ...SETTINGS, cloak_enabled: true, cloak_max_slots: 2 };
     const on = renderToString(<WorkersTable data={{ ...fleetData, slots: cloaked, settings }} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
     expect(on.match(/fleetCloakSwitch/g)).toHaveLength(1);   // homelab-2 lost its session
@@ -133,9 +136,11 @@ describe('Fleet tab', () => {
     expect(html).toContain('fleetCloakTitle');
     expect(html).toContain('fleetCloakBody');
     expect(html).toContain('fleetCloakWarn');
+    expect(html).toContain('fleetEngineNoRelogin');
     const back = renderToString(<EngineSwitchDialog accountNo={7} engine="stock" onClose={noop} onDone={noop} />);
     expect(back).toContain('fleetStockTitle');
     expect(back).toContain('fleetStockWarn');
+    expect(back).toContain('fleetEngineNoRelogin');
   });
   it('shows the engine card with its switch, seats and loss rates', () => {
     const html = renderToString(<EngineCard settings={{ ...SETTINGS, cloak_enabled: true }} used={1} onChanged={noop} />);

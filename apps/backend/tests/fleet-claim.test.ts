@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomBytes } from 'node:crypto';
-import { cookieUid, cookieValue, type ClaimAnswer, type FleetCookie, type NextTaskAnswer } from '@recycle-erp/shared';
+import { cookieUid, FLEET_CLOAK_MIN_WORKER_VERSION, cookieValue, type ClaimAnswer, type FleetCookie, type NextTaskAnswer } from '@recycle-erp/shared';
 import { getTestDb, resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { signWorkerToken, workerTokenKey } from '../src/fleet/auth';
@@ -106,8 +106,13 @@ describe('POST /api/fleet/worker/claim', () => {
   it('passes a CloakBrowser slot\'s engine, seed and GPU through in the device', async () => {
     const no = await seedSlot(1);
     await getTestDb()`UPDATE fleet_slots SET device = ${getTestDb().json({ viewport: [1440, 777], timezone: 'America/Denver', locale: 'en-US', browser_engine: 'cloak', cloak_seed: 48213, cloak_gpu: 'Intel' })} WHERE account_no = ${no}`;
-    const a = await claimed('lab-1');
-    expect(a.device).toMatchObject({ viewport: [1440, 777], browser_engine: 'cloak', cloak_seed: 48213, cloak_gpu: 'Intel' });
+    // The suite's 0.14.0 worker cannot launch CloakBrowser, so it is not handed one.
+    expect((await claim('lab-1')).status).toBe(409);
+    const r = await api<ClaimAnswer>('POST', '/api/fleet/worker/claim', {
+      headers: bearer(HOST_TOKEN), body: { host_id: 'lab', worker_id: 'lab-2', version: FLEET_CLOAK_MIN_WORKER_VERSION, vnc_port: 5901 },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.device).toMatchObject({ viewport: [1440, 777], browser_engine: 'cloak', cloak_seed: 48213, cloak_gpu: 'Intel' });
   });
 
   it('hands the slot with its secrets unsealed, opens the stint and mints a token for epoch 1', async () => {
