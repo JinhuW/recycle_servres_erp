@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.405.1] - 2026-11-02
+
+### Fixed
+
+- **A sell order no longer folds two RAM dies into one row** (RS-501). The
+  series that v1.404.0 folds lines and shares a # by stopped at the module
+  organisation, so SK Hynix `HMAA2GU6AJR8N` (A-die) and `HMAA2GU6CJR8N`
+  (C-die), or Samsung `M471A1K43CB1` and `…EB1`, sat in one row. A buyer
+  prices each die as its own product. The series now runs through the die,
+  the part the short code names (Micron: its die revision), so only lots that
+  differ by speed or packaging fold. #s already stored stay as they are.
+
 ## [1.405.0] - 2026-11-02
 
 ### Added

@@ -136,7 +136,7 @@ describe('foldSeries', () => {
   it('folds one series into a row where its first line sat, and leaves the rest', () => {
     const out = foldSeries(items([
       ram('M471A1K43CB1-CRC'), ram('HMA81GS6AFR8N-UH', 'SK Hynix 8GB DDR4'),
-      ram('M471A1K43EB1-CWE'), { category: 'SSD', partNumber: 'X', label: 'SSD', condition: null },
+      ram('M471A1K43CB1-CTD'), { category: 'SSD', partNumber: 'X', label: 'SSD', condition: null },
       ram('HMA81GS6AFR8N-UH', 'SK Hynix 8GB DDR4'),
     ]));
     expect(out).toHaveLength(3);
@@ -145,8 +145,12 @@ describe('foldSeries', () => {
     expect(isFold(out[2]!)).toBe(false);
   });
 
-  it('keeps a lone series line, another label or another condition unfolded', () => {
-    const out = foldSeries(items([ram('M471A1K43CB1-CRC'), ram('M471A1K43CB1-CTD', 'Samsung 16GB DDR4'), ram('M471A1K43EB1-CWE', undefined, 'New')]));
+  it('keeps a lone series line, another die, label or condition unfolded', () => {
+    const out = foldSeries(items([
+      ram('M471A1K43CB1-CRC'), ram('M471A1K43EB1-CWE'), ram('M471A1K43CB1-CTD', 'Samsung 16GB DDR4'),
+      ram('M471A1K43CB1-CTD', undefined, 'New'), ram('HMAA2GU6AJR8N-XN', 'SK Hynix 16GB DDR4'),
+      ram('HMAA2GU6CJR8N-XN', 'SK Hynix 16GB DDR4'),
+    ]));
     expect(out.some(isFold)).toBe(false);
   });
 

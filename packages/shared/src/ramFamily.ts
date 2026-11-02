@@ -73,20 +73,23 @@ export function ramFamilyLabel(raw: string, family: RamFamily): string {
 }
 
 // A sell order goes looser than the family: one series is the module up to its
-// organisation — Samsung M471A1K43, SK Hynix HMA81GS6, Micron MTA18ASF2G72PZ —
-// so CB1-CRC, CB1-CTD and EB1-CWE are one row and one # on the order, with die
-// and speed read off each lot. Inventory keeps the family above.
-const SAMSUNG_SERIES = 9;   // M · module · generation · depth · organisation
-const HYNIX_SERIES = 8;     // HM · generation · density · depth · form · organisation
-const MICRON_SERIES_RE = /^(MTA?\d{1,2}[A-Z]{2,3}(?:256|512|1G|2G|4G|8G|16G)(?:64|72)[A-Z0-9]*?Z)[123]G\d/;
+// die, the part the short code names — Samsung M471A1K43CB1, SK Hynix
+// HMAA2GU6AJR, Micron MTA18ASF2G72PZ + its die revision — so CB1-CRC and
+// CB1-CTD are one row and one # on the order, with speed read off each lot.
+// A different die (CB1 vs EB1, AJR vs CJR) is a different product to a buyer.
+// Inventory keeps the family above.
+const SAMSUNG_SERIES = 12;  // M · module · generation · depth · organisation · die, package, PCB
+const HYNIX_SERIES = 11;    // HM · generation · density · depth · form · organisation · die, package
+const MICRON_SERIES_RE = /^(MTA?\d{1,2}[A-Z]{2,3}(?:256|512|1G|2G|4G|8G|16G)(?:64|72)[A-Z0-9]*?Z)[123]G\d([A-Z]\d)/;
 
-/** The module series of a RAM part number (`M471A1K43`); null when no scheme reads it. */
+/** The module series of a RAM part number, die included (`M471A1K43CB1`); null when no scheme reads it. */
 export function ramSeries(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const canon = canonicalPartNumber(raw);
   if (SAMSUNG_RE.test(canon)) return canon.slice(0, SAMSUNG_SERIES);
   if (canon.startsWith('HM') && hynixLength(raw, canon) != null) return canon.slice(0, HYNIX_SERIES);
-  return canon.match(MICRON_SERIES_RE)?.[1] ?? null;
+  const m = canon.match(MICRON_SERIES_RE);
+  return m ? `${m[1]}-${m[2]}` : null;
 }
 
 export type SellSeriesLine = {
