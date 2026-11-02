@@ -2,7 +2,7 @@ import { AccountingAmountSources } from '../../../components/AccountingAmountSou
 import { ACCOUNTING_KINDS, ACCOUNTING_METHODS, KIND_TARGET, type AccountingKind, type AccountingMethod } from '@recycle-erp/shared';
 import { Modal } from '../../../components/Modal';
 import { Icon } from '../../../components/Icon';
-import { FIGURE_KEY, Yuan, recordActionKey, targetStatusLabel } from '../../../components/AccountingBits';
+import { FIGURE_KEY, MismatchWarn, Yuan, recordActionKey, targetStatusLabel } from '../../../components/AccountingBits';
 import { AcctAttachments, AcctPendingAttachments } from '../../../components/AcctAttachments';
 import { useT } from '../../../lib/i18n';
 import { fmtMoney } from '../../../lib/format';
@@ -56,7 +56,7 @@ export function EntryDialog({ preset, entry, onClose, onSaved, onAttachmentsChan
       <div className="modal-foot">
         <button type="button" className="btn" onClick={onClose} disabled={f.busy}>{t('cancel')}</button>
         <button type="submit" form="acct-entry-form" className="btn accent" disabled={f.busy || f.reading || f.payerLocked}>
-          {f.busy ? '…' : entry ? t('acctSaveEdit') : action}
+          {f.busy ? '…' : f.confirmMismatch ? t('acctSaveAnyway') : entry ? t('acctSaveEdit') : action}
         </button>
       </div>
     </Modal>
@@ -90,7 +90,7 @@ function EntryFields({ f, entry, onAttachmentsChanged }: {
   entry?: AcctEntryDetail;
   onAttachmentsChanged?: () => void;
 }) {
-  const { t } = useT();
+  const { t, locale } = useT();
   const { form } = f;
   const id = (k: string) => 'acct-dlg-' + k;
   return (
@@ -146,6 +146,7 @@ function EntryFields({ f, entry, onAttachmentsChanged }: {
         )}
       </div>
       <AccountingAmountSources f={f} />
+      <MismatchWarn m={f.mismatch} t={t} locale={locale} />
       {form.currency === 'USD' && f.preview != null && (
         <PreviewLine value={f.preview} />
       )}

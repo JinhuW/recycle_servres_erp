@@ -2,7 +2,7 @@ import { AccountingAmountSources } from './AccountingAmountSources';
 import { useState } from 'react';
 import { ACCOUNTING_KINDS, ACCOUNTING_METHODS, KIND_TARGET, type AccountingKind, type AccountingMethod } from '@recycle-erp/shared';
 import { PhSheet } from './PhSheet';
-import { FIGURE_KEY, Yuan, recordActionKey, targetStatusLabel } from './AccountingBits';
+import { FIGURE_KEY, MismatchWarn, Yuan, recordActionKey, targetStatusLabel } from './AccountingBits';
 import { useT } from '../lib/i18n';
 import { fmtMoney } from '../lib/format';
 import type { AcctEntryDetail, AcctTarget } from '../lib/accounting';
@@ -44,7 +44,7 @@ export function PhAccountingSheet({ preset, entry, onClose, onSaved, onAttachmen
   // An existing entry's screenshots save as they change, not with the form.
   onAttachmentsChanged?: () => void;
 }) {
-  const { t } = useT();
+  const { t, locale } = useT();
   const f = useAccountingEntryForm({ preset, entry, onSaved });
   const { form } = f;
   const action = t(recordActionKey(form.kind, form.direction));
@@ -122,6 +122,7 @@ export function PhAccountingSheet({ preset, entry, onClose, onSaved, onAttachmen
           </div>
         </div>
         <AccountingAmountSources f={f} />
+        <MismatchWarn m={f.mismatch} t={t} locale={locale} />
         {form.currency === 'USD' && (
           <div className="ph-field">
             <label htmlFor={id('rate')}>{t('acctFieldRate')}</label>
@@ -174,7 +175,7 @@ export function PhAccountingSheet({ preset, entry, onClose, onSaved, onAttachmen
         </div>
         {f.error && <div className="acct-error" role="alert">{t(f.error)}</div>}
         <button type="submit" className="ph-btn dark" style={{ width: '100%', height: 46 }} disabled={f.busy || f.reading || f.payerLocked}>
-          {f.busy ? '…' : entry ? t('acctSaveEdit') : action}
+          {f.busy ? '…' : f.confirmMismatch ? t('acctSaveAnyway') : entry ? t('acctSaveEdit') : action}
         </button>
       </form>
     </PhSheet>

@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-502](./RS-502-rmb-flow-shows-the-record-s-amount-and-flags-a-misma.md) | done | story | P2 | RMB Flow shows the record's amount and flags a mismatch | — |
 | [RS-501](./RS-501-sell-order-fold-keeps-different-ram-dies-apart.md) | done | bug | P2 | Sell order fold keeps different RAM dies apart | 1.405.1 |
 | [RS-500](./RS-500-web-submissions-nav-shows-a-count-of-new-submissions.md) | done | story | P2 | Web submissions nav shows a count of new submissions | 1.405.0 |
 | [RS-499](./RS-499-sell-order-table-folds-same-series-ram.md) | done | story | P2 | Sell order table folds same-series RAM | 1.404.0 |

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyKind, convertAmount, orderAmount, initialForm, payerLock, pickTarget, previewCny, toRequestBody } from './accountingForm';
+import { applyKind, convertAmount, formMismatch, orderAmount, initialForm, payerLock, pickTarget, previewCny, toRequestBody } from './accountingForm';
 import { markDayStarts, owedOnSale, phonePeriod, reviewActions, splitYuan, fmtCny, fmtSignedCny, type AcctEntry, type AcctReview } from './accounting';
 
 const ME = '11111111-1111-1111-1111-111111111111';
@@ -234,5 +234,36 @@ describe('reviewActions', () => {
     expect(reviewActions(entry(asked), SOFIA)).toMatchObject({ answer: false, withdrawQuery: true, review: true });
     // A backfilled entry of Sofia's own money: she reviews it, but has nobody to ask.
     expect(reviewActions(entry(review({ author: null }), SOFIA), SOFIA)).toMatchObject({ review: true, query: false });
+  });
+});
+
+describe('formMismatch', () => {
+  const PO = { id: 'PO-1', amount: 100, currency: 'USD' as const, recordedCny: 0 };
+  const form = (over: Record<string, unknown>) => ({
+    ...pickTarget(applyKind(initialForm({ meId: ME, today: TODAY }), 'purchase'), PO), amountSource: 'manual' as const, currency: 'CNY' as const, ...over,
+  });
+
+  it('weighs the book total after this entry against the record, at 2%', () => {
+    expect(formMismatch(form({ amount: '700' }), 7)).toBeNull();
+    expect(formMismatch(form({ amount: '685' }), 7)).toMatchObject({ figureCny: 700, recordedCny: 685 });
+    // Half already booked: the second half balances it.
+    expect(formMismatch(form({ amount: '350', target: { ...PO, recordedCny: 350 } }), 7)).toBeNull();
+    // A dollar entry at its own rate.
+    expect(formMismatch(form({ amount: '100', currency: 'USD', fxRate: '7.5' }), 7)).toMatchObject({ recordedCny: 750 });
+    expect(formMismatch(form({ amount: '' }), 7)).toBeNull();
+    expect(formMismatch(form({ target: { id: 'PO-1' }, amount: '5' }), 7)).toBeNull();
+  });
+
+  it("takes an edited entry's old figure out of the book first", () => {
+    const entry = { kind: 'purchase' as const, direction: 'out' as const, amountCny: 600, target: { type: 'po' as const, id: 'PO-1' }, voided: null };
+    const f = form({ amount: '700', target: { ...PO, recordedCny: 600 } });
+    expect(formMismatch(f, 7, entry)).toBeNull();
+    expect(formMismatch(f, 7)).toMatchObject({ recordedCny: 1300 });
+  });
+
+  it('reads a sale as money received', () => {
+    const f = pickTarget(applyKind(initialForm({ meId: ME, today: TODAY }), 'sale'), { id: 'SO-1', amount: 1000, currency: 'CNY', recordedCny: 0 });
+    expect(formMismatch({ ...f, amount: '1000' }, 7)).toBeNull();
+    expect(formMismatch({ ...f, amount: '1000', direction: 'out' }, 7)).toMatchObject({ recordedCny: -1000 });
   });
 });

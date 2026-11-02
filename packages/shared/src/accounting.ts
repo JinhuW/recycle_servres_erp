@@ -227,3 +227,26 @@ export function accountingChecks(
 }
 
 export const hasAccountingWarning = (checks: readonly AccountingCheck[]) => checks.some(c => c.tone === 'warn');
+
+// The book's own flag on a record: what every live entry of its kind adds up
+// to, more than this far from the record's figure either way. Wider than
+// Review mode's check because it is shown on every row and while typing.
+export const ACCOUNTING_MISMATCH_PCT = 0.02;
+
+export type AccountingMismatch = { figureCny: number; recordedCny: number; pct: number };
+
+/** Null when the record has no figure, no rate to read it in CNY, or the book is within 2%. */
+export function recordMismatch(
+  record: { amount: number | null; currency: AccountingCurrency } | null,
+  recordedCny: number,
+  cnyPerUsd: number | null,
+): AccountingMismatch | null {
+  if (!record || record.amount === null || record.amount <= 0) return null;
+  const figureCny = record.currency === 'CNY' ? record.amount
+    : cnyPerUsd === null || cnyPerUsd <= 0 ? null : round2(record.amount * cnyPerUsd);
+  if (!figureCny) return null;
+  // In cents, so a total exactly 2% off doesn't flag on float noise.
+  const diff = round2(recordedCny - figureCny);
+  if (Math.abs(diff) <= round2(figureCny * ACCOUNTING_MISMATCH_PCT)) return null;
+  return { figureCny, recordedCny: round2(recordedCny), pct: diff / figureCny };
+}
