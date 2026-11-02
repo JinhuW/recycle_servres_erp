@@ -3,11 +3,13 @@
 
 Runs inside the worker image. It goes the way a fleet worker goes, minus the
 claim: a made-up claim device becomes `identity.json` through rs_worker's
-`identity_for`, Xvfb takes `screen_geometry`'s screen, the monitor's
+`identity_for`, rs_worker's `start_display` runs Xvfb at `screen_geometry`'s
+screen (with the window manager a cloak device gets), the monitor's
 `browser_engine.launch` starts the browser and `create_page` opens the
 context (proxy, device options) exactly as before a login. Then it opens one
 IP-echo page and asks a second echo host through `context.request`, the path
-the token exchange takes, and prints one JSON object. It never opens a
+the token exchange takes, then reads the request headers back from an echo,
+and prints one JSON object. It never opens a
 facebook.com page and holds no session.
 
     docker run --rm -e PYTHONPATH=/app -e CLOAKBROWSER_LICENSE_KEY \\
@@ -30,7 +32,6 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
@@ -41,6 +42,11 @@ ECHO_URL = "https://api.ipify.org?format=json"
 # Another host for the context.request leg, so a proxy's access log tells the
 # two legs apart (it sees only CONNECT host:port).
 REQUEST_ECHO_URL = "https://api4.ipify.org?format=json"
+# Echoes the request headers the page sent, through the same proxy.
+HEADERS_URL = "https://httpbin.org/headers"
+# How far a full-screen window's outer width may sit from the screen's
+# available width (a Windows frame's invisible borders are about 16 px).
+WINDOW_SLACK_PX = 16
 
 # Probed by width against the generic fallbacks: `document.fonts.check` says
 # true for any local name, installed or not.
@@ -118,7 +124,7 @@ async (fonts) => {
 def claim_answer(engine: str, seed: int | None, gpu: str | None, timezone: str,
                  locale: str, screen: List[int]) -> Dict[str, Any]:
     """A claim answer as the ERP would send it, with no account behind it."""
-    device: Dict[str, Any] = {"timezone": timezone, "locale": locale, "screen": screen}
+    device: Dict[str, Any] = {"timezone": timezone, "locale": locale, "screen": list(screen)}
     if engine == "cloak":
         device.update(browser_engine="cloak", cloak_gpu=gpu)
         if seed is not None:
@@ -145,6 +151,9 @@ def summarize(raw: Dict[str, Any]) -> Dict[str, Any]:
         window.get("outer_width", 0) >= window.get("inner_width", 1)
         and window.get("outer_height", 0) >= window.get("inner_height", 1)
     )
+    screen = out.get("screen") or {}
+    out["frame_width"] = window.get("outer_width", 0) - window.get("inner_width", 0)
+    out["outer_to_avail_width"] = window.get("outer_width", 0) - screen.get("avail_width", 0)
     return out
 
 
@@ -181,6 +190,18 @@ def compare(runs: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
                 str(fp.get("webdriver")))
             row(f"{name}: UA, client hints and platform say Windows", windows_consistent(fp),
                 f"{fp.get('platform')} / {(fp.get('ua_data') or {}).get('platform')}")
+            # A window with no frame, or one that is not the screen, is a tell.
+            row(f"{name}: the window has a frame (outerWidth > innerWidth)",
+                (fp.get("frame_width") or 0) > 0, f"outer - inner = {fp.get('frame_width')}")
+            row(f"{name}: the window is the screen's width",
+                abs(fp.get("outer_to_avail_width") or 10**6) <= WINDOW_SLACK_PX,
+                f"outer - availWidth = {fp.get('outer_to_avail_width')}")
+            locale = run.get("device", {}).get("locale")
+            languages = fp.get("languages") or []
+            accept = run.get("accept_language") or ""
+            row(f"{name}: navigator.languages and Accept-Language lead with the device locale",
+                bool(locale) and languages[:1] == [locale] and accept.startswith(locale),
+                f"{languages} / {accept}")
     a, b, a2 = runs.get("cloak_a"), runs.get("cloak_b"), runs.get("cloak_a2")
     if a and b:
         fa, fb = a.get("fingerprint") or {}, b.get("fingerprint") or {}
@@ -197,24 +218,18 @@ def compare(runs: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     return rows
 
 
-def start_xvfb(geometry: str) -> subprocess.Popen | None:
-    xvfb = shutil.which("Xvfb")
-    if xvfb is None:
-        return None
-    display = os.environ.setdefault("DISPLAY", ":99")
-    proc = subprocess.Popen([xvfb, display, "-screen", "0", geometry, "-ac", "+extension", "GLX",
-                             "+render", "-noreset"])
-    socket_path = Path("/tmp/.X11-unix") / f"X{display.lstrip(':')}"
-    for _ in range(50):
-        if socket_path.exists():
-            break
-        time.sleep(0.1)
-    return proc
-
-
 def probe(args: argparse.Namespace) -> Dict[str, Any]:
     from playwright.sync_api import sync_playwright
-    from rs_worker.entry import identity_for, screen_geometry, split_proxy
+    from rs_worker.entry import (
+        CLOAK_WINDOW_MANAGER,
+        WINDOW_MANAGER_ENV,
+        identity_for,
+        is_cloak,
+        screen_geometry,
+        split_proxy,
+        start_display,
+        stop_all,
+    )
 
     from ai_marketplace_monitor import browser_engine
     from ai_marketplace_monitor.facebook import FacebookMarketplace, FacebookMarketplaceConfig
@@ -228,7 +243,15 @@ def probe(args: argparse.Namespace) -> Dict[str, Any]:
     geometry = screen_geometry(answer["device"])
     result: Dict[str, Any] = {"engine": args.engine, "seed": args.seed, "gpu": args.gpu,
                               "geometry": geometry, "device": identity["device"]}
-    xvfb = start_xvfb(geometry)
+    # The display as rs_worker starts it for this device: its screen, and
+    # the window manager a cloak window gets. The monitor reads the same
+    # SCREEN_GEOMETRY when the device names no screen.
+    os.environ.setdefault("DISPLAY", ":99")
+    os.environ["SCREEN_GEOMETRY"] = geometry
+    if is_cloak(answer["device"]):
+        os.environ[WINDOW_MANAGER_ENV] = CLOAK_WINDOW_MANAGER
+    display = start_display(dict(os.environ))
+    time.sleep(1)
     pw = sync_playwright().start()
     browser = None
     try:
@@ -247,12 +270,15 @@ def probe(args: argparse.Namespace) -> Dict[str, Any]:
         request_ip = response.json().get("ip")
         result["ip"] = {"page": page_ip, "request": request_ip}
         result["fingerprint"] = summarize(page.evaluate(FINGERPRINT_JS, FONTS))
+        page.goto(args.headers_url, wait_until="domcontentloaded", timeout=60_000)
+        headers = json.loads(page.locator("body").inner_text()).get("headers") or {}
+        result["accept_language"] = headers.get("Accept-Language")
         page.context.close()
     except Exception as e:
-        reason = browser_engine.park_reason(e)
+        reason = browser_engine.park_reason(e, args.engine)
         result["error"] = f"{type(e).__name__}: {str(e)[:400]}"
         result["park_reason"] = reason
-        denial = browser_engine.license_denial(e)
+        denial = browser_engine.license_denial(e, args.engine)
         if denial is not None:
             result["license"] = denial
     finally:
@@ -263,8 +289,7 @@ def probe(args: argparse.Namespace) -> Dict[str, Any]:
             except Exception:
                 pass
         pw.stop()
-        if xvfb is not None:
-            xvfb.terminate()
+        stop_all(display, 3)
         shutil.rmtree(home, ignore_errors=True)
     return result
 
@@ -280,6 +305,7 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument("--proxy", help="http://user:pass@host:port, per context as the fleet sets it")
     parser.add_argument("--echo-url", default=ECHO_URL)
     parser.add_argument("--request-echo-url", default=REQUEST_ECHO_URL)
+    parser.add_argument("--headers-url", default=HEADERS_URL)
     parser.add_argument("--compare", nargs="+", type=Path,
                         help="saved runs, named by file stem (stock, cloak_a, cloak_b, cloak_a2)")
     args = parser.parse_args(argv)

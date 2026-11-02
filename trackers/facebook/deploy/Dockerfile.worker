@@ -43,7 +43,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Xvfb + x11vnc + xauth: the virtual display and VNC the non-headless browser
 # needs; websockify + novnc: the browser-based VNC client; supervisor: the
-# old mode's process manager; tini: PID 1; curl: the healthcheck. The fonts
+# old mode's process manager; tini: PID 1; curl: the healthcheck; openbox:
+# the window manager a cloak window needs for its frame (rs_worker starts it
+# for cloak devices only). The fonts
 # are what a Windows persona's font probe expects to find, in metric-compatible
 # form (Arial, Times, Calibri, Cambria) plus emoji and CJK, so its font list
 # is not a bare Debian one.
@@ -58,6 +60,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         git \
         tini \
+        openbox \
         fonts-liberation \
         fonts-noto-color-emoji \
         fonts-noto-cjk \
@@ -88,6 +91,14 @@ COPY deploy/worker-constraints.txt /tmp/worker-constraints.txt
 # 15 or later for its `proxy=` and `InvalidStatus`).
 RUN pip install -c /tmp/worker-constraints.txt . "websockets>=15" cloakbrowser \
     && playwright install --with-deps chromium
+
+# The monitor launches CloakBrowser from these internals of the pinned
+# release; a cloakbrowser that moved one fails the build, not a worker.
+RUN python -c "from cloakbrowser.browser import _install_license_guard, build_args; \
+from cloakbrowser.config import IGNORE_DEFAULT_ARGS; from cloakbrowser.download import ensure_binary; \
+from cloakbrowser.license import CloakBrowserLicenseError, build_launch_env, license_error_message, \
+license_error_for_code, mint_denial_file, resolve_license_key; \
+import inspect; assert {'timezone', 'locale', 'start_maximized'} <= set(inspect.signature(build_args).parameters)"
 
 # CloakBrowser's binary, fetched with the license in the build secret and kept
 # at a fixed path; the run-time launch then never downloads (the variable is

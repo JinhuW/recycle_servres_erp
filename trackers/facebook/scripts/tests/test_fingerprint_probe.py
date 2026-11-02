@@ -34,14 +34,17 @@ def run(canvas: str = "a", renderer: str = "RTX", **fp: Any) -> Dict[str, Any]:
         "ua_data": {"platform": "Windows"},
         "hardware_concurrency": 24,
         "device_memory": 16,
-        "window": {"outer_width": 945, "outer_height": 1032, "inner_width": 945,
-                   "inner_height": 939},
+        "languages": ["en-US", "en"],
+        "screen": {"width": 1920, "height": 1080, "avail_width": 1920, "avail_height": 1032},
+        "window": {"outer_width": 1919, "outer_height": 1032, "inner_width": 1911,
+                   "inner_height": 954},
         "webgl": {"vendor": "Google Inc. (NVIDIA)", "renderer": renderer},
         "canvas_data_url": f"data:image/png;base64,{canvas}",
         "fonts": ["Arial"],
     }
     raw.update(fp)
     return {"ip": {"page": "203.0.113.7", "request": "203.0.113.7"},
+            "device": {"locale": "en-US"}, "accept_language": "en-US,en;q=0.9",
             "fingerprint": probe.summarize(raw)}
 
 
@@ -109,6 +112,34 @@ def test_a_broken_expectation_fails_its_row(name: str, change: Dict[str, Any], f
                         "renderer": "RTX" if name != "cloak_b" else "GTX", **change})
     rows = {r["check"]: r["pass"] for r in probe.compare(runs)}
     assert rows[failing] is False
+
+
+@pytest.mark.parametrize(
+    ("window", "failing"),
+    [
+        # No window manager: no frame.
+        ({"outer_width": 1919, "inner_width": 1919}, "cloak_a: the window has a frame (outerWidth > innerWidth)"),
+        # Maximize ignored without one: a window narrower than the screen.
+        ({"outer_width": 945, "inner_width": 937}, "cloak_a: the window is the screen's width"),
+    ],
+)
+def test_a_window_that_is_not_a_framed_screen_fails(window: Dict[str, int], failing: str) -> None:
+    good = run()["fingerprint"]
+    raw = {**{k: v for k, v in good.items()}, "window": {**good["window"], **window}}
+    body = {**run(), "fingerprint": probe.summarize(raw)}
+    rows = {r["check"]: r["pass"] for r in probe.compare({"cloak_a": body})}
+    assert rows[failing] is False
+
+
+def test_a_locale_the_headers_do_not_carry_fails() -> None:
+    body = {**run(), "accept_language": "en,en-GB;q=0.9"}
+    rows = {r["check"]: r["pass"] for r in probe.compare({"cloak_a": body})}
+    assert rows["cloak_a: navigator.languages and Accept-Language lead with the device locale"] is False
+
+
+def test_the_frame_and_screen_offsets_are_recorded() -> None:
+    fp = run()["fingerprint"]
+    assert fp["frame_width"] == 8 and fp["outer_to_avail_width"] == -1
 
 
 def test_a_request_that_leaves_another_way_fails() -> None:

@@ -1084,9 +1084,17 @@ def test_the_monitor_launches_cloak_from_the_written_identity(tmp_path: Path) ->
         "--fingerprint=48213",
         "--fingerprint-platform=windows",
         "--fingerprint-gpu-vendor=NVIDIA",
-        "--fingerprint-timezone=America/New_York",
-        "--lang=en-US",
+        "--window-position=0,0",
+        "--window-size=1536,864",
     ]
+    assert browser_engine.cloak_locale(identity) == ("America/New_York", "en-US")
+
+
+def test_a_cloak_device_without_a_viewport_keeps_its_screen() -> None:
+    device = {k: v for k, v in cloak_device().items() if k != "viewport"}
+    profile = entry.identity_for(claim_with(device))["device"]
+    assert profile["screen"] == {"width": 1536, "height": 864}
+    assert "viewport" not in profile
 
 
 @pytest.mark.parametrize(
@@ -1136,6 +1144,7 @@ def test_a_cloak_worker_gets_its_screen_license_and_version(
         SCREEN_GEOMETRY="1920x1080x24", RS_CLOAK_VERSION="145.0.7632.159.2",
     )
     assert seen["SCREEN_GEOMETRY"] == "1536x864x24"
+    assert seen["RS_WORKER_WINDOW_MANAGER"] == "openbox"
     assert seen["CLOAKBROWSER_LICENSE_KEY"] == LICENSE
     assert seen["RS_CLOAK_VERSION"] == "145.0.7632.159.2"
     # The license reaches the browser's environment only: not the config, not the log.
@@ -1149,8 +1158,33 @@ def test_a_stock_worker_keeps_the_containers_screen(
     fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     device = {**fleet_device(), "screen": [1536, 864]}
-    seen = run_capturing_env(fleet, tmp_path, monkeypatch, device, SCREEN_GEOMETRY="1280x800x24")
+    seen = run_capturing_env(
+        fleet, tmp_path, monkeypatch, device, SCREEN_GEOMETRY="1280x800x24",
+        RS_WORKER_WINDOW_MANAGER="openbox",
+    )
     assert seen["SCREEN_GEOMETRY"] == "1280x800x24"
+    # Stock keeps the window it always had: no window manager.
+    assert "RS_WORKER_WINDOW_MANAGER" not in seen
+
+
+def test_the_display_starts_the_window_manager_it_is_told_to(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    started: List[List[str]] = []
+
+    class Proc:
+        def __init__(self, args: List[str], **kwargs: Any) -> None:
+            started.append(list(args))
+
+    monkeypatch.setattr(entry.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(entry.subprocess, "Popen", Proc)
+    monkeypatch.setattr(entry, "vnc_allow_args", lambda: [])
+    monkeypatch.setattr(entry.Path, "exists", lambda self: True)
+    entry.start_display({"DISPLAY": ":99", "RS_WORKER_WINDOW_MANAGER": "openbox"})
+    assert [p[0] for p in started] == ["/usr/bin/Xvfb", "/usr/bin/openbox", "/usr/bin/x11vnc"]
+    started.clear()
+    entry.start_display({"DISPLAY": ":99"})
+    assert [p[0] for p in started] == ["/usr/bin/Xvfb", "/usr/bin/x11vnc"]
 
 
 def test_the_baked_cloak_version_is_read_from_the_image(tmp_path: Path) -> None:

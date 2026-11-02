@@ -123,6 +123,11 @@ BROWSER_ENV = ("CLOAKBROWSER_LICENSE_KEY",)
 ENGINE_CLOAK = "cloak"
 # What Xvfb runs at unless a cloak device names its screen.
 DEFAULT_GEOMETRY = "1920x1080x24"
+# A cloak window needs a window manager to have a frame (outerWidth >
+# innerWidth, as on Windows). Stock runs without one, as it always has: its
+# viewport is emulated and its accounts already present that window.
+WINDOW_MANAGER_ENV = "RS_WORKER_WINDOW_MANAGER"
+CLOAK_WINDOW_MANAGER = "openbox"
 # Where Dockerfile.worker bakes the binary's version; absent in a stock-only image.
 CLOAK_VERSION_FILE = Path("/opt/cloakbrowser/VERSION")
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -568,6 +573,9 @@ def identity_for(answer: Dict[str, Any]) -> Dict[str, Any]:
     if viewport:
         profile["viewport"] = viewport
         profile["screen"] = _pair(device.get("screen")) or viewport
+    elif is_cloak(device) and _pair(device.get("screen")):
+        # The cloak window is sized from it; there is no viewport to emulate.
+        profile["screen"] = _pair(device.get("screen"))
     if isinstance(device.get("device_scale_factor"), (int, float)) and device["device_scale_factor"] > 0:
         profile["device_scale_factor"] = float(device["device_scale_factor"])
     if device.get("preserve_user_agent") is True:
@@ -769,6 +777,14 @@ def start_display(env: Dict[str, str]) -> List[subprocess.Popen]:
         if socket_path.exists():
             break
         time.sleep(0.1)
+    manager = env.get(WINDOW_MANAGER_ENV)
+    if manager:
+        path = shutil.which(manager)
+        if path is None:
+            log(f"no {manager} on this host; the browser window has no frame")
+        else:
+            procs.append(subprocess.Popen([path], env=env, stdout=subprocess.DEVNULL,
+                                          stderr=subprocess.DEVNULL))
     x11vnc = shutil.which("x11vnc")
     if x11vnc is not None:
         procs.append(
@@ -1012,6 +1028,10 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
     baked = cloak_version(env)
     if baked:
         menv["RS_CLOAK_VERSION"] = baked
+    if is_cloak(device):
+        menv[WINDOW_MANAGER_ENV] = CLOAK_WINDOW_MANAGER
+    else:
+        menv.pop(WINDOW_MANAGER_ENV, None)
     if is_cloak(device):
         log(
             f"browser: CloakBrowser {baked or 'not in this image'}, screen {menv['SCREEN_GEOMETRY']}, "
