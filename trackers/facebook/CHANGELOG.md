@@ -18,6 +18,48 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **CloakBrowser as a per-account browser engine for the ERP fleet** (RS-505).
+  A slot's device chooses its browser with `browser_engine`. Absent or
+  `stock` is Playwright's Chromium, exactly as before, so no running slot
+  changes with this release. `cloak` is the CloakBrowser stealth Chromium.
+  - **Fingerprint.** The binary's fingerprint comes from the device's own
+    `cloak_seed` and `cloak_gpu`, its timezone and locale, and a Windows
+    persona. A cloak device with no seed is refused, never given a random
+    one, because a new seed is a new device to Facebook. A cloak context
+    emulates nothing (no user agent, viewport, screen, locale or timezone),
+    and Xvfb takes the device's screen. The session, the proxy and the
+    account's `datr`/`sb` cookies carry over as before.
+  - **License failures park, distinctly.** A refused license (the binary's
+    exits 76-79: seats, key, server, local config) parks the worker `DEAD`
+    with `license_denied` and the exit code, apart from a crashed browser.
+    No Facebook page has loaded by then, so it is not a login. A cloak device
+    on an image without the binary parks `browser_failed` rather than exiting
+    into a new container.
+  - **Heartbeats** carry `detail.cloak_version`, the baked build.
+  - **The worker image** carries both engines. Built with `CLOAK_BAKE=1` and
+    the license as the `cloak_key` BuildKit secret (`push-fleet-images.sh`
+    does this when `CLOAKBROWSER_LICENSE_KEY` is set), it bakes the binary
+    into `/opt/cloakbrowser`. The key is mounted for that one step and never
+    kept in a layer, ENV, label or file. Built without them, the image is
+    stock-only. The flag, not the secret, decides, because BuildKit leaves a
+    secret out of its cache key: a stock-only and a baked build would
+    otherwise reuse each other's layer.
+  - **Fonts and the pin.** The image adds metric-compatible Windows fonts,
+    emoji and CJK. `cloakbrowser==0.7.0` is pinned exactly, because the
+    monitor launches the binary from its internals.
+  - **The key reaches only the browser.** `rs_worker` takes
+    `CLOAKBROWSER_LICENSE_KEY` from the claim's `env` into the browser's
+    environment, never into `config.toml` or a log.
+  - **Probe.** `scripts/fingerprint-probe.py` measures, with no account, what
+    a worker's browser presents: `webdriver`, the client hints, WebGL, canvas,
+    fonts, the window, and the exit IP of the page and of `context.request`
+    through the slot's proxy. `docs/debug-notes/2026-11-02-cloakbrowser-fingerprint-probe.md`
+    has its first results: cloak hides `webdriver`, both legs use the proxy,
+    and different seeds give different fingerprints, stable across
+    containers.
+
 ### Fixed
 
 - `fleet-alert-sender.py` claims a re-sighted listing at its new price.
