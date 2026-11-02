@@ -192,7 +192,17 @@ export type FleetDevice = {
   device_scale_factor?: number;
   /** Filled in by the claim all the same; the worker ignores what is listed. */
   native?: FleetNativeField[];
+  /** Absent is stock. Set by the engine switch, never by the claim. */
+  browser_engine?: FleetBrowserEngine;
+  /** CloakBrowser's fingerprint seed and GPU; written once, with the switch. */
+  cloak_seed?: number;
+  cloak_gpu?: FleetCloakGpu;
 };
+
+export const FLEET_BROWSER_ENGINES = ['stock', 'cloak'] as const;
+export type FleetBrowserEngine = (typeof FLEET_BROWSER_ENGINES)[number];
+export const FLEET_CLOAK_GPUS = ['NVIDIA', 'Intel'] as const;
+export type FleetCloakGpu = (typeof FLEET_CLOAK_GPUS)[number];
 
 /** A device as a slot stores it: the claim fills in what is missing, so a
  *  profile that leaves the user agent to the browser simply has none. */
@@ -238,6 +248,40 @@ export function fleetDeviceFor(accountNo: number, timezone: string): FleetDevice
     native: ['user_agent'],
   };
 }
+
+/**
+ * The CloakBrowser fingerprint a slot gets when it is switched, fixed by its
+ * account number like its device: a seed is the whole machine to Facebook, so
+ * one made again for the same account has to come out the same.
+ */
+export function fleetCloakFor(accountNo: number): { cloak_seed: number; cloak_gpu: FleetCloakGpu } {
+  const h = fnv1a(`fleet-cloak:${accountNo}`);
+  return {
+    cloak_seed: 10000 + (h % 90000),
+    cloak_gpu: FLEET_CLOAK_GPUS[Math.floor(h / 90000) % FLEET_CLOAK_GPUS.length],
+  };
+}
+
+/** States in which the account has lost its session, so its browser holds
+ *  nothing a new fingerprint could give away. DEAD is not one: a page that
+ *  would not load leaves the session live. */
+export const fleetSessionLost = (state: string | null | undefined): boolean =>
+  state === 'SESSION_EXPIRED' || state === 'CHECKPOINT' || !!state?.startsWith('CHALLENGE');
+
+/**
+ * Whether a slot may be switched to CloakBrowser, as far as the slot itself
+ * says: never switched before, and no worker on it with a live session. The
+ * route also checks `cloak_enabled` and `cloak_max_slots`.
+ */
+export function fleetCloakSwitchable(s: {
+  parked: boolean; worker_id: string | null; state: string | null | undefined; device: FleetDeviceProfile | null;
+}): boolean {
+  if (s.device?.cloak_seed !== undefined) return false;
+  return s.parked || s.worker_id === null || fleetSessionLost(s.state);
+}
+
+/** Body of POST /api/fleet/slots/:no/engine. */
+export type FleetEngineSwitch = { engine: FleetBrowserEngine };
 
 // ─── Proxies ──────────────────────────────────────────────────────────────────
 
@@ -545,6 +589,10 @@ export type FleetSettings = {
   retention_days: number;
   /** Non-parked slots one proxy may carry: a static ISP exit is one IP. */
   max_accounts_per_proxy: number;
+  /** False refuses new switches to CloakBrowser; slots already switched stay. */
+  cloak_enabled: boolean;
+  /** Slots that may run CloakBrowser at once: the license's session limit. */
+  cloak_max_slots: number;
   search: FleetSearchSettings;
 };
 
@@ -560,6 +608,8 @@ export const FLEET_SETTINGS_DEFAULTS: Omit<FleetSettings, 'search'> = {
   quarantine_probe_hours: 6,
   retention_days: 90,
   max_accounts_per_proxy: 2,
+  cloak_enabled: false,
+  cloak_max_slots: 1,
 };
 
 /** What a worker token says about its bearer. `exp` is Unix seconds. The
@@ -737,7 +787,17 @@ export type FleetErrorCode =
   /** Mark healthy for a worker that is not parked with `connect_failed`. */
   | 'not_parked'
   /** Retiring an account fleetSlotRetirable does not call lost: park it first. */
-  | 'not_lost';
+  | 'not_lost'
+  /** Switching the engine of a slot whose worker holds a live session. */
+  | 'engine_live_session'
+  /** Switching to CloakBrowser while `cloak_enabled` is off. */
+  | 'cloak_disabled'
+  /** Switching to CloakBrowser with `cloak_max_slots` slots on it already. */
+  | 'cloak_slots_full'
+  /** Switching to CloakBrowser a slot that has had a cloak seed already. */
+  | 'cloak_seeded'
+  /** Back to stock for a slot whose CloakBrowser session once reached HEALTHY. */
+  | 'cloak_proven';
 
 export type FleetError = { error: FleetErrorCode; detail?: string };
 

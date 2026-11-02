@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  fleetDeviceFor, fleetResumable, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
+  fleetCloakFor, fleetCloakSwitchable, fleetDeviceFor, fleetResumable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
   type FleetWorkerRelogin, type FleetWorkerResume,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
@@ -318,6 +318,67 @@ slots.post('/:no/unpark', async (c) => {
     if (!exists.length) return c.json({ error: 'not_found' }, 404);
   }
   wlog.info('fleet slot unparked', { accountNo: no, by: c.var.user.email });
+  return c.json({ slot: await loadSlotView(sql, no) });
+});
+
+// ─── Browser engine ───────────────────────────────────────────────────────────
+// A slot moves to CloakBrowser only while its account has no live session:
+// the new fingerprint is a new machine, and a logged-in account that changes
+// machine under Facebook's eyes is the checkpoint this exists to avoid. The
+// worker reads the engine at its next claim. Going back to stock is a second
+// new machine, so it is only for a slot whose cloak session never got
+// HEALTHY. The seed and GPU stay on the device either way: they are the
+// fingerprint that account has shown, and the slot is not switched again.
+
+const ENGINE_LOCK = 'fleet-slot-engine';
+
+slots.post('/:no/engine', async (c) => {
+  const no = parseNo(c.req.param('no'));
+  if (no === null) return c.json({ error: 'not_found' }, 404);
+  const input = await c.req.json().catch(() => null);
+  if (!isRecord(input) || !(FLEET_BROWSER_ENGINES as readonly unknown[]).includes(input.engine)) {
+    return c.json(bad(`engine must be one of: ${FLEET_BROWSER_ENGINES.join(', ')}`).body, 422);
+  }
+  const engine = input.engine as FleetBrowserEngine;
+  const sql = getDb(c.env);
+  const out = await sql.begin(async (tx): Promise<Refusal | { changed: boolean }> => {
+    // Serialises switches, so two at once cannot both take the last cloak seat.
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${ENGINE_LOCK}))`;
+    const [slot] = await tx<{ worker_id: string | null; parked: boolean; device: unknown }[]>`
+      SELECT worker_id, (lease_expires_at IS NOT DISTINCT FROM 'infinity'::timestamptz) AS parked, device
+      FROM fleet_slots WHERE account_no = ${no} FOR UPDATE`;
+    if (!slot) return notFound(`slot #${no}`);
+    const device = isRecord(slot.device) ? slot.device : null;
+    const current = device?.browser_engine === 'cloak' ? 'cloak' : 'stock';
+    if (engine === current) return { changed: false };
+
+    if (engine === 'stock') {
+      const [proven] = await tx`
+        SELECT 1 FROM fleet_worker_state_events
+        WHERE account_no = ${no} AND engine = 'cloak' AND to_state = 'HEALTHY' LIMIT 1`;
+      if (proven) return conflict('cloak_proven', `#${no} has been HEALTHY on CloakBrowser; going back would be another new machine`);
+      await tx`UPDATE fleet_slots SET device = device || '{"browser_engine":"stock"}'::jsonb WHERE account_no = ${no}`;
+      return { changed: true };
+    }
+
+    const [worker] = slot.worker_id
+      ? await tx<{ state: string | null }[]>`SELECT state FROM fleet_workers WHERE worker_id = ${slot.worker_id}`
+      : [];
+    if (device?.cloak_seed !== undefined) return conflict('cloak_seeded', `#${no} has had a CloakBrowser seed already`);
+    if (!fleetCloakSwitchable({ parked: slot.parked, worker_id: slot.worker_id, state: worker?.state, device: null })) {
+      return conflict('engine_live_session', `#${no} is on ${slot.worker_id} (${worker?.state ?? 'starting'}); park it or wait for it to lose its session`);
+    }
+    const settings = await loadSettings(tx);
+    if (!settings.cloak_enabled) return conflict('cloak_disabled', 'CloakBrowser is off in the fleet settings');
+    const [{ n }] = await tx<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM fleet_slots WHERE device->>'browser_engine' = 'cloak'`;
+    if (n >= settings.cloak_max_slots) return conflict('cloak_slots_full', `${n} of ${settings.cloak_max_slots} CloakBrowser slots are taken`);
+    const cloak = { browser_engine: 'cloak', ...fleetCloakFor(no) };
+    await tx`UPDATE fleet_slots SET device = COALESCE(device, '{}'::jsonb) || ${tx.json(cloak)} WHERE account_no = ${no}`;
+    return { changed: true };
+  });
+  if (isRefusal(out)) return c.json(out.body, out.status);
+  if (out.changed) wlog.info('fleet slot engine switched', { accountNo: no, engine, by: c.var.user.email });
   return c.json({ slot: await loadSlotView(sql, no) });
 });
 

@@ -103,6 +103,13 @@ async function events(id: number): Promise<string[]> {
 describe('POST /api/fleet/worker/claim', () => {
   beforeEach(async () => { await resetDb(); await seedBase(); });
 
+  it('passes a CloakBrowser slot\'s engine, seed and GPU through in the device', async () => {
+    const no = await seedSlot(1);
+    await getTestDb()`UPDATE fleet_slots SET device = ${getTestDb().json({ viewport: [1440, 777], timezone: 'America/Denver', locale: 'en-US', browser_engine: 'cloak', cloak_seed: 48213, cloak_gpu: 'Intel' })} WHERE account_no = ${no}`;
+    const a = await claimed('lab-1');
+    expect(a.device).toMatchObject({ viewport: [1440, 777], browser_engine: 'cloak', cloak_seed: 48213, cloak_gpu: 'Intel' });
+  });
+
   it('hands the slot with its secrets unsealed, opens the stint and mints a token for epoch 1', async () => {
     const no = await seedSlot(1, { lastHost: 'lab' });
     const r = await claim('lab-1');
