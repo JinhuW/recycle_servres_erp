@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.401.1] - 2026-11-01
+
+### Fixed
+
+- **The uptime monitor no longer crash-loops on one failed probe** (RS-496).
+  On 2026-10-28 a single run got a Cloudflare 429 and exited 1. Railway then
+  kept re-running the service from a snapshot it could not fetch, which sent a
+  "Deploy failed" to Telegram about every four hours and stopped the probes for
+  four days. A failing probe whose alert reaches the relay now exits 0. The
+  relay post is retried once. Only a run that could not alert at all still
+  exits 1. The service was redeployed from the `dev` head.
+
 ## [1.401.0] - 2026-11-01
 
 ### Added
