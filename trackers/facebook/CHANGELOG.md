@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-02
+
 ### Added
 
 - **CloakBrowser as a per-account browser engine for the ERP fleet** (RS-505).
