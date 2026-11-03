@@ -1,6 +1,6 @@
 import {
-  KIND_DEFAULT_DIRECTION, KIND_TARGET, isIsoDate,
-  type AccountingCurrency, type AccountingDirection, type AccountingKind, type AccountingMethod, type IsoDate,
+  KIND_DEFAULT_DIRECTION, KIND_TARGET, isIsoDate, recordMismatch,
+  type AccountingCurrency, type AccountingMismatch, type AccountingDirection, type AccountingKind, type AccountingMethod, type IsoDate,
 } from '@recycle-erp/shared';
 import type { AcctEntry, AcctEntryBody, AcctTarget } from './accounting';
 
@@ -152,6 +152,24 @@ export function previewCny(f: EntryForm, latestRate: number | null): number | nu
   if (f.currency === 'CNY') return amount;
   const rate = f.fxRate ? Number(f.fxRate) : latestRate;
   return rate && Number.isFinite(rate) && rate > 0 ? Math.round(amount * rate * 100) / 100 : null;
+}
+
+// What the book would hold against the record once this entry is saved, and
+// the book's 2% flag on it. The record's `recordedCny` already counts the
+// entry being edited, so its old figure comes out first. Signed the way the
+// record reads it: a sale is received, a PO and a case are paid.
+export function formMismatch(
+  f: EntryForm, latestRate: number | null, entry?: Pick<AcctEntry, 'kind' | 'direction' | 'amountCny' | 'target' | 'voided'>,
+): AccountingMismatch | null {
+  const t = f.target;
+  if (!t || t.amount == null || !t.currency || t.recordedCny == null) return null;
+  const cny = previewCny(f, latestRate);
+  if (cny === null) return null;
+  const sign = (kind: AccountingKind, d: AccountingDirection) => (kind === 'sale') === (d === 'in') ? 1 : -1;
+  const before = entry && !entry.voided && entry.kind === f.kind && entry.target?.id === t.id
+    ? sign(entry.kind, entry.direction) * entry.amountCny : 0;
+  const total = t.recordedCny - before + sign(f.kind, f.direction) * cny;
+  return recordMismatch({ amount: t.amount, currency: t.currency }, total, latestRate);
 }
 
 export type FormError =

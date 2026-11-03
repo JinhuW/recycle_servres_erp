@@ -1,5 +1,6 @@
 // Manager-only inbox for the public website forms (routes/publicForms.ts):
 //   GET    /api/web-submissions            list, filter by site/status/q, keyset paged
+//   GET    /api/web-submissions/count      how many are still `new` (the nav badge)
 //   GET    /api/web-submissions/:id        one submission with its photos
 //   PATCH  /api/web-submissions/:id        triage: status, staff note
 //   POST   /api/web-submissions/:id/convert  a ram4cash sell lot → Draft PO
@@ -150,6 +151,14 @@ async function loadOne(sql: ReturnType<typeof getDb>, id: string) {
     })),
   };
 }
+
+// The sidebar badge: what nobody has triaged yet.
+webSubmissions.get('/count', async (c) => {
+  const [r] = await getDb(c.env)<{ n: number }[]>`
+    SELECT COUNT(*)::int AS n FROM web_submissions WHERE status = 'new'
+  `;
+  return c.json({ n: r!.n });
+});
 
 webSubmissions.get('/:id', async (c) => {
   const one = await loadOne(getDb(c.env), c.req.param('id'));
@@ -317,11 +326,11 @@ webSubmissions.post('/:id/convert', async (c) => {
         source: p.source === 'web' ? 'other' : p.source,
         supplierId: supplier.id,
       });
-      // Nobody bought this on commission, and the seller already chose how to
-      // be paid: PayPal upfront for a shipped lot, cash at a pickup.
+      // Nobody bought this on commission. A company payment is always a
+      // PayPal or Mercury transaction, a pickup's included.
       await tx`
         UPDATE orders SET
-          payment_method = ${pickup ? 'cash' : 'paypal'},
+          payment_method = 'paypal',
           handoff_method = ${pickup ? 'pickup' : null},
           commission_rate = 0
         WHERE id = ${orderId}

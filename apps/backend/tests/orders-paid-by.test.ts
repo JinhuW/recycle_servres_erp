@@ -82,7 +82,7 @@ describe('a self-paid PO names who paid', () => {
 
     // Flipping to the Business Account clears it, a payer sent alongside or not.
     expect((await api('PATCH', `/api/orders/${id}`, {
-      token: marcus.token, body: { payment: 'company', paymentMethod: 'cash', paidByUserId: sofia.user.id },
+      token: marcus.token, body: { payment: 'company', paymentMethod: 'paypal', paidByUserId: sofia.user.id },
     })).status).toBe(200);
     expect(await storedPayer(id)).toBeNull();
 
@@ -243,7 +243,7 @@ describe('a self-paid PO names who paid', () => {
 
     // The Business Account reads as such on both lenses: a cost paid as
     // 'company', and a commission the company paid.
-    expect((await api('PATCH', `/api/orders/${id}`, { token: marcus.token, body: { payment: 'company', paymentMethod: 'cash' } })).status).toBe(200);
+    expect((await api('PATCH', `/api/orders/${id}`, { token: marcus.token, body: { payment: 'company', paymentMethod: 'paypal' } })).status).toBe(200);
     expect((await api('PUT', `/api/orders/${id}/commission-paid-by`, { token: alex.token, body: { company: true } })).status).toBe(200);
     const costNow = await api<Target>('GET', `/api/accounting/by-order/${id}?kind=purchase`, { token: alex.token });
     expect(costNow.body.target).toMatchObject({ payerId: null, payerName: null, payerBusiness: true });

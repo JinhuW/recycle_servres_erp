@@ -63,7 +63,7 @@ describe('a PO needs a goods cost to leave Draft', () => {
       body: {
         warehouseId: 'WH-LA1', source: 'facebook',
         handoff: { method: 'pickup', byUserId: user.id },
-        payment: 'company', paymentMethod: 'cash',
+        payment: 'company', paymentMethod: 'paypal', paypalTxnId: '7AB12345CD678901E',
       },
     });
     expect(r.status).toBe(409);

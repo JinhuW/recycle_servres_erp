@@ -739,9 +739,8 @@ export function OrderDetail({
       };
       const files = (n: number) => n > 0 ? t('poReadyFiles', { n }) : null;
       if (payment === 'company') {
-        paymentRow('hoNeedMethod', paymentMethod === 'cash' ? t('hoMethodCash') : t('hoMethodPaypal'));
-        if (paymentMethod === 'paypal') paymentRow('poTxnRequired', paypalTxnId.trim() || null);
         if (paymentMethod === 'cash') paymentRow('hoNeedCashShot', files(proof.proofAtts.length));
+        else paymentRow('poTxnRequired', paypalTxnId.trim() || null);
       } else {
         paymentRow('hoNeedChatShot', files(proof.chatAtts.length));
       }
@@ -785,7 +784,7 @@ export function OrderDetail({
   };
   const paymentSummary = payment === 'self'
     ? costPayerLabel({ payment, paidBy: payerDraft.payer }, t, true)
-    : [t('payBusinessShort'), paymentMethod === 'cash' ? t('hoMethodCash') : paymentMethod === 'paypal' ? t('hoMethodPaypal') : null, paypalTxnId.trim() || null]
+    : [t('payBusinessShort'), paymentMethod === 'cash' ? t('hoMethodCash') : t('hoMethodPaypal'), paypalTxnId.trim() || null]
         .filter(Boolean).join(' · ');
   // The owner select must be able to show the order as-is even when its
   // owner has left the member list, as the desktop's does.
@@ -1450,7 +1449,7 @@ export function OrderDetail({
           <PaymentFields
             paidBy={payment} paidByUserId={paidByUserId} payers={payers}
             onPaidBy={(v, userId) => canEditOrder && setMeta({ payment: v, paidByUserId: v === 'self' ? userId : null })}
-            method={paymentMethod} onMethod={v => canEditOrder && setMeta({ paymentMethod: v })}
+            method={paymentMethod}
             txnId={paypalTxnId} onTxnId={v => canEditOrder && setMeta({ paypalTxnId: v })}
             txnRequired={order.txnRequired === true}
             disabled={!canEditOrder}

@@ -391,9 +391,10 @@ export async function handoffOrderTx(
   const collector = wantedBy ? await activeMember(tx, wantedBy) : null;
   const handoffBy = collector?.id ?? null;
   const payment = input.payment ?? before.payment;
+  // A company payment the row never named is PayPal: the only method left.
   const paymentMethod = payment === 'self'
     ? null
-    : (input.paymentMethod !== undefined ? input.paymentMethod : before.payment_method);
+    : (input.paymentMethod !== undefined ? input.paymentMethod : before.payment_method) ?? 'paypal';
   const paidBy = paidByAfter(payment, input.paidByUserId, before.paid_by, before.user_id);
   // PATCH's rule: a booked cost's payer is a manager's. The hand-off sends
   // the payer on file back with every submit, which changes nothing.

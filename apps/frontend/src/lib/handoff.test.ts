@@ -45,8 +45,9 @@ describe('handoffBlockerKeys', () => {
     expect(handoffBlockerKeys({ ...base, method: 'cash' })).toEqual([]);
   });
 
-  it('company card must say how it paid', () => {
-    expect(handoffBlockerKeys({ ...base, method: null })).toEqual(['hoNeedMethod']);
+  it('a company card that never named its method is PayPal', () => {
+    expect(handoffBlockerKeys({ ...base, method: null })).toEqual(['poTxnRequired']);
+    expect(handoffBlockerKeys({ ...base, method: null, txnId: '8XY12345AB678901C' })).toEqual([]);
     // Not a company question: a self-paid order carries no method.
     expect(handoffBlockerKeys({ ...base, paidBy: 'self', method: null, chatAttachmentCount: 1, saved: { payment: 'self' } }))
       .toEqual([]);
@@ -127,6 +128,10 @@ describe('buildHandoffBody', () => {
     const cash = buildHandoffBody({ ...draft, paidBy: 'company', method: 'cash' });
     expect(cash.paymentMethod).toBe('cash');
     expect(cash).not.toHaveProperty('paypalTxnId');
+    // A company order that never named a method goes out as PayPal.
+    expect(buildHandoffBody({ ...draft, paidBy: 'company', method: null })).toMatchObject({
+      paymentMethod: 'paypal', paypalTxnId: '8XY12345AB678901C',
+    });
   });
 
   it('shapes a label hand-off and the manager-only fields', () => {

@@ -90,7 +90,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const [undo, setUndo] = useState<Undo | null>(null);
   const [scan, setScan] = useState('');
   const [scanMsg, setScanMsg] = useState<ScanMsg | null>(null);
-  const [busy, setBusy] = useState<'approve' | null>(null);
+  const [busy, setBusy] = useState<'approve' | 'apply' | null>(null);
   const takeover = useManagerTakeover();
   const mismatch = usePaymentMismatchConfirm();
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -223,6 +223,59 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     setEditing({ line, original: line });
   };
 
+  // A short count written to the line's qty. The units on it were counted, so
+  // its tick stays, unlike an Edit that changes the qty. A line with serials
+  // goes through the drawer instead: which serials didn't arrive is the
+  // manager's to say, and the server refuses a qty the serials don't match.
+  const appliable = (l: OrderLine) => {
+    const n = countOf(l, checkOf(l.id));
+    return n > 0 && n < l.qty && lineShippedOn(l).length === 0;
+  };
+  const viaDrawer = (l: OrderLine) => parseSerials(l.serialNumber).length > 0;
+
+  const applyCounts = async (ls: OrderLine[]) => {
+    if (!ready || busy !== null || !ls.length) return;
+    setBusy('apply');
+    try {
+      if (!(await flush())) {
+        showErrorDialog(t('bcApplyUnsaved'));
+        return;
+      }
+      const now = new Date().toISOString();
+      const next = ls.map(l => {
+        const c = checkOf(l.id);
+        return { line: l, check: { ...c, counted: countOf(l, c), checkedAt: c.checkedAt ?? now } };
+      });
+      await api.patch(`/api/orders/${order.id}`, {
+        expectStage: order.lifecycle, lines: next.map(x => ({ id: x.line.id, qty: x.check.counted })),
+      });
+      for (const x of next) {
+        editedQty.current.set(x.line.id, x.check.counted);
+        save(x.check);
+      }
+      await flush();
+      const one = next.length === 1 ? next[0]! : null;
+      showToast(one
+        ? t('bcAppliedToast', { n: lineNo(one.line), q: one.check.counted })
+        : t('bcAppliedManyToast', { n: next.length }), 'success');
+      await onReload();
+    } catch (e) {
+      const now = readStageMoved(e);
+      if (now !== null) showErrorDialog(t('bcStaleStage', { id: order.id, s: poStageName(now, t) }));
+      else handleFetchError(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyCount = (l: OrderLine) => {
+    if (!ready || !appliable(l)) return;
+    if (!viaDrawer(l)) { void applyCounts([l]); return; }
+    setSelectedId(l.id);
+    const original = orderLineToEditLine(l, lines.indexOf(l));
+    setEditing({ line: { ...original, qty: countOf(l, checkOf(l.id)), _dirty: true }, original });
+  };
+
   // A cost is owed only once the line is touched, as on the PO page: legacy
   // $0 lines must stay openable. Every line here is already on the PO, so it
   // may be set to 0.
@@ -252,9 +305,12 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     // Units added to the line were never counted, so its tick can't stand.
     // It replaces whatever was waiting for the line and goes out with the
     // rest before the reload: the remount reads the count straight back.
+    // A lowered qty keeps the count it was lowered to, tick included.
     if (Number(l.qty) !== Number(o.qty)) {
-      editedQty.current.set(id, Number(l.qty));
-      save(emptyCheck(id, Number(l.qty)));
+      const q = Number(l.qty);
+      const prev = checkOf(id);
+      editedQty.current.set(id, q);
+      save(q < Number(o.qty) ? { ...prev, counted: Math.min(prev.counted, q) } : emptyCheck(id, q));
     }
     await flush();
     showToast(t('bcLineSaved', { n }), 'success');
@@ -677,6 +733,8 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
 
   const short = ordered.done.filter(l => isShortChecked(l, checks.get(l.id)));
   const absent = ordered.done.filter(l => isAbsentChecked(l, checks.get(l.id)));
+  // What Apply all writes in one go; a line with serials waits for its drawer.
+  const shortDirect = short.filter(l => appliable(l) && !viaDrawer(l));
   // What Approve still has to set to 0: a line already there needs nothing,
   // and one held for a shipped sell order is that sale's record — its count
   // here is a box check, never a recount.
@@ -833,6 +891,13 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               </button>
             </div>
             {countOf(l, c) === 0 && <div className="bc-absent-tag">{t('bcAbsentTag')}</div>}
+            {ready && appliable(l) && (
+              <button type="button" className="bc-price-use bc-apply-count" disabled={busy !== null}
+                title={t('bcApplyCountTip', { n: countOf(l, c) })}
+                onClick={e => { e.stopPropagation(); applyCount(l); }}>
+                {t('bcApplyCount', { n: countOf(l, c) })}
+              </button>
+            )}
           </td>
           <td className="num bc-price-cell" onClick={e => e.stopPropagation()}>
             <span className="bc-price">
@@ -1416,6 +1481,12 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                           </li>
                         ))}
                       </ul>
+                      {ready && shortDirect.length > 0 && (
+                        <button type="button" className="btn sm" disabled={busy !== null}
+                          onClick={() => { void applyCounts(shortDirect); }}>
+                          {busy === 'apply' ? '…' : t('bcApplyAll', { n: shortDirect.length })}
+                        </button>
+                      )}
                     </>
                   )}
                 </>

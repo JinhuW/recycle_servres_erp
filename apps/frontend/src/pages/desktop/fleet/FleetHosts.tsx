@@ -1,8 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { ApiError } from '../../../lib/api';
-import { fleetApi, type FleetHost, type FleetHostCreated, type FleetRelease } from '../../../lib/fleet';
+import { fleetApi, type FleetEngineLoss, type FleetEngineLossRow, type FleetHost, type FleetHostCreated, type FleetRelease, type FleetSettings } from '../../../lib/fleet';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
 import { capacityCuts, hostLag, hostRunning, releaseSummary, rollProgress } from './fleetBoard';
@@ -19,9 +19,12 @@ import { agoLabel, Clock, ConfirmDialogBody, useFleetMirror } from './shared';
 // open from the tab's action row.
 
 const CAPACITY_MAX = 64;
+// The settings route's bound for cloak_max_slots.
+const CLOAK_SEATS_MAX = 100;
+const LOSS_DAYS = 30;
 
 const RELEASE_CHIP: Record<FleetRelease['state'], string> = {
-  rolling: 'chip info', done: 'chip pos', failed: 'chip neg', superseded: 'chip muted',
+  rolling: 'chip info', staged: 'chip warn', done: 'chip pos', failed: 'chip neg', superseded: 'chip muted',
 };
 
 /** The latest roll: its state, how far it got, the worker being replaced now and why it stopped if it did. */
@@ -354,5 +357,82 @@ export function ReleaseDialog({ current, onClose, onDone }: { current: string | 
         </div>
       </form>
     </Modal>
+  );
+}
+
+// ─── Browser engine ───────────────────────────────────────────────────────────
+// One card beside the hosts: whether accounts may move to CloakBrowser, how
+// many may run it at once (the license's session limit), and the loss rate
+// each engine has had, against the stint ledger's baseline from before the
+// state history. The switch itself is per account, on the table's rows.
+
+export function EngineCard({ settings, used, onChanged }: { settings: FleetSettings; used: number; onChanged: () => void }) {
+  const { t } = useT();
+  const mirror = useFleetMirror();
+  const [busy, setBusy] = useState(false);
+  const [loss, setLoss] = useState<FleetEngineLoss | null>(null);
+  useEffect(() => {
+    let live = true;
+    fleetApi.engineLoss(LOSS_DAYS).then(l => { if (live) setLoss(l); }).catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+  const save = async (patch: Partial<FleetSettings>) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fleetApi.saveSettings(patch);
+      showSuccessToast(t('fleetEngineSaved'));
+      onChanged();
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const on = settings.cloak_enabled;
+  const max = settings.cloak_max_slots;
+  return (
+    <section className="card fleet-host" aria-label={t('fleetEngineCard')}>
+      <div className="fleet-host-line">
+        <span className="fleet-host-id">{t('fleetEngineCard')}</span>
+        <span className="fleet-host-meta">{t('fleetEngineSeatsUsed', { used, max })}</span>
+        <span className="fleet-host-right">
+          <button type="button" role="switch" aria-checked={on} className={`fleet-switch${on ? ' on' : ''}`}
+            onClick={() => save({ cloak_enabled: !on })} disabled={busy || mirror} title={t(on ? 'fleetEngineCloakOnHint' : 'fleetEngineCloakOffHint')}>
+            <i /><span>{t(on ? 'fleetEngineCloakOn' : 'fleetEngineCloakOff')}</span>
+          </button>
+          <span className="fleet-stepper" title={t('fleetEngineSeatsHint')}>
+            {!mirror && <button type="button" className="btn ghost icon sm" onClick={() => save({ cloak_max_slots: max - 1 })} disabled={busy || max <= 0}
+              aria-label={t('fleetEngineSeatsLess')}><Icon name="minus" size={12} /></button>}
+            <b className="mono">{max}</b>
+            {!mirror && <button type="button" className="btn ghost icon sm" onClick={() => save({ cloak_max_slots: max + 1 })} disabled={busy || max >= CLOAK_SEATS_MAX}
+              aria-label={t('fleetEngineSeatsMore')}><Icon name="plus" size={12} /></button>}
+            <small>{t('fleetEngineSeats')}</small>
+          </span>
+        </span>
+      </div>
+      <EngineLossLine loss={loss} />
+    </section>
+  );
+}
+
+export function EngineLossLine({ loss }: { loss: FleetEngineLoss | null }) {
+  const { t } = useT();
+  if (!loss) return <div className="fleet-host-meta">{t('fleetEngineLossHead', { days: LOSS_DAYS })} …</div>;
+  const rate = (r: FleetEngineLossRow, name: string) => (
+    <span key={name} title={t('fleetEngineLossDetail', { losses: r.total_losses, days: r.account_days.toFixed(1) })}>
+      {name}{' '}
+      {r.losses_per_100_account_days === null ? <em>{t('fleetEngineLossNone')}</em> : <b className="mono">{r.losses_per_100_account_days.toFixed(2)}</b>}
+    </span>
+  );
+  const parts = [
+    ...loss.engines.map(r => rate(r, t(r.engine === 'cloak' ? 'fleetEngine_cloak' : 'fleetEngine_stock'))),
+    rate(loss.retro, t('fleetEngineRetro')),
+  ];
+  return (
+    <div className="fleet-host-meta">
+      {t('fleetEngineLossHead', { days: loss.days })}{' '}
+      {parts.flatMap((p, i) => (i ? [<span key={`s${i}`}> · </span>, p] : [p]))}
+    </div>
   );
 }

@@ -24,6 +24,11 @@
 #   REGISTRY         ghcr.io            registry host (sin.ocir.io for the OCI fallback)
 #   NAMESPACE        jinhuw             owner or namespace (ax6usa8hwbie on OCI)
 #   BUILDX_BUILDER   multiarch          a docker-container builder that can build amd64
+#   CLOAKBROWSER_LICENSE_KEY            bakes the CloakBrowser binary into the worker
+#                                       (a BuildKit secret, never in the image); unset,
+#                                       the worker is stock-only
+#   RS_CLOAK_VERSION                    labels the worker with the baked build; the
+#                                       build fails if the key fetched another one
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)        # trackers/facebook
@@ -38,7 +43,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --no-push) PUSH=0 ;;
         --only) shift; ONLY=${1:-} ;;
-        -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
     shift
@@ -74,9 +79,16 @@ if [ "$ONLY" != agent ]; then
     # A pushed tag is what a fleet release names; it must be a real release,
     # the same gate deploy.sh applies. A dry run may build any tree.
     [ "$PUSH" = 0 ] || sh "$ROOT/scripts/check-release-tag.sh"
+    if [ -n "${CLOAKBROWSER_LICENSE_KEY:-}" ]; then
+        set -- --build-arg CLOAK_BAKE=1 --secret id=cloak_key,env=CLOAKBROWSER_LICENSE_KEY \
+            --build-arg RS_CLOAK_VERSION="${RS_CLOAK_VERSION:-}"
+    else
+        echo "  no CLOAKBROWSER_LICENSE_KEY: the worker image is stock-only" >&2
+        set --
+    fi
     build "$REGISTRY/$NAMESPACE/aimm-recycle:$VERSION" "$ROOT" "$ROOT/deploy/Dockerfile.worker" \
         --build-arg RS_VERSION="$VERSION" \
-        --build-arg RS_MONITOR_COMMIT="$(git -C "$MON" rev-parse --short HEAD)"
+        --build-arg RS_MONITOR_COMMIT="$(git -C "$MON" rev-parse --short HEAD)" "$@"
 fi
 
 if [ "$ONLY" != worker ]; then

@@ -1,9 +1,16 @@
+import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { Hono } from 'hono';
 import type postgres from 'postgres';
 import {
   cookieUid,
+  FLEET_CLOAK_MIN_WORKER_VERSION,
+  fleetVersionAtLeast,
+  FLEET_AUTO_RESUME_BY,
+  fleetAutoResumeDue,
+  fleetResumable,
   fleetStateParked,
+  fleetTakesResume,
   totpKey,
   type ClaimAnswer,
   type FleetCookie,
@@ -28,6 +35,7 @@ import { loadSettings } from './cities';
 import { notifyReady } from './scheduler';
 import { minutesTodaySql, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
 import { loadRelease, ownWorkerId } from './hosts';
+import { recordStateChange } from './stateEvents';
 
 // ─── The worker protocol ──────────────────────────────────────────────────────
 // What a worker container says to the ERP over its life: it claims a slot at
@@ -324,6 +332,13 @@ worker.post('/claim', claimAuth, async (c) => {
         OR (${handoff}::int IS NOT NULL AND handoff_epoch IS NOT DISTINCT FROM ${handoff} AND reserved_until > NOW()))`;
     if (running) return null;
     const settings = await loadSettings(tx);
+    // A worker too old to launch CloakBrowser would run a cloak slot on stock
+    // and log in there; the slot waits for one that can.
+    const cloakCapable = fleetVersionAtLeast(version, FLEET_CLOAK_MIN_WORKER_VERSION);
+    const engineRuns = cloakCapable ? tx`TRUE` : tx`s.device->>'browser_engine' IS DISTINCT FROM 'cloak'`;
+    // The few workers that can run a cloak slot are the only ones it can go
+    // to, so one of them takes it before a stock slot any worker could take.
+    const cloakFirst = cloakCapable ? tx`(s.device->>'browser_engine' = 'cloak') DESC NULLS LAST,` : tx``;
 
     // This boot's own slot (a retried claim) or the one held for it (a
     // handoff) waits for its lock: skipping it would hand the same boot a
@@ -337,7 +352,7 @@ worker.post('/claim', claimAuth, async (c) => {
         ORDER BY (claim_id IS NOT DISTINCT FROM ${claimId}) DESC LIMIT 1`;
       if (mine) {
         [row] = await tx<ClaimRow[]>`${CLAIM_SELECT(tx)} WHERE s.account_no = ${mine.account_no} AND a.status = 'fleet'
-          FOR NO KEY UPDATE OF a`;
+          AND ${engineRuns} FOR NO KEY UPDATE OF a`;
       }
     }
     // Otherwise any free slot. A handoff whose reservation lapsed lands here
@@ -347,8 +362,9 @@ worker.post('/claim', claimAuth, async (c) => {
     if (!row) {
       [row] = await tx<ClaimRow[]>`
         ${CLAIM_SELECT(tx)}
-        WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW())
+        WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AND ${engineRuns}
         ORDER BY (s.worker_id = ${worker_id}) DESC NULLS LAST,
+          ${cloakFirst}
           (s.last_host_id = ${host.host_id}) DESC NULLS LAST,
           s.account_no
         LIMIT 1
@@ -393,7 +409,8 @@ worker.post('/claim', claimAuth, async (c) => {
         host_id = EXCLUDED.host_id, account_no = EXCLUDED.account_no, epoch = EXCLUDED.epoch,
         version = EXCLUDED.version, vnc_port = EXCLUDED.vnc_port, state = NULL, last_heartbeat_at = NULL, detail = NULL,
         relogin_id = NULL, relogin_requested_at = NULL, relogin_requested_by = NULL, relogin_delivered_at = NULL,
-        resume_id = NULL, resume_requested_at = NULL, resume_requested_by = NULL, resume_delivered_at = NULL`;
+        resume_id = NULL, resume_requested_at = NULL, resume_requested_by = NULL, resume_delivered_at = NULL,
+        state_since = NULL, auto_resumes = 0`;
 
     if (ticket) {
       await tx`UPDATE fleet_claim_tickets SET consumed_at = COALESCE(consumed_at, NOW()), claim_id = ${claimId}
@@ -498,14 +515,33 @@ worker.post('/heartbeat', workerAuth, async (c) => {
     await tx`
       UPDATE fleet_slots SET lease_expires_at = ${lease}
       WHERE account_no = ${w.account_no} AND epoch = ${w.epoch}`;
-    await tx`
-      INSERT INTO fleet_workers (worker_id, host_id, account_no, epoch, state, version, last_heartbeat_at, vnc_port, detail)
+    await recordStateChange(tx, w, state, detail);
+    const [beat] = await tx<{ state_since: Date | null; auto_resumes: number; version: string | null; resume_requested_at: Date | null; resume_delivered_at: Date | null; now: Date }[]>`
+      INSERT INTO fleet_workers (worker_id, host_id, account_no, epoch, state, version, last_heartbeat_at, vnc_port, detail, state_since)
       VALUES (${w.worker_id}, ${w.slot.host_id}, ${w.account_no}, ${w.epoch}, ${state}, ${version}, NOW(), ${vncPort},
-              ${detailValue === null ? null : tx.json(detailValue)})
+              ${detailValue === null ? null : tx.json(detailValue)}, NOW())
       ON CONFLICT (worker_id) DO UPDATE SET
         host_id = EXCLUDED.host_id, account_no = EXCLUDED.account_no, epoch = EXCLUDED.epoch, state = EXCLUDED.state,
         version = COALESCE(EXCLUDED.version, fleet_workers.version), last_heartbeat_at = NOW(),
-        vnc_port = COALESCE(EXCLUDED.vnc_port, fleet_workers.vnc_port), detail = EXCLUDED.detail`;
+        vnc_port = COALESCE(EXCLUDED.vnc_port, fleet_workers.vnc_port), detail = EXCLUDED.detail,
+        state_since = CASE WHEN fleet_workers.state IS DISTINCT FROM EXCLUDED.state OR fleet_workers.state_since IS NULL
+                           THEN NOW() ELSE fleet_workers.state_since END,
+        -- An hour of HEALTHY is a park run over; a resume that parks again at
+        -- once keeps counting, so a proxy that is really down stops being tried.
+        auto_resumes = CASE WHEN EXCLUDED.state = 'HEALTHY' AND fleet_workers.state = 'HEALTHY'
+                             AND fleet_workers.state_since < NOW() - INTERVAL '1 hour'
+                            THEN 0 ELSE fleet_workers.auto_resumes END
+      RETURNING state_since, auto_resumes, version, resume_requested_at, resume_delivered_at, NOW() AS now`;
+    if (fleetResumable(state, detail) && fleetTakesResume(beat.version) && (beat.resume_requested_at === null || beat.resume_delivered_at !== null)) {
+      const due = fleetAutoResumeDue(beat.state_since, beat.resume_requested_at, beat.auto_resumes);
+      if (due && due <= beat.now) {
+        await tx`
+          UPDATE fleet_workers SET resume_id = ${randomUUID()}, resume_requested_at = NOW(),
+            resume_requested_by = ${FLEET_AUTO_RESUME_BY}, resume_delivered_at = NULL, auto_resumes = auto_resumes + 1
+          WHERE worker_id = ${w.worker_id}`;
+        flog.info('fleet resume queued', { workerId: w.worker_id, by: FLEET_AUTO_RESUME_BY, try: beat.auto_resumes + 1 });
+      }
+    }
     // The worker acts on `relogin` and `resume` only when one first appears,
     // so each goes out on exactly one answer.
     const [relogin] = await tx<{ relogin_id: string }[]>`

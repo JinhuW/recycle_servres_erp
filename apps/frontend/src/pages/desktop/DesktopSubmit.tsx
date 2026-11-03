@@ -7,7 +7,6 @@ import { ImageLightbox } from '../../components/ImageLightbox';
 import { PaymentFields } from '../../components/PaymentFields';
 import { payerAfterOwnerChange, payerChoices } from '../../lib/poFacets';
 import { useMembers } from '../../lib/useManagers';
-import type { HandoffMethod } from '../../lib/handoff';
 import { useT } from '../../lib/i18n';
 import { api, createOrder, deleteOrder, MAX_UPLOAD_BYTES } from '../../lib/api';
 import { handleFetchError, showErrorDialog, showSuccessToast, showWarnToast } from '../../lib/errorToast';
@@ -89,7 +88,6 @@ type OrderMeta = {
   payment: 'Company' | 'Self';
   // The person on a self-paid PO; null lets the server name the owner.
   paidByUserId: string | null;
-  paymentMethod: HandoffMethod | null;
   notes: string;
   // Charged on top of the goods total, so it is its own field rather than
   // something folded into the override.
@@ -149,7 +147,6 @@ function OrderForm({
     warehouseId: '',
     payment: 'Company',
     paidByUserId: null,
-    paymentMethod: null,
     notes: '',
     otherFees: '',
     otherFeesNote: '',
@@ -574,7 +571,7 @@ function OrderForm({
     warehouseId?: string;
     payment: 'company' | 'self';
     paidByUserId: string | null;
-    paymentMethod: HandoffMethod | null;
+    paymentMethod: 'paypal' | null;
     notes: string | null;
     otherFees: number;
     otherFeesNote: string | null;
@@ -624,7 +621,7 @@ function OrderForm({
     ...(meta.warehouseId ? { warehouseId: meta.warehouseId } : {}),
     payment: meta.payment === 'Company' ? 'company' : 'self',
     paidByUserId: meta.payment === 'Company' ? null : meta.paidByUserId,
-    paymentMethod: meta.payment === 'Company' ? meta.paymentMethod : null,
+    paymentMethod: meta.payment === 'Company' ? 'paypal' : null,
     notes: meta.notes || null,
     otherFees: parseFeeInput(meta.otherFees),
     otherFeesNote: meta.otherFeesNote.trim() || null,
@@ -1159,8 +1156,7 @@ function OrderForm({
               paidByUserId={meta.paidByUserId}
               payers={payers}
               onPaidBy={(v, userId) => setMeta(m => ({ ...m, payment: v === 'company' ? 'Company' : 'Self', paidByUserId: userId }))}
-              method={meta.paymentMethod}
-              onMethod={v => setMeta(m => ({ ...m, paymentMethod: v }))}
+              method="paypal"
               txnId="" onTxnId={() => {}}
               compact
               idPrefix="sub"

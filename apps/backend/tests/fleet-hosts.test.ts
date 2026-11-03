@@ -238,6 +238,28 @@ describe('releases', () => {
     expect(list.body.hosts[0].desired).toEqual({ count: 2, image: IMAGE_NEW, version: '0.14.0', roll: null });
   });
 
+  it('stages an image for new containers without replacing a running worker, until a release supersedes it', async () => {
+    const { token } = await loginAs(ALEX);
+    const staged = await api<{ ok: true; release: FleetRelease }>('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0', staged: true } });
+    expect(staged.status).toBe(200);
+    expect(staged.body.release).toMatchObject({ state: 'staged', image: IMAGE_NEW, current: null });
+    for (let i = 0; i < 3; i++) {
+      expect((await desired()).body).toMatchObject({ image: IMAGE_NEW, version: '0.14.0', roll: null });
+    }
+    expect(await release()).toMatchObject({ state: 'staged', upgraded: [], skipped: [], current: null });
+
+    const rolled = await api<{ ok: true; release: FleetRelease }>('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0' } });
+    expect(rolled.body.release.state).toBe('rolling');
+    expect((await desired()).body.roll).not.toBeNull();
+  });
+
+  it('refuses a staged flag that is not a boolean', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ error: string; detail: string }>('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0', staged: 'yes' } });
+    expect(r.status).toBe(422);
+    expect(r.body.detail).toBe('staged');
+  });
+
   it('passes the gate for a replacement that comes back on another account at a lower epoch', async () => {
     const { token } = await loginAs(ALEX);
     await api('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0' } });

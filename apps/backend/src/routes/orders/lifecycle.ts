@@ -17,7 +17,7 @@ import { normalizeTracking, type Carrier, type PackageSource } from '@recycle-er
 import { type Env, type User } from '../../types';
 import { PAYPAL_TXN_STRICT, normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
-import { type OrdersEnv, committedLinesBody, describeSellOrders, handoffByErr, isOrderPayment, isPaymentMethod, pickedPaidByErr, PACKAGE_DELIVERED_MSG, parseCommissionRate, PAYER_BOOKED_MSG, registerIfNeeded, resolveOrderOwner, sourceErr, stageMovedBody, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, unackedRevertFrag, warehouseErr } from './shared';
+import { type OrdersEnv, committedLinesBody, describeSellOrders, handoffByErr, isOrderPayment, isPaymentMethod, cashRefused, CASH_RETIRED_MSG, pickedPaidByErr, PACKAGE_DELIVERED_MSG, parseCommissionRate, PAYER_BOOKED_MSG, registerIfNeeded, resolveOrderOwner, sourceErr, stageMovedBody, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, unackedRevertFrag, warehouseErr } from './shared';
 
 const lifecycleRoutes = new Hono<OrdersEnv>();
 
@@ -456,8 +456,6 @@ function advanceRefusedResponse(
       }, 409);
     case 'missingTracking':
       return c.json({ error: 'Add the tracking number from the shipping label before submitting it.' }, 409);
-    case 'missingMethod':
-      return c.json({ error: 'Say how the company paid — PayPal or cash — before submitting it.' }, 409);
     // Hono lets a handler return nothing, so without this a new outcome kind
     // would fall out of the switch as an implicit undefined and a 200.
     default: {
@@ -500,13 +498,14 @@ lifecycleRoutes.post('/:id/handoff', async (c) => {
   }
   if (!isOrderPayment(body.payment)) return c.json({ error: 'payment must be company or self' }, 400);
   // A self-paid order has no method: it is reimbursed from commission. The
-  // company card names one, and cash is what lifts the transaction-id rule.
-  // Absent means the row's; the advance refuses a company row with none.
+  // company card is PayPal; cash survives only on POs saved before it was
+  // retired. Absent means the row's.
   let paymentMethod: 'paypal' | 'cash' | null | undefined;
   if (body.paymentMethod !== undefined) {
     if (!isPaymentMethod(body.paymentMethod)) {
       return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
     }
+    if (await cashRefused(sql, id, body.paymentMethod)) return c.json({ error: CASH_RETIRED_MSG }, 400);
     paymentMethod = body.paymentMethod;
   }
   if (body.payment === 'self') paymentMethod = null;

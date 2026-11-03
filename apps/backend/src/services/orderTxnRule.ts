@@ -12,16 +12,17 @@
 // below are held against every door, a manager stage-jump included.
 //
 // Three rules, by who paid and how:
-//   company card — the PayPal transaction id, unless the seller was paid in
-//                  cash (payment_method 'cash'). NULL method is the historical
-//                  row that was never asked: still required. And the id must
+//   company card — the PayPal transaction id, or a PayPal / Mercury payment
+//                  a manager linked to the PO. Not for a PO saved as cash
+//                  before cash was retired. NULL method is a row that was
+//                  never asked: read as PayPal, still required. And the id must
 //                  be one the PayPal sync has seen in our account — once any
 //                  PayPal account has synced into this environment. Until
 //                  then (a dev box, the test suite) the synced table says
 //                  nothing about the world and the rule stays off, in the
 //                  same fail-open spirit as an absent cutoff key.
-//   company cash — a screenshot of the amount handed over, as a Payment
-//                  attachment. Its own bucket, not Submission: a receipt or a
+//   company cash — legacy POs only: a screenshot of the amount handed over,
+//                  as a Payment attachment. Its own bucket, not Submission: a receipt or a
 //                  lot manifest left there is not proof of what was paid.
 //   self-paid    — the chat with the seller, as a Submission attachment. No
 //                  transaction id: a self-paid order is reimbursed from
@@ -73,25 +74,37 @@ async function afterCutoff(
   return cutoff !== null && createdAt >= new Date(cutoff);
 }
 
-/** Whether the transaction-id rule governs this order at all. */
+/** Whether the transaction-id rule still asks this order for an id. A
+ *  linked payment answers it, so the field stops being required. */
 export async function txnRequiredFor(
-  tx: SqlLike, order: TxnRuleOrder, cutoffs?: Cutoffs,
+  tx: SqlLike, order: TxnRuleOrder & { id: string }, cutoffs?: Cutoffs,
 ): Promise<boolean> {
   if (order.payment !== 'company' || order.payment_method === 'cash') return false;
-  return afterCutoff(tx, TXN_CUTOFF_KEY, order.created_at, cutoffs);
+  if (!await afterCutoff(tx, TXN_CUTOFF_KEY, order.created_at, cutoffs)) return false;
+  return !await costPaymentLinked(tx, order.id);
+}
+
+// A manager's link names the payment as surely as a typed id does, and a
+// Mercury payment has no id to type.
+async function costPaymentLinked(tx: SqlLike, orderId: string): Promise<boolean> {
+  const rows = await tx`
+    SELECT 1 FROM bank_transactions
+    WHERE order_id = ${orderId} AND link_kind = 'payment' LIMIT 1`;
+  return rows.length > 0;
 }
 
 /** Whether this order is governed by the rule AND still fails it. */
 async function companyPayTxnMissing(
   tx: SqlLike,
-  order: TxnRuleOrder & { paypal_txn_id: string | null },
+  order: TxnRuleOrder & { id: string; paypal_txn_id: string | null },
   cutoffs?: Cutoffs,
 ): Promise<boolean> {
   // Cheapest test first: the cutoff lookup only runs for an order that would
   // actually be blocked by it, so the common advance costs no extra query.
   if (order.payment !== 'company' || order.payment_method === 'cash') return false;
   if ((order.paypal_txn_id ?? '').trim() !== '') return false;
-  return afterCutoff(tx, TXN_CUTOFF_KEY, order.created_at, cutoffs);
+  if (!await afterCutoff(tx, TXN_CUTOFF_KEY, order.created_at, cutoffs)) return false;
+  return !await costPaymentLinked(tx, order.id);
 }
 
 /** Whether this order is governed by the rule, names an id, and that id is
@@ -175,7 +188,6 @@ export type LeaveDraftBlocker =
   | { kind: 'missingSource' }
   | { kind: 'missingDelivery' }
   | { kind: 'missingTracking' }
-  | { kind: 'missingMethod' }
   | { kind: 'missingTxnId' }
   | { kind: 'unknownTxnId'; paypalTxnId: string }
   | { kind: 'missingChatShot' }
@@ -230,7 +242,6 @@ export async function leaveDraftBlockers(
     out.push({ kind: 'missingDelivery' });
   }
   if (o.handoff_method === 'label' && !o.has_package) out.push({ kind: 'missingTracking' });
-  if (o.payment === 'company' && o.payment_method === null) out.push({ kind: 'missingMethod' });
   if (await companyPayTxnMissing(tx, o, cutoffs)) out.push({ kind: 'missingTxnId' });
   if (await companyPayTxnUnknown(tx, o, cutoffs)) {
     out.push({ kind: 'unknownTxnId', paypalTxnId: o.paypal_txn_id!.trim() });

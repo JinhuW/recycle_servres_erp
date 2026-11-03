@@ -60,9 +60,9 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
     setPaidByState(v);
     setPaidByUserId(v === 'self' ? userId : null);
   };
-  // A company order that was never asked stays null and the dialog asks —
-  // defaulting to PayPal here is how a cash deal ended up chasing an id.
-  const [method, setMethod] = useState<HandoffMethod | null>(init.paymentMethod);
+  // Cash survives only on a PO saved before it was retired; everything else
+  // the company paid is PayPal.
+  const method: HandoffMethod = init.paymentMethod ?? 'paypal';
   const [txnId, setTxnIdState] = useState(init.paypalTxnId);
   const { proof } = init;
   // A PayPal screenshot scanned here lands in the page's id field (the shared
@@ -139,7 +139,7 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
     delivery, setDelivery,
     byUserId, setByUserId, members,
     raw, setRaw, pick, setPick, tn, detected, carrier, hintKey,
-    paidBy, paidByUserId, setPaidBy, payers, payer, method, setMethod,
+    paidBy, paidByUserId, setPaidBy, payers, payer, method,
     txnId, setTxnId, proof,
     readiness, blockerKeys, canSubmit, busy, submit,
   };

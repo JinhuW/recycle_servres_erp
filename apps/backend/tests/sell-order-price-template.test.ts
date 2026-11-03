@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import app from '../src/index';
 import { resetDb, getTestDb } from './helpers/db';
 import { freeSellableLine } from './helpers/inventory';
-import { api, testEnv } from './helpers/app';
+import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import {
   buildPriceTemplateWorkbook, buildPackingListWorkbook, packSections, packTabName,
@@ -640,6 +640,22 @@ describe('GET /api/sell-orders/:id/packing-list', () => {
     expect(nj2Cells).toContain('WH-R1');
     expect(nj2Cells).not.toContain('WH-S1');
     expect(rowQty(nj2, 'Warehouse total')).toEqual([3]);
+  });
+
+  it('is rejected outright when uploaded to the price import', async () => {
+    // The parser needs a part header AND a price header on the same row; this
+    // workbook has the first and never the second. Uploading the wrong file
+    // must say so, not quietly match nothing.
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token);
+    const dl = await getRaw(`/api/sell-orders/${id}/packing-list`, token);
+    const file = new Blob([await dl.arrayBuffer()], { type: XLSX_MIME });
+
+    const res = await multipart(
+      `/api/sell-orders/${id}/price-import/preview`, { file }, { token },
+    );
+    expect(res.status).toBe(400);
+    expect((res.body as { code?: string }).code).toBe('columns-not-found');
   });
 
   it('404s unknown orders and 403s non-managers', async () => {

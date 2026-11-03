@@ -12,10 +12,10 @@ import { RemoveFromFleetDialog } from './FleetProxies';
 import { SearchNowDialog } from './FleetTasksTab';
 import { dueLabel, leaseLive } from './fleetBoard';
 import {
-  deviceText, erpCheckpoint, erpCityChips, erpCityLog, erpHistory, erpHistoryDot, erpProxyText, erpWorkerStatus, sessionDaysLeft,
+  deviceText, erpCheckpoint, erpCityChips, erpConnectPark, erpCityLog, erpHistory, erpHistoryDot, erpProxyText, erpWorkerStatus, sessionDaysLeft,
   type ErpHistoryLine,
 } from './fleetWorkerView';
-import { ParkDialog, ReleaseQuarantineButton, RetireSlotDialog, UnparkDialog, useFleetMirror } from './shared';
+import { EngineChip, MarkHealthyButton, ParkDialog, ReleaseQuarantineButton, RetireSlotDialog, UnparkDialog, useFleetMirror } from './shared';
 import {
   AccountsUsed, CheckpointsCard, ErpBuildChip, Muted, NoThumb, WorkerCard, WorkerHead, WorkerHistory, type HistoryEntry, type WorkerField,
 } from './workerDetail';
@@ -42,6 +42,7 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
   const name = acct?.email ?? acct?.uid ?? w.worker_id;
   const status = erpWorkerStatus(w, now);
   const checkpoint = erpCheckpoint(w, now);
+  const connectPark = erpConnectPark(w, now);
   const chips = useMemo(() => erpCityChips(d, now), [d, now]);
   const visits = useMemo(() => erpCityLog(d), [d]);
   const history = useMemo(() => erpHistory(d.events, stints ?? []), [d.events, stints]);
@@ -56,6 +57,7 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
 
   const note = status === 'offline'
     ? (w.last_heartbeat_at ? t('fbcNoteSilent', { age: relTime(w.last_heartbeat_at, locale) }) : t('fbcNeverReported'))
+    : connectPark ? (connectPark.since ? t('fleetNoteConnectPark', { age: relTime(connectPark.since, locale) }) : t('fleetNoteConnectParkNoAge'))
     : checkpoint ? stateLabel(t, checkpoint.state)
     : slot?.parked ? t('fleetNoteParked')
     : task ? t('fleetNoteSearching', { city: task.city_name ?? task.city, item: task.item })
@@ -67,7 +69,14 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
     : heldLease ? <span>{t('fleetEpochN', { n: slot.epoch })} · {t('fleetLeaseUntil', { time: dueLabel(t, slot.lease_expires_at, now) })}</span>
     : <Muted>{t('fleetSlotFree')}</Muted>;
 
+  const autoRetry = !connectPark ? null
+    : !connectPark.canResume ? t('fleetAutoRetryTooOld')
+    : connectPark.next === null ? t('fleetAutoRetrySpent', { max: connectPark.maxTries })
+    : Date.parse(connectPark.next) <= now ? t('fleetAutoRetryDue', { n: connectPark.tries, max: connectPark.maxTries })
+    : t('fleetAutoRetryNext', { time: dueLabel(t, connectPark.next, now), n: connectPark.tries, max: connectPark.maxTries });
+
   const fields: WorkerField[] = [
+    ...(autoRetry ? [{ label: t('fleetDetailAutoRetry'), value: <span className="fp-warn">{autoRetry}</span> }] : []),
     { label: t('fbcDetailFbLogin'), value: acct?.email ?? acct?.uid ?? <Muted>{t('fleetNoPoolAccount')}</Muted> },
     { label: t('fbcDetailFbUser'), value: acct?.uid
       ? <a className="mono" href={`https://www.facebook.com/profile.php?id=${encodeURIComponent(acct.uid)}`} target="_blank" rel="noopener">{acct.uid}</a>
@@ -87,6 +96,7 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
           {deviceText(device) && <><br /><small className="fp-muted">{deviceText(device)}</small></>}
         </span>
       : <Muted>—</Muted> },
+    { label: t('fleetDetailEngine'), value: slot ? <span className="fp-holder"><EngineChip slot={slot} /></span> : <Muted>—</Muted> },
     { label: t('fbcDetailBackup'), value: acct?.cookie_at
       ? <span title={acct.cookie_at}>{relTime(acct.cookie_at, locale)}</span>
       : <Muted>{t('fbcNeverBackedUp')}</Muted> },
@@ -151,6 +161,8 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
             fields={fields}
             actions={<>
               {watchButton('btn')}
+              {connectPark && d.holds_slot
+                && <MarkHealthyButton workerId={w.worker_id} version={w.version} resume={w.resume ?? null} state={w.state} onQueued={onReload} className="btn" />}
               {!mirror && <>
                 {slot && !slot.parked && <button type="button" className="btn" onClick={() => setDialog('park')}>{t('fleetPark')}</button>}
                 {slot?.parked && <button type="button" className="btn" onClick={() => setDialog('unpark')}>{t('fleetUnpark')}</button>}

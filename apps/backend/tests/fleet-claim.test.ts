@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomBytes } from 'node:crypto';
-import { cookieUid, cookieValue, type ClaimAnswer, type FleetCookie, type NextTaskAnswer } from '@recycle-erp/shared';
+import { cookieUid, FLEET_CLOAK_MIN_WORKER_VERSION, cookieValue, type ClaimAnswer, type FleetCookie, type NextTaskAnswer } from '@recycle-erp/shared';
 import { getTestDb, resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { signWorkerToken, workerTokenKey } from '../src/fleet/auth';
@@ -102,6 +102,18 @@ async function events(id: number): Promise<string[]> {
 
 describe('POST /api/fleet/worker/claim', () => {
   beforeEach(async () => { await resetDb(); await seedBase(); });
+
+  it('passes a CloakBrowser slot\'s engine, seed and GPU through in the device', async () => {
+    const no = await seedSlot(1);
+    await getTestDb()`UPDATE fleet_slots SET device = ${getTestDb().json({ viewport: [1440, 777], timezone: 'America/Denver', locale: 'en-US', browser_engine: 'cloak', cloak_seed: 48213, cloak_gpu: 'Intel' })} WHERE account_no = ${no}`;
+    // The suite's 0.14.0 worker cannot launch CloakBrowser, so it is not handed one.
+    expect((await claim('lab-1')).status).toBe(409);
+    const r = await api<ClaimAnswer>('POST', '/api/fleet/worker/claim', {
+      headers: bearer(HOST_TOKEN), body: { host_id: 'lab', worker_id: 'lab-2', version: FLEET_CLOAK_MIN_WORKER_VERSION, vnc_port: 5901 },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.device).toMatchObject({ viewport: [1440, 777], browser_engine: 'cloak', cloak_seed: 48213, cloak_gpu: 'Intel' });
+  });
 
   it('hands the slot with its secrets unsealed, opens the stint and mints a token for epoch 1', async () => {
     const no = await seedSlot(1, { lastHost: 'lab' });
@@ -1043,6 +1055,67 @@ describe('POST /api/fleet/workers/:id/resume', () => {
     await getTestDb()`UPDATE fleet_slots SET lease_expires_at = NOW() - interval '1 minute'`;
     const { worker_token: wt } = await claimed('lab-1');
     expect((await heartbeat(wt, 'HEALTHY')).body.directives).toEqual([]);
+  });
+});
+
+describe('automatic resume of a connect_failed park', () => {
+  beforeEach(async () => { await resetDb(); await seedBase(); });
+
+  const connectFailed = { version: '0.15.0 (3576db7)', detail: { reason: 'connect_failed', operator: true } };
+  const age = (minutes: number) => getTestDb()`
+    UPDATE fleet_workers SET state_since = state_since - make_interval(mins => ${minutes}),
+      resume_requested_at = resume_requested_at - make_interval(mins => ${minutes})
+    WHERE worker_id = 'lab-1'`;
+  const row = async () => (await getTestDb()<{ auto_resumes: number; resume_requested_by: string | null }[]>`
+    SELECT auto_resumes, resume_requested_by FROM fleet_workers WHERE worker_id = 'lab-1'`)[0];
+
+  it('sends resume 10 min into the park, then 30 min after that try, and counts the tries', async () => {
+    await seedSlot(1);
+    const { worker_token: wt } = await claimed('lab-1');
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual([]);
+    await age(9);
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual([]);
+    await age(1);
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual(['resume']);
+    expect(await row()).toMatchObject({ auto_resumes: 1, resume_requested_by: 'auto' });
+    // It parks again at once: a new park, timed from the later of it and the try.
+    await heartbeat(wt, 'HEALTHY', { version: connectFailed.version });
+    await heartbeat(wt, 'DEAD', connectFailed);
+    await age(29);
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual([]);
+    await age(1);
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual(['resume']);
+    expect((await row()).auto_resumes).toBe(2);
+  });
+
+  it('stops after the last try, and starts again after an hour of HEALTHY', async () => {
+    await seedSlot(1);
+    const { worker_token: wt } = await claimed('lab-1');
+    await heartbeat(wt, 'DEAD', connectFailed);
+    await getTestDb()`UPDATE fleet_workers SET auto_resumes = 8 WHERE worker_id = 'lab-1'`;
+    await age(600);
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual([]);
+    await heartbeat(wt, 'HEALTHY', { version: connectFailed.version });
+    await heartbeat(wt, 'HEALTHY', { version: connectFailed.version });
+    expect((await row()).auto_resumes).toBe(8);
+    await age(61);
+    await heartbeat(wt, 'HEALTHY', { version: connectFailed.version });
+    expect((await row()).auto_resumes).toBe(0);
+  });
+
+  it('leaves old builds, other DEAD reasons and other parks alone, and does not stack on a waiting resume', async () => {
+    await seedSlot(1);
+    const { worker_token: wt } = await claimed('lab-1');
+    await heartbeat(wt, 'DEAD', { ...connectFailed, version: '0.14.10 (f4d4fdf)' });
+    await age(600);
+    expect((await heartbeat(wt, 'DEAD', { ...connectFailed, version: '0.14.10 (f4d4fdf)' })).body.directives).toEqual([]);
+    await heartbeat(wt, 'DEAD', { version: '0.15.0', detail: { reason: 'login_failed', operator: true } });
+    await age(600);
+    expect((await heartbeat(wt, 'DEAD', { version: '0.15.0', detail: { reason: 'login_failed', operator: true } })).body.directives).toEqual([]);
+    await heartbeat(wt, 'SESSION_EXPIRED', { version: '0.15.0' });
+    await age(600);
+    expect((await heartbeat(wt, 'SESSION_EXPIRED', { version: '0.15.0' })).body.directives).toEqual([]);
+    expect((await row()).auto_resumes).toBe(0);
   });
 });
 

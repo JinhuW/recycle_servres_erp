@@ -242,6 +242,20 @@ describe('/api/web-submissions (manager)', () => {
     expect((await api('GET', `/api/web-submissions/${lot.body.ref}`, { token: purchaser.token })).status).toBe(403);
   });
 
+  it('counts only untriaged submissions for the nav badge; purchasers get 403', async () => {
+    const lot = await submit({ email: 'lot@example.com', source: 'reddit', lines: [ramLine] });
+    await submitQuote(quote);
+    const { token } = await loginAs(ALEX);
+    const count = () => api<{ n: number }>('GET', '/api/web-submissions/count', { token });
+    expect((await count()).body).toEqual({ n: 2 });
+
+    await api('PATCH', `/api/web-submissions/${lot.body.ref}`, { token, body: { status: 'contacted' } });
+    expect((await count()).body).toEqual({ n: 1 });
+
+    const purchaser = await loginAs(MARCUS);
+    expect((await api('GET', '/api/web-submissions/count', { token: purchaser.token })).status).toBe(403);
+  });
+
   it('shows one submission with photos and triages it', async () => {
     const payload = JSON.stringify({ email: 'p@example.com', source: 'web', lines: [ramLine] });
     const r = await multipart('/api/public/intake', { payload, 'photo-0-0': jpeg('a.jpg') },
@@ -341,7 +355,7 @@ describe('/api/web-submissions (manager)', () => {
     expect(line.type).toBeNull();
   });
 
-  it('converts a pickup lot as cash at a pickup, and refuses a quote', async () => {
+  it('converts a pickup lot as a PayPal-paid pickup, and refuses a quote', async () => {
     const lot = await submit({ email: 'local@example.com', source: 'facebook', handoff: 'pickup', pickup_location: 'chicago', lines: [ssdLine] });
     const q = await submitQuote(quote);
     const { token } = await loginAs(ALEX);
@@ -352,7 +366,7 @@ describe('/api/web-submissions (manager)', () => {
       SELECT o.payment_method, o.handoff_method, o.source, o.notes, s.source AS supplier_source
       FROM orders o JOIN suppliers s ON s.id = o.supplier_id WHERE o.id = ${conv.body.orderId}
     `;
-    expect(po).toMatchObject({ payment_method: 'cash', handoff_method: 'pickup', source: 'facebook', supplier_source: 'facebook' });
+    expect(po).toMatchObject({ payment_method: 'paypal', handoff_method: 'pickup', source: 'facebook', supplier_source: 'facebook' });
     expect(po.notes).toContain('chicago');
 
     expect((await api('POST', `/api/web-submissions/${q.body.ref}/convert`, { token })).status).toBe(400);

@@ -18,6 +18,10 @@ import {
   validateSellLines, createSellOrderDraft, insertSellOrderLine, type DraftLineInput,
 } from '../services/sellOrderCreate';
 import {
+  matchPriceRows, groupOrderProducts, type SellOrderLineRow,
+} from '../services/sellOrderPriceImport';
+import { readPriceSheetUpload } from '../services/priceSheet';
+import {
   buildPriceTemplateWorkbook, buildPackingListWorkbook, buildPackingListByPoWorkbook,
 } from '../lib/sellOrderPriceTemplate';
 import {
@@ -37,7 +41,7 @@ import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
 } from '../lib/fx';
-import { recordSaleDataPoints, retractSaleDataPoints } from '../lib/sellOrderMarket';
+import { recordSaleDataPoints, retractSaleDataPoints, recordBidDataPoints, retractBidDataPoints, type BidPart } from '../lib/sellOrderMarket';
 import type { WithdrawnPrice } from '../lib/refPriceEvents';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
@@ -526,8 +530,8 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
 
 // Vendor bid sheet: one row per product on its category's worksheet
 // (RAM/SSD/HDD/Other tabs), with a clickable item-photo URL and a blank Unit
-// Price column: a quote the vendor fills in by hand. Nothing reads it back;
-// a sell order's prices come from its lots' sell prices.
+// Price column. The vendor fills it and the manager round-trips it through
+// POST /:id/price-import/preview — the parser reads every tab.
 sellOrders.get('/:id/price-template', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -569,6 +573,49 @@ sellOrders.get('/:id/packing-list', async (c) => {
     : await buildPackingListWorkbook(data.head, warehouses);
   const suffix = `${byPo ? '-by-po' : ''}${only ? `-${customerSlug(only)}` : ''}`;
   return xlsxResponse(buf, datedFilename(`${data.filenameStem}-packing-list${suffix}`));
+});
+
+// Vendor price import, step 1 of 2: parse an uploaded bid sheet and report how
+// its rows match this order's products — by canonical part number, never by
+// cell position. Writes nothing; the manager applies the matched prices
+// through the edit form, whose save (PATCH /:id) owns FX, guards, and audit —
+// and, when the client names the confirmed products in `bidParts`, records
+// their saved prices on the Market board as `bid:<order>` data points.
+
+sellOrders.post('/:id/price-import/preview', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  const head = (await sql<{ id: string; status: string; currency_code: string }[]>`
+    SELECT id, status, currency_code FROM sell_orders WHERE id = ${id} LIMIT 1
+  `)[0];
+  if (!head) return c.json({ error: 'Not found' }, 404);
+  // Same lock the edit form honors: a Done/Closed order's prices are final.
+  if (head.status === 'Done' || head.status === 'Closed') {
+    return c.json({ error: `prices are locked on a ${head.status} order` }, 409);
+  }
+
+  // Our own bid sheet is priced in the order's currency; the upload's list
+  // currency is the Market import's concern, not this one's.
+  const upload = await readPriceSheetUpload(
+    await c.req.formData().catch(() => null), { condition: true },
+  );
+  if (!upload.ok) return c.json(upload.body, upload.status);
+
+  const lines = (await sql`
+    SELECT label, part_number, qty,
+           unit_price::float AS unit_price,
+           source_unit_price::float AS source_unit_price
+    FROM sell_order_lines
+    -- A line held at 0 is left off the bid sheet, so it can't be missing from it.
+    WHERE sell_order_id = ${id} AND qty > 0
+    ORDER BY position
+  `) as SellOrderLineRow[];
+  const products = groupOrderProducts(lines, head.currency_code === 'CNY');
+
+  return c.json({ currency: head.currency_code, ...matchPriceRows(upload.rows, products) });
 });
 
 // Field gates — fail fast with a clean 400 rather than letting a malformed
@@ -744,7 +791,7 @@ sellOrders.patch('/:id', async (c) => {
   const body = (await c.req.json().catch(() => null)) as
     | { status?: string; notes?: string;
         customerId?: string; lines?: SaveLineInput[]; currency?: string;
-        paymentReceivedBy?: string | null; linesVersion?: unknown }
+        paymentReceivedBy?: string | null; bidParts?: BidPart[]; linesVersion?: unknown }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
   if (body.linesVersion !== undefined && typeof body.linesVersion !== 'string') {
@@ -809,6 +856,24 @@ sellOrders.patch('/:id', async (c) => {
   if (Array.isArray(body.lines)) {
     const lineErr = lineInputError(body.lines, { allowZeroQty: true });
     if (lineErr) return c.json({ error: lineErr }, 400);
+  }
+
+  // A confirmed vendor price import names the parts whose saved prices are
+  // the customer's bid — every condition of the part, since the sheet prices
+  // a part once. It only means something alongside the lines it prices, so
+  // it is refused on its own.
+  if (body.bidParts !== undefined) {
+    const badPart = (p: unknown) => {
+      if (typeof p !== 'object' || p === null) return true;
+      const { partNumber } = p as { partNumber?: unknown };
+      return typeof partNumber !== 'string' || partNumber.trim() === '' || partNumber.length > 200;
+    };
+    if (!Array.isArray(body.bidParts) || body.bidParts.length > 1000 || body.bidParts.some(badPart)) {
+      return c.json({ error: 'bidParts must be an array of { partNumber } objects' }, 400);
+    }
+    if (body.lines === undefined) {
+      return c.json({ error: 'bidParts requires lines' }, 400);
+    }
   }
 
   type Outcome =
@@ -931,6 +996,9 @@ sellOrders.patch('/:id', async (c) => {
       // A tick belongs to a line on the order: one left behind by a removed
       // line would read as packed when its lot is added back.
       await prunePackRows(tx, id);
+      if (body.bidParts?.length) {
+        await recordBidDataPoints(tx, id, u.id, body.bidParts);
+      }
     }
 
     // Diff events — emitted only when something actually changed.
@@ -1776,10 +1844,12 @@ sellOrders.post('/:id/status', async (c) => {
     // Audit-event writes for close + reopen. Done's audit story is the
     // inventory_events rows below; archive lives in its own handler.
     if (body.to === 'Closed') {
+      const withdrawnBids = await retractBidDataPoints(tx, id);
       await writeSellOrderEvent(tx, id, u.id, 'closed', {
         reasonId: body.closeReasonId!,
         note: body.note ?? null,
         fromStatus: cur.status,
+        ...(withdrawnBids.length ? { withdrawnPrices: withdrawnBids } : {}),
       });
     } else if (reopening || reopeningSale) {
       // The withdrawn market prices are named here, the one record left of

@@ -47,6 +47,22 @@ export function fleetTakesResume(version: string | null | undefined): boolean {
   return true;
 }
 
+/** Minutes the ERP waits before each automatic `resume` of a connect_failed
+ *  park, counted from the park or the previous try, whichever is later. A
+ *  park still there after the last one waits for a manager. */
+export const FLEET_AUTO_RESUME_MINUTES = [10, 30, 60, 60, 60, 60, 60, 60] as const;
+
+/** Who an automatic resume is recorded as. */
+export const FLEET_AUTO_RESUME_BY = 'auto';
+
+/** When the next automatic resume of a connect_failed park is due, or null
+ *  when the tries are spent. */
+export function fleetAutoResumeDue(stateSince: string | Date | null, lastResumeAt: string | Date | null, tries: number): Date | null {
+  if (tries >= FLEET_AUTO_RESUME_MINUTES.length || stateSince === null) return null;
+  const base = Math.max(new Date(stateSince).getTime(), lastResumeAt === null ? 0 : new Date(lastResumeAt).getTime());
+  return new Date(base + FLEET_AUTO_RESUME_MINUTES[tries] * 60_000);
+}
+
 /** Whether an account's fleet slot may be retired as lost: a manager parked
  *  it, the pool already took it out of the fleet, or its worker reports a
  *  parked state. A worker that only went silent is not lost, and one parked
@@ -192,7 +208,17 @@ export type FleetDevice = {
   device_scale_factor?: number;
   /** Filled in by the claim all the same; the worker ignores what is listed. */
   native?: FleetNativeField[];
+  /** Absent is stock. Set by the engine switch, never by the claim. */
+  browser_engine?: FleetBrowserEngine;
+  /** CloakBrowser's fingerprint seed and GPU; written once, with the switch. */
+  cloak_seed?: number;
+  cloak_gpu?: FleetCloakGpu;
 };
+
+export const FLEET_BROWSER_ENGINES = ['stock', 'cloak'] as const;
+export type FleetBrowserEngine = (typeof FLEET_BROWSER_ENGINES)[number];
+export const FLEET_CLOAK_GPUS = ['NVIDIA', 'Intel'] as const;
+export type FleetCloakGpu = (typeof FLEET_CLOAK_GPUS)[number];
 
 /** A device as a slot stores it: the claim fills in what is missing, so a
  *  profile that leaves the user agent to the browser simply has none. */
@@ -238,6 +264,76 @@ export function fleetDeviceFor(accountNo: number, timezone: string): FleetDevice
     native: ['user_agent'],
   };
 }
+
+/**
+ * The CloakBrowser fingerprint a slot gets when it is switched, fixed by its
+ * account number like its device: a seed is the whole machine to Facebook, so
+ * one made again for the same account has to come out the same.
+ */
+export function fleetCloakFor(accountNo: number): { cloak_seed: number; cloak_gpu: FleetCloakGpu } {
+  const h = fnv1a(`fleet-cloak:${accountNo}`);
+  return {
+    cloak_seed: 10000 + (h % 90000),
+    cloak_gpu: FLEET_CLOAK_GPUS[Math.floor(h / 90000) % FLEET_CLOAK_GPUS.length],
+  };
+}
+
+/** States in which the account has lost its session, so its browser holds
+ *  nothing a new fingerprint could give away. DEAD is not one: a page that
+ *  would not load leaves the session live. */
+export const fleetSessionLost = (state: string | null | undefined): boolean =>
+  state === 'SESSION_EXPIRED' || state === 'CHECKPOINT' || !!state?.startsWith('CHALLENGE');
+
+/**
+ * Whether a slot may be switched to CloakBrowser, as far as its account says:
+ * never switched before, and no session it could carry onto the new
+ * fingerprint. That is an account whose last known state is a lost session,
+ * or one no fleet worker has ever held: its saved session, if any, came from
+ * outside the fleet and shows Facebook a new machine on either engine. Parked
+ * or worker-less alone is not enough: a session a stock worker saved goes
+ * back out with the next claim. The route also checks `cloak_enabled` and
+ * `cloak_max_slots`.
+ */
+export function fleetCloakSwitchable(s: Pick<FleetSlot, 'epoch' | 'account_state' | 'has_session' | 'fleet_held' | 'device'>): boolean {
+  if (s.device?.cloak_seed !== undefined) return false;
+  if (fleetSessionLost(s.account_state)) return true;
+  return s.epoch === 0 && s.account_state === null && (!s.has_session || !s.fleet_held);
+}
+
+/**
+ * Whether a CloakBrowser slot may go back to stock, as far as its session
+ * says: no worker can be running on it, or its account has lost its session.
+ * A cloak worker still booting could reach HEALTHY after the switch back and
+ * hand stock a session minted on the cloak fingerprint. The route also
+ * refuses one whose cloak session ever reached HEALTHY.
+ */
+export function fleetStockRevertible(s: Pick<FleetSlot, 'parked' | 'worker_id' | 'account_state'>): boolean {
+  return s.parked || s.worker_id === null || fleetSessionLost(s.account_state);
+}
+
+/** The engine a worker says it launched; a heartbeat without one is from an
+ *  image older than CloakBrowser, which only runs stock. */
+export const fleetReportedEngine = (detail: Record<string, unknown> | null | undefined): FleetBrowserEngine =>
+  detail?.engine === 'cloak' ? 'cloak' : 'stock';
+
+/** The first worker release that can launch CloakBrowser. An older one would
+ *  run a cloak slot on stock and mint a stock session the next cloak boot
+ *  loads, so the claim never hands it one. */
+export const FLEET_CLOAK_MIN_WORKER_VERSION = '0.16.0';
+
+/** Whether a worker's reported version is at least `min` (dotted numbers); a
+ *  version that does not parse, such as `unknown`, is not. */
+export function fleetVersionAtLeast(version: string | null | undefined, min: string): boolean {
+  const parse = (v: string) => /^v?(\d+)\.(\d+)\.(\d+)/.exec(v)?.slice(1, 4).map(Number) ?? null;
+  const a = version ? parse(version) : null;
+  const b = parse(min)!;
+  if (!a) return false;
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return true;
+}
+
+/** Body of POST /api/fleet/slots/:no/engine. */
+export type FleetEngineSwitch = { engine: FleetBrowserEngine };
 
 // ─── Proxies ──────────────────────────────────────────────────────────────────
 
@@ -403,6 +499,15 @@ export type FleetSlot = {
   /** Held for its stopped worker's replacement until this instant (a host's
    *  `stopped` with `restart`); null when not reserved. Not a park: it lapses. */
   reserved_until: string | null;
+  /** The account's last known state: its worker's report for this lease,
+   *  else its latest state event; null for none or a worker still booting. */
+  account_state: string | null;
+  /** Whether the pool account has a saved session the next claim hands out. */
+  has_session: boolean;
+  /** Whether a fleet worker has ever held the account (a stint, or a claim by
+   *  a fleet host). A saved session on one never held came from outside the
+   *  fleet, such as the seller's cookie, and no fleet fingerprint is on it. */
+  fleet_held: boolean;
 };
 
 /** Which of a pool account's secrets are stored. Never a value. */
@@ -484,7 +589,9 @@ export type FleetHostReport = {
 export type FleetRelease = {
   image: string;
   version: string;
-  state: 'rolling' | 'done' | 'failed' | 'superseded';
+  /** `staged`: new containers start on `image`, and no running worker is
+   *  replaced (a one-account canary); an ordinary release supersedes it. */
+  state: 'rolling' | 'staged' | 'done' | 'failed' | 'superseded';
   started_at: string;
   finished_at: string | null;
   /** Workers already on `image` through this roll, and the ones left out
@@ -510,6 +617,10 @@ export type FleetWorker = {
   last_heartbeat_at: string | null;
   vnc_port: number | null;
   detail: Record<string, unknown> | null;
+  /** When the reported state last changed: how long a park has lasted. */
+  state_since?: string | null;
+  /** Automatic resumes sent in this park run (FLEET_AUTO_RESUME_MINUTES). */
+  auto_resumes?: number;
   /** A manager's re-login, in the manager's views only (the worker never reads it). */
   relogin?: FleetWorkerRelogin | null;
   resume?: FleetWorkerResume | null;
@@ -524,8 +635,9 @@ export type FleetWorkerRelogin = {
   delivered_at: string | null;
 };
 
-/** The latest "Mark healthy" a manager queued for a worker parked with
- *  `connect_failed`; delivered once, like a re-login. */
+/** The latest "Mark healthy" queued for a worker parked with
+ *  `connect_failed`, by a manager or by the ERP itself (`requested_by`
+ *  FLEET_AUTO_RESUME_BY); delivered once, like a re-login. */
 export type FleetWorkerResume = FleetWorkerRelogin;
 
 /** The search parameters handed to every worker; keys follow the monitor's config. */
@@ -545,6 +657,10 @@ export type FleetSettings = {
   retention_days: number;
   /** Non-parked slots one proxy may carry: a static ISP exit is one IP. */
   max_accounts_per_proxy: number;
+  /** False refuses new switches to CloakBrowser; slots already switched stay. */
+  cloak_enabled: boolean;
+  /** Slots that may run CloakBrowser at once: the license's session limit. */
+  cloak_max_slots: number;
   search: FleetSearchSettings;
 };
 
@@ -560,6 +676,8 @@ export const FLEET_SETTINGS_DEFAULTS: Omit<FleetSettings, 'search'> = {
   quarantine_probe_hours: 6,
   retention_days: 90,
   max_accounts_per_proxy: 2,
+  cloak_enabled: false,
+  cloak_max_slots: 1,
 };
 
 /** What a worker token says about its bearer. `exp` is Unix seconds. The
@@ -737,6 +855,41 @@ export type FleetErrorCode =
   /** Mark healthy for a worker that is not parked with `connect_failed`. */
   | 'not_parked'
   /** Retiring an account fleetSlotRetirable does not call lost: park it first. */
-  | 'not_lost';
+  | 'not_lost'
+  /** Switching the engine of a slot whose account may hold a live session. */
+  | 'engine_live_session'
+  /** Switching to CloakBrowser while `cloak_enabled` is off. */
+  | 'cloak_disabled'
+  /** Switching to CloakBrowser with `cloak_max_slots` slots on it already. */
+  | 'cloak_slots_full'
+  /** Switching to CloakBrowser a slot that has had a cloak seed already. */
+  | 'cloak_seeded'
+  /** Back to stock for a slot whose CloakBrowser session once reached HEALTHY. */
+  | 'cloak_proven'
+  /** Re-login or resume while the slot's engine is not the one its worker
+   *  runs: the fresh session would carry onto the other fingerprint. */
+  | 'engine_mismatch';
 
 export type FleetError = { error: FleetErrorCode; detail?: string };
+
+/** One browser engine's account loss over a window (GET /api/fleet/stats/engine-loss). */
+export type FleetEngineLossRow = {
+  /** `stock` or `cloak` (fleet_slots.device.browser_engine; absent is stock). */
+  engine: string;
+  /** Time accounts spent on a worker in the window, in days. */
+  account_days: number;
+  /** Losses by the state entered (SESSION_EXPIRED, CHECKPOINT, CHALLENGE_*), or by stint outcome in `retro`. */
+  losses: Record<string, number>;
+  total_losses: number;
+  /** null with no account-days. */
+  losses_per_100_account_days: number | null;
+};
+
+export type FleetEngineLoss = {
+  days: number;
+  since: string;
+  /** From the worker state history; always lists `stock` and `cloak`. */
+  engines: FleetEngineLossRow[];
+  /** From fb_worker_accounts stints ending `problem` or `retired`: the baseline from before the history. */
+  retro: FleetEngineLossRow;
+};

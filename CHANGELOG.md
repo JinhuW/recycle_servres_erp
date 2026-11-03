@@ -15,6 +15,301 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.412.1] - 2026-11-03
+
+### Fixed
+
+- **An account no fleet worker has held can switch to CloakBrowser even with
+  the seller's cookie** (RS-513). The switch refused any never-claimed
+  account that had a saved session. Every unused account in the pool came
+  with the seller's cookie, so none of them could be the CloakBrowser
+  canary. That cookie was never on a fleet fingerprint, and either engine
+  shows Facebook a new machine on its first login, so it is no reason to
+  refuse. A session a fleet worker saved still blocks the switch: one
+  claimed by a fleet host, or with a stint under a worker. The slot now
+  reports `fleet_held`.
+
+## [1.412.0] - 2026-11-03
+
+### Added
+
+- **A worker image can be staged for new workers only** (RS-513).
+  `POST /api/fleet/releases` with `staged: true` names the image that new
+  containers start on and replaces no running worker. A fleet release used
+  to replace every worker, one Facebook login each, so a single account
+  could not try a new image. The Hosts tab shows it as "Staged: new workers
+  only". The next ordinary release supersedes it.
+- **A CloakBrowser account goes to a worker that can run it.** A worker on
+  0.16.0 or later takes a free CloakBrowser slot before a free stock one; its
+  own previous slot still comes first. Only those workers can run a
+  CloakBrowser slot, so leaving it to the account order could start the one
+  canary worker on a stock account instead.
+- **The CloakBrowser license reaches only CloakBrowser workers.** It is now
+  its own Worker secret, `CLOAKBROWSER_LICENSE_KEY`. The Cloudflare Worker
+  adds it to a claim's env only when the claimed device's engine is cloak.
+  A stock worker never receives it, and `FLEET_WORKER_ENV`, which can't be
+  read back to edit, stays as it is.
+
+## [1.411.0] - 2026-11-02
+
+### Fixed
+
+- **A fleet worker parked on a page that would not load retries by itself**
+  (RS-512). On 2026-11-01 a few minutes of DNS outage made homelab-2,
+  worker-60-14-6 and worker-60-14-3 park DEAD with `connect_failed`. That
+  park waits for a manager's Mark healthy, so all three sat idle for about
+  37 hours while their heartbeats looked fine. The ERP now sends `resume`
+  itself, on the heartbeat, to such a park on a 0.15.0+ worker: 10 minutes
+  in, then 30 minutes after that try, then hourly, 8 tries per run. It
+  starts counting again after an hour of Healthy. A proxy that is really
+  down still ends up parked and visible. No worker release and no login are
+  needed: the directive is the one Mark healthy already sends.
+- **The worker page says why the worker is parked.** It used to show a bare
+  "Dead" beside a fresh heartbeat and a green session. Now it reads "Parked:
+  couldn't reach Facebook · since …", has an Auto-retry row with the next try
+  or "gave up after 8 tries", and offers Mark healthy.
+
+## [1.410.0] - 2026-11-02
+
+### Added
+
+- **Review mode applies a short count to the PO** (RS-511). A product counted
+  short used to keep its PO qty, and the only fix was the Edit drawer, where
+  the qty had to be typed again. Now the Counted cell offers **Apply N** under
+  the stepper, and Finish review offers **Apply all counts** for every short
+  line. Both write the qty straight to the PO and keep the line checked. A
+  product with serials opens the Edit drawer with the qty already set, so the
+  manager picks which serials didn't arrive instead of having them guessed.
+  Lowering a qty through the drawer no longer drops the line's tick either.
+
+## [1.409.1] - 2026-11-02
+
+### Fixed
+
+- **Fixes from the pre-release review of v1.401.0–v1.409.0** (RS-508). Three of
+  them would have written wrong data on prod once `dev` was released:
+  - **Sell-order #.** On an order numbered before v1.404.0, one RAM series
+    sits under several #s. A new lot of one of its parts joined the series'
+    lowest # and split the part across two #s on the packing list and the bid
+    sheet. It now joins its own part's #, and only a part new to the order
+    takes the series' #.
+  - **Bids from the vendor price import.** A price typed over the import
+    before Save was still recorded on the Market board as the customer's bid.
+    Now only parts still at the sheet's price are sent. A re-imported sheet
+    stacked a second bid for each part, and nothing ever withdrew them. A
+    later bid save now replaces the order's earlier bid for the part, and
+    closing the order withdraws its bids, so `last_price` falls back to the
+    part's previous reading. The *closed* history entry names the withdrawn
+    prices, as a reopened sale's does.
+  - **Currency.** The bid template and the preview price in the order's saved
+    currency. With a currency switch not saved yet, the sheet's numbers went
+    into the other currency's lines. The import card now says to save the
+    currency change first, and the preview formats in its own currency.
+- A series fold holding a lot just added now collapses when its chevron is
+  clicked.
+- The uptime probe exits 0 when `ALERT_URL` is unset. A failing run used to
+  mark the deployment CRASHED, the loop from 2026-10-28.
+- A cash edit or hand-off of a PO that does not exist answers 404 instead of
+  the cash-retired 400.
+- The price import's `ambiguous` row status is gone. Lines are folded by part
+  number before matching, so it could never occur.
+
+## [1.409.0] - 2026-11-02
+
+### Added
+
+- **A fleet account can move to CloakBrowser, one at a time and only while it
+  has no live session** (RS-507). CloakBrowser is a stealth Chromium whose
+  fingerprint is set by a seed. A slot's device now carries `browser_engine`,
+  `cloak_seed` and `cloak_gpu`, derived from the account number so that the
+  same account always gets the same values, and the claim hands them to the
+  worker. `POST /api/fleet/slots/:no/engine` makes the switch. Because the
+  new fingerprint is a new machine to Facebook, it allows only an account
+  that has already lost its session, or one never logged in. A parked account
+  isn't enough on its own, since its saved session goes out with the next
+  claim. The account's state is read for that account only, never from a
+  worker row that has since moved to another account. It also refuses while the new `cloak_enabled`
+  setting is off (the default), once `cloak_max_slots` slots (default 1, the
+  free license's session limit) run CloakBrowser, and for a slot switched
+  before. Going back to stock is allowed only while the cloak session never
+  reached HEALTHY and no worker can be starting on the slot. State events now
+  record the engine the worker says it launched (`detail.engine`), not just
+  the slot's setting. The claim leaves a cloak slot unclaimed rather than
+  hand it to a worker older than 0.16.0, which would run it on stock. Re-login
+  and Mark healthy are refused (`engine_mismatch`) while a worker runs a
+  different engine from its slot's, so no fresh session is minted on the old
+  fingerprint. On the Fleet tab the table gains an Engine column and a
+  "Switch to CloakBrowser" action wherever the guard would allow it, behind
+  a confirmation that says the move is one way, and a CloakBrowser row offers
+  Back to stock. A Browser engine card holds
+  the on/off switch, the seats and the loss rate per 100 account-days for
+  each engine against the stint baseline from v1.408.0. Slot lists carry each
+  account's `account_state` and `has_session` for the row's guard.
+
+## [1.408.0] - 2026-11-02
+
+### Added
+
+- **The ERP fleet keeps a history of its workers' states and reports account
+  loss per browser engine** (RS-506). `fleet_workers.state` held only the
+  latest report, so there was no way to say how often an account fell to
+  SESSION_EXPIRED, CHECKPOINT or a challenge. Every heartbeat that changes a
+  worker's state now writes a row to the new `fleet_worker_state_events`
+  (migration 0221), stamped with the slot's browser engine, `stock` until an
+  account is switched to CloakBrowser. `GET /api/fleet/stats/engine-loss`
+  turns it into account-days, losses and losses per 100 account-days for each
+  engine, and adds a stock baseline from the stint ledger's `problem` and
+  `retired` endings so the comparison has a number before the history
+  builds up. It ships ahead of the CloakBrowser switch so the stock baseline
+  is already accumulating when the first account moves. No page shows it yet.
+
+## [1.407.1] - 2026-11-02
+
+### Fixed
+
+- **The payment-gap note on the PO list fits its box again** (RS-504). The
+  note opened by the red `!` beside a PO id sits inside the order-id cell. It
+  inherited that cell's no-wrap, so the "Payment doesn't match the total cost"
+  text and the *Open Payments* link ran past the right edge of the amber box,
+  over the row. The note now wraps its text inside the box, with the link on
+  its last line.
+
+## [1.407.0] - 2026-11-02
+
+### Added
+
+- **Kingston and other-brand RAM shows a short code read from its Chip #**
+  (RS-503). Before, a third-party stick showed *Not recorded* even when its
+  chip marking named the die, such as `MICRON-0ZE75D9WFL`,
+  `SK-H5ANAG8NCJRXNC240VS` or `SAMSUNG CB1`. Since v1.347.0 the short code had
+  read only Samsung and SK Hynix part numbers and the Micron brand's chip. Now
+  any other brand reads the die from a Micron FBGA code, a full Hynix `H5AN`
+  marking or a bare die code. In prod data that gives 132 DDR4 lots a code.
+  Placeholders, Samsung `K4A` markings and cut Hynix markings stay unknown,
+  because each would be a guess. Such lots now join the short-code grouping
+  on the vendor bid sheet. Samsung, SK Hynix and Micron lots are unchanged.
+
+## [1.406.0] - 2026-11-02
+
+### Added
+
+- **The RMB Flow book shows the order amount, and a red ! when the book is
+  more than 2% off it** (RS-502). A new *Order amount* column sits between
+  Method and Received. It shows the figure of the record the entry pays: the
+  PO's commission on a Commission row, the PO's cost with other fees on a
+  Purchase row, the sell order's total on a Sale row and the case's amount on
+  an After-sales row, each in the record's own currency. Before this, a
+  commission that didn't match the PO stayed out of sight until Review mode.
+  When every live entry of that kind on the record adds up to more than 2%
+  away from that figure, in either direction, each of the record's rows
+  carries a red ! whose tooltip gives both ¥ figures and the gap. A dollar
+  figure converts at the latest rate. The record form says the same thing
+  while you type: a red line under Amount gives the total the book would hold
+  after this entry, and Save turns into *Save anyway*, which needs a second
+  click. This applies on desktop and on the phone sheet.
+
+## [1.405.1] - 2026-11-02
+
+### Fixed
+
+- **A sell order no longer folds two RAM dies into one row** (RS-501). The
+  series that v1.404.0 folds lines and shares a # by stopped at the module
+  organisation, so SK Hynix `HMAA2GU6AJR8N` (A-die) and `HMAA2GU6CJR8N`
+  (C-die), or Samsung `M471A1K43CB1` and `…EB1`, sat in one row. A buyer
+  prices each die as its own product. The series now runs through the die,
+  the part the short code names (Micron: its die revision), so only lots that
+  differ by speed or packaging fold. #s already stored stay as they are.
+
+## [1.405.0] - 2026-11-02
+
+### Added
+
+- **The Web submissions nav item counts what is waiting** (RS-500). A badge
+  beside it shows how many submissions are still in status `new`, so a
+  manager sees a form arrive without opening the page. Submissions come from
+  the public websites, not from inside the ERP, so the count polls once a
+  minute while the tab is visible and re-reads the moment the tab comes back.
+  A status change, a Create Draft PO or a sent reply on the thread page
+  updates it at once. The count comes from the new manager-only
+  `GET /api/web-submissions/count`.
+
+## [1.404.0] - 2026-11-02
+
+### Added
+
+- **A sell order folds same-series RAM into one row and one #** (RS-499).
+  Samsung `M471A1K43CB1-CRC`, `…CB1-CTD` and `…EB1-CWE` used to take three
+  rows and three #s, and one SK Hynix part from two POs took two rows. A new
+  shared `ramSeries()` reads the module up to its organisation (Samsung
+  `M471A1K43`, SK Hynix `HMA81GS6`, Micron through the module code). Lines of
+  one series with the same label and condition now:
+  - take one # when numbered, so the packer labels one product;
+  - show as one folded row on the order page, with the short codes, the
+    spec they share or differ on, the summed qty and total, and one price
+    field that sets every lot's price when they agree.
+
+  Stored #s never move, so an older order shows `#1–3` on its folded row.
+  The packing lists keep one row per part number under the shared #, and
+  Inventory keeps its stricter module-family grouping. Every RAM row's title
+  now carries its short code.
+
+## [1.403.0] - 2026-11-02
+
+### Changed
+
+- **Business Account payments link to a PayPal or Mercury transaction; Cash
+  is gone** (RS-498). Every company payment should be backed by a real bank
+  row, and a cash PO never was. The Business Account's PayPal | Cash toggle
+  is gone from every page, and a company PO is PayPal. A manager's Cost
+  Payment tab gets the Commission tab's search: pick an unlinked outgoing
+  PayPal or Mercury payment and it is linked as the PO's cost. A linked
+  payment now satisfies the transaction-ID rule, so a Mercury-paid PO can
+  leave Draft without a typed id.
+- The API refuses a new `paymentMethod: 'cash'` on create, PATCH and
+  hand-off, and website pickups convert as PayPal. POs already saved as cash
+  keep it, with their screenshots and screenshot rule.
+
+## [1.402.0] - 2026-11-01
+
+### Added
+
+- **The sell order's Vendor price import is back** (RS-497). Drop the
+  vendor's filled bid sheet on the card at the top of an open order's side
+  column. A preview matches its rows to the order by part number. Confirming
+  fills those lines' sell prices, and the save records them on the Market
+  board as `bid:<order>` data points, as before v1.297.0. RS-324 removed the
+  card after reading "drop our sell order spreadsheet" as *remove* rather
+  than *drag and drop*, which left managers typing every price from the
+  vendor's sheet by hand. The matcher now reads through the price-sheet
+  reader that the Market import and Review mode share. That reader reads a
+  Condition column again on request, so an older per-condition sheet is
+  still caught. A lot added to an order keeps starting at its sell price.
+
+## [1.401.1] - 2026-11-01
+
+### Fixed
+
+- **The uptime monitor no longer crash-loops on one failed probe** (RS-496).
+  On 2026-10-28 a single run got a Cloudflare 429 and exited 1. Railway then
+  kept re-running the service from a snapshot it could not fetch, which sent a
+  "Deploy failed" to Telegram about every four hours and stopped the probes for
+  four days. A failing probe whose alert reaches the relay now exits 0. The
+  relay post is retried once. Only a run that could not alert at all still
+  exits 1. The service was redeployed from the `dev` head.
+
+## [1.401.0] - 2026-11-01
+
+### Added
+
+- **The Payments table sorts by its columns** (RS-495). Date, Source, Payee,
+  Amount, Owner and Status headers now sort. The list is paged as you scroll,
+  so the sort runs on the server and the cursor follows the sorted column:
+  every page continues the same order without skipping or repeating a row.
+  Amount sorts by size, since the default money-out view is all negative
+  numbers; Status groups sell orders, POs, ignored, transfers and open rows;
+  ties within a payee, owner or status stay newest first. The choice is
+  remembered across navigation.
+
 ## [1.400.0] - 2026-11-01
 
 ### Changed

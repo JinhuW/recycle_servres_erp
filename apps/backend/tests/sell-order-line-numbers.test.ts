@@ -616,3 +616,85 @@ describe('sell order #: what a deploy, a re-spec and a typed line can do', () =>
     expect((await numbers(mgr, id)).sort()).toEqual([['REV-T1', 1], ['REV-T1', 2]]);
   });
 });
+
+// One RAM series — Samsung M471A1K43CB1, SK Hynix HMA81GS6AFR — is one # on a
+// line numbered from now on, whatever its speed; another die is another #; each part number still
+// prints as its own row under that #. A # already stored never moves.
+describe('sell order #: one RAM series shares one #', () => {
+  let mgr: string;
+  beforeEach(async () => {
+    await resetDb();
+    mgr = (await loginAs(ALEX)).token;
+  });
+
+  const SERIES = ['M471A1K43CB1-CRC', 'M471A1K43CB1-CTD', 'M471A1K43CB1-CWE'];
+
+  it('a new order gives a series one #, and the sheet one row per part number under it', async () => {
+    const { ids } = await lots([
+      ...SERIES.map(pn => ({ pn, brand: 'Samsung', warehouse: 'WH-LA1' })),
+      { pn: 'HMA81GS6AFR8N-UH', brand: 'SK Hynix', warehouse: 'WH-LA1' },
+    ]);
+    const id = await createOrder(mgr, [...SERIES, 'HMA81GS6AFR8N-UH'].map((pn, i) => lotLine(ids[i]!, pn, 'WH-LA1')));
+
+    const nos = new Map(await numbers(mgr, id) as [string, number][]);
+    expect(new Set(SERIES.map(pn => nos.get(pn))).size).toBe(1);
+    expect(nos.get('HMA81GS6AFR8N-UH')).not.toBe(nos.get(SERIES[0]!));
+    const sheet = await workbook(mgr, `/api/sell-orders/${id}/packing-list`);
+    const n = String(nos.get(SERIES[0]!));
+    expect(packRows(sheet.worksheets[0]!).filter(([no]) => no === n).map(([, pn]) => pn).sort()).toEqual(SERIES);
+  });
+
+  it('a lot of a series already on the order joins its #, in its own warehouse only', async () => {
+    const { ids } = await lots([
+      { pn: SERIES[0]!, brand: 'Samsung', warehouse: 'WH-LA1' },
+      { pn: SERIES[2]!, brand: 'Samsung', warehouse: 'WH-LA1' },
+      { pn: SERIES[1]!, brand: 'Samsung', warehouse: 'WH-NJ2' },
+    ]);
+    const id = await createOrder(mgr, [lotLine(ids[0]!, SERIES[0]!, 'WH-LA1')]);
+    await addLines(mgr, id, [lotLine(ids[1]!, SERIES[2]!, 'WH-LA1'), lotLine(ids[2]!, SERIES[1]!, 'WH-NJ2')]);
+    expect((await numbers(mgr, id)).sort()).toEqual([[SERIES[0], 1], [SERIES[1], 2], [SERIES[2], 1]]);
+  });
+
+  it('another die of the module is a # of its own', async () => {
+    const pns = ['HMAA2GU6AJR8N-XN', 'HMAA2GU6CJR8N-XN'];
+    const { ids } = await lots(pns.map(pn => ({ pn, brand: 'SK Hynix', warehouse: 'WH-LA1' })));
+    const id = await createOrder(mgr, pns.map((pn, i) => lotLine(ids[i]!, pn, 'WH-LA1')));
+    expect(new Set((await numbers(mgr, id)).map(([, no]) => no)).size).toBe(2);
+  });
+
+  it('a different capacity of the series is a # of its own', async () => {
+    const { ids } = await lots([
+      { pn: SERIES[0]!, brand: 'Samsung', warehouse: 'WH-LA1' },
+      { pn: SERIES[1]!, brand: 'Samsung', warehouse: 'WH-LA1' },
+    ]);
+    await getTestDb()`UPDATE order_lines SET capacity = '8GB' WHERE id = ${ids[1]!}`;
+    const id = await createOrder(mgr, [lotLine(ids[0]!, SERIES[0]!, 'WH-LA1'), lotLine(ids[1]!, SERIES[1]!, 'WH-LA1')]);
+    expect(new Set((await numbers(mgr, id)).map(([, no]) => no)).size).toBe(2);
+  });
+
+  it('an order numbered before keeps its #s through a save', async () => {
+    const { ids } = await lots(SERIES.map(pn => ({ pn, brand: 'Samsung', warehouse: 'WH-LA1' })));
+    const id = await createOrder(mgr, SERIES.map((pn, i) => lotLine(ids[i]!, pn, 'WH-LA1')));
+    // What the release before this one stored: a # per part number.
+    for (const [i, pn] of SERIES.entries()) {
+      await getTestDb()`UPDATE sell_order_lines SET product_no = ${i + 1} WHERE sell_order_id = ${id} AND part_number = ${pn}`;
+    }
+    await getTestDb()`UPDATE sell_orders SET next_product_no = 4 WHERE id = ${id}`;
+    expect(await saveLines(mgr, id, await detailLines(mgr, id)).then(r => r.status)).toBe(200);
+    expect((await numbers(mgr, id)).sort()).toEqual(SERIES.map((pn, i) => [pn, i + 1]));
+  });
+
+  it('on an order numbered before, a new lot of a part joins that part\'s #, not the series\' lowest', async () => {
+    const { ids } = await lots([
+      ...SERIES.map(pn => ({ pn, brand: 'Samsung', warehouse: 'WH-LA1' })),
+      { pn: SERIES[1]!, brand: 'Samsung', warehouse: 'WH-LA1' },
+    ]);
+    const id = await createOrder(mgr, SERIES.map((pn, i) => lotLine(ids[i]!, pn, 'WH-LA1')));
+    for (const [i, pn] of SERIES.entries()) {
+      await getTestDb()`UPDATE sell_order_lines SET product_no = ${i + 1} WHERE sell_order_id = ${id} AND part_number = ${pn}`;
+    }
+    await getTestDb()`UPDATE sell_orders SET next_product_no = 4 WHERE id = ${id}`;
+    await addLines(mgr, id, [lotLine(ids[3]!, SERIES[1]!, 'WH-LA1')]);
+    expect((await numbers(mgr, id)).sort()).toEqual([[SERIES[0], 1], [SERIES[1], 2], [SERIES[1], 2], [SERIES[2], 3]]);
+  });
+});

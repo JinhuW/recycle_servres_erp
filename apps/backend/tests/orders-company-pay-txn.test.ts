@@ -4,6 +4,7 @@ import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
 import { syncBankTransactions } from '../src/banktx/sync';
 import { stubPaypalProvider } from '../src/banktx/stub';
+import { fakeProvider } from './helpers/bankProvider';
 
 // "A company-paid PO must carry a payment transaction id before it can leave
 // Draft" — enforced in advanceOrderTx, so every caller is covered, and scoped
@@ -11,7 +12,12 @@ import { stubPaypalProvider } from '../src/banktx/stub';
 // Its self-paid twin (0126): the chat with the seller, as a Submission
 // attachment, before the order leaves Draft. And the cash twin (0128): a
 // company PO settled in cash carries a screenshot of the amount paid, as a
-// Payment attachment.
+// Payment attachment. Cash is retired as a choice since: only a PO saved as
+// cash before keeps it, so these tests write it in SQL.
+
+async function legacyCash(id: string): Promise<void> {
+  await getTestDb()`UPDATE orders SET payment_method = 'cash' WHERE id = ${id}`;
+}
 
 const PNG = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'chat.png', { type: 'image/png' });
 
@@ -84,11 +90,31 @@ describe('company-pay POs need a transaction ID to leave Draft', () => {
     expect(await lifecycleOf(token, id)).toBe('in_transit');
   });
 
-  it('lifts the rule when the company paid in cash', async () => {
+  it('is answered by a linked PayPal or Mercury payment, with no id typed', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await createOrder(token, 'company');
-    const patched = await api('PATCH', `/api/orders/${id}`, { token, body: { paymentMethod: 'cash' } });
-    expect(patched.status).toBe(200);
+    await syncBankTransactions(testEnv, [fakeProvider('mercury', [{ externalId: 'merc-wire-1', amount: -120 }])]);
+    const sql = getTestDb();
+    const [row] = await sql<{ id: string }[]>`SELECT id FROM bank_transactions WHERE external_id = 'merc-wire-1'`;
+    const { token: mTok } = await loginAs(ALEX);
+    const linked = await api('POST', `/api/bank-transactions/${row.id}/link`, { token: mTok, body: { orderId: id, kind: 'cost' } });
+    expect(linked.status).toBe(200);
+
+    const got = await api<{ order: { txnRequired: boolean; paypalTxnId: string | null; blockers: { kind: string }[] } }>(
+      'GET', `/api/orders/${id}`, { token });
+    expect(got.body.order.paypalTxnId).toBeNull();
+    expect(got.body.order.txnRequired).toBe(false);
+    expect(got.body.order.blockers.map(b => b.kind)).not.toContain('missingTxnId');
+
+    const r = await api('POST', `/api/orders/${id}/advance`, { token });
+    expect(r.status).toBe(200);
+    expect(await lifecycleOf(token, id)).toBe('in_transit');
+  });
+
+  it('lifts the rule for a PO saved as cash before cash was retired', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'company');
+    await legacyCash(id);
     await attachPaymentShot(token, id);
 
     const got = await api<{ order: { txnRequired: boolean; paymentMethod: string | null } }>(
@@ -99,6 +125,12 @@ describe('company-pay POs need a transaction ID to leave Draft', () => {
     const r = await api('POST', `/api/orders/${id}/advance`, { token });
     expect(r.status).toBe(200);
     expect(await lifecycleOf(token, id)).toBe('in_transit');
+  });
+
+  it('answers a cash edit of a PO that does not exist with 404, not the cash refusal', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('PATCH', '/api/orders/SO-NOPE-0', { token, body: { paymentMethod: 'cash' } });
+    expect(r.status).toBe(404);
   });
 
   it('holds a manager stage-jump to the same rule', async () => {
@@ -339,12 +371,9 @@ describe('cash-paid POs need a screenshot of the amount to leave Draft', () => {
   beforeEach(async () => { await resetDb(); });
 
   async function cashOrder(token: string): Promise<string> {
-    const r = await api<{ id: string }>('POST', '/api/orders', {
-      token,
-      body: { category: 'RAM', warehouseId: 'WH-LA1', payment: 'company', paymentMethod: 'cash', lines: [LINE] },
-    });
-    expect(r.status).toBe(201);
-    return r.body.id;
+    const id = await createOrder(token, 'company');
+    await legacyCash(id);
+    return id;
   }
 
   it('refuses the advance until a Payment attachment exists', async () => {
@@ -439,6 +468,37 @@ describe('paymentMethod on the PO itself', () => {
     expect(await methodOf(id)).toBeNull();
   });
 
+  it('refuses cash as a new choice, at every door', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ error: string }>('POST', '/api/orders', {
+      token,
+      body: { category: 'RAM', warehouseId: 'WH-LA1', payment: 'company', paymentMethod: 'cash', lines: [LINE] },
+    });
+    expect(created.status).toBe(400);
+    expect(created.body.error).toMatch(/PayPal or Mercury/);
+
+    const id = await createOrder(token, 'company');
+    const patched = await api<{ error: string }>('PATCH', `/api/orders/${id}`, { token, body: { paymentMethod: 'cash' } });
+    expect(patched.status).toBe(400);
+    const handed = await api<{ error: string }>('POST', `/api/orders/${id}/handoff`, {
+      token, body: { payment: 'company', paymentMethod: 'cash' },
+    });
+    expect(handed.status).toBe(400);
+    expect(await methodOf(id)).toBeNull();
+  });
+
+  it('a PO saved as cash may say so again, and move to PayPal', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'company');
+    await legacyCash(id);
+    expect((await api('PATCH', `/api/orders/${id}`, { token, body: { paymentMethod: 'cash' } })).status).toBe(200);
+    expect(await methodOf(id)).toBe('cash');
+    expect((await api('PATCH', `/api/orders/${id}`, { token, body: { paymentMethod: 'paypal' } })).status).toBe(200);
+    expect(await methodOf(id)).toBe('paypal');
+    // Once it has moved, cash is gone for it too.
+    expect((await api('PATCH', `/api/orders/${id}`, { token, body: { paymentMethod: 'cash' } })).status).toBe(400);
+  });
+
   it('is saved by POST and PATCH, and logged', async () => {
     const { token } = await loginAs(MARCUS);
     const created = await api<{ id: string }>('POST', '/api/orders', {
@@ -448,11 +508,12 @@ describe('paymentMethod on the PO itself', () => {
     expect(created.status).toBe(201);
     expect(await methodOf(created.body.id)).toBe('paypal');
 
+    await legacyCash(created.body.id);
     const patched = await api('PATCH', `/api/orders/${created.body.id}`, {
-      token, body: { paymentMethod: 'cash' },
+      token, body: { paymentMethod: 'paypal' },
     });
     expect(patched.status).toBe(200);
-    expect(await methodOf(created.body.id)).toBe('cash');
+    expect(await methodOf(created.body.id)).toBe('paypal');
 
     const sql = getTestDb();
     const events = await sql<{ detail: { changes: { field: string; from: unknown; to: unknown }[] } }[]>`
@@ -460,7 +521,7 @@ describe('paymentMethod on the PO itself', () => {
       WHERE order_id = ${created.body.id} AND kind = 'meta_changed'
       ORDER BY created_at, id`;
     const change = events.flatMap(e => e.detail.changes).find(d => d.field === 'payment_method');
-    expect(change).toMatchObject({ from: 'paypal', to: 'cash' });
+    expect(change).toMatchObject({ from: 'cash', to: 'paypal' });
   });
 
   it('is cleared when the PO flips to self-paid, and ignored on a self-paid create', async () => {
@@ -473,8 +534,7 @@ describe('paymentMethod on the PO itself', () => {
     expect(await methodOf(created.body.id)).toBeNull();
 
     const id = await createOrder(token, 'company');
-    await api('PATCH', `/api/orders/${id}`, { token, body: { paymentMethod: 'cash' } });
-    expect(await methodOf(id)).toBe('cash');
+    await legacyCash(id);
     const flipped = await api('PATCH', `/api/orders/${id}`, { token, body: { payment: 'self' } });
     expect(flipped.status).toBe(200);
     expect(await methodOf(id)).toBeNull();
@@ -483,7 +543,7 @@ describe('paymentMethod on the PO itself', () => {
   it('is a material edit: a purchaser changing it on a Reviewing PO goes back to Draft', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await createOrder(token, 'company');
-    await api('PATCH', `/api/orders/${id}`, { token, body: { paymentMethod: 'cash' } });
+    await legacyCash(id);
     await attachPaymentShot(token, id);
     const sql = getTestDb();
     await sql`UPDATE orders SET lifecycle = 'reviewing' WHERE id = ${id}`;

@@ -20,7 +20,7 @@ export const ITEMS: FleetItem[] = [
 
 export const SETTINGS: FleetSettings = {
   per_day_default: 1, budget_minutes: 360, lease_minutes: 30, task_max_minutes: 45, poll_hold_seconds: 50,
-  familiar_days: 7, start_fresh_hours: 2, quarantine_hours: 48, quarantine_probe_hours: 6, retention_days: 90, max_accounts_per_proxy: 2, search: {},
+  familiar_days: 7, start_fresh_hours: 2, quarantine_hours: 48, quarantine_probe_hours: 6, retention_days: 90, max_accounts_per_proxy: 2, cloak_enabled: false, cloak_max_slots: 1, search: {},
 };
 
 // GET /tasks answers bare rows: no city name, ids as numbers.
@@ -158,7 +158,7 @@ export const WORKERS: FleetWorker[] = [
 const slot = (no: number, over: Partial<FleetSlot> = {}): FleetSlot => ({
   account_no: no, uid: `10000${no}000${no}${no}${no}`, pool_status: 'fleet', worker_id: null, host_id: null, last_host_id: null,
   epoch: 0, lease_expires_at: null, has_proxy: true, proxy_id: null, device: null, quarantined_until: null, note: '', parked: false, reserved_until: null,
-  minutes_today: 0, budget_minutes: 360, worker: null,
+  account_state: over.worker?.state ?? null, has_session: true, fleet_held: true, minutes_today: 0, budget_minutes: 360, worker: null,
   ...over,
 });
 

@@ -25,7 +25,7 @@ import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL, cano
 import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
 import { sellOrderStatuses, sellOrderStatusShort } from '../../lib/lookups';
 import { useManagerOptions, type MemberOption } from '../../lib/useManagers';
-import { CASEABLE_SELL_STATUSES } from '@recycle-erp/shared';
+import { CASEABLE_SELL_STATUSES, ramSeries } from '@recycle-erp/shared';
 import { closeReasonLabelKey } from '../../lib/closeReasons';
 import { usePersisted } from '../../lib/listMemory';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
@@ -35,9 +35,11 @@ import { useAuth } from '../../lib/auth';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { SellOrderAttachments, type SellAttachment } from '../../components/SellOrderAttachments';
+import { PriceImportSection } from './SellOrderPriceImportDialog';
+import { applyPriceRows, confirmedBidParts, type ImportedBid, mergeBidParts } from '../../lib/priceImport';
 import { usePreference } from '../../lib/preferences';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
-import { filterLineGroups, groupSellOrderLines, type SellOrderLineGroup, type SellOrderLineGroupBy } from '../../lib/sellOrderLineGroups';
+import { filterLineGroups, foldEntries, groupSellOrderLines, noRange, type SellOrderLineGroup, type SellOrderLineGroupBy, type SeriesFold } from '../../lib/sellOrderLineGroups';
 import { isPackable, lotWarehouse, packWarehouseOptions, UNASSIGNED } from '../../lib/sellOrderPack';
 import { peekSellOrderPrefill, clearSellOrderPrefill } from '../../lib/sellOrderPrefill';
 import { missingSigners, signoffSig } from '../../lib/sellOrderSignoff';
@@ -958,6 +960,7 @@ function LineItemCell({ line, lineNo, sub, showPo, showLineNo }: {
           </span>
         )}
         {line.label}
+        {line.category === 'RAM' && line.shortCode && <ShortCodeChip code={line.shortCode} />}
         {showLineNo && n != null && line.sourceOrderId && (
           <span
             className="chip muted mono"
@@ -972,7 +975,7 @@ function LineItemCell({ line, lineNo, sub, showPo, showLineNo }: {
         ? <LineSpecChips line={chipLine} withType />
         : sub && <div style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 3 }}>{sub}</div>}
       <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
-        {line.category === 'RAM' && <span>{t('ramShortCode')}: <span className="mono">{line.shortCode ?? t('ramShortCodeUnknown')}</span></span>}
+        {line.category === 'RAM' && !line.shortCode && <span>{t('ramShortCode')}: {t('ramShortCodeUnknown')}</span>}
         <span className="mono">{line.partNumber ?? '—'}</span>
         {line.condition && (<><span>·</span><span>{line.condition}</span></>)}
         {po && (<><span>·</span>
@@ -980,6 +983,140 @@ function LineItemCell({ line, lineNo, sub, showPo, showLineNo }: {
         </>)}
       </div>
     </td>
+  );
+}
+
+function ShortCodeChip({ code }: { code: string }) {
+  const { t } = useT();
+  return (
+    <span className="chip mono so-short-code" title={t('ramShortCode')}>{code}</span>
+  );
+}
+
+// What a folded row's chips say: each spec its lines share, and a spec they
+// differ on as its values joined — 2400/2666/3200MHz.
+function mergedSpec(lines: readonly ItemCellLine[]): ItemCellLine {
+  const join = <K extends 'type' | 'classification' | 'rank' | 'speed'>(k: K) => {
+    const vals = [...new Set(lines.map(l => l[k]).filter((v): v is string => !!v))];
+    if (k === 'speed') vals.sort((a, b) => Number(a) - Number(b));
+    return vals.length ? vals.join('/') : null;
+  };
+  return {
+    ...lines[0]!, condition: null,
+    type: join('type'), classification: join('classification'), rank: join('rank'), speed: join('speed'),
+  };
+}
+
+// One RAM series folded into a row: its #s, the codes and spec its lots carry,
+// and the series its part numbers share, each one listed on hover.
+function FoldItemCell({ lines, nos, open, onToggle, showPo }: {
+  lines: readonly ItemCellLine[];
+  // Null for a line the save has yet to number.
+  nos: readonly (number | null)[];
+  open: boolean;
+  onToggle: () => void;
+  showPo: boolean;
+}) {
+  const { t } = useT();
+  const first = lines[0]!;
+  const saved = nos.filter((n): n is number => n != null);
+  const codes = [...new Set(lines.map(l => l.shortCode).filter((c): c is string => !!c))];
+  const parts = [...new Map(lines.filter(l => l.partNumber).map(l => [canonicalPartNumber(l.partNumber), l.partNumber!])).values()];
+  const pos = showPo ? [...new Set(lines.map(l => l.sourceOrderId).filter((p): p is string => !!p))] : [];
+  return (
+    <td>
+      <div style={{ fontWeight: 500, fontSize: 13, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0 }}>
+        <button
+          type="button"
+          className="so-fold-toggle"
+          aria-expanded={open}
+          title={t(open ? 'sodFoldCollapse' : 'sodFoldExpand')}
+          onClick={onToggle}
+        >
+          <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} />
+        </button>
+        {saved.length > 0 && (
+          <span className="mono" style={{ color: 'var(--fg-subtle)', fontWeight: 600, marginRight: 8 }}>
+            #{noRange(saved)}
+          </span>
+        )}
+        {saved.length < nos.length && (
+          <span className="chip muted" style={{ fontSize: 10, padding: '1px 6px', marginRight: 8 }} title={t('sodLineNewTitle')}>
+            {t('sodLineNew')}
+          </span>
+        )}
+        {first.label}
+        {codes.map(c => <ShortCodeChip key={c} code={c} />)}
+      </div>
+      <LineSpecChips line={mergedSpec(lines)} withType />
+      <div className="so-fold-meta">
+        <span className="mono" title={parts.join('\n')}>{ramSeries(first.partNumber)}*</span>
+        <span>·</span>
+        <span title={parts.join('\n')}>
+          {t('sodFoldLots', { n: lines.length })}
+          {parts.length > 1 && <>, {t('sodFoldParts', { n: parts.length })}</>}
+        </span>
+        {first.condition && (<><span>·</span><span>{first.condition}</span></>)}
+        {pos.length > 0 && (<><span>·</span><span className="mono">{t('sodFromPO', { po: pos.join(', ') })}</span></>)}
+      </div>
+    </td>
+  );
+}
+
+type FoldRowLine = { line: ItemCellLine; warehouse: string | null; no: number | null; qty: number; price: number; maxQty: number | null };
+
+// A folded series' row: its lots' qty and total summed, and its unit price —
+// one value, editable for all its lots at once, or the range they span, which
+// is edited lot by lot once it is open.
+function FoldRow({ rows, open, onToggle, lineGroup, currency, locale, onPrice }: {
+  rows: readonly FoldRowLine[];
+  open: boolean;
+  onToggle: () => void;
+  lineGroup: SellOrderLineGroupBy;
+  currency: Currency;
+  locale: string;
+  // Set in the editor.
+  onPrice?: (price: number) => void;
+}) {
+  const { t } = useT();
+  const prices = [...new Set(rows.map(r => r.price))].sort((a, b) => a - b);
+  const qty = rows.reduce((a, r) => a + r.qty, 0);
+  const total = rows.reduce((a, r) => a + r.qty * r.price, 0);
+  const maxQty = rows.every(r => r.maxQty != null) ? rows.reduce((a, r) => a + Math.max(0, r.maxQty!), 0) : null;
+  const warehouses = [...new Set(rows.map(r => r.warehouse ?? t('sodNoWarehouse')))];
+  return (
+    <tr className="so-fold-row">
+      <FoldItemCell
+        lines={rows.map(r => r.line)}
+        nos={rows.map(r => r.no)}
+        open={open}
+        onToggle={onToggle}
+        showPo={lineGroup !== 'po'}
+      />
+      {lineGroup !== 'warehouse' && <td style={{ fontSize: 12 }}>{warehouses.join(', ')}</td>}
+      <td className="num mono">
+        {qty}
+        {onPrice && maxQty != null && <span style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginLeft: 6 }}>/ {maxQty}</span>}
+      </td>
+      <td className="num mono">
+        {onPrice && prices.length === 1 ? (
+          <input
+            className="so-mini-input"
+            type="number"
+            step="0.01"
+            value={prices[0]}
+            onChange={e => onPrice(Number(e.target.value) || 0)}
+            style={{ width: 90 }}
+          />
+        ) : prices.length === 1 ? fmtMoney(prices[0]!, currency, locale) : (
+          <span title={t('sodFoldMixedTitle')}>
+            {fmtMoney(prices[0]!, currency, locale)}–{fmtMoney(prices[prices.length - 1]!, currency, locale)}
+          </span>
+        )}
+      </td>
+      <td className="num mono" style={{ fontWeight: 500 }}>{fmtMoney(total, currency, locale)}</td>
+      {onPrice && <td></td>}
+    </tr>
   );
 }
 
@@ -1074,6 +1211,11 @@ function SellOrderDetail({ id, onToast }: {
     paymentReceivedBy: string;   // '' = not assigned
     currency: Currency;
     lines: EditLine[];
+    // Products — (canonical part, condition) — whose prices came from a
+    // confirmed vendor price import. Save sends them so the backend records
+    // the accepted prices on the Market value board, and clears them the
+    // moment that PATCH lands so a retry of a later step re-sends no bids.
+    bidParts: ImportedBid[];
   } | null>(null);
   // FX snapshot for the draft's currency (null for USD or until it loads).
   const [fx, setFx] = useState<FxInfo | null>(null);
@@ -1149,6 +1291,7 @@ function SellOrderDetail({ id, onToast }: {
           paymentReceivedBy: r.order.paymentReceivedBy?.id ?? '',
           currency: r.order.currency,
           lines: merged.lines,
+          bidParts: [],
         });
         setPendingAdjust(null);
       })
@@ -1219,6 +1362,7 @@ function SellOrderDetail({ id, onToast }: {
     || receiverChanged
     || currencyChanged
     || linesChanged
+    || confirmedBidParts(draft.lines, draft.bidParts).length > 0
     || pendingAdjust != null
   );
   // Done waits on every manager's sign-off of the order as saved. Edits that
@@ -1391,6 +1535,29 @@ function SellOrderDetail({ id, onToast }: {
   // Keyed by lot, not row: the rows are made inside the updater (fresh
   // `_cid`s), which runs on the latest draft rather than this render's.
   const [justAdded, setJustAdded] = useState<ReadonlySet<string>>(new Set());
+  // Folded series start closed; one holding a lot just added opens, so the
+  // add is seen.
+  const [openFolds, setOpenFolds] = useState<ReadonlySet<string>>(new Set());
+  const isFoldOpen = (groupKey: string, f: SeriesFold<{ inventoryId: string | null }>) =>
+    openFolds.has(groupKey + '\u0000' + f.key)
+    || f.members.some(m => m.line.inventoryId !== null && justAdded.has(m.line.inventoryId));
+  const toggleFold = (groupKey: string, f: SeriesFold<{ inventoryId: string | null }>) => {
+    const k = groupKey + '\u0000' + f.key;
+    const open = isFoldOpen(groupKey, f);
+    setOpenFolds(s => {
+      const n = new Set(s);
+      if (open) n.delete(k); else n.add(k);
+      return n;
+    });
+    // A just-added lot holds its fold open, so closing it lets go of them.
+    if (open) {
+      setJustAdded(s => {
+        const n = new Set(s);
+        for (const m of f.members) if (m.line.inventoryId !== null) n.delete(m.line.inventoryId);
+        return n;
+      });
+    }
+  };
   const addLines = (picked: SellableItem[]) => {
     if (!draft) return;
     setLineSearch('');
@@ -1427,7 +1594,10 @@ function SellOrderDetail({ id, onToast }: {
       // requires the full line set alongside it — resend lines whenever either
       // the currency or the lines themselves changed.
       if (currencyChanged) patchBody.currency = draft.currency;
-      if (linesChanged || currencyChanged) {
+      // A confirmed import is a bid even when the vendor re-quoted the current
+      // prices, so the line set goes with it regardless of a diff.
+      const bidParts = confirmedBidParts(draft.lines, draft.bidParts);
+      if (linesChanged || currencyChanged || bidParts.length > 0) {
         patchBody.lines = draft.lines.map(l => ({
           id:          l.id,
           inventoryId: l.inventoryId,
@@ -1440,11 +1610,15 @@ function SellOrderDetail({ id, onToast }: {
           warehouseId: l.warehouseId,
           condition:   l.condition,
         }));
+        if (bidParts.length > 0) patchBody.bidParts = bidParts;
         if (linesBase.current) patchBody.linesVersion = linesBase.current;
       }
       if (Object.keys(patchBody).length > 0) {
         const saved = await api.patch<{ linesVersion?: string | null }>(`/api/sell-orders/${order.id}`, patchBody);
         if (saved.linesVersion) linesBase.current = saved.linesVersion;
+        // The bids are recorded with that PATCH; if the adjust or status step
+        // below fails, the retry must not record them again.
+        setDraft(d => d && { ...d, bidParts: [] });
         setHistoryKey(k => k + 1);
       }
       // A pending negotiated total applies AFTER the line rewrite (the server
@@ -1878,8 +2052,18 @@ function SellOrderDetail({ id, onToast }: {
                           </tr>
                         </thead>
                         <tbody>
-                          {g.items.map(({ line: l, idx }) => (
-                            <tr key={l.id}>
+                          {foldEntries(g.items, f => isFoldOpen(g.key, f)).map(({ fold, line: l, member }) => fold ? (
+                            <FoldRow
+                              key={'fold:' + fold.key}
+                              rows={fold.members.map(({ line: m }) => ({ line: m, warehouse: lotWarehouse(m), no: m.no, qty: m.qty, price: m.nativeUnitPrice, maxQty: null }))}
+                              open={isFoldOpen(g.key, fold)}
+                              onToggle={() => toggleFold(g.key, fold)}
+                              lineGroup={lineGroup}
+                              currency={order.currency}
+                              locale={locale}
+                            />
+                          ) : (
+                            <tr key={l.id} className={member ? 'so-fold-member' : undefined}>
                               <LineItemCell line={l} lineNo={l.no} sub={l.sub} showPo={lineGroup !== 'po'} showLineNo={lineGroup === 'po'} />
                               {lineGroup !== 'warehouse' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
                               <td className="num mono">{l.qty}</td>
@@ -1914,7 +2098,21 @@ function SellOrderDetail({ id, onToast }: {
                           </tr>
                         </thead>
                         <tbody>
-                          {g.items.map(({ line: l, idx }) => {
+                          {foldEntries(g.items, f => isFoldOpen(g.key, f)).map(({ fold, line: l, idx, member }) => {
+                            if (fold) {
+                              return (
+                                <FoldRow
+                                  key={'fold:' + fold.key}
+                                  rows={fold.members.map(({ line: m }) => ({ line: m, warehouse: lotWarehouse(m), no: m.saved ? m.no : null, qty: m.qty, price: m.unitPrice, maxQty: m.inventoryId === null ? null : m.maxQty }))}
+                                  open={isFoldOpen(g.key, fold)}
+                                  onToggle={() => toggleFold(g.key, fold)}
+                                  lineGroup={lineGroup}
+                                  currency={draft.currency}
+                                  locale={locale}
+                                  onPrice={p => { for (const k of new Set(fold.members.map(m => productKey(m.line)))) setPrice(k, p); }}
+                                />
+                              );
+                            }
                             // The lot left the sellable statuses, its PO was
                             // archived, or other committed orders hold it all:
                             // save refuses any qty above 0, so a saved line can
@@ -1924,7 +2122,7 @@ function SellOrderDetail({ id, onToast }: {
                             // A typed line has no lot to run out of.
                             const cap = l.inventoryId === null ? MAX_LINE_QTY : Math.max(0, Math.min(MAX_LINE_QTY, l.maxQty));
                             return (
-                            <tr key={l._cid} className={l.inventoryId !== null && justAdded.has(l.inventoryId) ? 'so-line-added' : undefined}>
+                            <tr key={l._cid} className={[member && 'so-fold-member', l.inventoryId !== null && justAdded.has(l.inventoryId) && 'so-line-added'].filter(Boolean).join(' ') || undefined}>
                               <LineItemCell line={l} lineNo={l.saved ? l.no : null} sub={l.subLabel} showPo={lineGroup !== 'po'} showLineNo={lineGroup === 'po'} />
                               {lineGroup !== 'warehouse' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
                               <td className="num">
@@ -1997,6 +2195,23 @@ function SellOrderDetail({ id, onToast }: {
               </div>
             </div>
             <div className="so-page-side">
+              {/* Above the summary: on a long order, under the lines was a scroll past every one. */}
+              {editable && (
+                <div className="card so-page-card">
+                  <PriceImportSection
+                    orderId={order.id}
+                    currency={draft.currency}
+                    savedCurrency={order.currency}
+                    locale={locale}
+                    onApply={rows =>
+                      setDraft(d => d && {
+                        ...d,
+                        lines: applyPriceRows(d.lines, rows),
+                        bidParts: mergeBidParts(d.bidParts, rows),
+                      })}
+                  />
+                </div>
+              )}
               {summary && (
               <div className="so-summary">
                 <div

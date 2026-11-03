@@ -4,7 +4,7 @@ import type { PaidBy } from './useCommissionPaidBy';
 import type { ChipAttachment } from '../components/AttachmentChip';
 import {
   accountingReviewActions, addDays, addMonths, startOfMonth, startOfYear, todayIn,
-  type AccountingChanges, type AccountingCheck, type AccountingCurrency, type AccountingDirection,
+  type AccountingChanges, type AccountingCheck, type AccountingMismatch, type AccountingCurrency, type AccountingDirection,
   type AccountingKind, type AccountingMethod, type AccountingReviewState, type AccountingReviewTab,
   type AccountingTargetType, type IsoDate,
 } from '@recycle-erp/shared';
@@ -46,7 +46,13 @@ export type AcctReview = {
   } | null;
 };
 
-export type AcctRow = AcctEntry & { balance: number | null };
+export type AcctRow = AcctEntry & {
+  balance: number | null;
+  // The record's own figure and what the whole book has against it, and
+  // the book's 2% flag on the two. Optional for deploy skew.
+  record?: { amount: number | null; currency: AccountingCurrency; recordedCny: number } | null;
+  mismatch?: AccountingMismatch | null;
+};
 
 // A record an entry can be for, as the picker and the cards show it: its own
 // figure in its own currency, and what the book already has against it.

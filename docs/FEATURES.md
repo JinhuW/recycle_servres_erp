@@ -115,8 +115,9 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
 - **A new purchaser gets a walkthrough on first sign-in** (v1.299.0), on both
   shells. Nine steps cover the home numbers, adding products (Submit order on
   desktop, the camera button on the phone), Mark as In Transit and what it
-  asks for, the payment proof for Company card PayPal, Company card cash and
-  Self-paid, the manager review and the edit window until Ready to Pay, the
+  asks for, the payment proof for Company card PayPal and Self-paid (Company
+  card cash too, until v1.403.0), the manager review and the edit window
+  until Ready to Pay, the
   commission formula with a worked example, and the buying tools. A step with
   a place in the app spotlights it: the sidebar item on desktop, the tab-bar
   item on the phone. The card switches between English and 中文 in place, and
@@ -476,6 +477,16 @@ is not a stage but a flag beside one, set once every line has sold
   - Checked is its own state, never inferred from the count. Lowering a line
     with − turns it amber and takes its tick away; ticking it then confirms
     the short count (v1.190.0). Finish review lists the lines checked short.
+  - **A short count can be applied to the PO** (v1.410.0, RS-511). Under a
+    count between 1 and qty − 1 sits **Apply N**, which sets the product's
+    qty on the PO to N. The line stays checked, or is checked by the click,
+    since those units were counted. A product with serials on file opens
+    its Edit drawer instead, with qty already at N, so the manager removes
+    the serials that didn't arrive. Finish review's short list has **Apply
+    all counts**, which writes every short line without serials in one save.
+    A line held by a shipped sell order has no Apply. A qty lowered in the
+    Edit drawer also keeps the line's tick now, and only a raised qty resets
+    it.
   - **The count can be typed as well as stepped** (v1.260.0). Clicking the
     number between − and + selects it. Enter or leaving the field saves it,
     and Escape restores it. The count is held between 0 and qty and meets
@@ -735,10 +746,12 @@ is not a stage but a flag beside one, set once every line has sold
   how the goods get here: **Local pickup** (who collected it, from a member
   picker) or **Shipping label** (paste the tracking number; the carrier is
   recognised from its shape, as on Add-package). Then who paid. The
-  **Business Account** (*Company card* until v1.317.0) names a method, PayPal
+  **Business Account** (*Company card* until v1.317.0) named a method, PayPal
   or Cash: PayPal keeps the transaction-ID rule and offers the optional
-  screenshot that reads the ID; Cash lifts that rule but needs its own proof
-  (v1.153.0, below). **A person** — any active manager by name, or the
+  screenshot that reads the ID; Cash lifted that rule but needed its own proof
+  (v1.153.0, below). Since v1.403.0 the Business Account is always PayPal or
+  Mercury, and Cash is gone (see *Business Account payments* below).
+  **A person** — any active manager by name, or the
   purchaser (*Self-paid* until v1.317.0) — asks for no method and no ID — it
   is reimbursed, not matched against the bank — but **requires the chat with
   the seller** as a Submission attachment (any
@@ -871,6 +884,25 @@ is not a stage but a flag beside one, set once every line has sold
   (`paymentMethod` on POST / PATCH), logged, and cleared when the PO flips to
   Self-paid; `GET /api/orders/:id` reports `cashShotRequired` beside
   `txnRequired` and `chatShotRequired`.
+- **Business Account payments are a PayPal or Mercury transaction, never
+  cash** (v1.403.0, RS-498).
+  - **No Cash anywhere.** The *Method* toggle is gone from the Submit and
+    edit pages, the phone, the hand-off dialog and the sheet. A company PO
+    is PayPal, and one whose method was never set reads as PayPal, so the
+    *Say how the company paid* blocker (`missingMethod`) is gone too.
+  - **Refused at every door.** Create, PATCH and hand-off refuse
+    `paymentMethod: 'cash'` with a 400. The exception is a PO already saved
+    as cash, which keeps it: it reads *Cash — saved before cash was retired*
+    with its screenshots, and its screenshot rule still applies.
+  - **Website pickups.** A ram4cash pickup converts as PayPal.
+  - **Search and link.** On a manager's PO page, the Cost Payment tab's
+    Business Account side has the Commission tab's search, over unlinked,
+    settled, outgoing PayPal and Mercury rows. Picking one asks to confirm,
+    then links it to the PO as its cost, and the ledger below refreshes.
+  - **A link counts as the transaction.** A linked cost payment answers the
+    transaction-ID rule, so a Mercury-paid PO leaves Draft with no id typed,
+    and `txnRequired` reads false. A linked PayPal row also fills the PO's id
+    when it is empty, as before.
 - **`payment` is `company` or `self`, at every door** (v1.191.0): create, draft,
   PATCH and hand-off refuse anything else with a 400, and a CHECK constraint
   backs it. Every proof rule above keys on one of the two values, so a third
@@ -1318,8 +1350,16 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   die/package segment (`HMA42GR7MFR4N-TF` → `MFR`), or Micron's recorded
   three-letter chip die (`D9VPP` → `VPP`). Recognized separator-free spellings
   read the same. A Micron lot with no recognizable chip stays *Not recorded*;
-  its module number alone does not prove a die. Other brands and unsupported
-  part schemes, including Hynix HMC DDR5, have no short code.
+  its module number alone does not prove a die. Unsupported part schemes,
+  including Hynix HMC DDR5, have no short code.
+  - **Kingston and other module brands take the die from Chip #** (v1.407.0,
+    RS-503). A Micron FBGA code (`8DE75 D9VPP`, `MICRON-0ZE75D9WFL` → `VPP`,
+    `WFL`), a full Hynix marking (`SK-H5ANAG8NCJRXNC240VS` → `CJR`) or a bare
+    die code (`CB1`, `SAMSUNG CB1`, `SK-CJR`) all count. These stay *Not
+    recorded*: placeholders (`NA`, `OTHER`, `SHELL`), Samsung `K4A…` markings,
+    which name only the revision, and Hynix markings cut before the package
+    letter (`H5ANAG8NCJ`). On the vendor bid sheet, such lots now group by
+    Brand + Short code + spec like the three chip makers' own sticks.
   - Desktop and phone RAM forms show it live from Brand, Part # and Chip #.
     The inventory RAM editor also offers Chip #, so existing stock can gain a
     missing code, normalized on save and recorded in its audit log.
@@ -1470,12 +1510,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   - **The order's History is the last card in the right-hand column, folded**
     (v1.248.0; in the side column since v1.248.2); a click on its heading
     opens it.
-  - **The Vendor price import card is gone** (v1.297.0, RS-324). It sat at
-    the top of the right-hand column from v1.248.3 (first in the left card in
-    v1.248.1, under the products before that). A sell order's prices come
-    from its lots' sell prices now; see *Vendor bid sheet* below. The filled
-    sheet is dropped on the PO's Review mode instead (v1.313.0), which sets
-    those sell prices.
+  - **The Vendor price import card is at the top of the right-hand column**
+    on an open order (v1.248.3; first in the left card in v1.248.1, under
+    the products before that). It was removed in v1.297.0 (RS-324) and
+    restored in v1.402.0 (RS-497); see *Vendor bid sheet* below.
   - **A search box over the products narrows the list** (v1.248.0), in view
     and edit, like Pack mode's: a part #, serial or PO number matches with or
     without its dashes, and words match the item's name and spec chips
@@ -1499,6 +1537,32 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     warehouse tab, same part / label / condition — joins that product's #.
     Both packing lists keep their sorted rows, so a later product prints in
     its sorted place with its later # (`#1, #2, #9, #3`).
+  - **One RAM series is one #** (v1.404.0, RS-499; die from v1.405.1,
+    RS-501). A series is the module up to its die, the part the short code
+    names: Samsung `M471A1K43CB1`, SK Hynix `HMAA2GU6AJR`, Micron the module
+    code plus its die revision (`MTA36ASF2G72PZ-A2`). Lots of one series with
+    the same label and condition take one # in a warehouse tab, whatever their
+    speed, so `M471A1K43CB1-CRC` and `…CB1-CTD` are both `#1`, while
+    `…EB1-CWE` (E-die) gets its own #, as do `HMAA2GU6AJR8N` and
+    `HMAA2GU6CJR8N`. Lines numbered earlier keep their own #s, and since
+    v1.409.1 (RS-508) a new lot of a part numbered that way joins that part's
+    #, not the lowest of its series. The packing
+    lists still print each part number as its own row under the shared #.
+    Inventory's grouped view keeps its stricter module-family rule.
+  - **The order table folds a series into one row** (v1.404.0). In view and
+    edit, and in every grouping, two or more lines of one series show as one
+    row, closed by default. The row shows its # (`#1`, or `#1–3` on an order
+    numbered earlier), the label, every short code its lots carry, the spec
+    chips, with differing values joined (`2400/2666MHz`), and the series
+    as `M471A1K43CB1*`, whose part numbers are listed on hover. Qty and total are
+    summed. When the lots share a unit price, it shows as one value, and in
+    the editor that field sets every lot's price at once. Otherwise the row
+    shows the price range. The chevron opens the row onto its lots, each with
+    its own qty, price and ✕. A fold that holds a lot just added opens by
+    itself.
+  - **A RAM line's title carries its short code** (v1.404.0), next to the
+    item name; a line with no code still says *Short code: Not recorded*
+    under it.
   - **Removing a packed line asks first** (v1.387.0). Its ✕ opens *Remove a
     packed item?*, naming the part, because the save drops the line's Pack
     mode tick for good. A line not yet packed, or one added in this edit,
@@ -1716,28 +1780,35 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   DDR5 by Brand + Type + Capacity + Rank + Speed + Class (v1.255.0), other RAM
   by part number and label. Known and unknown chip codes never share a bid
   group. Packing lists and product `#` keep their existing grouping.
-  - **The import half of the round trip was removed in v1.297.0** (RS-324).
-    From v1.21.0 to v1.296.x the vendor filled the sheet's Unit Price column
-    and the manager dropped it back on the order's edit view: the preview
-    matched rows by canonical part number, confirming filled the form's
-    prices, and the save that followed recorded them on the Market board as
-    `bid:<order>` data points (v1.138.3). Since Review mode sets each PO
-    line's sell price (v1.296.0) and a sell order line starts at its lot's
-    sell price, the returned sheet is read on the PO's Review mode instead
-    (v1.313.0). Since v1.347.0 its preview expands grouped part-number cells
-    and matches any Short code column as well, so Micron VPP and WSM under one
-    module number can take different quoted prices. Sheets without that
-    column still match by part number, and since v1.391.1 (RS-476) so does a
-    Micron line whose chip marking is not entered yet (several dies at
-    several prices read as a conflict). The retired sell-order
-    `price-import/preview` route, the `bidParts` save field (an old bundle
-    sending it is ignored) and the `bid:` feed are gone; `bid:` events
-    already on file still show on the Activity page. The Market page's own
-    price-list import stays and still reads these sheets. A lot added to an
-    existing order's edit view starts at its sell price too, in the order's
-    currency (a CNY order's prefilled lots still start at 0, since the rate
-    loads after them); before v1.297.0 it started at 0 unless the product was
-    already on the order.
+  - **The filled sheet fills the order's sell prices** (v1.21.0; removed in
+    v1.297.0 by RS-324, restored in v1.402.0 by RS-497). The vendor fills
+    the Unit Price column and the manager drops it on the order's *Vendor
+    price import* card (`POST /api/sell-orders/:id/price-import/preview`,
+    manager only, 8 MB, refused on Done/Closed). The preview matches rows by
+    canonical part number, a grouped cell's parts each at the row's price,
+    and flags rows not in the order, unpriced, invalid, duplicated or
+    priced per condition on a pre-v1.242.0 sheet. Confirming
+    fills every line of each matched part. Nothing is written until Save,
+    which records the confirmed parts' saved prices on the Market board as
+    `bid:<order>` data points (v1.138.3); Cancel records nothing. Since
+    v1.409.1 (RS-508) a part whose price was typed over after the import is
+    not recorded as a bid, a later bid save of a part replaces the order's
+    earlier bid for it, closing the order withdraws its bids (the history's
+    *closed* entry lists them), and the card is shut while the order's
+    currency is switched but not saved, since the template and the preview
+    price in the saved one. It reads
+    the sheet through the reader the Market import and Review mode share.
+  - **The same sheet prices the PO in Review mode** (v1.313.0). Since
+    v1.347.0 that preview expands grouped part-number cells and matches any
+    Short code column as well, so Micron VPP and WSM under one module number
+    can take different quoted prices. Sheets without that column still match
+    by part number, and since v1.391.1 (RS-476) so does a Micron line whose
+    chip marking is not entered yet (several dies at several prices read as
+    a conflict).
+  - A lot added to an existing order's edit view starts at its sell price,
+    in the order's currency (v1.297.0; a CNY order's prefilled lots still
+    start at 0, since the rate loads after them); before that it started at
+    0 unless the product was already on the order.
 - The price template splits into one worksheet per category with per-attribute
   spec columns and image URLs (v1.25.0, v1.27.0). **The RAM tab groups its rows
   with merged label columns left of `#`** — "Desktop & laptop" / "Server", then
@@ -2151,6 +2222,11 @@ it.
   loop behind a manager-only API (v1.91.0), and a Payments page (v1.92.0).
   Search waits 200 ms after typing stops; filter chips apply at once
   (v1.179.0).
+- **The table sorts by Date, Source, Payee, Amount, Owner or Status**
+  (v1.401.0). A header click sorts the whole filtered list on the server, not
+  just the loaded rows: descending, then ascending, then back to newest first.
+  Amount sorts by size, so money out puts the biggest payment first. The sort
+  is remembered while you are elsewhere, like the filters.
 - **Internal Mercury↔PayPal transfers are classified out of the unlinked
   queue** (v1.93.0) by counterparty and Mercury kind rules (v1.94.0).
 - **Automatic pairing is stricter about what it guesses** (v1.198.3).
@@ -2560,7 +2636,16 @@ is who paid, below).
     amount in ¥ or $ with the RMB it books as, date, method, Paid by (the
     Business Account or a person), counterparty, screenshots and note.
     Edit opens the same form with the entry's screenshots, which save as
-    they are added (drop, pick or paste) or removed (v1.396.0). An entry
+    they are added (drop, pick or paste) or removed (v1.396.0).
+  - **Order amount** (v1.406.0), between Method and Received, is the
+    record's own figure in its own currency: the PO's commission, the PO's
+    cost with other fees, the sell order's total, the case's amount. When
+    the whole book's total for that kind on the record is more than 2% off
+    it either way (in ¥, with a dollar figure at the latest rate), each of
+    the record's rows carries a red ! whose tooltip gives both figures. The
+    form warns the same way while you type: a red line under Amount, and
+    Save becomes *Save anyway*, which needs a second click (desktop and
+    phone). An entry
     whose PO, SO or case was deleted stays in the book unlinked, and its
     Edit says so; an Other entry never had a record.
 - **On the records** (managers only), an *Accounting* card shows what the book
@@ -2571,7 +2656,8 @@ is who paid, below).
     paid, the projected commission). Since v1.397.0 (RS-490) a manager's Cost
     Payment opens on a **RMB Flow | Business Account** switch, as Commission
     does: RMB Flow names the person who paid and carries this card; Business
-    Account picks PayPal or Cash and carries the Payments ledger. A PO still
+    Account carries the Payments ledger, and since v1.403.0 a search that
+    links a PayPal or Mercury payment to the PO (Cash is gone). A PO still
     saved as Business-paid asks for a Save before the card can record, and
     shows its RMB book read-only under Business Account. Moving the switch
     away and back keeps the person who paid (v1.398.1).
@@ -2708,13 +2794,13 @@ over MCP.
   needs, so a RAM card shows its full spec: rank, speed and part number
   (v1.395.1). Under the name each card shows the part number and when the
   SKU was last updated, without tapping to expand (v1.395.2).
-- **Four feeds write `last_price`**, each tagged in the event's source: the
+- **Five feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
   on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
   and a price-list import on the Market page (`import:<email>`, v1.247.0).
-  A fifth, a sell-order save that followed a confirmed vendor price import
-  (`bid:<order>`, v1.138.3), was retired with that import in v1.297.0; its
-  events stay on file. The Activity page shows the source per row; the
+  A fifth is a sell-order save that followed a confirmed vendor price import
+  (`bid:<order>`, v1.138.3). It was off from v1.297.0 to v1.401.x and came
+  back with the import in v1.402.0. The Activity page shows the source per row; the
   Market page shows only the price and its age.
   - **The scraper's push** (`POST /api/market/values`, bearer
     `market:write`) works on a part that has no price yet (v1.329.1). Until
@@ -3601,7 +3687,15 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     healthy sent" until the worker reports anything but Dead. A worker build
     before facebook-tracker 0.15.0 cannot take it, and the button says so.
     The worker itself now tries a page that times out twice more, 10 s then
-    30 s apart, before it parks. The
+    30 s apart, before it parks. Since v1.411.0 (RS-512) the ERP does not
+    wait for a manager: a park like that on a 0.15.0+ worker that still
+    heartbeats is sent `resume` by itself 10 min in, then 30 min after that
+    try, then hourly, 8 tries per run (recorded as `requested_by` `auto`).
+    The count starts again after an hour of Healthy. A network blip on
+    2026-11-01 had parked three workers for 37 h. The worker page reads
+    "Parked: couldn't reach Facebook · since …" instead of a bare Dead, adds
+    an **Auto-retry** row (the next try, or that the tries are spent) and
+    offers Mark healthy. The
     toolbar has the legend with counts (All workers, Healthy, Free, Parked), a
     host select and a search over worker, account, city and host; since v1.371.0 (RS-431) the
     tab opens on Healthy rather than All workers. The foot says "N of M
@@ -3613,6 +3707,47 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     The coordinator's activity aside stays under the table while its rows
     exist; since v1.350.1 it spans the full width and its list stops at 480px
     and scrolls. There is no Pause on a roll: the backend has no route for it.
+    Since v1.409.0 (RS-507) each ERP account can run CloakBrowser, a stealth
+    Chromium, instead of stock Chromium. The slot's device carries
+    `browser_engine`, a `cloak_seed` and a `cloak_gpu` derived from the
+    account number, and the claim hands them to the worker, which uses them
+    from its next normal start. The table has an **Engine** column (Stock,
+    or a CloakBrowser chip with its seed and GPU). A row offers **Switch to
+    CloakBrowser** only while its account has no live session: its own last
+    state (its worker's report for this lease, else its latest state event)
+    is Session expired, Checkpoint or a challenge, or no worker has ever held
+    it and it has no saved session. Parking alone is not enough, since the
+    saved session goes out again with the next claim. It also has to be never
+    switched before, with CloakBrowser on and a seat free. The confirmation
+    names the fingerprint and says the move is one way and that Facebook
+    sees a new device on the account's next normal start. It also says not to
+    re-login the account before then: Re-login and Mark healthy answer 409
+    `engine_mismatch` while the worker runs a different engine from its
+    slot's. A worker older than 0.16.0 is never handed a CloakBrowser slot,
+    which waits for one that can run it. A proxy timezone edit rewrites the
+    timezone of every slot on it, which for a CloakBrowser slot changes its
+    `--fingerprint-timezone`. A refusal from
+    `POST /api/fleet/slots/:no/engine` reads as a sentence: a live session,
+    CloakBrowser off, every seat taken, or switched before. A CloakBrowser
+    row offers **Back to stock**, another new device, only while no worker
+    can be starting on it (parked, no worker, or a lost session). It is
+    refused once the cloak session has been healthy. A
+    **Browser engine** card under the host cards has the **CloakBrowser on**
+    switch (`cloak_enabled`, default off; off stops new switches and leaves
+    switched accounts alone), the seats stepper (`cloak_max_slots`, default
+    1, the license's session limit; parked cloak slots count) and the
+    losses per 100 account-days over 30 days for stock, CloakBrowser and the
+    stint baseline. The ERP worker page shows the engine, seed and GPU under
+    the browser. Since v1.412.0 (RS-513) the license travels as its own Worker
+    secret, `CLOAKBROWSER_LICENSE_KEY`, added to a claim's env only for a
+    CloakBrowser device. A worker new enough for CloakBrowser takes a free
+    CloakBrowser slot before a free stock one. A release can be **staged**
+    (`POST /api/fleet/releases` with `staged: true`): new containers start
+    on its image and no running worker is replaced, so one canary worker can
+    try a new image without logging every account in again. The Hosts tab
+    shows "Staged: new workers only" until an ordinary release supersedes it.
+    Since v1.412.1 an account no fleet worker has held (`fleet_held` false)
+    switches even with the seller's cookie, which carries no fleet fingerprint.
   - **Tasks** (`/#/fleet/tasks`, v1.344.0): the belt, then the task table
     with the city log beside it. **The belt** is one row per enabled item on
     a 24-hour window centred on now, in quarter-hour buckets: searches done in
@@ -3710,6 +3845,15 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     the same alert total and the task list is not capped, the last alert's
     day (the Searched by column went in v1.374.0, RS-439). The coordinator's
     counts are not tagged per worker, so there is no worker or item filter.
+    Since v1.408.0 (RS-506) the backend also keeps every change of an ERP
+    worker's state, stamped with its slot's browser engine, and
+    `GET /api/fleet/stats/engine-loss?days=30` (manager-only, 1 to 365 days)
+    answers per engine the account-days on a worker, the entries into
+    SESSION_EXPIRED, CHECKPOINT and CHALLENGE_* (a re-entry without a
+    healthy state between is the same loss) and losses per 100
+    account-days, with a `retro` block from the stint ledger's `problem`
+    and `retired` endings as the stock baseline from before the history.
+    Since v1.409.0 the Fleet tab's Browser engine card shows it.
   - **Proxies** (`/#/fleet/proxies`, v1.368.0, RS-424): the health of every
     proxy port the fleet browses through, between Analysis and Account pool,
     with the number down as a warn-coloured chip on the tab bar. Rows are the
@@ -3912,9 +4056,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   photos, a status + staff-note triage panel and its email conversation. **Create
   Draft PO** converts a sell lot once into a Draft PO owned by the clicking
   manager (lines at cost 0, photos copied, seller filed as a house-account
-  supplier with source `web`, PayPal or cash + pickup per the seller's choice).
+  supplier with source `web`; a pickup per the seller's choice, paid by PayPal —
+  a pickup converted as cash until v1.403.0).
   Both endpoints allow 5 submissions a minute per IP and drop a filled honeypot
-  silently.
+  silently. The sidebar item carries a badge with the number still `new`
+  (v1.405.0). It polls each minute while the tab is visible, re-reads when the
+  tab returns, and follows a triage, conversion or reply at once.
 - **The public forms have a daily ceiling and their own CORS** (v1.195.0).
   Together they accept 300 submissions or 2 GB of photos per UTC day
   (workspace settings `public_form_daily_submissions` and

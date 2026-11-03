@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ddr5SpecKey, ramFamily, ramFamilyLabel, type Ddr5SpecRow } from '@recycle-erp/shared';
+import { ddr5SpecKey, ramFamily, ramFamilyLabel, ramSeries, sellSeriesKey, type Ddr5SpecRow } from '@recycle-erp/shared';
 
 const key = (pn: string) => ramFamily(pn)?.key ?? null;
 
@@ -86,5 +86,39 @@ describe('ddr5SpecKey', () => {
     expect(ddr5SpecKey(row({ generation: 'DDR4' }))).toBeNull();
     expect(ddr5SpecKey(row({ generation: null }))).toBeNull();
     expect(ddr5SpecKey(row({ category: 'SSD' }))).toBeNull();
+  });
+});
+
+describe('ramSeries', () => {
+  it('folds speed into one series, keeps module, depth, organisation and die apart', () => {
+    expect(ramSeries('M471A1K43CB1-CRC')).toBe('M471A1K43CB1');
+    expect(ramSeries('M471A1K43CB1-CTD')).toBe('M471A1K43CB1');
+    expect(ramSeries('m471a1k43cb1 ctd')).toBe('M471A1K43CB1');
+    expect(ramSeries('M471A1K43EB1-CWE')).toBe('M471A1K43EB1');
+    expect(ramSeries('M391A1K43CB1-CRC')).toBe('M391A1K43CB1');
+    expect(ramSeries('M471A2K43CB1-CRC')).toBe('M471A2K43CB1');
+    expect(ramSeries('HMA81GS6AFR8N-UH')).toBe('HMA81GS6AFR');
+    expect(ramSeries('HMA81GS6AFR8N-VK')).toBe('HMA81GS6AFR');
+    expect(ramSeries('HMAA2GU6AJR8N-XN')).toBe('HMAA2GU6AJR');
+    expect(ramSeries('HMAA2GU6CJR8N-XN')).toBe('HMAA2GU6CJR');
+    expect(ramSeries('HMA82GR7CJR8N-VK-TF')).toBe('HMA82GR7CJR');
+    expect(ramSeries('MTA36ASF2G72PZ-2G1A2II')).toBe('MTA36ASF2G72PZ-A2');
+    expect(ramSeries('MTA36ASF2G72PZ-2G6A2IG')).toBe('MTA36ASF2G72PZ-A2');
+    expect(ramSeries('MTA36ASF2G72PZ-2G9E2TG')).toBe('MTA36ASF2G72PZ-E2');
+    expect(ramSeries('MTA18ASF2G72PDZ-2G3B1')).toBe('MTA18ASF2G72PDZ-B1');
+  });
+
+  it('gives no series to a part number no scheme reads', () => {
+    for (const pn of ['KSM26RD8/16HDI', 'HMCG88AEBRA-XN', 'NUM-D4', '', null]) expect(ramSeries(pn), String(pn)).toBeNull();
+  });
+
+  it('keys a sell line on series, label and condition, RAM only', () => {
+    const l = { category: 'RAM', partNumber: 'M471A1K43CB1-CRC', label: 'Samsung 8GB DDR4', condition: 'Pulled — Tested' };
+    expect(sellSeriesKey(l)).toBe(sellSeriesKey({ ...l, partNumber: 'M471A1K43CB1-CTD' }));
+    expect(sellSeriesKey(l)).not.toBe(sellSeriesKey({ ...l, partNumber: 'M471A1K43EB1-CWE' }));
+    expect(sellSeriesKey(l)).not.toBe(sellSeriesKey({ ...l, condition: 'New' }));
+    expect(sellSeriesKey(l)).not.toBe(sellSeriesKey({ ...l, label: 'Samsung 16GB DDR4' }));
+    expect(sellSeriesKey({ ...l, category: 'SSD' })).toBeNull();
+    expect(sellSeriesKey({ ...l, partNumber: 'NUM-D4' })).toBeNull();
   });
 });

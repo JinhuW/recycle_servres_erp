@@ -5,6 +5,25 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-513](./RS-513-fleet-staged-worker-image-and-one-account-cloakbrows.md) | done | story | P2 | Fleet: staged worker image and one-account CloakBrowser canary | 1.412.1 |
+| [RS-512](./RS-512-fleet-retries-a-connect-failed-park-by-itself-and-sa.md) | done | bug | P2 | Fleet retries a connect_failed park by itself and says why it is parked | 1.411.0 |
+| [RS-511](./RS-511-review-mode-applies-a-short-count-to-the-product-s-q.md) | done | story | P2 | Review mode applies a short count to the product's qty | 1.410.0 |
+| [RS-510](./RS-510-ledger-mismatch-flag-converts-usd-records-at-today-s.md) | backlog | bug | P2 | Ledger mismatch flag converts USD records at today's rate, not the booked one | — |
+| [RS-509](./RS-509-chip-die-code-accepts-any-three-letters-and-misses-a.md) | backlog | bug | P2 | Chip die code accepts any three letters and misses a bare HYNIX prefix | — |
+| [RS-508](./RS-508-fix-sell-order-numbering-bid-recording-and-review-fi.md) | done | bug | P1 | Fix sell-order numbering, bid recording and review findings before release | 1.409.1 |
+| [RS-507](./RS-507-fleet-slots-can-switch-to-the-cloakbrowser-engine.md) | done | story | P2 | Fleet slots can switch to the CloakBrowser engine | 1.409.0 |
+| [RS-506](./RS-506-fleet-keeps-a-history-of-worker-states-and-reports-a.md) | done | story | P2 | Fleet keeps a history of worker states and reports account loss per browser engine | 1.408.0 |
+| [RS-505](./RS-505-fleet-worker-image-can-run-cloakbrowser-per-account.md) | in-review | story | P2 | Fleet worker image can run CloakBrowser per account | facebook-tracker 0.16.0 (no ERP release) |
+| [RS-504](./RS-504-po-list-payment-gap-note-text-overflows-its-box.md) | done | bug | P2 | PO list payment-gap note text overflows its box | 1.407.1 |
+| [RS-503](./RS-503-ram-short-code-reads-the-chip-die-on-kingston-and-ot.md) | done | story | P2 | RAM short code reads the chip die on Kingston and other brands | 1.407.0 |
+| [RS-502](./RS-502-rmb-flow-shows-the-record-s-amount-and-flags-a-misma.md) | done | story | P2 | RMB Flow shows the record's amount and flags a mismatch | 1.406.0 |
+| [RS-501](./RS-501-sell-order-fold-keeps-different-ram-dies-apart.md) | done | bug | P2 | Sell order fold keeps different RAM dies apart | 1.405.1 |
+| [RS-500](./RS-500-web-submissions-nav-shows-a-count-of-new-submissions.md) | done | story | P2 | Web submissions nav shows a count of new submissions | 1.405.0 |
+| [RS-499](./RS-499-sell-order-table-folds-same-series-ram.md) | done | story | P2 | Sell order table folds same-series RAM | 1.404.0 |
+| [RS-498](./RS-498-business-account-payments-link-to-paypal-or-mercury.md) | done | story | P2 | Business Account payments link to PayPal or Mercury, no Cash | 1.403.0 |
+| [RS-497](./RS-497-restore-the-sell-order-s-vendor-price-import.md) | done | story | P2 | Restore the sell order's vendor price import | 1.402.0 |
+| [RS-496](./RS-496-uptime-monitor-crash-loop-floods-telegram-with-deplo.md) | done | bug | P2 | Uptime monitor crash loop floods Telegram with deploy alerts | 1.401.1 |
+| [RS-495](./RS-495-payments-table-sorts-by-its-columns.md) | done | story | P2 | Payments table sorts by its columns | 1.401.0 |
 | [RS-494](./RS-494-rmb-flow-opens-on-oct-31-2026-to-today.md) | done | story | P2 | RMB Flow opens on Oct 31, 2026 to today | 1.400.0 |
 | [RS-493](./RS-493-rmb-flow-keeps-its-filters-when-you-leave-and-come-b.md) | done | story | P2 | RMB Flow keeps its filters when you leave and come back | 1.399.0 |
 | [RS-492](./RS-492-review-fixes-for-the-cost-payment-switch-and-receipt.md) | done | bug | P2 | Review fixes for the Cost Payment switch and receipt names | 1.398.1 |

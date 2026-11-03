@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterLineGroups, groupSellOrderLines } from './sellOrderLineGroups';
+import { filterLineGroups, foldSeries, groupSellOrderLines, isFold, noRange } from './sellOrderLineGroups';
 
 const line = (id: string, warehouseId: string | null, sourceOrderId: string | null) => {
   const warehouse = warehouseId && warehouseId.replace('WH-', '');
@@ -125,5 +125,37 @@ describe('filterLineGroups', () => {
     const out = filterLineGroups(groups, 'HMA84');
     expect(out.map(g => g.key)).toEqual(['DEN']);
     expect(out[0].items).toEqual([{ line: items[2], idx: 2 }]);
+  });
+});
+
+describe('foldSeries', () => {
+  const ram = (pn: string, label = 'Samsung 8GB DDR4', condition: string | null = 'Pulled — Tested') =>
+    ({ category: 'RAM', partNumber: pn, label, condition });
+  const items = (ls: ReturnType<typeof ram>[]) => ls.map((line, idx) => ({ line, idx }));
+
+  it('folds one series into a row where its first line sat, and leaves the rest', () => {
+    const out = foldSeries(items([
+      ram('M471A1K43CB1-CRC'), ram('HMA81GS6AFR8N-UH', 'SK Hynix 8GB DDR4'),
+      ram('M471A1K43CB1-CTD'), { category: 'SSD', partNumber: 'X', label: 'SSD', condition: null },
+      ram('HMA81GS6AFR8N-UH', 'SK Hynix 8GB DDR4'),
+    ]));
+    expect(out).toHaveLength(3);
+    expect(isFold(out[0]!) && out[0].members.map(m => m.idx)).toEqual([0, 2]);
+    expect(isFold(out[1]!) && out[1].members.map(m => m.idx)).toEqual([1, 4]);
+    expect(isFold(out[2]!)).toBe(false);
+  });
+
+  it('keeps a lone series line, another die, label or condition unfolded', () => {
+    const out = foldSeries(items([
+      ram('M471A1K43CB1-CRC'), ram('M471A1K43EB1-CWE'), ram('M471A1K43CB1-CTD', 'Samsung 16GB DDR4'),
+      ram('M471A1K43CB1-CTD', undefined, 'New'), ram('HMAA2GU6AJR8N-XN', 'SK Hynix 16GB DDR4'),
+      ram('HMAA2GU6CJR8N-XN', 'SK Hynix 16GB DDR4'),
+    ]));
+    expect(out.some(isFold)).toBe(false);
+  });
+
+  it('writes a run of #s short', () => {
+    expect(noRange([1, 1, 1])).toBe('1');
+    expect(noRange([3, 1, 2, 5])).toBe('1–3, 5');
   });
 });

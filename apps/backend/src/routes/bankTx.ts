@@ -23,7 +23,7 @@ import { actAsTx, getDb, type SqlLike } from '../db';
 import { poRealizedLateral } from '../lib/po-cost';
 import { lockBankGroupTx } from '../services/bankTxLocks';
 import { writeOrderEvent } from '../services/orderAudit';
-import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, escapeLike, UUID_RE } from '../lib/pagination';
+import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, escapeLike, parseSort, UUID_RE } from '../lib/pagination';
 import type { Env, User } from '../types';
 import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
 
@@ -134,6 +134,11 @@ bankTx.get('/', async (c) => {
     return c.json({ error: `settle must be one of ${SETTLE_FILTERS.join(', ')}` }, 400);
   }
   const limit = clampLimit(c.req.query('limit'), 50, 200);
+  const sortRaw = c.req.query('sort');
+  if (sortRaw && !parseSort('bank-tx', sortRaw)) {
+    return c.json({ error: 'sort column not allowed' }, 400);
+  }
+  const sort = parseSort('bank-tx', sortRaw) ?? { col: 'posted_at', dir: 'desc' as const };
   const cursor = decodeCursor(c.req.query('cursor'));
 
   const statusFrag =
@@ -170,9 +175,50 @@ bankTx.get('/', async (c) => {
     assignee === '' ? sql`TRUE`
     : assignee === 'unassigned' ? sql`${ownerExpr} IS NULL`
     : sql`${ownerExpr} = ${assignee}::uuid`;
-  const afterTs = cursorTs(cursor);
-  const cursorFrag = afterTs && cursor
-    ? sql`AND (bt.posted_at, bt.id) < (${cursorTsParam(sql, afterTs)}, ${cursor.id}::uuid)`
+  // Keyset on the active sort column, id as the tiebreaker. Every expression
+  // is NULL-free, or the tuple compare would drop rows at a page boundary.
+  // The text keys carry the posting time after the visible value, so rows that
+  // read the same (a payee, an owner, a status) stay newest-first among
+  // themselves; COLLATE "C" keeps the chr(1) separator below every letter, where
+  // a locale collation would ignore it.
+  const postedKey = cursorTsSelect(sql, sql`bt.posted_at`);
+  const textKey = (head: typeof postedKey) =>
+    sql`((${head}) || chr(1) || ${postedKey}) COLLATE "C"`;
+  // The rank follows the Status cell's own precedence: a sell order, then a
+  // PO, then ignored, then transfer, then still open.
+  const statusRank = sql`CASE WHEN bt.sell_order_id IS NOT NULL THEN '1'
+    WHEN bt.order_id IS NOT NULL THEN '2' WHEN bt.ignored THEN '3'
+    WHEN bt.category = 'transfer' THEN '4' ELSE '5' END`;
+  const sortExpr = {
+    posted_at: sql`bt.posted_at`,
+    // The display source: a pair reads "Paired", not its PayPal leg.
+    source: textKey(sql`CASE WHEN bt.pair_id IS NOT NULL THEN 'paired' ELSE bt.source END`),
+    counterparty: textKey(sql`lower(COALESCE(bt.counterparty, ''))`),
+    // By size: the page defaults to money out, where every amount is negative
+    // and a signed descending sort would list the smallest payment first.
+    amount: sql`abs(bt.amount)`,
+    owner: textKey(sql`lower(COALESCE(au.name, pou.name, ''))`),
+    status: textKey(statusRank),
+  }[sort.col]!;
+  const sortVal = sort.col === 'posted_at' ? postedKey
+    : sort.col === 'amount' ? sql`abs(bt.amount)::text`
+    : sortExpr;
+  const afterTs = sort.col === 'posted_at' ? cursorTs(cursor)
+    : sort.col === 'amount'
+      ? (cursor && typeof cursor.ts === 'string' && /^\d+(\.\d+)?$/.test(cursor.ts) ? cursor.ts : null)
+      : (cursor && typeof cursor.ts === 'string' ? cursor.ts : null);
+  // A cursor that doesn't fit the column's type would 500 on the cast; it
+  // falls back to page one instead. The cast and direction come from fixed
+  // lists, never from the request, so sql.unsafe cannot inject here.
+  const sortParam = !afterTs ? null
+    : sort.col === 'posted_at' ? cursorTsParam(sql, afterTs)
+    : sort.col === 'amount' ? sql`(${afterTs}::text)::numeric`
+    : sql`(${afterTs}::text) COLLATE "C"`;
+  const dirSql = sql.unsafe(sort.dir === 'asc' ? 'ASC' : 'DESC'); // nosec
+  const cursorFrag = sortParam && cursor
+    ? (sort.dir === 'desc'
+        ? sql`AND (${sortExpr}, bt.id) < (${sortParam}, ${cursor.id}::uuid)`
+        : sql`AND (${sortExpr}, bt.id) > (${sortParam}, ${cursor.id}::uuid)`)
     : sql`AND TRUE`;
   // In the WHERE rather than applied to the page, so keyset pagination over
   // the filtered set doesn't return short pages.
@@ -199,7 +245,7 @@ bankTx.get('/', async (c) => {
   // The join is aliased `po`, not `o`: `hasMatchFrag` lands in this WHERE
   // carrying its own `EXISTS (SELECT 1 FROM orders o …)`.
   const rows = await sql`
-    SELECT bt.id, bt.source, bt.external_id, bt.posted_at, ${cursorTsSelect(sql, sql`bt.posted_at`)} AS cursor_ts,
+    SELECT bt.id, bt.source, bt.external_id, bt.posted_at, ${sortVal} AS cursor_ts,
            bt.amount::float AS amount, bt.currency,
            bt.counterparty, bt.description, bt.paypal_txn_id, bt.pair_id,
            bt.order_id, bt.sell_order_id, bt.link_kind, bt.link_auto, bt.linked_at, bt.ignored,
@@ -245,7 +291,7 @@ bankTx.get('/', async (c) => {
       AND ${orderId ? sql`bt.order_id = ${orderId}` : sql`TRUE`}
       AND ${sellOrderId ? sql`bt.sell_order_id = ${sellOrderId}` : sql`TRUE`}
       AND ${assigneeFrag} AND ${matchFrag} AND ${disputeFrag} AND ${settleFrag} ${cursorFrag}
-    ORDER BY bt.posted_at DESC, bt.id DESC
+    ORDER BY ${sortExpr} ${dirSql}, bt.id ${dirSql}
     LIMIT ${limit + 1}
   `;
   const hasMore = rows.length > limit;

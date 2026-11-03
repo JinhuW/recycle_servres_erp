@@ -13,7 +13,7 @@
 import type postgres from 'postgres';
 import type { SqlLike } from '../db';
 import { comparePoIds, packSections, type PoSource, type PriceTemplateProduct } from '../lib/sellOrderPriceTemplate';
-import { ddr5SpecKey, ramShortCode, ramShortCodes, ramSpeedMts } from '@recycle-erp/shared';
+import { ddr5SpecKey, ramShortCode, ramShortCodes, ramSpeedMts, sellSeriesKey } from '@recycle-erp/shared';
 import { canonPartNumberJs } from '../lib/part-number';
 import { invLabel } from '../lib/inventoryLabel';
 import { poLineNo, sellLineOrder } from '../lib/poLineNo';
@@ -54,7 +54,7 @@ type SheetProduct = Omit<PriceTemplateProduct, 'category' | 'poSources'>
 
 // A line with what the fold reads off it, worked out once.
 type FoldLine = {
-  row: SheetLineRow; qty: number; key: string; bidKey: string; label: string;
+  row: SheetLineRow; qty: number; key: string; bidKey: string; numKey: string; label: string;
   category: SoCategory; part: string | null; po: string | null; lineNo: number | null;
 };
 
@@ -105,9 +105,13 @@ function foldLine(r: SheetLineRow): FoldLine {
   const part = r.part_number ?? r.sol_part ?? null;
   const condition = r.condition ?? r.sol_condition ?? null;
   const canon = part ? canonPartNumberJs(part) : '';
+  const key = `${canon}|${label}|${condition ?? ''}`;
   return {
     row: r, qty: Number(r.sell_qty ?? 0), label, category, part,
-    key: `${canon}|${label}|${condition ?? ''}`,
+    key,
+    // What a new line's # is shared by: one RAM series takes one #, though
+    // each part number still prints as its own row under it.
+    numKey: sellSeriesKey({ category, partNumber: part, label, condition }) ?? key,
     // A bid prices equivalent RAM once across module numbers. Unknown codes
     // keep the older part/spec grouping, separate from recorded chip dies.
     bidKey: hasInv && category === 'RAM'
@@ -218,30 +222,39 @@ function byWarehouseTab(lines: readonly FoldLine[]): [string, FoldLine[]][] {
 }
 
 // The # a line not numbered yet takes: a lot of a product already on the
-// order — same warehouse tab, same part|label|condition — joins its #; the
-// rest are new products which, folded among themselves, take the next #s in
-// packing-list order. So a new order reads 1..N down its sheet, and a later
+// order — same warehouse tab, same series or part, label and condition — joins
+// its #; the rest are new products which, folded among themselves, take the
+// next #s in packing-list order, a series sharing the # its first row took. So a new order reads 1..N down its sheet, and a later
 // save's products follow every other.
 function plannedNos(lines: readonly FoldLine[], next: number): { assigned: Map<string, number>; next: number } {
-  const slot = (l: FoldLine) => `${warehouseOf(l)}\u0000${l.key}`;
+  const slot = (l: FoldLine) => `${warehouseOf(l)}\u0000${l.numKey}`;
+  // An order numbered before series shared a # holds one series under several
+  // #s, so a lot joins its own product's # before its series' lowest.
+  const own = (l: FoldLine) => `${warehouseOf(l)}\u0000${l.key}`;
   const existing = new Map<string, number>();
+  const existingOwn = new Map<string, number>();
   for (const l of lines) {
     const no = l.row.product_no;
     if (no == null) continue;
     const had = existing.get(slot(l));
     if (had == null || no < had) existing.set(slot(l), no);
+    const hadOwn = existingOwn.get(own(l));
+    if (hadOwn == null || no < hadOwn) existingOwn.set(own(l), no);
   }
   const assigned = new Map<string, number>();
   const newcomers: FoldLine[] = [];
   for (const l of lines) {
     if (l.row.product_no != null) continue;
-    const joins = existing.get(slot(l));
+    const joins = existingOwn.get(own(l)) ?? existing.get(slot(l));
     if (joins != null) assigned.set(l.row.sol_id, joins);
     else newcomers.push(l);
   }
-  for (const [, whLines] of byWarehouseTab(newcomers)) {
+  for (const [wh, whLines] of byWarehouseTab(newcomers)) {
+    const numKeyOf = new Map(whLines.map((l) => [l.key, l.numKey]));
     for (const p of packSections(foldProducts(whLines, byKey)).flatMap((s) => s.rows)) {
-      const no = next++;
+      const at = `${wh}\u0000${numKeyOf.get(p.key)!}`;
+      let no = existing.get(at);
+      if (no == null) existing.set(at, (no = next++));
       for (const src of p.poSources) for (const lineId of src.solIds) assigned.set(lineId, no);
     }
   }

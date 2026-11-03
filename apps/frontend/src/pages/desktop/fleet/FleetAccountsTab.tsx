@@ -1,10 +1,15 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { nextSort, SortTh, type SortState } from '../../../components/SortTh';
+import { Modal } from '../../../components/Modal';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { coordinatorApi, type Challenge, type FleetDoc } from '../../../lib/coordinator';
 import { poolApi } from '../../../lib/facebookPool';
-import { fleetApi, fleetStateParked, type FleetHost, type FleetRelease, type FleetSlot, type FleetWorker } from '../../../lib/fleet';
+import { handleFetchError, showSuccessToast, showWarnToast } from '../../../lib/errorToast';
+import {
+  fleetApi, fleetCloakFor, fleetEngineOf, fleetErrorCode, fleetStateParked,
+  type FleetBrowserEngine, type FleetHost, type FleetRelease, type FleetSettings, type FleetSlot, type FleetWorker,
+} from '../../../lib/fleet';
 import { queueCityName, withoutRetired } from '../../../lib/fleetView';
 import { useT } from '../../../lib/i18n';
 import { usePersisted } from '../../../lib/listMemory';
@@ -13,13 +18,13 @@ import { ActivityAside } from '../FleetWorkers';
 import { dueLabel, easternClock, isQuarantined, maskUid } from './fleetBoard';
 import {
   DEFAULT_FLEET_ROW_FILTER, FLEET_ROW_KINDS, FLEET_ROW_SORT_COLS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning,
-  releasableRows, rowOwnSlot, rowRetirable, sortFleetRows,
-  type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowKind, type FleetRowSortCol,
+  fleetCloakRoom, releasableRows, rowCloakSwitchable, rowOwnSlot, rowStockRevertible, rowRetirable, sortFleetRows,
+  type FleetCloakRoom, type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowKind, type FleetRowSortCol,
 } from './fleetRows';
 import { AccountBriefCell } from './accountBrief';
-import { AddHostDialog, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
+import { AddHostDialog, EngineCard, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
 import {
-  agoLabel, BudgetRing, COORDINATOR_POLL_MS, EmptyRow, Legend, MarkHealthyButton, ParkDialog, ReleaseParkedDialog, RetireSlotDialog, resumeWaiting, UnavailableCard, useFleetMirror, useFleetPoll,
+  agoLabel, BudgetRing, ConfirmDialogBody, COORDINATOR_POLL_MS, EmptyRow, EngineChip, Legend, MarkHealthyButton, ParkDialog, ReleaseParkedDialog, RetireSlotDialog, resumeWaiting, UnavailableCard, useFleetMirror, useFleetPoll,
   WorkerStateChip,
 } from './shared';
 
@@ -36,6 +41,8 @@ import {
 
 type ErpData = {
   slots: FleetSlot[]; workers: FleetWorker[]; hosts: FleetHost[]; release: FleetRelease | null; pool: FleetPoolAccount[] | null;
+  /** For the engine card and the CloakBrowser guard; without it no row offers the switch. */
+  settings?: FleetSettings | null;
 };
 type CoordinatorData = { coordinator: FleetDoc | null; challenges: Challenge[] | null };
 type Data = ErpData & CoordinatorData;
@@ -54,7 +61,8 @@ export function FleetAccountsTab() {
     fleetApi.slots(), fleetApi.workers(), fleetApi.hosts(),
     // The pool names the account a coordinator worker holds.
     poolApi.summary().then(s => s.accounts).catch(() => null),
-  ]).then(([slots, workers, hosts, pool]) => ({ slots, workers, hosts: hosts.hosts, release: hosts.release, pool })));
+    fleetApi.settings().catch(() => null),
+  ]).then(([slots, workers, hosts, pool, settings]) => ({ slots, workers, hosts: hosts.hosts, release: hosts.release, pool, settings })));
   // The coordinator's rows go away at cutover; without the proxy the table
   // is the ERP's fleet alone.
   const coord = useFleetPoll<CoordinatorData>(() => Promise.all([
@@ -93,7 +101,10 @@ export function FleetAccountsTab() {
       </div>
       {data === null ? <div className="card fleet-host"><TableSkeleton rows={1} cols={4} /></div>
         : <HostStrip hosts={hosts} release={release} onChanged={reload} />}
-      {release && (release.state === 'rolling' || release.state === 'failed') && <ReleaseBanner release={release} />}
+      {data?.settings && (
+        <EngineCard settings={data.settings} used={data.slots.filter(s => fleetEngineOf(s.device) === 'cloak').length} onChanged={reload} />
+      )}
+      {release && (release.state === 'rolling' || release.state === 'staged' || release.state === 'failed') && <ReleaseBanner release={release} />}
       <section className="card fleet-card" aria-label={t('fleetColWorker')}>
         {data === null ? <TableSkeleton rows={6} cols={9} />
           : <WorkersTable data={data} filter={filter} onFilter={setFilter} onChanged={reload} />}
@@ -128,6 +139,7 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
   const running = fleetRunning(rows);
   const versions = new Map(data.hosts.map(h => [h.host_id, h.desired.version]));
   const budget = data.slots[0]?.budget_minutes ?? 360;
+  const room = useMemo(() => fleetCloakRoom(data.settings, data.slots), [data.settings, data.slots]);
   const set = (patch: Partial<FleetRowFilter>) => onFilter({ ...filter, ...patch });
   return (
     <>
@@ -159,6 +171,7 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
               <SortTh col="host" sort={sort} onSort={cycleSort}>{t('fleetColHost')}</SortTh>
               <SortTh col="account" sort={sort} onSort={cycleSort}>{t('fleetColAccount')}</SortTh>
               <SortTh col="state" sort={sort} onSort={cycleSort}>{t('fleetColState')}</SortTh>
+              <th>{t('fleetColEngine')}</th>
               <SortTh col="now" sort={sort} onSort={cycleSort}>{t('fleetColNow')}</SortTh>
               <SortTh col="today" sort={sort} onSort={cycleSort}>{t('fleetColToday')}</SortTh>
               <SortTh col="lease" sort={sort} onSort={cycleSort}>{t('fleetColLease')}</SortTh>
@@ -167,9 +180,9 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
             </tr>
           </thead>
           <tbody>
-            {shown.length === 0 && <EmptyRow cols={9}>{counts.all === 0 ? t('fleetWorkersNone') : t('fleetWorkersNoMatch')}</EmptyRow>}
+            {shown.length === 0 && <EmptyRow cols={10}>{counts.all === 0 ? t('fleetWorkersNone') : t('fleetWorkersNoMatch')}</EmptyRow>}
             {shown.map(r => <WorkerRow key={r.key} row={r} hostVersion={r.host ? versions.get(r.host) ?? null : null}
-              cityName={slug => queueCityName(data.coordinator, slug)} onChanged={onChanged} now={now} />)}
+              cityName={slug => queueCityName(data.coordinator, slug)} room={room} onChanged={onChanged} now={now} />)}
           </tbody>
         </table>
       </div>
@@ -181,19 +194,23 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
   );
 }
 
-function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
-  row: FleetRow; hostVersion: string | null; cityName: (slug: string) => string; onChanged: () => void; now: number;
+function WorkerRow({ row: r, hostVersion, cityName, room, onChanged, now }: {
+  row: FleetRow; hostVersion: string | null; cityName: (slug: string) => string; room: FleetCloakRoom; onChanged: () => void; now: number;
 }) {
   const { t, locale } = useT();
   const mirror = useFleetMirror();
   const [parking, setParking] = useState(false);
   const [retiring, setRetiring] = useState(false);
+  const [cloaking, setCloaking] = useState<FleetBrowserEngine | null>(null);
   // Park acts on the account this worker holds now, so it needs the slot to
   // still be this worker's.
   const slot = r.slot && r.slot.worker_id === r.workerId ? r.slot : null;
   const quarantined = !!slot && isQuarantined(slot, now);
   const ownSlot = rowOwnSlot(r);
   const retirable = !mirror && rowRetirable(r);
+  const cloakable = !mirror && rowCloakSwitchable(r, room);
+  const engineSlot = r.source === 'erp' ? ownSlot ?? slot : null;
+  const stockable = !mirror && rowStockRevertible(r);
 
   const since = r.now?.since ? Math.max(0, Math.round((now - Date.parse(r.now.since)) / 1000)) : null;
   const elapsed = since === null ? '' : `${Math.floor(since / 60)}m ${String(since % 60).padStart(2, '0')}s`;
@@ -252,6 +269,19 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
         </span>
       </td>
       <td>
+        {engineSlot ? (
+          <span className="fp-holder">
+            <EngineChip slot={engineSlot} />
+            {cloakable && (
+              <button type="button" className="btn sm ghost" onClick={() => setCloaking('cloak')}>{t('fleetCloakSwitch')}</button>
+            )}
+            {stockable && (
+              <button type="button" className="btn sm ghost" onClick={() => setCloaking('stock')}>{t('fleetStockSwitch')}</button>
+            )}
+          </span>
+        ) : <span className="fp-muted">—</span>}
+      </td>
+      <td>
         <span className="fp-holder">
           {nowCell}
           {((r.running && slot && !slot.parked && !mirror) || retirable) && (
@@ -287,9 +317,65 @@ function WorkerRow({ row: r, hostVersion, cityName, onChanged, now }: {
           <Icon name="eye" size={14} />
         </a>
         {parking && slot && <ParkDialog slot={slot} onClose={() => setParking(false)} onDone={() => { setParking(false); onChanged(); }} />}
+        {cloaking && ownSlot && <EngineSwitchDialog accountNo={ownSlot.account_no} engine={cloaking}
+          onClose={() => setCloaking(null)} onDone={() => { setCloaking(null); onChanged(); }} />}
         {retiring && ownSlot && <RetireSlotDialog accountNo={ownSlot.account_no} workerId={r.workerId} operator={r.operator}
           onClose={() => setRetiring(false)} onDone={() => { setRetiring(false); onChanged(); }} />}
       </td>
     </tr>
+  );
+}
+
+const CLOAK_REFUSALS: Record<string, string> = {
+  engine_live_session: 'fleetCloakRefused_engine_live_session',
+  cloak_disabled: 'fleetCloakRefused_cloak_disabled',
+  cloak_slots_full: 'fleetCloakRefused_cloak_slots_full',
+  cloak_seeded: 'fleetCloakRefused_cloak_seeded',
+  cloak_proven: 'fleetCloakRefused_cloak_proven',
+};
+
+// One way: the fingerprint becomes the account's machine, which Facebook
+// first sees at the worker's next ordinary start, never through a restart
+// made for it. Back to stock is one more new machine, so only for an account
+// its cloak session never got healthy on.
+export function EngineSwitchDialog({ accountNo: no, engine, onClose, onDone }: {
+  accountNo: number; engine: FleetBrowserEngine; onClose: () => void; onDone: () => void;
+}) {
+  const { t } = useT();
+  const [busy, setBusy] = useState(false);
+  const cloak = fleetCloakFor(no);
+  const confirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fleetApi.setSlotEngine(no, engine);
+      showSuccessToast(t(engine === 'cloak' ? 'fleetCloakDone' : 'fleetStockDone', { no }));
+      onDone();
+    } catch (e) {
+      const why = CLOAK_REFUSALS[fleetErrorCode(e) ?? ''];
+      if (why) showWarnToast(t(why, { no }));
+      else handleFetchError(e);
+      setBusy(false);
+    }
+  };
+  const close = () => { if (!busy) onClose(); };
+  return (
+    <Modal onClose={close} shellStyle={{ maxWidth: 460 }}>
+      {engine === 'cloak' ? (
+        <ConfirmDialogBody title={t('fleetCloakTitle', { no })} confirm={t('fleetCloakSwitch')} busy={busy} onClose={close} onConfirm={confirm}
+          body={<>
+            <p>{t('fleetCloakBody', { seed: cloak.cloak_seed, gpu: cloak.cloak_gpu })}</p>
+            <p className="fp-warn">{t('fleetCloakWarn')}</p>
+            <p className="fp-warn">{t('fleetEngineNoRelogin')}</p>
+          </>} />
+      ) : (
+        <ConfirmDialogBody title={t('fleetStockTitle', { no })} confirm={t('fleetStockSwitch')} busy={busy} danger onClose={close} onConfirm={confirm}
+          body={<>
+            <p>{t('fleetStockBody')}</p>
+            <p className="fp-warn">{t('fleetStockWarn')}</p>
+            <p className="fp-warn">{t('fleetEngineNoRelogin')}</p>
+          </>} />
+      )}
+    </Modal>
   );
 }

@@ -366,27 +366,34 @@ hosts.delete('/:id', managerOnly, async (c) => {
   return c.json({ ok: true });
 });
 
-/** `POST /api/fleet/releases`, mounted by routes/fleet.ts: starts a roll onto `image`; an active one is superseded. */
+/**
+ * `POST /api/fleet/releases`, mounted by routes/fleet.ts: starts a roll onto
+ * `image`; an active one is superseded. `staged` names the image for new
+ * containers only, so one canary worker can run it without the login every
+ * replaced worker costs.
+ */
 export const releases = new Hono<ManagerEnv>().post('/', managerOnly, async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { image?: unknown; version?: unknown } | null;
+  const body = (await c.req.json().catch(() => null)) as { image?: unknown; version?: unknown; staged?: unknown } | null;
   const image = body?.image;
   const version = body?.version;
   if (typeof image !== 'string' || !IMAGE_REF.test(image)) return c.json({ error: 'bad_request', detail: 'image' }, 422);
   if (typeof version !== 'string' || !version || version.length > 64) return c.json({ error: 'bad_request', detail: 'version' }, 422);
+  if (body?.staged !== undefined && typeof body.staged !== 'boolean') return c.json({ error: 'bad_request', detail: 'staged' }, 422);
+  const staged = body?.staged === true;
   const sql = getDb(c.env);
   const release = await sql.begin(async (tx) => {
     const active = await loadRelease(tx, true);
-    if (active && active.state === 'rolling') {
+    if (active && (active.state === 'rolling' || active.state === 'staged')) {
       hlog.info('fleet release superseded', { version: active.version, by: version });
     }
     const next: FleetRelease = {
-      image, version, state: 'rolling', started_at: new Date().toISOString(), finished_at: null,
+      image, version, state: staged ? 'staged' : 'rolling', started_at: new Date().toISOString(), finished_at: null,
       upgraded: [], skipped: [], current: null, failure: null,
     };
     await saveRelease(tx, next);
     return next;
   });
-  hlog.info('fleet release started', { version, image, by: c.var.user.email });
+  hlog.info(staged ? 'fleet release staged' : 'fleet release started', { version, image, by: c.var.user.email });
   return c.json({ ok: true, release });
 });
 

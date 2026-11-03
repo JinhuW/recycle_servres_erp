@@ -134,13 +134,16 @@ function isFleetMachineCall(request, url) {
 // The env every fleet worker shares (LLM key, Telegram, ...) is a Worker
 // secret, so it never sits in Railway or Postgres. It rides only on a claim
 // the backend answered 200: the host-token check there decides who gets it.
+// The CloakBrowser license is a secret of its own and rides only on a claim
+// for a cloak device: a stock worker has no use for it.
 async function withWorkerEnv(res, env) {
   const workerEnv = parseWorkerEnv(env.FLEET_WORKER_ENV);
   if (!workerEnv) {
     // Name the problem, never the value.
-    console.log(`fleet claim: FLEET_WORKER_ENV is ${env.FLEET_WORKER_ENV ? 'not a JSON object of strings' : 'not set'}; answering without env`);
-    return res;
+    console.log(`fleet claim: FLEET_WORKER_ENV is ${env.FLEET_WORKER_ENV ? 'not a JSON object of strings' : 'not set'}; answering without the shared env`);
   }
+  const cloakKey = typeof env.CLOAKBROWSER_LICENSE_KEY === 'string' && env.CLOAKBROWSER_LICENSE_KEY ? env.CLOAKBROWSER_LICENSE_KEY : null;
+  if (!workerEnv && !cloakKey) return res;
   const text = await res.text();
   let body;
   try {
@@ -156,8 +159,11 @@ async function withWorkerEnv(res, env) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return new Response(text, { status: res.status, headers });
   }
+  const cloak = cloakKey && body.device && body.device.browser_engine === 'cloak';
+  if (!workerEnv && !cloak) return new Response(text, { status: res.status, headers });
   headers.set('Cache-Control', 'no-store');
-  return new Response(JSON.stringify({ ...body, env: workerEnv }), { status: res.status, headers });
+  const merged = { ...(workerEnv ?? {}), ...(cloak ? { CLOAKBROWSER_LICENSE_KEY: cloakKey } : {}) };
+  return new Response(JSON.stringify({ ...body, env: merged }), { status: res.status, headers });
 }
 
 function parseWorkerEnv(raw) {

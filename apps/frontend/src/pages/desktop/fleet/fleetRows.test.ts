@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COORDINATOR, NOW, POOL, RELEASE, SLOTS, WORKERS } from './fixtures';
-import { FLEET_ROW_KINDS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning, releasableRows, sortFleetRows } from './fleetRows';
+import { FLEET_ROW_KINDS, fleetCloakRoom, rowCloakSwitchable, rowStockRevertible, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning, releasableRows, sortFleetRows } from './fleetRows';
 
 const input = { slots: SLOTS, workers: WORKERS, release: RELEASE, coordinator: COORDINATOR, challenges: null, pool: POOL };
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
@@ -161,5 +161,59 @@ describe('fleetRows', () => {
     const bare = fleetRows({ slots: SLOTS, workers: WORKERS, release: null, coordinator: null, challenges: null, pool: null }, NOW);
     expect(bare.length).toBe(WORKERS.length);
     expect(bare.find(r => r.key === 'erp:homelab-3')?.kind).toBe('healthy');
+  });
+});
+
+describe('rowCloakSwitchable', () => {
+  const rows = fleetRows(input, NOW);
+  const by = (key: string) => rows.find(r => r.key === key)!;
+  const open = { enabled: true, used: 0, max: 1 };
+  it('offers the switch for an account that lost its session, while a seat is free', () => {
+    expect(rowCloakSwitchable(by('erp:homelab-2'), open)).toBe(true);           // SESSION_EXPIRED on its own slot
+    expect(rowCloakSwitchable(by('erp:homelab-2'), { ...open, enabled: false })).toBe(false);
+    expect(rowCloakSwitchable(by('erp:homelab-2'), { ...open, used: 1 })).toBe(false);
+  });
+  it('never for a live session, a coordinator worker or a slot seeded already', () => {
+    expect(rowCloakSwitchable(by('erp:homelab-1'), open)).toBe(false);          // HEALTHY
+    expect(rowCloakSwitchable(by('erp:homelab-4'), open)).toBe(false);          // DEGRADED still holds the session
+    expect(rowCloakSwitchable(by('coord:homelab-5'), open)).toBe(false);
+    const seeded = fleetRows({
+      ...input, slots: SLOTS.map(s => s.account_no === 7 ? { ...s, device: { viewport: [1366, 645] as [number, number], timezone: 'UTC', locale: 'en-US', browser_engine: 'stock' as const, cloak_seed: 12345, cloak_gpu: 'Intel' as const } } : s),
+    }, NOW).find(r => r.key === 'erp:homelab-2')!;
+    expect(rowCloakSwitchable(seeded, open)).toBe(false);
+  });
+  const parkedAs = (account_state: string | null, over: Partial<(typeof SLOTS)[number]> = {}) => fleetRows({
+    ...input, slots: SLOTS.map(s => s.account_no === 4 ? { ...s, parked: true, worker_id: null, lease_expires_at: null, account_state, ...over } : s),
+  }, NOW).find(r => r.key === 'erp:homelab-1')!;
+  it('never for a parked slot whose account was healthy or is booting: the park keeps its session', () => {
+    expect(rowCloakSwitchable(parkedAs('HEALTHY'), open)).toBe(false);
+    expect(rowCloakSwitchable(parkedAs(null), open)).toBe(false);
+  });
+  it('offers it for a parked slot whose account went CHECKPOINT, and for one never logged in', () => {
+    expect(rowCloakSwitchable(parkedAs('CHECKPOINT'), open)).toBe(true);
+    expect(rowCloakSwitchable(parkedAs(null, { epoch: 0, has_session: false }), open)).toBe(true);
+  });
+  it('offers it for an account no fleet worker held that came with the seller\'s cookie', () => {
+    expect(rowCloakSwitchable(parkedAs(null, { epoch: 0, has_session: true, fleet_held: false }), open)).toBe(true);
+    expect(rowCloakSwitchable(parkedAs(null, { epoch: 0, has_session: true, fleet_held: true }), open)).toBe(false);
+  });
+  it('reads the account\'s own state, not the state of the worker row it shares', () => {
+    // homelab-2's worker row says SESSION_EXPIRED, but the account's own last state is HEALTHY.
+    const moved = fleetRows({ ...input, slots: SLOTS.map(s => s.account_no === 7 ? { ...s, account_state: 'HEALTHY' } : s) }, NOW)
+      .find(r => r.key === 'erp:homelab-2')!;
+    expect(rowCloakSwitchable(moved, open)).toBe(false);
+  });
+  it('offers Back to stock only for a cloak slot no worker can be starting on', () => {
+    const cloak = { viewport: [1366, 645] as [number, number], timezone: 'UTC', locale: 'en-US', browser_engine: 'cloak' as const, cloak_seed: 12345 };
+    expect(rowStockRevertible(parkedAs(null, { device: cloak }))).toBe(true);
+    expect(rowStockRevertible(parkedAs(null))).toBe(false);
+    const booting = fleetRows({ ...input, slots: SLOTS.map(s => s.account_no === 4 ? { ...s, device: cloak, account_state: null } : s) }, NOW)
+      .find(r => r.key === 'erp:homelab-1')!;
+    expect(rowStockRevertible(booting)).toBe(false);
+  });
+  it('counts the seats the slots use', () => {
+    const cloaked = SLOTS.map(s => s.account_no === 31 ? { ...s, device: { viewport: [1366, 645] as [number, number], timezone: 'UTC', locale: 'en-US', browser_engine: 'cloak' as const, cloak_seed: 12345 } } : s);
+    expect(fleetCloakRoom({ cloak_enabled: true, cloak_max_slots: 1 }, cloaked)).toEqual({ enabled: true, used: 1, max: 1 });
+    expect(fleetCloakRoom(null, SLOTS)).toEqual({ enabled: false, used: 0, max: 0 });
   });
 });

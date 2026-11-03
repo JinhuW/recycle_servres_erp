@@ -10,7 +10,19 @@
 #   docker build -f deploy/Dockerfile.worker \
 #       -t ghcr.io/jinhuw/aimm-recycle:$(cat VERSION) \
 #       --build-arg RS_VERSION=$(cat VERSION) \
-#       --build-arg RS_MONITOR_COMMIT=$(git -C ai-marketplace-monitor rev-parse --short HEAD) .
+#       --build-arg RS_MONITOR_COMMIT=$(git -C ai-marketplace-monitor rev-parse --short HEAD) \
+#       --build-arg CLOAK_BAKE=1 --secret id=cloak_key,env=CLOAKBROWSER_LICENSE_KEY .
+#
+# CLOAK_BAKE=1 bakes the CloakBrowser binary into the image with the license
+# in the secret (a free or paid key; it is only mounted for that one RUN, never
+# kept in a layer, ENV or label), and fails without the secret. The flag, not
+# the secret, decides: BuildKit leaves a secret out of the cache key, so a
+# stock-only build and a baked one would otherwise reuse each other's layer.
+# Without it the image is stock-only: a device that asks for cloak
+# parks its worker as browser_failed ("no CloakBrowser binary in this
+# image") instead of downloading one at run time. Add
+# --build-arg RS_CLOAK_VERSION=<version> to label the image with the build
+# the secret fetched; the build fails if it is not that one.
 
 FROM python:3.12-slim-bookworm
 
@@ -31,7 +43,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Xvfb + x11vnc + xauth: the virtual display and VNC the non-headless browser
 # needs; websockify + novnc: the browser-based VNC client; supervisor: the
-# old mode's process manager; tini: PID 1; curl: the healthcheck.
+# old mode's process manager; tini: PID 1; curl: the healthcheck; openbox:
+# the window manager a cloak window needs for its frame (rs_worker starts it
+# for cloak devices only). The fonts
+# are what a Windows persona's font probe expects to find, in metric-compatible
+# form (Arial, Times, Calibri, Cambria) plus emoji and CJK, so its font list
+# is not a bare Debian one.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         xvfb \
         x11vnc \
@@ -43,6 +60,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         git \
         tini \
+        openbox \
+        fonts-liberation \
+        fonts-noto-color-emoji \
+        fonts-noto-cjk \
+        fonts-crosextra-carlito \
+        fonts-crosextra-caladea \
     && rm -rf /var/lib/apt/lists/*
 
 RUN if [ ! -e /usr/share/novnc/vnc.html ] && [ -e /usr/share/novnc/vnc_lite.html ]; then \
@@ -66,13 +89,54 @@ COPY deploy/worker-constraints.txt /tmp/worker-constraints.txt
 # rebuild pick a newer Playwright, and so a different Chromium under the same
 # device profile. websockets is the VNC relay's (rs_worker/vnc_relay.py needs
 # 15 or later for its `proxy=` and `InvalidStatus`).
-RUN pip install -c /tmp/worker-constraints.txt . "websockets>=15" \
+RUN pip install -c /tmp/worker-constraints.txt . "websockets>=15" cloakbrowser \
     && playwright install --with-deps chromium
+
+# The monitor launches CloakBrowser from these internals of the pinned
+# release; a cloakbrowser that moved one fails the build, not a worker.
+RUN python -c "from cloakbrowser.browser import _install_license_guard, build_args; \
+from cloakbrowser.config import IGNORE_DEFAULT_ARGS; from cloakbrowser.download import ensure_binary; \
+from cloakbrowser.license import CloakBrowserLicenseError, build_launch_env, license_error_message, \
+license_error_for_code, mint_denial_file, resolve_license_key; \
+import inspect; assert {'timezone', 'locale', 'start_maximized'} <= set(inspect.signature(build_args).parameters)"
+
+# CloakBrowser's binary, fetched with the license in the build secret and kept
+# at a fixed path; the run-time launch then never downloads (the variable is
+# set even in a stock-only image, so a cloak device there fails at once). The
+# download cache goes in the same layer: it holds the key's hash and the
+# license server's answer, not something to ship.
+ENV CLOAKBROWSER_BINARY_PATH=/opt/cloakbrowser/chrome
+ARG CLOAK_BAKE=0
+RUN --mount=type=secret,id=cloak_key,required=false sh -ec '\
+    if [ "$CLOAK_BAKE" != 1 ]; then \
+        echo "CLOAK_BAKE=$CLOAK_BAKE: stock-only image, no CloakBrowser binary"; exit 0; \
+    fi; \
+    if [ ! -s /run/secrets/cloak_key ]; then \
+        echo "CLOAK_BAKE=1 needs the cloak_key secret" >&2; exit 1; \
+    fi; \
+    cache=$(mktemp -d); \
+    bin=$(CLOAKBROWSER_LICENSE_KEY="$(cat /run/secrets/cloak_key)" CLOAKBROWSER_CACHE_DIR="$cache" \
+        CLOAKBROWSER_BINARY_PATH= python -m cloakbrowser install | tail -n 1); \
+    dir=$(dirname "$bin"); \
+    version=$(basename "$dir" | sed -e "s/^chromium-//" -e "s/-pro\$//"); \
+    mv "$dir" /opt/cloakbrowser; \
+    echo "$version" > /opt/cloakbrowser/VERSION; \
+    rm -rf "$cache" /root/.cloakbrowser; \
+    test -x "$CLOAKBROWSER_BINARY_PATH"; \
+    echo "baked CloakBrowser $version"'
 
 RUN mkdir -p /etc/supervisor/conf.d /var/log/supervisor /root/.ai-marketplace-monitor
 COPY ai-marketplace-monitor/docker/supervisord.conf /etc/supervisor/conf.d/aimm.conf
 
 COPY rs_worker ./rs_worker
+
+# Late, so labelling an image never refetches the binary above.
+ARG RS_CLOAK_VERSION=
+RUN if [ -n "$RS_CLOAK_VERSION" ]; then \
+        test "$(cat /opt/cloakbrowser/VERSION 2>/dev/null)" = "$RS_CLOAK_VERSION" \
+        || { echo "RS_CLOAK_VERSION=$RS_CLOAK_VERSION but the baked build is $(cat /opt/cloakbrowser/VERSION 2>/dev/null || echo none)" >&2; exit 1; }; \
+    fi
+LABEL com.recycleservers.cloak-version=$RS_CLOAK_VERSION
 
 # 5900 VNC, 8467 the monitor's web UI, 8788 /healthz in fleet mode.
 EXPOSE 5900 8467 8788

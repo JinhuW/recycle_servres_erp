@@ -3,7 +3,7 @@ import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { ApiError } from '../../../lib/api';
 import { handleFetchError, showSuccessToast, showWarnToast } from '../../../lib/errorToast';
-import { fleetApi, fleetTakesResume, type FleetSlot, type FleetWorkerResume } from '../../../lib/fleet';
+import { fleetApi, fleetEngineOf, fleetTakesResume, type FleetSlot, type FleetWorkerResume } from '../../../lib/fleet';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
 import { useT } from '../../../lib/i18n';
 import { budgetTone, easternClock, easternDateTime, liveness, spanLabel, type Liveness, type Translate } from './fleetBoard';
@@ -443,5 +443,18 @@ export function ReleaseQuarantineButton({ slot, onDone }: { slot: FleetSlot; onD
     <button type="button" className="btn sm" onClick={release} disabled={busy} title={t('fleetQuarantineReleaseHint')}>
       {t('fleetQuarantineRelease')}
     </button>
+  );
+}
+
+/** A slot's engine, with the CloakBrowser fingerprint it carries. */
+export function EngineChip({ slot }: { slot: Pick<FleetSlot, 'device'> }) {
+  const { t } = useT();
+  const d = slot.device;
+  if (fleetEngineOf(d) === 'stock') return <span className="fp-muted">{t('fleetEngine_stock')}</span>;
+  return (
+    <>
+      <span><span className="chip info">{t('fleetEngine_cloak')}</span></span>
+      {d?.cloak_seed !== undefined && <small className="mono">{t('fleetCloakSeed', { seed: d.cloak_seed, gpu: d.cloak_gpu ?? '—' })}</small>}
+    </>
   );
 }

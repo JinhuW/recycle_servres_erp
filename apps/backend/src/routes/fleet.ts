@@ -13,6 +13,7 @@ import { forwardsReads, mirrorAnswers } from '../fleet/mirror';
 import hosts, { releases } from '../fleet/hosts';
 import proxies from '../fleet/proxies';
 import proxyHealth from '../fleet/proxyHealth';
+import { engineLoss, readLossDays } from '../fleet/stateEvents';
 import { slots, workers } from '../fleet/workers';
 import { allowedAppOrigin } from '../lib/origins';
 import { VNC_WORKER_ID } from './coordinator';
@@ -124,6 +125,14 @@ fleet.get('/stats/funnel', managerOnly, async (c) => {
   const days = readFunnelDays(c.req.query());
   if (isRefusal(days)) return refuse(c, days);
   return c.json({ days: await funnelDays(getDb(c.env), days) });
+});
+
+// Account loss per browser engine, from the worker state history, with the
+// stint ledger's problem and retired endings as the baseline from before it.
+fleet.get('/stats/engine-loss', managerOnly, async (c) => {
+  const days = readLossDays(c.req.query());
+  if (isRefusal(days)) return refuse(c, days);
+  return c.json(await engineLoss(getDb(c.env), days));
 });
 
 // The Fleet table's hover card. Any pool number answers, so an account the
