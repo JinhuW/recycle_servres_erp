@@ -5,7 +5,8 @@
 
 import type { FbWorkerStint } from '@recycle-erp/shared';
 import type { CityStep, CityStepKind, CityVisit, CityVisitOutcome, FleetCity as ChipCity } from '../../../lib/coordinator';
-import { fleetStateParked, type FleetCityLogTask as FleetTaskLog, type FleetWorkerDetail, type FleetWorkerEvent } from '../../../lib/fleet';
+import {
+  fleetAutoResumeDue, fleetResumable, fleetStateParked, fleetTakesResume, FLEET_AUTO_RESUME_MINUTES, type FleetCityLogTask as FleetTaskLog, type FleetWorkerDetail, type FleetWorkerEvent } from '../../../lib/fleet';
 import type { CityHits, FleetStatus, ReloginProgress } from '../../../lib/fleetView';
 import { liveness } from './fleetBoard';
 
@@ -33,6 +34,27 @@ export function erpCheckpoint(w: FleetWorkerDetail['worker'], now: number = Date
     url: str(d.url),
     seenAt: w.last_heartbeat_at,
   };
+}
+
+/** A worker parked on a page that would not load (DEAD connect_failed),
+ *  usually a network or proxy blip: since when, and where the ERP's own
+ *  retries stand. `next` is null once they are spent or the build cannot
+ *  take a resume, and is in the past while one waits for a heartbeat. */
+export type ErpConnectPark = {
+  since: string | null;
+  tries: number;
+  maxTries: number;
+  next: string | null;
+  canResume: boolean;
+};
+
+export function erpConnectPark(w: FleetWorkerDetail['worker'], now: number = Date.now()): ErpConnectPark | null {
+  if (!fleetResumable(w.state, w.detail) || erpWorkerStatus(w, now) === 'offline') return null;
+  const since = w.state_since ?? null;
+  const tries = w.auto_resumes ?? 0;
+  const canResume = fleetTakesResume(w.version);
+  const next = canResume ? fleetAutoResumeDue(since, w.resume?.requested_at ?? null, tries) : null;
+  return { since, tries, maxTries: FLEET_AUTO_RESUME_MINUTES.length, next: next?.toISOString() ?? null, canResume };
 }
 
 /** Days until the stored session's expiry, as the monitor last reported it. */

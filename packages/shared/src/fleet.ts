@@ -47,6 +47,22 @@ export function fleetTakesResume(version: string | null | undefined): boolean {
   return true;
 }
 
+/** Minutes the ERP waits before each automatic `resume` of a connect_failed
+ *  park, counted from the park or the previous try, whichever is later. A
+ *  park still there after the last one waits for a manager. */
+export const FLEET_AUTO_RESUME_MINUTES = [10, 30, 60, 60, 60, 60, 60, 60] as const;
+
+/** Who an automatic resume is recorded as. */
+export const FLEET_AUTO_RESUME_BY = 'auto';
+
+/** When the next automatic resume of a connect_failed park is due, or null
+ *  when the tries are spent. */
+export function fleetAutoResumeDue(stateSince: string | Date | null, lastResumeAt: string | Date | null, tries: number): Date | null {
+  if (tries >= FLEET_AUTO_RESUME_MINUTES.length || stateSince === null) return null;
+  const base = Math.max(new Date(stateSince).getTime(), lastResumeAt === null ? 0 : new Date(lastResumeAt).getTime());
+  return new Date(base + FLEET_AUTO_RESUME_MINUTES[tries] * 60_000);
+}
+
 /** Whether an account's fleet slot may be retired as lost: a manager parked
  *  it, the pool already took it out of the fleet, or its worker reports a
  *  parked state. A worker that only went silent is not lost, and one parked
@@ -593,6 +609,10 @@ export type FleetWorker = {
   last_heartbeat_at: string | null;
   vnc_port: number | null;
   detail: Record<string, unknown> | null;
+  /** When the reported state last changed: how long a park has lasted. */
+  state_since?: string | null;
+  /** Automatic resumes sent in this park run (FLEET_AUTO_RESUME_MINUTES). */
+  auto_resumes?: number;
   /** A manager's re-login, in the manager's views only (the worker never reads it). */
   relogin?: FleetWorkerRelogin | null;
   resume?: FleetWorkerResume | null;
@@ -607,8 +627,9 @@ export type FleetWorkerRelogin = {
   delivered_at: string | null;
 };
 
-/** The latest "Mark healthy" a manager queued for a worker parked with
- *  `connect_failed`; delivered once, like a re-login. */
+/** The latest "Mark healthy" queued for a worker parked with
+ *  `connect_failed`, by a manager or by the ERP itself (`requested_by`
+ *  FLEET_AUTO_RESUME_BY); delivered once, like a re-login. */
 export type FleetWorkerResume = FleetWorkerRelogin;
 
 /** The search parameters handed to every worker; keys follow the monitor's config. */

@@ -25,7 +25,7 @@ export type {
   FleetBrowserEngine, FleetCloakGpu, FleetEngineLoss, FleetEngineLossRow,
 } from '@recycle-erp/shared';
 export {
-  FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetResumable, fleetTakesResume, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
+  FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetResumable, fleetTakesResume, fleetAutoResumeDue, FLEET_AUTO_RESUME_MINUTES, FLEET_AUTO_RESUME_BY, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
   FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_SLOW_MS,
   fleetCloakFor, fleetCloakSwitchable, fleetSessionLost, fleetStockRevertible,
 } from '@recycle-erp/shared';

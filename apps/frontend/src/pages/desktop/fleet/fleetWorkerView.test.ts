@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NOW, WORKER_DETAIL, WORKER_STINTS } from './fixtures';
 import {
-  deviceText, erpCheckpoint, erpCityChips, erpCityLog, erpHistory, erpHistoryDot, erpProxyText, erpReloginProgress, erpWorkerStatus,
+  deviceText, erpCheckpoint, erpConnectPark, erpCityChips, erpCityLog, erpHistory, erpHistoryDot, erpProxyText, erpReloginProgress, erpWorkerStatus,
   sessionDaysLeft, taskVisit,
 } from './fleetWorkerView';
 
@@ -30,6 +30,24 @@ describe('erpCheckpoint', () => {
     expect(erpCheckpoint({ ...worker, state: 'SESSION_EXPIRED', detail: { reason: 'logged out mid-sweep' } }, NOW)?.kind).toBe('SESSION_EXPIRED');
     // A silent worker is offline, not an open checkpoint.
     expect(erpCheckpoint({ ...walled, last_heartbeat_at: minutesAgo(60) }, NOW)).toBeNull();
+  });
+});
+
+describe('erpConnectPark', () => {
+  const parked = { ...worker, state: 'DEAD', version: '0.15.0 (3576db7)', detail: { reason: 'connect_failed', operator: true }, state_since: minutesAgo(4), auto_resumes: 0, resume: null };
+  it('dates the park and says when the ERP tries again', () => {
+    expect(erpConnectPark(worker, NOW)).toBeNull();
+    expect(erpConnectPark(parked, NOW)).toEqual({
+      since: minutesAgo(4), tries: 0, maxTries: 8, next: new Date(NOW + 6 * 60_000).toISOString(), canResume: true,
+    });
+    const tried = { ...parked, auto_resumes: 1, resume: { id: 'r', requested_at: minutesAgo(2), requested_by: 'auto', delivered_at: minutesAgo(2) } };
+    expect(erpConnectPark(tried, NOW)?.next).toBe(new Date(NOW + 28 * 60_000).toISOString());
+  });
+  it('has no next try once they are spent, on an old build, or for another DEAD reason', () => {
+    expect(erpConnectPark({ ...parked, auto_resumes: 8 }, NOW)?.next).toBeNull();
+    expect(erpConnectPark({ ...parked, version: '0.14.10 (f4d4fdf)' }, NOW)).toMatchObject({ next: null, canResume: false });
+    expect(erpConnectPark({ ...parked, detail: { reason: 'login_failed' } }, NOW)).toBeNull();
+    expect(erpConnectPark({ ...parked, last_heartbeat_at: minutesAgo(60) }, NOW)).toBeNull();
   });
 });
 
