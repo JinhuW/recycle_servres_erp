@@ -104,7 +104,7 @@ export function FleetAccountsTab() {
       {data?.settings && (
         <EngineCard settings={data.settings} used={data.slots.filter(s => fleetEngineOf(s.device) === 'cloak').length} onChanged={reload} />
       )}
-      {release && (release.state === 'rolling' || release.state === 'failed') && <ReleaseBanner release={release} />}
+      {release && (release.state === 'rolling' || release.state === 'staged' || release.state === 'failed') && <ReleaseBanner release={release} />}
       <section className="card fleet-card" aria-label={t('fleetColWorker')}>
         {data === null ? <TableSkeleton rows={6} cols={9} />
           : <WorkersTable data={data} filter={filter} onFilter={setFilter} onChanged={reload} />}

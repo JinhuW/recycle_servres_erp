@@ -4964,6 +4964,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fleetReleaseConfirm: "Start the roll",
     fleetReleaseStarted: "Rolling out {version}",
     fleetReleaseState_rolling: "Rolling",
+    fleetReleaseState_staged: "Staged: new workers only",
     fleetReleaseState_done: "Rolled out",
     fleetReleaseState_failed: "Stopped",
     fleetReleaseState_superseded: "Superseded",

@@ -15,6 +15,27 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.412.0] - 2026-11-03
+
+### Added
+
+- **A worker image can be staged for new workers only** (RS-513).
+  `POST /api/fleet/releases` with `staged: true` names the image that new
+  containers start on and replaces no running worker. A fleet release used
+  to replace every worker, one Facebook login each, so a single account
+  could not try a new image. The Hosts tab shows it as "Staged: new workers
+  only". The next ordinary release supersedes it.
+- **A CloakBrowser account goes to a worker that can run it.** A worker on
+  0.16.0 or later takes a free CloakBrowser slot before a free stock one; its
+  own previous slot still comes first. Only those workers can run a
+  CloakBrowser slot, so leaving it to the account order could start the one
+  canary worker on a stock account instead.
+- **The CloakBrowser license reaches only CloakBrowser workers.** It is now
+  its own Worker secret, `CLOAKBROWSER_LICENSE_KEY`. The Cloudflare Worker
+  adds it to a claim's env only when the claimed device's engine is cloak.
+  A stock worker never receives it, and `FLEET_WORKER_ENV`, which can't be
+  read back to edit, stays as it is.
+
 ## [1.411.0] - 2026-11-02
 
 ### Fixed
