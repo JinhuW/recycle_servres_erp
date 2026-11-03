@@ -1906,7 +1906,7 @@ One row per price reading of a part, the history behind ref_prices.last_price. W
 | `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
 | `ref_price_id` | `text` | ✓ |  | → ref_prices (cascade). |
 | `price` | `numeric(12,2)` | ✓ |  | Unit price, USD, never negative; a price-list import converts yuan at the FX ledger's latest rate. |
-| `source` | `text` | ✓ |  | Origin tag: scraper:<name>, mcp:<client id>, manual:<email>, import:<email>, sale:<sell order id>, seed. The retired bid:<order> survives on old rows. |
+| `source` | `text` | ✓ |  | Origin tag: scraper:<name>, mcp:<client id>, manual:<email>, import:<email>, sale:<sell order id>, bid:<sell order id> (a sell order's Sync to Market), seed. |
 | `note` | `text` |  |  | Optional free text: the file name for an import, up to 280 characters over MCP. |
 | `actor_user_id` | `uuid` |  |  | → users. Who recorded it; NULL for the scraper, service clients and the seed, and once the user is deleted. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |

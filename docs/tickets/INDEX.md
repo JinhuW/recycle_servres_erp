@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-516](./RS-516-sync-a-sell-order-s-prices-to-the-market-page-at-a-c.md) | done | story | P2 | Sync a sell order's prices to the Market page at a chosen percent | — |
 | [RS-515](./RS-515-phone-record-entry-sheet-layout-fixes.md) | done | bug | P2 | Phone Record entry sheet layout fixes | 1.413.1 |
 | [RS-514](./RS-514-add-to-fleet-avoids-failed-proxies.md) | done | story | P2 | Add to fleet avoids failed proxies | 1.413.0 |
 | [RS-513](./RS-513-fleet-staged-worker-image-and-one-account-cloakbrows.md) | done | story | P2 | Fleet: staged worker image and one-account CloakBrowser canary | 1.412.1 |
