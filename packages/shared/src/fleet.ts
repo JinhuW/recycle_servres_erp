@@ -288,14 +288,16 @@ export const fleetSessionLost = (state: string | null | undefined): boolean =>
  * Whether a slot may be switched to CloakBrowser, as far as its account says:
  * never switched before, and no session it could carry onto the new
  * fingerprint. That is an account whose last known state is a lost session,
- * or one no worker has ever held and that has no saved session. Parked or
- * worker-less alone is not enough: the saved session goes back out with the
- * next claim. The route also checks `cloak_enabled` and `cloak_max_slots`.
+ * or one no fleet worker has ever held: its saved session, if any, came from
+ * outside the fleet and shows Facebook a new machine on either engine. Parked
+ * or worker-less alone is not enough: a session a stock worker saved goes
+ * back out with the next claim. The route also checks `cloak_enabled` and
+ * `cloak_max_slots`.
  */
-export function fleetCloakSwitchable(s: Pick<FleetSlot, 'epoch' | 'account_state' | 'has_session' | 'device'>): boolean {
+export function fleetCloakSwitchable(s: Pick<FleetSlot, 'epoch' | 'account_state' | 'has_session' | 'fleet_held' | 'device'>): boolean {
   if (s.device?.cloak_seed !== undefined) return false;
   if (fleetSessionLost(s.account_state)) return true;
-  return s.epoch === 0 && s.account_state === null && !s.has_session;
+  return s.epoch === 0 && s.account_state === null && (!s.has_session || !s.fleet_held);
 }
 
 /**
@@ -502,6 +504,10 @@ export type FleetSlot = {
   account_state: string | null;
   /** Whether the pool account has a saved session the next claim hands out. */
   has_session: boolean;
+  /** Whether a fleet worker has ever held the account (a stint, or a claim by
+   *  a fleet host). A saved session on one never held came from outside the
+   *  fleet, such as the seller's cookie, and no fleet fingerprint is on it. */
+  fleet_held: boolean;
 };
 
 /** Which of a pool account's secrets are stored. Never a value. */

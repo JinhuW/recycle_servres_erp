@@ -3746,6 +3746,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     on its image and no running worker is replaced, so one canary worker can
     try a new image without logging every account in again. The Hosts tab
     shows "Staged: new workers only" until an ordinary release supersedes it.
+    Since v1.412.1 an account no fleet worker has held (`fleet_held` false)
+    switches even with the seller's cookie, which carries no fleet fingerprint.
   - **Tasks** (`/#/fleet/tasks`, v1.344.0): the belt, then the task table
     with the city log beside it. **The belt** is one row per enabled item on
     a 24-hour window centred on now, in quarter-hour buckets: searches done in

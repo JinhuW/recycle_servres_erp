@@ -8,7 +8,7 @@ created: 2026-11-02
 reporter: jinhu
 branch: cloak-staged-canary
 pr:
-version: 1.412.0
+version: 1.412.1
 related: [RS-505, RS-507]
 ---
 
@@ -54,3 +54,9 @@ prod with one never-claimed account, through a dev → main release.
 
 Rolling the whole fleet onto 0.16.0, the homelab and prod canary (after dev),
 the fonts licence.
+
+## Notes
+
+- v1.412.1: every unused pool account came with the seller's cookie, which
+  the switch read as a live session and refused. An account no fleet worker
+  has held (no claim by a fleet host, no stint under a worker) now switches.

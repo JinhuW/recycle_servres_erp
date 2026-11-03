@@ -193,6 +193,10 @@ describe('rowCloakSwitchable', () => {
     expect(rowCloakSwitchable(parkedAs('CHECKPOINT'), open)).toBe(true);
     expect(rowCloakSwitchable(parkedAs(null, { epoch: 0, has_session: false }), open)).toBe(true);
   });
+  it('offers it for an account no fleet worker held that came with the seller\'s cookie', () => {
+    expect(rowCloakSwitchable(parkedAs(null, { epoch: 0, has_session: true, fleet_held: false }), open)).toBe(true);
+    expect(rowCloakSwitchable(parkedAs(null, { epoch: 0, has_session: true, fleet_held: true }), open)).toBe(false);
+  });
   it('reads the account\'s own state, not the state of the worker row it shares', () => {
     // homelab-2's worker row says SESSION_EXPIRED, but the account's own last state is HEALTHY.
     const moved = fleetRows({ ...input, slots: SLOTS.map(s => s.account_no === 7 ? { ...s, account_state: 'HEALTHY' } : s) }, NOW)
