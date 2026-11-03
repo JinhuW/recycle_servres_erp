@@ -1,6 +1,6 @@
 # CloakBrowser fingerprint probe: what a worker presents, with no account
 
-**2026-11-02, facebook-tracker 0.16.0 (unreleased), RS-505.**
+**2026-11-02, facebook-tracker 0.16.0, RS-505.** R1 passed on the dev host; see *R1: amd64 on worker-60-14* below.
 
 - **Image:** the worker image built locally from this branch
   (`aimm-recycle:cloak-dev`, linux/arm64). The first pass had the monitor at
@@ -150,7 +150,7 @@ Windows one. It is recorded here, not tuned.
 - **Key absence.** `docker history --no-trunc` and `docker inspect` count 0
   for `cb_`. The exported filesystem holds neither the key nor its sha256.
 
-### amd64: built, not yet probed (an R1 gate)
+### amd64: the local build
 
 `aimm-recycle:cloak-dev-amd64` builds from the same tree. It bakes the x86-64
 CloakBrowser 155.0.8059.39.2, and its key-absence checks are all 0. Its
@@ -188,8 +188,41 @@ docker run --rm --network cloakprobe -e PYTHONPATH=/app -e CLOAKBROWSER_LICENSE_
 python3 scripts/fingerprint-probe.py --compare stock.json cloak_a.json cloak_b.json cloak_a2.json
 ```
 
-R1 passes when `--compare` passes. Its canvas and WebGL hashes are amd64's
-own; the arm64 ones above don't carry over.
+R1 passes when `--compare` passes.
+
+### R1: amd64 on worker-60-14, `--compare` 31/31 pass
+
+Run on 2026-11-03 UTC against the released image
+`ghcr.io/jinhuw/aimm-recycle:0.16.0@sha256:fce04736d45bea11f83aa9502eb88ce09f3a5473d561a220f4eecc472ead7533`
+(label `com.recycleservers.cloak-version` = 155.0.8059.39.2), pulled on the
+host beside its nine running workers. Those were not touched, and no cloak
+worker existed, so the probe had the free key's one seat. The proxy was the
+same throwaway `proxy.py` sidecar on a private network; it, the network and
+the probe files were removed afterwards.
+
+| Run | webdriver | platform | canvas | WebGL | renderer | cores |
+| --- | --- | --- | --- | --- | --- | --- |
+| stock | true | Linux x86_64 | `bf15a9f204e8` | `1231b6cedb15` | ANGLE SwiftShader (Vulkan, Subzero) | 8 |
+| cloak A | false | Win32 | `62c165a0e1b0` | `bbec01befde1` | RTX 4070 SUPER, D3D11 | 24 |
+| cloak B | false | Win32 | `005f9a634953` | `123cddfe2d8d` | GTX 750 Ti, D3D11 | 16 |
+| cloak A again, fresh container | false | Win32 | `62c165a0e1b0` | `bbec01befde1` | RTX 4070 SUPER, D3D11 | 24 |
+
+- **A seed's fingerprint does not depend on the host.** The cloak canvas
+  and WebGL hashes are the arm64 ones exactly, so a seed is the same device
+  wherever its worker runs. Stock's WebGL hash differs from arm64's (its
+  SwiftShader backend is Vulkan here), and stock reports the host's cores.
+- **Window and locale** as on arm64: outer 1919 / inner 1911 / available
+  1920, an 8 px frame, `en-US, en` and `en-US,en;q=0.9`.
+- **Proxy.** Every run logged CONNECTs for `api.ipify.org` (the page),
+  `api4.ipify.org` (`context.request`) and `httpbin.org`. Only stock also
+  opened `www.google.com`.
+- **License outage.** `--network none`, and a run with `cloakbrowser.dev`,
+  `api.` and `www.` mapped to 127.0.0.1 behind the proxy, each failed
+  within seconds with `CloakBrowserLicenseError` (license server
+  unreachable), exit code 78, `park_reason` = `license_denied`.
+- **Key absence.** `docker history --no-trunc` and `docker inspect` of the
+  pushed image count 0 for `cb_`, and the build log holds no key. The key
+  reached the host only over ssh stdin, into the probe's environment.
 
 ## What the probe shows that is not yet right
 
@@ -207,5 +240,5 @@ own; the arm64 ones above don't carry over.
 - **The window, fixed in the second pass.** In the first pass, with no window
   manager, the cloak window opened 945 px wide on a 1920 px screen, unframed.
   It is now the screen's width with an 8 px frame. A Windows frame is ~16 px.
-- **Arm64 only so far.** The persona reports x86 64-bit either way. The amd64
-  run is the R1 gate above.
+- **Both architectures probed.** The persona reports x86 64-bit either way,
+  and the amd64 run on the dev host passed (R1 above).
