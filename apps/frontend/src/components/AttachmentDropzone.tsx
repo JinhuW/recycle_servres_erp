@@ -2,6 +2,11 @@ import { useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
 
+// A phone has no pointer to drag a file with, so "click" and "drag & drop"
+// read as desktop copy there.
+export const TOUCH_ONLY = typeof window !== 'undefined'
+  && window.matchMedia?.('(hover: none) and (pointer: coarse)').matches === true;
+
 // Shared drag-&-drop file picker for evidence/attachment surfaces (sell orders
 // and purchase orders). Presentational: the parent owns the selected-file state
 // and renders the AttachmentChip list itself.
@@ -67,8 +72,8 @@ export function AttachmentDropzone({
         <Icon name="upload" size={compact ? 16 : 20} style={{ color: 'var(--fg-subtle)' }} />
         <div style={{ marginTop: compact ? 3 : 6, fontSize: 13, color: 'var(--fg)' }}>
           <strong style={{ color: 'var(--accent-strong)' }}>
-            {uploading ? t('uploadingLabel') : t('clickToUpload')}
-          </strong> {!uploading && t('orDragDrop')}
+            {uploading ? t('uploadingLabel') : t(TOUCH_ONLY ? 'tapToUpload' : 'clickToUpload')}
+          </strong> {!uploading && !TOUCH_ONLY && t('orDragDrop')}
         </div>
         <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>{boxHint ?? t('uploadHint')}</div>
         <input

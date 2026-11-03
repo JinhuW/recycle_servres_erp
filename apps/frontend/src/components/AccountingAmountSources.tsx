@@ -4,10 +4,12 @@ import { fmtMoney } from '../lib/format';
 
 export function AccountingAmountSources({ f }: { f: AccountingEntryForm }) {
   const { t, locale } = useT();
-  if (f.editing) return null;
+  const hasOrder = f.suggested != null && f.suggested > 0;
+  // An empty row would still take a gap in the form's grid.
+  if (f.editing || (!hasOrder && !f.readings.some(r => r.receipt.currency) && !f.reading && !f.scanNotice)) return null;
   return (
     <div className="acct-amount-sources" aria-label={t('acctAmountSources')}>
-      {f.suggested != null && f.suggested > 0 && (
+      {hasOrder && (
         <button type="button" className="btn sm" onClick={f.useOrderAmount} disabled={f.busy}
                 aria-pressed={f.form.amountSource === 'order'}>
           {t('acctUseOrderAmount', { amount: fmtMoney(f.suggested, f.form.currency, locale) })}

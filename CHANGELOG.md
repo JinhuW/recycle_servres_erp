@@ -15,6 +15,21 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.413.1] - 2026-11-03
+
+### Fixed
+
+- **The phone's Record entry sheet fits the phone** (RS-515). The kind chips ran
+  just past the screen, which could hide the selected kind with nothing to say
+  the row went on, so they now wrap. On an iPhone the Date field outgrew its
+  column and overlapped Method. It now stays in its column with its value
+  left-aligned, and the single-line fields and currency toggle share one height.
+  The empty row that widened the gap under Amount is gone, and Screenshots has
+  the same label spacing as the other fields.
+- **A touch screen no longer says "Click to upload or drag & drop"** (RS-515).
+  Attachment boxes on a touch device read "Tap to add a file", and the RMB Flow
+  hint drops "Drop or click". Desktop wording is unchanged.
+
 ## [1.413.0] - 2026-11-03
 
 ### Changed
