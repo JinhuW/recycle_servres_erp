@@ -284,6 +284,24 @@ describe('POST /api/fleet/slots/:no/engine', () => {
     expect((await claim('lab-2')).account.no).toBe(no);
   });
 
+  it('gives a worker new enough for CloakBrowser the free cloak slot before a lower-numbered stock one', async () => {
+    await setSettings(manager, { cloak_enabled: true });
+    const stock = await seedSlot(1);
+    const no = await seedSlot(2, DEVICE, { session: false });
+    expect((await switchTo(manager, no, 'cloak')).status).toBe(200);
+    expect((await claim('lab-1')).account.no).toBe(no);
+    expect((await claim('lab-2')).account.no).toBe(stock);
+  });
+
+  it('keeps a cloak-capable worker on its own previous stock slot', async () => {
+    await setSettings(manager, { cloak_enabled: true });
+    const stock = await seedSlot(1);
+    await getTestDb()`UPDATE fleet_slots SET worker_id = 'lab-1', host_id = 'lab', last_host_id = 'lab' WHERE account_no = ${stock}`;
+    const no = await seedSlot(2, DEVICE, { session: false });
+    expect((await switchTo(manager, no, 'cloak')).status).toBe(200);
+    expect((await claim('lab-1')).account.no).toBe(stock);
+  });
+
   it('refuses Back to stock while a cloak worker is booting on the slot', async () => {
     await setSettings(manager, { cloak_enabled: true });
     const no = await seedSlot(1, DEVICE, { session: false });

@@ -3738,7 +3738,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     1, the license's session limit; parked cloak slots count) and the
     losses per 100 account-days over 30 days for stock, CloakBrowser and the
     stint baseline. The ERP worker page shows the engine, seed and GPU under
-    the browser.
+    the browser. Since v1.412.0 (RS-513) the license travels as its own Worker
+    secret, `CLOAKBROWSER_LICENSE_KEY`, added to a claim's env only for a
+    CloakBrowser device. A worker new enough for CloakBrowser takes a free
+    CloakBrowser slot before a free stock one. A release can be **staged**
+    (`POST /api/fleet/releases` with `staged: true`): new containers start
+    on its image and no running worker is replaced, so one canary worker can
+    try a new image without logging every account in again. The Hosts tab
+    shows "Staged: new workers only" until an ordinary release supersedes it.
   - **Tasks** (`/#/fleet/tasks`, v1.344.0): the belt, then the task table
     with the city log beside it. **The belt** is one row per enabled item on
     a 24-hour window centred on now, in quarter-hour buckets: searches done in

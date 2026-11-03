@@ -74,8 +74,43 @@ test('no secret, or one that is not an object of strings: no env key, one line w
     const res = await worker.fetch(claim(), env({ FLEET_WORKER_ENV: value }));
     assert.deepEqual(await res.json(), CLAIM);
     assert.equal(logs.length, 1);
+    assert.ok(!logs[0].includes('sk-made-up'));
     if (value) assert.ok(!logs[0].includes(value), 'the log line must not carry the secret');
   }
+});
+
+const CLOAK_KEY = 'cb_made_up_key';
+const cloakClaim = (engine) => () => new Response(JSON.stringify({ ...CLAIM, device: { browser_engine: engine, cloak_seed: 12345 } }), { status: 200 });
+
+test('the CloakBrowser key rides only on a claim for a cloak device', async () => {
+  answer = cloakClaim('cloak');
+  let body = await (await worker.fetch(claim(), env({ CLOAKBROWSER_LICENSE_KEY: CLOAK_KEY }))).json();
+  assert.deepEqual(body.env, { ...SHARED, CLOAKBROWSER_LICENSE_KEY: CLOAK_KEY });
+
+  for (const engine of ['stock', undefined]) {
+    answer = cloakClaim(engine);
+    body = await (await worker.fetch(claim(), env({ CLOAKBROWSER_LICENSE_KEY: CLOAK_KEY }))).json();
+    assert.deepEqual(body.env, SHARED);
+  }
+  answer = () => new Response(JSON.stringify(CLAIM), { status: 200 });
+  body = await (await worker.fetch(claim(), env({ CLOAKBROWSER_LICENSE_KEY: CLOAK_KEY }))).json();
+  assert.deepEqual(body.env, SHARED);
+});
+
+test('a cloak claim gets the key even when the shared env is missing, and a stock one gets nothing', async () => {
+  answer = cloakClaim('cloak');
+  let body = await (await worker.fetch(claim(), env({ FLEET_WORKER_ENV: undefined, CLOAKBROWSER_LICENSE_KEY: CLOAK_KEY }))).json();
+  assert.deepEqual(body.env, { CLOAKBROWSER_LICENSE_KEY: CLOAK_KEY });
+  answer = cloakClaim('stock');
+  body = await (await worker.fetch(claim(), env({ FLEET_WORKER_ENV: undefined, CLOAKBROWSER_LICENSE_KEY: CLOAK_KEY }))).json();
+  assert.equal(body.env, undefined);
+  assert.ok(logs.every((l) => !l.includes(CLOAK_KEY)));
+});
+
+test('a refused claim never carries the CloakBrowser key', async () => {
+  answer = () => new Response(JSON.stringify({ error: 'no_slot', device: { browser_engine: 'cloak' } }), { status: 409 });
+  const body = await (await worker.fetch(claim(), env({ CLOAKBROWSER_LICENSE_KEY: CLOAK_KEY }))).json();
+  assert.equal(body.env, undefined);
 });
 
 test('other routes and methods are not rewritten', async () => {

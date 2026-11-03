@@ -24,7 +24,7 @@ const CLOAK_SEATS_MAX = 100;
 const LOSS_DAYS = 30;
 
 const RELEASE_CHIP: Record<FleetRelease['state'], string> = {
-  rolling: 'chip info', done: 'chip pos', failed: 'chip neg', superseded: 'chip muted',
+  rolling: 'chip info', staged: 'chip warn', done: 'chip pos', failed: 'chip neg', superseded: 'chip muted',
 };
 
 /** The latest roll: its state, how far it got, the worker being replaced now and why it stopped if it did. */

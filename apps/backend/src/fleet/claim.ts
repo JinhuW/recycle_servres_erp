@@ -334,8 +334,11 @@ worker.post('/claim', claimAuth, async (c) => {
     const settings = await loadSettings(tx);
     // A worker too old to launch CloakBrowser would run a cloak slot on stock
     // and log in there; the slot waits for one that can.
-    const engineRuns = fleetVersionAtLeast(version, FLEET_CLOAK_MIN_WORKER_VERSION)
-      ? tx`TRUE` : tx`s.device->>'browser_engine' IS DISTINCT FROM 'cloak'`;
+    const cloakCapable = fleetVersionAtLeast(version, FLEET_CLOAK_MIN_WORKER_VERSION);
+    const engineRuns = cloakCapable ? tx`TRUE` : tx`s.device->>'browser_engine' IS DISTINCT FROM 'cloak'`;
+    // The few workers that can run a cloak slot are the only ones it can go
+    // to, so one of them takes it before a stock slot any worker could take.
+    const cloakFirst = cloakCapable ? tx`(s.device->>'browser_engine' = 'cloak') DESC NULLS LAST,` : tx``;
 
     // This boot's own slot (a retried claim) or the one held for it (a
     // handoff) waits for its lock: skipping it would hand the same boot a
@@ -361,6 +364,7 @@ worker.post('/claim', claimAuth, async (c) => {
         ${CLAIM_SELECT(tx)}
         WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AND ${engineRuns}
         ORDER BY (s.worker_id = ${worker_id}) DESC NULLS LAST,
+          ${cloakFirst}
           (s.last_host_id = ${host.host_id}) DESC NULLS LAST,
           s.account_no
         LIMIT 1

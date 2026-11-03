@@ -583,7 +583,9 @@ export type FleetHostReport = {
 export type FleetRelease = {
   image: string;
   version: string;
-  state: 'rolling' | 'done' | 'failed' | 'superseded';
+  /** `staged`: new containers start on `image`, and no running worker is
+   *  replaced (a one-account canary); an ordinary release supersedes it. */
+  state: 'rolling' | 'staged' | 'done' | 'failed' | 'superseded';
   started_at: string;
   finished_at: string | null;
   /** Workers already on `image` through this roll, and the ones left out

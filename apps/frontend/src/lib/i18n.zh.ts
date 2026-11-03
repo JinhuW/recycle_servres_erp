@@ -3896,6 +3896,7 @@ const zh: Record<string, string> = {
   fleetReleaseConfirm: "开始滚动升级",
   fleetReleaseStarted: "正在发布 {version}",
   fleetReleaseState_rolling: "发布中",
+  fleetReleaseState_staged: "已预置：仅新 worker",
   fleetReleaseState_done: "已发布",
   fleetReleaseState_failed: "已停止",
   fleetReleaseState_superseded: "已被取代",
