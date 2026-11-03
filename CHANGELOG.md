@@ -15,6 +15,25 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.411.0] - 2026-11-02
+
+### Fixed
+
+- **A fleet worker parked on a page that would not load retries by itself**
+  (RS-512). On 2026-11-01 a few minutes of DNS outage made homelab-2,
+  worker-60-14-6 and worker-60-14-3 park DEAD with `connect_failed`. That
+  park waits for a manager's Mark healthy, so all three sat idle for about
+  37 hours while their heartbeats looked fine. The ERP now sends `resume`
+  itself, on the heartbeat, to such a park on a 0.15.0+ worker: 10 minutes
+  in, then 30 minutes after that try, then hourly, 8 tries per run. It
+  starts counting again after an hour of Healthy. A proxy that is really
+  down still ends up parked and visible. No worker release and no login are
+  needed: the directive is the one Mark healthy already sends.
+- **The worker page says why the worker is parked.** It used to show a bare
+  "Dead" beside a fresh heartbeat and a green session. Now it reads "Parked:
+  couldn't reach Facebook · since …", has an Auto-retry row with the next try
+  or "gave up after 8 tries", and offers Mark healthy.
+
 ## [1.410.0] - 2026-11-02
 
 ### Added

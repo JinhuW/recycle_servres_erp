@@ -50,6 +50,7 @@ type WorkerRow = {
   version: string | null; last_heartbeat_at: Date | null; vnc_port: number | null; detail: unknown;
   relogin_id: string | null; relogin_requested_at: Date | null; relogin_requested_by: string | null; relogin_delivered_at: Date | null;
   resume_id: string | null; resume_requested_at: Date | null; resume_requested_by: string | null; resume_delivered_at: Date | null;
+  state_since: Date | null; auto_resumes: number;
 };
 
 function reloginOf(w: WorkerRow): FleetWorkerRelogin | null {
@@ -111,6 +112,8 @@ async function workerViews(sql: SqlLike): Promise<Map<string, WorkerView>> {
     last_heartbeat_at: iso(w.last_heartbeat_at),
     vnc_port: w.vnc_port,
     detail: isRecord(w.detail) ? w.detail : null,
+    state_since: iso(w.state_since),
+    auto_resumes: w.auto_resumes,
     relogin: reloginOf(w),
     resume: resumeOf(w),
     task: byWorker.get(w.worker_id) ?? null,
