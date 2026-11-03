@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-02
 reporter: jinhu
 branch: cloak-staged-canary
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1066, https://github.com/JinhuW/recycle_servres_erp/pull/1068
 version: 1.412.1
 related: [RS-505, RS-507]
 ---
@@ -60,3 +60,11 @@ the fonts licence.
 - v1.412.1: every unused pool account came with the seller's cookie, which
   the switch read as a live session and refused. An account no fleet worker
   has held (no claim by a fleet host, no stint under a worker) now switches.
+- Canary run 2026-11-03 on prod (release #1067): 0.16.0 staged at 18:09 UTC,
+  account #76 (seller batch Order 2822048) switched to CloakBrowser before
+  its first claim. homelab-10 started on 0.16.0 at 18:10:13, claimed it, and
+  hit a Facebook locked wall (CHECKPOINT) 17 s later: the seller's cookie
+  was invalid and the password login was walled. On stock, 30 of the 37
+  accounts claimed from the same batch were retired within hours, so this
+  single result does not separate the engine from the batch. No other
+  worker was restarted.
