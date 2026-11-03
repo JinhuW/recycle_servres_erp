@@ -42,7 +42,7 @@ type SlotRow = {
   account_no: number; worker_id: string | null; host_id: string | null; last_host_id: string | null; epoch: number;
   lease_expires_at: Date | null; proxy_url: string | null; proxy_id: number | null; device: unknown;
   quarantined_until: Date | null; note: string; parked: boolean; reserved_until: Date | null;
-  uid: string | null; pool_status: string; minutes_today: number; account_state: string | null; has_session: boolean;
+  uid: string | null; pool_status: string; minutes_today: number; account_state: string | null; has_session: boolean; fleet_held: boolean;
 };
 
 type WorkerRow = {
@@ -92,7 +92,11 @@ const SLOT_SELECT = (sql: SqlLike) => sql`
          a.uid, a.status AS pool_status,
          ${minutesTodaySql(sql, sql`s.account_no`)} AS minutes_today,
          ${ACCOUNT_STATE(sql)} AS account_state,
-         COALESCE(a.cookie_enc, '') <> '' AS has_session
+         COALESCE(a.cookie_enc, '') <> '' AS has_session,
+         (EXISTS (SELECT 1 FROM fb_worker_accounts w WHERE w.account_no = s.account_no
+                   AND lower(w.worker_id) <> lower(${FLEET_HOLDER}))
+          OR EXISTS (SELECT 1 FROM fb_pool_events e WHERE e.account_no = s.account_no AND e.kind = 'assigned'
+                       AND e.actor_id IS NULL AND e.actor_name LIKE 'fleet host %')) AS fleet_held
   FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no`;
 
 /** Every worker row with the task it holds, keyed by worker id. */
@@ -138,6 +142,7 @@ function slotView(r: SlotRow, budget: number, workersById: Map<string, WorkerVie
     reserved_until: iso(r.reserved_until),
     account_state: r.account_state,
     has_session: r.has_session,
+    fleet_held: r.fleet_held,
     uid: r.uid,
     pool_status: r.pool_status,
     minutes_today: Math.round(r.minutes_today),
@@ -386,7 +391,7 @@ slots.post('/:no/engine', async (c) => {
 
     if (device?.cloak_seed !== undefined) return conflict('cloak_seeded', `#${no} has had a CloakBrowser seed already`);
     if (!fleetCloakSwitchable({ ...slot, device })) {
-      return conflict('engine_live_session', `#${no} may still hold a live session (${where}); only an account that lost its session, or one never logged in, switches`);
+      return conflict('engine_live_session', `#${no} may still hold a live session (${where}); only an account that lost its session, or one no fleet worker has held, switches`);
     }
     const settings = await loadSettings(tx);
     if (!settings.cloak_enabled) return conflict('cloak_disabled', 'CloakBrowser is off in the fleet settings');

@@ -79,16 +79,18 @@ describe('fleetCloakFor', () => {
 });
 
 describe('fleetCloakSwitchable', () => {
-  const base = { epoch: 3, account_state: 'HEALTHY', has_session: true, device: null };
-  it('allows only an account that lost its session, or one never logged in', () => {
+  const base = { epoch: 3, account_state: 'HEALTHY', has_session: true, fleet_held: true, device: null };
+  it('allows only an account that lost its session, or one no fleet worker has held', () => {
     expect(fleetCloakSwitchable(base)).toBe(false);
     for (const account_state of [null, 'DEGRADED', 'DEAD']) expect(fleetCloakSwitchable({ ...base, account_state })).toBe(false);
     for (const account_state of ['SESSION_EXPIRED', 'CHECKPOINT', 'CHALLENGE', 'CHALLENGE_2FA']) {
       expect(fleetCloakSwitchable({ ...base, account_state })).toBe(true);
     }
-    const fresh = { epoch: 0, account_state: null, has_session: false, device: null };
+    const fresh = { epoch: 0, account_state: null, has_session: false, fleet_held: false, device: null };
     expect(fleetCloakSwitchable(fresh)).toBe(true);
-    expect(fleetCloakSwitchable({ ...fresh, has_session: true })).toBe(false);
+    // The seller's cookie on an account no fleet worker held carries no fleet fingerprint.
+    expect(fleetCloakSwitchable({ ...fresh, has_session: true })).toBe(true);
+    expect(fleetCloakSwitchable({ ...fresh, has_session: true, fleet_held: true })).toBe(false);
     expect(fleetCloakSwitchable({ ...fresh, epoch: 1 })).toBe(false);
     expect(fleetCloakSwitchable({ ...fresh, device: { ...DEVICE, cloak_seed: 12345 } as never })).toBe(false);
   });
@@ -203,12 +205,26 @@ describe('POST /api/fleet/slots/:no/engine', () => {
     expect((await deviceOf(no))!.browser_engine).toBe('cloak');
   });
 
-  it('refuses a slot no worker holds whose account has a saved session', async () => {
+  it('refuses a slot no worker holds whose account a fleet worker saved a session for', async () => {
     await setSettings(manager, { cloak_enabled: true });
     const no = await seedSlot(1);
+    await getTestDb()`INSERT INTO fb_pool_events (account_no, actor_id, actor_name, kind, status, detail)
+                      VALUES (${no}, NULL, 'fleet host lab', 'assigned', 'fleet', 'lab-1')`;
     const r = await switchTo(manager, no, 'cloak');
     expect(r.status).toBe(409);
     expect(r.body.error).toBe('engine_live_session');
+    const stint = await seedSlot(2);
+    await getTestDb()`INSERT INTO fb_worker_accounts (worker_id, account_no, uid, started_at, ended_at, outcome) VALUES ('homelab-3', ${stint}, 'uid-2', NOW() - interval '9 days', NOW() - interval '8 days', 'fleet')`;
+    expect((await switchTo(manager, stint, 'cloak')).body.error).toBe('engine_live_session');
+  });
+
+  it('switches an account no fleet worker held even with the seller\'s cookie, and says so on the slot', async () => {
+    await setSettings(manager, { cloak_enabled: true });
+    const no = await seedSlot(1);
+    const r = await switchTo(manager, no, 'cloak');
+    expect(r.status).toBe(200);
+    expect(r.body.slot).toMatchObject({ has_session: true, fleet_held: false });
+    expect(await deviceOf(no)).toMatchObject({ browser_engine: 'cloak', ...fleetCloakFor(no) });
   });
 
   it('refuses a parked slot whose account was HEALTHY or still booting', async () => {

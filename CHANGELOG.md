@@ -15,6 +15,20 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.412.1] - 2026-11-03
+
+### Fixed
+
+- **An account no fleet worker has held can switch to CloakBrowser even with
+  the seller's cookie** (RS-513). The switch refused any never-claimed
+  account that had a saved session. Every unused account in the pool came
+  with the seller's cookie, so none of them could be the CloakBrowser
+  canary. That cookie was never on a fleet fingerprint, and either engine
+  shows Facebook a new machine on its first login, so it is no reason to
+  refuse. A session a fleet worker saved still blocks the switch: one
+  claimed by a fleet host, or with a stint under a worker. The slot now
+  reports `fleet_held`.
+
 ## [1.412.0] - 2026-11-03
 
 ### Added
