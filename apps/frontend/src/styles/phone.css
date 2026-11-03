@@ -657,7 +657,17 @@
   background-color: color-mix(in oklch, var(--neg-soft, #fee2e2) 70%, white);
   border-color: var(--neg, #dc2626);
 }
-.ph-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ph-field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+/* iOS draws a date input as a native pill: wider than its column, taller than
+   a select beside it, its value centred. Make it a plain field. */
+.ph-field .input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  display: block;
+  text-align: left;
+}
+.ph-field .input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
 
 /* Sticky action footer */
 .ph-action-bar {

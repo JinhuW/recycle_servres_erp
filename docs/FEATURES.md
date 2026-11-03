@@ -2532,6 +2532,9 @@ is who paid, below).
     entry on the book without its link, and its history names the PO. The
     record is part of what was signed off, so the delete clears a sign-off
     and moves the entry's version (v1.317.4).
+  - **The phone's form shows every kind at once** (v1.413.1, RS-515): the kind
+    chips wrap rather than scroll. On a touch screen the screenshot box reads
+    *Tap to add a file*, as every attachment box on a touch device now does.
   - **Payment screenshots** (v1.333.0, RS-390). Each image is stored under
     the name the receipt OCR reads off it, `<date>-<method>-<amount>.png`,
     the same rename a PO's payment evidence gets. When the model can't read

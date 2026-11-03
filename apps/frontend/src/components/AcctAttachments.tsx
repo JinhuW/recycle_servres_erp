@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { AttachmentChip } from './AttachmentChip';
-import { AttachmentDropzone } from './AttachmentDropzone';
+import { AttachmentDropzone, TOUCH_ONLY } from './AttachmentDropzone';
 import { MAX_UPLOAD_BYTES } from '../lib/api';
 import { fmtBytes, fmtDateShort } from '../lib/format';
 import { useT } from '../lib/i18n';
 import { acctDeleteAttachment, acctUploadAttachment, type AcctAttachment } from '../lib/accounting';
 
 const ACCEPT = '.png,.jpg,.jpeg,.webp,.pdf,image/*,application/pdf';
+
+const boxHintKey = (paste?: boolean) =>
+  TOUCH_ONLY ? 'acctScreenshotsBoxTouch' : paste ? 'acctScreenshotsBoxPaste' : 'acctScreenshotsBox';
 
 // An entry's payment screenshots, saved live like the sell order's
 // attachments. The server names each by what the receipt OCR reads off it,
@@ -92,7 +95,7 @@ export function AcctAttachments({ entryId, initial, readOnly, onChanged, paste }
           compact
           accept={ACCEPT}
           uploading={uploading}
-          boxHint={uploading ? t('acctScreenshotsUploading') : t(paste ? 'acctScreenshotsBoxPaste' : 'acctScreenshotsBox')}
+          boxHint={uploading ? t('acctScreenshotsUploading') : t(boxHintKey(paste))}
           onFiles={files => void addFiles(files)}
         />
       )}
@@ -134,7 +137,7 @@ export function AcctPendingAttachments({ files, onAdd, onRemove, busy, paste }: 
         compact
         accept={ACCEPT}
         uploading={busy}
-        boxHint={t(paste ? 'acctScreenshotsBoxPaste' : 'acctScreenshotsBox')}
+        boxHint={t(boxHintKey(paste))}
         onFiles={onAdd}
       />
     </div>

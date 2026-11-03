@@ -178,7 +178,8 @@
 .acct-pick-row:last-child { border-bottom: 0; }
 .acct-pick-row:hover { background: var(--bg-soft); }
 .acct-pick-party { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-muted); }
-.acct-amount-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.acct-amount-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
+.acct-amount-row .seg button { min-width: 36px; }
 .acct-hint { font-size: 11.5px; color: var(--fg-subtle); margin-top: 4px; }
 .acct-error { font-size: 12.5px; color: var(--neg); }
 
@@ -394,6 +395,15 @@
   display: inline-flex; align-items: center; gap: 6px; }
 /* The sheet's form spaces its own fields. */
 .acct-form .ph-field { margin-top: 0; }
+/* Wrapped, not scrolled: the row only just overflows, which hid the selected
+   kind past the screen edge with nothing to say the row went on. */
+.acct-ph-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.acct-ph-kinds .ph-chip-btn { padding-inline: 10px; }
+/* One height down the form: iOS draws a date input taller than a select. */
+.acct-form .ph-field input.input,
+.acct-form .ph-field .select { height: 46px; }
+/* The screenshots box brings its own label; it reads as one more field. */
+.ph-ho-sheet .acct-form .label { display: block; margin-bottom: 5px; font-size: 11.5px; }
 .acct-ph-section .acct-card-rows { font-size: 13px; }
 .acct-ph-hero { padding: 16px 2px 14px; }
 .acct-ph-hero .acct-fig { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; }
