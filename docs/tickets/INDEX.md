@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-511](./RS-511-review-mode-applies-a-short-count-to-the-product-s-q.md) | done | story | P2 | Review mode applies a short count to the product's qty | 1.410.0 |
 | [RS-510](./RS-510-ledger-mismatch-flag-converts-usd-records-at-today-s.md) | backlog | bug | P2 | Ledger mismatch flag converts USD records at today's rate, not the booked one | — |
 | [RS-509](./RS-509-chip-die-code-accepts-any-three-letters-and-misses-a.md) | backlog | bug | P2 | Chip die code accepts any three letters and misses a bare HYNIX prefix | — |
 | [RS-508](./RS-508-fix-sell-order-numbering-bid-recording-and-review-fi.md) | done | bug | P1 | Fix sell-order numbering, bid recording and review findings before release | 1.409.1 |

@@ -4223,6 +4223,8 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-partial .bc-count-n b { color: var(--warn-strong); }
 .bc-absent .bc-count-n b { color: var(--neg); }
 .bc-absent-tag { margin-top: 2px; font-size: 11px; font-weight: 500; color: var(--neg); }
+/* Under the stepper, centred on it like the absent tag. */
+.bc-price-use.bc-apply-count { margin: 2px auto 0; }
 .bc-done .bc-count-n b { color: var(--accent-strong); }
 .bc-done-absent .bc-count-n b { color: var(--neg); }
 .bc-done .bc-pn { text-decoration: line-through; text-decoration-color: var(--fg-subtle); }
