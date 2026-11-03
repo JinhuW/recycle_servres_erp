@@ -3564,7 +3564,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   proxy defaults to a random one with room, or pick one from the dropdown
   (since v1.389.0, RS-471; a full one is disabled, and since v1.390.1 a
   picked proxy a reload removed or filled is not swapped for a random one:
-  the dialog says so and waits for another pick; two accounts per proxy by default, the
+  the dialog says so and waits for another pick; since v1.413.0, RS-514, a
+  proxy whose last health checks read down is disabled with "down", the
+  random pick prefers one that is up and never takes a down one, and the
+  backend refuses a down proxy with `proxy_down`; two accounts per proxy by default, the
   `Accounts per proxy` rule in Cities ▸ Rules; there are no home cities to
   pick since v1.374.0, RS-439), and the ERP makes the slot with a desktop browser made
   for the account (Chromium's own user agent, a common screen and scale

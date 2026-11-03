@@ -1,5 +1,5 @@
 import {
-  isFleetTimezone, parseProxyUrl, proxyLoad, type FleetDeviceProfile, type FleetProxy, type FleetSlot,
+  isFleetTimezone, parseProxyUrl, proxyLoad, type FleetDeviceProfile, type FleetProxy, type FleetProxyHealthState, type FleetSlot,
 } from '../../../lib/fleet';
 import { leaseLive } from './fleetBoard';
 
@@ -32,22 +32,35 @@ export function fleetRowAction(a: PoolRow, slot: FleetSlot | undefined, now: num
   return a.password && a.totp ? { kind: 'add' } : { kind: 'add-blocked' };
 }
 
-export type ProxyChoice = { proxy: FleetProxy; load: number; full: boolean };
+export type ProxyChoice = { proxy: FleetProxy; load: number; full: boolean; state: FleetProxyHealthState; down: boolean };
 
-/** Every proxy with how many accounts it carries, the emptiest first; a full one stays listed, disabled. */
-export function proxyChoices(proxies: readonly FleetProxy[], limit: number): ProxyChoice[] {
+/**
+ * Every proxy with how many accounts it carries and how its last checks went:
+ * the open ones first, emptiest first, then the down ones, then the full ones.
+ * A proxy missing from `health` (or with no health read at all) is unchecked.
+ */
+export function proxyChoices(
+  proxies: readonly FleetProxy[], limit: number, health: ReadonlyMap<number, FleetProxyHealthState> = new Map(),
+): ProxyChoice[] {
+  const rank = (c: ProxyChoice) => (c.full ? 2 : c.down ? 1 : 0);
   return proxies
     .map((proxy) => {
       const load = proxyLoad(proxy);
-      return { proxy, load, full: load >= limit };
+      const state = health.get(proxy.id) ?? 'unchecked';
+      return { proxy, load, full: load >= limit, state, down: state === 'down' };
     })
-    .sort((a, b) => Number(a.full) - Number(b.full) || a.load - b.load || a.proxy.label.localeCompare(b.proxy.label));
+    .sort((a, b) => rank(a) - rank(b) || a.load - b.load || a.proxy.label.localeCompare(b.proxy.label));
 }
 
-/** A proxy with room, any of them alike: the dialog's default when the manager does not pick one. */
+/** True when a new slot may go on the choice: room left and not failing its checks. */
+export const proxyOpen = (c: ProxyChoice): boolean => !c.full && !c.down;
+
+/** The dialog's default when the manager does not pick one: an open proxy, a healthy one while any is. */
 export function randomOpenProxy(choices: readonly ProxyChoice[], rand: () => number = Math.random): FleetProxy | null {
-  const open = choices.filter((c) => !c.full);
-  return open.length ? open[Math.floor(rand() * open.length)]!.proxy : null;
+  const open = choices.filter(proxyOpen);
+  const up = open.filter((c) => c.state === 'up');
+  const from = up.length ? up : open;
+  return from.length ? from[Math.floor(rand() * from.length)]!.proxy : null;
 }
 
 export const proxyExit = (p: Pick<FleetProxy, 'host' | 'port'>): string => `${p.host}:${p.port}`;

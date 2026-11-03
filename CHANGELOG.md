@@ -15,6 +15,21 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.413.0] - 2026-11-03
+
+### Changed
+
+- **Add to fleet skips a proxy that failed its checks** (RS-514). The dialog
+  read only how many accounts each proxy carried, so the random pick, or a
+  pick by hand, could put a new account on an exit the 5-minute health round
+  had marked down. Its first sign-in would then fail through a dead proxy,
+  and a failed sign-in is how accounts get checkpointed. The dialog now reads
+  proxy health. A down proxy is listed disabled with "down". The random pick
+  takes a proxy that is up while any is, and never a down one. When every
+  proxy with room is down, the dialog says so. `POST /api/fleet/slots`
+  refuses a down proxy with 409 `proxy_down`. A proxy never checked, or one
+  that missed a single check, is still allowed.
+
 ## [1.412.1] - 2026-11-03
 
 ### Fixed
