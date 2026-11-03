@@ -7,7 +7,8 @@ import { precheckPriceFile } from '../../lib/priceFilePrecheck';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
-import type { PriceApplyRow } from '../../lib/priceImport';
+import { usePreference } from '../../lib/preferences';
+import { marketSyncParts, type MarketSyncLine, type MarketSyncPart, type PriceApplyRow } from '../../lib/priceImport';
 
 // Vendor price round-trip inside the sell-order edit modal: download the bid
 // template, vendor fills unit prices, drop the file back here. The backend
@@ -64,7 +65,7 @@ function StepBadge({ n }: { n: number }) {
 }
 
 export function PriceImportSection({
-  orderId, currency, savedCurrency, locale, onApply,
+  orderId, currency, savedCurrency, locale, savedLines, dirty, onApply,
 }: {
   orderId: string;
   currency: string;
@@ -72,11 +73,19 @@ export function PriceImportSection({
   // switch not saved yet would put those numbers into the other currency.
   savedCurrency: string;
   locale: string;
+  savedLines: MarketSyncLine[];
+  // Sync to Market records saved prices, so unsaved edits would not be in it.
+  dirty: boolean;
   onApply: (rows: PriceApplyRow[]) => void;
 }) {
   const { t } = useT();
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const syncParts = marketSyncParts(savedLines);
+  const syncBlocked = dirty ? t('soMarketSyncSaveFirst')
+    : syncParts.length === 0 ? t('soMarketSyncNoParts')
+      : null;
 
   const downloadTemplate = async () => {
     try {
@@ -166,6 +175,23 @@ export function PriceImportSection({
           )}
         </div>
       </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+        <button className="btn sm" disabled={syncBlocked !== null} title={syncBlocked ?? undefined} onClick={() => setSyncing(true)}>
+          <Icon name="upload" size={13} /> {t('soMarketSyncButton')}
+        </button>
+        <span style={{ flex: '1 1 220px', fontSize: 12.5, color: 'var(--fg-subtle)' }}>
+          {syncBlocked ?? t('soMarketSyncHint')}
+        </span>
+      </div>
+      {syncing && (
+        <MarketSyncDialog
+          orderId={orderId}
+          parts={syncParts}
+          currency={savedCurrency}
+          locale={locale}
+          onClose={() => setSyncing(false)}
+        />
+      )}
       {preview && (
         <PriceImportPreviewDialog
           preview={preview}
@@ -312,6 +338,119 @@ function PriceImportPreviewDialog({
         <button className="btn" onClick={onCancel}>{t('cancel')}</button>
         <button className="btn accent" onClick={confirm} disabled={included.length === 0}>
           {t('soPriceImportConfirm', { n: String(included.length) })}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function MarketSyncDialog({
+  orderId, parts, currency, locale, onClose,
+}: {
+  orderId: string;
+  parts: MarketSyncPart[];
+  currency: string;
+  locale: string;
+  onClose: () => void;
+}) {
+  const { t } = useT();
+  const [lastPercent, setLastPercent] = usePreference('sellOrders.marketPercent', 90);
+  const [percentText, setPercentText] = useState(String(lastPercent));
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  const percent = percentText.trim() === '' ? NaN : Number(percentText);
+  const percentOk = Number.isFinite(percent) && percent > 0 && percent <= 100;
+  const included = parts.filter(p => !excluded.has(p.canonPart));
+
+  const toggle = (key: string) =>
+    setExcluded(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const confirm = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post<{ recorded: number }>(`/api/sell-orders/${orderId}/market-sync`, {
+        percent,
+        parts: included.map(p => p.canonPart),
+      });
+      setLastPercent(percent);
+      window.__showToast?.(t('soMarketSyncDone', { n: String(r.recorded) }), 'success');
+      onClose();
+    } catch (e) {
+      handleFetchError(e);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose} shellStyle={{ maxWidth: 680, width: 'calc(100vw - 80px)' }}>
+      <div className="modal-head">
+        <div className="modal-title">{t('soMarketSyncTitle')}</div>
+      </div>
+      <div className="modal-body" style={{ padding: 20, maxHeight: '60vh', overflowY: 'auto' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, marginBottom: 16 }}>
+          <span style={{ fontWeight: 500 }}>{t('soMarketSyncPercent')}</span>
+          <input
+            className="input mono"
+            type="number"
+            min={0.01}
+            max={100}
+            step="any"
+            autoFocus
+            value={percentText}
+            onChange={e => setPercentText(e.target.value)}
+            style={{ width: 80, textAlign: 'right' }}
+          />
+          <span style={{ color: 'var(--fg-subtle)' }}>{t('soMarketSyncPercentOf')}</span>
+        </label>
+        <table className="so-line-table">
+          <thead>
+            <tr>
+              <th style={{ width: 30 }}></th>
+              <th>{t('item')}</th>
+              <th className="num" style={{ width: 60 }}>{t('qty')}</th>
+              <th className="num" style={{ width: 110 }}>{t('soMarketSyncOrderPrice')}</th>
+              <th className="num" style={{ width: 110 }}>{t('soMarketSyncMarketPrice')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {parts.map(p => (
+              <tr key={p.canonPart} style={{ opacity: excluded.has(p.canonPart) ? 0.45 : 1 }}>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={!excluded.has(p.canonPart)}
+                    onChange={() => toggle(p.canonPart)}
+                  />
+                </td>
+                <td>
+                  <div style={{ fontWeight: 500, fontSize: 13 }}>{p.label}</div>
+                  <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, marginTop: 2 }}>
+                    <span className="mono">{p.partNumber}</span>
+                    {p.lineCount > 1 && (
+                      <span>{t('soPriceImportAppliesTo', { n: String(p.lineCount) })}</span>
+                    )}
+                  </div>
+                </td>
+                <td className="num mono">{p.qty}</td>
+                <td className="num mono" style={{ color: 'var(--fg-subtle)' }}>{fmtMoney(p.price, currency, locale)}</td>
+                <td className="num mono" style={{ fontWeight: 600 }}>
+                  {percentOk ? fmtMoney(p.price * percent / 100, currency, locale) : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={onClose}>{t('cancel')}</button>
+        <button className="btn accent" onClick={confirm} disabled={busy || !percentOk || included.length === 0}>
+          {t('soMarketSyncConfirm', { n: String(included.length) })}
         </button>
       </div>
     </Modal>

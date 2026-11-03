@@ -44,6 +44,8 @@ export type PrefMap = {
   // How a sell order's lines are grouped: where they ship from, or which PO
   // they came in on.
   'sellOrders.lineGroup': SellOrderLineGroupBy;
+  // The percent of a sell order's price Sync to Market last recorded.
+  'sellOrders.marketPercent': number;
   // The bench labels: Pack mode's per product, printed by itself as each is
   // packed, and Review mode's per PO box, printed by itself on approval. The
   // stock (width × height as it feeds) and the language the Bluetooth printer

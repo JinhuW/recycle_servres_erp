@@ -1789,15 +1789,23 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     and flags rows not in the order, unpriced, invalid, duplicated or
     priced per condition on a pre-v1.242.0 sheet. Confirming
     fills every line of each matched part. Nothing is written until Save,
-    which records the confirmed parts' saved prices on the Market board as
-    `bid:<order>` data points (v1.138.3); Cancel records nothing. Since
-    v1.409.1 (RS-508) a part whose price was typed over after the import is
-    not recorded as a bid, a later bid save of a part replaces the order's
-    earlier bid for it, closing the order withdraws its bids (the history's
-    *closed* entry lists them), and the card is shut while the order's
-    currency is switched but not saved, since the template and the preview
-    price in the saved one. It reads
+    and since v1.414.0 (RS-516) Save only prices the order. The card is shut
+    while the order's currency is switched but not saved, since the template
+    and the preview price in the saved one (v1.409.1). It reads
     the sheet through the reader the Market import and Review mode share.
+  - **Sync to Market** (v1.414.0, RS-516, managers) updates the Market sell
+    price from an open order, as its own action on the same card (`POST
+    /api/sell-orders/:id/market-sync`). It asks for a percent above 0 and up
+    to 100, starting at the manager's last-used one (90 the first time), and
+    lists each priced part on the order with its order price and resulting
+    Market price, in the order's currency. Confirming records the ticked parts
+    at once, at the percent of their saved qty-weighted USD price, as plain
+    `bid:<order>` readings: no note and no mention of the percent on the
+    Market side. The order's prices don't change. The button waits while the
+    order has unsaved changes. A later sync of a part replaces the order's
+    earlier reading, closing the order withdraws its readings (the history's
+    *closed* entry lists them), and Done records the full `sale:<order>`
+    price over them.
   - **The same sheet prices the PO in Review mode** (v1.313.0). Since
     v1.347.0 that preview expands grouped part-number cells and matches any
     Short code column as well, so Micron VPP and WSM under one module number
@@ -2801,9 +2809,9 @@ over MCP.
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
   on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
   and a price-list import on the Market page (`import:<email>`, v1.247.0).
-  A fifth is a sell-order save that followed a confirmed vendor price import
-  (`bid:<order>`, v1.138.3). It was off from v1.297.0 to v1.401.x and came
-  back with the import in v1.402.0. The Activity page shows the source per row; the
+  A fifth is a sell order's Sync to Market at a chosen percent (`bid:<order>`,
+  v1.414.0). From v1.138.3 this was a save following a vendor price import, off
+  from v1.297.0 to v1.401.x. The Activity page shows the source per row; the
   Market page shows only the price and its age.
   - **The scraper's push** (`POST /api/market/values`, bearer
     `market:write`) works on a part that has no price yet (v1.329.1). Until

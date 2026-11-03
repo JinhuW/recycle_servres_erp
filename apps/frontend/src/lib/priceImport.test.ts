@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyPriceRows, confirmedBidParts, mergeBidParts } from './priceImport';
+import { applyPriceRows, marketSyncParts } from './priceImport';
 
 type Line = {
   partNumber: string | null;
@@ -57,28 +57,19 @@ describe('applyPriceRows', () => {
   });
 });
 
-describe('mergeBidParts', () => {
-  it('keys on the part so a re-import replaces, not repeats', () => {
-    const first = mergeBidParts([], [
-      { canonPart: 'ABC123', price: 10 },
-      { canonPart: 'XYZ9', price: 5 },
+describe('marketSyncParts', () => {
+  const l = (partNumber: string | null, qty: number, nativeUnitPrice: number) =>
+    ({ partNumber, label: 'DIMM', qty, nativeUnitPrice });
+
+  it('rolls a part\'s lines into one qty-weighted price', () => {
+    const parts = marketSyncParts([l('ABC-123', 2, 100), l('abc123', 3, 50), l('XYZ-9', 1, 7)]);
+    expect(parts.map(p => [p.canonPart, p.qty, p.price, p.lineCount])).toEqual([
+      ['ABC123', 5, 70, 2],
+      ['XYZ9', 1, 7, 1],
     ]);
-    expect(first).toEqual([{ partNumber: 'ABC123', price: 10 }, { partNumber: 'XYZ9', price: 5 }]);
-    const again = mergeBidParts(first, [{ canonPart: 'ABC123', price: 12 }]);
-    expect(again).toEqual([{ partNumber: 'ABC123', price: 12 }, { partNumber: 'XYZ9', price: 5 }]);
-  });
-});
-
-describe('confirmedBidParts', () => {
-  const bids = [{ partNumber: 'ABC123', price: 40 }, { partNumber: 'XYZ9', price: 5 }, { partNumber: 'GONE1', price: 9 }];
-
-  it('sends a part still at the sheet\'s price on every line', () => {
-    const lines = [line({ unitPrice: 40 }), line({ unitPrice: 40, condition: 'Used' }), line({ partNumber: 'xyz-9', unitPrice: 5 })];
-    expect(confirmedBidParts(lines, bids)).toEqual([{ partNumber: 'ABC123' }, { partNumber: 'XYZ9' }]);
   });
 
-  it('drops a part whose price was typed over on any line, and one no longer on the order', () => {
-    const lines = [line({ unitPrice: 40 }), line({ unitPrice: 25 }), line({ partNumber: 'XYZ-9', unitPrice: 5 })];
-    expect(confirmedBidParts(lines, bids)).toEqual([{ partNumber: 'XYZ9' }]);
+  it('leaves out lines at 0, unpriced parts and lines with no part number', () => {
+    expect(marketSyncParts([l('ABC-123', 0, 100), l('XYZ-9', 4, 0), l(null, 1, 5)])).toEqual([]);
   });
 });

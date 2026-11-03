@@ -15,6 +15,22 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.414.0] - 2026-11-03
+
+### Changed
+
+- **A sell order updates the Market sell price with its own action, at a percent
+  you choose** (RS-516). Filling a vendor's sheet and saving used to write the
+  full price to the Market page as well, with no chance to choose what it
+  recorded. Fill + Save now only prices the order. A new **Sync to Market** button
+  on the order's import card asks for a percent, starting at the one you last
+  used (90% the first time), lists the order's priced parts with the Market price
+  each would get, and writes the ones you keep ticked straight away. The order's
+  own prices don't change, and the Market page shows only the resulting price,
+  with no mention of a discount. Syncing again replaces the order's earlier
+  reading, closing the order withdraws it, and reaching Done still records the
+  full sale price.
+
 ## [1.413.1] - 2026-11-03
 
 ### Fixed

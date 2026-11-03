@@ -3,8 +3,6 @@ import { canonPartCol, canonPartNumberJs } from './part-number';
 import { autoTrackParts, type TrackablePart } from './marketAutoTrack';
 import { appendPriceEvent, retractPriceEvents, type WithdrawnPrice } from './refPriceEvents';
 
-export type BidPart = { partNumber: string };
-
 type LineRow = {
   part_number: string | null;
   unit_price: number;
@@ -30,6 +28,9 @@ type RecordOptions = {
   // The order's earlier points under `source` for these parts are withdrawn
   // first, so a re-priced bid replaces its quote rather than repeating it.
   replace?: boolean;
+  // Share of the order's price the Market records. A part that comes to
+  // nothing is left out: a line can be saved at 0, and that is no market price.
+  percent?: number;
 };
 
 // One market data point per distinct product (canonical part number) on a
@@ -68,6 +69,10 @@ async function recordSellOrderDataPoints(
       });
     }
   }
+  const priceOf = (g: Group) => +((g.priceQty / g.qty) * (opts.percent ?? 100) / 100).toFixed(2);
+  if (opts.percent !== undefined) {
+    for (const [canon, g] of byCanon) if (priceOf(g) <= 0) byCanon.delete(canon);
+  }
   if (byCanon.size === 0) return { recorded: 0 };
 
   // Ensure a ref_prices row exists for every product being recorded.
@@ -91,10 +96,9 @@ async function recordSellOrderDataPoints(
   for (const [canon, g] of byCanon) {
     const refPriceId = idByCanon.get(canon);
     if (!refPriceId) continue; // autoTrackParts guarantees a row; defensive only
-    const price = +(g.priceQty / g.qty).toFixed(2);
     await appendPriceEvent(tx, {
       refPriceId,
-      price,
+      price: priceOf(g),
       source: opts.source,
       note: null,
       actorUserId,
@@ -126,22 +130,21 @@ export async function retractSaleDataPoints(
   return retractPriceEvents(tx, `sale:${sellOrderId}`);
 }
 
-// On a line save whose prices came from a confirmed vendor price import: the
-// customer's accepted quote is a market signal weeks before the deal closes.
-// `parts` are the part numbers the manager confirmed in the preview — the
-// sheet prices a part once, across its conditions; the order's other lines
-// keep whatever price they had and are not a bid. A later save of the same
-// part replaces its bid. Runs inside the save's tx, after
-// the lines are rewritten, so it reads the saved USD values.
-export async function recordBidDataPoints(
+// The manager's Sync to Market: the customer's quote is a market signal weeks
+// before the deal closes, at the share of it the manager chooses. The percent
+// is deliberately not recorded on the reading: the Market shows a plain price.
+// Reads the saved USD values. A later sync of the same part replaces this
+// order's reading of it.
+export async function syncMarketPrices(
   tx: TransactionSql,
   sellOrderId: string,
   actorUserId: string,
-  parts: BidPart[],
+  partNumbers: string[],
+  percent: number,
 ): Promise<{ recorded: number }> {
   const only = new Set<string>();
-  for (const p of parts) {
-    const canon = canonPartNumberJs(p.partNumber);
+  for (const p of partNumbers) {
+    const canon = canonPartNumberJs(p);
     if (canon) only.add(canon);
   }
   if (only.size === 0) return { recorded: 0 };
@@ -149,6 +152,7 @@ export async function recordBidDataPoints(
     source: bidSource(sellOrderId),
     only,
     replace: true,
+    percent,
   });
 }
 
