@@ -38,6 +38,15 @@ describe('Add to fleet', () => {
     expect(html).toContain('fpAddToFleetFull');
     expect(html).not.toContain('fpAddToFleetDevice');     // no proxy picked, so no timezone to show yet
   });
+  it('lists a down proxy disabled, and says so when every proxy with room is down', () => {
+    const one = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={2} health={new Map([[3, 'down']])} onClose={noop} onDone={noop} />);
+    expect(one).toMatch(/<option[^>]*value="3"[^>]*disabled=""|<option[^>]*disabled=""[^>]*value="3"/);
+    expect(one).toContain('fpAddToFleetDown');
+    expect(one).not.toContain('fpAddToFleetAllDown');
+    const all = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={2} health={new Map([[2, 'down'], [3, 'down']])} onClose={noop} onDone={noop} />);
+    expect(all).toContain('fpAddToFleetAllDown');
+    expect(all).toMatch(/<button type="submit"[^>]*disabled=""/);
+  });
   it('says every proxy is full when none has room', () => {
     const html = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={0} onClose={noop} onDone={noop} />);
     expect(html).toContain('fpAddToFleetAllFull');

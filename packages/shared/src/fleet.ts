@@ -846,6 +846,8 @@ export type FleetErrorCode =
   | 'account_busy' | 'no_login'
   /** The proxy already carries `max_accounts_per_proxy` non-parked slots. */
   | 'proxy_full'
+  /** The proxy failed its last health checks (proxyHealthState reads `down`). */
+  | 'proxy_down'
   /** Removing a proxy a non-parked slot uses. */
   | 'in_use'
   /** Removing a slot a worker holds (or a reservation does): park it first. */

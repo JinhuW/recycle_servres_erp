@@ -243,6 +243,24 @@ describe('add to fleet', () => {
     expect((await addSlot({ account_no: d, proxy_id: proxyId })).body.error).toBe('proxy_full');
   });
 
+  it('refuses a proxy whose last checks failed, and takes one that only blipped', async () => {
+    const db = getTestDb();
+    const check = (ago: number, ok: boolean) => db`
+      INSERT INTO fleet_proxy_checks (exit, source, proxy_id, checked_at, ok, latency_ms)
+      VALUES ('http://isp.example.net:10001', 'erp', ${proxyId}, NOW() - make_interval(mins => ${ago}), ${ok}, 300)`;
+    const [a, b] = [await account(1), await account(2)];
+    await check(10, true);
+    await check(5, false);
+    // One miss after a pass is degraded, not down.
+    expect((await addSlot({ account_no: a, proxy_id: proxyId })).status).toBe(201);
+    await check(0, false);
+    const down = await addSlot({ account_no: b, proxy_id: proxyId });
+    expect(down.status).toBe(409);
+    expect(down.body).toMatchObject({ error: 'proxy_down' });
+    expect(down.body.detail).toContain('isp.example.net');
+    expect(await pool(b)).toEqual({ status: 'available', holder_name: null });
+  });
+
   it('removes a slot nobody holds and puts the account back on the rack', async () => {
     const no = await account(1);
     await addSlot({ account_no: no, proxy_id: proxyId });
