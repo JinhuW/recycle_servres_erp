@@ -15,6 +15,19 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.410.0] - 2026-11-02
+
+### Added
+
+- **Review mode applies a short count to the PO** (RS-511). A product counted
+  short used to keep its PO qty, and the only fix was the Edit drawer, where
+  the qty had to be typed again. Now the Counted cell offers **Apply N** under
+  the stepper, and Finish review offers **Apply all counts** for every short
+  line. Both write the qty straight to the PO and keep the line checked. A
+  product with serials opens the Edit drawer with the qty already set, so the
+  manager picks which serials didn't arrive instead of having them guessed.
+  Lowering a qty through the drawer no longer drops the line's tick either.
+
 ## [1.409.1] - 2026-11-02
 
 ### Fixed

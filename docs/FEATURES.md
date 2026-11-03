@@ -477,6 +477,16 @@ is not a stage but a flag beside one, set once every line has sold
   - Checked is its own state, never inferred from the count. Lowering a line
     with − turns it amber and takes its tick away; ticking it then confirms
     the short count (v1.190.0). Finish review lists the lines checked short.
+  - **A short count can be applied to the PO** (v1.410.0, RS-511). Under a
+    count between 1 and qty − 1 sits **Apply N**, which sets the product's
+    qty on the PO to N. The line stays checked, or is checked by the click,
+    since those units were counted. A product with serials on file opens
+    its Edit drawer instead, with qty already at N, so the manager removes
+    the serials that didn't arrive. Finish review's short list has **Apply
+    all counts**, which writes every short line without serials in one save.
+    A line held by a shipped sell order has no Apply. A qty lowered in the
+    Edit drawer also keeps the line's tick now, and only a raised qty resets
+    it.
   - **The count can be typed as well as stepped** (v1.260.0). Clicking the
     number between − and + selects it. Enter or leaving the field saves it,
     and Escape restores it. The count is held between 0 and qty and meets
