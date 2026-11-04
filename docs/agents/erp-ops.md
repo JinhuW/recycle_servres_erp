@@ -171,6 +171,27 @@ them and recreate only `rs-coordinator`.
   whatever monitor and volume fields arrive, and logs each payload to the
   Worker's observability logs.
 
+## Performance evidence
+
+Start optimization work from `perf_rollups`, not from a feeling. Settings ▸
+Performance shows it, and managers can read the same data from
+`/api/perf/routes`, `/loads`, `/versions` and `/compare?from=&to=`.
+
+1. Rank by total time. A route called 40,000 times at 80 ms costs more than one
+   called twice at 8 s. Turn the machine-traffic filter off when the question is
+   about the fleet.
+2. Change it, and ship it as its own version where you can: rollups are per
+   release, so a release that bundles several changes can't separate them.
+3. Compare the two versions. Read the request counts first, because each release
+   sees different traffic, and a low-sample row means little.
+
+Limits: percentiles are bucket estimates, so a small move inside one bucket isn't
+evidence. Request time stops when the handler returns, so it doesn't cover the
+network or the browser. The `client timing` log line still has the fields rollups
+leave out, such as API calls per load and connection speed. Nothing records
+per-query time; `pg_stat_statements` would, but enabling it restarts the prod
+database, so ask the owner first.
+
 ## Infrastructure (Terraform)
 
 - `infra/terraform/` owns Cloudflare side: R2 attachments bucket, custom

@@ -11,6 +11,8 @@
 
 import { loadCallCounts } from './api';
 import { sendBeacon } from './beacon';
+import { pathToDesktopView, readPath, type DesktopViewId } from './route';
+import { PHONE_BREAKPOINT } from './viewport';
 
 // One per page load. A SPA route change is not a page load, and re-reporting on
 // each one would drown the signal in noise.
@@ -18,6 +20,12 @@ let sent = false;
 
 // null when the browser has no LCP support or nothing qualified before we sent.
 let lcp: number | null = null;
+
+// The page the load landed on, read when it starts: the report goes out seconds
+// later, by when the user may have moved on. A view id, never the path, which
+// can hold an order id or a token.
+let page: DesktopViewId | null = null;
+let shell: 'desktop' | 'mobile' | null = null;
 
 function observeLcp(): void {
   if (typeof PerformanceObserver === 'undefined') return;
@@ -52,6 +60,8 @@ function report(): void {
     // 'navigate' vs 'reload' vs 'back_forward' — a back_forward load is served
     // from the bfcache and its numbers mean something different.
     navType: nav.type,
+    shell,
+    page,
     // Request fan-out for this load, counted in api.ts.
     ...loadCallCounts(),
     // A phone on 3G and a desktop on the office LAN are different populations;
@@ -63,6 +73,8 @@ function report(): void {
 /** Start observing, and arrange to report once. Call once, after render. */
 export function installTiming(): void {
   if (typeof window === 'undefined' || typeof performance === 'undefined') return;
+  page = pathToDesktopView(readPath());
+  shell = window.innerWidth < PHONE_BREAKPOINT ? 'mobile' : 'desktop';
   observeLcp();
 
   // LCP is not final until the user interacts or the page is hidden, so waiting

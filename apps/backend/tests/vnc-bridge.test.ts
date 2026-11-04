@@ -5,6 +5,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { createAdaptorServer } from '@hono/node-server';
 import app from '../src/index';
 import { attachVncBridge, closeVncBridges, openVncBridges, VNC_SESSION_LAPSED } from '../src/vncBridge';
+import { flushPerf } from '../src/lib/perf';
 import { getTestDb, resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
@@ -119,6 +120,29 @@ function connect(path: string, opts: { token?: string; origin?: string; send?: s
 }
 
 describe('VNC bridge (/api/coordinator/vnc/:workerId/ws)', () => {
+  it('leaves a socket out of the request timings, which only see its authorization', async () => {
+    const { token } = await loginAs(ALEX);
+    await flushPerf(getTestDb());
+    const holdMs = 1000;
+    await new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${erpPort}/api/coordinator/vnc/ne-1/ws`, {
+        headers: { Cookie: `at=${token}`, Origin: 'http://localhost:5173' },
+      });
+      ws.once('error', reject);
+      ws.once('message', () => {
+        setTimeout(() => ws.close(), holdMs);
+      });
+      ws.once('close', () => resolve());
+    });
+    await flushPerf(getTestDb());
+
+    const rows = await getTestDb()<{ name: string; max_ms: number }[]>`
+      SELECT name, max_ms FROM perf_rollups WHERE kind = 'http' AND name LIKE '%vnc%'
+    `;
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(r.max_ms).toBeLessThan(holdMs);
+  });
+
   it('relays bytes both ways with the facade credentials kept server-side', async () => {
     const { token } = await loginAs(ALEX);
     const out = await connect('/api/coordinator/vnc/ne-1/ws', {
