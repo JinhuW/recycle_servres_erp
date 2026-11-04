@@ -30,19 +30,22 @@ INSERT INTO public.env_marker (name) VALUES ('dev');
 -- Blanked so dev holds neither the secrets nor blobs it can't open; the rows
 -- themselves stay, so the rack still looks real. One blob left behind 500s
 -- the page that reads it, so every *_enc column of every table is found here
--- rather than listed: a new one is cleared without an edit.
+-- rather than listed: a new one is cleared without an edit. A NOT NULL one gets
+-- an empty string, which restores fine and opens as nothing on dev: a mirror
+-- never unseals fleet_proxies.url_enc, the only such column so far.
 DO $$
 DECLARE c RECORD;
 BEGIN
   FOR c IN
-    SELECT cl.relname AS tbl, a.attname AS col
+    SELECT cl.relname AS tbl, a.attname AS col, a.attnotnull AS required
     FROM pg_catalog.pg_attribute a
     JOIN pg_catalog.pg_class cl ON cl.oid = a.attrelid
     JOIN pg_catalog.pg_namespace n ON n.oid = cl.relnamespace
     WHERE n.nspname = 'public' AND cl.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped
       AND a.attname ~ '_enc$'
   LOOP
-    EXECUTE pg_catalog.format('UPDATE public.%I SET %I = NULL WHERE %I IS NOT NULL', c.tbl, c.col, c.col);
+    EXECUTE pg_catalog.format('UPDATE public.%I SET %I = %s WHERE %I IS NOT NULL',
+                              c.tbl, c.col, CASE WHEN c.required THEN '''''' ELSE 'NULL' END, c.col);
   END LOOP;
 END $$;
 
