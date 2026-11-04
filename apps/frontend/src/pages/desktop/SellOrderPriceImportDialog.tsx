@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../../lib/api';
+import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { fmtMoney } from '../../lib/format';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
@@ -65,7 +65,7 @@ function StepBadge({ n }: { n: number }) {
 }
 
 export function PriceImportSection({
-  orderId, currency, savedCurrency, locale, savedLines, dirty, onApply,
+  orderId, currency, savedCurrency, locale, savedLines, linesVersion, dirty, onApply,
 }: {
   orderId: string;
   currency: string;
@@ -74,6 +74,8 @@ export function PriceImportSection({
   savedCurrency: string;
   locale: string;
   savedLines: MarketSyncLine[];
+  // The version of savedLines, so a sync can't record prices the dialog never showed.
+  linesVersion?: string;
   // Sync to Market records saved prices, so unsaved edits would not be in it.
   dirty: boolean;
   onApply: (rows: PriceApplyRow[]) => void;
@@ -187,6 +189,7 @@ export function PriceImportSection({
         <MarketSyncDialog
           orderId={orderId}
           parts={syncParts}
+          linesVersion={linesVersion}
           currency={savedCurrency}
           locale={locale}
           onClose={() => setSyncing(false)}
@@ -345,10 +348,11 @@ function PriceImportPreviewDialog({
 }
 
 function MarketSyncDialog({
-  orderId, parts, currency, locale, onClose,
+  orderId, parts, linesVersion, currency, locale, onClose,
 }: {
   orderId: string;
   parts: MarketSyncPart[];
+  linesVersion?: string;
   currency: string;
   locale: string;
   onClose: () => void;
@@ -377,18 +381,23 @@ function MarketSyncDialog({
       const r = await api.post<{ recorded: number }>(`/api/sell-orders/${orderId}/market-sync`, {
         percent,
         parts: included.map(p => p.canonPart),
+        ...(linesVersion ? { linesVersion } : {}),
       });
       setLastPercent(percent);
       window.__showToast?.(t('soMarketSyncDone', { n: String(r.recorded) }), 'success');
       onClose();
     } catch (e) {
-      handleFetchError(e);
+      if (e instanceof ApiError && (e.body as { code?: unknown } | null)?.code === 'lines_changed') {
+        showErrorDialog(t('soMarketSyncLinesChanged'));
+      } else {
+        handleFetchError(e);
+      }
       setBusy(false);
     }
   };
 
   return (
-    <Modal onClose={onClose} shellStyle={{ maxWidth: 680, width: 'calc(100vw - 80px)' }}>
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 680, width: 'calc(100vw - 80px)' }}>
       <div className="modal-head">
         <div className="modal-title">{t('soMarketSyncTitle')}</div>
       </div>
@@ -440,7 +449,7 @@ function MarketSyncDialog({
                 <td className="num mono">{p.qty}</td>
                 <td className="num mono" style={{ color: 'var(--fg-subtle)' }}>{fmtMoney(p.price, currency, locale)}</td>
                 <td className="num mono" style={{ fontWeight: 600 }}>
-                  {percentOk ? fmtMoney(p.price * percent / 100, currency, locale) : '—'}
+                  {percentOk ? fmtMoney(+(p.usdPrice * percent / 100).toFixed(2), 'USD', locale) : '—'}
                 </td>
               </tr>
             ))}
@@ -448,7 +457,7 @@ function MarketSyncDialog({
         </table>
       </div>
       <div className="modal-foot">
-        <button className="btn" onClick={onClose}>{t('cancel')}</button>
+        <button className="btn" onClick={onClose} disabled={busy}>{t('cancel')}</button>
         <button className="btn accent" onClick={confirm} disabled={busy || !percentOk || included.length === 0}>
           {t('soMarketSyncConfirm', { n: String(included.length) })}
         </button>

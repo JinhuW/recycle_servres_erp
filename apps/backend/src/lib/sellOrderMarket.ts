@@ -25,11 +25,8 @@ type RecordOptions = {
   source: string;
   // Lines to record, by canonical part number. Absent = every line.
   only?: Set<string>;
-  // The order's earlier points under `source` for these parts are withdrawn
-  // first, so a re-priced bid replaces its quote rather than repeating it.
-  replace?: boolean;
-  // Share of the order's price the Market records. A part that comes to
-  // nothing is left out: a line can be saved at 0, and that is no market price.
+  // Share of the order's price the Market records. A line saved at 0 is no
+  // market price, so it neither counts toward the average nor makes a reading.
   percent?: number;
 };
 
@@ -53,6 +50,7 @@ async function recordSellOrderDataPoints(
   for (const l of lines) {
     // A line held at 0 sold nothing and was priced for nothing.
     if (l.qty === 0) continue;
+    if (opts.percent !== undefined && l.unit_price <= 0) continue;
     const raw = (l.part_number ?? '').trim();
     if (!raw) continue;
     const canon = canonPartNumberJs(raw);
@@ -90,7 +88,6 @@ async function recordSellOrderDataPoints(
   `;
   const idByCanon = new Map<string, string>();
   for (const r of idRows) if (!idByCanon.has(r.canon)) idByCanon.set(r.canon, r.id);
-  if (opts.replace) await retractPriceEvents(tx, opts.source, [...idByCanon.values()]);
 
   let recorded = 0;
   for (const [canon, g] of byCanon) {
@@ -134,7 +131,8 @@ export async function retractSaleDataPoints(
 // before the deal closes, at the share of it the manager chooses. The percent
 // is deliberately not recorded on the reading: the Market shows a plain price.
 // Reads the saved USD values. A later sync of the same part replaces this
-// order's reading of it.
+// order's reading of it, even when the part now comes to nothing, and readings
+// of parts the order no longer prices go too: the dialog can't list those.
 export async function syncMarketPrices(
   tx: TransactionSql,
   sellOrderId: string,
@@ -142,21 +140,50 @@ export async function syncMarketPrices(
   partNumbers: string[],
   percent: number,
 ): Promise<{ recorded: number }> {
+  await retractUnpricedBids(tx, sellOrderId);
   const only = new Set<string>();
   for (const p of partNumbers) {
     const canon = canonPartNumberJs(p);
     if (canon) only.add(canon);
   }
   if (only.size === 0) return { recorded: 0 };
+  const source = bidSource(sellOrderId);
+  const earlier = await tx<{ id: string }[]>`
+    SELECT id FROM ref_prices
+    WHERE ${canonPartCol(tx, tx`part_number`)} = ANY(${[...only]}::text[])
+  `;
+  if (earlier.length) await retractPriceEvents(tx, source, earlier.map(r => r.id));
   return recordSellOrderDataPoints(tx, sellOrderId, actorUserId, {
-    source: bidSource(sellOrderId),
+    source,
     only,
-    replace: true,
     percent,
   });
 }
 
 const bidSource = (sellOrderId: string) => `bid:${sellOrderId}`;
+
+// A quote stands only while the order still prices the part. Called wherever
+// that can have stopped being true unseen: a line save, a sync, and Done, which
+// would otherwise leave a reading for something that never sold.
+export async function retractUnpricedBids(
+  tx: TransactionSql,
+  sellOrderId: string,
+): Promise<WithdrawnPrice[]> {
+  const source = bidSource(sellOrderId);
+  const held = await tx<{ id: string; part_number: string }[]>`
+    SELECT DISTINCT rp.id, rp.part_number
+    FROM ref_price_events e JOIN ref_prices rp ON rp.id = e.ref_price_id
+    WHERE e.source = ${source}
+  `;
+  if (held.length === 0) return [];
+  const lines = await tx<{ part_number: string | null }[]>`
+    SELECT part_number FROM sell_order_lines
+    WHERE sell_order_id = ${sellOrderId} AND qty > 0 AND unit_price > 0
+  `;
+  const priced = new Set(lines.map(l => canonPartNumberJs((l.part_number ?? '').trim())));
+  const gone = held.filter(r => !priced.has(canonPartNumberJs(r.part_number))).map(r => r.id);
+  return gone.length ? retractPriceEvents(tx, source, gone) : [];
+}
 
 // A sell order closed without a sale was never the customer's price, so its
 // bids leave the Market board with it.

@@ -59,7 +59,7 @@ describe('applyPriceRows', () => {
 
 describe('marketSyncParts', () => {
   const l = (partNumber: string | null, qty: number, nativeUnitPrice: number) =>
-    ({ partNumber, label: 'DIMM', qty, nativeUnitPrice });
+    ({ partNumber, label: 'DIMM', qty, nativeUnitPrice, unitPrice: nativeUnitPrice });
 
   it('rolls a part\'s lines into one qty-weighted price', () => {
     const parts = marketSyncParts([l('ABC-123', 2, 100), l('abc123', 3, 50), l('XYZ-9', 1, 7)]);
@@ -67,6 +67,14 @@ describe('marketSyncParts', () => {
       ['ABC123', 5, 70, 2],
       ['XYZ9', 1, 7, 1],
     ]);
+  });
+
+  it('leaves a lot priced at 0 out of the average, and carries the USD apart', () => {
+    const [part] = marketSyncParts([
+      { partNumber: 'ABC-123', label: 'DIMM', qty: 10, nativeUnitPrice: 720, unitPrice: 100 },
+      { partNumber: 'ABC-123', label: 'DIMM', qty: 5, nativeUnitPrice: 0, unitPrice: 0 },
+    ]);
+    expect(part).toMatchObject({ qty: 10, price: 720, usdPrice: 100, lineCount: 1 });
   });
 
   it('leaves out lines at 0, unpriced parts and lines with no part number', () => {

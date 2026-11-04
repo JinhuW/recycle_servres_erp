@@ -2190,6 +2190,7 @@ function SellOrderDetail({ id, onToast }: {
                     savedCurrency={order.currency}
                     locale={locale}
                     savedLines={order.lines}
+                    linesVersion={order.linesVersion}
                     dirty={!!dirty}
                     onApply={rows =>
                       setDraft(d => d && { ...d, lines: applyPriceRows(d.lines, rows) })}

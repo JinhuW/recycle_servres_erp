@@ -41,7 +41,7 @@ import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
 } from '../lib/fx';
-import { recordSaleDataPoints, retractSaleDataPoints, syncMarketPrices, retractBidDataPoints } from '../lib/sellOrderMarket';
+import { recordSaleDataPoints, retractSaleDataPoints, syncMarketPrices, retractBidDataPoints, retractUnpricedBids } from '../lib/sellOrderMarket';
 import type { WithdrawnPrice } from '../lib/refPriceEvents';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
@@ -624,7 +624,8 @@ sellOrders.post('/:id/market-sync', async (c) => {
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
 
-  const body = (await c.req.json().catch(() => null)) as { percent?: unknown; parts?: unknown } | null;
+  const body = (await c.req.json().catch(() => null)) as
+    { percent?: unknown; parts?: unknown; linesVersion?: unknown } | null;
   const percent = body?.percent;
   if (typeof percent !== 'number' || !Number.isFinite(percent) || percent <= 0 || percent > 100) {
     return c.json({ error: 'percent must be above 0 and at most 100' }, 400);
@@ -636,6 +637,10 @@ sellOrders.post('/:id/market-sync', async (c) => {
   ) {
     return c.json({ error: 'parts must be a non-empty array of part numbers' }, 400);
   }
+  const seenVersion = body?.linesVersion;
+  if (seenVersion !== undefined && typeof seenVersion !== 'string') {
+    return c.json({ error: 'linesVersion must be a string' }, 400);
+  }
 
   const outcome = await getDb(c.env).begin(async (tx) => {
     const head = (await tx<{ status: string }[]>`
@@ -645,11 +650,22 @@ sellOrders.post('/:id/market-sync', async (c) => {
     if (head.status === 'Done' || head.status === 'Closed') {
       return { kind: 'locked' as const, status: head.status };
     }
+    // The manager confirmed the prices the dialog showed, not whatever the
+    // lines hold by now.
+    if (seenVersion !== undefined) {
+      const now = await tx<VersionedLine[]>`
+        SELECT id, qty, unit_price::float AS unit_price, warehouse_id
+        FROM sell_order_lines WHERE sell_order_id = ${id}`;
+      if (linesVersion(now) !== seenVersion) return { kind: 'linesChanged' as const };
+    }
     return { kind: 'ok' as const, ...await syncMarketPrices(tx, id, u.id, parts as string[], percent) };
   });
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
   if (outcome.kind === 'locked') {
     return c.json({ error: `prices are locked on a ${outcome.status} order` }, 409);
+  }
+  if (outcome.kind === 'linesChanged') {
+    return c.json({ error: 'the products on this order changed since you opened it — reload it and sync again', code: 'lines_changed' }, 409);
   }
   return c.json({ recorded: outcome.recorded });
 });
@@ -1014,6 +1030,7 @@ sellOrders.patch('/:id', async (c) => {
       // A tick belongs to a line on the order: one left behind by a removed
       // line would read as packed when its lot is added back.
       await prunePackRows(tx, id);
+      await retractUnpricedBids(tx, id);
     }
 
     // Diff events — emitted only when something actually changed.
@@ -1955,6 +1972,7 @@ sellOrders.post('/:id/status', async (c) => {
 
       // A completed sale is the most authoritative price signal we have —
       // record one market data point per sold product.
+      await retractUnpricedBids(tx, id);
       await recordSaleDataPoints(tx, id, u.id);
     }
     return { kind: 'done' };

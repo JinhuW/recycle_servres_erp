@@ -1785,6 +1785,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     soMarketSyncMarketPrice: 'Market price',
     soMarketSyncConfirm: 'Sync {n} prices',
     soMarketSyncDone: '{n} prices synced to Market',
+    soMarketSyncLinesChanged: 'The products on this order changed after you opened it, so nothing was synced. Reload the order and sync again.',
     soPriceImportColumnsNotFound: 'Couldn’t find the Part Number / Unit Price columns in this file',
     soPriceImportNotXlsx: 'This isn’t an Excel (.xlsx) workbook — export or save it as .xlsx first',
     soPriceImportTooLarge: 'File is too large (max 8 MB)',

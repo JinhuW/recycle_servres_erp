@@ -33,6 +33,7 @@ export type MarketSyncLine = {
   label: string;
   qty: number;
   nativeUnitPrice: number;
+  unitPrice: number; // USD, what the Market records
 };
 
 export type MarketSyncPart = {
@@ -40,26 +41,29 @@ export type MarketSyncPart = {
   partNumber: string;
   label: string;
   qty: number;
-  // Qty-weighted across the part's lines, the same way the backend records it.
+  // Qty-weighted across the part's priced lines, the same way the backend
+  // records it: `price` in the order's currency, `usdPrice` in USD.
   price: number;
+  usdPrice: number;
   lineCount: number;
 };
 
 // What Sync to Market can offer: a part per canonical part number, leaving out
-// lines at qty 0 and a part with no price, which the backend would not record.
+// lines at qty 0 or priced at 0, which the backend would not count.
 export function marketSyncParts(lines: MarketSyncLine[]): MarketSyncPart[] {
-  const byCanon = new Map<string, MarketSyncPart & { priceQty: number }>();
+  const byCanon = new Map<string, MarketSyncPart & { priceQty: number; usdQty: number }>();
   for (const l of lines) {
     const canon = canonicalPartNumber(l.partNumber);
-    if (canon === '' || l.qty <= 0) continue;
+    if (canon === '' || l.qty <= 0 || l.unitPrice <= 0) continue;
     const part = byCanon.get(canon)
-      ?? { canonPart: canon, partNumber: l.partNumber ?? '', label: l.label, qty: 0, price: 0, lineCount: 0, priceQty: 0 };
+      ?? { canonPart: canon, partNumber: l.partNumber ?? '', label: l.label, qty: 0, price: 0, usdPrice: 0, lineCount: 0, priceQty: 0, usdQty: 0 };
     part.qty += l.qty;
     part.priceQty += l.nativeUnitPrice * l.qty;
+    part.usdQty += l.unitPrice * l.qty;
     part.lineCount += 1;
     byCanon.set(canon, part);
   }
-  return [...byCanon.values()]
-    .filter(p => p.priceQty > 0)
-    .map(({ priceQty, ...p }) => ({ ...p, price: priceQty / p.qty }));
+  return [...byCanon.values()].map(({ priceQty, usdQty, ...p }) => ({
+    ...p, price: priceQty / p.qty, usdPrice: usdQty / p.qty,
+  }));
 }

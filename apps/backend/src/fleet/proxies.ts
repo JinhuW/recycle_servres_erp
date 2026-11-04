@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono';
 import {
-  isFleetTimezone, parseProxyUrl, type FleetProxy, type FleetProxyPatch, type FleetProxyUse,
+  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, isFleetTimezone, parseProxyUrl, proxyHealthState,
+  type FleetProxy, type FleetProxyHealthState, type FleetProxyPatch, type FleetProxyUse,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
@@ -25,6 +26,27 @@ const MAX_NOTE = 500;
 type ProxyRow = {
   id: number; label: string; url_enc: string; host: string; port: number; timezone: string; note: string; created_at: Date;
 };
+
+/**
+ * What each listed proxy's recent checks say about putting a new account on
+ * it. Checks older than the Proxies tab's day say nothing: a health round that
+ * stopped must not refuse a proxy for the two weeks its rows are kept.
+ */
+export async function proxyStates(sql: SqlLike, proxyId?: number): Promise<Map<number, FleetProxyHealthState>> {
+  const rows = await sql<{ proxy_id: number; ok: boolean; latency_ms: number | null }[]>`
+    SELECT proxy_id, ok, latency_ms FROM (
+      SELECT proxy_id, ok, latency_ms,
+             ROW_NUMBER() OVER (PARTITION BY proxy_id ORDER BY checked_at DESC, id DESC) AS n
+      FROM fleet_proxy_checks
+      WHERE source = 'erp' AND proxy_id IS NOT NULL ${proxyId === undefined ? sql`` : sql`AND proxy_id = ${proxyId}`}
+        AND checked_at > NOW() - make_interval(secs => ${(FLEET_PROXY_BUCKETS * FLEET_PROXY_BUCKET_MS) / 1000})
+    ) recent
+    WHERE n <= 2
+    ORDER BY proxy_id, n`;
+  const byProxy = new Map<number, typeof rows[number][]>();
+  for (const r of rows) byProxy.set(r.proxy_id, [...(byProxy.get(r.proxy_id) ?? []), r]);
+  return new Map([...byProxy].map(([id, checks]) => [id, proxyHealthState(checks)]));
+}
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -134,6 +156,9 @@ proxies.put('/:id', async (c) => {
       if ((e as { code?: string }).code === UNIQUE_VIOLATION) return dupe(patch.url!.host, patch.url!.port);
       throw e;
     }
+    // Those checks judged the old exit, so the new one starts unchecked, like
+    // a proxy just added, rather than inheriting its verdict.
+    if (sealed) await tx`UPDATE fleet_proxy_checks SET proxy_id = NULL WHERE proxy_id = ${id}`;
     // The slots follow, in the pool-then-slot lock order every slot write takes.
     const nos = (await tx<{ account_no: number }[]>`SELECT account_no FROM fleet_slots WHERE proxy_id = ${id}`).map((r) => r.account_no);
     if (nos.length && (sealed || (patch.timezone && patch.timezone !== cur.timezone))) {
