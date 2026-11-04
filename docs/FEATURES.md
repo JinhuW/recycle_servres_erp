@@ -1537,24 +1537,25 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     warehouse tab, same part / label / condition — joins that product's #.
     Both packing lists keep their sorted rows, so a later product prints in
     its sorted place with its later # (`#1, #2, #9, #3`).
-  - **One RAM series is one #** (v1.404.0, RS-499; die from v1.405.1,
-    RS-501). A series is the module up to its die, the part the short code
-    names: Samsung `M471A1K43CB1`, SK Hynix `HMAA2GU6AJR`, Micron the module
-    code plus its die revision (`MTA36ASF2G72PZ-A2`). Lots of one series with
-    the same label and condition take one # in a warehouse tab, whatever their
-    speed, so `M471A1K43CB1-CRC` and `…CB1-CTD` are both `#1`, while
-    `…EB1-CWE` (E-die) gets its own #, as do `HMAA2GU6AJR8N` and
-    `HMAA2GU6CJR8N`. Lines numbered earlier keep their own #s, and since
-    v1.409.1 (RS-508) a new lot of a part numbered that way joins that part's
-    #, not the lowest of its series. The packing
-    lists still print each part number as its own row under the shared #.
-    Inventory's grouped view keeps its stricter module-family rule.
+  - **One RAM series is one #** (v1.404.0, RS-499; narrowed in v1.414.2,
+    RS-518). A series is one module family, read off the part number through
+    its speed, with the same label (brand, capacity), condition, rank and
+    short code. Lots of one series take one # in a warehouse tab, so
+    `M471A1K43CB1-CTD` and `…CB1-CTD7Q` are both `#1`, while `…CB1-CRC` gets
+    its own # even though its short code is also CB1. A blank rank or short
+    code stays apart from a recorded one, and a part number no scheme reads
+    (Kingston, for one) doesn't fold. Stored #s never change, so an order
+    numbered between v1.404.0 and v1.414.2 can show two rows under one #.
+    Lines numbered before v1.404.0 keep their own #s, and since v1.409.1
+    (RS-508) a new lot of a part numbered that way joins that part's #. The
+    packing lists still print each part number as its own row under the
+    shared #.
   - **The order table folds a series into one row** (v1.404.0). In view and
     edit, and in every grouping, two or more lines of one series show as one
-    row, closed by default. The row shows its # (`#1`, or `#1–3` on an order
-    numbered earlier), the label, every short code its lots carry, the spec
-    chips, with differing values joined (`2400/2666MHz`), and the series
-    as `M471A1K43CB1*`, whose part numbers are listed on hover. Qty and total are
+    row, closed by default. The row shows its # (`#1`, or `#2, 9` when its lots
+    hold several), the label, the short code, the spec chips, with differing
+    values joined, and the family as `M471A1K43CB1-CTD*`, whose part numbers
+    are listed on hover. Qty and total are
     summed. When the lots share a unit price, it shows as one value, and in
     the editor that field sets every lot's price at once. Otherwise the row
     shows the price range. The chevron opens the row onto its lots, each with

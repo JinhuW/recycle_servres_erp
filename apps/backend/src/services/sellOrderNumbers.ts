@@ -111,7 +111,10 @@ function foldLine(r: SheetLineRow): FoldLine {
     key,
     // What a new line's # is shared by: one RAM series takes one #, though
     // each part number still prints as its own row under it.
-    numKey: sellSeriesKey({ category, partNumber: part, label, condition }) ?? key,
+    numKey: sellSeriesKey({
+      category, partNumber: part, label, condition, rank: r.rank,
+      shortCode: ramShortCode({ brand: r.brand, partNumber: r.part_number, chipNumber: r.chip_number }),
+    }) ?? key,
     // A bid prices equivalent RAM once across module numbers. Unknown codes
     // keep the older part/spec grouping, separate from recorded chip dies.
     bidKey: hasInv && category === 'RAM'

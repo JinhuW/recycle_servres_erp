@@ -104,9 +104,8 @@ export type FoldedItem<T> = { line: T; idx: number } | SeriesFold<T>;
 
 export const isFold = <T>(it: FoldedItem<T>): it is SeriesFold<T> => 'members' in it;
 
-// One RAM series in a group — the same module, label and condition, whatever
-// its die or speed — reads as one row the user unfolds, where its first line
-// sat. A series of one line stays a plain row.
+// One RAM series in a group — see sellSeriesKey — reads as one row the user
+// unfolds, where its first line sat. A series of one line stays a plain row.
 export function foldSeries<T extends SellSeriesLine>(items: readonly { line: T; idx: number }[]): FoldedItem<T>[] {
   const byKey = new Map<string, SeriesFold<T>>();
   for (const it of items) {
