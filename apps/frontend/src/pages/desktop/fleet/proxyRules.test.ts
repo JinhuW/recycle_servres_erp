@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fleetDeviceFor, parseProxyUrl } from '../../../lib/fleet';
 import { NOW, PROXIES, SLOTS } from './fixtures';
-import { deviceSummary, fleetRowAction, proxyChoices, proxyDraftProblem, proxyPatch, randomOpenProxy } from './proxyRules';
+import { deviceSummary, fleetRowAction, proxyChangeVerdict, proxyChoices, proxyDraftProblem, proxyPatch, randomOpenProxy } from './proxyRules';
 
 const row = (status: string, over: Partial<{ holder: string | null; password: string; totp: string }> = {}) =>
   ({ status, holder: null, password: 'pw', totp: 'KEY', ...over });
@@ -88,5 +88,21 @@ describe('deviceSummary', () => {
     expect(s.timezone).toBe('America/Chicago');
     expect(s.screen).toBe(`${d.screen![0]}×${d.screen![1]}`);
     expect(s.scale).toBe(d.device_scale_factor);
+  });
+});
+
+describe('proxyChangeVerdict', () => {
+  const last = (ok: boolean) => ({ at: '2026-11-04T00:00:00Z', ok, latency_ms: ok ? 300 : null, exit_ip: null, city: null, region: null, country: null, org: null, error: null });
+  it('stops on a miss even when one blip only reads degraded', () => {
+    expect(proxyChangeVerdict({ state: 'degraded', last: last(false) })).toBe('blocked');
+    expect(proxyChangeVerdict({ state: 'down', last: last(false) })).toBe('blocked');
+  });
+  it('warns on a slow answer or a check that could not run', () => {
+    expect(proxyChangeVerdict({ state: 'degraded', last: last(true) })).toBe('warn');
+    expect(proxyChangeVerdict({ state: 'unchecked', last: null })).toBe('warn');
+    expect(proxyChangeVerdict(null)).toBe('warn');
+  });
+  it('is clean only for an answer that reads up', () => {
+    expect(proxyChangeVerdict({ state: 'up', last: last(true) })).toBe('ok');
   });
 });

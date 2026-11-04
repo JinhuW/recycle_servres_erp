@@ -15,6 +15,22 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.415.0] - 2026-11-04
+
+### Added
+
+- **A manager can move a fleet worker's account to another proxy, and has to
+  confirm it after seeing a live check** (RS-521). Some proxies are unreliable,
+  and the only ways off a bad exit were editing the proxy, which moves every
+  account on it, or removing and re-adding the account, which loses its browser
+  device. **Change proxy** on an ERP-fleet worker's page checks the chosen proxy
+  through the proxy itself, then shows the result, the browser clock change and
+  when the move takes effect. A proxy that failed the check cannot be confirmed.
+  `POST /api/fleet/slots/:no/proxy` refuses a call without `confirm: true` or
+  naming a proxy the slot has left. Nothing restarts: the worker moves at its
+  next normal start, the page says so until then, and the account's log records
+  who moved it.
+
 ## [1.414.4] - 2026-11-04
 
 ### Fixed

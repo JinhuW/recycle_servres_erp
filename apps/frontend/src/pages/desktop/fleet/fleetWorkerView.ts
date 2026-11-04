@@ -77,6 +77,13 @@ export function erpCityChips(d: FleetWorkerDetail, now: number = Date.now()): { 
   };
 }
 
+/** The exit a running worker still goes out through after its slot's proxy changed, or null when they agree. */
+export function erpProxyBehind(d: Pick<FleetWorkerDetail, 'proxy' | 'running_exit'>): string | null {
+  if (!d.proxy || !d.running_exit) return null;
+  const exit = d.running_exit.replace(/^[a-z0-9+.-]+:\/\//i, '');
+  return exit === `${d.proxy.host}:${d.proxy.port}` ? null : exit;
+}
+
 /** The proxy as the page names it: its label, then host:port and its clock. */
 export function erpProxyText(d: FleetWorkerDetail): { label: string; where: string } | 'unlisted' | null {
   if (d.proxy) return { label: d.proxy.label, where: `${d.proxy.host}:${d.proxy.port} · ${d.proxy.timezone}` };

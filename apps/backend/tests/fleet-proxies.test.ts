@@ -320,6 +320,104 @@ describe('add to fleet', () => {
   });
 });
 
+describe('POST /api/fleet/slots/:no/proxy', () => {
+  type Slot = { proxy_id: number | null; proxy_url: string | null; device: { timezone: string; screen: unknown }; epoch: number; worker_id: string | null; lease_expires_at: Date | null };
+  const slotRow = async (no: number) => (await getTestDb()<Slot[]>`SELECT * FROM fleet_slots WHERE account_no = ${no}`)[0];
+  const change = (no: number, body: unknown, as = token) => api<{ slot: SlotView } & Err>('POST', `/api/fleet/slots/${no}/proxy`, { token: as, body });
+  let ny: number;
+  let chi: number;
+  let no: number;
+
+  beforeEach(async () => {
+    ny = (await addProxy({ label: 'NY', url: url(10001), timezone: 'America/New_York' })).body.id;
+    chi = (await addProxy({ label: 'CHI', url: url(10002), timezone: 'America/Chicago' })).body.id;
+    no = await account(1);
+    expect((await addSlot({ account_no: no, proxy_id: ny })).status).toBe(201);
+  });
+
+  it('moves the slot: new sealed URL and clock, same device, lease and epoch, logged without a login', async () => {
+    const db = getTestDb();
+    await db`UPDATE fleet_slots SET worker_id = 'w-1', epoch = 4, lease_expires_at = NOW() + INTERVAL '10 minutes' WHERE account_no = ${no}`;
+    const before = await slotRow(no);
+    const r = await change(no, { proxy_id: chi, from_proxy_id: ny, confirm: true });
+    expect(r.status).toBe(200);
+    expect(r.body.slot).toMatchObject({ account_no: no, proxy_id: chi, has_proxy: true, worker_id: 'w-1' });
+    noSecret(r.body);
+    const after = await slotRow(no);
+    expect(unseal(after.proxy_url!, key())).toBe(url(10002));
+    expect(after.device).toEqual({ ...before.device, timezone: 'America/Chicago' });
+    expect(after).toMatchObject({ epoch: 4, worker_id: 'w-1', lease_expires_at: before.lease_expires_at });
+    const [event] = await db<{ kind: string; status: string; detail: string; actor_name: string }[]>`
+      SELECT kind, status, detail, actor_name FROM fb_pool_events WHERE account_no = ${no} AND kind = 'edited'`;
+    expect(event).toMatchObject({ kind: 'edited', status: 'fleet', detail: 'proxy isp.example.net:10001 -> isp.example.net:10002' });
+    noSecret(event);
+    expect(logged.join('\n')).not.toContain(SECRET);
+    // The stint and the pool holder are not part of a proxy change.
+    expect(await pool(no)).toMatchObject({ status: 'fleet' });
+  });
+
+  it('refuses a call that did not ask the manager, and changes nothing', async () => {
+    for (const confirm of [undefined, false, 'true', 1]) {
+      const r = await change(no, { proxy_id: chi, from_proxy_id: ny, ...(confirm === undefined ? {} : { confirm }) });
+      expect(r.status).toBe(422);
+      expect(r.body.detail).toContain('confirmed');
+    }
+    expect((await slotRow(no)).proxy_id).toBe(ny);
+  });
+
+  it('requires the proxy the manager confirmed from, and refuses when the slot moved since', async () => {
+    expect((await change(no, { proxy_id: chi, confirm: true })).status).toBe(422);
+    expect((await change(no, { proxy_id: chi, from_proxy_id: null, confirm: true })).body.error).toBe('proxy_changed');
+    const third = (await addProxy({ label: 'LA', url: url(10003), timezone: 'America/Los_Angeles' })).body.id;
+    expect((await change(no, { proxy_id: third, from_proxy_id: chi, confirm: true })).body.error).toBe('proxy_changed');
+    expect((await slotRow(no)).proxy_id).toBe(ny);
+  });
+
+  it('moves a slot off an unlisted proxy, naming it so in the log', async () => {
+    const db = getTestDb();
+    await db`UPDATE fleet_slots SET proxy_id = NULL WHERE account_no = ${no}`;
+    expect((await change(no, { proxy_id: chi, from_proxy_id: null, confirm: true })).status).toBe(200);
+    const [event] = await db<{ detail: string }[]>`SELECT detail FROM fb_pool_events WHERE account_no = ${no} AND kind = 'edited'`;
+    expect(event.detail).toBe('proxy an unlisted proxy -> isp.example.net:10002');
+  });
+
+  it('refuses the same, a missing, a full or a down proxy, and an unknown slot', async () => {
+    const send = (proxy_id: number, n = no) => change(n, { proxy_id, from_proxy_id: ny, confirm: true });
+    expect((await send(ny)).body.error).toBe('exists');
+    expect((await send(99999)).status).toBe(404);
+    expect((await send(chi, 99999)).status).toBe(404);
+
+    const db = getTestDb();
+    await db`INSERT INTO fleet_proxy_checks (exit, source, proxy_id, checked_at, ok, latency_ms)
+             VALUES ('http://isp.example.net:10002', 'erp', ${chi}, NOW(), FALSE, NULL)`;
+    expect((await send(chi)).body.error).toBe('proxy_down');
+
+    await db`DELETE FROM fleet_proxy_checks WHERE proxy_id = ${chi}`;
+    for (const n of [2, 3]) expect((await addSlot({ account_no: await account(n), proxy_id: chi })).status).toBe(201);
+    expect((await send(chi)).body.error).toBe('proxy_full');
+    expect((await slotRow(no)).proxy_id).toBe(ny);
+  });
+
+  it('is a manager\'s', async () => {
+    const { token: purchaser } = await loginAs(MARCUS);
+    expect((await change(no, { proxy_id: chi, from_proxy_id: ny, confirm: true }, purchaser)).status).toBe(403);
+    expect((await slotRow(no)).proxy_id).toBe(ny);
+  });
+
+  it('a claim after the change gets the new proxy', async () => {
+    const db = getTestDb();
+    await db`INSERT INTO fleet_hosts (host_id, token_hash, capacity, authoritative) VALUES ('lab', ${sha256hex(HOST_TOKEN)}, 2, TRUE)`;
+    await db`INSERT INTO fleet_items (name, phrases) VALUES ('server_ram', '["ram"]')`;
+    expect((await change(no, { proxy_id: chi, from_proxy_id: ny, confirm: true })).status).toBe(200);
+    const claimed = await api<ClaimAnswer>('POST', '/api/fleet/worker/claim', {
+      headers: { Authorization: `Bearer ${HOST_TOKEN}` }, body: { host_id: 'lab', worker_id: 'lab-1', version: '0.14.7' },
+    });
+    expect(claimed.status).toBe(200);
+    expect(claimed.body.proxy).toEqual({ url: url(10002) });
+    expect(claimed.body.device?.timezone).toBe('America/Chicago');
+  });
+});
+
 describe('fleetDeviceFor', () => {
   it('is fixed by the account number and picks a common screen with the viewport under the browser chrome', () => {
     const seen = new Set<string>();

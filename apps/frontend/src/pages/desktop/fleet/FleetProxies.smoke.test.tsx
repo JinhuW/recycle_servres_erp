@@ -14,7 +14,7 @@ vi.mock('../../../components/Modal', () => ({ Modal: ({ children }: { children: 
 vi.mock('../../../lib/errorToast', () => ({ handleFetchError: vi.fn(), showSuccessToast: vi.fn(), showWarnToast: vi.fn() }));
 
 const { PROXIES, SLOTS } = await import('./fixtures');
-const { AddToFleetDialog, ProxyDialog, RemoveFromFleetDialog } = await import('./FleetProxies');
+const { AddToFleetDialog, ChangeProxyDialog, ProxyDialog, RemoveFromFleetDialog } = await import('./FleetProxies');
 const noop = () => undefined;
 
 describe('Proxy form', () => {
@@ -60,5 +60,15 @@ describe('Add to fleet', () => {
     const html = renderToString(<RemoveFromFleetDialog slot={SLOTS.find(s => s.account_no === 40)!} onClose={noop} onDone={noop} />);
     expect(html).toContain('fpRemoveFromFleetTitle');
     expect(html).toContain('fpRemoveFromFleetBody');
+  });
+});
+
+describe('Change proxy', () => {
+  // renderToString does not run effects, so the list never loads here; what the
+  // confirm screen decides is proxyChangeVerdict (proxyRules.test.ts), and the
+  // dialog must show nothing and write nothing before it has a list.
+  it('renders nothing until the proxy list is read', () => {
+    const html = renderToString(<ChangeProxyDialog slot={SLOTS[0]} current={null} holder={null} onClose={noop} onDone={noop} />);
+    expect(html).toBe('');
   });
 });

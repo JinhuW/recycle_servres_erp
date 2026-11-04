@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
   fleetCloakFor, fleetCloakSwitchable, fleetDeviceFor, fleetReportedEngine, fleetStockRevertible, fleetResumable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
-  type FleetWorkerRelogin, type FleetWorkerResume,
+  type FleetWorkerRelogin, type FleetWorkerResume, type FbPoolStatus,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
@@ -351,6 +351,62 @@ slots.post('/:no/unpark', async (c) => {
   return c.json({ slot: await loadSlotView(sql, no) });
 });
 
+// ─── Changing a slot's proxy ──────────────────────────────────────────────────
+// Only the slot is written. A worker reads its proxy when it claims, so nothing
+// restarts: a running one keeps its exit until its next normal start, and that
+// start signs in from the new IP. That risk is why the call must say `confirm`
+// and name the proxy the manager confirmed from. The limit and the down rule
+// are Add to fleet's, with the same lock order.
+
+slots.post('/:no/proxy', async (c) => {
+  const no = parseNo(c.req.param('no'));
+  if (no === null) return c.json({ error: 'not_found' }, 404);
+  const input = await c.req.json().catch(() => null);
+  if (!isRecord(input)) return c.json(bad('expected an object').body, 422);
+  for (const k of Object.keys(input)) {
+    if (!['proxy_id', 'from_proxy_id', 'confirm'].includes(k)) return c.json(bad(`not a field: ${k}`).body, 422);
+  }
+  const { proxy_id: proxyId, from_proxy_id: fromId, confirm } = input;
+  if (!Number.isInteger(proxyId) || (proxyId as number) < 1) return c.json(bad('proxy_id').body, 422);
+  if (fromId !== null && (!Number.isInteger(fromId) || (fromId as number) < 1)) return c.json(bad('from_proxy_id must be the current proxy, or null').body, 422);
+  if (confirm !== true) return c.json(bad('a proxy change has to be confirmed').body, 422);
+  const toId = proxyId as number;
+  const user = c.var.user;
+  const sql = getDb(c.env);
+  const out = await sql.begin(async (tx): Promise<Refusal | { from: string; to: string; timezone: string }> => {
+    const [account] = await tx<{ status: FbPoolStatus }[]>`SELECT status FROM fb_pool_accounts WHERE no = ${no} FOR NO KEY UPDATE`;
+    const [proxy] = await tx<{ url_enc: string; host: string; port: number; timezone: string }[]>`
+      SELECT url_enc, host, port, timezone FROM fleet_proxies WHERE id = ${toId} FOR UPDATE`;
+    const [slot] = await tx<{ proxy_id: number | null; has_proxy: boolean }[]>`
+      SELECT proxy_id, proxy_url IS NOT NULL AS has_proxy FROM fleet_slots WHERE account_no = ${no} FOR UPDATE`;
+    if (!account || !slot) return notFound(`slot #${no}`);
+    if (!proxy) return notFound(`proxy ${toId}`);
+    const to = `${proxy.host}:${proxy.port}`;
+    if (slot.proxy_id === toId) return exists(`#${no} is on ${to} already`);
+    if (slot.proxy_id !== fromId) return conflict('proxy_changed', `#${no} moved to another proxy since this was opened; look again`);
+    const limit = (await loadSettings(tx)).max_accounts_per_proxy;
+    const [{ n }] = await tx<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM fleet_slots
+      WHERE proxy_id = ${toId} AND lease_expires_at IS DISTINCT FROM 'infinity'::timestamptz`;
+    if (n >= limit) return conflict('proxy_full', `${to} carries ${n} of ${limit} accounts`);
+    if ((await proxyStates(tx, toId)).get(toId) === 'down') {
+      return conflict('proxy_down', `${to} failed its last proxy checks; pick another proxy`);
+    }
+    const [old] = slot.proxy_id === null ? [] : await tx<{ host: string; port: number }[]>`
+      SELECT host, port FROM fleet_proxies WHERE id = ${slot.proxy_id}`;
+    const from = old ? `${old.host}:${old.port}` : slot.has_proxy ? 'an unlisted proxy' : 'no proxy';
+    await tx`
+      UPDATE fleet_slots SET proxy_url = ${proxy.url_enc}, proxy_id = ${toId},
+        device = CASE WHEN jsonb_typeof(device) = 'object' THEN jsonb_set(device, '{timezone}', to_jsonb(${proxy.timezone}::text)) ELSE device END
+      WHERE account_no = ${no}`;
+    await writeEvent(tx, user, 'edited', account.status, no, `proxy ${from} -> ${to}`);
+    return { from, to, timezone: proxy.timezone };
+  });
+  if (isRefusal(out)) return c.json(out.body, out.status);
+  wlog.info('fleet slot proxy changed', { accountNo: no, proxyId: toId, from: out.from, exit: out.to, timezone: out.timezone, by: user.email });
+  return c.json({ slot: await loadSlotView(sql, no) });
+});
+
 // ─── Browser engine ───────────────────────────────────────────────────────────
 // A slot moves to CloakBrowser only while its account has no live session:
 // the new fingerprint is a new machine, and a logged-in account that changes
@@ -538,6 +594,8 @@ workers.get('/:id', async (c) => {
     ? await sql<{ id: number; label: string; host: string; port: number; timezone: string }[]>`
         SELECT id, label, host, port, timezone FROM fleet_proxies WHERE id = ${slot.proxy_id}`
     : [];
+  const [stint] = held ? await sql<{ proxy_url: string | null }[]>`
+    SELECT proxy_url FROM fb_worker_accounts WHERE account_no = ${held.account_no} AND ended_at IS NULL` : [];
   const [acct] = no === null ? [] : await sql<AccountRow[]>`
     SELECT no, uid, email, status, holder_name, cookie_at,
            password_enc IS NOT NULL AS password, totp_enc IS NOT NULL AS totp,
@@ -581,6 +639,7 @@ workers.get('/:id', async (c) => {
     slot,
     holds_slot: !!held,
     proxy: proxy ?? null,
+    running_exit: stint?.proxy_url ?? null,
     account: acct ? {
       no: acct.no, uid: acct.uid, email: acct.email || null, status: acct.status, holder: acct.holder_name,
       cookie_at: iso(acct.cookie_at), secrets,

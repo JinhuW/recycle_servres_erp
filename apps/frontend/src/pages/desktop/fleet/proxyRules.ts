@@ -1,5 +1,5 @@
 import {
-  isFleetTimezone, parseProxyUrl, proxyLoad, type FleetDeviceProfile, type FleetProxy, type FleetProxyHealthState, type FleetSlot,
+  isFleetTimezone, parseProxyUrl, proxyLoad, type FleetDeviceProfile, type FleetProxy, type FleetProxyHealth, type FleetProxyHealthState, type FleetSlot,
 } from '../../../lib/fleet';
 import { leaseLive } from './fleetBoard';
 
@@ -61,6 +61,17 @@ export function randomOpenProxy(choices: readonly ProxyChoice[], rand: () => num
   const up = open.filter((c) => c.state === 'up');
   const from = up.length ? up : open;
   return from.length ? from[Math.floor(rand() * from.length)]!.proxy : null;
+}
+
+/**
+ * What a live check says about moving an account onto a proxy: a miss or a
+ * down verdict stops it, anything short of a clean answer warns (`check` null
+ * is a check that could not run).
+ */
+export function proxyChangeVerdict(check: Pick<FleetProxyHealth, 'state' | 'last'> | null): 'ok' | 'warn' | 'blocked' {
+  if (!check) return 'warn';
+  if (check.state === 'down' || check.last?.ok === false) return 'blocked';
+  return check.state === 'up' ? 'ok' : 'warn';
 }
 
 export const proxyExit = (p: Pick<FleetProxy, 'host' | 'port'>): string => `${p.host}:${p.port}`;
