@@ -462,6 +462,9 @@ export type FleetProxyHealth = {
   buckets: (Exclude<FleetProxyHealthState, 'unchecked'> | null)[];
 };
 
+/** The states Add to fleet goes by, as POST /slots judges them. A proxy not listed is unchecked. */
+export type FleetProxyStates = { states: { proxy_id: number; state: FleetProxyHealthState }[] };
+
 export type FleetProxyHealthAnswer = {
   proxies: FleetProxyHealth[];
   /** When the last full round ran, and what the console said for the coordinator's ports. */
@@ -846,6 +849,8 @@ export type FleetErrorCode =
   | 'account_busy' | 'no_login'
   /** The proxy already carries `max_accounts_per_proxy` non-parked slots. */
   | 'proxy_full'
+  /** The proxy failed its last health checks (proxyHealthState reads `down`). */
+  | 'proxy_down'
   /** Removing a proxy a non-parked slot uses. */
   | 'in_use'
   /** Removing a slot a worker holds (or a reservation does): park it first. */

@@ -40,6 +40,19 @@ describe('proxyChoices', () => {
     expect(randomOpenProxy(c, () => 0.99)!.id).toBe(2);
     expect(randomOpenProxy(proxyChoices(PROXIES, 0))).toBeNull();
   });
+  it('never draws a down proxy, and draws a healthy one while any is', () => {
+    const down3 = proxyChoices(PROXIES, 2, new Map([[3, 'down']]));
+    expect(down3.map((x) => [x.proxy.id, x.down])).toEqual([[2, false], [3, true], [1, false]]);
+    expect(randomOpenProxy(down3, () => 0)!.id).toBe(2);
+    expect(randomOpenProxy(down3, () => 0.99)!.id).toBe(2);
+    const up2 = proxyChoices(PROXIES, 2, new Map([[2, 'up'], [3, 'degraded']]));
+    expect(randomOpenProxy(up2, () => 0)!.id).toBe(2);
+    expect(randomOpenProxy(up2, () => 0.99)!.id).toBe(2);
+    // None up: any open one, unchecked or degraded alike.
+    const none = proxyChoices(PROXIES, 2, new Map([[2, 'degraded']]));
+    expect(randomOpenProxy(none, () => 0)!.id).toBe(3);
+    expect(randomOpenProxy(proxyChoices(PROXIES, 2, new Map([[2, 'down'], [3, 'down']])))).toBeNull();
+  });
 });
 
 describe('proxy form', () => {

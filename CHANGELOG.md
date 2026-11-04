@@ -15,6 +15,82 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.414.1] - 2026-11-03
+
+### Fixed
+
+Fixes from the code review before releasing v1.413.0 to v1.414.0 (RS-517).
+
+- **Sync to Market records the prices the dialog showed.** If someone saved the
+  order's lines after the dialog opened, the sync used to write prices the
+  manager never saw while reporting success. It now refuses and writes nothing.
+- **A lot priced at 0 no longer drags a part's Market price down.** 10 units at
+  $100 plus a new lot of 5 at $0 recorded $60 at 90% instead of $90.
+- **A quote leaves the Market page when the order stops pricing the part.**
+  Removing a part or holding it at 0 left its reading in place, with no way to
+  withdraw it, and reaching Done kept it as a quote that never sold. The next
+  save, sync or Done now takes it back. A sync that rounds to nothing does too.
+- **The dialog's Market price is in USD**, as the Market page shows it. A CNY
+  order used to show ¥648 for what the Market recorded as $90.
+- **Sync to Market can't be dismissed mid-request**, which looked like a cancel
+  while the write still went through.
+- **A proxy's new URL isn't judged by the old exit's checks.** Editing a working
+  proxy to a dead URL kept reading healthy until the next round, and fixing a
+  dead one kept being refused. A new URL now starts unchecked.
+- **Old proxy checks no longer refuse a proxy.** If the health round stopped, two
+  old failures locked a proxy out for the 14 days the rows are kept. The Add to
+  fleet guard and dialog now share one reading, limited to the last 24 hours, so
+  they can't disagree either.
+- **Add to fleet doesn't draw the same dead proxy twice.** A `proxy_down` refusal
+  now marks it down in the open dialog. The dialog also reads a small states
+  endpoint rather than the Proxies tab's full day of checks.
+
+## [1.414.0] - 2026-11-03
+
+### Changed
+
+- **A sell order updates the Market sell price with its own action, at a percent
+  you choose** (RS-516). Filling a vendor's sheet and saving used to write the
+  full price to the Market page as well, with no chance to choose what it
+  recorded. Fill + Save now only prices the order. A new **Sync to Market** button
+  on the order's import card asks for a percent, starting at the one you last
+  used (90% the first time), lists the order's priced parts with the Market price
+  each would get, and writes the ones you keep ticked straight away. The order's
+  own prices don't change, and the Market page shows only the resulting price,
+  with no mention of a discount. Syncing again replaces the order's earlier
+  reading, closing the order withdraws it, and reaching Done still records the
+  full sale price.
+
+## [1.413.1] - 2026-11-03
+
+### Fixed
+
+- **The phone's Record entry sheet fits the phone** (RS-515). The kind chips ran
+  just past the screen, which could hide the selected kind with nothing to say
+  the row went on, so they now wrap. On an iPhone the Date field outgrew its
+  column and overlapped Method. It now stays in its column with its value
+  left-aligned, and the single-line fields and currency toggle share one height.
+  The empty row that widened the gap under Amount is gone, and Screenshots has
+  the same label spacing as the other fields.
+- **A touch screen no longer says "Click to upload or drag & drop"** (RS-515).
+  Attachment boxes on a touch device read "Tap to add a file", and the RMB Flow
+  hint drops "Drop or click". Desktop wording is unchanged.
+
+## [1.413.0] - 2026-11-03
+
+### Changed
+
+- **Add to fleet skips a proxy that failed its checks** (RS-514). The dialog
+  read only how many accounts each proxy carried, so the random pick, or a
+  pick by hand, could put a new account on an exit the 5-minute health round
+  had marked down. Its first sign-in would then fail through a dead proxy,
+  and a failed sign-in is how accounts get checkpointed. The dialog now reads
+  proxy health. A down proxy is listed disabled with "down". The random pick
+  takes a proxy that is up while any is, and never a down one. When every
+  proxy with room is down, the dialog says so. `POST /api/fleet/slots`
+  refuses a down proxy with 409 `proxy_down`. A proxy never checked, or one
+  that missed a single check, is still allowed.
+
 ## [1.412.1] - 2026-11-03
 
 ### Fixed

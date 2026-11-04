@@ -16,31 +16,6 @@ export type PriceApplyRow = {
   price: number;
 };
 
-// The parts the sheet priced, at the price it gave. Keyed the way
-// applyPriceRows matches, so a second import of the same part replaces rather
-// than repeats it.
-export type ImportedBid = { partNumber: string; price: number };
-// What the save sends the backend as a confirmed bid.
-export type BidPart = { partNumber: string };
-
-export function mergeBidParts(current: ImportedBid[], rows: PriceApplyRow[]): ImportedBid[] {
-  const byPart = new Map<string, ImportedBid>();
-  for (const p of current) byPart.set(p.partNumber, p);
-  for (const r of rows) byPart.set(r.canonPart, { partNumber: r.canonPart, price: r.price });
-  return [...byPart.values()];
-}
-
-// The imported parts still at the sheet's price on every line. A price typed
-// over the import afterwards is the manager's, not the customer's bid.
-export function confirmedBidParts(lines: PriceApplyLine[], bids: ImportedBid[]): BidPart[] {
-  return bids
-    .filter(b => {
-      const own = lines.filter(l => canonicalPartNumber(l.partNumber) === b.partNumber);
-      return own.length > 0 && own.every(l => l.unitPrice === b.price);
-    })
-    .map(b => ({ partNumber: b.partNumber }));
-}
-
 export function applyPriceRows<L extends PriceApplyLine>(
   lines: L[],
   rows: PriceApplyRow[],
@@ -51,4 +26,44 @@ export function applyPriceRows<L extends PriceApplyLine>(
     const row = rows.find(r => r.canonPart === canon);
     return row ? { ...line, unitPrice: row.price } : line;
   });
+}
+
+export type MarketSyncLine = {
+  partNumber: string | null;
+  label: string;
+  qty: number;
+  nativeUnitPrice: number;
+  unitPrice: number; // USD, what the Market records
+};
+
+export type MarketSyncPart = {
+  canonPart: string;
+  partNumber: string;
+  label: string;
+  qty: number;
+  // Qty-weighted across the part's priced lines, the same way the backend
+  // records it: `price` in the order's currency, `usdPrice` in USD.
+  price: number;
+  usdPrice: number;
+  lineCount: number;
+};
+
+// What Sync to Market can offer: a part per canonical part number, leaving out
+// lines at qty 0 or priced at 0, which the backend would not count.
+export function marketSyncParts(lines: MarketSyncLine[]): MarketSyncPart[] {
+  const byCanon = new Map<string, MarketSyncPart & { priceQty: number; usdQty: number }>();
+  for (const l of lines) {
+    const canon = canonicalPartNumber(l.partNumber);
+    if (canon === '' || l.qty <= 0 || l.unitPrice <= 0) continue;
+    const part = byCanon.get(canon)
+      ?? { canonPart: canon, partNumber: l.partNumber ?? '', label: l.label, qty: 0, price: 0, usdPrice: 0, lineCount: 0, priceQty: 0, usdQty: 0 };
+    part.qty += l.qty;
+    part.priceQty += l.nativeUnitPrice * l.qty;
+    part.usdQty += l.unitPrice * l.qty;
+    part.lineCount += 1;
+    byCanon.set(canon, part);
+  }
+  return [...byCanon.values()].map(({ priceQty, usdQty, ...p }) => ({
+    ...p, price: priceQty / p.qty, usdPrice: usdQty / p.qty,
+  }));
 }

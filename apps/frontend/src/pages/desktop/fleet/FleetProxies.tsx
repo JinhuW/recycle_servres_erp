@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { Modal } from '../../../components/Modal';
 import { handleFetchError, showSuccessToast, showWarnToast } from '../../../lib/errorToast';
 import {
-  fleetApi, fleetDeviceFor, fleetErrorCode, type FleetProxy, type FleetSlot,
+  fleetApi, fleetDeviceFor, fleetErrorCode, type FleetProxy, type FleetProxyHealthState, type FleetSlot,
 } from '../../../lib/fleet';
 import { ApiError } from '../../../lib/api';
 import { useT } from '../../../lib/i18n';
-import { deviceSummary, proxyChoices, proxyDraftProblem, proxyExit, proxyPatch, randomOpenProxy, type ProxyDraft } from './proxyRules';
+import { deviceSummary, proxyChoices, proxyDraftProblem, proxyExit, proxyOpen, proxyPatch, randomOpenProxy, type ProxyDraft } from './proxyRules';
 import { ConfirmDialogBody } from './shared';
 import '../../../styles/fleet.css';
 
@@ -138,18 +138,32 @@ export function RemoveProxyDialog({ proxy, onClose, onDone }: { proxy: FleetProx
   );
 }
 
-export function AddToFleetDialog({ no, proxies, limit, onClose, onDone }: {
-  no: number; proxies: FleetProxy[]; limit: number; onClose: () => void; onDone: () => void;
+type ProxyHealthMap = ReadonlyMap<number, FleetProxyHealthState>;
+
+export function AddToFleetDialog({ no, proxies, limit, health: given, onClose, onDone }: {
+  no: number; proxies: FleetProxy[]; limit: number; health?: ProxyHealthMap; onClose: () => void; onDone: () => void;
 }) {
   const { t } = useT();
-  const choices = useMemo(() => proxyChoices(proxies, limit), [proxies, limit]);
+  // Until the health read answers, or when it fails, no proxy counts as down:
+  // the backend refuses a down one anyway.
+  const [health, setHealth] = useState<ProxyHealthMap>(() => given ?? new Map());
+  useEffect(() => {
+    if (given) return;
+    let live = true;
+    fleetApi.proxyStates().then((h) => {
+      if (live) setHealth(new Map(h.states.map((s) => [s.proxy_id, s.state])));
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [given]);
+  const choices = useMemo(() => proxyChoices(proxies, limit, health), [proxies, limit, health]);
   // null is "any proxy with room", drawn when the form is sent.
   const [proxyId, setProxyId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const chosen = proxyId === null ? null : choices.find((c) => c.proxy.id === proxyId) ?? null;
   const roomLeft = choices.some((c) => !c.full);
-  // A pick a reload removed or filled is not swapped for a random one.
-  const pickGone = proxyId !== null && (!chosen || chosen.full);
+  const openLeft = choices.some(proxyOpen);
+  // A pick a reload removed, filled or found down is not swapped for a random one.
+  const pickGone = proxyId !== null && (!chosen || !proxyOpen(chosen));
   const device = chosen ? deviceSummary(fleetDeviceFor(no, chosen.proxy.timezone)) : null;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -161,6 +175,9 @@ export function AddToFleetDialog({ no, proxies, limit, onClose, onDone }: {
       showSuccessToast(t('fpAddedToFleetToast', { n: no, proxy: proxy.label }));
       onDone();
     } catch (err) {
+      // Went down since this read, or the read failed: the next pick must not
+      // draw it again.
+      if (fleetErrorCode(err) === 'proxy_down') setHealth((h) => new Map(h).set(proxy.id, 'down'));
       warnOrFail(err);
       setBusy(false);
     }
@@ -181,9 +198,10 @@ export function AddToFleetDialog({ no, proxies, limit, onClose, onDone }: {
               <select className="input" value={proxyId ?? ''} disabled={busy}
                 onChange={(e) => setProxyId(e.target.value === '' ? null : Number(e.target.value))}>
                 <option value="">{t('fpAddToFleetRandom')}</option>
-                {choices.map(({ proxy, load, full }) => (
-                  <option key={proxy.id} value={proxy.id} disabled={full}>
+                {choices.map(({ proxy, load, full, down }) => (
+                  <option key={proxy.id} value={proxy.id} disabled={full || down}>
                     {proxy.label}, {t('fleetProxyUses', { n: load, max: limit })}{full && `, ${t('fpAddToFleetFull')}`}
+                    {!full && down && `, ${t('fpAddToFleetDown')}`}
                   </option>
                 ))}
               </select>
@@ -191,12 +209,13 @@ export function AddToFleetDialog({ no, proxies, limit, onClose, onDone }: {
           ) : (
             <p className="fp-warn">{t(choices.length ? 'fpAddToFleetAllFull' : 'fpAddToFleetNoProxy')}</p>
           )}
-          {roomLeft && pickGone && <p className="fp-warn">{t('fpAddToFleetPickGone')}</p>}
+          {roomLeft && !openLeft && <p className="fp-warn">{t('fpAddToFleetAllDown')}</p>}
+          {openLeft && pickGone && <p className="fp-warn">{t('fpAddToFleetPickGone')}</p>}
           {device && <p className="fp-muted">{t('fpAddToFleetDevice', device)}</p>}
         </div>
         <div className="modal-foot">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>{t('cancel')}</button>
-          <button type="submit" className="btn primary" disabled={busy || !roomLeft || pickGone}>{t('fpAddToFleetConfirm')}</button>
+          <button type="submit" className="btn primary" disabled={busy || !openLeft || pickGone}>{t('fpAddToFleetConfirm')}</button>
         </div>
       </form>
     </Modal>

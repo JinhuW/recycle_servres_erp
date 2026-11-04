@@ -5,6 +5,10 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-517](./RS-517-fix-the-code-review-findings-before-releasing-sync-t.md) | done | bug | P2 | Fix the code review findings before releasing Sync to Market and Add to fleet | 1.414.1 |
+| [RS-516](./RS-516-sync-a-sell-order-s-prices-to-the-market-page-at-a-c.md) | done | story | P2 | Sync a sell order's prices to the Market page at a chosen percent | 1.414.0 |
+| [RS-515](./RS-515-phone-record-entry-sheet-layout-fixes.md) | done | bug | P2 | Phone Record entry sheet layout fixes | 1.413.1 |
+| [RS-514](./RS-514-add-to-fleet-avoids-failed-proxies.md) | done | story | P2 | Add to fleet avoids failed proxies | 1.413.0 |
 | [RS-513](./RS-513-fleet-staged-worker-image-and-one-account-cloakbrows.md) | done | story | P2 | Fleet: staged worker image and one-account CloakBrowser canary | 1.412.1 |
 | [RS-512](./RS-512-fleet-retries-a-connect-failed-park-by-itself-and-sa.md) | done | bug | P2 | Fleet retries a connect_failed park by itself and says why it is parked | 1.411.0 |
 | [RS-511](./RS-511-review-mode-applies-a-short-count-to-the-product-s-q.md) | done | story | P2 | Review mode applies a short count to the product's qty | 1.410.0 |

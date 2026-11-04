@@ -9,7 +9,7 @@
 
 import type {
   FleetBrowserEngine, FleetEngineLoss, FleetAccountBrief, FleetWorkerRelogin, FleetWorkerResume,
-  FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetProxy, FleetProxyHealthAnswer, FleetProxyPatch, FleetProxyWrite, FleetRelease,
+  FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetProxy, FleetProxyHealthAnswer, FleetProxyPatch, FleetProxyStates, FleetProxyWrite, FleetRelease,
   FleetSettings, FleetSlot as FleetSlotRow, FleetSlotWrite,
   FleetFunnelDay, FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, FleetWorkerDetail, RoundStartAnswer,
 } from '@recycle-erp/shared';
@@ -205,6 +205,7 @@ export const fleetApi = {
   removeProxy: (id: number) => api.delete<{ ok: true }>(`${BASE}/proxies/${id}`),
   // Each proxy's last check and its day. A check probes through the proxy, so it takes seconds.
   proxyHealth: () => api.get<FleetProxyHealthAnswer>(`${BASE}/proxies/health`),
+  proxyStates: () => api.get<FleetProxyStates>(`${BASE}/proxies/health/states`),
   // One ERP proxy, or every proxy (homelab ports included) without one.
   checkProxies: (proxyId?: number) =>
     api.post<FleetProxyHealthAnswer>(`${BASE}/proxies/health/check`, proxyId === undefined ? {} : { proxy_id: proxyId }),

@@ -41,7 +41,7 @@ import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
 } from '../lib/fx';
-import { recordSaleDataPoints, retractSaleDataPoints, recordBidDataPoints, retractBidDataPoints, type BidPart } from '../lib/sellOrderMarket';
+import { recordSaleDataPoints, retractSaleDataPoints, syncMarketPrices, retractBidDataPoints, retractUnpricedBids } from '../lib/sellOrderMarket';
 import type { WithdrawnPrice } from '../lib/refPriceEvents';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
@@ -578,9 +578,7 @@ sellOrders.get('/:id/packing-list', async (c) => {
 // Vendor price import, step 1 of 2: parse an uploaded bid sheet and report how
 // its rows match this order's products — by canonical part number, never by
 // cell position. Writes nothing; the manager applies the matched prices
-// through the edit form, whose save (PATCH /:id) owns FX, guards, and audit —
-// and, when the client names the confirmed products in `bidParts`, records
-// their saved prices on the Market board as `bid:<order>` data points.
+// through the edit form, whose save (PATCH /:id) owns FX, guards, and audit.
 
 sellOrders.post('/:id/price-import/preview', async (c) => {
   const u = c.var.user;
@@ -616,6 +614,60 @@ sellOrders.post('/:id/price-import/preview', async (c) => {
   const products = groupOrderProducts(lines, head.currency_code === 'CNY');
 
   return c.json({ currency: head.currency_code, ...matchPriceRows(upload.rows, products) });
+});
+
+// Sync to Market: records the chosen parts' saved prices, at the manager's
+// percent, as this order's `bid:<order>` readings. The order itself is not
+// touched, and closing it withdraws them.
+sellOrders.post('/:id/market-sync', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+
+  const body = (await c.req.json().catch(() => null)) as
+    { percent?: unknown; parts?: unknown; linesVersion?: unknown } | null;
+  const percent = body?.percent;
+  if (typeof percent !== 'number' || !Number.isFinite(percent) || percent <= 0 || percent > 100) {
+    return c.json({ error: 'percent must be above 0 and at most 100' }, 400);
+  }
+  const parts = body?.parts;
+  if (
+    !Array.isArray(parts) || parts.length === 0 || parts.length > 1000
+    || parts.some(p => typeof p !== 'string' || p.trim() === '' || p.length > 200)
+  ) {
+    return c.json({ error: 'parts must be a non-empty array of part numbers' }, 400);
+  }
+  const seenVersion = body?.linesVersion;
+  if (seenVersion !== undefined && typeof seenVersion !== 'string') {
+    return c.json({ error: 'linesVersion must be a string' }, 400);
+  }
+
+  const outcome = await getDb(c.env).begin(async (tx) => {
+    const head = (await tx<{ status: string }[]>`
+      SELECT status FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+    `)[0];
+    if (!head) return { kind: 'notFound' as const };
+    if (head.status === 'Done' || head.status === 'Closed') {
+      return { kind: 'locked' as const, status: head.status };
+    }
+    // The manager confirmed the prices the dialog showed, not whatever the
+    // lines hold by now.
+    if (seenVersion !== undefined) {
+      const now = await tx<VersionedLine[]>`
+        SELECT id, qty, unit_price::float AS unit_price, warehouse_id
+        FROM sell_order_lines WHERE sell_order_id = ${id}`;
+      if (linesVersion(now) !== seenVersion) return { kind: 'linesChanged' as const };
+    }
+    return { kind: 'ok' as const, ...await syncMarketPrices(tx, id, u.id, parts as string[], percent) };
+  });
+  if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
+  if (outcome.kind === 'locked') {
+    return c.json({ error: `prices are locked on a ${outcome.status} order` }, 409);
+  }
+  if (outcome.kind === 'linesChanged') {
+    return c.json({ error: 'the products on this order changed since you opened it — reload it and sync again', code: 'lines_changed' }, 409);
+  }
+  return c.json({ recorded: outcome.recorded });
 });
 
 // Field gates — fail fast with a clean 400 rather than letting a malformed
@@ -791,7 +843,7 @@ sellOrders.patch('/:id', async (c) => {
   const body = (await c.req.json().catch(() => null)) as
     | { status?: string; notes?: string;
         customerId?: string; lines?: SaveLineInput[]; currency?: string;
-        paymentReceivedBy?: string | null; bidParts?: BidPart[]; linesVersion?: unknown }
+        paymentReceivedBy?: string | null; linesVersion?: unknown }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
   if (body.linesVersion !== undefined && typeof body.linesVersion !== 'string') {
@@ -856,24 +908,6 @@ sellOrders.patch('/:id', async (c) => {
   if (Array.isArray(body.lines)) {
     const lineErr = lineInputError(body.lines, { allowZeroQty: true });
     if (lineErr) return c.json({ error: lineErr }, 400);
-  }
-
-  // A confirmed vendor price import names the parts whose saved prices are
-  // the customer's bid — every condition of the part, since the sheet prices
-  // a part once. It only means something alongside the lines it prices, so
-  // it is refused on its own.
-  if (body.bidParts !== undefined) {
-    const badPart = (p: unknown) => {
-      if (typeof p !== 'object' || p === null) return true;
-      const { partNumber } = p as { partNumber?: unknown };
-      return typeof partNumber !== 'string' || partNumber.trim() === '' || partNumber.length > 200;
-    };
-    if (!Array.isArray(body.bidParts) || body.bidParts.length > 1000 || body.bidParts.some(badPart)) {
-      return c.json({ error: 'bidParts must be an array of { partNumber } objects' }, 400);
-    }
-    if (body.lines === undefined) {
-      return c.json({ error: 'bidParts requires lines' }, 400);
-    }
   }
 
   type Outcome =
@@ -996,9 +1030,7 @@ sellOrders.patch('/:id', async (c) => {
       // A tick belongs to a line on the order: one left behind by a removed
       // line would read as packed when its lot is added back.
       await prunePackRows(tx, id);
-      if (body.bidParts?.length) {
-        await recordBidDataPoints(tx, id, u.id, body.bidParts);
-      }
+      await retractUnpricedBids(tx, id);
     }
 
     // Diff events — emitted only when something actually changed.
@@ -1940,6 +1972,7 @@ sellOrders.post('/:id/status', async (c) => {
 
       // A completed sale is the most authoritative price signal we have —
       // record one market data point per sold product.
+      await retractUnpricedBids(tx, id);
       await recordSaleDataPoints(tx, id, u.id);
     }
     return { kind: 'done' };

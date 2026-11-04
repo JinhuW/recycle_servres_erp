@@ -1789,15 +1789,27 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     and flags rows not in the order, unpriced, invalid, duplicated or
     priced per condition on a pre-v1.242.0 sheet. Confirming
     fills every line of each matched part. Nothing is written until Save,
-    which records the confirmed parts' saved prices on the Market board as
-    `bid:<order>` data points (v1.138.3); Cancel records nothing. Since
-    v1.409.1 (RS-508) a part whose price was typed over after the import is
-    not recorded as a bid, a later bid save of a part replaces the order's
-    earlier bid for it, closing the order withdraws its bids (the history's
-    *closed* entry lists them), and the card is shut while the order's
-    currency is switched but not saved, since the template and the preview
-    price in the saved one. It reads
+    and since v1.414.0 (RS-516) Save only prices the order. The card is shut
+    while the order's currency is switched but not saved, since the template
+    and the preview price in the saved one (v1.409.1). It reads
     the sheet through the reader the Market import and Review mode share.
+  - **Sync to Market** (v1.414.0, RS-516, managers) updates the Market sell
+    price from an open order, as its own action on the same card (`POST
+    /api/sell-orders/:id/market-sync`). It asks for a percent above 0 and up
+    to 100, starting at the manager's last-used one (90 the first time), and
+    lists each priced part on the order with its order price, in the order's
+    currency, and resulting Market price, in USD as the Market page shows it
+    (v1.414.1). Confirming records the ticked parts at once, at the percent of
+    their saved qty-weighted USD price, as plain `bid:<order>` readings: no
+    note and no mention of the percent on the Market side. A lot priced at 0
+    is left out of that average. If the order's lines changed after the dialog
+    opened, the sync is refused and writes nothing. The order's prices don't
+    change. The button waits while the order has unsaved changes. A later sync
+    of a part replaces the order's earlier reading, closing the order withdraws
+    its readings (the history's *closed* entry lists them), and Done records
+    the full `sale:<order>` price over them. A part the order stops pricing
+    (removed, or held at qty or price 0) has its reading withdrawn on the next
+    save, sync or Done (v1.414.1, RS-517).
   - **The same sheet prices the PO in Review mode** (v1.313.0). Since
     v1.347.0 that preview expands grouped part-number cells and matches any
     Short code column as well, so Micron VPP and WSM under one module number
@@ -2532,6 +2544,9 @@ is who paid, below).
     entry on the book without its link, and its history names the PO. The
     record is part of what was signed off, so the delete clears a sign-off
     and moves the entry's version (v1.317.4).
+  - **The phone's form shows every kind at once** (v1.413.1, RS-515): the kind
+    chips wrap rather than scroll. On a touch screen the screenshot box reads
+    *Tap to add a file*, as every attachment box on a touch device now does.
   - **Payment screenshots** (v1.333.0, RS-390). Each image is stored under
     the name the receipt OCR reads off it, `<date>-<method>-<amount>.png`,
     the same rename a PO's payment evidence gets. When the model can't read
@@ -2798,9 +2813,9 @@ over MCP.
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
   on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
   and a price-list import on the Market page (`import:<email>`, v1.247.0).
-  A fifth is a sell-order save that followed a confirmed vendor price import
-  (`bid:<order>`, v1.138.3). It was off from v1.297.0 to v1.401.x and came
-  back with the import in v1.402.0. The Activity page shows the source per row; the
+  A fifth is a sell order's Sync to Market at a chosen percent (`bid:<order>`,
+  v1.414.0). From v1.138.3 this was a save following a vendor price import, off
+  from v1.297.0 to v1.401.x. The Activity page shows the source per row; the
   Market page shows only the price and its age.
   - **The scraper's push** (`POST /api/market/values`, bearer
     `market:write`) works on a part that has no price yet (v1.329.1). Until
@@ -3564,7 +3579,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   proxy defaults to a random one with room, or pick one from the dropdown
   (since v1.389.0, RS-471; a full one is disabled, and since v1.390.1 a
   picked proxy a reload removed or filled is not swapped for a random one:
-  the dialog says so and waits for another pick; two accounts per proxy by default, the
+  the dialog says so and waits for another pick; since v1.413.0, RS-514, a
+  proxy whose last health checks read down is disabled with "down", the
+  random pick prefers one that is up and never takes a down one, and the
+  backend refuses a down proxy with `proxy_down`; since v1.414.1, RS-517, both go by the last 24 hours of checks only, and a proxy's new URL starts unchecked; two accounts per proxy by default, the
   `Accounts per proxy` rule in Cities ▸ Rules; there are no home cities to
   pick since v1.374.0, RS-439), and the ERP makes the slot with a desktop browser made
   for the account (Chromium's own user agent, a common screen and scale

@@ -558,9 +558,9 @@ describe('POST /api/sell-orders/:id/price-import/preview', () => {
 });
 
 // ---------------------------------------------------------------------------
-// PATCH /api/sell-orders/:id with bidParts — the save that follows a confirmed
-// import records the accepted prices on the Market board (ref_prices) as
-// `bid:<order>` data points, USD at the rate the lines were saved at.
+// POST /api/sell-orders/:id/market-sync — the manager's Sync to Market records
+// the order's saved prices, at a chosen percent, on the Market page (ref_prices)
+// as `bid:<order>` data points, USD at the rate the lines were saved at.
 // ---------------------------------------------------------------------------
 
 type RefPriceRow = {
@@ -590,68 +590,87 @@ const BID_LINES = [
 const repriced = (a: number, b: number) => [
   { ...BID_LINES[0], unitPrice: a }, { ...BID_LINES[1], unitPrice: b },
 ];
-// A confirmed part: the bid covers every line of it.
-const bid = (...parts: string[]) => parts.map(partNumber => ({ partNumber }));
 // The same part in two conditions — the import prices them as one.
 const COND_LINES = [
   { category: 'RAM', label: 'DIMM C', partNumber: 'BID-C3', qty: 10, unitPrice: 40, warehouseId: 'WH-LA1', condition: 'New' },
   { category: 'RAM', label: 'DIMM C', partNumber: 'BID-C3', qty: 5, unitPrice: 40, warehouseId: 'WH-LA1', condition: 'Used' },
 ];
 
-describe('PATCH /api/sell-orders/:id with bidParts', () => {
+async function saveAt(token: string, id: string, a: number, b: number) {
+  const res = await api('PATCH', `/api/sell-orders/${id}`, { token, body: { lines: repriced(a, b) } });
+  expect(res.status).toBe(200);
+}
+const sync = (token: string, id: string, percent: unknown, parts: unknown) =>
+  api<{ recorded: number; error?: string }>('POST', `/api/sell-orders/${id}/market-sync`, {
+    token, body: { percent, parts },
+  });
+
+describe('POST /api/sell-orders/:id/market-sync', () => {
   beforeEach(async () => { await resetDb(); });
   afterEach(() => { vi.unstubAllGlobals(); });
 
-  it('records one bid data point per confirmed product, at the saved price', async () => {
+  it('a save alone writes nothing to the Market page, even with a legacy bidParts', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, BID_LINES);
     const res = await api('PATCH', `/api/sell-orders/${id}`, {
-      token, body: { lines: repriced(55, 120), bidParts: bid('bid-a1', 'BID-B2') },
+      token, body: { lines: repriced(55, 120), bidParts: [{ partNumber: 'BID-A1' }] },
     });
     expect(res.status).toBe(200);
+    expect((await refPrice('BID-A1'))?.last_price ?? null).toBeNull();
+    expect((await refPrice('BID-B2'))?.last_price ?? null).toBeNull();
+  });
 
-    const a = await refPrice('BID-A1');
-    expect(a).toMatchObject({ last_price: 55, last_price_source: `bid:${id}`, label: 'DIMM A', samples: 0 });
-    const b = await refPrice('BID-B2');
-    expect(b).toMatchObject({ last_price: 120, last_price_source: `bid:${id}` });
-    expect(await eventsFor(a!.id)).toEqual([{ price: 55, source: `bid:${id}` }]);
-    expect(await eventsFor(b!.id)).toEqual([{ price: 120, source: `bid:${id}` }]);
-
-    const detail = await api<{ order: { lines: { unitPrice: number }[] } }>(
+  it('records the percent of the saved price, plainly, and leaves the order alone', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    await saveAt(token, id, 200, 120);
+    const before = await api<{ order: { lines: { unitPrice: number }[]; linesVersion?: string } }>(
       'GET', `/api/sell-orders/${id}`, { token });
-    expect(detail.body.order.lines.map(l => l.unitPrice).sort((x, y) => x - y)).toEqual([55, 120]);
-  });
 
-  it('records only the products the manager confirmed', async () => {
-    const { token } = await loginAs(ALEX);
-    const id = await createOrder(token, BID_LINES);
-    const res = await api('PATCH', `/api/sell-orders/${id}`, {
-      token, body: { lines: repriced(55, 120), bidParts: bid('BID-A1') },
-    });
+    const res = await sync(token, id, 90, ['BID-A1', 'BID-B2']);
     expect(res.status).toBe(200);
-    expect((await refPrice('BID-A1'))?.last_price).toBe(55);
-    expect(await refPrice('BID-B2')).toBeUndefined();
+    expect(res.body.recorded).toBe(2);
+
+    const a = await refPrice('BID-A1');
+    expect(a).toMatchObject({ last_price: 180, last_price_source: `bid:${id}`, label: 'DIMM A', samples: 0 });
+    expect((await refPrice('BID-B2'))?.last_price).toBe(108);
+    expect(await eventsFor(a!.id)).toEqual([{ price: 180, source: `bid:${id}` }]);
+    const notes = await getTestDb()<{ note: string | null }[]>`
+      SELECT note FROM ref_price_events WHERE ref_price_id = ${a!.id}`;
+    expect(notes).toEqual([{ note: null }]);
+
+    const after = await api<typeof before.body>('GET', `/api/sell-orders/${id}`, { token });
+    expect(after.body.order.lines).toEqual(before.body.order.lines);
   });
 
-  it('a second bid save of a part replaces the order\'s earlier bid, not adds to it', async () => {
+  it('records only the parts the manager kept, and ignores one not on the order', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, BID_LINES);
-    for (const price of [55, 60]) {
-      expect((await api('PATCH', `/api/sell-orders/${id}`, {
-        token, body: { lines: repriced(price, 120), bidParts: bid('BID-A1') },
-      })).status).toBe(200);
-    }
-    const a = await refPrice('BID-A1');
-    expect(a?.last_price).toBe(60);
-    expect(await eventsFor(a!.id)).toEqual([{ price: 60, source: `bid:${id}` }]);
+    const res = await sync(token, id, 100, ['bid-a1', 'NOPE-9']);
+    expect(res.body.recorded).toBe(1);
+    expect((await refPrice('BID-A1'))?.last_price).toBe(40);
+    expect(await refPrice('BID-B2')).toBeUndefined();
+    expect(await refPrice('NOPE-9')).toBeUndefined();
   });
 
-  it('closing the order withdraws its bids, and the part falls back to its previous reading', async () => {
+  it('a second sync of a part replaces the order\'s earlier reading, not adds to it', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    await sync(token, id, 90, ['BID-A1']);
+    await sync(token, id, 50, ['BID-A1']);
+    const a = await refPrice('BID-A1');
+    expect(a?.last_price).toBe(20);
+    expect(await eventsFor(a!.id)).toEqual([{ price: 20, source: `bid:${id}` }]);
+  });
+
+  it('closing the order withdraws its readings, and the part falls back to its previous one', async () => {
     const { token } = await loginAs(ALEX);
     const earlier = await createOrder(token, BID_LINES);
-    await api('PATCH', `/api/sell-orders/${earlier}`, { token, body: { lines: repriced(30, 90), bidParts: bid('BID-A1') } });
+    await saveAt(token, earlier, 30, 90);
+    await sync(token, earlier, 100, ['BID-A1']);
     const id = await createOrder(token, BID_LINES);
-    await api('PATCH', `/api/sell-orders/${id}`, { token, body: { lines: repriced(55, 90), bidParts: bid('BID-A1') } });
+    await saveAt(token, id, 100, 90);
+    await sync(token, id, 55, ['BID-A1']);
     expect((await refPrice('BID-A1'))?.last_price).toBe(55);
 
     expect((await api('POST', `/api/sell-orders/${id}/status`, {
@@ -659,70 +678,138 @@ describe('PATCH /api/sell-orders/:id with bidParts', () => {
     })).status).toBe(200);
     const a = await refPrice('BID-A1');
     expect(a).toMatchObject({ last_price: 30, last_price_source: `bid:${earlier}` });
-    expect(await eventsFor(a!.id)).toEqual([{ price: 30, source: `bid:${earlier}` }]);
     const [ev] = await getTestDb()<{ detail: { withdrawnPrices?: unknown } }[]>`
       SELECT detail FROM sell_order_events WHERE sell_order_id = ${id} AND kind = 'closed'`;
     expect(ev?.detail.withdrawnPrices).toEqual([{ partNumber: 'BID-A1', price: 55 }]);
   });
 
-  it('rolls the same part on two lines into one qty-weighted point', async () => {
+  it('Done still records the full sale price over a synced reading', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, BID_LINES);
-    const res = await api('PATCH', `/api/sell-orders/${id}`, {
+    await saveAt(token, id, 200, 120);
+    await sync(token, id, 90, ['BID-A1']);
+    expect((await refPrice('BID-A1'))?.last_price).toBe(180);
+
+    await signOffAll(id);
+    expect((await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Done', note: 'paid' },
+    })).status).toBe(200);
+    expect(await refPrice('BID-A1')).toMatchObject({ last_price: 200, last_price_source: `sale:${id}` });
+  });
+
+  it('applies the percent to one qty-weighted point across a part\'s lines', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    expect((await api('PATCH', `/api/sell-orders/${id}`, {
       token,
-      body: {
-        lines: [
-          { ...BID_LINES[0], qty: 2, unitPrice: 100 },
-          { ...BID_LINES[0], qty: 3, unitPrice: 50 },
-        ],
-        bidParts: bid('BID-A1'),
-      },
-    });
-    expect(res.status).toBe(200);
+      body: { lines: [{ ...BID_LINES[0], qty: 2, unitPrice: 100 }, { ...BID_LINES[0], qty: 3, unitPrice: 50 }] },
+    })).status).toBe(200);
+    await sync(token, id, 90, ['BID-A1']);
     const a = await refPrice('BID-A1');
-    // (2·100 + 3·50) / 5 = 70
-    expect(a?.last_price).toBe(70);
+    // (2·100 + 3·50) / 5 = 70, at 90% = 63
+    expect(a?.last_price).toBe(63);
     expect(await eventsFor(a!.id)).toHaveLength(1);
   });
 
-  it('a confirmed part covers every condition of it', async () => {
-    const { token } = await loginAs(ALEX);
-    const id = await createOrder(token, COND_LINES);
-    const res = await api('PATCH', `/api/sell-orders/${id}`, {
-      token,
-      body: {
-        lines: [{ ...COND_LINES[0], unitPrice: 100 }, { ...COND_LINES[1], unitPrice: 40 }],
-        bidParts: bid('BID-C3'),
-      },
-    });
-    expect(res.status).toBe(200);
-    expect((await refPrice('BID-C3'))?.last_price).toBe(80);
-  });
-
-  it('ignores a confirmed part that is not on the order', async () => {
+  it('a part with no price is not recorded', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, BID_LINES);
-    const res = await api('PATCH', `/api/sell-orders/${id}`, {
-      token, body: { lines: repriced(55, 120), bidParts: bid('NOPE-9') },
-    });
-    expect(res.status).toBe(200);
-    expect(await refPrice('NOPE-9')).toBeUndefined();
+    await saveAt(token, id, 0, 120);
+    const res = await sync(token, id, 90, ['BID-A1']);
+    expect(res.body.recorded).toBe(0);
     expect(await refPrice('BID-A1')).toBeUndefined();
   });
 
-  it('stays silent on a plain price edit', async () => {
+  it('leaves a lot priced at 0 out of the average', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, BID_LINES);
-    const res = await api('PATCH', `/api/sell-orders/${id}`, {
-      token, body: { lines: repriced(55, 120) },
+    expect((await api('PATCH', `/api/sell-orders/${id}`, {
+      token,
+      body: { lines: [{ ...BID_LINES[0], qty: 10, unitPrice: 100 }, { ...BID_LINES[0], qty: 5, unitPrice: 0 }] },
+    })).status).toBe(200);
+    await sync(token, id, 90, ['BID-A1']);
+    expect((await refPrice('BID-A1'))?.last_price).toBe(90);
+  });
+
+  it('refuses prices that changed after the dialog showed them, and writes nothing', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    await saveAt(token, id, 200, 120);
+    const read = async () => (await api<{ order: { linesVersion: string } }>(
+      'GET', `/api/sell-orders/${id}`, { token })).body.order.linesVersion;
+    const seen = await read();
+    await saveAt(token, id, 120, 120);
+    const stale = await api<{ code?: string }>('POST', `/api/sell-orders/${id}/market-sync`, {
+      token, body: { percent: 90, parts: ['BID-A1'], linesVersion: seen },
     });
-    expect(res.status).toBe(200);
-    expect((await refPrice('BID-A1'))?.last_price ?? null).toBeNull();
+    expect(stale.status).toBe(409);
+    expect(stale.body.code).toBe('lines_changed');
+    expect(await refPrice('BID-A1')).toBeUndefined();
+
+    const fresh = await api<{ recorded: number }>('POST', `/api/sell-orders/${id}/market-sync`, {
+      token, body: { percent: 90, parts: ['BID-A1'], linesVersion: await read() },
+    });
+    expect(fresh.status).toBe(200);
+    expect((await refPrice('BID-A1'))?.last_price).toBe(108);
+    expect((await api('POST', `/api/sell-orders/${id}/market-sync`, {
+      token, body: { percent: 90, parts: ['BID-A1'], linesVersion: 7 },
+    })).status).toBe(400);
+  });
+
+  it('a save that stops pricing a part withdraws its reading', async () => {
+    const { token } = await loginAs(ALEX);
+    const earlier = await createOrder(token, BID_LINES);
+    await saveAt(token, earlier, 30, 90);
+    await sync(token, earlier, 100, ['BID-A1']);
+    const id = await createOrder(token, BID_LINES);
+    await saveAt(token, id, 200, 120);
+    await sync(token, id, 90, ['BID-A1', 'BID-B2']);
+    expect((await refPrice('BID-A1'))?.last_price).toBe(180);
+
+    await saveAt(token, id, 0, 150);
+    expect(await refPrice('BID-A1')).toMatchObject({ last_price: 30, last_price_source: `bid:${earlier}` });
+    // A part still priced keeps its reading: a save alone doesn't sync.
+    expect((await refPrice('BID-B2'))?.last_price).toBe(108);
+
+    expect((await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { lines: [{ ...BID_LINES[0], unitPrice: 200 }] },
+    })).status).toBe(200);
+    // Dropped from the order, and nothing else ever quoted it.
     expect((await refPrice('BID-B2'))?.last_price ?? null).toBeNull();
   });
 
-  it('converts a CNY bid to USD at the rate the lines were saved at', async () => {
-    // 1 USD = 7.2 CNY, so ¥720 → $100 and ¥1,440 → $200 exactly.
+  it('a sync whose price rounds to nothing still takes back the earlier reading', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    await saveAt(token, id, 0.05, 120);
+    await sync(token, id, 100, ['BID-A1']);
+    expect((await refPrice('BID-A1'))?.last_price).toBe(0.05);
+    const res = await sync(token, id, 5, ['BID-A1']);
+    expect(res.body.recorded).toBe(0);
+    const a = await refPrice('BID-A1');
+    expect(a?.last_price ?? null).toBeNull();
+    expect(await eventsFor(a!.id)).toEqual([]);
+  });
+
+  it('Done takes back the reading of a part held at 0 that never sold', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    await saveAt(token, id, 200, 120);
+    await sync(token, id, 90, ['BID-A1', 'BID-B2']);
+    // Pack mode can do this without a line save.
+    await getTestDb()`UPDATE sell_order_lines SET qty = 0 WHERE sell_order_id = ${id} AND part_number = 'BID-A1'`;
+    await signOffAll(id);
+    expect((await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Done', note: 'paid' },
+    })).status).toBe(200);
+    const a = await refPrice('BID-A1');
+    expect(a?.last_price ?? null).toBeNull();
+    expect(await eventsFor(a!.id)).toEqual([]);
+    expect(await refPrice('BID-B2')).toMatchObject({ last_price: 120, last_price_source: `sale:${id}` });
+  });
+
+  it('works from the USD a CNY order saved', async () => {
+    // 1 USD = 7.2 CNY, so ¥720 → $100, at 90% = $90.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
       JSON.stringify({ amount: 1, base: 'USD', date: '2026-09-12', rates: { CNY: 7.2 } }),
       { status: 200 },
@@ -733,29 +820,32 @@ describe('PATCH /api/sell-orders/:id with bidParts', () => {
       token, body: { customerId: cust.body.items[0].id, currency: 'CNY', lines: BID_LINES },
     });
     expect(create.status).toBe(201);
-    const res = await api('PATCH', `/api/sell-orders/${create.body.id}`, {
-      token, body: { lines: repriced(720, 1440), bidParts: bid('BID-A1', 'BID-B2') },
-    });
-    expect(res.status).toBe(200);
-    expect((await refPrice('BID-A1'))?.last_price).toBe(100);
-    expect((await refPrice('BID-B2'))?.last_price).toBe(200);
+    await saveAt(token, create.body.id, 720, 1440);
+    await sync(token, create.body.id, 90, ['BID-A1']);
+    expect((await refPrice('BID-A1'))?.last_price).toBe(90);
   });
 
-  it('rejects bidParts without lines, a non-array, and bare strings', async () => {
+  it('refuses a bad percent or part list', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, BID_LINES);
-    const noLines = await api('PATCH', `/api/sell-orders/${id}`, {
-      token, body: { bidParts: bid('BID-A1') },
-    });
-    expect(noLines.status).toBe(400);
-    const notArray = await api('PATCH', `/api/sell-orders/${id}`, {
-      token, body: { lines: repriced(55, 120), bidParts: 'BID-A1' },
-    });
-    expect(notArray.status).toBe(400);
-    const bare = await api('PATCH', `/api/sell-orders/${id}`, {
-      token, body: { lines: repriced(55, 120), bidParts: ['BID-A1'] },
-    });
-    expect(bare.status).toBe(400);
+    for (const percent of [0, -5, 100.5, '90', null, Number.NaN]) {
+      expect((await sync(token, id, percent, ['BID-A1'])).status).toBe(400);
+    }
+    for (const parts of [[], 'BID-A1', [{ partNumber: 'BID-A1' }], ['  '], null]) {
+      expect((await sync(token, id, 90, parts)).status).toBe(400);
+    }
     expect(await refPrice('BID-A1')).toBeUndefined();
+  });
+
+  it('is a manager\'s, on an order that still exists and is open', async () => {
+    const mgr = await loginAs(ALEX);
+    const pur = await loginAs(MARCUS);
+    const id = await createOrder(mgr.token, BID_LINES);
+    expect((await sync(pur.token, id, 90, ['BID-A1'])).status).toBe(403);
+    expect((await sync(mgr.token, 'SO-nope', 90, ['BID-A1'])).status).toBe(404);
+    expect((await api('POST', `/api/sell-orders/${id}/status`, {
+      token: mgr.token, body: { to: 'Closed', closeReasonId: 'other' },
+    })).status).toBe(200);
+    expect((await sync(mgr.token, id, 90, ['BID-A1'])).status).toBe(409);
   });
 });

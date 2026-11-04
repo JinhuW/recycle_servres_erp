@@ -22,6 +22,9 @@ const isBoolean: Validator = (v) => typeof v === 'boolean';
 const isShortString: Validator = (v) =>
   typeof v === 'string' && v.length > 0 && v.length <= 64;
 
+const isPercent: Validator = (v) =>
+  typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 100;
+
 // Keys map to validators. Unknown keys are rejected.
 const SCHEMA: Record<string, Validator> = {
   'language':                 isOneOf('en', 'zh'),
@@ -38,6 +41,7 @@ const SCHEMA: Record<string, Validator> = {
   // re-issued per session, labels aren't.
   'scan.cameraLabel':         isShortString,
   'sellOrders.lineGroup':     isOneOf('warehouse', 'po', 'none'),
+  'sellOrders.marketPercent': isPercent,
   'pack.labelAuto':           isBoolean,
   'review.labelAuto':         isBoolean,
   'pack.labelSize':           isOneOf('50x25mm', '4x6', '4x3', '2.25x1.25'),

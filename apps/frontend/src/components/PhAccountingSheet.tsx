@@ -69,7 +69,7 @@ export function PhAccountingSheet({ preset, entry, onClose, onSaved, onAttachmen
         </div>
 
         {!form.targetLocked && (
-          <div className="ph-chip-scroller" role="group" aria-label={t('acctFieldKind')} style={{ margin: '0 -16px' }}>
+          <div className="acct-ph-kinds" role="group" aria-label={t('acctFieldKind')}>
             {ACCOUNTING_KINDS.map(k => (
               <button key={k} type="button" className={'ph-chip-btn ' + (form.kind === k ? 'active' : '')}
                       aria-pressed={form.kind === k} onClick={() => f.setKind(k)}>

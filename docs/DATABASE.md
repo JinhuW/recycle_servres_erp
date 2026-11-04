@@ -1906,7 +1906,7 @@ One row per price reading of a part, the history behind ref_prices.last_price. W
 | `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
 | `ref_price_id` | `text` | ✓ |  | → ref_prices (cascade). |
 | `price` | `numeric(12,2)` | ✓ |  | Unit price, USD, never negative; a price-list import converts yuan at the FX ledger's latest rate. |
-| `source` | `text` | ✓ |  | Origin tag: scraper:<name>, mcp:<client id>, manual:<email>, import:<email>, sale:<sell order id>, seed. The retired bid:<order> survives on old rows. |
+| `source` | `text` | ✓ |  | Origin tag: scraper:<name>, mcp:<client id>, manual:<email>, import:<email>, sale:<sell order id>, bid:<sell order id> (a sell order's Sync to Market), seed. |
 | `note` | `text` |  |  | Optional free text: the file name for an import, up to 280 characters over MCP. |
 | `actor_user_id` | `uuid` |  |  | → users. Who recorded it; NULL for the scraper, service clients and the seed, and once the user is deleted. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
@@ -2334,7 +2334,7 @@ The proxies the ERP fleet browses through, as a list managers edit on the Accoun
 
 #### `fleet_proxy_checks`
 
-One health check of one proxy port, dialed through the proxy itself to an IP-geo lookup (`fleet/proxyProbe.ts`). Every five minutes a round checks each `fleet_proxies` row from the backend and each port the homelab workers dial through rs_console's `/v1/proxies/health`; **Check now** on the Proxies tab adds rows between rounds. Kept 14 days; each round prunes older rows. No login is stored. Migration 0215.
+One health check of one proxy port, dialed through the proxy itself to an IP-geo lookup (`fleet/proxyProbe.ts`). Every five minutes a round checks each `fleet_proxies` row from the backend and each port the homelab workers dial through rs_console's `/v1/proxies/health`; **Check now** on the Proxies tab adds rows between rounds. Kept 14 days; each round prunes older rows. A new URL on a proxy clears `proxy_id` on its rows, as removing it does, so the new exit starts unchecked. No login is stored. Migration 0215.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |

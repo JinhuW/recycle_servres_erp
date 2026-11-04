@@ -12,6 +12,7 @@ import { dropSlot, releaseTasks } from './claim';
 import { loadRelease } from './hosts';
 import { cityLog } from './tasks';
 import { loadSettings } from './cities';
+import { proxyStates } from './proxies';
 import { managerOnly, type ManagerEnv } from './auth';
 import { bad, conflict, eventToWire, exists, isRefusal, minutesTodaySql, notFound, taskToWire, type Refusal, type TaskEventRow, type TaskRow } from './sql';
 
@@ -216,6 +217,11 @@ slots.post('/', async (c) => {
       SELECT COUNT(*)::int AS n FROM fleet_slots
       WHERE proxy_id = ${proxyId} AND lease_expires_at IS DISTINCT FROM 'infinity'::timestamptz`;
     if (n >= limit) return conflict('proxy_full', `${proxy.host}:${proxy.port} carries ${n} of ${limit} accounts`);
+    // A new account's first sign-in through a dead exit fails, and a failed
+    // sign-in is what gets an account checkpointed. Never checked is allowed.
+    if ((await proxyStates(tx, proxyId)).get(proxyId) === 'down') {
+      return conflict('proxy_down', `${proxy.host}:${proxy.port} failed its last proxy checks; pick another proxy`);
+    }
     const device = fleetDeviceFor(no, proxy.timezone);
     await tx`
       UPDATE fb_pool_accounts SET status = 'fleet', holder_user_id = NULL, holder_name = ${FLEET_HOLDER},
