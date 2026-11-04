@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-04
 reporter: jinhu
 branch: fix/free-worker-truth
-pr:
+pr: 1078
 version: 1.414.4
 related: []
 ---
