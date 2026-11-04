@@ -87,9 +87,16 @@ export function erpCityChips(d: FleetWorkerDetail, now: number = Date.now()): { 
 /** The exit a running worker still goes out through after its slot's proxy changed, or null when they agree. */
 export function erpProxyBehind(d: Pick<FleetWorkerDetail, 'proxy' | 'running_exit'>): string | null {
   if (!d.proxy || !d.running_exit) return null;
-  const exit = d.running_exit.replace(/^[a-z0-9+.-]+:\/\//i, '');
-  return exit === `${d.proxy.host}:${d.proxy.port}` ? null : exit;
+  const m = /^([a-z0-9+.-]+):\/\/(.*)$/i.exec(d.running_exit);
+  const exit = m ? m[2]! : d.running_exit;
+  // The exit went through new URL(), which drops a scheme's default port and
+  // lowercases the host only for http(s); the listed proxy keeps both spelled
+  // out, so the same proxy can read differently on each side.
+  const port = /:\d+$/.test(exit) ? '' : `:${DEFAULT_PORT[m?.[1]?.toLowerCase() ?? ''] ?? ''}`;
+  return `${exit}${port}`.toLowerCase() === `${d.proxy.host}:${d.proxy.port}`.toLowerCase() ? null : exit;
 }
+
+const DEFAULT_PORT: Record<string, number> = { http: 80, https: 443 };
 
 /** The proxy as the page names it: its label, then host:port and its clock. */
 export function erpProxyText(d: FleetWorkerDetail): { label: string; where: string } | 'unlisted' | null {

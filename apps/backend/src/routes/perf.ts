@@ -5,6 +5,7 @@ import {
   type PerfVersionRow, type PerfWindow,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
+import { allLimited } from '../lib/concurrency';
 import { percentile, type PerfKind } from '../lib/perf';
 import { requireManager } from '../lib/role';
 import type { Env, User } from '../types';
@@ -26,8 +27,10 @@ const parseWindow = (v: string | undefined): PerfWindow =>
 // Versions come from package.json; anything else cannot match a row.
 const VERSION_RE = /^[\w.+-]{1,64}$/;
 
+// Callers no person is waiting on. The rest of /api/fleet/hosts is the manager's
+// Hosts tab, so only the routes behind hostAuth count.
 const isMachineRoute = (route: string): boolean =>
-  /^[A-Z]+ \/api\/fleet\/(worker|hosts)(\/|$)/.test(route);
+  /^[A-Z]+ (\/api\/fleet\/worker(\/|$)|\/api\/fleet\/hosts\/:id\/(desired|stopped|tickets|report)$|\/api\/wechat-market\/push\/|\/api\/health$|\/metrics$)/.test(route);
 
 type Merged = { name: string; count: number; errors: number; sum_ms: number; max_ms: number; buckets: number[] };
 
@@ -117,6 +120,14 @@ perf.get('/versions', async (c) => {
     FROM perf_rollups WHERE kind = 'http'
     GROUP BY version ORDER BY MAX(bucket) DESC LIMIT 50
   `;
+  // Buckets are hourly, so a release and the one it replaced can share a last
+  // hour, and two releases in one hour share both ends. The page compares the
+  // first two rows, so a tie must not leave them backwards.
+  const time = (at: string) => new Date(at).getTime();
+  versions.sort((a, b) =>
+    time(b.lastSeen) - time(a.lastSeen)
+    || time(b.firstSeen) - time(a.firstSeen)
+    || b.version.localeCompare(a.version, undefined, { numeric: true }));
   return c.json({ versions });
 });
 
@@ -130,9 +141,9 @@ perf.get('/compare', async (c) => {
     return c.json({ error: 'from and to must name a version' }, 400);
   }
   const sql = getDb(c.env);
-  const [before, after] = await Promise.all([
-    merged(sql, 'http', { version: from }),
-    merged(sql, 'http', { version: to }),
+  const [before, after] = await allLimited([
+    () => merged(sql, 'http', { version: from }),
+    () => merged(sql, 'http', { version: to }),
   ]);
   const beforeBy = new Map(before.map((r) => [r.name, r]));
   const afterBy = new Map(after.map((r) => [r.name, r]));

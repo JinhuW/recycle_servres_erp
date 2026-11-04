@@ -321,7 +321,7 @@ export function ChangeProxyDialog({ slot, current, holder, onClose, onDone }: {
       warnOrFail(err);
       setBusy(false);
       // The page's view of the slot is what was wrong, so it reads again.
-      if (fleetErrorCode(err) === 'proxy_changed') { onDone(); return; }
+      if (fleetErrorCode(err) === 'proxy_changed' || fleetErrorCode(err) === 'exists') { onDone(); return; }
       // Filled or failed since the list was read: back to a fresh pick.
       if (fleetErrorCode(err) === 'proxy_full' || fleetErrorCode(err) === 'proxy_down') {
         setCheck(undefined);

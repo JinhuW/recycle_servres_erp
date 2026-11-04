@@ -6,7 +6,8 @@ import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
 import { fleetWorkerPath } from '../../../lib/route';
 import { fmtDays, ReloginButton, stateLabel } from '../FleetAccounts';
-import { erpProxyText, erpReloginProgress, erpWorkerRetirable, erpWorkerStatus, sessionDaysLeft } from './fleetWorkerView';
+import { leaseLive } from './fleetBoard';
+import { erpProxyBehind, erpProxyText, erpReloginProgress, erpWorkerRetirable, erpWorkerStatus, sessionDaysLeft } from './fleetWorkerView';
 import { MarkHealthyButton, RetireSlotDialog, useFleetMirror, useFleetPoll } from './shared';
 import { WatchAccountPanel, type PoolLookup, type WatchFact } from './watchAccount';
 import { WatchView } from './watchView';
@@ -64,6 +65,7 @@ export function FleetErpWatch({ initial, now = Date.now() }: { initial: FleetWor
   const offline = erpWorkerStatus(w, now) === 'offline';
   const days = sessionDaysLeft(w, now);
   const proxy = erpProxyText(d);
+  const proxyBehind = d.slot && d.holds_slot && leaseLive(d.slot, now) ? erpProxyBehind(d) : null;
 
   const missing: WatchFact[] = [
     { key: 'login', label: t('fbcWatchAcctLogin'), value: acct
@@ -80,7 +82,10 @@ export function FleetErpWatch({ initial, now = Date.now() }: { initial: FleetWor
       ? <span title={w.last_heartbeat_at}>{relTime(w.last_heartbeat_at, locale)}</span> : <Muted>{t('fbcNever')}</Muted> },
     { key: 'proxy', label: t('fbcDetailProxy'), value: proxy === null ? <Muted>—</Muted>
       : proxy === 'unlisted' ? <Muted>{t('fleetProxyUnlisted')}</Muted>
-      : <span>{proxy.label}<br /><small className="fp-muted mono">{proxy.where}</small></span> },
+      : <span>
+          {proxy.label}<br /><small className="fp-muted mono">{proxy.where}</small>
+          {proxyBehind && <><br /><small className="fp-warn">{t('fleetProxyBehind', { exit: proxyBehind })}</small></>}
+        </span> },
     { key: 'build', label: t('fbcColBuild'), value: <ErpBuildChip version={w.version} release={d.release_version} /> },
   ];
   const stripKey = relogin ? STRIP_KEY[relogin.phase] : undefined;

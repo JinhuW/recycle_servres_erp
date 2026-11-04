@@ -75,7 +75,8 @@ isolation boundary (`trackers/facebook/infra/README.md`).
   2. It sets dev's Facebook fleet aside in a `sync_keep` schema
      (`keep-fleet.sql`): every `fleet_*` table, and for each pool account
      with a `fleet_slots` row its `*_enc` columns, `cookie_uid`, `cookie_at`,
-     `status` and `note`. Then it resets dev's schema wholesale and restores
+     `status` and `note`, plus `perf_rollups`, so dev's timing stays dev's own.
+     Then it resets dev's schema wholesale and restores
      prod's dump.
   3. It runs `scrub.sql` in the same transaction. That truncates the live
      credentials (`refresh_tokens`, `oauth_refresh_tokens`,
@@ -86,7 +87,7 @@ isolation boundary (`trackers/facebook/infra/README.md`).
   4. It redeploys the dev backend, so migrations not yet on prod apply again on
      top of the restored copy.
   5. Once every migration dev had is applied again, `restore-fleet.sql` puts
-     the fleet back in one transaction (onto the same pool accounts, matched
+     the fleet and the timing rows back in one transaction (onto the same pool accounts, matched
      by `uid`) and drops `sync_keep`. A run that times out leaves `sync_keep`,
      and the next run refuses until it is restored or dropped.
 - **Local.** The ERP's `docker-compose.yml` runs Postgres 16 (`recycle_pg`),
@@ -2714,7 +2715,7 @@ Keyed by file name, so an edited file that was already applied never runs again;
 
 #### `perf_rollups`
 
-Hourly timing histograms per release, written by lib/perf.ts about once a minute and at shutdown, read by /api/perf/* for Settings ▸ Performance. Rows older than 400 days are purged daily. No row holds a user identity, an id or a raw path.
+Hourly timing histograms per release, written by lib/perf.ts about once a minute and at shutdown, read by /api/perf/* for Settings ▸ Performance. Rows older than 400 days are purged daily. No row holds a user identity, an id or a raw path. Dev keeps its own rows through the nightly prod copy.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |

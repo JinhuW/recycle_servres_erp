@@ -389,6 +389,11 @@ export const DESKTOP_VIEW_TO_PATH = {
 export type DesktopViewId = keyof typeof DESKTOP_VIEW_TO_PATH;
 
 export function pathToDesktopView(path: string): DesktopViewId {
+  return knownDesktopView(path) ?? 'home';
+}
+
+/** The view a path names, or null for one no view claims, which the shell lands on Home. */
+export function knownDesktopView(path: string): DesktopViewId | null {
   if (path === '/' || path === '/home') return 'home';
   // The money dashboard and the stock analysis became Analysis's two tabs;
   // their old paths keep resolving for bookmarks and old links.
@@ -415,7 +420,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/fleet' || path === '/fleet/pool' || matchFleetTab(path) || fleetRedirect(path) || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
   if (path === '/leads/reddit' || matchLeadsTab(path)) return 'leadsReddit';
   if (path === '/settings') return 'settings';
-  return 'home';
+  return null;
 }
 
 // An after-sales case's page. `new` is the create form; `?order=SO-…`

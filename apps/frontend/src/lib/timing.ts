@@ -11,7 +11,7 @@
 
 import { loadCallCounts } from './api';
 import { sendBeacon } from './beacon';
-import { pathToDesktopView, readPath, type DesktopViewId } from './route';
+import { knownDesktopView, readPath, type DesktopViewId } from './route';
 import { PHONE_BREAKPOINT } from './viewport';
 
 // One per page load. A SPA route change is not a page load, and re-reporting on
@@ -23,8 +23,9 @@ let lcp: number | null = null;
 
 // The page the load landed on, read when it starts: the report goes out seconds
 // later, by when the user may have moved on. A view id, never the path, which
-// can hold an order id or a token.
-let page: DesktopViewId | null = null;
+// can hold an order id or a token. The shell lands an unknown path on Home, but
+// counting it as a Home load would blur that row.
+let page: DesktopViewId | 'other' | null = null;
 let shell: 'desktop' | 'mobile' | null = null;
 
 function observeLcp(): void {
@@ -73,7 +74,7 @@ function report(): void {
 /** Start observing, and arrange to report once. Call once, after render. */
 export function installTiming(): void {
   if (typeof window === 'undefined' || typeof performance === 'undefined') return;
-  page = pathToDesktopView(readPath());
+  page = knownDesktopView(readPath()) ?? 'other';
   shell = window.innerWidth < PHONE_BREAKPOINT ? 'mobile' : 'desktop';
   observeLcp();
 

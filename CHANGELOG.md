@@ -15,6 +15,31 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.418.1] - 2026-11-04
+
+Fixes from the review of the dev → main release (RS-526). None of these crashed
+anything or caused a Facebook login; they were wrong evidence or misleading UI.
+
+Settings ▸ Performance could mislead in several ways. A page hidden before its
+load event stored a 0 ms load, so abandoned slow loads read as instant. The
+default release compare could run new → old for the hour after a deploy, showing
+regressions as improvements. Unknown paths counted as Home. The "hide machine"
+filter hid the manager's Hosts tab while listing memtrade's poll, health checks
+and metrics scrapes as human traffic. Changing the compared versions left the
+previous pair's numbers on screen, for good if the request failed.
+
+The nightly prod → dev copy now keeps dev's own `perf_rollups`, which it used to
+replace with prod's.
+
+On the fleet, an unchanged proxy could raise a false "still running through"
+warning when its port was a scheme default or its host had capitals. The Watch
+page now shows that warning when it is true, as the worker page already did. The
+Change proxy dialog no longer sticks on a confirm that can never succeed when
+another manager has already moved the slot.
+
+On Box Check, a sheet's "Priced from" note now goes away once something else
+prices the line.
+
 ## [1.418.0] - 2026-11-04
 
 ### Added
