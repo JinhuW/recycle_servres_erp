@@ -155,6 +155,11 @@ describe('client timing rollups', () => {
     expect(await clientNames()).toEqual(['load|unknown|other']);
   });
 
+  it('counts a page hidden before its load event as no load, keeping its other metrics', async () => {
+    await report({ loadEvent: 0, ttfb: 20, lcp: 500, navType: 'navigate', shell: 'desktop', page: 'home' });
+    expect(await clientNames()).toEqual(['lcp|desktop|home', 'ttfb|desktop|home']);
+  });
+
   it('leaves bfcache restores out of the rollups', async () => {
     await report({ loadEvent: 2, navType: 'back_forward', shell: 'desktop', page: 'home' });
     expect(await clientNames()).toEqual([]);
@@ -226,6 +231,28 @@ describe('/api/perf', () => {
     expect(r.body.routes.find((x) => x.route === 'GET /ancient')).toBeUndefined();
   });
 
+  it('flags only callers no person is waiting on as machine traffic', async () => {
+    const names = [
+      'GET /api/fleet/hosts/:id/desired', 'POST /api/fleet/hosts/:id/report',
+      'POST /api/wechat-market/push/reruns/claim', 'GET /api/health', 'GET /metrics',
+      'GET /api/fleet/hosts', 'POST /api/fleet/hosts', 'PUT /api/fleet/hosts/:id',
+    ];
+    for (const name of names) {
+      await sql()`
+        INSERT INTO perf_rollups (bucket, version, kind, name, count, sum_ms, max_ms, buckets)
+        VALUES (date_trunc('hour', NOW()), 'machine-check', 'http', ${name}, 1, 1, 1,
+                ${sql().array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])}::bigint[])`;
+    }
+    const r = await api<{ routes: { route: string; machine: boolean }[] }>(
+      'GET', '/api/perf/routes?window=24h', { token: managerToken },
+    );
+    await sql()`DELETE FROM perf_rollups WHERE version = 'machine-check'`;
+    expect(r.body.routes.filter((x) => names.includes(x.route) && x.machine).map((x) => x.route).sort()).toEqual([
+      'GET /api/fleet/hosts/:id/desired', 'GET /api/health', 'GET /metrics',
+      'POST /api/fleet/hosts/:id/report', 'POST /api/wechat-market/push/reruns/claim',
+    ]);
+  });
+
   it('pivots page loads by shell and page', async () => {
     const r = await api<{ loads: Record<string, unknown>[] }>(
       'GET', '/api/perf/loads?window=24h', { token: managerToken },
@@ -257,5 +284,19 @@ describe('/api/perf', () => {
   it('lists releases newest first', async () => {
     const r = await api<{ versions: { version: string }[] }>('GET', '/api/perf/versions', { token: managerToken });
     expect(r.body.versions[r.body.versions.length - 1]!.version).toBe('0.9.0');
+  });
+
+  it('breaks a tie in the last hour by the later start, then the higher version', async () => {
+    const put = (version: string, hoursAgo: number) => sql()`
+      INSERT INTO perf_rollups (bucket, version, kind, name, count, sum_ms, max_ms, buckets)
+      VALUES (date_trunc('hour', NOW()) + INTERVAL '2 hours' - make_interval(hours => ${hoursAgo}), ${version}, 'http', 'GET /tie', 1, 1, 1,
+              ${sql().array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])}::bigint[])`;
+    await put('2.9.0', 5);
+    await put('2.9.0', 0);
+    await put('2.10.0', 0);
+    await put('2.11.0', 0);
+    const r = await api<{ versions: { version: string }[] }>('GET', '/api/perf/versions', { token: managerToken });
+    await sql()`DELETE FROM perf_rollups WHERE name = 'GET /tie'`;
+    expect(r.body.versions.slice(0, 3).map((v) => v.version)).toEqual(['2.11.0', '2.10.0', '2.9.0']);
   });
 });

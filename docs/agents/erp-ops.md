@@ -40,7 +40,8 @@ The release flow itself (`dev` → `main` is a full release) is in the root
   accounts, and wiping their slots costs a Facebook login per worker.  The
   fleet tables, and the slotted pool accounts' sealed columns, cookie
   fields, status and note, go to a `sync_keep` schema before the drop and
-  come back once the redeployed backend has migrated.  A run whose restore
+  come back once the redeployed backend has migrated.  So does `perf_rollups`
+  (v1.418.1), so dev's Settings ▸ Performance shows dev's traffic.  A run whose restore
   did not finish (`fleet NOT restored` in the db-sync log) leaves
   `sync_keep`, and every later run refuses until someone runs
   `restore-fleet.sql` against dev (`psql --single-transaction -f`) or drops

@@ -364,6 +364,14 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     try {
       const r = await api.patch<{ ok: true; warnings?: string[] }>(`/api/inventory/${l.id}`, { sellPrice: next });
       if (r.warnings?.includes('sub_cost_sell')) showToast(t('bcPriceBelowCost', { n: lineNo(l) }), 'warn');
+      // The sheet no longer set this price. Applying a sheet names itself again
+      // after its writes.
+      setSources(m => {
+        if (!m.has(l.id)) return m;
+        const rest = new Map(m);
+        rest.delete(l.id);
+        return rest;
+      });
       return true;
     } catch (e) {
       setPrices(m => new Map(m).set(l.id, before));

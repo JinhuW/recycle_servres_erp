@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NOW, WORKER_DETAIL, WORKER_STINTS } from './fixtures';
 import {
-  deviceText, erpCheckpoint, erpConnectPark, erpCityChips, erpCityLog, erpHistory, erpHistoryDot, erpProxyText, erpReloginProgress, erpWorkerRetirable, erpWorkerStatus,
+  deviceText, erpCheckpoint, erpConnectPark, erpCityChips, erpCityLog, erpHistory, erpHistoryDot, erpProxyBehind, erpProxyText, erpReloginProgress, erpWorkerRetirable, erpWorkerStatus,
   sessionDaysLeft, taskVisit,
 } from './fleetWorkerView';
 
@@ -93,6 +93,31 @@ describe('the card rows', () => {
     expect(chips.hits.get('philly')).toEqual({ sent: 2, hit: 0 });
     expect(chips.hits.has('denver')).toBe(false);
     expect([...chips.searched]).toEqual(['denver', 'philly']);
+  });
+});
+
+describe('erpProxyBehind', () => {
+  const on = (host: string, port: number, running_exit: string | null) => ({
+    proxy: { host, port } as NonNullable<typeof WORKER_DETAIL.proxy>,
+    running_exit,
+  });
+
+  it('says nothing while the browser runs through the listed proxy', () => {
+    expect(erpProxyBehind(on('proxy.example', 8080, 'http://proxy.example:8080'))).toBeNull();
+  });
+
+  it('reads a default port the running exit dropped as that port', () => {
+    expect(erpProxyBehind(on('proxy.example', 80, 'http://proxy.example'))).toBeNull();
+    expect(erpProxyBehind(on('proxy.example', 443, 'https://proxy.example'))).toBeNull();
+  });
+
+  it('ignores host case, which new URL() keeps for socks5', () => {
+    expect(erpProxyBehind(on('host.example', 1080, 'socks5://Host.Example:1080'))).toBeNull();
+  });
+
+  it('names the old exit once the slot has really moved', () => {
+    expect(erpProxyBehind(on('new.example', 8080, 'http://old.example:8080'))).toBe('old.example:8080');
+    expect(erpProxyBehind(on('proxy.example', 8080, 'http://proxy.example'))).toBe('proxy.example');
   });
 });
 

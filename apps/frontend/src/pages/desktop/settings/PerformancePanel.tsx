@@ -53,6 +53,7 @@ export function PerformancePanel() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [compare, setCompare] = useState<PerfCompareRow[] | null>(null);
+  const [compareError, setCompareError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -82,12 +83,15 @@ export function PerformancePanel() {
   }, []);
 
   useEffect(() => {
-    if (!from || !to || from === to) { setCompare(null); return; }
+    // Cleared first, so the last pair's numbers never sit under the new labels.
+    setCompare(null);
+    setCompareError(null);
+    if (!from || !to || from === to) return;
     let stale = false;
     const q = new URLSearchParams({ from, to });
     api.get<{ rows: PerfCompareRow[] }>(`/api/perf/compare?${q}`)
       .then((r) => { if (!stale) setCompare(r.rows); })
-      .catch((e: Error) => { if (!stale) setError(e.message); });
+      .catch((e: Error) => { if (!stale) setCompareError(e.message); });
     return () => { stale = true; };
   }, [from, to]);
 
@@ -261,6 +265,10 @@ export function PerformancePanel() {
           <div className="card-body muted">{t('perf.compare_need_two')}</div>
         ) : from === to ? (
           <div className="card-body muted">{t('perf.compare_same')}</div>
+        ) : compareError ? (
+          <div className="card-body" role="alert" style={{ color: 'var(--neg)' }}>{compareError}</div>
+        ) : compare === null ? (
+          <div className="card-body muted">{t('perf.loading')}</div>
         ) : shownCompare.length === 0 ? (
           <div className="card-body muted">{t('perf.empty')}</div>
         ) : (

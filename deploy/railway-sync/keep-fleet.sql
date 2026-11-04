@@ -10,6 +10,8 @@
 -- Kept: every fleet_* table, and for each pool account that has a slot the
 -- columns dev owns (every *_enc, cookie_uid, cookie_at, status, note, and the
 -- holder: a worker's token is only good while the account names it as holder).
+-- Also perf_rollups: dev's timing is the evidence for dev's releases, and prod's
+-- rows would merge into it wherever both ran the same version.
 CREATE SCHEMA sync_keep;
 CREATE TABLE sync_keep._migrations AS SELECT filename FROM public.schema_migrations;
 
@@ -35,7 +37,8 @@ BEGIN
   FOR t IN
     SELECT cl.relname FROM pg_catalog.pg_class cl
     JOIN pg_catalog.pg_namespace n ON n.oid = cl.relnamespace
-    WHERE n.nspname = 'public' AND cl.relkind IN ('r', 'p') AND cl.relname LIKE 'fleet\_%'
+    WHERE n.nspname = 'public' AND cl.relkind IN ('r', 'p')
+      AND (cl.relname LIKE 'fleet\_%' OR cl.relname = 'perf_rollups')
   LOOP
     EXECUTE pg_catalog.format('CREATE TABLE sync_keep.%I AS TABLE public.%I', t.relname, t.relname);
   END LOOP;

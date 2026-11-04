@@ -4523,9 +4523,13 @@ removed in v1.191.0.
   Performance, managers only, on desktop, shows the last 24 hours, 7 days or 30
   days:
   - **Slowest routes**, ranked by total time spent, with request count, p50, p95,
-    p99, max and 5xx rate. Fleet worker and host traffic is hidden by default.
+    p99, max and 5xx rate. Traffic no person waits on (fleet workers and hosts,
+    memtrade's push and poll, health checks, metrics) is hidden by default; the
+    manager's own Hosts tab stays listed (v1.418.1).
   - **Page loads** by page and shell: LCP, load and TTFB percentiles. Only full
-    loads count; moving between pages inside the app does not.
+    loads count; moving between pages inside the app does not. A page hidden
+    before it finished loading adds no load time, and a path no page claims
+    counts as `other`, not Home (v1.418.1).
   - **Compare releases**: p50 and p95 for each route between any two versions.
     A route with under 30 requests on either side is marked and ranked last.
 

@@ -77,7 +77,9 @@ clientTimings.post('/', async (c) => {
   // Real loads only: a back_forward load comes out of the bfcache and a
   // prerender was never waited on, so either would flatter the percentiles.
   if (nav === 'navigate' || nav === 'reload') {
-    recordPerf('client', `load|${shell}|${page}`, loadEvent);
+    // A page hidden before its load event reports 0: not an instant load but an
+    // unfinished one, usually a slow one the user gave up watching.
+    if (loadEvent > 0) recordPerf('client', `load|${shell}|${page}`, loadEvent);
     if (ttfb !== undefined) recordPerf('client', `ttfb|${shell}|${page}`, ttfb);
     if (lcp !== undefined) recordPerf('client', `lcp|${shell}|${page}`, lcp);
   }

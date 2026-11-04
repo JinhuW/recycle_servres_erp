@@ -63,7 +63,8 @@ BEGIN
   SELECT COALESCE(array_agg(k.relname::text), '{}') INTO kept
   FROM pg_catalog.pg_class k
   JOIN pg_catalog.pg_namespace kn ON kn.oid = k.relnamespace
-  WHERE kn.nspname = 'sync_keep' AND k.relkind = 'r' AND k.relname LIKE 'fleet\_%'
+  WHERE kn.nspname = 'sync_keep' AND k.relkind = 'r'
+    AND (k.relname LIKE 'fleet\_%' OR k.relname = 'perf_rollups')
     AND pg_catalog.to_regclass(pg_catalog.format('public.%I', k.relname)) IS NOT NULL;
 
   -- A kept row pointing outside the fleet (a user, a pool account) at a row

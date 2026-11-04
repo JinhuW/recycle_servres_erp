@@ -96,6 +96,23 @@ describe('prod→dev sync keeps the dev fleet', () => {
     expect(await sql`SELECT 1 FROM fleet_task_attempts WHERE task_id = ${t.id}`).toHaveLength(1);
   });
 
+  it('keeps dev\'s own timing rows instead of prod\'s', async () => {
+    const sql = getTestDb();
+    const row = (version: string, count: number) => sql`
+      INSERT INTO perf_rollups (bucket, version, kind, name, count, sum_ms, max_ms, buckets)
+      VALUES ('2026-11-01T10:00:00Z', ${version}, 'http', 'GET /api/orders', ${count}, 1, 1,
+              '{0,0,0,0,0,0,0,0,0,0,0,0,0}'::bigint[])`;
+    await row('1.0.0-dev', 7);
+
+    await sql.begin((tx) => tx.unsafe(keep));
+    await sql`TRUNCATE perf_rollups`;
+    await row('1.0.0-prod', 900);
+    await sql.begin((tx) => tx.unsafe(restore));
+
+    const rows = await sql`SELECT version, count::int AS count FROM perf_rollups`;
+    expect(rows.map((r) => [r.version, r.count])).toEqual([['1.0.0-dev', 7]]);
+  });
+
   it('drops a slot whose pool number now belongs to another account', async () => {
     const sql = getTestDb();
     const a = await pool('61500000000011', 'fleet', 'fleet pilot');
