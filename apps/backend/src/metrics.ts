@@ -8,6 +8,7 @@
 
 import type { Context, Next } from 'hono';
 import { Registry, collectDefaultMetrics, Counter, Histogram } from 'prom-client';
+import { PERF_BUCKETS_MS, recordPerf } from './lib/perf';
 
 const registry = new Registry();
 collectDefaultMetrics({ register: registry });
@@ -16,7 +17,7 @@ const httpRequestDuration = new Histogram({
   name: 'http_request_duration_seconds',
   help: 'HTTP request duration in seconds, labeled by Hono matched route.',
   labelNames: ['method', 'route', 'status'] as const,
-  buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+  buckets: PERF_BUCKETS_MS.map((ms) => ms / 1000),
   registers: [registry],
 });
 
@@ -81,6 +82,7 @@ export async function metricsMiddleware(c: Context, next: Next): Promise<void> {
     const labels = { method: c.req.method, route, status };
     httpRequestDuration.observe(labels, seconds);
     httpRequestsTotal.inc(labels);
+    recordPerf('http', `${c.req.method} ${route}`, seconds * 1000, { error: c.res.status >= 500 });
   }
 }
 

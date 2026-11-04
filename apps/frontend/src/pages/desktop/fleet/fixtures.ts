@@ -308,6 +308,7 @@ export const WORKER_DETAIL: FleetWorkerDetail = {
   },
   holds_slot: true,
   proxy: { id: 3, label: 'Decodo NY 1', host: 'isp.example.net', port: 10001, timezone: 'America/New_York' },
+  running_exit: 'http://isp.example.net:10001',
   account: {
     no: 31, uid: '100031000313131', email: 'acct31@example.test', status: 'fleet', holder: 'worker-60-14-1',
     cookie_at: ago(60 * 5), secrets: ['password', 'totp', 'cookie'],

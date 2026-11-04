@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
   accountingEntryPath, afterSalesCasePath, afterSalesNewPath, FLEET_TABS, fleetRedirect, fleetTabPath, matchFleetTab, fleetWorkerPath, hrefFor, matchFleetWorker, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, navigate, navigateBack, onLinkClick,
-  parseShippingRoute, pathToDesktopView, pathToMobileView, poCheckPath, poLinePath, readPath, readPoLineQuery, readSafeNext,
+  knownDesktopView, parseShippingRoute, pathToDesktopView, pathToMobileView, poCheckPath, poLinePath, readPath, readPoLineQuery, readSafeNext,
   replaceRoute, sellOrderPackPath, splitHash,
   type LinkClick,
 } from './route';
@@ -37,6 +37,12 @@ describe('Home and Analysis routes', () => {
     expect(pathToDesktopView('/no-such-page')).toBe('home');
     expect(pathToMobileView('/')).toBe('home');
     expect(pathToMobileView('/no-such-page')).toBe('home');
+  });
+
+  it('tells an unknown path apart from Home for whoever needs to', () => {
+    expect(knownDesktopView('/')).toBe('home');
+    expect(knownDesktopView('/settings')).toBe('settings');
+    expect(knownDesktopView('/no-such-page')).toBeNull();
   });
 
   it('serves the money dashboard and the stock analysis as Analysis tabs', () => {

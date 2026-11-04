@@ -6,7 +6,7 @@
 import type { FbWorkerStint } from '@recycle-erp/shared';
 import type { CityStep, CityStepKind, CityVisit, CityVisitOutcome, FleetCity as ChipCity } from '../../../lib/coordinator';
 import {
-  fleetAutoResumeDue, fleetResumable, fleetStateParked, fleetTakesResume, FLEET_AUTO_RESUME_MINUTES, type FleetCityLogTask as FleetTaskLog, type FleetWorkerDetail, type FleetWorkerEvent } from '../../../lib/fleet';
+  fleetAutoResumeDue, fleetResumable, fleetSlotRetirable, fleetStateParked, fleetTakesResume, FLEET_AUTO_RESUME_MINUTES, type FleetCityLogTask as FleetTaskLog, type FleetWorkerDetail, type FleetWorkerEvent } from '../../../lib/fleet';
 import type { CityHits, FleetStatus, ReloginProgress } from '../../../lib/fleetView';
 import { liveness } from './fleetBoard';
 
@@ -16,6 +16,13 @@ export function erpWorkerStatus(w: FleetWorkerDetail['worker'], now: number = Da
   if (beat === 'never' || beat === 'dead') return 'offline';
   if (fleetStateParked(w.state)) return 'attention';
   return beat === 'stale' ? 'stale' : 'live';
+}
+
+/** A lost account on this worker's own slot, or on one parked with none. */
+export function erpWorkerRetirable(d: FleetWorkerDetail): boolean {
+  const slot = d.slot;
+  return !!slot && (d.holds_slot || slot.worker_id === null)
+    && fleetSlotRetirable({ parked: slot.parked, poolStatus: slot.pool_status, state: d.worker.state, operator: d.worker.detail?.operator === true });
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
@@ -76,6 +83,20 @@ export function erpCityChips(d: FleetWorkerDetail, now: number = Date.now()): { 
     searched: new Set(d.cities.filter(c => c.last_done_at?.slice(0, 10) === today).map(c => c.slug)),
   };
 }
+
+/** The exit a running worker still goes out through after its slot's proxy changed, or null when they agree. */
+export function erpProxyBehind(d: Pick<FleetWorkerDetail, 'proxy' | 'running_exit'>): string | null {
+  if (!d.proxy || !d.running_exit) return null;
+  const m = /^([a-z0-9+.-]+):\/\/(.*)$/i.exec(d.running_exit);
+  const exit = m ? m[2]! : d.running_exit;
+  // The exit went through new URL(), which drops a scheme's default port and
+  // lowercases the host only for http(s); the listed proxy keeps both spelled
+  // out, so the same proxy can read differently on each side.
+  const port = /:\d+$/.test(exit) ? '' : `:${DEFAULT_PORT[m?.[1]?.toLowerCase() ?? ''] ?? ''}`;
+  return `${exit}${port}`.toLowerCase() === `${d.proxy.host}:${d.proxy.port}`.toLowerCase() ? null : exit;
+}
+
+const DEFAULT_PORT: Record<string, number> = { http: 80, https: 443 };
 
 /** The proxy as the page names it: its label, then host:port and its clock. */
 export function erpProxyText(d: FleetWorkerDetail): { label: string; where: string } | 'unlisted' | null {

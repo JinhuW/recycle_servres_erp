@@ -364,6 +364,14 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     try {
       const r = await api.patch<{ ok: true; warnings?: string[] }>(`/api/inventory/${l.id}`, { sellPrice: next });
       if (r.warnings?.includes('sub_cost_sell')) showToast(t('bcPriceBelowCost', { n: lineNo(l) }), 'warn');
+      // The sheet no longer set this price. Applying a sheet names itself again
+      // after its writes.
+      setSources(m => {
+        if (!m.has(l.id)) return m;
+        const rest = new Map(m);
+        rest.delete(l.id);
+        return rest;
+      });
       return true;
     } catch (e) {
       setPrices(m => new Map(m).set(l.id, before));
@@ -388,6 +396,29 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
       setFilling(false);
     }
     showToast(t('bcFilledFromMarket', { n }), 'success');
+  };
+  // What a sell order charges beats an estimate, so unlike the market fill this
+  // replaces a price already on the line. Asked on click: the page has no other
+  // use for these prices, and they may have moved since it loaded.
+  const fillFromSellOrders = async () => {
+    if (!ready || filling) return;
+    setFilling(true);
+    try {
+      const { lines: priced } = await api.get<{ lines: { lineId: string; price: number }[] }>(
+        `/api/orders/${order.id}/sell-order-prices`);
+      if (!priced.length) { showToast(t('bcFillSellOrderNone'), 'warn'); return; }
+      const priceByLine = new Map(priced.map(p => [p.lineId, p.price]));
+      let n = 0;
+      for (const l of lines) {
+        const price = priceByLine.get(l.id);
+        if (price !== undefined && priceOf(l) !== price && await savePrice(l, price)) n += 1;
+      }
+      showToast(t('bcFilledFromSellOrder', { n }), 'success');
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setFilling(false);
+    }
   };
 
   // ── A sell order sheet: the server matches it to the lines by part number
@@ -1100,6 +1131,15 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               onClick={() => { void fillFromMarket(); }}
             >
               <Icon name="tag" size={13} /> {filling ? '…' : t('bcFillMarket')}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={!ready || filling || sheet !== null || sheetBusy}
+              title={t('bcFillSellOrderTip')}
+              onClick={() => { void fillFromSellOrders(); }}
+            >
+              <Icon name="tag" size={13} /> {filling ? '…' : t('bcFillSellOrder')}
             </button>
             <button
               type="button"

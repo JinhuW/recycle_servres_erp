@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
+import { PERF_PAGES } from '@recycle-erp/shared';
 import { log } from '../lib/log';
+import { recordPerf } from '../lib/perf';
 import { createRateLimiter } from '../lib/rate-limit';
 import type { Env, User } from '../types';
 
@@ -38,9 +40,15 @@ const NAV_TYPES = ['navigate', 'reload', 'back_forward', 'prerender'] as const;
 const navType = (v: unknown): string | undefined =>
   typeof v === 'string' && (NAV_TYPES as readonly string[]).includes(v) ? v : undefined;
 
+// Closed sets, so neither can carry a URL into the log or a rollup's name.
+const shellOf = (v: unknown): string => (v === 'desktop' || v === 'mobile' ? v : 'unknown');
+const pageOf = (v: unknown): string =>
+  typeof v === 'string' && (PERF_PAGES as readonly string[]).includes(v) ? v : 'other';
+
 type Body = {
   ttfb?: unknown; domContentLoaded?: unknown; loadEvent?: unknown; lcp?: unknown;
   navType?: unknown; apiCalls?: unknown; refreshes?: unknown; downlink?: unknown;
+  shell?: unknown; page?: unknown;
 };
 
 clientTimings.post('/', async (c) => {
@@ -60,17 +68,35 @@ clientTimings.post('/', async (c) => {
   // from this stream.
   if (loadEvent === undefined) return c.json({ error: 'loadEvent is required' }, 400);
 
+  const ttfb = num(body.ttfb);
+  const lcp = num(body.lcp);
+  const nav = navType(body.navType);
+  const shell = shellOf(body.shell);
+  const page = pageOf(body.page);
+
+  // Real loads only: a back_forward load comes out of the bfcache and a
+  // prerender was never waited on, so either would flatter the percentiles.
+  if (nav === 'navigate' || nav === 'reload') {
+    // A page hidden before its load event reports 0: not an instant load but an
+    // unfinished one, usually a slow one the user gave up watching.
+    if (loadEvent > 0) recordPerf('client', `load|${shell}|${page}`, loadEvent);
+    if (ttfb !== undefined) recordPerf('client', `ttfb|${shell}|${page}`, ttfb);
+    if (lcp !== undefined) recordPerf('client', `lcp|${shell}|${page}`, lcp);
+  }
+
   // log.info, not warn: this is the healthy path. It rides the same ambient
   // requestId and release stamp as every other line, so a slow load can be
   // joined to the requests it made.
   log.info('client timing', {
     kind: 'client-timing',
     userEmail: u.email,
-    ttfb: num(body.ttfb),
+    shell,
+    page,
+    ttfb,
     domContentLoaded: num(body.domContentLoaded),
     loadEvent,
-    lcp: num(body.lcp),
-    navType: navType(body.navType),
+    lcp,
+    navType: nav,
     apiCalls: num(body.apiCalls),
     refreshes: num(body.refreshes),
     downlink: typeof body.downlink === 'number' && Number.isFinite(body.downlink)

@@ -625,6 +625,15 @@ is not a stage but a flag beside one, set once every line has sold
       and age, and the final sell price once it has sold. Finish review
       lists the unpriced products, which count as $0 until priced; they
       don't block Approve. The pure maths lives in `lib/reviewPricing.ts`.
+  - **Linked sell orders price the PO** (v1.416.0, RS-522). **From sell order**,
+    beside *Fill from market*, sets each line to what the sell orders naming it
+    charge, in USD: the qty-weighted average when there are several, over every
+    order except Closed or archived ones, ignoring sell lines at qty or price 0.
+    It replaces a price already on the line and leaves a line with no such order
+    alone. Each price goes through the inventory line PATCH and is audited as
+    `priced`. There is no preview or Undo. Manager only: a purchaser's
+    `GET /api/orders/:id/sell-order-prices` answers 403, and they see only the
+    resulting price, with no sell order, customer or source.
   - **A sell order sheet prices the PO** (v1.313.0, RS-347). Drop the
     buyer's filled sheet (`.xlsx`) anywhere on the product list, or pick it
     with **From sheet** beside *Fill from market*; while a file is dragged
@@ -2658,7 +2667,8 @@ is who paid, below).
     cost with other fees, the sell order's total, the case's amount. When
     the whole book's total for that kind on the record is more than 2% off
     it either way (in ¥, with a dollar figure at the latest rate), each of
-    the record's rows carries a red ! whose tooltip gives both figures. The
+    the record's rows carries a red ! and prints both figures in red under
+    the amount (v1.416.1). The
     form warns the same way while you type: a red line under Amount, and
     Save becomes *Save anyway*, which needs a second click (desktop and
     phone). An entry
@@ -3591,7 +3601,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   *fleet* under "ERP fleet" and reads "waiting for a worker" until one claims
   it. **Remove from fleet** takes back an account no worker holds (park it on
   the Fleet tab first) and returns it to Available. Removing a proxy an
-  active account uses is refused. A host now starts only as many workers as
+  active account uses is refused. Since v1.415.0, RS-521, **Change proxy** on an
+  ERP-fleet worker's page moves its account to another listed proxy. Full and
+  down proxies are disabled, the pick runs a live check through the proxy, and a
+  second screen shows that check, the browser clock change and the risk before
+  anything is written; a proxy that failed the check cannot be confirmed, and
+  the API refuses a call without `confirm: true`. The slot takes the proxy's
+  sealed URL and timezone and keeps the rest of its device. No worker restarts:
+  a running one keeps its exit until its next normal start, which signs in from
+  the new IP, and its page reads "Still running through …" until then. The
+  account's pool log records the move. Homelab workers are not covered. A host now starts only as many workers as
   it has accounts to run, up to its capacity: with capacity 4 and one ready
   account it runs one worker, and each account added brings another.
 
@@ -3681,7 +3700,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     Checkpoint, Challenge or Dead (not Dead for an operator, a proxy fault),
     or a manager parked the slot, or the pool already took the account out:
     a row parked only because its worker went silent has none, and the API
-    refuses any other slot with `not_lost`. Since v1.383.0 (RS-461) the toolbar has
+    refuses any other slot with `not_lost`. Since v1.417.0 (RS-523) that
+    worker's Watch page has the same button, beside Re-login, under the same
+    rule. Since v1.383.0 (RS-461) the toolbar has
     **Release parked (N)** whenever such rows exist: a confirmation lists each
     account, worker and state, counts the parked rows it leaves alone, and
     warns that every account added to the fleet afterwards starts a worker (a
@@ -4498,6 +4519,23 @@ removed in v1.191.0.
   navigation timing, LCP, and the request/refresh counts for the page load, one
   report per load. Numbers only, no paths — it is the answer to "the page feels
   slow", which until then had no evidence behind it either way.
+- **Performance is kept per route and release** (v1.418.0). Settings ▸
+  Performance, managers only, on desktop, shows the last 24 hours, 7 days or 30
+  days:
+  - **Slowest routes**, ranked by total time spent, with request count, p50, p95,
+    p99, max and 5xx rate. Traffic no person waits on (fleet workers and hosts,
+    memtrade's push and poll, health checks, metrics) is hidden by default; the
+    manager's own Hosts tab stays listed (v1.418.1).
+  - **Page loads** by page and shell: LCP, load and TTFB percentiles. Only full
+    loads count; moving between pages inside the app does not. A page hidden
+    before it finished loading adds no load time, and a path no page claims
+    counts as `other`, not Home (v1.418.1).
+  - **Compare releases**: p50 and p95 for each route between any two versions.
+    A route with under 30 requests on either side is marked and ranked last.
+
+  Percentiles are estimates from histogram buckets. Rows are hourly and kept for
+  400 days, and hold no user identity, ids or raw paths. New data lands within
+  about a minute. Per-query SQL timing is not recorded.
 - `/api/health` reports version, build date, commit and provider modes.
 - **Ops alerts reach one Telegram group** (v1.322.0, v1.325.0). Everything
   goes to the "Homelab Alerts" group, each source in its own topic:

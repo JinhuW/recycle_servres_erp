@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   pathToDesktopView, pathToMobileView, matchPurchaseOrder, poProductsPath, match, activityRecordHref,
-  splitHash,
+  splitHash, DESKTOP_VIEW_TO_PATH,
 } from '../src/lib/route';
+import { PERF_PAGES } from '@recycle-erp/shared';
 
 describe('splitHash — a route may carry a page-local query', () => {
   it('separates the path the router matches from the query it ignores', () => {
@@ -108,5 +109,11 @@ describe('purchase-order screens', () => {
   it('keeps both PO screens on the phone history tab', () => {
     expect(pathToMobileView('/purchase-orders/PO-1444')).toBe('history');
     expect(pathToMobileView('/purchase-orders/PO-1444/products')).toBe('history');
+  });
+});
+
+describe('load report pages', () => {
+  it('lists every desktop view, or its loads would be filed under other', () => {
+    expect([...PERF_PAGES].sort()).toEqual(Object.keys(DESKTOP_VIEW_TO_PATH).sort());
   });
 });

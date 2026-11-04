@@ -338,4 +338,26 @@ checksRoutes.post('/:id/price-sheet/preview', async (c) => {
   return c.json({ fx, lines: matches, notOnPo: notOnPo.size });
 });
 
+// What the sell orders naming this PO's lines are charging, for Review mode to
+// write through the line PATCH. Open orders count, unlike the final sell price:
+// a PO under review is usually sold on one that has not closed yet. No order id
+// or customer travels here, since the price is all the fill needs.
+checksRoutes.get('/:id/sell-order-prices', async (c) => {
+  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+  if (!await checkOrder(sql, id)) return c.json({ error: 'Not found' }, 404);
+  const rows = await sql<{ line_id: string; price: number }[]>`
+    SELECT ol.id AS line_id,
+           ROUND(SUM(sol.qty * sol.unit_price) / SUM(sol.qty), 2)::float AS price
+    FROM order_lines ol
+    JOIN sell_order_lines sol ON sol.inventory_id = ol.id
+    JOIN sell_orders so ON so.id = sol.sell_order_id
+    -- A sell line at 0 is unpriced or held at zero: neither says what the units fetch.
+    WHERE ol.order_id = ${id} AND so.status <> 'Closed' AND so.archived_at IS NULL
+      AND sol.qty > 0 AND sol.unit_price > 0
+    GROUP BY ol.id`;
+  return c.json({ lines: rows.map(r => ({ lineId: r.line_id, price: r.price })) });
+});
+
 export default checksRoutes;

@@ -15,6 +15,97 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.418.1] - 2026-11-04
+
+Fixes from the review of the dev → main release (RS-526). None of these crashed
+anything or caused a Facebook login; they were wrong evidence or misleading UI.
+
+Settings ▸ Performance could mislead in several ways. A page hidden before its
+load event stored a 0 ms load, so abandoned slow loads read as instant. The
+default release compare could run new → old for the hour after a deploy, showing
+regressions as improvements. Unknown paths counted as Home. The "hide machine"
+filter hid the manager's Hosts tab while listing memtrade's poll, health checks
+and metrics scrapes as human traffic. Changing the compared versions left the
+previous pair's numbers on screen, for good if the request failed.
+
+The nightly prod → dev copy now keeps dev's own `perf_rollups`, which it used to
+replace with prod's.
+
+On the fleet, an unchanged proxy could raise a false "still running through"
+warning when its port was a scheme default or its host had capitals. The Watch
+page now shows that warning when it is true, as the worker page already did. The
+Change proxy dialog no longer sticks on a confirm that can never succeed when
+another manager has already moved the slot.
+
+On Box Check, a sheet's "Priced from" note now goes away once something else
+prices the line.
+
+## [1.418.0] - 2026-11-04
+
+### Added
+
+- **Performance evidence by route and release (RS-525).** Timing existed but
+  nothing kept it: `/metrics` resets on every deploy, and the logs hold raw lines
+  that nobody aggregates. So nothing could say what to optimize, or whether a
+  release helped. The backend now stores hourly histograms per route and release
+  in `perf_rollups`, and Settings gets a manager-only Performance section: routes
+  ranked by total time spent, page loads by page and shell, and a before/after
+  between any two releases. Browser load reports now say which page and shell
+  they came from, as closed lists, so no URL or id can reach the data. Rollups
+  hold no user identity. Prod evidence starts accumulating from the release
+  that carries this.
+
+## [1.417.0] - 2026-11-04
+
+### Added
+
+- **Retire & free on the fleet Watch page (RS-523).** The Watch page is where a
+  manager sees a checkpoint or a dead session, but retiring that account meant
+  leaving it for the worker page or the Accounts tab. The button now sits beside
+  Re-login, with the same rule as the worker page: a lost or parked account on
+  this worker's own slot, never a healthy one. It opens the same confirmation,
+  including the warning that the worker's next start is a Facebook login.
+
+## [1.416.1] - 2026-11-04
+
+### Changed
+
+- **RMB Flow's red alerts now say why on the row (RS-524).** The red `!` beside an
+  Order amount means the book's total for that record is more than 2% off the
+  record's own figure, but the figures were only in a hover tooltip, so each alert
+  had to be hovered separately. A flagged row now prints them in red under the
+  amount, such as `Book ¥73,138.00 vs order ¥17,900.12 (+308.6%)`, and the tooltip
+  is gone. Desktop only; the phone book shows no alerts.
+
+## [1.416.0] - 2026-11-04
+
+### Added
+
+- **Review mode can price a PO from its linked sell orders (RS-522).** When a sell
+  order already named a PO's lines, a manager still had to re-enter its price by
+  hand. The new **From sell order** button copies it across, replacing any price
+  already on the line. A line on several orders takes the qty-weighted average.
+  Closed and archived orders don't count, and the sell order itself is not
+  changed. The button and its endpoint are manager-only. A purchaser sees the
+  resulting price on their PO, as with any manager-set price, but not the sell
+  order, the customer or where the price came from.
+
+## [1.415.0] - 2026-11-04
+
+### Added
+
+- **A manager can move a fleet worker's account to another proxy, and has to
+  confirm it after seeing a live check** (RS-521). Some proxies are unreliable,
+  and the only ways off a bad exit were editing the proxy, which moves every
+  account on it, or removing and re-adding the account, which loses its browser
+  device. **Change proxy** on an ERP-fleet worker's page checks the chosen proxy
+  through the proxy itself, then shows the result, the browser clock change and
+  when the move takes effect. A proxy that failed the check cannot be confirmed.
+  `POST /api/fleet/slots/:no/proxy` refuses a call without `confirm: true` or
+  naming a proxy the slot has left. Nothing restarts: the worker moves at its
+  next normal start, the page says so until then, and the account's log records
+  who moved it.
+
 ## [1.414.4] - 2026-11-04
 
 ### Fixed

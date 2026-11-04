@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-02:** ERP migration `0222`, Reddit tracker migration `0007`,
+**As of 2026-11-04:** ERP migration `0223`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -75,7 +75,8 @@ isolation boundary (`trackers/facebook/infra/README.md`).
   2. It sets dev's Facebook fleet aside in a `sync_keep` schema
      (`keep-fleet.sql`): every `fleet_*` table, and for each pool account
      with a `fleet_slots` row its `*_enc` columns, `cookie_uid`, `cookie_at`,
-     `status` and `note`. Then it resets dev's schema wholesale and restores
+     `status` and `note`, plus `perf_rollups`, so dev's timing stays dev's own.
+     Then it resets dev's schema wholesale and restores
      prod's dump.
   3. It runs `scrub.sql` in the same transaction. That truncates the live
      credentials (`refresh_tokens`, `oauth_refresh_tokens`,
@@ -86,7 +87,7 @@ isolation boundary (`trackers/facebook/infra/README.md`).
   4. It redeploys the dev backend, so migrations not yet on prod apply again on
      top of the restored copy.
   5. Once every migration dev had is applied again, `restore-fleet.sql` puts
-     the fleet back in one transaction (onto the same pool accounts, matched
+     the fleet and the timing rows back in one transaction (onto the same pool accounts, matched
      by `uid`) and drops `sync_keep`. A run that times out leaves `sync_keep`,
      and the next run refuses until it is restored or dropped.
 - **Local.** The ERP's `docker-compose.yml` runs Postgres 16 (`recycle_pg`),
@@ -2312,7 +2313,7 @@ Single-use bearers the host agent mints right before each `docker run`, one per 
 
 #### `fleet_proxies`
 
-The proxies the ERP fleet browses through, as a list managers edit on the Account pool tab. A slot made there copies its proxy's sealed URL into `fleet_slots.proxy_url` (what a claim reads) and names the proxy in `fleet_slots.proxy_id`; editing a proxy's URL or timezone rewrites its slots' copy and device clock. No route answers the URL. Migration 0213.
+The proxies the ERP fleet browses through, as a list managers edit on the Account pool tab. A slot made there copies its proxy's sealed URL into `fleet_slots.proxy_url` (what a claim reads) and names the proxy in `fleet_slots.proxy_id`; editing a proxy's URL or timezone rewrites its slots' copy and device clock. Change proxy on a worker's page (`POST /api/fleet/slots/:no/proxy`, RS-521) copies another proxy's URL, id and timezone onto one slot the same way. No route answers the URL. Migration 0213.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
@@ -2661,7 +2662,7 @@ Who did what to which seller, including the seller replies purchasers log. Appen
 
 Workspace-wide configuration and plumbing: key/value settings (workspace_settings), the counters behind human-readable ids such as PO-1289 (id_counters), and the migration runner's ledger (schema_migrations).
 
-Tables: [`workspace_settings`](#erp-workspace-settings), [`id_counters`](#erp-id-counters), [`schema_migrations`](#erp-schema-migrations)
+Tables: [`workspace_settings`](#erp-workspace-settings), [`id_counters`](#erp-id-counters), [`schema_migrations`](#erp-schema-migrations), [`perf_rollups`](#erp-perf-rollups)
 
 <a id="erp-workspace-settings"></a>
 
@@ -2709,6 +2710,29 @@ Ledger of applied migrations, written by scripts/migrate.mjs at boot: one row pe
 - **Primary key:** `filename`
 
 Keyed by file name, so an edited file that was already applied never runs again; the runner only logs a warning when its checksum differs.
+
+<a id="erp-perf-rollups"></a>
+
+#### `perf_rollups`
+
+Hourly timing histograms per release, written by lib/perf.ts about once a minute and at shutdown, read by /api/perf/* for Settings ▸ Performance. Rows older than 400 days are purged daily. No row holds a user identity, an id or a raw path. Dev keeps its own rows through the nightly prod copy.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `bucket` | `timestamptz` | ✓ |  | The hour the samples fall in. |
+| `version` | `text` | ✓ |  | Release that served them, from releaseVersion(). |
+| `kind` | `text` | ✓ |  | `http` for a backend request, `client` for a browser load report. |
+| `name` | `text` | ✓ |  | `http`: method and matched route pattern, e.g. `GET /api/orders/:id`. `client`: `metric\|shell\|page`, e.g. `lcp\|desktop\|inventory`, from closed lists. |
+| `count` | `bigint` | ✓ |  | Samples. |
+| `errors` | `bigint` | ✓ | `0` | Of those, responses with a 5xx status. Always 0 for `client`. |
+| `sum_ms` | `double precision` | ✓ |  | Total milliseconds. |
+| `max_ms` | `double precision` | ✓ |  | Slowest sample. |
+| `buckets` | `bigint[]` | ✓ |  | One count per bound in PERF_BUCKETS_MS, plus a last one for anything above the top. |
+
+- **Primary key:** `bucket`, `version`, `kind`, `name`
+- **Index:** `perf_rollups_version_idx` on `version`, `kind`
+
+Rows are summed index by index, so changing PERF_BUCKETS_MS needs a migration that rewrites `buckets`.
 
 ### SQL functions
 

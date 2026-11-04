@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Modal } from '../../../components/Modal';
 import { handleFetchError, showSuccessToast, showWarnToast } from '../../../lib/errorToast';
 import {
-  fleetApi, fleetDeviceFor, fleetErrorCode, type FleetProxy, type FleetProxyHealthState, type FleetSlot,
+  fleetApi, fleetDeviceFor, fleetErrorCode, type FleetProxy, type FleetProxyHealth, type FleetProxyHealthState, type FleetSlot, type FleetWorkerDetail,
 } from '../../../lib/fleet';
 import { ApiError } from '../../../lib/api';
 import { useT } from '../../../lib/i18n';
-import { deviceSummary, proxyChoices, proxyDraftProblem, proxyExit, proxyOpen, proxyPatch, randomOpenProxy, type ProxyDraft } from './proxyRules';
+import { deviceSummary, proxyChangeVerdict, proxyChoices, proxyDraftProblem, proxyExit, proxyOpen, proxyPatch, randomOpenProxy, type ProxyDraft } from './proxyRules';
 import { ConfirmDialogBody } from './shared';
 import '../../../styles/fleet.css';
 
@@ -220,6 +220,170 @@ export function AddToFleetDialog({ no, proxies, limit, health: given, onClose, o
       </form>
     </Modal>
   );
+}
+
+// Two steps, because a proxy that drops or shows a bad IP can cost the account:
+// the pick only runs a live check, and only the second screen, which says what
+// the check found and what the move does, writes anything. Nothing is sent to
+// the worker either way (fleet/workers.ts).
+export function ChangeProxyDialog({ slot, current, holder, onClose, onDone }: {
+  slot: FleetSlot; current: FleetWorkerDetail['proxy']; holder: string | null; onClose: () => void; onDone: () => void;
+}) {
+  const { t } = useT();
+  const no = slot.account_no;
+  const [list, setList] = useState<{ proxies: FleetProxy[]; limit: number; health: ProxyHealthMap } | null>(null);
+  const [proxyId, setProxyId] = useState<number | null>(null);
+  // undefined until checked; null when the check itself could not run.
+  const [check, setCheck] = useState<FleetProxyHealth | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const close = () => { if (!busy) onClose(); };
+
+  const load = useCallback(() => Promise.all([
+    fleetApi.proxies(),
+    fleetApi.settings().then((s) => s.max_accounts_per_proxy ?? DEFAULT_LIMIT),
+    // As in Add to fleet: no health read means no proxy counts as down yet.
+    fleetApi.proxyStates().then((h) => new Map(h.states.map((s) => [s.proxy_id, s.state]))).catch(() => new Map<number, FleetProxyHealthState>()),
+  ]).then(([proxies, limit, health]) => setList({ proxies, limit, health })), []);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    load().catch((err) => { handleFetchError(err); closeRef.current(); });
+  }, [load]);
+
+  const choices = useMemo(
+    () => (list ? proxyChoices(list.proxies, list.limit, list.health).filter((c) => c.proxy.id !== slot.proxy_id) : []),
+    [list, slot.proxy_id],
+  );
+  const chosen = choices.find((c) => c.proxy.id === proxyId) ?? null;
+  if (!list) return null;
+
+  const runCheck = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy || !chosen || !proxyOpen(chosen)) return;
+    setBusy(true);
+    const answer = await fleetApi.checkProxies(chosen.proxy.id).catch(() => null);
+    setCheck(answer?.proxies.find((p) => p.proxy_id === chosen.proxy.id) ?? null);
+    setBusy(false);
+  };
+
+  if (check === undefined || !chosen) {
+    const open = choices.some(proxyOpen);
+    return (
+      <Modal onClose={close} shellStyle={{ maxWidth: 520 }}>
+        <form onSubmit={runCheck}>
+          <div className="modal-head">
+            <div>
+              <div className="modal-title">{t('fleetChangeProxyTitle', { no })}</div>
+              <div className="modal-sub">{t('fleetChangeProxySub')}</div>
+            </div>
+          </div>
+          <div className="modal-body fleet-form">
+            <div className="fleet-field">
+              <span>{t('fleetChangeProxyCurrent')}</span>
+              <CurrentProxy slot={slot} current={current} />
+            </div>
+            {open ? (
+              <label className="fleet-field">
+                <span>{t('fleetChangeProxyNew')}</span>
+                <select className="input" value={proxyId ?? ''} disabled={busy} autoFocus
+                  onChange={(e) => setProxyId(e.target.value === '' ? null : Number(e.target.value))}>
+                  <option value="">{t('fleetChangeProxyPick')}</option>
+                  {choices.map(({ proxy, load: n, full, down }) => (
+                    <option key={proxy.id} value={proxy.id} disabled={full || down}>
+                      {proxy.label}, {t('fleetProxyUses', { n, max: list.limit })}{full && `, ${t('fpAddToFleetFull')}`}
+                      {!full && down && `, ${t('fpAddToFleetDown')}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : <p className="fp-warn">{t('fleetChangeProxyNone')}</p>}
+          </div>
+          <div className="modal-foot">
+            <button type="button" className="btn" onClick={onClose} disabled={busy}>{t('cancel')}</button>
+            <button type="submit" className="btn primary" disabled={busy || !chosen || !proxyOpen(chosen)} aria-busy={busy}>
+              {busy ? t('fleetChangeProxyChecking') : t('fleetChangeProxyNext')}
+            </button>
+          </div>
+        </form>
+      </Modal>
+    );
+  }
+
+  const verdict = proxyChangeVerdict(check);
+  const confirm = async () => {
+    if (busy || verdict === 'blocked') return;
+    setBusy(true);
+    try {
+      await fleetApi.changeSlotProxy(no, chosen.proxy.id, slot.proxy_id);
+      showSuccessToast(t('fleetChangeProxyDone', { no, label: chosen.proxy.label }));
+      onDone();
+    } catch (err) {
+      warnOrFail(err);
+      setBusy(false);
+      // The page's view of the slot is what was wrong, so it reads again.
+      if (fleetErrorCode(err) === 'proxy_changed' || fleetErrorCode(err) === 'exists') { onDone(); return; }
+      // Filled or failed since the list was read: back to a fresh pick.
+      if (fleetErrorCode(err) === 'proxy_full' || fleetErrorCode(err) === 'proxy_down') {
+        setCheck(undefined);
+        setProxyId(null);
+        load().catch(handleFetchError);
+      }
+    }
+  };
+  const clockFrom = slot.device?.timezone;
+  const clockTo = chosen.proxy.timezone;
+  const last = check?.last ?? null;
+  return (
+    <Modal onClose={close} shellStyle={{ maxWidth: 520 }}>
+      <div className="modal-head">
+        <div>
+          <div className="modal-title">{t('fleetChangeProxyConfirmTitle', { no, label: chosen.proxy.label })}</div>
+          <div className="modal-sub">{t('fleetChangeProxyConfirmSub')}</div>
+        </div>
+      </div>
+      <div className="modal-body fleet-form">
+        <div className="fleet-field">
+          <span>{t('fleetChangeProxyCurrent')}</span>
+          <CurrentProxy slot={slot} current={current} />
+        </div>
+        <div className="fleet-field">
+          <span>{t('fleetChangeProxyNew')}</span>
+          <div>{chosen.proxy.label}<br /><small className="fp-muted mono">{proxyExit(chosen.proxy)} · {clockTo}</small></div>
+        </div>
+        <div className="fleet-field">
+          <span>{t('fleetChangeProxyHealth')}</span>
+          {!last ? <p className="fp-warn">{t('fleetChangeProxyCheckNone')}</p>
+            : last.ok ? (
+              <p className={verdict === 'ok' ? 'fp-ok' : 'fp-warn'}>
+                {t(verdict === 'ok' ? 'fleetChangeProxyCheckOk' : 'fleetChangeProxyCheckSlow', {
+                  ms: last.latency_ms ?? '—',
+                  where: [last.exit_ip, [last.city, last.region, last.country].filter(Boolean).join(', ')].filter(Boolean).join(' · ') || '—',
+                })}
+                {check?.uptime != null && <><br /><small className="fp-muted">{t('fleetProxyUptime', { pct: Math.round(check.uptime * 1000) / 10, n: check.checks })}</small></>}
+              </p>
+            ) : <p className="fp-warn">{t('fleetChangeProxyCheckFailed', { error: last.error ?? '—' })}</p>}
+        </div>
+        {verdict !== 'blocked' && <>
+          {clockFrom && clockFrom !== clockTo && <p>{t('fleetChangeProxyClock', { from: clockFrom, to: clockTo })}</p>}
+          <p>{slot.parked ? t('fleetChangeProxyWhenParked')
+            : holder ? t('fleetChangeProxyWhenRunning', { worker: holder })
+            : t('fleetChangeProxyWhenFree')}</p>
+          <p className="fp-warn">{t('fleetChangeProxyRisk')}</p>
+        </>}
+      </div>
+      <div className="modal-foot">
+        <button type="button" className="btn" onClick={() => setCheck(undefined)} disabled={busy}>{t('fleetChangeProxyBack')}</button>
+        <button type="button" className="btn" onClick={onClose} disabled={busy}>{t('cancel')}</button>
+        <button type="button" className="btn primary fleet-danger" onClick={confirm} disabled={busy || verdict === 'blocked'}>{t('fleetChangeProxyConfirm')}</button>
+      </div>
+    </Modal>
+  );
+}
+
+function CurrentProxy({ slot, current }: { slot: FleetSlot; current: FleetWorkerDetail['proxy'] }) {
+  const { t } = useT();
+  if (current) return <div>{current.label}<br /><small className="fp-muted mono">{proxyExit(current)} · {current.timezone}</small></div>;
+  return <div className="fp-muted">{slot.has_proxy ? t('fleetProxyUnlisted') : '—'}</div>;
 }
 
 export function RemoveFromFleetDialog({ slot, onClose, onDone }: { slot: FleetSlot; onClose: () => void; onDone: () => void }) {

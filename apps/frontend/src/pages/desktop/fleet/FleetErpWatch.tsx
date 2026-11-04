@@ -6,8 +6,9 @@ import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
 import { fleetWorkerPath } from '../../../lib/route';
 import { fmtDays, ReloginButton, stateLabel } from '../FleetAccounts';
-import { erpProxyText, erpReloginProgress, erpWorkerStatus, sessionDaysLeft } from './fleetWorkerView';
-import { MarkHealthyButton, useFleetPoll } from './shared';
+import { leaseLive } from './fleetBoard';
+import { erpProxyBehind, erpProxyText, erpReloginProgress, erpWorkerRetirable, erpWorkerStatus, sessionDaysLeft } from './fleetWorkerView';
+import { MarkHealthyButton, RetireSlotDialog, useFleetMirror, useFleetPoll } from './shared';
 import { WatchAccountPanel, type PoolLookup, type WatchFact } from './watchAccount';
 import { WatchView } from './watchView';
 import { ErpBuildChip, Muted } from './workerDetail';
@@ -37,6 +38,8 @@ const STRIP_KEY: Partial<Record<ReloginPhase, string>> = {
 export function FleetErpWatch({ initial, now = Date.now() }: { initial: FleetWorkerDetail; now?: number }) {
   const { t, locale } = useT();
   const workerId = initial.worker.worker_id;
+  const mirror = useFleetMirror();
+  const [retiring, setRetiring] = useState(false);
   const [following, setFollowing] = useState(false);
   const load = useCallback(() => fleetApi.worker(workerId), [workerId]);
   const { data, reload } = useFleetPoll(load, following ? RELOGIN_REFRESH_MS : REFRESH_MS);
@@ -62,6 +65,7 @@ export function FleetErpWatch({ initial, now = Date.now() }: { initial: FleetWor
   const offline = erpWorkerStatus(w, now) === 'offline';
   const days = sessionDaysLeft(w, now);
   const proxy = erpProxyText(d);
+  const proxyBehind = d.slot && d.holds_slot && leaseLive(d.slot, now) ? erpProxyBehind(d) : null;
 
   const missing: WatchFact[] = [
     { key: 'login', label: t('fbcWatchAcctLogin'), value: acct
@@ -78,35 +82,44 @@ export function FleetErpWatch({ initial, now = Date.now() }: { initial: FleetWor
       ? <span title={w.last_heartbeat_at}>{relTime(w.last_heartbeat_at, locale)}</span> : <Muted>{t('fbcNever')}</Muted> },
     { key: 'proxy', label: t('fbcDetailProxy'), value: proxy === null ? <Muted>—</Muted>
       : proxy === 'unlisted' ? <Muted>{t('fleetProxyUnlisted')}</Muted>
-      : <span>{proxy.label}<br /><small className="fp-muted mono">{proxy.where}</small></span> },
+      : <span>
+          {proxy.label}<br /><small className="fp-muted mono">{proxy.where}</small>
+          {proxyBehind && <><br /><small className="fp-warn">{t('fleetProxyBehind', { exit: proxyBehind })}</small></>}
+        </span> },
     { key: 'build', label: t('fbcColBuild'), value: <ErpBuildChip version={w.version} release={d.release_version} /> },
   ];
   const stripKey = relogin ? STRIP_KEY[relogin.phase] : undefined;
 
   return (
-    <WatchView
-      workerId={workerId}
-      socketUrl={fleetVncSocketUrl}
-      back={{ path: fleetWorkerPath(workerId), label: acct?.email ?? acct?.uid ?? workerId }}
-      sub={<>
-        {w.host_id ?? '—'}
-        {w.state && <> · {stateLabel(t, w.state)}</>}
-        {w.last_heartbeat_at
-          ? <> · {t('fbcWatchHeartbeat', { age: relTime(w.last_heartbeat_at, locale) })}</>
-          : <> · {t('fbcNeverReported')}</>}
-      </>}
-      relogin={<>
-        {fleetResumable(w.state, w.detail) && !offline && d.holds_slot
-          && <MarkHealthyButton workerId={workerId} version={w.version} resume={w.resume ?? null} state={w.state} onQueued={reload} className="btn sm" />}
-        <ReloginButton workerId={workerId} fleet onQueued={reload}
-          disabledReason={offline || !d.holds_slot ? t('fleetWorkerNotRunning') : null} />
-      </>}
-      strip={relogin && stripKey ? { phase: relogin.phase, text: t(stripKey, { age: relTime(relogin.since, locale) }) } : null}
-      panel={typing => (
-        <WatchAccountPanel pool={pool} asking={w.state === 'CHALLENGE_2FA'}
-          profileId={acct?.uid && /^\d+$/.test(acct.uid) ? acct.uid : null}
-          missing={missing} facts={facts} {...typing} />
-      )}
-    />
+    <>
+      <WatchView
+        workerId={workerId}
+        socketUrl={fleetVncSocketUrl}
+        back={{ path: fleetWorkerPath(workerId), label: acct?.email ?? acct?.uid ?? workerId }}
+        sub={<>
+          {w.host_id ?? '—'}
+          {w.state && <> · {stateLabel(t, w.state)}</>}
+          {w.last_heartbeat_at
+            ? <> · {t('fbcWatchHeartbeat', { age: relTime(w.last_heartbeat_at, locale) })}</>
+            : <> · {t('fbcNeverReported')}</>}
+        </>}
+        relogin={<>
+          {fleetResumable(w.state, w.detail) && !offline && d.holds_slot
+            && <MarkHealthyButton workerId={workerId} version={w.version} resume={w.resume ?? null} state={w.state} onQueued={reload} className="btn sm" />}
+          <ReloginButton workerId={workerId} fleet onQueued={reload}
+            disabledReason={offline || !d.holds_slot ? t('fleetWorkerNotRunning') : null} />
+          {!mirror && erpWorkerRetirable(d)
+            && <button type="button" className="btn sm fleet-danger-text" onClick={() => setRetiring(true)}>{t('fleetRetireFree')}</button>}
+        </>}
+        strip={relogin && stripKey ? { phase: relogin.phase, text: t(stripKey, { age: relTime(relogin.since, locale) }) } : null}
+        panel={typing => (
+          <WatchAccountPanel pool={pool} asking={w.state === 'CHALLENGE_2FA'}
+            profileId={acct?.uid && /^\d+$/.test(acct.uid) ? acct.uid : null}
+            missing={missing} facts={facts} {...typing} />
+        )}
+      />
+      {retiring && d.slot && <RetireSlotDialog accountNo={d.slot.account_no} workerId={workerId} operator={w.detail?.operator === true}
+        onClose={() => setRetiring(false)} onDone={() => { setRetiring(false); reload(); }} />}
+    </>
   );
 }

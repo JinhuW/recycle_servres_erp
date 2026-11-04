@@ -1,12 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { NOW, WORKER_DETAIL, WORKER_STINTS } from './fixtures';
 import {
-  deviceText, erpCheckpoint, erpConnectPark, erpCityChips, erpCityLog, erpHistory, erpHistoryDot, erpProxyText, erpReloginProgress, erpWorkerStatus,
+  deviceText, erpCheckpoint, erpConnectPark, erpCityChips, erpCityLog, erpHistory, erpHistoryDot, erpProxyBehind, erpProxyText, erpReloginProgress, erpWorkerRetirable, erpWorkerStatus,
   sessionDaysLeft, taskVisit,
 } from './fleetWorkerView';
 
 const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString();
 const worker = WORKER_DETAIL.worker;
+
+describe('erpWorkerRetirable', () => {
+  const slot = WORKER_DETAIL.slot!;
+  const withState = (state: string, detail = {}) => ({ ...WORKER_DETAIL, worker: { ...worker, state, detail } });
+
+  it('leaves a healthy worker alone', () => {
+    expect(erpWorkerRetirable(WORKER_DETAIL)).toBe(false);
+  });
+  it('offers a lost or parked account on its own slot', () => {
+    expect(erpWorkerRetirable(withState('CHECKPOINT'))).toBe(true);
+    expect(erpWorkerRetirable({ ...WORKER_DETAIL, slot: { ...slot, parked: true } })).toBe(true);
+    expect(erpWorkerRetirable({ ...WORKER_DETAIL, holds_slot: false, slot: { ...slot, parked: true, worker_id: null } })).toBe(true);
+  });
+  it('refuses a slot another worker holds, and a worker parked for an operator', () => {
+    expect(erpWorkerRetirable({ ...withState('CHECKPOINT'), holds_slot: false, slot: { ...slot, worker_id: 'other' } })).toBe(false);
+    expect(erpWorkerRetirable(withState('DEAD', { operator: true }))).toBe(false);
+  });
+  it('has nothing to retire without a slot', () => {
+    expect(erpWorkerRetirable({ ...withState('CHECKPOINT'), slot: null })).toBe(false);
+  });
+});
 
 describe('erpWorkerStatus', () => {
   it('buckets an ERP worker as the homelab page does', () => {
@@ -72,6 +93,31 @@ describe('the card rows', () => {
     expect(chips.hits.get('philly')).toEqual({ sent: 2, hit: 0 });
     expect(chips.hits.has('denver')).toBe(false);
     expect([...chips.searched]).toEqual(['denver', 'philly']);
+  });
+});
+
+describe('erpProxyBehind', () => {
+  const on = (host: string, port: number, running_exit: string | null) => ({
+    proxy: { host, port } as NonNullable<typeof WORKER_DETAIL.proxy>,
+    running_exit,
+  });
+
+  it('says nothing while the browser runs through the listed proxy', () => {
+    expect(erpProxyBehind(on('proxy.example', 8080, 'http://proxy.example:8080'))).toBeNull();
+  });
+
+  it('reads a default port the running exit dropped as that port', () => {
+    expect(erpProxyBehind(on('proxy.example', 80, 'http://proxy.example'))).toBeNull();
+    expect(erpProxyBehind(on('proxy.example', 443, 'https://proxy.example'))).toBeNull();
+  });
+
+  it('ignores host case, which new URL() keeps for socks5', () => {
+    expect(erpProxyBehind(on('host.example', 1080, 'socks5://Host.Example:1080'))).toBeNull();
+  });
+
+  it('names the old exit once the slot has really moved', () => {
+    expect(erpProxyBehind(on('new.example', 8080, 'http://old.example:8080'))).toBe('old.example:8080');
+    expect(erpProxyBehind(on('proxy.example', 8080, 'http://proxy.example'))).toBe('proxy.example');
   });
 });
 

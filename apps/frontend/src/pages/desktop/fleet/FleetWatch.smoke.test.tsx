@@ -59,6 +59,16 @@ describe('watch page', () => {
     expect(html).toMatch(/disabled=""[^>]*title="fleetWorkerNotRunning"/);
   });
 
+  it('offers Retire & free only for a lost account on the worker\'s own slot', () => {
+    expect(renderToString(<FleetErpWatch initial={WORKER_DETAIL} now={NOW} />)).not.toContain('fleetRetireFree');
+    const walled = { ...WORKER_DETAIL, worker: { ...WORKER_DETAIL.worker, state: 'CHECKPOINT' } };
+    expect(renderToString(<FleetErpWatch initial={walled} now={NOW} />)).toContain('fleetRetireFree');
+    const parked = { ...WORKER_DETAIL, slot: { ...WORKER_DETAIL.slot!, parked: true } };
+    expect(renderToString(<FleetErpWatch initial={parked} now={NOW} />)).toContain('fleetRetireFree');
+    const taken = { ...walled, holds_slot: false, slot: { ...WORKER_DETAIL.slot!, worker_id: 'other' } };
+    expect(renderToString(<FleetErpWatch initial={taken} now={NOW} />)).not.toContain('fleetRetireFree');
+  });
+
   it('shows a homelab worker on the same layout, fed by the coordinator', () => {
     const html = renderToString(<FleetWatch workerId="homelab-5" />);
     for (const k of LAYOUT) expect(html, k).toContain(k);
