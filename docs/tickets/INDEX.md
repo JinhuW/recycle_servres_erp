@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-520](./RS-520-a-free-fleet-worker-shows-no-account-or-browser-it-d.md) | done | bug | P2 | A Free fleet worker shows no account or browser it does not have | 1.414.4 |
 | [RS-519](./RS-519-prod-to-dev-sync-survives-a-not-null-sealed-column.md) | done | bug | P2 | Prod-to-dev sync survives a NOT NULL sealed column | 1.414.3 |
 | [RS-518](./RS-518-sell-order-fold-keeps-different-ram-speeds-apart.md) | done | bug | P2 | Sell order fold keeps different RAM speeds apart | 1.414.2 |
 | [RS-517](./RS-517-fix-the-code-review-findings-before-releasing-sync-t.md) | done | bug | P2 | Fix the code review findings before releasing Sync to Market and Add to fleet | 1.414.1 |

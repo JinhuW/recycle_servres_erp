@@ -214,7 +214,9 @@ function WorkerRow({ row: r, hostVersion, cityName, room, onChanged, now }: {
 
   const since = r.now?.since ? Math.max(0, Math.round((now - Date.parse(r.now.since)) / 1000)) : null;
   const elapsed = since === null ? '' : `${Math.floor(since / 60)}m ${String(since % 60).padStart(2, '0')}s`;
-  const nowCell = r.replacingTo
+  const nowCell = r.kind === 'free'
+    ? <em className="fleet-hold">{t(r.running ? 'fleetNowStopping' : 'fleetNowNoAccount')}</em>
+    : r.replacingTo
     ? <em className="fleet-hold">{t('fleetNowReplacing', { version: r.replacingTo })}</em>
     : r.now
       ? <span className="fleet-task-now">
@@ -251,7 +253,9 @@ function WorkerRow({ row: r, hostVersion, cityName, room, onChanged, now }: {
         {r.host ? <span className="mono fleet-hostcell">{r.host}</span> : <span className="fp-muted">—</span>}
       </td>
       <td>
-        {r.no === null
+        {r.kind === 'free'
+          ? <span className="fp-holder"><span className="fp-muted">—</span>{r.no !== null && <small>{t('fleetAccountWas', { no: r.no })}</small>}</span>
+          : r.no === null
           ? <span className="fp-holder"><span className="fp-muted">—</span><small className="mono">{maskUid(r.uid)}</small></span>
           : (
             <AccountBriefCell no={r.no} uid={r.uid} pool={r.pool}>

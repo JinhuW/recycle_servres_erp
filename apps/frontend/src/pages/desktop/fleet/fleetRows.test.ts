@@ -82,6 +82,25 @@ describe('fleetRows', () => {
     // No report yet: unknown is not gone.
     expect(rowsWith([{ host_id: 'homelab', report: null }])?.kind).toBe('free');
   });
+  it('reads a free worker from its host report, not its last heartbeat', () => {
+    const free = { ...WORKERS[0], worker_id: 'homelab-7', host_id: 'homelab', account_no: 70, vnc_port: 5907, last_heartbeat_at: ago(5) };
+    const report = (state: string) => ({ version: '1', containers: [{ worker_id: 'homelab-7', image: 'img:1', state, started_at: null }] });
+    const rowWith = (hosts: Parameters<typeof fleetRows>[0]['hosts']) =>
+      fleetRows({ ...input, workers: [...WORKERS, free], hosts }, NOW).find(r => r.workerId === 'homelab-7');
+    expect(rowWith([{ host_id: 'homelab', report: report('exited') }]))
+      .toMatchObject({ kind: 'free', running: false, vncPort: null, now: null, task: null, no: 70 });
+    // Removed by the agent: gone now, not when the heartbeat ages out.
+    expect(rowWith([{ host_id: 'homelab', report: { version: '1', containers: [] } }])).toBeUndefined();
+    // Still up, or nothing reported: the heartbeat stands.
+    expect(rowWith([{ host_id: 'homelab', report: report('running') }])).toMatchObject({ running: true, vncPort: 5907 });
+    expect(rowWith([{ host_id: 'homelab', report: null }])).toMatchObject({ running: true, vncPort: 5907 });
+  });
+  it('sorts a free worker as holding no account', () => {
+    const free = { ...WORKERS[0], worker_id: 'homelab-7', host_id: 'homelab', account_no: 1, task: null, last_heartbeat_at: ago(30) };
+    const sorted = sortFleetRows(fleetRows({ ...input, workers: [...WORKERS, free] }, NOW), 'account', 'asc');
+    const held = sorted.filter(r => r.no !== null && r.kind !== 'free').length;
+    expect(sorted.findIndex(r => r.workerId === 'homelab-7')).toBeGreaterThanOrEqual(held);
+  });
   it('leaves out a parked worker above the count once its host removed its container', () => {
     const parked = { ...WORKERS[0], worker_id: 'homelab-7', host_id: 'homelab', state: 'CHECKPOINT', task: null, last_heartbeat_at: ago(30) };
     const report = { version: '1', containers: [{ worker_id: 'homelab-1', image: 'img:2', state: 'running', started_at: null }] };

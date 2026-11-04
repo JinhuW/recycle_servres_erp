@@ -15,6 +15,20 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.414.4] - 2026-11-04
+
+### Fixed
+
+- **A Free fleet worker no longer looks like it has an account and a browser
+  (RS-520).** After Release parked, a freed worker kept its old account number,
+  "Waiting for a task" and a VNC port for up to 15 minutes, because a recent
+  heartbeat counted as running, and the number stayed after that. Workers that
+  had already exited looked idle and ready. A Free row now follows its host's
+  container report: it reads "No account" once the container has stopped, or
+  "Stopping" while it still runs, leaves the table once the host removes the
+  container, and shows the old account only as "was No. 87". This changes the
+  page only: it restarts no worker and causes no login.
+
 ## [1.414.3] - 2026-11-03
 
 ### Fixed

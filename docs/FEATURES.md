@@ -3691,7 +3691,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     account added on the Account pool tab; Free comes before
     Parked. Since v1.387.2 (RS-469) a worker reads Free as soon as
     its account's slot is gone, for example straight after Release parked,
-    without waiting for it to go silent: its next call is refused. A stopped worker of a deleted host reads Parked, not Free: no
+    without waiting for it to go silent: its next call is refused. Since
+    v1.414.4 (RS-520) a Free row holds no account: its Account cell is a dash
+    with "was No. n", and its host's container report decides the rest at once,
+    not its last heartbeat. It reads Stopping while the container runs, No
+    account with no VNC port after that, and is left out once the container is
+    gone. A stopped worker of a deleted host reads Parked, not Free: no
     agent is left to start it (v1.387.1). A Free worker whose container its
     host no longer reports (the agent removed it for being on an old image)
     is left out of the table (v1.388.0); since v1.390.1 so is a Parked one
