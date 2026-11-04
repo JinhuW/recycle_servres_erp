@@ -135,14 +135,22 @@ describe('foldSeries', () => {
 
   it('folds one series into a row where its first line sat, and leaves the rest', () => {
     const out = foldSeries(items([
-      ram('M471A1K43CB1-CRC'), ram('HMA81GS6AFR8N-UH', 'SK Hynix 8GB DDR4'),
-      ram('M471A1K43CB1-CTD'), { category: 'SSD', partNumber: 'X', label: 'SSD', condition: null },
+      ram('M471A1K43CB1-CTD'), ram('HMA81GS6AFR8N-UH', 'SK Hynix 8GB DDR4'),
+      ram('M471A1K43CB1-CTD7Q'), { category: 'SSD', partNumber: 'X', label: 'SSD', condition: null },
       ram('HMA81GS6AFR8N-UH', 'SK Hynix 8GB DDR4'),
     ]));
     expect(out).toHaveLength(3);
     expect(isFold(out[0]!) && out[0].members.map(m => m.idx)).toEqual([0, 2]);
     expect(isFold(out[1]!) && out[1].members.map(m => m.idx)).toEqual([1, 4]);
     expect(isFold(out[2]!)).toBe(false);
+  });
+
+  it('keeps another speed of one short code apart', () => {
+    const lot = (partNumber: string) => ({ ...ram(partNumber), rank: '1Rx8', shortCode: 'CB1' });
+    const out = foldSeries(items([lot('M471A1K43CB1-CRC'), lot('M471A1K43CB1-CTD'), lot('M471A1K43CB1-CTD')]));
+    expect(out).toHaveLength(2);
+    expect(isFold(out[0]!)).toBe(false);
+    expect(isFold(out[1]!) && out[1].members.map(m => m.idx)).toEqual([1, 2]);
   });
 
   it('keeps a lone series line, another die, label or condition unfolded', () => {

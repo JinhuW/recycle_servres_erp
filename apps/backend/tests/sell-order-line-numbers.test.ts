@@ -617,9 +617,9 @@ describe('sell order #: what a deploy, a re-spec and a typed line can do', () =>
   });
 });
 
-// One RAM series — Samsung M471A1K43CB1, SK Hynix HMA81GS6AFR — is one # on a
-// line numbered from now on, whatever its speed; another die is another #; each part number still
-// prints as its own row under that #. A # already stored never moves.
+// One RAM series — one module family, however it was packaged — is one # on a
+// line numbered from now on; another speed or die is another #; each part
+// number still prints as its own row under that #. A # already stored never moves.
 describe('sell order #: one RAM series shares one #', () => {
   let mgr: string;
   beforeEach(async () => {
@@ -627,7 +627,7 @@ describe('sell order #: one RAM series shares one #', () => {
     mgr = (await loginAs(ALEX)).token;
   });
 
-  const SERIES = ['M471A1K43CB1-CRC', 'M471A1K43CB1-CTD', 'M471A1K43CB1-CWE'];
+  const SERIES = ['M471A1K43CB1-CTD', 'M471A1K43CB1-CTD7Q', 'M471A1K43CB1-CTDQ'];
 
   it('a new order gives a series one #, and the sheet one row per part number under it', async () => {
     const { ids } = await lots([
@@ -658,6 +658,13 @@ describe('sell order #: one RAM series shares one #', () => {
   it('another die of the module is a # of its own', async () => {
     const pns = ['HMAA2GU6AJR8N-XN', 'HMAA2GU6CJR8N-XN'];
     const { ids } = await lots(pns.map(pn => ({ pn, brand: 'SK Hynix', warehouse: 'WH-LA1' })));
+    const id = await createOrder(mgr, pns.map((pn, i) => lotLine(ids[i]!, pn, 'WH-LA1')));
+    expect(new Set((await numbers(mgr, id)).map(([, no]) => no)).size).toBe(2);
+  });
+
+  it('another speed of one short code is a # of its own', async () => {
+    const pns = ['M471A1K43CB1-CRC', 'M471A1K43CB1-CTD'];
+    const { ids } = await lots(pns.map(pn => ({ pn, brand: 'Samsung', warehouse: 'WH-LA1' })));
     const id = await createOrder(mgr, pns.map((pn, i) => lotLine(ids[i]!, pn, 'WH-LA1')));
     expect(new Set((await numbers(mgr, id)).map(([, no]) => no)).size).toBe(2);
   });
