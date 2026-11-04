@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-522](./RS-522-fill-a-po-s-sell-prices-from-its-linked-sell-orders.md) | done | story | P2 | Fill a PO's sell prices from its linked sell orders | 1.416.0 |
 | [RS-521](./RS-521-change-a-worker-s-proxy-with-a-live-check-and-a-conf.md) | done | story | P2 | Change a worker's proxy, with a live check and a confirmation | 1.415.0 |
 | [RS-520](./RS-520-a-free-fleet-worker-shows-no-account-or-browser-it-d.md) | done | bug | P2 | A Free fleet worker shows no account or browser it does not have | 1.414.4 |
 | [RS-519](./RS-519-prod-to-dev-sync-survives-a-not-null-sealed-column.md) | done | bug | P2 | Prod-to-dev sync survives a NOT NULL sealed column | 1.414.3 |
