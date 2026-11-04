@@ -114,13 +114,15 @@
 .acct-rec-amt { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-muted); white-space: nowrap; }
 .acct-mismatch {
   display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%;
-  background: var(--neg); color: #fff; font-size: 11px; font-weight: 700; line-height: 1; cursor: help;
+  background: var(--neg); color: #fff; font-size: 11px; font-weight: 700; line-height: 1;
 }
 .acct-mismatch-warn { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12.5px; color: var(--neg); }
 .acct-for { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .acct-for-kind { font-weight: 500; white-space: nowrap; }
 .acct-for-party { color: var(--fg-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
 .acct-sub { display: block; font-size: 11.5px; color: var(--fg-subtle); margin-top: 2px; white-space: nowrap; }
+/* Two lines, unlike other sub-lines: unbroken it would push Balance off a laptop screen. */
+.acct-sub.acct-mismatch-why { color: var(--neg); white-space: normal; min-width: 168px; text-wrap: balance; word-break: keep-all; }
 .acct-book tr.acct-voided td { color: var(--fg-subtle); }
 .acct-book tr.acct-voided .acct-num .acct-fig { text-decoration: line-through; color: var(--fg-subtle); }
 .acct-empty { padding: 28px 24px; font-size: 13px; color: var(--fg-subtle); }

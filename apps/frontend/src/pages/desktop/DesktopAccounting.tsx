@@ -291,13 +291,13 @@ function RecordAmount({ row }: { row: AcctRow }) {
   if (!rec || rec.amount === null) return null;
   const m = row.mismatch;
   return (
-    <span className="acct-rec-amt">
-      {m && (
-        <span className="acct-mismatch" role="img" aria-label={t('acctMismatchShort')}
-              title={mismatchText(t, m, locale)}>!</span>
-      )}
-      <span className="acct-fig">{fmtMoney(rec.amount, rec.currency, locale)}</span>
-    </span>
+    <>
+      <span className="acct-rec-amt">
+        {m && <span className="acct-mismatch" role="img" aria-label={t('acctMismatchShort')}>!</span>}
+        <span className="acct-fig">{fmtMoney(rec.amount, rec.currency, locale)}</span>
+      </span>
+      {m && <span className="acct-sub acct-mismatch-why">{mismatchText(t, m, locale)}</span>}
+    </>
   );
 }
 

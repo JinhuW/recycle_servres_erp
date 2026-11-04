@@ -2667,7 +2667,8 @@ is who paid, below).
     cost with other fees, the sell order's total, the case's amount. When
     the whole book's total for that kind on the record is more than 2% off
     it either way (in ¥, with a dollar figure at the latest rate), each of
-    the record's rows carries a red ! whose tooltip gives both figures. The
+    the record's rows carries a red ! and prints both figures in red under
+    the amount (v1.416.1). The
     form warns the same way while you type: a red line under Amount, and
     Save becomes *Save anyway*, which needs a second click (desktop and
     phone). An entry
