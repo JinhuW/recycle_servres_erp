@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-02:** ERP migration `0222`, Reddit tracker migration `0007`,
+**As of 2026-11-04:** ERP migration `0223`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2661,7 +2661,7 @@ Who did what to which seller, including the seller replies purchasers log. Appen
 
 Workspace-wide configuration and plumbing: key/value settings (workspace_settings), the counters behind human-readable ids such as PO-1289 (id_counters), and the migration runner's ledger (schema_migrations).
 
-Tables: [`workspace_settings`](#erp-workspace-settings), [`id_counters`](#erp-id-counters), [`schema_migrations`](#erp-schema-migrations)
+Tables: [`workspace_settings`](#erp-workspace-settings), [`id_counters`](#erp-id-counters), [`schema_migrations`](#erp-schema-migrations), [`perf_rollups`](#erp-perf-rollups)
 
 <a id="erp-workspace-settings"></a>
 
@@ -2709,6 +2709,29 @@ Ledger of applied migrations, written by scripts/migrate.mjs at boot: one row pe
 - **Primary key:** `filename`
 
 Keyed by file name, so an edited file that was already applied never runs again; the runner only logs a warning when its checksum differs.
+
+<a id="erp-perf-rollups"></a>
+
+#### `perf_rollups`
+
+Hourly timing histograms per release, written by lib/perf.ts about once a minute and at shutdown, read by /api/perf/* for Settings ▸ Performance. Rows older than 400 days are purged daily. No row holds a user identity, an id or a raw path.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `bucket` | `timestamptz` | ✓ |  | The hour the samples fall in. |
+| `version` | `text` | ✓ |  | Release that served them, from releaseVersion(). |
+| `kind` | `text` | ✓ |  | `http` for a backend request, `client` for a browser load report. |
+| `name` | `text` | ✓ |  | `http`: method and matched route pattern, e.g. `GET /api/orders/:id`. `client`: `metric\|shell\|page`, e.g. `lcp\|desktop\|inventory`, from closed lists. |
+| `count` | `bigint` | ✓ |  | Samples. |
+| `errors` | `bigint` | ✓ | `0` | Of those, responses with a 5xx status. Always 0 for `client`. |
+| `sum_ms` | `double precision` | ✓ |  | Total milliseconds. |
+| `max_ms` | `double precision` | ✓ |  | Slowest sample. |
+| `buckets` | `bigint[]` | ✓ |  | One count per bound in PERF_BUCKETS_MS, plus a last one for anything above the top. |
+
+- **Primary key:** `bucket`, `version`, `kind`, `name`
+- **Index:** `perf_rollups_version_idx` on `version`, `kind`
+
+Rows are summed index by index, so changing PERF_BUCKETS_MS needs a migration that rewrites `buckets`.
 
 ### SQL functions
 

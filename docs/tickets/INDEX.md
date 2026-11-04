@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-525](./RS-525-keep-performance-evidence-by-route-and-release.md) | done | story | P2 | Keep performance evidence by route and release | 1.418.0 |
 | [RS-524](./RS-524-show-the-reason-for-rmb-flow-red-alerts-on-the-row.md) | done | story | P2 | Show the reason for RMB Flow red alerts on the row | 1.416.1 |
 | [RS-523](./RS-523-retire-free-on-the-fleet-watch-page.md) | done | story | P2 | Retire & free on the fleet Watch page | 1.417.0 |
 | [RS-522](./RS-522-fill-a-po-s-sell-prices-from-its-linked-sell-orders.md) | done | story | P2 | Fill a PO's sell prices from its linked sell orders | 1.416.0 |

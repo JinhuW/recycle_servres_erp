@@ -15,6 +15,21 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.418.0] - 2026-11-04
+
+### Added
+
+- **Performance evidence by route and release (RS-525).** Timing existed but
+  nothing kept it: `/metrics` resets on every deploy, and the logs hold raw lines
+  that nobody aggregates. So nothing could say what to optimize, or whether a
+  release helped. The backend now stores hourly histograms per route and release
+  in `perf_rollups`, and Settings gets a manager-only Performance section: routes
+  ranked by total time spent, page loads by page and shell, and a before/after
+  between any two releases. Browser load reports now say which page and shell
+  they came from, as closed lists, so no URL or id can reach the data. Rollups
+  hold no user identity. Prod evidence starts accumulating from the release
+  that carries this.
+
 ## [1.417.0] - 2026-11-04
 
 ### Added

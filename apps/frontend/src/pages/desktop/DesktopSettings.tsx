@@ -16,10 +16,11 @@ const CustomersPanel = lazy(() => import('./settings/CustomersPanel').then(m => 
 const CategoriesPanel = lazy(() => import('./settings/CategoriesPanel').then(m => ({ default: m.CategoriesPanel })));
 const GeneralPanel = lazy(() => import('./settings/GeneralPanel').then(m => ({ default: m.GeneralPanel })));
 const FxRatesPanel = lazy(() => import('../../components/FxRatesPanel').then(m => ({ default: m.FxRatesPanel })));
+const PerformancePanel = lazy(() => import('./settings/PerformancePanel').then(m => ({ default: m.PerformancePanel })));
 const DesktopSettingsConnectors = lazy(() => import('./DesktopSettingsConnectors').then(m => ({ default: m.DesktopSettingsConnectors })));
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
-type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'fx' | 'connectors';
+type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'fx' | 'performance' | 'connectors';
 
 // Section labels are looked up via t() at render time — id ↔ tKey is the
 // only declarative mapping we need; pluralization / casing belongs to the
@@ -36,6 +37,7 @@ const SECTIONS: { id: SectionId; labelKey: string; subKey: string; icon: IconNam
   { id: 'categories', labelKey: 'settingsNavCategories', subKey: 'settingsNavCategoriesSub', icon: 'box', managerOnly: true },
   { id: 'general',    labelKey: 'settingsNavGeneral',    subKey: 'settingsNavGeneralSub',    icon: 'settings', managerOnly: true },
   { id: 'fx',         labelKey: 'settingsNavFx',         subKey: 'settingsNavFxSub',         icon: 'refresh', managerOnly: true },
+  { id: 'performance', labelKey: 'settingsNavPerformance', subKey: 'settingsNavPerformanceSub', icon: 'analytics', managerOnly: true },
   { id: 'connectors', labelKey: 'connectorsTab',         subKey: 'settingsNavConnectorsSub', icon: 'chip' },
 ];
 
@@ -89,6 +91,7 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
             {section === 'categories' && <CategoriesPanel />}
             {section === 'general'    && <GeneralPanel />}
             {section === 'fx'         && <FxRatesPanel />}
+            {section === 'performance' && <PerformancePanel />}
             {section === 'connectors' && <DesktopSettingsConnectors />}
           </Suspense>
         </div>

@@ -4519,6 +4519,19 @@ removed in v1.191.0.
   navigation timing, LCP, and the request/refresh counts for the page load, one
   report per load. Numbers only, no paths — it is the answer to "the page feels
   slow", which until then had no evidence behind it either way.
+- **Performance is kept per route and release** (v1.418.0). Settings ▸
+  Performance, managers only, on desktop, shows the last 24 hours, 7 days or 30
+  days:
+  - **Slowest routes**, ranked by total time spent, with request count, p50, p95,
+    p99, max and 5xx rate. Fleet worker and host traffic is hidden by default.
+  - **Page loads** by page and shell: LCP, load and TTFB percentiles. Only full
+    loads count; moving between pages inside the app does not.
+  - **Compare releases**: p50 and p95 for each route between any two versions.
+    A route with under 30 requests on either side is marked and ranked last.
+
+  Percentiles are estimates from histogram buckets. Rows are hourly and kept for
+  400 days, and hold no user identity, ids or raw paths. New data lands within
+  about a minute. Per-query SQL timing is not recorded.
 - `/api/health` reports version, build date, commit and provider modes.
 - **Ops alerts reach one Telegram group** (v1.322.0, v1.325.0). Everything
   goes to the "Homelab Alerts" group, each source in its own topic:
