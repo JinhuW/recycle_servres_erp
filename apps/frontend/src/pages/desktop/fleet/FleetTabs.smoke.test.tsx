@@ -97,6 +97,22 @@ describe('Fleet tab', () => {
     expect(html).toContain('ff-ring-full');            // #12 has used its budget
     expect(html).toContain('fleetWorkersFoot');
   });
+  it('shows a free worker with no account, task or browser', () => {
+    const free = { ...WORKERS[0], worker_id: 'homelab-7', host_id: 'homelab', account_no: 70, vnc_port: 5907, task: null, last_heartbeat_at: new Date(NOW - 5 * 60_000).toISOString() };
+    const report = (state: string) => ({ version: '1', containers: [{ worker_id: 'homelab-7', image: 'img:1', state, started_at: null }] });
+    const html = (state: string) => renderToString(<WorkersTable
+      data={{ ...fleetData, slots: [], workers: [free], coordinator: null, hosts: [{ ...HOSTS[0], host_id: 'homelab', report: report(state) }] }}
+      filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
+    const stopped = html('exited');
+    expect(stopped).toContain('fleetAccountWas');
+    expect(stopped).toContain('fleetNowNoAccount');
+    expect(stopped).not.toContain('fleetNowWaiting');
+    expect(stopped).not.toContain('fleetAccountNo');
+    expect(stopped).not.toContain('vnc :5907');
+    const stopping = html('running');
+    expect(stopping).toContain('fleetNowStopping');
+    expect(stopping).toContain('vnc :5907');
+  });
   it('has the Healthy, Free and Parked chips, and no retired worker', () => {
     const html = renderToString(<WorkersTable data={fleetData} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
     expect(html.match(/<i class="fp-dot"><\/i><span>(\w+)<\/span>/g)?.map(m => m.match(/<span>(\w+)/)![1]))

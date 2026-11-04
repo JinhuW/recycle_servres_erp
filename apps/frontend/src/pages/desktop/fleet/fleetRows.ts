@@ -191,7 +191,7 @@ export function fleetRows(input: FleetRowsInput, now: number = Date.now()): Flee
   const hosts = input.hosts && new Set(input.hosts.map(h => h.host_id));
   // The containers each reporting host still has: the agent removes a stopped
   // container above the count once new workers start on another image.
-  const onHost = new Map((input.hosts ?? []).flatMap(h => h.report ? [[h.host_id, new Set(h.report.containers.map(c => c.worker_id))] as const] : []));
+  const onHost = new Map((input.hosts ?? []).flatMap(h => h.report ? [[h.host_id, new Map(h.report.containers.map(c => [c.worker_id, c.state]))] as const] : []));
   const countOf = new Map((input.hosts ?? []).flatMap(h => h.desired ? [[h.host_id, h.desired.count] as const] : []));
   // A container missing within the count is about to be run again; above it, the agent removed it for good.
   const removed = (w: FleetWorker, row: FleetRow) => {
@@ -205,7 +205,16 @@ export function fleetRows(input: FleetRowsInput, now: number = Date.now()): Flee
   const seenNo = new Set<number>();
   for (const w of workers.values()) {
     const row = erpRow(w, slotOf(w), input.release, null, now, !!hosts && !!w.host_id && !hosts.has(w.host_id));
-    if (!row.running && !(row.heartbeat && now - Date.parse(row.heartbeat) < OFFLINE_KEPT_MS)) continue;
+    // A freed worker's last heartbeat outlives it by up to 15 minutes; its
+    // host's report says at once that the container, and so the browser, is gone.
+    const reported = w.host_id ? onHost.get(w.host_id) : undefined;
+    if (row.kind === 'free' && reported && reported.get(w.worker_id) !== 'running') {
+      row.running = false;
+      row.vncPort = null;
+      row.now = null;
+      row.task = null;
+    }
+    if (!row.running &&!(row.heartbeat && now - Date.parse(row.heartbeat) < OFFLINE_KEPT_MS)) continue;
     if (removed(w, row)) continue;
     row.pool = row.no === null ? null : poolByNo.get(row.no) ?? null;
     row.uid ??= row.pool?.uid ?? null;
@@ -233,7 +242,7 @@ function sortValue(col: FleetRowSortCol, r: FleetRow): string | number | null {
   switch (col) {
     case 'worker': return r.workerId;
     case 'host': return r.host;
-    case 'account': return r.no;
+    case 'account': return r.kind === 'free' ? null : r.no;
     case 'state': return `${KIND_ORDER[r.kind]} ${r.state ?? ''}`;
     case 'now': return r.now ? r.now.cityName ?? r.now.city : null;
     case 'today': return r.minutes;
