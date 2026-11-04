@@ -3700,7 +3700,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     Checkpoint, Challenge or Dead (not Dead for an operator, a proxy fault),
     or a manager parked the slot, or the pool already took the account out:
     a row parked only because its worker went silent has none, and the API
-    refuses any other slot with `not_lost`. Since v1.383.0 (RS-461) the toolbar has
+    refuses any other slot with `not_lost`. Since v1.417.0 (RS-523) that
+    worker's Watch page has the same button, beside Re-login, under the same
+    rule. Since v1.383.0 (RS-461) the toolbar has
     **Release parked (N)** whenever such rows exist: a confirmation lists each
     account, worker and state, counts the parked rows it leaves alone, and
     warns that every account added to the fleet afterwards starts a worker (a

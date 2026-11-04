@@ -6,7 +6,7 @@
 import type { FbWorkerStint } from '@recycle-erp/shared';
 import type { CityStep, CityStepKind, CityVisit, CityVisitOutcome, FleetCity as ChipCity } from '../../../lib/coordinator';
 import {
-  fleetAutoResumeDue, fleetResumable, fleetStateParked, fleetTakesResume, FLEET_AUTO_RESUME_MINUTES, type FleetCityLogTask as FleetTaskLog, type FleetWorkerDetail, type FleetWorkerEvent } from '../../../lib/fleet';
+  fleetAutoResumeDue, fleetResumable, fleetSlotRetirable, fleetStateParked, fleetTakesResume, FLEET_AUTO_RESUME_MINUTES, type FleetCityLogTask as FleetTaskLog, type FleetWorkerDetail, type FleetWorkerEvent } from '../../../lib/fleet';
 import type { CityHits, FleetStatus, ReloginProgress } from '../../../lib/fleetView';
 import { liveness } from './fleetBoard';
 
@@ -16,6 +16,13 @@ export function erpWorkerStatus(w: FleetWorkerDetail['worker'], now: number = Da
   if (beat === 'never' || beat === 'dead') return 'offline';
   if (fleetStateParked(w.state)) return 'attention';
   return beat === 'stale' ? 'stale' : 'live';
+}
+
+/** A lost account on this worker's own slot, or on one parked with none. */
+export function erpWorkerRetirable(d: FleetWorkerDetail): boolean {
+  const slot = d.slot;
+  return !!slot && (d.holds_slot || slot.worker_id === null)
+    && fleetSlotRetirable({ parked: slot.parked, poolStatus: slot.pool_status, state: d.worker.state, operator: d.worker.detail?.operator === true });
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);

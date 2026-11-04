@@ -1,12 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { NOW, WORKER_DETAIL, WORKER_STINTS } from './fixtures';
 import {
-  deviceText, erpCheckpoint, erpConnectPark, erpCityChips, erpCityLog, erpHistory, erpHistoryDot, erpProxyText, erpReloginProgress, erpWorkerStatus,
+  deviceText, erpCheckpoint, erpConnectPark, erpCityChips, erpCityLog, erpHistory, erpHistoryDot, erpProxyText, erpReloginProgress, erpWorkerRetirable, erpWorkerStatus,
   sessionDaysLeft, taskVisit,
 } from './fleetWorkerView';
 
 const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString();
 const worker = WORKER_DETAIL.worker;
+
+describe('erpWorkerRetirable', () => {
+  const slot = WORKER_DETAIL.slot!;
+  const withState = (state: string, detail = {}) => ({ ...WORKER_DETAIL, worker: { ...worker, state, detail } });
+
+  it('leaves a healthy worker alone', () => {
+    expect(erpWorkerRetirable(WORKER_DETAIL)).toBe(false);
+  });
+  it('offers a lost or parked account on its own slot', () => {
+    expect(erpWorkerRetirable(withState('CHECKPOINT'))).toBe(true);
+    expect(erpWorkerRetirable({ ...WORKER_DETAIL, slot: { ...slot, parked: true } })).toBe(true);
+    expect(erpWorkerRetirable({ ...WORKER_DETAIL, holds_slot: false, slot: { ...slot, parked: true, worker_id: null } })).toBe(true);
+  });
+  it('refuses a slot another worker holds, and a worker parked for an operator', () => {
+    expect(erpWorkerRetirable({ ...withState('CHECKPOINT'), holds_slot: false, slot: { ...slot, worker_id: 'other' } })).toBe(false);
+    expect(erpWorkerRetirable(withState('DEAD', { operator: true }))).toBe(false);
+  });
+  it('has nothing to retire without a slot', () => {
+    expect(erpWorkerRetirable({ ...withState('CHECKPOINT'), slot: null })).toBe(false);
+  });
+});
 
 describe('erpWorkerStatus', () => {
   it('buckets an ERP worker as the homelab page does', () => {
