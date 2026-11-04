@@ -625,6 +625,15 @@ is not a stage but a flag beside one, set once every line has sold
       and age, and the final sell price once it has sold. Finish review
       lists the unpriced products, which count as $0 until priced; they
       don't block Approve. The pure maths lives in `lib/reviewPricing.ts`.
+  - **Linked sell orders price the PO** (v1.416.0, RS-522). **From sell order**,
+    beside *Fill from market*, sets each line to what the sell orders naming it
+    charge, in USD: the qty-weighted average when there are several, over every
+    order except Closed or archived ones, ignoring sell lines at qty or price 0.
+    It replaces a price already on the line and leaves a line with no such order
+    alone. Each price goes through the inventory line PATCH and is audited as
+    `priced`. There is no preview or Undo. Manager only: a purchaser's
+    `GET /api/orders/:id/sell-order-prices` answers 403, and they see only the
+    resulting price, with no sell order, customer or source.
   - **A sell order sheet prices the PO** (v1.313.0, RS-347). Drop the
     buyer's filled sheet (`.xlsx`) anywhere on the product list, or pick it
     with **From sheet** beside *Fill from market*; while a file is dragged

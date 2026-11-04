@@ -389,6 +389,29 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     }
     showToast(t('bcFilledFromMarket', { n }), 'success');
   };
+  // What a sell order charges beats an estimate, so unlike the market fill this
+  // replaces a price already on the line. Asked on click: the page has no other
+  // use for these prices, and they may have moved since it loaded.
+  const fillFromSellOrders = async () => {
+    if (!ready || filling) return;
+    setFilling(true);
+    try {
+      const { lines: priced } = await api.get<{ lines: { lineId: string; price: number }[] }>(
+        `/api/orders/${order.id}/sell-order-prices`);
+      if (!priced.length) { showToast(t('bcFillSellOrderNone'), 'warn'); return; }
+      const priceByLine = new Map(priced.map(p => [p.lineId, p.price]));
+      let n = 0;
+      for (const l of lines) {
+        const price = priceByLine.get(l.id);
+        if (price !== undefined && priceOf(l) !== price && await savePrice(l, price)) n += 1;
+      }
+      showToast(t('bcFilledFromSellOrder', { n }), 'success');
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setFilling(false);
+    }
+  };
 
   // ── A sell order sheet: the server matches it to the lines by part number
   // and writes nothing; Apply writes each price the way a typed one goes.
@@ -1100,6 +1123,15 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               onClick={() => { void fillFromMarket(); }}
             >
               <Icon name="tag" size={13} /> {filling ? '…' : t('bcFillMarket')}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={!ready || filling || sheet !== null || sheetBusy}
+              title={t('bcFillSellOrderTip')}
+              onClick={() => { void fillFromSellOrders(); }}
+            >
+              <Icon name="tag" size={13} /> {filling ? '…' : t('bcFillSellOrder')}
             </button>
             <button
               type="button"

@@ -15,6 +15,19 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.416.0] - 2026-11-04
+
+### Added
+
+- **Review mode can price a PO from its linked sell orders (RS-522).** When a sell
+  order already named a PO's lines, a manager still had to re-enter its price by
+  hand. The new **From sell order** button copies it across, replacing any price
+  already on the line. A line on several orders takes the qty-weighted average.
+  Closed and archived orders don't count, and the sell order itself is not
+  changed. The button and its endpoint are manager-only. A purchaser sees the
+  resulting price on their PO, as with any manager-set price, but not the sell
+  order, the customer or where the price came from.
+
 ## [1.415.0] - 2026-11-04
 
 ### Added
