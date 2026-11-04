@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Sql } from 'postgres';
 import {
   FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_ROUND_MS, proxyHealthState,
-  type FleetProxyCheck, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxySource,
+  type FleetProxyCheck, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxySource, type FleetProxyStates,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import type { Env } from '../types';
@@ -12,7 +12,7 @@ import { poolKey, unseal } from '../lib/sealed';
 import { callFacade } from '../routes/coordinator';
 import { managerOnly, unavailable, type ManagerEnv } from './auth';
 import { proxyWithoutLogin } from './claim';
-import { listProxies } from './proxies';
+import { listProxies, proxyStates } from './proxies';
 import { probeProxy, type ProbeResult } from './proxyProbe';
 import { notFound } from './sql';
 
@@ -239,6 +239,11 @@ export function startProxyHealthLoop(sql: Sql, env: Env): { stop(): void } {
 const health = new Hono<ManagerEnv>().use('*', managerOnly);
 
 health.get('/', async (c) => c.json(await proxyHealthView(getDb(c.env))));
+
+health.get('/states', async (c) => {
+  const states = await proxyStates(getDb(c.env));
+  return c.json({ states: [...states].map(([proxy_id, state]) => ({ proxy_id, state })) } satisfies FleetProxyStates);
+});
 
 // "Check now": one ERP proxy (`proxy_id`), or a full round unless one started
 // in the last few seconds. A coordinator port is only checked with the rest:

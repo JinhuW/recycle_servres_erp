@@ -968,6 +968,7 @@ const zh: Record<string, string> = {
   soMarketSyncMarketPrice: '市场价格',
   soMarketSyncConfirm: '同步 {n} 个价格',
   soMarketSyncDone: '已将 {n} 个价格同步到市场',
+  soMarketSyncLinesChanged: '打开后此订单的产品已被更改，因此未同步任何价格。请重新加载订单后再同步。',
   soPriceImportColumnsNotFound: '未能在文件中找到型号 / 单价列',
   soPriceImportNotXlsx: '这不是 Excel（.xlsx）文件 — 请先另存为 .xlsx 格式',
   soPriceImportTooLarge: '文件过大（最大 8 MB）',

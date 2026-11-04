@@ -2334,7 +2334,7 @@ The proxies the ERP fleet browses through, as a list managers edit on the Accoun
 
 #### `fleet_proxy_checks`
 
-One health check of one proxy port, dialed through the proxy itself to an IP-geo lookup (`fleet/proxyProbe.ts`). Every five minutes a round checks each `fleet_proxies` row from the backend and each port the homelab workers dial through rs_console's `/v1/proxies/health`; **Check now** on the Proxies tab adds rows between rounds. Kept 14 days; each round prunes older rows. No login is stored. Migration 0215.
+One health check of one proxy port, dialed through the proxy itself to an IP-geo lookup (`fleet/proxyProbe.ts`). Every five minutes a round checks each `fleet_proxies` row from the backend and each port the homelab workers dial through rs_console's `/v1/proxies/health`; **Check now** on the Proxies tab adds rows between rounds. Kept 14 days; each round prunes older rows. A new URL on a proxy clears `proxy_id` on its rows, as removing it does, so the new exit starts unchecked. No login is stored. Migration 0215.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |

@@ -15,6 +15,36 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.414.1] - 2026-11-03
+
+### Fixed
+
+Fixes from the code review before releasing v1.413.0 to v1.414.0 (RS-517).
+
+- **Sync to Market records the prices the dialog showed.** If someone saved the
+  order's lines after the dialog opened, the sync used to write prices the
+  manager never saw while reporting success. It now refuses and writes nothing.
+- **A lot priced at 0 no longer drags a part's Market price down.** 10 units at
+  $100 plus a new lot of 5 at $0 recorded $60 at 90% instead of $90.
+- **A quote leaves the Market page when the order stops pricing the part.**
+  Removing a part or holding it at 0 left its reading in place, with no way to
+  withdraw it, and reaching Done kept it as a quote that never sold. The next
+  save, sync or Done now takes it back. A sync that rounds to nothing does too.
+- **The dialog's Market price is in USD**, as the Market page shows it. A CNY
+  order used to show ¥648 for what the Market recorded as $90.
+- **Sync to Market can't be dismissed mid-request**, which looked like a cancel
+  while the write still went through.
+- **A proxy's new URL isn't judged by the old exit's checks.** Editing a working
+  proxy to a dead URL kept reading healthy until the next round, and fixing a
+  dead one kept being refused. A new URL now starts unchecked.
+- **Old proxy checks no longer refuse a proxy.** If the health round stopped, two
+  old failures locked a proxy out for the 14 days the rows are kept. The Add to
+  fleet guard and dialog now share one reading, limited to the last 24 hours, so
+  they can't disagree either.
+- **Add to fleet doesn't draw the same dead proxy twice.** A `proxy_down` refusal
+  now marks it down in the open dialog. The dialog also reads a small states
+  endpoint rather than the Proxies tab's full day of checks.
+
 ## [1.414.0] - 2026-11-03
 
 ### Changed

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
   fleetCloakFor, fleetCloakSwitchable, fleetDeviceFor, fleetReportedEngine, fleetStockRevertible, fleetResumable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
-  type FleetWorkerRelogin, type FleetWorkerResume, proxyHealthState,
+  type FleetWorkerRelogin, type FleetWorkerResume,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
@@ -12,6 +12,7 @@ import { dropSlot, releaseTasks } from './claim';
 import { loadRelease } from './hosts';
 import { cityLog } from './tasks';
 import { loadSettings } from './cities';
+import { proxyStates } from './proxies';
 import { managerOnly, type ManagerEnv } from './auth';
 import { bad, conflict, eventToWire, exists, isRefusal, minutesTodaySql, notFound, taskToWire, type Refusal, type TaskEventRow, type TaskRow } from './sql';
 
@@ -218,10 +219,7 @@ slots.post('/', async (c) => {
     if (n >= limit) return conflict('proxy_full', `${proxy.host}:${proxy.port} carries ${n} of ${limit} accounts`);
     // A new account's first sign-in through a dead exit fails, and a failed
     // sign-in is what gets an account checkpointed. Never checked is allowed.
-    const checks = await tx<{ ok: boolean; latency_ms: number | null }[]>`
-      SELECT ok, latency_ms FROM fleet_proxy_checks
-      WHERE source = 'erp' AND proxy_id = ${proxyId} ORDER BY checked_at DESC, id DESC LIMIT 2`;
-    if (proxyHealthState(checks) === 'down') {
+    if ((await proxyStates(tx, proxyId)).get(proxyId) === 'down') {
       return conflict('proxy_down', `${proxy.host}:${proxy.port} failed its last proxy checks; pick another proxy`);
     }
     const device = fleetDeviceFor(no, proxy.timezone);

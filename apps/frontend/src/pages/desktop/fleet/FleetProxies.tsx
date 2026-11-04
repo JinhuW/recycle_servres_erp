@@ -150,9 +150,8 @@ export function AddToFleetDialog({ no, proxies, limit, health: given, onClose, o
   useEffect(() => {
     if (given) return;
     let live = true;
-    fleetApi.proxyHealth().then((h) => {
-      if (!live) return;
-      setHealth(new Map(h.proxies.flatMap((p) => (p.source === 'erp' && p.proxy_id !== null ? [[p.proxy_id, p.state] as const] : []))));
+    fleetApi.proxyStates().then((h) => {
+      if (live) setHealth(new Map(h.states.map((s) => [s.proxy_id, s.state])));
     }).catch(() => undefined);
     return () => { live = false; };
   }, [given]);
@@ -176,6 +175,9 @@ export function AddToFleetDialog({ no, proxies, limit, health: given, onClose, o
       showSuccessToast(t('fpAddedToFleetToast', { n: no, proxy: proxy.label }));
       onDone();
     } catch (err) {
+      // Went down since this read, or the read failed: the next pick must not
+      // draw it again.
+      if (fleetErrorCode(err) === 'proxy_down') setHealth((h) => new Map(h).set(proxy.id, 'down'));
       warnOrFail(err);
       setBusy(false);
     }

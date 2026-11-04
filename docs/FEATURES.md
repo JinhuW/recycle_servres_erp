@@ -1797,15 +1797,19 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     price from an open order, as its own action on the same card (`POST
     /api/sell-orders/:id/market-sync`). It asks for a percent above 0 and up
     to 100, starting at the manager's last-used one (90 the first time), and
-    lists each priced part on the order with its order price and resulting
-    Market price, in the order's currency. Confirming records the ticked parts
-    at once, at the percent of their saved qty-weighted USD price, as plain
-    `bid:<order>` readings: no note and no mention of the percent on the
-    Market side. The order's prices don't change. The button waits while the
-    order has unsaved changes. A later sync of a part replaces the order's
-    earlier reading, closing the order withdraws its readings (the history's
-    *closed* entry lists them), and Done records the full `sale:<order>`
-    price over them.
+    lists each priced part on the order with its order price, in the order's
+    currency, and resulting Market price, in USD as the Market page shows it
+    (v1.414.1). Confirming records the ticked parts at once, at the percent of
+    their saved qty-weighted USD price, as plain `bid:<order>` readings: no
+    note and no mention of the percent on the Market side. A lot priced at 0
+    is left out of that average. If the order's lines changed after the dialog
+    opened, the sync is refused and writes nothing. The order's prices don't
+    change. The button waits while the order has unsaved changes. A later sync
+    of a part replaces the order's earlier reading, closing the order withdraws
+    its readings (the history's *closed* entry lists them), and Done records
+    the full `sale:<order>` price over them. A part the order stops pricing
+    (removed, or held at qty or price 0) has its reading withdrawn on the next
+    save, sync or Done (v1.414.1, RS-517).
   - **The same sheet prices the PO in Review mode** (v1.313.0). Since
     v1.347.0 that preview expands grouped part-number cells and matches any
     Short code column as well, so Micron VPP and WSM under one module number
@@ -3578,7 +3582,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   the dialog says so and waits for another pick; since v1.413.0, RS-514, a
   proxy whose last health checks read down is disabled with "down", the
   random pick prefers one that is up and never takes a down one, and the
-  backend refuses a down proxy with `proxy_down`; two accounts per proxy by default, the
+  backend refuses a down proxy with `proxy_down`; since v1.414.1, RS-517, both go by the last 24 hours of checks only, and a proxy's new URL starts unchecked; two accounts per proxy by default, the
   `Accounts per proxy` rule in Cities ▸ Rules; there are no home cities to
   pick since v1.374.0, RS-439), and the ERP makes the slot with a desktop browser made
   for the account (Chromium's own user agent, a common screen and scale
