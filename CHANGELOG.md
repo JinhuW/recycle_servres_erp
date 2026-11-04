@@ -15,6 +15,17 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.417.0] - 2026-11-04
+
+### Added
+
+- **Retire & free on the fleet Watch page (RS-523).** The Watch page is where a
+  manager sees a checkpoint or a dead session, but retiring that account meant
+  leaving it for the worker page or the Accounts tab. The button now sits beside
+  Re-login, with the same rule as the worker page: a lost or parked account on
+  this worker's own slot, never a healthy one. It opens the same confirmation,
+  including the warning that the worker's next start is a Facebook login.
+
 ## [1.416.1] - 2026-11-04
 
 ### Changed

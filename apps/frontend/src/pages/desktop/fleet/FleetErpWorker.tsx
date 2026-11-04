@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { handleFetchError } from '../../../lib/errorToast';
 import type { FbWorkerStint } from '../../../lib/facebookPool';
-import { fleetSlotRetirable, fleetApi, type FleetCity, type FleetSlot, type FleetWorkerDetail } from '../../../lib/fleet';
+import { fleetApi, type FleetCity, type FleetSlot, type FleetWorkerDetail } from '../../../lib/fleet';
 import { browserLabel, SESSION_WARN_DAYS } from '../../../lib/fleetView';
 import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
@@ -12,7 +12,7 @@ import { ChangeProxyDialog, RemoveFromFleetDialog } from './FleetProxies';
 import { SearchNowDialog } from './FleetTasksTab';
 import { dueLabel, leaseLive } from './fleetBoard';
 import {
-  deviceText, erpCheckpoint, erpCityChips, erpConnectPark, erpCityLog, erpHistory, erpHistoryDot, erpProxyBehind, erpProxyText, erpWorkerStatus, sessionDaysLeft,
+  deviceText, erpCheckpoint, erpCityChips, erpConnectPark, erpCityLog, erpHistory, erpHistoryDot, erpProxyBehind, erpProxyText, erpWorkerRetirable, erpWorkerStatus, sessionDaysLeft,
   type ErpHistoryLine,
 } from './fleetWorkerView';
 import { EngineChip, MarkHealthyButton, ParkDialog, ReleaseQuarantineButton, RetireSlotDialog, UnparkDialog, useFleetMirror } from './shared';
@@ -143,9 +143,7 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
   const removable = !!slot && (slot.parked || !leaseLive(slot, now)) && !slot.reserved_until;
   // The account's slot only while it is this worker's, or no worker's.
   const proxyMovable = !!slot && (d.holds_slot || slot.worker_id === null);
-  // A lost account on this worker's own slot, or on one parked with none.
-  const retirable = !!slot && (d.holds_slot || slot.worker_id === null)
-    && fleetSlotRetirable({ parked: slot.parked, poolStatus: slot.pool_status, state: w.state, operator: w.detail?.operator === true });
+  const retirable = erpWorkerRetirable(d);
 
   return (
     <div className="fp-pool">
