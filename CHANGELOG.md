@@ -15,6 +15,17 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.416.1] - 2026-11-04
+
+### Changed
+
+- **RMB Flow's red alerts now say why on the row (RS-524).** The red `!` beside an
+  Order amount means the book's total for that record is more than 2% off the
+  record's own figure, but the figures were only in a hover tooltip, so each alert
+  had to be hovered separately. A flagged row now prints them in red under the
+  amount, such as `Book ¥73,138.00 vs order ¥17,900.12 (+308.6%)`, and the tooltip
+  is gone. Desktop only; the phone book shows no alerts.
+
 ## [1.416.0] - 2026-11-04
 
 ### Added
