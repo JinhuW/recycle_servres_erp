@@ -8,11 +8,11 @@ import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
 import { CityChip, fmtDays, HITS_DAYS, stateLabel, WatchButton } from '../FleetAccounts';
 import { CityLogCard } from '../FleetCityLog';
-import { RemoveFromFleetDialog } from './FleetProxies';
+import { ChangeProxyDialog, RemoveFromFleetDialog } from './FleetProxies';
 import { SearchNowDialog } from './FleetTasksTab';
 import { dueLabel, leaseLive } from './fleetBoard';
 import {
-  deviceText, erpCheckpoint, erpCityChips, erpConnectPark, erpCityLog, erpHistory, erpHistoryDot, erpProxyText, erpWorkerStatus, sessionDaysLeft,
+  deviceText, erpCheckpoint, erpCityChips, erpConnectPark, erpCityLog, erpHistory, erpHistoryDot, erpProxyBehind, erpProxyText, erpWorkerStatus, sessionDaysLeft,
   type ErpHistoryLine,
 } from './fleetWorkerView';
 import { EngineChip, MarkHealthyButton, ParkDialog, ReleaseQuarantineButton, RetireSlotDialog, UnparkDialog, useFleetMirror } from './shared';
@@ -26,9 +26,9 @@ import {
 // without a secret, the listed proxy, and its tasks and events
 // (GET /api/fleet/workers/:id). The actions are the fleet's: watch (the watch
 // page, FleetErpWatch.tsx, through the ERP's relay), park or unpark the slot,
-// take the account out of the fleet, search a city now. A row the fleet has no source for reads "—".
+// change its proxy, take the account out of the fleet, search a city now. A row the fleet has no source for reads "—".
 
-type Dialog = 'park' | 'unpark' | 'remove' | 'retire' | 'search' | null;
+type Dialog = 'park' | 'unpark' | 'proxy' | 'remove' | 'retire' | 'search' | null;
 
 export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }: {
   detail: FleetWorkerDetail; stints: FbWorkerStint[] | null; onReload: () => void; now?: number;
@@ -54,6 +54,7 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
   const ua = browserLabel(device?.user_agent) ?? (device?.native?.includes('user_agent') ? t('fleetUaNative') : null);
   const proxy = erpProxyText(d);
   const heldLease = !!slot && d.holds_slot && leaseLive(slot, now);
+  const proxyBehind = heldLease ? erpProxyBehind(d) : null;
 
   const note = status === 'offline'
     ? (w.last_heartbeat_at ? t('fbcNoteSilent', { age: relTime(w.last_heartbeat_at, locale) }) : t('fbcNeverReported'))
@@ -102,7 +103,10 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
       : <Muted>{t('fbcNeverBackedUp')}</Muted> },
     { label: t('fbcDetailProxy'), value: proxy === null ? <Muted>—</Muted>
       : proxy === 'unlisted' ? <Muted>{t('fleetProxyUnlisted')}</Muted>
-      : <span>{proxy.label}<br /><small className="fp-muted mono">{proxy.where}</small></span> },
+      : <span>
+          {proxy.label}<br /><small className="fp-muted mono">{proxy.where}</small>
+          {proxyBehind && <><br /><small className="fp-warn">{t('fleetProxyBehind', { exit: proxyBehind })}</small></>}
+        </span> },
     { label: t('fleetDetailSlot'), value: <>
       {slotText}
       {slot?.quarantined_until && Date.parse(slot.quarantined_until) > now && (
@@ -137,6 +141,8 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
     );
   // Removing deletes the slot, which only a slot nobody holds allows.
   const removable = !!slot && (slot.parked || !leaseLive(slot, now)) && !slot.reserved_until;
+  // The account's slot only while it is this worker's, or no worker's.
+  const proxyMovable = !!slot && (d.holds_slot || slot.worker_id === null);
   // A lost account on this worker's own slot, or on one parked with none.
   const retirable = !!slot && (d.holds_slot || slot.worker_id === null)
     && fleetSlotRetirable({ parked: slot.parked, poolStatus: slot.pool_status, state: w.state, operator: w.detail?.operator === true });
@@ -166,6 +172,7 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
               {!mirror && <>
                 {slot && !slot.parked && <button type="button" className="btn" onClick={() => setDialog('park')}>{t('fleetPark')}</button>}
                 {slot?.parked && <button type="button" className="btn" onClick={() => setDialog('unpark')}>{t('fleetUnpark')}</button>}
+                {proxyMovable && <button type="button" className="btn" onClick={() => setDialog('proxy')}>{t('fleetChangeProxy')}</button>}
                 {slot && (
                   <button type="button" className="btn" onClick={() => setDialog('remove')} disabled={!removable}
                     title={removable ? undefined : t('fleetRemoveHeld')}>{t('fpRemoveFromFleet')}</button>
@@ -200,6 +207,8 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
 
       {dialog === 'park' && slot && <ParkDialog slot={slot} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); }} />}
       {dialog === 'unpark' && slot && <UnparkDialog slot={slot} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); }} />}
+      {dialog === 'proxy' && slot && <ChangeProxyDialog slot={slot} current={d.proxy} holder={heldLease ? w.worker_id : null}
+        onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); }} />}
       {dialog === 'remove' && slot && <RemoveFromFleetDialog slot={slot} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); }} />}
       {dialog === 'retire' && slot && <RetireSlotDialog accountNo={slot.account_no} workerId={w.worker_id} operator={w.detail?.operator === true}
         onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); }} />}

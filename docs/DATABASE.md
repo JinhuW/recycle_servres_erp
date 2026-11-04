@@ -2312,7 +2312,7 @@ Single-use bearers the host agent mints right before each `docker run`, one per 
 
 #### `fleet_proxies`
 
-The proxies the ERP fleet browses through, as a list managers edit on the Account pool tab. A slot made there copies its proxy's sealed URL into `fleet_slots.proxy_url` (what a claim reads) and names the proxy in `fleet_slots.proxy_id`; editing a proxy's URL or timezone rewrites its slots' copy and device clock. No route answers the URL. Migration 0213.
+The proxies the ERP fleet browses through, as a list managers edit on the Account pool tab. A slot made there copies its proxy's sealed URL into `fleet_slots.proxy_url` (what a claim reads) and names the proxy in `fleet_slots.proxy_id`; editing a proxy's URL or timezone rewrites its slots' copy and device clock. Change proxy on a worker's page (`POST /api/fleet/slots/:no/proxy`, RS-521) copies another proxy's URL, id and timezone onto one slot the same way. No route answers the URL. Migration 0213.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |

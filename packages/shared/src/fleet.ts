@@ -535,6 +535,8 @@ export type FleetWorkerDetail = {
   slot: (FleetSlot & { uid: string | null; pool_status: string; minutes_today: number; budget_minutes: number }) | null;
   holds_slot: boolean;
   proxy: { id: number; label: string; host: string; port: number; timezone: string } | null;
+  /** `scheme://host:port` the worker holding the slot claimed it with; it differs from `proxy` after a change, until its next start. */
+  running_exit: string | null;
   account: {
     no: number;
     uid: string | null;
@@ -851,6 +853,8 @@ export type FleetErrorCode =
   | 'proxy_full'
   /** The proxy failed its last health checks (proxyHealthState reads `down`). */
   | 'proxy_down'
+  /** Changing a slot's proxy: it is not on the proxy the manager confirmed from any more. */
+  | 'proxy_changed'
   /** Removing a proxy a non-parked slot uses. */
   | 'in_use'
   /** Removing a slot a worker holds (or a reservation does): park it first. */

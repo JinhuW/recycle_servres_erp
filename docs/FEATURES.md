@@ -3591,7 +3591,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   *fleet* under "ERP fleet" and reads "waiting for a worker" until one claims
   it. **Remove from fleet** takes back an account no worker holds (park it on
   the Fleet tab first) and returns it to Available. Removing a proxy an
-  active account uses is refused. A host now starts only as many workers as
+  active account uses is refused. Since v1.415.0, RS-521, **Change proxy** on an
+  ERP-fleet worker's page moves its account to another listed proxy. Full and
+  down proxies are disabled, the pick runs a live check through the proxy, and a
+  second screen shows that check, the browser clock change and the risk before
+  anything is written; a proxy that failed the check cannot be confirmed, and
+  the API refuses a call without `confirm: true`. The slot takes the proxy's
+  sealed URL and timezone and keeps the rest of its device. No worker restarts:
+  a running one keeps its exit until its next normal start, which signs in from
+  the new IP, and its page reads "Still running through …" until then. The
+  account's pool log records the move. Homelab workers are not covered. A host now starts only as many workers as
   it has accounts to run, up to its capacity: with capacity 4 and one ready
   account it runs one worker, and each account added brings another.
 

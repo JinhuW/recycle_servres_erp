@@ -58,6 +58,24 @@ beforeEach(async () => {
 });
 
 describe('GET /api/fleet/workers/:id', () => {
+  it('keeps naming the exit a running worker claimed with after its slot moves', async () => {
+    const { no, proxyId } = await seed();
+    await claim('lab-1');
+    expect((await detail('lab-1')).body.running_exit).toBe('http://isp.example.net:10001');
+    const other = await api<{ id: number }>('POST', '/api/fleet/proxies', {
+      token: manager, body: { label: 'NY 2', url: `http://${PROXY_LOGIN}:${PROXY_PASS}@isp.example.net:10002`, timezone: 'America/New_York' },
+    });
+    const moved = await api('POST', `/api/fleet/slots/${no}/proxy`, {
+      token: manager, body: { proxy_id: other.body.id, from_proxy_id: proxyId, confirm: true },
+    });
+    expect(moved.status).toBe(200);
+    const d = (await detail('lab-1')).body;
+    expect(d.proxy).toMatchObject({ id: other.body.id, port: 10002 });
+    expect(d.running_exit).toBe('http://isp.example.net:10001');
+    expect(d.worker.epoch).toBe(d.slot!.epoch);
+    expect(JSON.stringify(d)).not.toContain(PROXY_PASS);
+  });
+
   it('answers the worker, its slot, account, proxy, cities, stats and history without a secret', async () => {
     const { no, proxyId } = await seed();
     const db = getTestDb();

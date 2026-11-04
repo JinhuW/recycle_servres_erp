@@ -339,6 +339,21 @@ describe('Worker page', () => {
     expect(html).not.toContain('fbcNoCheckpoint');
   });
 
+  it('offers Change proxy for its own slot or a parked one, not for an account another worker holds', () => {
+    expect(renderToString(<ErpWorkerView detail={WORKER_DETAIL} stints={[]} onReload={noop} now={NOW} />)).toContain('fleetChangeProxy');
+    const parked = { ...WORKER_DETAIL, holds_slot: false, slot: { ...WORKER_DETAIL.slot!, parked: true, worker_id: null } };
+    expect(renderToString(<ErpWorkerView detail={parked} stints={[]} onReload={noop} now={NOW} />)).toContain('fleetChangeProxy');
+    const elsewhere = { ...WORKER_DETAIL, holds_slot: false, slot: { ...WORKER_DETAIL.slot!, worker_id: 'worker-60-14-2' } };
+    expect(renderToString(<ErpWorkerView detail={elsewhere} stints={[]} onReload={noop} now={NOW} />)).not.toContain('fleetChangeProxy');
+  });
+
+  it('says when the running browser is behind its slot\'s proxy, and only then', () => {
+    const live = { ...WORKER_DETAIL.slot!, lease_expires_at: new Date(NOW + 600_000).toISOString() };
+    const behind = { ...WORKER_DETAIL, slot: live, running_exit: 'http://isp.example.net:19999' };
+    expect(renderToString(<ErpWorkerView detail={behind} stints={[]} onReload={noop} now={NOW} />)).toContain('fleetProxyBehind');
+    expect(renderToString(<ErpWorkerView detail={{ ...WORKER_DETAIL, slot: live }} stints={[]} onReload={noop} now={NOW} />)).not.toContain('fleetProxyBehind');
+  });
+
   it('offers Unpark for a parked slot and reads "—" without a slot', () => {
     const html = renderToString(<ErpWorkerView detail={{ ...WORKER_DETAIL, holds_slot: false, slot: { ...WORKER_DETAIL.slot!, parked: true, worker_id: null } }} stints={[]} onReload={noop} now={NOW} />);
     expect(html).toContain('fleetUnpark');
