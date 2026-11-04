@@ -15,6 +15,19 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.414.2] - 2026-11-03
+
+### Fixed
+
+- **A sell order no longer folds different RAM speeds into one row (RS-518).**
+  `M471A1K43CB1-CRC` (2400MHz) and `…CB1-CTD` (2666MHz) share the short code CB1,
+  so they shared a row and, on new orders, a #, which hid a real difference from
+  whoever priced or packed them. Lines now fold only when their module family
+  (the part number through its speed), label, condition, rank and short code all
+  match, so packaging suffixes like `-CTD7Q` still fold in. The folded row names
+  the family, as `M471A1K43CB1-CTD*`. Stored #s don't change, so an order numbered
+  since v1.404.0 can show two rows under one #.
+
 ## [1.414.1] - 2026-11-03
 
 ### Fixed

@@ -25,7 +25,7 @@ import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL, cano
 import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
 import { sellOrderStatuses, sellOrderStatusShort } from '../../lib/lookups';
 import { useManagerOptions, type MemberOption } from '../../lib/useManagers';
-import { CASEABLE_SELL_STATUSES, ramSeries } from '@recycle-erp/shared';
+import { CASEABLE_SELL_STATUSES, ramFamily, ramFamilyLabel } from '@recycle-erp/shared';
 import { closeReasonLabelKey } from '../../lib/closeReasons';
 import { usePersisted } from '../../lib/listMemory';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
@@ -994,7 +994,7 @@ function ShortCodeChip({ code }: { code: string }) {
 }
 
 // What a folded row's chips say: each spec its lines share, and a spec they
-// differ on as its values joined — 2400/2666/3200MHz.
+// differ on as its values joined — RDIMM/LRDIMM.
 function mergedSpec(lines: readonly ItemCellLine[]): ItemCellLine {
   const join = <K extends 'type' | 'classification' | 'rank' | 'speed'>(k: K) => {
     const vals = [...new Set(lines.map(l => l[k]).filter((v): v is string => !!v))];
@@ -1007,8 +1007,8 @@ function mergedSpec(lines: readonly ItemCellLine[]): ItemCellLine {
   };
 }
 
-// One RAM series folded into a row: its #s, the codes and spec its lots carry,
-// and the series its part numbers share, each one listed on hover.
+// One RAM series folded into a row: its #s, the code and spec its lots carry,
+// and the module family its part numbers share, each one listed on hover.
 function FoldItemCell({ lines, nos, open, onToggle, showPo }: {
   lines: readonly ItemCellLine[];
   // Null for a line the save has yet to number.
@@ -1050,7 +1050,7 @@ function FoldItemCell({ lines, nos, open, onToggle, showPo }: {
       </div>
       <LineSpecChips line={mergedSpec(lines)} withType />
       <div className="so-fold-meta">
-        <span className="mono" title={parts.join('\n')}>{ramSeries(first.partNumber)}*</span>
+        <span className="mono" title={parts.join('\n')}>{ramFamilyLabel(first.partNumber!, ramFamily(first.partNumber)!)}</span>
         <span>·</span>
         <span title={parts.join('\n')}>
           {t('sodFoldLots', { n: lines.length })}
