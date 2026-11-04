@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-519](./RS-519-prod-to-dev-sync-survives-a-not-null-sealed-column.md) | done | bug | P2 | Prod-to-dev sync survives a NOT NULL sealed column | 1.414.3 |
 | [RS-518](./RS-518-sell-order-fold-keeps-different-ram-speeds-apart.md) | done | bug | P2 | Sell order fold keeps different RAM speeds apart | 1.414.2 |
 | [RS-517](./RS-517-fix-the-code-review-findings-before-releasing-sync-t.md) | done | bug | P2 | Fix the code review findings before releasing Sync to Market and Add to fleet | 1.414.1 |
 | [RS-516](./RS-516-sync-a-sell-order-s-prices-to-the-market-page-at-a-c.md) | done | story | P2 | Sync a sell order's prices to the Market page at a chosen percent | 1.414.0 |

@@ -43,12 +43,15 @@ describe('prod→dev sync scrub', () => {
     // A sealed column the scrub has never heard of, on a table of its own.
     await sql`CREATE TABLE public.scrub_probe (id INT PRIMARY KEY, secret_enc TEXT, label TEXT)`;
     await sql`INSERT INTO public.scrub_probe VALUES (1, 'v1.a.b.c', 'kept')`;
+    await sql`CREATE TABLE public.scrub_probe_required (id INT PRIMARY KEY, secret_enc TEXT NOT NULL)`;
+    await sql`INSERT INTO public.scrub_probe_required VALUES (1, 'v1.a.b.c')`;
 
     await sql.begin(async (tx) => {
       await tx`SELECT pg_catalog.set_config('search_path', '', true)`;
       await tx.unsafe(scrub);
     });
     expect(await sql`SELECT secret_enc, label FROM scrub_probe`).toEqual([{ secret_enc: null, label: 'kept' }]);
+    expect(await sql`SELECT secret_enc FROM scrub_probe_required`).toEqual([{ secret_enc: '' }]);
 
     const [left] = await sql<Record<string, number>[]>`
       SELECT
@@ -77,6 +80,8 @@ describe('prod→dev sync scrub', () => {
       INSERT INTO fb_pool_accounts (uid, batch, status) VALUES ('61556203481175', 'Batch', 'fleet') RETURNING no`;
     await sql`INSERT INTO fleet_slots (account_no, worker_id, host_id, epoch, proxy_url)
               VALUES (${a.no}, 'lab-1', 'lab', 4, 'v1.a.b.c')`;
+    await sql`INSERT INTO fleet_proxies (label, url_enc, host, port, timezone)
+              VALUES ('NJ1', 'v1.a.b.c', 'isp.example', 10018, 'America/New_York')`;
 
     await sql.begin(async (tx) => {
       await tx`SELECT pg_catalog.set_config('search_path', '', true)`;
@@ -88,5 +93,8 @@ describe('prod→dev sync scrub', () => {
     expect(host.token_hash).not.toBe('hash-of-a-live-token');
     expect((await sql`SELECT 1 FROM fleet_claim_tickets`).length).toBe(0);
     expect(await sql`SELECT worker_id, epoch, proxy_url FROM fleet_slots`).toEqual([{ worker_id: 'lab-1', epoch: 4, proxy_url: null }]);
+    expect(await sql`SELECT label, url_enc, host, port, timezone FROM fleet_proxies`).toEqual([
+      { label: 'NJ1', url_enc: '', host: 'isp.example', port: 10018, timezone: 'America/New_York' },
+    ]);
   });
 });

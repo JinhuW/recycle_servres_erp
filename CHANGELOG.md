@@ -15,6 +15,17 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.414.3] - 2026-11-03
+
+### Fixed
+
+- **The nightly prod-to-dev database copy runs again (RS-519).** Its scrub cleared
+  every sealed `*_enc` column to NULL, but `fleet_proxies.url_enc` can't be NULL,
+  so once prod held proxy rows the whole restore rolled back. Dev stayed up but
+  stopped getting fresh data, and its newest order is from Oct 27. A required
+  sealed column is now blanked to an empty string instead, so the proxy rows
+  still show on dev and none of prod's sealed values reach it.
+
 ## [1.414.2] - 2026-11-03
 
 ### Fixed
