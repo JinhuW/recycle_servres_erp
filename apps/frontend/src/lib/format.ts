@@ -57,6 +57,15 @@ export const fmtMoney0 = (
   return signed(Math.round(n), sym ?? `${currency} `, fmt0(Math.abs(n), locale));
 };
 
+/** A sell order's list Total. A Worker can go live before the backend it calls
+ *  sends `nativeTotal`, and the only total that backend has is in USD. */
+export const fmtOrderTotal0 = (
+  native: number | null | undefined,
+  currency: string,
+  usd: number,
+  locale = 'en-US',
+) => (native == null ? fmtUSD0(usd, locale) : fmtMoney0(native, currency, locale));
+
 export const fmtDate = (d: Date | string, locale = 'en-US') =>
   new Date(d).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' });
 

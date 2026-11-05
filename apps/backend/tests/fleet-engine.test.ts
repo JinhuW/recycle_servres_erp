@@ -290,7 +290,7 @@ describe('POST /api/fleet/slots/:no/engine', () => {
     await setSettings(manager, { cloak_enabled: true });
     const no = await seedSlot(1, DEVICE, { session: false });
     expect((await switchTo(manager, no, 'cloak')).status).toBe(200);
-    for (const version of ['0.15.0', 'unknown']) {
+    for (const version of ['0.15.0', '0.16.0', 'unknown']) {
       const r = await tryClaim('lab-1', version);
       expect(r.status).toBe(409);
       expect(r.body.error).toBe('no_slot');

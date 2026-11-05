@@ -37,7 +37,7 @@ async function event(no: number, to: string, when: string, opts: { from?: string
     VALUES (${no}, ${`w-${no}`}, ${opts.engine ?? 'stock'}, ${opts.from ?? null}, ${to}, ${opts.reason ?? null}, ${when})`;
 }
 const healthy = (no: number, hours = 1) => event(no, 'HEALTHY', at(hours));
-async function search(no: number, when: string, stopped = false, state = 'done', kind = 'search') {
+async function search(no: number, when: string, stopped: boolean | string = false, state = 'done', kind = 'search') {
   await db()`INSERT INTO fleet_cities (slug, name, region) VALUES ('c', 'C', 'R') ON CONFLICT DO NOTHING`;
   await db()`INSERT INTO fleet_items (name, phrases) VALUES ('ram', '[]') ON CONFLICT DO NOTHING`;
   await db()`INSERT INTO fleet_tasks (city, item, kind, due_at, state, account_no, done_at, leased_at, result)
@@ -189,6 +189,8 @@ describe('cohort report', () => {
     await search(1, at(168)); // the window is half-open
     await search(1, at(-1));
     await search(1, at(2), true); // stopped
+    await search(1, at(5), 'wall (checkpoint)'); // how workers really say it
+    await search(1, at(6), 'no result');
     await search(1, at(3), false, 'expired');
     await search(1, at(4), false, 'done', 'probe');
     // An early loss keeps its short count: doing badly can't drop an account.

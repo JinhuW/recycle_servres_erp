@@ -2187,7 +2187,7 @@ One row per stint of a pool account on a fleet worker: it opens when the account
 
 - **Primary key:** `id`
 - **Checks:** `(ended_at IS NULL) = (outcome IS NULL)`; `outcome IN ('available', 'taken', 'fleet', 'problem', 'retired', 'removed')`
-- **Indexes:** `fb_worker_accounts_failed_idx` (proxy_url, ended_at) WHERE outcome IN ('problem', 'retired'); `fb_worker_accounts_open_idx` UNIQUE (account_no) WHERE ended_at IS NULL; `fb_worker_accounts_worker_idx` (lower(worker_id), started_at DESC)
+- **Indexes:** `fb_worker_accounts_account_idx` (account_no, started_at); `fb_worker_accounts_failed_idx` (proxy_url, ended_at) WHERE outcome IN ('problem', 'retired'); `fb_worker_accounts_open_idx` UNIQUE (account_no) WHERE ended_at IS NULL; `fb_worker_accounts_worker_idx` (lower(worker_id), started_at DESC)
 
 Written only by the fb_worker_accounts_track trigger on fb_pool_accounts, except proxy_url and proxy_known, which /assign stamps on the open stint. A proxy whose distinct failed accounts since its last revive exceed four (FB_PROXY_DEAD_AFTER) is DEAD, and /assign refuses its workers.
 
