@@ -1,15 +1,16 @@
 import {
   FLEET_PILOT_CLOAK_CAP,
+  fleetSessionLost,
   type FleetCohortAccount, type FleetCohortCounts, type FleetCohortGroup, type FleetCohortOutcome, type FleetCohortReport, type FleetCohortSearches, type FleetCohortWindow, type FleetPilotArm,
 } from '@recycle-erp/shared';
 import type { SqlLike } from '../db';
 import { loadSettings } from './cities';
 import { readLossDays } from './stateEvents';
 import { bad, searchRanToEnd, type Refusal } from './sql';
-import { FLEET_HOLDER } from './workers';
+import { FLEET_HOLDER, PILOT_ID, PILOT_ID_RULE } from './workers';
 
 // ─── Cohort report: pilot arms and the supplier scorecard ────────────────────
-// The launch plan fixed these rules before the first account, so an arm can't
+// docs/superpowers/plans/2026-11-04-cloakbrowser-launch-plan.md fixed these rules before the first account, so an arm can't
 // be flattered afterwards. Numbers only: the verdict is the owner's.
 //
 // "Lost" is a stint that ended retired or problem, as the plan's 30-day figures
@@ -19,7 +20,6 @@ import { FLEET_HOLDER } from './workers';
 const HOUR_MS = 3_600_000;
 const SHORT_HOURS = 24;
 const LONG_HOURS = 7 * 24;
-const PILOT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 export type CohortQuery = { pilot: string | null; days: number };
 
@@ -27,7 +27,7 @@ export function readCohortQuery(q: Record<string, string | undefined>): CohortQu
   const days = readLossDays(q);
   if (typeof days !== 'number') return days;
   if (q.pilot === undefined) return { pilot: null, days };
-  if (!PILOT_ID.test(q.pilot)) return bad('pilot must be 1 to 64 letters, digits, dots, dashes or underscores');
+  if (!PILOT_ID.test(q.pilot)) return bad(PILOT_ID_RULE);
   return { pilot: q.pilot, days };
 }
 
@@ -51,8 +51,6 @@ type Fact = {
   outages: string[];
   recovery_boots: number;
 };
-
-const lossState = (s: string | null) => s !== null && (s === 'SESSION_EXPIRED' || s === 'CHECKPOINT' || s.startsWith('CHALLENGE'));
 
 /** Where the account stood when the window closed. The earliest ending wins: an
  *  account handed back at hour 5 and retired after a re-add never ran the clock
@@ -93,7 +91,7 @@ function counts(facts: Fact[], hours: number, now: Date): FleetCohortCounts {
     const o = outcomeAt(f, hours, now);
     if (!o) continue;
     c[o] += 1;
-    if (o === 'survived' && lossState(hours === SHORT_HOURS ? f.state_short : f.state_long)) c.survived_in_loss_state += 1;
+    if (o === 'survived' && fleetSessionLost(hours === SHORT_HOURS ? f.state_short : f.state_long)) c.survived_in_loss_state += 1;
   }
   c.decided = c.lost + c.survived + c.never_healthy;
   // Retiring is a manual click, so `lost` alone runs late and misses a browser
@@ -181,8 +179,8 @@ const accountWire = (f: Fact, now: Date): FleetCohortAccount => ({
   lost_at: f.lost_at?.toISOString() ?? null,
   outcome_24h: outcomeAt(f, SHORT_HOURS, now),
   outcome_7d: outcomeAt(f, LONG_HOURS, now),
-  in_loss_state_24h: outcomeAt(f, SHORT_HOURS, now) === 'survived' && lossState(f.state_short),
-  in_loss_state_7d: outcomeAt(f, LONG_HOURS, now) === 'survived' && lossState(f.state_long),
+  in_loss_state_24h: outcomeAt(f, SHORT_HOURS, now) === 'survived' && fleetSessionLost(f.state_short),
+  in_loss_state_7d: outcomeAt(f, LONG_HOURS, now) === 'survived' && fleetSessionLost(f.state_long),
   searches_7d: f.clock && f.known ? f.searches : null,
   exit_changes: f.exit_changes.length,
   licence_outages: f.outages.length,

@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-547](./RS-547-fleet-cleanup-after-the-cloakbrowser-review.md) | done | chore | P3 | Fleet: cleanup after the CloakBrowser review | 1.425.1 |
 | [RS-546](./RS-546-fleet-show-outages-holds-and-exit-alerts-on-desktop.md) | done | story | P2 | Fleet: show outages, holds and exit alerts on desktop | 1.425.0 |
 | [RS-545](./RS-545-fleet-worker-0-17-0-exit-moved-outage-operator-flag.md) | in-progress | bug | P1 | Fleet worker 0.17.0: exit_moved, outage operator flag, honest resume | — |
 | [RS-544](./RS-544-fleet-agent-one-licence-probe-per-host-stock-first.md) | done | bug | P1 | Fleet agent: one licence probe per host, stock first | 1.424.4 |
@@ -16,7 +17,7 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-538](./RS-538-fleet-track-each-proxy-s-measured-exit.md) | done | story | P2 | Fleet: track each proxy's measured exit | 1.422.0 |
 | [RS-537](./RS-537-fleet-atomic-account-enrollment-and-browser-profile.md) | done | story | P2 | Fleet: atomic account enrollment and browser profile | 1.421.0 |
 | [RS-536](./RS-536-so-list-total-follows-the-order-s-currency.md) | done | bug | P2 | SO list Total follows the order's currency | 1.420.1 |
-| [RS-535](./RS-535-fleet-worker-0-17-0-preflight-webrtc-seats-outage-ex.md) | done | story | P2 | Fleet worker 0.17.0: preflight, WebRTC, seats, outage exit | facebook-tracker unreleased (next minor, 0.17.0) |
+| [RS-535](./RS-535-fleet-worker-0-17-0-preflight-webrtc-seats-outage-ex.md) | in-progress | story | P2 | Fleet worker 0.17.0: preflight, WebRTC, seats, outage exit | — |
 | [RS-529](./RS-529-fleet-agent-licence-outage-exit.md) | done | story | P2 | Fleet agent: licence outage exit | 1.420.0 |
 | [RS-528](./RS-528-count-proxy-crowding-by-exit-ip-not-by-port.md) | done | bug | P2 | Count proxy crowding by exit IP, not by port | 1.419.1 |
 | [RS-527](./RS-527-warn-when-a-proxy-carries-too-many-accounts.md) | done | story | P2 | Warn when a proxy carries too many accounts | 1.419.0 |

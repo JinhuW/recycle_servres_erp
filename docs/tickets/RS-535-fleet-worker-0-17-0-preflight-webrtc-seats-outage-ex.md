@@ -2,13 +2,13 @@
 id: RS-535
 title: Fleet worker 0.17.0: preflight, WebRTC, seats, outage exit
 type: story
-status: done
+status: in-progress
 priority: P2
 created: 2026-11-05
 reporter: jinhu
 branch: JinhuW/turban
 pr: 1091
-version: facebook-tracker unreleased (next minor, 0.17.0)
+version:
 related: []
 ---
 

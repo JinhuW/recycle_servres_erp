@@ -476,6 +476,12 @@ export type FleetProxyCheck = {
 
 /** One side of an exit change. */
 export type FleetProxyExitPoint = { ip: string; city: string | null; region: string | null; country: string | null; timezone: string | null };
+/** An exit as text, for an alert or a hover. */
+export function fleetExitPointText(e: Omit<FleetProxyExitPoint, 'ip'> & { ip: string }): string {
+  const where = [e.city, e.region, e.country, e.timezone].filter(Boolean).join(', ');
+  return where ? `${e.ip} (${where})` : e.ip;
+}
+
 /** A port's measured exit moved, in IP or in geo. */
 export type FleetProxyExitChange = { at: string; from: FleetProxyExitPoint; to: FleetProxyExitPoint };
 

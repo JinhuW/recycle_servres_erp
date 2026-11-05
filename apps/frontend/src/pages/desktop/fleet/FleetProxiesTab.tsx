@@ -5,7 +5,7 @@ import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { poolApi, proxyMarkFor, type FbProxyMark } from '../../../lib/facebookPool';
 import {
   FLEET_PROXY_BUCKET_MS, FLEET_PROXY_SLOW_MS, fleetApi, proxyLoad,
-  type FleetProxy, type FleetProxyExitPoint, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxyHealthState, type FleetProxySource,
+  fleetExitPointText, type FleetProxy, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxyHealthState, type FleetProxySource,
 } from '../../../lib/fleet';
 import { useT } from '../../../lib/i18n';
 import { ProxyDeadChip } from '../FleetWorkers';
@@ -216,7 +216,7 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
                         <span className="mono" title={last.org ?? undefined}>{last.exit_ip}</span>
                         <small>
                           {where || '—'}
-                          {p.previous_ip && <> · <span className="fp-warn" title={t('fleetProxyIpChangedHint')}>{t('fleetProxyIpChanged', { ip: p.previous_ip })}</span></>}
+                          {p.previous_ip && !p.exit_change && <> · <span className="fp-warn" title={t('fleetProxyIpChangedHint')}>{t('fleetProxyIpChanged', { ip: p.previous_ip })}</span></>}
                         </small>
                       </span>
                     ) : <span className="fp-muted">—</span>}
@@ -279,10 +279,7 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
   );
 }
 
-const exitPoint = (e: FleetProxyExitPoint) => {
-  const where = [e.city, e.region, e.country, e.timezone].filter(Boolean).join(', ');
-  return where ? `${e.ip} (${where})` : e.ip;
-};
+const exitPoint = fleetExitPointText;
 
 /** Report only: each chip names a problem with the port's exit, the hover its detail. */
 function ExitFlags({ flags, now }: { flags: readonly ProxyExitFlag[]; now: number }) {

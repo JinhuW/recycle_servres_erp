@@ -177,11 +177,26 @@ export async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAns
       WHERE checked_at > NOW() - make_interval(secs => ${(FLEET_PROXY_BUCKETS * FLEET_PROXY_BUCKET_MS) / 1000})
       ORDER BY checked_at DESC, id DESC`,
     // A proxy whose checks stopped a day ago still shows how it last answered.
+    // Each port's own lookup, not a sort of 14 days of checks on every poll. The
+    // recursive part walks the index for the homelab ports' names.
     sql<HistoryRow[]>`
-      SELECT DISTINCT ON (source, COALESCE(proxy_id::text, exit))
-             exit, source, proxy_id, checked_at, ok, latency_ms, exit_ip, city, region, country, org, timezone, error
-      FROM fleet_proxy_checks
-      ORDER BY source, COALESCE(proxy_id::text, exit), checked_at DESC, id DESC`,
+      WITH RECURSIVE homelab AS (
+        SELECT MIN(exit) AS exit FROM fleet_proxy_checks WHERE source = 'coordinator'
+        UNION ALL
+        SELECT (SELECT MIN(c.exit) FROM fleet_proxy_checks c WHERE c.source = 'coordinator' AND c.exit > h.exit)
+        FROM homelab h WHERE h.exit IS NOT NULL
+      ), ports AS (
+        SELECT 'erp' AS source, p.id AS proxy_id, NULL::text AS exit FROM fleet_proxies p
+        UNION ALL
+        SELECT 'coordinator', NULL, h.exit FROM homelab h WHERE h.exit IS NOT NULL
+      )
+      SELECT l.* FROM ports
+      CROSS JOIN LATERAL (
+        SELECT c.exit, c.source, c.proxy_id, c.checked_at, c.ok, c.latency_ms, c.exit_ip, c.city, c.region, c.country, c.org, c.timezone, c.error
+        FROM fleet_proxy_checks c
+        WHERE c.source = ports.source
+          AND (CASE WHEN ports.source = 'erp' THEN c.proxy_id = ports.proxy_id ELSE c.exit = ports.exit END)
+        ORDER BY c.checked_at DESC, c.id DESC LIMIT 1) l`,
   ]);
   const [changes, clocks, held] = await Promise.all([
     sql<ChangeRow[]>`
