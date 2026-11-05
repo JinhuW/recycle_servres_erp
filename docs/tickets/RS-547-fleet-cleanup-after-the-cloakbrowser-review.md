@@ -7,7 +7,7 @@ priority: P3
 created: 2026-11-05
 reporter: jinhu
 branch: JinhuW/cloak-fixes-wave-5
-pr:
+pr: 1104
 version: 1.425.1
 related: []
 ---
