@@ -72,6 +72,7 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
 
   const autoRetry = !connectPark ? null
     : !connectPark.canResume ? t('fleetAutoRetryTooOld')
+    : d.proxy_down ? t('fleetAutoRetryProxyDown', { n: connectPark.tries, max: connectPark.maxTries })
     : connectPark.next === null ? t('fleetAutoRetrySpent', { max: connectPark.maxTries })
     : Date.parse(connectPark.next) <= now ? t('fleetAutoRetryDue', { n: connectPark.tries, max: connectPark.maxTries })
     : t('fleetAutoRetryNext', { time: dueLabel(t, connectPark.next, now), n: connectPark.tries, max: connectPark.maxTries });

@@ -3740,14 +3740,20 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     hover, rather than Dead, and the row and its watch page offer **Mark
     healthy**: its next heartbeat hands it `resume` once, and it tries again in
     the same browser, with no new browser and no login. The row reads "Mark
-    healthy sent" until the worker reports anything but Dead. A worker build
+    healthy sent" until the worker reports anything but Dead, for at most two
+    minutes after it receives the resume (v1.424.1, RS-541); after that the
+    button works again. A worker build
     before facebook-tracker 0.15.0 cannot take it, and the button says so.
     The worker itself now tries a page that times out twice more, 10 s then
     30 s apart, before it parks. Since v1.411.0 (RS-512) the ERP does not
     wait for a manager: a park like that on a 0.15.0+ worker that still
     heartbeats is sent `resume` by itself 10 min in, then 30 min after that
     try, then hourly, 8 tries per run (recorded as `requested_by` `auto`).
-    The count starts again after an hour of Healthy. A network blip on
+    The count starts again after an hour of Healthy. Since v1.424.1 (RS-541)
+    no try is sent or spent while the proxy's latest check, under 15 minutes
+    old, is failing, and the Auto-retry row says so; once tries are spent, a
+    proxy that failed a check after the last try and now passes starts them
+    over. A network blip on
     2026-11-01 had parked three workers for 37 h. The worker page reads
     "Parked: couldn't reach Facebook · since …" instead of a bare Dead, adds
     an **Auto-retry** row (the next try, or that the tries are spent) and

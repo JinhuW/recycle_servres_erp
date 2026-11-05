@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-541](./RS-541-parked-fleet-workers-can-t-be-marked-healthy-and-ret.md) | done | bug | P1 | Parked fleet workers can't be marked healthy, and retries ignore the proxy | — |
 | [RS-540](./RS-540-answer-recycleservers-com-quotes-from-their-own-mail.md) | in-review | story | P2 | Answer recycleservers.com quotes from their own mailbox | 1.424.0 |
 | [RS-539](./RS-539-fleet-pilot-cohort-report.md) | done | story | P2 | Fleet: pilot cohort report | 1.423.0 |
 | [RS-538](./RS-538-fleet-track-each-proxy-s-measured-exit.md) | done | story | P2 | Fleet: track each proxy's measured exit | 1.422.0 |

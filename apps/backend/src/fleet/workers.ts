@@ -796,6 +796,7 @@ workers.get('/:id', async (c) => {
     ? await sql<{ id: number; label: string; host: string; port: number; timezone: string }[]>`
         SELECT id, label, host, port, timezone FROM fleet_proxies WHERE id = ${slot.proxy_id}`
     : [];
+  const exit = slot?.proxy_id ? await latestProxyExit(sql, slot.proxy_id) : null;
   const [stint] = held ? await sql<{ proxy_url: string | null }[]>`
     SELECT proxy_url FROM fb_worker_accounts WHERE account_no = ${held.account_no} AND ended_at IS NULL` : [];
   const [acct] = no === null ? [] : await sql<AccountRow[]>`
@@ -841,6 +842,7 @@ workers.get('/:id', async (c) => {
     slot,
     holds_slot: !!held,
     proxy: proxy ?? null,
+    proxy_down: !!exit?.fresh && !exit.ok,
     running_exit: stint?.proxy_url ?? null,
     account: acct ? {
       no: acct.no, uid: acct.uid, email: acct.email || null, status: acct.status, holder: acct.holder_name,

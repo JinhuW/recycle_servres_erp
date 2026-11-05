@@ -32,7 +32,7 @@ import {
   type ClaimEnv, type WorkerEnv, type WorkerIdentity,
 } from './auth';
 import { loadSettings } from './cities';
-import { firstLoginHeld, latestProxyExit } from './proxyExit';
+import { firstLoginHeld, latestProxyExit, type ProxyExitMeasure } from './proxyExit';
 import { notifyReady } from './scheduler';
 import { minutesTodaySql, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
 import { loadRelease, ownWorkerId } from './hosts';
@@ -58,6 +58,19 @@ type Vars = ClaimEnv['Variables'] & WorkerEnv['Variables'];
 const worker = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 const BAD_REQUEST = { error: 'bad_request' } as const;
+
+/** Whether a proxy now passes after failing a check since the last resume: the
+ *  tries so far met an outage, so they say nothing about the proxy as it is. */
+async function proxyRecoveredSince(
+  tx: SqlLike, proxyId: number | null, exit: ProxyExitMeasure | null, since: Date | null,
+): Promise<boolean> {
+  if (proxyId === null || since === null || !exit?.fresh || !exit.ok) return false;
+  const [failed] = await tx`
+    SELECT 1 FROM fleet_proxy_checks
+    WHERE source = 'erp' AND proxy_id = ${proxyId} AND NOT ok AND checked_at > ${since}
+    LIMIT 1`;
+  return !!failed;
+}
 const NOT_FOUND = { error: 'not_found' } as const;
 
 // Holds past this answer null at once rather than pin another connection; a
@@ -550,13 +563,20 @@ worker.post('/heartbeat', workerAuth, async (c) => {
                             THEN 0 ELSE fleet_workers.auto_resumes END
       RETURNING state_since, auto_resumes, version, resume_requested_at, resume_delivered_at, NOW() AS now`;
     if (fleetResumable(state, detail) && fleetTakesResume(beat.version) && (beat.resume_requested_at === null || beat.resume_delivered_at !== null)) {
-      const due = fleetAutoResumeDue(beat.state_since, beat.resume_requested_at, beat.auto_resumes);
-      if (due && due <= beat.now) {
-        await tx`
-          UPDATE fleet_workers SET resume_id = ${randomUUID()}, resume_requested_at = NOW(),
-            resume_requested_by = ${FLEET_AUTO_RESUME_BY}, resume_delivered_at = NULL, auto_resumes = auto_resumes + 1
-          WHERE worker_id = ${w.worker_id}`;
-        flog.info('fleet resume queued', { workerId: w.worker_id, by: FLEET_AUTO_RESUME_BY, try: beat.auto_resumes + 1 });
+      const exit = w.slot.proxy_id === null ? null : await latestProxyExit(tx, w.slot.proxy_id);
+      // A try against a proxy that is failing its checks can only fail, and an
+      // outage would use them all up before the proxy came back.
+      if (!exit?.fresh || exit.ok) {
+        const due = fleetAutoResumeDue(beat.state_since, beat.resume_requested_at, beat.auto_resumes);
+        const restart = due === null && await proxyRecoveredSince(tx, w.slot.proxy_id, exit, beat.resume_requested_at);
+        if (restart || (due && due <= beat.now)) {
+          const tries = restart ? 1 : beat.auto_resumes + 1;
+          await tx`
+            UPDATE fleet_workers SET resume_id = ${randomUUID()}, resume_requested_at = NOW(),
+              resume_requested_by = ${FLEET_AUTO_RESUME_BY}, resume_delivered_at = NULL, auto_resumes = ${tries}
+            WHERE worker_id = ${w.worker_id}`;
+          flog.info('fleet resume queued', { workerId: w.worker_id, by: FLEET_AUTO_RESUME_BY, try: tries });
+        }
       }
     }
     // The worker acts on `relogin` and `resume` only when one first appears,

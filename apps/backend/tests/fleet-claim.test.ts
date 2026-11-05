@@ -1103,6 +1103,76 @@ describe('automatic resume of a connect_failed park', () => {
     expect((await row()).auto_resumes).toBe(0);
   });
 
+  const onProxy = async (no: number) => {
+    const db = getTestDb();
+    const [{ id }] = await db<{ id: number }[]>`
+      INSERT INTO fleet_proxies (label, url_enc, host, port, timezone)
+      VALUES ('P', ${seal('http://u:p@isp.example:10007', key())}, 'isp.example', 10007, 'America/New_York') RETURNING id`;
+    await db`UPDATE fleet_slots SET proxy_id = ${id} WHERE account_no = ${no}`;
+    return id;
+  };
+  const check = (proxyId: number, ok: boolean, minutesAgo = 0) => getTestDb()`
+    INSERT INTO fleet_proxy_checks (exit, source, proxy_id, ok, checked_at)
+    VALUES ('http://isp.example:10007', 'erp', ${proxyId}, ${ok}, NOW() - make_interval(mins => ${minutesAgo}))`;
+
+  it('spends no try while the proxy fails its checks, and sends the due one when it passes', async () => {
+    const no = await seedSlot(1);
+    const proxy = await onProxy(no);
+    const { worker_token: wt } = await claimed('lab-1');
+    await heartbeat(wt, 'DEAD', connectFailed);
+    await check(proxy, false);
+    await age(600);
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual([]);
+    expect((await row()).auto_resumes).toBe(0);
+    await check(proxy, true);
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual(['resume']);
+    expect((await row()).auto_resumes).toBe(1);
+  });
+
+  it('keeps the timer when the failing check is stale or the proxy has none', async () => {
+    const no = await seedSlot(1);
+    const proxy = await onProxy(no);
+    const { worker_token: wt } = await claimed('lab-1');
+    await heartbeat(wt, 'DEAD', connectFailed);
+    await age(10);
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual(['resume']);
+    await heartbeat(wt, 'DEAD', connectFailed);
+    await check(proxy, false, 20);
+    await age(30);
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual(['resume']);
+  });
+
+  it('starts the tries over when the proxy fails after the last one and then passes', async () => {
+    const no = await seedSlot(1);
+    const proxy = await onProxy(no);
+    const { worker_token: wt } = await claimed('lab-1');
+    await heartbeat(wt, 'DEAD', connectFailed);
+    const db = getTestDb();
+    await db`UPDATE fleet_workers SET auto_resumes = 8, resume_id = gen_random_uuid(), resume_requested_at = NOW() - INTERVAL '10 hours',
+      resume_requested_by = 'auto', resume_delivered_at = NOW() - INTERVAL '10 hours' WHERE worker_id = 'lab-1'`;
+    await check(proxy, false, 300);
+    await check(proxy, false, 1);
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual([]);
+    expect((await row()).auto_resumes).toBe(8);
+    await check(proxy, true);
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual(['resume']);
+    expect((await row()).auto_resumes).toBe(1);
+  });
+
+  it('stays spent when the proxy passes throughout and the worker still fails', async () => {
+    const no = await seedSlot(1);
+    const proxy = await onProxy(no);
+    const { worker_token: wt } = await claimed('lab-1');
+    await heartbeat(wt, 'DEAD', connectFailed);
+    const db = getTestDb();
+    await db`UPDATE fleet_workers SET auto_resumes = 8, resume_id = gen_random_uuid(), resume_requested_at = NOW() - INTERVAL '10 hours',
+      resume_requested_by = 'auto', resume_delivered_at = NOW() - INTERVAL '10 hours' WHERE worker_id = 'lab-1'`;
+    await check(proxy, false, 700);
+    await check(proxy, true);
+    expect((await heartbeat(wt, 'DEAD', connectFailed)).body.directives).toEqual([]);
+    expect((await row()).auto_resumes).toBe(8);
+  });
+
   it('leaves old builds, other DEAD reasons and other parks alone, and does not stack on a waiting resume', async () => {
     await seedSlot(1);
     const { worker_token: wt } = await claimed('lab-1');
