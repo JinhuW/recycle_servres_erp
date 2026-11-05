@@ -3,12 +3,13 @@ import { simpleParser } from 'mailparser';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
-import { mailConfig, mailGate, recipientAllowed, type MailConfig } from '../src/mail';
+import { describeMail, mailConfig, mailConfigs, mailGate, recipientAllowed, type MailConfig } from '../src/mail';
 import { stubOutbox } from '../src/mail/send';
 import { dmarcVerdict, matchSubmission, type InboundHeader, type MatchLookups } from '../src/mail/match';
 import { runInboxTick, toInboundHeader, type InboxClient } from '../src/mail/inbox';
 
 const BOX = 'sales@recycleservers.com';
+const QUOTES_BOX = 'quotes@recycleservers.com';
 const STUB = { MAIL_STUB: '1', MAIL_USER: BOX };
 
 let wsSeq = 5000;
@@ -133,6 +134,27 @@ describe('web submission email thread — routes', () => {
     expect(t.body.mail).toMatchObject({ fromName: 'Recycle Servers', threadSubject: `Your quote request ${id} · Recycle Servers` });
   });
 
+  it('sends a quote from its own box when it has one, and a sell lot from the shared box', async () => {
+    const env = { ...STUB, MAIL_QUOTES_USER: QUOTES_BOX };
+    const quote = await insertSubmission({ site: 'recycleservers', kind: 'quote', email: 'ops@acme.example' });
+    const lot = await insertSubmission();
+    const { token } = await loginAs(ALEX);
+
+    const draft = await api<Thread>('GET', `/api/web-submissions/${quote}/messages`, { token, env });
+    expect(draft.body.mail.address).toBe(QUOTES_BOX);
+    const q = await api<Sent>('POST', `/api/web-submissions/${quote}/messages`, { token, env, body: { body: 'Quote' } });
+    expect(q.status).toBe(201);
+    expect(q.body.message.from).toBe(QUOTES_BOX);
+    const quoteMail = stubOutbox[stubOutbox.length - 1];
+    expect(header(quoteMail, 'From')).toBe(`Recycle Servers <${QUOTES_BOX}>`);
+    expect(header(quoteMail, 'Message-ID')).toMatch(/@recycleservers\.com>$/);
+
+    expect((await api<Thread>('GET', `/api/web-submissions/${lot}/messages`, { token, env })).body.mail.address).toBe(BOX);
+    const l = await api<Sent>('POST', `/api/web-submissions/${lot}/messages`, { token, env, body: { body: 'Offer' } });
+    expect(l.body.message.from).toBe(BOX);
+    expect(header(stubOutbox[stubOutbox.length - 1], 'From')).toBe(`ram4cash <${BOX}>`);
+  });
+
   it('records a failed send and leaves the triage status alone', async () => {
     const id = await insertSubmission();
     const { token } = await loginAs(ALEX);
@@ -196,6 +218,37 @@ describe('test-recipient list (MAIL_ALLOW_TO)', () => {
     expect((await t(listed)).body.mail).toMatchObject({ restricted: true, recipientAllowed: true });
     expect((await t(customer)).body.mail).toMatchObject({ restricted: true, recipientAllowed: false });
     expect((await api('GET', '/api/health', { env })).body).toMatchObject({ providers: { mail: 'stub', mailRestricted: true } });
+  });
+
+  it('picks the box by site, and a half-set quotes box counts as unset', () => {
+    const box = { ...testEnv, MAIL_USER: BOX, MAIL_PASSWORD: 'pw' };
+    const both = { ...box, MAIL_QUOTES_USER: QUOTES_BOX, MAIL_QUOTES_PASSWORD: 'qpw' };
+    expect(mailConfig(both, 'recycleservers')).toMatchObject({ user: QUOTES_BOX, password: 'qpw' });
+    expect(mailConfig(both, 'ram4cash')).toMatchObject({ user: BOX, password: 'pw' });
+    expect(mailConfig(both)).toMatchObject({ user: BOX, password: 'pw' });
+    expect(mailConfig(box, 'recycleservers')?.user).toBe(BOX);
+    expect(mailConfig({ ...box, MAIL_QUOTES_USER: QUOTES_BOX }, 'recycleservers')?.user).toBe(BOX);
+    expect(mailConfig({ ...box, MAIL_QUOTES_PASSWORD: 'qpw' }, 'recycleservers')?.password).toBe('pw');
+    // Only the quotes box configured: quotes can send, sell lots stay dark.
+    const only = { ...testEnv, MAIL_QUOTES_USER: QUOTES_BOX, MAIL_QUOTES_PASSWORD: 'qpw' };
+    expect(mailConfig(only, 'ram4cash')).toBeNull();
+    expect(mailConfigs(only).map((c) => c.user)).toEqual([QUOTES_BOX]);
+    expect(describeMail(only).mail).toBe('smtp');
+  });
+
+  it('lists each distinct box once', () => {
+    const box = { ...testEnv, MAIL_USER: BOX, MAIL_PASSWORD: 'pw' };
+    expect(mailConfigs(testEnv)).toEqual([]);
+    expect(mailConfigs(box).map((c) => c.user)).toEqual([BOX]);
+    expect(mailConfigs({ ...box, MAIL_QUOTES_USER: QUOTES_BOX, MAIL_QUOTES_PASSWORD: 'q' }).map((c) => c.user)).toEqual([BOX, QUOTES_BOX]);
+    expect(mailConfigs({ ...box, MAIL_QUOTES_USER: BOX.toUpperCase(), MAIL_QUOTES_PASSWORD: 'q' })).toHaveLength(1);
+  });
+
+  it('keeps the quotes box off on a non-production environment too', () => {
+    const quotes = { ...testEnv, MAIL_QUOTES_USER: QUOTES_BOX, MAIL_QUOTES_PASSWORD: 'q', RAILWAY_ENVIRONMENT_NAME: 'dev' };
+    expect(mailGate(quotes, 'recycleservers')).toEqual({ config: null, blocked: 'non_production_without_allow_list' });
+    expect(mailConfigs(quotes)).toEqual([]);
+    expect(mailConfig({ ...quotes, MAIL_ALLOW_TO: 'me@x.com' }, 'recycleservers')?.user).toBe(QUOTES_BOX);
   });
 
   it('keeps mail off on a non-production Railway environment unless the list is set', () => {
@@ -377,6 +430,31 @@ describe('runInboxTick', () => {
     await runInboxTick(sql, cfg, box, new Map());
     expect((await replies(id)).map((m) => m.body_text)).toEqual(['replied before the first poll']);
     expect((await state()).last).toBe(42);
+  });
+
+  it('reads each box on its own watermark, and a reply lands on its thread from either', async () => {
+    const sql = getTestDb();
+    const quotes = mailConfig({ ...testEnv, MAIL_USER: BOX, MAIL_PASSWORD: 'pw', MAIL_QUOTES_USER: QUOTES_BOX, MAIL_QUOTES_PASSWORD: 'q' }, 'recycleservers')!;
+    const lot = await insertSubmission();
+    const quote = await insertSubmission({ site: 'recycleservers', kind: 'quote' });
+    const lotSent = await seedSent(lot);
+    const quoteSent = await seedSent(quote);
+    await sql`
+      INSERT INTO mail_sync_state (account, mailbox, uid_validity, last_uid)
+      VALUES (${BOX}, 'INBOX', 7, 10), (${QUOTES_BOX}, 'INBOX', 9, 500)
+    `;
+    const shared = new FakeInbox([{ uid: 11, header: { messageId: '<a@x>', inReplyTo: lotSent }, raw: rawMail({ body: 'lot answer' }) }], 7, 12);
+    const own = new FakeInbox([{ uid: 501, header: { messageId: '<b@x>', inReplyTo: quoteSent }, raw: rawMail({ body: 'quote answer' }) }], 9, 502);
+
+    expect(await runInboxTick(sql, cfg, shared, new Map())).toEqual({ scanned: 1, stored: 1 });
+    expect(await runInboxTick(sql, quotes, own, new Map())).toEqual({ scanned: 1, stored: 1 });
+
+    expect((await replies(lot)).map((m) => m.body_text)).toEqual(['lot answer']);
+    expect((await replies(quote)).map((m) => m.body_text)).toEqual(['quote answer']);
+    const marks = await sql`SELECT account, last_uid::int AS last FROM mail_sync_state ORDER BY account`;
+    expect(marks).toEqual([{ account: QUOTES_BOX, last: 501 }, { account: BOX, last: 11 }]);
+    const [to] = await sql`SELECT to_addr FROM web_submission_messages WHERE submission_id = ${quote} AND direction = 'in'`;
+    expect(to.to_addr).toBe(QUOTES_BOX);
   });
 
   it('stores a reply to our message, notifies, and never downloads unrelated mail', async () => {

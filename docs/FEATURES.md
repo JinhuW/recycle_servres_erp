@@ -4194,15 +4194,17 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - **Sending.** The thread reads like a mail client: the subject on top,
     earlier messages folded to one line (sender, snippet, date, any problem),
     the newest open with its From / To. A manager writes the reply in a draft
-    showing the From / To / Subject it will go out with. It goes out from one
+    showing the From / To / Subject it will go out with. It goes out from a
     shared company mailbox, a Lark box set by `MAIL_USER` and
-    `MAIL_PASSWORD`.
+    `MAIL_PASSWORD`. recycleservers.com quotes use their own box when
+    `MAIL_QUOTES_USER` and `MAIL_QUOTES_PASSWORD` are set (v1.424.0).
     - A ram4cash sell request is sent as "ram4cash" with the subject "Your
       sell request WS-nnnn · ram4cash.com".
     - A recycleservers.com quote is sent as "Recycle Servers".
     - The first sent reply moves a `new` submission to `contacted`.
   - **Receiving.** Every two minutes the backend reads the box's INBOX over
-    IMAP, read-only, so nothing in Lark changes. It attaches a customer's
+    IMAP, read-only, so nothing in Lark changes. With a quotes box set, it reads
+    both, each from its own position. It attaches a customer's
     answer to the thread only when the answer replies to a message the ERP
     sent: its `In-Reply-To` or `References` names one of our Message-IDs.
     A WS id in the subject is not enough, because ids are sequential and a

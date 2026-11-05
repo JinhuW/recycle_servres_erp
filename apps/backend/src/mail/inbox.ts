@@ -15,7 +15,7 @@ import { simpleParser } from 'mailparser';
 import type { Sql } from 'postgres';
 import type { Env } from '../types';
 import { notifyManagers } from '../lib/notify';
-import { mailGate, mailLog, type MailConfig } from './index';
+import { mailConfigs, mailGate, mailLog, type MailConfig } from './index';
 import {
   dmarcVerdict, matchSubmission, normalizeMessageId, parseReferences, threadIds,
   type InboundHeader, type MatchLookups,
@@ -326,15 +326,18 @@ export async function runInboxTick(
 }
 
 export function startMailInboxLoop(sql: Sql, env: Env): { stop(): void } {
-  const { config: cfg, blocked } = mailGate(env);
   // Otherwise the variables would sit there looking ignored.
-  if (blocked) {
-    mailLog.warn('mail is off: MAIL_USER/MAIL_PASSWORD are set on a non-production Railway environment without MAIL_ALLOW_TO', {
+  if (mailGate(env).blocked || mailGate(env, 'recycleservers').blocked) {
+    mailLog.warn('mail is off: mailbox credentials are set on a non-production Railway environment without MAIL_ALLOW_TO', {
       environment: env.RAILWAY_ENVIRONMENT_NAME || env.RAILWAY_ENVIRONMENT || null,
     });
   }
-  if (cfg?.mode !== 'smtp') return { stop: () => {} };
+  const loops = mailConfigs(env).filter((cfg) => cfg.mode === 'smtp').map((cfg) => startBoxLoop(sql, cfg));
+  return { stop: () => loops.forEach((l) => l.stop()) };
+}
 
+function startBoxLoop(sql: Sql, cfg: MailConfig): { stop(): void } {
+  const boxLog = mailLog.child({ account: cfg.user });
   let stopped = false;
   let running = false;
   let live: ReturnType<typeof imapClient> | null = null;
@@ -348,11 +351,11 @@ export function startMailInboxLoop(sql: Sql, env: Env): { stop(): void } {
     live = client;
     try {
       const r = await runInboxTick(sql, cfg, client, strikes, () => stopped);
-      if (failing) mailLog.info('inbox poll recovered');
+      if (failing) boxLog.info('inbox poll recovered');
       failing = false;
-      if (r.stored > 0) mailLog.info('web submission replies received', r);
+      if (r.stored > 0) boxLog.info('web submission replies received', r);
     } catch (err) {
-      if (!failing) mailLog.warn('inbox poll failed', err);
+      if (!failing) boxLog.warn('inbox poll failed', err);
       failing = true;
     } finally {
       live = null;
