@@ -80,7 +80,7 @@ describe('Proxies tab', () => {
     expect(readOnly).not.toContain('fleetProxyRemove');
   });
 
-  it('marks a crowded proxy with a dot whose hover gives the reason', () => {
+  it('marks a crowded exit IP with a dot whose hover gives the reason', () => {
     const slots = (n: number, parked = false) => Array.from({ length: n }, (_, i) => ({ account_no: i + 1, pool_status: 'fleet', parked, leased: true }));
     const row = (over: Partial<FleetProxyHealth>) => renderToString(<ProxiesHealthTable rows={[{ ...UP, ...over }]} marks={null} filter={filter} onFilter={noop} busy={null} now={NOW} />);
     expect(row({ slots: slots(4) })).not.toContain('fleet-proxy-crowd');
@@ -94,5 +94,13 @@ describe('Proxies tab', () => {
     // Homelab workers count; parked accounts hold no browser on the port.
     expect(row({ slots: slots(3), workers: ['homelab-1', 'homelab-2'] })).toContain('is-warn');
     expect(row({ slots: slots(5, true) })).not.toContain('fleet-proxy-crowd');
+    // Ports on one exit IP add up and all carry the dot, even with a filter on.
+    const second: FleetProxyHealth = { ...UP, proxy_id: 9, label: 'Decodo NY 9', exit: 'http://isp.example.net:10009', port: 10009, slots: slots(3) };
+    const shared = (f: typeof filter | { state: 'all'; source: ''; q: string }) => renderToString(<ProxiesHealthTable rows={[{ ...UP, slots: slots(3) }, second]} marks={null} filter={f} onFilter={noop} busy={null} now={NOW} />);
+    expect(shared(filter).match(/fleet-proxy-crowd is-warn/g)).toHaveLength(2);
+    expect(shared({ ...filter, q: '10009' }).match(/fleet-proxy-crowd is-warn/g)).toHaveLength(1);
+    // A port with no known exit has no IP to count against.
+    const noIp = row({ slots: slots(11), last: { ...UP.last!, ok: false, exit_ip: null } });
+    expect(noIp).not.toContain('fleet-proxy-crowd');
   });
 });

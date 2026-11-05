@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-527](./RS-527-warn-when-a-proxy-carries-too-many-accounts.md) | done | story | P2 | Warn when a proxy carries too many accounts | — |
+| [RS-528](./RS-528-count-proxy-crowding-by-exit-ip-not-by-port.md) | done | bug | P2 | Count proxy crowding by exit IP, not by port | — |
+| [RS-527](./RS-527-warn-when-a-proxy-carries-too-many-accounts.md) | done | story | P2 | Warn when a proxy carries too many accounts | 1.419.0 |
 | [RS-526](./RS-526-release-review-findings-before-the-v1-418-prod-cut.md) | done | bug | P2 | Release-review findings before the v1.418 prod cut | 1.418.1 |
 | [RS-525](./RS-525-keep-performance-evidence-by-route-and-release.md) | done | story | P2 | Keep performance evidence by route and release | 1.418.0 |
 | [RS-524](./RS-524-show-the-reason-for-rmb-flow-red-alerts-on-the-row.md) | done | story | P2 | Show the reason for RMB Flow red alerts on the row | 1.416.1 |
