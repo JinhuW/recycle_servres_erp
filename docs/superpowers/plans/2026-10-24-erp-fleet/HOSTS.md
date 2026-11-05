@@ -14,6 +14,15 @@
   a token exits 70 before its browser opens.
 - Agent log shipping is off: `FLEET_OPENSEARCH_URL` is also a LAN address.
 
+## SSH between `oci-sg-1` and `development`
+
+`development` (`dev@10.10.60.10`) holds a reverse SSH tunnel to `oci-sg-1`, as
+systemd service `oci-tunnel`, so on `oci-sg-1` `ssh development` reaches it through
+`127.0.0.1:2210`. The tunnel key can only listen on that port. The return key logs in
+as `dev`, which has sudo and sits on the LAN, so a compromised `oci-sg-1` reaches both.
+To cut it, stop the service, or remove `oci-sg-1-to-development` from `dev`'s
+`authorized_keys`. Fleet traffic doesn't use this tunnel.
+
 ## Reachability of `10.10.60.14`
 
 - Earlier on 2026-10-24 the host did not answer on port 22 from the Mac mini
