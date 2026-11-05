@@ -89,6 +89,36 @@ describe('sell orders — per-order currency', () => {
     expect(row.source_currency).toBeNull();
   });
 
+  it('the list carries each order\'s total in its own currency, beside the USD one', async () => {
+    const { token } = await loginAs(ALEX);
+    const customerId = await firstCustomerId(token);
+    const cnyLine = await freeSellableLine(token, 2);
+    const cny = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: { customerId, currency: 'CNY', lines: [{ inventoryId: cnyLine.id, category: 'RAM', label: 'x', partNumber: 'pn', qty: 2, unitPrice: 78 }] },
+    });
+    const usdLine = await freeSellableLine(token, 1);
+    const usd = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: { customerId, lines: [{ inventoryId: usdLine.id, category: 'RAM', label: 'x', partNumber: 'pn', qty: 1, unitPrice: 100 }] },
+    });
+
+    const list = await api<{ rows: { id: string; currency: string; total: number; nativeTotal: number }[] }>(
+      'GET', '/api/sell-orders?limit=200', { token },
+    );
+    const cnyRow = list.body.rows.find(r => r.id === cny.body.id)!;
+    expect(cnyRow.currency).toBe('CNY');
+    expect(cnyRow.nativeTotal).toBeCloseTo(156, 2);
+    const detail = await api<SODetail>('GET', `/api/sell-orders/${cny.body.id}`, { token });
+    expect(cnyRow.nativeTotal).toBe(detail.body.order.nativeTotal);
+    expect(cnyRow.total).toBeCloseTo(detail.body.order.total, 2);
+
+    const usdRow = list.body.rows.find(r => r.id === usd.body.id)!;
+    expect(usdRow.currency).toBe('USD');
+    expect(usdRow.nativeTotal).toBe(100);
+    expect(usdRow.total).toBe(100);
+  });
+
   it('rejects an unsupported currency', async () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token, 1);

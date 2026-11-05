@@ -1475,6 +1475,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
 
 ## Sell orders
 
+- **The list's Total is in the order's own currency** (v1.420.1): ¥ and the RMB
+  amount on an RMB order, the same figure as the order's page, and $ on a USD
+  order. The status tiles, the Excel export and the add-to-order picker stay in
+  USD.
 - **A sell order is a full page** (v1.194.0), `#/sell-orders/:id`, rendered
   in place of the list as a PO's page is. It was a popup before.
   - **An open order is the editor** (v1.375.0): anything short of Done or

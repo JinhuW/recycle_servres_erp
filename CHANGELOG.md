@@ -15,6 +15,16 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.420.1] - 2026-11-05
+
+The Sell orders list now shows each order's Total in the currency chosen on the
+order (RS-536). The column was always in dollars, so an RMB order read as its USD
+equivalent, and its figure disagreed with the Total on its own page. An RMB order
+now shows ¥ and its RMB amount, the same figure as its page; a USD order looks as
+it did. The status tiles and the Excel export stay in USD, because the tiles add
+up orders in different currencies. The list API gains `nativeTotal` and `total`
+stays USD.
+
 ## [1.420.0] - 2026-11-05
 
 The fleet agent now understands worker exit 74, a licence outage (RS-529). Until
