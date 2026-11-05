@@ -176,6 +176,50 @@ describe('accounting', () => {
     });
   });
 
+  it('holds a commission entry to what the purchaser earns: the commission, plus a cost they paid themselves', async () => {
+    type Row = Entry & {
+      record: { amount: number | null } | null;
+      mismatch: { figureCny: number } | null;
+    };
+    const sofia = await loginAs(SOFIA);
+    const marcus = await loginAs(MARCUS);
+    // Two sticks bought at $10 and priced at $40: $20 cost, $30 commission at 50%.
+    const figureFor = async (
+      over: { payment: 'company' | 'self'; paidBy?: string | null; rate?: number | null; amount: number },
+    ) => {
+      const po = await donePO();
+      const id = await recorded(alex.token, base({ kind: 'commission', targetId: po, amount: over.amount }));
+      await getTestDb()`
+        UPDATE orders SET payment = ${over.payment}, paid_by = ${over.paidBy ?? null},
+          commission_rate = ${over.rate === undefined ? 0.5 : over.rate}
+        WHERE id = ${po}`;
+      const rows = (await listOf(alex.token, '')).rows as Row[];
+      return rows.find(r => r.id === id)!;
+    };
+
+    // ¥360 at the ledger's 7.2 is what the purchaser was paid in one transfer.
+    expect(await figureFor({ payment: 'self', paidBy: marcus.user.id, amount: 360 }))
+      .toMatchObject({ record: { amount: 50 }, mismatch: null });
+    // No payer on file predates the field, when Self meant the purchaser.
+    expect(await figureFor({ payment: 'self', amount: 360 }))
+      .toMatchObject({ record: { amount: 50 }, mismatch: null });
+    // The commission alone leaves the cost owed, so the book flags it.
+    expect(await figureFor({ payment: 'self', paidBy: marcus.user.id, amount: 216 }))
+      .toMatchObject({ record: { amount: 50 }, mismatch: { figureCny: 360 } });
+
+    // Another manager is reimbursed apart, and the company's cost is not owed to anyone.
+    expect(await figureFor({ payment: 'self', paidBy: sofia.user.id, amount: 216 }))
+      .toMatchObject({ record: { amount: 30 }, mismatch: null });
+    expect(await figureFor({ payment: 'company', amount: 216 }))
+      .toMatchObject({ record: { amount: 30 }, mismatch: null });
+
+    // With no rate there is no commission yet: a self-paid cost is still owed.
+    expect(await figureFor({ payment: 'self', paidBy: marcus.user.id, rate: null, amount: 144 }))
+      .toMatchObject({ record: { amount: 20 }, mismatch: null });
+    expect(await figureFor({ payment: 'company', rate: null, amount: 144 }))
+      .toMatchObject({ record: { amount: null }, mismatch: null });
+  });
+
   it('books dollars into RMB at the typed rate, or the FX ledger\'s', async () => {
     const typed = await recorded(alex.token, base({ currency: 'USD', amount: 100, fxRate: 7.1 }));
     const latest = await recorded(alex.token, base({ currency: 'USD', amount: 100 }));
@@ -207,7 +251,7 @@ describe('accounting', () => {
     expect((await api('GET', '/api/accounting/summary?from=2026-10-31&to=2026-10-01', { token: alex.token })).status).toBe(400);
   });
 
-  it('runs the balance over the whole book, whatever the filters hide', async () => {
+  it('runs the balance over the scope (whole book or one payer), whatever the filters hide', async () => {
     const sofia = await loginAs(SOFIA);
     const po = await draftPO(alex.token, { payment: 'self' });
     await recorded(alex.token, base({ direction: 'in', amount: 1000, occurredOn: '2026-10-01' }));
@@ -218,11 +262,19 @@ describe('accounting', () => {
     expect(book.rows.map(r => [r.amount, r.balance])).toEqual([[50, 750], [300, 700], [1000, 1000]]);
     const purchases = await listOf(alex.token, 'kind=purchase');
     expect(purchases.rows.map(r => r.balance)).toEqual([700]);
-    // One company-wide book: scoping to a payer hides rows, never moves the balance.
+    // Scoping to a payer runs the balance over their entries alone, so the
+    // newest row agrees with the band's Closing.
     const sofias = await listOf(alex.token, `managerId=${sofia.user.id}`);
-    expect(sofias.rows.map(r => [r.amount, r.manager.id, r.balance])).toEqual([[300, sofia.user.id, 700]]);
+    expect(sofias.rows.map(r => [r.amount, r.manager.id, r.balance])).toEqual([[300, sofia.user.id, -300]]);
     const alexs = await listOf(alex.token, `managerId=${alex.user.id}`);
-    expect(alexs.rows.map(r => [r.amount, r.balance])).toEqual([[50, 750], [1000, 1000]]);
+    expect(alexs.rows.map(r => [r.amount, r.balance])).toEqual([[50, 1050], [1000, 1000]]);
+    const alexBand = (await api<Summary>('GET', `/api/accounting/summary?from=2026-10-01&to=2026-10-31&managerId=${alex.user.id}`, { token: alex.token })).body;
+    expect(alexBand.closing).toBe(alexs.rows[0]!.balance);
+    // The other filters still only hide rows inside that scope.
+    const alexSearched = await listOf(alex.token, `managerId=${alex.user.id}&q=acme`);
+    expect(alexSearched.rows.map(r => r.balance)).toEqual([1050]);
+    const alexLate = await listOf(alex.token, `managerId=${alex.user.id}&from=2026-10-03&to=2026-10-31`);
+    expect(alexLate.rows.map(r => r.balance)).toEqual([1050]);
     expect((await api('GET', '/api/accounting/entries?managerId=business', { token: alex.token })).status).toBe(400);
     const searched = await listOf(alex.token, 'q=acme');
     expect(searched.rows.map(r => r.balance)).toEqual([750]);

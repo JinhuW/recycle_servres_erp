@@ -2538,8 +2538,8 @@ is who paid, below).
   their own counter. The form no longer asks for a reference (v1.333.0); an
   entry that has one still shows it, and an edit keeps it.
   - **The amount fills from the linked record or screenshot** (v1.345.0,
-    RS-396). New entries open on the PO cost, projected commission, or sell
-    order's figure in its native currency. A CNY sale opened from its order
+    RS-396). New entries open on the PO cost, what the purchaser earns
+    (v1.427.1), or sell order's figure in its native currency. A CNY sale opened from its order
     still offers the remaining sale payment. Switching CNY/USD converts the
     amount using the entered or latest rate; without a known rate a nonempty
     amount cannot silently change currencies. Screenshot recognition runs
@@ -2665,10 +2665,11 @@ is who paid, below).
   - **The book** has Date (printed once per day), Entry, For (kind, the record
     as a link, counterparty, note), Paid by, Method, then **Received, Paid and
     Balance** columns: direction is the column a figure sits in. Balance is
-    one company-wide book (v1.317.0): what the whole book held after that
-    entry, from the first entry on, so the payer, direction, kind, method and
-    search filters hide rows without changing any balance. *Show voided*
-    lists voided entries struck through.
+    what the page's scope held after that entry, from its first entry on: the
+    whole book with All selected, or that manager alone with one selected, so
+    the newest row agrees with Closing (v1.427.0). The direction, kind, method,
+    review, search and period filters hide rows without changing any balance.
+    *Show voided* lists voided entries struck through.
   - A row, or `#/accounting/AC-1008`, opens the entry in a drawer: the record
     it is for (with that record's own figure and what the book has against
     it), every field, the history, Edit, Void and Restore. *Record entry*
@@ -2678,8 +2679,10 @@ is who paid, below).
     Edit opens the same form with the entry's screenshots, which save as
     they are added (drop, pick or paste) or removed (v1.396.0).
   - **Order amount** (v1.406.0), between Method and Received, is the
-    record's own figure in its own currency: the PO's commission, the PO's
-    cost with other fees, the sell order's total, the case's amount. When
+    record's own figure in its own currency: what the purchaser earns on the
+    PO (the commission, plus the cost with other fees when the purchaser paid
+    it themselves; v1.427.1), the PO's cost with other fees, the sell order's
+    total, the case's amount. When
     the whole book's total for that kind on the record is more than 2% off
     it either way (in ¥, with a dollar figure at the latest rate), each of
     the record's rows carries a red ! and prints both figures in red under
@@ -2694,7 +2697,7 @@ is who paid, below).
   Record button with the record already chosen:
   - the PO's **Cost Payment** tab (Purchase entries, net paid, the PO's cost ≈
     ¥ at the latest rate) and **Commission** tab (Commission entries, net
-    paid, the projected commission). Since v1.397.0 (RS-490) a manager's Cost
+    paid, what the purchaser earns). Since v1.397.0 (RS-490) a manager's Cost
     Payment opens on a **RMB Flow | Business Account** switch, as Commission
     does: RMB Flow names the person who paid and carries this card; Business
     Account carries the Payments ledger, and since v1.403.0 a search that
