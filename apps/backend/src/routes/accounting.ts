@@ -234,7 +234,7 @@ const signedCny = (sql: SqlLike) =>
 
 // ── What an entry is for ────────────────────────────────────────────────────
 // A record's own figure, in its own currency, for the picker and the cards:
-// a PO's cost or projected commission (USD), a sell order's total in the
+// a PO's cost or what its purchaser earns (USD), a sell order's total in the
 // currency it was sold in, a case's amount (USD).
 
 type TargetFacts = {
@@ -293,11 +293,17 @@ async function findTargets(
       // Commission is owed once the review is finished.
       : lens === 'commission' ? sql`o.archived_at IS NULL AND o.lifecycle IN ('ready_to_pay', 'done')`
       : sql`o.archived_at IS NULL`;
-    // The projected commission is the bank picker's (routes/bankTx.ts): the
-    // margin as bought, clamped at zero, times the rate.
+    // What the purchaser is paid, as the PO's Commission tab states it. The
+    // commission is the bank picker's (routes/bankTx.ts): the margin as bought,
+    // clamped at zero, times the rate. A cost they paid themselves comes back
+    // in the same transfer; one another manager paid is reimbursed apart.
+    const cost = sql`(COALESCE(o.total_cost, 0) + o.other_fees)`;
+    const commissionDue = sql`(GREATEST(rz.projected_profit, 0) * o.commission_rate)`;
     const amount = lens === 'commission'
-      ? sql`(GREATEST(rz.projected_profit, 0) * o.commission_rate)::float`
-      : sql`(COALESCE(o.total_cost, 0) + o.other_fees)::float`;
+      ? sql`(CASE WHEN o.payment = 'self' AND (o.paid_by IS NULL OR o.paid_by = o.user_id)
+                  THEN ${cost} + COALESCE(${commissionDue}, 0)
+                  ELSE ${commissionDue} END)::float`
+      : sql`${cost}::float`;
     const payerCol = lens === 'commission' ? sql`o.commission_paid_by` : sql`o.paid_by`;
     // The Business Account: a cost paid as 'company', or a commission the
     // company paid — by hand, or because a live bank row is linked as it
