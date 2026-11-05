@@ -207,7 +207,7 @@ describe('accounting', () => {
     expect((await api('GET', '/api/accounting/summary?from=2026-10-31&to=2026-10-01', { token: alex.token })).status).toBe(400);
   });
 
-  it('runs the balance over the whole book, whatever the filters hide', async () => {
+  it('runs the balance over the scope (whole book or one payer), whatever the filters hide', async () => {
     const sofia = await loginAs(SOFIA);
     const po = await draftPO(alex.token, { payment: 'self' });
     await recorded(alex.token, base({ direction: 'in', amount: 1000, occurredOn: '2026-10-01' }));
@@ -218,11 +218,19 @@ describe('accounting', () => {
     expect(book.rows.map(r => [r.amount, r.balance])).toEqual([[50, 750], [300, 700], [1000, 1000]]);
     const purchases = await listOf(alex.token, 'kind=purchase');
     expect(purchases.rows.map(r => r.balance)).toEqual([700]);
-    // One company-wide book: scoping to a payer hides rows, never moves the balance.
+    // Scoping to a payer runs the balance over their entries alone, so the
+    // newest row agrees with the band's Closing.
     const sofias = await listOf(alex.token, `managerId=${sofia.user.id}`);
-    expect(sofias.rows.map(r => [r.amount, r.manager.id, r.balance])).toEqual([[300, sofia.user.id, 700]]);
+    expect(sofias.rows.map(r => [r.amount, r.manager.id, r.balance])).toEqual([[300, sofia.user.id, -300]]);
     const alexs = await listOf(alex.token, `managerId=${alex.user.id}`);
-    expect(alexs.rows.map(r => [r.amount, r.balance])).toEqual([[50, 750], [1000, 1000]]);
+    expect(alexs.rows.map(r => [r.amount, r.balance])).toEqual([[50, 1050], [1000, 1000]]);
+    const alexBand = (await api<Summary>('GET', `/api/accounting/summary?from=2026-10-01&to=2026-10-31&managerId=${alex.user.id}`, { token: alex.token })).body;
+    expect(alexBand.closing).toBe(alexs.rows[0]!.balance);
+    // The other filters still only hide rows inside that scope.
+    const alexSearched = await listOf(alex.token, `managerId=${alex.user.id}&q=acme`);
+    expect(alexSearched.rows.map(r => r.balance)).toEqual([1050]);
+    const alexLate = await listOf(alex.token, `managerId=${alex.user.id}&from=2026-10-03&to=2026-10-31`);
+    expect(alexLate.rows.map(r => r.balance)).toEqual([1050]);
     expect((await api('GET', '/api/accounting/entries?managerId=business', { token: alex.token })).status).toBe(400);
     const searched = await listOf(alex.token, 'q=acme');
     expect(searched.rows.map(r => r.balance)).toEqual([750]);
