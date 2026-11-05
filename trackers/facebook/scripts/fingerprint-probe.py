@@ -23,6 +23,14 @@ on a free key that is the only one, so no worker may run cloak meanwhile.
     python3 scripts/fingerprint-probe.py --compare a.json b.json ...
 
 reads saved runs and prints the checks across them (stdlib only, any host).
+
+Each cloak run also passes through the worker's own preflight
+(`browser_engine.run_preflight`). `--expected-exit-ip` and `--webrtc-ip` are the
+claim's fields of the same names, and `--force wrong_exit` or `--force
+blocked_webrtc` makes the preflight fail the way a bad profile would; the run
+stops there, as a worker would before any Facebook page. Save those runs as
+`forced_wrong_exit.json` and `forced_blocked_webrtc.json`, and `--compare`
+expects them to park.
 """
 
 from __future__ import annotations
@@ -42,6 +50,12 @@ ECHO_URL = "https://api.ipify.org?format=json"
 # Another host for the context.request leg, so a proxy's access log tells the
 # two legs apart (it sees only CONNECT host:port).
 REQUEST_ECHO_URL = "https://api4.ipify.org?format=json"
+# A TEST-NET address, which no proxy exits from.
+FORCED_WRONG_EXIT = "203.0.113.1"
+FORCED_BLOCKED_WEBRTC_JS = "Object.defineProperty(window, 'RTCPeerConnection', {value: undefined});"
+# The preflight check each forced run must fail, by run name.
+FORCED_FAILURES = {"forced_wrong_exit": "exit_ip_expected", "forced_blocked_webrtc": "webrtc"}
+PARK_REASON = "profile_preflight"
 # Echoes the request headers the page sent, through the same proxy.
 HEADERS_URL = "https://httpbin.org/headers"
 # How far a full-screen window's outer width may sit from the screen's
@@ -122,16 +136,19 @@ async (fonts) => {
 
 
 def claim_answer(engine: str, seed: int | None, gpu: str | None, timezone: str,
-                 locale: str, screen: List[int]) -> Dict[str, Any]:
+                 locale: str, screen: List[int], expected_exit_ip: str | None = None,
+                 webrtc_ip: str | None = None) -> Dict[str, Any]:
     """A claim answer as the ERP would send it, with no account behind it."""
     device: Dict[str, Any] = {"timezone": timezone, "locale": locale, "screen": list(screen)}
+    answer: Dict[str, Any] = {"account": {"no": 0, "uid": None, "cookies": []}, "device": device}
     if engine == "cloak":
         device.update(browser_engine="cloak", cloak_gpu=gpu)
         if seed is not None:
             device["cloak_seed"] = seed
+        answer.update(expected_exit_ip=expected_exit_ip, webrtc_ip=webrtc_ip)
     else:
         device["viewport"] = [screen[0], screen[1] - 123]
-    return {"account": {"no": 0, "uid": None, "cookies": []}, "device": device}
+    return answer
 
 
 def sha256(text: str) -> str:
@@ -177,6 +194,17 @@ def compare(runs: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     for name, run in runs.items():
         fp = run.get("fingerprint") or {}
         ip = run.get("ip") or {}
+        if name in FORCED_FAILURES:
+            failures = (run.get("preflight") or {}).get("failures") or []
+            hosts = (run.get("preflight") or {}).get("hosts") or []
+            row(f"{name}: the preflight fails {FORCED_FAILURES[name]}",
+                FORCED_FAILURES[name] in failures, ", ".join(failures) or "nothing failed")
+            row(f"{name}: the worker would park {PARK_REASON}",
+                run.get("park_reason") == PARK_REASON, str(run.get("park_reason")))
+            row(f"{name}: no Facebook host was asked for",
+                bool(hosts) and not any("facebook" in h or "fbcdn" in h for h in hosts),
+                ", ".join(hosts) or "no hosts recorded")
+            continue
         if run.get("error"):
             row(f"{name}: launched", False, run["error"])
             continue
@@ -186,6 +214,20 @@ def compare(runs: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
         row(f"{name}: outerWidth >= innerWidth", fp.get("outer_ge_inner") is True,
             json.dumps(fp.get("window")))
         if name.startswith("cloak"):
+            flags = run.get("flags") or []
+            device = run.get("device") or {}
+            row(f"{name}: license calls go direct", "--license-route=direct" in flags,
+                " ".join(f for f in flags if f.startswith("--license-route")) or "no flag")
+            webrtc_ip = device.get("webrtc_ip")
+            webrtc_flag = [f for f in flags if f.startswith("--fingerprint-webrtc-ip")]
+            row(f"{name}: the WebRTC flag names the claim's IP, and only when it has one",
+                webrtc_flag == ([f"--fingerprint-webrtc-ip={webrtc_ip}"] if webrtc_ip else []),
+                " ".join(webrtc_flag) or "no flag")
+            preflight = run.get("preflight") or {}
+            row(f"{name}: the preflight passes",
+                "failures" in preflight and not preflight["failures"],
+                ", ".join(preflight.get("failures") or []) or
+                f"not checked: {', '.join(preflight.get('skipped') or []) or 'nothing'}")
             row(f"{name}: navigator.webdriver is false", fp.get("webdriver") is False,
                 str(fp.get("webdriver")))
             row(f"{name}: UA, client hints and platform say Windows", windows_consistent(fp),
@@ -235,8 +277,11 @@ def probe(args: argparse.Namespace) -> Dict[str, Any]:
     from ai_marketplace_monitor.facebook import FacebookMarketplace, FacebookMarketplaceConfig
     from ai_marketplace_monitor.utils import MonitorConfig
 
-    answer = claim_answer(args.engine, args.seed, args.gpu, args.timezone, args.locale,
-                          args.screen)
+    answer = claim_answer(
+        args.engine, args.seed, args.gpu, args.timezone, args.locale, args.screen,
+        FORCED_WRONG_EXIT if args.force == "wrong_exit" else args.expected_exit_ip,
+        args.webrtc_ip,
+    )
     home = Path(tempfile.mkdtemp(prefix="probe-"))
     identity = identity_for(answer)
     (home / "identity.json").write_text(json.dumps(identity))
@@ -257,12 +302,27 @@ def probe(args: argparse.Namespace) -> Dict[str, Any]:
     try:
         browser = browser_engine.launch(pw, identity, False, None)
         result["browser_version"] = browser.version
+        if is_cloak(answer["device"]):
+            result["flags"] = browser_engine.cloak_args(identity)
         monitor = MonitorConfig(name="monitor", storage_state_path=str(home / "session.json"),
                                 **(split_proxy(args.proxy) if args.proxy else {}))
         config = FacebookMarketplaceConfig(name="facebook")
         config.monitor_config = monitor
         market = FacebookMarketplace("facebook", browser, None, None)
         market.configure(config)
+        if is_cloak(answer["device"]):
+            preflight = browser_engine.run_preflight(
+                browser, identity, proxy=monitor.get_proxy_options(),
+                context_options={"no_viewport": True},
+                echo_url=args.echo_url, request_echo_url=args.request_echo_url,
+                init_script=FORCED_BLOCKED_WEBRTC_JS if args.force == "blocked_webrtc" else None,
+            )
+            result["preflight"] = preflight
+            if preflight["failures"]:
+                result["park_reason"] = browser_engine.park_reason(
+                    browser_engine.PreflightFailedError(preflight), args.engine)
+            if args.force:
+                return result
         page = market.create_page()
         page.goto(args.echo_url, wait_until="domcontentloaded", timeout=60_000)
         page_ip = json.loads(page.locator("body").inner_text()).get("ip")
@@ -303,12 +363,20 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument("--locale", default="en-US")
     parser.add_argument("--screen", type=int, nargs=2, default=[1920, 1080], metavar=("W", "H"))
     parser.add_argument("--proxy", help="http://user:pass@host:port, per context as the fleet sets it")
+    parser.add_argument("--expected-exit-ip", help="the claim's expected_exit_ip")
+    parser.add_argument("--webrtc-ip", help="the claim's webrtc_ip")
+    parser.add_argument("--force", choices=("wrong_exit", "blocked_webrtc"),
+                        help="make the preflight fail this way, and stop there")
     parser.add_argument("--echo-url", default=ECHO_URL)
     parser.add_argument("--request-echo-url", default=REQUEST_ECHO_URL)
     parser.add_argument("--headers-url", default=HEADERS_URL)
     parser.add_argument("--compare", nargs="+", type=Path,
                         help="saved runs, named by file stem (stock, cloak_a, cloak_b, cloak_a2)")
     args = parser.parse_args(argv)
+    if args.force and args.engine != "cloak":
+        parser.error("--force needs --engine cloak: stock has no preflight")
+    if args.force == "blocked_webrtc" and not args.webrtc_ip:
+        parser.error("--force blocked_webrtc needs --webrtc-ip: without one the check is skipped")
     if args.compare:
         runs = {p.stem: json.loads(p.read_text()) for p in args.compare}
         rows = compare(runs)

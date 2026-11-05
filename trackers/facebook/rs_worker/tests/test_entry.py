@@ -782,6 +782,39 @@ def test_a_parked_monitor_is_up_on_healthz_and_never_restarted_by_its_exit(
     assert result == [entry.EXIT_OPERATOR] == [78]
 
 
+def test_a_license_outage_stays_74_even_with_a_parked_file_behind_it(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 78 here would leave the worker stopped; the agent has to retry this one."""
+    home = tmp_path / "home"
+
+    def run_monitor(command: Any, env: Dict[str, str], *args: Any, **kwargs: Any) -> int:
+        (home / entry.PARKED_FILE).write_text(json.dumps({"reason": "connect_failed"}))
+        return entry.EXIT_LICENSE_OUTAGE
+
+    monkeypatch.setattr(entry, "run_monitor", run_monitor)
+    assert entry.run_fleet([], fleet_env(fleet), home=home) == entry.EXIT_LICENSE_OUTAGE == 74
+
+
+def test_the_exit_code_the_monitor_leaves_with_is_the_one_entry_knows() -> None:
+    from ai_marketplace_monitor.control_plane import LICENSE_OUTAGE_EXIT_CODE
+
+    assert LICENSE_OUTAGE_EXIT_CODE == entry.EXIT_LICENSE_OUTAGE
+
+
+def test_any_other_crash_while_parked_is_still_78(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+
+    def run_monitor(command: Any, env: Dict[str, str], *args: Any, **kwargs: Any) -> int:
+        (home / entry.PARKED_FILE).write_text(json.dumps({"reason": "profile_preflight"}))
+        return 1
+
+    monkeypatch.setattr(entry, "run_monitor", run_monitor)
+    assert entry.run_fleet([], fleet_env(fleet), home=home) == entry.EXIT_OPERATOR
+
+
 def test_a_parked_monitor_stopped_by_docker_still_leaves_0(
     fleet: FakeFleet, tmp_path: Path
 ) -> None:
@@ -1067,6 +1100,42 @@ def test_a_seed_that_is_not_an_integer_is_not_passed_on() -> None:
     assert "cloak_seed" not in profile
 
 
+def test_the_claims_ips_reach_the_launch_args_from_the_fake_fleet(
+    fleet: FakeFleet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The claim contract end to end: ERP answer, identity.json, the binary's flags."""
+    from ai_marketplace_monitor import browser_engine
+
+    from .fake_fleet import CLOAK_CLAIM
+
+    run_capturing_env(fleet, tmp_path, monkeypatch, cloak_device())
+    identity = json.loads((tmp_path / "home" / "identity.json").read_text())
+    assert identity["device"]["expected_exit_ip"] == CLOAK_CLAIM["expected_exit_ip"]
+    assert identity["device"]["webrtc_ip"] == CLOAK_CLAIM["webrtc_ip"]
+    args = browser_engine.cloak_args(identity)
+    assert f"--fingerprint-webrtc-ip={CLOAK_CLAIM['webrtc_ip']}" in args
+    assert "--license-route=direct" in args
+
+
+@pytest.mark.parametrize(
+    "claim", [{}, {"expected_exit_ip": None, "webrtc_ip": None}, {"expected_exit_ip": "", "webrtc_ip": 7}]
+)
+def test_an_older_erp_leaves_the_cloak_ips_out(claim: Dict[str, Any]) -> None:
+    from ai_marketplace_monitor import browser_engine
+
+    profile = entry.identity_for({**claim_with(cloak_device()), **claim})
+    assert not {"expected_exit_ip", "webrtc_ip"} & set(profile["device"])
+    assert not any(a.startswith("--fingerprint-webrtc-ip") for a in browser_engine.cloak_args(profile))
+
+
+def test_a_stock_device_never_takes_the_cloak_ips() -> None:
+    plain = entry.identity_for(claim_with(fleet_device()))
+    claimed = entry.identity_for(
+        {**claim_with(fleet_device()), "expected_exit_ip": "203.0.113.7", "webrtc_ip": "203.0.113.7"}
+    )
+    assert claimed == plain
+
+
 def test_a_cloak_device_pins_no_user_agent_anywhere(tmp_path: Path) -> None:
     entry.write_files(tmp_path, claim_with(cloak_device()), {"monitor": {}})
     profile = json.loads((tmp_path / "identity.json").read_text())["device"]
@@ -1086,6 +1155,7 @@ def test_the_monitor_launches_cloak_from_the_written_identity(tmp_path: Path) ->
         "--fingerprint-gpu-vendor=NVIDIA",
         "--window-position=0,0",
         "--window-size=1536,864",
+        "--license-route=direct",
     ]
     assert browser_engine.cloak_locale(identity) == ("America/New_York", "en-US")
 

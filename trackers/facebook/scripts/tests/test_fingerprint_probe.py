@@ -44,8 +44,14 @@ def run(canvas: str = "a", renderer: str = "RTX", **fp: Any) -> Dict[str, Any]:
     }
     raw.update(fp)
     return {"ip": {"page": "203.0.113.7", "request": "203.0.113.7"},
-            "device": {"locale": "en-US"}, "accept_language": "en-US,en;q=0.9",
+            "device": {"locale": "en-US", "webrtc_ip": "203.0.113.7"}, "accept_language": "en-US,en;q=0.9",
+            "flags": ["--license-route=direct", "--fingerprint-webrtc-ip=203.0.113.7"],
+            "preflight": {"failures": [], "skipped": [], "hosts": ["api.ipify.org"]},
             "fingerprint": probe.summarize(raw)}
+
+
+def forced(failure: str, park: str | None = "profile_preflight", hosts: Any = ("api.ipify.org",)) -> Dict[str, Any]:
+    return {"park_reason": park, "preflight": {"failures": [failure], "hosts": list(hosts)}}
 
 
 def test_the_claim_answer_is_a_cloak_device_with_its_seed() -> None:
@@ -147,6 +153,70 @@ def test_a_request_that_leaves_another_way_fails() -> None:
     bad["ip"]["request"] = "198.51.100.9"
     rows = {r["check"]: r["pass"] for r in probe.compare({"cloak_a": bad})}
     assert rows["cloak_a: page and context.request leave by the same IP"] is False
+
+
+@pytest.mark.parametrize(
+    ("change", "failing"),
+    [
+        ({"flags": ["--fingerprint-webrtc-ip=203.0.113.7"]}, "cloak_a: license calls go direct"),
+        ({"flags": ["--license-route=direct"]},
+         "cloak_a: the WebRTC flag names the claim's IP, and only when it has one"),
+        ({"flags": ["--license-route=direct", "--fingerprint-webrtc-ip=198.51.100.1"]},
+         "cloak_a: the WebRTC flag names the claim's IP, and only when it has one"),
+        ({"preflight": {"failures": ["webrtc"], "skipped": []}}, "cloak_a: the preflight passes"),
+        ({"preflight": None}, "cloak_a: the preflight passes"),
+    ],
+)
+def test_the_new_flags_and_the_preflight_are_compared(change: Dict[str, Any], failing: str) -> None:
+    rows = probe.compare({"cloak_a": {**run(), **change}})
+    assert [r["check"] for r in rows if not r["pass"]] == [failing]
+
+
+def test_a_run_with_no_webrtc_ip_must_carry_no_flag() -> None:
+    body = {**run(), "device": {"locale": "en-US"}, "flags": ["--license-route=direct"]}
+    assert all(r["pass"] for r in probe.compare({"cloak_a": body}))
+
+
+def test_forced_failures_must_park_with_no_facebook_host() -> None:
+    rows = probe.compare({
+        "forced_wrong_exit": forced("exit_ip_expected"),
+        "forced_blocked_webrtc": forced("webrtc"),
+    })
+    assert len(rows) == 6 and all(r["pass"] for r in rows)
+
+
+@pytest.mark.parametrize(
+    ("body", "failing"),
+    [
+        (forced("webrtc"), "forced_wrong_exit: the preflight fails exit_ip_expected"),
+        (forced("exit_ip_expected", park=None), "forced_wrong_exit: the worker would park profile_preflight"),
+        (forced("exit_ip_expected", hosts=("api.ipify.org", "www.facebook.com")),
+         "forced_wrong_exit: no Facebook host was asked for"),
+        (forced("exit_ip_expected", hosts=()), "forced_wrong_exit: no Facebook host was asked for"),
+    ],
+)
+def test_a_forced_run_that_would_go_on_fails_its_row(body: Dict[str, Any], failing: str) -> None:
+    rows = probe.compare({"forced_wrong_exit": body})
+    assert [r["check"] for r in rows if not r["pass"]] == [failing]
+
+
+def test_the_claim_answer_carries_the_claims_ips_for_cloak_only() -> None:
+    cloak = probe.claim_answer("cloak", 48213, "NVIDIA", "America/Denver", "en-US", [1920, 1080],
+                               "203.0.113.7", "203.0.113.8")
+    assert (cloak["expected_exit_ip"], cloak["webrtc_ip"]) == ("203.0.113.7", "203.0.113.8")
+    stock = probe.claim_answer("stock", None, None, "America/Denver", "en-US", [1920, 1080],
+                               "203.0.113.7", "203.0.113.8")
+    assert "expected_exit_ip" not in stock and "webrtc_ip" not in stock
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["--engine", "stock", "--force", "wrong_exit"], ["--engine", "cloak", "--force", "blocked_webrtc"]],
+)
+def test_a_force_that_could_not_fail_is_refused(argv: list) -> None:
+    with pytest.raises(SystemExit) as caught:
+        probe.main(argv)
+    assert caught.value.code == 2
 
 
 def test_compare_from_saved_files(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
