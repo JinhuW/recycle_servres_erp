@@ -1,6 +1,6 @@
 # CloakBrowser launch plan: a browser profile for every fleet account
 
-**Status:** revised 2026-11-05 after a six-point review. Phases 0 and 1 are being built. Nothing here has reached `main`, a fleet release or a live worker.
+**Status:** updated 2026-11-05. Phase 0 and the code for Phase 1 are merged to `dev`. Nothing here has reached `main`, a fleet release or a live worker, and none of the worker code has run in the real CloakBrowser binary yet.
 
 **Tracking:** `[x]` means merged to `dev` or finished, and `[ ]` means not yet. `[owner]` marks an item only the owner can do. The coordinating session is the only editor of this file, so parallel workers don't conflict on it.
 
@@ -9,8 +9,8 @@
 - [x] Review CloakBrowser against the fleet and proxy service
 - [x] Write the plan to a file
 - [x] Check the six review gaps against code and prod data (all six confirmed)
-- [ ] Phase 0: ERP groundwork
-- [ ] Phase 1: worker and agent build, spikes
+- [ ] Phase 0: ERP groundwork. Built and merged (v1.420.0–v1.423.0); waiting for your yes to release to `main`
+- [ ] Phase 1: worker and agent build, spikes. Code merged (RS-529, RS-535); spikes, agent swap and image still to do
 - [ ] Decision G1 `[owner]`
 - [ ] Phase 2: controlled pilot
 - [ ] Phase 3: automatic profile for new accounts (only on Go)
@@ -35,6 +35,7 @@ This builds on the 2026-11-02 plan (`review-current-fb-fleet-cozy-bunny.md`) and
 | Bad timezones don't predict death | 15 of 21 slots disagree with their exit, measured after the remap: 3 (#45, #55, #78) caused by it, 12 already wrong. Yet 7 of the 9 HEALTHY accounts are among them | Survivorship applies, but a coherent profile alone may not save accounts |
 | Stored proxy geo goes stale | Some labels (Leesburg, Boston) were right until the remap | A typed `fleet_proxies.timezone` can't feed a profile |
 | IPs are shared | At the snapshot: 20 Decodo IPs, 6 carrying 2 accounts, 9 carrying 1, 5 carrying none. The five free ports were 10006, 10009, 10014, 10016, 10017; re-measure before use | Solo IPs must be reserved by exit, not port |
+| Stock's 24 h loss is about 59% | Report on the prod copy of 2026-11-04: 71 of 120 decided stock accounts lost within 24 h (59.2%), 73 failed (60.8%). The earlier 55% counted accounts still inside their first day | The pilot's bar and the power table below assume 55%; re-read them against the stock arm's actual figure |
 | The baseline is young | State history starts 2026-11-03 18:10 UTC | Stock vs cloak needs a cohort test, not the existing rate |
 
 ## CloakBrowser review
@@ -110,58 +111,61 @@ Dates are estimates. Accounts come only from batches you assign, per your 2026-1
 ### Phase 0: ERP groundwork. No worker touched, no logins
 
 **Exit identity (workstream A)**
-- [ ] Keep the exit's zone: new column on `fleet_proxy_checks`, read from the lookup in `proxyProbe.ts`, after logging one real answer to confirm the field exists
-- [ ] Record each exit change per proxy: old and new IP, geo, time, and the slots bound then
-- [ ] Alert when an exit changes under a bound slot
-- [ ] Proxies tab flags zone mismatch, stale measurement and a recent exit change. Report only; live devices stay as they are
+- [x] Keep the exit's zone: new column on `fleet_proxy_checks`, read from the lookup in `proxyProbe.ts` (RS-538)
+- [ ] Confirm one real lookup through a Decodo port returns a zone. Only a direct ipinfo call was checked; a port with no zone refuses enrollment with `exit_zone_unknown`
+- [x] Record each exit change per proxy: old and new IP, geo, time, and the slots bound then
+- [x] Alert when an exit changes under a bound slot
+- [x] Proxies tab flags zone mismatch, stale measurement and a recent exit change. Report only; live devices stay as they are
 - [x] Proxies tab flags ports crowding one exit IP (RS-527, RS-528, v1.419.1)
+- [x] Enrollment takes its zone from the measured exit, on both arms (RS-538)
+- [x] Hold a pilot account's first login while its exit differs from the one recorded at enrollment; re-adding or Change proxy re-records it, and only before first claim (RS-538)
 
 **Enrollment and profile (workstream B)**
-- [ ] Store the profile on `fb_pool_accounts`, since `fleet_slots.device` is deleted with the slot and remove-then-re-add loses the `cloak_seeded` guard
-- [ ] Durable enrollment record (account, batch, pilot, arm, seed, measured exit, enrolled and first-claim time) that outlives slot deletion
-- [ ] Atomic enrollment: `POST /slots` takes engine and arm, and writes enrollment, profile, proxy and slot in one transaction, so no worker can claim a half-set slot
-- [ ] Reserve by measured exit IP across stock and cloak, and refuse a stale measurement
-- [ ] Enforce seed uniqueness; `fleetCloakFor` in `packages/shared/src/fleet.ts` doesn't today
-- [ ] Stop proxy edits in `proxies.ts` rewriting a pinned profile's timezone
-- [ ] Claim answer carries the expected exit IP and WebRTC IP for cloak slots
-- [ ] Test: with `cloak_enabled=false`, existing cloak accounts still claim and still receive the licence; only new enrollment stops
-- [ ] Update `CONTRACTS.md`, which never mentions cloak
+- [x] Store the profile on `fb_pool_accounts`, since `fleet_slots.device` is deleted with the slot and remove-then-re-add loses the `cloak_seeded` guard
+- [x] Durable enrollment record (account, batch, pilot, arm, seed, measured exit, enrolled and first-claim time) that outlives slot deletion
+- [x] Atomic enrollment: `POST /slots` takes engine and arm, and writes enrollment, profile, proxy and slot in one transaction, so no worker can claim a half-set slot
+- [x] Reserve by measured exit IP across stock and cloak, and refuse a stale measurement (15 minutes). A plain add or Change proxy onto a pilot's exit is refused too (RS-537)
+- [x] Enforce seed uniqueness; `fleetCloakFor` in `packages/shared/src/fleet.ts` doesn't today
+- [x] Stop proxy edits in `proxies.ts` rewriting a pinned profile's timezone
+- [x] Claim answer carries the expected exit IP and WebRTC IP for cloak slots
+- [x] Test: with `cloak_enabled=false`, existing cloak accounts still claim and still receive the licence; only new enrollment stops
+- [x] Update `CONTRACTS.md`, which never mentions cloak
 
 **Cohort report (workstream C, after B)**
-- [ ] Per batch and arm: reached HEALTHY, 24 h and 7 d survival from first claim, searches in the fixed window, failed starts, recovery logins
-- [ ] Flag accounts touched by an exit change or licence outage, and show results with and without them
-- [ ] Active cloak count against seats, so the 18 cap and the survivors stay visible
-- [ ] Also serves as a **supplier scorecard**, which has value even if the pilot fails
+- [x] Per batch and arm: reached HEALTHY, 24 h and 7 d survival from first claim, searches in the fixed window, failed starts, recovery logins
+- [x] Flag accounts touched by an exit change or licence outage, and show results with and without them
+- [x] Active cloak count against seats, so the 18 cap and the survivors stay visible
+- [x] Also serves as a **supplier scorecard**, which has value even if the pilot fails
 
 **Gate**
-- [ ] Tests pass and the report matches prod numbers
+- [x] Tests pass and the report matches prod numbers: on the prod copy of 2026-11-04 it gave 130 accounts, 72 lost within 24 h and 108 within 7 days, the same as an independent count
 - [ ] Your yes for the `main` release `[owner]`
 
 ### Phase 1: Worker and agent build. No Facebook
 
 **Fleet agent (workstream D).** Must reach hosts before worker 0.17.0: an older agent reads the new exit code as a crash and holds the worker after 5 restarts. An agent swap isn't a login.
-- [ ] New worker exit code **74, licence outage**, distinct from the existing 78 "left for an operator"
-- [ ] Bounded retries with jitter: backoff from 5 min, at most 8 attempts, inside the existing one-start stagger; then hold as `license_outage`
-- [ ] Report the hold and retries to the ERP
+- [x] New worker exit code **74, licence outage**, distinct from the existing 78 "left for an operator"
+- [x] Bounded retries with jitter: backoff from 5 min, at most 8 attempts, inside the existing one-start stagger; then hold as `license_outage`
+- [x] Report the hold and retries to the ERP
 - [ ] Your yes for the agent swap on hosts `[owner]`
 
 **Worker 0.17.0 (workstream E).** In `browser_engine.py`, `monitor.py`, `entry.py` and `fingerprint-probe.py`:
-- [ ] Close the browser explicitly on stop. A killed browser can hold its seat for 4–30 min; the replacement exits 76 and parks
-- [ ] Licence outage (binary exit 78, before or after launch returns): worker exits 74. Exits 76, 77 and 79 stay parked as `license_denied`
-- [ ] Parked-state exit mapping in `entry.py` must not turn 74 into 78
-- [ ] Before any Facebook page, a retry costs no login. After a live session, the replacement container restores the session from the ERP and counts as a logged boot login
-- [ ] Pass `--fingerprint-webrtc-ip` from the claim; add `--license-route=direct`
-- [ ] **Preflight before any Facebook page:** exit IP matches the expected one on both paths, WebRTC candidates, zone, language, `webdriver`, platform, fonts, window. Failure parks `profile_preflight`, costing no login
-- [ ] Report session upload failures. A 413 over the 1 MiB cap silently leaves the pool copy stale
-- [ ] Wrap `build_launch_env` and guard errors as a park. Today they crash-loop
+- [x] Close the browser explicitly on stop. A killed browser can hold its seat for 4–30 min; the replacement exits 76 and parks
+- [x] Licence outage (binary exit 78, before or after launch returns): worker exits 74. Exits 76, 77 and 79 stay parked as `license_denied`
+- [x] Parked-state exit mapping in `entry.py` must not turn 74 into 78
+- [x] Before any Facebook page, a retry costs no login. After a live session, the replacement container restores the session from the ERP and counts as a logged boot login
+- [x] Pass `--fingerprint-webrtc-ip` from the claim; add `--license-route=direct`
+- [x] **Preflight before any Facebook page:** exit IP matches the expected one on both paths, WebRTC candidates, zone, language, `webdriver`, platform, fonts, window. Failure parks `profile_preflight`, costing no login
+- [x] Report session upload failures. A 413 over the 1 MiB cap silently leaves the pool copy stale
+- [x] Wrap `build_launch_env` and guard errors as a park. Today they crash-loop
 - [ ] Cloak-only fonts through `FONTCONFIG_FILE`, waiting on decision 1. Adding fonts image-wide would change every **stock** account's fingerprint at its next start, which is a device change
 
 **Spikes on worker-60-14**, using the free key's one seat, one run at a time. They need the owner to provide the key at run time, and no Facebook page is opened.
-- [ ] **S1:** does WebRTC expose the host IP without the flag?
+- [ ] **S1:** does WebRTC expose the host IP without the flag? Also run the new preflight check: it requires `webrtc_ip` among the candidates, so a binary that offers only mDNS would falsely park every cloak worker
 - [ ] **S2:** run about 50 seeds against FingerprintJS's public demo. Do some flag as tampering (#553)? Does the seed's screen conflict with Xvfb? Quarantine bad seeds
 - [ ] **S3:** do hashes hold from 155 to 156? If not, a binary bump is a device change
 - [ ] **S4:** does a browser survive a blocked licence server beyond 30 min, and does `playwright.stop()` free the seat?
-- [ ] **S5:** block the licence server before and after `launch` returns; both must end in exit 74, and a retry must recover
+- [ ] **S5:** block the licence server before and after `launch` returns; both must end in exit 74, and a retry must recover. The after-launch path relies on the binary writing its denial file
 
 **Gate**
 - [ ] All spikes written up in the probe note
@@ -184,9 +188,9 @@ The earlier canaries can't separate engine from batch, so this test splits each 
 - [ ] **Further waves:** need more distinct exits, not just ports (decision 3)
 
 **Measurement, fixed before the first account**
-- **Primary outcome:** lost within 24 h of first claim. Secondary: lost within 7 days.
+- **Primary outcome:** failed within 24 h of first claim. Failed means retired or problem, never reached HEALTHY, or sitting in a lost session state when the window closes, so it doesn't depend on how fast someone clicks Retire. Secondary: the same within 7 days. The report shows the stint-only lost figure beside it for comparing suppliers.
 - **Search yield:** completed searches per account in a fixed 7-day window from first claim, so a long-lived account doesn't get an open-ended count.
-- **Everyone stays in:** accounts count in their assigned arm, including failed starts. An account can't be dropped for doing badly.
+- **Everyone stays in:** accounts count in their assigned arm, and failed starts count as failed. An account can't be dropped for doing badly.
 - **Incomplete follow-up:** an account released or held by the owner before its clock ends is reported as unknown, not as a survivor.
 - **Infrastructure events:** a licence outage, proxy remap or manual Release flags the affected accounts. Results are shown with and without them; the "with" figures decide.
 - **No early verdict:** only the pause conditions below act before an arm completes.
@@ -205,8 +209,8 @@ The earlier canaries can't separate engine from batch, so this test splits each 
 
 | Result at 20 per arm | Decision |
 | --- | --- |
-| Cloak 24 h loss ≤ 30%, at least 20 points under stock, and at least 1.5× searches per account | **Go** to Phase 3, keeping a stock holdout of 1 in 5 new accounts until the combined result is significant or the arms reach 96 |
-| Loss clears that bar, but searches under 1.5× | **Hold.** No new enrollment until the cause is known; then your call. Survival without searches doesn't pay for the licence |
+| Cloak 24 h failure ≤ 30%, at least 20 points under stock, and at least 1.5× searches per account | **Go** to Phase 3, keeping a stock holdout of 1 in 5 new accounts until the combined result is significant or the arms reach 96 |
+| Failure clears that bar, but searches under 1.5× | **Hold.** No new enrollment until the cause is known; then your call. Survival without searches doesn't pay for the licence |
 | Gap of 10–20 points | **Inconclusive.** Extend to 96 per arm only if you accept the cost above; otherwise treat as Stop |
 | Gap under 10 points | **Stop** |
 
@@ -242,7 +246,11 @@ The earlier canaries can't separate engine from batch, so this test splits each 
 | Browser dies with a live session | Exits 74. Replacement container restores the session from the ERP | One boot login, logged and counted in the report |
 | 8 retries used, or exit 76, 77 or 79 | Agent holds `license_outage`; the worker parks `license_denied` | Operator acts |
 
-Retrying through the agent instead of inside the container keeps the existing start stagger. With 18 cloak workers and a 3-minute stagger, full recovery takes about 54 minutes, so a long outage doesn't become a burst of logins. A replacement may wait for the old lease to lapse, up to 30 minutes.
+Retrying through the agent instead of inside the container keeps the existing start stagger. With 18 cloak workers and a 3-minute stagger, full recovery takes at least 54 minutes, so a long outage doesn't become a burst of logins.
+
+**The lease sets the real pace.** The worker's last DEAD heartbeat renews its lease, so a replacement gets `no_slot` and exits 75, with no browser and no login, until the lease lapses, up to 30 minutes (`lease_minutes`). The agent's early 5- and 10-minute retries therefore mostly hit 75, and each real attempt takes about 30 minutes or more. The replacement isn't guaranteed the same account: an idle cloak-capable worker can claim the slot first, which is safe because the device and session travel with the account.
+
+**A network failure during preflight isn't a bad profile.** If the exit can't be measured, the worker parks `connect_failed`, which auto-resumes and re-runs the preflight. A measured mismatch parks `profile_preflight` for an operator.
 
 ## Decisions for you
 
@@ -258,11 +266,11 @@ Retrying through the agent instead of inside the container keeps the existing st
 
 ## Out of scope
 
-Account creation or warm-up, captcha solving, the poster and messenger, and rewriting live sessions or timezones. Homelab compose workers stay stock, but their exits count toward the solo-exit rule.
+Account creation or warm-up, captcha solving, the poster and messenger, and rewriting live sessions or timezones. Homelab compose workers stay stock. On 2026-11-05 no compose workers were running on the homelab VM (only `rs-fleet-homelab-*`, which are ERP fleet workers), though old config files still name ports 10001–10020. If any come back, the reservation counts them through the coordinator's check rows.
 
 ## Tickets
 
-Numbers are picked just before merge. Each carries this Ask verbatim:
+Each carries this Ask verbatim:
 
 > Deep review the all feature of these https://cloakbrowser.dev/ and see how we can integrate with my current automation system and see how it can integrate with my proxy service.
 >
@@ -272,11 +280,11 @@ Numbers are picked just before merge. Each carries this Ask verbatim:
 
 | Workstream | Ticket | Acceptance |
 | --- | --- | --- |
-| A | Fleet: track each proxy's measured exit | Exit changes are recorded and alerted; tab flags mismatches; no live device changes |
-| B | Fleet: atomic account enrollment and browser profile | No claim can see a half-enrolled slot; record survives slot deletion; seeds unique; reservation by exit IP |
-| C | Fleet: pilot cohort report | Follows the measurement rules above, per batch and arm |
-| D | Fleet agent: licence outage exit | Exit 74 retries are bounded, staggered and jittered, then held |
-| E | Fleet worker 0.17.0: preflight, WebRTC, seats, outage exit | Failed preflight parks before any Facebook page; outage exits 74 |
+| A, RS-538 | Fleet: track each proxy's measured exit | Exit changes are recorded and alerted; tab flags mismatches; no live device changes |
+| B, RS-537 | Fleet: atomic account enrollment and browser profile | No claim can see a half-enrolled slot; record survives slot deletion; seeds unique; reservation by exit IP |
+| C, RS-539 | Fleet: pilot cohort report | Follows the measurement rules above, per batch and arm |
+| D, RS-529 | Fleet agent: licence outage exit | Exit 74 retries are bounded, staggered and jittered, then held |
+| E, RS-535 | Fleet worker 0.17.0: preflight, WebRTC, seats, outage exit | Failed preflight parks before any Facebook page; outage exits 74 |
 | later | Fleet: automatic profile on Add to fleet (Phase 3) | Add to fleet creates a profile unaided |
 
 ## Verification
