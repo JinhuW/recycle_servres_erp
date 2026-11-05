@@ -15,6 +15,25 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.423.0] - 2026-11-05
+
+The fleet can now measure the CloakBrowser pilot by the rules the launch plan fixed
+in advance (RS-539, workstream C). A new Cohort report on the Analysis tab shows each
+pilot per batch and arm: reached HEALTHY, lost within 24 hours and 7 days of first
+claim, completed searches in a fixed 7 days, failed starts and recovery boots. Lost
+uses the same definition as the plan's 30-day figures, a stint ended retired or
+problem, so an account still counts after retiring deletes its slot.
+
+Doing badly can't take an account out of the numbers: failed starts stay in their arm,
+while an account the owner released or parked first shows as unknown and not as a
+survivor. Accounts touched by an exit change or licence outage are flagged, with results
+shown with and without them. The headline is failed: lost, plus never reached HEALTHY,
+plus sitting in a lost state nobody has retired yet, because retiring is a manual click
+that can run days late. The stint figure sits beside it for comparing suppliers. With no pilot chosen, the same report is a supplier
+scorecard by batch and engine from existing history. It shows counts beside percentages
+and CloakBrowser slots against the cap of 18, and it never prints a verdict. Nothing here
+writes: there is no migration and the claim path is unchanged.
+
 ## [1.422.0] - 2026-11-05
 
 The ERP now tracks where each proxy really comes out (RS-538, workstream A of the

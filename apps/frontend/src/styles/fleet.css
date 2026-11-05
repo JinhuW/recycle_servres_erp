@@ -914,3 +914,13 @@
   flex-wrap: wrap;
   gap: 2px 10px;
 }
+
+.fleet-cohort-note {
+  margin: 0;
+  padding: 10px 18px;
+}
+
+.fleet-cohort-pilot {
+  width: auto;
+  max-width: none;
+}
