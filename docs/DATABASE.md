@@ -381,7 +381,7 @@ One row per entry in a user's in-app inbox (the bell). Written inside the transa
 | --- | --- | :-: | --- | --- |
 | `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
 | `user_id` | `uuid` | ✓ |  |  |
-| `kind` | `text` | ✓ |  | What happened: order_submitted, order_reverted, order_ready_to_pay, ai_review, box_check, low_margin, payment_received, sell_order_signoff, package_delivered, web_submission, accounting_query, accounting_answered. |
+| `kind` | `text` | ✓ |  | What happened: order_submitted, order_reverted, order_ready_to_pay, ai_review, box_check, low_margin, payment_received, sell_order_signoff, package_delivered, web_submission, accounting_query, accounting_answered, fleet_proxy_exit, fleet_licence_outage. |
 | `tone` | `text` | ✓ | `'info'` | info, warn or pos (good news); colours the entry. |
 | `icon` | `text` | ✓ | `'bell'` | Icon name the UI draws: bell (default), mail, package, alert, cash, flag, check, inventory. |
 | `title` | `text` | ✓ |  |  |

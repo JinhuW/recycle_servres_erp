@@ -62,6 +62,8 @@ export function ProxyDialog({ proxy, onClose, onDone }: { proxy: FleetProxy | nu
         ? await fleetApi.updateProxy(proxy.id, body)
         : await fleetApi.addProxy({ label: body.label, url: body.url, timezone: body.timezone, ...(body.note ? { note: body.note } : {}) });
       showSuccessToast(t('fleetProxySaved', { label: saved.label }));
+      // Accounts that need an exit wait on the first reading of a new URL.
+      if (proxy && body.url) fleetApi.checkProxies(saved.id).catch(() => {});
       onDone();
     } catch (err) {
       const detail = err instanceof ApiError ? (err.body as { detail?: unknown } | undefined)?.detail : undefined;
@@ -159,7 +161,14 @@ export function AddToFleetDialog({ no, proxies, limit, health: given, onClose, o
   // null is "any proxy with room", drawn when the form is sent.
   const [proxyId, setProxyId] = useState<number | null>(null);
   const [pilot, setPilot] = useState('');
-  const [arm, setArm] = useState<FleetPilotArm>('stock');
+  // No default: the pair assignment decides, and a default is how a miss goes unseen.
+  const [arm, setArm] = useState<FleetPilotArm | ''>('');
+  const [pilots, setPilots] = useState<string[]>([]);
+  useEffect(() => {
+    let live = true;
+    fleetApi.cohorts({ days: 30 }).then((r) => { if (live) setPilots(r.pilots); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
   const [busy, setBusy] = useState(false);
   const chosen = proxyId === null ? null : choices.find((c) => c.proxy.id === proxyId) ?? null;
   const roomLeft = choices.some((c) => !c.full);
@@ -173,7 +182,7 @@ export function AddToFleetDialog({ no, proxies, limit, health: given, onClose, o
     if (busy || pickGone || !proxy) return;
     setBusy(true);
     try {
-      await fleetApi.addSlot({ account_no: no, proxy_id: proxy.id, ...(pilot.trim() ? { pilot: pilot.trim(), arm } : {}) });
+      await fleetApi.addSlot({ account_no: no, proxy_id: proxy.id, ...(pilot.trim() && arm ? { pilot: pilot.trim(), arm } : {}) });
       showSuccessToast(t('fpAddedToFleetToast', { n: no, proxy: proxy.label }));
       onDone();
     } catch (err) {
@@ -213,16 +222,18 @@ export function AddToFleetDialog({ no, proxies, limit, health: given, onClose, o
           )}
           {roomLeft && !openLeft && <p className="fp-warn">{t('fpAddToFleetAllDown')}</p>}
           {openLeft && pickGone && <p className="fp-warn">{t('fpAddToFleetPickGone')}</p>}
-          {device && <p className="fp-muted">{t('fpAddToFleetDevice', device)}</p>}
+          {device && <p className="fp-muted">{t(pilot.trim() ? 'fpAddToFleetDevicePilot' : 'fpAddToFleetDevice', device)}</p>}
           <label className="fleet-field">
             <span>{t('fpAddToFleetPilot')}</span>
-            <input className="input" value={pilot} maxLength={64} disabled={busy} placeholder={t('fpAddToFleetPilotHint')}
+            <input className="input" list="fleet-pilots" value={pilot} maxLength={64} disabled={busy} placeholder={t('fpAddToFleetPilotHint')}
               onChange={(e) => setPilot(e.target.value)} />
+            <datalist id="fleet-pilots">{pilots.map((p) => <option key={p} value={p} />)}</datalist>
           </label>
           {pilot.trim() && (
             <label className="fleet-field">
               <span>{t('fpAddToFleetArm')}</span>
               <select className="input" value={arm} disabled={busy} onChange={(e) => setArm(e.target.value as FleetPilotArm)}>
+                <option value="" disabled>{t('fpAddToFleetArmPick')}</option>
                 <option value="stock">{t('fpAddToFleetArmStock')}</option>
                 <option value="cloak">{t('fpAddToFleetArmCloak')}</option>
               </select>
@@ -231,7 +242,7 @@ export function AddToFleetDialog({ no, proxies, limit, health: given, onClose, o
         </div>
         <div className="modal-foot">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>{t('cancel')}</button>
-          <button type="submit" className="btn primary" disabled={busy || !openLeft || pickGone}>{t('fpAddToFleetConfirm')}</button>
+          <button type="submit" className="btn primary" disabled={busy || !openLeft || pickGone || (!!pilot.trim() && !arm)}>{t('fpAddToFleetConfirm')}</button>
         </div>
       </form>
     </Modal>

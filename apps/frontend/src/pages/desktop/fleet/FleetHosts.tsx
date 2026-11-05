@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
-import { ApiError } from '../../../lib/api';
-import { fleetApi, type FleetEngineLoss, type FleetEngineLossRow, type FleetHost, type FleetHostCreated, type FleetRelease, type FleetSettings } from '../../../lib/fleet';
+import { api, ApiError } from '../../../lib/api';
+import type { Notification } from '../../../lib/types';
+import { fleetApi, type FleetEngineLoss, type FleetEngineLossRow, type FleetHost, type FleetHostCreated, type FleetWorker, type FleetRelease, type FleetSettings } from '../../../lib/fleet';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
-import { capacityCuts, hostLag, hostRunning, releaseSummary, rollProgress } from './fleetBoard';
-import { agoLabel, Clock, ConfirmDialogBody, useFleetMirror } from './shared';
+import { capacityCuts, fleetAttention, hostLag, hostRunning, releaseSummary, rollProgress } from './fleetBoard';
+import { agoLabel, Clock, ConfirmDialogBody, useFleetMirror, useFleetPoll } from './shared';
 
 // ─── Hosts ────────────────────────────────────────────────────────────────────
 // The machines that run worker containers, as the strip of cards at the top
@@ -22,12 +23,45 @@ const CAPACITY_MAX = 64;
 // The settings route's bound for cloak_max_slots.
 const CLOAK_SEATS_MAX = 100;
 const LOSS_DAYS = 30;
+const ALERT_POLL_MS = 60_000;
+const FLEET_ALERT_KINDS = ['fleet_proxy_exit', 'fleet_licence_outage'];
 
 const RELEASE_CHIP: Record<FleetRelease['state'], string> = {
   rolling: 'chip info', staged: 'chip warn', done: 'chip pos', failed: 'chip neg', superseded: 'chip muted',
 };
 
 /** The latest roll: its state, how far it got, the worker being replaced now and why it stopped if it did. */
+/** What needs a manager's eye and shows nowhere else on a desktop: a licence
+ *  outage, workers held for a person, and the alerts only the phone shell reads. */
+export function FleetAlerts({ workers, hosts }: { workers: readonly FleetWorker[]; hosts: readonly FleetHost[] }) {
+  const { t } = useT();
+  const inbox = useFleetPoll(() => api.get<{ items: Notification[] }>('/api/notifications'), ALERT_POLL_MS);
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
+  const { outage, probing, held } = fleetAttention(workers, hosts);
+  const alerts = inbox.data && inbox.data !== 'unavailable'
+    ? inbox.data.items.filter(n => n.unread && FLEET_ALERT_KINDS.includes(n.kind) && !dismissed.has(n.id)).slice(0, 3)
+    : [];
+  const dismiss = (id: string) => {
+    setDismissed(d => new Set(d).add(id));
+    api.post('/api/notifications/mark-read', { id }).catch(handleFetchError);
+  };
+  if (!outage && !held.length && !alerts.length) return null;
+  return (
+    <div className="card fleet-release" role="status">
+      <span className="fp-holder">
+        {outage > 0 && <span><span className="chip warn">{t('fleetPark_license_outage')}</span>{' '}{t('fleetOutageBanner', { n: outage, probing })}</span>}
+        {held.length > 0 && <small className="fp-warn">{t('fleetHeldBanner', { workers: held.join(', ') })}</small>}
+        {alerts.map(a => (
+          <small key={a.id}>
+            <strong>{a.title}</strong> {a.body}{' '}
+            <button type="button" className="btn sm ghost" onClick={() => dismiss(a.id)}>{t('fleetAlertDismiss')}</button>
+          </small>
+        ))}
+      </span>
+    </div>
+  );
+}
+
 export function ReleaseBanner({ release, now }: { release: FleetRelease; now?: number }) {
   const { t } = useT();
   const sum = releaseSummary(release)!;

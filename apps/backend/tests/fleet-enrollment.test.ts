@@ -293,6 +293,7 @@ describe('the profile outlives the slot', () => {
     const p = await proxy(10001);
     await measure(p, '198.51.100.1');
     expect((await enroll(no, p, 'stock')).status).toBe(201);
+    expect((await claim('lab-1')).status).toBe(200);
     await parkAndRemove(no);
     expect((await enroll(no, p, 'cloak')).body.error).toBe('already_enrolled');
     expect((await enroll(no, p, 'stock', 'wave-2')).body.error).toBe('already_enrolled');
@@ -854,6 +855,23 @@ describe('a first login on a changed exit', () => {
     expect(res.status).toBe(200);
     expect((await enrollment(no)).exit_ip).toBe('198.51.100.20');
     expect((await claim('lab-1')).status).toBe(200);
+  });
+
+  it('corrects a pilot or arm before the first claim, and not after', async () => {
+    const { no, p } = await setup();
+    await remove(no);
+    const fixed = await enroll(no, p, 'stock', 'wave-2');
+    expect(fixed.status).toBe(201);
+    expect(await enrollment(no)).toMatchObject({ pilot_id: 'wave-2', arm: 'stock', seed: null });
+    expect(await profile(no)).toMatchObject({ browser_engine: 'stock', cloak_seed: null });
+    const got = await claim('lab-1');
+    expect(got.status).toBe(200);
+    const db = getTestDb();
+    await db`UPDATE fleet_slots SET lease_expires_at = NULL, worker_id = NULL WHERE account_no = ${no}`;
+    await remove(no);
+    const late = await enroll(no, p, 'stock', 'wave-3');
+    expect(late.status).toBe(409);
+    expect(late.body.error).toBe('already_enrolled');
   });
 
   it('keeps holding after a claim that opened no Facebook page', async () => {

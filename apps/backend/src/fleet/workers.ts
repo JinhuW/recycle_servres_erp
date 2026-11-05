@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  isFleetTimezone, fleetCloakFor, fleetCloakSwitchable, fleetDeviceFor, fleetReportedEngine, FLEET_PILOT_ARMS, type FleetCloakGpu, type FleetPilotArm, fleetStockRevertible, fleetResumable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
+  isFleetTimezone, fleetCloakFor, fleetCloakSwitchable, fleetDeviceFor, fleetReportedEngine, FLEET_PILOT_ARMS, type FleetCloakGpu, type FleetPilotArm, fleetStockRevertible, fleetResumable, fleetRestartable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
   type FleetWorkerRelogin, type FleetWorkerResume, type FbPoolStatus,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
@@ -308,7 +308,10 @@ type PoolForSlot = {
   browser_engine: FleetPilotArm | null; cloak_seed: number | null; cloak_gpu: FleetCloakGpu | null; profile_timezone: string | null;
   has_session: boolean; fleet_held: boolean; account_state: string | null;
 };
-type EnrollmentRow = { pilot_id: string | null; arm: FleetPilotArm; first_login_at: Date | null; exit_timezone: string | null };
+type EnrollmentRow = {
+  pilot_id: string | null; arm: FleetPilotArm; seed: number | null; first_claimed_at: Date | null;
+  first_login_at: Date | null; exit_timezone: string | null;
+};
 
 // Lock order: the engine lock, the pool account, then the proxy, then the slot.
 // Everything is written in this one transaction, with the slot last: a claim
@@ -354,7 +357,16 @@ slots.post('/', async (c) => {
       return conflict('proxy_down', `${exitName} failed its last proxy checks; pick another proxy`);
     }
 
-    const [enrolled] = await tx<EnrollmentRow[]>`SELECT pilot_id, arm, first_login_at, exit_timezone FROM fleet_pilot_enrollments WHERE account_no = ${no}`;
+    let [enrolled] = await tx<EnrollmentRow[]>`SELECT pilot_id, arm, seed, first_claimed_at, first_login_at, exit_timezone FROM fleet_pilot_enrollments WHERE account_no = ${no}`;
+    // A typo or the wrong arm can still be put right before a claim: no result
+    // exists to protect yet, and nothing has shown this profile to Facebook.
+    if (enroll && enrolled && enrolled.first_claimed_at === null && account.cloak_seed === enrolled.seed
+        && (enrolled.pilot_id !== enroll.pilot_id || enrolled.arm !== enroll.arm)) {
+      await tx`DELETE FROM fleet_pilot_enrollments WHERE account_no = ${no}`;
+      await tx`UPDATE fb_pool_accounts SET browser_engine = NULL, cloak_seed = NULL, cloak_gpu = NULL, profile_timezone = NULL WHERE no = ${no}`;
+      Object.assign(account, { browser_engine: null, cloak_seed: null, cloak_gpu: null, profile_timezone: null });
+      enrolled = undefined as unknown as EnrollmentRow;
+    }
     if (enroll && enrolled && (enrolled.pilot_id !== enroll.pilot_id || enrolled.arm !== enroll.arm)) {
       return conflict('already_enrolled', `#${no} is enrolled already (${enrolled.pilot_id ?? 'no pilot'}, ${enrolled.arm}); an account stays in the arm it was given`);
     }
@@ -594,7 +606,7 @@ slots.post('/:no/proxy', async (c) => {
     if ((await proxyStates(tx, toId)).get(toId) === 'down') {
       return conflict('proxy_down', `${to} failed its last proxy checks; pick another proxy`);
     }
-    const [enrolled] = await tx<EnrollmentRow[]>`SELECT pilot_id, arm, first_login_at, exit_timezone FROM fleet_pilot_enrollments WHERE account_no = ${no}`;
+    const [enrolled] = await tx<EnrollmentRow[]>`SELECT pilot_id, arm, seed, first_claimed_at, first_login_at, exit_timezone FROM fleet_pilot_enrollments WHERE account_no = ${no}`;
     let repinned: string | null = null;
     if (enrolled) {
       const measured = await measuredExit(tx, toId, to, no);
@@ -756,7 +768,9 @@ workers.post('/:id/relogin', async (c) => {
 // A worker that could not load a page parks with `connect_failed` and waits in
 // its open browser; this tells it, on its next heartbeat, to try again there,
 // with no new browser and no login. Only that park: the others leave the
-// browser in a state nobody knows. Queued and delivered like a re-login.
+// browser in a state nobody knows. Queued and delivered like a re-login. A worker
+// parked on a moved exit takes the same directive as its manager's restart: it
+// leaves for a new browser, which is one boot login, so the page asks first.
 
 workers.post('/:id/resume', async (c) => {
   const id = c.req.param('id');
@@ -775,7 +789,7 @@ workers.post('/:id/resume', async (c) => {
     if (mismatch) return mismatch;
     const pending = resumeOf(w);
     if (pending && pending.delivered_at === null) return { resume: pending, fresh: false };
-    if (!fleetResumable(w.state, w.detail)) {
+    if (!fleetResumable(w.state, w.detail) && !fleetRestartable(w.state, w.detail)) {
       return conflict('not_parked', `${id} is not parked on a page that would not load`);
     }
     const [row] = await tx<WorkerRow[]>`

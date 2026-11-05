@@ -33,6 +33,12 @@ export const fleetStateParked = (state: string | null | undefined): boolean =>
 export const fleetResumable = (state: string | null | undefined, detail: unknown): boolean =>
   state === 'DEAD' && !!detail && typeof detail === 'object' && (detail as Record<string, unknown>).reason === 'connect_failed';
 
+/** Whether a manager may restart a worker whose port moved after a page opened:
+ *  the WebRTC flag is fixed at launch, so it takes a new browser, and that is a
+ *  boot login. Never automatic, unlike the resume above. */
+export const fleetRestartable = (state: string | null | undefined, detail: unknown): boolean =>
+  state === 'DEAD' && !!detail && typeof detail === 'object' && (detail as Record<string, unknown>).reason === 'exit_moved';
+
 /** The first worker build that takes the `resume` directive. */
 export const FLEET_RESUME_SINCE = [0, 15, 0] as const;
 

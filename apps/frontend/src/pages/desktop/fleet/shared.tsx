@@ -95,14 +95,15 @@ export function FleetMirrorBanner() {
  * moment it is shown, never while the previous read is still out. `reload`
  * re-reads after an action.
  */
-export function useFleetPoll<T>(load: () => Promise<T>, ms: number = FLEET_POLL_MS): { data: Loaded<T>; reload: () => void } {
+export function useFleetPoll<T>(load: () => Promise<T>, ms: number = FLEET_POLL_MS): { data: Loaded<T>; failed: boolean; reload: () => void } {
   const [data, setData] = useState<Loaded<T>>(null);
+  const [failed, setFailed] = useState(false);
   const loadRef = useRef(load);
   loadRef.current = load;
   const alive = useRef(true);
   const gate = useMemo(() => pollGate(() => loadRef.current()
-    .then(d => { if (alive.current) setData(d); })
-    .catch(() => { if (alive.current) setData(prev => (prev === null || prev === 'unavailable' ? 'unavailable' : prev)); })), []);
+    .then(d => { if (alive.current) { setData(d); setFailed(false); } })
+    .catch(() => { if (alive.current) { setFailed(true); setData(prev => (prev === null || prev === 'unavailable' ? 'unavailable' : prev)); } })), []);
   useEffect(() => {
     alive.current = true;
     gate.tick();
@@ -115,7 +116,7 @@ export function useFleetPoll<T>(load: () => Promise<T>, ms: number = FLEET_POLL_
       document.removeEventListener('visibilitychange', tick);
     };
   }, [gate, ms]);
-  return { data, reload: gate.reload };
+  return { data, failed, reload: gate.reload };
 }
 
 /** A fleet route that is not there yet: an older backend, or one without the tables. */
@@ -265,6 +266,37 @@ export function MarkHealthyButton({ workerId, version, resume, state, onQueued, 
       {waiting ? t('fleetMarkHealthySent') : t('fleetMarkHealthy')}
     </button>
   );
+}
+
+/** Restarts a worker parked on a moved exit. Unlike Mark healthy this is a new
+ *  browser and so a boot login, which is why it asks first and never runs by itself. */
+export function RestartWorkerButton({ workerId, resume, state, onQueued, className = 'btn sm ghost' }: {
+  workerId: string; resume: FleetWorkerResume | null; state: string | null; onQueued?: () => void; className?: string;
+}) {
+  const { t } = useT();
+  const mirror = useFleetMirror();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const restart = () => {
+    setBusy(true);
+    fleetApi.resume(workerId)
+      .then(() => { showSuccessToast(t('fleetRestartQueued', { id: workerId })); setAsking(false); onQueued?.(); })
+      .catch(handleFetchError)
+      .finally(() => setBusy(false));
+  };
+  if (mirror) return null;
+  return <>
+    <button type="button" className={className} disabled={resumeWaiting(resume, state)} title={t('fleetRestartHint')}
+      onClick={e => { e.stopPropagation(); setAsking(true); }}>
+      {resumeWaiting(resume, state) ? t('fleetMarkHealthySent') : t('fleetRestart')}
+    </button>
+    {asking && (
+      <Modal onClose={() => { if (!busy) setAsking(false); }} shellStyle={{ maxWidth: 460 }}>
+        <ConfirmDialogBody title={t('fleetRestartTitle', { id: workerId })} body={<p>{t('fleetRestartBody')}</p>}
+          confirm={t('fleetRestart')} busy={busy} onClose={() => setAsking(false)} onConfirm={restart} />
+      </Modal>
+    )}
+  </>;
 }
 
 /** A worker id as a link to its page. */

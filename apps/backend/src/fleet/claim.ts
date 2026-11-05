@@ -33,6 +33,7 @@ import {
   type ClaimEnv, type WorkerEnv, type WorkerIdentity,
 } from './auth';
 import { loadSettings } from './cities';
+import { notifyManagers } from '../lib/notify';
 import { lastKnownExitIp } from './proxies';
 import { latestProxyExit, slotWaits, type ProxyExitMeasure } from './proxyExit';
 import { notifyReady } from './scheduler';
@@ -524,6 +525,18 @@ export async function dropSlot(tx: SqlLike, no: number, reason: string): Promise
   return true;
 }
 
+/** At most one an hour, however many workers report it or how often the probe does. */
+async function alertLicenceOutage(tx: SqlLike): Promise<void> {
+  const [recent] = await tx`
+    SELECT 1 FROM notifications WHERE kind = 'fleet_licence_outage' AND created_at > NOW() - INTERVAL '1 hour' LIMIT 1`;
+  if (recent) return;
+  await notifyManagers(tx, {
+    kind: 'fleet_licence_outage', tone: 'warn', icon: 'alert',
+    title: 'CloakBrowser licence server out of reach',
+    body: 'Cloak workers have stopped and one per host is probing. Their accounts are not lost, so leave them unretired. They restart on their own once a probe stays up.',
+  });
+}
+
 worker.post('/heartbeat', workerAuth, async (c) => {
   const w: WorkerIdentity = c.var.worker;
   const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
@@ -557,6 +570,7 @@ worker.post('/heartbeat', workerAuth, async (c) => {
         WHERE account_no = ${w.account_no} AND first_login_at IS NULL`;
     }
     await recordStateChange(tx, w, state, detail);
+    if (outage) await alertLicenceOutage(tx);
     const [beat] = await tx<{ state_since: Date | null; auto_resumes: number; version: string | null; resume_requested_at: Date | null; resume_delivered_at: Date | null; now: Date }[]>`
       INSERT INTO fleet_workers (worker_id, host_id, account_no, epoch, state, version, last_heartbeat_at, vnc_port, detail, state_since)
       VALUES (${w.worker_id}, ${w.slot.host_id}, ${w.account_no}, ${w.epoch}, ${state}, ${version}, NOW(), ${vncPort},

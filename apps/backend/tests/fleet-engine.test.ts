@@ -310,6 +310,46 @@ describe('POST /api/fleet/slots/:no/engine', () => {
     expect((await api('POST', `/api/fleet/slots/${cloak}/remove`, { token: manager })).status).toBe(200);
   });
 
+  it('alerts managers of an outage once an hour, however many workers report it', async () => {
+    await setSettings(manager, { cloak_enabled: true });
+    const cloak = await seedSlot(1, DEVICE, { session: false });
+    expect((await switchTo(manager, cloak, 'cloak')).status).toBe(200);
+    const got = await claim('lab-1');
+    const beat = () => heartbeat(got.worker_token, 'DEAD', { reason: 'license_outage', operator: true });
+    const sent = async () => (await getTestDb()<{ title: string }[]>`SELECT DISTINCT title FROM notifications WHERE kind = 'fleet_licence_outage'`).length;
+    const count = async () => (await getTestDb()`SELECT 1 FROM notifications WHERE kind = 'fleet_licence_outage'`).length;
+    await beat();
+    const first = await count();
+    expect(first).toBeGreaterThan(0);
+    expect(await sent()).toBe(1);
+    await beat();
+    expect(await count()).toBe(first);
+  });
+
+  it('takes a manager\'s restart for a moved exit, and never queues one by itself', async () => {
+    await setSettings(manager, { cloak_enabled: true });
+    const cloak = await seedSlot(1, DEVICE, { session: false });
+    expect((await switchTo(manager, cloak, 'cloak')).status).toBe(200);
+    const got = await claim('lab-1');
+    await heartbeat(got.worker_token, 'DEAD', { reason: 'exit_moved', operator: true, engine: 'cloak' });
+    const db = getTestDb();
+    await db`UPDATE fleet_workers SET state_since = NOW() - INTERVAL '5 hours' WHERE worker_id = 'lab-1'`;
+    await heartbeat(got.worker_token, 'DEAD', { reason: 'exit_moved', operator: true, engine: 'cloak' });
+    expect((await db<{ resume_id: string | null }[]>`SELECT resume_id FROM fleet_workers WHERE worker_id = 'lab-1'`)[0].resume_id).toBeNull();
+    expect((await api('POST', '/api/fleet/workers/lab-1/resume', { token: manager })).status).toBe(200);
+    expect((await db<{ resume_requested_by: string }[]>`SELECT resume_requested_by FROM fleet_workers WHERE worker_id = 'lab-1'`)[0].resume_requested_by).not.toBe('auto');
+  });
+
+  it('dismisses one notification without emptying the inbox', async () => {
+    const db = getTestDb();
+    const [{ id: uid }] = await db<{ id: string }[]>`SELECT id FROM users WHERE email = ${ALEX} LIMIT 1`;
+    const made = await db<{ id: string }[]>`INSERT INTO notifications (user_id, kind, tone, icon, title, body)
+      VALUES (${uid}, 'fleet_proxy_exit', 'warn', 'alert', 'One', ''), (${uid}, 'fleet_proxy_exit', 'warn', 'alert', 'Two', '') RETURNING id`;
+    expect((await api('POST', '/api/notifications/mark-read', { token: manager, body: { id: made[0].id } })).status).toBe(200);
+    const unread = await db<{ id: string }[]>`SELECT id FROM notifications WHERE user_id = ${uid} AND unread AND id = ANY(${made.map((m) => m.id)})`;
+    expect(unread.map((r) => r.id)).toEqual([made[1].id]);
+  });
+
   it('pins the clock the slot really exits from when it switches', async () => {
     await setSettings(manager, { cloak_enabled: true });
     const no = await seedSlot(1, DEVICE, { session: false });
