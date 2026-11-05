@@ -227,10 +227,16 @@ export function WorkerStateChip({ state }: { state: string }) {
   return <span className={WORKER_STATE_CHIP[state] ?? 'chip muted'}>{workerStateLabel(t, state)}</span>;
 }
 
-/** A Mark healthy that waits for the worker's next heartbeat, or that went
- *  out and the worker has not yet reported anything but DEAD since. */
-export function resumeWaiting(resume: FleetWorkerResume | null | undefined, state: string | null): boolean {
-  return !!resume && (resume.delivered_at === null || state === 'DEAD');
+// A worker reports within about 20 s of a resume. Still DEAD well after that
+// means the try failed, and only a manager's click is left to send another.
+const RESUME_SENT_MS = 2 * 60_000;
+
+/** A Mark healthy that waits for the worker's next heartbeat, or that just
+ *  went out and the worker has not yet reported anything but DEAD since. */
+export function resumeWaiting(resume: FleetWorkerResume | null | undefined, state: string | null, now: number = Date.now()): boolean {
+  if (!resume) return false;
+  if (resume.delivered_at === null) return true;
+  return state === 'DEAD' && now - Date.parse(resume.delivered_at) < RESUME_SENT_MS;
 }
 
 /** Marks a worker parked on a page that would not load healthy: it tries the

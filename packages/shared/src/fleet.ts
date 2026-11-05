@@ -563,6 +563,8 @@ export type FleetWorkerDetail = {
   slot: (FleetSlot & { uid: string | null; pool_status: string; minutes_today: number; budget_minutes: number }) | null;
   holds_slot: boolean;
   proxy: { id: number; label: string; host: string; port: number; timezone: string } | null;
+  /** The slot's proxy failed its latest recent check, so the ERP holds its automatic resumes. */
+  proxy_down: boolean;
   /** `scheme://host:port` the worker holding the slot claimed it with; it differs from `proxy` after a change, until its next start. */
   running_exit: string | null;
   account: {
