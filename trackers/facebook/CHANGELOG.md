@@ -26,7 +26,12 @@ deployed?" harder to answer.
   language, `webdriver`, platform, font count and window. This runs in a
   throwaway context on the account's own proxy, against ipify rather than
   Facebook. A failure parks `DEAD` with `{reason: "profile_preflight"}` and
-  costs no login. An exit that could not be measured says nothing about the
+  costs no login. A port that moved since the claim, with both paths agreeing and
+  nothing else wrong, isn't a bad profile: before any page the worker reports
+  `exit_moved` and exits 75 for a new browser and a fresh claim, and after a page
+  it parks `exit_moved` until a manager asks for the restart, which is one boot
+  login. The zone check accepts the browser's own spelling of the pinned zone, such
+  as `America/Indianapolis`. An exit that could not be measured says nothing about the
   profile, so it parks `connect_failed` instead, which auto-resumes, and a
   resume measures again before the login. A claim without those IPs (an older ERP) skips those two
   checks and logs that it did. Linux font tells are reported and don't fail,
@@ -42,8 +47,9 @@ deployed?" harder to answer.
 - **A license server out of reach is now worker exit 74, not a park.** That is
   the binary's exit 78, before or after `launch` returns, including when a
   handler swallowed the error. The worker heartbeats `DEAD` with
-  `{reason: "license_outage", exit_code: 78, facebook_opened}` and leaves for
-  the agent to retry. Exits 76, 77 and 79 stay parked as `license_denied`.
+  `{reason: "license_outage", operator: true, exit_code: 78, facebook_opened}`
+  and leaves for the agent to retry. `operator` keeps a passing outage from making
+  a good account retirable. Exits 76, 77 and 79 stay parked as `license_denied`.
   **An agent that predates exit 74 reads it as a crash and holds the worker
   after 5 restarts, so the agent must reach hosts first.**
 - **A cloak browser is closed explicitly on stop**, after its session is saved,
@@ -52,10 +58,20 @@ deployed?" harder to answer.
 
 ### Fixed
 
+- **A resume before any login no longer reports `HEALTHY`.** A boot cut off by a
+  blip reports `DEGRADED` until it has really logged in, on either engine, so the
+  ERP doesn't record a proven cloak session or a survivor that never opened
+  Facebook. Every heartbeat also says `facebook_opened` once a page exists.
+- **A cloak preflight can't hang silently.** It heartbeats before it starts, and
+  its page script has a time limit. A dead browser parks `browser_failed` rather
+  than reading as a proxy blip.
+- **A denial at the top of the fleet loop hands back a finished task**, so its
+  result isn't lost and the city isn't searched again.
 - **A refused session upload on a cloak worker is reported.** A 413 over the
   1 MiB cap used to leave the pool's copy stale with nothing said. It now logs
   `session_upload_failed` and every heartbeat carries
-  `detail.session_upload_failure` until an upload succeeds.
+  `detail.session_upload_failure` until an upload succeeds. A network failure or a
+  jar with no cookies isn't a refusal, so neither is reported as one.
 - **A license setup or guard that raises parks a cloak worker** as
   `browser_failed`. It used to exit into a new container each time.
 
