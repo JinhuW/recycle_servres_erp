@@ -13,7 +13,7 @@ export interface Desired {
 }
 
 /** Why a stopped worker is left stopped; the ERP must not wait on it. */
-export type Hold = 'operator_needed' | 'crash_limit' | 'operator_stopped' | 'license_outage';
+export type Hold = 'operator_needed' | 'crash_limit' | 'operator_stopped';
 
 export interface ReportContainer {
   worker_id: string;

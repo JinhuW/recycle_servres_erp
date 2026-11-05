@@ -95,19 +95,19 @@ the same `FLEET_HOST_ID` on its daemon observes only, logs an error and puts
      slot) after 60 s, or after 10 min once it has had five 75/70 restarts
      in 30 min; `70` (claim failed) after 10 min; any other code after 60 s,
      counted; five counted restarts in 30 min hold it (below). `74`
-     (licence outage) is not a crash: it waits 5 min, doubling to at most
-     60 min, each wait plus up to 25% jitter, for at most 8 retries, inside
-     the same stagger. The count and jitter live in `/state` and survive an
-     agent restart. A run longer than 60 min clears the count, so a later
-     outage starts afresh; so does a person bringing a held worker back;
+     (licence outage) is not a crash and is never held: one worker per host,
+     the lowest number, probes after 5 min, doubling to at most 60 min, each
+     wait plus up to 25% jitter, after any other start in the tick. The others
+     wait and spend no attempts. A probe still running after 15 min ends the
+     outage, and the rest restart one stagger apart. The count, jitter and
+     recovery time live in `/state` and survive an agent restart;
+   - report `outage_attempts` on a container from its first `74` until the
+     count clears;
    - leave stopped, and report with a distinct `state` and `hold`:
      - `operator_needed`: it exited `78`, could not reach Facebook or its
        proxy;
      - `crash_limit`: it hit the crash limit. The hold stays on that
        container after the window has passed and across agent restarts;
-     - `license_outage`: it exited `74` again after 8 retries. Report
-       containers also carry `outage_attempts` from the first `74` until the
-       count clears;
      - `operator_stopped`: it exited `0` or `143` while this agent ran and
        the agent had not stopped it, i.e. someone ran `docker stop`. An exit
        from before the agent started (a host or daemon restart) is restarted

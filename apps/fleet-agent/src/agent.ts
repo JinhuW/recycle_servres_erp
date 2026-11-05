@@ -156,6 +156,7 @@ export class Agent {
       restarts: this.memory.restarts,
       softRestarts: this.memory.soft_restarts,
       outage: this.memory.license_outage,
+      outageRecoveredAt: this.memory.outage_recovered_at,
       held: this.memory.held,
       selfStopped: this.memory.self_stopped,
       bootAt: this.bootAt,
@@ -230,8 +231,6 @@ export class Agent {
     let changed = false;
     for (const [id, h] of Object.entries(this.memory.held)) {
       if (!observed.some((c) => c.worker_id === id && c.id === h.container && !c.running)) {
-        // A person took it back, so it gets a whole new set of retries.
-        if (h.reason === 'license_outage') delete this.memory.license_outage[id];
         delete this.memory.held[id];
         changed = true;
       }
@@ -258,6 +257,7 @@ export class Agent {
       // shortest draw would win. With no retry made, the record is already right.
       if (retry && ranHealthily(c, now) && !(outageExit && retry.attempts === 0)) {
         delete this.memory.license_outage[id];
+        if (c.running) this.memory.outage_recovered_at = now;
         changed = true;
       }
       if (outageExit && !this.memory.license_outage[id]) {

@@ -618,7 +618,7 @@ export type FleetHostContainer = {
   state: string;
   started_at: string | null;
   /** Why the agent leaves it stopped until a person acts (§6). */
-  hold?: 'operator_needed' | 'crash_limit' | 'operator_stopped' | 'license_outage' | string;
+  hold?: 'operator_needed' | 'crash_limit' | 'operator_stopped' | string;
   exit_code?: number | null;
   /** Licence outage retries used, from the first exit 74 until the worker has recovered. */
   outage_attempts?: number;

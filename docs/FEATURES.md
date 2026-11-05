@@ -3531,12 +3531,13 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   the city unverified so it is checked again. A session upload must carry this
   account's `c_user` and `xs`, so it cannot wipe or replace the stored login.
 - **Licence outage retries (v1.420.0, RS-529)**: a worker that exits 74 because
-  the browser's licence server is out of reach isn't treated as a crash. The host
-  agent retries it after 5 minutes, doubling to at most 60, plus up to 25%
-  jitter, at most 8 times and one start at a time. A further 74 leaves it stopped
-  as `license_outage` until a person acts, and a rollout skips it like any other
-  held worker. A run longer than 60 minutes clears the count. The host's report
-  carries `outage_attempts` during an outage. Since v1.424.3 (RS-543) the outage
+  the browser's licence server is out of reach isn't treated as a crash. Since
+  v1.424.4 (RS-544) one worker per host probes, after 5 minutes, doubling to at
+  most 60, plus up to 25% jitter, with no limit and after any other start, so a
+  stock restart never queues behind an outage. The others wait and spend no
+  attempts. A probe still up after 15 minutes ends the outage, and the rest restart
+  one stagger apart with nobody going to the host. The host's report carries
+  `outage_attempts` during an outage. Since v1.424.3 (RS-543) the outage
   heartbeat keeps the slot's lease for 24 hours, so a worker with no slot takes
   stock accounts first, and a rolling release skips a worker that comes back
   parked on `license_outage` or `exit_moved`, and any running cloak worker during

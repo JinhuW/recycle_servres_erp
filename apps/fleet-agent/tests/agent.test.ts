@@ -571,14 +571,15 @@ describe('licence outage', () => {
   };
   const SEQUENCE = [5, 10, 20, 40, 60, 60, 60, 60];
 
-  it('walks the backoff, starts once per wait, then holds and reports it', async () => {
+  it('walks the backoff, starts once per wait, and keeps probing hourly past eight', async () => {
     const docker = new FakeDocker();
     const a = agent(docker, { random: () => 0 });
-    for (const [i, wait] of SEQUENCE.entries()) {
+    for (const [i, wait] of [...SEQUENCE, 60, 60].entries()) {
       fail(docker);
       docker.commands = [];
       await a.tick();
       expect(lastReport()).toMatchObject({ state: 'exited', exit_code: 74, outage_attempts: i });
+      expect(lastReport()).not.toHaveProperty('hold');
       clock += wait * MIN - 1000;
       await a.tick();
       expect(starts(docker)).toBe(0);
@@ -588,18 +589,10 @@ describe('licence outage', () => {
     }
     expect(memory().restarts).toEqual({});
     expect(memory().soft_restarts).toEqual({});
-    const last = fail(docker);
-    docker.commands = [];
-    await a.tick();
-    expect(starts(docker)).toBe(0);
-    expect(memory().held).toEqual({ 'lab-1': { container: last.id, reason: 'license_outage' } });
-    expect(lastReport()).toMatchObject({ state: 'license_outage', hold: 'license_outage', exit_code: 74, outage_attempts: 8 });
-    clock += 24 * 60 * MIN;
-    await a.tick();
-    expect(starts(docker)).toBe(0);
+    expect(memory().held).toEqual({});
   });
 
-  it('an agent restart at every tick changes neither the count nor the hold', async () => {
+  it('an agent restart at every tick doesn\'t change the count', async () => {
     const docker = new FakeDocker();
     for (const wait of SEQUENCE) {
       fail(docker);
@@ -613,11 +606,24 @@ describe('licence outage', () => {
       expect(starts(docker)).toBe(1);
     }
     fail(docker);
-    docker.commands = [];
     await agent(docker).tick();
-    await agent(docker).tick();
+    expect(lastReport()).toMatchObject({ outage_attempts: 8 });
+  });
+
+  it('a probe that stays up ends the outage for the workers waiting behind it, and survives an agent restart', async () => {
+    server.desired = desired({ count: 2, vnc_ports: {} });
+    const docker = new FakeDocker();
+    remember({ license_outage: { 'lab-1': { attempts: 2, jitter: 0 } } });
+    docker.containers.set('rs-fleet-lab-1', running('lab-1', 'img:1', new Date(clock - 14 * MIN).toISOString()));
+    fail(docker, 'lab-2');
+    const a = agent(docker, { random: () => 0 });
+    await a.tick();
     expect(starts(docker)).toBe(0);
-    expect(lastReport()).toMatchObject({ hold: 'license_outage', outage_attempts: 8 });
+    clock += 2 * MIN;
+    await agent(docker, { random: () => 0 }).tick();
+    expect(memory().outage_recovered_at).toBe(clock);
+    expect(starts(docker)).toBe(1);
+    expect(docker.commands.some((c) => c.includes('rs-fleet-lab-2'))).toBe(true);
   });
 
   it('draws the jitter once per wait: neither a later tick nor an agent restart draws again', async () => {
@@ -640,7 +646,7 @@ describe('licence outage', () => {
 
   it('a long healthy run clears the count, so the next outage starts at 5 min', async () => {
     remember({ license_outage: { 'lab-1': { attempts: 7, jitter: 0 } } });
-    const docker = new FakeDocker([running('lab-1', 'img:1', new Date(clock - 59 * MIN).toISOString())]);
+    const docker = new FakeDocker([running('lab-1', 'img:1', new Date(clock - 14 * MIN).toISOString())]);
     const a = agent(docker, { random: () => 0 });
     await a.tick();
     expect(memory().license_outage).toEqual({ 'lab-1': { attempts: 7, jitter: 0 } });
@@ -661,7 +667,6 @@ describe('licence outage', () => {
     const docker = new FakeDocker();
     docker.containers.set('rs-fleet-lab-1', { ...exited('lab-1', 74, new Date(clock).toISOString()), started_at: new Date(clock - 120 * MIN).toISOString() });
     await agent(docker, { random: () => 0 }).tick();
-    expect(memory().held).toEqual({});
     expect(memory().license_outage).toEqual({ 'lab-1': { attempts: 0, jitter: 0 } });
   });
 
@@ -723,23 +728,7 @@ describe('licence outage', () => {
     expect(lastReport()).toMatchObject({ outage_attempts: 3 });
   });
 
-  it('a person bringing a held worker back gets a whole new set of retries', async () => {
-    const docker = new FakeDocker();
-    const c = fail(docker);
-    remember({ license_outage: { 'lab-1': { attempts: 8, jitter: 0 } }, held: { 'lab-1': { container: c.id, reason: 'license_outage' } } });
-    const a = agent(docker, { random: () => 0 });
-    await a.tick();
-    expect(starts(docker)).toBe(0);
-    docker.containers.delete('rs-fleet-lab-1'); // docker rm
-    await a.tick();
-    expect(starts(docker)).toBe(1);
-    expect(memory().held).toEqual({});
-    fail(docker);
-    await a.tick();
-    expect(memory().license_outage).toEqual({ 'lab-1': { attempts: 0, jitter: 0 } });
-  });
-
-  it('several in an outage at once start one at a time, a stagger apart', async () => {
+  it('several in an outage at once: one probes, and the rest follow it a stagger apart once it stays up', async () => {
     server.desired = desired({ count: 3, vnc_ports: {} });
     const docker = new FakeDocker();
     for (const id of ['lab-1', 'lab-2', 'lab-3']) fail(docker, id);
@@ -749,10 +738,11 @@ describe('licence outage', () => {
     expect(docker.commands).toEqual([['start', 'rs-fleet-lab-1']]);
     expect(memory().license_outage['lab-1'].attempts).toBe(1);
     expect(memory().license_outage['lab-2'].attempts).toBe(0);
-    clock += 2 * MIN;
+    docker.containers.set('rs-fleet-lab-1', running('lab-1', 'img:1', new Date(clock).toISOString()));
+    clock += 14 * MIN;
     await a.tick();
     expect(docker.commands).toEqual([['start', 'rs-fleet-lab-1']]);
-    clock += MIN;
+    clock += 2 * MIN;
     await a.tick();
     expect(docker.commands).toEqual([['start', 'rs-fleet-lab-1'], ['start', 'rs-fleet-lab-2']]);
     clock += 3 * MIN;
