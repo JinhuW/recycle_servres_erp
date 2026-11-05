@@ -15,6 +15,18 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.420.0] - 2026-11-05
+
+The fleet agent now understands worker exit 74, a licence outage (RS-529). Until
+now an undefined exit counted as a crash and was held after 5 restarts in 30
+minutes, far too quickly for an outage that clears by itself. A 74 now waits 5
+minutes, doubling to at most 60, plus up to 25% jitter, for at most 8 retries
+inside the usual one-start stagger. A further 74 holds the worker as
+`license_outage` until a person acts. The count survives an agent restart and
+clears after a run longer than 60 minutes. Reports carry the hold and a new
+`outage_attempts`. This must reach hosts before worker 0.17.0, which emits 74:
+an older agent reads it as a crash. No host has been swapped.
+
 ## [1.419.1] - 2026-11-04
 
 The Proxies tab's crowding dot now counts accounts per exit IP, not per proxy

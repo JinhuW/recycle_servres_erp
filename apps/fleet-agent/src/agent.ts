@@ -14,7 +14,7 @@
 import type { FleetClient } from './client.js';
 import type { DockerApi, WorkerEnv } from './docker.js';
 import { type Logger, silentLogger } from './log.js';
-import { holdOf, plan, recentRestarts, workerIndex, type Action, type Container } from './plan.js';
+import { EXIT_LICENSE_OUTAGE, holdOf, plan, ranHealthily, recentRestarts, workerIndex, type Action, type Container } from './plan.js';
 import { loadDesired, loadInstanceId, loadMemory, saveDesired, saveMemory, type Memory, type StopIdentity } from './state.js';
 import { EMPTY_DESIRED, imageAllowed, type AgentIdentity, type Desired, type Report } from './types.js';
 
@@ -29,6 +29,8 @@ export interface AgentOptions {
   workerEnv: WorkerEnv;
   version: string;
   now?: () => number;
+  /** Source of licence outage jitter, 0 <= x < 1. */
+  random?: () => number;
   staggerMs?: number;
   log?: Logger;
   /** Repositories this host runs; unset, any well-formed reference. */
@@ -51,6 +53,7 @@ export interface TickResult {
 
 export class Agent {
   private readonly now: () => number;
+  private readonly random: () => number;
   private readonly log: Logger;
   private readonly bootAt: number;
   private readonly instanceId: string;
@@ -63,6 +66,7 @@ export class Agent {
 
   constructor(private readonly o: AgentOptions) {
     this.now = o.now ?? (() => Date.now());
+    this.random = o.random ?? Math.random;
     this.log = o.log ?? silentLogger;
     this.bootAt = this.now();
     this.memory = loadMemory(o.stateDir);
@@ -138,6 +142,7 @@ export class Agent {
     result.observe_only = observeOnly;
 
     this.tidy(observed);
+    this.trackOutages(observed);
     if (online && !others.length) await this.settlePending(desired, observed);
 
     const now = this.now();
@@ -150,6 +155,7 @@ export class Agent {
       lastStartAt: this.memory.last_start_at,
       restarts: this.memory.restarts,
       softRestarts: this.memory.soft_restarts,
+      outage: this.memory.license_outage,
       held: this.memory.held,
       selfStopped: this.memory.self_stopped,
       bootAt: this.bootAt,
@@ -203,6 +209,7 @@ export class Agent {
         .sort((a, b) => a.worker_id.localeCompare(b.worker_id, undefined, { numeric: true }))
         .map((c) => {
           const hold = holdOf(c, holdInput);
+          const retry = this.memory.license_outage[c.worker_id];
           return {
             worker_id: c.worker_id,
             image: c.image,
@@ -210,6 +217,7 @@ export class Agent {
             started_at: c.started_at,
             ...(hold ? { hold } : {}),
             exit_code: c.exit_code,
+            ...(retry ? { outage_attempts: retry.attempts } : {}),
             ...(c.image_id ? { image_id: c.image_id } : {}),
           };
         }),
@@ -222,6 +230,8 @@ export class Agent {
     let changed = false;
     for (const [id, h] of Object.entries(this.memory.held)) {
       if (!observed.some((c) => c.worker_id === id && c.id === h.container && !c.running)) {
+        // A person took it back, so it gets a whole new set of retries.
+        if (h.reason === 'license_outage') delete this.memory.license_outage[id];
         delete this.memory.held[id];
         changed = true;
       }
@@ -233,6 +243,28 @@ export class Agent {
       }
     }
     if (changed) this.save('tidy');
+  }
+
+  /** Opens a worker's outage record at its first 74; a long enough run closes it. */
+  private trackOutages(observed: Container[]): void {
+    const now = this.now();
+    let changed = false;
+    for (const c of observed) {
+      const id = c.worker_id;
+      if (this.memory.license_outage[id] && ranHealthily(c, now)) {
+        delete this.memory.license_outage[id];
+        changed = true;
+      }
+      if (!c.running && c.exit_code === EXIT_LICENSE_OUTAGE && !this.memory.license_outage[id]) {
+        this.memory.license_outage[id] = { attempts: 0, jitter: this.random() };
+        changed = true;
+      }
+    }
+    if (changed) this.save('outage');
+  }
+
+  private countOutageAttempt(id: string): void {
+    this.memory.license_outage[id] = { attempts: this.memory.license_outage[id].attempts + 1, jitter: this.random() };
   }
 
   private async settlePending(desired: Desired, observed: Container[]): Promise<void> {
@@ -258,6 +290,7 @@ export class Agent {
     const d = this.o.docker;
     switch (action.kind) {
       case 'start': {
+        if (action.outage) this.countOutageAttempt(action.worker_id);
         const withheld = this.stampStart(action);
         if (withheld) return withheld;
         return d.start(action.container);
@@ -279,6 +312,13 @@ export class Agent {
         if (missing) return `image ${action.image} is not available: ${missing}`;
         const stopped = await this.stop(action, desired);
         if (stopped) return `could not replace ${action.container}: ${stopped}`;
+        // Here, not at the start's stamp: if the ticket is refused the container
+        // is already gone, and the run that follows comes back as a plain missing
+        // worker, which would otherwise never be counted.
+        if (action.outage) {
+          this.countOutageAttempt(action.worker_id);
+          this.save('outage');
+        }
         return this.runWorker(action);
       }
       case 'remove':

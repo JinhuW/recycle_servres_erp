@@ -265,7 +265,8 @@ curl -sS --proxy "$PROXY_HOMELAB_NYC" --proxy-user "$PROXY_HOMELAB_NYC_USER:$PRO
    rule, 2026-10-25).
 
    A worker the agent holds (report `state` `operator_needed`,
-   `crash_limit` or `operator_stopped`) stays stopped until a person acts:
+   `crash_limit`, `license_outage` or `operator_stopped`) stays stopped until
+   a person acts:
    `docker rm rs-fleet-<worker_id>` lets the agent run a fresh one on its
    turn; `docker start` works only for a container without the
    `rs.fleet.handoff_epoch` label. `docker stop` on a worker is now a hold,

@@ -538,6 +538,7 @@ hosts.post('/:id/report', hostAuth, async (c) => {
     const hold = text(x.hold, 40);
     if (hold) c.hold = hold;
     if (x.exit_code === null || Number.isInteger(x.exit_code)) c.exit_code = x.exit_code as number | null;
+    if (Number.isInteger(x.outage_attempts)) c.outage_attempts = x.outage_attempts as number;
     const imageId = text(x.image_id, 100);
     if (imageId) c.image_id = imageId;
     return c;

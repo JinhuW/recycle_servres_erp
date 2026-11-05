@@ -58,7 +58,7 @@ async function seedSlot(n: number, over: { worker?: string; host?: string; epoch
   return a.no;
 }
 
-async function report(containers: Array<{ worker_id: string; image: string; state?: string; hold?: string; exit_code?: number | null; image_id?: string }>, token = HOST_TOKEN, host = 'lab') {
+async function report(containers: Array<{ worker_id: string; image: string; state?: string; hold?: string; exit_code?: number | null; outage_attempts?: number; image_id?: string }>, token = HOST_TOKEN, host = 'lab') {
   return api('POST', `/api/fleet/hosts/${host}/report`, {
     headers: { ...bearer(token), 'X-Requested-By': 'an-agent' },
     body: { version: '1.340.0', containers: containers.map((c) => ({ state: 'running', ...c, started_at: '2026-10-24T10:00:00Z' })) },
@@ -319,6 +319,19 @@ describe('releases', () => {
     await getTestDb()`UPDATE fleet_hosts SET last_seen_at = NOW() - interval '21 minutes' WHERE host_id = 'far'`;
     await desired();
     expect(await release()).toMatchObject({ skipped: ['far-1'], skip_reasons: { 'far-1': 'host is silent' } });
+  });
+
+  it('keeps a licence outage hold and its retries from the report, and skips the worker in a roll', async () => {
+    await report([
+      { worker_id: 'lab-1', image: IMAGE_OLD, state: 'license_outage', hold: 'license_outage', exit_code: 74, outage_attempts: 8 },
+      { worker_id: 'lab-2', image: IMAGE_OLD },
+    ]);
+    const [stored] = await getTestDb()<{ report: { containers: Array<Record<string, unknown>> } }[]>`SELECT report FROM fleet_hosts WHERE host_id = 'lab'`;
+    expect(stored.report.containers[0]).toMatchObject({ state: 'license_outage', hold: 'license_outage', exit_code: 74, outage_attempts: 8 });
+    const { token } = await loginAs(ALEX);
+    await api('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0' } });
+    expect((await desired()).body.roll).toEqual({ replace: 'lab-2' });
+    expect((await release()).skip_reasons).toEqual({ 'lab-1': 'held: license_outage' });
   });
 
   it('leaves out a stopped container and a parked worker, with the reason, instead of naming them', async () => {
