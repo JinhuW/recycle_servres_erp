@@ -14,6 +14,7 @@ import hosts, { releases } from '../fleet/hosts';
 import proxies from '../fleet/proxies';
 import proxyHealth from '../fleet/proxyHealth';
 import { engineLoss, readLossDays } from '../fleet/stateEvents';
+import { cohortReport, readCohortQuery } from '../fleet/cohorts';
 import { slots, workers } from '../fleet/workers';
 import { allowedAppOrigin } from '../lib/origins';
 import { VNC_WORKER_ID } from './coordinator';
@@ -133,6 +134,14 @@ fleet.get('/stats/engine-loss', managerOnly, async (c) => {
   const days = readLossDays(c.req.query());
   if (isRefusal(days)) return refuse(c, days);
   return c.json(await engineLoss(getDb(c.env), days));
+});
+
+// A pilot's arms against the plan's fixed rules, or with no pilot the supplier
+// scorecard, per batch and engine from the same history.
+fleet.get('/stats/cohorts', managerOnly, async (c) => {
+  const q = readCohortQuery(c.req.query());
+  if (isRefusal(q)) return refuse(c, q);
+  return c.json(await cohortReport(getDb(c.env), q));
 });
 
 // The Fleet table's hover card. Any pool number answers, so an account the

@@ -3926,6 +3926,21 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     account-days, with a `retro` block from the stint ledger's `problem`
     and `retired` endings as the stock baseline from before the history.
     Since v1.409.0 the Fleet tab's Browser engine card shows it.
+    Since v1.423.0 (RS-539) the tab also has a **Cohort report** for the
+    CloakBrowser pilot, from `GET /api/fleet/stats/cohorts` (manager-only). With
+    `pilot` it answers that pilot per batch and arm, one row per arm across
+    batches, and its accounts. With no pilot it is a supplier scorecard: accounts
+    first claimed in the last `days` (default 30), by batch and engine. Lost means a
+    stint ended retired or problem within 24 h or 7 d of first claim, and the record
+    survives the slot and the pool row. The headline is failed, shown first: lost, plus
+    never reached HEALTHY, plus sitting in a lost state nobody has retired yet, with
+    stint lost beside it as the supplier-comparable figure. Failed starts stay in their arm, never-claimed
+    accounts are apart, an account released or parked by a manager first is unknown,
+    and a running clock is neither. Accounts touched by an exit change or licence
+    outage are flagged, with results with and without them. It also shows completed
+    searches per account in the fixed 7 days, recovery boots (an upper bound on logins)
+    and CloakBrowser slots against the setting and the pilot cap of 18, parked ones
+    counted. It shows counts beside percentages and never a verdict.
   - **Proxies** (`/#/fleet/proxies`, v1.368.0, RS-424): the health of every
     proxy port the fleet browses through, between Analysis and Account pool,
     with the number down as a warn-coloured chip on the tab bar. Rows are the

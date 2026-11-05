@@ -931,6 +931,102 @@ export type FleetErrorCode =
 
 export type FleetError = { error: FleetErrorCode; detail?: string };
 
+/** The most CloakBrowser accounts the pilot runs at once on the Team plan's 20 seats. */
+export const FLEET_PILOT_CLOAK_CAP = 18;
+
+/** Where an account stood when a window closed. `unknown`: the owner released or
+ *  held it first. `running`: the window is still open. Neither counts as decided. */
+export type FleetCohortOutcome = 'lost' | 'survived' | 'never_healthy' | 'unknown' | 'running';
+
+export type FleetCohortCounts = {
+  /** The headline: lost + never_healthy + survived_in_loss_state. With no state
+   *  history the last two can't occur, so it equals `lost`. */
+  failed: number;
+  /** failed / decided, one decimal; null with nothing decided. */
+  failed_pct: number | null;
+  /** A stint ended retired or problem inside the window: the figure comparable across suppliers. */
+  lost: number;
+  survived: number;
+  /** Of `survived`: its worker sat in SESSION_EXPIRED, CHECKPOINT or CHALLENGE_*
+   *  when the window closed, and nobody had retired it yet. */
+  survived_in_loss_state: number;
+  /** Claimed, still on the fleet when the window closed, and not yet HEALTHY by then. */
+  never_healthy: number;
+  unknown: number;
+  running: number;
+  /** lost + survived + never_healthy. The percentage's denominator. */
+  decided: number;
+  /** lost / decided, one decimal; null with nothing decided. */
+  lost_pct: number | null;
+};
+
+/** `all` keeps every account. `unflagged` leaves out those an exit change or
+ *  licence outage touched while this window ran. */
+export type FleetCohortWindow = { all: FleetCohortCounts; unflagged: FleetCohortCounts };
+
+/** Completed searches in the fixed 7 days from first claim, over accounts whose
+ *  7 days are decided. */
+export type FleetCohortSearches = { accounts: number; searches: number; per_account: number | null };
+
+export type FleetCohortGroup = {
+  pilot: string | null;
+  /** null: every batch (`arms`), or a removed account outside any enrollment. */
+  batch: string | null;
+  arm: FleetBrowserEngine;
+  claimed: number;
+  /** Enrolled, no claim yet, a first login held for a changed exit included. In no window. */
+  never_claimed: number;
+  reached_healthy: number;
+  /** Claimed with no state history, so HEALTHY can't be told: homelab workers, and accounts from before it began. */
+  health_unknown: number;
+  /** Claimed and never HEALTHY, and the 24 h window ended it as lost or never_healthy. They stay in the windows above. */
+  failed_starts: number;
+  lost_24h: FleetCohortWindow;
+  lost_7d: FleetCohortWindow;
+  searches: { all: FleetCohortSearches; unflagged: FleetCohortSearches };
+  exit_change_accounts: number;
+  outage_accounts: number;
+  /** Boots right after a licence outage exit. An upper bound on recovery logins:
+   *  a boot that opened no Facebook page cost none, and the history can't tell. */
+  recovery_boots: number;
+};
+
+export type FleetCohortAccount = {
+  account_no: number;
+  batch: string | null;
+  arm: FleetBrowserEngine;
+  enrolled_at: string | null;
+  first_claimed_at: string | null;
+  reached_healthy: boolean | null;
+  lost_at: string | null;
+  outcome_24h: FleetCohortOutcome | null;
+  outcome_7d: FleetCohortOutcome | null;
+  /** A survivor in a lost state when the window closed: it counts as failed. */
+  in_loss_state_24h: boolean;
+  in_loss_state_7d: boolean;
+  searches_7d: number | null;
+  exit_changes: number;
+  licence_outages: number;
+  recovery_boots: number;
+};
+
+/** GET /api/fleet/stats/cohorts. Counts only, never a verdict. */
+export type FleetCohortReport = {
+  /** null: the supplier scorecard, over accounts first claimed in the last `days`. */
+  pilot: string | null;
+  days: number | null;
+  since: string | null;
+  /** Every pilot named so far. */
+  pilots: string[];
+  /** Slots on CloakBrowser now. Parked ones are in `active`: a parked worker keeps its seat. */
+  seats: { active: number; parked: number; max_slots: number; pilot_cap: number };
+  /** One row per arm across batches. */
+  arms: FleetCohortGroup[];
+  groups: FleetCohortGroup[];
+  /** The pilot's accounts; empty on the scorecard. */
+  accounts: FleetCohortAccount[];
+};
+
 /** One browser engine's account loss over a window (GET /api/fleet/stats/engine-loss). */
 export type FleetEngineLossRow = {
   /** `stock` or `cloak` (fleet_slots.device.browser_engine; absent is stock). */
