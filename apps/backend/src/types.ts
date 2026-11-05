@@ -72,6 +72,9 @@ export type Env = {
   // capture transport (and `fail` makes every send throw) with no IMAP poll.
   MAIL_USER?: string;
   MAIL_PASSWORD?: string;
+  // recycleservers.com quotes' own box; they share MAIL_USER until both are set.
+  MAIL_QUOTES_USER?: string;
+  MAIL_QUOTES_PASSWORD?: string;
   MAIL_SMTP_HOST?: string;
   MAIL_SMTP_PORT?: string;
   MAIL_IMAP_HOST?: string;

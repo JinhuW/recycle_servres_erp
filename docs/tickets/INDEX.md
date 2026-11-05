@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-539](./RS-539-fleet-pilot-cohort-report.md) | done | story | P2 | Fleet: pilot cohort report | — |
+| [RS-540](./RS-540-answer-recycleservers-com-quotes-from-their-own-mail.md) | in-review | story | P2 | Answer recycleservers.com quotes from their own mailbox | 1.424.0 |
+| [RS-539](./RS-539-fleet-pilot-cohort-report.md) | done | story | P2 | Fleet: pilot cohort report | 1.423.0 |
 | [RS-538](./RS-538-fleet-track-each-proxy-s-measured-exit.md) | done | story | P2 | Fleet: track each proxy's measured exit | 1.422.0 |
 | [RS-537](./RS-537-fleet-atomic-account-enrollment-and-browser-profile.md) | done | story | P2 | Fleet: atomic account enrollment and browser profile | 1.421.0 |
 | [RS-536](./RS-536-so-list-total-follows-the-order-s-currency.md) | done | bug | P2 | SO list Total follows the order's currency | 1.420.1 |

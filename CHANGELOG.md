@@ -15,6 +15,16 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.424.0] - 2026-11-05
+
+recycleservers.com quote requests can now have their own mailbox (RS-540). With
+`MAIL_QUOTES_USER` and `MAIL_QUOTES_PASSWORD` set, a manager's reply to a quote goes out
+from that box, the draft shows it, and customers' answers are read back from it onto the
+same thread. Sell requests keep using `MAIL_USER`, so a Recycle Servers customer no longer
+hears back from a ram4cash address. The backend polls each box separately, from its own
+position. With the new variables unset nothing changes, and the rule that keeps mail off
+on non-production environments covers both boxes.
+
 ## [1.423.0] - 2026-11-05
 
 The fleet can now measure the CloakBrowser pilot by the rules the launch plan fixed

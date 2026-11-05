@@ -109,6 +109,8 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
     BANKTX_STUB: src.BANKTX_STUB,
     MAIL_USER: src.MAIL_USER,
     MAIL_PASSWORD: src.MAIL_PASSWORD, // pragma: allowlist secret
+    MAIL_QUOTES_USER: src.MAIL_QUOTES_USER,
+    MAIL_QUOTES_PASSWORD: src.MAIL_QUOTES_PASSWORD, // pragma: allowlist secret
     MAIL_SMTP_HOST: src.MAIL_SMTP_HOST,
     MAIL_SMTP_PORT: src.MAIL_SMTP_PORT,
     MAIL_IMAP_HOST: src.MAIL_IMAP_HOST,
