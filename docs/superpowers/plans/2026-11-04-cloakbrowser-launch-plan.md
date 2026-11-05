@@ -161,14 +161,15 @@ Dates are estimates. Accounts come only from batches you assign, per your 2026-1
 - [ ] Cloak-only fonts through `FONTCONFIG_FILE`, waiting on decision 1. Adding fonts image-wide would change every **stock** account's fingerprint at its next start, which is a device change
 
 **Spikes on worker-60-14**, using the free key's one seat, one run at a time. They need the owner to provide the key at run time, and no Facebook page is opened.
-- [ ] **S1:** does WebRTC expose the host IP without the flag? Also run the new preflight check: it requires `webrtc_ip` among the candidates, so a binary that offers only mDNS would falsely park every cloak worker
+- [x] **S1:** Done 2026-11-05: no leak, check passes. Original question: does WebRTC expose the host IP without the flag? Also run the new preflight check: it requires `webrtc_ip` among the candidates, so a binary that offers only mDNS would falsely park every cloak worker
 - [ ] **S2:** run about 50 seeds against FingerprintJS's public demo. Do some flag as tampering (#553)? Does the seed's screen conflict with Xvfb? Quarantine bad seeds
 - [ ] **S3:** do hashes hold from 155 to 156? If not, a binary bump is a device change
-- [ ] **S4:** does a browser survive a blocked licence server beyond 30 min, and does `playwright.stop()` free the seat? Also: can a fresh launch stay up 15 min during an outage? If so, a probe would falsely end the outage
-- [ ] **S5:** block the licence server before and after `launch` returns; both must end in exit 74, and a retry must recover. The after-launch path relies on the binary writing its denial file
+- [x] **S4:** Done 2026-11-05: dies about 16 min after launch; a fresh launch cannot stay up; seat question inconclusive. Original question: does a browser survive a blocked licence server beyond 30 min, and does `playwright.stop()` free the seat? Also: can a fresh launch stay up 15 min during an outage? If so, a probe would falsely end the outage
+- [x] **S5:** **Failed 2026-11-05: blocked before launch is right, blocked after launch reads as `browser_failed`.** Original question: block the licence server before and after `launch` returns; both must end in exit 74, and a retry must recover. The after-launch path relies on the binary writing its denial file
 
 **Gate**
-- [ ] All spikes written up in the probe note
+- [ ] All spikes written up in the probe note (S1, S4, S5 written up; S2 and S3 not run)
+- [ ] Before tagging 0.17.0: classify a live browser's licence death as an outage, and pin the binary to 155 or fix the frame on 156
 - [ ] **Staged** image only, so running workers aren't replaced `[owner]`
 
 ### Decision G1 (end of Phase 1): you
