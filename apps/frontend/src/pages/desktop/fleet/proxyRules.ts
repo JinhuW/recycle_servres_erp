@@ -52,6 +52,17 @@ export function proxyChoices(
     .sort((a, b) => rank(a) - rank(b) || a.load - b.load || a.proxy.label.localeCompare(b.proxy.label));
 }
 
+// Fixed, unlike max_accounts_per_proxy: they say a port looks crowded whatever
+// the limit is set to, and homelab ports have no limit at all.
+export const PROXY_CROWD_WARN_AT = 5;
+export const PROXY_CROWD_OVER_ABOVE = 10;
+
+/** How crowded a proxy is with `n` accounts on it: null, yellow from 5, red above 10. */
+export function proxyCrowding(n: number): 'warn' | 'over' | null {
+  if (n > PROXY_CROWD_OVER_ABOVE) return 'over';
+  return n >= PROXY_CROWD_WARN_AT ? 'warn' : null;
+}
+
 /** True when a new slot may go on the choice: room left and not failing its checks. */
 export const proxyOpen = (c: ProxyChoice): boolean => !c.full && !c.down;
 

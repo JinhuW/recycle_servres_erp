@@ -3926,6 +3926,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     round unless one started in the last 15 s; the row button checks one ERP
     proxy (homelab ports are checked together). Checks are kept 14 days. No
     proxy login reaches the browser, the log or the table.
+    Since v1.419.0 (RS-527) Used by shows a yellow dot at 5 to 10 accounts and a
+    red dot above 10, with the count and reason on hover. It counts non-parked
+    ERP accounts plus homelab workers, on fixed thresholds that don't follow
+    the per-proxy limit.
     Since v1.376.0 (RS-443) the tab is also where the ERP's proxies are
     managed: **Add proxy** beside Check all, and Edit and Remove on each ERP
     row, the same forms the Account pool card had (homelab ports stay

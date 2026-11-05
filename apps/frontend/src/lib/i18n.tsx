@@ -5383,6 +5383,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fleetProxyExit: "Exit",
     fleetProxyUsedBy: "Used by",
     fleetProxyUses: "{n} of {max} accounts",
+    fleetProxyCrowdWarn: "{n} accounts use this proxy. Yellow from 5, red above 10.",
+    fleetProxyCrowdOver: "{n} accounts use this proxy, over the 10 this page allows before red.",
     fleetProxyNone: "No proxies yet. Add one before putting accounts in the fleet.",
     fleetProxyRemove: "Remove proxy",
     fleetProxyRemoveTitle: "Remove {label}?",
