@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { fleetApi, type FleetCohortAccount, type FleetCohortCounts, type FleetCohortGroup, type FleetCohortOutcome, type FleetCohortReport } from '../../../lib/fleet';
 import { useT } from '../../../lib/i18n';
-import { COORDINATOR_POLL_MS, EmptyRow, useFleetPoll } from './shared';
+import { EmptyRow, useFleetPoll } from './shared';
+
+// Its figures move over hours and days, and it is the fleet's costliest read.
+const COHORT_POLL_MS = 5 * 60_000;
 
 // ─── Cohort report ────────────────────────────────────────────────────────────
 // A pilot's arms against the launch plan's fixed measurement rules, or with no
@@ -152,9 +155,14 @@ export function FleetCohortCard() {
   const [days, setDays] = useState<number>(SCORECARD_DAYS[0]);
   const { data, reload } = useFleetPoll<FleetCohortReport>(
     () => fleetApi.cohorts(pilot ? { pilot } : { days }),
-    COORDINATOR_POLL_MS,
+    COHORT_POLL_MS,
   );
-  useEffect(() => { reload(); }, [pilot, days]);
+  // The poll has just read this selection on mount.
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (mounted.current) reload();
+    mounted.current = true;
+  }, [pilot, days]);
   const loaded = data && data !== 'unavailable' ? data : null;
   // The answer on hand may still be the last selection's; it mustn't show under this one.
   const report = loaded && loaded.pilot === (pilot || null) && (pilot || loaded.days === days) ? loaded : null;

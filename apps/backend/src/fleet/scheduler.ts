@@ -3,6 +3,7 @@ import type { SqlLike } from '../db';
 import { log } from '../lib/log';
 import type { Env } from '../types';
 import { loadSettings } from './cities';
+import { searchRanToEnd } from './sql';
 
 // ─── The scheduler ────────────────────────────────────────────────────────────
 // Keeps fleet_tasks true to the catalog: one open search task per enabled city
@@ -153,9 +154,7 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
 
   // Compare completed results by account, as the coordinator did by worker.
   // Stopped searches are not evidence that the account cannot see cards.
-  // `stopped` counts as the probe's `!result.stopped` does: absent, false,
-  // null, 0 or "" is a search that ran to the end. An account in `blind` saw
-  // nothing anywhere, so any account with cards in one of its cities is a
+  // An account in `blind` saw nothing anywhere, so any account with cards in one of its cities is a
   // peer: the positive cities are one set, not a lookup per evidence row.
   if (settings.quarantine_hours > 0) {
     await sql`
@@ -163,7 +162,7 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
         SELECT t.account_no, t.city, t.done_at, (t.result->>'cards')::numeric AS cards
         FROM fleet_tasks t
         WHERE t.kind = 'search' AND t.state = 'done' AND jsonb_typeof(t.result->'cards') = 'number'
-          AND COALESCE(t.result->'stopped', 'false'::jsonb) IN ('false'::jsonb, 'null'::jsonb, '0'::jsonb, '""'::jsonb)
+          AND ${searchRanToEnd(sql)}
           AND t.done_at > ${now}::timestamptz - make_interval(hours => ${settings.quarantine_hours})
       ), seen AS (
         SELECT DISTINCT city FROM evidence WHERE cards > 0

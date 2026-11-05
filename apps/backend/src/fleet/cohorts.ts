@@ -5,7 +5,7 @@ import {
 import type { SqlLike } from '../db';
 import { loadSettings } from './cities';
 import { readLossDays } from './stateEvents';
-import { bad, type Refusal } from './sql';
+import { bad, searchRanToEnd, type Refusal } from './sql';
 import { FLEET_HOLDER } from './workers';
 
 // ─── Cohort report: pilot arms and the supplier scorecard ────────────────────
@@ -243,7 +243,7 @@ export async function cohortReport(sql: SqlLike, q: CohortQuery, now = new Date(
         ORDER BY ev.at DESC, ev.id DESC LIMIT 1) AS state_long,
       (SELECT COUNT(*)::int FROM fleet_tasks t
         WHERE t.account_no = c.account_no AND t.state = 'done' AND t.kind = 'search'
-          AND t.result->>'stopped' IS DISTINCT FROM 'true'
+          AND ${searchRanToEnd(sql)}
           AND t.done_at >= c.clock AND t.done_at < c.clock + make_interval(hours => ${LONG_HOURS})) AS searches,
       COALESCE((SELECT json_agg(x.changed_at ORDER BY x.changed_at) FROM fleet_proxy_exit_changes x
         WHERE x.changed_at >= c.clock AND x.changed_at <= c.clock + make_interval(hours => ${LONG_HOURS})

@@ -319,10 +319,10 @@ export function fleetStockRevertible(s: Pick<FleetSlot, 'parked' | 'worker_id' |
 export const fleetReportedEngine = (detail: Record<string, unknown> | null | undefined): FleetBrowserEngine =>
   detail?.engine === 'cloak' ? 'cloak' : 'stock';
 
-/** The first worker release that can launch CloakBrowser. An older one would
- *  run a cloak slot on stock and mint a stock session the next cloak boot
- *  loads, so the claim never hands it one. */
-export const FLEET_CLOAK_MIN_WORKER_VERSION = '0.16.0';
+/** The first worker release allowed a cloak slot: the first with the preflight,
+ *  the WebRTC flag and the licence-outage exit. An older one would log a pilot
+ *  in with none of them, and one older still would run the slot on stock. */
+export const FLEET_CLOAK_MIN_WORKER_VERSION = '0.17.0';
 
 /** Whether a worker's reported version is at least `min` (dotted numbers); a
  *  version that does not parse, such as `unknown`, is not. */

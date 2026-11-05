@@ -3785,7 +3785,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     sees a new device on the account's next normal start. It also says not to
     re-login the account before then: Re-login and Mark healthy answer 409
     `engine_mismatch` while the worker runs a different engine from its
-    slot's. A worker older than 0.16.0 is never handed a CloakBrowser slot,
+    slot's. A worker older than 0.17.0 (v1.424.2) is never handed a CloakBrowser slot,
     which waits for one that can run it. Since v1.421.0 (RS-537) the profile
     (engine, seed, GPU, timezone) is kept on the pool account, so removing and
     re-adding an account brings the same machine back and it still can't be
