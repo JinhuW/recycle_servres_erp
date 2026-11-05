@@ -451,8 +451,15 @@ export type FleetProxyCheck = {
   region: string | null;
   country: string | null;
   org: string | null;
+  /** The lookup's IANA zone for the exit. Null on older rows and on homelab ports. */
+  timezone: string | null;
   error: string | null;
 };
+
+/** One side of an exit change. */
+export type FleetProxyExitPoint = { ip: string; city: string | null; region: string | null; country: string | null; timezone: string | null };
+/** A port's measured exit moved, in IP or in geo. */
+export type FleetProxyExitChange = { at: string; from: FleetProxyExitPoint; to: FleetProxyExitPoint };
 
 export type FleetProxyHealth = {
   /** `scheme://host:port`, the login cut out, as fb_worker_accounts names it. */
@@ -463,11 +470,17 @@ export type FleetProxyHealth = {
   label: string | null;
   host: string;
   port: number;
-  /** The ERP slots on it, and the homelab workers dialing it. */
-  slots: FleetProxyUse[];
+  /**
+   * The ERP slots on it with each device's zone, and the homelab workers dialing it.
+   * held_exit_ip is the exit a pilot account enrolled on, set while its first
+   * login waits because the port has moved off it.
+   */
+  slots: (FleetProxyUse & { timezone: string | null; held_exit_ip: string | null })[];
   workers: string[];
   state: FleetProxyHealthState;
   last: FleetProxyCheck | null;
+  /** The newest exit change in the last 24 h. */
+  exit_change: FleetProxyExitChange | null;
   /** The exit IP before the last one, when it changed in the last 24 h. */
   previous_ip: string | null;
   /** Share of the last 24 h's checks that answered, null with none. */
@@ -910,6 +923,8 @@ export type FleetErrorCode =
   | 'exit_stale'
   /** Enrolling on a proxy whose latest measurement failed or found no IP. */
   | 'exit_failing'
+  /** Enrolling with no pinned clock on a proxy whose fresh measurement names no timezone. */
+  | 'exit_zone_unknown'
   /** Enrolling on an exit IP another slot, enrollment or homelab worker uses,
    *  or any add or proxy change landing on a pilot account's exit IP. */
   | 'exit_shared';

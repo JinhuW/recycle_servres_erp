@@ -903,7 +903,7 @@ describe `POST /slots`, this adds to them.
 | `pilot_id` | The caller's pilot name; NULL when only `engine` was sent |
 | `arm` | `cloak` or `stock`, as the caller passed it |
 | `seed` | The cloak seed; NULL exactly when `arm` is `stock` |
-| `exit_ip` | The exit measured at enrollment; never rewritten |
+| `exit_ip` | The exit measured at enrollment. A re-add or `POST /slots/:no/proxy` re-records it while `first_claimed_at` is NULL; never rewritten after that (migration 0225) |
 | `enrolled_at`, `enrolled_by` | When, and the manager's email |
 | `first_claimed_at` | Stamped by the first claim of the account; NULL until then |
 
@@ -920,10 +920,15 @@ Enrollment, profile, proxy and slot are written in one transaction with the slot
 last, so a claim can't see a half-set slot. With none of the new fields, an
 account with no profile and no enrollment gets what it always got.
 
+Enrolling an account with no pinned `profile_timezone` takes its clock from the
+measured exit, on both arms, not from the proxy's typed `timezone`. An account with
+a pinned one keeps it, and a plain add still follows the typed value.
+
 A profile is **pinned**: a later add ignores the new proxy's timezone and brings
 back its engine, seed and GPU, even with none of the new fields. An add of an
-already enrolled account also passes the exit rules below, and its enrollment row
-stays as it was. An add that would run CloakBrowser needs `cloak_enabled` and a
+already enrolled account also passes the exit rules below. Its enrollment row stays
+as it was, except that `exit_ip` is re-recorded while the account has never been
+claimed. An add that would run CloakBrowser needs `cloak_enabled` and a
 free seat, new or not.
 
 | Refusal (`409`) | When |
@@ -937,6 +942,7 @@ free seat, new or not.
 | `exit_stale` | No `erp` measurement of the proxy, or the latest is older than `FLEET_EXIT_FRESH_MS` (15 minutes: three 5-minute rounds, so one missed round and one late one don't stop enrollment) |
 | `exit_failing` | The latest measurement failed, or passed without naming an IP |
 | `exit_shared` | The measured IP is used by another slot, an active enrollment or a homelab worker |
+| `exit_zone_unknown` | Enrolling with no pinned clock, and the fresh measurement names no valid timezone |
 
 `exit_shared` compares IPs, never ports, against:
 
@@ -961,7 +967,8 @@ measurement goes ahead, and with no pilot nothing is refused.
   answers `409 cloak_seeded` from the pool row's seed, `cloak_seed_taken`, and
   `pilot_arm` for an account in a pilot's stock arm.
 - `POST /slots/:no/proxy` on an enrolled account passes the exit rules above, and
-  a pinned account keeps its timezone.
+  a pinned account keeps its timezone. It re-records `exit_ip` while the account
+  has never been claimed.
 - `PUT /proxies/:id` with a new `timezone` skips accounts with a profile. A new
   `url` still reaches every slot on the proxy.
 
@@ -978,6 +985,15 @@ Slots whose device has `browser_engine: cloak` add two top-level fields beside
 `null` means skip the check, and so does a missing field. A claim is never refused
 for want of a measurement, because it may be a live account's restart. The value
 is what was measured last, not what was recorded at enrollment.
+
+A first login waits on a changed exit. A slot is not offered while its account has
+a pilot enrollment (`pilot_id` set) with `first_claimed_at` NULL and the proxy's
+latest good measurement names another IP than the enrollment's `exit_ip`. The worker
+gets the normal `409 no_slot`, so no login happens. A proxy with no good measurement
+holds nothing. A claimed account and a slot outside a pilot are never affected. To
+release one, a manager re-adds the account or uses `POST /slots/:no/proxy`, either
+of which records the fresh exit. `GET /proxies/health` reports the wait as
+`slots[].held_exit_ip`, the enrolled IP, and null otherwise.
 
 ### Stopping
 

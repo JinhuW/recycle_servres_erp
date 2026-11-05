@@ -25,15 +25,15 @@ const at = '2026-10-27T14:58:00Z';
 const empty = Array.from({ length: 48 }, () => null);
 const UP: FleetProxyHealth = {
   exit: 'http://isp.example.net:10001', source: 'erp', proxy_id: 1, label: 'Decodo NY 1', host: 'isp.example.net', port: 10001,
-  slots: [{ account_no: 12, pool_status: 'fleet', parked: false, leased: true }], workers: [], state: 'up',
-  last: { at, ok: true, latency_ms: 640, exit_ip: '203.0.113.9', city: 'Ashburn', region: 'Virginia', country: 'US', org: 'AS64500', error: null },
-  previous_ip: '198.51.100.4', uptime: 0.979, checks: 288, buckets: [...empty.slice(1), 'up'],
+  slots: [{ account_no: 12, pool_status: 'fleet', parked: false, leased: true, timezone: 'America/New_York', held_exit_ip: null }], workers: [], state: 'up',
+  last: { at, ok: true, latency_ms: 640, exit_ip: '203.0.113.9', city: 'Ashburn', region: 'Virginia', country: 'US', org: 'AS64500', timezone: 'America/New_York', error: null },
+  exit_change: null, previous_ip: '198.51.100.4', uptime: 0.979, checks: 288, buckets: [...empty.slice(1), 'up'],
 };
 const DOWN: FleetProxyHealth = {
   exit: 'http://isp.example.com:10003', source: 'coordinator', proxy_id: null, label: null, host: 'isp.example.com', port: 10003,
   slots: [], workers: ['homelab-1', 'wc-1'], state: 'down',
-  last: { at, ok: false, latency_ms: 8000, exit_ip: null, city: null, region: null, country: null, org: null, error: 'Timed out' },
-  previous_ip: null, uptime: 0, checks: 4, buckets: [...empty.slice(2), 'down', 'down'],
+  last: { at, ok: false, latency_ms: 8000, exit_ip: null, city: null, region: null, country: null, org: null, timezone: null, error: 'Timed out' },
+  exit_change: null, previous_ip: null, uptime: 0, checks: 4, buckets: [...empty.slice(2), 'down', 'down'],
 };
 const UNCHECKED: FleetProxyHealth = { ...UP, proxy_id: 2, label: 'Decodo NY 2', exit: 'NY 2', port: 10002, slots: [], state: 'unchecked', last: null, previous_ip: null, uptime: null, checks: 0, buckets: empty };
 const filter = { state: 'all' as const, source: '' as const, q: '' };
@@ -81,7 +81,7 @@ describe('Proxies tab', () => {
   });
 
   it('marks a crowded exit IP with a dot whose hover gives the reason', () => {
-    const slots = (n: number, parked = false) => Array.from({ length: n }, (_, i) => ({ account_no: i + 1, pool_status: 'fleet', parked, leased: true }));
+    const slots = (n: number, parked = false) => Array.from({ length: n }, (_, i) => ({ account_no: i + 1, pool_status: 'fleet', parked, leased: true, timezone: null, held_exit_ip: null }));
     const row = (over: Partial<FleetProxyHealth>) => renderToString(<ProxiesHealthTable rows={[{ ...UP, ...over }]} marks={null} filter={filter} onFilter={noop} busy={null} now={NOW} />);
     expect(row({ slots: slots(4) })).not.toContain('fleet-proxy-crowd');
     const warn = row({ slots: slots(5) });
@@ -102,5 +102,21 @@ describe('Proxies tab', () => {
     // A port with no known exit has no IP to count against.
     const noIp = row({ slots: slots(11), last: { ...UP.last!, ok: false, exit_ip: null } });
     expect(noIp).not.toContain('fleet-proxy-crowd');
+  });
+
+  it('shows a chip with a hover reason for each thing wrong with the exit, and none on a clean row', () => {
+    const row = (over: Partial<FleetProxyHealth>) => renderToString(<ProxiesHealthTable rows={[{ ...UP, ...over }]} marks={null} filter={filter} onFilter={noop} busy={null} now={NOW} />);
+    expect(row({})).not.toContain('fleet-proxy-flags');
+    expect(row({ slots: [{ ...UP.slots[0]!, timezone: 'America/Chicago' }] })).toContain('title="fleetProxyFlagZoneHint"');
+    expect(row({ last: { ...UP.last!, at: '2026-10-27T14:30:00Z' } })).toContain('title="fleetProxyFlagStaleHint"');
+    expect(row({ state: 'unchecked', last: null })).toContain('title="fleetProxyFlagNeverHint"');
+    const failing = row({ state: 'down', last: { ...UP.last!, ok: false, exit_ip: null, timezone: null, error: 'Timed out' } });
+    expect(failing).toContain('chip neg');
+    expect(failing).toContain('title="fleetProxyFlagFailingHint"');
+    const held = row({ slots: [{ ...UP.slots[0]!, held_exit_ip: '198.51.100.4' }] });
+    expect(held).toContain('chip neg');
+    expect(held).toContain('title="fleetProxyFlagHeldHint"');
+    const point = { ip: '203.0.113.9', city: 'Ashburn', region: 'Virginia', country: 'US', timezone: 'America/New_York' };
+    expect(row({ exit_change: { at, from: { ...point, city: 'Boston' }, to: point } })).toContain('title="fleetProxyFlagChangedHint"');
   });
 });

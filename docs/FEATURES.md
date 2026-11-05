@@ -3789,7 +3789,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     the account in one step: `POST /api/fleet/slots` writes the enrollment
     (`fleet_pilot_enrollments`, which outlives the slot and the account), the
     profile, the proxy and the slot in one transaction, so no worker can claim a
-    half-set slot. Enrollment refuses an exit IP that another slot, an active
+    half-set slot. An enrolled account with no pinned clock takes its timezone
+    from the measured exit, not the proxy's typed one, and enrollment is refused
+    if the fresh measurement names none (v1.422.0, RS-538). Enrollment refuses an exit IP that another slot, an active
     enrollment or a homelab worker already uses, comparing measured IPs across
     ports, and refuses a proxy whose latest measurement failed or is over 15
     minutes old. A normal add or Change proxy is also refused when
@@ -3957,6 +3959,20 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     every port last seen on that IP, with the dot on each of those rows. A port
     with no known exit shows none. The thresholds are fixed and don't follow the
     per-proxy limit.
+    Since v1.422.0 (RS-538) each check keeps the exit's zone, and every change
+    of a port's exit IP or geo is recorded for good with the accounts and
+    workers on it then; a failed check is not a change. A change under an
+    account or worker notifies the managers: one notification per remap, at
+    most one every 30 minutes. The Exit column flags **Zone differs** (a device
+    keeps another zone than the exit), **Measurement stale** (no check in 15
+    minutes) or **Never measured**, **Exit unknown** (the last check found no
+    exit) and **Exit changed** (in the last 24 hours), with the detail on hover.
+    These only report: no device or timezone is changed. Homelab ports have no
+    zone, since rs_console doesn't send one. **First login held** marks a pilot
+    account that has never been claimed and whose port has moved off the exit it
+    enrolled on. No worker starts it, so no login happens, until a manager
+    re-adds it or uses Change proxy, which records the fresh exit. Claimed
+    accounts and accounts outside a pilot are never held.
     Since v1.376.0 (RS-443) the tab is also where the ERP's proxies are
     managed: **Add proxy** beside Check all, and Edit and Remove on each ERP
     row, the same forms the Account pool card had (homelab ports stay

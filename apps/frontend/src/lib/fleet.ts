@@ -19,14 +19,14 @@ import { sharedApi as api } from './sharedGet';
 export type {
   FleetAccountBrief, FleetFunnelDay, FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,
   FleetTaskResult, FleetTaskState, FleetHostContainer, FleetHostReport, DesiredAnswer, RoundStartAnswer,
-  FleetProxy, FleetProxyCheck, FleetProxyHealth, FleetProxyHealthAnswer, FleetProxyHealthState, FleetProxySource,
+  FleetProxy, FleetProxyCheck, FleetProxyExitChange, FleetProxyExitPoint, FleetProxyHealth, FleetProxyHealthAnswer, FleetProxyHealthState, FleetProxySource,
   FleetPilotArm, FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
   FleetSecretKind, FleetWorkerDetail, FleetWorkerEvent, FleetWorkerRelogin, FleetWorkerResume,
   FleetBrowserEngine, FleetCloakGpu, FleetEngineLoss, FleetEngineLossRow,
 } from '@recycle-erp/shared';
 export {
   FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetResumable, fleetTakesResume, fleetAutoResumeDue, FLEET_AUTO_RESUME_MINUTES, FLEET_AUTO_RESUME_BY, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
-  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_SLOW_MS,
+  FLEET_EXIT_FRESH_MS, FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_SLOW_MS,
   fleetCloakFor, fleetCloakSwitchable, fleetSessionLost, fleetStockRevertible,
 } from '@recycle-erp/shared';
 

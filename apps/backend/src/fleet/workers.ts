@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  fleetCloakFor, fleetCloakSwitchable, fleetDeviceFor, fleetReportedEngine, FLEET_PILOT_ARMS, type FleetCloakGpu, type FleetPilotArm, fleetStockRevertible, fleetResumable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
+  isFleetTimezone, fleetCloakFor, fleetCloakSwitchable, fleetDeviceFor, fleetReportedEngine, FLEET_PILOT_ARMS, type FleetCloakGpu, type FleetPilotArm, fleetStockRevertible, fleetResumable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
   type FleetWorkerRelogin, type FleetWorkerResume, type FbPoolStatus,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
@@ -12,7 +12,8 @@ import { dropSlot, releaseTasks } from './claim';
 import { loadRelease } from './hosts';
 import { cityLog } from './tasks';
 import { loadSettings } from './cities';
-import { lastKnownExitIp, latestExitCheck, proxyStates } from './proxies';
+import { lastKnownExitIp, proxyStates } from './proxies';
+import { latestProxyExit } from './proxyExit';
 import { managerOnly, type ManagerEnv } from './auth';
 import { bad, conflict, eventToWire, exists, isRefusal, minutesTodaySql, notFound, taskToWire, type Refusal, type TaskEventRow, type TaskRow } from './sql';
 
@@ -249,15 +250,15 @@ async function exitUsers(tx: SqlLike, ip: string, no: number): Promise<string[]>
 
 /** The exit an enrolled account may go out through: identity is the measured
  *  IP, not the port, and several ports can share one. */
-async function measuredExit(tx: SqlLike, proxyId: number, name: string, no: number): Promise<Refusal | { ip: string }> {
-  const check = await latestExitCheck(tx, proxyId);
+async function measuredExit(tx: SqlLike, proxyId: number, name: string, no: number): Promise<Refusal | { ip: string; timezone: string | null }> {
+  const check = await latestProxyExit(tx, proxyId);
   if (!check?.fresh) {
     return conflict('exit_stale', `${name} ${check ? 'was last measured too long ago' : 'has never been measured'}; check it again first`);
   }
   if (!check.ok || !check.exit_ip) return conflict('exit_failing', `${name} failed its latest check; pick another proxy or check it again`);
   const users = await exitUsers(tx, check.exit_ip, no);
   if (users.length) return conflict('exit_shared', `${name} exits from ${check.exit_ip}, already used by ${users.join(', ')}`);
-  return { ip: check.exit_ip };
+  return { ip: check.exit_ip, timezone: check.timezone };
 }
 
 /** For an account outside any pilot, which is otherwise not held to the exit
@@ -281,6 +282,11 @@ async function pilotExitRefusal(tx: SqlLike, proxyId: number, name: string, no: 
   if (!holders.length) return null;
   return conflict('exit_shared', `${name} exits from ${ip}, held by pilot account ${holders.map((h) => `#${h.account_no}`).join(', ')}`);
 }
+
+/** A manager's way out of a held first login. Once claimed the record stays, as
+ *  the exit the account really started on is what a cohort has to see. */
+const recordEnrolledExit = (tx: SqlLike, no: number, ip: string) => tx`
+  UPDATE fleet_pilot_enrollments SET exit_ip = ${ip} WHERE account_no = ${no} AND first_claimed_at IS NULL`;
 
 type PoolForSlot = {
   status: string; holder_name: string | null; password_enc: string | null; totp_enc: string | null; uid: string; batch: string;
@@ -365,16 +371,22 @@ slots.post('/', async (c) => {
       return seedRefusal(fingerprint.cloak_seed, no);
     }
     let exitIp: string | null = null;
+    let exitZone: string | null = null;
     if (enroll || enrolled) {
       const measured = await measuredExit(tx, proxyId, exitName, no);
       if (isRefusal(measured)) return measured;
       exitIp = measured.ip;
+      // A profile's clock comes from where it exits, since a typed zone goes stale.
+      if (enroll && account.profile_timezone === null) {
+        if (!isFleetTimezone(measured.timezone)) return conflict('exit_zone_unknown', `${exitName}'s latest measurement names no timezone; check it again first`);
+        exitZone = measured.timezone;
+      }
     } else {
       const held = await pilotExitRefusal(tx, proxyId, exitName, no);
       if (held) return held;
     }
 
-    const timezone = account.profile_timezone ?? proxy.timezone;
+    const timezone = account.profile_timezone ?? exitZone ?? proxy.timezone;
     const device = {
       ...fleetDeviceFor(no, timezone),
       ...(engine ? { browser_engine: engine } : {}),
@@ -392,6 +404,8 @@ slots.post('/', async (c) => {
       await tx`
         INSERT INTO fleet_pilot_enrollments (account_no, uid, batch, pilot_id, arm, seed, exit_ip, enrolled_by)
         VALUES (${no}, ${account.uid}, ${account.batch}, ${enroll.pilot_id}, ${enroll.arm}, ${enroll.arm === 'cloak' ? fingerprint!.cloak_seed : null}, ${exitIp!}, ${user.email})`;
+    } else if (enrolled) {
+      await recordEnrolledExit(tx, no, exitIp!);
     }
     await tx`
       INSERT INTO fleet_slots (account_no, proxy_url, proxy_id, device)
@@ -567,6 +581,7 @@ slots.post('/:no/proxy', async (c) => {
     if (enrolled) {
       const measured = await measuredExit(tx, toId, to, no);
       if (isRefusal(measured)) return measured;
+      await recordEnrolledExit(tx, no, measured.ip);
     } else {
       const held = await pilotExitRefusal(tx, toId, to, no);
       if (held) return held;

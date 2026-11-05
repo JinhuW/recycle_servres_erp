@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Sql } from 'postgres';
 import {
   FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_ROUND_MS, proxyHealthState,
-  type FleetProxyCheck, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxySource, type FleetProxyStates,
+  type FleetProxyCheck, type FleetProxyExitChange, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxySource, type FleetProxyStates,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import type { Env } from '../types';
@@ -13,6 +13,7 @@ import { callFacade } from '../routes/coordinator';
 import { managerOnly, unavailable, type ManagerEnv } from './auth';
 import { proxyWithoutLogin } from './claim';
 import { listProxies, proxyStates } from './proxies';
+import { firstLoginHeld, hostPort, recordExitChanges, type ProxyCheckRow } from './proxyExit';
 import { probeProxy, type ProbeResult } from './proxyProbe';
 import { notFound } from './sql';
 
@@ -34,15 +35,11 @@ const FIRST_RUN_MS = 20_000;
 const TICK_MS = 30_000;
 
 type CoordinatorStatus = NonNullable<FleetProxyHealthAnswer['coordinator']>;
-type CheckRow = {
-  exit: string; source: FleetProxySource; proxy_id: number | null; workers: string[];
-  ok: boolean; latency_ms: number | null; exit_ip: string | null; city: string | null;
-  region: string | null; country: string | null; org: string | null; error: string | null;
-};
+type CheckRow = ProxyCheckRow;
 
 const fromProbe = (r: ProbeResult) => r.ok
-  ? { ok: true, latency_ms: r.latency_ms, exit_ip: r.exit.ip, city: r.exit.city, region: r.exit.region, country: r.exit.country, org: r.exit.org, error: null }
-  : { ok: false, latency_ms: r.latency_ms, exit_ip: null, city: null, region: null, country: null, org: null, error: r.error };
+  ? { ok: true, latency_ms: r.latency_ms, exit_ip: r.exit.ip, city: r.exit.city, region: r.exit.region, country: r.exit.country, org: r.exit.org, timezone: r.exit.timezone, error: null }
+  : { ok: false, latency_ms: r.latency_ms, exit_ip: null, city: null, region: null, country: null, org: null, timezone: null, error: r.error };
 
 async function probeErp(sql: SqlLike, env: Env, id?: number): Promise<CheckRow[]> {
   const key = poolKey(env);
@@ -78,19 +75,19 @@ async function probeCoordinator(env: Env): Promise<{ status: CoordinatorStatus; 
       workers: Array.isArray(p.workers) ? p.workers.filter((w): w is string => typeof w === 'string').slice(0, 100) : [],
       ok: p.ok === true,
       latency_ms: typeof p.latency_ms === 'number' && Number.isFinite(p.latency_ms) ? Math.round(p.latency_ms) : null,
-      exit_ip: text(p.ip), city: text(p.city), region: text(p.region), country: text(p.country), org: text(p.org),
+      exit_ip: text(p.ip), city: text(p.city), region: text(p.region), country: text(p.country), org: text(p.org), timezone: null,
       error: p.ok === true ? null : (text(p.error) ?? 'Check failed'),
     });
   }
   return { status: 'ok', rows };
 }
 
-async function insertChecks(sql: SqlLike, rows: CheckRow[], at: Date | null): Promise<void> {
+async function insertChecks(sql: SqlLike, rows: CheckRow[], at: Date): Promise<void> {
   for (const r of rows) {
     await sql`
-      INSERT INTO fleet_proxy_checks (exit, source, proxy_id, workers, checked_at, ok, latency_ms, exit_ip, city, region, country, org, error)
-      VALUES (${r.exit}, ${r.source}, ${r.proxy_id}, ${sql.array(r.workers)}, ${at ?? sql`NOW()`}, ${r.ok}, ${r.latency_ms},
-              ${r.exit_ip}, ${r.city}, ${r.region}, ${r.country}, ${r.org}, ${r.error})`;
+      INSERT INTO fleet_proxy_checks (exit, source, proxy_id, workers, checked_at, ok, latency_ms, exit_ip, city, region, country, org, timezone, error)
+      VALUES (${r.exit}, ${r.source}, ${r.proxy_id}, ${sql.array(r.workers)}, ${at}, ${r.ok}, ${r.latency_ms},
+              ${r.exit_ip}, ${r.city}, ${r.region}, ${r.country}, ${r.org}, ${r.timezone}, ${r.error})`;
   }
 }
 
@@ -110,6 +107,7 @@ export async function runProxyRound(sql: Sql, env: Env, gapMs = FLEET_PROXY_ROUN
   const [erp, coordinator] = await Promise.all([probeErp(sql, env), probeCoordinator(env)]);
   const at = claimed.started_at;
   await sql.begin(async (tx) => {
+    await recordExitChanges(tx, [...erp, ...coordinator.rows], at);
     await insertChecks(tx, [...erp, ...coordinator.rows], at);
     await tx`
       UPDATE fleet_proxy_rounds SET coordinator = ${coordinator.status},
@@ -125,13 +123,20 @@ type HistoryRow = Omit<CheckRow, 'workers'> & { checked_at: Date };
 
 const toCheck = (r: HistoryRow): FleetProxyCheck => ({
   at: r.checked_at.toISOString(), ok: r.ok, latency_ms: r.latency_ms, exit_ip: r.exit_ip,
-  city: r.city, region: r.region, country: r.country, org: r.org, error: r.error,
+  city: r.city, region: r.region, country: r.country, org: r.org, timezone: r.timezone, error: r.error,
 });
 
-function hostPort(exit: string): { host: string; port: number } {
-  const m = /^[a-z0-9]+:\/\/(.+?)(?::(\d+))?$/i.exec(exit);
-  return { host: m?.[1] ?? exit, port: Number(m?.[2] ?? 0) };
-}
+type ChangeRow = {
+  exit: string; source: FleetProxySource; proxy_id: number | null; changed_at: Date;
+  old_ip: string; old_city: string | null; old_region: string | null; old_country: string | null; old_timezone: string | null;
+  new_ip: string; new_city: string | null; new_region: string | null; new_country: string | null; new_timezone: string | null;
+};
+
+const toChange = (c: ChangeRow): FleetProxyExitChange => ({
+  at: c.changed_at.toISOString(),
+  from: { ip: c.old_ip, city: c.old_city, region: c.old_region, country: c.old_country, timezone: c.old_timezone },
+  to: { ip: c.new_ip, city: c.new_city, region: c.new_region, country: c.new_country, timezone: c.new_timezone },
+});
 
 /** The day of one proxy's checks, newest first, into what the tab draws. */
 function summarise(checks: HistoryRow[], latest: HistoryRow | undefined, now: number) {
@@ -167,25 +172,47 @@ export async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAns
       FROM (SELECT 1) one LEFT JOIN fleet_proxy_rounds r ON TRUE`,
     listProxies(sql),
     sql<(HistoryRow & { workers: string[] })[]>`
-      SELECT exit, source, proxy_id, workers, checked_at, ok, latency_ms, exit_ip, city, region, country, org, error
+      SELECT exit, source, proxy_id, workers, checked_at, ok, latency_ms, exit_ip, city, region, country, org, timezone, error
       FROM fleet_proxy_checks
       WHERE checked_at > NOW() - make_interval(secs => ${(FLEET_PROXY_BUCKETS * FLEET_PROXY_BUCKET_MS) / 1000})
       ORDER BY checked_at DESC, id DESC`,
     // A proxy whose checks stopped a day ago still shows how it last answered.
     sql<HistoryRow[]>`
       SELECT DISTINCT ON (source, COALESCE(proxy_id::text, exit))
-             exit, source, proxy_id, checked_at, ok, latency_ms, exit_ip, city, region, country, org, error
+             exit, source, proxy_id, checked_at, ok, latency_ms, exit_ip, city, region, country, org, timezone, error
       FROM fleet_proxy_checks
       ORDER BY source, COALESCE(proxy_id::text, exit), checked_at DESC, id DESC`,
   ]);
+  const [changes, clocks, held] = await Promise.all([
+    sql<ChangeRow[]>`
+      SELECT DISTINCT ON (source, COALESCE(proxy_id::text, exit))
+             exit, source, proxy_id, changed_at,
+             old_ip, old_city, old_region, old_country, old_timezone,
+             new_ip, new_city, new_region, new_country, new_timezone
+      FROM fleet_proxy_exit_changes
+      WHERE changed_at > NOW() - make_interval(secs => ${(FLEET_PROXY_BUCKETS * FLEET_PROXY_BUCKET_MS) / 1000})
+      ORDER BY source, COALESCE(proxy_id::text, exit), changed_at DESC, id DESC`,
+    sql<{ account_no: number; timezone: string | null }[]>`
+      SELECT account_no, device->>'timezone' AS timezone FROM fleet_slots WHERE proxy_id IS NOT NULL`,
+    sql<{ account_no: number; exit_ip: string }[]>`
+      SELECT s.account_no, e.exit_ip
+      FROM fleet_slots s JOIN fleet_pilot_enrollments e ON e.account_no = s.account_no
+      WHERE ${firstLoginHeld(sql)}`,
+  ]);
+  const clockOf = new Map(clocks.map((s) => [s.account_no, s.timezone]));
+  const heldOn = new Map(held.map((s) => [s.account_no, s.exit_ip]));
 
   const now = round.now.getTime();
   const out: FleetProxyHealth[] = proxies.map((p) => {
     const mine = history.filter((c) => c.source === 'erp' && c.proxy_id === p.id);
     const last = latest.find((c) => c.source === 'erp' && c.proxy_id === p.id);
+    // A change on the URL this proxy had before says nothing about the new one.
+    const change = changes.find((c) => c.source === 'erp' && c.proxy_id === p.id && c.exit === last?.exit);
     return {
       exit: last?.exit ?? `${p.host}:${p.port}`, source: 'erp', proxy_id: p.id, label: p.label,
-      host: p.host, port: p.port, slots: p.slots, workers: [], ...summarise(mine, last, now),
+      host: p.host, port: p.port, slots: p.slots.map((s) => ({ ...s, timezone: clockOf.get(s.account_no) ?? null, held_exit_ip: heldOn.get(s.account_no) ?? null })),
+      workers: [],
+      exit_change: change ? toChange(change) : null, ...summarise(mine, last, now),
     };
   });
   // The homelab ports in use are those of the last round the console answered.
@@ -201,9 +228,10 @@ export async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAns
     }
     const mine = history.filter((c) => c.source === 'coordinator' && c.exit === port.exit);
     const last = latest.find((c) => c.source === 'coordinator' && c.exit === port.exit);
+    const change = changes.find((c) => c.source === 'coordinator' && c.exit === port.exit);
     out.push({
       exit: port.exit, source: 'coordinator', proxy_id: null, label: null, host, port: n,
-      slots: [], workers: port.workers, ...summarise(mine, last, now),
+      slots: [], workers: port.workers, exit_change: change ? toChange(change) : null, ...summarise(mine, last, now),
     });
   }
   return {
@@ -257,7 +285,11 @@ health.post('/check', async (c) => {
     if (!poolKey(c.env)) return c.json(unavailable('FB_POOL_KEY'), 503);
     const rows = await probeErp(sql, c.env, id as number);
     if (!rows.length) return c.json(notFound('proxy').body, 404);
-    await insertChecks(sql, rows, null);
+    await sql.begin(async (tx) => {
+      const [{ now }] = await tx<{ now: Date }[]>`SELECT NOW() AS now`;
+      await recordExitChanges(tx, rows, now);
+      await insertChecks(tx, rows, now);
+    });
   } else {
     await runProxyRound(sql, c.env, CHECK_NOW_GAP_MS);
   }
