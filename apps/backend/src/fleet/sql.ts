@@ -107,6 +107,7 @@ export const FLEET_TABLES = [
   'fleet_pilot_enrollments',
   'fleet_proxies',
   'fleet_proxy_checks',
+  'fleet_proxy_exit_changes',
   'fleet_proxy_rounds',
   'fleet_settings',
   'fleet_slots',

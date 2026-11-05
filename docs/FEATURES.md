@@ -3957,6 +3957,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     every port last seen on that IP, with the dot on each of those rows. A port
     with no known exit shows none. The thresholds are fixed and don't follow the
     per-proxy limit.
+    Since v1.422.0 (RS-538) each check keeps the exit's zone, and every change
+    of a port's exit IP or geo is recorded for good with the accounts and
+    workers on it then; a failed check is not a change. A change under an
+    account or worker notifies the managers: one notification per remap, at
+    most one every 30 minutes. The Exit column flags **Zone differs** (a device
+    keeps another zone than the exit), **Measurement stale** (no check in 15
+    minutes) or **Never measured**, **Exit unknown** (the last check found no
+    exit) and **Exit changed** (in the last 24 hours), with the detail on hover.
+    These only report: no device or timezone is changed. Homelab ports have no
+    zone, since rs_console doesn't send one.
     Since v1.376.0 (RS-443) the tab is also where the ERP's proxies are
     managed: **Add proxy** beside Check all, and Edit and Remove on each ERP
     row, the same forms the Account pool card had (homelab ports stay

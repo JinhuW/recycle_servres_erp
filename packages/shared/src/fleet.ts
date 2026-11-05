@@ -435,6 +435,8 @@ export const FLEET_PROXY_ROUND_MS = 5 * 60_000;
 export const FLEET_EXIT_FRESH_MS = 3 * FLEET_PROXY_ROUND_MS;
 export const FLEET_PROXY_BUCKET_MS = 30 * 60_000;
 export const FLEET_PROXY_BUCKETS = 48;
+/** Three rounds missed: whatever the last check said about the exit is too old to go by. */
+export const FLEET_PROXY_EXIT_STALE_MS = 3 * FLEET_PROXY_ROUND_MS;
 
 /** Degraded: answered slower than FLEET_PROXY_SLOW_MS, or missed one check after answering. */
 export type FleetProxyHealthState = 'up' | 'degraded' | 'down' | 'unchecked';
@@ -451,8 +453,15 @@ export type FleetProxyCheck = {
   region: string | null;
   country: string | null;
   org: string | null;
+  /** The lookup's IANA zone for the exit. Null on older rows and on homelab ports. */
+  timezone: string | null;
   error: string | null;
 };
+
+/** One side of an exit change. */
+export type FleetProxyExitPoint = { ip: string; city: string | null; region: string | null; country: string | null; timezone: string | null };
+/** A port's measured exit moved, in IP or in geo. */
+export type FleetProxyExitChange = { at: string; from: FleetProxyExitPoint; to: FleetProxyExitPoint };
 
 export type FleetProxyHealth = {
   /** `scheme://host:port`, the login cut out, as fb_worker_accounts names it. */
@@ -463,11 +472,13 @@ export type FleetProxyHealth = {
   label: string | null;
   host: string;
   port: number;
-  /** The ERP slots on it, and the homelab workers dialing it. */
-  slots: FleetProxyUse[];
+  /** The ERP slots on it with each device's zone, and the homelab workers dialing it. */
+  slots: (FleetProxyUse & { timezone: string | null })[];
   workers: string[];
   state: FleetProxyHealthState;
   last: FleetProxyCheck | null;
+  /** The newest exit change in the last 24 h. */
+  exit_change: FleetProxyExitChange | null;
   /** The exit IP before the last one, when it changed in the last 24 h. */
   previous_ip: string | null;
   /** Share of the last 24 h's checks that answered, null with none. */

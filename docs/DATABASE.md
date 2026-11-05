@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-05:** ERP migration `0224`, Reddit tracker migration `0007`,
+**As of 2026-11-05:** ERP migration `0225`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2214,7 +2214,7 @@ Only the latest revive is kept; the backend logs each one.
 
 The ERP fleet: the city task queue the Facebook Marketplace workers pull from, and the slots they run pool accounts in. fleet_cities and fleet_items are the catalog managers edit; fleet_settings holds the queue's knobs; fleet_tasks is one open task per enabled city and item, with fleet_task_events as its log; fleet_hosts are the machines that run worker containers; fleet_slots is the fleet's view of each pool account (who runs it, where, under which lease epoch) and fleet_workers the containers that heartbeat, with fleet_worker_state_events keeping each change of their state (0221). fleet_minutes is a view that sums each account's leased minutes per Eastern day (UTC before 0218) for the daily budget. The accounts themselves and their secrets stay in fb_pool_accounts. Migration 0206 creates all of it; the routes under /api/fleet fill it in later releases.
 
-Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_proxies`](#erp-fleet-proxies), [`fleet_proxy_checks`](#erp-fleet-proxy-checks), [`fleet_proxy_rounds`](#erp-fleet-proxy-rounds), [`fleet_slots`](#erp-fleet-slots), [`fleet_pilot_enrollments`](#erp-fleet-pilot-enrollments), [`fleet_workers`](#erp-fleet-workers), [`fleet_worker_state_events`](#erp-fleet-worker-state-events), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
+Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_proxies`](#erp-fleet-proxies), [`fleet_proxy_checks`](#erp-fleet-proxy-checks), [`fleet_proxy_exit_changes`](#erp-fleet-proxy-exit-changes), [`fleet_proxy_rounds`](#erp-fleet-proxy-rounds), [`fleet_slots`](#erp-fleet-slots), [`fleet_pilot_enrollments`](#erp-fleet-pilot-enrollments), [`fleet_workers`](#erp-fleet-workers), [`fleet_worker_state_events`](#erp-fleet-worker-state-events), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
 
 <a id="erp-fleet-cities"></a>
 
@@ -2354,10 +2354,36 @@ One health check of one proxy port, dialed through the proxy itself to an IP-geo
 | `exit_ip` | `text` |  |  | The address the lookup saw. |
 | `city` / `region` / `country` / `org` | `text` |  |  | Where the exit IP is, and its ISP. |
 | `error` | `text` |  |  | Why a failed check failed, worded by the probe (never a raw socket message). |
+| `timezone` | `text` |  |  | The lookup's IANA zone for the exit. NULL on rows before 0225 and on coordinator ports, whose console sends none. |
 
 - **Primary key:** `id`
 - **References:** `proxy_id` → `fleet_proxies.id` (on delete set null)
 - **Indexes:** `fleet_proxy_checks_exit_idx` (source, exit, checked_at desc), `fleet_proxy_checks_at_idx` (checked_at), `fleet_proxy_checks_proxy_id_idx` (proxy_id)
+
+<a id="erp-fleet-proxy-exit-changes"></a>
+
+#### `fleet_proxy_exit_changes`
+
+One change of a port's measured exit, in IP or geo, against its last good check (`fleet/proxyExit.ts`). A failed check is not a change; a geo field missing on either side doesn't count as one. A port on both lists is recorded once, on its ERP row. Kept for good. Migration 0225.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | identity |  |
+| `exit` | `text` | ✓ |  | `scheme://host:port`, login cut out. |
+| `source` | `text` | ✓ |  | `erp` or `coordinator`. |
+| `proxy_id` | `integer` |  |  | → fleet_proxies; NULL for a coordinator port or a removed proxy. |
+| `changed_at` | `timestamptz` | ✓ |  | The check that saw the new exit. |
+| `previous_at` | `timestamptz` | ✓ |  | The last good check on the old exit. The move happened between the two. |
+| `old_ip` / `new_ip` | `text` | ✓ |  | The exit IP before and after; equal on a geo-only change. |
+| `old_city` / `old_region` / `old_country` / `old_timezone` | `text` |  |  | Where the old exit was. |
+| `new_city` / `new_region` / `new_country` / `new_timezone` | `text` |  |  | Where the new exit is. |
+| `slots` | `integer[]` | ✓ | `'{}'` | Account numbers of the slots on the proxy then. Plain values, since a slot can be deleted. |
+| `workers` | `text[]` | ✓ | `'{}'` | The homelab workers dialing the port then. |
+| `notified_at` | `timestamptz` |  |  | When an alert covered it. NULL while waiting for the 30-minute gap, and always on a port nobody used. |
+
+- **Primary key:** `id`
+- **References:** `proxy_id` → `fleet_proxies.id` (on delete set null)
+- **Indexes:** `fleet_proxy_exit_changes_proxy_id_idx` (proxy_id), `fleet_proxy_exit_changes_at_idx` (changed_at)
 
 <a id="erp-fleet-proxy-rounds"></a>
 

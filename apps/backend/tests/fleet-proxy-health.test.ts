@@ -16,7 +16,7 @@ import { testEnv } from './helpers/app';
 
 const USER = 'decodo-user-' + randomBytes(4).toString('hex');
 const PASS = 'pw-' + randomBytes(8).toString('hex');
-const EXIT = { ip: '203.0.113.9', city: 'Ashburn', region: 'Virginia', country: 'US', org: 'AS64500 Example' };
+const EXIT = { ip: '203.0.113.9', city: 'Ashburn', region: 'Virginia', country: 'US', org: 'AS64500 Example', timezone: 'America/New_York' };
 
 const servers: net.Server[] = [];
 let lookupUrl = '';

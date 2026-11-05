@@ -5,13 +5,13 @@ import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { poolApi, proxyMarkFor, type FbProxyMark } from '../../../lib/facebookPool';
 import {
   FLEET_PROXY_BUCKET_MS, FLEET_PROXY_SLOW_MS, fleetApi, proxyLoad,
-  type FleetProxy, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxyHealthState, type FleetProxySource,
+  type FleetProxy, type FleetProxyExitPoint, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxyHealthState, type FleetProxySource,
 } from '../../../lib/fleet';
 import { useT } from '../../../lib/i18n';
 import { ProxyDeadChip } from '../FleetWorkers';
 import { ProxyDialog, RemoveProxyDialog } from './FleetProxies';
 import { easternClock } from './fleetBoard';
-import { exitIpUsers, proxyCrowding } from './proxyRules';
+import { exitIpUsers, proxyCrowding, proxyExitFlags, type ProxyExitFlag } from './proxyRules';
 import { agoLabel, Clock, EmptyRow, Legend, UnavailableCard, useFleetMirror, useFleetPoll, WorkerLink } from './shared';
 
 // ─── Proxies ──────────────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ export function proxyMatches(p: FleetProxyHealth, q: string): boolean {
   const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return true;
   const hay = [
-    p.label, p.exit, `${p.host}:${p.port}`, p.last?.exit_ip, p.last?.city, p.last?.region, p.last?.org, p.previous_ip,
+    p.label, p.exit, `${p.host}:${p.port}`, p.last?.exit_ip, p.last?.city, p.last?.region, p.last?.org, p.last?.timezone, p.previous_ip,
     ...p.workers, ...p.slots.map(s => `#${s.account_no}`),
   ].filter(Boolean).join(' ').toLowerCase();
   return terms.every(term => hay.includes(term));
@@ -220,6 +220,7 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
                         </small>
                       </span>
                     ) : <span className="fp-muted">—</span>}
+                    <ExitFlags flags={proxyExitFlags(p, now)} now={now} />
                   </td>
                   <td>
                     <span className="fp-holder">
@@ -275,6 +276,41 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
         </table>
       </div>
     </>
+  );
+}
+
+const exitPoint = (e: FleetProxyExitPoint) => {
+  const where = [e.city, e.region, e.country, e.timezone].filter(Boolean).join(', ');
+  return where ? `${e.ip} (${where})` : e.ip;
+};
+
+/** Report only: each chip names a problem with the port's exit, the hover its detail. */
+function ExitFlags({ flags, now }: { flags: readonly ProxyExitFlag[]; now: number }) {
+  const { t } = useT();
+  if (!flags.length) return null;
+  const chip = (f: ProxyExitFlag): { tone: string; label: string; hint: string } => {
+    switch (f.kind) {
+      case 'stale': return f.at
+        ? { tone: 'warn', label: t('fleetProxyFlagStale'), hint: t('fleetProxyFlagStaleHint', { ago: agoLabel(t, f.at, now) }) }
+        : { tone: 'warn', label: t('fleetProxyFlagNever'), hint: t('fleetProxyFlagNeverHint') };
+      case 'failing': return { tone: 'neg', label: t('fleetProxyFlagFailing'), hint: t('fleetProxyFlagFailingHint') };
+      case 'zone': return {
+        tone: 'warn', label: t('fleetProxyFlagZone'),
+        hint: t('fleetProxyFlagZoneHint', { zone: f.zone, slots: f.slots.map(s => `#${s.account_no} ${s.timezone}`).join(', ') }),
+      };
+      case 'changed': return {
+        tone: 'warn', label: t('fleetProxyFlagChanged', { ago: agoLabel(t, f.change.at, now) }),
+        hint: t('fleetProxyFlagChangedHint', { from: exitPoint(f.change.from), to: exitPoint(f.change.to) }),
+      };
+    }
+  };
+  return (
+    <span className="fleet-proxy-flags">
+      {flags.map(f => {
+        const { tone, label, hint } = chip(f);
+        return <span key={f.kind} className={`chip ${tone}`} title={hint}>{label}</span>;
+      })}
+    </span>
   );
 }
 

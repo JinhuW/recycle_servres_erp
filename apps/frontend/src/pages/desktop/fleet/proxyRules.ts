@@ -1,5 +1,5 @@
 import {
-  isFleetTimezone, parseProxyUrl, proxyLoad, type FleetDeviceProfile, type FleetProxy, type FleetProxyHealth, type FleetProxyHealthState, type FleetSlot,
+  FLEET_PROXY_EXIT_STALE_MS, isFleetTimezone, parseProxyUrl, proxyLoad, type FleetDeviceProfile, type FleetProxy, type FleetProxyExitChange, type FleetProxyHealth, type FleetProxyHealthState, type FleetSlot,
 } from '../../../lib/fleet';
 import { leaseLive } from './fleetBoard';
 
@@ -75,6 +75,36 @@ export function exitIpUsers(rows: readonly FleetProxyHealth[]): Map<string, numb
 export function proxyCrowding(n: number): 'warn' | 'over' | null {
   if (n > PROXY_CROWD_OVER_ABOVE) return 'over';
   return n >= PROXY_CROWD_WARN_AT ? 'warn' : null;
+}
+
+export type ProxyExitFlag =
+  /** The last measurement is too old to trust, or there has never been one (`at` null). */
+  | { kind: 'stale'; at: string | null }
+  /** The last check found no exit. */
+  | { kind: 'failing' }
+  /** Accounts whose device keeps another clock than the exit's zone. */
+  | { kind: 'zone'; zone: string; slots: { account_no: number; timezone: string }[] }
+  | { kind: 'changed'; change: FleetProxyExitChange };
+
+/**
+ * What to tell a manager about a port's measured exit. Report only: nothing
+ * here changes a device or refuses an account. An old failure reads as stale,
+ * since that is the more urgent fact: nobody is measuring. Zones compare by
+ * name, so America/Detroit against America/New_York flags too: a browser shows
+ * the name, and the hover gives both for a manager to judge.
+ */
+export function proxyExitFlags(p: Pick<FleetProxyHealth, 'last' | 'slots' | 'exit_change'>, now: number = Date.now()): ProxyExitFlag[] {
+  const out: ProxyExitFlag[] = [];
+  const { last } = p;
+  if (!last || now - Date.parse(last.at) > FLEET_PROXY_EXIT_STALE_MS) out.push({ kind: 'stale', at: last?.at ?? null });
+  else if (!last.ok || !last.exit_ip) out.push({ kind: 'failing' });
+  const zone = last?.timezone;
+  if (zone) {
+    const slots = p.slots.flatMap((s) => (s.timezone && s.timezone !== zone ? [{ account_no: s.account_no, timezone: s.timezone }] : []));
+    if (slots.length) out.push({ kind: 'zone', zone, slots });
+  }
+  if (p.exit_change) out.push({ kind: 'changed', change: p.exit_change });
+  return out;
 }
 
 /** True when a new slot may go on the choice: room left and not failing its checks. */

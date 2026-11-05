@@ -14,7 +14,7 @@ export const LOOKUP_URL = 'https://ipinfo.io/json';
 const TIMEOUT_MS = 10_000;
 const MAX_BODY = 64 * 1024;
 
-export type ProxyExit = { ip: string | null; city: string | null; region: string | null; country: string | null; org: string | null };
+export type ProxyExit = { ip: string | null; city: string | null; region: string | null; country: string | null; org: string | null; timezone: string | null };
 export type ProbeResult =
   | { ok: true; latency_ms: number; exit: ProxyExit }
   | { ok: false; latency_ms: number; error: string };
@@ -162,7 +162,7 @@ function lookupOver(tunnel: net.Socket, lookup: URL, sockets: net.Socket[]): Pro
         try {
           const body = JSON.parse(Buffer.concat(parts).toString('utf8')) as Record<string, unknown>;
           const pick = (k: string) => (typeof body[k] === 'string' && body[k] ? String(body[k]).slice(0, 200) : null);
-          resolve({ ip: pick('ip'), city: pick('city'), region: pick('region'), country: pick('country'), org: pick('org') });
+          resolve({ ip: pick('ip'), city: pick('city'), region: pick('region'), country: pick('country'), org: pick('org'), timezone: pick('timezone') });
         } catch {
           reject(new ProbeError('Lookup answer was not JSON'));
         }

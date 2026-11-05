@@ -15,6 +15,19 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.422.0] - 2026-11-05
+
+The ERP now tracks where each proxy really comes out (RS-538, workstream A of the
+CloakBrowser launch plan). On 2026-11-04, 14 of 20 ports moved to other exit IPs
+in four minutes and nothing recorded it. Each check now keeps the exit's zone, and
+any change of IP or geo on a port is stored for good, with the accounts and homelab
+workers on it at the time. A failed check is not a change, so a port that fails and
+recovers on the same exit stays quiet.
+
+A change under an account notifies the managers, with one notification for a whole
+remap and at most one every 30 minutes after that. The Proxies tab flags a device
+zone that differs from the exit, a stale or failing measurement, and a recent exit
+change. All of this only reports: no device, slot or timezone is changed.
 ## [1.421.0] - 2026-11-05
 
 An account can now join the fleet on a chosen browser in one step, and its browser
