@@ -21,8 +21,8 @@
 # Without it the image is stock-only: a device that asks for cloak
 # parks its worker as browser_failed ("no CloakBrowser binary in this
 # image") instead of downloading one at run time. Add
-# --build-arg RS_CLOAK_VERSION=<version> to label the image with the build
-# the secret fetched; the build fails if it is not that one.
+# --build-arg RS_CLOAK_VERSION=<version> to bake that build and label the
+# image with it; the build fails if the secret fetched any other.
 
 FROM python:3.12-slim-bookworm
 
@@ -107,6 +107,7 @@ import inspect; assert {'timezone', 'locale', 'start_maximized'} <= set(inspect.
 # license server's answer, not something to ship.
 ENV CLOAKBROWSER_BINARY_PATH=/opt/cloakbrowser/chrome
 ARG CLOAK_BAKE=0
+ARG RS_CLOAK_VERSION=
 RUN --mount=type=secret,id=cloak_key,required=false sh -ec '\
     if [ "$CLOAK_BAKE" != 1 ]; then \
         echo "CLOAK_BAKE=$CLOAK_BAKE: stock-only image, no CloakBrowser binary"; exit 0; \
@@ -116,7 +117,7 @@ RUN --mount=type=secret,id=cloak_key,required=false sh -ec '\
     fi; \
     cache=$(mktemp -d); \
     bin=$(CLOAKBROWSER_LICENSE_KEY="$(cat /run/secrets/cloak_key)" CLOAKBROWSER_CACHE_DIR="$cache" \
-        CLOAKBROWSER_BINARY_PATH= python -m cloakbrowser install | tail -n 1); \
+        CLOAKBROWSER_VERSION="$RS_CLOAK_VERSION" CLOAKBROWSER_BINARY_PATH= python -m cloakbrowser install | tail -n 1); \
     dir=$(dirname "$bin"); \
     version=$(basename "$dir" | sed -e "s/^chromium-//" -e "s/-pro\$//"); \
     mv "$dir" /opt/cloakbrowser; \
@@ -130,8 +131,7 @@ COPY ai-marketplace-monitor/docker/supervisord.conf /etc/supervisor/conf.d/aimm.
 
 COPY rs_worker ./rs_worker
 
-# Late, so labelling an image never refetches the binary above.
-ARG RS_CLOAK_VERSION=
+# The pin above asks for this build; a free key is served the latest whatever it asks.
 RUN if [ -n "$RS_CLOAK_VERSION" ]; then \
         test "$(cat /opt/cloakbrowser/VERSION 2>/dev/null)" = "$RS_CLOAK_VERSION" \
         || { echo "RS_CLOAK_VERSION=$RS_CLOAK_VERSION but the baked build is $(cat /opt/cloakbrowser/VERSION 2>/dev/null || echo none)" >&2; exit 1; }; \

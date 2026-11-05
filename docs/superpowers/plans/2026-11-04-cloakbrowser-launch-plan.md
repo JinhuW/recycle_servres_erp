@@ -160,7 +160,7 @@ Dates are estimates. Accounts come only from batches you assign, per your 2026-1
 - [x] Wrap `build_launch_env` and guard errors as a park. Today they crash-loop
 - [ ] Cloak-only fonts through `FONTCONFIG_FILE`, waiting on decision 1. Adding fonts image-wide would change every **stock** account's fingerprint at its next start, which is a device change
 
-**Spikes on worker-60-14**, using the free key's one seat, one run at a time. They need the owner to provide the key at run time, and no Facebook page is opened.
+**Spikes**, first planned for worker-60-14 and run on `oci-sg-1` and `development`. They need the owner to provide the key at run time, and no Facebook page is opened.
 - [x] **S1:** Done 2026-11-05: no leak, check passes. Original question: does WebRTC expose the host IP without the flag? Also run the new preflight check: it requires `webrtc_ip` among the candidates, so a binary that offers only mDNS would falsely park every cloak worker
 - [ ] **S2:** run about 50 seeds against FingerprintJS's public demo. Do some flag as tampering (#553)? Does the seed's screen conflict with Xvfb? Quarantine bad seeds
 - [ ] **S3:** do hashes hold from 155 to 156? If not, a binary bump is a device change
@@ -169,7 +169,7 @@ Dates are estimates. Accounts come only from batches you assign, per your 2026-1
 
 **Gate**
 - [ ] All spikes written up in the probe note (S1, S4, S5 written up; S2 and S3 not run)
-- [ ] Before tagging 0.17.0: classify a live browser's licence death as an outage, and pin the binary to 155 or fix the frame on 156
+- [x] Before tagging 0.17.0: classify a live browser's licence death as an outage, and pin the binary to 155 (RS-551, re-run passed on `development`)
 - [ ] **Staged** image only, so running workers aren't replaced `[owner]`
 
 ### Decision G1 (end of Phase 1): you
@@ -244,7 +244,7 @@ The earlier canaries can't separate engine from batch, so this test splits each 
 | --- | --- | --- |
 | Binary exits 78 before any Facebook page | Exits 74. Agent retries with backoff and jitter | No login |
 | Licence check fails after `launch` returned, before any Facebook page | Target closes; the guard turns that into the licence error; exits 74 | No login |
-| Browser dies with a live session | Exits 74. Replacement container restores the session from the ERP | One boot login, logged and counted in the report |
+| Browser dies with a live session (within about 16 min of an outage starting; it reports no reason, so a fresh launch checks the licence) | Exits 74. Replacement container restores the session from the ERP | One boot login, logged and counted in the report |
 | Exit 76, 77 or 79 | The worker parks `license_denied` | Operator acts |
 
 Retrying through the agent instead of inside the container keeps the existing start stagger. One worker per host probes, after any other start, so a stock restart never queues behind an outage and only one account per host can spend a login on a retry. Simulated with 18 cloak workers and a 4-hour outage: a stock restart at +11 minutes, 6 boots from one worker, and the last worker back 104 minutes after the outage ended.
