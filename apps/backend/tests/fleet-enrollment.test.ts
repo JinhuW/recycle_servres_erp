@@ -61,6 +61,9 @@ const setSettings = async (body: Partial<FleetSettings>) =>
 const claim = (workerId: string) => api<ClaimAnswer & Err>('POST', '/api/fleet/worker/claim', {
   headers: bearer, body: { host_id: 'lab', worker_id: workerId, version: FLEET_CLOAK_MIN_WORKER_VERSION, vnc_port: 5901 },
 });
+const opened = (workerToken: string) => api('POST', '/api/fleet/worker/heartbeat', {
+  headers: { Authorization: `Bearer ${workerToken}` }, body: { state: 'HEALTHY', version: FLEET_CLOAK_MIN_WORKER_VERSION, detail: { facebook_opened: true } },
+});
 const enrollment = async (no: number) =>
   (await getTestDb()<EnrollmentRow[]>`SELECT * FROM fleet_pilot_enrollments WHERE account_no = ${no}`)[0];
 const profile = async (no: number) => (await getTestDb()<{ browser_engine: string | null; cloak_seed: number | null; cloak_gpu: string | null; profile_timezone: string | null }[]>`
@@ -330,7 +333,7 @@ describe('seed uniqueness', () => {
     await expect(db`UPDATE fb_pool_accounts SET browser_engine = 'cloak' WHERE no = ${b}`).rejects.toMatchObject({ code: '23514' });
   });
 
-  it('refuses the seed another account holds, on enrollment and on the switch', async () => {
+  it('draws again past a seed another account holds, on enrollment and on the switch', async () => {
     const [a, b, c] = [await account(1), await account(2), await account(3)];
     const [p, q] = [await proxy(10001), await proxy(10002)];
     await measure(p, '198.51.100.1');
@@ -338,14 +341,14 @@ describe('seed uniqueness', () => {
     const db = getTestDb();
     // A retired account's fingerprint stays taken too.
     await db`UPDATE fb_pool_accounts SET status = 'retired', browser_engine = 'stock', cloak_seed = ${fleetCloakFor(a).cloak_seed} WHERE no = ${c}`;
-    const r = await enroll(a, p);
-    expect(r.status).toBe(409);
-    expect(r.body.error).toBe('cloak_seed_taken');
+    expect((await enroll(a, p)).status).toBe(201);
+    expect((await profile(a)).cloak_seed).toBe(fleetCloakFor(a, 1).cloak_seed);
+    await setSettings({ cloak_max_slots: 5 });
     await db`UPDATE fb_pool_accounts SET cloak_seed = ${fleetCloakFor(b).cloak_seed} WHERE no = ${c}`;
     expect((await add({ account_no: b, proxy_id: q })).status).toBe(201);
     const s = await api<Err>('POST', `/api/fleet/slots/${b}/engine`, { token, body: { engine: 'cloak' } });
-    expect(s.status).toBe(409);
-    expect(s.body.error).toBe('cloak_seed_taken');
+    expect(s.status).toBe(200);
+    expect((await profile(b)).cloak_seed).toBe(fleetCloakFor(b, 1).cloak_seed);
   });
 });
 
@@ -618,13 +621,14 @@ describe('the claim answer', () => {
     expect((await enrollment(no)).first_claimed_at).toEqual(stamped);
   });
 
-  it('gives a cloak slot its measured exit, and nulls instead of a refusal without a fresh one', async () => {
+  it('gives a cloak slot the last exit seen, however old, so it never launches without one', async () => {
     const no = await account(1);
     const p = await proxy(10001);
     await measure(p, '198.51.100.1');
     expect((await enroll(no, p)).status).toBe(201);
     const fresh = await claim('lab-1');
     expect(fresh.body).toMatchObject({ expected_exit_ip: '198.51.100.1', webrtc_ip: '198.51.100.1' });
+    await opened(fresh.body.worker_token);
     const db = getTestDb();
     const again = async () => {
       await db`UPDATE fleet_slots SET lease_expires_at = NOW() - interval '1 minute', worker_id = NULL, host_id = NULL WHERE account_no = ${no}`;
@@ -637,12 +641,17 @@ describe('the claim answer', () => {
     await measure(p, null, { ok: false });
     let r = await again();
     expect(r.status).toBe(200);
-    expect(r.body).toMatchObject({ expected_exit_ip: null, webrtc_ip: null });
+    expect(r.body).toMatchObject({ expected_exit_ip: '198.51.100.8', webrtc_ip: '198.51.100.8' });
     await db`DELETE FROM fleet_proxy_checks WHERE proxy_id = ${p}`;
     await measure(p, '198.51.100.8', { agoMs: FLEET_EXIT_FRESH_MS + 5_000 });
     r = await again();
     expect(r.status).toBe(200);
-    expect(r.body).toMatchObject({ expected_exit_ip: null, webrtc_ip: null });
+    expect(r.body).toMatchObject({ expected_exit_ip: '198.51.100.8', webrtc_ip: '198.51.100.8' });
+    // Nothing seen at all, as after a URL edit: it waits for the next round.
+    await db`DELETE FROM fleet_proxy_checks WHERE proxy_id = ${p}`;
+    r = await again();
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe('no_slot');
     // A proxy no longer on the list is not a refusal either.
     await db`UPDATE fleet_slots SET proxy_id = NULL WHERE account_no = ${no}`;
     r = await again();
@@ -813,12 +822,14 @@ describe('a first login on a changed exit', () => {
     expect((await claim('lab-1')).status).toBe(200);
   });
 
-  it('holds through a failure after the move, and on an unmeasured port does not', async () => {
+  it('holds through a failure after the move, and on an unmeasured port until a reading comes', async () => {
     const { no, p } = await setup();
     await measure(p, NEW);
     await measure(p, null, { ok: false });
     expect((await claim('lab-1')).status).toBe(409);
     await getTestDb()`DELETE FROM fleet_proxy_checks WHERE proxy_id = ${p}`;
+    expect((await claim('lab-1')).status).toBe(409);
+    await measure(p, OLD);
     const got = await claim('lab-1');
     expect(got.status).toBe(200);
     expect(got.body.account.no).toBe(no);
@@ -845,9 +856,98 @@ describe('a first login on a changed exit', () => {
     expect((await claim('lab-1')).status).toBe(200);
   });
 
-  it('never touches an account once claimed: still claimable, and its record stays', async () => {
+  it('keeps holding after a claim that opened no Facebook page', async () => {
     const { no, p } = await setup();
+    const got = await claim('lab-1');
+    expect(got.status).toBe(200);
+    expect((await enrollment(no)).first_login_at).toBeNull();
+    const db = getTestDb();
+    await db`UPDATE fleet_slots SET lease_expires_at = NOW() - INTERVAL '1 minute' WHERE account_no = ${no}`;
+    await measure(p, NEW);
+    expect((await claim('lab-1')).status).toBe(409);
+    // A handoff is a new boot, so its reservation doesn't get round the hold.
+    const [{ epoch }] = await db<{ epoch: number }[]>`SELECT epoch FROM fleet_slots WHERE account_no = ${no}`;
+    await db`UPDATE fleet_slots SET handoff_epoch = ${epoch}, reserved_until = NOW() + INTERVAL '10 minutes',
+      lease_expires_at = NOW() + INTERVAL '10 minutes', claim_id = NULL WHERE account_no = ${no}`;
+    const handoff = await api<ClaimAnswer & Err>('POST', '/api/fleet/worker/claim', {
+      headers: bearer, body: { host_id: 'lab', worker_id: 'lab-1', version: FLEET_CLOAK_MIN_WORKER_VERSION, vnc_port: 5901, handoff_epoch: epoch },
+    });
+    expect(handoff.status).toBe(409);
+    // The record can still be corrected, since nothing has run on the old exit.
+    await db`UPDATE fleet_slots SET lease_expires_at = NULL, reserved_until = NULL, handoff_epoch = NULL, worker_id = NULL WHERE account_no = ${no}`;
+    expect((await remove(no)).status).toBe(200);
+    expect((await add({ account_no: no, proxy_id: p })).status).toBe(201);
+    expect((await enrollment(no)).exit_ip).toBe(NEW);
     expect((await claim('lab-1')).status).toBe(200);
+  });
+
+  it('stamps the first login from the worker, once', async () => {
+    const { no } = await setup();
+    const got = await claim('lab-1');
+    const db = getTestDb();
+    expect((await api('POST', '/api/fleet/worker/heartbeat', { headers: { Authorization: `Bearer ${got.body.worker_token}` }, body: { state: 'DEGRADED', version: FLEET_CLOAK_MIN_WORKER_VERSION, detail: null } })).status).toBe(200);
+    expect((await enrollment(no)).first_login_at).toBeNull();
+    await opened(got.body.worker_token);
+    const first = (await enrollment(no)).first_login_at;
+    expect(first).not.toBeNull();
+    await db`UPDATE fleet_pilot_enrollments SET first_login_at = NOW() - INTERVAL '1 hour' WHERE account_no = ${no}`;
+    const stamped = (await enrollment(no)).first_login_at;
+    await opened(got.body.worker_token);
+    expect((await enrollment(no)).first_login_at).toEqual(stamped);
+  });
+
+  it('holds a move that keeps the IP and changes the zone, and a re-add brings the new clock', async () => {
+    const { no, p } = await setup();
+    await measure(p, OLD, { zone: 'America/Denver' });
+    expect((await claim('lab-1')).status).toBe(409);
+    expect((await remove(no)).status).toBe(200);
+    expect((await add({ account_no: no, proxy_id: p })).status).toBe(201);
+    expect(await enrollment(no)).toMatchObject({ exit_ip: OLD, exit_timezone: 'America/Denver' });
+    expect((await profile(no)).profile_timezone).toBe('America/Denver');
+    const got = await claim('lab-1');
+    expect(got.status).toBe(200);
+    expect(got.body.device.timezone).toBe('America/Denver');
+  });
+
+  it('brings the new clock on Change proxy too', async () => {
+    const { no, p } = await setup();
+    const q = await proxy(10002);
+    await measure(q, '198.51.100.20', { zone: 'America/Chicago' });
+    expect((await api('POST', `/api/fleet/slots/${no}/proxy`, { token, body: { proxy_id: q, from_proxy_id: p, confirm: true } })).status).toBe(200);
+    expect((await profile(no)).profile_timezone).toBe('America/Chicago');
+    expect((await claim('lab-1')).body.device.timezone).toBe('America/Chicago');
+  });
+
+  it('holds a first login when a remap puts another slot on the same exit', async () => {
+    const { no } = await setup();
+    const other = await account(2);
+    const q = await proxy(10002);
+    await measure(q, '198.51.100.20');
+    expect((await add({ account_no: other, proxy_id: q })).status).toBe(201);
+    await measure(q, OLD);
+    const first = await claim('lab-1');
+    expect(first.body.account.no).toBe(other);
+    expect((await claim('lab-2')).status).toBe(409);
+    expect((await enrollment(no)).first_claimed_at).toBeNull();
+  });
+
+  it('stops reserving the exit a pilot left once it has logged in', async () => {
+    const { no, p } = await setup();
+    const got = await claim('lab-1');
+    await opened(got.body.worker_token);
+    await measure(p, NEW);
+    const other = await account(2);
+    const q = await proxy(10002);
+    await measure(q, OLD);
+    expect((await add({ account_no: other, proxy_id: q })).status).toBe(201);
+    expect((await enrollment(no)).exit_ip).toBe(OLD);
+  });
+
+  it('never touches an account once logged in: still claimable, and its record stays', async () => {
+    const { no, p } = await setup();
+    const claimed = await claim('lab-1');
+    expect(claimed.status).toBe(200);
+    await opened(claimed.body.worker_token);
     const first = (await enrollment(no)).first_claimed_at;
     await getTestDb()`UPDATE fleet_slots SET lease_expires_at = NOW() - INTERVAL '1 minute' WHERE account_no = ${no}`;
     await measure(p, NEW);

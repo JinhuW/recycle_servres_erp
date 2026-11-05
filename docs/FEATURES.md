@@ -3536,7 +3536,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   jitter, at most 8 times and one start at a time. A further 74 leaves it stopped
   as `license_outage` until a person acts, and a rollout skips it like any other
   held worker. A run longer than 60 minutes clears the count. The host's report
-  carries `outage_attempts` during an outage.
+  carries `outage_attempts` during an outage. Since v1.424.3 (RS-543) the outage
+  heartbeat keeps the slot's lease for 24 hours, so a worker with no slot takes
+  stock accounts first, and a rolling release skips a worker that comes back
+  parked on `license_outage` or `exit_moved`, and any running cloak worker during
+  an outage, instead of failing.
 - **Fleet scheduling and rollout fixes (v1.356.0, RS-407)** — a rollout no
   longer picks a worker the agent will not replace: a held container
   (operator needed, crash limit, stopped by hand), one not running, or a
@@ -3803,8 +3807,15 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     minutes old. A normal add or Change proxy is also refused when
     it would land on an exit IP a pilot account holds. With CloakBrowser off, existing cloak accounts keep claiming
     and keep their licence; only new ones stop. A CloakBrowser claim also says
-    which exit IP to expect (`expected_exit_ip`, `webrtc_ip`), or null when
-    there is no fresh measurement. A refusal from
+    which exit IP to expect (`expected_exit_ip`, `webrtc_ip`): the last one
+    seen, however old, since v1.424.3 (RS-543). A cloak slot, or a pilot account
+    not yet logged in, whose listed proxy has no reading at all, as after a URL
+    edit, waits for the next round and isn't counted when the host sizes its
+    workers. A pilot's first login is held until its first Facebook page, not its
+    first claim, and also when the exit's zone moves or another slot lands on the
+    same exit; a re-add or Change proxy re-records the exit and its clock. A seed
+    another account holds is drawn again. A pool account with a profile or a pilot
+    record refuses a new UID. A refusal from
     `POST /api/fleet/slots/:no/engine` reads as a sentence: a live session,
     CloakBrowser off, every seat taken, or switched before. A CloakBrowser
     row offers **Back to stock**, another new device, only while no worker

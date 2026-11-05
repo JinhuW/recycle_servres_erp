@@ -45,7 +45,14 @@ BEGIN
   END LOOP;
 
   IF pg_catalog.to_regclass('public.fleet_slots') IS NOT NULL THEN
-    CREATE TABLE sync_keep._pool AS
-      SELECT * FROM public.fb_pool_accounts WHERE no IN (SELECT account_no FROM public.fleet_slots);
+    -- An enrollment outlives its slot, and its profile has to outlive it with it.
+    IF pg_catalog.to_regclass('public.fleet_pilot_enrollments') IS NOT NULL THEN
+      CREATE TABLE sync_keep._pool AS
+        SELECT * FROM public.fb_pool_accounts
+        WHERE no IN (SELECT account_no FROM public.fleet_slots UNION SELECT account_no FROM public.fleet_pilot_enrollments);
+    ELSE
+      CREATE TABLE sync_keep._pool AS
+        SELECT * FROM public.fb_pool_accounts WHERE no IN (SELECT account_no FROM public.fleet_slots);
+    END IF;
   END IF;
 END $$;

@@ -286,6 +286,44 @@ describe('POST /api/fleet/slots/:no/engine', () => {
     expect(a.device).toMatchObject({ browser_engine: 'cloak', ...fleetCloakFor(no), viewport: DEVICE.viewport });
   });
 
+  it('keeps a slot leased through a licence outage, so a worker with no slot takes stock first', async () => {
+    await setSettings(manager, { cloak_enabled: true });
+    const cloak = await seedSlot(1, DEVICE, { session: false });
+    expect((await switchTo(manager, cloak, 'cloak')).status).toBe(200);
+    const got = await claim('lab-1');
+    expect(got.account.no).toBe(cloak);
+    const stock = await seedSlot(2);
+    expect((await heartbeat(got.worker_token, 'DEAD', { reason: 'license_outage', operator: true, exit_code: 78 })).status).toBe(200);
+    const [{ hours }] = await getTestDb()<{ hours: number }[]>`
+      SELECT EXTRACT(EPOCH FROM lease_expires_at - NOW()) / 3600 AS hours FROM fleet_slots WHERE account_no = ${cloak}`;
+    expect(Number(hours)).toBeGreaterThan(23);
+    expect((await claim('lab-2')).account.no).toBe(stock);
+    // Other reasons keep the ordinary lease.
+    expect((await tryClaim('lab-3')).status).toBe(409);
+    await heartbeat(got.worker_token, 'DEAD', { reason: 'connect_failed', operator: true });
+    const [{ ordinary }] = await getTestDb()<{ ordinary: number }[]>`
+      SELECT EXTRACT(EPOCH FROM lease_expires_at - NOW()) / 3600 AS ordinary FROM fleet_slots WHERE account_no = ${cloak}`;
+    expect(Number(ordinary)).toBeLessThan(2);
+    // A host lost mid-outage needn't strand its account for the whole lease.
+    await heartbeat(got.worker_token, 'DEAD', { reason: 'license_outage', operator: true, exit_code: 78 });
+    expect((await api('POST', `/api/fleet/slots/${cloak}/park`, { token: manager })).status).toBe(200);
+    expect((await api('POST', `/api/fleet/slots/${cloak}/remove`, { token: manager })).status).toBe(200);
+  });
+
+  it('pins the clock the slot really exits from when it switches', async () => {
+    await setSettings(manager, { cloak_enabled: true });
+    const no = await seedSlot(1, DEVICE, { session: false });
+    const db = getTestDb();
+    const [p] = await db<{ id: number }[]>`INSERT INTO fleet_proxies (label, url_enc, host, port, timezone)
+      VALUES ('P', ${seal('http://u:p@exit.example:1', poolKey(testEnv)!)}, 'exit.example', 1, 'America/New_York') RETURNING id`;
+    await db`UPDATE fleet_slots SET proxy_id = ${p.id} WHERE account_no = ${no}`;
+    await db`INSERT INTO fleet_proxy_checks (exit, source, proxy_id, checked_at, ok, latency_ms, exit_ip, timezone)
+      VALUES ('http://exit.example:1', 'erp', ${p.id}, NOW(), TRUE, 1, '198.51.100.3', 'America/Denver')`;
+    expect((await switchTo(manager, no, 'cloak')).status).toBe(200);
+    expect((await deviceOf(no))!.timezone).toBe('America/Denver');
+    expect((await db<{ profile_timezone: string }[]>`SELECT profile_timezone FROM fb_pool_accounts WHERE no = ${no}`)[0].profile_timezone).toBe('America/Denver');
+  });
+
   it('leaves a cloak slot unclaimed by a worker too old to run CloakBrowser', async () => {
     await setSettings(manager, { cloak_enabled: true });
     const no = await seedSlot(1, DEVICE, { session: false });

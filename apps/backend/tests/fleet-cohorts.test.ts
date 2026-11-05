@@ -34,7 +34,9 @@ async function stint(no: number, start: string, end: string | null, outcome: str
 }
 async function event(no: number, to: string, when: string, opts: { from?: string | null; reason?: string; engine?: string } = {}) {
   await db()`INSERT INTO fleet_worker_state_events (account_no, worker_id, engine, from_state, to_state, reason, at)
-    VALUES (${no}, ${`w-${no}`}, ${opts.engine ?? 'stock'}, ${opts.from ?? null}, ${to}, ${opts.reason ?? null}, ${when})`;
+    VALUES (${no}, ${`w-${no}`},
+            COALESCE(${opts.engine ?? null}, (SELECT arm FROM fleet_pilot_enrollments WHERE account_no = ${no}), 'stock'),
+            ${opts.from ?? null}, ${to}, ${opts.reason ?? null}, ${when})`;
 }
 const healthy = (no: number, hours = 1) => event(no, 'HEALTHY', at(hours));
 async function search(no: number, when: string, stopped: boolean | string = false, state = 'done', kind = 'search') {
@@ -180,6 +182,16 @@ describe('cohort report', () => {
       const [g] = (await report(null)).groups;
       expect(g.lost_24h.all).toMatchObject({ failed: 1, lost: 1, failed_pct: 50, lost_pct: 50, decided: 2 });
     });
+  });
+
+  it('counts a cloak-arm account rescued on stock as failed, and says it crossed', async () => {
+    await enroll(1, 'cloak'); await stint(1, CLAIM, null, null);
+    await event(1, 'HEALTHY', at(3), { engine: 'stock' });
+    await enroll(2, 'cloak'); await stint(2, CLAIM, null, null); await healthy(2);
+    const r = await report();
+    const [rescued, kept] = r.accounts;
+    expect(rescued).toMatchObject({ account_no: 1, crossed_arm: true, reached_healthy: false, outcome_24h: 'never_healthy' });
+    expect(kept).toMatchObject({ account_no: 2, crossed_arm: false, reached_healthy: true, outcome_24h: 'survived' });
   });
 
   it('counts completed searches only inside the fixed 7 days from first claim', async () => {

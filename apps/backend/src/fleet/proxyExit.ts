@@ -36,20 +36,46 @@ export async function latestProxyExit(tx: SqlLike, proxyId: number): Promise<Pro
 }
 
 /**
- * Whether slot `s` must wait: a pilot account that has never been claimed, on a
- * proxy whose latest good exit is no longer the one it enrolled on. Its first
- * login would happen on an exit the pilot didn't record. No measurement holds
- * nothing. This runs for every free slot on every claim, so the measurement is
- * a scalar subquery, reached only by the few rows the primary key lookup and
- * the two column tests let through.
+ * Whether slot `s` belongs to a pilot account that hasn't opened Facebook yet,
+ * on an exit the pilot wouldn't accept: a different IP or geo from the one
+ * recorded at enrollment, or one another slot also uses. No measurement holds
+ * nothing here; `exitUnknown` covers that. This runs for every free slot on
+ * every claim, so the measurements sit behind the primary key lookup and the
+ * two column tests, and only the few rows they let through reach them.
  */
 export const firstLoginHeld = (sql: SqlLike) => sql`EXISTS (
   SELECT 1 FROM fleet_pilot_enrollments e
-  WHERE e.account_no = s.account_no AND e.pilot_id IS NOT NULL AND e.first_claimed_at IS NULL
-    AND e.exit_ip <> (
-      SELECT c.exit_ip FROM fleet_proxy_checks c
-      WHERE c.source = 'erp' AND c.proxy_id = s.proxy_id AND c.ok AND c.exit_ip IS NOT NULL
-      ORDER BY c.checked_at DESC, c.id DESC LIMIT 1))`;
+  CROSS JOIN LATERAL (
+    SELECT c.exit_ip, c.timezone FROM fleet_proxy_checks c
+    WHERE c.source = 'erp' AND c.proxy_id = s.proxy_id AND c.ok AND c.exit_ip IS NOT NULL
+    ORDER BY c.checked_at DESC, c.id DESC LIMIT 1) latest
+  WHERE e.account_no = s.account_no AND e.pilot_id IS NOT NULL AND e.first_login_at IS NULL
+    AND (e.exit_ip <> latest.exit_ip
+      OR (latest.timezone IS NOT NULL AND e.exit_timezone IS NOT NULL AND latest.timezone <> e.exit_timezone)
+      OR EXISTS (
+        SELECT 1 FROM fleet_slots other
+        CROSS JOIN LATERAL (
+          SELECT c.exit_ip FROM fleet_proxy_checks c
+          WHERE c.source = 'erp' AND c.proxy_id = other.proxy_id AND c.ok AND c.exit_ip IS NOT NULL
+          ORDER BY c.checked_at DESC, c.id DESC LIMIT 1) theirs
+        WHERE other.account_no <> s.account_no AND theirs.exit_ip = latest.exit_ip)))`;
+
+/**
+ * Whether slot `s` needs an expected exit and its listed proxy has none, as
+ * after a URL edit until the next round. A slot on an unlisted proxy has no
+ * checks to wait for, so it isn't held to this.
+ */
+export const exitUnknown = (sql: SqlLike) => sql`(
+  s.proxy_id IS NOT NULL
+  AND (s.device->>'browser_engine' IS NOT DISTINCT FROM 'cloak' OR EXISTS (
+    SELECT 1 FROM fleet_pilot_enrollments e
+    WHERE e.account_no = s.account_no AND e.pilot_id IS NOT NULL AND e.first_login_at IS NULL))
+  AND NOT EXISTS (
+    SELECT 1 FROM fleet_proxy_checks c
+    WHERE c.source = 'erp' AND c.proxy_id = s.proxy_id AND c.exit_ip IS NOT NULL))`;
+
+/** A slot no worker can be given yet, for the claim and for counting workers alike. */
+export const slotWaits = (sql: SqlLike) => sql`(${firstLoginHeld(sql)} OR ${exitUnknown(sql)})`;
 
 export function hostPort(exit: string): { host: string; port: number } {
   const m = /^[a-z0-9]+:\/\/(.+?)(?::(\d+))?$/i.exec(exit);
@@ -78,13 +104,14 @@ type Baseline = Measured & { exit: string; source: FleetProxySource; proxy_id: n
 export async function recordExitChanges(tx: SqlLike, rows: ProxyCheckRow[], at: Date): Promise<void> {
   // A round and a manager's Check now could otherwise both see the old exit.
   await tx`SELECT pg_advisory_xact_lock(hashtext('fleet_proxy_exit_changes'))`;
-  const listed = await tx<{ id: number; host: string; port: number; slots: number[] }[]>`
-    SELECT p.id, p.host, p.port,
+  const listed = await tx<{ id: number; host: string; port: number; slots: number[]; replaced_exit: Baseline | null }[]>`
+    SELECT p.id, p.host, p.port, p.replaced_exit,
            COALESCE(ARRAY_AGG(s.account_no ORDER BY s.account_no) FILTER (WHERE s.account_no IS NOT NULL), '{}') AS slots
     FROM fleet_proxies p LEFT JOIN fleet_slots s ON s.proxy_id = p.id
     GROUP BY p.id`;
   const listedPorts = new Set(listed.map((p) => `${p.host}:${p.port}`));
   const slotsOn = new Map(listed.map((p) => [p.id, p.slots]));
+  const replaced = new Map(listed.filter((p) => p.replaced_exit).map((p) => [p.id, { ...p, was: p.replaced_exit! }]));
 
   // A port on both lists is one port, recorded on its ERP row. Its homelab
   // workers come from this round, or the last one the console answered when
@@ -112,19 +139,39 @@ export async function recordExitChanges(tx: SqlLike, rows: ProxyCheckRow[], at: 
   const before = new Map(baselines.map((b) => [key(b), b]));
 
   for (const r of readings) {
-    const was = before.get(key(r));
-    // A row from under a URL edit names the old exit: that move was the manager's.
-    if (!was || was.exit !== r.exit || !exitMoved(was, r)) continue;
+    // A row from under a URL edit names the old exit, and says nothing of the
+    // new one. The first reading of the new one compares with what was kept.
+    const edit = r.proxy_id === null ? undefined : replaced.get(r.proxy_id);
+    const onEdited = !!edit && portKey(r.exit) === `${edit.host}:${edit.port}`;
+    const was = onEdited ? edit.was : before.get(key(r));
+    if (onEdited) await tx`UPDATE fleet_proxies SET replaced_exit = NULL WHERE id = ${r.proxy_id}`;
+    if (!was || (!onEdited && was.exit !== r.exit) || !exitMoved(was, r)) continue;
+    // A round and a Check now that overlap read the same past, so the lock
+    // alone can't stop the second recording this move again.
+    const [recorded] = await tx`
+      SELECT 1 FROM fleet_proxy_exit_changes
+      WHERE source = ${r.source} AND exit = ${r.exit} AND old_ip = ${was.exit_ip} AND new_ip = ${r.exit_ip}
+        AND changed_at > ${was.checked_at} LIMIT 1`;
+    if (recorded) continue;
     const slots = r.proxy_id === null ? [] : slotsOn.get(r.proxy_id) ?? [];
+    const sharing = await tx<{ account_no: number }[]>`
+      SELECT e.account_no FROM fleet_pilot_enrollments e
+      JOIN fleet_slots s ON s.account_no = e.account_no
+      CROSS JOIN LATERAL (
+        SELECT c.exit_ip FROM fleet_proxy_checks c
+        WHERE c.source = 'erp' AND c.proxy_id = s.proxy_id AND c.ok AND c.exit_ip IS NOT NULL
+        ORDER BY c.checked_at DESC, c.id DESC LIMIT 1) latest
+      WHERE e.pilot_id IS NOT NULL AND latest.exit_ip = ${r.exit_ip} AND s.proxy_id IS DISTINCT FROM ${r.proxy_id}
+      ORDER BY e.account_no`;
     await tx`
       INSERT INTO fleet_proxy_exit_changes (
         exit, source, proxy_id, changed_at, previous_at,
         old_ip, old_city, old_region, old_country, old_timezone,
-        new_ip, new_city, new_region, new_country, new_timezone, slots, workers)
+        new_ip, new_city, new_region, new_country, new_timezone, slots, workers, shares_with)
       VALUES (${r.exit}, ${r.source}, ${r.proxy_id}, ${at}, ${was.checked_at},
               ${was.exit_ip}, ${was.city}, ${was.region}, ${was.country}, ${was.timezone},
               ${r.exit_ip}, ${r.city}, ${r.region}, ${r.country}, ${r.timezone},
-              ${slots}::int[], ${tx.array(homelab.get(portKey(r.exit)) ?? [])}::text[])`;
+              ${slots}::int[], ${tx.array(homelab.get(portKey(r.exit)) ?? [])}::text[], ${sharing.map((x) => x.account_no)}::int[])`;
   }
   await alertExitChanges(tx);
 }
@@ -143,7 +190,7 @@ export type PendingChange = {
   name: string; old_ip: string; new_ip: string;
   old_city: string | null; old_region: string | null; old_country: string | null; old_timezone: string | null;
   new_city: string | null; new_region: string | null; new_country: string | null; new_timezone: string | null;
-  slots: number[]; workers: string[];
+  slots: number[]; workers: string[]; shares_with: number[];
 };
 
 const side = (ip: string, ...geo: (string | null)[]) => {
@@ -159,8 +206,10 @@ export function exitAlertText(pending: readonly PendingChange[], unused: number)
   const lines = pending.slice(0, ALERT_LINES).map((c) =>
     `${c.name}: ${side(c.old_ip, c.old_city, c.old_region, c.old_country, c.old_timezone)} → ${side(c.new_ip, c.new_city, c.new_region, c.new_country, c.new_timezone)}`);
   const more = pending.length - lines.length;
+  const sharing = [...new Set(pending.flatMap((c) => c.shares_with))].sort((a, b) => a - b);
   const body = [
-    `On it: ${who}.`,
+    ...(who ? [`On it: ${who}.`] : []),
+    ...(sharing.length ? [`Now on the same exit as pilot account ${sharing.map((n) => `#${n}`).join(', ')}.`] : []),
     ...lines,
     ...(more > 0 ? [`And ${more} more on Fleet ▸ Proxies.`] : []),
     'No device or timezone was changed.',
@@ -182,14 +231,14 @@ async function alertExitChanges(tx: SqlLike): Promise<void> {
   const pending = await tx<(PendingChange & { id: string; changed_at: Date })[]>`
     SELECT c.id, COALESCE(p.label, c.exit) AS name, c.changed_at,
            c.old_ip, c.old_city, c.old_region, c.old_country, c.old_timezone,
-           c.new_ip, c.new_city, c.new_region, c.new_country, c.new_timezone, c.slots, c.workers
+           c.new_ip, c.new_city, c.new_region, c.new_country, c.new_timezone, c.slots, c.workers, c.shares_with
     FROM fleet_proxy_exit_changes c LEFT JOIN fleet_proxies p ON p.id = c.proxy_id
-    WHERE c.notified_at IS NULL AND (CARDINALITY(c.slots) > 0 OR CARDINALITY(c.workers) > 0)
+    WHERE c.notified_at IS NULL AND (CARDINALITY(c.slots) > 0 OR CARDINALITY(c.workers) > 0 OR CARDINALITY(c.shares_with) > 0)
     ORDER BY c.changed_at, c.id`;
   if (!pending.length) return;
   const [{ unused }] = await tx<{ unused: number }[]>`
     SELECT COUNT(*)::int AS unused FROM fleet_proxy_exit_changes
-    WHERE CARDINALITY(slots) = 0 AND CARDINALITY(workers) = 0
+    WHERE CARDINALITY(slots) = 0 AND CARDINALITY(workers) = 0 AND CARDINALITY(shares_with) = 0
       AND changed_at >= ${new Date(pending[0]!.changed_at.getTime() - REMAP_SPREAD_MS)}`;
   await notifyManagers(tx, { kind: 'fleet_proxy_exit', tone: 'warn', icon: 'alert', ...exitAlertText(pending, unused) });
   await tx`UPDATE fleet_proxy_exit_changes SET notified_at = NOW() WHERE id = ANY(${pending.map((c) => c.id)}::bigint[])`;

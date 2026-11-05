@@ -24,7 +24,7 @@ const group = (o: Partial<FleetCohortGroup>): FleetCohortGroup => ({
   ...o,
 });
 const account: FleetCohortAccount = {
-  account_no: 41, batch: 'order-7', arm: 'stock', enrolled_at: '2026-11-01T00:00:00Z', first_claimed_at: null, reached_healthy: null, lost_at: null,
+  account_no: 41, batch: 'order-7', arm: 'stock', enrolled_at: '2026-11-01T00:00:00Z', first_claimed_at: null, reached_healthy: null, crossed_arm: false, lost_at: null,
   outcome_24h: null, outcome_7d: null, in_loss_state_24h: false, in_loss_state_7d: false, searches_7d: null, exit_changes: 0, licence_outages: 0, recovery_boots: 0,
 };
 const report = (o: Partial<FleetCohortReport> = {}): FleetCohortReport => ({

@@ -5,6 +5,7 @@ import type postgres from 'postgres';
 import {
   cookieUid,
   FLEET_CLOAK_MIN_WORKER_VERSION,
+  FLEET_OUTAGE_LEASE_MINUTES,
   fleetVersionAtLeast,
   FLEET_AUTO_RESUME_BY,
   fleetAutoResumeDue,
@@ -32,7 +33,8 @@ import {
   type ClaimEnv, type WorkerEnv, type WorkerIdentity,
 } from './auth';
 import { loadSettings } from './cities';
-import { firstLoginHeld, latestProxyExit, type ProxyExitMeasure } from './proxyExit';
+import { lastKnownExitIp } from './proxies';
+import { latestProxyExit, slotWaits, type ProxyExitMeasure } from './proxyExit';
 import { notifyReady } from './scheduler';
 import { minutesTodaySql, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
 import { loadRelease, ownWorkerId } from './hosts';
@@ -365,20 +367,22 @@ worker.post('/claim', claimAuth, async (c) => {
             OR (${handoff}::int IS NOT NULL AND handoff_epoch = ${handoff} AND reserved_until > NOW()))
         ORDER BY (claim_id IS NOT DISTINCT FROM ${claimId}) DESC LIMIT 1`;
       if (mine) {
+        // A retried claim keeps what its boot was given. A handoff is a new
+        // boot, and one that opened no Facebook page is still a first login.
         [row] = await tx<ClaimRow[]>`${CLAIM_SELECT(tx)} WHERE s.account_no = ${mine.account_no} AND a.status = 'fleet'
-          AND ${engineRuns} FOR NO KEY UPDATE OF a`;
+          AND ${engineRuns} AND ((${claimId}::text IS NOT NULL AND s.claim_id = ${claimId}) OR NOT ${slotWaits(tx)})
+          FOR NO KEY UPDATE OF a`;
       }
     }
     // Otherwise any free slot. A handoff whose reservation lapsed lands here
     // too, and its own slot (now free) still comes first.
     // The slot's own row is what the lock holds; the pool row only says the
-    // account is still the fleet's. Only this query holds a first login: the one
-    // above finds a slot this boot already holds, which has been claimed.
+    // account is still the fleet's.
     if (!row) {
       [row] = await tx<ClaimRow[]>`
         ${CLAIM_SELECT(tx)}
         WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AND ${engineRuns}
-          AND NOT ${firstLoginHeld(tx)}
+          AND NOT ${slotWaits(tx)}
         ORDER BY (s.worker_id = ${worker_id}) DESC NULLS LAST,
           ${cloakFirst}
           (s.last_host_id = ${host.host_id}) DESC NULLS LAST,
@@ -437,12 +441,11 @@ worker.post('/claim', claimAuth, async (c) => {
         WHERE account_no = ${row.account_no} AND first_claimed_at IS NULL`;
     }
     const device = deviceOf(row.device);
-    // Null rather than a refusal: this claim may be a live account's restart,
-    // and turning that away costs more than a skipped check.
+    // The last IP seen, however old: a browser with no WebRTC flag may show the
+    // host's IP, and the preflight parks a wrong one before any Facebook page.
     let exitFields: { expected_exit_ip?: string | null; webrtc_ip?: string | null } = {};
     if (device.browser_engine === 'cloak') {
-      const check = row.proxy_id === null ? null : await latestProxyExit(tx, row.proxy_id);
-      const ip = check?.fresh && check.ok ? check.exit_ip : null;
+      const ip = row.proxy_id === null ? null : await lastKnownExitIp(tx, row.proxy_id);
       exitFields = { expected_exit_ip: ip, webrtc_ip: ip };
     }
     const exp = Math.floor(Date.now() / 1000) + WORKER_TOKEN_DAYS * 86_400;
@@ -541,10 +544,18 @@ worker.post('/heartbeat', workerAuth, async (c) => {
   const accepted = await sql.begin(async (tx): Promise<false | { relogin: string | null; resume: string | null }> => {
     if (!await eligibleSlot(tx, w, true)) return false;
     const settings = await loadSettings(tx);
-    const lease = tx`NOW() + ${minutes(settings.lease_minutes)}::interval`;
+    // A worker leaving on a licence outage waits far longer than a lease. If it
+    // lapsed, a worker with no slot would take this one ahead of stock accounts
+    // it could really run, and the host's count would shrink under the retries.
+    const outage = state === 'DEAD' && detail?.reason === 'license_outage';
+    const lease = tx`NOW() + ${minutes(outage ? FLEET_OUTAGE_LEASE_MINUTES : settings.lease_minutes)}::interval`;
     await tx`
       UPDATE fleet_slots SET lease_expires_at = ${lease}
       WHERE account_no = ${w.account_no} AND epoch = ${w.epoch}`;
+    if (detail?.facebook_opened === true) {
+      await tx`UPDATE fleet_pilot_enrollments SET first_login_at = NOW()
+        WHERE account_no = ${w.account_no} AND first_login_at IS NULL`;
+    }
     await recordStateChange(tx, w, state, detail);
     const [beat] = await tx<{ state_since: Date | null; auto_resumes: number; version: string | null; resume_requested_at: Date | null; resume_delivered_at: Date | null; now: Date }[]>`
       INSERT INTO fleet_workers (worker_id, host_id, account_no, epoch, state, version, last_heartbeat_at, vnc_port, detail, state_since)

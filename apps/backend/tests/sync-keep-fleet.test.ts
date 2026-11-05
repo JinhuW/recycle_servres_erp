@@ -124,6 +124,20 @@ describe('prod→dev sync keeps the dev fleet', () => {
     expect(await sql`SELECT account_no, pilot_id FROM fleet_pilot_enrollments`).toEqual([{ account_no: a, pilot_id: 'wave-1' }]);
   });
 
+  it('keeps the profile of an enrolled account that has no slot', async () => {
+    const sql = getTestDb();
+    const a = await pool('61500000000031', 'retired', 'retired pilot');
+    await sql`UPDATE fb_pool_accounts SET browser_engine = 'cloak', cloak_seed = 54321, cloak_gpu = 'Intel', profile_timezone = 'America/Chicago' WHERE no = ${a}`;
+    await sql`INSERT INTO fleet_pilot_enrollments (account_no, uid, batch, pilot_id, arm, seed, exit_ip)
+              VALUES (${a}, '61500000000031', 'Batch', 'wave-1', 'cloak', 54321, '198.51.100.7')`;
+    await sql.begin((tx) => tx.unsafe(keep));
+    await copyLikeTheNightly([a]);
+    await sql`UPDATE fb_pool_accounts SET browser_engine = NULL, cloak_seed = NULL, cloak_gpu = NULL, profile_timezone = NULL WHERE no = ${a}`;
+    await sql.begin((tx) => tx.unsafe(restore));
+    expect(await sql`SELECT cloak_seed, profile_timezone FROM fb_pool_accounts WHERE no = ${a}`).toEqual([{ cloak_seed: 54321, profile_timezone: 'America/Chicago' }]);
+    expect(await sql`SELECT account_no FROM fleet_pilot_enrollments`).toEqual([{ account_no: a }]);
+  });
+
   it('keeps dev\'s own timing rows instead of prod\'s', async () => {
     const sql = getTestDb();
     const row = (version: string, count: number) => sql`

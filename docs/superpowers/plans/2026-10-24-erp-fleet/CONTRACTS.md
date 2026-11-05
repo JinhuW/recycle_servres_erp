@@ -979,21 +979,26 @@ Slots whose device has `browser_engine: cloak` add two top-level fields beside
 
 | Field | Value |
 | --- | --- |
-| `expected_exit_ip` | The proxy's latest measured IP if it passed within `FLEET_EXIT_FRESH_MS`, else `null` |
+| `expected_exit_ip` | The last IP the proxy's checks saw, however old. A slot on a listed proxy with no reading isn't claimable; `null` only on an unlisted proxy |
 | `webrtc_ip` | Always the same value |
 
-`null` means skip the check, and so does a missing field. A claim is never refused
-for want of a measurement, because it may be a live account's restart. The value
-is what was measured last, not what was recorded at enrollment.
+`null` means skip the check, and so does a missing field; only a slot on an
+unlisted proxy gets one. The value is what was measured last, not what was
+recorded at enrollment, and it can be stale: the preflight parks a wrong one
+before any Facebook page.
 
-A first login waits on a changed exit. A slot is not offered while its account has
-a pilot enrollment (`pilot_id` set) with `first_claimed_at` NULL and the proxy's
-latest good measurement names another IP than the enrollment's `exit_ip`. The worker
-gets the normal `409 no_slot`, so no login happens. A proxy with no good measurement
-holds nothing. A claimed account and a slot outside a pilot are never affected. To
-release one, a manager re-adds the account or uses `POST /slots/:no/proxy`, either
-of which records the fresh exit. `GET /proxies/health` reports the wait as
-`slots[].held_exit_ip`, the enrolled IP, and null otherwise.
+A first login waits on a changed exit. A slot is not offered, on a free claim or
+a handoff, while its account has a pilot enrollment (`pilot_id` set) with
+`first_login_at` NULL and the proxy's latest good measurement differs from
+`exit_ip`, moves `exit_timezone`, or is also another slot's exit. The first
+heartbeat with `detail.facebook_opened: true` stamps `first_login_at`.
+The worker gets the normal `409 no_slot`, so no login happens. To release one, a
+manager re-adds the account or uses `POST /slots/:no/proxy`, either of which records
+the fresh exit. `GET /proxies/health` reports the wait as `slots[].held_exit_ip`,
+the enrolled IP, and null otherwise.
+
+A `DEAD` heartbeat with `detail.reason: license_outage` renews the lease for
+`FLEET_OUTAGE_LEASE_MINUTES` instead of `lease_minutes`.
 
 ### Stopping
 
