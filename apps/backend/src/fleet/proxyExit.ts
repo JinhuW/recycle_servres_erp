@@ -1,4 +1,4 @@
-import type { FleetProxySource } from '@recycle-erp/shared';
+import { FLEET_EXIT_FRESH_MS, type FleetProxySource } from '@recycle-erp/shared';
 import type { SqlLike } from '../db';
 import { notifyManagers } from '../lib/notify';
 
@@ -17,22 +17,39 @@ export type ProxyCheckRow = {
 type Geo = { city: string | null; region: string | null; country: string | null; timezone: string | null };
 type Measured = Geo & { exit_ip: string | null };
 
-export type ProxyExitMeasure = { ok: boolean; exit_ip: string | null; timezone: string | null; measured_at: Date };
+export type ProxyExitMeasure = { ok: boolean; exit_ip: string | null; timezone: string | null; fresh: boolean; measured_at: Date };
 
 /**
- * The newest check of a listed proxy, whatever it found: a failed one has
- * ok false and no IP, so a caller can refuse rather than use an old exit.
- * Null when the proxy has never been checked.
+ * The newest check of a listed proxy, whatever it found and however old: a
+ * failed one has ok false and no IP, so a caller can refuse rather than use an
+ * old exit. Null when the proxy has never been checked.
  */
 export async function latestProxyExit(tx: SqlLike, proxyId: number): Promise<ProxyExitMeasure | null> {
   const [row] = await tx<ProxyExitMeasure[]>`
-    SELECT ok, exit_ip, timezone, checked_at AS measured_at
+    SELECT ok, exit_ip, timezone, checked_at AS measured_at,
+           checked_at > NOW() - make_interval(secs => ${FLEET_EXIT_FRESH_MS / 1000}) AS fresh
     FROM fleet_proxy_checks
     WHERE source = 'erp' AND proxy_id = ${proxyId}
     ORDER BY checked_at DESC, id DESC
     LIMIT 1`;
   return row ?? null;
 }
+
+/**
+ * Whether slot `s` must wait: a pilot account that has never been claimed, on a
+ * proxy whose latest good exit is no longer the one it enrolled on. Its first
+ * login would happen on an exit the pilot didn't record. No measurement holds
+ * nothing. This runs for every free slot on every claim, so the measurement is
+ * a scalar subquery, reached only by the few rows the primary key lookup and
+ * the two column tests let through.
+ */
+export const firstLoginHeld = (sql: SqlLike) => sql`EXISTS (
+  SELECT 1 FROM fleet_pilot_enrollments e
+  WHERE e.account_no = s.account_no AND e.pilot_id IS NOT NULL AND e.first_claimed_at IS NULL
+    AND e.exit_ip <> (
+      SELECT c.exit_ip FROM fleet_proxy_checks c
+      WHERE c.source = 'erp' AND c.proxy_id = s.proxy_id AND c.ok AND c.exit_ip IS NOT NULL
+      ORDER BY c.checked_at DESC, c.id DESC LIMIT 1))`;
 
 export function hostPort(exit: string): { host: string; port: number } {
   const m = /^[a-z0-9]+:\/\/(.+?)(?::(\d+))?$/i.exec(exit);

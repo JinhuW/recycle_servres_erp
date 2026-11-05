@@ -25,7 +25,7 @@ const at = '2026-10-27T14:58:00Z';
 const empty = Array.from({ length: 48 }, () => null);
 const UP: FleetProxyHealth = {
   exit: 'http://isp.example.net:10001', source: 'erp', proxy_id: 1, label: 'Decodo NY 1', host: 'isp.example.net', port: 10001,
-  slots: [{ account_no: 12, pool_status: 'fleet', parked: false, leased: true, timezone: 'America/New_York' }], workers: [], state: 'up',
+  slots: [{ account_no: 12, pool_status: 'fleet', parked: false, leased: true, timezone: 'America/New_York', held_exit_ip: null }], workers: [], state: 'up',
   last: { at, ok: true, latency_ms: 640, exit_ip: '203.0.113.9', city: 'Ashburn', region: 'Virginia', country: 'US', org: 'AS64500', timezone: 'America/New_York', error: null },
   exit_change: null, previous_ip: '198.51.100.4', uptime: 0.979, checks: 288, buckets: [...empty.slice(1), 'up'],
 };
@@ -81,7 +81,7 @@ describe('Proxies tab', () => {
   });
 
   it('marks a crowded exit IP with a dot whose hover gives the reason', () => {
-    const slots = (n: number, parked = false) => Array.from({ length: n }, (_, i) => ({ account_no: i + 1, pool_status: 'fleet', parked, leased: true, timezone: null }));
+    const slots = (n: number, parked = false) => Array.from({ length: n }, (_, i) => ({ account_no: i + 1, pool_status: 'fleet', parked, leased: true, timezone: null, held_exit_ip: null }));
     const row = (over: Partial<FleetProxyHealth>) => renderToString(<ProxiesHealthTable rows={[{ ...UP, ...over }]} marks={null} filter={filter} onFilter={noop} busy={null} now={NOW} />);
     expect(row({ slots: slots(4) })).not.toContain('fleet-proxy-crowd');
     const warn = row({ slots: slots(5) });
@@ -113,6 +113,9 @@ describe('Proxies tab', () => {
     const failing = row({ state: 'down', last: { ...UP.last!, ok: false, exit_ip: null, timezone: null, error: 'Timed out' } });
     expect(failing).toContain('chip neg');
     expect(failing).toContain('title="fleetProxyFlagFailingHint"');
+    const held = row({ slots: [{ ...UP.slots[0]!, held_exit_ip: '198.51.100.4' }] });
+    expect(held).toContain('chip neg');
+    expect(held).toContain('title="fleetProxyFlagHeldHint"');
     const point = { ip: '203.0.113.9', city: 'Ashburn', region: 'Virginia', country: 'US', timezone: 'America/New_York' };
     expect(row({ exit_change: { at, from: { ...point, city: 'Boston' }, to: point } })).toContain('title="fleetProxyFlagChangedHint"');
   });

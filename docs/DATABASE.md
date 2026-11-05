@@ -2446,7 +2446,7 @@ One row per account ever enrolled through `POST /api/fleet/slots` with a pilot o
 | `pilot_id` | `text` |  |  | The caller's pilot name; NULL for an engine given outside a pilot. |
 | `arm` | `text` | ✓ |  | cloak or stock, as the caller passed it. |
 | `seed` | `integer` |  |  | The cloak seed; NULL exactly for a stock arm. |
-| `exit_ip` | `text` | ✓ |  | The exit measured at enrollment; never rewritten. |
+| `exit_ip` | `text` | ✓ |  | The exit measured at enrollment. A re-add or Change proxy re-records it while `first_claimed_at` is NULL, and it is never rewritten after that (migration 0225's column comment; 0224's own comment predates this). A pilot account's first claim waits while the proxy's latest good measurement differs from it. |
 | `enrolled_at` | `timestamptz` | ✓ | `now()` |  |
 | `first_claimed_at` | `timestamptz` |  |  | Stamped by the account's first claim. |
 | `enrolled_by` | `text` |  |  | The manager's email. |

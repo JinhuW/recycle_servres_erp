@@ -435,8 +435,6 @@ export const FLEET_PROXY_ROUND_MS = 5 * 60_000;
 export const FLEET_EXIT_FRESH_MS = 3 * FLEET_PROXY_ROUND_MS;
 export const FLEET_PROXY_BUCKET_MS = 30 * 60_000;
 export const FLEET_PROXY_BUCKETS = 48;
-/** Three rounds missed: whatever the last check said about the exit is too old to go by. */
-export const FLEET_PROXY_EXIT_STALE_MS = 3 * FLEET_PROXY_ROUND_MS;
 
 /** Degraded: answered slower than FLEET_PROXY_SLOW_MS, or missed one check after answering. */
 export type FleetProxyHealthState = 'up' | 'degraded' | 'down' | 'unchecked';
@@ -472,8 +470,12 @@ export type FleetProxyHealth = {
   label: string | null;
   host: string;
   port: number;
-  /** The ERP slots on it with each device's zone, and the homelab workers dialing it. */
-  slots: (FleetProxyUse & { timezone: string | null })[];
+  /**
+   * The ERP slots on it with each device's zone, and the homelab workers dialing it.
+   * held_exit_ip is the exit a pilot account enrolled on, set while its first
+   * login waits because the port has moved off it.
+   */
+  slots: (FleetProxyUse & { timezone: string | null; held_exit_ip: string | null })[];
   workers: string[];
   state: FleetProxyHealthState;
   last: FleetProxyCheck | null;
@@ -921,6 +923,8 @@ export type FleetErrorCode =
   | 'exit_stale'
   /** Enrolling on a proxy whose latest measurement failed or found no IP. */
   | 'exit_failing'
+  /** Enrolling with no pinned clock on a proxy whose fresh measurement names no timezone. */
+  | 'exit_zone_unknown'
   /** Enrolling on an exit IP another slot, enrollment or homelab worker uses,
    *  or any add or proxy change landing on a pilot account's exit IP. */
   | 'exit_shared';

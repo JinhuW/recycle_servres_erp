@@ -46,13 +46,20 @@ a move touched.
 - [x] The Proxies tab flags a zone mismatch, a stale or failing measurement and
   a recent exit change. Report only.
 - [x] `latestProxyExit(tx, proxyId)` is exported for enrollment.
-- [x] No device, slot or timezone is rewritten.
+- [x] No device, slot or timezone is rewritten on a live account.
+- [x] Enrolling with no pinned clock takes the timezone from the measured exit on
+  both arms, and refuses `exit_zone_unknown` when the fresh measurement has none.
+  A pinned profile and a plain add don't change.
+- [x] A never-claimed pilot account isn't claimable while its proxy's latest good
+  exit differs from its enrollment. Re-adding it or Change proxy re-records the
+  exit and releases it, and never does so after the first claim.
+- [x] The Proxies tab shows **First login held**.
 
 ## Out of scope
 
-- Blocking first logins on a changed exit (plan rule 5) and refusing a stale
-  measurement at assignment (rule 4). Those belong to enrollment, workstream B,
-  which can read `latestProxyExit`.
+- Holding an account that has already been claimed, or a slot outside a pilot.
+  Turning a live account away costs more than the move it would avoid.
+- A geo-only change doesn't hold a first login; only the IP is compared.
 - Homelab zones. rs_console's `/v1/proxies/health` doesn't send the lookup's
   zone, so coordinator rows keep `timezone` NULL. Adding it means a console
   deploy, and homelab ports have no ERP slot to mismatch.
@@ -62,6 +69,15 @@ a move touched.
 
 ## Notes
 
+- **Plan rules 2 and 5** fell between workstreams A and B and were added here on
+  top of B's enrollment (RS-537). `latestExitCheck` and `latestProxyExit` are now
+  one helper in `fleet/proxyExit.ts`, and `FLEET_EXIT_FRESH_MS` is the only
+  freshness threshold.
+- **Migration 0224 still says `exit_ip` is never rewritten.** It has run on `dev`,
+  and applied migrations aren't edited, so 0225 corrects it with a column comment.
+- **Claim cost:** on a scratch database with 200 slots, 161,000 checks and 18
+  pending pilots, the candidate count with the condition took under 1 ms, the same
+  as without it. The check query runs only for never-claimed pilot accounts.
 - **Zone field confirmed:** a direct call to `https://ipinfo.io/8.8.8.8/json` on
   2026-11-05 answered with `"timezone": "America/Los_Angeles"`. It was not tried
   through a Decodo port, because no proxy login was available, so the column

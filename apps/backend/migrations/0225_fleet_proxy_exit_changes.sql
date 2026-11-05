@@ -35,3 +35,9 @@ CREATE TABLE fleet_proxy_exit_changes (
 );
 CREATE INDEX fleet_proxy_exit_changes_proxy_id_idx ON fleet_proxy_exit_changes (proxy_id);
 CREATE INDEX fleet_proxy_exit_changes_at_idx ON fleet_proxy_exit_changes (changed_at);
+
+-- 0224's comment calls this column never rewritten. That holds once the account
+-- has been claimed. Before then a manager may have to re-record it to release a
+-- first login held because the exit moved.
+COMMENT ON COLUMN fleet_pilot_enrollments.exit_ip IS
+  'The exit measured at enrollment. A re-add or Change proxy re-records it while first_claimed_at is NULL, and it is never rewritten after that.';

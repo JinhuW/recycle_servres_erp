@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import {
-  FLEET_EXIT_FRESH_MS, FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, isFleetTimezone, parseProxyUrl, proxyHealthState,
+  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, isFleetTimezone, parseProxyUrl, proxyHealthState,
   type FleetProxy, type FleetProxyHealthState, type FleetProxyPatch, type FleetProxyUse,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
@@ -48,18 +48,6 @@ export async function proxyStates(sql: SqlLike, proxyId?: number): Promise<Map<n
   const byProxy = new Map<number, typeof rows[number][]>();
   for (const r of rows) byProxy.set(r.proxy_id, [...(byProxy.get(r.proxy_id) ?? []), r]);
   return new Map([...byProxy].map(([id, checks]) => [id, proxyHealthState(checks)]));
-}
-
-export type ExitCheck = { ok: boolean; exit_ip: string | null; fresh: boolean; checked_at: Date };
-
-/** A proxy's latest measurement, however old, or null if it has none. */
-export async function latestExitCheck(sql: SqlLike, proxyId: number): Promise<ExitCheck | null> {
-  const [check] = await sql<ExitCheck[]>`
-    SELECT ok, exit_ip, checked_at, checked_at > NOW() - make_interval(secs => ${FLEET_EXIT_FRESH_MS / 1000}) AS fresh
-    FROM fleet_proxy_checks
-    WHERE source = 'erp' AND proxy_id = ${proxyId}
-    ORDER BY checked_at DESC, id DESC LIMIT 1`;
-  return check ?? null;
 }
 
 /** The IP a proxy was last seen exiting from, even if its latest check failed:

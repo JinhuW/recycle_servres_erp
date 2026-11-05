@@ -115,7 +115,7 @@ describe('deviceSummary', () => {
 describe('proxyExitFlags', () => {
   const at = new Date(NOW - 60_000).toISOString();
   const check = { at, ok: true, latency_ms: 300, exit_ip: '203.0.113.9', city: 'Ashburn', region: 'Virginia', country: 'US', org: null, timezone: 'America/New_York', error: null };
-  const use = (account_no: number, timezone: string | null) => ({ account_no, pool_status: 'fleet', parked: false, leased: true, timezone });
+  const use = (account_no: number, timezone: string | null) => ({ account_no, pool_status: 'fleet', parked: false, leased: true, timezone, held_exit_ip: null });
   const kinds = (p: Parameters<typeof proxyExitFlags>[0]) => proxyExitFlags(p, NOW).map((f) => f.kind);
   const clean = { last: check, slots: [use(1, 'America/New_York')], exit_change: null };
   it('has nothing to say about a fresh exit in the slots\' zone', () => {
@@ -140,6 +140,10 @@ describe('proxyExitFlags', () => {
     expect(kinds({ ...clean, last: failed })).toEqual(['failing']);
     expect(kinds({ ...clean, last: { ...failed, at: new Date(NOW - 16 * 60_000).toISOString() } })).toEqual(['stale']);
     expect(kinds({ ...clean, last: { ...check, exit_ip: null } })).toEqual(['failing']);
+  });
+  it('flags the pilot accounts whose first login waits', () => {
+    expect(proxyExitFlags({ ...clean, slots: [use(1, 'America/New_York'), { ...use(2, 'America/New_York'), held_exit_ip: '198.51.100.4' }] }, NOW))
+      .toEqual([{ kind: 'held', slots: [{ account_no: 2, exit_ip: '198.51.100.4' }] }]);
   });
   it('flags a recent exit change, alongside anything else that holds', () => {
     const change = { at, from: { ip: '198.51.100.4', city: null, region: null, country: null, timezone: null }, to: { ip: '203.0.113.9', city: null, region: null, country: null, timezone: null } };

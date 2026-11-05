@@ -5391,6 +5391,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fleetProxyFlagNeverHint: "No check of this port has run yet, so its exit is unknown.",
     fleetProxyFlagFailing: "Exit unknown",
     fleetProxyFlagFailingHint: "The last check found no exit.",
+    fleetProxyFlagHeld: "First login held",
+    fleetProxyFlagHeldHint: "This port no longer exits where these pilot accounts enrolled, so no worker will start them: {slots}. Re-add the account or use Change proxy to record the new exit.",
     fleetProxyFlagZone: "Zone differs",
     fleetProxyFlagZoneHint: "The exit is in {zone}, but these devices keep another clock: {slots}. Nothing is changed automatically.",
     fleetProxyFlagChanged: "Exit changed {ago}",

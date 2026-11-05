@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   fleetCloakFor, fleetDeviceFor, FLEET_CLOAK_MIN_WORKER_VERSION, FLEET_EXIT_FRESH_MS,
-  type ClaimAnswer, type FleetProxy, type FleetSettings, type FleetSlot,
+  type ClaimAnswer, type FleetProxy, type FleetProxyHealthAnswer, type FleetSettings, type FleetSlot,
 } from '@recycle-erp/shared';
 import { getTestDb, resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
@@ -48,9 +48,10 @@ async function proxy(port: number, timezone = 'America/New_York'): Promise<numbe
   return r.body.id;
 }
 
-const measure = (proxyId: number, ip: string | null, o: { ok?: boolean; agoMs?: number } = {}) => getTestDb()`
-  INSERT INTO fleet_proxy_checks (exit, source, proxy_id, checked_at, ok, latency_ms, exit_ip)
-  VALUES ('http://isp.example.net', 'erp', ${proxyId}, NOW() - make_interval(secs => ${(o.agoMs ?? 0) / 1000}), ${o.ok ?? true}, 300, ${ip})`;
+const measure = (proxyId: number, ip: string | null, o: { ok?: boolean; agoMs?: number; zone?: string | null } = {}) => getTestDb()`
+  INSERT INTO fleet_proxy_checks (exit, source, proxy_id, checked_at, ok, latency_ms, exit_ip, timezone)
+  VALUES ('http://isp.example.net', 'erp', ${proxyId}, NOW() - make_interval(secs => ${(o.agoMs ?? 0) / 1000}), ${o.ok ?? true}, 300, ${ip},
+          ${o.zone === undefined ? (ip && (o.ok ?? true) ? 'America/New_York' : null) : o.zone})`;
 
 const add = (body: Record<string, unknown>) => api<Added>('POST', '/api/fleet/slots', { token, body });
 const enroll = (no: number, proxyId: number, arm: 'cloak' | 'stock' = 'cloak', pilot = 'wave-1') =>
@@ -241,8 +242,8 @@ describe('the profile outlives the slot', () => {
     const r = await add({ account_no: no, proxy_id: chi });
     expect(r.status).toBe(201);
     expect(r.body.slot.device).toEqual({ ...fleetDeviceFor(no, 'America/New_York'), browser_engine: 'cloak', ...fleetCloakFor(no) });
-    // The record is what happened at enrollment, not what a re-add did.
-    expect(await enrollment(no)).toEqual(first);
+    // Never claimed, so the re-add records the exit it now goes out on.
+    expect(await enrollment(no)).toEqual({ ...first, exit_ip: '198.51.100.2' });
   });
 
   it('keeps the cloak_seeded guard past remove and re-add', async () => {
@@ -722,6 +723,172 @@ describe('with cloak_enabled off', () => {
     const dump = await db`SELECT to_jsonb(e) AS row FROM fleet_pilot_enrollments e`;
     const slots = await db`SELECT device FROM fleet_slots`;
     expect(JSON.stringify([dump, slots])).not.toContain(LICENCE);
+  });
+});
+
+describe('the zone comes from the exit', () => {
+  it('sets an enrolled clock from the measurement, not the typed zone, on both arms', async () => {
+    const [a, b] = [await account(1), await account(2)];
+    const [p, q] = [await proxy(10001, 'America/Chicago'), await proxy(10002, 'America/Chicago')];
+    await measure(p, '198.51.100.1', { zone: 'America/Denver' });
+    await measure(q, '198.51.100.2', { zone: 'America/Denver' });
+    expect((await enroll(a, p, 'cloak')).body.slot.device?.timezone).toBe('America/Denver');
+    expect((await enroll(b, q, 'stock')).body.slot.device?.timezone).toBe('America/Denver');
+    expect((await profile(a)).profile_timezone).toBe('America/Denver');
+    expect((await profile(b)).profile_timezone).toBe('America/Denver');
+  });
+
+  it('refuses when the fresh measurement names no usable zone, leaving nothing behind', async () => {
+    const no = await account(1);
+    const p = await proxy(10001);
+    await measure(p, '198.51.100.1', { zone: null });
+    const none = await enroll(no, p);
+    expect(none.status).toBe(409);
+    expect(none.body.error).toBe('exit_zone_unknown');
+    await measure(p, '198.51.100.1', { zone: 'not a zone' });
+    expect((await enroll(no, p)).body.error).toBe('exit_zone_unknown');
+    expect(await enrollment(no)).toBeUndefined();
+    expect((await profile(no)).browser_engine).toBeNull();
+    await measure(p, '198.51.100.1', { zone: 'America/Denver' });
+    expect((await enroll(no, p)).status).toBe(201);
+  });
+
+  it('keeps a pinned clock, even when the exit names no zone', async () => {
+    const no = await account(1);
+    const p = await proxy(10001);
+    await getTestDb()`UPDATE fb_pool_accounts SET browser_engine = 'stock', profile_timezone = 'Asia/Tokyo' WHERE no = ${no}`;
+    await measure(p, '198.51.100.1', { zone: null });
+    const res = await enroll(no, p, 'stock');
+    expect(res.status).toBe(201);
+    expect(res.body.slot.device?.timezone).toBe('Asia/Tokyo');
+    expect((await profile(no)).profile_timezone).toBe('Asia/Tokyo');
+  });
+
+  it('leaves a plain add on the typed zone, measured or not', async () => {
+    const [a, b] = [await account(1), await account(2)];
+    const [p, q] = [await proxy(10001, 'America/Chicago'), await proxy(10002, 'America/Chicago')];
+    await measure(p, '198.51.100.1', { zone: 'America/Denver' });
+    expect((await add({ account_no: a, proxy_id: p })).body.slot.device?.timezone).toBe('America/Chicago');
+    expect((await add({ account_no: b, proxy_id: q })).body.slot.device?.timezone).toBe('America/Chicago');
+    expect((await profile(a)).browser_engine).toBeNull();
+  });
+});
+
+describe('a first login on a changed exit', () => {
+  const OLD = '198.51.100.1';
+  const NEW = '198.51.100.9';
+  const setup = async () => {
+    const no = await account(1);
+    const p = await proxy(10001);
+    await measure(p, OLD);
+    expect((await enroll(no, p)).status).toBe(201);
+    return { no, p };
+  };
+  const remove = (no: number) => api('POST', `/api/fleet/slots/${no}/remove`, { token });
+  const heldOn = async (p: number) => (await api<FleetProxyHealthAnswer>('GET', '/api/fleet/proxies/health', { token }))
+    .body.proxies.find((r) => r.proxy_id === p)!.slots.map((s) => s.held_exit_ip);
+
+  it('gives the worker no_slot while the latest good exit differs, then only the free account', async () => {
+    const { no, p } = await setup();
+    await measure(p, NEW);
+    const refused = await claim('lab-1');
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe('no_slot');
+    expect((await enrollment(no)).first_claimed_at).toBeNull();
+    expect((await getTestDb()`SELECT 1 FROM fb_worker_accounts WHERE account_no = ${no} AND worker_id = 'lab-1'`)).toHaveLength(0);
+    expect(await heldOn(p)).toEqual([OLD]);
+
+    const other = await account(2);
+    const q = await proxy(10002);
+    await add({ account_no: other, proxy_id: q });
+    const got = await claim('lab-1');
+    expect(got.status).toBe(200);
+    expect(got.body.account.no).toBe(other);
+  });
+
+  it('goes by the latest good measurement: a failed check neither holds nor releases', async () => {
+    const { p } = await setup();
+    await measure(p, null, { ok: false });
+    expect(await heldOn(p)).toEqual([null]);
+    expect((await claim('lab-1')).status).toBe(200);
+  });
+
+  it('holds through a failure after the move, and on an unmeasured port does not', async () => {
+    const { no, p } = await setup();
+    await measure(p, NEW);
+    await measure(p, null, { ok: false });
+    expect((await claim('lab-1')).status).toBe(409);
+    await getTestDb()`DELETE FROM fleet_proxy_checks WHERE proxy_id = ${p}`;
+    const got = await claim('lab-1');
+    expect(got.status).toBe(200);
+    expect(got.body.account.no).toBe(no);
+  });
+
+  it('releases when a re-add records the fresh exit', async () => {
+    const { no, p } = await setup();
+    await measure(p, NEW);
+    expect((await remove(no)).status).toBe(200);
+    expect((await add({ account_no: no, proxy_id: p })).status).toBe(201);
+    expect((await enrollment(no)).exit_ip).toBe(NEW);
+    expect(await heldOn(p)).toEqual([null]);
+    expect((await claim('lab-1')).status).toBe(200);
+  });
+
+  it('releases when Change proxy records the fresh exit', async () => {
+    const { no, p } = await setup();
+    await measure(p, NEW);
+    const q = await proxy(10002);
+    await measure(q, '198.51.100.20');
+    const res = await api('POST', `/api/fleet/slots/${no}/proxy`, { token, body: { proxy_id: q, from_proxy_id: p, confirm: true } });
+    expect(res.status).toBe(200);
+    expect((await enrollment(no)).exit_ip).toBe('198.51.100.20');
+    expect((await claim('lab-1')).status).toBe(200);
+  });
+
+  it('never touches an account once claimed: still claimable, and its record stays', async () => {
+    const { no, p } = await setup();
+    expect((await claim('lab-1')).status).toBe(200);
+    const first = (await enrollment(no)).first_claimed_at;
+    await getTestDb()`UPDATE fleet_slots SET lease_expires_at = NOW() - INTERVAL '1 minute' WHERE account_no = ${no}`;
+    await measure(p, NEW);
+    expect(await heldOn(p)).toEqual([null]);
+    const again = await claim('lab-2');
+    expect(again.status).toBe(200);
+    expect(again.body.account.no).toBe(no);
+
+    await getTestDb()`UPDATE fleet_slots SET lease_expires_at = NULL, worker_id = NULL WHERE account_no = ${no}`;
+    expect((await remove(no)).status).toBe(200);
+    expect((await add({ account_no: no, proxy_id: p })).status).toBe(201);
+    expect(await enrollment(no)).toMatchObject({ exit_ip: OLD, first_claimed_at: first });
+    const q = await proxy(10002);
+    await measure(q, '198.51.100.20');
+    expect((await api('POST', `/api/fleet/slots/${no}/proxy`, { token, body: { proxy_id: q, from_proxy_id: p, confirm: true } })).status).toBe(200);
+    expect((await enrollment(no)).exit_ip).toBe(OLD);
+  });
+
+  it('never holds a slot outside a pilot: a plain add, or an engine given alone', async () => {
+    const [a, b] = [await account(1), await account(2)];
+    const [p, q] = [await proxy(10001), await proxy(10002)];
+    await measure(p, OLD);
+    await measure(q, '198.51.100.2');
+    await add({ account_no: a, proxy_id: p });
+    expect((await add({ account_no: b, proxy_id: q, engine: 'stock' })).status).toBe(201);
+    await measure(p, NEW);
+    await measure(q, '198.51.100.30');
+    expect(await heldOn(q)).toEqual([null]);
+    const claimed = [(await claim('lab-1')).body.account.no, (await claim('lab-2')).body.account.no];
+    expect(claimed.sort()).toEqual([a, b].sort());
+  });
+
+  it('with no pilot, picks the same slots in the same order as before', async () => {
+    const nos = [await account(1), await account(2), await account(3)];
+    const p = await proxy(10001);
+    await setSettings({ max_accounts_per_proxy: 10 });
+    await measure(p, OLD);
+    for (const no of nos) expect((await add({ account_no: no, proxy_id: p })).status).toBe(201);
+    await measure(p, NEW);
+    expect([(await claim('lab-1')).body.account.no, (await claim('lab-2')).body.account.no, (await claim('lab-3')).body.account.no]).toEqual(nos);
+    expect((await claim('lab-4')).body.error).toBe('no_slot');
   });
 });
 

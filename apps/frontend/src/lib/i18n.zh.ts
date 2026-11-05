@@ -4321,6 +4321,8 @@ const zh: Record<string, string> = {
   fleetProxyFlagNeverHint: "这个端口还没有检测过,出口未知。",
   fleetProxyFlagFailing: "出口未知",
   fleetProxyFlagFailingHint: "上次检测没有测到出口。",
+  fleetProxyFlagHeld: "首次登录已暂停",
+  fleetProxyFlagHeldHint: "这个端口的出口已不是这些试点账号登记时的出口,所以不会有 worker 启动它们:{slots}。重新添加账号或使用更换代理来记录新出口。",
   fleetProxyFlagZone: "时区不一致",
   fleetProxyFlagZoneHint: "出口在 {zone},但这些设备用的是别的时区:{slots}。不会自动修改。",
   fleetProxyFlagChanged: "出口变更于{ago}",

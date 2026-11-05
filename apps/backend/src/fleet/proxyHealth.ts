@@ -13,7 +13,7 @@ import { callFacade } from '../routes/coordinator';
 import { managerOnly, unavailable, type ManagerEnv } from './auth';
 import { proxyWithoutLogin } from './claim';
 import { listProxies, proxyStates } from './proxies';
-import { hostPort, recordExitChanges, type ProxyCheckRow } from './proxyExit';
+import { firstLoginHeld, hostPort, recordExitChanges, type ProxyCheckRow } from './proxyExit';
 import { probeProxy, type ProbeResult } from './proxyProbe';
 import { notFound } from './sql';
 
@@ -183,7 +183,7 @@ export async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAns
       FROM fleet_proxy_checks
       ORDER BY source, COALESCE(proxy_id::text, exit), checked_at DESC, id DESC`,
   ]);
-  const [changes, clocks] = await Promise.all([
+  const [changes, clocks, held] = await Promise.all([
     sql<ChangeRow[]>`
       SELECT DISTINCT ON (source, COALESCE(proxy_id::text, exit))
              exit, source, proxy_id, changed_at,
@@ -194,8 +194,13 @@ export async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAns
       ORDER BY source, COALESCE(proxy_id::text, exit), changed_at DESC, id DESC`,
     sql<{ account_no: number; timezone: string | null }[]>`
       SELECT account_no, device->>'timezone' AS timezone FROM fleet_slots WHERE proxy_id IS NOT NULL`,
+    sql<{ account_no: number; exit_ip: string }[]>`
+      SELECT s.account_no, e.exit_ip
+      FROM fleet_slots s JOIN fleet_pilot_enrollments e ON e.account_no = s.account_no
+      WHERE ${firstLoginHeld(sql)}`,
   ]);
   const clockOf = new Map(clocks.map((s) => [s.account_no, s.timezone]));
+  const heldOn = new Map(held.map((s) => [s.account_no, s.exit_ip]));
 
   const now = round.now.getTime();
   const out: FleetProxyHealth[] = proxies.map((p) => {
@@ -205,7 +210,8 @@ export async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAns
     const change = changes.find((c) => c.source === 'erp' && c.proxy_id === p.id && c.exit === last?.exit);
     return {
       exit: last?.exit ?? `${p.host}:${p.port}`, source: 'erp', proxy_id: p.id, label: p.label,
-      host: p.host, port: p.port, slots: p.slots.map((s) => ({ ...s, timezone: clockOf.get(s.account_no) ?? null })), workers: [],
+      host: p.host, port: p.port, slots: p.slots.map((s) => ({ ...s, timezone: clockOf.get(s.account_no) ?? null, held_exit_ip: heldOn.get(s.account_no) ?? null })),
+      workers: [],
       exit_change: change ? toChange(change) : null, ...summarise(mine, last, now),
     };
   });

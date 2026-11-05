@@ -315,11 +315,11 @@ describe('exit tracking', () => {
       expect(await latestProxyExit(db, p.id)).toBeNull();
       await round();
       const good = await latestProxyExit(db, p.id);
-      expect(good).toEqual({ ok: true, exit_ip: ASHBURN.ip, timezone: 'America/New_York', measured_at: expect.any(Date) });
+      expect(good).toEqual({ ok: true, exit_ip: ASHBURN.ip, timezone: 'America/New_York', fresh: true, measured_at: expect.any(Date) });
       lookupFails = true;
       await round();
       const failed = await latestProxyExit(db, p.id);
-      expect(failed).toEqual({ ok: false, exit_ip: null, timezone: null, measured_at: expect.any(Date) });
+      expect(failed).toEqual({ ok: false, exit_ip: null, timezone: null, fresh: true, measured_at: expect.any(Date) });
       expect(failed!.measured_at.getTime()).toBeGreaterThan(good!.measured_at.getTime());
     });
   });

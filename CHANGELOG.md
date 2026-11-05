@@ -28,6 +28,15 @@ A change under an account notifies the managers, with one notification for a who
 remap and at most one every 30 minutes after that. The Proxies tab flags a device
 zone that differs from the exit, a stale or failing measurement, and a recent exit
 change. All of this only reports: no device, slot or timezone is changed.
+
+Enrollment now acts on the measurement too, for accounts that have never logged in.
+An enrolled account with no pinned clock takes its timezone from the exit, not the
+proxy's typed value, and is refused with `exit_zone_unknown` if the fresh
+measurement names none. A pilot account's first login also waits while its port's
+latest good exit differs from the one it enrolled on: the worker gets the normal
+`no_slot`, and the tab shows **First login held**. Re-adding the account or Change
+proxy records the fresh exit and releases it. An account already claimed, and any
+slot outside a pilot, behaves exactly as before.
 ## [1.421.0] - 2026-11-05
 
 An account can now join the fleet on a chosen browser in one step, and its browser

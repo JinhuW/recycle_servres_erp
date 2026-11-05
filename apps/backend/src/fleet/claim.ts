@@ -32,7 +32,7 @@ import {
   type ClaimEnv, type WorkerEnv, type WorkerIdentity,
 } from './auth';
 import { loadSettings } from './cities';
-import { latestExitCheck } from './proxies';
+import { firstLoginHeld, latestProxyExit } from './proxyExit';
 import { notifyReady } from './scheduler';
 import { minutesTodaySql, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
 import { loadRelease, ownWorkerId } from './hosts';
@@ -359,11 +359,13 @@ worker.post('/claim', claimAuth, async (c) => {
     // Otherwise any free slot. A handoff whose reservation lapsed lands here
     // too, and its own slot (now free) still comes first.
     // The slot's own row is what the lock holds; the pool row only says the
-    // account is still the fleet's.
+    // account is still the fleet's. Only this query holds a first login: the one
+    // above finds a slot this boot already holds, which has been claimed.
     if (!row) {
       [row] = await tx<ClaimRow[]>`
         ${CLAIM_SELECT(tx)}
         WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AND ${engineRuns}
+          AND NOT ${firstLoginHeld(tx)}
         ORDER BY (s.worker_id = ${worker_id}) DESC NULLS LAST,
           ${cloakFirst}
           (s.last_host_id = ${host.host_id}) DESC NULLS LAST,
@@ -426,7 +428,7 @@ worker.post('/claim', claimAuth, async (c) => {
     // and turning that away costs more than a skipped check.
     let exitFields: { expected_exit_ip?: string | null; webrtc_ip?: string | null } = {};
     if (device.browser_engine === 'cloak') {
-      const check = row.proxy_id === null ? null : await latestExitCheck(tx, row.proxy_id);
+      const check = row.proxy_id === null ? null : await latestProxyExit(tx, row.proxy_id);
       const ip = check?.fresh && check.ok ? check.exit_ip : null;
       exitFields = { expected_exit_ip: ip, webrtc_ip: ip };
     }

@@ -1,5 +1,5 @@
 import {
-  FLEET_PROXY_EXIT_STALE_MS, isFleetTimezone, parseProxyUrl, proxyLoad, type FleetDeviceProfile, type FleetProxy, type FleetProxyExitChange, type FleetProxyHealth, type FleetProxyHealthState, type FleetSlot,
+  FLEET_EXIT_FRESH_MS, isFleetTimezone, parseProxyUrl, proxyLoad, type FleetDeviceProfile, type FleetProxy, type FleetProxyExitChange, type FleetProxyHealth, type FleetProxyHealthState, type FleetSlot,
 } from '../../../lib/fleet';
 import { leaseLive } from './fleetBoard';
 
@@ -82,6 +82,8 @@ export type ProxyExitFlag =
   | { kind: 'stale'; at: string | null }
   /** The last check found no exit. */
   | { kind: 'failing' }
+  /** Pilot accounts whose first login waits: the port moved off the exit they enrolled on. */
+  | { kind: 'held'; slots: { account_no: number; exit_ip: string }[] }
   /** Accounts whose device keeps another clock than the exit's zone. */
   | { kind: 'zone'; zone: string; slots: { account_no: number; timezone: string }[] }
   | { kind: 'changed'; change: FleetProxyExitChange };
@@ -96,8 +98,10 @@ export type ProxyExitFlag =
 export function proxyExitFlags(p: Pick<FleetProxyHealth, 'last' | 'slots' | 'exit_change'>, now: number = Date.now()): ProxyExitFlag[] {
   const out: ProxyExitFlag[] = [];
   const { last } = p;
-  if (!last || now - Date.parse(last.at) > FLEET_PROXY_EXIT_STALE_MS) out.push({ kind: 'stale', at: last?.at ?? null });
+  if (!last || now - Date.parse(last.at) > FLEET_EXIT_FRESH_MS) out.push({ kind: 'stale', at: last?.at ?? null });
   else if (!last.ok || !last.exit_ip) out.push({ kind: 'failing' });
+  const held = p.slots.flatMap((s) => (s.held_exit_ip ? [{ account_no: s.account_no, exit_ip: s.held_exit_ip }] : []));
+  if (held.length) out.push({ kind: 'held', slots: held });
   const zone = last?.timezone;
   if (zone) {
     const slots = p.slots.flatMap((s) => (s.timezone && s.timezone !== zone ? [{ account_no: s.account_no, timezone: s.timezone }] : []));

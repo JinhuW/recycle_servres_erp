@@ -294,6 +294,10 @@ function ExitFlags({ flags, now }: { flags: readonly ProxyExitFlag[]; now: numbe
         ? { tone: 'warn', label: t('fleetProxyFlagStale'), hint: t('fleetProxyFlagStaleHint', { ago: agoLabel(t, f.at, now) }) }
         : { tone: 'warn', label: t('fleetProxyFlagNever'), hint: t('fleetProxyFlagNeverHint') };
       case 'failing': return { tone: 'neg', label: t('fleetProxyFlagFailing'), hint: t('fleetProxyFlagFailingHint') };
+      case 'held': return {
+        tone: 'neg', label: t('fleetProxyFlagHeld'),
+        hint: t('fleetProxyFlagHeldHint', { slots: f.slots.map(s => `#${s.account_no} ${s.exit_ip}`).join(', ') }),
+      };
       case 'zone': return {
         tone: 'warn', label: t('fleetProxyFlagZone'),
         hint: t('fleetProxyFlagZoneHint', { zone: f.zone, slots: f.slots.map(s => `#${s.account_no} ${s.timezone}`).join(', ') }),
