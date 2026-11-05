@@ -665,6 +665,57 @@ describe('licence outage', () => {
     expect(memory().license_outage).toEqual({ 'lab-1': { attempts: 0, jitter: 0 } });
   });
 
+  /** Exits 74 now, after a run long enough to count as recovery. */
+  const failAfterLongRun = (docker: FakeDocker) => docker.containers.set('rs-fleet-lab-1', { ...exited('lab-1', 74, new Date(clock).toISOString()), started_at: new Date(clock - 120 * MIN).toISOString() });
+
+  it('a long-running worker that exits 74 keeps its first draw until the retry, and idle ticks write nothing', async () => {
+    const path = join(stateDir, 'memory.json');
+    const draws = [0.8, 0.1, 0.2, 0.3, 0.4, 0.5];
+    const random = () => draws.shift()!;
+    const docker = new FakeDocker();
+    failAfterLongRun(docker);
+    const a = agent(docker, { random });
+    await a.tick();
+    expect(memory().license_outage).toEqual({ 'lab-1': { attempts: 0, jitter: 0.8 } });
+    writeFileSync(path, 'untouched');
+    for (const step of [1, 1, 3, 0.9]) { // to 5.9 min of the 6 the first draw gives
+      clock += step * MIN;
+      await a.tick();
+      expect(starts(docker)).toBe(0);
+    }
+    expect(draws).toHaveLength(5);
+    expect(readFileSync(path, 'utf8')).toBe('untouched');
+    clock += 0.1 * MIN;
+    await a.tick();
+    expect(starts(docker)).toBe(1);
+    expect(memory().license_outage).toEqual({ 'lab-1': { attempts: 1, jitter: 0.1 } });
+  });
+
+  it('a long run that ends in another 74 is a new outage: one fresh draw, attempts back to 0', async () => {
+    remember({ license_outage: { 'lab-1': { attempts: 3, jitter: 0.9 } } });
+    const draws = [0.2, 0.7, 0.7];
+    const docker = new FakeDocker();
+    failAfterLongRun(docker);
+    const a = agent(docker, { random: () => draws.shift()! });
+    await a.tick();
+    expect(memory().license_outage).toEqual({ 'lab-1': { attempts: 0, jitter: 0.2 } });
+    clock += 5.2 * MIN;
+    await a.tick();
+    expect(starts(docker)).toBe(0);
+    expect(draws).toHaveLength(2);
+    clock += 0.05 * MIN; // 5.25 min: 5 plus 25% of the 0.2 draw
+    await a.tick();
+    expect(starts(docker)).toBe(1);
+  });
+
+  it('a long run that ends in any other exit still clears the record', async () => {
+    remember({ license_outage: { 'lab-1': { attempts: 0, jitter: 0.5 } } });
+    const docker = new FakeDocker();
+    docker.containers.set('rs-fleet-lab-1', { ...exited('lab-1', 75, new Date(clock).toISOString()), started_at: new Date(clock - 120 * MIN).toISOString() });
+    await agent(docker).tick();
+    expect(memory().license_outage).toEqual({});
+  });
+
   it('a short recovery does not clear the count', async () => {
     remember({ license_outage: { 'lab-1': { attempts: 3, jitter: 0 } } });
     const docker = new FakeDocker([running('lab-1', 'img:1', new Date(clock - 10 * MIN).toISOString())]);

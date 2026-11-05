@@ -251,11 +251,16 @@ export class Agent {
     let changed = false;
     for (const c of observed) {
       const id = c.worker_id;
-      if (this.memory.license_outage[id] && ranHealthily(c, now)) {
+      const outageExit = !c.running && c.exit_code === EXIT_LICENSE_OUTAGE;
+      const retry = this.memory.license_outage[id];
+      // A finished run's length never changes, so this is true on every tick
+      // until the retry. Reopening each time would redraw the jitter, and the
+      // shortest draw would win. With no retry made, the record is already right.
+      if (retry && ranHealthily(c, now) && !(outageExit && retry.attempts === 0)) {
         delete this.memory.license_outage[id];
         changed = true;
       }
-      if (!c.running && c.exit_code === EXIT_LICENSE_OUTAGE && !this.memory.license_outage[id]) {
+      if (outageExit && !this.memory.license_outage[id]) {
         this.memory.license_outage[id] = { attempts: 0, jitter: this.random() };
         changed = true;
       }

@@ -55,6 +55,10 @@ any host, which needs the owner's yes. Any ERP UI for the new hold.
   reads 74 as a crash and holds the worker after 5 restarts.
 - Jitter is drawn once per wait and stored. Drawn per tick, the shortest draw
   would soon win and the delay would collapse to its base.
+- A finished run's length never changes, so a long run that ended in 74 looks
+  recovered on every tick until its retry. A record with no retry made is left
+  alone there, or each tick would redraw the jitter. One with retries made
+  resets once: that long run means this is a new outage.
 - Jitter applies above the 60 min cap, so a wait can reach 75 min. The capped
   retries are the ones a long outage lines up, so they need it most.
 - A `replace` counts its attempt once the old container is gone, not at the
