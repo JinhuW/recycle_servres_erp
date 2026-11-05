@@ -41,7 +41,7 @@ what answers.
 | Agent holds: exit `0`/`143` while the agent ran (`operator_stopped`) and the crash limit (`crash_limit`) leave a worker stopped like `78`; report containers carry optional `hold`, `exit_code`, `image_id`, and the report an optional `agent` identity; repeated `75` backs off; `401/403/404` on `desired` means observe-only; `--` before the image; `FLEET_IMAGE_PREFIX` | §6, §10 | agent review fixes |
 | No coordinator in the MVP: `FLEET_COORDINATOR_URL` may be empty, and `settings.coordinator_url` is then `null` | §2, §5 | this change |
 | Exit code `78`: the worker cannot connect and waits for an operator; the agent never restarts it | §6, §10 | this change |
-| Exit code `74`: licence outage. Bounded agent retries, then hold `license_outage`; report containers carry optional `outage_attempts`. Agents must have this before worker 0.17.0, which emits `74`: an older agent reads it as a crash | §6, §10 | licence outage exit |
+| Exit code `74`: licence outage. One probing worker per host, retried with no limit; report containers carry optional `outage_attempts`. Agents must have this before worker 0.17.0, which emits `74`: an older agent reads it as a crash | §6, §10 | licence outage exit |
 | A missing server key is `503 {error: "unavailable"}`, never 401; worker 401s carry `detail` `missing_token` / `bad_token` / `expired_token`; `FLEET_WORKER_TOKEN_KEY_PREVIOUS` for rotation | §2, §3, §5 | RS-406 |
 | Claim: `worker_id` must be `<host_id>-<n>`; a claim-id retry or handoff waits for its own slot instead of skipping to another | §5 | RS-406 |
 | Handoff reservations carry `reserved_until` (gate timeout) instead of an infinite lease; slot rows add `reserved_until`; park/unpark clear the handoff | §4, §6, §7 | RS-406 |
@@ -605,7 +605,7 @@ with a fresh socket for the next viewer.
   "vnc_ports": { "homelab-1": 5901, "homelab-2": 5902 }, "roll": { "replace": "homelab-2" } | null }
 // POST /api/fleet/hosts/:id/report
 { "version": "1.340.0", "containers": [ { "worker_id": "homelab-1", "image": "…", "state": "running", "started_at": "…",
-    "hold"?: "operator_needed" | "crash_limit" | "operator_stopped" | "license_outage", "exit_code"?: 0 | null, "outage_attempts"?: 0, "image_id"?: "sha256:…" } ],
+    "hold"?: "operator_needed" | "crash_limit" | "operator_stopped", "exit_code"?: 0 | null, "outage_attempts"?: 0, "image_id"?: "sha256:…" } ],
   "agent"?: { "instance_id": "uuid", "daemon_id": "…" | null, "conflict"?: ["other-agent-container"] } }
 // 200 { "ok": true }   (sets fleet_hosts.report, version, last_seen_at; 422 over 200 KB)
 // 403 { "error": "agent_conflict" }   on desired or report: another agent instance holds this host
@@ -736,12 +736,13 @@ already holds. Slot rows show a reservation as `reserved_until`, not as
   had five 75/70 restarts in 30 min; `70` → restart after 10 min; any other
   exit except `0`/`143`/`74`/`78` → restart after 60 s and counts as a crash.
   `75`, `74`, `70`, `0`, `143` and `78` never count as crashes.
-- Exit `74` (licence outage): restart after 5 min, doubling to at most 60 min,
-  each wait plus up to 25% jitter, at most 8 retries, under the same one-start
-  stagger; a further `74` is held as `license_outage`. The count is per worker
-  id, survives agent restarts, and clears when a run lasts over 60 min or a
-  person brings a held worker back. Report containers carry `outage_attempts`
-  from the first `74` until it clears.
+- Exit `74` (licence outage): never held. One worker per host, the lowest number,
+  probes after 5 min, doubling to at most 60 min, each wait plus up to 25% jitter,
+  after any other start in the tick. The others wait and spend no attempts. A probe
+  still running after 15 min ends the outage, and every `74` from before then
+  restarts under the one-start stagger. The count is per worker id, survives agent
+  restarts, and clears when a run lasts over 15 min. Report containers carry
+  `outage_attempts` from the first `74` until it clears.
 - **Held: never restarted, online or offline**, until a person starts the
   container (`docker start`) or removes it (`docker rm`, after which it is a
   missing worker). The report gives each held container `state` and `hold`
@@ -749,8 +750,6 @@ already holds. Slot rows show a reservation as `reserved_until`, not as
   - `operator_needed`: it exited `78`;
   - `crash_limit`: 5 crashes in 30 min. The hold belongs to that container
     and outlives the window and agent restarts;
-  - `license_outage`: it exited `74` after 8 retries. The hold belongs to that
-    container and outlives agent restarts;
   - `operator_stopped`: it exited `0` or `143` after the agent started, and
     the agent had not stopped it itself (someone ran `docker stop`). An exit
     from before the agent started is a host or daemon restart and is

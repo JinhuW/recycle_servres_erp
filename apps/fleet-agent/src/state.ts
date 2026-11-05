@@ -25,12 +25,13 @@ export interface Memory {
   restarts: Record<string, number[]>;
   soft_restarts: Record<string, number[]>;
   license_outage: Record<string, OutageRetry>;
+  outage_recovered_at: number | null;
   held: Record<string, HoldEntry>;
   self_stopped: Record<string, number>;
 }
 
 export function emptyMemory(): Memory {
-  return { last_start_at: null, restarts: {}, soft_restarts: {}, license_outage: {}, pending: {}, held: {}, self_stopped: {} };
+  return { last_start_at: null, restarts: {}, soft_restarts: {}, license_outage: {}, outage_recovered_at: null, pending: {}, held: {}, self_stopped: {} };
 }
 
 function writePrivate(path: string, text: string): void {
@@ -84,7 +85,7 @@ export function loadMemory(dir: string): Memory {
   const held: Record<string, HoldEntry> = {};
   if (isObject(raw.held)) {
     for (const [id, h] of Object.entries(raw.held)) {
-      if (isObject(h) && typeof h.container === 'string' && (h.reason === 'crash_limit' || h.reason === 'operator_stopped' || h.reason === 'license_outage')) {
+      if (isObject(h) && typeof h.container === 'string' && (h.reason === 'crash_limit' || h.reason === 'operator_stopped')) {
         held[id] = { container: h.container, reason: h.reason };
       }
     }
@@ -107,6 +108,7 @@ export function loadMemory(dir: string): Memory {
     restarts: times(raw.restarts),
     soft_restarts: times(raw.soft_restarts),
     license_outage: licenseOutage,
+    outage_recovered_at: typeof raw.outage_recovered_at === 'number' && Number.isFinite(raw.outage_recovered_at) ? raw.outage_recovered_at : null,
     held,
     self_stopped: selfStopped,
   };

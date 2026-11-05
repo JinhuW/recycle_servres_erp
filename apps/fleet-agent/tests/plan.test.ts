@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CRASH_LIMIT, EXIT_LICENSE_OUTAGE, effectiveLastStart, holdOf, isCrash, OUTAGE_ATTEMPT_LIMIT, outageDelayMs, plan, ranHealthily, SOFT_BACKOFF_MS, SOFT_LIMIT, type Container, type PlanInput } from '../src/plan.js';
+import { CRASH_LIMIT, EXIT_LICENSE_OUTAGE, effectiveLastStart, holdOf, isCrash, OUTAGE_RECOVERED_MS, outageDelayMs, plan, ranHealthily, SOFT_BACKOFF_MS, SOFT_LIMIT, type Container, type PlanInput } from '../src/plan.js';
 import type { Desired } from '../src/types.js';
 import { exited, running } from './helpers/fake-docker.js';
 
@@ -397,34 +397,49 @@ describe('licence outage (exit 74)', () => {
     expect(p.actions[0]).toMatchObject({ kind: 'start', worker_id: 'lab-1', counted: false, soft: false, outage: true });
   });
 
-  it('holds once the attempts are used, at once and without the wait', () => {
-    const c = out('lab-1', 1000);
-    const p = run([c, running('lab-2')], { outage: { 'lab-1': { attempts: OUTAGE_ATTEMPT_LIMIT, jitter: 0 } } });
-    expect(OUTAGE_ATTEMPT_LIMIT).toBe(8);
-    expect(p.actions).toEqual([]);
-    expect(p.holds).toEqual({ 'lab-1': { container: c.id, reason: 'license_outage' } });
+  it('never holds: the eighth, ninth and hundredth retry all wait about an hour', () => {
+    for (const attempts of [7, 8, 100]) {
+      const outage = { 'lab-1': { attempts, jitter: 0 } };
+      expect(run([out('lab-1', 59 * MIN), running('lab-2')], { outage }).actions).toEqual([]);
+      const p = run([out('lab-1', 61 * MIN), running('lab-2')], { outage });
+      expect(kinds(p)).toEqual([['start', 'lab-1']]);
+      expect(p.holds).toEqual({});
+    }
   });
 
-  it('retries the eighth attempt', () => {
-    const p = run([out('lab-1', 61 * MIN), running('lab-2')], { outage: { 'lab-1': { attempts: OUTAGE_ATTEMPT_LIMIT - 1, jitter: 0 } } });
-    expect(kinds(p)).toEqual([['start', 'lab-1']]);
-  });
-
-  it('a kept hold stays stopped, and says why', () => {
-    const c = out('lab-1', 24 * 60 * MIN);
-    const held = { 'lab-1': { container: c.id!, reason: 'license_outage' as const } };
-    expect(holdOf(c, { held })).toBe('license_outage');
-    const p = run([c, running('lab-2')], { held });
-    expect(p.actions).toEqual([]);
-    expect(p.notes.some((n) => n.startsWith('lab-1: licence outage retries used (last exit 74)'))).toBe(true);
-  });
-
-  it('takes one start per tick when several fall due, and none inside the stagger', () => {
+  it('probes with one worker per host, the lowest number, and the rest spend no attempts', () => {
     const three = [out('lab-1', 6 * MIN), out('lab-2', 6 * MIN), out('lab-3', 6 * MIN)];
     const p = run(three, {}, { count: 3 });
     expect(kinds(p)).toEqual([['start', 'lab-1']]);
-    expect(p.notes).toContain('lab-2: exit 74; restart waits for its turn');
+    expect(p.notes).toContain('lab-2: licence outage; waits for the host\'s probe');
     expect(run(three, { lastStartAt: NOW - MIN }, { count: 3 }).actions).toEqual([]);
+  });
+
+  it('waits on the probe\'s own backoff, not on a due worker behind it', () => {
+    const outage = { 'lab-1': { attempts: 3, jitter: 0 } }; // 40 min
+    expect(run([out('lab-1', 10 * MIN), out('lab-2', 10 * MIN)], { outage }, { count: 2 }).actions).toEqual([]);
+  });
+
+  it('starts no second probe while one is running', () => {
+    const outage = { 'lab-1': { attempts: 1, jitter: 0 } };
+    const p = run([running('lab-1'), out('lab-2', 60 * MIN)], { outage }, { count: 2 });
+    expect(p.actions).toEqual([]);
+    expect(p.notes).toContain('lab-2: licence outage; waits for lab-1\'s probe');
+  });
+
+  it('gives a stock restart the start ahead of a due probe, whatever its number', () => {
+    const p = run([out('lab-1', 6 * MIN), exited('lab-2', 75, ago(120))], {}, { count: 2 });
+    expect(kinds(p)).toEqual([['start', 'lab-2']]);
+  });
+
+  it('lets the rest follow one at a time once a probe has stayed up, with no probe wait', () => {
+    const outage = { 'lab-2': { attempts: 0, jitter: 0 }, 'lab-3': { attempts: 0, jitter: 0 } };
+    const recovered = { outageRecoveredAt: NOW - MIN, outage };
+    const p = run([running('lab-1'), out('lab-2', 3 * MIN), out('lab-3', 3 * MIN)], recovered, { count: 3 });
+    expect(kinds(p)).toEqual([['start', 'lab-2']]);
+    expect(p.actions[0]).toMatchObject({ outage: true });
+    // A 74 after the recovery is a new outage, back behind a probe.
+    expect(run([running('lab-1'), out('lab-2', 0), out('lab-3', 0)], { outageRecoveredAt: NOW - MIN }, { count: 3 }).actions).toEqual([]);
   });
 
   it('recreates a spent ticket or reservation online, and leaves it waiting offline', () => {
@@ -443,13 +458,14 @@ describe('licence outage (exit 74)', () => {
     expect(run([out('lab-1', 6 * MIN)], {}, { authoritative: false }).actions).toEqual([]);
   });
 
-  it('counts a run as recovery only past the backoff cap, running or finished', () => {
+  it('counts a run as recovery only past 15 minutes, running or finished', () => {
     const start = (msAgo: number) => new Date(NOW - msAgo).toISOString();
-    expect(ranHealthily(running('lab-1', 'img:1', start(61 * MIN)), NOW)).toBe(true);
-    expect(ranHealthily(running('lab-1', 'img:1', start(59 * MIN)), NOW)).toBe(false);
+    expect(OUTAGE_RECOVERED_MS).toBe(15 * MIN);
+    expect(ranHealthily(running('lab-1', 'img:1', start(16 * MIN)), NOW)).toBe(true);
+    expect(ranHealthily(running('lab-1', 'img:1', start(14 * MIN)), NOW)).toBe(false);
     const finished = exited('lab-1', 74, start(MIN));
-    expect(ranHealthily({ ...finished, started_at: start(62 * MIN) }, NOW)).toBe(true);
-    expect(ranHealthily({ ...finished, started_at: start(30 * MIN) }, NOW)).toBe(false);
+    expect(ranHealthily({ ...finished, started_at: start(17 * MIN) }, NOW)).toBe(true);
+    expect(ranHealthily({ ...finished, started_at: start(10 * MIN) }, NOW)).toBe(false);
     expect(ranHealthily({ ...finished, started_at: null }, NOW)).toBe(false);
   });
 
