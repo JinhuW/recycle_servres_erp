@@ -123,7 +123,8 @@ sellOrders.get('/', async (c) => {
       -- Products, by #; a line not numbered yet counts on its own.
       COUNT(DISTINCT COALESCE(sol.product_no::text, sol.id::text))::int AS line_count,
       COALESCE(SUM(sol.qty), 0)::int                    AS qty,
-      COALESCE(SUM(sol.qty * sol.unit_price), 0)::float AS subtotal
+      COALESCE(SUM(sol.qty * sol.unit_price), 0)::float AS subtotal,
+      COALESCE(SUM(sol.qty * COALESCE(sol.source_unit_price, sol.unit_price)), 0)::float AS native_total
     FROM sell_orders so
     JOIN customers c ON c.id = so.customer_id
     LEFT JOIN users pu ON pu.id = so.payment_received_by
@@ -153,6 +154,8 @@ sellOrders.get('/', async (c) => {
     // inbox sorts apples-to-apples regardless of each order's source currency.
     subtotal: r.subtotal,
     total: r.subtotal,
+    // What the row displays: the amount in the currency the order was sold in.
+    nativeTotal: +(r.native_total as number).toFixed(2),
     adjusted: r.adjusted as boolean,
   }));
   return c.json({

@@ -47,6 +47,16 @@ export const fmtMoney = (
   return signed(n, sym ?? `${currency} `, fmt(Math.abs(n), locale));
 };
 
+export const fmtMoney0 = (
+  n: number | null | undefined,
+  currency: string,
+  locale = 'en-US',
+) => {
+  if (n == null) return '—';
+  const sym = CURRENCY_SYMBOL[currency];
+  return signed(Math.round(n), sym ?? `${currency} `, fmt0(Math.abs(n), locale));
+};
+
 export const fmtDate = (d: Date | string, locale = 'en-US') =>
   new Date(d).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' });
 
