@@ -298,3 +298,29 @@ moved exit, since `exit_moved` needs the exit to be the only failure.
 **S3, in part.** Seed 48213's canvas (`62c165a0e1b0`) and WebGL (`bbec01befde1`) hashes
 and its font count are the same on both builds. The UA's Chrome version does change.
 
+## Re-run after the fixes: `development`, 2026-11-05 (RS-551)
+
+Monitor `5ff8fc2`, build pinned to 155.0.8059.39.2, no account and no Facebook page. It
+drove the real `_fleet_park` and exit path with a stub marketplace.
+
+| Case | Result |
+| --- | --- |
+| Good profile | Preflight has no failures, window 1919 / 1911 |
+| Forced wrong exit | `exit_ip_expected` alone, reads `exit_moved` |
+| Forced blocked WebRTC | `webrtc` alone, reads `profile_preflight` |
+| Blocked before launch | **Exit 74** |
+| Blocked 1 minute after launch | Dies at 16 min, recheck takes 24 s, **exit 74** |
+| Blocked 18 min 18 s after launch | Dies at 31 min, recheck takes 25 s, **exit 74** |
+| Browser killed, licence fine | Recheck takes 30.5 s, finds no outage, goes on to the park |
+
+Limits. The stub had no `stale_epoch_pending` or `park_for_operator`, so the killed-browser
+case left the real park loop with exit 78 and sent no heartbeat; the `browser_failed`
+report is covered by a unit test. `facebook_opened` in these runs is the stub's. The host
+and exit share an IP on this network, so this run adds nothing on a WebRTC leak; S1 on
+`oci-sg-1` covers that, but on 156. Whether `playwright.stop()` frees a seat stays open.
+
+**An outage kills running browsers within about 16 minutes.** Death came 16 and 31 minutes
+after launch, whichever minute the block began, which fits a licence check about every 15
+minutes and about a minute's grace. So a longer outage ends every cloak browser, and each
+account that had a live session costs one boot login to bring back.
+

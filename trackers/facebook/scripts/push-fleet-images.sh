@@ -27,8 +27,11 @@
 #   CLOAKBROWSER_LICENSE_KEY            bakes the CloakBrowser binary into the worker
 #                                       (a BuildKit secret, never in the image); unset,
 #                                       the worker is stock-only
-#   RS_CLOAK_VERSION                    labels the worker with the baked build; the
-#                                       build fails if the key fetched another one
+#   RS_CLOAK_VERSION  155.0.8059.39.2   the CloakBrowser build to bake; the build fails
+#                                       if the key fetched another one. A new build is a
+#                                       visible device change, and 156 fails the window
+#                                       preflight, so moving it is a decision. A free key
+#                                       can't pin and fails the build
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)        # trackers/facebook
@@ -81,7 +84,7 @@ if [ "$ONLY" != agent ]; then
     [ "$PUSH" = 0 ] || sh "$ROOT/scripts/check-release-tag.sh"
     if [ -n "${CLOAKBROWSER_LICENSE_KEY:-}" ]; then
         set -- --build-arg CLOAK_BAKE=1 --secret id=cloak_key,env=CLOAKBROWSER_LICENSE_KEY \
-            --build-arg RS_CLOAK_VERSION="${RS_CLOAK_VERSION:-}"
+            --build-arg RS_CLOAK_VERSION="${RS_CLOAK_VERSION:-155.0.8059.39.2}"
     else
         echo "  no CLOAKBROWSER_LICENSE_KEY: the worker image is stock-only" >&2
         set --
