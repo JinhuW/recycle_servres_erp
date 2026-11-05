@@ -176,6 +176,50 @@ describe('accounting', () => {
     });
   });
 
+  it('holds a commission entry to what the purchaser earns: the commission, plus a cost they paid themselves', async () => {
+    type Row = Entry & {
+      record: { amount: number | null } | null;
+      mismatch: { figureCny: number } | null;
+    };
+    const sofia = await loginAs(SOFIA);
+    const marcus = await loginAs(MARCUS);
+    // Two sticks bought at $10 and priced at $40: $20 cost, $30 commission at 50%.
+    const figureFor = async (
+      over: { payment: 'company' | 'self'; paidBy?: string | null; rate?: number | null; amount: number },
+    ) => {
+      const po = await donePO();
+      const id = await recorded(alex.token, base({ kind: 'commission', targetId: po, amount: over.amount }));
+      await getTestDb()`
+        UPDATE orders SET payment = ${over.payment}, paid_by = ${over.paidBy ?? null},
+          commission_rate = ${over.rate === undefined ? 0.5 : over.rate}
+        WHERE id = ${po}`;
+      const rows = (await listOf(alex.token, '')).rows as Row[];
+      return rows.find(r => r.id === id)!;
+    };
+
+    // ¥360 at the ledger's 7.2 is what the purchaser was paid in one transfer.
+    expect(await figureFor({ payment: 'self', paidBy: marcus.user.id, amount: 360 }))
+      .toMatchObject({ record: { amount: 50 }, mismatch: null });
+    // No payer on file predates the field, when Self meant the purchaser.
+    expect(await figureFor({ payment: 'self', amount: 360 }))
+      .toMatchObject({ record: { amount: 50 }, mismatch: null });
+    // The commission alone leaves the cost owed, so the book flags it.
+    expect(await figureFor({ payment: 'self', paidBy: marcus.user.id, amount: 216 }))
+      .toMatchObject({ record: { amount: 50 }, mismatch: { figureCny: 360 } });
+
+    // Another manager is reimbursed apart, and the company's cost is not owed to anyone.
+    expect(await figureFor({ payment: 'self', paidBy: sofia.user.id, amount: 216 }))
+      .toMatchObject({ record: { amount: 30 }, mismatch: null });
+    expect(await figureFor({ payment: 'company', amount: 216 }))
+      .toMatchObject({ record: { amount: 30 }, mismatch: null });
+
+    // With no rate there is no commission yet: a self-paid cost is still owed.
+    expect(await figureFor({ payment: 'self', paidBy: marcus.user.id, rate: null, amount: 144 }))
+      .toMatchObject({ record: { amount: 20 }, mismatch: null });
+    expect(await figureFor({ payment: 'company', rate: null, amount: 144 }))
+      .toMatchObject({ record: { amount: null }, mismatch: null });
+  });
+
   it('books dollars into RMB at the typed rate, or the FX ledger\'s', async () => {
     const typed = await recorded(alex.token, base({ currency: 'USD', amount: 100, fxRate: 7.1 }));
     const latest = await recorded(alex.token, base({ currency: 'USD', amount: 100 }));

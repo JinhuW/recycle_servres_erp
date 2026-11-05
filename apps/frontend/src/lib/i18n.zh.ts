@@ -4820,7 +4820,7 @@ const zh: Record<string, string> = {
   acctErrManager: '请选择付款方。',
   acctOrphanNote: '这笔记录对应的单据已被删除，钱仍留在账上。',
   acctFigurePurchase: '采购成本',
-  acctFigureCommission: '预计佣金',
+  acctFigureCommission: '采购员收益',
   acctFigureSale: '订单总额',
   acctFigureAs: '案例金额',
   acctUsdOriginal: '{usd}，汇率 {rate}',

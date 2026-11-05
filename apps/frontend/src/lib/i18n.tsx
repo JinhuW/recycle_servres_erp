@@ -574,7 +574,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     acctErrManager: 'Pick who paid.',
     acctOrphanNote: 'The record this entry was for has been deleted. The money stays in the book.',
     acctFigurePurchase: 'PO cost',
-    acctFigureCommission: 'Projected commission',
+    acctFigureCommission: 'Purchaser earns',
     acctFigureSale: 'Order total',
     acctFigureAs: 'Case amount',
     acctUsdOriginal: '{usd} at {rate}',
