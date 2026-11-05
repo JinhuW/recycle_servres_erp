@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-546](./RS-546-fleet-show-outages-holds-and-exit-alerts-on-desktop.md) | done | story | P2 | Fleet: show outages, holds and exit alerts on desktop | 1.425.0 |
 | [RS-545](./RS-545-fleet-worker-0-17-0-exit-moved-outage-operator-flag.md) | in-progress | bug | P1 | Fleet worker 0.17.0: exit_moved, outage operator flag, honest resume | — |
 | [RS-544](./RS-544-fleet-agent-one-licence-probe-per-host-stock-first.md) | done | bug | P1 | Fleet agent: one licence probe per host, stock first | 1.424.4 |
 | [RS-543](./RS-543-fleet-exit-lease-and-pilot-rules-for-cloak-slots.md) | done | bug | P1 | Fleet: exit, lease and pilot rules for cloak slots | 1.424.3 |

@@ -3537,7 +3537,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   stock restart never queues behind an outage. The others wait and spend no
   attempts. A probe still up after 15 minutes ends the outage, and the rest restart
   one stagger apart with nobody going to the host. The host's report carries
-  `outage_attempts` during an outage. Since v1.424.3 (RS-543) the outage
+  `outage_attempts` during an outage. Since v1.425.0 (RS-546) the Fleet tab has a banner
+  for an outage, for containers held for a person and for unread fleet alerts, each
+  dismissable on its own. A worker row names `Licence outage` or `Exit moved`. A
+  worker whose port moved after a page opened offers **Restart**, which warns it is
+  one boot login, and which nothing does by itself. Since v1.424.3 (RS-543) the outage
   heartbeat keeps the slot's lease for 24 hours, so a worker with no slot takes
   stock accounts first, and a rolling release skips a worker that comes back
   parked on `license_outage` or `exit_moved`, and any running cloak worker during
@@ -3816,7 +3820,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     first claim, and also when the exit's zone moves or another slot lands on the
     same exit; a re-add or Change proxy re-records the exit and its clock. A seed
     another account holds is drawn again. A pool account with a profile or a pilot
-    record refuses a new UID. A refusal from
+    record refuses a new UID. Add to fleet offers known pilots and makes the arm an
+    explicit choice, and a remove and re-add can correct either before the first
+    claim (v1.425.0). A refusal from
     `POST /api/fleet/slots/:no/engine` reads as a sentence: a live session,
     CloakBrowser off, every seat taken, or switched before. A CloakBrowser
     row offers **Back to stock**, another new device, only while no worker

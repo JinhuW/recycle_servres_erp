@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { handleFetchError } from '../../../lib/errorToast';
 import type { FbWorkerStint } from '../../../lib/facebookPool';
-import { fleetApi, type FleetCity, type FleetSlot, type FleetWorkerDetail } from '../../../lib/fleet';
+import { fleetApi, fleetRestartable, type FleetCity, type FleetSlot, type FleetWorkerDetail } from '../../../lib/fleet';
 import { browserLabel, SESSION_WARN_DAYS } from '../../../lib/fleetView';
 import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
@@ -15,7 +15,7 @@ import {
   deviceText, erpCheckpoint, erpCityChips, erpConnectPark, erpCityLog, erpHistory, erpHistoryDot, erpProxyBehind, erpProxyText, erpWorkerRetirable, erpWorkerStatus, sessionDaysLeft,
   type ErpHistoryLine,
 } from './fleetWorkerView';
-import { EngineChip, MarkHealthyButton, ParkDialog, ReleaseQuarantineButton, RetireSlotDialog, UnparkDialog, useFleetMirror } from './shared';
+import { EngineChip, MarkHealthyButton, RestartWorkerButton, ParkDialog, ReleaseQuarantineButton, RetireSlotDialog, UnparkDialog, useFleetMirror } from './shared';
 import {
   AccountsUsed, CheckpointsCard, ErpBuildChip, Muted, NoThumb, WorkerCard, WorkerHead, WorkerHistory, type HistoryEntry, type WorkerField,
 } from './workerDetail';
@@ -168,6 +168,8 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
               {watchButton('btn')}
               {connectPark && d.holds_slot
                 && <MarkHealthyButton workerId={w.worker_id} version={w.version} resume={w.resume ?? null} state={w.state} onQueued={onReload} className="btn" />}
+              {fleetRestartable(w.state, w.detail) && d.holds_slot
+                && <RestartWorkerButton workerId={w.worker_id} resume={w.resume ?? null} state={w.state} onQueued={onReload} className="btn" />}
               {!mirror && <>
                 {slot && !slot.parked && <button type="button" className="btn" onClick={() => setDialog('park')}>{t('fleetPark')}</button>}
                 {slot?.parked && <button type="button" className="btn" onClick={() => setDialog('unpark')}>{t('fleetUnpark')}</button>}

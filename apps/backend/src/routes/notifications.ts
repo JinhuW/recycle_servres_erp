@@ -31,7 +31,11 @@ notifications.get('/', async (c) => {
 notifications.post('/mark-read', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
-  await sql`UPDATE notifications SET unread = FALSE WHERE user_id = ${u.id} AND unread = TRUE`;
+  // With an id, just that one, so a page can dismiss an alert without emptying the inbox.
+  const body = (await c.req.json().catch(() => null)) as { id?: unknown } | null;
+  const id = typeof body?.id === 'string' ? body.id : null;
+  await sql`UPDATE notifications SET unread = FALSE
+    WHERE user_id = ${u.id} AND unread = TRUE ${id ? sql`AND id::text = ${id}` : sql``}`;
   return c.json({ ok: true });
 });
 

@@ -114,7 +114,10 @@ export function CohortAccounts({ rows }: { rows: FleetCohortAccount[] }) {
             <tr key={a.account_no}>
               <td className="num mono">{a.account_no}</td>
               <td className="fp-muted">{a.batch ?? '—'}</td>
-              <td>{t(a.arm === 'cloak' ? 'fleetEngine_cloak' : 'fleetEngine_stock')}</td>
+              <td>
+                {t(a.arm === 'cloak' ? 'fleetEngine_cloak' : 'fleetEngine_stock')}
+                {a.crossed_arm && <>{' '}<span className="chip warn" title={t('fleetCohortCrossedHint')}>{t('fleetCohortCrossed')}</span></>}
+              </td>
               <td className="fp-muted">{a.first_claimed_at ? new Date(a.first_claimed_at).toLocaleString(locale) : t('fleetCohortNotClaimed')}</td>
               <td>{outcome(a.outcome_24h, a.in_loss_state_24h)}</td>
               <td>{outcome(a.outcome_7d, a.in_loss_state_7d)}</td>
@@ -153,7 +156,7 @@ export function FleetCohortCard() {
   const { t } = useT();
   const [pilot, setPilot] = useState('');
   const [days, setDays] = useState<number>(SCORECARD_DAYS[0]);
-  const { data, reload } = useFleetPoll<FleetCohortReport>(
+  const { data, failed, reload } = useFleetPoll<FleetCohortReport>(
     () => fleetApi.cohorts(pilot ? { pilot } : { days }),
     COHORT_POLL_MS,
   );
@@ -185,7 +188,7 @@ export function FleetCohortCard() {
           )}
         </div>
       </div>
-      {data === 'unavailable' ? <p className="fp-muted fleet-note fleet-cohort-note">{t('fleetCohortUnavailable')}</p>
+      {data === 'unavailable' || (report === null && failed) ? <p className="fp-muted fleet-note fleet-cohort-note">{t('fleetCohortUnavailable')}</p>
         : report === null ? <TableSkeleton rows={4} cols={12} />
         : <CohortBody report={report} />}
     </section>

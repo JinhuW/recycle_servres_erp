@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fleetResumable, fleetTakesResume } from './fleet';
+import { fleetRestartable, fleetResumable, fleetTakesResume } from './fleet';
 import { resumeWaiting } from '../pages/desktop/fleet/shared';
 
 describe('Mark healthy', () => {
@@ -26,5 +26,14 @@ describe('Mark healthy', () => {
     expect(resumeWaiting(delivered, 'HEALTHY', at('12:01:00'))).toBe(false);
     expect(resumeWaiting(delivered, 'DEAD', at('12:02:20'))).toBe(false);
     expect(resumeWaiting(null, 'DEAD', at('12:01:00'))).toBe(false);
+  });
+});
+
+describe('fleetRestartable', () => {
+  it('is only a worker parked on a moved exit, which an automatic resume must not touch', () => {
+    expect(fleetRestartable('DEAD', { reason: 'exit_moved' })).toBe(true);
+    expect(fleetResumable('DEAD', { reason: 'exit_moved' })).toBe(false);
+    expect(fleetRestartable('DEAD', { reason: 'connect_failed' })).toBe(false);
+    expect(fleetRestartable('HEALTHY', { reason: 'exit_moved' })).toBe(false);
   });
 });
