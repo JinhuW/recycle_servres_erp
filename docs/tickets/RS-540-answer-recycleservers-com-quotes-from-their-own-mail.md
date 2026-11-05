@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-05
 reporter: jinhu
 branch: feat/quotes-mailbox
-pr:
+pr: "#1097"
 version: 1.424.0
 related: []
 ---
