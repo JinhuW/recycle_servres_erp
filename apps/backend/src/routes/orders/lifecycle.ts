@@ -446,6 +446,10 @@ function advanceRefusedResponse(
       return c.json({
         error: 'This PO has no cost — enter the unit cost on its products before submitting it.',
       }, 409);
+    case 'zeroCost':
+      return c.json({
+        error: 'Every product on this PO is $0 — confirm that when you submit it, or enter the unit cost.',
+      }, 409);
     case 'missingWarehouse':
       return c.json({ error: 'Pick the receiving warehouse before submitting it.' }, 409);
     case 'missingSource':
@@ -478,7 +482,7 @@ lifecycleRoutes.post('/:id/handoff', async (c) => {
     handoff?: { method?: unknown; byUserId?: unknown; trackingNumber?: unknown; carrier?: unknown } | null;
     payment?: unknown; paymentMethod?: unknown; paidByUserId?: unknown;
     paypalTxnId?: unknown; paymentScreenshotKey?: unknown; paymentScreenshotUrl?: unknown;
-    onBehalfOfUserId?: unknown; commissionRate?: unknown;
+    onBehalfOfUserId?: unknown; commissionRate?: unknown; confirmZeroCost?: unknown;
   } | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
 
@@ -580,6 +584,7 @@ lifecycleRoutes.post('/:id/handoff', async (c) => {
     paymentScreenshotUrl: opt(body.paymentScreenshotUrl),
     newOwner,
     commissionRate,
+    confirmZeroCost: body.confirmZeroCost === true,
   };
   // What the hand-off is about to write is what the advance inside it judges,
   // so the pull reads the request merged over the row — an id saved earlier

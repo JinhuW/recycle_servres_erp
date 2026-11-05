@@ -529,7 +529,7 @@ function Shell() {
   // line never fails to sync silently. A saved line of an existing order may
   // be counted down to 0; a line being captured needs at least 1.
   const lineSyncBlock = (l: DraftLine, allowZeroQty = false): string | null => {
-    const fields = missingFieldNames(lineRequirements(l, { allowZeroQty }).missingKeys, t, lang);
+    const fields = missingFieldNames(lineRequirements(l, { allowZeroQty, allowZeroCost: true }).missingKeys, t, lang);
     return fields ? t('drawerStillNeeded', { fields }) : null;
   };
 

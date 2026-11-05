@@ -63,10 +63,13 @@ function missingIdentityFields(line: RequirementLine): string[] {
  * `allowZeroQty` is for a line already on a PO: it may be counted down to 0
  * when none of it arrived, which keeps the PO's line numbers where deleting it
  * would not. A blank qty is still missing. A new line needs at least 1.
+ *
+ * `allowZeroCost` is the phone form's: a typed 0 is an answer, and the purchaser
+ * is asked about it when the PO leaves Draft. A blank cost is still missing.
  */
 export function lineRequirements(
   line: RequirementLine,
-  { requireCost = true, allowZeroQty = false }: { requireCost?: boolean; allowZeroQty?: boolean } = {},
+  { requireCost = true, allowZeroQty = false, allowZeroCost = false }: { requireCost?: boolean; allowZeroQty?: boolean; allowZeroCost?: boolean } = {},
 ): {
   ready: boolean;
   missingKeys: string[];
@@ -76,8 +79,19 @@ export function lineRequirements(
     ? line.qty !== '' && line.qty != null && Number.isInteger(Number(line.qty)) && Number(line.qty) >= 0
     : Number(line.qty) > 0;
   if (!qtyOk) missingKeys.push('qty');
-  if (requireCost && !(Number(line.unitCost) > 0)) missingKeys.push('unitCost');
+  const costOk = allowZeroCost
+    ? line.unitCost !== '' && line.unitCost != null && Number(line.unitCost) >= 0
+    : Number(line.unitCost) > 0;
+  if (requireCost && !costOk) missingKeys.push('unitCost');
   return { ready: missingKeys.length === 0, missingKeys };
+}
+
+/** The lines a purchaser is asked about before a PO leaves Draft. A line counted
+ *  down to no units costs nothing either way, so it isn't one of them. */
+export function zeroCostLines<T extends { qty?: number | string | null; unitCost?: number | string | null }>(
+  lines: readonly T[],
+): T[] {
+  return lines.filter(l => Number(l.qty) > 0 && !(Number(l.unitCost) > 0));
 }
 
 /**
