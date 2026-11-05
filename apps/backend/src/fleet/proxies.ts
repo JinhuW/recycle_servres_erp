@@ -169,8 +169,19 @@ proxies.put('/:id', async (c) => {
       throw e;
     }
     // Those checks judged the old exit, so the new one starts unchecked, like
-    // a proxy just added, rather than inheriting its verdict.
-    if (sealed) await tx`UPDATE fleet_proxy_checks SET proxy_id = NULL WHERE proxy_id = ${id}`;
+    // a proxy just added, rather than inheriting its verdict. Claims that need
+    // an expected exit wait for its first reading, which is compared with this.
+    if (sealed) {
+      await tx`
+        UPDATE fleet_proxies p SET replaced_exit = COALESCE((
+          SELECT to_jsonb(k) FROM (
+            SELECT c.exit, c.source, c.proxy_id, c.checked_at, c.exit_ip, c.city, c.region, c.country, c.timezone
+            FROM fleet_proxy_checks c
+            WHERE c.proxy_id = ${id} AND c.source = 'erp' AND c.ok AND c.exit_ip IS NOT NULL
+            ORDER BY c.checked_at DESC, c.id DESC LIMIT 1) k), p.replaced_exit)
+        WHERE p.id = ${id}`;
+      await tx`UPDATE fleet_proxy_checks SET proxy_id = NULL WHERE proxy_id = ${id}`;
+    }
     // The slots follow, in the pool-then-slot lock order every slot write takes.
     const nos = (await tx<{ account_no: number }[]>`SELECT account_no FROM fleet_slots WHERE proxy_id = ${id}`).map((r) => r.account_no);
     if (nos.length && (sealed || (patch.timezone && patch.timezone !== cur.timezone))) {

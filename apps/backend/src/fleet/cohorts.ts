@@ -43,6 +43,7 @@ type Fact = {
   released_at: Date | null;
   held_at: Date | null;
   healthy_at: Date | null;
+  crossed_arm: boolean;
   state_short: string | null;
   state_long: string | null;
   searches: number;
@@ -176,6 +177,7 @@ const accountWire = (f: Fact, now: Date): FleetCohortAccount => ({
   enrolled_at: f.enrolled_at?.toISOString() ?? null,
   first_claimed_at: f.clock?.toISOString() ?? null,
   reached_healthy: f.clock && f.known ? f.healthy_at !== null : null,
+  crossed_arm: f.crossed_arm,
   lost_at: f.lost_at?.toISOString() ?? null,
   outcome_24h: outcomeAt(f, SHORT_HOURS, now),
   outcome_7d: outcomeAt(f, LONG_HOURS, now),
@@ -234,7 +236,10 @@ export async function cohortReport(sql: SqlLike, q: CohortQuery, now = new Date(
           c.clock)
       END AS held_at,
       (SELECT MIN(ev.at) FROM fleet_worker_state_events ev
-        WHERE ev.account_no = c.account_no AND ev.to_state = 'HEALTHY' AND ev.at >= c.clock) AS healthy_at,
+        WHERE ev.account_no = c.account_no AND ev.to_state = 'HEALTHY' AND ev.at >= c.clock
+          AND (NOT c.enrolled OR ev.engine = c.arm)) AS healthy_at,
+      c.enrolled AND EXISTS (SELECT 1 FROM fleet_worker_state_events ev
+        WHERE ev.account_no = c.account_no AND ev.engine <> c.arm) AS crossed_arm,
       (SELECT ev.to_state FROM fleet_worker_state_events ev
         WHERE ev.account_no = c.account_no AND ev.at <= c.clock + make_interval(hours => ${SHORT_HOURS})
         ORDER BY ev.at DESC, ev.id DESC LIMIT 1) AS state_short,
@@ -247,7 +252,7 @@ export async function cohortReport(sql: SqlLike, q: CohortQuery, now = new Date(
           AND t.done_at >= c.clock AND t.done_at < c.clock + make_interval(hours => ${LONG_HOURS})) AS searches,
       COALESCE((SELECT json_agg(x.changed_at ORDER BY x.changed_at) FROM fleet_proxy_exit_changes x
         WHERE x.changed_at >= c.clock AND x.changed_at <= c.clock + make_interval(hours => ${LONG_HOURS})
-          AND (c.account_no = ANY(x.slots) OR EXISTS (
+          AND (c.account_no = ANY(x.slots) OR c.account_no = ANY(x.shares_with) OR EXISTS (
             SELECT 1 FROM fb_worker_accounts w
             WHERE w.account_no = c.account_no AND lower(w.worker_id) IN (SELECT lower(u) FROM unnest(x.workers) u)
               AND w.started_at <= x.changed_at AND COALESCE(w.ended_at, 'infinity'::timestamptz) >= x.changed_at))), '[]'::json) AS exit_changes,

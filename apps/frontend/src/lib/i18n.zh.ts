@@ -108,6 +108,7 @@ const zh: Record<string, string> = {
     fpTokenHelp: "可选。账号附带的 Facebook 访问令牌（EAA… 开头）。",
     fpInvalidUid: "请输入 10–20 位数字 UID。",
     fpDuplicate: "该 UID 已在账号池中。",
+    fpUidPinned: "该账号已有浏览器配置或试点记录，不能更改 UID。",
     fpPasswordRequired: "请输入密码。",
     fpInvalidKey: "设置密钥只能包含 base32 字母 A–Z 和数字 2–7。",
     fpHolderRequired: "请为使用中或集群账号填写持有人。",

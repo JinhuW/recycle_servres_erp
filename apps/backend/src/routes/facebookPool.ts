@@ -471,6 +471,14 @@ pool.put('/:no', async (c) => {
     const storedCookie = unsealOrEmpty(cur.cookie_enc, key);
     const codes = validateFbPoolDraft(draft, await existingUids(tx), cur.uid, storedCookie);
     if (codes.length) return refusal(codes);
+    // The profile and any pilot record belong to the Facebook account, and a
+    // new uid under them would give another account its machine.
+    if (draft.uid !== cur.uid) {
+      const [profiled] = await tx`
+        SELECT 1 FROM fb_pool_accounts a
+        WHERE a.no = ${no} AND (a.cloak_seed IS NOT NULL OR EXISTS (SELECT 1 FROM fleet_pilot_enrollments e WHERE e.account_no = a.no))`;
+      if (profiled) return { status: 409, body: { error: 'Invalid account', code: 'fpUidPinned', codes: ['fpUidPinned'] } } as const;
+    }
     const s = sealDraft(draft, key);
     // A cookie that reads the same keeps its age; a new one is fresh today.
     const cookieUnchanged = draft.cookie === storedCookie;

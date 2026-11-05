@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-05:** ERP migration `0225`, Reddit tracker migration `0007`,
+**As of 2026-11-05:** ERP migration `0227`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2328,6 +2328,7 @@ The proxies the ERP fleet browses through, as a list managers edit on the Accoun
 | `port` | `integer` | ✓ |  | The exit's port (1..65535). |
 | `timezone` | `text` | ✓ |  | IANA zone of the exit; a slot's device clock follows it. |
 | `note` | `text` | ✓ | `''` |  |
+| `replaced_exit` | `jsonb` |  |  | The last good reading from before a URL edit, until the first reading of the new URL is compared with it. |
 | `created_by` | `uuid` |  |  | → users. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
 
@@ -2379,6 +2380,7 @@ One change of a port's measured exit, in IP or geo, against its last good check 
 | `new_city` / `new_region` / `new_country` / `new_timezone` | `text` |  |  | Where the new exit is. |
 | `slots` | `integer[]` | ✓ | `'{}'` | Account numbers of the slots on the proxy then. Plain values, since a slot can be deleted. |
 | `workers` | `text[]` | ✓ | `'{}'` | The homelab workers dialing the port then. |
+| `shares_with` | `integer[]` | ✓ | `'{}'` | Pilot accounts on other ports the move landed on the same exit as. The cohort flags them too. |
 | `notified_at` | `timestamptz` |  |  | When an alert covered it. NULL while waiting for the 30-minute gap, and always on a port nobody used. |
 
 - **Primary key:** `id`
@@ -2446,9 +2448,11 @@ One row per account ever enrolled through `POST /api/fleet/slots` with a pilot o
 | `pilot_id` | `text` |  |  | The caller's pilot name; NULL for an engine given outside a pilot. |
 | `arm` | `text` | ✓ |  | cloak or stock, as the caller passed it. |
 | `seed` | `integer` |  |  | The cloak seed; NULL exactly for a stock arm. |
-| `exit_ip` | `text` | ✓ |  | The exit measured at enrollment. A re-add or Change proxy re-records it while `first_claimed_at` is NULL, and it is never rewritten after that (migration 0225's column comment; 0224's own comment predates this). A pilot account's first claim waits while the proxy's latest good measurement differs from it. |
+| `exit_ip` | `text` | ✓ |  | The exit measured at enrollment. A re-add or Change proxy re-records it while `first_login_at` is NULL, and it is never rewritten after that (migration 0225's column comment; 0224's own comment predates this). A pilot account's claim waits until its first login while the proxy's latest good measurement differs from it, moves its zone, or another slot shares that exit. |
+| `exit_timezone` | `text` |  |  | The zone measured with `exit_ip`; NULL on rows from before migration 0227. |
 | `enrolled_at` | `timestamptz` | ✓ | `now()` |  |
-| `first_claimed_at` | `timestamptz` |  |  | Stamped by the account's first claim. |
+| `first_claimed_at` | `timestamptz` |  |  | Stamped by the account's first claim, which can end before any browser opens. The cohort clock. |
+| `first_login_at` | `timestamptz` |  |  | Stamped by the first heartbeat with `detail.facebook_opened`. Ends the first-login hold and the re-record path. |
 | `enrolled_by` | `text` |  |  | The manager's email. |
 
 - **Primary key:** `account_no`

@@ -127,6 +127,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fpTokenHelp: "Optional. The Facebook access token (EAA…) supplied with the account.",
     fpInvalidUid: "Enter a numeric UID with 10–20 digits.",
     fpDuplicate: "This UID is already in the pool.",
+    fpUidPinned: "This account has a browser profile or a pilot record, so its UID can't change.",
     fpPasswordRequired: "A password is required.",
     fpInvalidKey: "The setup key must use base32 letters A–Z and digits 2–7.",
     fpHolderRequired: "Enter a holder for a taken or fleet account.",

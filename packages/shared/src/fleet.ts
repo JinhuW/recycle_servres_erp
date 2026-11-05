@@ -72,6 +72,17 @@ export const fleetSlotRetirable = (s: {
   parked: boolean; poolStatus?: string | null; state: string | null | undefined; operator: boolean;
 }): boolean => s.parked || (!!s.poolStatus && s.poolStatus !== 'fleet') || (fleetStateParked(s.state) && !s.operator);
 
+/** How long a worker that left on a licence outage keeps its slot. Past the
+ *  retries' longest gap, and short enough that a host lost during an outage
+ *  doesn't strand its accounts for good. */
+export const FLEET_OUTAGE_LEASE_MINUTES = 24 * 60;
+
+/** Parks that say nothing about the worker's image: its licence server is down,
+ *  or its port moved. A rolling release skips these rather than failing. */
+const FLEET_INFRA_PARKS: readonly unknown[] = ['license_outage', 'exit_moved'];
+export const fleetInfraPark = (state: string | null | undefined, detail: unknown): boolean =>
+  state === 'DEAD' && !!detail && typeof detail === 'object' && FLEET_INFRA_PARKS.includes((detail as Record<string, unknown>).reason);
+
 export type FleetCity = {
   slug: string;
   name: string;
@@ -271,10 +282,11 @@ export function fleetDeviceFor(accountNo: number, timezone: string): FleetDevice
 /**
  * The CloakBrowser fingerprint a slot gets when it is switched, fixed by its
  * account number like its device: a seed is the whole machine to Facebook, so
- * one made again for the same account has to come out the same.
+ * one made again for the same account has to come out the same. `attempt` is
+ * for a seed another account already has.
  */
-export function fleetCloakFor(accountNo: number): { cloak_seed: number; cloak_gpu: FleetCloakGpu } {
-  const h = fnv1a(`fleet-cloak:${accountNo}`);
+export function fleetCloakFor(accountNo: number, attempt = 0): { cloak_seed: number; cloak_gpu: FleetCloakGpu } {
+  const h = fnv1a(attempt === 0 ? `fleet-cloak:${accountNo}` : `fleet-cloak:${accountNo}:${attempt}`);
   return {
     cloak_seed: 10000 + (h % 90000),
     cloak_gpu: FLEET_CLOAK_GPUS[Math.floor(h / 90000) % FLEET_CLOAK_GPUS.length],
@@ -1000,6 +1012,8 @@ export type FleetCohortAccount = {
   enrolled_at: string | null;
   first_claimed_at: string | null;
   reached_healthy: boolean | null;
+  /** It also ran on the other arm's engine; only HEALTHY on its own arm counts. */
+  crossed_arm: boolean;
   lost_at: string | null;
   outcome_24h: FleetCohortOutcome | null;
   outcome_7d: FleetCohortOutcome | null;

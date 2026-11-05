@@ -7,6 +7,7 @@ import { ALEX, loginAs } from './helpers/auth';
 import { getTestDb, resetDb } from './helpers/db';
 import { poolKey, seal } from '../src/lib/sealed';
 import { exitAlertText, exitMoved, latestProxyExit, type PendingChange } from '../src/fleet/proxyExit';
+import { recordExitChanges } from '../src/fleet/proxyExit';
 import { runProxyRound } from '../src/fleet/proxyHealth';
 
 // Exit tracking through real probes: local CONNECT proxies tunnel to a stand-in
@@ -258,9 +259,52 @@ describe('exit tracking', () => {
     await round();
     const res = await api('PUT', `/api/fleet/proxies/${p.id}`, { token, body: { url: `http://u:p@127.0.0.1:${ports[1]}` } });
     expect(res.status).toBe(200);
+    // Nothing has measured the new URL yet, and the old reading stays for the first that does.
     exit = DENVER;
     await round();
+    expect(await changes()).toMatchObject([{ proxy_id: p.id, old_ip: ASHBURN.ip, new_ip: DENVER.ip }]);
+    await round();
+    expect(await changes()).toHaveLength(1);
+    expect((await getTestDb()`SELECT replaced_exit FROM fleet_proxies WHERE id = ${p.id}`)[0].replaced_exit).toBeNull();
+  });
+
+  it('records nothing when a new URL comes out on the same exit', async () => {
+    const p = await addProxy('NY 1', ports[0]!);
+    await round();
+    expect((await api('PUT', `/api/fleet/proxies/${p.id}`, { token, body: { url: `http://u:p@127.0.0.1:${ports[1]}` } })).status).toBe(200);
+    await round();
     expect(await changes()).toEqual([]);
+  });
+
+  const reading = (proxyId: number, port: number, m: typeof DENVER) => ({
+    exit: `http://127.0.0.1:${port}`, source: 'erp' as const, proxy_id: proxyId, workers: [], ok: true, latency_ms: 300,
+    exit_ip: m.ip, city: m.city, region: m.region, country: m.country, org: m.org, timezone: m.timezone, error: null,
+  });
+
+  it('records one move once when a round and a Check now overlap', async () => {
+    const p = await addProxy('NY 1', ports[0]!);
+    await round();
+    const started = new Date(Date.now() - 1000);
+    exit = DENVER;
+    await check({ proxy_id: p.id });
+    expect(await changes()).toHaveLength(1);
+    // The round began before that Check now, so its past still holds the old exit.
+    await getTestDb().begin((tx) => recordExitChanges(tx, [reading(p.id, ports[0]!, DENVER)], started));
+    expect(await changes()).toHaveLength(1);
+  });
+
+  it('names the pilot account a move landed beside', async () => {
+    const p = await addProxy('NY 1', ports[0]!);
+    const q = await addProxy('NY 2', ports[1]!);
+    await round();
+    const db = getTestDb();
+    const pilot = await bindSlot(q.id);
+    await db`INSERT INTO fleet_pilot_enrollments (account_no, uid, batch, pilot_id, arm, exit_ip) VALUES (${pilot}, 'u', 'b', 'wave-1', 'stock', ${DENVER.ip})`;
+    await db`INSERT INTO fleet_proxy_checks (exit, source, proxy_id, checked_at, ok, latency_ms, exit_ip) VALUES ('http://x', 'erp', ${q.id}, NOW(), TRUE, 1, ${DENVER.ip})`;
+    await db.begin((tx) => recordExitChanges(tx, [reading(p.id, ports[0]!, DENVER)], new Date()));
+    const [made] = await db<{ shares_with: number[] }[]>`SELECT shares_with FROM fleet_proxy_exit_changes WHERE proxy_id = ${p.id}`;
+    expect(made.shares_with).toEqual([pilot]);
+    expect((await alerts())[0].body).toContain(`Now on the same exit as pilot account #${pilot}`);
   });
 
   describe('homelab ports', () => {
