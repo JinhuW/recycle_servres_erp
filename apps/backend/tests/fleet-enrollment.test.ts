@@ -443,6 +443,104 @@ describe('reservation by measured exit IP', () => {
   });
 });
 
+describe('an account outside any pilot and a pilot account\'s exit', () => {
+  const change = (no: number, to: number, from: number) => api<Err>('POST', `/api/fleet/slots/${no}/proxy`, {
+    token, body: { proxy_id: to, from_proxy_id: from, confirm: true },
+  });
+
+  it('refuses a plain add on another port with the pilot account\'s IP', async () => {
+    const [pilot, plain] = [await account(1), await account(2)];
+    const [p, q] = [await proxy(10001), await proxy(10002)];
+    await measure(p, '198.51.100.1');
+    await measure(q, '198.51.100.1');
+    expect((await enroll(pilot, p, 'stock')).status).toBe(201);
+    const r = await add({ account_no: plain, proxy_id: q });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe('exit_shared');
+    expect(r.body.detail).toContain(`#${pilot}`);
+    expect(await getTestDb()`SELECT 1 FROM fleet_slots WHERE account_no = ${plain}`).toHaveLength(0);
+  });
+
+  it('refuses Change proxy for an account that is not enrolled, leaving it where it was', async () => {
+    const [pilot, plain] = [await account(1), await account(2)];
+    const [p, q, r] = [await proxy(10001), await proxy(10002), await proxy(10003)];
+    await measure(p, '198.51.100.1');
+    await measure(q, '198.51.100.2');
+    await measure(r, '198.51.100.1');
+    expect((await enroll(pilot, p)).status).toBe(201);
+    expect((await add({ account_no: plain, proxy_id: q })).status).toBe(201);
+    const refused = await change(plain, r, q);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe('exit_shared');
+    const [slot] = await getTestDb()<{ proxy_id: number }[]>`SELECT proxy_id FROM fleet_slots WHERE account_no = ${plain}`;
+    expect(slot.proxy_id).toBe(q);
+  });
+
+  it('matches both the recorded exit and the latest exit of the proxy the slot sits on', async () => {
+    const [pilot, plain] = [await account(1), await account(2)];
+    const [p, recorded, moved] = [await proxy(10001), await proxy(10002), await proxy(10003)];
+    await measure(p, '198.51.100.1');
+    expect((await enroll(pilot, p)).status).toBe(201);
+    await measure(p, '198.51.100.5');
+    await measure(recorded, '198.51.100.1');
+    await measure(moved, '198.51.100.5');
+    expect((await add({ account_no: plain, proxy_id: recorded })).body.error).toBe('exit_shared');
+    expect((await add({ account_no: plain, proxy_id: moved })).body.error).toBe('exit_shared');
+  });
+
+  it('judges a failing target by the IP it was last seen on', async () => {
+    const [pilot, plain] = [await account(1), await account(2)];
+    const [p, q] = [await proxy(10001), await proxy(10002)];
+    await measure(p, '198.51.100.1');
+    await measure(q, '198.51.100.1', { agoMs: 60_000 });
+    await measure(q, null, { ok: false });
+    expect((await enroll(pilot, p)).status).toBe(201);
+    expect((await add({ account_no: plain, proxy_id: q })).body.error).toBe('exit_shared');
+  });
+
+  it('lets an unmeasured target through, and any IP no pilot account holds', async () => {
+    const [pilot, a, b, c] = [await account(1), await account(2), await account(3), await account(4)];
+    const [p, unmeasured, other, target] = [await proxy(10001), await proxy(10002), await proxy(10003), await proxy(10004)];
+    await measure(p, '198.51.100.1');
+    await measure(other, '198.51.100.2');
+    await measure(target, '198.51.100.3');
+    expect((await enroll(pilot, p)).status).toBe(201);
+    expect((await add({ account_no: a, proxy_id: unmeasured })).status).toBe(201);
+    expect((await add({ account_no: b, proxy_id: other })).status).toBe(201);
+    expect((await add({ account_no: c, proxy_id: other })).status).toBe(201);
+    expect((await change(c, target, other)).status).toBe(200);
+    expect((await change(a, other, unmeasured)).status).toBe(200);
+  });
+
+  it('refuses nothing while no pilot exists, nor for an engine given outside one', async () => {
+    const [outside, plain, moving] = [await account(1), await account(2), await account(3)];
+    const [p, q, r] = [await proxy(10001), await proxy(10002), await proxy(10003)];
+    await measure(p, '198.51.100.1');
+    await measure(q, '198.51.100.1');
+    await measure(r, '198.51.100.1');
+    // All three ports on one IP: a plain add has never minded that.
+    expect((await add({ account_no: moving, proxy_id: q })).status).toBe(201);
+    expect((await change(moving, r, q)).status).toBe(200);
+    expect((await add({ account_no: plain, proxy_id: q })).status).toBe(201);
+    await parkAndRemove(plain);
+    await parkAndRemove(moving);
+    expect((await add({ account_no: outside, proxy_id: p, engine: 'stock' })).status).toBe(201);
+    expect((await enrollment(outside)).pilot_id).toBeNull();
+    expect((await add({ account_no: plain, proxy_id: q })).status).toBe(201);
+  });
+
+  it('frees the exit once the pilot account has no slot', async () => {
+    const [pilot, plain] = [await account(1), await account(2)];
+    const [p, q] = [await proxy(10001), await proxy(10002)];
+    await measure(p, '198.51.100.1');
+    await measure(q, '198.51.100.1');
+    expect((await enroll(pilot, p)).status).toBe(201);
+    expect((await add({ account_no: plain, proxy_id: q })).body.error).toBe('exit_shared');
+    await parkAndRemove(pilot);
+    expect((await add({ account_no: plain, proxy_id: q })).status).toBe(201);
+  });
+});
+
 describe('cloak_max_slots', () => {
   it('refuses enrollment past it, counting parked slots', async () => {
     const [a, b] = [await account(1), await account(2)];
@@ -470,8 +568,10 @@ describe('proxy edits and a pinned profile', () => {
     await setSettings({ max_accounts_per_proxy: 3 });
     expect((await enroll(pinned, p)).status).toBe(201);
     expect((await enroll(stockArm, q, 'stock')).status).toBe(201);
-    expect((await add({ account_no: plain, proxy_id: p })).status).toBe(201);
-    for (const id of [p, q]) {
+    const third = await proxy(10004);
+    await measure(third, '198.51.100.4');
+    expect((await add({ account_no: plain, proxy_id: third })).status).toBe(201);
+    for (const id of [p, q, third]) {
       expect((await api('PUT', `/api/fleet/proxies/${id}`, { token, body: { timezone: 'America/Chicago' } })).status).toBe(200);
     }
     const zone = async (no: number) =>

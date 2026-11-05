@@ -24,13 +24,13 @@ claim in between and the switch was then refused. Removing a slot also lost its 
 so the same account could be given a second fingerprint.
 
 `POST /api/fleet/slots` now takes `pilot`, `arm` and `engine`, and writes the
-enrollment, profile, proxy and slot in one transaction. Without them it behaves as
-before. The profile lives on the pool account, with seeds unique at the database, and
+enrollment, profile, proxy and slot in one transaction. The profile lives on the pool account, with seeds unique at the database, and
 a proxy edit no longer changes a profile's timezone. `fleet_pilot_enrollments` keeps
 each enrollment after the slot and the account are gone, and the first claim stamps
 it. Enrollment refuses an exit IP already in use, comparing measured IPs across ports
 and including homelab workers, and refuses a measurement that failed or is over 15
-minutes old. CloakBrowser claim answers now include `expected_exit_ip` and `webrtc_ip`,
+minutes old. A plain add or Change proxy is also refused when it would land on a
+pilot account's exit IP, which changes nothing until a pilot exists. CloakBrowser claim answers now include `expected_exit_ip` and `webrtc_ip`,
 which the next worker release will read. Nothing changes for running workers, and no
 worker needs a restart.
 

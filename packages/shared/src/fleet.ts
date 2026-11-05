@@ -910,7 +910,8 @@ export type FleetErrorCode =
   | 'exit_stale'
   /** Enrolling on a proxy whose latest measurement failed or found no IP. */
   | 'exit_failing'
-  /** Enrolling on an exit IP another slot, enrollment or homelab worker uses. */
+  /** Enrolling on an exit IP another slot, enrollment or homelab worker uses,
+   *  or any add or proxy change landing on a pilot account's exit IP. */
   | 'exit_shared';
 
 export type FleetError = { error: FleetErrorCode; detail?: string };

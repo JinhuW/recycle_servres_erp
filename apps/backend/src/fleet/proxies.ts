@@ -62,6 +62,16 @@ export async function latestExitCheck(sql: SqlLike, proxyId: number): Promise<Ex
   return check ?? null;
 }
 
+/** The IP a proxy was last seen exiting from, even if its latest check failed:
+ *  a port failing right now can come back on the same IP. */
+export async function lastKnownExitIp(sql: SqlLike, proxyId: number): Promise<string | null> {
+  const [check] = await sql<{ exit_ip: string }[]>`
+    SELECT exit_ip FROM fleet_proxy_checks
+    WHERE source = 'erp' AND proxy_id = ${proxyId} AND exit_ip IS NOT NULL
+    ORDER BY checked_at DESC, id DESC LIMIT 1`;
+  return check?.exit_ip ?? null;
+}
+
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /** Every proxy with the slots on it, oldest first. Never selects url_enc. */

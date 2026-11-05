@@ -37,6 +37,7 @@ changed exit IP, so a port isn't an identity.
 - [x] `POST /slots` takes `pilot`, `arm`, `engine` and writes everything in one transaction; a claim racing enrollment never sees a half-set slot.
 - [x] Without the new fields, behaviour is as before.
 - [x] Enrollment refuses an exit IP shared across ports, slots, active enrollments and homelab workers, and a stale (over 15 minutes) or failing measurement.
+- [x] A plain add or Change proxy on an account that isn't enrolled is refused (`exit_shared`) when its target's last measured IP is held by another account's active pilot enrollment; with no pilot or no measurement, nothing changes.
 - [x] A unique index holds seeds apart; a duplicate is refused.
 - [x] Proxy edits don't rewrite a pinned profile's timezone.
 - [x] Cloak claim answers add `expected_exit_ip` and `webrtc_ip`, null without a fresh measurement, never a refusal.
@@ -48,8 +49,7 @@ changed exit IP, so a port isn't an identity.
 
 Automatic arm assignment for a batch and the automatic profile (Phase 3): the caller
 passes the arm. Reading the zone from the exit: workstream A adds that column, so
-enrollment pins the proxy's typed timezone until then. A plain add, with none of the
-new fields, doesn't check exits, by requirement.
+enrollment pins the proxy's typed timezone until then.
 
 ## Notes
 

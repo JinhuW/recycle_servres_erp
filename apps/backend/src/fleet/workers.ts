@@ -12,7 +12,7 @@ import { dropSlot, releaseTasks } from './claim';
 import { loadRelease } from './hosts';
 import { cityLog } from './tasks';
 import { loadSettings } from './cities';
-import { latestExitCheck, proxyStates } from './proxies';
+import { lastKnownExitIp, latestExitCheck, proxyStates } from './proxies';
 import { managerOnly, type ManagerEnv } from './auth';
 import { bad, conflict, eventToWire, exists, isRefusal, minutesTodaySql, notFound, taskToWire, type Refusal, type TaskEventRow, type TaskRow } from './sql';
 
@@ -260,6 +260,28 @@ async function measuredExit(tx: SqlLike, proxyId: number, name: string, no: numb
   return { ip: check.exit_ip };
 }
 
+/** For an account outside any pilot, which is otherwise not held to the exit
+ *  rules: landing on a pilot account's exit would quietly spoil that account's
+ *  solo-exit condition. An unmeasured target has nothing to compare, so it goes
+ *  ahead, as these paths always have. */
+async function pilotExitRefusal(tx: SqlLike, proxyId: number, name: string, no: number): Promise<Refusal | null> {
+  const ip = await lastKnownExitIp(tx, proxyId);
+  if (ip === null) return null;
+  const holders = await tx<{ account_no: number }[]>`
+    SELECT e.account_no FROM fleet_pilot_enrollments e
+    JOIN fleet_slots s ON s.account_no = e.account_no
+    LEFT JOIN LATERAL (
+      SELECT c.exit_ip FROM fleet_proxy_checks c
+      WHERE c.source = 'erp' AND c.proxy_id = s.proxy_id AND c.exit_ip IS NOT NULL
+      ORDER BY c.checked_at DESC, c.id DESC LIMIT 1
+    ) latest ON TRUE
+    WHERE e.pilot_id IS NOT NULL AND e.account_no <> ${no}
+      AND (e.exit_ip = ${ip} OR latest.exit_ip = ${ip})
+    ORDER BY e.account_no`;
+  if (!holders.length) return null;
+  return conflict('exit_shared', `${name} exits from ${ip}, held by pilot account ${holders.map((h) => `#${h.account_no}`).join(', ')}`);
+}
+
 type PoolForSlot = {
   status: string; holder_name: string | null; password_enc: string | null; totp_enc: string | null; uid: string; batch: string;
   browser_engine: FleetPilotArm | null; cloak_seed: number | null; cloak_gpu: FleetCloakGpu | null; profile_timezone: string | null;
@@ -347,6 +369,9 @@ slots.post('/', async (c) => {
       const measured = await measuredExit(tx, proxyId, exitName, no);
       if (isRefusal(measured)) return measured;
       exitIp = measured.ip;
+    } else {
+      const held = await pilotExitRefusal(tx, proxyId, exitName, no);
+      if (held) return held;
     }
 
     const timezone = account.profile_timezone ?? proxy.timezone;
@@ -542,6 +567,9 @@ slots.post('/:no/proxy', async (c) => {
     if (enrolled) {
       const measured = await measuredExit(tx, toId, to, no);
       if (isRefusal(measured)) return measured;
+    } else {
+      const held = await pilotExitRefusal(tx, toId, to, no);
+      if (held) return held;
     }
     const [old] = slot.proxy_id === null ? [] : await tx<{ host: string; port: number }[]>`
       SELECT host, port FROM fleet_proxies WHERE id = ${slot.proxy_id}`;

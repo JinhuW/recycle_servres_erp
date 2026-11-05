@@ -948,8 +948,12 @@ free seat, new or not.
 
 A slot with a NULL `proxy_id` has no measured exit and isn't seen here.
 
-A plain add, with none of the new fields, doesn't check exits, so it can still
-land on a pilot account's IP. Only enrollment reserves.
+An account that isn't enrolled is held to one rule only, on a plain add and on
+`POST /slots/:no/proxy`: `409 exit_shared` when the target proxy's last measured IP
+is held by another account's active pilot enrollment, meaning `pilot_id` is set and
+the account still has a slot. The IP is compared with both the enrollment's
+`exit_ip` and the last IP measured on the proxy its slot sits on. A target with no
+measurement goes ahead, and with no pilot nothing is refused.
 
 ### Other manager routes
 

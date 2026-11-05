@@ -3792,7 +3792,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     half-set slot. Enrollment refuses an exit IP that another slot, an active
     enrollment or a homelab worker already uses, comparing measured IPs across
     ports, and refuses a proxy whose latest measurement failed or is over 15
-    minutes old. With CloakBrowser off, existing cloak accounts keep claiming
+    minutes old. A normal add or Change proxy is also refused when
+    it would land on an exit IP a pilot account holds. With CloakBrowser off, existing cloak accounts keep claiming
     and keep their licence; only new ones stop. A CloakBrowser claim also says
     which exit IP to expect (`expected_exit_ip`, `webrtc_ip`), or null when
     there is no fresh measurement. A refusal from
