@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-537](./RS-537-fleet-atomic-account-enrollment-and-browser-profile.md) | done | story | P2 | Fleet: atomic account enrollment and browser profile | 1.421.0 |
 | [RS-536](./RS-536-so-list-total-follows-the-order-s-currency.md) | done | bug | P2 | SO list Total follows the order's currency | 1.420.1 |
 | [RS-535](./RS-535-fleet-worker-0-17-0-preflight-webrtc-seats-outage-ex.md) | done | story | P2 | Fleet worker 0.17.0: preflight, WebRTC, seats, outage exit | facebook-tracker unreleased (next minor, 0.17.0) |
 | [RS-529](./RS-529-fleet-agent-licence-outage-exit.md) | done | story | P2 | Fleet agent: licence outage exit | 1.420.0 |

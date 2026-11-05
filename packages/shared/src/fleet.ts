@@ -208,9 +208,9 @@ export type FleetDevice = {
   device_scale_factor?: number;
   /** Filled in by the claim all the same; the worker ignores what is listed. */
   native?: FleetNativeField[];
-  /** Absent is stock. Set by the engine switch, never by the claim. */
+  /** Absent is stock. Set by enrollment or the engine switch, never by the claim. */
   browser_engine?: FleetBrowserEngine;
-  /** CloakBrowser's fingerprint seed and GPU; written once, with the switch. */
+  /** CloakBrowser's fingerprint seed and GPU; written once. fb_pool_accounts keeps them past the slot. */
   cloak_seed?: number;
   cloak_gpu?: FleetCloakGpu;
 };
@@ -219,6 +219,9 @@ export const FLEET_BROWSER_ENGINES = ['stock', 'cloak'] as const;
 export type FleetBrowserEngine = (typeof FLEET_BROWSER_ENGINES)[number];
 export const FLEET_CLOAK_GPUS = ['NVIDIA', 'Intel'] as const;
 export type FleetCloakGpu = (typeof FLEET_CLOAK_GPUS)[number];
+/** A pilot's arm is the engine the account was assigned, so a cohort compares like with like. */
+export const FLEET_PILOT_ARMS = FLEET_BROWSER_ENGINES;
+export type FleetPilotArm = FleetBrowserEngine;
 
 /** A device as a slot stores it: the claim fills in what is missing, so a
  *  profile that leaves the user agent to the browser simply has none. */
@@ -407,7 +410,15 @@ export type FleetProxyWrite = { label: string; url: string; timezone: string; no
 export type FleetProxyPatch = { label?: string; url?: string; timezone?: string; note?: string };
 
 /** `POST /api/fleet/slots`: puts a pool account into the fleet. */
-export type FleetSlotWrite = { account_no: number; proxy_id: number };
+export type FleetSlotWrite = {
+  account_no: number;
+  proxy_id: number;
+  /** Which pilot the account joins; comes with `arm`. */
+  pilot?: string;
+  arm?: FleetPilotArm;
+  /** Alone, gives the account this engine outside any pilot; with `arm`, must equal it. */
+  engine?: FleetBrowserEngine;
+};
 
 /** Slots on a proxy that count against `max_accounts_per_proxy`: every one but the parked. */
 export const proxyLoad = (p: Pick<FleetProxy, 'slots'>): number => p.slots.filter((s) => !s.parked).length;
@@ -418,6 +429,10 @@ export const proxyLoad = (p: Pick<FleetProxy, 'slots'>): number => p.slots.filte
 export const FLEET_PROXY_SLOW_MS = 3000;
 /** One round every five minutes; the history strip is half-hour buckets over a day. */
 export const FLEET_PROXY_ROUND_MS = 5 * 60_000;
+/** How old an exit measurement may be and still count: three rounds, so one
+ *  missed round and a late one (a backend deploy) don't stop enrollment, while
+ *  a probe that has really stopped does. */
+export const FLEET_EXIT_FRESH_MS = 3 * FLEET_PROXY_ROUND_MS;
 export const FLEET_PROXY_BUCKET_MS = 30 * 60_000;
 export const FLEET_PROXY_BUCKETS = 48;
 
@@ -744,6 +759,11 @@ export type ClaimAnswer = {
   };
   proxy: { url: string } | null;
   device: FleetDevice;
+  /** Cloak slots only, and null when the proxy has no fresh passing measurement:
+   *  the exit the worker should see. Absent or null means skip the check. */
+  expected_exit_ip?: string | null;
+  /** Always `expected_exit_ip`: what `--fingerprint-webrtc-ip` should announce. */
+  webrtc_ip?: string | null;
   items: FleetItem[];
   settings: {
     search: FleetSearchSettings;
@@ -879,7 +899,20 @@ export type FleetErrorCode =
   | 'cloak_proven'
   /** Re-login or resume while the slot's engine is not the one its worker
    *  runs: the fresh session would carry onto the other fingerprint. */
-  | 'engine_mismatch';
+  | 'engine_mismatch'
+  /** Enrolling with the seed another pool account's profile holds. */
+  | 'cloak_seed_taken'
+  /** Enrolling an account already enrolled in another pilot or arm. */
+  | 'already_enrolled'
+  /** Switching a pilot's stock-arm account to CloakBrowser. */
+  | 'pilot_arm'
+  /** Enrolling on a proxy with no measurement within FLEET_EXIT_FRESH_MS. */
+  | 'exit_stale'
+  /** Enrolling on a proxy whose latest measurement failed or found no IP. */
+  | 'exit_failing'
+  /** Enrolling on an exit IP another slot, enrollment or homelab worker uses,
+   *  or any add or proxy change landing on a pilot account's exit IP. */
+  | 'exit_shared';
 
 export type FleetError = { error: FleetErrorCode; detail?: string };
 
