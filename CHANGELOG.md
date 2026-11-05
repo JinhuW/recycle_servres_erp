@@ -15,6 +15,15 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.419.1] - 2026-11-04
+
+The Proxies tab's crowding dot now counts accounts per exit IP, not per proxy
+port (RS-528). v1.419.0 counted each port alone, but several ports can exit from
+one IP, and the IP is what a site sees. Now every row on an IP adds into one
+total and all of them carry the dot, and the hover names the IP. The thresholds
+are the same: yellow from 5, red above 10. A port with no known exit IP shows no
+dot and adds to no total.
+
 ## [1.419.0] - 2026-11-04
 
 The Proxies tab now flags a crowded proxy (RS-527). The Used by column shows a

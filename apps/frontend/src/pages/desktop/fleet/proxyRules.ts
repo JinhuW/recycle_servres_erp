@@ -52,12 +52,26 @@ export function proxyChoices(
     .sort((a, b) => rank(a) - rank(b) || a.load - b.load || a.proxy.label.localeCompare(b.proxy.label));
 }
 
-// Fixed, unlike max_accounts_per_proxy: they say a port looks crowded whatever
-// the limit is set to, and homelab ports have no limit at all.
+// Fixed, unlike max_accounts_per_proxy: they say an exit IP looks crowded
+// whatever the limit is set to, and homelab ports have no limit at all.
 export const PROXY_CROWD_WARN_AT = 5;
 export const PROXY_CROWD_OVER_ABOVE = 10;
 
-/** How crowded a proxy is with `n` accounts on it: null, yellow from 5, red above 10. */
+/**
+ * Accounts on each exit IP: non-parked ERP accounts plus homelab workers, over
+ * every port that last exited there. What a site sees is the IP, and ports can
+ * share one. A port with no known exit counts towards nothing.
+ */
+export function exitIpUsers(rows: readonly FleetProxyHealth[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const p of rows) {
+    const ip = p.last?.exit_ip;
+    if (ip) out.set(ip, (out.get(ip) ?? 0) + proxyLoad(p) + p.workers.length);
+  }
+  return out;
+}
+
+/** How crowded an exit IP is with `n` accounts on it: null, yellow from 5, red above 10. */
 export function proxyCrowding(n: number): 'warn' | 'over' | null {
   if (n > PROXY_CROWD_OVER_ABOVE) return 'over';
   return n >= PROXY_CROWD_WARN_AT ? 'warn' : null;

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { FleetProxyHealth } from '@recycle-erp/shared';
 import { fleetDeviceFor, parseProxyUrl } from '../../../lib/fleet';
 import { NOW, PROXIES, SLOTS } from './fixtures';
-import { deviceSummary, fleetRowAction, proxyChangeVerdict, proxyChoices, proxyCrowding, proxyDraftProblem, proxyPatch, randomOpenProxy } from './proxyRules';
+import { deviceSummary, exitIpUsers, fleetRowAction, proxyChangeVerdict, proxyChoices, proxyCrowding, proxyDraftProblem, proxyPatch, randomOpenProxy } from './proxyRules';
 
 const row = (status: string, over: Partial<{ holder: string | null; password: string; totp: string }> = {}) =>
   ({ status, holder: null, password: 'pw', totp: 'KEY', ...over });
@@ -31,6 +32,20 @@ describe('fleetRowAction', () => {
 describe('proxyCrowding', () => {
   it('is quiet below 5, yellow from 5 through 10 and red above 10', () => {
     expect([0, 4, 5, 10, 11, 30].map(proxyCrowding)).toEqual([null, null, 'warn', 'warn', 'over', 'over']);
+  });
+});
+
+describe('exitIpUsers', () => {
+  const on = (ip: string | null, accounts: number, workers: string[] = [], parked = 0) => ({
+    last: ip ? { exit_ip: ip } : { exit_ip: null }, workers,
+    slots: [
+      ...Array.from({ length: accounts }, (_, i) => ({ account_no: i, parked: false })),
+      ...Array.from({ length: parked }, (_, i) => ({ account_no: 100 + i, parked: true })),
+    ],
+  }) as unknown as FleetProxyHealth;
+  it('adds every port on an IP, workers in and parked accounts out, and skips an unknown exit', () => {
+    const users = exitIpUsers([on('1.1.1.1', 2), on('1.1.1.1', 1, ['homelab-1'], 3), on('2.2.2.2', 1), on(null, 9)]);
+    expect([...users]).toEqual([['1.1.1.1', 4], ['2.2.2.2', 1]]);
   });
 });
 
