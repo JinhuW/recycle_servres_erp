@@ -38,6 +38,11 @@ describe('Add to fleet', () => {
     expect(html).toContain('fpAddToFleetFull');
     expect(html).not.toContain('fpAddToFleetDevice');     // no proxy picked, so no timezone to show yet
   });
+  it('offers an optional pilot, with the arm hidden until one is named', () => {
+    const html = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={2} onClose={noop} onDone={noop} />);
+    expect(html).toContain('fpAddToFleetPilot');
+    expect(html).not.toContain('fpAddToFleetArmCloak');
+  });
   it('lists a down proxy disabled, and says so when every proxy with room is down', () => {
     const one = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={2} health={new Map([[3, 'down']])} onClose={noop} onDone={noop} />);
     expect(one).toMatch(/<option[^>]*value="3"[^>]*disabled=""|<option[^>]*disabled=""[^>]*value="3"/);

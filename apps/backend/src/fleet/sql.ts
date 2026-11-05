@@ -104,6 +104,7 @@ export const FLEET_TABLES = [
   'fleet_hosts',
   'fleet_items',
   'fleet_minutes',
+  'fleet_pilot_enrollments',
   'fleet_proxies',
   'fleet_proxy_checks',
   'fleet_proxy_rounds',

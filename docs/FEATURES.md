@@ -3780,9 +3780,22 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     re-login the account before then: Re-login and Mark healthy answer 409
     `engine_mismatch` while the worker runs a different engine from its
     slot's. A worker older than 0.16.0 is never handed a CloakBrowser slot,
-    which waits for one that can run it. A proxy timezone edit rewrites the
-    timezone of every slot on it, which for a CloakBrowser slot changes its
-    `--fingerprint-timezone`. A refusal from
+    which waits for one that can run it. Since v1.421.0 (RS-537) the profile
+    (engine, seed, GPU, timezone) is kept on the pool account, so removing and
+    re-adding an account brings the same machine back and it still can't be
+    seeded twice, and no two accounts can hold one seed. A proxy timezone edit,
+    or Change proxy, leaves that timezone alone and only moves accounts with no
+    profile. **Add to fleet** can also name a pilot and an arm, which enrolls
+    the account in one step: `POST /api/fleet/slots` writes the enrollment
+    (`fleet_pilot_enrollments`, which outlives the slot and the account), the
+    profile, the proxy and the slot in one transaction, so no worker can claim a
+    half-set slot. Enrollment refuses an exit IP that another slot, an active
+    enrollment or a homelab worker already uses, comparing measured IPs across
+    ports, and refuses a proxy whose latest measurement failed or is over 15
+    minutes old. With CloakBrowser off, existing cloak accounts keep claiming
+    and keep their licence; only new ones stop. A CloakBrowser claim also says
+    which exit IP to expect (`expected_exit_ip`, `webrtc_ip`), or null when
+    there is no fresh measurement. A refusal from
     `POST /api/fleet/slots/:no/engine` reads as a sentence: a live session,
     CloakBrowser off, every seat taken, or switched before. A CloakBrowser
     row offers **Back to stock**, another new device, only while no worker

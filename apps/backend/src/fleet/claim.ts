@@ -32,6 +32,7 @@ import {
   type ClaimEnv, type WorkerEnv, type WorkerIdentity,
 } from './auth';
 import { loadSettings } from './cities';
+import { latestExitCheck } from './proxies';
 import { notifyReady } from './scheduler';
 import { minutesTodaySql, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
 import { loadRelease, ownWorkerId } from './hosts';
@@ -416,6 +417,19 @@ worker.post('/claim', claimAuth, async (c) => {
       await tx`UPDATE fleet_claim_tickets SET consumed_at = COALESCE(consumed_at, NOW()), claim_id = ${claimId}
         WHERE token_hash = ${ticket.token_hash}`;
     }
+    if (!repeated) {
+      await tx`UPDATE fleet_pilot_enrollments SET first_claimed_at = NOW()
+        WHERE account_no = ${row.account_no} AND first_claimed_at IS NULL`;
+    }
+    const device = deviceOf(row.device);
+    // Null rather than a refusal: this claim may be a live account's restart,
+    // and turning that away costs more than a skipped check.
+    let exitFields: { expected_exit_ip?: string | null; webrtc_ip?: string | null } = {};
+    if (device.browser_engine === 'cloak') {
+      const check = row.proxy_id === null ? null : await latestExitCheck(tx, row.proxy_id);
+      const ip = check?.fresh && check.ok ? check.exit_ip : null;
+      exitFields = { expected_exit_ip: ip, webrtc_ip: ip };
+    }
     const exp = Math.floor(Date.now() / 1000) + WORKER_TOKEN_DAYS * 86_400;
     const items = await loadItems(tx);
     const token = unsealOrEmpty(row.token_enc, key);
@@ -433,7 +447,8 @@ worker.post('/claim', claimAuth, async (c) => {
         token: token || null,
       },
       proxy: proxyUrl ? { url: proxyUrl } : null,
-      device: deviceOf(row.device),
+      device,
+      ...exitFields,
       items,
       settings: {
         search: settings.search,

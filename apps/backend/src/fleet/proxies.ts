@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import {
-  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, isFleetTimezone, parseProxyUrl, proxyHealthState,
+  FLEET_EXIT_FRESH_MS, FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, isFleetTimezone, parseProxyUrl, proxyHealthState,
   type FleetProxy, type FleetProxyHealthState, type FleetProxyPatch, type FleetProxyUse,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
@@ -15,7 +15,9 @@ import { bad, conflict, exists, isRefusal, notFound, type Refusal } from './sql'
 // reads carry host:port, and a slot made on a proxy copies the sealed value
 // (fleet_slots.proxy_url is what a claim unseals). Editing a proxy reaches its
 // slots at once: a new URL is copied into each, a new timezone into each
-// device, and a worker picks either up on its next claim.
+// device that has no profile of its own, and a worker picks either up on its
+// next claim. A profile's timezone is pinned: the same machine doesn't change
+// its clock because someone corrected a label.
 
 const proxies = new Hono<ManagerEnv>().use('*', managerOnly);
 
@@ -46,6 +48,18 @@ export async function proxyStates(sql: SqlLike, proxyId?: number): Promise<Map<n
   const byProxy = new Map<number, typeof rows[number][]>();
   for (const r of rows) byProxy.set(r.proxy_id, [...(byProxy.get(r.proxy_id) ?? []), r]);
   return new Map([...byProxy].map(([id, checks]) => [id, proxyHealthState(checks)]));
+}
+
+export type ExitCheck = { ok: boolean; exit_ip: string | null; fresh: boolean; checked_at: Date };
+
+/** A proxy's latest measurement, however old, or null if it has none. */
+export async function latestExitCheck(sql: SqlLike, proxyId: number): Promise<ExitCheck | null> {
+  const [check] = await sql<ExitCheck[]>`
+    SELECT ok, exit_ip, checked_at, checked_at > NOW() - make_interval(secs => ${FLEET_EXIT_FRESH_MS / 1000}) AS fresh
+    FROM fleet_proxy_checks
+    WHERE source = 'erp' AND proxy_id = ${proxyId}
+    ORDER BY checked_at DESC, id DESC LIMIT 1`;
+  return check ?? null;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -166,8 +180,10 @@ proxies.put('/:id', async (c) => {
       await tx`SELECT account_no FROM fleet_slots WHERE account_no = ANY(${nos}::int[]) ORDER BY account_no FOR UPDATE`;
       if (sealed) await tx`UPDATE fleet_slots SET proxy_url = ${sealed} WHERE proxy_id = ${id}`;
       if (patch.timezone && patch.timezone !== cur.timezone) {
-        await tx`UPDATE fleet_slots SET device = jsonb_set(device, '{timezone}', to_jsonb(${patch.timezone}::text))
-                 WHERE proxy_id = ${id} AND jsonb_typeof(device) = 'object'`;
+        await tx`UPDATE fleet_slots s SET device = jsonb_set(s.device, '{timezone}', to_jsonb(${patch.timezone}::text))
+                 FROM fb_pool_accounts a
+                 WHERE a.no = s.account_no AND a.browser_engine IS NULL
+                   AND s.proxy_id = ${id} AND jsonb_typeof(s.device) = 'object'`;
       }
     }
     return { slots: nos.length };

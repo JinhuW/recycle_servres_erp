@@ -20,7 +20,7 @@ export type {
   FleetAccountBrief, FleetFunnelDay, FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,
   FleetTaskResult, FleetTaskState, FleetHostContainer, FleetHostReport, DesiredAnswer, RoundStartAnswer,
   FleetProxy, FleetProxyCheck, FleetProxyHealth, FleetProxyHealthAnswer, FleetProxyHealthState, FleetProxySource,
-  FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
+  FleetPilotArm, FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
   FleetSecretKind, FleetWorkerDetail, FleetWorkerEvent, FleetWorkerRelogin, FleetWorkerResume,
   FleetBrowserEngine, FleetCloakGpu, FleetEngineLoss, FleetEngineLossRow,
 } from '@recycle-erp/shared';

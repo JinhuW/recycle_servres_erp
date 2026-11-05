@@ -96,6 +96,34 @@ describe('prod→dev sync keeps the dev fleet', () => {
     expect(await sql`SELECT 1 FROM fleet_task_attempts WHERE task_id = ${t.id}`).toHaveLength(1);
   });
 
+  it('keeps dev\'s browser profile and enrollments, and a copied seed cannot break the restore', async () => {
+    const sql = getTestDb();
+    const a = await pool('61500000000021', 'fleet', 'fleet pilot');
+    const fromProd = await pool('61500000000022', 'available', 'not in the fleet');
+    const gone = await pool('61500000000023', 'retired', 'retired');
+    await sql`UPDATE fb_pool_accounts SET browser_engine = 'cloak', cloak_seed = 12345, cloak_gpu = 'Intel', profile_timezone = 'America/Chicago' WHERE no = ${a}`;
+    await sql`INSERT INTO fleet_slots (account_no, epoch) VALUES (${a}, 1)`;
+    await sql`INSERT INTO fleet_pilot_enrollments (account_no, uid, batch, pilot_id, arm, seed, exit_ip)
+              VALUES (${a}, '61500000000021', 'Batch', 'wave-1', 'cloak', 12345, '198.51.100.7'),
+                     (${gone}, '61500000000023', 'Batch', 'wave-1', 'stock', NULL, '198.51.100.8')`;
+
+    await sql.begin((tx) => tx.unsafe(keep));
+    await copyLikeTheNightly([a, fromProd, gone]);
+    // The copy brings prod's profiles: none for a, and a's seed on another row.
+    await sql`UPDATE fb_pool_accounts SET browser_engine = NULL, cloak_seed = NULL, cloak_gpu = NULL, profile_timezone = NULL WHERE no = ${a}`;
+    await sql`UPDATE fb_pool_accounts SET browser_engine = 'cloak', cloak_seed = 12345, cloak_gpu = 'NVIDIA' WHERE no = ${fromProd}`;
+    // A pool number prod gave to someone else takes no enrollment with it.
+    await sql`UPDATE fb_pool_accounts SET uid = '61500000000099' WHERE no = ${gone}`;
+    await sql.begin((tx) => tx.unsafe(restore));
+
+    const rows = await sql`SELECT no, browser_engine, cloak_seed, cloak_gpu, profile_timezone FROM fb_pool_accounts WHERE no IN (${a}, ${fromProd}) ORDER BY no`;
+    expect(rows).toEqual([
+      { no: a, browser_engine: 'cloak', cloak_seed: 12345, cloak_gpu: 'Intel', profile_timezone: 'America/Chicago' },
+      { no: fromProd, browser_engine: null, cloak_seed: null, cloak_gpu: null, profile_timezone: null },
+    ]);
+    expect(await sql`SELECT account_no, pilot_id FROM fleet_pilot_enrollments`).toEqual([{ account_no: a, pilot_id: 'wave-1' }]);
+  });
+
   it('keeps dev\'s own timing rows instead of prod\'s', async () => {
     const sql = getTestDb();
     const row = (version: string, count: number) => sql`

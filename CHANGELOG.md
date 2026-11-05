@@ -15,6 +15,25 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.421.0] - 2026-11-05
+
+An account can now join the fleet on a chosen browser in one step, and its browser
+profile survives leaving the fleet (RS-537, CloakBrowser launch plan, workstream B).
+Before, adding an account and switching its engine were two calls, so a worker could
+claim in between and the switch was then refused. Removing a slot also lost its seed,
+so the same account could be given a second fingerprint.
+
+`POST /api/fleet/slots` now takes `pilot`, `arm` and `engine`, and writes the
+enrollment, profile, proxy and slot in one transaction. Without them it behaves as
+before. The profile lives on the pool account, with seeds unique at the database, and
+a proxy edit no longer changes a profile's timezone. `fleet_pilot_enrollments` keeps
+each enrollment after the slot and the account are gone, and the first claim stamps
+it. Enrollment refuses an exit IP already in use, comparing measured IPs across ports
+and including homelab workers, and refuses a measurement that failed or is over 15
+minutes old. CloakBrowser claim answers now include `expected_exit_ip` and `webrtc_ip`,
+which the next worker release will read. Nothing changes for running workers, and no
+worker needs a restart.
+
 ## [1.420.1] - 2026-11-05
 
 The Sell orders list now shows each order's Total in the currency chosen on the

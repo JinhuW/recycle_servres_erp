@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-04:** ERP migration `0223`, Reddit tracker migration `0007`,
+**As of 2026-11-05:** ERP migration `0224`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -75,7 +75,7 @@ isolation boundary (`trackers/facebook/infra/README.md`).
   2. It sets dev's Facebook fleet aside in a `sync_keep` schema
      (`keep-fleet.sql`): every `fleet_*` table, and for each pool account
      with a `fleet_slots` row its `*_enc` columns, `cookie_uid`, `cookie_at`,
-     `status` and `note`, plus `perf_rollups`, so dev's timing stays dev's own.
+     `status`, `note` and browser profile, plus `perf_rollups`, so dev's timing stays dev's own.
      Then it resets dev's schema wholesale and restores
      prod's dump.
   3. It runs `scrub.sql` in the same transaction. That truncates the live
@@ -2128,12 +2128,16 @@ One row per Facebook Marketplace login in the shared pool. Managers add, import,
 | `updated_at` | `timestamptz` | ✓ | `now()` |  |
 | `alive_checked_at` | `timestamptz` |  |  | When the weekly liveness check last claimed it; NULL = never, so checked on the next pass. |
 | `token_enc` | `text` |  |  | Sealed Facebook Graph access token (EAA…) that came with the account; NULL = none. |
+| `browser_engine` | `text` |  |  | The engine of the account's browser profile (0224): stock or cloak. NULL = no profile of its own, so its clock follows its proxy. A profile outlives every slot. |
+| `cloak_seed` | `integer` |  |  | CloakBrowser fingerprint seed, kept once given even if the account goes back to stock; unique across all rows, retired included. |
+| `cloak_gpu` | `text` |  |  | The GPU that goes with the seed. |
+| `profile_timezone` | `text` |  |  | The profile's pinned clock; a proxy edit doesn't change it. |
 
 - **Primary key:** `no`
 - **References:** `created_by` → `users.id` (on delete set null); `holder_user_id` → `users.id` (on delete set null)
 - **Unique:** `(uid)`
-- **Checks:** `status IN ('available', 'taken', 'fleet', 'problem', 'retired')`; `uid ~ '^\d{10,20}$'`
-- **Indexes:** `fb_pool_accounts_created_by_idx` (created_by); `fb_pool_accounts_holder_user_id_idx` (holder_user_id); `fb_pool_accounts_status_idx` (status, added_at)
+- **Checks:** `status IN ('available', 'taken', 'fleet', 'problem', 'retired')`; `uid ~ '^\d{10,20}$'`; `browser_engine IN ('stock', 'cloak')`; `browser_engine <> 'cloak' OR cloak_seed IS NOT NULL`
+- **Indexes:** `fb_pool_accounts_cloak_seed_key` (cloak_seed), unique, where cloak_seed is not null; `fb_pool_accounts_created_by_idx` (created_by); `fb_pool_accounts_holder_user_id_idx` (holder_user_id); `fb_pool_accounts_status_idx` (status, added_at)
 - **Triggers:** `fb_worker_accounts_track` (after insert, update of status or holder_name, or delete → `fb_worker_accounts_track()`)
 
 Secrets are AES-256-GCM blobs sealed under FB_POOL_KEY (lib/sealed.ts, v1.<iv>.<tag>.<body> base64url), never clear text, and are shown only to a manager or the purchaser holding the account; the prod→dev copy nulls every *_enc column. `no` never reuses a removed account's number.
@@ -2210,7 +2214,7 @@ Only the latest revive is kept; the backend logs each one.
 
 The ERP fleet: the city task queue the Facebook Marketplace workers pull from, and the slots they run pool accounts in. fleet_cities and fleet_items are the catalog managers edit; fleet_settings holds the queue's knobs; fleet_tasks is one open task per enabled city and item, with fleet_task_events as its log; fleet_hosts are the machines that run worker containers; fleet_slots is the fleet's view of each pool account (who runs it, where, under which lease epoch) and fleet_workers the containers that heartbeat, with fleet_worker_state_events keeping each change of their state (0221). fleet_minutes is a view that sums each account's leased minutes per Eastern day (UTC before 0218) for the daily budget. The accounts themselves and their secrets stay in fb_pool_accounts. Migration 0206 creates all of it; the routes under /api/fleet fill it in later releases.
 
-Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_proxies`](#erp-fleet-proxies), [`fleet_proxy_checks`](#erp-fleet-proxy-checks), [`fleet_proxy_rounds`](#erp-fleet-proxy-rounds), [`fleet_slots`](#erp-fleet-slots), [`fleet_workers`](#erp-fleet-workers), [`fleet_worker_state_events`](#erp-fleet-worker-state-events), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
+Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_proxies`](#erp-fleet-proxies), [`fleet_proxy_checks`](#erp-fleet-proxy-checks), [`fleet_proxy_rounds`](#erp-fleet-proxy-rounds), [`fleet_slots`](#erp-fleet-slots), [`fleet_pilot_enrollments`](#erp-fleet-pilot-enrollments), [`fleet_workers`](#erp-fleet-workers), [`fleet_worker_state_events`](#erp-fleet-worker-state-events), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
 
 <a id="erp-fleet-cities"></a>
 
@@ -2401,6 +2405,29 @@ A slot made on the Account pool tab (`POST /api/fleet/slots`) gets a generated `
 - **Primary key:** `account_no`
 - **References:** `account_no` → `fb_pool_accounts.no` (on delete cascade); `host_id` → `fleet_hosts.host_id` (on delete set null); `proxy_id` → `fleet_proxies.id` (on delete set null)
 - **Indexes:** `fleet_slots_host_id_idx` (host_id), `fleet_slots_proxy_id_idx` (proxy_id)
+
+<a id="erp-fleet-pilot-enrollments"></a>
+
+#### `fleet_pilot_enrollments`
+
+One row per account ever enrolled through `POST /api/fleet/slots` with a pilot or an engine, written with its slot in one transaction (0224). It is a pilot's denominator, so it outlives the slot and the account: there is no foreign key to `fb_pool_accounts`, as with `fb_pool_events`. An enrollment is active while its account has a `fleet_slots` row. The nightly prod→dev copy keeps dev's rows and drops those whose pool number now belongs to another uid.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `account_no` | `integer` | ✓ |  | The pool's #; an account enrolls once. |
+| `uid` | `text` | ✓ |  | Copied from the pool row. |
+| `batch` | `text` | ✓ |  | Copied from the pool row. |
+| `pilot_id` | `text` |  |  | The caller's pilot name; NULL for an engine given outside a pilot. |
+| `arm` | `text` | ✓ |  | cloak or stock, as the caller passed it. |
+| `seed` | `integer` |  |  | The cloak seed; NULL exactly for a stock arm. |
+| `exit_ip` | `text` | ✓ |  | The exit measured at enrollment; never rewritten. |
+| `enrolled_at` | `timestamptz` | ✓ | `now()` |  |
+| `first_claimed_at` | `timestamptz` |  |  | Stamped by the account's first claim. |
+| `enrolled_by` | `text` |  |  | The manager's email. |
+
+- **Primary key:** `account_no`
+- **Checks:** `arm IN ('cloak', 'stock')`; `(arm = 'cloak') = (seed IS NOT NULL)`
+- **Indexes:** `fleet_pilot_enrollments_exit_ip_idx` (exit_ip), `fleet_pilot_enrollments_pilot_idx` (pilot_id, arm)
 
 <a id="erp-fleet-workers"></a>
 

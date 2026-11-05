@@ -881,6 +881,108 @@ the first version; others add fields in their own PRs.
 - Health: `docker inspect` health = `curl -sf localhost:8788/healthz`
   (entrypoint serves it once the monitor is up).
 
+## Enrollment and browser profile (RS-537)
+
+CloakBrowser launch plan, workstream B. Migration `0224_fleet_pilot_enrollment.sql`.
+The sections above predate this and don't mention CloakBrowser; where they
+describe `POST /slots`, this adds to them.
+
+### Stored
+
+- **`fb_pool_accounts`** keeps the profile past any slot: `browser_engine`
+  (`stock`, `cloak`, or NULL for an account with no profile of its own),
+  `cloak_seed` (unique across all pool rows, retired ones included), `cloak_gpu`,
+  `profile_timezone`.
+- **`fleet_pilot_enrollments`**, one row per account ever enrolled. It has no
+  foreign key, so neither retiring nor deleting the account removes it.
+
+| Column | Meaning |
+| --- | --- |
+| `account_no` | Primary key: an account enrolls once |
+| `uid`, `batch` | Copied from the pool row at enrollment |
+| `pilot_id` | The caller's pilot name; NULL when only `engine` was sent |
+| `arm` | `cloak` or `stock`, as the caller passed it |
+| `seed` | The cloak seed; NULL exactly when `arm` is `stock` |
+| `exit_ip` | The exit measured at enrollment; never rewritten |
+| `enrolled_at`, `enrolled_by` | When, and the manager's email |
+| `first_claimed_at` | Stamped by the first claim of the account; NULL until then |
+
+An enrollment is **active** while its account has a `fleet_slots` row.
+
+### `POST /api/fleet/slots`
+
+Body adds optional `pilot` (1 to 64 of letters, digits, `.`, `_`, `-`), `arm` and
+`engine`. `pilot` and `arm` come together. `engine` alone gives the account that
+engine outside any pilot (row with `pilot_id` NULL, `arm` = `engine`); with `arm`
+it must equal it. A cohort report should filter on `pilot_id IS NOT NULL`.
+
+Enrollment, profile, proxy and slot are written in one transaction with the slot
+last, so a claim can't see a half-set slot. With none of the new fields, an
+account with no profile and no enrollment gets what it always got.
+
+A profile is **pinned**: a later add ignores the new proxy's timezone and brings
+back its engine, seed and GPU, even with none of the new fields. An add of an
+already enrolled account also passes the exit rules below, and its enrollment row
+stays as it was. An add that would run CloakBrowser needs `cloak_enabled` and a
+free seat, new or not.
+
+| Refusal (`409`) | When |
+| --- | --- |
+| `cloak_disabled` | `cloak_enabled` is off and the add would run CloakBrowser |
+| `cloak_slots_full` | The slots with `browser_engine: cloak` reach `cloak_max_slots`. Parked slots count, since a parked worker keeps its seat; a stock arm spends none |
+| `cloak_seeded` | The account has a seed and isn't asking to stay on CloakBrowser |
+| `cloak_seed_taken` | Another pool row holds this seed. `fleetCloakFor` hashes the account number into 90,000 values, so two can collide: pick another account |
+| `engine_live_session` | New to CloakBrowser while it may hold a fleet worker's session (`fleetCloakSwitchable`) |
+| `already_enrolled` | Enrolled before under another pilot or arm |
+| `exit_stale` | No `erp` measurement of the proxy, or the latest is older than `FLEET_EXIT_FRESH_MS` (15 minutes: three 5-minute rounds, so one missed round and one late one don't stop enrollment) |
+| `exit_failing` | The latest measurement failed, or passed without naming an IP |
+| `exit_shared` | The measured IP is used by another slot, an active enrollment or a homelab worker |
+
+`exit_shared` compares IPs, never ports, against:
+
+- any other slot, parked included, by the latest IP measured on its `proxy_id`,
+  keeping the last known IP if the proxy is failing now
+- the `exit_ip` recorded by any other active enrollment, even if its port has
+  since moved
+- homelab workers on a port in the last round the console answered
+
+A slot with a NULL `proxy_id` has no measured exit and isn't seen here.
+
+A plain add, with none of the new fields, doesn't check exits, so it can still
+land on a pilot account's IP. Only enrollment reserves.
+
+### Other manager routes
+
+- `POST /slots/:no/engine` writes the profile too. Going to CloakBrowser also
+  answers `409 cloak_seeded` from the pool row's seed, `cloak_seed_taken`, and
+  `pilot_arm` for an account in a pilot's stock arm.
+- `POST /slots/:no/proxy` on an enrolled account passes the exit rules above, and
+  a pinned account keeps its timezone.
+- `PUT /proxies/:id` with a new `timezone` skips accounts with a profile. A new
+  `url` still reaches every slot on the proxy.
+
+### Claim answer (`POST /api/fleet/worker/claim`)
+
+Slots whose device has `browser_engine: cloak` add two top-level fields beside
+`device`. Slots on any other engine don't have them.
+
+| Field | Value |
+| --- | --- |
+| `expected_exit_ip` | The proxy's latest measured IP if it passed within `FLEET_EXIT_FRESH_MS`, else `null` |
+| `webrtc_ip` | Always the same value |
+
+`null` means skip the check, and so does a missing field. A claim is never refused
+for want of a measurement, because it may be a live account's restart. The value
+is what was measured last, not what was recorded at enrollment.
+
+### Stopping
+
+`cloak_enabled=false` stops only new CloakBrowser enrollment and switches, and
+adding a removed cloak account back. An existing cloak account still claims, and
+its answer still has `device.browser_engine: cloak`, which is what the Cloudflare
+Worker keys on to add `env.CLOAKBROWSER_LICENSE_KEY`. The licence is never stored
+or logged by the backend.
+
 ## Review recovery protocol (RS-400)
 
 Backend support must ship before the new agent/worker. Existing fields stay

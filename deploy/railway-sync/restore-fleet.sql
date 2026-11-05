@@ -23,6 +23,14 @@ DECLARE
   progress BOOLEAN;
 BEGIN
   IF pg_catalog.to_regclass('sync_keep._pool') IS NOT NULL THEN
+    -- The copy's rows give way on a seed a kept account holds, or the update
+    -- below breaks the unique index and the whole restore with it.
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'sync_keep' AND table_name = '_pool' AND column_name = 'cloak_seed') THEN
+      UPDATE public.fb_pool_accounts p SET browser_engine = NULL, cloak_seed = NULL, cloak_gpu = NULL, profile_timezone = NULL
+      FROM sync_keep._pool k WHERE k.cloak_seed = p.cloak_seed AND k.no <> p.no;
+    END IF;
+
     -- Only onto the same account: a pool number that prod now gives to someone
     -- else gets none of the kept secrets, and its slot is not brought back.
     -- The holder comes back too: a worker's token is only honoured while its
@@ -34,7 +42,8 @@ BEGIN
     INTO cols
     FROM information_schema.columns c
     WHERE c.table_schema = 'public' AND c.table_name = 'fb_pool_accounts'
-      AND (c.column_name ~ '_enc$' OR c.column_name IN ('cookie_uid', 'cookie_at', 'status', 'note', 'holder_user_id', 'holder_name', 'held_since'))
+      AND (c.column_name ~ '_enc$' OR c.column_name IN ('cookie_uid', 'cookie_at', 'status', 'note', 'holder_user_id', 'holder_name', 'held_since',
+                                'browser_engine', 'cloak_seed', 'cloak_gpu', 'profile_timezone'))
       AND EXISTS (SELECT 1 FROM information_schema.columns k
                   WHERE k.table_schema = 'sync_keep' AND k.table_name = '_pool' AND k.column_name = c.column_name);
     EXECUTE pg_catalog.format(
@@ -50,6 +59,12 @@ BEGIN
                         WHERE p.no = s.account_no);
       GET DIAGNOSTICS n = ROW_COUNT;
       IF n > 0 THEN RAISE NOTICE 'keep-fleet: % slots dropped, their pool account is gone or changed', n; END IF;
+    END IF;
+    -- Nothing else would catch these: enrollments have no foreign key, so that
+    -- they outlive the account.
+    IF pg_catalog.to_regclass('sync_keep.fleet_pilot_enrollments') IS NOT NULL THEN
+      DELETE FROM sync_keep.fleet_pilot_enrollments e
+      WHERE NOT EXISTS (SELECT 1 FROM public.fb_pool_accounts p WHERE p.no = e.account_no AND p.uid = e.uid);
     END IF;
     IF pg_catalog.to_regclass('sync_keep.fleet_workers') IS NOT NULL THEN
       UPDATE sync_keep.fleet_workers w SET account_no = NULL
