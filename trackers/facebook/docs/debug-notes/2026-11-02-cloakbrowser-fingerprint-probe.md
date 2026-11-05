@@ -242,3 +242,59 @@ the probe files were removed afterwards.
   It is now the screen's width with an 8 px frame. A Windows frame is ~16 px.
 - **Both architectures probed.** The persona reports x86 64-bit either way,
   and the amd64 run on the dev host passed (R1 above).
+
+## Spikes S1, S4 and S5: `oci-sg-1`, 2026-11-05
+
+Run with no account and no Facebook page, on a throwaway image
+(`aimm-recycle:spike-ee40173`, monitor `ee40173`), using the worker's own launch,
+preflight and outage classification. The proxy was a throwaway `proxy.py` on the Mac,
+tunnelled over ssh, so the exit (`74.104.122.134`) differs from the host
+(`140.245.106.33`). An outage was simulated by dropping the test containers' direct
+egress in `DOCKER-USER`; the proxy path stayed up. These runs stop at the classifier:
+`monitor.py`'s exit itself is covered by unit tests, not by these runs.
+
+**The key changed what gets baked.** A build now fetches 156.0.8078.47.1, where 0.16.0
+has 155.0.8059.39.2. The key identifies as CloakBrowser Pro and ran 4 browsers at once;
+the upper limit was not measured.
+
+| Spike | Result |
+| --- | --- |
+| S1, no flag | Preflight saw no WebRTC candidates, so no host IP |
+| S1, with the flag | An mDNS name plus a srflx candidate on the exit IP; the `webrtc` check passes |
+| S1, forced wrong exit, blocked WebRTC | Both fail their checks and park `profile_preflight` |
+| S5, blocked before launch | Dies in about 25 s, exit 78, `license_outage()` true; a retry after unblocking works |
+| S4, fresh launch during an outage | Cannot stay up: the same 25 s |
+| S5 and S4, blocked after launch | **Fails. See below.** A retry after unblocking works |
+| S4, does `playwright.stop()` free the seat | **Inconclusive.** A new launch worked straight after, but the key has spare seats |
+
+**A live browser in an outage dies as a plain crash.** Each blocked browser died about
+16 minutes after launch (961 to 968 s), with the block applied either at once or 90 s
+after launch, on both 155 and 156. Two unblocked controls, one per build, ran the full
+25 minutes beside them. After each death:
+
+- The error is `TargetClosedError`, and the guard does not turn it into a licence error.
+- The denial file never appears, checked for 44 s after the death.
+- `license_denial()` is None, `license_outage()` is false, `park_reason()` is `browser_failed`.
+
+So the after-launch row of the plan's outage table doesn't hold: these workers would
+park `browser_failed` rather than exit 74. Not measured: when a browser dies if the
+outage starts long after launch.
+
+**Probe timing.** A browser whose block starts just after launch lives past
+`OUTAGE_RECOVERED_MS` (15 minutes) by about a minute, so one launched in that window
+could falsely end an outage. A launch inside an outage dies in 25 s and can't.
+
+**156 fails the preflight on a good profile.** Same code and host, three runs on 156 and
+one on 155:
+
+| Binary | outer / inner width | `window` check |
+| --- | --- | --- |
+| 155.0.8059.39.2 | 1919 / 1911 | passes |
+| 156.0.8078.47.1 | 1919 / 1919, no frame | **fails** |
+
+Every cloak worker on 156 would park `profile_preflight`, and the failure also hides a
+moved exit, since `exit_moved` needs the exit to be the only failure.
+
+**S3, in part.** Seed 48213's canvas (`62c165a0e1b0`) and WebGL (`bbec01befde1`) hashes
+and its font count are the same on both builds. The UA's Chrome version does change.
+
