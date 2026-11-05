@@ -16,9 +16,13 @@
 //   recreated on the current image anyway, and left there it only shows an
 //   old build. Removing a stopped container is not a login.
 // * Left stopped, online or not, until a person acts: a worker that exited 78
-//   (it could not connect), one that hit the crash limit, and one a person
-//   stopped (`docker stop`, exit 0 or 143 while this agent ran). Every restart
-//   would be one more login.
+//   (it could not connect), one that hit the crash limit, one that used up its
+//   licence outage retries, and one a person stopped (`docker stop`, exit 0 or
+//   143 while this agent ran). Every restart would be one more login.
+// * A worker that exited 74 (no licence server) is retried on a long backoff,
+//   a bounded number of times. An outage hits every cloak worker at once, so
+//   the retries share the stagger below and the jitter keeps them from
+//   falling due together.
 // * One start per tick, and never within the stagger of the previous one:
 //   each start is a Facebook login, and ten from one host at once is a
 //   pattern worth not showing. The previous start is the later of what the
@@ -47,6 +51,14 @@ export const EXIT_CLAIM_FAILED = 70;
 export const EXIT_OPERATOR_NEEDED = 78;
 /** What the report says for a worker left for an operator, in place of docker's `exited`. */
 export const OPERATOR_NEEDED_STATE = 'operator_needed';
+// The browser's licence server could not be reached. Not the worker's fault and
+// not a crash, but a retry during a long outage can still be a boot login.
+export const EXIT_LICENSE_OUTAGE = 74;
+export const OUTAGE_BACKOFF_BASE_MS = 5 * 60_000;
+export const OUTAGE_BACKOFF_CAP_MS = 60 * 60_000;
+export const OUTAGE_ATTEMPT_LIMIT = 8;
+// On top of the cap too: capped retries are the ones an outage lines up.
+export const OUTAGE_JITTER = 0.25;
 const RESTART_DELAY_MS: Record<number, number> = {
   [EXIT_STALE_OR_NO_SLOT]: 60_000,
   [EXIT_CLAIM_FAILED]: 10 * 60_000,
@@ -77,13 +89,20 @@ export interface Container {
 
 export type Action =
   | { kind: 'run'; worker_id: string; container: string; image: string; port: number; reason: string }
-  | { kind: 'start'; worker_id: string; container: string; reason: string; counted: boolean; soft: boolean }
-  | { kind: 'replace'; worker_id: string; container: string; image: string; port: number; reason: string; counted: boolean; soft: boolean }
+  | { kind: 'start'; worker_id: string; container: string; reason: string; counted: boolean; soft: boolean; outage?: boolean }
+  | { kind: 'replace'; worker_id: string; container: string; image: string; port: number; reason: string; counted: boolean; soft: boolean; outage?: boolean }
   | { kind: 'remove'; worker_id: string; container: string; reason: string };
 
 export interface HoldEntry {
   container: string;
   reason: Exclude<Hold, 'operator_needed'>;
+}
+
+/** A worker's licence outage retries. Kept per worker id: a retry may recreate the container. */
+export interface OutageRetry {
+  attempts: number;
+  /** Drawn once per wait, 0 <= jitter < 1: drawn per tick, the shortest draw would always win. */
+  jitter: number;
 }
 
 export interface PlanInput {
@@ -99,6 +118,8 @@ export interface PlanInput {
   restarts: Record<string, number[]>;
   /** Restarts after a 75 or 70, per worker (ms). */
   softRestarts?: Record<string, number[]>;
+  /** Licence outage retries, per worker. */
+  outage?: Record<string, OutageRetry>;
   /** Workers left stopped, by worker id, for the container they were held on. */
   held?: Record<string, HoldEntry>;
   /** When this agent itself last stopped each worker (ms). */
@@ -154,12 +175,21 @@ export function restartDelayMs(exitCode: number | null): number {
 /** True for an exit the contract did not define: it counts toward the crash limit. */
 export function isCrash(exitCode: number | null): boolean {
   return exitCode !== EXIT_STALE_OR_NO_SLOT && exitCode !== EXIT_CLAIM_FAILED && exitCode !== EXIT_OPERATOR_NEEDED
-    && exitCode !== EXIT_NORMAL && exitCode !== EXIT_SIGTERM;
+    && exitCode !== EXIT_LICENSE_OUTAGE && exitCode !== EXIT_NORMAL && exitCode !== EXIT_SIGTERM;
 }
 
 /** An exited worker that waits for a person, never for the agent. */
 export function needsOperator(c: Container): boolean {
   return !c.running && c.exit_code === EXIT_OPERATOR_NEEDED;
+}
+
+export function outageDelayMs(retry: OutageRetry): number {
+  return Math.min(OUTAGE_BACKOFF_CAP_MS, OUTAGE_BACKOFF_BASE_MS * 2 ** retry.attempts) * (1 + OUTAGE_JITTER * retry.jitter);
+}
+
+/** Its last or current run outlasted the longest backoff, so the outage it counted toward is over. */
+export function ranHealthily(c: Container, now: number): boolean {
+  return (c.running ? now : parseTime(c.finished_at)) - parseTime(c.started_at) > OUTAGE_BACKOFF_CAP_MS;
 }
 
 export function recentRestarts(times: number[] | undefined, now: number): number[] {
@@ -314,19 +344,29 @@ export function plan(input: PlanInput): Plan {
     }
     if (hold) {
       if (current.id !== undefined && input.held?.[id]?.container !== current.id) holds[id] = { container: current.id, reason: hold };
-      notes.push(hold === 'crash_limit'
-        ? `${id}: crash limit reached (last exit ${current.exit_code}); left stopped until a person starts or removes it`
-        : `${id}: stopped by hand (exit ${current.exit_code}); left stopped until a person starts or removes it`);
+      const why = { crash_limit: 'crash limit reached (last exit', license_outage: 'licence outage retries used (last exit', operator_stopped: 'stopped by hand (exit' }[hold];
+      notes.push(`${id}: ${why} ${current.exit_code}); left stopped until a person starts or removes it`);
       continue;
     }
     // Exited: how long ago, and has it been doing this a lot.
     const finished = parseTime(current.finished_at);
     const sinceExit = Number.isFinite(finished) ? now - finished : Infinity;
     const crash = isCrash(current.exit_code);
-    const soft = !crash;
+    const outage = current.exit_code === EXIT_LICENSE_OUTAGE;
+    // Its own count: a retry here must not push a later 75 into the long wait.
+    const soft = !crash && !outage;
     let delay = restartDelayMs(current.exit_code);
     if (current.exit_code === EXIT_STALE_OR_NO_SLOT && recentRestarts(input.softRestarts?.[id], now).length >= SOFT_LIMIT) {
       delay = SOFT_BACKOFF_MS;
+    }
+    if (outage) {
+      const retry = input.outage?.[id] ?? { attempts: 0, jitter: 0 };
+      if (retry.attempts >= OUTAGE_ATTEMPT_LIMIT) {
+        if (current.id !== undefined) holds[id] = { container: current.id, reason: 'license_outage' };
+        notes.push(`${id}: licence outage, ${OUTAGE_ATTEMPT_LIMIT} retries used; left stopped until a person starts or removes it`);
+        continue;
+      }
+      delay = outageDelayMs(retry);
     }
     if (sinceExit < delay) {
       notes.push(`${id}: exit ${current.exit_code} ${Math.round(sinceExit / 1000)} s ago; restart after ${delay / 1000} s`);
@@ -348,9 +388,9 @@ export function plan(input: PlanInput): Plan {
       continue;
     }
     if (recreate) {
-      actions.push({ kind: 'replace', worker_id: id, container: current.name, image: desired.image, port: vncPort(desired, id, n), reason: `exit ${current.exit_code}`, counted: crash, soft });
+      actions.push({ kind: 'replace', worker_id: id, container: current.name, image: desired.image, port: vncPort(desired, id, n), reason: `exit ${current.exit_code}`, counted: crash, soft, ...(outage ? { outage } : {}) });
     } else {
-      actions.push({ kind: 'start', worker_id: id, container: current.name, reason: `exit ${current.exit_code}`, counted: crash, soft });
+      actions.push({ kind: 'start', worker_id: id, container: current.name, reason: `exit ${current.exit_code}`, counted: crash, soft, ...(outage ? { outage } : {}) });
     }
   }
 

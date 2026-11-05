@@ -6,6 +6,7 @@ See [README.md](./README.md) for what the fields mean.
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
 | [RS-535](./RS-535-fleet-worker-0-17-0-preflight-webrtc-seats-outage-ex.md) | done | story | P2 | Fleet worker 0.17.0: preflight, WebRTC, seats, outage exit | facebook-tracker unreleased (next minor, 0.17.0) |
+| [RS-529](./RS-529-fleet-agent-licence-outage-exit.md) | done | story | P2 | Fleet agent: licence outage exit | 1.420.0 |
 | [RS-528](./RS-528-count-proxy-crowding-by-exit-ip-not-by-port.md) | done | bug | P2 | Count proxy crowding by exit IP, not by port | 1.419.1 |
 | [RS-527](./RS-527-warn-when-a-proxy-carries-too-many-accounts.md) | done | story | P2 | Warn when a proxy carries too many accounts | 1.419.0 |
 | [RS-526](./RS-526-release-review-findings-before-the-v1-418-prod-cut.md) | done | bug | P2 | Release-review findings before the v1.418 prod cut | 1.418.1 |

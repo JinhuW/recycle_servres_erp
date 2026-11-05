@@ -94,12 +94,20 @@ the same `FLEET_HOST_ID` on its daemon observes only, logs an error and puts
    - restart an exited worker by its exit code: `75` (stale epoch or no
      slot) after 60 s, or after 10 min once it has had five 75/70 restarts
      in 30 min; `70` (claim failed) after 10 min; any other code after 60 s,
-     counted; five counted restarts in 30 min hold it (below);
+     counted; five counted restarts in 30 min hold it (below). `74`
+     (licence outage) is not a crash: it waits 5 min, doubling to at most
+     60 min, each wait plus up to 25% jitter, for at most 8 retries, inside
+     the same stagger. The count and jitter live in `/state` and survive an
+     agent restart. A run longer than 60 min clears the count, so a later
+     outage starts afresh; so does a person bringing a held worker back;
    - leave stopped, and report with a distinct `state` and `hold`:
      - `operator_needed`: it exited `78`, could not reach Facebook or its
        proxy;
      - `crash_limit`: it hit the crash limit. The hold stays on that
        container after the window has passed and across agent restarts;
+     - `license_outage`: it exited `74` again after 8 retries. Report
+       containers also carry `outage_attempts` from the first `74` until the
+       count clears;
      - `operator_stopped`: it exited `0` or `143` while this agent ran and
        the agent had not stopped it, i.e. someone ran `docker stop`. An exit
        from before the agent started (a host or daemon restart) is restarted
@@ -158,7 +166,7 @@ recreated (stop confirmation, then a fresh ticket and `docker run`).
 - Touch a container without the `rs.fleet.host={id}` label.
 - Start more than one worker per tick, or two within the stagger.
 - Restart a worker it holds (`operator_needed`, `crash_limit`,
-  `operator_stopped`).
+  `license_outage`, `operator_stopped`).
 - Pull or run an image outside `FLEET_IMAGE_PREFIX`.
 - Start, stop or replace anything while the ERP says `authoritative: false`.
 - Hand out the host token. It is the only secret the agent holds; each
