@@ -18,6 +18,45 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **A cloak worker proves its profile before any Facebook page.** It measures
+  the exit IP on both the page path and `context.request` against the claim's
+  `expected_exit_ip`, the WebRTC candidates against `webrtc_ip`, then zone,
+  language, `webdriver`, platform, font count and window. This runs in a
+  throwaway context on the account's own proxy, against ipify rather than
+  Facebook. A failure parks `DEAD` with `{reason: "profile_preflight"}` and
+  costs no login. A claim without those IPs (an older ERP) skips those two
+  checks and logs that it did. Linux font tells are reported and don't fail,
+  until the Windows fonts decision.
+- **`--fingerprint-webrtc-ip` from the claim and `--license-route=direct`** on
+  every cloak launch, so license calls never use an account's proxy.
+- **`fingerprint-probe.py` covers all of this.** `--expected-exit-ip`,
+  `--webrtc-ip` and `--force wrong_exit|blocked_webrtc`, with `--compare` rows
+  for the flags, the preflight and the forced runs that must park.
+
+### Changed
+
+- **A license server out of reach is now worker exit 74, not a park.** That is
+  the binary's exit 78, before or after `launch` returns, including when a
+  handler swallowed the error. The worker heartbeats `DEAD` with
+  `{reason: "license_outage", exit_code: 78, facebook_opened}` and leaves for
+  the agent to retry. Exits 76, 77 and 79 stay parked as `license_denied`.
+  **An agent that predates exit 74 reads it as a crash and holds the worker
+  after 5 restarts, so the agent must reach hosts first.**
+- **A cloak browser is closed explicitly on stop**, after its session is saved,
+  so its license seat is free for the replacement. A killed one holds its seat
+  for up to 30 minutes, and the replacement exits 76 and parks.
+
+### Fixed
+
+- **A refused session upload on a cloak worker is reported.** A 413 over the
+  1 MiB cap used to leave the pool's copy stale with nothing said. It now logs
+  `session_upload_failed` and every heartbeat carries
+  `detail.session_upload_failure` until an upload succeeds.
+- **A license setup or guard that raises parks a cloak worker** as
+  `browser_failed`. It used to exit into a new container each time.
+
 ## [0.16.0] - 2026-11-02
 
 ### Added
