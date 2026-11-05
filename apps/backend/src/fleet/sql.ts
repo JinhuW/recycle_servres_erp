@@ -97,6 +97,14 @@ export const minutesTodaySql = (sql: SqlLike, accountNo: ReturnType<SqlLike> | n
      WHERE t.account_no = ${accountNo} AND t.state = 'leased' AND t.leased_at IS NOT NULL
    ) x)`;
 
+/**
+ * Whether search task `t` ran to the end, as the probe's `!result.stopped`
+ * reads it: absent, false, null, 0 or "". Workers send a reason string, such
+ * as 'wall (checkpoint)', when they stop one.
+ */
+export const searchRanToEnd = (sql: SqlLike) => sql`
+  COALESCE(t.result->'stopped', 'false'::jsonb) IN ('false'::jsonb, 'null'::jsonb, '0'::jsonb, '""'::jsonb)`;
+
 /** Every relation the fleet migration creates, the view included. */
 export const FLEET_TABLES = [
   'fleet_cities',
@@ -104,8 +112,10 @@ export const FLEET_TABLES = [
   'fleet_hosts',
   'fleet_items',
   'fleet_minutes',
+  'fleet_pilot_enrollments',
   'fleet_proxies',
   'fleet_proxy_checks',
+  'fleet_proxy_exit_changes',
   'fleet_proxy_rounds',
   'fleet_settings',
   'fleet_slots',

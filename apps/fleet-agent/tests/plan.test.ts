@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CRASH_LIMIT, effectiveLastStart, holdOf, plan, SOFT_BACKOFF_MS, SOFT_LIMIT, type Container, type PlanInput } from '../src/plan.js';
+import { CRASH_LIMIT, EXIT_LICENSE_OUTAGE, effectiveLastStart, holdOf, isCrash, OUTAGE_RECOVERED_MS, outageDelayMs, plan, ranHealthily, SOFT_BACKOFF_MS, SOFT_LIMIT, type Container, type PlanInput } from '../src/plan.js';
 import type { Desired } from '../src/types.js';
 import { exited, running } from './helpers/fake-docker.js';
 
@@ -357,5 +357,121 @@ describe('images and handoffs', () => {
   it('online recreates a ticket worker, so it runs on a fresh ticket', () => {
     const p = run([running('lab-1'), { ...exited('lab-2', 75, ago(120)), ticket: true }], {}, { leases: {} });
     expect(p.actions[0]).toMatchObject({ kind: 'replace', worker_id: 'lab-2' });
+  });
+});
+
+describe('licence outage (exit 74)', () => {
+  const MIN = 60_000;
+  /** Exited 74 this many ms ago after a run too short to count as recovery. */
+  const out = (id: string, msAgo: number): Container => ({
+    ...exited(id, EXIT_LICENSE_OUTAGE, new Date(NOW - msAgo).toISOString()),
+    started_at: new Date(NOW - msAgo - 30_000).toISOString(),
+  });
+
+  it('is its own code, and not a crash', () => {
+    expect(EXIT_LICENSE_OUTAGE).toBe(74);
+    expect(isCrash(EXIT_LICENSE_OUTAGE)).toBe(false);
+  });
+
+  it('backs off from 5 min, doubling, capped at 60', () => {
+    const delays = [0, 1, 2, 3, 4, 5, 6, 7].map((attempts) => outageDelayMs({ attempts, jitter: 0 }) / MIN);
+    expect(delays).toEqual([5, 10, 20, 40, 60, 60, 60, 60]);
+  });
+
+  it('adds up to 25% jitter, at the cap too', () => {
+    expect(outageDelayMs({ attempts: 0, jitter: 0.5 })).toBe(5.625 * MIN);
+    expect(outageDelayMs({ attempts: 6, jitter: 0.5 })).toBe(67.5 * MIN);
+    expect(outageDelayMs({ attempts: 6, jitter: 0.999 })).toBeLessThan(75 * MIN);
+  });
+
+  it('waits out the jittered delay it is given', () => {
+    const outage = { 'lab-1': { attempts: 1, jitter: 0.4 } }; // 11 min
+    expect(run([out('lab-1', 11 * MIN - 1), running('lab-2')], { outage }).actions).toEqual([]);
+    expect(kinds(run([out('lab-1', 11 * MIN), running('lab-2')], { outage }))).toEqual([['start', 'lab-1']]);
+  });
+
+  it('marks its retry as neither a crash nor a soft restart, whatever the crash history', () => {
+    const history = Array.from({ length: CRASH_LIMIT }, (_, i) => NOW - i * MIN);
+    const p = run([out('lab-1', 6 * MIN), running('lab-2')], { restarts: { 'lab-1': history }, softRestarts: { 'lab-1': history } });
+    expect(p.holds).toEqual({});
+    expect(p.actions[0]).toMatchObject({ kind: 'start', worker_id: 'lab-1', counted: false, soft: false, outage: true });
+  });
+
+  it('never holds: the eighth, ninth and hundredth retry all wait about an hour', () => {
+    for (const attempts of [7, 8, 100]) {
+      const outage = { 'lab-1': { attempts, jitter: 0 } };
+      expect(run([out('lab-1', 59 * MIN), running('lab-2')], { outage }).actions).toEqual([]);
+      const p = run([out('lab-1', 61 * MIN), running('lab-2')], { outage });
+      expect(kinds(p)).toEqual([['start', 'lab-1']]);
+      expect(p.holds).toEqual({});
+    }
+  });
+
+  it('probes with one worker per host, the lowest number, and the rest spend no attempts', () => {
+    const three = [out('lab-1', 6 * MIN), out('lab-2', 6 * MIN), out('lab-3', 6 * MIN)];
+    const p = run(three, {}, { count: 3 });
+    expect(kinds(p)).toEqual([['start', 'lab-1']]);
+    expect(p.notes).toContain('lab-2: licence outage; waits for the host\'s probe');
+    expect(run(three, { lastStartAt: NOW - MIN }, { count: 3 }).actions).toEqual([]);
+  });
+
+  it('waits on the probe\'s own backoff, not on a due worker behind it', () => {
+    const outage = { 'lab-1': { attempts: 3, jitter: 0 } }; // 40 min
+    expect(run([out('lab-1', 10 * MIN), out('lab-2', 10 * MIN)], { outage }, { count: 2 }).actions).toEqual([]);
+  });
+
+  it('starts no second probe while one is running', () => {
+    const outage = { 'lab-1': { attempts: 1, jitter: 0 } };
+    const p = run([running('lab-1'), out('lab-2', 60 * MIN)], { outage }, { count: 2 });
+    expect(p.actions).toEqual([]);
+    expect(p.notes).toContain('lab-2: licence outage; waits for lab-1\'s probe');
+  });
+
+  it('gives a stock restart the start ahead of a due probe, whatever its number', () => {
+    const p = run([out('lab-1', 6 * MIN), exited('lab-2', 75, ago(120))], {}, { count: 2 });
+    expect(kinds(p)).toEqual([['start', 'lab-2']]);
+  });
+
+  it('lets the rest follow one at a time once a probe has stayed up, with no probe wait', () => {
+    const outage = { 'lab-2': { attempts: 0, jitter: 0 }, 'lab-3': { attempts: 0, jitter: 0 } };
+    const recovered = { outageRecoveredAt: NOW - MIN, outage };
+    const p = run([running('lab-1'), out('lab-2', 3 * MIN), out('lab-3', 3 * MIN)], recovered, { count: 3 });
+    expect(kinds(p)).toEqual([['start', 'lab-2']]);
+    expect(p.actions[0]).toMatchObject({ outage: true });
+    // A 74 after the recovery is a new outage, back behind a probe.
+    expect(run([running('lab-1'), out('lab-2', 0), out('lab-3', 0)], { outageRecoveredAt: NOW - MIN }, { count: 3 }).actions).toEqual([]);
+  });
+
+  it('recreates a spent ticket or reservation online, and leaves it waiting offline', () => {
+    for (const spent of [{ ticket: true }, { handoff: true }]) {
+      const c = { ...out('lab-1', 6 * MIN), ...spent };
+      expect(run([c, running('lab-2')], {}, { leases: {} }).actions[0]).toMatchObject({ kind: 'replace', worker_id: 'lab-1', outage: true });
+      expect(run([c, running('lab-2')], { online: false }, { leases: {} }).actions).toEqual([]);
+    }
+  });
+
+  it('offline, restarts a container it may start, and creates nothing', () => {
+    expect(run([out('lab-1', 6 * MIN), running('lab-2')], { online: false }, { leases: {} }).actions[0]).toMatchObject({ kind: 'start', outage: true });
+  });
+
+  it('not authoritative, does nothing', () => {
+    expect(run([out('lab-1', 6 * MIN)], {}, { authoritative: false }).actions).toEqual([]);
+  });
+
+  it('counts a run as recovery only past 15 minutes, running or finished', () => {
+    const start = (msAgo: number) => new Date(NOW - msAgo).toISOString();
+    expect(OUTAGE_RECOVERED_MS).toBe(15 * MIN);
+    expect(ranHealthily(running('lab-1', 'img:1', start(16 * MIN)), NOW)).toBe(true);
+    expect(ranHealthily(running('lab-1', 'img:1', start(14 * MIN)), NOW)).toBe(false);
+    const finished = exited('lab-1', 74, start(MIN));
+    expect(ranHealthily({ ...finished, started_at: start(17 * MIN) }, NOW)).toBe(true);
+    expect(ranHealthily({ ...finished, started_at: start(10 * MIN) }, NOW)).toBe(false);
+    expect(ranHealthily({ ...finished, started_at: null }, NOW)).toBe(false);
+  });
+
+  it('leaves the other exits without an outage mark', () => {
+    const p = run([exited('lab-1', 75, ago(120)), running('lab-2')]);
+    expect(p.actions[0]).toMatchObject({ kind: 'start', soft: true });
+    expect(p.actions[0]).not.toHaveProperty('outage');
   });
 });

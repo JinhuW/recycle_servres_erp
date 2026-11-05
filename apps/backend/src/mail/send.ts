@@ -70,12 +70,12 @@ export async function sendSubmissionReply(
   sql: Sql, env: Env,
   args: { submissionId: string; authorId: string; body: string },
 ): Promise<ReplyOutcome> {
-  const cfg = mailConfig(env);
-  if (!cfg) return { kind: 'off' };
   const [sub] = await sql<{ id: string; site: string; kind: string; email: string }[]>`
     SELECT id, site, kind, email FROM web_submissions WHERE id = ${args.submissionId}
   `;
   if (!sub) return { kind: 'not_found' };
+  const cfg = mailConfig(env, sub.site);
+  if (!cfg) return { kind: 'off' };
   // A test sender refuses before anything is recorded: there's no attempt to
   // show, and no address outside its list is ever handed to SMTP.
   if (!recipientAllowed(cfg, sub.email)) return { kind: 'blocked' };

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FleetCity, FleetTask } from '../../../lib/fleet';
 import { CITIES, HITS, HOSTS, NOW, RELEASE, SLOTS, STATS, TASKS, WORKERS } from './fixtures';
 import {
-  alertsByCity, averageTaskSeconds, beltAxis, beltLeft, beltRow, beltSummary, budgetTone, cityBucket, cityStanding, daySeries, dueIn, dueLabel,
+  fleetAttention, alertsByCity, averageTaskSeconds, beltAxis, beltLeft, beltRow, beltSummary, budgetTone, cityBucket, cityStanding, daySeries, dueIn, dueLabel,
   capacityCuts, easternClock, filterCities, filterTasks, funnelCounts, funnelGaps, funnelHeadline, hostRunning, isQuarantined, isSlug,
   lastDoneSearch, leaseLive, liveness, logByItem, maskUid, nextDue, niceTop, openSearch, releaseSummary, rollProgress, hostLag, imageVersion, roundStartPreview,
   slotLease, sortTasks, spanLabel, utcDayStart, withCityNames, workersBusy,
@@ -409,5 +409,23 @@ describe('task table', () => {
     expect(ids.slice(2, 5)).toEqual([209, 204, 203]);         // due now, newest due first
     expect(ids[ids.length - 1]).toBe(207);                    // the soonest waiting-for-later task is last
     expect(ids.indexOf(190)).toBeLessThan(ids.indexOf(206));  // finished before waiting-for-later
+  });
+});
+
+describe('fleetAttention', () => {
+  const host = (containers: object[]) => ({ report: { containers } }) as never;
+  it('counts outage reports, running probes and held containers', () => {
+    const workers = [
+      { state: 'DEAD', detail: { reason: 'license_outage' } }, { state: 'DEAD', detail: { reason: 'license_outage' } },
+      { state: 'DEAD', detail: { reason: 'connect_failed' } }, { state: 'HEALTHY', detail: null },
+    ] as never;
+    expect(fleetAttention(workers, [host([
+      { worker_id: 'b-1', state: 'running', outage_attempts: 2 },
+      { worker_id: 'b-2', state: 'exited', outage_attempts: 0 },
+      { worker_id: 'a-3', state: 'crash_limit', hold: 'crash_limit' },
+    ])])).toEqual({ outage: 2, probing: 1, held: ['a-3'] });
+  });
+  it('is empty on a healthy fleet, and on a host with no report', () => {
+    expect(fleetAttention([], [{ report: null } as never])).toEqual({ outage: 0, probing: 0, held: [] });
   });
 });

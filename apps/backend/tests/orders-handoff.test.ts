@@ -463,17 +463,52 @@ describe('hand-off facts on the page', () => {
     expect(ho?.detail).toMatchObject({ method: 'pickup', byUserId: user.id, byName: user.name });
   });
 
-  it('a $0 Draft lists noCost first; /advance refuses on it but not on a missing source', async () => {
+  it('a Draft with no units lists noCost, and confirming does not pass it', async () => {
+    const { token, user } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'self');
+    await attachChat(token, id);
+    await getTestDb()`UPDATE order_lines SET qty = 0 WHERE order_id = ${id}`;
+    await getTestDb()`UPDATE orders SET total_cost = 0 WHERE id = ${id}`;
+    expect((await readOrder(token, id)).blockers[0]).toBe('noCost');
+    const refused = await api<{ error: string }>('POST', `/api/orders/${id}/handoff`, {
+      token,
+      body: { warehouseId: 'WH-LA1', source: 'facebook', handoff: pickup(user.id), payment: 'self', confirmZeroCost: true },
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/no cost/i);
+  });
+
+  it('an all-$0 PO leaves Draft only through a hand-off that confirms it', async () => {
+    const { token, user } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token, body: { category: 'RAM', warehouseId: 'WH-LA1', payment: 'self', lines: [{ ...LINE, unitCost: 0 }] },
+    });
+    const id = created.body.id;
+    await attachChat(token, id);
+    const body = { warehouseId: 'WH-LA1', source: 'facebook', handoff: pickup(user.id), payment: 'self' };
+
+    const refused = await api<{ error: string }>('POST', `/api/orders/${id}/handoff`, { token, body });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/\$0/);
+    expect((await readOrder(token, id)).lifecycle).toBe('draft');
+
+    const ok = await api('POST', `/api/orders/${id}/handoff`, { token, body: { ...body, confirmZeroCost: true } });
+    expect(ok.status).toBe(200);
+    expect((await readOrder(token, id)).lifecycle).toBe('in_transit');
+    expect((await events(id)).find(e => e.kind === 'submitted')?.detail).toMatchObject({ zeroCostConfirmed: true });
+  });
+
+  it('a $0 Draft lists zeroCost first; /advance refuses on it but not on a missing source', async () => {
     const { token: mTok } = await loginAs(ALEX);
     const { token } = await loginAs(MARCUS);
     const free = await api<{ id: string }>('POST', '/api/orders', {
       token, body: { category: 'RAM', warehouseId: 'WH-LA1', payment: 'self', lines: [{ ...LINE, unitCost: 0 }] },
     });
     expect(free.status).toBe(201);
-    expect((await readOrder(token, free.body.id)).blockers[0]).toBe('noCost');
+    expect((await readOrder(token, free.body.id)).blockers[0]).toBe('zeroCost');
     const refused = await api<{ error: string }>('POST', `/api/orders/${free.body.id}/advance`, { token: mTok, body: {} });
     expect(refused.status).toBe(409);
-    expect(refused.body.error).toMatch(/no cost/i);
+    expect(refused.body.error).toMatch(/\$0/);
 
     // Priced, self-paid, chat attached — but no source and no delivery. The
     // facts are the hand-off's; a manager stage-jump is not held to them.

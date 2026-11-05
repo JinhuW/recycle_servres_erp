@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-04:** ERP migration `0223`, Reddit tracker migration `0007`,
+**As of 2026-11-05:** ERP migration `0228`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -75,7 +75,7 @@ isolation boundary (`trackers/facebook/infra/README.md`).
   2. It sets dev's Facebook fleet aside in a `sync_keep` schema
      (`keep-fleet.sql`): every `fleet_*` table, and for each pool account
      with a `fleet_slots` row its `*_enc` columns, `cookie_uid`, `cookie_at`,
-     `status` and `note`, plus `perf_rollups`, so dev's timing stays dev's own.
+     `status`, `note` and browser profile, plus `perf_rollups`, so dev's timing stays dev's own.
      Then it resets dev's schema wholesale and restores
      prod's dump.
   3. It runs `scrub.sql` in the same transaction. That truncates the live
@@ -381,7 +381,7 @@ One row per entry in a user's in-app inbox (the bell). Written inside the transa
 | --- | --- | :-: | --- | --- |
 | `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
 | `user_id` | `uuid` | ✓ |  |  |
-| `kind` | `text` | ✓ |  | What happened: order_submitted, order_reverted, order_ready_to_pay, ai_review, box_check, low_margin, payment_received, sell_order_signoff, package_delivered, web_submission, accounting_query, accounting_answered. |
+| `kind` | `text` | ✓ |  | What happened: order_submitted, order_reverted, order_ready_to_pay, ai_review, box_check, low_margin, payment_received, sell_order_signoff, package_delivered, web_submission, accounting_query, accounting_answered, fleet_proxy_exit, fleet_licence_outage. |
 | `tone` | `text` | ✓ | `'info'` | info, warn or pos (good news); colours the entry. |
 | `icon` | `text` | ✓ | `'bell'` | Icon name the UI draws: bell (default), mail, package, alert, cash, flag, check, inventory. |
 | `title` | `text` | ✓ |  |  |
@@ -2128,12 +2128,16 @@ One row per Facebook Marketplace login in the shared pool. Managers add, import,
 | `updated_at` | `timestamptz` | ✓ | `now()` |  |
 | `alive_checked_at` | `timestamptz` |  |  | When the weekly liveness check last claimed it; NULL = never, so checked on the next pass. |
 | `token_enc` | `text` |  |  | Sealed Facebook Graph access token (EAA…) that came with the account; NULL = none. |
+| `browser_engine` | `text` |  |  | The engine of the account's browser profile (0224): stock or cloak. NULL = no profile of its own, so its clock follows its proxy. A profile outlives every slot. |
+| `cloak_seed` | `integer` |  |  | CloakBrowser fingerprint seed, kept once given even if the account goes back to stock; unique across all rows, retired included. |
+| `cloak_gpu` | `text` |  |  | The GPU that goes with the seed. |
+| `profile_timezone` | `text` |  |  | The profile's pinned clock; a proxy edit doesn't change it. |
 
 - **Primary key:** `no`
 - **References:** `created_by` → `users.id` (on delete set null); `holder_user_id` → `users.id` (on delete set null)
 - **Unique:** `(uid)`
-- **Checks:** `status IN ('available', 'taken', 'fleet', 'problem', 'retired')`; `uid ~ '^\d{10,20}$'`
-- **Indexes:** `fb_pool_accounts_created_by_idx` (created_by); `fb_pool_accounts_holder_user_id_idx` (holder_user_id); `fb_pool_accounts_status_idx` (status, added_at)
+- **Checks:** `status IN ('available', 'taken', 'fleet', 'problem', 'retired')`; `uid ~ '^\d{10,20}$'`; `browser_engine IN ('stock', 'cloak')`; `browser_engine <> 'cloak' OR cloak_seed IS NOT NULL`
+- **Indexes:** `fb_pool_accounts_cloak_seed_key` (cloak_seed), unique, where cloak_seed is not null; `fb_pool_accounts_created_by_idx` (created_by); `fb_pool_accounts_holder_user_id_idx` (holder_user_id); `fb_pool_accounts_status_idx` (status, added_at)
 - **Triggers:** `fb_worker_accounts_track` (after insert, update of status or holder_name, or delete → `fb_worker_accounts_track()`)
 
 Secrets are AES-256-GCM blobs sealed under FB_POOL_KEY (lib/sealed.ts, v1.<iv>.<tag>.<body> base64url), never clear text, and are shown only to a manager or the purchaser holding the account; the prod→dev copy nulls every *_enc column. `no` never reuses a removed account's number.
@@ -2183,7 +2187,7 @@ One row per stint of a pool account on a fleet worker: it opens when the account
 
 - **Primary key:** `id`
 - **Checks:** `(ended_at IS NULL) = (outcome IS NULL)`; `outcome IN ('available', 'taken', 'fleet', 'problem', 'retired', 'removed')`
-- **Indexes:** `fb_worker_accounts_failed_idx` (proxy_url, ended_at) WHERE outcome IN ('problem', 'retired'); `fb_worker_accounts_open_idx` UNIQUE (account_no) WHERE ended_at IS NULL; `fb_worker_accounts_worker_idx` (lower(worker_id), started_at DESC)
+- **Indexes:** `fb_worker_accounts_account_idx` (account_no, started_at); `fb_worker_accounts_failed_idx` (proxy_url, ended_at) WHERE outcome IN ('problem', 'retired'); `fb_worker_accounts_open_idx` UNIQUE (account_no) WHERE ended_at IS NULL; `fb_worker_accounts_worker_idx` (lower(worker_id), started_at DESC)
 
 Written only by the fb_worker_accounts_track trigger on fb_pool_accounts, except proxy_url and proxy_known, which /assign stamps on the open stint. A proxy whose distinct failed accounts since its last revive exceed four (FB_PROXY_DEAD_AFTER) is DEAD, and /assign refuses its workers.
 
@@ -2210,7 +2214,7 @@ Only the latest revive is kept; the backend logs each one.
 
 The ERP fleet: the city task queue the Facebook Marketplace workers pull from, and the slots they run pool accounts in. fleet_cities and fleet_items are the catalog managers edit; fleet_settings holds the queue's knobs; fleet_tasks is one open task per enabled city and item, with fleet_task_events as its log; fleet_hosts are the machines that run worker containers; fleet_slots is the fleet's view of each pool account (who runs it, where, under which lease epoch) and fleet_workers the containers that heartbeat, with fleet_worker_state_events keeping each change of their state (0221). fleet_minutes is a view that sums each account's leased minutes per Eastern day (UTC before 0218) for the daily budget. The accounts themselves and their secrets stay in fb_pool_accounts. Migration 0206 creates all of it; the routes under /api/fleet fill it in later releases.
 
-Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_proxies`](#erp-fleet-proxies), [`fleet_proxy_checks`](#erp-fleet-proxy-checks), [`fleet_proxy_rounds`](#erp-fleet-proxy-rounds), [`fleet_slots`](#erp-fleet-slots), [`fleet_workers`](#erp-fleet-workers), [`fleet_worker_state_events`](#erp-fleet-worker-state-events), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
+Tables: [`fleet_cities`](#erp-fleet-cities), [`fleet_items`](#erp-fleet-items), [`fleet_settings`](#erp-fleet-settings), [`fleet_hosts`](#erp-fleet-hosts), [`fleet_claim_tickets`](#erp-fleet-claim-tickets), [`fleet_proxies`](#erp-fleet-proxies), [`fleet_proxy_checks`](#erp-fleet-proxy-checks), [`fleet_proxy_exit_changes`](#erp-fleet-proxy-exit-changes), [`fleet_proxy_rounds`](#erp-fleet-proxy-rounds), [`fleet_slots`](#erp-fleet-slots), [`fleet_pilot_enrollments`](#erp-fleet-pilot-enrollments), [`fleet_workers`](#erp-fleet-workers), [`fleet_worker_state_events`](#erp-fleet-worker-state-events), [`fleet_tasks`](#erp-fleet-tasks), [`fleet_task_events`](#erp-fleet-task-events), [`fleet_minutes`](#erp-fleet-minutes) (view)
 
 <a id="erp-fleet-cities"></a>
 
@@ -2322,8 +2326,9 @@ The proxies the ERP fleet browses through, as a list managers edit on the Accoun
 | `url_enc` | `text` | ✓ |  | scheme://user:pass@host:port, sealed under FB_POOL_KEY (lib/sealed.ts). Never returned or logged. |
 | `host` | `text` | ✓ |  | The exit's host, lowercased, in clear for the list. |
 | `port` | `integer` | ✓ |  | The exit's port (1..65535). |
-| `timezone` | `text` | ✓ |  | IANA zone of the exit; a slot's device clock follows it. |
+| `timezone` | `text` | ✓ |  | IANA zone of the exit as a manager typed it. A slot's device clock follows it, unless the account has a pinned profile (`fb_pool_accounts.profile_timezone`). |
 | `note` | `text` | ✓ | `''` |  |
+| `replaced_exit` | `jsonb` |  |  | The last good reading from before a URL edit, until the first reading of the new URL is compared with it. |
 | `created_by` | `uuid` |  |  | → users. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
 
@@ -2350,10 +2355,37 @@ One health check of one proxy port, dialed through the proxy itself to an IP-geo
 | `exit_ip` | `text` |  |  | The address the lookup saw. |
 | `city` / `region` / `country` / `org` | `text` |  |  | Where the exit IP is, and its ISP. |
 | `error` | `text` |  |  | Why a failed check failed, worded by the probe (never a raw socket message). |
+| `timezone` | `text` |  |  | The lookup's IANA zone for the exit. NULL on rows before 0225 and on coordinator ports, whose console sends none. |
 
 - **Primary key:** `id`
 - **References:** `proxy_id` → `fleet_proxies.id` (on delete set null)
-- **Indexes:** `fleet_proxy_checks_exit_idx` (source, exit, checked_at desc), `fleet_proxy_checks_at_idx` (checked_at), `fleet_proxy_checks_proxy_id_idx` (proxy_id)
+- **Indexes:** `fleet_proxy_checks_exit_idx` (source, exit, checked_at desc), `fleet_proxy_checks_at_idx` (checked_at), `fleet_proxy_checks_proxy_id_idx` (proxy_id), `fleet_proxy_checks_proxy_recent_idx` (proxy_id, checked_at desc, id desc) where source = 'erp'
+
+<a id="erp-fleet-proxy-exit-changes"></a>
+
+#### `fleet_proxy_exit_changes`
+
+One change of a port's measured exit, in IP or geo, against its last good check (`fleet/proxyExit.ts`). A failed check is not a change; a geo field missing on either side doesn't count as one. A port on both lists is recorded once, on its ERP row. Kept for good. Migration 0225.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | identity |  |
+| `exit` | `text` | ✓ |  | `scheme://host:port`, login cut out. |
+| `source` | `text` | ✓ |  | `erp` or `coordinator`. |
+| `proxy_id` | `integer` |  |  | → fleet_proxies; NULL for a coordinator port or a removed proxy. |
+| `changed_at` | `timestamptz` | ✓ |  | The check that saw the new exit. |
+| `previous_at` | `timestamptz` | ✓ |  | The last good check on the old exit. The move happened between the two. |
+| `old_ip` / `new_ip` | `text` | ✓ |  | The exit IP before and after; equal on a geo-only change. |
+| `old_city` / `old_region` / `old_country` / `old_timezone` | `text` |  |  | Where the old exit was. |
+| `new_city` / `new_region` / `new_country` / `new_timezone` | `text` |  |  | Where the new exit is. |
+| `slots` | `integer[]` | ✓ | `'{}'` | Account numbers of the slots on the proxy then. Plain values, since a slot can be deleted. |
+| `workers` | `text[]` | ✓ | `'{}'` | The homelab workers dialing the port then. |
+| `shares_with` | `integer[]` | ✓ | `'{}'` | Pilot accounts on other ports the move landed on the same exit as. The cohort flags them too. |
+| `notified_at` | `timestamptz` |  |  | When an alert covered it. NULL while waiting for the 30-minute gap, and always on a port nobody used. |
+
+- **Primary key:** `id`
+- **References:** `proxy_id` → `fleet_proxies.id` (on delete set null)
+- **Indexes:** `fleet_proxy_exit_changes_proxy_id_idx` (proxy_id), `fleet_proxy_exit_changes_at_idx` (changed_at)
 
 <a id="erp-fleet-proxy-rounds"></a>
 
@@ -2401,6 +2433,31 @@ A slot made on the Account pool tab (`POST /api/fleet/slots`) gets a generated `
 - **Primary key:** `account_no`
 - **References:** `account_no` → `fb_pool_accounts.no` (on delete cascade); `host_id` → `fleet_hosts.host_id` (on delete set null); `proxy_id` → `fleet_proxies.id` (on delete set null)
 - **Indexes:** `fleet_slots_host_id_idx` (host_id), `fleet_slots_proxy_id_idx` (proxy_id)
+
+<a id="erp-fleet-pilot-enrollments"></a>
+
+#### `fleet_pilot_enrollments`
+
+One row per account ever enrolled through `POST /api/fleet/slots` with a pilot or an engine, written with its slot in one transaction (0224). It is a pilot's denominator, so it outlives the slot and the account: there is no foreign key to `fb_pool_accounts`, as with `fb_pool_events`. An enrollment is active while its account has a `fleet_slots` row. The nightly prod→dev copy keeps dev's rows and drops those whose pool number now belongs to another uid.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `account_no` | `integer` | ✓ |  | The pool's #; an account enrolls once. |
+| `uid` | `text` | ✓ |  | Copied from the pool row. |
+| `batch` | `text` | ✓ |  | Copied from the pool row. |
+| `pilot_id` | `text` |  |  | The caller's pilot name; NULL for an engine given outside a pilot. |
+| `arm` | `text` | ✓ |  | cloak or stock, as the caller passed it. |
+| `seed` | `integer` |  |  | The cloak seed; NULL exactly for a stock arm. |
+| `exit_ip` | `text` | ✓ |  | The exit measured at enrollment. A re-add or Change proxy re-records it while `first_login_at` is NULL, and it is never rewritten after that (migration 0225's column comment; 0224's own comment predates this). A pilot account's claim waits until its first login while the proxy's latest good measurement differs from it, moves its zone, or another slot shares that exit. |
+| `exit_timezone` | `text` |  |  | The zone measured with `exit_ip`; NULL on rows from before migration 0227. |
+| `enrolled_at` | `timestamptz` | ✓ | `now()` |  |
+| `first_claimed_at` | `timestamptz` |  |  | Stamped by the account's first claim, which can end before any browser opens. The cohort clock. |
+| `first_login_at` | `timestamptz` |  |  | Stamped by the first heartbeat with `detail.facebook_opened`. Ends the first-login hold and the re-record path. |
+| `enrolled_by` | `text` |  |  | The manager's email. |
+
+- **Primary key:** `account_no`
+- **Checks:** `arm IN ('cloak', 'stock')`; `(arm = 'cloak') = (seed IS NOT NULL)`
+- **Indexes:** `fleet_pilot_enrollments_exit_ip_idx` (exit_ip), `fleet_pilot_enrollments_pilot_idx` (pilot_id, arm)
 
 <a id="erp-fleet-workers"></a>
 

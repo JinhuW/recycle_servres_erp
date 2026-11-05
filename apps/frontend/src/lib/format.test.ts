@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { fmtMoney, fmtUSD, fmtUSD0 } from './format';
+import { fmtMoney, fmtOrderTotal0, fmtUSD, fmtUSD0 } from './format';
+
+describe('fmtOrderTotal0', () => {
+  it('shows the order currency when the backend sends it', () => {
+    expect(fmtOrderTotal0(156, 'CNY', 22, 'en-US')).toContain('156');
+  });
+  it('falls back to the USD total while the backend lags, never a dash', () => {
+    expect(fmtOrderTotal0(undefined, 'CNY', 22, 'en-US')).toBe('$22');
+  });
+});
 
 // A negative amount carries its sign before the symbol; "$-120" reads as a
 // typo on a chip.

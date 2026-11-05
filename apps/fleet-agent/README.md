@@ -94,7 +94,15 @@ the same `FLEET_HOST_ID` on its daemon observes only, logs an error and puts
    - restart an exited worker by its exit code: `75` (stale epoch or no
      slot) after 60 s, or after 10 min once it has had five 75/70 restarts
      in 30 min; `70` (claim failed) after 10 min; any other code after 60 s,
-     counted; five counted restarts in 30 min hold it (below);
+     counted; five counted restarts in 30 min hold it (below). `74`
+     (licence outage) is not a crash and is never held: one worker per host,
+     the lowest number, probes after 5 min, doubling to at most 60 min, each
+     wait plus up to 25% jitter, after any other start in the tick. The others
+     wait and spend no attempts. A probe still running after 15 min ends the
+     outage, and the rest restart one stagger apart. The count, jitter and
+     recovery time live in `/state` and survive an agent restart;
+   - report `outage_attempts` on a container from its first `74` until the
+     count clears;
    - leave stopped, and report with a distinct `state` and `hold`:
      - `operator_needed`: it exited `78`, could not reach Facebook or its
        proxy;
@@ -158,7 +166,7 @@ recreated (stop confirmation, then a fresh ticket and `docker run`).
 - Touch a container without the `rs.fleet.host={id}` label.
 - Start more than one worker per tick, or two within the stagger.
 - Restart a worker it holds (`operator_needed`, `crash_limit`,
-  `operator_stopped`).
+  `license_outage`, `operator_stopped`).
 - Pull or run an image outside `FLEET_IMAGE_PREFIX`.
 - Start, stop or replace anything while the ERP says `authoritative: false`.
 - Hand out the host token. It is the only secret the agent holds; each

@@ -29,7 +29,9 @@ export type HandoffInit = {
   /** The page's live lines — not `order.lines`, which on the desktop is the
    *  page-load snapshot: a line the drawer priced through Confirm line is in
    *  the page's state (and the row's total) but not there. */
-  lines: { count: number; units: number; goods: number };
+  lines: { count: number; units: number; goods: number; zeroCost: number };
+  /** The purchaser answered the $0 question on the way in. */
+  zeroCostConfirmed: boolean;
   /** Seeded from the page's current values, which equal the saved order when
    *  the page is clean (both shells ask for a save first otherwise). */
   warehouseId: string;
@@ -106,7 +108,7 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
         chatShotRequired: order.chatShotRequired, cashShotRequired: order.cashShotRequired,
       },
     },
-    lines: { count: init.lines.count, goods: init.lines.goods, everSubmitted: order.everSubmitted === true },
+    lines: { count: init.lines.count, goods: init.lines.goods, everSubmitted: order.everSubmitted === true, zeroCost: init.lines.zeroCost },
   });
   const blockerKeys = readinessBlockerKeys(readiness);
   const canSubmit = blockerKeys.length === 0 && !busy && !proof.busy;
@@ -121,7 +123,9 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
         warehouseId, source: source!, delivery: delivery!, byUserId, trackingNumber: tn, carrier,
         paidBy, paidByUserId, method, txnId,
       });
-      const r = await api.post<{ ok: true; packageId: string | null }>(`/api/orders/${order.id}/handoff`, body);
+      const r = await api.post<{ ok: true; packageId: string | null }>(`/api/orders/${order.id}/handoff`, {
+        ...body, ...(init.zeroCostConfirmed ? { confirmZeroCost: true } : {}),
+      });
       onDone({ packageId: r.packageId });
     } catch (e) {
       handleFetchError(e);

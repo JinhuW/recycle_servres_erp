@@ -22,9 +22,9 @@ import {
   type FleetCloakRoom, type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowKind, type FleetRowSortCol,
 } from './fleetRows';
 import { AccountBriefCell } from './accountBrief';
-import { AddHostDialog, EngineCard, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
+import { AddHostDialog, EngineCard, FleetAlerts, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
 import {
-  agoLabel, BudgetRing, ConfirmDialogBody, COORDINATOR_POLL_MS, EmptyRow, EngineChip, Legend, MarkHealthyButton, ParkDialog, ReleaseParkedDialog, RetireSlotDialog, resumeWaiting, UnavailableCard, useFleetMirror, useFleetPoll,
+  agoLabel, BudgetRing, ConfirmDialogBody, COORDINATOR_POLL_MS, EmptyRow, EngineChip, Legend, MarkHealthyButton, RestartWorkerButton, ParkDialog, ReleaseParkedDialog, RetireSlotDialog, resumeWaiting, UnavailableCard, useFleetMirror, useFleetPoll,
   WorkerStateChip,
 } from './shared';
 
@@ -101,6 +101,7 @@ export function FleetAccountsTab() {
       </div>
       {data === null ? <div className="card fleet-host"><TableSkeleton rows={1} cols={4} /></div>
         : <HostStrip hosts={hosts} release={release} onChanged={reload} />}
+      {data && !mirror && <FleetAlerts workers={data.workers} hosts={hosts} />}
       {data?.settings && (
         <EngineCard settings={data.settings} used={data.slots.filter(s => fleetEngineOf(s.device) === 'cloak').length} onChanged={reload} />
       )}
@@ -230,6 +231,7 @@ function WorkerRow({ row: r, hostVersion, cityName, room, onChanged, now }: {
   const stateChip = r.kind === 'healthy' ? <span className="chip pos">{t('fleetKindHealthy')}</span>
     : r.kind === 'free' ? <span className="chip" title={t('fleetStateFreeHint')}>{t('fleetStateFree')}</span>
     : r.resumable ? <span className="chip warn" title={r.parkError ?? undefined}>{t('fleetStateNoPage')}</span>
+    : r.infraPark ? <span className="chip warn" title={t(`fleetParkHint_${r.infraPark}`)}>{t(`fleetPark_${r.infraPark}`)}</span>
     : fleetStateParked(r.state) ? <WorkerStateChip state={r.state!} />
     : <span className="chip neg">{t('fleetKindParked')}</span>;
 
@@ -292,6 +294,8 @@ function WorkerRow({ row: r, hostVersion, cityName, room, onChanged, now }: {
             <span className="fleet-now-actions">
               {r.resumable && r.running && slot && !slot.parked && !mirror
                 && <MarkHealthyButton workerId={r.workerId} version={r.version} resume={r.resume} state={r.state} onQueued={onChanged} />}
+              {r.restartable && r.running && slot && !slot.parked && !mirror
+                && <RestartWorkerButton workerId={r.workerId} resume={r.resume} state={r.state} onQueued={onChanged} />}
               {r.running && slot && !slot.parked && !mirror
                 && <button type="button" className="btn sm ghost" onClick={() => setParking(true)}>{t('fleetPark')}</button>}
               {retirable && <button type="button" className="btn sm ghost fleet-danger-text" onClick={() => setRetiring(true)}>{t('fleetRetireFree')}</button>}
@@ -336,6 +340,8 @@ const CLOAK_REFUSALS: Record<string, string> = {
   cloak_slots_full: 'fleetCloakRefused_cloak_slots_full',
   cloak_seeded: 'fleetCloakRefused_cloak_seeded',
   cloak_proven: 'fleetCloakRefused_cloak_proven',
+  pilot_arm: 'fleetCloakRefused_pilot_arm',
+  cloak_seed_taken: 'fleetCloakRefused_cloak_seed_taken',
 };
 
 // One way: the fingerprint becomes the account's machine, which Facebook

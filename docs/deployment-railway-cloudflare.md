@@ -98,8 +98,8 @@ secret values.
 `OAUTH_SIGNING_KEY_PREVIOUS` is not required (no key rotation needed for the
 experiment).
 
-**Web-submission email.** Prod sets `MAIL_USER` and `MAIL_PASSWORD`. Dev may
-set them only together with `MAIL_ALLOW_TO`: dev's database is a nightly copy
+**Web-submission email.** Prod sets `MAIL_USER` and `MAIL_PASSWORD`, plus
+`MAIL_QUOTES_USER` and `MAIL_QUOTES_PASSWORD`. Dev may set them only together with `MAIL_ALLOW_TO`: dev's database is a nightly copy
 of prod, so every submission on it is a real customer. The backend enforces
 it: on any Railway environment other than `production`, mail stays off without
 the list, and boot logs a warning saying so. Railway only allows outbound SMTP
@@ -109,6 +109,7 @@ on the Pro plan, and a service only picks that up on a redeploy.
 |---|---|
 | `MAIL_USER` | the shared mailbox address replies are sent from |
 | `MAIL_PASSWORD` | the mailbox's IMAP/SMTP app password (Lark: Mail settings → IMAP/SMTP) — do not commit |
+| `MAIL_QUOTES_USER` / `MAIL_QUOTES_PASSWORD` | the mailbox recycleservers.com quotes are sent from and read at, and its app password — do not commit. Unset, quotes share `MAIL_USER`. Same hosts and ports. |
 | `MAIL_SMTP_HOST` / `MAIL_SMTP_PORT` | optional; default `smtp.larksuite.com` / `465` |
 | `MAIL_IMAP_HOST` / `MAIL_IMAP_PORT` | optional; default `imap.larksuite.com` / `993` |
 | `MAIL_ALLOW_TO` | **dev: required**; prod: unset. Comma-separated test recipients (`you@x.com`, or a domain as `@x.com`). The server mails no one else. |

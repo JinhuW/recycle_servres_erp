@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
-import type { HoldEntry } from './plan.js';
+import type { HoldEntry, OutageRetry } from './plan.js';
 import { EMPTY_DESIRED, parseDesired, type Desired } from './types.js';
 
 const DESIRED_FILE = 'desired.json';
@@ -24,12 +24,14 @@ export interface Memory {
   last_start_at: number | null;
   restarts: Record<string, number[]>;
   soft_restarts: Record<string, number[]>;
+  license_outage: Record<string, OutageRetry>;
+  outage_recovered_at: number | null;
   held: Record<string, HoldEntry>;
   self_stopped: Record<string, number>;
 }
 
 export function emptyMemory(): Memory {
-  return { last_start_at: null, restarts: {}, soft_restarts: {}, pending: {}, held: {}, self_stopped: {} };
+  return { last_start_at: null, restarts: {}, soft_restarts: {}, license_outage: {}, outage_recovered_at: null, pending: {}, held: {}, self_stopped: {} };
 }
 
 function writePrivate(path: string, text: string): void {
@@ -88,6 +90,14 @@ export function loadMemory(dir: string): Memory {
       }
     }
   }
+  const licenseOutage: Record<string, OutageRetry> = {};
+  if (isObject(raw.license_outage)) {
+    for (const [id, r] of Object.entries(raw.license_outage)) {
+      if (isObject(r) && Number.isInteger(r.attempts) && (r.attempts as number) >= 0 && typeof r.jitter === 'number' && r.jitter >= 0 && r.jitter < 1) {
+        licenseOutage[id] = { attempts: r.attempts as number, jitter: r.jitter };
+      }
+    }
+  }
   const selfStopped: Record<string, number> = {};
   if (isObject(raw.self_stopped)) {
     for (const [id, t] of Object.entries(raw.self_stopped)) if (typeof t === 'number' && Number.isFinite(t)) selfStopped[id] = t;
@@ -97,6 +107,8 @@ export function loadMemory(dir: string): Memory {
     last_start_at: typeof raw.last_start_at === 'number' && Number.isFinite(raw.last_start_at) ? raw.last_start_at : null,
     restarts: times(raw.restarts),
     soft_restarts: times(raw.soft_restarts),
+    license_outage: licenseOutage,
+    outage_recovered_at: typeof raw.outage_recovered_at === 'number' && Number.isFinite(raw.outage_recovered_at) ? raw.outage_recovered_at : null,
     held,
     self_stopped: selfStopped,
   };

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  fleetCloakFor, fleetCloakSwitchable, fleetDeviceFor, fleetReportedEngine, fleetStockRevertible, fleetResumable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
+  isFleetTimezone, fleetCloakFor, fleetCloakSwitchable, fleetDeviceFor, fleetReportedEngine, FLEET_PILOT_ARMS, type FleetCloakGpu, type FleetPilotArm, fleetStockRevertible, fleetResumable, fleetRestartable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
   type FleetWorkerRelogin, type FleetWorkerResume, type FbPoolStatus,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
@@ -12,7 +12,8 @@ import { dropSlot, releaseTasks } from './claim';
 import { loadRelease } from './hosts';
 import { cityLog } from './tasks';
 import { loadSettings } from './cities';
-import { proxyStates } from './proxies';
+import { lastKnownExitIp, proxyStates } from './proxies';
+import { latestExitOf, latestProxyExit } from './proxyExit';
 import { managerOnly, type ManagerEnv } from './auth';
 import { bad, conflict, eventToWire, exists, isRefusal, minutesTodaySql, notFound, taskToWire, type Refusal, type TaskEventRow, type TaskRow } from './sql';
 
@@ -85,6 +86,17 @@ const ACCOUNT_STATE = (sql: SqlLike) => sql`
           ORDER BY e.at DESC, e.id DESC LIMIT 1)
   END`;
 
+/** The pool holder a slot made here carries until a worker claims it. */
+export const FLEET_HOLDER = 'ERP fleet';
+
+// Whether a fleet worker has ever held the account, so any saved session of its
+// could carry that worker's fingerprint.
+const FLEET_HELD = (sql: SqlLike, no: ReturnType<SqlLike>) => sql`
+  (EXISTS (SELECT 1 FROM fb_worker_accounts w WHERE w.account_no = ${no}
+            AND lower(w.worker_id) <> lower(${FLEET_HOLDER}))
+   OR EXISTS (SELECT 1 FROM fb_pool_events e WHERE e.account_no = ${no} AND e.kind = 'assigned'
+                AND e.actor_id IS NULL AND e.actor_name LIKE 'fleet host %'))`;
+
 const SLOT_SELECT = (sql: SqlLike) => sql`
   SELECT s.account_no, s.worker_id, s.host_id, s.last_host_id, s.epoch, s.lease_expires_at, s.proxy_url, s.proxy_id, s.device,
          s.quarantined_until, s.note,
@@ -94,10 +106,7 @@ const SLOT_SELECT = (sql: SqlLike) => sql`
          ${minutesTodaySql(sql, sql`s.account_no`)} AS minutes_today,
          ${ACCOUNT_STATE(sql)} AS account_state,
          COALESCE(a.cookie_enc, '') <> '' AS has_session,
-         (EXISTS (SELECT 1 FROM fb_worker_accounts w WHERE w.account_no = s.account_no
-                   AND lower(w.worker_id) <> lower(${FLEET_HOLDER}))
-          OR EXISTS (SELECT 1 FROM fb_pool_events e WHERE e.account_no = s.account_no AND e.kind = 'assigned'
-                       AND e.actor_id IS NULL AND e.actor_name LIKE 'fleet host %')) AS fleet_held
+         ${FLEET_HELD(sql, sql`s.account_no`)} AS fleet_held
   FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no`;
 
 /** Every worker row with the task it holds, keyed by worker id. */
@@ -173,31 +182,157 @@ slots.get('/', async (c) => {
 
 // ─── Into and out of the fleet ────────────────────────────────────────────────
 
-/** The pool holder a slot made here carries until a worker claims it. */
-export const FLEET_HOLDER = 'ERP fleet';
+type Enrollment = { pilot_id: string | null; arm: FleetPilotArm };
+type SlotWrite = { account_no: number; proxy_id: number; enroll: Enrollment | null };
 
-type SlotWrite = { account_no: number; proxy_id: number };
+export const PILOT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+export const PILOT_ID_RULE = 'pilot must be 1 to 64 letters, digits, dots, dashes or underscores';
+const isArm = (v: unknown): v is FleetPilotArm => (FLEET_PILOT_ARMS as readonly unknown[]).includes(v);
 
 function readSlotWrite(input: unknown): SlotWrite | Refusal {
   if (!isRecord(input)) return bad('expected an object');
-  for (const k of Object.keys(input)) if (!['account_no', 'proxy_id'].includes(k)) return bad(`not a slot field: ${k}`);
-  const { account_no, proxy_id } = input;
+  for (const k of Object.keys(input)) if (!['account_no', 'proxy_id', 'pilot', 'arm', 'engine'].includes(k)) return bad(`not a slot field: ${k}`);
+  const { account_no, proxy_id, pilot, arm, engine } = input;
   if (!Number.isInteger(account_no) || (account_no as number) < 1) return bad('account_no');
   if (!Number.isInteger(proxy_id) || (proxy_id as number) < 1) return bad('proxy_id');
-  return { account_no: account_no as number, proxy_id: proxy_id as number };
+  if (pilot !== undefined && (typeof pilot !== 'string' || !PILOT_ID.test(pilot))) return bad(PILOT_ID_RULE);
+  if (arm !== undefined && !isArm(arm)) return bad(`arm must be one of: ${FLEET_PILOT_ARMS.join(', ')}`);
+  if (engine !== undefined && !isArm(engine)) return bad(`engine must be one of: ${FLEET_PILOT_ARMS.join(', ')}`);
+  if ((pilot === undefined) !== (arm === undefined)) return bad('pilot and arm come together');
+  // An account whose engine isn't its arm would be counted against the wrong browser.
+  if (arm !== undefined && engine !== undefined && arm !== engine) return bad('engine must match arm');
+  const chosen = (arm ?? engine) as FleetPilotArm | undefined;
+  return {
+    account_no: account_no as number,
+    proxy_id: proxy_id as number,
+    enroll: chosen ? { pilot_id: (pilot as string | undefined) ?? null, arm: chosen } : null,
+  };
 }
 
-// Lock order: the pool account, then the proxy (which serialises two adds on
-// one exit, so the limit holds), then the slot.
+/** Taken first by anything that spends a cloak seat or an exit: the checks read
+ *  other accounts' rows, which no row lock of ours would keep still. */
+const ENGINE_LOCK = 'fleet-slot-engine';
+
+const seedTaken = async (tx: SqlLike, seed: number, no: number): Promise<boolean> =>
+  (await tx`SELECT 1 FROM fb_pool_accounts WHERE cloak_seed = ${seed} AND no <> ${no}`).length > 0;
+const seedRefusal = (no: number): Refusal =>
+  conflict('cloak_seed_taken', `No free CloakBrowser seed was found for #${no}; two accounts on one seed are one machine`);
+
+/** Why another account can't start on CloakBrowser now, or null. */
+async function cloakSeatRefusal(tx: SqlLike): Promise<Refusal | null> {
+  const settings = await loadSettings(tx);
+  if (!settings.cloak_enabled) return conflict('cloak_disabled', 'CloakBrowser is off in the fleet settings');
+  const [{ n }] = await tx<{ n: number }[]>`
+    SELECT COUNT(*)::int AS n FROM fleet_slots WHERE device->>'browser_engine' = 'cloak'`;
+  return n >= settings.cloak_max_slots ? conflict('cloak_slots_full', `${n} of ${settings.cloak_max_slots} CloakBrowser slots are taken`) : null;
+}
+
+/** Nothing has shown a seed that isn't stored yet, so a taken one can simply be drawn again. */
+async function freeFingerprint(tx: SqlLike, no: number): Promise<ReturnType<typeof fleetCloakFor> | Refusal> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const fingerprint = fleetCloakFor(no, attempt);
+    if (!await seedTaken(tx, fingerprint.cloak_seed, no)) return fingerprint;
+  }
+  return seedRefusal(no);
+}
+
+type Profile = { engine: FleetPilotArm; cloak_seed: number | null; cloak_gpu: FleetCloakGpu | null; timezone: string | null };
+
+async function writeProfile(tx: SqlLike, no: number, p: Profile): Promise<void> {
+  await tx`UPDATE fb_pool_accounts SET browser_engine = ${p.engine}, cloak_seed = ${p.cloak_seed}, cloak_gpu = ${p.cloak_gpu},
+    profile_timezone = ${p.timezone} WHERE no = ${no}`;
+}
+
+/** Everything else on an exit IP: a latest measurement of any other proxy that a
+ *  slot sits on (its last known IP if it is failing now, since it may come back
+ *  there), an active enrollment's recorded IP, and the homelab workers of the
+ *  last round the console answered. */
+async function exitUsers(tx: SqlLike, ip: string, no: number): Promise<string[]> {
+  const rows = await tx<{ who: string }[]>`
+    SELECT '#' || s.account_no AS who FROM fleet_slots s
+    CROSS JOIN LATERAL (${latestExitOf(tx, tx`s.proxy_id`)}) latest
+    WHERE s.account_no <> ${no} AND latest.exit_ip = ${ip}
+    UNION
+    SELECT '#' || e.account_no FROM fleet_pilot_enrollments e JOIN fleet_slots s ON s.account_no = e.account_no
+    WHERE e.account_no <> ${no} AND e.exit_ip = ${ip} AND e.first_login_at IS NULL
+    UNION
+    SELECT w FROM fleet_proxy_checks c JOIN fleet_proxy_rounds r ON c.checked_at = r.coordinator_at
+    CROSS JOIN LATERAL unnest(c.workers) w
+    WHERE c.source = 'coordinator' AND c.exit_ip = ${ip}
+    ORDER BY 1`;
+  return rows.map((r) => r.who);
+}
+
+/** The exit an enrolled account may go out through: identity is the measured
+ *  IP, not the port, and several ports can share one. */
+async function measuredExit(tx: SqlLike, proxyId: number, name: string, no: number): Promise<Refusal | { ip: string; timezone: string | null }> {
+  const check = await latestProxyExit(tx, proxyId);
+  if (!check?.fresh) {
+    return conflict('exit_stale', `${name} ${check ? 'was last measured too long ago' : 'has never been measured'}; check it again first`);
+  }
+  if (!check.ok || !check.exit_ip) return conflict('exit_failing', `${name} failed its latest check; pick another proxy or check it again`);
+  const users = await exitUsers(tx, check.exit_ip, no);
+  if (users.length) return conflict('exit_shared', `${name} exits from ${check.exit_ip}, already used by ${users.join(', ')}`);
+  return { ip: check.exit_ip, timezone: check.timezone };
+}
+
+/** For an account outside any pilot, which is otherwise not held to the exit
+ *  rules: landing on a pilot account's exit would quietly spoil that account's
+ *  solo-exit condition. An unmeasured target has nothing to compare, so it goes
+ *  ahead, as these paths always have. */
+async function pilotExitRefusal(tx: SqlLike, proxyId: number, name: string, no: number): Promise<Refusal | null> {
+  const ip = await lastKnownExitIp(tx, proxyId);
+  if (ip === null) return null;
+  const holders = await tx<{ account_no: number }[]>`
+    SELECT e.account_no FROM fleet_pilot_enrollments e
+    JOIN fleet_slots s ON s.account_no = e.account_no
+    LEFT JOIN LATERAL (${latestExitOf(tx, tx`s.proxy_id`)}) latest ON TRUE
+    WHERE e.pilot_id IS NOT NULL AND e.account_no <> ${no}
+      AND ((e.exit_ip = ${ip} AND e.first_login_at IS NULL) OR latest.exit_ip = ${ip})
+    ORDER BY e.account_no`;
+  if (!holders.length) return null;
+  return conflict('exit_shared', `${name} exits from ${ip}, held by pilot account ${holders.map((h) => `#${h.account_no}`).join(', ')}`);
+}
+
+/** A manager's way out of a held first login. After a first login the record
+ *  stays, as the exit the account really started on is what a cohort has to see. */
+const recordEnrolledExit = (tx: SqlLike, no: number, ip: string, zone: string | null) => tx`
+  UPDATE fleet_pilot_enrollments SET exit_ip = ${ip}, exit_timezone = ${zone}
+  WHERE account_no = ${no} AND first_login_at IS NULL`;
+
+/** The clock a re-recorded exit brings. Only one the enrollment set itself moves:
+ *  a profile pinned before the pilot has been shown to Facebook already. */
+const repinnedZone = (enrolled: Pick<EnrollmentRow, 'first_login_at' | 'exit_timezone'>, pinned: string | null, zone: string | null): string | null =>
+  enrolled.first_login_at === null && pinned === enrolled.exit_timezone && isFleetTimezone(zone) ? zone : null;
+
+type PoolForSlot = {
+  status: string; holder_name: string | null; password_enc: string | null; totp_enc: string | null; uid: string; batch: string;
+  browser_engine: FleetPilotArm | null; cloak_seed: number | null; cloak_gpu: FleetCloakGpu | null; profile_timezone: string | null;
+  has_session: boolean; fleet_held: boolean; account_state: string | null;
+};
+type EnrollmentRow = {
+  pilot_id: string | null; arm: FleetPilotArm; seed: number | null; first_claimed_at: Date | null;
+  first_login_at: Date | null; exit_timezone: string | null;
+};
+
+// Lock order: the engine lock, the pool account, then the proxy, then the slot.
+// Everything is written in this one transaction, with the slot last: a claim
+// cannot see the slot until the rest of what it is handed is there too.
 slots.post('/', async (c) => {
   const input = readSlotWrite(await c.req.json().catch(() => null));
   if (isRefusal(input)) return c.json(input.body, input.status);
-  const { account_no: no, proxy_id: proxyId } = input;
+  const { account_no: no, proxy_id: proxyId, enroll } = input;
   const user = c.var.user;
   const sql = getDb(c.env);
-  const out = await sql.begin(async (tx): Promise<Refusal | { exit: string; device: string }> => {
-    const [account] = await tx<{ status: string; holder_name: string | null; password_enc: string | null; totp_enc: string | null }[]>`
-      SELECT status, holder_name, password_enc, totp_enc FROM fb_pool_accounts WHERE no = ${no} FOR NO KEY UPDATE`;
+  const out = await sql.begin(async (tx): Promise<Refusal | { exit: string; device: string; exitIp: string | null }> => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${ENGINE_LOCK}))`;
+    const [account] = await tx<PoolForSlot[]>`
+      SELECT a.status, a.holder_name, a.password_enc, a.totp_enc, a.uid, a.batch,
+             a.browser_engine, a.cloak_seed, a.cloak_gpu, a.profile_timezone,
+             COALESCE(a.cookie_enc, '') <> '' AS has_session,
+             ${FLEET_HELD(tx, tx`a.no`)} AS fleet_held,
+             (SELECT e.to_state FROM fleet_worker_state_events e WHERE e.account_no = a.no ORDER BY e.at DESC, e.id DESC LIMIT 1) AS account_state
+      FROM fb_pool_accounts a WHERE a.no = ${no} FOR NO KEY UPDATE`;
     if (!account) return notFound(`account #${no}`);
     const [slot] = await tx`SELECT account_no FROM fleet_slots WHERE account_no = ${no}`;
     if (slot) return exists(`#${no} is in the fleet already`);
@@ -212,31 +347,107 @@ slots.post('/', async (c) => {
     const [proxy] = await tx<{ url_enc: string; host: string; port: number; timezone: string }[]>`
       SELECT url_enc, host, port, timezone FROM fleet_proxies WHERE id = ${proxyId} FOR UPDATE`;
     if (!proxy) return notFound(`proxy ${proxyId}`);
+    const exitName = `${proxy.host}:${proxy.port}`;
     const limit = (await loadSettings(tx)).max_accounts_per_proxy;
     const [{ n }] = await tx<{ n: number }[]>`
       SELECT COUNT(*)::int AS n FROM fleet_slots
       WHERE proxy_id = ${proxyId} AND lease_expires_at IS DISTINCT FROM 'infinity'::timestamptz`;
-    if (n >= limit) return conflict('proxy_full', `${proxy.host}:${proxy.port} carries ${n} of ${limit} accounts`);
+    if (n >= limit) return conflict('proxy_full', `${exitName} carries ${n} of ${limit} accounts`);
     // A new account's first sign-in through a dead exit fails, and a failed
     // sign-in is what gets an account checkpointed. Never checked is allowed.
     if ((await proxyStates(tx, proxyId)).get(proxyId) === 'down') {
-      return conflict('proxy_down', `${proxy.host}:${proxy.port} failed its last proxy checks; pick another proxy`);
+      return conflict('proxy_down', `${exitName} failed its last proxy checks; pick another proxy`);
     }
-    const device = fleetDeviceFor(no, proxy.timezone);
+
+    let [enrolled] = await tx<EnrollmentRow[]>`SELECT pilot_id, arm, seed, first_claimed_at, first_login_at, exit_timezone FROM fleet_pilot_enrollments WHERE account_no = ${no}`;
+    // A typo or the wrong arm can still be put right before a claim: no result
+    // exists to protect yet, and nothing has shown this profile to Facebook.
+    if (enroll && enrolled && enrolled.first_claimed_at === null && account.cloak_seed === enrolled.seed
+        && (enrolled.pilot_id !== enroll.pilot_id || enrolled.arm !== enroll.arm)) {
+      await tx`DELETE FROM fleet_pilot_enrollments WHERE account_no = ${no}`;
+      await tx`UPDATE fb_pool_accounts SET browser_engine = NULL, cloak_seed = NULL, cloak_gpu = NULL, profile_timezone = NULL WHERE no = ${no}`;
+      Object.assign(account, { browser_engine: null, cloak_seed: null, cloak_gpu: null, profile_timezone: null });
+      enrolled = undefined as unknown as EnrollmentRow;
+    }
+    if (enroll && enrolled && (enrolled.pilot_id !== enroll.pilot_id || enrolled.arm !== enroll.arm)) {
+      return conflict('already_enrolled', `#${no} is enrolled already (${enrolled.pilot_id ?? 'no pilot'}, ${enrolled.arm}); an account stays in the arm it was given`);
+    }
+    if (enroll) {
+      // A seed is a fingerprint the account has shown, so it can only come back
+      // on the engine it holds it under.
+      const keepsCloak = enroll.arm === 'cloak' && account.browser_engine === 'cloak';
+      if (account.cloak_seed !== null && !keepsCloak) return conflict('cloak_seeded', `#${no} has had a CloakBrowser seed already`);
+      if (enroll.arm === 'cloak' && !keepsCloak && !fleetCloakSwitchable({
+        epoch: 0, account_state: account.account_state, has_session: account.has_session, fleet_held: account.fleet_held, device: null,
+      })) {
+        return conflict('engine_live_session', `#${no} may still hold a live session (${account.account_state ?? 'no state yet'}); only an account that lost its session, or one no fleet worker has held, starts on CloakBrowser`);
+      }
+    }
+    // A re-add brings back whatever engine the profile holds, so a removed
+    // cloak account spends a seat and needs CloakBrowser on, like a new one.
+    const engine: FleetPilotArm | null = enroll?.arm ?? account.browser_engine;
+    if (engine === 'cloak') {
+      const full = await cloakSeatRefusal(tx);
+      if (full) return full;
+    }
+    const fingerprint = account.cloak_seed !== null
+      ? { cloak_seed: account.cloak_seed, cloak_gpu: account.cloak_gpu! }
+      : engine === 'cloak' ? await freeFingerprint(tx, no) : null;
+    if (fingerprint && isRefusal(fingerprint)) return fingerprint;
+    let exitIp: string | null = null;
+    let exitZone: string | null = null;
+    let measuredZone: string | null = null;
+    let repinned: string | null = null;
+    if (enroll || enrolled) {
+      const measured = await measuredExit(tx, proxyId, exitName, no);
+      if (isRefusal(measured)) return measured;
+      exitIp = measured.ip;
+      measuredZone = measured.timezone;
+      if (enrolled) repinned = repinnedZone(enrolled, account.profile_timezone, measured.timezone);
+      // A profile's clock comes from where it exits, since a typed zone goes stale.
+      if (enroll && account.profile_timezone === null) {
+        if (!isFleetTimezone(measured.timezone)) return conflict('exit_zone_unknown', `${exitName}'s latest measurement names no timezone; check it again first`);
+        exitZone = measured.timezone;
+      }
+    } else {
+      const held = await pilotExitRefusal(tx, proxyId, exitName, no);
+      if (held) return held;
+    }
+
+    const timezone = repinned ?? account.profile_timezone ?? exitZone ?? proxy.timezone;
+    const device = {
+      ...fleetDeviceFor(no, timezone),
+      ...(engine ? { browser_engine: engine } : {}),
+      ...(fingerprint ?? {}),
+    };
     await tx`
       UPDATE fb_pool_accounts SET status = 'fleet', holder_user_id = NULL, holder_name = ${FLEET_HOLDER},
         held_since = CASE WHEN status = 'fleet' THEN held_since ELSE NOW() END, updated_at = NOW()
       WHERE no = ${no}`;
     await writeEvent(tx, user, 'assigned', 'fleet', no, FLEET_HOLDER);
+    if (engine) {
+      await writeProfile(tx, no, { engine, cloak_seed: fingerprint?.cloak_seed ?? null, cloak_gpu: fingerprint?.cloak_gpu ?? null, timezone });
+    }
+    if (enroll && !enrolled) {
+      await tx`
+        INSERT INTO fleet_pilot_enrollments (account_no, uid, batch, pilot_id, arm, seed, exit_ip, exit_timezone, enrolled_by)
+        VALUES (${no}, ${account.uid}, ${account.batch}, ${enroll.pilot_id}, ${enroll.arm}, ${enroll.arm === 'cloak' ? fingerprint!.cloak_seed : null}, ${exitIp!}, ${measuredZone}, ${user.email})`;
+    } else if (enrolled) {
+      await recordEnrolledExit(tx, no, exitIp!, measuredZone);
+    }
     await tx`
       INSERT INTO fleet_slots (account_no, proxy_url, proxy_id, device)
       VALUES (${no}, ${proxy.url_enc}, ${proxyId}, ${tx.json(device)})`;
-    return { exit: `${proxy.host}:${proxy.port}`, device: `${device.screen![0]}x${device.screen![1]}@${device.device_scale_factor}` };
+    return { exit: exitName, device: `${device.screen![0]}x${device.screen![1]}@${device.device_scale_factor}`, exitIp };
   });
   if (isRefusal(out)) return c.json(out.body, out.status);
-  wlog.info('fleet slot added', { accountNo: no, proxyId, exit: out.exit, device: out.device, by: user.email });
+  wlog.info('fleet slot added', {
+    accountNo: no, proxyId, exit: out.exit, device: out.device, by: user.email,
+    ...(enroll ? { pilot: enroll.pilot_id, arm: enroll.arm, exitIp: out.exitIp } : {}),
+  });
   return c.json({ slot: await loadSlotView(sql, no) }, 201);
 });
+
 
 // Only a slot nobody holds: a leased one is parked first, which fences its
 // worker out; deleting it under the worker would leave that browser running.
@@ -374,7 +585,9 @@ slots.post('/:no/proxy', async (c) => {
   const user = c.var.user;
   const sql = getDb(c.env);
   const out = await sql.begin(async (tx): Promise<Refusal | { from: string; to: string; timezone: string }> => {
-    const [account] = await tx<{ status: FbPoolStatus }[]>`SELECT status FROM fb_pool_accounts WHERE no = ${no} FOR NO KEY UPDATE`;
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${ENGINE_LOCK}))`;
+    const [account] = await tx<{ status: FbPoolStatus; pinned: boolean; profile_timezone: string | null }[]>`
+      SELECT status, browser_engine IS NOT NULL AS pinned, profile_timezone FROM fb_pool_accounts WHERE no = ${no} FOR NO KEY UPDATE`;
     const [proxy] = await tx<{ url_enc: string; host: string; port: number; timezone: string }[]>`
       SELECT url_enc, host, port, timezone FROM fleet_proxies WHERE id = ${toId} FOR UPDATE`;
     const [slot] = await tx<{ proxy_id: number | null; has_proxy: boolean }[]>`
@@ -392,15 +605,31 @@ slots.post('/:no/proxy', async (c) => {
     if ((await proxyStates(tx, toId)).get(toId) === 'down') {
       return conflict('proxy_down', `${to} failed its last proxy checks; pick another proxy`);
     }
+    const [enrolled] = await tx<EnrollmentRow[]>`SELECT pilot_id, arm, seed, first_claimed_at, first_login_at, exit_timezone FROM fleet_pilot_enrollments WHERE account_no = ${no}`;
+    let repinned: string | null = null;
+    if (enrolled) {
+      const measured = await measuredExit(tx, toId, to, no);
+      if (isRefusal(measured)) return measured;
+      repinned = repinnedZone(enrolled, account.profile_timezone, measured.timezone);
+      await recordEnrolledExit(tx, no, measured.ip, measured.timezone);
+    } else {
+      const held = await pilotExitRefusal(tx, toId, to, no);
+      if (held) return held;
+    }
     const [old] = slot.proxy_id === null ? [] : await tx<{ host: string; port: number }[]>`
       SELECT host, port FROM fleet_proxies WHERE id = ${slot.proxy_id}`;
     const from = old ? `${old.host}:${old.port}` : slot.has_proxy ? 'an unlisted proxy' : 'no proxy';
     await tx`
-      UPDATE fleet_slots SET proxy_url = ${proxy.url_enc}, proxy_id = ${toId},
-        device = CASE WHEN jsonb_typeof(device) = 'object' THEN jsonb_set(device, '{timezone}', to_jsonb(${proxy.timezone}::text)) ELSE device END
+      UPDATE fleet_slots SET proxy_url = ${proxy.url_enc}, proxy_id = ${toId}
+        ${account.pinned ? tx`` : tx`, device = CASE WHEN jsonb_typeof(device) = 'object' THEN jsonb_set(device, '{timezone}', to_jsonb(${proxy.timezone}::text)) ELSE device END`}
       WHERE account_no = ${no}`;
+    if (repinned) {
+      await tx`UPDATE fb_pool_accounts SET profile_timezone = ${repinned} WHERE no = ${no}`;
+      await tx`UPDATE fleet_slots SET device = jsonb_set(device, '{timezone}', to_jsonb(${repinned}::text))
+        WHERE account_no = ${no} AND jsonb_typeof(device) = 'object'`;
+    }
     await writeEvent(tx, user, 'edited', account.status, no, `proxy ${from} -> ${to}`);
-    return { from, to, timezone: proxy.timezone };
+    return { from, to, timezone: repinned ?? (account.pinned ? 'pinned' : proxy.timezone) };
   });
   if (isRefusal(out)) return c.json(out.body, out.status);
   wlog.info('fleet slot proxy changed', { accountNo: no, proxyId: toId, from: out.from, exit: out.to, timezone: out.timezone, by: user.email });
@@ -415,10 +644,9 @@ slots.post('/:no/proxy', async (c) => {
 // lost session or an account never logged in counts. The worker reads the
 // engine at its next claim. Going back to stock is a second new machine, so it
 // is only for a slot whose cloak session never got HEALTHY, and none may be
-// starting on it. The seed and GPU stay on the device either way: they are
-// the fingerprint that account has shown, and the slot is not switched again.
-
-const ENGINE_LOCK = 'fleet-slot-engine';
+// starting on it. The seed and GPU stay on the device and the pool row either
+// way: they are the fingerprint that account has shown, and it is not switched
+// again, whichever slot it sits in later.
 
 slots.post('/:no/engine', async (c) => {
   const no = parseNo(c.req.param('no'));
@@ -432,8 +660,11 @@ slots.post('/:no/engine', async (c) => {
   const out = await sql.begin(async (tx): Promise<Refusal | { changed: boolean }> => {
     // Serialises switches, so two at once cannot both take the last cloak seat.
     await tx`SELECT pg_advisory_xact_lock(hashtext(${ENGINE_LOCK}))`;
+    // The profile below is written on the pool row, and a claim locks pool then
+    // slot: taking the slot first here would deadlock against it.
+    const [account] = await tx<{ cloak_seed: number | null }[]>`SELECT cloak_seed FROM fb_pool_accounts WHERE no = ${no} FOR NO KEY UPDATE`;
     const [slot] = await tx<SlotRow[]>`${SLOT_SELECT(tx)} WHERE s.account_no = ${no} FOR UPDATE OF s`;
-    if (!slot) return notFound(`slot #${no}`);
+    if (!slot || !account) return notFound(`slot #${no}`);
     const device = isRecord(slot.device) ? slot.device as FleetSlot['device'] : null;
     const current = device?.browser_engine === 'cloak' ? 'cloak' : 'stock';
     if (engine === current) return { changed: false };
@@ -448,20 +679,26 @@ slots.post('/:no/engine', async (c) => {
         return conflict('engine_live_session', `#${no} may be running on CloakBrowser (${where}); park it or wait for it to lose its session`);
       }
       await tx`UPDATE fleet_slots SET device = device || '{"browser_engine":"stock"}'::jsonb WHERE account_no = ${no}`;
+      await tx`UPDATE fb_pool_accounts SET browser_engine = 'stock' WHERE no = ${no}`;
       return { changed: true };
     }
 
-    if (device?.cloak_seed !== undefined) return conflict('cloak_seeded', `#${no} has had a CloakBrowser seed already`);
+    if (device?.cloak_seed !== undefined || account.cloak_seed !== null) return conflict('cloak_seeded', `#${no} has had a CloakBrowser seed already`);
+    const [arm] = await tx`SELECT 1 FROM fleet_pilot_enrollments WHERE account_no = ${no} AND arm = 'stock' AND pilot_id IS NOT NULL`;
+    if (arm) return conflict('pilot_arm', `#${no} is in a pilot's stock arm; switching it would spoil the comparison`);
     if (!fleetCloakSwitchable({ ...slot, device })) {
       return conflict('engine_live_session', `#${no} may still hold a live session (${where}); only an account that lost its session, or one no fleet worker has held, switches`);
     }
-    const settings = await loadSettings(tx);
-    if (!settings.cloak_enabled) return conflict('cloak_disabled', 'CloakBrowser is off in the fleet settings');
-    const [{ n }] = await tx<{ n: number }[]>`
-      SELECT COUNT(*)::int AS n FROM fleet_slots WHERE device->>'browser_engine' = 'cloak'`;
-    if (n >= settings.cloak_max_slots) return conflict('cloak_slots_full', `${n} of ${settings.cloak_max_slots} CloakBrowser slots are taken`);
-    const cloak = { browser_engine: 'cloak', ...fleetCloakFor(no) };
+    const full = await cloakSeatRefusal(tx);
+    if (full) return full;
+    const fingerprint = await freeFingerprint(tx, no);
+    if (isRefusal(fingerprint)) return fingerprint;
+    // Pinned for good from here, so it comes from where the slot really exits.
+    const check = slot.proxy_id === null ? null : await latestProxyExit(tx, slot.proxy_id);
+    const zone = check?.fresh && check.ok && isFleetTimezone(check.timezone) ? check.timezone : device?.timezone ?? null;
+    const cloak = { browser_engine: 'cloak', ...fingerprint, ...(zone ? { timezone: zone } : {}) };
     await tx`UPDATE fleet_slots SET device = COALESCE(device, '{}'::jsonb) || ${tx.json(cloak)} WHERE account_no = ${no}`;
+    await writeProfile(tx, no, { engine: 'cloak', ...fingerprint, timezone: zone });
     return { changed: true };
   });
   if (isRefusal(out)) return c.json(out.body, out.status);
@@ -527,7 +764,9 @@ workers.post('/:id/relogin', async (c) => {
 // A worker that could not load a page parks with `connect_failed` and waits in
 // its open browser; this tells it, on its next heartbeat, to try again there,
 // with no new browser and no login. Only that park: the others leave the
-// browser in a state nobody knows. Queued and delivered like a re-login.
+// browser in a state nobody knows. Queued and delivered like a re-login. A worker
+// parked on a moved exit takes the same directive as its manager's restart: it
+// leaves for a new browser, which is one boot login, so the page asks first.
 
 workers.post('/:id/resume', async (c) => {
   const id = c.req.param('id');
@@ -546,7 +785,7 @@ workers.post('/:id/resume', async (c) => {
     if (mismatch) return mismatch;
     const pending = resumeOf(w);
     if (pending && pending.delivered_at === null) return { resume: pending, fresh: false };
-    if (!fleetResumable(w.state, w.detail)) {
+    if (!fleetResumable(w.state, w.detail) && !fleetRestartable(w.state, w.detail)) {
       return conflict('not_parked', `${id} is not parked on a page that would not load`);
     }
     const [row] = await tx<WorkerRow[]>`
@@ -594,6 +833,7 @@ workers.get('/:id', async (c) => {
     ? await sql<{ id: number; label: string; host: string; port: number; timezone: string }[]>`
         SELECT id, label, host, port, timezone FROM fleet_proxies WHERE id = ${slot.proxy_id}`
     : [];
+  const exit = slot?.proxy_id ? await latestProxyExit(sql, slot.proxy_id) : null;
   const [stint] = held ? await sql<{ proxy_url: string | null }[]>`
     SELECT proxy_url FROM fb_worker_accounts WHERE account_no = ${held.account_no} AND ended_at IS NULL` : [];
   const [acct] = no === null ? [] : await sql<AccountRow[]>`
@@ -639,6 +879,7 @@ workers.get('/:id', async (c) => {
     slot,
     holds_slot: !!held,
     proxy: proxy ?? null,
+    proxy_down: !!exit?.fresh && !exit.ok,
     running_exit: stint?.proxy_url ?? null,
     account: acct ? {
       no: acct.no, uid: acct.uid, email: acct.email || null, status: acct.status, holder: acct.holder_name,

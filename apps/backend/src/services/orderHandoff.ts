@@ -40,6 +40,8 @@ export type HandoffInput = {
   newOwner?: { ownerId: string; ownerName: string | null };
   /** Manager-only, already clamped. Undefined leaves the rate alone. */
   commissionRate?: number | null;
+  /** The mover confirmed the PO's $0 products. */
+  confirmZeroCost?: boolean;
 };
 
 export type HandoffRefusal =
@@ -503,7 +505,9 @@ export async function handoffOrderTx(
   // The merged row is what gets judged, every blocker enforced — this is the
   // door that collects the facts, so it is the one that refuses for want of
   // them.
-  const outcome = await advanceOrderTx(tx, id, actor, undefined, { enforce: 'all' });
+  const outcome = await advanceOrderTx(tx, id, actor, undefined, {
+    enforce: 'all', confirmZeroCost: input.confirmZeroCost,
+  });
   if (outcome.kind !== 'ok') throw new HandoffRefused({ kind: 'advance', outcome });
   return { package: pkg, needsRegister, paymentsLinked };
 }

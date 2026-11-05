@@ -12,7 +12,7 @@ import type { PoolAccountSummary } from '../../../lib/facebookPool';
 export type FleetPoolAccount = Pick<PoolAccountSummary, 'no' | 'uid' | 'status' | 'holder' | 'note'>
   & Partial<Pick<PoolAccountSummary, 'addedAt' | 'batch'>>;
 import {
-  fleetCloakSwitchable, fleetEngineOf, fleetResumable, fleetStockRevertible, fleetSlotRetirable, fleetStateParked,
+  fleetCloakSwitchable, fleetEngineOf, fleetRestartable, fleetResumable, fleetStockRevertible, fleetSlotRetirable, fleetStateParked,
   type FleetHost, type FleetRelease, type FleetSettings, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume,
 } from '../../../lib/fleet';
 import { parkedWorkers, retiredAt } from '../../../lib/fleetView';
@@ -63,6 +63,10 @@ export type FleetRow = {
   operator: boolean;
   /** Parked DEAD on a page that would not load: a manager may mark it healthy. */
   resumable: boolean;
+  /** Parked on a moved exit: a manager's restart, which is one boot login, ends it. */
+  restartable: boolean;
+  /** Why a worker parked, when the account isn't the reason. */
+  infraPark: 'license_outage' | 'exit_moved' | null;
   /** The worker's own words for why it parked, when it says. */
   parkError: string | null;
   /** The latest Mark healthy queued for it. */
@@ -128,6 +132,8 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
     replacingTo: replacing ? release?.version ?? null : null,
     operator: worker.detail?.operator === true,
     resumable: fleetResumable(worker.state, worker.detail),
+    restartable: fleetRestartable(worker.state, worker.detail),
+    infraPark: worker.state === 'DEAD' && (worker.detail?.reason === 'license_outage' || worker.detail?.reason === 'exit_moved') ? worker.detail.reason : null,
     parkError: typeof worker.detail?.error === 'string' ? worker.detail.error : null,
     resume: worker.resume ?? null,
     slot,
@@ -166,6 +172,8 @@ function coordinatorRow(w: FleetAccount, parked: ReadonlySet<string>, pool: Flee
     replacingTo: null,
     operator: false,
     resumable: false,
+    restartable: false,
+    infraPark: null,
     parkError: null,
     resume: null,
     slot: null,

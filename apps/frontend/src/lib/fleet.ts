@@ -8,7 +8,7 @@
 // state), the page-side type extends the shared one here.
 
 import type {
-  FleetBrowserEngine, FleetEngineLoss, FleetAccountBrief, FleetWorkerRelogin, FleetWorkerResume,
+  FleetBrowserEngine, FleetCohortReport, FleetEngineLoss, FleetAccountBrief, FleetWorkerRelogin, FleetWorkerResume,
   FleetCityListed, FleetHost as FleetHostRow, FleetItem, FleetProxy, FleetProxyHealthAnswer, FleetProxyPatch, FleetProxyStates, FleetProxyWrite, FleetRelease,
   FleetSettings, FleetSlot as FleetSlotRow, FleetSlotWrite,
   FleetFunnelDay, FleetTask as FleetTaskRow, FleetTaskLog, FleetTaskState, FleetWorker as FleetWorkerRow, FleetWorkerDetail, RoundStartAnswer,
@@ -19,14 +19,14 @@ import { sharedApi as api } from './sharedGet';
 export type {
   FleetAccountBrief, FleetFunnelDay, FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,
   FleetTaskResult, FleetTaskState, FleetHostContainer, FleetHostReport, DesiredAnswer, RoundStartAnswer,
-  FleetProxy, FleetProxyCheck, FleetProxyHealth, FleetProxyHealthAnswer, FleetProxyHealthState, FleetProxySource,
-  FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
+  FleetProxy, FleetProxyCheck, FleetProxyExitChange, FleetProxyExitPoint, FleetProxyHealth, FleetProxyHealthAnswer, FleetProxyHealthState, FleetProxySource,
+  FleetPilotArm, FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
   FleetSecretKind, FleetWorkerDetail, FleetWorkerEvent, FleetWorkerRelogin, FleetWorkerResume,
-  FleetBrowserEngine, FleetCloakGpu, FleetEngineLoss, FleetEngineLossRow,
+  FleetBrowserEngine, FleetCloakGpu, FleetCohortAccount, FleetCohortCounts, FleetCohortGroup, FleetCohortOutcome, FleetCohortReport, FleetCohortSearches, FleetEngineLoss, FleetEngineLossRow,
 } from '@recycle-erp/shared';
 export {
-  FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetResumable, fleetTakesResume, fleetAutoResumeDue, FLEET_AUTO_RESUME_MINUTES, FLEET_AUTO_RESUME_BY, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
-  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_SLOW_MS,
+  fleetExitPointText, FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetResumable, fleetRestartable, fleetTakesResume, fleetAutoResumeDue, FLEET_AUTO_RESUME_MINUTES, FLEET_AUTO_RESUME_BY, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
+  FLEET_EXIT_FRESH_MS, FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_SLOW_MS,
   fleetCloakFor, fleetCloakSwitchable, fleetSessionLost, fleetStockRevertible,
 } from '@recycle-erp/shared';
 
@@ -199,6 +199,8 @@ export const fleetApi = {
     api.post<{ slot: FleetSlot }>(`${BASE}/slots/${no}/engine`, { engine }).then(r => r.slot),
   // Losses per engine over the last `days`, with the stint ledger's baseline.
   engineLoss: (days = 30) => api.get<FleetEngineLoss>(`${BASE}/stats/engine-loss${query({ days })}`),
+  // A pilot's arms, or with no pilot the supplier scorecard over the last `days`.
+  cohorts: (opts: { pilot?: string; days?: number }) => api.get<FleetCohortReport>(`${BASE}/stats/cohorts${query(opts)}`),
   // Only a slot no worker holds (409 leased otherwise); the account goes back to Available.
   removeSlot: (no: number) => api.post<{ ok: true; pool_status: string }>(`${BASE}/slots/${no}/remove`, {}),
 

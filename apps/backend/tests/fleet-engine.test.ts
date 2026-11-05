@@ -286,11 +286,89 @@ describe('POST /api/fleet/slots/:no/engine', () => {
     expect(a.device).toMatchObject({ browser_engine: 'cloak', ...fleetCloakFor(no), viewport: DEVICE.viewport });
   });
 
+  it('keeps a slot leased through a licence outage, so a worker with no slot takes stock first', async () => {
+    await setSettings(manager, { cloak_enabled: true });
+    const cloak = await seedSlot(1, DEVICE, { session: false });
+    expect((await switchTo(manager, cloak, 'cloak')).status).toBe(200);
+    const got = await claim('lab-1');
+    expect(got.account.no).toBe(cloak);
+    const stock = await seedSlot(2);
+    expect((await heartbeat(got.worker_token, 'DEAD', { reason: 'license_outage', operator: true, exit_code: 78 })).status).toBe(200);
+    const [{ hours }] = await getTestDb()<{ hours: number }[]>`
+      SELECT EXTRACT(EPOCH FROM lease_expires_at - NOW()) / 3600 AS hours FROM fleet_slots WHERE account_no = ${cloak}`;
+    expect(Number(hours)).toBeGreaterThan(23);
+    expect((await claim('lab-2')).account.no).toBe(stock);
+    // Other reasons keep the ordinary lease.
+    expect((await tryClaim('lab-3')).status).toBe(409);
+    await heartbeat(got.worker_token, 'DEAD', { reason: 'connect_failed', operator: true });
+    const [{ ordinary }] = await getTestDb()<{ ordinary: number }[]>`
+      SELECT EXTRACT(EPOCH FROM lease_expires_at - NOW()) / 3600 AS ordinary FROM fleet_slots WHERE account_no = ${cloak}`;
+    expect(Number(ordinary)).toBeLessThan(2);
+    // A host lost mid-outage needn't strand its account for the whole lease.
+    await heartbeat(got.worker_token, 'DEAD', { reason: 'license_outage', operator: true, exit_code: 78 });
+    expect((await api('POST', `/api/fleet/slots/${cloak}/park`, { token: manager })).status).toBe(200);
+    expect((await api('POST', `/api/fleet/slots/${cloak}/remove`, { token: manager })).status).toBe(200);
+  });
+
+  it('alerts managers of an outage once an hour, however many workers report it', async () => {
+    await setSettings(manager, { cloak_enabled: true });
+    const cloak = await seedSlot(1, DEVICE, { session: false });
+    expect((await switchTo(manager, cloak, 'cloak')).status).toBe(200);
+    const got = await claim('lab-1');
+    const beat = () => heartbeat(got.worker_token, 'DEAD', { reason: 'license_outage', operator: true });
+    const sent = async () => (await getTestDb()<{ title: string }[]>`SELECT DISTINCT title FROM notifications WHERE kind = 'fleet_licence_outage'`).length;
+    const count = async () => (await getTestDb()`SELECT 1 FROM notifications WHERE kind = 'fleet_licence_outage'`).length;
+    await beat();
+    const first = await count();
+    expect(first).toBeGreaterThan(0);
+    expect(await sent()).toBe(1);
+    await beat();
+    expect(await count()).toBe(first);
+  });
+
+  it('takes a manager\'s restart for a moved exit, and never queues one by itself', async () => {
+    await setSettings(manager, { cloak_enabled: true });
+    const cloak = await seedSlot(1, DEVICE, { session: false });
+    expect((await switchTo(manager, cloak, 'cloak')).status).toBe(200);
+    const got = await claim('lab-1');
+    await heartbeat(got.worker_token, 'DEAD', { reason: 'exit_moved', operator: true, engine: 'cloak' });
+    const db = getTestDb();
+    await db`UPDATE fleet_workers SET state_since = NOW() - INTERVAL '5 hours' WHERE worker_id = 'lab-1'`;
+    await heartbeat(got.worker_token, 'DEAD', { reason: 'exit_moved', operator: true, engine: 'cloak' });
+    expect((await db<{ resume_id: string | null }[]>`SELECT resume_id FROM fleet_workers WHERE worker_id = 'lab-1'`)[0].resume_id).toBeNull();
+    expect((await api('POST', '/api/fleet/workers/lab-1/resume', { token: manager })).status).toBe(200);
+    expect((await db<{ resume_requested_by: string }[]>`SELECT resume_requested_by FROM fleet_workers WHERE worker_id = 'lab-1'`)[0].resume_requested_by).not.toBe('auto');
+  });
+
+  it('dismisses one notification without emptying the inbox', async () => {
+    const db = getTestDb();
+    const [{ id: uid }] = await db<{ id: string }[]>`SELECT id FROM users WHERE email = ${ALEX} LIMIT 1`;
+    const made = await db<{ id: string }[]>`INSERT INTO notifications (user_id, kind, tone, icon, title, body)
+      VALUES (${uid}, 'fleet_proxy_exit', 'warn', 'alert', 'One', ''), (${uid}, 'fleet_proxy_exit', 'warn', 'alert', 'Two', '') RETURNING id`;
+    expect((await api('POST', '/api/notifications/mark-read', { token: manager, body: { id: made[0].id } })).status).toBe(200);
+    const unread = await db<{ id: string }[]>`SELECT id FROM notifications WHERE user_id = ${uid} AND unread AND id = ANY(${made.map((m) => m.id)})`;
+    expect(unread.map((r) => r.id)).toEqual([made[1].id]);
+  });
+
+  it('pins the clock the slot really exits from when it switches', async () => {
+    await setSettings(manager, { cloak_enabled: true });
+    const no = await seedSlot(1, DEVICE, { session: false });
+    const db = getTestDb();
+    const [p] = await db<{ id: number }[]>`INSERT INTO fleet_proxies (label, url_enc, host, port, timezone)
+      VALUES ('P', ${seal('http://u:p@exit.example:1', poolKey(testEnv)!)}, 'exit.example', 1, 'America/New_York') RETURNING id`;
+    await db`UPDATE fleet_slots SET proxy_id = ${p.id} WHERE account_no = ${no}`;
+    await db`INSERT INTO fleet_proxy_checks (exit, source, proxy_id, checked_at, ok, latency_ms, exit_ip, timezone)
+      VALUES ('http://exit.example:1', 'erp', ${p.id}, NOW(), TRUE, 1, '198.51.100.3', 'America/Denver')`;
+    expect((await switchTo(manager, no, 'cloak')).status).toBe(200);
+    expect((await deviceOf(no))!.timezone).toBe('America/Denver');
+    expect((await db<{ profile_timezone: string }[]>`SELECT profile_timezone FROM fb_pool_accounts WHERE no = ${no}`)[0].profile_timezone).toBe('America/Denver');
+  });
+
   it('leaves a cloak slot unclaimed by a worker too old to run CloakBrowser', async () => {
     await setSettings(manager, { cloak_enabled: true });
     const no = await seedSlot(1, DEVICE, { session: false });
     expect((await switchTo(manager, no, 'cloak')).status).toBe(200);
-    for (const version of ['0.15.0', 'unknown']) {
+    for (const version of ['0.15.0', '0.16.0', 'unknown']) {
       const r = await tryClaim('lab-1', version);
       expect(r.status).toBe(409);
       expect(r.body.error).toBe('no_slot');

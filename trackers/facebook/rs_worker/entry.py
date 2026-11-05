@@ -30,7 +30,8 @@ expired: the agent starts a fresh container, with a fresh ticket, after a
 minute), 70 for a claim or
 configuration failure (the agent backs off ten minutes), 78 for a worker
 parked for an operator that could not stay up (the agent leaves it
-stopped), otherwise the monitor's own code (0 on `docker stop`).
+stopped), 74 for a CloakBrowser license server out of reach (the agent retries
+with backoff), otherwise the monitor's own code (0 on `docker stop`).
 
 A worker that cannot reach Facebook or its proxy does not exit at all: the
 monitor parks, heartbeats DEAD with `connect_failed`, and `/healthz` keeps
@@ -80,6 +81,10 @@ EXIT_RESTART = 75
 EXIT_CONFIG = 70
 # The monitor's `OPERATOR_EXIT_CODE`.
 EXIT_OPERATOR = 78
+# The monitor's `LICENSE_OUTAGE_EXIT_CODE`. The CloakBrowser binary's own exit
+# for the same outage is also 78, which has nothing to do with EXIT_OPERATOR;
+# the monitor has already turned it into this by the time it gets here.
+EXIT_LICENSE_OUTAGE = 74
 
 HEALTHZ_PORT = 8788
 CLAIM_ATTEMPTS = 3
@@ -121,6 +126,7 @@ TOKENS_ENV = "RS_CONTROL_PLANE_TOKENS"
 # config would refuse one) and so it is never written into config.toml.
 BROWSER_ENV = ("CLOAKBROWSER_LICENSE_KEY",)
 ENGINE_CLOAK = "cloak"
+CLOAK_CLAIM_IPS = ("expected_exit_ip", "webrtc_ip")
 # What Xvfb runs at unless a cloak device names its screen.
 DEFAULT_GEOMETRY = "1920x1080x24"
 # A cloak window needs a window manager to have a frame (outerWidth >
@@ -587,6 +593,12 @@ def identity_for(answer: Dict[str, Any]) -> Dict[str, Any]:
         profile["cloak_seed"] = device["cloak_seed"]
     if isinstance(device.get("cloak_gpu"), str):
         profile["cloak_gpu"] = device["cloak_gpu"]
+    # What the preflight and the WebRTC flag hold this browser to. An ERP that
+    # predates them omits them, and the monitor skips those checks and says so.
+    if is_cloak(device):
+        for field in CLOAK_CLAIM_IPS:
+            if isinstance(answer.get(field), str) and answer[field]:
+                profile[field] = answer[field]
     cookies = [
         cookie
         for cookie in account.get("cookies") or []
@@ -1035,7 +1047,9 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
     if is_cloak(device):
         log(
             f"browser: CloakBrowser {baked or 'not in this image'}, screen {menv['SCREEN_GEOMETRY']}, "
-            f"license {'set' if menv.get('CLOAKBROWSER_LICENSE_KEY') else 'missing'}"
+            f"license {'set' if menv.get('CLOAKBROWSER_LICENSE_KEY') else 'missing'}, "
+            f"exit and WebRTC IPs from the claim: "
+            f"{', '.join(f for f in CLOAK_CLAIM_IPS if answer.get(f)) or 'none, not checked'}"
         )
     try:
         with open(TEMPLATE, "rb") as f:
@@ -1085,7 +1099,7 @@ def run_fleet(argv: Sequence[str], env: Dict[str, str], home: Path | None = None
     finally:
         if relay is not None:
             relay.stop(timeout=RELAY_STOP_GRACE_S)
-    if code not in (0, EXIT_RESTART, EXIT_OPERATOR) and health.parked() is not None:
+    if code not in (0, EXIT_RESTART, EXIT_OPERATOR, EXIT_LICENSE_OUTAGE) and health.parked() is not None:
         # Parked for an operator and then gone: started again it would only
         # log in to fail the same way.
         log(f"monitor exited {code} while parked for an operator; exiting {EXIT_OPERATOR}")

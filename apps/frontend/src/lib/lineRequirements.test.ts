@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  lineRequirements, missingFieldNames, capacityGb, ssdBrandRequired,
+  lineRequirements, missingFieldNames, zeroCostLines, capacityGb, ssdBrandRequired,
   type RequirementLine,
 } from './lineRequirements';
 
@@ -13,6 +13,21 @@ const ram = (over: Partial<RequirementLine> = {}): RequirementLine => ({
   classification: 'ECC', rank: '2Rx4', speed: '3200', partNumber: 'M393A4K40DB3-CWE',
   qty: 10, unitCost: 12.5,
   ...over,
+});
+
+describe('zero cost', () => {
+  it('allowZeroCost takes a typed 0 and still names a blank', () => {
+    expect(lineRequirements(ram({ unitCost: 0 })).missingKeys).toEqual(['unitCost']);
+    expect(lineRequirements(ram({ unitCost: 0 }), { allowZeroCost: true }).ready).toBe(true);
+    expect(lineRequirements(ram({ unitCost: null }), { allowZeroCost: true }).missingKeys).toEqual(['unitCost']);
+    expect(lineRequirements(ram({ unitCost: '' }), { allowZeroCost: true }).missingKeys).toEqual(['unitCost']);
+    expect(lineRequirements(ram({ unitCost: -1 }), { allowZeroCost: true }).missingKeys).toEqual(['unitCost']);
+  });
+
+  it('zeroCostLines finds units at $0, not a line counted down to none', () => {
+    const free = { qty: 2, unitCost: 0 };
+    expect(zeroCostLines([free, { qty: 1, unitCost: 5 }, { qty: 0, unitCost: 0 }])).toEqual([free]);
+  });
 });
 
 describe('lineRequirements', () => {

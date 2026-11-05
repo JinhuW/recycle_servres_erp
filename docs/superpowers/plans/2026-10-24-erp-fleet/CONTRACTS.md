@@ -41,6 +41,7 @@ what answers.
 | Agent holds: exit `0`/`143` while the agent ran (`operator_stopped`) and the crash limit (`crash_limit`) leave a worker stopped like `78`; report containers carry optional `hold`, `exit_code`, `image_id`, and the report an optional `agent` identity; repeated `75` backs off; `401/403/404` on `desired` means observe-only; `--` before the image; `FLEET_IMAGE_PREFIX` | §6, §10 | agent review fixes |
 | No coordinator in the MVP: `FLEET_COORDINATOR_URL` may be empty, and `settings.coordinator_url` is then `null` | §2, §5 | this change |
 | Exit code `78`: the worker cannot connect and waits for an operator; the agent never restarts it | §6, §10 | this change |
+| Exit code `74`: licence outage. One probing worker per host, retried with no limit; report containers carry optional `outage_attempts`. Agents must have this before worker 0.17.0, which emits `74`: an older agent reads it as a crash | §6, §10 | licence outage exit |
 | A missing server key is `503 {error: "unavailable"}`, never 401; worker 401s carry `detail` `missing_token` / `bad_token` / `expired_token`; `FLEET_WORKER_TOKEN_KEY_PREVIOUS` for rotation | §2, §3, §5 | RS-406 |
 | Claim: `worker_id` must be `<host_id>-<n>`; a claim-id retry or handoff waits for its own slot instead of skipping to another | §5 | RS-406 |
 | Handoff reservations carry `reserved_until` (gate timeout) instead of an infinite lease; slot rows add `reserved_until`; park/unpark clear the handoff | §4, §6, §7 | RS-406 |
@@ -604,7 +605,7 @@ with a fresh socket for the next viewer.
   "vnc_ports": { "homelab-1": 5901, "homelab-2": 5902 }, "roll": { "replace": "homelab-2" } | null }
 // POST /api/fleet/hosts/:id/report
 { "version": "1.340.0", "containers": [ { "worker_id": "homelab-1", "image": "…", "state": "running", "started_at": "…",
-    "hold"?: "operator_needed" | "crash_limit" | "operator_stopped", "exit_code"?: 0 | null, "image_id"?: "sha256:…" } ],
+    "hold"?: "operator_needed" | "crash_limit" | "operator_stopped", "exit_code"?: 0 | null, "outage_attempts"?: 0, "image_id"?: "sha256:…" } ],
   "agent"?: { "instance_id": "uuid", "daemon_id": "…" | null, "conflict"?: ["other-agent-container"] } }
 // 200 { "ok": true }   (sets fleet_hosts.report, version, last_seen_at; 422 over 200 KB)
 // 403 { "error": "agent_conflict" }   on desired or report: another agent instance holds this host
@@ -733,8 +734,15 @@ already holds. Slot rows show a reservation as `reserved_until`, not as
   (stopping is not a login).
 - Exit codes: `75` → restart after 60 s, or after 10 min once the worker has
   had five 75/70 restarts in 30 min; `70` → restart after 10 min; any other
-  exit except `0`/`143`/`78` → restart after 60 s and counts as a crash.
-  `75`, `70`, `0`, `143` and `78` never count as crashes.
+  exit except `0`/`143`/`74`/`78` → restart after 60 s and counts as a crash.
+  `75`, `74`, `70`, `0`, `143` and `78` never count as crashes.
+- Exit `74` (licence outage): never held. One worker per host, the lowest number,
+  probes after 5 min, doubling to at most 60 min, each wait plus up to 25% jitter,
+  after any other start in the tick. The others wait and spend no attempts. A probe
+  still running after 15 min ends the outage, and every `74` from before then
+  restarts under the one-start stagger. The count is per worker id, survives agent
+  restarts, and clears when a run lasts over 15 min. Report containers carry
+  `outage_attempts` from the first `74` until it clears.
 - **Held: never restarted, online or offline**, until a person starts the
   container (`docker start`) or removes it (`docker rm`, after which it is a
   missing worker). The report gives each held container `state` and `hold`
@@ -871,6 +879,133 @@ the first version; others add fields in their own PRs.
   reports in heartbeats.
 - Health: `docker inspect` health = `curl -sf localhost:8788/healthz`
   (entrypoint serves it once the monitor is up).
+
+## Enrollment and browser profile (RS-537)
+
+CloakBrowser launch plan, workstream B. Migration `0224_fleet_pilot_enrollment.sql`.
+The sections above predate this and don't mention CloakBrowser; where they
+describe `POST /slots`, this adds to them.
+
+### Stored
+
+- **`fb_pool_accounts`** keeps the profile past any slot: `browser_engine`
+  (`stock`, `cloak`, or NULL for an account with no profile of its own),
+  `cloak_seed` (unique across all pool rows, retired ones included), `cloak_gpu`,
+  `profile_timezone`.
+- **`fleet_pilot_enrollments`**, one row per account ever enrolled. It has no
+  foreign key, so neither retiring nor deleting the account removes it.
+
+| Column | Meaning |
+| --- | --- |
+| `account_no` | Primary key: an account enrolls once |
+| `uid`, `batch` | Copied from the pool row at enrollment |
+| `pilot_id` | The caller's pilot name; NULL when only `engine` was sent |
+| `arm` | `cloak` or `stock`, as the caller passed it |
+| `seed` | The cloak seed; NULL exactly when `arm` is `stock` |
+| `exit_ip` | The exit measured at enrollment. A re-add or `POST /slots/:no/proxy` re-records it while `first_claimed_at` is NULL; never rewritten after that (migration 0225) |
+| `enrolled_at`, `enrolled_by` | When, and the manager's email |
+| `first_claimed_at` | Stamped by the first claim of the account; NULL until then |
+
+An enrollment is **active** while its account has a `fleet_slots` row.
+
+### `POST /api/fleet/slots`
+
+Body adds optional `pilot` (1 to 64 of letters, digits, `.`, `_`, `-`), `arm` and
+`engine`. `pilot` and `arm` come together. `engine` alone gives the account that
+engine outside any pilot (row with `pilot_id` NULL, `arm` = `engine`); with `arm`
+it must equal it. A cohort report should filter on `pilot_id IS NOT NULL`.
+
+Enrollment, profile, proxy and slot are written in one transaction with the slot
+last, so a claim can't see a half-set slot. With none of the new fields, an
+account with no profile and no enrollment gets what it always got.
+
+Enrolling an account with no pinned `profile_timezone` takes its clock from the
+measured exit, on both arms, not from the proxy's typed `timezone`. An account with
+a pinned one keeps it, and a plain add still follows the typed value.
+
+A profile is **pinned**: a later add ignores the new proxy's timezone and brings
+back its engine, seed and GPU, even with none of the new fields. An add of an
+already enrolled account also passes the exit rules below. Its enrollment row stays
+as it was, except that `exit_ip` is re-recorded while the account has never been
+claimed. An add that would run CloakBrowser needs `cloak_enabled` and a
+free seat, new or not.
+
+| Refusal (`409`) | When |
+| --- | --- |
+| `cloak_disabled` | `cloak_enabled` is off and the add would run CloakBrowser |
+| `cloak_slots_full` | The slots with `browser_engine: cloak` reach `cloak_max_slots`. Parked slots count, since a parked worker keeps its seat; a stock arm spends none |
+| `cloak_seeded` | The account has a seed and isn't asking to stay on CloakBrowser |
+| `cloak_seed_taken` | Another pool row holds this seed. `fleetCloakFor` hashes the account number into 90,000 values, so two can collide: pick another account |
+| `engine_live_session` | New to CloakBrowser while it may hold a fleet worker's session (`fleetCloakSwitchable`) |
+| `already_enrolled` | Enrolled before under another pilot or arm |
+| `exit_stale` | No `erp` measurement of the proxy, or the latest is older than `FLEET_EXIT_FRESH_MS` (15 minutes: three 5-minute rounds, so one missed round and one late one don't stop enrollment) |
+| `exit_failing` | The latest measurement failed, or passed without naming an IP |
+| `exit_shared` | The measured IP is used by another slot, an active enrollment or a homelab worker |
+| `exit_zone_unknown` | Enrolling with no pinned clock, and the fresh measurement names no valid timezone |
+
+`exit_shared` compares IPs, never ports, against:
+
+- any other slot, parked included, by the latest IP measured on its `proxy_id`,
+  keeping the last known IP if the proxy is failing now
+- the `exit_ip` recorded by any other active enrollment, even if its port has
+  since moved
+- homelab workers on a port in the last round the console answered
+
+A slot with a NULL `proxy_id` has no measured exit and isn't seen here.
+
+An account that isn't enrolled is held to one rule only, on a plain add and on
+`POST /slots/:no/proxy`: `409 exit_shared` when the target proxy's last measured IP
+is held by another account's active pilot enrollment, meaning `pilot_id` is set and
+the account still has a slot. The IP is compared with both the enrollment's
+`exit_ip` and the last IP measured on the proxy its slot sits on. A target with no
+measurement goes ahead, and with no pilot nothing is refused.
+
+### Other manager routes
+
+- `POST /slots/:no/engine` writes the profile too. Going to CloakBrowser also
+  answers `409 cloak_seeded` from the pool row's seed, `cloak_seed_taken`, and
+  `pilot_arm` for an account in a pilot's stock arm.
+- `POST /slots/:no/proxy` on an enrolled account passes the exit rules above, and
+  a pinned account keeps its timezone. It re-records `exit_ip` while the account
+  has never been claimed.
+- `PUT /proxies/:id` with a new `timezone` skips accounts with a profile. A new
+  `url` still reaches every slot on the proxy.
+
+### Claim answer (`POST /api/fleet/worker/claim`)
+
+Slots whose device has `browser_engine: cloak` add two top-level fields beside
+`device`. Slots on any other engine don't have them.
+
+| Field | Value |
+| --- | --- |
+| `expected_exit_ip` | The last IP the proxy's checks saw, however old. A slot on a listed proxy with no reading isn't claimable; `null` only on an unlisted proxy |
+| `webrtc_ip` | Always the same value |
+
+`null` means skip the check, and so does a missing field; only a slot on an
+unlisted proxy gets one. The value is what was measured last, not what was
+recorded at enrollment, and it can be stale: the preflight parks a wrong one
+before any Facebook page.
+
+A first login waits on a changed exit. A slot is not offered, on a free claim or
+a handoff, while its account has a pilot enrollment (`pilot_id` set) with
+`first_login_at` NULL and the proxy's latest good measurement differs from
+`exit_ip`, moves `exit_timezone`, or is also another slot's exit. The first
+heartbeat with `detail.facebook_opened: true` stamps `first_login_at`.
+The worker gets the normal `409 no_slot`, so no login happens. To release one, a
+manager re-adds the account or uses `POST /slots/:no/proxy`, either of which records
+the fresh exit. `GET /proxies/health` reports the wait as `slots[].held_exit_ip`,
+the enrolled IP, and null otherwise.
+
+A `DEAD` heartbeat with `detail.reason: license_outage` renews the lease for
+`FLEET_OUTAGE_LEASE_MINUTES` instead of `lease_minutes`.
+
+### Stopping
+
+`cloak_enabled=false` stops only new CloakBrowser enrollment and switches, and
+adding a removed cloak account back. An existing cloak account still claims, and
+its answer still has `device.browser_engine: cloak`, which is what the Cloudflare
+Worker keys on to add `env.CLOAKBROWSER_LICENSE_KEY`. The licence is never stored
+or logged by the backend.
 
 ## Review recovery protocol (RS-400)
 

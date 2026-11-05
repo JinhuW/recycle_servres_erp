@@ -1,13 +1,14 @@
 import { randomBytes } from 'node:crypto';
 import { Hono } from 'hono';
 import type { JSONValue } from 'postgres';
-import { fleetStateParked, type ClaimTicketAnswer, type DesiredAnswer, type FleetHost, type FleetHostContainer, type FleetHostReport, type FleetRelease } from '@recycle-erp/shared';
+import { FLEET_OUTAGE_LEASE_MINUTES, fleetInfraPark, fleetReportedEngine, fleetStateParked, type ClaimTicketAnswer, type DesiredAnswer, type FleetHost, type FleetHostContainer, type FleetHostReport, type FleetRelease } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
 import type { Env } from '../types';
 import { CLAIM_TICKET_MINUTES, hostAuth, managerOnly, newClaimTicket, type HostEnv, type ManagerEnv } from './auth';
 import { sha256hex, type FleetHostRow, type FleetSlotRow } from './sql';
 import { releaseTasks } from './claim';
+import { slotWaits } from './proxyExit';
 
 // ─── Hosts and releases ───────────────────────────────────────────────────────
 // A host is a machine running one fleet-agent container. The ERP tells it what
@@ -87,7 +88,7 @@ export function gateOk(preState: string | null, postState: string | null): boole
   return postState !== 'DEAD';
 }
 
-type WorkerRow = { worker_id: string; state: string | null; version: string | null; last_heartbeat_at: Date | null; epoch: number | null; account_no: number | null };
+type WorkerRow = { worker_id: string; state: string | null; version: string | null; last_heartbeat_at: Date | null; epoch: number | null; account_no: number | null; detail: unknown };
 
 function onVersion(w: WorkerRow | undefined, version: string, since: Date): boolean {
   if (!w || !w.last_heartbeat_at) return false;
@@ -124,10 +125,12 @@ const pending = (h: FleetHostRow, release: FleetRelease): string[] => pendingCon
  * its account (checkpoint, expired session, challenge, dead proxy) would be
  * rebooted into a fresh login that cannot pass the gate either.
  */
-function unreplaceable(c: Pending, w: WorkerRow | undefined): string | null {
+function unreplaceable(c: Pending, w: WorkerRow | undefined, licenceDown: boolean): string | null {
   if (c.hold) return `held: ${c.hold}`;
   if (c.state !== 'running') return `container ${c.state || 'not running'}`;
   if (fleetStateParked(w?.state)) return `worker ${w!.state}`;
+  // A running browser can outlast an outage; a replacement can't start in one.
+  if (licenceDown && isRecord(w?.detail) && fleetReportedEngine(w.detail) === 'cloak') return 'licence outage';
   return null;
 }
 
@@ -148,7 +151,7 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
   const before = JSON.stringify(release);
   const allHosts = await tx<FleetHostRow[]>`SELECT * FROM fleet_hosts`;
   const workers = new Map(
-    (await tx<WorkerRow[]>`SELECT worker_id, state, version, last_heartbeat_at, epoch, account_no FROM fleet_workers`).map((w) => [w.worker_id, w]),
+    (await tx<WorkerRow[]>`SELECT worker_id, state, version, last_heartbeat_at, epoch, account_no, detail FROM fleet_workers`).map((w) => [w.worker_id, w]),
   );
 
   if (release.current) {
@@ -160,6 +163,11 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
     const reclaimed = cur.epoch === undefined || (cur.account_no !== undefined && w?.account_no !== cur.account_no) || (w?.epoch ?? 0) > cur.epoch;
     if (onVersion(w, release.version, started) && reclaimed && gateOk(cur.pre_state, w?.state ?? null)) {
       release.upgraded = [...release.upgraded, cur.worker_id];
+      release.current = null;
+    } else if (onVersion(w, release.version, started) && reclaimed && fleetInfraPark(w?.state, w?.detail)) {
+      // It came up on the new image and met an outage or a moved port, which
+      // says nothing about the image. The stock workers behind it still upgrade.
+      skip(release, cur.worker_id, `worker parked: ${(w!.detail as { reason: string }).reason}`);
       release.current = null;
     } else if (now.getTime() - new Date(cur.stopped_at ?? cur.started_at).getTime() > (cur.stopped_at ? GATE_TIMEOUT_MS : 2 * GATE_TIMEOUT_MS)) {
       release.state = 'failed';
@@ -176,6 +184,8 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
     }
   }
 
+  const licenceDown = [...workers.values()].some((w) => w.state === 'DEAD' && isRecord(w.detail) && w.detail.reason === 'license_outage'
+    && !!w.last_heartbeat_at && now.getTime() - w.last_heartbeat_at.getTime() < FLEET_OUTAGE_LEASE_MINUTES * 60_000);
   // Workers on observe-only or long-silent hosts are skipped, not waited for;
   // the host asking is live by definition. A host only briefly silent (an ERP
   // deploy, a network blip) is waited for, or the roll would finish without
@@ -191,7 +201,7 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
       }
     } else {
       for (const c of pendingContainers(h, release)) {
-        const why = unreplaceable(c, workers.get(c.worker_id));
+        const why = unreplaceable(c, workers.get(c.worker_id), licenceDown);
         if (why) skip(release, c.worker_id, why);
       }
     }
@@ -240,7 +250,7 @@ async function workerCount(tx: SqlLike, host: FleetHostRow, now = Date.now()): P
   if (!host.authoritative || host.capacity <= 0) return 0;
   const rows = await tx<{ host_id: string | null; worker_id: string | null; free: boolean }[]>`
     SELECT CASE WHEN s.lease_expires_at > NOW() THEN s.host_id END AS host_id, s.worker_id,
-           (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AS free
+           ((s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AND NOT ${slotWaits(tx)}) AS free
     FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no
     WHERE a.status = 'fleet' AND s.lease_expires_at IS DISTINCT FROM 'infinity'::timestamptz`;
   const heldBy = (id: string) => rows.filter((r) => r.host_id === id);
@@ -538,6 +548,7 @@ hosts.post('/:id/report', hostAuth, async (c) => {
     const hold = text(x.hold, 40);
     if (hold) c.hold = hold;
     if (x.exit_code === null || Number.isInteger(x.exit_code)) c.exit_code = x.exit_code as number | null;
+    if (Number.isInteger(x.outage_attempts)) c.outage_attempts = x.outage_attempts as number;
     const imageId = text(x.image_id, 100);
     if (imageId) c.image_id = imageId;
     return c;

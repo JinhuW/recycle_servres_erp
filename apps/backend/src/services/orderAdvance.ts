@@ -115,6 +115,8 @@ export type AdvanceOptions = {
   fromStage?: string;
   takeManager?: boolean;
   fromManagerId?: string | null;
+  /** The purchaser answered the hand-off's question about $0 products. */
+  confirmZeroCost?: boolean;
 };
 
 // Moving an order into any of these makes the mover its manager when it has
@@ -580,7 +582,8 @@ export async function advanceOrderTx(
   // The first blocker in display order is the refusal, so the message names
   // the thing the page lists first.
   if (cur.lifecycle === 'draft' && nextStageId !== 'draft') {
-    const blockers = await leaveDraftBlockers(tx, cur);
+    const blockers = (await leaveDraftBlockers(tx, cur))
+      .filter((b) => !(opts.confirmZeroCost && b.kind === 'zeroCost'));
     const first = opts.enforce === 'all'
       ? blockers[0]
       : blockers.find((b) => ENFORCED_EVERYWHERE.has(b.kind));
@@ -615,6 +618,7 @@ export async function advanceOrderTx(
       lineCount: snap.line_count,
       qty: snap.qty,
       totalCost: snap.total_cost,
+      ...(opts.confirmZeroCost ? { zeroCostConfirmed: true } : {}),
     });
   } else {
     await writeOrderEvent(tx, id, actor.id, 'advanced', {

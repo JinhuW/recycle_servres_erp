@@ -171,7 +171,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
   // the form works with is parsed off these, so a half-typed value never
   // rewrites what's on screen.
   const [qtyRaw, setQtyRaw] = useState(() => (initial.qty || (allowZeroQty && initial.qty === 0) ? String(initial.qty) : ''));
-  const [costRaw, setCostRaw] = useState(() => (initial.unitCost ? String(initial.unitCost) : ''));
+  const [costRaw, setCostRaw] = useState(() => (initial.unitCost || isEditing ? String(initial.unitCost ?? 0) : ''));
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
   // Tracks which fields the user has touched since the AI populated them.
@@ -298,8 +298,8 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
     // order until someone reopened that line and filled in a brand.
     // The typed text, not the parsed number: a cleared field reads 0 there.
     const { missingKeys } = lineRequirements(
-      { ...line, qty: qtyRaw.trim() === '' ? null : line.qty },
-      { allowZeroQty },
+      { ...line, qty: qtyRaw.trim() === '' ? null : line.qty, unitCost: costRaw.trim() === '' ? null : line.unitCost },
+      { allowZeroQty, allowZeroCost: true },
     );
     const fields = missingFieldNames(missingKeys, t, lang);
     if (fields) {
@@ -543,36 +543,6 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
 
         <PhCategoryFields category={category} value={line} onChange={set} aiFilled={aiFilled} aiLowConfFields={aiLowConfFields} />
 
-        <div className="ph-field-row">
-          <div className="ph-field">
-            <label>{t('quantity')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
-            <input
-              className="input"
-              type="number"
-              min={allowZeroQty ? 0 : 1}
-              inputMode="numeric"
-              placeholder="1"
-              value={qtyRaw}
-              onChange={e => {
-                setQtyRaw(e.target.value);
-                set('qty', parseInt(e.target.value, 10) || 0);
-              }}
-            />
-          </div>
-          <div className="ph-field">
-            <label>{t('condition')}</label>
-            <select className="select" value={line.condition ?? 'Pulled — Tested'} onChange={e => set('condition', e.target.value)}>
-              {/* Orphan-safe: if the stored value isn't in the live catalog
-                  (renamed or removed), render it as a one-off option so the
-                  user still sees what was saved instead of an empty select. */}
-              {line.condition && !CONDITIONS.includes(line.condition) && (
-                <option value={line.condition}>{line.condition}</option>
-              )}
-              {CONDITIONS.map(c => <option key={c}>{c}</option>)}
-            </select>
-          </div>
-        </div>
-
         {/* SSDs are received as anonymous bulk lots — nobody keys in per-drive
             serials at purchase, so the field only invited count-mismatch
             errors. A line that already carries serials (pre-rule data, scan
@@ -607,6 +577,36 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
           </div>
         </div>
         )}
+
+        <div className="ph-field-row">
+          <div className="ph-field">
+            <label>{t('quantity')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
+            <input
+              className="input"
+              type="number"
+              min={allowZeroQty ? 0 : 1}
+              inputMode="numeric"
+              placeholder="1"
+              value={qtyRaw}
+              onChange={e => {
+                setQtyRaw(e.target.value);
+                set('qty', parseInt(e.target.value, 10) || 0);
+              }}
+            />
+          </div>
+          <div className="ph-field">
+            <label>{t('condition')}</label>
+            <select className="select" value={line.condition ?? 'Pulled — Tested'} onChange={e => set('condition', e.target.value)}>
+              {/* Orphan-safe: if the stored value isn't in the live catalog
+                  (renamed or removed), render it as a one-off option so the
+                  user still sees what was saved instead of an empty select. */}
+              {line.condition && !CONDITIONS.includes(line.condition) && (
+                <option value={line.condition}>{line.condition}</option>
+              )}
+              {CONDITIONS.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
 
         {/* Pricing row mirrors desktop LineDrawer: qty → unit → total
             (always shown so a purchaser can enter the negotiated bulk total

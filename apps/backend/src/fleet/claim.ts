@@ -5,6 +5,7 @@ import type postgres from 'postgres';
 import {
   cookieUid,
   FLEET_CLOAK_MIN_WORKER_VERSION,
+  FLEET_OUTAGE_LEASE_MINUTES,
   fleetVersionAtLeast,
   FLEET_AUTO_RESUME_BY,
   fleetAutoResumeDue,
@@ -32,6 +33,9 @@ import {
   type ClaimEnv, type WorkerEnv, type WorkerIdentity,
 } from './auth';
 import { loadSettings } from './cities';
+import { notifyManagers } from '../lib/notify';
+import { lastKnownExitIp } from './proxies';
+import { latestProxyExit, slotWaits, type ProxyExitMeasure } from './proxyExit';
 import { notifyReady } from './scheduler';
 import { minutesTodaySql, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
 import { loadRelease, ownWorkerId } from './hosts';
@@ -57,6 +61,19 @@ type Vars = ClaimEnv['Variables'] & WorkerEnv['Variables'];
 const worker = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 const BAD_REQUEST = { error: 'bad_request' } as const;
+
+/** Whether a proxy now passes after failing a check since the last resume: the
+ *  tries so far met an outage, so they say nothing about the proxy as it is. */
+async function proxyRecoveredSince(
+  tx: SqlLike, proxyId: number | null, exit: ProxyExitMeasure | null, since: Date | null,
+): Promise<boolean> {
+  if (proxyId === null || since === null || !exit?.fresh || !exit.ok) return false;
+  const [failed] = await tx`
+    SELECT 1 FROM fleet_proxy_checks
+    WHERE source = 'erp' AND proxy_id = ${proxyId} AND NOT ok AND checked_at > ${since}
+    LIMIT 1`;
+  return !!failed;
+}
 const NOT_FOUND = { error: 'not_found' } as const;
 
 // Holds past this answer null at once rather than pin another connection; a
@@ -351,8 +368,11 @@ worker.post('/claim', claimAuth, async (c) => {
             OR (${handoff}::int IS NOT NULL AND handoff_epoch = ${handoff} AND reserved_until > NOW()))
         ORDER BY (claim_id IS NOT DISTINCT FROM ${claimId}) DESC LIMIT 1`;
       if (mine) {
+        // A retried claim keeps what its boot was given. A handoff is a new
+        // boot, and one that opened no Facebook page is still a first login.
         [row] = await tx<ClaimRow[]>`${CLAIM_SELECT(tx)} WHERE s.account_no = ${mine.account_no} AND a.status = 'fleet'
-          AND ${engineRuns} FOR NO KEY UPDATE OF a`;
+          AND ${engineRuns} AND ((${claimId}::text IS NOT NULL AND s.claim_id = ${claimId}) OR NOT ${slotWaits(tx)})
+          FOR NO KEY UPDATE OF a`;
       }
     }
     // Otherwise any free slot. A handoff whose reservation lapsed lands here
@@ -363,6 +383,7 @@ worker.post('/claim', claimAuth, async (c) => {
       [row] = await tx<ClaimRow[]>`
         ${CLAIM_SELECT(tx)}
         WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AND ${engineRuns}
+          AND NOT ${slotWaits(tx)}
         ORDER BY (s.worker_id = ${worker_id}) DESC NULLS LAST,
           ${cloakFirst}
           (s.last_host_id = ${host.host_id}) DESC NULLS LAST,
@@ -416,6 +437,18 @@ worker.post('/claim', claimAuth, async (c) => {
       await tx`UPDATE fleet_claim_tickets SET consumed_at = COALESCE(consumed_at, NOW()), claim_id = ${claimId}
         WHERE token_hash = ${ticket.token_hash}`;
     }
+    if (!repeated) {
+      await tx`UPDATE fleet_pilot_enrollments SET first_claimed_at = NOW()
+        WHERE account_no = ${row.account_no} AND first_claimed_at IS NULL`;
+    }
+    const device = deviceOf(row.device);
+    // The last IP seen, however old: a browser with no WebRTC flag may show the
+    // host's IP, and the preflight parks a wrong one before any Facebook page.
+    let exitFields: { expected_exit_ip?: string | null; webrtc_ip?: string | null } = {};
+    if (device.browser_engine === 'cloak') {
+      const ip = row.proxy_id === null ? null : await lastKnownExitIp(tx, row.proxy_id);
+      exitFields = { expected_exit_ip: ip, webrtc_ip: ip };
+    }
     const exp = Math.floor(Date.now() / 1000) + WORKER_TOKEN_DAYS * 86_400;
     const items = await loadItems(tx);
     const token = unsealOrEmpty(row.token_enc, key);
@@ -433,7 +466,8 @@ worker.post('/claim', claimAuth, async (c) => {
         token: token || null,
       },
       proxy: proxyUrl ? { url: proxyUrl } : null,
-      device: deviceOf(row.device),
+      device,
+      ...exitFields,
       items,
       settings: {
         search: settings.search,
@@ -491,6 +525,18 @@ export async function dropSlot(tx: SqlLike, no: number, reason: string): Promise
   return true;
 }
 
+/** At most one an hour, however many workers report it or how often the probe does. */
+async function alertLicenceOutage(tx: SqlLike): Promise<void> {
+  const [recent] = await tx`
+    SELECT 1 FROM notifications WHERE kind = 'fleet_licence_outage' AND created_at > NOW() - INTERVAL '1 hour' LIMIT 1`;
+  if (recent) return;
+  await notifyManagers(tx, {
+    kind: 'fleet_licence_outage', tone: 'warn', icon: 'alert',
+    title: 'CloakBrowser licence server out of reach',
+    body: 'Cloak workers have stopped and one per host is probing. Their accounts are not lost, so leave them unretired. They restart on their own once a probe stays up.',
+  });
+}
+
 worker.post('/heartbeat', workerAuth, async (c) => {
   const w: WorkerIdentity = c.var.worker;
   const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
@@ -511,11 +557,20 @@ worker.post('/heartbeat', workerAuth, async (c) => {
   const accepted = await sql.begin(async (tx): Promise<false | { relogin: string | null; resume: string | null }> => {
     if (!await eligibleSlot(tx, w, true)) return false;
     const settings = await loadSettings(tx);
-    const lease = tx`NOW() + ${minutes(settings.lease_minutes)}::interval`;
+    // A worker leaving on a licence outage waits far longer than a lease. If it
+    // lapsed, a worker with no slot would take this one ahead of stock accounts
+    // it could really run, and the host's count would shrink under the retries.
+    const outage = state === 'DEAD' && detail?.reason === 'license_outage';
+    const lease = tx`NOW() + ${minutes(outage ? FLEET_OUTAGE_LEASE_MINUTES : settings.lease_minutes)}::interval`;
     await tx`
       UPDATE fleet_slots SET lease_expires_at = ${lease}
       WHERE account_no = ${w.account_no} AND epoch = ${w.epoch}`;
+    if (detail?.facebook_opened === true) {
+      await tx`UPDATE fleet_pilot_enrollments SET first_login_at = NOW()
+        WHERE account_no = ${w.account_no} AND first_login_at IS NULL`;
+    }
     await recordStateChange(tx, w, state, detail);
+    if (outage) await alertLicenceOutage(tx);
     const [beat] = await tx<{ state_since: Date | null; auto_resumes: number; version: string | null; resume_requested_at: Date | null; resume_delivered_at: Date | null; now: Date }[]>`
       INSERT INTO fleet_workers (worker_id, host_id, account_no, epoch, state, version, last_heartbeat_at, vnc_port, detail, state_since)
       VALUES (${w.worker_id}, ${w.slot.host_id}, ${w.account_no}, ${w.epoch}, ${state}, ${version}, NOW(), ${vncPort},
@@ -533,13 +588,20 @@ worker.post('/heartbeat', workerAuth, async (c) => {
                             THEN 0 ELSE fleet_workers.auto_resumes END
       RETURNING state_since, auto_resumes, version, resume_requested_at, resume_delivered_at, NOW() AS now`;
     if (fleetResumable(state, detail) && fleetTakesResume(beat.version) && (beat.resume_requested_at === null || beat.resume_delivered_at !== null)) {
-      const due = fleetAutoResumeDue(beat.state_since, beat.resume_requested_at, beat.auto_resumes);
-      if (due && due <= beat.now) {
-        await tx`
-          UPDATE fleet_workers SET resume_id = ${randomUUID()}, resume_requested_at = NOW(),
-            resume_requested_by = ${FLEET_AUTO_RESUME_BY}, resume_delivered_at = NULL, auto_resumes = auto_resumes + 1
-          WHERE worker_id = ${w.worker_id}`;
-        flog.info('fleet resume queued', { workerId: w.worker_id, by: FLEET_AUTO_RESUME_BY, try: beat.auto_resumes + 1 });
+      const exit = w.slot.proxy_id === null ? null : await latestProxyExit(tx, w.slot.proxy_id);
+      // A try against a proxy that is failing its checks can only fail, and an
+      // outage would use them all up before the proxy came back.
+      if (!exit?.fresh || exit.ok) {
+        const due = fleetAutoResumeDue(beat.state_since, beat.resume_requested_at, beat.auto_resumes);
+        const restart = due === null && await proxyRecoveredSince(tx, w.slot.proxy_id, exit, beat.resume_requested_at);
+        if (restart || (due && due <= beat.now)) {
+          const tries = restart ? 1 : beat.auto_resumes + 1;
+          await tx`
+            UPDATE fleet_workers SET resume_id = ${randomUUID()}, resume_requested_at = NOW(),
+              resume_requested_by = ${FLEET_AUTO_RESUME_BY}, resume_delivered_at = NULL, auto_resumes = ${tries}
+            WHERE worker_id = ${w.worker_id}`;
+          flog.info('fleet resume queued', { workerId: w.worker_id, by: FLEET_AUTO_RESUME_BY, try: tries });
+        }
       }
     }
     // The worker acts on `relogin` and `resume` only when one first appears,

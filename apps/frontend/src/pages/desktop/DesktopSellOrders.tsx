@@ -21,7 +21,7 @@ import {
 } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { shareOrCopy } from '../../lib/shareOrCopy';
-import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL, canonicalPartNumber } from '../../lib/format';
+import { fmtUSD, fmtUSD0, fmtMoney, fmtOrderTotal0, fmtDate, fmtDateShort, CURRENCY_SYMBOL, canonicalPartNumber } from '../../lib/format';
 import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
 import { sellOrderStatuses, sellOrderStatusShort } from '../../lib/lookups';
 import { useManagerOptions, type MemberOption } from '../../lib/useManagers';
@@ -92,6 +92,7 @@ type SellOrderSummary = {
   qty: number;
   subtotal: number;
   total: number;
+  nativeTotal: number;
   adjusted: boolean;
 };
 
@@ -612,7 +613,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                         {t('soAdjustedShort')}
                       </span>
                     )}
-                    {fmtUSD0(o.total, locale)}
+                    {fmtOrderTotal0(o.nativeTotal, o.currency, o.total, locale)}
                   </td>
                   <td><span className={'chip dot ' + toneFor(o.status)}>{o.status}</span></td>
                   <td className="col-actions" onClick={e => e.stopPropagation()}>

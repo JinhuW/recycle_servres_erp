@@ -23,6 +23,8 @@ export interface ReportContainer {
   started_at: string | null;
   hold?: Hold;
   exit_code?: number | null;
+  /** Licence outage retries used, present from the first exit 74 until the worker has recovered. */
+  outage_attempts?: number;
   /** The local image id (`sha256:…`) the container runs: tells a re-pushed tag apart. */
   image_id?: string;
 }

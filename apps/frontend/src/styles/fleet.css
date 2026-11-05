@@ -845,6 +845,12 @@
 .fleet-proxy-strip i.is-degraded { background: var(--warn); }
 .fleet-proxy-strip i.is-down { background: var(--neg); }
 .fleet-proxy-workers { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; }
+.fleet-proxy-used { display: inline-flex; align-items: flex-start; gap: 6px; }
+.fleet-proxy-crowd { flex-shrink: 0; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; cursor: help; }
+.fleet-proxy-crowd.is-warn { background: var(--warn); }
+.fleet-proxy-crowd.is-over { background: var(--neg); }
+.fleet-proxy-flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.fleet-proxy-flags .chip { cursor: help; }
 
 /* A stage summed over fewer days than the ones beside it. */
 .ff-stage-partial { margin-left: 1px; color: var(--fg-muted); font-weight: 500; }
@@ -907,4 +913,14 @@
   display: flex;
   flex-wrap: wrap;
   gap: 2px 10px;
+}
+
+.fleet-cohort-note {
+  margin: 0;
+  padding: 10px 18px;
+}
+
+.fleet-cohort-pilot {
+  width: auto;
+  max-width: none;
 }

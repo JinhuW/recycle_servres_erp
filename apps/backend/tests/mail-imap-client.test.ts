@@ -9,12 +9,18 @@ const fake = vi.hoisted(() => ({
   fetchOne: undefined as unknown,
   search: [] as unknown,
   options: null as null | Record<string, unknown>,
+  logins: [] as string[],
 }));
 
 vi.mock('imapflow', () => ({
   ImapFlow: class {
-    constructor(options: Record<string, unknown>) { fake.options = options; }
+    constructor(options: Record<string, unknown>) {
+      fake.options = options;
+      fake.logins.push((options.auth as { user: string }).user);
+    }
     on() {}
+    async connect() { throw new Error('no server in this test'); }
+    async logout() {}
     get usable() { return fake.usable; }
     get mailbox() { return fake.mailbox; }
     async fetchOne() { return fake.fetchOne; }
@@ -22,9 +28,37 @@ vi.mock('imapflow', () => ({
   },
 }));
 
-const { imapClient } = await import('../src/mail/inbox');
+const { imapClient, startMailInboxLoop } = await import('../src/mail/inbox');
 const { mailConfig } = await import('../src/mail');
 const { testEnv } = await import('./helpers/app');
+
+describe('startMailInboxLoop', () => {
+  const start = (env: Record<string, string>) => startMailInboxLoop(null as never, { ...testEnv, ...env });
+  const shared = { MAIL_USER: 'sell@ram4cash.example', MAIL_PASSWORD: 'pw' };
+  beforeEach(() => { fake.logins = []; });
+
+  it('polls every configured box', async () => {
+    const loop = start({ ...shared, MAIL_QUOTES_USER: 'quotes@recycleservers.example', MAIL_QUOTES_PASSWORD: 'q' });
+    await vi.waitFor(() => expect(fake.logins).toHaveLength(2));
+    loop.stop();
+    expect(fake.logins).toEqual(['sell@ram4cash.example', 'quotes@recycleservers.example']);
+  });
+
+  it('polls a box only once when quotes share it', async () => {
+    const loop = start(shared);
+    await vi.waitFor(() => expect(fake.logins).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 20));
+    loop.stop();
+    expect(fake.logins).toEqual(['sell@ram4cash.example']);
+  });
+
+  it('does not poll in stub mode', async () => {
+    const loop = start({ MAIL_STUB: '1', MAIL_QUOTES_USER: 'quotes@recycleservers.example' });
+    await new Promise((r) => setTimeout(r, 20));
+    loop.stop();
+    expect(fake.logins).toEqual([]);
+  });
+});
 
 describe('imapClient', () => {
   const client = (port?: string) => imapClient(mailConfig({

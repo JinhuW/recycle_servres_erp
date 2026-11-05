@@ -919,7 +919,8 @@ is not a stage but a flag beside one, set once every line has sold
 - **A Draft with a linked bank payment can be deleted** (v1.191.0). The delete
   unlinks the payment first — it used to fail with a 500 — and leaves it free
   to auto-link to the PO it really paid for.
-- **A PO cannot be submitted without a cost** (v1.148.0). Leaving Draft is
+- **A PO cannot be submitted without a cost** (v1.148.0; $0 products can be
+  confirmed since v1.426.0, below). Leaving Draft is
   refused while the order's goods cost is zero, through every door — the
   hand-off, a manager stage-jump, the carrier poll. The rule is per order,
   read off the derived `orders.total_cost`: a $0 line inside a priced lot and
@@ -930,7 +931,15 @@ is not a stage but a flag beside one, set once every line has sold
   and the manager judges the edit in the change-review dialog. Clicking In
   Transit on a $0 Draft with no submission history, on the desktop stepper
   or the phone's advance button, raises a *Can't submit yet* dialog naming
-  the fix instead of opening the hand-off.
+  the fix instead of opening the hand-off. Since v1.426.0 that applies only
+  when there is nothing to confirm, such as a PO with no units.
+- **$0 products are confirmed at submission** (v1.426.0). On first submission,
+  a PO with a $0 product asks *Submit with $0 products?* on the phone and the
+  desktop, listing those products, before the hand-off opens. A PO where every
+  product is $0 can leave Draft only through a hand-off that sends this
+  confirmation; `/advance` and a manager stage-jump still refuse it. The
+  `submitted` event records `zeroCostConfirmed`. A negotiated lot price or
+  earlier submission history skips the question.
 - **Unit cost is required when a product line is saved** (v1.152.0). The
   shared line rule (`lib/lineRequirements.ts`) names Unit cost alongside the
   identity fields and quantity, so a blank or $0 cost is refused where the
@@ -940,7 +949,9 @@ is not a stage but a flag beside one, set once every line has sold
   edit page asks only of a line that is new or that the user touched — an
   untouched legacy $0 line does not block Save or a stage change. The
   per-order leave-Draft check above stays as the backstop, and the backend
-  still accepts `unit_cost >= 0`.
+  still accepts `unit_cost >= 0`. The phone's add-item form and draft sync
+  accept a typed $0 since v1.426.0; a blank cost is still refused there. On that
+  form, Serial numbers sits directly under Part # (v1.426.0).
 - **The list's Payment cell says what the bank paid and opens it** (v1.138.0).
   On the desktop PO list a manager reads `Company | $1,279` or `Self | $2,829`
   on every PO with linked payments — the ledger's net, refunds subtracted,
@@ -1475,6 +1486,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
 
 ## Sell orders
 
+- **The list's Total is in the order's own currency** (v1.420.1): ¥ and the RMB
+  amount on an RMB order, the same figure as the order's page, and $ on a USD
+  order. The status tiles, the Excel export and the add-to-order picker stay in
+  USD.
 - **A sell order is a full page** (v1.194.0), `#/sell-orders/:id`, rendered
   in place of the list as a PO's page is. It was a popup before.
   - **An open order is the editor** (v1.375.0): anything short of Done or
@@ -3526,6 +3541,22 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   and is shown as reserved, not parked. A slug check whose page failed leaves
   the city unverified so it is checked again. A session upload must carry this
   account's `c_user` and `xs`, so it cannot wipe or replace the stored login.
+- **Licence outage retries (v1.420.0, RS-529)**: a worker that exits 74 because
+  the browser's licence server is out of reach isn't treated as a crash. Since
+  v1.424.4 (RS-544) one worker per host probes, after 5 minutes, doubling to at
+  most 60, plus up to 25% jitter, with no limit and after any other start, so a
+  stock restart never queues behind an outage. The others wait and spend no
+  attempts. A probe still up after 15 minutes ends the outage, and the rest restart
+  one stagger apart with nobody going to the host. The host's report carries
+  `outage_attempts` during an outage. Since v1.425.0 (RS-546) the Fleet tab has a banner
+  for an outage, for containers held for a person and for unread fleet alerts, each
+  dismissable on its own. A worker row names `Licence outage` or `Exit moved`. A
+  worker whose port moved after a page opened offers **Restart**, which warns it is
+  one boot login, and which nothing does by itself. Since v1.424.3 (RS-543) the outage
+  heartbeat keeps the slot's lease for 24 hours, so a worker with no slot takes
+  stock accounts first, and a rolling release skips a worker that comes back
+  parked on `license_outage` or `exit_moved`, and any running cloak worker during
+  an outage, instead of failing.
 - **Fleet scheduling and rollout fixes (v1.356.0, RS-407)** — a rollout no
   longer picks a worker the agent will not replace: a held container
   (operator needed, crash limit, stopped by hand), one not running, or a
@@ -3729,14 +3760,20 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     hover, rather than Dead, and the row and its watch page offer **Mark
     healthy**: its next heartbeat hands it `resume` once, and it tries again in
     the same browser, with no new browser and no login. The row reads "Mark
-    healthy sent" until the worker reports anything but Dead. A worker build
+    healthy sent" until the worker reports anything but Dead, for at most two
+    minutes after it receives the resume (v1.424.1, RS-541); after that the
+    button works again. A worker build
     before facebook-tracker 0.15.0 cannot take it, and the button says so.
     The worker itself now tries a page that times out twice more, 10 s then
     30 s apart, before it parks. Since v1.411.0 (RS-512) the ERP does not
     wait for a manager: a park like that on a 0.15.0+ worker that still
     heartbeats is sent `resume` by itself 10 min in, then 30 min after that
     try, then hourly, 8 tries per run (recorded as `requested_by` `auto`).
-    The count starts again after an hour of Healthy. A network blip on
+    The count starts again after an hour of Healthy. Since v1.424.1 (RS-541)
+    no try is sent or spent while the proxy's latest check, under 15 minutes
+    old, is failing, and the Auto-retry row says so; once tries are spent, a
+    proxy that failed a check after the last try and now passes starts them
+    over. A network blip on
     2026-11-01 had parked three workers for 37 h. The worker page reads
     "Parked: couldn't reach Facebook · since …" instead of a bare Dead, adds
     an **Auto-retry** row (the next try, or that the tries are spent) and
@@ -3768,10 +3805,35 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     sees a new device on the account's next normal start. It also says not to
     re-login the account before then: Re-login and Mark healthy answer 409
     `engine_mismatch` while the worker runs a different engine from its
-    slot's. A worker older than 0.16.0 is never handed a CloakBrowser slot,
-    which waits for one that can run it. A proxy timezone edit rewrites the
-    timezone of every slot on it, which for a CloakBrowser slot changes its
-    `--fingerprint-timezone`. A refusal from
+    slot's. A worker older than 0.17.0 (v1.424.2) is never handed a CloakBrowser slot,
+    which waits for one that can run it. Since v1.421.0 (RS-537) the profile
+    (engine, seed, GPU, timezone) is kept on the pool account, so removing and
+    re-adding an account brings the same machine back and it still can't be
+    seeded twice, and no two accounts can hold one seed. A proxy timezone edit,
+    or Change proxy, leaves that timezone alone and only moves accounts with no
+    profile. **Add to fleet** can also name a pilot and an arm, which enrolls
+    the account in one step: `POST /api/fleet/slots` writes the enrollment
+    (`fleet_pilot_enrollments`, which outlives the slot and the account), the
+    profile, the proxy and the slot in one transaction, so no worker can claim a
+    half-set slot. An enrolled account with no pinned clock takes its timezone
+    from the measured exit, not the proxy's typed one, and enrollment is refused
+    if the fresh measurement names none (v1.422.0, RS-538). Enrollment refuses an exit IP that another slot, an active
+    enrollment or a homelab worker already uses, comparing measured IPs across
+    ports, and refuses a proxy whose latest measurement failed or is over 15
+    minutes old. A normal add or Change proxy is also refused when
+    it would land on an exit IP a pilot account holds. With CloakBrowser off, existing cloak accounts keep claiming
+    and keep their licence; only new ones stop. A CloakBrowser claim also says
+    which exit IP to expect (`expected_exit_ip`, `webrtc_ip`): the last one
+    seen, however old, since v1.424.3 (RS-543). A cloak slot, or a pilot account
+    not yet logged in, whose listed proxy has no reading at all, as after a URL
+    edit, waits for the next round and isn't counted when the host sizes its
+    workers. A pilot's first login is held until its first Facebook page, not its
+    first claim, and also when the exit's zone moves or another slot lands on the
+    same exit; a re-add or Change proxy re-records the exit and its clock. A seed
+    another account holds is drawn again. A pool account with a profile or a pilot
+    record refuses a new UID. Add to fleet offers known pilots and makes the arm an
+    explicit choice, and a remove and re-add can correct either before the first
+    claim (v1.425.0). A refusal from
     `POST /api/fleet/slots/:no/engine` reads as a sentence: a live session,
     CloakBrowser off, every seat taken, or switched before. A CloakBrowser
     row offers **Back to stock**, another new device, only while no worker
@@ -3899,6 +3961,21 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     account-days, with a `retro` block from the stint ledger's `problem`
     and `retired` endings as the stock baseline from before the history.
     Since v1.409.0 the Fleet tab's Browser engine card shows it.
+    Since v1.423.0 (RS-539) the tab also has a **Cohort report** for the
+    CloakBrowser pilot, from `GET /api/fleet/stats/cohorts` (manager-only). With
+    `pilot` it answers that pilot per batch and arm, one row per arm across
+    batches, and its accounts. With no pilot it is a supplier scorecard: accounts
+    first claimed in the last `days` (default 30), by batch and engine. Lost means a
+    stint ended retired or problem within 24 h or 7 d of first claim, and the record
+    survives the slot and the pool row. The headline is failed, shown first: lost, plus
+    never reached HEALTHY, plus sitting in a lost state nobody has retired yet, with
+    stint lost beside it as the supplier-comparable figure. Failed starts stay in their arm, never-claimed
+    accounts are apart, an account released or parked by a manager first is unknown,
+    and a running clock is neither. Accounts touched by an exit change or licence
+    outage are flagged, with results with and without them. It also shows completed
+    searches per account in the fixed 7 days, recovery boots (an upper bound on logins)
+    and CloakBrowser slots against the setting and the pilot cap of 18, parked ones
+    counted. It shows counts beside percentages and never a verdict.
   - **Proxies** (`/#/fleet/proxies`, v1.368.0, RS-424): the health of every
     proxy port the fleet browses through, between Analysis and Account pool,
     with the number down as a warn-coloured chip on the tab bar. Rows are the
@@ -3926,6 +4003,26 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     round unless one started in the last 15 s; the row button checks one ERP
     proxy (homelab ports are checked together). Checks are kept 14 days. No
     proxy login reaches the browser, the log or the table.
+    Since v1.419.0 (RS-527) Used by shows a yellow dot at 5 to 10 accounts and a
+    red dot above 10, with the count and reason on hover. Since v1.419.1 (RS-528)
+    the count is per exit IP: non-parked ERP accounts plus homelab workers over
+    every port last seen on that IP, with the dot on each of those rows. A port
+    with no known exit shows none. The thresholds are fixed and don't follow the
+    per-proxy limit.
+    Since v1.422.0 (RS-538) each check keeps the exit's zone, and every change
+    of a port's exit IP or geo is recorded for good with the accounts and
+    workers on it then; a failed check is not a change. A change under an
+    account or worker notifies the managers: one notification per remap, at
+    most one every 30 minutes. The Exit column flags **Zone differs** (a device
+    keeps another zone than the exit), **Measurement stale** (no check in 15
+    minutes) or **Never measured**, **Exit unknown** (the last check found no
+    exit) and **Exit changed** (in the last 24 hours), with the detail on hover.
+    These only report: no device or timezone is changed. Homelab ports have no
+    zone, since rs_console doesn't send one. **First login held** marks a pilot
+    account that has never been claimed and whose port has moved off the exit it
+    enrolled on. No worker starts it, so no login happens, until a manager
+    re-adds it or uses Change proxy, which records the fresh exit. Claimed
+    accounts and accounts outside a pilot are never held.
     Since v1.376.0 (RS-443) the tab is also where the ERP's proxies are
     managed: **Add proxy** beside Check all, and Edit and Remove on each ERP
     row, the same forms the Account pool card had (homelab ports stay
@@ -4132,15 +4229,17 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - **Sending.** The thread reads like a mail client: the subject on top,
     earlier messages folded to one line (sender, snippet, date, any problem),
     the newest open with its From / To. A manager writes the reply in a draft
-    showing the From / To / Subject it will go out with. It goes out from one
+    showing the From / To / Subject it will go out with. It goes out from a
     shared company mailbox, a Lark box set by `MAIL_USER` and
-    `MAIL_PASSWORD`.
+    `MAIL_PASSWORD`. recycleservers.com quotes use their own box when
+    `MAIL_QUOTES_USER` and `MAIL_QUOTES_PASSWORD` are set (v1.424.0).
     - A ram4cash sell request is sent as "ram4cash" with the subject "Your
       sell request WS-nnnn · ram4cash.com".
     - A recycleservers.com quote is sent as "Recycle Servers".
     - The first sent reply moves a `new` submission to `contacted`.
   - **Receiving.** Every two minutes the backend reads the box's INBOX over
-    IMAP, read-only, so nothing in Lark changes. It attaches a customer's
+    IMAP, read-only, so nothing in Lark changes. With a quotes box set, it reads
+    both, each from its own position. It attaches a customer's
     answer to the thread only when the answer replies to a message the ERP
     sent: its `In-Reply-To` or `References` names one of our Message-IDs.
     A WS id in the subject is not enough, because ids are sequential and a

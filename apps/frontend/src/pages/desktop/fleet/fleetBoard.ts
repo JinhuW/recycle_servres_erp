@@ -620,3 +620,13 @@ export function alertsByCity(
     };
   }).sort((a, b) => b.alerts - a.alerts || a.name.localeCompare(b.name));
 }
+
+/** Outage reports, the workers a probe is running for, and containers waiting for a person. */
+export function fleetAttention(workers: readonly FleetWorker[], hosts: readonly FleetHost[]): { outage: number; probing: number; held: string[] } {
+  const containers = hosts.flatMap(h => h.report?.containers ?? []);
+  return {
+    outage: workers.filter(w => w.state === 'DEAD' && w.detail?.reason === 'license_outage').length,
+    probing: containers.filter(c => c.state === 'running' && (c.outage_attempts ?? 0) > 0).length,
+    held: containers.filter(c => c.hold).map(c => c.worker_id).sort(),
+  };
+}

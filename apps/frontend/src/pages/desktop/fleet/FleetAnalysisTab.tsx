@@ -5,6 +5,7 @@ import { coordinatorApi, type AlertHitRow, type FilterPrompt, type FleetDoc } fr
 import { fleetApi, type FleetCity, type FleetFunnelDay, type FleetTask } from '../../../lib/fleet';
 import { useT } from '../../../lib/i18n';
 import { FlowCard } from '../FleetFlow';
+import { FleetCohortCard } from './FleetCohorts';
 import { alertsByCity, daySeries, FUNNEL_RANGES, niceTop, type DaySeries, type FunnelRange } from './fleetBoard';
 import { COORDINATOR_POLL_MS, EmptyRow, UnavailableCard, useFleetPoll } from './shared';
 
@@ -81,6 +82,7 @@ export function FleetAnalysisTab() {
           : <HitsTable rows={alertsByCity(coordinator.hits, erpRows.done, erpRows.cities)} />}
       </section>
       <p className="fp-muted fleet-note">{t('fleetAnalysisNoFilter')}</p>
+      <FleetCohortCard />
     </div>
   );
 }

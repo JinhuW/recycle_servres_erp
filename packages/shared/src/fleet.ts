@@ -33,6 +33,12 @@ export const fleetStateParked = (state: string | null | undefined): boolean =>
 export const fleetResumable = (state: string | null | undefined, detail: unknown): boolean =>
   state === 'DEAD' && !!detail && typeof detail === 'object' && (detail as Record<string, unknown>).reason === 'connect_failed';
 
+/** Whether a manager may restart a worker whose port moved after a page opened:
+ *  the WebRTC flag is fixed at launch, so it takes a new browser, and that is a
+ *  boot login. Never automatic, unlike the resume above. */
+export const fleetRestartable = (state: string | null | undefined, detail: unknown): boolean =>
+  state === 'DEAD' && !!detail && typeof detail === 'object' && (detail as Record<string, unknown>).reason === 'exit_moved';
+
 /** The first worker build that takes the `resume` directive. */
 export const FLEET_RESUME_SINCE = [0, 15, 0] as const;
 
@@ -71,6 +77,17 @@ export function fleetAutoResumeDue(stateSince: string | Date | null, lastResumeA
 export const fleetSlotRetirable = (s: {
   parked: boolean; poolStatus?: string | null; state: string | null | undefined; operator: boolean;
 }): boolean => s.parked || (!!s.poolStatus && s.poolStatus !== 'fleet') || (fleetStateParked(s.state) && !s.operator);
+
+/** How long a worker that left on a licence outage keeps its slot. Past the
+ *  retries' longest gap, and short enough that a host lost during an outage
+ *  doesn't strand its accounts for good. */
+export const FLEET_OUTAGE_LEASE_MINUTES = 24 * 60;
+
+/** Parks that say nothing about the worker's image: its licence server is down,
+ *  or its port moved. A rolling release skips these rather than failing. */
+const FLEET_INFRA_PARKS: readonly unknown[] = ['license_outage', 'exit_moved'];
+export const fleetInfraPark = (state: string | null | undefined, detail: unknown): boolean =>
+  state === 'DEAD' && !!detail && typeof detail === 'object' && FLEET_INFRA_PARKS.includes((detail as Record<string, unknown>).reason);
 
 export type FleetCity = {
   slug: string;
@@ -208,9 +225,9 @@ export type FleetDevice = {
   device_scale_factor?: number;
   /** Filled in by the claim all the same; the worker ignores what is listed. */
   native?: FleetNativeField[];
-  /** Absent is stock. Set by the engine switch, never by the claim. */
+  /** Absent is stock. Set by enrollment or the engine switch, never by the claim. */
   browser_engine?: FleetBrowserEngine;
-  /** CloakBrowser's fingerprint seed and GPU; written once, with the switch. */
+  /** CloakBrowser's fingerprint seed and GPU; written once. fb_pool_accounts keeps them past the slot. */
   cloak_seed?: number;
   cloak_gpu?: FleetCloakGpu;
 };
@@ -219,6 +236,9 @@ export const FLEET_BROWSER_ENGINES = ['stock', 'cloak'] as const;
 export type FleetBrowserEngine = (typeof FLEET_BROWSER_ENGINES)[number];
 export const FLEET_CLOAK_GPUS = ['NVIDIA', 'Intel'] as const;
 export type FleetCloakGpu = (typeof FLEET_CLOAK_GPUS)[number];
+/** A pilot's arm is the engine the account was assigned, so a cohort compares like with like. */
+export const FLEET_PILOT_ARMS = FLEET_BROWSER_ENGINES;
+export type FleetPilotArm = FleetBrowserEngine;
 
 /** A device as a slot stores it: the claim fills in what is missing, so a
  *  profile that leaves the user agent to the browser simply has none. */
@@ -268,10 +288,11 @@ export function fleetDeviceFor(accountNo: number, timezone: string): FleetDevice
 /**
  * The CloakBrowser fingerprint a slot gets when it is switched, fixed by its
  * account number like its device: a seed is the whole machine to Facebook, so
- * one made again for the same account has to come out the same.
+ * one made again for the same account has to come out the same. `attempt` is
+ * for a seed another account already has.
  */
-export function fleetCloakFor(accountNo: number): { cloak_seed: number; cloak_gpu: FleetCloakGpu } {
-  const h = fnv1a(`fleet-cloak:${accountNo}`);
+export function fleetCloakFor(accountNo: number, attempt = 0): { cloak_seed: number; cloak_gpu: FleetCloakGpu } {
+  const h = fnv1a(attempt === 0 ? `fleet-cloak:${accountNo}` : `fleet-cloak:${accountNo}:${attempt}`);
   return {
     cloak_seed: 10000 + (h % 90000),
     cloak_gpu: FLEET_CLOAK_GPUS[Math.floor(h / 90000) % FLEET_CLOAK_GPUS.length],
@@ -316,10 +337,10 @@ export function fleetStockRevertible(s: Pick<FleetSlot, 'parked' | 'worker_id' |
 export const fleetReportedEngine = (detail: Record<string, unknown> | null | undefined): FleetBrowserEngine =>
   detail?.engine === 'cloak' ? 'cloak' : 'stock';
 
-/** The first worker release that can launch CloakBrowser. An older one would
- *  run a cloak slot on stock and mint a stock session the next cloak boot
- *  loads, so the claim never hands it one. */
-export const FLEET_CLOAK_MIN_WORKER_VERSION = '0.16.0';
+/** The first worker release allowed a cloak slot: the first with the preflight,
+ *  the WebRTC flag and the licence-outage exit. An older one would log a pilot
+ *  in with none of them, and one older still would run the slot on stock. */
+export const FLEET_CLOAK_MIN_WORKER_VERSION = '0.17.0';
 
 /** Whether a worker's reported version is at least `min` (dotted numbers); a
  *  version that does not parse, such as `unknown`, is not. */
@@ -407,7 +428,15 @@ export type FleetProxyWrite = { label: string; url: string; timezone: string; no
 export type FleetProxyPatch = { label?: string; url?: string; timezone?: string; note?: string };
 
 /** `POST /api/fleet/slots`: puts a pool account into the fleet. */
-export type FleetSlotWrite = { account_no: number; proxy_id: number };
+export type FleetSlotWrite = {
+  account_no: number;
+  proxy_id: number;
+  /** Which pilot the account joins; comes with `arm`. */
+  pilot?: string;
+  arm?: FleetPilotArm;
+  /** Alone, gives the account this engine outside any pilot; with `arm`, must equal it. */
+  engine?: FleetBrowserEngine;
+};
 
 /** Slots on a proxy that count against `max_accounts_per_proxy`: every one but the parked. */
 export const proxyLoad = (p: Pick<FleetProxy, 'slots'>): number => p.slots.filter((s) => !s.parked).length;
@@ -418,6 +447,10 @@ export const proxyLoad = (p: Pick<FleetProxy, 'slots'>): number => p.slots.filte
 export const FLEET_PROXY_SLOW_MS = 3000;
 /** One round every five minutes; the history strip is half-hour buckets over a day. */
 export const FLEET_PROXY_ROUND_MS = 5 * 60_000;
+/** How old an exit measurement may be and still count: three rounds, so one
+ *  missed round and a late one (a backend deploy) don't stop enrollment, while
+ *  a probe that has really stopped does. */
+export const FLEET_EXIT_FRESH_MS = 3 * FLEET_PROXY_ROUND_MS;
 export const FLEET_PROXY_BUCKET_MS = 30 * 60_000;
 export const FLEET_PROXY_BUCKETS = 48;
 
@@ -436,8 +469,21 @@ export type FleetProxyCheck = {
   region: string | null;
   country: string | null;
   org: string | null;
+  /** The lookup's IANA zone for the exit. Null on older rows and on homelab ports. */
+  timezone: string | null;
   error: string | null;
 };
+
+/** One side of an exit change. */
+export type FleetProxyExitPoint = { ip: string; city: string | null; region: string | null; country: string | null; timezone: string | null };
+/** An exit as text, for an alert or a hover. */
+export function fleetExitPointText(e: Omit<FleetProxyExitPoint, 'ip'> & { ip: string }): string {
+  const where = [e.city, e.region, e.country, e.timezone].filter(Boolean).join(', ');
+  return where ? `${e.ip} (${where})` : e.ip;
+}
+
+/** A port's measured exit moved, in IP or in geo. */
+export type FleetProxyExitChange = { at: string; from: FleetProxyExitPoint; to: FleetProxyExitPoint };
 
 export type FleetProxyHealth = {
   /** `scheme://host:port`, the login cut out, as fb_worker_accounts names it. */
@@ -448,11 +494,17 @@ export type FleetProxyHealth = {
   label: string | null;
   host: string;
   port: number;
-  /** The ERP slots on it, and the homelab workers dialing it. */
-  slots: FleetProxyUse[];
+  /**
+   * The ERP slots on it with each device's zone, and the homelab workers dialing it.
+   * held_exit_ip is the exit a pilot account enrolled on, set while its first
+   * login waits because the port has moved off it.
+   */
+  slots: (FleetProxyUse & { timezone: string | null; held_exit_ip: string | null })[];
   workers: string[];
   state: FleetProxyHealthState;
   last: FleetProxyCheck | null;
+  /** The newest exit change in the last 24 h. */
+  exit_change: FleetProxyExitChange | null;
   /** The exit IP before the last one, when it changed in the last 24 h. */
   previous_ip: string | null;
   /** Share of the last 24 h's checks that answered, null with none. */
@@ -535,6 +587,8 @@ export type FleetWorkerDetail = {
   slot: (FleetSlot & { uid: string | null; pool_status: string; minutes_today: number; budget_minutes: number }) | null;
   holds_slot: boolean;
   proxy: { id: number; label: string; host: string; port: number; timezone: string } | null;
+  /** The slot's proxy failed its latest recent check, so the ERP holds its automatic resumes. */
+  proxy_down: boolean;
   /** `scheme://host:port` the worker holding the slot claimed it with; it differs from `proxy` after a change, until its next start. */
   running_exit: string | null;
   account: {
@@ -578,6 +632,8 @@ export type FleetHostContainer = {
   /** Why the agent leaves it stopped until a person acts (§6). */
   hold?: 'operator_needed' | 'crash_limit' | 'operator_stopped' | string;
   exit_code?: number | null;
+  /** Licence outage retries used, from the first exit 74 until the worker has recovered. */
+  outage_attempts?: number;
   image_id?: string;
 };
 
@@ -742,6 +798,11 @@ export type ClaimAnswer = {
   };
   proxy: { url: string } | null;
   device: FleetDevice;
+  /** Cloak slots only, and null when the proxy has no fresh passing measurement:
+   *  the exit the worker should see. Absent or null means skip the check. */
+  expected_exit_ip?: string | null;
+  /** Always `expected_exit_ip`: what `--fingerprint-webrtc-ip` should announce. */
+  webrtc_ip?: string | null;
   items: FleetItem[];
   settings: {
     search: FleetSearchSettings;
@@ -877,9 +938,122 @@ export type FleetErrorCode =
   | 'cloak_proven'
   /** Re-login or resume while the slot's engine is not the one its worker
    *  runs: the fresh session would carry onto the other fingerprint. */
-  | 'engine_mismatch';
+  | 'engine_mismatch'
+  /** Enrolling with the seed another pool account's profile holds. */
+  | 'cloak_seed_taken'
+  /** Enrolling an account already enrolled in another pilot or arm. */
+  | 'already_enrolled'
+  /** Switching a pilot's stock-arm account to CloakBrowser. */
+  | 'pilot_arm'
+  /** Enrolling on a proxy with no measurement within FLEET_EXIT_FRESH_MS. */
+  | 'exit_stale'
+  /** Enrolling on a proxy whose latest measurement failed or found no IP. */
+  | 'exit_failing'
+  /** Enrolling with no pinned clock on a proxy whose fresh measurement names no timezone. */
+  | 'exit_zone_unknown'
+  /** Enrolling on an exit IP another slot, enrollment or homelab worker uses,
+   *  or any add or proxy change landing on a pilot account's exit IP. */
+  | 'exit_shared';
 
 export type FleetError = { error: FleetErrorCode; detail?: string };
+
+/** The most CloakBrowser accounts the pilot runs at once on the Team plan's 20 seats. */
+export const FLEET_PILOT_CLOAK_CAP = 18;
+
+/** Where an account stood when a window closed. `unknown`: the owner released or
+ *  held it first. `running`: the window is still open. Neither counts as decided. */
+export type FleetCohortOutcome = 'lost' | 'survived' | 'never_healthy' | 'unknown' | 'running';
+
+export type FleetCohortCounts = {
+  /** The headline: lost + never_healthy + survived_in_loss_state. With no state
+   *  history the last two can't occur, so it equals `lost`. */
+  failed: number;
+  /** failed / decided, one decimal; null with nothing decided. */
+  failed_pct: number | null;
+  /** A stint ended retired or problem inside the window: the figure comparable across suppliers. */
+  lost: number;
+  survived: number;
+  /** Of `survived`: its worker sat in SESSION_EXPIRED, CHECKPOINT or CHALLENGE_*
+   *  when the window closed, and nobody had retired it yet. */
+  survived_in_loss_state: number;
+  /** Claimed, still on the fleet when the window closed, and not yet HEALTHY by then. */
+  never_healthy: number;
+  unknown: number;
+  running: number;
+  /** lost + survived + never_healthy. The percentage's denominator. */
+  decided: number;
+  /** lost / decided, one decimal; null with nothing decided. */
+  lost_pct: number | null;
+};
+
+/** `all` keeps every account. `unflagged` leaves out those an exit change or
+ *  licence outage touched while this window ran. */
+export type FleetCohortWindow = { all: FleetCohortCounts; unflagged: FleetCohortCounts };
+
+/** Completed searches in the fixed 7 days from first claim, over accounts whose
+ *  7 days are decided. */
+export type FleetCohortSearches = { accounts: number; searches: number; per_account: number | null };
+
+export type FleetCohortGroup = {
+  pilot: string | null;
+  /** null: every batch (`arms`), or a removed account outside any enrollment. */
+  batch: string | null;
+  arm: FleetBrowserEngine;
+  claimed: number;
+  /** Enrolled, no claim yet, a first login held for a changed exit included. In no window. */
+  never_claimed: number;
+  reached_healthy: number;
+  /** Claimed with no state history, so HEALTHY can't be told: homelab workers, and accounts from before it began. */
+  health_unknown: number;
+  /** Claimed and never HEALTHY, and the 24 h window ended it as lost or never_healthy. They stay in the windows above. */
+  failed_starts: number;
+  lost_24h: FleetCohortWindow;
+  lost_7d: FleetCohortWindow;
+  searches: { all: FleetCohortSearches; unflagged: FleetCohortSearches };
+  exit_change_accounts: number;
+  outage_accounts: number;
+  /** Boots right after a licence outage exit. An upper bound on recovery logins:
+   *  a boot that opened no Facebook page cost none, and the history can't tell. */
+  recovery_boots: number;
+};
+
+export type FleetCohortAccount = {
+  account_no: number;
+  batch: string | null;
+  arm: FleetBrowserEngine;
+  enrolled_at: string | null;
+  first_claimed_at: string | null;
+  reached_healthy: boolean | null;
+  /** It also ran on the other arm's engine; only HEALTHY on its own arm counts. */
+  crossed_arm: boolean;
+  lost_at: string | null;
+  outcome_24h: FleetCohortOutcome | null;
+  outcome_7d: FleetCohortOutcome | null;
+  /** A survivor in a lost state when the window closed: it counts as failed. */
+  in_loss_state_24h: boolean;
+  in_loss_state_7d: boolean;
+  searches_7d: number | null;
+  exit_changes: number;
+  licence_outages: number;
+  recovery_boots: number;
+};
+
+/** GET /api/fleet/stats/cohorts. Counts only, never a verdict. */
+export type FleetCohortReport = {
+  /** null: the supplier scorecard, over accounts first claimed in the last `days`. */
+  pilot: string | null;
+  days: number | null;
+  since: string | null;
+  /** Every pilot named so far. */
+  pilots: string[];
+  /** Slots on CloakBrowser now. Parked ones are in `active`: a parked worker keeps its seat. */
+  seats: { active: number; parked: number; max_slots: number; pilot_cap: number };
+  /** One row per arm across batches. */
+  arms: FleetCohortGroup[];
+  groups: FleetCohortGroup[];
+  /** The pilot's accounts; empty on the scorecard. */
+  accounts: FleetCohortAccount[];
+};
 
 /** One browser engine's account loss over a window (GET /api/fleet/stats/engine-loss). */
 export type FleetEngineLossRow = {

@@ -184,6 +184,7 @@ async function companyCashShotMissing(
 
 export type LeaveDraftBlocker =
   | { kind: 'noCost' }
+  | { kind: 'zeroCost' }
   | { kind: 'missingWarehouse' }
   | { kind: 'missingSource' }
   | { kind: 'missingDelivery' }
@@ -210,7 +211,7 @@ export type LeaveDraftOrder = TxnRuleOrder & {
  *  warehouse is not a hand-off question but where the stock lands, and nothing
  *  past Draft asks for it again — so it is held against every door. */
 export const ENFORCED_EVERYWHERE: ReadonlySet<LeaveDraftBlocker['kind']> =
-  new Set(['noCost', 'missingWarehouse', 'missingTxnId', 'unknownTxnId', 'missingChatShot', 'missingCashShot']);
+  new Set(['noCost', 'zeroCost', 'missingWarehouse', 'missingTxnId', 'unknownTxnId', 'missingChatShot', 'missingCashShot']);
 
 /** Every reason this Draft cannot leave, in the order the page lists them.
  *  Local reads only — never calls PayPal; the routes pull once before the
@@ -224,6 +225,10 @@ export const ENFORCED_EVERYWHERE: ReadonlySet<LeaveDraftBlocker['kind']> =
  *  change-review is where that edit is judged. The history read only runs
  *  for a $0 Draft, so the common advance pays nothing for it.
  *
+ *  `zeroCost` is a $0 Draft whose products were entered at $0, which a free lot
+ *  legitimately is: only the hand-off's `confirmZeroCost` passes it. `noCost` is
+ *  the rest, nothing to price or a header pinned at $0 over priced lines.
+ *
  *  `pre` hands in reads a caller already made (GET needs both for its own
  *  response); left out, each is read here, from `tx`. */
 export async function leaveDraftBlockers(
@@ -234,7 +239,10 @@ export async function leaveDraftBlockers(
   const { cutoffs } = pre;
   const out: LeaveDraftBlocker[] = [];
   if (!(Number(o.total_cost) > 0) && !(pre.everSubmitted ?? await wasEverSubmitted(tx, o.id))) {
-    out.push({ kind: 'noCost' });
+    const [lines] = await tx`
+      SELECT COALESCE(SUM(qty), 0)::int AS units, COALESCE(SUM(qty * unit_cost), 0)::float AS goods
+      FROM order_lines WHERE order_id = ${o.id}` as unknown as { units: number; goods: number }[];
+    out.push({ kind: lines.units > 0 && !(lines.goods > 0) ? 'zeroCost' : 'noCost' });
   }
   if (o.warehouse_id === null) out.push({ kind: 'missingWarehouse' });
   if (o.source === null) out.push({ kind: 'missingSource' });

@@ -16,7 +16,7 @@ const rules: HandoffRules = {
   proofAttachmentCount: 0,
   saved: { payment: 'company', paymentMethod: 'paypal', txnRequired: true, chatShotRequired: false, cashShotRequired: false },
 };
-const lines = { count: 1, goods: 120, everSubmitted: false };
+const lines = { count: 1, goods: 120, everSubmitted: false, zeroCost: 0 };
 const byTab = (items: ReturnType<typeof poReadiness>) =>
   Object.fromEntries(items.map(i => [i.tab, i.needKeys]));
 
@@ -29,16 +29,19 @@ describe('poReadiness', () => {
   });
 
   it('an empty draft wants products first; a $0 unsubmitted one wants a cost', () => {
-    expect(byTab(poReadiness({ rules, lines: { count: 0, goods: 0, everSubmitted: false } })).products)
+    expect(byTab(poReadiness({ rules, lines: { count: 0, goods: 0, everSubmitted: false, zeroCost: 0 } })).products)
       .toEqual(['poReadyNoProducts']);
-    expect(byTab(poReadiness({ rules, lines: { count: 2, goods: 0, everSubmitted: false } })).products)
+    expect(byTab(poReadiness({ rules, lines: { count: 2, goods: 0, everSubmitted: false, zeroCost: 0 } })).products)
       .toEqual(['poReadyNoCost']);
+    // Products entered at $0 are the confirmation's question, not a blocker.
+    expect(byTab(poReadiness({ rules, lines: { count: 2, goods: 0, everSubmitted: false, zeroCost: 2 } })).products)
+      .toEqual([]);
     // Re-submitting as accepted: the cost rule is first-submission only.
-    expect(byTab(poReadiness({ rules, lines: { count: 2, goods: 0, everSubmitted: true } })).products)
+    expect(byTab(poReadiness({ rules, lines: { count: 2, goods: 0, everSubmitted: true, zeroCost: 0 } })).products)
       .toEqual([]);
     // The server calls an empty Draft `noCost`; the row still says products.
     expect(byTab(poReadiness({
-      rules, lines: { count: 0, goods: 0, everSubmitted: false }, serverBlockers: ['noCost'],
+      rules, lines: { count: 0, goods: 0, everSubmitted: false, zeroCost: 0 }, serverBlockers: ['noCost'],
     })).products).toEqual(['poReadyNoProducts']);
   });
 

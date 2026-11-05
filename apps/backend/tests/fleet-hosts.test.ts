@@ -58,7 +58,7 @@ async function seedSlot(n: number, over: { worker?: string; host?: string; epoch
   return a.no;
 }
 
-async function report(containers: Array<{ worker_id: string; image: string; state?: string; hold?: string; exit_code?: number | null; image_id?: string }>, token = HOST_TOKEN, host = 'lab') {
+async function report(containers: Array<{ worker_id: string; image: string; state?: string; hold?: string; exit_code?: number | null; outage_attempts?: number; image_id?: string }>, token = HOST_TOKEN, host = 'lab') {
   return api('POST', `/api/fleet/hosts/${host}/report`, {
     headers: { ...bearer(token), 'X-Requested-By': 'an-agent' },
     body: { version: '1.340.0', containers: containers.map((c) => ({ state: 'running', ...c, started_at: '2026-10-24T10:00:00Z' })) },
@@ -67,6 +67,33 @@ async function report(containers: Array<{ worker_id: string; image: string; stat
 
 const desired = (token = HOST_TOKEN, host = 'lab', env: Partial<Env> = ENV) =>
   api<DesiredAnswer>('GET', `/api/fleet/hosts/${host}/desired`, { headers: bearer(token), env });
+
+// A slot's first login is held while its exit is wrong, so counting it as free
+// would start a worker that could only get no_slot.
+describe('hosts: counting slots a claim would refuse', () => {
+  beforeEach(async () => { await resetDb(); await seedHost('lab', HOST_TOKEN, 4); });
+
+  it('starts no worker for a held or unmeasured pilot slot, and one once it can run', async () => {
+    const db = getTestDb();
+    const no = await seedSlot(1);
+    const [p] = await db<{ id: number }[]>`INSERT INTO fleet_proxies (label, url_enc, host, port, timezone)
+      VALUES ('P', ${seal('http://u:p@exit.example:1', poolKey(testEnv)!)}, 'exit.example', 1, 'America/New_York') RETURNING id`;
+    await db`UPDATE fleet_slots SET proxy_id = ${p.id} WHERE account_no = ${no}`;
+    await db`INSERT INTO fleet_pilot_enrollments (account_no, uid, batch, pilot_id, arm, exit_ip) VALUES (${no}, 'u', 'b', 'wave-1', 'stock', '198.51.100.1')`;
+    expect((await desired()).body.count).toBe(0);
+    const measure = (ip: string) => db`INSERT INTO fleet_proxy_checks (exit, source, proxy_id, checked_at, ok, latency_ms, exit_ip)
+      VALUES ('http://exit.example:1', 'erp', ${p.id}, NOW(), TRUE, 1, ${ip})`;
+    await measure('198.51.100.9');
+    expect((await desired()).body.count).toBe(0);
+    await measure('198.51.100.1');
+    expect((await desired()).body.count).toBe(1);
+  });
+
+  it('counts a plain stock slot as ever', async () => {
+    await seedSlot(1);
+    expect((await desired()).body.count).toBe(1);
+  });
+});
 
 const release = async () => (await getTestDb()<{ value: FleetRelease }[]>`SELECT value FROM fleet_settings WHERE key = 'release'`)[0]?.value;
 
@@ -277,6 +304,48 @@ describe('releases', () => {
     expect((await release()).upgraded).toEqual(['lab-1']);
   });
 
+  const startRoll = async () => {
+    const { token } = await loginAs(ALEX);
+    await api('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0' } });
+    expect((await desired()).body.roll).toEqual({ replace: 'lab-1' });
+  };
+  const comesBack = (state: string, detail: unknown) => getTestDb()`
+    UPDATE fleet_workers SET version = '0.14.0', state = ${state}, detail = ${getTestDb().json(detail as never)}, epoch = epoch + 1,
+      last_heartbeat_at = NOW() + interval '1 second' WHERE worker_id = 'lab-1'`;
+
+  it.each(['license_outage', 'exit_moved'])('skips a worker that comes back parked on %s, and carries on with the next', async (reason) => {
+    await startRoll();
+    await comesBack('DEAD', { reason, operator: true });
+    expect((await desired()).body.roll).toEqual({ replace: 'lab-2' });
+    const r = await release();
+    expect(r.state).toBe('rolling');
+    expect(r.skipped).toEqual(['lab-1']);
+    expect(r.skip_reasons).toEqual({ 'lab-1': `worker parked: ${reason}` });
+    expect(r.upgraded).toEqual([]);
+  });
+
+  it('still stops on a preflight park, which a broken image would also cause', async () => {
+    await startRoll();
+    await comesBack('DEAD', { reason: 'profile_preflight', operator: true });
+    await getTestDb()`UPDATE fleet_settings SET value = jsonb_set(value, '{current,stopped_at}', to_jsonb((NOW() - interval '21 minutes')::text)) WHERE key = 'release'`;
+    expect((await desired()).body.roll).toBeNull();
+    expect((await release()).state).toBe('failed');
+  });
+
+  it('leaves a running cloak worker alone during an outage, and still rolls stock', async () => {
+    const db = getTestDb();
+    await seedSlot(3, { worker: 'lab-3', host: 'lab', epoch: 1 });
+    await report([
+      { worker_id: 'lab-1', image: IMAGE_OLD }, { worker_id: 'lab-2', image: IMAGE_OLD }, { worker_id: 'lab-3', image: IMAGE_OLD, state: 'exited', exit_code: 74 },
+    ]);
+    await db`UPDATE fleet_workers SET detail = ${db.json({ engine: 'cloak' } as never)} WHERE worker_id = 'lab-1'`;
+    await db`UPDATE fleet_workers SET state = 'DEAD', detail = ${db.json({ reason: 'license_outage', operator: true } as never)} WHERE worker_id = 'lab-3'`;
+    const { token } = await loginAs(ALEX);
+    await api('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0' } });
+    expect((await desired()).body.roll).toEqual({ replace: 'lab-2' });
+    expect((await release()).skip_reasons).toMatchObject({ 'lab-1': 'licence outage' });
+  });
+
   it('skips workers on observe-only hosts, stops a release whose worker does not come back, and supersedes an active one', async () => {
     const otherToken = 'host-' + randomBytes(8).toString('hex');
     await seedHost('obs', otherToken, 1, false);
@@ -319,6 +388,19 @@ describe('releases', () => {
     await getTestDb()`UPDATE fleet_hosts SET last_seen_at = NOW() - interval '21 minutes' WHERE host_id = 'far'`;
     await desired();
     expect(await release()).toMatchObject({ skipped: ['far-1'], skip_reasons: { 'far-1': 'host is silent' } });
+  });
+
+  it('keeps a licence outage hold and its retries from the report, and skips the worker in a roll', async () => {
+    await report([
+      { worker_id: 'lab-1', image: IMAGE_OLD, state: 'license_outage', hold: 'license_outage', exit_code: 74, outage_attempts: 8 },
+      { worker_id: 'lab-2', image: IMAGE_OLD },
+    ]);
+    const [stored] = await getTestDb()<{ report: { containers: Array<Record<string, unknown>> } }[]>`SELECT report FROM fleet_hosts WHERE host_id = 'lab'`;
+    expect(stored.report.containers[0]).toMatchObject({ state: 'license_outage', hold: 'license_outage', exit_code: 74, outage_attempts: 8 });
+    const { token } = await loginAs(ALEX);
+    await api('POST', '/api/fleet/releases', { token, body: { image: IMAGE_NEW, version: '0.14.0' } });
+    expect((await desired()).body.roll).toEqual({ replace: 'lab-2' });
+    expect((await release()).skip_reasons).toEqual({ 'lab-1': 'held: license_outage' });
   });
 
   it('leaves out a stopped container and a parked worker, with the reason, instead of naming them', async () => {

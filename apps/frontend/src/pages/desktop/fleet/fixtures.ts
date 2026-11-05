@@ -307,6 +307,7 @@ export const WORKER_DETAIL: FleetWorkerDetail = {
     device: { viewport: [1366, 645], screen: [1366, 768], device_scale_factor: 1, timezone: 'America/New_York', locale: 'en-US', native: ['user_agent'] },
   },
   holds_slot: true,
+  proxy_down: false,
   proxy: { id: 3, label: 'Decodo NY 1', host: 'isp.example.net', port: 10001, timezone: 'America/New_York' },
   running_exit: 'http://isp.example.net:10001',
   account: {

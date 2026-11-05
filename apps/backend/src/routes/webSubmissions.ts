@@ -444,7 +444,7 @@ webSubmissions.get('/:id/messages', async (c) => {
     SELECT id, site, kind, email FROM web_submissions WHERE id = ${id}
   `;
   if (!sub) return c.json({ error: 'Not found' }, 404);
-  const cfg = mailConfig(c.env);
+  const cfg = mailConfig(c.env, sub.site);
   const base = baseSubject(sub);
   return c.json({
     messages: await loadMessages(sql, { submissionId: id }),

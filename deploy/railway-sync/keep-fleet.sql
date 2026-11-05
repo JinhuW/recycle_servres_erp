@@ -8,8 +8,9 @@
 -- backend has migrated the fresh copy.
 --
 -- Kept: every fleet_* table, and for each pool account that has a slot the
--- columns dev owns (every *_enc, cookie_uid, cookie_at, status, note, and the
--- holder: a worker's token is only good while the account names it as holder).
+-- columns dev owns (every *_enc, cookie_uid, cookie_at, status, note, the
+-- browser profile, and the holder: a worker's token is only good while the
+-- account names it as holder).
 -- Also perf_rollups: dev's timing is the evidence for dev's releases, and prod's
 -- rows would merge into it wherever both ran the same version.
 CREATE SCHEMA sync_keep;
@@ -44,7 +45,14 @@ BEGIN
   END LOOP;
 
   IF pg_catalog.to_regclass('public.fleet_slots') IS NOT NULL THEN
-    CREATE TABLE sync_keep._pool AS
-      SELECT * FROM public.fb_pool_accounts WHERE no IN (SELECT account_no FROM public.fleet_slots);
+    -- An enrollment outlives its slot, and its profile has to outlive it with it.
+    IF pg_catalog.to_regclass('public.fleet_pilot_enrollments') IS NOT NULL THEN
+      CREATE TABLE sync_keep._pool AS
+        SELECT * FROM public.fb_pool_accounts
+        WHERE no IN (SELECT account_no FROM public.fleet_slots UNION SELECT account_no FROM public.fleet_pilot_enrollments);
+    ELSE
+      CREATE TABLE sync_keep._pool AS
+        SELECT * FROM public.fb_pool_accounts WHERE no IN (SELECT account_no FROM public.fleet_slots);
+    END IF;
   END IF;
 END $$;

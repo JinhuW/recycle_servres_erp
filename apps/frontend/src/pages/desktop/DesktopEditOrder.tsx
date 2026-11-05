@@ -45,11 +45,12 @@ import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
 import { derivePoPermissions, lineShippedOn } from '../../lib/poPermissions';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { cascadePatch, serialIssue } from '@recycle-erp/shared';
-import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
+import { lineRequirements, missingFieldNames, zeroCostLines } from '../../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { OrderActivityLog } from '../../components/OrderActivityLog';
 import { RevertNoticeDialog } from '../../components/RevertNoticeDialog';
 import { HandoffDialog } from '../../components/HandoffDialog';
+import { ZeroCostConfirmDialog } from '../../components/ZeroCostConfirmDialog';
 import { PaymentFields } from '../../components/PaymentFields';
 import type { HandoffDelivery, HandoffMethod } from '../../lib/handoff';
 import { usePaymentProof } from '../../lib/usePaymentProof';
@@ -180,6 +181,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // The Draft → In Transit hand-off: opened from the stepper, it saves its own
   // fields and advances in one call, so it wants a clean page underneath.
   const [handoffOpen, setHandoffOpen] = useState(false);
+  const [zeroCostAsk, setZeroCostAsk] = useState<ReadonlyArray<EditLine> | null>(null);
+  const [zeroCostConfirmed, setZeroCostConfirmed] = useState(false);
   const [doneNote, setDoneNote] = useState(order.statusMeta?.['Done']?.note ?? '');
   const [doneAttachments, setDoneAttachments] = useState<StatusAttachment[]>(
     order.statusMeta?.['Done']?.attachments ?? [],
@@ -749,7 +752,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       proofAttachmentCount: proof.proofAtts.length,
       saved: order,
     },
-    lines: { count: lines.length, goods: cost.goods, everSubmitted: order.everSubmitted === true },
+    lines: { count: lines.length, goods: cost.goods, everSubmitted: order.everSubmitted === true, zeroCost: zeroCostLines(lines).length },
     commission: isPurchaser ? null : { rate: commissionRateValue },
     serverBlockers: savedStatus === 'Draft' ? order.blockers : null,
     dirty: {
@@ -1241,13 +1244,17 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       // The checkpoint writes its own fields and advances in one call, so
       // unsaved page edits would be left behind — ask for the save first.
       if (dirty) { showErrorDialog(t('hoSaveFirst')); return; }
-      // The cost is fixed on this page, not in the dialog, so it is asked for
-      // here — and the server refuses it too. First submission only: a PO an
-      // edit sent back to Draft re-submits as it was accepted.
-      if (!(cost.goods > 0) && !order.everSubmitted) {
+      // The cost is fixed on this page, not in the dialog, so it is asked about
+      // here — and the server holds a $0 PO to the same answer. First submission
+      // only: a PO an edit sent back to Draft re-submits as it was accepted. A
+      // negotiated lot price is what those $0 lines cost.
+      const zero = order.everSubmitted ? [] : zeroCostLines(lines);
+      if (!(cost.goods > 0) && !order.everSubmitted && zero.length === 0) {
         showErrorDialog(t('poCostRequired'), undefined, t('errCantSubmitTitle'));
         return;
       }
+      setZeroCostConfirmed(false);
+      if (zero.length > 0 && !(goodsOverridden && cost.goods > 0)) { setZeroCostAsk(zero); return; }
       setHandoffOpen(true);
       return;
     }
@@ -2121,6 +2128,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
 
       {reviewPrompt}
       {takeover.dialog}
+      {zeroCostAsk && (
+        <ZeroCostConfirmDialog
+          lines={zeroCostAsk}
+          onCancel={() => setZeroCostAsk(null)}
+          onConfirm={() => { setZeroCostAsk(null); setZeroCostConfirmed(true); setHandoffOpen(true); }}
+        />
+      )}
       {mismatch.dialog}
       {partQ.dialog}
 
@@ -2183,7 +2197,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         <HandoffDialog
           init={{
             order,
-            lines: { count: lines.length, units: totals.qty, goods: cost.goods },
+            lines: { count: lines.length, units: totals.qty, goods: cost.goods, zeroCost: zeroCostLines(lines).length },
+            zeroCostConfirmed,
             warehouseId,
             payment,
             paidByUserId,

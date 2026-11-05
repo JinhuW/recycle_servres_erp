@@ -63,6 +63,9 @@ DEVICE = {
     "timezone": "America/New_York",
     "locale": "en-US",
 }
+# What the ERP adds to a claim for a cloak slot. TEST-NET, so nothing can be
+# reached at it.
+CLOAK_CLAIM = {"expected_exit_ip": "203.0.113.7", "webrtc_ip": "203.0.113.7"}
 ITEMS = [
     {
         "name": "server_ram",
@@ -324,6 +327,7 @@ class FakeFleet:
             "home_cities": self.home_cities,
             "items": ITEMS,
             "settings": self.settings,
+            **(CLOAK_CLAIM if DEVICE.get("browser_engine") == "cloak" else {}),
         }
         if self.env is not None:
             answer["env"] = self.env

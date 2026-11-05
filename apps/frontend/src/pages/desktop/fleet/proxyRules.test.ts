@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { FleetProxyHealth } from '@recycle-erp/shared';
 import { fleetDeviceFor, parseProxyUrl } from '../../../lib/fleet';
 import { NOW, PROXIES, SLOTS } from './fixtures';
-import { deviceSummary, fleetRowAction, proxyChangeVerdict, proxyChoices, proxyDraftProblem, proxyPatch, randomOpenProxy } from './proxyRules';
+import { deviceSummary, exitIpUsers, proxyExitFlags, fleetRowAction, proxyChangeVerdict, proxyChoices, proxyCrowding, proxyDraftProblem, proxyPatch, randomOpenProxy } from './proxyRules';
 
 const row = (status: string, over: Partial<{ holder: string | null; password: string; totp: string }> = {}) =>
   ({ status, holder: null, password: 'pw', totp: 'KEY', ...over });
@@ -25,6 +26,26 @@ describe('fleetRowAction', () => {
     expect(fleetRowAction(row('fleet'), free, NOW)).toEqual({ kind: 'remove', slot: free });
     expect(fleetRowAction(row('fleet'), parked, NOW)).toEqual({ kind: 'remove', slot: parked });
     expect(fleetRowAction(row('fleet', { holder: 'worker-60-14-1' }), held, NOW)).toEqual({ kind: 'remove-blocked', slot: held });
+  });
+});
+
+describe('proxyCrowding', () => {
+  it('is quiet below 5, yellow from 5 through 10 and red above 10', () => {
+    expect([0, 4, 5, 10, 11, 30].map(proxyCrowding)).toEqual([null, null, 'warn', 'warn', 'over', 'over']);
+  });
+});
+
+describe('exitIpUsers', () => {
+  const on = (ip: string | null, accounts: number, workers: string[] = [], parked = 0) => ({
+    last: ip ? { exit_ip: ip } : { exit_ip: null }, workers,
+    slots: [
+      ...Array.from({ length: accounts }, (_, i) => ({ account_no: i, parked: false })),
+      ...Array.from({ length: parked }, (_, i) => ({ account_no: 100 + i, parked: true })),
+    ],
+  }) as unknown as FleetProxyHealth;
+  it('adds every port on an IP, workers in and parked accounts out, and skips an unknown exit', () => {
+    const users = exitIpUsers([on('1.1.1.1', 2), on('1.1.1.1', 1, ['homelab-1'], 3), on('2.2.2.2', 1), on(null, 9)]);
+    expect([...users]).toEqual([['1.1.1.1', 4], ['2.2.2.2', 1]]);
   });
 });
 
@@ -91,8 +112,48 @@ describe('deviceSummary', () => {
   });
 });
 
+describe('proxyExitFlags', () => {
+  const at = new Date(NOW - 60_000).toISOString();
+  const check = { at, ok: true, latency_ms: 300, exit_ip: '203.0.113.9', city: 'Ashburn', region: 'Virginia', country: 'US', org: null, timezone: 'America/New_York', error: null };
+  const use = (account_no: number, timezone: string | null) => ({ account_no, pool_status: 'fleet', parked: false, leased: true, timezone, held_exit_ip: null });
+  const kinds = (p: Parameters<typeof proxyExitFlags>[0]) => proxyExitFlags(p, NOW).map((f) => f.kind);
+  const clean = { last: check, slots: [use(1, 'America/New_York')], exit_change: null };
+  it('has nothing to say about a fresh exit in the slots\' zone', () => {
+    expect(kinds(clean)).toEqual([]);
+  });
+  it('flags only the slots whose device keeps another zone', () => {
+    expect(proxyExitFlags({ ...clean, slots: [use(1, 'America/New_York'), use(2, 'America/Chicago'), use(3, null)] }, NOW)).toEqual([
+      { kind: 'zone', zone: 'America/New_York', slots: [{ account_no: 2, timezone: 'America/Chicago' }] },
+    ]);
+  });
+  it('says nothing about zones while the exit has none, as homelab ports and older rows do', () => {
+    expect(kinds({ ...clean, last: { ...check, timezone: null }, slots: [use(1, 'America/Chicago')] })).toEqual([]);
+  });
+  it('flags a measurement older than three rounds, or none at all', () => {
+    const old = new Date(NOW - 16 * 60_000).toISOString();
+    expect(kinds({ ...clean, last: { ...check, at: new Date(NOW - 14 * 60_000).toISOString() } })).toEqual([]);
+    expect(proxyExitFlags({ ...clean, last: { ...check, at: old } }, NOW)).toEqual([{ kind: 'stale', at: old }]);
+    expect(proxyExitFlags({ ...clean, last: null }, NOW)).toEqual([{ kind: 'stale', at: null }]);
+  });
+  it('flags a fresh failure, and an old one as stale', () => {
+    const failed = { ...check, ok: false, exit_ip: null, timezone: null, error: 'Timed out' };
+    expect(kinds({ ...clean, last: failed })).toEqual(['failing']);
+    expect(kinds({ ...clean, last: { ...failed, at: new Date(NOW - 16 * 60_000).toISOString() } })).toEqual(['stale']);
+    expect(kinds({ ...clean, last: { ...check, exit_ip: null } })).toEqual(['failing']);
+  });
+  it('flags the pilot accounts whose first login waits', () => {
+    expect(proxyExitFlags({ ...clean, slots: [use(1, 'America/New_York'), { ...use(2, 'America/New_York'), held_exit_ip: '198.51.100.4' }] }, NOW))
+      .toEqual([{ kind: 'held', slots: [{ account_no: 2, exit_ip: '198.51.100.4' }] }]);
+  });
+  it('flags a recent exit change, alongside anything else that holds', () => {
+    const change = { at, from: { ip: '198.51.100.4', city: null, region: null, country: null, timezone: null }, to: { ip: '203.0.113.9', city: null, region: null, country: null, timezone: null } };
+    expect(proxyExitFlags({ ...clean, exit_change: change }, NOW)).toEqual([{ kind: 'changed', change }]);
+    expect(kinds({ last: check, slots: [use(1, 'America/Chicago')], exit_change: change })).toEqual(['zone', 'changed']);
+  });
+});
+
 describe('proxyChangeVerdict', () => {
-  const last = (ok: boolean) => ({ at: '2026-11-04T00:00:00Z', ok, latency_ms: ok ? 300 : null, exit_ip: null, city: null, region: null, country: null, org: null, error: null });
+  const last = (ok: boolean) => ({ at: '2026-11-04T00:00:00Z', ok, latency_ms: ok ? 300 : null, exit_ip: null, city: null, region: null, country: null, org: null, timezone: null, error: null });
   it('stops on a miss even when one blip only reads degraded', () => {
     expect(proxyChangeVerdict({ state: 'degraded', last: last(false) })).toBe('blocked');
     expect(proxyChangeVerdict({ state: 'down', last: last(false) })).toBe('blocked');

@@ -7,6 +7,7 @@ import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
 import { poolKey, seal } from '../lib/sealed';
 import { managerOnly, unavailable, type ManagerEnv } from './auth';
+import { latestExitOf } from './proxyExit';
 import { bad, conflict, exists, isRefusal, notFound, type Refusal } from './sql';
 
 // ─── Proxies ──────────────────────────────────────────────────────────────────
@@ -15,7 +16,9 @@ import { bad, conflict, exists, isRefusal, notFound, type Refusal } from './sql'
 // reads carry host:port, and a slot made on a proxy copies the sealed value
 // (fleet_slots.proxy_url is what a claim unseals). Editing a proxy reaches its
 // slots at once: a new URL is copied into each, a new timezone into each
-// device, and a worker picks either up on its next claim.
+// device that has no profile of its own, and a worker picks either up on its
+// next claim. A profile's timezone is pinned: the same machine doesn't change
+// its clock because someone corrected a label.
 
 const proxies = new Hono<ManagerEnv>().use('*', managerOnly);
 
@@ -46,6 +49,13 @@ export async function proxyStates(sql: SqlLike, proxyId?: number): Promise<Map<n
   const byProxy = new Map<number, typeof rows[number][]>();
   for (const r of rows) byProxy.set(r.proxy_id, [...(byProxy.get(r.proxy_id) ?? []), r]);
   return new Map([...byProxy].map(([id, checks]) => [id, proxyHealthState(checks)]));
+}
+
+/** The IP a proxy was last seen exiting from, even if its latest check failed:
+ *  a port failing right now can come back on the same IP. */
+export async function lastKnownExitIp(sql: SqlLike, proxyId: number): Promise<string | null> {
+  const [check] = await sql<{ exit_ip: string }[]>`${latestExitOf(sql, sql`${proxyId}::int`)}`;
+  return check?.exit_ip ?? null;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -157,8 +167,19 @@ proxies.put('/:id', async (c) => {
       throw e;
     }
     // Those checks judged the old exit, so the new one starts unchecked, like
-    // a proxy just added, rather than inheriting its verdict.
-    if (sealed) await tx`UPDATE fleet_proxy_checks SET proxy_id = NULL WHERE proxy_id = ${id}`;
+    // a proxy just added, rather than inheriting its verdict. Claims that need
+    // an expected exit wait for its first reading, which is compared with this.
+    if (sealed) {
+      await tx`
+        UPDATE fleet_proxies p SET replaced_exit = COALESCE((
+          SELECT to_jsonb(k) FROM (
+            SELECT c.exit, c.source, c.proxy_id, c.checked_at, c.exit_ip, c.city, c.region, c.country, c.timezone
+            FROM fleet_proxy_checks c
+            WHERE c.proxy_id = ${id} AND c.source = 'erp' AND c.ok AND c.exit_ip IS NOT NULL
+            ORDER BY c.checked_at DESC, c.id DESC LIMIT 1) k), p.replaced_exit)
+        WHERE p.id = ${id}`;
+      await tx`UPDATE fleet_proxy_checks SET proxy_id = NULL WHERE proxy_id = ${id}`;
+    }
     // The slots follow, in the pool-then-slot lock order every slot write takes.
     const nos = (await tx<{ account_no: number }[]>`SELECT account_no FROM fleet_slots WHERE proxy_id = ${id}`).map((r) => r.account_no);
     if (nos.length && (sealed || (patch.timezone && patch.timezone !== cur.timezone))) {
@@ -166,8 +187,10 @@ proxies.put('/:id', async (c) => {
       await tx`SELECT account_no FROM fleet_slots WHERE account_no = ANY(${nos}::int[]) ORDER BY account_no FOR UPDATE`;
       if (sealed) await tx`UPDATE fleet_slots SET proxy_url = ${sealed} WHERE proxy_id = ${id}`;
       if (patch.timezone && patch.timezone !== cur.timezone) {
-        await tx`UPDATE fleet_slots SET device = jsonb_set(device, '{timezone}', to_jsonb(${patch.timezone}::text))
-                 WHERE proxy_id = ${id} AND jsonb_typeof(device) = 'object'`;
+        await tx`UPDATE fleet_slots s SET device = jsonb_set(s.device, '{timezone}', to_jsonb(${patch.timezone}::text))
+                 FROM fb_pool_accounts a
+                 WHERE a.no = s.account_no AND a.browser_engine IS NULL
+                   AND s.proxy_id = ${id} AND jsonb_typeof(s.device) = 'object'`;
       }
     }
     return { slots: nos.length };

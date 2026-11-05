@@ -5,12 +5,13 @@ import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { poolApi, proxyMarkFor, type FbProxyMark } from '../../../lib/facebookPool';
 import {
   FLEET_PROXY_BUCKET_MS, FLEET_PROXY_SLOW_MS, fleetApi, proxyLoad,
-  type FleetProxy, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxyHealthState, type FleetProxySource,
+  fleetExitPointText, type FleetProxy, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxyHealthState, type FleetProxySource,
 } from '../../../lib/fleet';
 import { useT } from '../../../lib/i18n';
 import { ProxyDeadChip } from '../FleetWorkers';
 import { ProxyDialog, RemoveProxyDialog } from './FleetProxies';
 import { easternClock } from './fleetBoard';
+import { exitIpUsers, proxyCrowding, proxyExitFlags, type ProxyExitFlag } from './proxyRules';
 import { agoLabel, Clock, EmptyRow, Legend, UnavailableCard, useFleetMirror, useFleetPoll, WorkerLink } from './shared';
 
 // ─── Proxies ──────────────────────────────────────────────────────────────────
@@ -44,7 +45,7 @@ export function proxyMatches(p: FleetProxyHealth, q: string): boolean {
   const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return true;
   const hay = [
-    p.label, p.exit, `${p.host}:${p.port}`, p.last?.exit_ip, p.last?.city, p.last?.region, p.last?.org, p.previous_ip,
+    p.label, p.exit, `${p.host}:${p.port}`, p.last?.exit_ip, p.last?.city, p.last?.region, p.last?.org, p.last?.timezone, p.previous_ip,
     ...p.workers, ...p.slots.map(s => `#${s.account_no}`),
   ].filter(Boolean).join(' ').toLowerCase();
   return terms.every(term => hay.includes(term));
@@ -133,6 +134,8 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
     return out;
   }, [rows]);
   const sources = useMemo(() => [...new Set(rows.map(p => p.source))], [rows]);
+  // From every row, not the shown ones: a filter doesn't change who shares an IP.
+  const ipUsers = useMemo(() => exitIpUsers(rows), [rows]);
   const shown = useMemo(() => rows
     .filter(p => (filter.state === 'all' || p.state === filter.state) && (!filter.source || p.source === filter.source) && proxyMatches(p, filter.q))
     .sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || a.source.localeCompare(b.source) || a.exit.localeCompare(b.exit)),
@@ -181,6 +184,9 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
               const rowBusy = busy === 'all' || (p.proxy_id !== null && busy === p.proxy_id);
               const own = p.proxy_id === null ? undefined : editing?.proxies.find(x => x.id === p.proxy_id);
               const load = own ? proxyLoad(own) : 0;
+              const users = last?.exit_ip ? ipUsers.get(last.exit_ip) ?? 0 : 0;
+              const crowding = proxyCrowding(users);
+              const crowdReason = crowding && t(crowding === 'over' ? 'fleetProxyCrowdOver' : 'fleetProxyCrowdWarn', { n: users, ip: last?.exit_ip ?? '' });
               return (
                 <tr key={`${p.source}:${p.proxy_id ?? p.exit}`}>
                   <td>
@@ -210,10 +216,11 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
                         <span className="mono" title={last.org ?? undefined}>{last.exit_ip}</span>
                         <small>
                           {where || '—'}
-                          {p.previous_ip && <> · <span className="fp-warn" title={t('fleetProxyIpChangedHint')}>{t('fleetProxyIpChanged', { ip: p.previous_ip })}</span></>}
+                          {p.previous_ip && !p.exit_change && <> · <span className="fp-warn" title={t('fleetProxyIpChangedHint')}>{t('fleetProxyIpChanged', { ip: p.previous_ip })}</span></>}
                         </small>
                       </span>
                     ) : <span className="fp-muted">—</span>}
+                    <ExitFlags flags={proxyExitFlags(p, now)} now={now} />
                   </td>
                   <td>
                     <span className="fp-holder">
@@ -223,18 +230,23 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
                   </td>
                   <td><Clock at={last?.at} now={now} /></td>
                   <td>
-                    {(own || p.slots.length > 0) && (
-                      <span className="fp-holder">
-                        {own && editing && (
-                          <span className={load >= editing.limit ? 'fp-warn' : undefined}>{t('fleetProxyUses', { n: load, max: editing.limit })}</span>
+                    <span className="fleet-proxy-used">
+                      {crowding && <span className={`fleet-proxy-crowd is-${crowding}`} role="img" title={crowdReason ?? undefined} aria-label={crowdReason ?? undefined} />}
+                      <span>
+                        {(own || p.slots.length > 0) && (
+                          <span className="fp-holder">
+                            {own && editing && (
+                              <span className={load >= editing.limit ? 'fp-warn' : undefined}>{t('fleetProxyUses', { n: load, max: editing.limit })}</span>
+                            )}
+                            {p.slots.map(s => (
+                              <small key={s.account_no}>{t('fleetAccountN', { no: s.account_no })}{s.parked && ` · ${t('fleetProxyParked')}`}</small>
+                            ))}
+                          </span>
                         )}
-                        {p.slots.map(s => (
-                          <small key={s.account_no}>{t('fleetAccountN', { no: s.account_no })}{s.parked && ` · ${t('fleetProxyParked')}`}</small>
-                        ))}
+                        {p.workers.length > 0 && <span className="fleet-proxy-workers">{p.workers.map(w => <WorkerLink key={w} id={w} />)}</span>}
+                        {!own && !p.slots.length && !p.workers.length && <span className="fp-muted">{t('fleetProxyNobody')}</span>}
                       </span>
-                    )}
-                    {p.workers.length > 0 && <span className="fleet-proxy-workers">{p.workers.map(w => <WorkerLink key={w} id={w} />)}</span>}
-                    {!own && !p.slots.length && !p.workers.length && <span className="fp-muted">{t('fleetProxyNobody')}</span>}
+                    </span>
                   </td>
                   <td className="fleet-row-actions">
                     {onCheck && (
@@ -264,6 +276,42 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
         </table>
       </div>
     </>
+  );
+}
+
+const exitPoint = fleetExitPointText;
+
+/** Report only: each chip names a problem with the port's exit, the hover its detail. */
+function ExitFlags({ flags, now }: { flags: readonly ProxyExitFlag[]; now: number }) {
+  const { t } = useT();
+  if (!flags.length) return null;
+  const chip = (f: ProxyExitFlag): { tone: string; label: string; hint: string } => {
+    switch (f.kind) {
+      case 'stale': return f.at
+        ? { tone: 'warn', label: t('fleetProxyFlagStale'), hint: t('fleetProxyFlagStaleHint', { ago: agoLabel(t, f.at, now) }) }
+        : { tone: 'warn', label: t('fleetProxyFlagNever'), hint: t('fleetProxyFlagNeverHint') };
+      case 'failing': return { tone: 'neg', label: t('fleetProxyFlagFailing'), hint: t('fleetProxyFlagFailingHint') };
+      case 'held': return {
+        tone: 'neg', label: t('fleetProxyFlagHeld'),
+        hint: t('fleetProxyFlagHeldHint', { slots: f.slots.map(s => `#${s.account_no} ${s.exit_ip}`).join(', ') }),
+      };
+      case 'zone': return {
+        tone: 'warn', label: t('fleetProxyFlagZone'),
+        hint: t('fleetProxyFlagZoneHint', { zone: f.zone, slots: f.slots.map(s => `#${s.account_no} ${s.timezone}`).join(', ') }),
+      };
+      case 'changed': return {
+        tone: 'warn', label: t('fleetProxyFlagChanged', { ago: agoLabel(t, f.change.at, now) }),
+        hint: t('fleetProxyFlagChangedHint', { from: exitPoint(f.change.from), to: exitPoint(f.change.to) }),
+      };
+    }
+  };
+  return (
+    <span className="fleet-proxy-flags">
+      {flags.map(f => {
+        const { tone, label, hint } = chip(f);
+        return <span key={f.kind} className={`chip ${tone}`} title={hint}>{label}</span>;
+      })}
+    </span>
   );
 }
 

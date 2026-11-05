@@ -1,8 +1,8 @@
-// The shared company mailbox behind the web-submission conversation: replies
+// The shared company mailboxes behind the web-submission conversation: replies
 // go out over SMTP (send.ts), the customer's answers come back over IMAP
-// (inbox.ts). One mailbox for every manager, credentials in env only.
+// (inbox.ts). Every manager uses the same box per site, credentials in env only.
 //
-// Dark until MAIL_USER and MAIL_PASSWORD are both set — the page then keeps
+// Dark until a site's address and password are both set — the page then keeps
 // its mailto link. MAIL_STUB sends against nodemailer's capture transport so
 // the thread can be exercised locally without a real box; it never polls.
 //
@@ -44,9 +44,15 @@ export function parseAllowTo(raw: string | undefined): string[] | null {
 // Why mail is off on a server that has a mailbox configured, if it is.
 export type MailBlock = 'non_production_without_allow_list';
 
-export function mailGate(env: Env): { config: MailConfig | null; blocked: MailBlock | null } {
+// A customer should hear back from the brand they wrote to, so a site can have
+// a box of its own. Without one it shares MAIL_USER. A half-set pair counts as
+// unset: without its password that box could neither send nor be read.
+export function mailGate(env: Env, site?: string): { config: MailConfig | null; blocked: MailBlock | null } {
   const stub = env.MAIL_STUB === '1' || env.MAIL_STUB === 'fail';
-  if (!stub && (!env.MAIL_USER || !env.MAIL_PASSWORD)) return { config: null, blocked: null };
+  const quotesBox = site === 'recycleservers' && env.MAIL_QUOTES_USER && (stub || env.MAIL_QUOTES_PASSWORD);
+  const user = quotesBox ? env.MAIL_QUOTES_USER : env.MAIL_USER;
+  const password = quotesBox ? env.MAIL_QUOTES_PASSWORD : env.MAIL_PASSWORD;
+  if (!stub && (!user || !password)) return { config: null, blocked: null };
   const allowTo = parseAllowTo(env.MAIL_ALLOW_TO);
   // A Railway environment that can't be named counts as not production: the
   // safe side of this mistake is no mail. Stub never delivers, so it's exempt.
@@ -58,8 +64,8 @@ export function mailGate(env: Env): { config: MailConfig | null; blocked: MailBl
   return {
     config: {
       mode: stub ? 'stub' : 'smtp',
-      user: env.MAIL_USER || STUB_ADDRESS,
-      password: env.MAIL_PASSWORD ?? '',
+      user: user || STUB_ADDRESS,
+      password: password ?? '',
       smtp: { host: env.MAIL_SMTP_HOST || 'smtp.larksuite.com', port: Number(env.MAIL_SMTP_PORT) || 465 },
       imap: { host: env.MAIL_IMAP_HOST || 'imap.larksuite.com', port: Number(env.MAIL_IMAP_PORT) || 993 },
       stubFail: env.MAIL_STUB === 'fail',
@@ -69,8 +75,17 @@ export function mailGate(env: Env): { config: MailConfig | null; blocked: MailBl
   };
 }
 
-export function mailConfig(env: Env): MailConfig | null {
-  return mailGate(env).config;
+export function mailConfig(env: Env, site?: string): MailConfig | null {
+  return mailGate(env, site).config;
+}
+
+// Every distinct box in use, default first: each one needs polling.
+export function mailConfigs(env: Env): MailConfig[] {
+  const boxes = new Map<string, MailConfig>();
+  for (const cfg of [mailConfig(env), mailConfig(env, 'recycleservers')]) {
+    if (cfg && !boxes.has(cfg.user.toLowerCase())) boxes.set(cfg.user.toLowerCase(), cfg);
+  }
+  return [...boxes.values()];
 }
 
 export function recipientAllowed(cfg: MailConfig, email: string): boolean {
@@ -86,12 +101,12 @@ export function recipientAllowed(cfg: MailConfig, email: string): boolean {
 // was never set looks healthy from outside and simply never sends. Modes only,
 // plus whether a test-recipient list narrows who it sends to.
 export function describeMail(env: Env): { mail: MailMode; mailRestricted: boolean } {
-  const cfg = mailConfig(env);
+  const cfg = mailConfigs(env)[0];
   return { mail: cfg?.mode ?? 'off', mailRestricted: Boolean(cfg?.allowTo) };
 }
 
 // Sellers know ram4cash.com, not Recycle Servers; a quote came through
-// recycleservers.com. Same mailbox either way.
+// recycleservers.com.
 const BRAND: Record<string, { name: string; label: string }> = {
   ram4cash: { name: 'ram4cash', label: 'ram4cash.com' },
   recycleservers: { name: 'Recycle Servers', label: 'Recycle Servers' },

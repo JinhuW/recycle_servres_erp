@@ -110,6 +110,16 @@ describe('facebook account pool', () => {
     expect((await api('POST', `${BASE}/import`, { token, body: { rows: [] } })).status).toBe(400);
   });
 
+  it('refuses a new uid under a browser profile or a pilot record, which belong to the old account', async () => {
+    const { token } = await loginAs(ALEX);
+    expect((await api('POST', `${BASE}/import`, { token, body: { rows: [draft(1), draft(2)] } })).status).toBeLessThan(300);
+    await getTestDb()`UPDATE fb_pool_accounts SET browser_engine = 'cloak', cloak_seed = 777, cloak_gpu = 'Intel' WHERE no = 1`;
+    const r = await api<{ code: string }>('PUT', `${BASE}/1`, { token, body: { draft: draft(1, { uid: uid(9) }) } });
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe('fpUidPinned');
+    expect((await api('PUT', `${BASE}/2`, { token, body: { draft: draft(2, { uid: uid(8) }) } })).status).toBe(200);
+  });
+
   it('edits keep cookie age and holding time when those did not change, and resolve a member by name', async () => {
     const token = await manager();
     const first = (await seedPool(token, 1)).accounts[0];
