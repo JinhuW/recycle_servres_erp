@@ -4,6 +4,15 @@
 | --- | --- | --- | --- | --- |
 | `homelab` | `jinhu@10.10.10.73` | Python coordinator, console, OpenSearch and four ERP fleet workers; all legacy monitor launches retired | Active dev fleet host, capacity 4 | RS-426, 2026-10-27; sessions restored once, alerts off |
 | `worker-60-14` | `worker@10.10.60.14` | Eight running ERP worker containers and one parked container on operator hold | First dev fleet host, capacity 13 | Existing containers retained during RS-426; SESSION_EXPIRED workers left untouched |
+| `oci-sg-1` | `ubuntu@140.245.106.33` | OCI Singapore `fleet-oci-sg-1`, VM.Standard.E4.Flex, 1 OCPU, 8 GB, 50 GB boot; Pay-As-You-Go, billed | Trial host, observe-only, capacity 0 | Agent only since 2026-11-05. Cannot run a live worker until it has a coordinator route and tokens (below) |
+
+## What `oci-sg-1` lacks before it can run a live worker
+
+- No route to the coordinator: `10.10.10.73:8500` is a LAN address, and the relay
+  admits only `10.10.60.14` and Docker's hairpin gateway.
+- `RS_CONTROL_PLANE_TOKENS` has no `oci-sg-1-*` entries, and a worker id without
+  a token exits 70 before its browser opens.
+- Agent log shipping is off: `FLEET_OPENSEARCH_URL` is also a LAN address.
 
 ## Reachability of `10.10.60.14`
 
