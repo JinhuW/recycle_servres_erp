@@ -9,8 +9,8 @@
 - [x] Review CloakBrowser against the fleet and proxy service
 - [x] Write the plan to a file
 - [x] Check the six review gaps against code and prod data (all six confirmed)
-- [ ] Phase 0: ERP groundwork. Built and merged (v1.420.0–v1.423.0); waiting for your yes to release to `main`
-- [ ] Phase 1: worker and agent build, spikes. Code merged (RS-529, RS-535); spikes, agent swap and image still to do
+- [x] Phase 0: ERP groundwork. Released to `main` as v1.426.0 on 2026-11-05
+- [ ] Phase 1: worker and agent build, spikes. Code merged (RS-529, RS-535); agent swapped 2026-11-05; spikes and image still to do
 - [ ] Decision G1 `[owner]`
 - [ ] Phase 2: controlled pilot
 - [ ] Phase 3: automatic profile for new accounts (only on Go)
@@ -147,7 +147,7 @@ Dates are estimates. Accounts come only from batches you assign, per your 2026-1
 - [x] New worker exit code **74, licence outage**, distinct from the existing 78 "left for an operator"
 - [x] One worker per host probes with jitter, backoff from 5 min to about hourly with no limit, after any other start. The rest follow once a probe stays up for 15 min (RS-544; owner chose hourly over a hold, 2026-11-05)
 - [x] Report the hold and retries to the ERP
-- [ ] Your yes for the agent swap on hosts `[owner]`
+- [x] Agent swap on hosts: both on 1.426.0 since 2026-11-05 18:42 UTC, no worker restarted
 
 **Worker 0.17.0 (workstream E).** In `browser_engine.py`, `monitor.py`, `entry.py` and `fingerprint-probe.py`:
 - [x] Close the browser explicitly on stop. A killed browser can hold its seat for 4–30 min; the replacement exits 76 and parks
