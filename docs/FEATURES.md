@@ -2665,10 +2665,11 @@ is who paid, below).
   - **The book** has Date (printed once per day), Entry, For (kind, the record
     as a link, counterparty, note), Paid by, Method, then **Received, Paid and
     Balance** columns: direction is the column a figure sits in. Balance is
-    one company-wide book (v1.317.0): what the whole book held after that
-    entry, from the first entry on, so the payer, direction, kind, method and
-    search filters hide rows without changing any balance. *Show voided*
-    lists voided entries struck through.
+    what the page's scope held after that entry, from its first entry on: the
+    whole book with All selected, or that manager alone with one selected, so
+    the newest row agrees with Closing (v1.427.0). The direction, kind, method,
+    review, search and period filters hide rows without changing any balance.
+    *Show voided* lists voided entries struck through.
   - A row, or `#/accounting/AC-1008`, opens the entry in a drawer: the record
     it is for (with that record's own figure and what the book has against
     it), every field, the history, Edit, Void and Restore. *Record entry*

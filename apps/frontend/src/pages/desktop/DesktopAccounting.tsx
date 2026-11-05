@@ -33,7 +33,8 @@ const DEFAULT_FROM = '2026-10-31';
 // The managers' RMB book. The period and the manager are the book's scope;
 // the band states it (opening + received − paid = closing) and the table is
 // the book itself. Filters on the table only hide rows: a balance is what
-// the manager held after that entry, whatever else is on screen.
+// the scope (one manager, or everyone) held after that entry, whatever else
+// is on screen.
 export function DesktopAccounting({ onToast }: Props) {
   const { t, locale } = useT();
   const { path } = useRoute();
@@ -191,7 +192,7 @@ export function DesktopAccounting({ onToast }: Props) {
                   <th className="acct-num">{t('acctColRecordAmount')}</th>
                   <th className="acct-num">{t('acctReceived')}</th>
                   <th className="acct-num">{t('acctPaid')}</th>
-                  <th className="acct-num" title={t('acctBalanceHint')}>{t('acctBalance')}</th>
+                  <th className="acct-num" title={managerName ? t('acctBalanceHintManager', { name: managerName }) : t('acctBalanceHint')}>{t('acctBalance')}</th>
                   <th className="acct-tick-col">{t('acctColReview')}</th>
                 </tr>
               </thead>

@@ -528,14 +528,16 @@ accounting.get('/entries', async (c) => {
   ].filter((f): f is NonNullable<typeof f> => f !== null);
   const where = frags.reduce((acc, f) => sql`${acc} AND ${f}`, sql`TRUE`);
 
-  // The balance runs over the whole book before any filter — the payer
-  // included — so hiding rows never changes what a row says is left after it.
+  // The payer picks whose book the balance runs over, so a scoped page's last
+  // row agrees with its Closing. Every other filter runs after the window:
+  // hiding rows never changes what a row says is left after it.
   const rows = await sql<(EntryRow & { balance: number | null; cursor_ts: string })[]>`
     WITH book AS (
       SELECT e.id,
              SUM(${signedCny(sql)}) FILTER (WHERE e.voided_at IS NULL)
                OVER (ORDER BY e.occurred_on, e.created_at, e.id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS balance
       FROM accounting_entries e
+      WHERE ${managerId ? payerFrag(sql, managerId) : sql`TRUE`}
     )
     SELECT ${entryCols(sql)},
            CASE WHEN e.voided_at IS NULL THEN COALESCE(b.balance, 0)::float END AS balance,
