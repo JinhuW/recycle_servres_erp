@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fleetDeviceFor, parseProxyUrl } from '../../../lib/fleet';
 import { NOW, PROXIES, SLOTS } from './fixtures';
-import { deviceSummary, fleetRowAction, proxyChangeVerdict, proxyChoices, proxyDraftProblem, proxyPatch, randomOpenProxy } from './proxyRules';
+import { deviceSummary, fleetRowAction, proxyChangeVerdict, proxyChoices, proxyCrowding, proxyDraftProblem, proxyPatch, randomOpenProxy } from './proxyRules';
 
 const row = (status: string, over: Partial<{ holder: string | null; password: string; totp: string }> = {}) =>
   ({ status, holder: null, password: 'pw', totp: 'KEY', ...over });
@@ -25,6 +25,12 @@ describe('fleetRowAction', () => {
     expect(fleetRowAction(row('fleet'), free, NOW)).toEqual({ kind: 'remove', slot: free });
     expect(fleetRowAction(row('fleet'), parked, NOW)).toEqual({ kind: 'remove', slot: parked });
     expect(fleetRowAction(row('fleet', { holder: 'worker-60-14-1' }), held, NOW)).toEqual({ kind: 'remove-blocked', slot: held });
+  });
+});
+
+describe('proxyCrowding', () => {
+  it('is quiet below 5, yellow from 5 through 10 and red above 10', () => {
+    expect([0, 4, 5, 10, 11, 30].map(proxyCrowding)).toEqual([null, null, 'warn', 'warn', 'over', 'over']);
   });
 });
 

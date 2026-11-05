@@ -15,6 +15,16 @@ Every version `package.json` has ever held has a tag and a section here —
 1.52.0, 1.53.0) shipped without a tag at the time and were tagged retroactively
 at the last commit that carried each version.
 
+## [1.419.0] - 2026-11-04
+
+The Proxies tab now flags a crowded proxy (RS-527). The Used by column shows a
+yellow dot once 5 accounts use a proxy and a red dot above 10, and hovering the
+dot gives the count and the reason. The count is the ERP accounts on the row,
+leaving out parked ones, plus the homelab workers, so homelab ports get a dot
+too. Before this, the only signal was the count turning amber at the configured
+per-proxy limit, and homelab rows showed no count at all. The thresholds are
+fixed and don't move with `max_accounts_per_proxy`.
+
 ## [1.418.1] - 2026-11-04
 
 Fixes from the review of the dev → main release (RS-526). None of these crashed

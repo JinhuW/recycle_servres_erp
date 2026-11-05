@@ -79,4 +79,20 @@ describe('Proxies tab', () => {
     expect(readOnly).toContain('fleetProxyUses');
     expect(readOnly).not.toContain('fleetProxyRemove');
   });
+
+  it('marks a crowded proxy with a dot whose hover gives the reason', () => {
+    const slots = (n: number, parked = false) => Array.from({ length: n }, (_, i) => ({ account_no: i + 1, pool_status: 'fleet', parked, leased: true }));
+    const row = (over: Partial<FleetProxyHealth>) => renderToString(<ProxiesHealthTable rows={[{ ...UP, ...over }]} marks={null} filter={filter} onFilter={noop} busy={null} now={NOW} />);
+    expect(row({ slots: slots(4) })).not.toContain('fleet-proxy-crowd');
+    const warn = row({ slots: slots(5) });
+    expect(warn).toContain('fleet-proxy-crowd is-warn');
+    expect(warn).toContain('title="fleetProxyCrowdWarn"');
+    expect(row({ slots: slots(10) })).toContain('is-warn');
+    const over = row({ slots: slots(11) });
+    expect(over).toContain('fleet-proxy-crowd is-over');
+    expect(over).toContain('title="fleetProxyCrowdOver"');
+    // Homelab workers count; parked accounts hold no browser on the port.
+    expect(row({ slots: slots(3), workers: ['homelab-1', 'homelab-2'] })).toContain('is-warn');
+    expect(row({ slots: slots(5, true) })).not.toContain('fleet-proxy-crowd');
+  });
 });

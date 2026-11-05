@@ -11,6 +11,7 @@ import { useT } from '../../../lib/i18n';
 import { ProxyDeadChip } from '../FleetWorkers';
 import { ProxyDialog, RemoveProxyDialog } from './FleetProxies';
 import { easternClock } from './fleetBoard';
+import { proxyCrowding } from './proxyRules';
 import { agoLabel, Clock, EmptyRow, Legend, UnavailableCard, useFleetMirror, useFleetPoll, WorkerLink } from './shared';
 
 // ─── Proxies ──────────────────────────────────────────────────────────────────
@@ -181,6 +182,9 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
               const rowBusy = busy === 'all' || (p.proxy_id !== null && busy === p.proxy_id);
               const own = p.proxy_id === null ? undefined : editing?.proxies.find(x => x.id === p.proxy_id);
               const load = own ? proxyLoad(own) : 0;
+              const users = proxyLoad(p) + p.workers.length;
+              const crowding = proxyCrowding(users);
+              const crowdReason = crowding && t(crowding === 'over' ? 'fleetProxyCrowdOver' : 'fleetProxyCrowdWarn', { n: users });
               return (
                 <tr key={`${p.source}:${p.proxy_id ?? p.exit}`}>
                   <td>
@@ -223,18 +227,23 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
                   </td>
                   <td><Clock at={last?.at} now={now} /></td>
                   <td>
-                    {(own || p.slots.length > 0) && (
-                      <span className="fp-holder">
-                        {own && editing && (
-                          <span className={load >= editing.limit ? 'fp-warn' : undefined}>{t('fleetProxyUses', { n: load, max: editing.limit })}</span>
+                    <span className="fleet-proxy-used">
+                      {crowding && <span className={`fleet-proxy-crowd is-${crowding}`} role="img" title={crowdReason ?? undefined} aria-label={crowdReason ?? undefined} />}
+                      <span>
+                        {(own || p.slots.length > 0) && (
+                          <span className="fp-holder">
+                            {own && editing && (
+                              <span className={load >= editing.limit ? 'fp-warn' : undefined}>{t('fleetProxyUses', { n: load, max: editing.limit })}</span>
+                            )}
+                            {p.slots.map(s => (
+                              <small key={s.account_no}>{t('fleetAccountN', { no: s.account_no })}{s.parked && ` · ${t('fleetProxyParked')}`}</small>
+                            ))}
+                          </span>
                         )}
-                        {p.slots.map(s => (
-                          <small key={s.account_no}>{t('fleetAccountN', { no: s.account_no })}{s.parked && ` · ${t('fleetProxyParked')}`}</small>
-                        ))}
+                        {p.workers.length > 0 && <span className="fleet-proxy-workers">{p.workers.map(w => <WorkerLink key={w} id={w} />)}</span>}
+                        {!own && !p.slots.length && !p.workers.length && <span className="fp-muted">{t('fleetProxyNobody')}</span>}
                       </span>
-                    )}
-                    {p.workers.length > 0 && <span className="fleet-proxy-workers">{p.workers.map(w => <WorkerLink key={w} id={w} />)}</span>}
-                    {!own && !p.slots.length && !p.workers.length && <span className="fp-muted">{t('fleetProxyNobody')}</span>}
+                    </span>
                   </td>
                   <td className="fleet-row-actions">
                     {onCheck && (
