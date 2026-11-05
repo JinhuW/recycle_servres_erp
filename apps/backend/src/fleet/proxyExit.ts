@@ -1,4 +1,4 @@
-import { FLEET_EXIT_FRESH_MS, type FleetProxySource } from '@recycle-erp/shared';
+import { FLEET_EXIT_FRESH_MS, fleetExitPointText, type FleetProxySource } from '@recycle-erp/shared';
 import type { SqlLike } from '../db';
 import { notifyManagers } from '../lib/notify';
 
@@ -35,6 +35,12 @@ export async function latestProxyExit(tx: SqlLike, proxyId: number): Promise<Pro
   return row ?? null;
 }
 
+/** The newest reading of the proxy `proxy` names, for a LATERAL. A failed ERP check stores no IP. */
+export const latestExitOf = (sql: SqlLike, proxy: ReturnType<SqlLike>) => sql`
+  SELECT c.exit_ip, c.timezone FROM fleet_proxy_checks c
+  WHERE c.source = 'erp' AND c.proxy_id = ${proxy} AND c.exit_ip IS NOT NULL
+  ORDER BY c.checked_at DESC, c.id DESC LIMIT 1`;
+
 /**
  * Whether slot `s` belongs to a pilot account that hasn't opened Facebook yet,
  * on an exit the pilot wouldn't accept: a different IP or geo from the one
@@ -45,19 +51,13 @@ export async function latestProxyExit(tx: SqlLike, proxyId: number): Promise<Pro
  */
 export const firstLoginHeld = (sql: SqlLike) => sql`EXISTS (
   SELECT 1 FROM fleet_pilot_enrollments e
-  CROSS JOIN LATERAL (
-    SELECT c.exit_ip, c.timezone FROM fleet_proxy_checks c
-    WHERE c.source = 'erp' AND c.proxy_id = s.proxy_id AND c.ok AND c.exit_ip IS NOT NULL
-    ORDER BY c.checked_at DESC, c.id DESC LIMIT 1) latest
+  CROSS JOIN LATERAL (${latestExitOf(sql, sql`s.proxy_id`)}) latest
   WHERE e.account_no = s.account_no AND e.pilot_id IS NOT NULL AND e.first_login_at IS NULL
     AND (e.exit_ip <> latest.exit_ip
       OR (latest.timezone IS NOT NULL AND e.exit_timezone IS NOT NULL AND latest.timezone <> e.exit_timezone)
       OR EXISTS (
         SELECT 1 FROM fleet_slots other
-        CROSS JOIN LATERAL (
-          SELECT c.exit_ip FROM fleet_proxy_checks c
-          WHERE c.source = 'erp' AND c.proxy_id = other.proxy_id AND c.ok AND c.exit_ip IS NOT NULL
-          ORDER BY c.checked_at DESC, c.id DESC LIMIT 1) theirs
+        CROSS JOIN LATERAL (${latestExitOf(sql, sql`other.proxy_id`)}) theirs
         WHERE other.account_no <> s.account_no AND theirs.exit_ip = latest.exit_ip)))`;
 
 /**
@@ -128,14 +128,21 @@ export async function recordExitChanges(tx: SqlLike, rows: ProxyCheckRow[], at: 
   // Failed checks are skipped, so a port that fails and recovers on the same
   // exit compares with what it had before. A round's rows carry the time it
   // started, and a Check now may have landed since: that one is not its past.
+  const erpIds = readings.filter((r) => r.source === 'erp').map((r) => r.proxy_id!);
+  const coordinatorExits = readings.filter((r) => r.source === 'coordinator').map((r) => r.exit);
+  // Each port's own lookup: this runs under the lock every round, and sorting 14
+  // days of checks to keep one row per port took 200 times as long.
+  const baselineOf = (where: ReturnType<SqlLike>) => tx`
+    SELECT c.exit, c.source, c.proxy_id, c.checked_at, c.exit_ip, c.city, c.region, c.country, c.timezone
+    FROM fleet_proxy_checks c
+    WHERE c.ok AND c.exit_ip IS NOT NULL AND c.checked_at <= ${at} AND ${where}
+    ORDER BY c.checked_at DESC, c.id DESC LIMIT 1`;
   const baselines = readings.length ? await tx<Baseline[]>`
-    SELECT DISTINCT ON (source, COALESCE(proxy_id::text, exit))
-           exit, source, proxy_id, checked_at, exit_ip, city, region, country, timezone
-    FROM fleet_proxy_checks
-    WHERE ok AND exit_ip IS NOT NULL AND checked_at <= ${at}
-      AND ((source = 'erp' AND proxy_id = ANY(${readings.filter((r) => r.source === 'erp').map((r) => r.proxy_id!)}::int[]))
-        OR (source = 'coordinator' AND exit = ANY(${tx.array(readings.filter((r) => r.source === 'coordinator').map((r) => r.exit))}::text[])))
-    ORDER BY source, COALESCE(proxy_id::text, exit), checked_at DESC, id DESC` : [];
+    SELECT b.* FROM unnest(${erpIds}::int[]) port(id)
+    CROSS JOIN LATERAL (${baselineOf(tx`c.source = 'erp' AND c.proxy_id = port.id`)}) b
+    UNION ALL
+    SELECT b.* FROM unnest(${tx.array(coordinatorExits)}::text[]) port(exit)
+    CROSS JOIN LATERAL (${baselineOf(tx`c.source = 'coordinator' AND c.exit = port.exit`)}) b` : [];
   const before = new Map(baselines.map((b) => [key(b), b]));
 
   for (const r of readings) {
@@ -157,10 +164,7 @@ export async function recordExitChanges(tx: SqlLike, rows: ProxyCheckRow[], at: 
     const sharing = await tx<{ account_no: number }[]>`
       SELECT e.account_no FROM fleet_pilot_enrollments e
       JOIN fleet_slots s ON s.account_no = e.account_no
-      CROSS JOIN LATERAL (
-        SELECT c.exit_ip FROM fleet_proxy_checks c
-        WHERE c.source = 'erp' AND c.proxy_id = s.proxy_id AND c.ok AND c.exit_ip IS NOT NULL
-        ORDER BY c.checked_at DESC, c.id DESC LIMIT 1) latest
+      CROSS JOIN LATERAL (${latestExitOf(tx, tx`s.proxy_id`)}) latest
       WHERE e.pilot_id IS NOT NULL AND latest.exit_ip = ${r.exit_ip} AND s.proxy_id IS DISTINCT FROM ${r.proxy_id}
       ORDER BY e.account_no`;
     await tx`
@@ -193,10 +197,8 @@ export type PendingChange = {
   slots: number[]; workers: string[]; shares_with: number[];
 };
 
-const side = (ip: string, ...geo: (string | null)[]) => {
-  const where = geo.filter(Boolean).join(', ');
-  return where ? `${ip} (${where})` : ip;
-};
+const side = (ip: string, city: string | null, region: string | null, country: string | null, timezone: string | null) =>
+  fleetExitPointText({ ip, city, region, country, timezone });
 
 /** One notification for everything pending, however many ports it covers. */
 export function exitAlertText(pending: readonly PendingChange[], unused: number): { title: string; body: string } {

@@ -13,7 +13,7 @@ import { loadRelease } from './hosts';
 import { cityLog } from './tasks';
 import { loadSettings } from './cities';
 import { lastKnownExitIp, proxyStates } from './proxies';
-import { latestProxyExit } from './proxyExit';
+import { latestExitOf, latestProxyExit } from './proxyExit';
 import { managerOnly, type ManagerEnv } from './auth';
 import { bad, conflict, eventToWire, exists, isRefusal, minutesTodaySql, notFound, taskToWire, type Refusal, type TaskEventRow, type TaskRow } from './sql';
 
@@ -185,7 +185,8 @@ slots.get('/', async (c) => {
 type Enrollment = { pilot_id: string | null; arm: FleetPilotArm };
 type SlotWrite = { account_no: number; proxy_id: number; enroll: Enrollment | null };
 
-const PILOT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+export const PILOT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+export const PILOT_ID_RULE = 'pilot must be 1 to 64 letters, digits, dots, dashes or underscores';
 const isArm = (v: unknown): v is FleetPilotArm => (FLEET_PILOT_ARMS as readonly unknown[]).includes(v);
 
 function readSlotWrite(input: unknown): SlotWrite | Refusal {
@@ -194,7 +195,7 @@ function readSlotWrite(input: unknown): SlotWrite | Refusal {
   const { account_no, proxy_id, pilot, arm, engine } = input;
   if (!Number.isInteger(account_no) || (account_no as number) < 1) return bad('account_no');
   if (!Number.isInteger(proxy_id) || (proxy_id as number) < 1) return bad('proxy_id');
-  if (pilot !== undefined && (typeof pilot !== 'string' || !PILOT_ID.test(pilot))) return bad('pilot must be 1 to 64 letters, digits, dots, dashes or underscores');
+  if (pilot !== undefined && (typeof pilot !== 'string' || !PILOT_ID.test(pilot))) return bad(PILOT_ID_RULE);
   if (arm !== undefined && !isArm(arm)) return bad(`arm must be one of: ${FLEET_PILOT_ARMS.join(', ')}`);
   if (engine !== undefined && !isArm(engine)) return bad(`engine must be one of: ${FLEET_PILOT_ARMS.join(', ')}`);
   if ((pilot === undefined) !== (arm === undefined)) return bad('pilot and arm come together');
@@ -216,6 +217,15 @@ const seedTaken = async (tx: SqlLike, seed: number, no: number): Promise<boolean
   (await tx`SELECT 1 FROM fb_pool_accounts WHERE cloak_seed = ${seed} AND no <> ${no}`).length > 0;
 const seedRefusal = (no: number): Refusal =>
   conflict('cloak_seed_taken', `No free CloakBrowser seed was found for #${no}; two accounts on one seed are one machine`);
+
+/** Why another account can't start on CloakBrowser now, or null. */
+async function cloakSeatRefusal(tx: SqlLike): Promise<Refusal | null> {
+  const settings = await loadSettings(tx);
+  if (!settings.cloak_enabled) return conflict('cloak_disabled', 'CloakBrowser is off in the fleet settings');
+  const [{ n }] = await tx<{ n: number }[]>`
+    SELECT COUNT(*)::int AS n FROM fleet_slots WHERE device->>'browser_engine' = 'cloak'`;
+  return n >= settings.cloak_max_slots ? conflict('cloak_slots_full', `${n} of ${settings.cloak_max_slots} CloakBrowser slots are taken`) : null;
+}
 
 /** Nothing has shown a seed that isn't stored yet, so a taken one can simply be drawn again. */
 async function freeFingerprint(tx: SqlLike, no: number): Promise<ReturnType<typeof fleetCloakFor> | Refusal> {
@@ -240,11 +250,7 @@ async function writeProfile(tx: SqlLike, no: number, p: Profile): Promise<void> 
 async function exitUsers(tx: SqlLike, ip: string, no: number): Promise<string[]> {
   const rows = await tx<{ who: string }[]>`
     SELECT '#' || s.account_no AS who FROM fleet_slots s
-    CROSS JOIN LATERAL (
-      SELECT c.exit_ip FROM fleet_proxy_checks c
-      WHERE c.source = 'erp' AND c.proxy_id = s.proxy_id AND c.exit_ip IS NOT NULL
-      ORDER BY c.checked_at DESC, c.id DESC LIMIT 1
-    ) latest
+    CROSS JOIN LATERAL (${latestExitOf(tx, tx`s.proxy_id`)}) latest
     WHERE s.account_no <> ${no} AND latest.exit_ip = ${ip}
     UNION
     SELECT '#' || e.account_no FROM fleet_pilot_enrollments e JOIN fleet_slots s ON s.account_no = e.account_no
@@ -280,11 +286,7 @@ async function pilotExitRefusal(tx: SqlLike, proxyId: number, name: string, no: 
   const holders = await tx<{ account_no: number }[]>`
     SELECT e.account_no FROM fleet_pilot_enrollments e
     JOIN fleet_slots s ON s.account_no = e.account_no
-    LEFT JOIN LATERAL (
-      SELECT c.exit_ip FROM fleet_proxy_checks c
-      WHERE c.source = 'erp' AND c.proxy_id = s.proxy_id AND c.exit_ip IS NOT NULL
-      ORDER BY c.checked_at DESC, c.id DESC LIMIT 1
-    ) latest ON TRUE
+    LEFT JOIN LATERAL (${latestExitOf(tx, tx`s.proxy_id`)}) latest ON TRUE
     WHERE e.pilot_id IS NOT NULL AND e.account_no <> ${no}
       AND ((e.exit_ip = ${ip} AND e.first_login_at IS NULL) OR latest.exit_ip = ${ip})
     ORDER BY e.account_no`;
@@ -385,11 +387,8 @@ slots.post('/', async (c) => {
     // cloak account spends a seat and needs CloakBrowser on, like a new one.
     const engine: FleetPilotArm | null = enroll?.arm ?? account.browser_engine;
     if (engine === 'cloak') {
-      const settings = await loadSettings(tx);
-      if (!settings.cloak_enabled) return conflict('cloak_disabled', 'CloakBrowser is off in the fleet settings');
-      const [{ n: seats }] = await tx<{ n: number }[]>`
-        SELECT COUNT(*)::int AS n FROM fleet_slots WHERE device->>'browser_engine' = 'cloak'`;
-      if (seats >= settings.cloak_max_slots) return conflict('cloak_slots_full', `${seats} of ${settings.cloak_max_slots} CloakBrowser slots are taken`);
+      const full = await cloakSeatRefusal(tx);
+      if (full) return full;
     }
     const fingerprint = account.cloak_seed !== null
       ? { cloak_seed: account.cloak_seed, cloak_gpu: account.cloak_gpu! }
@@ -690,11 +689,8 @@ slots.post('/:no/engine', async (c) => {
     if (!fleetCloakSwitchable({ ...slot, device })) {
       return conflict('engine_live_session', `#${no} may still hold a live session (${where}); only an account that lost its session, or one no fleet worker has held, switches`);
     }
-    const settings = await loadSettings(tx);
-    if (!settings.cloak_enabled) return conflict('cloak_disabled', 'CloakBrowser is off in the fleet settings');
-    const [{ n }] = await tx<{ n: number }[]>`
-      SELECT COUNT(*)::int AS n FROM fleet_slots WHERE device->>'browser_engine' = 'cloak'`;
-    if (n >= settings.cloak_max_slots) return conflict('cloak_slots_full', `${n} of ${settings.cloak_max_slots} CloakBrowser slots are taken`);
+    const full = await cloakSeatRefusal(tx);
+    if (full) return full;
     const fingerprint = await freeFingerprint(tx, no);
     if (isRefusal(fingerprint)) return fingerprint;
     // Pinned for good from here, so it comes from where the slot really exits.

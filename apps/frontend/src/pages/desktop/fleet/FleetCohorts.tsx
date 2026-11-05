@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { fleetApi, type FleetCohortAccount, type FleetCohortCounts, type FleetCohortGroup, type FleetCohortOutcome, type FleetCohortReport } from '../../../lib/fleet';
 import { useT } from '../../../lib/i18n';
+import { easternDateTime } from './fleetBoard';
 import { EmptyRow, useFleetPoll } from './shared';
 
 // Its figures move over hours and days, and it is the fleet's costliest read.
@@ -118,7 +119,7 @@ export function CohortAccounts({ rows }: { rows: FleetCohortAccount[] }) {
                 {t(a.arm === 'cloak' ? 'fleetEngine_cloak' : 'fleetEngine_stock')}
                 {a.crossed_arm && <>{' '}<span className="chip warn" title={t('fleetCohortCrossedHint')}>{t('fleetCohortCrossed')}</span></>}
               </td>
-              <td className="fp-muted">{a.first_claimed_at ? new Date(a.first_claimed_at).toLocaleString(locale) : t('fleetCohortNotClaimed')}</td>
+              <td className="fp-muted">{a.first_claimed_at ? easternDateTime(a.first_claimed_at, locale) : t('fleetCohortNotClaimed')}</td>
               <td>{outcome(a.outcome_24h, a.in_loss_state_24h)}</td>
               <td>{outcome(a.outcome_7d, a.in_loss_state_7d)}</td>
               <td className="num">{a.searches_7d ?? '—'}</td>

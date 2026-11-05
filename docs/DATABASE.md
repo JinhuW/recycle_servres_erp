@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-05:** ERP migration `0227`, Reddit tracker migration `0007`,
+**As of 2026-11-05:** ERP migration `0228`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2326,7 +2326,7 @@ The proxies the ERP fleet browses through, as a list managers edit on the Accoun
 | `url_enc` | `text` | ✓ |  | scheme://user:pass@host:port, sealed under FB_POOL_KEY (lib/sealed.ts). Never returned or logged. |
 | `host` | `text` | ✓ |  | The exit's host, lowercased, in clear for the list. |
 | `port` | `integer` | ✓ |  | The exit's port (1..65535). |
-| `timezone` | `text` | ✓ |  | IANA zone of the exit; a slot's device clock follows it. |
+| `timezone` | `text` | ✓ |  | IANA zone of the exit as a manager typed it. A slot's device clock follows it, unless the account has a pinned profile (`fb_pool_accounts.profile_timezone`). |
 | `note` | `text` | ✓ | `''` |  |
 | `replaced_exit` | `jsonb` |  |  | The last good reading from before a URL edit, until the first reading of the new URL is compared with it. |
 | `created_by` | `uuid` |  |  | → users. |
@@ -2359,7 +2359,7 @@ One health check of one proxy port, dialed through the proxy itself to an IP-geo
 
 - **Primary key:** `id`
 - **References:** `proxy_id` → `fleet_proxies.id` (on delete set null)
-- **Indexes:** `fleet_proxy_checks_exit_idx` (source, exit, checked_at desc), `fleet_proxy_checks_at_idx` (checked_at), `fleet_proxy_checks_proxy_id_idx` (proxy_id)
+- **Indexes:** `fleet_proxy_checks_exit_idx` (source, exit, checked_at desc), `fleet_proxy_checks_at_idx` (checked_at), `fleet_proxy_checks_proxy_id_idx` (proxy_id), `fleet_proxy_checks_proxy_recent_idx` (proxy_id, checked_at desc, id desc) where source = 'erp'
 
 <a id="erp-fleet-proxy-exit-changes"></a>
 

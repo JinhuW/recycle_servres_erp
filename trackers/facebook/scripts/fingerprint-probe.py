@@ -62,16 +62,8 @@ HEADERS_URL = "https://httpbin.org/headers"
 # available width (a Windows frame's invisible borders are about 16 px).
 WINDOW_SLACK_PX = 16
 
-# Probed by width against the generic fallbacks: `document.fonts.check` says
-# true for any local name, installed or not.
-FONTS = [
-    "Arial", "Arial Black", "Calibri", "Cambria", "Candara", "Comic Sans MS", "Consolas",
-    "Courier New", "Georgia", "Impact", "Segoe UI", "Tahoma", "Times New Roman",
-    "Trebuchet MS", "Verdana", "Carlito", "Caladea", "Liberation Sans", "Liberation Serif",
-    "Liberation Mono", "DejaVu Sans", "Noto Color Emoji", "Noto Sans CJK SC", "Helvetica",
-    "Ubuntu", "Cantarell",
-]
-
+# Fonts are probed by width against the generic fallbacks: `document.fonts.check`
+# says true for any local name, installed or not.
 FINGERPRINT_JS = """
 async (fonts) => {
   const out = {};
@@ -329,7 +321,7 @@ def probe(args: argparse.Namespace) -> Dict[str, Any]:
         response = page.context.request.get(args.request_echo_url, timeout=60_000)
         request_ip = response.json().get("ip")
         result["ip"] = {"page": page_ip, "request": request_ip}
-        result["fingerprint"] = summarize(page.evaluate(FINGERPRINT_JS, FONTS))
+        result["fingerprint"] = summarize(page.evaluate(FINGERPRINT_JS, list(browser_engine.PREFLIGHT_FONTS)))
         page.goto(args.headers_url, wait_until="domcontentloaded", timeout=60_000)
         headers = json.loads(page.locator("body").inner_text()).get("headers") or {}
         result["accept_language"] = headers.get("Accept-Language")

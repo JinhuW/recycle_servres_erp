@@ -1,6 +1,6 @@
 # CloakBrowser launch plan: a browser profile for every fleet account
 
-**Status:** updated 2026-11-05. Phase 0 and the code for Phase 1 are merged to `dev`. Nothing here has reached `main`, a fleet release or a live worker, and none of the worker code has run in the real CloakBrowser binary yet.
+**Status:** updated 2026-11-05. Phase 0, the code for Phase 1 and the fixes from the 2026-11-05 review (RS-542 to RS-547, v1.424.2 to v1.425.1) are merged to `dev`. Nothing here has reached `main`, a fleet release or a live worker, and none of the worker code has run in the real CloakBrowser binary yet.
 
 **Tracking:** `[x]` means merged to `dev` or finished, and `[ ]` means not yet. `[owner]` marks an item only the owner can do. The coordinating session is the only editor of this file, so parallel workers don't conflict on it.
 
@@ -145,7 +145,7 @@ Dates are estimates. Accounts come only from batches you assign, per your 2026-1
 
 **Fleet agent (workstream D).** Must reach hosts before worker 0.17.0: an older agent reads the new exit code as a crash and holds the worker after 5 restarts. An agent swap isn't a login.
 - [x] New worker exit code **74, licence outage**, distinct from the existing 78 "left for an operator"
-- [x] Bounded retries with jitter: backoff from 5 min, at most 8 attempts, inside the existing one-start stagger; then hold as `license_outage`
+- [x] One worker per host probes with jitter, backoff from 5 min to about hourly with no limit, after any other start. The rest follow once a probe stays up for 15 min (RS-544; owner chose hourly over a hold, 2026-11-05)
 - [x] Report the hold and retries to the ERP
 - [ ] Your yes for the agent swap on hosts `[owner]`
 
@@ -164,7 +164,7 @@ Dates are estimates. Accounts come only from batches you assign, per your 2026-1
 - [ ] **S1:** does WebRTC expose the host IP without the flag? Also run the new preflight check: it requires `webrtc_ip` among the candidates, so a binary that offers only mDNS would falsely park every cloak worker
 - [ ] **S2:** run about 50 seeds against FingerprintJS's public demo. Do some flag as tampering (#553)? Does the seed's screen conflict with Xvfb? Quarantine bad seeds
 - [ ] **S3:** do hashes hold from 155 to 156? If not, a binary bump is a device change
-- [ ] **S4:** does a browser survive a blocked licence server beyond 30 min, and does `playwright.stop()` free the seat?
+- [ ] **S4:** does a browser survive a blocked licence server beyond 30 min, and does `playwright.stop()` free the seat? Also: can a fresh launch stay up 15 min during an outage? If so, a probe would falsely end the outage
 - [ ] **S5:** block the licence server before and after `launch` returns; both must end in exit 74, and a retry must recover. The after-launch path relies on the binary writing its denial file
 
 **Gate**
@@ -244,13 +244,13 @@ The earlier canaries can't separate engine from batch, so this test splits each 
 | Binary exits 78 before any Facebook page | Exits 74. Agent retries with backoff and jitter | No login |
 | Licence check fails after `launch` returned, before any Facebook page | Target closes; the guard turns that into the licence error; exits 74 | No login |
 | Browser dies with a live session | Exits 74. Replacement container restores the session from the ERP | One boot login, logged and counted in the report |
-| 8 retries used, or exit 76, 77 or 79 | Agent holds `license_outage`; the worker parks `license_denied` | Operator acts |
+| Exit 76, 77 or 79 | The worker parks `license_denied` | Operator acts |
 
-Retrying through the agent instead of inside the container keeps the existing start stagger. With 18 cloak workers and a 3-minute stagger, full recovery takes at least 54 minutes, so a long outage doesn't become a burst of logins.
+Retrying through the agent instead of inside the container keeps the existing start stagger. One worker per host probes, after any other start, so a stock restart never queues behind an outage and only one account per host can spend a login on a retry. Simulated with 18 cloak workers and a 4-hour outage: a stock restart at +11 minutes, 6 boots from one worker, and the last worker back 104 minutes after the outage ended.
 
-**The lease sets the real pace.** The worker's last DEAD heartbeat renews its lease, so a replacement gets `no_slot` and exits 75, with no browser and no login, until the lease lapses, up to 30 minutes (`lease_minutes`). The agent's early 5- and 10-minute retries therefore mostly hit 75, and each real attempt takes about 30 minutes or more. The replacement isn't guaranteed the same account: an idle cloak-capable worker can claim the slot first, which is safe because the device and session travel with the account.
+**The handoff sets the real pace, not the lease.** The agent's retry goes through `/stopped`, which hands the slot straight to the replacement, so every retry is a real boot of the same account. The outage heartbeat keeps the lease for 24 hours, so slotless workers can't take the slot and the host's count holds. It says `operator: true`, so the account can't be retired for an outage. If spike S5 shows a probe can reach Facebook after launch, hourly probing costs logins and a hold becomes the right choice again.
 
-**A network failure during preflight isn't a bad profile.** If the exit can't be measured, the worker parks `connect_failed`, which auto-resumes and re-runs the preflight. A measured mismatch parks `profile_preflight` for an operator.
+**A network failure during preflight isn't a bad profile.** If the exit can't be measured, the worker parks `connect_failed`, which auto-resumes and re-runs the preflight. The claim always names the last exit seen, so a stale measurement is checked rather than skipped. If only the expected exit fails, the port moved: before any Facebook page the worker exits 75 for a fresh claim at no login cost, and after one it parks `exit_moved` until a manager clicks Restart, which is one boot login. Any other mismatch parks `profile_preflight` for an operator.
 
 ## Decisions for you
 

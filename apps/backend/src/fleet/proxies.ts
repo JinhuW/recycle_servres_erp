@@ -7,6 +7,7 @@ import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
 import { poolKey, seal } from '../lib/sealed';
 import { managerOnly, unavailable, type ManagerEnv } from './auth';
+import { latestExitOf } from './proxyExit';
 import { bad, conflict, exists, isRefusal, notFound, type Refusal } from './sql';
 
 // ─── Proxies ──────────────────────────────────────────────────────────────────
@@ -53,10 +54,7 @@ export async function proxyStates(sql: SqlLike, proxyId?: number): Promise<Map<n
 /** The IP a proxy was last seen exiting from, even if its latest check failed:
  *  a port failing right now can come back on the same IP. */
 export async function lastKnownExitIp(sql: SqlLike, proxyId: number): Promise<string | null> {
-  const [check] = await sql<{ exit_ip: string }[]>`
-    SELECT exit_ip FROM fleet_proxy_checks
-    WHERE source = 'erp' AND proxy_id = ${proxyId} AND exit_ip IS NOT NULL
-    ORDER BY checked_at DESC, id DESC LIMIT 1`;
+  const [check] = await sql<{ exit_ip: string }[]>`${latestExitOf(sql, sql`${proxyId}::int`)}`;
   return check?.exit_ip ?? null;
 }
 
