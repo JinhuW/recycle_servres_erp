@@ -26,7 +26,9 @@ deployed?" harder to answer.
   language, `webdriver`, platform, font count and window. This runs in a
   throwaway context on the account's own proxy, against ipify rather than
   Facebook. A failure parks `DEAD` with `{reason: "profile_preflight"}` and
-  costs no login. A claim without those IPs (an older ERP) skips those two
+  costs no login. An exit that could not be measured says nothing about the
+  profile, so it parks `connect_failed` instead, which auto-resumes, and a
+  resume measures again before the login. A claim without those IPs (an older ERP) skips those two
   checks and logs that it did. Linux font tells are reported and don't fail,
   until the Windows fonts decision.
 - **`--fingerprint-webrtc-ip` from the claim and `--license-route=direct`** on

@@ -34,6 +34,7 @@ Everything here applies to the cloak engine only. No stock path or stock fingerp
 - [x] `--fingerprint-webrtc-ip` comes from the claim's `webrtc_ip`, and `--license-route=direct` is on every cloak launch
 - [x] Absent or null `expected_exit_ip` / `webrtc_ip` skips that flag and check, and says so
 - [x] A failed preflight parks `profile_preflight` with no Facebook request and no login
+- [x] An exit that could not be measured parks `connect_failed` instead, with the preflight detail, and a resume runs the preflight again before the login
 - [x] A refused session upload is reported in the log and in each heartbeat until one succeeds
 - [x] A license setup or guard error parks `browser_failed` instead of crash-looping
 - [x] `fingerprint-probe.py --compare` covers the new flags and the forced failures (not run against any real host)
@@ -45,7 +46,7 @@ Windows fonts (waiting on the owner's decision), `geoip`, `humanize`, the agent'
 
 ## Notes
 
-**VERSION stays 0.16.0.** `scripts/release.sh` is the only thing that bumps it, and it tags in the same run. A hand bump would make `check-release-tag.sh` look for a tag that doesn't exist, and `release.sh minor` would then compute 0.18.0. The change sits under `[Unreleased]` in the tracker's `CHANGELOG.md`, and the pin moved to `8128525`.
+**VERSION stays 0.16.0.** `scripts/release.sh` is the only thing that bumps it, and it tags in the same run. A hand bump would make `check-release-tag.sh` look for a tag that doesn't exist, and `release.sh minor` would then compute 0.18.0. The change sits under `[Unreleased]` in the tracker's `CHANGELOG.md`, and the pin moved to `b71da65`.
 
 **How a replacement re-claims after exit 74** (`apps/backend/src/fleet/claim.ts`, read, not run):
 
@@ -56,6 +57,8 @@ Windows fonts (waiting on the owner's decision), `geoip`, `humanize`, the agent'
 - If the account has left the fleet, the worker takes the next free slot, which is a first login for that account.
 
 **The boot login record.** The replacement's login is written as trigger `boot`, because `_restoring` is only set by the coordinator's restore directive, which a fleet worker never runs. That ledger row needs a coordinator, though, so a worker without one writes no row. The ERP's own record exists either way: a claim clears the worker's state, so its first heartbeat (`DEGRADED`, reason `booting`) lands in `fleet_worker_state_events`. The outage heartbeat's `facebook_opened` tells a free retry from one that costs a login, but `fleet_worker_state_events` keeps only the reason; `facebook_opened` survives only in `fleet_workers.detail` until the next claim clears it.
+
+**A blip is not a bad profile.** Review found that ipify being down or a proxy timeout parked `profile_preflight`, which never resumes. A local Chromium run with a dead proxy showed the page evaluation fails too once navigation has failed, so every fingerprint check read as failed with nothing measured. The preflight now reports that as one `page` failure, and `exit_unmeasured` sends it to `connect_failed`. A resume returns from the park without logging in: `_fleet_preflight` answers False and the loop measures again.
 
 **Checks that need a spike.**
 
