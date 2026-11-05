@@ -10,6 +10,8 @@ import { RevertNoticeDialog } from '../components/RevertNoticeDialog';
 import { useManagerTakeover } from '../components/ManagerTakeoverDialog';
 import { StatusChangeDialog } from '../components/StatusChangeDialog';
 import { PhHandoffSheet } from '../components/PhHandoffSheet';
+import { ZeroCostConfirmDialog } from '../components/ZeroCostConfirmDialog';
+import { zeroCostLines } from '../lib/lineRequirements';
 import { PhScrollJump } from '../components/PhScrollJump';
 import { AttachmentChip } from '../components/AttachmentChip';
 import { AttachmentDropzone } from '../components/AttachmentDropzone';
@@ -247,6 +249,8 @@ export function OrderDetail({
   const [advancing, setAdvancing] = useState(false);
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
   const [handoffOpen, setHandoffOpen] = useState(false);
+  const [zeroCostAsk, setZeroCostAsk] = useState<ReadonlyArray<Order['lines'][number]> | null>(null);
+  const [zeroCostConfirmed, setZeroCostConfirmed] = useState(false);
   const [commissionOpen, setCommissionOpen] = useState(false);
   const takeover = useManagerTakeover();
   // The mover's answer to the takeover question, carried through the
@@ -580,14 +584,17 @@ export function OrderDetail({
     // order — which, once the page is clean, is what is on screen.
     if (effectiveStatus === 'Draft') {
       if (dirty) { showErrorDialog(t('hoSaveFirst')); return; }
-      // The cost lives on this page, not in the sheet, so it is asked for
-      // here; the server refuses a $0 PO as well. Only on the first
+      // The cost lives on this page, not in the sheet, so it is asked about
+      // here; the server holds a $0 PO to the same answer. Only on the first
       // submission: a PO an edit sent back to Draft re-submits as it was
-      // accepted.
-      if (!(cost.goods > 0) && !order.everSubmitted) {
+      // accepted. A negotiated lot price is what those $0 lines cost.
+      const zero = order.everSubmitted ? [] : zeroCostLines(order.lines);
+      if (!(cost.goods > 0) && !order.everSubmitted && zero.length === 0) {
         showErrorDialog(t('poCostRequired'), undefined, t('errCantSubmitTitle'));
         return;
       }
+      setZeroCostConfirmed(false);
+      if (zero.length > 0 && !(goodsNegotiated && cost.goods > 0)) { setZeroCostAsk(zero); return; }
       setHandoffOpen(true);
       return;
     }
@@ -712,7 +719,7 @@ export function OrderDetail({
           proofAttachmentCount: proof.proofAtts.length,
           saved: order,
         },
-        lines: { count: order.lines.length, goods: cost.goods, everSubmitted: order.everSubmitted === true },
+        lines: { count: order.lines.length, goods: cost.goods, everSubmitted: order.everSubmitted === true, zeroCost: zeroCostLines(order.lines).length },
         serverBlockers: order.blockers,
         dirty: { delivery: warehouseDirty || facts, payment: paymentDirty || methodDirty || paypalDirty || proofChanged },
       });
@@ -1860,7 +1867,8 @@ export function OrderDetail({
         <PhHandoffSheet
           init={{
             order,
-            lines: { count: order.lines.length, units: totals.qty, goods: cost.goods },
+            lines: { count: order.lines.length, units: totals.qty, goods: cost.goods, zeroCost: zeroCostLines(order.lines).length },
+            zeroCostConfirmed,
             warehouseId: warehouseId || (order.warehouse?.id ?? ''),
             payment,
             paidByUserId,
@@ -1932,6 +1940,13 @@ export function OrderDetail({
       )}
       <CommissionPaidByConfirm paidBy={commissionPaidBy} />
       {takeover.dialog}
+      {zeroCostAsk && (
+        <ZeroCostConfirmDialog
+          lines={zeroCostAsk}
+          onCancel={() => setZeroCostAsk(null)}
+          onConfirm={() => { setZeroCostAsk(null); setZeroCostConfirmed(true); setHandoffOpen(true); }}
+        />
+      )}
     </div>
   );
 }

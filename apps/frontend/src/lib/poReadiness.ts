@@ -22,7 +22,9 @@ export type ReadinessItem = {
 export type ReadinessInput = {
   /** The hand-off rule's view of the order with the form's values overlaid. */
   rules: HandoffRules;
-  lines: { count: number; goods: number; everSubmitted: boolean };
+  /** `zeroCost`: lines with units at $0. Those are a question put when the PO
+   *  moves, not a blocker; only a $0 PO with none of them has no cost to ask about. */
+  lines: { count: number; goods: number; everSubmitted: boolean; zeroCost: number };
   /** Present for a manager, who owns the rate; absent hides the row. */
   commission?: { rate: number | null } | null;
   /** `order.blockers` as GET reported it, for a Draft. Null or undefined
@@ -85,7 +87,7 @@ const TABS: ReadinessTab[] = ['products', 'delivery', 'payment'];
 export function poReadiness(input: ReadinessInput): ReadinessItem[] {
   const local: string[] = [];
   if (input.lines.count === 0) local.push('poReadyNoProducts');
-  else if (!(input.lines.goods > 0) && !input.lines.everSubmitted) local.push('poReadyNoCost');
+  else if (!(input.lines.goods > 0) && !input.lines.zeroCost && !input.lines.everSubmitted) local.push('poReadyNoCost');
   local.push(...handoffBlockerKeys(input.rules));
 
   const server = Array.isArray(input.serverBlockers)

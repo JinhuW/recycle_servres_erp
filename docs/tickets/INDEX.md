@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-548](./RS-548-phone-po-form-accepts-0-cost-confirmed-at-submit-ser.md) | done | story | P2 | Phone PO form accepts $0 cost, confirmed at submit; serials sit under Part # | 1.426.0 |
 | [RS-547](./RS-547-fleet-cleanup-after-the-cloakbrowser-review.md) | done | chore | P3 | Fleet: cleanup after the CloakBrowser review | 1.425.1 |
 | [RS-546](./RS-546-fleet-show-outages-holds-and-exit-alerts-on-desktop.md) | done | story | P2 | Fleet: show outages, holds and exit alerts on desktop | 1.425.0 |
 | [RS-545](./RS-545-fleet-worker-0-17-0-exit-moved-outage-operator-flag.md) | in-progress | bug | P1 | Fleet worker 0.17.0: exit_moved, outage operator flag, honest resume | — |

@@ -919,7 +919,8 @@ is not a stage but a flag beside one, set once every line has sold
 - **A Draft with a linked bank payment can be deleted** (v1.191.0). The delete
   unlinks the payment first — it used to fail with a 500 — and leaves it free
   to auto-link to the PO it really paid for.
-- **A PO cannot be submitted without a cost** (v1.148.0). Leaving Draft is
+- **A PO cannot be submitted without a cost** (v1.148.0; $0 products can be
+  confirmed since v1.426.0, below). Leaving Draft is
   refused while the order's goods cost is zero, through every door — the
   hand-off, a manager stage-jump, the carrier poll. The rule is per order,
   read off the derived `orders.total_cost`: a $0 line inside a priced lot and
@@ -930,7 +931,15 @@ is not a stage but a flag beside one, set once every line has sold
   and the manager judges the edit in the change-review dialog. Clicking In
   Transit on a $0 Draft with no submission history, on the desktop stepper
   or the phone's advance button, raises a *Can't submit yet* dialog naming
-  the fix instead of opening the hand-off.
+  the fix instead of opening the hand-off. Since v1.426.0 that applies only
+  when there is nothing to confirm, such as a PO with no units.
+- **$0 products are confirmed at submission** (v1.426.0). On first submission,
+  a PO with a $0 product asks *Submit with $0 products?* on the phone and the
+  desktop, listing those products, before the hand-off opens. A PO where every
+  product is $0 can leave Draft only through a hand-off that sends this
+  confirmation; `/advance` and a manager stage-jump still refuse it. The
+  `submitted` event records `zeroCostConfirmed`. A negotiated lot price or
+  earlier submission history skips the question.
 - **Unit cost is required when a product line is saved** (v1.152.0). The
   shared line rule (`lib/lineRequirements.ts`) names Unit cost alongside the
   identity fields and quantity, so a blank or $0 cost is refused where the
@@ -940,7 +949,9 @@ is not a stage but a flag beside one, set once every line has sold
   edit page asks only of a line that is new or that the user touched — an
   untouched legacy $0 line does not block Save or a stage change. The
   per-order leave-Draft check above stays as the backstop, and the backend
-  still accepts `unit_cost >= 0`.
+  still accepts `unit_cost >= 0`. The phone's add-item form and draft sync
+  accept a typed $0 since v1.426.0; a blank cost is still refused there. On that
+  form, Serial numbers sits directly under Part # (v1.426.0).
 - **The list's Payment cell says what the bank paid and opens it** (v1.138.0).
   On the desktop PO list a manager reads `Company | $1,279` or `Self | $2,829`
   on every PO with linked payments — the ledger's net, refunds subtracted,
