@@ -450,7 +450,8 @@ describe('POST /api/fleet/slots/:no/engine', () => {
       expect(r.status).toBe(409);
       expect(r.body.error).toBe('engine_mismatch');
       expect(r.body.detail).toContain(`lab-1 runs stock but #${no} is set to cloak`);
-      expect(r.body.detail).toContain('Park then Unpark');
+      expect(r.body.detail).toContain('next normal start');
+      expect(r.body.detail).toContain('more than one login');
     }
     const [w] = await getTestDb()<{ relogin_id: string | null }[]>`SELECT relogin_id FROM fleet_workers WHERE worker_id = 'lab-1'`;
     expect(w.relogin_id).toBeNull();
