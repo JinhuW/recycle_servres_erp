@@ -764,7 +764,7 @@ async function engineMismatch(tx: SqlLike, w: WorkerRow): Promise<Refusal | null
   const configured = device?.browser_engine === 'cloak' ? 'cloak' : 'stock';
   const running = fleetReportedEngine(isRecord(w.detail) ? w.detail : null);
   if (configured === running) return null;
-  return conflict('engine_mismatch', `${w.worker_id} runs ${running} but #${w.account_no} is set to ${configured}; it changes at its next normal start`);
+  return conflict('engine_mismatch', `${w.worker_id} runs ${running} but #${w.account_no} is set to ${configured}, so it can't take this until it restarts on ${configured}. Park then Unpark restarts it, which is one login.`);
 }
 
 workers.post('/:id/relogin', async (c) => {

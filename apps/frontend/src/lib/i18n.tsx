@@ -5541,6 +5541,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fleetAlertHide: "Hide details",
     fleetFoldHost: "Controls for {host}",
     fleetFoldEngine: "Browser engine controls",
+    fleetFoldRack: "Hosts, alerts, release and browser engine",
     fleetReleaseCard: "Release",
     fleetAlertDismiss: "Dismiss",
     fleetCohortCrossed: "Crossed",

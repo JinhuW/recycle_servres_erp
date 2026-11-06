@@ -5,6 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-558](./RS-558-alerts-show-the-detailed-reason-not-the-status-code.md) | done | bug | P2 | Alerts show the detailed reason, not the status code | 1.433.1 |
+| [RS-557](./RS-557-fleet-tab-fold-the-status-panel-s-host-alert-release.md) | done | story | P2 | Fleet tab: fold the status panel's host, alert, release and engine rows | 1.433.0 |
 | [RS-556](./RS-556-exhausted-proxy-status-and-accounts-used-grouped-by.md) | done | story | P2 | Exhausted proxy status, and Accounts used grouped by IP | 1.432.0 |
 | [RS-555](./RS-555-add-to-fleet-offers-the-browser-engine-without-a-pil.md) | done | story | P2 | Add to fleet offers the browser engine without a pilot | 1.431.0 |
 | [RS-554](./RS-554-fleet-link-each-account-to-its-first-cloakbrowser-la.md) | in-progress | story | P2 | Fleet: link each account to its first CloakBrowser launch, and keep profiles different | 1.430.0 |

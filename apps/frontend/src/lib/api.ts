@@ -169,18 +169,25 @@ async function request<T>(
   const json = text ? safeJson(text) : null;
 
   if (!res.ok) {
-    throw new ApiError(res.status, errMsg(json, res.status), { path, method, requestId: reqId(res) }, json);
+    throw new ApiError(res.status, responseReason(json), { path, method, requestId: reqId(res) }, json);
   }
   return json as T;
 }
 
-function errMsg(json: unknown, status: number): string {
-  return (json && typeof json === 'object' && 'error' in json && typeof json.error === 'string')
-    ? json.error
-    : `HTTP ${status}`;
+// What the user reads when a call fails. `error` is often a machine code, with
+// the sentence in `detail`, and a status code means nothing to the person who
+// has to act on it. `status` stays on ApiError for code and the operator's log.
+export function responseReason(json: unknown): string {
+  if (json && typeof json === 'object') {
+    const { detail, error } = json as { detail?: unknown; error?: unknown };
+    if (typeof detail === 'string' && detail) return detail;
+    if (typeof error === 'string' && error) return error;
+  }
+  return (typeof window !== 'undefined' && window.__genericErrorMessage)
+    || 'Something went wrong. Please try again.';
 }
 
-function safeJson(text: string): unknown {
+export function safeJson(text: string): unknown {
   try { return JSON.parse(text); } catch { return null; }
 }
 
@@ -213,12 +220,12 @@ async function download(path: string, fallbackName: string, body?: unknown): Pro
     if (refreshed) res = await send();
     if (res.status === 401) {
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('auth:unauthorized'));
-      throw new ApiError(401, errMsg(null, 401), { path, method, requestId: reqId(res) });
+      throw new ApiError(401, responseReason(null), { path, method, requestId: reqId(res) });
     }
   }
   if (!res.ok) {
     const text = await res.text();
-    throw new ApiError(res.status, errMsg(text ? safeJson(text) : null, res.status), {
+    throw new ApiError(res.status, responseReason(text ? safeJson(text) : null), {
       path, method, requestId: reqId(res),
     });
   }

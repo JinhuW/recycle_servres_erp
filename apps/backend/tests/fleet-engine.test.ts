@@ -446,9 +446,11 @@ describe('POST /api/fleet/slots/:no/engine', () => {
     await heartbeat(worker_token, 'CHECKPOINT');
     expect((await switchTo(manager, no, 'cloak')).status).toBe(200);
     for (const verb of ['relogin', 'resume']) {
-      const r = await api<{ error?: string }>('POST', `/api/fleet/workers/lab-1/${verb}`, { token: manager, body: {} });
+      const r = await api<{ error?: string; detail?: string }>('POST', `/api/fleet/workers/lab-1/${verb}`, { token: manager, body: {} });
       expect(r.status).toBe(409);
       expect(r.body.error).toBe('engine_mismatch');
+      expect(r.body.detail).toContain(`lab-1 runs stock but #${no} is set to cloak`);
+      expect(r.body.detail).toContain('Park then Unpark');
     }
     const [w] = await getTestDb()<{ relogin_id: string | null }[]>`SELECT relogin_id FROM fleet_workers WHERE worker_id = 'lab-1'`;
     expect(w.relogin_id).toBeNull();

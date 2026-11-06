@@ -42,7 +42,7 @@ describe('handleFetchError', () => {
     expect(dialogs[0]!.msg.length).toBeGreaterThan(0);
   });
 
-  it('surfaces the endpoint, status and request id so the failure is greppable', async () => {
+  it('surfaces the endpoint and request id, never the status', async () => {
     globalThis.fetch = vi.fn(async () => new Response(null, { status: 204 })) as any;
     const dialogs = collectDialogs();
 
@@ -57,6 +57,29 @@ describe('handleFetchError', () => {
     expect(dialogs[0]!.msg).toBe('Internal error');
     expect(dialogs[0]!.details?.join(' ')).toContain('abc-123');
     expect(dialogs[0]!.details?.join(' ')).toContain('/api/activity');
+    expect(dialogs[0]!.details?.join(' ')).not.toContain('500');
+  });
+
+  it('logs the machine code while the user reads the sentence', async () => {
+    const posts: { message?: string; status?: number }[] = [];
+    globalThis.fetch = vi.fn(async (_url: any, init: any) => {
+      posts.push(JSON.parse(init.body));
+      return new Response(null, { status: 204 });
+    }) as any;
+    const dialogs = collectDialogs();
+
+    const { ApiError } = await import('../src/lib/api');
+    const { handleFetchError } = await import('../src/lib/errorToast');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    handleFetchError(new ApiError(409, 'The worker runs stock', {
+      path: '/api/fleet/workers/w/relogin', method: 'POST', requestId: 'abc-123',
+    }, { error: 'engine_mismatch', detail: 'The worker runs stock' }));
+
+    expect(dialogs[0]!.msg).toBe('The worker runs stock');
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]!.message).toBe('engine_mismatch');
+    expect(posts[0]!.status).toBe(409);
   });
 
   it('posts the failure to the backend', async () => {
@@ -117,5 +140,26 @@ describe('handleFetchError', () => {
     await new Promise(r => setTimeout(r, 0));
     expect(dialogs).toHaveLength(1);
     expect(dialogs[0]!.msg).toBe('original failure');
+  });
+});
+
+describe('responseReason', () => {
+  it('prefers the detail sentence over the error code', async () => {
+    const { responseReason } = await import('../src/lib/api');
+    expect(responseReason({ error: 'engine_mismatch', detail: 'The worker runs stock' })).toBe('The worker runs stock');
+  });
+
+  it('uses the error when there is no usable detail', async () => {
+    const { responseReason } = await import('../src/lib/api');
+    expect(responseReason({ error: 'not_found' })).toBe('not_found');
+    expect(responseReason({ error: 'not_found', detail: { field: 'x' } })).toBe('not_found');
+  });
+
+  it('falls back to the generic sentence, never a status', async () => {
+    const { responseReason } = await import('../src/lib/api');
+    (globalThis as any).window.__genericErrorMessage = 'Please try again.';
+    expect(responseReason(null)).toBe('Please try again.');
+    delete (globalThis as any).window.__genericErrorMessage;
+    expect(responseReason(null)).toBe('Something went wrong. Please try again.');
   });
 });

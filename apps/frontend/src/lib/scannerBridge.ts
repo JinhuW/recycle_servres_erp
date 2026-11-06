@@ -5,6 +5,8 @@
 // but it can call loopback. Deliberately plain fetch, not lib/api.ts: this is
 // not our backend — no cookies, no CSRF header, no refresh.
 
+import { responseReason } from './api';
+
 export const BRIDGE_URL = 'http://127.0.0.1:47811';
 
 export type BridgeHealth = {
@@ -69,7 +71,7 @@ export async function bridgeScan(signal?: AbortSignal, timeoutMs = 120_000): Pro
       body?.kind === 'busy' || (!body?.kind && res.status === 409) ? 'busy'
       : body?.kind === 'cancelled' ? 'cancelled'
       : 'printer';
-    throw new BridgeError(kind, body?.error ?? `HTTP ${res.status}`);
+    throw new BridgeError(kind, responseReason(body));
   }
   return res.blob();
 }

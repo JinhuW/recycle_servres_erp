@@ -28,6 +28,11 @@ vi.mock('../../../lib/facebookPool', async () => {
 // Modal reads document on mount; a dialog's body renders the same without it.
 vi.mock('../../../components/Modal', () => ({ Modal: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 vi.mock('../../../lib/errorToast', () => ({ handleFetchError: vi.fn(), showSuccessToast: vi.fn(), showWarnToast: vi.fn() }));
+const prefs = vi.hoisted(() => ({ rackFolded: undefined as boolean | undefined }));
+vi.mock('../../../lib/preferences', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/preferences')>('../../../lib/preferences');
+  return { ...actual, usePreference: <T,>(_key: string, fallback: T) => [prefs.rackFolded ?? fallback, () => undefined] };
+});
 
 const { CITIES, CITY_LOG, COORDINATOR, HITS, HOSTS, NOW, POOL, RELEASE, SETTINGS, SLOTS, STATS, TASKS, WORKER_DETAIL, WORKER_STINTS, WORKERS } = await import('./fixtures');
 const { EngineSwitchDialog, WorkersTable } = await import('./FleetAccountsTab');
@@ -132,6 +137,19 @@ describe('Fleet tab', () => {
   });
   it('folds the host controls away until asked', () => {
     expect(rack('all')).toMatch(/class="fleet-chassis-fold" hidden/);
+  });
+  it('folds everything under the headline as one, and starts open', () => {
+    expect(rack('all')).toContain('<div class="fleet-rack-body">');
+    prefs.rackFolded = true;
+    try {
+      const folded = rack('all');
+      expect(folded).toContain('<div class="fleet-rack-body" hidden="">');
+      expect(folded).toContain('fleetRackVerdict');
+      expect(folded).toContain('fleetKindHealthy');
+      expect(folded).toMatch(/aria-expanded="false" aria-label="fleetFoldRack"/);
+    } finally {
+      prefs.rackFolded = undefined;
+    }
   });
   it('has no retired worker', () => {
     const html = renderToString(<WorkersTable data={fleetData} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
