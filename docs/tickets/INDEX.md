@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-559](./RS-559-engine-mismatch-reason-does-not-promise-one-login.md) | done | bug | P2 | Engine mismatch reason does not promise one login | — |
+| [RS-560](./RS-560-redeploys-cause-the-fleet-s-502s-and-503s.md) | done | bug | P2 | Redeploys cause the fleet's 502s and 503s | 1.433.3 |
+| [RS-559](./RS-559-engine-mismatch-reason-does-not-promise-one-login.md) | done | bug | P2 | Engine mismatch reason does not promise one login | 1.433.2 |
 | [RS-558](./RS-558-alerts-show-the-detailed-reason-not-the-status-code.md) | done | bug | P2 | Alerts show the detailed reason, not the status code | 1.433.1 |
 | [RS-557](./RS-557-fleet-tab-fold-the-status-panel-s-host-alert-release.md) | done | story | P2 | Fleet tab: fold the status panel's host, alert, release and engine rows | 1.433.0 |
 | [RS-556](./RS-556-exhausted-proxy-status-and-accounts-used-grouped-by.md) | done | story | P2 | Exhausted proxy status, and Accounts used grouped by IP | 1.432.0 |

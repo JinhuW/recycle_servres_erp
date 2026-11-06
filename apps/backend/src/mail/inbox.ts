@@ -325,6 +325,14 @@ export async function runInboxTick(
   return { scanned: headers.length, stored };
 }
 
+// ImapFlow's message is always "Command failed"; what the server said is on
+// these two fields, and the logger keeps only message and stack of an Error.
+export function imapFailure(err: unknown): unknown {
+  if (!(err instanceof Error)) return err;
+  const { responseText, serverResponseCode } = err as Error & { responseText?: unknown; serverResponseCode?: unknown };
+  return { error: err.message, stack: err.stack, responseText, serverResponseCode };
+}
+
 export function startMailInboxLoop(sql: Sql, env: Env): { stop(): void } {
   // Otherwise the variables would sit there looking ignored.
   if (mailGate(env).blocked || mailGate(env, 'recycleservers').blocked) {
@@ -355,7 +363,7 @@ function startBoxLoop(sql: Sql, cfg: MailConfig): { stop(): void } {
       failing = false;
       if (r.stored > 0) boxLog.info('web submission replies received', r);
     } catch (err) {
-      if (!failing) boxLog.warn('inbox poll failed', err);
+      if (!failing) boxLog.warn('inbox poll failed', imapFailure(err));
       failing = true;
     } finally {
       live = null;

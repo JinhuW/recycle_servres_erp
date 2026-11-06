@@ -112,6 +112,17 @@ const minutes = (n: number) => `${n} minutes`;
 type Waker = { emitter: EventEmitter; ready: Promise<unknown> };
 const wakers = new WeakMap<postgres.Sql, Waker>();
 let holds = 0;
+// A redeploy's drain waits on every open request, and a held poll can outlast
+// it: the grace then cuts the socket (a 502 at the worker) and the poll wakes
+// to a closed pool. So a drain ends the holds and takes no new ones.
+let draining = false;
+const armed = new Set<() => void>();
+
+/** On at SIGTERM; the worker comes back through retry_after to the new instance. */
+export function setPollsDraining(on: boolean): void {
+  draining = on;
+  if (on) for (const wake of armed) wake();
+}
 
 function waker(sql: postgres.Sql): Waker {
   let w = wakers.get(sql);
@@ -141,13 +152,14 @@ function armWake(sql: postgres.Sql): Wake {
   let release: (() => void) | null = null;
   const onTask = () => { fired = true; release?.(); };
   emitter.on('task', onTask);
+  armed.add(onTask);
   return {
     wait: (ms) => new Promise<void>((resolve) => {
-      if (fired) return resolve();
+      if (fired || draining) return resolve();
       const timer = setTimeout(() => { release = null; resolve(); }, ms);
       release = () => { clearTimeout(timer); release = null; resolve(); };
     }),
-    dispose: () => { emitter.off('task', onTask); },
+    dispose: () => { emitter.off('task', onTask); armed.delete(onTask); },
   };
 }
 
@@ -839,7 +851,7 @@ worker.post('/next-task', workerAuth, async (c) => {
     for (;;) {
       if ('stale' in answer) return c.json({ error: 'stale_epoch' }, 409);
       const left = deadline - Date.now();
-      if (answer.task || answer.reason !== 'nothing_due' || left <= 0 || holds >= MAX_HOLDS) return c.json(answer);
+      if (answer.task || answer.reason !== 'nothing_due' || left <= 0 || holds >= MAX_HOLDS || draining) return c.json(answer);
       holds++;
       try {
         await wake.wait(left);

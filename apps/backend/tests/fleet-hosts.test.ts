@@ -562,7 +562,7 @@ describe('the fleet VNC relay', () => {
   beforeAll(async () => {
     env = Object.assign(Object.create(testEnv), {});
     erp = createAdaptorServer({ fetch: (req) => app.fetch(req, env) }) as Server;
-    attachVncBridge(erp, app, env, { revalidateMs: 150 });
+    attachVncBridge(erp, app, env, { revalidateMs: 150, relayWaitMs: 400 });
     port = await new Promise<number>((resolve) => erp.listen(0, '127.0.0.1', () => resolve((erp.address() as AddressInfo).port)));
   });
 
@@ -687,6 +687,33 @@ describe('the fleet VNC relay', () => {
     expect(back.out.open).toBe(true);
     back.ws.close();
     await back.outcome;
+  });
+
+  it('holds a dial through the deploy gap until this instance takes the lock', async () => {
+    lease.stop();
+    const wt = await workerToken();
+    const { token } = await loginAs(ALEX);
+    const worker = open('/api/fleet/worker/vnc', { Authorization: `Bearer ${wt}` });
+    const viewer = open('/api/fleet/vnc/lab-1/ws', { Cookie: `at=${token}`, Origin: 'http://localhost:5173' });
+    await settle(100);
+    expect(worker.out.status).toBeUndefined();
+    expect(worker.out.open).toBeUndefined();
+    lease = startFleetRelayLease(getTestDb(), { retryMs: 100 });
+    expect(await lease.ready).toBe(true);
+    await settle();
+    expect(worker.out.open).toBe(true);
+    expect(viewer.out.open).toBe(true);
+    viewer.ws.close();
+    worker.ws.close();
+    await Promise.all([viewer.outcome, worker.outcome]);
+  });
+
+  it('refuses a bad token during the gap without holding it', async () => {
+    lease.stop();
+    const started = Date.now();
+    const r = await open('/api/fleet/worker/vnc', { Authorization: 'Bearer nope' }).outcome;
+    expect(r.status).toBe(401);
+    expect(Date.now() - started).toBeLessThan(300);
   });
 
   it('tells a viewer when the worker has no relay connected, and refuses the wrong callers', async () => {
