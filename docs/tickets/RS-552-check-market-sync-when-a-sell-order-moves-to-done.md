@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-05
 reporter: jinhu
 branch: JinhuW/sablefish
-pr:
+pr: 1118
 version: 1.428.0
 related: [RS-516, RS-517]
 ---
