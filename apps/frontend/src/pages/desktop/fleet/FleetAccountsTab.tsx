@@ -24,7 +24,7 @@ import {
 import { AccountBriefCell } from './accountBrief';
 import { AddHostDialog, FleetRack, ReleaseDialog } from './FleetHosts';
 import {
-  agoLabel, BudgetRing, ConfirmDialogBody, COORDINATOR_POLL_MS, EmptyRow, EngineChip, MarkHealthyButton, RestartWorkerButton, ParkDialog, ReleaseParkedDialog, RetireSlotDialog, resumeWaiting, UnavailableCard, useFleetMirror, useFleetPoll,
+  AcceptProfileButton, agoLabel, BudgetRing, ConfirmDialogBody, COORDINATOR_POLL_MS, EmptyRow, EngineChip, MarkHealthyButton, RestartWorkerButton, ParkDialog, ReleaseParkedDialog, RetireSlotDialog, resumeWaiting, UnavailableCard, useFleetMirror, useFleetPoll,
   WorkerStateChip,
 } from './shared';
 
@@ -287,6 +287,8 @@ function WorkerRow({ row: r, hostVersion, cityName, room, onChanged, now }: {
                 && <MarkHealthyButton workerId={r.workerId} version={r.version} resume={r.resume} state={r.state} onQueued={onChanged} />}
               {r.restartable && r.running && slot && !slot.parked && !mirror
                 && <RestartWorkerButton workerId={r.workerId} resume={r.resume} state={r.state} onQueued={onChanged} />}
+              {slot?.profile?.changed && !mirror
+                && <AcceptProfileButton no={slot.account_no} build={slot.profile.changed_build} onDone={onChanged} />}
               {r.running && slot && !slot.parked && !mirror
                 && <button type="button" className="btn sm ghost" onClick={() => setParking(true)}>{t('fleetPark')}</button>}
               {retirable && <button type="button" className="btn sm ghost fleet-danger-text" onClick={() => setRetiring(true)}>{t('fleetRetireFree')}</button>}

@@ -1,0 +1,52 @@
+---
+id: RS-554
+title: Fleet: link each account to its first CloakBrowser launch, and keep profiles different
+type: story
+status: in-progress
+priority: P2
+created: 2026-11-06
+reporter: jinhu
+branch: JinhuW/fleet-profile-first-launch
+pr: 1121
+version: 1.430.0
+related: []
+---
+
+## Ask
+
+> I hope each account can link the profit CloakBrowser first time launched for them.
+>
+> Also make sure all account should have a different profile.
+
+## Context
+
+Since RS-537 the seed, GPU and timezone live on `fb_pool_accounts` and a unique index holds seeds apart. That compares settings, not what a browser shows. Our probe got 43 distinct canvas hashes from 50 seeds, so two seeds can look alike, and nothing recorded what an account's browser really was, on which build, or checked a later launch against it. The screen was worked out again from `FLEET_SCREENS` on every re-add. #76 and #130 ran on CloakBrowser before 0224 and their seeds were never kept, so a new account could draw one.
+
+Owner decisions (2026-11-05): keep the identity and a launch record, with no saved Chrome folder; the guarantee covers accounts on CloakBrowser, and stock accounts stay untouched. "profit" in the Ask is read as "profile".
+
+## Acceptance criteria
+
+- [x] A cloak worker reports what its browser showed after the preflight and before any Facebook page; the first report is stored on the account with its time, build, worker and host.
+- [x] A later launch with the same fingerprint goes on; a different one parks `profile_changed`, opens no Facebook page, and only a manager's Accept clears it.
+- [x] A build bump alone (user agent and build) doesn't count as a change.
+- [x] A first launch that looks like another account gets a new seed, GPU and fresh claim, with no Facebook page; two racing can't both link.
+- [x] An account already shown to Facebook keeps its seed on a clash, and managers are alerted.
+- [x] No answer from the ERP parks `connect_failed`, so no account reaches Facebook unrecorded.
+- [x] A re-add brings back the first device, even if `FLEET_SCREENS` changes.
+- [x] The seeds of #76 and #130 are restored, and `fleet_slots` holds seeds unique too.
+- [x] The Fleet table shows the first launch and build, and offers Accept change only when there is one.
+- [x] The dev restore keeps the new columns and clears them with a colliding seed.
+
+## Out of scope
+
+- Saving the Chrome user-data folder: decided against; containers keep no disk and cookies and localStorage are sealed in the ERP already.
+- Stock accounts: no seed to differ, and moving a live session is a device change.
+- Making every new account start on CloakBrowser: that is Phase 3 of the launch plan, after the pilot.
+- Whether Facebook sees these as different machines. Fingerprint's demo gave 6 visitor IDs across about 50 seeds (spikes S2 and S3); this proves difference by our own hash only, and solo exits and the fonts decision still matter.
+
+## Notes
+
+- Rollout, none of which restarts a running worker or logs an account in: ERP release to `main`, then tag and stage facebook-tracker 0.18.0, then raise `FLEET_CLOAK_MIN_WORKER_VERSION` to 0.18.0. Each step needs the owner's yes.
+- #55, #133 and #134 record their fingerprint at their next natural boot. For #133 that becomes the baseline though it first launched earlier.
+- Still to run before tagging, with the licence key at run time: the fingerprint key over the 50 S2 profiles on the real binary, 10 repeated. The key's stability and uniqueness haven't been measured on CloakBrowser itself, and the verdicts depend on both.
+- A redraw waits for the old lease to end before it re-claims, as a moved exit does. No Facebook page has opened by then, so it costs only those minutes.

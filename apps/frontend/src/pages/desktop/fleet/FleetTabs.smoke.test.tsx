@@ -1,5 +1,6 @@
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import type { FleetProfileRecord } from '../../../lib/fleet';
 
 // Smoke tests: each tab's table renders its fixtures to markup without a DOM.
 // The fetchers are swapped out so the module graph never reaches lib/api.ts;
@@ -143,6 +144,17 @@ describe('Fleet tab', () => {
     const html = renderToString(<WorkersTable data={fleetData} filter={DEFAULT_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
     expect(html).not.toContain('homelab-9');          // silent, so parked
     expect(html).toContain('fleetNowReplacing');      // homelab-3 still runs
+  });
+  it('shows a cloak account\'s first launch, and offers Accept only for a changed fingerprint', () => {
+    const device = { viewport: [1366, 645] as [number, number], timezone: 'UTC', locale: 'en-US', browser_engine: 'cloak' as const, cloak_seed: 48213, cloak_gpu: 'Intel' as const };
+    const profile: FleetProfileRecord = { first_launched_at: '2026-11-01T00:00:00Z', fingerprint: 'a'.repeat(64), build: '155.0.8059.39.2', changed: false, changed_build: null };
+    const render = (p: FleetProfileRecord) => renderToString(
+      <WorkersTable data={{ ...fleetData, slots: SLOTS.map(s => s.account_no === 31 ? { ...s, device, profile: p } : s) }} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
+    expect(render(profile)).toContain('fleetProfileLinked');
+    expect(render(profile)).not.toContain('fleetProfileAccept');
+    expect(render({ ...profile, fingerprint: null })).toContain('fleetProfileNotMeasured');
+    expect(render({ first_launched_at: null, fingerprint: null, build: null, changed: false, changed_build: null })).toContain('fleetProfileNotLaunched');
+    expect(render({ ...profile, changed: true, changed_build: '156.0' })).toContain('fleetProfileAccept');
   });
   it('has an Engine column, and offers CloakBrowser only where the guard would', () => {
     const cloaked = SLOTS.map(s => s.account_no === 31

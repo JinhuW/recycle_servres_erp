@@ -37,6 +37,7 @@ import { notifyManagers } from '../lib/notify';
 import { lastKnownExitIp } from './proxies';
 import { latestProxyExit, slotWaits, type ProxyExitMeasure } from './proxyExit';
 import { notifyReady } from './scheduler';
+import { linkLaunch, readLaunchFacts } from './profile';
 import { minutesTodaySql, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
 import { loadRelease, ownWorkerId } from './hosts';
 import { recordStateChange } from './stateEvents';
@@ -645,6 +646,21 @@ worker.post('/heartbeat', workerAuth, async (c) => {
     ...(accepted.resume ? { resume_id: accepted.resume } : {}),
   };
   return c.json({ ok: true, ...directives, ...renewal });
+});
+
+// ─── The browser's own report ─────────────────────────────────────────────────
+// Before any Facebook page, so every verdict but a go-ahead costs no login.
+worker.post('/profile-launch', workerAuth, async (c) => {
+  const w: WorkerIdentity = c.var.worker;
+  const facts = readLaunchFacts(await c.req.json().catch(() => null));
+  if (!facts) return c.json(BAD_REQUEST, 422);
+  const verdict = await getDb(c.env).begin(async (tx) => {
+    if (!await eligibleSlot(tx, w, true)) return null;
+    return linkLaunch(tx, { worker_id: w.worker_id, host_id: w.slot.host_id, account_no: w.account_no, epoch: w.epoch }, facts);
+  });
+  if (!verdict) return c.json({ error: 'stale_epoch' }, 409);
+  flog.info('fleet profile launch', { accountNo: w.account_no, workerId: w.worker_id, verdict, seed: facts.cloak_seed, build: facts.build });
+  return c.json({ verdict });
 });
 
 // ─── Next task ────────────────────────────────────────────────────────────────

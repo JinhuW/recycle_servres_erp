@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
+import type postgres from 'postgres';
 import {
   isFleetTimezone, fleetCloakFor, fleetCloakSwitchable, fleetDeviceFor, fleetReportedEngine, FLEET_PILOT_ARMS, type FleetCloakGpu, type FleetPilotArm, fleetStockRevertible, fleetResumable, fleetRestartable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
   type FleetWorkerRelogin, type FleetWorkerResume, type FbPoolStatus,
@@ -15,6 +16,7 @@ import { loadSettings } from './cities';
 import { lastKnownExitIp, proxyStates } from './proxies';
 import { latestExitOf, latestProxyExit } from './proxyExit';
 import { managerOnly, type ManagerEnv } from './auth';
+import { acceptLaunch, ENGINE_LOCK, freeFingerprint } from './profile';
 import { bad, conflict, eventToWire, exists, isRefusal, minutesTodaySql, notFound, taskToWire, type Refusal, type TaskEventRow, type TaskRow } from './sql';
 
 // ─── Slots and workers, as the manager sees them ──────────────────────────────
@@ -45,6 +47,7 @@ type SlotRow = {
   lease_expires_at: Date | null; proxy_url: string | null; proxy_id: number | null; device: unknown;
   quarantined_until: Date | null; note: string; parked: boolean; reserved_until: Date | null;
   uid: string | null; pool_status: string; minutes_today: number; account_state: string | null; has_session: boolean; fleet_held: boolean;
+  profile_first_launched_at: Date | null; profile_fingerprint: string | null; profile_build: string | null; profile_changed: boolean; profile_changed_build: string | null;
 };
 
 type WorkerRow = {
@@ -103,6 +106,8 @@ const SLOT_SELECT = (sql: SqlLike) => sql`
          (s.lease_expires_at IS NOT DISTINCT FROM 'infinity'::timestamptz) AS parked,
          CASE WHEN s.reserved_until > NOW() THEN s.reserved_until END AS reserved_until,
          a.uid, a.status AS pool_status,
+         a.profile_first_launched_at, a.profile_fingerprint, a.profile_launch->>'build' AS profile_build, a.profile_launch_changed->>'build' AS profile_changed_build,
+         a.profile_launch_changed IS NOT NULL AS profile_changed,
          ${minutesTodaySql(sql, sql`s.account_no`)} AS minutes_today,
          ${ACCOUNT_STATE(sql)} AS account_state,
          COALESCE(a.cookie_enc, '') <> '' AS has_session,
@@ -146,6 +151,13 @@ function slotView(r: SlotRow, budget: number, workersById: Map<string, WorkerVie
     has_proxy: r.proxy_url !== null,
     proxy_id: r.proxy_id,
     device: device as FleetSlot['device'],
+    profile: device?.browser_engine === 'cloak' ? {
+      first_launched_at: iso(r.profile_first_launched_at),
+      fingerprint: r.profile_fingerprint,
+      build: r.profile_build,
+      changed: r.profile_changed,
+      changed_build: r.profile_changed_build,
+    } : null,
     quarantined_until: iso(r.quarantined_until),
     note: r.note,
     parked: r.parked,
@@ -209,15 +221,6 @@ function readSlotWrite(input: unknown): SlotWrite | Refusal {
   };
 }
 
-/** Taken first by anything that spends a cloak seat or an exit: the checks read
- *  other accounts' rows, which no row lock of ours would keep still. */
-const ENGINE_LOCK = 'fleet-slot-engine';
-
-const seedTaken = async (tx: SqlLike, seed: number, no: number): Promise<boolean> =>
-  (await tx`SELECT 1 FROM fb_pool_accounts WHERE cloak_seed = ${seed} AND no <> ${no}`).length > 0;
-const seedRefusal = (no: number): Refusal =>
-  conflict('cloak_seed_taken', `No free CloakBrowser seed was found for #${no}; two accounts on one seed are one machine`);
-
 /** Why another account can't start on CloakBrowser now, or null. */
 async function cloakSeatRefusal(tx: SqlLike): Promise<Refusal | null> {
   const settings = await loadSettings(tx);
@@ -227,20 +230,20 @@ async function cloakSeatRefusal(tx: SqlLike): Promise<Refusal | null> {
   return n >= settings.cloak_max_slots ? conflict('cloak_slots_full', `${n} of ${settings.cloak_max_slots} CloakBrowser slots are taken`) : null;
 }
 
-/** Nothing has shown a seed that isn't stored yet, so a taken one can simply be drawn again. */
-async function freeFingerprint(tx: SqlLike, no: number): Promise<ReturnType<typeof fleetCloakFor> | Refusal> {
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const fingerprint = fleetCloakFor(no, attempt);
-    if (!await seedTaken(tx, fingerprint.cloak_seed, no)) return fingerprint;
-  }
-  return seedRefusal(no);
+type Profile = { engine: FleetPilotArm; cloak_seed: number | null; cloak_gpu: FleetCloakGpu | null; timezone: string | null; device: unknown };
+
+/** The parts of a device that stay with the account; engine, seed and clock have columns. */
+function pinnedDevice(device: unknown): Record<string, unknown> | null {
+  if (!isRecord(device)) return null;
+  const picked = Object.entries(device).filter(([k]) => ['viewport', 'screen', 'device_scale_factor', 'locale', 'native'].includes(k));
+  return picked.length ? Object.fromEntries(picked) : null;
 }
 
-type Profile = { engine: FleetPilotArm; cloak_seed: number | null; cloak_gpu: FleetCloakGpu | null; timezone: string | null };
-
 async function writeProfile(tx: SqlLike, no: number, p: Profile): Promise<void> {
+  const pinned = pinnedDevice(p.device);
+  // COALESCE: the first pin is the device, and nothing after it rewrites it.
   await tx`UPDATE fb_pool_accounts SET browser_engine = ${p.engine}, cloak_seed = ${p.cloak_seed}, cloak_gpu = ${p.cloak_gpu},
-    profile_timezone = ${p.timezone} WHERE no = ${no}`;
+    profile_timezone = ${p.timezone}, profile_device = COALESCE(profile_device, ${pinned === null ? null : tx.json(pinned as postgres.JSONValue)}) WHERE no = ${no}`;
 }
 
 /** Everything else on an exit IP: a latest measurement of any other proxy that a
@@ -307,7 +310,7 @@ const repinnedZone = (enrolled: Pick<EnrollmentRow, 'first_login_at' | 'exit_tim
 
 type PoolForSlot = {
   status: string; holder_name: string | null; password_enc: string | null; totp_enc: string | null; uid: string; batch: string;
-  browser_engine: FleetPilotArm | null; cloak_seed: number | null; cloak_gpu: FleetCloakGpu | null; profile_timezone: string | null;
+  browser_engine: FleetPilotArm | null; cloak_seed: number | null; cloak_gpu: FleetCloakGpu | null; profile_timezone: string | null; profile_device: unknown;
   has_session: boolean; fleet_held: boolean; account_state: string | null;
 };
 type EnrollmentRow = {
@@ -328,7 +331,7 @@ slots.post('/', async (c) => {
     await tx`SELECT pg_advisory_xact_lock(hashtext(${ENGINE_LOCK}))`;
     const [account] = await tx<PoolForSlot[]>`
       SELECT a.status, a.holder_name, a.password_enc, a.totp_enc, a.uid, a.batch,
-             a.browser_engine, a.cloak_seed, a.cloak_gpu, a.profile_timezone,
+             a.browser_engine, a.cloak_seed, a.cloak_gpu, a.profile_timezone, a.profile_device,
              COALESCE(a.cookie_enc, '') <> '' AS has_session,
              ${FLEET_HELD(tx, tx`a.no`)} AS fleet_held,
              (SELECT e.to_state FROM fleet_worker_state_events e WHERE e.account_no = a.no ORDER BY e.at DESC, e.id DESC LIMIT 1) AS account_state
@@ -365,8 +368,8 @@ slots.post('/', async (c) => {
     if (enroll && enrolled && enrolled.first_claimed_at === null && account.cloak_seed === enrolled.seed
         && (enrolled.pilot_id !== enroll.pilot_id || enrolled.arm !== enroll.arm)) {
       await tx`DELETE FROM fleet_pilot_enrollments WHERE account_no = ${no}`;
-      await tx`UPDATE fb_pool_accounts SET browser_engine = NULL, cloak_seed = NULL, cloak_gpu = NULL, profile_timezone = NULL WHERE no = ${no}`;
-      Object.assign(account, { browser_engine: null, cloak_seed: null, cloak_gpu: null, profile_timezone: null });
+      await tx`UPDATE fb_pool_accounts SET browser_engine = NULL, cloak_seed = NULL, cloak_gpu = NULL, profile_timezone = NULL, profile_device = NULL WHERE no = ${no}`;
+      Object.assign(account, { browser_engine: null, cloak_seed: null, cloak_gpu: null, profile_timezone: null, profile_device: null });
       enrolled = undefined as unknown as EnrollmentRow;
     }
     if (enroll && enrolled && (enrolled.pilot_id !== enroll.pilot_id || enrolled.arm !== enroll.arm)) {
@@ -417,6 +420,8 @@ slots.post('/', async (c) => {
     const timezone = repinned ?? account.profile_timezone ?? exitZone ?? proxy.timezone;
     const device = {
       ...fleetDeviceFor(no, timezone),
+      // Worked out from a screen list that can change; the account's own stays.
+      ...(pinnedDevice(account.profile_device) ?? {}),
       ...(engine ? { browser_engine: engine } : {}),
       ...(fingerprint ?? {}),
     };
@@ -426,7 +431,7 @@ slots.post('/', async (c) => {
       WHERE no = ${no}`;
     await writeEvent(tx, user, 'assigned', 'fleet', no, FLEET_HOLDER);
     if (engine) {
-      await writeProfile(tx, no, { engine, cloak_seed: fingerprint?.cloak_seed ?? null, cloak_gpu: fingerprint?.cloak_gpu ?? null, timezone });
+      await writeProfile(tx, no, { engine, cloak_seed: fingerprint?.cloak_seed ?? null, cloak_gpu: fingerprint?.cloak_gpu ?? null, timezone, device: fleetDeviceFor(no, timezone) });
     }
     if (enroll && !enrolled) {
       await tx`
@@ -698,11 +703,34 @@ slots.post('/:no/engine', async (c) => {
     const zone = check?.fresh && check.ok && isFleetTimezone(check.timezone) ? check.timezone : device?.timezone ?? null;
     const cloak = { browser_engine: 'cloak', ...fingerprint, ...(zone ? { timezone: zone } : {}) };
     await tx`UPDATE fleet_slots SET device = COALESCE(device, '{}'::jsonb) || ${tx.json(cloak)} WHERE account_no = ${no}`;
-    await writeProfile(tx, no, { engine: 'cloak', ...fingerprint, timezone: zone });
+    await writeProfile(tx, no, { engine: 'cloak', ...fingerprint, timezone: zone, device });
     return { changed: true };
   });
   if (isRefusal(out)) return c.json(out.body, out.status);
   if (out.changed) wlog.info('fleet slot engine switched', { accountNo: no, engine, by: c.var.user.email });
+  return c.json({ slot: await loadSlotView(sql, no) });
+});
+
+// A planned change, such as a new build: the fingerprint moved, and only a manager
+// can say that's expected. The waiting worker runs its preflight again, in the same
+// browser, and finds it matches.
+slots.post('/:no/profile/accept', async (c) => {
+  const no = parseNo(c.req.param('no'));
+  if (no === null) return c.json({ error: 'not_found' }, 404);
+  const user = c.var.user;
+  const sql = getDb(c.env);
+  const out = await sql.begin(async (tx): Promise<Refusal | true> => {
+    if (!await acceptLaunch(tx, no, user.email)) return conflict('no_profile_change', `#${no} has no changed launch to accept`);
+    await tx`
+      UPDATE fleet_workers w SET resume_id = ${randomUUID()}, resume_requested_at = NOW(),
+        resume_requested_by = ${user.email}, resume_delivered_at = NULL
+      FROM fleet_slots s
+      WHERE s.account_no = ${no} AND w.account_no = s.account_no AND w.epoch = s.epoch
+        AND w.state = 'DEAD' AND w.detail->>'reason' = 'profile_changed'`;
+    return true;
+  });
+  if (isRefusal(out)) return c.json(out.body, out.status);
+  wlog.info('fleet profile change accepted', { accountNo: no, by: user.email });
   return c.json({ slot: await loadSlotView(sql, no) });
 });
 

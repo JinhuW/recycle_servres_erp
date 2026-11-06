@@ -39,6 +39,10 @@ export const fleetResumable = (state: string | null | undefined, detail: unknown
 export const fleetRestartable = (state: string | null | undefined, detail: unknown): boolean =>
   state === 'DEAD' && !!detail && typeof detail === 'object' && (detail as Record<string, unknown>).reason === 'exit_moved';
 
+/** Whether a worker waits on a fingerprint that differs from its account's record. */
+export const fleetProfileChanged = (state: string | null | undefined, detail: unknown): boolean =>
+  state === 'DEAD' && !!detail && typeof detail === 'object' && (detail as Record<string, unknown>).reason === 'profile_changed';
+
 /** The first worker build that takes the `resume` directive. */
 export const FLEET_RESUME_SINCE = [0, 15, 0] as const;
 
@@ -230,6 +234,44 @@ export type FleetDevice = {
   /** CloakBrowser's fingerprint seed and GPU; written once. fb_pool_accounts keeps them past the slot. */
   cloak_seed?: number;
   cloak_gpu?: FleetCloakGpu;
+};
+
+/** What a worker's browser really showed, reported after its preflight and before any Facebook page. */
+export type FleetProfileLaunchFacts = {
+  cloak_seed: number;
+  canvas_sha256: string;
+  webgl_sha256: string;
+  hardware_concurrency: number;
+  device_memory: number | null;
+  screen: [number, number];
+  platform: string;
+  languages: string[];
+  user_agent: string;
+  /** The CloakBrowser build baked into the image. */
+  build: string | null;
+};
+
+/**
+ * The ERP's answer to that report. `linked` first launch recorded; `match` same as
+ * the record; `redraw` looks like another account and nothing has reached Facebook,
+ * so a new seed is stored and the worker restarts for it; `duplicate` looks like
+ * another account but has reached Facebook, so it keeps its seed and managers are
+ * told; `changed` differs from its own record and parks for a manager;
+ * `no_free_seed` the redraws ran out and it parks.
+ */
+export const FLEET_PROFILE_VERDICTS = ['linked', 'match', 'redraw', 'duplicate', 'changed', 'no_free_seed'] as const;
+export type FleetProfileVerdict = (typeof FLEET_PROFILE_VERDICTS)[number];
+
+/** A CloakBrowser account's launch record, as the fleet pages show it. */
+export type FleetProfileRecord = {
+  /** Null until it has launched. */
+  first_launched_at: string | null;
+  /** Null when it launched before workers reported this. */
+  fingerprint: string | null;
+  build: string | null;
+  /** Its latest launch differs from the record and waits for a manager. */
+  changed: boolean;
+  changed_build: string | null;
 };
 
 export const FLEET_BROWSER_ENGINES = ['stock', 'cloak'] as const;
@@ -546,6 +588,8 @@ export type FleetSlot = {
   /** The listed proxy it was made on; null for a seeded slot or a removed proxy. */
   proxy_id: number | null;
   device: FleetDeviceProfile | null;
+  /** Null on a stock slot. */
+  profile: FleetProfileRecord | null;
   quarantined_until: string | null;
   note: string;
   /** A manager parked it: nothing claims it until it is unparked, and its
@@ -939,6 +983,8 @@ export type FleetErrorCode =
   /** Re-login or resume while the slot's engine is not the one its worker
    *  runs: the fresh session would carry onto the other fingerprint. */
   | 'engine_mismatch'
+  /** Accepting a launch for an account with no changed one waiting. */
+  | 'no_profile_change'
   /** Enrolling with the seed another pool account's profile holds. */
   | 'cloak_seed_taken'
   /** Enrolling an account already enrolled in another pilot or arm. */
