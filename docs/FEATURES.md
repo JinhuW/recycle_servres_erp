@@ -3835,7 +3835,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     This proves accounts differ by our own hash, not that Facebook sees separate
     machines. A proxy timezone edit,
     or Change proxy, leaves that timezone alone and only moves accounts with no
-    profile. **Add to fleet** can also name a pilot and an arm, which enrolls
+    profile. **Add to fleet** has a Browser choice (v1.431.0, RS-555): CloakBrowser,
+    the default, which starts a new account on a seat and an exit of its own with no
+    pilot, or Stock Chromium, which can share an exit. It can also name a pilot and an arm, which enrolls
     the account in one step: `POST /api/fleet/slots` writes the enrollment
     (`fleet_pilot_enrollments`, which outlives the slot and the account), the
     profile, the proxy and the slot in one transaction, so no worker can claim a

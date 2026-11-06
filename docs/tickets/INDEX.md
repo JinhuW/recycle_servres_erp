@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-554](./RS-554-fleet-link-each-account-to-its-first-cloakbrowser-la.md) | in-progress | story | P2 | Fleet: link each account to its first CloakBrowser launch, and keep profiles different | — |
+| [RS-555](./RS-555-add-to-fleet-offers-the-browser-engine-without-a-pil.md) | done | story | P2 | Add to fleet offers the browser engine without a pilot | 1.431.0 |
+| [RS-554](./RS-554-fleet-link-each-account-to-its-first-cloakbrowser-la.md) | in-progress | story | P2 | Fleet: link each account to its first CloakBrowser launch, and keep profiles different | 1.430.0 |
 | [RS-553](./RS-553-fleet-tab-lead-with-fleet-status-fold-the-host-detai.md) | done | story | P2 | Fleet tab: lead with fleet status, fold the host detail away | 1.429.0 |
 | [RS-552](./RS-552-check-market-sync-when-a-sell-order-moves-to-done.md) | done | story | P2 | Check Market sync when a sell order moves to Done | 1.428.0 |
 | [RS-551](./RS-551-fleet-worker-pin-the-cloakbrowser-build-and-read-a-l.md) | done | bug | P2 | Fleet worker: pin the CloakBrowser build and read a live licence outage as an outage | facebook-tracker 0.17.0 |

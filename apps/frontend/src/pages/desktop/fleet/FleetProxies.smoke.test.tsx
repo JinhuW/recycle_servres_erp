@@ -14,7 +14,7 @@ vi.mock('../../../components/Modal', () => ({ Modal: ({ children }: { children: 
 vi.mock('../../../lib/errorToast', () => ({ handleFetchError: vi.fn(), showSuccessToast: vi.fn(), showWarnToast: vi.fn() }));
 
 const { PROXIES, SLOTS } = await import('./fixtures');
-const { AddToFleetDialog, ChangeProxyDialog, ProxyDialog, RemoveFromFleetDialog } = await import('./FleetProxies');
+const { AddToFleetDialog, addSlotEngine, ChangeProxyDialog, ProxyDialog, RemoveFromFleetDialog } = await import('./FleetProxies');
 const noop = () => undefined;
 
 describe('Proxy form', () => {
@@ -33,7 +33,7 @@ describe('Add to fleet', () => {
     expect(html).toMatch(/<option value=""[^>]*selected=""[^>]*>fpAddToFleetRandom/);
     expect(html).toContain('Decodo NY 2');
     expect(html).toContain('Decodo CHI 1');
-    expect(html.match(/<option/g)?.length).toBe(4);
+    expect(html.match(/<option/g)?.length).toBe(6);       // 4 proxy choices, 2 engines
     expect(html).toMatch(/<option[^>]*value="1"[^>]*disabled=""|<option[^>]*disabled=""[^>]*value="1"/);    // Decodo NY 1 carries two
     expect(html).toContain('fpAddToFleetFull');
     expect(html).not.toContain('fpAddToFleetDevice');     // no proxy picked, so no timezone to show yet
@@ -41,7 +41,19 @@ describe('Add to fleet', () => {
   it('offers an optional pilot, with the arm hidden until one is named', () => {
     const html = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={2} onClose={noop} onDone={noop} />);
     expect(html).toContain('fpAddToFleetPilot');
-    expect(html).not.toContain('fpAddToFleetArmCloak');
+    expect(html).not.toContain('fpAddToFleetArmPick');
+  });
+  it('offers the browser with no pilot, CloakBrowser selected', () => {
+    const html = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={2} onClose={noop} onDone={noop} />);
+    expect(html).toContain('fpAddToFleetEngine');
+    expect(html).toMatch(/<option value="cloak"[^>]*selected=""[^>]*>fpAddToFleetArmCloak/);
+    expect(html).toContain('fpAddToFleetArmStock');
+  });
+  it('sends an engine only for CloakBrowser, and a pilot always with its arm', () => {
+    expect(addSlotEngine('', '', 'stock')).toEqual({});
+    expect(addSlotEngine('', '', 'cloak')).toEqual({ engine: 'cloak' });
+    expect(addSlotEngine(' p1 ', 'stock', 'cloak')).toEqual({ pilot: 'p1', arm: 'stock' });
+    expect(addSlotEngine('p1', '', 'cloak')).toEqual({});
   });
   it('lists a down proxy disabled, and says so when every proxy with room is down', () => {
     const one = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={2} health={new Map([[3, 'down']])} onClose={noop} onDone={noop} />);
