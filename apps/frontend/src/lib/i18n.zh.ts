@@ -4363,6 +4363,8 @@ const zh: Record<string, string> = {
   fpAddToFleetArm: "分组",
   fpAddToFleetArmStock: "原版 Chromium",
   fpAddToFleetArmCloak: "CloakBrowser",
+  fpAddToFleetEngine: "浏览器",
+  fpAddToFleetNoSoloExit: "没有未被其他账号使用的代理。CloakBrowser 和试点账号需要独占一个代理。",
   fpAddToFleetConfirm: "加入车队",
   fpAddedToFleetToast: "#{n} 已加入车队，代理 {proxy}",
   fpAddToFleetNeedsLogin: "需要先有密码和 2FA 密钥",

@@ -5434,6 +5434,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fpAddToFleetArm: "Arm",
     fpAddToFleetArmStock: "Stock Chromium",
     fpAddToFleetArmCloak: "CloakBrowser",
+    fpAddToFleetEngine: "Browser",
+    fpAddToFleetNoSoloExit: "No proxy without another account. CloakBrowser and pilot accounts need one to themselves.",
     fpAddToFleetConfirm: "Add to fleet",
     fpAddedToFleetToast: "#{n} is in the fleet on {proxy}",
     fpAddToFleetNeedsLogin: "Needs a password and a 2FA key first",

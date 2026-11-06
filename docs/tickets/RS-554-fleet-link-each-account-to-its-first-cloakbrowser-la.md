@@ -48,5 +48,5 @@ Owner decisions (2026-11-05): keep the identity and a launch record, with no sav
 
 - Rollout, none of which restarts a running worker or logs an account in: ERP release to `main`, then tag and stage facebook-tracker 0.18.0, then raise `FLEET_CLOAK_MIN_WORKER_VERSION` to 0.18.0. Each step needs the owner's yes.
 - #55, #133 and #134 record their fingerprint at their next natural boot. For #133 that becomes the baseline though it first launched earlier.
-- Still to run before tagging, with the licence key at run time: the fingerprint key over the 50 S2 profiles on the real binary, 10 repeated. The key's stability and uniqueness haven't been measured on CloakBrowser itself, and the verdicts depend on both.
+- The fingerprint key was measured on the saved S2 and S3 runs of the real binary, no new session and no key needed: all seeds distinct and every repeat stable ([note](../debug-notes/2026-11-06-cloakbrowser-spikes-s2-s3.md)). The new preflight script has run in stock Chromium only, so the first 0.18.0 image still deserves one account-free probe.
 - A redraw waits for the old lease to end before it re-claims, as a moved exit does. No Facebook page has opened by then, so it costs only those minutes.
