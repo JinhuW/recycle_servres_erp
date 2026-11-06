@@ -347,6 +347,7 @@ describe('hosts', () => {
     expect(imageVersion('localhost:5000/w:1.2')).toBe('1.2');
     expect(imageVersion('localhost:5000/w')).toBe('localhost:5000/w');
     expect(imageVersion('ghcr.io/x/w@sha256:abc')).toBe('ghcr.io/x/w@sha256:abc');
+    expect(imageVersion('ghcr.io/x/w:0.15.0@sha256:abc')).toBe('0.15.0');
   });
   it('sums up the latest release', () => {
     expect(releaseSummary(RELEASE)).toEqual({ upgraded: 3, skipped: 1, replacing: 'homelab-3' });

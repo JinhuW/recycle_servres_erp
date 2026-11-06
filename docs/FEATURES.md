@@ -3559,7 +3559,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   one stagger apart with nobody going to the host. The host's report carries
   `outage_attempts` during an outage. Since v1.425.0 (RS-546) the Fleet tab has a banner
   for an outage, for containers held for a person and for unread fleet alerts, each
-  dismissable on its own. A worker row names `Licence outage` or `Exit moved`. A
+  dismissable on its own; since v1.429.0 (RS-553) these are one line each in the
+  status panel, an alert's text under **Details**, a held worker with **Show worker**. A worker row names `Licence outage` or `Exit moved`. A
   worker whose port moved after a page opened offers **Restart**, which warns it is
   one boot login, and which nothing does by itself. Since v1.424.3 (RS-543) the outage
   heartbeat keeps the slot's lease for 24 hours, so a worker with no slot takes
@@ -3676,10 +3677,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   tab says so and the rest of the page is unaffected. Every tab re-reads every
   10 s while it is visible.
   Since v1.351.0 (RS-403) the Fleet and Analysis tabs show the ERP's own rows without waiting for the coordinator, whose rows fill in when they land, read every 30 s and never while the last read is still out; the tabs and the tab-bar counts send each URL once per load and read the pool summary, not the secret-bearing snapshot.
-  - **Fleet** (`/#/fleet`, v1.344.0): a strip of host cards, then one table
-    of every worker (since v1.361.0, RS-412; before, every account). A host
-    card gives the id, the agent's version, when it
-    last reported, running of capacity, the **Authoritative** switch (off is
+  - **Fleet** (`/#/fleet`, v1.344.0): a status panel, then one table of every
+    worker (since v1.361.0, RS-412; before, every account). Since v1.429.0
+    (RS-553) the panel opens with a headline ("11 of 15 workers healthy", and how
+    many things need a person), the state filter and one row per host: a bay per
+    worker slot, solid green for healthy, red with "!" for parked, hatched for
+    free, an outline for empty. Clicking a bay shows that worker in the table.
+    Observe-only hosts sort last and dimmed. A host's row shows how many workers
+    are on older builds, running of capacity and, once it is late, when it last
+    reported. Its fold gives the agent's version, when it
+    last reported, the **Authoritative** switch (off is
     observe-only: the agent reports and starts nothing), the capacity stepper
     (a new worker is a Facebook login; since v1.364.0 the agent runs no more
     workers than the host has accounts for; since v1.382.0 (RS-459) a − that
@@ -3848,7 +3855,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     row offers **Back to stock**, another new device, only while no worker
     can be starting on it (parked, no worker, or a lost session). It is
     refused once the cloak session has been healthy. A
-    **Browser engine** card under the host cards has the **CloakBrowser on**
+    **Browser engine** row in the status panel keeps its loss rates visible and
+    folds away the **CloakBrowser on**
     switch (`cloak_enabled`, default off; off stops new switches and leaves
     switched accounts alone), the seats stepper (`cloak_max_slots`, default
     1, the license's session limit; parked cloak slots count) and the
