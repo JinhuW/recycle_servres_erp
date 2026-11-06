@@ -83,6 +83,24 @@ Repeats of one seed on 155 held every hash, 10 of 10, so this difference isn't n
 IDs matched across builds in 8 of 8, then 4 of 6, but they also move between repeats of one
 build, so they say little here.
 
+## RS-554: does the launch fingerprint tell seeds apart?
+
+**Yes, on the same saved runs.** The key RS-554 records is a hash of canvas, WebGL, hardware
+concurrency, memory, screen, platform and languages. The worker's preflight draws what these
+runs' probe drew, line for line.
+
+| Build | Runs | Seeds | Repeated seeds | Repeats that moved | Distinct keys |
+| --- | --- | --- | --- | --- | --- |
+| 155 | 85 | 51 | 14 | 0 | 51 |
+| 156 | 67 | 51 | 14 | 0 | 51 |
+
+No single field would do: on build 155 the 51 seeds share 46 canvas hashes and 32 WebGL hashes,
+so comparing canvas alone would have flagged look-alikes that aren't. A clash stays possible as
+the fleet grows, which is what `redraw` is for. From S3 above, a build bump should leave most
+keys alone but would move at least #1031's WebGL, so it parks that account for Accept.
+
+This is our own hash. It doesn't change the finding above that Fingerprint links these seeds.
+
 ## Limits
 
 - **This is Fingerprint's detector, not Facebook's.** Facebook's checks are unknown, so these
