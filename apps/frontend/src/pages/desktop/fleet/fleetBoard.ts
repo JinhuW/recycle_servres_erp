@@ -305,14 +305,17 @@ export function hostRunning(h: FleetHost): { running: number; desired: number } 
   return { running, desired: h.desired.count };
 }
 
-/** The containers above capacity `next`: every one numbered above it, as
- *  `apps/fleet-agent/src/plan.ts` reads `<host_id>-<n>`, highest first. The
- *  agent removes none of them; it only stops restarting them. */
+/** A worker's number on its host, as `apps/fleet-agent/src/plan.ts` reads
+ *  `<host_id>-<n>`; null for a worker named any other way. */
+export function workerIndex(hostId: string, workerId: string): number | null {
+  const m = workerId.startsWith(`${hostId}-`) ? /^[1-9]\d*$/.exec(workerId.slice(hostId.length + 1)) : null;
+  return m ? Number(m[0]) : null;
+}
+
+/** The containers above capacity `next`: every one numbered above it, highest
+ *  first. The agent removes none of them; it only stops restarting them. */
 export function capacityCuts(h: Pick<FleetHost, 'host_id' | 'report'>, next: number): FleetHostContainer[] {
-  const index = (id: string) => {
-    const m = id.startsWith(`${h.host_id}-`) ? /^[1-9]\d*$/.exec(id.slice(h.host_id.length + 1)) : null;
-    return m ? Number(m[0]) : null;
-  };
+  const index = (id: string) => workerIndex(h.host_id, id);
   return (h.report?.containers ?? [])
     .filter(c => (index(c.worker_id) ?? 0) > next)
     .sort((a, b) => index(b.worker_id)! - index(a.worker_id)!);
@@ -331,11 +334,10 @@ export function rollProgress(h: FleetHost, release: FleetRelease | null): { onTa
   return { onTarget, total: containers.length, replacing: h.desired.roll?.replace ?? null };
 }
 
-/** An image's tag, its version: "…/aimm-recycle:0.14.6" → "0.14.6". A
- *  digest-pinned or untagged image has none and reads as the image itself. */
+/** An image's tag, its version: "…/aimm-recycle:0.14.6" → "0.14.6", with or
+ *  without a digest after it. An image with no tag reads as the image itself. */
 export function imageVersion(image: string): string {
-  if (image.includes('@')) return image;
-  return /:([^:/]+)$/.exec(image)?.[1] ?? image;
+  return /:([^:/]+)$/.exec(image.split('@')[0])?.[1] ?? image;
 }
 
 /** Workers on a host still running an older image than the one new workers
