@@ -1830,9 +1830,14 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     is left out of that average. If the order's lines changed after the dialog
     opened, the sync is refused and writes nothing. The order's prices don't
     change. The button waits while the order has unsaved changes. A later sync
-    of a part replaces the order's earlier reading, closing the order withdraws
-    its readings (the history's *closed* entry lists them), and Done records
-    the full `sale:<order>` price over them. A part the order stops pricing
+    of a part replaces the order's earlier reading, and closing the order
+    withdraws its readings (the history's *closed* entry lists them). Done keeps
+    a synced part's price and records the full `sale:<order>` price only for
+    parts never synced (v1.428.0, RS-552). Moving an order to Done checks this
+    first: the Done dialog names the priced parts not yet synced and offers the
+    sync, limited to those parts, and the manager can still continue. A part
+    synced and then repriced still counts as synced, so it needs syncing again
+    before Done. A part the order stops pricing
     (removed, or held at qty or price 0) has its reading withdrawn on the next
     save, sync or Done (v1.414.1, RS-517).
   - **The same sheet prices the PO in Review mode** (v1.313.0). Since
@@ -2840,7 +2845,8 @@ over MCP.
   SKU was last updated, without tapping to expand (v1.395.2).
 - **Five feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
-  on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
+  on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`,
+  except parts it already synced, v1.428.0),
   and a price-list import on the Market page (`import:<email>`, v1.247.0).
   A fifth is a sell order's Sync to Market at a chosen percent (`bid:<order>`,
   v1.414.0). From v1.138.3 this was a save following a vendor price import, off

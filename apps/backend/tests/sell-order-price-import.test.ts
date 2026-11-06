@@ -12,6 +12,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { signOffAll } from './helpers/fixtures';
+import { canonPartNumberJs } from '../src/lib/part-number';
 
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -601,7 +602,7 @@ async function saveAt(token: string, id: string, a: number, b: number) {
   expect(res.status).toBe(200);
 }
 const sync = (token: string, id: string, percent: unknown, parts: unknown) =>
-  api<{ recorded: number; error?: string }>('POST', `/api/sell-orders/${id}/market-sync`, {
+  api<{ recorded: number; marketSyncedParts: string[]; error?: string }>('POST', `/api/sell-orders/${id}/market-sync`, {
     token, body: { percent, parts },
   });
 
@@ -683,18 +684,46 @@ describe('POST /api/sell-orders/:id/market-sync', () => {
     expect(ev?.detail.withdrawnPrices).toEqual([{ partNumber: 'BID-A1', price: 55 }]);
   });
 
-  it('Done still records the full sale price over a synced reading', async () => {
+  it('Done keeps a synced price and records the full sale price for the rest', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, BID_LINES);
     await saveAt(token, id, 200, 120);
-    await sync(token, id, 90, ['BID-A1']);
-    expect((await refPrice('BID-A1'))?.last_price).toBe(180);
+    const synced = await sync(token, id, 90, ['BID-A1']);
+    expect(synced.body.marketSyncedParts).toEqual([canonPartNumberJs('BID-A1')]);
+
+    const detail = await api<{ order: { marketSyncedParts: string[] } }>('GET', `/api/sell-orders/${id}`, { token });
+    expect(detail.body.order.marketSyncedParts).toEqual([canonPartNumberJs('BID-A1')]);
 
     await signOffAll(id);
     expect((await api('POST', `/api/sell-orders/${id}/status`, {
       token, body: { to: 'Done', note: 'paid' },
     })).status).toBe(200);
-    expect(await refPrice('BID-A1')).toMatchObject({ last_price: 200, last_price_source: `sale:${id}` });
+
+    const a = await refPrice('BID-A1');
+    expect(a).toMatchObject({ last_price: 180, last_price_source: `bid:${id}` });
+    expect(await eventsFor(a!.id)).toEqual([{ price: 180, source: `bid:${id}` }]);
+    expect(await refPrice('BID-B2')).toMatchObject({ last_price: 120, last_price_source: `sale:${id}` });
+  });
+
+  it('a reopened sale gives back only its sale readings, and Done again keeps the synced price', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    await saveAt(token, id, 200, 120);
+    await sync(token, id, 90, ['BID-A1']);
+    await signOffAll(id);
+    await api('POST', `/api/sell-orders/${id}/status`, { token, body: { to: 'Done', note: 'paid' } });
+
+    const reopened = await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Awaiting payment', from: 'Done', note: 'customer short-paid' },
+    });
+    expect(reopened.status).toBe(200);
+    expect(await refPrice('BID-A1')).toMatchObject({ last_price: 180, last_price_source: `bid:${id}` });
+    expect((await refPrice('BID-B2'))?.last_price_source).not.toBe(`sale:${id}`);
+
+    await signOffAll(id);
+    await api('POST', `/api/sell-orders/${id}/status`, { token, body: { to: 'Done', note: 'paid' } });
+    expect(await refPrice('BID-A1')).toMatchObject({ last_price: 180, last_price_source: `bid:${id}` });
+    expect(await refPrice('BID-B2')).toMatchObject({ last_price: 120, last_price_source: `sale:${id}` });
   });
 
   it('applies the percent to one qty-weighted point across a part\'s lines', async () => {
@@ -805,7 +834,7 @@ describe('POST /api/sell-orders/:id/market-sync', () => {
     const a = await refPrice('BID-A1');
     expect(a?.last_price ?? null).toBeNull();
     expect(await eventsFor(a!.id)).toEqual([]);
-    expect(await refPrice('BID-B2')).toMatchObject({ last_price: 120, last_price_source: `sale:${id}` });
+    expect(await refPrice('BID-B2')).toMatchObject({ last_price: 108, last_price_source: `bid:${id}` });
   });
 
   it('works from the USD a CNY order saved', async () => {

@@ -41,7 +41,7 @@ import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
 } from '../lib/fx';
-import { recordSaleDataPoints, retractSaleDataPoints, syncMarketPrices, retractBidDataPoints, retractUnpricedBids } from '../lib/sellOrderMarket';
+import { recordSaleDataPoints, retractSaleDataPoints, syncMarketPrices, syncedBidParts, retractBidDataPoints, retractUnpricedBids } from '../lib/sellOrderMarket';
 import type { WithdrawnPrice } from '../lib/refPriceEvents';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
@@ -352,7 +352,7 @@ sellOrders.get('/:id', async (c) => {
     WHERE sol.sell_order_id = ${id}
     ORDER BY ${sellLineOrder(sql, 'sol')}
   `;
-  const [listed, metaRows, attRows, metaStatusSet, signoff, orderAttRows] = await allLimited([
+  const [listed, metaRows, attRows, metaStatusSet, signoff, orderAttRows, marketSyncedParts] = await allLimited([
     linesQuery,
     // Per-status evidence (notes + attachments). The frontend expects a map
     // keyed by status with both fields flattened together.
@@ -378,6 +378,7 @@ sellOrders.get('/:id', async (c) => {
       WHERE a.sell_order_id = ${id}
       ORDER BY a.uploaded_at, a.id
     `,
+    () => syncedBidParts(sql, id),
   ] as const);
   // The lines in # order, each with its product's # — folded from this one
   // read, so a save landing mid-request can't split a product.
@@ -483,6 +484,7 @@ sellOrders.get('/:id', async (c) => {
       nativeSubtotal: +nativeSubtotal.toFixed(2),
       nativeTotal:    +nativeSubtotal.toFixed(2),
       statusMeta,
+      marketSyncedParts,
       attachments: orderAttRows.map(orderAttachmentJson),
     },
   });
@@ -661,7 +663,8 @@ sellOrders.post('/:id/market-sync', async (c) => {
         FROM sell_order_lines WHERE sell_order_id = ${id}`;
       if (linesVersion(now) !== seenVersion) return { kind: 'linesChanged' as const };
     }
-    return { kind: 'ok' as const, ...await syncMarketPrices(tx, id, u.id, parts as string[], percent) };
+    const { recorded } = await syncMarketPrices(tx, id, u.id, parts as string[], percent);
+    return { kind: 'ok' as const, recorded, marketSyncedParts: await syncedBidParts(tx, id) };
   });
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
   if (outcome.kind === 'locked') {
@@ -670,7 +673,7 @@ sellOrders.post('/:id/market-sync', async (c) => {
   if (outcome.kind === 'linesChanged') {
     return c.json({ error: 'the products on this order changed since you opened it — reload it and sync again', code: 'lines_changed' }, 409);
   }
-  return c.json({ recorded: outcome.recorded });
+  return c.json({ recorded: outcome.recorded, marketSyncedParts: outcome.marketSyncedParts });
 });
 
 // Field gates — fail fast with a clean 400 rather than letting a malformed

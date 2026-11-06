@@ -4,7 +4,7 @@
 // survive a parent-modal Cancel; (2) attachments come back as URLs the
 // frontend can render.
 
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { Icon, type IconName } from './Icon';
 import { api, MAX_UPLOAD_BYTES } from '../lib/api';
 import { useEscapeKey } from '../lib/useEscapeKey';
@@ -94,11 +94,13 @@ type Props = {
   // leave a Cancel-after-upload invisible on the tab. Only the note still
   // goes to `status-meta/<to>`; `initialAttachments` is ignored.
   attachments?: CommissionShots;
+  // Something the move needs said first, above the note.
+  notice?: ReactNode;
 };
 
 export function StatusChangeDialog({
   orderId, to, currentStatus, initialNote, initialAttachments, onCancel, onConfirm, onMutated,
-  apiBase = '/api/sell-orders', variant = 'sell', attachments: store,
+  apiBase = '/api/sell-orders', variant = 'sell', attachments: store, notice,
 }: Props) {
   const { t } = useT();
   const [note, setNote] = useState(initialNote);
@@ -227,6 +229,7 @@ export function StatusChangeDialog({
 
         {/* Body */}
         <div style={{ padding: 24, display: 'grid', gap: 18 }}>
+          {notice}
           <div className="field" style={{ marginBottom: 0 }}>
             <label className="label">{variant === 'purchase' ? t('poStatusNoteLabel') : t('trackingNote')}</label>
             <textarea
