@@ -54,9 +54,11 @@ so the two failures on 2026-11-04 can't be explained after the fact.
   and expired sessions (1,102 401s): already refused correctly.
 - `PATCH /api/sell-orders/SO-4075` and `SO-4077` 400s (8): correct, other orders
   had sold those lots.
-- 499s (68) and the 9 truncated-body 422s that share their timestamps: slow
-  requests that appear to be office uplink stalls. An inference, not proven, and
-  it overlaps the performance evidence in RS-525.
+- 499s (68), 8 of which the app logged as truncated-body 422s at the same
+  timestamps: slow requests that appear to be office uplink stalls. An inference,
+  not proven, and it overlaps the performance evidence in RS-525.
+- One other 422, `PUT /api/fleet/worker/session` on 2026-11-04 in 21 ms: the
+  access log keeps `bad_request` but not its detail, so the cause is unknown.
 - Lines Railway marks as errors but aren't: db-sync `drop cascades`, rclone
   `NOTICE`, Reddit `rate limited`, pgBackRest `stanza-create rc=50`
   (`pg_stat_archiver` shows archiving current, last failure 2026-10-23).
