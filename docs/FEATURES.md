@@ -3698,6 +3698,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     many things need a person), the state filter and one row per host: a bay per
     worker slot, solid green for healthy, red with "!" for parked, hatched for
     free, an outline for empty. Clicking a bay shows that worker in the table.
+    Since v1.433.0 (RS-557) an arrow beside the headline folds everything under the
+    top row, saved per user; it opens unfolded until someone folds it.
     Observe-only hosts sort last and dimmed. A host's row shows how many workers
     are on older builds, running of capacity and, once it is late, when it last
     reported. Its fold gives the agent's version, when it

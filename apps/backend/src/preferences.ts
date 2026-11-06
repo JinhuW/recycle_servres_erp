@@ -48,6 +48,7 @@ const SCHEMA: Record<string, Validator> = {
   'pack.labelLanguage':       isOneOf('auto', 'tspl', 'zpl', 'escpos'),
   'sidebar.folded':           isBoolean,
   'fleetWatch.accountHidden': isBoolean,
+  'fleet.rackFolded':         isBoolean,
   'leads.view':               isOneOf('list', 'board'),
   'onboarding.done':          isBoolean,
 };
