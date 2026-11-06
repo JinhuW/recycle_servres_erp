@@ -42,6 +42,27 @@ export const latestExitOf = (sql: SqlLike, proxy: ReturnType<SqlLike>) => sql`
   ORDER BY c.checked_at DESC, c.id DESC LIMIT 1`;
 
 /**
+ * The IP a port last exited from, whichever side checks it, for a LATERAL. Each
+ * side is its own index lookup, as this runs for every port on every claim.
+ */
+export const latestExitIpOf = (sql: SqlLike, url: ReturnType<SqlLike>) => sql`
+  SELECT x.exit_ip FROM (
+    (SELECT c.exit_ip, c.checked_at FROM fleet_proxy_checks c
+     WHERE c.source = 'erp' AND c.exit = ${url} AND c.ok AND c.exit_ip IS NOT NULL
+     ORDER BY c.checked_at DESC, c.id DESC LIMIT 1)
+    UNION ALL
+    (SELECT c.exit_ip, c.checked_at FROM fleet_proxy_checks c
+     WHERE c.source = 'coordinator' AND c.exit = ${url} AND c.ok AND c.exit_ip IS NOT NULL
+     ORDER BY c.checked_at DESC, c.id DESC LIMIT 1)
+  ) x ORDER BY x.checked_at DESC LIMIT 1`;
+
+/** The IP to stamp on a stint going out through `url`, or null if it was never measured. */
+export async function exitIpForStint(sql: SqlLike, url: string): Promise<string | null> {
+  const [row] = await sql<{ exit_ip: string }[]>`${latestExitIpOf(sql, sql`${url}::text`)}`;
+  return row?.exit_ip ?? null;
+}
+
+/**
  * Whether slot `s` belongs to a pilot account that hasn't opened Facebook yet,
  * on an exit the pilot wouldn't accept: a different IP or geo from the one
  * recorded at enrollment, or one another slot also uses. No measurement holds
@@ -74,8 +95,13 @@ export const exitUnknown = (sql: SqlLike) => sql`(
     SELECT 1 FROM fleet_proxy_checks c
     WHERE c.source = 'erp' AND c.proxy_id = s.proxy_id AND c.exit_ip IS NOT NULL))`;
 
-/** A slot no worker can be given yet, for the claim and for counting workers alike. */
-export const slotWaits = (sql: SqlLike) => sql`(${firstLoginHeld(sql)} OR ${exitUnknown(sql)})`;
+/**
+ * A slot no worker can be given yet, for the claim and for counting workers alike.
+ * `exhausted` is proxyMarks' answer, read once by the caller: a claim is a login,
+ * and one through a burned IP waits for the rotation.
+ */
+export const slotWaits = (sql: SqlLike, exhausted: readonly number[]) => sql`(
+  s.proxy_id = ANY(${exhausted as number[]}::int[]) OR ${firstLoginHeld(sql)} OR ${exitUnknown(sql)})`;
 
 export function hostPort(exit: string): { host: string; port: number } {
   const m = /^[a-z0-9]+:\/\/(.+?)(?::(\d+))?$/i.exec(exit);
@@ -176,6 +202,15 @@ export async function recordExitChanges(tx: SqlLike, rows: ProxyCheckRow[], at: 
               ${was.exit_ip}, ${was.city}, ${was.region}, ${was.country}, ${was.timezone},
               ${r.exit_ip}, ${r.city}, ${r.region}, ${r.country}, ${r.timezone},
               ${slots}::int[], ${tx.array(homelab.get(portKey(r.exit)) ?? [])}::text[], ${sharing.map((x) => x.account_no)}::int[])`;
+  }
+  // The account is on whatever its port exits from now, so a later failure
+  // counts against that IP. This also fills in a stint the claim couldn't, on a
+  // URL edited and not yet measured.
+  if (readings.length) {
+    await tx`
+      UPDATE fb_worker_accounts w SET exit_ip = v.ip
+      FROM unnest(${tx.array(readings.map((r) => r.exit))}::text[], ${tx.array(readings.map((r) => r.exit_ip!))}::text[]) v(exit, ip)
+      WHERE w.proxy_url = v.exit AND w.ended_at IS NULL AND w.exit_ip IS DISTINCT FROM v.ip`;
   }
   await alertExitChanges(tx);
 }

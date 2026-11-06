@@ -463,6 +463,8 @@ export type FleetProxy = {
   note: string;
   created_at: string;
   slots: FleetProxyUse[];
+  /** Its current IP has burned too many accounts: none go on it until it rotates. */
+  exhausted: boolean;
 };
 
 export type FleetProxyWrite = { label: string; url: string; timezone: string; note?: string };
@@ -958,6 +960,7 @@ export type FleetErrorCode =
   | 'proxy_full'
   /** The proxy failed its last health checks (proxyHealthState reads `down`). */
   | 'proxy_down'
+  | 'proxy_exhausted'
   /** Changing a slot's proxy: it is not on the proxy the manager confirmed from any more. */
   | 'proxy_changed'
   /** Removing a proxy a non-parked slot uses. */

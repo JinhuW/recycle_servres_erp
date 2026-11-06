@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-556](./RS-556-exhausted-proxy-status-and-accounts-used-grouped-by.md) | done | story | P2 | Exhausted proxy status, and Accounts used grouped by IP | 1.432.0 |
 | [RS-555](./RS-555-add-to-fleet-offers-the-browser-engine-without-a-pil.md) | done | story | P2 | Add to fleet offers the browser engine without a pilot | 1.431.0 |
 | [RS-554](./RS-554-fleet-link-each-account-to-its-first-cloakbrowser-la.md) | in-progress | story | P2 | Fleet: link each account to its first CloakBrowser launch, and keep profiles different | 1.430.0 |
 | [RS-553](./RS-553-fleet-tab-lead-with-fleet-status-fold-the-host-detai.md) | done | story | P2 | Fleet tab: lead with fleet status, fold the host detail away | 1.429.0 |

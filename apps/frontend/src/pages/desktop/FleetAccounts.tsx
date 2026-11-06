@@ -210,7 +210,7 @@ const FATE_KEYS: Record<PreviousFate, string> = {
   retired: 'fbcCredFateRetired',
 };
 
-const POOL_REFUSALS = new Set(['fpWorkerTaken', 'fpNoPassword', 'fpAssignRetired', 'fpAssignHeld', 'fpProxyDead']);
+const POOL_REFUSALS = new Set(['fpWorkerTaken', 'fpNoPassword', 'fpAssignRetired', 'fpAssignHeld', 'fpProxyExhausted']);
 const COOKIE_PROBLEM = { missing: 'fpCookieMissing', mismatch: 'fpCookieMismatch', unknown: 'fpCookieUnknown' } as const;
 
 function EditCredentialsModal({ account: w, onClose, onSaved }: {
@@ -236,11 +236,11 @@ function EditCredentialsModal({ account: w, onClose, onSaved }: {
   const held = pool ? heldByWorker(pool, w.worker_id) : undefined;
   const candidates = pool ? installCandidates(pool, query) : [];
   const picked = candidates.find(a => a.no === pick);
-  // A new account behind a DEAD proxy is the next one it burns; the backend
+  // A new account on an exhausted proxy is the next one it burns; the backend
   // refuses it too, this only says so before a pick.
   const mark = proxyMarkFor(marks, w);
-  const dead = mark?.dead ? mark : undefined;
-  const ready = !!picked && (!held || fate !== null) && !dead;
+  const exhausted = mark?.exhausted ? mark : undefined;
+  const ready = !!picked && (!held || fate !== null) && !exhausted;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -282,10 +282,10 @@ function EditCredentialsModal({ account: w, onClose, onSaved }: {
           <div style={{ fontSize: 13.5 }}>
             <span className="muted">{t('fbcCredCurrent')}</span> {current}
           </div>
-          {dead && (
+          {exhausted && (
             <div className="card-note ff-dead-note" style={{ padding: '10px 12px' }}>
               <Icon name="alert" size={16} />
-              <span>{t('fbcCredProxyDead', { url: dead.url, n: dead.failed })}</span>
+              <span>{t('fbcCredProxyExhausted', { url: exhausted.url, n: exhausted.failed })}</span>
             </div>
           )}
           {!acct && (

@@ -331,8 +331,21 @@ describe('Worker page', () => {
   const ROWS = ['fbcDetailFbLogin', 'fbcDetailFbUser', 'fbcDetailSecrets', 'fbcColSession', 'fbcDetailUa', 'fbcDetailBackup', 'fbcDetailProxy', 'fbcFoldPacing', 'fbcDetailSessionFile', 'fbcColBuild'];
   const STATS_ROW = ['fbcColAlerts', 'fbcColLastSearch', 'fbcDetailLastListing', 'fbcDetailErrors'];
 
+  it('groups Accounts used by IP, with each one\'s status and any worker\'s accounts', () => {
+    const stint = { uid: '100031000313131', email: 'acct31@example.test', proxyUrl: 'http://isp.example.net:10001', proxyKnown: true, startedAt: NOW - 86_400_000 };
+    const html = renderToString(<ErpWorkerView detail={WORKER_DETAIL} stints={WORKER_STINTS} ipGroups={[
+      { kind: 'ip', ip: '192.0.2.1', proxyUrl: stint.proxyUrl, status: 'exhausted', failed: 5, current: true,
+        stints: [{ ...stint, workerId: 'other-host-2', accountNo: 77, endedAt: NOW, outcome: 'retired' }] },
+      { kind: 'ip', ip: '192.0.2.2', proxyUrl: stint.proxyUrl, status: 'deprecated', failed: 0, current: false, stints: [] },
+      { kind: 'unrecorded', ip: null, proxyUrl: null, status: null, failed: 0, current: false,
+        stints: [{ ...stint, workerId: 'worker-60-14-1', accountNo: 78, endedAt: NOW, outcome: 'available' }] },
+    ]} onReload={noop} now={NOW} />);
+    for (const k of ['192.0.2.1', 'fbcIpStatus_exhausted', 'fbcIpStatus_deprecated', 'fbcIpNotRecorded', 'other-host-2', 'fbcIpCount']) expect(html, k).toContain(k);
+    expect(html).toContain('isp.example.net:10001');
+  });
+
   it('shows an ERP-fleet worker on the homelab layout, from its one read', () => {
-    const html = renderToString(<ErpWorkerView detail={WORKER_DETAIL} stints={WORKER_STINTS} onReload={noop} now={NOW} />);
+    const html = renderToString(<ErpWorkerView detail={WORKER_DETAIL} stints={WORKER_STINTS} ipGroups={[]} onReload={noop} now={NOW} />);
     for (const k of [...LAYOUT, ...ROWS, ...STATS_ROW]) expect(html, k).toContain(k);
     expect(html).toContain('acct31@example.test');          // the login is the title
     expect(html).toContain('worker-60-14-1');
@@ -360,7 +373,7 @@ describe('Worker page', () => {
 
   it('shows a parked worker\'s wall as its open checkpoint', () => {
     const parked = { ...WORKER_DETAIL, worker: { ...WORKER_DETAIL.worker, state: 'CHECKPOINT', task: null, detail: { reason: 'wall', wall: 'checkpoint', url: 'https://www.facebook.com/checkpoint/9' } } };
-    const html = renderToString(<ErpWorkerView detail={parked} stints={[]} onReload={noop} now={NOW} />);
+    const html = renderToString(<ErpWorkerView detail={parked} stints={[]} ipGroups={[]} onReload={noop} now={NOW} />);
     expect(html).toContain('ff-attention');
     expect(html).toContain('fbcAttnParked');
     expect(html).toContain('https://www.facebook.com/checkpoint/9');
@@ -368,24 +381,24 @@ describe('Worker page', () => {
   });
 
   it('offers Change proxy for its own slot or a parked one, not for an account another worker holds', () => {
-    expect(renderToString(<ErpWorkerView detail={WORKER_DETAIL} stints={[]} onReload={noop} now={NOW} />)).toContain('fleetChangeProxy');
+    expect(renderToString(<ErpWorkerView detail={WORKER_DETAIL} stints={[]} ipGroups={[]} onReload={noop} now={NOW} />)).toContain('fleetChangeProxy');
     const parked = { ...WORKER_DETAIL, holds_slot: false, slot: { ...WORKER_DETAIL.slot!, parked: true, worker_id: null } };
-    expect(renderToString(<ErpWorkerView detail={parked} stints={[]} onReload={noop} now={NOW} />)).toContain('fleetChangeProxy');
+    expect(renderToString(<ErpWorkerView detail={parked} stints={[]} ipGroups={[]} onReload={noop} now={NOW} />)).toContain('fleetChangeProxy');
     const elsewhere = { ...WORKER_DETAIL, holds_slot: false, slot: { ...WORKER_DETAIL.slot!, worker_id: 'worker-60-14-2' } };
-    expect(renderToString(<ErpWorkerView detail={elsewhere} stints={[]} onReload={noop} now={NOW} />)).not.toContain('fleetChangeProxy');
+    expect(renderToString(<ErpWorkerView detail={elsewhere} stints={[]} ipGroups={[]} onReload={noop} now={NOW} />)).not.toContain('fleetChangeProxy');
   });
 
   it('says when the running browser is behind its slot\'s proxy, and only then', () => {
     const live = { ...WORKER_DETAIL.slot!, lease_expires_at: new Date(NOW + 600_000).toISOString() };
     const behind = { ...WORKER_DETAIL, slot: live, running_exit: 'http://isp.example.net:19999' };
-    expect(renderToString(<ErpWorkerView detail={behind} stints={[]} onReload={noop} now={NOW} />)).toContain('fleetProxyBehind');
-    expect(renderToString(<ErpWorkerView detail={{ ...WORKER_DETAIL, slot: live }} stints={[]} onReload={noop} now={NOW} />)).not.toContain('fleetProxyBehind');
+    expect(renderToString(<ErpWorkerView detail={behind} stints={[]} ipGroups={[]} onReload={noop} now={NOW} />)).toContain('fleetProxyBehind');
+    expect(renderToString(<ErpWorkerView detail={{ ...WORKER_DETAIL, slot: live }} stints={[]} ipGroups={[]} onReload={noop} now={NOW} />)).not.toContain('fleetProxyBehind');
   });
 
   it('offers Unpark for a parked slot and reads "—" without a slot', () => {
-    const html = renderToString(<ErpWorkerView detail={{ ...WORKER_DETAIL, holds_slot: false, slot: { ...WORKER_DETAIL.slot!, parked: true, worker_id: null } }} stints={[]} onReload={noop} now={NOW} />);
+    const html = renderToString(<ErpWorkerView detail={{ ...WORKER_DETAIL, holds_slot: false, slot: { ...WORKER_DETAIL.slot!, parked: true, worker_id: null } }} stints={[]} ipGroups={[]} onReload={noop} now={NOW} />);
     expect(html).toContain('fleetUnpark');
-    const bare = renderToString(<ErpWorkerView detail={{ ...WORKER_DETAIL, slot: null, proxy: null, account: null }} stints={null} onReload={noop} now={NOW} />);
+    const bare = renderToString(<ErpWorkerView detail={{ ...WORKER_DETAIL, slot: null, proxy: null, account: null }} stints={null} ipGroups={null} onReload={noop} now={NOW} />);
     expect(bare).toContain('fleetSlotNone');
     expect(bare).toContain('fleetNoPoolAccount');
     expect(bare).not.toContain('fleetPark');
@@ -393,7 +406,7 @@ describe('Worker page', () => {
 
   it('shows a homelab worker on the same layout', () => {
     const html = renderToString(<HomelabWorkerView workerId="homelab-5" fleet={COORDINATOR} challenges={[]} hits={HITS} marks={[]}
-      stints={[]} logins={[]} cityLog={[]} onReload={noop} onMarks={noop} />);
+      stints={[]} ipGroups={[]} logins={[]} cityLog={[]} onReload={noop} onMarks={noop} />);
     for (const k of [...LAYOUT, ...ROWS, ...STATS_ROW]) expect(html, k).toContain(k);
     expect(html).toContain('homelab-5');
     expect(html).toContain('Los Angeles');
@@ -404,7 +417,7 @@ describe('Worker page', () => {
 
   it('still opens a retired homelab worker, dated and without a re-login', () => {
     const html = renderToString(<HomelabWorkerView workerId="homelab-20" fleet={COORDINATOR} challenges={[]} hits={HITS} marks={[]}
-      stints={[]} logins={[]} cityLog={[]} onReload={noop} onMarks={noop} />);
+      stints={[]} ipGroups={[]} logins={[]} cityLog={[]} onReload={noop} onMarks={noop} />);
     expect(html).toContain('homelab-20');
     expect(html).toContain('fleetRetiredOn');
     expect(html).not.toContain('fbcRelogin');

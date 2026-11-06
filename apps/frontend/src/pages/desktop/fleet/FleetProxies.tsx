@@ -202,7 +202,7 @@ export function AddToFleetDialog({ no, proxies, limit, health: given, onClose, o
     } catch (err) {
       // Went down since this read, or the read failed: the next pick must not
       // draw it again.
-      if (fleetErrorCode(err) === 'proxy_down') setHealth((h) => new Map(h).set(proxy.id, 'down'));
+      if (fleetErrorCode(err) === 'proxy_down' || fleetErrorCode(err) === 'proxy_exhausted') setHealth((h) => new Map(h).set(proxy.id, 'down'));
       warnOrFail(err);
       setBusy(false);
     }
@@ -223,10 +223,11 @@ export function AddToFleetDialog({ no, proxies, limit, health: given, onClose, o
               <select className="input" value={proxyId ?? ''} disabled={busy}
                 onChange={(e) => setProxyId(e.target.value === '' ? null : Number(e.target.value))}>
                 <option value="">{t('fpAddToFleetRandom')}</option>
-                {choices.map(({ proxy, load, full, down }) => (
-                  <option key={proxy.id} value={proxy.id} disabled={full || down}>
+                {choices.map(({ proxy, load, full, down, exhausted }) => (
+                  <option key={proxy.id} value={proxy.id} disabled={full || down || exhausted}>
                     {proxy.label}, {t('fleetProxyUses', { n: load, max: limit })}{full && `, ${t('fpAddToFleetFull')}`}
                     {!full && down && `, ${t('fpAddToFleetDown')}`}
+                    {!full && !down && exhausted && `, ${t('fpAddToFleetExhausted')}`}
                   </option>
                 ))}
               </select>
@@ -339,10 +340,11 @@ export function ChangeProxyDialog({ slot, current, holder, onClose, onDone }: {
                 <select className="input" value={proxyId ?? ''} disabled={busy} autoFocus
                   onChange={(e) => setProxyId(e.target.value === '' ? null : Number(e.target.value))}>
                   <option value="">{t('fleetChangeProxyPick')}</option>
-                  {choices.map(({ proxy, load: n, full, down }) => (
-                    <option key={proxy.id} value={proxy.id} disabled={full || down}>
+                  {choices.map(({ proxy, load: n, full, down, exhausted }) => (
+                    <option key={proxy.id} value={proxy.id} disabled={full || down || exhausted}>
                       {proxy.label}, {t('fleetProxyUses', { n, max: list.limit })}{full && `, ${t('fpAddToFleetFull')}`}
                       {!full && down && `, ${t('fpAddToFleetDown')}`}
+                      {!full && !down && exhausted && `, ${t('fpAddToFleetExhausted')}`}
                     </option>
                   ))}
                 </select>
@@ -373,8 +375,8 @@ export function ChangeProxyDialog({ slot, current, holder, onClose, onDone }: {
       setBusy(false);
       // The page's view of the slot is what was wrong, so it reads again.
       if (fleetErrorCode(err) === 'proxy_changed' || fleetErrorCode(err) === 'exists') { onDone(); return; }
-      // Filled or failed since the list was read: back to a fresh pick.
-      if (fleetErrorCode(err) === 'proxy_full' || fleetErrorCode(err) === 'proxy_down') {
+      // Filled, failed or exhausted since the list was read: back to a fresh pick.
+      if (fleetErrorCode(err) === 'proxy_full' || fleetErrorCode(err) === 'proxy_down' || fleetErrorCode(err) === 'proxy_exhausted') {
         setCheck(undefined);
         setProxyId(null);
         load().catch(handleFetchError);

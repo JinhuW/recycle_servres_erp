@@ -889,6 +889,15 @@
 .ff-tl-toggle {
   cursor: pointer;
 }
+.fp-table .ff-ip-head > td {
+  background: var(--bg-soft);
+}
+.ff-ip-head-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
 .fp-table .ff-tl-row > td {
   padding: 0;
   white-space: normal;

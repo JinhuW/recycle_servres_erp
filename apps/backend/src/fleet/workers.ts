@@ -14,6 +14,7 @@ import { loadRelease } from './hosts';
 import { cityLog } from './tasks';
 import { loadSettings } from './cities';
 import { lastKnownExitIp, proxyStates } from './proxies';
+import { exhaustedProxyIds } from './proxyMarks';
 import { latestExitOf, latestProxyExit } from './proxyExit';
 import { managerOnly, type ManagerEnv } from './auth';
 import { acceptLaunch, ENGINE_LOCK, freeFingerprint } from './profile';
@@ -361,6 +362,9 @@ slots.post('/', async (c) => {
     if ((await proxyStates(tx, proxyId)).get(proxyId) === 'down') {
       return conflict('proxy_down', `${exitName} failed its last proxy checks; pick another proxy`);
     }
+    if ((await exhaustedProxyIds(tx)).includes(proxyId)) {
+      return conflict('proxy_exhausted', `${exitName} is exhausted; rotate its IP in Decodo or pick another proxy`);
+    }
 
     let [enrolled] = await tx<EnrollmentRow[]>`SELECT pilot_id, arm, seed, first_claimed_at, first_login_at, exit_timezone FROM fleet_pilot_enrollments WHERE account_no = ${no}`;
     // A typo or the wrong arm can still be put right before a claim: no result
@@ -609,6 +613,9 @@ slots.post('/:no/proxy', async (c) => {
     if (n >= limit) return conflict('proxy_full', `${to} carries ${n} of ${limit} accounts`);
     if ((await proxyStates(tx, toId)).get(toId) === 'down') {
       return conflict('proxy_down', `${to} failed its last proxy checks; pick another proxy`);
+    }
+    if ((await exhaustedProxyIds(tx)).includes(toId)) {
+      return conflict('proxy_exhausted', `${to} is exhausted; rotate its IP in Decodo or pick another proxy`);
     }
     const [enrolled] = await tx<EnrollmentRow[]>`SELECT pilot_id, arm, seed, first_claimed_at, first_login_at, exit_timezone FROM fleet_pilot_enrollments WHERE account_no = ${no}`;
     let repinned: string | null = null;

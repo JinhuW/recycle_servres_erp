@@ -1,3 +1,4 @@
+import { FB_PROXY_EXHAUSTED_AFTER } from '@recycle-erp/shared';
 import { useMemo, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { TableSkeleton } from '../../../components/Skeleton';
@@ -8,7 +9,7 @@ import {
   fleetExitPointText, type FleetProxy, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxyHealthState, type FleetProxySource,
 } from '../../../lib/fleet';
 import { useT } from '../../../lib/i18n';
-import { ProxyDeadChip } from '../FleetWorkers';
+import { ProxyExhaustedChip } from '../FleetWorkers';
 import { ProxyDialog, RemoveProxyDialog } from './FleetProxies';
 import { easternClock } from './fleetBoard';
 import { exitIpUsers, proxyCrowding, proxyExitFlags, type ProxyExitFlag } from './proxyRules';
@@ -22,13 +23,16 @@ import { agoLabel, Clock, EmptyRow, Legend, UnavailableCard, useFleetMirror, use
 // over the day. The ERP's own rows are also where that list is edited; the
 // homelab's ports belong to rs_console and stay read-only here.
 
-const STATES = ['up', 'degraded', 'down', 'unchecked'] as const;
+// Exhausted is the pool's mark on a port, not a health check's answer, and a port
+// can be both up and exhausted; the legend filters by either.
+const STATES = ['up', 'degraded', 'down', 'unchecked', 'exhausted'] as const;
+type Bucket = (typeof STATES)[number];
 const STATE_CHIP: Record<FleetProxyHealthState, string> = { up: 'chip pos', degraded: 'chip warn', down: 'chip neg', unchecked: 'chip muted' };
-const STATE_KEY: Record<FleetProxyHealthState | 'all', string> = {
-  all: 'fleetSegAll', up: 'fleetProxyUp', degraded: 'fleetProxyDegraded', down: 'fleetProxyDown', unchecked: 'fleetProxyUnchecked',
+const STATE_KEY: Record<Bucket | 'all', string> = {
+  all: 'fleetSegAll', up: 'fleetProxyUp', degraded: 'fleetProxyDegraded', down: 'fleetProxyDown', unchecked: 'fleetProxyUnchecked', exhausted: 'fbcProxyExhausted',
 };
-const STATE_DOT: Record<FleetProxyHealthState | 'all', string> = {
-  all: 'fleet-dot-all', up: 'fleet-dot-pos', degraded: 'fleet-dot-warn', down: 'fleet-dot-neg', unchecked: 'fleet-dot-all',
+const STATE_DOT: Record<Bucket | 'all', string> = {
+  all: 'fleet-dot-all', up: 'fleet-dot-pos', degraded: 'fleet-dot-warn', down: 'fleet-dot-neg', unchecked: 'fleet-dot-all', exhausted: 'fleet-dot-neg',
 };
 const SOURCE_KEY: Record<FleetProxySource, string> = { erp: 'fleetProxySourceErp', coordinator: 'fleetProxySourceCoordinator' };
 // Down first: the row that needs a hand is the one to see.
@@ -38,7 +42,7 @@ type Data = { health: FleetProxyHealthAnswer; marks: FbProxyMark[] | null; proxi
 /** The ERP's proxy list behind the rows, for the Used by load and the edit actions. */
 type Editing = { proxies: readonly FleetProxy[]; limit: number; onEdit?: (p: FleetProxy) => void; onRemove?: (p: FleetProxy) => void };
 const DEFAULT_LIMIT = 2;
-type Filter = { state: FleetProxyHealthState | 'all'; source: FleetProxySource | ''; q: string };
+type Filter = { state: Bucket | 'all'; source: FleetProxySource | ''; q: string };
 
 /** Whether a row matches the search box: label, host:port, exit, city, worker or account. */
 export function proxyMatches(p: FleetProxyHealth, q: string): boolean {
@@ -129,17 +133,22 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
 }) {
   const { t, locale } = useT();
   const counts = useMemo(() => {
-    const out = { all: rows.length, up: 0, degraded: 0, down: 0, unchecked: 0 };
-    for (const p of rows) out[p.state] += 1;
+    const out = { all: rows.length, up: 0, degraded: 0, down: 0, unchecked: 0, exhausted: 0 };
+    for (const p of rows) {
+      out[p.state] += 1;
+      if (proxyMarkFor(marks, { proxy: { url: p.exit } })?.exhausted) out.exhausted += 1;
+    }
     return out;
-  }, [rows]);
+  }, [rows, marks]);
   const sources = useMemo(() => [...new Set(rows.map(p => p.source))], [rows]);
   // From every row, not the shown ones: a filter doesn't change who shares an IP.
   const ipUsers = useMemo(() => exitIpUsers(rows), [rows]);
   const shown = useMemo(() => rows
-    .filter(p => (filter.state === 'all' || p.state === filter.state) && (!filter.source || p.source === filter.source) && proxyMatches(p, filter.q))
+    .filter(p => (filter.state === 'all' || p.state === filter.state
+        || (filter.state === 'exhausted' && proxyMarkFor(marks, { proxy: { url: p.exit } })?.exhausted))
+      && (!filter.source || p.source === filter.source) && proxyMatches(p, filter.q))
     .sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || a.source.localeCompare(b.source) || a.exit.localeCompare(b.exit)),
-  [rows, filter]);
+  [rows, marks, filter]);
   const set = (patch: Partial<Filter>) => onFilter({ ...filter, ...patch });
   const cols = 8;
 
@@ -201,8 +210,11 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
                     <span className="fp-holder">
                       <span>
                         <span className={STATE_CHIP[p.state]}>{t(STATE_KEY[p.state])}</span>
-                        {mark?.dead && <> <ProxyDeadChip mark={mark} /></>}
+                        {mark?.exhausted && <> <ProxyExhaustedChip mark={mark} /></>}
                       </span>
+                      {mark && !mark.exhausted && <small className="fp-warn" title={t('fbcProxyFailedHint', { max: FB_PROXY_EXHAUSTED_AFTER })}>
+                        {t('fleetProxyFailedOf', { n: mark.failed, max: FB_PROXY_EXHAUSTED_AFTER + 1 })}
+                      </small>}
                       {p.state === 'degraded' && <small className="fp-warn">
                         {last?.ok ? t('fleetProxyDegradedSlow', { s: FLEET_PROXY_SLOW_MS / 1000 }) : t('fleetProxyDegradedMissed')}
                       </small>}

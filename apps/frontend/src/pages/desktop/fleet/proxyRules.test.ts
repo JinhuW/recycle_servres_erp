@@ -61,6 +61,13 @@ describe('proxyChoices', () => {
     expect(randomOpenProxy(c, () => 0.99)!.id).toBe(2);
     expect(randomOpenProxy(proxyChoices(PROXIES, 0))).toBeNull();
   });
+  it('never offers an exhausted proxy, and lists it with the down ones', () => {
+    const spent = PROXIES.map((p) => (p.id === 3 ? { ...p, exhausted: true } : p));
+    const c = proxyChoices(spent, 2);
+    expect(c.map((x) => [x.proxy.id, x.exhausted])).toEqual([[2, false], [3, true], [1, false]]);
+    expect(randomOpenProxy(c, () => 0)!.id).toBe(2);
+    expect(randomOpenProxy(c, () => 0.99)!.id).toBe(2);
+  });
   it('never draws a down proxy, and draws a healthy one while any is', () => {
     const down3 = proxyChoices(PROXIES, 2, new Map([[3, 'down']]));
     expect(down3.map((x) => [x.proxy.id, x.down])).toEqual([[2, false], [3, true], [1, false]]);

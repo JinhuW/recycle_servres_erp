@@ -32,22 +32,22 @@ export function fleetRowAction(a: PoolRow, slot: FleetSlot | undefined, now: num
   return a.password && a.totp ? { kind: 'add' } : { kind: 'add-blocked' };
 }
 
-export type ProxyChoice = { proxy: FleetProxy; load: number; full: boolean; state: FleetProxyHealthState; down: boolean };
+export type ProxyChoice = { proxy: FleetProxy; load: number; full: boolean; state: FleetProxyHealthState; down: boolean; exhausted: boolean };
 
 /**
  * Every proxy with how many accounts it carries and how its last checks went:
- * the open ones first, emptiest first, then the down ones, then the full ones.
+ * the open ones first, emptiest first, then the down or exhausted ones, then the full ones.
  * A proxy missing from `health` (or with no health read at all) is unchecked.
  */
 export function proxyChoices(
   proxies: readonly FleetProxy[], limit: number, health: ReadonlyMap<number, FleetProxyHealthState> = new Map(),
 ): ProxyChoice[] {
-  const rank = (c: ProxyChoice) => (c.full ? 2 : c.down ? 1 : 0);
+  const rank = (c: ProxyChoice) => (c.full ? 2 : c.down || c.exhausted ? 1 : 0);
   return proxies
     .map((proxy) => {
       const load = proxyLoad(proxy);
       const state = health.get(proxy.id) ?? 'unchecked';
-      return { proxy, load, full: load >= limit, state, down: state === 'down' };
+      return { proxy, load, full: load >= limit, state, down: state === 'down', exhausted: proxy.exhausted };
     })
     .sort((a, b) => rank(a) - rank(b) || a.load - b.load || a.proxy.label.localeCompare(b.proxy.label));
 }
@@ -111,8 +111,8 @@ export function proxyExitFlags(p: Pick<FleetProxyHealth, 'last' | 'slots' | 'exi
   return out;
 }
 
-/** True when a new slot may go on the choice: room left and not failing its checks. */
-export const proxyOpen = (c: ProxyChoice): boolean => !c.full && !c.down;
+/** True when a new slot may go on the choice: room left, not failing its checks, IP not exhausted. */
+export const proxyOpen = (c: ProxyChoice): boolean => !c.full && !c.down && !c.exhausted;
 
 /** The dialog's default when the manager does not pick one: an open proxy, a healthy one while any is. */
 export function randomOpenProxy(choices: readonly ProxyChoice[], rand: () => number = Math.random): FleetProxy | null {
