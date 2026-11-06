@@ -18,6 +18,19 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **A cloak worker reports its browser to the ERP before any Facebook page.**
+  After a passing preflight it sends hashes of what the browser really showed
+  (canvas, WebGL, hardware, screen, platform, languages) plus the user agent and
+  build. The ERP records the first launch and holds every later one to it:
+  `linked`, `match` and `duplicate` go on to the login; `redraw` (looks like another
+  account, nothing shown to Facebook yet) leaves with exit 75 for a claim with a new
+  seed; `changed` parks `profile_changed` until a manager accepts it, which resumes
+  in the same browser; no answer parks `connect_failed`, so no account reaches
+  Facebook unrecorded. None of these costs a login. The ERP has to carry
+  `POST /api/fleet/worker/profile-launch` (v1.430.0) before this worker runs.
+
 ## [0.17.0] - 2026-11-05
 
 ### Added

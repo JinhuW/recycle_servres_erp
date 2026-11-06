@@ -27,7 +27,8 @@ BEGIN
     -- below breaks the unique index and the whole restore with it.
     IF EXISTS (SELECT 1 FROM information_schema.columns
                WHERE table_schema = 'sync_keep' AND table_name = '_pool' AND column_name = 'cloak_seed') THEN
-      UPDATE public.fb_pool_accounts p SET browser_engine = NULL, cloak_seed = NULL, cloak_gpu = NULL, profile_timezone = NULL
+      UPDATE public.fb_pool_accounts p SET browser_engine = NULL, cloak_seed = NULL, cloak_gpu = NULL, profile_timezone = NULL,
+        profile_device = NULL, profile_first_launched_at = NULL, profile_fingerprint = NULL, profile_launch = NULL, profile_launch_changed = NULL
       FROM sync_keep._pool k WHERE k.cloak_seed = p.cloak_seed AND k.no <> p.no;
     END IF;
 
@@ -43,7 +44,8 @@ BEGIN
     FROM information_schema.columns c
     WHERE c.table_schema = 'public' AND c.table_name = 'fb_pool_accounts'
       AND (c.column_name ~ '_enc$' OR c.column_name IN ('cookie_uid', 'cookie_at', 'status', 'note', 'holder_user_id', 'holder_name', 'held_since',
-                                'browser_engine', 'cloak_seed', 'cloak_gpu', 'profile_timezone'))
+                                'browser_engine', 'cloak_seed', 'cloak_gpu', 'profile_timezone',
+                                'profile_device', 'profile_first_launched_at', 'profile_fingerprint', 'profile_launch', 'profile_launch_changed'))
       AND EXISTS (SELECT 1 FROM information_schema.columns k
                   WHERE k.table_schema = 'sync_keep' AND k.table_name = '_pool' AND k.column_name = c.column_name);
     EXECUTE pg_catalog.format(

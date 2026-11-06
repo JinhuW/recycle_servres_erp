@@ -66,7 +66,7 @@ export type FleetRow = {
   /** Parked on a moved exit: a manager's restart, which is one boot login, ends it. */
   restartable: boolean;
   /** Why a worker parked, when the account isn't the reason. */
-  infraPark: 'license_outage' | 'exit_moved' | null;
+  infraPark: 'license_outage' | 'exit_moved' | 'profile_changed' | null;
   /** The worker's own words for why it parked, when it says. */
   parkError: string | null;
   /** The latest Mark healthy queued for it. */
@@ -133,7 +133,7 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
     operator: worker.detail?.operator === true,
     resumable: fleetResumable(worker.state, worker.detail),
     restartable: fleetRestartable(worker.state, worker.detail),
-    infraPark: worker.state === 'DEAD' && (worker.detail?.reason === 'license_outage' || worker.detail?.reason === 'exit_moved') ? worker.detail.reason : null,
+    infraPark: worker.state === 'DEAD' && (worker.detail?.reason === 'license_outage' || worker.detail?.reason === 'exit_moved' || worker.detail?.reason === 'profile_changed') ? worker.detail.reason : null,
     parkError: typeof worker.detail?.error === 'string' ? worker.detail.error : null,
     resume: worker.resume ?? null,
     slot,

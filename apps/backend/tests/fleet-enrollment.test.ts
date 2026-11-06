@@ -249,6 +249,35 @@ describe('the profile outlives the slot', () => {
     expect(await enrollment(no)).toEqual({ ...first, exit_ip: '198.51.100.2' });
   });
 
+  it('re-adding keeps the first device, even if the screen list has moved on', async () => {
+    const no = await account(1);
+    const p = await proxy(10001);
+    await measure(p, '198.51.100.1');
+    expect((await enroll(no, p)).status).toBe(201);
+    const pinned = { viewport: [1111, 666], screen: [1111, 777], device_scale_factor: 1, locale: 'en-US', native: ['user_agent'] };
+    await getTestDb()`UPDATE fb_pool_accounts SET profile_device = ${getTestDb().json(pinned)} WHERE no = ${no}`;
+    await parkAndRemove(no);
+    const r = await add({ account_no: no, proxy_id: p });
+    expect(r.status).toBe(201);
+    expect(r.body.slot.device).toMatchObject({ ...pinned, browser_engine: 'cloak', ...fleetCloakFor(no) });
+  });
+
+  it('pins the device at enrollment and at the engine switch', async () => {
+    const [a, b] = [await account(1), await account(2)];
+    const [p, q] = [await proxy(10001), await proxy(10002)];
+    await measure(p, '198.51.100.1');
+    await measure(q, '198.51.100.2');
+    expect((await enroll(a, p)).status).toBe(201);
+    const [one] = await getTestDb()<{ profile_device: Record<string, unknown> }[]>`SELECT profile_device FROM fb_pool_accounts WHERE no = ${a}`;
+    const { timezone: _tz, ...expected } = fleetDeviceFor(a, 'UTC');
+    expect(one.profile_device).toEqual(expected);
+    expect((await add({ account_no: b, proxy_id: q })).status).toBe(201);
+    expect((await api('POST', `/api/fleet/slots/${b}/engine`, { token, body: { engine: 'cloak' } })).status).toBe(200);
+    const [two] = await getTestDb()<{ profile_device: Record<string, unknown> }[]>`SELECT profile_device FROM fb_pool_accounts WHERE no = ${b}`;
+    expect(two.profile_device.screen).toEqual(fleetDeviceFor(b, 'UTC').screen);
+    expect(two.profile_device.timezone).toBeUndefined();
+  });
+
   it('keeps the cloak_seeded guard past remove and re-add', async () => {
     const no = await account(1);
     const p = await proxy(10001);
@@ -1011,6 +1040,42 @@ describe('a first login on a changed exit', () => {
 });
 
 describe('the migration, on rows that exist already', () => {
+  it('0229 backfills the device and first launch, and restores the seeds of #76 and #130', async () => {
+    const dir = join(import.meta.dirname, '..', 'migrations');
+    const file = readdirSync(dir).find((f) => f.endsWith('_fleet_profile_first_launch.sql'))!;
+    const migration = readFileSync(join(dir, file), 'utf8');
+    const live = await account(1);
+    const unlaunched = await account(2);
+    const db = getTestDb();
+    class Rollback extends Error {}
+    await expect(db.begin(async (tx) => {
+      await tx.unsafe(`
+        DROP INDEX fb_pool_accounts_profile_fingerprint_idx; DROP INDEX fleet_slots_cloak_seed_key;
+        ALTER TABLE fb_pool_accounts DROP COLUMN profile_device, DROP COLUMN profile_first_launched_at, DROP COLUMN profile_fingerprint, DROP COLUMN profile_launch, DROP COLUMN profile_launch_changed;`);
+      await tx`UPDATE fb_pool_accounts SET browser_engine = 'cloak', cloak_seed = 11111, cloak_gpu = 'Intel', profile_timezone = 'UTC' WHERE no = ${live}`;
+      await tx`UPDATE fb_pool_accounts SET browser_engine = 'cloak', cloak_seed = 22222, cloak_gpu = 'Intel', profile_timezone = 'UTC' WHERE no = ${unlaunched}`;
+      const device = { viewport: [1366, 645], screen: [1366, 768], timezone: 'UTC', locale: 'en-US', browser_engine: 'cloak', cloak_seed: 11111, cloak_gpu: 'Intel' };
+      await tx`INSERT INTO fleet_slots (account_no, device) VALUES (${live}, ${tx.json(device)})`;
+      await tx`INSERT INTO fleet_worker_state_events (account_no, worker_id, engine, to_state, at) VALUES
+        (${live}, 'lab-1', 'cloak', 'DEGRADED', '2026-11-01T00:00:00Z'), (${live}, 'lab-1', 'cloak', 'HEALTHY', '2026-11-01T00:05:00Z'),
+        (${unlaunched}, 'lab-2', 'cloak', 'DEGRADED', '2026-11-01T00:00:00Z'), (76, 'lab-3', 'cloak', 'SESSION_EXPIRED', '2026-11-03T00:00:00Z')`;
+      await tx`INSERT INTO fb_pool_accounts (no, uid, batch, status) OVERRIDING SYSTEM VALUE VALUES (76, '61500000000076', 'old', 'retired'), (130, '61500000000130', 'old', 'retired')`;
+
+      await tx.unsafe(migration);
+
+      const rows = await tx<Record<string, unknown>[]>`
+        SELECT no, cloak_seed, cloak_gpu, profile_device, profile_first_launched_at FROM fb_pool_accounts WHERE no = ANY(${[live, unlaunched, 76, 130]}::int[]) ORDER BY no`;
+      const of = (no: number) => rows.find((r) => r.no === no)!;
+      expect(of(live).profile_device).toEqual({ viewport: [1366, 645], screen: [1366, 768], locale: 'en-US' });
+      expect(of(live).profile_first_launched_at).toEqual(new Date('2026-11-01T00:05:00Z'));
+      expect(of(unlaunched).profile_first_launched_at).toBeNull();
+      expect(of(76)).toMatchObject({ cloak_seed: fleetCloakFor(76).cloak_seed, cloak_gpu: fleetCloakFor(76).cloak_gpu, profile_first_launched_at: new Date('2026-11-03T00:00:00Z') });
+      // Never ran CloakBrowser here, so nothing to restore.
+      expect(of(130).cloak_seed).toBeNull();
+      throw new Rollback();
+    })).rejects.toBeInstanceOf(Rollback);
+  });
+
   it('copies seeded slots to the pool row, tolerates a duplicate seed and leaves stock slots unpinned', async () => {
     const dir = join(import.meta.dirname, '..', 'migrations');
     const file = readdirSync(dir).find((f) => f.endsWith('_fleet_pilot_enrollment.sql'))!;
@@ -1022,7 +1087,7 @@ describe('the migration, on rows that exist already', () => {
       await tx.unsafe(`
         DROP TABLE fleet_pilot_enrollments;
         ALTER TABLE fb_pool_accounts DROP CONSTRAINT fb_pool_accounts_cloak_has_seed;
-        DROP INDEX fb_pool_accounts_cloak_seed_key;
+        DROP INDEX fb_pool_accounts_cloak_seed_key; DROP INDEX fleet_slots_cloak_seed_key;
         ALTER TABLE fb_pool_accounts DROP COLUMN browser_engine, DROP COLUMN cloak_seed, DROP COLUMN cloak_gpu, DROP COLUMN profile_timezone;`);
       const slot = (no: number, device: unknown) => tx`INSERT INTO fleet_slots (account_no, device) VALUES (${no}, ${device === null ? null : tx.json(device as never)})`;
       await slot(cloak, { timezone: 'America/Chicago', browser_engine: 'cloak', cloak_seed: 11111, cloak_gpu: 'Intel' });

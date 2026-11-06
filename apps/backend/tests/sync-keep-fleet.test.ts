@@ -101,7 +101,8 @@ describe('prod→dev sync keeps the dev fleet', () => {
     const a = await pool('61500000000021', 'fleet', 'fleet pilot');
     const fromProd = await pool('61500000000022', 'available', 'not in the fleet');
     const gone = await pool('61500000000023', 'retired', 'retired');
-    await sql`UPDATE fb_pool_accounts SET browser_engine = 'cloak', cloak_seed = 12345, cloak_gpu = 'Intel', profile_timezone = 'America/Chicago' WHERE no = ${a}`;
+    await sql`UPDATE fb_pool_accounts SET browser_engine = 'cloak', cloak_seed = 12345, cloak_gpu = 'Intel', profile_timezone = 'America/Chicago',
+      profile_first_launched_at = '2026-11-01T00:00:00Z', profile_fingerprint = 'dev-fingerprint', profile_launch = '{"build":"155"}', profile_device = '{"screen":[1366,768]}' WHERE no = ${a}`;
     await sql`INSERT INTO fleet_slots (account_no, epoch) VALUES (${a}, 1)`;
     await sql`INSERT INTO fleet_pilot_enrollments (account_no, uid, batch, pilot_id, arm, seed, exit_ip)
               VALUES (${a}, '61500000000021', 'Batch', 'wave-1', 'cloak', 12345, '198.51.100.7'),
@@ -110,8 +111,9 @@ describe('prod→dev sync keeps the dev fleet', () => {
     await sql.begin((tx) => tx.unsafe(keep));
     await copyLikeTheNightly([a, fromProd, gone]);
     // The copy brings prod's profiles: none for a, and a's seed on another row.
-    await sql`UPDATE fb_pool_accounts SET browser_engine = NULL, cloak_seed = NULL, cloak_gpu = NULL, profile_timezone = NULL WHERE no = ${a}`;
-    await sql`UPDATE fb_pool_accounts SET browser_engine = 'cloak', cloak_seed = 12345, cloak_gpu = 'NVIDIA' WHERE no = ${fromProd}`;
+    await sql`UPDATE fb_pool_accounts SET browser_engine = NULL, cloak_seed = NULL, cloak_gpu = NULL, profile_timezone = NULL,
+      profile_first_launched_at = NULL, profile_fingerprint = NULL, profile_launch = NULL, profile_device = NULL WHERE no = ${a}`;
+    await sql`UPDATE fb_pool_accounts SET browser_engine = 'cloak', cloak_seed = 12345, cloak_gpu = 'NVIDIA', profile_fingerprint = 'prod-fingerprint' WHERE no = ${fromProd}`;
     // A pool number prod gave to someone else takes no enrollment with it.
     await sql`UPDATE fb_pool_accounts SET uid = '61500000000099' WHERE no = ${gone}`;
     await sql.begin((tx) => tx.unsafe(restore));
@@ -120,6 +122,10 @@ describe('prod→dev sync keeps the dev fleet', () => {
     expect(rows).toEqual([
       { no: a, browser_engine: 'cloak', cloak_seed: 12345, cloak_gpu: 'Intel', profile_timezone: 'America/Chicago' },
       { no: fromProd, browser_engine: null, cloak_seed: null, cloak_gpu: null, profile_timezone: null },
+    ]);
+    expect(await sql`SELECT no, profile_fingerprint, profile_first_launched_at FROM fb_pool_accounts WHERE no IN (${a}, ${fromProd}) ORDER BY no`).toEqual([
+      { no: a, profile_fingerprint: 'dev-fingerprint', profile_first_launched_at: new Date('2026-11-01T00:00:00Z') },
+      { no: fromProd, profile_fingerprint: null, profile_first_launched_at: null },
     ]);
     expect(await sql`SELECT account_no, pilot_id FROM fleet_pilot_enrollments`).toEqual([{ account_no: a, pilot_id: 'wave-1' }]);
   });

@@ -999,6 +999,34 @@ the enrolled IP, and null otherwise.
 A `DEAD` heartbeat with `detail.reason: license_outage` renews the lease for
 `FLEET_OUTAGE_LEASE_MINUTES` instead of `lease_minutes`.
 
+### Launch report (`POST /api/fleet/worker/profile-launch`)
+
+A cloak worker sends this after a passing preflight and before any Facebook page,
+on its worker token (a stale epoch gets `409 stale_epoch`). Workers from 0.18.0 do;
+an older one reaches Facebook unrecorded, and the ERP then treats the account as
+already shown.
+
+Body: `cloak_seed`, `canvas_sha256`, `webgl_sha256`, `hardware_concurrency`,
+`device_memory` (or null), `screen` as `[w, h]`, `platform`, `languages`,
+`user_agent`, `build` (or null). Anything else malformed is `422`. The fingerprint
+is a SHA-256 over all but `cloak_seed`, `user_agent` and `build`, since those move
+on a build bump.
+
+| `verdict` | When | Worker |
+| --- | --- | --- |
+| `linked` | First report, recorded on `fb_pool_accounts` | Goes on |
+| `match` | Same as the record | Goes on |
+| `redraw` | Nothing shown to Facebook yet and another account has this fingerprint, so a new seed was stored; or the report names an older seed | Heartbeats `DEAD` `profile_redraw`, exits 75, and claims again when its lease ends |
+| `duplicate` | Shown to Facebook already and another account has it, so it's recorded and managers are told | Goes on |
+| `changed` | Differs from its own record, kept in `profile_launch_changed` | Parks `DEAD` `profile_changed` |
+| `no_free_seed` | The redraws ran out | Parks `DEAD` `profile_preflight` |
+
+`POST /api/fleet/slots/:no/profile/accept` (manager) takes the changed launch as the
+record and queues `resume` for a worker parked on it, or answers `409
+no_profile_change`. The worker then runs its preflight again in the same browser.
+`SlotView.profile` is null on a stock slot, otherwise `{first_launched_at, fingerprint,
+build, changed, changed_build}`.
+
 ### Stopping
 
 `cloak_enabled=false` stops only new CloakBrowser enrollment and switches, and

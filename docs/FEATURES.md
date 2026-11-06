@@ -3825,7 +3825,15 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     which waits for one that can run it. Since v1.421.0 (RS-537) the profile
     (engine, seed, GPU, timezone) is kept on the pool account, so removing and
     re-adding an account brings the same machine back and it still can't be
-    seeded twice, and no two accounts can hold one seed. A proxy timezone edit,
+    seeded twice, and no two accounts can hold one seed. Since v1.430.0 (RS-554), and with worker 0.18.0, each cloak browser reports what it
+    really showed before any Facebook page: the first report is the account's
+    record, shown beside its seed with the date and build. A first launch that
+    looks like another account gets a new seed; one already shown to Facebook
+    keeps its seed and managers get an alert; a browser that differs from its own
+    record parks **Fingerprint changed** until a manager clicks **Accept change**.
+    The first device stays with the account, so a re-add can't change its screen.
+    This proves accounts differ by our own hash, not that Facebook sees separate
+    machines. A proxy timezone edit,
     or Change proxy, leaves that timezone alone and only moves accounts with no
     profile. **Add to fleet** can also name a pilot and an arm, which enrolls
     the account in one step: `POST /api/fleet/slots` writes the enrollment
