@@ -74,6 +74,17 @@ deployed?" harder to answer.
   jar with no cookies isn't a refusal, so neither is reported as one.
 - **A license setup or guard that raises parks a cloak worker** as
   `browser_failed`. It used to exit into a new container each time.
+- **A running cloak browser that loses the license server now reads as an
+  outage.** It dies about 16 minutes later as a plain closed target with no
+  denial file, which used to park `browser_failed`. A cloak browser that dies
+  with no reason now gets one recheck launch, with no page and no account: if
+  that launch hits the outage the worker exits 74, otherwise it parks as before.
+  Stock workers never recheck. Each account with a live session still costs one
+  boot login to come back from an outage.
+- **Images bake CloakBrowser 155.0.8059.39.2, and the build fails on any other
+  build.** The key now fetches 156 by default, whose missing window frame fails
+  the preflight on every good profile and hides a moved exit. Moving the build is
+  a visible device change, so it takes an explicit `RS_CLOAK_VERSION`.
 
 ## [0.16.0] - 2026-11-02
 
