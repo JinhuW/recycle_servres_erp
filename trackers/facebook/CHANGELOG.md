@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-05
+
 ### Added
 
 - **A cloak worker proves its profile before any Facebook page.** It measures
