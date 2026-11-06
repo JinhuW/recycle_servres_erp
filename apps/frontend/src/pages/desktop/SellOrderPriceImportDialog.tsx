@@ -65,7 +65,7 @@ function StepBadge({ n }: { n: number }) {
 }
 
 export function PriceImportSection({
-  orderId, currency, savedCurrency, locale, savedLines, linesVersion, dirty, onApply,
+  orderId, currency, savedCurrency, locale, savedLines, linesVersion, dirty, onApply, onSynced,
 }: {
   orderId: string;
   currency: string;
@@ -79,6 +79,7 @@ export function PriceImportSection({
   // Sync to Market records saved prices, so unsaved edits would not be in it.
   dirty: boolean;
   onApply: (rows: PriceApplyRow[]) => void;
+  onSynced: (marketSyncedParts: string[]) => void;
 }) {
   const { t } = useT();
   const [uploading, setUploading] = useState(false);
@@ -193,6 +194,7 @@ export function PriceImportSection({
           currency={savedCurrency}
           locale={locale}
           onClose={() => setSyncing(false)}
+          onSynced={onSynced}
         />
       )}
       {preview && (
@@ -347,15 +349,55 @@ function PriceImportPreviewDialog({
   );
 }
 
-function MarketSyncDialog({
-  orderId, parts, linesVersion, currency, locale, onClose,
+// What the Done dialog says about the order's Market prices. Syncing is the
+// page's to open: a nested dialog renders beside this one, not inside it.
+export function MarketSyncCheck({
+  parts, syncedParts, blocked, onSync,
+}: {
+  parts: MarketSyncPart[];
+  syncedParts: string[];
+  // Why the order's saved prices can't be synced right now.
+  blocked: string | null;
+  onSync: () => void;
+}) {
+  const { t } = useT();
+  if (parts.length === 0) return null;
+  const synced = new Set(syncedParts);
+  const unsynced = parts.filter(p => !synced.has(p.canonPart));
+  if (unsynced.length === 0) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--fg-subtle)' }}>
+        <Icon name="check" size={13} /> {t('soDoneSyncAll')}
+      </div>
+    );
+  }
+  return (
+    <div style={{ padding: '10px 12px', borderRadius: 8, background: 'var(--warn-soft)', fontSize: 12.5 }}>
+      <div>{t('soDoneSyncMissing', { n: String(unsynced.length), total: String(parts.length) })}</div>
+      <div className="mono" style={{ marginTop: 6, fontSize: 11.5, maxHeight: 72, overflowY: 'auto', overflowWrap: 'anywhere' }}>
+        {unsynced.map(p => p.partNumber).join(', ')}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+        <button type="button" className="btn sm" disabled={blocked !== null} title={blocked ?? undefined} onClick={onSync}>
+          <Icon name="upload" size={13} /> {t('soMarketSyncButton')}
+        </button>
+        {blocked && <span style={{ color: 'var(--fg-subtle)' }}>{blocked}</span>}
+      </div>
+    </div>
+  );
+}
+
+export function MarketSyncDialog({
+  orderId, parts, linesVersion, currency, locale, zIndex, onClose, onSynced,
 }: {
   orderId: string;
   parts: MarketSyncPart[];
   linesVersion?: string;
   currency: string;
   locale: string;
+  zIndex?: number;
   onClose: () => void;
+  onSynced: (marketSyncedParts: string[]) => void;
 }) {
   const { t } = useT();
   const [lastPercent, setLastPercent] = usePreference('sellOrders.marketPercent', 90);
@@ -378,12 +420,13 @@ function MarketSyncDialog({
   const confirm = async () => {
     setBusy(true);
     try {
-      const r = await api.post<{ recorded: number }>(`/api/sell-orders/${orderId}/market-sync`, {
+      const r = await api.post<{ recorded: number; marketSyncedParts: string[] }>(`/api/sell-orders/${orderId}/market-sync`, {
         percent,
         parts: included.map(p => p.canonPart),
         ...(linesVersion ? { linesVersion } : {}),
       });
       setLastPercent(percent);
+      onSynced(r.marketSyncedParts);
       window.__showToast?.(t('soMarketSyncDone', { n: String(r.recorded) }), 'success');
       onClose();
     } catch (e) {
@@ -397,7 +440,7 @@ function MarketSyncDialog({
   };
 
   return (
-    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 680, width: 'calc(100vw - 80px)' }}>
+    <Modal onClose={() => { if (!busy) onClose(); }} zIndex={zIndex} shellStyle={{ maxWidth: 680, width: 'calc(100vw - 80px)' }}>
       <div className="modal-head">
         <div className="modal-title">{t('soMarketSyncTitle')}</div>
       </div>

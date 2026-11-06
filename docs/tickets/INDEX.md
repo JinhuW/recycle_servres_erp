@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-552](./RS-552-check-market-sync-when-a-sell-order-moves-to-done.md) | done | story | P2 | Check Market sync when a sell order moves to Done | 1.428.0 |
 | [RS-551](./RS-551-fleet-worker-pin-the-cloakbrowser-build-and-read-a-l.md) | done | bug | P2 | Fleet worker: pin the CloakBrowser build and read a live licence outage as an outage | facebook-tracker 0.17.0 |
 | [RS-550](./RS-550-rmb-flow-compares-a-commission-entry-to-what-the-pur.md) | done | bug | P2 | RMB Flow compares a commission entry to what the purchaser earns | 1.427.1 |
 | [RS-549](./RS-549-rmb-flow-balance-runs-per-manager-when-one-is-select.md) | done | story | P2 | RMB Flow balance runs per manager when one is selected | 1.427.0 |

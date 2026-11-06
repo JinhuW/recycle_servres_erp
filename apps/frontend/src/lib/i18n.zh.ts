@@ -960,6 +960,8 @@ const zh: Record<string, string> = {
   soPriceImportApplied: '已填入 {n} 个价格 — 请检查并保存',
   soMarketSyncButton: '同步到市场',
   soMarketSyncHint: '用此订单已保存的价格更新市场售价，订单本身的价格不变。',
+  soDoneSyncMissing: '{total} 个已定价产品中有 {n} 个尚未同步到市场。继续后，这些产品将按完整售价记录。',
+  soDoneSyncAll: '所有已定价产品均已同步到市场，并将保留这些价格。',
   soMarketSyncSaveFirst: '请先保存订单，再同步到市场',
   soMarketSyncNoParts: '此订单没有带型号且已定价的产品',
   soMarketSyncTitle: '同步价格到市场',

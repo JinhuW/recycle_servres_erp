@@ -1778,6 +1778,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     soPriceImportApplied: '{n} prices filled in — review and save',
     soMarketSyncButton: 'Sync to Market',
     soMarketSyncHint: 'Updates the Market sell price from this order’s saved prices. The order’s own prices don’t change.',
+    soDoneSyncMissing: '{n} of {total} priced parts haven’t been synced to Market. If you continue, they get the full sale price.',
+    soDoneSyncAll: 'All priced parts have been synced to Market, and keep those prices.',
     soMarketSyncSaveFirst: 'Save the order before syncing to Market',
     soMarketSyncNoParts: 'No priced products with a part number on this order',
     soMarketSyncTitle: 'Sync prices to Market',
