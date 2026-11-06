@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { FormSkeleton } from '../../../components/Skeleton';
 import { ApiError } from '../../../lib/api';
-import { poolApi, type FbWorkerStint } from '../../../lib/facebookPool';
+import { poolApi, type FbIpGroup, type FbWorkerStint } from '../../../lib/facebookPool';
 import { fleetApi } from '../../../lib/fleet';
 import { ErpWorkerView } from './FleetErpWorker';
 import { useFleetPoll } from './shared';
@@ -23,9 +23,11 @@ export function FleetWorkerSwitch({ workerId }: { workerId: string }) {
     .catch(err => (err instanceof ApiError && err.status === 404 ? NOT_FLEET : Promise.reject(err))), [workerId]);
   const { data, reload } = useFleetPoll(load);
   const [stints, setStints] = useState<FbWorkerStint[] | null>(null);
+  const [ipGroups, setIpGroups] = useState<FbIpGroup[] | null>(null);
   const fleetWorker = data !== null && data !== 'unavailable' && data !== NOT_FLEET;
   const readStints = useCallback(() => {
     poolApi.workerAccounts(workerId).then(r => setStints(r.stints)).catch(() => setStints([]));
+    poolApi.workerIps(workerId).then(r => setIpGroups(r.ips)).catch(() => setIpGroups([]));
   }, [workerId]);
   useEffect(() => { if (fleetWorker) readStints(); }, [fleetWorker, readStints]);
 
@@ -37,5 +39,5 @@ export function FleetWorkerSwitch({ workerId }: { workerId: string }) {
       </Suspense>
     );
   }
-  return <ErpWorkerView detail={data} stints={stints} onReload={() => { reload(); readStints(); }} />;
+  return <ErpWorkerView detail={data} stints={stints} ipGroups={ipGroups} onReload={() => { reload(); readStints(); }} />;
 }

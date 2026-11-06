@@ -512,7 +512,7 @@ describe('facebook account pool', () => {
 
     type Stint = { accountNo: number; uid: string; email: string | null; proxyUrl: string | null; proxyKnown: boolean;
       startedAt: number; endedAt: number | null; outcome: string | null };
-    type Mark = { url: string; failed: number; dead: boolean; deadAt: number | null; revivedAt: number | null; revivedBy: string | null };
+    type Mark = { url: string; ip: string | null; failed: number; exhausted: boolean; exhaustedAt: number | null; revivedAt: number | null; revivedBy: string | null };
     const stints = async (token: string, worker: string) =>
       (await api<{ stints: Stint[] }>('GET', `${BASE}/workers/${worker}/accounts`, { token })).body.stints;
     const marks = async (token: string) => (await api<{ proxies: Mark[] }>('GET', `${BASE}/proxies`, { token })).body.proxies;
@@ -553,11 +553,11 @@ describe('facebook account pool', () => {
 
       // Two failed on the proxy, the returned one doesn't count.
       expect(await marks(token)).toEqual([
-        { url: PROXY, failed: 2, dead: false, deadAt: null, revivedAt: null, revivedBy: null },
+        { url: PROXY, ip: null, failed: 2, exhausted: false, exhaustedAt: null, revivedAt: null, revivedBy: null },
       ]);
     });
 
-    it('marks a proxy DEAD at its fifth failed account and refuses Assign behind it until revived', async () => {
+    it('marks a proxy exhausted at its fifth failed account and refuses Assign behind it until revived', async () => {
       const token = await manager();
       await seedPool(token, 8);
       // Two workers dial one proxy: its failures are the proxy's, not a worker's.
@@ -568,24 +568,24 @@ describe('facebook account pool', () => {
       expect((await assign(token, 5, 'nyc-2')).status).toBe(200);
       expect((await assign(token, 6, 'nyc-2', 'retired')).status).toBe(200);
       // #1-#3 failed on nyc-1, #5 on nyc-2: four is not yet more than four.
-      expect(await marks(token)).toMatchObject([{ url: PROXY, failed: 4, dead: false, deadAt: null }]);
+      expect(await marks(token)).toMatchObject([{ url: PROXY, failed: 4, exhausted: false, exhaustedAt: null }]);
 
       expect((await assign(token, 7, 'nyc-1', 'problem')).status).toBe(200);
-      const [dead] = await marks(token);
-      expect(dead).toMatchObject({ url: PROXY, failed: 5, dead: true });
-      expect(dead.deadAt).not.toBeNull();
+      const [spent] = await marks(token);
+      expect(spent).toMatchObject({ url: PROXY, failed: 5, exhausted: true });
+      expect(spent.exhaustedAt).not.toBeNull();
 
       const calls = spy.mock.calls.length;
       for (const worker of ['nyc-1', 'nyc-2']) {
         const refused = await assign(token, 8, worker, 'problem');
         expect(refused.status).toBe(409);
-        expect(refused.body.code).toBe('fpProxyDead');
-        expect(refused.body.error).toMatch(/DEAD: 5 accounts failed/);
+        expect(refused.body.code).toBe('fpProxyExhausted');
+        expect(refused.body.error).toMatch(/exhausted: 5 accounts failed/);
       }
       // Unreadable, the fleet document leaves the check to the proxy the
       // worker's last account went through.
       fleetAnswer = [502, { detail: 'coordinator unreachable' }];
-      expect((await assign(token, 8, 'nyc-1', 'problem')).body.code).toBe('fpProxyDead');
+      expect((await assign(token, 8, 'nyc-1', 'problem')).body.code).toBe('fpProxyExhausted');
       onProxy(['nyc-1', PROXY], ['nyc-2', PROXY]);
       expect(spy.mock.calls.length).toBe(calls); // nothing reached a worker
       const pool = await api<Snapshot>('GET', BASE, { token });
@@ -601,7 +601,7 @@ describe('facebook account pool', () => {
       expect(revived.status).toBe(200);
       expect(revived.body.proxies).toEqual([]);
       expect((await assign(token, 8, 'nyc-1', 'problem')).status).toBe(200);
-      expect(await marks(token)).toMatchObject([{ url: PROXY, failed: 1, dead: false, revivedBy: 'Alex Chen' }]);
+      expect(await marks(token)).toMatchObject([{ url: PROXY, failed: 1, exhausted: false, revivedBy: 'Alex Chen' }]);
     });
 
     type TimelineEvent = { kind: string; at: number; worker?: string; trigger?: string | null; outcome?: string | null;

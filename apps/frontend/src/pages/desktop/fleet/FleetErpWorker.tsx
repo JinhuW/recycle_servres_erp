@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { handleFetchError } from '../../../lib/errorToast';
-import type { FbWorkerStint } from '../../../lib/facebookPool';
+import type { FbIpGroup, FbWorkerStint } from '../../../lib/facebookPool';
 import { fleetApi, fleetRestartable, type FleetCity, type FleetSlot, type FleetWorkerDetail } from '../../../lib/fleet';
 import { browserLabel, SESSION_WARN_DAYS } from '../../../lib/fleetView';
 import { relTime } from '../../../lib/format';
@@ -30,8 +30,8 @@ import {
 
 type Dialog = 'park' | 'unpark' | 'proxy' | 'remove' | 'retire' | 'search' | null;
 
-export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }: {
-  detail: FleetWorkerDetail; stints: FbWorkerStint[] | null; onReload: () => void; now?: number;
+export function ErpWorkerView({ detail: d, stints, ipGroups, onReload, now = Date.now() }: {
+  detail: FleetWorkerDetail; stints: FbWorkerStint[] | null; ipGroups: FbIpGroup[] | null; onReload: () => void; now?: number;
 }) {
   const { t, locale } = useT();
   const mirror = useFleetMirror();
@@ -200,7 +200,7 @@ export function ErpWorkerView({ detail: d, stints, onReload, now = Date.now() }:
             </>,
           }] : []} />
 
-          <AccountsUsed stints={stints} locale={locale} />
+          <AccountsUsed groups={ipGroups} locale={locale} />
           <CityLogCard log={visits} />
         </div>
         <WorkerHistory entries={history.map(line => historyEntry(line))} locale={locale} />

@@ -8,6 +8,7 @@ import { log } from '../lib/log';
 import { poolKey, seal } from '../lib/sealed';
 import { managerOnly, unavailable, type ManagerEnv } from './auth';
 import { latestExitOf } from './proxyExit';
+import { exhaustedProxyIds } from './proxyMarks';
 import { bad, conflict, exists, isRefusal, notFound, type Refusal } from './sql';
 
 // ─── Proxies ──────────────────────────────────────────────────────────────────
@@ -72,11 +73,13 @@ export async function listProxies(sql: SqlLike, id?: number): Promise<FleetProxy
     FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no
     WHERE s.proxy_id IS NOT NULL ${id === undefined ? sql`` : sql`AND s.proxy_id = ${id}`}
     ORDER BY s.account_no`;
+  const exhausted = new Set(await exhaustedProxyIds(sql));
   return rows.map((r) => ({
     id: r.id, label: r.label, host: r.host, port: r.port, timezone: r.timezone, note: r.note,
     created_at: r.created_at.toISOString(),
     slots: uses.filter((u) => u.proxy_id === r.id)
       .map(({ account_no, pool_status, parked, leased }) => ({ account_no, pool_status, parked, leased })),
+    exhausted: exhausted.has(r.id),
   }));
 }
 

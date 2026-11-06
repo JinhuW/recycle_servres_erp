@@ -9,6 +9,7 @@ import { CLAIM_TICKET_MINUTES, hostAuth, managerOnly, newClaimTicket, type HostE
 import { sha256hex, type FleetHostRow, type FleetSlotRow } from './sql';
 import { releaseTasks } from './claim';
 import { slotWaits } from './proxyExit';
+import { exhaustedProxyIds } from './proxyMarks';
 
 // ─── Hosts and releases ───────────────────────────────────────────────────────
 // A host is a machine running one fleet-agent container. The ERP tells it what
@@ -248,9 +249,10 @@ async function advanceRoll(tx: SqlLike, host: FleetHostRow, now = new Date()): P
  */
 async function workerCount(tx: SqlLike, host: FleetHostRow, now = Date.now()): Promise<number> {
   if (!host.authoritative || host.capacity <= 0) return 0;
+  const exhausted = await exhaustedProxyIds(tx);
   const rows = await tx<{ host_id: string | null; worker_id: string | null; free: boolean }[]>`
     SELECT CASE WHEN s.lease_expires_at > NOW() THEN s.host_id END AS host_id, s.worker_id,
-           ((s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AND NOT ${slotWaits(tx)}) AS free
+           ((s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AND NOT ${slotWaits(tx, exhausted)}) AS free
     FROM fleet_slots s JOIN fb_pool_accounts a ON a.no = s.account_no
     WHERE a.status = 'fleet' AND s.lease_expires_at IS DISTINCT FROM 'infinity'::timestamptz`;
   const heldBy = (id: string) => rows.filter((r) => r.host_id === id);

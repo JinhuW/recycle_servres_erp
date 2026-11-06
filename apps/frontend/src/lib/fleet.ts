@@ -189,7 +189,7 @@ export const fleetApi = {
   addSlot: (body: FleetSlotWrite) => api.post<{ slot: FleetSlot }>(`${BASE}/slots`, body).then(r => r.slot),
   // Moves the slot to another listed proxy; a running worker keeps its exit
   // until its next start. `fromProxyId` is the proxy the manager confirmed from:
-  // 409 proxy_changed if it moved since, proxy_full, proxy_down or exists.
+  // 409 proxy_changed if it moved since, proxy_full, proxy_down, proxy_exhausted or exists.
   changeSlotProxy: (no: number, proxyId: number, fromProxyId: number | null) =>
     api.post<{ slot: FleetSlot }>(`${BASE}/slots/${no}/proxy`, { proxy_id: proxyId, from_proxy_id: fromProxyId, confirm: true }).then(r => r.slot),
   // To CloakBrowser only for an account that lost its session or was never

@@ -253,10 +253,10 @@ export const POOL: PoolAccount[] = [
 // GET /proxies: host:port and the slots on each, never the URL.
 export const PROXIES: FleetProxy[] = [
   { id: 1, label: 'Decodo NY 1', host: 'isp.example.net', port: 10001, timezone: 'America/New_York', note: 'pair A', created_at: ago(60 * 24),
-    slots: [{ account_no: 31, pool_status: 'fleet', parked: false, leased: true }, { account_no: 40, pool_status: 'fleet', parked: false, leased: false }] },
+    slots: [{ account_no: 31, pool_status: 'fleet', parked: false, leased: true }, { account_no: 40, pool_status: 'fleet', parked: false, leased: false }], exhausted: false },
   { id: 2, label: 'Decodo NY 2', host: 'isp.example.net', port: 10002, timezone: 'America/New_York', note: '', created_at: ago(60 * 24),
-    slots: [{ account_no: 44, pool_status: 'fleet', parked: true, leased: false }] },
-  { id: 3, label: 'Decodo CHI 1', host: 'isp.example.net', port: 10003, timezone: 'America/Chicago', note: '', created_at: ago(60), slots: [] },
+    slots: [{ account_no: 44, pool_status: 'fleet', parked: true, leased: false }], exhausted: false },
+  { id: 3, label: 'Decodo CHI 1', host: 'isp.example.net', port: 10003, timezone: 'America/Chicago', note: '', created_at: ago(60), slots: [], exhausted: false },
 ];
 
 // GET /workers/worker-60-14-1: the ERP worker's page in one read. It searched

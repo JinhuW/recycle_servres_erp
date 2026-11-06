@@ -35,7 +35,8 @@ import {
 import { loadSettings } from './cities';
 import { notifyManagers } from '../lib/notify';
 import { lastKnownExitIp } from './proxies';
-import { latestProxyExit, slotWaits, type ProxyExitMeasure } from './proxyExit';
+import { exitIpForStint, latestProxyExit, slotWaits, type ProxyExitMeasure } from './proxyExit';
+import { exhaustedProxyIds } from './proxyMarks';
 import { notifyReady } from './scheduler';
 import { linkLaunch, readLaunchFacts } from './profile';
 import { minutesTodaySql, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
@@ -350,6 +351,7 @@ worker.post('/claim', claimAuth, async (c) => {
         OR (${handoff}::int IS NOT NULL AND handoff_epoch IS NOT DISTINCT FROM ${handoff} AND reserved_until > NOW()))`;
     if (running) return null;
     const settings = await loadSettings(tx);
+    const exhausted = await exhaustedProxyIds(tx);
     // A worker too old to launch CloakBrowser would run a cloak slot on stock
     // and log in there; the slot waits for one that can.
     const cloakCapable = fleetVersionAtLeast(version, FLEET_CLOAK_MIN_WORKER_VERSION);
@@ -372,7 +374,7 @@ worker.post('/claim', claimAuth, async (c) => {
         // A retried claim keeps what its boot was given. A handoff is a new
         // boot, and one that opened no Facebook page is still a first login.
         [row] = await tx<ClaimRow[]>`${CLAIM_SELECT(tx)} WHERE s.account_no = ${mine.account_no} AND a.status = 'fleet'
-          AND ${engineRuns} AND ((${claimId}::text IS NOT NULL AND s.claim_id = ${claimId}) OR NOT ${slotWaits(tx)})
+          AND ${engineRuns} AND ((${claimId}::text IS NOT NULL AND s.claim_id = ${claimId}) OR NOT ${slotWaits(tx, exhausted)})
           FOR NO KEY UPDATE OF a`;
       }
     }
@@ -384,7 +386,7 @@ worker.post('/claim', claimAuth, async (c) => {
       [row] = await tx<ClaimRow[]>`
         ${CLAIM_SELECT(tx)}
         WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AND ${engineRuns}
-          AND NOT ${slotWaits(tx)}
+          AND NOT ${slotWaits(tx, exhausted)}
         ORDER BY (s.worker_id = ${worker_id}) DESC NULLS LAST,
           ${cloakFirst}
           (s.last_host_id = ${host.host_id}) DESC NULLS LAST,
@@ -420,8 +422,9 @@ worker.post('/claim', claimAuth, async (c) => {
     const proxyUrl = row.proxy_url ? unseal(row.proxy_url, key) : null;
     const exit = proxyUrl ? proxyWithoutLogin(proxyUrl) : null;
     if (exit) {
+      const exitIp = await exitIpForStint(tx, exit);
       await tx`
-        UPDATE fb_worker_accounts SET proxy_url = ${exit}, proxy_known = TRUE
+        UPDATE fb_worker_accounts SET proxy_url = ${exit}, proxy_known = TRUE, exit_ip = ${exitIp}
         WHERE account_no = ${row.account_no} AND ended_at IS NULL`;
     }
     if (!repeated) await tx`

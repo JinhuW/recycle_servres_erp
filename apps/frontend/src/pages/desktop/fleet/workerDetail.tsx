@@ -1,17 +1,18 @@
-import { FB_FAILED_OUTCOMES, type FbStintOutcome } from '@recycle-erp/shared';
+import { FB_FAILED_OUTCOMES, type FbIpStatus, type FbStintOutcome } from '@recycle-erp/shared';
 import { Fragment, useState, type ReactNode } from 'react';
 import { Icon } from '../../../components/Icon';
 import { FormSkeleton } from '../../../components/Skeleton';
 import { handleFetchError } from '../../../lib/errorToast';
 import {
   groupTimeline, loginCounts, loginTone, poolApi, REPORT_REASON_KEYS,
-  type FbAccountTimeline, type FbWorkerStint, type LoginTone, type TimelineLine,
+  type FbAccountTimeline, type FbIpGroup, type LoginTone, type TimelineLine,
 } from '../../../lib/facebookPool';
 import type { FleetStatus } from '../../../lib/fleetView';
 import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
 import { hrefFor, onLinkClick } from '../../../lib/route';
 import { StatusChip } from '../FleetWorkers';
+import { WorkerLink } from './shared';
 
 // ─── One worker's page, whichever fleet runs it ───────────────────────────────
 // The layout both worker pages share: the homelab coordinator's
@@ -139,13 +140,19 @@ const OUTCOME_TONE: Record<FbStintOutcome, string> = {
 const shortWhen = (at: number, locale: string) =>
   new Date(at).toLocaleString(locale, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
-// Every pool account the worker has signed in with, newest first, each with
-// the proxy it went out through. Problem and Retired count against that proxy.
+const IP_STATUS_TONE: Record<FbIpStatus, string> = { active: 'pos', exhausted: 'neg', deprecated: 'muted' };
+const STINT_COLS = 7;
+
+// Facebook judges the IP, not the container that happened to run the account, so
+// this lists each IP the worker has gone out through and every account on it, from
+// any worker. Its own stints with no IP known stay apart, under the port they used.
 // A row unfolds into the account's timeline, fetched the first time.
-export function AccountsUsed({ stints, locale }: { stints: FbWorkerStint[] | null; locale: string }) {
+export function AccountsUsed({ groups, locale }: { groups: FbIpGroup[] | null; locale: string }) {
   const { t } = useT();
   const when = (at: number) => shortWhen(at, locale);
-  const failed = stints?.filter(s => s.outcome && FB_FAILED_OUTCOMES.includes(s.outcome)).length ?? 0;
+  const stints = groups?.flatMap(g => g.stints) ?? [];
+  const failed = new Set(stints.filter(s => s.outcome && FB_FAILED_OUTCOMES.includes(s.outcome)).map(s => s.accountNo)).size;
+  const ipCount = groups?.filter(g => g.kind === 'ip').length ?? 0;
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const [timelines, setTimelines] = useState<ReadonlyMap<number, FbAccountTimeline | 'error'>>(() => new Map());
   const toggle = (row: string, no: number) => {
@@ -167,10 +174,12 @@ export function AccountsUsed({ stints, locale }: { stints: FbWorkerStint[] | nul
     <section className="card ff-stints" aria-label={t('fbcAccountsUsed')}>
       <div className="card-head">
         <h2 className="card-title">{t('fbcAccountsUsed')}</h2>
-        <span className="card-sub">{stints ? t('fbcAccountsUsedSub', { n: stints.length, failed }) : ''}</span>
+        <span className="card-sub">
+          {groups ? `${t('fbcIpCount', { n: ipCount })} · ${t('fbcAccountsUsedSub', { n: new Set(stints.map(s => s.accountNo)).size, failed })}` : ''}
+        </span>
       </div>
-      {stints === null ? <FormSkeleton fields={2} />
-        : stints.length === 0 ? <div className="fp-empty">{t('fbcAccountsUsedNone')}</div>
+      {groups === null ? <FormSkeleton fields={2} />
+        : groups.length === 0 ? <div className="fp-empty">{t('fbcAccountsUsedNone')}</div>
         : (
           <div className="fp-table-wrap">
             <table className="fp-table">
@@ -179,59 +188,82 @@ export function AccountsUsed({ stints, locale }: { stints: FbWorkerStint[] | nul
                   <th aria-label={t('fbcTlTitle')} />
                   <th>#</th>
                   <th>{t('fbcStintLogin')}</th>
-                  <th>{t('fbcColProxy')}</th>
+                  <th>{t('fbcStintWorker')}</th>
                   <th>{t('fbcStintFrom')}</th>
                   <th>{t('fbcStintUntil')}</th>
                   <th>{t('fbcStintOutcome')}</th>
                 </tr>
               </thead>
-              <tbody>
-                {stints.map(s => {
-                  const row = `${s.accountNo}-${s.startedAt}`;
-                  const isOpen = open.has(row);
-                  return (
-                  <Fragment key={row}>
-                  <tr className={isOpen ? 'ff-open ff-tl-toggle' : 'ff-tl-toggle'} onClick={() => toggle(row, s.accountNo)}>
-                    <td className="ff-chev">
-                      <button type="button" className="btn ghost icon sm" aria-expanded={isOpen}
-                        aria-label={t(isOpen ? 'fbcTlHide' : 'fbcTlShow', { n: s.accountNo })} title={t('fbcTlTitle')}
-                        onClick={e => { e.stopPropagation(); toggle(row, s.accountNo); }}>
-                        <Icon name={isOpen ? 'chevronUp' : 'chevronDown'} size={13} />
-                      </button>
-                    </td>
-                    <td className="mono">#{s.accountNo}</td>
-                    <td>
-                      <span className="fp-holder">
-                        <span>{s.email ?? s.uid}</span>
-                        {s.email && <small className="mono">{s.uid}</small>}
-                      </span>
-                    </td>
-                    <td>
-                      {!s.proxyKnown ? <span className="fp-muted" title={t('fbcStintProxyUnknownHint')}>{t('fbcStintProxyUnknown')}</span>
-                        : s.proxyUrl ? <span className="mono">{s.proxyUrl}</span>
-                        : <span className="fp-muted">{t('fbcProxyNone')}</span>}
-                    </td>
-                    <td>{when(s.startedAt)}</td>
-                    <td>{s.endedAt ? when(s.endedAt) : <span className="fp-muted">—</span>}</td>
-                    <td>
-                      {s.outcome
-                        ? <span className={`chip ${OUTCOME_TONE[s.outcome]}`}>{t(`fbcStint_${s.outcome}`)}</span>
-                        : <span className="chip accent">{t('fbcStint_current')}</span>}
-                    </td>
+              {groups.map(g => (
+                <tbody key={`${g.kind}:${g.proxyUrl}:${g.ip}`}>
+                  <tr className="ff-ip-head">
+                    <td colSpan={STINT_COLS}><IpGroupHead group={g} /></td>
                   </tr>
-                  {isOpen && (
-                    <tr className="ff-tl-row">
-                      <td colSpan={7}><AccountTimeline timeline={timelines.get(s.accountNo)} locale={locale} /></td>
-                    </tr>
-                  )}
-                  </Fragment>
-                  );
-                })}
-              </tbody>
+                  {g.stints.map(s => {
+                    const row = `${s.accountNo}-${s.startedAt}`;
+                    const isOpen = open.has(row);
+                    return (
+                      <Fragment key={row}>
+                        <tr className={isOpen ? 'ff-open ff-tl-toggle' : 'ff-tl-toggle'}
+                          onClick={e => { if (!(e.target as Element).closest('a')) toggle(row, s.accountNo); }}>
+                          <td className="ff-chev">
+                            <button type="button" className="btn ghost icon sm" aria-expanded={isOpen}
+                              aria-label={t(isOpen ? 'fbcTlHide' : 'fbcTlShow', { n: s.accountNo })} title={t('fbcTlTitle')}
+                              onClick={e => { e.stopPropagation(); toggle(row, s.accountNo); }}>
+                              <Icon name={isOpen ? 'chevronUp' : 'chevronDown'} size={13} />
+                            </button>
+                          </td>
+                          <td className="mono">#{s.accountNo}</td>
+                          <td>
+                            <span className="fp-holder">
+                              <span>{s.email ?? s.uid}</span>
+                              {s.email && <small className="mono">{s.uid}</small>}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="fp-holder">
+                              <WorkerLink id={s.workerId} />
+                              {g.kind === 'unrecorded' && (s.proxyKnown && s.proxyUrl
+                                ? <small className="mono">{s.proxyUrl}</small>
+                                : <small title={t('fbcStintProxyUnknownHint')}>{t('fbcStintProxyUnknown')}</small>)}
+                            </span>
+                          </td>
+                          <td>{when(s.startedAt)}</td>
+                          <td>{s.endedAt ? when(s.endedAt) : <span className="fp-muted">—</span>}</td>
+                          <td>
+                            {s.outcome
+                              ? <span className={`chip ${OUTCOME_TONE[s.outcome]}`}>{t(`fbcStint_${s.outcome}`)}</span>
+                              : <span className="chip accent">{t('fbcStint_current')}</span>}
+                          </td>
+                        </tr>
+                        {isOpen && (
+                          <tr className="ff-tl-row">
+                            <td colSpan={STINT_COLS}><AccountTimeline timeline={timelines.get(s.accountNo)} locale={locale} /></td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              ))}
             </table>
           </div>
         )}
     </section>
+  );
+}
+
+function IpGroupHead({ group: g }: { group: FbIpGroup }) {
+  const { t } = useT();
+  if (g.kind === 'vm') return <b>{t('fbcProxyNone')}</b>;
+  if (g.kind === 'unrecorded') return <b title={t('fbcIpNotRecordedHint')}>{t('fbcIpNotRecorded')}</b>;
+  return (
+    <span className="ff-ip-head-line">
+      <b className="mono">{g.ip}</b>
+      {g.status && <span className={`chip ${IP_STATUS_TONE[g.status]}`} title={t(`fbcIpStatusHint_${g.status}`)}>{t(`fbcIpStatus_${g.status}`)}</span>}
+      <small className="mono fp-muted">{g.proxyUrl}</small>
+      {g.failed > 0 && <small className="fp-warn">{t('fbcProxyFailed', { n: g.failed })}</small>}
+    </span>
   );
 }
 

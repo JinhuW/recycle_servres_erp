@@ -120,3 +120,22 @@ describe('Proxies tab', () => {
     expect(row({ exit_change: { at, from: { ...point, city: 'Boston' }, to: point } })).toContain('title="fleetProxyFlagChangedHint"');
   });
 });
+
+describe('an exhausted proxy on the Proxies tab', () => {
+  const mark = (failed: number, exhausted: boolean) => ({ url: UP.exit, ip: '192.0.2.1', failed, exhausted, exhaustedAt: exhausted ? NOW : null, revivedAt: null, revivedBy: null });
+  const table = (m: ReturnType<typeof mark>, state: 'all' | 'exhausted' = 'all') =>
+    renderToString(<ProxiesHealthTable rows={[UP, DOWN]} marks={[m]} filter={{ ...filter, state }} onFilter={noop} busy={null} now={NOW} />);
+
+  it('shows the chip past the limit, and the count of five below it', () => {
+    const spent = table(mark(5, true));
+    expect(spent).toContain('fbcProxyExhausted');
+    expect(spent).not.toContain('fleetProxyFailedOf');
+    expect(table(mark(3, false))).toContain('fleetProxyFailedOf');
+  });
+
+  it('filters to the exhausted ones', () => {
+    const only = table(mark(5, true), 'exhausted');
+    expect(only).toContain(`${UP.host}:${UP.port}`);
+    expect(only).not.toContain(`${DOWN.host}:${DOWN.port}`);
+  });
+});
