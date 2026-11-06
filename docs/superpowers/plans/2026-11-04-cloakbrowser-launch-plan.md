@@ -170,7 +170,7 @@ Dates are estimates. Accounts come only from batches you assign, per your 2026-1
 **Gate**
 - [ ] All spikes written up in the probe note (S1, S4, S5 written up; S2 and S3 not run)
 - [x] Before tagging 0.17.0: classify a live browser's licence death as an outage, and pin the binary to 155 (RS-551, re-run passed on `development`)
-- [ ] **Staged** image only, so running workers aren't replaced `[owner]`
+- [x] **Staged** image only, so running workers aren't replaced `[owner]`. Tagged and staged 2026-11-06 01:2x UTC, `aimm-recycle:0.17.0@sha256:af18ba5dfefd…` (monitor `5ff8fc2`, CloakBrowser 155.0.8059.39.2). No account has run it yet
 
 ### Decision G1 (end of Phase 1): you
 

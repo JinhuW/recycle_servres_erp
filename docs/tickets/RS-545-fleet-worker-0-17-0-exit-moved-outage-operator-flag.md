@@ -2,13 +2,13 @@
 id: RS-545
 title: Fleet worker 0.17.0: exit_moved, outage operator flag, honest resume
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-11-05
 reporter: jinhu
 branch: JinhuW/cloak-fixes-wave-3
 pr: 1102
-version:
+version: facebook-tracker 0.17.0
 related: []
 ---
 
