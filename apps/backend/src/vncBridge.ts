@@ -262,14 +262,15 @@ function recheck(client: WebSocket, workerId: string, check: () => Promise<numbe
  * refused, as it was before this existed.
  */
 export function attachVncBridge(
-  server: Server, app: FetchApp, env: Env, { revalidateMs = REVALIDATE_MS }: { revalidateMs?: number } = {},
+  server: Server, app: FetchApp, env: Env,
+  { revalidateMs = REVALIDATE_MS, relayWaitMs }: { revalidateMs?: number; relayWaitMs?: number } = {},
 ): WebSocketServer {
   // A frame cap too: ws would otherwise accept up to 100 MiB per message.
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_FRAME_BYTES });
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.on('error', () => socket.destroy());
-    if (handleFleetVncUpgrade(req, socket, head, app, env, wss, { revalidateMs })) return;
+    if (handleFleetVncUpgrade(req, socket, head, app, env, wss, { revalidateMs, relayWaitMs })) return;
     const path = (req.url ?? '').split('?')[0] ?? '';
     const match = PATH.exec(path);
     if (!match) {

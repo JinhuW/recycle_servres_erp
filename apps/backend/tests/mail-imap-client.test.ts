@@ -95,3 +95,14 @@ describe('imapClient', () => {
     expect(fake.options).toMatchObject({ port: 143, secure: false, doSTARTTLS: true });
   });
 });
+
+describe('imapFailure', () => {
+  it('keeps what the server said, which the bare message hides', async () => {
+    const { imapFailure } = await import('../src/mail/inbox');
+    const err = Object.assign(new Error('Command failed'), { responseText: 'Too many connections', serverResponseCode: 'LIMIT' });
+    expect(imapFailure(err)).toMatchObject({
+      error: 'Command failed', responseText: 'Too many connections', serverResponseCode: 'LIMIT',
+    });
+    expect(imapFailure('plain')).toBe('plain');
+  });
+});

@@ -29,7 +29,9 @@
 // session advisory lock below (startFleetRelayLease, from server.ts). Every
 // other instance refuses both paths 503, so a second replica fails loudly
 // instead of parking a worker where its viewer never arrives. A deploy hands
-// the lock over when the old instance exits and closes its sockets.
+// the lock over when the old instance stops and closes its sockets. Every
+// worker dials back at that moment and the new instance only takes the lock at
+// its next retry, so an authenticated dial waits out that gap before a refusal.
 
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -54,6 +56,8 @@ export const FLEET_VNC_STALE_EPOCH = 4409;
 export const VIEWER_FRAME = 'viewer';
 const RELAY_LOCK = 'fleet-vnc-relay';
 const RELAY_RETRY_MS = 5_000;
+// Past one retry, and under the 10 s open_timeout in rs_worker/vnc_relay.py.
+const RELAY_WAIT_MS = 6_000;
 
 const vlog = log.child({ module: 'fleet-vnc' });
 
@@ -66,6 +70,22 @@ const bridges = new Set<WebSocket>();
 let closing = false;
 // Whether this process holds the relay lock (see the header).
 let serving = false;
+const servingWaits = new Set<(ok: boolean) => void>();
+
+function whenServing(waitMs: number): Promise<boolean> {
+  if (serving) return Promise.resolve(true);
+  if (closing) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const done = (ok: boolean) => { clearTimeout(timer); servingWaits.delete(done); resolve(ok); };
+    const timer = setTimeout(() => done(false), waitMs);
+    timer.unref?.();
+    servingWaits.add(done);
+  });
+}
+
+function settleServingWaits(ok: boolean): void {
+  for (const done of servingWaits) done(ok);
+}
 
 function reject(socket: Duplex, status: number): void {
   socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
@@ -182,22 +202,22 @@ function recheck(viewer: WebSocket, check: () => Promise<number>, everyMs: numbe
  */
 export function handleFleetVncUpgrade(
   req: IncomingMessage, socket: Duplex, head: Buffer, app: FetchApp, env: Env, wss: WebSocketServer,
-  { revalidateMs = REVALIDATE_MS }: { revalidateMs?: number } = {},
+  { revalidateMs = REVALIDATE_MS, relayWaitMs = RELAY_WAIT_MS }: { revalidateMs?: number; relayWaitMs?: number } = {},
 ): boolean {
   const path = (req.url ?? '').split('?')[0] ?? '';
   if (path === WORKER_PATH) {
-    if (!serving) { reject(socket, 503); return true; }
-    admit(app, env, req).then((res) => {
+    admit(app, env, req).then(async (res) => {
       const workerId = res.headers.get('X-Fleet-Worker-Id');
       if (res.status !== 204 || !workerId) { reject(socket, res.status === 204 ? 500 : res.status); return; }
-      if (closing || !serving || (parked.size >= MAX_PARKED && !parked.has(workerId))) { reject(socket, 503); return; }
+      const held = await whenServing(relayWaitMs);
+      if (socket.destroyed) return;
+      if (!held || closing || !serving || (parked.size >= MAX_PARKED && !parked.has(workerId))) { reject(socket, 503); return; }
       wss.handleUpgrade(req, socket, head, (ws) => park(workerId, ws, () => admit(app, env, req).then((r) => r.status), revalidateMs));
     }).catch((e: unknown) => { vlog.error('fleet vnc worker upgrade failed', e); reject(socket, 500); });
     return true;
   }
   const match = VIEWER_PATH.exec(path);
   if (!match) return false;
-  if (!serving) { reject(socket, 503); return true; }
   let workerId: string;
   try {
     workerId = decodeURIComponent(match[1]!);
@@ -206,9 +226,11 @@ export function handleFleetVncUpgrade(
     return true;
   }
   if (!VNC_WORKER_ID.test(workerId)) { reject(socket, 404); return true; }
-  admit(app, env, req).then((res) => {
+  admit(app, env, req).then(async (res) => {
     if (res.status !== 204) { reject(socket, res.status); return; }
-    if (closing || bridges.size >= MAX_FLEET_BRIDGES) { reject(socket, 503); return; }
+    const held = await whenServing(relayWaitMs);
+    if (socket.destroyed) return;
+    if (!held || closing || !serving || bridges.size >= MAX_FLEET_BRIDGES) { reject(socket, 503); return; }
     wss.handleUpgrade(req, socket, head, (viewer) => {
       const worker = parked.get(workerId);
       if (!worker || worker.readyState !== WebSocket.OPEN) {
@@ -233,6 +255,7 @@ function closeAll(code: number, reason: string, graceMs: number): void {
 /** Closes every parked and paired socket, for shutdown. */
 export function closeFleetVnc({ graceMs = TERMINATE_GRACE_MS }: { graceMs?: number } = {}): void {
   closing = true;
+  settleServingWaits(false);
   closeAll(1001, 'The ERP is restarting — reconnect in a moment', graceMs);
 }
 
@@ -264,6 +287,7 @@ export function startFleetRelayLease(sql: Sql, { retryMs = RELAY_RETRY_MS }: { r
         if (r?.ok && !stopped) {
           serving = true;
           vlog.info('fleet vnc relay served by this instance');
+          settleServingWaits(true);
         }
       }
     } catch (e) {
