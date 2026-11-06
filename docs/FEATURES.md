@@ -3838,7 +3838,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     sees a new device on the account's next normal start. It also says not to
     re-login the account before then: Re-login and Mark healthy answer 409
     `engine_mismatch` while the worker runs a different engine from its
-    slot's. A worker older than 0.17.0 (v1.424.2) is never handed a CloakBrowser slot,
+    slot's. A worker parked on a lost session holds its lease and never reaches
+    that start by itself; the refusal says Park then Unpark restarts it, which
+    is one login (v1.433.1). A worker older than 0.17.0 (v1.424.2) is never handed a CloakBrowser slot,
     which waits for one that can run it. Since v1.421.0 (RS-537) the profile
     (engine, seed, GPU, timezone) is kept on the pool account, so removing and
     re-adding an account brings the same machine back and it still can't be
@@ -4658,6 +4660,10 @@ removed in v1.191.0.
   path, method and the backend's `X-Request-Id`, and `POST /api/client-errors`
   writes one greppable JSON line to stdout — capped at 5 per page load, deduped,
   and with vendor-portal tokens redacted (v1.105.0).
+- **Error dialogs give the reason, never a status code** (v1.433.1, RS-558): the
+  message is the response's `detail`, else its `error`, else a generic sentence,
+  and the line below it is the method, path and request ID. The status and the
+  machine code stay in the client-error log line.
 - **Load timing is reported too** (v1.122.0): `POST /api/client-timings` takes
   navigation timing, LCP, and the request/refresh counts for the page load, one
   report per load. Numbers only, no paths — it is the answer to "the page feels
