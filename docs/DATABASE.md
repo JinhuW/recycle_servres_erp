@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-05:** ERP migration `0228`, Reddit tracker migration `0007`,
+**As of 2026-11-06:** ERP migration `0229`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2132,12 +2132,17 @@ One row per Facebook Marketplace login in the shared pool. Managers add, import,
 | `cloak_seed` | `integer` |  |  | CloakBrowser fingerprint seed, kept once given even if the account goes back to stock; unique across all rows, retired included. |
 | `cloak_gpu` | `text` |  |  | The GPU that goes with the seed. |
 | `profile_timezone` | `text` |  |  | The profile's pinned clock; a proxy edit doesn't change it. |
+| `profile_device` | `jsonb` |  |  | The device's screen, viewport, scale, locale and native fields, pinned at the first engine choice (0229). A re-add uses these rather than working them out again. |
+| `profile_first_launched_at` | `timestamptz` |  |  | When its browser first launched on CloakBrowser. NULL = not yet, so a look-alike seed can still be redrawn. |
+| `profile_fingerprint` | `text` |  |  | SHA-256 of what that browser showed, which every later launch is held to. Not unique: an account already shown to Facebook keeps a clash and raises an alert. NULL = no report yet. |
+| `profile_launch` | `jsonb` |  |  | The report behind the fingerprint: hashes, user agent, build, worker, host, epoch, and who accepted it if it replaced an earlier record. |
+| `profile_launch_changed` | `jsonb` |  |  | A later launch that differs and waits for a manager; NULL otherwise. |
 
 - **Primary key:** `no`
 - **References:** `created_by` → `users.id` (on delete set null); `holder_user_id` → `users.id` (on delete set null)
 - **Unique:** `(uid)`
 - **Checks:** `status IN ('available', 'taken', 'fleet', 'problem', 'retired')`; `uid ~ '^\d{10,20}$'`; `browser_engine IN ('stock', 'cloak')`; `browser_engine <> 'cloak' OR cloak_seed IS NOT NULL`
-- **Indexes:** `fb_pool_accounts_cloak_seed_key` (cloak_seed), unique, where cloak_seed is not null; `fb_pool_accounts_created_by_idx` (created_by); `fb_pool_accounts_holder_user_id_idx` (holder_user_id); `fb_pool_accounts_status_idx` (status, added_at)
+- **Indexes:** `fb_pool_accounts_cloak_seed_key` (cloak_seed), unique, where cloak_seed is not null; `fb_pool_accounts_created_by_idx` (created_by); `fb_pool_accounts_holder_user_id_idx` (holder_user_id); `fb_pool_accounts_profile_fingerprint_idx` (profile_fingerprint), where not null; `fb_pool_accounts_status_idx` (status, added_at)
 - **Triggers:** `fb_worker_accounts_track` (after insert, update of status or holder_name, or delete → `fb_worker_accounts_track()`)
 
 Secrets are AES-256-GCM blobs sealed under FB_POOL_KEY (lib/sealed.ts, v1.<iv>.<tag>.<body> base64url), never clear text, and are shown only to a manager or the purchaser holding the account; the prod→dev copy nulls every *_enc column. `no` never reuses a removed account's number.
@@ -2432,7 +2437,7 @@ A slot made on the Account pool tab (`POST /api/fleet/slots`) gets a generated `
 
 - **Primary key:** `account_no`
 - **References:** `account_no` → `fb_pool_accounts.no` (on delete cascade); `host_id` → `fleet_hosts.host_id` (on delete set null); `proxy_id` → `fleet_proxies.id` (on delete set null)
-- **Indexes:** `fleet_slots_host_id_idx` (host_id), `fleet_slots_proxy_id_idx` (proxy_id)
+- **Indexes:** `fleet_slots_cloak_seed_key` ((device->>'cloak_seed')), unique, where the seed is set (0229); `fleet_slots_host_id_idx` (host_id), `fleet_slots_proxy_id_idx` (proxy_id)
 
 <a id="erp-fleet-pilot-enrollments"></a>
 

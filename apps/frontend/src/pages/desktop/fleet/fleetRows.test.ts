@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COORDINATOR, NOW, POOL, RELEASE, SLOTS, WORKERS } from './fixtures';
-import { FLEET_ROW_KINDS, fleetCloakRoom, rowCloakSwitchable, rowStockRevertible, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning, releasableRows, sortFleetRows } from './fleetRows';
+import { FLEET_ROW_KINDS, fleetCloakRoom, hostBays, rowCloakSwitchable, rowStockRevertible, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning, releasableRows, sortFleetRows, type FleetRow, type HostBay } from './fleetRows';
 
 const input = { slots: SLOTS, workers: WORKERS, release: RELEASE, coordinator: COORDINATOR, challenges: null, pool: POOL };
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
@@ -180,6 +180,27 @@ describe('fleetRows', () => {
     const bare = fleetRows({ slots: SLOTS, workers: WORKERS, release: null, coordinator: null, challenges: null, pool: null }, NOW);
     expect(bare.length).toBe(WORKERS.length);
     expect(bare.find(r => r.key === 'erp:homelab-3')?.kind).toBe('healthy');
+  });
+});
+
+describe('hostBays', () => {
+  const row = (workerId: string, host = 'h') => ({ key: `erp:${workerId}`, workerId, host }) as FleetRow;
+  const ids = (bays: readonly HostBay[]) => bays.map(b => b.row?.workerId ?? null);
+  it('puts a numbered worker in its own bay and pads to capacity', () => {
+    expect(ids(hostBays({ host_id: 'h', capacity: 4 }, [row('h-3'), row('h-1')]))).toEqual(['h-1', null, 'h-3', null]);
+  });
+  it('fills the first free bays with workers named any other way', () => {
+    expect(ids(hostBays({ host_id: 'h', capacity: 3 }, [row('nyc'), row('h-1')]))).toEqual(['h-1', 'nyc', null]);
+  });
+  it('keeps a worker past capacity, without empty bays up to it', () => {
+    expect(ids(hostBays({ host_id: 'h', capacity: 2 }, [row('h-9'), row('h-1')]))).toEqual(['h-1', null, 'h-9']);
+  });
+  it('reads only its own host, and a host with no capacity has only its workers', () => {
+    expect(ids(hostBays({ host_id: 'h', capacity: 0 }, [row('x-1', 'x'), row('h-1')]))).toEqual(['h-1']);
+  });
+  it('gives every bay its own key', () => {
+    const keys = hostBays({ host_id: 'h', capacity: 2 }, [row('h-1'), row('h-1'), row('h-7')]).map(b => b.key);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });
 

@@ -20,6 +20,21 @@ deployed?" harder to answer.
 
 ### Added
 
+- **A cloak worker reports its browser to the ERP before any Facebook page.**
+  After a passing preflight it sends hashes of what the browser really showed
+  (canvas, WebGL, hardware, screen, platform, languages) plus the user agent and
+  build. The ERP records the first launch and holds every later one to it:
+  `linked`, `match` and `duplicate` go on to the login; `redraw` (looks like another
+  account, nothing shown to Facebook yet) leaves with exit 75 for a claim with a new
+  seed; `changed` parks `profile_changed` until a manager accepts it, which resumes
+  in the same browser; no answer parks `connect_failed`, so no account reaches
+  Facebook unrecorded. None of these costs a login. The ERP has to carry
+  `POST /api/fleet/worker/profile-launch` (v1.430.0) before this worker runs.
+
+## [0.17.0] - 2026-11-05
+
+### Added
+
 - **A cloak worker proves its profile before any Facebook page.** It measures
   the exit IP on both the page path and `context.request` against the claim's
   `expected_exit_ip`, the WebRTC candidates against `webrtc_ip`, then zone,
@@ -74,6 +89,17 @@ deployed?" harder to answer.
   jar with no cookies isn't a refusal, so neither is reported as one.
 - **A license setup or guard that raises parks a cloak worker** as
   `browser_failed`. It used to exit into a new container each time.
+- **A running cloak browser that loses the license server now reads as an
+  outage.** It dies about 16 minutes later as a plain closed target with no
+  denial file, which used to park `browser_failed`. A cloak browser that dies
+  with no reason now gets one recheck launch, with no page and no account: if
+  that launch hits the outage the worker exits 74, otherwise it parks as before.
+  Stock workers never recheck. Each account with a live session still costs one
+  boot login to come back from an outage.
+- **Images bake CloakBrowser 155.0.8059.39.2, and the build fails on any other
+  build.** The key now fetches 156 by default, whose missing window frame fails
+  the preflight on every good profile and hides a moved exit. Moving the build is
+  a visible device change, so it takes an explicit `RS_CLOAK_VERSION`.
 
 ## [0.16.0] - 2026-11-02
 

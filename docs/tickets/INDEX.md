@@ -5,12 +5,16 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-554](./RS-554-fleet-link-each-account-to-its-first-cloakbrowser-la.md) | in-progress | story | P2 | Fleet: link each account to its first CloakBrowser launch, and keep profiles different | — |
+| [RS-553](./RS-553-fleet-tab-lead-with-fleet-status-fold-the-host-detai.md) | done | story | P2 | Fleet tab: lead with fleet status, fold the host detail away | 1.429.0 |
+| [RS-552](./RS-552-check-market-sync-when-a-sell-order-moves-to-done.md) | done | story | P2 | Check Market sync when a sell order moves to Done | 1.428.0 |
+| [RS-551](./RS-551-fleet-worker-pin-the-cloakbrowser-build-and-read-a-l.md) | done | bug | P2 | Fleet worker: pin the CloakBrowser build and read a live licence outage as an outage | facebook-tracker 0.17.0 |
 | [RS-550](./RS-550-rmb-flow-compares-a-commission-entry-to-what-the-pur.md) | done | bug | P2 | RMB Flow compares a commission entry to what the purchaser earns | 1.427.1 |
 | [RS-549](./RS-549-rmb-flow-balance-runs-per-manager-when-one-is-select.md) | done | story | P2 | RMB Flow balance runs per manager when one is selected | 1.427.0 |
 | [RS-548](./RS-548-phone-po-form-accepts-0-cost-confirmed-at-submit-ser.md) | done | story | P2 | Phone PO form accepts $0 cost, confirmed at submit; serials sit under Part # | 1.426.0 |
 | [RS-547](./RS-547-fleet-cleanup-after-the-cloakbrowser-review.md) | done | chore | P3 | Fleet: cleanup after the CloakBrowser review | 1.425.1 |
 | [RS-546](./RS-546-fleet-show-outages-holds-and-exit-alerts-on-desktop.md) | done | story | P2 | Fleet: show outages, holds and exit alerts on desktop | 1.425.0 |
-| [RS-545](./RS-545-fleet-worker-0-17-0-exit-moved-outage-operator-flag.md) | in-progress | bug | P1 | Fleet worker 0.17.0: exit_moved, outage operator flag, honest resume | — |
+| [RS-545](./RS-545-fleet-worker-0-17-0-exit-moved-outage-operator-flag.md) | done | bug | P1 | Fleet worker 0.17.0: exit_moved, outage operator flag, honest resume | facebook-tracker 0.17.0 |
 | [RS-544](./RS-544-fleet-agent-one-licence-probe-per-host-stock-first.md) | done | bug | P1 | Fleet agent: one licence probe per host, stock first | 1.424.4 |
 | [RS-543](./RS-543-fleet-exit-lease-and-pilot-rules-for-cloak-slots.md) | done | bug | P1 | Fleet: exit, lease and pilot rules for cloak slots | 1.424.3 |
 | [RS-542](./RS-542-fleet-and-sell-orders-fixes-before-the-next-release.md) | done | bug | P1 | Fleet and sell orders: fixes before the next release | 1.424.2 |
@@ -20,7 +24,7 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-538](./RS-538-fleet-track-each-proxy-s-measured-exit.md) | done | story | P2 | Fleet: track each proxy's measured exit | 1.422.0 |
 | [RS-537](./RS-537-fleet-atomic-account-enrollment-and-browser-profile.md) | done | story | P2 | Fleet: atomic account enrollment and browser profile | 1.421.0 |
 | [RS-536](./RS-536-so-list-total-follows-the-order-s-currency.md) | done | bug | P2 | SO list Total follows the order's currency | 1.420.1 |
-| [RS-535](./RS-535-fleet-worker-0-17-0-preflight-webrtc-seats-outage-ex.md) | in-progress | story | P2 | Fleet worker 0.17.0: preflight, WebRTC, seats, outage exit | — |
+| [RS-535](./RS-535-fleet-worker-0-17-0-preflight-webrtc-seats-outage-ex.md) | done | story | P2 | Fleet worker 0.17.0: preflight, WebRTC, seats, outage exit | facebook-tracker 0.17.0 |
 | [RS-529](./RS-529-fleet-agent-licence-outage-exit.md) | done | story | P2 | Fleet agent: licence outage exit | 1.420.0 |
 | [RS-528](./RS-528-count-proxy-crowding-by-exit-ip-not-by-port.md) | done | bug | P2 | Count proxy crowding by exit IP, not by port | 1.419.1 |
 | [RS-527](./RS-527-warn-when-a-proxy-carries-too-many-accounts.md) | done | story | P2 | Warn when a proxy carries too many accounts | 1.419.0 |

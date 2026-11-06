@@ -16,7 +16,7 @@ import {
   type FleetHost, type FleetRelease, type FleetSettings, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume,
 } from '../../../lib/fleet';
 import { parkedWorkers, retiredAt } from '../../../lib/fleetView';
-import { leaseLive, liveness } from './fleetBoard';
+import { leaseLive, liveness, workerIndex } from './fleetBoard';
 
 // A worker doing the work (degraded or mid-replacement included), one that
 // stopped once its account left the fleet (retired or removed) and waits for
@@ -66,7 +66,7 @@ export type FleetRow = {
   /** Parked on a moved exit: a manager's restart, which is one boot login, ends it. */
   restartable: boolean;
   /** Why a worker parked, when the account isn't the reason. */
-  infraPark: 'license_outage' | 'exit_moved' | null;
+  infraPark: 'license_outage' | 'exit_moved' | 'profile_changed' | null;
   /** The worker's own words for why it parked, when it says. */
   parkError: string | null;
   /** The latest Mark healthy queued for it. */
@@ -133,7 +133,7 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
     operator: worker.detail?.operator === true,
     resumable: fleetResumable(worker.state, worker.detail),
     restartable: fleetRestartable(worker.state, worker.detail),
-    infraPark: worker.state === 'DEAD' && (worker.detail?.reason === 'license_outage' || worker.detail?.reason === 'exit_moved') ? worker.detail.reason : null,
+    infraPark: worker.state === 'DEAD' && (worker.detail?.reason === 'license_outage' || worker.detail?.reason === 'exit_moved' || worker.detail?.reason === 'profile_changed') ? worker.detail.reason : null,
     parkError: typeof worker.detail?.error === 'string' ? worker.detail.error : null,
     resume: worker.resume ?? null,
     slot,
@@ -296,6 +296,28 @@ export function fleetRowHosts(rows: readonly FleetRow[], registered: readonly st
   const hosts = new Set(registered);
   for (const r of rows) if (r.host) hosts.add(r.host);
   return [...hosts].sort(naturally);
+}
+
+export type HostBay = { key: string; row: FleetRow | null };
+
+/** A host's worker slots in order: a numbered worker in its own bay, any other
+ *  in the first bay left, an empty bay up to capacity. A worker past capacity
+ *  gets a bay after them, since it is still running there. */
+export function hostBays(host: { host_id: string; capacity: number }, rows: readonly FleetRow[]): HostBay[] {
+  const bays = new Map<number, FleetRow>();
+  const loose: FleetRow[] = [];
+  for (const r of rows) {
+    if (r.host !== host.host_id) continue;
+    const n = workerIndex(host.host_id, r.workerId);
+    if (n !== null && !bays.has(n)) bays.set(n, r);
+    else loose.push(r);
+  }
+  const out: HostBay[] = [];
+  for (let n = 1; n <= host.capacity; n += 1) {
+    out.push({ key: `${host.host_id}-${n}`, row: bays.get(n) ?? loose.shift() ?? null });
+  }
+  const past = [...bays].filter(([n]) => n > host.capacity).sort(([a], [b]) => a - b).map(([, r]) => r);
+  return [...out, ...[...past, ...loose].map(row => ({ key: row.key, row }))];
 }
 
 /** "M running on K hosts" for the card's foot. */

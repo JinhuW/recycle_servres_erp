@@ -1,5 +1,6 @@
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import type { FleetProfileRecord } from '../../../lib/fleet';
 
 // Smoke tests: each tab's table renders its fixtures to markup without a DOM.
 // The fetchers are swapped out so the module graph never reaches lib/api.ts;
@@ -30,7 +31,7 @@ vi.mock('../../../lib/errorToast', () => ({ handleFetchError: vi.fn(), showSucce
 
 const { CITIES, CITY_LOG, COORDINATOR, HITS, HOSTS, NOW, POOL, RELEASE, SETTINGS, SLOTS, STATS, TASKS, WORKER_DETAIL, WORKER_STINTS, WORKERS } = await import('./fixtures');
 const { EngineSwitchDialog, WorkersTable } = await import('./FleetAccountsTab');
-const { EngineCard, EngineLossLine, HostStrip, LowerCapacityDialog, ReleaseBanner } = await import('./FleetHosts');
+const { EngineCard, EngineLossLine, FleetRack, HostRows, LowerCapacityDialog, ReleaseBanner } = await import('./FleetHosts');
 const { Belt, CityLogAside, TaskTable } = await import('./FleetTasksTab');
 const { CitiesTable } = await import('./FleetCitiesTab');
 const { DayChart, HitsTable } = await import('./FleetAnalysisTab');
@@ -38,22 +39,22 @@ const { FlowCard } = await import('../FleetFlow');
 const { ErpWorkerView } = await import('./FleetErpWorker');
 const { HomelabWorkerView } = await import('../FleetWorker');
 const { alertsByCity, daySeries, EMPTY_CITY_FILTER, EMPTY_TASK_FILTER, withCityNames } = await import('./fleetBoard');
-const { DEFAULT_FLEET_ROW_FILTER, EMPTY_FLEET_ROW_FILTER } = await import('./fleetRows');
+const { DEFAULT_FLEET_ROW_FILTER, EMPTY_FLEET_ROW_FILTER, fleetRows } = await import('./fleetRows');
 
 const noop = () => undefined;
 const items = ['server_ram', 'enterprise_ssd'];
 const fleetData = { slots: SLOTS, workers: WORKERS, hosts: HOSTS, release: RELEASE, coordinator: COORDINATOR, challenges: null, pool: POOL };
 
 describe('Fleet tab', () => {
-  it('shows one card per host with its switch, stepper and roll', () => {
-    const html = renderToString(<HostStrip hosts={HOSTS} release={RELEASE} onChanged={noop} now={NOW} />);
+  it('shows one row per host with its switch, stepper and roll', () => {
+    const html = renderToString(<HostRows hosts={HOSTS} rows={[]} release={RELEASE} onChanged={noop} onShowWorker={noop} now={NOW} />);
     expect(html).toContain('homelab');
     expect(html).toContain('worker-60-14');
     expect(html).toContain('role="switch"');
     expect(html).toContain('fleetAuthoritativeOff');   // the observe-only host
     expect(html).toContain('fleetHostRolling');
     expect(html).toContain('1.340.0');
-    expect(renderToString(<HostStrip hosts={[]} release={null} onChanged={noop} now={NOW} />)).toContain('fleetHostsNone');
+    expect(renderToString(<HostRows hosts={[]} rows={[]} release={null} onChanged={noop} onShowWorker={noop} now={NOW} />)).toContain('fleetHostsNone');
   });
   it('names the containers a lower capacity removes, and the login it costs', () => {
     const html = renderToString(<LowerCapacityDialog host={HOSTS[0]} next={2} onClose={noop} onDone={noop} />);
@@ -66,9 +67,9 @@ describe('Fleet tab', () => {
   });
   it('notes workers on an older build, with no bar, when no release rolls', () => {
     for (const release of [null, { ...RELEASE, state: 'done' as const }]) {
-      const html = renderToString(<HostStrip hosts={HOSTS} release={release} onChanged={noop} now={NOW} />);
+      const html = renderToString(<HostRows hosts={HOSTS} rows={[]} release={release} onChanged={noop} onShowWorker={noop} now={NOW} />);
       expect(html).not.toContain('fleetHostRolling');
-      expect(html).not.toContain('fleet-host-bar');
+      expect(html).not.toContain('fleet-chassis-bar');
       expect(html).toContain('fleetHostBehind');        // homelab: two on 0.13.9
       expect(html).toContain('fleetHostWorkerVersion'); // worker-60-14 is current
     }
@@ -113,20 +114,47 @@ describe('Fleet tab', () => {
     expect(stopping).toContain('fleetNowStopping');
     expect(stopping).toContain('vnc :5907');
   });
-  it('has the Healthy, Free and Parked chips, and no retired worker', () => {
-    const html = renderToString(<WorkersTable data={fleetData} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
-    expect(html.match(/<i class="fp-dot"><\/i><span>(\w+)<\/span>/g)?.map(m => m.match(/<span>(\w+)/)![1]))
+  const rack = (filter: 'all' | 'healthy', settled = true) => renderToString(
+    <FleetRack rows={fleetRows(fleetData, NOW)} workers={WORKERS} hosts={HOSTS} release={RELEASE} settings={SETTINGS} cloakUsed={0}
+      filter={filter} onFilter={noop} onShowWorker={noop} onChanged={noop} settled={settled} actions={null} now={NOW} />);
+  it('has the Healthy, Free and Parked chips in the rack', () => {
+    expect(rack('all').match(/<i class="fp-dot"><\/i><span>(\w+)<\/span>/g)?.map(m => m.match(/<span>(\w+)/)![1]))
       .toEqual(['fleetKindAll', 'fleetKindHealthy', 'fleetKindFree', 'fleetKindParked']);
+    expect(rack('healthy')).toMatch(/aria-pressed="true"[^>]*><i class="fp-dot"><\/i><span>fleetKindHealthy<\/span>/);
+  });
+  it('states the verdict once the coordinator has answered, and makes a bay of each worker', () => {
+    expect(rack('all')).toContain('fleetRackVerdict');
+    expect(rack('all', false)).not.toContain('fleetRackVerdict');
+    expect(rack('all')).toContain('fleet-bay-healthy');
+    expect(rack('all')).toContain('fleet-bay-parked');
+    expect(rack('all')).toContain('fleet-bay-empty');
+    expect(rack('all')).toContain('fleetBayTitle');
+  });
+  it('folds the host controls away until asked', () => {
+    expect(rack('all')).toMatch(/class="fleet-chassis-fold" hidden/);
+  });
+  it('has no retired worker', () => {
+    const html = renderToString(<WorkersTable data={fleetData} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
     // homelab-2 reports SESSION_EXPIRED on its own slot.
     expect(html).toContain('fleetReleaseParked');
     expect(html).not.toContain('homelab-20');
     expect(html).not.toContain('fleetRetiredOn');
   });
-  it('opens on the Healthy chip', () => {
+  it('opens on the healthy workers', () => {
     const html = renderToString(<WorkersTable data={fleetData} filter={DEFAULT_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
-    expect(html).toMatch(/aria-pressed="true"[^>]*><i class="fp-dot"><\/i><span>fleetKindHealthy<\/span>/);
     expect(html).not.toContain('homelab-9');          // silent, so parked
     expect(html).toContain('fleetNowReplacing');      // homelab-3 still runs
+  });
+  it('shows a cloak account\'s first launch, and offers Accept only for a changed fingerprint', () => {
+    const device = { viewport: [1366, 645] as [number, number], timezone: 'UTC', locale: 'en-US', browser_engine: 'cloak' as const, cloak_seed: 48213, cloak_gpu: 'Intel' as const };
+    const profile: FleetProfileRecord = { first_launched_at: '2026-11-01T00:00:00Z', fingerprint: 'a'.repeat(64), build: '155.0.8059.39.2', changed: false, changed_build: null };
+    const render = (p: FleetProfileRecord) => renderToString(
+      <WorkersTable data={{ ...fleetData, slots: SLOTS.map(s => s.account_no === 31 ? { ...s, device, profile: p } : s) }} filter={EMPTY_FLEET_ROW_FILTER} onFilter={noop} onChanged={noop} now={NOW} />);
+    expect(render(profile)).toContain('fleetProfileLinked');
+    expect(render(profile)).not.toContain('fleetProfileAccept');
+    expect(render({ ...profile, fingerprint: null })).toContain('fleetProfileNotMeasured');
+    expect(render({ first_launched_at: null, fingerprint: null, build: null, changed: false, changed_build: null })).toContain('fleetProfileNotLaunched');
+    expect(render({ ...profile, changed: true, changed_build: '156.0' })).toContain('fleetProfileAccept');
   });
   it('has an Engine column, and offers CloakBrowser only where the guard would', () => {
     const cloaked = SLOTS.map(s => s.account_no === 31

@@ -160,16 +160,17 @@ Dates are estimates. Accounts come only from batches you assign, per your 2026-1
 - [x] Wrap `build_launch_env` and guard errors as a park. Today they crash-loop
 - [ ] Cloak-only fonts through `FONTCONFIG_FILE`, waiting on decision 1. Adding fonts image-wide would change every **stock** account's fingerprint at its next start, which is a device change
 
-**Spikes on worker-60-14**, using the free key's one seat, one run at a time. They need the owner to provide the key at run time, and no Facebook page is opened.
-- [ ] **S1:** does WebRTC expose the host IP without the flag? Also run the new preflight check: it requires `webrtc_ip` among the candidates, so a binary that offers only mDNS would falsely park every cloak worker
-- [ ] **S2:** run about 50 seeds against FingerprintJS's public demo. Do some flag as tampering (#553)? Does the seed's screen conflict with Xvfb? Quarantine bad seeds
-- [ ] **S3:** do hashes hold from 155 to 156? If not, a binary bump is a device change
-- [ ] **S4:** does a browser survive a blocked licence server beyond 30 min, and does `playwright.stop()` free the seat? Also: can a fresh launch stay up 15 min during an outage? If so, a probe would falsely end the outage
-- [ ] **S5:** block the licence server before and after `launch` returns; both must end in exit 74, and a retry must recover. The after-launch path relies on the binary writing its denial file
+**Spikes**, first planned for worker-60-14 and run on `oci-sg-1` and `development`. They need the owner to provide the key at run time, and no Facebook page is opened.
+- [x] **S1:** Done 2026-11-05: no leak, check passes. Original question: does WebRTC expose the host IP without the flag? Also run the new preflight check: it requires `webrtc_ip` among the candidates, so a binary that offers only mDNS would falsely park every cloak worker
+- [x] **S2:** **Done 2026-11-06: nearly every seed flags as an anti-detect browser, so there are no bad seeds to quarantine; build 155 also reads as a bot and 156 doesn't; seeds collapse to 6 visitor IDs ([note](../../debug-notes/2026-11-06-cloakbrowser-spikes-s2-s3.md)).** Original question: run about 50 seeds against FingerprintJS's public demo. Do some flag as tampering (#553)? Does the seed's screen conflict with Xvfb? Quarantine bad seeds
+- [x] **S3:** **Done 2026-11-06: 49 of 50 seeds keep every hash, one changes GPU, and every user agent changes, so a bump is a device change.** Original question: do hashes hold from 155 to 156? If not, a binary bump is a device change
+- [x] **S4:** Done 2026-11-05: dies about 16 min after launch; a fresh launch cannot stay up; seat question inconclusive. Original question: does a browser survive a blocked licence server beyond 30 min, and does `playwright.stop()` free the seat? Also: can a fresh launch stay up 15 min during an outage? If so, a probe would falsely end the outage
+- [x] **S5:** **Failed 2026-11-05: blocked before launch is right, blocked after launch reads as `browser_failed`.** Original question: block the licence server before and after `launch` returns; both must end in exit 74, and a retry must recover. The after-launch path relies on the binary writing its denial file
 
 **Gate**
-- [ ] All spikes written up in the probe note
-- [ ] **Staged** image only, so running workers aren't replaced `[owner]`
+- [x] All spikes written up (S1, S4, S5 in the probe note; S2, S3 in [their own note](../../debug-notes/2026-11-06-cloakbrowser-spikes-s2-s3.md), since the probe note sits under the tagged tracker tree)
+- [x] Before tagging 0.17.0: classify a live browser's licence death as an outage, and pin the binary to 155 (RS-551, re-run passed on `development`)
+- [x] **Staged** image only, so running workers aren't replaced `[owner]`. Tagged and staged 2026-11-06 01:2x UTC, `aimm-recycle:0.17.0@sha256:af18ba5dfefd…` (monitor `5ff8fc2`, CloakBrowser 155.0.8059.39.2). No account has run it yet
 
 ### Decision G1 (end of Phase 1): you
 
@@ -243,7 +244,7 @@ The earlier canaries can't separate engine from batch, so this test splits each 
 | --- | --- | --- |
 | Binary exits 78 before any Facebook page | Exits 74. Agent retries with backoff and jitter | No login |
 | Licence check fails after `launch` returned, before any Facebook page | Target closes; the guard turns that into the licence error; exits 74 | No login |
-| Browser dies with a live session | Exits 74. Replacement container restores the session from the ERP | One boot login, logged and counted in the report |
+| Browser dies with a live session (within about 16 min of an outage starting; it reports no reason, so a fresh launch checks the licence) | Exits 74. Replacement container restores the session from the ERP | One boot login, logged and counted in the report |
 | Exit 76, 77 or 79 | The worker parks `license_denied` | Operator acts |
 
 Retrying through the agent instead of inside the container keeps the existing start stagger. One worker per host probes, after any other start, so a stock restart never queues behind an outage and only one account per host can spend a login on a retry. Simulated with 18 cloak workers and a 4-hour outage: a stock restart at +11 minutes, 6 boots from one worker, and the last worker back 104 minutes after the outage ended.

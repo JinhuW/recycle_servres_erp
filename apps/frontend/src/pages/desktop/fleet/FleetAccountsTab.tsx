@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { nextSort, SortTh, type SortState } from '../../../components/SortTh';
 import { Modal } from '../../../components/Modal';
@@ -17,23 +17,23 @@ import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
 import { ActivityAside } from '../FleetWorkers';
 import { dueLabel, easternClock, isQuarantined, maskUid } from './fleetBoard';
 import {
-  DEFAULT_FLEET_ROW_FILTER, FLEET_ROW_KINDS, FLEET_ROW_SORT_COLS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning,
+  DEFAULT_FLEET_ROW_FILTER, EMPTY_FLEET_ROW_FILTER, FLEET_ROW_SORT_COLS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning,
   fleetCloakRoom, releasableRows, rowCloakSwitchable, rowOwnSlot, rowStockRevertible, rowRetirable, sortFleetRows,
-  type FleetCloakRoom, type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowKind, type FleetRowSortCol,
+  type FleetCloakRoom, type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowSortCol,
 } from './fleetRows';
 import { AccountBriefCell } from './accountBrief';
-import { AddHostDialog, EngineCard, FleetAlerts, HostStrip, ReleaseBanner, ReleaseDialog } from './FleetHosts';
+import { AddHostDialog, FleetRack, ReleaseDialog } from './FleetHosts';
 import {
-  agoLabel, BudgetRing, ConfirmDialogBody, COORDINATOR_POLL_MS, EmptyRow, EngineChip, Legend, MarkHealthyButton, RestartWorkerButton, ParkDialog, ReleaseParkedDialog, RetireSlotDialog, resumeWaiting, UnavailableCard, useFleetMirror, useFleetPoll,
+  AcceptProfileButton, agoLabel, BudgetRing, ConfirmDialogBody, COORDINATOR_POLL_MS, EmptyRow, EngineChip, MarkHealthyButton, RestartWorkerButton, ParkDialog, ReleaseParkedDialog, RetireSlotDialog, resumeWaiting, UnavailableCard, useFleetMirror, useFleetPoll,
   WorkerStateChip,
 } from './shared';
 
 // ─── Fleet ────────────────────────────────────────────────────────────────────
-// The hosts as a strip of cards, then one table of every worker: the ERP
+// The fleet's status as a rack (FleetHosts.tsx), then one table of every worker: the ERP
 // fleet's, with the account and lease each holds, and the coordinator's until
 // cutover (host "homelab"). The accounts nothing runs, and the actions that
-// put them back, are on the Account pool tab. The legend, the host select and
-// the search box narrow the table. The activity aside stays under the table
+// put them back, are on the Account pool tab. The rack's legend and bays, the
+// host select and the search box narrow the table. The activity aside stays under the table
 // while the coordinator's rows exist. The ERP's own data and the
 // coordinator's are read apart: the table shows the ERP's rows at once and
 // the coordinator's join them when its slower answer lands. A coordinator
@@ -46,13 +46,6 @@ type ErpData = {
 };
 type CoordinatorData = { coordinator: FleetDoc | null; challenges: Challenge[] | null };
 type Data = ErpData & CoordinatorData;
-
-const KIND_DOT: Record<FleetRowKind | 'all', string> = {
-  all: 'fleet-dot-all', healthy: 'fleet-dot-pos', free: 'fleet-dot-muted', parked: 'fleet-dot-neg',
-};
-const KIND_KEY: Record<FleetRowKind | 'all', string> = {
-  all: 'fleetKindAll', healthy: 'fleetKindHealthy', free: 'fleetKindFree', parked: 'fleetKindParked',
-};
 
 export function FleetAccountsTab() {
   const { t, locale } = useT();
@@ -80,6 +73,12 @@ export function FleetAccountsTab() {
   const [adding, setAdding] = useState(false);
   const [releasing, setReleasing] = useState(false);
   const [filter, setFilter] = useState<FleetRowFilter>(DEFAULT_FLEET_ROW_FILTER);
+  const table = useRef<HTMLElement>(null);
+  const rows = useMemo(() => data && data !== 'unavailable' ? fleetRows(data) : [], [data]);
+  const showWorker = useCallback((workerId: string) => {
+    setFilter({ ...EMPTY_FLEET_ROW_FILTER, q: workerId });
+    table.current?.scrollIntoView({ block: 'nearest' });
+  }, []);
 
   if (data === 'unavailable') return <UnavailableCard text={t('fleetNotServed')} />;
   const hosts = data?.hosts ?? [];
@@ -90,23 +89,17 @@ export function FleetAccountsTab() {
 
   return (
     <div className="fp-pool">
-      <div className="fleet-tab-head">
-        <p className="fleet-lede">{t('fleetLede')}</p>
-        {!mirror && (
-          <div className="page-actions">
-            <button type="button" className="btn" onClick={() => setReleasing(true)} disabled={!data || hosts.length === 0}>{t('fleetReleaseAction')}</button>
-            <button type="button" className="btn primary" onClick={() => setAdding(true)} disabled={!data}>{t('fleetHostAdd')}</button>
-          </div>
-        )}
-      </div>
-      {data === null ? <div className="card fleet-host"><TableSkeleton rows={1} cols={4} /></div>
-        : <HostStrip hosts={hosts} release={release} onChanged={reload} />}
-      {data && !mirror && <FleetAlerts workers={data.workers} hosts={hosts} />}
-      {data?.settings && (
-        <EngineCard settings={data.settings} used={data.slots.filter(s => fleetEngineOf(s.device) === 'cloak').length} onChanged={reload} />
+      {data === null ? <div className="card fleet-rack"><TableSkeleton rows={3} cols={4} /></div> : (
+        <FleetRack rows={rows} workers={data.workers} hosts={hosts} release={release} settings={data.settings}
+          cloakUsed={data.slots.filter(s => fleetEngineOf(s.device) === 'cloak').length}
+          filter={filter.kind} onFilter={kind => setFilter(f => ({ ...f, kind }))} onShowWorker={showWorker} onChanged={reload}
+          settled={coord.data !== null}
+          actions={!mirror && <>
+            <button type="button" className="btn" onClick={() => setReleasing(true)} disabled={hosts.length === 0}>{t('fleetReleaseAction')}</button>
+            <button type="button" className="btn primary" onClick={() => setAdding(true)}>{t('fleetHostAdd')}</button>
+          </>} />
       )}
-      {release && (release.state === 'rolling' || release.state === 'staged' || release.state === 'failed') && <ReleaseBanner release={release} />}
-      <section className="card fleet-card" aria-label={t('fleetColWorker')}>
+      <section ref={table} className="card fleet-card" aria-label={t('fleetColWorker')}>
         {data === null ? <TableSkeleton rows={6} cols={9} />
           : <WorkersTable data={data} filter={filter} onFilter={setFilter} onChanged={reload} />}
       </section>
@@ -145,8 +138,6 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
   return (
     <>
       <div className="fp-toolbar fleet-toolbar">
-        <Legend buckets={FLEET_ROW_KINDS} counts={counts} value={filter.kind} onChange={kind => set({ kind })}
-          label={k => t(KIND_KEY[k])} dotClass={k => KIND_DOT[k]} />
         <select className="input fleet-select" value={filter.host} aria-label={t('fleetColHost')} onChange={e => set({ host: e.target.value })}>
           <option value="">{t('fleetEveryHost')}</option>
           {hostIds.map(h => <option key={h} value={h}>{h}</option>)}
@@ -296,6 +287,8 @@ function WorkerRow({ row: r, hostVersion, cityName, room, onChanged, now }: {
                 && <MarkHealthyButton workerId={r.workerId} version={r.version} resume={r.resume} state={r.state} onQueued={onChanged} />}
               {r.restartable && r.running && slot && !slot.parked && !mirror
                 && <RestartWorkerButton workerId={r.workerId} resume={r.resume} state={r.state} onQueued={onChanged} />}
+              {slot?.profile?.changed && !mirror
+                && <AcceptProfileButton no={slot.account_no} build={slot.profile.changed_build} onDone={onChanged} />}
               {r.running && slot && !slot.parked && !mirror
                 && <button type="button" className="btn sm ghost" onClick={() => setParking(true)}>{t('fleetPark')}</button>}
               {retirable && <button type="button" className="btn sm ghost fleet-danger-text" onClick={() => setRetiring(true)}>{t('fleetRetireFree')}</button>}

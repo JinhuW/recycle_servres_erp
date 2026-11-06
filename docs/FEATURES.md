@@ -1830,9 +1830,14 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     is left out of that average. If the order's lines changed after the dialog
     opened, the sync is refused and writes nothing. The order's prices don't
     change. The button waits while the order has unsaved changes. A later sync
-    of a part replaces the order's earlier reading, closing the order withdraws
-    its readings (the history's *closed* entry lists them), and Done records
-    the full `sale:<order>` price over them. A part the order stops pricing
+    of a part replaces the order's earlier reading, and closing the order
+    withdraws its readings (the history's *closed* entry lists them). Done keeps
+    a synced part's price and records the full `sale:<order>` price only for
+    parts never synced (v1.428.0, RS-552). Moving an order to Done checks this
+    first: the Done dialog names the priced parts not yet synced and offers the
+    sync, limited to those parts, and the manager can still continue. A part
+    synced and then repriced still counts as synced, so it needs syncing again
+    before Done. A part the order stops pricing
     (removed, or held at qty or price 0) has its reading withdrawn on the next
     save, sync or Done (v1.414.1, RS-517).
   - **The same sheet prices the PO in Review mode** (v1.313.0). Since
@@ -2840,7 +2845,8 @@ over MCP.
   SKU was last updated, without tapping to expand (v1.395.2).
 - **Five feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
-  on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
+  on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`,
+  except parts it already synced, v1.428.0),
   and a price-list import on the Market page (`import:<email>`, v1.247.0).
   A fifth is a sell order's Sync to Market at a chosen percent (`bid:<order>`,
   v1.414.0). From v1.138.3 this was a save following a vendor price import, off
@@ -3553,7 +3559,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   one stagger apart with nobody going to the host. The host's report carries
   `outage_attempts` during an outage. Since v1.425.0 (RS-546) the Fleet tab has a banner
   for an outage, for containers held for a person and for unread fleet alerts, each
-  dismissable on its own. A worker row names `Licence outage` or `Exit moved`. A
+  dismissable on its own; since v1.429.0 (RS-553) these are one line each in the
+  status panel, an alert's text under **Details**, a held worker with **Show worker**. A worker row names `Licence outage` or `Exit moved`. A
   worker whose port moved after a page opened offers **Restart**, which warns it is
   one boot login, and which nothing does by itself. Since v1.424.3 (RS-543) the outage
   heartbeat keeps the slot's lease for 24 hours, so a worker with no slot takes
@@ -3670,10 +3677,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   tab says so and the rest of the page is unaffected. Every tab re-reads every
   10 s while it is visible.
   Since v1.351.0 (RS-403) the Fleet and Analysis tabs show the ERP's own rows without waiting for the coordinator, whose rows fill in when they land, read every 30 s and never while the last read is still out; the tabs and the tab-bar counts send each URL once per load and read the pool summary, not the secret-bearing snapshot.
-  - **Fleet** (`/#/fleet`, v1.344.0): a strip of host cards, then one table
-    of every worker (since v1.361.0, RS-412; before, every account). A host
-    card gives the id, the agent's version, when it
-    last reported, running of capacity, the **Authoritative** switch (off is
+  - **Fleet** (`/#/fleet`, v1.344.0): a status panel, then one table of every
+    worker (since v1.361.0, RS-412; before, every account). Since v1.429.0
+    (RS-553) the panel opens with a headline ("11 of 15 workers healthy", and how
+    many things need a person), the state filter and one row per host: a bay per
+    worker slot, solid green for healthy, red with "!" for parked, hatched for
+    free, an outline for empty. Clicking a bay shows that worker in the table.
+    Observe-only hosts sort last and dimmed. A host's row shows how many workers
+    are on older builds, running of capacity and, once it is late, when it last
+    reported. Its fold gives the agent's version, when it
+    last reported, the **Authoritative** switch (off is
     observe-only: the agent reports and starts nothing), the capacity stepper
     (a new worker is a Facebook login; since v1.364.0 the agent runs no more
     workers than the host has accounts for; since v1.382.0 (RS-459) a − that
@@ -3812,7 +3825,15 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     which waits for one that can run it. Since v1.421.0 (RS-537) the profile
     (engine, seed, GPU, timezone) is kept on the pool account, so removing and
     re-adding an account brings the same machine back and it still can't be
-    seeded twice, and no two accounts can hold one seed. A proxy timezone edit,
+    seeded twice, and no two accounts can hold one seed. Since v1.430.0 (RS-554), and with worker 0.18.0, each cloak browser reports what it
+    really showed before any Facebook page: the first report is the account's
+    record, shown beside its seed with the date and build. A first launch that
+    looks like another account gets a new seed; one already shown to Facebook
+    keeps its seed and managers get an alert; a browser that differs from its own
+    record parks **Fingerprint changed** until a manager clicks **Accept change**.
+    The first device stays with the account, so a re-add can't change its screen.
+    This proves accounts differ by our own hash, not that Facebook sees separate
+    machines. A proxy timezone edit,
     or Change proxy, leaves that timezone alone and only moves accounts with no
     profile. **Add to fleet** can also name a pilot and an arm, which enrolls
     the account in one step: `POST /api/fleet/slots` writes the enrollment
@@ -3842,7 +3863,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     row offers **Back to stock**, another new device, only while no worker
     can be starting on it (parked, no worker, or a lost session). It is
     refused once the cloak session has been healthy. A
-    **Browser engine** card under the host cards has the **CloakBrowser on**
+    **Browser engine** row in the status panel keeps its loss rates visible and
+    folds away the **CloakBrowser on**
     switch (`cloak_enabled`, default off; off stops new switches and leaves
     switched accounts alone), the seats stepper (`cloak_max_slots`, default
     1, the license's session limit; parked cloak slots count) and the

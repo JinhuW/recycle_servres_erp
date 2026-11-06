@@ -3,7 +3,7 @@ import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { ApiError } from '../../../lib/api';
 import { handleFetchError, showSuccessToast, showWarnToast } from '../../../lib/errorToast';
-import { fleetApi, fleetEngineOf, fleetTakesResume, type FleetSlot, type FleetWorkerResume } from '../../../lib/fleet';
+import { fleetApi, fleetEngineOf, fleetTakesResume, type FleetProfileRecord, type FleetSlot, type FleetWorkerResume } from '../../../lib/fleet';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../../lib/route';
 import { useT } from '../../../lib/i18n';
 import { budgetTone, easternClock, easternDateTime, liveness, spanLabel, type Liveness, type Translate } from './fleetBoard';
@@ -485,7 +485,7 @@ export function ReleaseQuarantineButton({ slot, onDone }: { slot: FleetSlot; onD
 }
 
 /** A slot's engine, with the CloakBrowser fingerprint it carries. */
-export function EngineChip({ slot }: { slot: Pick<FleetSlot, 'device'> }) {
+export function EngineChip({ slot }: { slot: Pick<FleetSlot, 'device' | 'profile'> }) {
   const { t } = useT();
   const d = slot.device;
   if (fleetEngineOf(d) === 'stock') return <span className="fp-muted">{t('fleetEngine_stock')}</span>;
@@ -493,6 +493,46 @@ export function EngineChip({ slot }: { slot: Pick<FleetSlot, 'device'> }) {
     <>
       <span><span className="chip info">{t('fleetEngine_cloak')}</span></span>
       {d?.cloak_seed !== undefined && <small className="mono">{t('fleetCloakSeed', { seed: d.cloak_seed, gpu: d.cloak_gpu ?? '—' })}</small>}
+      {slot.profile && <ProfileLaunch profile={slot.profile} />}
     </>
   );
+}
+
+/** What an account's browser showed the first time, which later launches are held to. */
+function ProfileLaunch({ profile: p }: { profile: FleetProfileRecord }) {
+  const { t, locale } = useT();
+  const when = p.first_launched_at ? easternDateTime(p.first_launched_at, locale) : null;
+  const line = !when ? t('fleetProfileNotLaunched')
+    : p.fingerprint ? t('fleetProfileLinked', { when, build: p.build ?? '—' })
+    : t('fleetProfileNotMeasured', { when });
+  return <small title={p.fingerprint ? t('fleetProfileFingerprint', { fingerprint: p.fingerprint.slice(0, 12) }) : undefined}>{line}</small>;
+}
+
+/** For a planned change such as a new build: the fingerprint moved and only a manager can say that's expected. */
+export function AcceptProfileButton({ no, build, onDone, className = 'btn sm ghost' }: {
+  no: number; build: string | null; onDone?: () => void; className?: string;
+}) {
+  const { t } = useT();
+  const mirror = useFleetMirror();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const accept = () => {
+    setBusy(true);
+    fleetApi.acceptSlotProfile(no)
+      .then(() => { showSuccessToast(t('fleetProfileAccepted', { no })); setAsking(false); onDone?.(); })
+      .catch(handleFetchError)
+      .finally(() => setBusy(false));
+  };
+  if (mirror) return null;
+  return <>
+    <button type="button" className={className} title={t('fleetParkHint_profile_changed')} onClick={e => { e.stopPropagation(); setAsking(true); }}>
+      {t('fleetProfileAccept')}
+    </button>
+    {asking && (
+      <Modal onClose={() => { if (!busy) setAsking(false); }} shellStyle={{ maxWidth: 460 }}>
+        <ConfirmDialogBody title={t('fleetProfileAcceptTitle', { no })} body={<p>{t('fleetProfileAcceptBody', { build: build ?? '—' })}</p>}
+          confirm={t('fleetProfileAccept')} busy={busy} onClose={() => setAsking(false)} onConfirm={accept} />
+      </Modal>
+    )}
+  </>;
 }

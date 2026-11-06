@@ -35,8 +35,8 @@ import { useAuth } from '../../lib/auth';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { SellOrderAttachments, type SellAttachment } from '../../components/SellOrderAttachments';
-import { PriceImportSection } from './SellOrderPriceImportDialog';
-import { applyPriceRows } from '../../lib/priceImport';
+import { MarketSyncCheck, MarketSyncDialog, PriceImportSection } from './SellOrderPriceImportDialog';
+import { applyPriceRows, marketSyncParts } from '../../lib/priceImport';
 import { usePreference } from '../../lib/preferences';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { filterLineGroups, foldEntries, groupSellOrderLines, noRange, type SellOrderLineGroup, type SellOrderLineGroupBy, type SeriesFold } from '../../lib/sellOrderLineGroups';
@@ -273,6 +273,9 @@ type SellOrderDetailType = {
   // (Pack mode's count, another save) is refused, not reverted. Absent from a
   // backend older than this bundle.
   linesVersion?: string;
+  // Canonical part numbers this order has synced to the Market. Absent from a
+  // backend older than this bundle.
+  marketSyncedParts?: string[];
   archivedAt: string | null;
   closeReasonId: string | null;
   // Set once the order has been Done, and kept through a reopen. Absent from
@@ -1350,15 +1353,15 @@ function SellOrderDetail({ id, onToast }: {
     && (draft.paymentReceivedBy || null) !== (order.paymentReceivedBy?.id ?? null);
   const linesChanged = !!order && !!draft
     && linesSig(draft.lines) !== linesSig(order.lines.map(toEditLine));
-  const dirty = order && draft && (
-    draft.status !== order.status
-    || (draft.notes ?? '') !== (order.notes ?? '')
+  const editsUnsaved = !!order && !!draft && (
+    (draft.notes ?? '') !== (order.notes ?? '')
     || customerChanged
     || receiverChanged
     || currencyChanged
     || linesChanged
     || pendingAdjust != null
   );
+  const dirty = order && draft && (draft.status !== order.status || editsUnsaved);
   // Done waits on every manager's sign-off of the order as saved. Edits that
   // void it are read the way the server reads them: a reorder or a warehouse
   // move doesn't, so linesChanged would over-warn.
@@ -1566,6 +1569,11 @@ function SellOrderDetail({ id, onToast }: {
     const timer = setTimeout(() => setJustAdded(new Set()), 2400);
     return () => clearTimeout(timer);
   }, [justAdded]);
+
+  const [doneSyncing, setDoneSyncing] = useState(false);
+  // Only the order's field: a reload would replace the draft under an open dialog.
+  const onMarketSynced = (marketSyncedParts: string[]) =>
+    setOrder(o => o && { ...o, marketSyncedParts });
 
   const save = async () => {
     if (!order || !draft) return;
@@ -2195,6 +2203,7 @@ function SellOrderDetail({ id, onToast }: {
                     dirty={!!dirty}
                     onApply={rows =>
                       setDraft(d => d && { ...d, lines: applyPriceRows(d.lines, rows) })}
+                    onSynced={onMarketSynced}
                   />
                 </div>
               )}
@@ -2510,6 +2519,29 @@ function SellOrderDetail({ id, onToast }: {
             setPending(null);
           }}
           onMutated={() => setHistoryKey(k => k + 1)}
+          notice={pending === 'Done' && order.status !== 'Done' && order.marketSyncedParts ? (
+            <MarketSyncCheck
+              parts={marketSyncParts(order.lines)}
+              syncedParts={order.marketSyncedParts}
+              // A staged status doesn't change the saved prices a sync reads.
+              blocked={editsUnsaved ? t('soMarketSyncSaveFirst') : null}
+              onSync={() => setDoneSyncing(true)}
+            />
+          ) : undefined}
+        />
+      )}
+      {doneSyncing && order && (
+        <MarketSyncDialog
+          orderId={order.id}
+          // Only what the check named: ticking a part synced earlier would
+          // re-record it at whatever percent this dialog holds now.
+          parts={marketSyncParts(order.lines).filter(p => !order.marketSyncedParts?.includes(p.canonPart))}
+          linesVersion={order.linesVersion}
+          currency={order.currency}
+          locale={locale}
+          zIndex={120}
+          onClose={() => setDoneSyncing(false)}
+          onSynced={onMarketSynced}
         />
       )}
       {adding && draft && (

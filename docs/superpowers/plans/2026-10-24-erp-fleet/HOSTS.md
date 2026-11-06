@@ -4,6 +4,7 @@
 | --- | --- | --- | --- | --- |
 | `homelab` | `jinhu@10.10.10.73` | Python coordinator, console, OpenSearch and four ERP fleet workers; all legacy monitor launches retired | Active dev fleet host, capacity 4 | RS-426, 2026-10-27; sessions restored once, alerts off |
 | `worker-60-14` | `worker@10.10.60.14` | Eight running ERP worker containers and one parked container on operator hold | First dev fleet host, capacity 13 | Existing containers retained during RS-426; SESSION_EXPIRED workers left untouched |
+| `development` | `dev@10.10.60.10` | LAN machine, 32 GB RAM; nothing else in Docker | Trial host, observe-only, capacity 0 | Agent only since 2026-11-05. The owner put it ahead of `oci-sg-1`. A live worker needs an `RS_CONTROL_PLANE_TOKENS` entry and the coordinator relay's source list extended |
 | `oci-sg-1` | `ubuntu@140.245.106.33` | OCI Singapore `fleet-oci-sg-1`, VM.Standard.E4.Flex, 1 OCPU, 8 GB, 50 GB boot; Pay-As-You-Go, billed | Trial host, observe-only, capacity 0 | Agent only since 2026-11-05. Cannot run a live worker until it has a coordinator route and tokens (below) |
 
 ## What `oci-sg-1` lacks before it can run a live worker
@@ -13,6 +14,15 @@
 - `RS_CONTROL_PLANE_TOKENS` has no `oci-sg-1-*` entries, and a worker id without
   a token exits 70 before its browser opens.
 - Agent log shipping is off: `FLEET_OPENSEARCH_URL` is also a LAN address.
+
+## SSH between `oci-sg-1` and `development`
+
+`development` (`dev@10.10.60.10`) holds a reverse SSH tunnel to `oci-sg-1`, as
+systemd service `oci-tunnel`, so on `oci-sg-1` `ssh development` reaches it through
+`127.0.0.1:2210`. The tunnel key can only listen on that port. The return key logs in
+as `dev`, which has sudo and sits on the LAN, so a compromised `oci-sg-1` reaches both.
+To cut it, stop the service, or remove `oci-sg-1-to-development` from `dev`'s
+`authorized_keys`. Fleet traffic doesn't use this tunnel.
 
 ## Reachability of `10.10.60.14`
 

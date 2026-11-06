@@ -72,6 +72,8 @@ export type FleetWorker = FleetWorkerRow & {
 
 // One account's slot, joined with its worker and its pool row. `uid` is the
 // pool account's Facebook id; the table masks it.
+export type { FleetProfileRecord } from '@recycle-erp/shared';
+
 export type FleetSlot = FleetSlotRow & {
   uid: string | null;
   pool_status: string;
@@ -197,6 +199,8 @@ export const fleetApi = {
   // cloak session never got HEALTHY (cloak_proven).
   setSlotEngine: (no: number, engine: FleetBrowserEngine) =>
     api.post<{ slot: FleetSlot }>(`${BASE}/slots/${no}/engine`, { engine }).then(r => r.slot),
+  // Takes a changed fingerprint as the account's record (409 no_profile_change without one).
+  acceptSlotProfile: (no: number) => api.post<{ slot: FleetSlot }>(`${BASE}/slots/${no}/profile/accept`, {}).then(r => r.slot),
   // Losses per engine over the last `days`, with the stint ledger's baseline.
   engineLoss: (days = 30) => api.get<FleetEngineLoss>(`${BASE}/stats/engine-loss${query({ days })}`),
   // A pilot's arms, or with no pilot the supplier scorecard over the last `days`.

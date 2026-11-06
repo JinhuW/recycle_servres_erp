@@ -27,7 +27,7 @@ vi.mock('../../../lib/errorToast', () => ({ handleFetchError: vi.fn(), showSucce
 const { HOSTS, NOW, RELEASE } = await import('./fixtures');
 const { FleetMirrorBanner, loadFleetMirror, PROD_FLEET_URL } = await import('./shared');
 const { FleetAccountsTab } = await import('./FleetAccountsTab');
-const { HostStrip } = await import('./FleetHosts');
+const { HostRows } = await import('./FleetHosts');
 
 const noop = () => undefined;
 
@@ -40,7 +40,7 @@ describe('Fleet mirror', () => {
     const tab = renderToString(<FleetAccountsTab />);
     expect(tab).not.toContain('fleetHostAdd');
     expect(tab).not.toContain('fleetReleaseAction');
-    const strip = renderToString(<HostStrip hosts={HOSTS} release={RELEASE} onChanged={noop} now={NOW} />);
+    const strip = renderToString(<HostRows hosts={HOSTS} rows={[]} release={RELEASE} onChanged={noop} onShowWorker={noop} now={NOW} />);
     expect(strip).toContain('role="switch"');           // the state still shows, disabled
     expect(strip).toMatch(/role="switch"[^>]*disabled/);
     expect(strip).not.toContain('fleetCapacityMore');

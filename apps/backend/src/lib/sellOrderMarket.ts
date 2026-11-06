@@ -1,4 +1,5 @@
 import type { TransactionSql } from 'postgres';
+import type { SqlLike } from '../db';
 import { canonPartCol, canonPartNumberJs } from './part-number';
 import { autoTrackParts, type TrackablePart } from './marketAutoTrack';
 import { appendPriceEvent, retractPriceEvents, type WithdrawnPrice } from './refPriceEvents';
@@ -25,6 +26,8 @@ type RecordOptions = {
   source: string;
   // Lines to record, by canonical part number. Absent = every line.
   only?: Set<string>;
+  // Lines to leave out, by canonical part number.
+  except?: Set<string>;
   // Share of the order's price the Market records. A line saved at 0 is no
   // market price, so it neither counts toward the average nor makes a reading.
   percent?: number;
@@ -56,6 +59,7 @@ async function recordSellOrderDataPoints(
     const canon = canonPartNumberJs(raw);
     if (!canon) continue;
     if (opts.only && !opts.only.has(canon)) continue;
+    if (opts.except?.has(canon)) continue;
     const g = byCanon.get(canon);
     if (g) {
       g.priceQty += l.unit_price * l.qty;
@@ -105,9 +109,9 @@ async function recordSellOrderDataPoints(
   return { recorded };
 }
 
-// On sell-order completion: a completed sale is the most authoritative price
-// signal we have, so every sold product gets a data point. Runs inside the
-// caller's Done tx.
+// On sell-order completion: a sold product gets a data point at its sale price,
+// unless the manager already synced it. That price is the one they chose for
+// the Market, so the sale leaves it standing. Runs inside the caller's Done tx.
 export async function recordSaleDataPoints(
   tx: TransactionSql,
   sellOrderId: string,
@@ -115,6 +119,7 @@ export async function recordSaleDataPoints(
 ): Promise<{ recorded: number }> {
   return recordSellOrderDataPoints(tx, sellOrderId, actorUserId, {
     source: `sale:${sellOrderId}`,
+    except: new Set(await syncedBidParts(tx, sellOrderId)),
   });
 }
 
@@ -161,6 +166,16 @@ export async function syncMarketPrices(
 }
 
 const bidSource = (sellOrderId: string) => `bid:${sellOrderId}`;
+
+// The canonical part numbers this order's Sync to Market holds a reading for.
+export async function syncedBidParts(sql: SqlLike, sellOrderId: string): Promise<string[]> {
+  const rows = await sql<{ part_number: string }[]>`
+    SELECT DISTINCT rp.part_number
+    FROM ref_price_events e JOIN ref_prices rp ON rp.id = e.ref_price_id
+    WHERE e.source = ${bidSource(sellOrderId)}
+  `;
+  return [...new Set(rows.map(r => canonPartNumberJs(r.part_number)))];
+}
 
 // A quote stands only while the order still prices the part. Called wherever
 // that can have stopped being true unseen: a line save, a sync, and Done, which
