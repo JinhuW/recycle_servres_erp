@@ -2,13 +2,13 @@
 id: RS-551
 title: Fleet worker: pin the CloakBrowser build and read a live licence outage as an outage
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-05
 reporter: jinhu
 branch: JinhuW/cloak-blockers-0-17
 pr: 1115
-version:
+version: facebook-tracker 0.17.0
 related: []
 ---
 
@@ -34,7 +34,7 @@ Spikes S1, S4 and S5 found two faults in the unreleased worker 0.17.0 code (resu
 - [x] Stock never launches a recheck
 - [x] A worker image bakes the pinned build, and the build fails if it gets any other
 - [x] On the real binary, with no account: preflight passes on a good profile, a wrong exit reads `exit_moved`, an outage on a running browser exits 74
-- [ ] Shipped in worker 0.17.0
+- [x] Shipped in worker 0.17.0
 
 ## Out of scope
 
