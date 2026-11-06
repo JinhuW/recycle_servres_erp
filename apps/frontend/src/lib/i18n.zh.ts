@@ -4470,6 +4470,7 @@ const zh: Record<string, string> = {
   fleetAlertHide: "收起详情",
   fleetFoldHost: "{host} 的控制项",
   fleetFoldEngine: "浏览器引擎控制项",
+  fleetFoldRack: "主机、提醒、发布和浏览器引擎",
   fleetReleaseCard: "发布",
   fleetAlertDismiss: "忽略",
   fleetCohortCrossed: "跨组",

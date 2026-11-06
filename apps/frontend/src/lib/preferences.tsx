@@ -60,6 +60,8 @@ export type PrefMap = {
   'sidebar.folded': boolean;
   // The account panel beside a worker's live browser, folded away.
   'fleetWatch.accountHidden': boolean;
+  // Everything under the headline of the Fleet tab's status panel, folded away.
+  'fleet.rackFolded': boolean;
   // My leads under Leads ▸ Reddit: a list ranked by urgency, or a board by stage.
   'leads.view': 'list' | 'board';
   // Finished or skipped the purchaser walkthrough; it opens by itself until

@@ -7,6 +7,7 @@ import type { Notification } from '../../../lib/types';
 import { fleetApi, type FleetEngineLoss, type FleetEngineLossRow, type FleetHost, type FleetHostCreated, type FleetWorker, type FleetRelease, type FleetSettings } from '../../../lib/fleet';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
+import { usePreference } from '../../../lib/preferences';
 import { capacityCuts, fleetAttention, hostLag, hostRunning, liveness, releaseSummary, rollProgress } from './fleetBoard';
 import { FLEET_ROW_KINDS, fleetRowCounts, hostBays, type FleetRow, type FleetRowKind } from './fleetRows';
 import { agoLabel, Clock, ConfirmDialogBody, Legend, useFleetMirror, useFleetPoll } from './shared';
@@ -41,7 +42,8 @@ const RELEASE_CHIP: Record<FleetRelease['state'], string> = {
 
 /** The Fleet tab's first read: how the fleet is, then each host as a row of
  *  bays, what needs a person, and the release and engine as a quiet row each.
- *  Every control a manager rarely touches waits in a row's fold. */
+ *  Every control a manager rarely touches waits in a row's fold, and everything
+ *  under the headline folds as one for a manager who only wants the table. */
 export function FleetRack({ rows, workers, hosts, release, settings, cloakUsed, filter, onFilter, onShowWorker, onChanged, settled, actions, now = Date.now() }: {
   rows: readonly FleetRow[]; workers: readonly FleetWorker[]; hosts: readonly FleetHost[]; release: FleetRelease | null;
   settings: FleetSettings | null | undefined; cloakUsed: number;
@@ -53,10 +55,12 @@ export function FleetRack({ rows, workers, hosts, release, settings, cloakUsed, 
   const { t } = useT();
   const attention = useFleetAttention(workers, hosts);
   const counts = fleetRowCounts(rows);
+  const [folded, setFolded] = usePreference('fleet.rackFolded', false);
   return (
     <section className="card fleet-rack" aria-label={t('fleetRackLabel')}>
       <div className="fleet-rack-head">
         <div className="fleet-rack-verdict">
+          <FoldButton open={!folded} onToggle={() => setFolded(!folded)} label={t('fleetFoldRack')} />
           {!settled ? <Skeleton width={230} height={22} />
             : counts.all === 0 ? <span className="fleet-rack-none">{t('fleetWorkersNone')}</span>
             : <h2>{t('fleetRackVerdict', { healthy: counts.healthy, total: counts.all })}</h2>}
@@ -67,10 +71,13 @@ export function FleetRack({ rows, workers, hosts, release, settings, cloakUsed, 
           label={k => t(KIND_KEY[k])} dotClass={k => KIND_DOT[k]} />
         <div className="fleet-rack-actions">{actions}</div>
       </div>
-      <HostRows hosts={hosts} rows={rows} release={release} onChanged={onChanged} onShowWorker={onShowWorker} now={now} />
-      <FleetAlerts attention={attention} onShowWorker={onShowWorker} />
-      {release && (release.state === 'rolling' || release.state === 'staged' || release.state === 'failed') && <ReleaseBanner release={release} now={now} />}
-      {settings && <EngineCard settings={settings} used={cloakUsed} onChanged={onChanged} />}
+      {/* Hidden, not unmounted: a host fold or alert left open is still open on the way back. */}
+      <div className="fleet-rack-body" hidden={folded}>
+        <HostRows hosts={hosts} rows={rows} release={release} onChanged={onChanged} onShowWorker={onShowWorker} now={now} />
+        <FleetAlerts attention={attention} onShowWorker={onShowWorker} />
+        {release && (release.state === 'rolling' || release.state === 'staged' || release.state === 'failed') && <ReleaseBanner release={release} now={now} />}
+        {settings && <EngineCard settings={settings} used={cloakUsed} onChanged={onChanged} />}
+      </div>
     </section>
   );
 }
