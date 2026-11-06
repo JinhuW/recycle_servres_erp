@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-06:** ERP migration `0229`, Reddit tracker migration `0007`,
+**As of 2026-11-06:** ERP migration `0230`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2094,7 +2094,7 @@ A manager's Re-run on Monitors ▸ WeChat (v1.363.0). The ERP can't reach memtra
 
 ### Facebook account pool
 
-The ERP-side Facebook account pool: purchased Marketplace logins that purchasers take and return and managers assign to fleet workers. fb_pool_accounts is one row per login with its secrets sealed, and fb_pool_events is the append-only ledger of who did what to which account. fb_worker_accounts is every stint an account had on a fleet worker, with the proxy it went out through, and fb_proxies holds when a manager last revived a DEAD proxy. The fleet's own worker vault lives in the Facebook tracker's database, not here.
+The ERP-side Facebook account pool: purchased Marketplace logins that purchasers take and return and managers assign to fleet workers. fb_pool_accounts is one row per login with its secrets sealed, and fb_pool_events is the append-only ledger of who did what to which account. fb_worker_accounts is every stint an account had on a fleet worker, with the proxy it went out through, and fb_proxies holds when a manager last revived an exhausted proxy. The fleet's own worker vault lives in the Facebook tracker's database, not here.
 
 Tables: [`fb_pool_accounts`](#erp-fb-pool-accounts), [`fb_pool_events`](#erp-fb-pool-events), [`fb_worker_accounts`](#erp-fb-worker-accounts), [`fb_proxies`](#erp-fb-proxies)
 
@@ -2176,7 +2176,7 @@ UPDATE and DELETE raise (fb_pool_events_lock). account_no has no FK on purpose, 
 
 #### `fb_worker_accounts`
 
-One row per stint of a pool account on a fleet worker: it opens when the account becomes fleet on that worker and closes when it stops being that. The worker page lists them as Accounts used, and a proxy's failed stints decide whether it is DEAD.
+One row per stint of a pool account on a fleet worker: it opens when the account becomes fleet on that worker and closes when it stops being that. The worker page lists them as Accounts used, grouped by IP, and a port's failed stints on its current IP decide whether it is exhausted.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
@@ -2186,21 +2186,22 @@ One row per stint of a pool account on a fleet worker: it opens when the account
 | `uid` | `text` | ✓ |  | The account's Facebook uid at the time. |
 | `proxy_url` | `text` |  |  | The worker's proxy when the account was sent, scheme://host:port with no login, as the fleet document names it. NULL = the VM's own IP (proxy_known) or not recorded. |
 | `proxy_known` | `boolean` | ✓ | `false` | Whether /assign recorded the proxy. False for stints backfilled from the ledger (before v1.319.0), opened by an edit with no Assign, or sent while the fleet document did not list the worker. |
+| `exit_ip` | `text` |  |  | The measured IP behind `proxy_url`. Stamped at claim and /assign; while the stint is open each check moves it to the port's IP, so a closed stint keeps the IP it ended on. NULL when no check covers it. Backfilled from the 14 days of checks kept at migration 0230. |
 | `started_at` | `timestamptz` | ✓ | `now()` |  |
 | `ended_at` | `timestamptz` |  |  | NULL while the account is still on the worker. |
-| `outcome` | `text` |  |  | What the account became when the stint ended: a pool status (available, taken, problem, retired), fleet for another worker, or removed when it left the pool. NULL while current. problem and retired count against the proxy. |
+| `outcome` | `text` |  |  | What the account became when the stint ended: a pool status (available, taken, problem, retired), fleet for another worker, or removed when it left the pool. NULL while current. problem and retired count against the IP. |
 
 - **Primary key:** `id`
 - **Checks:** `(ended_at IS NULL) = (outcome IS NULL)`; `outcome IN ('available', 'taken', 'fleet', 'problem', 'retired', 'removed')`
 - **Indexes:** `fb_worker_accounts_account_idx` (account_no, started_at); `fb_worker_accounts_failed_idx` (proxy_url, ended_at) WHERE outcome IN ('problem', 'retired'); `fb_worker_accounts_open_idx` UNIQUE (account_no) WHERE ended_at IS NULL; `fb_worker_accounts_worker_idx` (lower(worker_id), started_at DESC)
 
-Written only by the fb_worker_accounts_track trigger on fb_pool_accounts, except proxy_url and proxy_known, which /assign stamps on the open stint. A proxy whose distinct failed accounts since its last revive exceed four (FB_PROXY_DEAD_AFTER) is DEAD, and /assign refuses its workers.
+Written only by the fb_worker_accounts_track trigger on fb_pool_accounts, except proxy_url, proxy_known and exit_ip, which /assign, a claim and the proxy checks stamp on the open stint. A port is exhausted once more than four (FB_PROXY_EXHAUSTED_AFTER) distinct accounts have failed on its current IP since its last revive. A stint with no exit_ip counts if it ended after the port's last IP change. Add to fleet, Change proxy and /assign refuse an exhausted port and no worker can claim a slot on it; a new IP clears it.
 
 <a id="erp-fb-proxies"></a>
 
 #### `fb_proxies`
 
-A row for each proxy a manager has revived. A revive restarts the proxy's failed count: stints that ended before it no longer count.
+A row for each proxy a manager has revived. A revive restarts the proxy's failed count: stints that ended before it no longer count. Rotating the IP clears the count without one.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |

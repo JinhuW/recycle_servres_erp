@@ -308,14 +308,14 @@ describe('account timeline', () => {
 });
 
 describe('proxyMarkFor', () => {
-  const dead = { url: 'http://gw:10001', failed: 5, dead: true, deadAt: 1, revivedAt: null, revivedBy: null };
+  const spent = { url: 'http://gw:10001', ip: '192.0.2.1', failed: 5, exhausted: true, exhaustedAt: 1, revivedAt: null, revivedBy: null };
   it('finds the mark on the proxy the worker dials now', () => {
-    expect(proxyMarkFor([dead], { proxy: { url: 'http://gw:10001' } })).toBe(dead);
-    expect(proxyMarkFor([dead], { proxy: { url: 'http://gw:10002' } })).toBeUndefined();
+    expect(proxyMarkFor([spent], { proxy: { url: 'http://gw:10001' } })).toBe(spent);
+    expect(proxyMarkFor([spent], { proxy: { url: 'http://gw:10002' } })).toBeUndefined();
   });
   it('has none for the VM\'s own IP, an older facade, or marks not loaded', () => {
-    expect(proxyMarkFor([dead], { proxy: { url: null } })).toBeUndefined();
-    expect(proxyMarkFor([dead], {})).toBeUndefined();
+    expect(proxyMarkFor([spent], { proxy: { url: null } })).toBeUndefined();
+    expect(proxyMarkFor([spent], {})).toBeUndefined();
     expect(proxyMarkFor(null, { proxy: { url: 'http://gw:10001' } })).toBeUndefined();
   });
 });

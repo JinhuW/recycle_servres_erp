@@ -30,8 +30,8 @@ export const FB_POOL_EVENT_KINDS = [
 ] as const;
 export type FbPoolEventKind = (typeof FB_POOL_EVENT_KINDS)[number];
 
-/** A proxy is DEAD once more distinct accounts than this have failed on it. */
-export const FB_PROXY_DEAD_AFTER = 4;
+/** A proxy is exhausted once more distinct accounts than this have failed on its current IP. */
+export const FB_PROXY_EXHAUSTED_AFTER = 4;
 
 /** How an account's stint on a worker ended: what it became, 'fleet' for
  *  another worker, 'removed' when it left the pool. Null while it is current. */
@@ -53,12 +53,36 @@ export type FbWorkerStint = {
   outcome: FbStintOutcome | null;
 };
 
-/** A proxy's failed accounts since its last revive. */
+/** One stint under an IP: any worker's, so it names the worker. */
+export type FbIpStint = FbWorkerStint & { workerId: string };
+
+/**
+ * An exit IP's standing. Active: its port exits there, under the limit.
+ * Exhausted: its port exits there, past the limit, until the IP is rotated.
+ * Deprecated: its port has moved off it.
+ */
+export type FbIpStatus = 'active' | 'exhausted' | 'deprecated';
+
+/** The accounts on one IP. `unrecorded` and `vm` hold only the worker's own
+ *  stints, with no IP to judge, so no status. */
+export type FbIpGroup = {
+  kind: 'ip' | 'unrecorded' | 'vm';
+  ip: string | null;
+  proxyUrl: string | null;
+  status: FbIpStatus | null;
+  failed: number;
+  /** The worker's own account is on it now. */
+  current: boolean;
+  stints: FbIpStint[];
+};
+
+/** A proxy's failed accounts on its current IP since its last revive. */
 export type FbProxyMark = {
   url: string;
+  ip: string | null;
   failed: number;
-  dead: boolean;
-  deadAt: number | null;
+  exhausted: boolean;
+  exhaustedAt: number | null;
   revivedAt: number | null;
   revivedBy: string | null;
 };

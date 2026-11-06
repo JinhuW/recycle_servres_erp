@@ -1,4 +1,4 @@
-import { FB_PROXY_DEAD_AFTER } from '@recycle-erp/shared';
+import { FB_PROXY_EXHAUSTED_AFTER } from '@recycle-erp/shared';
 import { Fragment, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Skeleton } from '../../components/Skeleton';
@@ -215,7 +215,7 @@ function WorkerRowSkeleton() {
 // ISP on hover. `shared` is an IP another worker also exits from, which only
 // holds while the two look like two people. A facade that predates the
 // lookup sends only the env var's name. `mark` counts the accounts that failed
-// behind this proxy; past FB_PROXY_DEAD_AFTER it is DEAD and Assign refuses it.
+// behind this proxy; past FB_PROXY_EXHAUSTED_AFTER it is exhausted and Assign refuses it.
 function ProxyCell({ worker: w, shared, mark, terms }: {
   worker: FleetAccount; shared: boolean; mark: FbProxyMark | undefined; terms: readonly string[];
 }) {
@@ -231,24 +231,24 @@ function ProxyCell({ worker: w, shared, mark, terms }: {
       <span>
         {port ? <span className="mono"><Hi text={`:${port}`} terms={terms} /></span> : t('fbcProxyNone')}
         {p.ip && <span className="mono fp-muted"> · <Hi text={p.ip} terms={terms} /></span>}
-        {mark?.dead && <> <ProxyDeadChip mark={mark} /></>}
+        {mark?.exhausted && <> <ProxyExhaustedChip mark={mark} /></>}
       </span>
       <small className={p.error ? 'fp-warn' : undefined}>
         {p.pending ? t('fbcProxyLookingUp')
           : p.error ? t('fbcProxyLookupFailed')
           : <Hi text={where || '—'} terms={terms} />}
         {shared && <> · <span className="fp-warn" title={t('fbcSharesIpHint')}>{t('fbcProxyShared')}</span></>}
-        {mark && !mark.dead && <> · <span className="fp-warn" title={t('fbcProxyFailedHint', { max: FB_PROXY_DEAD_AFTER })}>
+        {mark && !mark.exhausted && <> · <span className="fp-warn" title={t('fbcProxyFailedHint', { max: FB_PROXY_EXHAUSTED_AFTER })}>
           {t('fbcProxyFailed', { n: mark.failed })}</span></>}
       </small>
     </span>
   );
 }
 
-export function ProxyDeadChip({ mark }: { mark: FbProxyMark }) {
+export function ProxyExhaustedChip({ mark }: { mark: FbProxyMark }) {
   const { t, locale } = useT();
-  const since = mark.deadAt ? relTime(new Date(mark.deadAt).toISOString(), locale) : '';
-  return <span className="chip neg" title={t('fbcProxyDeadHint', { n: mark.failed, since })}>{t('fbcProxyDead')}</span>;
+  const since = mark.exhaustedAt ? relTime(new Date(mark.exhaustedAt).toISOString(), locale) : '';
+  return <span className="chip neg" title={t('fbcProxyExhaustedHint', { n: mark.failed, since })}>{t('fbcProxyExhausted')}</span>;
 }
 
 function WorkerRow({ account: w, fleet, hits, parked, terms, startAt, shared, mark, open, onToggle, locale }: {

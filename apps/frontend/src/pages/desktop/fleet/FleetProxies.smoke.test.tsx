@@ -64,6 +64,12 @@ describe('Add to fleet', () => {
     expect(all).toContain('fpAddToFleetAllDown');
     expect(all).toMatch(/<button type="submit"[^>]*disabled=""/);
   });
+  it('lists an exhausted proxy disabled and labelled', () => {
+    const spent = PROXIES.map((p) => (p.id === 3 ? { ...p, exhausted: true } : p));
+    const html = renderToString(<AddToFleetDialog no={40} proxies={spent} limit={2} onClose={noop} onDone={noop} />);
+    expect(html).toMatch(/<option[^>]*value="3"[^>]*disabled=""|<option[^>]*disabled=""[^>]*value="3"/);
+    expect(html).toContain('fpAddToFleetExhausted');
+  });
   it('says every proxy is full when none has room', () => {
     const html = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={0} onClose={noop} onDone={noop} />);
     expect(html).toContain('fpAddToFleetAllFull');

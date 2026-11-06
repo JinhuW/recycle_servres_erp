@@ -3293,6 +3293,21 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   until, and how it ended (on now, returned, Problem, Retired, moved to
   another worker, removed). Stints from before v1.319.0 come from the pool
   ledger and say "proxy not recorded", so they do not count toward DEAD.
+  Since v1.432.0 (RS-556) DEAD is **Exhausted**, and it follows the IP: the
+  count is of accounts failed on the IP the port exits from now, and it blocks
+  the whole fleet. Add to fleet and Change proxy list an exhausted port disabled
+  and refuse it, Assign refuses it, and no worker can claim a slot on it, so a
+  slot whose lease lapses waits. An account already running there keeps
+  running. A manager rotates the IP in Decodo; the next check (within 5 minutes,
+  or Check now) reads the new IP and the port is usable again with its count at
+  0. Revive stays on the homelab worker's page for a false alarm. **Accounts
+  used** is grouped by IP since then: each IP the worker has gone out through,
+  the one it is on now first, with every account on that IP from any worker,
+  its port, its failed count and a status: **Active**, **Exhausted**, or
+  **Deprecated** once the port has rotated off it. A stint the kept checks
+  don't cover (14 days) stays under "IP not recorded" with its port, and its
+  failures still count against the port's current IP unless the port has moved
+  since. The worker's History still shows only its own stints.
   Since v1.320.0 (RS-366) a row there unfolds into the account's
   **timeline**, newest first, across every worker it was on: each login the
   workers attempted for it (Login success — session restored / password /
@@ -4016,7 +4031,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     out with a note, and one that stops answering keeps them as last
     reported. A row gives the state — **Up**, **Degraded** (slower than 3 s,
     or one missed check after answering), **Down** (two misses in a row) or
-    **Unchecked** — with the error under it and the RS-365 DEAD chip, the
+    **Unchecked** — with the error under it and the Exhausted chip or "n of 5 failed" (RS-556, which also adds an Exhausted filter), the
     last latency, the exit IP with its city, region and country (ISP on
     hover) and "was <ip>" when it changed in the last 24 hours, the day as 48
     half-hour ticks in each bucket's worst state with the uptime over its

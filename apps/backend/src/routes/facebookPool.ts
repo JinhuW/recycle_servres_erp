@@ -4,8 +4,7 @@ import {
   FB_POOL_LIMIT,
   FB_POOL_SECRET_FIELDS,
   FB_POOL_STATUSES,
-  FB_PROXY_DEAD_AFTER,
-  FB_REPORT_REASONS,
+    FB_REPORT_REASONS,
   cookieUid,
   cookieValue,
   normalizeFbPoolDraft,
@@ -15,7 +14,6 @@ import {
   type FbPoolEventKind,
   type FbAccountTimeline,
   type FbPoolStatus,
-  type FbProxyMark,
   type FbStintOutcome,
   type FbTimelineEvent,
   type FbWorkerStint,
@@ -29,6 +27,8 @@ import { effectiveRole, requireManager } from '../lib/role';
 import { poolKey, sealOrNull, unsealOrEmpty } from '../lib/sealed';
 import type { Env, User } from '../types';
 import { dropSlot } from '../fleet/claim';
+import { exitIpForStint } from '../fleet/proxyExit';
+import { proxyMarks, workerIpGroups } from '../fleet/proxyMarks';
 import { ACCOUNT_ID, WORKER_ID, callFacade } from './coordinator';
 
 // ─── Facebook account pool ────────────────────────────────────────────────────
@@ -564,42 +564,6 @@ async function lastProxy(sql: SqlLike, worker: string): Promise<string | null> {
   return row?.proxy_url ?? null;
 }
 
-type MarkRow = { url: string; failed: number; dead_at: Date | null; revived_at: Date | null; revived_by_name: string | null };
-
-/**
- * Each proxy's distinct failed accounts since its last revive. The account
- * that takes it past FB_PROXY_DEAD_AFTER makes it DEAD, at the moment its
- * stint ended. A proxy with no failures since its revive is left out.
- */
-async function proxyMarks(sql: SqlLike, url?: string): Promise<FbProxyMark[]> {
-  const rows = await sql<MarkRow[]>`
-    WITH failed AS (
-      SELECT w.proxy_url AS url, w.account_no, MIN(w.ended_at) AS failed_at
-      FROM fb_worker_accounts w
-      LEFT JOIN fb_proxies p ON p.url = w.proxy_url
-      WHERE w.proxy_url IS NOT NULL
-        AND w.outcome = ANY(${FB_FAILED_OUTCOMES as string[]}::text[])
-        AND w.ended_at > COALESCE(p.revived_at, '-infinity'::timestamptz)
-        ${url === undefined ? sql`` : sql`AND w.proxy_url = ${url}`}
-      GROUP BY w.proxy_url, w.account_no
-    ), ranked AS (
-      SELECT url, failed_at, ROW_NUMBER() OVER (PARTITION BY url ORDER BY failed_at) AS n FROM failed
-    )
-    SELECT r.url, COUNT(*)::int AS failed,
-           MAX(r.failed_at) FILTER (WHERE r.n = ${FB_PROXY_DEAD_AFTER + 1}) AS dead_at,
-           MAX(p.revived_at) AS revived_at, MAX(p.revived_by_name) AS revived_by_name
-    FROM ranked r LEFT JOIN fb_proxies p ON p.url = r.url
-    GROUP BY r.url ORDER BY r.url`;
-  return rows.map((r) => ({
-    url: r.url,
-    failed: r.failed,
-    dead: r.failed > FB_PROXY_DEAD_AFTER,
-    deadAt: ms(r.dead_at),
-    revivedAt: ms(r.revived_at),
-    revivedBy: r.revived_by_name,
-  }));
-}
-
 const PREVIOUS_FATES = ['available', 'problem', 'retired'] as const;
 type PreviousFate = (typeof PREVIOUS_FATES)[number];
 const PREVIOUS_EVENT: Record<PreviousFate, FbPoolEventKind> = {
@@ -640,14 +604,14 @@ pool.post('/:no/assign', async (c) => {
     return c.json({ error: `#${held[0].no} is already on ${worker}`, code: 'fpWorkerTaken' }, 409);
   const password = unsealOrEmpty(row.password_enc, key);
   if (!password) return c.json({ error: 'This account has no password to sign in with', code: 'fpNoPassword' }, 409);
-  // Read before anything reaches the worker: an account sent through a proxy
-  // that has burned more than FB_PROXY_DEAD_AFTER is the next one it burns.
+  // Read before anything reaches the worker: an account sent through an IP that
+  // has burned more than FB_PROXY_EXHAUSTED_AFTER is the next one it burns.
   const proxy = await workerProxy(c.env, worker);
   const checked = proxy.known ? proxy.url : await lastProxy(sql, worker);
   if (checked) {
     const [mark] = await proxyMarks(sql, checked);
-    if (mark?.dead)
-      return c.json({ error: `${worker}'s proxy ${checked} is DEAD: ${mark.failed} accounts failed on it`, code: 'fpProxyDead' }, 409);
+    if (mark?.exhausted)
+      return c.json({ error: `${worker}'s proxy ${checked} is exhausted: ${mark.failed} accounts failed on its IP`, code: 'fpProxyExhausted' }, 409);
   }
   const cookie = unsealOrEmpty(row.cookie_enc, key);
   // Cookie-first: a cookie that is this account's own (its c_user matches) can
@@ -704,6 +668,7 @@ pool.post('/:no/assign', async (c) => {
   }
   log.info('fleet worker given a pool login', { module: 'facebookPool', accountNo: no, workerId: worker, mode, by: user.email });
 
+  const exitIp = proxy.known && proxy.url ? await exitIpForStint(sql, proxy.url) : null;
   await sql.begin(async (tx) => {
     await tx`
       UPDATE fb_pool_accounts SET
@@ -717,7 +682,7 @@ pool.post('/:no/assign', async (c) => {
     // proxy is the one thing it can't know.
     if (proxy.known) {
       await tx`
-        UPDATE fb_worker_accounts SET proxy_url = ${proxy.url}, proxy_known = TRUE
+        UPDATE fb_worker_accounts SET proxy_url = ${proxy.url}, proxy_known = TRUE, exit_ip = ${exitIp}
         WHERE account_no = ${no} AND ended_at IS NULL`;
     }
     if (previous === null) return;
@@ -791,6 +756,12 @@ pool.get('/workers/:worker/accounts', async (c) => {
     outcome: r.outcome,
   }));
   return c.json({ stints });
+});
+
+pool.get('/workers/:worker/ips', async (c) => {
+  const worker = c.req.param('worker');
+  if (!WORKER_ID.test(worker)) return c.json({ error: 'Not a valid worker id' }, 400);
+  return c.json({ ips: await workerIpGroups(getDb(c.env), worker) });
 });
 
 // One account's life on the fleet, newest first: the pool's own ledger, and

@@ -1,4 +1,4 @@
-import { FB_PROXY_DEAD_AFTER, type FbStintOutcome } from '@recycle-erp/shared';
+import { FB_PROXY_EXHAUSTED_AFTER, type FbStintOutcome } from '@recycle-erp/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
@@ -8,7 +8,7 @@ import {
   challengeScreenshotUrl, coordinatorApi, type AlertHitRow, type Challenge, type FleetAccount, type FleetDoc, type LedgerLogin,
 } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
-import { loginTone, poolApi, proxyMarkFor, type FbProxyMark, type FbWorkerStint } from '../../lib/facebookPool';
+import { loginTone, poolApi, proxyMarkFor, type FbIpGroup, type FbProxyMark, type FbWorkerStint } from '../../lib/facebookPool';
 import {
   accountAlerts, browserLabel, canWatch, externalVncUrl, fleetActivity, fleetStatus, hitsByCity, parkedWorkers, retiredAt, searchedToday, SESSION_WARN_DAYS, whoIs,
   workerHistory, type HistoryLine,
@@ -19,7 +19,7 @@ import { BuildChip, CityChip, EditCredentialsButton, fmtDays, HITS_DAYS, Relogin
 import { EditCitiesButton } from './FleetCities';
 import { CityLogCard, loadCityLog, type CityLogState } from './FleetCityLog';
 import { QueueButton, QueueField } from './FleetQueue';
-import { eventDetail, ProxyDeadChip, statusNote } from './FleetWorkers';
+import { eventDetail, ProxyExhaustedChip, statusNote } from './FleetWorkers';
 import {
   AccountsUsed, CheckpointsCard, LOGIN_DOT, LoginWords, Muted, NoThumb, WorkerCard, WorkerHead, WorkerHistory, WorkerMissing,
   type HistoryEntry, type WorkerField,
@@ -31,7 +31,7 @@ import '../../styles/facebookPool.css';
 // worker in the Account pool's credential-card style, its open checkpoints
 // and recent events, and every action the control plane offers on it today:
 // watch its browser, queue a re-login, set its credentials, set its cities
-// (FleetCities.tsx), clear a checkpoint, revive a DEAD proxy. Under them, every
+// (FleetCities.tsx), clear a checkpoint, revive an exhausted proxy. Under them, every
 // pool account it has signed in with; beside them all, the worker's History.
 // Pacing still lives in fleet.toml. The layout is fleet/workerDetail.tsx,
 // which the ERP fleet's worker page shares.
@@ -48,6 +48,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
   const [failed, setFailed] = useState(false);
   const [marks, setMarks] = useState<FbProxyMark[] | null>(null);
   const [stints, setStints] = useState<FbWorkerStint[] | null>(null);
+  const [ipGroups, setIpGroups] = useState<FbIpGroup[] | null>(null);
   const [logins, setLogins] = useState<LedgerLogins>(null);
   const [cityLog, setCityLog] = useState<CityLogState>(null);
 
@@ -60,6 +61,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
     coordinatorApi.alertHits(HITS_DAYS).then(setHits).catch(() => setHits([]));
     poolApi.proxies().then(r => setMarks(r.proxies)).catch(() => setMarks([]));
     poolApi.workerAccounts(workerId).then(r => setStints(r.stints)).catch(() => setStints([]));
+    poolApi.workerIps(workerId).then(r => setIpGroups(r.ips)).catch(() => setIpGroups([]));
     coordinatorApi.workerLogins(workerId).then(setLogins)
       .catch(err => setLogins(err instanceof ApiError && err.status === 404 ? 'not_served' : 'unreachable'));
     loadCityLog({ worker: workerId }, setCityLog);
@@ -74,15 +76,15 @@ export function FleetWorker({ workerId }: { workerId: string }) {
 
   if (!fleet) return failed ? <WorkerMissing workerId={workerId} note={t('fbcFleetUnavailableNote')} /> : <FormSkeleton fields={6} />;
   return (
-    <HomelabWorkerView workerId={workerId} fleet={fleet} challenges={challenges} hits={hits} marks={marks} stints={stints}
+    <HomelabWorkerView workerId={workerId} fleet={fleet} challenges={challenges} hits={hits} marks={marks} stints={stints} ipGroups={ipGroups}
       logins={logins} cityLog={cityLog} onReload={load} onMarks={setMarks} />
   );
 }
 
 /** The coordinator worker's page, from what the loader read. */
-export function HomelabWorkerView({ workerId, fleet, challenges, hits, marks, stints, logins, cityLog, onReload, onMarks }: {
+export function HomelabWorkerView({ workerId, fleet, challenges, hits, marks, stints, ipGroups, logins, cityLog, onReload, onMarks }: {
   workerId: string; fleet: FleetDoc; challenges: Challenge[] | null; hits: AlertHitRow[] | null; marks: FbProxyMark[] | null;
-  stints: FbWorkerStint[] | null; logins: LedgerLogins; cityLog: CityLogState; onReload: () => void; onMarks: (m: FbProxyMark[]) => void;
+  stints: FbWorkerStint[] | null; ipGroups: FbIpGroup[] | null; logins: LedgerLogins; cityLog: CityLogState; onReload: () => void; onMarks: (m: FbProxyMark[]) => void;
 }) {
   const { t, locale } = useT();
   const [zoom, setZoom] = useState<Challenge | null>(null);
@@ -196,7 +198,7 @@ export function HomelabWorkerView({ workerId, fleet, challenges, hits, marks, st
             </>,
           }))} />
 
-          <AccountsUsed stints={stints} locale={locale} />
+          <AccountsUsed groups={ipGroups} locale={locale} />
           <CityLogCard log={cityLog} />
         </div>
         <WorkerHistory entries={history.map(historyEntry)} locale={locale}
@@ -235,8 +237,8 @@ export function ProxyExit({ worker }: { worker: FleetAccount }) {
   );
 }
 
-// How many accounts failed behind the proxy since its last revive. Revive is
-// for after the IP behind it has been swapped: the count starts again.
+// How many accounts failed on the proxy's current IP. Rotating the IP clears
+// it by itself; Revive is for a false alarm, and the count starts again.
 function ProxyMarkNote({ mark, onRevived }: { mark: FbProxyMark; onRevived: (marks: FbProxyMark[]) => void }) {
   const { t } = useT();
   const [busy, setBusy] = useState(false);
@@ -249,11 +251,11 @@ function ProxyMarkNote({ mark, onRevived }: { mark: FbProxyMark; onRevived: (mar
   };
   return (
     <div className="ff-proxy-mark">
-      {mark.dead && <ProxyDeadChip mark={mark} />}
-      <small className={mark.dead ? 'fp-bad' : 'fp-warn'}>
-        {t(mark.dead ? 'fbcProxyDeadNote' : 'fbcProxyFailedNote', { n: mark.failed, max: FB_PROXY_DEAD_AFTER })}
+      {mark.exhausted && <ProxyExhaustedChip mark={mark} />}
+      <small className={mark.exhausted ? 'fp-bad' : 'fp-warn'}>
+        {t(mark.exhausted ? 'fbcProxyExhaustedNote' : 'fbcProxyFailedNote', { n: mark.failed, max: FB_PROXY_EXHAUSTED_AFTER })}
       </small>
-      {mark.dead && (
+      {mark.exhausted && (
         <button type="button" className="btn sm" disabled={busy} onClick={revive} title={t('fbcProxyReviveHint')}>
           <Icon name="refresh" size={12} />{t('fbcProxyRevive')}
         </button>

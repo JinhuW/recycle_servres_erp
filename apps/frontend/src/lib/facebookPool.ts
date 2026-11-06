@@ -14,6 +14,7 @@ import {
   type FbPoolEventKind,
   type FbPoolSecretField,
   type FbPoolStatus,
+  type FbIpGroup,
   type FbProxyMark,
   type FbReportReason,
   type FbTimelineEvent,
@@ -403,10 +404,12 @@ export const poolApi = {
   reviveProxy: (url: string) => api.post<{ proxies: FbProxyMark[] }>(`${BASE}/proxies/revive`, { url }),
   workerAccounts: (worker: string) =>
     api.get<{ stints: FbWorkerStint[] }>(`${BASE}/workers/${encodeURIComponent(worker)}/accounts`),
+  workerIps: (worker: string) =>
+    api.get<{ ips: FbIpGroup[] }>(`${BASE}/workers/${encodeURIComponent(worker)}/ips`),
   timeline: (no: number) => api.get<FbAccountTimeline>(`${BASE}/${no}/timeline`),
 };
 
-export type { FbAccountTimeline, FbProxyMark, FbTimelineEvent, FbWorkerStint };
+export type { FbAccountTimeline, FbIpGroup, FbProxyMark, FbTimelineEvent, FbWorkerStint };
 
 /** A timeline line: one event, or a run of identical logins. */
 export type TimelineLine = FbTimelineEvent & { count: number; since: number };
