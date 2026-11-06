@@ -3839,8 +3839,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     re-login the account before then: Re-login and Mark healthy answer 409
     `engine_mismatch` while the worker runs a different engine from its
     slot's. A worker parked on a lost session holds its lease and never reaches
-    that start by itself; the refusal says Park then Unpark restarts it, which
-    is one login (v1.433.1). A worker older than 0.17.0 (v1.424.2) is never handed a CloakBrowser slot,
+    that start by itself; the refusal says Park then Unpark frees the account,
+    which can take more than one login because the worker may claim another account first (v1.433.2). A worker older than 0.17.0 (v1.424.2) is never handed a CloakBrowser slot,
     which waits for one that can run it. Since v1.421.0 (RS-537) the profile
     (engine, seed, GPU, timezone) is kept on the pool account, so removing and
     re-adding an account brings the same machine back and it still can't be
