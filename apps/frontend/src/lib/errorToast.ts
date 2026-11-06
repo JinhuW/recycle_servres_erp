@@ -107,9 +107,12 @@ export function handleFetchError(err: unknown): void {
   const api = err instanceof ApiError ? err : null;
   const raw = err instanceof Error ? err.message : '';
 
+  // The log greps on the machine code the dialog no longer shows.
+  const code = (api?.body as { error?: unknown } | null | undefined)?.error;
+
   reportClientError({
     kind: 'fetch',
-    message: raw || String(err),
+    message: (typeof code === 'string' && code) || raw || String(err),
     stack: err instanceof Error ? err.stack : undefined,
     path: api?.path,
     method: api?.method,
@@ -129,7 +132,7 @@ export function handleFetchError(err: unknown): void {
   const details: string[] = [];
   if (api?.requestId) {
     const where = api.path ? `${api.method ?? 'GET'} ${api.path}` : 'request';
-    details.push(`${where} · ${api.status} · ${api.requestId}`);
+    details.push(`${where} · ${api.requestId}`);
   }
 
   showErrorDialog(msg, details.length ? details : undefined);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useT } from '../lib/i18n';
-import { ApiError, rawFetch } from '../lib/api';
+import { ApiError, rawFetch, responseReason, safeJson } from '../lib/api';
 
 /**
  * OAuth 2.1 consent screen.
@@ -78,15 +78,8 @@ export function Authorize() {
         const res = await rawFetch('GET', `/oauth/authorize/pending/${encodeURIComponent(req)}`);
         if (!res.ok) {
           const text = await res.text();
-          let msg: string;
-          try {
-            const j = JSON.parse(text) as { error?: string };
-            msg = j.error ?? `HTTP ${res.status}`;
-          } catch {
-            msg = `HTTP ${res.status}`;
-          }
           if (!alive) return;
-          setState({ kind: 'error', message: msg });
+          setState({ kind: 'error', message: responseReason(safeJson(text)) });
           return;
         }
         const pending = (await res.json()) as Pending;
@@ -123,13 +116,7 @@ export function Authorize() {
         setState({ kind: 'error', message: 'missing redirectUri' });
         return;
       }
-      const text = await res.text();
-      let msg = `HTTP ${res.status}`;
-      try {
-        const j = JSON.parse(text) as { error?: string };
-        if (j.error) msg = j.error;
-      } catch { /* keep HTTP status */ }
-      setState({ kind: 'error', message: msg });
+      setState({ kind: 'error', message: responseReason(safeJson(await res.text())) });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setState({ kind: 'error', message: msg });
@@ -152,13 +139,7 @@ export function Authorize() {
         setState({ kind: 'error', message: 'missing redirectUri' });
         return;
       }
-      const text = await res.text();
-      let msg = `HTTP ${res.status}`;
-      try {
-        const j = JSON.parse(text) as { error?: string };
-        if (j.error) msg = j.error;
-      } catch { /* keep HTTP status */ }
-      setState({ kind: 'error', message: msg });
+      setState({ kind: 'error', message: responseReason(safeJson(await res.text())) });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setState({ kind: 'error', message: msg });
