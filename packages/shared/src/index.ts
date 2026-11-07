@@ -28,6 +28,7 @@ export * from "./accounting.js";
 export * from "./wechatMarket.js";
 export * from "./inventoryGroupSort.js";
 export * from "./fleet.js";
+export * from "./fbSeller.js";
 export * from "./ramShortCode.js";
 export * from "./redditLeads.js";
 export * from "./perf.js";

@@ -61,6 +61,8 @@ import activityRoutes from './routes/activity';
 import clientErrorRoutes from './routes/clientErrors';
 import clientTimingRoutes from './routes/clientTimings';
 import perfRoutes from './routes/perf';
+import fbSellerRoutes from './routes/fbSeller';
+import fbAgentRoutes from './routes/fbAgent';
 import wellKnown, { oauth as oauthRoutes, oauthAdmin } from './oauth/server';
 import { handleMcp } from './mcp/server';
 import { bearerGuard } from './oauth/guard';
@@ -451,6 +453,10 @@ app.route('/api/leads/reddit', redditLeadsRoutes);
 // Self-applies its scopes per route: cookie + manager gate on the pages' reads
 // and writes, a bearer on the host-agent and worker routes (src/fleet/auth.ts).
 app.route('/api/fleet', fleetRoutes);
+// Self-apply the session cookie and the manager gate: Facebook seller accounts
+// (ads, photos, threads) and the agent's profiles and evals.
+app.route('/api/fb-seller', fbSellerRoutes);
+app.route('/api/fb-agent', fbAgentRoutes);
 // Self-applies its auth: Bearer (wechat:write) on /push/*, where memtrade
 // sends each day's report; cookie + manager gate on the page's reads.
 app.route('/api/wechat-market', wechatMarketRoutes);

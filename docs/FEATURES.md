@@ -1308,6 +1308,12 @@ is the inbox for the public website forms, described with the public forms
 further down. Clicking Leads opens Reddit. The closed row's badge adds up both
 sources.
 
+**Leads ▸ Facebook** (`#/leads/facebook`, managers only, v1.437.0, RS-565) will
+hold the conversations on the fleet's Facebook seller accounts, the "we buy" ads
+they post, their photo pools, the negotiating agent and its settings. So far it
+shows its tabs (Needs human, Inbox, Ads, Photos, Agent, Settings), each marked
+coming soon.
+
 **Leads ▸ Reddit** (`#/leads/reddit`, v1.392.0, RS-477) is a pool of sellers to
 buy from. They are found in the swap subreddits' public trade records: u/LabB0T
 on r/homelabsales and u/hwsbot on r/hardwareswap log every confirmed sale

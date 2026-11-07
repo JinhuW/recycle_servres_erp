@@ -128,7 +128,7 @@ profile shape and `runAgent`, E at the HTTP routes and DTOs.
 
 | WS | State | PR | Version | Notes |
 | --- | --- | --- | --- | --- |
-| A1 | not started | | | |
+| A1 | PR open | #1145 | 1.437.0 | migration 0232; see the WS file's Outcome |
 | A2 | not started | | | |
 | B | PR open | #1146 | tracker [Unreleased], monitor pin `d788039` | no release cut; fixtures are guesses until F.live refreshes them |
 | C | not started | | | |

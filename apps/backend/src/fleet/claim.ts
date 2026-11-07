@@ -18,6 +18,7 @@ import {
   type FleetCookie,
   type FleetDevice,
   type FleetItem,
+  type FleetSearchTaskKind,
   type FleetSettings,
   type FleetStorageState,
   type FleetTaskWhy,
@@ -701,7 +702,7 @@ worker.post('/profile-launch', workerAuth, async (c) => {
 // ─── Next task ────────────────────────────────────────────────────────────────
 
 type PickRow = {
-  id: number; kind: HandedTask['kind']; city: string; name: string; radius_km: number; item: string;
+  id: number; kind: FleetSearchTaskKind; city: string; name: string; radius_km: number; item: string;
   reason: string | null; lease_expires_at: Date; familiar: boolean;
 };
 

@@ -25,6 +25,8 @@ import { startFleetSchedulerLoop } from './fleet/scheduler';
 import { startProxyHealthLoop } from './fleet/proxyHealth';
 import { startFleetRelayLease } from './fleet/vnc';
 import { setPollsDraining } from './fleet/claim';
+import { startFbSellerLoop } from './services/fbPacing';
+import { startFbAgentLoop } from './services/fbAgent';
 
 const env = buildEnv();
 const port = Number(process.env.PORT ?? 8787);
@@ -50,6 +52,8 @@ const loops = [
   startFleetRelayLease(getDb(env)),
   { stop: () => setPollsDraining(true) },
 ];
+startFbSellerLoop(env);
+startFbAgentLoop(env);
 
 const server = serve({ fetch: (request) => app.fetch(request, env), port }, (info) => {
   log.info('recycle-erp-backend listening', { port: info.port });
