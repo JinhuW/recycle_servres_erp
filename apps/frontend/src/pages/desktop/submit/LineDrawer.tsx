@@ -36,7 +36,7 @@ import { cascadePatch } from '@recycle-erp/shared';
 export function LineDrawer({
   line, idx, newNo, onChange, onClose, onRemove, canRemove, editing = false,
   onConfirmLine, onConfirmError, duplicateOnLines, readOnly = false, readOnlyNote,
-  sellPriceEditable = false, photoCtx, market, missingFields,
+  sellPriceEditable = false, onSavePrice, photoCtx, market, missingFields,
 }: {
   line: Line | EditLine;
   idx: number;
@@ -59,6 +59,10 @@ export function LineDrawer({
   readOnlyNote?: string;
   // Sell price stays live inside a readOnly drawer (a manager at Ready to Pay).
   sellPriceEditable?: boolean;
+  // Writes that price from the drawer itself, resolving true once it landed;
+  // a refusal is the caller's to report. Without it the page's own Save
+  // carries the price (the PO page); Review mode has no such Save.
+  onSavePrice?: () => Promise<boolean>;
   // Recorded market value for this line's part number, if the parent looked
   // one up. Optional so surfaces that don't fetch it still render.
   market?: ResolvedMarketValue | null;
@@ -742,7 +746,25 @@ export function LineDrawer({
             borderTop: '1px solid var(--border)', background: 'var(--bg-soft)',
           }}>
             {readOnly ? (
-              <button className="btn" onClick={onClose}>{t('close')}</button>
+              sellOutside && onSavePrice ? (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn" onClick={onClose}>{t('cancel')}</button>
+                  <button
+                    className="btn accent"
+                    disabled={confirming}
+                    onClick={() => {
+                      setConfirming(true);
+                      void onSavePrice()
+                        .then(ok => { if (ok) onClose(); })
+                        .finally(() => setConfirming(false));
+                    }}
+                  >
+                    <Icon name="check" size={13} /> {t('save')}
+                  </button>
+                </div>
+              ) : (
+                <button className="btn" onClick={onClose}>{t('close')}</button>
+              )
             ) : (
               <>
                 <button
