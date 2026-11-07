@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-570](./RS-570-jump-from-the-duplicate-part-dialog-to-the-product-t.md) | in-progress | story | P2 | Jump from the duplicate-part dialog to the product to update its quantity | — |
+| [RS-570](./RS-570-jump-from-the-duplicate-part-dialog-to-the-product-t.md) | done | story | P2 | Jump from the duplicate-part dialog to the product to update its quantity | 1.446.0 |
 | [RS-569](./RS-569-commission-rate-and-notes-editable-at-ready-to-pay.md) | done | story | P2 | Commission rate and notes editable at Ready to Pay | 1.445.0 |
 | [RS-568](./RS-568-allow-a-unit-cost-of-0-on-a-po-line.md) | done | task | P2 | Allow a unit cost of 0 on a PO line | 1.444.2 |
 | [RS-567](./RS-567-review-mode-sell-price-editable-at-ready-to-pay.md) | done | bug | P2 | Review mode: sell price editable at Ready to Pay | 1.444.1 |

@@ -2,13 +2,13 @@
 id: RS-570
 title: Jump from the duplicate-part dialog to the product to update its quantity
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-07
 reporter: jinhu
 branch: JinhuW/po-duplicate-item-jump
-pr:
-version:
+pr: 1169
+version: 1.446.0
 related: []
 ---
 
