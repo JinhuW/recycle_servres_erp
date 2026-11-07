@@ -3,6 +3,8 @@ import type { FbAgentProfileRow, RegistryEntry } from '@recycle-erp/shared';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { agentRegistry as runtimeRegistry } from '../src/services/fbAgent/registry';
+import { agentRegistry as contentRegistry } from '../src/services/fbAgentProfiles';
 
 // Profile versions (CONTRACTS §6.3): only a draft is editable, promotions keep
 // one active and one candidate, and params are checked against the registry.
@@ -41,6 +43,9 @@ describe('/api/fb-agent profiles', () => {
       'unknown_direction', 'confidence_below', 'intent', 'bot_question', 'keyword',
     ]);
     expect(r.body.skills.map((e) => e.kind)).toEqual(['screen', 'negotiate', 'answer']);
+    // The modules' own schemas, not a copy that can drift from what runs.
+    expect(r.body).toEqual(runtimeRegistry());
+    expect(contentRegistry()).toEqual(runtimeRegistry());
   });
 
   it('makes a draft from any version; only the draft is editable', async () => {

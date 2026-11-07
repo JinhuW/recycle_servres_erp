@@ -9,6 +9,7 @@ const rule: AgentRule = {
   params: {
     type: 'object',
     properties: { gap_pct: { type: 'number', label: 'Gap between ask and offer (% of the ask)', minimum: 0, maximum: 100, default: 10 } },
+    required: ['gap_pct'],
   },
   check({ input, extract, offer, params }) {
     if (extract.agreeing || extract.intent === 'agree') return { fire: true, reason: 'The seller is agreeing to a deal.' };

@@ -7,13 +7,15 @@ import { alignWindow, applySellerReport } from '../src/services/fbSellerReports'
 import { queueOutbound } from '../src/services/fbThreads';
 
 const agentRuns = vi.hoisted(() => [] as { threadId: number; messageId: number }[]);
+const breakerChecks = vi.hoisted(() => [] as number[]);
 vi.mock('../src/services/fbAgent', () => ({
   enqueueAgentRun: async (_tx: unknown, threadId: number, messageId: number) => { agentRuns.push({ threadId, messageId }); },
   decide: async () => { throw new Error('not used'); },
+  checkCircuitBreaker: async (_tx: unknown, accountNo: number) => { breakerChecks.push(accountNo); return false; },
   startFbAgentLoop: () => ({ stop: () => {} }),
 }));
 
-beforeEach(async () => { await resetDb(); agentRuns.length = 0; });
+beforeEach(async () => { await resetDb(); agentRuns.length = 0; breakerChecks.length = 0; });
 
 const inn = (body: string, has_image = false) => ({ direction: 'in' as const, body, has_image });
 const out = (body: string) => ({ direction: 'out' as const, body, has_image: false });
@@ -172,5 +174,49 @@ describe('send and post reports', () => {
     await db.begin((tx) => applySellerReport(tx, acc, { task_id: b.taskId, kind: 'msg-send', ref: String(b.messageId), outcome: 'failed', detail: 'The message box was not there' }));
     const [t] = await db<{ needs_human: boolean; human_reason: string }[]>`SELECT needs_human, human_reason FROM fb_threads`;
     expect(t).toEqual({ needs_human: true, human_reason: 'A reply could not be sent: The message box was not there' });
+    // A staff reply is not the agent's: guard 8 does not count it.
+    expect(breakerChecks).toEqual([]);
+  });
+
+  it('an agent reply that fails to send, or never lands, counts toward the circuit breaker', async () => {
+    const acc = await seedSlot({ agentOn: true });
+    const db = getTestDb();
+    await report(acc, [thread([inn('Hello')])]);
+    const [{ id: threadId }] = await db<{ id: number }[]>`SELECT id::int AS id FROM fb_threads`;
+    const agentSend = async (body: string, state: string) => {
+      const [run] = await db<{ id: number }[]>`INSERT INTO fb_agent_runs (thread_id) VALUES (${threadId}) RETURNING id::int AS id`;
+      const [m] = await db<{ id: number }[]>`
+        INSERT INTO fb_messages (thread_id, direction, author, body, send_state, agent_run_id)
+        VALUES (${threadId}, 'out', 'agent', ${body}, ${state}, ${run!.id}) RETURNING id::int AS id`;
+      return m!.id;
+    };
+    const failed = await agentSend('What part numbers?', 'sending');
+    const [t] = await db<{ id: number }[]>`
+      INSERT INTO fleet_tasks (kind, due_at, state, account_no, payload)
+      VALUES ('msg-send', NOW(), 'leased', ${acc}, ${db.json({ ref: String(failed) })}) RETURNING id::int AS id`;
+    await db.begin((tx) => applySellerReport(tx, acc, { task_id: t!.id, kind: 'msg-send', ref: String(failed), outcome: 'failed', detail: 'No message box' }));
+    expect(breakerChecks).toEqual([acc]);
+    await agentSend('How many?', 'uncertain');
+    await report(acc, [thread([inn('Hello'), inn('Still there?')])]);
+    expect(breakerChecks).toEqual([acc, acc]);
+  });
+});
+
+describe('matching our replies to the window', () => {
+  it('ignores the line breaks and spaces the worker cannot read back', async () => {
+    const acc = await seedSlot();
+    await report(acc, [thread([inn('Hello')])]);
+    const db = getTestDb();
+    const [{ id: threadId }] = await db<{ id: number }[]>`SELECT id::int AS id FROM fb_threads`;
+    const [u] = await db<{ id: string }[]>`SELECT id FROM users WHERE email = ${ALEX}`;
+    const { messageId } = await db.begin((tx) => queueOutbound(tx, threadId, 'Thanks!\n\nWhich  models?  ', { author: 'staff', userId: u!.id }));
+    await db`UPDATE fb_messages SET send_state = 'uncertain' WHERE id = ${messageId}`;
+    // The worker drops blank lines and trims each one.
+    await report(acc, [thread([inn('Hello'), out('Thanks!\nWhich  models?')])]);
+    const [m] = await db<{ send_state: string; seq: number }[]>`SELECT send_state, seq FROM fb_messages WHERE id = ${messageId}`;
+    expect(m).toEqual({ send_state: 'sent', seq: 2 });
+    // The next window still aligns on it.
+    await report(acc, [thread([inn('Hello'), out('Thanks!\nWhich models?'), inn('R740 sticks')])]);
+    expect((await stored()).map((x) => x.body)).toEqual(['Hello', 'Thanks!\n\nWhich  models?  ', 'R740 sticks']);
   });
 });

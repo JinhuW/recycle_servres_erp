@@ -229,7 +229,7 @@ function ErpHistoryText({ line }: { line: ErpHistoryLine }) {
   if (line.kind === 'signon') return <>{t('fbcHistSignOn', { n: line.stint.accountNo, login: line.stint.email ?? line.stint.uid })}</>;
   if (line.kind === 'left') return <>{t('fbcHistLeft', { n: line.stint.accountNo, outcome: t(`fbcStint_${line.stint.outcome}`) })}</>;
   const e = line.event;
-  const where = { city: e.city_name ?? e.city, item: e.task_kind === 'search' ? e.item : e.task_kind };
+  const where = { city: e.city_name ?? e.city ?? '—', item: e.task_kind === 'search' ? e.item ?? '—' : e.task_kind };
   const d = e.detail ?? {};
   const word = (v: unknown) => (typeof v === 'string' && v ? v : null);
   if (e.kind === 'done') {

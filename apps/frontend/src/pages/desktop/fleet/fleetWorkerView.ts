@@ -203,7 +203,7 @@ export function taskVisit(task: FleetTaskLog, names: ReadonlyMap<string, string>
 
 export function erpCityLog(d: FleetWorkerDetail): CityVisit[] {
   const names = new Map(d.cities.filter(c => c.name).map(c => [c.slug, c.name!]));
-  for (const e of d.events) if (e.city_name) names.set(e.city, e.city_name);
+  for (const e of d.events) if (e.city && e.city_name) names.set(e.city, e.city_name);
   if (d.worker.task?.city && d.worker.task.city_name) names.set(d.worker.task.city, d.worker.task.city_name);
   return d.log.map(t => taskVisit(t, names));
 }

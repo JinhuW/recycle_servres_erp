@@ -11,6 +11,7 @@ const rule: AgentRule = {
   params: {
     type: 'object',
     properties: { words: { type: 'array', label: 'Words that mean logistics', items: { type: 'string' }, default: [] } },
+    required: ['words'],
   },
   check({ extract, latest, params }) {
     if (extract.intent === 'logistics') return { fire: true, reason: 'The seller is asking about payment, shipping or pickup.' };

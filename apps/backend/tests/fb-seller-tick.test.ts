@@ -3,7 +3,8 @@ import { resetDb, getTestDb } from './helpers/db';
 import { ALEX } from './helpers/auth';
 import { hoursAround, patchSettings, seedAd, seedPool, seedSlot, seedThread } from './helpers/fbSeller';
 import { runFbSellerTick, withinActiveHours } from '../src/services/fbPacing';
-import { queueOutbound } from '../src/services/fbThreads';
+import { flagHuman, holdAgentReplies, queueOutbound } from '../src/services/fbThreads';
+import { HONEST_LINE } from '../src/services/fbAgent/guards';
 import { placeAd } from '../src/services/fbAds';
 
 
@@ -149,5 +150,58 @@ describe('ad actions', () => {
     const rows = await db<{ id: number; state: string; renews_id: number | null }[]>`
       SELECT id::int AS id, state, renews_id::int AS renews_id FROM fb_ad_placements ORDER BY id`;
     expect(rows).toEqual([{ id: p!.id, state: 'removing', renews_id: null }, { id: expect.any(Number), state: 'queued', renews_id: p!.id }]);
+  });
+});
+
+describe('the agent stops (RS-565 review)', () => {
+  async function agentQueue(threadId: number, body: string): Promise<number> {
+    const db = getTestDb();
+    const [run] = await db<{ id: number }[]>`INSERT INTO fb_agent_runs (thread_id) VALUES (${threadId}) RETURNING id::int AS id`;
+    return (await db.begin((tx) => queueOutbound(tx, threadId, body, { author: 'agent', agentRunId: run!.id }))).messageId;
+  }
+  const state = async (id: number) =>
+    (await getTestDb()<{ send_state: string }[]>`SELECT send_state FROM fb_messages WHERE id = ${id}`)[0]!.send_state;
+
+  it('a hand-off still sends the honest line it queued first', async () => {
+    const now = new Date();
+    await patchSettings((s) => { s.active_hours = hoursAround(now); });
+    const account = await seedSlot({ agentOn: true });
+    const threadId = await seedThread(account);
+    const honest = await agentQueue(threadId, HONEST_LINE);
+    const other = await agentQueue(threadId, 'What part numbers do you have?');
+    await getTestDb().begin((tx) => flagHuman(tx, threadId, 'The seller asked whether they are talking to a person.'));
+    expect(await state(honest)).toBe('queued');
+    expect(await state(other)).toBe('held');
+    await runFbSellerTick(getTestDb(), { now });
+    expect(await state(honest)).toBe('sending');
+    expect((await tasks('msg-send'))[0]!.payload).toMatchObject({ body: HONEST_LINE });
+  });
+
+  it('a take-over or the kill switch stops a reply whose send task no worker has taken', async () => {
+    const now = new Date();
+    await patchSettings((s) => { s.active_hours = hoursAround(now); });
+    const account = await seedSlot({ agentOn: true });
+    const a = await seedThread(account);
+    const b = await seedThread(account);
+    const m1 = await agentQueue(a, 'What part numbers do you have?');
+    await runFbSellerTick(getTestDb(), { now });
+    expect(await state(m1)).toBe('sending');
+    const [t1] = await tasks('msg-send');
+    await getTestDb().begin((tx) => holdAgentReplies(tx, a, { keepHonest: false }));
+    expect(await state(m1)).toBe('held');
+    expect((await tasks('msg-send')).find((t) => t.id === t1!.id)!.state).toBe('cancelled');
+
+    // The kill switch, through the tick, does the same; a leased one runs out.
+    const m2 = await agentQueue(b, 'How many sticks?');
+    await runFbSellerTick(getTestDb(), { now: at(now, 10) });
+    expect(await state(m2)).toBe('sending');
+    await patchSettings((s) => { s.kill_switch = true; });
+    await runFbSellerTick(getTestDb(), { now: at(now, 11) });
+    expect(await state(m2)).toBe('held');
+    expect((await tasks('msg-send')).every((t) => t.state === 'cancelled')).toBe(true);
+    // Nothing queues the held replies again.
+    await patchSettings((s) => { s.kill_switch = false; });
+    await runFbSellerTick(getTestDb(), { now: at(now, 20) });
+    expect(await tasks('msg-send')).toHaveLength(2);
   });
 });

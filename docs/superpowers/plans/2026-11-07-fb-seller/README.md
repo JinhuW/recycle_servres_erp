@@ -135,6 +135,6 @@ profile shape and `runAgent`, E at the HTTP routes and DTOs.
 | D1 | PR open | #1151 | 1.440.0 | runtime, ten rules, three skills, fbOffer, guards, loop; real-model transcript still to run (no key here) |
 | D2 | PR open | #1150 | 1.439.0 | registry is a local §6.5 copy until D1 merges |
 | E | PR open | #1153 | 1.441.0 | pages on a dev-only mock for /api/fb-seller; real-API screenshots after C merges |
-| R | not started | | | |
+| R | PR open | #1155 | 1.442.1, monitor pin `2378351` | 13 findings (3 high, 7 medium, 3 low), all fixed; not-fixed notes in WS-R-review.md's Outcome |
 | F.local | not started | | | |
 | F.live | not started | | | each step needs the owner's yes |

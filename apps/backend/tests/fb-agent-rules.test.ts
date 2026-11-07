@@ -149,6 +149,26 @@ describe('guards', () => {
     passes(`Do you have the exact part number, like ${PN}, and are all 8 the same? Is it from an R740?`);
   });
 
+  it('guard 3: a small bare price, or a number in words', () => {
+    for (const t of [
+      'How about 95?', 'We could offer 80 for both of them', 'Would 60 for all work', 'Our budget is 90 total',
+      'Thinking ninety for the pair', 'Could you do 45, given the age?',
+    ]) blocked(t, null);
+    passes('Are all 4 of the drives the same model, and do the 2 PSUs work?', null);
+  });
+
+  it('guard 2/3: nothing beside {{offer}} can change its amount', () => {
+    // offer 208: these would send $2080, $208k, $208 a stick, 1$208 or the offer twice.
+    for (const t of [
+      'We can offer {{offer}}0 for the lot.', 'We can offer {{offer}}k for the lot.', 'We can offer {{offer}} each.',
+      'We can do {{offer}} per stick.', 'We can do {{offer}} apiece.', 'We can do 1{{offer}} for the lot.',
+      'We can offer {{offer}}.50 for them.', 'We can offer {{offer}} x 4.', 'Either {{offer}} or {{offer}} works.',
+      'We can do {{offer}} a stick.', 'We can do {{offer}} plus tax.',
+    ]) blocked(t);
+    expect(passes('We can offer {{offer}}, for the lot.')).toBe('We can offer $208, for the lot.');
+    expect(passes('Our offer: {{offer}}.')).toBe('Our offer: $208.');
+  });
+
   it('guard 4: never accepts, pays or arranges a handover', () => {
     for (const t of [
       'Deal!', "It's a deal at {{offer}}", 'Sounds good, I accept.', "I'll pay {{offer}} today.", 'We will take them.',

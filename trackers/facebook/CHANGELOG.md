@@ -52,6 +52,21 @@ deployed?" harder to answer.
 
 ### Fixed
 
+- **A seller task no longer reports a delivered reply or post as lost (RS-565
+  review).** The vendored monitor (pin `2378351`): a lone amount such as "300"
+  was read as a timestamp and dropped, so the send never verified and the ERP
+  failed it; a carriage return or tab in a reply was typed as Enter or Tab; and
+  an error after the publish, delete or send reached Facebook was reported
+  `failed` instead of `uncertain`. Each one invited a person to send it again.
+  The per-task log line also passed `kind` twice and raised after every report.
+- **A seller task parks on every wall and reads its inbox honestly (RS-565
+  review, pin `9a7004e`).** A retried send now finds our reply even when the
+  seller has answered since, instead of typing it a second time. A restriction
+  that appears mid-form, or once a listing opens for deletion, parks the
+  worker as a wall rather than failing the task and leaving the account to be
+  driven again. An inbox with no thread links fails unless the page says it
+  is empty, so a Facebook redesign is not read as "no conversations". A
+  seller writing "I was temporarily blocked" no longer parks the account.
 - **Two coordinator tests no longer fail with the calendar.** The city-lease
   and city-event tests in `test_postgres.py` used fixed 2026-10-23 times, and
   the city log keeps only the last 14 days, so both failed every run from

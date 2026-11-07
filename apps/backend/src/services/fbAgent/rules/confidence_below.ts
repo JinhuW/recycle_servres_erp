@@ -7,6 +7,7 @@ const rule: AgentRule = {
   params: {
     type: 'object',
     properties: { min: { type: 'number', label: 'Lowest confidence the agent acts on (0 to 1)', minimum: 0, maximum: 1, default: 0.6 } },
+    required: ['min'],
   },
   check({ extract, params }) {
     const min = numParam(params, 'min', 0.6);

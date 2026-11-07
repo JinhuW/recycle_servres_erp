@@ -14,9 +14,16 @@ const MONEY: { re: RegExp; what: string }[] = [
   { re: /\b(usd|dollars?|bucks|grand|cents?)\b/i, what: 'a money word' },
   { re: /\b\d+(?:[.,]\d+)?\s*k\b/i, what: 'a number with k' },
   { re: /(?<![\w-])\d{1,3}(?:,\d{3})+(?![\w-])|(?<![\w-])\d+\.\d+(?![\w-])|(?<![\w-])\d{3,}(?![\w-])/, what: 'a number that could be a price' },
-  { re: /\b(hundred|thousand|million)\b/i, what: 'a number written in words' },
+  { re: /\b(hundred|thousand|million|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b/i, what: 'a number written in words' },
+  // A small bare number read as a price: after a price word, or closing the
+  // clause ("how about 95?", "80 for both"). Counts inside a sentence ("are
+  // all 8 the same") are not.
+  { re: /\b(offer(ing)?|pay(ing)?|budget|price|thinking|how about|around|roughly|say|ask(ing)?)\s+(of\s+|is\s+|maybe\s+|about\s+)?\d{1,2}(?![\w.,]*\d)\b/i, what: 'a number that could be a price' },
+  { re: /(?<![\w.,-])\d{1,2}(?=\s*([?!;]|[.,](?!\d)|$|\b(for (both|all|them|the lot|everything)|total|altogether|or so|ish|tops|firm|obo)\b))/i, what: 'a number that could be a price' },
   { re: /\b\d+\s*(each|apiece|a piece|per\s+\w+|\/\s*ea)\b/i, what: 'a unit price' },
 ];
+
+const OFFER_TRAILER = /\{\{offer\}\}(?:[\w$]|[.,]\d|\s*(?:k|x|each|apiece|a piece|per|\/|ea|times|a (unit|pop|stick|drive|card|piece)|for each|plus|\+|\*|more|extra|on top)\b)/i;
 
 // Guard 4: accepting, confirming, paying, or arranging a handover. A person
 // on our team does all of these.
@@ -52,6 +59,11 @@ export function checkReply(draft: string, offerUsd: number | null): GuardResult 
   if (/\{\{|\}\}/.test(withoutOffer)) failures.push('The reply has a placeholder other than {{offer}}.');
   const usesOffer = text.includes(OFFER_PLACEHOLDER);
   if (usesOffer && offerUsd === null) failures.push('The reply names an offer, and there is no offer to make.');
+  if (text.split(OFFER_PLACEHOLDER).length > 2) failures.push('The reply names the offer more than once.');
+  // The filled amount is the whole lot's price. A digit, letter or unit beside
+  // the placeholder would turn it into another number: "{{offer}}0" sends ten
+  // times the offer, "{{offer}}k" a thousand times, "{{offer}} each" one per item.
+  if (/[\w$.,]\{\{offer\}\}/i.test(text) || OFFER_TRAILER.test(text)) failures.push('The reply changes the offer\'s amount around {{offer}}.');
   for (const m of MONEY) if (m.re.test(withoutOffer)) failures.push(`The reply has ${m.what} the model wrote itself.`);
   for (const c of COMMITMENT) if (c.re.test(withoutOffer)) failures.push(`The reply commits us (${c.what}).`);
   if (HUMAN_CLAIM.test(withoutOffer)) failures.push('The reply claims to be a person.');
