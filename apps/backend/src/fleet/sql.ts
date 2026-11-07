@@ -24,8 +24,8 @@ export const iso = (d: Date | null): string | null => (d ? d.toISOString() : nul
 /** fleet_tasks as postgres.js returns it: the BIGSERIAL id arrives as a string. */
 export type TaskRow = {
   id: string;
-  city: string;
-  item: string;
+  city: string | null;
+  item: string | null;
   kind: FleetTask['kind'];
   due_at: Date;
   priority: number;

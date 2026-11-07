@@ -155,8 +155,9 @@ export type FleetTaskResult = {
 
 export type FleetTask = {
   id: number;
-  city: string;
-  item: string;
+  /** Null on a seller task, which names its account and carries a payload instead. */
+  city: string | null;
+  item: string | null;
   kind: FleetTaskKind;
   due_at: string;
   /** Higher first; a manager's task is 100. */

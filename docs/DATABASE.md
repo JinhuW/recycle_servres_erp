@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-07:** ERP migration `0233`, Reddit tracker migration `0007`,
+**As of 2026-11-07:** ERP migration `0234`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2622,7 +2622,9 @@ assigned entirely to the starting day. Returning a task to ready preserves the
 ended attempt. Done uses the completion time; an expired/released lease is
 capped at its expiry. The next-task pick skips accounts at budget_minutes.
 Migration 0207 backfills known terminal attempts; time erased by earlier
-releases cannot be recovered.
+releases cannot be recovered. Since 0234 it counts search kinds only: seller
+tasks (ad-post, ad-delete, inbox-sync, msg-send) are left out, as the budget
+(`minutesTodaySql`) leaves them out.
 
 | Column | Type | Meaning |
 | --- | --- | --- |

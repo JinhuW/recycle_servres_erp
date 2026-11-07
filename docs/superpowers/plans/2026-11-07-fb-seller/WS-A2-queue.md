@@ -31,7 +31,7 @@ search worker sees. CONTRACTS §4 is the spec.
 
 ## Outcome
 
-Migration `0233_fleet_seller_fence.sql`, v1.438.0. Tests:
+Migrations `0233_fleet_seller_fence.sql` and `0234_fleet_minutes_no_seller.sql`, v1.438.0. Tests:
 `apps/backend/tests/fleet-seller-queue.test.ts`. Notes for the workstreams after A2:
 
 - **Body limit.** The routes enforce 512 KB themselves. Above them, Hono's
@@ -58,9 +58,10 @@ Migration `0233_fleet_seller_fence.sql`, v1.438.0. Tests:
 - **Pick.** A seller slot reads its worker's `fleet_workers.version` (claim or
   heartbeat). Over budget, it is offered only its seller kinds; with nothing
   due it answers `nothing_due` and holds the poll, so an enqueue wakes it.
-- **Left as they are.** `FleetTask.city` / `.item` stay typed `string` in
-  shared, though seller rows carry null; the backend task lists and the city log
-  already tolerate it in SQL, but a page that renders a seller task needs the
-  shared type widened (a DTO change: E and the orchestrator). The `fleet_minutes`
-  view still counts seller minutes (only the budget excludes them). The hourly
-  purge does not delete `uncertain` tasks.
+- **Follow-up in the same PR.** Shared `FleetTask.city` and `.item` are now
+  `string | null`. The Fleet pages show the task's kind where a city would go
+  (task table, belt titles, worker note, city log) and don't open a city log
+  for a seller task. The `fleet_minutes` view excludes seller kinds (migration
+  `0234_fleet_minutes_no_seller.sql`), matching `minutesTodaySql`; the Fleet
+  pages' minutes column already reads `minutesTodaySql`.
+- **Left as they are.** The hourly purge does not delete `uncertain` tasks.

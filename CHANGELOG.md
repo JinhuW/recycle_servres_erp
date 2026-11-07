@@ -36,6 +36,11 @@ tracker ships them.
   lease has moved on and never answer 401 or 409 for it, because a worker
   exits on those and every exit is a Facebook login. A repeated report is a
   no-op; the body limit is 512 KB.
+- **Minutes (migration 0234).** The `fleet_minutes` view leaves seller tasks
+  out too, so every count of an account's minutes agrees with its budget.
+- **Task lists.** A fleet task's city and item are typed as possibly null,
+  since a seller task has neither; the Fleet pages show the task's kind where
+  a city would go and don't open a city log for it.
 
 ## [1.437.1] - 2026-11-07
 

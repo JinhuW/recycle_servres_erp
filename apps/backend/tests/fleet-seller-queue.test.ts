@@ -213,6 +213,24 @@ describe('budget', () => {
     expect(minutes).toBe(0);
   });
 
+  it('leaves seller minutes out of the fleet_minutes view, and keeps search minutes in it', async () => {
+    const no = await seedSlot(1, 'seller');
+    const db = getTestDb();
+    // Noon to 2 PM Eastern yesterday: whole inside one Eastern day, whenever CI runs.
+    const at = db`(date_trunc('day', NOW() AT TIME ZONE 'America/New_York') - interval '12 hours') AT TIME ZONE 'America/New_York'`;
+    await db`
+      INSERT INTO fleet_tasks (kind, due_at, state, account_no, leased_at, lease_expires_at, done_at, payload)
+      SELECT 'msg-send', s, 'done', ${no}, s, s + interval '3 hours', s + interval '2 hours', '{"ref":"m-1"}'::jsonb FROM (SELECT ${at} AS s) x`;
+    await db`
+      INSERT INTO fleet_tasks (city, item, due_at, state, account_no, leased_at, lease_expires_at, done_at)
+      SELECT 'houston', 'server_ram', s, 'done', ${no}, s, s + interval '3 hours', s + interval '30 minutes' FROM (SELECT ${at} AS s) x`;
+    await db`
+      INSERT INTO fleet_tasks (kind, due_at, state, account_no, leased_at, lease_expires_at, payload)
+      VALUES ('inbox-sync', NOW(), 'leased', ${no}, NOW() - interval '20 minutes', NOW() + interval '10 minutes', '{"ref":"inbox:y"}'::jsonb)`;
+    const rows = await db<{ minutes: number }[]>`SELECT minutes::float8 AS minutes FROM fleet_minutes WHERE account_no = ${no}`;
+    expect(rows.map((r) => Math.round(r.minutes))).toEqual([30]);
+  });
+
   it('still hands a budget-exhausted seller slot its seller tasks', async () => {
     const no = await seedSlot(1, 'seller');
     await spendBudget(no);
