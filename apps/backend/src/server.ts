@@ -50,10 +50,10 @@ const loops = [
   startPerfLoop(getDb(env)),
   // The fleet VNC relay pairs sockets in memory: one instance serves it.
   startFleetRelayLease(getDb(env)),
+  startFbSellerLoop(env),
+  startFbAgentLoop(env),
   { stop: () => setPollsDraining(true) },
 ];
-startFbSellerLoop(env);
-startFbAgentLoop(env);
 
 const server = serve({ fetch: (request) => app.fetch(request, env), port }, (info) => {
   log.info('recycle-erp-backend listening', { port: info.port });

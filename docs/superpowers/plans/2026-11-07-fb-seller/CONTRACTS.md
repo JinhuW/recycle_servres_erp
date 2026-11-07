@@ -508,7 +508,7 @@ export async function recordExtract(tx: SqlLike, threadId: number, extracted: Ag
 
 ### 5.3 Tick
 
-`startFbSellerLoop(env)` is started from `server.ts` by A1 as a stub. Every 30 s, each pass reads the settings and does nothing outside active hours, except settling reports.
+`startFbSellerLoop(env): { stop: () => void }` is started from `server.ts` by A1 as a stub, in the `loops` list so shutdown stops it; `stop()` ends the timer and lets a pass in flight finish. Every 30 s, each pass reads the settings and does nothing outside active hours, except settling reports.
 
 1. Settle `uncertain` seller tasks into the domain.
 2. For each seller slot whose worker is HEALTHY, queue `inbox-sync` when the last one is older than `inbox_every_minutes` plus jitter.
@@ -579,7 +579,7 @@ export type AgentDecision = {
 export async function enqueueAgentRun(tx: SqlLike, threadId: number, triggerMessageId: number): Promise<void>;
 // Pure decision: no DB writes, no sends. The LLM call goes through `llm`, so tests and replays can stub it.
 export async function decide(input: AgentInput, profile: FbAgentProfile, llm: AgentLlm): Promise<AgentDecision>;
-export function startFbAgentLoop(env: Env): void;   // A1 stubs it in server.ts
+export function startFbAgentLoop(env: Env): { stop: () => void };   // in server.ts's `loops` list; stop() claims no new run
 export type AgentLlm = (req: { model: string; system: string; messages: { role: 'user' | 'assistant'; content: string }[];
   schema: Record<string, unknown> }) => Promise<{ json: Record<string, unknown>; usage: AgentDecision['usage'][number] }>;
 ```
