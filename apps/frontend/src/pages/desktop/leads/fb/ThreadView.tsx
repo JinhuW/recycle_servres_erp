@@ -4,7 +4,7 @@ import { Icon } from '../../../../components/Icon';
 import { Modal } from '../../../../components/Modal';
 import { TableSkeleton } from '../../../../components/Skeleton';
 import { handleFetchError, showSuccessToast } from '../../../../lib/errorToast';
-import { fbSellerApi, fbSellerChanged, offerLadder, usePolled } from '../../../../lib/fbSeller';
+import { fbSellerApi, fbSellerChanged, offerLadder, threadModeKey, usePolled } from '../../../../lib/fbSeller';
 import { fmtDateShort } from '../../../../lib/format';
 import { useT } from '../../../../lib/i18n';
 import { fbSellerTabPath, hrefFor, onLinkClick } from '../../../../lib/route';
@@ -59,7 +59,7 @@ export function ThreadView({ id }: { id: number }) {
           <h2>{d.seller_name || t('fbs_unknown_seller')}</h2>
           <div className="rl-dmeta">
             <StageChip stage={d.stage} />
-            <span className={`chip ${d.mode === 'human' ? 'info' : 'muted'}`}>{t(d.mode === 'human' ? 'fbs_mode_human' : 'fbs_mode_agent')}</span>
+            <span className={`chip ${d.mode === 'human' ? 'info' : d.needs_human ? 'warn' : 'muted'}`}>{t(threadModeKey(d))}</span>
             <AccountCell no={d.account_no} accounts={accts.data?.rows ?? null} />
             <span className="rl-clip">{d.listing_title}</span>
           </div>

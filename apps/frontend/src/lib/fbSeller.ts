@@ -219,6 +219,16 @@ export const SEND_STATE_TONE: Record<FbSendState, string> = {
   queued: 'muted', held: 'warn', sending: 'info', sent: 'pos', uncertain: 'warn', failed: 'neg',
 };
 
+/**
+ * Who answers the seller next. A hand-off leaves `mode` at 'agent' (only a
+ * take-over changes it), but the agent stays silent until a manager hands it
+ * back, so "agent answering" would be wrong there.
+ */
+export function threadModeKey(t: { mode: 'agent' | 'human'; needs_human: boolean }): 'fbs_mode_agent' | 'fbs_mode_human' | 'fbs_mode_waiting' {
+  if (t.mode === 'human') return 'fbs_mode_human';
+  return t.needs_human ? 'fbs_mode_waiting' : 'fbs_mode_agent';
+}
+
 /** Whether an account can still carry a thread: it exists and is a seller that is not retired. */
 export function threadStranded(accountNo: number | null, accounts: readonly FbSellerAccount[] | null): boolean {
   if (accountNo === null) return true;
