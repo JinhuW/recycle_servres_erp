@@ -61,6 +61,8 @@ import activityRoutes from './routes/activity';
 import clientErrorRoutes from './routes/clientErrors';
 import clientTimingRoutes from './routes/clientTimings';
 import perfRoutes from './routes/perf';
+import fbSellerRoutes from './routes/fbSeller';
+import fbAgentRoutes from './routes/fbAgent';
 import wellKnown, { oauth as oauthRoutes, oauthAdmin } from './oauth/server';
 import { handleMcp } from './mcp/server';
 import { bearerGuard } from './oauth/guard';
@@ -293,7 +295,9 @@ const isUploadPath = (path: string): boolean =>
   // So is a vendor's filled bid sheet dropped on a sell order.
   /^\/api\/sell-orders\/[^/]+\/price-import\/preview$/.test(path) ||
   // The sell order sheet dropped on Review mode is the same kind of file.
-  /^\/api\/orders\/[^/]+\/price-sheet\/preview$/.test(path);
+  /^\/api\/orders\/[^/]+\/price-sheet\/preview$/.test(path) ||
+  // A Facebook seller photo pool takes many photos in one drop.
+  /^\/api\/fb-seller\/pools\/\d+\/photos$/.test(path);
 
 // A Reddit leads harvest is ~2k sellers plus the buyer network's trades,
 // about 1.3 MB of JSON; manager-only, and the route caps its own row count.
@@ -451,6 +455,10 @@ app.route('/api/leads/reddit', redditLeadsRoutes);
 // Self-applies its scopes per route: cookie + manager gate on the pages' reads
 // and writes, a bearer on the host-agent and worker routes (src/fleet/auth.ts).
 app.route('/api/fleet', fleetRoutes);
+// Self-apply the session cookie and the manager gate: Facebook seller accounts
+// (ads, photos, threads) and the agent's profiles and evals.
+app.route('/api/fb-seller', fbSellerRoutes);
+app.route('/api/fb-agent', fbAgentRoutes);
 // Self-applies its auth: Bearer (wechat:write) on /push/*, where memtrade
 // sends each day's report; cookie + manager gate on the page's reads.
 app.route('/api/wechat-market', wechatMarketRoutes);

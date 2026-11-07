@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { FLEET_TZ, type FleetError, type FleetTask, type FleetTaskEvent } from '@recycle-erp/shared';
+import { FLEET_SELLER_TASK_KINDS, FLEET_TZ, type FleetError, type FleetTask, type FleetTaskEvent } from '@recycle-erp/shared';
 import type { SqlLike } from '../db';
 
 // Row shapes and the few queries more than one fleet module runs. Handlers keep
@@ -24,8 +24,8 @@ export const iso = (d: Date | null): string | null => (d ? d.toISOString() : nul
 /** fleet_tasks as postgres.js returns it: the BIGSERIAL id arrives as a string. */
 export type TaskRow = {
   id: string;
-  city: string;
-  item: string;
+  city: string | null;
+  item: string | null;
   kind: FleetTask['kind'];
   due_at: Date;
   priority: number;
@@ -78,12 +78,18 @@ export const eventToWire = (r: TaskEventRow): FleetTaskEvent => ({
   at: r.at.toISOString(),
 });
 
+const sellerKinds: string[] = [...FLEET_SELLER_TASK_KINDS];
+
+/** The kinds that write to Facebook: a lost lease on one may have posted or sent. */
+export const SELLER_WRITE_KINDS: string[] = ['ad-post', 'ad-delete', 'msg-send'];
+
 /**
  * An account's search minutes so far today (an Eastern day, FLEET_TZ, as the
  * Analysis funnel counts days), as fleet_minutes counts them. That view
  * spreads every attempt in the retention window over its days before a day
  * can be picked; this reads only attempts that can reach today (none outlives
- * a day: lease and task limits are hours).
+ * a day: lease and task limits are hours). A seller's posting and inbox work
+ * is not search, so it is not charged to the budget.
  */
 export const minutesTodaySql = (sql: SqlLike, accountNo: ReturnType<SqlLike> | number) => sql`
   (SELECT COALESCE(SUM(GREATEST(0, EXTRACT(EPOCH FROM LEAST(x.ended_at, d.e) - GREATEST(x.leased_at, d.s)))), 0)::float8 / 60
@@ -92,9 +98,11 @@ export const minutesTodaySql = (sql: SqlLike, accountNo: ReturnType<SqlLike> | n
    CROSS JOIN LATERAL (
      SELECT a.leased_at, a.ended_at FROM fleet_task_attempts a
      WHERE a.account_no = ${accountNo} AND a.leased_at >= d.s - interval '1 day' AND a.ended_at > d.s
+       AND NOT EXISTS (SELECT 1 FROM fleet_tasks st WHERE st.id = a.task_id AND st.kind = ANY(${sellerKinds}::text[]))
      UNION ALL
      SELECT t.leased_at, LEAST(NOW(), t.lease_expires_at) FROM fleet_tasks t
      WHERE t.account_no = ${accountNo} AND t.state = 'leased' AND t.leased_at IS NOT NULL
+       AND t.kind <> ALL(${sellerKinds}::text[])
    ) x)`;
 
 /**
@@ -154,6 +162,9 @@ export type FleetSlotRow = {
   reserved_until: Date | null;
   proxy_id: number | null;
   note: string;
+  role: 'search' | 'seller';
+  agent_on: boolean;
+  agent_profile_id: number | null;
 };
 
 /** A claim ticket as stored: only its hash, the worker it is for, and whether a claim spent it. */

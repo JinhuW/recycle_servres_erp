@@ -12,6 +12,8 @@ export type Env = {
   STUB_LOW_CONF?: string;
   OPENROUTER_API_KEY?: string;
   OPENROUTER_OCR_MODEL?: string;
+  // Telegram bot for Facebook seller alerts (lib/fbSellerAlert.ts). Unset: in-app only.
+  FB_SELLER_TELEGRAM_BOT_TOKEN?: string;
   // Reddit tracker admin proxy (/api/tracker/*). Both unset → proxy answers
   // 501 so the UI can show a "not configured" state instead of erroring.
   TRACKER_API_URL?: string;

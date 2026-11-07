@@ -7,6 +7,7 @@ import { shownNav, type ShownLeaf } from '../lib/desktopNav';
 import { useAcctReviewCount } from '../lib/accounting';
 import { useLeadsAttention } from '../lib/redditLeads';
 import { useWebSubNewCount } from '../lib/webSubmissions';
+import { useFbNeedsHumanCount } from '../lib/fbSeller';
 import { DESKTOP_VIEW_TO_PATH, hrefFor, onLinkClick, type DesktopViewId } from '../lib/route';
 
 export type DesktopView = DesktopViewId;
@@ -52,7 +53,7 @@ function NavLink({ view, className, label, icon, current, tour, children }: {
   );
 }
 
-const COUNT_HINTS: Record<string, string> = { leadsReddit: 'rlNavHint', websubmissions: 'webSubNavHint' };
+const COUNT_HINTS: Record<string, string> = { leadsReddit: 'rlNavHint', websubmissions: 'webSubNavHint', leadsFacebook: 'fbs_nav_hint' };
 const countHint = (id: string) => COUNT_HINTS[id] ?? 'acctReviewModeHint';
 
 // `count` is live work waiting on the viewer, where the leaf's static badge
@@ -85,8 +86,9 @@ export function Sidebar({ view, folded, onToggleFold }: Props) {
   const reviewCount = useAcctReviewCount(user?.role === 'manager');
   const leadsCount = useLeadsAttention();
   const webSubCount = useWebSubNewCount(user?.role === 'manager');
+  const fbCount = useFbNeedsHumanCount(user?.role === 'manager');
   const counts: Partial<Record<string, number>> = {
-    accounting: reviewCount, leadsReddit: leadsCount, websubmissions: webSubCount,
+    accounting: reviewCount, leadsReddit: leadsCount, websubmissions: webSubCount, leadsFacebook: fbCount,
   };
   const countOf = (item: ShownLeaf) => counts[item.leaf.id];
   if (!user) return null;

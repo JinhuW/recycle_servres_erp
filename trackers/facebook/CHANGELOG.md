@@ -18,7 +18,28 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-07
+
 ### Added
+
+- **A worker can run seller tasks (RS-565).** The vendored monitor (pin
+  `d788039`) takes four new kinds from `next-task`: `ad-post` (download the
+  task's photos, fill the create form, publish, and report the new listing's
+  id), `ad-delete`, `inbox-sync` (the newest threads and their last messages,
+  oldest first) and `msg-send`. It picks the kind before it looks up an item,
+  so a seller task never searches and search does not change. Each task
+  checks for a wall after every navigation and every submit, reports to
+  `POST /api/fleet/worker/seller/report` before its `done`, and parks on a
+  wall the way a search does. A publish, delete or send it could not see
+  land is reported `uncertain` and never retried. The browser steps are
+  ported from `rs_poster` and `rs_messenger`, which stay out of the worker
+  image, and their selectors and timings live in `seller_tasks.py`. Ported
+  with fixes: a bubble whose sender can't be told is `unknown`, never `in`;
+  two identical messages in a row stay two; image bubbles are flagged; a
+  multi-line reply goes out as one message; a reply that is already the
+  newest outbound bubble is not typed again. Nothing hands these tasks out
+  yet: the ERP's `FLEET_SELLER_MIN_WORKER_VERSION` stays above every
+  released worker until the rollout.
 
 - **A cloak worker reports its browser to the ERP before any Facebook page.**
   After a passing preflight it sends hashes of what the browser really showed
@@ -30,6 +51,29 @@ deployed?" harder to answer.
   in the same browser; no answer parks `connect_failed`, so no account reaches
   Facebook unrecorded. None of these costs a login. The ERP has to carry
   `POST /api/fleet/worker/profile-launch` (v1.430.0) before this worker runs.
+
+### Fixed
+
+- **A seller task no longer reports a delivered reply or post as lost (RS-565
+  review).** The vendored monitor (pin `2378351`): a lone amount such as "300"
+  was read as a timestamp and dropped, so the send never verified and the ERP
+  failed it; a carriage return or tab in a reply was typed as Enter or Tab; and
+  an error after the publish, delete or send reached Facebook was reported
+  `failed` instead of `uncertain`. Each one invited a person to send it again.
+  The per-task log line also passed `kind` twice and raised after every report.
+- **A seller task parks on every wall and reads its inbox honestly (RS-565
+  review, pin `9a7004e`).** A retried send now finds our reply even when the
+  seller has answered since, instead of typing it a second time. A restriction
+  that appears mid-form, or once a listing opens for deletion, parks the
+  worker as a wall rather than failing the task and leaving the account to be
+  driven again. An inbox with no thread links fails unless the page says it
+  is empty, so a Facebook redesign is not read as "no conversations". A
+  seller writing "I was temporarily blocked" no longer parks the account.
+- **Two coordinator tests no longer fail with the calendar.** The city-lease
+  and city-event tests in `test_postgres.py` used fixed 2026-10-23 times, and
+  the city log keeps only the last 14 days, so both failed every run from
+  2026-11-06 and `release.sh` refused to release. They now run an hour before
+  the test starts. Tests only; the coordinator is unchanged.
 
 ## [0.17.0] - 2026-11-05
 

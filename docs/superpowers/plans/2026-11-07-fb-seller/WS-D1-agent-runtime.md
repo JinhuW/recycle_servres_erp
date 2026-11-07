@@ -30,6 +30,37 @@ CONTRACTS §6 is the spec.
 
 ## Exit criteria
 
-- [ ] The tests above pass with the LLM stubbed; existing AI suites untouched and green.
-- [ ] Adding a rule is one module + one registry line + its test (show it in the PR by adding `keyword` last).
-- [ ] Version bump, CHANGELOG, README Status.
+- [x] The tests above pass with the LLM stubbed; existing AI suites untouched and green.
+- [x] Adding a rule is one module + one registry line + its test (show it in the PR by adding `keyword` last).
+- [x] Version bump, CHANGELOG, README Status.
+
+## Outcome
+
+v1.440.0. Notes for the workstreams after D1:
+
+- `gpt-6-luna` lists `structured_outputs` in OpenRouter's catalogue
+  (checked 2026-11-07), so the seeded models stand. The chat call sends
+  `response_format: json_schema, strict` with `provider.require_parameters`.
+- Rounds: the thread's `round` counts offers made; the next offer is round
+  `round + 1`, at `opening_pct + step_pct × (round − 1)`. No offer past
+  `max_rounds`, and the `closing` rule hands off before the last one.
+- `AgentInput.market` is built before the model runs, from part-number-looking
+  tokens in the seller's messages plus the thread's stored extract, so
+  `decide` stays pure. An extracted part not in that set gets no offer.
+- Every enabled rule is checked and all that fire are recorded; the first is
+  the hand-off reason. A profile kind missing from the registry hands off.
+  Guard 5 holds even with `bot_question` switched off. A seller message no
+  skill fits (a decline, say) hands off; our message being the newest is `noop`.
+- Guard 4's second check is one more call to the extract model per send; it
+  fails closed.
+- On `handoff` with a reply (the honest line), the loop calls `queueOutbound`
+  before `flagHuman`, since C's `queueOutbound` refuses once `needs_human` is
+  set. An apply that throws (a person took the thread) leaves the run
+  `done/error` and nothing on the thread.
+- `checkCircuitBreaker(tx, accountNo, settings)` is exported for C's
+  send-failure path; it counts the account's last N `send`/`blocked` runs,
+  a send whose message ended `failed` counting as a failure.
+- Extra exports for D2: `agentLlmFor`, `agentSpentTodayUsd` (CONTRACTS §9),
+  `buildAgentInput`, `drainFbAgentRuns`, `AgentBudgetError`, `agentRegistry`.
+- The real-model transcript of the fixtures was not run: this Mac has no
+  OpenRouter key. R or F runs it with one.

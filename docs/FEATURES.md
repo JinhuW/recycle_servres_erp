@@ -1308,6 +1308,113 @@ is the inbox for the public website forms, described with the public forms
 further down. Clicking Leads opens Reddit. The closed row's badge adds up both
 sources.
 
+**Leads ▸ Facebook** (`#/leads/facebook`, managers only, v1.441.0, RS-565) is
+where managers work the fleet's Facebook seller accounts: the Marketplace
+conversations they read, the "we buy" ads they post, the photo pools those ads
+draw from, and the agent that screens and negotiates with sellers. Purchasers
+see neither the nav entry nor the routes (the view bounces to Home). It has
+Leads ▸ Reddit's layout: icon tabs with counts, and a line under them saying
+what the tab is for. The sidebar entry carries the number of conversations
+waiting on a manager, read every 60 s while the page is visible. Every refusal
+names its reason in words.
+
+- **Needs human** (the default tab) lists the conversations the agent handed to
+  a person: deals about to close first, then whoever has waited longest. Each
+  row shows the seller and listing, the account, the reason in words, the
+  current offer beside the ceiling, and how long it has waited.
+- **Inbox** is every open conversation, newest activity first, with its stage,
+  account, last message, offer and an unread dot. A conversation whose account
+  is gone, retired or no longer a seller is marked **Stranded**. A search box
+  matches seller, listing and messages; a filter narrows to one account; closed
+  conversations are behind **Closed**.
+- **A conversation** (`#/leads/facebook/thread/:id`) shows every message with
+  its author (seller, agent, staff, or one sent on Facebook directly) and, for
+  each outbound, how far it got: queued, held (kill switch), sending, sent,
+  unknown or failed with the reason. Beside it: what the agent extracted (items,
+  quantities, the seller's ask, intent, confidence), the Market matches with the
+  max buy price and its date, the ceiling and offer, the offer ladder by round,
+  the rules that fired on the last runs, and the conversation's history.
+  **Take over** stops the agent; **Hand back to agent** gives it back and
+  clears Needs human; the reply box queues a staff message on the account's
+  send schedule; **Close as won / lost** takes a note; **Save as test case**
+  freezes the conversation as an agent test case with what the agent should do.
+  It re-reads every 15 s and opening it marks it read.
+- **Ads** lists the ads by state (draft, ready, archived) beside an editor with
+  a preview of how the post reads, including the photo count range and the
+  pool it draws from. Only a draft is edited; **Mark ready** makes it placeable.
+  **Place** takes seller accounts × locations and lists every pair it refused
+  with the reason. The placements table shows each one's state, the photos it
+  drew as thumbnails, its listing id, when it was posted and renews next, with
+  **Renew**, **Remove** and, for an outcome the worker could not see,
+  **Resolve** (live, with its listing id, or never posted).
+- **Photos** lists the pools with unused and used counts and a **Low** mark
+  under the low-pool warning. Photos are added by dragging a batch onto the
+  pool (or choosing files); the result lists each file added or refused, with
+  why (a photo already in any pool is refused). The grid filters by used and
+  unused; a used photo names the placement that took it, and an unused one can
+  be deleted.
+- **Agent** has three views. **Versions** lists the profile versions with their
+  state; a draft's models (OpenRouter picker), system and extraction prompts,
+  skills (on or off, with their prompt and parameters) and hand-off rules (in
+  order, on or off, with parameters) are edited in forms built from the
+  registry. A draft is made candidate or active, a retired version can be rolled
+  back to, and any version can seed a new draft. **Shadow** lays the
+  candidate's decision beside the live agent's for each seller message and marks
+  the ones that differ. **Tests** lists the saved cases, runs every case against
+  a chosen version, shows each run's per-case results with why a case failed,
+  and compares two runs case by case.
+- **Settings** holds every seller setting, the kill switch first. The kill
+  switch saves at once; the rest (active hours, ad, message and inbox pacing,
+  offers, agent limits, the low-pool warning, the Telegram chat) save together,
+  checked against the same bounds the server enforces before Save is allowed. A
+  save someone else beat says so and reloads. The change history lists every
+  saved version with who, when and each field's old and new value.
+
+On the **Fleet ▸ worker** page (ERP fleet), a **Facebook seller** card switches
+the worker's account between searching and selling, turns the agent on or off
+for it, and picks the agent version it follows (the active one by default).
+None of these restarts anything or causes a login. The Tasks tab shows a seller
+task (post ad, remove ad, read inbox, send message) by its kind and account,
+since it has no city or item.
+
+The agent's setup is a versioned profile (v1.439.0). Only a draft can be
+edited. A draft becomes the candidate, which runs in shadow next to the live
+version, or becomes active. There is exactly one active version, and rolling
+back makes a retired version active again. Saved cases freeze a conversation,
+including the Market prices it was priced with. An eval replays every case
+against a version, and compare shows which cases changed between two evals.
+So far this is the `/api/fb-agent` routes; the Agent tab comes later.
+
+The pages run on the seller backend (v1.442.0, `/api/fb-seller`, managers
+only):
+
+- **Settings** are one database row, validated field by field, saved against
+  the version a manager opened (a stale save is refused) and kept in an
+  append-only history. Pacing reads them every 30 seconds, so a change needs no
+  restart. They hold the active hours, the per-account pacing (gaps, daily send
+  cap, live-ad cap, inbox interval), the offer policy, the agent's budget and
+  circuit breaker, the low-pool warning and an optional Telegram chat.
+- **Photo pools.** An upload takes many photos at once; a file already in any
+  pool is refused with the pool and photo it duplicates. Every post draws a
+  random set of unused photos and no photo is ever used twice. A post short of
+  photos waits as "needs photos" and is retried once the pool is refilled; a pool
+  under the warning alerts once. Only an unused photo can be deleted.
+- **Ads** are drafted by managers and placed on seller accounts by location.
+  A placement is refused when the ad isn't ready, the account isn't a seller,
+  or that ad already went up in that place today as often as allowed. Ads renew
+  on their schedule with fresh photos; a placement whose outcome is unknown
+  waits for a manager to say whether it is on Facebook.
+- **Conversations** arrive from each seller account's inbox reads. Managers can
+  reply, take a conversation over (the agent's unsent replies are held), hand
+  it back, close it as won or lost, and mark it read. A reply that may not have
+  reached the seller and never shows up in the next read moves the thread to
+  Needs human with that reason.
+- **Making a seller.** Setting an account's role to seller, or turning its agent
+  on, changes no container and causes no Facebook login.
+- **Alerts** for Needs human, a wall, a pool out of photos or running low go to
+  every manager's notifications, and to Telegram when the bot token and a chat
+  are set.
+
 **Leads ▸ Reddit** (`#/leads/reddit`, v1.392.0, RS-477) is a pool of sellers to
 buy from. They are found in the swap subreddits' public trade records: u/LabB0T
 on r/homelabsales and u/hwsbot on r/hardwareswap log every confirmed sale

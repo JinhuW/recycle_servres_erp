@@ -131,6 +131,11 @@ describe('erpCityLog', () => {
     // The server's own done event is not a step the table knows.
     expect(done.events.map(e => e.event)).toEqual(['handed', 'searched', 'searched', 'finished']);
   });
+  it('takes a seller task event, which has no city, without naming a city', () => {
+    const seller = { ...WORKER_DETAIL.events[0], city: null, city_name: null, item: null, task_kind: 'msg-send' as const };
+    const visits = erpCityLog({ ...WORKER_DETAIL, events: [seller, ...WORKER_DETAIL.events] });
+    expect(visits.map(v => v.name)).toEqual(erpCityLog(WORKER_DETAIL).map(v => v.name));
+  });
   it('sums the searched events when the worker sent no report', () => {
     const v = taskVisit({ ...WORKER_DETAIL.log[2], result: null, state: 'expired' }, new Map());
     expect(v).toMatchObject({ outcome: 'expired', reported: false, name: null });

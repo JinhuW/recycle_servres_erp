@@ -128,13 +128,13 @@ profile shape and `runAgent`, E at the HTTP routes and DTOs.
 
 | WS | State | PR | Version | Notes |
 | --- | --- | --- | --- | --- |
-| A1 | not started | | | |
-| A2 | not started | | | |
-| B | not started | | | |
-| C | not started | | | |
-| D1 | not started | | | |
-| D2 | not started | | | |
-| E | not started | | | |
-| R | not started | | | |
+| A1 | PR open | #1145 | 1.437.0 | migration 0232; see the WS file's Outcome |
+| A2 | PR open | #1149 | 1.438.0 | migrations 0233, 0234; see the WS file's Outcome |
+| B | PR open | #1146 | tracker [Unreleased], monitor pin `d788039` | no release cut; fixtures are guesses until F.live refreshes them |
+| C | PR open | #1152 | 1.442.0 | D1 faked in tests; dev-sync options in the PR body |
+| D1 | PR open | #1151 | 1.440.0 | runtime, ten rules, three skills, fbOffer, guards, loop; real-model transcript still to run (no key here) |
+| D2 | PR open | #1150 | 1.439.0 | registry is a local §6.5 copy until D1 merges |
+| E | PR open | #1153 | 1.441.0 | pages on a dev-only mock for /api/fb-seller; real-API screenshots after C merges |
+| R | PR open | #1155 | 1.442.1, monitor pin `2378351` | 13 findings (3 high, 7 medium, 3 low), all fixed; not-fixed notes in WS-R-review.md's Outcome |
 | F.local | not started | | | |
 | F.live | not started | | | each step needs the owner's yes |
