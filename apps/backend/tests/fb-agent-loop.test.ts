@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import type { FbThreadSnapshot } from '@recycle-erp/shared';
 import type { Sql } from 'postgres';
 import {
-  claimFbAgentRun, drainFbAgentRuns, enqueueAgentRun, startFbAgentLoop,
+  claimFbAgentRun, drainFbAgentRuns, enqueueAgentRun, runFbAgentRun, startFbAgentLoop,
   type AgentDeps, type AgentThreads,
 } from '../src/services/fbAgent';
 import { HONEST_LINE } from '../src/services/fbAgent/guards';
@@ -126,6 +126,31 @@ describe('fb agent loop', () => {
     expect(r!.cost_usd).toBeCloseTo(0.003);
     expect(calls.map((c) => c.fn)).toEqual(['recordExtract', 'recordOffer', 'setStage', 'queueOutbound']);
     expect(calls[3]!.args).toEqual([expect.stringContaining('$196'), { author: 'agent', agentRunId: r!.id }]);
+  });
+
+  it('a run retaken from a slow runner is applied once, by the claim that holds it', async () => {
+    const { threadId, messageId } = await seedThread(db, accountNo);
+    await enqueueAgentRun(db, threadId, messageId);
+    const slow = await claimFbAgentRun(db);
+    // The model took over five minutes; another instance retakes the run.
+    await db`UPDATE fb_agent_runs SET claimed_at = NOW() - INTERVAL '6 minutes' WHERE id = ${slow!.id}`;
+    const retaken = await claimFbAgentRun(db);
+    expect(retaken).toMatchObject({ id: slow!.id, attempts: 2 });
+    await runFbAgentRun(db, deps(db, calls, alerts), slow!);
+    expect(calls.filter((c) => c.fn === 'queueOutbound')).toHaveLength(0);
+    await runFbAgentRun(db, deps(db, calls, alerts), retaken!);
+    expect(calls.filter((c) => c.fn === 'queueOutbound')).toHaveLength(1);
+  });
+
+  it('waits while our last reply has not reached the seller', async () => {
+    const { threadId, messageId } = await seedThread(db, accountNo);
+    const [m] = await db<{ id: number }[]>`
+      INSERT INTO fb_messages (thread_id, direction, author, body, send_state)
+      VALUES (${threadId}, 'out', 'agent', 'What part numbers do you have?', 'sending') RETURNING id::int AS id`;
+    await enqueueAgentRun(db, threadId, messageId);
+    expect(await claimFbAgentRun(db)).toBeNull();
+    await db`UPDATE fb_messages SET send_state = 'sent' WHERE id = ${m!.id}`;
+    expect(await claimFbAgentRun(db)).toMatchObject({ thread_id: threadId });
   });
 
   it('hand-off flags a person; the bot question sends the honest line first', async () => {
