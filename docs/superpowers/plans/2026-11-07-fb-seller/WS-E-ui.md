@@ -31,7 +31,7 @@ Desktop only; the mobile shell is out of scope.
 
 ## Exit criteria
 
-- [ ] All tabs work against the real API on a local stack with seeded data (C/D1/D2 merged) — screenshots of each tab in the PR.
+- [x] All tabs work against the real API on a local stack with seeded data (C/D1/D2 merged) — screenshots of each tab in the PR.
 - [x] Purchasers see neither the nav entry nor the routes (the view bounces).
 - [x] Frontend tests for the API client, the settings form validation and the thread send-state rendering; `pnpm typecheck` green.
 - [x] `docs/FEATURES.md` section "Leads ▸ Facebook" complete, citing the version.
@@ -41,19 +41,18 @@ Desktop only; the mobile shell is out of scope.
 
 v1.441.0. Notes for R and F:
 
-- **Seller routes not yet against the real API.** C had not merged when this
-  landed, so the `/api/fb-seller` tabs were built and screenshotted against
-  `lib/fbSellerMock.ts`, an in-memory fake of every CONTRACTS §5.1 route. A dev
-  build turns it on with `localStorage['erp.fbSeller.mock'] = '1'` (a "Mock
-  data" chip shows in the page head); a production build never loads it.
-  `/api/fb-agent` always reaches the backend (D1 and D2 merged first). The
-  first exit criterion is left for a follow-up once C merges: screenshots from
-  a seeded local stack, then delete the mock or keep it as a dev aid.
-- The Agent tab uses D1's and D2's shared types. Only `ceiling_usd` on the
-  thread list row is declared locally (`FbThreadListRow` in `lib/fbSeller.ts`)
-  until C adds it to `FbThreadRow`.
+- **Real API (v1.442.1).** After C merged, every tab was checked against the
+  real routes on a migrated, seeded local database: sellers and a photo pool
+  and ads set up through the API, conversations, agent runs and eval runs
+  written by a local script. The dev-only mock and its switch are gone, and the
+  thread list uses the shared `FbThreadRow` with its `ceiling_usd`. The
+  screenshots are in the v1.442.1 PR.
+- Checking against the real data turned up three fixes, now in: D1's offer
+  code numbers rounds from 1 (`offerAmount`), so the thread's ladder now starts
+  at round 1; a future renewal date showed as "now", because `relTime` only
+  handles the past; and the eval compare named changed fields by their raw keys.
 - The settings form's bounds mirror §2.1 in `validateFbSettings`; the offer
-  ladder mirrors §6.6 in `offerLadder` (rounds `0 … max_rounds-1`). If C's
+  ladder mirrors `lib/fbOffer.ts` `offerAmount` in `offerLadder` (rounds `1 … max_rounds`). If C's
   `fbConfig.ts` or D1's `fbOffer.ts` read either differently, the form and the
   thread's ladder have to follow.
 - Outside the owned paths: one line in `components/Sidebar.tsx` (the

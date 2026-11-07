@@ -134,7 +134,7 @@ profile shape and `runAgent`, E at the HTTP routes and DTOs.
 | C | PR open | #1152 | 1.442.0 | D1 faked in tests; dev-sync options in the PR body |
 | D1 | PR open | #1151 | 1.440.0 | runtime, ten rules, three skills, fbOffer, guards, loop; real-model transcript still to run (no key here) |
 | D2 | PR open | #1150 | 1.439.0 | registry is a local §6.5 copy until D1 merges |
-| E | PR open | #1153 | 1.441.0 | pages on a dev-only mock for /api/fb-seller; real-API screenshots after C merges |
+| E | PR open | #1153 (merged), #1154 | 1.441.0, 1.442.1 | checked against the real API (v1.442.1); mock removed |
 | R | not started | | | |
 | F.local | not started | | | |
 | F.live | not started | | | each step needs the owner's yes |
