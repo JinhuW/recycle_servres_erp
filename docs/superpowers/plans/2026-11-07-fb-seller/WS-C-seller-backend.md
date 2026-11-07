@@ -22,9 +22,20 @@ tick, report handling and alerts. CONTRACTS §2, §5 are the spec.
 
 ## Exit criteria
 
-- [ ] Tests: settings validation, history, stale-version 409; a pacing change in the DB changes the next tick's behaviour with no restart.
-- [ ] Tests: random photo picks never repeat — including two placements racing for the last photos of a pool; duplicate upload refused with a reason; pool exhaustion → `needs_photos` + one alert; low-pool alert fires once.
-- [ ] Tests: window alignment — new messages appended, repeats kept, a sent outbound settled, an unmatched window realigned with an event; agent enqueued only under the right conditions.
-- [ ] Tests: take over stops agent sends (`queueOutbound` refuses), kill switch holds agent messages but not staff ones, mirror mode refuses writes.
-- [ ] Tests: the tick respects active hours, gaps, daily caps and the one-open-send-per-account rule.
-- [ ] Version bump, CHANGELOG, `docs/FEATURES.md` draft section (E completes it), README Status.
+- [x] Tests: settings validation, history, stale-version 409; a pacing change in the DB changes the next tick's behaviour with no restart.
+- [x] Tests: random photo picks never repeat — including two placements racing for the last photos of a pool; duplicate upload refused with a reason; pool exhaustion → `needs_photos` + one alert; low-pool alert fires once.
+- [x] Tests: window alignment — new messages appended, repeats kept, a sent outbound settled, an unmatched window realigned with an event; agent enqueued only under the right conditions.
+- [x] Tests: take over stops agent sends (`queueOutbound` refuses), kill switch holds agent messages but not staff ones, mirror mode refuses writes.
+- [x] Tests: the tick respects active hours, gaps, daily caps and the one-open-send-per-account rule.
+- [x] Version bump, CHANGELOG, `docs/FEATURES.md` draft section (E completes it), README Status.
+
+## Outcome
+
+PR #1152, v1.438.0. Notes for the workstreams after C:
+
+- `queueOutbound` throws `FbThreadRefusal` (exported from `fbThreads.ts`) with the reason in words; D1 can catch it by class.
+- One `enqueueAgentRun` per thread per inbox sync, on the newest new `in`/`unknown` message.
+- Kill switch, take-over, hand-off (`flagHuman`) and close move the agent's `queued` messages to `held`; nothing revives them.
+- A failed `msg-send` calls `flagHuman` ("A reply could not be sent: …"); D1's circuit breaker can count `fb_messages.send_state = 'failed'` by account.
+- `src/index.ts` gained one `isUploadPath` line for `/api/fb-seller/pools/:id/photos`.
+- The dev-sync options are in the PR body; while the fleet runs on dev, `keep-fleet.sql` does not keep the `fb_*` seller tables.

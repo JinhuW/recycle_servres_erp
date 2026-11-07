@@ -138,11 +138,10 @@ describe('placing an ad', () => {
   it('short of photos the placement waits as needs_photos, and managers hear once', async () => {
     const m = await loginAs(ALEX);
     const a1 = await seedSlot();
-    const a2 = await seedSlot();
     const { poolId } = await seedPool('Thin pool', 1);
     const ad = await seedAd(poolId, { min: 2, max: 2 });
     const r = await api<{ placements: FbPlacement[]; refused: unknown[] }>('POST', `/api/fb-seller/ads/${ad}/place`, {
-      cookies: m.cookies, body: { account_nos: [a1, a2], locations: ['Denver, CO'] },
+      cookies: m.cookies, body: { account_nos: [a1], locations: ['Denver, CO', 'Boulder, CO'] },
     });
     expect(r.status).toBe(200);
     expect(r.body.placements.map((p) => p.state)).toEqual(['needs_photos', 'needs_photos']);
