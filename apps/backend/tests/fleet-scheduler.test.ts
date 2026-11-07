@@ -484,3 +484,117 @@ describe('reconcile: verify-slug backoff', () => {
     expect((await open())[0].due_at.getTime()).toBe(NOW.getTime());
   });
 });
+
+describe('blank searches', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  async function account(uid: string): Promise<number> {
+    const db = getTestDb();
+    const [a] = await db<{ no: number }[]>`INSERT INTO fb_pool_accounts (uid,batch,status) VALUES (${uid},'test','fleet') RETURNING no`;
+    await db`INSERT INTO fleet_slots (account_no) VALUES (${a.no})`;
+    return a.no;
+  }
+  const search = (city: string, item: string, no: number, hoursAgo: number, cards: number) => getTestDb()`
+    INSERT INTO fleet_tasks (city, item, kind, state, due_at, done_at, account_no, result, reason)
+    VALUES (${city}, ${item}, 'search', 'done', ${at(-hoursAgo)}, ${at(-hoursAgo)}, ${no},
+            ${getTestDb().json({ cards })}, 'cadence')`;
+  const openDue = async (city: string) => (await tasks('open')).find((t) => t.city === city)!.due_at.getTime();
+  const quarantined = async (no: number) => (await getTestDb()`SELECT quarantined_until, quarantine_evidence FROM fleet_slots WHERE account_no = ${no}`)[0];
+
+  it('passes over a blank where a peer found cards, so the next account searches at once', async () => {
+    await catalog([['houston']]);
+    const [a, b] = [await account('61550000001'), await account('61550000002')];
+    await search('houston', 'server_ram', a, 25, 90);
+    await search('houston', 'server_ram', b, 1, 0);
+    await reconcile(getTestDb(), NOW);
+    expect(await openDue('houston')).toBe(NOW.getTime());
+  });
+
+  it('believes a second blank in a row, and a blank where nobody has cards', async () => {
+    await catalog([['houston'], ['nome']]);
+    const [a, b, c] = [await account('61550000001'), await account('61550000002'), await account('61550000003')];
+    await search('houston', 'server_ram', a, 30, 90);
+    await search('houston', 'server_ram', b, 2, 0);
+    await search('houston', 'server_ram', c, 1, 0);
+    await search('nome', 'server_ram', a, 1, 0);
+    await reconcile(getTestDb(), NOW);
+    expect(await openDue('houston')).toBe(at(23).getTime());
+    expect(await openDue('nome')).toBe(at(23).getTime());
+  });
+
+  it('believes a blank whose only cards came from the same account, or longer ago than the window', async () => {
+    await catalog([['houston'], ['dallas']]);
+    const [a, b] = [await account('61550000001'), await account('61550000002')];
+    await search('houston', 'server_ram', a, 25, 90);
+    await search('houston', 'server_ram', a, 1, 0);
+    await search('dallas', 'server_ram', a, 24 * 8, 90);
+    await search('dallas', 'server_ram', b, 1, 0);
+    await reconcile(getTestDb(), NOW);
+    expect(await openDue('houston')).toBe(at(23).getTime());
+    expect(await openDue('dallas')).toBe(at(23).getTime());
+  });
+
+  it('counts a search with cards as usual', async () => {
+    await catalog([['houston']]);
+    await search('houston', 'server_ram', await account('61550000001'), 1, 40);
+    await reconcile(getTestDb(), NOW);
+    expect(await openDue('houston')).toBe(at(23).getTime());
+  });
+
+  async function history(blanks: number, full: number) {
+    const cities = Array.from({ length: blanks + full }, (_, i) => `c${i}`);
+    await catalog(cities.map((c) => [c] as [string]));
+    const [mine, peer] = [await account('61550000001'), await account('61550000002')];
+    for (const [i, c] of cities.entries()) {
+      await search(c, 'server_ram', peer, 40, 90);
+      await search(c, 'server_ram', mine, 2, i < blanks ? 0 : 90);
+    }
+    return mine;
+  }
+
+  it('quarantines an account mostly blank on one item even though some searches find cards', async () => {
+    const mine = await history(5, 5);
+    await reconcile(getTestDb(), NOW);
+    const q = await quarantined(mine);
+    expect(q.quarantined_until.getTime()).toBe(at(46).getTime());
+    expect(q.quarantine_evidence).toMatchObject({ rule: 'mostly_blank_with_positive_peer', item: 'server_ram', searches: 10, blanks: 5 });
+  });
+
+  it('leaves an account under the share or under the minimum count alone', async () => {
+    const mine = await history(4, 6);
+    await reconcile(getTestDb(), NOW);
+    expect((await quarantined(mine)).quarantined_until).toBeNull();
+    await resetDb();
+    const few = await history(5, 4);
+    await reconcile(getTestDb(), NOW);
+    expect((await quarantined(few)).quarantined_until).toBeNull();
+  });
+
+  it('does not shorten a longer hold', async () => {
+    const mine = await history(10, 0);
+    await getTestDb()`UPDATE fleet_slots SET quarantined_until = ${at(24 * 14)}, quarantine_evidence = '{"rule":"manual_hold"}' WHERE account_no = ${mine}`;
+    await reconcile(getTestDb(), NOW);
+    const q = await quarantined(mine);
+    expect(q.quarantined_until.getTime()).toBe(at(24 * 14).getTime());
+    expect(q.quarantine_evidence.rule).toBe('manual_hold');
+  });
+});
+
+describe('every_days', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('stretches the city gap for that item only, and moves a task already waiting', async () => {
+    const db = getTestDb();
+    await catalog([['houston', true, 2]], ['server_ram', 'enterprise_ssd']);
+    await db`UPDATE fleet_items SET every_days = 2 WHERE name = 'enterprise_ssd'`;
+    await done('houston', 'server_ram', 1);
+    await done('houston', 'enterprise_ssd', 1);
+    await reconcile(db, NOW);
+    const due = async (item: string) => (await tasks('open')).find((t) => t.item === item)!.due_at.getTime();
+    expect(await due('server_ram')).toBe(at(11).getTime());
+    expect(await due('enterprise_ssd')).toBe(at(23).getTime());
+    await db`UPDATE fleet_items SET every_days = 4 WHERE name = 'enterprise_ssd'`;
+    await reconcile(db, NOW);
+    expect(await due('enterprise_ssd')).toBe(at(47).getTime());
+  });
+});

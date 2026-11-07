@@ -122,6 +122,8 @@ export type FleetItem = {
   phrases: string[];
   filters: Record<string, unknown>;
   enabled: boolean;
+  /** Stretches every city's gap for this item: 2 is half as often. Workers are not sent it. */
+  every_days?: number;
 };
 
 export type FleetTaskResult = {
@@ -764,6 +766,8 @@ export type FleetSettings = {
   retention_days: number;
   /** Non-parked slots one proxy may carry: a static ISP exit is one IP. */
   max_accounts_per_proxy: number;
+  /** Accounts whose number mod 100 is below this spread their budget across the Eastern day; 0 is none. */
+  pace_percent: number;
   /** False refuses new switches to CloakBrowser; slots already switched stay. */
   cloak_enabled: boolean;
   /** Slots that may run CloakBrowser at once: the license's session limit. */
@@ -783,6 +787,7 @@ export const FLEET_SETTINGS_DEFAULTS: Omit<FleetSettings, 'search'> = {
   quarantine_probe_hours: 6,
   retention_days: 90,
   max_accounts_per_proxy: 2,
+  pace_percent: 0,
   cloak_enabled: false,
   cloak_max_slots: 1,
 };
