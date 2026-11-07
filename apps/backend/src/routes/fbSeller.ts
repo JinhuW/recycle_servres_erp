@@ -13,6 +13,7 @@ import { canonPartCol, canonPartNumberJs } from '../lib/part-number';
 import { getUploadLimits, getWorkspaceSetting } from '../lib/settings';
 import { deleteAttachment, uploadAttachment } from '../r2';
 import { saveCaseFromThread } from '../services/fbAgentEval';
+import { FbAgentRefusal } from '../services/fbAgentProfiles';
 import {
   createAd, createPool, duplicateOf, FbSellerRefusal, getAd, getPlacement, listAds, listPhotos, listPlacements, listPools,
   patchAd, patchPool, photoDto, placeAd, plain, removePlacement, renewPlacement, resolvePlacement, sha256Hex, sniffImage,
@@ -42,7 +43,7 @@ const refuseMirrorWrites: MiddlewareHandler<ManagerEnv> = async (c, next) => {
 };
 fbSeller.use('*', refuseMirrorWrites);
 
-const refusal = (c: C, status: 400 | 404 | 409 | 422 | 501, error: string, detail: string) => c.json({ error, detail }, status);
+const refusal = (c: C, status: 400 | 404 | 409 | 422, error: string, detail: string) => c.json({ error, detail }, status);
 
 /** Runs the handler in one transaction and turns a refusal into its answer. */
 async function inTx<T>(c: C, fn: (tx: SqlLike) => Promise<T>): Promise<Response> {
@@ -52,6 +53,7 @@ async function inTx<T>(c: C, fn: (tx: SqlLike) => Promise<T>): Promise<Response>
   } catch (e) {
     if (e instanceof FbSellerRefusal) return refusal(c, e.status, e.error, e.message);
     if (e instanceof FbThreadRefusal) return refusal(c, 409, 'refused', e.message);
+    if (e instanceof FbAgentRefusal) return refusal(c, e.status, e.error, e.detail);
     throw e;
   }
 }
@@ -510,18 +512,11 @@ fbSeller.post('/threads/:id/save-case', async (c) => {
   if (!validExpectation(body.expected)) {
     return refusal(c, 422, 'bad_case', 'expected: say whether the agent should hand off, and optionally the reason kind, the highest offer and words it must not use.');
   }
-  try {
-    return await inTx(c, async (tx) => {
-      await lockThread(tx, id);
-      const { caseId } = await saveCaseFromThread(tx, id, name, body.expected as EvalExpectation);
-      return { case_id: caseId };
-    });
-  } catch (e) {
-    if (e instanceof Error && /not implemented/.test(e.message)) {
-      return refusal(c, 501, 'not_ready', 'Saving a conversation as a test case is not switched on yet.');
-    }
-    throw e;
-  }
+  return inTx(c, async (tx) => {
+    await lockThread(tx, id);
+    const { caseId } = await saveCaseFromThread(tx, id, name, body.expected as EvalExpectation);
+    return { case_id: caseId };
+  });
 });
 
 export default fbSeller;

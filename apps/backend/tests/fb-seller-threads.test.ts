@@ -104,14 +104,19 @@ describe('thread views', () => {
     expect(page2.body).toEqual({ rows: [], next: null });
   });
 
-  it('save-case says so in words until the eval workstream lands', async () => {
+  it('save-case freezes the conversation as a case, and refuses an empty one in words', async () => {
     const m = await loginAs(ALEX);
     const t = await seedThread(await seedSlot());
-    const r = await api<Refusal | { case_id: number }>('POST', `/api/fb-seller/threads/${t}/save-case`, {
+    const save = () => api<Refusal | { case_id: number }>('POST', `/api/fb-seller/threads/${t}/save-case`, {
       cookies: m.cookies, body: { name: 'Bot question', expected: { handoff: true } },
     });
-    if (r.status === 501) expect((r.body as Refusal).detail).toMatch(/not switched on yet/);
-    else expect(r.status).toBe(200);
+    const empty = await save();
+    expect(empty.status).toBe(400);
+    expect((empty.body as Refusal).detail).toMatch(/at least one message/);
+    await getTestDb()`INSERT INTO fb_messages (thread_id, seq, direction, author, body) VALUES (${t}, 1, 'in', 'seller', 'Are you a bot?')`;
+    const ok = await save();
+    expect(ok.status).toBe(200);
+    expect((ok.body as { case_id: number }).case_id).toEqual(expect.any(Number));
   });
 });
 
