@@ -31,7 +31,7 @@ tick, report handling and alerts. CONTRACTS §2, §5 are the spec.
 
 ## Outcome
 
-PR #1152, v1.438.0. Notes for the workstreams after C:
+PR #1152, v1.439.0. Notes for the workstreams after C:
 
 - `queueOutbound` throws `FbThreadRefusal` (exported from `fbThreads.ts`) with the reason in words; D1 can catch it by class.
 - One `enqueueAgentRun` per thread per inbox sync, on the newest new `in`/`unknown` message.

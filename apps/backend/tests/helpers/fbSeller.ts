@@ -1,25 +1,7 @@
-import type { FbSellerSettings, FleetSellerTaskKind, SellerTaskPayload } from '@recycle-erp/shared';
+import type { FbSellerSettings } from '@recycle-erp/shared';
 import { getTestDb } from './db';
-import type { SqlLike } from '../../src/db';
 
 // Fixtures for the fb-seller-* tests. Every name and message here is made up.
-
-/**
- * Stands in for A2's enqueueSellerTask until it merges: one open task per
- * (account, kind, ref), null when one is already open.
- */
-export async function fakeEnqueueSellerTask(tx: SqlLike, accountNo: number, kind: FleetSellerTaskKind, ref: string,
-  payload: SellerTaskPayload, dueAt: Date): Promise<{ taskId: number } | null> {
-  const [open] = await tx`
-    SELECT 1 FROM fleet_tasks WHERE account_no = ${accountNo} AND kind = ${kind} AND payload->>'ref' = ${ref}
-       AND state IN ('ready', 'leased')`;
-  if (open) return null;
-  const [t] = await tx<{ id: number }[]>`
-    INSERT INTO fleet_tasks (kind, due_at, state, account_no, payload, reason)
-    VALUES (${kind}, ${dueAt}, 'ready', ${accountNo}, ${tx.json(payload as never)}, 'seller')
-    RETURNING id::int AS id`;
-  return { taskId: t!.id };
-}
 
 let uidSeq = 0;
 

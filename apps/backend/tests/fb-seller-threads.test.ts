@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FbMessage, FbThreadDetail, FbThreadRow } from '@recycle-erp/shared';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
@@ -8,7 +8,6 @@ import { configureFbSellerAlerts, drainFbSellerTelegram, setTelegramSenderForTes
 import { runFbSellerTick } from '../src/services/fbPacing';
 import { flagHuman, queueOutbound } from '../src/services/fbThreads';
 
-vi.mock('../src/fleet/seller', async () => ({ enqueueSellerTask: (await import('./helpers/fbSeller')).fakeEnqueueSellerTask }));
 
 beforeEach(async () => { await resetDb(); });
 afterEach(() => { setTelegramSenderForTests(null); configureFbSellerAlerts({ token: undefined, sql: getTestDb() }); });

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { FB_SELLER_DEFAULT_SETTINGS, type FbSellerSettings, type FbSettingsChange } from '@recycle-erp/shared';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
@@ -8,7 +8,6 @@ import { validateFbSellerSettings } from '../src/services/fbConfig';
 import { runFbSellerTick } from '../src/services/fbPacing';
 import { queueOutbound } from '../src/services/fbThreads';
 
-vi.mock('../src/fleet/seller', async () => ({ enqueueSellerTask: (await import('./helpers/fbSeller')).fakeEnqueueSellerTask }));
 
 beforeEach(async () => { await resetDb(); });
 

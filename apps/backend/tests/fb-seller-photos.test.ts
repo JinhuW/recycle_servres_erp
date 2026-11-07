@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import type { FbAd, FbPhoto, FbPhotoPool, FbPlacement } from '@recycle-erp/shared';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
@@ -9,7 +9,6 @@ import {
 import { pickPhotos, placeAd, sniffImage } from '../src/services/fbAds';
 import { runFbSellerTick } from '../src/services/fbPacing';
 
-vi.mock('../src/fleet/seller', async () => ({ enqueueSellerTask: (await import('./helpers/fbSeller')).fakeEnqueueSellerTask }));
 
 beforeEach(async () => { await resetDb(); });
 

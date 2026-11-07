@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { ALEX } from './helpers/auth';
 import { hoursAround, patchSettings, seedAd, seedPool, seedSlot, seedThread } from './helpers/fbSeller';
@@ -6,7 +6,6 @@ import { runFbSellerTick, withinActiveHours } from '../src/services/fbPacing';
 import { queueOutbound } from '../src/services/fbThreads';
 import { placeAd } from '../src/services/fbAds';
 
-vi.mock('../src/fleet/seller', async () => ({ enqueueSellerTask: (await import('./helpers/fbSeller')).fakeEnqueueSellerTask }));
 
 beforeEach(async () => { await resetDb(); });
 
