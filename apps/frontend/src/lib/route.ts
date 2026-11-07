@@ -374,7 +374,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   sellorders: '/sell-orders',
   aftersales: '/after-sales',
   transfers:  '/transfers',
-  websubmissions: '/web-submissions',
+  websubmissions: '/leads/website',
   activity:   '/activity',
   payments:   '/payments',
   internaltx: '/payments/internal',
@@ -409,7 +409,7 @@ export function knownDesktopView(path: string): DesktopViewId | null {
     || matchSellOrderPack(path)) return 'sellorders';
   if (path === '/after-sales' || match('/after-sales/:id', path)) return 'aftersales';
   if (path === '/transfers') return 'transfers';
-  if (path === '/web-submissions' || match('/web-submissions/:id', path)) return 'websubmissions';
+  if (path === '/leads/website' || path === '/web-submissions' || matchWebsiteLead(path)) return 'websubmissions';
   if (path === '/activity') return 'activity';
   // A tab under Payments, like Inventory under Analysis.
   if (path === '/payments/internal') return 'internaltx';
@@ -471,6 +471,17 @@ export function leadsTabPath(tab: LeadsTab | 'pool'): string {
 export function matchLeadsTab(path: string): LeadsTab | null {
   const m = match('/leads/reddit/:tab', path);
   return m && (LEADS_TABS as readonly string[]).includes(m.tab) ? (m.tab as LeadsTab) : null;
+}
+
+// One lead on Leads ▸ Website. It lived at /web-submissions/:id until it moved
+// under Leads; that path keeps resolving for bookmarks and old links.
+export function websiteLeadPath(id: string): string {
+  return `/leads/website/${encodeURIComponent(id)}`;
+}
+
+export function matchWebsiteLead(path: string): { id: string } | null {
+  const m = match('/leads/website/:id', path) ?? match('/web-submissions/:id', path);
+  return m?.id ? { id: m.id } : null;
 }
 
 // The ERP-owned fleet's tabs under Monitors ▸ Facebook beside the Fleet tab

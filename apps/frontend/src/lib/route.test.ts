@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
-  accountingEntryPath, afterSalesCasePath, afterSalesNewPath, FLEET_TABS, fleetRedirect, fleetTabPath, matchFleetTab, fleetWorkerPath, hrefFor, matchFleetWorker, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, navigate, navigateBack, onLinkClick,
+  accountingEntryPath, afterSalesCasePath, afterSalesNewPath, FLEET_TABS, fleetRedirect, fleetTabPath, matchFleetTab, fleetWorkerPath, hrefFor, matchFleetWorker, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, matchWebsiteLead, websiteLeadPath, navigate, navigateBack, onLinkClick,
   knownDesktopView, parseShippingRoute, pathToDesktopView, pathToMobileView, poCheckPath, poLinePath, readPath, readPoLineQuery, readSafeNext,
   replaceRoute, sellOrderPackPath, splitHash,
   type LinkClick,
@@ -152,9 +152,14 @@ describe('parseShippingRoute', () => {
     expect(pathToDesktopView('/clients/2f1c0b7e-0000-4000-8000-000000000000')).toBe('clients');
   });
 
-  it('maps the web submissions inbox and one submission', () => {
+  it('maps Leads ▸ Website and one lead, by the old paths too', () => {
+    expect(pathToDesktopView('/leads/website')).toBe('websubmissions');
+    expect(pathToDesktopView(websiteLeadPath('WS-1001'))).toBe('websubmissions');
     expect(pathToDesktopView('/web-submissions')).toBe('websubmissions');
     expect(pathToDesktopView('/web-submissions/WS-1001')).toBe('websubmissions');
+    expect(matchWebsiteLead('/leads/website/WS-1001')).toEqual({ id: 'WS-1001' });
+    expect(matchWebsiteLead('/web-submissions/WS-1001')).toEqual({ id: 'WS-1001' });
+    expect(matchWebsiteLead('/leads/website')).toBeNull();
   });
 });
 

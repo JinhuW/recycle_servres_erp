@@ -121,6 +121,9 @@ export function Sidebar({ view, folded, onToggleFold }: Props) {
             const label = t(item.parent.tKey);
             // A folded parent carries the count its children would show.
             const folded = item.open ? 0 : item.children.reduce((n, c) => n + (countOf(c) ?? 0), 0);
+            // One child's wording would misdescribe a sum across several.
+            const due = item.children.filter(c => countOf(c));
+            const foldedHint = due.length === 1 ? countHint(due[0].leaf.id) : 'acctReviewModeHint';
             return (
               <Fragment key={item.parent.tKey}>
                 {/* Not aria-current: while it is open, the page is one of its
@@ -131,7 +134,7 @@ export function Sidebar({ view, folded, onToggleFold }: Props) {
                   label={label}
                   icon={item.parent.icon}
                 >
-                  {!!folded && <span className="badge due" title={t(countHint(item.children[0].leaf.id), { n: folded })}>{folded}</span>}
+                  {!!folded && <span className="badge due" title={t(foldedHint, { n: folded })}>{folded}</span>}
                   <span className="nav-caret">
                     <Icon name={item.open ? 'chevronDown' : 'chevronRight'} size={13} />
                   </span>

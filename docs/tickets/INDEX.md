@@ -5,7 +5,10 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-562](./RS-562-fleet-count-only-real-searches-pace-budgets-ssd-ever.md) | done | story | P1 | Fleet: count only real searches, pace budgets, SSD every second day | — |
+| [RS-565](./RS-565-facebook-seller-accounts-post-buy-ads-route-messenge.md) | in-progress | story | P2 | Facebook seller accounts post buy ads, route Messenger to an ERP message center, and an agent negotiates | — |
+| [RS-564](./RS-564-rerun-the-fleet-search-frequency-review.md) | backlog | task | P2 | Rerun the fleet search frequency review | — |
+| [RS-563](./RS-563-move-web-submissions-under-leads-as-website.md) | done | story | P2 | Move web submissions under Leads as Website | 1.436.0 |
+| [RS-562](./RS-562-fleet-count-only-real-searches-pace-budgets-ssd-ever.md) | done | story | P1 | Fleet: count only real searches, pace budgets, SSD every second day | 1.435.0 |
 | [RS-561](./RS-561-add-accounts-to-the-pool-by-api-and-a-skill.md) | done | story | P2 | Add accounts to the pool by API and a skill | 1.434.0 |
 | [RS-560](./RS-560-redeploys-cause-the-fleet-s-502s-and-503s.md) | done | bug | P2 | Redeploys cause the fleet's 502s and 503s | 1.433.3 |
 | [RS-559](./RS-559-engine-mismatch-reason-does-not-promise-one-login.md) | done | bug | P2 | Engine mismatch reason does not promise one login | 1.433.2 |
