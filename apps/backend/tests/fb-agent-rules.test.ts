@@ -32,7 +32,7 @@ describe('registry', () => {
     const reg = agentRegistry();
     expect(reg.rules.map((r) => r.kind)).toEqual([
       'closing', 'no_market_match', 'price_stale', 'logistics', 'has_image',
-      'unknown_direction', 'confidence_below', 'intent', 'bot_question',
+      'unknown_direction', 'confidence_below', 'intent', 'bot_question', 'keyword',
     ]);
     expect(reg.skills.map((s) => s.kind)).toEqual(['screen', 'negotiate', 'answer']);
     for (const e of [...reg.rules, ...reg.skills]) {
@@ -112,6 +112,12 @@ describe('rules', () => {
 
   it('bot_question: the bot question', () => {
     expect(check('bot_question', ctx({ kind: 'bot_question', extract: extractOf({ intent: 'bot_question' }) })).fire).toBe(true);
+  });
+
+  it('keyword: a pattern on the latest seller message; a broken pattern hands off', () => {
+    expect(check('keyword', ctx({ kind: 'keyword', params: { patterns: ['r7\\d0'] } })).fire).toBe(true);
+    expect(check('keyword', ctx({ kind: 'keyword', params: { patterns: ['lawyer'] } })).fire).toBe(false);
+    expect(check('keyword', ctx({ kind: 'keyword', params: { patterns: ['(unclosed'] } })).fire).toBe(true);
   });
 });
 

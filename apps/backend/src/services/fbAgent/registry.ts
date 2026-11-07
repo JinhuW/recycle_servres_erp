@@ -9,6 +9,7 @@ import unknownDirection from './rules/unknown_direction';
 import confidenceBelow from './rules/confidence_below';
 import intent from './rules/intent';
 import botQuestion from './rules/bot_question';
+import keyword from './rules/keyword';
 import screen from './skills/screen';
 import negotiate from './skills/negotiate';
 import answer from './skills/answer';
@@ -26,6 +27,7 @@ export const RULES: readonly AgentRule[] = [
   confidenceBelow,
   intent,
   botQuestion,
+  keyword,
 ];
 
 export const SKILLS: readonly AgentSkill[] = [
