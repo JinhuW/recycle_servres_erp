@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-06:** ERP migration `0230`, Reddit tracker migration `0007`,
+**As of 2026-11-07:** ERP migration `0231`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2259,6 +2259,7 @@ What the fleet searches for in every city: the search phrases and filters of one
 | `phrases` | `jsonb` | ✓ |  | Search phrases, a JSON array of strings. |
 | `filters` | `jsonb` | ✓ | `'{}'` | Marketplace filters: date_listed, delivery_method, max_results and the like. |
 | `enabled` | `boolean` | ✓ | `true` | A disabled item gets no tasks and its open ones are cancelled. |
+| `every_days` | `integer` | ✓ | `1` | Multiplies a city's gap for this item, 1 to 30: 2 searches it half as often in every city (0231). |
 
 - **Primary key:** `name`
 
@@ -2271,7 +2272,7 @@ The queue's knobs, one JSON value per key: per_day_default, budget_minutes, leas
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
 | `key` | `text` | ✓ |  |  |
-| `value` | `jsonb` | ✓ |  | A number for the limits, an object for search. |
+| `value` | `jsonb` | ✓ |  | A number for the limits, an object for search. `pace_percent` (default 0) spreads the budget of accounts whose number mod 100 is below it across the Eastern day. |
 | `updated_by` | `uuid` |  |  | → users. The manager who last changed it; NULL for an import. |
 | `updated_at` | `timestamptz` | ✓ | `now()` |  |
 
@@ -2521,7 +2522,7 @@ Every change of an ERP-fleet worker's reported state, written by the heartbeat t
 
 #### `fleet_tasks`
 
-One search of one item in one city. The scheduler keeps exactly one open (ready or leased) task per city, item and kind; a worker leases the next due one, finishes it, and the scheduler writes the next with `due_at = done + day / per_day`. The partial unique index is what makes that safe from two backend instances.
+One search of one item in one city. The scheduler keeps exactly one open (ready or leased) task per city, item and kind; a worker leases the next due one, finishes it, and the scheduler writes the next with `due_at = done + day × item.every_days / per_day`. A 0-card search does not set `done` when another account found cards in that city and item in the last 7 days, unless the search before it was also 0: the next account retries at once. The partial unique index is what makes that safe from two backend instances.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |

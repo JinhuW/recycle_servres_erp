@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import { cookieUid, FLEET_CLOAK_MIN_WORKER_VERSION, cookieValue, type ClaimAnswer, type FleetCookie, type NextTaskAnswer } from '@recycle-erp/shared';
 import { getTestDb, resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { signWorkerToken, workerTokenKey } from '../src/fleet/auth';
 import { sha256hex } from '../src/fleet/sql';
-import { cookiesFromText, openHolds, setPollsDraining } from '../src/fleet/claim';
+import { cookiesFromText, easternMinutes, isPaced, openHolds, pacedAllowance, setPollsDraining } from '../src/fleet/claim';
 import { notifyReady } from '../src/fleet/scheduler';
 import { ALEX, MARCUS, loginAs } from './helpers/auth';
 import { poolKey, seal, unseal } from '../src/lib/sealed';
@@ -422,6 +422,60 @@ describe('POST /api/fleet/worker/next-task', () => {
     const r = await nextTask(token, null, 5);
     expect(r.body).toEqual({ task: null, retry_after: 300, reason: 'budget' });
     expect((await taskRow(waiting)).state).toBe('ready');
+  });
+
+  describe('paced budget', () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    // Noon Eastern: half the 360-minute budget plus the headroom is 210 minutes.
+    const atEasternNoon = () => vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-07-15T16:00:00Z') });
+    async function spent(no: number, minutes: number) {
+      await getTestDb()`
+        WITH today AS (
+          SELECT date_trunc('day', NOW() AT TIME ZONE 'America/New_York') AT TIME ZONE 'America/New_York' AS start
+        )
+        INSERT INTO fleet_tasks (city, item, due_at, state, account_no, leased_at, lease_expires_at, done_at)
+        SELECT 'denver', 'server_ram', start, 'done', ${no}, start, start + interval '30 minutes',
+               start + make_interval(mins => ${minutes})
+        FROM today`;
+    }
+    const pace = (percent: number) => getTestDb()`
+      INSERT INTO fleet_settings (key, value) VALUES ('pace_percent', ${getTestDb().json(percent)})
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+
+    it('holds a paced account over its share of the day, and leaves the others to the full budget', async () => {
+      const no = await seedSlot(1);
+      const { worker_token: token } = await claimed('lab-1');
+      const waiting = await addTask('houston');
+      await spent(no, 240);
+      await pace(no % 100);
+      atEasternNoon();
+      expect((await nextTask(token, null, 1)).body).toMatchObject({ task: { id: waiting } });
+      await getTestDb()`UPDATE fleet_tasks SET state = 'ready', worker_id = NULL, account_no = NULL, leased_at = NULL, lease_expires_at = NULL, epoch = NULL WHERE id = ${waiting}`;
+      await pace(no % 100 + 1);
+      expect((await nextTask(token, null, 1)).body).toEqual({ task: null, retry_after: 300, reason: 'budget' });
+    });
+
+    it('lets a paced account under its share search', async () => {
+      const no = await seedSlot(1);
+      const { worker_token: token } = await claimed('lab-1');
+      const waiting = await addTask('houston');
+      await spent(no, 60);
+      await pace(100);
+      atEasternNoon();
+      expect((await nextTask(token, null, 1)).body).toMatchObject({ task: { id: waiting } });
+    });
+
+    it('grows with the Eastern day and never passes the budget', () => {
+      expect(pacedAllowance(360, 0)).toBe(30);
+      expect(pacedAllowance(360, 720)).toBe(210);
+      expect(pacedAllowance(360, 1439)).toBe(360);
+      expect(easternMinutes(new Date('2026-07-15T16:00:00Z'))).toBe(720);
+      expect(easternMinutes(new Date('2026-01-15T05:30:00Z'))).toBe(30);
+      expect(isPaced(114, 15)).toBe(true);
+      expect(isPaced(115, 15)).toBe(false);
+      expect(isPaced(1, 0)).toBe(false);
+    });
   });
 
   it('take:false closes done and leases nothing, even with a task due, and answers at once', async () => {

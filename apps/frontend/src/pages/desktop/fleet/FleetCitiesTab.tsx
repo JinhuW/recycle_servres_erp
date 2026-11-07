@@ -288,12 +288,12 @@ export function CitiesTable({ cities, items, done, filter, onFilter, onChanged, 
 // Numbers are kept as typed until Save, which sends only what changed.
 const RULE_FIELDS = [
   'per_day_default', 'budget_minutes', 'lease_minutes', 'task_max_minutes', 'familiar_days', 'start_fresh_hours', 'quarantine_hours', 'quarantine_probe_hours', 'retention_days',
-  'max_accounts_per_proxy',
+  'max_accounts_per_proxy', 'pace_percent',
 ] as const;
 type RuleField = (typeof RULE_FIELDS)[number];
 const RULE_MIN: Record<RuleField, number> = {
   per_day_default: 1, budget_minutes: 1, lease_minutes: 1, task_max_minutes: 1, familiar_days: 0, start_fresh_hours: 0, quarantine_hours: 0, quarantine_probe_hours: 1, retention_days: 30,
-  max_accounts_per_proxy: 1,
+  max_accounts_per_proxy: 1, pace_percent: 0,
 };
 
 function RulesDialog({ onClose }: { onClose: () => void }) {
@@ -301,6 +301,8 @@ function RulesDialog({ onClose }: { onClose: () => void }) {
   const mirror = useFleetMirror();
   const [saved, setSaved] = useState<FleetSettings | 'failed' | null>(null);
   const [draft, setDraft] = useState<Record<RuleField, string> | null>(null);
+  const [items, setItems] = useState<FleetItem[]>([]);
+  const [everyDays, setEveryDays] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   useEffect(() => {
@@ -310,6 +312,14 @@ function RulesDialog({ onClose }: { onClose: () => void }) {
         if (!live) return;
         setSaved(s);
         setDraft(Object.fromEntries(RULE_FIELDS.map(f => [f, String(s[f])])) as Record<RuleField, string>);
+      })
+      .catch(() => { if (live) setSaved('failed'); });
+    fleetApi.items()
+      .then(all => {
+        if (!live) return;
+        const enabled = all.filter(i => i.enabled);
+        setItems(enabled);
+        setEveryDays(Object.fromEntries(enabled.map(i => [i.name, String(i.every_days ?? 1)])));
       })
       .catch(() => { if (live) setSaved('failed'); });
     return () => { live = false; };
@@ -324,11 +334,18 @@ function RulesDialog({ onClose }: { onClose: () => void }) {
       if (!Number.isInteger(n) || n < RULE_MIN[f]) { setProblem(t('fleetRulesBad', { field: t(`fleetRule_${f}`) })); return; }
       if (n !== saved[f]) patch[f] = n;
     }
-    if (Object.keys(patch).length === 0) { onClose(); return; }
+    const changedItems: FleetItem[] = [];
+    for (const i of items) {
+      const n = Number(everyDays[i.name]);
+      if (!Number.isInteger(n) || n < 1 || n > 30) { setProblem(t('fleetRulesBad', { field: t('fleetRuleItemEvery', { item: i.name }) })); return; }
+      if (n !== (i.every_days ?? 1)) changedItems.push({ ...i, every_days: n });
+    }
+    if (Object.keys(patch).length === 0 && changedItems.length === 0) { onClose(); return; }
     setBusy(true);
     setProblem(null);
     try {
-      await fleetApi.saveSettings(patch);
+      if (Object.keys(patch).length) await fleetApi.saveSettings(patch);
+      if (changedItems.length) await fleetApi.saveItems(changedItems);
       showSuccessToast(t('fleetRulesSaved'));
       onClose();
     } catch (err) {
@@ -356,6 +373,16 @@ function RulesDialog({ onClose }: { onClose: () => void }) {
                     <input className="input fleet-rule-input" type="number" min={RULE_MIN[f]} step={1} value={draft[f]} onChange={e => set(f, e.target.value)}
                       disabled={mirror} />
                     {' '}{t(`fleetRuleUnit_${f}`)}
+                  </dd>
+                </Fragment>
+              ))}
+              {items.map(i => (
+                <Fragment key={i.name}>
+                  <dt>{t('fleetRuleItemEvery', { item: i.name })}</dt>
+                  <dd>
+                    <input className="input fleet-rule-input" type="number" min={1} max={30} step={1} value={everyDays[i.name] ?? '1'}
+                      onChange={e => setEveryDays(d => ({ ...d, [i.name]: e.target.value }))} disabled={mirror} />
+                    {' '}{t('fleetRuleItemEveryUnit')}
                   </dd>
                 </Fragment>
               ))}
