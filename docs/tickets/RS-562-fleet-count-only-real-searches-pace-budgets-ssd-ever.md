@@ -49,7 +49,7 @@ http://10.10.100.225:8800/fleet-search-frequency-review.html
 - [x] `pace_percent` (0–100, default 0) paces the chosen accounts' budget across the Eastern day. 0 leaves behaviour exactly as today.
 - [x] An item can run every N days (`every_days`, default 1): the gap is `1 day / per_day × every_days`, and a change reaches tasks already waiting.
 - [x] Both new settings can be edited in the fleet Rules dialog.
-- [ ] Prod runs `enterprise_ssd` at `every_days = 2` and `pace_percent = 15` after release.
+- [x] Prod runs `enterprise_ssd` at `every_days = 2` and `pace_percent = 15` after release.
 
 ## Out of scope
 
@@ -64,6 +64,7 @@ http://10.10.100.225:8800/fleet-search-frequency-review.html
   (`fleet_slots.quarantined_until`, evidence rule `manual_hold`). Release Quarantine
   on the worker page lifts it. Its probes use SSD, which it has never returned
   cards for, so a probe should not lift it.
+- Released and set on prod 2026-11-07 06:16 UTC: `enterprise_ssd.every_days = 2`, `pace_percent = 15` (accounts 1, 9, 11, 12, 14).
 - Nothing here restarts a worker, so nothing causes a Facebook login.
 - Raising `pace_percent` past 15 waits for the owner: the effect on checkpoints is
   untested.
