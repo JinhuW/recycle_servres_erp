@@ -295,7 +295,9 @@ const isUploadPath = (path: string): boolean =>
   // So is a vendor's filled bid sheet dropped on a sell order.
   /^\/api\/sell-orders\/[^/]+\/price-import\/preview$/.test(path) ||
   // The sell order sheet dropped on Review mode is the same kind of file.
-  /^\/api\/orders\/[^/]+\/price-sheet\/preview$/.test(path);
+  /^\/api\/orders\/[^/]+\/price-sheet\/preview$/.test(path) ||
+  // A Facebook seller photo pool takes many photos in one drop.
+  /^\/api\/fb-seller\/pools\/\d+\/photos$/.test(path);
 
 // A Reddit leads harvest is ~2k sellers plus the buyer network's trades,
 // about 1.3 MB of JSON; manager-only, and the route caps its own row count.

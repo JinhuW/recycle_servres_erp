@@ -234,6 +234,7 @@ export type FbThreadRow = {
   human_reason: string | null;
   human_at: string | null;
   offer_usd: number | null;
+  ceiling_usd: number | null;
   round: number;
   unread: boolean;
   last_inbound_at: string | null;
@@ -304,7 +305,6 @@ export type FbMarketMatch = {
 };
 
 export type FbThreadDetail = FbThreadRow & {
-  ceiling_usd: number | null;
   extracted: AgentExtract | Record<string, never>;
   close_note: string | null;
   messages: FbMessage[];

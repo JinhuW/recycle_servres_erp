@@ -1385,6 +1385,36 @@ including the Market prices it was priced with. An eval replays every case
 against a version, and compare shows which cases changed between two evals.
 So far this is the `/api/fb-agent` routes; the Agent tab comes later.
 
+The pages run on the seller backend (v1.442.0, `/api/fb-seller`, managers
+only):
+
+- **Settings** are one database row, validated field by field, saved against
+  the version a manager opened (a stale save is refused) and kept in an
+  append-only history. Pacing reads them every 30 seconds, so a change needs no
+  restart. They hold the active hours, the per-account pacing (gaps, daily send
+  cap, live-ad cap, inbox interval), the offer policy, the agent's budget and
+  circuit breaker, the low-pool warning and an optional Telegram chat.
+- **Photo pools.** An upload takes many photos at once; a file already in any
+  pool is refused with the pool and photo it duplicates. Every post draws a
+  random set of unused photos and no photo is ever used twice. A post short of
+  photos waits as "needs photos" and is retried once the pool is refilled; a pool
+  under the warning alerts once. Only an unused photo can be deleted.
+- **Ads** are drafted by managers and placed on seller accounts by location.
+  A placement is refused when the ad isn't ready, the account isn't a seller,
+  or that ad already went up in that place today as often as allowed. Ads renew
+  on their schedule with fresh photos; a placement whose outcome is unknown
+  waits for a manager to say whether it is on Facebook.
+- **Conversations** arrive from each seller account's inbox reads. Managers can
+  reply, take a conversation over (the agent's unsent replies are held), hand
+  it back, close it as won or lost, and mark it read. A reply that may not have
+  reached the seller and never shows up in the next read moves the thread to
+  Needs human with that reason.
+- **Making a seller.** Setting an account's role to seller, or turning its agent
+  on, changes no container and causes no Facebook login.
+- **Alerts** for Needs human, a wall, a pool out of photos or running low go to
+  every manager's notifications, and to Telegram when the bot token and a chat
+  are set.
+
 **Leads ▸ Reddit** (`#/leads/reddit`, v1.392.0, RS-477) is a pool of sellers to
 buy from. They are found in the swap subreddits' public trade records: u/LabB0T
 on r/homelabsales and u/hwsbot on r/hardwareswap log every confirmed sale

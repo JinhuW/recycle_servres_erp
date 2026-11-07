@@ -100,8 +100,8 @@ describe('/api/fb-seller and /api/fb-agent', () => {
     for (const prefix of ['/api/fb-seller', '/api/fb-agent']) {
       expect((await api('GET', `${prefix}/summary`)).status).toBe(401);
       expect((await api('GET', `${prefix}/summary`, { cookies: purchaser.cookies })).status).toBe(403);
-      // No routes yet: a manager passes the gate and finds nothing.
-      expect((await api('GET', `${prefix}/summary`, { cookies: manager.cookies })).status).toBe(404);
+      // A manager passes the gate: the seller summary answers, the agent routes have none yet.
+      expect((await api('GET', `${prefix}/summary`, { cookies: manager.cookies })).status).toBe(prefix === '/api/fb-seller' ? 200 : 404);
     }
   });
 
