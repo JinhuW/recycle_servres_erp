@@ -78,7 +78,9 @@ other workstreams needs to be merged.
 
 ## Exit criteria
 
-- [ ] Dispatch, the four kinds and the wall checks implemented with tests on fixtures.
-- [ ] Vendored monitor suite, tracker suites and `release.sh --dry-run` pass.
-- [ ] Fork commit pushed to `private-mirror` only; `VENDOR.md` pin updated with `scripts/check-vendor.sh update`; the moonjelly clone fast-forwarded if it is clean (otherwise say so in the PR).
-- [ ] `[Unreleased]` entry in the tracker CHANGELOG; README Status updated.
+- [x] Dispatch, the four kinds and the wall checks implemented with tests on fixtures.
+- [x] Vendored monitor suite, tracker suites and `release.sh --dry-run` pass.
+- [x] Fork commit pushed to `private-mirror` only; `VENDOR.md` pin updated with `scripts/check-vendor.sh update`; the moonjelly clone fast-forwarded if it is clean (otherwise say so in the PR).
+
+  Done 2026-11-07: `recycle-patches` at `d788039` on `private-mirror`; the moonjelly clone was clean and is fast-forwarded to it.
+- [x] `[Unreleased]` entry in the tracker CHANGELOG; README Status updated.
