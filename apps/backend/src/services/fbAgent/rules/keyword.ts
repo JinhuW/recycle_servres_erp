@@ -7,6 +7,7 @@ const rule: AgentRule = {
   params: {
     type: 'object',
     properties: { patterns: { type: 'array', label: 'Regular expressions, case-insensitive', items: { type: 'string' }, default: [] } },
+    required: ['patterns'],
   },
   check({ latest, params }) {
     const text = latest?.body ?? '';

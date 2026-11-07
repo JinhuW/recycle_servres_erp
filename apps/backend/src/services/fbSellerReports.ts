@@ -2,7 +2,7 @@ import type { InboxThread, SellerReport } from '@recycle-erp/shared';
 import type { SqlLike } from '../db';
 import { alertManagers } from '../lib/fbSellerAlert';
 import { log } from '../lib/log';
-import { enqueueAgentRun } from './fbAgent';
+import { checkCircuitBreaker, enqueueAgentRun } from './fbAgent';
 import { loadFbSellerSettings } from './fbConfig';
 import { addThreadEvent, flagHuman } from './fbThreads';
 
@@ -30,7 +30,7 @@ export async function applySellerReport(tx: SqlLike, accountNo: number, report: 
   switch (report.kind) {
     case 'ad-post': return applyAdPost(tx, report);
     case 'ad-delete': return applyAdDelete(tx, report);
-    case 'msg-send': return applyMsgSend(tx, report);
+    case 'msg-send': return applyMsgSend(tx, accountNo, report);
     case 'inbox-sync': return applyInbox(tx, accountNo, report);
   }
 }
@@ -79,7 +79,12 @@ async function applyAdDelete(tx: SqlLike, r: SellerReport): Promise<Result> {
   return { accepted: true };
 }
 
-async function applyMsgSend(tx: SqlLike, r: SellerReport): Promise<Result> {
+/** Guard 8 counts a failed agent send as it counts a blocked reply (CONTRACTS §6.6). */
+async function agentSendFailed(tx: SqlLike, accountNo: number, author: string): Promise<void> {
+  if (author === 'agent') await checkCircuitBreaker(tx, accountNo, await loadFbSellerSettings(tx));
+}
+
+async function applyMsgSend(tx: SqlLike, accountNo: number, r: SellerReport): Promise<Result> {
   const id = refId(r);
   const [m] = id === null ? [] : await tx<{ thread_id: number; send_state: string; author: string; staff_user_id: string | null }[]>`
     SELECT thread_id::int AS thread_id, send_state, author, staff_user_id FROM fb_messages WHERE id = ${id} FOR UPDATE`;
@@ -92,6 +97,7 @@ async function applyMsgSend(tx: SqlLike, r: SellerReport): Promise<Result> {
     await tx`UPDATE fb_messages SET send_state = 'failed', error = ${why} WHERE id = ${id}`;
     await addThreadEvent(tx, m.thread_id, 'send_failed', { message_id: id, reason: why });
     await flagHuman(tx, m.thread_id, `A reply could not be sent: ${why}`);
+    await agentSendFailed(tx, accountNo, m.author);
   } else if (m.send_state === 'sending') {
     // Typed, maybe submitted: the next inbox sync shows whether it landed.
     const why = reason(r, 'The worker could not see whether the reply went out.');
@@ -115,7 +121,9 @@ async function markSent(tx: SqlLike, id: number, m: { thread_id: number; author:
 // ─── Inbox ────────────────────────────────────────────────────────────────────
 
 type Msg = { direction: string; body: string };
-const same = (a: Msg, b: Msg) => a.direction === b.direction && a.body === b.body;
+/** The worker reads a bubble line by line, trimmed and without blank lines; compare what both sides keep. */
+const flat = (body: string) => body.replace(/\s+/g, ' ').trim();
+const same = (a: Msg, b: Msg) => a.direction === b.direction && flat(a.body) === flat(b.body);
 
 /**
  * How many of the window's first messages are already the stored
@@ -184,7 +192,8 @@ async function ingestThread(tx: SqlLike, accountNo: number, t: InboxThread, g: {
       // Ours if an outbound we queued, not yet seen in a window, has this text.
       const [mine] = await tx<{ id: number; thread_id: number; author: string; staff_user_id: string | null; send_state: string }[]>`
         SELECT id::int AS id, thread_id::int AS thread_id, author, staff_user_id, send_state FROM fb_messages
-         WHERE thread_id = ${threadId} AND seq IS NULL AND direction = 'out' AND body = ${m.body}
+         WHERE thread_id = ${threadId} AND seq IS NULL AND direction = 'out'
+           AND btrim(regexp_replace(body, '[[:space:]]+', ' ', 'g')) = ${flat(m.body)}
            AND send_state IN ('sending', 'sent', 'uncertain')
          ORDER BY id LIMIT 1 FOR UPDATE`;
       if (mine) {
@@ -216,12 +225,13 @@ async function ingestThread(tx: SqlLike, accountNo: number, t: InboxThread, g: {
   }
 
   // An uncertain reply this window would have shown, had it landed, did not.
-  const lost = await tx<{ id: number }[]>`
+  const lost = await tx<{ id: number; author: string }[]>`
     UPDATE fb_messages SET send_state = 'failed', error = ${UNCERTAIN_SEND_REASON}
      WHERE thread_id = ${threadId} AND seq IS NULL AND send_state = 'uncertain'
-    RETURNING id::int AS id`;
+    RETURNING id::int AS id, author`;
   for (const l of lost) await addThreadEvent(tx, threadId, 'send_failed', { message_id: l.id, reason: UNCERTAIN_SEND_REASON });
   if (lost.length > 0) await flagHuman(tx, threadId, UNCERTAIN_SEND_REASON);
+  if (lost.some((l) => l.author === 'agent')) await agentSendFailed(tx, accountNo, 'agent');
 
   // One run per sync, on the newest message: the agent reads the whole window anyway.
   if (trigger !== null && th!.mode === 'agent' && !th!.needs_human && lost.length === 0 && !th!.closed && g.agentOn && !g.killSwitch) {

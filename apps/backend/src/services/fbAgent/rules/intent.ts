@@ -8,6 +8,7 @@ const rule: AgentRule = {
   params: {
     type: 'object',
     properties: { kinds: { type: 'array', label: 'Intents to hand off', items: { type: 'string', enum: [...AGENT_INTENTS] }, default: ['hostile', 'off_topic'] } },
+    required: ['kinds'],
   },
   check({ extract, params }) {
     return stringsParam(params, 'kinds').includes(extract.intent)

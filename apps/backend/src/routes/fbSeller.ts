@@ -20,7 +20,7 @@ import {
 } from '../services/fbAds';
 import { listSettingsHistory, loadFbSellerSettings, loadFbSellerSettingsRow, saveFbSellerSettings } from '../services/fbConfig';
 import {
-  actorFor, addThreadEvent, FbThreadRefusal, listThreads, queueOutbound, threadRow, type ThreadView,
+  actorFor, addThreadEvent, FbThreadRefusal, holdAgentReplies, listThreads, queueOutbound, threadRow, type ThreadView,
 } from '../services/fbThreads';
 
 // ─── /api/fb-seller ───────────────────────────────────────────────────────────────
@@ -444,8 +444,8 @@ fbSeller.post('/threads/:id/take-over', async (c) => {
     const t = await lockThread(tx, id);
     if (t.mode !== 'human') {
       await tx`UPDATE fb_threads SET mode = 'human', updated_at = NOW() WHERE id = ${id}`;
-      // The agent's replies not yet handed to the worker stay unsent.
-      await tx`UPDATE fb_messages SET send_state = 'held' WHERE thread_id = ${id} AND author = 'agent' AND send_state = 'queued'`;
+      // The agent's replies no worker has taken yet stay unsent.
+      await holdAgentReplies(tx, id, { keepHonest: false });
       await addThreadEvent(tx, id, 'taken_over', {}, await actorFor(tx, c.get('user').id));
     }
     return detail(tx, id);
@@ -480,7 +480,7 @@ fbSeller.post('/threads/:id/close', async (c) => {
       UPDATE fb_threads SET stage = ${body.outcome as string}, closed_at = NOW(), close_note = ${note},
              needs_human = FALSE, unread = FALSE, updated_at = NOW()
        WHERE id = ${id}`;
-    await tx`UPDATE fb_messages SET send_state = 'held' WHERE thread_id = ${id} AND author = 'agent' AND send_state = 'queued'`;
+    await holdAgentReplies(tx, id, { keepHonest: false });
     await addThreadEvent(tx, id, 'closed', { outcome: body.outcome, note }, await actorFor(tx, c.get('user').id));
     return detail(tx, id);
   });

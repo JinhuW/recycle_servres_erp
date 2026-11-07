@@ -6,6 +6,7 @@ import { log } from '../lib/log';
 import type { Env } from '../types';
 import { photoUrl, pickPhotos, renewPlacement } from './fbAds';
 import { loadFbSellerSettings } from './fbConfig';
+import { HONEST_LINE } from './fbAgent/guards';
 import { addThreadEvent } from './fbThreads';
 
 // The seller tick (CONTRACTS §5.3): settles uncertain tasks and turns queued
@@ -119,12 +120,22 @@ const startOfLocalDay = (tx: SqlLike, now: Date, tz: string) =>
 
 // 3. Queued messages to msg-send tasks: one open per account, spaced, capped per day.
 async function queueSends(tx: SqlLike, s: FbSellerSettings, now: Date): Promise<{ sends: number; held: number }> {
-  // Agent messages a person now owns, or the kill switch stops, are held, never sent.
+  // Agent messages a person now owns, or the kill switch stops, are held,
+  // never sent: queued ones, and ones whose send task no worker has taken
+  // yet. A hand-off still sends the bot-question answer it queued first.
+  const stop = tx`(${s.kill_switch} OR t.mode = 'human' OR (t.needs_human AND m.body <> ${HONEST_LINE})
+       OR t.closed_at IS NOT NULL OR NOT COALESCE(sl.agent_on, FALSE))`;
+  const stopped = await tx<{ id: number }[]>`
+    UPDATE fleet_tasks ft SET state = 'cancelled', done_at = NOW()
+      FROM fb_messages m JOIN fb_threads t ON t.id = m.thread_id LEFT JOIN fleet_slots sl ON sl.account_no = t.account_no
+     WHERE ft.id = m.task_id AND ft.kind = 'msg-send' AND ft.state = 'ready'
+       AND m.author = 'agent' AND m.send_state = 'sending' AND ${stop}
+    RETURNING m.id::int AS id`;
   const held = await tx`
-    UPDATE fb_messages m SET send_state = 'held'
+    UPDATE fb_messages m SET send_state = 'held', task_id = CASE WHEN m.send_state = 'sending' THEN NULL ELSE m.task_id END
       FROM fb_threads t LEFT JOIN fleet_slots sl ON sl.account_no = t.account_no
-     WHERE m.thread_id = t.id AND m.author = 'agent' AND m.send_state = 'queued'
-       AND (${s.kill_switch} OR t.mode = 'human' OR t.needs_human OR t.closed_at IS NOT NULL OR NOT COALESCE(sl.agent_on, FALSE))`;
+     WHERE m.thread_id = t.id AND m.author = 'agent'
+       AND (m.send_state = 'queued' OR m.id = ANY(${stopped.map((r) => r.id)}::bigint[])) AND ${stop}`;
   const accounts = await tx<{ account_no: number; open: boolean; last_id: number | null; last_at: Date | null; today: number }[]>`
     SELECT sl.account_no,
            EXISTS (SELECT 1 FROM fleet_tasks o WHERE o.account_no = sl.account_no AND o.kind = 'msg-send'

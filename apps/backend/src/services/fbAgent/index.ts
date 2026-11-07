@@ -228,7 +228,13 @@ export async function runFbAgentRun(sql: Sql<{}>, deps: AgentDeps, run: ClaimedR
   const decision = await decide(input, profile, budgeted(deps.llm, budget));
   const sum = totals(decision);
 
-  await sql.begin(async (tx) => {
+  const applied = await sql.begin(async (tx) => {
+    // A run its runner held past STALE_AFTER (a slow model) is retaken by
+    // another claim, on this instance or another. Only the claim that still
+    // holds it applies a decision: two would queue two replies.
+    const [mine] = await tx<{ ok: boolean }[]>`
+      SELECT (state = 'running' AND attempts = ${run.attempts}) AS ok FROM fb_agent_runs WHERE id = ${run.id} FOR UPDATE`;
+    if (!mine?.ok) return false;
     await tx`
       UPDATE fb_agent_runs
       SET state = 'done', decision = ${tx.json(decision as never)}, outcome = ${decision.outcome},
@@ -242,12 +248,14 @@ export async function runFbAgentRun(sql: Sql<{}>, deps: AgentDeps, run: ClaimedR
       // on): the decision stays on record and nothing reaches the thread.
       const msg = e instanceof Error ? e.message : String(e);
       await tx`UPDATE fb_agent_runs SET outcome = 'error', error = ${msg.slice(0, 500)} WHERE id = ${run.id}`;
-      return;
+      return true;
     }
     if (decision.outcome === 'blocked' && snap.thread.account_no !== null) {
       await checkCircuitBreaker(tx, snap.thread.account_no, settings, deps.alert);
     }
+    return true;
   });
+  if (!applied) return;
 
   // A candidate profile decides the same input on the side; it never touches the thread.
   const candidate = await profileInState(sql, 'candidate');
@@ -287,6 +295,13 @@ export async function claimFbAgentRun(sql: SqlLike): Promise<ClaimedRun | null> 
           SELECT 1 FROM fb_agent_runs o
           WHERE o.thread_id = r.thread_id AND o.id <> r.id AND o.state = 'running' AND NOT o.shadow
             AND o.claimed_at >= NOW() - ${STALE_AFTER}::interval)
+        -- Our last reply has not reached the seller yet: the run waits for it
+        -- rather than answer a conversation it cannot see whole, which sent
+        -- two replies (and two offer rounds) to a seller who wrote twice.
+        AND NOT EXISTS (
+          SELECT 1 FROM fb_messages m
+          WHERE m.thread_id = r.thread_id AND m.direction = 'out'
+            AND m.send_state IN ('queued', 'sending', 'uncertain'))
       ORDER BY r.created_at, r.id
       FOR UPDATE SKIP LOCKED
       LIMIT 1

@@ -1,6 +1,7 @@
 import type { AgentExtract, FbThreadEventKind, FbThreadSnapshot, FbThreadStage } from '@recycle-erp/shared';
 import type { SqlLike } from '../db';
 import { alertManagers } from '../lib/fbSellerAlert';
+import { HONEST_LINE } from './fbAgent/guards';
 import { loadFbSellerSettings } from './fbConfig';
 
 // The thread operations the agent and the routes share (CONTRACTS §5.2). Every
@@ -87,6 +88,26 @@ export async function queueOutbound(tx: SqlLike, threadId: number, body: string,
   return { messageId: Number(m!.id) };
 }
 
+/**
+ * Stops the agent's unsent replies on a thread: queued ones, and ones whose
+ * send task no worker has taken yet (the task is cancelled). A task already
+ * leased may be typing, so it runs out. `keepHonest` leaves the bot-question
+ * answer to go out: a hand-off sends it first (CONTRACTS §6.5, §6.6 guard 5).
+ */
+export async function holdAgentReplies(tx: SqlLike, threadId: number, o: { keepHonest: boolean }): Promise<void> {
+  const keep = o.keepHonest ? tx`AND m.body <> ${HONEST_LINE}` : tx``;
+  const stopped = await tx<{ id: number }[]>`
+    UPDATE fleet_tasks t SET state = 'cancelled', done_at = NOW()
+      FROM fb_messages m
+     WHERE m.thread_id = ${threadId} AND m.author = 'agent' AND m.send_state = 'sending' AND m.task_id = t.id
+       AND t.kind = 'msg-send' AND t.state = 'ready' ${keep}
+    RETURNING m.id::int AS id`;
+  await tx`
+    UPDATE fb_messages m SET send_state = 'held', task_id = CASE WHEN m.send_state = 'sending' THEN NULL ELSE m.task_id END
+     WHERE m.thread_id = ${threadId} AND m.author = 'agent' ${keep}
+       AND (m.send_state = 'queued' OR m.id = ANY(${stopped.map((r) => r.id)}::bigint[]))`;
+}
+
 /** Moves the thread to Needs human with the reason in words, and tells managers. */
 export async function flagHuman(tx: SqlLike, threadId: number, reason: string, detail?: Record<string, unknown>): Promise<void> {
   const [t] = await tx<{ seller_name: string; account_no: number | null }[]>`
@@ -95,8 +116,7 @@ export async function flagHuman(tx: SqlLike, threadId: number, reason: string, d
      RETURNING seller_name, account_no`;
   if (!t) return;
   // The agent's messages still waiting to go are now the person's call.
-  await tx`UPDATE fb_messages SET send_state = 'held'
-            WHERE thread_id = ${threadId} AND author = 'agent' AND send_state = 'queued'`;
+  await holdAgentReplies(tx, threadId, { keepHonest: true });
   await addThreadEvent(tx, threadId, 'handed_off', { reason, ...(detail ?? {}) });
   const who = t.seller_name || 'A seller';
   await alertManagers(tx, {

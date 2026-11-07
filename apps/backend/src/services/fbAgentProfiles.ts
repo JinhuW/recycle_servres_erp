@@ -1,5 +1,4 @@
 import {
-  AGENT_INTENTS,
   type FbAgentModule,
   type FbAgentProfile,
   type FbAgentProfileRow,
@@ -9,6 +8,7 @@ import {
   type RegistryEntry,
 } from '@recycle-erp/shared';
 import type { SqlLike } from '../db';
+import { agentRegistry as runtimeRegistry } from './fbAgent/registry';
 
 // Agent profile versions (CONTRACTS §6.3). A version's content is frozen once
 // it leaves `draft`, so a run's profile_id always names what it ran with. Every
@@ -17,41 +17,10 @@ import type { SqlLike } from '../db';
 
 export type AgentRegistry = { rules: RegistryEntry[]; skills: RegistryEntry[] };
 
-const none: ParamSchema = { type: 'object', properties: {} };
-
-// A copy of CONTRACTS §6.5 until fbAgent/registry.ts exports agentRegistry().
-const REGISTRY: AgentRegistry = {
-  rules: [
-    { kind: 'closing', label: 'Deal about to close', params: { type: 'object', properties: {
-      gap_pct: { type: 'number', label: 'Hand off when ask and offer are within (%)', minimum: 0, maximum: 100, default: 10 },
-    }, required: ['gap_pct'] } },
-    { kind: 'no_market_match', label: 'Item not on the Market page', params: none },
-    { kind: 'price_stale', label: 'Market price missing or old', params: none },
-    { kind: 'logistics', label: 'Payment, shipping or pickup', params: { type: 'object', properties: {
-      words: { type: 'array', label: 'Words', items: { type: 'string' }, default: [] },
-    }, required: ['words'] } },
-    { kind: 'has_image', label: 'Seller sent a photo', params: none },
-    { kind: 'unknown_direction', label: 'Message the worker could not place', params: none },
-    { kind: 'confidence_below', label: 'Extraction unsure', params: { type: 'object', properties: {
-      min: { type: 'number', label: 'Minimum confidence', minimum: 0, maximum: 1, default: 0.6 },
-    }, required: ['min'] } },
-    { kind: 'intent', label: 'Seller intent', params: { type: 'object', properties: {
-      kinds: { type: 'array', label: 'Intents', items: { type: 'string', enum: [...AGENT_INTENTS] }, default: ['hostile', 'off_topic'] },
-    }, required: ['kinds'] } },
-    { kind: 'bot_question', label: 'Asked if it is a bot', params: none },
-    { kind: 'keyword', label: 'Keyword', params: { type: 'object', properties: {
-      patterns: { type: 'array', label: 'Patterns (regular expressions)', items: { type: 'string' }, default: [] },
-    }, required: ['patterns'] } },
-  ],
-  skills: [
-    { kind: 'screen', label: 'Screen', params: none },
-    { kind: 'negotiate', label: 'Negotiate', params: none },
-    { kind: 'answer', label: 'Answer a question', params: none },
-  ],
-};
-
+// The modules' own schemas (fbAgent/registry.ts): a version is checked
+// against the rules and skills this ERP can run, never a copy of them.
 export function agentRegistry(): AgentRegistry {
-  return REGISTRY;
+  return runtimeRegistry();
 }
 
 /** A refused profile or case write: `detail` says why in words, `field` names the offending input. */
