@@ -274,7 +274,7 @@ function ManagerView({ m }: { m: ManagerHome }) {
             <MoneyRow to="/after-sales" icon="refresh"
                       label={t('homeAfterSalesN', { n: m.queues.afterSales, mine: m.queues.afterSalesMine })} />
             <MoneyRow to="/transfers" icon="truck" label={t('homeTransfersN', { n: m.queues.transfers })} />
-            <MoneyRow to="/web-submissions" icon="mail" label={t('homeWebN', { n: m.queues.web })} />
+            <MoneyRow to="/leads/website" icon="mail" label={t('homeWebN', { n: m.queues.web })} />
           </div>
         </Card>
       </div>
