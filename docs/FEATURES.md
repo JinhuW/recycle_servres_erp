@@ -954,7 +954,8 @@ is not a stage but a flag beside one, set once every line has sold
   untouched legacy $0 line does not block Save or a stage change. The
   per-order leave-Draft check above stays as the backstop, and the backend
   still accepts `unit_cost >= 0`. The phone's add-item form and draft sync
-  accept a typed $0 since v1.426.0; a blank cost is still refused there. On that
+  accept a typed $0 since v1.426.0, and the desktop PO edit page's Confirm and
+  Save since v1.444.2; a blank cost is still refused on both. On that
   form, Serial numbers sits directly under Part # (v1.426.0).
 - **The list's Payment cell says what the bank paid and opens it** (v1.138.0).
   On the desktop PO list a manager reads `Company | $1,279` or `Self | $2,829`
