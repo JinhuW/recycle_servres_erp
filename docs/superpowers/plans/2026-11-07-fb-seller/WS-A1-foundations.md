@@ -24,9 +24,34 @@ One small PR that everything else builds on. Merge it as soon as CI is green.
 
 ## Exit criteria
 
-- [ ] `scripts/migrate.mjs` applies the migration on a fresh DB and on a copy with fleet rows (seed + a few `fleet_tasks`), and the test template builds.
-- [ ] `pnpm typecheck`, backend and frontend suites pass with no fleet test edited.
-- [ ] The seeded settings validate against the TS type (a unit test parses them).
-- [ ] Leads ▸ Facebook shows for a manager, not for a purchaser.
-- [ ] `docs/DATABASE.md` updated, *As of* line bumped.
-- [ ] README Status row updated.
+- [x] `scripts/migrate.mjs` applies the migration on a fresh DB and on a copy with fleet rows (seed + a few `fleet_tasks`), and the test template builds.
+- [x] `pnpm typecheck`, backend and frontend suites pass with no fleet test edited.
+- [x] The seeded settings validate against the TS type (a unit test parses them).
+- [x] Leads ▸ Facebook shows for a manager, not for a purchaser.
+- [x] `docs/DATABASE.md` updated, *As of* line bumped.
+- [x] README Status row updated.
+
+## Outcome
+
+Migration `0232_fb_seller.sql`, v1.437.0. Notes for the workstreams after A1:
+
+- `fleet_tasks_state_check` was the real name (0206's inline check); confirmed on
+  a DB with fleet rows before the migration ran.
+- Every FK has an index, including the user columns (`created_by` and the like).
+  `fb_thread_events` is append-only by trigger, like the settings history.
+- `HandedTask`'s search variant keeps the existing `why` field. `claim.ts`'s
+  `PickRow.kind` is now `FleetSearchTaskKind` (one line), so the union compiles;
+  A2 widens it when `handed()` learns the seller shape.
+- `FLEET_TASK_STATES` gained `uncertain`; `PERF_PAGES` gained `leadsFacebook`.
+- `FB_SELLER_DEFAULT_SETTINGS` in `shared/fbSeller.ts` is the seeded value,
+  typed; the backend test holds the row to it.
+- Return types the contract left open: `saveCaseFromThread` →
+  `{ caseId }`, `enqueueSellerTask` → `{ taskId } | null` (null: an open task
+  with that ref exists). Change them freely in your own PR.
+- `startFbSellerLoop` lives in `src/services/fbPacing.ts` (C's tick file).
+  Both loops return `void` as CONTRACTS §6.2 says, so `server.ts` calls them
+  after the `loops` list and shutdown cannot stop them; a loop that should stop
+  on SIGTERM needs a contract change to return `{ stop() }`.
+- Rule, skill and context types (`AgentRule`, `AgentSkill`, `RuleContext`,
+  `SkillContext`) are left to D1; the wire types (`ParamSchema`,
+  `RegistryEntry`, `EvalExpectation`) are in shared.

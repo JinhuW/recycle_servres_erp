@@ -4,11 +4,23 @@
 // so field names follow the columns and the worker payloads (snake_case), and
 // every instant is an ISO-8601 string.
 
-export const FLEET_TASK_STATES = ['ready', 'leased', 'done', 'cancelled', 'expired'] as const;
+/** 'uncertain': a seller write whose lease was lost; the post or message may be out, so it is never retried. */
+export const FLEET_TASK_STATES = ['ready', 'leased', 'done', 'cancelled', 'expired', 'uncertain'] as const;
 export type FleetTaskState = (typeof FLEET_TASK_STATES)[number];
 
-export const FLEET_TASK_KINDS = ['search', 'verify-slug', 'probe'] as const;
+export const FLEET_SEARCH_TASK_KINDS = ['search', 'verify-slug', 'probe'] as const;
+export type FleetSearchTaskKind = (typeof FLEET_SEARCH_TASK_KINDS)[number];
+
+/** Handed only to the worker holding the task's account, on a seller slot. */
+export const FLEET_SELLER_TASK_KINDS = ['ad-post', 'ad-delete', 'inbox-sync', 'msg-send'] as const;
+export type FleetSellerTaskKind = (typeof FLEET_SELLER_TASK_KINDS)[number];
+
+export const FLEET_TASK_KINDS = [...FLEET_SEARCH_TASK_KINDS, ...FLEET_SELLER_TASK_KINDS] as const;
 export type FleetTaskKind = (typeof FLEET_TASK_KINDS)[number];
+
+/** The first worker release that knows the seller kinds. Above every release
+ *  until the tracker ships them, so no worker is handed one before then. */
+export const FLEET_SELLER_MIN_WORKER_VERSION = '99.0.0';
 
 /** Why a task exists: the cadence, a city just added, a manager, a round start, a quarantine probe or a slug check. */
 export type FleetTaskReason = 'cadence' | 'added' | 'manual' | 'start' | 'probe' | 'verify';
@@ -910,13 +922,57 @@ export type HeartbeatAnswer = {
 /** Why a task went to this account, as the worker logs it. */
 export type FleetTaskWhy = 'familiar' | 'other' | 'manual' | 'probe';
 
-export type HandedTask = {
-  id: number;
-  kind: FleetTaskKind;
-  city: { slug: string; name: string; radius_km: number };
-  item: string;
-  lease_expires_at: string;
-  why: FleetTaskWhy;
+/** A worker that knows the seller kinds dispatches on `kind` before it looks at `item`. */
+export type HandedTask =
+  | {
+    id: number;
+    kind: FleetSearchTaskKind;
+    city: { slug: string; name: string; radius_km: number };
+    item: string;
+    lease_expires_at: string;
+    why: FleetTaskWhy;
+  }
+  | { id: number; kind: FleetSellerTaskKind; city: null; item: null; payload: SellerTaskPayload; lease_expires_at: string };
+
+/** Every payload carries `ref`, unique per open task per account and kind. */
+export type SellerTaskPayload =
+  | {
+    /** The placement id. */
+    ref: string; kind: 'ad-post'; location: string; title: string; description: string;
+    price_usd: number; category: string; condition: string;
+    /** Public R2 URLs; the worker downloads them for the task and deletes them after. */
+    photos: { url: string; sha256: string }[];
+  }
+  | { /** The placement id. */ ref: string; kind: 'ad-delete'; fb_listing_id: string; title: string }
+  | { /** 'inbox:' + ISO minute. */ ref: string; kind: 'inbox-sync'; max_threads: number; max_messages: number }
+  | {
+    /** The message id. */
+    ref: string; kind: 'msg-send'; fb_thread_id: string; body: string;
+    /** The last few messages the ERP knows, newest last, so the worker can tell whether this one already landed. */
+    tail: { direction: 'in' | 'out' | 'unknown'; body: string }[];
+  };
+
+/** `POST /api/fleet/worker/seller/report`, sent before `done` on next-task. */
+export type SellerReport = {
+  task_id: number;
+  kind: FleetSellerTaskKind;
+  ref: string;
+  outcome: 'ok' | 'failed' | 'uncertain' | 'wall';
+  /** A reason in words for failed, uncertain and wall. */
+  detail?: string;
+  data?:
+    | { fb_listing_id: string }
+    | Record<string, never>
+    | { threads: InboxThread[] }
+    | { already_sent: boolean };
+};
+
+export type InboxThread = {
+  fb_thread_id: string;
+  seller_name: string;
+  listing_title: string;
+  /** Oldest first: the window the page showed, up to max_messages. */
+  messages: { direction: 'in' | 'out' | 'unknown'; body: string; has_image: boolean }[];
 };
 
 export type NextTaskRequest = {
