@@ -718,3 +718,36 @@ It is exported from `shared/index.ts`. Fields are snake_case, as in `shared/flee
 - The nav id is `leadsFacebook`, under Leads, manager-only.
 - The badge is `FbSellerSummary.needs_human`, polled every 60 s while the page is visible.
 - An open thread polls every 15 s.
+
+## 9. Additions agreed during the build
+
+Settled by the orchestrator while wave 2 ran; they extend the sections named
+and change nothing already there.
+
+- **§5.1 / §7.** `FbThreadRow` gains `ceiling_usd: number | null`, and
+  `GET /api/fb-seller/threads` returns it, so Needs human shows offer and
+  ceiling side by side (C).
+- **§5.3 / §6.2.** `startFbSellerLoop` and `startFbAgentLoop` return
+  `{ stop: () => void }` and sit in `server.ts`'s `loops` list (v1.437.1).
+- **§6.2.** D1 also exports from `src/services/fbAgent/index.ts`:
+  - `agentLlmFor(env: Env): AgentLlm`, the OpenRouter-backed implementation;
+  - `agentSpentTodayUsd(sql: SqlLike, settings: FbSellerSettings): Promise<number>`,
+    the sum of `fb_agent_runs.cost_usd` over every run (live, shadow, eval) on
+    today's calendar day in `settings.active_hours.tz`. D1's loop enforces
+    `agent.daily_spend_usd` with it; D2's eval runner checks it before each
+    case and fails the eval run, with the reason in words, at the cap.
+- **§6.7.** D2 adds to `shared/fbSeller.ts`, and the routes answer with:
+  - `GET /profiles` → `{ rows: FbAgentProfileRow[] }`; `POST /profiles/:id/draft`,
+    `PATCH /profiles/:id`, `/promote` and `/retire` → `FbAgentProfileRow`.
+    Rollback is `POST /profiles/:id/promote { to: 'active' }` on a retired version.
+  - `GET /cases` → `{ rows: FbAgentEvalCase[] }`.
+  - `GET /shadow` → `FbShadowPage = { rows: FbShadowPair[]; next: string | null }`,
+    `FbShadowPair = { trigger_message_id, thread_id, trigger_body, created_at, shadow: FbAgentRunBrief, live: FbAgentRunBrief | null }`.
+  - `GET /evals?profile_id=` → `{ rows: FbAgentEvalRun[] }`, newest first (new route).
+  - `GET /evals/:id` → `FbAgentEvalRunDetail = FbAgentEvalRun & { profile: { id, name, version }; error: string | null; results: FbEvalCaseResult[] }`,
+    `FbEvalCaseResult = { case_id, case_name, run_id, state, decision: AgentDecision | null, passed: boolean | null, why: string[], cost_usd: number | null, error: string | null }`.
+  - `GET /evals/compare` → `FbEvalCompare = { a: FbAgentEvalRun; b: FbAgentEvalRun; rows: FbEvalCompareRow[]; changed: number }`,
+    `FbEvalCompareRow = { case_id, case_name, a: { handoff, reason_kind, offer_usd, reply, passed } | null, b: same | null, changed: boolean, changes: string[] }`.
+- **§6.4.** `saveCaseFromThread` returns `{ caseId }`; `enqueueSellerTask`
+  returns `{ taskId } | null` (null: an open task with that ref exists), as A1
+  stubbed them.
