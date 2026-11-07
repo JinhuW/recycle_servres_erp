@@ -9,7 +9,7 @@ vi.mock('./api', () => {
 vi.mock('./errorToast', () => ({ handleFetchError: vi.fn() }));
 
 const {
-  fbAgentApi, fbSellerApi, offerLadder, paramProblems, qs, settingsDiff, setSettingsField, sortNeedsHuman, threadStranded, validateFbSettings,
+  fbAgentApi, fbSellerApi, offerLadder, paramProblems, qs, settingsDiff, setSettingsField, sortNeedsHuman, threadModeKey, threadStranded, validateFbSettings,
 } = await import('./fbSeller');
 
 const settings = (patch: (v: FbSellerSettings) => void = () => {}) => {
@@ -203,5 +203,13 @@ describe('paramProblems', () => {
   it('names each param that does not', () => {
     expect(paramProblems({ min: 1.5, kinds: ['rude'], on: 'yes' }, schema)).toEqual(['gap_pct', 'min', 'kinds', 'on']);
     expect(paramProblems({ gap_pct: 2.5 }, schema)).toEqual(['gap_pct']);
+  });
+});
+
+describe('threadModeKey', () => {
+  it('says the agent is paused on a handed-off thread, not answering', () => {
+    expect(threadModeKey({ mode: 'agent', needs_human: true })).toBe('fbs_mode_waiting');
+    expect(threadModeKey({ mode: 'agent', needs_human: false })).toBe('fbs_mode_agent');
+    expect(threadModeKey({ mode: 'human', needs_human: true })).toBe('fbs_mode_human');
   });
 });

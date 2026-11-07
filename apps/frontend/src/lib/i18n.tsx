@@ -4139,6 +4139,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fbs_stranded_hint: "This account is gone, retired or no longer a seller, so nothing sent here will reach the seller.",
     fbs_mode_agent: "Agent answering",
     fbs_mode_human: "Taken over",
+    fbs_mode_waiting: "Agent paused for a person",
     fbs_stage_new: "New",
     fbs_stage_screening: "Screening",
     fbs_stage_negotiating: "Negotiating",

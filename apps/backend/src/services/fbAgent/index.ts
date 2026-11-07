@@ -18,6 +18,7 @@ import { loadFbSellerSettings } from '../fbConfig';
 import * as fbThreads from '../fbThreads';
 import { Budget } from '../poAiReview';
 import { AgentBudgetError, decide } from './runtime';
+import { stubAgentLlm } from './stubLlm';
 import type { AgentLlm } from './types';
 
 export { decide, AgentBudgetError } from './runtime';
@@ -25,6 +26,7 @@ export { agentRegistry } from './registry';
 export type { AgentLlm, AgentRule, AgentSkill, RuleContext, SkillContext } from './types';
 
 const agentLog = log.child({ module: 'fb-agent' });
+let warnedAboutStub = false;
 
 /** Queues a run for the thread, or points the one already waiting at the newer message. */
 export async function enqueueAgentRun(tx: SqlLike, threadId: number, triggerMessageId: number): Promise<void> {
@@ -54,6 +56,15 @@ export type AgentDeps = {
 
 /** The OpenRouter-backed AgentLlm (CONTRACTS §9), for the loop and D2's eval runner. */
 export function agentLlmFor(env: Env): AgentLlm {
+  // Production refuses to boot without the key (env.ts); dev and CI get the
+  // canned reader, as label OCR does.
+  if (!env.OPENROUTER_API_KEY && env.NODE_ENV !== 'production') {
+    if (!warnedAboutStub) {
+      warnedAboutStub = true;
+      agentLog.warn('OPENROUTER_API_KEY is not set: the seller agent answers with the local stub model');
+    }
+    return stubAgentLlm;
+  }
   return async (req) => {
     const { json, usage } = await openRouterChatJson(env, { ...req, schemaName: 'agent' });
     return {

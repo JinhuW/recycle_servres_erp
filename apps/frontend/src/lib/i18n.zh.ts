@@ -5254,6 +5254,7 @@ const zh: Record<string, string> = {
   fbs_stranded_hint: "该账号已删除、已停用或不再是卖家账号，从这里发送的消息无法送达卖家。",
   fbs_mode_agent: "智能体回复中",
   fbs_mode_human: "已人工接管",
+  fbs_mode_waiting: "智能体已暂停，等人工处理",
   fbs_stage_new: "新对话",
   fbs_stage_screening: "筛选中",
   fbs_stage_negotiating: "议价中",
