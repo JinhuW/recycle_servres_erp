@@ -15,6 +15,7 @@ import {
   deviceText, erpCheckpoint, erpCityChips, erpConnectPark, erpCityLog, erpHistory, erpHistoryDot, erpProxyBehind, erpProxyText, erpWorkerRetirable, erpWorkerStatus, sessionDaysLeft,
   type ErpHistoryLine,
 } from './fleetWorkerView';
+import { FleetSellerCard } from './FleetSellerCard';
 import { EngineChip, MarkHealthyButton, RestartWorkerButton, ParkDialog, ReleaseQuarantineButton, RetireSlotDialog, UnparkDialog, useFleetMirror } from './shared';
 import {
   AccountsUsed, CheckpointsCard, ErpBuildChip, Muted, NoThumb, WorkerCard, WorkerHead, WorkerHistory, type HistoryEntry, type WorkerField,
@@ -183,6 +184,7 @@ export function ErpWorkerView({ detail: d, stints, ipGroups, onReload, now = Dat
               </>}
               {slot?.quarantined_until && Date.parse(slot.quarantined_until) > now && <ReleaseQuarantineButton slot={slot} onDone={onReload} />}
             </>} />
+          {slot && <FleetSellerCard accountNo={slot.account_no} readOnly={mirror} />}
 
           <CheckpointsCard sub={t('fleetCheckpointsSub')} items={checkpoint ? [{
             key: 'wall',
