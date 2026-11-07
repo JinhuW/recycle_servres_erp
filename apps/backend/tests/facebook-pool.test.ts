@@ -1,8 +1,10 @@
-import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
+import { afterEach, beforeAll, describe, it, expect, beforeEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { poolKey, seal } from '../src/lib/sealed';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
+import { createOAuthClient } from '../src/oauth/clients';
+import { generateSigningKey, signAccessToken } from '../src/oauth/tokens';
 
 type Account = {
   no: number; uid: string; password: string; totp: string; email: string; emailPassword: string;
@@ -790,5 +792,112 @@ describe('facebook account pool', () => {
     });
     // A different key cannot open the stored blobs: that surfaces, never silently reads as blank.
     expect(keyed.status).toBe(500);
+  });
+});
+
+describe('POST /api/facebook-pool/push/accounts', () => {
+  const PUSH = `${BASE}/push/accounts`;
+  const CLIENT = 'fb-pool-add';
+  let bearer: string;
+  let otherScope: string;
+  let userBound: string;
+
+  beforeAll(async () => {
+    process.env.__TEST_OAUTH_KEY__ = await generateSigningKey();
+    process.env.OAUTH_ISSUER_URL = 'http://localhost:8787';
+  });
+
+  beforeEach(async () => {
+    await resetDb();
+    const env = {
+      OAUTH_ISSUER_URL: 'http://localhost:8787',
+      OAUTH_SIGNING_KEY_CURRENT: process.env.__TEST_OAUTH_KEY__,
+      OAUTH_ACCESS_TOKEN_TTL_SEC: '900',
+    } as never;
+    const sql = getTestDb();
+    const [{ id: alex }] = await sql<{ id: string }[]>`SELECT id FROM users WHERE email = ${ALEX}`;
+    const mint = async (name: string, scope: 'pool:write' | 'fleet:read', userId: string | null) => {
+      const client = await createOAuthClient(sql, {
+        name, redirectUris: [], grantTypes: ['client_credentials'], scopes: [scope], createdBy: alex, public: false,
+      });
+      return signAccessToken(env, { clientId: client.clientId, userId, scopes: [scope] });
+    };
+    bearer = await mint(CLIENT, 'pool:write', null);
+    otherScope = await mint('other', 'fleet:read', null);
+    userBound = await mint('connector', 'pool:write', alex);
+  });
+
+  const push = <T>(body: unknown, token = bearer) =>
+    api<T>('POST', PUSH, { body, headers: { authorization: `Bearer ${token}`, 'X-Requested-By': '' } });
+
+  it('adds the rows sealed, and answers with no secrets', async () => {
+    const r = await push<{ batch: string; added: { no: number; uid: string }[] }>({ batch: 'Order 7', rows: [draft(1), draft(2)] });
+    expect(r.status).toBe(201);
+    expect(r.body.batch).toBe('Order 7');
+    expect(r.body.added.map((a) => a.uid)).toEqual([uid(1), uid(2)]);
+    expect(JSON.stringify(r.body)).not.toMatch(/DemoOnly|Mail!|session-|EAAtoken|JBSWY/);
+
+    const [row] = await getTestDb()<{ password_enc: string; status: string; batch: string; created_by: string | null; cookie_by: string }[]>`
+      SELECT password_enc, status, batch, created_by, cookie_by FROM fb_pool_accounts WHERE no = ${r.body.added[0].no}`;
+    expect(row.password_enc).toMatch(/^v1\./);
+    expect(row).toMatchObject({ status: 'available', batch: 'Order 7', created_by: null, cookie_by: CLIENT });
+
+    const snap = await api<Snapshot>('GET', BASE, { token: await manager() });
+    expect(snap.body.accounts[0].password).toBe('DemoOnly!1');
+    expect(snap.body.activity[0]).toMatchObject({ who: CLIENT, action: 'imported', detail: '2 · Order 7' });
+  });
+
+  it('lands every row available whatever it asks for', async () => {
+    const r = await push({ rows: [draft(1, { status: 'fleet', holder: 'Alex' })] });
+    expect(r.status).toBe(201);
+    const [row] = await getTestDb()<{ status: string; holder_name: string | null; batch: string }[]>`
+      SELECT status, holder_name, batch FROM fb_pool_accounts`;
+    expect(row).toEqual({ status: 'available', holder_name: null, batch: 'API' });
+  });
+
+  it('writes nothing when any row is refused, and names the rows', async () => {
+    expect((await push({ rows: [draft(1)] })).status).toBe(201);
+    const count = async () => (await getTestDb()<{ n: number }[]>`SELECT count(*)::int AS n FROM fb_pool_accounts`)[0].n;
+
+    const dup = await push<{ code: string; failures: { index: number; uid: string; codes: string[] }[] }>({ rows: [draft(2), draft(1)] });
+    expect(dup.status).toBe(409);
+    expect(dup.body.code).toBe('fpDuplicate');
+    expect(dup.body.failures).toEqual([{ index: 1, uid: uid(1), codes: ['fpDuplicate'] }]);
+
+    const twice = await push({ rows: [draft(3), draft(3)] });
+    expect(twice.status).toBe(409);
+
+    const bad = await push<{ failures: { index: number; codes: string[] }[] }>({ rows: [draft(4), draft(5, { password: '' })] });
+    expect(bad.status).toBe(400);
+    expect(bad.body.failures[0]).toMatchObject({ index: 1, codes: ['fpPasswordRequired'] });
+
+    expect((await push({ rows: [] })).status).toBe(400);
+    expect((await push({ rows: ['not a row'] })).status).toBe(400);
+    expect(await count()).toBe(1);
+  });
+
+  it('takes only a service client holding pool:write', async () => {
+    const body = { rows: [draft(1)] };
+    expect((await api('POST', PUSH, { body, headers: { 'X-Requested-By': '' } })).status).toBe(401);
+    expect((await api('POST', PUSH, { body, token: await manager() })).status).toBe(401);
+    expect((await push(body, otherScope)).status).toBe(403);
+    expect((await push(body, userBound)).status).toBe(403);
+    expect((await getTestDb()<{ n: number }[]>`SELECT count(*)::int AS n FROM fb_pool_accounts`)[0].n).toBe(0);
+  });
+
+  it('opens nothing else to the token', async () => {
+    const headers = { authorization: `Bearer ${bearer}`, 'X-Requested-By': 'recycle-erp' };
+    expect((await api('GET', BASE, { headers })).status).toBe(401);
+    expect((await api('POST', `${BASE}/import`, { headers, body: { rows: [draft(1)] } })).status).toBe(401);
+    for (const [method, path] of [
+      ['GET', `${BASE}/push/accounts`],
+      ['GET', `${BASE}/push/timeline`],
+      ['POST', `${BASE}/push/take`],
+      ['POST', `${BASE}/push/retire`],
+      ['DELETE', `${BASE}/push`],
+    ] as const) {
+      const { status } = await api(method, path, { headers });
+      expect([401, 403, 404], `${method} ${path}`).toContain(status);
+    }
   });
 });

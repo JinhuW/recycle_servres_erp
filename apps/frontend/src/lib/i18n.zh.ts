@@ -742,6 +742,7 @@ const zh: Record<string, string> = {
   connectorsScopeSellOrderWrite: '创建销售订单草稿 (sellorder:write)',
   connectorsScopeWechatWrite: '推送微信行情报告 (wechat:write)',
   connectorsScopeFleetRead: '读取 Facebook 机队，供开发环境 ERP 实时查看 (fleet:read)',
+  connectorsScopePoolWrite: '向 Facebook 账号池添加账号 (pool:write)',
   connectorsNamePlaceholder: '例如：ebay-scraper-prod',
   connectorsCreate: '创建',
   connectorsSecretOnce: '客户端密钥（仅显示一次 — 立即复制）：',

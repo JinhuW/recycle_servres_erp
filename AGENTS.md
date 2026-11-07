@@ -226,5 +226,10 @@ Four things worth knowing:
 - Each tracker's manual: `trackers/reddit/README.md` and
   `trackers/facebook/README.md`, with their debug notes under each tracker's
   `docs/`.
+- Adding Facebook accounts to the ERP account pool: the `fb-pool-add` skill
+  ([.claude/skills/fb-pool-add/SKILL.md](.claude/skills/fb-pool-add/SKILL.md)).
+  It previews the rows with secrets masked, then posts them to
+  `/api/facebook-pool/push/accounts` with a `pool:write` service client. Use it
+  rather than writing to the database. Adding causes no Facebook login.
 
 [5]: docs/superpowers/specs/2026-05-17-per-order-commission-rate-design.md
