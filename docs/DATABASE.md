@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-07:** ERP migration `0232`, Reddit tracker migration `0007`,
+**As of 2026-11-07:** ERP migration `0234`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2581,7 +2581,12 @@ prevents duplicate charging. Index: fleet_task_attempts_account_idx
 (account_no, leased_at); that unique index covers the task FK.
 
 The fleet_fence_pool_owner trigger on pool status/holder/uid changes or deletion advances
-the slot epoch and releases its current task atomically. Worker mutations lock
+the slot epoch and releases its current task atomically. Since 0233 a seller
+task keeps its account when its lease is lost this way: a post, a delete or a
+send turns `uncertain` (it may already be out, so it is never run again) and an
+inbox sync is cancelled. The other two ways a lease is lost treat seller tasks
+the same, except that a released inbox sync goes back to `ready` and an expired
+one ends `expired`. Worker mutations lock
 pool account, then slot, then city/task; rollout operations acquire the release
 row before those locks. Claims serialize by host/worker and lock pool before
 slot. Probes have a separate unique open index on account_no; the city's open
@@ -2598,8 +2603,8 @@ What happened to a task, in order: the city log the fleet pages show.
 | `id` | `bigint` | ✓ | sequence |  |
 | `task_id` | `bigint` |  |  | → fleet_tasks. |
 | `worker_id` | `text` |  |  | The worker that reported it; NULL for the scheduler's own (expired). |
-| `kind` | `text` | ✓ |  | handed, started, searched, finished, stopped, released, expired or done. |
-| `detail` | `jsonb` |  |  | Per kind: the result for done, the parked state for released, the cards seen for searched. |
+| `kind` | `text` | ✓ |  | handed, started, searched, finished, stopped, released, expired, done or seller_report. |
+| `detail` | `jsonb` |  |  | Per kind: the result for done, the parked state for released, the cards seen for searched; for seller_report the worker's report, the answer it got and the epoch it was sent under (a report is stored even after its lease was lost). |
 | `at` | `timestamptz` | ✓ | `now()` |  |
 
 - **Primary key:** `id`
@@ -2617,7 +2622,9 @@ assigned entirely to the starting day. Returning a task to ready preserves the
 ended attempt. Done uses the completion time; an expired/released lease is
 capped at its expiry. The next-task pick skips accounts at budget_minutes.
 Migration 0207 backfills known terminal attempts; time erased by earlier
-releases cannot be recovered.
+releases cannot be recovered. Since 0234 it counts search kinds only: seller
+tasks (ad-post, ad-delete, inbox-sync, msg-send) are left out, as the budget
+(`minutesTodaySql`) leaves them out.
 
 | Column | Type | Meaning |
 | --- | --- | --- |

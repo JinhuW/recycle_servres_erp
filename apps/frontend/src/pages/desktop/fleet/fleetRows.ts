@@ -122,7 +122,7 @@ function erpRow(worker: FleetWorker, slot: FleetSlot | null, release: FleetRelea
     vncPort: running ? worker.vnc_port ?? null : null,
     state: worker.state ?? null,
     heartbeat: worker.last_heartbeat_at ?? null,
-    now: task ? { city: task.city, cityName: task.city_name ?? null, item: task.item, since: task.leased_at, home: false } : null,
+    now: task ? { city: task.city ?? task.kind, cityName: task.city_name ?? null, item: task.item ?? '', since: task.leased_at, home: false } : null,
     // A slot another worker holds now counts that worker's minutes, not these.
     minutes: slot && (holds || !slot.worker_id) ? slot.minutes_today : null,
     budget: slot && (holds || !slot.worker_id) ? slot.budget_minutes : null,

@@ -3,7 +3,7 @@ import type { SqlLike } from '../db';
 import { log } from '../lib/log';
 import type { Env } from '../types';
 import { loadSettings } from './cities';
-import { searchRanToEnd } from './sql';
+import { SELLER_WRITE_KINDS, searchRanToEnd } from './sql';
 
 // ─── The scheduler ────────────────────────────────────────────────────────────
 // Keeps fleet_tasks true to the catalog: one open search task per enabled city
@@ -43,8 +43,9 @@ export type ReconcileReport = {
   notified: string[];
 };
 
-export async function notifyReady(sql: SqlLike, items: Iterable<string>): Promise<string[]> {
-  const distinct = [...new Set(items)];
+export async function notifyReady(sql: SqlLike, items: Iterable<string | null>): Promise<string[]> {
+  // A seller task has no item; whoever makes one ready notifies with ''.
+  const distinct = [...new Set([...items].filter((i): i is string => i !== null))];
   // pg_notify through the caller's handle, not sql.notify: postgres.js binds
   // notify to the pool, so inside a transaction it would fire on another
   // connection before the task commits and wake a poll that then finds nothing.
@@ -99,17 +100,20 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
 
   // A lease past its time, or a task that has run longer than any search
   // should however faithfully its worker heartbeats: the old queue renewed
-  // leases for ever, and a stuck browser held its city for the day.
-  const expired = await sql<{ id: string; worker_id: string | null; leased_at: Date; lease_expires_at: Date | null }[]>`
-    UPDATE fleet_tasks SET state = 'expired', done_at = ${now}
+  // leases for ever, and a stuck browser held its city for the day. A seller
+  // write whose lease ran out may have posted or sent, so it is never run
+  // again: it waits, uncertain, for the seller side to settle it.
+  const expired = await sql<{ id: string; worker_id: string | null; leased_at: Date; lease_expires_at: Date | null; state: string }[]>`
+    UPDATE fleet_tasks SET done_at = ${now},
+      state = CASE WHEN kind = ANY(${SELLER_WRITE_KINDS}::text[]) THEN 'uncertain' ELSE 'expired' END
     WHERE state = 'leased'
       AND (lease_expires_at < ${now} OR leased_at + make_interval(mins => ${settings.task_max_minutes}) < ${now})
-    RETURNING id, worker_id, leased_at, lease_expires_at`;
+    RETURNING id, worker_id, leased_at, lease_expires_at, state`;
   for (const t of expired) {
     await sql`
       INSERT INTO fleet_task_events (task_id, worker_id, kind, detail, at)
       VALUES (${t.id}, ${t.worker_id}, 'expired',
-              ${sql.json({ leased_at: t.leased_at.toISOString(), lease_expires_at: t.lease_expires_at?.toISOString() ?? null, task_max_minutes: settings.task_max_minutes })},
+              ${sql.json({ leased_at: t.leased_at.toISOString(), lease_expires_at: t.lease_expires_at?.toISOString() ?? null, task_max_minutes: settings.task_max_minutes, ...(t.state === 'uncertain' ? { uncertain: true } : {}) })},
               ${now})`;
   }
 

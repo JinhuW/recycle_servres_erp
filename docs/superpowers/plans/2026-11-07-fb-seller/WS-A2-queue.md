@@ -22,9 +22,46 @@ search worker sees. CONTRACTS §4 is the spec.
 
 ## Exit criteria
 
-- [ ] Tests: a seller task is never handed to a search slot, to another account's seller slot, or to a worker below the minimum version; a search task is never handed to a seller slot.
-- [ ] Tests: a leased `msg-send` becomes `uncertain` on each of the three paths (release, pool fence, expiry); `inbox-sync` follows the table.
-- [ ] Tests: a report from a worker whose epoch moved on is stored and answered 200 `{ accepted: … }`; a malformed body is 422; nothing answers 401/409 for epoch reasons.
-- [ ] Tests: seller minutes don't count toward the budget; a budget-exhausted seller slot still gets its seller tasks.
-- [ ] Every existing fleet test passes unedited.
-- [ ] Version bump, CHANGELOG, README Status.
+- [x] Tests: a seller task is never handed to a search slot, to another account's seller slot, or to a worker below the minimum version; a search task is never handed to a seller slot.
+- [x] Tests: a leased `msg-send` becomes `uncertain` on each of the three paths (release, pool fence, expiry); `inbox-sync` follows the table.
+- [x] Tests: a report from a worker whose epoch moved on is stored and answered 200 `{ accepted: … }`; a malformed body is 422; nothing answers 401/409 for epoch reasons.
+- [x] Tests: seller minutes don't count toward the budget; a budget-exhausted seller slot still gets its seller tasks.
+- [x] Every existing fleet test passes unedited.
+- [x] Version bump, CHANGELOG, README Status.
+
+## Outcome
+
+Migrations `0233_fleet_seller_fence.sql` and `0234_fleet_minutes_no_seller.sql`, v1.438.0. Tests:
+`apps/backend/tests/fleet-seller-queue.test.ts`. Notes for the workstreams after A2:
+
+- **Body limit.** The routes enforce 512 KB themselves. Above them, Hono's
+  global JSON cap is 1 MiB (`index.ts`), and the Cloudflare Worker
+  (`deploy/cloudflare/worker.js`) streams the body through, so the edge ceiling
+  is the plan's 100 MB. The 1 MiB cap applies to the multipart screenshot too.
+- **Report auth.** The token's HMAC and expiry only (a bad token is still 401).
+  The task must be the token's account's, of the kind and ref the report names,
+  and have a `handed` event for the token's worker id; otherwise the answer is
+  200 `{ accepted: false, detail }`. The pool account's status and the slot's
+  epoch are not read.
+- **Idempotency.** A second report with the same outcome for the same
+  `(account_no, kind, ref)` gets the first answer back and does not call
+  `applySellerReport` again. A different outcome is applied (C decides what it
+  means). The event's `detail` is `{ report, answer, epoch }`.
+- **Screenshot key.** `uploadAttachment` adds a UUID, so the key is
+  `fb-seller/screenshots/<account>/<uuid>-<task>-<step>.<ext>`: no overwrite on
+  a retry. A task that is not the worker's answers 200 `{ ok: false, detail }`;
+  a storage failure 502 `{ ok: false, detail }`.
+- **Uncertain tasks** keep `worker_id`, `epoch`, `leased_at` and get `done_at`;
+  each path writes a `released` (or `expired`) event whose detail says
+  `state: 'uncertain'` / `uncertain: true`. A released `inbox-sync` keeps its
+  account and wakes polls with `pg_notify('fleet_tasks', '')`.
+- **Pick.** A seller slot reads its worker's `fleet_workers.version` (claim or
+  heartbeat). Over budget, it is offered only its seller kinds; with nothing
+  due it answers `nothing_due` and holds the poll, so an enqueue wakes it.
+- **Follow-up in the same PR.** Shared `FleetTask.city` and `.item` are now
+  `string | null`. The Fleet pages show the task's kind where a city would go
+  (task table, belt titles, worker note, city log) and don't open a city log
+  for a seller task. The `fleet_minutes` view excludes seller kinds (migration
+  `0234_fleet_minutes_no_seller.sql`), matching `minutesTodaySql`; the Fleet
+  pages' minutes column already reads `minutesTodaySql`.
+- **Left as they are.** The hourly purge does not delete `uncertain` tasks.

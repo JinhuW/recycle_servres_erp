@@ -126,7 +126,7 @@ const TITLE_MAX = 12;
 
 function markTitle(t: Translate, m: BeltMark, locale: string, now: number): string {
   const lines = m.tasks.slice(0, TITLE_MAX).map(task => {
-    const city = task.city_name ?? task.city;
+    const city = task.city_name ?? task.city ?? task.kind;
     if (m.kind === 'done') {
       return t('fleetBeltDoneTitle', {
         city, time: easternClock(task.done_at, locale, now), by: task.worker_id ?? '—',
@@ -190,7 +190,7 @@ export function Belt({ tasks, items, workers, cityCount, now = Date.now() }: {
                 })}
                 {r.counts.due > 0 && (
                   <span className="fleet-wall" title={r.due.slice(0, TITLE_MAX).map(x =>
-                    t('fleetBeltDueTitle', { city: x.city_name ?? x.city, time: easternClock(x.due_at, locale, now) })
+                    t('fleetBeltDueTitle', { city: x.city_name ?? x.city ?? x.kind, time: easternClock(x.due_at, locale, now) })
                     + (x.priority >= 100 ? ` · ${t('fleetReason_manual')}` : '')).join('\n')}>
                     <span className="fleet-wall-n">{t('fleetBeltDueNow', { n: r.counts.due })}</span>
                     <span className="fleet-wall-bar" style={{ height: `${Math.min(70, 6 + r.counts.due * 4)}px` }} />
@@ -301,7 +301,7 @@ export function TaskTable({ tasks, items, filter, onFilter, range, onRange, sele
           <tbody>
             {shown.length === 0 && <EmptyRow cols={9}>{t('fleetTasksNone')}</EmptyRow>}
             {shown.map(task => {
-              const name = task.city_name ?? task.city;
+              const name = task.city_name ?? task.city ?? task.kind;
               const sub = task.state === 'ready'
                 ? (Date.parse(task.due_at) <= now ? agoLabel(t, task.due_at, now) : dueLabel(t, task.due_at, now))
                 : task.state === 'leased' ? t('fleetStartedAt', { time: easternClock(task.leased_at ?? task.due_at, locale, now) })
@@ -311,11 +311,11 @@ export function TaskTable({ tasks, items, filter, onFilter, range, onRange, sele
                 ? <span className="chip info mono">{mmss((now - Date.parse(task.leased_at)) / 1000)}</span>
                 : typeof task.result?.seconds === 'number' ? mmss(task.result.seconds) : '';
               return (
-                <tr key={task.id} className={task.city === selected ? 'fleet-row-sel' : undefined} onClick={() => onSelect(task.city)}
+                <tr key={task.id} className={task.city === selected ? 'fleet-row-sel' : undefined} onClick={() => { if (task.city) onSelect(task.city); }}
                   title={t('fleetCityLogOpen', { city: name })}>
                   <td>
                     <span className="fp-holder">
-                      <button type="button" className="fleet-city-name fleet-city-pick" onClick={e => { e.stopPropagation(); onSelect(task.city); }}>{name}</button>
+                      <button type="button" className="fleet-city-name fleet-city-pick" onClick={e => { e.stopPropagation(); if (task.city) onSelect(task.city); }}>{name}</button>
                       {task.kind !== 'search' && <small className="mono">{t(`fleetKind_${task.kind}`)}</small>}
                     </span>
                   </td>

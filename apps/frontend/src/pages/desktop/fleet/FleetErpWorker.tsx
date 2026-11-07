@@ -61,7 +61,7 @@ export function ErpWorkerView({ detail: d, stints, ipGroups, onReload, now = Dat
     : connectPark ? (connectPark.since ? t('fleetNoteConnectPark', { age: relTime(connectPark.since, locale) }) : t('fleetNoteConnectParkNoAge'))
     : checkpoint ? stateLabel(t, checkpoint.state)
     : slot?.parked ? t('fleetNoteParked')
-    : task ? t('fleetNoteSearching', { city: task.city_name ?? task.city, item: task.item })
+    : task ? t('fleetNoteSearching', { city: task.city_name ?? task.city ?? task.kind, item: task.item ?? '' })
     : t('fleetNoteIdle');
 
   const slotText = !slot ? <Muted>{t('fleetSlotNone')}</Muted>
