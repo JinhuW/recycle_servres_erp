@@ -20,6 +20,8 @@ type Props = {
   commissionPct: string; onCommissionPct: (v: string) => void;
   isPurchaser: boolean;
   orderLocked: boolean;
+  /** The rate outlives the lock through Ready to Pay (payment review). */
+  rateLocked: boolean;
   isArchived: boolean;
   /** The purchaser paid the cost themselves, so it comes back in their earnings. */
   selfReimbursed: boolean;
@@ -82,9 +84,9 @@ export function CommissionTab(p: Props) {
             min={0}
             max={100}
             step="0.1"
-            // The rate is part of the closed book; the server refuses it
+            // The rate joins the closed book at Done; the server refuses it
             // there, so the input must not invite the edit.
-            disabled={p.isPurchaser || p.orderLocked}
+            disabled={p.isPurchaser || p.rateLocked}
             value={p.commissionPct}
             placeholder={p.isPurchaser ? '—' : t('eoSetRate')}
             onChange={e => p.onCommissionPct(e.target.value)}

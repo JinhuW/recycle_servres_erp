@@ -3006,7 +3006,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     bcSheetAppliedRepriced: '{n} product(s) priced from the sheet, {m} of them repriced',
     bcMoneyTitle: 'Commission',
     bcMoneyEarnsHint: 'What {name} is paid once this PO is approved.',
-    bcMoneyRateLocked: 'The rate is part of the closed book from Ready to Pay.',
+    bcMoneyRateLocked: 'The rate is part of the closed book once the order is Done.',
     bcMoneyLotPrice: 'Goods at the negotiated lot price.',
     bcMoneyPriced: '{n} of {of} priced',
     bcUnpricedIntro: '{n} product(s) have no sell price. They count as $0 in the commission until priced:',

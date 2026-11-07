@@ -360,11 +360,14 @@ is not a stage but a flag beside one, set once every line has sold
   ownership freeze, notes still append, line goods edits refuse
   — and the PO's lines read Done for every stock and sellable bucket. Managers
   and the owner are notified when a PO reaches it. The stage is a PO stage
-  only: it can't be written as a line status. One field survives the lock:
-  a manager can still change a line's **sell price** from the desktop PO
-  page's line drawer while the PO is at Ready to Pay, so the commission
-  projection can be corrected during payment review; Save stays on the PO
-  (v1.191.1).
+  only: it can't be written as a line status. Payment review keeps a manager
+  a few fields until Done. A line's **sell price** can still be changed from
+  the desktop PO page's line drawer (v1.191.1), and the PO's **commission
+  rate** from the Commission tab or Review mode's Commission card (v1.445.0,
+  RS-569), so the commission projection can be corrected; Save stays on the
+  PO. The **Notes & files** tab (the note and Submission files) stays live
+  for a manager too (v1.445.0). The phone keeps all of these read-only past
+  review, and a purchaser can't change them.
 - **Sold is a flag beside the stage, not a stage** (v1.246.0). A PO at In
   Transit, Reviewing, Ready to Pay or Done whose every line with units is at
   the `Sold` line status is sold; a Draft never is. Nobody sets it: it is
@@ -621,9 +624,9 @@ is not a stage but a flag beside one, set once every line has sold
       formula (goods or negotiated lot price plus fees, revenue over priced
       lines, the rate, the cost back on a self-paid PO) and over the qty
       Approve will leave, so a line ticked at 0 earns nothing.
-    - A **Commission** card in the side panel carries the rate (editable at
-      Reviewing and earlier, read-only once the book closes at Ready to
-      Pay), revenue, cost with the fee broken out, profit, commission and
+    - A **Commission** card in the side panel carries the rate (editable
+      through Ready to Pay, read-only at Done since v1.445.0), revenue, cost
+      with the fee broken out, profit, commission and
       the total, with the unpriced count. The Compare card shows the
       selected product's sell price, its market reference with the basis
       and age, and the final sell price once it has sold. Finish review
