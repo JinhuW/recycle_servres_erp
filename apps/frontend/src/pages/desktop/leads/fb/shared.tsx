@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import type { FbMessage, FbPlacementState, FbSellerAccount, FbThreadStage } from '@recycle-erp/shared';
 import { SEND_STATE_TONE, threadStranded } from '../../../../lib/fbSeller';
-import { fmtUSD0, relTime } from '../../../../lib/format';
+import { fmtDateShort, fmtUSD0, relTime } from '../../../../lib/format';
 import { useT } from '../../../../lib/i18n';
 
 // Pieces every Leads ▸ Facebook tab draws with. The table and empty-state
@@ -53,9 +53,12 @@ export function Money({ usd }: { usd: number | null | undefined }) {
   return usd === null || usd === undefined ? <span className="rl-muted">—</span> : <>{fmtUSD0(usd, locale)}</>;
 }
 
+/** A past time as "3 hr. ago"; a future one (a renewal) as its date, which relTime would call "now". */
 export function Ago({ at }: { at: string | null | undefined }) {
   const { locale } = useT();
-  return at ? <time dateTime={at} title={new Date(at).toLocaleString(locale)}>{relTime(at, locale)}</time> : <span className="rl-muted">—</span>;
+  if (!at) return <span className="rl-muted">—</span>;
+  const future = Date.parse(at) > Date.now() + 60_000;
+  return <time dateTime={at} title={new Date(at).toLocaleString(locale)}>{future ? fmtDateShort(at, locale) : relTime(at, locale)}</time>;
 }
 
 /** The account a thread or placement runs on, marked stranded when it is gone, retired or no longer a seller. */
