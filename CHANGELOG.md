@@ -23,6 +23,17 @@ re-projected commission. The Notes & files tab takes a note and Submission
 files. Done still locks all of it. Purchasers and the phone stay read-only past
 review.
 
+## [1.444.3] - 2026-11-07
+
+Leads ▸ Facebook now runs only against the real seller and agent routes, and
+its pages were checked against them on a seeded local stack (RS-565). That
+check turned up three things the made-up data had hidden: the thread's offer
+ladder counted rounds from 0 while the agent's offer code counts from 1, so
+the highlighted round was one off; a placement's next renewal, a future date,
+read "now"; and the test-run comparison named changed fields by their code
+names. All three are fixed. The development-only fake of the seller routes is
+gone, since nothing needs it any more.
+
 ## [1.444.2] - 2026-11-07
 
 A product on a PO can be saved at a unit cost of $0 from the desktop edit page

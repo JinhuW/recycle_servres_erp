@@ -334,7 +334,7 @@ version.
 
 ```ts
 export type HandedTask =
-  | { id: number; kind: 'search' | 'verify-slug' | 'probe'; city: { slug: string; name: string; radius_km: number }; item: string; lease_expires_at: string }
+  | { id: number; kind: 'search' | 'verify-slug' | 'probe'; city: { slug: string; name: string; radius_km: number }; item: string; lease_expires_at: string; why: FleetTaskWhy }
   | { id: number; kind: FleetSellerTaskKind; city: null; item: null; payload: SellerTaskPayload; lease_expires_at: string };
 ```
 
@@ -434,7 +434,7 @@ It answers `{ ok: true, key }`, and is never required for a task to finish.
 
 ### 5.1 HTTP routes, `/api/fb-seller`
 
-Every route is manager-only, using a cookie session and `effectiveRole`.
+Every route is manager-only through `managerSession` (`src/fleet/auth.ts`): a cookie session and the user's own role. A manager previewing as a purchaser keeps manager access, as everywhere in the repo (`src/lib/role.ts`: a preview is not a demotion).
 
 - **Writes in mirror mode:** a write on a mirror ERP (`FLEET_ROLE=mirror`) answers 409 `{ error: 'mirror', detail }`.
 - **Refusals:** `{ error, detail }`, where `detail` is a sentence, never a status code.
@@ -751,3 +751,11 @@ and change nothing already there.
 - **§6.4.** `saveCaseFromThread` returns `{ caseId }`; `enqueueSellerTask`
   returns `{ taskId } | null` (null: an open task with that ref exists), as A1
   stubbed them.
+- **§4.2.** The search variant of `HandedTask` carries `why: FleetTaskWhy`, as
+  the ERP has always sent it; a worker must accept it.
+- **Dev copy (owner, 2026-11-07).** The nightly prod→dev copy keeps seller
+  conversations as they are. `db-sync` on dev runs with `SYNC_KEEP_FLEET=0`, so
+  dev takes prod's fleet and seller tables together and their references
+  (task payload refs, `fleet_slots.agent_profile_id`) stay consistent. If the
+  fleet ever runs on dev again (`SYNC_KEEP_FLEET=1`), `keep-fleet.sql` and
+  `restore-fleet.sql` must keep the `fb_*` seller tables beside `fleet_*`.

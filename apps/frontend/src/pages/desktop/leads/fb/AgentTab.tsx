@@ -415,6 +415,12 @@ export function EvalResults({ d, title }: { d: FbAgentEvalRunDetail; title: stri
   );
 }
 
+// compareEvals names the fields that differ between the two runs.
+const CHANGE_KEY: Record<string, string> = {
+  handoff: 'fbs_change_handoff', reason_kind: 'fbs_change_reason_kind', offer_usd: 'fbs_change_offer_usd',
+  reply: 'fbs_change_reply', passed: 'fbs_change_passed', present: 'fbs_change_present',
+};
+
 function CompareView({ a, b, labelOf }: { a: number; b: number; labelOf: (profileId: number) => string }) {
   const { t } = useT();
   const { data } = usePolled<FbEvalCompare>(() => fbAgentApi.compare(a, b), null, [a, b]);
@@ -434,7 +440,7 @@ function CompareView({ a, b, labelOf }: { a: number; b: number; labelOf: (profil
         {data.rows.map(r => (
           <tr key={r.case_id} className={r.changed ? 'fbs-differs' : undefined}>
             <td>{r.case_name}</td><td>{side(r.a)}</td><td>{side(r.b)}</td>
-            <td>{r.changes.length ? r.changes.map((c, i) => <p key={i} className="fbs-fired">{c}</p>) : <span className="rl-muted">{t('fbs_compare_same')}</span>}</td>
+            <td>{r.changes.length ? r.changes.map(c => <p key={c} className="fbs-fired">{CHANGE_KEY[c] ? t(CHANGE_KEY[c]) : c}</p>) : <span className="rl-muted">{t('fbs_compare_same')}</span>}</td>
           </tr>
         ))}
       </Table>

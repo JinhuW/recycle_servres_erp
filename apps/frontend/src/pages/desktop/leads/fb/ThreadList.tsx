@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '../../../../components/Icon';
 import { TableSkeleton } from '../../../../components/Skeleton';
-import { fbSellerApi, sortNeedsHuman, usePolled, type FbThreadListRow } from '../../../../lib/fbSeller';
+import type { FbThreadRow } from '@recycle-erp/shared';
+import { fbSellerApi, sortNeedsHuman, usePolled } from '../../../../lib/fbSeller';
 import { useT } from '../../../../lib/i18n';
 import { fbSellerThreadPath, hrefFor, onLinkClick } from '../../../../lib/route';
 import { AccountCell, Ago, Empty, Money, StageChip, Table } from './shared';
@@ -64,12 +65,12 @@ export function ThreadList({ view }: { view: 'needs_human' | 'inbox' }) {
 }
 
 /** The newer of the last message in and out; the row's own update time otherwise. */
-function lastActivity(r: FbThreadListRow): string {
+function lastActivity(r: FbThreadRow): string {
   const at = [r.last_inbound_at, r.last_outbound_at].filter((x): x is string => !!x).sort();
   return at[at.length - 1] ?? r.updated_at;
 }
 
-function SellerLink({ row }: { row: FbThreadListRow }) {
+function SellerLink({ row }: { row: FbThreadRow }) {
   const { t } = useT();
   const href = fbSellerThreadPath(row.id);
   return (
@@ -80,7 +81,7 @@ function SellerLink({ row }: { row: FbThreadListRow }) {
   );
 }
 
-function NeedsTable({ rows, accounts }: { rows: FbThreadListRow[]; accounts: Parameters<typeof AccountCell>[0]['accounts'] }) {
+function NeedsTable({ rows, accounts }: { rows: FbThreadRow[]; accounts: Parameters<typeof AccountCell>[0]['accounts'] }) {
   const { t } = useT();
   return (
     <Table head={<>
@@ -104,7 +105,7 @@ function NeedsTable({ rows, accounts }: { rows: FbThreadListRow[]; accounts: Par
   );
 }
 
-function InboxTable({ rows, accounts }: { rows: FbThreadListRow[]; accounts: Parameters<typeof AccountCell>[0]['accounts'] }) {
+function InboxTable({ rows, accounts }: { rows: FbThreadRow[]; accounts: Parameters<typeof AccountCell>[0]['accounts'] }) {
   const { t } = useT();
   return (
     <Table head={<>
