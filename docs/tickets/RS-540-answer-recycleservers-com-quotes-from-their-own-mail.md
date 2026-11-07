@@ -2,7 +2,7 @@
 id: RS-540
 title: Answer recycleservers.com quotes from their own mailbox
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-11-05
 reporter: jinhu
@@ -52,3 +52,6 @@ forgery reasoning in `mail/match.ts`). WhatsApp. A general N-mailbox config.
   replies go out from sell@ram4cash.com.
 - Formspree stays as the site's backup email, as RS-123 decided.
 - The poll is per box, so a quotes box adds one IMAP login every two minutes.
+- Went live 2026-11-07: `MAIL_QUOTES_*` set on production, the site change
+  shipped as `recycle_servers_home_page` 2abcad9, and a labelled test from the
+  live form stored WS-1005 with the Formspree copy also sent.
