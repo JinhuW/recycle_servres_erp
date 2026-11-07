@@ -5,6 +5,8 @@ import type postgres from 'postgres';
 import {
   cookieUid,
   FLEET_CLOAK_MIN_WORKER_VERSION,
+  FLEET_SELLER_MIN_WORKER_VERSION,
+  FLEET_SELLER_TASK_KINDS,
   FLEET_OUTAGE_LEASE_MINUTES,
   fleetVersionAtLeast,
   FLEET_AUTO_RESUME_BY,
@@ -18,12 +20,14 @@ import {
   type FleetCookie,
   type FleetDevice,
   type FleetItem,
-  type FleetSearchTaskKind,
+  type FleetSellerTaskKind,
+  type FleetTaskKind,
   type FleetSettings,
   type FleetStorageState,
   type FleetTaskWhy,
   type HandedTask,
   type NextTaskAnswer,
+  type SellerTaskPayload,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
@@ -41,7 +45,8 @@ import { exitIpForStint, latestProxyExit, slotWaits, type ProxyExitMeasure } fro
 import { exhaustedProxyIds } from './proxyMarks';
 import { notifyReady } from './scheduler';
 import { linkLaunch, readLaunchFacts } from './profile';
-import { minutesTodaySql, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
+import { minutesTodaySql, SELLER_WRITE_KINDS, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
+import sellerWorker from './seller';
 import { loadRelease, ownWorkerId } from './hosts';
 import { recordStateChange } from './stateEvents';
 
@@ -392,6 +397,9 @@ worker.post('/claim', claimAuth, async (c) => {
     // The few workers that can run a cloak slot are the only ones it can go
     // to, so one of them takes it before a stock slot any worker could take.
     const cloakFirst = cloakCapable ? tx`(s.device->>'browser_engine' = 'cloak') DESC NULLS LAST,` : tx``;
+    // A seller slot's tasks are kinds an older worker cannot run, so it waits
+    // for one that can rather than sit claimed and idle.
+    const roleRuns = fleetVersionAtLeast(version, FLEET_SELLER_MIN_WORKER_VERSION) ? tx`TRUE` : tx`s.role <> 'seller'`;
 
     // This boot's own slot (a retried claim) or the one held for it (a
     // handoff) waits for its lock: skipping it would hand the same boot a
@@ -407,7 +415,7 @@ worker.post('/claim', claimAuth, async (c) => {
         // A retried claim keeps what its boot was given. A handoff is a new
         // boot, and one that opened no Facebook page is still a first login.
         [row] = await tx<ClaimRow[]>`${CLAIM_SELECT(tx)} WHERE s.account_no = ${mine.account_no} AND a.status = 'fleet'
-          AND ${engineRuns} AND ((${claimId}::text IS NOT NULL AND s.claim_id = ${claimId}) OR NOT ${slotWaits(tx, exhausted)})
+          AND ${engineRuns} AND ${roleRuns} AND ((${claimId}::text IS NOT NULL AND s.claim_id = ${claimId}) OR NOT ${slotWaits(tx, exhausted)})
           FOR NO KEY UPDATE OF a`;
       }
     }
@@ -418,7 +426,7 @@ worker.post('/claim', claimAuth, async (c) => {
     if (!row) {
       [row] = await tx<ClaimRow[]>`
         ${CLAIM_SELECT(tx)}
-        WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AND ${engineRuns}
+        WHERE a.status = 'fleet' AND (s.lease_expires_at IS NULL OR s.lease_expires_at < NOW()) AND ${engineRuns} AND ${roleRuns}
           AND NOT ${slotWaits(tx, exhausted)}
         ORDER BY (s.worker_id = ${worker_id}) DESC NULLS LAST,
           ${cloakFirst}
@@ -525,26 +533,42 @@ worker.post('/claim', claimAuth, async (c) => {
 
 // ─── Heartbeat ────────────────────────────────────────────────────────────────
 
-/** Puts a worker's leased tasks back on the queue; the ids it returned. */
+/**
+ * Puts a worker's leased tasks back on the queue; the ids it let go. A seller
+ * write (a post, a delete, a send) may already be out, so it is never run
+ * again: it turns uncertain and the seller side settles it. Seller tasks keep
+ * their account, as a probe does.
+ */
 async function releaseTasks(
   tx: SqlLike, where: { worker_id: string; account_no?: number; epoch?: number } | { account_no: number }, reason: string,
 ): Promise<number[]> {
-  const rows = await tx<{ id: number; item: string }[]>`
-    UPDATE fleet_tasks SET
-      state = 'ready', due_at = NOW(), worker_id = NULL, epoch = NULL, leased_at = NULL, lease_expires_at = NULL, started_at = NULL,
-      account_no = CASE WHEN kind = 'probe' THEN account_no ELSE NULL END
-    WHERE state = 'leased'
+  const held = tx`state = 'leased'
       AND ${'worker_id' in where ? tx`worker_id = ${where.worker_id}` : tx`account_no = ${where.account_no}`}
       ${'worker_id' in where && where.account_no !== undefined ? tx`AND account_no = ${where.account_no}` : tx``}
-      ${'epoch' in where ? tx`AND epoch = ${where.epoch!}` : tx``}
+      ${'epoch' in where ? tx`AND epoch = ${where.epoch!}` : tx``}`;
+  const uncertain = await tx<{ id: number }[]>`
+    UPDATE fleet_tasks SET state = 'uncertain', done_at = NOW()
+    WHERE ${held} AND kind = ANY(${SELLER_WRITE_KINDS}::text[])
+    RETURNING id::int AS id`;
+  const rows = await tx<{ id: number; item: string | null }[]>`
+    UPDATE fleet_tasks SET
+      state = 'ready', due_at = NOW(), worker_id = NULL, epoch = NULL, leased_at = NULL, lease_expires_at = NULL, started_at = NULL,
+      account_no = CASE WHEN kind = 'probe' OR kind = ANY(${sellerKinds}::text[]) THEN account_no ELSE NULL END
+    WHERE ${held}
     RETURNING id::int AS id, item`;
+  const by = 'worker_id' in where ? where.worker_id : null;
+  for (const r of uncertain) {
+    await tx`
+      INSERT INTO fleet_task_events (task_id, worker_id, kind, detail)
+      VALUES (${r.id}, ${by}, 'released', ${tx.json({ reason, state: 'uncertain' })})`;
+  }
   for (const r of rows) {
     await tx`
       INSERT INTO fleet_task_events (task_id, worker_id, kind, detail)
-      VALUES (${r.id}, ${'worker_id' in where ? where.worker_id : null}, 'released', ${tx.json({ reason })})`;
-    await notifyReady(tx, [r.item]);
+      VALUES (${r.id}, ${by}, 'released', ${tx.json({ reason })})`;
+    await notifyReady(tx, [r.item ?? '']);
   }
-  return rows.map((r) => r.id);
+  return [...uncertain, ...rows].map((r) => r.id);
 }
 
 export { releaseTasks };
@@ -702,31 +726,44 @@ worker.post('/profile-launch', workerAuth, async (c) => {
 // ─── Next task ────────────────────────────────────────────────────────────────
 
 type PickRow = {
-  id: number; kind: FleetSearchTaskKind; city: string; name: string; radius_km: number; item: string;
-  reason: string | null; lease_expires_at: Date; familiar: boolean;
+  id: number; kind: FleetTaskKind; city: string | null; name: string | null; radius_km: number | null; item: string | null;
+  reason: string | null; lease_expires_at: Date; familiar: boolean; payload: unknown;
 };
 
 type Pick = NextTaskAnswer | { stale: true };
 
+const sellerKinds: string[] = [...FLEET_SELLER_TASK_KINDS];
+const isSellerKind = (k: FleetTaskKind): k is FleetSellerTaskKind => sellerKinds.includes(k);
+
 function why(r: PickRow): FleetTaskWhy {
   if (r.kind === 'probe') return 'probe';
+  if (isSellerKind(r.kind)) return 'other';
   if (r.reason === 'manual') return 'manual';
   if (r.familiar) return 'familiar';
   return 'other';
 }
 
 function handed(r: PickRow, leaseExpiresAt: Date): HandedTask {
+  if (isSellerKind(r.kind)) {
+    return {
+      id: r.id, kind: r.kind, city: null, item: null,
+      payload: r.payload as SellerTaskPayload, lease_expires_at: leaseExpiresAt.toISOString(),
+    };
+  }
   return {
     id: r.id,
     kind: r.kind,
-    city: { slug: r.city, name: r.name, radius_km: r.radius_km },
-    item: r.item,
+    city: { slug: r.city!, name: r.name!, radius_km: r.radius_km! },
+    item: r.item!,
     lease_expires_at: leaseExpiresAt.toISOString(),
     why: why(r),
   };
 }
 
-/** Tasks with the city's name and whether this account searched the city lately. */
+const handedDetail = (r: PickRow): Record<string, string> =>
+  isSellerKind(r.kind) ? { ref: String((r.payload as { ref?: unknown } | null)?.ref ?? '') } : { why: why(r) };
+
+/** Tasks with the city's name and whether this account searched the city lately; a seller task has no city. */
 function taskRows(tx: SqlLike, w: WorkerIdentity, settings: FleetSettings) {
   return tx`
     WITH familiar AS (
@@ -735,8 +772,8 @@ function taskRows(tx: SqlLike, w: WorkerIdentity, settings: FleetSettings) {
         AND done_at > NOW() - ${`${settings.familiar_days} days`}::interval
     )
     SELECT t.id::int AS id, t.kind, t.city, c.name, c.radius_km, t.item, t.reason, t.lease_expires_at, t.priority, t.due_at,
-      (f.city IS NOT NULL) AS familiar
-    FROM fleet_tasks t JOIN fleet_cities c ON c.slug = t.city LEFT JOIN familiar f ON f.city = t.city`;
+      (f.city IS NOT NULL) AS familiar, t.payload
+    FROM fleet_tasks t LEFT JOIN fleet_cities c ON c.slug = t.city LEFT JOIN familiar f ON f.city = t.city`;
 }
 
 /**
@@ -788,7 +825,7 @@ async function pickTask(
     if (held) {
       await tx`
         INSERT INTO fleet_task_events (task_id, worker_id, kind, detail)
-        VALUES (${held.id}, ${w.worker_id}, 'handed', ${tx.json({ why: why(held), again: true })})`;
+        VALUES (${held.id}, ${w.worker_id}, 'handed', ${tx.json({ ...handedDetail(held), again: true })})`;
       return { task: handed(held, held.lease_expires_at) };
     }
 
@@ -801,21 +838,39 @@ async function pickTask(
 
     const [{ quarantined }] = await tx<{ quarantined: boolean }[]>`
       SELECT COALESCE(quarantined_until > NOW(), FALSE) AS quarantined FROM fleet_slots WHERE account_no = ${w.account_no}`;
+    // A seller slot takes its own account's seller tasks, once its worker is a
+    // release that knows them, and its own probes; never a search.
+    const seller = slot.role === 'seller';
+    let sells = false;
+    if (seller && !quarantined) {
+      const [me] = await tx<{ version: string | null }[]>`SELECT version FROM fleet_workers WHERE worker_id = ${w.worker_id}`;
+      sells = fleetVersionAtLeast(me?.version ?? null, FLEET_SELLER_MIN_WORKER_VERSION);
+    }
+    let overBudget = false;
     if (!quarantined) {
       const [used] = await tx<{ minutes: number }[]>`SELECT ${minutesTodaySql(tx, w.account_no)} AS minutes`;
       const allowed = isPaced(w.account_no, settings.pace_percent)
         ? pacedAllowance(settings.budget_minutes, easternMinutes(new Date()))
         : settings.budget_minutes;
-      if (used.minutes >= allowed) {
+      overBudget = used.minutes >= allowed;
+      // The budget is for searching; posting and the inbox go on past it.
+      if (overBudget && !sells) {
         return { task: null, retry_after: RETRY_BLOCKED, reason: 'budget' };
       }
     }
     // A quarantined account only probes its own slot; everyone else takes
     // searches and slug checks, plus a probe aimed at them whose quarantine
     // has lapsed meanwhile.
+    const own = tx`t.account_no = ${w.account_no}`;
     const kinds = quarantined
-      ? tx`t.kind = 'probe' AND t.account_no = ${w.account_no}`
-      : tx`(t.kind <> 'probe' OR t.account_no = ${w.account_no})`;
+      ? tx`t.kind = 'probe' AND ${own}`
+      : !seller
+        ? tx`(t.kind <> 'probe' OR ${own}) AND t.kind <> ALL(${sellerKinds}::text[])`
+        : !sells
+          ? tx`t.kind = 'probe' AND ${own}`
+          : overBudget
+            ? tx`t.kind = ANY(${sellerKinds}::text[]) AND ${own}`
+            : tx`(t.kind = 'probe' OR t.kind = ANY(${sellerKinds}::text[])) AND ${own}`;
     const [row] = await tx<PickRow[]>`
       ${taskRows(tx, w, settings)}
       WHERE t.state = 'ready' AND t.due_at <= NOW() AND ${kinds}
@@ -837,7 +892,7 @@ async function pickTask(
       RETURNING lease_expires_at`;
     await tx`
       INSERT INTO fleet_task_events (task_id, worker_id, kind, detail)
-      VALUES (${row.id}, ${w.worker_id}, 'handed', ${tx.json({ why: why(row) })})`;
+      VALUES (${row.id}, ${w.worker_id}, 'handed', ${tx.json(handedDetail(row))})`;
     return { task: handed(row, leased.lease_expires_at) };
   });
 }
@@ -1002,5 +1057,11 @@ worker.get('/vnc', workerAuth, (c) => {
   c.header('X-Fleet-Worker-Id', c.var.worker.worker_id);
   return c.body(null, 204);
 });
+
+// ─── Seller reports ───────────────────────────────────────────────────────────
+// What a seller worker did on Facebook, accepted even after its lease is gone
+// (fleet/seller.ts).
+
+worker.route('/seller', sellerWorker);
 
 export default worker;
