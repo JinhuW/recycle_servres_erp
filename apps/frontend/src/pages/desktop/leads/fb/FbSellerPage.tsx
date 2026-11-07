@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Icon, type IconName } from '../../../../components/Icon';
-import { fbMockOn, useFbSellerSummary } from '../../../../lib/fbSeller';
+import { useFbSellerSummary } from '../../../../lib/fbSeller';
 import { useT } from '../../../../lib/i18n';
 import { fbSellerTabPath, hrefFor, matchFbSellerRoute, onLinkClick, useRoute, type FbSellerTab } from '../../../../lib/route';
 import { AdsTab } from './AdsTab';
@@ -58,7 +58,6 @@ export function FbSellerPage() {
         <div className="page-sub">{t('nav_leads')} / {t('nav_leads_facebook')}</div>
         <h1 className="page-title">{t('fbs_title')}</h1>
       </div>
-      {fbMockOn() && <span className="chip warn" title={t('fbs_mock_hint')}>{t('fbs_mock')}</span>}
       </div>
       <nav className="tabs rl-tabs" aria-label={t('fbs_views')}>
         {TABS.map(x => {

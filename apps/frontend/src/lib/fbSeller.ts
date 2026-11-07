@@ -9,46 +9,22 @@ import { api } from './api';
 import { handleFetchError } from './errorToast';
 
 // ─── Leads ▸ Facebook: the client ─────────────────────────────────────────────
-// Every call to /api/fb-seller and /api/fb-agent goes through here. Until the
-// seller backend lands, a dev build can answer /api/fb-seller from an in-memory
-// fake of its routes (lib/fbSellerMock.ts), switched on with
-// localStorage['erp.fbSeller.mock'] = '1'. A production build never loads it.
+// Every call to /api/fb-seller and /api/fb-agent goes through here.
 
 export type Paged<T> = { rows: T[]; next: string | null };
 
-// C adds `ceiling_usd` to FbThreadRow in shared/fbSeller.ts (CONTRACTS §9);
-// until it lands the list row carries it here.
-
-/** The thread list row with the ceiling the Needs human table shows beside the offer. */
-export type FbThreadListRow = FbThreadRow & { ceiling_usd?: number | null };
 export type FbPlaceResult = { placements: FbPlacement[]; refused: { account_no: number; location: string; reason: string }[] };
 export type FbUploadResult = { added: FbPhoto[]; refused: { name: string; reason: string }[] };
-
-type Transport = Pick<typeof api, 'get' | 'post' | 'put' | 'patch' | 'delete' | 'upload'>;
 
 const S = '/api/fb-seller';
 const A = '/api/fb-agent';
 
-const MOCK_KEY = 'erp.fbSeller.mock';
-export function fbMockOn(): boolean {
-  if (!import.meta.env.DEV) return false;
-  try { return localStorage.getItem(MOCK_KEY) === '1'; } catch { return false; }
-}
-
-let mock: Promise<Transport> | null = null;
-// Only the seller routes are faked; /api/fb-agent always reaches the backend.
-function transport(path: string): Promise<Transport> {
-  if (!path.startsWith(S) || !fbMockOn()) return Promise.resolve(api);
-  mock ??= import('./fbSellerMock').then(m => m.fbMockTransport);
-  return mock;
-}
-
-const get = async <T,>(path: string) => (await transport(path)).get<T>(path);
-const post = async <T,>(path: string, body: unknown = {}) => (await transport(path)).post<T>(path, body);
-const put = async <T,>(path: string, body: unknown) => (await transport(path)).put<T>(path, body);
-const patch = async <T,>(path: string, body: unknown) => (await transport(path)).patch<T>(path, body);
-const del = async <T,>(path: string) => (await transport(path)).delete<T>(path);
-const upload = async <T,>(path: string, form: FormData) => (await transport(path)).upload<T>(path, form);
+const get = <T,>(path: string) => api.get<T>(path);
+const post = <T,>(path: string, body: unknown = {}) => api.post<T>(path, body);
+const put = <T,>(path: string, body: unknown) => api.put<T>(path, body);
+const patch = <T,>(path: string, body: unknown) => api.patch<T>(path, body);
+const del = <T,>(path: string) => api.delete<T>(path);
+const upload = <T,>(path: string, form: FormData) => api.upload<T>(path, form);
 
 /** A query string from the set values only. */
 export function qs(params: Record<string, string | number | boolean | null | undefined>): string {
@@ -90,7 +66,7 @@ export const fbSellerApi = {
   resolve: (id: number, live: boolean, fb_listing_id?: string) =>
     post<FbPlacement>(`${S}/placements/${id}/resolve`, fb_listing_id ? { live, fb_listing_id } : { live }),
   threads: (view: 'needs_human' | 'inbox' | 'closed', f: { account_no?: number; q?: string; cursor?: string | null } = {}) =>
-    get<Paged<FbThreadListRow>>(`${S}/threads${qs({ view, ...f })}`),
+    get<Paged<FbThreadRow>>(`${S}/threads${qs({ view, ...f })}`),
   thread: (id: number) => get<FbThreadDetail>(`${S}/threads/${id}`),
   reply: (id: number, body: string) => post<FbMessage>(`${S}/threads/${id}/reply`, { body }),
   takeOver: (id: number) => post<FbThreadDetail>(`${S}/threads/${id}/take-over`),
@@ -229,13 +205,13 @@ export function sortNeedsHuman<T extends Pick<FbThreadRow, 'stage' | 'human_at' 
 }
 
 /**
- * Every round's offer for a ceiling, as lib/fbOffer.ts computes it on the
- * server (CONTRACTS §6.6): the opening share plus a step per round, never
- * above the ceiling, rounded to the dollar.
+ * Every round's offer for a ceiling, as lib/fbOffer.ts's offerAmount computes
+ * it on the server: round 1 is the opening share, each later round adds a
+ * step, never above the ceiling, rounded to the dollar. Index 0 is round 1.
  */
 export function offerLadder(ceiling: number, o: FbSellerSettings['offer']): number[] {
-  return Array.from({ length: Math.max(1, o.max_rounds) }, (_, r) =>
-    Math.min(ceiling, Math.round((ceiling * (o.opening_pct + o.step_pct * r)) / 100)));
+  return Array.from({ length: Math.max(1, o.max_rounds) }, (_, i) =>
+    Math.min(ceiling, Math.round((ceiling * (o.opening_pct + o.step_pct * i)) / 100)));
 }
 
 /** The chip tone for an outbound message's send state. */
