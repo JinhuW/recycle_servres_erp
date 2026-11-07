@@ -82,6 +82,11 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const lines = order.lines;
   const readOnly = order.archivedAt !== null;
   const atReviewing = order.lifecycle === 'reviewing';
+  // Past review the line is closed book, but the sell price stays the
+  // manager's until Done, as on the PO page: the drawer opens view-only with
+  // that one field live, written through the same line PATCH as the column.
+  const priceOnly = order.lifecycle === 'ready_to_pay';
+  const closedBook = priceOnly || order.lifecycle === 'done';
 
   const [selectedId, setSelectedId] = useState<string | null>(lines[0]?.id ?? null);
   const [editing, setEditing] = useState<Editing | null>(null);
@@ -315,6 +320,16 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     await flush();
     showToast(t('bcLineSaved', { n }), 'success');
     await onReload();
+  };
+
+  // False keeps the drawer open; savePrice has already said why.
+  const saveDrawerPrice = async (): Promise<boolean> => {
+    const l = editing && lineById.get(editing.line._id ?? '');
+    if (!l) return true;
+    const raw = editing.line.sellPrice;
+    const parsed = raw == null || raw === '' ? null : parsePriceInput(String(raw));
+    if (parsed === undefined) { showErrorDialog(t('subFillThisLine')); return false; }
+    return savePrice(l, parsed);
   };
 
   const applyUndo = () => {
@@ -1586,7 +1601,9 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
           canRemove={false}
           onConfirmLine={confirmEdit}
           onConfirmError={showErrorDialog}
-          readOnly={!ready}
+          readOnly={!ready || closedBook}
+          sellPriceEditable={ready && priceOnly}
+          onSavePrice={saveDrawerPrice}
           missingFields={missingFieldNames(editRequirements(editing.line).missingKeys, t, lang)}
         />
       )}
