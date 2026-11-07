@@ -20,6 +20,25 @@ deployed?" harder to answer.
 
 ### Added
 
+- **A worker can run seller tasks (RS-565).** The vendored monitor (pin
+  `d788039`) takes four new kinds from `next-task`: `ad-post` (download the
+  task's photos, fill the create form, publish, and report the new listing's
+  id), `ad-delete`, `inbox-sync` (the newest threads and their last messages,
+  oldest first) and `msg-send`. It picks the kind before it looks up an item,
+  so a seller task never searches and search does not change. Each task
+  checks for a wall after every navigation and every submit, reports to
+  `POST /api/fleet/worker/seller/report` before its `done`, and parks on a
+  wall the way a search does. A publish, delete or send it could not see
+  land is reported `uncertain` and never retried. The browser steps are
+  ported from `rs_poster` and `rs_messenger`, which stay out of the worker
+  image, and their selectors and timings live in `seller_tasks.py`. Ported
+  with fixes: a bubble whose sender can't be told is `unknown`, never `in`;
+  two identical messages in a row stay two; image bubbles are flagged; a
+  multi-line reply goes out as one message; a reply that is already the
+  newest outbound bubble is not typed again. Nothing hands these tasks out
+  yet: the ERP's `FLEET_SELLER_MIN_WORKER_VERSION` stays above every
+  released worker until the rollout.
+
 - **A cloak worker reports its browser to the ERP before any Facebook page.**
   After a passing preflight it sends hashes of what the browser really showed
   (canvas, WebGL, hardware, screen, platform, languages) plus the user agent and
