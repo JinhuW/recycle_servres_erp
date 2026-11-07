@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../../lib/api';
 import { webSubChanged } from '../../lib/webSubmissions';
 import { useT } from '../../lib/i18n';
-import { match, navigate, useRoute } from '../../lib/route';
+import { DESKTOP_VIEW_TO_PATH, matchWebsiteLead, navigate, useRoute, websiteLeadPath } from '../../lib/route';
 import { Icon } from '../../components/Icon';
 import { SubmissionThread, type MailMode } from './DesktopWebSubmissionThread';
 
@@ -78,9 +78,9 @@ function lineLabel(l: SellLine): string {
 
 export function DesktopWebSubmissions({ onToast }: Props = {}) {
   const { path } = useRoute();
-  const detail = match('/web-submissions/:id', path);
+  const detail = matchWebsiteLead(path);
   return detail
-    ? <SubmissionDetail id={decodeURIComponent(detail.id!)} onToast={onToast} />
+    ? <SubmissionDetail id={decodeURIComponent(detail.id)} onToast={onToast} />
     : <SubmissionList onToast={onToast} />;
 }
 
@@ -211,7 +211,7 @@ function SubmissionList({ onToast }: Props) {
             <tbody>
               {items.map(s => (
                 <tr key={s.id} style={{ cursor: 'pointer' }}
-                    onClick={() => navigate('/web-submissions/' + encodeURIComponent(s.id))}>
+                    onClick={() => navigate(websiteLeadPath(s.id))}>
                   <td className="mono" style={{ fontWeight: 600 }}>{s.id}</td>
                   <td>{new Date(s.createdAt).toLocaleString()}</td>
                   <td>{SITE_LABEL[s.site]}</td>
@@ -309,7 +309,7 @@ function SubmissionDetail({ id, onToast }: Props & { id: string }) {
   };
 
   const back = (
-    <button className="btn" onClick={() => navigate('/web-submissions')}>
+    <button className="btn" onClick={() => navigate(DESKTOP_VIEW_TO_PATH.websubmissions)}>
       <Icon name="chevronLeft" size={13} /> {t('webSubBack')}
     </button>
   );

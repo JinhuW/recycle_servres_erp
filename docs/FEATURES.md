@@ -1303,6 +1303,11 @@ log and `orders.supplier_id`.
 
 ## Leads (Reddit sellers)
 
+Leads has one child per source. **Leads ▸ Website** (managers only, v1.436.0)
+is the inbox for the public website forms, described with the public forms
+further down. Clicking Leads opens Reddit. The closed row's badge adds up both
+sources.
+
 **Leads ▸ Reddit** (`#/leads/reddit`, v1.392.0, RS-477) is a pool of sellers to
 buy from. They are found in the swap subreddits' public trade records: u/LabB0T
 on r/homelabsales and u/hwsbot on r/hardwareswap log every confirmed sale
@@ -4241,8 +4246,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   greyed out for a worker that holds no slot. Homelab ids keep the
   coordinator's feed.
 
-- **Web submissions** — the manager inbox for the public website forms
-  (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the
+- **Leads ▸ Website** (`#/leads/website`) — the manager inbox for the public
+  website forms (v1.187.0; called Web submissions and top-level in the sidebar
+  until v1.436.0, whose old links still open). The ram4cash.com sell form (`POST /api/public/intake`) and the
   recycleservers.com quote form (`POST /api/public/quote`) each store a
   `WS-nnnn` row and notify managers; nothing anonymous touches orders. The page
   lists them by status (new / contacted / converted / archived / spam) with
