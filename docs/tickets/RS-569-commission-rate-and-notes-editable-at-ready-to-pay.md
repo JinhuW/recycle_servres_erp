@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-07
 reporter: jinhu
 branch: JinhuW/feat-commission-rate-editable
-pr:
+pr: 1165
 version: 1.445.0
 related: [RS-131, RS-567]
 ---
