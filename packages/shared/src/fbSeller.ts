@@ -444,3 +444,62 @@ export type FbAgentEvalRun = {
   created_at: string;
   finished_at: string | null;
 };
+
+// ─── Shadow runs and evals (/api/fb-agent, CONTRACTS §6.7) ────────────────────
+
+/** A candidate's shadow decision beside the live one for the same inbound message. */
+export type FbShadowPair = {
+  trigger_message_id: number | null;
+  thread_id: number | null;
+  trigger_body: string | null;
+  created_at: string;
+  shadow: FbAgentRunBrief;
+  /** Null when the live run is gone or never happened. */
+  live: FbAgentRunBrief | null;
+};
+
+export type FbShadowPage = { rows: FbShadowPair[]; next: string | null };
+
+/** One case of an eval run, graded against the case's expectation. */
+export type FbEvalCaseResult = {
+  case_id: number;
+  case_name: string;
+  run_id: number;
+  state: 'queued' | 'running' | 'done' | 'failed';
+  decision: AgentDecision | null;
+  /** Null while the case has not run. */
+  passed: boolean | null;
+  /** Why it failed, in words; empty when it passed. */
+  why: string[];
+  cost_usd: number | null;
+  error: string | null;
+};
+
+export type FbAgentEvalRunDetail = FbAgentEvalRun & {
+  profile: { id: number; name: string; version: number };
+  /** Why the run stopped early, in words. */
+  error: string | null;
+  results: FbEvalCaseResult[];
+};
+
+/** What compare looks at in one case's decision. */
+export type FbEvalCaseSummary = {
+  handoff: boolean;
+  reason_kind: string | null;
+  offer_usd: number | null;
+  reply: string | null;
+  passed: boolean | null;
+};
+
+export type FbEvalCompareRow = {
+  case_id: number;
+  case_name: string;
+  /** Null when the case is missing from that run. */
+  a: FbEvalCaseSummary | null;
+  b: FbEvalCaseSummary | null;
+  changed: boolean;
+  /** The fields that differ: handoff, reason_kind, offer_usd, reply, passed, or present. */
+  changes: string[];
+};
+
+export type FbEvalCompare = { a: FbAgentEvalRun; b: FbAgentEvalRun; rows: FbEvalCompareRow[]; changed: number };

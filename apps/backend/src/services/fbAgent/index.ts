@@ -1,4 +1,4 @@
-import type { AgentDecision, AgentInput, FbAgentProfile } from '@recycle-erp/shared';
+import type { AgentDecision, AgentInput, FbAgentProfile, FbSellerSettings } from '@recycle-erp/shared';
 import type { SqlLike } from '../../db';
 import type { Env } from '../../types';
 
@@ -16,4 +16,14 @@ export async function decide(_input: AgentInput, _profile: FbAgentProfile, _llm:
 
 export function startFbAgentLoop(_env: Env): { stop: () => void } {
   return { stop: () => {} };
+}
+
+/** The OpenRouter-backed AgentLlm the loop and eval runs use. */
+export function agentLlmFor(_env: Env): AgentLlm {
+  return () => { throw new Error('agentLlmFor is not implemented'); };
+}
+
+/** Spend on every run (live, shadow, eval) since midnight in settings.active_hours.tz. */
+export async function agentSpentTodayUsd(_sql: SqlLike, _settings: FbSellerSettings): Promise<number> {
+  throw new Error('agentSpentTodayUsd is not implemented');
 }

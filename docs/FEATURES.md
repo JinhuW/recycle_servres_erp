@@ -1314,6 +1314,14 @@ they post, their photo pools, the negotiating agent and its settings. So far it
 shows its tabs (Needs human, Inbox, Ads, Photos, Agent, Settings), each marked
 coming soon.
 
+The agent's setup is a versioned profile (v1.439.0). Only a draft can be
+edited. A draft becomes the candidate, which runs in shadow next to the live
+version, or becomes active. There is exactly one active version, and rolling
+back makes a retired version active again. Saved cases freeze a conversation,
+including the Market prices it was priced with. An eval replays every case
+against a version, and compare shows which cases changed between two evals.
+So far this is the `/api/fb-agent` routes; the Agent tab comes later.
+
 **Leads ▸ Reddit** (`#/leads/reddit`, v1.392.0, RS-477) is a pool of sellers to
 buy from. They are found in the swap subreddits' public trade records: u/LabB0T
 on r/homelabsales and u/hwsbot on r/hardwareswap log every confirmed sale

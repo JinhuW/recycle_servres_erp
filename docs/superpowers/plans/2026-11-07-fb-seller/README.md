@@ -133,7 +133,7 @@ profile shape and `runAgent`, E at the HTTP routes and DTOs.
 | B | PR open | #1146 | tracker [Unreleased], monitor pin `d788039` | no release cut; fixtures are guesses until F.live refreshes them |
 | C | not started | | | |
 | D1 | not started | | | |
-| D2 | not started | | | |
+| D2 | PR open | #1150 | 1.439.0 | registry is a local §6.5 copy until D1 merges |
 | E | not started | | | |
 | R | not started | | | |
 | F.local | not started | | | |
