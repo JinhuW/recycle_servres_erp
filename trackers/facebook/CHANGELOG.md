@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-07
+
 ### Added
 
 - **A worker can run seller tasks (RS-565).** The vendored monitor (pin
