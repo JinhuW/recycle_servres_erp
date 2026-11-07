@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-561](./RS-561-add-accounts-to-the-pool-by-api-and-a-skill.md) | done | story | P2 | Add accounts to the pool by API and a skill | — |
 | [RS-560](./RS-560-redeploys-cause-the-fleet-s-502s-and-503s.md) | done | bug | P2 | Redeploys cause the fleet's 502s and 503s | 1.433.3 |
 | [RS-559](./RS-559-engine-mismatch-reason-does-not-promise-one-login.md) | done | bug | P2 | Engine mismatch reason does not promise one login | 1.433.2 |
 | [RS-558](./RS-558-alerts-show-the-detailed-reason-not-the-status-code.md) | done | bug | P2 | Alerts show the detailed reason, not the status code | 1.433.1 |

@@ -206,7 +206,7 @@ describe('DCR /oauth/register', () => {
   });
 
   it('never registers a connector for a service-only scope, asked for or not', async () => {
-    for (const scope of [undefined, 'market:read wechat:write fleet:read']) {
+    for (const scope of [undefined, 'market:read wechat:write fleet:read pool:write']) {
       const r = await api('POST', '/oauth/register', {
         body: { client_name: 'wechat', redirect_uris: ['https://example.com/cb'], ...(scope ? { scope } : {}) },
       });
@@ -214,6 +214,7 @@ describe('DCR /oauth/register', () => {
       const granted = ((r.body as Record<string, unknown>).scope as string).split(' ');
       expect(granted).not.toContain('wechat:write');
       expect(granted).not.toContain('fleet:read');
+      expect(granted).not.toContain('pool:write');
     }
   });
 

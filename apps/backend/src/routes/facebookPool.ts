@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import {
   FB_FAILED_OUTCOMES,
   FB_POOL_LIMIT,
@@ -25,7 +25,8 @@ import { allLimited } from '../lib/concurrency';
 import { log } from '../lib/log';
 import { effectiveRole, requireManager } from '../lib/role';
 import { poolKey, sealOrNull, unsealOrEmpty } from '../lib/sealed';
-import type { Env, User } from '../types';
+import { bearerGuard } from '../oauth/guard';
+import type { Env, OAuthCtx, User } from '../types';
 import { dropSlot } from '../fleet/claim';
 import { exitIpForStint } from '../fleet/proxyExit';
 import { proxyMarks, workerIpGroups } from '../fleet/proxyMarks';
@@ -37,10 +38,21 @@ import { ACCOUNT_ID, WORKER_ID, callFacade } from './coordinator';
 // is dozens of rows, so the page replaces its snapshot instead of patching it.
 // The fleet's own vault (trackers/facebook, worker logins) is a separate store:
 // `fleet` here says which worker an account went to, and `/assign` is the one
-// route that copies a login across.
+// route that copies a login across. /push/* is the one surface without a
+// session: a pool:write service client adds accounts there and reads nothing
+// back.
 
-type Vars = { user: User; key: Buffer };
+type Vars = { user: User; key: Buffer; oauthCtx: OAuthCtx };
 type Tx = SqlLike;
+// A service client has a name but no member behind it.
+type Actor = { id: string | null; name: string };
+
+const PUSH_PREFIX = '/api/facebook-pool/push/';
+const isPush = (path: string) => path.startsWith(PUSH_PREFIX);
+// The sub-app's context is a superset of each guard's; they only read and set
+// their own variable.
+const asVars = (mw: unknown) => mw as MiddlewareHandler<{ Bindings: Env; Variables: Vars }>;
+const pushGuard = asVars(bearerGuard({ scopes: ['pool:write'] }));
 
 const NOT_CONFIGURED = 'The account pool is not configured — set FB_POOL_KEY';
 const MAX_IMPORT_ROWS = 500;
@@ -98,7 +110,7 @@ type EventRow = {
 const ms = (d: Date | null) => (d === null ? null : d.getTime());
 
 const pool = new Hono<{ Bindings: Env; Variables: Vars }>()
-  .use('*', authMiddleware)
+  .use('*', (c, next) => (isPush(c.req.path) ? pushGuard(c, next) : asVars(authMiddleware)(c, next)))
   .use('*', async (c, next) => {
     const key = poolKey(c.env);
     if (!key) return c.json({ error: NOT_CONFIGURED }, 503);
@@ -108,7 +120,7 @@ const pool = new Hono<{ Bindings: Env; Variables: Vars }>()
 
 export async function writeEvent(
   tx: Tx,
-  user: User,
+  user: Actor,
   kind: FbPoolEventKind,
   status: FbPoolStatus,
   accountNo: number | null,
@@ -393,7 +405,7 @@ pool.post('/:no/events', async (c) => {
 
 // ── Managers: add, import, edit, retire, remove ─────────────────────────────
 
-pool.use('*', requireManager);
+pool.use('*', (c, next) => (isPush(c.req.path) ? next() : asVars(requireManager)(c, next)));
 
 type Sealed = {
   password_enc: string | null;
@@ -415,7 +427,7 @@ function sealDraft(d: FbPoolDraft, key: Buffer): Sealed {
   };
 }
 
-async function insertAccount(tx: Tx, d: FbPoolDraft, key: Buffer, batch: string, user: User): Promise<number> {
+async function insertAccount(tx: Tx, d: FbPoolDraft, key: Buffer, batch: string, user: Actor): Promise<number> {
   const s = sealDraft(d, key);
   const holderId = await resolveHolder(tx, d.holder);
   const [row] = await tx<{ no: number }[]>`
@@ -871,37 +883,68 @@ pool.delete('/:no', async (c) => {
   return c.json(await snapshot(sql, c.var.key, user));
 });
 
-// All-or-nothing: the page already dropped the rows that fail its own checks,
-// so a refusal here means the pool changed under it (another import landed
-// the same uid). The offending rows are named so it can show which.
+function readImportRows(rows: unknown, shape: (row: unknown) => unknown = (row) => row) {
+  if (!Array.isArray(rows) || rows.length === 0) return { error: 'No rows' } as const;
+  if (rows.length > MAX_IMPORT_ROWS) return { error: `At most ${MAX_IMPORT_ROWS} rows per import` } as const;
+  const drafts = rows.map((row) => readDraft(shape(row)));
+  if (drafts.some((d) => d === null)) return { error: 'Invalid account' } as const;
+  return { drafts: drafts as FbPoolDraft[] } as const;
+}
+
+// All-or-nothing: a refusal names the offending rows, so the caller can show
+// which. For the page, which already dropped the rows that fail its own checks,
+// it means the pool changed under it (another import landed the same uid).
+async function importDrafts(tx: Tx, drafts: FbPoolDraft[], batch: string, key: Buffer, actor: Actor) {
+  const taken = await existingUids(tx);
+  const failures: { index: number; uid: string; codes: string[] }[] = [];
+  drafts.forEach((d, index) => {
+    const codes = validateFbPoolDraft(d, taken);
+    if (taken.has(d.uid)) codes.includes('fpDuplicate') || codes.push('fpDuplicate');
+    if (codes.length) failures.push({ index, uid: d.uid, codes });
+    taken.add(d.uid);
+  });
+  if (failures.length) {
+    const dup = failures.every((f) => f.codes.every((code) => code === 'fpDuplicate'));
+    return {
+      refused: { status: dup ? 409 : 400, body: { error: 'Some rows were refused', code: dup ? 'fpDuplicate' : undefined, failures } },
+    } as const;
+  }
+  const added: { no: number; uid: string }[] = [];
+  for (const d of drafts) added.push({ no: await insertAccount(tx, d, key, batch, actor), uid: d.uid });
+  await writeEvent(tx, actor, 'imported', 'available', null, `${drafts.length} · ${batch}`);
+  return { added } as const;
+}
+
 pool.post('/import', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { batch?: unknown; rows?: unknown } | null;
-  if (!Array.isArray(body?.rows) || body.rows.length === 0) return c.json({ error: 'No rows' }, 400);
-  if (body.rows.length > MAX_IMPORT_ROWS) return c.json({ error: `At most ${MAX_IMPORT_ROWS} rows per import` }, 400);
-  const drafts = body.rows.map(readDraft);
-  if (drafts.some((d) => d === null)) return c.json({ error: 'Invalid account' }, 400);
-  const batch = readBatch(body.batch, 'Imported');
+  const read = readImportRows(body?.rows);
+  if ('error' in read) return c.json({ error: read.error }, 400);
+  const batch = readBatch(body?.batch, 'Imported');
   const sql = getDb(c.env);
   const user = c.var.user;
-  const result = await sql.begin(async (tx) => {
-    const taken = await existingUids(tx);
-    const failures: { index: number; uid: string; codes: string[] }[] = [];
-    (drafts as FbPoolDraft[]).forEach((d, index) => {
-      const codes = validateFbPoolDraft(d, taken);
-      if (taken.has(d.uid)) codes.includes('fpDuplicate') || codes.push('fpDuplicate');
-      if (codes.length) failures.push({ index, uid: d.uid, codes });
-      taken.add(d.uid);
-    });
-    if (failures.length) {
-      const dup = failures.every((f) => f.codes.every((code) => code === 'fpDuplicate'));
-      return { status: dup ? 409 : 400, body: { error: 'Some rows were refused', code: dup ? 'fpDuplicate' : undefined, failures } } as const;
-    }
-    for (const d of drafts as FbPoolDraft[]) await insertAccount(tx, d, c.var.key, batch, user);
-    await writeEvent(tx, user, 'imported', 'available', null, `${drafts.length} · ${batch}`);
-    return null;
-  });
-  if (result) return c.json(result.body, result.status);
+  const result = await sql.begin((tx) => importDrafts(tx, read.drafts, batch, c.var.key, user));
+  if (result.refused) return c.json(result.refused.body, result.refused.status);
   return c.json(await snapshot(sql, c.var.key, user), 201);
+});
+
+// Unlike the page's routes this answers with no secrets, and every row lands
+// available whatever it asks for: a held status is the manager's call, and
+// assigning an account to a worker is what starts a Facebook login.
+pool.post('/push/accounts', async (c) => {
+  const ctx = c.var.oauthCtx;
+  // Nothing rechecks that a consenting user is still a manager.
+  if (ctx.userId) return c.json({ error: 'insufficient_scope', scope: 'pool:write' }, 403);
+  const body = (await c.req.json().catch(() => null)) as { batch?: unknown; rows?: unknown } | null;
+  const read = readImportRows(body?.rows, (row) =>
+    row && typeof row === 'object' ? { ...row, status: 'available', holder: null } : null,
+  );
+  if ('error' in read) return c.json({ error: read.error }, 400);
+  const batch = readBatch(body?.batch, 'API');
+  const sql = getDb(c.env);
+  const [client] = await sql<{ name: string }[]>`SELECT name FROM oauth_clients WHERE id = ${ctx.clientId}`;
+  const result = await sql.begin((tx) => importDrafts(tx, read.drafts, batch, c.var.key, { id: null, name: client.name }));
+  if (result.refused) return c.json(result.refused.body, result.refused.status);
+  return c.json({ batch, added: result.added }, 201);
 });
 
 export default pool;

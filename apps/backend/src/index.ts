@@ -441,8 +441,9 @@ app.route('/api/ai', aiModelsRoutes);
 app.route('/api/web-submissions', webSubmissionsRoutes);
 // Same shape: self-applied authMiddleware + manager gate.
 app.route('/api/coordinator', coordinatorRoutes);
-// Self-applies authMiddleware; the take/return/report routes are for every
-// role and the rest is manager-gated inside the module.
+// Self-applies its auth: Bearer (pool:write) on /push/*; otherwise cookie, with
+// the take/return/report routes for every role and the rest manager-gated
+// inside the module.
 app.route('/api/facebook-pool', facebookPoolRoutes);
 // Self-applies authMiddleware; claim and the lead work are for every role,
 // /import is manager-gated inside the module.
