@@ -5,7 +5,7 @@ import { getTestDb, resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { signWorkerToken, workerTokenKey } from '../src/fleet/auth';
 import { sha256hex } from '../src/fleet/sql';
-import { cookiesFromText } from '../src/fleet/claim';
+import { cookiesFromText, openHolds, setPollsDraining } from '../src/fleet/claim';
 import { notifyReady } from '../src/fleet/scheduler';
 import { ALEX, MARCUS, loginAs } from './helpers/auth';
 import { poolKey, seal, unseal } from '../src/lib/sealed';
@@ -385,6 +385,25 @@ describe('POST /api/fleet/worker/next-task', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(900);
     expect(Date.now() - started).toBeLessThan(3000);
     expect(r.body).toEqual({ task: null, retry_after: 30, reason: 'nothing_due' });
+  });
+
+  it('answers a held poll at once when the server starts draining, and holds no new one', async () => {
+    await seedSlot(1);
+    const { worker_token: token } = await claimed('lab-1');
+    const held = nextTask(token, null, 50);
+    for (let i = 0; i < 100 && openHolds() === 0; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(openHolds()).toBe(1);
+    const started = Date.now();
+    setPollsDraining(true);
+    try {
+      const nothing = { task: null, retry_after: 30, reason: 'nothing_due' };
+      expect((await held).body).toEqual(nothing);
+      expect((await nextTask(token, null, 50)).body).toEqual(nothing);
+      expect(Date.now() - started).toBeLessThan(3000);
+      expect(openHolds()).toBe(0);
+    } finally {
+      setPollsDraining(false);
+    }
   });
 
   it('answers budget once today’s leased minutes reach budget_minutes', async () => {

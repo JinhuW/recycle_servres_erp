@@ -3598,7 +3598,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   that keeps ending without a verdict backs off from 15 minutes to 6 hours. Task
   history reads newest first (up to 5000, flagged when cut), so Analysis no
   longer shows the oldest days of its window. The fleet VNC relay is served
-  by one backend instance (an advisory lock; the others answer 503) and drops
+  by one backend instance (an advisory lock; the others answer 503, after waiting
+  up to 6 s for the lock so a redeploy's handover refuses nobody, v1.433.3) and drops
   a parked worker socket within a minute of its slot moving on (`4409`).
   `fleet-import.mjs` keeps managers' edits unless `--overwrite`, and it,
   `fleet-seed-slots.mjs` and `fleet-fake-worker.mjs` refuse a remote target
