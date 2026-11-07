@@ -1385,8 +1385,8 @@ including the Market prices it was priced with. An eval replays every case
 against a version, and compare shows which cases changed between two evals.
 So far this is the `/api/fb-agent` routes; the Agent tab comes later.
 
-Its backend is in place (v1.442.0, `/api/fb-seller`, managers only; the pages
-are still to come):
+The pages run on the seller backend (v1.442.0, `/api/fb-seller`, managers
+only):
 
 - **Settings** are one database row, validated field by field, saved against
   the version a manager opened (a stale save is refused) and kept in an
