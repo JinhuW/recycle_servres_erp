@@ -14,4 +14,6 @@ export async function decide(_input: AgentInput, _profile: FbAgentProfile, _llm:
   throw new Error('decide is not implemented');
 }
 
-export function startFbAgentLoop(_env: Env): void {}
+export function startFbAgentLoop(_env: Env): { stop: () => void } {
+  return { stop: () => {} };
+}
