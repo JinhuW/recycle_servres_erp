@@ -20,8 +20,26 @@ compare. CONTRACTS §6.3, §6.4, §6.7 are the spec.
 
 ## Exit criteria
 
-- [ ] Tests: a draft is the only editable state; promote/retire/rollback keep exactly one active; params invalid for a rule's schema are refused with the field named.
-- [ ] Tests: a candidate in shadow never writes to a thread or queues a message.
-- [ ] Tests: replaying a saved case twice with a stubbed LLM gives identical decisions; Market changes after saving don't change the replay.
-- [ ] Tests: compare reports changed cases correctly.
-- [ ] Version bump, CHANGELOG, README Status.
+- [x] Tests: a draft is the only editable state; promote/retire/rollback keep exactly one active; params invalid for a rule's schema are refused with the field named.
+- [x] Tests: a candidate in shadow never writes to a thread or queues a message.
+- [x] Tests: replaying a saved case twice with a stubbed LLM gives identical decisions; Market changes after saving don't change the replay.
+- [x] Tests: compare reports changed cases correctly.
+- [x] Version bump, CHANGELOG, README Status.
+
+## Outcome
+
+v1.439.0. Notes for the workstreams after D2:
+
+- `agentRegistry()` is a copy of the §6.5 table in `fbAgentProfiles.ts`; swap
+  it for D1's `fbAgent/registry.ts` export when D1 merges.
+- `agentLlmFor` and `agentSpentTodayUsd` were added to D1's stub `index.ts` as
+  throwing stubs (CONTRACTS §9); D1's bodies win at merge.
+- `saveCaseFromThread` freezes the thread's current messages and offer
+  settings, and takes `market` from the thread's newest live run's input (what
+  the agent last priced it with), `[]` when it has none.
+- Seed cases are in `src/services/fbAgentSeedCases.ts` (tests are not in the
+  image); `POST /api/fb-agent/cases/seed` adds the missing ones. The keyword
+  case passes only once a profile's keyword rule lists a matching pattern.
+- `tests/fixtures/fb-agent/stubAgent.ts` holds the stubbed LLM and a small
+  contract-shaped `decide` the tests replay with.
+- An eval stuck in `running` by a process restart stays so; nothing retakes it.
