@@ -48,6 +48,10 @@ export type Line = {
   // DB id, once the line has been persisted. Null before that — which is why
   // photos are buffered rather than uploaded as they're picked.
   _dbId?: string | null;
+  // A saved line edited since: the next write carries it as an update (the
+  // edit page's Save, the new-PO page's Submit). Without it a saved line's
+  // drawer edits stay on screen and never reach the PO.
+  _dirty?: boolean;
   // The product's # on the PO — the server gives it when the line is saved and
   // never changes it, so it is read, never sent. Absent until then.
   no?: number | null;
@@ -134,6 +138,13 @@ export function scanToLinePatch(scan: ScanResponse, category?: Category): Partia
 export const patchEditsLine = (patch: object): boolean =>
   Object.keys(patch).some(k => !k.startsWith('_'));
 
+/**
+ * A patch applied to a line, marking a saved line edited. Saved is read off
+ * the line before the patch: the save's own patch sets `_confirmed` and the #.
+ */
+export const applyLinePatch = (l: Line, patch: Partial<Line>): Line =>
+  l._confirmed && patchEditsLine(patch) ? { ...l, ...patch, _dirty: true } : { ...l, ...patch };
+
 export const brandConfirmPending = (l: Line): boolean =>
   l.category === 'RAM'
   && !!l._brandNeedsConfirm
@@ -153,6 +164,22 @@ export function duplicatesByIndex(
     for (const i of g.idxs) m.set(i, g.idxs.filter(j => j !== i && !sameProduct(i, j)));
   }
   return m;
+}
+
+/** The id of the drawer's Qty input for the line at that list index. */
+export const lineQtyInputId = (idx: number): string => `dw-qty-${idx}`;
+
+/**
+ * Puts the cursor in a line's Qty, its value selected, once the drawer the
+ * caller just opened has rendered. A frame later because the drawer may be
+ * mounting in the same click, and a dialog closing in it hands focus back to
+ * its opener first.
+ */
+export function focusLineQty(idx: number): void {
+  requestAnimationFrame(() => {
+    const el = document.getElementById(lineQtyInputId(idx));
+    if (el instanceof HTMLInputElement) { el.focus(); el.select(); }
+  });
 }
 
 /**

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { OrderLine } from '../../../lib/types';
 import { partQuestionPending } from '../../../lib/ramPartQuestion';
-import { orderLineToEditLine, type EditLine } from './editLine';
-import { patchEditsLine } from './line';
+import { orderLineToEditLine, savedLineEdits, type EditLine } from './editLine';
+import { applyLinePatch, patchEditsLine, type Line } from './line';
 
 // Samsung 16GB DDR4 RDIMM, Server, 1Rx4, 2400.
 const saved = (over: Partial<OrderLine> = {}): OrderLine => ({
@@ -45,5 +45,37 @@ describe('patchEditsLine — what makes an edited line dirty', () => {
   it('is true once a field the save writes moves', () => {
     expect(patchEditsLine({ rank: '1Rx4' })).toBe(true);
     expect(patchEditsLine({ brand: 'Samsung', _brandNeedsConfirm: false })).toBe(true);
+  });
+});
+
+// The new-PO page: a product saved by its Confirm stays editable in the
+// drawer, and Submit writes back only what changed after that save.
+describe('a saved product edited on the new-PO page', () => {
+  const fan = (over: Partial<Line> = {}): Line => ({
+    _cid: 'c1', category: 'Other', itemType: 'Fan', partNumber: 'FAN-01',
+    qty: '4', unitCost: '10', condition: '', scanImageUrl: null, ...over,
+  });
+
+  it('is marked edited once a field moves', () => {
+    expect(applyLinePatch(fan({ _confirmed: true, _dbId: 'l1' }), { qty: '6' })._dirty).toBe(true);
+  });
+
+  it('is not marked by its own save, by bookkeeping, or before it is saved', () => {
+    // The save's own patch carries the non-`_` key `no`.
+    expect(applyLinePatch(fan(), { _confirmed: true, _dbId: 'l1', no: 1 })._dirty).toBeUndefined();
+    expect(applyLinePatch(fan({ _confirmed: true }), { _partKept: null })._dirty).toBeUndefined();
+    expect(applyLinePatch(fan(), { qty: '6' })._dirty).toBeUndefined();
+  });
+
+  it('is written back by id, with what was edited', () => {
+    const edits = savedLineEdits([
+      fan({ _confirmed: true, _dbId: 'l1', qty: '6', _dirty: true }),
+      fan({ _cid: 'c2', _confirmed: true, _dbId: 'l2' }),               // saved, untouched
+      fan({ _cid: 'c3', qty: '2' }),                                     // not saved yet
+      fan({ _cid: 'c4', _confirmed: true, _dbId: null, _dirty: true }), // saved with no id back
+    ]);
+    expect(edits).toHaveLength(1);
+    expect(edits[0]).toMatchObject({ id: 'l1', qty: 6, partNumber: 'FAN-01' });
+    expect(edits[0].status).toBeUndefined();
   });
 });
