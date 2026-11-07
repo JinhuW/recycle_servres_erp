@@ -23,6 +23,7 @@ import os
 import re
 import threading
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -395,30 +396,36 @@ def test_city_searches_append_in_order(backend):
     assert backend.city_search_log_start() == rows[0]["at"]
 
 
+# The city log keeps only the last SEARCH_CYCLE_DAYS, so its tests run an hour ago.
+_RECENT = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(hours=1)
+
+
+def _recent(minutes: int) -> str:
+    return (_RECENT + timedelta(minutes=minutes)).isoformat(timespec="seconds")
+
+
 def test_city_leases_open_settle_extend(backend):
-    t = "2026-10-23T13:00:00+00:00"
-    later = "2026-10-23T13:30:00+00:00"
+    t = _recent(0)
+    later = _recent(30)
     backend.open_city_lease("nyc-1", "server_ram", "nyc", "home", t, later)
     backend.open_city_lease("nyc-1", "server_ram", "boston", "other", t, later)
     backend.open_city_lease("nyc-1", "enterprise_ssd", "nyc", "home", t, later)
     # Done with nyc for one item: it closes; the item's other live lease is given up.
-    given_up = backend.settle_city_leases("nyc-1", "server_ram", "nyc", "2026-10-23T13:10:00+00:00")
+    given_up = backend.settle_city_leases("nyc-1", "server_ram", "nyc", _recent(10))
     assert given_up == [{"item": "server_ram", "city": "boston", "leased_at": t}]
     rows = {(r["item"], r["city"]): r for r in backend.city_leases_since("0")}
-    assert rows[("server_ram", "nyc")]["closed_at"] == "2026-10-23T13:10:00+00:00"
-    assert rows[("server_ram", "boston")]["expires_at"] == "2026-10-23T13:10:00+00:00"
+    assert rows[("server_ram", "nyc")]["closed_at"] == _recent(10)
+    assert rows[("server_ram", "boston")]["expires_at"] == _recent(10)
     assert rows[("enterprise_ssd", "nyc")]["closed_at"] is None
-    moved = backend.extend_city_leases(
-        "nyc-1", "2026-10-23T14:00:00+00:00", "2026-10-23T13:20:00+00:00"
-    )
+    moved = backend.extend_city_leases("nyc-1", _recent(60), _recent(20))
     assert [(m["item"], m["city"]) for m in moved] == [("enterprise_ssd", "nyc")]
     rows = {(r["item"], r["city"]): r for r in backend.city_leases_since("0")}
-    assert rows[("enterprise_ssd", "nyc")]["expires_at"] == "2026-10-23T14:00:00+00:00"
-    assert rows[("server_ram", "boston")]["expires_at"] == "2026-10-23T13:10:00+00:00"
+    assert rows[("enterprise_ssd", "nyc")]["expires_at"] == _recent(60)
+    assert rows[("server_ram", "boston")]["expires_at"] == _recent(10)
 
 
 def test_city_events_append_with_their_detail(backend):
-    t = "2026-10-23T13:00:00+00:00"
+    t = _recent(0)
     backend.log_city_event("nyc-1", "server_ram", "nyc", "handed", {"why": "home"}, t)
     backend.log_city_event("ne-1", None, "boston", "searched", {"cards": 3, "phrase": "dell"})
     backend.log_city_event("nyc-1", "server_ram", "nyc", "started")

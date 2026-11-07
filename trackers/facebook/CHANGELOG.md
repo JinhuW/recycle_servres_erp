@@ -50,6 +50,14 @@ deployed?" harder to answer.
   Facebook unrecorded. None of these costs a login. The ERP has to carry
   `POST /api/fleet/worker/profile-launch` (v1.430.0) before this worker runs.
 
+### Fixed
+
+- **Two coordinator tests no longer fail with the calendar.** The city-lease
+  and city-event tests in `test_postgres.py` used fixed 2026-10-23 times, and
+  the city log keeps only the last 14 days, so both failed every run from
+  2026-11-06 and `release.sh` refused to release. They now run an hour before
+  the test starts. Tests only; the coordinator is unchanged.
+
 ## [0.17.0] - 2026-11-05
 
 ### Added
