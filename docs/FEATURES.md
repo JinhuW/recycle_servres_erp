@@ -4332,6 +4332,12 @@ inventory search, sell-order draft creation.
 - `wechat:write` (v1.312.0) is for memtrade's service client, which pushes the
   WeChat market report. Self-registration never grants it, even to a client
   that names no scope; a manager mints it under Settings → Connectors.
+- `pool:write` (v1.434.0) has the same limits and is for the `fb-pool-add`
+  skill's service client. It opens one route,
+  `POST /api/facebook-pool/push/accounts`, which adds a batch all-or-nothing,
+  always as `available`, and answers with each account's `#` and uid but no
+  secrets. Adding starts no Facebook login. The pool's activity log names the
+  client as the actor.
 - Per-tool gating lives in `TOOL_SCOPES` and filters both `tools/list` and
   `tools/call` — a connector missing tools has a scope problem, not a missing
   tool.

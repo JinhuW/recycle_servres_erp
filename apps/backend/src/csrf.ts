@@ -23,6 +23,7 @@ function exempt(path: string): boolean {
     || path === '/api/mcp'
     || path === '/api/market/values'
     || path.startsWith('/api/wechat-market/push/')
+    || path.startsWith('/api/facebook-pool/push/')
     || path.startsWith('/api/public/')
     || path.startsWith('/oauth/')
     || path.startsWith('/.well-known/');

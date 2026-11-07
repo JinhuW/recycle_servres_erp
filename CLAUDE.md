@@ -7,6 +7,7 @@
     plan mode and closes it through `CHANGELOG.md` / `docs/FEATURES.md`.
     `/ticket` is the manual path.
   - `verify`: drives the local ERP stack end to end.
+  - `fb-pool-add`: adds Facebook accounts to the ERP account pool.
 - **Sessions run in worktrees.** If a session starts in the main checkout, the
   `SessionStart` hook (`scripts/claude-session-hook.sh`) says so. Run
   `scripts/new-session.sh --print-only`, then `EnterWorktree` with the path it
