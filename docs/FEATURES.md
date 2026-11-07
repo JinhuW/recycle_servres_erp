@@ -610,6 +610,10 @@ is not a stage but a flag beside one, set once every line has sold
       field takes it, as does the *Use $n* link under it. **Fill from
       market** in the tally bar prices every unpriced line that has a value
       in one click and says how many it priced.
+    - At Ready to Pay the row's Edit drawer opens view-only with the sell
+      price still live, and its Save writes the price the same way
+      (v1.444.1, RS-567). Before that the drawer sent the whole line, which
+      a closed-book PO refuses.
     - A priced row shows its margin under the price; one priced below cost
       reads *below cost* in red and the save toasts a warning.
     - The tally bar's right half counts the priced products with its own
