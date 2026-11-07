@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { FLEET_SELLER_TASK_KINDS } from '@recycle-erp/shared';
 import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
 import { FormSkeleton, TableSkeleton } from '../../../components/Skeleton';
@@ -301,7 +302,9 @@ export function TaskTable({ tasks, items, filter, onFilter, range, onRange, sele
           <tbody>
             {shown.length === 0 && <EmptyRow cols={9}>{t('fleetTasksNone')}</EmptyRow>}
             {shown.map(task => {
-              const name = task.city_name ?? task.city ?? task.kind;
+              // A seller task (ad-post, inbox-sync, …) has an account and no city or item.
+              const seller = (FLEET_SELLER_TASK_KINDS as readonly string[]).includes(task.kind);
+              const name = seller ? t(`fleetKind_${task.kind}`) : task.city_name ?? task.city ?? task.kind;
               const sub = task.state === 'ready'
                 ? (Date.parse(task.due_at) <= now ? agoLabel(t, task.due_at, now) : dueLabel(t, task.due_at, now))
                 : task.state === 'leased' ? t('fleetStartedAt', { time: easternClock(task.leased_at ?? task.due_at, locale, now) })
@@ -311,15 +314,22 @@ export function TaskTable({ tasks, items, filter, onFilter, range, onRange, sele
                 ? <span className="chip info mono">{mmss((now - Date.parse(task.leased_at)) / 1000)}</span>
                 : typeof task.result?.seconds === 'number' ? mmss(task.result.seconds) : '';
               return (
-                <tr key={task.id} className={task.city === selected ? 'fleet-row-sel' : undefined} onClick={() => { if (task.city) onSelect(task.city); }}
-                  title={t('fleetCityLogOpen', { city: name })}>
+                <tr key={task.id} className={!seller && task.city === selected ? 'fleet-row-sel' : undefined} onClick={seller || !task.city ? undefined : () => onSelect(task.city!)}
+                  title={seller ? undefined : t('fleetCityLogOpen', { city: name })}>
                   <td>
-                    <span className="fp-holder">
-                      <button type="button" className="fleet-city-name fleet-city-pick" onClick={e => { e.stopPropagation(); if (task.city) onSelect(task.city); }}>{name}</button>
-                      {task.kind !== 'search' && <small className="mono">{t(`fleetKind_${task.kind}`)}</small>}
-                    </span>
+                    {seller ? (
+                      <span className="fp-holder">
+                        <span className="fleet-city-name">{name}</span>
+                        {task.account_no !== null && <small>{t('fleetAccountN', { no: task.account_no })}</small>}
+                      </span>
+                    ) : (
+                      <span className="fp-holder">
+                        <button type="button" className="fleet-city-name fleet-city-pick" onClick={e => { e.stopPropagation(); if (task.city) onSelect(task.city); }}>{name}</button>
+                        {task.kind !== 'search' && <small className="mono">{t(`fleetKind_${task.kind}`)}</small>}
+                      </span>
+                    )}
                   </td>
-                  <td className="mono">{task.item}</td>
+                  <td className="mono">{seller ? <span className="fp-muted">—</span> : task.item}</td>
                   <td><StateChip task={task} now={now} /></td>
                   <td>
                     <span className="fp-holder">
