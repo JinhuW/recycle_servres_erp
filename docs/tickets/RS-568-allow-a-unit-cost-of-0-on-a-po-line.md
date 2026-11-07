@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-07
 reporter: jinhu
 branch: JinhuW/cownose
-pr: pending
+pr: 1163
 version: 1.444.2
 related: []
 ---
