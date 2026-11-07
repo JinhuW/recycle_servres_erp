@@ -60,7 +60,7 @@ deployed?" harder to answer.
   `failed` instead of `uncertain`. Each one invited a person to send it again.
   The per-task log line also passed `kind` twice and raised after every report.
 - **A seller task parks on every wall and reads its inbox honestly (RS-565
-  review, pin `6dceddf`).** A retried send now finds our reply even when the
+  review, pin `9a7004e`).** A retried send now finds our reply even when the
   seller has answered since, instead of typing it a second time. A restriction
   that appears mid-form, or once a listing opens for deletion, parks the
   worker as a wall rather than failing the task and leaving the account to be

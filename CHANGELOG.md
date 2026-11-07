@@ -48,7 +48,7 @@ computed.
   message, not a timestamp. A carriage return or tab in a reply is typed as text.
   An error after a submit is reported uncertain, not failed. Each of these had
   made a delivered reply or post look lost.
-- **Worker pin `6dceddf`** (vendored monitor), from a second review: a retried
+- **Worker pin `9a7004e`** (vendored monitor), from a second review: a retried
   send finds our reply even after the seller answered it, so it is not typed
   twice. A restriction partway through a post or delete parks the account
   instead of failing the task. An inbox that shows no conversations and doesn't
