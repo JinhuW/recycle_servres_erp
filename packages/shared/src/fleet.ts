@@ -632,9 +632,10 @@ export const FLEET_SECRET_KINDS: readonly FleetSecretKind[] = ['password', 'totp
 
 /** A task event with the task it belongs to, for a worker's history. */
 export type FleetWorkerEvent = FleetTaskEvent & {
-  city: string;
+  /** Null on a seller task, which searches no city. */
+  city: string | null;
   city_name: string | null;
-  item: string;
+  item: string | null;
   task_kind: FleetTaskKind;
 };
 

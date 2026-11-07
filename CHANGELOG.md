@@ -48,6 +48,14 @@ computed.
   message, not a timestamp. A carriage return or tab in a reply is typed as text.
   An error after a submit is reported uncertain, not failed. Each of these had
   made a delivered reply or post look lost.
+- **Worker pin `6dceddf`** (vendored monitor), from a second review: a retried
+  send finds our reply even after the seller answered it, so it is not typed
+  twice. A restriction partway through a post or delete parks the account
+  instead of failing the task. An inbox that shows no conversations and doesn't
+  say it is empty fails rather than reading as empty, and a seller's own words
+  "temporarily blocked" no longer park the account.
+- **Seller task events in a worker's history.** They carry no city or item, and
+  the shared type said they always did; the history and city log now take them.
 
 ## [1.442.0] - 2026-11-07
 

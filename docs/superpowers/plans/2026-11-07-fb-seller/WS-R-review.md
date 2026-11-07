@@ -35,11 +35,13 @@ it was meant to do.
 
 Reviewed `cf991fcb..origin/dev` (`apps`, `packages`, through v1.442.0) and
 monitor commit `d788039`, against `CONTRACTS.md` only. Fixed in v1.442.1 with
-monitor pin `2378351` (private mirror only). Every fix has a test:
-`fb-agent-loop`, `fb-agent-rules`, `fb-seller-tick`, `fb-seller-inbox`,
-`fb-agent-profiles-lifecycle`, and the monitor's `test_seller_tasks.py`.
+monitor pin `2378351` (private mirror only). A second, separate review found
+five more (14–18), fixed in the same PR with monitor pin `6dceddf`. Every fix
+has a test: `fb-agent-loop`, `fb-agent-rules`, `fb-seller-tick`,
+`fb-seller-inbox`, `fb-agent-profiles-lifecycle`, the frontend's
+`fleetWorkerView.test.ts`, and the monitor's `test_seller_tasks.py`.
 
-### Findings, most severe first
+### Findings, most severe first (14–18, from the second review, ranked among themselves)
 
 | # | Sev | Area | Failing scenario | Fixed |
 | --- | --- | --- | --- | --- |
@@ -56,6 +58,11 @@ monitor pin `2378351` (private mirror only). Every fix has a test:
 | 11 | Low | Worker | The summary log passed `kind` twice to `aimm_event`. Every seller task on a worker with a logger raised `TypeError` after its report, so `done` carried an error and the `finished` event was skipped. The loop caught it, so there was no exit. | Yes. |
 | 12 | Low | Guard 8 | Failed agent sends (a report, or an uncertain one the inbox fails) never ran the circuit breaker, which counted them only when a later run was blocked. | Yes. Both paths call `checkCircuitBreaker`. |
 | 13 | Low | Config | D2's `fbAgentProfiles.ts` validated against a local copy of §6.5. | Yes. It uses `agentRegistry()` from `fbAgent/registry.ts`, and the five parameterised rules now mark their parameter `required`, as the copy did. |
+| 14 | High | Duplicate (worker) | `already_sent` checked only the newest bubble (WS-B step 6 says the newest *outbound* one). With page [in x, out "We can do 400", in "hmm"] and tail [in x], a staff retry of the uncertain message typed it again; an `unknown`-direction bubble of ours did the same. | Yes. It finds where the tail ends on the page and counts any later `out`/`unknown` bubble with the body. With no tail on the page, our newest bubble decides. |
+| 15 | Medium | Guard (§4.6) | A selling restriction that shows after the photo upload broke the next `_fill`/`_select`, which raised `StepError`, and `run()` reported `failed` with no park. `ad_delete` had no wall check after opening the listing. The worker kept driving a restricted account, and a failed ad-post could be re-queued into the same wall. | Yes. `run()` checks for a wall (no navigation) before reporting `failed` or `uncertain` on any task that opened a page; `ad_delete` checks once the listing opens. |
+| 16 | Medium | Data (§4.5) | `inbox_sync` with no thread link reported `ok` with zero threads, so a Facebook redesign read as "no conversations" forever and uncertain sends never settled. | Yes. No links and no empty-inbox notice is `failed` at `open-inbox`. |
+| 17 | Low | Login (wall) | The blocked-text check matched conversation text, so a seller writing "I was temporarily blocked" parked the account. | Yes. On a conversation only a dialog or text outside the pane counts. |
+| 18 | Low | Data | `FleetWorkerEvent.city`/`.item` were typed `string`, but seller task events carry null since migration 0232, and the worker history and city log used them unguarded. | Yes. Both are `string \| null`, and the history and city log take the null. |
 
 ### Not fixed, and why
 
@@ -78,10 +85,10 @@ monitor pin `2378351` (private mirror only). Every fix has a test:
   (`uploadAttachment` prefixes a random UUID), not the contract's bare
   `<task>-<step>`. Kept: the random part is what makes them unguessable.
 - **Speculative worker items, not fixed without a live page:** a lazy-loaded
-  "Your listings" could make `ad-post` report an older listing id; restriction
-  text inside a seller's message could read as a wall (it parks the worker but
-  causes no login); a wide bubble with no "You sent" label reads as `unknown`.
-  F.live should check all three against a real page.
+  "Your listings" could make `ad-post` report an older listing id; a wide
+  bubble with no "You sent" label reads as `unknown`. The empty-inbox wording
+  (finding 16) is a guess at Facebook's text. F.live should check all three
+  against a real page.
 
 ### Checked and clean
 
