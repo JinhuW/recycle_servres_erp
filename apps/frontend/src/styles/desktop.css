@@ -1365,6 +1365,11 @@ html.desktop, body.desktop, .desktop #root {
   border-radius: 1px;
 }
 .so-step-bar.reached { background: var(--fg-muted); }
+/* Read-only stepper on a Done order: a record, so no pointer and no hover. */
+.so-step[disabled]:not(.locked) { cursor: default; }
+.so-step[disabled]:not(.locked):hover { border-color: var(--border); }
+.so-step.reached[disabled]:not(.locked):not(.active):hover { color: var(--fg); }
+.so-step.active[disabled]:hover { border-color: var(--accent); }
 .so-step.locked { opacity: 0.55; cursor: not-allowed; background: var(--bg-soft); }
 .so-step.locked:hover { border-color: var(--border); color: var(--fg-subtle); }
 .so-step.locked .so-step-dot { background: var(--bg-soft); color: var(--fg-subtle); border: 1px dashed var(--border-strong); }
