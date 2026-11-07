@@ -536,9 +536,9 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     }
   };
   const hasFiles = (e: { dataTransfer: DataTransfer }) => Array.from(e.dataTransfer.types).includes('Files');
-  // The rate is the PO's: a manager's until the book closes at Ready to Pay,
-  // where the server refuses it.
-  const rateLocked = order.lifecycle === 'ready_to_pay' || order.lifecycle === 'done';
+  // The rate is the PO's: a manager's through Ready to Pay, which is the
+  // payment review that corrects the projection; the server refuses it at Done.
+  const rateLocked = order.lifecycle === 'done';
   const saveRate = async (v: number | null) => {
     if (!ready || rateLocked || rateEq(v ?? 0, rate ?? 0)) return;
     const before = rate;

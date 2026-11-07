@@ -2142,7 +2142,7 @@ const zh: Record<string, string> = {
   bcSheetAppliedRepriced: '已按表格为 {n} 个产品定价，其中改价 {m} 个',
   bcMoneyTitle: '佣金',
   bcMoneyEarnsHint: '此采购单批准后 {name} 将获得的金额。',
-  bcMoneyRateLocked: '自待付佣金起，比率随账目一并锁定。',
+  bcMoneyRateLocked: '订单完成后，比率随账目一并锁定。',
   bcMoneyLotPrice: '货物按议定的整批价计。',
   bcMoneyPriced: '已定价 {n} / {of}',
   bcUnpricedIntro: '有 {n} 个产品没有售价，定价前按 $0 计入佣金：',

@@ -24,6 +24,16 @@ describe('derivePoPermissions', () => {
     expect(mgr).toMatchObject({ orderLocked: true, canReopen: true, isOwnerOrManager: true });
   });
 
+  it('keeps a manager the payment review at Ready to Pay only', () => {
+    const at = (isPurchaser: boolean, o: Parameters<typeof order>[0]) =>
+      derivePoPermissions({ isPurchaser, userId: isPurchaser ? 'owner' : 'mgr', order: order(o) }).paymentReview;
+    expect(at(false, { lifecycle: 'ready_to_pay' })).toBe(true);
+    expect(at(true, { lifecycle: 'ready_to_pay' })).toBe(false);
+    expect(at(false, { lifecycle: 'done' })).toBe(false);
+    expect(at(false, { lifecycle: 'reviewing' })).toBe(false);
+    expect(at(false, { lifecycle: 'ready_to_pay', archivedAt: '2026-10-01' })).toBe(false);
+  });
+
   it('locks an archived order and offers no reopen', () => {
     const p = derivePoPermissions({ isPurchaser: false, userId: 'mgr', order: order({ lifecycle: 'done', archivedAt: '2026-10-01' }) });
     expect(p).toMatchObject({ isArchived: true, orderLocked: true, canReopen: false });

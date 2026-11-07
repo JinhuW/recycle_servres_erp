@@ -139,16 +139,15 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const isManager = useEffectiveUser()?.role === 'manager';
   // Edit rights, the same rule the phone uses (lib/poPermissions.ts). A
   // closed order keeps its stage moves for managers (canReopen); everything
-  // else stays read-only until such a move lands.
+  // else stays read-only until such a move lands, except what payment review
+  // keeps (paymentReview): sell price, commission rate, note and files. The
+  // sell price goes through the inventory line PATCH, which takes it on a
+  // closed-book PO; PATCH /api/orders refuses every line field there.
   const {
     effectiveStatus, isArchived, orderLocked, canEditOrder, revertOnSave,
-    isOwnerOrManager, canAnnotate, canReopen,
+    isOwnerOrManager, canAnnotate, canReopen, paymentReview,
   } = derivePoPermissions({ isPurchaser, userId: user?.id, order });
-  // Payment review is where a manager corrects the commission projection, so
-  // sell price survives the Ready to Pay lock. It goes through the inventory
-  // line PATCH, which takes sellPrice on a closed-book PO; PATCH /api/orders
-  // refuses every line field there.
-  const canEditSellPrice = !isPurchaser && order.lifecycle === 'ready_to_pay' && !isArchived;
+  const notesOpen = canAnnotate || paymentReview;
   const [status, setStatus] = useState(effectiveStatus);
   // The stage as last written. Normally the one the page opened with, but a
   // save that has to keep the user here (a photo upload that failed) has
@@ -797,7 +796,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // block it — the purchaser can't fix that line at this stage anyway.
   const canSave =
     dirty && !saving && !txnBlocked && !cashShotBlocked && !trackingIncomplete
-    && (!orderLocked || (canReopen && statusDirty) || (canEditSellPrice && linesDirty))
+    && (!orderLocked || (canReopen && statusDirty) || (paymentReview && (linesDirty || commissionDirty || notesDirty)))
     && (!canEditOrder || !linesDirty || lines.every(lineReady));
 
   // Localized "Brand, Quantity" list of what a line is still waiting on. The
@@ -901,7 +900,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         // Sequential, and each line is marked clean as it lands, so a retry
         // after a mid-loop failure re-sends only what didn't.
         let pricesWritten = false;
-        if (canEditSellPrice) {
+        if (paymentReview) {
           for (const l of saveLines) {
             if (!l._id || !l._dirty) continue;
             const sp = l.sellPrice == null || l.sellPrice === '' ? null : Number(l.sellPrice);
@@ -914,7 +913,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             setLines(ls => ls.map(x => (x._id === l._id ? { ...x, _dirty: false } : x)));
           }
         }
-        if (notesDirty) await api.patch(`/api/orders/${order.id}`, { notes });
+        // The rate is the one order field a closed book takes besides the note.
+        const rateWritten = paymentReview && commissionDirty;
+        if (notesDirty || rateWritten) {
+          await api.patch(`/api/orders/${order.id}`, {
+            notes: notesDirty ? notes : undefined,
+            commissionRate: rateWritten ? commissionRateValue : undefined,
+          });
+        }
         // Manager reopening a Done order — the one stage move a closed order
         // accepts. /advance cascades line statuses server-side, so no line
         // patch is needed alongside it.
@@ -929,8 +935,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           }
         }
         // Stay on the PO: the manager is mid-review and wants to see the
-        // commission the new prices project.
-        if (pricesWritten && onReload) {
+        // commission the new prices or rate project.
+        if ((pricesWritten || rateWritten) && onReload) {
           window.__showToast?.(t('eoSavedToast', { id: order.id }), 'success');
           await onReload();
           return moved;
@@ -1858,6 +1864,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               ownerId={ownerId} onOwner={pickOwner} ownerOptions={ownerOptions}
               commissionPct={commissionPct} onCommissionPct={setCommissionPct}
               isPurchaser={isPurchaser} orderLocked={orderLocked} isArchived={isArchived}
+              rateLocked={orderLocked && !paymentReview}
               selfReimbursed={selfReimbursed} reimbursedTo={reimbursedTo}
               purchaserEarn={purchaserEarn}
               effectiveTotalCost={effectiveTotalCost}
@@ -1894,11 +1901,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                   value={notes}
                   onChange={e => setNotes(e.target.value)}
                   placeholder={t('orderNotesPh')}
-                  disabled={!canAnnotate}
+                  disabled={!notesOpen}
                   style={{ width: '100%', resize: 'vertical', minHeight: 64, fontFamily: 'inherit', lineHeight: 1.5 }}
                 />
               </div>
-              {(submissionAtts.length > 0 || canAnnotate) && (
+              {(submissionAtts.length > 0 || notesOpen) && (
                 <div className="field" style={{ marginBottom: 0 }}>
                   <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Icon name="paperclip" size={12} /> {t('poSubmissionEvidenceTitle')}
@@ -1909,10 +1916,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                       <AttachmentChip
                         key={a.id}
                         a={a}
-                        onRemove={canAnnotate ? () => void proof.removeChatAtt(a) : undefined}
+                        onRemove={notesOpen ? () => void proof.removeChatAtt(a) : undefined}
                       />
                     ))}
-                    {canAnnotate && (
+                    {notesOpen && (
                       <AttachmentDropzone
                         boxHint={t('poSubmitAttachHint')}
                         uploading={proof.chatUploading}
@@ -1975,7 +1982,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           readOnly={!canEditOrder || activeShippedOn.length > 0}
           readOnlyNote={canEditOrder && activeShippedOn.length > 0
             ? t('lineShippedReadOnly', { so: activeShippedOn.join(', ') }) : undefined}
-          sellPriceEditable={canEditSellPrice}
+          sellPriceEditable={paymentReview}
           missingFields={missingNamesFor(lines[activeIdx])}
           market={marketFor(lines[activeIdx].partNumber)}
           photoCtx={{
