@@ -394,10 +394,11 @@ export function fleetStockRevertible(s: Pick<FleetSlot, 'parked' | 'worker_id' |
 export const fleetReportedEngine = (detail: Record<string, unknown> | null | undefined): FleetBrowserEngine =>
   detail?.engine === 'cloak' ? 'cloak' : 'stock';
 
-/** The first worker release allowed a cloak slot: the first with the preflight,
- *  the WebRTC flag and the licence-outage exit. An older one would log a pilot
- *  in with none of them, and one older still would run the slot on stock. */
-export const FLEET_CLOAK_MIN_WORKER_VERSION = '0.17.0';
+/** The first worker release allowed a cloak slot: the first that reports its
+ *  launch fingerprint before any Facebook page. An older one would log an
+ *  account in with no first launch on record, so nothing could later tell its
+ *  profile had moved or matched another account's. */
+export const FLEET_CLOAK_MIN_WORKER_VERSION = '0.18.0';
 
 /** Whether a worker's reported version is at least `min` (dotted numbers); a
  *  version that does not parse, such as `unknown`, is not. */
