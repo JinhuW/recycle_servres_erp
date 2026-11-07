@@ -1608,7 +1608,9 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     Closed opens with the stepper, line inputs and customer ready to change;
     there is no read-only page or Edit order button any more. The old
     `/:id/edit` address opens the same page. Done and Closed orders stay
-    read-only, with Reopen.
+    read-only, with Reopen. They keep the editor's brief as text: a Done
+    order shows the stepper with nothing clickable, and both show customer,
+    currency and payment receiver (v1.444.0).
   - The line items and editing controls are on the left. The order summary,
     payment receiver, evidence and internal notes are on the right; under
     1100px everything stacks into one column.

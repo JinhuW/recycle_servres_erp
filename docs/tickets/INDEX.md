@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-566](./RS-566-show-the-sell-order-brief-read-only-once-the-order-i.md) | done | story | P2 | Show the sell order brief read-only once the order is done | — |
 | [RS-565](./RS-565-facebook-seller-accounts-post-buy-ads-route-messenge.md) | in-progress | story | P2 | Facebook seller accounts post buy ads, route Messenger to an ERP message center, and an agent negotiates | — |
 | [RS-564](./RS-564-rerun-the-fleet-search-frequency-review.md) | backlog | task | P2 | Rerun the fleet search frequency review | — |
 | [RS-563](./RS-563-move-web-submissions-under-leads-as-website.md) | done | story | P2 | Move web submissions under Leads as Website | 1.436.0 |
