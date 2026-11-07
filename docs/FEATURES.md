@@ -1337,7 +1337,8 @@ names its reason in words.
   each outbound, how far it got: queued, held (kill switch), sending, sent,
   unknown or failed with the reason. Beside it: what the agent extracted (items,
   quantities, the seller's ask, intent, confidence), the Market matches with the
-  max buy price and its date, the ceiling and offer, the offer ladder by round,
+  max buy price and its date, the ceiling and offer, the offer ladder from round 1
+  (counted as the agent's offer code counts them, v1.444.3),
   the rules that fired on the last runs, and the conversation's history.
   **Take over** stops the agent; **Hand back to agent** gives it back and
   clears Needs human; the reply box queues a staff message on the account's
@@ -1367,7 +1368,8 @@ names its reason in words.
   candidate's decision beside the live agent's for each seller message and marks
   the ones that differ. **Tests** lists the saved cases, runs every case against
   a chosen version, shows each run's per-case results with why a case failed,
-  and compares two runs case by case.
+  and compares two runs case by case, naming in words what changed in each
+  case (v1.444.3).
 - **Settings** holds every seller setting, the kill switch first. The kill
   switch saves at once; the rest (active hours, ad, message and inbox pacing,
   offers, agent limits, the low-pool warning, the Telegram chat) save together,

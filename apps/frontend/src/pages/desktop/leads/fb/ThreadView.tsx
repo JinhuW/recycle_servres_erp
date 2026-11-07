@@ -225,9 +225,9 @@ function ThreadSide({ d, offer }: { d: FbThreadDetail; offer: FbSellerSettings['
         <section className="card fbs-panel">
           <h3>{t('fbs_ladder')}</h3>
           <ol className="fbs-ladder">
-            {ladder.map((usd, r) => (
-              <li key={r} className={r === d.round && d.offer_usd !== null ? 'on' : r < d.round ? 'past' : undefined}>
-                <span>{t('fbs_round_n', { n: r })}</span><b><Money usd={usd} /></b>
+            {ladder.map((usd, i) => (
+              <li key={i} className={i + 1 === d.round ? 'on' : i + 1 < d.round ? 'past' : undefined}>
+                <span>{t('fbs_round_n', { n: i + 1 })}</span><b><Money usd={usd} /></b>
               </li>
             ))}
           </ol>
