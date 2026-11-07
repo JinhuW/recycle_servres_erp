@@ -787,8 +787,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // one would lock those orders against any edit.
   const costRequired = (l: EditLine) => !l._id || !!l._dirty;
   // A line already on the PO may be counted down to 0; a new one needs 1.
+  // A typed $0 cost is an answer (asked about when the PO leaves Draft); a
+  // blank one is still missing.
   const lineRule = (l: EditLine) =>
-    lineRequirements(l, { requireCost: costRequired(l), allowZeroQty: !!l._id });
+    lineRequirements(l, { requireCost: costRequired(l), allowZeroQty: !!l._id, allowZeroCost: true });
   const lineReady = (l: EditLine) => lineRule(l).ready;
   // Line readiness gates only the saves that actually write lines. A note-only
   // save or a stage move sends none, so an incomplete legacy line must not
@@ -1537,7 +1539,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                     </td>
                     <td className="mono muted" style={{ fontSize: 11 }}>{l.partNumber || '—'}</td>
                     <td className="num mono">{qty}</td>
-                    <td className="num mono">{lCost ? fmtUSD(lCost, locale) : '—'}</td>
+                    <td className="num mono">{l.unitCost === '' || l.unitCost == null ? '—' : fmtUSD(lCost, locale)}</td>
                     <td className="num mono">{sp ? fmtUSD(sp, locale) : '—'}</td>
                     {isManager && (
                       <td className="num mono">
