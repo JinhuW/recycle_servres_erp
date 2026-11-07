@@ -130,7 +130,7 @@ profile shape and `runAgent`, E at the HTTP routes and DTOs.
 | --- | --- | --- | --- | --- |
 | A1 | not started | | | |
 | A2 | not started | | | |
-| B | PR open | (this PR) | tracker [Unreleased], monitor pin `d788039` | no release cut; fixtures are guesses until F.live refreshes them |
+| B | PR open | #1146 | tracker [Unreleased], monitor pin `d788039` | no release cut; fixtures are guesses until F.live refreshes them |
 | C | not started | | | |
 | D1 | not started | | | |
 | D2 | not started | | | |
