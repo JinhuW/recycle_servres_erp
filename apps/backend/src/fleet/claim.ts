@@ -14,6 +14,7 @@ import {
   fleetTakesResume,
   totpKey,
   type ClaimAnswer,
+  FLEET_TZ,
   type FleetCookie,
   type FleetDevice,
   type FleetItem,
@@ -85,6 +86,25 @@ export const MAX_HOLDS = 200;
 // budget or quarantine does not clear in seconds.
 const RETRY_NOTHING_DUE = 30;
 const RETRY_BLOCKED = 300;
+// Room for about one search just after midnight, when a paced account's share
+// of the day is still nothing.
+const PACE_HEADROOM_MINUTES = 30;
+
+export const isPaced = (accountNo: number, percent: number): boolean => accountNo % 100 < percent;
+
+/**
+ * What a paced account may have spent so far today. An unpaced account spends
+ * its budget the moment the Eastern day opens, so a listing posted that morning
+ * waits for midnight; this keeps the same daily total but spreads it out.
+ */
+export const pacedAllowance = (budgetMinutes: number, elapsedMinutes: number): number =>
+  Math.min(budgetMinutes, budgetMinutes * (elapsedMinutes / 1440) + PACE_HEADROOM_MINUTES);
+
+export function easternMinutes(at: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: FLEET_TZ, hourCycle: 'h23', hour: 'numeric', minute: 'numeric' }).formatToParts(at);
+  const part = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return part('hour') * 60 + part('minute');
+}
 const MAX_COOKIES = 200;
 const MAX_DETAIL_BYTES = 64 * 1024;
 const DEVICE_COOKIE_DAYS = 400;
@@ -782,7 +802,10 @@ async function pickTask(
       SELECT COALESCE(quarantined_until > NOW(), FALSE) AS quarantined FROM fleet_slots WHERE account_no = ${w.account_no}`;
     if (!quarantined) {
       const [used] = await tx<{ minutes: number }[]>`SELECT ${minutesTodaySql(tx, w.account_no)} AS minutes`;
-      if (used.minutes >= settings.budget_minutes) {
+      const allowed = isPaced(w.account_no, settings.pace_percent)
+        ? pacedAllowance(settings.budget_minutes, easternMinutes(new Date()))
+        : settings.budget_minutes;
+      if (used.minutes >= allowed) {
         return { task: null, retry_after: RETRY_BLOCKED, reason: 'budget' };
       }
     }

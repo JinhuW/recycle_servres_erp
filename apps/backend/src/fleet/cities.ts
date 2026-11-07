@@ -38,6 +38,7 @@ type ItemRow = {
   phrases: string[];
   filters: Record<string, unknown>;
   enabled: boolean;
+  every_days: number;
 };
 
 /** The monitor's rule for a Marketplace location: a slug or a numeric id. */
@@ -48,6 +49,7 @@ const MAX_RADIUS_KM = 500;
 const MAX_PER_DAY = 24;
 const MAX_PHRASES = 100;
 const MAX_PHRASE = 500;
+const MAX_EVERY_DAYS = 30;
 export const VERIFY_PRIORITY = 50;
 
 const cityToWire = (r: CityRow): FleetCity => ({
@@ -299,22 +301,27 @@ export function readItems(input: unknown): FleetItem[] | Refusal {
     }
     if (raw.filters !== undefined && !isObject(raw.filters)) return bad(`${name}: filters must be an object`);
     if (raw.enabled !== undefined && typeof raw.enabled !== 'boolean') return bad(`${name}: enabled must be true or false`);
-    out.push({ name, phrases, filters: (raw.filters as Record<string, unknown>) ?? {}, enabled: raw.enabled ?? true });
+    if (raw.every_days !== undefined && !isInt(raw.every_days, 1, MAX_EVERY_DAYS)) return bad(`${name}: every_days must be a whole number from 1 to ${MAX_EVERY_DAYS}`);
+    out.push({
+      name, phrases, filters: (raw.filters as Record<string, unknown>) ?? {}, enabled: raw.enabled ?? true,
+      ...(raw.every_days !== undefined ? { every_days: raw.every_days } : {}),
+    });
   }
   return out;
 }
 
 export async function listItems(sql: SqlLike): Promise<FleetItem[]> {
-  return sql<ItemRow[]>`SELECT name, phrases, filters, enabled FROM fleet_items ORDER BY name`;
+  return sql<ItemRow[]>`SELECT name, phrases, filters, enabled, every_days FROM fleet_items ORDER BY name`;
 }
 
-/** Writes the items given and leaves the rest alone; an item goes away by `enabled: false`, never by omission. */
+/** Writes the items given and leaves the rest alone; an item goes away by `enabled: false`, never by omission. An item sent without every_days keeps its own. */
 export async function upsertItems(sql: SqlLike, items: FleetItem[]): Promise<FleetItem[]> {
   for (const i of items) {
     await sql`
-      INSERT INTO fleet_items (name, phrases, filters, enabled)
-      VALUES (${i.name}, ${sql.json(i.phrases)}, ${sql.json(i.filters as JSONValue)}, ${i.enabled})
-      ON CONFLICT (name) DO UPDATE SET phrases = EXCLUDED.phrases, filters = EXCLUDED.filters, enabled = EXCLUDED.enabled`;
+      INSERT INTO fleet_items (name, phrases, filters, enabled, every_days)
+      VALUES (${i.name}, ${sql.json(i.phrases)}, ${sql.json(i.filters as JSONValue)}, ${i.enabled}, ${i.every_days ?? 1})
+      ON CONFLICT (name) DO UPDATE SET phrases = EXCLUDED.phrases, filters = EXCLUDED.filters, enabled = EXCLUDED.enabled,
+        every_days = ${i.every_days === undefined ? sql`fleet_items.every_days` : sql`EXCLUDED.every_days`}`;
   }
   return listItems(sql);
 }
@@ -343,6 +350,7 @@ export const SETTING_BOUNDS: Record<NumericKey, readonly [number, number]> = {
   // A static ISP exit is one IP; two accounts on it is what the vendor's
   // pairs were bought for.
   max_accounts_per_proxy: [1, 10],
+  pace_percent: [0, 100],
   // 0 stops new switches as cloak_enabled does; a license sells seats in tens.
   cloak_max_slots: [0, 100],
 };

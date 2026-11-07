@@ -165,13 +165,22 @@ describe('items', () => {
     const r = await api<FleetItem[]>('PUT', '/api/fleet/items', { token, body: ITEMS });
     expect(r.status).toBe(200);
     expect(r.body).toEqual([
-      { name: 'enterprise_ssd', phrases: ['ssd lot'], filters: {}, enabled: true },
-      { name: 'server_ram', phrases: ['server ram memory'], filters: { keywords: ['ram'] }, enabled: true },
+      { name: 'enterprise_ssd', phrases: ['ssd lot'], filters: {}, enabled: true, every_days: 1 },
+      { name: 'server_ram', phrases: ['server ram memory'], filters: { keywords: ['ram'] }, enabled: true, every_days: 1 },
     ]);
     const off = await api<FleetItem[]>('PUT', '/api/fleet/items', { token, body: [{ name: 'server_ram', phrases: ['server ram', ' server ram '], enabled: false }] });
-    expect(off.body.find((i) => i.name === 'server_ram')).toEqual({ name: 'server_ram', phrases: ['server ram'], filters: {}, enabled: false });
+    expect(off.body.find((i) => i.name === 'server_ram')).toEqual({ name: 'server_ram', phrases: ['server ram'], filters: {}, enabled: false, every_days: 1 });
     expect(off.body).toHaveLength(2);
     expect((await api<FleetItem[]>('GET', '/api/fleet/items', { token })).body).toEqual(off.body);
+  });
+
+  it('saves every_days, keeps it when a save leaves it out, and refuses one out of range', async () => {
+    await api('PUT', '/api/fleet/items', { token, body: ITEMS });
+    const two = await api<FleetItem[]>('PUT', '/api/fleet/items', { token, body: [{ name: 'enterprise_ssd', phrases: ['ssd lot'], every_days: 2 }] });
+    expect(two.body.find((i) => i.name === 'enterprise_ssd')?.every_days).toBe(2);
+    const kept = await api<FleetItem[]>('PUT', '/api/fleet/items', { token, body: [{ name: 'enterprise_ssd', phrases: ['ssd'] }] });
+    expect(kept.body.find((i) => i.name === 'enterprise_ssd')).toMatchObject({ phrases: ['ssd'], every_days: 2 });
+    expect((await api('PUT', '/api/fleet/items', { token, body: [{ name: 'enterprise_ssd', phrases: ['ssd'], every_days: 0 }] })).status).toBe(422);
   });
 
   it('refuses a bad name, no phrases and a non-object filter', async () => {
@@ -189,7 +198,7 @@ describe('settings', () => {
     const r = await api<FleetSettings>('GET', '/api/fleet/settings', { token });
     expect(r.body).toEqual({
       per_day_default: 1, budget_minutes: 360, lease_minutes: 30, task_max_minutes: 45, poll_hold_seconds: 50,
-      familiar_days: 7, start_fresh_hours: 2, quarantine_hours: 48, quarantine_probe_hours: 6, retention_days: 90, max_accounts_per_proxy: 2, cloak_enabled: false, cloak_max_slots: 1, search: {},
+      familiar_days: 7, start_fresh_hours: 2, quarantine_hours: 48, quarantine_probe_hours: 6, retention_days: 90, max_accounts_per_proxy: 2, pace_percent: 0, cloak_enabled: false, cloak_max_slots: 1, search: {},
     });
   });
 

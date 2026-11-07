@@ -3959,7 +3959,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     lease, longest task, familiar window, round-start skip, quarantine and
     its probe interval, and since v1.358.0 how many days of task history to
     keep, 30 to 730, default 90); a change reaches each worker at its next
-    task. Finished, cancelled and expired tasks older than that are deleted
+    task. Since v1.435.0 (RS-562) it also sets **Paced accounts**, the share of
+    accounts that spread their budget across the Eastern day instead of
+    spending it after midnight, and for each item how many times a city's gap
+    it waits (2 searches it half as often). An account mostly blank on an item
+    where others find cards is quarantined, and such a blank no longer costs
+    the city its turn: the next account retries once. Finished, cancelled and expired tasks older than that are deleted
     hourly with their logs, except each city and item's last search and each
     city's latest slug check.
   - **Analysis** (`/#/fleet/analysis`, v1.344.0): the search-to-alert

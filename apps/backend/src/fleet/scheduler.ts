@@ -27,6 +27,12 @@ const VERIFY_BACKOFF_MAX = '6 hours';
 export const PURGE_BATCH = 5000;
 const PURGE_EVERY_MS = 3_600_000;
 const PURGE_LOCK = 'fleet:purge';
+// How far back another account's cards count as proof a city has listings.
+const PEER_CARDS_WINDOW = '7 days';
+// Well clear of a healthy account: the worst of those ran 20% blank when the
+// one this catches ran 57% on one item and 100% on the other.
+const BLANK_MIN_SEARCHES = 10;
+const BLANK_SHARE = 0.5;
 
 export type ReconcileReport = {
   inserted: number;
@@ -45,6 +51,35 @@ export async function notifyReady(sql: SqlLike, items: Iterable<string>): Promis
   for (const item of distinct) await sql`SELECT pg_notify(${NOTIFY_CHANNEL}, ${item})`;
   return distinct;
 }
+
+const hasCards = (sql: SqlLike, t: ReturnType<SqlLike>) => sql`
+  CASE WHEN jsonb_typeof(${t}.result->'cards') = 'number' THEN (${t}.result->>'cards')::numeric > 0 ELSE FALSE END`;
+
+/**
+ * The finished search a pair's cadence runs from. A blank search takes seconds
+ * and, counted, would cost the city its whole turn, so one that found nothing
+ * where another account found cards is passed over and the next account tries.
+ * A second blank in a row is believed: the listings may really have gone.
+ */
+const countedLastDone = (sql: SqlLike, now: Date, city: ReturnType<SqlLike>, item: ReturnType<SqlLike>) => sql`(
+  SELECT CASE WHEN n.blank AND NOT COALESCE(p.blank, FALSE) AND EXISTS (
+           SELECT 1 FROM fleet_tasks x
+           WHERE x.city = ${city} AND x.item = ${item} AND x.kind = 'search' AND x.state = 'done'
+             AND x.account_no IS DISTINCT FROM n.account_no AND ${hasCards(sql, sql`x`)}
+             AND x.done_at > ${now}::timestamptz - ${PEER_CARDS_WINDOW}::interval)
+         THEN p.done_at ELSE n.done_at END
+  FROM (
+    SELECT t.done_at, t.account_no, COALESCE(t.result->'cards' = '0'::jsonb AND ${searchRanToEnd(sql)}, FALSE) AS blank
+    FROM fleet_tasks t
+    WHERE t.city = ${city} AND t.item = ${item} AND t.kind = 'search' AND t.state = 'done'
+    ORDER BY t.done_at DESC LIMIT 1
+  ) n
+  LEFT JOIN LATERAL (
+    SELECT t.done_at, COALESCE(t.result->'cards' = '0'::jsonb AND ${searchRanToEnd(sql)}, FALSE) AS blank
+    FROM fleet_tasks t
+    WHERE t.city = ${city} AND t.item = ${item} AND t.kind = 'search' AND t.state = 'done' AND t.done_at < n.done_at
+    ORDER BY t.done_at DESC LIMIT 1
+  ) p ON TRUE)`;
 
 export async function reconcile(sql: Sql, now: Date = new Date()): Promise<ReconcileReport> {
   const settings = await loadSettings(sql);
@@ -106,21 +141,18 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
     ON CONFLICT DO NOTHING RETURNING item, due_at`;
   for (const t of checks) if (t.due_at.getTime() <= now.getTime()) woke.add(t.item);
 
-  // One open search per enabled pair. Due when the last finished search plus
+  // One open search per enabled pair. Due when the last counted search plus
   // the cadence says, or now: a pair never searched (or whose task just
-  // expired) is due at once.
+  // expired) is due at once. An item's every_days stretches the city's gap.
   const inserted = await sql<{ item: string; due_at: Date }[]>`
     INSERT INTO fleet_tasks (city, item, kind, due_at, priority, state, reason)
     SELECT c.slug, i.name, 'search',
-           GREATEST(${now}::timestamptz, ld.last_done + (interval '1 day' / COALESCE(c.per_day, ${settings.per_day_default}))),
+           GREATEST(${now}::timestamptz, ld.last_done + (interval '1 day' * i.every_days / COALESCE(c.per_day, ${settings.per_day_default}))),
            0, 'ready',
            CASE WHEN ld.last_done IS NULL THEN 'added' ELSE 'cadence' END
     FROM fleet_cities c
     CROSS JOIN fleet_items i
-    LEFT JOIN LATERAL (
-      SELECT MAX(d.done_at) AS last_done FROM fleet_tasks d
-      WHERE d.city = c.slug AND d.item = i.name AND d.kind = 'search' AND d.state = 'done'
-    ) ld ON TRUE
+    CROSS JOIN LATERAL (SELECT ${countedLastDone(sql, now, sql`c.slug`, sql`i.name`)} AS last_done) ld
     WHERE c.enabled AND c.disabled_at IS NULL AND i.enabled
       AND NOT EXISTS (
         SELECT 1 FROM fleet_tasks o
@@ -137,13 +169,11 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
   const retimed = await sql<{ item: string; due_at: Date }[]>`
     UPDATE fleet_tasks t SET due_at = n.due
     FROM (
-      SELECT w.id, GREATEST(${now}::timestamptz, ld.last_done + (interval '1 day' / COALESCE(c.per_day, ${settings.per_day_default}))) AS due
+      SELECT w.id, GREATEST(${now}::timestamptz, ld.last_done + (interval '1 day' * i.every_days / COALESCE(c.per_day, ${settings.per_day_default}))) AS due
       FROM fleet_tasks w
       JOIN fleet_cities c ON c.slug = w.city
-      CROSS JOIN LATERAL (
-        SELECT MAX(d.done_at) AS last_done FROM fleet_tasks d
-        WHERE d.city = w.city AND d.item = w.item AND d.kind = 'search' AND d.state = 'done'
-      ) ld
+      JOIN fleet_items i ON i.name = w.item
+      CROSS JOIN LATERAL (SELECT ${countedLastDone(sql, now, sql`w.city`, sql`w.item`)} AS last_done) ld
       WHERE w.state = 'ready' AND w.kind = 'search' AND w.reason = 'cadence' AND w.due_at > ${now}
         AND ld.last_done IS NOT NULL
     ) n
@@ -178,6 +208,37 @@ export async function reconcile(sql: Sql, now: Date = new Date()): Promise<Recon
       FROM blind b WHERE s.account_no = b.account_no
         AND (s.quarantine_reset_at IS NULL OR b.latest > s.quarantine_reset_at)
         AND (s.quarantined_until IS NULL OR s.quarantined_until < b.latest + make_interval(hours => ${settings.quarantine_hours}))`;
+
+    // The rule above lets an account off as soon as one search finds a card.
+    // One item can go blank while the other still works, and those blanks are
+    // the cheapest tasks in the queue, so they crowd out everyone else's. Only
+    // cities where another account found cards count.
+    await sql`
+      WITH evidence AS (
+        SELECT t.account_no, t.city, t.item, t.done_at, t.result->'cards' = '0'::jsonb AS blank
+        FROM fleet_tasks t
+        WHERE t.kind = 'search' AND t.state = 'done' AND jsonb_typeof(t.result->'cards') = 'number'
+          AND ${searchRanToEnd(sql)}
+          AND t.done_at > ${now}::timestamptz - make_interval(hours => ${settings.quarantine_hours})
+          AND EXISTS (
+            SELECT 1 FROM fleet_tasks x
+            WHERE x.city = t.city AND x.item = t.item AND x.kind = 'search' AND x.state = 'done'
+              AND x.account_no IS DISTINCT FROM t.account_no AND ${hasCards(sql, sql`x`)}
+              AND x.done_at > ${now}::timestamptz - ${PEER_CARDS_WINDOW}::interval)
+      ), mostly AS (
+        SELECT DISTINCT ON (e.account_no) e.account_no, e.item, MAX(e.done_at) AS latest, COUNT(*) AS searches,
+               COUNT(*) FILTER (WHERE e.blank) AS blanks, jsonb_agg(DISTINCT e.city) FILTER (WHERE e.blank) AS cities
+        FROM evidence e JOIN fleet_slots own ON own.account_no = e.account_no
+        WHERE own.quarantine_reset_at IS NULL OR e.done_at > own.quarantine_reset_at
+        GROUP BY e.account_no, e.item
+        HAVING COUNT(*) >= ${BLANK_MIN_SEARCHES} AND COUNT(*) FILTER (WHERE e.blank) >= COUNT(*) * ${BLANK_SHARE}::numeric
+        ORDER BY e.account_no, MAX(e.done_at) DESC
+      )
+      UPDATE fleet_slots s SET quarantined_until = m.latest + make_interval(hours => ${settings.quarantine_hours}),
+        quarantine_evidence = jsonb_build_object('searches', m.searches, 'blanks', m.blanks, 'item', m.item, 'cities', m.cities, 'latest', m.latest, 'rule', 'mostly_blank_with_positive_peer')
+      FROM mostly m WHERE s.account_no = m.account_no
+        AND (s.quarantine_reset_at IS NULL OR m.latest > s.quarantine_reset_at)
+        AND (s.quarantined_until IS NULL OR s.quarantined_until < m.latest + make_interval(hours => ${settings.quarantine_hours}))`;
   }
 
   // A probe only its own account may take waits for ever once no worker runs
