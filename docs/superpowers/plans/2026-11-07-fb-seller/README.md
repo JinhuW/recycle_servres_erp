@@ -132,6 +132,7 @@ profile shape and `runAgent`, E at the HTTP routes and DTOs.
 | A2 | PR open | #1149 | 1.438.0 | migrations 0233, 0234; see the WS file's Outcome |
 | B | PR open | #1146 | tracker [Unreleased], monitor pin `d788039` | no release cut; fixtures are guesses until F.live refreshes them |
 | C | PR open | #1152 | 1.442.0 | D1 faked in tests; dev-sync options in the PR body |
+| C | PR open | #1152 | 1.442.0 | D1 faked in tests; dev-sync options in the PR body |
 | D1 | PR open | #1151 | 1.440.0 | runtime, ten rules, three skills, fbOffer, guards, loop; real-model transcript still to run (no key here) |
 | D2 | PR open | #1150 | 1.439.0 | registry is a local §6.5 copy until D1 merges |
 | E | PR open | #1153 | 1.441.0 | pages on a dev-only mock for /api/fb-seller; real-API screenshots after C merges |
