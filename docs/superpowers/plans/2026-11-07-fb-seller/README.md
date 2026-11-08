@@ -137,4 +137,4 @@ profile shape and `runAgent`, E at the HTTP routes and DTOs.
 | E | PR open | #1153 (merged), #1154 | 1.441.0, 1.444.3 | checked against the real API (v1.444.3); mock removed |
 | R | PR open | #1155 | 1.442.1, monitor pin `2378351` | 13 findings (3 high, 7 medium, 3 low), all fixed; not-fixed notes in WS-R-review.md's Outcome |
 | F.local | done | (this PR) | 1.445.1 | 15/15 steps pass; fake worker `apps/backend/scripts/fake-seller-worker.ts`; stub model without a key; see WS-F's F.local outcome |
-| F.live | not started | | | each step needs the owner's yes |
+| F.live | in progress | #1167 | 1.445.2 | step 3: seller gate at 0.18.0; see WS-F's F.live outcome |
