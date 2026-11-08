@@ -159,6 +159,10 @@ is not a stage but a flag beside one, set once every line has sold
     Saved products are named by `#` — "#5 is missing: Generation", "This
     Part # is already on #2, #7" — never by their place in the list. A
     transfer's two rows of one product are not flagged as a duplicate part #.
+    When Submit or Save finds a repeated part #, its dialog has an **Open #2
+    to update quantity** button per part (v1.446.0, RS-570). It closes the
+    dialog without saving and opens that part's first product with Qty
+    selected, so the repeat's units can be added there and the copy removed.
     The server names a product not saved yet the same way when it can: a new
     PO arrives with every row in list order ("new product 2
     (M471A2K43DB1-CWE): Laptop doesn't fit RDIMM"). A product added to a PO
@@ -4561,6 +4565,10 @@ inventory search, sell-order draft creation.
       the PO.
     - Deleting a saved line also removes it from the PO (this applies to
       hand-confirmed lines too).
+    - Editing a saved line in its drawer marks it **Not saved**, and Submit
+      writes the edit along with the new lines (v1.446.0, RS-570). A reload
+      warns before it is lost. Before that, the drawer took the edit but
+      nothing sent it, so the PO kept the old values.
     - Saves run one at a time, and Submit waits for an auto-save in flight, so
       there is never a second PO or duplicate rows.
     - The scanner bridge scans at the scanner's highest flatbed resolution,

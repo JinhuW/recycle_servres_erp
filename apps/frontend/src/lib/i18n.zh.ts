@@ -1784,6 +1784,7 @@ const zh: Record<string, string> = {
   dupPartModalSub: '此采购单中有多个产品使用了相同的零件号。请检查下列产品,或在确认无误时仍可保存。',
   dupPartModalRow: '零件 {pn} — {nums}',
   dupPartReview: '返回检查',
+  dupPartOpenLine: '打开 {line} 修改数量',
   dupPartSaveAnyway: '仍然保存',
   dupPartSubmitAnyway: '仍然提交',
   dupPartScanWarn: '零件 {pn} 已在本订单中（{line}）— 请在保存前核对。',

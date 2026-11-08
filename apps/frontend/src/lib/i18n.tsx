@@ -2646,6 +2646,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     dupPartModalSub: 'The same Part # appears on more than one product of this PO. Review them below or save anyway if this was intentional.',
     dupPartModalRow: 'Part {pn} — {nums}',
     dupPartReview: 'Review products',
+    dupPartOpenLine: 'Open {line} to update quantity',
     dupPartSaveAnyway: 'Save anyway',
     dupPartSubmitAnyway: 'Submit anyway',
     // Fires at scan time when the AI-extracted Part # matches a line already

@@ -22,8 +22,8 @@ import { poEffectiveCost, parseFeeInput, feeEq, rateEq, readStoredGoodsTotal } f
 import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
 import {
-  blankLine, brandConfirmPending, duplicatesByIndex, findDuplicatePartNumbers, lineBlockerMessages,
-  patchEditsLine, type DuplicatePartGroup, type Line,
+  blankLine, brandConfirmPending, duplicatesByIndex, findDuplicatePartNumbers, focusLineQty,
+  lineBlockerMessages, patchEditsLine, type DuplicatePartGroup, type Line,
 } from './submit/line';
 import { usePartQuestion } from '../../components/RamPartCheck';
 import { settlePartQuestions } from '../../lib/ramPartQuestion';
@@ -2155,6 +2155,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           confirmTone="primary"
           confirmLabel={t('dupPartSaveAnyway')}
           onClose={() => { setDupConfirm(null); takeBackMove(); }}
+          onOpenLine={idx => {
+            setDupConfirm(null);
+            takeBackMove();
+            setActiveIdx(idx);
+            focusLineQty(idx);
+          }}
           onConfirm={async () => {
             setDupConfirm(null);
             if (!(await askRevert(materialDirty))) return;

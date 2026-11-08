@@ -7,7 +7,7 @@ import { fmtUSD } from '../../../lib/format';
 import { scanErrorMessage } from '../../../lib/scanError';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../../../lib/status';
 import type { Category, ScanResponse } from '../../../lib/types';
-import { brandConfirmPending, scanToLinePatch, type Line } from './line';
+import { brandConfirmPending, lineQtyInputId, scanToLinePatch, type Line } from './line';
 import type { EditLine } from './editLine';
 import { BrandConfirmDialog } from '../../../components/BrandConfirmDialog';
 import { SerialChipsField } from '../../../components/SerialChipsField';
@@ -654,8 +654,9 @@ export function LineDrawer({
               padding: 14, background: 'var(--bg-soft)', borderRadius: 10,
             }}>
               <div className="field">
-                <label className="label">{t('qty')} <span className="req">*</span></label>
+                <label className="label" htmlFor={lineQtyInputId(idx)}>{t('qty')} <span className="req">*</span></label>
                 <input
+                  id={lineQtyInputId(idx)}
                   className="input"
                   type="number"
                   // A line already on the PO may be counted down to 0.
