@@ -230,6 +230,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   };
   const [activityKey, setActivityKey] = useState(0);
   const [costLedgerKey, setCostLedgerKey] = useState(0);
+  // A PO's cost is one bank payment: once one is linked the picker steps
+  // aside, and a second goes through the Payments page on purpose.
+  const [costLinked, setCostLinked] = useState(false);
   const [lines, setLines] = useState<EditLine[]>(() => order.lines.map(orderLineToEditLine));
   // Files picked for a line that has no DB id to hang them off yet — one added
   // in this session and not yet confirmed. Keyed by _cid, the only handle such
@@ -1830,7 +1833,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                   // the entries voided by the move stay reachable.
                   business: (
                     <>
-                      {canEditOrder && (
+                      {canEditOrder && !costLinked && (
                         <BankTxnLinkPicker orderId={order.id} kind="cost" onLinked={() => {
                           setCostLedgerKey(k => k + 1);
                           setActivityKey(k => k + 1);
@@ -1840,7 +1843,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                           if (!dirty) void onReload?.();
                         }} />
                       )}
-                      <PoPaymentsLedger key={costLedgerKey} scope={{ orderId: order.id, kind: 'cost' }} locale={locale} />
+                      <PoPaymentsLedger key={costLedgerKey} scope={{ orderId: order.id, kind: 'cost' }} locale={locale}
+                        onLoaded={rows => setCostLinked(rows.some(r => r.linkKind === 'payment'))} />
                       {order.payment === 'company' && <AccountingCard scope={{ orderId: order.id, kind: 'purchase' }} />}
                     </>
                   ),
