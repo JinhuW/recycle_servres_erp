@@ -1420,7 +1420,9 @@ only):
   reached the seller and never shows up in the next read moves the thread to
   Needs human with that reason.
 - **Making a seller.** Setting an account's role to seller, or turning its agent
-  on, changes no container and causes no Facebook login.
+  on, changes no container and causes no Facebook login. A seller account is
+  claimed only by a worker on facebook-tracker 0.18.0 or later, and only such a
+  worker is handed its tasks (v1.445.2); on an older worker it waits.
 - **Alerts** for Needs human, a wall, a pool out of photos or running low go to
   every manager's notifications, and to Telegram when the bot token and a chat
   are set.

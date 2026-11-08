@@ -29,6 +29,8 @@ related: [RS-394, RS-313, RS-314, RS-341]
 
 > For the image in the post, Manager can provide a source pool. Then the agent post pick random. Do not pcik any same.
 
+> First. let we start an test. Post first post in the facebook marketpalce.
+
 ## Context
 
 The ERP fleet (RS-394) runs one task kind that matters, `search`: workers
@@ -92,6 +94,10 @@ The plan is split for parallel agents in
   variable on Railway prod, the staged tracker image, and the one container
   recreate (one Facebook login) for the first seller account. The plan's
   WS-F lists them in order.
+- F.live step 3 (v1.445.2): `FLEET_SELLER_MIN_WORKER_VERSION` is `0.18.0`, the
+  tracker release that carries the seller kinds. The image is staged for new
+  workers only, so the first seller is a fresh pool account whose new worker
+  starts on it: one login, and no running worker replaced.
 - The agent never sees the price ceiling. Offers come from code, from the
   Market page's max buy (`lib/market.ts`, `maxBuyFor`), and any reply carrying
   another dollar figure is refused.

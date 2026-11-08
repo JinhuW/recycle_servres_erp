@@ -80,3 +80,13 @@ table are at `http://10.10.100.225:8800/rs565-f-local/index.html`.
   held (C's design). The backend process exits when Postgres goes away, and
   the walk resumed from the database after a restart with nothing lost.
   Photo thumbnails are blank locally because uploads go to the no-R2 stub.
+
+## F.live outcome
+
+- **Step 3, the gate (v1.445.2, 2026-11-07).** The tracker's 0.18.0 was already
+  released and staged as "new workers only" (0 replaced). The ERP gate is now
+  `0.18.0`. The owner chose a fresh pool account for the first seller, so its
+  new container starts on the staged image and no running worker is replaced:
+  one login. Before adding it, the plan checks that the new worker lands on a
+  missing or unheld worker id (`apps/fleet-agent/src/plan.ts`) and that no
+  other slot, a CloakBrowser one especially, is free for it to take first.
