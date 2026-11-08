@@ -41,3 +41,7 @@ description: Build/launch/drive recipe for verifying recycle-erp changes end-to-
   Inventory nav — use a manager for inventory pages.
 - Editing source files while the UI is open triggers a Vite full reload that
   resets in-page state (drafts survive server-side).
+- `browser_press_key` / `browser_type` can silently deliver nothing. Spy on
+  `keydown` before blaming the app, and fall back to a dispatched event; to
+  switch users, `browser_close` rather than signing out
+  ([debug note](../../../docs/debug-notes/2026-11-07-playwright-mcp-keys-never-reach-the-page.md)).

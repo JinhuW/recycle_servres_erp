@@ -18,9 +18,10 @@ export type FleetSellerTaskKind = (typeof FLEET_SELLER_TASK_KINDS)[number];
 export const FLEET_TASK_KINDS = [...FLEET_SEARCH_TASK_KINDS, ...FLEET_SELLER_TASK_KINDS] as const;
 export type FleetTaskKind = (typeof FLEET_TASK_KINDS)[number];
 
-/** The first worker release that knows the seller kinds. Above every release
- *  until the tracker ships them, so no worker is handed one before then. */
-export const FLEET_SELLER_MIN_WORKER_VERSION = '99.0.0';
+/** The first worker release that knows the seller kinds (facebook-tracker
+ *  0.18.0). Only a slot a manager sets to `seller` gets them, so raising this
+ *  hands nothing to a search worker. */
+export const FLEET_SELLER_MIN_WORKER_VERSION = '0.18.0';
 
 /** Why a task exists: the cadence, a city just added, a manager, a round start, a quarantine probe or a slug check. */
 export type FleetTaskReason = 'cadence' | 'added' | 'manual' | 'start' | 'probe' | 'verify';

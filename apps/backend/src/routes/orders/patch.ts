@@ -363,7 +363,9 @@ patchRoutes.patch('/:id', async (c) => {
       // commission or ownership corrupts that record (and may also confuse
       // downstream sell-order / commission math). Re-open to Reviewing first
       // if the data really needs to change. Notes are the only field a
-      // manager may freely append on a closed PO.
+      // manager may freely append on a closed PO, and the commission rate
+      // stays theirs until Done: Ready to Pay is the payment review that
+      // corrects the projection, as the sell price does on the line route.
       if (isClosedBook(orderBefore.lifecycle)) {
         const touchesFrozen =
           (Array.isArray(body.lines) && body.lines.length > 0) ||
@@ -374,7 +376,7 @@ patchRoutes.patch('/:id', async (c) => {
           // closed-book cost, not the free-append `notes` field.
           body.otherFees !== undefined ||
           body.otherFeesNote !== undefined ||
-          body.commissionRate !== undefined ||
+          (body.commissionRate !== undefined && orderBefore.lifecycle !== 'ready_to_pay') ||
           // The payment reference is part of the closed book too — and so is
           // who paid: a flip to self moves the reimbursement into commission.
           // A re-save echoing the stored value changes nothing.

@@ -4,7 +4,7 @@ import { Icon } from '../../../../components/Icon';
 import { Modal } from '../../../../components/Modal';
 import { TableSkeleton } from '../../../../components/Skeleton';
 import { handleFetchError, showSuccessToast } from '../../../../lib/errorToast';
-import { fbSellerApi, fbSellerChanged, offerLadder, usePolled } from '../../../../lib/fbSeller';
+import { fbSellerApi, fbSellerChanged, offerLadder, threadModeKey, usePolled } from '../../../../lib/fbSeller';
 import { fmtDateShort } from '../../../../lib/format';
 import { useT } from '../../../../lib/i18n';
 import { fbSellerTabPath, hrefFor, onLinkClick } from '../../../../lib/route';
@@ -59,7 +59,7 @@ export function ThreadView({ id }: { id: number }) {
           <h2>{d.seller_name || t('fbs_unknown_seller')}</h2>
           <div className="rl-dmeta">
             <StageChip stage={d.stage} />
-            <span className={`chip ${d.mode === 'human' ? 'info' : 'muted'}`}>{t(d.mode === 'human' ? 'fbs_mode_human' : 'fbs_mode_agent')}</span>
+            <span className={`chip ${d.mode === 'human' ? 'info' : d.needs_human ? 'warn' : 'muted'}`}>{t(threadModeKey(d))}</span>
             <AccountCell no={d.account_no} accounts={accts.data?.rows ?? null} />
             <span className="rl-clip">{d.listing_title}</span>
           </div>
@@ -225,9 +225,9 @@ function ThreadSide({ d, offer }: { d: FbThreadDetail; offer: FbSellerSettings['
         <section className="card fbs-panel">
           <h3>{t('fbs_ladder')}</h3>
           <ol className="fbs-ladder">
-            {ladder.map((usd, r) => (
-              <li key={r} className={r === d.round && d.offer_usd !== null ? 'on' : r < d.round ? 'past' : undefined}>
-                <span>{t('fbs_round_n', { n: r })}</span><b><Money usd={usd} /></b>
+            {ladder.map((usd, i) => (
+              <li key={i} className={i + 1 === d.round ? 'on' : i + 1 < d.round ? 'past' : undefined}>
+                <span>{t('fbs_round_n', { n: i + 1 })}</span><b><Money usd={usd} /></b>
               </li>
             ))}
           </ol>

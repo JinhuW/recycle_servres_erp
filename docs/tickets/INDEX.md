@@ -5,7 +5,10 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-567](./RS-567-review-mode-sell-price-editable-at-ready-to-pay.md) | done | bug | P2 | Review mode: sell price editable at Ready to Pay | — |
+| [RS-569](./RS-569-commission-rate-and-notes-editable-at-ready-to-pay.md) | done | story | P2 | Commission rate and notes editable at Ready to Pay | 1.445.0 |
+| [RS-568](./RS-568-allow-a-unit-cost-of-0-on-a-po-line.md) | done | task | P2 | Allow a unit cost of 0 on a PO line | 1.444.2 |
+| [RS-567](./RS-567-review-mode-sell-price-editable-at-ready-to-pay.md) | done | bug | P2 | Review mode: sell price editable at Ready to Pay | 1.444.1 |
+| [RS-566](./RS-566-show-the-sell-order-brief-read-only-once-the-order-i.md) | done | story | P2 | Show the sell order brief read-only once the order is done | 1.444.0 |
 | [RS-565](./RS-565-facebook-seller-accounts-post-buy-ads-route-messenge.md) | in-progress | story | P2 | Facebook seller accounts post buy ads, route Messenger to an ERP message center, and an agent negotiates | — |
 | [RS-564](./RS-564-rerun-the-fleet-search-frequency-review.md) | backlog | task | P2 | Rerun the fleet search frequency review | — |
 | [RS-563](./RS-563-move-web-submissions-under-leads-as-website.md) | done | story | P2 | Move web submissions under Leads as Website | 1.436.0 |

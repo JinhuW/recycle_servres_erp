@@ -206,6 +206,22 @@ describe('the book closes at Ready to Pay', () => {
     expect(after.body.order.lines.find(l => l.id === line.id)?.sellPrice).toBe(55);
   });
 
+  // Payment review corrects the commission projection, so the rate outlives
+  // the lock like the sell price does. Done still refuses it (orders.test.ts).
+  it('a manager can still change the commission rate alone; the purchaser cannot', async () => {
+    const { id, alex, marcus } = await orderAt('ready_to_pay');
+    expect((await api('PATCH', `/api/orders/${id}`, { token: marcus.token, body: { commissionRate: 0.15 } })).status).toBe(403);
+    expect((await api('PATCH', `/api/orders/${id}`, { token: alex.token, body: { commissionRate: 0.15 } })).status).toBe(200);
+
+    const mixed = await api('PATCH', `/api/orders/${id}`, { token: alex.token, body: { commissionRate: 0.2, otherFees: 5 } });
+    expect(mixed.status).toBe(409);
+
+    const after = await api<{ order: { lifecycle: string; commissionRate: number | null } }>(
+      'GET', `/api/orders/${id}`, { token: alex.token });
+    expect(after.body.order.lifecycle).toBe('ready_to_pay');
+    expect(after.body.order.commissionRate).toBeCloseTo(0.15, 4);
+  });
+
   // The inventory editor sends only the fields that moved, so everything but
   // the goods pair lands on a reviewed PO.
   it('non-goods line edits land on a Done PO, and on it once Sold', async () => {

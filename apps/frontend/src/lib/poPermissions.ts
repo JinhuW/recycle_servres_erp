@@ -20,6 +20,9 @@ export type PoPermissions = {
   canAnnotate: boolean;
   // A manager keeps the stage moves on a closed, unarchived order.
   canReopen: boolean;
+  // Ready to Pay is payment review: a manager still corrects the commission
+  // projection (sell price, rate) and annotates (note, files) until Done.
+  paymentReview: boolean;
   // Only a never-submitted Draft is deleted; a submitted one is archived.
   canDelete: boolean;
 };
@@ -48,6 +51,7 @@ export function derivePoPermissions(opts: {
     isOwnerOrManager,
     canAnnotate: !orderLocked && isOwnerOrManager,
     canReopen: !isPurchaser && orderLocked && !isArchived,
+    paymentReview: !isPurchaser && order.lifecycle === 'ready_to_pay' && !isArchived,
     canDelete: canEditOrder && effectiveStatus === 'Draft' && !order.everSubmitted,
   };
 }

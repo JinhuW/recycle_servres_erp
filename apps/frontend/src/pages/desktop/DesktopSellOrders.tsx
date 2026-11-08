@@ -1838,7 +1838,9 @@ function SellOrderDetail({ id, onToast }: {
                     </div>
                   </div>
                 )}
-                {editable && (
+                {/* A Done order keeps the stepper as a read-only record; Closed
+                    is not a step, and its banner above already says so. */}
+                {(editable || order.status === 'Done') && (
                   <div style={{ marginBottom: 18 }}>
                     <div style={{
                       display: 'flex', alignItems: 'center', gap: 8,
@@ -1846,9 +1848,11 @@ function SellOrderDetail({ id, onToast }: {
                       textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
                     }}>
                       <Icon name="flag" size={12} /> {t('orderStatus')}
-                      <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
-                        {t('sodStatusHint')}
-                      </span>
+                      {editable && (
+                        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+                          {t('sodStatusHint')}
+                        </span>
+                      )}
                     </div>
                     <div className="so-stepper">
                       {stepperStatuses.map(({ id: s }, i) => {
@@ -1858,12 +1862,12 @@ function SellOrderDetail({ id, onToast }: {
                         const meta = needsDialog(s) ? statusMeta?.[s] : null;
                         const hasMeta = !!meta && (!!meta.note || meta.attachments.length > 0);
                         const dialog = needsDialog(s);
-                        const blocked = s === 'Done' && !active && doneBlockedReason !== null;
+                        const blocked = editable && s === 'Done' && !active && doneBlockedReason !== null;
                         return (
                           <Fragment key={s}>
                             <button
                               type="button"
-                              disabled={blocked}
+                              disabled={blocked || !editable}
                               className={'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '')
                                 + (blocked ? ' locked' : '')}
                               onClick={() => {
@@ -1872,7 +1876,7 @@ function SellOrderDetail({ id, onToast }: {
                                 if (dialog) setPending(s);
                                 else setDraft({ ...draft, status: s });
                               }}
-                              title={blocked ? doneBlockedReason! : dialog
+                              title={!editable ? undefined : blocked ? doneBlockedReason! : dialog
                                 ? (s === draft.status
                                     ? t('sodStepEditMeta', { s })
                                     : t('sodStepAdvance', { s }))
@@ -1901,7 +1905,7 @@ function SellOrderDetail({ id, onToast }: {
                         );
                       })}
                     </div>
-                    {doneBlockedReason && draft.status !== 'Done' && (
+                    {editable && doneBlockedReason && draft.status !== 'Done' && (
                       <div className="so-signoff-step-note">
                         <Icon name="lock" size={12} /> {doneBlockedReason}
                       </div>
@@ -1923,52 +1927,71 @@ function SellOrderDetail({ id, onToast }: {
                   </div>
                 )}
 
-                {editable && (
-                  <div style={{ marginBottom: 18 }}>
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-                      textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
-                    }}>
-                      <Icon name="user" size={12} /> {t('fieldCustomer')}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+                    textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
+                  }}>
+                    <Icon name="user" size={12} /> {t('fieldCustomer')}
+                  </div>
+                  {!editable ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap', fontSize: 13 }}>
                       <div style={{ flex: '0 1 340px', minWidth: 240 }}>
-                        <CustomerPicker
-                          customers={customers.length ? customers : [{
-                            id: order.customer.id, name: order.customer.name,
-                            short_name: order.customer.short, region: order.customer.region,
-                          }]}
-                          value={draft.customerId}
-                          onChange={id => setDraft({ ...draft, customerId: id })}
-                          onCreated={c => { setCustomers(prev => [...prev, c]); setDraft({ ...draft, customerId: c.id }); }}
-                        />
+                        <span style={{ fontWeight: 500 }}>{order.customer.name}</span>
+                        {order.customer.region && (
+                          <span style={{ color: 'var(--fg-subtle)' }}> · {order.customer.region}</span>
+                        )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('currency.label')}</span>
-                        <CurrencyPicker
-                          value={draft.currency}
-                          onChange={cur => setDraft({ ...draft, currency: cur })}
-                          t={t}
-                        />
+                        <span className="mono">{order.currency}</span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <span style={{ fontSize: 12, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>{t('paymentReceiverLabel')}</span>
-                        <ReceiverSelect
-                          value={draft.paymentReceivedBy}
-                          current={order.paymentReceivedBy}
-                          members={members}
-                          onChange={id => setDraft({ ...draft, paymentReceivedBy: id })}
-                        />
+                        <span>{order.paymentReceivedBy?.name ?? t('paymentReceiverNone')}</span>
                       </div>
                     </div>
-                    {currencyChanged && (
-                      <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                        {t('soFxRateNote', { rate: fx ? fx.oneUsdInQuote.toFixed(4) : '…', currency: draft.currency, source: fx?.source ?? '…' })}
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+                        <div style={{ flex: '0 1 340px', minWidth: 240 }}>
+                          <CustomerPicker
+                            customers={customers.length ? customers : [{
+                              id: order.customer.id, name: order.customer.name,
+                              short_name: order.customer.short, region: order.customer.region,
+                            }]}
+                            value={draft.customerId}
+                            onChange={id => setDraft({ ...draft, customerId: id })}
+                            onCreated={c => { setCustomers(prev => [...prev, c]); setDraft({ ...draft, customerId: c.id }); }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('currency.label')}</span>
+                          <CurrencyPicker
+                            value={draft.currency}
+                            onChange={cur => setDraft({ ...draft, currency: cur })}
+                            t={t}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontSize: 12, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>{t('paymentReceiverLabel')}</span>
+                          <ReceiverSelect
+                            value={draft.paymentReceivedBy}
+                            current={order.paymentReceivedBy}
+                            members={members}
+                            onChange={id => setDraft({ ...draft, paymentReceivedBy: id })}
+                          />
+                        </div>
                       </div>
-                    )}
-                  </div>
-                )}
+                      {currencyChanged && (
+                        <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
+                          {t('soFxRateNote', { rate: fx ? fx.oneUsdInQuote.toFixed(4) : '…', currency: draft.currency, source: fx?.source ?? '…' })}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
 
                 {/* Line items — one card per warehouse or per source PO, by the
                     user's remembered switch. */}
@@ -2346,8 +2369,8 @@ function SellOrderDetail({ id, onToast }: {
 
               {/* Tracking & evidence — read-only view of the per-status notes and
                   attachments. The editor reaches these via the stepper dialog; a
-                  locked order has no stepper, so this is the only place to open
-                  the files. */}
+                  locked order's stepper is read-only, so this is the only place
+                  to open the files. */}
               {!editable && evidenceEntries(statusMeta).length > 0 && (
                 <div className="card so-page-card">
                   <div className="so-section-head"><Icon name="paperclip" size={14} /> {t('soEvidenceSection')}</div>

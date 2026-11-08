@@ -52,6 +52,41 @@
 
 ## Exit criteria
 
-- [ ] F.local walk passes with screenshots, reported to the owner.
+- [x] F.local walk passes with screenshots, reported to the owner.
 - [ ] Each F.live step done with the owner's recorded yes, results written
       here, ticket RS-565 closed with `pr:` and `version:` filled.
+
+## F.local outcome
+
+v1.445.1, 2026-11-07. All fifteen steps passed on a private local database
+with the backend and frontend on their own ports. Screenshots and a pass/fail
+table are at `http://10.10.100.225:8800/rs565-f-local/index.html`.
+
+- **Fake worker.** `apps/backend/scripts/fake-seller-worker.ts`, beside
+  `fleet-fake-worker.mjs` so it imports the backend's sealing and types.
+  `--seed` writes a host and made-up seller slots into a local
+  `DATABASE_URL` and refuses any other database; the worker refuses a
+  non-local ERP. It reports `FLEET_SELLER_MIN_WORKER_VERSION` by default
+  (`--version` overrides it), so the shared constant stays `99.0.0` until
+  F.live sets it. The inbox stays empty until an ad posts; a script message
+  can wait for a gate file, which is how the kill switch was caught
+  mid-conversation.
+- **Model.** No OpenRouter key on this Mac, so outside production the agent
+  now falls back to `services/fbAgent/stubLlm.ts`, a deterministic reader.
+  It passes the seeded eval cases except the keyword case, which needs a
+  pattern by design. The real-model transcript is still F.live's.
+- **Fixed.** A handed-off thread's header chip said "Agent answering".
+- **Seen, not changed.** Releasing the kill switch leaves held agent replies
+  held (C's design). The backend process exits when Postgres goes away, and
+  the walk resumed from the database after a restart with nothing lost.
+  Photo thumbnails are blank locally because uploads go to the no-R2 stub.
+
+## F.live outcome
+
+- **Step 3, the gate (v1.445.2, 2026-11-07).** The tracker's 0.18.0 was already
+  released and staged as "new workers only" (0 replaced). The ERP gate is now
+  `0.18.0`. The owner chose a fresh pool account for the first seller, so its
+  new container starts on the staged image and no running worker is replaced:
+  one login. Before adding it, the plan checks that the new worker lands on a
+  missing or unheld worker id (`apps/fleet-agent/src/plan.ts`) and that no
+  other slot, a CloakBrowser one especially, is free for it to take first.

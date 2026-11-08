@@ -360,11 +360,14 @@ is not a stage but a flag beside one, set once every line has sold
   ownership freeze, notes still append, line goods edits refuse
   — and the PO's lines read Done for every stock and sellable bucket. Managers
   and the owner are notified when a PO reaches it. The stage is a PO stage
-  only: it can't be written as a line status. One field survives the lock:
-  a manager can still change a line's **sell price** from the desktop PO
-  page's line drawer while the PO is at Ready to Pay, so the commission
-  projection can be corrected during payment review; Save stays on the PO
-  (v1.191.1).
+  only: it can't be written as a line status. Payment review keeps a manager
+  a few fields until Done. A line's **sell price** can still be changed from
+  the desktop PO page's line drawer (v1.191.1), and the PO's **commission
+  rate** from the Commission tab or Review mode's Commission card (v1.445.0,
+  RS-569), so the commission projection can be corrected; Save stays on the
+  PO. The **Notes & files** tab (the note and Submission files) stays live
+  for a manager too (v1.445.0). The phone keeps all of these read-only past
+  review, and a purchaser can't change them.
 - **Sold is a flag beside the stage, not a stage** (v1.246.0). A PO at In
   Transit, Reviewing, Ready to Pay or Done whose every line with units is at
   the `Sold` line status is sold; a Draft never is. Nobody sets it: it is
@@ -621,9 +624,9 @@ is not a stage but a flag beside one, set once every line has sold
       formula (goods or negotiated lot price plus fees, revenue over priced
       lines, the rate, the cost back on a self-paid PO) and over the qty
       Approve will leave, so a line ticked at 0 earns nothing.
-    - A **Commission** card in the side panel carries the rate (editable at
-      Reviewing and earlier, read-only once the book closes at Ready to
-      Pay), revenue, cost with the fee broken out, profit, commission and
+    - A **Commission** card in the side panel carries the rate (editable
+      through Ready to Pay, read-only at Done since v1.445.0), revenue, cost
+      with the fee broken out, profit, commission and
       the total, with the unpriced count. The Compare card shows the
       selected product's sell price, its market reference with the basis
       and age, and the final sell price once it has sold. Finish review
@@ -954,7 +957,8 @@ is not a stage but a flag beside one, set once every line has sold
   untouched legacy $0 line does not block Save or a stage change. The
   per-order leave-Draft check above stays as the backstop, and the backend
   still accepts `unit_cost >= 0`. The phone's add-item form and draft sync
-  accept a typed $0 since v1.426.0; a blank cost is still refused there. On that
+  accept a typed $0 since v1.426.0, and the desktop PO edit page's Confirm and
+  Save since v1.444.2; a blank cost is still refused on both. On that
   form, Serial numbers sits directly under Part # (v1.426.0).
 - **The list's Payment cell says what the bank paid and opens it** (v1.138.0).
   On the desktop PO list a manager reads `Company | $1,279` or `Self | $2,829`
@@ -1336,7 +1340,8 @@ names its reason in words.
   each outbound, how far it got: queued, held (kill switch), sending, sent,
   unknown or failed with the reason. Beside it: what the agent extracted (items,
   quantities, the seller's ask, intent, confidence), the Market matches with the
-  max buy price and its date, the ceiling and offer, the offer ladder by round,
+  max buy price and its date, the ceiling and offer, the offer ladder from round 1
+  (counted as the agent's offer code counts them, v1.444.3),
   the rules that fired on the last runs, and the conversation's history.
   **Take over** stops the agent; **Hand back to agent** gives it back and
   clears Needs human; the reply box queues a staff message on the account's
@@ -1366,7 +1371,8 @@ names its reason in words.
   candidate's decision beside the live agent's for each seller message and marks
   the ones that differ. **Tests** lists the saved cases, runs every case against
   a chosen version, shows each run's per-case results with why a case failed,
-  and compares two runs case by case.
+  and compares two runs case by case, naming in words what changed in each
+  case (v1.444.3).
 - **Settings** holds every seller setting, the kill switch first. The kill
   switch saves at once; the rest (active hours, ad, message and inbox pacing,
   offers, agent limits, the low-pool warning, the Telegram chat) save together,
@@ -1414,7 +1420,9 @@ only):
   reached the seller and never shows up in the next read moves the thread to
   Needs human with that reason.
 - **Making a seller.** Setting an account's role to seller, or turning its agent
-  on, changes no container and causes no Facebook login.
+  on, changes no container and causes no Facebook login. A seller account is
+  claimed only by a worker on facebook-tracker 0.18.0 or later, and only such a
+  worker is handed its tasks (v1.445.2); on an older worker it waits.
 - **Alerts** for Needs human, a wall, a pool out of photos or running low go to
   every manager's notifications, and to Telegram when the bot token and a chat
   are set.
@@ -1612,7 +1620,9 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     Closed opens with the stepper, line inputs and customer ready to change;
     there is no read-only page or Edit order button any more. The old
     `/:id/edit` address opens the same page. Done and Closed orders stay
-    read-only, with Reopen.
+    read-only, with Reopen. They keep the editor's brief as text: a Done
+    order shows the stepper with nothing clickable, and both show customer,
+    currency and payment receiver (v1.444.0).
   - The line items and editing controls are on the left. The order summary,
     payment receiver, evidence and internal notes are on the right; under
     1100px everything stacks into one column.
