@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-08
 reporter: jinhu
 branch: JinhuW/catfish
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1174
 version: 1.447.0
 related: []
 ---
