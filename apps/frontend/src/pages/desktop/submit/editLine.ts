@@ -3,9 +3,9 @@ import { partQuestionKey } from '../../../lib/ramPartQuestion';
 import type { Line } from './line';
 
 // A PO line being edited in the drawer: the shared `Line` plus the original DB
-// id (when the line came from the server) and a dirty marker so the PATCH can
-// be scoped to what changed.
-export type EditLine = Line & { _id?: string; _dirty?: boolean };
+// id (when the line came from the server). `Line._dirty` scopes the PATCH to
+// what changed.
+export type EditLine = Line & { _id?: string };
 
 // `i` is the line's place in the order's list, for an older backend that sends
 // no # — its lines came in # order.
@@ -82,4 +82,12 @@ export function editLineToPatch(l: EditLine, status?: string) {
     scanImageId:    l.scanImageId ?? null,
     scanConfidence: l.scanConfidence ?? null,
   };
+}
+
+// The new-PO page's saved lines edited since their save, as updates by id —
+// the same shape the edit page sends. No status: the server keeps the stage's.
+export function savedLineEdits(lines: readonly Line[]): ReturnType<typeof editLineToPatch>[] {
+  return lines
+    .filter(l => l._confirmed && l._dbId && l._dirty)
+    .map(l => editLineToPatch({ ...l, _id: l._dbId! }));
 }

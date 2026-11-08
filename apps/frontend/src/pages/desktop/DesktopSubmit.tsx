@@ -26,9 +26,10 @@ import { DupPartDialog } from './submit/DupPartDialog';
 import { ProductNo } from './submit/ProductNo';
 import { lineRef, newOrdinals, productCount } from '../../lib/productNo';
 import {
-  blankLine, brandConfirmPending, duplicatesByIndex, findDuplicatePartNumbers,
+  applyLinePatch, blankLine, brandConfirmPending, duplicatesByIndex, findDuplicatePartNumbers, focusLineQty,
   lineBlockerMessages, lineSaveBlock, type DuplicatePartGroup, type Line,
 } from './submit/line';
+import { savedLineEdits } from './submit/editLine';
 import { usePreference } from '../../lib/preferences';
 import { lookupChips } from '../../lib/useChipFill';
 import { useMarketLookup } from '../../lib/useMarketLookup';
@@ -137,9 +138,9 @@ function OrderForm({
   // add control offers all four regardless, so this only sets the first line.
   const [lastCat, setLastCat] = usePreference('submit.lastCategory', 'RAM');
   const [lines, setLines] = useState<Line[]>([blankLine(lastCat as Category)]);
-  // A filled-in line not yet confirmed exists only in this page; a reload or
-  // a layout switch asks before throwing it away.
-  useUnsavedGuard(lines.some(l => !l._confirmed && (!!l.brand || !!l.description)));
+  // A filled-in line not yet confirmed, or a saved one edited since, exists
+  // only in this page; a reload or a layout switch asks before throwing it away.
+  useUnsavedGuard(lines.some(l => l._dirty || (!l._confirmed && (!!l.brand || !!l.description))));
   const [activeIdx, setActiveIdx] = useState<number | null>(0);
   // Full-screen view of a row's thumbnail (its scan or first saved photo).
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
@@ -341,7 +342,7 @@ function OrderForm({
   const [serialIssues, setSerialIssues] = useState<SerialLineIssue[] | null>(null);
 
   const updateLine = (i: number, patch: Partial<Line>) =>
-    setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+    setLines(ls => ls.map((l, j) => (j === i ? applyLinePatch(l, patch) : l)));
 
   // The part # question for the saves that don't go through the drawer's
   // Confirm. An answer is written to its line as it is given, so it stands
@@ -591,15 +592,19 @@ function OrderForm({
   const orderIdRef = useRef<string | null>(null);
   orderIdRef.current = orderIdRef.current ?? orderId;
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  // `edits` are saved lines changed since (savedLineEdits). Only the PATCH
+  // carries them: a line is saved by a write that made the PO, so before the
+  // PO exists there are none.
   const persistLines = (
     wireLines: ReturnType<typeof toWireLine>[],
     m: WireMeta,
+    edits: ReturnType<typeof savedLineEdits> = [],
   ): Promise<{ orderId: string; lineIds: string[]; lineNos: (number | undefined)[] }> => {
     const run = async () => {
       const current = orderIdRef.current;
       if (current) {
         const r = await api.patch<{ ok: true; addedLineIds?: string[]; addedLineNos?: number[] }>(
-          '/api/orders/' + current, { addLines: wireLines, ...m });
+          '/api/orders/' + current, { addLines: wireLines, ...m, ...(edits.length ? { lines: edits } : {}) });
         return { orderId: current, lineIds: r.addedLineIds ?? [], lineNos: r.addedLineNos ?? [] };
       }
       // Ownership travels only on the create — PATCH can't reassign an owner,
@@ -681,12 +686,18 @@ function OrderForm({
   // after it would serialize the PRE-patch lines and drop accepted part numbers.
   const doSubmit = async (submitLines: Line[] = lines) => {
     const unconfirmedLines = submitLines.filter(l => !l._confirmed);
+    const edits = savedLineEdits(submitLines);
     setSubmitting(true);
     try {
       // Creates the PO if no line was ever confirmed (single-line straight
-      // submit); otherwise appends any still-unconfirmed lines + refreshes meta.
-      const saved = await persistLines(unconfirmedLines.map(toWireLine), wireMeta());
+      // submit); otherwise appends any still-unconfirmed lines, writes edits to
+      // saved ones (their Confirm is spent) and refreshes meta.
+      const saved = await persistLines(unconfirmedLines.map(toWireLine), wireMeta(), edits);
       const finalId = saved.orderId;
+      if (edits.length) {
+        const written = new Set(edits.map(e => e.id));
+        setLines(ls => ls.map(l => (l._dbId && written.has(l._dbId) ? { ...l, _dirty: false } : l)));
+      }
       // Recorded before anything can hold the user here: a retry needs a line
       // to attach the photos to, and a second submit must patch these lines
       // rather than append them a second time.
@@ -1033,8 +1044,8 @@ function OrderForm({
                   <td className="num mono">{lQty && lCost ? fmtUSD(lQty * lCost, locale) : '—'}</td>
                   <td>
                     {isActive && <span className="chip info"><Icon name="edit" size={10} /> {t('subStatusEditing')}</span>}
-                    {!isActive && l._confirmed && <span className="chip pos">{t('subStatusSaved')}</span>}
-                    {!isActive && !l._confirmed && filled && <span className="chip">{t('subStatusNotSaved')}</span>}
+                    {!isActive && l._confirmed && !l._dirty && <span className="chip pos">{t('subStatusSaved')}</span>}
+                    {!isActive && (l._dirty || (!l._confirmed && filled)) && <span className="chip">{t('subStatusNotSaved')}</span>}
                     {!isActive && !l._confirmed && !filled && <span className="chip warn">{t('subStatusNeedsInfo')}</span>}
                   </td>
                   <td>
@@ -1378,6 +1389,12 @@ function OrderForm({
           confirmTone="accent"
           confirmLabel={t('dupPartSubmitAnyway')}
           onClose={() => setDupConfirm(null)}
+          onOpenLine={idx => {
+            setDupConfirm(null);
+            setPendingTargetId(null);
+            setActiveIdx(idx);
+            focusLineQty(idx);
+          }}
           onConfirm={async () => {
             setDupConfirm(null);
             const target = pendingTargetId ? targets.find(o => o.id === pendingTargetId) : null;

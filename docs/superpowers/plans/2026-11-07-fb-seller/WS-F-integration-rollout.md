@@ -90,3 +90,27 @@ table are at `http://10.10.100.225:8800/rs565-f-local/index.html`.
   one login. Before adding it, the plan checks that the new worker lands on a
   missing or unheld worker id (`apps/fleet-agent/src/plan.ts`) and that no
   other slot, a CloakBrowser one especially, is free for it to take first.
+
+## F.live outcome so far
+
+Owner's yes for steps 1–3 on 2026-11-07; step 4 (the one login) waits for a
+separate yes.
+
+- **Tracker release (step 3 of the list above).** Already done: facebook-tracker
+  0.18.0 (tag at `fa5009f0`, monitor pin `9a7004e`) carries the seller tasks and
+  every WS-R worker fix; its image `ghcr.io/jinhuw/aimm-recycle:0.18.0`
+  (`sha256:566b2ac3…`) was pushed and staged with RS-554's release, so new
+  containers get it and no running worker was replaced.
+- **Seller gate.** `FLEET_SELLER_MIN_WORKER_VERSION` = `0.18.0` (#1167,
+  v1.445.2).
+- **Release to main.** PR #1170 (merge commit `c0c58a76`), v1.445.2;
+  `inventory.recycleservers.com/api/health` reports it, and `main`'s
+  backend-tests, version-check and deploy-frontend passed on that commit.
+- **Telegram (step 2).** Not set: optional, in-app alerts work without it.
+- **First seller account.** Read-only prod query on 2026-11-07: the healthy,
+  non-cloak fleet accounts with the longest clean stint (no pool reports, not
+  quarantined) are #9 (worker-60-14-7, Batch 2026-10-17), #14 (worker-60-14-4),
+  #11 (homelab-2), #45 (homelab-4) and #47 (homelab-1), each about 11 days on
+  its worker on image 0.15.0. #16 is quarantined (its blank searches are under
+  review) and is not a candidate. Every candidate runs 0.15.0, so making one a
+  seller means recreating its container on 0.18.0: one Facebook login.
