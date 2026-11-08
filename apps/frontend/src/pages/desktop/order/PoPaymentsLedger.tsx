@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../../lib/api';
 import { fmtUSD, fmtDateShort } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
@@ -17,8 +17,9 @@ type LinkKind = 'payment' | 'refund' | 'commission' | null;
 // Read-only ledger of bank transactions linked to an order on the Payments
 // page. Renders nothing until a payment is linked, so most orders pay no cost.
 // Manager-only by its API (everyone else 403s), so the host gates it.
-export function PoPaymentsLedger({ scope, locale, className }: {
+export function PoPaymentsLedger({ scope, locale, className, onLoaded }: {
   scope: LedgerScope; locale: string; className?: string;
+  onLoaded?: (payments: { linkKind: LinkKind }[]) => void;
 }) {
   const { t } = useT();
   const [ledger, setLedger] = useState<{
@@ -43,10 +44,12 @@ export function PoPaymentsLedger({ scope, locale, className }: {
   // A sell order's money comes in, so its net reads as received.
   const netKey = 'sellOrderId' in scope ? 'payLedgerNetReceived' : 'payLedgerNet';
 
+  const loaded = useRef(onLoaded);
+  loaded.current = onLoaded;
   useEffect(() => {
     let alive = true;
     api.get<NonNullable<typeof ledger>>(url)
-      .then(r => { if (alive) setLedger(r); })
+      .then(r => { if (alive) { setLedger(r); loaded.current?.(r.payments); } })
       // Silent: the ledger is a side panel, not the page — a fetch hiccup
       // must not throw a dialog over an otherwise working order edit.
       .catch(() => {});

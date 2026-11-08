@@ -81,6 +81,11 @@ export function PaymentFields({
   const stale = !company && (paidByUserId === null || !payers.some(m => m.id === paidByUserId));
   const value = company ? BUSINESS_ACCOUNT : stale ? 'self' : paidByUserId!;
 
+  // A manager's Business Account side links the bank row itself (PayPal or
+  // Mercury), so a typed id and a screenshot would be a second road to the
+  // same link. An id the purchaser typed stays readable.
+  const linksOnly = !!sources && company && method !== 'cash';
+
   const fields = (
     <div className={'pay-fields' + (compact ? ' compact' : '')}>
       <div className="pay-row">
@@ -112,7 +117,7 @@ export function PaymentFields({
         )}
       </div>
 
-      {proof && (
+      {proof && !linksOnly && (
         <ProofPanel
           paidBy={paidBy} method={method} txnId={txnId} onTxnId={onTxnId}
           txnRequired={txnRequired} disabled={disabled}
@@ -127,6 +132,12 @@ export function PaymentFields({
     <div className="pay-sourced">
       <PaymentSourceSwitch value={company ? 'business' : 'rmb'} onChange={pickSource} disabled={disabled} />
       {fields}
+      {linksOnly && txnId.trim() !== '' && (
+        <div className="field">
+          <span className="label">{t('shipPayTxnLabel')}</span>
+          <div className="mono">{txnId}</div>
+        </div>
+      )}
       {company ? sources.business : sources.rmb}
     </div>
   );

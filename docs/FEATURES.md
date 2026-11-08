@@ -919,6 +919,11 @@ is not a stage but a flag beside one, set once every line has sold
     Business Account side has the Commission tab's search, over unlinked,
     settled, outgoing PayPal and Mercury rows. Picking one asks to confirm,
     then links it to the PO as its cost, and the ledger below refreshes.
+    Since v1.447.0 it is the only way to link there: the side shows no
+    PayPal transaction ID box and no screenshot upload (an id the purchaser
+    typed shows read-only), and once a payment is linked the search hides
+    and only *Bank payments* shows. A second link goes through the Payments
+    page.
   - **A link counts as the transaction.** A linked cost payment answers the
     transaction-ID rule, so a Mercury-paid PO leaves Draft with no id typed,
     and `txnRequired` reads false. A linked PayPal row also fills the PO's id
