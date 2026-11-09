@@ -112,7 +112,7 @@ function foldLine(r: SheetLineRow): FoldLine {
     // What a new line's # is shared by: one RAM series takes one #, though
     // each part number still prints as its own row under it.
     numKey: sellSeriesKey({
-      category, partNumber: part, label, condition, rank: r.rank,
+      category, partNumber: part, label, rank: r.rank,
       shortCode: ramShortCode({ brand: r.brand, partNumber: r.part_number, chipNumber: r.chip_number }),
     }) ?? key,
     // A bid prices equivalent RAM once across module numbers. Unknown codes
@@ -225,8 +225,8 @@ function byWarehouseTab(lines: readonly FoldLine[]): [string, FoldLine[]][] {
 }
 
 // The # a line not numbered yet takes: a lot of a product already on the
-// order — same warehouse tab, same series or part, label and condition — joins
-// its #; the rest are new products which, folded among themselves, take the
+// order — same warehouse tab, and same series in any condition or same part,
+// label and condition — joins its #; the rest are new products which, folded among themselves, take the
 // next #s in packing-list order, a series sharing the # its first row took. So a new order reads 1..N down its sheet, and a later
 // save's products follow every other.
 function plannedNos(lines: readonly FoldLine[], next: number): { assigned: Map<string, number>; next: number } {

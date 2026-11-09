@@ -52,6 +52,10 @@ type Props = {
    *  the Business Account (the USD bank's, on Payments) — and each side brings
    *  its own ledger. The select then names people only. */
   sources?: { rmb: ReactNode; business: ReactNode };
+  /** The Business side of `sources` carries a bank-link picker, so a typed id
+   *  and a new screenshot would be a second road to the same link. The phone
+   *  page has no picker and keeps the full panel. */
+  linksPayment?: boolean;
   /** Who the RMB side names when the switch moves there and nobody is on file. */
   defaultPayerId?: string | null;
 };
@@ -60,6 +64,7 @@ export function PaymentFields({
   paidBy, paidByUserId, payers, onPaidBy, method, txnId, onTxnId,
   txnRequired = false, disabled = false, payerLocked = false, compact = false,
   proof, canEditProof = true, idPrefix = 'pay', sources, defaultPayerId = null,
+  linksPayment = false,
 }: Props) {
   const { t } = useT();
   const company = paidBy === 'company';
@@ -80,6 +85,15 @@ export function PaymentFields({
   // from the list) keeps a row of its own, or the select could not show it.
   const stale = !company && (paidByUserId === null || !payers.some(m => m.id === paidByUserId));
   const value = company ? BUSINESS_ACCOUNT : stale ? 'self' : paidByUserId!;
+
+  const linksOnly = !!sources && linksPayment && company && method !== 'cash';
+  // What is already on file stays: a typed id editable, because a wrong one
+  // blocks the Draft and a link never overwrites it; screenshots read-only.
+  // Latched, so clearing the id does not pull the input out from under the
+  // keyboard.
+  const hadTxn = useRef(txnId.trim() !== '');
+  if (txnId.trim() !== '') hadTxn.current = true;
+  const onFile = hadTxn.current || (proof?.proofAtts.length ?? 0) > 0;
 
   const fields = (
     <div className={'pay-fields' + (compact ? ' compact' : '')}>
@@ -112,11 +126,11 @@ export function PaymentFields({
         )}
       </div>
 
-      {proof && (
+      {proof && (!linksOnly || onFile) && (
         <ProofPanel
           paidBy={paidBy} method={method} txnId={txnId} onTxnId={onTxnId}
           txnRequired={txnRequired} disabled={disabled}
-          proof={proof} canEdit={canEditProof && !disabled} idPrefix={p}
+          proof={proof} canEdit={canEditProof && !disabled && !linksOnly} idPrefix={p}
         />
       )}
     </div>

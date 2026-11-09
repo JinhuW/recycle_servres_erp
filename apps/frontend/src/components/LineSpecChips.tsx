@@ -48,6 +48,11 @@ function chipsFor(l: SpecLine, withType = false): Chip[] {
   return [];
 }
 
+// The chips as words, for a printed label to read as the row does.
+export function specChipLabels(line: SpecLine, withType = false): string[] {
+  return chipsFor(line, withType).map(c => c.label);
+}
+
 export function lineHasSpecChips(line: SpecLine, withType = false): boolean {
   return chipsFor(line, withType).length > 0;
 }

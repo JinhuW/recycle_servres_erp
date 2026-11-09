@@ -572,6 +572,19 @@ is not a stage but a flag beside one, set once every line has sold
       label and the settings menu, whose button shows *Auto* or *Manual*.
       Both pages share one connection, the stock and the language. A refused
       or cancelled approval prints nothing.
+  - **Checking a line prints its product's label** (v1.448.0, RS-573).
+    While the Bluetooth printer is on, a tick prints one label. That covers
+    the checkbox, Space, a scan, and each line *Check all remaining* ticks, in
+    `#` order. The label reads the PO number and warehouse, then the line's
+    `#` with the units counted at its right (v1.450.0, RS-575). Next comes
+    the part number in mono, shrunk to fit, which is left out when the line
+    has none. Last is the spec in smaller type: the item name (brand,
+    capacity, generation) and then the row's spec chips without the device
+    type (class, rank and speed for RAM; form factor, health and condition
+    for drives). A line counted 0 prints
+    nothing. Unticking prints nothing, and ticking again prints again. With
+    the printer off, waiting or unsupported, a tick prints nothing and opens
+    no print dialog. *Print when approved* governs only the box label.
   - **Lines ticked at 0 are set to qty 0 on Approve** (v1.213.0; in v1.212.0,
     which never reached prod, Approve deleted them). They stay on the PO, so
     every line keeps its `#`.
@@ -919,6 +932,13 @@ is not a stage but a flag beside one, set once every line has sold
     Business Account side has the Commission tab's search, over unlinked,
     settled, outgoing PayPal and Mercury rows. Picking one asks to confirm,
     then links it to the PO as its cost, and the ledger below refreshes.
+    Since v1.447.0 it is the only way to link there: the side shows no
+    PayPal transaction ID box and no screenshot upload. Since v1.450.1 an id
+    the purchaser typed stays in an editable box, so a wrong one can be
+    corrected or cleared, and screenshots on file show read-only. The phone
+    page has no search and keeps the full panel. Once a payment is linked the search hides
+    and only *Bank payments* shows. A second link goes through the Payments
+    page.
   - **A link counts as the transaction.** A linked cost payment answers the
     transaction-ID rule, so a Mercury-paid PO leaves Draft with no id typed,
     and `txnRequired` reads false. A linked PayPal row also fills the PO's id
@@ -1693,8 +1713,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     its sorted place with its later # (`#1, #2, #9, #3`).
   - **One RAM series is one #** (v1.404.0, RS-499; narrowed in v1.414.2,
     RS-518). A series is one module family, read off the part number through
-    its speed, with the same label (brand, capacity), condition, rank and
-    short code. Lots of one series take one # in a warehouse tab, so
+    its speed, with the same label (brand, capacity), rank and short code, in
+    any condition (v1.449.0, RS-574: a Used lot no longer stands apart from
+    Pulled — Tested ones, and a fold lists each condition its lots carry).
+    Lots of one series take one # in a warehouse tab, so
     `M471A1K43CB1-CTD` and `…CB1-CTD7Q` are both `#1`, while `…CB1-CRC` gets
     its own # even though its short code is also CB1. A blank rank or short
     code stays apart from a recorded one, and a part number no scheme reads
