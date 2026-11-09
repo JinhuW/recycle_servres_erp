@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-08
 reporter: jinhu
 branch: JinhuW/arapaima
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1175
 version: 1.448.0
 related: []
 ---
