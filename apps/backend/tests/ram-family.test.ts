@@ -101,15 +101,19 @@ describe('sellSeriesKey', () => {
     expect(sellSeriesKey(l)).toBe(sellSeriesKey({ ...l, rank: ' 1RX8 ' }));
   });
 
+  it('folds lots of one series in different conditions', () => {
+    expect(sellSeriesKey(l)).toBe(sellSeriesKey({ ...l, condition: 'Used' } as typeof l));
+  });
+
   it('keeps another speed, module form or die apart, though the short code matches', () => {
     expect(sellSeriesKey(l)).not.toBe(sellSeriesKey({ ...l, partNumber: 'M471A1K43CB1-CRC' }));
     expect(sellSeriesKey(l)).not.toBe(sellSeriesKey({ ...l, partNumber: 'M378A1K43CB1-CTD' }));
     expect(sellSeriesKey(l)).not.toBe(sellSeriesKey({ ...l, partNumber: 'M471A1K43EB1-CTD' }));
   });
 
-  it('keeps another label, condition, rank or short code apart', () => {
+  it('keeps another label, rank or short code apart', () => {
     for (const other of [
-      { label: 'Samsung 16GB DDR4' }, { condition: 'New' },
+      { label: 'Samsung 16GB DDR4' },
       { rank: '2Rx8' }, { rank: null }, { shortCode: 'EB1' }, { shortCode: null },
     ]) expect(sellSeriesKey(l), JSON.stringify(other)).not.toBe(sellSeriesKey({ ...l, ...other }));
   });

@@ -679,6 +679,19 @@ describe('sell order #: one RAM series shares one #', () => {
     expect(new Set((await numbers(mgr, id)).map(([, no]) => no)).size).toBe(2);
   });
 
+  it('a lot of the series in another condition shares its #, and prints as a row of its own', async () => {
+    const { ids } = await lots([
+      { pn: SERIES[0]!, brand: 'Samsung', warehouse: 'WH-LA1' },
+      { pn: SERIES[0]!, brand: 'Samsung', warehouse: 'WH-LA1' },
+    ]);
+    await getTestDb()`UPDATE order_lines SET condition = 'Used' WHERE id = ${ids[1]!}`;
+    const id = await createOrder(mgr, [lotLine(ids[0]!, SERIES[0]!, 'WH-LA1')]);
+    await addLines(mgr, id, [{ ...lotLine(ids[1]!, SERIES[0]!, 'WH-LA1'), condition: 'Used' }]);
+    expect(await numbers(mgr, id)).toEqual([[SERIES[0], 1], [SERIES[0], 1]]);
+    const sheet = await workbook(mgr, `/api/sell-orders/${id}/packing-list`);
+    expect(packRows(sheet.worksheets[0]!).filter(([no]) => no === '1')).toHaveLength(2);
+  });
+
   it('an order numbered before keeps its #s through a save', async () => {
     const { ids } = await lots(SERIES.map(pn => ({ pn, brand: 'Samsung', warehouse: 'WH-LA1' })));
     const id = await createOrder(mgr, SERIES.map((pn, i) => lotLine(ids[i]!, pn, 'WH-LA1')));

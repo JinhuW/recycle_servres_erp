@@ -153,7 +153,13 @@ describe('foldSeries', () => {
     expect(isFold(out[1]!) && out[1].members.map(m => m.idx)).toEqual([1, 2]);
   });
 
-  it('keeps a lone series line, another die, label or condition unfolded', () => {
+  it('folds a series whatever the condition of its lots', () => {
+    const out = foldSeries(items([ram('M471A1K43CB1-CTD'), ram('M471A1K43CB1-CTD7Q', undefined, 'Used')]));
+    expect(out).toHaveLength(1);
+    expect(isFold(out[0]!) && out[0].members.map(m => m.idx)).toEqual([0, 1]);
+  });
+
+  it('keeps a lone series line, another die or label unfolded', () => {
     const out = foldSeries(items([
       ram('M471A1K43CB1-CRC'), ram('M471A1K43EB1-CWE'), ram('M471A1K43CB1-CTD', 'Samsung 16GB DDR4'),
       ram('M471A1K43CB1-CTD', undefined, 'New'), ram('HMAA2GU6AJR8N-XN', 'SK Hynix 16GB DDR4'),

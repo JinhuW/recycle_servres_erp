@@ -1027,6 +1027,7 @@ function FoldItemCell({ lines, nos, open, onToggle, showPo }: {
   const codes = [...new Set(lines.map(l => l.shortCode).filter((c): c is string => !!c))];
   const parts = [...new Map(lines.filter(l => l.partNumber).map(l => [canonicalPartNumber(l.partNumber), l.partNumber!])).values()];
   const pos = showPo ? [...new Set(lines.map(l => l.sourceOrderId).filter((p): p is string => !!p))] : [];
+  const conditions = [...new Set(lines.map(l => l.condition).filter((c): c is string => !!c))];
   return (
     <td>
       <div style={{ fontWeight: 500, fontSize: 13, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0 }}>
@@ -1060,7 +1061,7 @@ function FoldItemCell({ lines, nos, open, onToggle, showPo }: {
           {t('sodFoldLots', { n: lines.length })}
           {parts.length > 1 && <>, {t('sodFoldParts', { n: parts.length })}</>}
         </span>
-        {first.condition && (<><span>·</span><span>{first.condition}</span></>)}
+        {conditions.length > 0 && (<><span>·</span><span>{conditions.join(' / ')}</span></>)}
         {pos.length > 0 && (<><span>·</span><span className="mono">{t('sodFromPO', { po: pos.join(', ') })}</span></>)}
       </div>
     </td>
