@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-08
 reporter: jinhu
 branch: JinhuW/arapaima-label-pn
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1177
 version: 1.450.0
 related: [RS-573]
 ---
