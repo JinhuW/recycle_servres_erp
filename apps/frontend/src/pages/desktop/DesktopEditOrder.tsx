@@ -1826,6 +1826,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                 canEditProof={canAnnotate}
                 idPrefix="eo"
                 defaultPayerId={user?.id ?? null}
+                linksPayment={isManager}
                 sources={isManager ? {
                   // Bank payments linked to this PO on the Payments page;
                   // invisible until something links. A PO saved as
