@@ -575,10 +575,13 @@ is not a stage but a flag beside one, set once every line has sold
   - **Checking a line prints its product's label** (v1.448.0, RS-573).
     While the Bluetooth printer is on, a tick prints one label. That covers
     the checkbox, Space, a scan, and each line *Check all remaining* ticks, in
-    `#` order. The label reads the PO number and warehouse, the line's `#`,
-    and its spec: the item name (brand, capacity, generation) and then the
-    row's spec chips without the device type (class, rank and speed for RAM;
-    form factor, health and condition for drives). A line counted 0 prints
+    `#` order. The label reads the PO number and warehouse, then the line's
+    `#` with the units counted at its right (v1.450.0, RS-575). Next comes
+    the part number in mono, shrunk to fit, which is left out when the line
+    has none. Last is the spec in smaller type: the item name (brand,
+    capacity, generation) and then the row's spec chips without the device
+    type (class, rank and speed for RAM; form factor, health and condition
+    for drives). A line counted 0 prints
     nothing. Unticking prints nothing, and ticking again prints again. With
     the printer off, waiting or unsupported, a tick prints nothing and opens
     no print dialog. *Print when approved* governs only the box label.

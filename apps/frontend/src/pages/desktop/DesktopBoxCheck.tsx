@@ -175,19 +175,21 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     };
   };
 
-  // A checked product's own label: the PO, its #, and the spec read off it.
-  // No device type: the class (RDIMM, SODIMM) already says it, and 2-inch
-  // stock has room for the speed or the type, not both.
-  const lineLabelText = (l: OrderLine): LabelText => ({
+  // A checked product's own label: the PO, its # and the units counted, its
+  // part number, and the spec read off it. No device type: the class (RDIMM,
+  // SODIMM) already says it, and 2-inch stock has no room for it.
+  const lineLabelText = (l: OrderLine, counted: number): LabelText => ({
     name: `${order.id} #${lineNo(l)}`,
     top: [order.id, order.warehouse?.short].filter(Boolean).join(' · '),
     date: fmtDate(new Date(), locale),
     title: '#' + lineNo(l),
     caption: null,
-    body: [lineLabel(l), ...specChipLabels(l)].join(' · '),
-    mono: false,
+    body: l.partNumber ?? '',
+    mono: true,
+    spec: [lineLabel(l), ...specChipLabels(l)].join(' · '),
     bodyLines: 2,
-    counts: [],
+    counts: [{ n: counted, word: t('pkLabelUnits', { n: counted }) }],
+    countsBesideTitle: true,
   });
 
   useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
@@ -220,7 +222,8 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     const next: LineCheck = { ...prev, checkedAt: new Date().toISOString() };
     save(next);
     // A line found missing has nothing to label.
-    if (countOf(l, next) > 0) void label.printToPrinter([lineLabelText(l)]);
+    const counted = countOf(l, next);
+    if (counted > 0) void label.printToPrinter([lineLabelText(l, counted)]);
     flashUndo({ kind: 'check', lineId: l.id, prev, msg: t('bcCheckedToast', { pn: l.partNumber ?? lineLabel(l), n: countOf(l, prev), of: l.qty }) });
     setSelectedId(nextOpenAfter(lines, new Map(checks).set(l.id, next), l.id)?.id ?? l.id);
   };
@@ -592,7 +595,10 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     // it to count. Staggered stamps keep the batch in PO order inside Checked.
     const ticked = ordered.open.filter(l => l.qty === 0 || lineState(l, checks.get(l.id)) === 'open');
     ticked.forEach((l, i) => save({ ...checkOf(l.id), checkedAt: new Date(now - i).toISOString() }));
-    void label.printToPrinter(ticked.filter(l => countOf(l, checks.get(l.id)) > 0).map(lineLabelText));
+    void label.printToPrinter(ticked
+      .map(l => ({ l, n: countOf(l, checks.get(l.id)) }))
+      .filter(x => x.n > 0)
+      .map(x => lineLabelText(x.l, x.n)));
     setUndo(null);
   };
 

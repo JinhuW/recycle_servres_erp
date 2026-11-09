@@ -41,9 +41,14 @@ export type LabelText = {
   caption: string | null;
   body: string;
   mono: boolean;
-  // How many lines a wrapped body may take; by default 1 on small stock, else 2.
+  // How many lines a wrapped body, or the spec, may take; by default 1 on
+  // small stock, else 2.
   bodyLines?: number;
+  // A product's spec, in smaller type under the body.
+  spec?: string;
   counts: readonly { n: number; word: string }[];
+  // The counts go at the right end of the title row instead of a row of their own.
+  countsBesideTitle?: boolean;
 };
 
 const MONO = '"JetBrains Mono", ui-monospace, monospace';
@@ -91,89 +96,125 @@ export async function drawLabel(text: LabelText, widthIn: number, heightIn: numb
   const pad = Math.max(0.06 * m, 0.045 * W);
   const inner = W - 2 * pad;
   const small = heightIn < 1.6;
-  const size = {
-    top: small ? 0.1 * H : Math.min(0.04 * W, 0.05 * H),
-    title: Math.min(0.17 * W, 0.22 * H),
-    cap: Math.min(0.036 * W, 0.046 * H),
-    // Small stock has no caption or date, so its body and counts take the room.
-    body: Math.min(0.09 * W, (small ? 0.14 : 0.1) * H),
-    count: Math.min(0.06 * W, (small ? 0.1 : 0.07) * H),
-  };
   const caps = (px: number) => { g.font = `600 ${px}px ${SANS}`; g.letterSpacing = `${(0.07 * px).toFixed(1)}px`; };
   const plain = () => { g.letterSpacing = '0px'; };
-  // A font size at which one line of `s` fits the label's width.
-  const fit = (s: string, px: number) => (g.measureText(s).width > inner ? px * inner / g.measureText(s).width : px);
+  // A font size at which one line of `s` fits `width`.
+  const fit = (s: string, px: number, width = inner) => (g.measureText(s).width > width ? px * width / g.measureText(s).width : px);
+  const minGap = 0.03 * m;
 
   type Block = { h: number; draw: (top: number) => void };
-  const blocks: Block[] = [];
+  // The blocks with every size times `k`.
+  const layout = (k: number): Block[] => {
+    const size = {
+      top: small ? 0.1 * H : Math.min(0.04 * W, 0.05 * H),
+      title: Math.min(0.17 * W, 0.22 * H),
+      cap: Math.min(0.036 * W, 0.046 * H),
+      // Small stock has no caption or date, so its body and counts take the room.
+      body: Math.min(0.09 * W, (small ? 0.14 : 0.1) * H),
+      count: Math.min(0.06 * W, (small ? 0.1 : 0.07) * H),
+      spec: Math.min(0.06 * W, (small ? 0.1 : 0.07) * H),
+    };
+    for (const key of Object.keys(size) as (keyof typeof size)[]) size[key] *= k;
+    const out: Block[] = [];
+    const lineCap = text.bodyLines ?? (small ? 1 : 2);
 
-  blocks.push({
-    h: size.top * 1.2,
-    draw: top => {
-      caps(size.top);
-      const y = top + size.top;
-      const date = small ? '' : text.date.toUpperCase();
-      const dateW = g.measureText(date).width;
-      g.fillText(date, W - pad - dateW, y);
-      g.fillText(wrap(g, text.top.toUpperCase(), date ? inner - dateW - 0.04 * W : inner, 1)[0] ?? '', pad, y);
-      plain();
-    },
-  });
-
-  g.font = `700 ${size.title}px ${MONO}`;
-  const titlePx = fit(text.title, size.title);
-  const rule = Math.max(2, 0.008 * m);
-  blocks.push({
-    h: titlePx + 0.025 * m + rule,
-    draw: top => {
-      g.font = `700 ${titlePx}px ${MONO}`;
-      g.fillText(text.title, pad, top + titlePx * 0.86);
-      g.fillRect(pad, top + titlePx + 0.025 * m, inner, rule);
-    },
-  });
-
-  if (text.body) {
-    const font = (px: number) => `700 ${px}px ${text.mono ? MONO : SANS}`;
-    g.font = font(size.body);
-    const bodyPx = text.mono ? fit(text.body, size.body) : size.body;
-    const lines = text.mono ? [text.body] : wrap(g, text.body, inner, text.bodyLines ?? (small ? 1 : 2));
-    const capH = small || !text.caption ? 0 : size.cap * 1.2 + 0.01 * m;
-    blocks.push({
-      h: capH + lines.length * bodyPx * 1.12,
-      draw: top => {
-        if (capH) {
-          caps(size.cap);
-          g.fillText(text.caption!.toUpperCase(), pad, top + size.cap);
-          plain();
-        }
-        g.font = font(bodyPx);
-        lines.forEach((l, i) => g.fillText(l, pad, top + capH + bodyPx * (0.9 + i * 1.12)));
-      },
-    });
-  }
-
-  if (text.counts.length) {
+    // The counts as drawn: a big number, then its word.
     const num = size.count * 1.5;
-    blocks.push({
-      h: num * 1.05,
+    const countsW = () => text.counts.reduce((a, { n, word }, i) => {
+      g.font = `800 ${num}px ${SANS}`;
+      a += g.measureText(String(n)).width + 0.35 * size.count;
+      g.font = `500 ${size.count}px ${SANS}`;
+      return a + g.measureText(word).width + (i ? 0.05 * W : 0);
+    }, 0);
+    const drawCounts = (x: number, y: number) => {
+      for (const { n, word } of text.counts) {
+        g.font = `800 ${num}px ${SANS}`;
+        g.fillText(String(n), x, y);
+        x += g.measureText(String(n)).width + 0.35 * size.count;
+        g.font = `500 ${size.count}px ${SANS}`;
+        g.fillText(word, x, y);
+        x += g.measureText(word).width + 0.05 * W;
+      }
+    };
+    const beside = !!text.countsBesideTitle && text.counts.length > 0;
+    const besideW = beside ? countsW() + 0.05 * W : 0;
+
+    out.push({
+      h: size.top * 1.2,
       draw: top => {
-        const y = top + num * 0.85;
-        let x = pad;
-        for (const { n, word } of text.counts) {
-          g.font = `800 ${num}px ${SANS}`;
-          g.fillText(String(n), x, y);
-          x += g.measureText(String(n)).width + 0.35 * size.count;
-          g.font = `500 ${size.count}px ${SANS}`;
-          g.fillText(word, x, y);
-          x += g.measureText(word).width + 0.05 * W;
-        }
+        caps(size.top);
+        const y = top + size.top;
+        const date = small ? '' : text.date.toUpperCase();
+        const dateW = g.measureText(date).width;
+        g.fillText(date, W - pad - dateW, y);
+        g.fillText(wrap(g, text.top.toUpperCase(), date ? inner - dateW - 0.04 * W : inner, 1)[0] ?? '', pad, y);
+        plain();
       },
     });
+
+    g.font = `700 ${size.title}px ${MONO}`;
+    const titlePx = fit(text.title, size.title, inner - besideW);
+    const rule = Math.max(2, 0.008 * m);
+    out.push({
+      h: titlePx + 0.025 * m + rule,
+      draw: top => {
+        g.font = `700 ${titlePx}px ${MONO}`;
+        g.fillText(text.title, pad, top + titlePx * 0.86);
+        if (beside) drawCounts(W - pad - countsW(), top + titlePx * 0.86);
+        g.fillRect(pad, top + titlePx + 0.025 * m, inner, rule);
+      },
+    });
+
+    if (text.body) {
+      const font = (px: number) => `700 ${px}px ${text.mono ? MONO : SANS}`;
+      g.font = font(size.body);
+      const bodyPx = text.mono ? fit(text.body, size.body) : size.body;
+      const lines = text.mono ? [text.body] : wrap(g, text.body, inner, lineCap);
+      const capH = small || !text.caption ? 0 : size.cap * 1.2 + 0.01 * m;
+      out.push({
+        h: capH + lines.length * bodyPx * 1.12,
+        draw: top => {
+          if (capH) {
+            caps(size.cap);
+            g.fillText(text.caption!.toUpperCase(), pad, top + size.cap);
+            plain();
+          }
+          g.font = font(bodyPx);
+          lines.forEach((l, i) => g.fillText(l, pad, top + capH + bodyPx * (0.9 + i * 1.12)));
+        },
+      });
+    }
+
+    if (text.spec) {
+      g.font = `600 ${size.spec}px ${SANS}`;
+      const lines = wrap(g, text.spec, inner, lineCap);
+      out.push({
+        h: lines.length * size.spec * 1.15,
+        draw: top => {
+          g.font = `600 ${size.spec}px ${SANS}`;
+          lines.forEach((l, i) => g.fillText(l, pad, top + size.spec * (0.9 + i * 1.15)));
+        },
+      });
+    }
+
+    if (text.counts.length && !beside) {
+      out.push({ h: num * 1.05, draw: top => drawCounts(pad, top + num * 0.85) });
+    }
+    return out;
+  };
+
+  // Too tall for the stock, everything shrinks by the same factor until it fits.
+  const room = (bs: Block[]) => H - 2 * pad - minGap * Math.max(0, bs.length - 1);
+  const tall = (bs: Block[]) => bs.reduce((a, b) => a + b.h, 0);
+  let blocks = layout(1);
+  for (let k = 1, i = 0; i < 3 && tall(blocks) > room(blocks); i++) {
+    k *= room(blocks) / tall(blocks);
+    blocks = layout(k);
   }
 
   // Spread top to bottom, as the stock is tall or wide.
-  const used = blocks.reduce((a, b) => a + b.h, 0);
-  const gap = Math.max(0.03 * m, (H - 2 * pad - used) / Math.max(1, blocks.length - 1));
+  const used = tall(blocks);
+  const gap = Math.max(minGap, (H - 2 * pad - used) / Math.max(1, blocks.length - 1));
   let y = pad;
   for (const b of blocks) {
     b.draw(y);
