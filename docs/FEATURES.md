@@ -1708,8 +1708,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     its sorted place with its later # (`#1, #2, #9, #3`).
   - **One RAM series is one #** (v1.404.0, RS-499; narrowed in v1.414.2,
     RS-518). A series is one module family, read off the part number through
-    its speed, with the same label (brand, capacity), condition, rank and
-    short code. Lots of one series take one # in a warehouse tab, so
+    its speed, with the same label (brand, capacity), rank and short code, in
+    any condition (v1.449.0, RS-574: a Used lot no longer stands apart from
+    Pulled — Tested ones, and a fold lists each condition its lots carry).
+    Lots of one series take one # in a warehouse tab, so
     `M471A1K43CB1-CTD` and `…CB1-CTD7Q` are both `#1`, while `…CB1-CRC` gets
     its own # even though its short code is also CB1. A blank rank or short
     code stays apart from a recorded one, and a part number no scheme reads

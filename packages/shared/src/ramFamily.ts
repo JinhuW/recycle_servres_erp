@@ -73,22 +73,24 @@ export function ramFamilyLabel(raw: string, family: RamFamily): string {
 }
 
 export type SellSeriesLine = {
-  category?: string | null; partNumber?: string | null; label: string; condition?: string | null;
+  category?: string | null; partNumber?: string | null; label: string;
   rank?: string | null; shortCode?: string | null;
 };
 
 /**
  * What folds sell-order lines into one row and one #: the module family, so
  * another speed or module form stays apart though its short code matches, with
- * the label (brand, capacity), condition, rank and short code. A lot with a
- * blank rank or code stays apart too, rather than being guessed into a fold.
+ * the label (brand, capacity), rank and short code. Condition is left out: a
+ * Used lot and a Pulled — Tested one of a series sell as one product, and the
+ * packing list still prints each condition as its own row under the #. A lot
+ * with a blank rank or code stays apart, rather than being guessed into a fold.
  * Null for anything without a family; the caller keeps its own product key.
  */
 export function sellSeriesKey(l: SellSeriesLine): string | null {
   if (l.category !== 'RAM') return null;
   const family = ramFamily(l.partNumber);
   return family
-    ? `ramseries:${family.key}|${l.label}|${l.condition ?? ''}|${norm(l.rank)}|${l.shortCode ?? ''}`
+    ? `ramseries:${family.key}|${l.label}|${norm(l.rank)}|${l.shortCode ?? ''}`
     : null;
 }
 
