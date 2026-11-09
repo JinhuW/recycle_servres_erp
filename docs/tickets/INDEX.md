@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-574](./RS-574-fold-same-series-ram-on-a-sell-order-regardless-of-c.md) | done | story | P2 | Fold same-series RAM on a sell order regardless of condition | — |
+| [RS-575](./RS-575-review-mode-s-line-label-shows-the-part-number-and-t.md) | done | story | P2 | Review mode's line label shows the part number and the units counted | 1.450.0 |
+| [RS-574](./RS-574-fold-same-series-ram-on-a-sell-order-regardless-of-c.md) | done | story | P2 | Fold same-series RAM on a sell order regardless of condition | 1.449.0 |
 | [RS-573](./RS-573-review-mode-prints-a-product-label-for-each-line-as.md) | done | story | P2 | Review mode prints a product label for each line as it is checked | 1.448.0 |
 | [RS-572](./RS-572-cost-payment-business-account-link-a-paypal-or-mercu.md) | done | story | P2 | Cost Payment Business Account: link a PayPal or Mercury payment once, no screenshot | 1.447.0 |
 | [RS-571](./RS-571-facebook-leads-a-central-operator-drives-20-seller-b.md) | in-progress | story | P2 | Facebook Leads: a central operator drives 20 seller browsers with browser-use | — |
