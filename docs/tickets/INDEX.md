@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-576](./RS-576-business-account-cost-payment-keeps-the-id-box-on-ph.md) | done | bug | P1 | Business Account cost payment keeps the ID box on phone and lets a manager fix a typed ID | — |
 | [RS-575](./RS-575-review-mode-s-line-label-shows-the-part-number-and-t.md) | done | story | P2 | Review mode's line label shows the part number and the units counted | 1.450.0 |
 | [RS-574](./RS-574-fold-same-series-ram-on-a-sell-order-regardless-of-c.md) | done | story | P2 | Fold same-series RAM on a sell order regardless of condition | 1.449.0 |
 | [RS-573](./RS-573-review-mode-prints-a-product-label-for-each-line-as.md) | done | story | P2 | Review mode prints a product label for each line as it is checked | 1.448.0 |

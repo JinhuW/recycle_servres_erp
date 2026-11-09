@@ -933,8 +933,10 @@ is not a stage but a flag beside one, set once every line has sold
     settled, outgoing PayPal and Mercury rows. Picking one asks to confirm,
     then links it to the PO as its cost, and the ledger below refreshes.
     Since v1.447.0 it is the only way to link there: the side shows no
-    PayPal transaction ID box and no screenshot upload (an id the purchaser
-    typed shows read-only), and once a payment is linked the search hides
+    PayPal transaction ID box and no screenshot upload. Since v1.450.1 an id
+    the purchaser typed stays in an editable box, so a wrong one can be
+    corrected or cleared, and screenshots on file show read-only. The phone
+    page has no search and keeps the full panel. Once a payment is linked the search hides
     and only *Bank payments* shows. A second link goes through the Payments
     page.
   - **A link counts as the transaction.** A linked cost payment answers the
