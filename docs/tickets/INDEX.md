@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-572](./RS-572-cost-payment-business-account-link-a-paypal-or-mercu.md) | done | story | P2 | Cost Payment Business Account: link a PayPal or Mercury payment once, no screenshot | — |
+| [RS-573](./RS-573-review-mode-prints-a-product-label-for-each-line-as.md) | done | story | P2 | Review mode prints a product label for each line as it is checked | — |
+| [RS-572](./RS-572-cost-payment-business-account-link-a-paypal-or-mercu.md) | done | story | P2 | Cost Payment Business Account: link a PayPal or Mercury payment once, no screenshot | 1.447.0 |
 | [RS-571](./RS-571-facebook-leads-a-central-operator-drives-20-seller-b.md) | in-progress | story | P2 | Facebook Leads: a central operator drives 20 seller browsers with browser-use | — |
 | [RS-570](./RS-570-jump-from-the-duplicate-part-dialog-to-the-product-t.md) | done | story | P2 | Jump from the duplicate-part dialog to the product to update its quantity | 1.446.0 |
 | [RS-569](./RS-569-commission-rate-and-notes-editable-at-ready-to-pay.md) | done | story | P2 | Commission rate and notes editable at Ready to Pay | 1.445.0 |

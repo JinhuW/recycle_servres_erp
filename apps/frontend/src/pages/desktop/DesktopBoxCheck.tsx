@@ -5,7 +5,7 @@ import { CurrencyPicker, type Currency } from '../../components/CurrencyPicker';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
-import { LineSpecChips } from '../../components/LineSpecChips';
+import { LineSpecChips, specChipLabels } from '../../components/LineSpecChips';
 import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 import { PaymentMismatchBanner, usePaymentMismatchConfirm } from '../../components/PaymentMismatch';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
@@ -175,6 +175,21 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     };
   };
 
+  // A checked product's own label: the PO, its #, and the spec read off it.
+  // No device type: the class (RDIMM, SODIMM) already says it, and 2-inch
+  // stock has room for the speed or the type, not both.
+  const lineLabelText = (l: OrderLine): LabelText => ({
+    name: `${order.id} #${lineNo(l)}`,
+    top: [order.id, order.warehouse?.short].filter(Boolean).join(' · '),
+    date: fmtDate(new Date(), locale),
+    title: '#' + lineNo(l),
+    caption: null,
+    body: [lineLabel(l), ...specChipLabels(l)].join(' · '),
+    mono: false,
+    bodyLines: 2,
+    counts: [],
+  });
+
   useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
   const checkOf = useCallback(
@@ -204,6 +219,8 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     const prev = checkOf(l.id);
     const next: LineCheck = { ...prev, checkedAt: new Date().toISOString() };
     save(next);
+    // A line found missing has nothing to label.
+    if (countOf(l, next) > 0) void label.printToPrinter([lineLabelText(l)]);
     flashUndo({ kind: 'check', lineId: l.id, prev, msg: t('bcCheckedToast', { pn: l.partNumber ?? lineLabel(l), n: countOf(l, prev), of: l.qty }) });
     setSelectedId(nextOpenAfter(lines, new Map(checks).set(l.id, next), l.id)?.id ?? l.id);
   };
@@ -573,9 +590,9 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     // Short lines are left for their own tick; everything still at its full
     // count is ticked, a line already at qty 0 included — there is nothing of
     // it to count. Staggered stamps keep the batch in PO order inside Checked.
-    ordered.open
-      .filter(l => l.qty === 0 || lineState(l, checks.get(l.id)) === 'open')
-      .forEach((l, i) => save({ ...checkOf(l.id), checkedAt: new Date(now - i).toISOString() }));
+    const ticked = ordered.open.filter(l => l.qty === 0 || lineState(l, checks.get(l.id)) === 'open');
+    ticked.forEach((l, i) => save({ ...checkOf(l.id), checkedAt: new Date(now - i).toISOString() }));
+    void label.printToPrinter(ticked.filter(l => countOf(l, checks.get(l.id)) > 0).map(lineLabelText));
     setUndo(null);
   };
 

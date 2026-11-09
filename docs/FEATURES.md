@@ -572,6 +572,16 @@ is not a stage but a flag beside one, set once every line has sold
       label and the settings menu, whose button shows *Auto* or *Manual*.
       Both pages share one connection, the stock and the language. A refused
       or cancelled approval prints nothing.
+  - **Checking a line prints its product's label** (v1.448.0, RS-573).
+    While the Bluetooth printer is on, a tick prints one label. That covers
+    the checkbox, Space, a scan, and each line *Check all remaining* ticks, in
+    `#` order. The label reads the PO number and warehouse, the line's `#`,
+    and its spec: the item name (brand, capacity, generation) and then the
+    row's spec chips without the device type (class, rank and speed for RAM;
+    form factor, health and condition for drives). A line counted 0 prints
+    nothing. Unticking prints nothing, and ticking again prints again. With
+    the printer off, waiting or unsupported, a tick prints nothing and opens
+    no print dialog. *Print when approved* governs only the box label.
   - **Lines ticked at 0 are set to qty 0 on Approve** (v1.213.0; in v1.212.0,
     which never reached prod, Approve deleted them). They stay on the PO, so
     every line keeps its `#`.
