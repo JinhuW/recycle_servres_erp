@@ -41,6 +41,8 @@ export type LabelText = {
   caption: string | null;
   body: string;
   mono: boolean;
+  // How many lines a wrapped body may take; by default 1 on small stock, else 2.
+  bodyLines?: number;
   counts: readonly { n: number; word: string }[];
 };
 
@@ -134,7 +136,7 @@ export async function drawLabel(text: LabelText, widthIn: number, heightIn: numb
     const font = (px: number) => `700 ${px}px ${text.mono ? MONO : SANS}`;
     g.font = font(size.body);
     const bodyPx = text.mono ? fit(text.body, size.body) : size.body;
-    const lines = text.mono ? [text.body] : wrap(g, text.body, inner, small ? 1 : 2);
+    const lines = text.mono ? [text.body] : wrap(g, text.body, inner, text.bodyLines ?? (small ? 1 : 2));
     const capH = small || !text.caption ? 0 : size.cap * 1.2 + 0.01 * m;
     blocks.push({
       h: capH + lines.length * bodyPx * 1.12,
@@ -271,11 +273,11 @@ export function useLabelPrint(autoKey: 'pack.labelAuto' | 'review.labelAuto', on
   const viaDialog = (texts: readonly LabelText[]) =>
     new Promise<void>(done => setDialog(d => ({ n: (d?.n ?? 0) + 1, texts, done })));
 
-  const send = async (texts: readonly LabelText[]): Promise<void> => {
+  const send = async (texts: readonly LabelText[], fallback: boolean): Promise<void> => {
     // Asked for while the printer connects, it goes to the printer once that
     // is on, or to the dialog if it doesn't come on.
     const now = await labelPrinter.settled();
-    if (now.state !== 'on') return viaDialog(texts);
+    if (now.state !== 'on') return fallback ? viaDialog(texts) : undefined;
     const lang = language === 'auto' ? now.language : language;
     try {
       // A label sent to a printer out of paper or open is lost.
@@ -297,17 +299,21 @@ export function useLabelPrint(autoKey: 'pack.labelAuto' | 'review.labelAuto', on
   };
 
   // Settles once these labels are out, or refused.
-  const print = (texts: readonly LabelText[]): Promise<void> => {
+  const enqueue = (texts: readonly LabelText[], fallback: boolean): Promise<void> => {
     if (!texts.length) return queue.current;
-    queue.current = queue.current.then(() => send(texts));
+    queue.current = queue.current.then(() => send(texts, fallback));
     return queue.current;
   };
+  const print = (texts: readonly LabelText[]) => enqueue(texts, true);
+  // Labels a page prints as a side effect of a tick: without a printer on,
+  // the tick is all that happens, never a print dialog per tick.
+  const printToPrinter = (texts: readonly LabelText[]) => enqueue(texts, false);
 
   const element = dialog && (
     <LabelDialog key={dialog.n} texts={dialog.texts} size={size} onDone={() => { dialog.done(); setDialog(null); }} />
   );
   const settings: Settings = { auto, size, language, onAuto: setAuto, onSize: setSize, onLanguage: setLanguage };
-  return { printer, auto, print, viaDialog, element, settings };
+  return { printer, auto, print, printToPrinter, viaDialog, element, settings };
 }
 
 type Settings = {
