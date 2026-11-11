@@ -26,6 +26,7 @@ export * from "./afterSales.js";
 export * from "./facebookPool.js";
 export * from "./accounting.js";
 export * from "./wechatMarket.js";
+export * from "./fbChat.js";
 export * from "./inventoryGroupSort.js";
 export * from "./fleet.js";
 export * from "./fbSeller.js";

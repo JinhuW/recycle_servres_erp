@@ -1541,6 +1541,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     connectorsScopeWechatWrite: 'Push WeChat market reports (wechat:write)',
     connectorsScopeFleetRead: "Read the Facebook fleet, for the dev ERP's live view (fleet:read)",
     connectorsScopePoolWrite: 'Add accounts to the Facebook account pool (pool:write)',
+    connectorsScopeFbChatWrite: 'Push Facebook Marketplace chats and claim Telegram replies (fbchat:write)',
     connectorsNamePlaceholder: 'e.g. ebay-scraper-prod',
     connectorsCreate: 'Create',
     connectorsSecretOnce: 'Client secret (shown ONCE — copy now):',

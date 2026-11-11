@@ -89,6 +89,16 @@ then reports through `/push/reruns/<id>/finish`. The payload is
 on that one; test `apps/backend/tests/wechat-market.test.ts`. The ERP side has
 to keep accepting what the deployed memtrade sends.
 
+A second one does too. The **Facebook chat bridge** (a Chrome extension,
+outside this repo at `facebook_messager_extenion/` in the workspace) pushes the
+owner's Marketplace conversations to `/api/fb-chat/push/*` (`routes/fbChat.ts`)
+with a `fbchat:write` service-client token, and with the same token long-polls
+`/push/outbox/claim` for replies typed in Telegram, then reports through
+`/push/outbox/<id>/result`. The payload is `packages/shared/src/fbChat.ts` on
+this side and the extension's `src/shared/hub-contract.ts` on that one; test
+`apps/backend/tests/fb-chat.test.ts`. The ERP side has to keep accepting what
+installed extensions send.
+
 Two more callers dial in to the ERP's fleet API (`routes/fleet.ts`, mounted
 at `/api/fleet`), with tokens the ERP mints. Both reach it through the
 Cloudflare Worker (`deploy/cloudflare/worker.js`), never the Railway origin:

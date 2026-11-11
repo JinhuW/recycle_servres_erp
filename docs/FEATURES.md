@@ -1451,6 +1451,37 @@ only):
   every manager's notifications, and to Telegram when the bot token and a chat
   are set.
 
+**Facebook chat hub** (`/api/fb-chat`, v1.451.0, RS-578) relays the owner's
+own Marketplace chats to Telegram. It has no page in the ERP.
+
+- **Who sends.** A Chrome extension in each of the owner's browser profiles
+  (`facebook_messager_extenion/` in the workspace, its own repo), one Facebook
+  account per profile. Each authenticates with a service client holding
+  `fbchat:write`, minted in Settings ▸ Connectors.
+- **Topics.** The first time an account's conversation is pushed, the bot
+  opens a forum topic in the configured group named `<buyer> · <location>`
+  (`<buyer>` until a location is known, renamed when one arrives). It opens
+  with the buyer's rating, location, join year, the listing, the Facebook link
+  and which account the chat is on, then the conversation so far.
+- **Messages.** Each later buyer message is posted to its topic once. A reply
+  typed on Facebook directly appears as `↩️ You: …`.
+- **Replies.** Text typed in a topic is queued for the extension of the account
+  that owns the conversation, which types it into Facebook. The bot reacts 👍
+  when the extension reports it sent, and says so in the topic when it failed
+  or could not be confirmed. A reply never reported is marked uncertain after
+  five minutes and is not sent again. A line starting with `/` is a note and
+  goes nowhere. `FB_CHAT_TELEGRAM_USER_IDS` limits who may reply.
+- **Alerts.** A login or checkpoint page on an account posts one warning in
+  General, and one more when the account is back.
+- **Data.** Every message, buyer profile (rating, rating count, location, join
+  year), send attempt and account event is kept in the `fb_chat_*` tables for
+  analysis. Managers can read `/api/fb-chat/accounts`, `/threads` and
+  `/threads/:id/messages`.
+- **Setup.** `FB_CHAT_TELEGRAM_BOT_TOKEN` and `FB_CHAT_TELEGRAM_CHAT_ID` on the
+  backend. The bot must be this hub's alone, an admin of the group with
+  *Manage topics*, and the group must have Topics on. Without them the chats
+  are stored and Telegram is not called.
+
 **Leads ▸ Reddit** (`#/leads/reddit`, v1.392.0, RS-477) is a pool of sellers to
 buy from. They are found in the swap subreddits' public trade records: u/LabB0T
 on r/homelabsales and u/hwsbot on r/hardwareswap log every confirmed sale
