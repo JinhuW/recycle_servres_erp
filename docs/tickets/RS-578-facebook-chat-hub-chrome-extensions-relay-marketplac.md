@@ -2,7 +2,7 @@
 id: RS-578
 title: Facebook chat hub: Chrome extensions relay Marketplace chats to Telegram topics
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-11
 reporter: jinhu
