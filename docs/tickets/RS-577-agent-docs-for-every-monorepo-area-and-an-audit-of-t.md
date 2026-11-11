@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-11
 reporter: jinhu
 branch: docs/agent-docs
-pr:
+pr: 1180
 version: n/a — docs only, no release
 related: []
 ---
