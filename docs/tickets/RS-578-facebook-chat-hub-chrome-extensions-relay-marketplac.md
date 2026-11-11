@@ -82,3 +82,7 @@ they get their own `fb_chat_*` tables.
   backend instances never both consume updates.
 - The bot needs its own token. The Facebook coordinator polls another bot, and
   two pollers on one token take each other's updates.
+- 2026-11-11, after the first look at the live inbox: conversations there are
+  buttons that open a chat window on the same page, with no id and no URL. The
+  extension keys a conversation by its title, and v1.451.1 dropped the dead
+  thread link from the topic header and added `fb_sent_label`.

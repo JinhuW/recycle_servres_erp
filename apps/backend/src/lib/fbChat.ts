@@ -73,7 +73,10 @@ function rows(v: unknown): FbChatRow[] {
     const images = Array.isArray(r.images)
       ? r.images.filter((u): u is string => typeof u === 'string' && /^https:\/\/[^\s]{1,2000}$/.test(u)).slice(0, MAX_IMAGES)
       : [];
-    return { direction: r.direction, text: typeof r.text === 'string' ? r.text.slice(0, MAX_BODY) : '', images };
+    return {
+      direction: r.direction, text: typeof r.text === 'string' ? r.text.slice(0, MAX_BODY) : '', images,
+      at: text(r.at, 80) ?? undefined,
+    };
   }).filter((r) => r.text.trim() || r.images.length);
 }
 

@@ -122,6 +122,7 @@ async function postAlerts(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget: 
 
 type Unmirrored = {
   id: number; thread_id: number; direction: 'in' | 'out'; body: string; images: string[]; backfill: boolean;
+  fb_sent_label: string | null;
 };
 
 type ThreadRow = {
@@ -141,7 +142,6 @@ function header(t: ThreadRow): string {
   if (t.listing_title || t.listing_id) {
     lines.push(`🛒 ${[t.listing_title, t.listing_id && `https://www.facebook.com/marketplace/item/${t.listing_id}/`].filter(Boolean).join(' — ')}`);
   }
-  lines.push(`💬 https://www.facebook.com/marketplace/t/${t.fb_thread_id}/`);
   lines.push(`🔑 Account: ${t.account_label || t.fb_uid}`);
   lines.push('', 'Reply here to answer on Facebook. Start a line with / to keep a note to yourself.');
   return lines.join('\n');
@@ -185,7 +185,8 @@ async function ensureTopic(sql: postgres.Sql, cfg: FbChatTelegramConfig, t: Thre
 
 function transcriptLine(m: Unmirrored, buyer: string): string {
   const text = [m.body, ...m.images.map(() => '[photo]')].filter(Boolean).join(' ');
-  return `${m.direction === 'in' ? buyer : 'You'}: ${text}`;
+  const when = m.fb_sent_label ? `[${m.fb_sent_label}] ` : '';
+  return `${when}${m.direction === 'in' ? buyer : 'You'}: ${text}`;
 }
 
 async function postOne(cfg: FbChatTelegramConfig, topicId: number, m: Unmirrored): Promise<void> {
@@ -244,7 +245,7 @@ async function renameTopics(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget
 
 async function mirror(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget: Budget): Promise<number> {
   const rows = await sql<Unmirrored[]>`
-    SELECT id::int AS id, thread_id::int AS thread_id, direction, body, images, backfill
+    SELECT id::int AS id, thread_id::int AS thread_id, direction, body, images, backfill, fb_sent_label
       FROM fb_chat_messages WHERE mirrored_at IS NULL ORDER BY id LIMIT ${MIRROR_BATCH}`;
   const byThread = new Map<number, Unmirrored[]>();
   for (const r of rows) byThread.set(r.thread_id, [...(byThread.get(r.thread_id) ?? []), r]);
