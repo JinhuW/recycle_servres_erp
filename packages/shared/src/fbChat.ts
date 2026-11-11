@@ -11,6 +11,8 @@ export type FbChatRow = {
   text: string;
   /** Image URLs on the bubble. They are signed and expire. */
   images: string[];
+  /** When it was sent, in Facebook's own words ("Tuesday 5:57pm"). */
+  at?: string;
 };
 
 export type FbChatBuyer = {
@@ -37,6 +39,11 @@ export type FbChatAccountRef = {
 export type FbChatSyncPush = {
   account: FbChatAccountRef;
   thread: {
+    /**
+     * The extension's key for the conversation. Facebook's page shows no id
+     * for one, so the key is derived from its title (`<buyer> · <listing>`):
+     * stable, but not a number and not part of any Facebook address.
+     */
     fbThreadId: string;
     buyer: FbChatBuyer;
     listing: FbChatListing;

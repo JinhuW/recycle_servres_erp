@@ -165,9 +165,9 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
       continue;
     }
     await tx`
-      INSERT INTO fb_chat_messages (thread_id, seq, direction, source, body, images, backfill)
+      INSERT INTO fb_chat_messages (thread_id, seq, direction, source, body, images, backfill, fb_sent_label)
       VALUES (${threadId}, ${seq}, ${row.direction}, 'facebook', ${row.text},
-              ${tx.json(row.images)}, ${isNew})`;
+              ${tx.json(row.images)}, ${isNew}, ${row.at ?? null})`;
     added += 1;
     if (!isNew) {
       if (row.direction === 'in') inbound = true;

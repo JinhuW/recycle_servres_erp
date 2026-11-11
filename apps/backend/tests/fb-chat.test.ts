@@ -140,6 +140,8 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     expect(head).toContain('📍 Aurora, Colorado · on Facebook since 2012');
     expect(head).toContain('https://www.facebook.com/marketplace/item/9988/');
     expect(head).toContain('🔑 Account: Denver profile');
+    // A conversation has no address on Facebook, so the header links none.
+    expect(head).not.toContain('/marketplace/t/');
     expect(history).toBe('📜 Earlier messages\nJohn Smith: first\nYou: reply\nJohn Smith: latest');
     expect(sent('sendMessage').every((c) => c.params.message_thread_id === 1)).toBe(true);
 
@@ -297,6 +299,39 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     expect(status.body).toEqual({ ok: true, telegram: false });
     expect((await push<FbChatSyncAnswer>('sync', sync([row('in', 'hi')], { full: true }))).body.added).toBe(1);
     expect(calls).toHaveLength(0);
+  });
+
+  it('takes what the extension sends: a client-credentials token, a title key and message times', async () => {
+    const sql = getTestDb();
+    const [manager] = await sql<{ id: string }[]>`SELECT id FROM users WHERE email = ${ALEX}`;
+    const client = await createOAuthClient(sql, {
+      name: 'extension', redirectUris: [], grantTypes: ['client_credentials'], scopes: ['fbchat:write'], createdBy: manager!.id, public: false,
+    });
+    const minted = await api<{ access_token: string }>('POST', '/oauth/token', {
+      form: { grant_type: 'client_credentials', client_id: client.clientId, client_secret: client.clientSecret!, scope: 'fbchat:write' },
+    });
+    expect(minted.status).toBe(200);
+    // Byte for byte what the extension's end-to-end run pushed.
+    const body = {
+      account: { fbUid: '100000000000042', label: 'E2E profile', extVersion: '0.1.0' },
+      thread: {
+        fbThreadId: 'k7e601ec8e0ef7cac16',
+        buyer: { name: 'Kane Bryant', profileId: '61570000000001', location: null, joinedYear: null, rating: null, ratingCount: null },
+        listing: { id: '9988776655', title: 'Dell R740 256GB' },
+        rows: [
+          { direction: 'in', text: '', images: ['https://scontent.fbcdn.net/photo.jpg'], at: 'Tuesday 5:57pm' },
+          { direction: 'in', text: 'Is this still available?', images: [], at: 'Tuesday 5:58pm' },
+        ],
+        full: true,
+        complete: true,
+      },
+    };
+    const pushed = await push<FbChatSyncAnswer>('sync', body, minted.body.access_token);
+    expect(pushed.body).toEqual({ needsFull: false, added: 2 });
+    const labels = await sql`SELECT fb_sent_label FROM fb_chat_messages ORDER BY seq`;
+    expect(labels.map((r) => r.fb_sent_label)).toEqual(['Tuesday 5:57pm', 'Tuesday 5:58pm']);
+    await tick();
+    expect(texts().at(-1)).toBe('📜 Earlier messages\n[Tuesday 5:57pm] Kane Bryant: [photo]\n[Tuesday 5:58pm] Kane Bryant: Is this still available?');
   });
 
   it('names topics and cuts long text within Telegram limits', () => {

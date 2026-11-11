@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-11:** ERP migration `0235`, Reddit tracker migration `0007`,
+**As of 2026-11-11:** ERP migration `0236`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -3036,7 +3036,7 @@ One conversation on one account, and its Telegram topic.
 | --- | --- | :-: | --- | --- |
 | `id` | `bigint` | ✓ | sequence |  |
 | `account_id` | `bigint` | ✓ |  | → fb_chat_accounts. |
-| `fb_thread_id` | `text` | ✓ |  | The id in `/marketplace/t/<id>`. |
+| `fb_thread_id` | `text` | ✓ |  | The extension's key for the conversation, derived from its title (`<buyer> · <listing>`). Facebook's page shows no id of its own. |
 | `buyer_id` | `bigint` |  |  | → fb_chat_buyers, once the profile id is known. |
 | `buyer_name` | `text` |  |  | As the thread showed it. |
 | `buyer_location` | `text` |  |  |  |
@@ -3070,6 +3070,7 @@ One message. Those read off Facebook have `source = 'facebook'`; a reply typed i
 | `body` | `text` | ✓ | `''` |  |
 | `images` | `jsonb` | ✓ | `'[]'` | Image URLs on the bubble. Signed by Facebook; they expire. |
 | `backfill` | `boolean` | ✓ | `false` | Read as history when the thread was first seen, so `created_at` is when it was read, not written. |
+| `fb_sent_label` | `text` |  |  | When it was sent, in Facebook's own words ("Tuesday 5:57pm"). Relative to the day it was read. |
 | `send_state` | `text` |  |  | queued, sending, sent, failed or uncertain; NULL for messages read off Facebook. |
 | `attempts` | `integer` | ✓ | `0` | How many times an extension claimed it. |
 | `error` | `text` |  |  | Why a send failed or is uncertain, in words. |

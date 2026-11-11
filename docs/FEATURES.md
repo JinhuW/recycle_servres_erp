@@ -1461,8 +1461,9 @@ own Marketplace chats to Telegram. It has no page in the ERP.
 - **Topics.** The first time an account's conversation is pushed, the bot
   opens a forum topic in the configured group named `<buyer> · <location>`
   (`<buyer>` until a location is known, renamed when one arrives). It opens
-  with the buyer's rating, location, join year, the listing, the Facebook link
-  and which account the chat is on, then the conversation so far.
+  with the buyer's rating, location, join year, the listing and which account
+  the chat is on, then the conversation so far with Facebook's time on each
+  line (v1.451.1). A conversation has no address on Facebook, so none is linked.
 - **Messages.** Each later buyer message is posted to its topic once. A reply
   typed on Facebook directly appears as `↩️ You: …`.
 - **Replies.** Text typed in a topic is queued for the extension of the account
