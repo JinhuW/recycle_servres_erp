@@ -15,6 +15,8 @@
   misbehaves, read
   [docs/agents/session-isolation.md](docs/agents/session-isolation.md).
 - **Nested docs.** The `CLAUDE.md` files in `apps/backend/`, `apps/frontend/`,
-  `trackers/reddit/` and `trackers/facebook/` each import their folder's
-  `AGENTS.md`, and load when you read files there. ERP ops has no folder of its
-  own; reach it through the pointer in *Pointers*.
+  `apps/fleet-agent/`, `packages/shared/`, `trackers/reddit/` and
+  `trackers/facebook/` each import their folder's `AGENTS.md`, and load when
+  you read files there. `deploy/`, `backup/` and `infra/` each import
+  `docs/agents/erp-ops.md` the same way. For `docker-compose.yml`, or a
+  Railway or Cloudflare setting, read `docs/agents/erp-ops.md` yourself.

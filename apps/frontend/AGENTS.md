@@ -1,13 +1,17 @@
 # ERP frontend — `apps/frontend/`
 
 The root [AGENTS.md](../../AGENTS.md) has the repo map, workflow and the
-ERP↔tracker contracts; this file is the frontend's conventions.  Paths are
+ERP↔tracker contracts; this file is the frontend's conventions.  Bare paths
+such as `lib/api.ts` or `pages/desktop/` are under `apps/frontend/src/`, and
+`public/_headers` is under `apps/frontend/`; anything else is
 relative to the repo root.
 
 ## Frontend
 
 - One bundle, two shells.  `apps/frontend/src/App.tsx` decides which to
-  render: viewport width `< 720` → `MobileApp`; else `DesktopApp`.  Each is
+  render once, when the page loads: viewport width `< 720`
+  (`PHONE_BREAKPOINT`, `lib/viewport.ts`) → `MobileApp`; else `DesktopApp`.
+  A later resize never swaps the shell; it only offers a layout switch.  Each is
   lazy-imported so each shell ships its own chunk.  When adding a feature,
   identify which shell(s) it lives in and keep its components scoped to that
   subtree (`pages/desktop/`, `pages/` for mobile).

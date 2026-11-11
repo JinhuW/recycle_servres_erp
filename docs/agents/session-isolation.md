@@ -16,6 +16,8 @@ switches the branch out from under the first.
   (root, plus `trackers/reddit/.env` and `.api-token`),
   runs `pnpm install`, and launches `claude` inside it.  Optional branch name:
   `scripts/new-session.sh feat/<topic>` (default `session/<timestamp>`).
+  `--base <ref>` branches from another ref (new branches only), `--no-install`
+  skips `pnpm install`, and everything after `--` is passed to `claude`.
 - **To pick work back up, `scripts/new-session.sh --checkout <branch>`.**  It
   puts an *existing* branch in a worktree instead of cutting a new one — local
   or remote-only (`origin/<branch>` is fetched and tracked, and either spelling
@@ -45,8 +47,9 @@ switches the branch out from under the first.
   agent should then run `scripts/new-session.sh --print-only` and call
   `EnterWorktree` with the path it prints.  Read-only sessions — answering a
   question, reading history, no file edits — can skip this.
-- The base ref is **always `origin/dev`, never `main`**, matching the normal
-  branch workflow.  Claude Code's own `worktree.baseRef` setting can't express
+- The base ref is **`origin/dev` by default, never `main`**, matching the
+  normal branch workflow; `--base <ref>` overrides it for one session.
+  Claude Code's own `worktree.baseRef` setting can't express
   this (it only offers `origin/<default-branch>`, i.e. `main`, or local HEAD),
   which is why creation is scripted rather than left to `EnterWorktree`.
 - **Worktrees are recycled, not accumulated.**  Starting a session reuses an

@@ -52,9 +52,12 @@ The release flow itself (`dev` → `main` is a full release) is in the root
   `cap_drop: ALL` + `no-new-privileges` + memory caps + JSON log rotation.
   When you add a service, copy that block.
 - The Postgres container is **not host-published** in prod — `backend`
-  reaches it as `postgres:5432` over the compose net.  The override file
-  re-publishes it on `127.0.0.1:5432` for the host vitest suite only.  Never
-  bind it to `0.0.0.0`.
+  reaches it as `postgres:5432` over the compose net.  To reach it from the
+  host, a local `docker-compose.override.yml` publishes it on
+  `127.0.0.1:5432`.  That file is gitignored, so a fresh checkout or
+  worktree has none; all it needs is
+  `services.postgres.ports: ["127.0.0.1:5432:5432"]`.  Never bind it to
+  `0.0.0.0`.
 - Postgres needs `CHOWN, DAC_OVERRIDE, FOWNER, FSETID, SETGID, SETUID`
   re-added (its entrypoint runs as root then drops to `postgres`).  Caddy
   needs `NET_BIND_SERVICE` (binds :80 non-root via file caps).  Don't widen
@@ -80,10 +83,11 @@ The release flow itself (`dev` → `main` is a full release) is in the root
 - Deploy the frontend Workers with `deploy/cloudflare/deploy.sh <prod|dev>` —
   it builds, deploys, and smoke-checks every public hostname through
   Cloudflare. Don't run bare `wrangler deploy`.
-- **Every public hostname must be declared in `wrangler.toml` routes**
-  (`custom_domain = true`). Deploys reconcile custom domains against the
-  file; a domain attached only via the CF dashboard gets its DNS record +
-  cert deleted by the next deploy → sitewide 523 while Railway stays green.
+- **Every public hostname must be declared in
+  `deploy/cloudflare/wrangler.toml` routes** (`custom_domain = true`).
+  Deploys reconcile custom domains against the file; a domain attached only
+  via the CF dashboard gets its DNS record + cert deleted by the next deploy
+  → sitewide 523 while Railway stays green.
   See `docs/debug-notes/2026-07-13-cloudflare-worker-custom-domain-deleted.md`.
 - Pushes to `main` and `dev` auto-deploy their Worker via
   `.github/workflows/deploy-frontend.yml` (needs `CLOUDFLARE_API_TOKEN` repo
@@ -94,10 +98,11 @@ The release flow itself (`dev` → `main` is a full release) is in the root
 - **Browser security headers live in `apps/frontend/public/_headers` under
   `/*`** (CSP, frame, nosniff, referrer, permissions). Cloudflare applies them to
   what the Worker fetches from `ASSETS` and to the SPA fallback built from
-  `index.html`, so don't duplicate them in `worker.js`. Every CSP change must
-  also bump the `csp-rev` meta in `index.html`: the service worker serves
-  navigations from its precached index.html *with the headers it was cached
-  with*, and only re-precaches when the file's bytes change.
+  `index.html`, so don't duplicate them in `deploy/cloudflare/worker.js`.
+  Every CSP change must also bump the `csp-rev` meta in `index.html`: the
+  service worker serves navigations from its precached index.html *with the
+  headers it was cached with*, and only re-precaches when the file's bytes
+  change.
 - **The real client IP reaches the backend as `X-Client-IP`**, set by the
   Worker from `CF-Connecting-IP`. Railway rewrites `X-Forwarded-For` to a
   Cloudflare egress address shared by every user, so anything keyed per IP
@@ -106,6 +111,25 @@ The release flow itself (`dev` → `main` is a full release) is in the root
   lock people out when every request looks like the same few Cloudflare
   addresses must skip itself while `X-Client-IP` is absent, as the per-IP
   login budget does.
+
+## Fleet agent image
+
+- `apps/fleet-agent/` ships as `ghcr.io/jinhuw/fleet-agent:<root version>`.
+  It carries the ERP's version but is not part of the ERP's deploy: neither
+  Railway nor the Worker deploy builds it.
+- Push it from the Mac with
+  `trackers/facebook/scripts/push-fleet-images.sh --only agent`
+  (`--no-push` builds only).  The `fleet-agent` job in
+  `.github/workflows/fleet-images.yml` skips itself unless the repository
+  variable `GHCR_PRIVATE_CONFIRMED` is `yes`.
+- **Never re-push a tag.**  A fix after a push gets a new version.
+- A host runs a new agent only when someone re-runs its `docker run`
+  (`apps/fleet-agent/README.md` → *Run on a host*).  That leaves running
+  workers alone; anything that restarts a worker is a Facebook login (root
+  AGENTS.md → *First rule*).
+- Registry, credentials and the host checklist:
+  `docs/superpowers/plans/2026-10-24-erp-fleet/HOSTS.md` → *Registry* and
+  *Host prep checklist*.
 
 ## Ops alerts → Telegram
 
@@ -140,8 +164,9 @@ them and recreate only `rs-coordinator`.
   resolved. PR environments are left out.
 - **Our own senders use `/alert`.** They post
   `{topic, status, title, lines, link}` with the `ALERT_TOKEN` bearer, and
-  only `TOPICS` in `wrangler.toml` maps a topic key to a thread. A key or
-  event without a topic, or whose topic was deleted, goes to General.
+  only `TOPICS` in `deploy/railway-alerts/wrangler.toml` maps a topic key to
+  a thread. A key or event without a topic, or whose topic was deleted, goes
+  to General.
 - **One bearer per route.** `WEBHOOK_SECRET` belongs to the Railway webhooks.
   `ALERT_TOKEN` has three holders:
   - `uptime-monitor`, as `ALERT_TOKEN`;
