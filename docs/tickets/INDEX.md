@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-578](./RS-578-facebook-chat-hub-chrome-extensions-relay-marketplac.md) | in-progress | story | P2 | Facebook chat hub: Chrome extensions relay Marketplace chats to Telegram topics | — |
+| [RS-578](./RS-578-facebook-chat-hub-chrome-extensions-relay-marketplac.md) | in-progress | story | P2 | Facebook chat hub: Chrome extensions relay Marketplace chats to Telegram topics | 1.451.0 |
 | [RS-577](./RS-577-agent-docs-for-every-monorepo-area-and-an-audit-of-t.md) | done | task | P2 | Agent docs for every monorepo area, and an audit of the existing ones | n/a — docs only, no release |
 | [RS-576](./RS-576-business-account-cost-payment-keeps-the-id-box-on-ph.md) | done | bug | P1 | Business Account cost payment keeps the ID box on phone and lets a manager fix a typed ID | 1.450.1 |
 | [RS-575](./RS-575-review-mode-s-line-label-shows-the-part-number-and-t.md) | done | story | P2 | Review mode's line label shows the part number and the units counted | 1.450.0 |

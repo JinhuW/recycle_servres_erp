@@ -7,8 +7,8 @@ priority: P2
 created: 2026-11-11
 reporter: jinhu
 branch: feat/fb-chat-telegram-hub
-pr:
-version:
+pr: 1181
+version: 1.451.0
 related: [RS-565, RS-571]
 ---
 
