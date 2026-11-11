@@ -39,6 +39,7 @@ import facebookPoolRoutes from './routes/facebookPool';
 import redditLeadsRoutes from './routes/redditLeads';
 import fleetRoutes from './routes/fleet';
 import wechatMarketRoutes from './routes/wechatMarket';
+import fbChatRoutes from './routes/fbChat';
 import bankTxRoutes from './routes/bankTx';
 import internalTxRoutes from './routes/internalTx';
 import suppliersRoutes from './routes/suppliers';
@@ -462,6 +463,10 @@ app.route('/api/fb-agent', fbAgentRoutes);
 // Self-applies its auth: Bearer (wechat:write) on /push/*, where memtrade
 // sends each day's report; cookie + manager gate on the page's reads.
 app.route('/api/wechat-market', wechatMarketRoutes);
+// Same shape: Bearer (fbchat:write) on /push/*, where the owner's Chrome
+// extensions send Marketplace chats and claim Telegram replies; cookie +
+// manager gate on the reads.
+app.route('/api/fb-chat', fbChatRoutes);
 // Same shape: self-applied authMiddleware + manager gate.
 app.route('/api/bank-transactions', bankTxRoutes);
 app.route('/api/internal-transactions', internalTxRoutes);

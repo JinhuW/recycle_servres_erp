@@ -14,6 +14,14 @@ export type Env = {
   OPENROUTER_OCR_MODEL?: string;
   // Telegram bot for Facebook seller alerts (lib/fbSellerAlert.ts). Unset: in-app only.
   FB_SELLER_TELEGRAM_BOT_TOKEN?: string;
+  // Facebook chat hub (services/fbChatTelegram.ts): the bot that mirrors the
+  // owner's Marketplace chats into forum topics, and the supergroup it posts
+  // to. Either unset: chats are stored, Telegram is never called. The token
+  // must be this hub's alone, because getUpdates is exclusive per bot.
+  FB_CHAT_TELEGRAM_BOT_TOKEN?: string;
+  FB_CHAT_TELEGRAM_CHAT_ID?: string;
+  // Comma-separated Telegram user ids allowed to reply. Unset: any member.
+  FB_CHAT_TELEGRAM_USER_IDS?: string;
   // Reddit tracker admin proxy (/api/tracker/*). Both unset → proxy answers
   // 501 so the UI can show a "not configured" state instead of erroring.
   TRACKER_API_URL?: string;
@@ -148,6 +156,7 @@ export const OAUTH_SCOPES = [
   'wechat:write',
   'fleet:read',
   'pool:write',
+  'fbchat:write',
 ] as const;
 
 export type OAuthScope = typeof OAUTH_SCOPES[number];

@@ -27,6 +27,7 @@ import { startFleetRelayLease } from './fleet/vnc';
 import { setPollsDraining } from './fleet/claim';
 import { startFbSellerLoop } from './services/fbPacing';
 import { startFbAgentLoop } from './services/fbAgent';
+import { startFbChatTelegramLoop } from './services/fbChatTelegram';
 
 const env = buildEnv();
 const port = Number(process.env.PORT ?? 8787);
@@ -52,6 +53,7 @@ const loops = [
   startFleetRelayLease(getDb(env)),
   startFbSellerLoop(env),
   startFbAgentLoop(env),
+  startFbChatTelegramLoop(env),
   { stop: () => setPollsDraining(true) },
 ];
 

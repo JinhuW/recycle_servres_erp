@@ -17,11 +17,12 @@ import { oauthGrantsTotal } from '../metrics';
 const CODE_TTL_SEC = 600;
 
 // wechat:write is memtrade's daily push, fleet:read the dev ERP's live view of
-// prod's fleet and pool:write the fb-pool-add skill's way into the account pool,
+// prod's fleet, pool:write the fb-pool-add skill's way into the account pool
+// and fbchat:write the owner's Chrome extensions pushing Marketplace chats,
 // each held by a service client a manager mints. A self-registered connector
 // has no use for any of them, so registration never hands them out, even to a
 // client that names no scope.
-const SERVICE_ONLY = new Set<string>(['wechat:write', 'fleet:read', 'pool:write']);
+const SERVICE_ONLY = new Set<string>(['wechat:write', 'fleet:read', 'pool:write', 'fbchat:write']);
 const DCR_SCOPES = new Set<string>(OAUTH_SCOPES.filter(s => !SERVICE_ONLY.has(s)));
 // The interactive code flow is role-ceilinged: a manager's consent can grant
 // any scope; a non-manager's yields market:read only (price lookup — their MCP

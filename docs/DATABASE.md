@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-07:** ERP migration `0234`, Reddit tracker migration `0007`,
+**As of 2026-11-11:** ERP migration `0235`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2978,6 +2978,145 @@ One profile run against every case that is not archived. Each case's decision is
 - **Checks:** `state IN ('queued', 'running', 'done', 'failed')`
 - **Indexes:** `fb_agent_eval_runs_profile_id_idx` (profile_id); `fb_agent_eval_runs_created_by_idx` (created_by)
 
+### Facebook chat hub
+
+The owner's own Facebook accounts, each in its own Chrome profile with the
+bridge extension (`facebook_messager_extenion/` in the workspace). The
+extension pushes Marketplace conversations to `/api/fb-chat/push/*`; the
+backend mirrors each one into a Telegram forum topic and queues the replies
+typed there for the extension to type into Facebook
+(`services/fbChat.ts`, `services/fbChatTelegram.ts`). These tables are apart
+from the seller tables above on purpose: nothing here is read by the pacing
+tick or the agent. `fb_chat_accounts.fb_uid` is the same value as
+`fb_pool_accounts.uid`, which is the join when one is wanted.
+
+#### `fb_chat_accounts`
+
+One Facebook account an extension has spoken for, created on its first push.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | sequence |  |
+| `fb_uid` | `text` | ✓ |  | The Facebook numeric uid, from the tab's `c_user` cookie. |
+| `label` | `text` | ✓ | `''` | What the owner called the Chrome profile in the extension. |
+| `client_id` | `text` |  |  | The service client that last pushed for it; no FK. |
+| `ext_version` | `text` |  |  | The extension version that last pushed. |
+| `restricted` | `text` |  |  | login or checkpoint while the extension sees such a page; NULL when healthy. |
+| `restricted_at` | `timestamptz` |  |  |  |
+| `last_seen_at` | `timestamptz` | ✓ | `now()` | The last push of any kind. |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **Unique:** `fb_uid`
+- **Checks:** `restricted IN ('login', 'checkpoint')`
+#### `fb_chat_buyers`
+
+One Marketplace profile, shared by every account it has written to, so a repeat buyer is one row. Only buyers whose profile id a thread revealed get a row.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | sequence |  |
+| `fb_profile_id` | `text` | ✓ |  | The id in `/marketplace/profile/<id>`. |
+| `name` | `text` |  |  |  |
+| `location` | `text` |  |  | "Lives in …" as the profile shows it. |
+| `joined_year` | `integer` |  |  | "Joined Facebook in …". |
+| `rating` | `numeric(2,1)` |  |  | Marketplace star average, 0 to 5. |
+| `rating_count` | `integer` |  |  | How many ratings the average is over. |
+| `first_seen_at` | `timestamptz` | ✓ | `now()` |  |
+| `updated_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **Unique:** `fb_profile_id`
+- **Checks:** `rating BETWEEN 0 AND 5`; `rating_count >= 0`
+#### `fb_chat_threads`
+
+One conversation on one account, and its Telegram topic.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | sequence |  |
+| `account_id` | `bigint` | ✓ |  | → fb_chat_accounts. |
+| `fb_thread_id` | `text` | ✓ |  | The id in `/marketplace/t/<id>`. |
+| `buyer_id` | `bigint` |  |  | → fb_chat_buyers, once the profile id is known. |
+| `buyer_name` | `text` |  |  | As the thread showed it. |
+| `buyer_location` | `text` |  |  |  |
+| `listing_id` | `text` |  |  | The Marketplace item the conversation is about. |
+| `listing_title` | `text` |  |  |  |
+| `telegram_topic_id` | `bigint` |  |  | The forum topic's `message_thread_id`; NULL until created, and again if the topic is deleted in Telegram. |
+| `telegram_topic_name` | `text` |  |  | The name last set, `<buyer> · <location>`; compared to decide a rename. |
+| `header_sent_at` | `timestamptz` |  |  | When the topic's opening message was posted. |
+| `last_seq` | `integer` | ✓ | `0` | The highest `seq` handed out. |
+| `history_complete` | `boolean` | ✓ | `false` | The extension reached the first message when it read the thread. |
+| `last_inbound_at` | `timestamptz` |  |  | The last live buyer message; history read on first sight does not count. |
+| `last_outbound_at` | `timestamptz` |  |  |  |
+| `last_synced_at` | `timestamptz` |  |  |  |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `account_id` → `fb_chat_accounts.id` (on delete cascade); `buyer_id` → `fb_chat_buyers.id` (on delete set null)
+- **Unique:** `(account_id, fb_thread_id)`; `telegram_topic_id` where not null
+- **Indexes:** `fb_chat_threads_buyer_idx` (buyer_id)
+#### `fb_chat_messages`
+
+One message. Those read off Facebook have `source = 'facebook'`; a reply typed in the Telegram topic has `source = 'telegram'` and a `send_state`. `seq` is the position in the conversation; a Telegram reply has none until it is reported sent or seen on the page.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | sequence |  |
+| `thread_id` | `bigint` | ✓ |  | → fb_chat_threads. |
+| `seq` | `integer` |  |  | NULL while a Telegram reply has not landed. |
+| `direction` | `text` | ✓ |  | in (the buyer) or out (the account). |
+| `source` | `text` | ✓ |  | facebook or telegram: where the text was written. |
+| `body` | `text` | ✓ | `''` |  |
+| `images` | `jsonb` | ✓ | `'[]'` | Image URLs on the bubble. Signed by Facebook; they expire. |
+| `backfill` | `boolean` | ✓ | `false` | Read as history when the thread was first seen, so `created_at` is when it was read, not written. |
+| `send_state` | `text` |  |  | queued, sending, sent, failed or uncertain; NULL for messages read off Facebook. |
+| `attempts` | `integer` | ✓ | `0` | How many times an extension claimed it. |
+| `error` | `text` |  |  | Why a send failed or is uncertain, in words. |
+| `typing_ms` | `integer` |  |  | How long the extension took to type and submit it. |
+| `claimed_at` | `timestamptz` |  |  |  |
+| `sent_at` | `timestamptz` |  |  |  |
+| `tg_message_id` | `bigint` |  |  | The Telegram message the reply came from. |
+| `tg_user_id` | `bigint` |  |  | Who typed it in Telegram. |
+| `tg_user_name` | `text` |  |  |  |
+| `acked_at` | `timestamptz` |  |  | When Telegram was told how the reply ended. |
+| `mirrored_at` | `timestamptz` |  |  | When it was posted to the topic. A Telegram reply is born mirrored. |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `thread_id` → `fb_chat_threads.id` (on delete cascade)
+- **Unique:** `(thread_id, seq)`; `(thread_id, tg_message_id)`
+- **Checks:** `direction IN ('in', 'out')`; `source IN ('facebook', 'telegram')`; `send_state IN ('queued', 'sending', 'sent', 'failed', 'uncertain')`
+- **Indexes:** `fb_chat_messages_unmirrored_idx` (id) where not mirrored; `fb_chat_messages_outbox_idx` (thread_id, id) where queued or sending; `fb_chat_messages_unacked_idx` (id) where settled and not acknowledged
+#### `fb_chat_events`
+
+Append-only record of what is worth counting later and is not a message. `kind` is one of: `thread_seen`, `sync` (new messages in a known thread), `sync_gap` (a window that did not overlap what was stored), `send_sent`, `send_failed`, `send_uncertain`, `buyer_rating` (a rating or count changed; old and new values in `detail`), `topic_created`, `restricted`, `recovered`, `error`.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | sequence |  |
+| `account_id` | `bigint` |  |  | → fb_chat_accounts. |
+| `thread_id` | `bigint` |  |  | → fb_chat_threads. |
+| `kind` | `text` | ✓ |  |  |
+| `detail` | `jsonb` | ✓ | `'{}'` |  |
+| `alert` | `text` |  |  | Text to post in the group's General topic. |
+| `alerted_at` | `timestamptz` |  |  | When that was posted. |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `account_id` → `fb_chat_accounts.id` (on delete cascade); `thread_id` → `fb_chat_threads.id` (on delete cascade)
+- **Indexes:** `fb_chat_events_account_idx` (account_id, created_at); `fb_chat_events_thread_idx` (thread_id); `fb_chat_events_alert_idx` (id) where an alert is waiting
+#### `fb_chat_telegram_state`
+
+One row: the bot's `getUpdates` cursor.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `boolean` | ✓ | `true` | Always true. |
+| `offset` | `bigint` | ✓ | `0` | The next `update_id` to ask Telegram for. |
+
+- **Primary key:** `id`
+- **Checks:** `id`
 ### Reddit leads
 
 Sellers from the swap subreddits' trade-bot records (u/LabB0T on

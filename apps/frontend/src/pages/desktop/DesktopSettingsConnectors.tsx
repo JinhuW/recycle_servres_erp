@@ -29,7 +29,8 @@ type Client = {
 // Order is fixed here so the checkbox list renders stably; labels resolve via
 // i18n. wechat:write is for memtrade's service client, which pushes the WeChat
 // market report; fleet:read for the dev ERP's, which shows prod's fleet live;
-// pool:write for the fb-pool-add skill's, which adds Facebook accounts.
+// pool:write for the fb-pool-add skill's, which adds Facebook accounts;
+// fbchat:write for the owner's Chrome extensions, which relay Marketplace chats.
 const SCOPE_OPTIONS = [
   { scope: 'market:read', labelKey: 'connectorsScopeMarketRead' },
   { scope: 'market:write', labelKey: 'connectorsScopeMarketWrite' },
@@ -38,6 +39,7 @@ const SCOPE_OPTIONS = [
   { scope: 'wechat:write', labelKey: 'connectorsScopeWechatWrite' },
   { scope: 'fleet:read', labelKey: 'connectorsScopeFleetRead' },
   { scope: 'pool:write', labelKey: 'connectorsScopePoolWrite' },
+  { scope: 'fbchat:write', labelKey: 'connectorsScopeFbChatWrite' },
 ] as const;
 
 // Callback URLs each host uses for MCP connector OAuth. Presets, not

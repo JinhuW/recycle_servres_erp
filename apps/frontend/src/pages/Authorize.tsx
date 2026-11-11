@@ -27,6 +27,7 @@ const SCOPE_LABEL_KEYS: Record<string, string> = {
   'wechat:write': 'connectorsScopeWechatWrite',
   'fleet:read': 'connectorsScopeFleetRead',
   'pool:write': 'connectorsScopePoolWrite',
+  'fbchat:write': 'connectorsScopeFbChatWrite',
 };
 
 type Pending = {

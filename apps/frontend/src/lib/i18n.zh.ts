@@ -743,6 +743,7 @@ const zh: Record<string, string> = {
   connectorsScopeWechatWrite: '推送微信行情报告 (wechat:write)',
   connectorsScopeFleetRead: '读取 Facebook 机队，供开发环境 ERP 实时查看 (fleet:read)',
   connectorsScopePoolWrite: '向 Facebook 账号池添加账号 (pool:write)',
+  connectorsScopeFbChatWrite: '推送 Facebook Marketplace 聊天并领取 Telegram 回复 (fbchat:write)',
   connectorsNamePlaceholder: '例如：ebay-scraper-prod',
   connectorsCreate: '创建',
   connectorsSecretOnce: '客户端密钥（仅显示一次 — 立即复制）：',
