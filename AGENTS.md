@@ -24,6 +24,10 @@ Each of these is a login:
   workers) and `rsc fleet release` all open a new browser that restores the
   account's session. The login ledger (`rsc vault logins`) records each one as
   `boot`.
+- **A worker the ERP's fleet agent starts.** `apps/fleet-agent/` starts,
+  restarts or replaces worker containers when a host's capacity rises or a
+  release rolls on the ERP's Hosts tab, and when a worker exits. Raising a
+  capacity by three is three logins.
 - **Re-login** on the ERP's or the console's worker page
   (`POST /v1/workers/{id}/relogin`).
 - **Deleting or replacing a saved session** (`trackers/facebook/configs/sessions/`).
@@ -42,12 +46,13 @@ So:
 
 | Path | What | Stack | Runs on | Versioned by | Agent doc |
 | --- | --- | --- | --- | --- | --- |
-| `apps/backend/` | ERP API | Hono, Node 24, Postgres 18, raw SQL | Railway `recycle-erp-experiment` → `backend` | root `package.json`, `v*` tags | [apps/backend/AGENTS.md](apps/backend/AGENTS.md) |
+| `apps/backend/` | ERP API | Hono, Node 24, Postgres 18 (local compose still 16), raw SQL | Railway `recycle-erp-experiment` → `backend` | root `package.json`, `v*` tags | [apps/backend/AGENTS.md](apps/backend/AGENTS.md) |
 | `apps/frontend/` | ERP UI, desktop + mobile PWA | Vite, React | Cloudflare Workers `recycle-erp-prod` / `-dev` | root | [apps/frontend/AGENTS.md](apps/frontend/AGENTS.md) |
-| `packages/shared/` | Types and helpers both apps import | TS source, no build step | — | root | — |
-| `deploy/` `backup/` `infra/` | ERP ops: Worker deploy, prod→dev sync, uptime cron, R2 backup, Terraform | shell, Docker, Terraform | Railway crons, Cloudflare | root | [docs/agents/erp-ops.md](docs/agents/erp-ops.md) |
+| `apps/fleet-agent/` | Docker-host agent: keeps each host's Facebook workers matching what the ERP desires, over `/api/fleet/hosts/:id/*` | TS, Node 24, no runtime deps, Docker CLI through the mounted socket | One container per fleet Docker host | root (the image is tagged with the root version; see `docs/agents/erp-ops.md`) | [apps/fleet-agent/AGENTS.md](apps/fleet-agent/AGENTS.md) |
+| `packages/shared/` | Types and helpers both apps import | TS source, no build step | — | root | [packages/shared/AGENTS.md](packages/shared/AGENTS.md) |
+| `deploy/` `backup/` `infra/` | ERP ops: Worker deploy, ops-alert relay Worker, prod→dev sync, uptime cron, R2 backup, Terraform | shell, Docker, Terraform | Railway crons, Cloudflare | root | [docs/agents/erp-ops.md](docs/agents/erp-ops.md) |
 | `trackers/reddit/` | Reddit for-sale monitor: polls subreddits, LLM-judges posts, alerts Telegram | Hono, Node 24, Postgres; **standalone pnpm project** | Railway `reddits-tracker` (`api`, `worker`) + OCI worker fleet | its `package.json`, no tags | [trackers/reddit/AGENTS.md](trackers/reddit/AGENTS.md) |
-| `trackers/facebook/` | Facebook Marketplace fleet: coordinator, console, poster, messenger, router | Python, FastAPI, Playwright | Homelab VM `10.10.10.73` (Compose) + Railway Postgres `facebook-tracker` | `VERSION`, its `CHANGELOG.md`, `facebook-tracker/v*` tags | [trackers/facebook/AGENTS.md](trackers/facebook/AGENTS.md) |
+| `trackers/facebook/` | Facebook Marketplace fleet: coordinator, console, worker entrypoint (`rs_worker`), poster, messenger, router, `rs_fleetd` | Python, FastAPI, Playwright | Homelab VM `10.10.10.73` (coordinator, console; Compose) + fleet Docker hosts, where `apps/fleet-agent/` runs the workers + Railway Postgres `facebook-tracker` | `VERSION`, its `CHANGELOG.md`, `facebook-tracker/v*` tags | [trackers/facebook/AGENTS.md](trackers/facebook/AGENTS.md) |
 
 ## Boundaries
 
@@ -56,8 +61,11 @@ So:
   commands from inside it (`cd trackers/reddit && pnpm test`). Root `pnpm`
   commands never reach it. `trackers/facebook/` is Python with venvs in its own
   folder.
-- **Root CI is path-filtered to ERP paths.** No workflow tests the trackers, so
-  run a tracker's own suite before pushing a change to it.
+- **No workflow tests the trackers**, so run a tracker's own suite before
+  pushing a change to it. Root CI is filtered to ERP paths, with one
+  exception: `fleet-images.yml` also fires on `facebook-tracker/v*` tags to
+  build the worker image, and skips itself until a private mirror of the
+  vendored monitor and a private image package are set up.
 - **The ERP and the trackers share no code and no database.** They talk only
   over the HTTP contracts below.
 
@@ -80,6 +88,24 @@ then reports through `/push/reruns/<id>/finish`. The payload is
 `packages/shared/src/wechatMarket.ts` on this side and memtrade's `src/erp.ts`
 on that one; test `apps/backend/tests/wechat-market.test.ts`. The ERP side has
 to keep accepting what the deployed memtrade sends.
+
+Two more callers dial in to the ERP's fleet API (`routes/fleet.ts`, mounted
+at `/api/fleet`), with tokens the ERP mints. Both reach it through the
+Cloudflare Worker (`deploy/cloudflare/worker.js`), never the Railway origin:
+
+| Caller | ERP side | Auth | Test |
+| --- | --- | --- | --- |
+| Fleet agent, `apps/fleet-agent/src/client.ts` | `GET /api/fleet/hosts/:id/desired`, `POST …/stopped`, `…/tickets`, `…/report` in `apps/backend/src/fleet/hosts.ts` | Bearer host token (`hostAuth`, `src/fleet/auth.ts`) | `apps/backend/tests/fleet-hosts.test.ts` |
+| The Facebook worker image in fleet mode: `trackers/facebook/rs_worker/entry.py` (`claim`), the vendored monitor's fleet mode (`heartbeat`, `next-task`, `events`, `session`, `profile-launch`, `seller/*`), `rs_worker/vnc_relay.py` (`vnc`) | `/api/fleet/worker/*` in `src/fleet/claim.ts`, `src/fleet/seller.ts` and `src/fleet/vnc.ts` | a single-use claim ticket (or, from older agents, the host token) for `claim`, then the worker token the claim returns | `fleet-claim.test.ts`, `fleet-claim-tickets.test.ts` |
+
+The Worker is part of the claim contract: on a successful claim it adds the
+shared worker env (`FLEET_WORKER_ENV`), and for a cloak device the
+CloakBrowser key, to the answer. `FLEET_FORWARD_URL` can send these calls to
+another ERP. A change to the worker routes is also a change to the monitor
+fork, at the revision `trackers/facebook/VENDOR.md` pins. A deployed agent or
+worker image outlives an ERP release, so the ERP keeps accepting what the
+images in the field send. The written contract is
+`docs/superpowers/plans/2026-10-24-erp-fleet/CONTRACTS.md`.
 
 Some changes touch both sides of a contract: a new or reshaped tracker endpoint
 a page needs, or one the ERP allowlist proxies. Make those in one PR: the
@@ -114,7 +140,8 @@ backward-compatible until the ERP release reaches `main`.
 - **ERP.** It uses the root `package.json`, `CHANGELOG.md` and `v*` tags (see
   *Workspace* and *Tickets* below). `version-check.yml` decides what counts as
   ERP code from a fixed path list. `trackers/` is not on it, and
-  `scripts/changelog.sh` leaves tracker commits out of ERP release notes.
+  `scripts/changelog.sh` leaves tracker commits out of ERP release notes. The
+  fleet agent's image is tagged with this version too.
 - **`trackers/facebook/`.** It uses `VERSION` and its own `CHANGELOG.md`.
   Releases are cut by `trackers/facebook/scripts/release.sh` and tagged
   `facebook-tracker/vX.Y.Z`. Its deploy refuses an unreleased tree.
@@ -139,12 +166,16 @@ backward-compatible until the ERP release reaches `main`.
   since the latest `v*` tag without a bump, and auto-tags `v<version>` on
   green. Docs-only pushes, and pushes that only touch `trackers/`, are exempt.
 - Common entry points from the repo root:
-  - `pnpm dev` — runs backend (`:8787`) and frontend (`:5173`) in parallel.
+  - `pnpm dev` — runs every workspace package's `dev` script in parallel:
+    backend (`:8787`), frontend (`:5173`) and the fleet agent, which exits
+    at once unless `FLEET_URL`, `FLEET_HOST_ID` and `FLEET_HOST_TOKEN` are
+    set. `pnpm dev:backend` and `pnpm dev:frontend` run one each.
   - `pnpm typecheck` / `pnpm build` — recursive across the workspace.
   - `pnpm db:migrate` / `pnpm db:seed` / `pnpm db:reset` — proxy to backend
     scripts.
-  - `pnpm --filter recycle-erp-backend test` (vitest, integration) and
-    `pnpm --filter recycle-erp-frontend test`.
+  - `pnpm --filter recycle-erp-backend test` (vitest, integration),
+    `pnpm --filter recycle-erp-frontend test` and
+    `pnpm --filter recycle-erp-fleet-agent test` (no database).
 - The `@recycle-erp/shared` package is imported as a workspace dep (`main:
   "./src/index.ts"`) — there's no build step.  Don't add one.
 
@@ -221,6 +252,11 @@ Four things worth knowing:
 - What shipped when: `CHANGELOG.md` — one section per `v*` tag.
 - Per-feature design docs: `docs/superpowers/specs/`.
 - Implementation plans (in-flight and finished): `docs/superpowers/plans/`.
+- Debug notes for the ERP and this repo's tooling: `docs/debug-notes/`. Search
+  it before debugging something that looks familiar.
+- The fleet agent's manual: `apps/fleet-agent/README.md`. Fleet hosts, the
+  image registry and how images are pushed:
+  `docs/superpowers/plans/2026-10-24-erp-fleet/HOSTS.md`.
 - ERP deploys, releases, Railway, Cloudflare Workers, Docker, Terraform:
   [docs/agents/erp-ops.md](docs/agents/erp-ops.md).
 - Each tracker's manual: `trackers/reddit/README.md` and

@@ -8,8 +8,8 @@ Facebook Marketplace fleet for Recycle Servers. It has three parts:
 - **Messenger**: bridges seller inboxes to the same chat.
 
 It is all **Python**, unlike the rest of this repo. `README.md` is the full
-manual (around 860 lines), so read its sections by name rather than end to end.
-This file covers the map, the gates and the traps. The root
+manual, well over a thousand lines, so read its sections by name rather than
+end to end. This file covers the map, the gates and the traps. The root
 [AGENTS.md](../../AGENTS.md) has the repo map and workflow.
 
 ## Components
@@ -17,11 +17,12 @@ This file covers the map, the gates and the traps. The root
 | Path | What | Entry |
 | --- | --- | --- |
 | `rs_coordinator/` | Control plane (FastAPI): listing dedupe, Telegram alerts, Fernet account vault + TOTP, 2FA codes, heartbeats, challenges, incidents, message routing, per-worker config generation. SQLite locally, Railway Postgres in prod (`POSTGRES.md`). | `rs_coordinator.app:app` :8500; CLI `rsc` |
-| `rs_console/` | Allowlisted, read-mostly facade over the coordinator. It serves the fleet dashboard and a noVNC bridge and is **the only surface the ERP talks to**. | `rs_console.app:app` :8600 |
+| `rs_console/` | Allowlisted, read-mostly facade over the coordinator. It serves the fleet dashboard and a noVNC bridge, and is **the surface the ERP's proxy talks to** (fleet-mode workers call the ERP themselves, see below). | `rs_console.app:app` :8600 |
 | `rs_poster/` | Buy-ad poster (Playwright). Owns the Facebook session and account lock. | `rs-poster`, `rs-session` |
 | `rs_messenger/` | Inbox scraper; sends the replies the coordinator queues. Depends on `rs-poster`. | `rs-messenger` |
 | `rs_router/` | Bridges mautrix-meta Matrix rooms to the coordinator's messages API (stdlib only). | `rs-router` |
-| `rs_fleetd/` | Host agent, one per Docker host: runs the workers the coordinator assigns to it (`fleet.py`), rolls releases one worker at a time, keeps everything running when the coordinator is down (stdlib + docker CLI). | `rs-fleetd` |
+| `rs_fleetd/` | Host agent, one per Docker host: runs the workers the coordinator assigns to it (the assignment is `rs_coordinator/rs_coordinator/fleet.py`), rolls releases one worker at a time, keeps everything running when the coordinator is down (stdlib + docker CLI). Not the ERP's fleet agent, which is `apps/fleet-agent/` at the repo root. | `rs-fleetd` |
+| `rs_worker/` | The worker image's entrypoint (stdlib only), built by `deploy/Dockerfile.worker`. With the `RS_FLEET_*` variables it claims an account from the ERP's fleet and runs the monitor in fleet mode; without them the image runs its old command. | `rs_worker/entry.py` |
 | `configs/` | `master.toml` (what to search) + `fleet.toml` (who searches where) → `configs/generated/` via `rsc gen-configs`. | — |
 | `deploy/`, `scripts/`, `infra/` | Compose files for the homelab VM, the deploy/release/secret/vendor gates, and Terraform for the coordinator's Railway Postgres. | — |
 
@@ -97,14 +98,38 @@ Renaming or reshaping any of these is a change to both sides (root AGENTS.md →
 ERP release lands. `rs_console/rs_console/static/fleet.css` mirrors the ERP's
 `tokens.css` and `desktop.css` by copy, so keep the two in step.
 
+**Fleet-mode workers call the ERP themselves**, not through rs_console, and
+reach it through the ERP's Cloudflare Worker
+(`../../deploy/cloudflare/worker.js`), which adds the shared worker env to a
+successful claim. Three pieces of the worker image make the calls:
+
+- `rs_worker/entry.py` makes `POST /api/fleet/worker/claim`, with the
+  single-use claim ticket the host agent minted (or, from older agents, the
+  host token), and hands the worker token it gets back to the monitor.
+- The vendored monitor's fleet mode makes the rest of
+  `/api/fleet/worker/*`: `heartbeat`, `next-task`, `events`, `session`,
+  `profile-launch` and `seller/*`.
+- `rs_worker/vnc_relay.py` parks a socket at `/api/fleet/worker/vnc`.
+
+The ERP side is `apps/backend/src/fleet/claim.ts`, `seller.ts` and `vnc.ts`,
+tested by `apps/backend/tests/fleet-claim.test.ts` and
+`fleet-claim-tickets.test.ts`. A change to these routes is also a change to
+the monitor fork, at the revision `VENDOR.md` pins. A deployed worker image
+outlives an ERP release, so the ERP keeps accepting what the images in the
+field send. The exit codes `entry.py` leaves with (`EXIT_*`) are read by
+`apps/fleet-agent/src/plan.ts`, so change both together. README → *Fleet
+mode* has the detail, and the written contract is
+[CONTRACTS.md](../../docs/superpowers/plans/2026-10-24-erp-fleet/CONTRACTS.md).
+
 ## Versioning, releases, deploys
 
-- **One version for the whole fleet.** It lives in `VERSION`, the pyprojects
-  and `CHANGELOG.md` (Keep a Changelog; while on 0.x, a minor bump is
+- **One version for the whole fleet.** It lives in `VERSION`, five pyprojects
+  (coordinator, poster, messenger, console, fleetd; `rs_router`'s stays at
+  `0.1.0`) and `CHANGELOG.md` (Keep a Changelog; while on 0.x, a minor bump is
   breaking). Write the change under `[Unreleased]`, then run
-  `scripts/release.sh patch|minor|X.Y.Z`. That runs every gate and suite, bumps
-  the version, commits **only this folder**, and tags `facebook-tracker/vX.Y.Z`.
-  `--dry-run` changes nothing.
+  `scripts/release.sh [--dry-run] <major|minor|patch|X.Y.Z>`. That runs every
+  gate and suite, bumps the version, commits **only this folder**, and tags
+  `facebook-tracker/vX.Y.Z`. `--dry-run` changes nothing.
 - **Releases are judged on this subtree only.** `scripts/check-release-tag.sh`
   wants a clean tree here, an existing `facebook-tracker/v$(cat VERSION)` tag,
   and no change under `trackers/facebook/` since that tag. ERP commits
@@ -116,10 +141,25 @@ ERP release lands. `rs_console/rs_console/static/fleet.css` mirrors the ERP's
   verifies they run this tree, and stamps the VM. Once the VM runs `rs-fleetd`,
   "restarts the workers" becomes `rsc fleet release <version>`: the agent
   recreates one worker at a time and the deploy never touches a compose worker
-  again (README → *Fleet agent and rolling releases*). Use
-  `scripts/deploy.sh sync` for config-only changes and `scripts/deploy.sh
-  check` to verify only. Details are in README → *Deploying to the homelab
-  worker* and `deploy/README.md`.
+  again (README → *Fleet agent and rolling releases*). Usage is
+  `scripts/deploy.sh [check|sync|deploy] [--redeploy]`, and the default is
+  `deploy`. `check` only verifies and writes nothing. What the other two
+  restart depends on the VM. On a compose VM, `sync` and `deploy` both
+  restart the compose workers, one at a time. On a VM that runs `rs-fleetd`,
+  the compose restarts are skipped: `sync` recreates `rs-fleetd` but no
+  worker, and `deploy` also runs `rsc fleet release <version>`, which
+  recreates every fleet worker. **Each restarted worker is a Facebook login**
+  (root AGENTS.md → *First rule*), so ask the owner before any mode but
+  `check`. `--redeploy` re-runs a deploy that failed partway. Details are in
+  README → *Deploying to the homelab worker* and `deploy/README.md`.
+- **Fleet images are pushed by hand** with
+  `scripts/push-fleet-images.sh [--no-push] [--only worker|agent]`. The
+  worker image is `ghcr.io/jinhuw/aimm-recycle:<VERSION>`. For a worker
+  build the script refuses a monitor clone that is off its pin or dirty, and
+  for a worker push it refuses a tree that is not a release. **Never re-push
+  a tag.** A fix after a push gets a new version. The same script pushes the
+  ERP's fleet agent image, which has none of those checks: see
+  `../../docs/agents/erp-ops.md` → *Fleet agent image*.
 - **The vendored monitor is gitignored and pinned.** `ai-marketplace-monitor/`
   (AGPL-3, our patches on its local `recycle-patches` branch) and
   `facebook-marketplace-bot/` (reference only) are cloned into this folder, not
@@ -168,20 +208,29 @@ suites above and the vendored monitor's.
   the real one. Collection then fails with `No module named 'rs_console.app'`,
   or `cannot import name '__version__' from 'rs_console' (unknown location)` if
   the package is installed. `release.sh` runs it (and `rs_fleetd/tests`) from
-  inside the package; it does not run `rs_router/tests`, so run that by hand
-  when you touch it.
-- **Never point `RS_TEST_DATABASE_URL` at port 5432 or 55432.** Those are the
-  ERP's local databases (its compose Postgres and the `recycle-erp-testdb`
-  container), and `test_postgres.py` drops every table it touches.
+  inside the package. It does not run `rs_router/tests`, `rs_worker/tests` or
+  `scripts/tests/test_*.py`, so run those by hand when you touch them:
+  `.venv-aimm/bin/python -m pytest rs_worker/tests` (the monitor's venv,
+  from this folder), and each `scripts/tests/test_*.py` in the venv its
+  docstring names (`.venv-coordinator`, except `.venv-aimm` for
+  `test_fingerprint_probe.py`).
+- **Never point `RS_TEST_DATABASE_URL` at port 5432, 5433 or 55432.** Those
+  are other projects' local databases: 5432 is where the ERP's
+  `.env.example` puts its dev and test databases, 5433 is the Reddit
+  tracker's compose Postgres, and 55432 is the ERP's `recycle-erp-testdb`
+  container. `test_postgres.py` drops every table it touches.
   `conftest.py` only refuses a URL equal to `RS_DATABASE_URL` /
   `DATABASE_URL`, so it cannot catch this. Use a throwaway on a free port, as
   in `rs_coordinator/POSTGRES.md`.
 - **Running the coordinator by hand from an ERP shell** picks up the ERP's
-  `DATABASE_URL` (the root `.env` points it at the `recycle-erp-testdb`
-  container on 55432), so `RS_COORDINATOR_DB` is ignored and the coordinator
-  creates its tables in the ERP's test database. Start it with
-  `env -u DATABASE_URL -u RS_DATABASE_URL …` and check that `/healthz` says
-  `"backend":"sqlite"`.
+  `DATABASE_URL` when the shell has one exported. The root `.env` is
+  untracked, so where it points differs per machine: the committed example
+  says `localhost:5432`, and `../../docs/DATABASE.md` names the
+  `recycle-erp-testdb` container on 55432. `RS_COORDINATOR_DB` is then
+  ignored and the coordinator creates its tables in an ERP database. Start it
+  with `env -u DATABASE_URL -u RS_DATABASE_URL …` and check that `/healthz`
+  says `"backend":"sqlite"`. The same leak from the ERP side is in
+  [the debug note](../../docs/debug-notes/2026-07-12-shell-database-url-leak.md).
 
 ## Constraints
 
@@ -189,7 +238,8 @@ README → *Constraints worth knowing* is the authoritative list. In short:
 
 - Automating Marketplace violates Facebook's ToS, so treat every worker
   account as replaceable.
-- Keep the pacing in `master.toml` / `ads.toml` conservative.
+- Keep the pacing in `configs/master.toml` / `rs_poster/ads/ads.toml`
+  conservative.
 - Poster selectors live in `rs_poster/rs_poster/selectors.py`; run
   `rs-poster post --dry-run` after any Facebook UI change.
 - Keep the AGPL monitor a separate process that talks over HTTP, and never
