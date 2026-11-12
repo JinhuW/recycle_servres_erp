@@ -42,6 +42,9 @@ export type FbChatTelegramConfig = {
 
 const USER_LOCK = 'fb-chat-telegram-session';
 const USER_RETRY_MS = 15_000;
+// Each failed sign-in is a new connection as the owner's account; a wrong
+// setting must not turn into one every few seconds.
+const USER_FAIL_BACKOFF_MS = [60_000, 5 * 60_000, 30 * 60_000];
 
 let testCall: TelegramCall | null = null;
 /** Tests replace the Bot API with a recorder. */
@@ -56,6 +59,13 @@ export function fbChatUserSession(env: Env): UserSessionConfig | null {
   const apiId = Number(env.FB_CHAT_TELEGRAM_API_ID);
   const apiHash = env.FB_CHAT_TELEGRAM_API_HASH?.trim();
   if (!chatId || !session || !Number.isInteger(apiId) || apiId <= 0 || !apiHash) return null;
+  // Topics exist only in a supergroup, whose id starts -100. A plain group's
+  // id (what a group has before Topics is turned on) can never work, so it is
+  // refused here rather than signing the account in to find that out.
+  if (!/^-100\d{5,}$/.test(chatId)) {
+    flog.error('FB_CHAT_TELEGRAM_CHAT_ID is not a supergroup id (-100…); turn Topics on in the group and use its new id');
+    return null;
+  }
   return { apiId, apiHash, session, chatId };
 }
 
@@ -424,6 +434,8 @@ function startUserSessionLoop(env: Env, session: UserSessionConfig): { stop: () 
   let held: { stop: () => void; disconnect: () => Promise<void> } | null = null;
   let stopped = false;
   let busy = false;
+  let failures = 0;
+  let retryAt = 0;
   const release = async () => {
     const was = held;
     held = null;
@@ -444,6 +456,7 @@ function startUserSessionLoop(env: Env, session: UserSessionConfig): { stop: () 
         await conn!`SELECT 1`;
         return;
       }
+      if (Date.now() < retryAt) return;
       conn ??= await sql.reserve();
       const [r] = await conn<{ ok: boolean }[]>`SELECT pg_try_advisory_lock(hashtextextended(${USER_LOCK}, 0)) AS ok`;
       if (!r?.ok || stopped) return;
@@ -452,9 +465,13 @@ function startUserSessionLoop(env: Env, session: UserSessionConfig): { stop: () 
         call: userAccountCaller(client, session.chatId), chatId: session.chatId, userIds: userIdsOf(env), mode: 'user',
       };
       held = { ...runLoop(sql, cfg), disconnect };
+      failures = 0;
       flog.info('fb chat telegram session connected');
     } catch (e) {
-      flog.error('fb chat telegram session failed', e);
+      const waitMs = USER_FAIL_BACKOFF_MS[Math.min(failures, USER_FAIL_BACKOFF_MS.length - 1)]!;
+      failures += 1;
+      retryAt = Date.now() + waitMs;
+      flog.error('fb chat telegram session failed', { error: e instanceof Error ? e.message : String(e), retryInSec: waitMs / 1000 });
       await release();
     } finally {
       busy = false;

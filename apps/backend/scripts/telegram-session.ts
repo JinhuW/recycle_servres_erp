@@ -29,8 +29,12 @@ const me = await client.getMe();
 console.log(`\nSigned in as ${[me.firstName, me.lastName].filter(Boolean).join(' ')} (user id ${me.id}).`);
 console.log('\nForum groups this account is in (FB_CHAT_TELEGRAM_CHAT_ID is the -100... number):');
 for (const dialog of await client.getDialogs({ limit: 200 })) {
-  const entity = dialog.entity as { forum?: boolean } | undefined;
-  if (dialog.isChannel || dialog.isGroup) console.log(`  ${dialog.id}  ${dialog.title}${entity?.forum ? '' : '  (Topics off)'}`);
+  if (!dialog.isChannel && !dialog.isGroup) continue;
+  const id = String(dialog.id);
+  const forum = (dialog.entity as { forum?: boolean } | undefined)?.forum;
+  // Only a supergroup (-100…) with Topics on can hold the hub's topics.
+  const usable = id.startsWith('-100') && forum;
+  console.log(`  ${usable ? 'OK ' : 'NO '} ${id}  ${dialog.title}${usable ? '' : '  (turn Topics on in this group, then run this again: its id changes)'}`);
 }
 console.log('\nFB_CHAT_TELEGRAM_SESSION (a secret: store it, never share it):\n');
 console.log(client.session.save());
