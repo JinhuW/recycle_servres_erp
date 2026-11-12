@@ -2,12 +2,12 @@
 id: RS-579
 title: Chat bridge extensions load their settings from the ERP, and the ERP can change them
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-11
 reporter: jinhu
 branch: feat/fb-chat-remote-config
-pr:
+pr: 1185
 version: 1.453.0
 related: [RS-578]
 ---
