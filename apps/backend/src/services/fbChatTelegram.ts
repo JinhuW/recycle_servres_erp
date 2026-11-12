@@ -5,6 +5,7 @@ import { log } from '../lib/log';
 import { TelegramError, telegramCaller, type TelegramCall } from '../lib/telegramBot';
 import { connectUserClient, userAccountCaller, type UserSessionConfig } from '../lib/telegramUser';
 import type { Env } from '../types';
+import { notifyOutbox } from './fbChat';
 
 // The Telegram half of the Facebook chat hub. One pass:
 //   1. reads the bot's updates and queues the replies typed in topics;
@@ -153,6 +154,7 @@ async function handleUpdate(sql: postgres.Sql, cfg: FbChatTelegramConfig, u: Upd
     VALUES (${thread.id}, 'out', 'telegram', ${body}, 'queued', ${m.message_id}, ${m.from.id}, ${who}, NOW())
     ON CONFLICT (thread_id, tg_message_id) DO NOTHING
     RETURNING id`;
+  if (rows.length) await notifyOutbox(sql);
   return rows.length;
 }
 

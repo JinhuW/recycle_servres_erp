@@ -2,11 +2,12 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FbChatClaimAnswer, FbChatRow, FbChatSyncAnswer, FbChatSyncPush } from '@recycle-erp/shared';
 import type { FbChatConfigAnswer, FbChatConfigField } from '@recycle-erp/shared';
 import { chunkForTelegram, fbChatTopicName } from '../src/lib/fbChat';
-import { compareVersions } from '../src/services/fbChatConfig';
+import { setHoldsDraining } from '../src/lib/pgWake';
 import { TelegramError, type TelegramCall } from '../src/lib/telegramBot';
 import { userAccountCaller, type TelegramUserClient } from '../src/lib/telegramUser';
 import { createOAuthClient } from '../src/oauth/clients';
 import { generateSigningKey, signAccessToken } from '../src/oauth/tokens';
+import { compareVersions } from '../src/services/fbChatConfig';
 import { fbChatTelegramConfig, fbChatTelegramConfigured, fbChatUserSession, runFbChatTelegramTick, setFbChatTelegramForTests } from '../src/services/fbChatTelegram';
 import { api, testEnv } from './helpers/app';
 import { ALEX, MARCUS, loginAs } from './helpers/auth';
@@ -220,6 +221,49 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     expect(early.body.added).toBe(0);
     expect((await push(`outbox/${claim.body.id}/result`, { account: ACCOUNT, outcome: 'sent' })).status).toBe(200);
     expect(await getTestDb()`SELECT 1 FROM fb_chat_messages WHERE direction = 'out'`).toHaveLength(1);
+  });
+
+  // The hold re-checks only every 5 s, so an answer inside a second means the
+  // NOTIFY woke it.
+  it('wakes a held claim within a second of a reply being queued', async () => {
+    await seeded();
+    const held = push<FbChatClaimAnswer>('outbox/claim', { account: ACCOUNT, wait: 10 });
+    await new Promise((r) => setTimeout(r, 300));
+    const typed = Date.now();
+    topicReply(1, 'Yes, still available');
+    expect((await tick()).queued).toBe(1);
+    const claim = await held;
+    expect(Date.now() - typed).toBeLessThan(1000);
+    expect(claim.body).toMatchObject({ fbThreadId: 't1', body: 'Yes, still available' });
+  });
+
+  it('wakes a held claim when the send ahead of it is reported', async () => {
+    await seeded();
+    topicReply(1, 'first');
+    topicReply(1, 'second');
+    await tick();
+    const first = await push<FbChatClaimAnswer>('outbox/claim', { account: ACCOUNT });
+    const held = push<FbChatClaimAnswer>('outbox/claim', { account: ACCOUNT, wait: 10 });
+    await new Promise((r) => setTimeout(r, 300));
+    const reported = Date.now();
+    await push(`outbox/${first.body.id}/result`, { account: ACCOUNT, outcome: 'sent' });
+    expect((await held).body).toMatchObject({ body: 'second' });
+    expect(Date.now() - reported).toBeLessThan(1000);
+  });
+
+  it('answers a held claim at once when the server starts draining', async () => {
+    await seeded();
+    const held = push('outbox/claim', { account: ACCOUNT, wait: 20 });
+    await new Promise((r) => setTimeout(r, 300));
+    const started = Date.now();
+    setHoldsDraining(true);
+    try {
+      expect((await held).status).toBe(204);
+      expect((await push('outbox/claim', { account: ACCOUNT, wait: 20 })).status).toBe(204);
+      expect(Date.now() - started).toBeLessThan(2000);
+    } finally {
+      setHoldsDraining(false);
+    }
   });
 
   it('reports a failed reply in the topic and never resends a silent claim', async () => {

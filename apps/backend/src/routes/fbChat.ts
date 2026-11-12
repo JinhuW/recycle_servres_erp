@@ -8,9 +8,12 @@ import {
 } from '../lib/fbChat';
 import { allLimited } from '../lib/concurrency';
 import { log } from '../lib/log';
+import { armWake, holdsDraining, listening } from '../lib/pgWake';
 import { requireManager } from '../lib/role';
 import { bearerGuard } from '../oauth/guard';
-import { claimReply, ingestBuyer, ingestSync, recordEvent, recordSendResult, touchAccount } from '../services/fbChat';
+import {
+  claimReply, FB_CHAT_OUTBOX_CHANNEL, ingestBuyer, ingestSync, recordEvent, recordSendResult, touchAccount,
+} from '../services/fbChat';
 import { configFor, knownFields, notePickup, reportFields, setConfig } from '../services/fbChatConfig';
 import { fbChatTelegramConfigured, kickFbChatTelegram } from '../services/fbChatTelegram';
 import type { Env, OAuthCtx, User } from '../types';
@@ -27,9 +30,10 @@ type Vars = { user: User; oauthCtx: OAuthCtx };
 
 const PUSH_PREFIX = '/api/fb-chat/push/';
 const isPush = (path: string) => path.startsWith(PUSH_PREFIX);
-// How often a held claim looks again. A reply queued by another instance has
-// no in-process wake-up, so this is also the worst-case delay.
-const HOLD_STEP_MS = 1_000;
+// A held claim wakes on a NOTIFY (services/fbChat.ts → notifyOutbox) from any
+// instance. It also looks again this often, in case a write that freed a reply
+// sent none: a stale claim turning uncertain, say.
+const HOLD_RECHECK_MS = 5_000;
 
 const asVars = (mw: unknown) => mw as MiddlewareHandler<{ Bindings: Env; Variables: Vars }>;
 const pushGuard = asVars(bearerGuard({ scopes: ['fbchat:write'] }));
@@ -72,15 +76,27 @@ fbChat.post('/push/outbox/claim', async (c) => {
   const req = await parsed(c, parseClaim);
   if (typeof req === 'string') return c.json(invalid(req), 400);
   const sql = getDb(c.env);
+  const clientId = c.var.oauthCtx.clientId;
   const deadline = Date.now() + req.wait * 1000;
-  for (;;) {
-    const claimed = await sql.begin((tx) => claimReply(tx, req.account, c.var.oauthCtx.clientId));
-    if (claimed) {
-      log.info('fb chat reply claimed', { module: 'fbChat', id: claimed.id, clientId: c.var.oauthCtx.clientId });
-      return c.json(claimed);
+  if (req.wait > 0) await listening(sql, FB_CHAT_OUTBOX_CHANNEL);
+  // Armed before each look, so a reply queued between the look and the wait
+  // still wakes it.
+  let wake = armWake(sql, FB_CHAT_OUTBOX_CHANNEL);
+  try {
+    for (;;) {
+      const claimed = await sql.begin((tx) => claimReply(tx, req.account, clientId));
+      if (claimed) {
+        log.info('fb chat reply claimed', { module: 'fbChat', id: claimed.id, clientId });
+        return c.json(claimed);
+      }
+      const left = deadline - Date.now();
+      if (left <= 0 || holdsDraining() || c.req.raw.signal.aborted) return c.body(null, 204);
+      await wake.wait(Math.min(left, HOLD_RECHECK_MS));
+      wake.dispose();
+      wake = armWake(sql, FB_CHAT_OUTBOX_CHANNEL);
     }
-    if (Date.now() + HOLD_STEP_MS > deadline || c.req.raw.signal.aborted) return c.body(null, 204);
-    await new Promise((resolve) => setTimeout(resolve, HOLD_STEP_MS));
+  } finally {
+    wake.dispose();
   }
 });
 
