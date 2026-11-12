@@ -126,13 +126,25 @@ async function pollUpdates(sql: postgres.Sql, cfg: FbChatTelegramConfig): Promis
 
 async function handleUpdate(sql: postgres.Sql, cfg: FbChatTelegramConfig, u: Update): Promise<number> {
   const m = u.message;
-  if (!m || String(m.chat.id) !== cfg.chatId || !m.from || m.from.is_bot) return 0;
+  // Every message the pass passes over says why, without its text: a reply
+  // that never reaches Facebook is otherwise invisible.
+  const skip = (reason: string) => {
+    flog.info('fb chat telegram message skipped', {
+      reason, messageId: m?.message_id ?? u.update_id, topicId: m?.message_thread_id ?? null,
+      fromId: m?.from?.id ?? null, ownPost: m?.from?.is_bot ?? null, hasText: !!m?.text,
+    });
+    return 0;
+  };
+  if (!m) return skip('not a message');
+  if (String(m.chat.id) !== cfg.chatId) return skip('another chat');
+  if (!m.from) return skip('no sender');
+  if (m.from.is_bot) return skip('own post');
   // General and service messages carry no topic; a reply belongs to a buyer.
-  if (!m.is_topic_message || !m.message_thread_id) return 0;
-  if (cfg.userIds.size && !cfg.userIds.has(String(m.from.id))) return 0;
+  if (!m.is_topic_message || !m.message_thread_id) return skip('not in a topic');
+  if (cfg.userIds.size && !cfg.userIds.has(String(m.from.id))) return skip('sender not allowed');
   const [thread] = await sql<{ id: number }[]>`
     SELECT id::int AS id FROM fb_chat_threads WHERE telegram_topic_id = ${m.message_thread_id}`;
-  if (!thread) return 0;
+  if (!thread) return skip('topic has no conversation');
   const reply = (text: string) => cfg.call('sendMessage', {
     chat_id: cfg.chatId, message_thread_id: m.message_thread_id, text,
     reply_parameters: { message_id: m.message_id, allow_sending_without_reply: true },
@@ -143,7 +155,7 @@ async function handleUpdate(sql: postgres.Sql, cfg: FbChatTelegramConfig, u: Upd
     return 0;
   }
   // A leading slash is a bot command or a note to self, never for the buyer.
-  if (body.startsWith('/')) return 0;
+  if (body.startsWith('/')) return skip('note to self');
   if (body.length > FB_CHAT_REPLY_MAX) {
     await reply(`Too long to send (${body.length} characters; the limit is ${FB_CHAT_REPLY_MAX}). Not forwarded.`);
     return 0;
