@@ -1465,14 +1465,19 @@ own Marketplace chats to Telegram. Its one page is Settings ▸ Chat bridge
   with the buyer's rating, location, join year, the listing and which account
   the chat is on, then the conversation so far with Facebook's time on each
   line (v1.451.1). A conversation has no address on Facebook, so none is linked.
-- **Messages.** Each later buyer message is posted to its topic once. A reply
-  typed on Facebook directly appears as `↩️ You: …`.
+- **Messages.** Each later buyer message is posted to its topic once, as
+  `👤 <buyer>: …` (v1.453.3). A reply typed on Facebook directly appears as
+  `↩️ You: …`.
 - **Replies.** Text typed in a topic is queued for the extension of the account
   that owns the conversation, which types it into Facebook. The bot reacts 👍
   when the extension reports it sent, and says so in the topic when it failed
   or could not be confirmed. A reply never reported is marked uncertain after
   five minutes and is not sent again. A line starting with `/` is a note and
-  goes nowhere. `FB_CHAT_TELEGRAM_USER_IDS` limits who may reply.
+  goes nowhere. `FB_CHAT_TELEGRAM_USER_IDS` limits who may reply. In account
+  mode a reply may also be typed from the hub's own Telegram account, on a phone
+  signed in to it (v1.453.3): the hub tells its own posts apart by the ids and
+  texts it sent. A message from that account dated before the hub's session
+  started is taken as a post and not relayed.
 - **Alerts.** A login or checkpoint page on an account posts one warning in
   General, and one more when the account is back.
 - **Data.** Every message, buyer profile (rating, rating count, location, join

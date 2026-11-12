@@ -23,8 +23,9 @@ function fake(history: UserMessage[]) {
   return { client, calls, ping: () => activity() };
 }
 
+const later = () => Math.floor(Date.now() / 1000) + 60;
 const msg = (id: number, over: Partial<UserMessage> = {}): UserMessage => ({
-  id, topicId: 12, out: false, fromId: '7', firstName: 'Jin', text: `m${id}`, ...over,
+  id, date: later(), topicId: 12, out: false, fromId: '7', firstName: 'Jin', text: `m${id}`, ...over,
 });
 
 describe('userAccountCaller', () => {
@@ -37,7 +38,7 @@ describe('userAccountCaller', () => {
   });
 
   it('reads replies after the cursor as Bot API updates, and marks its own posts as a bot', async () => {
-    const { client, calls } = fake([msg(41), msg(42, { out: true, fromId: '5' }), msg(43, { topicId: null })]);
+    const { client, calls } = fake([msg(41), msg(42, { out: true, fromId: '5', date: 1 }), msg(43, { topicId: null })]);
     const call = userAccountCaller(client, '-1001234');
     const updates = await call<Array<{ update_id: number; message: Record<string, unknown> }>>('getUpdates', { offset: 42, limit: 50 });
     expect(calls[0]).toEqual(['history', [41, 50]]);
@@ -47,6 +48,23 @@ describe('userAccountCaller', () => {
       from: { id: 5, is_bot: true }, text: 'm42',
     });
     expect(updates[1]!.message).toMatchObject({ is_topic_message: false, from: { id: 7, is_bot: false, first_name: 'Jin' } });
+  });
+
+  it('relays a reply typed from the account itself, never a post the hub made', async () => {
+    const history = [
+      msg(900, { out: true, fromId: '5', text: '👤 Jinhu Wang: How much for DDR4' }),
+      msg(950, { out: true, fromId: '5', text: '↩️ You: sorry' }),
+      msg(951, { out: true, fromId: '5', text: 'nope' }),
+      msg(952, { out: true, fromId: '5', text: 'typed before the session started', date: 1 }),
+    ];
+    const { client } = fake(history);
+    const call = userAccountCaller(client, '-1001234');
+    // 900 by id; 950 by text, as when Telegram's answer named no id.
+    await call('sendMessage', { chat_id: '-1001234', message_thread_id: 12, text: '👤 Jinhu Wang: How much for DDR4' });
+    client.send = async () => 0;
+    await call('sendMessage', { chat_id: '-1001234', message_thread_id: 12, text: '↩️ You: sorry' });
+    const updates = await call<Array<{ update_id: number; message: { from: { is_bot: boolean } } }>>('getUpdates', { offset: 900, limit: 50 });
+    expect(updates.map((u) => [u.update_id, u.message.from.is_bot])).toEqual([[900, true], [950, true], [951, false], [952, true]]);
   });
 
   it('reads history only when something happened, or after the catch-up interval', async () => {
