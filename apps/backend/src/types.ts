@@ -12,8 +12,6 @@ export type Env = {
   STUB_LOW_CONF?: string;
   OPENROUTER_API_KEY?: string;
   OPENROUTER_OCR_MODEL?: string;
-  // Telegram bot for Facebook seller alerts (lib/fbSellerAlert.ts). Unset: in-app only.
-  FB_SELLER_TELEGRAM_BOT_TOKEN?: string;
   // Facebook chat hub (services/fbChatTelegram.ts): the bot that mirrors the
   // owner's Marketplace chats into forum topics, and the supergroup it posts
   // to. Either unset: chats are stored, Telegram is never called. The token

@@ -901,7 +901,7 @@ workers.get('/:id', async (c) => {
     ORDER BY m.last_done_at DESC NULLS LAST, m.city`;
   const cities = cityRows.map((r) => ({ slug: r.slug, name: r.name, radius_km: r.radius_km, last_done_at: iso(r.last_done_at), alerts: r.alerts }));
 
-  const events = await sql<(TaskEventRow & { city: string | null; city_name: string | null; item: string | null; task_kind: FleetTask['kind'] })[]>`
+  const events = await sql<(TaskEventRow & { city: string; city_name: string | null; item: string; task_kind: FleetTask['kind'] })[]>`
     SELECT e.*, t.city, c.name AS city_name, t.item, t.kind AS task_kind
     FROM fleet_task_events e JOIN fleet_tasks t ON t.id = e.task_id LEFT JOIN fleet_cities c ON c.slug = t.city
     WHERE e.worker_id = ${id} AND e.at >= ${since} AND e.kind = ANY(${HISTORY_KINDS}::text[])

@@ -11,7 +11,6 @@ import {
 } from '@recycle-erp/shared';
 import type postgres from 'postgres';
 import type { SqlLike } from '../db';
-import { alignWindow } from './fbSellerReports';
 
 // The store behind the Facebook chat hub. Extensions push conversation
 // windows; this aligns each one against what is stored, keeps the new
@@ -26,6 +25,25 @@ const ALIGN_TAIL = 400;
 const PROBE_CHARS = 60;
 
 const flat = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
+
+type Msg = { direction: string; body: string };
+/** The extension reads a bubble line by line, trimmed and without blank lines; compare what both sides keep. */
+const flatBody = (body: string) => body.replace(/\s+/g, ' ').trim();
+const sameMsg = (a: Msg, b: Msg) => a.direction === b.direction && flatBody(a.body) === flatBody(b.body);
+
+/**
+ * How many of the window's first messages are already the stored
+ * conversation's last ones: the longest suffix of `stored` that is a prefix of
+ * `window`. It matches whole runs, so two identical messages in a row stay two.
+ */
+export function alignWindow(stored: Msg[], window: Msg[]): number {
+  for (let k = Math.min(stored.length, window.length); k > 0; k--) {
+    let ok = true;
+    for (let i = 0; i < k && ok; i++) ok = sameMsg(stored[stored.length - k + i]!, window[i]!);
+    if (ok) return k;
+  }
+  return 0;
+}
 
 /** The channel a held outbox claim sleeps on (lib/pgWake.ts). */
 export const FB_CHAT_OUTBOX_CHANNEL = 'fb_chat_outbox';

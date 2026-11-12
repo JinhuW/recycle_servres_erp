@@ -409,7 +409,7 @@ export function slotLease(s: Pick<FleetSlot, 'lease_expires_at' | 'parked'>, now
 /** The task list answers city slugs only; the table shows the city's name. */
 export function withCityNames(tasks: readonly FleetTask[], cities: readonly FleetCity[]): FleetTask[] {
   const names = new Map(cities.map(c => [c.slug, c.name]));
-  return tasks.map(t => ({ ...t, city_name: t.city_name ?? (t.city ? names.get(t.city) : undefined) ?? null }));
+  return tasks.map(t => ({ ...t, city_name: t.city_name ?? names.get(t.city) ?? null }));
 }
 
 // `q` matches the city (slug or name), the worker and the account number.
@@ -607,11 +607,10 @@ export function alertsByCity(
   const alerted = new Map<string, number>();
   const incomplete = new Set<string>();
   for (const t of tasks) {
-    const city = t.city;
-    if (t.state !== 'done' || t.kind !== 'search' || !city) continue;
-    if (typeof t.result?.reviewed !== 'number' || typeof t.result?.alerted !== 'number') { incomplete.add(city); continue; }
-    alerted.set(city, (alerted.get(city) ?? 0) + t.result.alerted);
-    reviewed.set(city, (reviewed.get(city) ?? 0) + t.result.reviewed);
+    if (t.state !== 'done' || t.kind !== 'search') continue;
+    if (typeof t.result?.reviewed !== 'number' || typeof t.result?.alerted !== 'number') { incomplete.add(t.city); continue; }
+    alerted.set(t.city, (alerted.get(t.city) ?? 0) + t.result.alerted);
+    reviewed.set(t.city, (reviewed.get(t.city) ?? 0) + t.result.reviewed);
   }
   const names = new Map(cities.map(c => [c.slug, c]));
   return [...byCity].map(([slug, c]) => {

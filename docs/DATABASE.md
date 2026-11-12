@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-11:** ERP migration `0238`, Reddit tracker migration `0007`,
+**As of 2026-11-12:** ERP migration `0239`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -26,7 +26,6 @@ refresh a section.
   - [Market values](#market-values)
   - [Facebook account pool](#facebook-account-pool)
   - [Fleet](#fleet)
-  - [Facebook seller accounts](#facebook-seller-accounts)
   - [Reddit leads](#reddit-leads)
   - [System](#system)
   - [SQL functions](#sql-functions)
@@ -2435,16 +2434,12 @@ The fleet's view of one pool account: which worker runs it, on which host, under
 | `quarantine_evidence` | `jsonb` | | | Rule, search count, cities and latest result that justified quarantine. |
 | `proxy_id` | `integer` | | | → fleet_proxies. The listed proxy the slot was made on (0213); NULL for a seeded slot or once the proxy is removed, when `proxy_url` keeps its copy. |
 | `note` | `text` | ✓ | `''` | Free text for managers. |
-| `role` | `text` | ✓ | `'search'` | search or seller (0232). A seller slot is never handed search or verify-slug; it gets its own account's seller tasks. Setting it changes no container and causes no login. |
-| `agent_on` | `boolean` | ✓ | `false` | Whether the agent answers this seller account's threads. The circuit breaker sets it false. |
-| `agent_profile_id` | `bigint` |  |  | → fb_agent_profiles. The profile this account's agent runs; NULL follows the active one. |
 
 A slot made on the Account pool tab (`POST /api/fleet/slots`) gets a generated `device`: no user agent (`native: ["user_agent"]`, Chromium's own), a common desktop screen and scale picked from the account number, a viewport of the screen less the browser chrome, the proxy's timezone and `en-US`.
 
 - **Primary key:** `account_no`
-- **References:** `account_no` → `fb_pool_accounts.no` (on delete cascade); `host_id` → `fleet_hosts.host_id` (on delete set null); `proxy_id` → `fleet_proxies.id` (on delete set null); `agent_profile_id` → `fb_agent_profiles.id` (on delete set null)
-- **Checks:** `role IN ('search', 'seller')`
-- **Indexes:** `fleet_slots_agent_profile_id_idx` (agent_profile_id); `fleet_slots_cloak_seed_key` ((device->>'cloak_seed')), unique, where the seed is set (0229); `fleet_slots_host_id_idx` (host_id), `fleet_slots_proxy_id_idx` (proxy_id)
+- **References:** `account_no` → `fb_pool_accounts.no` (on delete cascade); `host_id` → `fleet_hosts.host_id` (on delete set null); `proxy_id` → `fleet_proxies.id` (on delete set null)
+- **Indexes:** `fleet_slots_cloak_seed_key` ((device->>'cloak_seed')), unique, where the seed is set (0229); `fleet_slots_host_id_idx` (host_id), `fleet_slots_proxy_id_idx` (proxy_id)
 
 <a id="erp-fleet-pilot-enrollments"></a>
 
@@ -2527,17 +2522,17 @@ Every change of an ERP-fleet worker's reported state, written by the heartbeat t
 
 #### `fleet_tasks`
 
-One search of one item in one city, or since 0232 one seller task on one account (post or delete an ad, read the inbox, send a message). The scheduler keeps exactly one open (ready or leased) task per city, item and kind; a worker leases the next due one, finishes it, and the scheduler writes the next with `due_at = done + day × item.every_days / per_day`. A 0-card search does not set `done` when another account found cards in that city and item in the last 7 days, unless the search before it was also 0: the next account retries at once. The partial unique index is what makes that safe from two backend instances.
+One search of one item in one city. The scheduler keeps exactly one open (ready or leased) task per city, item and kind; a worker leases the next due one, finishes it, and the scheduler writes the next with `due_at = done + day × item.every_days / per_day`. A 0-card search does not set `done` when another account found cards in that city and item in the last 7 days, unless the search before it was also 0: the next account retries at once. The partial unique index is what makes that safe from two backend instances.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
 | `id` | `bigint` | ✓ | sequence |  |
-| `city` | `text` |  |  | → fleet_cities. NULL exactly for seller kinds. |
-| `item` | `text` |  |  | → fleet_items. NULL exactly for seller kinds. |
-| `kind` | `text` | ✓ | `'search'` | search, verify-slug (a new city's check) or probe (a quarantined slot's periodic test); or a seller kind: ad-post, ad-delete, inbox-sync, msg-send. |
+| `city` | `text` | ✓ |  | → fleet_cities. |
+| `item` | `text` | ✓ |  | → fleet_items. |
+| `kind` | `text` | ✓ | `'search'` | search, verify-slug (a new city's check) or probe (a quarantined slot's periodic test). |
 | `due_at` | `timestamptz` | ✓ |  | Not handed out before this. |
 | `priority` | `integer` | ✓ | `0` | Higher first; a manager's task is 100, a slug check 50. |
-| `state` | `text` | ✓ |  | ready, leased, done, cancelled, expired, or uncertain: a seller write whose lease was lost, so the post or message may be out and it is never retried. |
+| `state` | `text` | ✓ |  | ready, leased, done, cancelled or expired. |
 | `worker_id` | `text` |  |  | Who leased it. |
 | `account_no` | `integer` |  |  | The account it was searched with. No FK, so a removed account's history is kept. |
 | `epoch` | `integer` |  |  | The lease epoch of the worker that took it. |
@@ -2547,12 +2542,11 @@ One search of one item in one city, or since 0232 one seller task on one account
 | `done_at` | `timestamptz` |  |  |  |
 | `reason` | `text` |  |  | Why it exists: cadence, added (a new city), manual, start (a round start), probe or verify. |
 | `result` | `jsonb` |  |  | What the search found: cards, opened, reviewed, alerted, seconds, stopped. |
-| `payload` | `jsonb` | ✓ | `'{}'` | A seller task's payload (`SellerTaskPayload` in packages/shared/src/fleet.ts), always with `ref`: the placement or message id, or `inbox:` and the minute. `{}` on search kinds. |
 
 - **Primary key:** `id`
 - **References:** `city` → `fleet_cities.slug`; `item` → `fleet_items.name`
-- **Checks:** `state IN ('ready', 'leased', 'done', 'cancelled', 'expired', 'uncertain')`; `fleet_tasks_seller_shape`: a seller kind has no city or item, has an account_no and a `ref` in payload; every other kind has a city and an item
-- **Indexes:** `fleet_tasks_due_idx` (state, due_at); `fleet_tasks_seller_open_idx` UNIQUE (account_no, kind, payload->>'ref') WHERE state IN ('ready', 'leased') AND a seller kind (0232); `fleet_tasks_item_idx` (item); `fleet_tasks_open_idx` UNIQUE (city, item, kind) WHERE state IN ('ready', 'leased') AND kind <> 'probe'; `fleet_tasks_probe_idx` UNIQUE (account_no) WHERE state IN ('ready','leased') AND kind = 'probe'; `fleet_tasks_worker_idx` (worker_id, leased_at DESC); `fleet_tasks_done_account_idx` (account_no, city, done_at) WHERE state = 'done'; `fleet_tasks_done_pair_idx` (city, item, done_at DESC) WHERE state = 'done' AND kind = 'search'; `fleet_tasks_purge_idx` (COALESCE(done_at, leased_at, due_at), id) WHERE state IN ('done', 'cancelled', 'expired') (migration 0210)
+- **Checks:** `state IN ('ready', 'leased', 'done', 'cancelled', 'expired')`
+- **Indexes:** `fleet_tasks_due_idx` (state, due_at); `fleet_tasks_item_idx` (item); `fleet_tasks_open_idx` UNIQUE (city, item, kind) WHERE state IN ('ready', 'leased') AND kind <> 'probe'; `fleet_tasks_probe_idx` UNIQUE (account_no) WHERE state IN ('ready','leased') AND kind = 'probe'; `fleet_tasks_worker_idx` (worker_id, leased_at DESC); `fleet_tasks_done_account_idx` (account_no, city, done_at) WHERE state = 'done'; `fleet_tasks_done_pair_idx` (city, item, done_at DESC) WHERE state = 'done' AND kind = 'search'; `fleet_tasks_purge_idx` (COALESCE(done_at, leased_at, due_at), id) WHERE state IN ('done', 'cancelled', 'expired') (migration 0210)
 
 **Retention (RS-409).** Once an hour each backend that runs the scheduler deletes terminal tasks (done, cancelled, expired) whose `COALESCE(done_at, leased_at, due_at)` is older than `fleet_settings.retention_days` (default 90, 30..730, never below `familiar_days`), with their `fleet_task_events` and `fleet_task_attempts` rows, 5,000 tasks per run, oldest first, under an advisory lock so one instance purges at a time. Ready and leased tasks are never deleted. Two kinds of row stay whatever their age, because a rule reads them without a window: the newest done search per city and item (the cadence's last done, the Cities tab's last search) and the verify-slug task holding each city's latest slug verdict (whether the city may be enabled again).
 
@@ -2581,12 +2575,7 @@ prevents duplicate charging. Index: fleet_task_attempts_account_idx
 (account_no, leased_at); that unique index covers the task FK.
 
 The fleet_fence_pool_owner trigger on pool status/holder/uid changes or deletion advances
-the slot epoch and releases its current task atomically. Since 0233 a seller
-task keeps its account when its lease is lost this way: a post, a delete or a
-send turns `uncertain` (it may already be out, so it is never run again) and an
-inbox sync is cancelled. The other two ways a lease is lost treat seller tasks
-the same, except that a released inbox sync goes back to `ready` and an expired
-one ends `expired`. Worker mutations lock
+the slot epoch and releases its current task atomically. Worker mutations lock
 pool account, then slot, then city/task; rollout operations acquire the release
 row before those locks. Claims serialize by host/worker and lock pool before
 slot. Probes have a separate unique open index on account_no; the city's open
@@ -2603,8 +2592,8 @@ What happened to a task, in order: the city log the fleet pages show.
 | `id` | `bigint` | ✓ | sequence |  |
 | `task_id` | `bigint` |  |  | → fleet_tasks. |
 | `worker_id` | `text` |  |  | The worker that reported it; NULL for the scheduler's own (expired). |
-| `kind` | `text` | ✓ |  | handed, started, searched, finished, stopped, released, expired, done or seller_report. |
-| `detail` | `jsonb` |  |  | Per kind: the result for done, the parked state for released, the cards seen for searched; for seller_report the worker's report, the answer it got and the epoch it was sent under (a report is stored even after its lease was lost). |
+| `kind` | `text` | ✓ |  | handed, started, searched, finished, stopped, released, expired or done. |
+| `detail` | `jsonb` |  |  | Per kind: the result for done, the parked state for released, the cards seen for searched. |
 | `at` | `timestamptz` | ✓ | `now()` |  |
 
 - **Primary key:** `id`
@@ -2622,361 +2611,13 @@ assigned entirely to the starting day. Returning a task to ready preserves the
 ended attempt. Done uses the completion time; an expired/released lease is
 capped at its expiry. The next-task pick skips accounts at budget_minutes.
 Migration 0207 backfills known terminal attempts; time erased by earlier
-releases cannot be recovered. Since 0234 it counts search kinds only: seller
-tasks (ad-post, ad-delete, inbox-sync, msg-send) are left out, as the budget
-(`minutesTodaySql`) leaves them out.
+releases cannot be recovered.
 
 | Column | Type | Meaning |
 | --- | --- | --- |
 | `account_no` | `integer` | The account. |
 | `day` | `date` | The UTC day whose overlap is charged. |
 | `minutes` | `numeric` | Leased minutes that day. |
-
-### Facebook seller accounts
-
-A pool account whose fleet slot has `role = 'seller'` stops searching. It posts "we buy" ads that managers write in the ERP, with photos drawn at random from a manager-filled pool, and it reads its Marketplace inbox. An agent screens and negotiates in those conversations under a versioned profile, and hands a thread to managers on Leads ▸ Facebook when a person is needed (RS-565). Migration 0232 creates every table here, seeds the settings row and the `default` v1 profile, and adds the seller columns to fleet_tasks and fleet_slots. The routes are `/api/fb-seller` and `/api/fb-agent`, both manager-only; the shapes are in `packages/shared/src/fbSeller.ts`.
-
-Tables: [`fb_seller_settings`](#erp-fb-seller-settings), [`fb_seller_settings_history`](#erp-fb-seller-settings-history), [`fb_photo_pools`](#erp-fb-photo-pools), [`fb_photos`](#erp-fb-photos), [`fb_ads`](#erp-fb-ads), [`fb_ad_placements`](#erp-fb-ad-placements), [`fb_threads`](#erp-fb-threads), [`fb_messages`](#erp-fb-messages), [`fb_thread_events`](#erp-fb-thread-events), [`fb_agent_profiles`](#erp-fb-agent-profiles), [`fb_agent_runs`](#erp-fb-agent-runs), [`fb_agent_eval_cases`](#erp-fb-agent-eval-cases), [`fb_agent_eval_runs`](#erp-fb-agent-eval-runs)
-
-<a id="erp-fb-seller-settings"></a>
-
-#### `fb_seller_settings`
-
-The seller domain's whole configuration, one row. Every module reads it per tick or per run through `loadFbSellerSettings` (`services/fbConfig.ts`) and never caches it past one, so a save takes effect without a restart. Selectors and step timings stay in the worker code.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `id` | `smallint` | ✓ |  | Always 1. |
-| `value` | `jsonb` | ✓ |  | `FbSellerSettings`: kill switch, active hours, pacing, offer policy, agent spend cap and circuit breaker, low-pool warning, Telegram chat. Seeded with `FB_SELLER_DEFAULT_SETTINGS`. |
-| `version` | `integer` | ✓ | `1` | Bumped by every save; a save naming an older one is refused. |
-| `updated_by` | `uuid` |  |  | → users. |
-| `updated_at` | `timestamptz` | ✓ | `now()` |  |
-
-- **Primary key:** `id`
-- **References:** `updated_by` → `users.id` (on delete set null)
-- **Checks:** `id = 1`
-- **Indexes:** `fb_seller_settings_updated_by_idx` (updated_by)
-
-<a id="erp-fb-seller-settings-history"></a>
-
-#### `fb_seller_settings_history`
-
-Every saved version of the settings, append-only. The seed writes version 1.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `id` | `bigint` | ✓ | sequence |  |
-| `version` | `integer` | ✓ |  | The version this save produced. |
-| `before` | `jsonb` |  |  | The value it replaced; NULL for the seed. |
-| `after` | `jsonb` | ✓ |  | The value saved. |
-| `changed_by` | `uuid` |  |  | → users. NULL for the seed. |
-| `changed_at` | `timestamptz` | ✓ | `now()` |  |
-
-- **Primary key:** `id`
-- **References:** `changed_by` → `users.id` (on delete set null)
-- **Indexes:** `fb_seller_settings_history_changed_by_idx` (changed_by)
-- **Triggers:** `fb_seller_settings_history_no_update`, `fb_seller_settings_history_no_delete` (before update or delete → `fb_seller_settings_history_lock()`, which raises)
-
-<a id="erp-fb-photo-pools"></a>
-
-#### `fb_photo_pools`
-
-A named set of photos that ads draw from.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `id` | `bigint` | ✓ | sequence |  |
-| `name` | `text` | ✓ |  | Unique. |
-| `note` | `text` | ✓ | `''` |  |
-| `created_by` | `uuid` |  |  | → users. |
-| `created_at` | `timestamptz` | ✓ | `now()` |  |
-| `archived_at` | `timestamptz` |  |  | Archived pools take no uploads and feed no new placements. |
-
-- **Primary key:** `id`
-- **References:** `created_by` → `users.id` (on delete set null)
-- **Unique:** `(name)`
-- **Indexes:** `fb_photo_pools_created_by_idx` (created_by)
-
-<a id="erp-fb-photos"></a>
-
-#### `fb_photos`
-
-One uploaded photo, stored in R2. A photo is used once, ever: placing an ad sets `used_at` on the photos it draws and nothing clears it. The same file (by sha256) is refused in every pool.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `id` | `bigint` | ✓ | sequence |  |
-| `pool_id` | `bigint` | ✓ |  | → fb_photo_pools. |
-| `r2_key` | `text` | ✓ |  | Its R2 object; the worker fetches `R2_ATTACHMENTS_PUBLIC_URL/<key>`. |
-| `mime` | `text` | ✓ |  |  |
-| `bytes` | `integer` | ✓ |  |  |
-| `width` | `integer` |  |  |  |
-| `height` | `integer` |  |  |  |
-| `sha256` | `text` | ✓ |  | Unique across every pool. |
-| `uploaded_by` | `uuid` |  |  | → users. |
-| `uploaded_at` | `timestamptz` | ✓ | `now()` |  |
-| `used_at` | `timestamptz` |  |  | Set once, when a placement draws it; never cleared. |
-| `used_by_placement` | `bigint` |  |  | → fb_ad_placements. The placement that drew it. |
-
-- **Primary key:** `id`
-- **References:** `pool_id` → `fb_photo_pools.id` (on delete restrict); `uploaded_by` → `users.id` (on delete set null); `used_by_placement` → `fb_ad_placements.id` (on delete set null)
-- **Unique:** `(sha256)`
-- **Indexes:** `fb_photos_unused_idx` (pool_id) WHERE used_at IS NULL; `fb_photos_pool_id_idx` (pool_id); `fb_photos_uploaded_by_idx` (uploaded_by); `fb_photos_used_by_placement_idx` (used_by_placement)
-
-<a id="erp-fb-ads"></a>
-
-#### `fb_ads`
-
-A "we buy" listing a manager writes. Placing it on accounts and locations makes `fb_ad_placements`.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `id` | `bigint` | ✓ | sequence |  |
-| `title` | `text` | ✓ |  |  |
-| `description` | `text` | ✓ |  |  |
-| `price_usd` | `numeric(10,2)` | ✓ |  | The listing's price box; at least 0. |
-| `category` | `text` | ✓ | `'Electronics'` | Marketplace's category. |
-| `condition` | `text` | ✓ | `'Used - Good'` | Marketplace's condition. |
-| `renew_days` | `integer` | ✓ | `7` | How long a placement stays up before it is replaced, 1..60. |
-| `photo_pool_id` | `bigint` |  |  | → fb_photo_pools. |
-| `photos_min` | `integer` | ✓ | `3` | Fewest photos a placement draws, 1..10. |
-| `photos_max` | `integer` | ✓ | `5` | Most, from `photos_min` to 10. |
-| `state` | `text` | ✓ | `'draft'` | draft, ready (placeable) or archived. |
-| `created_by` | `uuid` |  |  | → users. |
-| `updated_by` | `uuid` |  |  | → users. |
-| `created_at` | `timestamptz` | ✓ | `now()` |  |
-| `updated_at` | `timestamptz` | ✓ | `now()` |  |
-
-- **Primary key:** `id`
-- **References:** `photo_pool_id` → `fb_photo_pools.id` (on delete set null); `created_by`, `updated_by` → `users.id` (on delete set null)
-- **Checks:** `price_usd >= 0`; `renew_days BETWEEN 1 AND 60`; `state IN ('draft', 'ready', 'archived')`; `photos_min BETWEEN 1 AND 10 AND photos_max BETWEEN photos_min AND 10`
-- **Indexes:** `fb_ads_photo_pool_id_idx` (photo_pool_id); `fb_ads_created_by_idx` (created_by); `fb_ads_updated_by_idx` (updated_by)
-
-<a id="erp-fb-ad-placements"></a>
-
-#### `fb_ad_placements`
-
-One ad posted by one account in one location. A renewal is a new row pointing at the one it replaced, with new photos.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `id` | `bigint` | ✓ | sequence |  |
-| `ad_id` | `bigint` | ✓ |  | → fb_ads. |
-| `account_no` | `integer` |  |  | → fb_pool_accounts. The seller account posting it. |
-| `location` | `text` | ✓ |  | What the composer's location box takes, such as `Denver, CO`. |
-| `content` | `jsonb` | ✓ |  | The ad's text frozen at placing: title, description, price_usd, category, condition. |
-| `photo_ids` | `bigint[]` | ✓ | `'{}'` | The fb_photos drawn for it. |
-| `state` | `text` | ✓ |  | needs_photos (its pool ran short), queued, live, removing, removed, failed, or uncertain (a post or delete whose result the worker could not see; a manager resolves it). |
-| `renews_id` | `bigint` |  |  | → fb_ad_placements. The placement this one replaced. |
-| `fb_listing_id` | `text` |  |  | Facebook's listing id once posted. |
-| `posted_at` | `timestamptz` |  |  |  |
-| `next_renew_at` | `timestamptz` |  |  | When it is due to be replaced. |
-| `removed_at` | `timestamptz` |  |  |  |
-| `last_error` | `text` |  |  | The worker's reason, in words. |
-| `task_id` | `bigint` |  |  | The fleet_tasks row working it; no FK, as tasks are purged. |
-| `created_by` | `uuid` |  |  | → users. |
-| `created_at` | `timestamptz` | ✓ | `now()` |  |
-| `updated_at` | `timestamptz` | ✓ | `now()` |  |
-
-- **Primary key:** `id`
-- **References:** `ad_id` → `fb_ads.id` (on delete restrict); `account_no` → `fb_pool_accounts.no` (on delete set null); `renews_id` → `fb_ad_placements.id` (on delete set null); `created_by` → `users.id` (on delete set null)
-- **Checks:** `state IN ('needs_photos', 'queued', 'live', 'removing', 'removed', 'failed', 'uncertain')`
-- **Indexes:** `fb_ad_placements_ad_id_idx` (ad_id); `fb_ad_placements_account_no_idx` (account_no); `fb_ad_placements_renews_id_idx` (renews_id); `fb_ad_placements_created_by_idx` (created_by)
-
-<a id="erp-fb-threads"></a>
-
-#### `fb_threads`
-
-One Marketplace conversation on one seller account. The agent works it while `mode` is agent and `needs_human` is false; a hand-off sets `needs_human` with the reason in words, and the agent stays quiet until a manager hands it back.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `id` | `bigint` | ✓ | sequence |  |
-| `account_no` | `integer` |  |  | → fb_pool_accounts. |
-| `fb_thread_id` | `text` | ✓ |  | Facebook's id for the conversation. |
-| `seller_name` | `text` | ✓ | `''` |  |
-| `listing_title` | `text` | ✓ | `''` |  |
-| `placement_id` | `bigint` |  |  | → fb_ad_placements. The ad the seller answered, when known. |
-| `stage` | `text` | ✓ | `'new'` | new, screening, negotiating, closing, won or lost. |
-| `mode` | `text` | ✓ | `'agent'` | agent or human (a manager took it over). |
-| `needs_human` | `boolean` | ✓ | `false` | On Needs human. |
-| `human_reason` | `text` |  |  | Why, in words. |
-| `human_at` | `timestamptz` |  |  | When it was handed off. |
-| `offer_usd` | `numeric(10,2)` |  |  | Our latest offer. |
-| `ceiling_usd` | `numeric(10,2)` |  |  | The most the Market prices allow for what the seller has; never shown to the model. |
-| `round` | `integer` | ✓ | `0` | Offer rounds so far. |
-| `extracted` | `jsonb` | ✓ | `'{}'` | The agent's latest `AgentExtract`: items, ask, intent. |
-| `last_seq` | `integer` | ✓ | `0` | The highest fb_messages.seq. |
-| `last_inbound_at` | `timestamptz` |  |  |  |
-| `last_outbound_at` | `timestamptz` |  |  |  |
-| `unread` | `boolean` | ✓ | `false` | A seller message no manager has opened. |
-| `closed_at` | `timestamptz` |  |  |  |
-| `close_note` | `text` |  |  |  |
-| `created_at` | `timestamptz` | ✓ | `now()` |  |
-| `updated_at` | `timestamptz` | ✓ | `now()` |  |
-
-- **Primary key:** `id`
-- **References:** `account_no` → `fb_pool_accounts.no` (on delete set null); `placement_id` → `fb_ad_placements.id` (on delete set null)
-- **Unique:** `(account_no, fb_thread_id)`
-- **Checks:** `stage IN ('new', 'screening', 'negotiating', 'closing', 'won', 'lost')`; `mode IN ('agent', 'human')`
-- **Indexes:** `fb_threads_needs_human_idx` (human_at) WHERE needs_human; `fb_threads_placement_id_idx` (placement_id)
-
-<a id="erp-fb-messages"></a>
-
-#### `fb_messages`
-
-One message in a thread. Inbound ones arrive with an inbox sync; outbound ones are queued by the agent or a manager and sent by the worker. `seq` is the ERP's position in the conversation, assigned when a sync sees the message, so an outbound has none until it is seen to land.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `id` | `bigint` | ✓ | sequence |  |
-| `thread_id` | `bigint` | ✓ |  | → fb_threads. |
-| `seq` | `integer` |  |  | Position in the conversation; NULL while an outbound is unseen. |
-| `direction` | `text` | ✓ |  | in, out, or unknown (the page did not say). |
-| `author` | `text` | ✓ |  | seller, agent, staff, or facebook (an outbound we did not queue). |
-| `body` | `text` | ✓ |  |  |
-| `has_image` | `boolean` | ✓ | `false` |  |
-| `send_state` | `text` |  |  | queued, held (kill switch), sending, sent, uncertain or failed; NULL for inbound. |
-| `task_id` | `bigint` |  |  | The msg-send fleet task; no FK. |
-| `agent_run_id` | `bigint` |  |  | The fb_agent_runs row that wrote it; no FK. |
-| `staff_user_id` | `uuid` |  |  | → users. The manager who wrote it. |
-| `error` | `text` |  |  | Why a send failed, in words. |
-| `created_at` | `timestamptz` | ✓ | `now()` |  |
-| `sent_at` | `timestamptz` |  |  |  |
-
-- **Primary key:** `id`
-- **References:** `thread_id` → `fb_threads.id` (on delete cascade); `staff_user_id` → `users.id` (on delete set null)
-- **Unique:** `(thread_id, seq)`
-- **Checks:** `direction IN ('in', 'out', 'unknown')`; `author IN ('seller', 'agent', 'staff', 'facebook')`; `send_state IN ('queued', 'held', 'sending', 'sent', 'uncertain', 'failed')`
-- **Indexes:** `fb_messages_outbox_idx` (send_state, created_at) WHERE send_state IN ('queued', 'held', 'sending', 'uncertain'); `fb_messages_staff_user_id_idx` (staff_user_id)
-
-<a id="erp-fb-thread-events"></a>
-
-#### `fb_thread_events`
-
-Append-only history of each thread: created, inbound, agent_sent, staff_sent, handed_off, taken_over, handed_back, stage, offer, closed, send_failed, send_uncertain, realigned. No FK on `thread_id`, so the history outlives the thread.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `id` | `bigint` | ✓ | sequence |  |
-| `thread_id` | `bigint` | ✓ |  | The thread; no FK. |
-| `kind` | `text` | ✓ |  | One of the kinds above. |
-| `actor_id` | `uuid` |  |  | → users. NULL for the system and the agent. |
-| `actor_name` | `text` | ✓ | `'system'` |  |
-| `detail` | `jsonb` | ✓ | `'{}'` |  |
-| `created_at` | `timestamptz` | ✓ | `now()` |  |
-
-- **Primary key:** `id`
-- **References:** `actor_id` → `users.id` (on delete set null)
-- **Indexes:** `fb_thread_events_thread_idx` (thread_id, created_at); `fb_thread_events_actor_id_idx` (actor_id)
-- **Triggers:** `fb_thread_events_no_update`, `fb_thread_events_no_delete` (before update or delete → `fb_thread_events_lock()`, which raises)
-
-<a id="erp-fb-agent-profiles"></a>
-
-#### `fb_agent_profiles`
-
-One immutable version of the agent's setup: prompts, skills, rules (run in order) and models. A version is edited only while draft. At most one is active and at most one candidate; a candidate runs in shadow beside the active one. 0232 seeds `default` v1 as active.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `id` | `bigint` | ✓ | sequence |  |
-| `name` | `text` | ✓ |  |  |
-| `version` | `integer` | ✓ |  |  |
-| `state` | `text` | ✓ | `'draft'` | draft, candidate, active or retired. |
-| `prompts` | `jsonb` | ✓ |  | `{ system, extract, skills: { <kind>: text } }`. |
-| `skills` | `jsonb` | ✓ |  | `[{ kind, enabled, params }]`. |
-| `rules` | `jsonb` | ✓ |  | `[{ kind, enabled, params }]`, in the order they run. |
-| `models` | `jsonb` | ✓ |  | `{ extract, reply }`, OpenRouter model ids. |
-| `notes` | `text` | ✓ | `''` |  |
-| `based_on` | `bigint` |  |  | → fb_agent_profiles. The version it was copied from. |
-| `created_by` | `uuid` |  |  | → users. |
-| `created_at` | `timestamptz` | ✓ | `now()` |  |
-| `promoted_at` | `timestamptz` |  |  | When it last became candidate or active. |
-
-- **Primary key:** `id`
-- **References:** `based_on` → `fb_agent_profiles.id` (on delete set null); `created_by` → `users.id` (on delete set null)
-- **Unique:** `(name, version)`
-- **Checks:** `state IN ('draft', 'candidate', 'active', 'retired')`
-- **Indexes:** `fb_agent_profiles_one_active` UNIQUE ((TRUE)) WHERE state = 'active'; `fb_agent_profiles_one_candidate` UNIQUE ((TRUE)) WHERE state = 'candidate'; `fb_agent_profiles_based_on_idx` (based_on); `fb_agent_profiles_created_by_idx` (created_by)
-
-<a id="erp-fb-agent-runs"></a>
-
-#### `fb_agent_runs`
-
-One agent decision about one thread, a shadow run of the candidate profile, or one case of an eval run. It is also the agent's queue: the loop claims queued rows with SKIP LOCKED. `input` holds everything needed to replay the decision.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `id` | `bigint` | ✓ | sequence |  |
-| `thread_id` | `bigint` |  |  | → fb_threads. NULL for an eval case. |
-| `trigger_message_id` | `bigint` |  |  | → fb_messages. The inbound message it answers. |
-| `profile_id` | `bigint` |  |  | → fb_agent_profiles. |
-| `shadow` | `boolean` | ✓ | `false` | A candidate's run; never writes to the thread. |
-| `eval_run_id` | `bigint` |  |  | → fb_agent_eval_runs. |
-| `eval_case_id` | `bigint` |  |  | → fb_agent_eval_cases. |
-| `state` | `text` | ✓ | `'queued'` | queued, running, done or failed. |
-| `attempts` | `integer` | ✓ | `0` |  |
-| `claimed_at` | `timestamptz` |  |  |  |
-| `input` | `jsonb` |  |  | `AgentInput`. |
-| `decision` | `jsonb` |  |  | `AgentDecision`. |
-| `outcome` | `text` |  |  | send, handoff, noop, blocked or error. |
-| `model` | `text` |  |  |  |
-| `prompt_tokens` | `integer` |  |  |  |
-| `completion_tokens` | `integer` |  |  |  |
-| `cost_usd` | `numeric(10,5)` |  |  | Counted against `agent.daily_spend_usd`. |
-| `error` | `text` |  |  |  |
-| `created_at` | `timestamptz` | ✓ | `now()` |  |
-| `finished_at` | `timestamptz` |  |  |  |
-
-- **Primary key:** `id`
-- **References:** `thread_id` → `fb_threads.id` (on delete cascade); `trigger_message_id` → `fb_messages.id` (on delete set null); `profile_id` → `fb_agent_profiles.id` (on delete set null); `eval_run_id` → `fb_agent_eval_runs.id` (on delete cascade); `eval_case_id` → `fb_agent_eval_cases.id` (on delete set null)
-- **Checks:** `state IN ('queued', 'running', 'done', 'failed')`; `outcome IN ('send', 'handoff', 'noop', 'blocked', 'error')`
-- **Indexes:** `fb_agent_runs_queue_idx` (state, created_at) WHERE state IN ('queued', 'running'); one index on each FK column (`fb_agent_runs_<column>_idx`)
-
-<a id="erp-fb-agent-eval-cases"></a>
-
-#### `fb_agent_eval_cases`
-
-A replay case: a conversation with its Market snapshot frozen, and what a profile is expected to do with it.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `id` | `bigint` | ✓ | sequence |  |
-| `name` | `text` | ✓ |  |  |
-| `source_thread_id` | `bigint` |  |  | → fb_threads. The thread it was saved from, if any. |
-| `input` | `jsonb` | ✓ |  | `AgentInput`. |
-| `expected` | `jsonb` | ✓ |  | `EvalExpectation`: hand off or not, the reason kind, the highest allowed offer, phrases it must not contain. |
-| `created_by` | `uuid` |  |  | → users. |
-| `created_at` | `timestamptz` | ✓ | `now()` |  |
-| `archived_at` | `timestamptz` |  |  | Archived cases are left out of new eval runs. |
-
-- **Primary key:** `id`
-- **References:** `source_thread_id` → `fb_threads.id` (on delete set null); `created_by` → `users.id` (on delete set null)
-- **Indexes:** `fb_agent_eval_cases_source_thread_id_idx` (source_thread_id); `fb_agent_eval_cases_created_by_idx` (created_by)
-
-<a id="erp-fb-agent-eval-runs"></a>
-
-#### `fb_agent_eval_runs`
-
-One profile run against every case that is not archived. Each case's decision is an fb_agent_runs row.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `id` | `bigint` | ✓ | sequence |  |
-| `profile_id` | `bigint` | ✓ |  | → fb_agent_profiles. |
-| `state` | `text` | ✓ | `'queued'` | queued, running, done or failed. |
-| `cases` | `integer` | ✓ | `0` |  |
-| `passed` | `integer` | ✓ | `0` |  |
-| `failed` | `integer` | ✓ | `0` |  |
-| `cost_usd` | `numeric(10,5)` | ✓ | `0` |  |
-| `created_by` | `uuid` |  |  | → users. |
-| `created_at` | `timestamptz` | ✓ | `now()` |  |
-| `finished_at` | `timestamptz` |  |  |  |
-
-- **Primary key:** `id`
-- **References:** `profile_id` → `fb_agent_profiles.id` (on delete cascade); `created_by` → `users.id` (on delete set null)
-- **Checks:** `state IN ('queued', 'running', 'done', 'failed')`
-- **Indexes:** `fb_agent_eval_runs_profile_id_idx` (profile_id); `fb_agent_eval_runs_created_by_idx` (created_by)
 
 ### Facebook chat hub
 
@@ -2985,9 +2626,8 @@ bridge extension (`facebook_messager_extenion/` in the workspace). The
 extension pushes Marketplace conversations to `/api/fb-chat/push/*`; the
 backend mirrors each one into a Telegram forum topic and queues the replies
 typed there for the extension to type into Facebook
-(`services/fbChat.ts`, `services/fbChatTelegram.ts`). These tables are apart
-from the seller tables above on purpose: nothing here is read by the pacing
-tick or the agent. `fb_chat_accounts.fb_uid` is the same value as
+(`services/fbChat.ts`, `services/fbChatTelegram.ts`). No fleet slot or
+task is involved. `fb_chat_accounts.fb_uid` is the same value as
 `fb_pool_accounts.uid`, which is the join when one is wanted.
 
 #### `fb_chat_accounts`

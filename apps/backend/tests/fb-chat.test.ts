@@ -7,6 +7,7 @@ import { TelegramError, type TelegramCall } from '../src/lib/telegramBot';
 import { userAccountCaller, type TelegramUserClient } from '../src/lib/telegramUser';
 import { createOAuthClient } from '../src/oauth/clients';
 import { generateSigningKey, signAccessToken } from '../src/oauth/tokens';
+import { alignWindow } from '../src/services/fbChat';
 import { compareVersions } from '../src/services/fbChatConfig';
 import { fbChatTelegramConfig, fbChatTelegramConfigured, fbChatUserSession, runFbChatTelegramTick, setFbChatTelegramForTests } from '../src/services/fbChatTelegram';
 import { api, testEnv } from './helpers/app';
@@ -35,6 +36,19 @@ function sync(rows: FbChatRow[], over: Partial<FbChatSyncPush['thread']> = {}, a
 }
 
 type Call = { method: string; params: Record<string, unknown> };
+
+describe('alignWindow', () => {
+  const m = (d: string, b: string) => ({ direction: d, body: b });
+  it('finds the longest end-of-conversation run the window starts with', () => {
+    expect(alignWindow([m('in', 'a'), m('out', 'b'), m('in', 'c')], [m('out', 'b'), m('in', 'c'), m('in', 'd')])).toBe(2);
+    expect(alignWindow([m('in', 'a')], [m('in', 'x')])).toBe(0);
+    expect(alignWindow([], [m('in', 'x')])).toBe(0);
+  });
+  it('keeps repeats: two "ok"s after one stored "ok" leave one new', () => {
+    expect(alignWindow([m('in', 'hi'), m('in', 'ok')], [m('in', 'hi'), m('in', 'ok'), m('in', 'ok')])).toBe(2);
+    expect(alignWindow([m('in', 'ok'), m('in', 'ok')], [m('in', 'ok'), m('in', 'ok'), m('in', 'ok')])).toBe(2);
+  });
+});
 
 describe('Facebook chat hub (/api/fb-chat)', () => {
   let bearer: string;

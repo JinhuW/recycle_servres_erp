@@ -38,15 +38,14 @@ export const DESKTOP_NAV: readonly NavGroup[] = [
       // Shipping is unlisted for now: tracking numbers are handed off from the
       // PO itself (the In Transit dialog). The routes still resolve by URL.
       { id: 'clients',    tKey: 'nav_clients',    icon: 'book',       roles: ['manager', 'purchaser'] },
-      // Sellers to buy from, one child per source: found on Reddit, arriving
-      // through the public website forms, or answering our Facebook ads.
+      // Sellers to buy from, one child per source: found on Reddit, or arriving
+      // through the public website forms.
       {
         tKey: 'nav_leads',
         icon: 'target',
         children: [
           { id: 'leadsReddit', tKey: 'nav_leads_reddit', icon: 'globe', roles: ['manager', 'purchaser'] },
           { id: 'websubmissions', tKey: 'nav_websubmissions', icon: 'mail', roles: ['manager'] },
-          { id: 'leadsFacebook', tKey: 'nav_leads_facebook', icon: 'chats', roles: ['manager'] },
         ],
       },
       { id: 'market',     tKey: 'nav_market',     icon: 'tag',        roles: ['manager', 'purchaser'] },

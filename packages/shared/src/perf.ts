@@ -5,7 +5,7 @@ export const PERF_PAGES = [
   'home', 'analysis', 'stock', 'submit', 'history', 'shipping', 'clients',
   'market', 'inventory', 'sellorders', 'aftersales', 'transfers',
   'websubmissions', 'activity', 'payments', 'internaltx', 'accounting',
-  'tracker', 'wechat', 'coordinator', 'leadsReddit', 'leadsFacebook', 'settings',
+  'tracker', 'wechat', 'coordinator', 'leadsReddit', 'settings',
 ] as const;
 
 export type PerfPage = (typeof PERF_PAGES)[number];
