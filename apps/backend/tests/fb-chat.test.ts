@@ -10,7 +10,7 @@ import { api, testEnv } from './helpers/app';
 import { ALEX, MARCUS, loginAs } from './helpers/auth';
 import { getTestDb, resetDb } from './helpers/db';
 
-const CHAT = '-1001234';
+const CHAT = '-1001234567';
 const ACCOUNT = { fbUid: '100042', label: 'Denver profile', extVersion: '0.1.0' };
 const OTHER = { fbUid: '100077', label: 'Aurora profile' };
 
@@ -370,6 +370,8 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     expect(fbChatUserSession(session)).toEqual({ apiId: 123, apiHash: 'abc', session: 's', chatId: CHAT });
     expect(fbChatUserSession({ ...session, FB_CHAT_TELEGRAM_SESSION: '' } as typeof testEnv)).toBeNull();
     expect(fbChatUserSession({ ...session, FB_CHAT_TELEGRAM_API_ID: 'x' } as typeof testEnv)).toBeNull();
+    // A plain group's id: Topics is off, or it is the id from before it was turned on.
+    expect(fbChatUserSession({ ...session, FB_CHAT_TELEGRAM_CHAT_ID: '-5324994024' } as typeof testEnv)).toBeNull();
     setFbChatTelegramForTests(null);
     expect(fbChatTelegramConfigured(base)).toBe(false);
     expect(fbChatTelegramConfigured(session)).toBe(true);
