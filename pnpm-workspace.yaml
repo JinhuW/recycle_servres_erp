@@ -2,8 +2,11 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
+  bufferutil: false
+  es5-ext: false
   esbuild: true
   sharp: true
+  utf-8-validate: false
   workerd: true
 # uuid@8 (via exceljs) carries GHSA-w5hq-g745-h8pq; exceljs only calls v4(),
 # which is API-compatible across the bump.

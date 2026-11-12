@@ -5,7 +5,11 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-576](./RS-576-business-account-cost-payment-keeps-the-id-box-on-ph.md) | done | bug | P1 | Business Account cost payment keeps the ID box on phone and lets a manager fix a typed ID | — |
+| [RS-580](./RS-580-chat-hub-wakes-a-held-reply-claim-on-notify-instead.md) | done | task | P2 | Chat hub wakes a held reply claim on NOTIFY instead of polling every second | 1.453.1 |
+| [RS-579](./RS-579-chat-bridge-extensions-load-their-settings-from-the.md) | done | story | P2 | Chat bridge extensions load their settings from the ERP, and the ERP can change them | 1.453.0 |
+| [RS-578](./RS-578-facebook-chat-hub-chrome-extensions-relay-marketplac.md) | done | story | P2 | Facebook chat hub: Chrome extensions relay Marketplace chats to Telegram topics | 1.451.0 |
+| [RS-577](./RS-577-agent-docs-for-every-monorepo-area-and-an-audit-of-t.md) | done | task | P2 | Agent docs for every monorepo area, and an audit of the existing ones | n/a — docs only, no release |
+| [RS-576](./RS-576-business-account-cost-payment-keeps-the-id-box-on-ph.md) | done | bug | P1 | Business Account cost payment keeps the ID box on phone and lets a manager fix a typed ID | 1.450.1 |
 | [RS-575](./RS-575-review-mode-s-line-label-shows-the-part-number-and-t.md) | done | story | P2 | Review mode's line label shows the part number and the units counted | 1.450.0 |
 | [RS-574](./RS-574-fold-same-series-ram-on-a-sell-order-regardless-of-c.md) | done | story | P2 | Fold same-series RAM on a sell order regardless of condition | 1.449.0 |
 | [RS-573](./RS-573-review-mode-prints-a-product-label-for-each-line-as.md) | done | story | P2 | Review mode prints a product label for each line as it is checked | 1.448.0 |

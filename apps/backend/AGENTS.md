@@ -2,17 +2,21 @@
 
 The root [AGENTS.md](../../AGENTS.md) has the repo map, workflow and the
 ERP↔tracker contracts; this file is the backend's conventions.  Bare paths
-such as `lib/log.ts` or `routes/orders/` are under `apps/backend/src/`;
-anything else is relative to the repo root.
+such as `lib/log.ts` or `routes/orders/` are under `apps/backend/src/`,
+except `scripts/…`, `tests/…` and `migrations/…`, which are under
+`apps/backend/`; anything else is relative to the repo root.
 
 `routes/tracker.ts`, `routes/coordinator.ts` and `vncBridge.ts` are the ERP
-half of the tracker contracts — change them together with the tracker side
-(root AGENTS.md → *Contracts*).
+half of the tracker contracts.  `fleet/hosts.ts`, `fleet/claim.ts`,
+`fleet/seller.ts` and `fleet/vnc.ts` are the half that the fleet agent
+(`apps/fleet-agent/`) and the Facebook worker image call.  Change either
+together with its other side (root AGENTS.md → *Contracts*).
 
 ## Backend
 
 - Hono on `@hono/node-server` (Node 24).  Entry: `apps/backend/src/server.ts`
-  → `index.ts` mounts all routes under `/api/*`.
+  → `index.ts`, which mounts the API under `/api/*`, plus `GET /` (a service
+  banner), `/metrics`, `/.well-known/*` and `/oauth/*` at the root.
 - **All logging goes through `lib/log.ts`** — `log.info/warn/error/debug(msg,
   detail)`, never `console.*`.  Every line is one JSON object stamped with the
   release `version` and `commit`, so a log excerpt identifies its build without
@@ -24,8 +28,8 @@ half of the tracker contracts — change them together with the tracker side
 - **`requestId` and `userId` are ambient, not passed.**  The outermost
   middleware in `index.ts` opens an `AsyncLocalStorage` context
   (`runWithLogContext`), so *every* line emitted during a request carries the
-  id — including from `r2.ts`, `image-shrink.ts` and the MCP tools, which never
-  see a Hono `Context`, and including a `.catch()` that settles after the
+  id — including from `r2.ts`, `lib/image-shrink.ts` and the MCP tools, which
+  never see a Hono `Context`, and including a `.catch()` that settles after the
   response (the context follows a promise reaction from where it was
   *registered*).  `addLogContext({ userId })` fills in what auth learns later
   (`auth.ts`, `oauth/guard.ts`).  Precedence is ambient < `log.child` < the
@@ -59,14 +63,20 @@ half of the tracker contracts — change them together with the tracker side
 - **PO routes live in `routes/orders/`, one module per concern** (v1.197.4):
   `list`, `detail`, `create`, `patch`, `lifecycle` (revert-ack, delete,
   archive, lot-price reset, advance, hand-off), `evidence` (status meta,
-  photos), `checks` (Review mode) and `spreadsheet`, each a Hono sub-app
-  mounted by `index.ts`.  Helpers two modules share go in `shared.ts`.  A
+  photos), `checks` (Review mode), `aiReview` (background AI review) and
+  `spreadsheet`, each a Hono sub-app mounted by `routes/orders/index.ts`,
+  which `index.ts` mounts at `/api/orders`.
+  Helpers two modules share go in `shared.ts`.  A
   write refused inside its transaction throws `OrderRefusal` (`refusal.ts`)
   with a typed `kind` and payload, and the handler's catch returns
   `refusalResponse`.
-- **Status guards.**  Purchase orders, sell orders and transfer orders each
-  have explicit allowed-transition tables in their route files.  When adding a new state-changing endpoint, extend the existing
-  guard — don't write a parallel one.
+- **Status guards.**  Each order type has one place that decides a status
+  change; extend it, don't write a parallel one.  Purchase orders advance
+  through `advanceOrderTx` (`services/orderAdvance.ts`).  Sell orders and
+  after-sales cases each have an `ALLOWED_TRANSITIONS` table in their route
+  file (`routes/sellOrders.ts`, `routes/afterSales.ts`), and packages have
+  one in `shipping/status.ts`.  Transfer orders have no table: receive and
+  re-open check the status inline in `routes/inventory.ts`.
 - **One lock order: orders rows (sorted) before lines** (v1.197.0).  Lock a
   PO with `FOR NO KEY UPDATE` unless the transaction deletes it, because
   `FOR UPDATE` blocks the `FOR KEY SHARE` a line INSERT's FK check takes.  A
@@ -102,12 +112,15 @@ half of the tracker contracts — change them together with the tracker side
 - **Bank rows carry `currency`** (0153).  Reconciliation is USD-only
   (`openRowFrag`, `pairEligibleFrag`, autoPair, auto-link, `/link`, `/pair`).
   A new matcher has to filter on it too.
-- **Upload validation** — every upload route (status-meta evidence and line
-  photos in `routes/orders/`/`sellOrders.ts`, `scan.ts`, `publicForms.ts`) and the
-  storage layer (`r2.ts`) enforce both `maxBytes` and `allowedMime` from
-  `lib/settings.ts → getUploadLimits()`.
-  The allowed set is intersected with `SAFE_UPLOAD_MIME` so a misconfigured
-  DB setting can't widen the surface.  Keep it that way.
+- **Upload validation** — every route that *stores* a file calls
+  `lib/settings.ts → getUploadLimits()` and enforces both its `maxBytes`
+  and its `allowedMime` before storing (grep `getUploadLimits(` for the
+  callers; a new upload route joins them).  The allowed set is intersected
+  with `SAFE_UPLOAD_MIME` so a misconfigured DB setting can't widen the
+  surface.  Keep it that way.  `r2.ts` re-checks the MIME against
+  `SAFE_UPLOAD_MIME` and nothing else, so the size limit exists only in the
+  route.  Price-sheet imports are parsed and discarded, under their own cap
+  (`PRICE_SHEET_MAX_BYTES`, `services/priceSheet.ts`).
 - **Migrations** are plain SQL under `apps/backend/migrations/`, numbered
   `NNNN_…sql`.  The backend runs them on startup via `scripts/migrate.mjs`,
   recorded in `schema_migrations` with a sha256 `checksum` (an edited,
@@ -151,8 +164,8 @@ half of the tracker contracts — change them together with the tracker side
   It must be `X-Public-Host`, not `X-Forwarded-Host` — **Railway's edge rewrites
   the standard `X-Forwarded-*` headers to its own hostname**, so a value the
   Worker sets there never reaches the backend.  Add
-  a hostname to `wrangler.toml` without adding it to `CORS_ALLOWED_ORIGINS` and
-  discovery silently advertises `allow[0]` instead — which breaks the RFC 9728
+  a hostname to `deploy/cloudflare/wrangler.toml` without adding it to
+  `CORS_ALLOWED_ORIGINS` and discovery silently advertises `allow[0]` instead — which breaks the RFC 9728
   `resource` match and every MCP client with it.  Canonical host goes first.
 - **DCR is open by default** (`OAUTH_DCR_OPEN !== 'false'`), rate-limited per IP
   and globally.  `registration_endpoint` is advertised only when it's on — an
@@ -189,16 +202,20 @@ half of the tracker contracts — change them together with the tracker side
 - Backend tests are **integration tests against a real Postgres** — they
   exercise the real SQL, migrations, FK rules, and status guards (the layer
   most likely to break), so the DB dependency is intentional, not a smell.
-  They need `127.0.0.1:5432` reachable — `docker-compose.override.yml` does
-  that for local dev.  Production compose doesn't ship the override.
+  They read `TEST_DATABASE_URL` from the environment, or else from the
+  repo-root `.env`, and that server has to be reachable from the host:
+  `docs/DATABASE.md` names the usual one, the `recycle-erp-testdb` container
+  on `127.0.0.1:55432`.  The compose Postgres publishes no host port.  A
+  local `docker-compose.override.yml` can publish it on `127.0.0.1:5432`,
+  but that file is gitignored, so a fresh checkout or worktree has none.
   CI runs them against a `postgres:18` service container (prod's major)
   (`.github/workflows/backend-tests.yml`), which must set `TEST_DATABASE_URL`
-  in the job env: `global-setup.ts` otherwise falls back to the repo-root
-  `.env`, which doesn't exist on a runner, and throws.
+  in the job env: `tests/helpers/global-setup.ts` otherwise falls back to the
+  repo-root `.env`, which doesn't exist on a runner, and throws.
 - **Test files run in PARALLEL** (`vitest.config.ts`: `pool: 'forks'`, files
   parallel, `maxWorkers` 8 by default — override with `VITEST_MAX_FORKS`).  Each
-  fork owns a **private database**: `global-setup.ts` hands every worker a
-  run-scoped base name; `tests/helpers/db.ts` suffixes it with `VITEST_POOL_ID`
+  fork owns a **private database**: `tests/helpers/global-setup.ts` hands
+  every worker a run-scoped base name; `tests/helpers/db.ts` suffixes it with `VITEST_POOL_ID`
   (`<run>_w<id>`).  The suite runs in ~15s, not ~8min.
 - `resetDb()` is a **template clone**, not a re-migrate.  Each worker builds a
   migrated+seeded **template** DB once (`<run>_w<id>_tmpl`), then every test
@@ -212,9 +229,11 @@ half of the tracker contracts — change them together with the tracker side
   built as `<…>_tmpl_building` and renamed only once migrate and seed both
   succeed.  See
   [docs/debug-notes/2026-10-01-test-templates-build-through-migrate-mjs.md](../../docs/debug-notes/2026-10-01-test-templates-build-through-migrate-mjs.md).
-- Frontend tests (vitest) sit next to the code under `src/` and in
-  `tests/`.  Add coverage when you add a non-trivial pure helper; UI
-  behavior is mostly validated by visiting it.
+- Frontend tests (vitest) sit next to the code under `apps/frontend/src/`
+  (`lib/`, `pages/`, `components/`) and in `apps/frontend/tests/`.  A pure
+  helper from `packages/shared/` is tested there too.  Add coverage when you
+  add a non-trivial pure helper; UI behavior is mostly validated by visiting
+  it.
 - **To run a single backend test file**, `cd apps/backend && npx vitest run
   tests/foo.test.ts` — `pnpm --filter recycle-erp-backend test -- tests/foo.test.ts`
   silently drops the path and runs the full suite.
