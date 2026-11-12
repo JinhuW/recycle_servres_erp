@@ -2,13 +2,13 @@
 id: RS-582
 title: Chat bridge extensions enroll themselves and wait for approval
 type: feature
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-12
 reporter: jinhu
 branch: feat/fb-chat-device-enroll
-pr:
-version:
+pr: 1193
+version: 1.455.0
 related: [RS-578, RS-579]
 ---
 
@@ -35,16 +35,16 @@ Decisions taken with the owner on 2026-11-12:
 
 ## Acceptance criteria
 
-- [ ] `POST /api/fb-chat/enroll` (no auth) returns a device id, a token and a
+- [x] `POST /api/fb-chat/enroll` (no auth) returns a device id, a token and a
       pairing code, and records a pending device.
-- [ ] A pending device's bearer is refused on `/push/*` with `device_pending`;
+- [x] A pending device's bearer is refused on `/push/*` with `device_pending`;
       `/push/device` tells it its status.
-- [ ] Settings ▸ Chat bridge lists waiting requests with their code, name,
+- [x] Settings ▸ Chat bridge lists waiting requests with their code, name,
       Facebook user, version and IP; Approve lets the device push, Reject and
       Revoke stop it with `device_rejected`.
-- [ ] An `fbchat:write` service-client token still works on `/push/*`.
-- [ ] Enrollment is limited per IP and in the number of waiting requests.
-- [ ] Approved devices survive the nightly prod → dev sync.
+- [x] An `fbchat:write` service-client token still works on `/push/*`.
+- [x] Enrollment is limited per IP and in the number of waiting requests.
+- [x] Approved devices survive the nightly prod → dev sync.
 
 ## Out of scope
 

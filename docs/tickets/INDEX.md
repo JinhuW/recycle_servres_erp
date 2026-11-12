@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-582](./RS-582-chat-bridge-extensions-enroll-themselves-and-wait-fo.md) | in-progress | feature | P2 | Chat bridge extensions enroll themselves and wait for approval | — |
+| [RS-582](./RS-582-chat-bridge-extensions-enroll-themselves-and-wait-fo.md) | done | feature | P2 | Chat bridge extensions enroll themselves and wait for approval | 1.455.0 |
 | [RS-581](./RS-581-remove-the-facebook-seller-feature-so-fleet-accounts.md) | done | chore | P2 | Remove the Facebook seller feature so fleet accounts only search | 1.454.0 |
 | [RS-580](./RS-580-chat-hub-wakes-a-held-reply-claim-on-notify-instead.md) | done | task | P2 | Chat hub wakes a held reply claim on NOTIFY instead of polling every second | 1.453.1 |
 | [RS-579](./RS-579-chat-bridge-extensions-load-their-settings-from-the.md) | done | story | P2 | Chat bridge extensions load their settings from the ERP, and the ERP can change them | 1.453.0 |
