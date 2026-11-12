@@ -20,6 +20,13 @@ export type Env = {
   // must be this hub's alone, because getUpdates is exclusive per bot.
   FB_CHAT_TELEGRAM_BOT_TOKEN?: string;
   FB_CHAT_TELEGRAM_CHAT_ID?: string;
+  // Or post as an ordinary Telegram account instead of a bot: the app's
+  // api_id and api_hash from my.telegram.org and a GramJS StringSession for
+  // the account. All three set wins over the bot token. The account must be
+  // one nobody types in: its own messages are taken for the hub's posts.
+  FB_CHAT_TELEGRAM_API_ID?: string;
+  FB_CHAT_TELEGRAM_API_HASH?: string;
+  FB_CHAT_TELEGRAM_SESSION?: string;
   // Comma-separated Telegram user ids allowed to reply. Unset: any member.
   FB_CHAT_TELEGRAM_USER_IDS?: string;
   // Reddit tracker admin proxy (/api/tracker/*). Both unset → proxy answers

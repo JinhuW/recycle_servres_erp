@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-11:** ERP migration `0236`, Reddit tracker migration `0007`,
+**As of 2026-11-11:** ERP migration `0237`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -3109,12 +3109,13 @@ Append-only record of what is worth counting later and is not a message. `kind` 
 - **Indexes:** `fb_chat_events_account_idx` (account_id, created_at); `fb_chat_events_thread_idx` (thread_id); `fb_chat_events_alert_idx` (id) where an alert is waiting
 #### `fb_chat_telegram_state`
 
-One row: the bot's `getUpdates` cursor.
+One row: the reply cursors. A bot reads updates; an account reads the group's history. Each keeps its own, so switching modes starts clean.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
 | `id` | `boolean` | ✓ | `true` | Always true. |
-| `offset` | `bigint` | ✓ | `0` | The next `update_id` to ask Telegram for. |
+| `offset` | `bigint` | ✓ | `0` | Bot mode: the next `update_id` to ask Telegram for. |
+| `user_last_message_id` | `bigint` | ✓ | `0` | Account mode: one past the last group message read (0237). |
 
 - **Primary key:** `id`
 - **Checks:** `id`
