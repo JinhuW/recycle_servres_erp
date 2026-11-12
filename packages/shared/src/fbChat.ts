@@ -104,3 +104,65 @@ export type FbChatEventPush = {
 export const FB_CHAT_MAX_WAIT_SEC = 25;
 /** A claimed reply not reported within this is marked uncertain, never resent. */
 export const FB_CHAT_SEND_STALE_MS = 5 * 60_000;
+
+// ── Remote settings ───────────────────────────────────────────────────────────
+// The extension's options page holds only what it takes to reach the ERP.
+// Everything else is set on Settings ▸ Chat bridge. The set of settings is not
+// fixed here: each extension reports the fields it understands, the page draws
+// its form from them, and values are plain JSON. An extension ignores a key it
+// does not know, so the ERP may hold keys ahead of an extension release.
+
+export const FB_CHAT_CONFIG_TYPES = ['boolean', 'integer', 'number', 'string', 'json'] as const;
+export type FbChatConfigType = (typeof FB_CHAT_CONFIG_TYPES)[number];
+export const FB_CHAT_CONFIG_KEY = /^[A-Za-z][A-Za-z0-9_.]{0,63}$/;
+/** Largest stored value, as JSON text. */
+export const FB_CHAT_CONFIG_VALUE_MAX = 16_000;
+
+export type FbChatConfigField = {
+  key: string;
+  label: string;
+  help?: string;
+  type: FbChatConfigType;
+  default: unknown;
+  min?: number;
+  max?: number;
+  unit?: string;
+  /** For a `string` field: the only values allowed. */
+  options?: string[];
+};
+
+/** `POST /push/config`. */
+export type FbChatConfigRequest = {
+  /** Absent until the extension's tab has seen which account is logged in. */
+  account?: FbChatAccountRef;
+  extVersion: string;
+  fields: FbChatConfigField[];
+};
+
+export type FbChatConfigAnswer = {
+  /** Changes whenever `values` does. */
+  rev: string;
+  /** Only what the ERP sets; a profile's own value wins over the shared one. */
+  values: Record<string, unknown>;
+};
+
+/** Why `value` does not fit `field`, or null when it does. */
+export function fbChatConfigProblem(field: FbChatConfigField, value: unknown): string | null {
+  switch (field.type) {
+    case 'boolean':
+      return typeof value === 'boolean' ? null : 'must be true or false';
+    case 'integer':
+    case 'number': {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return 'must be a number';
+      if (field.type === 'integer' && !Number.isInteger(value)) return 'must be a whole number';
+      if (field.min !== undefined && value < field.min) return `must be at least ${field.min}`;
+      if (field.max !== undefined && value > field.max) return `must be at most ${field.max}`;
+      return null;
+    }
+    case 'string':
+      if (typeof value !== 'string') return 'must be text';
+      return field.options && !field.options.includes(value) ? `must be one of ${field.options.join(', ')}` : null;
+    case 'json':
+      return null;
+  }
+}
