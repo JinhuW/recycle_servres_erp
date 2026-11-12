@@ -1,13 +1,14 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import { authMiddleware } from '../auth';
 import { getDb } from '../db';
-import { FB_CHAT_CONFIG_KEY, fbChatConfigProblem } from '@recycle-erp/shared';
+import { FB_CHAT_CONFIG_KEY, fbChatConfigProblem, type FbChatDeviceAnswer } from '@recycle-erp/shared';
 import {
-  FbChatPushError, fbChatConfigValueProblem, parseBuyerPush, parseClaim, parseConfigRequest, parseEventPush,
-  parseSendResult, parseSyncPush,
+  FbChatPushError, fbChatConfigValueProblem, parseBuyerPush, parseClaim, parseConfigRequest, parseEnrollRequest,
+  parseEventPush, parseSendResult, parseSyncPush,
 } from '../lib/fbChat';
+import { clientIp } from '../lib/clientIp';
 import { allLimited } from '../lib/concurrency';
-import { log } from '../lib/log';
+import { addLogContext, log } from '../lib/log';
 import { armWake, holdsDraining, listening } from '../lib/pgWake';
 import { requireManager } from '../lib/role';
 import { bearerGuard } from '../oauth/guard';
@@ -15,20 +16,26 @@ import {
   claimReply, FB_CHAT_OUTBOX_CHANNEL, ingestBuyer, ingestSync, recordEvent, recordSendResult, touchAccount,
 } from '../services/fbChat';
 import { configFor, knownFields, notePickup, reportFields, setConfig } from '../services/fbChatConfig';
+import {
+  decideDevice, deleteDevice, deviceForBearer, enrollDevice, helloDevice, isDeviceBearer, listDevices, touchDevice,
+  type DeviceDecision, type DeviceRow,
+} from '../services/fbChatDevices';
 import { fbChatTelegramConfigured, kickFbChatTelegram } from '../services/fbChatTelegram';
 import type { Env, OAuthCtx, User } from '../types';
 
 // ─── Facebook chat hub ────────────────────────────────────────────────────────
 // The owner's Chrome extensions, one per browser profile and Facebook account,
-// push their Marketplace conversations here with a fbchat:write service token
-// and claim the replies typed in Telegram. The backend owns the one bot, so
-// any number of extensions share one group. Self-applies its auth (oauthAdmin
-// pattern): Bearer on /push/*, the session cookie and a manager gate on the
-// reads.
+// push their Marketplace conversations here and claim the replies typed in
+// Telegram. The backend owns the one bot, so any number of extensions share
+// one group. Self-applies its auth (oauthAdmin pattern): on /push/* a device
+// bearer a manager approved, or a fbchat:write service token from extensions
+// set up before enrollment existed; /enroll is open; the session cookie and a
+// manager gate on everything else.
 
-type Vars = { user: User; oauthCtx: OAuthCtx };
+type Vars = { user: User; oauthCtx: OAuthCtx; device: DeviceRow | null };
 
 const PUSH_PREFIX = '/api/fb-chat/push/';
+const ENROLL_PATH = '/api/fb-chat/enroll';
 const isPush = (path: string) => path.startsWith(PUSH_PREFIX);
 // A held claim wakes on a NOTIFY (services/fbChat.ts → notifyOutbox) from any
 // instance. It also looks again this often, in case a write that freed a reply
@@ -36,11 +43,35 @@ const isPush = (path: string) => path.startsWith(PUSH_PREFIX);
 const HOLD_RECHECK_MS = 5_000;
 
 const asVars = (mw: unknown) => mw as MiddlewareHandler<{ Bindings: Env; Variables: Vars }>;
-const pushGuard = asVars(bearerGuard({ scopes: ['fbchat:write'] }));
+const oauthPushGuard = asVars(bearerGuard({ scopes: ['fbchat:write'] }));
+
+// A device may only ask about itself until it is approved, so the extension
+// can show its pairing code and learn when to start.
+const pushGuard: MiddlewareHandler<{ Bindings: Env; Variables: Vars }> = async (c, next) => {
+  const header = c.req.header('authorization');
+  if (!isDeviceBearer(header)) {
+    c.set('device', null);
+    return oauthPushGuard(c, next);
+  }
+  const sql = getDb(c.env);
+  const device = await deviceForBearer(sql, header!);
+  if (!device) return c.json({ error: 'invalid_token' }, 401);
+  if (device.status !== 'approved' && c.req.path !== `${PUSH_PREFIX}device`) {
+    return c.json({ error: device.status === 'pending' ? 'device_pending' : 'device_rejected' }, 403);
+  }
+  if (device.status === 'approved') await touchDevice(sql, device.id);
+  c.set('device', device);
+  c.set('oauthCtx', { clientId: `device:${device.id}`, userId: null, scopes: ['fbchat:write'], jti: '' });
+  addLogContext({ oauthClientId: `device:${device.id}` });
+  return next();
+};
 
 const fbChat = new Hono<{ Bindings: Env; Variables: Vars }>()
-  .use('*', (c, next) => (isPush(c.req.path) ? pushGuard(c, next) : asVars(authMiddleware)(c, next)))
-  .use('*', (c, next) => (isPush(c.req.path) ? next() : asVars(requireManager)(c, next)));
+  .use('*', (c, next) => {
+    if (c.req.path === ENROLL_PATH) return next();
+    return isPush(c.req.path) ? pushGuard(c, next) : asVars(authMiddleware)(c, next);
+  })
+  .use('*', (c, next) => (isPush(c.req.path) || c.req.path === ENROLL_PATH ? next() : asVars(requireManager)(c, next)));
 
 /** Parses the body, or answers 400 with the reason. */
 async function parsed<T>(c: { req: { json: () => Promise<unknown> } }, parse: (v: unknown) => T): Promise<T | string> {
@@ -52,6 +83,36 @@ async function parsed<T>(c: { req: { json: () => Promise<unknown> } }, parse: (v
   }
 }
 const invalid = (detail: string) => ({ error: 'invalid_request', detail });
+
+// ── Enrollment ────────────────────────────────────────────────────────────────
+
+// Open to anyone, like the website's intake forms: an extension has nothing
+// to authenticate with yet. What it gets is a pending device that can do
+// nothing until a manager approves it.
+fbChat.post('/enroll', async (c) => {
+  const info = parseEnrollRequest(await c.req.json().catch(() => null));
+  const ip = clientIp((n) => c.req.header(n));
+  const outcome = await enrollDevice(getDb(c.env), info, {
+    ip: ip.full, ipKey: ip.key, userAgent: c.req.header('user-agent')?.slice(0, 300) ?? null,
+  });
+  if (outcome === 'ip_limit' || outcome === 'pending_limit') {
+    c.header('Retry-After', '3600');
+    return c.json({ error: 'too_many_requests', detail: outcome }, 429);
+  }
+  log.info('fb chat device enrolled', { module: 'fbChat', deviceId: outcome.deviceId, label: info.label });
+  return c.json(outcome);
+});
+
+// The extension's hello: while pending, every half minute or so; once
+// approved, now and then. Answers what it may do.
+fbChat.post('/push/device', async (c) => {
+  const device = c.var.device;
+  if (!device) return c.json({ error: 'not_a_device' }, 400);
+  const info = parseEnrollRequest(await c.req.json().catch(() => null));
+  await helloDevice(getDb(c.env), device.id, info);
+  const answer: FbChatDeviceAnswer = { deviceId: device.id, code: device.code, status: device.status };
+  return c.json(answer);
+});
 
 // ── Push ──────────────────────────────────────────────────────────────────────
 
@@ -170,6 +231,29 @@ fbChat.get('/threads/:id/messages', async (c) => {
            tg_user_name, created_at, sent_at
       FROM fb_chat_messages WHERE thread_id = ${id} ORDER BY seq NULLS LAST, id`;
   return c.json({ messages: rows });
+});
+
+// ── Extensions (manager) ──────────────────────────────────────────────────────
+
+fbChat.get('/devices', async (c) => c.json({ devices: await listDevices(getDb(c.env)) }));
+
+const DECISIONS = new Set<DeviceDecision>(['approve', 'reject', 'revoke']);
+
+fbChat.post('/devices/:id/:decision', async (c) => {
+  const decision = c.req.param('decision') as DeviceDecision;
+  if (!DECISIONS.has(decision)) return c.json({ error: 'not_found' }, 404);
+  const id = c.req.param('id');
+  const done = await decideDevice(getDb(c.env), id, decision, c.var.user.id);
+  if (!done) return c.json({ error: 'conflict', detail: `cannot ${decision} this extension now` }, 409);
+  log.info('fb chat device decided', { module: 'fbChat', deviceId: id, decision });
+  return c.json({ ok: true });
+});
+
+fbChat.delete('/devices/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!(await deleteDevice(getDb(c.env), id))) return c.json({ error: 'not_found' }, 404);
+  log.info('fb chat device deleted', { module: 'fbChat', deviceId: id });
+  return c.json({ ok: true });
 });
 
 // ── Settings (manager) ────────────────────────────────────────────────────────

@@ -25,6 +25,7 @@ function exempt(path: string): boolean {
     || path.startsWith('/api/wechat-market/push/')
     || path.startsWith('/api/facebook-pool/push/')
     || path.startsWith('/api/fb-chat/push/')
+    || path === '/api/fb-chat/enroll'
     || path.startsWith('/api/public/')
     || path.startsWith('/oauth/')
     || path.startsWith('/.well-known/');

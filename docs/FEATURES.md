@@ -1350,8 +1350,16 @@ own Marketplace chats to Telegram. Its one page is Settings ▸ Chat bridge
 
 - **Who sends.** A Chrome extension in each of the owner's browser profiles
   (`facebook_messager_extenion/` in the workspace, its own repo), one Facebook
-  account per profile. Each authenticates with a service client holding
-  `fbchat:write`, minted in Settings ▸ Connectors.
+  account per profile. Nothing is typed into the extension (v1.455.0, RS-582):
+  its build carries the ERP address, it enrolls itself through the open
+  `POST /api/fb-chat/enroll`, and it waits, showing a pairing code, until a
+  manager approves it under Settings ▸ Chat bridge ▸ Extensions, where the same
+  code is listed with the profile name, Facebook user, version and address.
+  Reject or Revoke stops it. Enrollment is limited to 5 an hour per address and
+  25 waiting requests; one nobody acts on is forgotten after 7 days. Approvals
+  on dev survive the nightly copy from prod. An extension set up before this
+  with a `fbchat:write` service client from Settings ▸ Connectors keeps
+  working.
 - **Topics.** The first time an account's conversation is pushed, the bot
   opens a forum topic in the configured group named `<buyer> · <location>`
   (`<buyer>` until a location is known, renamed when one arrives). It opens
@@ -1378,8 +1386,7 @@ own Marketplace chats to Telegram. Its one page is Settings ▸ Chat bridge
   analysis. Managers can read `/api/fb-chat/accounts`, `/threads` and
   `/threads/:id/messages`.
 - **Settings from the ERP** (v1.453.0, RS-579). An extension's options page
-  holds only the ERP address, its credentials, the profile's name and the
-  on/off switch. It asks `POST /api/fb-chat/push/config` for everything else
+  holds only the profile's name and the on/off switch. It asks `POST /api/fb-chat/push/config` for everything else
   as soon as it can reach the ERP, bridge on or off, then about once a minute.
   Settings ▸ Chat bridge (managers) sets each value for every profile or for one
   profile, and one profile's own value wins. The settings are not a fixed list:

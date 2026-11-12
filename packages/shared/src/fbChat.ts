@@ -166,3 +166,56 @@ export function fbChatConfigProblem(field: FbChatConfigField, value: unknown): s
       return null;
   }
 }
+
+// ── Enrollment ───────────────────────────────────────────────────────
+// An extension needs nothing typed in. With no device it asks `POST /enroll`
+// (no auth) and gets a token; it then waits, asking `POST /push/device`, until
+// a manager approves it on Settings ▸ Chat bridge, where its pairing code is
+// shown next to the one on the extension's options page. The bearer it sends
+// on every push route is `fbd_<deviceId>_<token>`.
+
+export const FB_CHAT_DEVICE_STATUSES = ['pending', 'approved', 'rejected', 'revoked'] as const;
+export type FbChatDeviceStatus = (typeof FB_CHAT_DEVICE_STATUSES)[number];
+export const FB_CHAT_DEVICE_BEARER_PREFIX = 'fbd_';
+
+/** `POST /enroll`. Every field is optional and only shown to the approver. */
+export type FbChatEnrollRequest = {
+  label?: string;
+  extVersion?: string;
+  fbUid?: string;
+};
+
+export type FbChatEnrollAnswer = {
+  deviceId: string;
+  /** Shown once; the ERP keeps only its hash. */
+  token: string;
+  /** `XXXX-XXXX`, shown on both sides. */
+  code: string;
+  status: FbChatDeviceStatus;
+};
+
+/** `POST /push/device`: the extension's hello while it waits, and after. */
+export type FbChatDeviceHello = FbChatEnrollRequest;
+export type FbChatDeviceAnswer = { deviceId: string; code: string; status: FbChatDeviceStatus };
+
+/**
+ * What `/push/*` answers a device that may not push yet: 403 with
+ * `device_pending`, or `device_rejected` once refused or revoked.
+ */
+export type FbChatDeviceRefusal = { error: 'device_pending' | 'device_rejected' };
+
+/** A row on Settings ▸ Chat bridge ▸ Extensions. */
+export type FbChatDevice = {
+  id: string;
+  code: string;
+  status: FbChatDeviceStatus;
+  label: string;
+  fb_uid: string | null;
+  ext_version: string | null;
+  created_ip: string | null;
+  user_agent: string | null;
+  created_at: string;
+  last_seen_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+};

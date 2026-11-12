@@ -92,7 +92,9 @@ to keep accepting what the deployed memtrade sends.
 A second one does too. The **Facebook chat bridge** (a Chrome extension,
 outside this repo at `facebook_messager_extenion/` in the workspace) pushes the
 owner's Marketplace conversations to `/api/fb-chat/push/*` (`routes/fbChat.ts`)
-with a `fbchat:write` service-client token, and with the same token long-polls
+with a device token it got from the open `POST /api/fb-chat/enroll` and a
+manager approved (older installs: a `fbchat:write` service-client token), and
+with the same token long-polls
 `/push/outbox/claim` for replies typed in Telegram, then reports through
 `/push/outbox/<id>/result`. It also asks `/push/config` about once a minute
 for the settings set on Settings ▸ Chat bridge, sending the fields it

@@ -11,6 +11,7 @@ import {
   type FbChatConfigField,
   type FbChatConfigRequest,
   type FbChatConfigType,
+  type FbChatEnrollRequest,
   type FbChatEventKind,
   type FbChatEventPush,
   type FbChatRow,
@@ -207,4 +208,14 @@ export function chunkForTelegram(textToSend: string, max = 4000): string[] {
   }
   if (rest) chunks.push(rest);
   return chunks;
+}
+
+/**
+ * `POST /enroll` and `/push/device`. Nothing here is trusted, so a field that
+ * does not fit is dropped rather than refused: the approver sees less.
+ */
+export function parseEnrollRequest(v: unknown): Required<{ [K in keyof FbChatEnrollRequest]: string | null }> {
+  const r = isObj(v) ? v : {};
+  const uid = typeof r.fbUid === 'string' && /^\d{1,32}$/.test(r.fbUid) ? r.fbUid : null;
+  return { label: text(r.label, 80), extVersion: text(r.extVersion, 32), fbUid: uid };
 }

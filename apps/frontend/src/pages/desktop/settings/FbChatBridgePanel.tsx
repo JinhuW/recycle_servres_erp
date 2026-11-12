@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { fbChatConfigProblem, type FbChatConfigField } from '@recycle-erp/shared';
+import { fbChatConfigProblem, type FbChatConfigField, type FbChatDevice } from '@recycle-erp/shared';
 import { api } from '../../../lib/api';
 import { handleFetchError } from '../../../lib/errorToast';
 import { relTime } from '../../../lib/format';
@@ -61,7 +61,9 @@ export function FbChatBridgePanel() {
     <>
       <SettingsHeader title={t('fbcfgTitle')} sub={t('fbcfgSub')} />
 
-      <div className="card">
+      <DevicesCard />
+
+      <div className="card" style={{ marginTop: 'var(--gap)' }}>
         <div className="card-head"><div className="card-title">{t('fbcfgProfiles')}</div></div>
         <div className="card-body" style={{ padding: 0 }}>
           {data.accounts.length === 0
@@ -253,6 +255,108 @@ function SettingRow({ field, value, source, overridden, onSave, onReset }: {
       <button className="btn sm ghost" style={{ visibility: overridden ? 'visible' : 'hidden' }} disabled={busy} onClick={onReset}>
         {t('fbcfgReset')}
       </button>
+    </div>
+  );
+}
+
+// Extensions enroll themselves and do nothing until approved here. The open
+// enroll route means a stranger can ask too: the pairing code on the
+// extension's options page is how the owner tells theirs apart.
+function DevicesCard() {
+  const { t, locale } = useT();
+  const [devices, setDevices] = useState<FbChatDevice[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const reload = () => api.get<{ devices: FbChatDevice[] }>('/api/fb-chat/devices')
+    .then((r) => setDevices(r.devices)).catch(handleFetchError);
+  useEffect(() => {
+    reload();
+    // A new request shows up without a refresh while the owner waits for it.
+    const timer = setInterval(reload, 10_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const act = async (id: string, action: 'approve' | 'reject' | 'revoke' | 'delete') => {
+    setBusy(id);
+    try {
+      if (action === 'delete') await api.delete(`/api/fb-chat/devices/${id}`);
+      else await api.post(`/api/fb-chat/devices/${id}/${action}`, {});
+      await reload();
+    } catch (err) {
+      handleFetchError(err);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const chip: Record<FbChatDevice['status'], string> = { pending: 'warn', approved: 'pos', rejected: 'neg', revoked: 'muted' };
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div className="card-title">{t('fbdevTitle')}</div>
+        <div className="card-sub">{t('fbdevSub')}</div>
+      </div>
+      <div className="card-body" style={{ padding: 0 }}>
+        {devices === null ? null : devices.length === 0
+          ? <div style={{ padding: 16, color: 'var(--fg-subtle)', fontSize: 13 }}>{t('fbdevNone')}</div>
+          : (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>{t('fbdevCode')}</th>
+                  <th>{t('fbcfgProfile')}</th>
+                  <th>{t('fbcfgVersion')}</th>
+                  <th>{t('fbdevFrom')}</th>
+                  <th>{t('fbcfgLastSeen')}</th>
+                  <th>{t('fbdevStatus')}</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {devices.map((d) => (
+                  <tr key={d.id}>
+                    <td className="mono" style={{ fontWeight: 600, letterSpacing: 1 }}>{d.code}</td>
+                    <td>
+                      <div>{d.label || '–'}</div>
+                      {d.fb_uid && <div className="mono" style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{d.fb_uid}</div>}
+                    </td>
+                    <td className="mono">{d.ext_version ?? '–'}</td>
+                    <td className="mono" title={d.user_agent ?? undefined}>{d.created_ip ?? '–'}</td>
+                    <td>{relTime(d.last_seen_at, locale)}</td>
+                    <td>
+                      <span className={`chip ${chip[d.status]}`}>{t(`fbdev_${d.status}`)}</span>
+                      {d.decided_by && d.decided_at && (
+                        <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                          {t('fbdevDecidedBy', { who: d.decided_by, when: relTime(d.decided_at, locale) })}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {d.status === 'pending' && (
+                        <>
+                          <button className="btn sm" disabled={busy === d.id} onClick={() => act(d.id, 'approve')}>{t('fbdevApprove')}</button>
+                          {' '}
+                          <button className="btn sm ghost" disabled={busy === d.id} onClick={() => act(d.id, 'reject')}>{t('fbdevReject')}</button>
+                        </>
+                      )}
+                      {d.status === 'approved' && (
+                        <button className="btn sm ghost" disabled={busy === d.id} onClick={() => act(d.id, 'revoke')}>{t('fbdevRevoke')}</button>
+                      )}
+                      {(d.status === 'rejected' || d.status === 'revoked') && (
+                        <>
+                          <button className="btn sm ghost" disabled={busy === d.id} onClick={() => act(d.id, 'approve')}>{t('fbdevApprove')}</button>
+                          {' '}
+                          <button className="btn sm ghost" disabled={busy === d.id} onClick={() => act(d.id, 'delete')}>{t('fbdevDelete')}</button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+      </div>
     </div>
   );
 }
