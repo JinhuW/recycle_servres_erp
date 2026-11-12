@@ -1,10 +1,16 @@
 import {
+  FB_CHAT_CONFIG_KEY,
+  FB_CHAT_CONFIG_TYPES,
+  FB_CHAT_CONFIG_VALUE_MAX,
   FB_CHAT_EVENT_KINDS,
   FB_CHAT_MAX_WAIT_SEC,
   type FbChatAccountRef,
   type FbChatBuyer,
   type FbChatBuyerPush,
   type FbChatClaimRequest,
+  type FbChatConfigField,
+  type FbChatConfigRequest,
+  type FbChatConfigType,
   type FbChatEventKind,
   type FbChatEventPush,
   type FbChatRow,
@@ -134,6 +140,52 @@ export function parseEventPush(v: unknown): FbChatEventPush {
     fbThreadId: p.fbThreadId === undefined ? undefined : id(p.fbThreadId, 'fbThreadId'),
     detail,
   };
+}
+
+const MAX_CONFIG_FIELDS = 200;
+
+const finite = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+
+/** A JSON value small enough to keep, or the reason it is not. */
+export function fbChatConfigValueProblem(value: unknown): string | null {
+  if (value === undefined) return 'is missing';
+  const json = JSON.stringify(value);
+  if (json === undefined) return 'is not JSON';
+  return json.length > FB_CHAT_CONFIG_VALUE_MAX ? `is longer than ${FB_CHAT_CONFIG_VALUE_MAX} characters as JSON` : null;
+}
+
+function configField(v: unknown): FbChatConfigField {
+  const f = obj(v, 'field');
+  if (typeof f.key !== 'string' || !FB_CHAT_CONFIG_KEY.test(f.key)) throw new FbChatPushError('field.key is not a setting key');
+  if (!FB_CHAT_CONFIG_TYPES.includes(f.type as FbChatConfigType)) throw new FbChatPushError(`field ${f.key}: unknown type`);
+  const problem = fbChatConfigValueProblem(f.default);
+  if (problem) throw new FbChatPushError(`field ${f.key}: default ${problem}`);
+  const options = Array.isArray(f.options)
+    ? f.options.filter((o): o is string => typeof o === 'string').map((o) => o.slice(0, 80)).slice(0, 50)
+    : undefined;
+  return {
+    key: f.key,
+    label: text(f.label, 80) ?? f.key,
+    help: text(f.help, 400) ?? undefined,
+    type: f.type as FbChatConfigType,
+    default: f.default,
+    min: finite(f.min),
+    max: finite(f.max),
+    unit: text(f.unit, 16) ?? undefined,
+    options: options?.length ? options : undefined,
+  };
+}
+
+export function parseConfigRequest(v: unknown): FbChatConfigRequest {
+  const p = obj(v, 'body');
+  if (!Array.isArray(p.fields) || p.fields.length > MAX_CONFIG_FIELDS) {
+    throw new FbChatPushError(`fields must be an array of at most ${MAX_CONFIG_FIELDS}`);
+  }
+  const fields = p.fields.map(configField);
+  if (new Set(fields.map((f) => f.key)).size !== fields.length) throw new FbChatPushError('fields repeat a key');
+  const extVersion = text(p.extVersion, 32);
+  if (!extVersion) throw new FbChatPushError('extVersion is missing');
+  return { account: p.account === undefined ? undefined : account(p.account), extVersion, fields };
 }
 
 /** `<buyer> · <location>`, within Telegram's 128-character topic name. */

@@ -1452,7 +1452,8 @@ only):
   are set.
 
 **Facebook chat hub** (`/api/fb-chat`, v1.451.0, RS-578) relays the owner's
-own Marketplace chats to Telegram. It has no page in the ERP.
+own Marketplace chats to Telegram. Its one page is Settings ▸ Chat bridge
+(v1.453.0).
 
 - **Who sends.** A Chrome extension in each of the owner's browser profiles
   (`facebook_messager_extenion/` in the workspace, its own repo), one Facebook
@@ -1478,6 +1479,21 @@ own Marketplace chats to Telegram. It has no page in the ERP.
   year), send attempt and account event is kept in the `fb_chat_*` tables for
   analysis. Managers can read `/api/fb-chat/accounts`, `/threads` and
   `/threads/:id/messages`.
+- **Settings from the ERP** (v1.453.0, RS-579). An extension's options page
+  holds only the ERP address, its credentials, the profile's name and the
+  on/off switch. It asks `POST /api/fb-chat/push/config` for everything else
+  as soon as it can reach the ERP, bridge on or off, then about once a minute.
+  Settings ▸ Chat bridge (managers) sets each value for every profile or for one
+  profile, and one profile's own value wins. The settings are not a fixed list:
+  each extension reports the fields it understands (key, type, default,
+  bounds, label), and the page draws its form from the newest version's
+  fields. A value that does not fit a reported field is refused. A key no
+  extension reports yet is accepted and kept, and an extension that does not
+  know a key ignores it. The page lists each profile with its extension version
+  and whether it has picked up the latest settings yet. The first settings are
+  Paused, Time between replies, Typing pace, Quiet thread wait, Buyer profile
+  refresh, the inbox reload window and the Settings check interval itself.
+  Paused stops claiming and typing replies; queued replies wait in the ERP.
 - **Setup.** `FB_CHAT_TELEGRAM_CHAT_ID` on the backend, plus either a bot
   (`FB_CHAT_TELEGRAM_BOT_TOKEN`) or, from v1.452.0, an ordinary Telegram
   account (`FB_CHAT_TELEGRAM_API_ID`, `FB_CHAT_TELEGRAM_API_HASH` and

@@ -1,6 +1,8 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FbChatClaimAnswer, FbChatRow, FbChatSyncAnswer, FbChatSyncPush } from '@recycle-erp/shared';
+import type { FbChatConfigAnswer, FbChatConfigField } from '@recycle-erp/shared';
 import { chunkForTelegram, fbChatTopicName } from '../src/lib/fbChat';
+import { compareVersions } from '../src/services/fbChatConfig';
 import { TelegramError, type TelegramCall } from '../src/lib/telegramBot';
 import { userAccountCaller, type TelegramUserClient } from '../src/lib/telegramUser';
 import { createOAuthClient } from '../src/oauth/clients';
@@ -383,5 +385,101 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     const chunks = chunkForTelegram(Array.from({ length: 300 }, (_, i) => `line ${i} ${'x'.repeat(30)}`).join('\n'));
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.every((c) => c.length <= 4000 && !c.startsWith('\n'))).toBe(true);
+  });
+  describe('remote settings', () => {
+    const FIELDS: FbChatConfigField[] = [
+      { key: 'paused', label: 'Paused', type: 'boolean', default: false },
+      { key: 'minSendIntervalSec', label: 'Time between replies', type: 'integer', default: 20, min: 10, max: 600, unit: 's' },
+    ];
+    const ask = (account?: typeof ACCOUNT, fields = FIELDS, extVersion = '0.2.0') =>
+      push<FbChatConfigAnswer>('config', { account, extVersion, fields });
+    type Page = {
+      fields: Array<FbChatConfigField & { versions: string[] }>;
+      entries: Array<{ account_id: number | null; key: string; value: unknown; updated_by: string | null }>;
+      accounts: Array<{ id: number; label: string; config_rev: string | null; expected_rev: string }>;
+    };
+    const page = async (token: string) => (await api<Page>('GET', '/api/fb-chat/config', { token })).body;
+
+    it('answers an extension before it knows its account, and with nothing set', async () => {
+      const first = await ask();
+      expect(first.status).toBe(200);
+      expect(first.body.values).toEqual({});
+      const again = await ask();
+      expect(again.body.rev).toBe(first.body.rev);
+    });
+
+    it('draws the settings page from the fields the extensions report', async () => {
+      await ask(ACCOUNT, [FIELDS[0]!], '0.1.9');
+      await ask(ACCOUNT);
+      const manager = await loginAs(ALEX);
+      const { fields, accounts } = await page(manager.token);
+      expect(fields.map((f) => f.key)).toEqual(['paused', 'minSendIntervalSec']);
+      expect(fields[0]!.versions).toEqual(['0.2.0', '0.1.9']);
+      expect(fields[1]!).toMatchObject({ min: 10, max: 600, unit: 's', versions: ['0.2.0'] });
+      expect(accounts.map((a) => a.label)).toEqual(['Denver profile']);
+    });
+
+    it('hands each profile the shared values with its own on top, and the revision follows', async () => {
+      const before = (await ask(ACCOUNT)).body.rev;
+      await ask(OTHER);
+      const manager = await loginAs(ALEX);
+      const accounts = (await page(manager.token)).accounts;
+      const denver = accounts.find((a) => a.label === 'Denver profile')!;
+      expect(denver.config_rev).toBe(before);
+      expect(denver.expected_rev).toBe(before);
+
+      const put = (key: string, value: unknown, accountId: number | null = null) =>
+        api('PUT', `/api/fb-chat/config/${key}`, { token: manager.token, body: { accountId, value } });
+      expect((await put('minSendIntervalSec', 30)).status).toBe(200);
+      expect((await put('minSendIntervalSec', 45, denver.id)).status).toBe(200);
+
+      // The page knows the profile has not picked it up yet.
+      const pending = (await page(manager.token)).accounts.find((a) => a.id === denver.id)!;
+      expect(pending.expected_rev).not.toBe(pending.config_rev);
+
+      const mine = await ask(ACCOUNT);
+      expect(mine.body.values).toEqual({ minSendIntervalSec: 45 });
+      expect(mine.body.rev).not.toBe(before);
+      expect((await ask(OTHER as typeof ACCOUNT)).body.values).toEqual({ minSendIntervalSec: 30 });
+      const caught = (await page(manager.token)).accounts.find((a) => a.id === denver.id)!;
+      expect(caught.config_rev).toBe(caught.expected_rev);
+
+      // Reset the profile's own value: back to the shared one.
+      expect((await api('DELETE', `/api/fb-chat/config/minSendIntervalSec?accountId=${denver.id}`, { token: manager.token })).status).toBe(200);
+      expect((await ask(ACCOUNT)).body.values).toEqual({ minSendIntervalSec: 30 });
+      const { entries } = await page(manager.token);
+      expect(entries).toEqual([expect.objectContaining({ account_id: null, key: 'minSendIntervalSec', value: 30, updated_by: expect.any(String) })]);
+    });
+
+    it('refuses a value that does not fit a reported field, and takes an unreported key as given', async () => {
+      await ask(ACCOUNT);
+      const manager = await loginAs(ALEX);
+      const put = (key: string, value: unknown) =>
+        api<{ detail?: string }>('PUT', `/api/fb-chat/config/${key}`, { token: manager.token, body: { accountId: null, value } });
+      const low = await put('minSendIntervalSec', 5);
+      expect(low.status).toBe(400);
+      expect(low.body.detail).toBe('Time between replies must be at least 10');
+      expect((await put('minSendIntervalSec', 12.5)).status).toBe(400);
+      expect((await put('paused', 'yes')).status).toBe(400);
+      expect((await put('bad key!', 1)).status).toBe(400);
+      expect((await put('futureSetting', { selectors: ['a', 'b'] })).status).toBe(200);
+      expect((await put('futureSetting', 'x'.repeat(20_000))).status).toBe(400);
+      expect((await ask(ACCOUNT)).body.values).toEqual({ futureSetting: { selectors: ['a', 'b'] } });
+      expect((await api('PUT', '/api/fb-chat/config/paused', { token: manager.token, body: { accountId: 999999, value: true } })).status).toBe(404);
+    });
+
+    it('guards the settings: the push needs the scope, the page a manager', async () => {
+      expect((await push('config', { extVersion: '0.2.0', fields: FIELDS }, wrongScope)).status).toBe(403);
+      expect((await push('config', { extVersion: '0.2.0', fields: [{ key: '1bad', type: 'boolean', default: false }] })).status).toBe(400);
+      expect((await push('config', { extVersion: '0.2.0', fields: [FIELDS[0], FIELDS[0]] })).status).toBe(400);
+      expect((await push('config', { fields: FIELDS })).status).toBe(400);
+      const purchaser = await loginAs(MARCUS);
+      expect((await api('GET', '/api/fb-chat/config', { token: purchaser.token })).status).toBe(403);
+      expect((await api('PUT', '/api/fb-chat/config/paused', { token: purchaser.token, body: { value: true } })).status).toBe(403);
+    });
+
+    it('orders extension versions by number', () => {
+      expect(['0.10.0', '0.2.0', '0.9.1'].sort((a, b) => compareVersions(b, a))).toEqual(['0.10.0', '0.9.1', '0.2.0']);
+    });
   });
 });

@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-11:** ERP migration `0237`, Reddit tracker migration `0007`,
+**As of 2026-11-11:** ERP migration `0238`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -3005,6 +3005,8 @@ One Facebook account an extension has spoken for, created on its first push.
 | `restricted_at` | `timestamptz` |  |  |  |
 | `last_seen_at` | `timestamptz` | ✓ | `now()` | The last push of any kind. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
+| `config_rev` | `text` |  |  | The settings revision the extension last picked up (0238). |
+| `config_seen_at` | `timestamptz` |  |  | When it last asked for its settings (0238). |
 
 - **Primary key:** `id`
 - **Unique:** `fb_uid`
@@ -3107,6 +3109,35 @@ Append-only record of what is worth counting later and is not a message. `kind` 
 - **Primary key:** `id`
 - **References:** `account_id` → `fb_chat_accounts.id` (on delete cascade); `thread_id` → `fb_chat_threads.id` (on delete cascade)
 - **Indexes:** `fb_chat_events_account_idx` (account_id, created_at); `fb_chat_events_thread_idx` (thread_id); `fb_chat_events_alert_idx` (id) where an alert is waiting
+#### `fb_chat_config`
+
+Settings the extensions load from the ERP, set on Settings ▸ Chat bridge (0238). Keys are not a fixed list; see `fb_chat_config_fields`.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | sequence |  |
+| `account_id` | `bigint` |  |  | → fb_chat_accounts; NULL is the value for every profile, a row for an account overrides it. |
+| `key` | `text` | ✓ |  | The setting, as the extension names it. |
+| `value` | `jsonb` | ✓ |  | Any JSON, at most 16,000 characters. |
+| `updated_by` | `uuid` |  |  | → users. |
+| `updated_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **Unique:** (account_id, key), nulls not distinct
+- **References:** `account_id` → `fb_chat_accounts.id` (on delete cascade); `updated_by` → `users.id` (on delete set null)
+- **Indexes:** `fb_chat_config_updated_by_idx` (updated_by)
+#### `fb_chat_config_fields`
+
+The settings each extension version reports it understands, as it reported them (0238). The settings page shows the newest definition of each key from versions seen in the past 90 days.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `ext_version` | `text` | ✓ |  | The extension's manifest version. |
+| `fields` | `jsonb` | ✓ |  | Array of `{key, label, help, type, default, min, max, unit, options}`. |
+| `first_seen_at` | `timestamptz` | ✓ | `now()` |  |
+| `last_seen_at` | `timestamptz` | ✓ | `now()` | Refreshed at most every ten minutes. |
+
+- **Primary key:** `ext_version`
 #### `fb_chat_telegram_state`
 
 One row: the reply cursors. A bot reads updates; an account reads the group's history. Each keeps its own, so switching modes starts clean.

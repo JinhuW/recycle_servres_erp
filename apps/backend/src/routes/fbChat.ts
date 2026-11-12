@@ -1,13 +1,17 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import { authMiddleware } from '../auth';
 import { getDb } from '../db';
+import { FB_CHAT_CONFIG_KEY, fbChatConfigProblem } from '@recycle-erp/shared';
 import {
-  FbChatPushError, parseBuyerPush, parseClaim, parseEventPush, parseSendResult, parseSyncPush,
+  FbChatPushError, fbChatConfigValueProblem, parseBuyerPush, parseClaim, parseConfigRequest, parseEventPush,
+  parseSendResult, parseSyncPush,
 } from '../lib/fbChat';
+import { allLimited } from '../lib/concurrency';
 import { log } from '../lib/log';
 import { requireManager } from '../lib/role';
 import { bearerGuard } from '../oauth/guard';
-import { claimReply, ingestBuyer, ingestSync, recordEvent, recordSendResult } from '../services/fbChat';
+import { claimReply, ingestBuyer, ingestSync, recordEvent, recordSendResult, touchAccount } from '../services/fbChat';
+import { configFor, knownFields, notePickup, reportFields, setConfig } from '../services/fbChatConfig';
 import { fbChatTelegramConfigured, kickFbChatTelegram } from '../services/fbChatTelegram';
 import type { Env, OAuthCtx, User } from '../types';
 
@@ -100,6 +104,22 @@ fbChat.post('/push/events', async (c) => {
   return c.json({ ok: true });
 });
 
+// Each extension asks for its settings about once a minute, bridge on or off,
+// and says which fields it understands so the settings page can show them.
+fbChat.post('/push/config', async (c) => {
+  const req = await parsed(c, parseConfigRequest);
+  if (typeof req === 'string') return c.json(invalid(req), 400);
+  const answer = await getDb(c.env).begin(async (tx) => {
+    await reportFields(tx, req.extVersion, req.fields);
+    if (!req.account) return configFor(tx, null);
+    const account = await touchAccount(tx, req.account, c.var.oauthCtx.clientId);
+    const config = await configFor(tx, account.id);
+    await notePickup(tx, account.id, config.rev);
+    return config;
+  });
+  return c.json(answer);
+});
+
 // The extension's settings page calls this to prove its credentials and to say
 // whether replies can arrive at all.
 fbChat.get('/push/status', (c) => c.json({ ok: true, telegram: fbChatTelegramConfigured(c.env) }));
@@ -134,6 +154,69 @@ fbChat.get('/threads/:id/messages', async (c) => {
            tg_user_name, created_at, sent_at
       FROM fb_chat_messages WHERE thread_id = ${id} ORDER BY seq NULLS LAST, id`;
   return c.json({ messages: rows });
+});
+
+// ── Settings (manager) ────────────────────────────────────────────────────────
+
+fbChat.get('/config', async (c) => {
+  const sql = getDb(c.env);
+  const [fields, entries, accounts] = await allLimited([
+    () => knownFields(sql),
+    () => sql`
+      SELECT c.account_id::int AS account_id, c.key, c.value, c.updated_at, u.name AS updated_by
+        FROM fb_chat_config c LEFT JOIN users u ON u.id = c.updated_by
+       ORDER BY c.account_id NULLS FIRST, c.key`,
+    () => sql<{ id: number; config_rev: string | null }[]>`
+      SELECT id::int AS id, fb_uid, label, ext_version, last_seen_at, config_rev, config_seen_at
+        FROM fb_chat_accounts ORDER BY label, id`,
+  ]);
+  // What each profile should have by now, so the page can say whether it has.
+  const expected = await allLimited(accounts.map((a) => async () => (await configFor(sql, a.id)).rev), 4);
+  return c.json({
+    fields,
+    entries,
+    accounts: accounts.map((a, i) => ({ ...a, expected_rev: expected[i] })),
+  });
+});
+
+/** The account a settings write names: null for every profile, or a known id. */
+function accountParam(v: unknown): number | null | 'bad' {
+  if (v === null || v === undefined || v === '') return null;
+  const id = Number(v);
+  return Number.isSafeInteger(id) && id > 0 ? id : 'bad';
+}
+
+fbChat.put('/config/:key', async (c) => {
+  const key = c.req.param('key');
+  if (!FB_CHAT_CONFIG_KEY.test(key)) return c.json(invalid('not a setting key'), 400);
+  const body = await c.req.json().catch(() => null) as { accountId?: unknown; value?: unknown } | null;
+  const accountId = accountParam(body?.accountId);
+  if (accountId === 'bad') return c.json(invalid('accountId is not an id'), 400);
+  const sizeProblem = fbChatConfigValueProblem(body?.value);
+  if (sizeProblem) return c.json(invalid(`value ${sizeProblem}`), 400);
+  const sql = getDb(c.env);
+  // A key no extension reports yet is taken as given, so the ERP can be set
+  // ahead of an extension release; one that is reported must fit its field.
+  const field = (await knownFields(sql)).find((f) => f.key === key);
+  const problem = field ? fbChatConfigProblem(field, body!.value) : null;
+  if (problem) return c.json(invalid(`${field!.label} ${problem}`), 400);
+  if (accountId !== null) {
+    const [known] = await sql`SELECT 1 FROM fb_chat_accounts WHERE id = ${accountId}`;
+    if (!known) return c.json({ error: 'not_found' }, 404);
+  }
+  await setConfig(sql, accountId, key, body!.value, c.var.user.id);
+  log.info('fb chat setting changed', { module: 'fbChat', key, accountId });
+  return c.json({ ok: true });
+});
+
+fbChat.delete('/config/:key', async (c) => {
+  const key = c.req.param('key');
+  if (!FB_CHAT_CONFIG_KEY.test(key)) return c.json(invalid('not a setting key'), 400);
+  const accountId = accountParam(c.req.query('accountId'));
+  if (accountId === 'bad') return c.json(invalid('accountId is not an id'), 400);
+  await setConfig(getDb(c.env), accountId, key, undefined, c.var.user.id);
+  log.info('fb chat setting reset', { module: 'fbChat', key, accountId });
+  return c.json({ ok: true });
 });
 
 export default fbChat;
