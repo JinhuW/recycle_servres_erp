@@ -114,6 +114,7 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
   if (acct.restricted) {
     await tx`UPDATE fb_chat_accounts SET restricted = NULL, restricted_at = NULL WHERE id = ${acct.id}`;
     await addEvent(tx, acct.id, null, 'recovered', {}, `✅ ${acct.label || push.account.fbUid}: Facebook is reachable again.`);
+    await notifyOutbox(tx);
   }
   const t = push.thread;
   let [thread] = await tx<{ id: number; last_seq: number }[]>`
@@ -222,6 +223,10 @@ export async function claimReply(tx: Tx, ref: FbChatAccountRef, clientId: string
        AND m.claimed_at < NOW() - make_interval(secs => ${FB_CHAT_SEND_STALE_MS / 1000})
     RETURNING m.id::int AS id, m.thread_id::int AS thread_id`;
   for (const m of stale) await addEvent(tx, acct.id, m.thread_id, 'send_uncertain', { message_id: m.id, reason: 'stale claim' });
+  // The account's next reply may go now; wake claims held on other instances.
+  if (stale.length) await notifyOutbox(tx);
+  // A login or checkpoint page has no composer: replies wait, as the alert says.
+  if (acct.restricted) return null;
   const [claimed] = await tx<FbChatClaimAnswer[]>`
     UPDATE fb_chat_messages m SET send_state = 'sending', claimed_at = NOW(), attempts = attempts + 1
       FROM fb_chat_threads t
@@ -290,6 +295,7 @@ export async function recordEvent(tx: Tx, push: FbChatEventPush, clientId: strin
     if (!acct.restricted) return;
     await tx`UPDATE fb_chat_accounts SET restricted = NULL, restricted_at = NULL WHERE id = ${acct.id}`;
     await addEvent(tx, acct.id, null, 'recovered', {}, `✅ ${name}: Facebook is reachable again.`);
+    await notifyOutbox(tx);
     return;
   }
   await addEvent(tx, acct.id, thread?.id ?? null, 'error', push.detail ?? {});

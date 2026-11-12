@@ -251,6 +251,20 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     expect(Date.now() - reported).toBeLessThan(1000);
   });
 
+  it('holds replies while the account is restricted and wakes a held claim when it is back', async () => {
+    await seeded();
+    topicReply(1, 'Yes, still available');
+    await tick();
+    await push('events', { account: ACCOUNT, kind: 'restricted', detail: { restriction: 'login' } });
+    expect((await push('outbox/claim', { account: ACCOUNT })).status).toBe(204);
+    const held = push<FbChatClaimAnswer>('outbox/claim', { account: ACCOUNT, wait: 10 });
+    await new Promise((r) => setTimeout(r, 300));
+    const recovered = Date.now();
+    await push('events', { account: ACCOUNT, kind: 'recovered' });
+    expect((await held).body).toMatchObject({ body: 'Yes, still available' });
+    expect(Date.now() - recovered).toBeLessThan(1000);
+  });
+
   it('answers a held claim at once when the server starts draining', async () => {
     await seeded();
     const held = push('outbox/claim', { account: ACCOUNT, wait: 20 });
