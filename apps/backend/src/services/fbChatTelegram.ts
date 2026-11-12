@@ -484,8 +484,9 @@ function startUserSessionLoop(env: Env, session: UserSessionConfig): { stop: () 
 }
 
 export function startFbChatTelegramLoop(env: Env): { stop: () => void } {
-  // A mirror holds a copy of the tables; posting from it would double every message.
-  if (env.FLEET_ROLE === 'mirror') return { stop: () => {} };
+  // Not gated on FLEET_ROLE: that says where the fleet runs. The chat tables
+  // belong to whichever ERP the extensions push to, and setting the Telegram
+  // variables on an instance is what opts it in. Set them on one ERP only.
   const session = fbChatUserSession(env);
   if (session) return startUserSessionLoop(env, session);
   const cfg = fbChatTelegramConfig(env);

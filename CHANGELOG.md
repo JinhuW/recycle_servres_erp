@@ -17,7 +17,10 @@ over and over when a setting is wrong (RS-578). A group id that is not a
 supergroup's (`-100…`), which is what a group has before Topics is turned on,
 is refused at startup with a log line saying so, and a failed sign-in now
 waits 1, then 5, then 30 minutes before the next try instead of 15 seconds.
-The session script marks which of the account's groups can be used.
+The session script marks which of the account's groups can be used. The
+Telegram loop also no longer refuses to start on a fleet mirror
+(`FLEET_ROLE=mirror`, which dev is): that setting is about the fleet, and it
+had kept dev's hub silent with every variable set.
 
 ## [1.452.0] - 2026-11-11
 
