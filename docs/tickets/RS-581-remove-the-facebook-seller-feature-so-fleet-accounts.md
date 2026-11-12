@@ -2,13 +2,13 @@
 id: RS-581
 title: Remove the Facebook seller feature so fleet accounts only search
 type: chore
-status: in-review
+status: done
 priority: P2
 created: 2026-11-12
 reporter: jinhu
 branch: session/20261112-114555
-pr:
-version:
+pr: 1191
+version: 1.454.0
 related: [RS-565, RS-571, RS-578]
 ---
 
