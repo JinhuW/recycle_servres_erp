@@ -13,14 +13,19 @@ import { TelegramError, type TelegramCall } from './telegramBot';
 //   history, after the last message id seen, and only when an update says
 //   something arrived (or a catch-up interval passed), to stay clear of flood
 //   limits.
-// - Messages the account itself sends come back marked `out`. They are the
-//   hub's own posts and are reported as from a bot, so the pass skips them.
-//   A reply typed from this same account is therefore never relayed: the
-//   account must be one nobody types in.
+// - Messages the account itself sends come back marked `out`, whether the hub
+//   posted them or the owner typed them on a phone signed in to the same
+//   account. The hub remembers what it posted (ids, and texts in case an id
+//   was not returned) and reports only those as from a bot. An `out` message
+//   it did not post is a reply. One from before this session started is
+//   taken as a post: nothing is known about it, and relaying a post would
+//   send the buyer's own words back to them.
 
 /** One message in the group, as much as the hub reads. */
 export type UserMessage = {
   id: number;
+  /** Unix seconds. */
+  date: number;
   /** The forum topic it is in, or null for General. */
   topicId: number | null;
   out: boolean;
@@ -46,6 +51,8 @@ export interface TelegramUserClient {
 
 // A missed update costs at most this much delay before a reply is read.
 const CATCH_UP_MS = 20_000;
+// How many of its own posts the hub remembers, to tell them from typed replies.
+const POSTED_KEPT = 500;
 
 type Params = Record<string, unknown>;
 const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
@@ -56,6 +63,17 @@ export function userAccountCaller(client: TelegramUserClient, chatId: string): T
   let lastFetch = 0;
   client.onActivity(() => { dirty = true; });
   const chat = { id: Number(chatId) };
+  const startedAt = Math.floor(Date.now() / 1000);
+  const postedIds = new Set<number>();
+  const postedTexts: string[] = [];
+  const posted = (id: number, text?: string) => {
+    if (id) postedIds.add(id);
+    if (postedIds.size > POSTED_KEPT) postedIds.delete(postedIds.values().next().value!);
+    if (text?.trim()) postedTexts.push(text.trim());
+    if (postedTexts.length > POSTED_KEPT) postedTexts.shift();
+  };
+  const isPost = (m: UserMessage) =>
+    m.out && (postedIds.has(m.id) || m.date <= startedAt || postedTexts.includes(m.text.trim()));
 
   const call = async (method: string, p: Params): Promise<unknown> => {
     switch (method) {
@@ -74,7 +92,7 @@ export function userAccountCaller(client: TelegramUserClient, chatId: string): T
             chat,
             // The first read only places the cursor: nothing before it is a reply.
             from: offset === 0 || !m.fromId ? undefined : {
-              id: Number(m.fromId), is_bot: m.out, first_name: m.firstName, last_name: m.lastName, username: m.username,
+              id: Number(m.fromId), is_bot: isPost(m), first_name: m.firstName, last_name: m.lastName, username: m.username,
             },
             text: m.text || undefined,
           },
@@ -83,10 +101,14 @@ export function userAccountCaller(client: TelegramUserClient, chatId: string): T
       case 'sendMessage': {
         const reply = p.reply_parameters as { message_id?: number } | undefined;
         const id = await client.send(String(p.text), { topicId: num(p.message_thread_id), replyToId: reply?.message_id });
+        posted(id, String(p.text));
         return { message_id: id };
       }
-      case 'sendPhoto':
-        return { message_id: await client.sendPhotoUrl(String(p.photo), p.caption as string | undefined, num(p.message_thread_id)!) };
+      case 'sendPhoto': {
+        const id = await client.sendPhotoUrl(String(p.photo), p.caption as string | undefined, num(p.message_thread_id)!);
+        posted(id, p.caption as string | undefined);
+        return { message_id: id };
+      }
       case 'createForumTopic':
         return { message_thread_id: await client.createTopic(String(p.name)) };
       case 'editForumTopic':
@@ -161,6 +183,7 @@ export async function connectUserClient(cfg: UserSessionConfig): Promise<{ clien
           const sender = m.sender instanceof Api.User ? m.sender : undefined;
           return {
             id: m.id,
+            date: m.date,
             topicId: topicOf(m),
             out: !!m.out,
             fromId: m.senderId ? m.senderId.toString() : null,

@@ -250,8 +250,10 @@ function transcriptLine(m: Unmirrored, buyer: string): string {
   return `${when}${m.direction === 'in' ? buyer : 'You'}: ${text}`;
 }
 
-async function postOne(cfg: FbChatTelegramConfig, topicId: number, m: Unmirrored): Promise<void> {
-  const text = m.direction === 'in' ? m.body : `↩️ You: ${m.body}`;
+async function postOne(cfg: FbChatTelegramConfig, topicId: number, m: Unmirrored, buyer: string): Promise<void> {
+  // Named either way: posted as an ordinary account, a buyer's message would
+  // otherwise read as the owner's own on a phone signed in to that account.
+  const text = m.direction === 'in' ? `👤 ${buyer}: ${m.body}`.trimEnd() : `↩️ You: ${m.body}`;
   const [first, ...more] = m.images;
   if (first) {
     try {
@@ -332,7 +334,7 @@ async function mirror(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget: Budg
       } else {
         for (const m of messages) {
           if (!budget.take()) return posted;
-          await postOne(cfg, topicId, m);
+          await postOne(cfg, topicId, m, t.buyer_name ?? 'Buyer');
           await done([m.id]);
           posted += 1;
         }

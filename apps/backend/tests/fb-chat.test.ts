@@ -160,7 +160,7 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     expect((await push<FbChatSyncAnswer>('sync', sync(window))).body.added).toBe(2);
     expect((await push<FbChatSyncAnswer>('sync', sync(window))).body.added).toBe(0);
     await tick();
-    expect(texts()).toEqual(['ok', 'ok']);
+    expect(texts()).toEqual(['👤 John Smith: ok', '👤 John Smith: ok']);
     expect(sent('createForumTopic')).toHaveLength(0);
   });
 
@@ -336,7 +336,7 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     await tick();
     await tick();
     expect(sent('createForumTopic')).toHaveLength(1);
-    expect(texts().at(-1)).toBe('hello?');
+    expect(texts().at(-1)).toBe('👤 John Smith: hello?');
     expect(sent('sendMessage').every((c) => c.params.message_thread_id === 2)).toBe(true);
   });
 
@@ -383,7 +383,8 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
 
   it('runs as a Telegram account: its own cursor, its own posts ignored, replies relayed', async () => {
     const posted: string[] = [];
-    let history = [{ id: 300, topicId: null, out: false, fromId: '7', text: 'old chatter in General' }];
+    const soon = Math.floor(Date.now() / 1000) + 60;
+    let history = [{ id: 300, date: 1, topicId: null as number | null, out: false, fromId: '7', text: 'old chatter in General' }];
     const client: TelegramUserClient = {
       async history(afterId) { return afterId === 0 ? history.slice(-1) : history.filter((m) => m.id > afterId); },
       async send(text) { posted.push(text); return 0; },
@@ -401,13 +402,22 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     expect(state).toMatchObject({ offset: '0', user_last_message_id: '301' });
 
     history = [...history,
-      { id: 301, topicId: 41, out: true, fromId: '5', text: '👤 John Smith' },
-      { id: 302, topicId: 41, out: false, fromId: '7', text: 'Yes, still available' }];
+      // Posted before this session started (as after a restart): a post.
+      { id: 301, date: 1, topicId: 41, out: true, fromId: '5', text: '👤 John Smith' },
+      { id: 302, date: soon, topicId: 41, out: false, fromId: '7', text: 'Yes, still available' }];
     // A new cfg reads at once rather than waiting out the catch-up interval.
     const fresh = { ...cfg, call: userAccountCaller(client, CHAT) };
     expect((await runFbChatTelegramTick(getTestDb(), fresh)).queued).toBe(1);
     const claim = await push<FbChatClaimAnswer>('outbox/claim', { account: ACCOUNT });
     expect(claim.body).toMatchObject({ fbThreadId: 't1', body: 'Yes, still available' });
+
+    // Typed on a phone signed in to the hub's own account: out, but not a post.
+    history = [...history, { id: 303, date: soon, topicId: 41, out: true, fromId: '5', text: 'nope' }];
+    client.onActivity = () => {};
+    const again = { ...cfg, call: userAccountCaller(client, CHAT) };
+    expect((await runFbChatTelegramTick(getTestDb(), again)).queued).toBe(1);
+    const [typed] = await getTestDb()`SELECT body, tg_message_id FROM fb_chat_messages WHERE tg_message_id = 303`;
+    expect(typed).toMatchObject({ body: 'nope', tg_message_id: '303' });
   });
 
   it('counts an account session as configured, and needs all of it', () => {
