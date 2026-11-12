@@ -97,4 +97,19 @@ describe('prod→dev sync scrub', () => {
       { label: 'NJ1', url_enc: '', host: 'isp.example', port: 10018, timezone: 'America/New_York' },
     ]);
   });
+  it('leaves no chat bridge device token usable, and runs where prod has no device table yet', async () => {
+    const sql = getTestDb();
+    await sql`INSERT INTO fb_chat_devices (id, token_hash, code, status) VALUES ('aaaaaaaaaaaaaaaaaa', 'hash-of-a-device', 'K7QD-M2XP', 'approved')`;
+    const run = () => sql.begin(async (tx) => {
+      await tx`SELECT pg_catalog.set_config('search_path', '', true)`;
+      await tx.unsafe(scrub);
+    });
+    await run();
+    const [d] = await sql<{ token_hash: string }[]>`SELECT token_hash FROM fb_chat_devices`;
+    expect(d!.token_hash).not.toBe('hash-of-a-device');
+
+    await sql`DROP TABLE env_marker`;
+    await sql`DROP TABLE fb_chat_devices`;
+    await run();
+  });
 });

@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-12:** ERP migration `0239`, Reddit tracker migration `0007`,
+**As of 2026-11-12:** ERP migration `0240`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2639,7 +2639,7 @@ One Facebook account an extension has spoken for, created on its first push.
 | `id` | `bigint` | ✓ | sequence |  |
 | `fb_uid` | `text` | ✓ |  | The Facebook numeric uid, from the tab's `c_user` cookie. |
 | `label` | `text` | ✓ | `''` | What the owner called the Chrome profile in the extension. |
-| `client_id` | `text` |  |  | The service client that last pushed for it; no FK. |
+| `client_id` | `text` |  |  | The service client that last pushed for it, or `device:<id>` for an enrolled extension (0240); no FK. |
 | `ext_version` | `text` |  |  | The extension version that last pushed. |
 | `restricted` | `text` |  |  | login or checkpoint while the extension sees such a page; NULL when healthy. |
 | `restricted_at` | `timestamptz` |  |  |  |
@@ -2778,6 +2778,32 @@ The settings each extension version reports it understands, as it reported them 
 | `last_seen_at` | `timestamptz` | ✓ | `now()` | Refreshed at most every ten minutes. |
 
 - **Primary key:** `ext_version`
+#### `fb_chat_devices`
+
+Chat bridge extensions that enrolled themselves (0240). A row is made by the open `POST /api/fb-chat/enroll` as `pending`; a manager approves it on Settings ▸ Chat bridge. The nightly prod → dev sync keeps dev's rows (`deploy/railway-sync/keep-fleet.sql`).
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `text` | ✓ |  | 18 hex characters; the bearer is `fbd_<id>_<token>`. |
+| `token_hash` | `text` | ✓ |  | sha256 of the token, hex. The token itself is shown once. |
+| `code` | `text` | ✓ |  | Pairing code `XXXX-XXXX`, shown on the extension and on the page. |
+| `status` | `text` | ✓ | `'pending'` | pending, approved, rejected or revoked. Only approved may push. |
+| `label` | `text` | ✓ | `''` | The profile name the extension sent. |
+| `fb_uid` | `text` |  |  | The Facebook uid the extension last reported. |
+| `ext_version` | `text` |  |  |  |
+| `created_ip` | `text` |  |  | The enrolling caller's address. |
+| `ip_key` | `text` |  |  | The address as the per-address budget counts it (IPv6 by /64). |
+| `user_agent` | `text` |  |  |  |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+| `last_seen_at` | `timestamptz` | ✓ | `now()` | A pending row unseen for 7 days is deleted. |
+| `decided_by` | `uuid` |  |  | → users. |
+| `decided_at` | `timestamptz` |  |  |  |
+
+- **Primary key:** `id`
+- **Unique:** `token_hash`
+- **Checks:** `status IN ('pending', 'approved', 'rejected', 'revoked')`
+- **References:** `decided_by` → `users.id` (on delete set null)
+- **Indexes:** `fb_chat_devices_decided_by_idx` (decided_by); `fb_chat_devices_ip_key_idx` (ip_key, created_at); `fb_chat_devices_pending_idx` (created_at) where pending
 #### `fb_chat_telegram_state`
 
 One row: the reply cursors. A bot reads updates; an account reads the group's history. Each keeps its own, so switching modes starts clean.

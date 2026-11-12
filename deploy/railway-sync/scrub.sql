@@ -56,3 +56,14 @@ END $$;
 UPDATE public.fleet_hosts SET token_hash = pg_catalog.md5(pg_catalog.gen_random_uuid()::text);
 TRUNCATE public.fleet_claim_tickets;
 UPDATE public.fleet_slots SET proxy_url = NULL WHERE proxy_url IS NOT NULL;
+
+-- Prod's chat bridge devices: a token whose hash came across would let that
+-- extension push to dev. Replaced like the host tokens. Dev's own approved
+-- devices come back afterwards from keep-fleet.sql. Guarded because prod
+-- gains the table only when its release reaches main.
+DO $$
+BEGIN
+  IF pg_catalog.to_regclass('public.fb_chat_devices') IS NOT NULL THEN
+    UPDATE public.fb_chat_devices SET token_hash = pg_catalog.md5(pg_catalog.gen_random_uuid()::text);
+  END IF;
+END $$;

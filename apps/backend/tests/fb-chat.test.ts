@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FbChatClaimAnswer, FbChatRow, FbChatSyncAnswer, FbChatSyncPush } from '@recycle-erp/shared';
-import type { FbChatConfigAnswer, FbChatConfigField } from '@recycle-erp/shared';
+import type { FbChatConfigAnswer, FbChatConfigField, FbChatDevice, FbChatDeviceAnswer, FbChatEnrollAnswer } from '@recycle-erp/shared';
 import { chunkForTelegram, fbChatTopicName } from '../src/lib/fbChat';
 import { setHoldsDraining } from '../src/lib/pgWake';
 import { TelegramError, type TelegramCall } from '../src/lib/telegramBot';
@@ -468,6 +468,67 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.every((c) => c.length <= 4000 && !c.startsWith('\n'))).toBe(true);
   });
+  describe('enrollment', () => {
+    const enroll = (body: unknown = { label: 'Office', extVersion: '0.3.0' }, ip = '203.0.113.7') =>
+      api<FbChatEnrollAnswer>('POST', '/api/fb-chat/enroll', { body, headers: { 'X-Requested-By': '', 'x-client-ip': ip } });
+    const deviceBearer = (e: FbChatEnrollAnswer) => `fbd_${e.deviceId}_${e.token}`;
+    const decide = async (id: string, decision: string) =>
+      api('POST', `/api/fb-chat/devices/${id}/${decision}`, { token: (await loginAs(ALEX)).token });
+
+    it('lets a device push only once a manager approves it', async () => {
+      const e = (await enroll()).body;
+      expect(e.status).toBe('pending');
+      expect(e.code).toMatch(/^[2-9A-Z]{4}-[2-9A-Z]{4}$/);
+      expect(await getTestDb()`SELECT 1 FROM fb_chat_devices WHERE token_hash = ${e.token}`).toHaveLength(0);
+
+      const body = sync([row('in', 'hi')], { full: true });
+      const refused = await push<{ error: string }>('sync', body, deviceBearer(e));
+      expect(refused).toMatchObject({ status: 403, body: { error: 'device_pending' } });
+      const hello = await push<FbChatDeviceAnswer>('device', { fbUid: '100001', label: 'Office Mac' }, deviceBearer(e));
+      expect(hello.body).toEqual({ deviceId: e.deviceId, code: e.code, status: 'pending' });
+
+      const manager = await loginAs(ALEX);
+      const list = await api<{ devices: FbChatDevice[] }>('GET', '/api/fb-chat/devices', { token: manager.token });
+      expect(list.body.devices).toMatchObject([{ id: e.deviceId, code: e.code, label: 'Office Mac', fb_uid: '100001', created_ip: '203.0.113.7' }]);
+      const purchaser = await loginAs(MARCUS);
+      expect((await api('GET', '/api/fb-chat/devices', { token: purchaser.token })).status).toBe(403);
+
+      expect((await decide(e.deviceId, 'approve')).status).toBe(200);
+      expect((await push('sync', body, deviceBearer(e))).status).toBe(200);
+      const [acct] = await getTestDb()`SELECT client_id FROM fb_chat_accounts`;
+      expect(acct!.client_id).toBe(`device:${e.deviceId}`);
+
+      expect((await decide(e.deviceId, 'revoke')).status).toBe(200);
+      expect((await push<{ error: string }>('sync', body, deviceBearer(e))).body).toEqual({ error: 'device_rejected' });
+      expect((await push<FbChatDeviceAnswer>('device', {}, deviceBearer(e))).body.status).toBe('revoked');
+    });
+
+    it('refuses a rejected device, a wrong token and a deleted one', async () => {
+      const e = (await enroll()).body;
+      expect((await decide(e.deviceId, 'reject')).status).toBe(200);
+      expect((await decide(e.deviceId, 'revoke')).status).toBe(409);
+      expect((await push<{ error: string }>('sync', sync([row('in', 'hi')]), deviceBearer(e))).body).toEqual({ error: 'device_rejected' });
+
+      const forged = `fbd_${e.deviceId}_${'A'.repeat(43)}`;
+      expect((await push('device', {}, forged)).status).toBe(401);
+      const manager = await loginAs(ALEX);
+      expect((await api('DELETE', `/api/fb-chat/devices/${e.deviceId}`, { token: manager.token })).status).toBe(200);
+      expect((await push('device', {}, deviceBearer(e))).status).toBe(401);
+    });
+
+    it('bounds enrollment per address and in waiting requests', async () => {
+      for (let i = 0; i < 5; i++) expect((await enroll(undefined, '198.51.100.1')).status).toBe(200);
+      expect((await enroll(undefined, '198.51.100.1')).status).toBe(429);
+      for (let i = 0; i < 20; i++) expect((await enroll(undefined, `198.51.100.${10 + i}`)).status).toBe(200);
+      expect((await enroll(undefined, '198.51.100.99')).status).toBe(429);
+    });
+
+    it('takes no session and needs no CSRF header to enroll', async () => {
+      const r = await api('POST', '/api/fb-chat/enroll', { body: 'not json', headers: { 'X-Requested-By': '' } });
+      expect(r.status).toBe(200);
+    });
+  });
+
   describe('remote settings', () => {
     const FIELDS: FbChatConfigField[] = [
       { key: 'paused', label: 'Paused', type: 'boolean', default: false },
