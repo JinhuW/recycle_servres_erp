@@ -27,6 +27,18 @@ const PROBE_CHARS = 60;
 
 const flat = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
 
+/** The channel a held outbox claim sleeps on (lib/pgWake.ts). */
+export const FB_CHAT_OUTBOX_CHANNEL = 'fb_chat_outbox';
+
+/**
+ * Wakes held claims: a reply was queued, or a send settled and the account's
+ * next one may go. Sent through the writer's own handle so that, inside a
+ * transaction, it is delivered at commit.
+ */
+export async function notifyOutbox(sql: SqlLike): Promise<void> {
+  await sql`SELECT pg_notify(${FB_CHAT_OUTBOX_CHANNEL}, '')`;
+}
+
 async function addEvent(
   tx: SqlLike, accountId: number | null, threadId: number | null, kind: string,
   detail: Record<string, unknown> = {}, alert: string | null = null,
@@ -157,6 +169,7 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
     if (ours >= 0) {
       // The bubble is on the page, whatever the extension went on to report.
       const [m] = pending.splice(ours, 1);
+      if (m!.send_state === 'sending') await notifyOutbox(tx);
       await tx`
         UPDATE fb_chat_messages SET seq = ${seq}, send_state = 'sent', sent_at = COALESCE(sent_at, NOW()), error = NULL,
                acked_at = CASE WHEN send_state = 'sent' THEN acked_at ELSE NULL END
@@ -254,6 +267,7 @@ export async function recordSendResult(tx: Tx, id: number, r: FbChatSendResult, 
   await addEvent(tx, acct.id, m.thread_id, `send_${r.outcome}`, {
     message_id: id, attempts: m.attempts, typing_ms: r.typingMs ?? null, error: r.error ?? null,
   });
+  await notifyOutbox(tx);
   return 'ok';
 }
 

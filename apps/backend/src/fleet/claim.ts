@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { EventEmitter } from 'node:events';
 import { Hono } from 'hono';
 import type postgres from 'postgres';
 import {
@@ -31,6 +30,7 @@ import {
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
+import { armWake, holdsDraining, listening, setHoldsDraining } from '../lib/pgWake';
 import { poolKey, seal, sealOrNull, unseal, unsealOrEmpty } from '../lib/sealed';
 import { WORKER_ID } from '../routes/coordinator';
 import type { Env } from '../types';
@@ -43,7 +43,7 @@ import { notifyManagers } from '../lib/notify';
 import { lastKnownExitIp } from './proxies';
 import { exitIpForStint, latestProxyExit, slotWaits, type ProxyExitMeasure } from './proxyExit';
 import { exhaustedProxyIds } from './proxyMarks';
-import { notifyReady } from './scheduler';
+import { NOTIFY_CHANNEL, notifyReady } from './scheduler';
 import { linkLaunch, readLaunchFacts } from './profile';
 import { minutesTodaySql, SELLER_WRITE_KINDS, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
 import sellerWorker from './seller';
@@ -130,63 +130,13 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 const minutes = (n: number) => `${n} minutes`;
 
 // ─── Wake-ups ─────────────────────────────────────────────────────────────────
-// One LISTEN per pool, on the dedicated connection postgres.js keeps for it,
-// fanned out in-process to every held next-task. Each poll arms its own
-// listener before its first look, so a task committed between that look and
-// the hold still wakes it.
+// Held next-tasks sleep on the fleet_tasks channel (lib/pgWake.ts).
 
-type Waker = { emitter: EventEmitter; ready: Promise<unknown> };
-const wakers = new WeakMap<postgres.Sql, Waker>();
 let holds = 0;
-// A redeploy's drain waits on every open request, and a held poll can outlast
-// it: the grace then cuts the socket (a 502 at the worker) and the poll wakes
-// to a closed pool. So a drain ends the holds and takes no new ones.
-let draining = false;
-const armed = new Set<() => void>();
 
 /** On at SIGTERM; the worker comes back through retry_after to the new instance. */
 export function setPollsDraining(on: boolean): void {
-  draining = on;
-  if (on) for (const wake of armed) wake();
-}
-
-function waker(sql: postgres.Sql): Waker {
-  let w = wakers.get(sql);
-  if (!w) {
-    const emitter = new EventEmitter();
-    // Armed polls, held or about to look: at most one per open request.
-    emitter.setMaxListeners(0);
-    const ready = sql.listen('fleet_tasks', (payload) => emitter.emit('task', payload))
-      .catch((e: unknown) => {
-        // Forget it so the next poll listens again, rather than every hold
-        // sleeping out its time for the life of the process.
-        wakers.delete(sql);
-        flog.warn('fleet_tasks listener failed', e);
-      });
-    w = { emitter, ready };
-    wakers.set(sql, w);
-  }
-  return w;
-}
-
-type Wake = { wait: (ms: number) => Promise<void>; dispose: () => void };
-
-/** Starts listening now; `wait` resolves at once if a notify already came. */
-function armWake(sql: postgres.Sql): Wake {
-  const { emitter } = waker(sql);
-  let fired = false;
-  let release: (() => void) | null = null;
-  const onTask = () => { fired = true; release?.(); };
-  emitter.on('task', onTask);
-  armed.add(onTask);
-  return {
-    wait: (ms) => new Promise<void>((resolve) => {
-      if (fired || draining) return resolve();
-      const timer = setTimeout(() => { release = null; resolve(); }, ms);
-      release = () => { clearTimeout(timer); release = null; resolve(); };
-    }),
-    dispose: () => { emitter.off('task', onTask); armed.delete(onTask); },
-  };
+  setHoldsDraining(on);
 }
 
 /** Held next-task requests right now, for tests. */
@@ -923,14 +873,14 @@ worker.post('/next-task', workerAuth, async (c) => {
   // worker took the task, or it was a probe for someone else) holds again
   // instead of sending the worker away for retry_after.
   const deadline = Date.now() + hold * 1000;
-  await waker(sql).ready;
-  let wake = armWake(sql);
+  await listening(sql, NOTIFY_CHANNEL);
+  let wake = armWake(sql, NOTIFY_CHANNEL);
   try {
     let answer = await pickTask(sql, w, settings, done);
     for (;;) {
       if ('stale' in answer) return c.json({ error: 'stale_epoch' }, 409);
       const left = deadline - Date.now();
-      if (answer.task || answer.reason !== 'nothing_due' || left <= 0 || holds >= MAX_HOLDS || draining) return c.json(answer);
+      if (answer.task || answer.reason !== 'nothing_due' || left <= 0 || holds >= MAX_HOLDS || holdsDraining()) return c.json(answer);
       holds++;
       try {
         await wake.wait(left);
@@ -938,7 +888,7 @@ worker.post('/next-task', workerAuth, async (c) => {
         holds--;
       }
       wake.dispose();
-      wake = armWake(sql);
+      wake = armWake(sql, NOTIFY_CHANNEL);
       answer = await pickTask(sql, w, settings, null);
     }
   } finally {
