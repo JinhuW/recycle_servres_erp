@@ -2,9 +2,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FbChatClaimAnswer, FbChatRow, FbChatSyncAnswer, FbChatSyncPush } from '@recycle-erp/shared';
 import { chunkForTelegram, fbChatTopicName } from '../src/lib/fbChat';
 import { TelegramError, type TelegramCall } from '../src/lib/telegramBot';
+import { userAccountCaller, type TelegramUserClient } from '../src/lib/telegramUser';
 import { createOAuthClient } from '../src/oauth/clients';
 import { generateSigningKey, signAccessToken } from '../src/oauth/tokens';
-import { fbChatTelegramConfig, runFbChatTelegramTick, setFbChatTelegramForTests } from '../src/services/fbChatTelegram';
+import { fbChatTelegramConfig, fbChatTelegramConfigured, fbChatUserSession, runFbChatTelegramTick, setFbChatTelegramForTests } from '../src/services/fbChatTelegram';
 import { api, testEnv } from './helpers/app';
 import { ALEX, MARCUS, loginAs } from './helpers/auth';
 import { getTestDb, resetDb } from './helpers/db';
@@ -332,6 +333,46 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     expect(labels.map((r) => r.fb_sent_label)).toEqual(['Tuesday 5:57pm', 'Tuesday 5:58pm']);
     await tick();
     expect(texts().at(-1)).toBe('📜 Earlier messages\n[Tuesday 5:57pm] Kane Bryant: [photo]\n[Tuesday 5:58pm] Kane Bryant: Is this still available?');
+  });
+
+  it('runs as a Telegram account: its own cursor, its own posts ignored, replies relayed', async () => {
+    const posted: string[] = [];
+    let history = [{ id: 300, topicId: null, out: false, fromId: '7', text: 'old chatter in General' }];
+    const client: TelegramUserClient = {
+      async history(afterId) { return afterId === 0 ? history.slice(-1) : history.filter((m) => m.id > afterId); },
+      async send(text) { posted.push(text); return 0; },
+      async sendPhotoUrl() { return 0; },
+      async createTopic() { return 41; },
+      async renameTopic() {},
+      async react() {},
+      onActivity() {},
+    };
+    const cfg = { call: userAccountCaller(client, CHAT), chatId: CHAT, userIds: new Set<string>(), mode: 'user' as const };
+    await push('sync', sync([row('in', 'Is this still available?')], { full: true, complete: true }));
+    await runFbChatTelegramTick(getTestDb(), cfg);
+    expect(posted[0]).toContain('👤 John Smith');
+    const [state] = await getTestDb()`SELECT "offset", user_last_message_id FROM fb_chat_telegram_state`;
+    expect(state).toMatchObject({ offset: '0', user_last_message_id: '301' });
+
+    history = [...history,
+      { id: 301, topicId: 41, out: true, fromId: '5', text: '👤 John Smith' },
+      { id: 302, topicId: 41, out: false, fromId: '7', text: 'Yes, still available' }];
+    // A new cfg reads at once rather than waiting out the catch-up interval.
+    const fresh = { ...cfg, call: userAccountCaller(client, CHAT) };
+    expect((await runFbChatTelegramTick(getTestDb(), fresh)).queued).toBe(1);
+    const claim = await push<FbChatClaimAnswer>('outbox/claim', { account: ACCOUNT });
+    expect(claim.body).toMatchObject({ fbThreadId: 't1', body: 'Yes, still available' });
+  });
+
+  it('counts an account session as configured, and needs all of it', () => {
+    const base = { ...testEnv, FB_CHAT_TELEGRAM_CHAT_ID: CHAT } as typeof testEnv;
+    const session = { ...base, FB_CHAT_TELEGRAM_API_ID: '123', FB_CHAT_TELEGRAM_API_HASH: 'abc', FB_CHAT_TELEGRAM_SESSION: 's' } as typeof testEnv;
+    expect(fbChatUserSession(session)).toEqual({ apiId: 123, apiHash: 'abc', session: 's', chatId: CHAT });
+    expect(fbChatUserSession({ ...session, FB_CHAT_TELEGRAM_SESSION: '' } as typeof testEnv)).toBeNull();
+    expect(fbChatUserSession({ ...session, FB_CHAT_TELEGRAM_API_ID: 'x' } as typeof testEnv)).toBeNull();
+    setFbChatTelegramForTests(null);
+    expect(fbChatTelegramConfigured(base)).toBe(false);
+    expect(fbChatTelegramConfigured(session)).toBe(true);
   });
 
   it('names topics and cuts long text within Telegram limits', () => {

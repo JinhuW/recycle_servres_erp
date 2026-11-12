@@ -1478,10 +1478,15 @@ own Marketplace chats to Telegram. It has no page in the ERP.
   year), send attempt and account event is kept in the `fb_chat_*` tables for
   analysis. Managers can read `/api/fb-chat/accounts`, `/threads` and
   `/threads/:id/messages`.
-- **Setup.** `FB_CHAT_TELEGRAM_BOT_TOKEN` and `FB_CHAT_TELEGRAM_CHAT_ID` on the
-  backend. The bot must be this hub's alone, an admin of the group with
-  *Manage topics*, and the group must have Topics on. Without them the chats
-  are stored and Telegram is not called.
+- **Setup.** `FB_CHAT_TELEGRAM_CHAT_ID` on the backend, plus either a bot
+  (`FB_CHAT_TELEGRAM_BOT_TOKEN`) or, from v1.452.0, an ordinary Telegram
+  account (`FB_CHAT_TELEGRAM_API_ID`, `FB_CHAT_TELEGRAM_API_HASH` and
+  `FB_CHAT_TELEGRAM_SESSION`, made with `apps/backend/scripts/telegram-session.ts`).
+  The account wins when both are set. Either must be an admin of the group with
+  *Manage topics*, and the group must have Topics on. An account must be one
+  nobody types in, since its own messages are taken for the hub's posts, and
+  only one backend instance signs it in at a time. Without any of them the
+  chats are stored and Telegram is not called.
 
 **Leads ▸ Reddit** (`#/leads/reddit`, v1.392.0, RS-477) is a pool of sellers to
 buy from. They are found in the swap subreddits' public trade records: u/LabB0T

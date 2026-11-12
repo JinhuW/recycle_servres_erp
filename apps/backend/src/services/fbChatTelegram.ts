@@ -3,6 +3,7 @@ import { getDb } from '../db';
 import { chunkForTelegram, FB_CHAT_REPLY_MAX, fbChatTopicName } from '../lib/fbChat';
 import { log } from '../lib/log';
 import { TelegramError, telegramCaller, type TelegramCall } from '../lib/telegramBot';
+import { connectUserClient, userAccountCaller, type UserSessionConfig } from '../lib/telegramUser';
 import type { Env } from '../types';
 
 // The Telegram half of the Facebook chat hub. One pass:
@@ -15,6 +16,11 @@ import type { Env } from '../types';
 // next one. getUpdates is exclusive per bot token: the advisory lock keeps two
 // backend instances from both consuming updates, and the token must not be one
 // another program polls.
+//
+// It speaks to Telegram as a bot (FB_CHAT_TELEGRAM_BOT_TOKEN) or as an ordinary
+// account (FB_CHAT_TELEGRAM_SESSION, lib/telegramUser.ts). An account's
+// session must be connected from one place at a time, or Telegram ends it, so
+// that mode holds a session advisory lock for as long as it is connected.
 
 const flog = log.child({ module: 'fbChat' });
 
@@ -26,7 +32,16 @@ const TRANSCRIPT_OVER = 4;
 // Telegram allows a bot about 20 messages a minute in one group.
 const SENDS_PER_TICK = 6;
 
-export type FbChatTelegramConfig = { call: TelegramCall; chatId: string; userIds: Set<string> };
+export type FbChatTelegramConfig = {
+  call: TelegramCall;
+  chatId: string;
+  userIds: Set<string>;
+  /** Where the reply cursor is kept: a bot's update id, or an account's last message id. */
+  mode: 'bot' | 'user';
+};
+
+const USER_LOCK = 'fb-chat-telegram-session';
+const USER_RETRY_MS = 15_000;
 
 let testCall: TelegramCall | null = null;
 /** Tests replace the Bot API with a recorder. */
@@ -34,12 +49,33 @@ export function setFbChatTelegramForTests(call: TelegramCall | null): void {
   testCall = call;
 }
 
+/** The account to sign in as, when the env names one completely. */
+export function fbChatUserSession(env: Env): UserSessionConfig | null {
+  const chatId = env.FB_CHAT_TELEGRAM_CHAT_ID?.trim();
+  const session = env.FB_CHAT_TELEGRAM_SESSION?.trim();
+  const apiId = Number(env.FB_CHAT_TELEGRAM_API_ID);
+  const apiHash = env.FB_CHAT_TELEGRAM_API_HASH?.trim();
+  if (!chatId || !session || !Number.isInteger(apiId) || apiId <= 0 || !apiHash) return null;
+  return { apiId, apiHash, session, chatId };
+}
+
+const userIdsOf = (env: Env) =>
+  new Set((env.FB_CHAT_TELEGRAM_USER_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean));
+
+/**
+ * The bot's config, or null. An account is configured through
+ * `fbChatUserSession` and connected by the loop, so it has no `call` until
+ * then; `fbChatTelegramConfigured` answers "is Telegram set up at all".
+ */
 export function fbChatTelegramConfig(env: Env): FbChatTelegramConfig | null {
   const chatId = env.FB_CHAT_TELEGRAM_CHAT_ID?.trim();
   const token = env.FB_CHAT_TELEGRAM_BOT_TOKEN?.trim();
   if (!chatId || !(token || testCall)) return null;
-  const userIds = new Set((env.FB_CHAT_TELEGRAM_USER_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean));
-  return { call: testCall ?? telegramCaller(token!), chatId, userIds };
+  return { call: testCall ?? telegramCaller(token!), chatId, userIds: userIdsOf(env), mode: 'bot' };
+}
+
+export function fbChatTelegramConfigured(env: Env): boolean {
+  return fbChatTelegramConfig(env) !== null || fbChatUserSession(env) !== null;
 }
 
 type Update = {
@@ -64,14 +100,15 @@ class Budget {
 }
 
 async function pollUpdates(sql: postgres.Sql, cfg: FbChatTelegramConfig): Promise<number> {
-  const [state] = await sql<{ offset: string }[]>`SELECT "offset" FROM fb_chat_telegram_state`;
+  const column = cfg.mode === 'user' ? 'user_last_message_id' : 'offset';
+  const [state] = await sql<{ cursor: string }[]>`SELECT ${sql(column)} AS cursor FROM fb_chat_telegram_state`;
   const updates = await cfg.call<Update[]>('getUpdates', {
-    offset: Number(state!.offset), timeout: 0, limit: 50, allowed_updates: ['message'],
+    offset: Number(state!.cursor), timeout: 0, limit: 50, allowed_updates: ['message'],
   });
   let queued = 0;
   for (const u of updates) {
     queued += await handleUpdate(sql, cfg, u);
-    await sql`UPDATE fb_chat_telegram_state SET "offset" = ${u.update_id + 1}`;
+    await sql`UPDATE fb_chat_telegram_state SET ${sql(column)} = ${u.update_id + 1}`;
   }
   return queued;
 }
@@ -351,11 +388,7 @@ export function kickFbChatTelegram(): void {
   kick?.();
 }
 
-export function startFbChatTelegramLoop(env: Env): { stop: () => void } {
-  const cfg = fbChatTelegramConfig(env);
-  // A mirror holds a copy of the tables; posting from it would double every message.
-  if (!cfg || env.FLEET_ROLE === 'mirror') return { stop: () => {} };
-  const sql = getDb(env);
+function runLoop(sql: postgres.Sql, cfg: FbChatTelegramConfig): { stop: () => void } {
   let stopped = false;
   let busy = false;
   let again = false;
@@ -379,4 +412,66 @@ export function startFbChatTelegramLoop(env: Env): { stop: () => void } {
   first.unref?.();
   handle.unref?.();
   return { stop: () => { stopped = true; kick = null; clearTimeout(first); clearInterval(handle); } };
+}
+
+/**
+ * Signs the account in only while this instance holds the session lock, so a
+ * deploy's old and new instances never connect the same session at once.
+ */
+function startUserSessionLoop(env: Env, session: UserSessionConfig): { stop: () => void } {
+  const sql = getDb(env);
+  let conn: postgres.ReservedSql | null = null;
+  let held: { stop: () => void; disconnect: () => Promise<void> } | null = null;
+  let stopped = false;
+  let busy = false;
+  const release = async () => {
+    const was = held;
+    held = null;
+    was?.stop();
+    await was?.disconnect().catch((e) => flog.warn('telegram session disconnect failed', e));
+    const c = conn;
+    conn = null;
+    if (c) {
+      await c`SELECT pg_advisory_unlock(hashtextextended(${USER_LOCK}, 0))`.catch(() => {});
+      c.release();
+    }
+  };
+  const tick = async () => {
+    if (stopped || busy) return;
+    busy = true;
+    try {
+      if (held) {
+        await conn!`SELECT 1`;
+        return;
+      }
+      conn ??= await sql.reserve();
+      const [r] = await conn<{ ok: boolean }[]>`SELECT pg_try_advisory_lock(hashtextextended(${USER_LOCK}, 0)) AS ok`;
+      if (!r?.ok || stopped) return;
+      const { client, disconnect } = await connectUserClient(session);
+      const cfg: FbChatTelegramConfig = {
+        call: userAccountCaller(client, session.chatId), chatId: session.chatId, userIds: userIdsOf(env), mode: 'user',
+      };
+      held = { ...runLoop(sql, cfg), disconnect };
+      flog.info('fb chat telegram session connected');
+    } catch (e) {
+      flog.error('fb chat telegram session failed', e);
+      await release();
+    } finally {
+      busy = false;
+    }
+  };
+  void tick();
+  const timer = setInterval(() => void tick(), USER_RETRY_MS);
+  timer.unref?.();
+  return { stop: () => { stopped = true; clearInterval(timer); void release(); } };
+}
+
+export function startFbChatTelegramLoop(env: Env): { stop: () => void } {
+  // A mirror holds a copy of the tables; posting from it would double every message.
+  if (env.FLEET_ROLE === 'mirror') return { stop: () => {} };
+  const session = fbChatUserSession(env);
+  if (session) return startUserSessionLoop(env, session);
+  const cfg = fbChatTelegramConfig(env);
+  if (!cfg) return { stop: () => {} };
+  return runLoop(getDb(env), cfg);
 }

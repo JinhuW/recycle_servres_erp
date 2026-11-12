@@ -8,7 +8,7 @@ import { log } from '../lib/log';
 import { requireManager } from '../lib/role';
 import { bearerGuard } from '../oauth/guard';
 import { claimReply, ingestBuyer, ingestSync, recordEvent, recordSendResult } from '../services/fbChat';
-import { fbChatTelegramConfig, kickFbChatTelegram } from '../services/fbChatTelegram';
+import { fbChatTelegramConfigured, kickFbChatTelegram } from '../services/fbChatTelegram';
 import type { Env, OAuthCtx, User } from '../types';
 
 // ─── Facebook chat hub ────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ fbChat.post('/push/events', async (c) => {
 
 // The extension's settings page calls this to prove its credentials and to say
 // whether replies can arrive at all.
-fbChat.get('/push/status', (c) => c.json({ ok: true, telegram: fbChatTelegramConfig(c.env) !== null }));
+fbChat.get('/push/status', (c) => c.json({ ok: true, telegram: fbChatTelegramConfigured(c.env) }));
 
 // ── Reads (manager) ───────────────────────────────────────────────────────────
 

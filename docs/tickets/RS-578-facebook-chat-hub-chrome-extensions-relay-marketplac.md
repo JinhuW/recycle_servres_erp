@@ -86,3 +86,7 @@ they get their own `fb_chat_*` tables.
   buttons that open a chat window on the same page, with no id and no URL. The
   extension keys a conversation by its title, and v1.451.1 dropped the dead
   thread link from the topic header and added `fb_sent_label`.
+- 2026-11-11: the owner asked to use a Telegram account ("service account")
+  instead of a bot. v1.452.0 adds that mode alongside the bot; the app was
+  created on my.telegram.org from the owner's browser at their request, and
+  the session string is made by the owner with `scripts/telegram-session.ts`.
