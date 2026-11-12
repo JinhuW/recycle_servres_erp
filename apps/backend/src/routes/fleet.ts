@@ -166,8 +166,6 @@ fleet.get('/city-log', managerOnly, async (c) => {
 // their health (fleet/proxyHealth.ts).
 
 fleet.route('/worker', worker);
-// The seller report and screenshot routes mount at /worker/seller, beside the
-// rest of the worker protocol (CONTRACTS §4.4).
 fleet.route('/hosts', hosts);
 fleet.route('/releases', releases);
 fleet.route('/slots', slots);

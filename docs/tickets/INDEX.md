@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-581](./RS-581-remove-the-facebook-seller-feature-so-fleet-accounts.md) | in-progress | chore | P2 | Remove the Facebook seller feature so fleet accounts only search | — |
 | [RS-580](./RS-580-chat-hub-wakes-a-held-reply-claim-on-notify-instead.md) | done | task | P2 | Chat hub wakes a held reply claim on NOTIFY instead of polling every second | 1.453.1 |
 | [RS-579](./RS-579-chat-bridge-extensions-load-their-settings-from-the.md) | done | story | P2 | Chat bridge extensions load their settings from the ERP, and the ERP can change them | 1.453.0 |
 | [RS-578](./RS-578-facebook-chat-hub-chrome-extensions-relay-marketplac.md) | done | story | P2 | Facebook chat hub: Chrome extensions relay Marketplace chats to Telegram topics | 1.451.0 |
@@ -14,13 +15,13 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-574](./RS-574-fold-same-series-ram-on-a-sell-order-regardless-of-c.md) | done | story | P2 | Fold same-series RAM on a sell order regardless of condition | 1.449.0 |
 | [RS-573](./RS-573-review-mode-prints-a-product-label-for-each-line-as.md) | done | story | P2 | Review mode prints a product label for each line as it is checked | 1.448.0 |
 | [RS-572](./RS-572-cost-payment-business-account-link-a-paypal-or-mercu.md) | done | story | P2 | Cost Payment Business Account: link a PayPal or Mercury payment once, no screenshot | 1.447.0 |
-| [RS-571](./RS-571-facebook-leads-a-central-operator-drives-20-seller-b.md) | in-progress | story | P2 | Facebook Leads: a central operator drives 20 seller browsers with browser-use | — |
+| [RS-571](./RS-571-facebook-leads-a-central-operator-drives-20-seller-b.md) | wont-do | story | P2 | Facebook Leads: a central operator drives 20 seller browsers with browser-use | — |
 | [RS-570](./RS-570-jump-from-the-duplicate-part-dialog-to-the-product-t.md) | done | story | P2 | Jump from the duplicate-part dialog to the product to update its quantity | 1.446.0 |
 | [RS-569](./RS-569-commission-rate-and-notes-editable-at-ready-to-pay.md) | done | story | P2 | Commission rate and notes editable at Ready to Pay | 1.445.0 |
 | [RS-568](./RS-568-allow-a-unit-cost-of-0-on-a-po-line.md) | done | task | P2 | Allow a unit cost of 0 on a PO line | 1.444.2 |
 | [RS-567](./RS-567-review-mode-sell-price-editable-at-ready-to-pay.md) | done | bug | P2 | Review mode: sell price editable at Ready to Pay | 1.444.1 |
 | [RS-566](./RS-566-show-the-sell-order-brief-read-only-once-the-order-i.md) | done | story | P2 | Show the sell order brief read-only once the order is done | 1.444.0 |
-| [RS-565](./RS-565-facebook-seller-accounts-post-buy-ads-route-messenge.md) | in-progress | story | P2 | Facebook seller accounts post buy ads, route Messenger to an ERP message center, and an agent negotiates | — |
+| [RS-565](./RS-565-facebook-seller-accounts-post-buy-ads-route-messenge.md) | wont-do | story | P2 | Facebook seller accounts post buy ads, route Messenger to an ERP message center, and an agent negotiates | — |
 | [RS-564](./RS-564-rerun-the-fleet-search-frequency-review.md) | backlog | task | P2 | Rerun the fleet search frequency review | — |
 | [RS-563](./RS-563-move-web-submissions-under-leads-as-website.md) | done | story | P2 | Move web submissions under Leads as Website | 1.436.0 |
 | [RS-562](./RS-562-fleet-count-only-real-searches-pace-budgets-ssd-ever.md) | done | story | P1 | Fleet: count only real searches, pace budgets, SSD every second day | 1.435.0 |

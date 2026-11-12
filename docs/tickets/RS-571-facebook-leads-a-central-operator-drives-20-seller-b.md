@@ -2,7 +2,7 @@
 id: RS-571
 title: "Facebook Leads: a central operator drives 20 seller browsers with browser-use"
 type: story
-status: in-progress
+status: wont-do
 priority: P2
 created: 2026-11-08
 reporter: jinhu
@@ -107,3 +107,5 @@ The explainer page is `http://10.10.100.225:8800/fb-seller-operator-plan.html`.
   CloakBrowser seats, the proxies, the host and the model budget. The plan
   README tracks them.
 - Cost and host-size figures in the plan are estimates.
+
+- 2026-11-12: closed as won't do. The ERP side was removed in RS-581 (v1.454.0); the archive of its tables is in R2 at `recycle-db-backup/archive/fb-seller-archive-prod-20261112.sql.gz`.

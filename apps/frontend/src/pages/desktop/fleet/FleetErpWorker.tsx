@@ -15,7 +15,6 @@ import {
   deviceText, erpCheckpoint, erpCityChips, erpConnectPark, erpCityLog, erpHistory, erpHistoryDot, erpProxyBehind, erpProxyText, erpWorkerRetirable, erpWorkerStatus, sessionDaysLeft,
   type ErpHistoryLine,
 } from './fleetWorkerView';
-import { FleetSellerCard } from './FleetSellerCard';
 import { EngineChip, MarkHealthyButton, RestartWorkerButton, ParkDialog, ReleaseQuarantineButton, RetireSlotDialog, UnparkDialog, useFleetMirror } from './shared';
 import {
   AccountsUsed, CheckpointsCard, ErpBuildChip, Muted, NoThumb, WorkerCard, WorkerHead, WorkerHistory, type HistoryEntry, type WorkerField,
@@ -62,7 +61,7 @@ export function ErpWorkerView({ detail: d, stints, ipGroups, onReload, now = Dat
     : connectPark ? (connectPark.since ? t('fleetNoteConnectPark', { age: relTime(connectPark.since, locale) }) : t('fleetNoteConnectParkNoAge'))
     : checkpoint ? stateLabel(t, checkpoint.state)
     : slot?.parked ? t('fleetNoteParked')
-    : task ? t('fleetNoteSearching', { city: task.city_name ?? task.city ?? task.kind, item: task.item ?? '' })
+    : task ? t('fleetNoteSearching', { city: task.city_name ?? task.city, item: task.item })
     : t('fleetNoteIdle');
 
   const slotText = !slot ? <Muted>{t('fleetSlotNone')}</Muted>
@@ -184,7 +183,6 @@ export function ErpWorkerView({ detail: d, stints, ipGroups, onReload, now = Dat
               </>}
               {slot?.quarantined_until && Date.parse(slot.quarantined_until) > now && <ReleaseQuarantineButton slot={slot} onDone={onReload} />}
             </>} />
-          {slot && <FleetSellerCard accountNo={slot.account_no} readOnly={mirror} />}
 
           <CheckpointsCard sub={t('fleetCheckpointsSub')} items={checkpoint ? [{
             key: 'wall',
@@ -229,7 +227,7 @@ function ErpHistoryText({ line }: { line: ErpHistoryLine }) {
   if (line.kind === 'signon') return <>{t('fbcHistSignOn', { n: line.stint.accountNo, login: line.stint.email ?? line.stint.uid })}</>;
   if (line.kind === 'left') return <>{t('fbcHistLeft', { n: line.stint.accountNo, outcome: t(`fbcStint_${line.stint.outcome}`) })}</>;
   const e = line.event;
-  const where = { city: e.city_name ?? e.city ?? '—', item: e.task_kind === 'search' ? e.item ?? '—' : e.task_kind };
+  const where = { city: e.city_name ?? e.city, item: e.task_kind === 'search' ? e.item : e.task_kind };
   const d = e.detail ?? {};
   const word = (v: unknown) => (typeof v === 'string' && v ? v : null);
   if (e.kind === 'done') {
