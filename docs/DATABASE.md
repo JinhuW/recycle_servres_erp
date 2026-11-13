@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-12:** ERP migration `0240`, Reddit tracker migration `0007`,
+**As of 2026-11-12:** ERP migration `0241`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2625,8 +2625,9 @@ The owner's own Facebook accounts, each in its own Chrome profile with the
 bridge extension (`facebook_messager_extenion/` in the workspace). The
 extension pushes Marketplace conversations to `/api/fb-chat/push/*`; the
 backend mirrors each one into a Telegram forum topic and queues the replies
-typed there for the extension to type into Facebook
-(`services/fbChat.ts`, `services/fbChatTelegram.ts`). No fleet slot or
+typed there, or on the ERP's Leads ▸ Facebook page, for the extension to type
+into Facebook (`services/fbChat.ts`, `services/fbChatTelegram.ts`; the page's
+own reads and writes are `services/fbChatPage.ts`). No fleet slot or
 task is involved. `fb_chat_accounts.fb_uid` is the same value as
 `fb_pool_accounts.uid`, which is the join when one is wanted.
 
@@ -2638,8 +2639,8 @@ One Facebook account an extension has spoken for, created on its first push.
 | --- | --- | :-: | --- | --- |
 | `id` | `bigint` | ✓ | sequence |  |
 | `fb_uid` | `text` | ✓ |  | The Facebook numeric uid, from the tab's `c_user` cookie. |
-| `label` | `text` | ✓ | `''` | What the owner called the Chrome profile in the extension. |
-| `client_id` | `text` |  |  | The service client that last pushed for it, or `device:<id>` for an enrolled extension (0240); no FK. |
+| `label` | `text` | ✓ | `''` | The account's name: what the extension calls its Chrome profile, until a manager names it. |
+| `client_id` | `text` |  |  | The service client that last pushed for it, or `device:<id>` for an enrolled extension (0240). This is the account's link to its `fb_chat_devices` row; no FK, because the nightly sync copies accounts from prod and keeps dev's devices. |
 | `ext_version` | `text` |  |  | The extension version that last pushed. |
 | `restricted` | `text` |  |  | login or checkpoint while the extension sees such a page; NULL when healthy. |
 | `restricted_at` | `timestamptz` |  |  |  |
@@ -2647,9 +2648,11 @@ One Facebook account an extension has spoken for, created on its first push.
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
 | `config_rev` | `text` |  |  | The settings revision the extension last picked up (0238). |
 | `config_seen_at` | `timestamptz` |  |  | When it last asked for its settings (0238). |
+| `no` | `integer` | ✓ |  | Display number, the `#` on the page's badge: 1, 2, 3 in the order accounts were first seen, never reused (0241). |
+| `label_locked` | `boolean` | ✓ | `false` | A manager named the account, at approval or on the page; the extension's label no longer replaces `label` (0241). |
 
 - **Primary key:** `id`
-- **Unique:** `fb_uid`
+- **Unique:** `fb_uid`; `no`
 - **Checks:** `restricted IN ('login', 'checkpoint')`
 #### `fb_chat_buyers`
 
@@ -2688,6 +2691,8 @@ One conversation on one account, and its Telegram topic.
 | `telegram_topic_name` | `text` |  |  | The name last set, `<buyer> · <location>`; compared to decide a rename. |
 | `header_sent_at` | `timestamptz` |  |  | When the topic's opening message was posted. |
 | `last_seq` | `integer` | ✓ | `0` | The highest `seq` handed out. |
+| `last_inbound_seq` | `integer` | ✓ | `0` | The `seq` of the buyer's newest message; 0 when the buyer has written nothing (0241). |
+| `read_seq` | `integer` | ✓ | `0` | The team's one read mark: the `seq` read or answered up to. The chat is unread while `last_inbound_seq > read_seq` (0241). |
 | `history_complete` | `boolean` | ✓ | `false` | The extension reached the first message when it read the thread. |
 | `last_inbound_at` | `timestamptz` |  |  | The last live buyer message; history read on first sight does not count. |
 | `last_outbound_at` | `timestamptz` |  |  |  |
@@ -2697,18 +2702,18 @@ One conversation on one account, and its Telegram topic.
 - **Primary key:** `id`
 - **References:** `account_id` → `fb_chat_accounts.id` (on delete cascade); `buyer_id` → `fb_chat_buyers.id` (on delete set null)
 - **Unique:** `(account_id, fb_thread_id)`; `telegram_topic_id` where not null
-- **Indexes:** `fb_chat_threads_buyer_idx` (buyer_id)
+- **Indexes:** `fb_chat_threads_buyer_idx` (buyer_id); `fb_chat_threads_unread_idx` (account_id) where unread
 #### `fb_chat_messages`
 
-One message. Those read off Facebook have `source = 'facebook'`; a reply typed in the Telegram topic has `source = 'telegram'` and a `send_state`. `seq` is the position in the conversation; a Telegram reply has none until it is reported sent or seen on the page.
+One message. Those read off Facebook have `source = 'facebook'`; a reply typed in the Telegram topic has `source = 'telegram'`, one typed on the ERP's Leads ▸ Facebook page has `source = 'erp'` (0241), and both have a `send_state`. `seq` is the position in the conversation; a reply of ours has none until it is reported sent or seen on the page.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
 | `id` | `bigint` | ✓ | sequence |  |
 | `thread_id` | `bigint` | ✓ |  | → fb_chat_threads. |
-| `seq` | `integer` |  |  | NULL while a Telegram reply has not landed. |
+| `seq` | `integer` |  |  | NULL while a Telegram or ERP reply has not landed. |
 | `direction` | `text` | ✓ |  | in (the buyer) or out (the account). |
-| `source` | `text` | ✓ |  | facebook or telegram: where the text was written. |
+| `source` | `text` | ✓ |  | facebook, telegram or erp: where the text was written. |
 | `body` | `text` | ✓ | `''` |  |
 | `images` | `jsonb` | ✓ | `'[]'` | Image URLs on the bubble. Signed by Facebook; they expire. |
 | `backfill` | `boolean` | ✓ | `false` | Read as history when the thread was first seen, so `created_at` is when it was read, not written. |
@@ -2722,15 +2727,16 @@ One message. Those read off Facebook have `source = 'facebook'`; a reply typed i
 | `tg_message_id` | `bigint` |  |  | The Telegram message the reply came from. |
 | `tg_user_id` | `bigint` |  |  | Who typed it in Telegram. |
 | `tg_user_name` | `text` |  |  |  |
-| `acked_at` | `timestamptz` |  |  | When Telegram was told how the reply ended. |
-| `mirrored_at` | `timestamptz` |  |  | When it was posted to the topic. A Telegram reply is born mirrored. |
+| `acked_at` | `timestamptz` |  |  | When Telegram was told how the reply ended. Cleared when the reply is retried. |
+| `mirrored_at` | `timestamptz` |  |  | When it was posted to the topic. A Telegram reply is born mirrored; an ERP reply is not, and is posted as `<first name> (ERP): …`. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
+| `erp_user_id` | `uuid` |  |  | → users: who typed an ERP reply (0241). |
 
 - **Primary key:** `id`
-- **References:** `thread_id` → `fb_chat_threads.id` (on delete cascade)
+- **References:** `thread_id` → `fb_chat_threads.id` (on delete cascade); `erp_user_id` → `users.id` (on delete set null)
 - **Unique:** `(thread_id, seq)`; `(thread_id, tg_message_id)`
-- **Checks:** `direction IN ('in', 'out')`; `source IN ('facebook', 'telegram')`; `send_state IN ('queued', 'sending', 'sent', 'failed', 'uncertain')`
-- **Indexes:** `fb_chat_messages_unmirrored_idx` (id) where not mirrored; `fb_chat_messages_outbox_idx` (thread_id, id) where queued or sending; `fb_chat_messages_unacked_idx` (id) where settled and not acknowledged
+- **Checks:** `direction IN ('in', 'out')`; `source IN ('facebook', 'telegram', 'erp')`; `send_state IN ('queued', 'sending', 'sent', 'failed', 'uncertain')`
+- **Indexes:** `fb_chat_messages_unmirrored_idx` (id) where not mirrored; `fb_chat_messages_outbox_idx` (thread_id, id) where queued or sending; `fb_chat_messages_unacked_idx` (id) where settled and not acknowledged; `fb_chat_messages_erp_user_idx` (erp_user_id) where set; `fb_chat_messages_thread_idx` (thread_id, id)
 #### `fb_chat_events`
 
 Append-only record of what is worth counting later and is not a message. `kind` is one of: `thread_seen`, `sync` (new messages in a known thread), `sync_gap` (a window that did not overlap what was stored), `send_sent`, `send_failed`, `send_uncertain`, `buyer_rating` (a rating or count changed; old and new values in `detail`), `topic_created`, `restricted`, `recovered`, `error`.
@@ -2751,7 +2757,7 @@ Append-only record of what is worth counting later and is not a message. `kind` 
 - **Indexes:** `fb_chat_events_account_idx` (account_id, created_at); `fb_chat_events_thread_idx` (thread_id); `fb_chat_events_alert_idx` (id) where an alert is waiting
 #### `fb_chat_config`
 
-Settings the extensions load from the ERP, set on Settings ▸ Chat bridge (0238). Keys are not a fixed list; see `fb_chat_config_fields`.
+Settings the extensions load from the ERP, set on Leads ▸ Facebook ▸ Settings (0238). Pausing an account on the Accounts tab, or approving it to start paused, writes its `paused` row here. Keys are not a fixed list; see `fb_chat_config_fields`.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
@@ -2780,7 +2786,7 @@ The settings each extension version reports it understands, as it reported them 
 - **Primary key:** `ext_version`
 #### `fb_chat_devices`
 
-Chat bridge extensions that enrolled themselves (0240). A row is made by the open `POST /api/fb-chat/enroll` as `pending`; a manager approves it on Settings ▸ Chat bridge. The nightly prod → dev sync keeps dev's rows (`deploy/railway-sync/keep-fleet.sql`).
+Chat bridge extensions that enrolled themselves (0240). A row is made by the open `POST /api/fb-chat/enroll` as `pending`; a manager approves it on Leads ▸ Facebook ▸ Accounts. Approving one whose `fb_uid` is already an account reconnects that account to it and revokes the device that relayed it before. The nightly prod → dev sync keeps dev's rows (`deploy/railway-sync/keep-fleet.sql`).
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
@@ -2798,6 +2804,8 @@ Chat bridge extensions that enrolled themselves (0240). A row is made by the ope
 | `last_seen_at` | `timestamptz` | ✓ | `now()` | A pending row unseen for 7 days is deleted. |
 | `decided_by` | `uuid` |  |  | → users. |
 | `decided_at` | `timestamptz` |  |  |  |
+| `account_label` | `text` |  |  | The account name chosen at approval, applied and cleared when the device's account is first seen (0241). |
+| `start_paused` | `boolean` | ✓ | `false` | Chosen at approval: the new account starts with sending paused. Applied and cleared with `account_label` (0241). |
 
 - **Primary key:** `id`
 - **Unique:** `token_hash`

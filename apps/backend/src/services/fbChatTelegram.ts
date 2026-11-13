@@ -10,7 +10,8 @@ import { notifyOutbox } from './fbChat';
 // The Telegram half of the Facebook chat hub. One pass:
 //   1. reads the bot's updates and queues the replies typed in topics;
 //   2. posts account alerts to General;
-//   3. mirrors stored messages into each buyer's topic, creating it on first use;
+//   3. mirrors stored messages into each buyer's topic, creating it on first
+//      use; a reply typed in the ERP is one of them, named after who typed it;
 //   4. renames a topic whose buyer name or location has since changed;
 //   5. tells Telegram how each reply ended.
 // Every step works from rows, so a pass that dies midway is finished by the
@@ -166,7 +167,11 @@ async function handleUpdate(sql: postgres.Sql, cfg: FbChatTelegramConfig, u: Upd
     VALUES (${thread.id}, 'out', 'telegram', ${body}, 'queued', ${m.message_id}, ${m.from.id}, ${who}, NOW())
     ON CONFLICT (thread_id, tg_message_id) DO NOTHING
     RETURNING id`;
-  if (rows.length) await notifyOutbox(sql);
+  if (rows.length) {
+    // Answering is reading: the chat stops showing as unread for the team.
+    await sql`UPDATE fb_chat_threads SET read_seq = last_seq WHERE id = ${thread.id}`;
+    await notifyOutbox(sql);
+  }
   return rows.length;
 }
 
@@ -184,7 +189,19 @@ async function postAlerts(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget: 
 type Unmirrored = {
   id: number; thread_id: number; direction: 'in' | 'out'; body: string; images: string[]; backfill: boolean;
   fb_sent_label: string | null;
+  source: 'facebook' | 'telegram' | 'erp';
+  /** For a reply typed in the ERP: that user's name, null once the user is gone. */
+  erp_name: string | null;
 };
+
+const firstName = (name: string | null) => name?.trim().split(/\s+/)[0] || null;
+
+/** Who an outbound message is shown as: the account's holder, or the ERP user who typed it. */
+function ourName(m: Pick<Unmirrored, 'source' | 'erp_name'>): string {
+  if (m.source !== 'erp') return 'You';
+  const who = firstName(m.erp_name);
+  return who ? `${who} (ERP)` : 'ERP';
+}
 
 type ThreadRow = {
   id: number; fb_thread_id: string; buyer_name: string | null; buyer_location: string | null;
@@ -247,13 +264,13 @@ async function ensureTopic(sql: postgres.Sql, cfg: FbChatTelegramConfig, t: Thre
 function transcriptLine(m: Unmirrored, buyer: string): string {
   const text = [m.body, ...m.images.map(() => '[photo]')].filter(Boolean).join(' ');
   const when = m.fb_sent_label ? `[${m.fb_sent_label}] ` : '';
-  return `${when}${m.direction === 'in' ? buyer : 'You'}: ${text}`;
+  return `${when}${m.direction === 'in' ? buyer : ourName(m)}: ${text}`;
 }
 
 async function postOne(cfg: FbChatTelegramConfig, topicId: number, m: Unmirrored, buyer: string): Promise<void> {
   // Named either way: posted as an ordinary account, a buyer's message would
   // otherwise read as the owner's own on a phone signed in to that account.
-  const text = m.direction === 'in' ? `👤 ${buyer}: ${m.body}`.trimEnd() : `↩️ You: ${m.body}`;
+  const text = m.direction === 'in' ? `👤 ${buyer}: ${m.body}`.trimEnd() : `↩️ ${ourName(m)}: ${m.body}`;
   const [first, ...more] = m.images;
   if (first) {
     try {
@@ -308,8 +325,10 @@ async function renameTopics(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget
 
 async function mirror(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget: Budget): Promise<number> {
   const rows = await sql<Unmirrored[]>`
-    SELECT id::int AS id, thread_id::int AS thread_id, direction, body, images, backfill, fb_sent_label
-      FROM fb_chat_messages WHERE mirrored_at IS NULL ORDER BY id LIMIT ${MIRROR_BATCH}`;
+    SELECT m.id::int AS id, m.thread_id::int AS thread_id, m.direction, m.body, m.images, m.backfill, m.fb_sent_label,
+           m.source, u.name AS erp_name
+      FROM fb_chat_messages m LEFT JOIN users u ON u.id = m.erp_user_id
+     WHERE m.mirrored_at IS NULL ORDER BY m.id LIMIT ${MIRROR_BATCH}`;
   const byThread = new Map<number, Unmirrored[]>();
   for (const r of rows) byThread.set(r.thread_id, [...(byThread.get(r.thread_id) ?? []), r]);
   let posted = 0;
@@ -349,12 +368,41 @@ async function mirror(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget: Budg
 }
 
 async function ackReplies(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget: Budget): Promise<void> {
-  const rows = await sql<{ id: number; send_state: string; error: string | null; tg_message_id: string; topic: string | null }[]>`
-    SELECT m.id::int AS id, m.send_state, m.error, m.tg_message_id, t.telegram_topic_id AS topic
+  // A reply typed in the ERP has no Telegram message to react or reply to:
+  // its outcome is told on its own line, and only once the reply itself is in
+  // the topic, so the two never arrive the wrong way round.
+  const rows = await sql<{
+    id: number; send_state: string; error: string | null; tg_message_id: string | null; topic: string | null;
+    source: string; erp_name: string | null;
+  }[]>`
+    SELECT m.id::int AS id, m.send_state, m.error, m.tg_message_id, t.telegram_topic_id AS topic, m.source, u.name AS erp_name
       FROM fb_chat_messages m JOIN fb_chat_threads t ON t.id = m.thread_id
-     WHERE m.send_state IN ('sent','failed','uncertain') AND m.acked_at IS NULL AND m.tg_message_id IS NOT NULL
+      LEFT JOIN users u ON u.id = m.erp_user_id
+     WHERE m.send_state IN ('sent','failed','uncertain') AND m.acked_at IS NULL
+       AND (m.tg_message_id IS NOT NULL OR (m.source = 'erp' AND m.mirrored_at IS NOT NULL))
      ORDER BY m.id LIMIT 10`;
   for (const r of rows) {
+    if (r.tg_message_id === null) {
+      // The ERP shows a sent reply as sent; Telegram already has its text.
+      if (r.send_state !== 'sent') {
+        if (!budget.take()) return;
+        const who = firstName(r.erp_name);
+        const whose = who ? `${who}'s reply from the ERP` : 'A reply from the ERP';
+        try {
+          await cfg.call('sendMessage', {
+            chat_id: cfg.chatId, message_thread_id: r.topic == null ? undefined : Number(r.topic),
+            text: r.send_state === 'failed'
+              ? `❌ ${whose} was not sent to Facebook: ${r.error ?? 'unknown error'}. Retry it in the ERP.`
+              : `⚠️ ${whose} may not have reached the buyer (${r.error ?? 'not confirmed'}). Check the conversation on Facebook before retrying it in the ERP.`,
+          });
+        } catch (e) {
+          if (e instanceof TelegramError && e.retryAfterSec) throw e;
+          flog.warn('telegram ack failed', e);
+        }
+      }
+      await sql`UPDATE fb_chat_messages SET acked_at = NOW() WHERE id = ${r.id}`;
+      continue;
+    }
     if (!budget.take()) return;
     try {
       if (r.send_state === 'sent') {

@@ -166,8 +166,8 @@ describe('prod→dev sync keeps the dev fleet', () => {
     const [approver] = await sql<{ id: string }[]>`
       INSERT INTO users (email, name, initials, role, password_hash) VALUES ('gone@example.com', 'Gone', 'GO', 'manager', 'x') RETURNING id`;
     await sql`
-      INSERT INTO fb_chat_devices (id, token_hash, code, status, label, decided_by, decided_at)
-      VALUES ('aaaaaaaaaaaaaaaaaa', 'h1', 'K7QD-M2XP', 'approved', 'Office', ${approver!.id}, NOW())`;
+      INSERT INTO fb_chat_devices (id, token_hash, code, status, label, decided_by, decided_at, account_label, start_paused)
+      VALUES ('aaaaaaaaaaaaaaaaaa', 'h1', 'K7QD-M2XP', 'approved', 'Office', ${approver!.id}, NOW(), 'Littleton Lots', TRUE)`;
 
     await sql.begin((tx) => tx.unsafe(keep));
     // Prod has neither the device nor the user who approved it.
@@ -176,8 +176,12 @@ describe('prod→dev sync keeps the dev fleet', () => {
     await sql`INSERT INTO fb_chat_devices (id, token_hash, code) VALUES ('bbbbbbbbbbbbbbbbbb', 'h2', 'AAAA-BBBB')`;
     await sql.begin((tx) => tx.unsafe(restore));
 
-    const rows = await sql`SELECT id, status, code, decided_by FROM fb_chat_devices`;
-    expect(rows).toEqual([{ id: 'aaaaaaaaaaaaaaaaaa', status: 'approved', code: 'K7QD-M2XP', decided_by: null }]);
+    // What the approver chose for an account not seen yet comes back with it.
+    const rows = await sql`SELECT id, status, code, decided_by, account_label, start_paused FROM fb_chat_devices`;
+    expect(rows).toEqual([{
+      id: 'aaaaaaaaaaaaaaaaaa', status: 'approved', code: 'K7QD-M2XP', decided_by: null,
+      account_label: 'Littleton Lots', start_paused: true,
+    }]);
   });
 
   it('drops a slot whose pool number now belongs to another account', async () => {

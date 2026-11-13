@@ -44,11 +44,32 @@ export async function configFor(tx: SqlLike, accountId: number | null): Promise<
     SELECT key, value FROM fb_chat_config
      WHERE account_id IS NULL OR account_id = ${accountId}
      ORDER BY (account_id IS NOT NULL), key`;
+  return answerFrom(rows);
+}
+
+/** `rows`: the shared values first, then the profile's own. */
+function answerFrom(rows: { key: string; value: unknown }[]): FbChatConfigAnswer {
   const merged = new Map<string, unknown>();
   for (const r of rows) merged.set(r.key, r.value);
   const values = Object.fromEntries([...merged].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
   const rev = createHash('sha256').update(JSON.stringify(values)).digest('hex').slice(0, 16);
   return { rev, values };
+}
+
+/** `configFor` for many profiles from one read: the accounts table asks for all of them. */
+export async function configsFor(sql: SqlLike, accountIds: number[]): Promise<Map<number, FbChatConfigAnswer>> {
+  const rows = await sql<{ account_id: number | null; key: string; value: unknown }[]>`
+    SELECT account_id::int AS account_id, key, value FROM fb_chat_config ORDER BY key`;
+  const shared = rows.filter((r) => r.account_id === null);
+  return new Map(accountIds.map((id) => [id, answerFrom([...shared, ...rows.filter((r) => r.account_id === id)])]));
+}
+
+/** The newest extension version heard from lately, or null before any. */
+export async function latestExtVersion(sql: SqlLike): Promise<string | null> {
+  const rows = await sql<{ ext_version: string }[]>`
+    SELECT ext_version FROM fb_chat_config_fields
+     WHERE last_seen_at > NOW() - make_interval(days => ${FIELDS_FRESH_DAYS})`;
+  return rows.map((r) => r.ext_version).sort((a, b) => compareVersions(b, a))[0] ?? null;
 }
 
 export async function notePickup(tx: SqlLike, accountId: number, rev: string): Promise<void> {

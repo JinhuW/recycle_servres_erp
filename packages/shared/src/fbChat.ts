@@ -328,6 +328,12 @@ export type FbChatMessagesAnswer = {
 
 /** `POST /threads/:id/messages`: a reply typed in the ERP. */
 export type FbChatReplyRequest = { body: string };
+/**
+ * Body of `POST /messages/:id/retry`. A `failed` reply needs none. An
+ * `uncertain` one may already be on Facebook, so the hub refuses to send it
+ * again (409) unless `force` is true.
+ */
+export type FbChatRetryRequest = { force?: boolean };
 /** Answer of `POST /threads/:id/messages` and `POST /messages/:id/retry`. */
 export type FbChatReplyAnswer = { message: FbChatMessageRow };
 

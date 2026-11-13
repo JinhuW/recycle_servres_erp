@@ -167,7 +167,8 @@ Server inputs:
 - When `touchAccount` creates an account and `clientId` is `device:<id>`: use
   that device's `account_label` as the label (and lock it) when set; and when
   its `start_paused` is true, insert `fb_chat_config (account_id, 'paused',
-  true, updated_by = device.decided_by)` and clear `start_paused`. One code
+  true, updated_by = device.decided_by)`; then clear both columns on the
+  device, so a later account from the same Chrome does not get them. One code
   path: approval never creates the account row itself, so an approved account
   appears on the page at its first check-in (within its settings check).
 
@@ -239,8 +240,10 @@ defaults to `all`; an unknown value is 400.
 
 - `messages` keeps today's order: `seq NULLS LAST, id`. Added to today's
   fields: `fb_sent_label`, `erp_user_id`, `author_name`.
-- `also_messaged` comes from `fb_chat_buyers`: the other threads with the same
-  non-null `buyer_id` (so on other accounts), newest activity first.
+- `also_messaged` comes from `fb_chat_buyers`: the threads with the same
+  non-null `buyer_id` on **other** accounts, newest activity first. (The same
+  buyer's chat about another listing on this account is not listed: the thread
+  key is buyer and listing, so one account can hold several.)
   `last_body` is that thread's newest message body. Empty when the buyer's
   profile id is not known yet.
 - 404 for an unknown thread.
@@ -259,6 +262,8 @@ defaults to `all`; an unknown value is 400.
   the same limit Telegram replies have: make `lib/fbChat.ts`'s
   `FB_CHAT_REPLY_MAX` read the shared constant) is 400. Unknown thread 404.
   A leading `/` is sent as typed: the note-to-self rule is Telegram's.
+  Without a first name (the user was deleted) the Telegram text is
+  `↩️ ERP: <body>`, and the failure line starts "A reply from the ERP".
 - In one transaction: insert `(thread_id, 'out', 'erp', body, 'queued',
   erp_user_id = the caller, mirrored_at NULL)`, set `read_seq = last_seq`,
   `notifyOutbox`. Then `kickFbChatTelegram()`.
@@ -274,11 +279,13 @@ defaults to `all`; an unknown value is 400.
   `tg_message_id`): for an `erp` row, `sent` only sets `acked_at`; `failed`
   and `uncertain` post one line into the topic (no `reply_parameters`), e.g.
   `❌ Jin's reply from the ERP was not sent to Facebook: <error>. Retry it in the ERP.`
-  and then set `acked_at`.
+  and then set `acked_at`. An `erp` row is acked only once it is mirrored, so
+  the outcome never precedes the reply in the topic.
 
-### `POST /messages/:id/retry` → `FbChatReplyAnswer`
+### `POST /messages/:id/retry` `FbChatRetryRequest` (optional) → `FbChatReplyAnswer`
 
-No body. Requeues in place: the row keeps its id, source and author.
+`{ "force": true }`, or no body. Requeues in place: the row keeps its id,
+source and author.
 
 - Allowed when `direction = 'out'`, `seq IS NULL` and `send_state IN
   ('failed','uncertain')`: set `send_state = 'queued'`, `error = NULL`,
@@ -287,8 +294,12 @@ No body. Requeues in place: the row keeps its id, source and author.
   lands, through the existing ack.
 - Anything else is 409 (`detail`: "this reply is not waiting for a retry");
   unknown id 404.
-- `uncertain` means the text may be on Facebook already. The server allows the
-  retry (the owner's decision); the Chats tab words the action accordingly.
+- `uncertain` means the text may be on Facebook already, so a retry can reach
+  the buyer twice. The server takes it only with `force: true`; without, 409
+  (`detail`: "this reply may already be on Facebook; retry it with force to
+  send it again"). `fbChatApi.retry(id, force)` sends it; the Chats tab passes
+  `force` for an `uncertain` bubble, behind wording that says so. `force` is
+  ignored for a `failed` reply.
 
 ### `POST /threads/:id/read`, `POST /threads/:id/unread` → `{ "ok": true }`
 
@@ -347,7 +358,8 @@ card offers Reconnect.
 The Accounts tab shows `status = 'pending'` as request cards. An approved
 device that is no account's `device` and has `matches_account === null` is an
 approved Chrome that has not checked in yet; show it as a muted "waiting for
-its first check-in" row. Rejected and revoked devices are not listed on the
+its first check-in" row. That row carries "Disconnect this Chrome", the only
+way to take the approval back before an account exists. Rejected and revoked devices are not listed on the
 page.
 
 ### `POST /devices/:id/approve` body `FbChatDeviceApproval` (optional) → `{ "ok": true }`
@@ -434,7 +446,21 @@ topic") is fixed copy.
 - `styles/fbChat.css`: page layout, `.fbc-tabs`, `.fbc-lede`, `.fbc-badge`,
   `.fbc-av`, `.fbc-health`, and the three source colours `--fbc-src-erp`,
   `--fbc-src-tg`, `--fbc-src-fb`. Import your own sheet from your tab file.
-- Times: `relTime` from `lib/format.ts`.
+- Times: `relTime` from `lib/format.ts`. The Chats tab is the exception where
+  the mockup shows clock times: the chat list (time today, weekday this week,
+  date before) and the stamp under a bubble.
+- Chats tab behaviour the mockup leaves open:
+  - Mark as unread closes the chat (back to `/leads/facebook`): the open chat
+    is marked read on every poll that finds it unread, so staying would read
+    it again. It is offered only when the chat has a message from the buyer,
+    and also in the conversation header below 1180px, where the details
+    column is hidden.
+  - A photo is drawn as a placeholder, never loaded: the stored links are
+    Facebook's signed ones, which expire.
+  - The details pane says "First seen" (`created_at`), not "Started": the
+    server does not know when the conversation began.
+  - An `uncertain` reply reads "May not have arrived · Send again", with the
+    risk of a double post in the button's hint.
 - i18n: shell keys are `fbc_*` (status labels included). Each tab adds one
   contiguous block with its own prefix, in `lib/i18n.tsx` and `lib/i18n.zh.ts`,
   right after the `fbc_` block. A count's singular is the same key plus `One`
@@ -444,9 +470,9 @@ topic") is fixed copy.
 
 | Owner | Owns (create or edit) | Notes |
 | --- | --- | --- |
-| **Backend** | `apps/backend/migrations/0241_fb_chat_page.sql`; `apps/backend/src/routes/fbChat.ts`; `apps/backend/src/services/fbChat.ts`, `fbChatConfig.ts`, `fbChatDevices.ts`, `fbChatTelegram.ts`; `apps/backend/src/lib/fbChat.ts`; `apps/backend/tests/fb-chat.test.ts` and new `apps/backend/tests/fb-chat-*.test.ts`; the `fb_chat_*` sections of `docs/DATABASE.md` | The existing extension tests must pass unchanged. May make additive edits to `packages/shared/src/fbChat.ts`; say so in the report. |
+| **Backend** | `apps/backend/migrations/0241_fb_chat_page.sql`; `apps/backend/src/routes/fbChat.ts`; `apps/backend/src/services/fbChat.ts`, `fbChatPage.ts` (the page's reads and writes), `fbChatConfig.ts`, `fbChatDevices.ts`, `fbChatTelegram.ts`; `apps/backend/src/lib/fbChat.ts`; `apps/backend/tests/fb-chat.test.ts` and new `apps/backend/tests/fb-chat-*.test.ts`; the `fb_chat_*` sections of `docs/DATABASE.md` | The existing extension tests must pass unchanged. May make additive edits to `packages/shared/src/fbChat.ts`; say so in the report. |
 | **Chats tab** | `pages/desktop/leads/fbchat/ChatsTab.tsx` and new `pages/desktop/leads/fbchat/Chat*.tsx`; `styles/fbChatChats.css`; i18n prefix `fbcc_` | Mockup: `#view-chats`, `strip()`, `list()`, `convo()`, `details()`, `stamp()`. |
-| **Accounts tab** | `pages/desktop/leads/fbchat/AccountsTab.tsx` and new `pages/desktop/leads/fbchat/Account*.tsx`; `styles/fbChatAccounts.css`; i18n prefix `fbca_` | Mockup: `#view-accounts`, `requests()`, `acctTable()`. Rename and disconnect dialogs use `components/Modal.tsx`. |
+| **Accounts tab** | `pages/desktop/leads/fbchat/AccountsTab.tsx` and new `pages/desktop/leads/fbchat/Account*.tsx`; `styles/fbChatAccounts.css`; i18n prefix `fbca_` | Mockup: `#view-accounts`, `requests()`, `acctTable()`. Rename is a field in the row, as the mockup has it; the disconnect confirmation uses `components/Modal.tsx`. |
 | **Settings tab** | `pages/desktop/leads/fbchat/SettingsTab.tsx` and new `pages/desktop/leads/fbchat/Setting*.tsx`; `styles/fbChatSettings.css`; i18n prefix `fbcs_`; and, as its last step, removing the page this one replaces: `pages/desktop/settings/FbChatBridgePanel.tsx`, its `fbChat` section in `pages/desktop/DesktopSettings.tsx`, and the `settingsNavFbChat*`, `fbcfg*`, `fbdev*` keys in both i18n tables | Mockup: `#view-settings`, `FIELDS`, `fieldRow()`, `fields()`. Other tabs may read `FbChatBridgePanel.tsx` for reference until it goes; nothing may import it. |
 | **Contract (done)** | `packages/shared/src/fbChat.ts`; `apps/frontend/src/lib/fbChat.ts`; `lib/route.ts`, `lib/desktopNav.ts`, `DesktopApp.tsx`, `components/Sidebar.tsx`; `pages/desktop/leads/fbchat/FbChatsPage.tsx`, `shared.tsx`; `styles/fbChat.css`; `fbc_*` i18n keys; this spec; the ticket | Tabs treat these as read-only. If one is wrong, make the smallest fix in place and report it. |
 | **Shared by all** | `apps/frontend/src/lib/i18n.tsx`, `apps/frontend/src/lib/i18n.zh.ts` | One contiguous block per owner. If an Edit fails because the file moved, re-read and retry. |
@@ -458,10 +484,11 @@ Paths without a root are under `apps/frontend/src/`.
 - Root `package.json` minor bump and its `CHANGELOG.md` section.
 - `docs/FEATURES.md`: the chat hub section still describes Settings ▸ Chat
   bridge.
-- Mentions of "Settings ▸ Chat bridge" in the root `AGENTS.md` contract
-  paragraph and in comments (`packages/shared/src/fbChat.ts`,
-  `services/fbChatConfig.ts`, `services/fbChatDevices.ts`, migrations 0238 and
-  0240 stay as written).
+- Mentions of "Settings ▸ Chat bridge" in comments
+  (`packages/shared/src/fbChat.ts`, `services/fbChatConfig.ts`,
+  `services/fbChatDevices.ts`; migrations 0238 and 0240 stay as written) and
+  in the `fb_chat_*` sections of `docs/DATABASE.md`. The root `AGENTS.md`
+  contract paragraph is done (Settings tab).
 - The extension's own text that says "approve in Settings ▸ Chat bridge", in
   the extension repo, which this work does not touch.
 - Closing RS-583.

@@ -1,10 +1,12 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import {
   FB_CHAT_DEVICE_BEARER_PREFIX,
-  type FbChatDevice,
+  type FbChatDeviceApproval,
+  type FbChatDeviceRow,
   type FbChatDeviceStatus,
   type FbChatEnrollAnswer,
 } from '@recycle-erp/shared';
+import type postgres from 'postgres';
 import type { SqlLike } from '../db';
 
 // ─── Chat bridge devices ─────────────────────────────────────────────
@@ -101,11 +103,16 @@ export async function touchDevice(sql: SqlLike, id: string): Promise<void> {
      WHERE id = ${id} AND last_seen_at < NOW() - INTERVAL '1 minute'`;
 }
 
-export async function listDevices(sql: SqlLike): Promise<FbChatDevice[]> {
-  return sql<FbChatDevice[]>`
+export async function listDevices(sql: SqlLike): Promise<FbChatDeviceRow[]> {
+  // matches_account: the Facebook user is an account the hub already has, so
+  // approving this Chrome reconnects that account rather than adding one.
+  return sql<FbChatDeviceRow[]>`
     SELECT d.id, d.code, d.status, d.label, d.fb_uid, d.ext_version, d.created_ip, d.user_agent,
-           d.created_at, d.last_seen_at, u.name AS decided_by, d.decided_at
+           d.created_at, d.last_seen_at, u.name AS decided_by, d.decided_at,
+           CASE WHEN a.id IS NULL THEN NULL
+                ELSE jsonb_build_object('id', a.id::int, 'no', a.no, 'label', a.label) END AS matches_account
       FROM fb_chat_devices d LEFT JOIN users u ON u.id = d.decided_by
+      LEFT JOIN fb_chat_accounts a ON a.fb_uid = d.fb_uid
      ORDER BY (d.status = 'pending') DESC, d.created_at DESC`;
 }
 
@@ -125,6 +132,38 @@ export async function decideDevice(sql: SqlLike, id: string, decision: DeviceDec
      WHERE id = ${id} AND status = ANY(${from})
      RETURNING id`;
   return rows.length > 0;
+}
+
+/**
+ * Approves a device. When its Facebook user is an account the hub already
+ * has, this Chrome takes that account over: the one relaying it until now is
+ * revoked, and the name and pause asked for are dropped, since the account
+ * keeps its own. Otherwise they wait on the device for the account's first
+ * push (services/fbChat.ts → touchAccount). False when it cannot be approved.
+ */
+export async function approveDevice(
+  tx: postgres.TransactionSql, id: string, approval: FbChatDeviceApproval, userId: string,
+): Promise<boolean> {
+  const [device] = await tx<{ fb_uid: string | null }[]>`
+    SELECT fb_uid FROM fb_chat_devices
+     WHERE id = ${id} AND status = ANY(${DECISIONS.approve.from}) FOR UPDATE`;
+  if (!device) return false;
+  const [account] = device.fb_uid === null ? [] : await tx<{ id: number; client_id: string | null }[]>`
+    SELECT id::int AS id, client_id FROM fb_chat_accounts WHERE fb_uid = ${device.fb_uid} FOR UPDATE`;
+  const clientId = `device:${id}`;
+  if (account) {
+    await tx`
+      UPDATE fb_chat_devices SET status = 'revoked', decided_by = ${userId}, decided_at = NOW()
+       WHERE 'device:' || id = ${account.client_id} AND id <> ${id} AND status = 'approved'`;
+    await tx`UPDATE fb_chat_accounts SET client_id = ${clientId} WHERE id = ${account.id}`;
+  }
+  await tx`
+    UPDATE fb_chat_devices SET
+      status = 'approved', decided_by = ${userId}, decided_at = NOW(),
+      account_label = ${account ? null : approval.label ?? null},
+      start_paused = ${account ? false : approval.startPaused ?? false}
+     WHERE id = ${id}`;
+  return true;
 }
 
 /** Forgets a device. Its extension, if still running, enrolls again. */

@@ -1,6 +1,11 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FbChatClaimAnswer, FbChatRow, FbChatSyncAnswer, FbChatSyncPush } from '@recycle-erp/shared';
 import type { FbChatConfigAnswer, FbChatConfigField, FbChatDevice, FbChatDeviceAnswer, FbChatEnrollAnswer } from '@recycle-erp/shared';
+import {
+  fbChatAccountStatus,
+  type FbChatAccountsAnswer, type FbChatDeviceRow, type FbChatMessagesAnswer, type FbChatReplyAnswer, type FbChatSummary,
+  type FbChatTelegramStatus, type FbChatThreadsAnswer,
+} from '@recycle-erp/shared';
 import { chunkForTelegram, fbChatTopicName } from '../src/lib/fbChat';
 import { setHoldsDraining } from '../src/lib/pgWake';
 import { TelegramError, type TelegramCall } from '../src/lib/telegramBot';
@@ -11,7 +16,7 @@ import { alignWindow } from '../src/services/fbChat';
 import { compareVersions } from '../src/services/fbChatConfig';
 import { fbChatTelegramConfig, fbChatTelegramConfigured, fbChatUserSession, runFbChatTelegramTick, setFbChatTelegramForTests } from '../src/services/fbChatTelegram';
 import { api, testEnv } from './helpers/app';
-import { ALEX, MARCUS, loginAs } from './helpers/auth';
+import { ALEX, MARCUS, SOFIA, loginAs } from './helpers/auth';
 import { getTestDb, resetDb } from './helpers/db';
 
 const CHAT = '-1001234567';
@@ -623,6 +628,498 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
 
     it('orders extension versions by number', () => {
       expect(['0.10.0', '0.2.0', '0.9.1'].sort((a, b) => compareVersions(b, a))).toEqual(['0.10.0', '0.9.1', '0.2.0']);
+    });
+  });
+
+  describe('the Leads ▸ Facebook page', () => {
+    type Thread = FbChatThreadsAnswer['threads'][number];
+    const FIELDS: FbChatConfigField[] = [
+      { key: 'paused', label: 'Paused', type: 'boolean', default: false },
+      { key: 'configPollSec', label: 'Settings check', type: 'integer', default: 60, min: 30, max: 3600, unit: 's' },
+    ];
+    let token: string;
+    const get = <T>(path: string) => api<T>('GET', `/api/fb-chat/${path}`, { token, env });
+    const post = <T>(path: string, body?: unknown) => api<T>('POST', `/api/fb-chat/${path}`, { token, body });
+    const threads = async (query = '') => (await get<FbChatThreadsAnswer>(`threads${query}`)).body.threads;
+    const thread = async (): Promise<Thread> => (await threads())[0]!;
+    const reply = (threadId: number, body: unknown) => post<FbChatReplyAnswer>(`threads/${threadId}/messages`, { body });
+    const accounts = async () => (await get<FbChatAccountsAnswer>('accounts')).body;
+    const summary = async () => (await get<FbChatSummary>('summary')).body;
+    const enroll = async (body: unknown) =>
+      (await api<FbChatEnrollAnswer>('POST', '/api/fb-chat/enroll', { body, headers: { 'X-Requested-By': '' } })).body;
+    const deviceBearer = (e: FbChatEnrollAnswer) => `fbd_${e.deviceId}_${e.token}`;
+    const stateOf = async (id: number) => {
+      const [m] = await getTestDb()`SELECT send_state, error, seq, attempts, acked_at FROM fb_chat_messages WHERE id = ${id}`;
+      return m!;
+    };
+    /** Claims the account's next reply and reports how it ended. */
+    async function send(outcome: 'sent' | 'failed' | 'uncertain', error?: string) {
+      const claim = await push<FbChatClaimAnswer>('outbox/claim', { account: ACCOUNT });
+      expect(claim.status).toBe(200);
+      expect((await push(`outbox/${claim.body.id}/result`, { account: ACCOUNT, outcome, error })).status).toBe(200);
+      return claim.body;
+    }
+
+    beforeEach(async () => {
+      token = (await loginAs(ALEX)).token;
+    });
+
+    it('sends a reply typed in the ERP through the same outbox, and names its author in Telegram', async () => {
+      await seeded();
+      const t = await thread();
+      const queued = await reply(t.id, '  We can do $38 each.  ');
+      expect(queued.status).toBe(201);
+      expect(queued.body.message).toMatchObject({
+        direction: 'out', source: 'erp', body: 'We can do $38 each.', send_state: 'queued', seq: null,
+        author_name: 'Alex Chen', erp_user_id: expect.any(String), tg_user_name: null,
+      });
+      await tick();
+      expect(texts()).toEqual(['↩️ Alex (ERP): We can do $38 each.']);
+      calls.length = 0;
+
+      const claimed = await send('sent');
+      expect(claimed).toEqual({ id: queued.body.message.id, fbThreadId: 't1', body: 'We can do $38 each.' });
+      // Sent needs no word in Telegram: the text is there and the ERP shows the state.
+      await tick();
+      expect(calls.filter((c) => c.method !== 'getUpdates')).toEqual([]);
+      expect((await stateOf(claimed.id)).acked_at).not.toBeNull();
+
+      // The bubble arrives in the next window: the same row, not a new one, and not posted again.
+      const again = await push<FbChatSyncAnswer>('sync', sync([row('in', 'Is this still available?'), row('out', 'We can do $38 each.')]));
+      expect(again.body.added).toBe(0);
+      await tick();
+      expect(texts()).toEqual([]);
+
+      const open = await get<FbChatMessagesAnswer>(`threads/${t.id}/messages`);
+      expect(open.body.messages.map((m) => [m.seq, m.source, m.send_state, m.author_name])).toEqual([
+        [1, 'facebook', null, null], [2, 'erp', 'sent', 'Alex Chen'],
+      ]);
+      expect(open.body.thread).toMatchObject({
+        id: t.id, account_no: 1, account_label: 'Denver profile', unread: false, failed: false,
+        telegram_topic_id: 1, telegram_topic_url: 'https://t.me/c/1234567/1',
+        last_message: { direction: 'out', source: 'erp', author_name: 'Alex Chen', body: 'We can do $38 each.', images: 0, send_state: 'sent' },
+      });
+      expect(open.body.also_messaged).toEqual([]);
+    });
+
+    it('refuses a reply that is empty, too long or for no chat, and sends a leading slash as typed', async () => {
+      await seeded();
+      const t = await thread();
+      expect((await reply(t.id, '   ')).status).toBe(400);
+      expect((await reply(t.id, 42)).status).toBe(400);
+      expect((await reply(t.id, 'x'.repeat(2001))).status).toBe(400);
+      expect((await reply(999999, 'hello')).status).toBe(404);
+      expect((await reply(t.id, 'x'.repeat(2000))).status).toBe(201);
+      expect((await reply(t.id, '/note')).body.message.body).toBe('/note');
+      expect((await get(`threads/999999/messages`)).status).toBe(404);
+    });
+
+    it('holds an ERP reply while the account is restricted, and tells Telegram when it fails', async () => {
+      await seeded();
+      const t = await thread();
+      await push('events', { account: ACCOUNT, kind: 'restricted', detail: { restriction: 'login' } });
+      expect((await reply(t.id, 'Still here')).status).toBe(201);
+      expect((await push('outbox/claim', { account: ACCOUNT })).status).toBe(204);
+      expect((await accounts()).accounts[0]).toMatchObject({ restricted: 'login', replies_waiting: 1 });
+      await push('events', { account: ACCOUNT, kind: 'recovered' });
+      await tick();
+      calls.length = 0;
+
+      await send('failed', 'composer not found');
+      await tick();
+      expect(texts()).toEqual(["❌ Alex's reply from the ERP was not sent to Facebook: composer not found. Retry it in the ERP."]);
+      expect(sent('sendMessage')[0]!.params).toMatchObject({ message_thread_id: 1 });
+      expect(sent('sendMessage')[0]!.params.reply_parameters).toBeUndefined();
+      calls.length = 0;
+      await tick();
+      expect(texts()).toEqual([]);
+    });
+
+    it('wakes a held claim when a reply is typed in the ERP', async () => {
+      await seeded();
+      const t = await thread();
+      const held = push<FbChatClaimAnswer>('outbox/claim', { account: ACCOUNT, wait: 10 });
+      await new Promise((r) => setTimeout(r, 300));
+      const typed = Date.now();
+      await reply(t.id, 'Yes, still available');
+      expect((await held).body).toMatchObject({ body: 'Yes, still available' });
+      expect(Date.now() - typed).toBeLessThan(1000);
+    });
+
+    it('retries only a reply that did not go out, and an uncertain one only when forced', async () => {
+      await seeded();
+      const t = await thread();
+      const { id } = (await reply(t.id, 'first try')).body.message;
+      const inbound = (await get<FbChatMessagesAnswer>(`threads/${t.id}/messages`)).body.messages[0]!;
+
+      // Queued, sending and inbound rows are not waiting for a retry.
+      expect((await post(`messages/${id}/retry`)).status).toBe(409);
+      expect((await post(`messages/${inbound.id}/retry`, { force: true })).status).toBe(409);
+      expect((await post('messages/999999/retry')).status).toBe(404);
+
+      await send('failed', 'composer not found');
+      expect(await thread()).toMatchObject({ failed: true });
+      expect((await threads('?filter=failed')).map((x) => x.id)).toEqual([t.id]);
+      const retried = await post<FbChatReplyAnswer>(`messages/${id}/retry`);
+      expect(retried.status).toBe(200);
+      expect(retried.body.message).toMatchObject({ id, source: 'erp', send_state: 'queued', error: null, author_name: 'Alex Chen' });
+      expect(await threads('?filter=failed')).toEqual([]);
+
+      // The same row goes out again; this time the browser cannot say whether it landed.
+      expect((await send('uncertain')).id).toBe(id);
+      expect(await stateOf(id)).toMatchObject({ send_state: 'uncertain', attempts: 2 });
+      expect((await threads('?filter=failed')).map((x) => x.id)).toEqual([t.id]);
+      const refused = await post<{ error: string; detail: string }>(`messages/${id}/retry`);
+      expect(refused.status).toBe(409);
+      expect(refused.body.detail).toContain('force');
+      expect((await post(`messages/${id}/retry`, { force: 'yes' })).status).toBe(409);
+      expect((await stateOf(id)).send_state).toBe('uncertain');
+      expect((await push('outbox/claim', { account: ACCOUNT })).status).toBe(204);
+
+      expect((await post(`messages/${id}/retry`, { force: true })).status).toBe(200);
+      expect((await send('sent')).id).toBe(id);
+      expect(await stateOf(id)).toMatchObject({ send_state: 'sent', seq: 2, attempts: 3 });
+      // Sent replies are final.
+      expect((await post(`messages/${id}/retry`, { force: true })).status).toBe(409);
+    });
+
+    it('retries a reply typed in Telegram from the ERP, and Telegram hears how it ended', async () => {
+      await seeded();
+      const tgId = topicReply(1, 'Can do 800');
+      await tick();
+      const failed = await send('failed', 'composer not found');
+      await tick();
+      calls.length = 0;
+      expect((await post(`messages/${failed.id}/retry`)).status).toBe(200);
+      await send('sent');
+      await tick();
+      expect(sent('setMessageReaction').map((c) => c.params.message_id)).toEqual([tgId]);
+      const open = await get<FbChatMessagesAnswer>(`threads/${(await thread()).id}/messages`);
+      expect(open.body.messages.at(-1)).toMatchObject({ source: 'telegram', author_name: 'Jin', send_state: 'sent' });
+    });
+
+    it('keeps one read mark per chat for the whole team', async () => {
+      // A chat found ending with the buyer starts unread.
+      await seeded();
+      const t = await thread();
+      expect(t.unread).toBe(true);
+      expect(await summary()).toEqual({ unread: 1, pending_devices: 0 });
+      expect((await threads('?filter=unread')).map((x) => x.id)).toEqual([t.id]);
+
+      // Opening the conversation is not reading it; saying so is, for everyone.
+      await get(`threads/${t.id}/messages`);
+      expect((await thread()).unread).toBe(true);
+      expect((await post(`threads/${t.id}/read`)).body).toEqual({ ok: true });
+      expect((await post(`threads/${t.id}/read`)).status).toBe(200);
+      const other = (await loginAs(SOFIA)).token;
+      const seenByOther = await api<FbChatThreadsAnswer>('GET', '/api/fb-chat/threads', { token: other });
+      expect(seenByOther.body.threads[0]!.unread).toBe(false);
+      expect(await threads('?filter=unread')).toEqual([]);
+      expect((await summary()).unread).toBe(0);
+
+      expect((await api('POST', `/api/fb-chat/threads/${t.id}/unread`, { token: other })).status).toBe(200);
+      expect((await post(`threads/${t.id}/unread`)).status).toBe(200);
+      expect((await thread()).unread).toBe(true);
+      expect((await accounts()).accounts[0]!.unread).toBe(1);
+
+      // An answer reads it, wherever it is typed: Telegram, the ERP, Facebook.
+      topicReply(1, 'Yes');
+      await tick();
+      expect((await thread()).unread).toBe(false);
+      await send('sent');
+      await push('sync', sync([row('in', 'Is this still available?'), row('out', 'Yes'), row('in', 'Price?')]));
+      expect((await thread()).unread).toBe(true);
+      await reply(t.id, '$40');
+      expect((await thread()).unread).toBe(false);
+      await send('sent');
+      await push('sync', sync([row('out', '$40'), row('in', 'Deal?')]));
+      expect((await thread()).unread).toBe(true);
+      await push('sync', sync([row('in', 'Deal?'), row('out', 'Deal')]));
+      expect((await thread()).unread).toBe(false);
+
+      expect((await post('threads/999999/read')).status).toBe(404);
+      expect((await post('threads/999999/unread')).status).toBe(404);
+    });
+
+    it('leaves a chat we ended read, and unread does nothing where the buyer never wrote', async () => {
+      await push('sync', sync([row('in', 'hi'), row('out', 'hello')], { full: true, complete: true }));
+      const t = await thread();
+      expect(t.unread).toBe(false);
+      await push('sync', sync([row('out', 'only us')], { full: true, complete: true, fbThreadId: 't2' }));
+      const ours = (await threads()).find((x) => x.fb_thread_id === 't2')!;
+      expect((await post(`threads/${ours.id}/unread`)).status).toBe(200);
+      expect((await threads('?filter=unread'))).toEqual([]);
+      expect((await post(`threads/${t.id}/unread`)).status).toBe(200);
+      expect((await threads('?filter=unread')).map((x) => x.id)).toEqual([t.id]);
+    });
+
+    it('filters the chat list by account, search and state', async () => {
+      await seeded();
+      await push('sync', sync([row('in', '100% tested DDR4_32GB sticks')], {
+        full: true, complete: true, fbThreadId: 't2',
+        buyer: { name: 'Ana Lee', profileId: '777', location: null, joinedYear: null, rating: null, ratingCount: null },
+        listing: { id: '77', title: 'Sell your RAM' },
+      }, OTHER));
+      const all = await threads();
+      expect(all.map((x) => x.buyer_name)).toEqual(['Ana Lee', 'John Smith']);
+      expect(all.map((x) => x.account_no)).toEqual([2, 1]);
+      const denver = all[1]!.account_id;
+      expect((await threads(`?account=${denver}`)).map((x) => x.buyer_name)).toEqual(['John Smith']);
+      expect((await threads('?q=john')).map((x) => x.buyer_name)).toEqual(['John Smith']);
+      expect((await threads('?q=your%20ram')).map((x) => x.buyer_name)).toEqual(['Ana Lee']);
+      expect((await threads('?q=STILL%20available')).map((x) => x.buyer_name)).toEqual(['John Smith']);
+      // What LIKE would read as wildcards is text to find.
+      expect((await threads('?q=100%25%20tested')).map((x) => x.buyer_name)).toEqual(['Ana Lee']);
+      expect((await threads('?q=DDR4_32')).map((x) => x.buyer_name)).toEqual(['Ana Lee']);
+      expect(await threads('?q=DDR4x32')).toEqual([]);
+      expect((await threads('?q=%25')).map((x) => x.buyer_name)).toEqual(['Ana Lee']);
+      expect((await threads(`?account=${denver}&filter=unread&q=available`)).map((x) => x.buyer_name)).toEqual(['John Smith']);
+      expect((await threads('?filter=all')).length).toBe(2);
+      expect((await get('threads?filter=archived')).status).toBe(400);
+      expect((await get('threads?account=abc')).status).toBe(400);
+
+      // The same Marketplace profile on another of our accounts.
+      await push('sync', sync([row('in', 'Asked about SSD pricing')], { full: true, complete: true, fbThreadId: 't3' }, OTHER));
+      const john = (await threads(`?account=${denver}`))[0]!;
+      const open = await get<FbChatMessagesAnswer>(`threads/${john.id}/messages`);
+      expect(open.body.also_messaged).toMatchObject([{ account_no: 2, account_label: 'Aurora profile', last_body: 'Asked about SSD pricing' }]);
+    });
+
+    it('keeps the name a manager gave an account when the extension reports its own', async () => {
+      await seeded();
+      await push('config', { account: { ...ACCOUNT, label: 'Chrome 1' }, extVersion: '0.3.0', fields: FIELDS });
+      const [acct] = (await accounts()).accounts;
+      expect(acct!.label).toBe('Chrome 1');
+
+      const rename = (id: number, label: unknown) => api('PATCH', `/api/fb-chat/accounts/${id}`, { token, body: { label } });
+      expect((await rename(acct!.id, '  ')).status).toBe(400);
+      expect((await rename(acct!.id, 'x'.repeat(61))).status).toBe(400);
+      expect((await rename(acct!.id, 7)).status).toBe(400);
+      expect((await rename(999999, 'Nobody')).status).toBe(404);
+      expect((await rename(acct!.id, '  Westside Parts ')).status).toBe(200);
+
+      await push('sync', sync([row('in', 'Is this still available?'), row('in', 'hello?')]));
+      await push('config', { account: ACCOUNT, extVersion: '0.3.0', fields: FIELDS });
+      await push('outbox/claim', { account: ACCOUNT });
+      const after = (await accounts()).accounts;
+      expect(after.map((a) => [a.id, a.no, a.label])).toEqual([[acct!.id, 1, 'Westside Parts']]);
+      expect((await thread()).account_label).toBe('Westside Parts');
+    });
+
+    it('gives a new account the name and pause chosen at approval, on its first push', async () => {
+      const e = await enroll({ label: 'Chrome 3', extVersion: '0.3.0' });
+      const approve = (body?: unknown) => post(`devices/${e.deviceId}/approve`, body);
+      expect((await approve({ startPaused: 'yes' })).status).toBe(400);
+      expect((await approve({ label: 5 })).status).toBe(400);
+      expect((await approve({ label: 'x'.repeat(61) })).status).toBe(400);
+      expect((await approve([])).status).toBe(400);
+      expect((await approve({ label: ' Littleton Lots ', startPaused: true })).status).toBe(200);
+      // Approval makes no account: it appears when the Chrome first checks in.
+      expect((await accounts()).accounts).toEqual([]);
+
+      const mine = { fbUid: '100500', label: 'Chrome 3', extVersion: '0.3.0' };
+      const first = await push<FbChatConfigAnswer>('config', { account: mine, extVersion: '0.3.0', fields: FIELDS }, deviceBearer(e));
+      expect(first.body.values).toEqual({ paused: true });
+      await push('sync', sync([row('in', 'hi')], { full: true }, mine), deviceBearer(e));
+
+      const [acct] = (await accounts()).accounts;
+      expect(acct).toMatchObject({
+        no: 1, fb_uid: '100500', label: 'Littleton Lots', paused: true, config_state: 'up_to_date', threads: 1,
+        device: { id: e.deviceId, label: 'Chrome 3', status: 'approved', decided_by: 'Alex Chen' },
+      });
+      const [entry] = (await get<{ entries: { account_id: number; key: string; value: unknown; updated_by: string }[] }>('config')).body.entries;
+      expect(entry).toMatchObject({ account_id: acct!.id, key: 'paused', value: true, updated_by: 'Alex Chen' });
+      const [device] = await getTestDb()`SELECT account_label, start_paused FROM fb_chat_devices`;
+      expect(device).toEqual({ account_label: null, start_paused: false });
+
+      // Resuming sticks: the pause was a starting value, not a rule.
+      expect((await api('DELETE', `/api/fb-chat/config/paused?accountId=${acct!.id}`, { token })).status).toBe(200);
+      await push('config', { account: mine, extVersion: '0.3.0', fields: FIELDS }, deviceBearer(e));
+      expect((await accounts()).accounts[0]).toMatchObject({ label: 'Littleton Lots', paused: false });
+    });
+
+    it('approves with no body as before: the account takes the Chrome profile name and is not paused', async () => {
+      const e = await enroll({ label: 'Office', extVersion: '0.2.0' });
+      expect((await api('POST', `/api/fb-chat/devices/${e.deviceId}/approve`, { token })).status).toBe(200);
+      const mine = { fbUid: '100501', label: 'Office' };
+      await push('sync', sync([row('in', 'hi')], { full: true }, mine), deviceBearer(e));
+      expect((await accounts()).accounts[0]).toMatchObject({ label: 'Office', paused: false });
+      await push('sync', sync([row('in', 'hi')], {}, { ...mine, label: 'Office 2' }), deviceBearer(e));
+      expect((await accounts()).accounts[0]!.label).toBe('Office 2');
+    });
+
+    it('marks a request from a known Facebook user as a reconnect, and moves the account to that Chrome', async () => {
+      const old = await enroll({ label: 'Old laptop', extVersion: '0.2.0' });
+      await post(`devices/${old.deviceId}/approve`);
+      const body = sync([row('in', 'Is this still available?')], { full: true, complete: true });
+      await push('sync', body, deviceBearer(old));
+      await tick();
+      const before = (await accounts()).accounts[0]!;
+      expect(before.device).toMatchObject({ id: old.deviceId, status: 'approved' });
+
+      const fresh = await enroll({ label: 'New desktop', extVersion: '0.3.0', fbUid: ACCOUNT.fbUid });
+      const stranger = await enroll({ label: 'Someone else', extVersion: '0.3.0', fbUid: '100999' });
+      const unknown = await enroll({ label: 'No user yet' });
+      const listed = (await get<{ devices: FbChatDeviceRow[] }>('devices')).body.devices;
+      const matchOf = (id: string) => listed.find((d) => d.id === id)!.matches_account;
+      expect(matchOf(fresh.deviceId)).toEqual({ id: before.id, no: 1, label: 'Denver profile' });
+      expect(matchOf(stranger.deviceId)).toBeNull();
+      expect(matchOf(unknown.deviceId)).toBeNull();
+      expect(await summary()).toMatchObject({ pending_devices: 3 });
+
+      // A reconnect ignores the name and pause: the account keeps its own.
+      expect((await post(`devices/${fresh.deviceId}/approve`, { label: 'Renamed', startPaused: true })).status).toBe(200);
+      const after = (await accounts()).accounts;
+      expect(after).toHaveLength(1);
+      expect(after[0]).toMatchObject({
+        id: before.id, no: 1, label: 'Denver profile', paused: false, threads: 1,
+        device: { id: fresh.deviceId, label: 'New desktop', status: 'approved' },
+      });
+      const devices = await getTestDb()`SELECT id, status, account_label, start_paused FROM fb_chat_devices WHERE id IN ${getTestDb()([old.deviceId, fresh.deviceId])}`;
+      expect(devices.find((d) => d.id === old.deviceId)).toMatchObject({ status: 'revoked' });
+      expect(devices.find((d) => d.id === fresh.deviceId)).toMatchObject({ status: 'approved', account_label: null, start_paused: false });
+      expect((await push<{ error: string }>('sync', body, deviceBearer(old))).body).toEqual({ error: 'device_rejected' });
+      expect((await push<FbChatSyncAnswer>('sync', body, deviceBearer(fresh))).body).toEqual({ needsFull: false, added: 0 });
+      expect((await thread()).telegram_topic_id).toBe(1);
+      expect((await summary()).pending_devices).toBe(2);
+    });
+
+    it('shows an account whose Chrome was disconnected, with the device it had', async () => {
+      const e = await enroll({ label: 'Office', extVersion: '0.3.0' });
+      await post(`devices/${e.deviceId}/approve`);
+      await push('sync', sync([row('in', 'hi')], { full: true }), deviceBearer(e));
+      expect((await post(`devices/${e.deviceId}/revoke`)).status).toBe(200);
+      const [acct] = (await accounts()).accounts;
+      expect(acct).toMatchObject({ threads: 1, device: { id: e.deviceId, status: 'revoked' } });
+      expect(fbChatAccountStatus(acct!, Date.now())).toBe('stale');
+      await api('DELETE', `/api/fb-chat/devices/${e.deviceId}`, { token });
+      expect((await accounts()).accounts[0]!.device).toBeNull();
+    });
+
+    it('numbers accounts in the order they appear and counts what the tabs show', async () => {
+      expect(await accounts()).toEqual({ accounts: [], next_no: 1, latest_ext_version: null });
+      expect(await summary()).toEqual({ unread: 0, pending_devices: 0 });
+      expect((await get<FbChatTelegramStatus>('telegram')).body).toEqual({ configured: true, topics: 0 });
+
+      await seeded();
+      // Every push touches the account; none of them may use up a number or an id.
+      for (let i = 0; i < 5; i++) await push('outbox/claim', { account: ACCOUNT });
+      await push('config', { account: ACCOUNT, extVersion: '0.2.0', fields: [FIELDS[0]] });
+      await push('config', { account: OTHER, extVersion: '0.3.0', fields: FIELDS });
+      await push('sync', sync([row('in', 'one'), row('out', 'two')], { full: true, complete: true }, OTHER));
+      const t = await thread();
+      await reply((await threads()).find((x) => x.account_no === 1)!.id, 'On my way');
+
+      const page = await accounts();
+      expect(page.next_no).toBe(3);
+      expect(page.latest_ext_version).toBe('0.3.0');
+      expect(page.accounts.map((a) => [a.no, a.label, a.threads, a.unread, a.replies_waiting])).toEqual([
+        [1, 'Denver profile', 1, 0, 1], [2, 'Aurora profile', 1, 0, 0],
+      ]);
+      expect(page.accounts[1]!.id).toBe(page.accounts[0]!.id + 1);
+      expect(page.accounts[0]).toMatchObject({
+        fb_uid: '100042', ext_version: '0.1.0', restricted: null, paused: false, stale_after_sec: 300,
+        config_state: 'up_to_date', device: null, last_sync_at: expect.any(String), config_seen_at: expect.any(String),
+      });
+      expect(fbChatAccountStatus(page.accounts[0]!, Date.now())).toBe('running');
+      expect(fbChatAccountStatus(page.accounts[0]!, Date.now() + 301_000)).toBe('stale');
+      expect(t).toBeDefined();
+
+      // A setting it has not picked up yet; a slower settings check stretches what counts as silence.
+      const put = (key: string, value: unknown, accountId: number | null = null) =>
+        api('PUT', `/api/fb-chat/config/${key}`, { token, body: { accountId, value } });
+      await put('paused', true, page.accounts[1]!.id);
+      await put('configPollSec', 200);
+      const waiting = (await accounts()).accounts;
+      expect(waiting.map((a) => [a.paused, a.config_state, a.stale_after_sec])).toEqual([[false, 'waiting', 600], [true, 'waiting', 600]]);
+      await push('config', { account: OTHER, extVersion: '0.3.0', fields: FIELDS });
+      const caught = (await accounts()).accounts;
+      expect(caught.map((a) => a.config_state)).toEqual(['waiting', 'up_to_date']);
+      expect(fbChatAccountStatus(caught[1]!, Date.now())).toBe('paused');
+
+      await push('events', { account: OTHER, kind: 'restricted', detail: { restriction: 'checkpoint' } });
+      expect(fbChatAccountStatus((await accounts()).accounts[1]!, Date.now())).toBe('checkpoint');
+
+      await push('sync', sync([row('in', 'one'), row('out', 'two'), row('in', 'three')], {}, OTHER));
+      await enroll({ label: 'Waiting' });
+      expect(await summary()).toEqual({ unread: 1, pending_devices: 1 });
+      await tick();
+      expect((await get<FbChatTelegramStatus>('telegram')).body.topics).toBeGreaterThan(0);
+      expect((await api<FbChatTelegramStatus>('GET', '/api/fb-chat/telegram', { token })).body.configured).toBe(false);
+      // No supergroup id, no link.
+      const plain = await api<FbChatThreadsAnswer>('GET', '/api/fb-chat/threads', { token });
+      expect(plain.body.threads.every((x) => x.telegram_topic_url === null)).toBe(true);
+    });
+
+    it('gives two accounts that appear at once different numbers', async () => {
+      const uids = ['100601', '100602', '100603', '100604'];
+      await Promise.all(uids.map((fbUid) => push('outbox/claim', { account: { fbUid, label: fbUid } })));
+      await Promise.all(uids.map((fbUid) => push('outbox/claim', { account: { fbUid, label: fbUid } })));
+      expect((await accounts()).accounts.map((a) => a.no)).toEqual([1, 2, 3, 4]);
+    });
+
+    it('is for managers only', async () => {
+      await seeded();
+      const t = await thread();
+      const purchaser = (await loginAs(MARCUS)).token;
+      const as = (method: string, path: string, body?: unknown) => api(method, `/api/fb-chat/${path}`, { token: purchaser, body });
+      const tries = [
+        as('GET', 'summary'), as('GET', 'accounts'), as('GET', 'threads'), as('GET', `threads/${t.id}/messages`),
+        as('GET', 'telegram'), as('GET', 'devices'), as('GET', 'config'),
+        as('POST', `threads/${t.id}/messages`, { body: 'hi' }), as('POST', `threads/${t.id}/read`), as('POST', `threads/${t.id}/unread`),
+        as('POST', 'messages/1/retry', { force: true }), as('PATCH', `accounts/${t.account_id}`, { label: 'Mine' }),
+        as('POST', 'devices/aaaaaaaaaaaaaaaaaa/approve', { label: 'Mine' }),
+      ];
+      expect((await Promise.all(tries)).map((r) => r.status)).toEqual(tries.map(() => 403));
+      expect((await api('GET', '/api/fb-chat/summary')).status).toBe(401);
+      expect(await getTestDb()`SELECT 1 FROM fb_chat_messages WHERE source = 'erp'`).toHaveLength(0);
+      expect((await thread()).unread).toBe(true);
+    });
+
+    it('still takes exactly what extensions 0.2.0 and 0.3.0 send, and answers as before', async () => {
+      // 0.2.0: a service token, an account with no version of its own on some calls.
+      const old = { fbUid: '100000000000042', label: 'E2E profile' };
+      const config = await push<FbChatConfigAnswer>('config', { account: old, extVersion: '0.2.0', fields: [FIELDS[0]] });
+      expect(Object.keys(config.body).sort()).toEqual(['rev', 'values']);
+      const window = (rows: FbChatRow[]) => ({
+        account: { ...old, extVersion: '0.2.0' },
+        thread: {
+          fbThreadId: 'k7e601ec8e0ef7cac16',
+          buyer: { name: 'Kane Bryant', profileId: null, location: null, joinedYear: null, rating: null, ratingCount: null },
+          listing: { id: null, title: 'Dell R740 256GB' },
+          rows, full: true, complete: true,
+        },
+      });
+      expect((await push<FbChatSyncAnswer>('sync', window([{ direction: 'in', text: 'Is this still available?', images: [], at: 'Tuesday 5:58pm' }]))).body)
+        .toEqual({ needsFull: false, added: 1 });
+      expect((await push('buyer', {
+        account: old, fbThreadId: 'k7e601ec8e0ef7cac16',
+        buyer: { name: 'Kane Bryant', profileId: '61570000000001', location: 'Denver, Colorado', joinedYear: 2015, rating: 4.9, ratingCount: 31 },
+      })).body).toEqual({ ok: true });
+      expect((await push('events', { account: old, kind: 'error', detail: { where: 'composer' } })).body).toEqual({ ok: true });
+      expect((await push('outbox/claim', { account: old, wait: 0 })).status).toBe(204);
+
+      const t = (await threads())[0]!;
+      await reply(t.id, 'Yes it is');
+      const claim = await push<FbChatClaimAnswer>('outbox/claim', { account: old });
+      expect(Object.keys(claim.body).sort()).toEqual(['body', 'fbThreadId', 'id']);
+      expect((await push(`outbox/${claim.body.id}/result`, { account: old, outcome: 'sent', typingMs: 2100 })).body).toEqual({ ok: true });
+
+      // 0.3.0: enrolls itself, says hello, then pushes with its device bearer.
+      const e = await enroll({ label: 'Buyer 1', extVersion: '0.3.0', fbUid: '100000000000043' });
+      expect(Object.keys(e).sort()).toEqual(['code', 'deviceId', 'status', 'token']);
+      const hello = await push<FbChatDeviceAnswer>('device', { label: 'Buyer 1', extVersion: '0.3.0', fbUid: '100000000000043' }, deviceBearer(e));
+      expect(hello.body).toEqual({ deviceId: e.deviceId, code: e.code, status: 'pending' });
+      await post(`devices/${e.deviceId}/approve`, {});
+      const mine = { fbUid: '100000000000043', label: 'Buyer 1', extVersion: '0.3.0' };
+      const cfg = await push<FbChatConfigAnswer>('config', { account: mine, extVersion: '0.3.0', fields: FIELDS }, deviceBearer(e));
+      expect(cfg.body.values).toEqual({});
+      expect((await push('outbox/claim', { account: mine, wait: 0 }, deviceBearer(e))).status).toBe(204);
+      const status = await api('GET', '/api/fb-chat/push/status', { headers: { authorization: `Bearer ${deviceBearer(e)}` } });
+      expect(status.body).toEqual({ ok: true, telegram: false });
+      expect((await accounts()).accounts.map((a) => [a.no, a.label, a.device?.label ?? null])).toEqual([
+        [1, 'E2E profile', null], [2, 'Buyer 1', 'Buyer 1'],
+      ]);
     });
   });
 });

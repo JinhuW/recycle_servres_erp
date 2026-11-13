@@ -29,7 +29,9 @@ export const fbChatApi = {
   messages: (threadId: number) => api.get<FbChatMessagesAnswer>(`${BASE}/threads/${threadId}/messages`),
   reply: (threadId: number, body: string) =>
     api.post<FbChatReplyAnswer>(`${BASE}/threads/${threadId}/messages`, { body }),
-  retry: (messageId: number) => api.post<FbChatReplyAnswer>(`${BASE}/messages/${messageId}/retry`, {}),
+  /** `force`: required for an `uncertain` reply, which may already be on Facebook. */
+  retry: (messageId: number, force = false) =>
+    api.post<FbChatReplyAnswer>(`${BASE}/messages/${messageId}/retry`, force ? { force: true } : {}),
   markRead: (threadId: number) => api.post<{ ok: true }>(`${BASE}/threads/${threadId}/read`, {}),
   markUnread: (threadId: number) => api.post<{ ok: true }>(`${BASE}/threads/${threadId}/unread`, {}),
 
