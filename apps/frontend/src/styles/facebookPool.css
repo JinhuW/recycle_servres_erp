@@ -2466,9 +2466,6 @@ td.rt-an-bad {
   gap: 8px;
   justify-content: flex-end;
 }
-.wx-banner.wx-acked {
-  color: var(--fg-muted);
-}
 .wx-banner ul.wx-warnings {
   flex: 1;
   min-width: 0;
@@ -2484,11 +2481,6 @@ td.rt-an-bad {
 .wx-warnings li > .btn {
   flex-shrink: 0;
   margin-block: -4px;
-}
-.wx-warnings em {
-  font-style: normal;
-  margin-left: 8px;
-  opacity: 0.75;
 }
 .wx-banner > .btn {
   margin-left: auto;
@@ -3162,4 +3154,276 @@ tr.wx-quiet td {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+}
+
+/* ── Re-run progress ─────────────────────────────────────────────────────── */
+.wx-rerun-body {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+.wx-rerun-body p {
+  margin: 0;
+}
+.wx-rerun-title {
+  font-weight: 600;
+}
+.wx-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wx-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--fg-subtle);
+}
+/* The connector runs from the step before into this one. */
+.wx-step + .wx-step::before {
+  content: '';
+  width: 28px;
+  height: 2px;
+  margin: 0 8px;
+  border-radius: 1px;
+  background: var(--border);
+}
+.wx-step.is-done + .wx-step::before {
+  background: var(--accent);
+}
+.wx-step i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--bg-elev);
+}
+.wx-step.is-done {
+  color: var(--fg);
+}
+.wx-step.is-done i {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.wx-step.is-now {
+  color: var(--fg);
+  font-weight: 600;
+}
+.wx-step.is-now i {
+  border-color: var(--info);
+  animation: wx-step-pulse 1.6s ease-in-out infinite;
+}
+.wx-warn .wx-step.is-now i {
+  border-color: var(--warn-strong);
+  animation: none;
+}
+.wx-step.is-failed {
+  color: var(--warn-strong);
+}
+.wx-step.is-failed i {
+  border-color: var(--warn-strong);
+  background: var(--warn-strong);
+}
+.wx-step time {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+@keyframes wx-step-pulse {
+  50% { box-shadow: 0 0 0 4px var(--info-soft); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wx-step.is-now i { animation: none; }
+}
+
+/* ── Activity tab ────────────────────────────────────────────────────────── */
+.wx-activity {
+  display: grid;
+  gap: 16px;
+}
+.wx-activity .card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.wx-act-range {
+  flex-shrink: 0;
+}
+.wx-act-figs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0;
+  margin: 0 0 14px;
+  border-bottom: 1px solid var(--border);
+}
+.wx-act-fig {
+  padding: 0 16px 12px;
+  border-left: 1px solid var(--border);
+}
+.wx-act-fig:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+.wx-act-fig dt {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.wx-act-fig dd {
+  margin: 2px 0 0;
+  display: grid;
+  gap: 2px;
+}
+.wx-act-fig b {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.wx-act-fig small {
+  font-size: 12px;
+  color: var(--fg-subtle);
+}
+.wx-act-fig small.is-low {
+  color: var(--warn-strong);
+}
+.wx-act-bar {
+  fill: var(--info);
+  opacity: 0.55;
+}
+.wx-act-day.is-current .wx-act-bar,
+.wx-act-day.is-hover .wx-act-bar,
+.wx-act-bar.is-hover {
+  opacity: 1;
+}
+.wx-act-flag {
+  fill: var(--warn-strong);
+}
+.wx-act-hit {
+  cursor: pointer;
+}
+.wx-act-quiet rect {
+  fill: var(--warn-soft);
+}
+.wx-act-quiet text {
+  font-size: 10.5px;
+  fill: var(--warn-strong);
+}
+.wx-act-tip dl {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 3px 14px;
+  margin: 0;
+}
+.wx-act-tip dt {
+  color: var(--fg-muted);
+}
+.wx-act-tip dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.wx-act-tip-note {
+  max-width: 320px;
+  margin: 6px 0 0;
+  white-space: normal;
+  color: var(--warn-strong);
+}
+.wx-act-tip-hint {
+  margin: 6px 0 0;
+  color: var(--fg-subtle);
+  font-size: 11.5px;
+}
+.wx-act-tip-big {
+  font-variant-numeric: tabular-nums;
+}
+.wx-heat-wrap {
+  position: relative;
+  overflow-x: auto;
+}
+.wx-heat {
+  display: grid;
+  gap: 2px;
+  min-width: 520px;
+}
+/* Rows lend their cells to the parent grid so the columns line up. */
+.wx-heat-row {
+  display: contents;
+}
+.wx-heat-head > span {
+  font-size: 11px;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+  padding-bottom: 4px;
+}
+/* Labels end at their day's cell and run left into the quiet space, so the
+   last one clears the column after it. */
+.wx-heat-day {
+  display: flex;
+  justify-content: flex-end;
+  overflow: visible;
+}
+.wx-heat-name {
+  overflow: hidden;
+  padding-right: 10px;
+  font-size: 12.5px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wx-heat-cell {
+  height: 18px;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--info) var(--heat, 0%), var(--bg-elev));
+}
+.wx-heat-cell.is-zero {
+  background: var(--bg-elev);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.wx-heat-cell.is-absent,
+.wx-heat-key i.is-absent {
+  background: repeating-linear-gradient(135deg, var(--border) 0 2px, transparent 2px 5px);
+}
+.wx-heat-last {
+  padding-left: 12px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.wx-heat-last.is-quiet {
+  color: var(--warn-strong);
+  font-weight: 600;
+}
+.wx-heat-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+.wx-heat-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+}
+.wx-heat-key i {
+  width: 14px;
+  height: 12px;
+  border-radius: 2px;
+  background: color-mix(in oklch, var(--info) var(--heat, 0%), var(--bg-elev));
+}
+.wx-heat-key i.is-absent {
+  margin-left: 10px;
+}
+.wx-heat-tip {
+  top: auto;
 }

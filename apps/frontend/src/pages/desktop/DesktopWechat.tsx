@@ -45,6 +45,7 @@ import {
   ladder,
   parseNotes,
   rerunOpen,
+  rerunStalled,
   signalCounts,
   traders,
   wechatApi,
@@ -52,6 +53,7 @@ import {
   type FacetPicks,
 } from '../../lib/wechatMarket';
 import { niceStep } from './DashboardChart';
+import { ActivityTab } from './WechatActivity';
 import { Hi } from './FleetAccounts';
 import '../../styles/facebookPool.css';
 
@@ -74,11 +76,12 @@ const RERUN_POLL_MS = 15_000;
 const REPORT_TZ = 'America/New_York';
 
 type Loaded = { day: WechatDay; rows: WechatRow[] };
-type Tab = 'board' | 'groups' | 'settings';
+type Tab = 'board' | 'groups' | 'activity' | 'settings';
+const TABS: readonly Tab[] = ['board', 'groups', 'activity', 'settings'];
 
 const tabFromUrl = (): Tab => {
-  const v = readHashQuery().get('view');
-  return v === 'groups' || v === 'settings' ? v : 'board';
+  const v = readHashQuery().get('view') as Tab | null;
+  return v && TABS.includes(v) ? v : 'board';
 };
 
 // The legend wears the board's side colours: demand-heavy is the bid's.
@@ -216,10 +219,10 @@ export function DesktopWechat() {
   const [acks, setAcks] = useState<WechatWarningAck[]>([]);
   const [acking, setAcking] = useState<string | null>(null);
   useEffect(() => { setAcks(day?.warningAcks ?? []); }, [day]);
-  const ackWarning = (warning: string, acked: boolean) => {
+  const ackWarning = (warning: string) => {
     if (!date) return;
     setAcking(warning);
-    wechatApi.ackWarning(date, warning, acked)
+    wechatApi.ackWarning(date, warning, true)
       .then(a => {
         setAcks(a);
         for (const key of dayCache.current.keys()) if (key.startsWith(`${date}:`)) dayCache.current.delete(key);
@@ -268,6 +271,9 @@ export function DesktopWechat() {
       </a>
       <a {...tabLink('groups')}>
         <Icon name="chats" size={14} />{t('wxTabGroups')}{summary && <span className="chip muted">{summary.totals.groupsTotal}</span>}
+      </a>
+      <a {...tabLink('activity')}>
+        <Icon name="analytics" size={14} />{t('wxTabActivity')}
       </a>
       <a {...tabLink('settings')}>
         <Icon name="settings" size={14} />{t('wxTabSettings')}
@@ -353,6 +359,7 @@ export function DesktopWechat() {
         </>}
 
         {tab === 'groups' && loaded !== 'missing' && <GroupsCard day={day} locale={locale} />}
+        {tab === 'activity' && loaded !== 'missing' && <ActivityTab until={date} />}
         {tab === 'settings' && <SettingsCard />}
       </div>
     </>
@@ -413,10 +420,11 @@ function RerunControl({ rerun, asking, onRerun }: {
 }) {
   const { t } = useT();
   if (rerunOpen(rerun)) {
+    const stalled = rerunStalled(rerun);
     return (
-      <span className="chip info wx-rerun-chip" role="status">
-        <Icon name="rotate" size={12} />
-        {t(rerun!.status === 'running' ? 'wxRerunChipRunning' : 'wxRerunChipQueued')}
+      <span className={`chip ${stalled ? 'warn' : 'info'} wx-rerun-chip`} role="status">
+        <Icon name={stalled ? 'alert' : 'rotate'} size={12} />
+        {t(rerun!.status === 'running' ? 'wxRerunChipRunning' : stalled ? 'wxRerunChipStalled' : 'wxRerunChipQueued')}
       </span>
     );
   }
@@ -427,94 +435,108 @@ function RerunControl({ rerun, asking, onRerun }: {
   );
 }
 
-// What became of the day's latest re-run. A clean one says nothing: the day
-// it pushed is what the page shows.
-// A warning a manager has acknowledged steps back to a quiet line with who
-// and when, and can be put back.
+// memtrade's warnings a manager hasn't acknowledged yet. An acknowledged one
+// is gone for everyone; the next day's report raises a new one if it recurs.
 function WarningsBanner({ warnings, acks, busy, onAck }: {
   warnings: string[];
   acks: WechatWarningAck[];
   busy: string | null;
-  onAck: (warning: string, acked: boolean) => void;
+  onAck: (warning: string) => void;
 }) {
-  const { t, locale } = useT();
-  const ackOf = new Map(acks.map(a => [a.warning, a]));
-  const open = warnings.filter(w => !ackOf.has(w));
-  const done = warnings.filter(w => ackOf.has(w));
+  const { t } = useT();
+  const acked = new Set(acks.map(a => a.warning));
+  const open = warnings.filter(w => !acked.has(w));
+  if (!open.length) return null;
   return (
-    <>
-      {open.length > 0 && (
-        <div className="wx-banner wx-warn">
-          <Icon name="alert" size={15} />
-          <ul className="wx-warnings">
-            {open.map(w => (
-              <li key={w}>
-                <span>{w}</span>
-                <button type="button" className="btn sm" disabled={busy !== null} onClick={() => onAck(w, true)}
-                  title={t('wxWarnAckHint')}>
-                  <Icon name="check" size={13} />{t('wxWarnAck')}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {done.length > 0 && (
-        <div className="wx-banner wx-acked">
-          <Icon name="check" size={15} />
-          <ul className="wx-warnings">
-            {done.map(w => {
-              const a = ackOf.get(w)!;
-              return (
-                <li key={w}>
-                  <span>
-                    {w}
-                    <em>{t('wxWarnAcked', { who: a.by ?? t('wxRerunSomeone'), age: relTime(a.at, locale) })}</em>
-                  </span>
-                  <button type="button" className="btn sm" disabled={busy !== null} onClick={() => onAck(w, false)}>
-                    {t('wxWarnUnack')}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
-    </>
+    <div className="wx-banner wx-warn">
+      <Icon name="alert" size={15} />
+      <ul className="wx-warnings">
+        {open.map(w => (
+          <li key={w}>
+            <span>{w}</span>
+            <button type="button" className="btn sm" disabled={busy !== null} onClick={() => onAck(w)}
+              title={t('wxWarnAckHint')}>
+              <Icon name="check" size={13} />{t('wxWarnAck')}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
+type Step = { key: string; label: string; at: string | null; state: 'done' | 'now' | 'todo' | 'failed' };
+
+const clock = (iso: string, locale: string) =>
+  new Date(iso).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit', timeZone: REPORT_TZ });
+
+// Where the day's latest re-run stands: asked, picked up by memtrade, redone.
+// A queued request only moves when memtrade next asks for work, so the banner
+// says when that was, and says plainly when it has stopped asking.
 function RerunBanner({ rerun }: { rerun: WechatRerun }) {
   const { t, locale } = useT();
+  // Re-render each 30 s so "for 3 min" and "checked 40 s ago" keep moving.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!rerunOpen(rerun)) return;
+    const id = window.setInterval(() => tick(n => n + 1), 30_000);
+    return () => window.clearInterval(id);
+  }, [rerun]);
+  const done = rerun.status === 'done' && !rerun.degraded;
+  if (done) return null;
+
+  const failed = rerun.status === 'failed';
+  const steps: Step[] = [
+    { key: 'asked', label: t('wxStepAsked'), at: rerun.requestedAt, state: 'done' },
+    {
+      key: 'picked', label: t('wxStepPicked'), at: rerun.claimedAt,
+      state: rerun.claimedAt ? 'done' : failed ? 'failed' : 'now',
+    },
+    {
+      key: 'redone', label: t('wxStepRedone'), at: rerun.finishedAt,
+      state: rerun.status === 'done' ? 'done' : failed && rerun.claimedAt ? 'failed' : rerun.status === 'running' ? 'now' : 'todo',
+    },
+  ];
+  const late = rerunStalled(rerun);
+  const who = rerun.requestedBy ?? t('wxRerunSomeone');
+
+  let line: string;
   if (rerun.status === 'queued') {
-    return (
-      <div className="wx-banner" role="status"><Icon name="rotate" size={15} />
-        <span>{t('wxRerunQueued', { age: relTime(rerun.requestedAt, locale), who: rerun.requestedBy ?? t('wxRerunSomeone') })}</span>
-      </div>
-    );
+    line = late
+      ? (rerun.pollSeenAt
+        ? t('wxRerunStalled', { age: relTime(rerun.pollSeenAt, locale) })
+        : t('wxRerunNeverPolled'))
+      : t('wxRerunWaiting', { age: relTime(rerun.pollSeenAt!, locale) });
+  } else if (rerun.status === 'running') {
+    line = t('wxRerunRunningFor', { age: relTime(rerun.claimedAt ?? rerun.requestedAt, locale) });
+  } else if (failed) {
+    line = t('wxRerunFailedWhy', { error: rerun.error ?? '' });
+  } else {
+    line = t('wxRerunDegraded', { age: relTime(rerun.finishedAt ?? rerun.requestedAt, locale) });
   }
-  if (rerun.status === 'running') {
-    return (
-      <div className="wx-banner" role="status"><Icon name="rotate" size={15} />
-        <span>{t('wxRerunRunning', { age: relTime(rerun.claimedAt ?? rerun.requestedAt, locale) })}</span>
+
+  const tone = late || failed || rerun.degraded ? ' wx-warn' : '';
+  return (
+    <div className={`wx-banner wx-rerun${tone}`} role="status">
+      <Icon name={late || failed ? 'alert' : 'rotate'} size={15} />
+      <div className="wx-rerun-body">
+        <div className="wx-rerun-title">
+          {t('wxRerunTitle', { who, age: relTime(rerun.requestedAt, locale) })}
+        </div>
+        <ol className="wx-steps" aria-label={t('wxRerunTitle', { who, age: '' })}>
+          {steps.map(st => (
+            <li key={st.key} className={`wx-step is-${st.state}`}
+              aria-current={st.state === 'now' ? 'step' : undefined}>
+              <i aria-hidden />
+              <span>{st.label}</span>
+              {st.at && <time dateTime={st.at}>{clock(st.at, locale)}</time>}
+            </li>
+          ))}
+        </ol>
+        <p>{line}</p>
       </div>
-    );
-  }
-  if (rerun.status === 'failed') {
-    return (
-      <div className="wx-banner wx-warn"><Icon name="alert" size={15} />
-        <span>{t('wxRerunFailed', { age: relTime(rerun.requestedAt, locale), error: rerun.error ?? '' })}</span>
-      </div>
-    );
-  }
-  if (rerun.degraded) {
-    return (
-      <div className="wx-banner wx-warn"><Icon name="alert" size={15} />
-        <span>{t('wxRerunDegraded', { age: relTime(rerun.finishedAt ?? rerun.requestedAt, locale) })}</span>
-      </div>
-    );
-  }
-  return null;
+    </div>
+  );
 }
 
 function SignalLegend({ counts, signal, onSignal }: {

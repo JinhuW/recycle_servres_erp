@@ -3377,10 +3377,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - A banner says when memtrade fell back to its rules for a day (Claude
     was unavailable), when only part of a day's posts arrived, and repeats
     memtrade's own warnings. Since v1.458.0 each of memtrade's warnings has
-    an **Acknowledge** button. An acknowledged warning leaves the yellow
-    banner for a quiet line with who and when, and *Undo* puts it back.
-    Acknowledgements are the team's, kept by the warning's text, so a re-run
-    that repeats a warning keeps it acknowledged and a new one shows.
+    an **Acknowledge** button, and since v1.459.0 an acknowledged warning is
+    gone from the page for everyone. Acknowledgements are kept by the
+    warning's text, so a re-run that repeats a warning keeps it acknowledged
+    and a new one shows.
     **Groups read**, on the Groups tab since
     v1.316.0 and always open, lists each group's messages that day and
     marks the ones joined in it.
@@ -3389,13 +3389,29 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     out, say. The ERP can't reach the office Mac, so the request is queued.
     memtrade polls every minute, claims it, reruns the day, pushes it as
     usual and reports back. The page shows *Queued*, then *Re-running*, and
-    reloads the day when it's done. It says so when Claude was still out
+    reloads the day when it's done. Since v1.459.0 the banner steps through
+    *Asked*, *Picked up by memtrade* and *Redone and sent* with their times,
+    and says when memtrade last checked for work. The ERP records every
+    check (`/push/reruns/claim`). When there has been none for 5 minutes,
+    the banner and the header chip (*Waiting on memtrade*) say memtrade has
+    stopped checking, as when its scheduled jobs on the office Mac break. It says so when Claude was still out
     and memtrade fell back to its rules again, and shows memtrade's error
     when the run failed. A second click joins the open request. A claim
     memtrade doesn't finish within 2 hours is marked failed, so the day
     can be asked for again. memtrade claims and finishes with the same
     `wechat:write` token (`/push/reruns/claim`, `/push/reruns/<id>/finish`).
-  - **Settings** (v1.458.0), a third tab (`?view=settings`), edits the
+  - **Activity** (v1.459.0, `?view=activity`) shows the groups' history up to
+    the selected day. *Messages per day* covers 14, 30 or 60 report days,
+    marks days memtrade flagged, and opens a day on click. Above it, the
+    day's messages, groups with messages, trade posts and buyers/sellers
+    against the median of the 7 days before. *Trade posts by hour* charts
+    the day's buy and sell posts by the hour they started (ET) and shades
+    stretches of 3 or more quiet hours. It counts trade posts, because
+    memtrade sends only the day's total of all messages. *Group activity*
+    is a group × day heatmap, busiest groups first, shaded by quintile,
+    with each group's last day with messages; a gap of 2+ days shows in the
+    warning colour.
+  - **Settings** (v1.458.0), a further tab (`?view=settings`), edits the
     prompt memtrade gives Claude to write the market notes. It shows
     memtrade's built-in prompt (`prompts/summary.md`, which memtrade
     reports on each run) until a manager saves another, says who changed it
