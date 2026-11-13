@@ -2,12 +2,12 @@
 id: RS-583
 title: Facebook chats page: read and answer Marketplace chats in the ERP
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-11-12
 reporter: jinhu
 branch: session/20261112-193240
-pr:
+pr: 1194
 version: 1.456.0
 related: [RS-578, RS-579, RS-582]
 ---
@@ -53,43 +53,43 @@ copy and states. Decisions taken with the owner:
 
 ## Acceptance criteria
 
-- [ ] Managers see Leads ▸ Facebook in the sidebar with a count of unread
+- [x] Managers see Leads ▸ Facebook in the sidebar with a count of unread
       chats; purchasers do not see it and are sent Home from its address.
-- [ ] Chats: a list of chats on the left that can be narrowed to one account,
+- [x] Chats: a list of chats on the left that can be narrowed to one account,
       searched by name, listing or message text, and filtered to Unread or
       Not sent; the open chat in the middle; the buyer's details on the
       right, with the same buyer's chats on our other accounts.
-- [ ] Each outbound message says where it was typed and by whom, and a reply
+- [x] Each outbound message says where it was typed and by whom, and a reply
       shows as queued, typing, sent or not sent.
 - [ ] A reply typed in the ERP reaches the buyer through the account's
       extension and appears in the chat's Telegram topic with the sender's
       name and "(ERP)".
-- [ ] A reply that failed, or may not have arrived, can be retried from the
+- [x] A reply that failed, or may not have arrived, can be retried from the
       chat.
-- [ ] Opening a chat marks it read for everyone; "Mark as unread" puts the
+- [x] Opening a chat marks it read for everyone; "Mark as unread" puts the
       mark back.
-- [ ] Accounts: each waiting extension is a card with its pairing code,
+- [x] Accounts: each waiting extension is a card with its pairing code,
       Chrome profile, Facebook user, browser, IP address and version. Approve
       takes a name and an optional "start with sending paused"; Deny refuses
       it. A request from a Facebook user that is already an account offers
       Reconnect instead, which replaces that account's old Chrome and keeps
       its chats.
-- [ ] Accounts: one row per Facebook account with its status (running,
+- [x] Accounts: one row per Facebook account with its status (running,
       paused, needs login, checkpoint, not checking in), replies waiting,
       last sync, extension version, whether it has picked up the current
       settings, and the Chrome that relays it. A row can be renamed, paused
       or resumed, and its Chrome disconnected without losing its chats.
-- [ ] A name given in the ERP stays when the extension next reports its own
+- [x] A name given in the ERP stays when the extension next reports its own
       profile name.
-- [ ] Settings: Sending (pause, time between replies, typing pace), Reading
+- [x] Settings: Sending (pause, time between replies, typing pace), Reading
       the inbox (inbox refresh as one range, quiet chat wait) and Advanced
       (settings check, closed by default), each editable for every account
       or for one, with a reset back to every account's value. A field an
       extension reports that is in none of those groups is shown and
       editable under Advanced.
-- [ ] Settings shows whether Telegram is connected and how many topics exist.
-- [ ] Settings ▸ Chat bridge is gone; nothing it did is lost.
-- [ ] Every string on the page is in English and Chinese.
+- [x] Settings shows whether Telegram is connected and how many topics exist.
+- [x] Settings ▸ Chat bridge is gone; nothing it did is lost.
+- [x] Every string on the page is in English and Chinese.
 - [ ] Extensions 0.2.0 and 0.3.0 keep working unchanged.
 
 ## Out of scope
@@ -106,3 +106,10 @@ copy and states. Decisions taken with the owner:
 
 Contract, migration (0241) and file ownership:
 `docs/superpowers/specs/2026-11-12-facebook-chats-page.md`.
+
+Shipped in v1.456.0 (#1194). Two criteria are left unticked because they were
+checked only by the backend tests and a local run with a simulated extension,
+not live: an ERP reply reaching a buyer through a real extension and showing
+in a real Telegram topic, and extensions 0.2.0 and 0.3.0 against the new
+release. Tick them once seen on dev. The extension's own text still points at
+Settings ▸ Chat bridge until its next release.
