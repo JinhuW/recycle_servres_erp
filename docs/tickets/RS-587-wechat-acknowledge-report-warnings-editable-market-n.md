@@ -2,12 +2,12 @@
 id: RS-587
 title: WeChat: acknowledge report warnings; editable market-note prompt
 type: story
-status: backlog
+status: done
 priority: P2
 created: 2026-11-13
 reporter: jinhu
 branch: session/20261113-112922
-pr:
+pr: 1198
 version: 1.458.0
 related: [RS-344]
 ---
