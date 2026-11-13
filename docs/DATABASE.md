@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-13:** ERP migration `0244`, Reddit tracker migration `0007`,
+**As of 2026-11-13:** ERP migration `0245`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -1840,9 +1840,9 @@ Ledger of USD→CNY exchange rates. A refresh loop runs every 6 hours and writes
 
 ### Market values
 
-Reference prices per part, and the WeChat market report. ref_prices is the Market values list (one row per tracked part), ref_price_events the price readings behind its last_price, and price_sources a display list; the four wechat_market_* tables hold memtrade's daily report (a day row with its board lines, groups read and evidence points), which nothing here feeds into ref_prices or orders. wechat_market_reruns queues a manager's request to have a day redone, for memtrade to claim; wechat_market_warning_acks records which of a day's warnings a manager has acknowledged, and wechat_market_settings holds settings memtrade fetches, such as the market-note prompt.
+Reference prices per part, and the WeChat market report. ref_prices is the Market values list (one row per tracked part), ref_price_events the price readings behind its last_price, and price_sources a display list; the four wechat_market_* tables hold memtrade's daily report (a day row with its board lines, groups read and evidence points), which nothing here feeds into ref_prices or orders. wechat_market_reruns queues a manager's request to have a day redone, for memtrade to claim; wechat_market_warning_acks records which of a day's warnings a manager has acknowledged, wechat_market_settings holds settings memtrade fetches, such as the market-note prompt, and wechat_market_heartbeats when memtrade last asked for work.
 
-Tables: [`ref_prices`](#erp-ref-prices), [`ref_price_events`](#erp-ref-price-events), [`price_sources`](#erp-price-sources), [`wechat_market_days`](#erp-wechat-market-days), [`wechat_market_groups`](#erp-wechat-market-groups), [`wechat_market_rows`](#erp-wechat-market-rows), [`wechat_market_points`](#erp-wechat-market-points), [`wechat_market_reruns`](#erp-wechat-market-reruns), [`wechat_market_warning_acks`](#erp-wechat-market-warning-acks), [`wechat_market_settings`](#erp-wechat-market-settings)
+Tables: [`ref_prices`](#erp-ref-prices), [`ref_price_events`](#erp-ref-price-events), [`price_sources`](#erp-price-sources), [`wechat_market_days`](#erp-wechat-market-days), [`wechat_market_groups`](#erp-wechat-market-groups), [`wechat_market_rows`](#erp-wechat-market-rows), [`wechat_market_points`](#erp-wechat-market-points), [`wechat_market_reruns`](#erp-wechat-market-reruns), [`wechat_market_warning_acks`](#erp-wechat-market-warning-acks), [`wechat_market_settings`](#erp-wechat-market-settings), [`wechat_market_heartbeats`](#erp-wechat-market-heartbeats)
 
 ```mermaid
 erDiagram
@@ -2125,6 +2125,19 @@ Settings for memtrade's report, edited on Monitors ▸ WeChat ▸ Settings and f
 - **Primary key:** `(key)`
 - **References:** `updated_by` → `users.id` (on delete set null)
 - **Indexes:** `(updated_by)`
+
+<a id="erp-wechat-market-heartbeats"></a>
+
+#### `wechat_market_heartbeats`
+
+When memtrade last asked the ERP for work (v1.459.0). The page uses it to tell a re-run memtrade is about to take from one waiting on a poller that has stopped.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `kind` | `text` | ✓ |  | `rerun_poll`: every `POST /api/wechat-market/push/reruns/claim`, whatever the answer. |
+| `seen_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `(kind)`
 
 ### Facebook account pool
 

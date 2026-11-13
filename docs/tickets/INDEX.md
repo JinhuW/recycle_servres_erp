@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-587](./RS-587-wechat-acknowledge-report-warnings-editable-market-n.md) | backlog | story | P2 | WeChat: acknowledge report warnings; editable market-note prompt | 1.458.0 |
+| [RS-588](./RS-588-wechat-activity-tab-acknowledged-warnings-disappear.md) | done | story | P2 | WeChat: Activity tab, acknowledged warnings disappear, live re-run status | 1.459.0 |
+| [RS-587](./RS-587-wechat-acknowledge-report-warnings-editable-market-n.md) | done | story | P2 | WeChat: acknowledge report warnings; editable market-note prompt | 1.458.0 |
 | [RS-586](./RS-586-drop-the-retired-seller-columns-and-tables.md) | backlog | task | P2 | Drop the retired seller columns and tables | — |
 | [RS-585](./RS-585-fix-the-dev-main-release-review-findings.md) | done | bug | P1 | Fix the dev → main release review findings | 1.457.1 |
 | [RS-584](./RS-584-add-to-fleet-no-pilot-field-shared-exits-for-cloakbr.md) | done | story | P2 | Add to fleet: no pilot field, shared exits for CloakBrowser, limit per exit IP | 1.457.0 |
