@@ -65,7 +65,7 @@ export async function exitIpForStint(sql: SqlLike, url: string): Promise<string 
 /**
  * Whether slot `s` belongs to a pilot account that hasn't opened Facebook yet,
  * on an exit the pilot wouldn't accept: a different IP or geo from the one
- * recorded at enrollment, or one another slot also uses. No measurement holds
+ * recorded at enrollment. Sharing the exit holds nothing. No measurement holds
  * nothing here; `exitUnknown` covers that. This runs for every free slot on
  * every claim, so the measurements sit behind the primary key lookup and the
  * two column tests, and only the few rows they let through reach them.
@@ -75,11 +75,7 @@ export const firstLoginHeld = (sql: SqlLike) => sql`EXISTS (
   CROSS JOIN LATERAL (${latestExitOf(sql, sql`s.proxy_id`)}) latest
   WHERE e.account_no = s.account_no AND e.pilot_id IS NOT NULL AND e.first_login_at IS NULL
     AND (e.exit_ip <> latest.exit_ip
-      OR (latest.timezone IS NOT NULL AND e.exit_timezone IS NOT NULL AND latest.timezone <> e.exit_timezone)
-      OR EXISTS (
-        SELECT 1 FROM fleet_slots other
-        CROSS JOIN LATERAL (${latestExitOf(sql, sql`other.proxy_id`)}) theirs
-        WHERE other.account_no <> s.account_no AND theirs.exit_ip = latest.exit_ip)))`;
+      OR (latest.timezone IS NOT NULL AND e.exit_timezone IS NOT NULL AND latest.timezone <> e.exit_timezone)))`;
 
 /**
  * Whether slot `s` needs an expected exit and its listed proxy has none, as

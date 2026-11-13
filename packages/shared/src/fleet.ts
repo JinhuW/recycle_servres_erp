@@ -468,6 +468,12 @@ export type FleetProxy = {
   slots: FleetProxyUse[];
   /** Its current IP has burned too many accounts: none go on it until it rotates. */
   exhausted: boolean;
+  /** The IP it last exited from, or null if no check has found one. */
+  exit_ip: string | null;
+  /** Accounts counted against `max_accounts_per_proxy`: non-parked slots on every
+   *  port that last exited from `exit_ip`, plus homelab workers there. With no
+   *  known exit, its own non-parked slots. */
+  exit_load: number;
 };
 
 export type FleetProxyWrite = { label: string; url: string; timezone: string; note?: string };
@@ -962,7 +968,7 @@ export type FleetErrorCode =
   | 'unverified'
   /** Adding to the fleet: the pool account is held, or lacks a password or 2FA key. */
   | 'account_busy' | 'no_login'
-  /** The proxy already carries `max_accounts_per_proxy` non-parked slots. */
+  /** The proxy's exit IP already carries `max_accounts_per_proxy` accounts. */
   | 'proxy_full'
   /** The proxy failed its last health checks (proxyHealthState reads `down`). */
   | 'proxy_down'
@@ -1005,10 +1011,7 @@ export type FleetErrorCode =
   /** Enrolling on a proxy whose latest measurement failed or found no IP. */
   | 'exit_failing'
   /** Enrolling with no pinned clock on a proxy whose fresh measurement names no timezone. */
-  | 'exit_zone_unknown'
-  /** Enrolling on an exit IP another slot, enrollment or homelab worker uses,
-   *  or any add or proxy change landing on a pilot account's exit IP. */
-  | 'exit_shared';
+  | 'exit_zone_unknown';
 
 export type FleetError = { error: FleetErrorCode; detail?: string };
 

@@ -332,14 +332,13 @@ describe('the profile outlives the slot', () => {
     expect(r.body.error).toBe('pilot_arm');
   });
 
-  it('keeps the enrollment when the account is retired or removed from the pool, and frees the exit', async () => {
+  it('keeps the enrollment when the account is retired or removed from the pool', async () => {
     const no = await account(1);
     const next = await account(2);
     const [p, q] = [await proxy(10001), await proxy(10002)];
     await measure(p, '198.51.100.1');
     await measure(q, '198.51.100.1');
     expect((await enroll(no, p)).status).toBe(201);
-    expect((await enroll(next, q)).body.error).toBe('exit_shared');
     expect((await api('POST', `/api/fleet/slots/${no}/park`, { token })).status).toBe(200);
     expect((await api('POST', `/api/fleet/slots/${no}/retire`, { token })).status).toBe(200);
     const db = getTestDb();
@@ -382,41 +381,38 @@ describe('seed uniqueness', () => {
   });
 });
 
-describe('reservation by measured exit IP', () => {
-  it('refuses an IP a slot already uses through a different port, stock or cloak, parked or not', async () => {
-    const [plain, parked, target] = [await account(1), await account(2), await account(3)];
+describe('the limit, by measured exit IP', () => {
+  it('lets CloakBrowser accounts share an IP up to the limit, counted across ports and without the parked', async () => {
+    const [plain, cloak, third] = [await account(1), await account(2), await account(3)];
     const [p, q, r] = [await proxy(10001), await proxy(10002), await proxy(10003)];
     await measure(p, '198.51.100.1');
-    await measure(q, '198.51.100.2');
+    await measure(q, '198.51.100.1');
     await measure(r, '198.51.100.1');
     expect((await add({ account_no: plain, proxy_id: p })).status).toBe(201);
-    const shared = await enroll(target, r);
-    expect(shared.status).toBe(409);
-    expect(shared.body.error).toBe('exit_shared');
-    expect(shared.body.detail).toContain(`#${plain}`);
-    expect(shared.body.detail).toContain('198.51.100.1');
-    // Its latest measurement moved: now r shares with q instead.
-    await measure(p, '198.51.100.9');
-    await measure(r, '198.51.100.2');
-    expect((await add({ account_no: parked, proxy_id: q })).status).toBe(201);
-    expect((await api('POST', `/api/fleet/slots/${parked}/park`, { token })).status).toBe(200);
-    expect((await enroll(target, r)).body.error).toBe('exit_shared');
-    // Free of both, it goes through.
-    await measure(r, '198.51.100.3');
-    expect((await enroll(target, r)).status).toBe(201);
+    expect((await add({ account_no: cloak, proxy_id: q, engine: 'cloak' })).status).toBe(201);
+    const list = await api<FleetProxy[]>('GET', '/api/fleet/proxies', { token });
+    expect(list.body.map((x) => [x.exit_ip, x.exit_load])).toEqual([['198.51.100.1', 2], ['198.51.100.1', 2], ['198.51.100.1', 2]]);
+    // r carries nothing itself, and its IP is full.
+    const full = await enroll(third, r);
+    expect(full.status).toBe(409);
+    expect(full.body.error).toBe('proxy_full');
+    expect(full.body.detail).toContain('198.51.100.1');
+    expect(full.body.detail).toContain('2 of 2');
+    expect((await api('POST', `/api/fleet/slots/${plain}/park`, { token })).status).toBe(200);
+    expect((await enroll(third, r)).status).toBe(201);
   });
 
-  it('refuses the IP an active enrollment recorded, even after its port moved', async () => {
-    const [a, b] = [await account(1), await account(2)];
-    const [p, q] = [await proxy(10001), await proxy(10002)];
-    await measure(p, '198.51.100.1');
-    expect((await enroll(a, p)).status).toBe(201);
-    await measure(p, '198.51.100.5');
-    await measure(q, '198.51.100.1');
-    expect((await enroll(b, q)).body.error).toBe('exit_shared');
+  it('counts a port with no known exit by its own slots', async () => {
+    const [a, b, c] = [await account(1), await account(2), await account(3)];
+    const p = await proxy(10001);
+    expect((await add({ account_no: a, proxy_id: p })).status).toBe(201);
+    expect((await add({ account_no: b, proxy_id: p })).status).toBe(201);
+    const full = await add({ account_no: c, proxy_id: p });
+    expect(full.body.error).toBe('proxy_full');
+    expect(full.body.detail).toContain('carries 2 of 2');
   });
 
-  it('refuses an IP a homelab worker uses in the last round the console answered', async () => {
+  it('counts the homelab workers on the IP in the last round the console answered', async () => {
     const no = await account(1);
     const p = await proxy(10001);
     await measure(p, '198.51.100.1');
@@ -434,9 +430,10 @@ describe('reservation by measured exit IP', () => {
     await parkAndRemove(no);
     await db`DELETE FROM fleet_proxy_checks WHERE source = 'coordinator'`;
     await port(at, ['homelab-3']);
-    const r = await enroll(no, p);
-    expect(r.body.error).toBe('exit_shared');
-    expect(r.body.detail).toContain('homelab-3');
+    expect((await enroll(no, p)).status).toBe(201);
+    await parkAndRemove(no);
+    await port(at, ['homelab-4']);
+    expect((await enroll(no, p)).body.error).toBe('proxy_full');
   });
 
   it('refuses a measurement that is missing, stale or failing, at the threshold', async () => {
@@ -458,19 +455,20 @@ describe('reservation by measured exit IP', () => {
   });
 
   it('judges a re-add and a proxy change of an enrolled account the same way', async () => {
-    const [a, b] = [await account(1), await account(2)];
+    const [a, b, c] = [await account(1), await account(2), await account(3)];
     const [p, q, r] = [await proxy(10001), await proxy(10002), await proxy(10003)];
     await measure(p, '198.51.100.1');
     await measure(q, '198.51.100.2');
     await measure(r, '198.51.100.2');
     expect((await enroll(a, p)).status).toBe(201);
     expect((await add({ account_no: b, proxy_id: q })).status).toBe(201);
+    expect((await add({ account_no: c, proxy_id: q })).status).toBe(201);
     const change = (to: number) => api<Err>('POST', `/api/fleet/slots/${a}/proxy`, {
       token, body: { proxy_id: to, from_proxy_id: p, confirm: true },
     });
-    expect((await change(r)).body.error).toBe('exit_shared');
+    expect((await change(r)).body.error).toBe('proxy_full');
     await parkAndRemove(a);
-    expect((await add({ account_no: a, proxy_id: r })).body.error).toBe('exit_shared');
+    expect((await add({ account_no: a, proxy_id: r })).body.error).toBe('proxy_full');
     await measure(p, '198.51.100.1', { agoMs: FLEET_EXIT_FRESH_MS * 2 });
     await getTestDb()`DELETE FROM fleet_proxy_checks WHERE proxy_id = ${p} AND checked_at > NOW() - interval '1 minute'`;
     expect((await add({ account_no: a, proxy_id: p })).body.error).toBe('exit_stale');
@@ -482,20 +480,16 @@ describe('an account outside any pilot and a pilot account\'s exit', () => {
     token, body: { proxy_id: to, from_proxy_id: from, confirm: true },
   });
 
-  it('refuses a plain add on another port with the pilot account\'s IP', async () => {
+  it('lets a plain add share the pilot account\'s IP through another port', async () => {
     const [pilot, plain] = [await account(1), await account(2)];
     const [p, q] = [await proxy(10001), await proxy(10002)];
     await measure(p, '198.51.100.1');
     await measure(q, '198.51.100.1');
     expect((await enroll(pilot, p, 'stock')).status).toBe(201);
-    const r = await add({ account_no: plain, proxy_id: q });
-    expect(r.status).toBe(409);
-    expect(r.body.error).toBe('exit_shared');
-    expect(r.body.detail).toContain(`#${pilot}`);
-    expect(await getTestDb()`SELECT 1 FROM fleet_slots WHERE account_no = ${plain}`).toHaveLength(0);
+    expect((await add({ account_no: plain, proxy_id: q })).status).toBe(201);
   });
 
-  it('refuses Change proxy for an account that is not enrolled, leaving it where it was', async () => {
+  it('lets Change proxy move an account onto the pilot account\'s IP', async () => {
     const [pilot, plain] = [await account(1), await account(2)];
     const [p, q, r] = [await proxy(10001), await proxy(10002), await proxy(10003)];
     await measure(p, '198.51.100.1');
@@ -503,33 +497,20 @@ describe('an account outside any pilot and a pilot account\'s exit', () => {
     await measure(r, '198.51.100.1');
     expect((await enroll(pilot, p)).status).toBe(201);
     expect((await add({ account_no: plain, proxy_id: q })).status).toBe(201);
-    const refused = await change(plain, r, q);
-    expect(refused.status).toBe(409);
-    expect(refused.body.error).toBe('exit_shared');
+    expect((await change(plain, r, q)).status).toBe(200);
     const [slot] = await getTestDb()<{ proxy_id: number }[]>`SELECT proxy_id FROM fleet_slots WHERE account_no = ${plain}`;
-    expect(slot.proxy_id).toBe(q);
+    expect(slot.proxy_id).toBe(r);
   });
 
-  it('matches both the recorded exit and the latest exit of the proxy the slot sits on', async () => {
-    const [pilot, plain] = [await account(1), await account(2)];
-    const [p, recorded, moved] = [await proxy(10001), await proxy(10002), await proxy(10003)];
-    await measure(p, '198.51.100.1');
-    expect((await enroll(pilot, p)).status).toBe(201);
-    await measure(p, '198.51.100.5');
-    await measure(recorded, '198.51.100.1');
-    await measure(moved, '198.51.100.5');
-    expect((await add({ account_no: plain, proxy_id: recorded })).body.error).toBe('exit_shared');
-    expect((await add({ account_no: plain, proxy_id: moved })).body.error).toBe('exit_shared');
-  });
-
-  it('judges a failing target by the IP it was last seen on', async () => {
-    const [pilot, plain] = [await account(1), await account(2)];
+  it('counts a failing target by the IP it was last seen on', async () => {
+    const [pilot, second, plain] = [await account(1), await account(2), await account(3)];
     const [p, q] = [await proxy(10001), await proxy(10002)];
     await measure(p, '198.51.100.1');
     await measure(q, '198.51.100.1', { agoMs: 60_000 });
     await measure(q, null, { ok: false });
     expect((await enroll(pilot, p)).status).toBe(201);
-    expect((await add({ account_no: plain, proxy_id: q })).body.error).toBe('exit_shared');
+    expect((await add({ account_no: second, proxy_id: p })).status).toBe(201);
+    expect((await add({ account_no: plain, proxy_id: q })).body.error).toBe('proxy_full');
   });
 
   it('lets an unmeasured target through, and any IP no pilot account holds', async () => {
@@ -563,16 +544,6 @@ describe('an account outside any pilot and a pilot account\'s exit', () => {
     expect((await add({ account_no: plain, proxy_id: q })).status).toBe(201);
   });
 
-  it('frees the exit once the pilot account has no slot', async () => {
-    const [pilot, plain] = [await account(1), await account(2)];
-    const [p, q] = [await proxy(10001), await proxy(10002)];
-    await measure(p, '198.51.100.1');
-    await measure(q, '198.51.100.1');
-    expect((await enroll(pilot, p)).status).toBe(201);
-    expect((await add({ account_no: plain, proxy_id: q })).body.error).toBe('exit_shared');
-    await parkAndRemove(pilot);
-    expect((await add({ account_no: plain, proxy_id: q })).status).toBe(201);
-  });
 });
 
 describe('cloak_max_slots', () => {
@@ -965,17 +936,16 @@ describe('a first login on a changed exit', () => {
     expect((await claim('lab-1')).body.device.timezone).toBe('America/Chicago');
   });
 
-  it('holds a first login when a remap puts another slot on the same exit', async () => {
+  it('holds nothing when a remap puts another slot on the same exit', async () => {
     const { no } = await setup();
     const other = await account(2);
     const q = await proxy(10002);
     await measure(q, '198.51.100.20');
     expect((await add({ account_no: other, proxy_id: q })).status).toBe(201);
     await measure(q, OLD);
-    const first = await claim('lab-1');
-    expect(first.body.account.no).toBe(other);
-    expect((await claim('lab-2')).status).toBe(409);
-    expect((await enrollment(no)).first_claimed_at).toBeNull();
+    const got = [await claim('lab-1'), await claim('lab-2')];
+    expect(got.map((g) => g.status)).toEqual([200, 200]);
+    expect(got.map((g) => g.body.account.no).sort((a, b) => a - b)).toEqual([no, other].sort((a, b) => a - b));
   });
 
   it('stops reserving the exit a pilot left once it has logged in', async () => {

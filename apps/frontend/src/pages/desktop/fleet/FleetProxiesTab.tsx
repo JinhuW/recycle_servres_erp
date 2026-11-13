@@ -5,7 +5,7 @@ import { TableSkeleton } from '../../../components/Skeleton';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { poolApi, proxyMarkFor, type FbProxyMark } from '../../../lib/facebookPool';
 import {
-  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_SLOW_MS, fleetApi, proxyLoad,
+  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_SLOW_MS, fleetApi,
   fleetExitPointText, type FleetProxy, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxyHealthState, type FleetProxySource,
 } from '../../../lib/fleet';
 import { useT } from '../../../lib/i18n';
@@ -192,7 +192,7 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
               const where = last ? [last.city, last.region, last.country].filter(Boolean).join(', ') : '';
               const rowBusy = busy === 'all' || (p.proxy_id !== null && busy === p.proxy_id);
               const own = p.proxy_id === null ? undefined : editing?.proxies.find(x => x.id === p.proxy_id);
-              const load = own ? proxyLoad(own) : 0;
+              const load = own ? own.exit_load : 0;
               const users = last?.exit_ip ? ipUsers.get(last.exit_ip) ?? 0 : 0;
               const crowding = proxyCrowding(users);
               const crowdReason = crowding && t(crowding === 'over' ? 'fleetProxyCrowdOver' : 'fleetProxyCrowdWarn', { n: users, ip: last?.exit_ip ?? '' });
