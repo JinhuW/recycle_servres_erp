@@ -17,7 +17,7 @@ import { armWake, holdsDraining, listening } from '../lib/pgWake';
 import { requireManager } from '../lib/role';
 import { bearerGuard } from '../oauth/guard';
 import {
-  claimReply, FB_CHAT_OUTBOX_CHANNEL, ingestBuyer, ingestSync, recordEvent, recordSendResult, touchAccount,
+  claimReply, FB_CHAT_OUTBOX_CHANNEL, FbChatAccountTaken, ingestBuyer, ingestSync, recordEvent, recordSendResult, touchAccount,
 } from '../services/fbChat';
 import { configFor, knownFields, notePickup, reportFields, setConfig } from '../services/fbChatConfig';
 import {
@@ -79,7 +79,11 @@ const fbChat = new Hono<{ Bindings: Env; Variables: Vars }>()
     if (c.req.path === ENROLL_PATH) return next();
     return isPush(c.req.path) ? pushGuard(c, next) : asVars(authMiddleware)(c, next);
   })
-  .use('*', (c, next) => (isPush(c.req.path) || c.req.path === ENROLL_PATH ? next() : asVars(requireManager)(c, next)));
+  .use('*', (c, next) => (isPush(c.req.path) || c.req.path === ENROLL_PATH ? next() : asVars(requireManager)(c, next)))
+  .onError((err, c) => {
+    if (err instanceof FbChatAccountTaken) return c.json({ error: 'conflict', detail: err.message }, 409);
+    throw err;
+  });
 
 /** Parses the body, or answers 400 with the reason. */
 async function parsed<T>(c: { req: { json: () => Promise<unknown> } }, parse: (v: unknown) => T): Promise<T | string> {

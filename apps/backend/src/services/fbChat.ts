@@ -72,26 +72,52 @@ type AccountRow = { id: number; label: string; restricted: string | null };
 const DEVICE_CLIENT = 'device:';
 
 /**
+ * Thrown when a push names an account another approved Chrome relays. The
+ * device bearer proves which Chrome is pushing, not which Facebook user: the
+ * account moves only once its own device is revoked, or through approveDevice.
+ */
+export class FbChatAccountTaken extends Error {
+  constructor() {
+    super('account_relayed_by_another_device');
+  }
+}
+
+/**
  * The account's row, created on first sight. Every push goes through here, so
  * the common path is a plain UPDATE: an upsert would burn an id on each one.
  * Needs a transaction: a new account takes its display number under a lock.
  */
 export async function touchAccount(tx: Tx, ref: FbChatAccountRef, clientId: string): Promise<AccountRow> {
   const extVersion = ref.extVersion ?? null;
+  const deviceId = clientId.startsWith(DEVICE_CLIENT) ? clientId.slice(DEVICE_CLIENT.length) : null;
   // A name a manager gave outlives the extension repeating its profile label.
-  const [seen] = await tx<AccountRow[]>`
-    UPDATE fb_chat_accounts SET
-      label = CASE WHEN NOT label_locked AND ${ref.label} <> '' THEN ${ref.label} ELSE label END,
+  const [seen] = await tx<(AccountRow & { was_client: string | null })[]>`
+    UPDATE fb_chat_accounts a SET
+      label = CASE WHEN NOT a.label_locked AND ${ref.label} <> '' THEN ${ref.label} ELSE a.label END,
       client_id = ${clientId},
-      ext_version = COALESCE(${extVersion}, ext_version),
+      ext_version = COALESCE(${extVersion}, a.ext_version),
       last_seen_at = NOW()
-    WHERE fb_uid = ${ref.fbUid}
-    RETURNING id::int AS id, label, restricted`;
-  if (seen) return seen;
+    FROM (SELECT id, client_id FROM fb_chat_accounts WHERE fb_uid = ${ref.fbUid} FOR UPDATE) o
+    WHERE a.id = o.id
+      AND (o.client_id IS NOT DISTINCT FROM ${clientId} OR NOT EXISTS (
+        SELECT 1 FROM fb_chat_devices d
+         WHERE ${DEVICE_CLIENT} || d.id = o.client_id AND d.status = 'approved'))
+    RETURNING a.id::int AS id, a.label, a.restricted, o.client_id AS was_client`;
+  if (seen) {
+    // This Chrome takes over an account the hub already had, which keeps its
+    // own name and pause, as when approveDevice finds the account at approval.
+    if (deviceId !== null && seen.was_client !== clientId) {
+      await tx`
+        UPDATE fb_chat_devices SET account_label = NULL, start_paused = FALSE
+         WHERE id = ${deviceId} AND (account_label IS NOT NULL OR start_paused)`;
+    }
+    return { id: seen.id, label: seen.label, restricted: seen.restricted };
+  }
+  const [held] = await tx`SELECT 1 FROM fb_chat_accounts WHERE fb_uid = ${ref.fbUid}`;
+  if (held) throw new FbChatAccountTaken();
 
   // What the manager chose when approving this Chrome, kept until now because
   // the Facebook user was not necessarily known then.
-  const deviceId = clientId.startsWith(DEVICE_CLIENT) ? clientId.slice(DEVICE_CLIENT.length) : null;
   const [device] = deviceId === null ? [] : await tx<{ account_label: string | null; start_paused: boolean; decided_by: string | null }[]>`
     SELECT account_label, start_paused, decided_by FROM fb_chat_devices WHERE id = ${deviceId}`;
   const named = device?.account_label ?? null;
@@ -306,7 +332,7 @@ export async function claimReply(tx: Tx, ref: FbChatAccountRef, clientId: string
               SELECT 1 FROM fb_chat_messages s JOIN fb_chat_threads st ON st.id = s.thread_id
                WHERE st.account_id = ${acct.id} AND s.send_state = 'sending')
           ORDER BY q.id LIMIT 1 FOR UPDATE OF q SKIP LOCKED)
-    RETURNING m.id::int AS id, t.fb_thread_id AS "fbThreadId", m.body`;
+    RETURNING m.id::int AS id, t.fb_thread_id AS "fbThreadId", m.body, m.attempts AS attempt`;
   return claimed ?? null;
 }
 
@@ -326,6 +352,14 @@ export async function recordSendResult(tx: Tx, id: number, r: FbChatSendResult, 
   // earlier attempt did land settles it before it is typed a second time.
   const requeued = m.send_state === 'queued' && m.attempts > 0 && r.outcome === 'sent';
   if (m.send_state !== 'sending' && !requeued) return 'not_sending';
+  // An earlier attempt, given up on and retried, reporting late. Only its
+  // word that the reply landed still says something about the message.
+  if (r.attempt !== undefined && r.attempt !== m.attempts && r.outcome !== 'sent') {
+    await addEvent(tx, acct.id, m.thread_id, 'send_stale_result', {
+      message_id: id, attempt: r.attempt, attempts: m.attempts, outcome: r.outcome,
+    });
+    return 'ok';
+  }
   if (r.outcome === 'sent') {
     const [t] = await tx<{ last_seq: number }[]>`
       UPDATE fb_chat_threads SET

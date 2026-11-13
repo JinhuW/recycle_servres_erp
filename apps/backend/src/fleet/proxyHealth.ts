@@ -226,7 +226,7 @@ export async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAns
     return {
       exit: last?.exit ?? `${p.host}:${p.port}`, source: 'erp', proxy_id: p.id, label: p.label,
       host: p.host, port: p.port, slots: p.slots.map((s) => ({ ...s, timezone: clockOf.get(s.account_no) ?? null, held_exit_ip: heldOn.get(s.account_no) ?? null })),
-      workers: [],
+      workers: [], load_ip: p.exit_ip, exit_load: p.exit_load,
       exit_change: change ? toChange(change) : null, ...summarise(mine, last, now),
     };
   });
@@ -246,8 +246,17 @@ export async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAns
     const change = changes.find((c) => c.source === 'coordinator' && c.exit === port.exit);
     out.push({
       exit: port.exit, source: 'coordinator', proxy_id: null, label: null, host, port: n,
-      slots: [], workers: port.workers, exit_change: change ? toChange(change) : null, ...summarise(mine, last, now),
+      slots: [], workers: port.workers, load_ip: port.exit_ip, exit_load: 0,
+      exit_change: change ? toChange(change) : null, ...summarise(mine, last, now),
     });
+  }
+  // A homelab port counts as exitLoads would: an ERP port on the same IP has
+  // the full count, and an IP with none carries only the homelab workers.
+  for (const row of out) {
+    if (row.source !== 'coordinator' || row.load_ip === null) continue;
+    const erp = proxies.find((p) => p.exit_ip === row.load_ip);
+    row.exit_load = erp ? erp.exit_load
+      : new Set(ports.filter((c) => c.exit_ip === row.load_ip).flatMap((c) => c.workers)).size;
   }
   return {
     proxies: out,

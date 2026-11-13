@@ -1398,8 +1398,11 @@ The sidebar row shows the number of unread chats.
   `POST /api/fb-chat/enroll`, and it waits, showing a pairing code, until a
   manager approves it on Leads ▸ Facebook ▸ Accounts (v1.456.0), where the same
   code is listed with the profile name, Facebook user, version and address.
-  Deny or Disconnect stops it. Enrollment is limited to 5 an hour per address and
-  25 waiting requests; one nobody acts on is forgotten after 7 days. Approvals
+  Deny or Disconnect stops it. Enrollment is limited to 5 an hour and 5 waiting
+  per address and 100 waiting in all; a request whose extension has not asked
+  about it in an hour is forgotten, and the extension enrolls again (v1.457.1).
+  A Chrome may push only for an account no other approved Chrome relays; the
+  account moves once that one is disconnected (v1.457.1). Approvals
   on dev survive the nightly copy from prod. An extension set up before this
   with a `fbchat:write` service client from Settings ▸ Connectors keeps
   working.

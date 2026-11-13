@@ -79,7 +79,8 @@ export async function listThreads(sql: SqlLike, chatId: string | undefined, quer
        ${query.filter === 'failed' ? sql`AND lo.send_state IN ('failed','uncertain')` : sql``}
        ${pattern === null ? sql`` : sql`
          AND (t.buyer_name ILIKE ${pattern} OR t.listing_title ILIKE ${pattern}
-              OR EXISTS (SELECT 1 FROM fb_chat_messages s WHERE s.thread_id = t.id AND s.body ILIKE ${pattern}))`}
+              -- One trigram-index lookup across all messages, not a scan per thread.
+              OR t.id IN (SELECT s.thread_id FROM fb_chat_messages s WHERE s.body ILIKE ${pattern}))`}
      ORDER BY last_activity_at DESC, t.id DESC LIMIT ${THREADS_MAX}`;
   return rows.map(({ lm_direction, lm_source, lm_author_name, lm_body, lm_images, lm_send_state, lm_created_at, ...t }) => ({
     ...t,

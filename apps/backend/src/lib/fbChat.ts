@@ -128,6 +128,7 @@ export function parseSendResult(v: unknown): FbChatSendResult {
     outcome: p.outcome,
     error: text(p.error, 300) ?? undefined,
     typingMs: int(p.typingMs, 0, 3_600_000) ?? undefined,
+    attempt: int(p.attempt, 1, 1_000_000) ?? undefined,
   };
 }
 

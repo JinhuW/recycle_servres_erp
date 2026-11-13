@@ -251,7 +251,7 @@ async function writeProfile(tx: SqlLike, no: number, p: Profile): Promise<void> 
  *  IP, so the count covers every port that last exited where this one does. */
 async function proxyFullRefusal(tx: SqlLike, proxyId: number, name: string, no: number): Promise<Refusal | null> {
   const limit = (await loadSettings(tx)).max_accounts_per_proxy;
-  const load = (await exitLoads(tx, no)).get(proxyId);
+  const load = (await exitLoads(tx, no, proxyId)).get(proxyId);
   if (!load || load.n < limit) return null;
   return conflict('proxy_full', load.ip === null
     ? `${name} carries ${load.n} of ${limit} accounts`
