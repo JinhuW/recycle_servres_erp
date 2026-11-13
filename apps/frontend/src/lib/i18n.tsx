@@ -4132,6 +4132,26 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     trkTrialModel: 'Model',
     trkTrialModelHelp: 'Leave empty to use the live model ({model}).',
 
+    // ── Leads ▸ Facebook: shell (tabs add their own blocks: fbcc_, fbca_, fbcs_) ──
+    nav_leads_facebook: "Facebook",
+    fbc_title: "Facebook chats",
+    fbc_views: "Facebook chats views",
+    fbc_navHint: "{n} chats with unread messages",
+    fbc_navHintOne: "{n} chat with unread messages",
+    fbc_pendingHint: "{n} extensions waiting for approval",
+    fbc_pendingHintOne: "{n} extension waiting for approval",
+    fbc_tabChats: "Chats",
+    fbc_tabAccounts: "Accounts",
+    fbc_tabSettings: "Settings",
+    fbc_ledeChats: "Marketplace conversations on our buyer accounts. Each chat is also a topic in the Telegram group, so a reply sent from either place reaches the seller.",
+    fbc_ledeAccounts: "The Facebook accounts whose chats come in here, and the Chrome profiles that relay them. Approve a new extension before it can connect.",
+    fbc_ledeSettings: "How fast the accounts read their inbox and type replies. Each extension picks up a change within its settings check, about a minute.",
+    fbc_statusRunning: "Running",
+    fbc_statusPaused: "Paused from the ERP",
+    fbc_statusLogin: "Needs Facebook login",
+    fbc_statusCheckpoint: "Facebook checkpoint",
+    fbc_statusStale: "Not checking in",
+
     // ── Leads ▸ Reddit ──
     nav_leads: "Leads",
     nav_leads_reddit: "Reddit",

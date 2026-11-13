@@ -47,6 +47,7 @@ const DesktopSettings = lazy(() => import('./pages/desktop/DesktopSettings').the
 const DesktopTracker = lazy(() => import('./pages/desktop/DesktopTracker').then(m => ({ default: m.DesktopTracker })));
 const DesktopWechat = lazy(() => import('./pages/desktop/DesktopWechat').then(m => ({ default: m.DesktopWechat })));
 const LeadsReddit = lazy(() => import('./pages/desktop/LeadsReddit').then(m => ({ default: m.LeadsReddit })));
+const FbChatsPage = lazy(() => import('./pages/desktop/leads/fbchat/FbChatsPage').then(m => ({ default: m.FbChatsPage })));
 const DesktopCoordinator = lazy(() => import('./pages/desktop/DesktopCoordinator').then(m => ({ default: m.DesktopCoordinator })));
 const DesktopSubmit = lazy(() => import('./pages/desktop/DesktopSubmit').then(m => ({ default: m.DesktopSubmit })));
 const DesktopShipping = lazy(() => import('./pages/desktop/DesktopShipping').then(m => ({ default: m.DesktopShipping })));
@@ -204,7 +205,7 @@ export function DesktopApp() {
   // A purchaser who reaches a manager-only view lands on Home — or, for the
   // stock tab, on the Analysis tab they can see.
   const view2: DesktopView = user.role === 'purchaser' && view === 'stock' ? 'analysis'
-    : user.role === 'purchaser' && (view === 'inventory' || view === 'sellorders' || view === 'aftersales' || view === 'transfers' || view === 'websubmissions' || view === 'activity' || view === 'payments' || view === 'internaltx' || view === 'accounting' || view === 'tracker' || view === 'wechat')
+    : user.role === 'purchaser' && (view === 'inventory' || view === 'sellorders' || view === 'aftersales' || view === 'transfers' || view === 'websubmissions' || view === 'leadsFacebook' || view === 'activity' || view === 'payments' || view === 'internaltx' || view === 'accounting' || view === 'tracker' || view === 'wechat')
     ? 'home'
     : view;
   // Review mode and Pack mode take over the whole window — no sidebar, no top
@@ -275,7 +276,8 @@ export function DesktopApp() {
           + (view2 === 'stock' ? ' page-analysis' : '')
           + (view2 === 'analysis' ? ' page-dashboard' : '')
           + (view2 === 'shipping' && shippingRoute?.kind === 'dashboard' ? ' page-shipping' : '')
-          + (view2 === 'activity' ? ' page-activity' : '')}>
+          + (view2 === 'activity' ? ' page-activity' : '')
+          + (view2 === 'leadsFacebook' ? ' page-fbchat' : '')}>
           {/* Analysis: the money dashboard, and for managers the stock
               snapshot beside it. */}
           {(view2 === 'analysis' || view2 === 'stock') && user.role === 'manager' && (
@@ -327,6 +329,7 @@ export function DesktopApp() {
             {view2 === 'wechat'    && <DesktopWechat />}
             {view2 === 'coordinator' && <DesktopCoordinator showToast={showToast} />}
             {view2 === 'leadsReddit' && <LeadsReddit showToast={showToast} />}
+            {view2 === 'leadsFacebook' && <FbChatsPage showToast={showToast} />}
             {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}
           </Suspense>
         </div>
