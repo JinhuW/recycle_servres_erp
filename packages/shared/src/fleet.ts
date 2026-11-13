@@ -560,6 +560,13 @@ export type FleetProxyHealth = {
   exit_change: FleetProxyExitChange | null;
   /** The exit IP before the last one, when it changed in the last 24 h. */
   previous_ip: string | null;
+  /**
+   * The exit IP max_accounts_per_proxy counts by, and the accounts on it by the
+   * same rule (fleet/proxies.ts → exitLoads): non-parked ERP slots on every
+   * port that last exited there, plus the homelab workers. Null with no known exit.
+   */
+  load_ip: string | null;
+  exit_load: number;
   /** Share of the last 24 h's checks that answered, null with none. */
   uptime: number | null;
   checks: number;

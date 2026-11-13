@@ -3,18 +3,25 @@
 -- Prod's seller tables held only their seed rows, archived to R2 at
 -- recycle-db-backup/archive/fb-seller-archive-prod-20261112.sql.gz.
 
+--
+-- The release before this one keeps serving while this runs, and again after a
+-- rollback, and its claim and next-task read fleet_slots.role and
+-- fleet_tasks.payload; its seller jobs read the seller tables. So this release
+-- only stops using them: the columns and tables are dropped by a later release.
+
 -- ─── Fleet back to search only ──────────────────────────────────────────────
+-- An attempt outlives its task's delete with no task to name its kind, and the
+-- minutes would then count it as search: delete the attempts first.
+DELETE FROM fleet_task_attempts WHERE task_id IN (
+  SELECT id FROM fleet_tasks WHERE kind IN ('ad-post','ad-delete','inbox-sync','msg-send'));
 DELETE FROM fleet_tasks WHERE kind IN ('ad-post','ad-delete','inbox-sync','msg-send');
 
 DROP INDEX fleet_tasks_seller_open_idx;
 ALTER TABLE fleet_tasks DROP CONSTRAINT fleet_tasks_seller_shape;
-ALTER TABLE fleet_tasks DROP COLUMN payload;
 ALTER TABLE fleet_tasks ALTER COLUMN city SET NOT NULL, ALTER COLUMN item SET NOT NULL;
 ALTER TABLE fleet_tasks DROP CONSTRAINT fleet_tasks_state_check;
 ALTER TABLE fleet_tasks ADD CONSTRAINT fleet_tasks_state_check
   CHECK (state IN ('ready','leased','done','cancelled','expired'));
-
-ALTER TABLE fleet_slots DROP COLUMN agent_profile_id, DROP COLUMN agent_on, DROP COLUMN role;
 
 -- 0207's trigger, before 0233 gave seller writes their own branches.
 CREATE OR REPLACE FUNCTION fleet_fence_pool_owner() RETURNS trigger AS $$
@@ -62,11 +69,3 @@ SELECT account_no, day_start::date AS day,
          LEAST(ended_at, (day_start + interval '1 day') AT TIME ZONE 'America/New_York')
          - GREATEST(leased_at, day_start AT TIME ZONE 'America/New_York'))))) / 60 AS minutes
 FROM days GROUP BY account_no, day_start::date;
-
--- ─── Seller tables ──────────────────────────────────────────────────────────
-DROP TABLE fb_agent_runs, fb_agent_eval_runs, fb_agent_eval_cases,
-  fb_thread_events, fb_messages, fb_threads,
-  fb_photos, fb_ad_placements, fb_ads, fb_photo_pools,
-  fb_seller_settings_history, fb_seller_settings, fb_agent_profiles;
-DROP FUNCTION fb_seller_settings_history_lock();
-DROP FUNCTION fb_thread_events_lock();

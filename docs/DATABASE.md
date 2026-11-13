@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-12:** ERP migration `0241`, Reddit tracker migration `0007`,
+**As of 2026-11-13:** ERP migration `0242`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2415,6 +2415,8 @@ A single row. A backend instance claims a round by moving `started_at` forward w
 
 The fleet's view of one pool account: which worker runs it, on which host, under which lease epoch. A worker claims a free slot at boot and the claim bumps the epoch; every later call carries it in the worker's token, and a token whose epoch is no longer the slot's is refused with 409, so one account never runs in two browsers. The login itself stays in fb_pool_accounts.
 
+Production also still has the retired seller columns `role`, `agent_on` and `agent_profile_id` (0232), which nothing in this release reads; 0239 leaves them, and `fleet_tasks.payload` and the seller tables, for the release before it, and a later release drops them.
+
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
 | `account_no` | `integer` | ✓ |  | → fb_pool_accounts. The account's #. |
@@ -2738,7 +2740,7 @@ One message. Those read off Facebook have `source = 'facebook'`; a reply typed i
 - **References:** `thread_id` → `fb_chat_threads.id` (on delete cascade); `erp_user_id` → `users.id` (on delete set null)
 - **Unique:** `(thread_id, seq)`; `(thread_id, tg_message_id)`
 - **Checks:** `direction IN ('in', 'out')`; `source IN ('facebook', 'telegram', 'erp')`; `send_state IN ('queued', 'sending', 'sent', 'failed', 'uncertain')`
-- **Indexes:** `fb_chat_messages_unmirrored_idx` (id) where not mirrored; `fb_chat_messages_outbox_idx` (thread_id, id) where queued or sending; `fb_chat_messages_unacked_idx` (id) where settled and not acknowledged; `fb_chat_messages_erp_user_idx` (erp_user_id) where set; `fb_chat_messages_thread_idx` (thread_id, id); `fb_chat_messages_client_key_idx` unique (thread_id, client_key) where set
+- **Indexes:** `fb_chat_messages_unmirrored_idx` (id) where not mirrored; `fb_chat_messages_outbox_idx` (thread_id, id) where queued or sending; `fb_chat_messages_unacked_idx` (id) where settled and not acknowledged; `fb_chat_messages_erp_user_idx` (erp_user_id) where set; `fb_chat_messages_thread_idx` (thread_id, id); `fb_chat_messages_client_key_idx` unique (thread_id, client_key) where set; `fb_chat_messages_body_trgm_idx` gin (body gin_trgm_ops), for the chats page search
 #### `fb_chat_events`
 
 Append-only record of what is worth counting later and is not a message. `kind` is one of: `thread_seen`, `sync` (new messages in a known thread), `sync_gap` (a window that did not overlap what was stored), `send_sent`, `send_failed`, `send_uncertain`, `buyer_rating` (a rating or count changed; old and new values in `detail`), `topic_created`, `restricted`, `recovered`, `error`.

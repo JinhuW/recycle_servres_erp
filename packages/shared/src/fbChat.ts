@@ -78,7 +78,11 @@ export type FbChatClaimRequest = {
   wait?: number;
 };
 
-export type FbChatClaimAnswer = { id: number; fbThreadId: string; body: string };
+/**
+ * `attempt` counts this reply's claims. The extension sends it back with the
+ * result, so a late result from an earlier attempt cannot settle a later one.
+ */
+export type FbChatClaimAnswer = { id: number; fbThreadId: string; body: string; attempt: number };
 
 /** `POST /push/outbox/:id/result`. */
 export type FbChatSendResult = {
@@ -87,6 +91,8 @@ export type FbChatSendResult = {
   outcome: 'sent' | 'failed' | 'uncertain';
   error?: string;
   typingMs?: number;
+  /** The claim's `attempt`; extensions released before it existed leave it out. */
+  attempt?: number;
 };
 
 export const FB_CHAT_EVENT_KINDS = ['restricted', 'recovered', 'error'] as const;

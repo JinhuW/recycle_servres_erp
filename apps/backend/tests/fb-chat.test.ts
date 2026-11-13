@@ -522,10 +522,26 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     });
 
     it('bounds enrollment per address and in waiting requests', async () => {
+      const sql = getTestDb();
       for (let i = 0; i < 5; i++) expect((await enroll(undefined, '198.51.100.1')).status).toBe(200);
-      expect((await enroll(undefined, '198.51.100.1')).status).toBe(429);
-      for (let i = 0; i < 20; i++) expect((await enroll(undefined, `198.51.100.${10 + i}`)).status).toBe(200);
-      expect((await enroll(undefined, '198.51.100.99')).status).toBe(429);
+      expect((await enroll(undefined, '198.51.100.1')).body).toMatchObject({ detail: 'ip_limit' });
+      // An hour on, the address still holds five waiting requests.
+      await sql`UPDATE fb_chat_devices SET created_at = NOW() - INTERVAL '2 hours'`;
+      expect((await enroll(undefined, '198.51.100.1')).body).toMatchObject({ detail: 'ip_limit' });
+
+      await sql`
+        INSERT INTO fb_chat_devices (id, token_hash, code, label, ip_key)
+        SELECT lpad(to_hex(g), 18, '0'), md5(g::text), 'AAAA-AAAA', '', 'filler-' || g FROM generate_series(1, 95) g`;
+      expect((await enroll(undefined, '198.51.100.99')).body).toMatchObject({ detail: 'pending_limit' });
+      // Requests nobody's extension is asking about any more stop holding the list shut.
+      await sql`UPDATE fb_chat_devices SET last_seen_at = NOW() - INTERVAL '2 hours' WHERE ip_key LIKE 'filler-%'`;
+      expect((await enroll(undefined, '198.51.100.99')).status).toBe(200);
+      expect(await sql`SELECT 1 FROM fb_chat_devices WHERE ip_key LIKE 'filler-%'`).toHaveLength(0);
+    });
+
+    it('lets requests arriving together pass the limit no further', async () => {
+      const answers = await Promise.all(Array.from({ length: 8 }, () => enroll(undefined, '198.51.100.2')));
+      expect(answers.filter((a) => a.status === 200)).toHaveLength(5);
     });
 
     it('takes no session and needs no CSRF header to enroll', async () => {
@@ -678,7 +694,7 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
       calls.length = 0;
 
       const claimed = await send('sent');
-      expect(claimed).toEqual({ id: queued.body.message.id, fbThreadId: 't1', body: 'We can do $38 each.' });
+      expect(claimed).toEqual({ id: queued.body.message.id, fbThreadId: 't1', body: 'We can do $38 each.', attempt: 1 });
       // Sent needs no word in Telegram: the text is there and the ERP shows the state.
       await tick();
       expect(calls.filter((c) => c.method !== 'getUpdates')).toEqual([]);
@@ -833,6 +849,50 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
       // Not mirrored as a reply typed on Facebook; the topic hears it landed.
       await tick();
       expect(texts()).toEqual(["✅ Alex's reply from the ERP was sent to Facebook after all."]);
+    });
+
+    it('ignores a late failure from an earlier attempt while the retry is being typed', async () => {
+      await seeded();
+      const t = await thread();
+      const { id } = (await reply(t.id, 'Yes, still available')).body.message;
+      const first = await push<FbChatClaimAnswer>('outbox/claim', { account: ACCOUNT });
+      expect(first.body).toMatchObject({ id, attempt: 1 });
+      await getTestDb()`UPDATE fb_chat_messages SET claimed_at = NOW() - INTERVAL '1 hour' WHERE id = ${id}`;
+      expect((await push('outbox/claim', { account: ACCOUNT })).status).toBe(204);
+      expect((await post(`messages/${id}/retry`, { force: true })).status).toBe(200);
+      const second = await push<FbChatClaimAnswer>('outbox/claim', { account: ACCOUNT });
+      expect(second.body).toMatchObject({ id, attempt: 2 });
+
+      expect((await push(`outbox/${id}/result`, { account: ACCOUNT, outcome: 'failed', attempt: 1 })).status).toBe(200);
+      expect((await stateOf(id)).send_state).toBe('sending');
+      expect((await push(`outbox/${id}/result`, { account: ACCOUNT, outcome: 'sent', attempt: 2 })).status).toBe(200);
+      expect(await stateOf(id)).toMatchObject({ send_state: 'sent', attempts: 2 });
+    });
+
+    it('refuses a push for an account another approved Chrome relays, until that one is revoked', async () => {
+      const owner = await enroll({ label: 'Office', extVersion: '0.3.0' });
+      await post(`devices/${owner.deviceId}/approve`);
+      const body = sync([row('in', 'hi')], { full: true });
+      expect((await push('sync', body, deviceBearer(owner))).status).toBe(200);
+
+      // Approved before its Facebook user was known, with a name and a pause.
+      const other = await enroll({ label: 'Laptop', extVersion: '0.3.0' });
+      await post(`devices/${other.deviceId}/approve`, { label: 'Renamed', startPaused: true });
+      const taken = await push<{ error: string }>('sync', body, deviceBearer(other));
+      expect(taken).toMatchObject({ status: 409, body: { error: 'conflict' } });
+      expect((await push('outbox/claim', { account: ACCOUNT }, deviceBearer(other))).status).toBe(409);
+      const [still] = await getTestDb()`SELECT client_id FROM fb_chat_accounts`;
+      expect(still!.client_id).toBe(`device:${owner.deviceId}`);
+
+      // Once the owner is revoked the account moves, keeping its own name and pause.
+      await post(`devices/${owner.deviceId}/revoke`);
+      expect((await push('sync', body, deviceBearer(other))).status).toBe(200);
+      expect((await accounts()).accounts[0]).toMatchObject({ label: 'Denver profile', paused: false, device: { id: other.deviceId } });
+      const [device] = await getTestDb()`SELECT account_label, start_paused FROM fb_chat_devices WHERE id = ${other.deviceId}`;
+      expect(device).toEqual({ account_label: null, start_paused: false });
+      // A later account from that Chrome is not given the name either.
+      await push('sync', sync([row('in', 'hey')], { full: true }, OTHER), deviceBearer(other));
+      expect((await accounts()).accounts.find((a) => a.fb_uid === OTHER.fbUid)).toMatchObject({ label: 'Aurora profile', paused: false });
     });
 
     it('takes the browser\'s late word that a retried reply had landed', async () => {
@@ -1198,7 +1258,8 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
       const t = (await threads())[0]!;
       await reply(t.id, 'Yes it is');
       const claim = await push<FbChatClaimAnswer>('outbox/claim', { account: old });
-      expect(Object.keys(claim.body).sort()).toEqual(['body', 'fbThreadId', 'id']);
+      // What 0.2.0 and 0.3.0 read, plus `attempt`, which they ignore and leave out of the result.
+      expect(Object.keys(claim.body).sort()).toEqual(['attempt', 'body', 'fbThreadId', 'id']);
       expect((await push(`outbox/${claim.body.id}/result`, { account: old, outcome: 'sent', typingMs: 2100 })).body).toEqual({ ok: true });
 
       // 0.3.0: enrolls itself, says hello, then pushes with its device bearer.

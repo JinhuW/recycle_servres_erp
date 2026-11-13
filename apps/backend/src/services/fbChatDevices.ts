@@ -12,15 +12,20 @@ import type { SqlLike } from '../db';
 // ─── Chat bridge devices ─────────────────────────────────────────────
 // Each extension enrolls itself and waits for a manager's approval. The token
 // is minted here and only its sha256 is kept, as with fleet host tokens. The
-// enroll route is open to anyone, so it is bounded per address and overall,
-// and a request nobody acts on is forgotten after a week.
+// enroll route is open to anyone, so it is bounded per address, both in new
+// requests and in requests left waiting, and overall. A waiting extension says
+// hello every half minute, and one that finds its request gone enrolls again,
+// so a request not heard from in an hour is forgotten: requests made and then
+// abandoned cannot hold the list shut for long.
 
 /** Enrollments one address may make in an hour. */
 export const ENROLL_PER_IP_HOUR = 5;
+/** Waiting requests from one address. */
+export const ENROLL_PENDING_PER_IP = 5;
 /** Waiting requests the list holds; past this the route answers 429. */
-export const ENROLL_MAX_PENDING = 25;
+export const ENROLL_MAX_PENDING = 100;
 /** A pending request not heard from in this long is deleted. */
-export const PENDING_FORGET_DAYS = 7;
+export const PENDING_FORGET_HOURS = 1;
 
 // No 0/O, 1/I/L: the code is read off one screen and compared with another.
 const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
@@ -44,17 +49,26 @@ export type EnrollOrigin = { ip: string | null; ipKey: string; userAgent: string
 export type EnrollOutcome = FbChatEnrollAnswer | 'ip_limit' | 'pending_limit';
 
 /** Records a pending device and hands back its one-time token. */
-export async function enrollDevice(sql: SqlLike, info: DeviceInfo, origin: EnrollOrigin): Promise<EnrollOutcome> {
-  await sql`
-    DELETE FROM fb_chat_devices
-     WHERE status = 'pending' AND last_seen_at < NOW() - make_interval(days => ${PENDING_FORGET_DAYS})`;
-  const [counts] = await sql<{ from_ip: number; pending: number }[]>`
-    SELECT (SELECT COUNT(*)::int FROM fb_chat_devices
-             WHERE ip_key = ${origin.ipKey} AND created_at > NOW() - INTERVAL '1 hour') AS from_ip,
-           (SELECT COUNT(*)::int FROM fb_chat_devices WHERE status = 'pending') AS pending`;
-  if (counts!.from_ip >= ENROLL_PER_IP_HOUR) return 'ip_limit';
-  if (counts!.pending >= ENROLL_MAX_PENDING) return 'pending_limit';
+export async function enrollDevice(sql: postgres.Sql, info: DeviceInfo, origin: EnrollOrigin): Promise<EnrollOutcome> {
+  return sql.begin(async (tx) => {
+    // The counts and the insert are one step, or requests arriving together
+    // all pass the limits.
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended('fb-chat-enroll', 0))`;
+    await tx`
+      DELETE FROM fb_chat_devices
+       WHERE status = 'pending' AND last_seen_at < NOW() - make_interval(hours => ${PENDING_FORGET_HOURS})`;
+    const [counts] = await tx<{ from_ip: number; pending_ip: number; pending: number }[]>`
+      SELECT COUNT(*) FILTER (WHERE ip_key = ${origin.ipKey} AND created_at > NOW() - INTERVAL '1 hour')::int AS from_ip,
+             COUNT(*) FILTER (WHERE ip_key = ${origin.ipKey} AND status = 'pending')::int AS pending_ip,
+             COUNT(*) FILTER (WHERE status = 'pending')::int AS pending
+        FROM fb_chat_devices`;
+    if (counts!.from_ip >= ENROLL_PER_IP_HOUR || counts!.pending_ip >= ENROLL_PENDING_PER_IP) return 'ip_limit';
+    if (counts!.pending >= ENROLL_MAX_PENDING) return 'pending_limit';
+    return insertPending(tx, info, origin);
+  }) as Promise<EnrollOutcome>;
+}
 
+async function insertPending(sql: SqlLike, info: DeviceInfo, origin: EnrollOrigin): Promise<FbChatEnrollAnswer> {
   const deviceId = randomBytes(9).toString('hex');
   const token = randomBytes(32).toString('base64url');
   const code = pairingCode();

@@ -268,8 +268,8 @@ export function ChangeProxyDialog({ slot, current, holder, onClose, onDone }: {
   }, [load]);
 
   const choices = useMemo(
-    () => (list ? proxyChoices(list.proxies, list.limit, list.health).filter((c) => c.proxy.id !== slot.proxy_id) : []),
-    [list, slot.proxy_id],
+    () => (list ? proxyChoices(list.proxies, list.limit, list.health, slot.account_no).filter((c) => c.proxy.id !== slot.proxy_id) : []),
+    [list, slot.proxy_id, slot.account_no],
   );
   const chosen = choices.find((c) => c.proxy.id === proxyId) ?? null;
   if (!list) return null;

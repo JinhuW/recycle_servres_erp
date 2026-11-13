@@ -68,7 +68,9 @@ export type ExitLoad = { ip: string | null; n: number };
  * share one. A proxy with no known exit counts its own slots. `except` leaves
  * one account out, for a move.
  */
-export async function exitLoads(sql: SqlLike, except: number | null = null): Promise<Map<number, ExitLoad>> {
+export async function exitLoads(sql: SqlLike, except: number | null = null, only?: number): Promise<Map<number, ExitLoad>> {
+  // Every port's latest exit is needed to see which share an IP; the homelab
+  // count and the sums only for the one asked about, when one is.
   const rows = await sql<{ id: number; ip: string | null; n: number }[]>`
     WITH ports AS (
       SELECT p.id, latest.exit_ip,
@@ -82,13 +84,14 @@ export async function exitLoads(sql: SqlLike, except: number | null = null): Pro
       FROM fleet_proxy_checks c JOIN fleet_proxy_rounds r ON c.checked_at = r.coordinator_at
       CROSS JOIN LATERAL unnest(c.workers) w
       WHERE c.source = 'coordinator' AND c.exit_ip IS NOT NULL
+        ${only === undefined ? sql`` : sql`AND c.exit_ip = (SELECT exit_ip FROM ports WHERE id = ${only})`}
       GROUP BY c.exit_ip
     )
     SELECT p.id, p.exit_ip AS ip,
            (CASE WHEN p.exit_ip IS NULL THEN p.n ELSE
               (SELECT SUM(q.n) FROM ports q WHERE q.exit_ip = p.exit_ip)
               + COALESCE((SELECT h.n FROM homelab h WHERE h.exit_ip = p.exit_ip), 0) END)::int AS n
-    FROM ports p`;
+    FROM ports p ${only === undefined ? sql`` : sql`WHERE p.id = ${only}`}`;
   return new Map(rows.map((r) => [r.id, { ip: r.ip, n: r.n }]));
 }
 
@@ -107,7 +110,7 @@ export async function listProxies(sql: SqlLike, id?: number): Promise<FleetProxy
     WHERE s.proxy_id IS NOT NULL ${id === undefined ? sql`` : sql`AND s.proxy_id = ${id}`}
     ORDER BY s.account_no`;
   const exhausted = new Set(await exhaustedProxyIds(sql));
-  const loads = await exitLoads(sql);
+  const loads = await exitLoads(sql, null, id);
   return rows.map((r) => ({
     id: r.id, label: r.label, host: r.host, port: r.port, timezone: r.timezone, note: r.note,
     created_at: r.created_at.toISOString(),
