@@ -2,13 +2,13 @@
 id: RS-585
 title: Fix the dev → main release review findings
 type: bug
-status: backlog
+status: done
 priority: P1
 created: 2026-11-13
 reporter: jinhu
 branch: fix/dev-release-review
-pr:
-version:
+pr: 1197
+version: 1.457.1
 related: [RS-581, RS-582, RS-583, RS-584, RS-586]
 ---
 

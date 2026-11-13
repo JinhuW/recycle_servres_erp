@@ -5,7 +5,9 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-584](./RS-584-add-to-fleet-no-pilot-field-shared-exits-for-cloakbr.md) | done | story | P2 | Add to fleet: no pilot field, shared exits for CloakBrowser, limit per exit IP | — |
+| [RS-586](./RS-586-drop-the-retired-seller-columns-and-tables.md) | backlog | task | P2 | Drop the retired seller columns and tables | — |
+| [RS-585](./RS-585-fix-the-dev-main-release-review-findings.md) | done | bug | P1 | Fix the dev → main release review findings | — |
+| [RS-584](./RS-584-add-to-fleet-no-pilot-field-shared-exits-for-cloakbr.md) | done | story | P2 | Add to fleet: no pilot field, shared exits for CloakBrowser, limit per exit IP | 1.457.0 |
 | [RS-583](./RS-583-facebook-chats-page-read-and-answer-marketplace-chat.md) | done | story | P2 | Facebook chats page: read and answer Marketplace chats in the ERP | 1.456.0 |
 | [RS-582](./RS-582-chat-bridge-extensions-enroll-themselves-and-wait-fo.md) | done | feature | P2 | Chat bridge extensions enroll themselves and wait for approval | 1.455.0 |
 | [RS-581](./RS-581-remove-the-facebook-seller-feature-so-fleet-accounts.md) | done | chore | P2 | Remove the Facebook seller feature so fleet accounts only search | 1.454.0 |
