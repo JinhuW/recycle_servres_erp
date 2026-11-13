@@ -107,7 +107,7 @@ export const FB_CHAT_SEND_STALE_MS = 5 * 60_000;
 
 // ── Remote settings ───────────────────────────────────────────────────────────
 // The extension's options page holds only what it takes to reach the ERP.
-// Everything else is set on Settings ▸ Chat bridge. The set of settings is not
+// Everything else is set on Leads ▸ Facebook ▸ Settings. The set of settings is not
 // fixed here: each extension reports the fields it understands, the page draws
 // its form from them, and values are plain JSON. An extension ignores a key it
 // does not know, so the ERP may hold keys ahead of an extension release.
@@ -170,7 +170,7 @@ export function fbChatConfigProblem(field: FbChatConfigField, value: unknown): s
 // ── Enrollment ───────────────────────────────────────────────────────
 // An extension needs nothing typed in. With no device it asks `POST /enroll`
 // (no auth) and gets a token; it then waits, asking `POST /push/device`, until
-// a manager approves it on Settings ▸ Chat bridge, where its pairing code is
+// a manager approves it on Leads ▸ Facebook ▸ Accounts, where its pairing code is
 // shown next to the one on the extension's options page. The bearer it sends
 // on every push route is `fbd_<deviceId>_<token>`.
 
@@ -204,7 +204,7 @@ export type FbChatDeviceAnswer = { deviceId: string; code: string; status: FbCha
  */
 export type FbChatDeviceRefusal = { error: 'device_pending' | 'device_rejected' };
 
-/** A row on Settings ▸ Chat bridge ▸ Extensions. */
+/** A connection request or connected Chrome on Leads ▸ Facebook ▸ Accounts. */
 export type FbChatDevice = {
   id: string;
   code: string;

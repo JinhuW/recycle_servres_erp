@@ -4,7 +4,7 @@ import type postgres from 'postgres';
 import type { SqlLike } from '../db';
 
 // Settings for the chat bridge extensions. Each extension reports the fields
-// it understands and gets back the values set on Settings ▸ Chat bridge. The
+// it understands and gets back the values set on Leads ▸ Facebook ▸ Settings. The
 // ERP keeps no list of its own: the page's form is whatever the extensions
 // last reported.
 

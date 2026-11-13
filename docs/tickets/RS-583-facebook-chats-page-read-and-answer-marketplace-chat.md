@@ -2,13 +2,13 @@
 id: RS-583
 title: Facebook chats page: read and answer Marketplace chats in the ERP
 type: story
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-11-12
 reporter: jinhu
 branch: session/20261112-193240
 pr:
-version:
+version: 1.456.0
 related: [RS-578, RS-579, RS-582]
 ---
 
