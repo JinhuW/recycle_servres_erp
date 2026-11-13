@@ -4,24 +4,11 @@
 // so field names follow the columns and the worker payloads (snake_case), and
 // every instant is an ISO-8601 string.
 
-/** 'uncertain': a seller write whose lease was lost; the post or message may be out, so it is never retried. */
-export const FLEET_TASK_STATES = ['ready', 'leased', 'done', 'cancelled', 'expired', 'uncertain'] as const;
+export const FLEET_TASK_STATES = ['ready', 'leased', 'done', 'cancelled', 'expired'] as const;
 export type FleetTaskState = (typeof FLEET_TASK_STATES)[number];
 
-export const FLEET_SEARCH_TASK_KINDS = ['search', 'verify-slug', 'probe'] as const;
-export type FleetSearchTaskKind = (typeof FLEET_SEARCH_TASK_KINDS)[number];
-
-/** Handed only to the worker holding the task's account, on a seller slot. */
-export const FLEET_SELLER_TASK_KINDS = ['ad-post', 'ad-delete', 'inbox-sync', 'msg-send'] as const;
-export type FleetSellerTaskKind = (typeof FLEET_SELLER_TASK_KINDS)[number];
-
-export const FLEET_TASK_KINDS = [...FLEET_SEARCH_TASK_KINDS, ...FLEET_SELLER_TASK_KINDS] as const;
+export const FLEET_TASK_KINDS = ['search', 'verify-slug', 'probe'] as const;
 export type FleetTaskKind = (typeof FLEET_TASK_KINDS)[number];
-
-/** The first worker release that knows the seller kinds (facebook-tracker
- *  0.18.0). Only a slot a manager sets to `seller` gets them, so raising this
- *  hands nothing to a search worker. */
-export const FLEET_SELLER_MIN_WORKER_VERSION = '0.18.0';
 
 /** Why a task exists: the cadence, a city just added, a manager, a round start, a quarantine probe or a slug check. */
 export type FleetTaskReason = 'cadence' | 'added' | 'manual' | 'start' | 'probe' | 'verify';
@@ -156,9 +143,8 @@ export type FleetTaskResult = {
 
 export type FleetTask = {
   id: number;
-  /** Null on a seller task, which names its account and carries a payload instead. */
-  city: string | null;
-  item: string | null;
+  city: string;
+  item: string;
   kind: FleetTaskKind;
   due_at: string;
   /** Higher first; a manager's task is 100. */
@@ -482,6 +468,12 @@ export type FleetProxy = {
   slots: FleetProxyUse[];
   /** Its current IP has burned too many accounts: none go on it until it rotates. */
   exhausted: boolean;
+  /** The IP it last exited from, or null if no check has found one. */
+  exit_ip: string | null;
+  /** Accounts counted against `max_accounts_per_proxy`: non-parked slots on every
+   *  port that last exited from `exit_ip`, plus homelab workers there. With no
+   *  known exit, its own non-parked slots. */
+  exit_load: number;
 };
 
 export type FleetProxyWrite = { label: string; url: string; timezone: string; note?: string };
@@ -568,6 +560,13 @@ export type FleetProxyHealth = {
   exit_change: FleetProxyExitChange | null;
   /** The exit IP before the last one, when it changed in the last 24 h. */
   previous_ip: string | null;
+  /**
+   * The exit IP max_accounts_per_proxy counts by, and the accounts on it by the
+   * same rule (fleet/proxies.ts → exitLoads): non-parked ERP slots on every
+   * port that last exited there, plus the homelab workers. Null with no known exit.
+   */
+  load_ip: string | null;
+  exit_load: number;
   /** Share of the last 24 h's checks that answered, null with none. */
   uptime: number | null;
   checks: number;
@@ -634,10 +633,9 @@ export const FLEET_SECRET_KINDS: readonly FleetSecretKind[] = ['password', 'totp
 
 /** A task event with the task it belongs to, for a worker's history. */
 export type FleetWorkerEvent = FleetTaskEvent & {
-  /** Null on a seller task, which searches no city. */
-  city: string | null;
+  city: string;
   city_name: string | null;
-  item: string | null;
+  item: string;
   task_kind: FleetTaskKind;
 };
 
@@ -926,57 +924,13 @@ export type HeartbeatAnswer = {
 /** Why a task went to this account, as the worker logs it. */
 export type FleetTaskWhy = 'familiar' | 'other' | 'manual' | 'probe';
 
-/** A worker that knows the seller kinds dispatches on `kind` before it looks at `item`. */
-export type HandedTask =
-  | {
-    id: number;
-    kind: FleetSearchTaskKind;
-    city: { slug: string; name: string; radius_km: number };
-    item: string;
-    lease_expires_at: string;
-    why: FleetTaskWhy;
-  }
-  | { id: number; kind: FleetSellerTaskKind; city: null; item: null; payload: SellerTaskPayload; lease_expires_at: string };
-
-/** Every payload carries `ref`, unique per open task per account and kind. */
-export type SellerTaskPayload =
-  | {
-    /** The placement id. */
-    ref: string; kind: 'ad-post'; location: string; title: string; description: string;
-    price_usd: number; category: string; condition: string;
-    /** Public R2 URLs; the worker downloads them for the task and deletes them after. */
-    photos: { url: string; sha256: string }[];
-  }
-  | { /** The placement id. */ ref: string; kind: 'ad-delete'; fb_listing_id: string; title: string }
-  | { /** 'inbox:' + ISO minute. */ ref: string; kind: 'inbox-sync'; max_threads: number; max_messages: number }
-  | {
-    /** The message id. */
-    ref: string; kind: 'msg-send'; fb_thread_id: string; body: string;
-    /** The last few messages the ERP knows, newest last, so the worker can tell whether this one already landed. */
-    tail: { direction: 'in' | 'out' | 'unknown'; body: string }[];
-  };
-
-/** `POST /api/fleet/worker/seller/report`, sent before `done` on next-task. */
-export type SellerReport = {
-  task_id: number;
-  kind: FleetSellerTaskKind;
-  ref: string;
-  outcome: 'ok' | 'failed' | 'uncertain' | 'wall';
-  /** A reason in words for failed, uncertain and wall. */
-  detail?: string;
-  data?:
-    | { fb_listing_id: string }
-    | Record<string, never>
-    | { threads: InboxThread[] }
-    | { already_sent: boolean };
-};
-
-export type InboxThread = {
-  fb_thread_id: string;
-  seller_name: string;
-  listing_title: string;
-  /** Oldest first: the window the page showed, up to max_messages. */
-  messages: { direction: 'in' | 'out' | 'unknown'; body: string; has_image: boolean }[];
+export type HandedTask = {
+  id: number;
+  kind: FleetTaskKind;
+  city: { slug: string; name: string; radius_km: number };
+  item: string;
+  lease_expires_at: string;
+  why: FleetTaskWhy;
 };
 
 export type NextTaskRequest = {
@@ -1021,7 +975,7 @@ export type FleetErrorCode =
   | 'unverified'
   /** Adding to the fleet: the pool account is held, or lacks a password or 2FA key. */
   | 'account_busy' | 'no_login'
-  /** The proxy already carries `max_accounts_per_proxy` non-parked slots. */
+  /** The proxy's exit IP already carries `max_accounts_per_proxy` accounts. */
   | 'proxy_full'
   /** The proxy failed its last health checks (proxyHealthState reads `down`). */
   | 'proxy_down'
@@ -1064,10 +1018,7 @@ export type FleetErrorCode =
   /** Enrolling on a proxy whose latest measurement failed or found no IP. */
   | 'exit_failing'
   /** Enrolling with no pinned clock on a proxy whose fresh measurement names no timezone. */
-  | 'exit_zone_unknown'
-  /** Enrolling on an exit IP another slot, enrollment or homelab worker uses,
-   *  or any add or proxy change landing on a pilot account's exit IP. */
-  | 'exit_shared';
+  | 'exit_zone_unknown';
 
 export type FleetError = { error: FleetErrorCode; detail?: string };
 

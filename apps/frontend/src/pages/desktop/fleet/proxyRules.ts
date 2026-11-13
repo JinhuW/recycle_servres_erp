@@ -38,14 +38,21 @@ export type ProxyChoice = { proxy: FleetProxy; load: number; full: boolean; stat
  * Every proxy with how many accounts it carries and how its last checks went:
  * the open ones first, emptiest first, then the down or exhausted ones, then the full ones.
  * A proxy missing from `health` (or with no health read at all) is unchecked.
+ * `moving` is the account a move is for: as the server does, it is left out of
+ * the count on the IP it leaves.
  */
 export function proxyChoices(
   proxies: readonly FleetProxy[], limit: number, health: ReadonlyMap<number, FleetProxyHealthState> = new Map(),
+  moving: number | null = null,
 ): ProxyChoice[] {
   const rank = (c: ProxyChoice) => (c.full ? 2 : c.down || c.exhausted ? 1 : 0);
+  const from = moving === null ? undefined
+    : proxies.find((p) => p.slots.some((s) => s.account_no === moving && !s.parked));
+  const sameExit = (p: FleetProxy) => from !== undefined && (from.exit_ip === null ? p.id === from.id : p.exit_ip === from.exit_ip);
   return proxies
     .map((proxy) => {
-      const load = proxyLoad(proxy);
+      // The limit is per exit IP, and other ports can exit from this one's.
+      const load = proxy.exit_load - (sameExit(proxy) ? 1 : 0);
       const state = health.get(proxy.id) ?? 'unchecked';
       return { proxy, load, full: load >= limit, state, down: state === 'down', exhausted: proxy.exhausted };
     })
@@ -56,20 +63,6 @@ export function proxyChoices(
 // whatever the limit is set to, and homelab ports have no limit at all.
 export const PROXY_CROWD_WARN_AT = 5;
 export const PROXY_CROWD_OVER_ABOVE = 10;
-
-/**
- * Accounts on each exit IP: non-parked ERP accounts plus homelab workers, over
- * every port that last exited there. What a site sees is the IP, and ports can
- * share one. A port with no known exit counts towards nothing.
- */
-export function exitIpUsers(rows: readonly FleetProxyHealth[]): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const p of rows) {
-    const ip = p.last?.exit_ip;
-    if (ip) out.set(ip, (out.get(ip) ?? 0) + proxyLoad(p) + p.workers.length);
-  }
-  return out;
-}
 
 /** How crowded an exit IP is with `n` accounts on it: null, yellow from 5, red above 10. */
 export function proxyCrowding(n: number): 'warn' | 'over' | null {

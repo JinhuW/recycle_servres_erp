@@ -1340,125 +1340,72 @@ is the inbox for the public website forms, described with the public forms
 further down. Clicking Leads opens Reddit. The closed row's badge adds up both
 sources.
 
-**Leads ▸ Facebook** (`#/leads/facebook`, managers only, v1.441.0, RS-565) is
-where managers work the fleet's Facebook seller accounts: the Marketplace
-conversations they read, the "we buy" ads they post, the photo pools those ads
-draw from, and the agent that screens and negotiates with sellers. Purchasers
-see neither the nav entry nor the routes (the view bounces to Home). It has
-Leads ▸ Reddit's layout: icon tabs with counts, and a line under them saying
-what the tab is for. The sidebar entry carries the number of conversations
-waiting on a manager, read every 60 s while the page is visible. Every refusal
-names its reason in words.
-
-- **Needs human** (the default tab) lists the conversations the agent handed to
-  a person: deals about to close first, then whoever has waited longest. Each
-  row shows the seller and listing, the account, the reason in words, the
-  current offer beside the ceiling, and how long it has waited.
-- **Inbox** is every open conversation, newest activity first, with its stage,
-  account, last message, offer and an unread dot. A conversation whose account
-  is gone, retired or no longer a seller is marked **Stranded**. A search box
-  matches seller, listing and messages; a filter narrows to one account; closed
-  conversations are behind **Closed**.
-- **A conversation** (`#/leads/facebook/thread/:id`) shows every message with
-  its author (seller, agent, staff, or one sent on Facebook directly) and, for
-  each outbound, how far it got: queued, held (kill switch), sending, sent,
-  unknown or failed with the reason. Beside it: what the agent extracted (items,
-  quantities, the seller's ask, intent, confidence), the Market matches with the
-  max buy price and its date, the ceiling and offer, the offer ladder from round 1
-  (counted as the agent's offer code counts them, v1.444.3),
-  the rules that fired on the last runs, and the conversation's history.
-  **Take over** stops the agent; **Hand back to agent** gives it back and
-  clears Needs human; the reply box queues a staff message on the account's
-  send schedule; **Close as won / lost** takes a note; **Save as test case**
-  freezes the conversation as an agent test case with what the agent should do.
-  It re-reads every 15 s and opening it marks it read.
-- **Ads** lists the ads by state (draft, ready, archived) beside an editor with
-  a preview of how the post reads, including the photo count range and the
-  pool it draws from. Only a draft is edited; **Mark ready** makes it placeable.
-  **Place** takes seller accounts × locations and lists every pair it refused
-  with the reason. The placements table shows each one's state, the photos it
-  drew as thumbnails, its listing id, when it was posted and renews next, with
-  **Renew**, **Remove** and, for an outcome the worker could not see,
-  **Resolve** (live, with its listing id, or never posted).
-- **Photos** lists the pools with unused and used counts and a **Low** mark
-  under the low-pool warning. Photos are added by dragging a batch onto the
-  pool (or choosing files); the result lists each file added or refused, with
-  why (a photo already in any pool is refused). The grid filters by used and
-  unused; a used photo names the placement that took it, and an unused one can
-  be deleted.
-- **Agent** has three views. **Versions** lists the profile versions with their
-  state; a draft's models (OpenRouter picker), system and extraction prompts,
-  skills (on or off, with their prompt and parameters) and hand-off rules (in
-  order, on or off, with parameters) are edited in forms built from the
-  registry. A draft is made candidate or active, a retired version can be rolled
-  back to, and any version can seed a new draft. **Shadow** lays the
-  candidate's decision beside the live agent's for each seller message and marks
-  the ones that differ. **Tests** lists the saved cases, runs every case against
-  a chosen version, shows each run's per-case results with why a case failed,
-  and compares two runs case by case, naming in words what changed in each
-  case (v1.444.3).
-- **Settings** holds every seller setting, the kill switch first. The kill
-  switch saves at once; the rest (active hours, ad, message and inbox pacing,
-  offers, agent limits, the low-pool warning, the Telegram chat) save together,
-  checked against the same bounds the server enforces before Save is allowed. A
-  save someone else beat says so and reloads. The change history lists every
-  saved version with who, when and each field's old and new value.
-
-On the **Fleet ▸ worker** page (ERP fleet), a **Facebook seller** card switches
-the worker's account between searching and selling, turns the agent on or off
-for it, and picks the agent version it follows (the active one by default).
-None of these restarts anything or causes a login. The Tasks tab shows a seller
-task (post ad, remove ad, read inbox, send message) by its kind and account,
-since it has no city or item.
-
-The agent's setup is a versioned profile (v1.439.0). Only a draft can be
-edited. A draft becomes the candidate, which runs in shadow next to the live
-version, or becomes active. There is exactly one active version, and rolling
-back makes a retired version active again. Saved cases freeze a conversation,
-including the Market prices it was priced with. An eval replays every case
-against a version, and compare shows which cases changed between two evals.
-So far this is the `/api/fb-agent` routes; the Agent tab comes later.
-
-The pages run on the seller backend (v1.442.0, `/api/fb-seller`, managers
-only):
-
-- **Settings** are one database row, validated field by field, saved against
-  the version a manager opened (a stale save is refused) and kept in an
-  append-only history. Pacing reads them every 30 seconds, so a change needs no
-  restart. They hold the active hours, the per-account pacing (gaps, daily send
-  cap, live-ad cap, inbox interval), the offer policy, the agent's budget and
-  circuit breaker, the low-pool warning and an optional Telegram chat.
-- **Photo pools.** An upload takes many photos at once; a file already in any
-  pool is refused with the pool and photo it duplicates. Every post draws a
-  random set of unused photos and no photo is ever used twice. A post short of
-  photos waits as "needs photos" and is retried once the pool is refilled; a pool
-  under the warning alerts once. Only an unused photo can be deleted.
-- **Ads** are drafted by managers and placed on seller accounts by location.
-  A placement is refused when the ad isn't ready, the account isn't a seller,
-  or that ad already went up in that place today as often as allowed. Ads renew
-  on their schedule with fresh photos; a placement whose outcome is unknown
-  waits for a manager to say whether it is on Facebook.
-- **Conversations** arrive from each seller account's inbox reads. Managers can
-  reply, take a conversation over (the agent's unsent replies are held), hand
-  it back, close it as won or lost, and mark it read. A reply that may not have
-  reached the seller and never shows up in the next read moves the thread to
-  Needs human with that reason.
-- **Making a seller.** Setting an account's role to seller, or turning its agent
-  on, changes no container and causes no Facebook login. A seller account is
-  claimed only by a worker on facebook-tracker 0.18.0 or later, and only such a
-  worker is handed its tasks (v1.445.2); on an older worker it waits.
-- **Alerts** for Needs human, a wall, a pool out of photos or running low go to
-  every manager's notifications, and to Telegram when the bot token and a chat
-  are set.
+The seller product that was first called Leads ▸ Facebook, and the Fleet
+worker page's **Facebook seller** card, are gone (v1.454.0, RS-581). A fleet
+account only searches. The owner's Marketplace chats go through the chat hub
+below, which uses no fleet account.
 
 **Facebook chat hub** (`/api/fb-chat`, v1.451.0, RS-578) relays the owner's
-own Marketplace chats to Telegram. Its one page is Settings ▸ Chat bridge
-(v1.453.0).
+own Marketplace chats to Telegram. Its page is **Leads ▸ Facebook**
+(`#/leads/facebook`, managers only, desktop only, v1.456.0, RS-583), with
+three tabs. It replaced Settings ▸ Chat bridge (v1.453.0), which is removed.
+The sidebar row shows the number of unread chats.
+
+- **Chats tab.** The left column lists chats, newest activity first. It can
+  be narrowed to one account, searched by buyer, listing or message text, and
+  filtered to Unread or Not sent. The open chat is in the middle. The right
+  column has the buyer's rating, location and join year, the listing, a link
+  to the chat's Telegram topic, and the same buyer's chats on our other
+  accounts. The details column drops on a narrow window. Each outbound
+  message says where it was typed (Facebook, Telegram or the ERP) and, for
+  the ERP, who typed it.
+- **Replying in the ERP.** A text reply typed in the open chat (2000
+  characters at most, no photos) goes through the same outbox as a Telegram
+  reply and is posted into the chat's topic as `↩️ <first name> (ERP): …`. It
+  is queued whatever the account's state and goes out when the account's
+  extension next claims. The bubble shows queued, typing, sent or not sent. A
+  failed reply has Retry on its bubble. One marked uncertain may already be on
+  Facebook, so its button is worded to say the buyer could get it twice. In
+  the topic, a failed or uncertain ERP reply gets one line saying
+  so, and one more if it is sent after all.
+- **Unread is shared by the team.** A chat is unread while the buyer's
+  message is the newest thing nobody has opened or answered, in the ERP or in
+  Telegram. Opening a chat marks it read for everyone, and "Mark as unread"
+  puts the mark back. There is no per-user read state.
+- **Accounts tab.** Each extension waiting to connect is a card with its
+  pairing code, Chrome profile, Facebook user, browser, address and version.
+  Approve takes a name and an optional "start with sending paused"; Deny
+  refuses it. When the request's Facebook user is already an account the card
+  offers Reconnect, which moves the account to the new Chrome, revokes the
+  old one and keeps the chats. Below is one row per Facebook account with a
+  number, its status (running, paused, needs login, checkpoint, or not
+  checking in after three missed settings checks and at least five minutes),
+  replies waiting, last sync, extension version, whether it has picked up the
+  current settings, and the Chrome that relays it. A row can be renamed,
+  paused or resumed, and its Chrome disconnected, which revokes the device
+  and keeps the chats. A name given here stays when the extension next
+  reports its own profile name. An approved account appears at its first
+  check-in.
+- **Settings tab.** See *Settings from the ERP* below.
+- **Only what the server knows.** The page does not show whether the bridge
+  is switched off in a Chrome, the extension's log or its last error. Those
+  stay in the extension.
 
 - **Who sends.** A Chrome extension in each of the owner's browser profiles
   (`facebook_messager_extenion/` in the workspace, its own repo), one Facebook
-  account per profile. Each authenticates with a service client holding
-  `fbchat:write`, minted in Settings ▸ Connectors.
+  account per profile. Nothing is typed into the extension (v1.455.0, RS-582):
+  its build carries the ERP address, it enrolls itself through the open
+  `POST /api/fb-chat/enroll`, and it waits, showing a pairing code, until a
+  manager approves it on Leads ▸ Facebook ▸ Accounts (v1.456.0), where the same
+  code is listed with the profile name, Facebook user, version and address.
+  Deny or Disconnect stops it. Enrollment is limited to 5 an hour and 5 waiting
+  per address and 100 waiting in all; a request whose extension has not asked
+  about it in an hour is forgotten, and the extension enrolls again (v1.457.1).
+  A Chrome may push only for an account no other approved Chrome relays; the
+  account moves once that one is disconnected (v1.457.1). Approvals
+  on dev survive the nightly copy from prod. An extension set up before this
+  with a `fbchat:write` service client from Settings ▸ Connectors keeps
+  working.
 - **Topics.** The first time an account's conversation is pushed, the bot
   opens a forum topic in the configured group named `<buyer> · <location>`
   (`<buyer>` until a location is known, renamed when one arrives). It opens
@@ -1482,19 +1429,24 @@ own Marketplace chats to Telegram. Its one page is Settings ▸ Chat bridge
   General, and one more when the account is back.
 - **Data.** Every message, buyer profile (rating, rating count, location, join
   year), send attempt and account event is kept in the `fb_chat_*` tables for
-  analysis. Managers can read `/api/fb-chat/accounts`, `/threads` and
+  analysis. Each message records where it was typed (`facebook`, `telegram`
+  or `erp`) and, for the ERP, which user (v1.456.0). Managers read them on
+  Leads ▸ Facebook through `/api/fb-chat/accounts`, `/threads` and
   `/threads/:id/messages`.
 - **Settings from the ERP** (v1.453.0, RS-579). An extension's options page
-  holds only the ERP address, its credentials, the profile's name and the
-  on/off switch. It asks `POST /api/fb-chat/push/config` for everything else
+  holds only the profile's name and the on/off switch. It asks `POST /api/fb-chat/push/config` for everything else
   as soon as it can reach the ERP, bridge on or off, then about once a minute.
-  Settings ▸ Chat bridge (managers) sets each value for every profile or for one
-  profile, and one profile's own value wins. The settings are not a fixed list:
-  each extension reports the fields it understands (key, type, default,
-  bounds, label), and the page draws its form from the newest version's
-  fields. A value that does not fit a reported field is refused. A key no
+  Leads ▸ Facebook ▸ Settings (managers) sets each value for every account or
+  for one account, and one account's own value wins until it is reset. The
+  page groups them (v1.456.0) as Sending (paused, time between replies, typing
+  pace), Reading the inbox (the inbox refresh window as one range, quiet chat
+  wait) and Advanced (the settings check, closed by default), and a card shows
+  whether Telegram is connected and how many topics exist. The settings are
+  not a fixed list: each extension reports the fields it understands (key,
+  type, default, bounds, label), and a field the page has no group for is
+  shown and editable under Advanced. A value that does not fit a reported field is refused. A key no
   extension reports yet is accepted and kept, and an extension that does not
-  know a key ignores it. The page lists each profile with its extension version
+  know a key ignores it. The Accounts tab lists each account with its extension version
   and whether it has picked up the latest settings yet. The first settings are
   Paused, Time between replies, Typing pace, Quiet thread wait, Buyer profile
   refresh, the inbox reload window and the Settings check interval itself.
@@ -3861,7 +3813,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   proxy whose last health checks read down is disabled with "down", the
   random pick prefers one that is up and never takes a down one, and the
   backend refuses a down proxy with `proxy_down`; since v1.414.1, RS-517, both go by the last 24 hours of checks only, and a proxy's new URL starts unchecked; two accounts per proxy by default, the
-  `Accounts per proxy` rule in Cities ▸ Rules; there are no home cities to
+  `Accounts per proxy` rule in Cities ▸ Rules, counted per exit IP since v1.457.0, RS-584: the non-parked accounts on every port that last exited from the proxy's IP, plus the homelab workers there, and a proxy with no known exit counts its own; there are no home cities to
   pick since v1.374.0, RS-439), and the ERP makes the slot with a desktop browser made
   for the account (Chromium's own user agent, a common screen and scale
   picked from the account number, the proxy's timezone). The account turns
@@ -4066,29 +4018,28 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     machines. A proxy timezone edit,
     or Change proxy, leaves that timezone alone and only moves accounts with no
     profile. **Add to fleet** has a Browser choice (v1.431.0, RS-555): CloakBrowser,
-    the default, which starts a new account on a seat and an exit of its own with no
-    pilot, or Stock Chromium, which can share an exit. It can also name a pilot and an arm, which enrolls
+    the default, which starts a new account on a seat of its own, or Stock Chromium.
+    Since v1.457.0 (RS-584) the dialog has no Pilot field, and either browser can
+    share an exit IP up to the `Accounts per proxy` limit. The API can still name a pilot and an arm, which enrolls
     the account in one step: `POST /api/fleet/slots` writes the enrollment
     (`fleet_pilot_enrollments`, which outlives the slot and the account), the
     profile, the proxy and the slot in one transaction, so no worker can claim a
     half-set slot. An enrolled account with no pinned clock takes its timezone
     from the measured exit, not the proxy's typed one, and enrollment is refused
-    if the fresh measurement names none (v1.422.0, RS-538). Enrollment refuses an exit IP that another slot, an active
-    enrollment or a homelab worker already uses, comparing measured IPs across
-    ports, and refuses a proxy whose latest measurement failed or is over 15
-    minutes old. A normal add or Change proxy is also refused when
-    it would land on an exit IP a pilot account holds. With CloakBrowser off, existing cloak accounts keep claiming
+    if the fresh measurement names none (v1.422.0, RS-538). Enrollment refuses a proxy whose latest measurement failed or is over 15
+    minutes old. Until v1.457.0 it also refused an exit IP that another slot, an
+    active enrollment or a homelab worker used, and a normal add or Change proxy
+    was refused on a pilot account's exit IP; the per-IP limit replaced both. With CloakBrowser off, existing cloak accounts keep claiming
     and keep their licence; only new ones stop. A CloakBrowser claim also says
     which exit IP to expect (`expected_exit_ip`, `webrtc_ip`): the last one
     seen, however old, since v1.424.3 (RS-543). A cloak slot, or a pilot account
     not yet logged in, whose listed proxy has no reading at all, as after a URL
     edit, waits for the next round and isn't counted when the host sizes its
     workers. A pilot's first login is held until its first Facebook page, not its
-    first claim, and also when the exit's zone moves or another slot lands on the
-    same exit; a re-add or Change proxy re-records the exit and its clock. A seed
+    first claim, and also when the exit's zone moves (another slot on the same exit
+    holds nothing since v1.457.0); a re-add or Change proxy re-records the exit and its clock. A seed
     another account holds is drawn again. A pool account with a profile or a pilot
-    record refuses a new UID. Add to fleet offers known pilots and makes the arm an
-    explicit choice, and a remove and re-add can correct either before the first
+    record refuses a new UID. A remove and re-add can correct a pilot or arm before the first
     claim (v1.425.0). A refusal from
     `POST /api/fleet/slots/:no/engine` reads as a sentence: a live session,
     CloakBrowser off, every seat taken, or switched before. A CloakBrowser

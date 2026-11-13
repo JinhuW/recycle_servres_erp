@@ -92,10 +92,12 @@ to keep accepting what the deployed memtrade sends.
 A second one does too. The **Facebook chat bridge** (a Chrome extension,
 outside this repo at `facebook_messager_extenion/` in the workspace) pushes the
 owner's Marketplace conversations to `/api/fb-chat/push/*` (`routes/fbChat.ts`)
-with a `fbchat:write` service-client token, and with the same token long-polls
+with a device token it got from the open `POST /api/fb-chat/enroll` and a
+manager approved (older installs: a `fbchat:write` service-client token), and
+with the same token long-polls
 `/push/outbox/claim` for replies typed in Telegram, then reports through
 `/push/outbox/<id>/result`. It also asks `/push/config` about once a minute
-for the settings set on Settings ▸ Chat bridge, sending the fields it
+for the settings set on Leads ▸ Facebook ▸ Settings, sending the fields it
 understands; that list is open, so a new setting needs only an extension
 release. The payload is `packages/shared/src/fbChat.ts` on
 this side and the extension's `src/shared/hub-contract.ts` on that one; test
@@ -109,7 +111,7 @@ Cloudflare Worker (`deploy/cloudflare/worker.js`), never the Railway origin:
 | Caller | ERP side | Auth | Test |
 | --- | --- | --- | --- |
 | Fleet agent, `apps/fleet-agent/src/client.ts` | `GET /api/fleet/hosts/:id/desired`, `POST …/stopped`, `…/tickets`, `…/report` in `apps/backend/src/fleet/hosts.ts` | Bearer host token (`hostAuth`, `src/fleet/auth.ts`) | `apps/backend/tests/fleet-hosts.test.ts` |
-| The Facebook worker image in fleet mode: `trackers/facebook/rs_worker/entry.py` (`claim`), the vendored monitor's fleet mode (`heartbeat`, `next-task`, `events`, `session`, `profile-launch`, `seller/*`), `rs_worker/vnc_relay.py` (`vnc`) | `/api/fleet/worker/*` in `src/fleet/claim.ts`, `src/fleet/seller.ts` and `src/fleet/vnc.ts` | a single-use claim ticket (or, from older agents, the host token) for `claim`, then the worker token the claim returns | `fleet-claim.test.ts`, `fleet-claim-tickets.test.ts` |
+| The Facebook worker image in fleet mode: `trackers/facebook/rs_worker/entry.py` (`claim`), the vendored monitor's fleet mode (`heartbeat`, `next-task`, `events`, `session`, `profile-launch`), `rs_worker/vnc_relay.py` (`vnc`) | `/api/fleet/worker/*` in `src/fleet/claim.ts` and `src/fleet/vnc.ts` | a single-use claim ticket (or, from older agents, the host token) for `claim`, then the worker token the claim returns | `fleet-claim.test.ts`, `fleet-claim-tickets.test.ts` |
 
 The Worker is part of the claim contract: on a successful claim it adds the
 shared worker env (`FLEET_WORKER_ENV`), and for a cloak device the

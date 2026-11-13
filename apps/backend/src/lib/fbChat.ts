@@ -4,6 +4,7 @@ import {
   FB_CHAT_CONFIG_VALUE_MAX,
   FB_CHAT_EVENT_KINDS,
   FB_CHAT_MAX_WAIT_SEC,
+  FB_CHAT_REPLY_MAX_CHARS,
   type FbChatAccountRef,
   type FbChatBuyer,
   type FbChatBuyerPush,
@@ -11,6 +12,7 @@ import {
   type FbChatConfigField,
   type FbChatConfigRequest,
   type FbChatConfigType,
+  type FbChatEnrollRequest,
   type FbChatEventKind,
   type FbChatEventPush,
   type FbChatRow,
@@ -27,7 +29,7 @@ export class FbChatPushError extends Error {}
 const MAX_ROWS = 2000;
 const MAX_BODY = 8000;
 const MAX_IMAGES = 10;
-export const FB_CHAT_REPLY_MAX = 2000;
+export const FB_CHAT_REPLY_MAX = FB_CHAT_REPLY_MAX_CHARS;
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -126,6 +128,7 @@ export function parseSendResult(v: unknown): FbChatSendResult {
     outcome: p.outcome,
     error: text(p.error, 300) ?? undefined,
     typingMs: int(p.typingMs, 0, 3_600_000) ?? undefined,
+    attempt: int(p.attempt, 1, 1_000_000) ?? undefined,
   };
 }
 
@@ -207,4 +210,14 @@ export function chunkForTelegram(textToSend: string, max = 4000): string[] {
   }
   if (rest) chunks.push(rest);
   return chunks;
+}
+
+/**
+ * `POST /enroll` and `/push/device`. Nothing here is trusted, so a field that
+ * does not fit is dropped rather than refused: the approver sees less.
+ */
+export function parseEnrollRequest(v: unknown): Required<{ [K in keyof FbChatEnrollRequest]: string | null }> {
+  const r = isObj(v) ? v : {};
+  const uid = typeof r.fbUid === 'string' && /^\d{1,32}$/.test(r.fbUid) ? r.fbUid : null;
+  return { label: text(r.label, 80), extVersion: text(r.extVersion, 32), fbUid: uid };
 }

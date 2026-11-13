@@ -7,8 +7,8 @@ except `scripts/…`, `tests/…` and `migrations/…`, which are under
 `apps/backend/`; anything else is relative to the repo root.
 
 `routes/tracker.ts`, `routes/coordinator.ts` and `vncBridge.ts` are the ERP
-half of the tracker contracts.  `fleet/hosts.ts`, `fleet/claim.ts`,
-`fleet/seller.ts` and `fleet/vnc.ts` are the half that the fleet agent
+half of the tracker contracts.  `fleet/hosts.ts`, `fleet/claim.ts` and
+`fleet/vnc.ts` are the half that the fleet agent
 (`apps/fleet-agent/`) and the Facebook worker image call.  Change either
 together with its other side (root AGENTS.md → *Contracts*).
 

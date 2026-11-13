@@ -39,7 +39,8 @@ export const DESKTOP_NAV: readonly NavGroup[] = [
       // PO itself (the In Transit dialog). The routes still resolve by URL.
       { id: 'clients',    tKey: 'nav_clients',    icon: 'book',       roles: ['manager', 'purchaser'] },
       // Sellers to buy from, one child per source: found on Reddit, arriving
-      // through the public website forms, or answering our Facebook ads.
+      // through the public website forms, or writing to a buyer account on
+      // Facebook Marketplace.
       {
         tKey: 'nav_leads',
         icon: 'target',

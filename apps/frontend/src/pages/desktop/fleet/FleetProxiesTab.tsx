@@ -5,14 +5,14 @@ import { TableSkeleton } from '../../../components/Skeleton';
 import { handleFetchError, showSuccessToast } from '../../../lib/errorToast';
 import { poolApi, proxyMarkFor, type FbProxyMark } from '../../../lib/facebookPool';
 import {
-  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_SLOW_MS, fleetApi, proxyLoad,
+  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_SLOW_MS, fleetApi,
   fleetExitPointText, type FleetProxy, type FleetProxyHealth, type FleetProxyHealthAnswer, type FleetProxyHealthState, type FleetProxySource,
 } from '../../../lib/fleet';
 import { useT } from '../../../lib/i18n';
 import { ProxyExhaustedChip } from '../FleetWorkers';
 import { ProxyDialog, RemoveProxyDialog } from './FleetProxies';
 import { easternClock } from './fleetBoard';
-import { exitIpUsers, proxyCrowding, proxyExitFlags, type ProxyExitFlag } from './proxyRules';
+import { proxyCrowding, proxyExitFlags, type ProxyExitFlag } from './proxyRules';
 import { agoLabel, Clock, EmptyRow, Legend, UnavailableCard, useFleetMirror, useFleetPoll, WorkerLink } from './shared';
 
 // ─── Proxies ──────────────────────────────────────────────────────────────────
@@ -141,8 +141,6 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
     return out;
   }, [rows, marks]);
   const sources = useMemo(() => [...new Set(rows.map(p => p.source))], [rows]);
-  // From every row, not the shown ones: a filter doesn't change who shares an IP.
-  const ipUsers = useMemo(() => exitIpUsers(rows), [rows]);
   const shown = useMemo(() => rows
     .filter(p => (filter.state === 'all' || p.state === filter.state
         || (filter.state === 'exhausted' && proxyMarkFor(marks, { proxy: { url: p.exit } })?.exhausted))
@@ -192,10 +190,10 @@ export function ProxiesHealthTable({ rows, marks, filter, onFilter, busy, onChec
               const where = last ? [last.city, last.region, last.country].filter(Boolean).join(', ') : '';
               const rowBusy = busy === 'all' || (p.proxy_id !== null && busy === p.proxy_id);
               const own = p.proxy_id === null ? undefined : editing?.proxies.find(x => x.id === p.proxy_id);
-              const load = own ? proxyLoad(own) : 0;
-              const users = last?.exit_ip ? ipUsers.get(last.exit_ip) ?? 0 : 0;
+              const load = own ? own.exit_load : 0;
+              const users = p.load_ip ? p.exit_load : 0;
               const crowding = proxyCrowding(users);
-              const crowdReason = crowding && t(crowding === 'over' ? 'fleetProxyCrowdOver' : 'fleetProxyCrowdWarn', { n: users, ip: last?.exit_ip ?? '' });
+              const crowdReason = crowding && t(crowding === 'over' ? 'fleetProxyCrowdOver' : 'fleetProxyCrowdWarn', { n: users, ip: p.load_ip ?? '' });
               return (
                 <tr key={`${p.source}:${p.proxy_id ?? p.exit}`}>
                   <td>

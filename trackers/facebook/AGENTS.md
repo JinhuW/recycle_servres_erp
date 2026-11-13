@@ -108,10 +108,11 @@ successful claim. Three pieces of the worker image make the calls:
   host token), and hands the worker token it gets back to the monitor.
 - The vendored monitor's fleet mode makes the rest of
   `/api/fleet/worker/*`: `heartbeat`, `next-task`, `events`, `session`,
-  `profile-launch` and `seller/*`.
+  and `profile-launch`. Its seller task code (0.18.0) is dormant: the ERP no
+  longer hands out seller tasks (RS-581).
 - `rs_worker/vnc_relay.py` parks a socket at `/api/fleet/worker/vnc`.
 
-The ERP side is `apps/backend/src/fleet/claim.ts`, `seller.ts` and `vnc.ts`,
+The ERP side is `apps/backend/src/fleet/claim.ts` and `vnc.ts`,
 tested by `apps/backend/tests/fleet-claim.test.ts` and
 `fleet-claim-tickets.test.ts`. A change to these routes is also a change to
 the monitor fork, at the revision `VENDOR.md` pins. A deployed worker image

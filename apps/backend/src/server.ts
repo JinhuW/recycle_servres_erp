@@ -25,8 +25,6 @@ import { startFleetSchedulerLoop } from './fleet/scheduler';
 import { startProxyHealthLoop } from './fleet/proxyHealth';
 import { startFleetRelayLease } from './fleet/vnc';
 import { setPollsDraining } from './fleet/claim';
-import { startFbSellerLoop } from './services/fbPacing';
-import { startFbAgentLoop } from './services/fbAgent';
 import { startFbChatTelegramLoop } from './services/fbChatTelegram';
 
 const env = buildEnv();
@@ -51,8 +49,6 @@ const loops = [
   startPerfLoop(getDb(env)),
   // The fleet VNC relay pairs sockets in memory: one instance serves it.
   startFleetRelayLease(getDb(env)),
-  startFbSellerLoop(env),
-  startFbAgentLoop(env),
   startFbChatTelegramLoop(env),
   { stop: () => setPollsDraining(true) },
 ];

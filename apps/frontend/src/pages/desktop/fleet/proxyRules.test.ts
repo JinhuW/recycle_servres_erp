@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FleetProxyHealth } from '@recycle-erp/shared';
 import { fleetDeviceFor, parseProxyUrl } from '../../../lib/fleet';
 import { NOW, PROXIES, SLOTS } from './fixtures';
-import { deviceSummary, exitIpUsers, proxyExitFlags, fleetRowAction, proxyChangeVerdict, proxyChoices, proxyCrowding, proxyDraftProblem, proxyPatch, randomOpenProxy } from './proxyRules';
+import { deviceSummary, proxyExitFlags, fleetRowAction, proxyChangeVerdict, proxyChoices, proxyCrowding, proxyDraftProblem, proxyPatch, randomOpenProxy } from './proxyRules';
 
 const row = (status: string, over: Partial<{ holder: string | null; password: string; totp: string }> = {}) =>
   ({ status, holder: null, password: 'pw', totp: 'KEY', ...over });
@@ -35,22 +35,19 @@ describe('proxyCrowding', () => {
   });
 });
 
-describe('exitIpUsers', () => {
-  const on = (ip: string | null, accounts: number, workers: string[] = [], parked = 0) => ({
-    last: ip ? { exit_ip: ip } : { exit_ip: null }, workers,
-    slots: [
-      ...Array.from({ length: accounts }, (_, i) => ({ account_no: i, parked: false })),
-      ...Array.from({ length: parked }, (_, i) => ({ account_no: 100 + i, parked: true })),
-    ],
-  }) as unknown as FleetProxyHealth;
-  it('adds every port on an IP, workers in and parked accounts out, and skips an unknown exit', () => {
-    const users = exitIpUsers([on('1.1.1.1', 2), on('1.1.1.1', 1, ['homelab-1'], 3), on('2.2.2.2', 1), on(null, 9)]);
-    expect([...users]).toEqual([['1.1.1.1', 4], ['2.2.2.2', 1]]);
-  });
-});
-
 describe('proxyChoices', () => {
-  it('counts the non-parked slots, marks the full ones and lists the emptiest first', () => {
+  it('takes the load of the exit IP, not of the port', () => {
+    const shared = PROXIES.map((p) => (p.id === 3 ? { ...p, exit_ip: '192.0.2.10', exit_load: 2 } : p));
+    expect(proxyChoices(shared, 2).find((x) => x.proxy.id === 3)).toMatchObject({ load: 2, full: true });
+  });
+  it('leaves the moving account out of the IP it leaves, as the server does', () => {
+    const shared = PROXIES.map((p) => (p.id === 2 ? { ...p, exit_ip: '192.0.2.10', exit_load: 2 } : p));
+    expect(proxyChoices(shared, 2).find((x) => x.proxy.id === 2)!.full).toBe(true);
+    expect(proxyChoices(shared, 2, new Map(), 40).find((x) => x.proxy.id === 2)).toMatchObject({ load: 1, full: false });
+    // Parked, the account was never counted.
+    expect(proxyChoices(shared, 2, new Map(), 44).find((x) => x.proxy.id === 2)!.load).toBe(2);
+  });
+  it('marks the full ones and lists the emptiest first', () => {
     const c = proxyChoices(PROXIES, 2);
     expect(c.map((x) => [x.proxy.id, x.load, x.full])).toEqual([[3, 0, false], [2, 0, false], [1, 2, true]]);
     expect(proxyChoices(PROXIES, 3).find((x) => x.proxy.id === 1)!.full).toBe(false);

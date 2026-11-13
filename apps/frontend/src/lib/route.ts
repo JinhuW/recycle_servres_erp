@@ -420,7 +420,7 @@ export function knownDesktopView(path: string): DesktopViewId | null {
   if (path === '/wechat' || matchWechatDay(path)) return 'wechat';
   if (path === '/fleet' || path === '/fleet/pool' || matchFleetTab(path) || fleetRedirect(path) || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
   if (path === '/leads/reddit' || matchLeadsTab(path)) return 'leadsReddit';
-  if (matchFbSellerRoute(path)) return 'leadsFacebook';
+  if (matchFbChatRoute(path)) return 'leadsFacebook';
   if (path === '/settings') return 'settings';
   return null;
 }
@@ -475,27 +475,26 @@ export function matchLeadsTab(path: string): LeadsTab | null {
   return m && (LEADS_TABS as readonly string[]).includes(m.tab) ? (m.tab as LeadsTab) : null;
 }
 
-// Leads ▸ Facebook: seller conversations, with Needs human at /leads/facebook
-// itself and the rest as tabs beside it; a thread opens under the same view.
-export const FB_SELLER_TABS = ['inbox', 'ads', 'photos', 'agent', 'settings'] as const;
-export type FbSellerTab = 'needs' | (typeof FB_SELLER_TABS)[number];
+// Leads ▸ Facebook: Chats at /leads/facebook itself, one open chat under it,
+// and the Accounts and Settings tabs beside it.
+export const FB_CHAT_TABS = ['chats', 'accounts', 'settings'] as const;
+export type FbChatTab = (typeof FB_CHAT_TABS)[number];
+export type FbChatRoute = { tab: FbChatTab; threadId: number | null };
 
-export type FbSellerRoute = { kind: 'tab'; tab: FbSellerTab } | { kind: 'thread'; id: number };
-
-export function fbSellerTabPath(tab: FbSellerTab): string {
-  return tab === 'needs' ? '/leads/facebook' : `/leads/facebook/${tab}`;
+export function fbChatTabPath(tab: FbChatTab): string {
+  return tab === 'chats' ? '/leads/facebook' : `/leads/facebook/${tab}`;
 }
 
-export function fbSellerThreadPath(id: number): string {
-  return `/leads/facebook/thread/${id}`;
+export function fbChatThreadPath(threadId: number): string {
+  return `/leads/facebook/chat/${threadId}`;
 }
 
-export function matchFbSellerRoute(path: string): FbSellerRoute | null {
-  if (path === '/leads/facebook') return { kind: 'tab', tab: 'needs' };
-  const thread = match('/leads/facebook/thread/:id', path);
-  if (thread) return /^[1-9]\d*$/.test(thread.id) ? { kind: 'thread', id: Number(thread.id) } : null;
-  const m = match('/leads/facebook/:tab', path);
-  return m && (FB_SELLER_TABS as readonly string[]).includes(m.tab) ? { kind: 'tab', tab: m.tab as FbSellerTab } : null;
+export function matchFbChatRoute(path: string): FbChatRoute | null {
+  if (path === '/leads/facebook') return { tab: 'chats', threadId: null };
+  if (path === '/leads/facebook/accounts') return { tab: 'accounts', threadId: null };
+  if (path === '/leads/facebook/settings') return { tab: 'settings', threadId: null };
+  const id = match('/leads/facebook/chat/:id', path)?.id;
+  return id && /^[1-9]\d{0,14}$/.test(id) ? { tab: 'chats', threadId: Number(id) } : null;
 }
 
 // One lead on Leads ▸ Website. It lived at /web-submissions/:id until it moved

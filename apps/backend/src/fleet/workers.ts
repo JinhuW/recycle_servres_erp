@@ -13,9 +13,9 @@ import { dropSlot, releaseTasks } from './claim';
 import { loadRelease } from './hosts';
 import { cityLog } from './tasks';
 import { loadSettings } from './cities';
-import { lastKnownExitIp, proxyStates } from './proxies';
+import { exitLoads, proxyStates } from './proxies';
 import { exhaustedProxyIds } from './proxyMarks';
-import { latestExitOf, latestProxyExit } from './proxyExit';
+import { latestProxyExit } from './proxyExit';
 import { managerOnly, type ManagerEnv } from './auth';
 import { acceptLaunch, ENGINE_LOCK, freeFingerprint } from './profile';
 import { bad, conflict, eventToWire, exists, isRefusal, minutesTodaySql, notFound, taskToWire, type Refusal, type TaskEventRow, type TaskRow } from './sql';
@@ -247,55 +247,27 @@ async function writeProfile(tx: SqlLike, no: number, p: Profile): Promise<void> 
     profile_timezone = ${p.timezone}, profile_device = COALESCE(profile_device, ${pinned === null ? null : tx.json(pinned as postgres.JSONValue)}) WHERE no = ${no}`;
 }
 
-/** Everything else on an exit IP: a latest measurement of any other proxy that a
- *  slot sits on (its last known IP if it is failing now, since it may come back
- *  there), an active enrollment's recorded IP, and the homelab workers of the
- *  last round the console answered. */
-async function exitUsers(tx: SqlLike, ip: string, no: number): Promise<string[]> {
-  const rows = await tx<{ who: string }[]>`
-    SELECT '#' || s.account_no AS who FROM fleet_slots s
-    CROSS JOIN LATERAL (${latestExitOf(tx, tx`s.proxy_id`)}) latest
-    WHERE s.account_no <> ${no} AND latest.exit_ip = ${ip}
-    UNION
-    SELECT '#' || e.account_no FROM fleet_pilot_enrollments e JOIN fleet_slots s ON s.account_no = e.account_no
-    WHERE e.account_no <> ${no} AND e.exit_ip = ${ip} AND e.first_login_at IS NULL
-    UNION
-    SELECT w FROM fleet_proxy_checks c JOIN fleet_proxy_rounds r ON c.checked_at = r.coordinator_at
-    CROSS JOIN LATERAL unnest(c.workers) w
-    WHERE c.source = 'coordinator' AND c.exit_ip = ${ip}
-    ORDER BY 1`;
-  return rows.map((r) => r.who);
+/** Why another account can't go on a proxy now, or null. The limit is per exit
+ *  IP, so the count covers every port that last exited where this one does. */
+async function proxyFullRefusal(tx: SqlLike, proxyId: number, name: string, no: number): Promise<Refusal | null> {
+  const limit = (await loadSettings(tx)).max_accounts_per_proxy;
+  const load = (await exitLoads(tx, no, proxyId)).get(proxyId);
+  if (!load || load.n < limit) return null;
+  return conflict('proxy_full', load.ip === null
+    ? `${name} carries ${load.n} of ${limit} accounts`
+    : `${name} exits from ${load.ip}, which carries ${load.n} of ${limit} accounts`);
 }
 
-/** The exit an enrolled account may go out through: identity is the measured
- *  IP, not the port, and several ports can share one. */
-async function measuredExit(tx: SqlLike, proxyId: number, name: string, no: number): Promise<Refusal | { ip: string; timezone: string | null }> {
+/** The exit an enrolled account goes out through, as freshly measured: its
+ *  profile's clock and its enrollment record come from this reading. Sharing
+ *  the IP is the limit's business, not this one's. */
+async function measuredExit(tx: SqlLike, proxyId: number, name: string): Promise<Refusal | { ip: string; timezone: string | null }> {
   const check = await latestProxyExit(tx, proxyId);
   if (!check?.fresh) {
     return conflict('exit_stale', `${name} ${check ? 'was last measured too long ago' : 'has never been measured'}; check it again first`);
   }
   if (!check.ok || !check.exit_ip) return conflict('exit_failing', `${name} failed its latest check; pick another proxy or check it again`);
-  const users = await exitUsers(tx, check.exit_ip, no);
-  if (users.length) return conflict('exit_shared', `${name} exits from ${check.exit_ip}, already used by ${users.join(', ')}`);
   return { ip: check.exit_ip, timezone: check.timezone };
-}
-
-/** For an account outside any pilot, which is otherwise not held to the exit
- *  rules: landing on a pilot account's exit would quietly spoil that account's
- *  solo-exit condition. An unmeasured target has nothing to compare, so it goes
- *  ahead, as these paths always have. */
-async function pilotExitRefusal(tx: SqlLike, proxyId: number, name: string, no: number): Promise<Refusal | null> {
-  const ip = await lastKnownExitIp(tx, proxyId);
-  if (ip === null) return null;
-  const holders = await tx<{ account_no: number }[]>`
-    SELECT e.account_no FROM fleet_pilot_enrollments e
-    JOIN fleet_slots s ON s.account_no = e.account_no
-    LEFT JOIN LATERAL (${latestExitOf(tx, tx`s.proxy_id`)}) latest ON TRUE
-    WHERE e.pilot_id IS NOT NULL AND e.account_no <> ${no}
-      AND ((e.exit_ip = ${ip} AND e.first_login_at IS NULL) OR latest.exit_ip = ${ip})
-    ORDER BY e.account_no`;
-  if (!holders.length) return null;
-  return conflict('exit_shared', `${name} exits from ${ip}, held by pilot account ${holders.map((h) => `#${h.account_no}`).join(', ')}`);
 }
 
 /** A manager's way out of a held first login. After a first login the record
@@ -352,11 +324,8 @@ slots.post('/', async (c) => {
       SELECT url_enc, host, port, timezone FROM fleet_proxies WHERE id = ${proxyId} FOR UPDATE`;
     if (!proxy) return notFound(`proxy ${proxyId}`);
     const exitName = `${proxy.host}:${proxy.port}`;
-    const limit = (await loadSettings(tx)).max_accounts_per_proxy;
-    const [{ n }] = await tx<{ n: number }[]>`
-      SELECT COUNT(*)::int AS n FROM fleet_slots
-      WHERE proxy_id = ${proxyId} AND lease_expires_at IS DISTINCT FROM 'infinity'::timestamptz`;
-    if (n >= limit) return conflict('proxy_full', `${exitName} carries ${n} of ${limit} accounts`);
+    const full = await proxyFullRefusal(tx, proxyId, exitName, no);
+    if (full) return full;
     // A new account's first sign-in through a dead exit fails, and a failed
     // sign-in is what gets an account checkpointed. Never checked is allowed.
     if ((await proxyStates(tx, proxyId)).get(proxyId) === 'down') {
@@ -406,7 +375,7 @@ slots.post('/', async (c) => {
     let measuredZone: string | null = null;
     let repinned: string | null = null;
     if (enroll || enrolled) {
-      const measured = await measuredExit(tx, proxyId, exitName, no);
+      const measured = await measuredExit(tx, proxyId, exitName);
       if (isRefusal(measured)) return measured;
       exitIp = measured.ip;
       measuredZone = measured.timezone;
@@ -416,9 +385,6 @@ slots.post('/', async (c) => {
         if (!isFleetTimezone(measured.timezone)) return conflict('exit_zone_unknown', `${exitName}'s latest measurement names no timezone; check it again first`);
         exitZone = measured.timezone;
       }
-    } else {
-      const held = await pilotExitRefusal(tx, proxyId, exitName, no);
-      if (held) return held;
     }
 
     const timezone = repinned ?? account.profile_timezone ?? exitZone ?? proxy.timezone;
@@ -606,11 +572,8 @@ slots.post('/:no/proxy', async (c) => {
     const to = `${proxy.host}:${proxy.port}`;
     if (slot.proxy_id === toId) return exists(`#${no} is on ${to} already`);
     if (slot.proxy_id !== fromId) return conflict('proxy_changed', `#${no} moved to another proxy since this was opened; look again`);
-    const limit = (await loadSettings(tx)).max_accounts_per_proxy;
-    const [{ n }] = await tx<{ n: number }[]>`
-      SELECT COUNT(*)::int AS n FROM fleet_slots
-      WHERE proxy_id = ${toId} AND lease_expires_at IS DISTINCT FROM 'infinity'::timestamptz`;
-    if (n >= limit) return conflict('proxy_full', `${to} carries ${n} of ${limit} accounts`);
+    const full = await proxyFullRefusal(tx, toId, to, no);
+    if (full) return full;
     if ((await proxyStates(tx, toId)).get(toId) === 'down') {
       return conflict('proxy_down', `${to} failed its last proxy checks; pick another proxy`);
     }
@@ -620,13 +583,10 @@ slots.post('/:no/proxy', async (c) => {
     const [enrolled] = await tx<EnrollmentRow[]>`SELECT pilot_id, arm, seed, first_claimed_at, first_login_at, exit_timezone FROM fleet_pilot_enrollments WHERE account_no = ${no}`;
     let repinned: string | null = null;
     if (enrolled) {
-      const measured = await measuredExit(tx, toId, to, no);
+      const measured = await measuredExit(tx, toId, to);
       if (isRefusal(measured)) return measured;
       repinned = repinnedZone(enrolled, account.profile_timezone, measured.timezone);
       await recordEnrolledExit(tx, no, measured.ip, measured.timezone);
-    } else {
-      const held = await pilotExitRefusal(tx, toId, to, no);
-      if (held) return held;
     }
     const [old] = slot.proxy_id === null ? [] : await tx<{ host: string; port: number }[]>`
       SELECT host, port FROM fleet_proxies WHERE id = ${slot.proxy_id}`;
@@ -901,7 +861,7 @@ workers.get('/:id', async (c) => {
     ORDER BY m.last_done_at DESC NULLS LAST, m.city`;
   const cities = cityRows.map((r) => ({ slug: r.slug, name: r.name, radius_km: r.radius_km, last_done_at: iso(r.last_done_at), alerts: r.alerts }));
 
-  const events = await sql<(TaskEventRow & { city: string | null; city_name: string | null; item: string | null; task_kind: FleetTask['kind'] })[]>`
+  const events = await sql<(TaskEventRow & { city: string; city_name: string | null; item: string; task_kind: FleetTask['kind'] })[]>`
     SELECT e.*, t.city, c.name AS city_name, t.item, t.kind AS task_kind
     FROM fleet_task_events e JOIN fleet_tasks t ON t.id = e.task_id LEFT JOIN fleet_cities c ON c.slug = t.city
     WHERE e.worker_id = ${id} AND e.at >= ${since} AND e.kind = ANY(${HISTORY_KINDS}::text[])

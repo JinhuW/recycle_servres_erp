@@ -1,0 +1,89 @@
+/* Leads ▸ Facebook ▸ Accounts (pages/desktop/leads/fbchat/Account*.tsx).
+   Prefix fbca-. The shared pieces (badge, avatar, health) are in fbChat.css. */
+
+.fbca { max-width: 1180px; }
+.fbca-sec { margin-bottom: 28px; }
+.fbca-sec > header { margin-bottom: 10px; }
+.fbca-sec h3 { margin: 0; font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.fbca-sec header p { margin: 3px 0 0; font-size: 13px; color: var(--fg-muted); max-width: 64ch; }
+
+.fbca-kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 12.5px; margin: 0; }
+.fbca-kv dt { color: var(--fg-subtle); }
+.fbca-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+/* ── Connection requests ── */
+.fbca-req {
+  display: grid; grid-template-columns: minmax(0, 1fr) 300px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev);
+  margin-bottom: 10px; overflow: hidden;
+}
+/* A request from a Facebook user we already know rides on --info, like its note. */
+.fbca-req.reconnect { border-color: oklch(0.85 0.05 250); }
+.fbca-req-who { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.fbca-req-top { display: flex; gap: 12px; align-items: center; }
+.fbca-req-top h4 { margin: 0; font-size: 14.5px; font-weight: 600; }
+.fbca-req-top small { display: block; color: var(--fg-subtle); font-size: 12px; }
+.fbca-req-code {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 12px; border-radius: 9px; background: var(--bg-soft);
+  font-size: 12.5px; color: var(--fg-muted);
+}
+.fbca-req-code b { font-size: 20px; letter-spacing: 0.14em; font-weight: 650; color: var(--fg); font-variant-numeric: tabular-nums; }
+.fbca-req-note { font-size: 12.5px; color: var(--info-strong); background: var(--info-soft); border-radius: 8px; padding: 8px 10px; }
+.fbca-req-act {
+  padding: 16px 18px; border-left: 1px solid var(--border); background: var(--bg-soft);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.fbca-lbl { font-size: 12px; font-weight: 500; color: var(--fg-muted); }
+.fbca-hint { font-size: 11.5px; color: var(--fg-subtle); margin-top: -6px; }
+.fbca-chk { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; }
+.fbca-chk input { margin-top: 2px; accent-color: var(--accent); }
+.fbca-req-btns { display: flex; gap: 8px; margin-top: auto; }
+.fbca-req-btns .btn { flex: 1; justify-content: center; }
+.fbca-empty {
+  padding: 18px; border: 1px dashed var(--border-strong); border-radius: var(--radius);
+  color: var(--fg-muted); font-size: 13px;
+}
+
+/* What the extension shows, for reference. */
+.fbca-ext-wrap summary { cursor: pointer; font-size: 12.5px; color: var(--fg-muted); margin: 6px 0; }
+.fbca-ext { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 4px; }
+.fbca-ext-step {
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev);
+  padding: 12px; font-size: 12.5px;
+}
+.fbca-ext-step h5 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--fg-muted); }
+.fbca-ext-code { font-size: 18px; letter-spacing: 0.14em; font-weight: 650; margin: 2px 0 4px; }
+.fbca-ext-step b { display: block; }
+
+/* ── Accounts table ── */
+.fbca-table td { vertical-align: middle; }
+.fbca-cell { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.fbca-cell small { display: block; color: var(--fg-subtle); font-size: 11.5px; }
+.fbca-muted { color: var(--fg-muted); }
+.fbca-ver { display: inline-flex; align-items: center; gap: 6px; }
+
+.fbca-row { cursor: pointer; }
+.fbca-row:hover td { background: var(--bg-soft); }
+.fbca-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fbca-row.open td { background: var(--bg-soft); border-bottom-color: transparent; }
+.fbca-detail td { background: var(--bg-soft); padding: 4px 14px 16px 50px; }
+.fbca-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: end; }
+.fbca-detail .fbca-kv { grid-template-columns: 140px 1fr; max-width: 560px; }
+.fbca-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.btn.fbca-danger { color: var(--neg); border-color: oklch(0.85 0.06 22); }
+
+.fbca-rename { display: flex; gap: 6px; align-items: center; cursor: default; }
+.fbca-rename .input { width: 240px; }
+
+/* An approved Chrome with no account yet. */
+.fbca-waiting td { color: var(--fg-muted); }
+.fbca-waiting .fbca-wait-line { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+
+@media (max-width: 860px) {
+  .fbca-req { grid-template-columns: 1fr; }
+  .fbca-req-act { border-left: 0; border-top: 1px solid var(--border); }
+  .fbca-ext { grid-template-columns: 1fr; }
+  .fbca-detail-grid { grid-template-columns: 1fr; }
+  .fbca-detail td { padding-left: 14px; }
+}

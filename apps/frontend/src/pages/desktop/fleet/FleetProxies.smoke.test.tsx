@@ -38,22 +38,21 @@ describe('Add to fleet', () => {
     expect(html).toContain('fpAddToFleetFull');
     expect(html).not.toContain('fpAddToFleetDevice');     // no proxy picked, so no timezone to show yet
   });
-  it('offers an optional pilot, with the arm hidden until one is named', () => {
-    const html = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={2} onClose={noop} onDone={noop} />);
-    expect(html).toContain('fpAddToFleetPilot');
-    expect(html).not.toContain('fpAddToFleetArmPick');
+  it('counts a port against its exit IP, so an empty port on a full IP is disabled', () => {
+    const shared = PROXIES.map((p) => (p.id === 3 ? { ...p, exit_ip: '192.0.2.10', exit_load: 2 } : p));
+    const html = renderToString(<AddToFleetDialog no={40} proxies={shared} limit={2} onClose={noop} onDone={noop} />);
+    expect(html).toMatch(/<option[^>]*value="3"[^>]*disabled=""|<option[^>]*disabled=""[^>]*value="3"/);
   });
-  it('offers the browser with no pilot, CloakBrowser selected', () => {
+  it('offers the browser and no pilot, CloakBrowser selected', () => {
+    expect(renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={2} onClose={noop} onDone={noop} />)).not.toContain('Pilot');
     const html = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={2} onClose={noop} onDone={noop} />);
     expect(html).toContain('fpAddToFleetEngine');
     expect(html).toMatch(/<option value="cloak"[^>]*selected=""[^>]*>fpAddToFleetArmCloak/);
     expect(html).toContain('fpAddToFleetArmStock');
   });
-  it('sends an engine only for CloakBrowser, and a pilot always with its arm', () => {
-    expect(addSlotEngine('', '', 'stock')).toEqual({});
-    expect(addSlotEngine('', '', 'cloak')).toEqual({ engine: 'cloak' });
-    expect(addSlotEngine(' p1 ', 'stock', 'cloak')).toEqual({ pilot: 'p1', arm: 'stock' });
-    expect(addSlotEngine('p1', '', 'cloak')).toEqual({});
+  it('sends an engine only for CloakBrowser', () => {
+    expect(addSlotEngine('stock')).toEqual({});
+    expect(addSlotEngine('cloak')).toEqual({ engine: 'cloak' });
   });
   it('lists a down proxy disabled, and says so when every proxy with room is down', () => {
     const one = renderToString(<AddToFleetDialog no={40} proxies={PROXIES} limit={2} health={new Map([[3, 'down']])} onClose={noop} onDone={noop} />);

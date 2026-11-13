@@ -45,16 +45,11 @@ describe('shownNav', () => {
     expect(leads('manager', 'home')?.target).toBe('leadsReddit');
     expect(leads('manager', 'websubmissions')?.open).toBe(true);
     expect(leads('manager', 'websubmissions')?.children.map(c => c.active)).toEqual([false, true, false]);
+    expect(leads('manager', 'leadsFacebook')?.children.map(c => c.active)).toEqual([false, false, true]);
     expect(leads('purchaser', 'home')?.children.map(c => c.leaf.id)).toEqual(['leadsReddit']);
     // Only ever a child now, never its own top-level row.
     expect(shownNav('manager', 'home').flatMap(g => g.items)
       .some(i => i.kind === 'leaf' && i.leaf.id === 'websubmissions')).toBe(false);
-  });
-
-  it('puts Facebook under Leads for managers only, lit on its own page', () => {
-    expect(leaf('manager', 'leadsFacebook', 'leadsFacebook')?.active).toBe(true);
-    expect(leaf('manager', 'home', 'leadsFacebook')?.active).toBe(false);
-    expect(leaf('purchaser', 'home', 'leadsFacebook')).toBeUndefined();
   });
 
   it('gives purchasers the Facebook pool and Settings, with no Reddit monitor', () => {

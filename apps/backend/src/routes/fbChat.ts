@@ -1,34 +1,49 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import { authMiddleware } from '../auth';
 import { getDb } from '../db';
-import { FB_CHAT_CONFIG_KEY, fbChatConfigProblem } from '@recycle-erp/shared';
 import {
-  FbChatPushError, fbChatConfigValueProblem, parseBuyerPush, parseClaim, parseConfigRequest, parseEventPush,
-  parseSendResult, parseSyncPush,
+  FB_CHAT_ACCOUNT_LABEL_MAX, FB_CHAT_CONFIG_KEY, FB_CHAT_REPLY_MAX_CHARS, FB_CHAT_THREAD_FILTERS, fbChatConfigProblem,
+  type FbChatDeviceAnswer, type FbChatDeviceApproval, type FbChatMessagesAnswer, type FbChatReplyAnswer,
+  type FbChatTelegramStatus, type FbChatThreadFilter, type FbChatThreadsAnswer,
+} from '@recycle-erp/shared';
+import {
+  FbChatPushError, fbChatConfigValueProblem, parseBuyerPush, parseClaim, parseConfigRequest, parseEnrollRequest,
+  parseEventPush, parseSendResult, parseSyncPush,
 } from '../lib/fbChat';
+import { clientIp } from '../lib/clientIp';
 import { allLimited } from '../lib/concurrency';
-import { log } from '../lib/log';
+import { addLogContext, log } from '../lib/log';
 import { armWake, holdsDraining, listening } from '../lib/pgWake';
 import { requireManager } from '../lib/role';
 import { bearerGuard } from '../oauth/guard';
 import {
-  claimReply, FB_CHAT_OUTBOX_CHANNEL, ingestBuyer, ingestSync, recordEvent, recordSendResult, touchAccount,
+  claimReply, FB_CHAT_OUTBOX_CHANNEL, FbChatAccountTaken, ingestBuyer, ingestSync, recordEvent, recordSendResult, touchAccount,
 } from '../services/fbChat';
 import { configFor, knownFields, notePickup, reportFields, setConfig } from '../services/fbChatConfig';
+import {
+  approveDevice, decideDevice, deleteDevice, deviceForBearer, enrollDevice, helloDevice, isDeviceBearer, listDevices, touchDevice,
+  type DeviceDecision, type DeviceRow,
+} from '../services/fbChatDevices';
+import {
+  alsoMessaged, listAccounts, listMessages, listThreads, markThread, queueErpReply, renameAccount, retryReply, summary,
+  topicCount, type ThreadQuery,
+} from '../services/fbChatPage';
 import { fbChatTelegramConfigured, kickFbChatTelegram } from '../services/fbChatTelegram';
 import type { Env, OAuthCtx, User } from '../types';
 
 // ─── Facebook chat hub ────────────────────────────────────────────────────────
 // The owner's Chrome extensions, one per browser profile and Facebook account,
-// push their Marketplace conversations here with a fbchat:write service token
-// and claim the replies typed in Telegram. The backend owns the one bot, so
-// any number of extensions share one group. Self-applies its auth (oauthAdmin
-// pattern): Bearer on /push/*, the session cookie and a manager gate on the
-// reads.
+// push their Marketplace conversations here and claim the replies typed in
+// Telegram or on the ERP's Leads ▸ Facebook page. The backend owns the one
+// bot, so any number of extensions share one group. Self-applies its auth (oauthAdmin pattern): on /push/* a device
+// bearer a manager approved, or a fbchat:write service token from extensions
+// set up before enrollment existed; /enroll is open; the session cookie and a
+// manager gate on everything else.
 
-type Vars = { user: User; oauthCtx: OAuthCtx };
+type Vars = { user: User; oauthCtx: OAuthCtx; device: DeviceRow | null };
 
 const PUSH_PREFIX = '/api/fb-chat/push/';
+const ENROLL_PATH = '/api/fb-chat/enroll';
 const isPush = (path: string) => path.startsWith(PUSH_PREFIX);
 // A held claim wakes on a NOTIFY (services/fbChat.ts → notifyOutbox) from any
 // instance. It also looks again this often, in case a write that freed a reply
@@ -36,11 +51,39 @@ const isPush = (path: string) => path.startsWith(PUSH_PREFIX);
 const HOLD_RECHECK_MS = 5_000;
 
 const asVars = (mw: unknown) => mw as MiddlewareHandler<{ Bindings: Env; Variables: Vars }>;
-const pushGuard = asVars(bearerGuard({ scopes: ['fbchat:write'] }));
+const oauthPushGuard = asVars(bearerGuard({ scopes: ['fbchat:write'] }));
+
+// A device may only ask about itself until it is approved, so the extension
+// can show its pairing code and learn when to start.
+const pushGuard: MiddlewareHandler<{ Bindings: Env; Variables: Vars }> = async (c, next) => {
+  const header = c.req.header('authorization');
+  if (!isDeviceBearer(header)) {
+    c.set('device', null);
+    return oauthPushGuard(c, next);
+  }
+  const sql = getDb(c.env);
+  const device = await deviceForBearer(sql, header!);
+  if (!device) return c.json({ error: 'invalid_token' }, 401);
+  if (device.status !== 'approved' && c.req.path !== `${PUSH_PREFIX}device`) {
+    return c.json({ error: device.status === 'pending' ? 'device_pending' : 'device_rejected' }, 403);
+  }
+  if (device.status === 'approved') await touchDevice(sql, device.id);
+  c.set('device', device);
+  c.set('oauthCtx', { clientId: `device:${device.id}`, userId: null, scopes: ['fbchat:write'], jti: '' });
+  addLogContext({ oauthClientId: `device:${device.id}` });
+  return next();
+};
 
 const fbChat = new Hono<{ Bindings: Env; Variables: Vars }>()
-  .use('*', (c, next) => (isPush(c.req.path) ? pushGuard(c, next) : asVars(authMiddleware)(c, next)))
-  .use('*', (c, next) => (isPush(c.req.path) ? next() : asVars(requireManager)(c, next)));
+  .use('*', (c, next) => {
+    if (c.req.path === ENROLL_PATH) return next();
+    return isPush(c.req.path) ? pushGuard(c, next) : asVars(authMiddleware)(c, next);
+  })
+  .use('*', (c, next) => (isPush(c.req.path) || c.req.path === ENROLL_PATH ? next() : asVars(requireManager)(c, next)))
+  .onError((err, c) => {
+    if (err instanceof FbChatAccountTaken) return c.json({ error: 'conflict', detail: err.message }, 409);
+    throw err;
+  });
 
 /** Parses the body, or answers 400 with the reason. */
 async function parsed<T>(c: { req: { json: () => Promise<unknown> } }, parse: (v: unknown) => T): Promise<T | string> {
@@ -52,6 +95,36 @@ async function parsed<T>(c: { req: { json: () => Promise<unknown> } }, parse: (v
   }
 }
 const invalid = (detail: string) => ({ error: 'invalid_request', detail });
+
+// ── Enrollment ────────────────────────────────────────────────────────────────
+
+// Open to anyone, like the website's intake forms: an extension has nothing
+// to authenticate with yet. What it gets is a pending device that can do
+// nothing until a manager approves it.
+fbChat.post('/enroll', async (c) => {
+  const info = parseEnrollRequest(await c.req.json().catch(() => null));
+  const ip = clientIp((n) => c.req.header(n));
+  const outcome = await enrollDevice(getDb(c.env), info, {
+    ip: ip.full, ipKey: ip.key, userAgent: c.req.header('user-agent')?.slice(0, 300) ?? null,
+  });
+  if (outcome === 'ip_limit' || outcome === 'pending_limit') {
+    c.header('Retry-After', '3600');
+    return c.json({ error: 'too_many_requests', detail: outcome }, 429);
+  }
+  log.info('fb chat device enrolled', { module: 'fbChat', deviceId: outcome.deviceId, label: info.label });
+  return c.json(outcome);
+});
+
+// The extension's hello: while pending, every half minute or so; once
+// approved, now and then. Answers what it may do.
+fbChat.post('/push/device', async (c) => {
+  const device = c.var.device;
+  if (!device) return c.json({ error: 'not_a_device' }, 400);
+  const info = parseEnrollRequest(await c.req.json().catch(() => null));
+  await helloDevice(getDb(c.env), device.id, info);
+  const answer: FbChatDeviceAnswer = { deviceId: device.id, code: device.code, status: device.status };
+  return c.json(answer);
+});
 
 // ── Push ──────────────────────────────────────────────────────────────────────
 
@@ -140,36 +213,167 @@ fbChat.post('/push/config', async (c) => {
 // whether replies can arrive at all.
 fbChat.get('/push/status', (c) => c.json({ ok: true, telegram: fbChatTelegramConfigured(c.env) }));
 
-// ── Reads (manager) ───────────────────────────────────────────────────────────
+// ── The page (manager) ────────────────────────────────────────────────────────
 
-fbChat.get('/accounts', async (c) => {
-  const rows = await getDb(c.env)`
-    SELECT a.id::int AS id, a.fb_uid, a.label, a.ext_version, a.restricted, a.restricted_at, a.last_seen_at,
-           (SELECT COUNT(*)::int FROM fb_chat_threads t WHERE t.account_id = a.id) AS threads
-      FROM fb_chat_accounts a ORDER BY a.label, a.id`;
-  return c.json({ accounts: rows });
+/** A positive row id from a path or query, or null. */
+function rowId(v: string | undefined): number | null {
+  const id = Number(v);
+  return v !== undefined && /^\d+$/.test(v) && Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+// Polled by the sidebar every half minute: two counts and nothing else.
+fbChat.get('/summary', async (c) => c.json(await summary(getDb(c.env))));
+
+fbChat.get('/accounts', async (c) => c.json(await listAccounts(getDb(c.env))));
+
+fbChat.patch('/accounts/:id', async (c) => {
+  const id = rowId(c.req.param('id'));
+  if (id === null) return c.json({ error: 'not_found' }, 404);
+  const body = await c.req.json().catch(() => null) as { label?: unknown } | null;
+  const label = typeof body?.label === 'string' ? body.label.trim() : '';
+  if (!label || label.length > FB_CHAT_ACCOUNT_LABEL_MAX) {
+    return c.json(invalid(`label must be 1 to ${FB_CHAT_ACCOUNT_LABEL_MAX} characters`), 400);
+  }
+  if (!(await renameAccount(getDb(c.env), id, label))) return c.json({ error: 'not_found' }, 404);
+  log.info('fb chat account renamed', { module: 'fbChat', accountId: id });
+  return c.json({ ok: true });
 });
 
 fbChat.get('/threads', async (c) => {
-  const rows = await getDb(c.env)`
-    SELECT t.id::int AS id, t.fb_thread_id, a.label AS account, t.buyer_name, t.buyer_location,
-           b.rating::float8 AS rating, b.rating_count, b.joined_year,
-           t.listing_id, t.listing_title, t.telegram_topic_id, t.last_seq,
-           t.last_inbound_at, t.last_outbound_at, t.created_at
-      FROM fb_chat_threads t JOIN fb_chat_accounts a ON a.id = t.account_id
-      LEFT JOIN fb_chat_buyers b ON b.id = t.buyer_id
-     ORDER BY GREATEST(t.last_inbound_at, t.last_outbound_at, t.created_at) DESC LIMIT 500`;
-  return c.json({ threads: rows });
+  const query: ThreadQuery = {};
+  const account = c.req.query('account');
+  if (account) {
+    const id = rowId(account);
+    if (id === null) return c.json(invalid('account is not an id'), 400);
+    query.account = id;
+  }
+  const filter = c.req.query('filter');
+  if (filter) {
+    if (!FB_CHAT_THREAD_FILTERS.includes(filter as FbChatThreadFilter)) return c.json(invalid('unknown filter'), 400);
+    query.filter = filter as FbChatThreadFilter;
+  }
+  const q = c.req.query('q')?.trim().slice(0, 100);
+  if (q) query.q = q;
+  const answer: FbChatThreadsAnswer = { threads: await listThreads(getDb(c.env), c.env.FB_CHAT_TELEGRAM_CHAT_ID, query) };
+  return c.json(answer);
 });
 
+// Reading a conversation does not mark it read: the page says when it has
+// been looked at (/read), so a background refetch never clears the mark.
 fbChat.get('/threads/:id/messages', async (c) => {
-  const id = Number(c.req.param('id'));
-  if (!Number.isSafeInteger(id) || id <= 0) return c.json({ error: 'not_found' }, 404);
-  const rows = await getDb(c.env)`
-    SELECT id::int AS id, seq, direction, source, body, images, backfill, send_state, error, typing_ms,
-           tg_user_name, created_at, sent_at
-      FROM fb_chat_messages WHERE thread_id = ${id} ORDER BY seq NULLS LAST, id`;
-  return c.json({ messages: rows });
+  const id = rowId(c.req.param('id'));
+  if (id === null) return c.json({ error: 'not_found' }, 404);
+  const sql = getDb(c.env);
+  const [threads, messages, also] = await allLimited([
+    () => listThreads(sql, c.env.FB_CHAT_TELEGRAM_CHAT_ID, { id }),
+    () => listMessages(sql, { threadId: id }),
+    () => alsoMessaged(sql, id),
+  ]);
+  if (!threads[0]) return c.json({ error: 'not_found' }, 404);
+  const answer: FbChatMessagesAnswer = { thread: threads[0], messages, also_messaged: also };
+  return c.json(answer);
+});
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// A reply typed on the page. It is queued whatever state the account is in,
+// and goes out when its extension next claims.
+fbChat.post('/threads/:id/messages', async (c) => {
+  const id = rowId(c.req.param('id'));
+  if (id === null) return c.json({ error: 'not_found' }, 404);
+  const raw = await c.req.json().catch(() => null) as { body?: unknown; clientKey?: unknown } | null;
+  const body = typeof raw?.body === 'string' ? raw.body.trim() : '';
+  if (!body) return c.json(invalid('body is empty'), 400);
+  if (body.length > FB_CHAT_REPLY_MAX_CHARS) {
+    return c.json(invalid(`body is ${body.length} characters; the limit is ${FB_CHAT_REPLY_MAX_CHARS}`), 400);
+  }
+  const clientKey = raw?.clientKey ?? null;
+  if (clientKey !== null && (typeof clientKey !== 'string' || !UUID.test(clientKey))) {
+    return c.json(invalid('clientKey must be a UUID'), 400);
+  }
+  const sql = getDb(c.env);
+  const queued = await sql.begin((tx) => queueErpReply(tx, id, body, c.var.user.id, clientKey));
+  if (queued === null) return c.json({ error: 'not_found' }, 404);
+  const answer: FbChatReplyAnswer = { message: (await listMessages(sql, { messageId: queued.id }))[0]! };
+  // The same reply sent again: the one already queued is the answer.
+  if (!queued.created) return c.json(answer);
+  kickFbChatTelegram();
+  log.info('fb chat reply queued from the ERP', { module: 'fbChat', id: queued.id, threadId: id });
+  return c.json(answer, 201);
+});
+
+fbChat.post('/messages/:id/retry', async (c) => {
+  const id = rowId(c.req.param('id'));
+  if (id === null) return c.json({ error: 'not_found' }, 404);
+  const raw = await c.req.json().catch(() => null) as { force?: unknown } | null;
+  const sql = getDb(c.env);
+  const outcome = await sql.begin((tx) => retryReply(tx, id, raw?.force === true));
+  if (outcome === 'not_found') return c.json({ error: 'not_found' }, 404);
+  if (outcome === 'not_waiting') return c.json({ error: 'conflict', detail: 'this reply is not waiting for a retry' }, 409);
+  if (outcome === 'needs_force') {
+    return c.json({ error: 'conflict', detail: 'this reply may already be on Facebook; retry it with force to send it again' }, 409);
+  }
+  log.info('fb chat reply requeued', { module: 'fbChat', id });
+  const answer: FbChatReplyAnswer = { message: (await listMessages(sql, { messageId: id }))[0]! };
+  return c.json(answer);
+});
+
+for (const mark of ['read', 'unread'] as const) {
+  fbChat.post(`/threads/:id/${mark}`, async (c) => {
+    const id = rowId(c.req.param('id'));
+    if (id === null || !(await markThread(getDb(c.env), id, mark === 'read'))) return c.json({ error: 'not_found' }, 404);
+    return c.json({ ok: true });
+  });
+}
+
+fbChat.get('/telegram', async (c) => {
+  const answer: FbChatTelegramStatus = {
+    configured: fbChatTelegramConfigured(c.env), topics: await topicCount(getDb(c.env)),
+  };
+  return c.json(answer);
+});
+
+// ── Extensions (manager) ──────────────────────────────────────────────────────
+
+fbChat.get('/devices', async (c) => c.json({ devices: await listDevices(getDb(c.env)) }));
+
+const DECISIONS = new Set<DeviceDecision>(['approve', 'reject', 'revoke']);
+
+/** The name and pause chosen at approval. No body at all is an approval that chooses neither. */
+function parseApproval(v: unknown): FbChatDeviceApproval | string {
+  if (v === null) return {};
+  if (!isObj(v)) return 'body must be an object';
+  if (v.label !== undefined && typeof v.label !== 'string') return 'label must be text';
+  if (v.startPaused !== undefined && typeof v.startPaused !== 'boolean') return 'startPaused must be true or false';
+  const label = v.label?.trim() || undefined;
+  if (label && label.length > FB_CHAT_ACCOUNT_LABEL_MAX) return `label must be at most ${FB_CHAT_ACCOUNT_LABEL_MAX} characters`;
+  return { label, startPaused: v.startPaused };
+}
+
+fbChat.post('/devices/:id/:decision', async (c) => {
+  const decision = c.req.param('decision') as DeviceDecision;
+  if (!DECISIONS.has(decision)) return c.json({ error: 'not_found' }, 404);
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+  let done: boolean;
+  if (decision === 'approve') {
+    const approval = parseApproval(await c.req.json().catch(() => null));
+    if (typeof approval === 'string') return c.json(invalid(approval), 400);
+    done = await sql.begin((tx) => approveDevice(tx, id, approval, c.var.user.id));
+  } else {
+    done = await decideDevice(sql, id, decision, c.var.user.id);
+  }
+  if (!done) return c.json({ error: 'conflict', detail: `cannot ${decision} this extension now` }, 409);
+  log.info('fb chat device decided', { module: 'fbChat', deviceId: id, decision });
+  return c.json({ ok: true });
+});
+
+fbChat.delete('/devices/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!(await deleteDevice(getDb(c.env), id))) return c.json({ error: 'not_found' }, 404);
+  log.info('fb chat device deleted', { module: 'fbChat', deviceId: id });
+  return c.json({ ok: true });
 });
 
 // ── Settings (manager) ────────────────────────────────────────────────────────

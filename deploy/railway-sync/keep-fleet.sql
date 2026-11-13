@@ -13,6 +13,9 @@
 -- account names it as holder).
 -- Also perf_rollups: dev's timing is the evidence for dev's releases, and prod's
 -- rows would merge into it wherever both ran the same version.
+-- Also fb_chat_devices: the chat bridge extensions a manager approved on dev.
+-- Prod's copy would replace them, and each extension would wait for approval
+-- again every morning.
 CREATE SCHEMA sync_keep;
 CREATE TABLE sync_keep._migrations AS SELECT filename FROM public.schema_migrations;
 
@@ -39,7 +42,7 @@ BEGIN
     SELECT cl.relname FROM pg_catalog.pg_class cl
     JOIN pg_catalog.pg_namespace n ON n.oid = cl.relnamespace
     WHERE n.nspname = 'public' AND cl.relkind IN ('r', 'p')
-      AND (cl.relname LIKE 'fleet\_%' OR cl.relname = 'perf_rollups')
+      AND (cl.relname LIKE 'fleet\_%' OR cl.relname IN ('perf_rollups', 'fb_chat_devices'))
   LOOP
     EXECUTE pg_catalog.format('CREATE TABLE sync_keep.%I AS TABLE public.%I', t.relname, t.relname);
   END LOOP;

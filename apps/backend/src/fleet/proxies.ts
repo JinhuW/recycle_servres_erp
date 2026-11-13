@@ -59,6 +59,42 @@ export async function lastKnownExitIp(sql: SqlLike, proxyId: number): Promise<st
   return check?.exit_ip ?? null;
 }
 
+export type ExitLoad = { ip: string | null; n: number };
+
+/**
+ * What each listed proxy counts against max_accounts_per_proxy: the non-parked
+ * slots on every port that last exited from its IP, plus the homelab workers of
+ * the last round the console answered there. A site sees the IP, and ports can
+ * share one. A proxy with no known exit counts its own slots. `except` leaves
+ * one account out, for a move.
+ */
+export async function exitLoads(sql: SqlLike, except: number | null = null, only?: number): Promise<Map<number, ExitLoad>> {
+  // Every port's latest exit is needed to see which share an IP; the homelab
+  // count and the sums only for the one asked about, when one is.
+  const rows = await sql<{ id: number; ip: string | null; n: number }[]>`
+    WITH ports AS (
+      SELECT p.id, latest.exit_ip,
+             COUNT(s.account_no) FILTER (WHERE s.lease_expires_at IS DISTINCT FROM 'infinity'::timestamptz) AS n
+      FROM fleet_proxies p
+      LEFT JOIN LATERAL (${latestExitOf(sql, sql`p.id`)}) latest ON TRUE
+      LEFT JOIN fleet_slots s ON s.proxy_id = p.id AND s.account_no IS DISTINCT FROM ${except}::int
+      GROUP BY p.id, latest.exit_ip
+    ), homelab AS (
+      SELECT c.exit_ip, COUNT(DISTINCT w) AS n
+      FROM fleet_proxy_checks c JOIN fleet_proxy_rounds r ON c.checked_at = r.coordinator_at
+      CROSS JOIN LATERAL unnest(c.workers) w
+      WHERE c.source = 'coordinator' AND c.exit_ip IS NOT NULL
+        ${only === undefined ? sql`` : sql`AND c.exit_ip = (SELECT exit_ip FROM ports WHERE id = ${only})`}
+      GROUP BY c.exit_ip
+    )
+    SELECT p.id, p.exit_ip AS ip,
+           (CASE WHEN p.exit_ip IS NULL THEN p.n ELSE
+              (SELECT SUM(q.n) FROM ports q WHERE q.exit_ip = p.exit_ip)
+              + COALESCE((SELECT h.n FROM homelab h WHERE h.exit_ip = p.exit_ip), 0) END)::int AS n
+    FROM ports p ${only === undefined ? sql`` : sql`WHERE p.id = ${only}`}`;
+  return new Map(rows.map((r) => [r.id, { ip: r.ip, n: r.n }]));
+}
+
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /** Every proxy with the slots on it, oldest first. Never selects url_enc. */
@@ -74,12 +110,15 @@ export async function listProxies(sql: SqlLike, id?: number): Promise<FleetProxy
     WHERE s.proxy_id IS NOT NULL ${id === undefined ? sql`` : sql`AND s.proxy_id = ${id}`}
     ORDER BY s.account_no`;
   const exhausted = new Set(await exhaustedProxyIds(sql));
+  const loads = await exitLoads(sql, null, id);
   return rows.map((r) => ({
     id: r.id, label: r.label, host: r.host, port: r.port, timezone: r.timezone, note: r.note,
     created_at: r.created_at.toISOString(),
     slots: uses.filter((u) => u.proxy_id === r.id)
       .map(({ account_no, pool_status, parked, leased }) => ({ account_no, pool_status, parked, leased })),
     exhausted: exhausted.has(r.id),
+    exit_ip: loads.get(r.id)?.ip ?? null,
+    exit_load: loads.get(r.id)?.n ?? 0,
   }));
 }
 

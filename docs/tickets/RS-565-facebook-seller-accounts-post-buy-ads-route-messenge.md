@@ -2,7 +2,7 @@
 id: RS-565
 title: Facebook seller accounts post buy ads, route Messenger to an ERP message center, and an agent negotiates
 type: story
-status: in-progress
+status: wont-do
 priority: P2
 created: 2026-11-07
 reporter: jinhu
@@ -104,3 +104,5 @@ The plan is split for parallel agents in
 - The agent tells a seller who asks that it is Recycle Servers' automated
   assistant and hands off. It never claims to be a person, the stance already
   written in `rs_coordinator/autoreply.py`.
+
+- 2026-11-12: closed as won't do. The ERP side was removed in RS-581 (v1.454.0); the archive of its tables is in R2 at `recycle-db-backup/archive/fb-seller-archive-prod-20261112.sql.gz`.

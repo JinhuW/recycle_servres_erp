@@ -182,9 +182,9 @@ export function taskVisit(task: FleetTaskLog, names: ReadonlyMap<string, string>
   const releasedEvent = task.events.find(e => e.kind === 'released');
   return {
     worker_id: task.worker_id ?? handed?.worker_id ?? '',
-    item: task.item ?? '',
-    city: task.city ?? task.kind,
-    name: task.city ? names.get(task.city) ?? null : null,
+    item: task.item,
+    city: task.city,
+    name: names.get(task.city) ?? null,
     via: 'queue',
     why: str(handed?.detail?.why),
     outcome,
@@ -203,8 +203,8 @@ export function taskVisit(task: FleetTaskLog, names: ReadonlyMap<string, string>
 
 export function erpCityLog(d: FleetWorkerDetail): CityVisit[] {
   const names = new Map(d.cities.filter(c => c.name).map(c => [c.slug, c.name!]));
-  for (const e of d.events) if (e.city && e.city_name) names.set(e.city, e.city_name);
-  if (d.worker.task?.city && d.worker.task.city_name) names.set(d.worker.task.city, d.worker.task.city_name);
+  for (const e of d.events) if (e.city_name) names.set(e.city, e.city_name);
+  if (d.worker.task?.city_name) names.set(d.worker.task.city, d.worker.task.city_name);
   return d.log.map(t => taskVisit(t, names));
 }
 
