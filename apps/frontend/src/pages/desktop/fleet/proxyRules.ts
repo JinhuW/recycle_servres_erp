@@ -45,7 +45,8 @@ export function proxyChoices(
   const rank = (c: ProxyChoice) => (c.full ? 2 : c.down || c.exhausted ? 1 : 0);
   return proxies
     .map((proxy) => {
-      const load = proxyLoad(proxy);
+      // The limit is per exit IP, and other ports can exit from this one's.
+      const load = proxy.exit_load;
       const state = health.get(proxy.id) ?? 'unchecked';
       return { proxy, load, full: load >= limit, state, down: state === 'down', exhausted: proxy.exhausted };
     })

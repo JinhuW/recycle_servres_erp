@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Modal } from '../../../components/Modal';
 import { handleFetchError, showSuccessToast, showWarnToast } from '../../../lib/errorToast';
 import {
-  fleetApi, fleetDeviceFor, fleetErrorCode, type FleetPilotArm, type FleetProxy, type FleetProxyHealth, type FleetProxyHealthState, type FleetSlot, type FleetWorkerDetail,
+  fleetApi, fleetDeviceFor, fleetErrorCode, type FleetBrowserEngine, type FleetProxy, type FleetProxyHealth, type FleetProxyHealthState, type FleetSlot, type FleetWorkerDetail,
 } from '../../../lib/fleet';
 import { ApiError } from '../../../lib/api';
 import { useT } from '../../../lib/i18n';
@@ -144,10 +144,7 @@ type ProxyHealthMap = ReadonlyMap<number, FleetProxyHealthState>;
 
 // Stock sends nothing: an explicit stock engine would enroll the account, which
 // refuses a shared exit and pins it to stock once a worker has claimed it.
-export const addSlotEngine = (pilot: string, arm: FleetPilotArm | '', engine: FleetPilotArm) =>
-  pilot.trim()
-    ? (arm ? { pilot: pilot.trim(), arm } : {})
-    : (engine === 'cloak' ? { engine } : {});
+export const addSlotEngine = (engine: FleetBrowserEngine) => (engine === 'cloak' ? { engine } : {});
 
 export function AddToFleetDialog({ no, proxies, limit, health: given, onClose, onDone }: {
   no: number; proxies: FleetProxy[]; limit: number; health?: ProxyHealthMap; onClose: () => void; onDone: () => void;
@@ -167,36 +164,21 @@ export function AddToFleetDialog({ no, proxies, limit, health: given, onClose, o
   const choices = useMemo(() => proxyChoices(proxies, limit, health), [proxies, limit, health]);
   // null is "any proxy with room", drawn when the form is sent.
   const [proxyId, setProxyId] = useState<number | null>(null);
-  const [pilot, setPilot] = useState('');
-  // No default: the pair assignment decides, and a default is how a miss goes unseen.
-  const [arm, setArm] = useState<FleetPilotArm | ''>('');
-  // Outside a pilot nothing is being measured, so a default can't spoil a result.
-  const [engine, setEngine] = useState<FleetPilotArm>('cloak');
-  const [pilots, setPilots] = useState<string[]>([]);
-  useEffect(() => {
-    let live = true;
-    fleetApi.cohorts({ days: 30 }).then((r) => { if (live) setPilots(r.pilots); }).catch(() => {});
-    return () => { live = false; };
-  }, []);
+  const [engine, setEngine] = useState<FleetBrowserEngine>('cloak');
   const [busy, setBusy] = useState(false);
   const chosen = proxyId === null ? null : choices.find((c) => c.proxy.id === proxyId) ?? null;
   const roomLeft = choices.some((c) => !c.full);
-  // A pilot account or a CloakBrowser one goes through the measured-exit path,
-  // which refuses an exit another account uses, so a random draw skips those.
-  const measured = !!pilot.trim() || engine === 'cloak';
-  const drawable = measured ? choices.filter((c) => c.load === 0) : choices;
   const openLeft = choices.some(proxyOpen);
   // A pick a reload removed, filled or found down is not swapped for a random one.
   const pickGone = proxyId !== null && (!chosen || !proxyOpen(chosen));
-  const noSoloExit = proxyId === null && measured && !drawable.some(proxyOpen);
   const device = chosen ? deviceSummary(fleetDeviceFor(no, chosen.proxy.timezone)) : null;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const proxy = chosen ? chosen.proxy : randomOpenProxy(drawable);
+    const proxy = chosen ? chosen.proxy : randomOpenProxy(choices);
     if (busy || pickGone || !proxy) return;
     setBusy(true);
     try {
-      await fleetApi.addSlot({ account_no: no, proxy_id: proxy.id, ...addSlotEngine(pilot, arm, engine) });
+      await fleetApi.addSlot({ account_no: no, proxy_id: proxy.id, ...addSlotEngine(engine) });
       showSuccessToast(t('fpAddedToFleetToast', { n: no, proxy: proxy.label }));
       onDone();
     } catch (err) {
@@ -237,37 +219,20 @@ export function AddToFleetDialog({ no, proxies, limit, health: given, onClose, o
           )}
           {roomLeft && !openLeft && <p className="fp-warn">{t('fpAddToFleetAllDown')}</p>}
           {openLeft && pickGone && <p className="fp-warn">{t('fpAddToFleetPickGone')}</p>}
-          {openLeft && noSoloExit && <p className="fp-warn">{t('fpAddToFleetNoSoloExit')}</p>}
-          {device && <p className="fp-muted">{t(measured ? 'fpAddToFleetDevicePilot' : 'fpAddToFleetDevice', device)}</p>}
-          <label className="fleet-field">
-            <span>{t('fpAddToFleetPilot')}</span>
-            <input className="input" list="fleet-pilots" value={pilot} maxLength={64} disabled={busy} placeholder={t('fpAddToFleetPilotHint')}
-              onChange={(e) => setPilot(e.target.value)} />
-            <datalist id="fleet-pilots">{pilots.map((p) => <option key={p} value={p} />)}</datalist>
-          </label>
-          {roomLeft && !pilot.trim() && (
+          {device && <p className="fp-muted">{t(engine === 'cloak' ? 'fpAddToFleetDevicePilot' : 'fpAddToFleetDevice', device)}</p>}
+          {roomLeft && (
             <label className="fleet-field">
               <span>{t('fpAddToFleetEngine')}</span>
-              <select className="input" value={engine} disabled={busy} onChange={(e) => setEngine(e.target.value as FleetPilotArm)}>
+              <select className="input" value={engine} disabled={busy} onChange={(e) => setEngine(e.target.value as FleetBrowserEngine)}>
                 <option value="cloak">{t('fpAddToFleetArmCloak')}</option>
                 <option value="stock">{t('fpAddToFleetArmStock')}</option>
-              </select>
-            </label>
-          )}
-          {pilot.trim() && (
-            <label className="fleet-field">
-              <span>{t('fpAddToFleetArm')}</span>
-              <select className="input" value={arm} disabled={busy} onChange={(e) => setArm(e.target.value as FleetPilotArm)}>
-                <option value="" disabled>{t('fpAddToFleetArmPick')}</option>
-                <option value="stock">{t('fpAddToFleetArmStock')}</option>
-                <option value="cloak">{t('fpAddToFleetArmCloak')}</option>
               </select>
             </label>
           )}
         </div>
         <div className="modal-foot">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>{t('cancel')}</button>
-          <button type="submit" className="btn primary" disabled={busy || !openLeft || pickGone || noSoloExit || (!!pilot.trim() && !arm)}>{t('fpAddToFleetConfirm')}</button>
+          <button type="submit" className="btn primary" disabled={busy || !openLeft || pickGone}>{t('fpAddToFleetConfirm')}</button>
         </div>
       </form>
     </Modal>

@@ -3810,7 +3810,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   proxy whose last health checks read down is disabled with "down", the
   random pick prefers one that is up and never takes a down one, and the
   backend refuses a down proxy with `proxy_down`; since v1.414.1, RS-517, both go by the last 24 hours of checks only, and a proxy's new URL starts unchecked; two accounts per proxy by default, the
-  `Accounts per proxy` rule in Cities ▸ Rules; there are no home cities to
+  `Accounts per proxy` rule in Cities ▸ Rules, counted per exit IP since v1.457.0, RS-584: the non-parked accounts on every port that last exited from the proxy's IP, plus the homelab workers there, and a proxy with no known exit counts its own; there are no home cities to
   pick since v1.374.0, RS-439), and the ERP makes the slot with a desktop browser made
   for the account (Chromium's own user agent, a common screen and scale
   picked from the account number, the proxy's timezone). The account turns
@@ -4015,29 +4015,28 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     machines. A proxy timezone edit,
     or Change proxy, leaves that timezone alone and only moves accounts with no
     profile. **Add to fleet** has a Browser choice (v1.431.0, RS-555): CloakBrowser,
-    the default, which starts a new account on a seat and an exit of its own with no
-    pilot, or Stock Chromium, which can share an exit. It can also name a pilot and an arm, which enrolls
+    the default, which starts a new account on a seat of its own, or Stock Chromium.
+    Since v1.457.0 (RS-584) the dialog has no Pilot field, and either browser can
+    share an exit IP up to the `Accounts per proxy` limit. The API can still name a pilot and an arm, which enrolls
     the account in one step: `POST /api/fleet/slots` writes the enrollment
     (`fleet_pilot_enrollments`, which outlives the slot and the account), the
     profile, the proxy and the slot in one transaction, so no worker can claim a
     half-set slot. An enrolled account with no pinned clock takes its timezone
     from the measured exit, not the proxy's typed one, and enrollment is refused
-    if the fresh measurement names none (v1.422.0, RS-538). Enrollment refuses an exit IP that another slot, an active
-    enrollment or a homelab worker already uses, comparing measured IPs across
-    ports, and refuses a proxy whose latest measurement failed or is over 15
-    minutes old. A normal add or Change proxy is also refused when
-    it would land on an exit IP a pilot account holds. With CloakBrowser off, existing cloak accounts keep claiming
+    if the fresh measurement names none (v1.422.0, RS-538). Enrollment refuses a proxy whose latest measurement failed or is over 15
+    minutes old. Until v1.457.0 it also refused an exit IP that another slot, an
+    active enrollment or a homelab worker used, and a normal add or Change proxy
+    was refused on a pilot account's exit IP; the per-IP limit replaced both. With CloakBrowser off, existing cloak accounts keep claiming
     and keep their licence; only new ones stop. A CloakBrowser claim also says
     which exit IP to expect (`expected_exit_ip`, `webrtc_ip`): the last one
     seen, however old, since v1.424.3 (RS-543). A cloak slot, or a pilot account
     not yet logged in, whose listed proxy has no reading at all, as after a URL
     edit, waits for the next round and isn't counted when the host sizes its
     workers. A pilot's first login is held until its first Facebook page, not its
-    first claim, and also when the exit's zone moves or another slot lands on the
-    same exit; a re-add or Change proxy re-records the exit and its clock. A seed
+    first claim, and also when the exit's zone moves (another slot on the same exit
+    holds nothing since v1.457.0); a re-add or Change proxy re-records the exit and its clock. A seed
     another account holds is drawn again. A pool account with a profile or a pilot
-    record refuses a new UID. Add to fleet offers known pilots and makes the arm an
-    explicit choice, and a remove and re-add can correct either before the first
+    record refuses a new UID. A remove and re-add can correct a pilot or arm before the first
     claim (v1.425.0). A refusal from
     `POST /api/fleet/slots/:no/engine` reads as a sentence: a live session,
     CloakBrowser off, every seat taken, or switched before. A CloakBrowser

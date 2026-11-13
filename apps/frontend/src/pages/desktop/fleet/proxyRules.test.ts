@@ -50,7 +50,11 @@ describe('exitIpUsers', () => {
 });
 
 describe('proxyChoices', () => {
-  it('counts the non-parked slots, marks the full ones and lists the emptiest first', () => {
+  it('takes the load of the exit IP, not of the port', () => {
+    const shared = PROXIES.map((p) => (p.id === 3 ? { ...p, exit_ip: '192.0.2.10', exit_load: 2 } : p));
+    expect(proxyChoices(shared, 2).find((x) => x.proxy.id === 3)).toMatchObject({ load: 2, full: true });
+  });
+  it('marks the full ones and lists the emptiest first', () => {
     const c = proxyChoices(PROXIES, 2);
     expect(c.map((x) => [x.proxy.id, x.load, x.full])).toEqual([[3, 0, false], [2, 0, false], [1, 2, true]]);
     expect(proxyChoices(PROXIES, 3).find((x) => x.proxy.id === 1)!.full).toBe(false);
