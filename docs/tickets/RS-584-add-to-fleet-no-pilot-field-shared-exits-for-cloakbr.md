@@ -2,13 +2,13 @@
 id: RS-584
 title: Add to fleet: no pilot field, shared exits for CloakBrowser, limit per exit IP
 type: story
-status: backlog
+status: done
 priority: P2
 created: 2026-11-12
 reporter: jinhu
 branch: session/20261112-234354
-pr:
-version:
+pr: 1196
+version: 1.457.0
 related: []
 ---
 
