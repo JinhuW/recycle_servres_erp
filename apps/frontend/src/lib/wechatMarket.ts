@@ -12,7 +12,9 @@ import type {
   WechatRerun,
   WechatRow,
   WechatRowKind,
+  WechatSettings,
   WechatSide,
+  WechatWarningAck,
 } from '@recycle-erp/shared';
 import { api } from './api';
 import { matchesTerms, queryTerms } from './fleetView';
@@ -35,6 +37,12 @@ export const wechatApi = {
     api.post<{ rerun: WechatRerun }>(`/api/wechat-market/days/${q(date)}/rerun`, {}).then(r => r.rerun),
   rerunStatus: (date: string) =>
     api.get<{ rerun: WechatRerun | null }>(`/api/wechat-market/days/${q(date)}/rerun`).then(r => r.rerun),
+  ackWarning: (date: string, warning: string, acked: boolean) =>
+    api.put<{ warningAcks: WechatWarningAck[] }>(`/api/wechat-market/days/${q(date)}/warning-acks`, { warning, acked })
+      .then(r => r.warningAcks),
+  settings: () => api.get<WechatSettings>('/api/wechat-market/settings'),
+  saveSettings: (summaryPrompt: string | null) =>
+    api.put<WechatSettings>('/api/wechat-market/settings', { summaryPrompt }),
 };
 
 export const rerunOpen = (r: WechatRerun | null): boolean => r?.status === 'queued' || r?.status === 'running';

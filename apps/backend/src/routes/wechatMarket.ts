@@ -1,5 +1,6 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import {
+  WECHAT_PROMPT_MAX,
   WECHAT_RERUN_STALE_MS,
   isWechatRowKind,
   type WechatDay,
@@ -12,6 +13,9 @@ import {
   type WechatRerun,
   type WechatRow,
   type WechatRowKind,
+  type WechatSettings,
+  type WechatSettingsPulled,
+  type WechatWarningAck,
 } from '@recycle-erp/shared';
 import { authMiddleware } from '../auth';
 import { getDb } from '../db';
@@ -325,6 +329,112 @@ wechat.get('/days/:date/rerun', async (c) => {
   return c.json({ rerun: await latestRerun(getDb(c.env), date) });
 });
 
+// ── Settings ──────────────────────────────────────────────────────────────────
+
+const SUMMARY_PROMPT = 'summary_prompt';
+const SUMMARY_PROMPT_DEFAULT = 'summary_prompt_default';
+
+async function readSettings(sql: ReturnType<typeof getDb>): Promise<WechatSettings> {
+  const rows = await sql<{ key: string; value: string; by: string | null; at: Date }[]>`
+    SELECT s.key, s.value, u.name AS by, s.updated_at AS at
+      FROM wechat_market_settings s LEFT JOIN users u ON u.id = s.updated_by
+  `;
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  const set = byKey.get(SUMMARY_PROMPT);
+  return {
+    summaryPrompt: {
+      value: set?.value ?? null,
+      default: byKey.get(SUMMARY_PROMPT_DEFAULT)?.value ?? null,
+      updatedBy: set?.by ?? null,
+      updatedAt: set?.at.toISOString() ?? null,
+    },
+  };
+}
+
+// memtrade asks before it writes a day, sending its built-in prompts so the
+// page can show what an empty setting falls back to.
+wechat.post('/push/settings', async (c) => {
+  const body = await c.req.json().catch(() => null) as { defaults?: { summaryPrompt?: unknown } } | null;
+  const dflt = body?.defaults?.summaryPrompt;
+  if (dflt !== undefined && (typeof dflt !== 'string' || dflt.length > WECHAT_PROMPT_MAX)) {
+    return c.json({ error: 'invalid_request', detail: 'defaults.summaryPrompt' }, 400);
+  }
+  const sql = getDb(c.env);
+  if (typeof dflt === 'string' && dflt.trim()) {
+    await sql`
+      INSERT INTO wechat_market_settings (key, value) VALUES (${SUMMARY_PROMPT_DEFAULT}, ${dflt})
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+        WHERE wechat_market_settings.value IS DISTINCT FROM EXCLUDED.value
+    `;
+  }
+  const out: WechatSettingsPulled = { summaryPrompt: (await readSettings(sql)).summaryPrompt.value };
+  return c.json(out);
+});
+
+wechat.get('/settings', async (c) => c.json(await readSettings(getDb(c.env))));
+
+// `{ summaryPrompt }`: the text to use, or null (or blank) for memtrade's own.
+wechat.put('/settings', async (c) => {
+  const body = await c.req.json().catch(() => null) as { summaryPrompt?: unknown } | null;
+  const v = body?.summaryPrompt;
+  if (v !== null && typeof v !== 'string') {
+    return c.json({ error: 'invalid_request', detail: 'expected { summaryPrompt: string | null }' }, 400);
+  }
+  if (typeof v === 'string' && v.length > WECHAT_PROMPT_MAX) {
+    return c.json({ error: 'invalid_request', detail: `summaryPrompt is over ${WECHAT_PROMPT_MAX} characters` }, 400);
+  }
+  const sql = getDb(c.env);
+  if (v === null || !v.trim()) {
+    await sql`DELETE FROM wechat_market_settings WHERE key = ${SUMMARY_PROMPT}`;
+  } else {
+    await sql`
+      INSERT INTO wechat_market_settings (key, value, updated_by) VALUES (${SUMMARY_PROMPT}, ${v}, ${c.var.user.id})
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+    `;
+  }
+  log.info('wechat market settings updated', { module: 'wechatMarket', summaryPrompt: v?.trim() ? 'custom' : 'default' });
+  return c.json(await readSettings(sql));
+});
+
+// ── Warning acknowledgements ──────────────────────────────────────────────────
+
+async function warningAcks(sql: ReturnType<typeof getDb>, date: string): Promise<WechatWarningAck[]> {
+  const rows = await sql<{ warning: string; by: string | null; at: Date }[]>`
+    SELECT a.warning, u.name AS by, a.acked_at AS at
+      FROM wechat_market_warning_acks a LEFT JOIN users u ON u.id = a.acked_by
+     WHERE a.report_date = ${date}
+     ORDER BY a.acked_at
+  `;
+  return rows.map((r) => ({ warning: r.warning, by: r.by, at: r.at.toISOString() }));
+}
+
+// `{ warning, acked }`: only a warning the day carries now can be acknowledged.
+wechat.put('/days/:date/warning-acks', async (c) => {
+  const date = c.req.param('date');
+  const bad = badDate(date);
+  if (bad) return c.json(bad, 400);
+  const body = await c.req.json().catch(() => null) as { warning?: unknown; acked?: unknown } | null;
+  if (typeof body?.warning !== 'string' || typeof body.acked !== 'boolean') {
+    return c.json({ error: 'invalid_request', detail: 'expected { warning: string, acked: boolean }' }, 400);
+  }
+  const sql = getDb(c.env);
+  const [day] = await sql<{ warnings: string[] }[]>`
+    SELECT warnings FROM wechat_market_days WHERE report_date = ${date}
+  `;
+  if (!day) return c.json({ error: 'not_found' }, 404);
+  if (body.acked) {
+    if (!day.warnings.includes(body.warning)) return c.json({ error: 'unknown_warning' }, 404);
+    await sql`
+      INSERT INTO wechat_market_warning_acks (report_date, warning, acked_by)
+      VALUES (${date}, ${body.warning}, ${c.var.user.id})
+      ON CONFLICT (report_date, warning) DO NOTHING
+    `;
+  } else {
+    await sql`DELETE FROM wechat_market_warning_acks WHERE report_date = ${date} AND warning = ${body.warning}`;
+  }
+  return c.json({ warningAcks: await warningAcks(sql, date) });
+});
+
 // ── Read ──────────────────────────────────────────────────────────────────────
 
 type DayRow = {
@@ -414,7 +524,7 @@ wechat.get('/days/:date', async (c) => {
       FROM wechat_market_days d WHERE d.report_date = ${date}
   `;
   if (!day) return c.json({ error: 'not_found' }, 404);
-  const [groups, lines, rerun] = await Promise.all([
+  const [groups, lines, rerun, acks] = await Promise.all([
     sql<{ id: string; name: string; messages: number; candidates: number; first_seen: Date | null }[]>`
       SELECT group_id AS id, name, messages, candidates, first_seen
         FROM wechat_market_groups WHERE report_date = ${date}
@@ -429,6 +539,7 @@ wechat.get('/days/:date', async (c) => {
        ORDER BY r.buy_senders + r.sell_senders DESC, r.row_key
     `,
     latestRerun(sql, date),
+    warningAcks(sql, date),
   ]);
   const out: WechatDay = {
     ...daySummary(day),
@@ -441,6 +552,8 @@ wechat.get('/days/:date', async (c) => {
     prevDate: day.prev_date,
     nextDate: day.next_date,
     rerun,
+    // A re-run may have dropped or reworded a warning; its old ack stays out.
+    warningAcks: acks.filter((a) => day.warnings.includes(a.warning)),
   };
   const rows: WechatRow[] = lines.map((r) => ({
     kind: r.kind,
