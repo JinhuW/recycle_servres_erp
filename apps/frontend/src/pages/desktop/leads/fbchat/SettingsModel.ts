@@ -152,3 +152,24 @@ export function parseDraft(field: FbChatConfigField, text: string): { value: unk
   }
   return { value: text };
 }
+
+export type RangeDraft = { lo: string; hi: string };
+
+/**
+ * What leaving the range row saves: both ends as typed, read together, so
+ * "60, Tab, 120" over 20–40 is one edit to 60–120 and never passes through
+ * 60–60. An error when either end does not parse or fit its field.
+ */
+export function rangeCommit(
+  current: Range, draft: RangeDraft, lo: FbChatKnownConfigField, hi: FbChatKnownConfigField,
+): { error: SettingMessage } | { next: Range; writes: { key: string; value: number }[] } {
+  const typedLo = parseDraft(lo, draft.lo);
+  if ('error' in typedLo) return { error: typedLo.error };
+  const typedHi = parseDraft(hi, draft.hi);
+  if ('error' in typedHi) return { error: typedHi.error };
+  const next = rangeAfter(current, { lo: typedLo.value as number, hi: typedHi.value as number });
+  // Both ends are checked: raising the longest to meet the shortest can carry
+  // it past its own limit.
+  const problem = settingProblem(lo, next.lo) ?? settingProblem(hi, next.hi);
+  return problem ? { error: problem } : { next, writes: rangeWrites(current, next) };
+}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FbChatConfigEntry, FbChatKnownConfigField } from '@recycle-erp/shared';
 import {
   accountsThatDiffer, draftOf, groupSettings, hasOwnValue, itemKeys, orphanEntries, parseDraft, rangeAfter,
-  rangeWrites, settingProblem,
+  rangeCommit, rangeWrites, settingProblem,
 } from './SettingsModel';
 
 const int = (key: string, def: number, min: number, max: number): FbChatKnownConfigField =>
@@ -90,6 +90,23 @@ describe('the inbox refresh range', () => {
   it('holds the longest at the shortest when it is typed lower', () => {
     expect(rangeAfter(now, { hi: 5 })).toEqual({ lo: 20, hi: 20 });
     expect(rangeWrites({ lo: 20, hi: 20 }, rangeAfter({ lo: 20, hi: 20 }, { hi: 5 }))).toEqual([]);
+  });
+
+  it('reads both ends together when the row is left: 60, Tab, 120 is one edit', () => {
+    expect(rangeCommit(now, { lo: '60', hi: '120' }, LO, HI)).toEqual({
+      next: { lo: 60, hi: 120 },
+      writes: [{ key: 'inboxRefreshMinSec', value: 60 }, { key: 'inboxRefreshMaxSec', value: 120 }],
+    });
+    // One end alone still writes only itself, and a shortest above the longest lifts it.
+    expect(rangeCommit(now, { lo: '30', hi: '40' }, LO, HI)).toMatchObject({ writes: [{ key: 'inboxRefreshMinSec', value: 30 }] });
+    expect(rangeCommit(now, { lo: '60', hi: '40' }, LO, HI)).toMatchObject({ next: { lo: 60, hi: 60 } });
+    expect(rangeCommit(now, { lo: '20', hi: '40' }, LO, HI)).toMatchObject({ writes: [] });
+  });
+
+  it('saves nothing when either end does not parse or fit', () => {
+    expect(rangeCommit(now, { lo: '', hi: '120' }, LO, HI)).toHaveProperty('error');
+    expect(rangeCommit(now, { lo: '60', hi: '99999' }, LO, HI)).toHaveProperty('error');
+    expect(rangeCommit(now, { lo: '5', hi: '40' }, LO, HI)).toHaveProperty('error');
   });
 
   it('writes only the end that changed', () => {

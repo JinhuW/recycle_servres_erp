@@ -208,10 +208,13 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
     await addEvent(tx, acct.id, threadId, 'sync_gap', { stored: stored.length, rows: t.rows.length });
   }
 
-  // Replies of ours that have not been placed in the conversation yet.
+  // Replies of ours that have not been placed in the conversation yet. One
+  // put back in the outbox after an attempt counts: that attempt may have
+  // landed, and finding its bubble here is what stops it being typed again.
   const pending = await tx<{ id: number; body: string; send_state: string }[]>`
     SELECT id::int AS id, body, send_state FROM fb_chat_messages
-     WHERE thread_id = ${threadId} AND seq IS NULL AND send_state IN ('sending','sent','uncertain')
+     WHERE thread_id = ${threadId} AND seq IS NULL
+       AND (send_state IN ('sending','sent','uncertain') OR (send_state = 'queued' AND attempts > 0))
      ORDER BY id`;
   let seq = thread!.last_seq;
   let added = 0;
@@ -319,7 +322,10 @@ export async function recordSendResult(tx: Tx, id: number, r: FbChatSendResult, 
   if (!m) return 'not_found';
   // A sync may already have found the bubble and settled it; that stands.
   if (m.send_state === 'sent' && m.seq !== null) return 'ok';
-  if (m.send_state !== 'sending') return 'not_sending';
+  // A retried reply is queued again, and the browser's late word that the
+  // earlier attempt did land settles it before it is typed a second time.
+  const requeued = m.send_state === 'queued' && m.attempts > 0 && r.outcome === 'sent';
+  if (m.send_state !== 'sending' && !requeued) return 'not_sending';
   if (r.outcome === 'sent') {
     const [t] = await tx<{ last_seq: number }[]>`
       UPDATE fb_chat_threads SET

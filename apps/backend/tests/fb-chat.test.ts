@@ -776,11 +776,107 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
       expect((await stateOf(id)).send_state).toBe('uncertain');
       expect((await push('outbox/claim', { account: ACCOUNT })).status).toBe(204);
 
+      await tick();
+      calls.length = 0;
       expect((await post(`messages/${id}/retry`, { force: true })).status).toBe(200);
       expect((await send('sent')).id).toBe(id);
       expect(await stateOf(id)).toMatchObject({ send_state: 'sent', seq: 2, attempts: 3 });
       // Sent replies are final.
       expect((await post(`messages/${id}/retry`, { force: true })).status).toBe(409);
+      // The topic was told it failed, so it is told it landed, once.
+      await tick();
+      expect(texts()).toEqual(["✅ Alex's reply from the ERP was sent to Facebook after all."]);
+      expect(sent('sendMessage')[0]!.params).toMatchObject({ message_thread_id: 1 });
+      calls.length = 0;
+      await tick();
+      expect(texts()).toEqual([]);
+    });
+
+    it('queues a reply once when the page sends it again with the same key', async () => {
+      await seeded();
+      const t = await thread();
+      const clientKey = '3f2b8c1e-5a44-4c0e-9d7a-0b1c2d3e4f50';
+      const send1 = await post<FbChatReplyAnswer>(`threads/${t.id}/messages`, { body: 'We can do $38 each.', clientKey });
+      expect(send1.status).toBe(201);
+      // The answer was lost; the page restored the text and the manager pressed Enter again.
+      const send2 = await post<FbChatReplyAnswer>(`threads/${t.id}/messages`, { body: 'We can do $38 each.', clientKey });
+      expect(send2.status).toBe(200);
+      expect(send2.body.message.id).toBe(send1.body.message.id);
+      expect(await getTestDb()`SELECT 1 FROM fb_chat_messages WHERE source = 'erp'`).toHaveLength(1);
+      await send('sent');
+      expect((await push('outbox/claim', { account: ACCOUNT })).status).toBe(204);
+      // The same key still answers with that reply once it has gone out.
+      const late = await post<FbChatReplyAnswer>(`threads/${t.id}/messages`, { body: 'We can do $38 each.', clientKey });
+      expect(late.body.message).toMatchObject({ id: send1.body.message.id, send_state: 'sent' });
+
+      // Another key, or none, is another reply; a key that is not a UUID is refused.
+      expect((await post(`threads/${t.id}/messages`, { body: 'We can do $38 each.', clientKey: clientKey.replace('3f', '4f') })).status).toBe(201);
+      expect((await reply(t.id, 'We can do $38 each.')).status).toBe(201);
+      expect((await reply(t.id, 'We can do $38 each.')).status).toBe(201);
+      expect((await post(`threads/${t.id}/messages`, { body: 'hi', clientKey: 'again' })).status).toBe(400);
+      expect(await getTestDb()`SELECT 1 FROM fb_chat_messages WHERE source = 'erp'`).toHaveLength(4);
+    });
+
+    it('does not send a retried reply again once a window shows it already landed', async () => {
+      await seeded();
+      const t = await thread();
+      const { id } = (await reply(t.id, 'Yes, still available')).body.message;
+      await send('uncertain');
+      await tick();
+      calls.length = 0;
+      // The manager sends it again before the next window of the chat arrives.
+      expect((await post(`messages/${id}/retry`, { force: true })).status).toBe(200);
+      const window = await push<FbChatSyncAnswer>('sync', sync([row('in', 'Is this still available?'), row('out', 'Yes, still available')]));
+      expect(window.body.added).toBe(0);
+      expect(await stateOf(id)).toMatchObject({ send_state: 'sent', seq: 2, attempts: 1 });
+      expect((await push('outbox/claim', { account: ACCOUNT })).status).toBe(204);
+      // Not mirrored as a reply typed on Facebook; the topic hears it landed.
+      await tick();
+      expect(texts()).toEqual(["✅ Alex's reply from the ERP was sent to Facebook after all."]);
+    });
+
+    it('takes the browser\'s late word that a retried reply had landed', async () => {
+      await seeded();
+      const t = await thread();
+      const { id } = (await reply(t.id, 'Yes, still available')).body.message;
+      const claim = await push<FbChatClaimAnswer>('outbox/claim', { account: ACCOUNT });
+      expect(claim.body.id).toBe(id);
+      // The browser goes quiet: the next claim finds the send stale.
+      await getTestDb()`UPDATE fb_chat_messages SET claimed_at = NOW() - INTERVAL '1 hour' WHERE id = ${id}`;
+      expect((await push('outbox/claim', { account: ACCOUNT })).status).toBe(204);
+      expect((await stateOf(id)).send_state).toBe('uncertain');
+      expect((await post(`messages/${id}/retry`, { force: true })).status).toBe(200);
+
+      // A failure reported for a reply that is back in the queue is still refused.
+      expect((await push(`outbox/${id}/result`, { account: ACCOUNT, outcome: 'failed' })).status).toBe(409);
+      expect((await push(`outbox/${id}/result`, { account: ACCOUNT, outcome: 'sent' })).status).toBe(200);
+      expect(await stateOf(id)).toMatchObject({ send_state: 'sent', seq: 2, attempts: 1 });
+      expect((await push('outbox/claim', { account: ACCOUNT })).status).toBe(204);
+      expect((await thread()).failed).toBe(false);
+    });
+
+    it('lets the release before this one keep upserting accounts without a number', async () => {
+      const sql = getTestDb();
+      // What touchAccount ran on every push before the number existed.
+      const upsert = (fbUid: string, label: string) => sql<{ id: number }[]>`
+        INSERT INTO fb_chat_accounts (fb_uid, label, client_id, ext_version)
+        VALUES (${fbUid}, ${label}, 'svc', NULL)
+        ON CONFLICT (fb_uid) DO UPDATE SET
+          label = CASE WHEN EXCLUDED.label <> '' THEN EXCLUDED.label ELSE fb_chat_accounts.label END,
+          client_id = EXCLUDED.client_id,
+          ext_version = COALESCE(EXCLUDED.ext_version, fb_chat_accounts.ext_version),
+          last_seen_at = NOW()
+        RETURNING id::int AS id`;
+      await seeded();
+      // A known account, a new one, the new one again, and two new at once.
+      await upsert(ACCOUNT.fbUid, 'Denver renamed');
+      await upsert('100700', 'Old release');
+      await upsert('100700', 'Old release');
+      await Promise.all([upsert('100701', 'a'), upsert('100702', 'b')]);
+      await push('outbox/claim', { account: { fbUid: '100703', label: 'New release' } });
+      expect((await accounts()).accounts.map((a) => [a.no, a.label])).toEqual([
+        [1, 'Denver renamed'], [2, 'Old release'], [3, expect.any(String)], [4, expect.any(String)], [5, 'New release'],
+      ]);
     });
 
     it('retries a reply typed in Telegram from the ERP, and Telegram hears how it ended', async () => {

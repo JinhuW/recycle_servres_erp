@@ -15,6 +15,7 @@ vi.mock('../../../../lib/errorToast', () => ({ handleFetchError: vi.fn() }));
 const { AccountRequests, fbChatBrowser } = await import('./AccountRequests');
 const { AccountDetail, AccountsTable } = await import('./AccountsTable');
 const { AccountsTab, fbChatWaitingDevices } = await import('./AccountsTab');
+const { LoadState } = await import('./shared');
 
 const ago = (sec: number) => new Date(Date.now() - sec * 1000).toISOString();
 const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -115,7 +116,13 @@ describe('Accounts tab', () => {
     expect(renderToString(<AccountsTable {...table} accounts={[]} waiting={[approved]} />)).toContain('fbca_waitingFirst');
   });
 
-  it('renders nothing until both lists have loaded', () => {
-    expect(renderToString(<AccountsTab />)).toBe('');
+  it('says it is loading until both lists have arrived, and offers another try when a read failed', () => {
+    const html = renderToString(<AccountsTab />);
+    expect(html).toContain('fbca_loading');
+    expect(html).not.toContain('fbca_tryAgain');
+    const failed = renderToString(<LoadState failed loading="l" failedText="did not load" retryText="again" onRetry={noop} />);
+    expect(failed).toContain('role="alert"');
+    expect(failed).toContain('did not load');
+    expect(failed).toContain('>again</button>');
   });
 });

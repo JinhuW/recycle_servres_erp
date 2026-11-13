@@ -373,9 +373,12 @@ async function ackReplies(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget: 
   // the topic, so the two never arrive the wrong way round.
   const rows = await sql<{
     id: number; send_state: string; error: string | null; tg_message_id: string | null; topic: string | null;
-    source: string; erp_name: string | null;
+    source: string; erp_name: string | null; troubled: boolean;
   }[]>`
-    SELECT m.id::int AS id, m.send_state, m.error, m.tg_message_id, t.telegram_topic_id AS topic, m.source, u.name AS erp_name
+    SELECT m.id::int AS id, m.send_state, m.error, m.tg_message_id, t.telegram_topic_id AS topic, m.source, u.name AS erp_name,
+           EXISTS (SELECT 1 FROM fb_chat_events e
+                    WHERE e.thread_id = m.thread_id AND e.kind IN ('send_failed','send_uncertain')
+                      AND e.detail->>'message_id' = m.id::text) AS troubled
       FROM fb_chat_messages m JOIN fb_chat_threads t ON t.id = m.thread_id
       LEFT JOIN users u ON u.id = m.erp_user_id
      WHERE m.send_state IN ('sent','failed','uncertain') AND m.acked_at IS NULL
@@ -383,17 +386,21 @@ async function ackReplies(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget: 
      ORDER BY m.id LIMIT 10`;
   for (const r of rows) {
     if (r.tg_message_id === null) {
-      // The ERP shows a sent reply as sent; Telegram already has its text.
-      if (r.send_state !== 'sent') {
+      // The ERP shows a sent reply as sent; Telegram already has its text. One
+      // that failed or went unconfirmed first is the exception: the topic was
+      // told so, and left at that, someone working there types it again.
+      if (r.send_state !== 'sent' || r.troubled) {
         if (!budget.take()) return;
         const who = firstName(r.erp_name);
         const whose = who ? `${who}'s reply from the ERP` : 'A reply from the ERP';
         try {
           await cfg.call('sendMessage', {
             chat_id: cfg.chatId, message_thread_id: r.topic == null ? undefined : Number(r.topic),
-            text: r.send_state === 'failed'
-              ? `❌ ${whose} was not sent to Facebook: ${r.error ?? 'unknown error'}. Retry it in the ERP.`
-              : `⚠️ ${whose} may not have reached the buyer (${r.error ?? 'not confirmed'}). Check the conversation on Facebook before retrying it in the ERP.`,
+            text: r.send_state === 'sent'
+              ? `✅ ${whose} was sent to Facebook after all.`
+              : r.send_state === 'failed'
+                ? `❌ ${whose} was not sent to Facebook: ${r.error ?? 'unknown error'}. Retry it in the ERP.`
+                : `⚠️ ${whose} may not have reached the buyer (${r.error ?? 'not confirmed'}). Check the conversation on Facebook before retrying it in the ERP.`,
           });
         } catch (e) {
           if (e instanceof TelegramError && e.retryAfterSec) throw e;

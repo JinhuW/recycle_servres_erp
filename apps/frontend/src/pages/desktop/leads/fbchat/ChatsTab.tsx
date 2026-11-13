@@ -26,16 +26,6 @@ import '../../../../styles/fbChatChats.css';
 const CONFIG_POLL_MS = 60_000;
 const SEARCH_DEBOUNCE_MS = 300;
 
-/** `read`, and whether its latest run failed: usePolled reports a failure once and keeps no state for it. */
-function useTracked<T>(read: () => Promise<T>): [() => Promise<T>, boolean] {
-  const [failed, setFailed] = useState(false);
-  const tracked = () => read().then(
-    r => { setFailed(false); return r; },
-    (err: unknown) => { setFailed(true); throw err; },
-  );
-  return [tracked, failed];
-}
-
 export function ChatsTab({ threadId }: FbChatTabProps & { threadId: number | null }) {
   const { t, locale } = useT();
   const [accountId, setAccountId] = useState<number | null>(null);
@@ -49,10 +39,10 @@ export function ChatsTab({ threadId }: FbChatTabProps & { threadId: number | nul
 
   const accounts = usePolled(fbChatApi.accounts, FB_CHAT_POLL_MS.accounts);
   const config = usePolled(fbChatApi.config, CONFIG_POLL_MS);
-  const [readThreads, threadsFailed] = useTracked(
+  const threads = usePolled(
     () => fbChatApi.threads({ account: accountId ?? undefined, q: query || undefined, filter }),
+    FB_CHAT_POLL_MS.threads, [accountId, query, filter],
   );
-  const threads = usePolled(readThreads, FB_CHAT_POLL_MS.threads, [accountId, query, filter]);
 
   // After a write here that moves a count or a chat's place in the list.
   const reloadThreads = threads.reload;
@@ -94,7 +84,7 @@ export function ChatsTab({ threadId }: FbChatTabProps & { threadId: number | nul
       </div>
       <div className={`fbcc-work${threadId !== null ? ' show-convo' : ''}`}>
         <ChatList
-          threads={threads.data?.threads ?? null} failed={threadsFailed} onRetry={() => void threads.reload()}
+          threads={threads.data?.threads ?? null} failed={threads.failed} onRetry={() => void threads.reload()}
           openId={threadId} oneAccount={accountId !== null}
           search={search} onSearch={setSearch} query={query} filter={filter} onFilter={setFilter} now={now}
         />
@@ -128,13 +118,13 @@ function ChatOpen({ threadId, accounts, config, onChanged }: ChatOpenProps) {
   const { t } = useT();
   const listPath = fbChatTabPath('chats');
   // A chat that is gone is an answer, not a failure: the id came from a URL.
-  const [readMessages, failed] = useTracked<FbChatMessagesAnswer | 'missing'>(
+  const polled = usePolled<FbChatMessagesAnswer | 'missing'>(
     () => fbChatApi.messages(threadId).catch((err: unknown) => {
       if (err instanceof ApiError && err.status === 404) return 'missing' as const;
       throw err;
     }),
+    FB_CHAT_POLL_MS.messages, [threadId],
   );
-  const polled = usePolled(readMessages, FB_CHAT_POLL_MS.messages, [threadId]);
   const answer = polled.data === 'missing' ? null : polled.data;
 
   // Opening a chat reads it for the whole team, and so does watching it while
@@ -153,11 +143,11 @@ function ChatOpen({ threadId, accounts, config, onChanged }: ChatOpenProps) {
   const [accepted, setAccepted] = useState<FbChatMessageRow[]>([]);
   const nextKey = useRef(0);
   const reload = polled.reload;
-  const send = useCallback(async (body: string) => {
+  const send = useCallback(async (body: string, clientKey: string) => {
     const key = ++nextKey.current;
     setPending(p => [...p, { key, body, at: new Date().toISOString() }]);
     try {
-      const { message } = await fbChatApi.reply(threadId, body);
+      const { message } = await fbChatApi.reply(threadId, body, clientKey);
       setAccepted(a => [...a, message]);
       onChanged();
       void reload();
@@ -212,7 +202,7 @@ function ChatOpen({ threadId, accounts, config, onChanged }: ChatOpenProps) {
     );
   }
   if (!answer) {
-    return failed
+    return polled.failed
       ? <ChatPlaceholder>{t('fbcc_convFailed')}<button type="button" className="btn sm" onClick={() => void reload()}>{t('fbcc_tryAgain')}</button></ChatPlaceholder>
       : <ChatPlaceholder>{t('fbcc_convLoading')}</ChatPlaceholder>;
   }

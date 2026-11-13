@@ -103,7 +103,9 @@ describe('Settings tab', () => {
     expect(html).not.toContain('fbcs_advanced');
   });
 
-  it('renders nothing until the settings arrive', () => {
-    expect(renderToString(<SettingsTab />)).toBe('');
+  it('says it is loading until the settings arrive', () => {
+    const html = renderToString(<SettingsTab />);
+    expect(html).toContain('fbcs_loading');
+    expect(html).not.toContain('fbcs_sending');
   });
 });

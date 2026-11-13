@@ -271,23 +271,31 @@ fbChat.get('/threads/:id/messages', async (c) => {
   return c.json(answer);
 });
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // A reply typed on the page. It is queued whatever state the account is in,
 // and goes out when its extension next claims.
 fbChat.post('/threads/:id/messages', async (c) => {
   const id = rowId(c.req.param('id'));
   if (id === null) return c.json({ error: 'not_found' }, 404);
-  const raw = await c.req.json().catch(() => null) as { body?: unknown } | null;
+  const raw = await c.req.json().catch(() => null) as { body?: unknown; clientKey?: unknown } | null;
   const body = typeof raw?.body === 'string' ? raw.body.trim() : '';
   if (!body) return c.json(invalid('body is empty'), 400);
   if (body.length > FB_CHAT_REPLY_MAX_CHARS) {
     return c.json(invalid(`body is ${body.length} characters; the limit is ${FB_CHAT_REPLY_MAX_CHARS}`), 400);
   }
+  const clientKey = raw?.clientKey ?? null;
+  if (clientKey !== null && (typeof clientKey !== 'string' || !UUID.test(clientKey))) {
+    return c.json(invalid('clientKey must be a UUID'), 400);
+  }
   const sql = getDb(c.env);
-  const messageId = await sql.begin((tx) => queueErpReply(tx, id, body, c.var.user.id));
-  if (messageId === null) return c.json({ error: 'not_found' }, 404);
+  const queued = await sql.begin((tx) => queueErpReply(tx, id, body, c.var.user.id, clientKey));
+  if (queued === null) return c.json({ error: 'not_found' }, 404);
+  const answer: FbChatReplyAnswer = { message: (await listMessages(sql, { messageId: queued.id }))[0]! };
+  // The same reply sent again: the one already queued is the answer.
+  if (!queued.created) return c.json(answer);
   kickFbChatTelegram();
-  log.info('fb chat reply queued from the ERP', { module: 'fbChat', id: messageId, threadId: id });
-  const answer: FbChatReplyAnswer = { message: (await listMessages(sql, { messageId }))[0]! };
+  log.info('fb chat reply queued from the ERP', { module: 'fbChat', id: queued.id, threadId: id });
   return c.json(answer, 201);
 });
 

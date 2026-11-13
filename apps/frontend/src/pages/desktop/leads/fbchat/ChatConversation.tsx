@@ -24,8 +24,12 @@ export type ChatConversationProps = {
   /** The chat's account; null until the accounts have loaded. */
   account: FbChatAccountRow | null;
   pacing: ChatPacing | null;
-  /** Resolves false when the reply was not accepted, so the text comes back. */
-  onSend: (body: string) => Promise<boolean>;
+  /**
+   * Resolves false when the reply was not accepted, so the text comes back.
+   * `clientKey` names this reply to the server: the same text sent again
+   * after a false carries the same key, in case the first did get through.
+   */
+  onSend: (body: string, clientKey: string) => Promise<boolean>;
   /** `force` sends a reply that may already be on Facebook; the server refuses that one without it. */
   onRetry: (messageId: number, force: boolean) => void;
   /** The reply a retry is in flight for. */
@@ -229,12 +233,18 @@ function ChatComposer({ thread, account, pacing, onSend }: ComposerProps) {
     el.style.height = `${Math.min(el.scrollHeight, BOX_MAX_PX)}px`;
   }, [text]);
 
+  // The reply whose answer never came. The server may have queued it all the
+  // same, so sending that text again reuses its key and cannot queue it twice.
+  const unanswered = useRef<{ body: string; key: string } | null>(null);
   const send = async () => {
     if (!body) return;
+    const key = unanswered.current?.body === body ? unanswered.current.key : crypto.randomUUID();
+    unanswered.current = null;
     setText('');
-    const ok = await onSend(body);
+    if (await onSend(body, key)) return;
+    unanswered.current = { body, key };
     // Back into the box unless something new was typed meanwhile.
-    if (!ok) setText(now => now || body);
+    setText(now => now || body);
   };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Enter while an input method is composing picks a candidate; it is not a send.

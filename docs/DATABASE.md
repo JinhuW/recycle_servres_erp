@@ -2654,6 +2654,7 @@ One Facebook account an extension has spoken for, created on its first push.
 - **Primary key:** `id`
 - **Unique:** `fb_uid`; `no`
 - **Checks:** `restricted IN ('login', 'checkpoint')`
+- **Triggers:** `fb_chat_accounts_number` (before insert when `no` is null → `fb_chat_accounts_number()`): an insert that names no number takes the next one, so the release before 0241, whose upsert does not know the column, keeps working beside this one and after a rollback.
 #### `fb_chat_buyers`
 
 One Marketplace profile, shared by every account it has written to, so a repeat buyer is one row. Only buyers whose profile id a thread revealed get a row.
@@ -2731,12 +2732,13 @@ One message. Those read off Facebook have `source = 'facebook'`; a reply typed i
 | `mirrored_at` | `timestamptz` |  |  | When it was posted to the topic. A Telegram reply is born mirrored; an ERP reply is not, and is posted as `<first name> (ERP): …`. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
 | `erp_user_id` | `uuid` |  |  | → users: who typed an ERP reply (0241). |
+| `client_key` | `uuid` |  |  | The page's own key for an ERP reply, so the same reply posted twice (its first answer was lost) is queued once (0241). |
 
 - **Primary key:** `id`
 - **References:** `thread_id` → `fb_chat_threads.id` (on delete cascade); `erp_user_id` → `users.id` (on delete set null)
 - **Unique:** `(thread_id, seq)`; `(thread_id, tg_message_id)`
 - **Checks:** `direction IN ('in', 'out')`; `source IN ('facebook', 'telegram', 'erp')`; `send_state IN ('queued', 'sending', 'sent', 'failed', 'uncertain')`
-- **Indexes:** `fb_chat_messages_unmirrored_idx` (id) where not mirrored; `fb_chat_messages_outbox_idx` (thread_id, id) where queued or sending; `fb_chat_messages_unacked_idx` (id) where settled and not acknowledged; `fb_chat_messages_erp_user_idx` (erp_user_id) where set; `fb_chat_messages_thread_idx` (thread_id, id)
+- **Indexes:** `fb_chat_messages_unmirrored_idx` (id) where not mirrored; `fb_chat_messages_outbox_idx` (thread_id, id) where queued or sending; `fb_chat_messages_unacked_idx` (id) where settled and not acknowledged; `fb_chat_messages_erp_user_idx` (erp_user_id) where set; `fb_chat_messages_thread_idx` (thread_id, id); `fb_chat_messages_client_key_idx` unique (thread_id, client_key) where set
 #### `fb_chat_events`
 
 Append-only record of what is worth counting later and is not a message. `kind` is one of: `thread_seen`, `sync` (new messages in a known thread), `sync_gap` (a window that did not overlap what was stored), `send_sent`, `send_failed`, `send_uncertain`, `buyer_rating` (a rating or count changed; old and new values in `detail`), `topic_created`, `restricted`, `recovered`, `error`.

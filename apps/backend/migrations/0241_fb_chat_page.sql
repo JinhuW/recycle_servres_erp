@@ -11,6 +11,11 @@ CREATE INDEX fb_chat_messages_erp_user_idx ON fb_chat_messages(erp_user_id)
   WHERE erp_user_id IS NOT NULL;
 -- The chat list reads each chat's newest message and its newest reply.
 CREATE INDEX fb_chat_messages_thread_idx ON fb_chat_messages(thread_id, id);
+-- The page makes one key per composed reply and sends it again when it never
+-- heard back, so a reply whose answer was lost is not queued a second time.
+ALTER TABLE fb_chat_messages ADD COLUMN client_key UUID;
+CREATE UNIQUE INDEX fb_chat_messages_client_key_idx ON fb_chat_messages(thread_id, client_key)
+  WHERE client_key IS NOT NULL;
 
 -- One read mark per chat, shared by the team: the conversation position (seq)
 -- read up to, beside the position of the buyer's newest message.
@@ -37,6 +42,26 @@ UPDATE fb_chat_accounts a SET no = n.no
  WHERE n.id = a.id;
 ALTER TABLE fb_chat_accounts ALTER COLUMN no SET NOT NULL;
 ALTER TABLE fb_chat_accounts ADD CONSTRAINT fb_chat_accounts_no_key UNIQUE (no);
+
+-- An insert that names no number still gets one. The release before this one
+-- upserts the account on every push without the column, and it keeps serving
+-- while this migration runs and after a rollback; NOT NULL is checked on the
+-- proposed row before the conflict on fb_uid is seen, so without this every
+-- one of its pushes would fail. A known account proposes the number it has
+-- (the conflict discards it) and takes no lock; a new one takes the next
+-- under the lock touchAccount uses.
+CREATE FUNCTION fb_chat_accounts_number() RETURNS trigger AS $$
+BEGIN
+  SELECT no INTO NEW.no FROM fb_chat_accounts WHERE fb_uid = NEW.fb_uid;
+  IF NEW.no IS NULL THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended('fb-chat-account-no', 0));
+    SELECT COALESCE(MAX(no), 0) + 1 INTO NEW.no FROM fb_chat_accounts;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER fb_chat_accounts_number BEFORE INSERT ON fb_chat_accounts
+  FOR EACH ROW WHEN (NEW.no IS NULL) EXECUTE FUNCTION fb_chat_accounts_number();
 
 -- What the manager chose when approving, applied when the device's account is
 -- first seen: its Facebook user may not be known at approval. No foreign key

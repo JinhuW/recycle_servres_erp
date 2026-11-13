@@ -326,8 +326,13 @@ export type FbChatMessagesAnswer = {
   also_messaged: FbChatAlsoMessaged[];
 };
 
-/** `POST /threads/:id/messages`: a reply typed in the ERP. */
-export type FbChatReplyRequest = { body: string };
+/**
+ * `POST /threads/:id/messages`: a reply typed in the ERP. `clientKey` is a
+ * UUID the page makes once per composed reply and sends again when it never
+ * heard the answer; the hub then answers 200 with the reply it already queued
+ * instead of queueing a second one.
+ */
+export type FbChatReplyRequest = { body: string; clientKey?: string };
 /**
  * Body of `POST /messages/:id/retry`. A `failed` reply needs none. An
  * `uncertain` one may already be on Facebook, so the hub refuses to send it

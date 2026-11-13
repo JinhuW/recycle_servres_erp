@@ -3,6 +3,7 @@ import {
   fbChatAccountStatus, fbChatConfigValue,
   type FbChatAccountRow, type FbChatAccountStatus, type FbChatAccountsAnswer, type FbChatConfigPage,
   type FbChatDeviceApproval, type FbChatDeviceRow, type FbChatMessagesAnswer, type FbChatReplyAnswer,
+  type FbChatReplyRequest,
   type FbChatSummary, type FbChatTelegramStatus, type FbChatThreadsAnswer, type FbChatThreadsQuery,
 } from '@recycle-erp/shared';
 import { api } from './api';
@@ -27,8 +28,9 @@ export const fbChatApi = {
     return api.get<FbChatThreadsAnswer>(`${BASE}/threads${qs ? `?${qs}` : ''}`);
   },
   messages: (threadId: number) => api.get<FbChatMessagesAnswer>(`${BASE}/threads/${threadId}/messages`),
-  reply: (threadId: number, body: string) =>
-    api.post<FbChatReplyAnswer>(`${BASE}/threads/${threadId}/messages`, { body }),
+  /** `clientKey`: one per composed reply, sent again with it when the answer never came, so it is queued once. */
+  reply: (threadId: number, body: string, clientKey: string) =>
+    api.post<FbChatReplyAnswer>(`${BASE}/threads/${threadId}/messages`, { body, clientKey } satisfies FbChatReplyRequest),
   /** `force`: required for an `uncertain` reply, which may already be on Facebook. */
   retry: (messageId: number, force = false) =>
     api.post<FbChatReplyAnswer>(`${BASE}/messages/${messageId}/retry`, force ? { force: true } : {}),
@@ -131,11 +133,38 @@ export const FB_CHAT_POLL_MS = { summary: 30_000, threads: 10_000, messages: 4_0
 export type Polled<T> = {
   /** Null until the first answer. */
   data: T | null;
+  /** The latest read failed. With `data` null there is nothing to show but that. */
+  failed: boolean;
   /** Reads again now; resolves when the answer is in. */
   reload: () => Promise<void>;
   /** Replaces the data until the next read, for a change the page already knows the outcome of. */
   set: (next: T) => void;
 };
+
+/**
+ * Which answers may be shown when reads overlap: a poll in flight and a
+ * reload() after a write, say. Answers arrive in any order, and one from a
+ * read that started earlier must not replace a later one's, or a save looks
+ * undone until the next poll. `reset()` is for a change of what is read:
+ * nothing started before it is taken.
+ */
+export function fbChatReadOrder() {
+  let started = 0;
+  let shown = 0;
+  let floor = 0;
+  return {
+    /** Call as a read starts; pass the result to `takes` when it answers. */
+    start: () => ++started,
+    reset: () => { floor = started; },
+    /** Whether this read's answer is still the newest; taking it retires every earlier read. */
+    takes: (seq: number, answered = true) => {
+      if (seq <= floor || seq < shown) return false;
+      // A failure retires nothing: an earlier read's answer is still worth showing.
+      if (answered) shown = seq;
+      return true;
+    },
+  };
+}
 
 /**
  * Reads now, again every `ms` while the tab is visible, and when it comes back
@@ -145,25 +174,30 @@ export type Polled<T> = {
  */
 export function usePolled<T>(read: () => Promise<T>, ms: number, deps: readonly unknown[] = []): Polled<T> {
   const [data, setData] = useState<T | null>(null);
+  const [failed, setFailed] = useState(false);
   const readRef = useRef(read);
   readRef.current = read;
-  const run = useRef(0);
+  const [order] = useState(fbChatReadOrder);
   const told = useRef(false);
 
   const reload = useCallback(async () => {
-    const mine = run.current;
+    const seq = order.start();
     try {
       const next = await readRef.current();
-      if (mine === run.current) setData(next);
+      if (!order.takes(seq)) return;
+      setData(next);
+      setFailed(false);
     } catch (err) {
-      if (mine !== run.current || told.current) return;
+      if (!order.takes(seq, false)) return;
+      setFailed(true);
+      if (told.current) return;
       told.current = true;
       handleFetchError(err);
     }
   }, []);
 
   useEffect(() => {
-    run.current++;
+    order.reset();
     told.current = false;
     void reload();
     const tick = () => { if (document.visibilityState === 'visible') void reload(); };
@@ -176,7 +210,7 @@ export function usePolled<T>(read: () => Promise<T>, ms: number, deps: readonly 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ms, reload, ...deps]);
 
-  return { data, reload, set: setData };
+  return { data, failed, reload, set: setData };
 }
 
 // ── Sidebar and tab counts ────────────────────────────────────────────────────

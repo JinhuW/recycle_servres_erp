@@ -38,6 +38,10 @@ CREATE INDEX fb_chat_messages_erp_user_idx ON fb_chat_messages(erp_user_id)
   WHERE erp_user_id IS NOT NULL;
 -- The chat list reads each chat's newest message and newest reply.
 CREATE INDEX fb_chat_messages_thread_idx ON fb_chat_messages(thread_id, id);
+-- The page's own key for a reply, so one posted twice is queued once.
+ALTER TABLE fb_chat_messages ADD COLUMN client_key UUID;
+CREATE UNIQUE INDEX fb_chat_messages_client_key_idx ON fb_chat_messages(thread_id, client_key)
+  WHERE client_key IS NOT NULL;
 
 -- One read mark per chat, shared by the team: the conversation position
 -- (seq) read up to, beside the position of the buyer's newest message.
@@ -64,6 +68,8 @@ UPDATE fb_chat_accounts a SET no = n.no
  WHERE n.id = a.id;
 ALTER TABLE fb_chat_accounts ALTER COLUMN no SET NOT NULL;
 ALTER TABLE fb_chat_accounts ADD CONSTRAINT fb_chat_accounts_no_key UNIQUE (no);
+-- Plus a BEFORE INSERT trigger, fb_chat_accounts_number, that fills `no` when
+-- an insert names none (see the notes below; the function is in the file).
 
 -- What the manager chose when approving, applied when the device's account
 -- is first seen (its Facebook user may not be known at approval).
@@ -74,6 +80,14 @@ ALTER TABLE fb_chat_devices
 
 Notes for whoever writes the file:
 
+- `no` is NOT NULL, and the release before this one upserts the account on
+  every push without naming it. Migrations run while that release still
+  serves, and Postgres checks NOT NULL on the proposed row before it sees the
+  conflict on `fb_uid`, so every push of the old instance would fail (and
+  would keep failing after a rollback). The `fb_chat_accounts_number` trigger
+  gives such an insert a number: the one the account has when it is known
+  (the conflict path discards it, and no lock is taken), else `MAX(no) + 1`
+  under the same advisory lock `touchAccount` takes.
 - The comments above are the "why"; keep them, in the migration's own words.
 - No foreign key from accounts to devices, on purpose. An account's device is
   `fb_chat_accounts.client_id = 'device:' || fb_chat_devices.id`, which the
@@ -252,11 +266,17 @@ defaults to `all`; an unknown value is 400.
 ### `POST /threads/:id/messages` `FbChatReplyRequest` → 201 `FbChatReplyAnswer`
 
 ```json
-{ "body": "We can do $38 each." }
+{ "body": "We can do $38 each.", "clientKey": "3f2b8c1e-5a44-4c0e-9d7a-0b1c2d3e4f50" }
 ```
 ```json
 { "message": { "…": "the new FbChatMessageRow: source 'erp', send_state 'queued', seq null" } }
 ```
+
+- `clientKey` is optional: a UUID the page makes once per composed reply and
+  sends again when it never heard the answer (the text goes back in the box
+  with its key). A key already used in this chat queues nothing: the answer is
+  **200** with the reply that key queued, in whatever state it is now. Stored
+  in `fb_chat_messages.client_key`, unique per chat. Not a UUID is 400.
 
 - `body` is trimmed; empty or longer than `FB_CHAT_REPLY_MAX_CHARS` (2000,
   the same limit Telegram replies have: make `lib/fbChat.ts`'s
@@ -280,7 +300,11 @@ defaults to `all`; an unknown value is 400.
   and `uncertain` post one line into the topic (no `reply_parameters`), e.g.
   `❌ Jin's reply from the ERP was not sent to Facebook: <error>. Retry it in the ERP.`
   and then set `acked_at`. An `erp` row is acked only once it is mirrored, so
-  the outcome never precedes the reply in the topic.
+  the outcome never precedes the reply in the topic. A `sent` row that has a
+  `send_failed` or `send_uncertain` event (it failed first and was retried, or
+  a later window settled an uncertain one) posts
+  `✅ Jin's reply from the ERP was sent to Facebook after all.`, so the
+  topic's last word is not "was not sent".
 
 ### `POST /messages/:id/retry` `FbChatRetryRequest` (optional) → `FbChatReplyAnswer`
 
@@ -289,7 +313,11 @@ source and author.
 
 - Allowed when `direction = 'out'`, `seq IS NULL` and `send_state IN
   ('failed','uncertain')`: set `send_state = 'queued'`, `error = NULL`,
-  `claimed_at = NULL`, `acked_at = NULL`; `notifyOutbox`. A Telegram-typed
+  `claimed_at = NULL`, `acked_at = NULL`; `notifyOutbox`. While it waits
+  (`queued` with `attempts > 0`) proof that the earlier attempt landed still
+  settles it as `sent` instead of leaving it to be typed again: a window whose
+  fresh outbound bubble carries its text (`ingestSync`), or the extension's
+  late `outcome: 'sent'` for it (`recordSendResult`). A Telegram-typed
   reply retried here gets its 👍 on the original Telegram message when it
   lands, through the existing ack.
 - Anything else is 409 (`detail`: "this reply is not waiting for a retry");
@@ -437,6 +465,11 @@ topic") is fixed copy.
 - `pages/desktop/leads/fbchat/shared.tsx`: `AccountBadge`, `BuyerAvatar`,
   `AccountHealth`, `fbcHueStyle(no)` (puts `--h` on a wrapper with class
   `fbc-acct`, which defines `--c` and `--cs`).
+- `usePolled` returns `{ data, failed, reload, set }`. Reads for the same
+  `deps` can overlap (a poll and a `reload()` after a write); an answer never
+  replaces one from a read that started later. `failed` is whether the latest
+  read failed; every tab shows "Loading…" while `data` is null, or a "did not
+  load" line with Try again (`LoadState` in `shared.tsx`) when it failed.
 - `lib/fbChat.ts`: `fbChatApi`, `usePolled(read, ms, deps)`,
   `FB_CHAT_POLL_MS`, `useFbChatSummary`, `fbChatChanged()` (call after a write
   that changes a count: read/unread, approve, deny), `fbChatStatusOf`,

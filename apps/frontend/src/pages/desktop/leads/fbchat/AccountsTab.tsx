@@ -9,6 +9,7 @@ import { useT } from '../../../../lib/i18n';
 import { AccountRequests } from './AccountRequests';
 import { AccountsTable, type AccountDisconnect } from './AccountsTable';
 import type { FbChatTabProps } from './FbChatsPage';
+import { LoadState } from './shared';
 import '../../../../styles/fbChatAccounts.css';
 
 // ─── Leads ▸ Facebook ▸ Accounts ──────────────────────────────────────────────
@@ -34,11 +35,19 @@ export function AccountsTab({ showToast }: FbChatTabProps) {
   const [disconnect, setDisconnect] = useState<AccountDisconnect | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
-  if (!accounts.data || !devices.data) return null;
+  const reloadAll = () => Promise.all([accounts.reload(), devices.reload()]);
+
+  if (!accounts.data || !devices.data) {
+    return (
+      <LoadState
+        failed={(!accounts.data && accounts.failed) || (!devices.data && devices.failed)}
+        loading={t('fbca_loading')} failedText={t('fbca_loadFailed')} retryText={t('fbca_tryAgain')}
+        onRetry={() => void reloadAll()}
+      />
+    );
+  }
   const rows = accounts.data.accounts;
   const all = devices.data.devices;
-
-  const reloadAll = () => Promise.all([accounts.reload(), devices.reload()]);
 
   // Decides a request. The lists are read again either way: a refusal usually
   // means another manager got to it first, and the card should go.

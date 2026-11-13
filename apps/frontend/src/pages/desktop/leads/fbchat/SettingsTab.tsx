@@ -9,10 +9,10 @@ import { useT } from '../../../../lib/i18n';
 import type { FbChatTabProps } from './FbChatsPage';
 import {
   SETTINGS_COPY, accountsThatDiffer, draftOf, groupSettings, hasOwnValue, itemKeys, orphanEntries, parseDraft,
-  rangeAfter, rangeWrites, settingProblem,
-  type SettingMessage, type SettingsItem,
+  rangeCommit, settingProblem,
+  type Range, type SettingMessage, type SettingsItem,
 } from './SettingsModel';
-import { fbcHueStyle } from './shared';
+import { LoadState, fbcHueStyle } from './shared';
 import '../../../../styles/fbChatSettings.css';
 
 // ─── Leads ▸ Facebook ▸ Settings ──────────────────────────────────────────────
@@ -46,7 +46,14 @@ export function SettingsTab({ showToast }: FbChatTabProps) {
   const accounts = usePolled(fbChatApi.accounts, FB_CHAT_POLL_MS.accounts);
   const telegram = usePolled(fbChatApi.telegram, TELEGRAM_POLL_MS);
 
-  if (!config.data) return null;
+  if (!config.data) {
+    return (
+      <LoadState
+        failed={config.failed} loading={t('fbcs_loading')} failedText={t('fbcs_loadFailed')} retryText={t('fbcs_tryAgain')}
+        onRetry={() => void config.reload()}
+      />
+    );
+  }
 
   // Reads again whatever happened: a range is two writes, and the first may
   // have landed when the second fails.
@@ -386,30 +393,48 @@ function FieldRow({ field, known, value, ...shared }: RowShared & { field: FbCha
 }
 
 function RangeRow({ lo, hi, value, ...shared }: RowShared & {
-  lo: FbChatKnownConfigField; hi: FbChatKnownConfigField; value: { lo: number; hi: number };
+  lo: FbChatKnownConfigField; hi: FbChatKnownConfigField; value: Range;
 }) {
   const { t } = useT();
   const unit = t(SETTINGS_COPY.inboxRefresh!.unit!);
-  const [draft, setDraft] = useState({ lo: String(value.lo), hi: String(value.hi) });
+  const asDraft = (r: Range) => ({ lo: String(r.lo), hi: String(r.hi) });
+  const [draft, setDraft] = useState(asDraft(value));
   const [error, setError] = useState<string | null>(null);
   const [busy, run] = useBusy();
-  useEffect(() => { setDraft({ lo: String(value.lo), hi: String(value.hi) }); setError(null); }, [value.lo, value.hi]);
-
-  const commit = (end: 'lo' | 'hi') => {
-    const field = end === 'lo' ? lo : hi;
-    if (draft[end] === String(value[end])) return;
-    const parsed = parseDraft(field, draft[end]);
-    if ('error' in parsed) { setError(say(t, parsed.error)); return; }
-    const next = rangeAfter(value, { [end]: parsed.value as number });
-    // Both ends are checked: raising the longest to meet the shortest can
-    // carry it past its own limit.
-    const problem = settingProblem(lo, next.lo) ?? settingProblem(hi, next.hi);
-    if (problem) { setError(say(t, problem)); return; }
+  const stored = useRef(value);
+  stored.current = value;
+  // Typed into and not yet committed. The inputs stay live while a save runs
+  // (the natural edit is shortest, Tab, longest), so what is being typed must
+  // survive the stored value changing underneath it.
+  const dirty = useRef(false);
+  // Where the saves still on their way take the range, and the saves in order.
+  const heading = useRef<Range | null>(null);
+  const saves = useRef(Promise.resolve());
+  useEffect(() => {
+    if (dirty.current) return;
+    setDraft(asDraft(value));
     setError(null);
-    setDraft({ lo: String(next.lo), hi: String(next.hi) });
-    const writes = rangeWrites(value, next);
+  }, [value.lo, value.hi]);
+
+  // The row commits as one, when focus leaves both inputs: committing each
+  // end on its own blur would save a half-typed range in between.
+  const commit = () => {
+    if (!dirty.current) return;
+    dirty.current = false;
+    const result = rangeCommit(heading.current ?? value, draft, lo, hi);
+    if ('error' in result) { setError(say(t, result.error)); return; }
+    setError(null);
+    setDraft(asDraft(result.next));
     // A longest typed under the shortest snaps back to where it already was.
-    if (writes.length) void run(() => shared.onSave(writes));
+    if (!result.writes.length) return;
+    const { next, writes } = result;
+    heading.current = next;
+    saves.current = saves.current.then(() => run(() => shared.onSave(writes))).then(() => {
+      if (heading.current !== next) return;
+      heading.current = null;
+      // A save that failed left the stored range where it was; show that.
+      if (!dirty.current) setDraft(asDraft(stored.current));
+    });
   };
 
   const input = (end: 'lo' | 'hi', field: FbChatKnownConfigField, label: string) => (
@@ -421,16 +446,14 @@ function RangeRow({ lo, hi, value, ...shared }: RowShared & {
       step={field.type === 'integer' ? 1 : 'any'}
       aria-label={label}
       value={draft[end]}
-      disabled={busy}
-      onChange={(e) => setDraft({ ...draft, [end]: e.target.value })}
-      onBlur={() => commit(end)}
+      onChange={(e) => { dirty.current = true; setDraft({ ...draft, [end]: e.target.value }); }}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
     />
   );
 
   return (
     <RowFrame shared={shared} busy={busy} label={t('fbcs_f_inboxRefresh')} help={t('fbcs_f_inboxRefreshHelp')} error={error}>
-      <div className="fbcs-range">
+      <div className="fbcs-range" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) commit(); }}>
         {input('lo', lo, t('fbcs_shortest'))}
         <span>{t('fbcs_rangeTo')}</span>
         {input('hi', hi, t('fbcs_longest'))}

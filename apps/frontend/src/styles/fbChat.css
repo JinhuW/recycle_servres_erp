@@ -24,6 +24,12 @@
 .fbc-body.fbc-fill { display: flex; flex-direction: column; }
 .fbc-body.fbc-scroll { overflow-y: auto; padding-bottom: 40px; }
 
+/* A tab before its first answer: loading, or failed with a way to try again. */
+.fbc-load {
+  padding: 28px 18px; color: var(--fg-muted); font-size: 13px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+
 /* One hue per buyer account, set inline as --h (fbcHueStyle). */
 .fbc-acct { --c: oklch(0.58 0.12 var(--h)); --cs: oklch(0.95 0.035 var(--h)); }
 .fbc-badge {
