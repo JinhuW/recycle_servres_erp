@@ -3376,7 +3376,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     no report for that day.
   - A banner says when memtrade fell back to its rules for a day (Claude
     was unavailable), when only part of a day's posts arrived, and repeats
-    memtrade's own warnings. **Groups read**, on the Groups tab since
+    memtrade's own warnings. Since v1.458.0 each of memtrade's warnings has
+    an **Acknowledge** button. An acknowledged warning leaves the yellow
+    banner for a quiet line with who and when, and *Undo* puts it back.
+    Acknowledgements are the team's, kept by the warning's text, so a re-run
+    that repeats a warning keeps it acknowledged and a new one shows.
+    **Groups read**, on the Groups tab since
     v1.316.0 and always open, lists each group's messages that day and
     marks the ones joined in it.
   - **Re-run** (v1.363.0) beside the day picker, and *Re-run with Claude*
@@ -3390,6 +3395,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     memtrade doesn't finish within 2 hours is marked failed, so the day
     can be asked for again. memtrade claims and finishes with the same
     `wechat:write` token (`/push/reruns/claim`, `/push/reruns/<id>/finish`).
+  - **Settings** (v1.458.0), a third tab (`?view=settings`), edits the
+    prompt memtrade gives Claude to write the market notes. It shows
+    memtrade's built-in prompt (`prompts/summary.md`, which memtrade
+    reports on each run) until a manager saves another, says who changed it
+    and when, and *Use built-in prompt* goes back. memtrade asks for it
+    (`POST /push/settings`) before writing a day's notes, re-runs included,
+    and uses its own if the ERP can't be reached. The notes keep only
+    "- " bullet lines, so a prompt has to keep asking for a list.
   - The push (`/api/wechat-market/push/*`) takes a Bearer token with the
     `wechat:write` scope from a service client a manager creates under
     Settings → Connectors. The day comes first, then its posts in batches

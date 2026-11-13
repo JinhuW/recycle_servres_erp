@@ -2447,6 +2447,49 @@ td.rt-an-bad {
   margin: 0;
   padding-left: 16px;
 }
+.wx-settings .card-body {
+  display: grid;
+  gap: 10px;
+}
+.wx-settings p {
+  margin: 0;
+}
+.wx-prompt {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  resize: vertical;
+}
+.wx-prompt-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.wx-banner.wx-acked {
+  color: var(--fg-muted);
+}
+.wx-banner ul.wx-warnings {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+.wx-warnings li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.wx-warnings li > .btn {
+  flex-shrink: 0;
+  margin-block: -4px;
+}
+.wx-warnings em {
+  font-style: normal;
+  margin-left: 8px;
+  opacity: 0.75;
+}
 .wx-banner > .btn {
   margin-left: auto;
   flex-shrink: 0;

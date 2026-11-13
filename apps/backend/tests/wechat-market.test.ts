@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { WechatDay, WechatDayPush, WechatRerun, WechatEvidence, WechatHistoryDay, WechatPoint, WechatRow } from '@recycle-erp/shared';
+import type { WechatDay, WechatDayPush, WechatRerun, WechatSettings, WechatWarningAck, WechatEvidence, WechatHistoryDay, WechatPoint, WechatRow } from '@recycle-erp/shared';
 import { createOAuthClient } from '../src/oauth/clients';
 import { generateSigningKey, signAccessToken } from '../src/oauth/tokens';
 import { api } from './helpers/app';
@@ -173,6 +173,72 @@ describe('WeChat market (/api/wechat-market)', () => {
              (SELECT degraded FROM wechat_market_days) AS degraded
     `;
     expect(counts).toEqual({ rows: 1, points: 0, degraded: true });
+  });
+
+  describe('warning acknowledgements', () => {
+    const GAP = '数据可能不完整：2026-10-21 08:00 → 2026-10-21 13:17 共 5.3 小时没有任何群消息。';
+    const ack = (token: string, warning: string, acked: boolean, date = '2026-10-21') =>
+      api<{ warningAcks: WechatWarningAck[] }>('PUT', `/api/wechat-market/days/${date}/warning-acks`, {
+        token, body: { warning, acked },
+      });
+    const dayAcks = async (token: string) =>
+      (await api<{ day: WechatDay }>('GET', '/api/wechat-market/days/2026-10-21', { token })).body.day.warningAcks;
+
+    beforeEach(async () => {
+      await push('2026-10-21', dayPush({ warnings: [GAP, 'other'] }));
+    });
+
+    it('is set and undone by managers, for a warning the day carries', async () => {
+      const { token: purchaser } = await loginAs(MARCUS);
+      expect((await ack(purchaser, GAP, true)).status).toBe(403);
+      const { token } = await loginAs(ALEX);
+      expect(await dayAcks(token)).toEqual([]);
+      expect((await ack(token, 'not on the day', true)).status).toBe(404);
+      expect((await ack(token, GAP, true, '2026-10-22')).status).toBe(404);
+      expect((await ack(token, GAP, 'yes' as never)).status).toBe(400);
+      const res = await ack(token, GAP, true);
+      expect(res.status).toBe(200);
+      expect(res.body.warningAcks).toEqual([{ warning: GAP, by: expect.any(String), at: expect.any(String) }]);
+      expect((await ack(token, GAP, true)).body.warningAcks).toHaveLength(1);
+      expect(await dayAcks(token)).toHaveLength(1);
+      expect((await ack(token, GAP, false)).body.warningAcks).toEqual([]);
+    });
+
+    it('survives a re-push that repeats the warning, and hides once it is gone', async () => {
+      const { token } = await loginAs(ALEX);
+      await ack(token, GAP, true);
+      await push('2026-10-21', dayPush({ warnings: [GAP] }));
+      expect((await dayAcks(token)).map((a) => a.warning)).toEqual([GAP]);
+      await push('2026-10-21', dayPush({ warnings: ['changed'] }));
+      expect(await dayAcks(token)).toEqual([]);
+    });
+  });
+
+  describe('settings', () => {
+    const pull = (body: unknown, bearer = pushBearer) =>
+      api<{ summaryPrompt: string | null }>('POST', '/api/wechat-market/push/settings', {
+        body, headers: { authorization: `Bearer ${bearer}`, 'X-Requested-By': '' },
+      });
+    const save = (token: string, summaryPrompt: unknown) =>
+      api<WechatSettings>('PUT', '/api/wechat-market/settings', { token, body: { summaryPrompt } });
+
+    it('hands memtrade the managers\' prompt, else none, and keeps its default to show', async () => {
+      const { token: purchaser } = await loginAs(MARCUS);
+      expect((await api('GET', '/api/wechat-market/settings', { token: purchaser })).status).toBe(403);
+      expect((await pull({}, marketBearer)).status).toBe(403);
+      const { token } = await loginAs(ALEX);
+      expect((await pull({ defaults: { summaryPrompt: 'built-in' } })).body).toEqual({ summaryPrompt: null });
+      const got = await api<WechatSettings>('GET', '/api/wechat-market/settings', { token });
+      expect(got.body.summaryPrompt).toEqual({ value: null, default: 'built-in', updatedBy: null, updatedAt: null });
+
+      expect((await save(token, 42)).status).toBe(400);
+      const saved = await save(token, '写 3 条要点');
+      expect(saved.status).toBe(200);
+      expect(saved.body.summaryPrompt).toMatchObject({ value: '写 3 条要点', default: 'built-in', updatedBy: expect.any(String) });
+      expect((await pull({ defaults: { summaryPrompt: 'built-in v2' } })).body).toEqual({ summaryPrompt: '写 3 条要点' });
+      expect((await save(token, '  ')).body.summaryPrompt).toMatchObject({ value: null, default: 'built-in v2' });
+      expect((await pull({})).body).toEqual({ summaryPrompt: null });
+    });
   });
 
   describe('re-run', () => {
