@@ -1,0 +1,58 @@
+/* Leads ▸ Facebook (pages/desktop/leads/fbchat/*): what the three tabs share.
+   Each tab keeps its own sheet: fbChatChats.css, fbChatAccounts.css,
+   fbChatSettings.css. Prefix fbc-, colours from the ERP's tokens. */
+
+/* Where a reply was typed. Telegram rides on --info. */
+.page-fbchat {
+  --fbc-src-erp: var(--accent-strong);
+  --fbc-src-tg: var(--info-strong);
+  --fbc-src-fb: var(--fg-muted);
+}
+
+/* The page column never scrolls itself: the tab body does, or, on Chats, the
+   columns inside it. */
+.page.page-fbchat { overflow: hidden; padding-bottom: 0; gap: 0; }
+.page.page-fbchat > .page-head { margin-bottom: 14px; }
+.page.page-fbchat > .page-head,
+.fbc-tabs, .fbc-lede { flex-shrink: 0; }
+
+.fbc-tabs .tab { display: inline-flex; align-items: center; gap: 7px; text-decoration: none; }
+.fbc-tabs .chip { font-variant-numeric: tabular-nums; }
+.fbc-lede { margin: 12px 0 14px; max-width: 72ch; color: var(--fg-muted); font-size: 13.5px; line-height: 1.5; }
+
+.fbc-body { flex: 1; min-height: 0; min-width: 0; }
+.fbc-body.fbc-fill { display: flex; flex-direction: column; }
+.fbc-body.fbc-scroll { overflow-y: auto; padding-bottom: 40px; }
+
+/* A tab before its first answer: loading, or failed with a way to try again. */
+.fbc-load {
+  padding: 28px 18px; color: var(--fg-muted); font-size: 13px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+
+/* One hue per buyer account, set inline as --h (fbcHueStyle). */
+.fbc-acct { --c: oklch(0.58 0.12 var(--h)); --cs: oklch(0.95 0.035 var(--h)); }
+.fbc-badge {
+  width: 22px; height: 22px; border-radius: 7px; flex-shrink: 0;
+  background: var(--cs); color: var(--c);
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+  display: inline-grid; place-items: center;
+}
+.fbc-badge.sm { width: 19px; height: 19px; font-size: 10px; border-radius: 6px; }
+
+/* A buyer's avatar; --ah is set inline from the name. */
+.fbc-av {
+  border-radius: 50%; flex-shrink: 0; position: relative;
+  background: oklch(0.9 0.02 var(--ah, 250)); color: oklch(0.4 0.06 var(--ah, 250));
+  display: grid; place-items: center; font-weight: 600;
+}
+
+/* Account status, one line with a dot. */
+.fbc-health { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; white-space: nowrap; }
+.fbc-health i { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-subtle); flex-shrink: 0; }
+.fbc-h-running i { background: var(--accent); }
+.fbc-h-paused { color: var(--warn-strong); }
+.fbc-h-paused i { background: var(--warn); }
+.fbc-h-login, .fbc-h-checkpoint { color: var(--neg); font-weight: 550; }
+.fbc-h-login i, .fbc-h-checkpoint i { background: var(--neg); }
+.fbc-h-stale { color: var(--fg-muted); }

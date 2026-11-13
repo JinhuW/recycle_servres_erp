@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
   accountingEntryPath, afterSalesCasePath, afterSalesNewPath, FLEET_TABS, fleetRedirect, fleetTabPath, matchFleetTab, fleetWorkerPath, hrefFor, matchFleetWorker, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, matchWebsiteLead, websiteLeadPath, navigate, navigateBack, onLinkClick,
   knownDesktopView, parseShippingRoute, pathToDesktopView, pathToMobileView, poCheckPath, poLinePath, readPath, readPoLineQuery, readSafeNext,
-  replaceRoute, sellOrderPackPath, splitHash,
+  replaceRoute, sellOrderPackPath, splitHash, fbChatTabPath, fbChatThreadPath, matchFbChatRoute,
   type LinkClick,
 } from './route';
 
@@ -150,6 +150,18 @@ describe('parseShippingRoute', () => {
   it('maps /clients and a deep link to one client', () => {
     expect(pathToDesktopView('/clients')).toBe('clients');
     expect(pathToDesktopView('/clients/2f1c0b7e-0000-4000-8000-000000000000')).toBe('clients');
+  });
+
+  it('maps Leads ▸ Facebook, its tabs and one open chat', () => {
+    expect(pathToDesktopView('/leads/facebook')).toBe('leadsFacebook');
+    expect(matchFbChatRoute(fbChatTabPath('chats'))).toEqual({ tab: 'chats', threadId: null });
+    expect(matchFbChatRoute(fbChatTabPath('accounts'))).toEqual({ tab: 'accounts', threadId: null });
+    expect(matchFbChatRoute(fbChatTabPath('settings'))).toEqual({ tab: 'settings', threadId: null });
+    expect(matchFbChatRoute(fbChatThreadPath(42))).toEqual({ tab: 'chats', threadId: 42 });
+    expect(pathToDesktopView(fbChatThreadPath(42))).toBe('leadsFacebook');
+    expect(matchFbChatRoute('/leads/facebook/chat/abc')).toBeNull();
+    expect(matchFbChatRoute('/leads/facebook/chat/0')).toBeNull();
+    expect(matchFbChatRoute('/leads/facebook/nope')).toBeNull();
   });
 
   it('maps Leads ▸ Website and one lead, by the old paths too', () => {

@@ -383,6 +383,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   wechat:     '/wechat',
   coordinator: '/fleet',
   leadsReddit: '/leads/reddit',
+  leadsFacebook: '/leads/facebook',
   settings:   '/settings',
 } as const;
 
@@ -419,6 +420,7 @@ export function knownDesktopView(path: string): DesktopViewId | null {
   if (path === '/wechat' || matchWechatDay(path)) return 'wechat';
   if (path === '/fleet' || path === '/fleet/pool' || matchFleetTab(path) || fleetRedirect(path) || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
   if (path === '/leads/reddit' || matchLeadsTab(path)) return 'leadsReddit';
+  if (matchFbChatRoute(path)) return 'leadsFacebook';
   if (path === '/settings') return 'settings';
   return null;
 }
@@ -471,6 +473,28 @@ export function leadsTabPath(tab: LeadsTab | 'pool'): string {
 export function matchLeadsTab(path: string): LeadsTab | null {
   const m = match('/leads/reddit/:tab', path);
   return m && (LEADS_TABS as readonly string[]).includes(m.tab) ? (m.tab as LeadsTab) : null;
+}
+
+// Leads ▸ Facebook: Chats at /leads/facebook itself, one open chat under it,
+// and the Accounts and Settings tabs beside it.
+export const FB_CHAT_TABS = ['chats', 'accounts', 'settings'] as const;
+export type FbChatTab = (typeof FB_CHAT_TABS)[number];
+export type FbChatRoute = { tab: FbChatTab; threadId: number | null };
+
+export function fbChatTabPath(tab: FbChatTab): string {
+  return tab === 'chats' ? '/leads/facebook' : `/leads/facebook/${tab}`;
+}
+
+export function fbChatThreadPath(threadId: number): string {
+  return `/leads/facebook/chat/${threadId}`;
+}
+
+export function matchFbChatRoute(path: string): FbChatRoute | null {
+  if (path === '/leads/facebook') return { tab: 'chats', threadId: null };
+  if (path === '/leads/facebook/accounts') return { tab: 'accounts', threadId: null };
+  if (path === '/leads/facebook/settings') return { tab: 'settings', threadId: null };
+  const id = match('/leads/facebook/chat/:id', path)?.id;
+  return id && /^[1-9]\d{0,14}$/.test(id) ? { tab: 'chats', threadId: Number(id) } : null;
 }
 
 // One lead on Leads ▸ Website. It lived at /web-submissions/:id until it moved

@@ -1,0 +1,100 @@
+/* Leads ▸ Facebook ▸ Settings (pages/desktop/leads/fbchat/SettingsTab.tsx).
+   Prefix fbcs-. The tab body (.fbc-scroll) is the scroller. */
+
+.fbcs-grid { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 28px; max-width: 1180px; }
+
+.fbcs-nav { position: sticky; top: 0; align-self: start; display: flex; flex-direction: column; gap: 2px; }
+.fbcs-nav button {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  padding: 7px 10px; border-radius: 7px; font-size: 13px; color: var(--fg-muted);
+}
+.fbcs-nav button:hover { background: var(--bg-soft); color: var(--fg); }
+.fbcs-nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fbcs-nav button.on { background: var(--bg-elev); color: var(--fg); box-shadow: 0 0 0 1px var(--border); }
+
+.fbcs-sec { margin-bottom: 28px; scroll-margin-top: 10px; }
+.fbcs-sec > header { margin-bottom: 10px; }
+.fbcs-sec h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.fbcs-sec > header p { margin: 3px 0 0; font-size: 13px; color: var(--fg-muted); max-width: 64ch; }
+
+.fbcs-scope {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  padding: 12px 18px; border-bottom: 1px solid var(--border);
+  background: var(--bg-soft); border-radius: var(--radius) var(--radius) 0 0; font-size: 13px;
+}
+.fbcs-scope select { width: auto; }
+.fbcs-scope-hint { color: var(--fg-subtle); font-size: 12.5px; }
+
+.fbcs-fields { padding: 4px 0; }
+.fbcs-none { padding: 14px 18px; font-size: 13px; color: var(--fg-subtle); }
+.fbcs-field {
+  display: grid; grid-template-columns: minmax(0, 1fr) 220px 130px; gap: 16px; align-items: center;
+  padding: 12px 18px; border-bottom: 1px solid var(--border);
+}
+.fbcs-field:last-child { border-bottom: 0; }
+.fbcs-label { font-weight: 500; font-size: 13.5px; }
+.fbcs-label code { margin-left: 8px; font-size: 11.5px; font-weight: 400; color: var(--fg-subtle); }
+.fbcs-label code.fbcs-key { margin-left: 0; font-size: 13px; color: var(--fg); }
+.fbcs-field p { margin: 2px 0 0; font-size: 12.5px; color: var(--fg-muted); }
+.fbcs-field p.fbcs-error { color: var(--neg); }
+.fbcs-unit, .fbcs-range { display: flex; align-items: center; gap: 6px; }
+.fbcs-unit span, .fbcs-range span { font-size: 12px; color: var(--fg-subtle); }
+.fbcs-range .input { width: 76px; }
+.fbcs-bounds { font-size: 11.5px; color: var(--fg-subtle); margin-top: 3px; }
+.fbcs-json-save { display: flex; justify-content: flex-end; margin-top: 6px; }
+.fbcs-field textarea.input { font-size: 12px; }
+.fbcs-raw { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* An account's own value: the row takes a wash of the account's hue (--h
+   comes from fbcHueStyle, --c from .fbc-acct). */
+.fbcs-field.fbcs-own { background: oklch(0.985 0.012 var(--h, 165)); }
+.fbcs-note { font-size: 11.5px; color: var(--fg-subtle); text-align: right; }
+.fbcs-note b { color: var(--c, var(--accent-strong)); font-weight: 600; }
+.fbcs-note button {
+  all: unset; cursor: pointer; display: block; margin: 2px 0 0 auto;
+  color: var(--fg-muted); text-decoration: underline;
+}
+.fbcs-note button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fbcs-note button:disabled { cursor: default; opacity: 0.5; }
+
+.fbcs-sw {
+  position: relative; width: 34px; height: 20px; border-radius: 999px;
+  background: var(--border-strong); border: 0; padding: 0; cursor: pointer; transition: background .15s;
+}
+.fbcs-sw::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .2); transition: transform .15s;
+}
+.fbcs-sw[aria-checked=true] { background: var(--accent); }
+.fbcs-sw[aria-checked=true]::after { transform: translateX(14px); }
+/* On means something stopped, so it is not the reassuring green. */
+.fbcs-sw.caution[aria-checked=true] { background: var(--warn-loud); }
+.fbcs-sw:disabled { cursor: default; opacity: 0.6; }
+.fbcs-sw:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.fbcs-adv > summary {
+  list-style: none; cursor: pointer; padding: 12px 18px;
+  font-size: 13px; font-weight: 500; color: var(--fg-muted); border-top: 1px solid var(--border);
+}
+.fbcs-adv > summary::-webkit-details-marker { display: none; }
+.fbcs-adv > summary::before { content: "▸ "; }
+.fbcs-adv[open] > summary::before { content: "▾ "; }
+.fbcs-adv[open] > summary { border-bottom: 1px solid var(--border); }
+
+.fbcs-tg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.fbcs-tg > div { padding: 14px 18px; border-right: 1px solid var(--border); }
+.fbcs-tg > div:last-child { border-right: 0; }
+.fbcs-tg small { display: block; font-size: 12px; color: var(--fg-subtle); margin-bottom: 4px; }
+.fbcs-tg b { font-weight: 600; font-size: 14px; color: var(--fg); }
+.fbcs-tg p { margin: 2px 0 0; font-size: 12px; color: var(--fg-subtle); }
+
+@media (max-width: 900px) {
+  .fbcs-grid { grid-template-columns: minmax(0, 1fr); }
+  .fbcs-nav { display: none; }
+  .fbcs-field { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .fbcs-note { text-align: left; }
+  .fbcs-note button { margin-left: 0; }
+  .fbcs-tg { grid-template-columns: minmax(0, 1fr); }
+  .fbcs-tg > div { border-right: 0; border-bottom: 1px solid var(--border); }
+  .fbcs-tg > div:last-child { border-bottom: 0; }
+}

@@ -14,7 +14,8 @@ import type { SqlLike } from '../db';
 
 // The store behind the Facebook chat hub. Extensions push conversation
 // windows; this aligns each one against what is stored, keeps the new
-// messages, and hands out the replies typed in Telegram. Telegram itself is
+// messages, and hands out the replies typed in Telegram or in the ERP (the
+// page's own reads and writes are fbChatPage.ts). Telegram itself is
 // fbChatTelegram.ts, which only reads what this writes.
 
 type Tx = postgres.TransactionSql;
@@ -68,17 +69,53 @@ async function addEvent(
 
 type AccountRow = { id: number; label: string; restricted: string | null };
 
-/** The account's row, created on first sight. Every push goes through here. */
-export async function touchAccount(tx: SqlLike, ref: FbChatAccountRef, clientId: string): Promise<AccountRow> {
-  const [row] = await tx<AccountRow[]>`
-    INSERT INTO fb_chat_accounts (fb_uid, label, client_id, ext_version)
-    VALUES (${ref.fbUid}, ${ref.label}, ${clientId}, ${ref.extVersion ?? null})
+const DEVICE_CLIENT = 'device:';
+
+/**
+ * The account's row, created on first sight. Every push goes through here, so
+ * the common path is a plain UPDATE: an upsert would burn an id on each one.
+ * Needs a transaction: a new account takes its display number under a lock.
+ */
+export async function touchAccount(tx: Tx, ref: FbChatAccountRef, clientId: string): Promise<AccountRow> {
+  const extVersion = ref.extVersion ?? null;
+  // A name a manager gave outlives the extension repeating its profile label.
+  const [seen] = await tx<AccountRow[]>`
+    UPDATE fb_chat_accounts SET
+      label = CASE WHEN NOT label_locked AND ${ref.label} <> '' THEN ${ref.label} ELSE label END,
+      client_id = ${clientId},
+      ext_version = COALESCE(${extVersion}, ext_version),
+      last_seen_at = NOW()
+    WHERE fb_uid = ${ref.fbUid}
+    RETURNING id::int AS id, label, restricted`;
+  if (seen) return seen;
+
+  // What the manager chose when approving this Chrome, kept until now because
+  // the Facebook user was not necessarily known then.
+  const deviceId = clientId.startsWith(DEVICE_CLIENT) ? clientId.slice(DEVICE_CLIENT.length) : null;
+  const [device] = deviceId === null ? [] : await tx<{ account_label: string | null; start_paused: boolean; decided_by: string | null }[]>`
+    SELECT account_label, start_paused, decided_by FROM fb_chat_devices WHERE id = ${deviceId}`;
+  const named = device?.account_label ?? null;
+  // Two new accounts at once would otherwise read the same highest number.
+  await tx`SELECT pg_advisory_xact_lock(hashtextextended('fb-chat-account-no', 0))`;
+  const [row] = await tx<(AccountRow & { created: boolean })[]>`
+    INSERT INTO fb_chat_accounts (fb_uid, label, label_locked, client_id, ext_version, no)
+    VALUES (${ref.fbUid}, ${named ?? ref.label}, ${named !== null}, ${clientId}, ${extVersion},
+            (SELECT COALESCE(MAX(no), 0) + 1 FROM fb_chat_accounts))
     ON CONFLICT (fb_uid) DO UPDATE SET
-      label = CASE WHEN EXCLUDED.label <> '' THEN EXCLUDED.label ELSE fb_chat_accounts.label END,
+      label = CASE WHEN NOT fb_chat_accounts.label_locked AND ${ref.label} <> '' THEN ${ref.label} ELSE fb_chat_accounts.label END,
       client_id = EXCLUDED.client_id,
       ext_version = COALESCE(EXCLUDED.ext_version, fb_chat_accounts.ext_version),
       last_seen_at = NOW()
-    RETURNING id::int AS id, label, restricted`;
+    RETURNING id::int AS id, label, restricted, (xmax = 0) AS created`;
+  if (row!.created && device && (named !== null || device.start_paused)) {
+    if (device.start_paused) {
+      await tx`
+        INSERT INTO fb_chat_config (account_id, key, value, updated_by)
+        VALUES (${row!.id}, 'paused', ${tx.json(true)}, ${device.decided_by})`;
+    }
+    // Applied once: a later account from the same Chrome is not this one.
+    await tx`UPDATE fb_chat_devices SET account_label = NULL, start_paused = FALSE WHERE id = ${deviceId}`;
+  }
   return row!;
 }
 
@@ -171,15 +208,23 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
     await addEvent(tx, acct.id, threadId, 'sync_gap', { stored: stored.length, rows: t.rows.length });
   }
 
-  // Replies from Telegram that have not been placed in the conversation yet.
+  // Replies of ours that have not been placed in the conversation yet. One
+  // put back in the outbox after an attempt counts: that attempt may have
+  // landed, and finding its bubble here is what stops it being typed again.
   const pending = await tx<{ id: number; body: string; send_state: string }[]>`
     SELECT id::int AS id, body, send_state FROM fb_chat_messages
-     WHERE thread_id = ${threadId} AND seq IS NULL AND send_state IN ('sending','sent','uncertain')
+     WHERE thread_id = ${threadId} AND seq IS NULL
+       AND (send_state IN ('sending','sent','uncertain') OR (send_state = 'queued' AND attempts > 0))
      ORDER BY id`;
   let seq = thread!.last_seq;
   let added = 0;
   let inbound = false;
   let outbound = false;
+  // The shared read mark: a buyer's message moves the unread position, and
+  // anything of ours after it counts as having answered. History read on
+  // first sight counts too, so a chat found ending with the buyer is unread.
+  let inboundSeq: number | null = null;
+  let answeredSeq = 0;
   for (const row of fresh) {
     seq += 1;
     const ours = row.direction === 'out'
@@ -194,6 +239,7 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
                acked_at = CASE WHEN send_state = 'sent' THEN acked_at ELSE NULL END
          WHERE id = ${m!.id}`;
       outbound = true;
+      answeredSeq = seq;
       continue;
     }
     await tx`
@@ -201,6 +247,8 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
       VALUES (${threadId}, ${seq}, ${row.direction}, 'facebook', ${row.text},
               ${tx.json(row.images)}, ${isNew}, ${row.at ?? null})`;
     added += 1;
+    if (row.direction === 'in') inboundSeq = seq;
+    else answeredSeq = seq;
     if (!isNew) {
       if (row.direction === 'in') inbound = true;
       else outbound = true;
@@ -209,6 +257,8 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
   await tx`
     UPDATE fb_chat_threads SET
       last_seq = ${seq}, last_synced_at = NOW(),
+      last_inbound_seq = COALESCE(${inboundSeq}, last_inbound_seq),
+      read_seq = GREATEST(read_seq, ${answeredSeq}),
       last_inbound_at = CASE WHEN ${inbound} THEN NOW() ELSE last_inbound_at END,
       last_outbound_at = CASE WHEN ${outbound} THEN NOW() ELSE last_outbound_at END
     WHERE id = ${threadId}`;
@@ -267,15 +317,20 @@ export async function recordSendResult(tx: Tx, id: number, r: FbChatSendResult, 
   const [m] = await tx<{ thread_id: number; send_state: string; seq: number | null; attempts: number }[]>`
     SELECT m.thread_id::int AS thread_id, m.send_state, m.seq, m.attempts
       FROM fb_chat_messages m JOIN fb_chat_threads t ON t.id = m.thread_id
-     WHERE m.id = ${id} AND t.account_id = ${acct.id} AND m.source = 'telegram'
+     WHERE m.id = ${id} AND t.account_id = ${acct.id} AND m.source IN ('telegram', 'erp')
        FOR UPDATE OF m`;
   if (!m) return 'not_found';
   // A sync may already have found the bubble and settled it; that stands.
   if (m.send_state === 'sent' && m.seq !== null) return 'ok';
-  if (m.send_state !== 'sending') return 'not_sending';
+  // A retried reply is queued again, and the browser's late word that the
+  // earlier attempt did land settles it before it is typed a second time.
+  const requeued = m.send_state === 'queued' && m.attempts > 0 && r.outcome === 'sent';
+  if (m.send_state !== 'sending' && !requeued) return 'not_sending';
   if (r.outcome === 'sent') {
     const [t] = await tx<{ last_seq: number }[]>`
-      UPDATE fb_chat_threads SET last_seq = last_seq + 1, last_outbound_at = NOW() WHERE id = ${m.thread_id}
+      UPDATE fb_chat_threads SET
+        last_seq = last_seq + 1, last_outbound_at = NOW(), read_seq = GREATEST(read_seq, last_seq + 1)
+       WHERE id = ${m.thread_id}
       RETURNING last_seq`;
     await tx`
       UPDATE fb_chat_messages SET send_state = 'sent', sent_at = NOW(), seq = ${t!.last_seq},

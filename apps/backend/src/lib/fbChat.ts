@@ -4,6 +4,7 @@ import {
   FB_CHAT_CONFIG_VALUE_MAX,
   FB_CHAT_EVENT_KINDS,
   FB_CHAT_MAX_WAIT_SEC,
+  FB_CHAT_REPLY_MAX_CHARS,
   type FbChatAccountRef,
   type FbChatBuyer,
   type FbChatBuyerPush,
@@ -28,7 +29,7 @@ export class FbChatPushError extends Error {}
 const MAX_ROWS = 2000;
 const MAX_BODY = 8000;
 const MAX_IMAGES = 10;
-export const FB_CHAT_REPLY_MAX = 2000;
+export const FB_CHAT_REPLY_MAX = FB_CHAT_REPLY_MAX_CHARS;
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);

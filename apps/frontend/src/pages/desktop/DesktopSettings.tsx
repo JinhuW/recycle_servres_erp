@@ -17,11 +17,10 @@ const CategoriesPanel = lazy(() => import('./settings/CategoriesPanel').then(m =
 const GeneralPanel = lazy(() => import('./settings/GeneralPanel').then(m => ({ default: m.GeneralPanel })));
 const FxRatesPanel = lazy(() => import('../../components/FxRatesPanel').then(m => ({ default: m.FxRatesPanel })));
 const PerformancePanel = lazy(() => import('./settings/PerformancePanel').then(m => ({ default: m.PerformancePanel })));
-const FbChatBridgePanel = lazy(() => import('./settings/FbChatBridgePanel').then(m => ({ default: m.FbChatBridgePanel })));
 const DesktopSettingsConnectors = lazy(() => import('./DesktopSettingsConnectors').then(m => ({ default: m.DesktopSettingsConnectors })));
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
-type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'fx' | 'performance' | 'fbChat' | 'connectors';
+type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'fx' | 'performance' | 'connectors';
 
 // Section labels are looked up via t() at render time — id ↔ tKey is the
 // only declarative mapping we need; pluralization / casing belongs to the
@@ -39,7 +38,6 @@ const SECTIONS: { id: SectionId; labelKey: string; subKey: string; icon: IconNam
   { id: 'general',    labelKey: 'settingsNavGeneral',    subKey: 'settingsNavGeneralSub',    icon: 'settings', managerOnly: true },
   { id: 'fx',         labelKey: 'settingsNavFx',         subKey: 'settingsNavFxSub',         icon: 'refresh', managerOnly: true },
   { id: 'performance', labelKey: 'settingsNavPerformance', subKey: 'settingsNavPerformanceSub', icon: 'analytics', managerOnly: true },
-  { id: 'fbChat',     labelKey: 'settingsNavFbChat',     subKey: 'settingsNavFbChatSub',     icon: 'chats', managerOnly: true },
   { id: 'connectors', labelKey: 'connectorsTab',         subKey: 'settingsNavConnectorsSub', icon: 'chip' },
 ];
 
@@ -94,7 +92,6 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
             {section === 'general'    && <GeneralPanel />}
             {section === 'fx'         && <FxRatesPanel />}
             {section === 'performance' && <PerformancePanel />}
-            {section === 'fbChat'     && <FbChatBridgePanel />}
             {section === 'connectors' && <DesktopSettingsConnectors />}
           </Suspense>
         </div>

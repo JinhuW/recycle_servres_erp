@@ -1340,22 +1340,65 @@ is the inbox for the public website forms, described with the public forms
 further down. Clicking Leads opens Reddit. The closed row's badge adds up both
 sources.
 
-**Leads ▸ Facebook** and the Fleet worker page's **Facebook seller** card are
-gone (v1.454.0, RS-581). A fleet account only searches. The owner's
-Marketplace chats go through the chat hub below, which uses no fleet account.
+The seller product that was first called Leads ▸ Facebook, and the Fleet
+worker page's **Facebook seller** card, are gone (v1.454.0, RS-581). A fleet
+account only searches. The owner's Marketplace chats go through the chat hub
+below, which uses no fleet account.
 
 **Facebook chat hub** (`/api/fb-chat`, v1.451.0, RS-578) relays the owner's
-own Marketplace chats to Telegram. Its one page is Settings ▸ Chat bridge
-(v1.453.0).
+own Marketplace chats to Telegram. Its page is **Leads ▸ Facebook**
+(`#/leads/facebook`, managers only, desktop only, v1.456.0, RS-583), with
+three tabs. It replaced Settings ▸ Chat bridge (v1.453.0), which is removed.
+The sidebar row shows the number of unread chats.
+
+- **Chats tab.** The left column lists chats, newest activity first. It can
+  be narrowed to one account, searched by buyer, listing or message text, and
+  filtered to Unread or Not sent. The open chat is in the middle. The right
+  column has the buyer's rating, location and join year, the listing, a link
+  to the chat's Telegram topic, and the same buyer's chats on our other
+  accounts. The details column drops on a narrow window. Each outbound
+  message says where it was typed (Facebook, Telegram or the ERP) and, for
+  the ERP, who typed it.
+- **Replying in the ERP.** A text reply typed in the open chat (2000
+  characters at most, no photos) goes through the same outbox as a Telegram
+  reply and is posted into the chat's topic as `↩️ <first name> (ERP): …`. It
+  is queued whatever the account's state and goes out when the account's
+  extension next claims. The bubble shows queued, typing, sent or not sent. A
+  failed reply has Retry on its bubble. One marked uncertain may already be on
+  Facebook, so its button is worded to say the buyer could get it twice. In
+  the topic, a failed or uncertain ERP reply gets one line saying
+  so, and one more if it is sent after all.
+- **Unread is shared by the team.** A chat is unread while the buyer's
+  message is the newest thing nobody has opened or answered, in the ERP or in
+  Telegram. Opening a chat marks it read for everyone, and "Mark as unread"
+  puts the mark back. There is no per-user read state.
+- **Accounts tab.** Each extension waiting to connect is a card with its
+  pairing code, Chrome profile, Facebook user, browser, address and version.
+  Approve takes a name and an optional "start with sending paused"; Deny
+  refuses it. When the request's Facebook user is already an account the card
+  offers Reconnect, which moves the account to the new Chrome, revokes the
+  old one and keeps the chats. Below is one row per Facebook account with a
+  number, its status (running, paused, needs login, checkpoint, or not
+  checking in after three missed settings checks and at least five minutes),
+  replies waiting, last sync, extension version, whether it has picked up the
+  current settings, and the Chrome that relays it. A row can be renamed,
+  paused or resumed, and its Chrome disconnected, which revokes the device
+  and keeps the chats. A name given here stays when the extension next
+  reports its own profile name. An approved account appears at its first
+  check-in.
+- **Settings tab.** See *Settings from the ERP* below.
+- **Only what the server knows.** The page does not show whether the bridge
+  is switched off in a Chrome, the extension's log or its last error. Those
+  stay in the extension.
 
 - **Who sends.** A Chrome extension in each of the owner's browser profiles
   (`facebook_messager_extenion/` in the workspace, its own repo), one Facebook
   account per profile. Nothing is typed into the extension (v1.455.0, RS-582):
   its build carries the ERP address, it enrolls itself through the open
   `POST /api/fb-chat/enroll`, and it waits, showing a pairing code, until a
-  manager approves it under Settings ▸ Chat bridge ▸ Extensions, where the same
+  manager approves it on Leads ▸ Facebook ▸ Accounts (v1.456.0), where the same
   code is listed with the profile name, Facebook user, version and address.
-  Reject or Revoke stops it. Enrollment is limited to 5 an hour per address and
+  Deny or Disconnect stops it. Enrollment is limited to 5 an hour per address and
   25 waiting requests; one nobody acts on is forgotten after 7 days. Approvals
   on dev survive the nightly copy from prod. An extension set up before this
   with a `fbchat:write` service client from Settings ▸ Connectors keeps
@@ -1383,18 +1426,24 @@ own Marketplace chats to Telegram. Its one page is Settings ▸ Chat bridge
   General, and one more when the account is back.
 - **Data.** Every message, buyer profile (rating, rating count, location, join
   year), send attempt and account event is kept in the `fb_chat_*` tables for
-  analysis. Managers can read `/api/fb-chat/accounts`, `/threads` and
+  analysis. Each message records where it was typed (`facebook`, `telegram`
+  or `erp`) and, for the ERP, which user (v1.456.0). Managers read them on
+  Leads ▸ Facebook through `/api/fb-chat/accounts`, `/threads` and
   `/threads/:id/messages`.
 - **Settings from the ERP** (v1.453.0, RS-579). An extension's options page
   holds only the profile's name and the on/off switch. It asks `POST /api/fb-chat/push/config` for everything else
   as soon as it can reach the ERP, bridge on or off, then about once a minute.
-  Settings ▸ Chat bridge (managers) sets each value for every profile or for one
-  profile, and one profile's own value wins. The settings are not a fixed list:
-  each extension reports the fields it understands (key, type, default,
-  bounds, label), and the page draws its form from the newest version's
-  fields. A value that does not fit a reported field is refused. A key no
+  Leads ▸ Facebook ▸ Settings (managers) sets each value for every account or
+  for one account, and one account's own value wins until it is reset. The
+  page groups them (v1.456.0) as Sending (paused, time between replies, typing
+  pace), Reading the inbox (the inbox refresh window as one range, quiet chat
+  wait) and Advanced (the settings check, closed by default), and a card shows
+  whether Telegram is connected and how many topics exist. The settings are
+  not a fixed list: each extension reports the fields it understands (key,
+  type, default, bounds, label), and a field the page has no group for is
+  shown and editable under Advanced. A value that does not fit a reported field is refused. A key no
   extension reports yet is accepted and kept, and an extension that does not
-  know a key ignores it. The page lists each profile with its extension version
+  know a key ignores it. The Accounts tab lists each account with its extension version
   and whether it has picked up the latest settings yet. The first settings are
   Paused, Time between replies, Typing pace, Quiet thread wait, Buyer profile
   refresh, the inbox reload window and the Settings check interval itself.

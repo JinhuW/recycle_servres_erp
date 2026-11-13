@@ -97,7 +97,7 @@ manager approved (older installs: a `fbchat:write` service-client token), and
 with the same token long-polls
 `/push/outbox/claim` for replies typed in Telegram, then reports through
 `/push/outbox/<id>/result`. It also asks `/push/config` about once a minute
-for the settings set on Settings ▸ Chat bridge, sending the fields it
+for the settings set on Leads ▸ Facebook ▸ Settings, sending the fields it
 understands; that list is open, so a new setting needs only an extension
 release. The payload is `packages/shared/src/fbChat.ts` on
 this side and the extension's `src/shared/hub-contract.ts` on that one; test
