@@ -12,7 +12,10 @@ import {
   type WechatRerun,
   type WechatRow,
   type WechatRowKind,
+  type WechatSettings,
   type WechatSide,
+  type WechatWarningAck,
+  WECHAT_PROMPT_MAX,
 } from '@recycle-erp/shared';
 import { Icon } from '../../components/Icon';
 import { RefinePanel } from '../../components/RefinePanel';
@@ -71,9 +74,12 @@ const RERUN_POLL_MS = 15_000;
 const REPORT_TZ = 'America/New_York';
 
 type Loaded = { day: WechatDay; rows: WechatRow[] };
-type Tab = 'board' | 'groups';
+type Tab = 'board' | 'groups' | 'settings';
 
-const tabFromUrl = (): Tab => (readHashQuery().get('view') === 'groups' ? 'groups' : 'board');
+const tabFromUrl = (): Tab => {
+  const v = readHashQuery().get('view');
+  return v === 'groups' || v === 'settings' ? v : 'board';
+};
 
 // The legend wears the board's side colours: demand-heavy is the bid's.
 const SIGNAL_CLASS: Record<'info' | 'accent' | 'muted', string> = {
@@ -204,6 +210,23 @@ export function DesktopWechat() {
     setAsking(true);
     wechatApi.rerun(date).then(setRerun).catch(handleFetchError).finally(() => setAsking(false));
   };
+  // Acks are the team's, not the report's: kept beside the day so a click
+  // doesn't reload the board, and the day's cached families dropped so the
+  // next switch asks again.
+  const [acks, setAcks] = useState<WechatWarningAck[]>([]);
+  const [acking, setAcking] = useState<string | null>(null);
+  useEffect(() => { setAcks(day?.warningAcks ?? []); }, [day]);
+  const ackWarning = (warning: string, acked: boolean) => {
+    if (!date) return;
+    setAcking(warning);
+    wechatApi.ackWarning(date, warning, acked)
+      .then(a => {
+        setAcks(a);
+        for (const key of dayCache.current.keys()) if (key.startsWith(`${date}:`)) dayCache.current.delete(key);
+      })
+      .catch(handleFetchError)
+      .finally(() => setAcking(null));
+  };
   const rows = loaded && loaded !== 'missing' ? loaded.rows : null;
   const summary = days?.find(d => d.date === date) ?? null;
   const prevSummary = day?.prevDate ? days?.find(d => d.date === day.prevDate) ?? null : null;
@@ -230,7 +253,7 @@ export function DesktopWechat() {
   // A plain click stays on the page: the query is all that moves.
   const tabLink = (v: Tab) => ({
     className: `tab ${tab === v ? 'active' : ''}`,
-    href: hrefFor(path + (v === 'groups' ? '?view=groups' : '')),
+    href: hrefFor(path + (v === 'board' ? '' : `?view=${v}`)),
     'aria-current': tab === v ? ('page' as const) : undefined,
     onClick: (e: React.MouseEvent) => {
       if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -245,6 +268,9 @@ export function DesktopWechat() {
       </a>
       <a {...tabLink('groups')}>
         <Icon name="chats" size={14} />{t('wxTabGroups')}{summary && <span className="chip muted">{summary.totals.groupsTotal}</span>}
+      </a>
+      <a {...tabLink('settings')}>
+        <Icon name="settings" size={14} />{t('wxTabSettings')}
       </a>
     </nav>
   );
@@ -293,10 +319,7 @@ export function DesktopWechat() {
           </div>
         )}
         {day && day.warnings.length > 0 && (
-          <div className="wx-banner wx-warn">
-            <Icon name="alert" size={15} />
-            <ul>{day.warnings.map(w => <li key={w}>{w}</li>)}</ul>
-          </div>
+          <WarningsBanner warnings={day.warnings} acks={acks} busy={acking} onAck={ackWarning} />
         )}
 
         {tab === 'board' && loaded !== 'missing' && <>
@@ -330,6 +353,7 @@ export function DesktopWechat() {
         </>}
 
         {tab === 'groups' && loaded !== 'missing' && <GroupsCard day={day} locale={locale} />}
+        {tab === 'settings' && <SettingsCard />}
       </div>
     </>
   );
@@ -405,6 +429,61 @@ function RerunControl({ rerun, asking, onRerun }: {
 
 // What became of the day's latest re-run. A clean one says nothing: the day
 // it pushed is what the page shows.
+// A warning a manager has acknowledged steps back to a quiet line with who
+// and when, and can be put back.
+function WarningsBanner({ warnings, acks, busy, onAck }: {
+  warnings: string[];
+  acks: WechatWarningAck[];
+  busy: string | null;
+  onAck: (warning: string, acked: boolean) => void;
+}) {
+  const { t, locale } = useT();
+  const ackOf = new Map(acks.map(a => [a.warning, a]));
+  const open = warnings.filter(w => !ackOf.has(w));
+  const done = warnings.filter(w => ackOf.has(w));
+  return (
+    <>
+      {open.length > 0 && (
+        <div className="wx-banner wx-warn">
+          <Icon name="alert" size={15} />
+          <ul className="wx-warnings">
+            {open.map(w => (
+              <li key={w}>
+                <span>{w}</span>
+                <button type="button" className="btn sm" disabled={busy !== null} onClick={() => onAck(w, true)}
+                  title={t('wxWarnAckHint')}>
+                  <Icon name="check" size={13} />{t('wxWarnAck')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {done.length > 0 && (
+        <div className="wx-banner wx-acked">
+          <Icon name="check" size={15} />
+          <ul className="wx-warnings">
+            {done.map(w => {
+              const a = ackOf.get(w)!;
+              return (
+                <li key={w}>
+                  <span>
+                    {w}
+                    <em>{t('wxWarnAcked', { who: a.by ?? t('wxRerunSomeone'), age: relTime(a.at, locale) })}</em>
+                  </span>
+                  <button type="button" className="btn sm" disabled={busy !== null} onClick={() => onAck(w, false)}>
+                    {t('wxWarnUnack')}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </>
+  );
+}
+
 function RerunBanner({ rerun }: { rerun: WechatRerun }) {
   const { t, locale } = useT();
   if (rerun.status === 'queued') {
@@ -1162,6 +1241,70 @@ function TopCard({ title, sub, rows, side, locale, onPick }: {
         })}
         {rows && top.length === 0 && <li className="fp-muted">{t('wxNoLines')}</li>}
       </ol>
+    </section>
+  );
+}
+
+// The market-note prompt memtrade hands Claude each morning. Empty means
+// memtrade's own (prompts/summary.md), which it reports on every run.
+function SettingsCard() {
+  const { t, locale } = useT();
+  const [settings, setSettings] = useState<WechatSettings | null>(null);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const adopt = useCallback((s: WechatSettings) => {
+    setSettings(s);
+    setDraft(s.summaryPrompt.value ?? s.summaryPrompt.default ?? '');
+  }, []);
+  useEffect(() => { wechatApi.settings().then(adopt).catch(handleFetchError); }, [adopt]);
+  const p = settings?.summaryPrompt;
+  const current = p ? (p.value ?? p.default ?? '') : '';
+  const dirty = p !== undefined && draft !== current;
+  const save = (value: string | null) => {
+    setSaving(true);
+    // The built-in text saved unchanged stays "built-in", so a later edit of
+    // prompts/summary.md still reaches the report.
+    const v = value !== null && p?.default !== null && value === p?.default ? null : value;
+    wechatApi.saveSettings(v)
+      .then(s => { adopt(s); showSuccessToast(t('wxPromptSaved')); })
+      .catch(handleFetchError)
+      .finally(() => setSaving(false));
+  };
+  return (
+    <section className="card wx-settings" aria-label={t('wxPromptTitle')} aria-busy={!settings}>
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t('wxPromptTitle')}</h2>
+          <span className="card-sub">{t('wxPromptSub')}</span>
+        </div>
+      </div>
+      <div className="card-body">
+        {!p ? <Skeleton width="100%" height={220} /> : <>
+          <p className="fp-muted wx-prompt-state">
+            {p.value !== null
+              ? t('wxPromptCustom', { who: p.updatedBy ?? t('wxRerunSomeone'), age: p.updatedAt ? relTime(p.updatedAt, locale) : '' })
+              : p.default !== null ? t('wxPromptBuiltin') : t('wxPromptNoDefault')}
+          </p>
+          <textarea className="input wx-prompt" rows={18} maxLength={WECHAT_PROMPT_MAX} value={draft}
+            spellCheck={false} placeholder={t('wxPromptPh')} aria-label={t('wxPromptTitle')}
+            onChange={e => setDraft(e.target.value)} />
+          <p className="fp-muted">{t('wxPromptHint')}</p>
+          <div className="wx-prompt-actions">
+            {p.value !== null && (
+              <button type="button" className="btn" disabled={saving} onClick={() => save(null)}>
+                <Icon name="rotate" size={13} />{t('wxPromptReset')}
+              </button>
+            )}
+            <button type="button" className="btn" disabled={saving || !dirty} onClick={() => setDraft(current)}>
+              {t('wxPromptDiscard')}
+            </button>
+            <button type="button" className="btn primary" disabled={saving || !dirty || !draft.trim()}
+              onClick={() => save(draft)}>
+              <Icon name="check" size={13} />{t('wxPromptSave')}
+            </button>
+          </div>
+        </>}
+      </div>
     </section>
   );
 }

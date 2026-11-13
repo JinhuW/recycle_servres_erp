@@ -153,6 +153,15 @@ export type WechatDay = WechatDaySummary & {
   nextDate: string | null;
   // The day's latest re-run request, if a manager ever asked for one.
   rerun: WechatRerun | null;
+  // The warnings above a manager has acknowledged, matched by their text.
+  warningAcks: WechatWarningAck[];
+};
+
+export type WechatWarningAck = {
+  warning: string;
+  // The manager's name; null once their account is gone.
+  by: string | null;
+  at: string;
 };
 
 // ── Re-run (the page asks, memtrade polls) ────────────────────────────────────
@@ -171,6 +180,25 @@ export type WechatRerun = {
   degraded: boolean;
   error: string | null;
 };
+
+// ── Settings (managers edit, memtrade fetches) ────────────────────────────────
+
+export const WECHAT_PROMPT_MAX = 20_000;
+
+// GET/PUT /api/wechat-market/settings. `value` null = memtrade's built-in
+// prompt, which `default` carries as memtrade last reported it.
+export type WechatPromptSetting = {
+  value: string | null;
+  default: string | null;
+  updatedBy: string | null;
+  updatedAt: string | null;
+};
+export type WechatSettings = { summaryPrompt: WechatPromptSetting };
+
+// POST /api/wechat-market/push/settings: memtrade sends its built-in prompts
+// as `{ defaults: { summaryPrompt } }` and gets back the one to use, null
+// meaning its own.
+export type WechatSettingsPulled = { summaryPrompt: string | null };
 
 /** What memtrade reports once it has rerun a claimed day. */
 export type WechatRerunFinish = { ok: boolean; degraded?: boolean; error?: string };

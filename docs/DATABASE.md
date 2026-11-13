@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-13:** ERP migration `0242`, Reddit tracker migration `0007`,
+**As of 2026-11-13:** ERP migration `0244`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -1840,9 +1840,9 @@ Ledger of USD→CNY exchange rates. A refresh loop runs every 6 hours and writes
 
 ### Market values
 
-Reference prices per part, and the WeChat market report. ref_prices is the Market values list (one row per tracked part), ref_price_events the price readings behind its last_price, and price_sources a display list; the four wechat_market_* tables hold memtrade's daily report (a day row with its board lines, groups read and evidence points), which nothing here feeds into ref_prices or orders. wechat_market_reruns queues a manager's request to have a day redone, for memtrade to claim.
+Reference prices per part, and the WeChat market report. ref_prices is the Market values list (one row per tracked part), ref_price_events the price readings behind its last_price, and price_sources a display list; the four wechat_market_* tables hold memtrade's daily report (a day row with its board lines, groups read and evidence points), which nothing here feeds into ref_prices or orders. wechat_market_reruns queues a manager's request to have a day redone, for memtrade to claim; wechat_market_warning_acks records which of a day's warnings a manager has acknowledged, and wechat_market_settings holds settings memtrade fetches, such as the market-note prompt.
 
-Tables: [`ref_prices`](#erp-ref-prices), [`ref_price_events`](#erp-ref-price-events), [`price_sources`](#erp-price-sources), [`wechat_market_days`](#erp-wechat-market-days), [`wechat_market_groups`](#erp-wechat-market-groups), [`wechat_market_rows`](#erp-wechat-market-rows), [`wechat_market_points`](#erp-wechat-market-points), [`wechat_market_reruns`](#erp-wechat-market-reruns)
+Tables: [`ref_prices`](#erp-ref-prices), [`ref_price_events`](#erp-ref-price-events), [`price_sources`](#erp-price-sources), [`wechat_market_days`](#erp-wechat-market-days), [`wechat_market_groups`](#erp-wechat-market-groups), [`wechat_market_rows`](#erp-wechat-market-rows), [`wechat_market_points`](#erp-wechat-market-points), [`wechat_market_reruns`](#erp-wechat-market-reruns), [`wechat_market_warning_acks`](#erp-wechat-market-warning-acks), [`wechat_market_settings`](#erp-wechat-market-settings)
 
 ```mermaid
 erDiagram
@@ -2091,6 +2091,40 @@ A manager's Re-run on Monitors ▸ WeChat (v1.363.0). The ERP can't reach memtra
 - **References:** `requested_by` → `users.id` (on delete set null)
 - **Checks:** `status IN ('queued', 'running', 'done', 'failed')`
 - **Indexes:** unique `(report_date) WHERE status IN ('queued', 'running')`, one open request per day, so a second click joins the first; `(report_date, requested_at DESC)`; `(requested_by)`
+
+<a id="erp-wechat-market-warning-acks"></a>
+
+#### `wechat_market_warning_acks`
+
+A manager's Acknowledge on one of a report day's warnings (v1.458.0). Keyed by the warning's text, with no foreign key to the day, so a re-run that repeats the warning keeps it acknowledged and a new or reworded one shows again.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `report_date` | `date` | ✓ |  | The report day. |
+| `warning` | `text` | ✓ |  | The warning's text, as memtrade sent it. |
+| `acked_by` | `uuid` |  |  | The manager who acknowledged it. |
+| `acked_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `(report_date, warning)`
+- **References:** `acked_by` → `users.id` (on delete set null)
+- **Indexes:** `(acked_by)`
+
+<a id="erp-wechat-market-settings"></a>
+
+#### `wechat_market_settings`
+
+Settings for memtrade's report, edited on Monitors ▸ WeChat ▸ Settings and fetched by memtrade (`POST /api/wechat-market/push/settings`) before it writes a day (v1.458.0). Key/value.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `key` | `text` | ✓ |  | `summary_prompt`: the market-note prompt a manager set; no row means memtrade's own. `summary_prompt_default`: memtrade's built-in prompt as it last reported it, shown on the page. |
+| `value` | `text` | ✓ |  |  |
+| `updated_by` | `uuid` |  |  | The manager who last saved it; null for what memtrade reports. |
+| `updated_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `(key)`
+- **References:** `updated_by` → `users.id` (on delete set null)
+- **Indexes:** `(updated_by)`
 
 ### Facebook account pool
 
