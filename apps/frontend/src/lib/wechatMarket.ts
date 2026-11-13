@@ -2,7 +2,9 @@
 // memory-module report memtrade pushes from the team's WeChat groups, and the
 // pure helpers the page sorts and formats it with.
 
+import { WECHAT_POLL_LATE_MS } from '@recycle-erp/shared';
 import type {
+  WechatActivity,
   WechatDay,
   WechatDaySummary,
   WechatEvidence,
@@ -40,12 +42,18 @@ export const wechatApi = {
   ackWarning: (date: string, warning: string, acked: boolean) =>
     api.put<{ warningAcks: WechatWarningAck[] }>(`/api/wechat-market/days/${q(date)}/warning-acks`, { warning, acked })
       .then(r => r.warningAcks),
+  activity: (until: string, days: number) =>
+    api.get<WechatActivity>(`/api/wechat-market/activity?until=${q(until)}&days=${days}`),
   settings: () => api.get<WechatSettings>('/api/wechat-market/settings'),
   saveSettings: (summaryPrompt: string | null) =>
     api.put<WechatSettings>('/api/wechat-market/settings', { summaryPrompt }),
 };
 
 export const rerunOpen = (r: WechatRerun | null): boolean => r?.status === 'queued' || r?.status === 'running';
+
+// A queued request memtrade isn't coming for: it last asked for work too long ago.
+export const rerunStalled = (r: WechatRerun | null, now = Date.now()): boolean =>
+  r?.status === 'queued' && (!r.pollSeenAt || now - Date.parse(r.pollSeenAt) > WECHAT_POLL_LATE_MS);
 
 // The board leads with the brands the team trades most; memtrade writes an
 // unbranded quote as 未注明, and those go last.

@@ -1,8 +1,10 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import {
+  WECHAT_ACTIVITY_DAYS_MAX,
   WECHAT_PROMPT_MAX,
   WECHAT_RERUN_STALE_MS,
   isWechatRowKind,
+  type WechatActivity,
   type WechatDay,
   type WechatDayPush,
   type WechatDaySummary,
@@ -216,11 +218,13 @@ type RerunRow = {
   finished_at: Date | null;
   degraded: boolean;
   error: string | null;
+  poll_seen_at: Date | null;
 };
 
 const RERUN_COLUMNS = (sql: ReturnType<typeof getDb>) => sql`
   r.id, to_char(r.report_date, 'YYYY-MM-DD') AS date, r.status, u.name AS requested_by,
-  r.requested_at, r.claimed_at, r.finished_at, r.degraded, r.error
+  r.requested_at, r.claimed_at, r.finished_at, r.degraded, r.error,
+  (SELECT seen_at FROM wechat_market_heartbeats WHERE kind = 'rerun_poll') AS poll_seen_at
 `;
 
 const rerunOut = (r: RerunRow): WechatRerun => ({
@@ -233,6 +237,7 @@ const rerunOut = (r: RerunRow): WechatRerun => ({
   finishedAt: r.finished_at?.toISOString() ?? null,
   degraded: r.degraded,
   error: r.error,
+  pollSeenAt: r.poll_seen_at?.toISOString() ?? null,
 });
 
 // A claim memtrade never finished (the Mac slept, the process was killed)
@@ -262,6 +267,12 @@ async function latestRerun(sql: ReturnType<typeof getDb>, date: string): Promise
 
 wechat.post('/push/reruns/claim', async (c) => {
   const sql = getDb(c.env);
+  // Every ask counts, so the page can tell a queue nobody is reading from
+  // one memtrade is about to take.
+  await sql`
+    INSERT INTO wechat_market_heartbeats (kind) VALUES ('rerun_poll')
+    ON CONFLICT (kind) DO UPDATE SET seen_at = NOW()
+  `;
   await expireStale(sql);
   const [claimed] = await sql<{ id: string; date: string }[]>`
     UPDATE wechat_market_reruns
@@ -654,5 +665,74 @@ wechat.get('/history', async (c) => {
   }));
   return c.json({ history });
 });
+
+// The communication history behind the report days: each day's totals, each
+// group's messages per day, and the selected day's trade posts by hour.
+wechat.get('/activity', async (c) => {
+  const until = c.req.query('until');
+  if (until !== undefined && !isReportDate(until)) return c.json({ error: 'invalid_date' }, 400);
+  const days = Math.min(WECHAT_ACTIVITY_DAYS_MAX,
+    Math.max(2, Number.parseInt(c.req.query('days') ?? '30', 10) || 30));
+  const sql = getDb(c.env);
+  const dayRows = await sql<{
+    date: string; window_start: Date; window_end: Date; messages: number; groups_active: number;
+    groups_total: number; candidates: number; posts: number; buyers: number; sellers: number;
+    degraded: boolean; warnings: string[];
+  }[]>`
+    SELECT * FROM (
+      SELECT to_char(report_date, 'YYYY-MM-DD') AS date, window_start, window_end, messages,
+             groups_active, groups_total, candidates, posts, buyers, sellers, degraded, warnings
+        FROM wechat_market_days
+       WHERE ${until ?? null}::date IS NULL OR report_date <= ${until ?? null}::date
+       ORDER BY report_date DESC LIMIT ${days}
+    ) d ORDER BY date
+  `;
+  if (!dayRows.length) return c.json({ days: [], groups: [], hours: [] } satisfies WechatActivity);
+  const first = dayRows[0]!.date;
+  const last = dayRows.at(-1)!;
+  const [groupRows, hourRows] = await Promise.all([
+    sql<{ date: string; id: string; name: string; messages: number; candidates: number }[]>`
+      SELECT to_char(report_date, 'YYYY-MM-DD') AS date, group_id AS id, name, messages, candidates
+        FROM wechat_market_groups
+       WHERE report_date BETWEEN ${first}::date AND ${last.date}::date
+    `,
+    sql<{ h: number; n: number }[]>`
+      SELECT FLOOR(EXTRACT(EPOCH FROM (first_at - ${last.window_start})) / 3600)::int AS h,
+             COUNT(DISTINCT post_key)::int AS n
+        FROM wechat_market_points
+       WHERE report_date = ${last.date}
+       GROUP BY 1
+    `,
+  ]);
+  const col = new Map(dayRows.map((d, i) => [d.date, i]));
+  const groups = new Map<string, { id: string; name: string; messages: (number | null)[]; candidates: (number | null)[] }>();
+  for (const g of groupRows) {
+    let row = groups.get(g.id);
+    if (!row) {
+      row = { id: g.id, name: g.name, messages: dayRows.map(() => null), candidates: dayRows.map(() => null) };
+      groups.set(g.id, row);
+    }
+    const i = col.get(g.date)!;
+    row.messages[i] = g.messages;
+    row.candidates[i] = g.candidates;
+    // The newest day's name wins: groups get renamed.
+    if (g.name) row.name = g.name;
+  }
+  const span = Math.max(1, Math.round((last.window_end.getTime() - last.window_start.getTime()) / 3_600_000));
+  const hours = hourRows.length ? Array.from({ length: span }, () => 0) : [];
+  for (const r of hourRows) if (r.h >= 0 && r.h < span) hours[r.h]! += r.n;
+  const out: WechatActivity = {
+    days: dayRows.map((d) => ({
+      date: d.date, windowStart: d.window_start.toISOString(), messages: d.messages,
+      groupsActive: d.groups_active, groupsTotal: d.groups_total, candidates: d.candidates, posts: d.posts,
+      buyers: d.buyers, sellers: d.sellers, degraded: d.degraded, warnings: d.warnings,
+    })),
+    groups: [...groups.values()].sort((a, b) => sum(b.messages) - sum(a.messages) || a.name.localeCompare(b.name)),
+    hours,
+  };
+  return c.json(out);
+});
+
+const sum = (xs: (number | null)[]) => xs.reduce<number>((t, x) => t + (x ?? 0), 0);
 
 export default wechat;

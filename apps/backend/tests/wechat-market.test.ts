@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { WechatDay, WechatDayPush, WechatRerun, WechatSettings, WechatWarningAck, WechatEvidence, WechatHistoryDay, WechatPoint, WechatRow } from '@recycle-erp/shared';
+import type { WechatActivity, WechatDay, WechatDayPush, WechatRerun, WechatSettings, WechatWarningAck, WechatEvidence, WechatHistoryDay, WechatPoint, WechatRow } from '@recycle-erp/shared';
 import { createOAuthClient } from '../src/oauth/clients';
 import { generateSigningKey, signAccessToken } from '../src/oauth/tokens';
 import { api } from './helpers/app';
@@ -241,6 +241,42 @@ describe('WeChat market (/api/wechat-market)', () => {
     });
   });
 
+  describe('activity', () => {
+    const activity = (token: string, q = 'until=2026-10-22&days=30') =>
+      api<WechatActivity>('GET', `/api/wechat-market/activity?${q}`, { token });
+
+    it('lines up each group\'s messages by day and buckets the last day\'s posts by hour', async () => {
+      await push('2026-10-21', dayPush());
+      await push('2026-10-22', dayPush({
+        windowStart: '2026-10-21T12:00:00Z', windowEnd: '2026-10-22T12:00:00Z',
+        warnings: ['gap'], pointCount: 3,
+        groups: [{ id: 'g1@chatroom', name: '深圳内存群 (new)', messages: 50, candidates: 5, firstSeen: null }],
+      }));
+      expect((await pushPoints('2026-10-22', [
+        point({ firstAt: '2026-10-21T12:10:00Z' }),
+        point({ postKey: 'wxid_b|x', firstAt: '2026-10-21T12:50:00Z' }),
+        point({ postKey: 'wxid_c|y', firstAt: '2026-10-21T15:00:00Z' }),
+      ])).status).toBe(200);
+      const { token: purchaser } = await loginAs(MARCUS);
+      expect((await activity(purchaser)).status).toBe(403);
+      const { token } = await loginAs(ALEX);
+      expect((await activity(token, 'until=nope')).status).toBe(400);
+      const { body } = await activity(token);
+      expect(body.days.map((d) => [d.date, d.messages, d.warnings])).toEqual([
+        ['2026-10-21', 8000, []],
+        ['2026-10-22', 8000, ['gap']],
+      ]);
+      expect(body.groups.map((g) => [g.id, g.name, g.messages])).toEqual([
+        ['g1@chatroom', '深圳内存群 (new)', [6000, 50]],
+        ['g2@chatroom', '港深30群', [2000, null]],
+      ]);
+      expect(body.hours).toHaveLength(24);
+      expect(body.hours.slice(0, 4)).toEqual([2, 0, 0, 1]);
+      expect((await activity(token, 'until=2026-10-21&days=30')).body.days).toHaveLength(1);
+      expect((await activity(token, 'until=2026-10-01')).body).toEqual({ days: [], groups: [], hours: [] });
+    });
+  });
+
   describe('re-run', () => {
     const claim = (bearer = pushBearer) =>
       api<{ id: string; date: string }>('POST', '/api/wechat-market/push/reruns/claim', {
@@ -279,6 +315,8 @@ describe('WeChat market (/api/wechat-market)', () => {
       expect((await claim()).status).toBe(204);
       expect((await claim(marketBearer)).status).toBe(403);
       const { body: { rerun } } = await ask(token);
+      // The 204 above was an ask too: the page can tell memtrade is polling.
+      expect(Date.now() - Date.parse(rerun.pollSeenAt!)).toBeLessThan(60_000);
       const c = await claim();
       expect(c.status).toBe(200);
       expect(c.body).toEqual({ id: rerun.id, date: '2026-10-21' });

@@ -179,7 +179,13 @@ export type WechatRerun = {
   // Done, but Claude was still unavailable and memtrade fell back to its rules.
   degraded: boolean;
   error: string | null;
+  // When memtrade last asked for work, whatever the answer. A queued request
+  // only moves once it asks again.
+  pollSeenAt: string | null;
 };
+
+// memtrade polls every minute; past this it has stopped asking.
+export const WECHAT_POLL_LATE_MS = 5 * 60 * 1000;
 
 // ── Settings (managers edit, memtrade fetches) ────────────────────────────────
 
@@ -212,6 +218,37 @@ export type WechatRow = WechatLine & {
 };
 
 export type WechatEvidence = Omit<WechatPoint, 'rowKeys' | 'groupIds'> & { groups: string[] };
+
+// GET /api/wechat-market/activity: the communication history behind each
+// report day, oldest first, up to `until`.
+export type WechatActivityDay = {
+  date: string;
+  windowStart: string;
+  messages: number;
+  groupsActive: number;
+  groupsTotal: number;
+  candidates: number;
+  posts: number;
+  buyers: number;
+  sellers: number;
+  degraded: boolean;
+  warnings: string[];
+};
+export type WechatActivityGroup = {
+  id: string;
+  name: string;
+  // Aligned with `days`; null where the group wasn't in that day's report.
+  messages: (number | null)[];
+  candidates: (number | null)[];
+};
+export type WechatActivity = {
+  days: WechatActivityDay[];
+  groups: WechatActivityGroup[];
+  // Trade posts in `until`'s window by the hour they started, from the window's
+  // first hour; empty when the day kept no posts.
+  hours: number[];
+};
+export const WECHAT_ACTIVITY_DAYS_MAX = 90;
 
 export type WechatHistoryDay = {
   date: string;
