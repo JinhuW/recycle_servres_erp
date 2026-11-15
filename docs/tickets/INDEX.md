@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-591](./RS-591-send-a-telegram-lead-alert-for-each-website-submissi.md) | done | story | P2 | Send a Telegram lead alert for each website submission | — |
 | [RS-590](./RS-590-facebook-chats-send-photos-to-facebook-from-telegram.md) | done | story | P2 | Facebook chats: send photos to Facebook from Telegram and the ERP | 1.461.0 |
 | [RS-589](./RS-589-facebook-chats-route-photos-through-the-extension-er.md) | done | story | P2 | Facebook chats: route photos through the extension, ERP and Telegram | 1.460.0 |
 | [RS-588](./RS-588-wechat-activity-tab-acknowledged-warnings-disappear.md) | done | story | P2 | WeChat: Activity tab, acknowledged warnings disappear, live re-run status | 1.459.0 |
