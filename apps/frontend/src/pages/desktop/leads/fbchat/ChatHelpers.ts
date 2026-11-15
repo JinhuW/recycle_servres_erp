@@ -1,13 +1,20 @@
 import {
-  fbChatConfigValue,
-  type FbChatConfigPage, type FbChatMessageRow, type FbChatMessageSource,
+  FB_CHAT_MEDIA_MAX_UPLOAD_BYTES, FB_CHAT_MEDIA_MIMES, FB_CHAT_REPLY_MEDIA_MAX, fbChatConfigValue,
+  type FbChatConfigPage, type FbChatMessageRow, type FbChatMessageSource, type FbChatReplyRequest,
 } from '@recycle-erp/shared';
 
 // What the Chats tab works out from the rows it is given. No React here, so
 // each rule has a test beside it (ChatHelpers.test.ts).
 
-/** A reply the page has sent but the server has not answered for yet. */
-export type ChatPendingReply = { key: number; body: string; at: string };
+/**
+ * A reply the page has sent but the server has not answered for yet.
+ * `previews` are the local object URLs of its photos, drawn until the stored
+ * row comes back with media ids.
+ */
+export type ChatPendingReply = { key: number; body: string; at: string; previews: readonly string[] };
+
+/** A row as the pane draws it: a pending one carries its photos' local previews. */
+export type ChatRow = FbChatMessageRow & { previews?: readonly string[] };
 
 export type ChatTimelineItem =
   | { kind: 'history' }
@@ -73,7 +80,7 @@ export function chatMergeMessages(
   polled: readonly FbChatMessageRow[],
   accepted: readonly FbChatMessageRow[],
   pending: readonly ChatPendingReply[],
-): FbChatMessageRow[] {
+): ChatRow[] {
   const have = new Set(polled.map(m => m.id));
   return [
     ...polled,
@@ -83,8 +90,9 @@ export function chatMergeMessages(
 }
 
 /** A stand-in row for a reply the server has not stored yet. Its id is negative so it can never match a real one. */
-export function chatPendingRow(p: ChatPendingReply): FbChatMessageRow {
+export function chatPendingRow(p: ChatPendingReply): ChatRow {
   return {
+    previews: p.previews,
     id: -p.key, seq: null, direction: 'out', source: 'erp', body: p.body, images: [], media: [],
     backfill: false, fb_sent_label: null, send_state: 'queued', error: null, typing_ms: null,
     tg_user_name: null, erp_user_id: null, author_name: null, created_at: p.at, sent_at: null,
@@ -130,4 +138,74 @@ export function chatPacing(config: Pick<FbChatConfigPage, 'fields' | 'entries'> 
   const pace = fbChatConfigValue(config, 'typingPace', accountId);
   const gapSec = fbChatConfigValue(config, 'minSendIntervalSec', accountId);
   return typeof pace === 'number' && typeof gapSec === 'number' ? { pace, gapSec } : null;
+}
+
+// ── Photos attached to a reply ───────────────────────────────────────────────
+
+/** Why a photo was not uploaded. `storage` and `other` may pass on a retry; the rest will not. */
+export type ChatUploadError = 'tooBig' | 'type' | 'storage' | 'other';
+
+/** A photo in the composer. `mediaId` is set once the upload has answered. */
+export type ChatAttachment = {
+  key: number;
+  file: Blob;
+  /** Local object URL; whoever drops the attachment revokes it. */
+  preview: string;
+  state: 'uploading' | 'done' | 'failed';
+  mediaId: string | null;
+  error: ChatUploadError | null;
+};
+
+/** What `POST /api/fb-chat/media` refused, from its status. */
+export function chatUploadError(status: number | undefined): ChatUploadError {
+  if (status === 413) return 'tooBig';
+  if (status === 415) return 'type';
+  if (status === 503) return 'storage';
+  return 'other';
+}
+
+export function chatUploadRetryable(error: ChatUploadError | null): boolean {
+  return error === 'storage' || error === 'other';
+}
+
+/** Files left out of an add, by reason, so the composer can say why. */
+export type ChatAttachSkipped = { overLimit: number; badType: number; tooBig: number };
+
+/**
+ * Which of the files picked, pasted or dropped join a reply that already has
+ * `have` photos. Files the hub would refuse are left out before uploading; so
+ * is anything past the per-reply limit, keeping the first ones in order.
+ */
+export function chatTakeAttachments<F extends Pick<Blob, 'type' | 'size'>>(
+  have: number, files: readonly F[],
+): { take: F[]; skipped: ChatAttachSkipped } {
+  const skipped: ChatAttachSkipped = { overLimit: 0, badType: 0, tooBig: 0 };
+  const take: F[] = [];
+  for (const f of files) {
+    if (!(FB_CHAT_MEDIA_MIMES as readonly string[]).includes(f.type)) skipped.badType++;
+    else if (f.size > FB_CHAT_MEDIA_MAX_UPLOAD_BYTES) skipped.tooBig++;
+    else if (have + take.length >= FB_CHAT_REPLY_MEDIA_MAX) skipped.overLimit++;
+    else take.push(f);
+  }
+  return { take, skipped };
+}
+
+/**
+ * Send is open with text or a photo, but not while a photo is still uploading
+ * or has failed: sending then would quietly leave it out.
+ */
+export function chatCanSend(body: string, attachments: readonly Pick<ChatAttachment, 'state'>[]): boolean {
+  if (attachments.length > FB_CHAT_REPLY_MEDIA_MAX) return false;
+  if (attachments.some(a => a.state !== 'done')) return false;
+  return body.trim().length > 0 || attachments.length > 0;
+}
+
+/** The body of `POST /threads/:id/messages`. `media` only when there are photos, as older servers expect. */
+export function chatReplyRequest(body: string, clientKey: string, media: readonly string[]): FbChatReplyRequest {
+  return media.length > 0 ? { body, clientKey, media: [...media] } : { body, clientKey };
+}
+
+/** Same text and same photos make the same reply, which reuses its clientKey. */
+export function chatReplySignature(body: string, media: readonly string[]): string {
+  return JSON.stringify([body, media]);
 }

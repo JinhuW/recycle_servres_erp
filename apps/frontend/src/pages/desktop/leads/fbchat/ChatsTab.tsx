@@ -9,9 +9,9 @@ import {
 } from '../../../../lib/fbChat';
 import { useT } from '../../../../lib/i18n';
 import { fbChatTabPath, hrefFor, navigate, onLinkClick } from '../../../../lib/route';
-import { ChatConversation } from './ChatConversation';
+import { ChatConversation, type ChatOutPhoto } from './ChatConversation';
 import { ChatDetails } from './ChatDetails';
-import { chatMergeMessages, chatPacing, type ChatPendingReply } from './ChatHelpers';
+import { chatMergeMessages, chatPacing, chatReplyRequest, type ChatPendingReply } from './ChatHelpers';
 import { ChatList } from './ChatList';
 import type { FbChatTabProps } from './FbChatsPage';
 import { AccountBadge, fbcHueStyle } from './shared';
@@ -143,11 +143,11 @@ function ChatOpen({ threadId, accounts, config, onChanged }: ChatOpenProps) {
   const [accepted, setAccepted] = useState<FbChatMessageRow[]>([]);
   const nextKey = useRef(0);
   const reload = polled.reload;
-  const send = useCallback(async (body: string, clientKey: string) => {
+  const send = useCallback(async (body: string, clientKey: string, photos: ChatOutPhoto[]) => {
     const key = ++nextKey.current;
-    setPending(p => [...p, { key, body, at: new Date().toISOString() }]);
+    setPending(p => [...p, { key, body, at: new Date().toISOString(), previews: photos.map(x => x.preview) }]);
     try {
-      const { message } = await fbChatApi.reply(threadId, body, clientKey);
+      const { message } = await fbChatApi.reply(threadId, chatReplyRequest(body, clientKey, photos.map(x => x.id)));
       setAccepted(a => [...a, message]);
       onChanged();
       void reload();
@@ -159,6 +159,9 @@ function ChatOpen({ threadId, accounts, config, onChanged }: ChatOpenProps) {
       setPending(p => p.filter(x => x.key !== key));
     }
   }, [threadId, onChanged, reload]);
+
+  // A refused upload is shown on its chip, not in the error dialog.
+  const uploadPhoto = useCallback((file: Blob) => fbChatApi.uploadMedia(file).then(a => a.mediaId), []);
 
   const [retrying, setRetrying] = useState<number | null>(null);
   const retry = async (messageId: number, force: boolean) => {
@@ -216,7 +219,7 @@ function ChatOpen({ threadId, accounts, config, onChanged }: ChatOpenProps) {
         thread={thread} messages={messages}
         account={accounts.find(a => a.id === thread.account_id) ?? null}
         pacing={chatPacing(config, thread.account_id)}
-        onSend={send} onRetry={(id, force) => void retry(id, force)} retrying={retrying}
+        onSend={send} onUpload={uploadPhoto} onRetry={(id, force) => void retry(id, force)} retrying={retrying}
         onBack={() => navigate(listPath)} onMarkUnread={() => void markUnread()} canMarkUnread={canMarkUnread}
         now={Date.now()}
       />
