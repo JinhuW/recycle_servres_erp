@@ -1,8 +1,9 @@
 import type postgres from 'postgres';
 import { getDb } from '../db';
 import { chunkForTelegram, FB_CHAT_REPLY_MAX, fbChatTopicName } from '../lib/fbChat';
+import { fbChatMediaFile } from '../lib/fbChatMedia';
 import { log } from '../lib/log';
-import { TelegramError, telegramCaller, type TelegramCall } from '../lib/telegramBot';
+import { TelegramError, TelegramUpload, telegramCaller, type TelegramCall } from '../lib/telegramBot';
 import { connectUserClient, userAccountCaller, type UserSessionConfig } from '../lib/telegramUser';
 import type { Env } from '../types';
 import { notifyOutbox } from './fbChat';
@@ -33,6 +34,13 @@ const MIRROR_BATCH = 40;
 const TRANSCRIPT_OVER = 4;
 // Telegram allows a bot about 20 messages a minute in one group.
 const SENDS_PER_TICK = 6;
+// An extension without media support leaves the photos for the hub to fetch
+// just after the sync; a message with photos waits this long for them.
+const MEDIA_GRACE_SEC = 60;
+// Telegram's limits on a photo's caption and on photos per album.
+const CAPTION_MAX = 1024;
+const ALBUM_MAX = 10;
+const TEXT_MAX = 4000;
 
 export type FbChatTelegramConfig = {
   call: TelegramCall;
@@ -40,6 +48,8 @@ export type FbChatTelegramConfig = {
   userIds: Set<string>;
   /** Where the reply cursor is kept: a bot's update id, or an account's last message id. */
   mode: 'bot' | 'user';
+  /** Where stored chat photos are read from. Without it none can be read, and photos go as links. */
+  env?: Env;
 };
 
 const USER_LOCK = 'fb-chat-telegram-session';
@@ -83,7 +93,7 @@ export function fbChatTelegramConfig(env: Env): FbChatTelegramConfig | null {
   const chatId = env.FB_CHAT_TELEGRAM_CHAT_ID?.trim();
   const token = env.FB_CHAT_TELEGRAM_BOT_TOKEN?.trim();
   if (!chatId || !(token || testCall)) return null;
-  return { call: testCall ?? telegramCaller(token!), chatId, userIds: userIdsOf(env), mode: 'bot' };
+  return { call: testCall ?? telegramCaller(token!), chatId, userIds: userIdsOf(env), mode: 'bot', env };
 }
 
 export function fbChatTelegramConfigured(env: Env): boolean {
@@ -104,9 +114,13 @@ type Update = {
 
 class Budget {
   private left = SENDS_PER_TICK;
-  take(): boolean {
-    if (this.left <= 0) return false;
-    this.left -= 1;
+  /**
+   * Takes `n` sends, all or none. A fresh budget lets one step overdraw it, so
+   * a step bigger than a whole tick still goes out, at the start of one.
+   */
+  take(n = 1): boolean {
+    if (this.left <= 0 || (n > this.left && this.left < SENDS_PER_TICK)) return false;
+    this.left -= n;
     return true;
   }
 }
@@ -188,6 +202,10 @@ async function postAlerts(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget: 
 
 type Unmirrored = {
   id: number; thread_id: number; direction: 'in' | 'out'; body: string; images: string[]; backfill: boolean;
+  /** Stored photo ids, in bubble order. */
+  media: string[];
+  /** Has photo links, none stored yet, and is young enough that they may still arrive. */
+  media_pending: boolean;
   fb_sent_label: string | null;
   source: 'facebook' | 'telegram' | 'erp';
   /** For a reply typed in the ERP: that user's name, null once the user is gone. */
@@ -261,36 +279,180 @@ async function ensureTopic(sql: postgres.Sql, cfg: FbChatTelegramConfig, t: Thre
   return topicId;
 }
 
-function transcriptLine(m: Unmirrored, buyer: string): string {
-  const text = [m.body, ...m.images.map(() => '[photo]')].filter(Boolean).join(' ');
+function speaker(m: Unmirrored, buyer: string): string {
   const when = m.fb_sent_label ? `[${m.fb_sent_label}] ` : '';
-  return `${when}${m.direction === 'in' ? buyer : ourName(m)}: ${text}`;
+  return `${when}${m.direction === 'in' ? buyer : ourName(m)}:`;
 }
 
-async function postOne(cfg: FbChatTelegramConfig, topicId: number, m: Unmirrored, buyer: string): Promise<void> {
-  // Named either way: posted as an ordinary account, a buyer's message would
-  // otherwise read as the owner's own on a phone signed in to that account.
-  const text = m.direction === 'in' ? `👤 ${buyer}: ${m.body}`.trimEnd() : `↩️ ${ourName(m)}: ${m.body}`;
-  const [first, ...more] = m.images;
-  if (first) {
-    try {
-      await cfg.call('sendPhoto', {
-        chat_id: cfg.chatId, message_thread_id: topicId, photo: first, caption: text.slice(0, 1000) || undefined,
-      });
-      for (const url of more) await cfg.call('sendPhoto', { chat_id: cfg.chatId, message_thread_id: topicId, photo: url });
-      return;
-    } catch (e) {
-      if (gone(e) || (e instanceof TelegramError && e.retryAfterSec)) throw e;
-      // Telegram could not fetch the image; the link still gets it across.
-    }
-    await cfg.call('sendMessage', { chat_id: cfg.chatId, message_thread_id: topicId, text: [text, ...m.images].filter(Boolean).join('\n') });
-    return;
+function transcriptLine(m: Unmirrored, buyer: string): string {
+  const text = [m.body, ...m.images.map(() => '[photo]')].filter(Boolean).join(' ');
+  return `${speaker(m, buyer)} ${text}`;
+}
+
+/**
+ * Some of the Telegram calls for one tick's work, and the messages that are in
+ * the topic once all of them succeeded. `cost` is how many sends it may make;
+ * the budget is taken for all of them before the first, so a step is either
+ * posted whole or left for the next tick, and nothing goes out twice.
+ */
+type Step = { cost: number; ids: number[]; run: () => Promise<void> };
+
+type MediaReader = (id: string) => Promise<TelegramUpload | null>;
+
+const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+
+function mediaReader(sql: postgres.Sql, env: Env | undefined): MediaReader {
+  return async (id) => {
+    if (!env) return null;
+    const file = await fbChatMediaFile(sql, env, id);
+    return file && new TelegramUpload(file.bytes, file.mime, `photo.${EXT[file.mime] ?? 'jpg'}`);
+  };
+}
+
+/** The message's stored photos that can still be read; one that cannot is left out. */
+async function readPhotos(m: Unmirrored, read: MediaReader): Promise<TelegramUpload[]> {
+  const files: TelegramUpload[] = [];
+  for (const id of m.media) {
+    const f = await read(id);
+    if (f) files.push(f);
   }
-  for (const chunk of chunkForTelegram(text)) {
+  return files;
+}
+
+const albumsOf = (n: number) => Math.ceil(n / ALBUM_MAX);
+
+async function sendText(cfg: FbChatTelegramConfig, topicId: number, text: string): Promise<void> {
+  for (const chunk of chunkForTelegram(text, TEXT_MAX)) {
     await cfg.call('sendMessage', {
       chat_id: cfg.chatId, message_thread_id: topicId, text: chunk, link_preview_options: { is_disabled: true },
     });
   }
+}
+
+/** Photos as bytes: one photo alone, more as albums of up to ten, the caption on the very first. */
+async function sendPhotos(cfg: FbChatTelegramConfig, topicId: number, files: TelegramUpload[], caption: string): Promise<void> {
+  for (let at = 0; at < files.length; at += ALBUM_MAX) {
+    const group = files.slice(at, at + ALBUM_MAX);
+    const text = at === 0 && caption ? caption : undefined;
+    if (group.length === 1) {
+      await cfg.call('sendPhoto', { chat_id: cfg.chatId, message_thread_id: topicId, photo: group[0], caption: text });
+    } else {
+      await cfg.call('sendMediaGroup', {
+        chat_id: cfg.chatId, message_thread_id: topicId,
+        media: group.map((photo, i) => ({ type: 'photo', media: photo, ...(i === 0 && text ? { caption: text } : {}) })),
+      });
+    }
+  }
+}
+
+function photosCost(text: string, photos: number): number {
+  return (text.length > CAPTION_MAX ? chunkForTelegram(text, TEXT_MAX).length : 0) + albumsOf(photos);
+}
+
+/**
+ * Photos with their words: the words as the caption where they fit, else
+ * posted first, with `short` as the caption.
+ */
+async function sendCaptioned(
+  cfg: FbChatTelegramConfig, topicId: number, files: TelegramUpload[], text: string, short: string,
+): Promise<void> {
+  if (text.length <= CAPTION_MAX) return sendPhotos(cfg, topicId, files, text);
+  await sendText(cfg, topicId, text);
+  await sendPhotos(cfg, topicId, files, short);
+}
+
+/** A message whose photos were never stored: the links, for Telegram to fetch, else as text. */
+async function sendPhotoLinks(cfg: FbChatTelegramConfig, topicId: number, m: Unmirrored, text: string): Promise<void> {
+  const [first, ...more] = m.images;
+  try {
+    await cfg.call('sendPhoto', {
+      chat_id: cfg.chatId, message_thread_id: topicId, photo: first, caption: text.slice(0, 1000) || undefined,
+    });
+    for (const url of more) await cfg.call('sendPhoto', { chat_id: cfg.chatId, message_thread_id: topicId, photo: url });
+    return;
+  } catch (e) {
+    if (gone(e) || (e instanceof TelegramError && e.retryAfterSec)) throw e;
+    // Telegram could not fetch the image; the link still gets it across.
+  }
+  await cfg.call('sendMessage', { chat_id: cfg.chatId, message_thread_id: topicId, text: [text, ...m.images].filter(Boolean).join('\n') });
+}
+
+/** One message on its own, as it happens. */
+function liveStep(cfg: FbChatTelegramConfig, topicId: number, m: Unmirrored, buyer: string, read: MediaReader): Step {
+  // Named either way: posted as an ordinary account, a buyer's message would
+  // otherwise read as the owner's own on a phone signed in to that account.
+  const who = m.direction === 'in' ? `👤 ${buyer}:` : `↩️ ${ourName(m)}:`;
+  const text = `${who} ${m.body}`.trimEnd();
+  // Sending links costs at most one send per photo, plus the fallback.
+  const linkCost = m.images.length + 1;
+  if (m.media.length) {
+    return {
+      cost: Math.max(photosCost(text, m.media.length), linkCost),
+      ids: [m.id],
+      run: async () => {
+        const files = await readPhotos(m, read);
+        if (files.length) return sendCaptioned(cfg, topicId, files, text, who);
+        if (m.images.length) return sendPhotoLinks(cfg, topicId, m, text);
+        return sendText(cfg, topicId, text);
+      },
+    };
+  }
+  if (m.images.length) return { cost: linkCost, ids: [m.id], run: () => sendPhotoLinks(cfg, topicId, m, text) };
+  return { cost: chunkForTelegram(text, TEXT_MAX).length, ids: [m.id], run: () => sendText(cfg, topicId, text) };
+}
+
+/**
+ * Many messages as a transcript: lines of text, broken at each message with
+ * stored photos, which goes as its own album captioned with its line.
+ * `title` heads whatever goes first.
+ */
+function transcriptSteps(
+  cfg: FbChatTelegramConfig, topicId: number, messages: Unmirrored[], buyer: string, title: string, read: MediaReader,
+): Step[] {
+  const steps: Step[] = [];
+  let lines: string[] = [];
+  let ids: number[] = [];
+  let head = title;
+  const flush = () => {
+    if (!ids.length) return;
+    const text = lines.join('\n');
+    steps.push({ cost: 1, ids, run: () => sendText(cfg, topicId, text) });
+    lines = [];
+    ids = [];
+  };
+  for (const m of messages) {
+    if (m.media.length) {
+      flush();
+      const lead = head;
+      const short = lead + speaker(m, buyer);
+      const caption = `${short} ${m.body}`.trimEnd();
+      head = '';
+      steps.push({
+        cost: photosCost(caption, m.media.length),
+        ids: [m.id],
+        run: async () => {
+          const files = await readPhotos(m, read);
+          if (files.length) return sendCaptioned(cfg, topicId, files, caption, short);
+          return sendText(cfg, topicId, lead + transcriptLine(m, buyer));
+        },
+      });
+      continue;
+    }
+    const line = head + transcriptLine(m, buyer);
+    head = '';
+    if (line.length > TEXT_MAX) {
+      // Longer than one message on its own: its parts go out together.
+      flush();
+      const text = line;
+      steps.push({ cost: chunkForTelegram(text, TEXT_MAX).length, ids: [m.id], run: () => sendText(cfg, topicId, text) });
+      continue;
+    }
+    if (ids.length && [...lines, line].join('\n').length > TEXT_MAX) flush();
+    lines.push(line);
+    ids.push(m.id);
+  }
+  flush();
+  return steps;
 }
 
 async function loadThread(sql: postgres.Sql, threadId: number): Promise<ThreadRow> {
@@ -325,38 +487,44 @@ async function renameTopics(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget
 
 async function mirror(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget: Budget): Promise<number> {
   const rows = await sql<Unmirrored[]>`
-    SELECT m.id::int AS id, m.thread_id::int AS thread_id, m.direction, m.body, m.images, m.backfill, m.fb_sent_label,
-           m.source, u.name AS erp_name
+    SELECT m.id::int AS id, m.thread_id::int AS thread_id, m.direction, m.body, m.images, m.media, m.backfill,
+           m.fb_sent_label, m.source, u.name AS erp_name,
+           (jsonb_array_length(m.images) > 0 AND jsonb_array_length(m.media) = 0
+             AND m.created_at > NOW() - make_interval(secs => ${MEDIA_GRACE_SEC})) AS media_pending
       FROM fb_chat_messages m LEFT JOIN users u ON u.id = m.erp_user_id
      WHERE m.mirrored_at IS NULL ORDER BY m.id LIMIT ${MIRROR_BATCH}`;
   const byThread = new Map<number, Unmirrored[]>();
   for (const r of rows) byThread.set(r.thread_id, [...(byThread.get(r.thread_id) ?? []), r]);
+  const read = mediaReader(sql, cfg.env);
   let posted = 0;
-  for (const [threadId, messages] of byThread) {
+  for (const [threadId, all] of byThread) {
+    // A message whose photos may still be on their way waits, and what came
+    // after it waits behind it, so the topic keeps the conversation's order.
+    const pending = all.findIndex((m) => m.media_pending);
+    const messages = pending < 0 ? all : all.slice(0, pending);
+    if (!messages.length) continue;
     const t = await loadThread(sql, threadId);
     try {
       const topicId = await ensureTopic(sql, cfg, t, budget);
       if (topicId == null) return posted;
-      const done = (ids: number[]) => sql`UPDATE fb_chat_messages SET mirrored_at = NOW() WHERE id IN ${sql(ids)}`;
+      const buyer = t.buyer_name ?? 'Buyer';
+      let steps: Step[];
       if (messages.some((m) => m.backfill) || messages.length > TRANSCRIPT_OVER) {
-        const buyer = t.buyer_name ?? 'Buyer';
-        const title = messages[0]!.backfill ? '📜 Earlier messages\n' : '';
-        const chunks = chunkForTelegram(title + messages.map((m) => transcriptLine(m, buyer)).join('\n'));
-        for (const chunk of chunks) {
-          if (!budget.take()) return posted;
-          await cfg.call('sendMessage', {
-            chat_id: cfg.chatId, message_thread_id: topicId, text: chunk, link_preview_options: { is_disabled: true },
-          });
-        }
-        await done(messages.map((m) => m.id));
-        posted += messages.length;
+        // A history longer than one tick goes out over several; only its
+        // first part carries the title.
+        const [begun] = messages[0]!.backfill ? await sql<{ yes: boolean }[]>`
+          SELECT EXISTS (SELECT 1 FROM fb_chat_messages
+                          WHERE thread_id = ${threadId} AND backfill AND mirrored_at IS NOT NULL) AS yes` : [{ yes: true }];
+        const title = begun!.yes ? '' : '📜 Earlier messages\n';
+        steps = transcriptSteps(cfg, topicId, messages, buyer, title, read);
       } else {
-        for (const m of messages) {
-          if (!budget.take()) return posted;
-          await postOne(cfg, topicId, m, t.buyer_name ?? 'Buyer');
-          await done([m.id]);
-          posted += 1;
-        }
+        steps = messages.map((m) => liveStep(cfg, topicId, m, buyer, read));
+      }
+      for (const step of steps) {
+        if (!budget.take(step.cost)) return posted;
+        await step.run();
+        await sql`UPDATE fb_chat_messages SET mirrored_at = NOW() WHERE id IN ${sql(step.ids)}`;
+        posted += step.ids.length;
       }
     } catch (e) {
       if (!gone(e)) throw e;
@@ -533,7 +701,7 @@ function startUserSessionLoop(env: Env, session: UserSessionConfig): { stop: () 
       if (!r?.ok || stopped) return;
       const { client, disconnect } = await connectUserClient(session);
       const cfg: FbChatTelegramConfig = {
-        call: userAccountCaller(client, session.chatId), chatId: session.chatId, userIds: userIdsOf(env), mode: 'user',
+        call: userAccountCaller(client, session.chatId), chatId: session.chatId, userIds: userIdsOf(env), mode: 'user', env,
       };
       held = { ...runLoop(sql, cfg), disconnect };
       failures = 0;
