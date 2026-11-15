@@ -93,18 +93,42 @@ export type FbChatBuyerPush = {
   buyer: FbChatBuyer;
 };
 
+/**
+ * What an extension can do beyond typing text, sent with each claim.
+ * `media`: it can attach photos to a reply. The hub hands a reply with photos
+ * only to an extension that says so; an older one would type the caption and
+ * report `sent` without them.
+ */
+export const FB_CHAT_CAPS = ['media'] as const;
+export type FbChatCap = (typeof FB_CHAT_CAPS)[number];
+
 /** `POST /push/outbox/claim`. Answers 204 when nothing is queued. */
 export type FbChatClaimRequest = {
   account: FbChatAccountRef;
   /** Longest the hub may hold the request open, seconds. */
   wait?: number;
+  /** Extensions before photo replies leave it out. */
+  caps?: FbChatCap[];
 };
+
+/**
+ * A photo to attach to a reply. The extension downloads it from
+ * `GET /api/fb-chat/push/media/:id` with its push credentials.
+ */
+export type FbChatOutMedia = { id: string; mime: string; bytes: number };
+
+/** Photos one reply may carry. */
+export const FB_CHAT_REPLY_MEDIA_MAX = 10;
 
 /**
  * `attempt` counts this reply's claims. The extension sends it back with the
  * result, so a late result from an earlier attempt cannot settle a later one.
+ * `body` may be empty when the reply is photos only; `media` is present only
+ * when it has photos, and only to an extension that claimed with `media`.
  */
-export type FbChatClaimAnswer = { id: number; fbThreadId: string; body: string; attempt: number };
+export type FbChatClaimAnswer = {
+  id: number; fbThreadId: string; body: string; attempt: number; media?: FbChatOutMedia[];
+};
 
 /** `POST /push/outbox/:id/result`. */
 export type FbChatSendResult = {
@@ -362,7 +386,16 @@ export type FbChatMessagesAnswer = {
  * heard the answer; the hub then answers 200 with the reply it already queued
  * instead of queueing a second one.
  */
-export type FbChatReplyRequest = { body: string; clientKey?: string };
+export type FbChatReplyRequest = {
+  body: string;
+  clientKey?: string;
+  /**
+   * Photos uploaded first through `POST /api/fb-chat/media` (raw image body,
+   * answers `FbChatMediaAnswer`), at most `FB_CHAT_REPLY_MEDIA_MAX`. With
+   * photos, `body` may be empty.
+   */
+  media?: string[];
+};
 /**
  * Body of `POST /messages/:id/retry`. A `failed` reply needs none. An
  * `uncertain` one may already be on Facebook, so the hub refuses to send it
