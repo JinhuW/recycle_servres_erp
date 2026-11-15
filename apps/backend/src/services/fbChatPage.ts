@@ -127,16 +127,17 @@ export async function alsoMessaged(sql: SqlLike, threadId: number): Promise<FbCh
  * `clientKey` names the reply as the page composed it. The page sends the
  * same key again when it never heard the answer, and gets the reply it
  * already queued (`created` false) rather than a second one for the buyer.
+ * `media` are stored photo ids, in the order they go out.
  */
 export async function queueErpReply(
-  tx: Tx, threadId: number, body: string, userId: string, clientKey: string | null,
+  tx: Tx, threadId: number, body: string, userId: string, clientKey: string | null, media: readonly string[] = [],
 ): Promise<{ id: number; created: boolean } | null> {
   // Answering is reading, as it is from Telegram.
   const [thread] = await tx`UPDATE fb_chat_threads SET read_seq = last_seq WHERE id = ${threadId} RETURNING id`;
   if (!thread) return null;
   const [m] = await tx<{ id: number }[]>`
-    INSERT INTO fb_chat_messages (thread_id, direction, source, body, send_state, erp_user_id, client_key)
-    VALUES (${threadId}, 'out', 'erp', ${body}, 'queued', ${userId}, ${clientKey})
+    INSERT INTO fb_chat_messages (thread_id, direction, source, body, media, send_state, erp_user_id, client_key)
+    VALUES (${threadId}, 'out', 'erp', ${body}, ${tx.json([...media])}, 'queued', ${userId}, ${clientKey})
     ON CONFLICT (thread_id, client_key) WHERE client_key IS NOT NULL DO NOTHING
     RETURNING id::int AS id`;
   if (!m) {
