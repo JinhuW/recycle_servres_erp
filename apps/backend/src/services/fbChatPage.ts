@@ -200,7 +200,7 @@ export async function listAccounts(sql: SqlLike): Promise<FbChatAccountsAnswer> 
   // client_id is its only link: a foreign key would not survive the nightly
   // sync, which brings accounts from prod and keeps dev's own devices.
   const rows = await sql<AccountDbRow[]>`
-    SELECT a.id::int AS id, a.no, a.fb_uid, a.label, a.ext_version, a.restricted, a.restricted_at,
+    SELECT a.id::int AS id, a.no, a.fb_uid, a.label, a.ext_version, a.photo_replies, a.restricted, a.restricted_at,
            a.last_seen_at, a.created_at, a.config_rev, a.config_seen_at,
            (SELECT COUNT(*)::int FROM fb_chat_threads t WHERE t.account_id = a.id) AS threads,
            (SELECT COUNT(*)::int FROM fb_chat_threads t

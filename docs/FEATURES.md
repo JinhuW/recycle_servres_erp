@@ -1432,7 +1432,9 @@ The sidebar row shows the number of unread chats.
   `GET /api/fb-chat/push/media/:id`, attaches them through the debugger and
   reports the reply failed if it cannot attach, before anything is sent. A
   photo reply waits, with the replies after it in that chat, until such an
-  extension claims.
+  extension claims. WebP photos are kept as JPEG (v1.462.1). The Accounts tab
+  marks an account whose extension cannot attach photos "No photo replies",
+  and the composer says a photo reply will wait for it.
 - **Replies.** Text typed in a topic is queued for the extension of the account
   that owns the conversation, which types it into Facebook. The bot reacts 👍
   when the extension reports it sent, and says so in the topic when it failed

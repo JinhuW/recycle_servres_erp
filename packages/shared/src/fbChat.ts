@@ -445,6 +445,12 @@ export type FbChatAccountRow = {
   stale_after_sec: number;
   config_state: FbChatConfigState;
   config_seen_at: string | null;
+  /**
+   * Whether its extension can attach photos, as of its last claim: false for
+   * one before 0.5.0 or with Chrome's "Allow access to file URLs" off, when
+   * photo replies wait. Null before its first claim.
+   */
+  photo_replies: boolean | null;
   /** Null for an account set up with a service client, or whose device was deleted. */
   device: FbChatAccountDevice | null;
 };

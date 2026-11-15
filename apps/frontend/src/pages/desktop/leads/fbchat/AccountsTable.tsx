@@ -93,6 +93,9 @@ export function AccountsTable({ accounts, waiting, latestVersion, busy, onRename
                             {a.ext_version && latestVersion && a.ext_version !== latestVersion && (
                               <span className="chip warn" title={t('fbca_updateHint', { version: latestVersion })}>{t('fbca_update')}</span>
                             )}
+                            {a.photo_replies === false && (
+                              <span className="chip warn" title={t('fbca_noPhotosHint')}>{t('fbca_noPhotos')}</span>
+                            )}
                           </span>
                         </td>
                         <td>

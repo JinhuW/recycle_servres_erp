@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-15:** ERP migration `0246`, Reddit tracker migration `0007`,
+**As of 2026-11-15:** ERP migration `0247`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2691,6 +2691,7 @@ One Facebook account an extension has spoken for, created on its first push.
 | `label` | `text` | ✓ | `''` | The account's name: what the extension calls its Chrome profile, until a manager names it. |
 | `client_id` | `text` |  |  | The service client that last pushed for it, or `device:<id>` for an enrolled extension (0240). This is the account's link to its `fb_chat_devices` row; no FK, because the nightly sync copies accounts from prod and keeps dev's devices. |
 | `ext_version` | `text` |  |  | The extension version that last pushed. |
+| `photo_replies` | `boolean` |  |  | Whether its extension's last claim said it can attach photos (`caps` has `media`); null before the first claim (0247). |
 | `restricted` | `text` |  |  | login or checkpoint while the extension sees such a page; NULL when healthy. |
 | `restricted_at` | `timestamptz` |  |  |  |
 | `last_seen_at` | `timestamptz` | ✓ | `now()` | The last push of any kind. |
