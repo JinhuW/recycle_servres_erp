@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-13:** ERP migration `0245`, Reddit tracker migration `0007`,
+**As of 2026-11-15:** ERP migration `0246`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2766,6 +2766,7 @@ One message. Those read off Facebook have `source = 'facebook'`; a reply typed i
 | `source` | `text` | ✓ |  | facebook, telegram or erp: where the text was written. |
 | `body` | `text` | ✓ | `''` |  |
 | `images` | `jsonb` | ✓ | `'[]'` | Image URLs on the bubble. Signed by Facebook; they expire. |
+| `media` | `jsonb` | ✓ | `'[]'` | Ids into fb_chat_media, in bubble order (0246): the photos the hub holds a copy of. Only ids that exist are written. Filled by the extension's sync, by a later sync whose window lines up with the row, or by the hub fetching `images` itself after the sync; empty when none could be stored. Not a foreign key. |
 | `backfill` | `boolean` | ✓ | `false` | Read as history when the thread was first seen, so `created_at` is when it was read, not written. |
 | `fb_sent_label` | `text` |  |  | When it was sent, in Facebook's own words ("Tuesday 5:57pm"). Relative to the day it was read. |
 | `send_state` | `text` |  |  | queued, sending, sent, failed or uncertain; NULL for messages read off Facebook. |
@@ -2788,6 +2789,26 @@ One message. Those read off Facebook have `source = 'facebook'`; a reply typed i
 - **Unique:** `(thread_id, seq)`; `(thread_id, tg_message_id)`
 - **Checks:** `direction IN ('in', 'out')`; `source IN ('facebook', 'telegram', 'erp')`; `send_state IN ('queued', 'sending', 'sent', 'failed', 'uncertain')`
 - **Indexes:** `fb_chat_messages_unmirrored_idx` (id) where not mirrored; `fb_chat_messages_outbox_idx` (thread_id, id) where queued or sending; `fb_chat_messages_unacked_idx` (id) where settled and not acknowledged; `fb_chat_messages_erp_user_idx` (erp_user_id) where set; `fb_chat_messages_thread_idx` (thread_id, id); `fb_chat_messages_client_key_idx` unique (thread_id, client_key) where set; `fb_chat_messages_body_trgm_idx` gin (body gin_trgm_ops), for the chats page search
+#### `fb_chat_media`
+
+Photos in Facebook chats, stored once (0246). Facebook's image links are signed and expire, so the extension uploads each photo's bytes (`POST /api/fb-chat/push/media`), the hub fetches the links itself for extensions that do not, and readers go through `GET /api/fb-chat/media/:id`, never the bucket URL. Each photo is checked against the workspace upload settings and shrunk to fit them (and 8 MB) before it is stored.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `uuid` | ✓ | `gen_random_uuid()` | What `fb_chat_messages.media` holds. |
+| `sha256` | `text` | ✓ |  | Of the bytes as received, so the same photo read again under a fresh signed link answers the same row. |
+| `source` | `text` | ✓ |  | facebook, telegram or erp: where the photo came from. |
+| `storage_key` | `text` | ✓ |  | The object's key in R2 (or the stub's key where R2 is not configured). |
+| `stub_bytes` | `bytea` |  |  | The file itself, only where R2 is not configured (dev, tests). |
+| `mime` | `text` | ✓ |  | image/jpeg, image/png or image/webp, as stored. |
+| `bytes` | `integer` | ✓ |  | Stored size, after any shrink. |
+| `width` | `integer` |  |  |  |
+| `height` | `integer` |  |  |  |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **Unique:** `sha256`
+- **Checks:** `source IN ('facebook', 'telegram', 'erp')`
 #### `fb_chat_events`
 
 Append-only record of what is worth counting later and is not a message. `kind` is one of: `thread_seen`, `sync` (new messages in a known thread), `sync_gap` (a window that did not overlap what was stored), `send_sent`, `send_failed`, `send_uncertain`, `buyer_rating` (a rating or count changed; old and new values in `detail`), `topic_created`, `restricted`, `recovered`, `error`.

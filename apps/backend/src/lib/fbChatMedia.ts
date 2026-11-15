@@ -7,6 +7,7 @@ import type { SqlLike } from '../db';
 import { getAttachmentBytes, uploadAttachment } from '../r2';
 import type { Env } from '../types';
 import { ImageRejectedError, shrinkImageToFit } from './image-shrink';
+import { getUploadLimits } from './settings';
 
 // Photos in Facebook chats, kept once per sha256 of the bytes as received.
 // Facebook's links are signed and expire, so this copy is what the chats page
@@ -23,6 +24,14 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isFbChatMediaId = (s: unknown): s is string => typeof s === 'string' && UUID.test(s);
 
 export { ImageRejectedError };
+
+/** The photo could not be brought under the stored size limit. */
+export class FbChatMediaTooLargeError extends Error {
+  constructor(readonly maxBytes: number) {
+    super(`photo is larger than ${maxBytes} bytes after shrinking`);
+    this.name = 'FbChatMediaTooLargeError';
+  }
+}
 
 /**
  * Stores one photo and answers its id; bytes seen before answer the existing
@@ -42,12 +51,18 @@ export async function storeFbChatMedia(
   if (seen) return { id: seen.id, created: false };
 
   const mime = declaredMime.toLowerCase().split(';')[0]!.trim();
-  if (!MIMES.has(mime)) throw new ImageRejectedError('wrong_format');
+  // Every stored file answers to the workspace upload settings, which can
+  // only narrow what this table takes.
+  const limits = await getUploadLimits(sql);
+  if (!MIMES.has(mime) || !limits.allowedMime.has(mime)) throw new ImageRejectedError('wrong_format');
+  const maxBytes = Math.min(FB_CHAT_MEDIA_MAX_STORED_BYTES, limits.maxBytes);
   const file = await shrinkImageToFit(
     new File([new Uint8Array(bytes)], `photo.${mime.slice(6)}`, { type: mime }),
-    FB_CHAT_MEDIA_MAX_STORED_BYTES,
+    maxBytes,
     { strict: true },
   );
+  // The shrink gives up after a few passes and hands the file back as it was.
+  if (file.size > maxBytes) throw new FbChatMediaTooLargeError(maxBytes);
   const body = Buffer.from(await file.arrayBuffer());
   const meta = await sharp(body).metadata();
   const stored = await uploadAttachment(env, file, 'fb-chat');

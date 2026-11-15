@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import { r2Configured } from './r2';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
+import { FB_CHAT_MEDIA_MAX_UPLOAD_BYTES } from '@recycle-erp/shared';
 
 import { UPLOAD_HARD_CAP_BYTES } from './lib/settings';
 import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from './lib/error-log';
@@ -304,6 +305,12 @@ const leadsImportBodyLimit = bodyLimit({
   onError: (c) => c.json({ error: 'Payload too large' }, 413),
 });
 
+// A chat photo from the Facebook extension arrives as the raw body.
+const fbChatMediaBodyLimit = bodyLimit({
+  maxSize: FB_CHAT_MEDIA_MAX_UPLOAD_BYTES,
+  onError: (c) => c.json({ error: 'payload_too_large', detail: `max ${FB_CHAT_MEDIA_MAX_UPLOAD_BYTES} bytes` }, 413),
+});
+
 // All other routes: apply the 1 MiB JSON cap.
 const jsonBodyLimit = bodyLimit({
   maxSize: JSON_BODY_LIMIT,
@@ -314,6 +321,7 @@ app.use('*', (c, next) => {
   if (c.req.path === '/api/public/intake') return intakeBodyLimit(c, next);
   if (isUploadPath(c.req.path)) return uploadBodyLimit(c, next);
   if (c.req.path === '/api/leads/reddit/import') return leadsImportBodyLimit(c, next);
+  if (c.req.path === '/api/fb-chat/push/media') return fbChatMediaBodyLimit(c, next);
   return jsonBodyLimit(c, next);
 });
 
