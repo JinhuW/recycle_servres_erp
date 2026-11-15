@@ -2,13 +2,13 @@
 id: RS-589
 title: Facebook chats: route photos through the extension, ERP and Telegram
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-15
 reporter: jinhu
 branch: feat/fb-chat-images
-pr:
-version:
+pr: 1206
+version: 1.460.0
 related: [RS-582, RS-583]
 ---
 
@@ -37,18 +37,18 @@ in a Telegram topic is refused with "Only text can be sent to Facebook".
 
 ## Acceptance criteria
 
-- [ ] The extension uploads each bubble photo to `POST /api/fb-chat/push/media`
+- [x] The extension uploads each bubble photo to `POST /api/fb-chat/push/media`
       and sends the returned ids as `media` on the sync row.
-- [ ] The same bytes uploaded again return the same id and add no row.
-- [ ] Rows stored before this change get their `media` filled in when a later
+- [x] The same bytes uploaded again return the same id and add no row.
+- [x] Rows stored before this change get their `media` filled in when a later
       sync lines up with them.
-- [ ] An extension that sends only `images` still syncs; the hub tries to fetch
+- [x] An extension that sends only `images` still syncs; the hub tries to fetch
       the links itself while they are fresh.
-- [ ] The chats page shows each stored photo, with a larger view on click, and
+- [x] The chats page shows each stored photo, with a larger view on click, and
       keeps the placeholder when none is stored.
-- [ ] Photos are served only through `GET /api/fb-chat/media/:id` to signed-in
+- [x] Photos are served only through `GET /api/fb-chat/media/:id` to signed-in
       users.
-- [ ] Telegram gets the photo itself (uploaded bytes, not a link), live and in
+- [x] Telegram gets the photo itself (uploaded bytes, not a link), live and in
       history transcripts, in bubble order.
 
 ## Out of scope
