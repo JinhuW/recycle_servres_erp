@@ -1,15 +1,20 @@
 import type postgres from 'postgres';
+import { FB_CHAT_MEDIA_MAX_UPLOAD_BYTES, FB_CHAT_MEDIA_MIMES, FB_CHAT_REPLY_MEDIA_MAX } from '@recycle-erp/shared';
 import { getDb } from '../db';
 import { chunkForTelegram, FB_CHAT_REPLY_MAX, fbChatTopicName } from '../lib/fbChat';
-import { fbChatMediaFile } from '../lib/fbChatMedia';
+import { FbChatMediaTooLargeError, ImageRejectedError, fbChatMediaFile, storeFbChatMedia } from '../lib/fbChatMedia';
 import { log } from '../lib/log';
-import { TelegramError, TelegramUpload, telegramCaller, type TelegramCall } from '../lib/telegramBot';
+import {
+  DOWNLOAD_FILE, TelegramError, TelegramUpload, telegramCaller, type TelegramCall, type TelegramDownload,
+} from '../lib/telegramBot';
 import { connectUserClient, userAccountCaller, type UserSessionConfig } from '../lib/telegramUser';
+import { StorageUnavailableError } from '../r2';
 import type { Env } from '../types';
 import { notifyOutbox } from './fbChat';
 
 // The Telegram half of the Facebook chat hub. One pass:
-//   1. reads the bot's updates and queues the replies typed in topics;
+//   1. reads the bot's updates and queues the replies typed in topics, text
+//      or photos (an album is one reply);
 //   2. posts account alerts to General;
 //   3. mirrors stored messages into each buyer's topic, creating it on first
 //      use; a reply typed in the ERP is one of them, named after who typed it;
@@ -100,17 +105,24 @@ export function fbChatTelegramConfigured(env: Env): boolean {
   return fbChatTelegramConfig(env) !== null || fbChatUserSession(env) !== null;
 }
 
-type Update = {
-  update_id: number;
-  message?: {
-    message_id: number;
-    message_thread_id?: number;
-    is_topic_message?: boolean;
-    chat: { id: number };
-    from?: { id: number; is_bot: boolean; first_name?: string; last_name?: string; username?: string };
-    text?: string;
-  };
+type PhotoSize = { file_id: string; width: number; height: number; file_size?: number };
+
+type Message = {
+  message_id: number;
+  message_thread_id?: number;
+  is_topic_message?: boolean;
+  chat: { id: number };
+  from?: { id: number; is_bot: boolean; first_name?: string; last_name?: string; username?: string };
+  text?: string;
+  caption?: string;
+  /** The same photo in several sizes. */
+  photo?: PhotoSize[];
+  document?: { file_id: string; mime_type?: string; file_size?: number };
+  /** Shared by the messages of one album. */
+  media_group_id?: string;
 };
+
+type Update = { update_id: number; message?: Message };
 
 class Budget {
   private left = SENDS_PER_TICK;
@@ -128,18 +140,138 @@ class Budget {
 async function pollUpdates(sql: postgres.Sql, cfg: FbChatTelegramConfig): Promise<number> {
   const column = cfg.mode === 'user' ? 'user_last_message_id' : 'offset';
   const [state] = await sql<{ cursor: string }[]>`SELECT ${sql(column)} AS cursor FROM fb_chat_telegram_state`;
+  let cursor = Number(state!.cursor);
   const updates = await cfg.call<Update[]>('getUpdates', {
-    offset: Number(state!.cursor), timeout: 0, limit: 50, allowed_updates: ['message'],
+    offset: cursor, timeout: 0, limit: 50, allowed_updates: ['message'],
   });
+  const units = replyUnits(updates);
+  const done = new Set<number>();
   let queued = 0;
-  for (const u of updates) {
-    queued += await handleUpdate(sql, cfg, u);
-    await sql`UPDATE fb_chat_telegram_state SET ${sql(column)} = ${u.update_id + 1}`;
+  for (const unit of units) {
+    const n = await handleUnit(sql, cfg, unit);
+    // The photo store is busy: this and everything after it waits for the next tick.
+    if (n === 'later') break;
+    queued += n;
+    for (const u of unit) done.add(u.update_id);
+    const next = safeCursor(updates, units, done);
+    if (next !== cursor) {
+      await sql`UPDATE fb_chat_telegram_state SET ${sql(column)} = ${next}`;
+      cursor = next;
+    }
   }
   return queued;
 }
 
-async function handleUpdate(sql: postgres.Sql, cfg: FbChatTelegramConfig, u: Update): Promise<number> {
+/**
+ * The batch's updates as replies, in the order each first appears: the
+ * messages of one album (same group, topic and sender) together, ordered by
+ * message id, every other update on its own. Album messages a later batch
+ * brings are a reply of their own there.
+ */
+function replyUnits(updates: Update[]): Update[][] {
+  const units: Update[][] = [];
+  const albums = new Map<string, Update[]>();
+  for (const u of updates) {
+    const m = u.message;
+    if (!m?.media_group_id) {
+      units.push([u]);
+      continue;
+    }
+    const key = [m.chat.id, m.message_thread_id ?? '', m.from?.id ?? '', m.media_group_id].join(':');
+    const album = albums.get(key);
+    if (album) {
+      album.push(u);
+      continue;
+    }
+    const fresh = [u];
+    albums.set(key, fresh);
+    units.push(fresh);
+  }
+  for (const album of albums.values()) album.sort((a, b) => a.message!.message_id - b.message!.message_id);
+  return units;
+}
+
+/**
+ * The cursor once the `done` updates are handled: the first update not yet
+ * handled, but never inside a handled album. Read again from inside one, its
+ * later photos would come back without the first message and be queued as a
+ * second reply; read again from its start, the whole album is regrouped and
+ * meets its own row (keyed on the first message), so nothing is queued twice.
+ */
+function safeCursor(updates: Update[], units: Update[][], done: Set<number>): number {
+  const pending = updates.filter((u) => !done.has(u.update_id)).map((u) => u.update_id);
+  let at = pending.length ? Math.min(...pending) : Math.max(...updates.map((u) => u.update_id)) + 1;
+  for (let moved = true; moved;) {
+    moved = false;
+    for (const unit of units) {
+      const ids = unit.map((u) => u.update_id);
+      const first = Math.min(...ids);
+      if (first < at && Math.max(...ids) >= at) {
+        at = first;
+        moved = true;
+      }
+    }
+  }
+  return at;
+}
+
+const SEND_MIMES: ReadonlySet<string> = new Set(FB_CHAT_MEDIA_MIMES);
+const MB = 1024 * 1024;
+const SUPPORTED = 'Only text, photos, and JPEG, PNG or WebP files can be sent to Facebook.';
+const NOT_FORWARDED = 'Nothing was forwarded.';
+
+type TgFile = { fileId: string; mime: string; size?: number };
+
+/** The photo a message carries, in its largest size, or an image sent as a file; null for anything else. */
+function fileOf(m: Message): TgFile | null {
+  if (m.photo?.length) {
+    const big = m.photo.reduce((a, b) => (b.width * b.height >= a.width * a.height ? b : a));
+    // Telegram re-encodes every photo it is sent as a JPEG.
+    return { fileId: big.file_id, mime: 'image/jpeg', size: big.file_size };
+  }
+  const mime = m.document?.mime_type?.toLowerCase();
+  if (m.document && mime && SEND_MIMES.has(mime)) return { fileId: m.document.file_id, mime, size: m.document.file_size };
+  return null;
+}
+
+/** The stored photo's id, a refusal to tell the topic, or 'later' when the store is busy. */
+async function storeTelegramFile(
+  sql: postgres.Sql, cfg: FbChatTelegramConfig, f: TgFile,
+): Promise<{ id: string } | { refusal: string } | 'later'> {
+  const tooLarge = { refusal: `Too large to send (the limit is ${FB_CHAT_MEDIA_MAX_UPLOAD_BYTES / MB} MB a photo). ${NOT_FORWARDED}` };
+  if ((f.size ?? 0) > FB_CHAT_MEDIA_MAX_UPLOAD_BYTES) return tooLarge;
+  try {
+    const { bytes } = await cfg.call<TelegramDownload>(DOWNLOAD_FILE, { file_id: f.fileId });
+    if (bytes.length > FB_CHAT_MEDIA_MAX_UPLOAD_BYTES) return tooLarge;
+    if (!cfg.env) throw new StorageUnavailableError();
+    const { id } = await storeFbChatMedia(sql, cfg.env, bytes, f.mime, 'telegram');
+    return { id };
+  } catch (e) {
+    // A refusal on Telegram's side (a bot's 20 MB limit, a file gone) is
+    // final; a rate limit pauses the pass, and a network or server error
+    // fails the tick, which reads the update again on the next one.
+    if (e instanceof TelegramError && !e.retryAfterSec && e.code >= 400 && e.code < 500) {
+      flog.warn('fb chat telegram photo download refused', { error: e.message });
+      return { refusal: `Telegram did not hand over the file (${e.message}). ${NOT_FORWARDED}` };
+    }
+    if (e instanceof ImageRejectedError) {
+      if (e.reason === 'busy') return 'later';
+      return { refusal: `The image could not be read. ${SUPPORTED} ${NOT_FORWARDED}` };
+    }
+    if (e instanceof FbChatMediaTooLargeError) return tooLarge;
+    // Missing storage is configuration: retrying every tick would hold every
+    // later reply behind this one. The sender is told, and can send again.
+    if (e instanceof StorageUnavailableError) {
+      flog.error('fb chat telegram photo not stored', e);
+      return { refusal: `Photos cannot be stored on the ERP right now. ${NOT_FORWARDED} Send it again later.` };
+    }
+    throw e;
+  }
+}
+
+/** One reply: a text message, or a photo or album with its caption. Answers how many were queued. */
+async function handleUnit(sql: postgres.Sql, cfg: FbChatTelegramConfig, unit: Update[]): Promise<number | 'later'> {
+  const u = unit[0]!;
   const m = u.message;
   // Every message the pass passes over says why, without its text: a reply
   // that never reaches Facebook is otherwise invisible.
@@ -147,6 +279,7 @@ async function handleUpdate(sql: postgres.Sql, cfg: FbChatTelegramConfig, u: Upd
     flog.info('fb chat telegram message skipped', {
       reason, messageId: m?.message_id ?? u.update_id, topicId: m?.message_thread_id ?? null,
       fromId: m?.from?.id ?? null, ownPost: m?.from?.is_bot ?? null, hasText: !!m?.text,
+      hasMedia: !!(m?.photo || m?.document), parts: unit.length,
     });
     return 0;
   };
@@ -164,24 +297,37 @@ async function handleUpdate(sql: postgres.Sql, cfg: FbChatTelegramConfig, u: Upd
     chat_id: cfg.chatId, message_thread_id: m.message_thread_id, text,
     reply_parameters: { message_id: m.message_id, allow_sending_without_reply: true },
   }).catch((e) => flog.warn('telegram reply failed', e));
-  const body = m.text?.trim();
-  if (!body) {
-    await reply('Only text can be sent to Facebook. This message was not forwarded.');
+  const refuse = async (text: string) => {
+    await reply(text);
     return 0;
-  }
+  };
+
+  const text = unit.length === 1 ? m.text?.trim() : undefined;
+  const files = text ? [] : unit.map((x) => fileOf(x.message!));
+  // An album's caption sits on whichever of its messages it was typed on.
+  const body = text ?? unit.map((x) => x.message?.caption?.trim()).find(Boolean) ?? '';
   // A leading slash is a bot command or a note to self, never for the buyer.
   if (body.startsWith('/')) return skip('note to self');
+  // A reply goes whole or not at all: one part that cannot be sent holds back the album.
+  if (!text && files.some((f) => !f)) return refuse(`${SUPPORTED} ${NOT_FORWARDED}`);
   if (body.length > FB_CHAT_REPLY_MAX) {
-    await reply(`Too long to send (${body.length} characters; the limit is ${FB_CHAT_REPLY_MAX}). Not forwarded.`);
-    return 0;
+    return refuse(`Too long to send (${body.length} characters; the limit is ${FB_CHAT_REPLY_MAX}). Not forwarded.`);
+  }
+  const media: string[] = [];
+  for (const f of files.slice(0, FB_CHAT_REPLY_MEDIA_MAX)) {
+    const stored = await storeTelegramFile(sql, cfg, f!);
+    if (stored === 'later') return 'later';
+    if ('refusal' in stored) return refuse(stored.refusal);
+    media.push(stored.id);
   }
   const who = [m.from.first_name, m.from.last_name].filter(Boolean).join(' ') || m.from.username || String(m.from.id);
   const rows = await sql`
-    INSERT INTO fb_chat_messages (thread_id, direction, source, body, send_state, tg_message_id, tg_user_id, tg_user_name, mirrored_at)
-    VALUES (${thread.id}, 'out', 'telegram', ${body}, 'queued', ${m.message_id}, ${m.from.id}, ${who}, NOW())
+    INSERT INTO fb_chat_messages (thread_id, direction, source, body, media, send_state, tg_message_id, tg_user_id, tg_user_name, mirrored_at)
+    VALUES (${thread.id}, 'out', 'telegram', ${body}, ${sql.json(media)}, 'queued', ${m.message_id}, ${m.from.id}, ${who}, NOW())
     ON CONFLICT (thread_id, tg_message_id) DO NOTHING
     RETURNING id`;
   if (rows.length) {
+    if (media.length) flog.info('fb chat telegram photo reply queued', { messageId: m.message_id, photos: media.length });
     // Answering is reading: the chat stops showing as unread for the team.
     await sql`UPDATE fb_chat_threads SET read_seq = last_seq WHERE id = ${thread.id}`;
     await notifyOutbox(sql);

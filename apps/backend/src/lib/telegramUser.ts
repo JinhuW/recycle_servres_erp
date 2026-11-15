@@ -2,7 +2,7 @@ import { Api, TelegramClient, helpers } from 'telegram';
 import { FloodWaitError, RPCError } from 'telegram/errors/index.js';
 import { CustomFile } from 'telegram/client/uploads.js';
 import { StringSession } from 'telegram/sessions/index.js';
-import { TelegramError, TelegramUpload, type TelegramCall } from './telegramBot';
+import { DOWNLOAD_FILE, TelegramError, TelegramUpload, type TelegramCall, type TelegramDownload } from './telegramBot';
 
 // The Facebook chat hub's Telegram side, signed in as an ordinary Telegram
 // account (MTProto) rather than a bot. The hub's pass is written against Bot
@@ -21,6 +21,9 @@ import { TelegramError, TelegramUpload, type TelegramCall } from './telegramBot'
 //   it did not post is a reply. One from before this session started is
 //   taken as a post: nothing is known about it, and relaying a post would
 //   send the buyer's own words back to them.
+// A message with a photo or file is reported the way the Bot API reports it
+// (`photo` or `document`, the text as `caption`), with the message id as the
+// file id, so `downloadFile` can fetch it again by that id.
 
 /** One message in the group, as much as the hub reads. */
 export type UserMessage = {
@@ -34,7 +37,12 @@ export type UserMessage = {
   firstName?: string;
   lastName?: string;
   username?: string;
+  /** The text, or the caption when the message carries a file. */
   text: string;
+  /** A photo, a file, or something else (video, sticker, voice); absent on plain text and link previews. */
+  media?: { kind: 'photo' | 'document' | 'other'; mime?: string; bytes?: number; width?: number; height?: number };
+  /** Shared by the messages of one album. */
+  groupedId?: string;
 };
 
 /** What the hub needs from a signed-in account, in the group it posts to. */
@@ -48,6 +56,8 @@ export interface TelegramUserClient {
   createTopic(title: string): Promise<number>;
   renameTopic(topicId: number, title: string): Promise<void>;
   react(messageId: number, emoji: string): Promise<void>;
+  /** The photo or file a message in the group carries. */
+  download(messageId: number): Promise<Buffer>;
   /** Called on any update for the group; tells the caller history moved. */
   onActivity(listener: () => void): void;
 }
@@ -89,6 +99,7 @@ export function userAccountCaller(client: TelegramUserClient, chatId: string): T
         return messages.map((m) => ({
           update_id: m.id,
           message: {
+            ...mediaFields(m),
             message_id: m.id,
             message_thread_id: m.topicId ?? undefined,
             is_topic_message: m.topicId !== null,
@@ -97,9 +108,13 @@ export function userAccountCaller(client: TelegramUserClient, chatId: string): T
             from: offset === 0 || !m.fromId ? undefined : {
               id: Number(m.fromId), is_bot: isPost(m), first_name: m.firstName, last_name: m.lastName, username: m.username,
             },
-            text: m.text || undefined,
+            text: m.media ? undefined : m.text || undefined,
           },
         }));
+      }
+      case DOWNLOAD_FILE: {
+        const answer: TelegramDownload = { bytes: await client.download(Number(p.file_id)) };
+        return answer;
       }
       case 'sendMessage': {
         const reply = p.reply_parameters as { message_id?: number } | undefined;
@@ -149,6 +164,49 @@ export function userAccountCaller(client: TelegramUserClient, chatId: string): T
       throw e;
     }
   }) as TelegramCall;
+}
+
+/** A message's file as the Bot API names it; `other` media is left as a bare caption, which the hub refuses. */
+function mediaFields(m: UserMessage): Params {
+  if (!m.media) return {};
+  const fileId = String(m.id);
+  return {
+    caption: m.text || undefined,
+    media_group_id: m.groupedId,
+    ...(m.media.kind === 'photo'
+      ? { photo: [{ file_id: fileId, width: m.media.width ?? 0, height: m.media.height ?? 0, file_size: m.media.bytes }] }
+      : {}),
+    ...(m.media.kind === 'document'
+      ? { document: { file_id: fileId, mime_type: m.media.mime, file_size: m.media.bytes } }
+      : {}),
+  };
+}
+
+/** What a message carries, in the terms `UserMessage` reports. */
+function mediaOf(m: Api.Message): UserMessage['media'] {
+  const media = m.media;
+  // A link's preview is still a text message.
+  if (!media || media instanceof Api.MessageMediaEmpty || media instanceof Api.MessageMediaWebPage) return undefined;
+  if (media instanceof Api.MessageMediaPhoto && media.photo instanceof Api.Photo) {
+    let best: { w: number; h: number; bytes?: number } | null = null;
+    for (const size of media.photo.sizes) {
+      const found = size instanceof Api.PhotoSize ? { w: size.w, h: size.h, bytes: size.size }
+        : size instanceof Api.PhotoSizeProgressive ? { w: size.w, h: size.h, bytes: size.sizes.at(-1) }
+          : null;
+      if (found && (!best || found.w * found.h >= best.w * best.h)) best = found;
+    }
+    return { kind: 'photo', mime: 'image/jpeg', width: best?.w, height: best?.h, bytes: best?.bytes };
+  }
+  if (media instanceof Api.MessageMediaDocument && media.document instanceof Api.Document) {
+    const d = media.document;
+    // Stickers are WebP documents, and GIFs and voice notes documents too; none is a photo to forward.
+    const special = d.attributes.some((a) => a instanceof Api.DocumentAttributeSticker
+      || a instanceof Api.DocumentAttributeAnimated || a instanceof Api.DocumentAttributeVideo
+      || a instanceof Api.DocumentAttributeAudio);
+    if (special) return { kind: 'other' };
+    return { kind: 'document', mime: d.mimeType, bytes: Number(d.size) };
+  }
+  return { kind: 'other' };
 }
 
 export type UserSessionConfig = { apiId: number; apiHash: string; session: string; chatId: string };
@@ -210,6 +268,8 @@ export async function connectUserClient(cfg: UserSessionConfig): Promise<{ clien
             lastName: sender?.lastName ?? undefined,
             username: sender?.username ?? undefined,
             text: m.message ?? '',
+            media: mediaOf(m),
+            groupedId: m.groupedId ? m.groupedId.toString() : undefined,
           };
         });
     },
@@ -270,6 +330,13 @@ export async function connectUserClient(cfg: UserSessionConfig): Promise<{ clien
       await tg.invoke(new Api.messages.SendReaction({
         peer, msgId: messageId, reaction: [new Api.ReactionEmoji({ emoticon: emoji })],
       }));
+    },
+    async download(messageId) {
+      const [m] = await tg.getMessages(peer, { ids: [messageId] });
+      if (!(m instanceof Api.Message) || !m.media) throw new TelegramError('the message has no file', 400, null);
+      const bytes = await tg.downloadMedia(m, {});
+      if (!Buffer.isBuffer(bytes)) throw new TelegramError('Telegram gave no file', 400, null);
+      return bytes;
     },
     onActivity(listener) {
       tg.addEventHandler((update: unknown) => {
