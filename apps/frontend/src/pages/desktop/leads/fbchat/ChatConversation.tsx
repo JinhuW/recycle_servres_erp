@@ -1,15 +1,17 @@
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import {
   FB_CHAT_REPLY_MAX_CHARS,
   type FbChatAccountRow, type FbChatMessageRow, type FbChatThreadRow,
 } from '@recycle-erp/shared';
 import { Icon } from '../../../../components/Icon';
+import { ImageLightbox } from '../../../../components/ImageLightbox';
 import { fbChatListingUrl, fbChatStatusOf } from '../../../../lib/fbChat';
 import { fmtDate, relTime } from '../../../../lib/format';
 import { useT } from '../../../../lib/i18n';
 import { fbChatTabPath, hrefFor, onLinkClick } from '../../../../lib/route';
 import {
-  CHAT_SOURCE_CLASS, chatCanRetry, chatDaysAgo, chatTimeline, type ChatPacing,
+  CHAT_SOURCE_CLASS, chatCanRetry, chatDaysAgo, chatMediaUrl, chatPhotoSlots, chatTimeline, type ChatPacing,
 } from './ChatHelpers';
 import { ChatMessengerIcon, ChatSendIcon, ChatSourceIcon, ChatTelegramIcon } from './ChatIcons';
 import { AccountBadge, BuyerAvatar, fbcHueStyle } from './shared';
@@ -148,14 +150,66 @@ function useSentTime() {
       : new Date(m.sent_at ?? m.created_at).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
 }
 
-/** The text, then a placeholder per photo: Facebook's image links are signed and expire, so they are not loaded here. */
+/**
+ * The text, then the photos. Only stored copies are loaded: Facebook's own
+ * image links are signed and expire, so a photo with no stored copy, or one
+ * that fails to load, keeps the placeholder.
+ */
 function BubbleBody({ m }: { m: FbChatMessageRow }) {
   const { t } = useT();
+  const { media, missing } = chatPhotoSlots(m);
+  const [broken, setBroken] = useState<ReadonlySet<string>>(() => new Set());
+  const [open, setOpen] = useState<number | null>(null);
+  const shown = media.filter(id => !broken.has(id));
+  const total = media.length + missing;
+  const placeholder = (key: string) => <div key={key} className="fbcc-img"><Icon name="image" size={16} />{t('fbcc_photo')}</div>;
+
   return (
     <>
       {m.body && <div className="fbcc-b">{m.body}</div>}
-      {m.images.map((_, i) => <div key={i} className="fbcc-img"><Icon name="image" size={16} />{t('fbcc_photo')}</div>)}
+      {media.map((id, i) => broken.has(id) ? placeholder(`m-${id}`) : (
+        <button
+          key={`m-${id}`} type="button" className="fbcc-photo"
+          onClick={() => setOpen(shown.indexOf(id))}
+          aria-label={t('fbcc_photoView', { n: i + 1, total })} title={t('fbcc_photoView', { n: i + 1, total })}
+        >
+          <img
+            src={chatMediaUrl(id)} alt={t('fbcc_photo')} loading="lazy" decoding="async"
+            onError={() => setBroken(b => new Set(b).add(id))}
+          />
+        </button>
+      ))}
+      {Array.from({ length: missing }, (_, i) => placeholder(`p-${i}`))}
+      {open !== null && shown[open] !== undefined && (
+        <ChatPhotoViewer ids={shown} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
+      )}
     </>
+  );
+}
+
+/**
+ * The shared lightbox, plus the arrow keys to step through the bubble's
+ * photos. It is portalled to the body so it sits outside the bubble list's
+ * live region and its scrolling box.
+ */
+function ChatPhotoViewer({ ids, index, onIndex, onClose }: {
+  ids: string[]; index: number; onIndex: (i: number) => void; onClose: () => void;
+}) {
+  const { t } = useT();
+  useEffect(() => {
+    if (ids.length < 2) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+      if (!step) return;
+      e.preventDefault();
+      onIndex((index + step + ids.length) % ids.length);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [ids.length, index, onIndex]);
+  return createPortal(
+    <ImageLightbox url={chatMediaUrl(ids[index])} alt={t('fbcc_photoView', { n: index + 1, total: ids.length })} onClose={onClose} />,
+    document.body,
   );
 }
 

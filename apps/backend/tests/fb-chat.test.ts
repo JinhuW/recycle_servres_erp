@@ -14,6 +14,7 @@ import { createOAuthClient } from '../src/oauth/clients';
 import { generateSigningKey, signAccessToken } from '../src/oauth/tokens';
 import { alignWindow } from '../src/services/fbChat';
 import { compareVersions } from '../src/services/fbChatConfig';
+import { fbChatMediaFetchesSettled, setFbChatMediaFetchForTests } from '../src/services/fbChatMediaFetch';
 import { fbChatTelegramConfig, fbChatTelegramConfigured, fbChatUserSession, runFbChatTelegramTick, setFbChatTelegramForTests } from '../src/services/fbChatTelegram';
 import { api, testEnv } from './helpers/app';
 import { ALEX, MARCUS, SOFIA, loginAs } from './helpers/auth';
@@ -127,9 +128,15 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     fail = null;
     topicSeq = 0;
     setFbChatTelegramForTests(telegram);
+    // Photo links here are made up; the hub's own fetch of them must never leave the test.
+    setFbChatMediaFetchForTests(async () => new Response(null, { status: 404 }));
   });
 
-  afterEach(() => setFbChatTelegramForTests(null));
+  afterEach(async () => {
+    setFbChatTelegramForTests(null);
+    await fbChatMediaFetchesSettled();
+    setFbChatMediaFetchForTests(null);
+  });
 
   it('guards the push routes by scope and the reads by role', async () => {
     const body = sync([row('in', 'hi')], { full: true });
@@ -186,6 +193,8 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
   it('mirrors a reply typed on Facebook, and a photo', async () => {
     await seeded();
     await push('sync', sync([row('in', 'Is this still available?'), row('out', 'Yes it is'), row('in', '', ['https://scontent.fbcdn.net/a.jpg'])]));
+    // Past the wait for the photo's bytes, none stored: the link goes.
+    await getTestDb()`UPDATE fb_chat_messages SET created_at = NOW() - INTERVAL '2 minutes'`;
     await tick();
     expect(texts()).toEqual(['↩️ You: Yes it is']);
     expect(sent('sendPhoto').map((c) => c.params.photo)).toEqual(['https://scontent.fbcdn.net/a.jpg']);
@@ -410,6 +419,8 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     expect(pushed.body).toEqual({ needsFull: false, added: 2 });
     const labels = await sql`SELECT fb_sent_label FROM fb_chat_messages ORDER BY seq`;
     expect(labels.map((r) => r.fb_sent_label)).toEqual(['Tuesday 5:57pm', 'Tuesday 5:58pm']);
+    // Past the wait for the photo's bytes, none stored.
+    await sql`UPDATE fb_chat_messages SET created_at = NOW() - INTERVAL '2 minutes'`;
     await tick();
     expect(texts().at(-1)).toBe('📜 Earlier messages\n[Tuesday 5:57pm] Kane Bryant: [photo]\n[Tuesday 5:58pm] Kane Bryant: Is this still available?');
   });
@@ -422,6 +433,7 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
       async history(afterId) { return afterId === 0 ? history.slice(-1) : history.filter((m) => m.id > afterId); },
       async send(text) { posted.push(text); return 0; },
       async sendPhotoUrl() { return 0; },
+      async sendPhotos() { return []; },
       async createTopic() { return 41; },
       async renameTopic() {},
       async react() {},

@@ -85,10 +85,24 @@ export function chatMergeMessages(
 /** A stand-in row for a reply the server has not stored yet. Its id is negative so it can never match a real one. */
 export function chatPendingRow(p: ChatPendingReply): FbChatMessageRow {
   return {
-    id: -p.key, seq: null, direction: 'out', source: 'erp', body: p.body, images: [],
+    id: -p.key, seq: null, direction: 'out', source: 'erp', body: p.body, images: [], media: [],
     backfill: false, fb_sent_label: null, send_state: 'queued', error: null, typing_ms: null,
     tg_user_name: null, erp_user_id: null, author_name: null, created_at: p.at, sent_at: null,
   };
+}
+
+/** Where a stored chat photo is served. Same-origin, so the session cookie goes along. */
+export function chatMediaUrl(id: string): string {
+  return `/api/fb-chat/media/${encodeURIComponent(id)}`;
+}
+
+/**
+ * How many photo slots a bubble draws, stored ones first. `media` holds only
+ * the photos the hub could store, so the rest keep a placeholder; which of the
+ * bubble's photos went missing is not known, so they go at the end.
+ */
+export function chatPhotoSlots(m: Pick<FbChatMessageRow, 'images' | 'media'>): { media: string[]; missing: number } {
+  return { media: m.media, missing: Math.max(0, m.images.length - m.media.length) };
 }
 
 /** True when the server would take a retry of this row (POST /messages/:id/retry). */

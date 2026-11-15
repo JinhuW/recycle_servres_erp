@@ -4,6 +4,7 @@ import {
   FB_CHAT_CONFIG_VALUE_MAX,
   FB_CHAT_EVENT_KINDS,
   FB_CHAT_MAX_WAIT_SEC,
+  FB_CHAT_MEDIA_PER_ROW,
   FB_CHAT_REPLY_MAX_CHARS,
   type FbChatAccountRef,
   type FbChatBuyer,
@@ -19,6 +20,7 @@ import {
   type FbChatSendResult,
   type FbChatSyncPush,
 } from '@recycle-erp/shared';
+import { isFbChatMediaId } from './fbChatMedia';
 
 // Parsers for what the extensions push. The extension reads these values off a
 // Facebook page, so every string is a stranger's text: bounded, never trusted
@@ -81,11 +83,17 @@ function rows(v: unknown): FbChatRow[] {
     const images = Array.isArray(r.images)
       ? r.images.filter((u): u is string => typeof u === 'string' && /^https:\/\/[^\s]{1,2000}$/.test(u)).slice(0, MAX_IMAGES)
       : [];
+    // Left out by extensions that predate media, which is how the hub knows
+    // to fetch `images` itself.
+    const media = Array.isArray(r.media)
+      ? r.media.filter(isFbChatMediaId).map((m) => m.toLowerCase()).slice(0, FB_CHAT_MEDIA_PER_ROW)
+      : undefined;
     return {
       direction: r.direction, text: typeof r.text === 'string' ? r.text.slice(0, MAX_BODY) : '', images,
+      ...(media ? { media } : {}),
       at: text(r.at, 80) ?? undefined,
     };
-  }).filter((r) => r.text.trim() || r.images.length);
+  }).filter((r) => r.text.trim() || r.images.length || r.media?.length);
 }
 
 export function parseSyncPush(v: unknown): FbChatSyncPush {

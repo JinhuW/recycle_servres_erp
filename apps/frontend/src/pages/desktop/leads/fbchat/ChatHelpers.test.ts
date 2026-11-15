@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FbChatMessageRow } from '@recycle-erp/shared';
 import {
-  chatCanRetry, chatDaysAgo, chatFirstName, chatMergeMessages, chatPacing, chatTimeline,
+  chatCanRetry, chatDaysAgo, chatFirstName, chatMediaUrl, chatMergeMessages, chatPacing, chatPhotoSlots, chatTimeline,
 } from './ChatHelpers';
 
 // Local-time constructors throughout: the day rules follow the viewer's clock,
@@ -12,7 +12,7 @@ let nextId = 1;
 function row(over: Partial<FbChatMessageRow>): FbChatMessageRow {
   const id = over.id ?? nextId++;
   return {
-    id, seq: id, direction: 'in', source: 'facebook', body: `m${id}`, images: [], backfill: false,
+    id, seq: id, direction: 'in', source: 'facebook', body: `m${id}`, images: [], media: [], backfill: false,
     fb_sent_label: null, send_state: null, error: null, typing_ms: null, tg_user_name: null,
     erp_user_id: null, author_name: null, created_at: at(12, 9), sent_at: null, ...over,
   };
@@ -89,6 +89,16 @@ describe('chatCanRetry', () => {
     expect(chatCanRetry({ ...base, send_state: 'sent' })).toBe(false);
     expect(chatCanRetry({ ...base, seq: 9, send_state: 'failed' })).toBe(false);
     expect(chatCanRetry({ ...base, direction: 'in', send_state: null })).toBe(false);
+  });
+});
+
+describe('chat photos', () => {
+  it('loads stored copies from the media route and keeps a placeholder for the rest', () => {
+    expect(chatMediaUrl('a1b2')).toBe('/api/fb-chat/media/a1b2');
+    expect(chatMediaUrl('a/b')).toBe('/api/fb-chat/media/a%2Fb');
+    expect(chatPhotoSlots(row({ images: ['x', 'y'], media: ['m1'] }))).toEqual({ media: ['m1'], missing: 1 });
+    expect(chatPhotoSlots(row({ images: ['x'], media: [] }))).toEqual({ media: [], missing: 1 });
+    expect(chatPhotoSlots(row({ images: [], media: ['m1'] }))).toEqual({ media: ['m1'], missing: 0 });
   });
 });
 

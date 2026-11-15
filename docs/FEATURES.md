@@ -1360,7 +1360,7 @@ The sidebar row shows the number of unread chats.
   message says where it was typed (Facebook, Telegram or the ERP) and, for
   the ERP, who typed it.
 - **Replying in the ERP.** A text reply typed in the open chat (2000
-  characters at most, no photos) goes through the same outbox as a Telegram
+  characters at most, no photos yet) goes through the same outbox as a Telegram
   reply and is posted into the chat's topic as `↩️ <first name> (ERP): …`. It
   is queued whatever the account's state and goes out when the account's
   extension next claims. The bubble shows queued, typing, sent or not sent. A
@@ -1415,6 +1415,16 @@ The sidebar row shows the number of unread chats.
 - **Messages.** Each later buyer message is posted to its topic once, as
   `👤 <buyer>: …` (v1.453.3). A reply typed on Facebook directly appears as
   `↩️ You: …`.
+- **Photos** (v1.460.0, RS-589). The extension (0.4.0 and later) uploads
+  each bubble photo to `POST /api/fb-chat/push/media`, and the hub keeps one
+  copy per photo (`fb_chat_media`, R2). For an older extension that sends
+  only Facebook's signed links, the hub fetches the photo itself from
+  `*.fbcdn.net` right after the sync. The Chats tab shows stored photos as
+  thumbnails with a larger view on click, through `GET /api/fb-chat/media/:id`
+  (managers only); a photo never stored keeps the grey "Photo" box. Telegram
+  gets the photo itself, alone or as an album captioned with the message, and
+  a history breaks at each message with photos. A photo Telegram refuses goes
+  as its link or as the text line. Photos cannot yet be sent to Facebook.
 - **Replies.** Text typed in a topic is queued for the extension of the account
   that owns the conversation, which types it into Facebook. The bot reacts 👍
   when the extension reports it sent, and says so in the topic when it failed

@@ -5297,6 +5297,7 @@ const zh: Record<string, string> = {
   fbcc_unknownBuyer: "未知买家",
   fbcc_photoIn: "发来一张照片",
   fbcc_photo: "照片",
+  fbcc_photoView: "查看第 {n} 张照片（共 {total} 张）",
   fbcc_pfxFb: "FB",
   fbcc_pfxTg: "TG",
   fbcc_pfxErp: "ERP",

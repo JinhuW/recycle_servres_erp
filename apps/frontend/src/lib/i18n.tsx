@@ -4187,6 +4187,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fbcc_unknownBuyer: "Unknown buyer",
     fbcc_photoIn: "Sent a photo",
     fbcc_photo: "Photo",
+    fbcc_photoView: "View photo {n} of {total}",
     fbcc_pfxFb: "FB",
     fbcc_pfxTg: "TG",
     fbcc_pfxErp: "ERP",

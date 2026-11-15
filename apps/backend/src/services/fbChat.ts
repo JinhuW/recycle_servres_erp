@@ -5,6 +5,7 @@ import {
   type FbChatBuyerPush,
   type FbChatClaimAnswer,
   type FbChatEventPush,
+  type FbChatRow,
   type FbChatSendResult,
   type FbChatSyncAnswer,
   type FbChatSyncPush,
@@ -188,8 +189,25 @@ async function applyBuyer(tx: SqlLike, accountId: number, threadId: number, b: F
     WHERE id = ${threadId}`;
 }
 
+/** A stored message whose photos the hub should fetch itself, from `urls`. */
+export type FbChatMissingMedia = { messageId: number; urls: string[] };
+
+export type FbChatSyncOutcome = {
+  answer: FbChatSyncAnswer;
+  /** New rows with links but no stored photo: an extension that predates media, or whose upload failed. */
+  missingMedia: FbChatMissingMedia[];
+};
+
+/** The ids among `ids` that name a stored photo. */
+async function storedMediaIds(tx: SqlLike, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const rows = await tx<{ id: string }[]>`
+    SELECT id::text AS id FROM fb_chat_media WHERE id = ANY(${[...new Set(ids)]}::uuid[])`;
+  return new Set(rows.map((r) => r.id));
+}
+
 /** One conversation window from an extension. */
-export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string): Promise<FbChatSyncAnswer> {
+export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string): Promise<FbChatSyncOutcome> {
   const acct = await touchAccount(tx, push.account, clientId);
   // A page that reads as a conversation again is an account that is back.
   if (acct.restricted) {
@@ -204,7 +222,7 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
   const isNew = !thread;
   // A topic opens with the conversation so far, so a new thread is stored
   // only from a push that tried to read all of it.
-  if (isNew && !t.full) return { needsFull: true, added: 0 };
+  if (isNew && !t.full) return { answer: { needsFull: true, added: 0 }, missingMedia: [] };
   if (!thread) {
     [thread] = await tx<{ id: number; last_seq: number }[]>`
       INSERT INTO fb_chat_threads (account_id, fb_thread_id, listing_id, listing_title, history_complete)
@@ -223,13 +241,31 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
   const threadId = thread!.id;
   await applyBuyer(tx, acct.id, threadId, t.buyer);
 
-  const stored = (await tx<{ direction: string; body: string }[]>`
-    SELECT direction, body FROM fb_chat_messages
+  const stored = (await tx<{ id: number; direction: string; body: string; images: number; media: number }[]>`
+    SELECT id::int AS id, direction, body, jsonb_array_length(images) AS images, jsonb_array_length(media) AS media
+      FROM fb_chat_messages
      WHERE thread_id = ${threadId} AND seq IS NOT NULL
      ORDER BY seq DESC LIMIT ${ALIGN_TAIL}`).reverse();
   const window = t.rows.map((r) => ({ direction: r.direction, body: r.text }));
   const known = alignWindow(stored, window);
   const fresh = t.rows.slice(known);
+
+  // An id the extension sends is kept only once the photo is stored, so a
+  // failed or forged upload leaves the bubble's placeholder.
+  const present = await storedMediaIds(tx, t.rows.flatMap((r) => r.media ?? []));
+  const mediaOf = (r: FbChatRow) => (r.media ?? []).filter((m) => present.has(m));
+  // The window's first `known` rows are the stored tail's last `known`, in
+  // order. A photo bubble stored before its photos could be uploaded takes
+  // them from this push.
+  const tailStart = stored.length - known;
+  for (let i = 0; i < known; i++) {
+    const old = stored[tailStart + i]!;
+    const media = mediaOf(t.rows[i]!);
+    if (old.images > 0 && old.media === 0 && media.length) {
+      await tx`UPDATE fb_chat_messages SET media = ${tx.json(media)} WHERE id = ${old.id} AND media = '[]'::jsonb`;
+    }
+  }
+  const missingMedia: FbChatMissingMedia[] = [];
   if (stored.length && !known && fresh.length) {
     await addEvent(tx, acct.id, threadId, 'sync_gap', { stored: stored.length, rows: t.rows.length });
   }
@@ -268,10 +304,13 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
       answeredSeq = seq;
       continue;
     }
-    await tx`
-      INSERT INTO fb_chat_messages (thread_id, seq, direction, source, body, images, backfill, fb_sent_label)
+    const media = mediaOf(row);
+    const [inserted] = await tx<{ id: number }[]>`
+      INSERT INTO fb_chat_messages (thread_id, seq, direction, source, body, images, media, backfill, fb_sent_label)
       VALUES (${threadId}, ${seq}, ${row.direction}, 'facebook', ${row.text},
-              ${tx.json(row.images)}, ${isNew}, ${row.at ?? null})`;
+              ${tx.json(row.images)}, ${tx.json(media)}, ${isNew}, ${row.at ?? null})
+      RETURNING id::int AS id`;
+    if (row.images.length && !media.length) missingMedia.push({ messageId: inserted!.id, urls: row.images });
     added += 1;
     if (row.direction === 'in') inboundSeq = seq;
     else answeredSeq = seq;
@@ -289,7 +328,7 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
       last_outbound_at = CASE WHEN ${outbound} THEN NOW() ELSE last_outbound_at END
     WHERE id = ${threadId}`;
   if (added && !isNew) await addEvent(tx, acct.id, threadId, 'sync', { added, known, rows: t.rows.length });
-  return { needsFull: false, added };
+  return { answer: { needsFull: false, added }, missingMedia };
 }
 
 /** What the buyer's own profile page showed. False when the thread is unknown. */
