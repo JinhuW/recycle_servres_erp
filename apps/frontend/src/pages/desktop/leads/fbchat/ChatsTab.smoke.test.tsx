@@ -31,7 +31,7 @@ const THREAD: FbChatThreadRow = {
 
 function msg(id: number, over: Partial<FbChatMessageRow>): FbChatMessageRow {
   return {
-    id, seq: id, direction: 'in', source: 'facebook', body: `message ${id}`, images: [], backfill: false,
+    id, seq: id, direction: 'in', source: 'facebook', body: `message ${id}`, images: [], media: [], backfill: false,
     fb_sent_label: null, send_state: null, error: null, typing_ms: null, tg_user_name: null,
     erp_user_id: null, author_name: null, created_at: at(12, 15, id), sent_at: null, ...over,
   };
@@ -138,12 +138,28 @@ describe('conversation', () => {
     expect(html).toContain('fbcc_today');
     expect(html).toContain('fbcc_photo');
     expect(html).not.toContain('example.test');       // signed image links are not loaded
+    expect(html).not.toContain('fbcc-photo');         // nothing stored, so placeholders only
     for (const c of ['src-fb sent', 'src-tg sent', 'src-erp failed', 'src-erp uncertain', 'src-erp sending', 'src-erp queued']) expect(html, c).toContain(c);
     expect(html).toContain('fbcc_srcFb');
     expect(html).toMatch(/Kevin · fbcc_srcTg/);
     expect(html).toMatch(/Jin Hu · fbcc_srcErp/);
     expect(html).toContain('Facebook showed “Couldn’t send”.');
     for (const k of ['fbcc_failed', 'fbcc_retry', 'fbcc_uncertain', 'fbcc_retryUncertain', 'fbcc_retryUncertainHint', 'fbcc_typing', 'fbcc_queued']) expect(html, k).toContain(k);
+  });
+
+  it('loads stored photos from the media route and keeps a placeholder for the rest', () => {
+    const id = '3f2b8c1e-9d4a-4e7b-a0c5-6e1f2d3c4b5a';
+    const one = renderToString(<ChatConversation {...convoProps} messages={[msg(1, { body: '', images: ['https://example.test/a.jpg'], media: [id] })]} />);
+    expect(one).toMatch(new RegExp(`<img[^>]*src="/api/fb-chat/media/${id}"`));
+    expect(one).toMatch(/<img[^>]*loading="lazy"/);
+    expect(one).not.toContain('example.test');
+    expect(one).not.toContain('fbcc-img');
+
+    const two = renderToString(<ChatConversation {...convoProps} messages={[msg(1, { body: '', images: ['https://example.test/a.jpg', 'https://example.test/b.jpg'], media: [id] })]} />);
+    expect(two.match(/<img /g)).toHaveLength(1);
+    expect(two.match(/class="fbcc-img"/g)).toHaveLength(1);
+    expect(two).toContain('fbcc_photoView');
+    expect(two).not.toContain('example.test');
   });
 
   it('says who the reply goes out as and how it is paced, with no warning on a running account', () => {
