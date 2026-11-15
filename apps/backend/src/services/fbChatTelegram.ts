@@ -775,6 +775,9 @@ export async function runFbChatTelegramTick(sql: postgres.Sql, cfg: FbChatTelegr
     // The transaction only holds the lock; the work commits row by row.
     const [lock] = await tx<{ ok: boolean }[]>`SELECT pg_try_advisory_xact_lock(hashtextextended('fb-chat-telegram', 0)) AS ok`;
     if (!lock!.ok) return { ran: false, queued: 0, posted: 0 };
+    // It sits idle while photos move to and from Telegram, which can outlast
+    // the pool's 60 s idle-in-transaction limit on an album.
+    await tx`SET LOCAL idle_in_transaction_session_timeout = '10min'`;
     const budget = new Budget();
     try {
       const queued = await pollUpdates(sql, cfg);
