@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-589](./RS-589-facebook-chats-route-photos-through-the-extension-er.md) | done | story | P2 | Facebook chats: route photos through the extension, ERP and Telegram | 1.460.0 |
 | [RS-588](./RS-588-wechat-activity-tab-acknowledged-warnings-disappear.md) | done | story | P2 | WeChat: Activity tab, acknowledged warnings disappear, live re-run status | 1.459.0 |
 | [RS-587](./RS-587-wechat-acknowledge-report-warnings-editable-market-n.md) | done | story | P2 | WeChat: acknowledge report warnings; editable market-note prompt | 1.458.0 |
 | [RS-586](./RS-586-drop-the-retired-seller-columns-and-tables.md) | backlog | task | P2 | Drop the retired seller columns and tables | — |
