@@ -22,6 +22,7 @@ function fake(history: UserMessage[]) {
     async createTopic(title) { calls.push(['createTopic', [title]]); return 77; },
     async renameTopic(topicId, title) { calls.push(['renameTopic', [topicId, title]]); },
     async react(messageId, emoji) { calls.push(['react', [messageId, emoji]]); },
+    async download(messageId) { calls.push(['download', [messageId]]); return Buffer.from(`bytes of ${messageId}`); },
     onActivity(listener) { activity = listener; },
   };
   return { client, calls, ping: () => activity() };
@@ -125,6 +126,28 @@ describe('userAccountCaller', () => {
       .rejects.toThrow(/uploaded files/);
     const updates = await call<Array<{ message: { from: { is_bot: boolean } } }>>('getUpdates', { offset: 910, limit: 50 });
     expect(updates.map((u) => u.message.from.is_bot)).toEqual([true, true, true]);
+  });
+
+  it('reports photos and files as the Bot API does, with the caption, and downloads them by message id', async () => {
+    const { client, calls } = fake([
+      msg(50, { text: 'see', media: { kind: 'photo', mime: 'image/jpeg', width: 1280, height: 960, bytes: 2000 }, groupedId: '9' }),
+      msg(51, { text: '', media: { kind: 'document', mime: 'image/png', bytes: 300 }, groupedId: '9' }),
+      msg(52, { text: 'a clip', media: { kind: 'other' } }),
+      msg(53, { text: 'https://example.com' }),
+    ]);
+    const call = userAccountCaller(client, '-1001234');
+    const updates = await call<Array<{ message: Record<string, unknown> }>>('getUpdates', { offset: 50, limit: 50 });
+    expect(updates.map((u) => u.message)).toMatchObject([
+      { caption: 'see', media_group_id: '9', photo: [{ file_id: '50', width: 1280, height: 960, file_size: 2000 }] },
+      { document: { file_id: '51', mime_type: 'image/png', file_size: 300 }, media_group_id: '9' },
+      { caption: 'a clip' },
+      { text: 'https://example.com' },
+    ]);
+    expect(updates.map((u) => [u.message.text, u.message.photo ?? u.message.document ?? null]).slice(2))
+      .toEqual([[undefined, null], ['https://example.com', null]]);
+    const got = await call<{ bytes: Buffer }>('downloadFile', { file_id: '50' });
+    expect(got.bytes.toString()).toBe('bytes of 50');
+    expect(calls.at(-1)).toEqual(['download', [50]]);
   });
 
   it('refuses a call it has no equivalent for', async () => {

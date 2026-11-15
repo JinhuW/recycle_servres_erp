@@ -218,7 +218,7 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     topicReply(99, 'unknown topic');
     updates.push({ update_id: ++updateId, message: { message_id: 1, chat: { id: Number(CHAT) }, from: { id: 7, is_bot: false }, text: 'in General' } });
     expect((await tick()).queued).toBe(1);
-    expect(texts()).toEqual(['Only text can be sent to Facebook. This message was not forwarded.']);
+    expect(texts()).toEqual(['Only text, photos, and JPEG, PNG or WebP files can be sent to Facebook. Nothing was forwarded.']);
 
     expect((await push('outbox/claim', { account: OTHER })).status).toBe(204);
     const claim = await push<FbChatClaimAnswer>('outbox/claim', { account: ACCOUNT });
