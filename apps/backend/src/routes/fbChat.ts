@@ -2,20 +2,23 @@ import { Hono, type MiddlewareHandler } from 'hono';
 import { authMiddleware } from '../auth';
 import { getDb } from '../db';
 import {
-  FB_CHAT_ACCOUNT_LABEL_MAX, FB_CHAT_CONFIG_KEY, FB_CHAT_REPLY_MAX_CHARS, FB_CHAT_THREAD_FILTERS, fbChatConfigProblem,
-  type FbChatDeviceAnswer, type FbChatDeviceApproval, type FbChatMessagesAnswer, type FbChatReplyAnswer,
+  FB_CHAT_ACCOUNT_LABEL_MAX, FB_CHAT_CONFIG_KEY, FB_CHAT_MEDIA_MAX_UPLOAD_BYTES, FB_CHAT_MEDIA_MIMES, FB_CHAT_REPLY_MAX_CHARS,
+  FB_CHAT_THREAD_FILTERS, fbChatConfigProblem,
+  type FbChatDeviceAnswer, type FbChatDeviceApproval, type FbChatMediaAnswer, type FbChatMessagesAnswer, type FbChatReplyAnswer,
   type FbChatTelegramStatus, type FbChatThreadFilter, type FbChatThreadsAnswer,
 } from '@recycle-erp/shared';
 import {
   FbChatPushError, fbChatConfigValueProblem, parseBuyerPush, parseClaim, parseConfigRequest, parseEnrollRequest,
   parseEventPush, parseSendResult, parseSyncPush,
 } from '../lib/fbChat';
+import { FbChatMediaTooLargeError, ImageRejectedError, fbChatMediaFile, storeFbChatMedia } from '../lib/fbChatMedia';
 import { clientIp } from '../lib/clientIp';
 import { allLimited } from '../lib/concurrency';
 import { addLogContext, log } from '../lib/log';
 import { armWake, holdsDraining, listening } from '../lib/pgWake';
 import { requireManager } from '../lib/role';
 import { bearerGuard } from '../oauth/guard';
+import { StorageUnavailableError } from '../r2';
 import {
   claimReply, FB_CHAT_OUTBOX_CHANNEL, FbChatAccountTaken, ingestBuyer, ingestSync, recordEvent, recordSendResult, touchAccount,
 } from '../services/fbChat';
@@ -28,6 +31,7 @@ import {
   alsoMessaged, listAccounts, listMessages, listThreads, markThread, queueErpReply, renameAccount, retryReply, summary,
   topicCount, type ThreadQuery,
 } from '../services/fbChatPage';
+import { queueFbChatMediaFetch } from '../services/fbChatMediaFetch';
 import { fbChatTelegramConfigured, kickFbChatTelegram } from '../services/fbChatTelegram';
 import type { Env, OAuthCtx, User } from '../types';
 
@@ -131,9 +135,46 @@ fbChat.post('/push/device', async (c) => {
 fbChat.post('/push/sync', async (c) => {
   const push = await parsed(c, parseSyncPush);
   if (typeof push === 'string') return c.json(invalid(push), 400);
-  const answer = await getDb(c.env).begin((tx) => ingestSync(tx, push, c.var.oauthCtx.clientId));
+  const sql = getDb(c.env);
+  const { answer, missingMedia } = await sql.begin((tx) => ingestSync(tx, push, c.var.oauthCtx.clientId));
   if (answer.added) kickFbChatTelegram();
+  queueFbChatMediaFetch(sql, c.env, missingMedia, kickFbChatTelegram);
   return c.json(answer);
+});
+
+const MEDIA_MIMES: ReadonlySet<string> = new Set(FB_CHAT_MEDIA_MIMES);
+
+// One bubble photo as the raw body. index.ts caps the body at the upload
+// limit as it streams in; the length header is checked here too so a refusal
+// does not wait for the bytes.
+fbChat.post('/push/media', async (c) => {
+  const mime = (c.req.header('content-type') ?? '').toLowerCase().split(';')[0]!.trim();
+  if (!MEDIA_MIMES.has(mime)) return c.json({ error: 'unsupported_media_type', detail: `type ${mime || 'unknown'}` }, 415);
+  if (Number(c.req.header('content-length')) > FB_CHAT_MEDIA_MAX_UPLOAD_BYTES) {
+    return c.json({ error: 'payload_too_large', detail: `max ${FB_CHAT_MEDIA_MAX_UPLOAD_BYTES} bytes` }, 413);
+  }
+  const bytes = new Uint8Array(await c.req.arrayBuffer());
+  if (!bytes.byteLength) return c.json(invalid('body is empty'), 400);
+  if (bytes.byteLength > FB_CHAT_MEDIA_MAX_UPLOAD_BYTES) {
+    return c.json({ error: 'payload_too_large', detail: `max ${FB_CHAT_MEDIA_MAX_UPLOAD_BYTES} bytes` }, 413);
+  }
+  try {
+    const stored = await storeFbChatMedia(getDb(c.env), c.env, bytes, mime, 'facebook');
+    if (stored.created) log.info('fb chat photo stored', { module: 'fbChat', mediaId: stored.id, bytes: bytes.byteLength });
+    const answer: FbChatMediaAnswer = { mediaId: stored.id };
+    return c.json(answer);
+  } catch (e) {
+    if (e instanceof ImageRejectedError) {
+      if (e.reason === 'busy') {
+        c.header('Retry-After', '30');
+        return c.json({ error: 'busy', detail: 'too many photos being processed' }, 503);
+      }
+      return c.json({ error: 'unsupported_media_type', detail: e.reason }, 415);
+    }
+    if (e instanceof FbChatMediaTooLargeError) return c.json({ error: 'payload_too_large', detail: e.message }, 413);
+    if (e instanceof StorageUnavailableError) return c.json({ error: 'storage_unavailable' }, 503);
+    throw e;
+  }
 });
 
 fbChat.post('/push/buyer', async (c) => {
@@ -273,6 +314,17 @@ fbChat.get('/threads/:id/messages', async (c) => {
   if (!threads[0]) return c.json({ error: 'not_found' }, 404);
   const answer: FbChatMessagesAnswer = { thread: threads[0], messages, also_messaged: also };
   return c.json(answer);
+});
+
+// The stored copy of a chat photo. Its bytes never change under an id.
+fbChat.get('/media/:id', async (c) => {
+  const file = await fbChatMediaFile(getDb(c.env), c.env, c.req.param('id'));
+  if (!file) return c.json({ error: 'not_found' }, 404);
+  return c.body(new Uint8Array(file.bytes), 200, {
+    'Content-Type': file.mime,
+    'Cache-Control': 'private, max-age=31536000, immutable',
+    'X-Content-Type-Options': 'nosniff',
+  });
 });
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

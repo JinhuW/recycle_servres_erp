@@ -95,7 +95,7 @@ export async function listThreads(sql: SqlLike, chatId: string | undefined, quer
 /** A conversation's messages in page order; with `messageId`, that one message. */
 export async function listMessages(sql: SqlLike, by: { threadId: number } | { messageId: number }): Promise<FbChatMessageRow[]> {
   return sql<FbChatMessageRow[]>`
-    SELECT m.id::int AS id, m.seq, m.direction, m.source, m.body, m.images, m.backfill, m.fb_sent_label,
+    SELECT m.id::int AS id, m.seq, m.direction, m.source, m.body, m.images, m.media, m.backfill, m.fb_sent_label,
            m.send_state, m.error, m.typing_ms, m.tg_user_name, m.erp_user_id,
            ${authorSql(sql, sql`m`, sql`u`)} AS author_name, m.created_at, m.sent_at
       FROM fb_chat_messages m LEFT JOIN users u ON u.id = m.erp_user_id

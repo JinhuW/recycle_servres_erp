@@ -14,6 +14,7 @@ import { createOAuthClient } from '../src/oauth/clients';
 import { generateSigningKey, signAccessToken } from '../src/oauth/tokens';
 import { alignWindow } from '../src/services/fbChat';
 import { compareVersions } from '../src/services/fbChatConfig';
+import { fbChatMediaFetchesSettled, setFbChatMediaFetchForTests } from '../src/services/fbChatMediaFetch';
 import { fbChatTelegramConfig, fbChatTelegramConfigured, fbChatUserSession, runFbChatTelegramTick, setFbChatTelegramForTests } from '../src/services/fbChatTelegram';
 import { api, testEnv } from './helpers/app';
 import { ALEX, MARCUS, SOFIA, loginAs } from './helpers/auth';
@@ -127,9 +128,15 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     fail = null;
     topicSeq = 0;
     setFbChatTelegramForTests(telegram);
+    // Photo links here are made up; the hub's own fetch of them must never leave the test.
+    setFbChatMediaFetchForTests(async () => new Response(null, { status: 404 }));
   });
 
-  afterEach(() => setFbChatTelegramForTests(null));
+  afterEach(async () => {
+    setFbChatTelegramForTests(null);
+    await fbChatMediaFetchesSettled();
+    setFbChatMediaFetchForTests(null);
+  });
 
   it('guards the push routes by scope and the reads by role', async () => {
     const body = sync([row('in', 'hi')], { full: true });
