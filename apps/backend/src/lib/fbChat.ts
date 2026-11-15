@@ -1,4 +1,5 @@
 import {
+  FB_CHAT_CAPS,
   FB_CHAT_CONFIG_KEY,
   FB_CHAT_CONFIG_TYPES,
   FB_CHAT_CONFIG_VALUE_MAX,
@@ -9,6 +10,7 @@ import {
   type FbChatAccountRef,
   type FbChatBuyer,
   type FbChatBuyerPush,
+  type FbChatCap,
   type FbChatClaimRequest,
   type FbChatConfigField,
   type FbChatConfigRequest,
@@ -121,9 +123,13 @@ export function parseBuyerPush(v: unknown): FbChatBuyerPush {
   return { account: account(p.account), fbThreadId: id(p.fbThreadId, 'fbThreadId'), buyer: buyer(p.buyer) };
 }
 
-export function parseClaim(v: unknown): Required<Pick<FbChatClaimRequest, 'account' | 'wait'>> {
+export function parseClaim(v: unknown): Required<FbChatClaimRequest> {
   const p = obj(v, 'body');
-  return { account: account(p.account), wait: int(p.wait, 0, FB_CHAT_MAX_WAIT_SEC) ?? 0 };
+  // A newer extension may name abilities this hub has not heard of.
+  const caps = Array.isArray(p.caps)
+    ? FB_CHAT_CAPS.filter((cap: FbChatCap) => (p.caps as unknown[]).includes(cap))
+    : [];
+  return { account: account(p.account), wait: int(p.wait, 0, FB_CHAT_MAX_WAIT_SEC) ?? 0, caps };
 }
 
 export function parseSendResult(v: unknown): FbChatSendResult {
