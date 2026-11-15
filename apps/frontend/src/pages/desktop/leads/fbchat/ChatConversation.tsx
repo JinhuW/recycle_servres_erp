@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  FB_CHAT_REPLY_MAX_CHARS,
+  FB_CHAT_MEDIA_MIMES, FB_CHAT_REPLY_MAX_CHARS,
   type FbChatAccountRow, type FbChatMessageRow, type FbChatThreadRow,
 } from '@recycle-erp/shared';
 import { Icon } from '../../../../components/Icon';
@@ -10,8 +10,10 @@ import { fbChatListingUrl, fbChatStatusOf } from '../../../../lib/fbChat';
 import { fmtDate, relTime } from '../../../../lib/format';
 import { useT } from '../../../../lib/i18n';
 import { fbChatTabPath, hrefFor, onLinkClick } from '../../../../lib/route';
+import { ChatAttachStrip, chatImageFiles, useChatAttachments, type ChatAttachApi } from './ChatAttachments';
 import {
-  CHAT_SOURCE_CLASS, chatCanRetry, chatDaysAgo, chatMediaUrl, chatPhotoSlots, chatTimeline, type ChatPacing,
+  CHAT_SOURCE_CLASS, chatCanRetry, chatCanSend, chatDaysAgo, chatMediaUrl, chatPhotoSlots, chatReplySignature, chatTimeline,
+  type ChatPacing, type ChatRow,
 } from './ChatHelpers';
 import { ChatMessengerIcon, ChatSendIcon, ChatSourceIcon, ChatTelegramIcon } from './ChatIcons';
 import { AccountBadge, BuyerAvatar, fbcHueStyle } from './shared';
@@ -22,7 +24,7 @@ import { AccountBadge, BuyerAvatar, fbcHueStyle } from './shared';
 
 export type ChatConversationProps = {
   thread: FbChatThreadRow;
-  messages: FbChatMessageRow[];
+  messages: ChatRow[];
   /** The chat's account; null until the accounts have loaded. */
   account: FbChatAccountRow | null;
   pacing: ChatPacing | null;
@@ -31,7 +33,9 @@ export type ChatConversationProps = {
    * `clientKey` names this reply to the server: the same text sent again
    * after a false carries the same key, in case the first did get through.
    */
-  onSend: (body: string, clientKey: string) => Promise<boolean>;
+  onSend: (body: string, clientKey: string, photos: ChatOutPhoto[]) => Promise<boolean>;
+  /** Uploads one photo for a reply and resolves its media id. */
+  onUpload: (file: Blob) => Promise<string>;
   /** `force` sends a reply that may already be on Facebook; the server refuses that one without it. */
   onRetry: (messageId: number, force: boolean) => void;
   /** The reply a retry is in flight for. */
@@ -42,14 +46,39 @@ export type ChatConversationProps = {
   now: number;
 };
 
+/** A photo going out with a reply: its media id, and the local preview the pending bubble draws. */
+export type ChatOutPhoto = { id: string; preview: string };
+
 export function ChatConversation(p: ChatConversationProps) {
   const { t } = useT();
   const { thread } = p;
   const name = thread.buyer_name ?? t('fbcc_unknownBuyer');
   const listingUrl = fbChatListingUrl(thread.listing_id);
+  const attach = useChatAttachments(p.onUpload);
+
+  // dragleave fires for every child crossed, so only leaving the column counts.
+  const [dragging, setDragging] = useState(false);
+  const dropProps = {
+    onDragOver: (e: DragEvent) => {
+      if (!e.dataTransfer.types.includes('Files')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setDragging(true);
+    },
+    onDragLeave: (e: DragEvent) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+    },
+    onDrop: (e: DragEvent) => {
+      if (!e.dataTransfer.types.includes('Files')) return;
+      e.preventDefault();
+      setDragging(false);
+      attach.add(chatImageFiles(e.dataTransfer.files));
+    },
+  };
 
   return (
-    <div className="fbcc-col fbcc-convo">
+    <div className={`fbcc-col fbcc-convo${dragging ? ' dropping' : ''}`} {...dropProps}>
+      {dragging && <div className="fbcc-drop" aria-hidden="true"><Icon name="image" size={22} />{t('fbcc_attachDrop')}</div>}
       <div className="fbcc-head">
         <button type="button" className="fbcc-iconbtn fbcc-back" onClick={p.onBack} aria-label={t('fbcc_back')}>
           <Icon name="chevronLeft" size={16} />
@@ -88,7 +117,7 @@ export function ChatConversation(p: ChatConversationProps) {
         </div>
       )}
       <ChatMessages thread={thread} messages={p.messages} onRetry={p.onRetry} retrying={p.retrying} now={p.now} />
-      <ChatComposer thread={thread} account={p.account} pacing={p.pacing} onSend={p.onSend} />
+      <ChatComposer thread={thread} account={p.account} pacing={p.pacing} onSend={p.onSend} attach={attach} />
     </div>
   );
 }
@@ -155,7 +184,7 @@ function useSentTime() {
  * image links are signed and expire, so a photo with no stored copy, or one
  * that fails to load, keeps the placeholder.
  */
-function BubbleBody({ m }: { m: FbChatMessageRow }) {
+function BubbleBody({ m }: { m: ChatRow }) {
   const { t } = useT();
   const { media, missing } = chatPhotoSlots(m);
   const [broken, setBroken] = useState<ReadonlySet<string>>(() => new Set());
@@ -180,6 +209,9 @@ function BubbleBody({ m }: { m: FbChatMessageRow }) {
         </button>
       ))}
       {Array.from({ length: missing }, (_, i) => placeholder(`p-${i}`))}
+      {m.previews?.map((url, i) => (
+        <div key={`l-${i}`} className="fbcc-photo local"><img src={url} alt={t('fbcc_photo')} /></div>
+      ))}
       {open !== null && shown[open] !== undefined && (
         <ChatPhotoViewer ids={shown} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
       )}
@@ -213,7 +245,7 @@ function ChatPhotoViewer({ ids, index, onIndex, onClose }: {
   );
 }
 
-function InBubble({ m, buyer, endsRun }: { m: FbChatMessageRow; buyer: string | null; endsRun: boolean }) {
+function InBubble({ m, buyer, endsRun }: { m: ChatRow; buyer: string | null; endsRun: boolean }) {
   const sentTime = useSentTime()(m);
   return (
     <div className={`fbcc-m in${endsRun ? ' ends-run' : ''}`}>
@@ -226,7 +258,7 @@ function InBubble({ m, buyer, endsRun }: { m: FbChatMessageRow; buyer: string | 
   );
 }
 
-function OutBubble({ m, onRetry, busy }: { m: FbChatMessageRow; onRetry: ChatConversationProps['onRetry']; busy: boolean }) {
+function OutBubble({ m, onRetry, busy }: { m: ChatRow; onRetry: ChatConversationProps['onRetry']; busy: boolean }) {
   const { t } = useT();
   const sentTime = useSentTime()(m);
   const src = CHAT_SOURCE_CLASS[m.source];
@@ -266,17 +298,19 @@ function OutBubble({ m, onRetry, busy }: { m: FbChatMessageRow; onRetry: ChatCon
 
 // ── Composer ──────────────────────────────────────────────────────────────────
 
-type ComposerProps = Pick<ChatConversationProps, 'thread' | 'account' | 'pacing' | 'onSend'>;
+type ComposerProps = Pick<ChatConversationProps, 'thread' | 'account' | 'pacing' | 'onSend'> & { attach: ChatAttachApi };
 
 // The counter only shows once the limit is near.
 const COUNTER_FROM = FB_CHAT_REPLY_MAX_CHARS - 200;
 const BOX_MAX_PX = 140;
 
-function ChatComposer({ thread, account, pacing, onSend }: ComposerProps) {
+function ChatComposer({ thread, account, pacing, onSend, attach }: ComposerProps) {
   const { t, locale } = useT();
   const [text, setText] = useState('');
   const area = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
   const body = text.trim();
+  const canSend = chatCanSend(body, attach.items);
   const status = account ? fbChatStatusOf(account) : null;
   const accountsPath = fbChatTabPath('accounts');
 
@@ -288,17 +322,32 @@ function ChatComposer({ thread, account, pacing, onSend }: ComposerProps) {
   }, [text]);
 
   // The reply whose answer never came. The server may have queued it all the
-  // same, so sending that text again reuses its key and cannot queue it twice.
-  const unanswered = useRef<{ body: string; key: string } | null>(null);
+  // same, so sending that text and those photos again reuses its key and
+  // cannot queue it twice.
+  const unanswered = useRef<{ sig: string; key: string } | null>(null);
   const send = async () => {
-    if (!body) return;
-    const key = unanswered.current?.body === body ? unanswered.current.key : crypto.randomUUID();
+    if (!canSend) return;
+    const photos = attach.take();
+    const out = photos.map(a => ({ id: a.mediaId!, preview: a.preview }));
+    const sig = chatReplySignature(body, out.map(x => x.id));
+    const key = unanswered.current?.sig === sig ? unanswered.current.key : crypto.randomUUID();
     unanswered.current = null;
     setText('');
-    if (await onSend(body, key)) return;
-    unanswered.current = { body, key };
+    if (await onSend(body, key, out)) {
+      attach.release(photos);
+      return;
+    }
+    unanswered.current = { sig, key };
     // Back into the box unless something new was typed meanwhile.
     setText(now => now || body);
+    attach.restore(photos);
+  };
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = chatImageFiles(e.clipboardData.files);
+    if (files.length === 0) return;
+    // A copy from a document can carry its text too; that still pastes.
+    if (!e.clipboardData.getData('text/plain')) e.preventDefault();
+    attach.add(files);
   };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Enter while an input method is composing picks a candidate; it is not a send.
@@ -341,13 +390,25 @@ function ChatComposer({ thread, account, pacing, onSend }: ComposerProps) {
           <span className="fbcc-left">{t('fbcc_charsLeft', { n: (FB_CHAT_REPLY_MAX_CHARS - text.length).toLocaleString(locale) })}</span>
         )}
       </div>
+      <ChatAttachStrip items={attach.items} skipped={attach.skipped} onRemove={attach.remove} onRetry={attach.retry} />
       <div className="fbcc-box">
+        <button type="button" className="fbcc-iconbtn fbcc-attach-btn" onClick={() => picker.current?.click()} aria-label={t('fbcc_attach')} title={t('fbcc_attachHint')}>
+          <Icon name="image" size={18} />
+        </button>
+        <input
+          ref={picker} type="file" accept={FB_CHAT_MEDIA_MIMES.join(',')} multiple hidden tabIndex={-1}
+          onChange={e => {
+            attach.add(chatImageFiles(e.currentTarget.files));
+            // Picking the same file again after removing it must still fire.
+            e.currentTarget.value = '';
+          }}
+        />
         <textarea
           ref={area} rows={1} value={text} maxLength={FB_CHAT_REPLY_MAX_CHARS}
-          onChange={e => setText(e.target.value)} onKeyDown={onKeyDown}
+          onChange={e => setText(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste}
           placeholder={t('fbcc_placeholder', { name: thread.buyer_name ?? t('fbcc_unknownBuyer') })} aria-label={t('fbcc_message')}
         />
-        <button type="button" className="fbcc-send" disabled={!body} onClick={() => void send()} aria-label={t('fbcc_send')} title={t('fbcc_sendHint')}>
+        <button type="button" className="fbcc-send" disabled={!canSend} onClick={() => void send()} aria-label={t('fbcc_send')} title={t('fbcc_sendHint')}>
           <ChatSendIcon />
         </button>
       </div>

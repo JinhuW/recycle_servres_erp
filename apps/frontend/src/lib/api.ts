@@ -126,7 +126,11 @@ function isSessionEndpoint(path: string): boolean {
   return path.includes('/api/auth/refresh') || path.includes('/api/auth/login');
 }
 
-async function doFetch(method: string, path: string, opts: { isForm?: boolean }, body?: unknown): Promise<Response> {
+// `rawType` sends a Blob as the body itself, for endpoints that take one file
+// with its own Content-Type rather than a form.
+type BodyOpts = { isForm?: boolean; rawType?: string };
+
+async function doFetch(method: string, path: string, opts: BodyOpts, body?: unknown): Promise<Response> {
   apiCalls++;
   const headers: Record<string, string> = { [CSRF_HEADER]: CSRF_VALUE };
 
@@ -134,6 +138,9 @@ async function doFetch(method: string, path: string, opts: { isForm?: boolean },
   if (body !== undefined) {
     if (opts.isForm) {
       payload = body as FormData;
+    } else if (opts.rawType !== undefined) {
+      headers['Content-Type'] = opts.rawType;
+      payload = body as Blob;
     } else {
       headers['Content-Type'] = 'application/json';
       payload = JSON.stringify(body);
@@ -147,7 +154,7 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
-  opts: { isForm?: boolean } = {},
+  opts: BodyOpts = {},
 ): Promise<T> {
   const requestedAt = Date.now();
   let res = await doFetch(method, path, opts, body);
@@ -248,6 +255,7 @@ export const api = {
   patch:  <T,>(path: string, body: unknown) => request<T>('PATCH', path, body),
   delete: <T,>(path: string)              => request<T>('DELETE', path),
   upload: <T,>(path: string, form: FormData) => request<T>('POST', path, form, { isForm: true }),
+  uploadRaw: <T,>(path: string, file: Blob) => request<T>('POST', path, file, { rawType: file.type }),
   download,
 };
 

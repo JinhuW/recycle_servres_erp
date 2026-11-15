@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import {
   fbChatAccountStatus, fbChatConfigValue,
   type FbChatAccountRow, type FbChatAccountStatus, type FbChatAccountsAnswer, type FbChatConfigPage,
-  type FbChatDeviceApproval, type FbChatDeviceRow, type FbChatMessagesAnswer, type FbChatReplyAnswer,
+  type FbChatDeviceApproval, type FbChatDeviceRow, type FbChatMediaAnswer, type FbChatMessagesAnswer, type FbChatReplyAnswer,
   type FbChatReplyRequest,
   type FbChatSummary, type FbChatTelegramStatus, type FbChatThreadsAnswer, type FbChatThreadsQuery,
 } from '@recycle-erp/shared';
@@ -29,8 +29,10 @@ export const fbChatApi = {
   },
   messages: (threadId: number) => api.get<FbChatMessagesAnswer>(`${BASE}/threads/${threadId}/messages`),
   /** `clientKey`: one per composed reply, sent again with it when the answer never came, so it is queued once. */
-  reply: (threadId: number, body: string, clientKey: string) =>
-    api.post<FbChatReplyAnswer>(`${BASE}/threads/${threadId}/messages`, { body, clientKey } satisfies FbChatReplyRequest),
+  reply: (threadId: number, req: FbChatReplyRequest) =>
+    api.post<FbChatReplyAnswer>(`${BASE}/threads/${threadId}/messages`, req),
+  /** One photo for a reply, as the raw body; its `type` is the Content-Type the hub checks. */
+  uploadMedia: (file: Blob) => api.uploadRaw<FbChatMediaAnswer>(`${BASE}/media`, file),
   /** `force`: required for an `uncertain` reply, which may already be on Facebook. */
   retry: (messageId: number, force = false) =>
     api.post<FbChatReplyAnswer>(`${BASE}/messages/${messageId}/retry`, force ? { force: true } : {}),

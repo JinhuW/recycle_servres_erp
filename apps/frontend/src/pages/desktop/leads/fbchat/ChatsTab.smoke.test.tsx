@@ -16,6 +16,7 @@ const { ChatsTab } = await import('./ChatsTab');
 const { ChatList } = await import('./ChatList');
 const { ChatConversation } = await import('./ChatConversation');
 const { ChatDetails } = await import('./ChatDetails');
+const { ChatAttachStrip } = await import('./ChatAttachments');
 
 const NOW = new Date(2026, 10, 12, 16, 0).getTime();
 const at = (day: number, hour: number, minute = 0) => new Date(2026, 10, day, hour, minute).toISOString();
@@ -49,7 +50,7 @@ const listProps = {
   search: '', onSearch: noop, query: '', filter: 'all' as const, onFilter: noop, now: NOW,
 };
 const convoProps = {
-  thread: THREAD, account: ACCOUNT, pacing: { pace: 1, gapSec: 20 }, onSend: async () => true,
+  thread: THREAD, account: ACCOUNT, pacing: { pace: 1, gapSec: 20 }, onSend: async () => true, onUpload: async () => 'm',
   onRetry: noop, retrying: null, onBack: noop, onMarkUnread: noop, canMarkUnread: true, now: NOW,
 };
 
@@ -180,6 +181,52 @@ describe('conversation', () => {
     expect(with_({ restricted: 'login' })).toContain('fbcc_downLogin');
     expect(with_({ restricted: 'checkpoint' })).toContain('fbcc_downCheckpoint');
     expect(with_({ last_seen_at: at(1, 9) })).toContain('fbcc_downStale');
+  });
+});
+
+describe('composer photos', () => {
+  const chip = (key: number, over: object) => ({
+    key, file: new Blob(), preview: `blob:p${key}`, state: 'done' as const, mediaId: null, error: null, ...over,
+  });
+
+  it('offers to add photos, limited to the images the hub takes', () => {
+    const html = renderToString(<ChatConversation {...convoProps} messages={[]} />);
+    expect(html).toContain('fbcc_attach');
+    expect(html).toContain('fbcc_attachHint');
+    expect(html).toMatch(/<input[^>]*type="file"[^>]*accept="image\/jpeg,image\/png,image\/webp"[^>]*multiple/);
+    expect(html).not.toContain('fbcc-chips');
+  });
+
+  it('draws a chip per photo: uploading, done, failed with retry, and refused with a reason', () => {
+    const html = renderToString(
+      <ChatAttachStrip
+        items={[
+          chip(1, { state: 'uploading' }), chip(2, { mediaId: 'm2' }),
+          chip(3, { state: 'failed', error: 'storage' }), chip(4, { state: 'failed', error: 'type' }),
+        ]}
+        skipped={null} onRemove={noop} onRetry={noop}
+      />,
+    );
+    for (const c of ['fbcc-chip uploading', 'fbcc-chip done', 'fbcc-chip failed']) expect(html, c).toContain(c);
+    for (const n of [1, 2, 3, 4]) expect(html).toContain(`src="blob:p${n}"`);
+    expect(html).toContain('busy-spinner');
+    expect(html.match(/fbcc_attachRemove/g)!.length).toBeGreaterThanOrEqual(4);
+    expect(html.match(/class="fbcc-chip-retry"/g)).toHaveLength(1);   // a wrong type would fail again
+    expect(html).toContain('fbcc_attachStorage');
+    expect(html).toContain('fbcc_attachType');
+  });
+
+  it('says why files were left out, and draws nothing with nothing to say', () => {
+    const html = renderToString(<ChatAttachStrip items={[]} skipped={{ overLimit: 1, badType: 1, tooBig: 1 }} onRemove={noop} onRetry={noop} />);
+    for (const k of ['fbcc_attachSkipLimit', 'fbcc_attachSkipType', 'fbcc_attachSkipSize']) expect(html, k).toContain(k);
+    expect(renderToString(<ChatAttachStrip items={[]} skipped={null} onRemove={noop} onRetry={noop} />)).toBe('');
+  });
+
+  it('draws a pending reply with its local previews', () => {
+    const pending = { ...msg(1, { id: -1, direction: 'out', source: 'erp', seq: null, send_state: 'queued', body: '' }), previews: ['blob:x', 'blob:y'] };
+    const html = renderToString(<ChatConversation {...convoProps} messages={[pending]} />);
+    expect(html.match(/class="fbcc-photo local"/g)).toHaveLength(2);
+    expect(html).toContain('src="blob:x"');
   });
 });
 
