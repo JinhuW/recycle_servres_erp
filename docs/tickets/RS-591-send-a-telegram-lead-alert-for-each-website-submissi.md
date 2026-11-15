@@ -2,13 +2,13 @@
 id: RS-591
 title: Send a Telegram lead alert for each website submission
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-15
 reporter: jinhu
 branch: session/20261115-184220
-pr:
-version:
+pr: "#1210"
+version: 1.462.0
 related: []
 ---
 
