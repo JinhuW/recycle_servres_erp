@@ -5,7 +5,8 @@
 //                             when photos ride along).
 //   POST /api/public/quote  — the recycleservers.com /contact quote form.
 //
-// Both only write a web_submissions row (plus photos) and tell managers. A
+// Both only write a web_submissions row (plus photos) and tell managers, in
+// the app and on Telegram (lib/webLeadAlert.ts). A
 // sell lot becomes a Draft PO only when a manager converts it on the Web
 // submissions page (routes/webSubmissions.ts), so nothing here touches orders.
 //
@@ -22,6 +23,8 @@ import { nextHumanId } from '../lib/id-seq';
 import { createRateLimiter } from '../lib/rate-limit';
 import { clientIp } from '../lib/clientIp';
 import { notifyManagers } from '../lib/notify';
+import { queueWebLeadAlert } from '../lib/webLeadAlert';
+import { kickFbChatTelegram } from '../services/fbChatTelegram';
 import { getUploadLimits, getWorkspaceSetting } from '../lib/settings';
 import { ImageRejectedError, shrinkImageToFit } from '../lib/image-shrink';
 import { deleteAttachments, uploadAttachment } from '../r2';
@@ -453,6 +456,7 @@ publicForms.post('/intake', async (c) => {
         title: `New sell request ${id} · ram4cash.com`,
         body: `${payload.lines.length} line${payload.lines.length === 1 ? '' : 's'} · ${units} unit${units === 1 ? '' : 's'} · ${payload.email}`,
       });
+      await queueWebLeadAlert(tx, { kind: 'sell_lot', ref: id, payload, photos: uploaded.length });
       return id;
     });
   } catch (e) {
@@ -461,6 +465,7 @@ publicForms.post('/intake', async (c) => {
   }
   // Stored, so the row itself now counts; the reservation has done its job.
   await budget.release();
+  kickFbChatTelegram();
 
   return c.json({ ref, lines: payload.lines.length, units }, 201);
 });
@@ -498,11 +503,13 @@ publicForms.post('/quote', async (c) => {
       title: `New quote request ${id} · recycleservers.com`,
       body: `${q.name}${q.company ? ` (${q.company})` : ''} · ${q.hardware.join(', ')}`,
     });
+    await queueWebLeadAlert(tx, { kind: 'quote', ref: id, payload: q });
     return id;
   });
   } finally {
     await budget.release();
   }
+  kickFbChatTelegram();
   return c.json({ ref }, 201);
 });
 

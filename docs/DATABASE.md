@@ -2811,7 +2811,7 @@ Photos in Facebook chats, stored once (0246). Facebook's image links are signed 
 - **Checks:** `source IN ('facebook', 'telegram', 'erp')`
 #### `fb_chat_events`
 
-Append-only record of what is worth counting later and is not a message. `kind` is one of: `thread_seen`, `sync` (new messages in a known thread), `sync_gap` (a window that did not overlap what was stored), `send_sent`, `send_failed`, `send_uncertain`, `buyer_rating` (a rating or count changed; old and new values in `detail`), `topic_created`, `restricted`, `recovered`, `error`.
+Append-only record of what is worth counting later and is not a message. `kind` is one of: `thread_seen`, `sync` (new messages in a known thread), `sync_gap` (a window that did not overlap what was stored), `send_sent`, `send_failed`, `send_uncertain`, `buyer_rating` (a rating or count changed; old and new values in `detail`), `topic_created`, `restricted`, `recovered`, `error`, `web_lead` (a new website submission, no account or thread; `detail.submission_id` names it, `alert` carries the Telegram text).
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
