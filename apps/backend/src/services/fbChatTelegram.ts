@@ -246,6 +246,22 @@ function header(t: ThreadRow): string {
 const gone = (e: unknown) => e instanceof TelegramError
   && /thread not found|topic.?(deleted|closed|not.?found)|TOPIC_/i.test(e.message);
 
+// Telegram refusing the photo itself (dimensions, ratio, format). Retrying
+// would refuse it again every tick and hold up the rest of the thread.
+const photoRefused = (e: unknown) => e instanceof TelegramError
+  && e.code === 400 && !e.retryAfterSec && !gone(e);
+
+/** Sends the stored photos; if Telegram refuses them, `fallback` gets the message across instead. */
+async function sendStoredOr(send: () => Promise<void>, fallback: () => Promise<void>): Promise<void> {
+  try {
+    await send();
+  } catch (e) {
+    if (!photoRefused(e)) throw e;
+    flog.warn('fb chat telegram photo refused', { error: (e as Error).message });
+    await fallback();
+  }
+}
+
 /** The thread's topic, created or renamed as needed. Null when out of budget. */
 async function ensureTopic(sql: postgres.Sql, cfg: FbChatTelegramConfig, t: ThreadRow, budget: Budget): Promise<number | null> {
   const name = fbChatTopicName(t.buyer_name, t.buyer_location, t.fb_thread_id);
@@ -391,9 +407,9 @@ function liveStep(cfg: FbChatTelegramConfig, topicId: number, m: Unmirrored, buy
       ids: [m.id],
       run: async () => {
         const files = await readPhotos(m, read);
-        if (files.length) return sendCaptioned(cfg, topicId, files, text, who);
-        if (m.images.length) return sendPhotoLinks(cfg, topicId, m, text);
-        return sendText(cfg, topicId, text);
+        const without = () => (m.images.length ? sendPhotoLinks(cfg, topicId, m, text) : sendText(cfg, topicId, `${text} [photo]`));
+        if (files.length) return sendStoredOr(() => sendCaptioned(cfg, topicId, files, text, who), without);
+        return without();
       },
     };
   }
@@ -432,8 +448,9 @@ function transcriptSteps(
         ids: [m.id],
         run: async () => {
           const files = await readPhotos(m, read);
-          if (files.length) return sendCaptioned(cfg, topicId, files, caption, short);
-          return sendText(cfg, topicId, lead + transcriptLine(m, buyer));
+          const without = () => sendText(cfg, topicId, lead + transcriptLine(m, buyer));
+          if (files.length) return sendStoredOr(() => sendCaptioned(cfg, topicId, files, caption, short), without);
+          return without();
         },
       });
       continue;

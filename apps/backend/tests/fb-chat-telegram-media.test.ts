@@ -125,6 +125,32 @@ describe('Facebook chat photos in Telegram', () => {
     expect((calls[0]!.params.photo as TelegramUpload).mime).toBe('image/jpeg');
   });
 
+  it('falls back to the link when Telegram refuses the uploaded photo, and does not retry it', async () => {
+    await seeded();
+    await push(sync([row('in', 'Is this still available?'), row('in', 'wide', [LINK]), row('in', 'after')]));
+    await attach('wide', ['A']);
+    fail = (c) => (c.method === 'sendPhoto' && c.params.photo instanceof TelegramUpload
+      ? new TelegramError('Bad Request: PHOTO_INVALID_DIMENSIONS', 400, null) : null);
+    await tick();
+    expect(posts()).toEqual([`photo ${LINK} | 👤 John Smith: wide`, 'text 👤 John Smith: after']);
+    calls.length = 0;
+    await tick();
+    expect(posts()).toEqual([]);
+  });
+
+  it('falls back to the transcript line when Telegram refuses a history photo', async () => {
+    await push(sync([row('in', 'first'), row('in', 'see this', [LINK]), row('in', 'ok')], { full: true, complete: true }));
+    await attach('see this', ['A']);
+    fail = (c) => (c.method === 'sendPhoto' && c.params.photo instanceof TelegramUpload
+      ? new TelegramError('Bad Request: IMAGE_PROCESS_FAILED', 400, null) : null);
+    await tick();
+    expect(posts()).toEqual([
+      'text 📜 Earlier messages\nJohn Smith: first',
+      'text John Smith: see this [photo]',
+      'text John Smith: ok',
+    ]);
+  });
+
   it('sends several stored photos as one album, the caption on the first', async () => {
     await seeded();
     await push(sync([row('in', 'Is this still available?'), row('in', 'three', [LINK, LINK, LINK])]));
