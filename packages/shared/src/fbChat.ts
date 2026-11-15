@@ -11,9 +11,31 @@ export type FbChatRow = {
   text: string;
   /** Image URLs on the bubble. They are signed and expire. */
   images: string[];
+  /**
+   * Ids from `POST /push/media`, one per photo the extension could upload, in
+   * bubble order. Extensions before media support leave it out; the hub then
+   * tries to fetch `images` itself while the links are fresh.
+   */
+  media?: string[];
   /** When it was sent, in Facebook's own words ("Tuesday 5:57pm"). */
   at?: string;
 };
+
+// ── Media ─────────────────────────────────────────────────────────────────────
+// `POST /push/media` takes one photo as the raw request body (Content-Type
+// image/jpeg, image/png or image/webp) and answers `FbChatMediaAnswer`. The
+// same bytes always answer the same id, so uploading again is harmless.
+// `GET /api/fb-chat/media/:id` serves it to signed-in ERP users.
+
+/** Largest photo the hub takes, as uploaded. Bigger ones are refused with 413. */
+export const FB_CHAT_MEDIA_MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+/** Stored photos are re-encoded to fit this (Telegram's bot limit is 10 MB). */
+export const FB_CHAT_MEDIA_MAX_STORED_BYTES = 8 * 1024 * 1024;
+export const FB_CHAT_MEDIA_MIMES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+/** Photos per bubble the hub keeps. */
+export const FB_CHAT_MEDIA_PER_ROW = 10;
+
+export type FbChatMediaAnswer = { mediaId: string };
 
 export type FbChatBuyer = {
   name: string | null;
@@ -300,6 +322,8 @@ export type FbChatMessageRow = {
   source: FbChatMessageSource;
   body: string;
   images: string[];
+  /** Stored photo ids, served by `GET /api/fb-chat/media/:id`. Empty when none could be stored. */
+  media: string[];
   /** Read with the history when the chat was first found; `created_at` is then when it was read. */
   backfill: boolean;
   /** Facebook's own wording for when it was sent, where the page showed one. */
