@@ -14,7 +14,7 @@ import {createLogger} from './logger.ts';
 import {evaluateOnce} from './loops/evaluate.ts';
 import {acquireUserSender, notifyOnce, releaseUserSender, renewUserSender} from './loops/notify.ts';
 import {pollOnce} from './loops/poll.ts';
-import {reactionsOnce} from './loops/reactions.ts';
+import {reactionsOnce, type OutageState} from './loops/reactions.ts';
 import {readsOnce} from './loops/reads.ts';
 import {Tracer} from './loops/trace.ts';
 import {watchOnce} from './loops/watch.ts';
@@ -91,6 +91,7 @@ async function runApi(): Promise<void> {
   // registered with the heartbeat: its loop names are part of the ERP's
   // /api/workers contract.
   const abort = new AbortController();
+  const outage: OutageState = {since: null};
   const reactions = config.alertTransport === 'telegram'
     ? startLoop(
       // The long poll is the wait; the idle pause only spaces out failures.
@@ -101,6 +102,7 @@ async function runApi(): Promise<void> {
         settings,
         logger: logger.child('reactions'),
         signal: abort.signal,
+        outage,
       }),
     )
     : null;

@@ -5,7 +5,12 @@
 
 import {afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createLogger} from '../src/logger.ts';
-import {reactionsOnce, type ReactionsDeps, type TelegramUpdate} from '../src/loops/reactions.ts';
+import {
+  OUTAGE_WARN_MS,
+  reactionsOnce,
+  type ReactionsDeps,
+  type TelegramUpdate,
+} from '../src/loops/reactions.ts';
 import {SettingsStore} from '../src/settings.ts';
 import {createTestDb, type TestDb} from './helpers/db.ts';
 
@@ -213,5 +218,62 @@ describe('reactionsOnce', () => {
 
     expect(await reactionsOnce(deps())).toBe(false);
     expect(await nextOffset()).toBe(0);
+  });
+
+  describe('transient failures', () => {
+    function recording() {
+      const lines: Array<{level: string; message: string}> = [];
+      const logger = createLogger('api-1', 'error', 'reactions', (_scope, level, message) => {
+        lines.push({level, message});
+      });
+      return {logger, lines};
+    }
+
+    const failures: Array<[string, () => Promise<Response>]> = [
+      ['a network error', async () => {
+        throw new TypeError('fetch failed', {cause: {code: 'UND_ERR_SOCKET'}});
+      }],
+      ['a 502 from Telegram\'s nightly restart', async () => new Response(
+        JSON.stringify({ok: false, description: 'Bad Gateway'}), {status: 502})],
+      ['a 429', async () => new Response(
+        JSON.stringify({ok: false, description: 'Too Many Requests: retry after 5'}), {status: 429})],
+    ];
+
+    it.each(failures)('does not warn about %s that has just started', async (_name, fail) => {
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(fail));
+      const {logger, lines} = recording();
+      const outage = {since: null};
+
+      expect(await reactionsOnce({...deps(logger), outage})).toBe(false);
+      expect(await reactionsOnce({...deps(logger), outage})).toBe(false);
+      expect(lines).toEqual([]);
+      expect(await nextOffset()).toBe(0);
+    });
+
+    it.each(failures)('warns about %s once it has lasted the outage window', async (_name, fail) => {
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(fail));
+      const {logger, lines} = recording();
+      const outage = {since: Date.now() - OUTAGE_WARN_MS};
+
+      expect(await reactionsOnce({...deps(logger), outage})).toBe(false);
+      expect(lines.map((l) => l.level)).toEqual(['warn']);
+    });
+
+    it('starts the window afresh after a successful poll', async () => {
+      stubUpdates();
+      const outage: {since: number | null} = {since: Date.now() - OUTAGE_WARN_MS};
+
+      await reactionsOnce({...deps(), outage});
+      expect(outage.since).toBeNull();
+    });
+
+    it('still warns at once when Telegram refuses the token', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(
+        JSON.stringify({ok: false, description: 'Unauthorized'}), {status: 401})));
+      const {logger, lines} = recording();
+
+      expect(await reactionsOnce({...deps(logger), outage: {since: null}})).toBe(false);
+      expect(lines.map((l) => l.level)).toEqual(['warn']);
+    });
   });
 });
