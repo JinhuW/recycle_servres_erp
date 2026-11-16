@@ -5273,6 +5273,7 @@ const zh: Record<string, string> = {
   fbc_statusPaused: "已在 ERP 暂停",
   fbc_statusLogin: "需要登录 Facebook",
   fbc_statusCheckpoint: "Facebook 安全验证",
+  fbc_statusBlocked: "被 Facebook 限制",
   fbc_statusStale: "未签到",
   // ── Leads ▸ Facebook: Chats tab ──
   fbcc_filterAccounts: "按账号筛选",
@@ -5331,6 +5332,7 @@ const zh: Record<string, string> = {
   fbcc_retryUncertainHint: "Facebook 上可能已经有这条回复。再发一次可能会重复发送。",
   fbcc_downLogin: "{name} 已退出 Facebook 登录。",
   fbcc_downCheckpoint: "{name} 遇到了 Facebook 安全验证。",
+  fbcc_downBlocked: "Facebook 警告正在限制 {name}，桥接已暂停。",
   fbcc_downStale: "{name} 没有签到（上次出现：{when}）。",
   fbcc_photosWait: "{name} 的 Chrome 还不能附加图片，这条回复会等到可以时再发。请在 chrome://extensions 中为扩展打开“允许访问文件网址”。",
   fbcc_downQueue: "回复会排队，等它恢复后发出。",

@@ -4161,6 +4161,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fbc_statusPaused: "Paused from the ERP",
     fbc_statusLogin: "Needs Facebook login",
     fbc_statusCheckpoint: "Facebook checkpoint",
+    fbc_statusBlocked: "Limited by Facebook",
     fbc_statusStale: "Not checking in",
     // ── Leads ▸ Facebook: Chats tab ──
     fbcc_filterAccounts: "Filter by account",
@@ -4219,6 +4220,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fbcc_retryUncertainHint: "Facebook may already have this reply. Sending it again can post it twice.",
     fbcc_downLogin: "{name} is logged out of Facebook.",
     fbcc_downCheckpoint: "{name} is on a Facebook checkpoint.",
+    fbcc_downBlocked: "Facebook warned that it is limiting {name}; the bridge is paused.",
     fbcc_downStale: "{name} is not checking in (last seen {when}).",
     fbcc_photosWait: "{name}'s Chrome cannot attach photos yet, so this reply will wait until it can. Turn on \"Allow access to file URLs\" for the extension in chrome://extensions.",
     fbcc_downQueue: "Replies queue and go out once it's back.",

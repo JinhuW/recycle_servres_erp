@@ -1378,7 +1378,8 @@ The sidebar row shows the number of unread chats.
   refuses it. When the request's Facebook user is already an account the card
   offers Reconnect, which moves the account to the new Chrome, revokes the
   old one and keeps the chats. Below is one row per Facebook account with a
-  number, its status (running, paused, needs login, checkpoint, or not
+  number, its status (running, paused, needs login, checkpoint, limited by
+  Facebook (v1.465.0), or not
   checking in after three missed settings checks and at least five minutes),
   replies waiting, last sync, extension version, whether it has picked up the
   current settings, and the Chrome that relays it. A row can be renamed,
@@ -1446,7 +1447,10 @@ The sidebar row shows the number of unread chats.
   texts it sent. A message from that account dated before the hub's session
   started is taken as a post and not relayed.
 - **Alerts.** A login or checkpoint page on an account posts one warning in
-  General, and one more when the account is back.
+  General, and one more when the account is back. So does a warning on the
+  page that Facebook is limiting the account ("temporarily blocked", "going
+  too fast", a security check): the extension (0.6.0+) then pauses for the
+  **Pause after a warning** hours, and the alert says when it ends (v1.465.0).
 - **Data.** Every message, buyer profile (rating, rating count, location, join
   year), send attempt and account event is kept in the `fb_chat_*` tables for
   analysis. Each message records where it was typed (`facebook`, `telegram`

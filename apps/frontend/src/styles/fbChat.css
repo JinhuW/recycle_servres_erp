@@ -53,6 +53,6 @@
 .fbc-h-running i { background: var(--accent); }
 .fbc-h-paused { color: var(--warn-strong); }
 .fbc-h-paused i { background: var(--warn); }
-.fbc-h-login, .fbc-h-checkpoint { color: var(--neg); font-weight: 550; }
-.fbc-h-login i, .fbc-h-checkpoint i { background: var(--neg); }
+.fbc-h-login, .fbc-h-checkpoint, .fbc-h-blocked { color: var(--neg); font-weight: 550; }
+.fbc-h-login i, .fbc-h-checkpoint i, .fbc-h-blocked i { background: var(--neg); }
 .fbc-h-stale { color: var(--fg-muted); }
