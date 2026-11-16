@@ -102,7 +102,7 @@ function toApi(r: Row, s: CrmSettings) {
 /** Reads use effectiveRole so a manager previewing as a purchaser sees a
  *  narrowed book; writes consult user.role directly (lib/role.ts: the preview
  *  is a viewing convenience, not a permission demotion). */
-function readScope(sql: ReturnType<typeof getDb>, u: User) {
+export function readScope(sql: ReturnType<typeof getDb>, u: User) {
   return effectiveRole(u) === 'manager' ? sql`TRUE` : sql`s.owner_id = ${u.id}`;
 }
 function canWrite(u: User, ownerId: string | null): boolean {

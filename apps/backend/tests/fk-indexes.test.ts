@@ -37,6 +37,17 @@ describe('FK / join column indexes', () => {
       'accounting_entries_voided_by_idx',
       'accounting_entry_events_entry_idx',
       'accounting_entry_events_actor_id_idx',
+      'action_items_assignee_id_idx',
+      'action_items_created_by_idx',
+      'action_items_removed_by_idx',
+      'action_items_order_id_idx',
+      'action_items_sell_order_id_idx',
+      'action_items_after_sales_id_idx',
+      'action_items_supplier_id_idx',
+      'action_items_web_submission_id_idx',
+      'action_items_order_line_id_idx',
+      'action_item_events_item_idx',
+      'action_item_events_actor_id_idx',
     ]) {
       expect(have.has(idx), `missing index ${idx}`).toBe(true);
     }

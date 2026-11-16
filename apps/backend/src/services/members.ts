@@ -209,6 +209,13 @@ export async function isActiveManager(sql: SqlLike, userId: string): Promise<boo
   return rows.length > 0;
 }
 
+// Who may be handed work: any active employee, whatever the role.
+export async function isActiveUser(sql: SqlLike, userId: string): Promise<boolean> {
+  if (typeof userId !== 'string' || !UUID_RE.test(userId)) return false;
+  const rows = await sql`SELECT 1 FROM users WHERE id = ${userId} AND active = TRUE LIMIT 1`;
+  return rows.length > 0;
+}
+
 // Soft-delete. Returns true if a row was updated, false if no such user.
 export async function deactivateMember(sql: Sql, id: string): Promise<boolean> {
   let updated = false;

@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-15:** ERP migration `0248`, Reddit tracker migration `0007`,
+**As of 2026-11-16:** ERP migration `0249`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -27,6 +27,7 @@ refresh a section.
   - [Facebook account pool](#facebook-account-pool)
   - [Fleet](#fleet)
   - [Reddit leads](#reddit-leads)
+  - [Actions](#actions)
   - [System](#system)
   - [SQL functions](#sql-functions)
 - [Reddit tracker database](#reddit-tracker-database)
@@ -2999,6 +3000,70 @@ Who did what to which seller, including the seller replies purchasers log. Appen
 - **References:** `actor_id` → `users.id` (on delete set null)
 - **Indexes:** `reddit_lead_events_username_idx` (username, created_at), `reddit_lead_events_actor_id_idx` (actor_id)
 - **Triggers:** `reddit_lead_events_no_update` and `reddit_lead_events_no_delete` raise (`reddit_lead_events_lock()`), as `fb_pool_events` does.
+
+### Actions
+
+The shared kanban board of action items on Actions (`routes/actions.ts`, RS-596). Any employee creates a card, assigns it to any active employee, moves it between four fixed columns and comments on it; only its creator or a manager removes it. A card may point at one ERP record, and what the board shows of that record follows the record's own read rules.
+
+Tables: [`action_items`](#erp-action-items), [`action_item_events`](#erp-action-item-events)
+
+<a id="erp-action-items"></a>
+
+#### `action_items`
+
+One card. Removal is soft (`removed_at`): the card leaves every list and keeps its history.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `text` | ✓ |  | `TK-n`, from `id_counters` row `TK`. |
+| `title` | `text` | ✓ |  | 1 to 200 characters. |
+| `description` | `text` |  |  |  |
+| `status` | `text` | ✓ | `'todo'` | The column: todo, in_progress, blocked, done. |
+| `position` | `integer` | ✓ | `0` | Order inside the column, top first. Every create and move rewrites the column as 0..n-1. |
+| `priority` | `text` | ✓ | `'normal'` | low, normal, high. |
+| `due_date` | `date` |  |  | Business day it is due. |
+| `assignee_id` | `uuid` |  |  | → users, set null. Any active user. Assigning someone else writes them a notification. |
+| `created_by` | `uuid` |  |  | → users, set null. |
+| `order_id` | `text` |  |  | → orders, set null. A linked PO. |
+| `sell_order_id` | `text` |  |  | → sell_orders, set null. |
+| `after_sales_id` | `text` |  |  | → after_sales_cases, set null. |
+| `supplier_id` | `uuid` |  |  | → suppliers, set null. A linked client. |
+| `web_submission_id` | `text` |  |  | → web_submissions, set null. |
+| `order_line_id` | `uuid` |  |  | → order_lines, set null. A linked inventory lot. |
+| `link_type` | `text` |  |  | po, so, as, client, ws, lot. Kept when the record is deleted and its FK nulls out. |
+| `link_label` | `text` |  |  | What the link reads as, snapshotted at link time: the record's number, `PO-n #k` for a lot, the word `Client` for a client (a client's name is its owner's). |
+| `completed_at` | `timestamptz` |  |  | Set on entering done, cleared on leaving. The board shows done cards for 14 days after it; the archive has the rest. |
+| `removed_at` | `timestamptz` |  |  |  |
+| `removed_by` | `uuid` |  |  | → users, set null. |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+| `updated_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `assignee_id`, `created_by`, `removed_by` → `users.id`; `order_id` → `orders.id`; `sell_order_id` → `sell_orders.id`; `after_sales_id` → `after_sales_cases.id`; `supplier_id` → `suppliers.id`; `web_submission_id` → `web_submissions.id`; `order_line_id` → `order_lines.id` (all on delete set null)
+- **Checks:** at most one of the six link FKs is set; `link_type` and `link_label` are both set or both null; `completed_at` is set exactly when `status = 'done'`
+- **Indexes:** `action_items_board_idx` (status, position) where not removed; `action_items_completed_idx` (completed_at DESC, id DESC) where done and not removed; one per FK (`action_items_<column>_idx`)
+
+Every create and move takes the transaction advisory lock `hashtext('actions:board')` first, so two moves never renumber the same columns in opposite order.
+
+<a id="erp-action-item-events"></a>
+
+#### `action_item_events`
+
+A card's timeline, written in the same transaction as the change. Comments are `note` rows.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
+| `item_id` | `text` | ✓ |  |  |
+| `kind` | `text` | ✓ |  | created, edited (detail `{changes}`), moved (detail `{from, to}`; a reorder inside a column writes none), assigned (detail `{from, to}` user ids), note, removed. |
+| `note` | `text` |  |  | The text of a note. |
+| `detail` | `jsonb` | ✓ | `'{}'::jsonb` |  |
+| `actor_id` | `uuid` |  |  |  |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `item_id` → `action_items.id` (on delete cascade); `actor_id` → `users.id` (on delete set null)
+- **Indexes:** `action_item_events_item_idx` (item_id, created_at); `action_item_events_actor_id_idx` (actor_id)
 
 ### System
 
