@@ -174,3 +174,64 @@ export function fbChatMediaFetchesSettled(): Promise<void> {
   if (!running && !queue.length) return Promise.resolve();
   return new Promise((resolve) => idle.push(resolve));
 }
+
+// -- sweep ---------------------------------------------------------------------
+//
+// A sync fetches only the rows it adds. A message stored while its photos
+// could not be had (the hub refused WebP before 1.462.1, an upload failed)
+// would otherwise keep its placeholder until the extension reads the chat again,
+// which it does only when something new arrives there. The sweep retries them
+// while Facebook's links still work.
+
+const SWEEP_EVERY_MS = 10 * 60_000;
+const SWEEP_BATCH = 40;
+const SWEEP_RETRY_MS = 6 * 60 * 60_000;
+/** Facebook's signed links last about two weeks. */
+const SWEEP_MAX_AGE_DAYS = 14;
+const swept = new Map<number, number>();
+
+/**
+ * Queues the photos of recent messages stored without them and answers how
+ * many messages were queued. A link that appears in more than one message of
+ * the chat is the sender's avatar, which older extensions took for a photo,
+ * and is left out.
+ */
+export async function sweepFbChatPhotos(sql: SqlLike, env: Env, onFilled: () => void = () => {}, now = Date.now()): Promise<number> {
+  const rows = await sql<{ id: number; urls: string[] }[]>`
+    WITH links AS (
+      SELECT m.id, m.thread_id, l.url, l.n, split_part(l.url, '?', 1) AS path
+        FROM fb_chat_messages m, jsonb_array_elements_text(m.images) WITH ORDINALITY AS l(url, n)
+       WHERE m.direction = 'in' AND m.images <> '[]'::jsonb
+         AND m.created_at > NOW() - make_interval(days => ${SWEEP_MAX_AGE_DAYS})
+    ), shared AS (
+      SELECT thread_id, path FROM links GROUP BY thread_id, path HAVING COUNT(DISTINCT id) > 1
+    )
+    SELECT l.id::int AS id, array_agg(l.url ORDER BY l.n) AS urls
+      FROM links l JOIN fb_chat_messages m ON m.id = l.id
+     WHERE m.media = '[]'::jsonb
+       AND NOT EXISTS (SELECT 1 FROM shared s WHERE s.thread_id = l.thread_id AND s.path = l.path)
+     GROUP BY l.id
+     ORDER BY l.id DESC`;
+  const due = rows.filter((r) => now - (swept.get(r.id) ?? 0) >= SWEEP_RETRY_MS).slice(0, SWEEP_BATCH);
+  for (const r of due) swept.set(r.id, now);
+  queueFbChatMediaFetch(sql, env, due.map((r) => ({ messageId: r.id, urls: r.urls })), onFilled);
+  return due.length;
+}
+
+/** Forgets which messages the sweep tried. For tests. */
+export function resetFbChatPhotoSweepForTests(): void {
+  swept.clear();
+}
+
+export function startFbChatPhotoSweepLoop(sql: SqlLike, env: Env, onFilled: () => void): { stop(): void } {
+  const run = () => {
+    sweepFbChatPhotos(sql, env, onFilled)
+      .then((n) => { if (n) flog.info('fb chat photo sweep queued', { messages: n }); })
+      .catch((e) => flog.error('fb chat photo sweep failed', e));
+  };
+  const first = setTimeout(run, 30_000);
+  const handle = setInterval(run, SWEEP_EVERY_MS);
+  first.unref?.();
+  handle.unref?.();
+  return { stop() { clearTimeout(first); clearInterval(handle); } };
+}
