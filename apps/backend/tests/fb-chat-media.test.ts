@@ -7,7 +7,9 @@ import {
 import app from '../src/index';
 import { createOAuthClient } from '../src/oauth/clients';
 import { generateSigningKey, signAccessToken } from '../src/oauth/tokens';
-import { fbChatMediaFetchesSettled, isFbcdnUrl, setFbChatMediaFetchForTests } from '../src/services/fbChatMediaFetch';
+import {
+  fbChatMediaFetchesSettled, isFbcdnUrl, resetFbChatPhotoSweepForTests, setFbChatMediaFetchForTests, sweepFbChatPhotos,
+} from '../src/services/fbChatMediaFetch';
 import { setFbChatTelegramForTests } from '../src/services/fbChatTelegram';
 import { api, testEnv } from './helpers/app';
 import { ALEX, MARCUS, loginAs } from './helpers/auth';
@@ -226,6 +228,36 @@ describe('Facebook chat photos', () => {
     expect(fetched).toEqual(['https://scontent-den2-1.xx.fbcdn.net/v/good.jpg?oh=secret', 'https://scontent.fbcdn.net/gone.jpg']);
     const [stored] = await getTestDb()<{ id: string }[]>`SELECT id::text AS id FROM fb_chat_media`;
     expect((await messages()).map((m) => m.media)).toEqual([[stored!.id], [], []]);
+  });
+
+  it('sweeps up the photos of messages stored without them, but never an avatar', async () => {
+    resetFbChatPhotoSweepForTests();
+    const cdn = (name: string, sig: string) => `https://scontent-den2-1.xx.fbcdn.net/v/${name}.jpg?oh=${sig}`;
+    // Stored while the photos could not be had: every fetch fails.
+    serve = () => new Response(null, { status: 503 });
+    await push('sync', sync([
+      { direction: 'in', text: 'look', images: [cdn('p1', 'a'), cdn('avatar', 'a')] },
+      { direction: 'in', text: '', images: [cdn('p2', 'b')] },
+      { direction: 'in', text: 'price?', images: [cdn('avatar', 'c')] },
+      { direction: 'out', text: 'mine', images: [cdn('p3', 'd')] },
+    ]));
+    await fbChatMediaFetchesSettled();
+    expect((await messages()).every((m) => m.media.length === 0)).toBe(true);
+
+    const bytes = await jpeg(60);
+    fetched = [];
+    serve = (url) => new Response(url.includes('/p1') ? bytes : new Uint8Array(0), {
+      headers: { 'content-type': 'image/jpeg' }, status: url.includes('/p1') || url.includes('/p2') ? 200 : 404,
+    });
+    expect(await sweepFbChatPhotos(getTestDb(), testEnv)).toBe(2);
+    await fbChatMediaFetchesSettled();
+    expect(fetched.map((u) => new URL(u).pathname).sort()).toEqual(['/v/p1.jpg', '/v/p2.jpg']);
+    const media = (await messages()).map((m) => m.media.length);
+    expect(media).toEqual([1, 0, 0, 0]);
+    // Not tried again for a while, then tried again.
+    expect(await sweepFbChatPhotos(getTestDb(), testEnv)).toBe(0);
+    expect(await sweepFbChatPhotos(getTestDb(), testEnv, () => {}, Date.now() + 7 * 60 * 60_000)).toBe(1);
+    await fbChatMediaFetchesSettled();
   });
 
   it('follows a redirect only within the Facebook CDN', async () => {
