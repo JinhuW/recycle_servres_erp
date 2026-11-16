@@ -82,6 +82,7 @@ import { PaymentMismatchBanner, usePaymentMismatchConfirm } from '../../componen
 import { paymentGap } from '../../lib/paymentGap';
 import { useCommissionPayments } from '../../lib/useCommissionPayments';
 import { useCommissionPaidBy } from '../../lib/useCommissionPaidBy';
+import { ActionsPanel, useRecordActions } from './actions/ActionsPanel';
 
 // The uppercase heading over each block of the action card.
 const SectionHead = ({ icon, children }: { icon: IconName; children: ReactNode }) => (
@@ -351,6 +352,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     replaceHashQuery(q);
   };
   const events = useOrderEvents(order.id, activityKey);
+  // The Actions cards about this PO: their own tab, and the count on it.
+  const recActions = useRecordActions('po', order.id, { label: order.id });
   // A stage change that lands snaps the look-back shut and re-suggests the
   // tab — keyed off the written stage, so a move that is taken back leaves the
   // tab where the user had it. Judged against the stage the page last saw,
@@ -1805,7 +1808,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       <OrderTabs
         tab={tab}
         onTab={setTab}
-        counts={{ notes: submissionAtts.length || undefined, activity: events.loaded ? events.events.length : undefined }}
+        counts={{ notes: submissionAtts.length || undefined, actions: recActions.open || undefined, activity: events.loaded ? events.events.length : undefined }}
         need={savedStatus === 'Draft' ? {
           delivery: readiness.some(r => r.tab === 'delivery' && !r.ok),
           payment: readiness.some(r => r.tab === 'payment' && !r.ok),
@@ -1952,6 +1955,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               )}
             </div>
           ),
+          actions: <ActionsPanel bare {...recActions.panel} />,
           activity: (
             <OrderActivityLog events={events} className="oe-activity-tab" />
           ),
@@ -2283,6 +2287,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         />
       )}
       <CommissionPaidByConfirm paidBy={commissionPaidBy} />
+      {recActions.overlay}
     </>
   );
 }

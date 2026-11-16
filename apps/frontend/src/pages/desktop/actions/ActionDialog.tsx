@@ -19,12 +19,14 @@ type Props = {
   /** A new card's column and record, when it is started from one. */
   status?: ActionStatus;
   link?: ActionLink | null;
+  /** Above a host that is itself a dialog. */
+  zIndex?: number;
   onClose: () => void;
   onSaved: (item: ActionItem) => void;
 };
 
 /** Creates or edits a card: what, who, when, and the record it is about. */
-export function ActionDialog({ item, status, link: presetLink, onClose, onSaved }: Props) {
+export function ActionDialog({ item, status, link: presetLink, zIndex, onClose, onSaved }: Props) {
   const { t } = useT();
   const members = useMembers();
   const [title, setTitle] = useState(item?.title ?? '');
@@ -50,8 +52,9 @@ export function ActionDialog({ item, status, link: presetLink, onClose, onSaved 
       priority,
       dueDate: dueDate || null,
     };
-    // A link is sent only when it changed: a deleted record's link has no id to resend.
-    if (link?.id !== start?.id || link?.type !== start?.type) {
+    // An edit sends the link only when it changed: a deleted record's link has
+    // no id to resend. A new card always sends it, preset from a record or not.
+    if (!item || link?.id !== start?.id || link?.type !== start?.type) {
       draft.link = link && link.id ? { type: link.type, id: link.id } : null;
     }
     setBusy(true);
@@ -69,7 +72,7 @@ export function ActionDialog({ item, status, link: presetLink, onClose, onSaved 
   };
 
   return (
-    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 560 }} ariaLabel={item ? t('actEditTitle') : t('actNewTitle')}>
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 560 }} zIndex={zIndex} ariaLabel={item ? t('actEditTitle') : t('actNewTitle')}>
       <div className="modal-head">
         <div className="modal-title">{item ? t('actEditTitle', { id: item.id }) : t('actNewTitle')}</div>
       </div>

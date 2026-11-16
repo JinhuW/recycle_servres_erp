@@ -110,3 +110,18 @@ a.act-link:hover { background: var(--accent-soft); }
 .po-archived { opacity: .6; }
 .po-board-wrap { padding: 12px 14px 14px; }
 .po-board .act-cards { max-height: calc(100vh - 290px); overflow-y: auto; padding-right: 2px; }
+
+/* One record's cards (pages/desktop/actions/ActionsPanel.tsx). */
+.act-panel { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.act-panel-head { display: flex; align-items: center; gap: 8px; }
+.act-panel-head h3 { margin: 0; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.act-panel-head .btn { margin-left: auto; }
+.act-panel-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.act-panel-row { all: unset; box-sizing: border-box; width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.act-panel-row:hover, .act-panel-row:focus-visible { background: var(--bg-soft); }
+.act-panel-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-panel-done .act-panel-title { color: var(--fg-subtle); text-decoration: line-through; }
+.act-st-todo { background: var(--bg-soft); color: var(--fg-muted); }
+.act-st-in_progress { background: var(--accent-soft); color: var(--accent-strong); }
+.act-st-blocked { background: var(--neg-soft); color: var(--neg); }
+.act-st-done { background: var(--pos-soft); color: var(--pos); }

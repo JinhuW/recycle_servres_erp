@@ -4432,6 +4432,13 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     poBoardActionsOne: "1 open action",
 
     // ── Actions ──
+    eoTabActions: "Actions",
+    actPanelTitle: "Actions",
+    actPanelOpen: "{n} open",
+    actPanelEmpty: "No actions about this yet.",
+    homeMyActions: "My actions",
+    homeMyActionsSub: "{n} open, assigned to you",
+    homeNoActions: "Nothing assigned to you.",
     nav_actions: "Actions",
     actTitle: "Actions",
     actLede: "The team's shared list of things to do. Drag a card to move it, or use the select on the card.",

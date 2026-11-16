@@ -16,6 +16,7 @@ import {
 } from '../../../lib/clients';
 import { LogContact } from './LogContact';
 import { EditClient } from './EditClient';
+import { ActionsPanel, useRecordActions } from '../actions/ActionsPanel';
 
 export function ClientDrawer({ id, onClose, onChanged, showToast }: {
   id: string;
@@ -26,6 +27,8 @@ export function ClientDrawer({ id, onClose, onChanged, showToast }: {
   const { t, locale } = useT();
   const [c, setC] = useState<ClientDetail | null>(null);
   const [editing, setEditing] = useState(false);
+  // A card opens on the board: this drawer is itself a dialog.
+  const recActions = useRecordActions('client', id, { label: c?.name ?? '', openInBoard: true });
 
   const load = useCallback(() => {
     api.get<ClientDetail>(`/api/suppliers/${id}`).then(setC).catch(handleFetchError);
@@ -44,6 +47,7 @@ export function ClientDrawer({ id, onClose, onChanged, showToast }: {
   const soldMax = c.sold.length ? Math.max(...c.sold.map((s) => s.qty)) : 1;
 
   return (
+    <>
     <Modal onClose={onClose} ariaLabel={c.name} shellClassName="cli-drawer">
       <div className="cli-drawer-head">
         <div className="cli-drawer-top">
@@ -172,6 +176,11 @@ export function ClientDrawer({ id, onClose, onChanged, showToast }: {
         )}
 
         <section className="cli-sec">
+          <h3 className="cli-sec-h">{t('actPanelTitle')}</h3>
+          <ActionsPanel bare {...recActions.panel} />
+        </section>
+
+        <section className="cli-sec">
           <h3 className="cli-sec-h">{t('cliHistoryH')}</h3>
           {c.timeline.length === 0
             ? <p className="cli-muted">{t('cliHistoryEmpty')}</p>
@@ -220,5 +229,8 @@ export function ClientDrawer({ id, onClose, onChanged, showToast }: {
         />
       )}
     </Modal>
+    {/* Beside the drawer's Modal, not inside it. */}
+    {recActions.overlay}
+    </>
   );
 }

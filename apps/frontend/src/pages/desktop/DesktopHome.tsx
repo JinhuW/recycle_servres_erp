@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { REPORTING_TZ, actionIsOverdue, todayIn, type ActionItem } from '@recycle-erp/shared';
 import { Icon, type IconName } from '../../components/Icon';
 import { RouteLink } from '../../components/RouteLink';
 import { DashboardSkeleton } from '../../components/Skeleton';
@@ -7,7 +8,8 @@ import { useEffectiveUser } from '../../lib/tweaks';
 import { fmtDateShort, fmtUSD0 } from '../../lib/format';
 import { LIFECYCLE_STATUS, statusTone, WORKFLOW_STAGES } from '../../lib/status';
 import { NEED_SHORT_KEY, SERVER_BLOCKER_KEY } from '../../lib/poReadiness';
-import { ACCOUNTING_REVIEW_PATH } from '../../lib/route';
+import { ACCOUNTING_REVIEW_PATH, ACTIONS_PATH, actionPath } from '../../lib/route';
+import { actionsApi, STATUS_KEY } from '../../lib/actions';
 import {
   ageTone, daysSince, managerTiles, poStagePath, sellStatusPath, useHomeData,
 } from '../../lib/home';
@@ -57,6 +59,7 @@ function PurchaserView({ p }: { p: PurchaserHome }) {
       </div>
 
       <div className="home-grid">
+        <MyActionsCard />
         <Card title={t('homeOpenPos')} sub={t('homeOpenPosSub', { n: p.openPos.count })}
               more={p.openPos.count > p.openPos.items.length ? { to: '/purchase-orders', label: t('seeAll') } : undefined}>
           {p.openPos.items.length === 0 ? <AllClear text={t('homeNoOpenPos')} /> : (
@@ -173,6 +176,7 @@ function ManagerView({ m }: { m: ManagerHome }) {
       </div>
 
       <div className="home-grid">
+        <MyActionsCard />
         <Card title={t('homeReviewQueue')}
               sub={m.review.count > 0 ? t('homeReviewSub', { n: m.review.count, mine: m.review.mine }) : undefined}
               more={m.review.count > m.review.items.length ? { to: poStagePath('reviewing'), label: t('seeAll') } : undefined}>
@@ -283,6 +287,45 @@ function ManagerView({ m }: { m: ManagerHome }) {
 }
 
 // ── Pieces ───────────────────────────────────────────────────────────────────
+
+// The viewer's open Actions cards, the most pressing first. Its own read, so
+// Home's one request stays the work tables' alone.
+function MyActionsCard() {
+  const { t, locale } = useT();
+  const [mine, setMine] = useState<{ count: number; items: ActionItem[] } | null>(null);
+  useEffect(() => {
+    let live = true;
+    // A Home card that fails to load is left out; it is never worth a dialog.
+    actionsApi.mine(5).then(r => { if (live) setMine(r); }, () => {});
+    return () => { live = false; };
+  }, []);
+  if (!mine) return null;
+  const today = todayIn(REPORTING_TZ);
+  return (
+    <Card title={t('homeMyActions')}
+          sub={mine.count > 0 ? t('homeMyActionsSub', { n: mine.count }) : undefined}
+          more={{ to: ACTIONS_PATH, label: t('seeAll') }}>
+      {mine.items.length === 0 ? <AllClear text={t('homeNoActions')} /> : (
+        <div className="home-list">
+          {mine.items.map(a => {
+            const overdue = actionIsOverdue(a, today);
+            const due = a.dueDate === today && a.status !== 'done';
+            return (
+              <RouteLink key={a.id} to={actionPath(a.id)} className="home-list-row">
+                <span className="home-list-main">{a.title}</span>
+                <span className={'home-list-meta' + (overdue ? ' neg' : due ? ' warn' : '')}>
+                  {a.dueDate
+                    ? overdue || due ? (due ? t('homeDueToday') : t('actOverdue')) : fmtDateShort(a.dueDate + 'T12:00:00', locale)
+                    : t(STATUS_KEY[a.status])}
+                </span>
+              </RouteLink>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 function Card({ title, sub, more, children }: {
   title: string; sub?: string; more?: { to: string; label: string }; children: ReactNode;
