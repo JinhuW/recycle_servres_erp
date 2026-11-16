@@ -49,6 +49,7 @@ import customersRoutes from './routes/customers';
 import sellOrdersRoutes from './routes/sellOrders';
 import sellOrderPackRoutes from './routes/sellOrderPack';
 import afterSalesRoutes from './routes/afterSales';
+import actionsRoutes from './routes/actions';
 import accountingRoutes from './routes/accounting';
 import inventoryRoutes from './routes/inventory';
 import membersRoutes from './routes/members';
@@ -389,6 +390,9 @@ app.use('/api/sell-orders/*', authMiddleware);
 // Bare path too: the list lives at the prefix root.
 app.use('/api/after-sales', authMiddleware);
 app.use('/api/after-sales/*', authMiddleware);
+// Bare path too: the board lives at the prefix root.
+app.use('/api/actions', authMiddleware);
+app.use('/api/actions/*', authMiddleware);
 app.use('/api/inventory/*', authMiddleware);
 app.use('/api/members/*', authMiddleware);
 app.use('/api/lookups/*', authMiddleware);
@@ -429,6 +433,7 @@ app.route('/api/customers', customersRoutes);
 app.route('/api/sell-orders', sellOrdersRoutes);
 app.route('/api/sell-orders', sellOrderPackRoutes);
 app.route('/api/after-sales', afterSalesRoutes);
+app.route('/api/actions', actionsRoutes);
 app.route('/api/inventory', inventoryRoutes);
 app.route('/api/members', membersRoutes);
 app.route('/api/lookups', lookupsRoutes);

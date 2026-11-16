@@ -1,14 +1,14 @@
 ---
-id: RS-596
+id: RS-598
 title: Show each inventory product's last collected date
 type: story
-status: backlog
+status: done
 priority: P2
 created: 2026-11-16
 reporter: jinhu
 branch: session/20261116-074805
-pr:
-version:
+pr: "#1224"
+version: 1.467.0
 related: []
 ---
 

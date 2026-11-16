@@ -1602,12 +1602,12 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   lots alone, and its row — qty and the in-stock split, lot and PO counts,
   cost range, Warehouses — sums those alone. The attribute chips still show
   a matching product whole, so a mis-typed lot stays findable.
-- **The grouped view shows each product's last collected date** (v1.466.0,
-  RS-596): the newest hand-off (pickup or shipment) among its lots' POs, or the
+- **The grouped view shows each product's last collected date** (v1.467.0,
+  RS-598): the newest hand-off (pickup or shipment) among its lots' POs, or the
   PO's date for one from before the hand-off step, with the days since. Each
   lot shows its own. A partial transfer's clone keeps its PO's date.
 - **The desktop Inventory table sorts by any column** (v1.332.0, Last
-  collected v1.466.0): Product, Part #, Qty, Lots, Warehouses, Cost, Sell,
+  collected v1.467.0): Product, Part #, Qty, Lots, Warehouses, Cost, Sell,
   Last collected. A click goes high → low → low →
   high → back to the bid-sheet order. Blanks sort last, and ties keep the
   bid-sheet order. The server ranks every matching product before it caps
