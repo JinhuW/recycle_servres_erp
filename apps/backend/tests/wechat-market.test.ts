@@ -175,6 +175,81 @@ describe('WeChat market (/api/wechat-market)', () => {
     expect(counts).toEqual({ rows: 1, points: 0, degraded: true });
   });
 
+  describe('flow, traders and sentiment (RS-599)', () => {
+    const flow = {
+      buyQty: 1200, sellQty: 3400, buyQtyPosts: 8, sellQtyPosts: 15,
+      buyOnly: 14, sellOnly: 19, both: 6, newBuyers: 3, newSellers: null,
+    };
+    const sentiment = {
+      score: 25, bullish: 12, neutral: 20, bearish: 4, urgent: 7,
+      buy: { bullish: 9, neutral: 9, bearish: 1 }, sell: { bullish: 3, neutral: 11, bearish: 3 },
+    };
+    const traders = {
+      buy: [{ senderId: 'wxid_a', name: '老王', posts: 6, lines: 4, qty: 500, groups: 3, both: true, mood: 'bullish' }],
+      sell: [{ senderId: 'wxid_b', name: '', posts: 9, lines: 7, qty: 0, groups: 5, both: false, mood: null }],
+    };
+    const full = () => {
+      const d = dayPush();
+      d.totals = { ...d.totals, ...flow } as never;
+      d.rows[1] = { ...d.rows[1]!, sentiment: { score: 50, bullish: 3, neutral: 1, bearish: 0 } };
+      return { ...d, traders, sentiment };
+    };
+
+    it('stores and reads back what memtrade sends', async () => {
+      expect((await push('2026-10-21', full())).status).toBe(200);
+      await pushPoints('2026-10-21', [point({ mood: 'bearish', urgent: true } as never)]);
+      const { token } = await loginAs(ALEX);
+      const list = await api<{ days: { totals: object }[] }>('GET', '/api/wechat-market/days', { token });
+      expect(list.body.days[0]!.totals).toMatchObject(flow);
+      const spec = await api<{ day: WechatDay; rows: WechatRow[] }>(
+        'GET', '/api/wechat-market/days/2026-10-21?kind=spec', { token },
+      );
+      expect(spec.body.day.traders).toEqual(traders);
+      expect(spec.body.day.sentiment).toEqual(sentiment);
+      expect(spec.body.rows[0]!.sentiment).toEqual({ score: 50, bullish: 3, neutral: 1, bearish: 0 });
+      const quote = await api<{ rows: WechatRow[] }>('GET', '/api/wechat-market/days/2026-10-21?kind=quote', { token });
+      expect(quote.body.rows[0]!.sentiment).toBeNull();
+      const ev = await api<{ points: WechatEvidence[] }>(
+        'GET', `/api/wechat-market/days/2026-10-21/points?kind=spec&key=${encodeURIComponent('64G 5600')}`, { token },
+      );
+      expect(ev.body.points[0]).toMatchObject({ mood: 'bearish', urgent: true });
+      const act = await api<WechatActivity>('GET', '/api/wechat-market/activity?until=2026-10-21', { token });
+      expect(act.body.days[0]).toMatchObject({ buyQty: 1200, sellQty: 3400, sentiment: 25 });
+    });
+
+    it('reads a day from a memtrade that predates them as nulls', async () => {
+      await push('2026-10-21', dayPush());
+      await pushPoints('2026-10-21', [point()]);
+      const { token } = await loginAs(ALEX);
+      const r = await api<{ day: WechatDay; rows: WechatRow[] }>('GET', '/api/wechat-market/days/2026-10-21?kind=spec', { token });
+      expect(r.body.day.totals).toMatchObject({ buyQty: null, both: null, newSellers: null });
+      expect(r.body.day.traders).toBeNull();
+      expect(r.body.day.sentiment).toBeNull();
+      expect(r.body.rows[0]!.sentiment).toBeNull();
+      const ev = await api<{ points: WechatEvidence[] }>(
+        'GET', `/api/wechat-market/days/2026-10-21/points?kind=spec&key=${encodeURIComponent('64G 5600')}`, { token },
+      );
+      expect(ev.body.points[0]).toMatchObject({ mood: null, urgent: false });
+      const act = await api<WechatActivity>('GET', '/api/wechat-market/activity?until=2026-10-21', { token });
+      expect(act.body.days[0]).toMatchObject({ buyQty: null, sellQty: null, sentiment: null });
+    });
+
+    it('refuses a bad mood, score or trader list, naming the field', async () => {
+      const detail = async (body: unknown) => ((await push('2026-10-21', body)).body as { detail: string }).detail;
+      expect(await detail({ ...full(), sentiment: { ...sentiment, score: 140 } })).toContain('sentiment.score');
+      expect(await detail({ ...full(), sentiment: { ...sentiment, buy: null } })).toContain('sentiment.buy');
+      const moody = { ...traders, buy: [{ ...traders.buy[0], mood: 'happy' }] };
+      expect(await detail({ ...full(), traders: moody })).toContain('traders.buy[0].mood');
+      const many = { ...traders, sell: Array.from({ length: 11 }, () => traders.sell[0]) };
+      expect(await detail({ ...full(), traders: many })).toContain('traders.sell');
+      const d = full();
+      d.totals = { ...d.totals, buyQty: -1 } as never;
+      expect(await detail(d)).toContain('totals.buyQty');
+      await push('2026-10-21', dayPush());
+      expect((await pushPoints('2026-10-21', [point({ mood: 'up' } as never)])).status).toBe(400);
+    });
+  });
+
   describe('warning acknowledgements', () => {
     const GAP = '数据可能不完整：2026-10-21 08:00 → 2026-10-21 13:17 共 5.3 小时没有任何群消息。';
     const ack = (token: string, warning: string, acked: boolean, date = '2026-10-21') =>

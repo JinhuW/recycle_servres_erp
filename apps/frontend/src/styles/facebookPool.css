@@ -3427,3 +3427,355 @@ tr.wx-quiet td {
 .wx-heat-tip {
   top: auto;
 }
+
+/* ─── Monitors ▸ WeChat: buyers & sellers, mood, traders (RS-599) ─────────
+   Mood wears the price-change colours the board already uses (wx-up/down):
+   bullish green, bearish red, neutral grey. The sides keep blue and green. */
+.wx-page {
+  --wx-bull: var(--pos);
+  --wx-bear: var(--neg);
+  --wx-flat: var(--fg-subtle);
+}
+.wx-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+@media (max-width: 960px) {
+  .wx-overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.wx-flow .card-head,
+.wx-sent .card-head {
+  align-items: flex-start;
+}
+.wx-flow-legend {
+  display: inline-flex;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.wx-flow-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.wx-card-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.wx-flow-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+.wx-flow-pair {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+.wx-flow-pair dt {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.wx-flow-pair dd {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 92px;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+.wx-flow-n {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.wx-flow-n.wx-sell {
+  justify-content: flex-end;
+}
+.wx-flow-n b {
+  font-size: 15px;
+  font-weight: 600;
+}
+.wx-flow-n.wx-buy b {
+  color: var(--wx-bid-text);
+}
+.wx-flow-n.wx-sell b {
+  color: var(--wx-ask-text);
+}
+.wx-flow-n small {
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+}
+.wx-flow-bar,
+.wx-flow-seg,
+.wx-tally {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-soft);
+}
+.wx-flow-bar > i.wx-buy {
+  background: var(--wx-bid);
+}
+.wx-flow-bar > i.wx-sell {
+  background: var(--wx-ask);
+}
+.wx-flow-note {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  text-align: center;
+}
+.wx-flow-split {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.wx-flow-seg {
+  margin-top: 8px;
+}
+.wx-seg-buy {
+  background: var(--wx-bid);
+}
+.wx-seg-both {
+  background: color-mix(in oklch, var(--wx-bid) 50%, var(--wx-ask));
+}
+.wx-seg-sell {
+  background: var(--wx-ask);
+}
+.wx-flow-seg-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.wx-flow-seg-keys li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.wx-flow-seg-keys i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.wx-flow-seg-keys b {
+  color: var(--fg);
+}
+.wx-flow-new {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* Mood */
+.chip.wx-mood-bullish {
+  color: var(--wx-bull);
+  background: color-mix(in oklch, var(--wx-bull) 12%, transparent);
+}
+.chip.wx-mood-bearish {
+  color: var(--wx-bear);
+  background: color-mix(in oklch, var(--wx-bear) 12%, transparent);
+}
+.chip.wx-mood-neutral {
+  color: var(--fg-muted);
+  background: var(--bg-soft);
+}
+.wx-dot.wx-mood-bullish,
+.wx-tally > i.wx-mood-bullish {
+  background: var(--wx-bull);
+}
+.wx-dot.wx-mood-neutral,
+.wx-tally > i.wx-mood-neutral {
+  background: var(--wx-flat);
+}
+.wx-dot.wx-mood-bearish,
+.wx-tally > i.wx-mood-bearish {
+  background: var(--wx-bear);
+}
+.wx-mood-text-bullish {
+  color: var(--wx-bull);
+}
+.wx-mood-text-bearish {
+  color: var(--wx-bear);
+}
+.wx-sent-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.wx-sent-head > span {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+.wx-sent-score {
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.wx-gauge {
+  position: relative;
+  height: 8px;
+  margin-top: 14px;
+  border-radius: 4px;
+  background: linear-gradient(90deg,
+    color-mix(in oklch, var(--wx-bear) 45%, transparent),
+    var(--bg-soft) 50%,
+    color-mix(in oklch, var(--wx-bull) 45%, transparent));
+}
+.wx-gauge-lean {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-inline: 1px dashed var(--border-strong, var(--border));
+}
+.wx-gauge-at {
+  position: absolute;
+  top: -4px;
+  width: 4px;
+  height: 16px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--fg);
+}
+.wx-gauge-ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+}
+.wx-sent-rows {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.wx-sent-rows > div {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bg-soft);
+}
+.wx-sent-rows dt {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.wx-sent-rows dd {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.wx-sent-side {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.wx-sent-side > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.wx-sent-urgent {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* Most active traders: the rankings' rows, not buttons. */
+.wx-traders .card-head .seg {
+  margin-top: 6px;
+}
+.wx-trader {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  row-gap: 2px;
+  column-gap: 10px;
+  padding: 7px 8px 9px;
+  font-size: 12.5px;
+}
+.wx-trader .wx-top-key {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wx-trader .chip,
+.wx-trader .wx-dot {
+  flex-shrink: 0;
+}
+.wx-trader .chip {
+  font-size: 10.5px;
+}
+/* WeChat names run long; the name gives way, the chip stays whole. */
+.wx-trader-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Activity: buyers, sellers and mood. */
+.wx-act-line {
+  fill: none;
+  stroke-width: 1.75;
+}
+.wx-act-line.wx-buy,
+.wx-act-pt.wx-buy {
+  stroke: var(--wx-bid);
+}
+.wx-act-line.wx-sell,
+.wx-act-pt.wx-sell {
+  stroke: var(--wx-ask);
+}
+.wx-act-pt {
+  fill: var(--bg-elev, var(--bg));
+  stroke-width: 1.5;
+}
+.wx-act-mood.wx-mood-bullish {
+  fill: var(--wx-bull);
+}
+.wx-act-mood.wx-mood-neutral {
+  fill: var(--wx-flat);
+}
+.wx-act-mood.wx-mood-bearish {
+  fill: var(--wx-bear);
+}
+.wx-act-cursor {
+  stroke: var(--border);
+  stroke-dasharray: 3 3;
+}
+.wx-flow-legend .wx-dot.wx-mood-bullish {
+  background: linear-gradient(90deg, var(--wx-bear) 50%, var(--wx-bull) 50%);
+}
+.wx-supply {
+  align-items: flex-start;
+}
+.wx-supply small .chip {
+  margin-left: 2px;
+  padding: 0 5px;
+  font-size: 10.5px;
+}

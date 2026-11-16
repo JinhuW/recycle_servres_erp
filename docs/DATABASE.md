@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-16:** ERP migration `0249`, Reddit tracker migration `0007`,
+**As of 2026-11-16:** ERP migration `0250`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -1964,6 +1964,17 @@ One row per report day of memtrade's WeChat market report (an 08:00 → 08:00 ET
 | `pushed_at` | `timestamptz` | ✓ | `now()` | When the day was last pushed. |
 | `push_id` | `uuid` | ✓ | `gen_random_uuid()` | Id of the current push; a point batch naming an older one is refused with 409 day_replaced. |
 | `stored_points` | `integer` | ✓ | `0` | Points actually stored, recounted after every batch. |
+| `buy_qty` | `integer` |  |  | Modules wanted: each buyer's largest figure per spec line, summed, one quoted line counted once (0250). NULL when the pushing memtrade predates it. |
+| `sell_qty` | `integer` |  |  | Modules offered, counted as buy_qty. |
+| `buy_qty_posts` | `integer` |  |  | Buy posts that gave a quantity, which buy_qty rests on. |
+| `sell_qty_posts` | `integer` |  |  | Sell posts that gave a quantity. |
+| `buy_only` | `integer` |  |  | Traders who posted only to buy; buyers = buy_only + both_sides. |
+| `sell_only` | `integer` |  |  | Traders who posted only to sell. |
+| `both_sides` | `integer` |  |  | Traders who posted on both sides. |
+| `new_buyers` | `integer` |  |  | Buyers not seen buying in the 30 report days before; NULL with under 7 days of history. |
+| `new_sellers` | `integer` |  |  | Sellers not seen selling in the 30 report days before. |
+| `traders` | `jsonb` |  |  | The ten most active traders a side, {buy: [...], sell: [...]}, each {senderId, name, posts, lines, qty, groups, both, mood}. |
+| `sentiment` | `jsonb` |  |  | The day's mood: {score, bullish, neutral, bearish, urgent, buy: {…}, sell: {…}}. One vote per trader (their latest post's mood); score = (bullish − bearish) / voters × 100, NULL under 3 voters. NULL when no post has a mood. |
 
 - **Primary key:** `report_date`
 - **Checks:** `window_end > window_start`
@@ -2020,6 +2031,7 @@ One price-board line per report day: a memory part family with its buy-side and 
 | `sell_exposures` | `integer` | ✓ |  | Copies of the sell posts across groups and hours. |
 | `sell_qty` | `integer` | ✓ |  | Total modules offered. |
 | `sell_prices` | `jsonb` | ✓ | `'[]'::jsonb` | Asks per bucket, same shape as buy_prices. |
+| `sentiment` | `jsonb` |  |  | The line's mood, {score, bullish, neutral, bearish}, counted as wechat_market_days.sentiment (0250). |
 
 - **Primary key:** `report_date, kind, row_key`
 - **References:** `report_date` → `wechat_market_days.report_date` (on delete cascade)
@@ -2064,10 +2076,12 @@ The evidence: one row per quoted item per post on a report day, linked to the bo
 | `location` | `text` |  |  | Delivery place as quoted, e.g. 深圳 or 香港. |
 | `raw_line` | `text` | ✓ |  | The message line the item was read from; may be empty. |
 | `row_keys` | `text[]` | ✓ | `'{}'[]` | kind:key of every board line the item counted toward, e.g. quote:三星 64G 5600 DM0. |
+| `mood` | `text` |  |  | The post's tone, by where it says prices are heading: bullish (急收, 加价, 缺货, 涨价), bearish (急出, 清仓, 甩货, 特价, 降价) or neutral (0250). NULL when read before memtrade scored tone. |
+| `urgent` | `boolean` | ✓ | `false` | The post presses for a deal: 急, 今天要, 马上, 实单. |
 
 - **Primary key:** `report_date, post_key, item_index`
 - **References:** `report_date` → `wechat_market_days.report_date` (on delete cascade)
-- **Checks:** `currency IN ('RMB', 'USD')`; `direction IN ('buy', 'sell')`; `form_factor IN ('server', 'pc')`; `source IN ('llm', 'rules')`
+- **Checks:** `currency IN ('RMB', 'USD')`; `direction IN ('buy', 'sell')`; `form_factor IN ('server', 'pc')`; `mood IN ('bullish', 'neutral', 'bearish')`; `source IN ('llm', 'rules')`
 
 Read within one day only, so the primary key's report_date prefix serves as the index; a line finds its posts through row_keys.
 

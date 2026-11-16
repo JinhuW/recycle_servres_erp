@@ -3498,6 +3498,26 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     is a group × day heatmap, busiest groups first, shaded by quintile,
     with each group's last day with messages; a gap of 2+ days shows in the
     warning colour.
+  - **Buyers & sellers**, **Market mood** and **Most active traders**
+    (v1.472.0, RS-599). Above the board, *Buyers & sellers* sets buy against
+    sell for traders, posts and units (each trader's largest figure per spec
+    line, summed, with how many posts gave a figure: most give none, so it is
+    a floor), with the change against the day before on hover; splits the
+    traders into buy only, both sides and sell only; and counts new buyers
+    and sellers (not seen on that side in the 30 report days before).
+    *Market mood* is Claude's read of each post's tone: bullish (急收, 加价,
+    缺货, 涨价), bearish (急出, 清仓, 甩货, 特价, 降价) or neutral, one vote per
+    trader (their latest post). It shows the index, (bullish − bearish) ÷
+    voters × 100, leaning at ±20, on a gauge, the three counts, each side's
+    split and the urgent posts. The board has a *Mood* column with each
+    line's index, an opened line lists its mood counts, and a post that
+    isn't neutral or is urgent says so. *Most active traders*, in the aside,
+    ranks the ten busiest buyers or sellers by posts, with their specs,
+    groups, units, mood and whether they trade both sides. On the Activity
+    tab, *Buyers, sellers and mood* charts both sides' traders and the mood
+    index per day, with units on hover. memtrade computes all of it; a day
+    it pushed before then says so instead of showing zeros, and the mood
+    needs the day re-run.
   - **Settings** (v1.458.0), a further tab (`?view=settings`), edits the
     prompt memtrade gives Claude to write the market notes. It shows
     memtrade's built-in prompt (`prompts/summary.md`, which memtrade

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { priceChange, priceSpread, type WechatPrice, type WechatRow } from '@recycle-erp/shared';
+import { priceChange, priceSpread, sentimentLean, type WechatPrice, type WechatRow } from '@recycle-erp/shared';
 import {
-  boardOrder, boardRows, FACETS, facetCounts, facetOrder, fmtPrice, ladder, parseNotes, signalCounts,
-  SIGNALS, UNBRANDED, wechatHaystack,
+  boardOrder, boardRows, FACETS, facetCounts, facetOrder, fmtPrice, fmtScore, ladder, parseNotes, sideShare,
+  signalCounts, SIGNALS, UNBRANDED, wechatHaystack,
 } from './wechatMarket';
 import { matchWechatDay, pathToDesktopView, wechatDayPath } from './route';
 
@@ -14,7 +14,7 @@ const side = (prices: WechatPrice[] = []) => ({ posts: 1, senders: 1, groups: 1,
 function row(over: Partial<WechatRow>): WechatRow {
   return {
     kind: 'quote', key: 'k', brand: '三星', capacityGb: 64, speed: 5600, code: null, ddr: 'DDR5',
-    formFactor: null, ranks: [], partNumbers: [], signal: null, buy: side(), sell: side(), prev: null,
+    formFactor: null, ranks: [], partNumbers: [], signal: null, buy: side(), sell: side(), sentiment: null, prev: null,
     ...over,
   };
 }
@@ -170,5 +170,23 @@ describe('WeChat refine panel', () => {
     expect(facetOrder('brand', [UNBRANDED, '金士顿', '海力士', '三星'])).toEqual(['三星', '海力士', '金士顿', UNBRANDED]);
     expect(facetOrder('form', ['pc', 'server'])).toEqual(['server', 'pc']);
     expect(facetOrder('ddr', ['DDR5', 'DDR3', 'DDR4'])).toEqual(['DDR3', 'DDR4', 'DDR5']);
+  });
+});
+
+describe('WeChat market mood and flow (RS-599)', () => {
+  it('reads a score as bullish or bearish from ±20, neutral between, nothing without one', () => {
+    expect([100, 20, 19, 0, -19, -20, -100].map(sentimentLean))
+      .toEqual(['bullish', 'bullish', 'neutral', 'neutral', 'neutral', 'bearish', 'bearish']);
+    expect(sentimentLean(null)).toBeNull();
+  });
+
+  it('signs a score with a real minus', () => {
+    expect([25, 0, -10].map(fmtScore)).toEqual(['+25', '0', '−10']);
+  });
+
+  it('splits a buy/sell pair into the buy side\'s share', () => {
+    expect(sideShare(1, 3)).toBe(25);
+    expect(sideShare(4, 0)).toBe(100);
+    expect(sideShare(0, 0)).toBeNull();
   });
 });
