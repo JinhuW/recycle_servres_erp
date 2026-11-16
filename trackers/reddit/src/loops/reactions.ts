@@ -18,6 +18,15 @@ const LONG_POLL_SECONDS = 25;
 
 const ALLOWED_UPDATES = ['message_reaction', 'message_reaction_count', 'my_chat_member'];
 
+/**
+ * How long getUpdates may keep failing on the network or a 5xx before it is a
+ * warning. Single drops happen several times an hour, and Telegram's Bot API
+ * restarts every night around 01:12 UTC with two minutes of 502s and
+ * timeouts. Neither loses a reaction: Telegram keeps updates for 24 hours and
+ * the cursor only moves on success.
+ */
+export const OUTAGE_WARN_MS = 10 * 60_000;
+
 interface TelegramChat {
   id: number;
   type?: string;
@@ -65,6 +74,45 @@ export interface ReactionsDeps {
   logger: Logger;
   /** Aborted on shutdown so a pending long poll does not hold the process up. */
   signal?: AbortSignal;
+  /** Kept across calls by the loop, so a blip is told apart from an outage. */
+  outage?: OutageState;
+}
+
+export interface OutageState {
+  /** When the current run of transient failures began; null while healthy. */
+  since: number | null;
+}
+
+/**
+ * A transient failure is logged at info until the run of them has lasted
+ * OUTAGE_WARN_MS, and at warn from then on, so a real outage still pages.
+ */
+function noteTransient(deps: ReactionsDeps, message: string, fields: Record<string, unknown>): void {
+  const outage = deps.outage ?? {since: null};
+  outage.since ??= Date.now();
+  const forMs = Date.now() - outage.since;
+  if (forMs >= OUTAGE_WARN_MS) {
+    deps.logger.warn(message, {...fields, failingForMinutes: Math.floor(forMs / 60_000)});
+  } else {
+    deps.logger.info(message, fields);
+  }
+}
+
+function noteHealthy(deps: ReactionsDeps): void {
+  const outage = deps.outage;
+  if (!outage || outage.since === null) return;
+  const forMs = Date.now() - outage.since;
+  outage.since = null;
+  if (forMs >= OUTAGE_WARN_MS) {
+    deps.logger.info('getUpdates recovered', {failedForMinutes: Math.floor(forMs / 60_000)});
+  }
+}
+
+/** undici reports every network error as "fetch failed"; the reason is in cause. */
+function describeFetchError(e: unknown): Record<string, unknown> {
+  if (!(e instanceof Error)) return {error: String(e)};
+  const cause = e.cause as {code?: string; message?: string} | undefined;
+  return {error: e.message, cause: cause?.code ?? cause?.message};
 }
 
 /**
@@ -97,9 +145,7 @@ export async function reactionsOnce(deps: ReactionsDeps): Promise<boolean> {
       ]),
     });
   } catch (e) {
-    if (!deps.signal?.aborted) {
-      logger.warn('getUpdates failed', {error: e instanceof Error ? e.message : String(e)});
-    }
+    if (!deps.signal?.aborted) noteTransient(deps, 'getUpdates failed', describeFetchError(e));
     return false;
   }
 
@@ -114,10 +160,15 @@ export async function reactionsOnce(deps: ReactionsDeps): Promise<boolean> {
     });
     return false;
   }
+  if (response.status >= 500 || response.status === 429) {
+    noteTransient(deps, 'getUpdates rejected', {status: response.status, description: payload.description});
+    return false;
+  }
   if (!response.ok || payload.ok !== true || !Array.isArray(payload.result)) {
     logger.warn('getUpdates rejected', {status: response.status, description: payload.description});
     return false;
   }
+  noteHealthy(deps);
   if (payload.result.length === 0) return false;
 
   const settings = await deps.settings.get();
