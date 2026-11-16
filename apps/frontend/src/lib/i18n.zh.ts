@@ -4066,6 +4066,8 @@ const zh: Record<string, string> = {
   fleetPacingBudget: "今日已用 {used} / {budget} 分钟",
   fleetUaNative: "Chromium 自带",
   fleetColEngine: "引擎",
+  fleetCheckProxies: "检查代理",
+  fleetCheckProxiesHint: "立即探测每个代理。需要几秒，不会登录任何账号。",
   fleetEngine_stock: "原版",
   fleetEngine_cloak: "CloakBrowser",
   fleetCloakSeed: "种子 {seed} · {gpu}",

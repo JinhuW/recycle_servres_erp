@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { COORDINATOR, NOW, POOL, RELEASE, SLOTS, WORKERS } from './fixtures';
-import { FLEET_ROW_KINDS, fleetCloakRoom, hostBays, rowCloakSwitchable, rowStockRevertible, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning, releasableRows, sortFleetRows, type FleetRow, type HostBay } from './fleetRows';
+import { FLEET_ROW_KINDS, fleetCloakRoom, hostBays, rowCloakSwitchable, rowStockRevertible, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning, releasableRows, rowProxy, sortFleetRows, type FleetRow, type HostBay } from './fleetRows';
+import type { FleetProxyHealth } from '../../../lib/fleet';
 
 const input = { slots: SLOTS, workers: WORKERS, release: RELEASE, coordinator: COORDINATOR, challenges: null, pool: POOL };
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
@@ -255,5 +256,22 @@ describe('rowCloakSwitchable', () => {
     const cloaked = SLOTS.map(s => s.account_no === 31 ? { ...s, device: { viewport: [1366, 645] as [number, number], timezone: 'UTC', locale: 'en-US', browser_engine: 'cloak' as const, cloak_seed: 12345 } } : s);
     expect(fleetCloakRoom({ cloak_enabled: true, cloak_max_slots: 1 }, cloaked)).toEqual({ enabled: true, used: 1, max: 1 });
     expect(fleetCloakRoom(null, SLOTS)).toEqual({ enabled: false, used: 0, max: 0 });
+  });
+});
+
+describe('rowProxy', () => {
+  const rows = fleetRows(input, NOW);
+  const by = (key: string) => rows.find(r => r.key === key)!;
+  const health = (over: Partial<FleetProxyHealth>): FleetProxyHealth => ({
+    exit: 'http://p.example:1', source: 'erp', proxy_id: null, label: null, host: 'p.example', port: 1, slots: [], workers: [],
+    state: 'up', last: null, exit_change: null, previous_ip: null, load_ip: null, exit_load: 0, uptime: null, checks: 0, buckets: [], ...over,
+  });
+  it('finds an ERP worker\'s proxy by the account it holds, and a homelab worker\'s by its worker id', () => {
+    const erp = by('erp:homelab-1');
+    const listed = health({ proxy_id: 7, slots: [{ account_no: erp.slot!.account_no, pool_status: 'active', parked: false, leased: true, timezone: null, held_exit_ip: null }] });
+    const port = health({ source: 'coordinator', workers: ['homelab-5'] });
+    expect(rowProxy(erp, [port, listed])).toBe(listed);
+    expect(rowProxy(by('coord:homelab-5'), [listed, port])).toBe(port);
+    expect(rowProxy(by('coord:homelab-9'), [listed, port])).toBeNull();
   });
 });

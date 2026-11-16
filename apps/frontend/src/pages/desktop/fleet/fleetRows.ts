@@ -13,7 +13,7 @@ export type FleetPoolAccount = Pick<PoolAccountSummary, 'no' | 'uid' | 'status' 
   & Partial<Pick<PoolAccountSummary, 'addedAt' | 'batch'>>;
 import {
   fleetCloakSwitchable, fleetEngineOf, fleetRestartable, fleetResumable, fleetStockRevertible, fleetSlotRetirable, fleetStateParked,
-  type FleetHost, type FleetRelease, type FleetSettings, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume,
+  type FleetHost, type FleetProxyHealth, type FleetRelease, type FleetSettings, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerResume,
 } from '../../../lib/fleet';
 import { parkedWorkers, retiredAt } from '../../../lib/fleetView';
 import { leaseLive, liveness, workerIndex } from './fleetBoard';
@@ -390,4 +390,15 @@ export function releasableRows(rows: readonly FleetRow[]): { release: FleetRow[]
     release.push(r);
   }
   return { release, skipped };
+}
+
+/** The proxy a row's browser dials: an ERP account's listed proxy, or the
+ *  homelab port the coordinator's last round saw that worker on. */
+export function rowProxy(r: FleetRow, proxies: readonly FleetProxyHealth[]): FleetProxyHealth | null {
+  if (r.kind === 'free') return null;
+  if (r.source === 'coordinator') return proxies.find(p => p.workers.includes(r.workerId)) ?? null;
+  const slot = r.slot;
+  if (!slot) return null;
+  return proxies.find(p => p.slots.some(s => s.account_no === slot.account_no))
+    ?? (slot.proxy_id !== null ? proxies.find(p => p.proxy_id === slot.proxy_id) ?? null : null);
 }
