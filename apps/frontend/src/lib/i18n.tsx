@@ -4415,6 +4415,22 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fbca_toastResumed: "Sending resumed on {name}",
     fbca_toastDisconnected: "Disconnected {chrome}",
 
+    // ── Purchase orders board ──
+    poViewLayout: "Layout",
+    poViewList: "List",
+    poViewBoard: "Board",
+    poBoardHint: "Drag a PO onto the next stage to start that step. Other moves are made on the PO page.",
+    poBoardMovedTo: "{id} moved to {stage}",
+    poBoardAlreadyMoved: "{id} had already moved to {stage}; the board is updated.",
+    poBoardInStage: "Days in this stage",
+    poBoardArchived: "Archived",
+    poBoardDoneFolded: "Turn on Show Done to see these. You can still drop a Ready to Pay PO here.",
+    poBoardNoSupplier: "No client yet",
+    poBoardLines: "{n} products",
+    poBoardLinesOne: "1 product",
+    poBoardActions: "{n} open actions",
+    poBoardActionsOne: "1 open action",
+
     // ── Actions ──
     nav_actions: "Actions",
     actTitle: "Actions",

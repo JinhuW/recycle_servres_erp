@@ -94,3 +94,19 @@ a.act-link:hover { background: var(--accent-soft); }
 @media (max-width: 1100px) {
   .act-board { grid-template-columns: repeat(4, 240px); }
 }
+
+/* Purchase orders as a board (pages/desktop/order/PoBoard.tsx). */
+.po-board-hint { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 12px; color: var(--fg-subtle); }
+.po-board .act-col { min-height: 320px; }
+.act-col.po-col-closed { opacity: .45; }
+.po-card { cursor: pointer; }
+.po-card-id { font-weight: 600; font-variant-numeric: tabular-nums; color: inherit; text-decoration: none; }
+.po-card-id:hover { color: var(--accent-strong); }
+.po-card .act-card-title { font-weight: 500; color: var(--fg-muted); }
+.po-card-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.po-card-meta span:first-child { color: var(--fg); font-weight: 600; }
+.po-card-track { display: inline-flex; align-items: center; gap: 3px; }
+.po-card-actions { margin-left: auto; }
+.po-archived { opacity: .6; }
+.po-board-wrap { padding: 12px 14px 14px; }
+.po-board .act-cards { max-height: calc(100vh - 290px); overflow-y: auto; padding-right: 2px; }

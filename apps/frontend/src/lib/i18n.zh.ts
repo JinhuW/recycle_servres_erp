@@ -5525,6 +5525,22 @@ const zh: Record<string, string> = {
   fbca_toastResumed: "已恢复 {name} 的发送",
   fbca_toastDisconnected: "已断开 {chrome}",
 
+  // ── Purchase orders board ──
+  poViewLayout: "布局",
+  poViewList: "列表",
+  poViewBoard: "看板",
+  poBoardHint: "将采购单拖到下一个阶段即可开始该步骤。其他移动请在采购单页面操作。",
+  poBoardMovedTo: "{id} 已移到{stage}",
+  poBoardAlreadyMoved: "{id} 已被移到{stage}，看板已更新。",
+  poBoardInStage: "在此阶段的天数",
+  poBoardArchived: "已归档",
+  poBoardDoneFolded: "打开“显示已完成”即可查看。仍可将待付款的采购单拖到这里。",
+  poBoardNoSupplier: "尚无客户",
+  poBoardLines: "{n} 个产品",
+  poBoardLinesOne: "1 个产品",
+  poBoardActions: "{n} 个未完成行动",
+  poBoardActionsOne: "1 个未完成行动",
+
   // ── Actions ──
   nav_actions: "行动",
   actTitle: "行动看板",

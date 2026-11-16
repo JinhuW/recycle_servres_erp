@@ -26,6 +26,7 @@ import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { SoldBadge } from '../../components/SoldBadge';
 import { PaymentGapMark } from '../../components/PaymentMismatch';
 import { paidByLabel, paidByLocked } from '../../lib/useCommissionPaidBy';
+import { PoBoard } from './order/PoBoard';
 import { useReviewModeEntry } from './ReviewModeEntry';
 
 // Map a stage tone keyword to a usable CSS variable. Same lookup as the
@@ -170,6 +171,8 @@ export function DesktopOrders({ onToast }: Props) {
   // Column-visibility — server-backed per-user preference. The hook returns
   // the canonical array; we project it to a Set for cheap membership checks.
   const [colsList, setColsList] = usePreference('orders.cols', DEFAULT_ORDERS_COLS);
+  // The table, or the same POs as a board by stage.
+  const [view, setView] = usePreference('orders.view', 'list');
   const visibleCols = useMemo(() => new Set(colsList as ColId[]), [colsList]);
   // The columns this role can pick from. A manager-only id can linger in the
   // stored list after a role preview, so counts go through this list too.
@@ -363,7 +366,12 @@ export function DesktopOrders({ onToast }: Props) {
         <div>
           <h1 className="page-title">{t('purchaseOrders')}</h1>
         </div>
-        <div className="page-actions" />
+        <div className="page-actions">
+          <div className="seg" role="group" aria-label={t('poViewLayout')}>
+            <button className={view === 'list' ? 'active' : ''} aria-pressed={view === 'list'} onClick={() => setView('list')}>{t('poViewList')}</button>
+            <button className={view === 'board' ? 'active' : ''} aria-pressed={view === 'board'} onClick={() => setView('board')}>{t('poViewBoard')}</button>
+          </div>
+        </div>
       </div>
 
       <div className="card orders-card">
@@ -505,7 +513,7 @@ export function DesktopOrders({ onToast }: Props) {
             category/search/columns controls — every filter for this table lives
             in one place. Per-stage revenue rides along in the tooltip; the KPI
             row above already recomputes it for whatever stage is selected. */}
-        {isManager && (
+        {isManager && view === 'list' && (
           <div className="status-rail stacked" role="group" aria-label={t('statusFilters')}>
             <button
               type="button"
@@ -599,6 +607,19 @@ export function DesktopOrders({ onToast }: Props) {
           </select>
         </div>
 
+        {view === 'board' ? (
+          <div className="po-board-wrap">
+            {!loadedOnce ? <TableSkeleton rows={6} cols={5} /> : (
+              <PoBoard
+                orders={soldPicked ? activeVisible.filter(o => o.sold) : activeVisible}
+                withDone={showDone || soldPicked}
+                onMoved={(id, lifecycle) => setOrders(os => os.map(o => (o.id === id
+                  ? { ...o, lifecycle, status: LIFECYCLE_STATUS[lifecycle] ?? o.status, stageSince: new Date().toISOString() }
+                  : o)))}
+              />
+            )}
+          </div>
+        ) : (
         <div className="table-scroll" ref={tableScrollRef}>
           {!loadedOnce ? (
             <TableSkeleton rows={10} cols={9} />
@@ -921,6 +942,7 @@ export function DesktopOrders({ onToast }: Props) {
           </table>
           )}
         </div>
+        )}
       </div>
       {/* Outside the table: the dialog doesn't portal, and a backdrop click
           would otherwise reach the row's own toggle. */}

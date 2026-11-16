@@ -1271,6 +1271,22 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     }
     moveTo(s);
   };
+  // A drop on the PO board opens its step here, where this page's own checks
+  // run: `?step=handoff` from Draft, `?step=done` from Ready to Pay. Read once.
+  // Read without side effects: StrictMode calls an initializer twice.
+  const [boardStep] = useState(() => readHashQuery().get('step'));
+  const boardStepRan = useRef(false);
+  useEffect(() => {
+    if (boardStepRan.current || !boardStep) return;
+    boardStepRan.current = true;
+    const q = readHashQuery();
+    q.delete('step');
+    replaceHashQuery(q);
+    if (boardStep === 'handoff' && savedStatus === 'Draft') void advanceTo('In Transit');
+    else if (boardStep === 'done' && savedStatus === 'Ready to Pay') void advanceTo('Done');
+    // advanceTo reads the page as it first renders; the step runs once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const nextStage = ORDER_STATUSES[currentIdx + 1] ?? null;
   const nextStep = nextStage ? {
     label: t('eoMarkAs', { s: nextStage }),
