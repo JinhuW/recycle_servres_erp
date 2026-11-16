@@ -342,7 +342,13 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
   for (const [i, [first, count]] of aligned.spans.entries()) {
     if (count !== 1) continue;
     const old = stored[tailStart + i]!;
-    const media = mediaOf(t.rows[first]!);
+    const row = t.rows[first]!;
+    // Extensions before 0.5.1 took the sender's avatar for a photo. A bubble
+    // read again with fewer photos keeps only those.
+    if (old.source === 'facebook' && old.images > row.images.length) {
+      await tx`UPDATE fb_chat_messages SET images = ${tx.json(row.images)} WHERE id = ${old.id}`;
+    }
+    const media = mediaOf(row);
     if (old.images > 0 && old.media === 0 && media.length) {
       await tx`UPDATE fb_chat_messages SET media = ${tx.json(media)} WHERE id = ${old.id} AND media = '[]'::jsonb`;
     }
@@ -442,6 +448,8 @@ export async function claimReply(
   tx: Tx, ref: FbChatAccountRef, clientId: string, caps: readonly FbChatCap[] = [],
 ): Promise<FbChatClaimAnswer | null> {
   const acct = await touchAccount(tx, ref, clientId);
+  const photos = caps.includes('media');
+  await tx`UPDATE fb_chat_accounts SET photo_replies = ${photos} WHERE id = ${acct.id} AND photo_replies IS DISTINCT FROM ${photos}`;
   // A claim never reported is not handed out again: the text may be on the
   // page, and a duplicate to a buyer is worse than a reply the owner resends.
   const stale = await tx<{ id: number; thread_id: number }[]>`

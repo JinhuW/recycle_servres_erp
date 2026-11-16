@@ -6,7 +6,7 @@ import sharp from 'sharp';
 import type { SqlLike } from '../db';
 import { getAttachmentBytes, uploadAttachment } from '../r2';
 import type { Env } from '../types';
-import { ImageRejectedError, shrinkImageToFit } from './image-shrink';
+import { ImageRejectedError, MAX_INPUT_PIXELS, shrinkImageToFit } from './image-shrink';
 import { getUploadLimits } from './settings';
 
 // Photos in Facebook chats, kept once per sha256 of the bytes as received.
@@ -50,14 +50,23 @@ export async function storeFbChatMedia(
   const [seen] = await sql<{ id: string }[]>`SELECT id::text AS id FROM fb_chat_media WHERE sha256 = ${sha256}`;
   if (seen) return { id: seen.id, created: false };
 
-  const mime = declaredMime.toLowerCase().split(';')[0]!.trim();
+  let mime = declaredMime.toLowerCase().split(';')[0]!.trim();
+  if (!MIMES.has(mime)) throw new ImageRejectedError('wrong_format');
+  let input = new Uint8Array(bytes);
+  // Facebook serves most chat photos as WebP. The workspace upload settings
+  // may leave WebP out, and Telegram handles it poorly as a photo, so it is
+  // kept as a JPEG.
+  if (mime === 'image/webp') {
+    input = await webpToJpeg(input);
+    mime = 'image/jpeg';
+  }
   // Every stored file answers to the workspace upload settings, which can
   // only narrow what this table takes.
   const limits = await getUploadLimits(sql);
-  if (!MIMES.has(mime) || !limits.allowedMime.has(mime)) throw new ImageRejectedError('wrong_format');
+  if (!limits.allowedMime.has(mime)) throw new ImageRejectedError('wrong_format');
   const maxBytes = Math.min(FB_CHAT_MEDIA_MAX_STORED_BYTES, limits.maxBytes);
   const file = await shrinkImageToFit(
-    new File([new Uint8Array(bytes)], `photo.${mime.slice(6)}`, { type: mime }),
+    new File([input], `photo.${mime.slice(6)}`, { type: mime }),
     maxBytes,
     { strict: true },
   );
@@ -78,6 +87,17 @@ export async function storeFbChatMedia(
   // Another upload of the same bytes won the race; its object is the one kept.
   const [other] = await sql<{ id: string }[]>`SELECT id::text AS id FROM fb_chat_media WHERE sha256 = ${sha256}`;
   return { id: other!.id, created: false };
+}
+
+async function webpToJpeg(bytes: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
+  try {
+    const image = sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' });
+    if ((await image.metadata()).format !== 'webp') throw new ImageRejectedError('wrong_format');
+    const out = await image.rotate().flatten({ background: '#ffffff' }).jpeg({ quality: 88, mozjpeg: true }).toBuffer();
+    return new Uint8Array(out);
+  } catch (e) {
+    throw e instanceof ImageRejectedError ? e : new ImageRejectedError('undecodable');
+  }
 }
 
 /** The stored photo, or null when the id is unknown or the object cannot be read. */

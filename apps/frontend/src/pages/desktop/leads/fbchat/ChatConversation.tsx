@@ -369,6 +369,12 @@ function ChatComposer({ thread, account, pacing, onSend, attach }: ComposerProps
           </span>
         </div>
       )}
+      {account?.photo_replies === false && attach.items.length > 0 && (
+        <div className="fbcc-note" role="status">
+          <Icon name="alert" size={14} />
+          <span>{t('fbcc_photosWait', { name: thread.account_label })}</span>
+        </div>
+      )}
       {status === 'paused' && (
         <div className="fbcc-note" role="status">
           <Icon name="alert" size={14} />

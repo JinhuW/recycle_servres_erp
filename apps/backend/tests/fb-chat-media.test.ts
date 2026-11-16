@@ -114,6 +114,23 @@ describe('Facebook chat photos', () => {
     expect(await getTestDb()`SELECT 1 FROM fb_chat_media`).toHaveLength(1);
   });
 
+  it('keeps a WebP photo as a JPEG, even where the workspace leaves WebP out', async () => {
+    await getTestDb()`
+      INSERT INTO workspace_settings (key, value) VALUES ('upload_allowed_mime', ${getTestDb().json(['image/jpeg', 'image/png'])})
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+    const webp = await sharp({ create: { width: 30, height: 40, channels: 4, background: { r: 9, g: 200, b: 40, alpha: 0.5 } } })
+      .webp().toBuffer();
+    const first = await upload(webp, 'image/webp');
+    expect(first.status).toBe(200);
+    expect((await upload(webp, 'image/webp')).body.mediaId).toBe(first.body.mediaId);
+    const [row] = await getTestDb()<{ mime: string; width: number; height: number; stub_bytes: Buffer }[]>`
+      SELECT mime, width, height, stub_bytes FROM fb_chat_media`;
+    expect([row!.mime, row!.width, row!.height]).toEqual(['image/jpeg', 30, 40]);
+    expect((await sharp(row!.stub_bytes).metadata()).format).toBe('jpeg');
+    // A JPEG called WebP is still refused.
+    expect((await upload(await jpeg(5), 'image/webp')).status).toBe(415);
+  });
+
   it('needs the push credentials to upload', async () => {
     const res = await app.fetch(new Request('http://test/api/fb-chat/push/media', {
       method: 'POST', body: await png(12), headers: { 'content-type': 'image/png' },
@@ -166,6 +183,32 @@ describe('Facebook chat photos', () => {
     await push('sync', sync([{ ...old('a3'), media: [c] }, { direction: 'out', text: 'hello', images: [] }, old('b3'),
       { direction: 'in', text: 'thanks', images: [] }], { full: false }));
     expect((await messages())[1]!.media).toEqual([a]);
+  });
+
+  it('drops a link a bubble no longer shows when read again, as an avatar taken for a photo', async () => {
+    const avatar = 'https://scontent.fbcdn.net/avatar.jpg';
+    await push('sync', sync([
+      { direction: 'in', text: 'look', images: ['https://scontent.fbcdn.net/p.jpg', avatar] },
+      { direction: 'in', text: 'price?', images: [avatar] },
+    ]));
+    await fbChatMediaFetchesSettled();
+    const p = (await upload(await png(40), 'image/png')).body.mediaId;
+    await push('sync', sync([
+      { direction: 'in', text: 'look', images: ['https://scontent.fbcdn.net/p2.jpg'], media: [p] },
+      { direction: 'in', text: 'price?', images: [] },
+    ], { full: false }));
+    expect((await messages()).map((m) => [m.body, m.images.length, m.media])).toEqual([
+      ['look', 1, [p]], ['price?', 0, []],
+    ]);
+  });
+
+  it('records whether the extension can attach photos at each claim', async () => {
+    const claim = (caps?: string[]) => push('outbox/claim', { account: ACCOUNT, ...(caps ? { caps } : {}) });
+    const state = async () => (await getTestDb()<{ p: boolean | null }[]>`SELECT photo_replies AS p FROM fb_chat_accounts`)[0]?.p;
+    await claim(['media']);
+    expect(await state()).toBe(true);
+    await claim();
+    expect(await state()).toBe(false);
   });
 
   it('fetches the photos itself for an extension that sends only links', async () => {
