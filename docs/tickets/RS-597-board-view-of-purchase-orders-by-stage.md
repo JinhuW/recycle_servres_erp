@@ -2,13 +2,13 @@
 id: RS-597
 title: Board view of purchase orders by stage
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-16
 reporter: jinhu
 branch: feat/po-board
-pr:
-version:
+pr: #1227
+version: 1.469.0
 related: [RS-596]
 ---
 
@@ -32,17 +32,17 @@ commission evidence before Done.
 
 ## Acceptance criteria
 
-- [ ] The purchase orders page has a List / Board switch, remembered per user.
-- [ ] Board columns are the five stages; Done shows only with Show Done on;
+- [x] The purchase orders page has a List / Board switch, remembered per user.
+- [x] Board columns are the five stages; Done shows only with Show Done on;
       the list's filters apply to the board.
-- [ ] A card shows PO number, purchaser, supplier, cost, lines, tracking,
+- [x] A card shows PO number, purchaser, supplier, cost, lines, tracking,
       days in stage (Home's tints) and open action count.
-- [ ] Dropping one stage forward: Draft → In Transit opens the hand-off form;
+- [x] Dropping one stage forward: Draft → In Transit opens the hand-off form;
       In Transit → Reviewing advances (with the manager takeover question);
       Reviewing → Ready to Pay opens the box check; Ready to Pay → Done runs
       the commission-evidence step. Purchasers can drag only their own Draft.
-- [ ] Backward and multi-stage drops are refused with a hint to open the PO.
-- [ ] A stale stage or changed manager shows a warning and reloads.
+- [x] Backward and multi-stage drops are refused with a hint to open the PO.
+- [x] A stale stage or changed manager shows a warning and reloads.
 
 ## Out of scope
 

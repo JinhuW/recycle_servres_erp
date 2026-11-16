@@ -2,13 +2,13 @@
 id: RS-596
 title: Actions kanban board with assignees and ERP record links
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-16
 reporter: jinhu
 branch: feat/actions-api
-pr:
-version:
+pr: #1223, #1225, #1228, #1229
+version: 1.466.0, 1.468.0, 1.470.0, 1.471.0
 related: [RS-597]
 ---
 
@@ -47,27 +47,27 @@ Owner decisions taken while planning:
 
 ## Acceptance criteria
 
-- [ ] `action_items` and `action_item_events` tables exist (migration
+- [x] `action_items` and `action_item_events` tables exist (migration
       `0249`); ids are `TK-n`.
-- [ ] `/api/actions` lets any signed-in user create, edit, move, comment on
+- [x] `/api/actions` lets any signed-in user create, edit, move, comment on
       and assign a card; the assignee must be an active user.
-- [ ] Removing a card is soft and allowed to its creator or a manager only.
-- [ ] Moving a card renumbers its column in one transaction; two people
+- [x] Removing a card is soft and allowed to its creator or a manager only.
+- [x] Moving a card renumbers its column in one transaction; two people
       moving cards at the same time never get a server error.
-- [ ] A card links to at most one record of the six types; the board shows
+- [x] A card links to at most one record of the six types; the board shows
       the record's number and live status.
-- [ ] A purchaser sees a linked record's status and a link only where they can
+- [x] A purchaser sees a linked record's status and a link only where they can
       open that record today (own POs, own clients); otherwise the number
       only, and a client shows as "Client" with no name.
-- [ ] A card keeps a readable label after its linked record is deleted.
-- [ ] Assigning a card to someone else writes an in-app notification for them.
-- [ ] Desktop Actions page with drag-and-drop between columns (mouse and
+- [x] A card keeps a readable label after its linked record is deleted.
+- [x] Assigning a card to someone else writes an in-app notification for them.
+- [x] Desktop Actions page with drag-and-drop between columns (mouse and
       iPad), a "Move to" control, card drawer with comments, archive view,
       filters All / Mine / person.
-- [ ] Sidebar count of my open cards; "My actions" on desktop and phone Home.
-- [ ] Actions panel on PO, sell order, after-sales case, client, web
+- [x] Sidebar count of my open cards; "My actions" on desktop and phone Home.
+- [x] Actions panel on PO, sell order, after-sales case, client, web
       submission and inventory lot pages; a card can be created there.
-- [ ] Strings in English and Chinese.
+- [x] Strings in English and Chinese.
 
 ## Out of scope
 
