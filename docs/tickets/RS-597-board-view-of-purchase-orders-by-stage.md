@@ -2,11 +2,11 @@
 id: RS-597
 title: Board view of purchase orders by stage
 type: story
-status: backlog
+status: in-progress
 priority: P2
 created: 2026-11-16
 reporter: jinhu
-branch:
+branch: feat/po-board
 pr:
 version:
 related: [RS-596]
@@ -52,3 +52,8 @@ commission evidence before Done.
 ## Notes
 
 - Ships after the RS-596 drag helper (`lib/boardDrag.ts`).
+- The hand-off and Done drops open the PO page with `?step=handoff` /
+  `?step=done` and run the page's own `advanceTo`, rather than copying that
+  page's checks (unsaved edits, $0 lines, commission evidence) onto the board.
+- The Done column is always a drop target; its cards show only with Show Done,
+  as the list prunes them.

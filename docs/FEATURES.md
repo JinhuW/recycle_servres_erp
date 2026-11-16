@@ -139,6 +139,21 @@ the event written when it leaves Draft, not a stage). Sold
 is not a stage but a flag beside one, set once every line has sold
 (v1.246.0).
 
+**The PO list as a board** (v1.469.0, RS-597). A List / Board switch on
+Purchase orders (remembered per user) shows the same POs as cards in one
+column per stage, with the list's category, search, warehouse, payment, Show
+Done and Show Archived filters still applied. Each card shows the PO, its
+client, cost, products, carrier, purchaser, open Actions cards, and how long
+it has sat in its stage, tinted as on Home. Columns run oldest in stage
+first. Dropping a card on the next stage starts the same step the PO page
+uses, so nothing is skipped: Draft → In Transit opens the PO with the
+hand-off form up; In Transit → Reviewing moves it from the board (after the
+take-over question when another manager holds it); Reviewing → Ready to Pay
+opens the box check; Ready to Pay → Done opens the PO with the commission
+evidence step. Done is always there to drop on, though its cards show only
+with Show Done. Back moves and jumps are refused; they stay on the PO page.
+A purchaser can drag only their own Draft.
+
 - **Every product on a PO has a `#` that never changes** (v1.234.0). It is
   given when the product is put on the PO — a new PO numbers its products
   1..n in the order they came, and each one added later takes the PO's next

@@ -64,6 +64,8 @@ export type PrefMap = {
   'fleet.rackFolded': boolean;
   // My leads under Leads ▸ Reddit: a list ranked by urgency, or a board by stage.
   'leads.view': 'list' | 'board';
+  // Purchase orders as the table or as a board by stage.
+  'orders.view': 'list' | 'board';
   // Whose cards the Actions board shows: all, me, none (unassigned) or a user id.
   'actions.assignee': string;
   // Finished or skipped the purchaser walkthrough; it opens by itself until
