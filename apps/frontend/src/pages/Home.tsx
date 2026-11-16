@@ -1,6 +1,7 @@
 import { useRef, type ReactNode } from 'react';
 import { Icon, type IconName } from '../components/Icon';
 import { RouteLink } from '../components/RouteLink';
+import { PhActionsSection } from '../components/PhActions';
 import { PhoneListSkeleton } from '../components/Skeleton';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import { useT } from '../lib/i18n';
@@ -65,6 +66,8 @@ export function Home({ goSubmit, onOpenNotifications, unreadCount }: Props) {
         {!data ? <div style={{ marginTop: 16 }}><PhoneListSkeleton rows={5} /></div>
           : data.role === 'manager' ? <ManagerRows m={data.manager} />
           : <PurchaserRows p={data.purchaser} />}
+
+        <PhActionsSection scope={{ mine: true }} />
 
         <div className="ph-section-h"><span>{t('nav_analysis')}</span></div>
         <LinkRow to="/analysis" icon="analytics"
