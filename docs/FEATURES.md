@@ -1269,6 +1269,38 @@ is not a stage but a flag beside one, set once every line has sold
   any width, and the Notes box stays inside its card at every width (it used
   to overhang at 1400px).
 
+## Actions
+
+**Actions** (`#/actions`, v1.468.0, RS-596) is the team's shared kanban of
+things to do, for both roles. Everyone sees every card and can create one,
+move it, comment on it and assign it to any active employee. Only the card's
+creator or a manager can remove it; removal hides the card and keeps its
+history.
+
+- **Columns** are fixed: To do, In progress, Blocked, Done. A card is dragged
+  between them (with a mouse from anywhere on the card; with a finger or pen
+  by its grip, so an iPad can still scroll the board) or moved with the
+  select on the card or in its drawer. New cards go on top of their column.
+  Done cards stay on the board for 14 days after they are finished, then move
+  to **Archive**.
+- **A card** has a title, details, a priority (a high one gets an amber edge),
+  an optional due date (red once overdue, "Today" on the day), an assignee and
+  comments. Assigning someone else leaves them an in-app notification. The
+  sidebar shows how many open cards are assigned to the viewer.
+- **Linked record.** A card can be about one purchase order, sell order,
+  after-sales case, client, web submission or inventory lot, picked by number
+  or name. The card shows the record's number and live status, and the drawer
+  links to it. What a purchaser sees follows the record's own rules: their
+  own POs and clients show status and a link; anything else shows only its
+  number, and a client shows as "Client" with no name. Only a record the
+  viewer could open can be linked. A card whose record is deleted keeps its
+  number, struck through.
+- **Filters:** everyone, mine, unassigned or one person (remembered per user),
+  and a search over title, number and linked record. The board re-reads every
+  minute and when the tab comes back, without undoing a drag in progress.
+- Card titles and comments are free text on a shared board: anything typed
+  there is visible to every employee, whatever the linked record's access.
+
 ## Clients (the people we buy from)
 
 - **A client link opens that client** (v1.258.7): `/#/clients/<id>` drives

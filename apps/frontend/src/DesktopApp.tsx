@@ -46,6 +46,7 @@ const DesktopAccountingReview = lazy(() => import('./pages/desktop/DesktopAccoun
 const DesktopSettings = lazy(() => import('./pages/desktop/DesktopSettings').then(m => ({ default: m.DesktopSettings })));
 const DesktopTracker = lazy(() => import('./pages/desktop/DesktopTracker').then(m => ({ default: m.DesktopTracker })));
 const DesktopWechat = lazy(() => import('./pages/desktop/DesktopWechat').then(m => ({ default: m.DesktopWechat })));
+const DesktopActions = lazy(() => import('./pages/desktop/DesktopActions').then(m => ({ default: m.DesktopActions })));
 const LeadsReddit = lazy(() => import('./pages/desktop/LeadsReddit').then(m => ({ default: m.LeadsReddit })));
 const FbChatsPage = lazy(() => import('./pages/desktop/leads/fbchat/FbChatsPage').then(m => ({ default: m.FbChatsPage })));
 const DesktopCoordinator = lazy(() => import('./pages/desktop/DesktopCoordinator').then(m => ({ default: m.DesktopCoordinator })));
@@ -299,6 +300,7 @@ export function DesktopApp() {
           <Suspense fallback={<FormSkeleton fields={8} />}>
             {view2 === 'home'       && <DesktopHome />}
             {view2 === 'analysis'   && <DesktopDashboard />}
+            {view2 === 'actions'    && <DesktopActions showToast={showToast} />}
             {view2 === 'submit'     && (
               <DesktopSubmit
                 onDone={(toast) => {
