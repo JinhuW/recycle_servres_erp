@@ -1019,7 +1019,7 @@ inventory.get('/products', async (c) => {
     form_factor: string | null; description: string | null; item_type: string | null;
     part_number: string | null; chip_number: string | null; serial_number: string | null; canon: string; rpm: number | null;
     condition: string; qty: number; unit_cost: number; sell_price: number | null;
-    status: string; health: number | null; created_at: string;
+    status: string; health: number | null; created_at: string; collected_at: string;
     warehouse_id: string | null; warehouse_short: string | null;
     user_name: string; user_initials: string; image_url: string | null;
   };
@@ -1032,6 +1032,7 @@ inventory.get('/products', async (c) => {
            l.condition, l.qty, l.unit_cost::float AS unit_cost,
            l.sell_price::float AS sell_price, l.status, l.health::float AS health,
            l.created_at,
+           COALESCE(ho.created_at, o.created_at) AS collected_at,
            COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id,
            w.short AS warehouse_short,
            u.name AS user_name, u.initials AS user_initials,
@@ -1040,6 +1041,16 @@ inventory.get('/products', async (c) => {
     JOIN orders o ON o.id = l.order_id
     JOIN users  u ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
+    -- When the goods were collected: the PO's latest hand-off. Not the line's
+    -- created_at, which a partial transfer's clone resets. POs from before the
+    -- hand-off checkpoint have no event and fall back to the PO's date.
+    LEFT JOIN LATERAL (
+      SELECT e.created_at
+      FROM order_events e
+      WHERE e.order_id = o.id AND e.kind = 'handoff'
+      ORDER BY e.created_at DESC
+      LIMIT 1
+    ) ho ON TRUE
     -- One representative scan per line (LATERAL + LIMIT 1 keeps the join from
     -- multiplying inventory rows). delivery_url is null for stub-provider scans.
     LEFT JOIN LATERAL (
@@ -1158,6 +1169,7 @@ inventory.get('/products', async (c) => {
     const submitters = new Set<string>();
     let mixed = false;
     let repPn: string | null = null;
+    let collectedAt = head.collected_at;
 
     for (const l of lots) {
       qty += l.qty;
@@ -1170,6 +1182,7 @@ inventory.get('/products', async (c) => {
       if (l.warehouse_short) whs.add(l.warehouse_short);
       if (l.user_name) submitters.add(l.user_name);
       if (repPn === null && l.part_number) repPn = l.part_number;
+      if (new Date(l.collected_at) > new Date(collectedAt)) collectedAt = l.collected_at;
       for (const k of SPEC_KEYS) {
         if (String((l as Record<string, unknown>)[k] ?? '') !== String((head as Record<string, unknown>)[k] ?? '')) mixed = true;
       }
@@ -1193,9 +1206,11 @@ inventory.get('/products', async (c) => {
       sell_price: head.sell_price,
       warehouses: [...whs],
       created_at: head.created_at,
+      collected_at: collectedAt,
       submitters: [...submitters],
       lines: lots.map((l) => ({
         id: l.id, order_id: l.order_id, po_line_no: l.po_line_no, created_at: l.created_at,
+        collected_at: l.collected_at,
         user_name: l.user_name, user_initials: l.user_initials,
         sell_price: l.sell_price, condition: l.condition, health: l.health,
         serial_number: l.serial_number, part_number: l.part_number, short_code: shortCodeOf(l),

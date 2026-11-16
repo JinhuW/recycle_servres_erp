@@ -3286,6 +3286,11 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     iptProduct: 'Product',
     iptLots: 'Lots',
     iptWarehouses: 'Warehouses',
+    // When the PO's goods were handed off (picked up or shipped), not when the
+    // lot was typed in.
+    iptLastCollected: 'Last collected',
+    iptCollected: 'Collected',
+    iptCollectedDaysAgo: '{n} days ago',
     iptSelectAllLots: 'Select all sellable lots in this product',
     iptNoSellableLots: 'No sellable lots',
     iptSelectAllSellable: 'Select all sellable lots',
