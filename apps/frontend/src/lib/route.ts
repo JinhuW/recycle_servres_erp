@@ -364,6 +364,7 @@ export function parseShippingRoute(path: string): ShippingRoute | null {
 export const DESKTOP_VIEW_TO_PATH = {
   home:       '/',
   analysis:   '/analysis',
+  actions:    '/actions',
   stock:      '/analysis/inventory',
   submit:     '/submit',
   history:    '/purchase-orders',
@@ -401,6 +402,7 @@ export function knownDesktopView(path: string): DesktopViewId | null {
   if (path === '/analysis' || path === '/dashboard') return 'analysis';
   if (path === '/analysis/inventory' || path === '/inventory/analysis') return 'stock';
   if (path === '/submit') return 'submit';
+  if (path === ACTIONS_PATH || path === ACTIONS_ARCHIVE_PATH || matchActionCard(path)) return 'actions';
   if (path === '/purchase-orders' || matchPurchaseOrder(path) || matchPoCheck(path)) return 'history';
   if (parseShippingRoute(path)) return 'shipping';
   if (path === '/clients' || match('/clients/:id', path)) return 'clients';
@@ -423,6 +425,15 @@ export function knownDesktopView(path: string): DesktopViewId | null {
   if (matchFbChatRoute(path)) return 'leadsFacebook';
   if (path === '/settings') return 'settings';
   return null;
+}
+
+// The Actions board, its archive, and one card open over the board.
+export const ACTIONS_PATH = '/actions';
+export const ACTIONS_ARCHIVE_PATH = '/actions/archive';
+export const actionPath = (id: string) => `/actions/${encodeURIComponent(id)}`;
+export function matchActionCard(path: string): string | null {
+  const m = /^\/actions\/(TK-\d+)$/.exec(path);
+  return m ? m[1] : null;
 }
 
 // An after-sales case's page. `new` is the create form; `?order=SO-…`
