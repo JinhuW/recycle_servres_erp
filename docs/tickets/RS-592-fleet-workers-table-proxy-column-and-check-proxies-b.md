@@ -2,12 +2,12 @@
 id: RS-592
 title: Fleet workers table: Proxy column and Check proxies button
 type: story
-status: in-review
+status: done
 priority: P3
 created: 2026-11-15
 reporter: jinhu
 branch: feat/fleet-worker-proxy-column
-pr:
+pr: "#1213"
 version: 1.463.0
 related: []
 ---
