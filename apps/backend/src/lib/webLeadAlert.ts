@@ -4,8 +4,9 @@ import type { QuotePayload, SellLotPayload } from '../routes/publicForms';
 
 // Tells the team on Telegram about a new website submission. The alert rides
 // the Facebook chat hub's queue: an fb_chat_events row with no account or
-// thread, which the hub posts to its group's General topic (as a bot or as the
-// hub's account, whichever it runs as). Written in the submission's own
+// thread, which the hub posts as its bot or service account, whichever it runs
+// as: to WEB_LEAD_TELEGRAM_CHAT_ID, a group that bot or account is in, or else
+// to its own group's General topic. Written in the submission's own
 // transaction, so a rolled-back row is never announced, and a Telegram outage
 // only delays the alert. With the hub unconfigured the row waits unposted.
 

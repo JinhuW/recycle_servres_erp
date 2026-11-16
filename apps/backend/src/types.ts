@@ -27,6 +27,9 @@ export type Env = {
   FB_CHAT_TELEGRAM_SESSION?: string;
   // Comma-separated Telegram user ids allowed to reply. Unset: any member.
   FB_CHAT_TELEGRAM_USER_IDS?: string;
+  // Where the hub posts website lead alerts (lib/webLeadAlert.ts), as the same
+  // bot or account, which must be a member. Unset: the hub group's General topic.
+  WEB_LEAD_TELEGRAM_CHAT_ID?: string;
   // Reddit tracker admin proxy (/api/tracker/*). Both unset → proxy answers
   // 501 so the UI can show a "not configured" state instead of erroring.
   TRACKER_API_URL?: string;

@@ -85,6 +85,7 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
     FB_CHAT_TELEGRAM_BOT_TOKEN: src.FB_CHAT_TELEGRAM_BOT_TOKEN, // pragma: allowlist secret
     FB_CHAT_TELEGRAM_CHAT_ID: src.FB_CHAT_TELEGRAM_CHAT_ID,
     FB_CHAT_TELEGRAM_USER_IDS: src.FB_CHAT_TELEGRAM_USER_IDS,
+    WEB_LEAD_TELEGRAM_CHAT_ID: src.WEB_LEAD_TELEGRAM_CHAT_ID,
     FB_CHAT_TELEGRAM_API_ID: src.FB_CHAT_TELEGRAM_API_ID,
     FB_CHAT_TELEGRAM_API_HASH: src.FB_CHAT_TELEGRAM_API_HASH, // pragma: allowlist secret
     FB_CHAT_TELEGRAM_SESSION: src.FB_CHAT_TELEGRAM_SESSION, // pragma: allowlist secret
