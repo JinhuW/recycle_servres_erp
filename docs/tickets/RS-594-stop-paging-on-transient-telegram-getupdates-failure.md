@@ -2,13 +2,13 @@
 id: RS-594
 title: Stop paging on transient Telegram getUpdates failures in the Reddit tracker
 type: bug
-status: in-progress
+status: done
 priority: P3
 created: 2026-11-15
 reporter: jinhu
 branch: session/20261115-201543
-pr:
-version:
+pr: "#1220"
+version: "tracker f2b4bfe4, api deployed 2026-11-16"
 related: []
 ---
 
