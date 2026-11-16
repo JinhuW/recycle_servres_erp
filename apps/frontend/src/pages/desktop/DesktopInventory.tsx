@@ -251,6 +251,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const sortColShown: Record<InventorySortCol, boolean> = {
     product: true, partNumber: isVis('partNumber'), qty: isVis('qty'), lots: true,
     warehouses: isVis('warehouse'), cost: isManager && isVis('unitCost'), sell: isVis('sellPrice'),
+    collected: true,
   };
   const activeSort: SortState = sort.dir && isInventorySortCol(sort.col) && sortColShown[sort.col]
     ? sort : { col: '', dir: null };

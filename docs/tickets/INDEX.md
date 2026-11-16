@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-598](./RS-598-show-each-inventory-product-s-last-collected-date.md) | done | story | P2 | Show each inventory product's last collected date | 1.467.0 |
 | [RS-597](./RS-597-board-view-of-purchase-orders-by-stage.md) | backlog | story | P2 | Board view of purchase orders by stage | — |
 | [RS-596](./RS-596-actions-kanban-board-with-assignees-and-erp-record-l.md) | in-progress | story | P2 | Actions kanban board with assignees and ERP record links | — |
 | [RS-595](./RS-595-chat-bridge-pause-and-alert-when-facebook-warns-it-i.md) | done | story | P2 | Chat bridge: pause and alert when Facebook warns it is limiting an account | 1.465.0 |
