@@ -429,7 +429,8 @@ export type FbChatAccountRow = {
   fb_uid: string;
   label: string;
   ext_version: string | null;
-  restricted: 'login' | 'checkpoint' | null;
+  /** `blocked`: Facebook warned in the page that it is limiting the account (extension 0.6.0+). */
+  restricted: 'login' | 'checkpoint' | 'blocked' | null;
   restricted_at: string | null;
   last_seen_at: string;
   created_at: string;
@@ -466,7 +467,7 @@ export type FbChatAccountsAnswer = {
 /** `PATCH /accounts/:id`. */
 export type FbChatAccountPatch = { label: string };
 
-export const FB_CHAT_ACCOUNT_STATUSES = ['running', 'paused', 'login', 'checkpoint', 'stale'] as const;
+export const FB_CHAT_ACCOUNT_STATUSES = ['running', 'paused', 'login', 'checkpoint', 'blocked', 'stale'] as const;
 export type FbChatAccountStatus = (typeof FB_CHAT_ACCOUNT_STATUSES)[number];
 
 /**

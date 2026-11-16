@@ -358,13 +358,13 @@ function ChatComposer({ thread, account, pacing, onSend, attach }: ComposerProps
 
   return (
     <div className="fbcc-composer">
-      {account && (status === 'login' || status === 'checkpoint' || status === 'stale') && (
+      {account && (status === 'login' || status === 'checkpoint' || status === 'blocked' || status === 'stale') && (
         <div className="fbcc-note neg" role="status">
           <Icon name="alert" size={14} />
           <span>
             <b>{status === 'stale'
               ? t('fbcc_downStale', { name: thread.account_label, when: relTime(account.last_seen_at, locale) })
-              : t(status === 'login' ? 'fbcc_downLogin' : 'fbcc_downCheckpoint', { name: thread.account_label })}</b>
+              : t(status === 'login' ? 'fbcc_downLogin' : status === 'blocked' ? 'fbcc_downBlocked' : 'fbcc_downCheckpoint', { name: thread.account_label })}</b>
             {' '}{t('fbcc_downQueue')}
           </span>
         </div>

@@ -562,12 +562,18 @@ export async function recordEvent(tx: Tx, push: FbChatEventPush, clientId: strin
     ? await tx<{ id: number }[]>`SELECT id::int AS id FROM fb_chat_threads WHERE account_id = ${acct.id} AND fb_thread_id = ${push.fbThreadId}`
     : [];
   if (push.kind === 'restricted') {
-    const what = push.detail?.restriction === 'checkpoint' ? 'checkpoint' : 'login';
+    const said = push.detail?.restriction;
+    const what = said === 'checkpoint' || said === 'blocked' ? said : 'login';
     // The extension repeats this while the page stays up; alert once.
     if (acct.restricted === what) return;
     await tx`UPDATE fb_chat_accounts SET restricted = ${what}, restricted_at = NOW() WHERE id = ${acct.id}`;
+    const until = typeof push.detail?.until === 'string' ? new Date(push.detail.until) : null;
     await addEvent(tx, acct.id, null, 'restricted', push.detail ?? {},
-      `⚠️ ${name}: Facebook is showing a ${what} page. Replies for this account wait until it is cleared in the browser.`);
+      what === 'blocked'
+        ? `⚠️ ${name}: Facebook warned that it is limiting this account (blocked, "going too fast" or a security check). ` +
+          `The bridge stops reading and typing${until && !Number.isNaN(until.getTime()) ? ` until ${until.toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''}. ` +
+          'Answer urgent buyers by hand, and slow down on this account.'
+        : `⚠️ ${name}: Facebook is showing a ${what} page. Replies for this account wait until it is cleared in the browser.`);
     return;
   }
   if (push.kind === 'recovered') {

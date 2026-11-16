@@ -370,6 +370,17 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     expect((await push('events', { account: ACCOUNT, kind: 'bogus' })).status).toBe(400);
   });
 
+  it('tells General when Facebook warns that it is limiting an account, and holds its replies', async () => {
+    await seeded();
+    const event = { account: ACCOUNT, kind: 'restricted', detail: { restriction: 'blocked', url: 'https://www.facebook.com/marketplace/inbox', until: '2026-11-16T08:00:00.000Z' } };
+    await push('events', event);
+    await push('events', event);
+    await tick();
+    expect(texts()).toHaveLength(1);
+    expect(texts()[0]).toMatch(/^⚠️ Denver profile: Facebook warned that it is limiting this account/);
+    expect(texts()[0]).toContain('until 2026-11-16 08:00 UTC');
+  });
+
   it('opens a new topic when the old one was deleted in Telegram', async () => {
     await seeded();
     await push('sync', sync([row('in', 'Is this still available?'), row('in', 'hello?')]));

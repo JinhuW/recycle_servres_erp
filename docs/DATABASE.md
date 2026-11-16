@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-15:** ERP migration `0247`, Reddit tracker migration `0007`,
+**As of 2026-11-15:** ERP migration `0248`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2692,7 +2692,7 @@ One Facebook account an extension has spoken for, created on its first push.
 | `client_id` | `text` |  |  | The service client that last pushed for it, or `device:<id>` for an enrolled extension (0240). This is the account's link to its `fb_chat_devices` row; no FK, because the nightly sync copies accounts from prod and keeps dev's devices. |
 | `ext_version` | `text` |  |  | The extension version that last pushed. |
 | `photo_replies` | `boolean` |  |  | Whether its extension's last claim said it can attach photos (`caps` has `media`); null before the first claim (0247). |
-| `restricted` | `text` |  |  | login or checkpoint while the extension sees such a page; NULL when healthy. |
+| `restricted` | `text` |  |  | login or checkpoint while the extension sees such a page; blocked while it pauses after Facebook warned that it is limiting the account (0248); NULL when healthy. |
 | `restricted_at` | `timestamptz` |  |  |  |
 | `last_seen_at` | `timestamptz` | ✓ | `now()` | The last push of any kind. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
@@ -2703,7 +2703,7 @@ One Facebook account an extension has spoken for, created on its first push.
 
 - **Primary key:** `id`
 - **Unique:** `fb_uid`; `no`
-- **Checks:** `restricted IN ('login', 'checkpoint')`
+- **Checks:** `restricted IN ('login', 'checkpoint', 'blocked')`
 - **Triggers:** `fb_chat_accounts_number` (before insert when `no` is null → `fb_chat_accounts_number()`): an insert that names no number takes the next one, so the release before 0241, whose upsert does not know the column, keeps working beside this one and after a rollback.
 #### `fb_chat_buyers`
 

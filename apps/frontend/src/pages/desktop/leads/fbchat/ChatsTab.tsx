@@ -66,7 +66,7 @@ export function ChatsTab({ threadId }: FbChatTabProps & { threadId: number | nul
         </button>
         {rows.map(a => {
           const status = fbChatStatusOf(a);
-          const down = status === 'login' || status === 'checkpoint';
+          const down = status === 'login' || status === 'checkpoint' || status === 'blocked';
           const name = fbChatAccountName(a);
           return (
             <button

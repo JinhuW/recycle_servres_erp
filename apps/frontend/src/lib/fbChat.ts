@@ -115,6 +115,7 @@ export const FB_CHAT_STATUS_KEY: Record<FbChatAccountStatus, string> = {
   paused: 'fbc_statusPaused',
   login: 'fbc_statusLogin',
   checkpoint: 'fbc_statusCheckpoint',
+  blocked: 'fbc_statusBlocked',
   stale: 'fbc_statusStale',
 };
 
