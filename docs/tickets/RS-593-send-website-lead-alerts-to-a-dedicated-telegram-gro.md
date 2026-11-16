@@ -2,13 +2,13 @@
 id: RS-593
 title: Send website lead alerts to a dedicated Telegram group
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-15
 reporter: jinhu
 branch: session/20261115-184220-lead-group
-pr:
-version:
+pr: "#1217"
+version: 1.464.0
 related: [RS-591]
 ---
 
@@ -48,3 +48,4 @@ hub's own connection has to post to the new group.
 
 - The account resolves the lead chat from its dialog list, re-reading it once
   if the group was joined after the session connected.
+- Dev set `WEB_LEAD_TELEGRAM_CHAT_ID=-4449838820` on 2026-11-16; test quote WS-1008 was posted to the new group within a second, and the owner confirmed receiving it.

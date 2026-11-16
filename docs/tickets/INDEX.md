@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-593](./RS-593-send-website-lead-alerts-to-a-dedicated-telegram-gro.md) | done | story | P2 | Send website lead alerts to a dedicated Telegram group | — |
 | [RS-592](./RS-592-fleet-workers-table-proxy-column-and-check-proxies-b.md) | done | story | P3 | Fleet workers table: Proxy column and Check proxies button | 1.463.0 |
 | [RS-591](./RS-591-send-a-telegram-lead-alert-for-each-website-submissi.md) | done | story | P2 | Send a Telegram lead alert for each website submission | 1.462.0 |
 | [RS-590](./RS-590-facebook-chats-send-photos-to-facebook-from-telegram.md) | done | story | P2 | Facebook chats: send photos to Facebook from Telegram and the ERP | 1.461.0 |
