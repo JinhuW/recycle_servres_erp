@@ -19,6 +19,11 @@ description: Build/launch/drive recipe for verifying recycle-erp changes end-to-
   `package.json`. Otherwise another session's backend is answering and yours
   died with `EADDRINUSE` (see its log). See
   [the debug note](../../../docs/debug-notes/2026-10-22-local-verify-reached-another-sessions-dev-server.md).
+- `pnpm dev` runs no migrations: run `pnpm db:migrate` after adding one. A
+  service client's `client_credentials` token needs
+  `OAUTH_SIGNING_KEY_CURRENT` on the backend, and Claude in Chrome isn't on
+  this Mac, so open vite at its LAN address, not `localhost`
+  ([debug note](../../../docs/debug-notes/2026-11-16-local-verify-of-a-service-push.md)).
 - The dev DB is the local docker Postgres from `docker-compose.override.yml`
   (`recycle-erp-testdb`) — safe to create draft POs; DELETE them afterwards
   (`DELETE /api/orders/<id>` works on drafts).
