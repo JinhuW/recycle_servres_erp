@@ -13,7 +13,7 @@ the era before the checks existed and are richer than the generated bullets.
 ## [1.465.0] - 2026-11-15
 
 The chat bridge now tells General when Facebook warns that it is limiting an
-account (RS-594). From extension 0.6.0, a "temporarily blocked", "going too
+account (RS-595). From extension 0.6.0, a "temporarily blocked", "going too
 fast" or security-check warning on the Facebook page pauses that account's
 bridge for a set number of hours (12 by default, **Pause after a warning** in
 the bridge settings). The hub posts one alert with the time the pause ends,

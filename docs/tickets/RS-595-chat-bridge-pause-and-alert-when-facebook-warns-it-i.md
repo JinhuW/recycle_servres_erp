@@ -1,14 +1,14 @@
 ---
-id: RS-594
+id: RS-595
 title: Chat bridge: pause and alert when Facebook warns it is limiting an account
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-15
 reporter: jinhu
 branch: session/20261115-200524
-pr:
-version:
+pr: 1218
+version: 1.465.0
 related: []
 ---
 

@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-595](./RS-595-chat-bridge-pause-and-alert-when-facebook-warns-it-i.md) | done | story | P2 | Chat bridge: pause and alert when Facebook warns it is limiting an account | 1.465.0 |
 | [RS-594](./RS-594-stop-paging-on-transient-telegram-getupdates-failure.md) | in-progress | bug | P3 | Stop paging on transient Telegram getUpdates failures in the Reddit tracker | — |
 | [RS-593](./RS-593-send-website-lead-alerts-to-a-dedicated-telegram-gro.md) | done | story | P2 | Send website lead alerts to a dedicated Telegram group | 1.464.0 |
 | [RS-592](./RS-592-fleet-workers-table-proxy-column-and-check-proxies-b.md) | done | story | P3 | Fleet workers table: Proxy column and Check proxies button | 1.463.0 |
