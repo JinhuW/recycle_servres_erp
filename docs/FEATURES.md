@@ -1320,6 +1320,10 @@ history.
   client, on the board), and starts a new card already linked to the record.
 - **Home** has a **My actions** card for both roles: the viewer's open cards,
   overdue and soonest due first (v1.470.0).
+- **On the phone** (v1.471.0) Home lists My actions and a PO has an Actions
+  fold. A card opens in a sheet to change its column or assignee and to read
+  or add comments; a linked PO opens from it. New action adds a card (from
+  Home, assigned to the viewer; from a PO, linked to it). No board or dragging.
 - Card titles and comments are free text on a shared board: anything typed
   there is visible to every employee, whatever the linked record's access.
 

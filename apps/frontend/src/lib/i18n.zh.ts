@@ -5542,6 +5542,7 @@ const zh: Record<string, string> = {
   poBoardActionsOne: "1 个未完成行动",
 
   // ── Actions ──
+  phActMore: "还有 {n} 个在看板上",
   eoTabActions: "行动",
   actPanelTitle: "行动",
   actPanelOpen: "{n} 个未完成",

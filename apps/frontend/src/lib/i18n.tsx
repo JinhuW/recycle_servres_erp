@@ -4432,6 +4432,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     poBoardActionsOne: "1 open action",
 
     // ── Actions ──
+    phActMore: "and {n} more on the board",
     eoTabActions: "Actions",
     actPanelTitle: "Actions",
     actPanelOpen: "{n} open",
