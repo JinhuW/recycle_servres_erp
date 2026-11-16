@@ -27,8 +27,8 @@ import { agoLabel, Clock, EmptyRow, Legend, UnavailableCard, useFleetMirror, use
 // can be both up and exhausted; the legend filters by either.
 const STATES = ['up', 'degraded', 'down', 'unchecked', 'exhausted'] as const;
 type Bucket = (typeof STATES)[number];
-const STATE_CHIP: Record<FleetProxyHealthState, string> = { up: 'chip pos', degraded: 'chip warn', down: 'chip neg', unchecked: 'chip muted' };
-const STATE_KEY: Record<Bucket | 'all', string> = {
+export const STATE_CHIP: Record<FleetProxyHealthState, string> = { up: 'chip pos', degraded: 'chip warn', down: 'chip neg', unchecked: 'chip muted' };
+export const STATE_KEY: Record<Bucket | 'all', string> = {
   all: 'fleetSegAll', up: 'fleetProxyUp', degraded: 'fleetProxyDegraded', down: 'fleetProxyDown', unchecked: 'fleetProxyUnchecked', exhausted: 'fbcProxyExhausted',
 };
 const STATE_DOT: Record<Bucket | 'all', string> = {

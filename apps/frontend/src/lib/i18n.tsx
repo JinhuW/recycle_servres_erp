@@ -5401,6 +5401,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fleetPacingBudget: "{used} of {budget} min today",
     fleetUaNative: "Chromium’s own",
     fleetColEngine: "Engine",
+    fleetCheckProxies: "Check proxies",
+    fleetCheckProxiesHint: "Probe every proxy now. Takes a few seconds and logs nobody in.",
     fleetEngine_stock: "Stock",
     fleetEngine_cloak: "CloakBrowser",
     fleetCloakSeed: "seed {seed} · {gpu}",

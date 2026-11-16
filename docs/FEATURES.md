@@ -3982,7 +3982,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     **Release parked (N)** whenever such rows exist: a confirmation lists each
     account, worker and state, counts the parked rows it leaves alone, and
     warns that every account added to the fleet afterwards starts a worker (a
-    login); confirming retires them one by one through the same endpoint. A
+    login); confirming retires them one by one through the same endpoint.
+    Since v1.463.0 (RS-592) the table has a **Proxy** column (the proxy an ERP
+    worker's account is on, or the homelab port a coordinator worker dials:
+    its label, its health chip, and the last check's latency and exit IP or
+    error) and the toolbar a **Check proxies** button that runs the Proxies
+    tab's full check round and refreshes the table; neither logs anyone in. A
     worker that has stopped and whose account no longer has a slot (retired or
     removed from the fleet) is its own kind, **Free**, grey, waiting for an
     account added on the Account pool tab; Free comes before
