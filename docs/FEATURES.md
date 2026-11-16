@@ -1313,6 +1313,13 @@ history.
 - **Filters:** everyone, mine, unassigned or one person (remembered per user),
   and a search over title, number and linked record. The board re-reads every
   minute and when the tab comes back, without undoing a drag in progress.
+- **On the records themselves** (v1.470.0). A purchase order has an
+  **Actions** tab, counting its open cards; a sell order, an after-sales case,
+  a website lead, a client and an inventory lot each have an Actions panel.
+  The panel lists the record's cards (open first), opens one in place (from a
+  client, on the board), and starts a new card already linked to the record.
+- **Home** has a **My actions** card for both roles: the viewer's open cards,
+  overdue and soonest due first (v1.470.0).
 - Card titles and comments are free text on a shared board: anything typed
   there is visible to every employee, whatever the linked record's access.
 

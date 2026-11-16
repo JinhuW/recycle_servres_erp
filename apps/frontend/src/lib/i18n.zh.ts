@@ -5542,6 +5542,13 @@ const zh: Record<string, string> = {
   poBoardActionsOne: "1 个未完成行动",
 
   // ── Actions ──
+  eoTabActions: "行动",
+  actPanelTitle: "行动",
+  actPanelOpen: "{n} 个未完成",
+  actPanelEmpty: "暂无相关行动。",
+  homeMyActions: "我的行动",
+  homeMyActionsSub: "{n} 个分配给你的未完成行动",
+  homeNoActions: "没有分配给你的行动。",
   nav_actions: "行动",
   actTitle: "行动看板",
   actLede: "团队共享的待办事项。拖动卡片即可移动，也可以用卡片上的下拉框。",

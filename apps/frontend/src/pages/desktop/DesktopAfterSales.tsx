@@ -20,6 +20,7 @@ import { useManagerOptions } from '../../lib/useManagers';
 import {
   AFTER_SALES_RESOLUTIONS as RESOLUTIONS, AFTER_SALES_STATUSES as STATUSES, CASEABLE_SELL_STATUSES,
 } from '@recycle-erp/shared';
+import { ActionsPanel, useRecordActions } from './actions/ActionsPanel';
 
 const CLOSED = new Set<string>(['Resolved', 'Cancelled']);
 
@@ -217,6 +218,7 @@ const ACTION_LABEL: Record<AfterSalesStatus, string> = {
 
 function CaseDetail({ id, onToast }: { id: string } & Props) {
   const { t, locale } = useT();
+  const recActions = useRecordActions('as', id, { label: id });
   const managers = useManagerOptions();
   const [c, setC] = useState<AfterSalesCase | null>(null);
   const [draft, setDraft] = useState<{
@@ -436,6 +438,9 @@ function CaseDetail({ id, onToast }: { id: string } & Props) {
 
           {/* Refunds paid on the case, from the managers' RMB book. */}
           <AccountingCard scope={{ afterSalesId: c.id }} className="card so-page-card" />
+
+          <ActionsPanel {...recActions.panel} className="so-page-card" />
+          {recActions.overlay}
 
           <div className="card so-page-card">
             <div className="so-section-head"><Icon name="clock" size={14} /> {t('asTimeline')}</div>

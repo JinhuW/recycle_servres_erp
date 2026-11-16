@@ -1,19 +1,20 @@
 import type { ReactNode } from 'react';
 import { useT } from '../../../lib/i18n';
 
-// The PO page's five sections, one fact each: everything about a thing lives
+// The PO page's six sections, one fact each: everything about a thing lives
 // under its tab and nowhere else. Every panel stays mounted (hidden, not
 // unmounted) so an input keeps its DOM node — and its focus — while readiness
 // recomputes around it.
 
-export type TabId = 'delivery' | 'payment' | 'commission' | 'notes' | 'activity';
-export const TAB_IDS: TabId[] = ['delivery', 'payment', 'commission', 'notes', 'activity'];
+export type TabId = 'delivery' | 'payment' | 'commission' | 'notes' | 'actions' | 'activity';
+export const TAB_IDS: TabId[] = ['delivery', 'payment', 'commission', 'notes', 'actions', 'activity'];
 
 const LABEL_KEY: Record<TabId, string> = {
   delivery: 'eoTabDelivery',
   payment: 'eoTabPayment',
   commission: 'eoTabCommission',
   notes: 'eoTabNotes',
+  actions: 'eoTabActions',
   activity: 'eoTabActivity',
 };
 

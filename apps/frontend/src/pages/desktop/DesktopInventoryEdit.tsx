@@ -26,6 +26,7 @@ import {
   HDD_BRANDS, HDD_CAP, HDD_INTERFACE, HDD_FORM, HDD_RPM,
 } from '../../lib/catalog';
 import { FormSkeleton } from '../../components/Skeleton';
+import { ActionsPanel, useRecordActions } from './actions/ActionsPanel';
 
 type DetailRow = {
   id: string;
@@ -119,6 +120,7 @@ const soTone = (s: string) => sellOrderStatuses.find(o => o.id === s)?.tone ?? '
 
 export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   const { t, locale } = useT();
+  const recActions = useRecordActions('lot', itemId, { label: itemId });
   const [item, setItem] = useState<DetailRow | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [tab, setTab] = useState<Tab>('details');
@@ -430,15 +432,17 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
           )}
         </div>
 
-        {/* Right column — summary */}
+        {/* Right column — summary, with the lot's Actions cards above the danger zone */}
         <SummaryColumn
           item={item}
           draft={draft}
           revenue={revenue}
           profit={profit}
           margin={margin}
+          actions={<ActionsPanel {...recActions.panel} />}
         />
       </div>
+      {recActions.overlay}
 
       {dirty && (
         <div className="save-bar">
@@ -1002,13 +1006,14 @@ function summarizeEvent(e: Event, locale = 'en-US'): string {
 
 // ─── Right summary column ────────────────────────────────────────────────────
 function SummaryColumn({
-  item, draft, revenue, profit, margin,
+  item, draft, revenue, profit, margin, actions,
 }: {
   item: DetailRow;
   draft: Draft;
   revenue: number;
   profit: number;
   margin: number;
+  actions: ReactNode;
 }) {
   const { t, locale } = useT();
   const sellable = draft.status === 'Reviewing' || draft.status === 'Done';
@@ -1049,6 +1054,8 @@ function SummaryColumn({
           <SummaryRow label={t('ieSubmittedDate')} value={fmtDate(item.created_at, locale)} />
         </div>
       </div>
+
+      {actions}
 
       <div className="card danger-card">
         <div className="card-head">
