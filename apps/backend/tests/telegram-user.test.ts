@@ -34,6 +34,17 @@ const msg = (id: number, over: Partial<UserMessage> = {}): UserMessage => ({
 });
 
 describe('userAccountCaller', () => {
+  it('posts to another chat the account is in when chat_id names one', async () => {
+    const { client, calls } = fake([]);
+    const call = userAccountCaller(client, '-1001234');
+    await call('sendMessage', { chat_id: '-1009999', text: 'lead' });
+    await call('sendMessage', { chat_id: '-1001234', text: 'group' });
+    expect(calls).toEqual([
+      ['send', ['lead', { topicId: undefined, replyToId: undefined, chatId: '-1009999' }]],
+      ['send', ['group', { topicId: undefined, replyToId: undefined, chatId: undefined }]],
+    ]);
+  });
+
   it('places the cursor on the first read without treating history as replies', async () => {
     const { client } = fake([msg(40), msg(41)]);
     const call = userAccountCaller(client, '-1001234');

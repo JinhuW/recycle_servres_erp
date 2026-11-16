@@ -55,6 +55,8 @@ export type FbChatTelegramConfig = {
   mode: 'bot' | 'user';
   /** Where stored chat photos are read from. Without it none can be read, and photos go as links. */
   env?: Env;
+  /** Where website lead alerts go; unset, the group's General topic. */
+  leadChatId?: string;
 };
 
 const USER_LOCK = 'fb-chat-telegram-session';
@@ -86,6 +88,8 @@ export function fbChatUserSession(env: Env): UserSessionConfig | null {
   return { apiId, apiHash, session, chatId };
 }
 
+const leadChatOf = (env: Env) => env.WEB_LEAD_TELEGRAM_CHAT_ID?.trim() || undefined;
+
 const userIdsOf = (env: Env) =>
   new Set((env.FB_CHAT_TELEGRAM_USER_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean));
 
@@ -98,7 +102,7 @@ export function fbChatTelegramConfig(env: Env): FbChatTelegramConfig | null {
   const chatId = env.FB_CHAT_TELEGRAM_CHAT_ID?.trim();
   const token = env.FB_CHAT_TELEGRAM_BOT_TOKEN?.trim();
   if (!chatId || !(token || testCall)) return null;
-  return { call: testCall ?? telegramCaller(token!), chatId, userIds: userIdsOf(env), mode: 'bot', env };
+  return { call: testCall ?? telegramCaller(token!), chatId, userIds: userIdsOf(env), mode: 'bot', env, leadChatId: leadChatOf(env) };
 }
 
 export function fbChatTelegramConfigured(env: Env): boolean {
@@ -335,15 +339,36 @@ async function handleUnit(sql: postgres.Sql, cfg: FbChatTelegramConfig, unit: Up
   return rows.length;
 }
 
+// A lead chat the hub can't post to (not a member, wrong id) is retried this
+// often, and meanwhile holds up no other alert.
+const LEAD_RETRY_MS = 60_000;
+let leadRetryAt = 0;
+
 async function postAlerts(sql: postgres.Sql, cfg: FbChatTelegramConfig, budget: Budget): Promise<void> {
-  const alerts = await sql<{ id: number; alert: string }[]>`
-    SELECT id::int AS id, alert FROM fb_chat_events
-     WHERE alert IS NOT NULL AND alerted_at IS NULL ORDER BY id LIMIT 5`;
+  const leadsDue = !cfg.leadChatId || Date.now() >= leadRetryAt;
+  const alerts = await sql<{ id: number; kind: string; alert: string }[]>`
+    SELECT id::int AS id, kind, alert FROM fb_chat_events
+     WHERE alert IS NOT NULL AND alerted_at IS NULL AND (kind <> 'web_lead' OR ${leadsDue})
+     ORDER BY id LIMIT 5`;
   for (const a of alerts) {
     if (!budget.take()) return;
-    await cfg.call('sendMessage', { chat_id: cfg.chatId, text: a.alert });
+    const leadChat = a.kind === 'web_lead' ? cfg.leadChatId : undefined;
+    if (leadChat && Date.now() < leadRetryAt) continue;
+    try {
+      await cfg.call('sendMessage', { chat_id: leadChat ?? cfg.chatId, text: a.alert });
+    } catch (e) {
+      if (!leadChat || (e instanceof TelegramError && e.retryAfterSec)) throw e;
+      leadRetryAt = Date.now() + LEAD_RETRY_MS;
+      flog.warn('web lead alert: could not post to WEB_LEAD_TELEGRAM_CHAT_ID', { error: e instanceof Error ? e.message : String(e) });
+      continue;
+    }
     await sql`UPDATE fb_chat_events SET alerted_at = NOW() WHERE id = ${a.id}`;
   }
+}
+
+/** Tests: forget a lead chat failure. */
+export function resetLeadRetryForTests(): void {
+  leadRetryAt = 0;
 }
 
 type Unmirrored = {
@@ -868,6 +893,7 @@ function startUserSessionLoop(env: Env, session: UserSessionConfig): { stop: () 
       const { client, disconnect } = await connectUserClient(session);
       const cfg: FbChatTelegramConfig = {
         call: userAccountCaller(client, session.chatId), chatId: session.chatId, userIds: userIdsOf(env), mode: 'user', env,
+        leadChatId: leadChatOf(env),
       };
       held = { ...runLoop(sql, cfg), disconnect };
       failures = 0;

@@ -4461,8 +4461,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   until v1.436.0, whose old links still open). The ram4cash.com sell form (`POST /api/public/intake`) and the
   recycleservers.com quote form (`POST /api/public/quote`) each store a
   `WS-nnnn` row and notify managers, in the app and, since v1.462.0, with a
-  lead alert in the Facebook chat hub's Telegram group (General topic: form,
-  reference, contact, lines or hardware, notes); nothing anonymous touches orders. The page
+  lead alert on Telegram (form, reference, contact, lines or hardware, notes),
+  posted by the Facebook chat hub's account to the group named by
+  `WEB_LEAD_TELEGRAM_CHAT_ID` (v1.464.0), or else to the hub group's General topic; nothing anonymous touches orders. The page
   lists them by status (new / contacted / converted / archived / spam) with
   counts, a site filter and search; a submission opens with its details, line
   photos, a status + staff-note triage panel and its email conversation. **Create

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { TelegramCall } from '../src/lib/telegramBot';
 import { formatWebLead } from '../src/lib/webLeadAlert';
-import { fbChatTelegramConfig, runFbChatTelegramTick, setFbChatTelegramForTests } from '../src/services/fbChatTelegram';
+import { TelegramError } from '../src/lib/telegramBot';
+import { fbChatTelegramConfig, resetLeadRetryForTests, runFbChatTelegramTick, setFbChatTelegramForTests } from '../src/services/fbChatTelegram';
 import { api, testEnv } from './helpers/app';
 import { getTestDb, resetDb } from './helpers/db';
 
@@ -29,17 +30,21 @@ type Call = { method: string; params: Record<string, unknown> };
 
 describe('website lead alerts on Telegram', () => {
   let calls: Call[];
+  let refuse: string | null;
   const telegram: TelegramCall = async <T>(method: string, params: Record<string, unknown>) => {
+    if (refuse && params.chat_id === refuse) throw new TelegramError('CHAT_WRITE_FORBIDDEN', 403, null);
     calls.push({ method, params });
     return (method === 'getUpdates' ? [] : { message_id: calls.length }) as T;
   };
   const env = { ...testEnv, FB_CHAT_TELEGRAM_CHAT_ID: CHAT } as typeof testEnv;
-  const tick = () => runFbChatTelegramTick(getTestDb(), fbChatTelegramConfig(env)!);
+  const tick = (over: Partial<typeof env> = {}) => runFbChatTelegramTick(getTestDb(), fbChatTelegramConfig({ ...env, ...over })!);
   const sentTexts = () => calls.filter((c) => c.method === 'sendMessage').map((c) => String(c.params.text));
 
   beforeEach(async () => {
     await resetDb();
     calls = [];
+    refuse = null;
+    resetLeadRetryForTests();
     setFbChatTelegramForTests(telegram);
   });
   afterEach(() => setFbChatTelegramForTests(null));
@@ -73,6 +78,34 @@ describe('website lead alerts on Telegram', () => {
     expect(text).toContain('Phone: (303) 555-0100');
     expect(text).toContain('Hardware: Servers, Networking');
     expect(text).toContain('Notes: Two racks of R740s');
+  });
+
+  it('posts to the dedicated lead chat when one is set, and account alerts stay in the hub group', async () => {
+    const LEADS = '-1005550001';
+    const r = await post<{ ref: string }>('quote', quote);
+    await getTestDb()`INSERT INTO fb_chat_events (kind, alert) VALUES ('restricted', 'account alert')`;
+    await tick({ WEB_LEAD_TELEGRAM_CHAT_ID: LEADS });
+    const sends = calls.filter((c) => c.method === 'sendMessage');
+    expect(sends.map((c) => [c.params.chat_id, String(c.params.text).split('\n')[0]])).toEqual([
+      [LEADS, `🟢 New quote request ${r.body.ref} · recycleservers.com`],
+      [CHAT, 'account alert'],
+    ]);
+  });
+
+  it('keeps a lead the lead chat refused, without holding up other alerts', async () => {
+    const LEADS = '-1005550002';
+    refuse = LEADS;
+    await post('quote', quote);
+    await getTestDb()`INSERT INTO fb_chat_events (kind, alert) VALUES ('restricted', 'account alert')`;
+    await tick({ WEB_LEAD_TELEGRAM_CHAT_ID: LEADS });
+    expect(sentTexts()).toEqual(['account alert']);
+    const [lead] = await getTestDb()`SELECT alerted_at FROM fb_chat_events WHERE kind = 'web_lead'`;
+    expect(lead.alerted_at).toBeNull();
+
+    refuse = null;
+    resetLeadRetryForTests();
+    await tick({ WEB_LEAD_TELEGRAM_CHAT_ID: LEADS });
+    expect(calls.at(-1)!.params.chat_id).toBe(LEADS);
   });
 
   it('queues nothing for a refused or honeypot submission', async () => {

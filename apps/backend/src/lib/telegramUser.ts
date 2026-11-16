@@ -49,7 +49,8 @@ export type UserMessage = {
 export interface TelegramUserClient {
   /** Messages after `afterId`, oldest first. With `afterId` 0, only the latest. */
   history(afterId: number, limit: number): Promise<UserMessage[]>;
-  send(text: string, opts: { topicId?: number; replyToId?: number }): Promise<number>;
+  /** `chatId` posts to another chat the account is in instead of the group. */
+  send(text: string, opts: { topicId?: number; replyToId?: number; chatId?: string }): Promise<number>;
   sendPhotoUrl(url: string, caption: string | undefined, topicId: number): Promise<number>;
   /** One photo, or an album of up to ten, from their bytes; the caption goes on the first. Answers the message ids. */
   sendPhotos(files: TelegramUpload[], caption: string | undefined, topicId: number): Promise<number[]>;
@@ -118,8 +119,10 @@ export function userAccountCaller(client: TelegramUserClient, chatId: string): T
       }
       case 'sendMessage': {
         const reply = p.reply_parameters as { message_id?: number } | undefined;
-        const id = await client.send(String(p.text), { topicId: num(p.message_thread_id), replyToId: reply?.message_id });
-        posted(id, String(p.text));
+        const elsewhere = p.chat_id !== undefined && String(p.chat_id) !== chatId ? String(p.chat_id) : undefined;
+        const id = await client.send(String(p.text), { topicId: num(p.message_thread_id), replyToId: reply?.message_id, chatId: elsewhere });
+        // Only the group's history is read back, so only its posts are remembered.
+        if (!elsewhere) posted(id, String(p.text));
         return { message_id: id };
       }
       case 'sendPhoto': {
@@ -228,6 +231,20 @@ export async function connectUserClient(cfg: UserSessionConfig): Promise<{ clien
   await tg.getDialogs({ limit: 200 });
   const peer = await tg.getInputEntity(cfg.chatId);
   const channelId = String(cfg.chatId).replace(/^-100/, '');
+  const others = new Map<string, Api.TypeInputPeer>();
+  // A chat joined since connecting is not in the cached dialogs yet.
+  const peerOf = async (chatId: string | undefined): Promise<Api.TypeInputPeer> => {
+    if (!chatId || chatId === cfg.chatId) return peer;
+    let p = others.get(chatId);
+    if (!p) {
+      p = await tg.getInputEntity(chatId).catch(async () => {
+        await tg.getDialogs({ limit: 200 });
+        return tg.getInputEntity(chatId);
+      });
+      others.set(chatId, p);
+    }
+    return p;
+  };
 
   const topicOf = (m: Api.Message): number | null => {
     const r = m.replyTo;
@@ -273,9 +290,9 @@ export async function connectUserClient(cfg: UserSessionConfig): Promise<{ clien
           };
         });
     },
-    async send(text, { topicId, replyToId }) {
+    async send(text, { topicId, replyToId, chatId }) {
       const updates = await tg.invoke(new Api.messages.SendMessage({
-        peer, message: text, noWebpage: true, randomId: helpers.generateRandomLong(), replyTo: replyTo(topicId, replyToId),
+        peer: await peerOf(chatId), message: text, noWebpage: true, randomId: helpers.generateRandomLong(), replyTo: replyTo(topicId, replyToId),
       }));
       return sentId(updates);
     },
