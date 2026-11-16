@@ -87,5 +87,13 @@ first (accepts the optional fields), then memtrade.
   neutral unless urgency, shortage or a price rise comes with it.
 - A line naming two speeds ("64G 5600/6400 10万") splits into two items
   carrying the same figure; units count it once.
-- The last box above is ticked for the code, which is ready and tested;
-  memtrade's live folder is swapped only when the owner says so.
+- memtrade's side went live on 2026-11-16 at the owner's word, after that
+  day's 08:00 report finished: code and prompts copied into
+  `~/Projects/wehat_ai/memtrade` (data and config untouched), its 88 tests
+  run there, and the copy deleted, so there is one memtrade. The previous
+  code is in `~/Projects/wehat_ai/memtrade-code-backup-2026-11-16.tgz`.
+  The next 08:00 run is the first to read moods; earlier days get them from
+  a re-run.
+- The squash commit's subject (25a67c67) says v1.469.0, an earlier number
+  from the renumbering; the version shipped is v1.472.0 (package.json, tag
+  and changelog).
