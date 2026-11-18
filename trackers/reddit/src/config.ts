@@ -5,6 +5,7 @@
 import {hostname} from 'node:os';
 import 'dotenv/config';
 import type {AlertTransport} from './alerts.ts';
+import type {RedditAuth} from './redditOAuth.ts';
 import type {UserCredentials} from './userSender.ts';
 
 export type Role = 'worker' | 'api';
@@ -17,6 +18,8 @@ export interface Config {
   readonly role: Role;
   readonly workerId: string;
   readonly redditUserAgent: string;
+  /** App-only OAuth credentials; null falls back to the (withdrawn) Atom feed. */
+  readonly redditAuth: RedditAuth | null;
   readonly redditMaxRpm: number;
   readonly apiPort: number;
   readonly apiToken: string;
@@ -87,6 +90,13 @@ export function loadConfig(): Config {
     throw new Error(`TELEGRAM_API_ID must be a number, got "${userEnv[0]}"`);
   }
 
+  const redditClientId = process.env['REDDIT_CLIENT_ID'] ?? '';
+  const redditClientSecret = process.env['REDDIT_CLIENT_SECRET'] ?? '';
+  if (Boolean(redditClientId) !== Boolean(redditClientSecret)) {
+    throw new Error('Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET together, or neither.');
+  }
+  const redditAuth = redditClientId ? {clientId: redditClientId, clientSecret: redditClientSecret} : null;
+
   return {
     databaseUrl: required('DATABASE_URL', role),
     alertTransport,
@@ -99,6 +109,7 @@ export function loadConfig(): Config {
     role,
     workerId: process.env['WORKER_ID'] || generateWorkerId(),
     redditUserAgent: process.env['REDDIT_USER_AGENT'] || DEFAULT_USER_AGENT,
+    redditAuth,
     redditMaxRpm,
     apiPort,
     apiToken: role === 'api' ? required('API_TOKEN', role) : (process.env['API_TOKEN'] ?? ''),

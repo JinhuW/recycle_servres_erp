@@ -14,6 +14,7 @@ import type {Sql} from '../db.ts';
 import type {Logger} from '../logger.ts';
 import type {RedditPacer} from '../pacing.ts';
 import {fetchComments, type RedditComment} from '../reddit.ts';
+import type {RedditAuth} from '../redditOAuth.ts';
 
 export const TRACER_LEASE = 'comment_tracer';
 const LEASE_TTL_SECONDS = 600;
@@ -51,6 +52,8 @@ export interface TraceDeps {
   sql: Sql;
   workerId: string;
   userAgent: string;
+  /** OAuth credentials; absent means the anonymous comment feed. */
+  auth?: RedditAuth | null;
   pacer: RedditPacer;
   logger: Logger;
   now?: () => number;
@@ -84,7 +87,7 @@ export class Tracer {
     if (!post) return false;
 
     await pacer.acquire();
-    const result = await fetchComments(post.url, this.deps.userAgent);
+    const result = await fetchComments(post.url, this.deps.userAgent, this.deps.auth ?? null);
 
     switch (result.kind) {
       case 'rate_limited':

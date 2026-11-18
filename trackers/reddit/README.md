@@ -226,6 +226,7 @@ through the API — no redeploy, and changes reach every worker within 60 s.
 | `API_PORT` / `API_TOKEN` | api role | `8080` / — |
 | `WORKER_ID` | no | `hostname-pid-random` |
 | `REDDIT_USER_AGENT` | no | `recycle-servers-tracker/1.0 (contact: …)` |
+| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | yes in practice, both or neither | — (falls back to the Atom feed, which Reddit withdrew in Nov 2026; see `docs/debug-notes/reddit-new-rss-404.md`) |
 | `REDDIT_MAX_RPM` | no | `1` |
 | `COMMENT_TRACER` | no | `on` (`off` keeps this worker from taking the PM tracer lease) |
 | `LOG_LEVEL` | no | `info` |

@@ -248,6 +248,7 @@ async function runWorker(): Promise<void> {
         sql,
         workerId: config.workerId,
         userAgent: config.redditUserAgent,
+        auth: config.redditAuth,
         pacer,
         settings,
         logger: logger.child('poll'),
@@ -284,6 +285,7 @@ async function runWorker(): Promise<void> {
       sql,
       workerId: config.workerId,
       userAgent: config.redditUserAgent,
+      auth: config.redditAuth,
       pacer,
       logger: logger.child('trace'),
     });

@@ -5,6 +5,12 @@
 // multireddit path (r/a+b+c/new.rss) returns up to 100 entries spanning every
 // watched subreddit — that is why the poll loop claims subreddits in batches.
 // See docs/debug-notes/reddit-anonymous-json-blocked.md.
+//
+// Reddit withdrew logged-out RSS in November 2026, so with OAuth credentials
+// configured both fetchers go through redditOAuth.ts instead. The Atom path
+// stays as the no-credentials fallback. See docs/debug-notes/reddit-new-rss-404.md.
+
+import {fetchCommentsOAuth, fetchNewPostsOAuth, type RedditAuth} from './redditOAuth.ts';
 
 export interface RedditPost {
   redditId: string;
@@ -194,8 +200,10 @@ async function fetchFeed(url: string, userAgent: string): Promise<FeedResult> {
 export async function fetchNewPosts(
   subreddits: string[],
   userAgent: string,
+  auth: RedditAuth | null = null,
 ): Promise<FetchResult> {
   if (subreddits.length === 0) return {kind: 'ok', posts: [], rateLimit: {}};
+  if (auth) return fetchNewPostsOAuth(subreddits, userAgent, auth);
   const result = await fetchFeed(feedUrl(subreddits), userAgent);
   switch (result.kind) {
     case 'ok':
@@ -246,7 +254,12 @@ export function parseComments(xml: string): RedditComment[] {
 }
 
 /** Fetches a post's comments. Never throws, like fetchNewPosts. */
-export async function fetchComments(postUrl: string, userAgent: string): Promise<CommentsResult> {
+export async function fetchComments(
+  postUrl: string,
+  userAgent: string,
+  auth: RedditAuth | null = null,
+): Promise<CommentsResult> {
+  if (auth) return fetchCommentsOAuth(postUrl, userAgent, auth);
   const result = await fetchFeed(commentsUrl(postUrl), userAgent);
   if (result.kind !== 'ok') return result;
   return {kind: 'ok', comments: parseComments(result.body), rateLimit: result.rateLimit};

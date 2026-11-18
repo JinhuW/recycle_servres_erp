@@ -16,12 +16,15 @@ import type {Sql} from '../db.ts';
 import type {Logger} from '../logger.ts';
 import type {RedditPacer} from '../pacing.ts';
 import {fetchNewPosts} from '../reddit.ts';
+import type {RedditAuth} from '../redditOAuth.ts';
 import type {SettingsStore} from '../settings.ts';
 
 export interface PollDeps {
   sql: Sql;
   workerId: string;
   userAgent: string;
+  /** OAuth credentials; absent means the anonymous Atom feed. */
+  auth?: RedditAuth | null;
   pacer: RedditPacer;
   settings: SettingsStore;
   logger: Logger;
@@ -39,7 +42,7 @@ export async function pollOnce(deps: PollDeps): Promise<boolean> {
   if (claimed.length === 0) return false;
 
   const names = claimed.map((s) => s.name);
-  const result = await fetchNewPosts(names, deps.userAgent);
+  const result = await fetchNewPosts(names, deps.userAgent, deps.auth ?? null);
 
   switch (result.kind) {
     case 'rate_limited':
