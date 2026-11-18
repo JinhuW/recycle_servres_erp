@@ -305,6 +305,17 @@ describe('settings', () => {
     expect(res.status).toBe(200);
   });
 
+  it('switches poll_source between reddit and webhook only', async () => {
+    const put = (value: unknown) => request('/api/settings/poll_source', {
+      method: 'PUT',
+      body: JSON.stringify({value}),
+    });
+
+    expect((await put('webhook')).status).toBe(200);
+    expect((await put('rss')).status).toBe(400);
+    expect((await put('reddit')).status).toBe(200);
+  });
+
   it('sets the dev chats and rejects anything but a list of chat ids', async () => {
     const ok = await request('/api/settings/telegram_dev_chat_ids', {
       method: 'PUT',
@@ -362,7 +373,7 @@ describe('settings', () => {
 
     expect(Object.keys(body.settings).sort()).toEqual([
       'candidate_eval_prompt', 'candidate_llm_model', 'eval_prompt', 'llm_model',
-      'max_post_age_hours', 'telegram_chat_ids', 'telegram_dev_chat_ids',
+      'max_post_age_hours', 'poll_source', 'telegram_chat_ids', 'telegram_dev_chat_ids',
     ]);
   });
 });
