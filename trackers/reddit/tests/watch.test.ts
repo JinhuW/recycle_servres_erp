@@ -235,9 +235,10 @@ describe('webhook quiet', () => {
       status: 'firing',
       title: 'Reddit webhook quiet',
       lines: [
-        'The redditapis webhook has been quiet for 100 min.',
+        'No new post has arrived through the redditapis webhook for 100 min.',
         'The poll loop is idle, so no new posts are coming in.',
-        "Check the vendor monitor with the setup script's status command, or set poll_source back to reddit.",
+        'Run `pnpm redditapis status` for the vendor monitor\'s health, and the api log for "webhook" lines.',
+        'Setting poll_source back to reddit helps only with REDDIT_CLIENT_ID set: anonymous Reddit feeds are gone.',
       ],
     }]);
 
@@ -248,13 +249,24 @@ describe('webhook quiet', () => {
     expect(await db.sql`SELECT 1 FROM watch_alerts`).toHaveLength(0);
   });
 
+  it('ignores deliveries that inserted no post', async () => {
+    await pollSource('webhook');
+    await db.sql`
+      INSERT INTO webhook_deliveries (delivery_id, monitor_id, items, inserted, received_at)
+      VALUES ('d-empty', 'mon-1', 3, 0, NOW())`;
+
+    await watch();
+
+    expect(posted.map((p) => p.title)).toEqual(['Reddit webhook quiet']);
+  });
+
   it('raises when the webhook has never delivered', async () => {
     await pollSource('webhook');
 
     await watch();
 
     expect(posted[0]).toMatchObject({status: 'firing', title: 'Reddit webhook quiet'});
-    expect(posted[0]!.lines[0]).toContain('never delivered');
+    expect(posted[0]!.lines[0]).toContain('never delivered a new post');
   });
 
   it('resolves when poll_source goes back to reddit', async () => {

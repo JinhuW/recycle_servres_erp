@@ -168,13 +168,48 @@ describe('POST /webhooks/redditapis', () => {
     await db.sql`
       INSERT INTO subreddits (name, enabled, last_status, consecutive_errors)
       VALUES ('homelabsales', TRUE, 'error', 3), ('hardwareswap', FALSE, NULL, 0)`;
+    await db.sql`UPDATE settings SET value = to_jsonb('webhook'::text) WHERE key = 'poll_source'`;
   });
 
-  it('answers 404 when no secret is configured', async () => {
+  it('answers 503 when no secret is configured, so the vendor retries', async () => {
     const res = await post(freshDelivery('d0'), {target: build(undefined)});
-    expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({error: 'not found'});
-    expect(await post(freshDelivery('d0'), {target: build('')}).then((r) => r.status)).toBe(404);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({error: 'webhook not configured'});
+    expect(await post(freshDelivery('d0'), {target: build('')}).then((r) => r.status)).toBe(503);
+  });
+
+  it('acknowledges a vendor test delivery without storing it', async () => {
+    const res = await post({...freshDelivery('test_abc'), type: 'test', monitor_id: null});
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ok: true, test: true});
+    expect(await db.sql`SELECT 1 FROM webhook_deliveries`).toHaveLength(0);
+    expect(await db.sql`SELECT 1 FROM posts`).toHaveLength(0);
+  });
+
+  it('rejects an oversized body with 413', async () => {
+    const huge = 'x'.repeat(6 * 1024 * 1024);
+    const res = await post(huge);
+    expect(res.status).toBe(413);
+  });
+
+  it('strips NUL characters that Postgres text cannot hold', async () => {
+    const body = freshDelivery('d-nul');
+    const items = body['items'] as Array<Record<string, unknown>>;
+    items[0] = {...items[0], title: 'Bad\u0000title', text: 'a\u0000b'};
+    const res = await post(body);
+    expect(res.status).toBe(200);
+    const [row] = await db.sql<Array<{title: string; selftext: string}>>`
+      SELECT title, selftext FROM posts WHERE reddit_id = 't3_1xz1gox'`;
+    expect(row).toEqual({title: 'Badtitle', selftext: 'ab'});
+  });
+
+  it('leaves subreddit health to the poll loop while poll_source is reddit', async () => {
+    await db.sql`UPDATE settings SET value = to_jsonb('reddit'::text) WHERE key = 'poll_source'`;
+    const res = await post(freshDelivery('d-reddit-mode'));
+    expect(res.status).toBe(200);
+    const [sub] = await db.sql`
+      SELECT last_status, consecutive_errors FROM subreddits WHERE name = 'homelabsales'`;
+    expect(sub).toMatchObject({last_status: 'error', consecutive_errors: 3});
   });
 
   it('rejects a bad signature without storing anything', async () => {

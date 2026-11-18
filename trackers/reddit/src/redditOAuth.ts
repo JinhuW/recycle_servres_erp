@@ -37,6 +37,7 @@ export function resetTokenCache(): void {
 
 type TokenResult =
   | {kind: 'ok'; token: string}
+  | {kind: 'rate_limited'; retryAfterSeconds?: number}
   | {kind: 'blocked'; status: number}
   | {kind: 'error'; message: string};
 
@@ -66,6 +67,12 @@ async function accessToken(auth: RedditAuth, userAgent: string): Promise<TokenRe
   if (response.status === 401 || response.status === 403) {
     return {kind: 'blocked', status: response.status};
   }
+  // Callers back off on rate_limited and blocked, but read error as "this one
+  // request failed": the tracer would write the post off as untraceable.
+  if (response.status === 429) {
+    const seconds = numericHeader(response.headers, 'retry-after');
+    return {kind: 'rate_limited', ...(seconds !== undefined ? {retryAfterSeconds: seconds} : {})};
+  }
   if (!response.ok) return {kind: 'error', message: `token: HTTP ${response.status}`};
 
   let body: {access_token?: unknown; expires_in?: unknown; error?: unknown};
@@ -75,8 +82,9 @@ async function accessToken(auth: RedditAuth, userAgent: string): Promise<TokenRe
     return {kind: 'error', message: 'token: response was not JSON'};
   }
   if (typeof body.access_token !== 'string') {
-    // Reddit answers bad credentials with 200 {"error": ...} as well as 401.
-    return {kind: 'error', message: `token: ${String(body.error ?? 'no access_token')}`};
+    // Reddit answers bad credentials with 200 {"error": ...} as well as 401:
+    // the same refusal, so the same result.
+    return {kind: 'blocked', status: 401};
   }
 
   const lifetimeMs = (typeof body.expires_in === 'number' ? body.expires_in : 3600) * 1000;

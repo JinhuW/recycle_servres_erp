@@ -229,7 +229,7 @@ through the API — no redeploy, and changes reach every worker within 60 s.
 | `REDDITAPIS_WEBHOOK_SECRET` | api role, when `poll_source` is `webhook` | — (`/webhooks/redditapis` answers 404) |
 | `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | no, both or neither | — (falls back to the Atom feed, which Reddit withdrew in Nov 2026; see `docs/debug-notes/reddit-new-rss-404.md`) |
 | `REDDIT_MAX_RPM` | no | `1` |
-| `COMMENT_TRACER` | no | `on` (`off` keeps this worker from taking the PM tracer lease) |
+| `COMMENT_TRACER` | no | `on` (`off` keeps this worker from taking the PM tracer lease; the tracer also needs `REDDIT_CLIENT_ID`) |
 | `LOG_LEVEL` | no | `info` |
 | `OPS_ALERT_URL` / `OPS_ALERT_TOKEN` | api role, both or neither | — (the ops watch is off) |
 | `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` / `TELEGRAM_USER_SESSION` | api role, all or none | — (the bot sends alerts; no read receipts) |
@@ -254,18 +254,33 @@ subreddits) watches the enabled subreddits and POSTs each new post to the api's
 (`REDDITAPIS_WEBHOOK_SECRET`), ignores redeliveries by delivery id, keeps only
 enabled subreddits younger than `max_post_age_hours`, and inserts the posts.
 Evaluation and alerts are unchanged. The ops watch pages when no delivery
-arrives for 90 minutes.
+has added a post for 90 minutes, or at once if none ever has. Vendor test
+deliveries (`type: "test"`) are acknowledged and not stored.
+
+The PM tracer runs only with `REDDIT_CLIENT_ID` set. Reddit's anonymous
+comment feeds 404 like the listing feeds, and the tracer reads a 404 as a
+removed post, so without OAuth it would write off every post's PM count.
 
 `pnpm redditapis <command>` (`scripts/redditapis-monitor.ts`, needs
 `REDDITAPIS_KEY`) manages the vendor side. It is an ops script against the
 vendor's API, not an admin surface for the tracker:
 
-- `setup --url https://<api host>/webhooks/redditapis` creates the webhook and
-  one monitor for the enabled subreddits, and prints the secret once.
-- `sync` matches the monitor to the `subreddits` table after you add or
-  disable one.
-- `status`, `test`, and `redrive --since-hours N` (after an outage over the
-  vendor's ~21 minutes of retries).
+- `setup --url https://<api host>/webhooks/redditapis --subreddits a,b,c`
+  (or `--from-db`) creates the webhook and one monitor, and prints the
+  secret once. If the vendor refuses the monitor, it deletes the webhook again.
+- `sync --subreddits a,b,c` (or `--from-db`) matches the monitor to the list,
+  after you add or disable a subreddit. Adding or enabling one through the API
+  or the ERP does **not** reach the vendor by itself: run `sync`. Use
+  `--dry-run` to see the diff first. Removals need `--yes`. `--from-db`
+  prints which database it read, so a local one is caught before it overwrites
+  production.
+- `sync --one-at-a-time` adds subreddits one per call. The vendor caps
+  never-watched subreddits service-wide (`capacity_temporarily_unavailable`),
+  and one at a time gets most of them in. On 2026-11-18 msp, pcmasterrace and
+  minerswap were refused this way.
+- `status`, `test`, and `redrive --since-hours N`. Run `redrive` after an
+  outage longer than the vendor's ~21 minutes of retries. It loops until the
+  dead-letter queue is drained.
 
 A delivery whose body the vendor could not verify arrives without text, and
 the post is judged on its title. Subreddits with no new posts keep their old

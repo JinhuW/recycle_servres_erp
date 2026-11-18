@@ -2,6 +2,7 @@
 // or how it evaluates posts — there is no CLI. All state lives in the shared
 // database, so this can run anywhere that can reach it.
 
+import {bodyLimit} from 'hono/body-limit';
 import {Hono} from 'hono';
 import {analytics, ANALYTICS_WINDOWS, type AnalyticsWindow} from './analytics.ts';
 import {requeuePost} from './claims.ts';
@@ -13,7 +14,7 @@ import {seen} from './seen.ts';
 import {createLogger, type Logger} from './logger.ts';
 import {isSettingKey, SETTING_KEYS, type SettingsStore} from './settings.ts';
 import {sendMessage} from './telegram.ts';
-import {webhookHandler} from './webhook.ts';
+import {WEBHOOK_BODY_LIMIT_BYTES, webhookHandler} from './webhook.ts';
 
 export interface ApiDeps {
   sql: Sql;
@@ -81,13 +82,22 @@ export function createApi(deps: ApiDeps): Hono {
 
   // Registered outside /api/*: the vendor cannot send our Bearer token, and
   // the HMAC signature is this route's authentication (src/webhook.ts).
-  // The process logger feeds the registry, so a bad signature or a 500 reaches
-  // the ops group like any other warn/error; tests fall back to a plain one.
-  app.post('/webhooks/redditapis', webhookHandler(
-    deps,
-    deps.logger?.child('webhook')
-      ?? createLogger(deps.workerId, process.env['LOG_LEVEL'] || 'info', 'webhook'),
-  ));
+  // The process logger feeds the registry, so a malformed delivery or a 500
+  // reaches the ops group like any other warn/error; tests fall back to a
+  // plain one. The body limit keeps a huge upload to this public route from
+  // exhausting the api's memory before the signature is checked.
+  app.post(
+    '/webhooks/redditapis',
+    bodyLimit({
+      maxSize: WEBHOOK_BODY_LIMIT_BYTES,
+      onError: (c) => c.json({error: 'payload too large'}, 413),
+    }),
+    webhookHandler(
+      deps,
+      deps.logger?.child('webhook')
+        ?? createLogger(deps.workerId, process.env['LOG_LEVEL'] || 'info', 'webhook'),
+    ),
+  );
 
   app.use('/api/*', async (c, next) => {
     const header = c.req.header('authorization') ?? '';

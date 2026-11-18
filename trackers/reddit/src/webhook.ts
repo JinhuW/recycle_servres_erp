@@ -16,9 +16,14 @@ export const SIGNATURE_TOLERANCE_S = 300;
 
 const SELFTEXT_MAX = 8000;
 
+/** The largest delivery we read. A grouped delivery of 100 long posts is ~1 MB. */
+export const WEBHOOK_BODY_LIMIT_BYTES = 5 * 1024 * 1024;
+
 export interface ParsedDelivery {
   deliveryId: string;
   monitorId: string | null;
+  /** Items in the envelope, whether or not they became posts. */
+  itemCount: number;
   posts: NewPost[];
 }
 
@@ -34,17 +39,13 @@ export interface WebhookDeps {
  * more than SIGNATURE_TOLERANCE_S away from `nowSeconds` is a replay. Several
  * `v1` entries (a secret rotation) pass if any one matches.
  */
-export function verifySignature(
-  rawBody: string,
-  signatureHeader: string | undefined,
-  secret: string,
-  nowSeconds: number,
-): boolean {
-  if (!secret || !signatureHeader) return false;
-
+function parseSignatureHeader(
+  header: string | undefined,
+): {timestamp: string; signatures: string[]} | null {
+  if (!header) return null;
   let timestamp: string | null = null;
   const signatures: string[] = [];
-  for (const part of signatureHeader.split(',')) {
+  for (const part of header.split(',')) {
     const eq = part.indexOf('=');
     if (eq < 0) continue;
     const key = part.slice(0, eq).trim();
@@ -52,8 +53,30 @@ export function verifySignature(
     if (key === 't') timestamp = value;
     else if (key === 'v1') signatures.push(value);
   }
-  if (timestamp === null || !/^\d+$/.test(timestamp) || signatures.length === 0) return false;
-  if (Math.abs(nowSeconds - Number(timestamp)) > SIGNATURE_TOLERANCE_S) return false;
+  if (timestamp === null || !/^\d+$/.test(timestamp) || signatures.length === 0) return null;
+  return {timestamp, signatures};
+}
+
+/**
+ * Whether a signature header is well-formed and fresh. Checked before the
+ * body is read, so a junk request on this public route costs nothing.
+ */
+export function signatureLooksFresh(header: string | undefined, nowSeconds: number): boolean {
+  const parsed = parseSignatureHeader(header);
+  return parsed !== null
+    && Math.abs(nowSeconds - Number(parsed.timestamp)) <= SIGNATURE_TOLERANCE_S;
+}
+
+export function verifySignature(
+  rawBody: string,
+  signatureHeader: string | undefined,
+  secret: string,
+  nowSeconds: number,
+): boolean {
+  if (!secret) return false;
+  const parsed = parseSignatureHeader(signatureHeader);
+  if (!parsed || !signatureLooksFresh(signatureHeader, nowSeconds)) return false;
+  const {timestamp, signatures} = parsed;
 
   const expected = createHmac('sha256', secret)
     .update(`${timestamp}.${rawBody}`)
@@ -68,8 +91,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+// Postgres text cannot hold U+0000; one NUL would fail the whole delivery's
+// transaction on every retry and redrive (heartbeat.ts strips it the same way).
+function withoutNul(value: string): string {
+  return value.includes('\u0000') ? value.replaceAll('\u0000', '') : value;
+}
+
 function nonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+  if (typeof value !== 'string') return null;
+  const clean = withoutNul(value).trim();
+  return clean !== '' ? clean : null;
 }
 
 function parsePostedAt(item: Record<string, unknown>): Date | null {
@@ -109,7 +140,7 @@ function parseItem(item: unknown): NewPost | null {
     title,
     // Absent when the vendor could not verify the body (body_verified: false).
     // The post is still worth judging on its title.
-    selftext: typeof text === 'string' ? text.slice(0, SELFTEXT_MAX) : '',
+    selftext: typeof text === 'string' ? withoutNul(text).slice(0, SELFTEXT_MAX) : '',
     author: author && author !== '[deleted]' ? author : null,
     flair: nonEmptyString(item['link_flair_text']),
     url,
@@ -133,21 +164,30 @@ export function parseDelivery(json: unknown, headerDeliveryId?: string): ParsedD
     const post = parseItem(item);
     if (post) posts.push(post);
   }
-  return {deliveryId, monitorId: nonEmptyString(json['monitor_id']), posts};
+  return {deliveryId, monitorId: nonEmptyString(json['monitor_id']), itemCount: items.length, posts};
 }
 
 /** Builds the `POST /webhooks/redditapis` handler. */
 export function webhookHandler(deps: WebhookDeps, logger: Logger) {
   return async (c: Context): Promise<Response> => {
+    // 503, not 404: the vendor retries 5xx for ~21 minutes but dead-letters a
+    // 4xx at once, so a deploy that briefly lacks the secret loses nothing.
     const secret = deps.webhookSecret ?? '';
-    if (!secret) return c.json({error: 'not found'}, 404);
+    if (!secret) return c.json({error: 'webhook not configured'}, 503);
 
-    // Verify the exact bytes the vendor signed, before any JSON parsing.
-    const rawBody = await c.req.text();
+    // Rejections log at info: this route is public, and a warn per junk
+    // request would let anyone flood the ops digest and bury real errors.
     const signature = c.req.header('x-redditapis-signature');
-    if (!verifySignature(rawBody, signature, secret, Math.floor(Date.now() / 1000))) {
-      logger.warn('webhook signature rejected', {
-        hasSignature: Boolean(signature),
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (!signatureLooksFresh(signature, nowSeconds)) {
+      logger.info('webhook rejected: missing or stale signature');
+      return c.json({error: 'invalid signature'}, 401);
+    }
+    // Verify the exact bytes the vendor signed, before any JSON parsing. The
+    // body size is capped by the route's bodyLimit (api.ts).
+    const rawBody = await c.req.text();
+    if (!verifySignature(rawBody, signature, secret, nowSeconds)) {
+      logger.info('webhook rejected: signature mismatch', {
         deliveryId: c.req.header('x-redditapis-delivery-id') ?? null,
       });
       return c.json({error: 'invalid signature'}, 401);
@@ -159,15 +199,25 @@ export function webhookHandler(deps: WebhookDeps, logger: Logger) {
     } catch {
       json = null;
     }
+    // The vendor's docs: skip anything with type "test" in production logic.
+    // Stored, it would insert its sample post and reset the quiet alert.
+    if (isRecord(json) && json['type'] === 'test') {
+      logger.info('webhook test delivery acknowledged');
+      return c.json({ok: true, test: true});
+    }
+
     const delivery = parseDelivery(json, c.req.header('x-redditapis-delivery-id'));
-    if (!delivery) return c.json({error: 'malformed delivery'}, 400);
+    if (!delivery) {
+      // Signed by the vendor yet unusable: their format changed. A 400 is not
+      // retried, so this is the only trace of the lost delivery.
+      logger.warn('webhook delivery malformed', {bytes: rawBody.length});
+      return c.json({error: 'malformed delivery'}, 400);
+    }
 
     try {
-      const {maxPostAgeHours} = await deps.settings.get();
+      const {maxPostAgeHours, pollSource} = await deps.settings.get();
       const cutoff = Date.now() - maxPostAgeHours * 3600_000;
-      const itemCount = Array.isArray((json as {items?: unknown}).items)
-        ? (json as {items: unknown[]}).items.length
-        : delivery.posts.length;
+      const {itemCount} = delivery;
 
       const result = await deps.sql.begin(async (tx) => {
         const [fresh] = await tx`
@@ -191,8 +241,11 @@ export function webhookHandler(deps: WebhookDeps, logger: Logger) {
           UPDATE webhook_deliveries SET inserted = ${inserted.length}
            WHERE delivery_id = ${delivery.deliveryId}`;
 
+        // Subreddit health belongs to whichever source is live: in reddit mode
+        // the poll loop owns it, and resetting consecutive_errors here would
+        // hide its failures and restart its backoff.
         const seen = [...new Set(watched.map((p) => p.subreddit))];
-        if (seen.length > 0) {
+        if (seen.length > 0 && pollSource === 'webhook') {
           await tx`
             UPDATE subreddits
                SET last_polled_at = NOW(), last_status = 'ok', consecutive_errors = 0
@@ -204,6 +257,15 @@ export function webhookHandler(deps: WebhookDeps, logger: Logger) {
       if (!result) {
         logger.info('webhook redelivery ignored', {deliveryId: delivery.deliveryId});
         return c.json({ok: true, duplicate: true});
+      }
+      if (itemCount > 0 && result.watched === 0) {
+        // Every item was dropped before the age filter: a vendor field we parse
+        // changed, or the monitor watches subreddits we don't.
+        logger.warn('webhook delivery had no usable posts', {
+          deliveryId: delivery.deliveryId,
+          items: itemCount,
+          parsed: delivery.posts.length,
+        });
       }
       logger.info('webhook delivery stored', {
         deliveryId: delivery.deliveryId,

@@ -4,14 +4,18 @@
 // watches every new post in the enabled subreddits. Ops-only; the tracker
 // itself never calls the vendor's management API.
 //
-//   REDDITAPIS_KEY=… pnpm redditapis setup --url https://…/webhooks/redditapis
-//   REDDITAPIS_KEY=… pnpm redditapis sync
+//   REDDITAPIS_KEY=… pnpm redditapis setup --url https://…/webhooks/redditapis --from-db
+//   REDDITAPIS_KEY=… pnpm redditapis sync --from-db --dry-run
 //   REDDITAPIS_KEY=… pnpm redditapis status
 //
 // Vendor reference: https://docs.redditapis.com/docs/monitoring/endpoints and
 // the request schemas in https://docs.redditapis.com/openapi.json.
 
 import 'dotenv/config';
+import {realpathSync} from 'node:fs';
+import {setTimeout as sleep} from 'node:timers/promises';
+import {fileURLToPath} from 'node:url';
+import {parseArgs as utilParseArgs} from 'node:util';
 import postgres from 'postgres';
 
 const API_BASE = 'https://api.redditapis.com/api/reddit/monitor';
@@ -19,26 +23,55 @@ const API_BASE = 'https://api.redditapis.com/api/reddit/monitor';
 /** The vendor caps one monitor at 50 subreddits (filter_spec.subreddit). */
 export const MAX_SUBREDDITS_PER_MONITOR = 50;
 
+/** webhook/redrive `limit` maximum (openapi: 1..1000, default 100). */
+export const REDRIVE_MAX_LIMIT = 1000;
+
+/** webhook/redrive is rate-limited to 10 calls a minute; stay just under. */
+const REDRIVE_CALL_INTERVAL_MS = 6_500;
+
+/** Safety stop for the redrive loop (20 × 1000 deliveries). */
+const REDRIVE_MAX_CALLS = 20;
+
+/** Pause between `sync --one-at-a-time` update calls. */
+const ONE_AT_A_TIME_INTERVAL_MS = 2_000;
+
 const USAGE = `Usage: pnpm redditapis <command> [options]
 
 Configures the redditapis.com monitor that pushes new Reddit posts to the
-tracker api. Needs REDDITAPIS_KEY; reads enabled subreddits via DATABASE_URL
-unless --subreddits is given.
+tracker api. Needs REDDITAPIS_KEY. Unknown or misspelt options are an error.
+
+Subreddit source (setup and sync need exactly one):
+  --subreddits a,b,c   Use this list.
+  --from-db            Read the enabled subreddits through DATABASE_URL. The
+                       host/port/database is printed first: dotenv often
+                       points it at the LOCAL compose DB (127.0.0.1:5433).
 
 Commands:
-  setup --url <webhook url> [--subreddits a,b,c]
+  setup --url <webhook url> (--subreddits a,b,c | --from-db)
       Create the webhook target (prints its signing secret ONCE) and one
-      monitor for the subreddits, delivering only to that webhook.
-  sync [--subreddits a,b,c]
-      Make the existing monitor's subreddit list match the enabled
-      subreddits (or the flag).
+      monitor for the subreddits, delivering only to that webhook. If the
+      vendor refuses the monitor, the new webhook is deleted again and the
+      printed secret is void.
+  sync (--subreddits a,b,c | --from-db) [--dry-run] [--yes] [--one-at-a-time]
+      Make the existing monitor's subreddit list match the source. This
+      REPLACES the live monitor's list.
+        --dry-run        Print the +/- diff and change nothing.
+        --yes            Required when the diff removes any subreddit.
+        --one-at-a-time  Add new subreddits with one update call each, and
+                         carry on past ones the vendor refuses for capacity
+                         (503 capacity_temporarily_unavailable); refused ones
+                         are listed at the end. Use this when the vendor's
+                         service-wide cap on never-watched subreddits bites.
   status
       Monitors, plan slots, webhooks, per-monitor health and recent
       deliveries.
   test [--webhook <id>] [--comment]
       Send a signed synthetic delivery to the webhook.
   redrive --since-hours N [--dry-run] [--webhook <id>]
-      Re-send the webhook's dead-lettered deliveries from the last N hours.
+      Re-send the webhook's dead-lettered deliveries from the last N hours,
+      ${REDRIVE_MAX_LIMIT} per call, oldest first, calling again (at most 10
+      calls a minute) until none are left. --dry-run makes one call and lists
+      what would be re-sent.
   help
       This text.
 `;
@@ -47,53 +80,174 @@ Commands:
 // Pure helpers (exported for tests)
 // ---------------------------------------------------------------------------
 
-/** Parsed command line: the command, positional args and `--flag [value]`s. */
+/** Every option the CLI knows; per-command subsets are in COMMAND_OPTIONS. */
+const OPTIONS = {
+  'url': {type: 'string'},
+  'subreddits': {type: 'string'},
+  'from-db': {type: 'boolean'},
+  'dry-run': {type: 'boolean'},
+  'yes': {type: 'boolean'},
+  'one-at-a-time': {type: 'boolean'},
+  'webhook': {type: 'string'},
+  'comment': {type: 'boolean'},
+  'since-hours': {type: 'string'},
+  'help': {type: 'boolean', short: 'h'},
+} as const;
+
+/** Parsed option values; absent options are undefined. */
+export interface CliValues {
+  'url'?: string;
+  'subreddits'?: string;
+  'from-db'?: boolean;
+  'dry-run'?: boolean;
+  'yes'?: boolean;
+  'one-at-a-time'?: boolean;
+  'webhook'?: string;
+  'comment'?: boolean;
+  'since-hours'?: string;
+  'help'?: boolean;
+}
+
+/** Options each command accepts (`--help` is accepted everywhere). */
+const COMMAND_OPTIONS: Record<string, ReadonlyArray<keyof CliValues>> = {
+  help: [],
+  setup: ['url', 'subreddits', 'from-db'],
+  sync: ['subreddits', 'from-db', 'dry-run', 'yes', 'one-at-a-time'],
+  status: [],
+  test: ['webhook', 'comment'],
+  redrive: ['since-hours', 'dry-run', 'webhook'],
+};
+
+/** Parsed command line: the command and its option values. */
 export interface ParsedArgs {
   command: string;
-  positionals: string[];
-  flags: Map<string, string | true>;
+  values: CliValues;
 }
-
-/** Boolean flags never consume the following token as their value. */
-const BOOLEAN_FLAGS = new Set(['dry-run', 'comment']);
 
 /**
- * Parses `argv` (without node and script path). Accepts `--name value`,
- * `--name=value` and bare boolean flags. The first positional is the command;
- * no command means `help`.
+ * Parses `argv` (without node and script path) with `node:util` parseArgs in
+ * strict mode: unknown options, a value on a boolean, a missing value, extra
+ * positionals and an option the command does not take all throw UsageError.
+ * The first positional is the command; no command means `help`.
  */
 export function parseArgs(argv: readonly string[]): ParsedArgs {
-  const positionals: string[] = [];
-  const flags = new Map<string, string | true>();
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i]!;
-    if (!arg.startsWith('--')) {
-      positionals.push(arg);
-      continue;
+  let parsed: {values: unknown; positionals: string[]};
+  try {
+    parsed = utilParseArgs({
+      args: [...argv],
+      options: OPTIONS,
+      strict: true,
+      allowPositionals: true,
+    });
+  } catch (e) {
+    const code = (e as {code?: unknown}).code;
+    if (typeof code === 'string' && code.startsWith('ERR_PARSE_ARGS_')) {
+      throw new UsageError((e as Error).message);
     }
-    const body = arg.slice(2);
-    const eq = body.indexOf('=');
-    if (eq >= 0) {
-      flags.set(body.slice(0, eq), body.slice(eq + 1));
-      continue;
-    }
-    const next = argv[i + 1];
-    if (!BOOLEAN_FLAGS.has(body) && next !== undefined && !next.startsWith('--')) {
-      flags.set(body, next);
-      i++;
-    } else {
-      flags.set(body, true);
+    throw e;
+  }
+  const values = parsed.values as CliValues;
+  const [command = 'help', ...extra] = parsed.positionals;
+  if (extra.length > 0) {
+    throw new UsageError(`Unexpected argument(s): ${extra.join(' ')}`);
+  }
+  const allowed = COMMAND_OPTIONS[command];
+  if (allowed) {
+    for (const [name, v] of Object.entries(values)) {
+      if (v === undefined || name === 'help') continue;
+      if (!allowed.includes(name as keyof CliValues)) {
+        throw new UsageError(`${command} does not take --${name}.`);
+      }
     }
   }
-  const [command = 'help', ...rest] = positionals;
-  return {command, positionals: rest, flags};
+  return {command, values};
 }
 
-/** Returns a flag's string value, or undefined; throws if it was given bare. */
-export function stringFlag(args: ParsedArgs, name: string): string | undefined {
-  const v = args.flags.get(name);
-  if (v === true) throw new UsageError(`--${name} needs a value`);
-  return v;
+/** Where `setup`/`sync` get their subreddit list from. */
+export type SubredditSource = {kind: 'list'; names: string[]} | {kind: 'db'};
+
+/** Requires exactly one of `--subreddits` and `--from-db`. */
+export function subredditSource(command: string, values: CliValues): SubredditSource {
+  const list = values['subreddits'];
+  const fromDb = values['from-db'] === true;
+  if (list !== undefined && fromDb) {
+    throw new UsageError('Pass either --subreddits or --from-db, not both.');
+  }
+  if (list !== undefined) {
+    const names = parseSubredditList(list);
+    if (names.length === 0) throw new UsageError('--subreddits is empty.');
+    return {kind: 'list', names};
+  }
+  if (fromDb) return {kind: 'db'};
+  throw new UsageError(
+    `${command} needs an explicit subreddit source: --subreddits a,b,c, or --from-db ` +
+      '(reads the enabled subreddits through DATABASE_URL).',
+  );
+}
+
+/**
+ * Describes a postgres URL as `host:port/dbname` without credentials, flagged
+ * when it points at this machine.
+ */
+export function describeDatabaseUrl(url: string): string {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return '(unparseable DATABASE_URL)';
+  }
+  const host = u.hostname || '(local socket)';
+  const where = `${host}:${u.port || '5432'}/${decodeURIComponent(u.pathname.replace(/^\//, '')) || '(default db)'}`;
+  const local = ['localhost', '127.0.0.1', '::1', '[::1]', ''].includes(u.hostname);
+  return local ? `${where}  (LOCAL database, not production)` : where;
+}
+
+/** What `sync` should do with a diff, given --dry-run and --yes. */
+export type SyncAction = 'noop' | 'dry-run' | 'needs-yes' | 'apply';
+
+/**
+ * No diff → noop; --dry-run → dry-run; a removal without --yes → needs-yes;
+ * otherwise apply.
+ */
+export function syncAction(
+  diff: {added: readonly string[]; removed: readonly string[]},
+  opts: {dryRun: boolean; yes: boolean},
+): SyncAction {
+  if (diff.added.length === 0 && diff.removed.length === 0) return 'noop';
+  if (opts.dryRun) return 'dry-run';
+  if (diff.removed.length > 0 && !opts.yes) return 'needs-yes';
+  return 'apply';
+}
+
+/** One webhook/redrive call's outcome and whether to call again. */
+export interface RedriveStep {
+  selected: number | undefined;
+  done: boolean;
+  reason: string;
+}
+
+/**
+ * Decides whether the redrive loop goes on: it stops when the vendor selected
+ * fewer than `limit` (nothing left), when the answer has no numeric
+ * `selected`, or when it repeats a delivery id already re-sent (which would
+ * loop forever). Adds this call's ids to `seen`.
+ */
+export function redriveStep(body: unknown, limit: number, seen: Set<string>): RedriveStep {
+  const res = asRecord(body);
+  const selected = typeof res['selected'] === 'number' ? res['selected'] : undefined;
+  if (selected === undefined) {
+    return {selected, done: true, reason: 'the response has no numeric `selected`; stopping'};
+  }
+  const ids = Array.isArray(res['delivery_ids'])
+    ? res['delivery_ids'].filter((x): x is string => typeof x === 'string')
+    : [];
+  const repeated = ids.some((id) => seen.has(id));
+  for (const id of ids) seen.add(id);
+  if (repeated) {
+    return {selected, done: true, reason: 'the vendor selected deliveries already re-sent; stopping'};
+  }
+  if (selected < limit) return {selected, done: true, reason: 'no more dead deliveries'};
+  return {selected, done: false, reason: ''};
 }
 
 /**
@@ -236,6 +390,47 @@ export class VendorError extends Error {
   }
 }
 
+/**
+ * For a 503 `capacity_temporarily_unavailable` whose `detail.limit` is
+ * `new_subreddits` (the vendor's service-wide cap on subreddits nobody watches
+ * yet), returns the vendor's `detail.message`; otherwise undefined.
+ */
+export function newSubredditCapacityMessage(
+  status: number,
+  body: unknown,
+): {message: string} | undefined {
+  if (status !== 503) return undefined;
+  const top = asRecord(body);
+  const nested = asRecord(top['error']);
+  // The live vendor sends the code as a top-level `error` string, e.g.
+  // {"error":"capacity_temporarily_unavailable","detail":{"limit":"new_subreddits",...}}
+  // (seen 2026-11-18); `code` and a nested object are kept for other shapes.
+  const code = top['code']
+    ?? (typeof top['error'] === 'string' ? top['error'] : nested['code']);
+  const detail = asRecord(top['detail'] ?? nested['detail']);
+  if (code !== 'capacity_temporarily_unavailable' || detail['limit'] !== 'new_subreddits') {
+    return undefined;
+  }
+  return {message: typeof detail['message'] === 'string' ? detail['message'] : ''};
+}
+
+/** True for the vendor's 503 new-subreddit capacity refusal. */
+export function isNewSubredditCapacityError(e: unknown): e is VendorError {
+  return e instanceof VendorError && newSubredditCapacityMessage(e.status, e.body) !== undefined;
+}
+
+/** The operator hint for a new-subreddit capacity refusal. */
+export function newSubredditCapacityHint(message: string): string[] {
+  const email = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(message)?.[0];
+  return [
+    '  The vendor caps how many never-watched subreddits can be added service-wide',
+    '  at a time; nothing was changed. Adding them ONE AT A TIME often gets most in:',
+    '    pnpm redditapis sync --one-at-a-time (--subreddits a,b,c | --from-db)',
+    `  To raise the cap, the vendor asks you to email ${email ?? 'them (see their message)'}` +
+      (message ? `: "${message}"` : '.'),
+  ];
+}
+
 /** Human-readable explanation of a vendor error, with a hint for known codes. */
 export function describeVendorError(err: VendorError): string {
   const lines = [`✗ ${err.message}`];
@@ -249,7 +444,12 @@ export function describeVendorError(err: VendorError): string {
   } else if (err.status === 429) {
     lines.push('  Management rate limit hit; wait a minute and retry.');
   } else if (err.status === 503) {
-    lines.push('  Monitoring is restarting; nothing was changed. Retry in a few seconds.');
+    const capacity = newSubredditCapacityMessage(err.status, err.body);
+    if (capacity) {
+      lines.push(...newSubredditCapacityHint(capacity.message));
+    } else {
+      lines.push('  Monitoring is restarting; nothing was changed. Retry in a few seconds.');
+    }
   }
   return lines.join('\n');
 }
@@ -295,9 +495,10 @@ async function enabledSubredditsFromDb(): Promise<string[]> {
   const url = process.env['DATABASE_URL'];
   if (!url) {
     throw new UsageError(
-      'DATABASE_URL is not set. Set it, or pass --subreddits a,b,c instead.',
+      '--from-db needs DATABASE_URL. Set it, or pass --subreddits a,b,c instead.',
     );
   }
+  console.log(`· Reading enabled subreddits from ${describeDatabaseUrl(url)}`);
   const sql = postgres(url, {onnotice: () => {}, max: 1});
   try {
     const rows = await sql`SELECT name FROM subreddits WHERE enabled ORDER BY name`;
@@ -307,11 +508,11 @@ async function enabledSubredditsFromDb(): Promise<string[]> {
   }
 }
 
-async function wantedSubreddits(args: ParsedArgs): Promise<string[]> {
-  const flag = stringFlag(args, 'subreddits');
-  const names = flag !== undefined ? parseSubredditList(flag) : await enabledSubredditsFromDb();
+async function wantedSubreddits(source: SubredditSource): Promise<string[]> {
+  const names =
+    source.kind === 'list' ? source.names : normalizeSubreddits(await enabledSubredditsFromDb());
   console.log(
-    `· ${names.length} subreddit(s) from ${flag !== undefined ? '--subreddits' : 'the subreddits table'}: ` +
+    `· ${names.length} subreddit(s) from ${source.kind === 'list' ? '--subreddits' : 'the subreddits table'}: ` +
       names.join(', '),
   );
   return names;
@@ -325,10 +526,37 @@ async function listMonitors(api: RedditApisClient): Promise<{
   return {monitors: recordList(body, 'monitors'), body};
 }
 
+function printNotices(res: Record<string, unknown>, indent: string): void {
+  const notices = res['notices'];
+  if (Array.isArray(notices) && notices.length > 0) {
+    console.log(`${indent}notices: ${JSON.stringify(notices, null, 2)}`);
+  }
+}
+
+/**
+ * Deletes a webhook that `setup` just created when the monitor it was for
+ * could not be created, so a retry does not pile up orphans.
+ */
+async function deleteOrphanWebhook(api: RedditApisClient, webhookId: string): Promise<void> {
+  console.error('');
+  console.error('✗ The monitor was not created; deleting the webhook target created above.');
+  try {
+    await api.post('webhook/delete', {id: webhookId});
+    console.error(`✓ Deleted webhook ${webhookId}. The secret printed above is now VOID:`);
+    console.error('  do not set it on Railway. A retry of setup creates a new one.');
+  } catch (e) {
+    console.error(`✗ Could not delete webhook ${webhookId}; delete it on the dashboard.`);
+    if (e instanceof VendorError) console.error(describeVendorError(e));
+    else console.error(`  ${String(e)}`);
+  }
+  console.error('');
+}
+
 async function cmdSetup(api: RedditApisClient, args: ParsedArgs): Promise<void> {
-  const url = stringFlag(args, 'url');
+  const url = args.values['url'];
   if (!url) throw new UsageError('setup needs --url <webhook url>.');
   if (!url.startsWith('https://')) throw new UsageError('The webhook url must be https://.');
+  const source = subredditSource('setup', args.values);
 
   const {monitors} = await listMonitors(api);
   if (monitors.length > 0) {
@@ -341,7 +569,7 @@ async function cmdSetup(api: RedditApisClient, args: ParsedArgs): Promise<void> 
 
   // Resolve the subreddit list before creating anything, so a bad list does
   // not leave an orphan webhook behind.
-  const filterSpec = buildFilterSpec(await wantedSubreddits(args));
+  const filterSpec = buildFilterSpec(await wantedSubreddits(source));
 
   const created = await api.post('webhook/create', {kind: 'webhook', url});
   const {id: webhookId, secret} = extractWebhookCreated(created);
@@ -356,8 +584,8 @@ async function cmdSetup(api: RedditApisClient, args: ParsedArgs): Promise<void> 
     console.log(`  secret: ${secret}`);
   }
   console.log('');
-  console.log('  !! The secret is shown ONCE and cannot be read back. Set it now as');
-  console.log('  !! REDDITAPIS_WEBHOOK_SECRET on the Railway api service.');
+  console.log('  !! The secret is shown ONCE and cannot be read back. Copy it now; it is');
+  console.log('  !! only valid if the monitor below is created too.');
   console.log('');
   if (!webhookId) {
     console.error('✗ No webhook id in the response; not creating the monitor.');
@@ -365,9 +593,24 @@ async function cmdSetup(api: RedditApisClient, args: ParsedArgs): Promise<void> 
     return;
   }
 
-  const monitor = asRecord(
-    await api.post('add', {filter_spec: filterSpec, webhook_ids: [webhookId]}),
-  );
+  let monitor: Record<string, unknown>;
+  try {
+    monitor = asRecord(
+      await api.post('add', {filter_spec: filterSpec, webhook_ids: [webhookId]}),
+    );
+  } catch (e) {
+    if (e instanceof VendorError) {
+      // The vendor answered and refused: no monitor exists for this webhook.
+      await deleteOrphanWebhook(api, webhookId);
+    } else {
+      // Network failure: the monitor may or may not exist, so keep the webhook.
+      console.error(
+        `✗ No answer from add; the monitor may or may not exist. Webhook ${webhookId} is ` +
+          'kept. Run `pnpm redditapis status` before retrying.',
+      );
+    }
+    throw e;
+  }
   const m = asRecord(monitor['monitor']);
   const monitorId = monitor['id'] ?? m['id'];
   const cadence = monitor['cadence_s'] ?? m['cadence_s'];
@@ -376,15 +619,17 @@ async function cmdSetup(api: RedditApisClient, args: ParsedArgs): Promise<void> 
   console.log(`  cadence:  ${cadence === undefined ? '?' : `${String(cadence)}s`}`);
   console.log(`  watching: ${filterSpec.subreddit.length} subreddit(s), kind=post, no keyword filter`);
   console.log(`  delivers: only to webhook ${webhookId}`);
-  const notices = monitor['notices'];
-  if (Array.isArray(notices) && notices.length > 0) {
-    console.log(`  notices:  ${JSON.stringify(notices, null, 2)}`);
-  }
+  printNotices(monitor, '  ');
   console.log('');
-  console.log('Next: set the secret on Railway, then `pnpm redditapis test`.');
+  console.log('Next: set the secret as REDDITAPIS_WEBHOOK_SECRET on the Railway api');
+  console.log('service, then `pnpm redditapis test`.');
 }
 
 async function cmdSync(api: RedditApisClient, args: ParsedArgs): Promise<void> {
+  const source = subredditSource('sync', args.values);
+  const dryRun = args.values['dry-run'] === true;
+  const yes = args.values['yes'] === true;
+
   const {monitors} = await listMonitors(api);
   if (monitors.length !== 1) {
     console.error(
@@ -398,21 +643,118 @@ async function cmdSync(api: RedditApisClient, args: ParsedArgs): Promise<void> {
     return;
   }
   const monitor = monitors[0]!;
+  const monitorId = String(monitor['id']);
   const current = monitorSubreddits(monitor);
-  const wanted = normalizeSubreddits(await wantedSubreddits(args));
-  const {added, removed} = diffSubreddits(current, wanted);
-  if (added.length === 0 && removed.length === 0) {
-    console.log(`✓ Monitor ${String(monitor['id'])} already watches exactly these subreddits.`);
+  const wanted = normalizeSubreddits(await wantedSubreddits(source));
+  buildFilterSpec(wanted); // Validates size before anything is written.
+  const diff = diffSubreddits(current, wanted);
+  console.log(`· Monitor ${monitorId} watches ${current.length}; the source has ${wanted.length}.`);
+  if (diff.added.length) console.log(`  + ${diff.added.join(', ')}`);
+  if (diff.removed.length) console.log(`  - ${diff.removed.join(', ')}`);
+
+  switch (syncAction(diff, {dryRun, yes})) {
+    case 'noop':
+      console.log(`✓ Monitor ${monitorId} already watches exactly these subreddits.`);
+      return;
+    case 'dry-run':
+      console.log('· Dry run: nothing was changed.');
+      if (diff.removed.length && !yes) {
+        console.log(`  Applying it would remove ${diff.removed.length} subreddit(s), which needs --yes.`);
+      }
+      return;
+    case 'needs-yes':
+      console.error(
+        `✗ This would REMOVE ${diff.removed.length} subreddit(s) from the live monitor: ` +
+          diff.removed.join(', '),
+      );
+      console.error('  Nothing was changed. Re-run with --yes to remove them (--dry-run to preview).');
+      process.exitCode = 1;
+      return;
+    case 'apply':
+      break;
+  }
+
+  const spec = asRecord(monitor['filter_spec']);
+  if (args.values['one-at-a-time'] === true && diff.added.length > 0) {
+    await syncOneAtATime(api, monitorId, spec, current, diff);
     return;
   }
-  if (added.length) console.log(`  + ${added.join(', ')}`);
-  if (removed.length) console.log(`  - ${removed.join(', ')}`);
-  const filterSpec = withSubreddits(asRecord(monitor['filter_spec']), wanted);
-  const res = asRecord(await api.post('update', {id: monitor['id'], filter_spec: filterSpec}));
-  console.log(`✓ Monitor ${String(monitor['id'])} updated (new subreddits start from now; no backfill).`);
-  const notices = res['notices'];
-  if (Array.isArray(notices) && notices.length > 0) {
-    console.log(`  notices: ${JSON.stringify(notices, null, 2)}`);
+  const res = asRecord(
+    await api.post('update', {id: monitor['id'], filter_spec: withSubreddits(spec, wanted)}),
+  );
+  console.log(`✓ Monitor ${monitorId} updated (new subreddits start from now; no backfill).`);
+  printNotices(res, '  ');
+}
+
+/**
+ * Applies removals in one update, then each addition in its own update,
+ * skipping (and reporting) subreddits the vendor refuses for new-subreddit
+ * capacity. Any other error stops the run after reporting progress.
+ */
+async function syncOneAtATime(
+  api: RedditApisClient,
+  monitorId: string,
+  spec: Record<string, unknown>,
+  current: readonly string[],
+  diff: {added: string[]; removed: string[]},
+): Promise<void> {
+  const removedKeys = new Set(diff.removed.map((s) => s.toLowerCase()));
+  const applied = current.filter((s) => !removedKeys.has(s.toLowerCase()));
+  const update = (list: readonly string[]) =>
+    api.post('update', {id: monitorId, filter_spec: withSubreddits(spec, list)});
+
+  // An empty filter is invalid, so if every current subreddit goes, the
+  // removals ride along with the first accepted addition instead.
+  let removalsPending = diff.removed.length > 0;
+  let calls = 0;
+  if (removalsPending && applied.length > 0) {
+    await update(applied);
+    calls++;
+    removalsPending = false;
+    console.log(`✓ Removed ${diff.removed.length}: ${diff.removed.join(', ')}`);
+  }
+
+  const added: string[] = [];
+  const refused: string[] = [];
+  let capacityMessage = '';
+  for (const [i, sub] of diff.added.entries()) {
+    if (calls > 0) await sleep(ONE_AT_A_TIME_INTERVAL_MS);
+    calls++;
+    const progress = `(${i + 1}/${diff.added.length})`;
+    try {
+      const res = asRecord(await update([...applied, sub]));
+      applied.push(sub);
+      added.push(sub);
+      removalsPending = false;
+      console.log(`  ✓ + ${sub} ${progress}`);
+      printNotices(res, '    ');
+    } catch (e) {
+      if (!isNewSubredditCapacityError(e)) {
+        console.error(`✗ Stopped at ${sub} ${progress}.`);
+        console.error(`  added so far: ${added.join(', ') || '(none)'}`);
+        console.error(`  not tried:    ${diff.added.slice(i).join(', ')}`);
+        if (refused.length) console.error(`  refused:      ${refused.join(', ')}`);
+        throw e;
+      }
+      capacityMessage = newSubredditCapacityMessage(e.status, e.body)?.message ?? capacityMessage;
+      refused.push(sub);
+      console.log(`  ✗ + ${sub} ${progress} refused: vendor new-subreddit capacity`);
+    }
+  }
+
+  console.log('');
+  console.log(
+    `✓ Monitor ${monitorId}: added ${added.length}/${diff.added.length}` +
+      ' (new subreddits start from now; no backfill).',
+  );
+  if (removalsPending) {
+    console.log(`  Removals NOT applied (every addition was refused): ${diff.removed.join(', ')}`);
+  }
+  if (refused.length) {
+    console.log(`✗ Refused for capacity (${refused.length}): ${refused.join(', ')}`);
+    console.log('  Re-run the same sync later to retry just these.');
+    for (const line of newSubredditCapacityHint(capacityMessage)) console.log(line);
+    process.exitCode = 1;
   }
 }
 
@@ -514,7 +856,7 @@ async function cmdStatus(api: RedditApisClient): Promise<void> {
  * targets, else the only webhook on the account.
  */
 async function resolveWebhookId(api: RedditApisClient, args: ParsedArgs): Promise<string> {
-  const flag = stringFlag(args, 'webhook');
+  const flag = args.values['webhook'];
   if (flag) return flag;
   const {monitors} = await listMonitors(api);
   const targeted = new Set<string>();
@@ -535,29 +877,73 @@ async function resolveWebhookId(api: RedditApisClient, args: ParsedArgs): Promis
 async function cmdTest(api: RedditApisClient, args: ParsedArgs): Promise<void> {
   const id = await resolveWebhookId(api, args);
   const body: Record<string, unknown> = {id};
-  if (args.flags.get('comment') === true) body['item_kind'] = 'comment';
+  if (args.values['comment'] === true) body['item_kind'] = 'comment';
   console.log(`· Sending a test delivery to webhook ${id}…`);
   const res = await api.post('webhook/test', body);
   console.log(JSON.stringify(res, null, 2));
 }
 
 async function cmdRedrive(api: RedditApisClient, args: ParsedArgs): Promise<void> {
-  const raw = stringFlag(args, 'since-hours');
+  const raw = args.values['since-hours'];
   const sinceHours = Number(raw);
   if (raw === undefined || !Number.isInteger(sinceHours) || sinceHours < 1 || sinceHours > 720) {
     throw new UsageError('redrive needs --since-hours N, an integer from 1 to 720.');
   }
-  const dryRun = args.flags.get('dry-run') === true;
+  const dryRun = args.values['dry-run'] === true;
   const id = await resolveWebhookId(api, args);
+  const limit = REDRIVE_MAX_LIMIT;
   console.log(`· Redrive webhook ${id}, last ${sinceHours}h${dryRun ? ' (dry run)' : ''}…`);
-  const res = await api.post('webhook/redrive', {id, since_hours: sinceHours, dry_run: dryRun});
-  console.log(JSON.stringify(res, null, 2));
+  const request = {id, since_hours: sinceHours, limit, dry_run: dryRun};
+
+  if (dryRun) {
+    const res = await api.post('webhook/redrive', request);
+    console.log(JSON.stringify(res, null, 2));
+    if (redriveStep(res, limit, new Set()).selected === limit) {
+      console.log(`· At least ${limit} would be re-sent; the real run keeps calling for the rest.`);
+    }
+    return;
+  }
+
+  const seen = new Set<string>();
+  let total = 0;
+  for (let call = 1; ; call++) {
+    if (call > 1) await sleep(REDRIVE_CALL_INTERVAL_MS);
+    const res = asRecord(await api.post('webhook/redrive', request));
+    const step = redriveStep(res, limit, seen);
+    total += step.selected ?? 0;
+    const skipped = res['skipped_permanent'];
+    console.log(
+      `  call ${call}: re-sent ${step.selected ?? '?'} (running total ${total})` +
+        (typeof skipped === 'number' && skipped > 0
+          ? `; skipped_permanent=${skipped} ${JSON.stringify(res['skipped_by_reason'] ?? {})}`
+          : ''),
+    );
+    if (step.selected === undefined) console.log(JSON.stringify(res, null, 2));
+    if (step.done) {
+      console.log(`✓ Redrive finished: ${total} re-sent (${step.reason}).`);
+      return;
+    }
+    if (call >= REDRIVE_MAX_CALLS) {
+      console.log(
+        `· Stopping after ${call} calls (${total} re-sent); run redrive again for any rest.`,
+      );
+      return;
+    }
+  }
 }
 
 /** Entry point; returns the process exit code. */
 export async function main(argv: readonly string[]): Promise<number> {
-  const args = parseArgs(argv);
-  if (args.command === 'help' || args.flags.has('help')) {
+  let args: ParsedArgs;
+  try {
+    args = parseArgs(argv);
+  } catch (e) {
+    if (!(e instanceof UsageError)) throw e;
+    console.error(`✗ ${e.message}\n`);
+    console.error(USAGE);
+    return 2;
+  }
+  if (args.command === 'help' || args.values['help'] === true) {
     console.log(USAGE);
     return 0;
   }
@@ -595,8 +981,20 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 }
 
-const isCliEntry = process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`;
+/**
+ * True when `scriptPath` (process.argv[1]) is this module. Compares real paths,
+ * so symlinked invocations and paths with spaces (percent-encoded in
+ * import.meta.url) still match.
+ */
+export function isEntryScript(moduleUrl: string, scriptPath: string | undefined): boolean {
+  if (!scriptPath) return false;
+  try {
+    return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(scriptPath);
+  } catch {
+    return false;
+  }
+}
 
-if (isCliEntry) {
+if (isEntryScript(import.meta.url, process.argv[1])) {
   process.exitCode = await main(process.argv.slice(2));
 }

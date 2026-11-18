@@ -118,10 +118,14 @@ describe('fetchNewPostsOAuth', () => {
     vi.stubGlobal('fetch', spy);
 
     const first = await fetchNewPosts(['homelabsales', 'hardwareswap'], 'ua', AUTH);
-    await fetchNewPosts(['homelabsales'], 'ua', AUTH);
+    const second = await fetchNewPosts(['homelabsales'], 'ua', AUTH);
 
     expect(first).toMatchObject({kind: 'ok', rateLimit: {remaining: 99, resetSeconds: 300}});
     if (first.kind === 'ok') expect(first.posts).toHaveLength(2);
+    // A broken cache would send the second call to the token endpoint again.
+    expect(second.kind).toBe('ok');
+    const urls = spy.mock.calls.map((call) => call[0] as string);
+    expect(urls.filter((u) => u.endsWith('/api/v1/access_token'))).toHaveLength(1);
 
     expect(spy).toHaveBeenCalledTimes(3);
     const [tokenUrl, tokenInit] = spy.mock.calls[0]! as [string, RequestInit];
@@ -141,11 +145,18 @@ describe('fetchNewPostsOAuth', () => {
     expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH)).toEqual({kind: 'blocked', status: 401});
   });
 
-  it('reports a token error body as an error', async () => {
+  it('reports a token error body as blocked, like a 401', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({error: 'invalid_grant'}), {status: 200})));
     expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH))
-      .toEqual({kind: 'error', message: 'token: invalid_grant'});
+      .toEqual({kind: 'blocked', status: 401});
+  });
+
+  it('reports a rate-limited token endpoint as rate_limited', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response('', {status: 429, headers: {'retry-after': '30'}})));
+    expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH))
+      .toEqual({kind: 'rate_limited', retryAfterSeconds: 30});
   });
 
   it('passes a 429 through with its reset window', async () => {

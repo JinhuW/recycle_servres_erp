@@ -151,10 +151,13 @@ async function checkFleet(deps: WatchDeps): Promise<void> {
  * SettingsStore, so the watch sees a switch on its next pass.
  */
 async function webhookQuiet(sql: Sql): Promise<{title: string; lines: string[]} | null> {
+  // Only deliveries that added a post count as a sign of life: deliveries the
+  // handler stored but could not use (a renamed vendor field, a monitor on the
+  // wrong subreddits) must not keep this alert quiet while nothing is ingested.
   const [row] = await sql<Array<{value: unknown; quiet_s: number | null}>>`
     SELECT (SELECT value FROM settings WHERE key = 'poll_source') AS value,
            (SELECT EXTRACT(EPOCH FROM NOW() - MAX(received_at))::float8
-              FROM webhook_deliveries) AS quiet_s`;
+              FROM webhook_deliveries WHERE inserted > 0) AS quiet_s`;
   if (parsePollSource(row?.value) !== 'webhook') return null;
   const quietS = row?.quiet_s ?? null;
   if (quietS !== null && quietS < WEBHOOK_QUIET_AFTER_MIN * 60) return null;
@@ -162,10 +165,11 @@ async function webhookQuiet(sql: Sql): Promise<{title: string; lines: string[]} 
     title: 'Reddit webhook quiet',
     lines: [
       quietS === null
-        ? 'The redditapis webhook has never delivered, and poll_source is webhook.'
-        : `The redditapis webhook has been quiet for ${minutes(quietS)}.`,
+        ? 'The redditapis webhook has never delivered a new post, and poll_source is webhook.'
+        : `No new post has arrived through the redditapis webhook for ${minutes(quietS)}.`,
       'The poll loop is idle, so no new posts are coming in.',
-      "Check the vendor monitor with the setup script's status command, or set poll_source back to reddit.",
+      'Run `pnpm redditapis status` for the vendor monitor\'s health, and the api log for "webhook" lines.',
+      'Setting poll_source back to reddit helps only with REDDIT_CLIENT_ID set: anonymous Reddit feeds are gone.',
     ],
   };
 }
