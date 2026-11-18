@@ -138,7 +138,12 @@ Breaking any of these breaks the fleet. The tests that cover them are
   code into the ERP backend. If this checkout isn't linked, run
   `railway link` (project `reddits-tracker`, env `production`). Then run
   `railway up --service <api|worker> --detach`.
-- **OCI worker fleet** (`infra/terraform/`, see `infra/README.md`):
+- **OCI worker fleet: stopped on 2026-11-18 (RS-600).** The VMs existed to
+  poll Reddit from many IPs. Posts now arrive by the redditapis.com webhook,
+  so their tracker containers were stopped and removed, and their fleet rows
+  deleted. The Railway `worker` alone runs evaluate and notify. The VMs still
+  exist (terraform state unchanged). Don't redeploy them unless polling comes
+  back, for example with OAuth across many IPs. To bring them back:
   1. Build the multi-arch image `ghcr.io/jinhuw/reddits_tracker:<sha>` with
      `docker buildx … --push .` from this folder.
   2. Run `scripts/deploy-workers.sh <sha>`.
