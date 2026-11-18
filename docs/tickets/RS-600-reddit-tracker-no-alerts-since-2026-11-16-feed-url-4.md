@@ -49,6 +49,15 @@ Devvit app from developers.reddit.com is something else and has no client
 secret. Reddit says public API access ends by March 2027, so this buys months,
 not a permanent fix.
 
+Reddit's create-app page would not issue OAuth credentials, so on 2026-11-17
+the requester chose the redditapis.com monitoring product (Growth, $49/month)
+instead. It pushes each new post in the 13 subreddits to a signed webhook on
+the tracker api (`src/webhook.ts`, migration 0009). `poll_source = webhook`
+idles the poll loop, and the ops watch pages after 90 minutes with no delivery.
+`scripts/redditapis-monitor.ts` sets up the vendor side. The OAuth path stays
+as a fallback. The vendor scrapes Reddit and its terms put Reddit compliance
+on the customer. The requester accepted that trade-off.
+
 A first attempt switched `/new.rss` to `/new/.rss`. A 429 on the new path
 looked like "the route exists", but once the rate limit cleared it 404'd like
 the rest.

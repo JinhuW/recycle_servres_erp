@@ -35,6 +35,9 @@ has the repo map and workflow.
   [docs/debug-notes/reddit-anonymous-json-blocked.md](docs/debug-notes/reddit-anonymous-json-blocked.md).
   The JSON API is dead for anonymous clients and the Atom feed is what works.
   The real rate limit is about 1 request per 40 s per IP, not 10/min.
+  That feed is gone too since Nov 2026
+  ([reddit-new-rss-404.md](docs/debug-notes/reddit-new-rss-404.md)); posts
+  now come from the redditapis.com webhook (`poll_source`, README *Post source*).
 - **The Dockerfile CMD or shutdown path** →
   [docs/debug-notes/signals-must-reach-node.md](docs/debug-notes/signals-must-reach-node.md).
   node must be PID 1 or SIGTERM never reaches the shutdown handler.
@@ -117,7 +120,8 @@ Breaking any of these breaks the fleet. The tests that cover them are
   `127.0.0.1:5433`). The claim logic depends on `FOR UPDATE SKIP LOCKED`, which
   fakes do not reproduce.
 - There is **no CLI** by design. The HTTP API is the only admin surface, so a UI
-  can do everything an operator can.
+  can do everything an operator can. `scripts/redditapis-monitor.ts` is not an
+  exception: it configures the vendor's monitor, not the tracker.
 - `ALERT_TRANSPORT=console` prints alerts to stdout instead of Telegram, which
   is useful locally and makes the bot token optional.
 

@@ -32,6 +32,7 @@ afterEach(() => {
 beforeEach(async () => {
   await db.sql`DELETE FROM posts`;
   await db.sql`DELETE FROM subreddits`;
+  await db.sql`UPDATE settings SET value = to_jsonb('reddit'::text) WHERE key = 'poll_source'`;
   await db.sql`INSERT INTO subreddits (name) VALUES
     ('homelab'), ('hardwareswap'), ('homelabsales')`;
 });
@@ -224,5 +225,42 @@ describe('pollOnce', () => {
     const rows = await db.sql<Array<{subreddit: string}>>`
       SELECT DISTINCT subreddit FROM posts`;
     expect(rows.map((r) => r.subreddit)).toEqual(['homelab']);
+  });
+});
+
+describe('pollOnce with poll_source', () => {
+  async function setSource(value: unknown) {
+    await db.sql`UPDATE settings SET value = ${db.sql.json(value as never)} WHERE key = 'poll_source'`;
+  }
+
+  it('idles on webhook: no pacer slot, no claim, no Reddit request', async () => {
+    await setSource('webhook');
+    const spy = stubFeed(freshFixture());
+    const d = deps();
+    const acquire = vi.spyOn(d.pacer, 'acquire');
+
+    expect(await pollOnce(d)).toBe(false);
+
+    expect(acquire).not.toHaveBeenCalled();
+    expect(spy).not.toHaveBeenCalled();
+    const claimed = await db.sql`SELECT 1 FROM subreddits WHERE claimed_by IS NOT NULL`;
+    expect(claimed).toHaveLength(0);
+    expect(await db.sql`SELECT 1 FROM posts`).toHaveLength(0);
+  });
+
+  it('polls on reddit', async () => {
+    await setSource('reddit');
+    const spy = stubFeed(freshFixture());
+
+    expect(await pollOnce(deps())).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('polls when the value is anything but exactly webhook', async () => {
+    await setSource('Webhook');
+    const spy = stubFeed(freshFixture());
+
+    expect(await pollOnce(deps())).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });

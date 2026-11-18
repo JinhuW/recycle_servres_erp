@@ -79,6 +79,8 @@ async function runApi(): Promise<void> {
     apiToken: config.apiToken,
     workerId: config.workerId,
     startedAt,
+    webhookSecret: config.redditapisWebhookSecret,
+    logger,
   });
 
   const server = serve({fetch: app.fetch, port: config.apiPort});

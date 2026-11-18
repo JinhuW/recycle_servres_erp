@@ -10,9 +10,15 @@
 import type {Sql} from '../db.ts';
 import {DEAD_AFTER_S, problemText, type LoopFailures, type LoopName} from '../heartbeat.ts';
 import type {Logger} from '../logger.ts';
+import {parsePollSource} from '../settings.ts';
 
 /** A loop is failing after this many bad iterations in a row. */
 export const FAILING_AFTER = 3;
+/** With poll_source = 'webhook', no delivery for this long pages ops. */
+export const WEBHOOK_QUIET_AFTER_MIN = 90;
+const WEBHOOK_QUIET_KEY = 'webhook:quiet';
+/** watch_alerts.worker_id for an alert about the fleet rather than one worker. */
+const FLEET_ID = 'fleet';
 const DIGEST_BATCH = 200;
 const RETENTION_DAYS = 7;
 const RELAY_TIMEOUT_MS = 15_000;
@@ -73,6 +79,8 @@ async function checkFleet(deps: WatchDeps): Promise<void> {
   const down = new Set(workers.filter((w) => w.silent_s >= DEAD_AFTER_S).map((w) => w.worker_id));
 
   const wanted = new Map<string, {workerId: string; title: string; lines: string[]}>();
+  const quiet = await webhookQuiet(sql);
+  if (quiet) wanted.set(WEBHOOK_QUIET_KEY, {workerId: FLEET_ID, ...quiet});
   for (const w of workers) {
     if (down.has(w.worker_id)) {
       wanted.set(`down:${w.worker_id}`, {
@@ -109,6 +117,16 @@ async function checkFleet(deps: WatchDeps): Promise<void> {
   for (const r of raised) {
     if (wanted.has(r.key)) continue;
     const kind = r.key.slice(0, r.key.indexOf(':'));
+    if (kind === 'webhook') {
+      const resolution = {
+        title: 'Reddit webhook back',
+        lines: ['Deliveries resumed, or poll_source is no longer webhook.'],
+      };
+      if (await post(deps, {topic: 'reddit_workers', status: 'resolved', ...resolution})) {
+        await sql`DELETE FROM watch_alerts WHERE key = ${r.key}`;
+      }
+      continue;
+    }
     // A failing loop on a worker that has since died is not a recovery; the
     // down alert speaks for it until the worker is back or gone.
     if (kind === 'failing' && down.has(r.worker_id)) continue;
@@ -125,6 +143,31 @@ async function checkFleet(deps: WatchDeps): Promise<void> {
       await sql`DELETE FROM watch_alerts WHERE key = ${r.key}`;
     }
   }
+}
+
+/**
+ * The webhook alert, when poll_source is 'webhook' and nothing has arrived for
+ * WEBHOOK_QUIET_AFTER_MIN. Read straight from the table rather than through a
+ * SettingsStore, so the watch sees a switch on its next pass.
+ */
+async function webhookQuiet(sql: Sql): Promise<{title: string; lines: string[]} | null> {
+  const [row] = await sql<Array<{value: unknown; quiet_s: number | null}>>`
+    SELECT (SELECT value FROM settings WHERE key = 'poll_source') AS value,
+           (SELECT EXTRACT(EPOCH FROM NOW() - MAX(received_at))::float8
+              FROM webhook_deliveries) AS quiet_s`;
+  if (parsePollSource(row?.value) !== 'webhook') return null;
+  const quietS = row?.quiet_s ?? null;
+  if (quietS !== null && quietS < WEBHOOK_QUIET_AFTER_MIN * 60) return null;
+  return {
+    title: 'Reddit webhook quiet',
+    lines: [
+      quietS === null
+        ? 'The redditapis webhook has never delivered, and poll_source is webhook.'
+        : `The redditapis webhook has been quiet for ${minutes(quietS)}.`,
+      'The poll loop is idle, so no new posts are coming in.',
+      "Check the vendor monitor with the setup script's status command, or set poll_source back to reddit.",
+    ],
+  };
 }
 
 /** Every warn/error line since the last digest, grouped by what it says. */

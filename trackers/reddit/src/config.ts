@@ -20,6 +20,8 @@ export interface Config {
   readonly redditUserAgent: string;
   /** App-only OAuth credentials; null falls back to the (withdrawn) Atom feed. */
   readonly redditAuth: RedditAuth | null;
+  /** HMAC secret for redditapis.com monitor webhooks; '' turns the route off. */
+  readonly redditapisWebhookSecret: string;
   readonly redditMaxRpm: number;
   readonly apiPort: number;
   readonly apiToken: string;
@@ -110,6 +112,7 @@ export function loadConfig(): Config {
     workerId: process.env['WORKER_ID'] || generateWorkerId(),
     redditUserAgent: process.env['REDDIT_USER_AGENT'] || DEFAULT_USER_AGENT,
     redditAuth,
+    redditapisWebhookSecret: process.env['REDDITAPIS_WEBHOOK_SECRET'] ?? '',
     redditMaxRpm,
     apiPort,
     apiToken: role === 'api' ? required('API_TOKEN', role) : (process.env['API_TOKEN'] ?? ''),

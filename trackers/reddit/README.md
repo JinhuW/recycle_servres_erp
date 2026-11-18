@@ -226,7 +226,8 @@ through the API — no redeploy, and changes reach every worker within 60 s.
 | `API_PORT` / `API_TOKEN` | api role | `8080` / — |
 | `WORKER_ID` | no | `hostname-pid-random` |
 | `REDDIT_USER_AGENT` | no | `recycle-servers-tracker/1.0 (contact: …)` |
-| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | yes in practice, both or neither | — (falls back to the Atom feed, which Reddit withdrew in Nov 2026; see `docs/debug-notes/reddit-new-rss-404.md`) |
+| `REDDITAPIS_WEBHOOK_SECRET` | api role, when `poll_source` is `webhook` | — (`/webhooks/redditapis` answers 404) |
+| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | no, both or neither | — (falls back to the Atom feed, which Reddit withdrew in Nov 2026; see `docs/debug-notes/reddit-new-rss-404.md`) |
 | `REDDIT_MAX_RPM` | no | `1` |
 | `COMMENT_TRACER` | no | `on` (`off` keeps this worker from taking the PM tracer lease) |
 | `LOG_LEVEL` | no | `info` |
@@ -234,15 +235,45 @@ through the API — no redeploy, and changes reach every worker within 60 s.
 | `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` / `TELEGRAM_USER_SESSION` | api role, all or none | — (the bot sends alerts; no read receipts) |
 
 Database-backed settings: `eval_prompt`, `llm_model`, `telegram_chat_ids`,
-`max_post_age_hours`, `telegram_dev_chat_ids`, `candidate_eval_prompt` and
-`candidate_llm_model`. The last three default to empty, which means off.
+`max_post_age_hours`, `telegram_dev_chat_ids`, `candidate_eval_prompt`,
+`candidate_llm_model` and `poll_source`. The two candidate keys and the dev
+chats default to empty, which means off. `poll_source` is `reddit` (workers
+poll Reddit) or `webhook` (the poll loop idles; see *Post source* below).
 Watched subreddits live in the `subreddits` table. Named buying rules live in
 `rules`; the enabled ones are appended to `eval_prompt` at evaluation time, so
 each post is still one LLM call (two while a candidate is on trial).
 
+## Post source
+
+Reddit withdrew logged-out RSS in November 2026
+([debug note](docs/debug-notes/reddit-new-rss-404.md)), so the workers'
+own polling no longer finds posts. With `poll_source = webhook`, the
+[redditapis.com](https://www.redditapis.com) monitor (Growth plan, up to 25
+subreddits) watches the enabled subreddits and POSTs each new post to the api's
+`/webhooks/redditapis`. The route checks the HMAC-SHA256 signature
+(`REDDITAPIS_WEBHOOK_SECRET`), ignores redeliveries by delivery id, keeps only
+enabled subreddits younger than `max_post_age_hours`, and inserts the posts.
+Evaluation and alerts are unchanged. The ops watch pages when no delivery
+arrives for 90 minutes.
+
+`pnpm redditapis <command>` (`scripts/redditapis-monitor.ts`, needs
+`REDDITAPIS_KEY`) manages the vendor side. It is an ops script against the
+vendor's API, not an admin surface for the tracker:
+
+- `setup --url https://<api host>/webhooks/redditapis` creates the webhook and
+  one monitor for the enabled subreddits, and prints the secret once.
+- `sync` matches the monitor to the `subreddits` table after you add or
+  disable one.
+- `status`, `test`, and `redrive --since-hours N` (after an outage over the
+  vendor's ~21 minutes of retries).
+
+A delivery whose body the vendor could not verify arrives without text, and
+the post is judged on its title. Subreddits with no new posts keep their old
+`last_status` in `/api/stats` until their next post arrives.
+
 ## HTTP API
 
-Everything except `/health` needs `Authorization: Bearer $API_TOKEN`.
+Everything except `/health` and `/webhooks/redditapis` needs `Authorization: Bearer $API_TOKEN`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |

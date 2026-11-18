@@ -1,6 +1,6 @@
 import {afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createLogger} from '../src/logger.ts';
-import {FAILING_AFTER, watchOnce, type RelayAlert} from '../src/loops/watch.ts';
+import {FAILING_AFTER, WEBHOOK_QUIET_AFTER_MIN, watchOnce, type RelayAlert} from '../src/loops/watch.ts';
 import {createTestDb, type TestDb} from './helpers/db.ts';
 
 // The api's watch turns the fleet's heartbeats into ops alerts.
@@ -21,6 +21,8 @@ beforeEach(async () => {
   await db.sql`DELETE FROM workers`;
   await db.sql`DELETE FROM worker_errors`;
   await db.sql`DELETE FROM watch_alerts`;
+  await db.sql`DELETE FROM webhook_deliveries`;
+  await db.sql`UPDATE settings SET value = to_jsonb('reddit'::text) WHERE key = 'poll_source'`;
   posted = [];
   relayStatus = 204;
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
@@ -194,5 +196,77 @@ describe('error digest', () => {
     await watch();
 
     expect(await db.sql`SELECT 1 FROM worker_errors`).toHaveLength(0);
+  });
+});
+
+describe('webhook quiet', () => {
+  const pollSource = (value: string) => db.sql`
+    UPDATE settings SET value = to_jsonb(${value}::text) WHERE key = 'poll_source'`;
+  const delivery = (id: string, minutesAgo: number) => db.sql`
+    INSERT INTO webhook_deliveries (delivery_id, monitor_id, items, inserted, received_at)
+    VALUES (${id}, 'mon-1', 1, 1, NOW() - make_interval(mins => ${minutesAgo}))`;
+
+  it('never fires while poll_source is reddit', async () => {
+    await delivery('d-1', 10 * 60);
+
+    await watch();
+
+    expect(posted).toEqual([]);
+  });
+
+  it(`stays quiet while a delivery is newer than ${WEBHOOK_QUIET_AFTER_MIN} min`, async () => {
+    await pollSource('webhook');
+    await delivery('d-1', WEBHOOK_QUIET_AFTER_MIN - 5);
+
+    await watch();
+
+    expect(posted).toEqual([]);
+  });
+
+  it(`raises once after ${WEBHOOK_QUIET_AFTER_MIN} quiet min, and resolves when deliveries resume`, async () => {
+    await pollSource('webhook');
+    await delivery('d-1', 100);
+
+    await watch();
+    await watch();
+
+    expect(posted).toEqual([{
+      topic: 'reddit_workers',
+      status: 'firing',
+      title: 'Reddit webhook quiet',
+      lines: [
+        'The redditapis webhook has been quiet for 100 min.',
+        'The poll loop is idle, so no new posts are coming in.',
+        "Check the vendor monitor with the setup script's status command, or set poll_source back to reddit.",
+      ],
+    }]);
+
+    await delivery('d-2', 0);
+    await watch();
+
+    expect(posted[1]).toMatchObject({status: 'resolved', title: 'Reddit webhook back'});
+    expect(await db.sql`SELECT 1 FROM watch_alerts`).toHaveLength(0);
+  });
+
+  it('raises when the webhook has never delivered', async () => {
+    await pollSource('webhook');
+
+    await watch();
+
+    expect(posted[0]).toMatchObject({status: 'firing', title: 'Reddit webhook quiet'});
+    expect(posted[0]!.lines[0]).toContain('never delivered');
+  });
+
+  it('resolves when poll_source goes back to reddit', async () => {
+    await pollSource('webhook');
+    await watch();
+
+    await pollSource('reddit');
+    await watch();
+
+    expect(posted.map((p) => [p.status, p.title])).toEqual([
+      ['firing', 'Reddit webhook quiet'],
+      ['resolved', 'Reddit webhook back'],
+    ]);
   });
 });
