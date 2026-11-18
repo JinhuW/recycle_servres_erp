@@ -258,10 +258,18 @@ export function webhookHandler(deps: WebhookDeps, logger: Logger) {
         logger.info('webhook redelivery ignored', {deliveryId: delivery.deliveryId});
         return c.json({ok: true, duplicate: true});
       }
-      if (itemCount > 0 && result.watched === 0) {
-        // Every item was dropped before the age filter: a vendor field we parse
-        // changed, or the monitor watches subreddits we don't.
+      if (itemCount > 0 && delivery.posts.length === 0) {
+        // Not one item parsed: a vendor field we read has changed.
         logger.warn('webhook delivery had no usable posts', {
+          deliveryId: delivery.deliveryId,
+          items: itemCount,
+          parsed: 0,
+        });
+      } else if (itemCount > 0 && result.watched === 0) {
+        // Only subreddits that are disabled here: the vendor monitor lags the
+        // subreddits table until the next `pnpm redditapis sync`. Routine, and
+        // at warn it would page ops on every delivery from that subreddit.
+        logger.info('webhook delivery only for subreddits not enabled', {
           deliveryId: delivery.deliveryId,
           items: itemCount,
           parsed: delivery.posts.length,

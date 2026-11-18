@@ -3641,7 +3641,7 @@ Jobs exactly one process in the fleet runs at a time (migration 0006). Today the
 
 #### `webhook_deliveries`
 
-One row per accepted delivery from the redditapis.com monitor (migration 0009). Reddit withdrew logged-out RSS in November 2026, so with `poll_source = webhook` the vendor discovers posts and POSTs them to the api's `/webhooks/redditapis`. The row is written in the same transaction as the delivery's posts, so a failed insert rolls both back and the vendor's retry is not mistaken for a duplicate. The ops watch reads the newest `received_at` to notice the webhook going quiet.
+One row per accepted delivery from the redditapis.com monitor (migration 0009). Reddit withdrew logged-out RSS in November 2026, so with `poll_source = webhook` the vendor discovers posts and POSTs them to the api's `/webhooks/redditapis`. The row is written in the same transaction as the delivery's posts, so a failed insert rolls both back and the vendor's retry is not mistaken for a duplicate. The ops watch reads the newest `received_at` to notice the webhook going quiet, and deletes rows older than 30 days, which is longer than the vendor retries or redrives a delivery.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |

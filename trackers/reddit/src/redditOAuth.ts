@@ -7,7 +7,14 @@
 // It reads the same r/a+b+c multireddit listing in one request, so the poll
 // loop's one-request-per-cycle invariant holds.
 
-import type {RedditComment, RedditPost, RateLimitHint} from './reddit.ts';
+import {
+  COMMENTS_LIMIT,
+  numericHeader,
+  readRateLimit,
+  type RateLimitHint,
+  type RedditComment,
+  type RedditPost,
+} from './reddit.ts';
 
 export interface RedditAuth {
   clientId: string;
@@ -20,7 +27,6 @@ const REQUEST_TIMEOUT_MS = 20_000;
 /** Renew this long before Reddit's stated expiry, so no request races it. */
 const TOKEN_MARGIN_MS = 5 * 60_000;
 const LISTING_LIMIT = 100;
-const COMMENTS_LIMIT = 500;
 
 interface CachedToken {
   key: string;
@@ -38,8 +44,7 @@ export function resetTokenCache(): void {
 type TokenResult =
   | {kind: 'ok'; token: string}
   | {kind: 'rate_limited'; retryAfterSeconds?: number}
-  | {kind: 'blocked'; status: number}
-  | {kind: 'error'; message: string};
+  | {kind: 'blocked'; status: number};
 
 async function accessToken(auth: RedditAuth, userAgent: string): Promise<TokenResult> {
   const key = auth.clientId;
@@ -59,8 +64,10 @@ async function accessToken(auth: RedditAuth, userAgent: string): Promise<TokenRe
       body: 'grant_type=client_credentials',
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-  } catch (e) {
-    return {kind: 'error', message: `token: ${e instanceof Error ? e.message : String(e)}`};
+  } catch {
+    // An outage of the token endpoint says nothing about the post being
+    // fetched, so it backs off like a 429 rather than failing that post.
+    return {kind: 'rate_limited'};
   }
 
   // Wrong credentials come back as 401; a revoked or unapproved app as 403.
@@ -68,18 +75,19 @@ async function accessToken(auth: RedditAuth, userAgent: string): Promise<TokenRe
     return {kind: 'blocked', status: response.status};
   }
   // Callers back off on rate_limited and blocked, but read error as "this one
-  // request failed": the tracer would write the post off as untraceable.
+  // request failed": the tracer would write the post off as untraceable. So
+  // no token failure is an error.
   if (response.status === 429) {
     const seconds = numericHeader(response.headers, 'retry-after');
     return {kind: 'rate_limited', ...(seconds !== undefined ? {retryAfterSeconds: seconds} : {})};
   }
-  if (!response.ok) return {kind: 'error', message: `token: HTTP ${response.status}`};
+  if (!response.ok) return {kind: 'rate_limited'};
 
   let body: {access_token?: unknown; expires_in?: unknown; error?: unknown};
   try {
     body = await response.json() as typeof body;
   } catch {
-    return {kind: 'error', message: 'token: response was not JSON'};
+    return {kind: 'rate_limited'};
   }
   if (typeof body.access_token !== 'string') {
     // Reddit answers bad credentials with 200 {"error": ...} as well as 401:
@@ -96,22 +104,6 @@ async function accessToken(auth: RedditAuth, userAgent: string): Promise<TokenRe
   return {kind: 'ok', token: body.access_token};
 }
 
-function numericHeader(headers: Headers, name: string): number | undefined {
-  const raw = headers.get(name);
-  if (raw === null || raw.trim() === '') return undefined;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : undefined;
-}
-
-function readRateLimit(headers: Headers): RateLimitHint {
-  const remaining = numericHeader(headers, 'x-ratelimit-remaining');
-  const resetSeconds = numericHeader(headers, 'x-ratelimit-reset');
-  return {
-    ...(remaining !== undefined ? {remaining} : {}),
-    ...(resetSeconds !== undefined ? {resetSeconds} : {}),
-  };
-}
-
 type ApiResult =
   | {kind: 'ok'; json: unknown; rateLimit: RateLimitHint}
   | {kind: 'rate_limited'; retryAfterSeconds?: number}
@@ -121,6 +113,20 @@ type ApiResult =
 
 /** One authenticated GET, with Reddit's failure modes told apart. Never throws. */
 async function apiGet(path: string, userAgent: string, auth: RedditAuth): Promise<ApiResult> {
+  const first = await apiGetOnce(path, userAgent, auth);
+  if (first !== 'unauthorized') return first;
+  // The token expired early or was revoked. One retry with a fresh token; a
+  // second refusal means the credentials themselves are no longer accepted.
+  resetTokenCache();
+  const second = await apiGetOnce(path, userAgent, auth);
+  return second === 'unauthorized' ? {kind: 'blocked', status: 401} : second;
+}
+
+async function apiGetOnce(
+  path: string,
+  userAgent: string,
+  auth: RedditAuth,
+): Promise<ApiResult | 'unauthorized'> {
   const token = await accessToken(auth, userAgent);
   if (token.kind !== 'ok') return token;
 
@@ -139,11 +145,7 @@ async function apiGet(path: string, userAgent: string, auth: RedditAuth): Promis
       ?? numericHeader(response.headers, 'x-ratelimit-reset');
     return {kind: 'rate_limited', ...(seconds !== undefined ? {retryAfterSeconds: seconds} : {})};
   }
-  if (response.status === 401) {
-    // The token expired early or was revoked; the next call fetches a new one.
-    resetTokenCache();
-    return {kind: 'error', message: 'HTTP 401 (token refreshed)'};
-  }
+  if (response.status === 401) return 'unauthorized';
   if (response.status === 403) return {kind: 'blocked', status: 403};
   if (response.status === 404) return {kind: 'gone'};
   if (!response.ok) return {kind: 'error', message: `HTTP ${response.status}`};

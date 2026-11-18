@@ -249,6 +249,16 @@ describe('webhook quiet', () => {
     expect(await db.sql`SELECT 1 FROM watch_alerts`).toHaveLength(0);
   });
 
+  it('deletes deliveries older than a month', async () => {
+    await delivery('d-old', 31 * 24 * 60);
+    await delivery('d-recent', 29 * 24 * 60);
+
+    await watch();
+
+    expect((await db.sql`SELECT delivery_id FROM webhook_deliveries`).map((r) => r['delivery_id']))
+      .toEqual(['d-recent']);
+  });
+
   it('ignores deliveries that inserted no post', async () => {
     await pollSource('webhook');
     await db.sql`

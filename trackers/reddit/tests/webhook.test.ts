@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 import type {Hono} from 'hono';
 import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 import {createApi} from '../src/api.ts';
+import type {Logger} from '../src/logger.ts';
 import {SettingsStore} from '../src/settings.ts';
 import {parseDelivery, verifySignature} from '../src/webhook.ts';
 import {createTestDb, type TestDb} from './helpers/db.ts';
@@ -126,8 +127,9 @@ describe('POST /webhooks/redditapis', () => {
   let db: TestDb;
   let app: Hono;
 
-  function build(webhookSecret?: string): Hono {
+  function build(webhookSecret?: string, logger?: Logger): Hono {
     return createApi({
+      ...(logger ? {logger} : {}),
       sql: db.sql,
       settings: new SettingsStore(db.sql, 0),
       botToken: 'bot-token',
@@ -255,6 +257,27 @@ describe('POST /webhooks/redditapis', () => {
     expect(subs[1]).toMatchObject({name: 'homelabsales', last_status: 'ok', consecutive_errors: 0});
     expect(subs[1]!['last_polled_at']).not.toBeNull();
     expect(subs[0]).toMatchObject({name: 'hardwareswap', last_status: null, last_polled_at: null});
+  });
+
+  it('logs a delivery only for disabled subreddits at info, so it never pages', async () => {
+    // Every warn reaches the ops group, and the vendor monitor keeps sending a
+    // subreddit disabled here until the next sync.
+    const levels: string[] = [];
+    const record = (level: string) => () => void levels.push(level);
+    const logger: Logger = {
+      debug: record('debug'), info: record('info'), warn: record('warn'), error: record('error'),
+      event: () => {}, child: () => logger,
+    };
+    const body = freshDelivery('d-disabled');
+    const items = body['items'] as Array<Record<string, unknown>>;
+    body['items'] = [{...items[0], id: 'off1', name: 't3_off1', subreddit: 'hardwareswap',
+      permalink: '/r/hardwareswap/comments/off1/x/'}];
+
+    const res = await post(body, {target: build(SECRET, logger)});
+
+    expect(await res.json()).toEqual({ok: true, inserted: 0});
+    expect(levels).not.toContain('warn');
+    expect(levels).not.toContain('error');
   });
 
   it('treats a repeated delivery id as a duplicate and inserts nothing', async () => {

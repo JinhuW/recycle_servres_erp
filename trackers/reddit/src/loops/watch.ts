@@ -21,6 +21,11 @@ const WEBHOOK_QUIET_KEY = 'webhook:quiet';
 const FLEET_ID = 'fleet';
 const DIGEST_BATCH = 200;
 const RETENTION_DAYS = 7;
+/**
+ * webhook_deliveries rows exist to spot a redelivery, and the vendor retries
+ * and redrives within days, so a month covers every id it can send again.
+ */
+const DELIVERY_RETENTION_DAYS = 30;
 const RELAY_TIMEOUT_MS = 15_000;
 const WORKERS_LISTED = 5;
 
@@ -62,6 +67,9 @@ export async function watchOnce(deps: WatchDeps): Promise<boolean> {
   const more = await sendErrorDigest(deps);
   await deps.sql`
     DELETE FROM worker_errors WHERE at < NOW() - make_interval(days => ${RETENTION_DAYS})`;
+  await deps.sql`
+    DELETE FROM webhook_deliveries
+     WHERE received_at < NOW() - make_interval(days => ${DELIVERY_RETENTION_DAYS})`;
   return more;
 }
 

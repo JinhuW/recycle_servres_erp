@@ -167,7 +167,7 @@ describe('fetchNewPostsOAuth', () => {
       .toEqual({kind: 'rate_limited', retryAfterSeconds: 42});
   });
 
-  it('drops the token after a 401 so the next call fetches a new one', async () => {
+  it('retries a 401 once with a fresh token', async () => {
     const spy = vi.fn()
       .mockResolvedValueOnce(tokenResponse())
       .mockResolvedValueOnce(new Response('', {status: 401}))
@@ -175,15 +175,25 @@ describe('fetchNewPostsOAuth', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify(LISTING), {status: 200}));
     vi.stubGlobal('fetch', spy);
 
-    expect((await fetchNewPostsOAuth(['homelab'], 'ua', AUTH)).kind).toBe('error');
     expect((await fetchNewPostsOAuth(['homelab'], 'ua', AUTH)).kind).toBe('ok');
     expect(spy.mock.calls[2]![0]).toBe('https://www.reddit.com/api/v1/access_token');
   });
 
-  it('never throws on a transport failure', async () => {
+  it('reports a 401 that survives a fresh token as blocked, never as error', async () => {
+    // error would make the tracer write the post off for good.
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce(new Response('', {status: 401}))
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce(new Response('', {status: 401})));
+    expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH)).toEqual({kind: 'blocked', status: 401});
+  });
+
+  it('backs off when the token endpoint is unreachable or failing', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('socket hang up')));
-    expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH))
-      .toEqual({kind: 'error', message: 'token: socket hang up'});
+    expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH)).toEqual({kind: 'rate_limited'});
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', {status: 503})));
+    expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH)).toEqual({kind: 'rate_limited'});
   });
 });
 

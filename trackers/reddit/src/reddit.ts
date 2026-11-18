@@ -129,14 +129,14 @@ export function parseFeed(xml: string): RedditPost[] {
  * Reads a numeric header. Returns undefined for an absent header — plain
  * Number() would turn that null into 0, which reads as "no wait needed".
  */
-function numericHeader(headers: Headers, name: string): number | undefined {
+export function numericHeader(headers: Headers, name: string): number | undefined {
   const raw = headers.get(name);
   if (raw === null || raw.trim() === '') return undefined;
   const value = Number(raw);
   return Number.isFinite(value) ? value : undefined;
 }
 
-function readRateLimit(headers: Headers): RateLimitHint {
+export function readRateLimit(headers: Headers): RateLimitHint {
   const remaining = numericHeader(headers, 'x-ratelimit-remaining');
   const resetSeconds = numericHeader(headers, 'x-ratelimit-reset');
   return {
@@ -228,7 +228,7 @@ export type CommentsResult =
   | {kind: 'error'; message: string};
 
 /** Reddit's ceiling for one comment page; a thread longer than this is rare on a sale post. */
-const COMMENTS_LIMIT = 500;
+export const COMMENTS_LIMIT = 500;
 
 /** A post's comment feed, from its permalink. */
 export function commentsUrl(postUrl: string): string {
