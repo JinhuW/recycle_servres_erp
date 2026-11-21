@@ -33,7 +33,9 @@ has the repo map and workflow.
 
 - **Anything about fetching posts** →
   [docs/debug-notes/reddit-anonymous-json-blocked.md](docs/debug-notes/reddit-anonymous-json-blocked.md).
-  The JSON API is dead for anonymous clients and the Atom feed is what works.
+  The JSON API is dead for anonymous clients. The Atom feed worked until
+  Reddit retired it on 2026-11-13; every poll has been a 404 since
+  ([docs/debug-notes/reddit-rss-retired-2026-11-13.md](docs/debug-notes/reddit-rss-retired-2026-11-13.md)).
   The real rate limit is about 1 request per 40 s per IP, not 10/min.
 - **The Dockerfile CMD or shutdown path** →
   [docs/debug-notes/signals-must-reach-node.md](docs/debug-notes/signals-must-reach-node.md).

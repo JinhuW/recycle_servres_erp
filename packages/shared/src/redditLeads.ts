@@ -6,12 +6,12 @@ export const REDDIT_LEAD_STAGES = ['claimed', 'dm', 'replied', 'talks', 'won'] a
 export type RedditLeadStage = (typeof REDDIT_LEAD_STAGES)[number];
 
 /** Why an open lead was closed without a deal. '' = not closed. */
-export const REDDIT_LEAD_CLOSINGS = ['nostock', 'lost'] as const;
+export const REDDIT_LEAD_CLOSINGS = ['nostock', 'lost', 'optout'] as const;
 export type RedditLeadClosing = (typeof REDDIT_LEAD_CLOSINGS)[number];
 
 export type RedditLeadEventKind =
   | 'imported' | 'claimed' | 'released' | 'dm' | 'reply'
-  | 'stage' | 'follow_up' | 'closed' | 'reopened';
+  | 'stage' | 'follow_up' | 'closed' | 'reopened' | 'opt_in';
 
 /** A claim this old with no DM yet is stale: a manager should free it. */
 export const REDDIT_LEAD_STALE_HOURS = 48;
@@ -20,6 +20,12 @@ export const REDDIT_LEAD_DM_FOLLOW_UP_DAYS = 3;
 /** "No stock now" comes back as a follow-up this many days later. */
 export const REDDIT_LEAD_NOSTOCK_DAYS = 30;
 export const REDDIT_LEAD_REPLY_MAX = 2000;
+/**
+ * First messages one purchaser may mark sent per local day. A burst of cold
+ * DMs is what Reddit's spam filter flags, and a flagged account loses the
+ * trade history that makes sellers answer. Follow-ups are not counted.
+ */
+export const REDDIT_LEAD_DAILY_FIRST_DMS = 15;
 export const REDDIT_LEAD_IMPORT_MAX = 5000;
 
 export interface RedditLeadReply {
@@ -55,6 +61,8 @@ export interface RedditLead {
   followUp: string | null;
   dmAt: number | null;
   lastReply: RedditLeadReply | null;
+  /** The seller asked not to be contacted. Nobody may claim them. */
+  optedOut: boolean;
 }
 
 export interface RedditLeadEvent {

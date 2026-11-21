@@ -1555,7 +1555,9 @@ saying what the tab is for.
   last deal and what they sold lately. **Claim** moves the seller to the
   claimer's My leads, and everyone else then sees it as claimed. When two
   purchasers claim at once, the second gets a warning (409 `rlTakenElsewhere`).
-  There is no claim limit. The list shows 50 sellers at a time and reveals
+  There is no claim limit. A seller who asked not to be contacted is not in
+  the Pool, and claiming one answers 409 `rlOptedOut` (v1.473.0, RS-600).
+  The list shows 50 sellers at a time and reveals
   the next 50 as you scroll to its foot (v1.393.0); **Show 50 more** does the
   same by hand.
 - **My leads** is the claimer's queue: Claimed → DM sent → Replied →
@@ -1568,14 +1570,29 @@ saying what the tab is for.
 - **The lead panel** runs the workflow for one seller:
   - a stage bar, and the next step spelled out;
   - a DM writer with Bulk inventory, Specific item and Follow-up templates,
-    filled in from the seller's record. **Open in Reddit** opens Reddit's
-    compose page with the message filled in, and the purchaser presses Send
-    there. Confirming "sent" marks the DM sent and sets a follow-up 3 days
-    out;
+    filled in from the seller's record. The first-contact templates end with
+    an opt-out line. **Copy & open chat** copies the message and opens a
+    Reddit Chat with the seller, where the purchaser pastes it and presses
+    Send; Reddit's old message page, which fills the message in, is still
+    offered under it (v1.473.0, RS-600). The ERP never sends a message
+    itself: Reddit's developer terms need written approval for business use
+    of its API, and private messages are now Chat, which has no API. Before a
+    first message to a seller with a tracked sale post, the writer asks for a
+    comment on that post first, as both swap subreddits expect. Confirming
+    "sent" marks the DM sent and sets a follow-up 3 days out;
+  - **a daily cap on first messages** (v1.473.0, RS-600): a purchaser can
+    mark at most 15 first messages sent per day, counted from the ledger. The
+    writer shows "7 of 15 first messages sent today", and the 16th answers
+    429 `rlDailyCap`. Follow-ups are not counted. A burst of identical cold
+    DMs is what gets a Reddit account flagged;
   - logging the seller's reply, which clears the follow-up;
   - setting the next follow-up (Tomorrow, In 3 days, Next week or a date);
   - closing the lead (Deal made; No stock now, which comes back in 30 days;
-    Not interested), reopening it, and releasing the seller;
+    Not interested; Asked not to be contacted), reopening it, and releasing
+    the seller. **Asked not to be contacted** (v1.473.0, RS-600) sticks to
+    the seller through release and re-import. Nobody can claim, message or
+    re-stage them, and only a manager can claim one and lift it, which the
+    history records;
   - the lead's history, read from an append-only ledger.
 - **Buyer network** lists the top 50 buyers. Picking one, say u/Frank202312,
   shows a tree of every seller they bought from, biggest sellers first. Each

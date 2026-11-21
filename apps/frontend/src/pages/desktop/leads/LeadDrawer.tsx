@@ -7,10 +7,10 @@ import { useEscapeKey } from '../../../lib/useEscapeKey';
 import { useFocusTrap } from '../../../lib/useFocusTrap';
 import { handleFetchError } from '../../../lib/errorToast';
 import {
-  DM_TEMPLATES, composeUrl, dmDraft, leadsApi, profileUrl,
-  type DmTemplateId, type RedditLead, type RedditLeadEvent,
+  DM_TEMPLATES, chatUrl, composeUrl, dmDraft, leadsApi, profileUrl,
+  type DmTemplateId, type RedditLead, type RedditLeadClosing, type RedditLeadEvent,
 } from '../../../lib/redditLeads';
-import { CLOSING_KEY, DealRecord, STAGE_KEY, StageChip, fmtDay, leadToday, type RunLead } from './shared';
+import { CLOSING_KEY, DealRecord, STAGE_KEY, StageChip, fmtDay, leadToday, type DmQuota, type RunLead } from './shared';
 
 const TEMPLATE_KEY: Record<DmTemplateId, string> = { bulk: 'rlTplBulk', item: 'rlTplItem', follow: 'rlTplFollow' };
 const QUICK_FOLLOW = [[1, 'rlTomorrow'], [3, 'rlIn3Days'], [7, 'rlNextWeek']] as const;
@@ -20,6 +20,9 @@ type Props = {
   me: { name: string };
   manager: boolean;
   run: RunLead;
+  quota: DmQuota;
+  /** The holder marked a first message sent: the page counts it against the cap. */
+  onFirstDm: () => void;
   onClose: () => void;
   onBuyer: (username: string) => void;
 };
@@ -29,7 +32,7 @@ type Props = {
  * DM writer, the reply log, the follow-up and closing, and the history. A
  * purchaser opening someone else's seller gets only "taken".
  */
-export function LeadDrawer({ lead, me, manager, run, onClose, onBuyer }: Props) {
+export function LeadDrawer({ lead, me, manager, run, quota, onFirstDm, onClose, onBuyer }: Props) {
   const { t, locale } = useT();
   const panel = useRef<HTMLElement>(null);
   useFocusTrap(panel);
@@ -65,8 +68,13 @@ export function LeadDrawer({ lead, me, manager, run, onClose, onBuyer }: Props) 
     return next;
   };
 
+  // The holder's first message to this seller counts against the daily cap;
+  // the API has the last word, this only greys the buttons early.
+  const firstDm = lead.dmAt === null;
+  const atCap = firstDm && quota.cap > 0 && quota.sent >= quota.cap;
   const sent = async () => {
     if (await act(leadsApi.dm(lead.username, t(TEMPLATE_KEY[template])), t('rlDmSentToast'))) {
+      if (firstDm) onFirstDm();
       setAskSent(false);
       setWriting(null);
     }
@@ -77,6 +85,19 @@ export function LeadDrawer({ lead, me, manager, run, onClose, onBuyer }: Props) 
   };
 
   const nextBox = () => {
+    if (lead.optedOut && !(lead.claimed && can)) {
+      return <div className="rl-next rl-warn"><p><b>{t('rlOptedOutTitle')}</b> {t('rlOptedOutHint')}</p>
+        {manager && !lead.claimed && <button className="btn sm" disabled={busy} onClick={() => void act(leadsApi.claim(lead.username))}>{t('rlClaim')}</button>}
+      </div>;
+    }
+    if (lead.optedOut) {
+      return (
+        <div className="rl-next rl-warn">
+          <p><b>{t('rlOptedOutTitle')}</b> {t('rlOptedOutHint')}</p>
+          {manager && <button className="btn sm" disabled={busy} onClick={() => void act(leadsApi.reopen(lead.username), t('rlReopenedToast'))}>{t('rlLiftOptOut')}</button>}
+        </div>
+      );
+    }
     if (!lead.claimed) {
       return (
         <div className="rl-next">
@@ -92,7 +113,7 @@ export function LeadDrawer({ lead, me, manager, run, onClose, onBuyer }: Props) 
       return (
         <div className="rl-next">
           <p>
-            <b>{lead.stage === 'won' && !lead.closed ? t('rlDealMade') : t('rlClosedAs', { reason: t(CLOSING_KEY[lead.closed as 'nostock' | 'lost']) })}</b>
+            <b>{lead.stage === 'won' && !lead.closed ? t('rlDealMade') : t('rlClosedAs', { reason: t(CLOSING_KEY[lead.closed as RedditLeadClosing]) })}</b>
             {' '}{lead.followUp && t('rlCheckBack', { date: fmtDay(lead.followUp, locale) })}
           </p>
           <button className="btn sm" disabled={busy} onClick={() => void act(leadsApi.reopen(lead.username), t('rlReopenedToast'))}>{t('rlReopen')}</button>
@@ -112,19 +133,36 @@ export function LeadDrawer({ lead, me, manager, run, onClose, onBuyer }: Props) 
                 </button>
               ))}
             </div>
-            <input className="input" value={draft.subject} aria-label={t('rlSubject')} onChange={e => setDraft({ ...draft, subject: e.target.value })} />
+            {lead.stage === 'claimed' && lead.latestPostUrl && (
+              <p className="rl-sub">
+                {t('rlCommentFirst')}{' '}
+                <a href={lead.latestPostUrl} target="_blank" rel="noopener noreferrer">{t('rlCommentFirstLink')}</a>
+              </p>
+            )}
             <textarea className="textarea" rows={8} value={draft.body} aria-label={t('rlMessage')} onChange={e => setDraft({ ...draft, body: e.target.value })} />
+            {firstDm && quota.cap > 0 && (
+              <p className={`rl-sub${atCap ? ' rl-warn' : ''}`}>
+                {atCap ? t('rlDailyCapHint', { cap: quota.cap }) : t('rlFirstDmQuota', { n: quota.sent, cap: quota.cap })}
+              </p>
+            )}
             <div className="rl-row">
-              <a className="btn primary" href={composeUrl(lead.name, draft.subject, draft.body)} target="_blank" rel="noopener noreferrer" onClick={() => setAskSent(true)}>
+              <a className="btn primary" aria-disabled={atCap} href={atCap ? undefined : chatUrl(lead.name)} target="_blank" rel="noopener noreferrer"
+                onClick={() => { void navigator.clipboard?.writeText(draft.body); setAskSent(true); }}>
+                {t('rlOpenChat')}
+              </a>
+              <span className="rl-sub">{t('rlOpenChatHint')}</span>
+            </div>
+            <details>
+              <summary className="rl-sub">{t('rlOldMessagePage')}</summary>
+              <input className="input" value={draft.subject} aria-label={t('rlSubject')} onChange={e => setDraft({ ...draft, subject: e.target.value })} />
+              <a className="btn sm" aria-disabled={atCap} href={atCap ? undefined : composeUrl(lead.name, draft.subject, draft.body)} target="_blank" rel="noopener noreferrer" onClick={() => setAskSent(true)}>
                 {t('rlOpenInReddit')}
               </a>
-              <button className="btn" onClick={() => { void navigator.clipboard?.writeText(draft.body); setAskSent(true); }}>{t('rlCopyMessage')}</button>
-              <span className="rl-sub">{t('rlOpenInRedditHint')}</span>
-            </div>
+            </details>
             {askSent && (
               <div className="rl-confirm" role="status">
                 {t('rlDidYouSend')}
-                <button className="btn sm primary" disabled={busy} onClick={() => void sent()}>{t('rlMarkDmSent')}</button>
+                <button className="btn sm primary" disabled={busy || atCap} onClick={() => void sent()}>{t('rlMarkDmSent')}</button>
                 <button className="rl-link" onClick={() => setAskSent(false)}>{t('rlNotYet')}</button>
               </div>
             )}
@@ -144,8 +182,9 @@ export function LeadDrawer({ lead, me, manager, run, onClose, onBuyer }: Props) 
       case 'reply': return t('rlEvReply', { who: e.actor });
       case 'stage': return t('rlEvStage', { who: e.actor, stage: t(STAGE_KEY[e.detail as keyof typeof STAGE_KEY] ?? e.detail) });
       case 'follow_up': return e.detail ? t('rlEvFollow', { who: e.actor, date: fmtDay(e.detail, locale) }) : t('rlEvFollowCleared', { who: e.actor });
-      case 'closed': return t('rlEvClosed', { who: e.actor, reason: t(CLOSING_KEY[e.detail as 'nostock' | 'lost'] ?? e.detail) });
+      case 'closed': return t('rlEvClosed', { who: e.actor, reason: t(CLOSING_KEY[e.detail as RedditLeadClosing] ?? e.detail) });
       case 'reopened': return t('rlEvReopened', { who: e.actor });
+      case 'opt_in': return t('rlEvOptIn', { who: e.actor });
       default: return e.kind;
     }
   };
@@ -225,7 +264,7 @@ export function LeadDrawer({ lead, me, manager, run, onClose, onBuyer }: Props) 
                 <h3>{t('rlCloseLead')}</h3>
                 <div className="rl-chips">
                   <button className="btn sm" disabled={busy} onClick={() => void act(leadsApi.stage(lead.username, 'won'), t('rlDealMade'))}>{t('rlStageWon')}</button>
-                  {(['nostock', 'lost'] as const).map(c => (
+                  {(['nostock', 'lost', 'optout'] as const).map(c => (
                     <button key={c} className="btn sm ghost" disabled={busy} onClick={() => void act(leadsApi.close(lead.username, c), t('rlClosedToast'))}>{t(CLOSING_KEY[c])}</button>
                   ))}
                 </div>
