@@ -7,7 +7,7 @@ fleet and owns the single Telegram alert stream.
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Response
 
 from .. import __version__, deps
 from ..db import utcnow
@@ -180,12 +180,3 @@ def _ingest_one(db: Any, listing: Any, worker_id: str) -> Verdict:
     db.update_listing(key, {**record, "last_seen_at": utcnow()})
     return verdict
 
-
-@router.get("/api/v1/listings")
-def query_listings(
-    since: str | None = Query(default=None, description="ISO timestamp lower bound"),
-    min_score: int | None = Query(default=None, ge=1, le=5),
-    limit: int = Query(default=100, ge=1, le=1000),
-    _worker: Optional[str] = Depends(require_worker),
-) -> Dict[str, Any]:
-    return {"listings": deps.db.query_listings(since=since, min_score=min_score, limit=limit)}

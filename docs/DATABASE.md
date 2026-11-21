@@ -4151,7 +4151,7 @@ One Marketplace listing reported over `POST /api/v1/listings`, deduped across wo
 | `ai_comment` | `text` |  |  | The AI's note, shown in the alert. |
 | `ai_count` | `text` |  |  | The AI's unit count as a display phrase, e.g. '8 sticks'; NULL from workers that predate it. |
 | `first_seen_at` | `text` | ✓ |  |  |
-| `last_seen_at` | `text` | ✓ |  | Latest report from any worker; `GET /api/v1/listings?since=` filters on it. |
+| `last_seen_at` | `text` | ✓ |  | Latest report from any worker; `rsc status --hours` filters on it. |
 | `first_worker_id` | `text` |  |  | Worker whose report created the row. |
 | `notified_at` | `text` |  |  | When the latest alert for it actually reached Telegram, set by outbox delivery. |
 

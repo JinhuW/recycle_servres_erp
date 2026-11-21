@@ -10,13 +10,13 @@ import hashlib
 import logging
 import re
 import tomllib
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from .. import deps, fleet
 from ..deps import require_admin, require_host
-from ..schemas import WORKER_ID_PATTERN, FleetHostUpdate, FleetRelease, FleetSlotUpdate
+from ..schemas import WORKER_ID_PATTERN
 from ..tokens import TokenError
 
 logger = logging.getLogger(__name__)
@@ -105,52 +105,6 @@ def state() -> Dict[str, Any]:
     }
 
 
-@router.put("/v1/fleet/hosts/{host_id}", dependencies=[Depends(require_admin)])
-def put_host(host_id: str, payload: FleetHostUpdate) -> Dict[str, Any]:
-    fields = payload.model_dump(exclude_unset=True)
-    for flag in ("cordoned", "authoritative"):
-        if flag in fields:
-            fields[flag] = 1 if fields[flag] else 0
-    deps.db.upsert_fleet_host(host_id, fields)
-    return deps.db.get_fleet_host(host_id) or {}
-
-
-@router.put("/v1/fleet/workers/{worker_id}", dependencies=[Depends(require_admin)])
-def put_slot(worker_id: str, payload: FleetSlotUpdate) -> Dict[str, Any]:
-    """Turn the fleet on or off for a slot, or pin it to a host."""
-    account = deps.db.account_row_for_worker(worker_id)
-    if account is None:
-        raise HTTPException(status_code=404, detail=f"No vault account names worker '{worker_id}'.")
-    fields = payload.model_dump(exclude_unset=True)
-    if "enabled" in fields:
-        fields["fleet_enabled"] = 1 if fields.pop("enabled") else 0
-    deps.db.put_account(account["account_id"], fields)
-    return {k: v for k, v in (deps.db.get_account_row(account["account_id"]) or {}).items() if k != "secret_blob"}
-
-
-@router.post("/v1/fleet/workers/{worker_id}/move", dependencies=[Depends(require_admin)])
-def move(worker_id: str, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    host_id = body.get("host_id")
-    if not isinstance(host_id, str) or not host_id:
-        raise HTTPException(status_code=400, detail="host_id is required")
-    try:
-        return fleet.move_worker(deps.db, worker_id, host_id, bool(body.get("force")))
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Worker '{worker_id}' has no assignment.") from None
-    except LookupError:
-        raise HTTPException(status_code=404, detail=f"No host '{host_id}'.") from None
-
-
-@router.post("/v1/fleet/workers/{worker_id}/restart", dependencies=[Depends(require_admin)])
-def restart(worker_id: str) -> Dict[str, Any]:
-    """Recreate the worker's container on its host (a new generation)."""
-    assignment = deps.db.get_assignment(worker_id)
-    if assignment is None:
-        raise HTTPException(status_code=404, detail=f"Worker '{worker_id}' has no assignment.")
-    deps.db.put_assignment(worker_id, {"generation": int(assignment["generation"]) + 1})
-    return deps.db.get_assignment(worker_id) or {}
-
-
 @router.get("/v1/fleet/configs", dependencies=[Depends(require_admin)])
 def list_configs() -> Dict[str, Any]:
     return {"configs": deps.db.list_worker_configs()}
@@ -185,31 +139,3 @@ def put_config(worker_id: str, body: Dict[str, Any] = Body(...)) -> Dict[str, An
     if current is None or current["sha256"] != sha:
         deps.db.put_worker_config(worker_id, text, sha, (by or "")[:120] or None)
     return {"worker_id": worker_id, "sha256": sha, "changed": current is None or current["sha256"] != sha}
-
-
-@router.post("/v1/fleet/releases", dependencies=[Depends(require_admin)])
-def release(payload: FleetRelease) -> Dict[str, Any]:
-    release_id = fleet.start_release(deps.db, payload.version, payload.image, payload.created_by)
-    return deps.db.get_release(release_id) or {}
-
-
-@router.post("/v1/fleet/releases/{release_id}/{action}", dependencies=[Depends(require_admin)])
-def release_action(release_id: int, action: str) -> Dict[str, Any]:
-    current: Optional[Dict[str, Any]] = deps.db.get_release(release_id)
-    if current is None:
-        raise HTTPException(status_code=404, detail=f"No release {release_id}")
-    moves = {
-        "pause": ({fleet.ROLLING}, fleet.PAUSED),
-        "resume": ({fleet.PAUSED}, fleet.ROLLING),
-        "abort": (set(fleet.ACTIVE), fleet.ABORTED),
-    }
-    if action not in moves:
-        raise HTTPException(status_code=404, detail=f"Unknown action '{action}'")
-    allowed, target = moves[action]
-    if current["state"] not in allowed:
-        raise HTTPException(status_code=409, detail=f"Release {release_id} is {current['state']}")
-    fields: Dict[str, Any] = {"state": target}
-    if target == fleet.ABORTED:
-        fields["finished_at"] = fleet.utcnow()
-    deps.db.update_release(release_id, fields)
-    return deps.db.get_release(release_id) or {}

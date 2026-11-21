@@ -126,7 +126,6 @@ def _resolve(worker: Optional[str], claimed_worker: Optional[str]) -> Tuple[str,
     return worker, deps.resolve_account(worker)
 
 
-@router.post("/api/v1/auth/code", response_model=CodeResponse)
 @router.post("/v1/auth/code", response_model=CodeResponse)
 def issue_code(
     payload: CodeRequest, worker: Optional[str] = Depends(require_worker)
@@ -155,7 +154,6 @@ def issue_code(
     return CodeResponse(code=code, expires_in=expires_in, kind=payload.kind)
 
 
-@router.post("/api/v1/auth/credentials", response_model=CredentialsResponse)
 @router.post("/v1/auth/credentials", response_model=CredentialsResponse)
 def issue_credentials(
     payload: CredentialsRequest, worker: Optional[str] = Depends(require_worker)
@@ -211,7 +209,6 @@ def issue_credentials(
     return CredentialsResponse(username=str(username), password=str(password))
 
 
-@router.post("/api/v1/auth/session-token", response_model=SessionTokenResponse)
 @router.post("/v1/auth/session-token", response_model=SessionTokenResponse)
 def issue_session_token(
     payload: CredentialsRequest, worker: Optional[str] = Depends(require_worker)

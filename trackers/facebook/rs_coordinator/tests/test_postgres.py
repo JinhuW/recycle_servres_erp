@@ -521,16 +521,6 @@ def test_device_profiles_are_created_once_and_found_by_key_or_device(backend):
     assert "device_cookies_blob" not in listed[0]
 
 
-def test_rekeying_a_device_profile_never_overwrites_another(backend):
-    backend.insert_device_profile(_profile("uid:1", "dev-1"))
-    backend.insert_device_profile(_profile("uid:2", "dev-2"))
-
-    assert backend.rekey_device_profile("uid:1", "uid:2") is False
-    assert backend.rekey_device_profile("uid:1", "uid:3") is True
-    assert backend.get_device_profile("uid:3")["device_id"] == "dev-1"
-    assert backend.get_device_profile("uid:1") is None
-
-
 def test_fleet_tables_round_trip(backend):
     backend.upsert_fleet_host("homelab", {})
     backend.upsert_fleet_host("homelab", {"capacity": 9, "authoritative": 1})
@@ -555,7 +545,6 @@ def test_fleet_tables_round_trip(backend):
     assert backend.list_worker_configs() == [
         {"worker_id": "va-1", "sha256": "sha-2", "updated_at": backend.get_worker_config("va-1")["updated_at"], "updated_by": None}
     ]
-    assert backend.delete_worker_config("va-1") is True
 
 
 def test_accounts_carry_a_facebook_uid(backend):
@@ -928,7 +917,6 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
     handle.device_profile_by_device("dev-1")
     handle.insert_device_profile({"identity_key": "uid:1", "device_id": "dev-1"})
     handle.update_device_profile("uid:1", {"locale": "en-US"})
-    handle.rekey_device_profile("uid:1", "uid:2")
     handle.list_device_profiles()
     handle.claim_device_cookies("uid:1", b"x")
     handle.upsert_fleet_host("h", {"capacity": 2})
@@ -944,7 +932,6 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
     handle.put_worker_config("w", "a = 1", "sha", None)
     handle.get_worker_config("w")
     handle.list_worker_configs()
-    handle.delete_worker_config("w")
     handle.insert_login_attempt({"worker_id": "w", "trigger": "boot"})
     handle.finish_login_attempt(1, "w", "failed", None)
     handle.list_login_attempts("w", 5)
@@ -955,7 +942,7 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
         handle.write_alert_claim(statement, {})
     handle.get_alert_claim("facebook", "1")
 
-    assert len(handle.log) == 58
+    assert len(handle.log) == 56
     for sql in handle.log:
         assert "?" not in sql, f"SQLite placeholder left in: {sql}"
         assert not re.search(r":\w", sql), f"named SQLite placeholder left in: {sql}"

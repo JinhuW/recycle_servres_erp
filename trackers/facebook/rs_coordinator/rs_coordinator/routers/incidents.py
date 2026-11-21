@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/api/v1/incidents", response_model=IncidentResponse)
 @router.post("/v1/incidents", response_model=IncidentResponse)
 def report_incident(
     payload: IncidentReport, worker: Optional[str] = Depends(require_worker)

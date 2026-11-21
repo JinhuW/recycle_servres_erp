@@ -2129,17 +2129,6 @@ class Database:
             )
             return cur.rowcount > 0
 
-    def rekey_device_profile(self: "Database", old_key: str, new_key: str) -> bool:
-        """Move a profile to a new identity key, unless that key is taken."""
-        with self.cursor() as cur:
-            cur.execute(
-                "UPDATE device_profiles SET identity_key = ?, updated_at = ? "
-                "WHERE identity_key = ? AND NOT EXISTS "
-                "(SELECT 1 FROM device_profiles WHERE identity_key = ?)",
-                (new_key, utcnow(), old_key, new_key),
-            )
-            return cur.rowcount > 0
-
     def list_device_profiles(self: "Database") -> List[Dict[str, Any]]:
         """Every profile without its sealed cookies."""
         with self.cursor() as cur:
@@ -2271,11 +2260,6 @@ class Database:
                 "ORDER BY worker_id"
             )
             return [dict(row) for row in cur.fetchall()]
-
-    def delete_worker_config(self: "Database", worker_id: str) -> bool:
-        with self.cursor() as cur:
-            cur.execute("DELETE FROM worker_configs WHERE worker_id = ?", (worker_id,))
-            return cur.rowcount > 0
 
     # -- login ledger ------------------------------------------------------
 

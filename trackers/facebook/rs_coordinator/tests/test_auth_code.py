@@ -94,7 +94,7 @@ def test_totp_code_matches_a_standard_authenticator(client):
 
 
 def test_both_route_prefixes_work(client):
-    assert client.post("/api/v1/auth/code", json={}, headers=auth("denver-1")).status_code == 200
+    assert client.post("/v1/auth/code", json={}, headers=auth("denver-1")).status_code == 200
 
 
 def test_every_release_is_audited(client):

@@ -528,13 +528,6 @@ def test_admin_view_needs_the_admin_token(client):
     assert client.get("/v1/workers", headers=AUTH).status_code == 401
 
 
-def test_legacy_worker_listing_stays_raw(client):
-    """Workers deployed before the control plane parse this shape."""
-    heartbeat(client, state="HEALTHY", region="rs_mountain")
-    workers = client.get("/api/v1/workers", headers=AUTH).json()["workers"]
-    assert workers[0]["region"] == "rs_mountain"
-    assert workers[0]["last_heartbeat_at"]
-    assert "liveness" not in workers[0]
 
 
 def status_changes(client, **params):

@@ -1386,16 +1386,6 @@ class PostgresDatabase:
             )
             return cur.rowcount > 0
 
-    def rekey_device_profile(self: "PostgresDatabase", old_key: str, new_key: str) -> bool:
-        with self.cursor() as cur:
-            cur.execute(
-                "UPDATE device_profiles SET identity_key = %s, updated_at = %s "
-                "WHERE identity_key = %s AND NOT EXISTS "
-                "(SELECT 1 FROM device_profiles WHERE identity_key = %s)",
-                (new_key, utcnow(), old_key, new_key),
-            )
-            return cur.rowcount > 0
-
     def list_device_profiles(self: "PostgresDatabase") -> List[Dict[str, Any]]:
         with self.cursor() as cur:
             cur.execute(
@@ -1529,11 +1519,6 @@ class PostgresDatabase:
                 "ORDER BY worker_id"
             )
             return _rows(cur.fetchall())
-
-    def delete_worker_config(self: "PostgresDatabase", worker_id: str) -> bool:
-        with self.cursor() as cur:
-            cur.execute("DELETE FROM worker_configs WHERE worker_id = %s", (worker_id,))
-            return cur.rowcount > 0
 
     # -- audit -------------------------------------------------------------
 

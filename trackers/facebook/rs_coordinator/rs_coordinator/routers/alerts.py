@@ -33,7 +33,6 @@ from ..schemas import (
 router = APIRouter()
 
 
-@router.post("/api/v1/alerts/telegram", response_model=StatusResponse)
 @router.post("/v1/alerts/telegram", response_model=StatusResponse)
 def report_alert_message(
     payload: AlertMessageReport, worker: Optional[str] = Depends(require_worker)

@@ -215,16 +215,6 @@ def request_restore(worker_id: str) -> Dict[str, Any]:
     return {"status": "ok", "worker_id": worker_id, "restore": "requested"}
 
 
-@router.get("/api/v1/workers")
-def list_workers(_worker: Optional[str] = Depends(require_worker)) -> Dict[str, Any]:
-    """Legacy listing, still reachable with a worker/legacy token.
-
-    Returns raw rows on purpose: workers deployed before the control plane
-    parse this shape, so the derived fields go on the admin route instead.
-    """
-    return {"workers": deps.db.list_workers()}
-
-
 @router.get("/v1/workers", response_model=WorkerList, dependencies=[Depends(require_admin)])
 def list_workers_admin() -> WorkerList:
     """Console-facing fleet view, with liveness and expiry derived on read."""

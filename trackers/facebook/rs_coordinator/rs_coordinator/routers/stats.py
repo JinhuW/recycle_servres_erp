@@ -43,7 +43,6 @@ router = APIRouter()
 MAX_DAYS = 92
 
 
-@router.post("/api/v1/stats/reviews", response_model=StatusResponse)
 @router.post("/v1/stats/reviews", response_model=StatusResponse)
 def report_reviews(
     payload: ReviewStatsReport, worker: Optional[str] = Depends(require_worker)

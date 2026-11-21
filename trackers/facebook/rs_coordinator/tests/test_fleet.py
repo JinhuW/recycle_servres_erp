@@ -61,11 +61,7 @@ def slot(client, worker_id: str, enabled: bool = True, config: bool = True, **fi
 
 
 def host(client, host_id: str = "homelab", capacity: int = 4, authoritative: bool = True) -> None:
-    client.put(
-        f"/v1/fleet/hosts/{host_id}",
-        json={"capacity": capacity, "authoritative": authoritative},
-        headers=ADMIN,
-    )
+    client.db.upsert_fleet_host(host_id, {"capacity": capacity, "authoritative": 1 if authoritative else 0})
     report(client, host_id)
 
 
@@ -75,9 +71,8 @@ def report(client, host_id: str = "homelab", running=()) -> None:
 
 
 def release(client, version: str = "0.12.0") -> dict:
-    return client.post(
-        "/v1/fleet/releases", json={"version": version, "image": f"aimm-recycle:{version}"}, headers=ADMIN
-    ).json()
+    release_id = fleet.start_release(client.db, version, f"aimm-recycle:{version}", None)
+    return client.db.get_release(release_id)
 
 
 def beat(client, worker_id: str, version: str, state: str = "HEALTHY") -> None:
@@ -150,7 +145,7 @@ def test_placement_fills_the_emptiest_live_uncordoned_host(env):
     host(env, "a", capacity=1)
     host(env, "b", capacity=2)
     host(env, "c", capacity=9)
-    env.put("/v1/fleet/hosts/c", json={"cordoned": True}, headers=ADMIN)
+    env.db.upsert_fleet_host("c", {"cordoned": 1})
     release(env)
     for wid in ("w1", "w2", "w3", "w4"):
         slot(env, wid)
@@ -187,7 +182,7 @@ def test_turning_a_slot_off_stops_it_quietly_and_on_brings_it_home(env):
     fleet.tick(env.db)
     env.db.put_account("va-1", {"pin_host": None})
 
-    env.put("/v1/fleet/workers/va-1", json={"enabled": False}, headers=ADMIN)
+    env.db.put_account("va-1", {"fleet_enabled": 0})
     fleet.tick(env.db)
     stopped = env.db.get_assignment("va-1")
     assert stopped["state"] == "stopped" and stopped["host_id"] == "b"
@@ -195,7 +190,7 @@ def test_turning_a_slot_off_stops_it_quietly_and_on_brings_it_home(env):
     # Stopped on purpose: the liveness sweep has nothing to page about.
     assert liveness_sweep(env.db.list_workers(), _moment(None) + timedelta(days=2)) == []
 
-    env.put("/v1/fleet/workers/va-1", json={"enabled": True}, headers=ADMIN)
+    env.db.put_account("va-1", {"fleet_enabled": 1})
     fleet.tick(env.db)
     back = env.db.get_assignment("va-1")
     assert back["state"] == "run" and back["host_id"] == "b"  # where its session is
@@ -216,7 +211,7 @@ def test_a_worker_on_a_dead_host_is_never_moved_on_its_own(env):
 
 
 def test_hosts_that_publish_vnc_get_a_port_each(env):
-    env.put("/v1/fleet/hosts/lan-box", json={"capacity": 5, "authoritative": True, "vnc_host": "10.10.10.80"}, headers=ADMIN)
+    env.db.upsert_fleet_host("lan-box", {"capacity": 5, "authoritative": 1, "vnc_host": "10.10.10.80"})
     report(env, "lan-box")
     host(env, "homelab", capacity=0)
     release(env)
@@ -300,7 +295,7 @@ def test_a_parked_worker_passes_if_it_comes_back_at_all():
 
 def test_workers_on_silent_or_observe_only_hosts_are_skipped(env):
     rolled(env)
-    env.put("/v1/fleet/hosts/homelab", json={"authoritative": False}, headers=ADMIN)
+    env.db.upsert_fleet_host("homelab", {"authoritative": 0})
     alerts = fleet.tick(env.db)
     latest = env.db.list_releases(1)[0]
     assert latest["state"] == "done"
@@ -311,13 +306,12 @@ def test_workers_on_silent_or_observe_only_hosts_are_skipped(env):
 
 def test_paused_releases_wait_and_a_new_one_supersedes(env):
     first = rolled(env)
-    env.post(f"/v1/fleet/releases/{first['id']}/pause", json={}, headers=ADMIN)
+    env.db.update_release(first["id"], {"state": fleet.PAUSED})
     fleet.tick(env.db)
     assert all(a["image"].endswith("0.11.1") for a in env.db.list_assignments())
     second = release(env, "0.12.1")
     assert env.db.get_release(first["id"])["state"] == "superseded"
     assert second["state"] == "rolling"
-    assert env.post(f"/v1/fleet/releases/{first['id']}/resume", json={}, headers=ADMIN).status_code == 409
 
 
 def test_new_workers_start_on_the_newest_good_release(env):
@@ -338,7 +332,7 @@ def test_a_move_waits_for_the_old_host_to_report_the_container_gone(env):
     fleet.tick(env.db)
     env.db.put_account("va-1", {"pin_host": None})
 
-    env.post("/v1/fleet/workers/va-1/move", json={"host_id": "b"}, headers=ADMIN)
+    fleet.move_worker(env.db, "va-1", "b", False)
     old_desired = env.get("/v1/fleet/hosts/a/desired", headers=host_auth("a")).json()
     new_desired = env.get("/v1/fleet/hosts/b/desired", headers=host_auth("b")).json()
     assert old_desired["workers"] == [] and new_desired["workers"] == []
@@ -356,9 +350,10 @@ def test_a_forced_move_is_immediate(env):
     release(env)
     slot(env, "va-1", pin_host="a")
     fleet.tick(env.db)
-    moved = env.post("/v1/fleet/workers/va-1/move", json={"host_id": "b", "force": True}, headers=ADMIN).json()
+    moved = fleet.move_worker(env.db, "va-1", "b", True)
     assert moved["host_id"] == "b" and moved["move_to_host"] is None
-    assert env.post("/v1/fleet/workers/nope/move", json={"host_id": "b"}, headers=ADMIN).status_code == 404
+    with pytest.raises(KeyError):
+        fleet.move_worker(env.db, "nope", "b", False)
 
 
 # -- configs ----------------------------------------------------------------------
@@ -391,7 +386,7 @@ def test_the_background_loop_queues_fleet_alerts(env):
     from rs_coordinator.background import Background
 
     rolled(env)
-    env.put("/v1/fleet/hosts/homelab", json={"authoritative": False}, headers=ADMIN)
+    env.db.upsert_fleet_host("homelab", {"authoritative": 0})
     loop = Background(lambda: env.db, notifier=None, ops_notifier=None)  # type: ignore[arg-type]
     loop._last_sweep = 1e18  # keep the liveness sweep out of this tick
     loop.drain_outbox = lambda db: None  # type: ignore[method-assign]

@@ -654,27 +654,3 @@ class AccountUpsert(BaseModel):
 
 class StatusResponse(BaseModel):
     status: str = "ok"
-
-
-# -- fleet --------------------------------------------------------------------
-
-
-class FleetHostUpdate(BaseModel):
-    capacity: int | None = Field(default=None, ge=0, le=100)
-    cordoned: bool | None = None
-    # Off until an operator has watched the agent's plan: it applies nothing.
-    authoritative: bool | None = None
-    # Where the console reaches VNC ports this host publishes; None for the
-    # console's own host, whose workers it reaches over the rs-fleet network.
-    vnc_host: str | None = Field(default=None, max_length=255)
-
-
-class FleetSlotUpdate(BaseModel):
-    enabled: bool | None = None
-    pin_host: str | None = Field(default=None, max_length=64)
-
-
-class FleetRelease(BaseModel):
-    version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")
-    image: str = Field(min_length=1, max_length=255)
-    created_by: str | None = Field(default=None, max_length=120)

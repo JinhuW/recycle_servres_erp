@@ -214,7 +214,7 @@ def test_reporting_listings_marks_the_worker_alive(client):
         json={"worker_id": "denver-1", "listings": [sample_listing()]},
         headers=AUTH,
     )
-    workers = client.get("/api/v1/workers", headers=AUTH).json()["workers"]
+    workers = client.db.list_workers()
     assert workers[0]["worker_id"] == "denver-1"
     assert workers[0]["last_heartbeat_at"]
 
@@ -225,7 +225,7 @@ def test_heartbeat_and_listing_query(client):
         json={"worker_id": "tx-1", "status": "ok", "region": "rs_texas"},
         headers=AUTH,
     )
-    workers = client.get("/api/v1/workers", headers=AUTH).json()["workers"]
+    workers = client.db.list_workers()
     assert workers[0]["region"] == "rs_texas"
 
     # A worker names its build; the row keeps it and healthz names the
@@ -235,7 +235,7 @@ def test_heartbeat_and_listing_query(client):
         json={"worker_id": "tx-1", "status": "ok", "version": "0.5.6 (d3e9a30)"},
         headers=AUTH,
     )
-    workers = client.get("/api/v1/workers", headers=AUTH).json()["workers"]
+    workers = client.db.list_workers()
     assert workers[0]["version"] == "0.5.6 (d3e9a30)"
     from rs_coordinator import __version__
     assert client.get("/healthz").json()["version"] == __version__
@@ -245,9 +245,9 @@ def test_heartbeat_and_listing_query(client):
         json={"worker_id": "tx-1", "listings": [sample_listing(ai_score=5)]},
         headers=AUTH,
     )
-    found = client.get("/api/v1/listings?min_score=5", headers=AUTH).json()["listings"]
+    found = client.db.query_listings(min_score=5)
     assert len(found) == 1
-    assert client.get("/api/v1/listings?min_score=1", headers=AUTH).json()["listings"]
+    assert client.db.query_listings(min_score=1)
 
 
 def test_relogin_request_rides_back_on_one_heartbeat(client):

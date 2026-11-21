@@ -25,6 +25,15 @@ deployed?" harder to answer.
   unread selectors, `FACEBOOK_DOMAINS`, a few script constants and unused
   imports. rs_console's test extra no longer installs `pytest-asyncio`; no test
   used it.
+- Coordinator routes nothing calls: the `/api/v1/` twins of `auth/code`,
+  `auth/credentials`, `auth/session-token`, `alerts/telegram`, `stats/reviews`
+  and `incidents` (no revision of the monitor ever used them; it keeps
+  `/api/v1/heartbeat` and `POST /api/v1/listings`), the legacy
+  `GET /api/v1/workers` and `GET /api/v1/listings`, and the fleet admin writes
+  `PUT /v1/fleet/hosts/{id}`, `PUT /v1/fleet/workers/{id}`, `…/move`,
+  `…/restart`, `POST /v1/fleet/releases` and `…/releases/{id}/{action}`, which
+  `rsc fleet` does directly. Also the unused `rekey_device_profile` and
+  `delete_worker_config` database methods.
 
 ## [0.18.0] - 2026-11-07
 

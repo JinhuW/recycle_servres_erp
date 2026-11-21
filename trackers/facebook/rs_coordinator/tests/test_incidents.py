@@ -121,7 +121,7 @@ def _ops_sent(client, monkeypatch):
 def test_endpoint_pages_once_across_workers_and_persists(client, monkeypatch):
     sent = _ops_sent(client, monkeypatch)
     body = {"worker_id": "ne-1", "key": "ai_unavailable", "state": "down", "detail": "boom"}
-    first = client.post("/api/v1/incidents", json=body, headers=AUTH).json()
+    first = client.post("/v1/incidents", json=body, headers=AUTH).json()
     assert first == {"status": "ok", "open": True, "alerted": True}
     second = client.post(
         "/v1/incidents", json={**body, "worker_id": "sc-1"}, headers=AUTH
@@ -137,7 +137,7 @@ def test_endpoint_pages_once_across_workers_and_persists(client, monkeypatch):
 
     for w in ("ne-1", "sc-1"):
         last = client.post(
-            "/api/v1/incidents",
+            "/v1/incidents",
             json={"worker_id": w, "key": "ai_unavailable", "state": "up"},
             headers=AUTH,
         ).json()
@@ -148,7 +148,7 @@ def test_endpoint_pages_once_across_workers_and_persists(client, monkeypatch):
 
 def test_endpoint_requires_auth_and_a_worker_id(client):
     body = {"key": "ai_unavailable", "state": "down"}
-    assert client.post("/api/v1/incidents", json=body).status_code == 401
-    assert client.post("/api/v1/incidents", json=body, headers=AUTH).status_code == 422
+    assert client.post("/v1/incidents", json=body).status_code == 401
+    assert client.post("/v1/incidents", json=body, headers=AUTH).status_code == 422
     bad = {"worker_id": "ne-1", "key": "AI Unavailable!", "state": "down"}
-    assert client.post("/api/v1/incidents", json=bad, headers=AUTH).status_code == 422
+    assert client.post("/v1/incidents", json=bad, headers=AUTH).status_code == 422
