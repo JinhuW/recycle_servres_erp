@@ -9,6 +9,7 @@ import type {
   WechatDaySummary,
   WechatEvidence,
   WechatHistoryDay,
+  WechatMood,
   WechatPrice,
   WechatPriceBucket,
   WechatRerun,
@@ -192,6 +193,28 @@ export const SIGNAL_TONE: Record<string, 'info' | 'accent' | 'muted'> = {
 };
 // The legend's pills, from most wanted to most offered.
 export const SIGNALS = Object.keys(SIGNAL_KEY);
+
+// A post's or trader's mood, as i18n keys; bullish wears the bid's colour.
+export const MOOD_KEY: Record<WechatMood, string> = {
+  bullish: 'wxMoodBullish',
+  neutral: 'wxMoodNeutral',
+  bearish: 'wxMoodBearish',
+};
+export const MOOD_HINT_KEY: Record<WechatMood, string> = {
+  bullish: 'wxMoodBullishHint',
+  neutral: 'wxMoodNeutralHint',
+  bearish: 'wxMoodBearishHint',
+};
+
+/** A sentiment score as "+25", "−10" or "0". */
+export function fmtScore(score: number): string {
+  return score > 0 ? `+${score}` : score < 0 ? `−${-score}` : '0';
+}
+
+/** Each side's share of a buy/sell pair, as 0–100; null when both are 0. */
+export function sideShare(buy: number, sell: number): number | null {
+  return buy + sell === 0 ? null : (buy / (buy + sell)) * 100;
+}
 
 export type BoardFilter = { pricedOnly: boolean; search: string; signal: string | null; picks: FacetPicks };
 

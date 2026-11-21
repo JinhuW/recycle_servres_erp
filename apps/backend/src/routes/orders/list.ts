@@ -10,7 +10,7 @@ import { soldFlagSql } from '../../services/orderSold';
 import { sortCategories } from '../../services/orderCategory';
 import { poRealizedLateral } from '../../lib/po-cost';
 import { realizedFromRow } from '../../services/poRealized';
-import { type OrdersEnv, commissionPaidByOf, newestPackageJson, packageFromJson } from './shared';
+import { type OrdersEnv, commissionPaidByOf, newestPackageJson, packageFromJson, stageSinceSql } from './shared';
 
 const listRoutes = new Hono<OrdersEnv>();
 
@@ -125,6 +125,8 @@ listRoutes.get('/', async (c) => {
       o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
       ${cursorTsSelect(sql, sql`o.created_at`)} AS cursor_ts,
       o.archived_at,
+      -- The PO board's days-in-stage, as Home reads it.
+      ${stageSinceSql(sql, sql`o`)} AS stage_since,
       o.total_cost::float AS total_cost,
       o.other_fees::float AS other_fees,
       o.other_fees_note,
@@ -221,6 +223,7 @@ listRoutes.get('/', async (c) => {
       lifecycle: r.lifecycle,
       archivedAt: r.archived_at,
       createdAt: r.created_at,
+      stageSince: r.stage_since,
       totalCost: r.total_cost,
       otherFees: r.other_fees,
       otherFeesNote: r.other_fees_note,

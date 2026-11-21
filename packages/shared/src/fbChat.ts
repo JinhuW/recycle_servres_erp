@@ -11,9 +11,31 @@ export type FbChatRow = {
   text: string;
   /** Image URLs on the bubble. They are signed and expire. */
   images: string[];
+  /**
+   * Ids from `POST /push/media`, one per photo the extension could upload, in
+   * bubble order. Extensions before media support leave it out; the hub then
+   * tries to fetch `images` itself while the links are fresh.
+   */
+  media?: string[];
   /** When it was sent, in Facebook's own words ("Tuesday 5:57pm"). */
   at?: string;
 };
+
+// ── Media ─────────────────────────────────────────────────────────────────────
+// `POST /push/media` takes one photo as the raw request body (Content-Type
+// image/jpeg, image/png or image/webp) and answers `FbChatMediaAnswer`. The
+// same bytes always answer the same id, so uploading again is harmless.
+// `GET /api/fb-chat/media/:id` serves it to signed-in ERP users.
+
+/** Largest photo the hub takes, as uploaded. Bigger ones are refused with 413. */
+export const FB_CHAT_MEDIA_MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+/** Stored photos are re-encoded to fit this (Telegram's bot limit is 10 MB). */
+export const FB_CHAT_MEDIA_MAX_STORED_BYTES = 8 * 1024 * 1024;
+export const FB_CHAT_MEDIA_MIMES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+/** Photos per bubble the hub keeps. */
+export const FB_CHAT_MEDIA_PER_ROW = 10;
+
+export type FbChatMediaAnswer = { mediaId: string };
 
 export type FbChatBuyer = {
   name: string | null;
@@ -71,18 +93,42 @@ export type FbChatBuyerPush = {
   buyer: FbChatBuyer;
 };
 
+/**
+ * What an extension can do beyond typing text, sent with each claim.
+ * `media`: it can attach photos to a reply. The hub hands a reply with photos
+ * only to an extension that says so; an older one would type the caption and
+ * report `sent` without them.
+ */
+export const FB_CHAT_CAPS = ['media'] as const;
+export type FbChatCap = (typeof FB_CHAT_CAPS)[number];
+
 /** `POST /push/outbox/claim`. Answers 204 when nothing is queued. */
 export type FbChatClaimRequest = {
   account: FbChatAccountRef;
   /** Longest the hub may hold the request open, seconds. */
   wait?: number;
+  /** Extensions before photo replies leave it out. */
+  caps?: FbChatCap[];
 };
+
+/**
+ * A photo to attach to a reply. The extension downloads it from
+ * `GET /api/fb-chat/push/media/:id` with its push credentials.
+ */
+export type FbChatOutMedia = { id: string; mime: string; bytes: number };
+
+/** Photos one reply may carry. */
+export const FB_CHAT_REPLY_MEDIA_MAX = 10;
 
 /**
  * `attempt` counts this reply's claims. The extension sends it back with the
  * result, so a late result from an earlier attempt cannot settle a later one.
+ * `body` may be empty when the reply is photos only; `media` is present only
+ * when it has photos, and only to an extension that claimed with `media`.
  */
-export type FbChatClaimAnswer = { id: number; fbThreadId: string; body: string; attempt: number };
+export type FbChatClaimAnswer = {
+  id: number; fbThreadId: string; body: string; attempt: number; media?: FbChatOutMedia[];
+};
 
 /** `POST /push/outbox/:id/result`. */
 export type FbChatSendResult = {
@@ -300,6 +346,8 @@ export type FbChatMessageRow = {
   source: FbChatMessageSource;
   body: string;
   images: string[];
+  /** Stored photo ids, served by `GET /api/fb-chat/media/:id`. Empty when none could be stored. */
+  media: string[];
   /** Read with the history when the chat was first found; `created_at` is then when it was read. */
   backfill: boolean;
   /** Facebook's own wording for when it was sent, where the page showed one. */
@@ -338,7 +386,16 @@ export type FbChatMessagesAnswer = {
  * heard the answer; the hub then answers 200 with the reply it already queued
  * instead of queueing a second one.
  */
-export type FbChatReplyRequest = { body: string; clientKey?: string };
+export type FbChatReplyRequest = {
+  body: string;
+  clientKey?: string;
+  /**
+   * Photos uploaded first through `POST /api/fb-chat/media` (raw image body,
+   * answers `FbChatMediaAnswer`), at most `FB_CHAT_REPLY_MEDIA_MAX`. With
+   * photos, `body` may be empty.
+   */
+  media?: string[];
+};
 /**
  * Body of `POST /messages/:id/retry`. A `failed` reply needs none. An
  * `uncertain` one may already be on Facebook, so the hub refuses to send it
@@ -372,7 +429,8 @@ export type FbChatAccountRow = {
   fb_uid: string;
   label: string;
   ext_version: string | null;
-  restricted: 'login' | 'checkpoint' | null;
+  /** `blocked`: Facebook warned in the page that it is limiting the account (extension 0.6.0+). */
+  restricted: 'login' | 'checkpoint' | 'blocked' | null;
   restricted_at: string | null;
   last_seen_at: string;
   created_at: string;
@@ -388,6 +446,12 @@ export type FbChatAccountRow = {
   stale_after_sec: number;
   config_state: FbChatConfigState;
   config_seen_at: string | null;
+  /**
+   * Whether its extension can attach photos, as of its last claim: false for
+   * one before 0.5.0 or with Chrome's "Allow access to file URLs" off, when
+   * photo replies wait. Null before its first claim.
+   */
+  photo_replies: boolean | null;
   /** Null for an account set up with a service client, or whose device was deleted. */
   device: FbChatAccountDevice | null;
 };
@@ -403,7 +467,7 @@ export type FbChatAccountsAnswer = {
 /** `PATCH /accounts/:id`. */
 export type FbChatAccountPatch = { label: string };
 
-export const FB_CHAT_ACCOUNT_STATUSES = ['running', 'paused', 'login', 'checkpoint', 'stale'] as const;
+export const FB_CHAT_ACCOUNT_STATUSES = ['running', 'paused', 'login', 'checkpoint', 'blocked', 'stale'] as const;
 export type FbChatAccountStatus = (typeof FB_CHAT_ACCOUNT_STATUSES)[number];
 
 /**

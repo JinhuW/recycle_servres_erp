@@ -225,6 +225,41 @@ describe('GET /api/inventory/products', () => {
     expect(byCost.body.products.map((g) => g.key)).toEqual(plain.body.products.map((g) => g.key));
   });
 
+  it('dates each lot by its PO\'s latest hand-off, else the PO, and a product by its newest lot', async () => {
+    const { token } = await loginAs(ALEX);
+    await po(token, { brand: 'COLLTEST', partNumber: 'COLL-1' });
+    await po(token, { brand: 'COLLTEST', partNumber: 'COLL-1' });
+    await po(token, { brand: 'COLLTEST', partNumber: 'COLL-2' });
+    const sql = getTestDb();
+    const pos = (await sql<{ order_id: string; part_number: string }[]>`
+      SELECT order_id, part_number FROM order_lines WHERE brand = 'COLLTEST' ORDER BY order_id
+    `);
+    const [handed, handedTwice] = pos.filter((p) => p.part_number === 'COLL-1').map((p) => p.order_id);
+    const plain = pos.find((p) => p.part_number === 'COLL-2')!.order_id;
+    await sql`UPDATE orders SET created_at = '2026-03-01T00:00:00Z' WHERE id IN (${handed}, ${handedTwice}, ${plain})`;
+    await sql`
+      INSERT INTO order_events (order_id, kind, created_at) VALUES
+        (${handed}, 'handoff', '2026-04-01T00:00:00Z'),
+        (${handedTwice}, 'handoff', '2026-05-01T00:00:00Z'),
+        (${handedTwice}, 'handoff', '2026-06-01T00:00:00Z'),
+        (${handedTwice}, 'advanced', '2026-07-01T00:00:00Z')
+    `;
+
+    type Dated = Group & { collected_at: string; lines: (Lot & { order_id: string; collected_at: string })[] };
+    const r = await api<{ products: Dated[] }>('GET', '/api/inventory/products?q=COLLTEST', { token });
+    expect(r.status).toBe(200);
+    const byPn = new Map(r.body.products.map((g) => [g.part_number, g]));
+    const g1 = byPn.get('COLL-1')!;
+    const lotAt = Object.fromEntries(g1.lines.map((l) => [l.order_id, new Date(l.collected_at).toISOString()]));
+    expect(lotAt).toEqual({ [handed]: '2026-04-01T00:00:00.000Z', [handedTwice]: '2026-06-01T00:00:00.000Z' });
+    expect(new Date(g1.collected_at).toISOString()).toBe('2026-06-01T00:00:00.000Z');
+    expect(new Date(byPn.get('COLL-2')!.collected_at).toISOString()).toBe('2026-03-01T00:00:00.000Z');
+
+    const asc = await api<{ products: Dated[] }>('GET', '/api/inventory/products?q=COLLTEST&sort=collected&dir=asc', { token });
+    expect(asc.status).toBe(200);
+    expect(asc.body.products.map((g) => g.part_number)).toEqual(['COLL-2', 'COLL-1']);
+  });
+
   it('scopes purchasers to their own lines', async () => {
     const mgr = await loginAs(ALEX);
     await po(mgr.token, { brand: 'SCOPEZ', partNumber: 'SCOPE-9' });

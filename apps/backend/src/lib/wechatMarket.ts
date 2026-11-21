@@ -2,11 +2,20 @@ import {
   WECHAT_MAX_GROUPS,
   WECHAT_MAX_ROWS,
   WECHAT_POINTS_BATCH,
+  WECHAT_FLOW_KEYS,
+  WECHAT_MOODS,
   WECHAT_PRICE_BUCKETS,
+  WECHAT_TRADERS_MAX,
   isWechatRowKind,
   type WechatDayPush,
   type WechatGroupCoverage,
   type WechatLine,
+  type WechatLineSentiment,
+  type WechatMood,
+  type WechatMoodTally,
+  type WechatSentiment,
+  type WechatTrader,
+  type WechatTraders,
   type WechatPoint,
   type WechatPrice,
   type WechatRerunFinish,
@@ -147,13 +156,76 @@ function line(v: unknown, at: string): WechatLine {
     signal: strOrNull(r.signal, `${at}.signal`),
     buy: side(r.buy, `${at}.buy`),
     sell: side(r.sell, `${at}.sell`),
+    sentiment: r.sentiment === null || r.sentiment === undefined ? null : lineSentiment(r.sentiment, `${at}.sentiment`),
+  };
+}
+
+// ── RS-599: the day's flow, traders and sentiment. Each is optional, so a
+// memtrade that predates them still pushes. ──
+
+const mood = (v: unknown, at: string): WechatMood | null =>
+  v === null || v === undefined ? null : oneOf(v, WECHAT_MOODS, at);
+
+function tally(v: unknown, at: string): WechatMoodTally {
+  const t = obj(v, at);
+  return {
+    bullish: count(t.bullish, `${at}.bullish`),
+    neutral: count(t.neutral, `${at}.neutral`),
+    bearish: count(t.bearish, `${at}.bearish`),
+  };
+}
+
+function score(v: unknown, at: string): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < -100 || v > 100) {
+    throw new PushError(`${at}: expected a whole number from −100 to 100`);
+  }
+  return v;
+}
+
+function lineSentiment(v: unknown, at: string): WechatLineSentiment {
+  return { ...tally(v, at), score: score((v as Record<string, unknown>).score, `${at}.score`) };
+}
+
+function sentiment(v: unknown, at: string): WechatSentiment {
+  const s = obj(v, at);
+  return {
+    ...lineSentiment(s, at),
+    urgent: count(s.urgent, `${at}.urgent`),
+    buy: tally(s.buy, `${at}.buy`),
+    sell: tally(s.sell, `${at}.sell`),
+  };
+}
+
+function trader(v: unknown, at: string): WechatTrader {
+  const t = obj(v, at);
+  return {
+    senderId: str(t.senderId, `${at}.senderId`),
+    name: text(t.name, `${at}.name`, SHORT_MAX),
+    posts: count(t.posts, `${at}.posts`),
+    lines: count(t.lines, `${at}.lines`),
+    qty: count(t.qty, `${at}.qty`),
+    groups: count(t.groups, `${at}.groups`),
+    both: bool(t.both, `${at}.both`),
+    mood: mood(t.mood, `${at}.mood`),
+  };
+}
+
+function traders(v: unknown, at: string): WechatTraders {
+  const t = obj(v, at);
+  return {
+    buy: arr(t.buy, `${at}.buy`, WECHAT_TRADERS_MAX).map((x, i) => trader(x, `${at}.buy[${i}]`)),
+    sell: arr(t.sell, `${at}.sell`, WECHAT_TRADERS_MAX).map((x, i) => trader(x, `${at}.sell[${i}]`)),
   };
 }
 
 function totals(v: unknown, at: string): WechatTotals {
   const t = obj(v, at);
   const keys = ['messages', 'groupsTotal', 'groupsActive', 'candidates', 'posts', 'buyPosts', 'sellPosts', 'buyers', 'sellers'] as const;
-  return Object.fromEntries(keys.map(k => [k, count(t[k], `${at}.${k}`)])) as WechatTotals;
+  return {
+    ...Object.fromEntries(keys.map(k => [k, count(t[k], `${at}.${k}`)])),
+    ...Object.fromEntries(WECHAT_FLOW_KEYS.map(k => [k, countOrNull(t[k], `${at}.${k}`)])),
+  } as WechatTotals;
 }
 
 function group(v: unknown, at: string): WechatGroupCoverage {
@@ -192,6 +264,8 @@ export function parseDayPush(body: unknown): WechatDayPush {
     groups,
     rows,
     pointCount: count(b.pointCount, 'pointCount'),
+    traders: b.traders === null || b.traders === undefined ? null : traders(b.traders, 'traders'),
+    sentiment: b.sentiment === null || b.sentiment === undefined ? null : sentiment(b.sentiment, 'sentiment'),
   };
 }
 
@@ -226,6 +300,8 @@ function point(v: unknown, at: string): WechatPoint {
     location: strOrNull(p.location, `${at}.location`),
     rawLine: text(p.rawLine, `${at}.rawLine`, TEXT_MAX),
     rowKeys: strings(p.rowKeys, `${at}.rowKeys`),
+    mood: mood(p.mood, `${at}.mood`),
+    urgent: p.urgent === undefined ? false : bool(p.urgent, `${at}.urgent`),
   };
 }
 

@@ -3,8 +3,11 @@ import {
   type FbChatAccountRef,
   type FbChatBuyer,
   type FbChatBuyerPush,
+  type FbChatCap,
   type FbChatClaimAnswer,
   type FbChatEventPush,
+  type FbChatOutMedia,
+  type FbChatRow,
   type FbChatSendResult,
   type FbChatSyncAnswer,
   type FbChatSyncPush,
@@ -27,23 +30,98 @@ const PROBE_CHARS = 60;
 
 const flat = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
 
-type Msg = { direction: string; body: string };
+/**
+ * A message as alignment compares it. `split`: a reply of ours with photos and
+ * a caption, which Facebook may show as one bubble or as a photo bubble and a
+ * caption bubble in either order. `photo`: a window row that shows a photo.
+ */
+type Msg = { direction: string; body: string; split?: boolean; photo?: boolean };
 /** The extension reads a bubble line by line, trimmed and without blank lines; compare what both sides keep. */
 const flatBody = (body: string) => body.replace(/\s+/g, ' ').trim();
 const sameMsg = (a: Msg, b: Msg) => a.direction === b.direction && flatBody(a.body) === flatBody(b.body);
+const barePhoto = (r: Msg) => r.direction === 'out' && r.photo === true && flatBody(r.body) === '';
+const captionOf = (m: Msg, r: Msg) => r.direction === 'out' && !r.photo && sameMsg(m, r);
+
+/** The window rows one stored message covers, as [first row, count]. */
+export type AlignSpan = [number, number];
 
 /**
- * How many of the window's first messages are already the stored
- * conversation's last ones: the longest suffix of `stored` that is a prefix of
- * `window`. It matches whole runs, so two identical messages in a row stay two.
+ * Lays `stored[s..]` over `window[w..]`, each message on the rows it covers,
+ * and answers the row after the last, or -1. A split reply may cover two rows;
+ * as the first message laid it may also show only its second, the window
+ * having begun between them.
  */
-export function alignWindow(stored: Msg[], window: Msg[]): number {
-  for (let k = Math.min(stored.length, window.length); k > 0; k--) {
-    let ok = true;
-    for (let i = 0; i < k && ok; i++) ok = sameMsg(stored[stored.length - k + i]!, window[i]!);
-    if (ok) return k;
+function lay(stored: Msg[], s: number, window: Msg[], w: number, spans: AlignSpan[]): number {
+  if (s === stored.length) return w;
+  const m = stored[s]!;
+  const a = window[w];
+  if (!a) return -1;
+  const counts: number[] = [];
+  const b = window[w + 1];
+  if (m.split && b && ((barePhoto(a) && captionOf(m, b)) || (captionOf(m, a) && barePhoto(b)))) counts.push(2);
+  if (sameMsg(m, a) || (m.split && spans.length === 0 && barePhoto(a))) counts.push(1);
+  for (const n of counts) {
+    spans.push([w, n]);
+    const end = lay(stored, s + 1, window, w + n, spans);
+    if (end >= 0) return end;
+    spans.pop();
   }
-  return 0;
+  return -1;
+}
+
+/**
+ * How many of the window's first rows are already the stored conversation's
+ * last messages: the longest suffix of `stored` laid exactly over a prefix of
+ * `window`. It matches whole runs, so two identical messages in a row stay
+ * two. `spans` are the rows each message of that suffix covers.
+ */
+export function alignWindowSpans(stored: Msg[], window: Msg[]): { rows: number; spans: AlignSpan[] } {
+  for (let k = Math.min(stored.length, window.length); k > 0; k--) {
+    const spans: AlignSpan[] = [];
+    const rows = lay(stored, stored.length - k, window, 0, spans);
+    if (rows >= 0) return { rows, spans };
+  }
+  return { rows: 0, spans: [] };
+}
+
+export const alignWindow = (stored: Msg[], window: Msg[]): number => alignWindowSpans(stored, window).rows;
+
+/** A reply of ours waiting to be found on the page. `media`: how many photos it carries. */
+export type PendingReply = { id: number; body: string; send_state: string; media: number };
+
+const probeOf = (body: string) => flat(body).slice(0, PROBE_CHARS);
+const isPhotoRow = (r: FbChatRow) => r.images.length > 0 || (r.media?.length ?? 0) > 0;
+const isBarePhotoRow = (r: FbChatRow) => isPhotoRow(r) && flat(r.text) === '';
+// An empty probe is in every text, so it never says anything.
+const shows = (r: FbChatRow, probe: string) => probe !== '' && flat(r.text).includes(probe);
+
+/**
+ * Which pending reply the outbound row `rows[i]` is, if any, and how many rows
+ * it covers: two when Facebook put a photo reply's caption in its own bubble,
+ * right before or after the photo. A reply with photos is found by a photo, a
+ * text reply by its text; neither by text that is empty.
+ */
+export function findReply(pending: PendingReply[], rows: FbChatRow[], i: number): { index: number; rows: 1 | 2 } | null {
+  const row = rows[i]!;
+  const next = rows[i + 1]?.direction === 'out' ? rows[i + 1] : undefined;
+  const photos = pending.flatMap((m, index) => (m.media > 0 ? [{ index, probe: probeOf(m.body) }] : []));
+  if (isPhotoRow(row)) {
+    for (const p of photos) {
+      if (shows(row, p.probe)) return { index: p.index, rows: 1 };
+      if (isBarePhotoRow(row) && next && !isPhotoRow(next) && shows(next, p.probe)) return { index: p.index, rows: 2 };
+    }
+    if (isBarePhotoRow(row)) {
+      // A caption not seen here may still come in a later window, where
+      // alignment takes it as this reply's.
+      const p = photos.find((x) => x.probe === '') ?? photos[0];
+      if (p) return { index: p.index, rows: 1 };
+    }
+  } else if (next && isBarePhotoRow(next)) {
+    const p = photos.find((x) => shows(row, x.probe));
+    if (p) return { index: p.index, rows: 2 };
+  }
+  const text = pending.findIndex((m) => m.media === 0 && shows(row, probeOf(m.body)));
+  return text >= 0 ? { index: text, rows: 1 } : null;
 }
 
 /** The channel a held outbox claim sleeps on (lib/pgWake.ts). */
@@ -188,8 +266,25 @@ async function applyBuyer(tx: SqlLike, accountId: number, threadId: number, b: F
     WHERE id = ${threadId}`;
 }
 
+/** A stored message whose photos the hub should fetch itself, from `urls`. */
+export type FbChatMissingMedia = { messageId: number; urls: string[] };
+
+export type FbChatSyncOutcome = {
+  answer: FbChatSyncAnswer;
+  /** New rows with links but no stored photo: an extension that predates media, or whose upload failed. */
+  missingMedia: FbChatMissingMedia[];
+};
+
+/** The ids among `ids` that name a stored photo. */
+async function storedMediaIds(tx: SqlLike, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const rows = await tx<{ id: string }[]>`
+    SELECT id::text AS id FROM fb_chat_media WHERE id = ANY(${[...new Set(ids)]}::uuid[])`;
+  return new Set(rows.map((r) => r.id));
+}
+
 /** One conversation window from an extension. */
-export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string): Promise<FbChatSyncAnswer> {
+export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string): Promise<FbChatSyncOutcome> {
   const acct = await touchAccount(tx, push.account, clientId);
   // A page that reads as a conversation again is an account that is back.
   if (acct.restricted) {
@@ -204,7 +299,7 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
   const isNew = !thread;
   // A topic opens with the conversation so far, so a new thread is stored
   // only from a push that tried to read all of it.
-  if (isNew && !t.full) return { needsFull: true, added: 0 };
+  if (isNew && !t.full) return { answer: { needsFull: true, added: 0 }, missingMedia: [] };
   if (!thread) {
     [thread] = await tx<{ id: number; last_seq: number }[]>`
       INSERT INTO fb_chat_threads (account_id, fb_thread_id, listing_id, listing_title, history_complete)
@@ -223,13 +318,42 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
   const threadId = thread!.id;
   await applyBuyer(tx, acct.id, threadId, t.buyer);
 
-  const stored = (await tx<{ direction: string; body: string }[]>`
-    SELECT direction, body FROM fb_chat_messages
+  const stored = (await tx<{ id: number; direction: string; source: string; body: string; images: number; media: number }[]>`
+    SELECT id::int AS id, direction, source, body, jsonb_array_length(images) AS images, jsonb_array_length(media) AS media
+      FROM fb_chat_messages
      WHERE thread_id = ${threadId} AND seq IS NOT NULL
      ORDER BY seq DESC LIMIT ${ALIGN_TAIL}`).reverse();
-  const window = t.rows.map((r) => ({ direction: r.direction, body: r.text }));
-  const known = alignWindow(stored, window);
+  const window = t.rows.map((r) => ({ direction: r.direction, body: r.text, photo: isPhotoRow(r) }));
+  const aligned = alignWindowSpans(stored.map((m) => ({
+    direction: m.direction, body: m.body,
+    split: m.direction === 'out' && m.source !== 'facebook' && m.media > 0 && flatBody(m.body) !== '',
+  })), window);
+  const known = aligned.rows;
   const fresh = t.rows.slice(known);
+
+  // An id the extension sends is kept only once the photo is stored, so a
+  // failed or forged upload leaves the bubble's placeholder.
+  const present = await storedMediaIds(tx, t.rows.flatMap((r) => r.media ?? []));
+  const mediaOf = (r: FbChatRow) => (r.media ?? []).filter((m) => present.has(m));
+  // The window's first `known` rows are the stored tail's last messages, in
+  // order. A photo bubble stored before its photos could be uploaded takes
+  // them from this push.
+  const tailStart = stored.length - aligned.spans.length;
+  for (const [i, [first, count]] of aligned.spans.entries()) {
+    if (count !== 1) continue;
+    const old = stored[tailStart + i]!;
+    const row = t.rows[first]!;
+    // Extensions before 0.5.1 took the sender's avatar for a photo. A bubble
+    // read again with fewer photos keeps only those.
+    if (old.source === 'facebook' && old.images > row.images.length) {
+      await tx`UPDATE fb_chat_messages SET images = ${tx.json(row.images)} WHERE id = ${old.id}`;
+    }
+    const media = mediaOf(row);
+    if (old.images > 0 && old.media === 0 && media.length) {
+      await tx`UPDATE fb_chat_messages SET media = ${tx.json(media)} WHERE id = ${old.id} AND media = '[]'::jsonb`;
+    }
+  }
+  const missingMedia: FbChatMissingMedia[] = [];
   if (stored.length && !known && fresh.length) {
     await addEvent(tx, acct.id, threadId, 'sync_gap', { stored: stored.length, rows: t.rows.length });
   }
@@ -237,8 +361,8 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
   // Replies of ours that have not been placed in the conversation yet. One
   // put back in the outbox after an attempt counts: that attempt may have
   // landed, and finding its bubble here is what stops it being typed again.
-  const pending = await tx<{ id: number; body: string; send_state: string }[]>`
-    SELECT id::int AS id, body, send_state FROM fb_chat_messages
+  const pending = await tx<PendingReply[]>`
+    SELECT id::int AS id, body, send_state, jsonb_array_length(media) AS media FROM fb_chat_messages
      WHERE thread_id = ${threadId} AND seq IS NULL
        AND (send_state IN ('sending','sent','uncertain') OR (send_state = 'queued' AND attempts > 0))
      ORDER BY id`;
@@ -251,27 +375,35 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
   // first sight counts too, so a chat found ending with the buyer is unread.
   let inboundSeq: number | null = null;
   let answeredSeq = 0;
-  for (const row of fresh) {
+  for (let i = 0; i < fresh.length; i++) {
+    const row = fresh[i]!;
     seq += 1;
-    const ours = row.direction === 'out'
-      ? pending.findIndex((m) => flat(row.text).includes(flat(m.body).slice(0, PROBE_CHARS)))
-      : -1;
-    if (ours >= 0) {
+    const ours = row.direction === 'out' ? findReply(pending, fresh, i) : null;
+    if (ours) {
       // The bubble is on the page, whatever the extension went on to report.
-      const [m] = pending.splice(ours, 1);
+      const [m] = pending.splice(ours.index, 1);
       if (m!.send_state === 'sending') await notifyOutbox(tx);
       await tx`
         UPDATE fb_chat_messages SET seq = ${seq}, send_state = 'sent', sent_at = COALESCE(sent_at, NOW()), error = NULL,
                acked_at = CASE WHEN send_state = 'sent' THEN acked_at ELSE NULL END
          WHERE id = ${m!.id}`;
+      // A caption in its own bubble is part of the reply, not a message: it
+      // keeps its place in the count, so the next one lines up.
+      if (ours.rows === 2) {
+        i += 1;
+        seq += 1;
+      }
       outbound = true;
       answeredSeq = seq;
       continue;
     }
-    await tx`
-      INSERT INTO fb_chat_messages (thread_id, seq, direction, source, body, images, backfill, fb_sent_label)
+    const media = mediaOf(row);
+    const [inserted] = await tx<{ id: number }[]>`
+      INSERT INTO fb_chat_messages (thread_id, seq, direction, source, body, images, media, backfill, fb_sent_label)
       VALUES (${threadId}, ${seq}, ${row.direction}, 'facebook', ${row.text},
-              ${tx.json(row.images)}, ${isNew}, ${row.at ?? null})`;
+              ${tx.json(row.images)}, ${tx.json(media)}, ${isNew}, ${row.at ?? null})
+      RETURNING id::int AS id`;
+    if (row.images.length && !media.length) missingMedia.push({ messageId: inserted!.id, urls: row.images });
     added += 1;
     if (row.direction === 'in') inboundSeq = seq;
     else answeredSeq = seq;
@@ -289,7 +421,7 @@ export async function ingestSync(tx: Tx, push: FbChatSyncPush, clientId: string)
       last_outbound_at = CASE WHEN ${outbound} THEN NOW() ELSE last_outbound_at END
     WHERE id = ${threadId}`;
   if (added && !isNew) await addEvent(tx, acct.id, threadId, 'sync', { added, known, rows: t.rows.length });
-  return { needsFull: false, added };
+  return { answer: { needsFull: false, added }, missingMedia };
 }
 
 /** What the buyer's own profile page showed. False when the thread is unknown. */
@@ -305,9 +437,19 @@ export async function ingestBuyer(tx: Tx, push: FbChatBuyerPush, clientId: strin
 /**
  * The account's oldest queued reply, now `sending`, or null. One at a time per
  * account: a second reply waits until the first is reported.
+ *
+ * A reply with photos goes only to an extension whose `caps` say it can attach
+ * them; an older one would type the caption and report it sent. It waits in
+ * the outbox for one that can, and so do the replies queued after it in the
+ * same chat, so the buyer reads them in the order they were written. Other
+ * chats are not held.
  */
-export async function claimReply(tx: Tx, ref: FbChatAccountRef, clientId: string): Promise<FbChatClaimAnswer | null> {
+export async function claimReply(
+  tx: Tx, ref: FbChatAccountRef, clientId: string, caps: readonly FbChatCap[] = [],
+): Promise<FbChatClaimAnswer | null> {
   const acct = await touchAccount(tx, ref, clientId);
+  const photos = caps.includes('media');
+  await tx`UPDATE fb_chat_accounts SET photo_replies = ${photos} WHERE id = ${acct.id} AND photo_replies IS DISTINCT FROM ${photos}`;
   // A claim never reported is not handed out again: the text may be on the
   // page, and a duplicate to a buyer is worse than a reply the owner resends.
   const stale = await tx<{ id: number; thread_id: number }[]>`
@@ -321,19 +463,49 @@ export async function claimReply(tx: Tx, ref: FbChatAccountRef, clientId: string
   if (stale.length) await notifyOutbox(tx);
   // A login or checkpoint page has no composer: replies wait, as the alert says.
   if (acct.restricted) return null;
-  const [claimed] = await tx<FbChatClaimAnswer[]>`
+  const textOnly = caps.includes('media') ? tx`` : tx`
+    AND NOT EXISTS (
+      SELECT 1 FROM fb_chat_messages p
+       WHERE p.thread_id = q.thread_id AND p.send_state = 'queued' AND p.id <= q.id AND p.media <> '[]'::jsonb)`;
+  const [claimed] = await tx<(Omit<FbChatClaimAnswer, 'media'> & { media_ids: string[] })[]>`
     UPDATE fb_chat_messages m SET send_state = 'sending', claimed_at = NOW(), attempts = attempts + 1
       FROM fb_chat_threads t
      WHERE t.id = m.thread_id
        AND m.id = (
          SELECT q.id FROM fb_chat_messages q JOIN fb_chat_threads qt ON qt.id = q.thread_id
-          WHERE qt.account_id = ${acct.id} AND q.send_state = 'queued'
+          WHERE qt.account_id = ${acct.id} AND q.send_state = 'queued' ${textOnly}
             AND NOT EXISTS (
               SELECT 1 FROM fb_chat_messages s JOIN fb_chat_threads st ON st.id = s.thread_id
                WHERE st.account_id = ${acct.id} AND s.send_state = 'sending')
           ORDER BY q.id LIMIT 1 FOR UPDATE OF q SKIP LOCKED)
-    RETURNING m.id::int AS id, t.fb_thread_id AS "fbThreadId", m.body, m.attempts AS attempt`;
-  return claimed ?? null;
+    RETURNING m.id::int AS id, t.fb_thread_id AS "fbThreadId", m.body, m.attempts AS attempt, m.media AS media_ids`;
+  if (!claimed) return null;
+  const { media_ids: ids, ...answer } = claimed;
+  if (!ids.length) return answer;
+  const media = await tx<FbChatOutMedia[]>`
+    SELECT f.id::text AS id, f.mime, f.bytes
+      FROM unnest(${ids}::uuid[]) WITH ORDINALITY AS x(id, n) JOIN fb_chat_media f ON f.id = x.id
+     ORDER BY x.n`;
+  return { ...answer, media };
+}
+
+/**
+ * Whether the extension `clientId` may download photo `mediaId`: it is on a
+ * reply of ours still going out, on a chat of an account that extension
+ * relays. The bearer names the Chrome, and an account belongs to the Chrome
+ * that last pushed for it (touchAccount), which is the one that claims its
+ * replies. Done or failed replies are not served: there is nothing to attach.
+ */
+export async function outboundMediaAllowed(sql: SqlLike, mediaId: string, clientId: string): Promise<boolean> {
+  const [hit] = await sql`
+    SELECT 1 FROM fb_chat_accounts a
+      JOIN fb_chat_threads t ON t.account_id = a.id
+      JOIN fb_chat_messages m ON m.thread_id = t.id
+     WHERE a.client_id = ${clientId} AND m.direction = 'out' AND m.source IN ('telegram', 'erp')
+       AND m.send_state IN ('queued', 'sending', 'uncertain')
+       AND m.media @> ${sql.json([mediaId])}
+     LIMIT 1`;
+  return hit !== undefined;
 }
 
 export type ResultOutcome = 'ok' | 'not_found' | 'not_sending';
@@ -390,12 +562,18 @@ export async function recordEvent(tx: Tx, push: FbChatEventPush, clientId: strin
     ? await tx<{ id: number }[]>`SELECT id::int AS id FROM fb_chat_threads WHERE account_id = ${acct.id} AND fb_thread_id = ${push.fbThreadId}`
     : [];
   if (push.kind === 'restricted') {
-    const what = push.detail?.restriction === 'checkpoint' ? 'checkpoint' : 'login';
+    const said = push.detail?.restriction;
+    const what = said === 'checkpoint' || said === 'blocked' ? said : 'login';
     // The extension repeats this while the page stays up; alert once.
     if (acct.restricted === what) return;
     await tx`UPDATE fb_chat_accounts SET restricted = ${what}, restricted_at = NOW() WHERE id = ${acct.id}`;
+    const until = typeof push.detail?.until === 'string' ? new Date(push.detail.until) : null;
     await addEvent(tx, acct.id, null, 'restricted', push.detail ?? {},
-      `⚠️ ${name}: Facebook is showing a ${what} page. Replies for this account wait until it is cleared in the browser.`);
+      what === 'blocked'
+        ? `⚠️ ${name}: Facebook warned that it is limiting this account (blocked, "going too fast" or a security check). ` +
+          `The bridge stops reading and typing${until && !Number.isNaN(until.getTime()) ? ` until ${until.toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''}. ` +
+          'Answer urgent buyers by hand, and slow down on this account.'
+        : `⚠️ ${name}: Facebook is showing a ${what} page. Replies for this account wait until it is cleared in the browser.`);
     return;
   }
   if (push.kind === 'recovered') {

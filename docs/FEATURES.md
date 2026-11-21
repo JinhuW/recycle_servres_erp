@@ -139,6 +139,21 @@ the event written when it leaves Draft, not a stage). Sold
 is not a stage but a flag beside one, set once every line has sold
 (v1.246.0).
 
+**The PO list as a board** (v1.469.0, RS-597). A List / Board switch on
+Purchase orders (remembered per user) shows the same POs as cards in one
+column per stage, with the list's category, search, warehouse, payment, Show
+Done and Show Archived filters still applied. Each card shows the PO, its
+client, cost, products, carrier, purchaser, open Actions cards, and how long
+it has sat in its stage, tinted as on Home. Columns run oldest in stage
+first. Dropping a card on the next stage starts the same step the PO page
+uses, so nothing is skipped: Draft → In Transit opens the PO with the
+hand-off form up; In Transit → Reviewing moves it from the board (after the
+take-over question when another manager holds it); Reviewing → Ready to Pay
+opens the box check; Ready to Pay → Done opens the PO with the commission
+evidence step. Done is always there to drop on, though its cards show only
+with Show Done. Back moves and jumps are refused; they stay on the PO page.
+A purchaser can drag only their own Draft.
+
 - **Every product on a PO has a `#` that never changes** (v1.234.0). It is
   given when the product is put on the PO — a new PO numbers its products
   1..n in the order they came, and each one added later takes the PO's next
@@ -1269,6 +1284,49 @@ is not a stage but a flag beside one, set once every line has sold
   any width, and the Notes box stays inside its card at every width (it used
   to overhang at 1400px).
 
+## Actions
+
+**Actions** (`#/actions`, v1.468.0, RS-596) is the team's shared kanban of
+things to do, for both roles. Everyone sees every card and can create one,
+move it, comment on it and assign it to any active employee. Only the card's
+creator or a manager can remove it; removal hides the card and keeps its
+history.
+
+- **Columns** are fixed: To do, In progress, Blocked, Done. A card is dragged
+  between them (with a mouse from anywhere on the card; with a finger or pen
+  by its grip, so an iPad can still scroll the board) or moved with the
+  select on the card or in its drawer. New cards go on top of their column.
+  Done cards stay on the board for 14 days after they are finished, then move
+  to **Archive**.
+- **A card** has a title, details, a priority (a high one gets an amber edge),
+  an optional due date (red once overdue, "Today" on the day), an assignee and
+  comments. Assigning someone else leaves them an in-app notification. The
+  sidebar shows how many open cards are assigned to the viewer.
+- **Linked record.** A card can be about one purchase order, sell order,
+  after-sales case, client, web submission or inventory lot, picked by number
+  or name. The card shows the record's number and live status, and the drawer
+  links to it. What a purchaser sees follows the record's own rules: their
+  own POs and clients show status and a link; anything else shows only its
+  number, and a client shows as "Client" with no name. Only a record the
+  viewer could open can be linked. A card whose record is deleted keeps its
+  number, struck through.
+- **Filters:** everyone, mine, unassigned or one person (remembered per user),
+  and a search over title, number and linked record. The board re-reads every
+  minute and when the tab comes back, without undoing a drag in progress.
+- **On the records themselves** (v1.470.0). A purchase order has an
+  **Actions** tab, counting its open cards; a sell order, an after-sales case,
+  a website lead, a client and an inventory lot each have an Actions panel.
+  The panel lists the record's cards (open first), opens one in place (from a
+  client, on the board), and starts a new card already linked to the record.
+- **Home** has a **My actions** card for both roles: the viewer's open cards,
+  overdue and soonest due first (v1.470.0).
+- **On the phone** (v1.471.0) Home lists My actions and a PO has an Actions
+  fold. A card opens in a sheet to change its column or assignee and to read
+  or add comments; a linked PO opens from it. New action adds a card (from
+  Home, assigned to the viewer; from a PO, linked to it). No board or dragging.
+- Card titles and comments are free text on a shared board: anything typed
+  there is visible to every employee, whatever the linked record's access.
+
 ## Clients (the people we buy from)
 
 - **A client link opens that client** (v1.258.7): `/#/clients/<id>` drives
@@ -1360,7 +1418,7 @@ The sidebar row shows the number of unread chats.
   message says where it was typed (Facebook, Telegram or the ERP) and, for
   the ERP, who typed it.
 - **Replying in the ERP.** A text reply typed in the open chat (2000
-  characters at most, no photos) goes through the same outbox as a Telegram
+  characters at most, with up to 10 photos) goes through the same outbox as a Telegram
   reply and is posted into the chat's topic as `↩️ <first name> (ERP): …`. It
   is queued whatever the account's state and goes out when the account's
   extension next claims. The bubble shows queued, typing, sent or not sent. A
@@ -1378,7 +1436,8 @@ The sidebar row shows the number of unread chats.
   refuses it. When the request's Facebook user is already an account the card
   offers Reconnect, which moves the account to the new Chrome, revokes the
   old one and keeps the chats. Below is one row per Facebook account with a
-  number, its status (running, paused, needs login, checkpoint, or not
+  number, its status (running, paused, needs login, checkpoint, limited by
+  Facebook (v1.465.0), or not
   checking in after three missed settings checks and at least five minutes),
   replies waiting, last sync, extension version, whether it has picked up the
   current settings, and the Chrome that relays it. A row can be renamed,
@@ -1415,6 +1474,26 @@ The sidebar row shows the number of unread chats.
 - **Messages.** Each later buyer message is posted to its topic once, as
   `👤 <buyer>: …` (v1.453.3). A reply typed on Facebook directly appears as
   `↩️ You: …`.
+- **Photos** (v1.460.0, RS-589). The extension (0.4.0 and later) uploads
+  each bubble photo to `POST /api/fb-chat/push/media`, and the hub keeps one
+  copy per photo (`fb_chat_media`, R2). For an older extension that sends
+  only Facebook's signed links, the hub fetches the photo itself from
+  `*.fbcdn.net` right after the sync. The Chats tab shows stored photos as
+  thumbnails with a larger view on click, through `GET /api/fb-chat/media/:id`
+  (managers only); a photo never stored keeps the grey "Photo" box. Telegram
+  gets the photo itself, alone or as an album captioned with the message, and
+  a history breaks at each message with photos. A photo Telegram refuses goes
+  as its link or as the text line. Photos can be sent to Facebook too
+  (v1.461.0, RS-590): a photo, a JPEG/PNG/WebP file or an album posted in a
+  topic becomes one reply with its caption, and the Chats composer attaches
+  photos by button, paste or drop. The extension (0.5.0 and later, with
+  "Allow access to file URLs" on) downloads them from
+  `GET /api/fb-chat/push/media/:id`, attaches them through the debugger and
+  reports the reply failed if it cannot attach, before anything is sent. A
+  photo reply waits, with the replies after it in that chat, until such an
+  extension claims. WebP photos are kept as JPEG (v1.462.1). The Accounts tab
+  marks an account whose extension cannot attach photos "No photo replies",
+  and the composer says a photo reply will wait for it.
 - **Replies.** Text typed in a topic is queued for the extension of the account
   that owns the conversation, which types it into Facebook. The bot reacts 👍
   when the extension reports it sent, and says so in the topic when it failed
@@ -1426,7 +1505,10 @@ The sidebar row shows the number of unread chats.
   texts it sent. A message from that account dated before the hub's session
   started is taken as a post and not relayed.
 - **Alerts.** A login or checkpoint page on an account posts one warning in
-  General, and one more when the account is back.
+  General, and one more when the account is back. So does a warning on the
+  page that Facebook is limiting the account ("temporarily blocked", "going
+  too fast", a security check): the extension (0.6.0+) then pauses for the
+  **Pause after a warning** hours, and the alert says when it ends (v1.465.0).
 - **Data.** Every message, buyer profile (rating, rating count, location, join
   year), send attempt and account event is kept in the `fb_chat_*` tables for
   analysis. Each message records where it was typed (`facebook`, `telegram`
@@ -1578,8 +1660,13 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   lots alone, and its row — qty and the in-stock split, lot and PO counts,
   cost range, Warehouses — sums those alone. The attribute chips still show
   a matching product whole, so a mis-typed lot stays findable.
-- **The desktop Inventory table sorts by any column** (v1.332.0): Product,
-  Part #, Qty, Lots, Warehouses, Cost, Sell. A click goes high → low → low →
+- **The grouped view shows each product's last collected date** (v1.467.0,
+  RS-598): the newest hand-off (pickup or shipment) among its lots' POs, or the
+  PO's date for one from before the hand-off step, with the days since. Each
+  lot shows its own. A partial transfer's clone keeps its PO's date.
+- **The desktop Inventory table sorts by any column** (v1.332.0, Last
+  collected v1.467.0): Product, Part #, Qty, Lots, Warehouses, Cost, Sell,
+  Last collected. A click goes high → low → low →
   high → back to the bid-sheet order. Blanks sort last, and ties keep the
   bid-sheet order. The server ranks every matching product before it caps
   the list at 200, so the top of a sort is the top of the whole stock. A
@@ -3411,6 +3498,26 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     is a group × day heatmap, busiest groups first, shaded by quintile,
     with each group's last day with messages; a gap of 2+ days shows in the
     warning colour.
+  - **Buyers & sellers**, **Market mood** and **Most active traders**
+    (v1.472.0, RS-599). Above the board, *Buyers & sellers* sets buy against
+    sell for traders, posts and units (each trader's largest figure per spec
+    line, summed, with how many posts gave a figure: most give none, so it is
+    a floor), with the change against the day before on hover; splits the
+    traders into buy only, both sides and sell only; and counts new buyers
+    and sellers (not seen on that side in the 30 report days before).
+    *Market mood* is Claude's read of each post's tone: bullish (急收, 加价,
+    缺货, 涨价), bearish (急出, 清仓, 甩货, 特价, 降价) or neutral, one vote per
+    trader (their latest post). It shows the index, (bullish − bearish) ÷
+    voters × 100, leaning at ±20, on a gauge, the three counts, each side's
+    split and the urgent posts. The board has a *Mood* column with each
+    line's index, an opened line lists its mood counts, and a post that
+    isn't neutral or is urgent says so. *Most active traders*, in the aside,
+    ranks the ten busiest buyers or sellers by posts, with their specs,
+    groups, units, mood and whether they trade both sides. On the Activity
+    tab, *Buyers, sellers and mood* charts both sides' traders and the mood
+    index per day, with units on hover. memtrade computes all of it; a day
+    it pushed before then says so instead of showing zeros, and the mood
+    needs the day re-run.
   - **Settings** (v1.458.0), a further tab (`?view=settings`), edits the
     prompt memtrade gives Claude to write the market notes. It shows
     memtrade's built-in prompt (`prompts/summary.md`, which memtrade
@@ -3962,7 +4069,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     **Release parked (N)** whenever such rows exist: a confirmation lists each
     account, worker and state, counts the parked rows it leaves alone, and
     warns that every account added to the fleet afterwards starts a worker (a
-    login); confirming retires them one by one through the same endpoint. A
+    login); confirming retires them one by one through the same endpoint.
+    Since v1.463.0 (RS-592) the table has a **Proxy** column (the proxy an ERP
+    worker's account is on, or the homelab port a coordinator worker dials:
+    its label, its health chip, and the last check's latency and exit IP or
+    error) and the toolbar a **Check proxies** button that runs the Proxies
+    tab's full check round and refreshes the table; neither logs anyone in. A
     worker that has stopped and whose account no longer has a slot (retired or
     removed from the fleet) is its own kind, **Free**, grey, waiting for an
     account added on the Account pool tab; Free comes before
@@ -4435,7 +4547,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   website forms (v1.187.0; called Web submissions and top-level in the sidebar
   until v1.436.0, whose old links still open). The ram4cash.com sell form (`POST /api/public/intake`) and the
   recycleservers.com quote form (`POST /api/public/quote`) each store a
-  `WS-nnnn` row and notify managers; nothing anonymous touches orders. The page
+  `WS-nnnn` row and notify managers, in the app and, since v1.462.0, with a
+  lead alert on Telegram (form, reference, contact, lines or hardware, notes),
+  posted by the Facebook chat hub's account to the group named by
+  `WEB_LEAD_TELEGRAM_CHAT_ID` (v1.464.0), or else to the hub group's General topic; nothing anonymous touches orders. The page
   lists them by status (new / contacted / converted / archived / spam) with
   counts, a site filter and search; a submission opens with its details, line
   photos, a status + staff-note triage panel and its email conversation. **Create

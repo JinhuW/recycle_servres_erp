@@ -8,7 +8,7 @@ import { poolApi } from '../../../lib/facebookPool';
 import { handleFetchError, showSuccessToast, showWarnToast } from '../../../lib/errorToast';
 import {
   fleetApi, fleetCloakFor, fleetEngineOf, fleetErrorCode, fleetStateParked,
-  type FleetBrowserEngine, type FleetHost, type FleetRelease, type FleetSettings, type FleetSlot, type FleetWorker,
+  type FleetBrowserEngine, type FleetHost, type FleetProxyHealth, type FleetRelease, type FleetSettings, type FleetSlot, type FleetWorker,
 } from '../../../lib/fleet';
 import { queueCityName, withoutRetired } from '../../../lib/fleetView';
 import { useT } from '../../../lib/i18n';
@@ -18,11 +18,12 @@ import { ActivityAside } from '../FleetWorkers';
 import { dueLabel, easternClock, isQuarantined, maskUid } from './fleetBoard';
 import {
   DEFAULT_FLEET_ROW_FILTER, EMPTY_FLEET_ROW_FILTER, FLEET_ROW_SORT_COLS, filterFleetRows, fleetRowCounts, fleetRowHosts, fleetRows, fleetRunning,
-  fleetCloakRoom, releasableRows, rowCloakSwitchable, rowOwnSlot, rowStockRevertible, rowRetirable, sortFleetRows,
+  fleetCloakRoom, releasableRows, rowCloakSwitchable, rowOwnSlot, rowProxy, rowStockRevertible, rowRetirable, sortFleetRows,
   type FleetCloakRoom, type FleetPoolAccount, type FleetRow, type FleetRowFilter, type FleetRowSortCol,
 } from './fleetRows';
 import { AccountBriefCell } from './accountBrief';
 import { AddHostDialog, FleetRack, ReleaseDialog } from './FleetHosts';
+import { STATE_CHIP as PROXY_CHIP, STATE_KEY as PROXY_KEY } from './FleetProxiesTab';
 import {
   AcceptProfileButton, agoLabel, BudgetRing, ConfirmDialogBody, COORDINATOR_POLL_MS, EmptyRow, EngineChip, MarkHealthyButton, RestartWorkerButton, ParkDialog, ReleaseParkedDialog, RetireSlotDialog, resumeWaiting, UnavailableCard, useFleetMirror, useFleetPoll,
   WorkerStateChip,
@@ -43,6 +44,8 @@ type ErpData = {
   slots: FleetSlot[]; workers: FleetWorker[]; hosts: FleetHost[]; release: FleetRelease | null; pool: FleetPoolAccount[] | null;
   /** For the engine card and the CloakBrowser guard; without it no row offers the switch. */
   settings?: FleetSettings | null;
+  /** Each proxy's last check; the Proxy column reads "—" without it. */
+  proxyHealth?: FleetProxyHealth[] | null;
 };
 type CoordinatorData = { coordinator: FleetDoc | null; challenges: Challenge[] | null };
 type Data = ErpData & CoordinatorData;
@@ -55,7 +58,10 @@ export function FleetAccountsTab() {
     // The pool names the account a coordinator worker holds.
     poolApi.summary().then(s => s.accounts).catch(() => null),
     fleetApi.settings().catch(() => null),
-  ]).then(([slots, workers, hosts, pool, settings]) => ({ slots, workers, hosts: hosts.hosts, release: hosts.release, pool, settings })));
+    fleetApi.proxyHealth().then(h => h.proxies).catch(() => null),
+  ]).then(([slots, workers, hosts, pool, settings, proxyHealth]) => ({
+    slots, workers, hosts: hosts.hosts, release: hosts.release, pool, settings, proxyHealth,
+  })));
   // The coordinator's rows go away at cutover; without the proxy the table
   // is the ERP's fleet alone.
   const coord = useFleetPoll<CoordinatorData>(() => Promise.all([
@@ -118,7 +124,24 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
   const { t } = useT();
   const mirror = useFleetMirror();
   const [releasing, setReleasing] = useState(false);
+  const [checking, setChecking] = useState(false);
   const rows = useMemo(() => fleetRows(data, now), [data, now]);
+  const proxies = data.proxyHealth ?? null;
+  // A full round probes through every proxy, so it takes seconds; the
+  // backend folds a second click into a round already running.
+  const checkProxies = async () => {
+    if (checking) return;
+    setChecking(true);
+    try {
+      const answer = await fleetApi.checkProxies();
+      showSuccessToast(t('fleetProxyChecked', { n: answer.proxies.length }));
+      onChanged();
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setChecking(false);
+    }
+  };
   const releasable = useMemo(() => releasableRows(rows), [rows]);
   // Click cycles desc → asc → the table's own order (running first, by worker id).
   const [sort, setSort] = usePersisted<SortState>('desktop.fleet.workers.sort', { col: '', dir: null });
@@ -147,6 +170,11 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
           <input className="input" type="search" value={filter.q} autoComplete="off" placeholder={t('fleetSearchWorkers')}
             aria-label={t('fleetSearchWorkers')} onChange={e => set({ q: e.target.value })} />
         </label>
+        {!mirror && (
+          <button type="button" className="btn" onClick={checkProxies} disabled={checking} aria-busy={checking} title={t('fleetCheckProxiesHint')}>
+            <Icon name="refresh" size={14} />{t('fleetCheckProxies')}
+          </button>
+        )}
         {!mirror && releasable.release.length > 0 && (
           <button type="button" className="btn fleet-danger-text" onClick={() => setReleasing(true)}>
             {t('fleetReleaseParked', { n: releasable.release.length })}
@@ -164,6 +192,7 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
               <SortTh col="account" sort={sort} onSort={cycleSort}>{t('fleetColAccount')}</SortTh>
               <SortTh col="state" sort={sort} onSort={cycleSort}>{t('fleetColState')}</SortTh>
               <th>{t('fleetColEngine')}</th>
+              <th>{t('fleetColProxyPort')}</th>
               <SortTh col="now" sort={sort} onSort={cycleSort}>{t('fleetColNow')}</SortTh>
               <SortTh col="today" sort={sort} onSort={cycleSort}>{t('fleetColToday')}</SortTh>
               <SortTh col="lease" sort={sort} onSort={cycleSort}>{t('fleetColLease')}</SortTh>
@@ -172,8 +201,9 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
             </tr>
           </thead>
           <tbody>
-            {shown.length === 0 && <EmptyRow cols={10}>{counts.all === 0 ? t('fleetWorkersNone') : t('fleetWorkersNoMatch')}</EmptyRow>}
+            {shown.length === 0 && <EmptyRow cols={11}>{counts.all === 0 ? t('fleetWorkersNone') : t('fleetWorkersNoMatch')}</EmptyRow>}
             {shown.map(r => <WorkerRow key={r.key} row={r} hostVersion={r.host ? versions.get(r.host) ?? null : null}
+              proxy={proxies ? rowProxy(r, proxies) : null} proxyUnlisted={!!proxies && r.source === 'erp' && r.kind !== 'free' && !!r.slot?.has_proxy}
               cityName={slug => queueCityName(data.coordinator, slug)} room={room} onChanged={onChanged} now={now} />)}
           </tbody>
         </table>
@@ -186,8 +216,8 @@ export function WorkersTable({ data, filter, onFilter, onChanged, now = Date.now
   );
 }
 
-function WorkerRow({ row: r, hostVersion, cityName, room, onChanged, now }: {
-  row: FleetRow; hostVersion: string | null; cityName: (slug: string) => string; room: FleetCloakRoom; onChanged: () => void; now: number;
+function WorkerRow({ row: r, hostVersion, proxy, proxyUnlisted, cityName, room, onChanged, now }: {
+  row: FleetRow; hostVersion: string | null; proxy: FleetProxyHealth | null; proxyUnlisted: boolean; cityName: (slug: string) => string; room: FleetCloakRoom; onChanged: () => void; now: number;
 }) {
   const { t, locale } = useT();
   const mirror = useFleetMirror();
@@ -279,6 +309,9 @@ function WorkerRow({ row: r, hostVersion, cityName, room, onChanged, now }: {
         ) : <span className="fp-muted">—</span>}
       </td>
       <td>
+        <ProxyCell proxy={proxy} unlisted={proxyUnlisted} now={now} />
+      </td>
+      <td>
         <span className="fp-holder">
           {nowCell}
           {((r.running && slot && !slot.parked && !mirror) || retirable) && (
@@ -324,6 +357,25 @@ function WorkerRow({ row: r, hostVersion, cityName, room, onChanged, now }: {
           onClose={() => setRetiring(false)} onDone={() => { setRetiring(false); onChanged(); }} />}
       </td>
     </tr>
+  );
+}
+
+/** Which proxy the browser dials and how it answered its last check. */
+function ProxyCell({ proxy: p, unlisted, now }: { proxy: FleetProxyHealth | null; unlisted: boolean; now: number }) {
+  const { t } = useT();
+  if (!p) return unlisted ? <small className="fp-muted">{t('fleetProxyUnlisted')}</small> : <span className="fp-muted">—</span>;
+  const last = p.last;
+  const latency = last?.ok && last.latency_ms !== null ? `${last.latency_ms} ms` : null;
+  const detail = [latency, last?.exit_ip].filter(Boolean).join(' · ');
+  return (
+    <span className="fp-holder">
+      <span title={`${p.host}:${p.port}`}>{p.label ?? <span className="mono">{`${p.host}:${p.port}`}</span>}</span>
+      <span>
+        <span className={PROXY_CHIP[p.state]} title={last ? agoLabel(t, last.at, now) : undefined}>{t(PROXY_KEY[p.state])}</span>
+      </span>
+      {last && !last.ok && last.error ? <small className="fp-warn">{last.error}</small>
+        : detail && <small className="mono">{detail}</small>}
+    </span>
   );
 }
 

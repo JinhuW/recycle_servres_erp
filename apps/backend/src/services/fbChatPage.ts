@@ -95,7 +95,7 @@ export async function listThreads(sql: SqlLike, chatId: string | undefined, quer
 /** A conversation's messages in page order; with `messageId`, that one message. */
 export async function listMessages(sql: SqlLike, by: { threadId: number } | { messageId: number }): Promise<FbChatMessageRow[]> {
   return sql<FbChatMessageRow[]>`
-    SELECT m.id::int AS id, m.seq, m.direction, m.source, m.body, m.images, m.backfill, m.fb_sent_label,
+    SELECT m.id::int AS id, m.seq, m.direction, m.source, m.body, m.images, m.media, m.backfill, m.fb_sent_label,
            m.send_state, m.error, m.typing_ms, m.tg_user_name, m.erp_user_id,
            ${authorSql(sql, sql`m`, sql`u`)} AS author_name, m.created_at, m.sent_at
       FROM fb_chat_messages m LEFT JOIN users u ON u.id = m.erp_user_id
@@ -127,16 +127,17 @@ export async function alsoMessaged(sql: SqlLike, threadId: number): Promise<FbCh
  * `clientKey` names the reply as the page composed it. The page sends the
  * same key again when it never heard the answer, and gets the reply it
  * already queued (`created` false) rather than a second one for the buyer.
+ * `media` are stored photo ids, in the order they go out.
  */
 export async function queueErpReply(
-  tx: Tx, threadId: number, body: string, userId: string, clientKey: string | null,
+  tx: Tx, threadId: number, body: string, userId: string, clientKey: string | null, media: readonly string[] = [],
 ): Promise<{ id: number; created: boolean } | null> {
   // Answering is reading, as it is from Telegram.
   const [thread] = await tx`UPDATE fb_chat_threads SET read_seq = last_seq WHERE id = ${threadId} RETURNING id`;
   if (!thread) return null;
   const [m] = await tx<{ id: number }[]>`
-    INSERT INTO fb_chat_messages (thread_id, direction, source, body, send_state, erp_user_id, client_key)
-    VALUES (${threadId}, 'out', 'erp', ${body}, 'queued', ${userId}, ${clientKey})
+    INSERT INTO fb_chat_messages (thread_id, direction, source, body, media, send_state, erp_user_id, client_key)
+    VALUES (${threadId}, 'out', 'erp', ${body}, ${tx.json([...media])}, 'queued', ${userId}, ${clientKey})
     ON CONFLICT (thread_id, client_key) WHERE client_key IS NOT NULL DO NOTHING
     RETURNING id::int AS id`;
   if (!m) {
@@ -199,7 +200,7 @@ export async function listAccounts(sql: SqlLike): Promise<FbChatAccountsAnswer> 
   // client_id is its only link: a foreign key would not survive the nightly
   // sync, which brings accounts from prod and keeps dev's own devices.
   const rows = await sql<AccountDbRow[]>`
-    SELECT a.id::int AS id, a.no, a.fb_uid, a.label, a.ext_version, a.restricted, a.restricted_at,
+    SELECT a.id::int AS id, a.no, a.fb_uid, a.label, a.ext_version, a.photo_replies, a.restricted, a.restricted_at,
            a.last_seen_at, a.created_at, a.config_rev, a.config_seen_at,
            (SELECT COUNT(*)::int FROM fb_chat_threads t WHERE t.account_id = a.id) AS threads,
            (SELECT COUNT(*)::int FROM fb_chat_threads t

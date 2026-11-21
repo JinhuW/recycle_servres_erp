@@ -26,7 +26,7 @@ const DEVICE: FbChatDeviceRow = {
   decided_by: null, decided_at: null, matches_account: null,
 };
 const ACCOUNT: FbChatAccountRow = {
-  id: 3, no: 1, fb_uid: '100089231457', label: 'Denver RAM Buyer', ext_version: '0.3.0', restricted: null, restricted_at: null,
+  id: 3, no: 1, fb_uid: '100089231457', label: 'Denver RAM Buyer', ext_version: '0.3.0', photo_replies: null, restricted: null, restricted_at: null,
   last_seen_at: ago(40), created_at: ago(86400), threads: 41, unread: 2, replies_waiting: 0, last_sync_at: ago(40),
   paused: false, stale_after_sec: 300, config_state: 'up_to_date', config_seen_at: ago(40),
   device: {

@@ -1,23 +1,30 @@
-import { Hono, type MiddlewareHandler } from 'hono';
+import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { authMiddleware } from '../auth';
 import { getDb } from '../db';
 import {
-  FB_CHAT_ACCOUNT_LABEL_MAX, FB_CHAT_CONFIG_KEY, FB_CHAT_REPLY_MAX_CHARS, FB_CHAT_THREAD_FILTERS, fbChatConfigProblem,
-  type FbChatDeviceAnswer, type FbChatDeviceApproval, type FbChatMessagesAnswer, type FbChatReplyAnswer,
+  FB_CHAT_ACCOUNT_LABEL_MAX, FB_CHAT_CONFIG_KEY, FB_CHAT_MEDIA_MAX_UPLOAD_BYTES, FB_CHAT_MEDIA_MIMES, FB_CHAT_REPLY_MAX_CHARS,
+  FB_CHAT_REPLY_MEDIA_MAX,
+  FB_CHAT_THREAD_FILTERS, fbChatConfigProblem,
+  type FbChatDeviceAnswer, type FbChatDeviceApproval, type FbChatMediaAnswer, type FbChatMessagesAnswer, type FbChatReplyAnswer,
   type FbChatTelegramStatus, type FbChatThreadFilter, type FbChatThreadsAnswer,
 } from '@recycle-erp/shared';
 import {
   FbChatPushError, fbChatConfigValueProblem, parseBuyerPush, parseClaim, parseConfigRequest, parseEnrollRequest,
   parseEventPush, parseSendResult, parseSyncPush,
 } from '../lib/fbChat';
+import {
+  FbChatMediaTooLargeError, ImageRejectedError, fbChatMediaFile, isFbChatMediaId, storeFbChatMedia, type FbChatMediaSource,
+} from '../lib/fbChatMedia';
 import { clientIp } from '../lib/clientIp';
 import { allLimited } from '../lib/concurrency';
 import { addLogContext, log } from '../lib/log';
 import { armWake, holdsDraining, listening } from '../lib/pgWake';
 import { requireManager } from '../lib/role';
 import { bearerGuard } from '../oauth/guard';
+import { StorageUnavailableError } from '../r2';
 import {
-  claimReply, FB_CHAT_OUTBOX_CHANNEL, FbChatAccountTaken, ingestBuyer, ingestSync, recordEvent, recordSendResult, touchAccount,
+  claimReply, FB_CHAT_OUTBOX_CHANNEL, FbChatAccountTaken, ingestBuyer, ingestSync, outboundMediaAllowed, recordEvent,
+  recordSendResult, touchAccount,
 } from '../services/fbChat';
 import { configFor, knownFields, notePickup, reportFields, setConfig } from '../services/fbChatConfig';
 import {
@@ -28,6 +35,7 @@ import {
   alsoMessaged, listAccounts, listMessages, listThreads, markThread, queueErpReply, renameAccount, retryReply, summary,
   topicCount, type ThreadQuery,
 } from '../services/fbChatPage';
+import { queueFbChatMediaFetch } from '../services/fbChatMediaFetch';
 import { fbChatTelegramConfigured, kickFbChatTelegram } from '../services/fbChatTelegram';
 import type { Env, OAuthCtx, User } from '../types';
 
@@ -131,9 +139,68 @@ fbChat.post('/push/device', async (c) => {
 fbChat.post('/push/sync', async (c) => {
   const push = await parsed(c, parseSyncPush);
   if (typeof push === 'string') return c.json(invalid(push), 400);
-  const answer = await getDb(c.env).begin((tx) => ingestSync(tx, push, c.var.oauthCtx.clientId));
+  const sql = getDb(c.env);
+  const { answer, missingMedia } = await sql.begin((tx) => ingestSync(tx, push, c.var.oauthCtx.clientId));
   if (answer.added) kickFbChatTelegram();
+  queueFbChatMediaFetch(sql, c.env, missingMedia, kickFbChatTelegram);
   return c.json(answer);
+});
+
+const MEDIA_MIMES: ReadonlySet<string> = new Set(FB_CHAT_MEDIA_MIMES);
+
+/**
+ * Stores one photo sent as the raw body and answers its id. index.ts caps the
+ * body at the upload limit as it streams in; the length header is checked
+ * here too so a refusal does not wait for the bytes.
+ */
+async function storeUpload(c: Context<{ Bindings: Env; Variables: Vars }>, source: FbChatMediaSource) {
+  const mime = (c.req.header('content-type') ?? '').toLowerCase().split(';')[0]!.trim();
+  if (!MEDIA_MIMES.has(mime)) return c.json({ error: 'unsupported_media_type', detail: `type ${mime || 'unknown'}` }, 415);
+  if (Number(c.req.header('content-length')) > FB_CHAT_MEDIA_MAX_UPLOAD_BYTES) {
+    return c.json({ error: 'payload_too_large', detail: `max ${FB_CHAT_MEDIA_MAX_UPLOAD_BYTES} bytes` }, 413);
+  }
+  const bytes = new Uint8Array(await c.req.arrayBuffer());
+  if (!bytes.byteLength) return c.json(invalid('body is empty'), 400);
+  if (bytes.byteLength > FB_CHAT_MEDIA_MAX_UPLOAD_BYTES) {
+    return c.json({ error: 'payload_too_large', detail: `max ${FB_CHAT_MEDIA_MAX_UPLOAD_BYTES} bytes` }, 413);
+  }
+  try {
+    const stored = await storeFbChatMedia(getDb(c.env), c.env, bytes, mime, source);
+    if (stored.created) log.info('fb chat photo stored', { module: 'fbChat', mediaId: stored.id, bytes: bytes.byteLength, source });
+    const answer: FbChatMediaAnswer = { mediaId: stored.id };
+    return c.json(answer);
+  } catch (e) {
+    if (e instanceof ImageRejectedError) {
+      if (e.reason === 'busy') {
+        c.header('Retry-After', '30');
+        return c.json({ error: 'busy', detail: 'too many photos being processed' }, 503);
+      }
+      return c.json({ error: 'unsupported_media_type', detail: e.reason }, 415);
+    }
+    if (e instanceof FbChatMediaTooLargeError) return c.json({ error: 'payload_too_large', detail: e.message }, 413);
+    if (e instanceof StorageUnavailableError) return c.json({ error: 'storage_unavailable' }, 503);
+    throw e;
+  }
+}
+
+// One bubble photo, as the extension read it off the page.
+fbChat.post('/push/media', (c) => storeUpload(c, 'facebook'));
+
+// A photo for a reply the extension is sending. Only the photos of replies
+// still going out on this extension's own accounts are served.
+fbChat.get('/push/media/:id', async (c) => {
+  const id = c.req.param('id').toLowerCase();
+  const sql = getDb(c.env);
+  if (!isFbChatMediaId(id) || !(await outboundMediaAllowed(sql, id, c.var.oauthCtx.clientId))) {
+    return c.json({ error: 'not_found' }, 404);
+  }
+  const file = await fbChatMediaFile(sql, c.env, id);
+  if (!file) return c.json({ error: 'not_found' }, 404);
+  return c.body(new Uint8Array(file.bytes), 200, {
+    'Content-Type': file.mime,
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+  });
 });
 
 fbChat.post('/push/buyer', async (c) => {
@@ -157,9 +224,9 @@ fbChat.post('/push/outbox/claim', async (c) => {
   let wake = armWake(sql, FB_CHAT_OUTBOX_CHANNEL);
   try {
     for (;;) {
-      const claimed = await sql.begin((tx) => claimReply(tx, req.account, clientId));
+      const claimed = await sql.begin((tx) => claimReply(tx, req.account, clientId, req.caps));
       if (claimed) {
-        log.info('fb chat reply claimed', { module: 'fbChat', id: claimed.id, clientId });
+        log.info('fb chat reply claimed', { module: 'fbChat', id: claimed.id, clientId, photos: claimed.media?.length ?? 0 });
         return c.json(claimed);
       }
       const left = deadline - Date.now();
@@ -275,16 +342,44 @@ fbChat.get('/threads/:id/messages', async (c) => {
   return c.json(answer);
 });
 
+// The stored copy of a chat photo. Its bytes never change under an id.
+fbChat.get('/media/:id', async (c) => {
+  const file = await fbChatMediaFile(getDb(c.env), c.env, c.req.param('id'));
+  if (!file) return c.json({ error: 'not_found' }, 404);
+  return c.body(new Uint8Array(file.bytes), 200, {
+    'Content-Type': file.mime,
+    'Cache-Control': 'private, max-age=31536000, immutable',
+    'X-Content-Type-Options': 'nosniff',
+  });
+});
+
+// A photo for a reply typed on the page, attached before it is sent.
+fbChat.post('/media', (c) => storeUpload(c, 'erp'));
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A reply's photo ids, deduplicated in order, or the reason they are refused. */
+function replyMedia(v: unknown): string[] | string {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) return 'media must be a list of photo ids';
+  if (!v.every(isFbChatMediaId)) return 'media must be photo ids';
+  const ids = [...new Set(v.map((m) => m.toLowerCase()))];
+  if (ids.length > FB_CHAT_REPLY_MEDIA_MAX) return `a reply carries at most ${FB_CHAT_REPLY_MEDIA_MAX} photos`;
+  return ids;
+}
 
 // A reply typed on the page. It is queued whatever state the account is in,
 // and goes out when its extension next claims.
 fbChat.post('/threads/:id/messages', async (c) => {
   const id = rowId(c.req.param('id'));
   if (id === null) return c.json({ error: 'not_found' }, 404);
-  const raw = await c.req.json().catch(() => null) as { body?: unknown; clientKey?: unknown } | null;
+  const raw = await c.req.json().catch(() => null) as { body?: unknown; clientKey?: unknown; media?: unknown } | null;
+  const media = replyMedia(raw?.media);
+  if (typeof media === 'string') return c.json(invalid(media), 400);
+  if (raw?.body !== undefined && typeof raw.body !== 'string') return c.json(invalid('body must be text'), 400);
   const body = typeof raw?.body === 'string' ? raw.body.trim() : '';
-  if (!body) return c.json(invalid('body is empty'), 400);
+  // With photos the text is a caption, and may be left out.
+  if (!body && !media.length) return c.json(invalid('body is empty'), 400);
   if (body.length > FB_CHAT_REPLY_MAX_CHARS) {
     return c.json(invalid(`body is ${body.length} characters; the limit is ${FB_CHAT_REPLY_MAX_CHARS}`), 400);
   }
@@ -293,13 +388,17 @@ fbChat.post('/threads/:id/messages', async (c) => {
     return c.json(invalid('clientKey must be a UUID'), 400);
   }
   const sql = getDb(c.env);
-  const queued = await sql.begin((tx) => queueErpReply(tx, id, body, c.var.user.id, clientKey));
+  if (media.length) {
+    const known = await sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM fb_chat_media WHERE id = ANY(${media}::uuid[])`;
+    if (known[0]!.n !== media.length) return c.json(invalid('media names a photo that was not uploaded'), 400);
+  }
+  const queued = await sql.begin((tx) => queueErpReply(tx, id, body, c.var.user.id, clientKey, media));
   if (queued === null) return c.json({ error: 'not_found' }, 404);
   const answer: FbChatReplyAnswer = { message: (await listMessages(sql, { messageId: queued.id }))[0]! };
   // The same reply sent again: the one already queued is the answer.
   if (!queued.created) return c.json(answer);
   kickFbChatTelegram();
-  log.info('fb chat reply queued from the ERP', { module: 'fbChat', id: queued.id, threadId: id });
+  log.info('fb chat reply queued from the ERP', { module: 'fbChat', id: queued.id, threadId: id, photos: media.length });
   return c.json(answer, 201);
 });
 

@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-13:** ERP migration `0245`, Reddit tracker migration `0007`,
+**As of 2026-11-16:** ERP migration `0250`, Reddit tracker migration `0007`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -27,6 +27,7 @@ refresh a section.
   - [Facebook account pool](#facebook-account-pool)
   - [Fleet](#fleet)
   - [Reddit leads](#reddit-leads)
+  - [Actions](#actions)
   - [System](#system)
   - [SQL functions](#sql-functions)
 - [Reddit tracker database](#reddit-tracker-database)
@@ -1963,6 +1964,17 @@ One row per report day of memtrade's WeChat market report (an 08:00 → 08:00 ET
 | `pushed_at` | `timestamptz` | ✓ | `now()` | When the day was last pushed. |
 | `push_id` | `uuid` | ✓ | `gen_random_uuid()` | Id of the current push; a point batch naming an older one is refused with 409 day_replaced. |
 | `stored_points` | `integer` | ✓ | `0` | Points actually stored, recounted after every batch. |
+| `buy_qty` | `integer` |  |  | Modules wanted: each buyer's largest figure per spec line, summed, one quoted line counted once (0250). NULL when the pushing memtrade predates it. |
+| `sell_qty` | `integer` |  |  | Modules offered, counted as buy_qty. |
+| `buy_qty_posts` | `integer` |  |  | Buy posts that gave a quantity, which buy_qty rests on. |
+| `sell_qty_posts` | `integer` |  |  | Sell posts that gave a quantity. |
+| `buy_only` | `integer` |  |  | Traders who posted only to buy; buyers = buy_only + both_sides. |
+| `sell_only` | `integer` |  |  | Traders who posted only to sell. |
+| `both_sides` | `integer` |  |  | Traders who posted on both sides. |
+| `new_buyers` | `integer` |  |  | Buyers not seen buying in the 30 report days before; NULL with under 7 days of history. |
+| `new_sellers` | `integer` |  |  | Sellers not seen selling in the 30 report days before. |
+| `traders` | `jsonb` |  |  | The ten most active traders a side, {buy: [...], sell: [...]}, each {senderId, name, posts, lines, qty, groups, both, mood}. |
+| `sentiment` | `jsonb` |  |  | The day's mood: {score, bullish, neutral, bearish, urgent, buy: {…}, sell: {…}}. One vote per trader (their latest post's mood); score = (bullish − bearish) / voters × 100, NULL under 3 voters. NULL when no post has a mood. |
 
 - **Primary key:** `report_date`
 - **Checks:** `window_end > window_start`
@@ -2019,6 +2031,7 @@ One price-board line per report day: a memory part family with its buy-side and 
 | `sell_exposures` | `integer` | ✓ |  | Copies of the sell posts across groups and hours. |
 | `sell_qty` | `integer` | ✓ |  | Total modules offered. |
 | `sell_prices` | `jsonb` | ✓ | `'[]'::jsonb` | Asks per bucket, same shape as buy_prices. |
+| `sentiment` | `jsonb` |  |  | The line's mood, {score, bullish, neutral, bearish}, counted as wechat_market_days.sentiment (0250). |
 
 - **Primary key:** `report_date, kind, row_key`
 - **References:** `report_date` → `wechat_market_days.report_date` (on delete cascade)
@@ -2063,10 +2076,12 @@ The evidence: one row per quoted item per post on a report day, linked to the bo
 | `location` | `text` |  |  | Delivery place as quoted, e.g. 深圳 or 香港. |
 | `raw_line` | `text` | ✓ |  | The message line the item was read from; may be empty. |
 | `row_keys` | `text[]` | ✓ | `'{}'[]` | kind:key of every board line the item counted toward, e.g. quote:三星 64G 5600 DM0. |
+| `mood` | `text` |  |  | The post's tone, by where it says prices are heading: bullish (急收, 加价, 缺货, 涨价), bearish (急出, 清仓, 甩货, 特价, 降价) or neutral (0250). NULL when read before memtrade scored tone. |
+| `urgent` | `boolean` | ✓ | `false` | The post presses for a deal: 急, 今天要, 马上, 实单. |
 
 - **Primary key:** `report_date, post_key, item_index`
 - **References:** `report_date` → `wechat_market_days.report_date` (on delete cascade)
-- **Checks:** `currency IN ('RMB', 'USD')`; `direction IN ('buy', 'sell')`; `form_factor IN ('server', 'pc')`; `source IN ('llm', 'rules')`
+- **Checks:** `currency IN ('RMB', 'USD')`; `direction IN ('buy', 'sell')`; `form_factor IN ('server', 'pc')`; `mood IN ('bullish', 'neutral', 'bearish')`; `source IN ('llm', 'rules')`
 
 Read within one day only, so the primary key's report_date prefix serves as the index; a line finds its posts through row_keys.
 
@@ -2691,7 +2706,8 @@ One Facebook account an extension has spoken for, created on its first push.
 | `label` | `text` | ✓ | `''` | The account's name: what the extension calls its Chrome profile, until a manager names it. |
 | `client_id` | `text` |  |  | The service client that last pushed for it, or `device:<id>` for an enrolled extension (0240). This is the account's link to its `fb_chat_devices` row; no FK, because the nightly sync copies accounts from prod and keeps dev's devices. |
 | `ext_version` | `text` |  |  | The extension version that last pushed. |
-| `restricted` | `text` |  |  | login or checkpoint while the extension sees such a page; NULL when healthy. |
+| `photo_replies` | `boolean` |  |  | Whether its extension's last claim said it can attach photos (`caps` has `media`); null before the first claim (0247). |
+| `restricted` | `text` |  |  | login or checkpoint while the extension sees such a page; blocked while it pauses after Facebook warned that it is limiting the account (0248); NULL when healthy. |
 | `restricted_at` | `timestamptz` |  |  |  |
 | `last_seen_at` | `timestamptz` | ✓ | `now()` | The last push of any kind. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
@@ -2702,7 +2718,7 @@ One Facebook account an extension has spoken for, created on its first push.
 
 - **Primary key:** `id`
 - **Unique:** `fb_uid`; `no`
-- **Checks:** `restricted IN ('login', 'checkpoint')`
+- **Checks:** `restricted IN ('login', 'checkpoint', 'blocked')`
 - **Triggers:** `fb_chat_accounts_number` (before insert when `no` is null → `fb_chat_accounts_number()`): an insert that names no number takes the next one, so the release before 0241, whose upsert does not know the column, keeps working beside this one and after a rollback.
 #### `fb_chat_buyers`
 
@@ -2766,6 +2782,7 @@ One message. Those read off Facebook have `source = 'facebook'`; a reply typed i
 | `source` | `text` | ✓ |  | facebook, telegram or erp: where the text was written. |
 | `body` | `text` | ✓ | `''` |  |
 | `images` | `jsonb` | ✓ | `'[]'` | Image URLs on the bubble. Signed by Facebook; they expire. |
+| `media` | `jsonb` | ✓ | `'[]'` | Ids into fb_chat_media, in bubble order (0246): the photos the hub holds a copy of. Only ids that exist are written. Filled by the extension's sync, by a later sync whose window lines up with the row, or by the hub fetching `images` itself after the sync; empty when none could be stored. Not a foreign key. |
 | `backfill` | `boolean` | ✓ | `false` | Read as history when the thread was first seen, so `created_at` is when it was read, not written. |
 | `fb_sent_label` | `text` |  |  | When it was sent, in Facebook's own words ("Tuesday 5:57pm"). Relative to the day it was read. |
 | `send_state` | `text` |  |  | queued, sending, sent, failed or uncertain; NULL for messages read off Facebook. |
@@ -2788,9 +2805,29 @@ One message. Those read off Facebook have `source = 'facebook'`; a reply typed i
 - **Unique:** `(thread_id, seq)`; `(thread_id, tg_message_id)`
 - **Checks:** `direction IN ('in', 'out')`; `source IN ('facebook', 'telegram', 'erp')`; `send_state IN ('queued', 'sending', 'sent', 'failed', 'uncertain')`
 - **Indexes:** `fb_chat_messages_unmirrored_idx` (id) where not mirrored; `fb_chat_messages_outbox_idx` (thread_id, id) where queued or sending; `fb_chat_messages_unacked_idx` (id) where settled and not acknowledged; `fb_chat_messages_erp_user_idx` (erp_user_id) where set; `fb_chat_messages_thread_idx` (thread_id, id); `fb_chat_messages_client_key_idx` unique (thread_id, client_key) where set; `fb_chat_messages_body_trgm_idx` gin (body gin_trgm_ops), for the chats page search
+#### `fb_chat_media`
+
+Photos in Facebook chats, stored once (0246). Facebook's image links are signed and expire, so the extension uploads each photo's bytes (`POST /api/fb-chat/push/media`), the hub fetches the links itself for extensions that do not, and readers go through `GET /api/fb-chat/media/:id`, never the bucket URL. Each photo is checked against the workspace upload settings and shrunk to fit them (and 8 MB) before it is stored.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `uuid` | ✓ | `gen_random_uuid()` | What `fb_chat_messages.media` holds. |
+| `sha256` | `text` | ✓ |  | Of the bytes as received, so the same photo read again under a fresh signed link answers the same row. |
+| `source` | `text` | ✓ |  | facebook, telegram or erp: where the photo came from. |
+| `storage_key` | `text` | ✓ |  | The object's key in R2 (or the stub's key where R2 is not configured). |
+| `stub_bytes` | `bytea` |  |  | The file itself, only where R2 is not configured (dev, tests). |
+| `mime` | `text` | ✓ |  | image/jpeg, image/png or image/webp, as stored. |
+| `bytes` | `integer` | ✓ |  | Stored size, after any shrink. |
+| `width` | `integer` |  |  |  |
+| `height` | `integer` |  |  |  |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **Unique:** `sha256`
+- **Checks:** `source IN ('facebook', 'telegram', 'erp')`
 #### `fb_chat_events`
 
-Append-only record of what is worth counting later and is not a message. `kind` is one of: `thread_seen`, `sync` (new messages in a known thread), `sync_gap` (a window that did not overlap what was stored), `send_sent`, `send_failed`, `send_uncertain`, `buyer_rating` (a rating or count changed; old and new values in `detail`), `topic_created`, `restricted`, `recovered`, `error`.
+Append-only record of what is worth counting later and is not a message. `kind` is one of: `thread_seen`, `sync` (new messages in a known thread), `sync_gap` (a window that did not overlap what was stored), `send_sent`, `send_failed`, `send_uncertain`, `buyer_rating` (a rating or count changed; old and new values in `detail`), `topic_created`, `restricted`, `recovered`, `error`, `web_lead` (a new website submission, no account or thread; `detail.submission_id` names it, `alert` carries the Telegram text).
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
@@ -2977,6 +3014,70 @@ Who did what to which seller, including the seller replies purchasers log. Appen
 - **References:** `actor_id` → `users.id` (on delete set null)
 - **Indexes:** `reddit_lead_events_username_idx` (username, created_at), `reddit_lead_events_actor_id_idx` (actor_id)
 - **Triggers:** `reddit_lead_events_no_update` and `reddit_lead_events_no_delete` raise (`reddit_lead_events_lock()`), as `fb_pool_events` does.
+
+### Actions
+
+The shared kanban board of action items on Actions (`routes/actions.ts`, RS-596). Any employee creates a card, assigns it to any active employee, moves it between four fixed columns and comments on it; only its creator or a manager removes it. A card may point at one ERP record, and what the board shows of that record follows the record's own read rules.
+
+Tables: [`action_items`](#erp-action-items), [`action_item_events`](#erp-action-item-events)
+
+<a id="erp-action-items"></a>
+
+#### `action_items`
+
+One card. Removal is soft (`removed_at`): the card leaves every list and keeps its history.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `text` | ✓ |  | `TK-n`, from `id_counters` row `TK`. |
+| `title` | `text` | ✓ |  | 1 to 200 characters. |
+| `description` | `text` |  |  |  |
+| `status` | `text` | ✓ | `'todo'` | The column: todo, in_progress, blocked, done. |
+| `position` | `integer` | ✓ | `0` | Order inside the column, top first. Every create and move rewrites the column as 0..n-1. |
+| `priority` | `text` | ✓ | `'normal'` | low, normal, high. |
+| `due_date` | `date` |  |  | Business day it is due. |
+| `assignee_id` | `uuid` |  |  | → users, set null. Any active user. Assigning someone else writes them a notification. |
+| `created_by` | `uuid` |  |  | → users, set null. |
+| `order_id` | `text` |  |  | → orders, set null. A linked PO. |
+| `sell_order_id` | `text` |  |  | → sell_orders, set null. |
+| `after_sales_id` | `text` |  |  | → after_sales_cases, set null. |
+| `supplier_id` | `uuid` |  |  | → suppliers, set null. A linked client. |
+| `web_submission_id` | `text` |  |  | → web_submissions, set null. |
+| `order_line_id` | `uuid` |  |  | → order_lines, set null. A linked inventory lot. |
+| `link_type` | `text` |  |  | po, so, as, client, ws, lot. Kept when the record is deleted and its FK nulls out. |
+| `link_label` | `text` |  |  | What the link reads as, snapshotted at link time: the record's number, `PO-n #k` for a lot, the word `Client` for a client (a client's name is its owner's). |
+| `completed_at` | `timestamptz` |  |  | Set on entering done, cleared on leaving. The board shows done cards for 14 days after it; the archive has the rest. |
+| `removed_at` | `timestamptz` |  |  |  |
+| `removed_by` | `uuid` |  |  | → users, set null. |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+| `updated_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `assignee_id`, `created_by`, `removed_by` → `users.id`; `order_id` → `orders.id`; `sell_order_id` → `sell_orders.id`; `after_sales_id` → `after_sales_cases.id`; `supplier_id` → `suppliers.id`; `web_submission_id` → `web_submissions.id`; `order_line_id` → `order_lines.id` (all on delete set null)
+- **Checks:** at most one of the six link FKs is set; `link_type` and `link_label` are both set or both null; `completed_at` is set exactly when `status = 'done'`
+- **Indexes:** `action_items_board_idx` (status, position) where not removed; `action_items_completed_idx` (completed_at DESC, id DESC) where done and not removed; one per FK (`action_items_<column>_idx`)
+
+Every create and move takes the transaction advisory lock `hashtext('actions:board')` first, so two moves never renumber the same columns in opposite order.
+
+<a id="erp-action-item-events"></a>
+
+#### `action_item_events`
+
+A card's timeline, written in the same transaction as the change. Comments are `note` rows.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
+| `item_id` | `text` | ✓ |  |  |
+| `kind` | `text` | ✓ |  | created, edited (detail `{changes}`), moved (detail `{from, to}`; a reorder inside a column writes none), assigned (detail `{from, to}` user ids), note, removed. |
+| `note` | `text` |  |  | The text of a note. |
+| `detail` | `jsonb` | ✓ | `'{}'::jsonb` |  |
+| `actor_id` | `uuid` |  |  |  |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `item_id` → `action_items.id` (on delete cascade); `actor_id` → `users.id` (on delete set null)
+- **Indexes:** `action_item_events_item_idx` (item_id, created_at); `action_item_events_actor_id_idx` (actor_id)
 
 ### System
 

@@ -5,6 +5,19 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-601](./RS-601-reddit-subreddit-backoff-overflows-after-37-errors-a.md) | done | bug | P2 | Reddit subreddit backoff overflows after ~37 errors and the failure repeats forever | tracker c68b2c66, Railway api+worker deployed 2026-11-21; OCI fleet pending |
+| [RS-600](./RS-600-reddit-alerts-drop-a-seller-s-second-lot-when-one-is.md) | done | bug | P2 | Reddit alerts drop a seller's second lot when one is DDR3 and the other DDR4 | tracker c68b2c66, Railway api+worker deployed 2026-11-21; OCI fleet pending |
+| [RS-599](./RS-599-wechat-market-buyer-seller-breakdown-top-traders-and.md) | done | story | P2 | WeChat market: buyer/seller breakdown, top traders and sentiment | 1.472.0 |
+| [RS-598](./RS-598-show-each-inventory-product-s-last-collected-date.md) | done | story | P2 | Show each inventory product's last collected date | 1.467.0 |
+| [RS-597](./RS-597-board-view-of-purchase-orders-by-stage.md) | done | story | P2 | Board view of purchase orders by stage | 1.469.0 |
+| [RS-596](./RS-596-actions-kanban-board-with-assignees-and-erp-record-l.md) | done | story | P2 | Actions kanban board with assignees and ERP record links | 1.466.0, 1.468.0, 1.470.0, 1.471.0 |
+| [RS-595](./RS-595-chat-bridge-pause-and-alert-when-facebook-warns-it-i.md) | done | story | P2 | Chat bridge: pause and alert when Facebook warns it is limiting an account | 1.465.0 |
+| [RS-594](./RS-594-stop-paging-on-transient-telegram-getupdates-failure.md) | done | bug | P3 | Stop paging on transient Telegram getUpdates failures in the Reddit tracker | tracker f2b4bfe4, api deployed 2026-11-16 |
+| [RS-593](./RS-593-send-website-lead-alerts-to-a-dedicated-telegram-gro.md) | done | story | P2 | Send website lead alerts to a dedicated Telegram group | 1.464.0 |
+| [RS-592](./RS-592-fleet-workers-table-proxy-column-and-check-proxies-b.md) | done | story | P3 | Fleet workers table: Proxy column and Check proxies button | 1.463.0 |
+| [RS-591](./RS-591-send-a-telegram-lead-alert-for-each-website-submissi.md) | done | story | P2 | Send a Telegram lead alert for each website submission | 1.462.0 |
+| [RS-590](./RS-590-facebook-chats-send-photos-to-facebook-from-telegram.md) | done | story | P2 | Facebook chats: send photos to Facebook from Telegram and the ERP | 1.461.0 |
+| [RS-589](./RS-589-facebook-chats-route-photos-through-the-extension-er.md) | done | story | P2 | Facebook chats: route photos through the extension, ERP and Telegram | 1.460.0 |
 | [RS-588](./RS-588-wechat-activity-tab-acknowledged-warnings-disappear.md) | done | story | P2 | WeChat: Activity tab, acknowledged warnings disappear, live re-run status | 1.459.0 |
 | [RS-587](./RS-587-wechat-acknowledge-report-warnings-editable-market-n.md) | done | story | P2 | WeChat: acknowledge report warnings; editable market-note prompt | 1.458.0 |
 | [RS-586](./RS-586-drop-the-retired-seller-columns-and-tables.md) | backlog | task | P2 | Drop the retired seller columns and tables | — |

@@ -43,6 +43,7 @@ import {
   fmtRange,
   hasPrice,
   ladder,
+  MOOD_KEY,
   parseNotes,
   rerunOpen,
   rerunStalled,
@@ -54,6 +55,7 @@ import {
 } from '../../lib/wechatMarket';
 import { niceStep } from './DashboardChart';
 import { ActivityTab } from './WechatActivity';
+import { FlowCard, MoodChip, SentimentCard, TradersCard } from './WechatMarketCards';
 import { Hi } from './FleetAccounts';
 import '../../styles/facebookPool.css';
 
@@ -329,6 +331,10 @@ export function DesktopWechat() {
         )}
 
         {tab === 'board' && loaded !== 'missing' && <>
+          <div className="wx-overview">
+            <FlowCard summary={summary} prev={prevSummary} locale={locale} />
+            <SentimentCard sentiment={day?.sentiment ?? null} loading={!day} />
+          </div>
           <SignalLegend counts={legend} signal={signal} onSignal={setSignal} />
           <div className="fp-split wx-split">
             <BoardCard
@@ -350,6 +356,7 @@ export function DesktopWechat() {
             />
             <aside className="wx-aside">
               <NotesCard day={day} />
+              <TradersCard traders={day?.traders ?? null} loading={!day} locale={locale} />
               <TopCard title={t('wxMostWanted')} sub={t('wxMostWantedSub')} rows={specRows} side="buy" locale={locale}
                 onPick={pickSpec} />
               <TopCard title={t('wxMostOffered')} sub={t('wxMostOfferedSub')} rows={specRows} side="sell" locale={locale}
@@ -704,7 +711,7 @@ function BoardCard({
                 <th className="wx-num" title={t('wxColAskHint')}>{t('wxColAsk')}</th>
                 <th title={t('wxColSpreadHint')}>{t('wxColSpread')}</th>
                 <th className="wx-num" title={t('wxColTradersHint')}>{t('wxColTraders')}</th>
-                <th>{t('wxColSignal')}</th>
+                <th title={t('wxColSignalMoodHint')}>{t('wxColSignal')}</th>
                 <th className="wx-num" title={t('wxColChangeHint', { date: data.day.prevDate ?? '—' })}>{t('wxColChange')}</th>
               </tr>
             </thead>
@@ -856,9 +863,16 @@ function BoardRow({ row, branded, terms, open, locale, onToggle }: {
         </span>
       </td>
       <td>
-        {row.signal && signal
-          ? <span className={`chip ${SIGNAL_TONE[row.signal] ?? 'muted'}`} title={t('wxSignalHint', { b: row.buy.posts, s: row.sell.posts })}>{t(signal)}</span>
-          : <span className="fp-muted">—</span>}
+        {/* The supply read, with the line's mood under it (RS-599): a column of its own
+            pushed the day-over-day change off the board. */}
+        <span className="fp-holder wx-supply">
+          {row.signal && signal
+            ? <span className={`chip ${SIGNAL_TONE[row.signal] ?? 'muted'}`} title={t('wxSignalHint', { b: row.buy.posts, s: row.sell.posts })}>{t(signal)}</span>
+            : <span className="fp-muted">—</span>}
+          {row.sentiment?.score != null && (
+            <small title={t('wxColMoodHint')}>{t('wxColMood')} <MoodChip sentiment={row.sentiment} /></small>
+          )}
+        </span>
       </td>
       <td className="wx-num">
         {row.prev === null ? (
@@ -954,6 +968,12 @@ function LineDetail({ date, row, locale }: { date: string; row: WechatRow; local
               {row[s].qty > 0 && ` · ${t('wxQty', { n: new Intl.NumberFormat(locale).format(row[s].qty) })}`}
             </span>
           ))}
+          {row.sentiment && (
+            <span>
+              {t('wxColMood')}: <MoodChip sentiment={row.sentiment} />{' '}
+              {t('wxMoodTally', { up: row.sentiment.bullish, flat: row.sentiment.neutral, down: row.sentiment.bearish })}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -977,6 +997,8 @@ function EvidenceItem({ p, locale }: { p: WechatEvidence; locale: string }) {
             </span>
           )}
           {p.qty !== null && <span className="fp-muted">×{p.qty}</span>}
+          {p.mood && p.mood !== 'neutral' && <span className={`chip wx-mood-${p.mood}`}>{t(MOOD_KEY[p.mood])}</span>}
+          {p.urgent && <span className="chip warn">{t('wxUrgent')}</span>}
           <time title={new Date(p.lastAt).toLocaleString(locale)}>{relTime(p.lastAt, locale)}</time>
         </div>
         <p className="wx-raw">{p.rawLine || '—'}</p>

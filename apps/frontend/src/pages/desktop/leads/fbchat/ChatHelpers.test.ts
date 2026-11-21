@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { FbChatMessageRow } from '@recycle-erp/shared';
+import { FB_CHAT_MEDIA_MAX_UPLOAD_BYTES, FB_CHAT_REPLY_MEDIA_MAX } from '@recycle-erp/shared';
 import {
-  chatCanRetry, chatDaysAgo, chatFirstName, chatMergeMessages, chatPacing, chatTimeline,
+  chatCanRetry, chatCanSend, chatDaysAgo, chatFirstName, chatMediaUrl, chatMergeMessages, chatPacing, chatPhotoSlots,
+  chatReplyRequest, chatReplySignature, chatTakeAttachments, chatTimeline, chatUploadError, chatUploadRetryable,
 } from './ChatHelpers';
 
 // Local-time constructors throughout: the day rules follow the viewer's clock,
@@ -12,7 +14,7 @@ let nextId = 1;
 function row(over: Partial<FbChatMessageRow>): FbChatMessageRow {
   const id = over.id ?? nextId++;
   return {
-    id, seq: id, direction: 'in', source: 'facebook', body: `m${id}`, images: [], backfill: false,
+    id, seq: id, direction: 'in', source: 'facebook', body: `m${id}`, images: [], media: [], backfill: false,
     fb_sent_label: null, send_state: null, error: null, typing_ms: null, tg_user_name: null,
     erp_user_id: null, author_name: null, created_at: at(12, 9), sent_at: null, ...over,
   };
@@ -58,7 +60,7 @@ describe('chatTimeline', () => {
 });
 
 describe('chatMergeMessages', () => {
-  const pending = [{ key: 3, body: 'on its way', at: at(12, 11) }];
+  const pending = [{ key: 3, body: 'on its way', at: at(12, 11), previews: [] }];
 
   it('keeps an accepted reply the answer on screen is too old to hold', () => {
     const polled = [row({ id: 10 })];
@@ -78,6 +80,14 @@ describe('chatMergeMessages', () => {
     expect(merged[1]).toMatchObject({ id: -3, direction: 'out', source: 'erp', send_state: 'queued', body: 'on its way', seq: null });
     expect(chatCanRetry(merged[1]!)).toBe(false);
   });
+
+  it('carries the local previews of a pending reply until the server row with media ids replaces it', () => {
+    const withPhotos = [{ key: 4, body: '', at: at(12, 11), previews: ['blob:a', 'blob:b'] }];
+    const merged = chatMergeMessages([], [], withPhotos);
+    expect(merged[0]).toMatchObject({ id: -4, body: '', media: [], previews: ['blob:a', 'blob:b'] });
+    const stored = row({ id: 12, direction: 'out', source: 'erp', seq: null, send_state: 'queued', body: '', media: ['m1', 'm2'] });
+    expect(chatMergeMessages([], [stored], [])[0]).not.toHaveProperty('previews');
+  });
 });
 
 describe('chatCanRetry', () => {
@@ -89,6 +99,16 @@ describe('chatCanRetry', () => {
     expect(chatCanRetry({ ...base, send_state: 'sent' })).toBe(false);
     expect(chatCanRetry({ ...base, seq: 9, send_state: 'failed' })).toBe(false);
     expect(chatCanRetry({ ...base, direction: 'in', send_state: null })).toBe(false);
+  });
+});
+
+describe('chat photos', () => {
+  it('loads stored copies from the media route and keeps a placeholder for the rest', () => {
+    expect(chatMediaUrl('a1b2')).toBe('/api/fb-chat/media/a1b2');
+    expect(chatMediaUrl('a/b')).toBe('/api/fb-chat/media/a%2Fb');
+    expect(chatPhotoSlots(row({ images: ['x', 'y'], media: ['m1'] }))).toEqual({ media: ['m1'], missing: 1 });
+    expect(chatPhotoSlots(row({ images: ['x'], media: [] }))).toEqual({ media: [], missing: 1 });
+    expect(chatPhotoSlots(row({ images: [], media: ['m1'] }))).toEqual({ media: ['m1'], missing: 0 });
   });
 });
 
@@ -114,5 +134,56 @@ describe('chatPacing', () => {
   it('says nothing until both values are known', () => {
     expect(chatPacing(null, 2)).toBeNull();
     expect(chatPacing({ fields: [fields[0]!], entries: [] }, 2)).toBeNull();
+  });
+});
+
+describe('reply photos', () => {
+  const img = (type = 'image/jpeg', size = 1000) => ({ type, size });
+
+  it('takes images up to the per-reply limit, in order, and counts what it left out', () => {
+    const files = Array.from({ length: 4 }, (_, i) => img('image/png', i + 1));
+    const { take, skipped } = chatTakeAttachments(FB_CHAT_REPLY_MEDIA_MAX - 2, files);
+    expect(take.map(f => f.size)).toEqual([1, 2]);
+    expect(skipped).toEqual({ overLimit: 2, badType: 0, tooBig: 0 });
+    expect(chatTakeAttachments(FB_CHAT_REPLY_MEDIA_MAX, [img()]).take).toEqual([]);
+  });
+
+  it('leaves out what the hub would refuse before it uploads', () => {
+    const { take, skipped } = chatTakeAttachments(0, [
+      img('image/heic'), img('image/gif'), img('image/webp', FB_CHAT_MEDIA_MAX_UPLOAD_BYTES + 1),
+      img('image/webp', FB_CHAT_MEDIA_MAX_UPLOAD_BYTES),
+    ]);
+    expect(take).toHaveLength(1);
+    expect(skipped).toEqual({ overLimit: 0, badType: 2, tooBig: 1 });
+  });
+
+  it('opens Send with text or an uploaded photo, never while one is uploading or failed', () => {
+    const done = { state: 'done' } as const;
+    expect(chatCanSend('', [])).toBe(false);
+    expect(chatCanSend('   ', [])).toBe(false);
+    expect(chatCanSend('hi', [])).toBe(true);
+    expect(chatCanSend('', [done])).toBe(true);
+    expect(chatCanSend('hi', [done, { state: 'uploading' }])).toBe(false);
+    expect(chatCanSend('hi', [done, { state: 'failed' }])).toBe(false);
+    expect(chatCanSend('', Array(FB_CHAT_REPLY_MEDIA_MAX + 1).fill(done))).toBe(false);
+  });
+
+  it('builds the reply body with media only when there are photos', () => {
+    expect(chatReplyRequest('hi', 'k1', [])).toEqual({ body: 'hi', clientKey: 'k1' });
+    expect(chatReplyRequest('', 'k2', ['a', 'b'])).toEqual({ body: '', clientKey: 'k2', media: ['a', 'b'] });
+  });
+
+  it('treats the same text with other photos as another reply', () => {
+    expect(chatReplySignature('hi', ['a'])).toBe(chatReplySignature('hi', ['a']));
+    expect(chatReplySignature('hi', ['a'])).not.toBe(chatReplySignature('hi', ['b']));
+    expect(chatReplySignature('hi', [])).not.toBe(chatReplySignature('hi', ['a']));
+  });
+
+  it('reads why an upload was refused, and which are worth retrying', () => {
+    expect([413, 415, 503, 500, undefined].map(chatUploadError)).toEqual(['tooBig', 'type', 'storage', 'other', 'other']);
+    expect(chatUploadRetryable('storage')).toBe(true);
+    expect(chatUploadRetryable('other')).toBe(true);
+    expect(chatUploadRetryable('tooBig')).toBe(false);
+    expect(chatUploadRetryable('type')).toBe(false);
   });
 });

@@ -50,6 +50,8 @@ const SCHEMA: Record<string, Validator> = {
   'fleetWatch.accountHidden': isBoolean,
   'fleet.rackFolded':         isBoolean,
   'leads.view':               isOneOf('list', 'board'),
+  'orders.view':              isOneOf('list', 'board'),
+  'actions.assignee':         isShortString,
   'onboarding.done':          isBoolean,
 };
 

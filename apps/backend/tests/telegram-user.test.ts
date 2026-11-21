@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TelegramError } from '../src/lib/telegramBot';
+import { TelegramError, TelegramUpload } from '../src/lib/telegramBot';
 import { userAccountCaller, type TelegramUserClient, type UserMessage } from '../src/lib/telegramUser';
 
 // The account mode answers the hub's Bot API calls from a user session. These
@@ -15,9 +15,14 @@ function fake(history: UserMessage[]) {
     },
     async send(text, opts) { calls.push(['send', [text, opts]]); return 900; },
     async sendPhotoUrl(url, caption, topicId) { calls.push(['photo', [url, caption, topicId]]); return 901; },
+    async sendPhotos(files, caption, topicId) {
+      calls.push(['photos', [files.map((f) => f.bytes.toString()), caption, topicId]]);
+      return files.map((_, i) => 910 + i);
+    },
     async createTopic(title) { calls.push(['createTopic', [title]]); return 77; },
     async renameTopic(topicId, title) { calls.push(['renameTopic', [topicId, title]]); },
     async react(messageId, emoji) { calls.push(['react', [messageId, emoji]]); },
+    async download(messageId) { calls.push(['download', [messageId]]); return Buffer.from(`bytes of ${messageId}`); },
     onActivity(listener) { activity = listener; },
   };
   return { client, calls, ping: () => activity() };
@@ -29,6 +34,17 @@ const msg = (id: number, over: Partial<UserMessage> = {}): UserMessage => ({
 });
 
 describe('userAccountCaller', () => {
+  it('posts to another chat the account is in when chat_id names one', async () => {
+    const { client, calls } = fake([]);
+    const call = userAccountCaller(client, '-1001234');
+    await call('sendMessage', { chat_id: '-1009999', text: 'lead' });
+    await call('sendMessage', { chat_id: '-1001234', text: 'group' });
+    expect(calls).toEqual([
+      ['send', ['lead', { topicId: undefined, replyToId: undefined, chatId: '-1009999' }]],
+      ['send', ['group', { topicId: undefined, replyToId: undefined, chatId: undefined }]],
+    ]);
+  });
+
   it('places the cursor on the first read without treating history as replies', async () => {
     const { client } = fake([msg(40), msg(41)]);
     const call = userAccountCaller(client, '-1001234');
@@ -97,6 +113,52 @@ describe('userAccountCaller', () => {
       ['photo', ['https://x/a.jpg', 'look', 77]],
       ['react', [55, '👍']],
     ]);
+  });
+
+  it('uploads photos given as bytes, alone or as an album, and knows them as its own posts', async () => {
+    const { client, calls } = fake([
+      msg(910, { out: true, fromId: '5', text: '👤 Kane: look' }),
+      msg(911, { out: true, fromId: '5', text: '' }),
+      msg(912, { out: true, fromId: '5', text: '' }),
+    ]);
+    const call = userAccountCaller(client, '-1001234');
+    const file = (s: string) => new TelegramUpload(Buffer.from(s), 'image/jpeg', 'photo.jpg');
+    expect(await call('sendPhoto', { chat_id: '-1001234', message_thread_id: 77, photo: file('a'), caption: 'one' }))
+      .toEqual({ message_id: 910 });
+    expect(await call('sendMediaGroup', {
+      chat_id: '-1001234', message_thread_id: 77,
+      media: [{ type: 'photo', media: file('b'), caption: '👤 Kane: look' }, { type: 'photo', media: file('c') }, { type: 'photo', media: file('d') }],
+    })).toEqual([{ message_id: 910 }, { message_id: 911 }, { message_id: 912 }]);
+    expect(calls).toEqual([
+      ['photos', [['a'], 'one', 77]],
+      ['photos', [['b', 'c', 'd'], '👤 Kane: look', 77]],
+    ]);
+    await expect(call('sendMediaGroup', { chat_id: '-1001234', media: [{ type: 'photo', media: 'https://x/a.jpg' }] }))
+      .rejects.toThrow(/uploaded files/);
+    const updates = await call<Array<{ message: { from: { is_bot: boolean } } }>>('getUpdates', { offset: 910, limit: 50 });
+    expect(updates.map((u) => u.message.from.is_bot)).toEqual([true, true, true]);
+  });
+
+  it('reports photos and files as the Bot API does, with the caption, and downloads them by message id', async () => {
+    const { client, calls } = fake([
+      msg(50, { text: 'see', media: { kind: 'photo', mime: 'image/jpeg', width: 1280, height: 960, bytes: 2000 }, groupedId: '9' }),
+      msg(51, { text: '', media: { kind: 'document', mime: 'image/png', bytes: 300 }, groupedId: '9' }),
+      msg(52, { text: 'a clip', media: { kind: 'other' } }),
+      msg(53, { text: 'https://example.com' }),
+    ]);
+    const call = userAccountCaller(client, '-1001234');
+    const updates = await call<Array<{ message: Record<string, unknown> }>>('getUpdates', { offset: 50, limit: 50 });
+    expect(updates.map((u) => u.message)).toMatchObject([
+      { caption: 'see', media_group_id: '9', photo: [{ file_id: '50', width: 1280, height: 960, file_size: 2000 }] },
+      { document: { file_id: '51', mime_type: 'image/png', file_size: 300 }, media_group_id: '9' },
+      { caption: 'a clip' },
+      { text: 'https://example.com' },
+    ]);
+    expect(updates.map((u) => [u.message.text, u.message.photo ?? u.message.document ?? null]).slice(2))
+      .toEqual([[undefined, null], ['https://example.com', null]]);
+    const got = await call<{ bytes: Buffer }>('downloadFile', { file_id: '50' });
+    expect(got.bytes.toString()).toBe('bytes of 50');
+    expect(calls.at(-1)).toEqual(['download', [50]]);
   });
 
   it('refuses a call it has no equivalent for', async () => {

@@ -1,7 +1,8 @@
 import { Api, TelegramClient, helpers } from 'telegram';
 import { FloodWaitError, RPCError } from 'telegram/errors/index.js';
+import { CustomFile } from 'telegram/client/uploads.js';
 import { StringSession } from 'telegram/sessions/index.js';
-import { TelegramError, type TelegramCall } from './telegramBot';
+import { DOWNLOAD_FILE, TelegramError, TelegramUpload, type TelegramCall, type TelegramDownload } from './telegramBot';
 
 // The Facebook chat hub's Telegram side, signed in as an ordinary Telegram
 // account (MTProto) rather than a bot. The hub's pass is written against Bot
@@ -20,6 +21,9 @@ import { TelegramError, type TelegramCall } from './telegramBot';
 //   it did not post is a reply. One from before this session started is
 //   taken as a post: nothing is known about it, and relaying a post would
 //   send the buyer's own words back to them.
+// A message with a photo or file is reported the way the Bot API reports it
+// (`photo` or `document`, the text as `caption`), with the message id as the
+// file id, so `downloadFile` can fetch it again by that id.
 
 /** One message in the group, as much as the hub reads. */
 export type UserMessage = {
@@ -33,18 +37,28 @@ export type UserMessage = {
   firstName?: string;
   lastName?: string;
   username?: string;
+  /** The text, or the caption when the message carries a file. */
   text: string;
+  /** A photo, a file, or something else (video, sticker, voice); absent on plain text and link previews. */
+  media?: { kind: 'photo' | 'document' | 'other'; mime?: string; bytes?: number; width?: number; height?: number };
+  /** Shared by the messages of one album. */
+  groupedId?: string;
 };
 
 /** What the hub needs from a signed-in account, in the group it posts to. */
 export interface TelegramUserClient {
   /** Messages after `afterId`, oldest first. With `afterId` 0, only the latest. */
   history(afterId: number, limit: number): Promise<UserMessage[]>;
-  send(text: string, opts: { topicId?: number; replyToId?: number }): Promise<number>;
+  /** `chatId` posts to another chat the account is in instead of the group. */
+  send(text: string, opts: { topicId?: number; replyToId?: number; chatId?: string }): Promise<number>;
   sendPhotoUrl(url: string, caption: string | undefined, topicId: number): Promise<number>;
+  /** One photo, or an album of up to ten, from their bytes; the caption goes on the first. Answers the message ids. */
+  sendPhotos(files: TelegramUpload[], caption: string | undefined, topicId: number): Promise<number[]>;
   createTopic(title: string): Promise<number>;
   renameTopic(topicId: number, title: string): Promise<void>;
   react(messageId: number, emoji: string): Promise<void>;
+  /** The photo or file a message in the group carries. */
+  download(messageId: number): Promise<Buffer>;
   /** Called on any update for the group; tells the caller history moved. */
   onActivity(listener: () => void): void;
 }
@@ -86,6 +100,7 @@ export function userAccountCaller(client: TelegramUserClient, chatId: string): T
         return messages.map((m) => ({
           update_id: m.id,
           message: {
+            ...mediaFields(m),
             message_id: m.id,
             message_thread_id: m.topicId ?? undefined,
             is_topic_message: m.topicId !== null,
@@ -94,20 +109,40 @@ export function userAccountCaller(client: TelegramUserClient, chatId: string): T
             from: offset === 0 || !m.fromId ? undefined : {
               id: Number(m.fromId), is_bot: isPost(m), first_name: m.firstName, last_name: m.lastName, username: m.username,
             },
-            text: m.text || undefined,
+            text: m.media ? undefined : m.text || undefined,
           },
         }));
       }
+      case DOWNLOAD_FILE: {
+        const answer: TelegramDownload = { bytes: await client.download(Number(p.file_id)) };
+        return answer;
+      }
       case 'sendMessage': {
         const reply = p.reply_parameters as { message_id?: number } | undefined;
-        const id = await client.send(String(p.text), { topicId: num(p.message_thread_id), replyToId: reply?.message_id });
-        posted(id, String(p.text));
+        const elsewhere = p.chat_id !== undefined && String(p.chat_id) !== chatId ? String(p.chat_id) : undefined;
+        const id = await client.send(String(p.text), { topicId: num(p.message_thread_id), replyToId: reply?.message_id, chatId: elsewhere });
+        // Only the group's history is read back, so only its posts are remembered.
+        if (!elsewhere) posted(id, String(p.text));
         return { message_id: id };
       }
       case 'sendPhoto': {
-        const id = await client.sendPhotoUrl(String(p.photo), p.caption as string | undefined, num(p.message_thread_id)!);
-        posted(id, p.caption as string | undefined);
+        const caption = p.caption as string | undefined;
+        const id = p.photo instanceof TelegramUpload
+          ? (await client.sendPhotos([p.photo], caption, num(p.message_thread_id)!))[0] ?? 0
+          : await client.sendPhotoUrl(String(p.photo), caption, num(p.message_thread_id)!);
+        posted(id, caption);
         return { message_id: id };
+      }
+      case 'sendMediaGroup': {
+        const items = p.media as Array<{ media: unknown; caption?: string }>;
+        const files = items.map((item) => item.media);
+        if (!files.every((f): f is TelegramUpload => f instanceof TelegramUpload)) {
+          throw new Error('an account sends an album only from uploaded files');
+        }
+        const caption = items[0]?.caption;
+        const ids = await client.sendPhotos(files, caption, num(p.message_thread_id)!);
+        ids.forEach((id, i) => posted(id, i === 0 ? caption : undefined));
+        return ids.map((id) => ({ message_id: id }));
       }
       case 'createForumTopic':
         return { message_thread_id: await client.createTopic(String(p.name)) };
@@ -134,6 +169,49 @@ export function userAccountCaller(client: TelegramUserClient, chatId: string): T
   }) as TelegramCall;
 }
 
+/** A message's file as the Bot API names it; `other` media is left as a bare caption, which the hub refuses. */
+function mediaFields(m: UserMessage): Params {
+  if (!m.media) return {};
+  const fileId = String(m.id);
+  return {
+    caption: m.text || undefined,
+    media_group_id: m.groupedId,
+    ...(m.media.kind === 'photo'
+      ? { photo: [{ file_id: fileId, width: m.media.width ?? 0, height: m.media.height ?? 0, file_size: m.media.bytes }] }
+      : {}),
+    ...(m.media.kind === 'document'
+      ? { document: { file_id: fileId, mime_type: m.media.mime, file_size: m.media.bytes } }
+      : {}),
+  };
+}
+
+/** What a message carries, in the terms `UserMessage` reports. */
+function mediaOf(m: Api.Message): UserMessage['media'] {
+  const media = m.media;
+  // A link's preview is still a text message.
+  if (!media || media instanceof Api.MessageMediaEmpty || media instanceof Api.MessageMediaWebPage) return undefined;
+  if (media instanceof Api.MessageMediaPhoto && media.photo instanceof Api.Photo) {
+    let best: { w: number; h: number; bytes?: number } | null = null;
+    for (const size of media.photo.sizes) {
+      const found = size instanceof Api.PhotoSize ? { w: size.w, h: size.h, bytes: size.size }
+        : size instanceof Api.PhotoSizeProgressive ? { w: size.w, h: size.h, bytes: size.sizes.at(-1) }
+          : null;
+      if (found && (!best || found.w * found.h >= best.w * best.h)) best = found;
+    }
+    return { kind: 'photo', mime: 'image/jpeg', width: best?.w, height: best?.h, bytes: best?.bytes };
+  }
+  if (media instanceof Api.MessageMediaDocument && media.document instanceof Api.Document) {
+    const d = media.document;
+    // Stickers are WebP documents, and GIFs and voice notes documents too; none is a photo to forward.
+    const special = d.attributes.some((a) => a instanceof Api.DocumentAttributeSticker
+      || a instanceof Api.DocumentAttributeAnimated || a instanceof Api.DocumentAttributeVideo
+      || a instanceof Api.DocumentAttributeAudio);
+    if (special) return { kind: 'other' };
+    return { kind: 'document', mime: d.mimeType, bytes: Number(d.size) };
+  }
+  return { kind: 'other' };
+}
+
 export type UserSessionConfig = { apiId: number; apiHash: string; session: string; chatId: string };
 
 /** A connected GramJS session, scoped to one forum group. */
@@ -153,6 +231,20 @@ export async function connectUserClient(cfg: UserSessionConfig): Promise<{ clien
   await tg.getDialogs({ limit: 200 });
   const peer = await tg.getInputEntity(cfg.chatId);
   const channelId = String(cfg.chatId).replace(/^-100/, '');
+  const others = new Map<string, Api.TypeInputPeer>();
+  // A chat joined since connecting is not in the cached dialogs yet.
+  const peerOf = async (chatId: string | undefined): Promise<Api.TypeInputPeer> => {
+    if (!chatId || chatId === cfg.chatId) return peer;
+    let p = others.get(chatId);
+    if (!p) {
+      p = await tg.getInputEntity(chatId).catch(async () => {
+        await tg.getDialogs({ limit: 200 });
+        return tg.getInputEntity(chatId);
+      });
+      others.set(chatId, p);
+    }
+    return p;
+  };
 
   const topicOf = (m: Api.Message): number | null => {
     const r = m.replyTo;
@@ -163,14 +255,16 @@ export async function connectUserClient(cfg: UserSessionConfig): Promise<{ clien
     topicId || replyToId
       ? new Api.InputReplyToMessage({ replyToMsgId: replyToId ?? topicId!, topMsgId: topicId })
       : undefined;
-  const sentId = (updates: Api.TypeUpdates): number => {
+  const sentIds = (updates: Api.TypeUpdates): number[] => {
     const list = 'updates' in updates ? updates.updates : [];
-    for (const u of list) {
-      if ((u instanceof Api.UpdateNewChannelMessage || u instanceof Api.UpdateNewMessage) && 'id' in u.message) return u.message.id;
-    }
-    for (const u of list) if (u instanceof Api.UpdateMessageID) return u.id;
-    return 0;
+    const made = list.flatMap((u) =>
+      (u instanceof Api.UpdateNewChannelMessage || u instanceof Api.UpdateNewMessage) && 'id' in u.message ? [u.message.id] : []);
+    const ids = made.length ? made : list.flatMap((u) => (u instanceof Api.UpdateMessageID ? [u.id] : []));
+    return ids.sort((a, b) => a - b);
   };
+  const sentId = (updates: Api.TypeUpdates): number => sentIds(updates)[0] ?? 0;
+  const upload = (f: TelegramUpload) =>
+    tg.uploadFile({ file: new CustomFile(f.name, f.bytes.length, '', f.bytes), workers: 1 });
 
   const client: TelegramUserClient = {
     async history(afterId, limit) {
@@ -191,12 +285,14 @@ export async function connectUserClient(cfg: UserSessionConfig): Promise<{ clien
             lastName: sender?.lastName ?? undefined,
             username: sender?.username ?? undefined,
             text: m.message ?? '',
+            media: mediaOf(m),
+            groupedId: m.groupedId ? m.groupedId.toString() : undefined,
           };
         });
     },
-    async send(text, { topicId, replyToId }) {
+    async send(text, { topicId, replyToId, chatId }) {
       const updates = await tg.invoke(new Api.messages.SendMessage({
-        peer, message: text, noWebpage: true, randomId: helpers.generateRandomLong(), replyTo: replyTo(topicId, replyToId),
+        peer: await peerOf(chatId), message: text, noWebpage: true, randomId: helpers.generateRandomLong(), replyTo: replyTo(topicId, replyToId),
       }));
       return sentId(updates);
     },
@@ -206,6 +302,35 @@ export async function connectUserClient(cfg: UserSessionConfig): Promise<{ clien
         randomId: helpers.generateRandomLong(), replyTo: replyTo(topicId),
       }));
       return sentId(updates);
+    },
+    async sendPhotos(files, caption, topicId) {
+      if (files.length === 1) {
+        const updates = await tg.invoke(new Api.messages.SendMedia({
+          peer, media: new Api.InputMediaUploadedPhoto({ file: await upload(files[0]!) }), message: caption ?? '',
+          randomId: helpers.generateRandomLong(), replyTo: replyTo(topicId),
+        }));
+        return sentIds(updates);
+      }
+      // An album takes photos already on Telegram's side: each is uploaded,
+      // turned into a photo, then the album points at those.
+      const media: Api.InputMediaPhoto[] = [];
+      for (const f of files) {
+        const done = await tg.invoke(new Api.messages.UploadMedia({
+          peer, media: new Api.InputMediaUploadedPhoto({ file: await upload(f) }),
+        }));
+        if (!(done instanceof Api.MessageMediaPhoto) || !(done.photo instanceof Api.Photo)) {
+          throw new TelegramError('Telegram did not take the photo', 500, null);
+        }
+        const { id, accessHash, fileReference } = done.photo;
+        media.push(new Api.InputMediaPhoto({ id: new Api.InputPhoto({ id, accessHash, fileReference }) }));
+      }
+      const updates = await tg.invoke(new Api.messages.SendMultiMedia({
+        peer, replyTo: replyTo(topicId),
+        multiMedia: media.map((m, i) => new Api.InputSingleMedia({
+          media: m, message: i === 0 ? caption ?? '' : '', randomId: helpers.generateRandomLong(),
+        })),
+      }));
+      return sentIds(updates);
     },
     async createTopic(title) {
       const updates = await tg.invoke(new Api.channels.CreateForumTopic({
@@ -222,6 +347,13 @@ export async function connectUserClient(cfg: UserSessionConfig): Promise<{ clien
       await tg.invoke(new Api.messages.SendReaction({
         peer, msgId: messageId, reaction: [new Api.ReactionEmoji({ emoticon: emoji })],
       }));
+    },
+    async download(messageId) {
+      const [m] = await tg.getMessages(peer, { ids: [messageId] });
+      if (!(m instanceof Api.Message) || !m.media) throw new TelegramError('the message has no file', 400, null);
+      const bytes = await tg.downloadMedia(m, {});
+      if (!Buffer.isBuffer(bytes)) throw new TelegramError('Telegram gave no file', 400, null);
+      return bytes;
     },
     onActivity(listener) {
       tg.addEventHandler((update: unknown) => {

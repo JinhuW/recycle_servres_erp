@@ -125,6 +125,9 @@
   background: linear-gradient(135deg, oklch(0.82 0.03 250), oklch(0.72 0.04 250));
   display: grid; place-items: center; place-content: center; gap: 4px; color: #fff; font-size: 12px; font-weight: 500;
 }
+.fbcc-photo { all: unset; display: block; cursor: zoom-in; border-radius: 14px; overflow: hidden; background: var(--bg-soft); }
+.fbcc-photo img { display: block; width: 220px; max-width: 100%; height: 165px; object-fit: cover; }
+.fbcc-photo:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .fbcc-stamp { font-size: 11px; color: var(--fg-subtle); display: flex; gap: 5px; align-items: center; flex-wrap: wrap; padding: 0 6px 6px; }
 .fbcc-m.out .fbcc-stamp { justify-content: flex-end; }
 .fbcc-src { display: inline-flex; gap: 4px; align-items: center; font-weight: 550; }
@@ -169,6 +172,36 @@
 .fbcc-send { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
 .fbcc-send:hover { background: var(--accent-strong); }
 .fbcc-send:disabled { background: var(--border); color: var(--fg-subtle); cursor: default; }
+/* Sits beside the 40px send button, so it takes the same height. */
+.fbcc-box .fbcc-attach-btn { height: 40px; width: 40px; }
+.fbcc-attach { margin-bottom: 8px; }
+.fbcc-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.fbcc-chip { position: relative; width: 56px; height: 56px; border-radius: 10px; background: var(--bg-soft); }
+.fbcc-chip img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; display: block; }
+.fbcc-chip.failed { box-shadow: 0 0 0 1.5px var(--neg); }
+.fbcc-chip-over {
+  position: absolute; inset: 0; border-radius: 10px; display: grid; place-items: center;
+  background: color-mix(in oklab, var(--bg-elev) 55%, transparent);
+}
+.fbcc-chip.failed .fbcc-chip-over { color: var(--neg); }
+.fbcc-chip-retry {
+  width: 28px; height: 28px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer;
+  background: var(--bg-elev); color: var(--neg); box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
+}
+.fbcc-chip-x {
+  position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: 0;
+  display: grid; place-items: center; cursor: pointer; background: var(--fg); color: var(--bg-elev);
+}
+.fbcc-chip-retry:focus-visible, .fbcc-chip-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fbcc-attach-note { margin-top: 6px; font-size: 12px; color: var(--neg); }
+.fbcc-convo.dropping { position: relative; }
+.fbcc-drop {
+  position: absolute; inset: 8px; z-index: 5; pointer-events: none; border-radius: 12px;
+  border: 2px dashed var(--accent); background: color-mix(in oklab, var(--accent-soft) 70%, transparent);
+  display: grid; place-content: center; justify-items: center; gap: 6px; color: var(--accent-strong); font-weight: 550;
+}
+/* A photo still on its way: the local copy, not yet a stored one to zoom into. */
+.fbcc-photo.local { cursor: default; opacity: 0.62; }
 
 /* ── Details ── */
 .fbcc-details { overflow-y: auto; padding: 16px; gap: 18px; background: var(--bg-soft); }

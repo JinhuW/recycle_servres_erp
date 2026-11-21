@@ -33,6 +33,7 @@ export const DESKTOP_NAV: readonly NavGroup[] = [
     items: [
       { id: 'home',       tKey: 'nav_home',       icon: 'dashboard',  roles: ['manager', 'purchaser'] },
       { id: 'analysis',   tKey: 'nav_analysis',   icon: 'analytics',  roles: ['manager', 'purchaser'], alsoActiveOn: ['stock'] },
+      { id: 'actions',    tKey: 'nav_actions',    icon: 'check2',     roles: ['manager', 'purchaser'] },
       { id: 'submit',     tKey: 'nav_submit',     icon: 'submit',     roles: ['manager', 'purchaser'], badge: '+' },
       { id: 'history',    tKey: 'nav_history',    icon: 'history',    roles: ['manager', 'purchaser'] },
       // Shipping is unlisted for now: tracking numbers are handed off from the
