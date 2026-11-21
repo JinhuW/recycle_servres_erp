@@ -5,6 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-601](./RS-601-reddit-subreddit-backoff-overflows-after-37-errors-a.md) | in-progress | bug | P2 | Reddit subreddit backoff overflows after ~37 errors and the failure repeats forever | — |
+| [RS-600](./RS-600-reddit-alerts-drop-a-seller-s-second-lot-when-one-is.md) | in-progress | bug | P2 | Reddit alerts drop a seller's second lot when one is DDR3 and the other DDR4 | — |
 | [RS-599](./RS-599-wechat-market-buyer-seller-breakdown-top-traders-and.md) | done | story | P2 | WeChat market: buyer/seller breakdown, top traders and sentiment | 1.472.0 |
 | [RS-598](./RS-598-show-each-inventory-product-s-last-collected-date.md) | done | story | P2 | Show each inventory product's last collected date | 1.467.0 |
 | [RS-597](./RS-597-board-view-of-purchase-orders-by-stage.md) | done | story | P2 | Board view of purchase orders by stage | 1.469.0 |
