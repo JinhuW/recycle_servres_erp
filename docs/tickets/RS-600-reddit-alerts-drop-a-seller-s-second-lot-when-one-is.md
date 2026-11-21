@@ -2,13 +2,13 @@
 id: RS-600
 title: Reddit alerts drop a seller's second lot when one is DDR3 and the other DDR4
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-20
 reporter: jinhu
 branch: fix/reddit-dedup-memory-generation
-pr:
-version:
+pr: "#1234"
+version: "tracker c68b2c66, Railway api+worker deployed 2026-11-21; OCI fleet pending"
 related: []
 ---
 
