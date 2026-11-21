@@ -96,7 +96,7 @@ def test_sync_stores_the_thread_and_routes_the_message_to_telegram(client, monke
     thread = client.db.get_thread("t1")
     assert thread["counterpart"] == "Jamie Seller"
     assert thread["worker_id"] == "denver-1"
-    assert client.db.count_messages("t1") == 1
+    assert len(client.db.list_messages("t1")) == 1
 
     (alert,) = outbox_rows(client, kind="message_in")
     assert "Jamie Seller" in alert["text"]
@@ -115,7 +115,7 @@ def test_resyncing_the_same_thread_is_free(client):
     sync(client, snapshot())
     body = sync(client, snapshot()).json()
     assert body["new_messages"] == 0
-    assert client.db.count_messages("t1") == 1
+    assert len(client.db.list_messages("t1")) == 1
     assert len(outbox_rows(client, kind="message_in")) == 1
 
 
@@ -125,7 +125,7 @@ def test_outgoing_messages_are_recorded_but_never_alerted(client):
         {"direction": "out", "sender": None, "text": "hello back", "sent_at": None},
     ]
     sync(client, snapshot(messages=messages))
-    assert client.db.count_messages("t1") == 2
+    assert len(client.db.list_messages("t1")) == 2
     assert len(outbox_rows(client, kind="message_in")) == 1
 
 
@@ -143,7 +143,6 @@ def test_router_sync_records_the_room_and_tags_the_alert_for_its_topic(client):
     sync(client, snapshot(matrix_room_id="!portal:rs.local"))
     thread = client.db.get_thread("t1")
     assert thread["matrix_room_id"] == "!portal:rs.local"
-    assert client.db.get_thread_by_room("!portal:rs.local")["thread_id"] == "t1"
 
     (alert,) = outbox_rows(client, kind="message_in")
     assert alert["dedupe_key"] == "t1"

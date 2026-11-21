@@ -252,19 +252,20 @@ def test_proxy_settings_percent_decodes_userinfo():
 # rs-session capture can fill a UID + password from configs/accounts.txt and
 # type them at a human pace (Facebook flags machine-speed login input).
 
-def test_lookup_account_reads_uid_password(tmp_path):
+def test_account_row_reads_headerless_lines(tmp_path):
     f = tmp_path / "accounts.txt"
     f.write_text("# comment\n100008960563344|Ranrover@997|\n"
                  "100006308048423|ABC@1234|SOMETOTP\n")
-    assert session_cli._lookup_account("100008960563344", f) == ("100008960563344", "Ranrover@997")
-    assert session_cli._lookup_account("100006308048423", f) == ("100006308048423", "ABC@1234")
+    assert session_cli._account_row("100008960563344", f)["password"] == "Ranrover@997"
+    row = session_cli._account_row("100006308048423", f)
+    assert (row["uid"], row["password"], row["twofa"]) == ("100006308048423", "ABC@1234", "SOMETOTP")
 
 
-def test_lookup_account_missing_uid_exits(tmp_path):
+def test_account_row_missing_uid_exits(tmp_path):
     f = tmp_path / "accounts.txt"
     f.write_text("100008960563344|pw|\n")
     with pytest.raises(SystemExit):
-        session_cli._lookup_account("999", f)
+        session_cli._account_row("999", f)
 
 
 def test_human_type_enters_every_character_one_at_a_time(monkeypatch):
@@ -291,4 +292,3 @@ def test_account_row_locates_columns_by_header(tmp_path):
     assert row["password"] == "Ranrover@997"
     assert row["twofa"] == "X7BHSEED"
     assert row["email"] == "a@b.com"
-    assert session_cli._lookup_account("100008960563344", f) == ("100008960563344", "Ranrover@997")

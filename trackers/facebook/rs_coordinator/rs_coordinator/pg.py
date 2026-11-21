@@ -287,12 +287,6 @@ class PostgresDatabase:
             row = cur.fetchone()
         return _row(row)
 
-    def insert_listing(self: "PostgresDatabase", record: Dict[str, Any]) -> None:
-        columns = ", ".join(record)
-        placeholders = ", ".join(f"%({name})s" for name in record)
-        with self.cursor() as cur:
-            cur.execute(f"INSERT INTO listings ({columns}) VALUES ({placeholders})", record)
-
     def claim_listing(self: "PostgresDatabase", record: Dict[str, Any]) -> bool:
         """See `Database.claim_listing`. True only for the caller that inserted."""
         columns = ", ".join(record)
@@ -348,13 +342,6 @@ class PostgresDatabase:
         with self.cursor() as cur:
             cur.execute(sql, params)
             return _rows(cur.fetchall())
-
-    def count_sightings(self: "PostgresDatabase", dedupe_key: str) -> int:
-        with self.cursor() as cur:
-            cur.execute(
-                "SELECT COUNT(*) AS n FROM sightings WHERE dedupe_key = %s", (dedupe_key,)
-            )
-            return int(cur.fetchone()["n"])
 
     # -- alert outbox ------------------------------------------------------
 
@@ -467,14 +454,6 @@ class PostgresDatabase:
             row = cur.fetchone()
         return _row(row)
 
-    def get_thread_by_room(
-        self: "PostgresDatabase", matrix_room_id: str
-    ) -> Optional[Dict[str, Any]]:
-        with self.cursor() as cur:
-            cur.execute("SELECT * FROM threads WHERE matrix_room_id = %s", (matrix_room_id,))
-            row = cur.fetchone()
-        return _row(row)
-
     def claim_message(self: "PostgresDatabase", record: Dict[str, Any]) -> bool:
         """See `Database.claim_message`. True only for the caller that inserted."""
         record = {"created_at": utcnow(), **record}
@@ -498,18 +477,6 @@ class PostgresDatabase:
                 (thread_id, limit),
             )
             return _rows(cur.fetchall())
-
-    def count_messages(
-        self: "PostgresDatabase", thread_id: str, direction: str | None = None
-    ) -> int:
-        sql = "SELECT COUNT(*) AS n FROM messages WHERE thread_id = %s"
-        params: List[Any] = [thread_id]
-        if direction:
-            sql += " AND direction = %s"
-            params.append(direction)
-        with self.cursor() as cur:
-            cur.execute(sql, params)
-            return int(cur.fetchone()["n"])
 
     # -- outbound replies --------------------------------------------------
 
@@ -1609,8 +1576,3 @@ class PostgresDatabase:
                 "VALUES (%s, %s, %s, %s, %s)",
                 (worker_id, account_id, kind, reason, utcnow()),
             )
-
-    def list_code_audit(self: "PostgresDatabase", limit: int = 100) -> List[Dict[str, Any]]:
-        with self.cursor() as cur:
-            cur.execute("SELECT * FROM code_audit ORDER BY released_at DESC LIMIT %s", (limit,))
-            return _rows(cur.fetchall())

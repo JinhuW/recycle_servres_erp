@@ -52,8 +52,6 @@ def test_no_bridge_state_means_not_a_portal():
 def test_direction_is_out_only_for_our_own_account():
     buyer = text_event(GHOST, "still available?")
     ours = text_event(OWN, "yes, $200")
-    assert bridge.is_buyer_message(buyer, OWN) is True
-    assert bridge.is_buyer_message(ours, OWN) is False
     assert bridge.message_from_event(buyer, OWN)["direction"] == "in"
     assert bridge.message_from_event(ours, OWN)["direction"] == "out"
 
@@ -64,6 +62,7 @@ def test_timeline_keeps_both_directions_but_drops_non_text():
         {"type": "m.room.member", "sender": GHOST, "content": {"membership": "join"}},
         text_event(OWN, "hello back"),
         {"type": "m.room.message", "sender": GHOST, "content": {"msgtype": "m.image", "body": "x"}},
+        {"type": "m.room.message", "sender": GHOST, "content": {"msgtype": "m.text", "body": ""}},
     ]
     messages = bridge.messages_from_timeline(events, OWN)
     assert [m["direction"] for m in messages] == ["in", "out"]

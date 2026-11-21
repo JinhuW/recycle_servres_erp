@@ -16,6 +16,8 @@ from rs_coordinator.routers.logins import datr_fingerprint
 from rs_coordinator.tokens import mint_worker_token
 from rs_coordinator.vault import Vault, generate_key
 
+from db_helpers import list_code_audit
+
 WORKER_SECRET = "test-hmac-secret"
 ADMIN = {"Authorization": "Bearer test-admin-token"}
 UID = "61574553140062"
@@ -99,7 +101,7 @@ def test_the_third_password_login_in_a_day_is_refused_and_audited(env):
 
     assert third.status_code == 403
     assert "Watch" in third.json()["detail"]
-    kinds = [row["kind"] for row in env.db.list_code_audit()]
+    kinds = [row["kind"] for row in list_code_audit(env.db)]
     assert kinds.count("password") == 2
     assert kinds.count("password_refused") == 1
 
@@ -301,7 +303,7 @@ def test_the_token_is_released_and_audited(env):
     response = session_token(env)
     assert response.status_code == 200, response.text
     assert response.json() == {"token": "EAAtoken"}
-    kinds = [row["kind"] for row in env.db.list_code_audit()]
+    kinds = [row["kind"] for row in list_code_audit(env.db)]
     assert kinds.count("token") == 1
 
 
@@ -328,7 +330,7 @@ def test_a_locked_account_is_refused_a_token(env):
     refused = session_token(env)
     assert refused.status_code == 403
     assert "locked" in refused.json()["detail"]
-    kinds = [row["kind"] for row in env.db.list_code_audit()]
+    kinds = [row["kind"] for row in list_code_audit(env.db)]
     assert "token" not in kinds
     assert kinds.count("password_refused") == 1
 

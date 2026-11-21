@@ -992,16 +992,6 @@ class Database:
             row = cur.fetchone()
         return dict(row) if row else None
 
-    def insert_listing(self: "Database", record: Dict[str, Any]) -> None:
-        """Insert a listing, raising if the dedupe key is already taken.
-
-        Callers racing other workers for the same key want `claim_listing`.
-        """
-        columns = ", ".join(record)
-        placeholders = ", ".join(f":{name}" for name in record)
-        with self.cursor() as cur:
-            cur.execute(f"INSERT INTO listings ({columns}) VALUES ({placeholders})", record)
-
     def claim_listing(self: "Database", record: Dict[str, Any]) -> bool:
         """Insert a listing if nobody has that dedupe key yet; True if we won.
 
@@ -1062,11 +1052,6 @@ class Database:
         with self.cursor() as cur:
             cur.execute(sql, params)
             return [dict(row) for row in cur.fetchall()]
-
-    def count_sightings(self: "Database", dedupe_key: str) -> int:
-        with self.cursor() as cur:
-            cur.execute("SELECT COUNT(*) AS n FROM sightings WHERE dedupe_key = ?", (dedupe_key,))
-            return int(cur.fetchone()["n"])
 
     # -- alert outbox ------------------------------------------------------
 
@@ -1182,13 +1167,6 @@ class Database:
             row = cur.fetchone()
         return dict(row) if row else None
 
-    def get_thread_by_room(self: "Database", matrix_room_id: str) -> Optional[Dict[str, Any]]:
-        """The thread a mautrix-meta portal room belongs to."""
-        with self.cursor() as cur:
-            cur.execute("SELECT * FROM threads WHERE matrix_room_id = ?", (matrix_room_id,))
-            row = cur.fetchone()
-        return dict(row) if row else None
-
     def claim_message(self: "Database", record: Dict[str, Any]) -> bool:
         """Insert a message if its fingerprint is new; True if we did.
 
@@ -1215,16 +1193,6 @@ class Database:
                 (thread_id, limit),
             )
             return [dict(row) for row in cur.fetchall()]
-
-    def count_messages(self: "Database", thread_id: str, direction: str | None = None) -> int:
-        sql = "SELECT COUNT(*) AS n FROM messages WHERE thread_id = ?"
-        params: List[Any] = [thread_id]
-        if direction:
-            sql += " AND direction = ?"
-            params.append(direction)
-        with self.cursor() as cur:
-            cur.execute(sql, params)
-            return int(cur.fetchone()["n"])
 
     # -- outbound replies --------------------------------------------------
 
@@ -2348,8 +2316,3 @@ class Database:
                 "VALUES (?, ?, ?, ?, ?)",
                 (worker_id, account_id, kind, reason, utcnow()),
             )
-
-    def list_code_audit(self: "Database", limit: int = 100) -> List[Dict[str, Any]]:
-        with self.cursor() as cur:
-            cur.execute("SELECT * FROM code_audit ORDER BY released_at DESC LIMIT ?", (limit,))
-            return [dict(row) for row in cur.fetchall()]

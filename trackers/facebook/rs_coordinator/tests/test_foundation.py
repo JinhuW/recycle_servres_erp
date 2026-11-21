@@ -19,6 +19,8 @@ from rs_coordinator.tokens import (
 )
 from rs_coordinator.vault import AccountStore, Vault, VaultError, generate_key
 
+from db_helpers import list_code_audit
+
 SECRET = "test-hmac-secret"
 
 
@@ -211,7 +213,7 @@ def test_snapshot_and_audit_round_trip():
     assert db.get_snapshot("denver-1")["state_blob"] == b"sealed"
 
     db.insert_code_audit("denver-1", "denver", "totp", "2fa prompt")
-    audit = db.list_code_audit()
+    audit = list_code_audit(db)
     assert len(audit) == 1 and audit[0]["kind"] == "totp"
 
 

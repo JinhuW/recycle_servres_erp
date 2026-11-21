@@ -230,14 +230,12 @@ def test_without_a_war_room_the_message_branch_stays_inert(tmp_path):
 # -- new DAO surface ---------------------------------------------------------
 
 
-def test_thread_reverse_lookups(tmp_path):
+def test_thread_lookup_by_topic(tmp_path):
     db = Database(tmp_path / "router.db")
     db.upsert_thread("t1", {"matrix_room_id": "!room:rs.local"})
     db.set_thread_fields("t1", {"telegram_topic_id": 7})
 
-    assert db.get_thread_by_room("!room:rs.local")["thread_id"] == "t1"
     assert db.get_thread_by_topic(7)["thread_id"] == "t1"
-    assert db.get_thread_by_room("!missing:rs.local") is None
     assert db.get_thread_by_topic(999) is None
 
 

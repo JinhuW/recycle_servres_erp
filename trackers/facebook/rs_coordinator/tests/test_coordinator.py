@@ -21,6 +21,8 @@ from rs_coordinator.sharding import (
     write_worker_config,
 )
 
+from db_helpers import count_sightings
+
 CONFIGS = Path(__file__).resolve().parents[2] / "configs"
 
 
@@ -172,7 +174,7 @@ def test_same_listing_from_two_workers_alerts_once(client):
     client.drain()
     assert len(client.sent) == 1
     key = dedupe_key("facebook", "123456789")
-    assert client.db.count_sightings(key) == 2
+    assert count_sightings(client.db, key) == 2
 
 
 def test_a_listing_upload_counts_as_a_beat_in_the_status_log(client):
@@ -636,9 +638,14 @@ def test_a_failed_statement_leaves_the_connection_usable(tmp_path):
         "first_seen_at": "2026-01-01T00:00:00+00:00",
         "last_seen_at": "2026-01-01T00:00:00+00:00",
     }
-    db.insert_listing(row)
+    insert = (
+        f"INSERT INTO listings ({', '.join(row)}) VALUES ({', '.join(':' + k for k in row)})"
+    )
+    with db.cursor() as cur:
+        cur.execute(insert, row)
     with pytest.raises(sqlite3.IntegrityError):
-        db.insert_listing(row)
+        with db.cursor() as cur:
+            cur.execute(insert, row)
 
     # A second connection must not find the database locked by the aborted write.
     other = sqlite3.connect(db.path, timeout=1)

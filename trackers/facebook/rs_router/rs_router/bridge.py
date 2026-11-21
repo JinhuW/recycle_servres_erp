@@ -42,25 +42,13 @@ def thread_id_from_bridge_state(state_events: List[Dict[str, Any]]) -> Optional[
     return None
 
 
-def is_buyer_message(event: Dict[str, Any], own_user_id: str) -> bool:
-    """True when `event` is a text message from the buyer, not one of ours.
-
-    Our own account is double-puppeted, so replies we (or staff via the router)
-    send come back through sync as `sender == own_user_id`; those are 'out' and
-    must not be re-alerted. Everything else with a text body is the buyer.
-    """
-    if event.get("type") != "m.room.message":
-        return False
-    content = event.get("content") or {}
-    if content.get("msgtype") not in ("m.text", "m.notice"):
-        return False
-    if not content.get("body"):
-        return False
-    return event.get("sender") != own_user_id
-
-
 def message_from_event(event: Dict[str, Any], own_user_id: str) -> Dict[str, Any]:
-    """One timeline event as a /v1/messages/sync message dict."""
+    """One timeline event as a /v1/messages/sync message dict.
+
+    Our account is double-puppeted, so replies we (or staff via the router)
+    send come back through sync as `sender == own_user_id`; those are 'out' and
+    must not be re-alerted.
+    """
     content = event.get("content") or {}
     direction = "out" if event.get("sender") == own_user_id else "in"
     return {

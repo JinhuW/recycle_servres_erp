@@ -36,6 +36,8 @@ from rs_coordinator.pg import (
     postgres_schema,
 )
 
+from db_helpers import count_sightings, list_code_audit
+
 TEST_URL = os.environ.get("RS_TEST_DATABASE_URL")
 
 requires_postgres = pytest.mark.skipif(
@@ -149,8 +151,8 @@ def test_outbound_retry_cap(backend):
     assert [row["id"] for row in backend.pending_outbound()] == []
 
 
-def test_listing_insert_get_update(backend):
-    backend.insert_listing(_listing("facebook:1", "2026-01-01T00:00:00+00:00", 7))
+def test_listing_claim_get_update(backend):
+    backend.claim_listing(_listing("facebook:1", "2026-01-01T00:00:00+00:00", 7))
 
     row = backend.get_listing("facebook:1")
     assert row is not None
@@ -170,9 +172,9 @@ def test_listing_insert_get_update(backend):
 
 
 def test_query_listings_filters_and_orders(backend):
-    backend.insert_listing(_listing("facebook:old", "2026-01-01T00:00:00+00:00", 3))
-    backend.insert_listing(_listing("facebook:mid", "2026-02-01T00:00:00+00:00", 8))
-    backend.insert_listing(_listing("facebook:new", "2026-03-01T00:00:00+00:00", 5))
+    backend.claim_listing(_listing("facebook:old", "2026-01-01T00:00:00+00:00", 3))
+    backend.claim_listing(_listing("facebook:mid", "2026-02-01T00:00:00+00:00", 8))
+    backend.claim_listing(_listing("facebook:new", "2026-03-01T00:00:00+00:00", 5))
 
     # Newest first.
     keys = [r["dedupe_key"] for r in backend.query_listings()]
@@ -191,14 +193,13 @@ def test_query_listings_filters_and_orders(backend):
     assert backend.query_listings(since="2099-01-01T00:00:00+00:00") == []
 
 
-def test_sighting_counts(backend):
-    assert backend.count_sightings("facebook:1") == 0
+def test_sightings_are_recorded_per_listing(backend):
+    assert count_sightings(backend, "facebook:1") == 0
     backend.record_sighting("facebook:1", "denver-1", "$45", 7)
     backend.record_sighting("facebook:1", "boulder-1", "$45", 7)
     backend.record_sighting("facebook:2", "denver-1", None, None)
-    assert backend.count_sightings("facebook:1") == 2
-    assert backend.count_sightings("facebook:2") == 1
-    assert isinstance(backend.count_sightings("facebook:1"), int)
+    assert count_sightings(backend, "facebook:1") == 2
+    assert count_sightings(backend, "facebook:2") == 1
 
 
 def test_worker_upsert_coalesces(backend):
@@ -336,14 +337,13 @@ def test_snapshot_round_trip(backend):
 
 
 def test_code_audit(backend):
-    assert backend.list_code_audit() == []
+    assert list_code_audit(backend) == []
     backend.insert_code_audit("denver-1", "denver", "totp", "2fa prompt")
     backend.insert_code_audit(None, None, "password", None)
 
-    audit = backend.list_code_audit()
+    audit = list_code_audit(backend)
     assert len(audit) == 2
     assert {row["kind"] for row in audit} == {"totp", "password"}
-    assert len(backend.list_code_audit(limit=1)) == 1
 
 
 def test_cursor_commits_on_exit(backend):
@@ -351,7 +351,7 @@ def test_cursor_commits_on_exit(backend):
         cur.execute("SELECT COUNT(*) AS n FROM listings")
         assert cur.fetchone()["n"] == 0
 
-    backend.insert_listing(_listing("facebook:1", "2026-01-01T00:00:00+00:00", 1))
+    backend.claim_listing(_listing("facebook:1", "2026-01-01T00:00:00+00:00", 1))
     with backend.cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM listings")
         assert cur.fetchone()["n"] == 1
@@ -889,11 +889,9 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
     handle = _OfflinePostgres()
 
     handle.get_listing("k")
-    handle.insert_listing({"dedupe_key": "k", "marketplace": "facebook"})
     handle.update_listing("k", {"price": "$1"})
     handle.record_sighting("k", "w", "$1", 3)
     handle.query_listings(since="2026-01-01", min_score=1, limit=5)
-    handle.count_sightings("k")
     handle.upsert_worker("w", status="running", region="r", detail={"a": 1}, heartbeat=True)
     handle.list_workers()
     handle.get_worker("w")
@@ -912,7 +910,6 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
     handle.upsert_snapshot("w", {"state_blob": b"x"})
     handle.get_snapshot("w")
     handle.insert_code_audit("w", "a", "totp", "why")
-    handle.list_code_audit(limit=5)
     handle.get_device_profile("uid:1")
     handle.device_profile_by_device("dev-1")
     handle.insert_device_profile({"identity_key": "uid:1", "device_id": "dev-1"})
@@ -942,7 +939,7 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
         handle.write_alert_claim(statement, {})
     handle.get_alert_claim("facebook", "1")
 
-    assert len(handle.log) == 56
+    assert len(handle.log) == 53
     for sql in handle.log:
         assert "?" not in sql, f"SQLite placeholder left in: {sql}"
         assert not re.search(r":\w", sql), f"named SQLite placeholder left in: {sql}"

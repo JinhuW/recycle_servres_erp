@@ -317,12 +317,6 @@ def _account_row(uid: str, path: Optional[Path] = None) -> Dict[str, str]:
     raise SystemExit(f"account {uid} not found in {ACCOUNTS_FILE}")
 
 
-def _lookup_account(uid: str, path: Optional[Path] = None) -> tuple:
-    """(username, password) for a UID — the pair the capture auto-fill needs."""
-    row = _account_row(uid, path)
-    return uid, row.get("password", "")
-
-
 def _human_type(field: Any, text: str) -> None:
     """Type into a field one character at a time, at an uneven human pace.
 

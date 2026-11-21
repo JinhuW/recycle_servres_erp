@@ -16,6 +16,8 @@ from fastapi.testclient import TestClient
 from rs_coordinator.tokens import mint_worker_token
 from rs_coordinator.vault import generate_key
 
+from db_helpers import list_code_audit
+
 WORKER_SECRET = "test-worker-hmac-secret"
 # The canonical pyotp example secret: 6 digits, 30-second step, SHA-1.
 TOTP_SECRET = "JBSWY3DPEHPK3PXP"
@@ -100,7 +102,7 @@ def test_both_route_prefixes_work(client):
 def test_every_release_is_audited(client):
     client.post("/v1/auth/code", json={"reason": "login challenge"}, headers=auth("denver-1"))
 
-    audit = client.db.list_code_audit()
+    audit = list_code_audit(client.db)
     assert len(audit) == 1
     assert audit[0]["worker_id"] == "denver-1"
     assert audit[0]["account_id"] == "denver"
@@ -116,7 +118,7 @@ def test_a_worker_token_pins_the_account_it_may_ask_for(client):
     )
     assert response.status_code == 200
     assert response.json()["code"] in reference_codes()
-    assert client.db.list_code_audit()[0]["account_id"] == "denver"
+    assert list_code_audit(client.db)[0]["account_id"] == "denver"
 
 
 def test_a_worker_with_no_account_is_a_404(client):
@@ -130,7 +132,7 @@ def test_an_account_without_a_totp_secret_is_a_404(client):
     assert response.status_code == 404
     # The error has to say how to fix it, not just that it failed.
     assert "rsc vault set-account" in response.json()["detail"]
-    assert client.db.list_code_audit() == []
+    assert list_code_audit(client.db) == []
 
 
 @pytest.mark.parametrize("headers", [{}, {"Authorization": "Bearer denver-1.deadbeef"}])
@@ -173,7 +175,7 @@ def test_credentials_are_refused_unless_the_account_opted_in(client):
     response = client.post("/v1/auth/credentials", json={}, headers=auth("denver-1"))
     assert response.status_code == 403
     assert "hunter2" not in response.text
-    assert client.db.list_code_audit() == []
+    assert list_code_audit(client.db) == []
 
 
 def test_credentials_are_released_and_audited_when_allowed(client):
@@ -183,7 +185,7 @@ def test_credentials_are_released_and_audited_when_allowed(client):
     assert response.status_code == 200
     assert response.json() == {"username": "tx@example.com", "password": "correct-horse"}
 
-    audit = client.db.list_code_audit()
+    audit = list_code_audit(client.db)
     assert len(audit) == 1
     assert (audit[0]["account_id"], audit[0]["kind"]) == ("tx", "password")
     assert audit[0]["reason"] == "session expired"
@@ -244,7 +246,7 @@ def test_the_fleet_token_cannot_name_an_account(legacy_client, route):
     assert "per-worker token" in response.json()["detail"]
     # Nothing leaked, and nothing was minted to leak.
     assert "hunter2" not in response.text
-    assert legacy_client.db.list_code_audit() == []
+    assert list_code_audit(legacy_client.db) == []
 
 
 def test_the_fleet_token_cannot_impersonate_a_worker_either(legacy_client):
@@ -253,7 +255,7 @@ def test_the_fleet_token_cannot_impersonate_a_worker_either(legacy_client):
         "/v1/auth/code", json={"worker_id": "denver-1"}, headers=LEGACY
     )
     assert response.status_code == 403
-    assert legacy_client.db.list_code_audit() == []
+    assert list_code_audit(legacy_client.db) == []
 
 
 def test_a_per_worker_token_still_works_on_that_deployment(legacy_client):

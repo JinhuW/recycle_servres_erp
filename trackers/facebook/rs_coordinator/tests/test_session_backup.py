@@ -15,6 +15,8 @@ from fastapi.testclient import TestClient
 from rs_coordinator.tokens import mint_worker_token
 from rs_coordinator.vault import Vault, VaultError, generate_key
 
+from db_helpers import list_code_audit
+
 ADMIN_TOKEN = "test-admin-token"
 LEGACY_TOKEN = "test-token"
 WORKER_SECRET = "test-hmac-secret"
@@ -454,7 +456,7 @@ def test_seed_is_audited_as_a_disclosure(env):
     register_account(env)
     seed(env, reason="assign #2")
     assert any(
-        a["kind"] == "session" and a["account_id"] == "denver" for a in env.db.list_code_audit()
+        a["kind"] == "session" and a["account_id"] == "denver" for a in list_code_audit(env.db)
     )
 
 

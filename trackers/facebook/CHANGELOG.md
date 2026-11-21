@@ -34,6 +34,11 @@ deployed?" harder to answer.
   `…/restart`, `POST /v1/fleet/releases` and `…/releases/{id}/{action}`, which
   `rsc fleet` does directly. Also the unused `rekey_device_profile` and
   `delete_worker_config` database methods.
+- Code only tests called: the coordinator database methods `insert_listing`,
+  `count_sightings`, `get_thread_by_room`, `count_messages` and
+  `list_code_audit` (both backends; the two the tests still need are now
+  `rs_coordinator/tests/db_helpers.py`), rs_router's `is_buyer_message` and
+  rs_poster's `_lookup_account`.
 
 ## [0.18.0] - 2026-11-07
 
