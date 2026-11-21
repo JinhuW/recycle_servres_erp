@@ -3,8 +3,8 @@ import { marketWritesTotal } from '../metrics';
 import { appendPriceEvent } from './refPriceEvents';
 import { canonPartArg, canonPartCol } from './part-number';
 
-export type WriteSelector = { id?: string; partNumber?: string };
-export type WriteValue = {
+type WriteSelector = { id?: string; partNumber?: string };
+type WriteValue = {
   selector: WriteSelector;
   low: string;
   high: string;

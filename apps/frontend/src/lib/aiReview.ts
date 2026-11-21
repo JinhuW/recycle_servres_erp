@@ -9,9 +9,9 @@ import type { Translate } from './orderPresentation';
 // manager's answer to each finding. The page applies a finding through the
 // ordinary line PATCH, then records the answer.
 
-export type AiReviewStatus = 'queued' | 'running' | 'done' | 'failed' | 'superseded';
+type AiReviewStatus = 'queued' | 'running' | 'done' | 'failed' | 'superseded';
 
-export type AiFindingSource =
+type AiFindingSource =
   | { kind: 'decoder'; partNumber: string; readAs?: string; value?: string }
   | { kind: 'label'; read: 'scan' | 'reread'; url: string | null; value?: string }
   | { kind: 'web'; urls: string[]; value?: string }
@@ -34,7 +34,7 @@ export type AiFinding = {
   stale: boolean;
 };
 
-export type AiReviewRun = {
+type AiReviewRun = {
   id: string; status: AiReviewStatus; trigger: 'stage' | 'manual'; model: string | null;
   costUsd: number; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
 };

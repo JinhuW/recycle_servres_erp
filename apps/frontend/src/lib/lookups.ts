@@ -11,7 +11,6 @@ import { CATEGORY_ORDER } from '@recycle-erp/shared';
 import { api } from './api';
 import { takeBoot } from './boot';
 
-export { CATEGORY_ORDER };
 
 // ── Catalog option groups (RAM/SSD spec dropdowns, conditions) ──────────────
 // Each array is mutated in place by `loadLookups()`. Consumers re-export from
@@ -38,7 +37,7 @@ export const catalog = {
 export type PriceSource = { id: string; label: string };
 export const priceSources: PriceSource[] = [];
 
-export type SellOrderStatus = 'Draft' | 'Packing' | 'Shipped' | 'Awaiting payment' | 'Done' | 'Closed';
+type SellOrderStatus = 'Draft' | 'Packing' | 'Shipped' | 'Awaiting payment' | 'Done' | 'Closed';
 export type SellOrderStatusInfo = {
   id: SellOrderStatus;
   label: string;

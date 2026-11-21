@@ -75,7 +75,7 @@ function lay(stored: Msg[], s: number, window: Msg[], w: number, spans: AlignSpa
  * `window`. It matches whole runs, so two identical messages in a row stay
  * two. `spans` are the rows each message of that suffix covers.
  */
-export function alignWindowSpans(stored: Msg[], window: Msg[]): { rows: number; spans: AlignSpan[] } {
+function alignWindowSpans(stored: Msg[], window: Msg[]): { rows: number; spans: AlignSpan[] } {
   for (let k = Math.min(stored.length, window.length); k > 0; k--) {
     const spans: AlignSpan[] = [];
     const rows = lay(stored, stored.length - k, window, 0, spans);

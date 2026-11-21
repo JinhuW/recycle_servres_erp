@@ -17,7 +17,7 @@ import { canonicalPartNumber } from './format';
 
 const DEBOUNCE_MS = 300;
 /** Shorter than this, a half-typed part # can exactly match an unrelated one. */
-export const CHIP_FILL_MIN = 6;
+const CHIP_FILL_MIN = 6;
 
 export type ChipFillLine = {
   category?: string | null;

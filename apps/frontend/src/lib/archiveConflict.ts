@@ -2,7 +2,7 @@ import { ApiError } from './api';
 
 // What POST /api/orders/:id/archive refuses with when the order's goods sit on
 // open sell orders: the user decides whether to pull them off those orders.
-export type ArchiveConflictSellOrder = {
+type ArchiveConflictSellOrder = {
   id: string;
   status: string;
   // solId is the sell-order line, which is what tells two entries for the

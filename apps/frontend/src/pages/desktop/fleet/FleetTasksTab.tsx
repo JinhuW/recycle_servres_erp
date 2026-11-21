@@ -454,7 +454,7 @@ export function CityLogAside({ city, items, onSearchNow, now = Date.now() }: {
 // Start the round now. The preview is worked out here from the same rule the
 // backend applies, so the dialog says what will happen before it does; the
 // answer's counts (started, skipped) go into the toast.
-export function StartRoundDialog({ cities, items, freshHours, onClose, onDone, now = Date.now() }: {
+function StartRoundDialog({ cities, items, freshHours, onClose, onDone, now = Date.now() }: {
   cities: readonly FleetCity[]; items: readonly string[]; freshHours: number; onClose: () => void; onDone: () => void; now?: number;
 }) {
   const { t } = useT();

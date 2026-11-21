@@ -1,7 +1,7 @@
 // One JSON object per line on stdout: the host's `docker logs` is the only
 // place these go, and a line that parses is one a dashboard can filter.
 
-export type Fields = Record<string, unknown>;
+type Fields = Record<string, unknown>;
 
 export interface Logger {
   info(msg: string, fields?: Fields): void;

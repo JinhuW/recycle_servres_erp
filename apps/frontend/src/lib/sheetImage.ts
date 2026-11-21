@@ -13,7 +13,7 @@ import {
 // uploads, and keeps each crop well under the upload limit.
 const MAX_CROP_LONG_SIDE = 2400;
 
-export type SheetCrop = {
+type SheetCrop = {
   box: SheetBox;
   blob: Blob;
 };

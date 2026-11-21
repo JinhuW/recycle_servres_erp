@@ -118,20 +118,20 @@ async function reserveDailyBudget(
   };
 }
 
-export const SELL_CATEGORIES = ['RAM', 'SSD', 'CPU'] as const;
-export type SellCategory = (typeof SELL_CATEGORIES)[number];
+const SELL_CATEGORIES = ['RAM', 'SSD', 'CPU'] as const;
+type SellCategory = (typeof SELL_CATEGORIES)[number];
 export const WEB_CHANNEL_SOURCES = ['web', 'facebook', 'reddit'] as const;
 type Source = (typeof WEB_CHANNEL_SOURCES)[number];
 const HANDOFFS = ['ship', 'pickup'] as const;
-export type Handoff = (typeof HANDOFFS)[number];
+type Handoff = (typeof HANDOFFS)[number];
 // The spec fields the sell form can send, all optional. Anything else is dropped.
-export const FIELD_KEYS = [
+const FIELD_KEYS = [
   'classification', 'capacity', 'speed', 'rank', 'brand',
   'interface', 'form_factor', 'description', 'part_number',
 ] as const;
-export type FieldKey = (typeof FIELD_KEYS)[number];
+type FieldKey = (typeof FIELD_KEYS)[number];
 
-export type SellLine = { category: SellCategory; qty: number; fields: Partial<Record<FieldKey, string>> };
+type SellLine = { category: SellCategory; qty: number; fields: Partial<Record<FieldKey, string>> };
 /** What web_submissions.payload holds for a sell lot. */
 export type SellLotPayload = {
   email: string;
@@ -166,7 +166,7 @@ type Parsed<T> = { ok: T } | { error: string } | { honeypot: true };
 const UNSTORABLE = /\0|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
 /** True when any string anywhere in a parsed JSON body can't be stored. */
-export function hasUnstorableText(v: unknown): boolean {
+function hasUnstorableText(v: unknown): boolean {
   const stack: unknown[] = [v];
   while (stack.length) {
     const x = stack.pop();
@@ -201,7 +201,7 @@ function isHoneypot(b: Record<string, unknown>): boolean {
   return typeof b.website === 'string' && b.website.trim() !== '';
 }
 
-export function parseSellLot(raw: unknown): Parsed<SellLotPayload> {
+function parseSellLot(raw: unknown): Parsed<SellLotPayload> {
   if (!raw || typeof raw !== 'object') return { error: 'payload must be an object' };
   const b = raw as Record<string, unknown>;
   if (isHoneypot(b)) return { honeypot: true };
@@ -249,7 +249,7 @@ export function parseSellLot(raw: unknown): Parsed<SellLotPayload> {
   };
 }
 
-export function parseQuote(raw: unknown): Parsed<QuotePayload> {
+function parseQuote(raw: unknown): Parsed<QuotePayload> {
   if (!raw || typeof raw !== 'object') return { error: 'body must be an object' };
   const b = raw as Record<string, unknown>;
   if (isHoneypot(b)) return { honeypot: true };

@@ -90,7 +90,7 @@ export function chatMergeMessages(
 }
 
 /** A stand-in row for a reply the server has not stored yet. Its id is negative so it can never match a real one. */
-export function chatPendingRow(p: ChatPendingReply): ChatRow {
+function chatPendingRow(p: ChatPendingReply): ChatRow {
   return {
     previews: p.previews,
     id: -p.key, seq: null, direction: 'out', source: 'erp', body: p.body, images: [], media: [],

@@ -35,7 +35,7 @@ const INLINE_LOGO_BYTES = 30_000;
 const IMAP_TIMEOUT_MS = 15_000;
 const BACKFILL_DAYS = 30;
 
-export type MailboxStatus = { uidValidity: bigint | number | string; uidNext: number };
+type MailboxStatus = { uidValidity: bigint | number | string; uidNext: number };
 
 // The slice of an IMAP session the tick needs; tests drive it with a fake.
 export interface InboxClient {
@@ -51,7 +51,7 @@ export interface InboxClient {
 }
 
 // Unfolded header lines by lowercased name, in message order.
-export function parseHeaderBlock(raw: Buffer | string | undefined): Map<string, string[]> {
+function parseHeaderBlock(raw: Buffer | string | undefined): Map<string, string[]> {
   const out = new Map<string, string[]>();
   if (!raw) return out;
   const unfolded = String(raw).replace(/\r?\n[ \t]+/g, ' ');
@@ -144,13 +144,13 @@ export function imapClient(cfg: MailConfig): InboxClient & { abort(): void } {
   };
 }
 
-export type ParsedInbound = { body: string; attachmentNames: string[] };
+type ParsedInbound = { body: string; attachmentNames: string[] };
 
 // Postgres text can't hold NUL, and a lone surrogate fails UTF-8 encoding;
 // either would make the INSERT throw on every retry.
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
-export function pgText(s: string): string {
+function pgText(s: string): string {
   return s.replace(/\u0000/g, '').replace(LONE_SURROGATE, '\uFFFD');
 }
 
@@ -163,7 +163,7 @@ function htmlBody(html: string): string {
   }
 }
 
-export async function parseInbound(raw: Buffer | string): Promise<ParsedInbound> {
+async function parseInbound(raw: Buffer | string): Promise<ParsedInbound> {
   const parsed = await simpleParser(raw, { skipImageLinks: true, skipTextToHtml: true, skipTextLinks: true });
   // mailparser derives `text` from HTML only when the whole message is HTML;
   // inside multipart/related (Outlook, Apple Mail with a logo) it leaves it

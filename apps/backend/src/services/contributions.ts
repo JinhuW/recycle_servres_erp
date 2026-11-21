@@ -20,12 +20,12 @@ import type { Role } from '../types';
 
 type Frag = postgres.Fragment;
 
-export type ContribRow = { id: string | null; name: string | null; amount: number; count: number };
+type ContribRow = { id: string | null; name: string | null; amount: number; count: number };
 // Every contributor, largest first; the card scrolls rather than folding a
 // tail, so nothing is aggregated away here.
-export type ContribRows = { rows: ContribRow[] };
-export type ContribMetric = 'cost' | 'revenue' | 'profit';
-export type ContribDim = 'supplier' | 'purchaser' | 'customer' | 'category';
+type ContribRows = { rows: ContribRow[] };
+type ContribMetric = 'cost' | 'revenue' | 'profit';
+type ContribDim = 'supplier' | 'purchaser' | 'customer' | 'category';
 export type Contributions = Record<ContribMetric, {
   total: number;
   count: number;

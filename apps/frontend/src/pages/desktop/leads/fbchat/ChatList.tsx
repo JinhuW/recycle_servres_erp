@@ -17,7 +17,7 @@ const FILTER_KEY: Record<FbChatThreadFilter, string> = {
 };
 
 /** A clock time today, a weekday this week, a date before that. */
-export function chatWhen(iso: string, nowMs: number, locale: string): string {
+function chatWhen(iso: string, nowMs: number, locale: string): string {
   const ago = chatDaysAgo(iso, nowMs);
   const d = new Date(iso);
   if (ago <= 0) return d.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });

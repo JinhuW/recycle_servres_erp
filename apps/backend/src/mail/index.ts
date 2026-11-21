@@ -36,7 +36,7 @@ export type MailConfig = {
 
 const STUB_ADDRESS = 'replies@example.test';
 
-export function parseAllowTo(raw: string | undefined): string[] | null {
+function parseAllowTo(raw: string | undefined): string[] | null {
   const entries = (raw ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
   return entries.length > 0 ? entries : null;
 }

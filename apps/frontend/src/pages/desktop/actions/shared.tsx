@@ -7,13 +7,13 @@ import { hrefFor, onLinkClick } from '../../../lib/route';
 
 export const actionToday = () => todayIn(REPORTING_TZ);
 
-export function initials(name: string): string {
+function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase() || '?';
 }
 
 /** A business day, read as the calendar date it names (never shifted by a time zone). */
-export function fmtDay(iso: string, locale: string): string {
+function fmtDay(iso: string, locale: string): string {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(locale, { month: 'short', day: 'numeric' });
 }
@@ -42,7 +42,7 @@ export function DueChip({ item, today }: { item: Pick<ActionItem, 'status' | 'du
   );
 }
 
-export function linkStatusText(link: ActionLink, t: (k: string) => string): string | null {
+function linkStatusText(link: ActionLink, t: (k: string) => string): string | null {
   if (link.status === undefined) return null;
   return link.type === 'po' ? poStageName(link.status, t) : link.status.replace(/_/g, ' ');
 }

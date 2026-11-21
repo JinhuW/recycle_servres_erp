@@ -31,10 +31,10 @@ export const FLEET_ROW_KINDS: readonly FleetRowKind[] = ['healthy', 'free', 'par
 const OFFLINE_KEPT_MS = 7 * 24 * 60 * 60_000;
 
 // The host every coordinator worker runs on; its fleet has one machine.
-export const COORDINATOR_HOST = 'homelab';
+const COORDINATOR_HOST = 'homelab';
 
 /** What the worker is doing now, as far as its source says. */
-export type FleetRowNow = { city: string; cityName: string | null; item: string; since: string | null; home: boolean };
+type FleetRowNow = { city: string; cityName: string | null; item: string; since: string | null; home: boolean };
 
 export type FleetRow = {
   key: string;

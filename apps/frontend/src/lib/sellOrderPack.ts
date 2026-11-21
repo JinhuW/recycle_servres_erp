@@ -127,7 +127,7 @@ export function packProducts<L extends PackLine>(rows: readonly PackRowView<L>[]
 }
 
 // `mixed`: some lot is packed or lowered, and not all are packed.
-export type ProductState = 'zero' | 'open' | 'mixed' | 'done';
+type ProductState = 'zero' | 'open' | 'mixed' | 'done';
 export type ProductSummary = {
   state: ProductState; counted: number; qty: number;
   // A lot counted below its qty, and a lot counted to 0 — packed or not.

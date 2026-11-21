@@ -14,7 +14,7 @@ export interface NavLeaf {
 
 // A second level: the children show only while one of them is the page, and
 // the parent itself links to its first child the viewer can see.
-export interface NavParent {
+interface NavParent {
   tKey: string;
   icon: IconName;
   children: readonly NavLeaf[];

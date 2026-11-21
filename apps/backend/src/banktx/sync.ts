@@ -38,7 +38,7 @@ const PAIR_REACH_DAYS = 120;
 // 65535-parameter ceiling, and small enough to keep one statement's plan cheap.
 const UPSERT_CHUNK = 500;
 
-export type SyncCounts = {
+type SyncCounts = {
   inserted: number;
   updated: number;
   paired: number;

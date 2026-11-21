@@ -19,7 +19,7 @@ type Facetable = {
   paidBy?: { id: string; name: string } | null;
 };
 
-export function warehouseKey(o: Facetable): string {
+function warehouseKey(o: Facetable): string {
   return o.warehouse?.id ?? NO_WAREHOUSE;
 }
 

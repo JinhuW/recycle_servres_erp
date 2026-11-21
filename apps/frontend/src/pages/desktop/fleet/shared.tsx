@@ -10,7 +10,7 @@ import type { FleetRow } from './fleetRows';
 
 // ─── Shared by the fleet tabs ─────────────────────────────────────────────────
 
-export const FLEET_POLL_MS = 10_000;
+const FLEET_POLL_MS = 10_000;
 // The coordinator's answers are seconds to build and change slowly; the ERP's
 // own tables stay on the 10 s clock.
 export const COORDINATOR_POLL_MS = 30_000;

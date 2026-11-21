@@ -43,7 +43,7 @@ const TICKET_TIMEOUT_MS = 10_000;
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 // Each socket streams a remote screen; a handful of managers watching at once
 // is the real ceiling, and anything past this is a client stuck reconnecting.
-export const MAX_BRIDGES = 8;
+const MAX_BRIDGES = 8;
 // Bytes queued for a slow browser before the bridge gives up on it rather than
 // buffering a framebuffer stream without bound.
 const MAX_BUFFERED = 16 * 1024 * 1024;

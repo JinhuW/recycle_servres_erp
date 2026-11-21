@@ -123,7 +123,7 @@ function toReviewLine(r: LineRow): ReviewLine {
 }
 
 /** What the review read, so a write can tell the lines moved under it. */
-export function linesHash(rows: readonly ReviewLine[]): string {
+function linesHash(rows: readonly ReviewLine[]): string {
   return createHash('sha256').update(JSON.stringify(rows)).digest('hex');
 }
 
@@ -214,7 +214,7 @@ function textFields(raw: Record<string, unknown> | null): Record<string, string>
  * such correction and offer to undo it. Only the part number is taken — the
  * blanks reconcile fills come from the decode, not the label.
  */
-export function labelAsRead(category: string, fields: Record<string, string>): Record<string, string> {
+function labelAsRead(category: string, fields: Record<string, string>): Record<string, string> {
   if (category !== 'RAM') return fields;
   const to = reconcileRamScan(fields).check?.partCorrected?.to;
   return to ? { ...fields, partNumber: to } : fields;
@@ -289,7 +289,7 @@ const SEVERITY_RANK = { error: 0, warn: 1, info: 2 } as const;
 /** Runs a claimed review to completion: findings written, event logged, manager told. */
 type ClaimedReview = { id: string; order_id: string; attempts: number };
 
-export async function runPoAiReview(
+async function runPoAiReview(
   sql: Sql<{}>, env: Env, review: ClaimedReview,
 ): Promise<void> {
   const setting = await poAiReviewSetting(sql);
@@ -394,7 +394,7 @@ const MAX_ATTEMPTS = 3;
 const MAX_PER_TICK = 5;
 
 /** Takes the oldest waiting review, or one whose runner died. */
-export async function claimPoAiReview(sql: SqlLike): Promise<ClaimedReview | null> {
+async function claimPoAiReview(sql: SqlLike): Promise<ClaimedReview | null> {
   await sql`
     UPDATE po_ai_reviews SET status = 'failed', finished_at = NOW(),
            error = 'gave up after ' || attempts || ' attempts'

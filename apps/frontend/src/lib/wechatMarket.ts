@@ -64,7 +64,7 @@ const BRAND_ORDER = ['三星', '海力士', '镁光', '长鑫'];
 // A quote can be unbranded as null or as 未注明; both are the same group.
 const brandOf = (r: WechatRow): string => r.brand ?? UNBRANDED;
 
-export function brandRank(brand: string | null): number {
+function brandRank(brand: string | null): number {
   if (!brand || brand === UNBRANDED) return 99;
   const i = BRAND_ORDER.indexOf(brand);
   return i >= 0 ? i : 50;
@@ -101,7 +101,7 @@ export const FACETS: Record<WechatRowKind, readonly Facet[]> = {
 export type FacetPicks = Partial<Record<Facet, string[]>>;
 
 /** The values a line files under; a line can list several ranks. */
-export function facetValues(r: WechatRow, f: Facet): string[] {
+function facetValues(r: WechatRow, f: Facet): string[] {
   switch (f) {
     case 'ddr': return r.ddr ? [r.ddr] : [];
     case 'speed': return r.speed === null ? [] : [String(r.speed)];

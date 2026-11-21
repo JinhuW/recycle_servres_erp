@@ -6,7 +6,7 @@ import type { ResolvedMarketValue } from './useMarketLookup';
 // for, and what the purchaser earns once the lines are priced. Pure — the
 // page owns the prices as typed, this decides what they add up to.
 
-export type SellBasis = 'last' | 'avg' | 'internal';
+type SellBasis = 'last' | 'avg' | 'internal';
 export type SellSuggestion = { value: number; basis: SellBasis };
 
 // The figure MarketAssist offers as "Suggested sell", in the same order: a
@@ -21,7 +21,7 @@ export function suggestedSell(m: ResolvedMarketValue | null | undefined): SellSu
   return null;
 }
 
-export type PricedLine = { id: string; qty: number; unitCost: number; sellPrice: number | null };
+type PricedLine = { id: string; qty: number; unitCost: number; sellPrice: number | null };
 
 export type ReviewMoneyInput = {
   lines: readonly PricedLine[];
@@ -114,7 +114,7 @@ export type SheetCell = {
   listedPrice?: number;
 };
 
-export type SheetLineMatch =
+type SheetLineMatch =
   | { lineId: string; status: 'matched'; cell: SheetCell }
   | { lineId: string; status: 'not-in-sheet' }
   | { lineId: string; status: 'no-part' }

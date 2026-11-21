@@ -82,7 +82,7 @@ export const firstLoginHeld = (sql: SqlLike) => sql`EXISTS (
  * after a URL edit until the next round. A slot on an unlisted proxy has no
  * checks to wait for, so it isn't held to this.
  */
-export const exitUnknown = (sql: SqlLike) => sql`(
+const exitUnknown = (sql: SqlLike) => sql`(
   s.proxy_id IS NOT NULL
   AND (s.device->>'browser_engine' IS NOT DISTINCT FROM 'cloak' OR EXISTS (
     SELECT 1 FROM fleet_pilot_enrollments e

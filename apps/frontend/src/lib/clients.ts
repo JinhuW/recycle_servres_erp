@@ -8,10 +8,10 @@
 export type Tier = 'A' | 'B' | 'C';
 export type Health = 'new' | 'ok' | 'quiet' | 'lost';
 export type DueState = 'overdue' | 'today' | 'soon' | 'later' | 'none';
-export type Standing = 'prospect' | 'active' | 'archived';
+type Standing = 'prospect' | 'active' | 'archived';
 export type ContactKind = 'call' | 'text' | 'visit' | 'offer' | 'note';
 
-export type ClientAddress = {
+type ClientAddress = {
   street1: string | null; street2: string | null; city: string | null;
   state: string | null; zip: string | null; country: string | null;
 };
@@ -39,7 +39,7 @@ export type Client = {
   createdAt: string;
 };
 
-export type ClientNote = {
+type ClientNote = {
   id: string; kind: ContactKind | 'owner_changed'; body: string;
   created_at: string; author: string | null;
 };

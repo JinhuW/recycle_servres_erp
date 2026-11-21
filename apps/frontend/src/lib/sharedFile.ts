@@ -3,7 +3,7 @@
 // page claims it, stores it here as a data URL and opens `/submit`, which takes
 // it into the capture session for the next new product's camera. One reader,
 // once: a photo shared yesterday must not surface in today's capture.
-export const SHARED_FILE_KEY = 'pwa:sharedFile';
+const SHARED_FILE_KEY = 'pwa:sharedFile';
 
 // False when the browser refused it (quota, storage off), so the landing can
 // say the photo was lost instead of opening an empty capture in silence.

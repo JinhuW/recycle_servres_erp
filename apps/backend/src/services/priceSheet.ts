@@ -275,7 +275,7 @@ export function readPriceSheetRows(wb: ExcelJS.Workbook, opts: ReadOptions = {})
 // an unmarked price is in. The file is parsed and dropped, never stored, so
 // its cap is its own rather than the attachment limits in getUploadLimits. A
 // refusal comes back as the status and body the route answers with.
-export const PRICE_SHEET_MAX_BYTES = 8 * 1024 * 1024;
+const PRICE_SHEET_MAX_BYTES = 8 * 1024 * 1024;
 
 export type PriceSheetUpload =
   | { ok: true; rows: SheetPriceRow[]; listCurrency: SupportedCurrency }

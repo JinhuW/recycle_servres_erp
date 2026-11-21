@@ -10,7 +10,7 @@ import { leaseLive } from './fleetBoard';
 // all of it again; these only keep a manager from asking for a refusal.
 
 /** The ERP's pool holder for an account put in the fleet and not yet claimed (fleet/workers.ts). */
-export const FLEET_HOLDER = 'ERP fleet';
+const FLEET_HOLDER = 'ERP fleet';
 
 export type FleetRowAction =
   | { kind: 'add' }
@@ -61,8 +61,8 @@ export function proxyChoices(
 
 // Fixed, unlike max_accounts_per_proxy: they say an exit IP looks crowded
 // whatever the limit is set to, and homelab ports have no limit at all.
-export const PROXY_CROWD_WARN_AT = 5;
-export const PROXY_CROWD_OVER_ABOVE = 10;
+const PROXY_CROWD_WARN_AT = 5;
+const PROXY_CROWD_OVER_ABOVE = 10;
 
 /** How crowded an exit IP is with `n` accounts on it: null, yellow from 5, red above 10. */
 export function proxyCrowding(n: number): 'warn' | 'over' | null {

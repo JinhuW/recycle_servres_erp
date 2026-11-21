@@ -20,7 +20,7 @@ export const RAM_PART_LABEL_KEY: Readonly<Record<RamPartField, string>> = {
 };
 
 /** One-line summary in the order a label prints it: `Samsung 16GB DDR4 · Server · RDIMM · 1Rx4 · 2400`. */
-export function ramPartSummary(spec: RamPartSpec): string {
+function ramPartSummary(spec: RamPartSpec): string {
   const head = [spec.brand, spec.capacity, spec.generation].filter(Boolean).join(' ');
   const tail = [spec.type, spec.classification, spec.rank, spec.speed].filter(Boolean);
   return [head, ...tail].filter(Boolean).join(' · ');

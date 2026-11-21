@@ -20,7 +20,7 @@ const TIMEOUT_MS = 10_000;
 
 const rlog = log.child({ module: 'ai-models' });
 
-export interface AiModel {
+interface AiModel {
   id: string;
   name: string;
   contextLength: number | null;

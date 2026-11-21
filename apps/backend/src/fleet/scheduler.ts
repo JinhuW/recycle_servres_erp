@@ -21,10 +21,10 @@ import { searchRanToEnd } from './sql';
 export const NOTIFY_CHANNEL = 'fleet_tasks';
 const TICK_MS = 30_000;
 const FIRST_RUN_MS = 5_000;
-export const PROBE_PRIORITY = 10;
+const PROBE_PRIORITY = 10;
 const VERIFY_BACKOFF_BASE = '15 minutes';
 const VERIFY_BACKOFF_MAX = '6 hours';
-export const PURGE_BATCH = 5000;
+const PURGE_BATCH = 5000;
 const PURGE_EVERY_MS = 3_600_000;
 const PURGE_LOCK = 'fleet:purge';
 // How far back another account's cards count as proof a city has listings.

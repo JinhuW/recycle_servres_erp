@@ -27,11 +27,11 @@ const hosts = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 const HOST_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const IMAGE_REF = /^[a-z0-9][a-z0-9._\/-]*(:[A-Za-z0-9._-]{1,128})?(@sha256:[0-9a-f]{64})?$/;
-export const FIRST_VNC_PORT = 5901;
+const FIRST_VNC_PORT = 5901;
 // An agent reports every 30 s; a host silent this long is not rolled.
-export const HOST_LIVE_MS = 2 * 60_000;
+const HOST_LIVE_MS = 2 * 60_000;
 // How long a replaced worker has to come back on the new version.
-export const GATE_TIMEOUT_MS = 20 * 60_000;
+const GATE_TIMEOUT_MS = 20 * 60_000;
 // A heartbeat this recent means the worker was up when its replacement began.
 const FRESH_HEARTBEAT_MS = 15 * 60_000;
 const MAX_REPORT_BYTES = 200_000;
@@ -421,7 +421,7 @@ export const releases = new Hono<ManagerEnv>().post('/', managerOnly, async (c) 
 // through as it always was.
 
 const AGENT_INSTANCE = /^[A-Za-z0-9._:-]{1,128}$/;
-export const AGENT_CONFLICT = 'agent_conflict';
+const AGENT_CONFLICT = 'agent_conflict';
 
 type AgentIdentity = { instance_id: string; daemon_id: string | null };
 

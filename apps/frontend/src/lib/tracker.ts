@@ -8,7 +8,7 @@ import { api } from './api';
 
 export type TrackerWorkerRole = 'worker' | 'api';
 export type LoopName = 'poll' | 'evaluate' | 'notify';
-export type LoopStatus = { lastSuccessAt: string | null; lastWorkAt: string | null };
+type LoopStatus = { lastSuccessAt: string | null; lastWorkAt: string | null };
 
 export type TrackerWorker = {
   workerId: string;
@@ -185,7 +185,7 @@ export function workerHaystack(w: TrackerWorker, roleLabel: string): string {
 }
 
 /** An OpenRouter model id, `provider/model`; the tracker checks the same shape. */
-export const MODEL_ID = /^[\w.-]+\/[\w.:-]+$/;
+const MODEL_ID = /^[\w.-]+\/[\w.:-]+$/;
 
 /**
  * The catalogue entries the evaluator can run on. MODEL_ID also drops

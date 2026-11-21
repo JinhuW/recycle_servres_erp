@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-export type SortDir = 'asc' | 'desc' | null;
+type SortDir = 'asc' | 'desc' | null;
 export type SortState = { col: string; dir: SortDir };
 
 /** A header click: desc, then asc, then the table's own order. */

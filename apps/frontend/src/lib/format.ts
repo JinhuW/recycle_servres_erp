@@ -47,7 +47,7 @@ export const fmtMoney = (
   return signed(n, sym ?? `${currency} `, fmt(Math.abs(n), locale));
 };
 
-export const fmtMoney0 = (
+const fmtMoney0 = (
   n: number | null | undefined,
   currency: string,
   locale = 'en-US',

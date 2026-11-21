@@ -7,8 +7,8 @@ import type { TakeoverAnswer } from './poPermissions';
 // Pure — the page owns the state, this decides what it means. (One exception,
 // the entry's takeover answer, which has to outlive the page.)
 
-export const BOX_CHECK_REASONS = ['missing', 'short', 'wrong_part', 'damaged', 'not_as_described'] as const;
-export type BoxCheckReason = typeof BOX_CHECK_REASONS[number];
+const BOX_CHECK_REASONS = ['missing', 'short', 'wrong_part', 'damaged', 'not_as_described'] as const;
+type BoxCheckReason = typeof BOX_CHECK_REASONS[number];
 
 // Flags were retired for editing the line itself; the server still stores
 // them, and every write from the page clears one left over from before.
@@ -19,7 +19,7 @@ export type LineCheck = {
   flagNote?: string | null;
   checkedAt: string | null;
 };
-export type CheckExtra = {
+type CheckExtra = {
   id: string; partNumber: string; note: string | null; createdAt: string; sentAt?: string | null;
 };
 export type ChecksResponse = { lines: LineCheck[]; extras: CheckExtra[] };
@@ -245,7 +245,7 @@ export function checkBody(c: LineCheck, qty: number) {
   };
 }
 
-export function boxCheckReasonKey(r: BoxCheckReason | string): string {
+function boxCheckReasonKey(r: BoxCheckReason | string): string {
   switch (r) {
     case 'missing': return 'bcReasonMissing';
     case 'short': return 'bcReasonShort';

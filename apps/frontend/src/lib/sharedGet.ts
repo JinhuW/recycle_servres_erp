@@ -8,7 +8,7 @@ import { api } from './api';
 // Long enough to cover callers that start in the same render or on the same
 // poll tick, short enough that a poll never reads an answer from its own
 // previous tick.
-export const SHARED_GET_MS = 2_000;
+const SHARED_GET_MS = 2_000;
 
 type Entry = { promise: Promise<unknown>; settledAt: number | null };
 

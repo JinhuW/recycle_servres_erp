@@ -163,7 +163,7 @@ function summarise(checks: HistoryRow[], latest: HistoryRow | undefined, now: nu
   };
 }
 
-export async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAnswer> {
+async function proxyHealthView(sql: SqlLike): Promise<FleetProxyHealthAnswer> {
   const [[round], proxies, history, latest] = await Promise.all([
     // The database's clock, which stamped every check, places them in buckets.
     // A missing round row reads as no round yet.

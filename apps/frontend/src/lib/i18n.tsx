@@ -6041,7 +6041,7 @@ const Ctx = createContext<LangCtx>({
 // sheet writes it). It used to be read only by that sheet: the app booted
 // into the profile language regardless and never noticed the device changing
 // its language.
-export const LANG_FOLLOW_SYSTEM_KEY = 'rs.langFollowSystem';
+const LANG_FOLLOW_SYSTEM_KEY = 'rs.langFollowSystem';
 
 export function systemLang(): Lang {
   if (typeof navigator === 'undefined') return 'en';

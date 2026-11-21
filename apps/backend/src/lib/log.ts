@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface LogFields {
   [key: string]: unknown;

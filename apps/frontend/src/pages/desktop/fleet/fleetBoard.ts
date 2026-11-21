@@ -16,7 +16,6 @@ export type Translate = (key: string, vars?: Record<string, string | number>) =>
 // The clocks the fleet pages show, and the days the Analysis tab counts: the
 // office's. Workers keep UTC, and a time in the browser's own zone would read
 // differently on every manager's laptop.
-export { FLEET_TZ };
 
 export function easternClock(at: string | null | undefined, locale: string, now: number = Date.now()): string {
   if (!at) return '';
@@ -79,17 +78,17 @@ export function dueLabel(t: Translate, dueAt: string | null | undefined, now: nu
 // slug check or a quarantine probe is not a city-item.
 
 export const BELT_WINDOW_H = 12;
-export const BELT_BUCKET_MIN = 15;
+const BELT_BUCKET_MIN = 15;
 // A city-item takes four to seven browser minutes; what the sentence assumes
 // until today's finished tasks say otherwise.
-export const DEFAULT_TASK_SECONDS = 360;
+const DEFAULT_TASK_SECONDS = 360;
 
 const HOUR = 3_600_000;
 const BUCKET_MS = BELT_BUCKET_MIN * 60_000;
 
-export type BeltMarkKind = 'done' | 'leased' | 'later' | 'soon';
+type BeltMarkKind = 'done' | 'leased' | 'later' | 'soon';
 export type BeltMark = { key: string; kind: BeltMarkKind; left: number; tasks: FleetTask[] };
-export type BeltCounts = { done: number; leased: number; due: number; later: number };
+type BeltCounts = { done: number; leased: number; due: number; later: number };
 export type BeltRow = { item: string; marks: BeltMark[]; due: FleetTask[]; counts: BeltCounts };
 
 /** Where an instant sits on the belt, as a percentage of its width. */
@@ -559,7 +558,7 @@ export function funnelHeadline(counts: FunnelCounts): FunnelHeadline | null {
   };
 }
 
-export type DayPoint = { day: string; value: number; today: boolean };
+type DayPoint = { day: string; value: number; today: boolean };
 export type DaySeries = { points: DayPoint[]; total: number; fullDayAverage: number; max: number };
 
 /** One value per office day for the last `n` days ending today, gaps as zero. */

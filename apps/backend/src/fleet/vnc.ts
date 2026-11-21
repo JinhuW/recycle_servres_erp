@@ -45,15 +45,15 @@ import { VNC_WORKER_ID } from '../routes/coordinator';
 const WORKER_PATH = '/api/fleet/worker/vnc';
 const VIEWER_PATH = /^\/api\/fleet\/vnc\/([^/?#]+)\/ws$/;
 // A worker parks one socket; a fleet of forty is the real ceiling.
-export const MAX_PARKED = 100;
-export const MAX_FLEET_BRIDGES = 8;
+const MAX_PARKED = 100;
+const MAX_FLEET_BRIDGES = 8;
 const MAX_BUFFERED = 16 * 1024 * 1024;
 const REVALIDATE_MS = 60_000;
 const TERMINATE_GRACE_MS = 2_000;
-export const FLEET_VNC_SESSION_LAPSED = 4401;
+const FLEET_VNC_SESSION_LAPSED = 4401;
 // The worker's token no longer names the slot's epoch: exit, let the agent claim.
 export const FLEET_VNC_STALE_EPOCH = 4409;
-export const VIEWER_FRAME = 'viewer';
+const VIEWER_FRAME = 'viewer';
 const RELAY_LOCK = 'fleet-vnc-relay';
 const RELAY_RETRY_MS = 5_000;
 // Past one retry, and under the 10 s open_timeout in rs_worker/vnc_relay.py.

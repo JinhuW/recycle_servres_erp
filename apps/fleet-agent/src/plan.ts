@@ -30,9 +30,9 @@
 
 import type { Desired, Hold } from './types.js';
 
-export const CONTAINER_PREFIX = 'rs-fleet-';
+const CONTAINER_PREFIX = 'rs-fleet-';
 export const DEFAULT_STAGGER_MS = 3 * 60_000;
-export const CRASH_WINDOW_MS = 30 * 60_000;
+const CRASH_WINDOW_MS = 30 * 60_000;
 export const CRASH_LIMIT = 5;
 // Exit 75 is not a crash, but a worker fenced again and again logs in again
 // and again: past this many 75/70 restarts in the window it waits longer.
@@ -40,24 +40,24 @@ export const SOFT_LIMIT = 5;
 export const SOFT_BACKOFF_MS = 10 * 60_000;
 
 // Worker exit codes the image contract defines and what the agent owes each.
-export const EXIT_NORMAL = 0;
+const EXIT_NORMAL = 0;
 // `docker stop` on a worker that did not trap SIGTERM.
-export const EXIT_SIGTERM = 143;
-export const EXIT_STALE_OR_NO_SLOT = 75;
-export const EXIT_CLAIM_FAILED = 70;
+const EXIT_SIGTERM = 143;
+const EXIT_STALE_OR_NO_SLOT = 75;
+const EXIT_CLAIM_FAILED = 70;
 // The worker could not reach Facebook or its proxy and stopped on purpose. A
 // retry is another login against the same wall, so only a person starts it
 // again (`docker start`, or `docker rm` to let the agent run a fresh one).
-export const EXIT_OPERATOR_NEEDED = 78;
+const EXIT_OPERATOR_NEEDED = 78;
 // The browser's licence server could not be reached. Not the worker's fault and
 // not a crash, but a retry during a long outage can still be a boot login.
 export const EXIT_LICENSE_OUTAGE = 74;
-export const OUTAGE_BACKOFF_BASE_MS = 5 * 60_000;
-export const OUTAGE_BACKOFF_CAP_MS = 60 * 60_000;
+const OUTAGE_BACKOFF_BASE_MS = 5 * 60_000;
+const OUTAGE_BACKOFF_CAP_MS = 60 * 60_000;
 /** How long a probe stays up before the outage counts as over. */
 export const OUTAGE_RECOVERED_MS = 15 * 60_000;
 // On top of the cap too: capped retries are the ones an outage lines up.
-export const OUTAGE_JITTER = 0.25;
+const OUTAGE_JITTER = 0.25;
 const RESTART_DELAY_MS: Record<number, number> = {
   [EXIT_STALE_OR_NO_SLOT]: 60_000,
   [EXIT_CLAIM_FAILED]: 10 * 60_000,
@@ -148,7 +148,7 @@ export function containerName(workerId: string): string {
   return CONTAINER_PREFIX + workerId;
 }
 
-export function workerId(hostId: string, n: number): string {
+function workerId(hostId: string, n: number): string {
   return `${hostId}-${n}`;
 }
 
@@ -161,13 +161,13 @@ export function workerIndex(hostId: string, id: string): number | null {
   return Number(rest);
 }
 
-export function vncPort(desired: Desired, id: string, n: number): number {
+function vncPort(desired: Desired, id: string, n: number): number {
   // The ERP maps ports for the workers it knows; a worker it has not seen yet
   // gets the conventional one until it does.
   return desired.vnc_ports[id] ?? 5900 + n;
 }
 
-export function restartDelayMs(exitCode: number | null): number {
+function restartDelayMs(exitCode: number | null): number {
   return exitCode !== null && RESTART_DELAY_MS[exitCode] !== undefined
     ? RESTART_DELAY_MS[exitCode]
     : RESTART_DELAY_OTHER_MS;

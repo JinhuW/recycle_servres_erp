@@ -11,7 +11,7 @@ import { canonicalPartNumber } from './format';
 // this one offers the spellings already on record, useMarketLookup prices the
 // one that ends up in the box.
 
-export type PartSuggestion = {
+type PartSuggestion = {
   partNumber: string;
   label: string | null;
   category: string | null;

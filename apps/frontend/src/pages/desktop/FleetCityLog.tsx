@@ -143,7 +143,7 @@ function VisitSteps({ visit, locale }: { visit: CityVisit; locale: string }) {
 }
 
 /** One row a city, and its steps under it. */
-export function CityLogTable({ visits }: { visits: CityVisit[] }) {
+function CityLogTable({ visits }: { visits: CityVisit[] }) {
   const { t, locale } = useT();
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = (row: string) => setOpen(prev => {

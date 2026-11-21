@@ -17,7 +17,7 @@ export type AccountLiveness = 'live' | 'stale' | 'dead' | 'unknown' | 'none';
 // 'unknown' = it has a row but the worker has never heartbeated.
 export const liveness = (w: FleetAccount): AccountLiveness => w.health?.liveness ?? 'none';
 
-export const needsAttention = (w: FleetAccount): boolean => Boolean(w.health?.needs_attention);
+const needsAttention = (w: FleetAccount): boolean => Boolean(w.health?.needs_attention);
 
 // A retired worker's row stays in the coordinator for its history, but it
 // runs nothing, so lists and counts leave it out; its own page still opens.
@@ -183,7 +183,7 @@ export const parkedWorkers = (challenges: readonly Challenge[] | null): Set<stri
 // serves: each worker's latest search, listing and session backup, and every
 // open checkpoint. Without the log, a dead worker's last heartbeat stands in
 // for the moment it went offline.
-export type FleetEventKind =
+type FleetEventKind =
   | 'search' | 'listing' | 'backup' | 'silent' | 'checkpoint'
   | 'stale' | 'offline' | 'back' | 'first' | 'attention' | 'healthy';
 // `status` is the bucket a status change moved the worker into, which its dot

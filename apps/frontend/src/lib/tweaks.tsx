@@ -3,12 +3,12 @@ import { useAuth } from './auth';
 import { usePreference } from './preferences';
 import type { User } from './types';
 
-export type Density = 'comfortable' | 'compact';
+type Density = 'comfortable' | 'compact';
 export type RolePreview = 'actual' | 'as_purchaser';
 
 export type EffectiveUser = (User & { previewing?: boolean }) | null;
 
-export type Tweaks = {
+type Tweaks = {
   density: Density;
   rolePreview: RolePreview;
 };

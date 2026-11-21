@@ -10,14 +10,14 @@ import { hostname } from 'node:os';
 import { containerName, type Container } from './plan.js';
 import { isDigestRef } from './types.js';
 
-export const LABEL_HOST = 'rs.fleet.host';
-export const LABEL_WORKER = 'rs.fleet.worker';
-export const LABEL_HANDOFF = 'rs.fleet.handoff_epoch';
+const LABEL_HOST = 'rs.fleet.host';
+const LABEL_WORKER = 'rs.fleet.worker';
+const LABEL_HANDOFF = 'rs.fleet.handoff_epoch';
 /** Created with a claim ticket: `docker start` would claim with a spent one. */
-export const LABEL_TICKET = 'rs.fleet.claim_ticket';
+const LABEL_TICKET = 'rs.fleet.claim_ticket';
 
 // The worker saves its session on SIGTERM; give it the time.
-export const STOP_TIMEOUT_S = 30;
+const STOP_TIMEOUT_S = 30;
 
 /** What every worker on this host is told. The host token is not among it. */
 export interface WorkerEnv {

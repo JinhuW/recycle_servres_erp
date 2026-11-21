@@ -6,7 +6,6 @@ import type { LinePhoto } from './linePhotos';
 import type { PackageSource } from './packageSource';
 import type { TrackedPackage } from './packages';
 import type { RamScanCheck } from '@recycle-erp/shared';
-export type { LinePhoto };
 
 export type Role = 'manager' | 'purchaser';
 export type Lang = 'en' | 'zh';
@@ -224,7 +223,7 @@ export type OrderSummary = {
 
 // Per-status evidence (note + attachments) — only the detail endpoint
 // returns it, and currently only for 'Done'.
-export type OrderStatusMeta = Record<string, {
+type OrderStatusMeta = Record<string, {
   note: string | null;
   when: string;
   attachments: {
@@ -273,7 +272,7 @@ export type RevertLineSnapshot = {
   unitCost: number;
 };
 
-export type RevertChangeSet = {
+type RevertChangeSet = {
   from: string;
   to: string;
   fields: OrderEventChange[];
@@ -291,7 +290,7 @@ export type PendingRevert = {
   detail: RevertChangeSet;
 };
 
-export type OrderEventKind =
+type OrderEventKind =
   | 'created'
   | 'submitted'
   | 'advanced'
@@ -322,7 +321,7 @@ export type OrderEvent = {
   createdAt: string;
 };
 
-export type SellOrderEventKind =
+type SellOrderEventKind =
   | 'created'
   | 'status_changed'
   | 'line_added'
@@ -458,16 +457,16 @@ export type Notification = {
 // a purchaser cannot see the peer figures it would take to sort locally.
 export type LeaderboardSort = 'cost' | 'commission';
 
-import type { Bucket, RangePreset, IsoDate } from '@recycle-erp/shared';
-export type { Bucket, RangePreset, IsoDate };
+import type { Bucket } from '@recycle-erp/shared';
+export type { Bucket };
 
 // Who drove a dashboard figure in the window, one grouping at a time. `rows`
 // is every contributor, largest first — the card scrolls rather than folding
 // a tail. A null id is the unattributed row (a PO with no supplier). Which dimensions come back depends on the lens: a purchaser
 // never receives a purchaser or customer grouping.
 export type ContribDim = 'supplier' | 'purchaser' | 'customer' | 'category';
-export type ContribMetric = 'cost' | 'revenue' | 'profit';
-export type ContribRow = { id: string | null; name: string | null; amount: number; count: number };
+type ContribMetric = 'cost' | 'revenue' | 'profit';
+type ContribRow = { id: string | null; name: string | null; amount: number; count: number };
 export type ContribRows = { rows: ContribRow[] };
 export type ContribMetricData = {
   total: number;

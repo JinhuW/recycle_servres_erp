@@ -62,7 +62,7 @@ export type PartAnswer =
   | { kind: 'keep' };
 
 /** What an answer writes to the line it was asked about. */
-export function partAnswerPatch(answer: PartAnswer, line: RamPartLine): PartQuestionLine {
+function partAnswerPatch(answer: PartAnswer, line: RamPartLine): PartQuestionLine {
   if (answer.kind === 'use') return answer.patch;
   if (answer.kind === 'usePart') return { partNumber: answer.partNumber };
   return { _partKept: partQuestionKey(line) };

@@ -19,13 +19,13 @@ import type { SqlLike } from '../db';
 // abandoned cannot hold the list shut for long.
 
 /** Enrollments one address may make in an hour. */
-export const ENROLL_PER_IP_HOUR = 5;
+const ENROLL_PER_IP_HOUR = 5;
 /** Waiting requests from one address. */
-export const ENROLL_PENDING_PER_IP = 5;
+const ENROLL_PENDING_PER_IP = 5;
 /** Waiting requests the list holds; past this the route answers 429. */
-export const ENROLL_MAX_PENDING = 100;
+const ENROLL_MAX_PENDING = 100;
 /** A pending request not heard from in this long is deleted. */
-export const PENDING_FORGET_HOURS = 1;
+const PENDING_FORGET_HOURS = 1;
 
 // No 0/O, 1/I/L: the code is read off one screen and compared with another.
 const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';

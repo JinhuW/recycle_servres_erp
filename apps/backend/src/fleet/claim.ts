@@ -81,7 +81,7 @@ const NOT_FOUND = { error: 'not_found' } as const;
 
 // Holds past this answer null at once rather than pin another connection; a
 // fleet of forty workers never gets near it.
-export const MAX_HOLDS = 200;
+const MAX_HOLDS = 200;
 // A worker idles this long before asking again when there is nothing due; a
 // budget or quarantine does not clear in seconds.
 const RETRY_NOTHING_DUE = 30;
@@ -195,7 +195,7 @@ export function cookiesFromText(text: string): FleetCookie[] {
 }
 
 /** What the pool row stores once a worker has handed its session back. */
-export function cookieTextFromList(cookies: FleetCookie[]): string {
+function cookieTextFromList(cookies: FleetCookie[]): string {
   return JSON.stringify(cookies);
 }
 
@@ -231,7 +231,7 @@ function parseStorageState(value: unknown): FleetStorageState | null {
 /** Only a worker-saved state (with `origins`) is held to the strict shape; any
  *  other form is a supplier's cookie, and one account's odd paste must not
  *  fail the claim that every free worker would pick it for. */
-export function storageStateFromText(text: string): FleetStorageState {
+function storageStateFromText(text: string): FleetStorageState {
   if (text.trim().startsWith('{')) {
     let value: unknown = null;
     try { value = JSON.parse(text); } catch { /* read as cookies below */ }

@@ -10,11 +10,11 @@ import tls from 'node:tls';
 // lookup then runs over that tunnel. The error is always worded here: a
 // socket's own message can carry the host, and the URL carries the login.
 
-export const LOOKUP_URL = 'https://ipinfo.io/json';
+const LOOKUP_URL = 'https://ipinfo.io/json';
 const TIMEOUT_MS = 10_000;
 const MAX_BODY = 64 * 1024;
 
-export type ProxyExit = { ip: string | null; city: string | null; region: string | null; country: string | null; org: string | null; timezone: string | null };
+type ProxyExit = { ip: string | null; city: string | null; region: string | null; country: string | null; org: string | null; timezone: string | null };
 export type ProbeResult =
   | { ok: true; latency_ms: number; exit: ProxyExit }
   | { ok: false; latency_ms: number; error: string };

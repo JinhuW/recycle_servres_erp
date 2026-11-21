@@ -4,7 +4,7 @@ import { api } from './api';
 import { showErrorDialog } from './errorToast';
 import { useT } from './i18n';
 
-export { isRealPhotoUrl, LINE_PHOTO_CAP };
+export {  LINE_PHOTO_CAP };
 
 // The one photo accessor for an order line. Replaces four near-identical
 // `!u.startsWith('data:image/placeholder')` checks that had drifted across
@@ -94,7 +94,7 @@ export function limitPhotoPick(
 
 export type PendingPhoto = { file: File; url: string };
 
-export type PhotoFlush = { saved: LinePhoto[]; failed: PendingPhoto[] };
+type PhotoFlush = { saved: LinePhoto[]; failed: PendingPhoto[] };
 
 export type LinePhotoBuffer = {
   busy: boolean;

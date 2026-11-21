@@ -81,7 +81,7 @@ export function PhActionsSection({ scope, title }: { scope: Scope; title?: strin
   );
 }
 
-export function PhActionSheet({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
+function PhActionSheet({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
   const { t, locale } = useT();
   const members = useMembers();
   const [item, setItem] = useState<ActionItem | null>(null);

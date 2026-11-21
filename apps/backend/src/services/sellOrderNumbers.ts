@@ -454,7 +454,7 @@ export async function healSellProductNos(tx: SqlLike, soId: string): Promise<voi
 // append_batch so a product added past Draft went after the rest.
 // Kept only to freeze those numbers once (freezeLegacySellNumbers); delete it
 // with append_batch once prod holds no unnumbered line.
-export function legacyNumbers(rows: readonly SheetLineRow[]): Map<string, number> {
+function legacyNumbers(rows: readonly SheetLineRow[]): Map<string, number> {
   const lines = rows.map(foldLine);
   const numbered = byWarehouseTab(lines).map(([, whLines]) =>
     packSections(foldProducts(whLines, byKey)).flatMap((s) => s.rows));

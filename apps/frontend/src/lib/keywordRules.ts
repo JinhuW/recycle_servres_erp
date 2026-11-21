@@ -269,7 +269,7 @@ export function markTerms(
 // ── What a listing would do ──
 
 /** Which entry matched, and which of its terms when it is a group of them. */
-export type RuleHit = { rule: number; term: string | null };
+type RuleHit = { rule: number; term: string | null };
 
 function firstHit(rules: readonly string[], text: string): RuleHit | null {
   for (let i = 0; i < rules.length; i++) {

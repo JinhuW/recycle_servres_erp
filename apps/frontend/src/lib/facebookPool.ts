@@ -363,7 +363,7 @@ export type PoolAccountSummary = {
 };
 
 /** A snapshot row as its summary, for a backend that has no summary route yet. */
-export const poolAccountSummary = (a: PoolAccount): PoolAccountSummary => ({
+const poolAccountSummary = (a: PoolAccount): PoolAccountSummary => ({
   no: a.no, uid: a.uid || null, email: a.email || null, note: a.note, status: a.status, holder: a.holder,
   holderId: a.holderId, since: a.since, addedAt: a.addedAt, cookieAt: a.cookieAt, aliveCheckedAt: a.aliveCheckedAt,
   batch: a.batch || null, hasCookie: !!a.cookie, cookieUid: a.cookie ? cookieUid(a.cookie) : null,

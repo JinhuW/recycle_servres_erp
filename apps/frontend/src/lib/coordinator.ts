@@ -16,7 +16,7 @@ export type WorkerState =
 // rather than re-deriving one from timestamps it sees late. 'unknown' is a
 // worker that has never reported: a deployment that never started, which is
 // a different problem from one that stopped.
-export type WorkerLiveness = 'live' | 'stale' | 'dead' | 'unknown';
+type WorkerLiveness = 'live' | 'stale' | 'dead' | 'unknown';
 
 export type FleetWorker = {
   worker_id: string;
@@ -113,9 +113,9 @@ export type CityTiers = {
   updated_by: string | null;
 };
 
-export type FleetRegion = { key: string; name: string; cities: FleetCity[] };
+type FleetRegion = { key: string; name: string; cities: FleetCity[] };
 
-export type FleetItem = {
+type FleetItem = {
   name: string;
   enabled: boolean;
   search_phrases: string[];
@@ -126,7 +126,7 @@ export type FleetItem = {
   max_price?: number;
 };
 
-export type FleetSearchSettings = Partial<{
+type FleetSearchSettings = Partial<{
   // Sweep times, HH:MM in UTC (the workers' clock). When set they drive the
   // cadence and the intervals do not.
   start_at: string[];
@@ -147,17 +147,17 @@ export type FleetSearchSettings = Partial<{
 // config; 'fleet' a sharded worker from fleet.toml; 'unconfigured' a row the
 // coordinator knows that no config describes.
 // 'config': a worker known only from the config the console writes for it.
-export type FleetAccountSource = 'monitor' | 'fleet' | 'config' | 'unconfigured';
+type FleetAccountSource = 'monitor' | 'fleet' | 'config' | 'unconfigured';
 
 // How a worker's city list relates to master.toml's regions. The phase-1
 // monitor searches a list of its own, so the facade names it by matching
 // city sets ('region' = exactly one region, 'subset', 'all', 'custom').
-export type FleetScope = 'region' | 'subset' | 'all' | 'custom' | 'empty' | 'missing' | 'unknown';
+type FleetScope = 'region' | 'subset' | 'all' | 'custom' | 'empty' | 'missing' | 'unknown';
 
 // The vault's non-secret view of an account: identity, and *which* secrets
 // are stored (never a value). `secrets` is keyed by the coordinator's field
 // names (password, email, email_password, totp_secret, imap_host, imap_port).
-export type VaultAccount = {
+type VaultAccount = {
   account_id: string;
   fb_username: string | null;
   region: string | null;
@@ -169,7 +169,7 @@ export type VaultAccount = {
 
 // Metadata of the worker's backed-up browser session. `fb_user_id` is the
 // session's `c_user` cookie — the public Facebook profile id, not a credential.
-export type SessionMeta = {
+type SessionMeta = {
   account_id: string | null;
   fb_user_id: string | null;
   user_agent: string | null;
@@ -219,7 +219,7 @@ export type FleetAccount = {
 // service through the proxy itself. `url` has any login cut out and is null on
 // the VM's own IP. The exit fields are absent while the lookup is `pending` or
 // after it failed (`error`).
-export type FleetProxy = {
+type FleetProxy = {
   url: string | null;
   ip?: string | null;
   city?: string | null;
@@ -235,7 +235,7 @@ export type CityWrite = { slug: string; name: string; radius: number };
 
 // The daily search budget: every enabled phrase in every city, once per
 // `start_at` time. `per_day` is null for an interval loop or an empty region.
-export type FleetSearchPlan = {
+type FleetSearchPlan = {
   phrases: number;
   cities: number;
   runs_per_day: number | null;
@@ -247,7 +247,7 @@ export type FleetSearchPlan = {
 // monitor that predates the funnel counters. `posts` are listings freshly
 // put to the AI today, `alerts` those it alerted on. `cities` are the slugs
 // it has searched today; null or absent from a coordinator that predates it.
-export type FleetToday = {
+type FleetToday = {
   day: string;
   first_at: string | null;
   last_at: string | null;
@@ -292,9 +292,9 @@ export type FleetDoc = {
 // Where a city stands in today's round, for one item: being searched now
 // (`leased`), on the own list of a live worker outside the queue (`held`),
 // searched today, not due again until `at` (`later`), or due.
-export type QueueCityState = 'leased' | 'held' | 'searched' | 'later' | 'due';
+type QueueCityState = 'leased' | 'held' | 'searched' | 'later' | 'due';
 
-export type FleetQueueCity = {
+type FleetQueueCity = {
   slug: string;
   name: string | null;
   region: string | null;
@@ -306,7 +306,7 @@ export type FleetQueueCity = {
   items: Record<string, { state: QueueCityState; at: string | null; by: string | null }>;
 };
 
-export type QueueItemCounts = {
+type QueueItemCounts = {
   cities: number;
   queue: number;
   searched: number;
@@ -319,7 +319,7 @@ export type QueueItemCounts = {
 // A round a manager started by hand: while `until` is ahead, every enrolled
 // worker's window is open and a city is due once it was not searched in the
 // last `fresh_hours`.
-export type QueueStarted = { at: string; by: string | null; until: string; fresh_hours: number };
+type QueueStarted = { at: string; by: string | null; until: string; fresh_hours: number };
 
 // What starting the round now would do: the workers it wakes, the ones on an
 // older monitor that start at their usual time, and per item how many queue
@@ -350,7 +350,7 @@ export type FleetQueue = {
 // One worker's part in the queue. `capable` is whether its monitor asks the
 // queue at all (0.13.14 or later); an enrolled worker that is not still
 // searches its own list.
-export type FleetQueueWorker = {
+type FleetQueueWorker = {
   worker_id: string;
   enrolled: boolean;
   capable: boolean;
@@ -382,7 +382,7 @@ export type CityStep = {
 // Searching now; no word for half an hour (quiet); or how it ended.
 export type CityVisitOutcome = 'finished' | 'stopped' | 'released' | 'expired' | 'searching' | 'quiet';
 
-export type CityVisitTotals = {
+type CityVisitTotals = {
   searches: number;
   cards: number;
   title_pass: number;

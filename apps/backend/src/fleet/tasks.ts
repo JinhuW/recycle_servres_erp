@@ -21,11 +21,11 @@ import {
 // The list, the city log, a manual "search now" and the round start. The
 // worker's side of a task (lease, done, events) belongs to the claim protocol.
 
-export const MANUAL_PRIORITY = 100;
+const MANUAL_PRIORITY = 100;
 const LIST_LIMIT = 1000;
 // A history read (Analysis: two weeks of done searches) is several thousand
 // rows at the imported catalog's size; the queue itself stays at LIST_LIMIT.
-export const HISTORY_LIMIT = 5000;
+const HISTORY_LIMIT = 5000;
 const DEFAULT_LOG_HOURS = 24;
 const MAX_LOG_HOURS = 720;
 
@@ -54,7 +54,7 @@ export function readTaskFilter(q: Record<string, string | undefined>): TaskFilte
   return f;
 }
 
-export const isQueueRead = (f: TaskFilter): boolean => f.state === 'ready' || f.state === 'leased';
+const isQueueRead = (f: TaskFilter): boolean => f.state === 'ready' || f.state === 'leased';
 
 /**
  * The queue (ready or leased) in the order workers take it: a manager's task
@@ -78,7 +78,7 @@ export async function listTasks(sql: SqlLike, f: TaskFilter): Promise<{ tasks: F
   return { tasks: rows.slice(0, limit).map(taskToWire), truncated: rows.length > limit };
 }
 
-export const MAX_FUNNEL_DAYS = 92;
+const MAX_FUNNEL_DAYS = 92;
 
 export function readFunnelDays(q: Record<string, string | undefined>): number | Refusal {
   if (q.days === undefined) return 14;
@@ -125,7 +125,7 @@ export async function funnelDays(sql: SqlLike, days: number, now: Date = new Dat
     GROUP BY 1 ORDER BY 1`;
 }
 
-export const BRIEF_DAYS = 7;
+const BRIEF_DAYS = 7;
 
 /**
  * An account's last week of searches and its stints, for the Fleet table's

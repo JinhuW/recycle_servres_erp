@@ -12,19 +12,19 @@
 export const SAMPLE_INTERVAL_MS = 250;
 export const STEADY_SAMPLES = 3;
 // Mean absolute per-pixel change between samples.  Sensor noise sits ~1–3.
-export const MAX_MOTION = 5;
-export const REARM_MOTION = 14;
+const MAX_MOTION = 5;
+const REARM_MOTION = 14;
 // Share of pixels with a strong gradient.  Label text is several percent; an
 // empty mat is well under one.
 export const MIN_EDGES = 0.02;
 export const EMPTY_EDGES = 0.008;
-export const EDGE_GRADIENT = 48;
+const EDGE_GRADIENT = 48;
 // See sharpness(): crisp print scores ~1–3, a label a few pixels out of
 // focus falls under 0.5.
 export const MIN_SHARPNESS = 0.55;
 // Autofocus hunts: a frame only counts once it is near the sharpest seen
 // while the scene has been still.
-export const SHARP_PEAK_RATIO = 0.85;
+const SHARP_PEAK_RATIO = 0.85;
 export const MIN_FIRE_GAP_MS = 3000;
 
 export type FrameSample = {
@@ -45,7 +45,7 @@ export const initialAutoCapture = (): AutoCaptureState => ({
   phase: 'armed', count: 0, bestSharpness: 0, lastFireAt: null,
 });
 
-export function toGray(rgba: Uint8ClampedArray, w: number, h: number): Uint8Array {
+function toGray(rgba: Uint8ClampedArray, w: number, h: number): Uint8Array {
   const out = new Uint8Array(w * h);
   for (let i = 0, p = 0; i < out.length; i++, p += 4) {
     // Integer Rec. 601 luma.
@@ -155,7 +155,7 @@ export type FrameBox = { x: number; y: number; w: number; h: number };
 
 // Detection moves by a few pixels frame to frame on a still stick; moving the
 // sample rect for that would read as motion and nothing would ever fire.
-export const BOX_JITTER = 0.02;
+const BOX_JITTER = 0.02;
 // Detection passes (every other sample, so ~2 s) a stick box survives without
 // a hit before the default returns.
 // Stops a flaky frame flipping the box — and re-arming the trigger — while the

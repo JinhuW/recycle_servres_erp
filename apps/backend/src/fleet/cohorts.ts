@@ -55,7 +55,7 @@ type Fact = {
 /** Where the account stood when the window closed. The earliest ending wins: an
  *  account handed back at hour 5 and retired after a re-add never ran the clock
  *  out, so its later loss can't be charged to this window. */
-export function outcomeAt(f: Fact, hours: number, now: Date): FleetCohortOutcome | null {
+function outcomeAt(f: Fact, hours: number, now: Date): FleetCohortOutcome | null {
   if (!f.clock) return null;
   const end = f.clock.getTime() + hours * HOUR_MS;
   const lost = f.lost_at?.getTime() ?? Infinity;

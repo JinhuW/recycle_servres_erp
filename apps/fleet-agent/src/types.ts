@@ -15,7 +15,7 @@ export interface Desired {
 /** Why a stopped worker is left stopped; the ERP must not wait on it. */
 export type Hold = 'operator_needed' | 'crash_limit' | 'operator_stopped';
 
-export interface ReportContainer {
+interface ReportContainer {
   worker_id: string;
   image: string;
   /** Docker's state, or the hold's name for a worker left stopped on purpose. */
@@ -51,7 +51,7 @@ export const EMPTY_DESIRED: Desired = {
 };
 
 // Capacity is 0..99 in the ERP; anything far past it is not a desired state.
-export const MAX_COUNT = 999;
+const MAX_COUNT = 999;
 
 export function parseDesired(body: unknown): Desired | null {
   if (!body || typeof body !== 'object') return null;

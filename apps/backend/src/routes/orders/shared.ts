@@ -105,7 +105,7 @@ export async function recordPayerTx(
 // (e.g. Mixed-brand SSDs the user left blank) so grouping/pricing has a stable
 // key. Applied only at line creation — edits never rewrite an existing part
 // number. Returns null when neither applies.
-export function resolvePartNumber(
+function resolvePartNumber(
   category: string | undefined,
   l: { partNumber?: string | null; brand?: string | null; capacity?: string | null;
        interface?: string | null; formFactor?: string | null; generation?: string | null;
@@ -260,7 +260,7 @@ export async function supplierErr(
   return null;
 }
 
-export const PG_INVALID_TEXT_REPRESENTATION = '22P02';
+const PG_INVALID_TEXT_REPRESENTATION = '22P02';
 
 // An `Other` line has no spec fields to identify it, so its type carries the
 // whole answer to "what kind of thing is this?". Required alongside the
@@ -280,7 +280,7 @@ export function identityErr(label: string, category: string | undefined, l: { it
 // negative slipping through would surface as a 500 from inside the transaction
 // instead of a 400 at the door. null means "clear" and must be excluded before
 // Number.isFinite is asked anything, since Number(null) is 0.
-export const FEE_NOTE_MAX = 280;
+const FEE_NOTE_MAX = 280;
 
 export function badFees(b: { otherFees?: unknown; otherFeesNote?: unknown }): string | null {
   if (b.otherFees !== undefined && b.otherFees !== null) {
@@ -567,7 +567,7 @@ export function trackInput(l: LineFields, cat: string): TrackablePart {
 // normalisations the UPDATE writes with — so a purchaser re-saving a line
 // untouched, or a queued autosave replaying, never drops a submitted order back
 // to Draft and hands a manager an empty change set to review.
-export function sameStoredValue(before: unknown, after: unknown): boolean {
+function sameStoredValue(before: unknown, after: unknown): boolean {
   const blank = (v: unknown) => v === null || v === undefined || v === '';
   if (typeof before === 'number' || typeof after === 'number') {
     if (blank(before) || blank(after)) return blank(before) && blank(after);
@@ -592,14 +592,14 @@ export function movesPayer(
   return !sameStoredValue(before.paid_by, after);
 }
 
-export const LINE_FIELD_SET: ReadonlySet<string> = new Set(LINE_FIELDS);
+const LINE_FIELD_SET: ReadonlySet<string> = new Set(LINE_FIELDS);
 // The line columns PATCH writes with a presence sentinel (null clears), not
 // COALESCE (null keeps) — must match the UPDATE in PATCH /:id.
-export const LINE_SPEC_TEXT_COLS: ReadonlySet<string> = new Set([
+const LINE_SPEC_TEXT_COLS: ReadonlySet<string> = new Set([
   'brand', 'capacity', 'type', 'generation', 'classification', 'rank', 'speed',
   'interface', 'form_factor', 'description', 'item_type',
 ]);
-export const LINE_SENTINEL_COLS: ReadonlySet<string> = new Set([
+const LINE_SENTINEL_COLS: ReadonlySet<string> = new Set([
   ...LINE_SPEC_TEXT_COLS, 'chip_number', 'health', 'rpm', 'sell_price',
 ]);
 

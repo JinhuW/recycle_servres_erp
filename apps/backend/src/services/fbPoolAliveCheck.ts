@@ -42,7 +42,7 @@ export function classifyPicture(body: PictureBody): Liveness {
   return 'unknown';
 }
 
-export const probeFbUid: Probe = async (uid) => {
+const probeFbUid: Probe = async (uid) => {
   try {
     const res = await fetch(`https://graph.facebook.com/${uid}/picture?redirect=false`, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),

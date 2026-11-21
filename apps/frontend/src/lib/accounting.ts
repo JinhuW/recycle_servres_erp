@@ -97,7 +97,7 @@ export type AcctEvent = {
 // An entry whose sign-off an edit cleared: who had signed, and every field
 // changed since, worked out by the server for Review mode and the drawer
 // alike.
-export type AcctCleared = {
+type AcctCleared = {
   reviewer: AcctPerson | null; at: string; changes: AccountingChanges;
   // The last change was the PO's payer moving the entry's Paid by.
   followedPo: boolean;
@@ -109,7 +109,7 @@ export type AcctEntryDetail = AcctEntry & {
   cleared?: AcctCleared | null;
 };
 
-export type AcctFx = { rate: number; source: string; effectiveDate: string };
+type AcctFx = { rate: number; source: string; effectiveDate: string };
 
 export type AcctSummary = {
   from: IsoDate; to: IsoDate;

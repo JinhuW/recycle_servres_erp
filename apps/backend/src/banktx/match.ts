@@ -63,8 +63,8 @@ export type CandidateRow = {
   pool_total: number;
 };
 
-export type MatchReason = 'txn' | 'exact' | 'near' | 'search';
-export type MatchConfidence = 'high' | 'medium' | 'low';
+type MatchReason = 'txn' | 'exact' | 'near' | 'search';
+type MatchConfidence = 'high' | 'medium' | 'low';
 
 export type RankedCandidate = {
   id: string;

@@ -60,7 +60,7 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export function summarize(s: WebSubmission): string {
+function summarize(s: WebSubmission): string {
   if (s.kind === 'sell_lot') {
     const p = s.payload as SellPayload;
     const units = p.lines.reduce((n, l) => n + l.qty, 0);

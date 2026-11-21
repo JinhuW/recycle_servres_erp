@@ -252,7 +252,7 @@ export const ACCOUNT_ID = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$/;
 // them into the worker configs; this side only narrows the body to the keys
 // that form edits, so a key the facade learns later is a decision made here.
 // `updated_by` is the session's, never the client's.
-export const SEARCH_SETTING_FIELDS = [
+const SEARCH_SETTING_FIELDS = [
   'start_at', 'date_listed', 'delivery_method', 'max_results', 'search_interval',
   'max_search_interval', 'title_prefilter', 'min_seller_rating', 'exclude_unrated_sellers',
   'rating', 'min_unit_count', 'prompt', 'rating_prompt',

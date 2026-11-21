@@ -14,13 +14,13 @@ import { useEscapeKey } from '../../lib/useEscapeKey';
 // Bluetooth printer gets that picture in dots, and the print dialog, the
 // fallback, prints it as an image, so the two can't drift apart.
 
-export type LabelSize = PrefMap['pack.labelSize'];
-export type LabelLanguage = PrefMap['pack.labelLanguage'];
+type LabelSize = PrefMap['pack.labelSize'];
+type LabelLanguage = PrefMap['pack.labelLanguage'];
 
 // Each stock: width × height in inches as it feeds, its name, and how TSPL
 // sizes it, in the stock's own unit with the gap between its labels. 50 × 25
 // mm is what the office's 2-inch CLABEL CT221D takes.
-export const LABEL_SIZES: Record<LabelSize, { inches: readonly [number, number]; name: string; tspl: TsplStock }> = {
+const LABEL_SIZES: Record<LabelSize, { inches: readonly [number, number]; name: string; tspl: TsplStock }> = {
   '50x25mm': { inches: [50 / 25.4, 25 / 25.4], name: '50×25 mm', tspl: { size: '50 mm,25 mm', gap: '2 mm,0 mm' } },
   '4x6': { inches: [4, 6], name: '4×6 in', tspl: { size: '4,6', gap: '0.12,0' } },
   '4x3': { inches: [4, 3], name: '4×3 in', tspl: { size: '4,3', gap: '0.12,0' } },
@@ -78,7 +78,7 @@ function wrap(g: CanvasRenderingContext2D, text: string, width: number, max: num
 // so one layout reads on every stock. Under 1.6 in tall the date and the
 // caption go, and the top row is drawn larger: on a product's label it is
 // the order the product is on.
-export async function drawLabel(text: LabelText, widthIn: number, heightIn: number, dpi: number): Promise<HTMLCanvasElement> {
+async function drawLabel(text: LabelText, widthIn: number, heightIn: number, dpi: number): Promise<HTMLCanvasElement> {
   await Promise.all(['800', '700', '600', '500'].flatMap(w => [
     document.fonts.load(`${w} 40px Inter`), document.fonts.load(`${w} 40px "JetBrains Mono"`),
   ])).catch(() => {});
@@ -230,7 +230,7 @@ export async function drawLabel(text: LabelText, widthIn: number, heightIn: numb
 // them. Each mount prints the labels it was given once; a later render
 // doesn't redraw them. It ends once, however it ends: the labels after it wait
 // on that.
-export function LabelDialog({ texts, size, onDone }: { texts: readonly LabelText[]; size: LabelSize; onDone: () => void }) {
+function LabelDialog({ texts, size, onDone }: { texts: readonly LabelText[]; size: LabelSize; onDone: () => void }) {
   const { t } = useT();
   const [urls, setUrls] = useState<string[] | null>(null);
   const done = useRef(onDone);

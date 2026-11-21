@@ -21,7 +21,7 @@ const EMPTY_KEY: Record<Exclude<AccountingKind, 'other'>, string> = {
   after_sales: 'acctCardEmptyAs',
 };
 
-export const scopeKind = (s: AcctScope): Exclude<AccountingKind, 'other'> =>
+const scopeKind = (s: AcctScope): Exclude<AccountingKind, 'other'> =>
   'orderId' in s ? s.kind : 'sellOrderId' in s ? 'sale' : 'after_sales';
 
 // A record's side of the managers' RMB book, on the record's own page: what

@@ -10,8 +10,8 @@ import {
 
 export type SettingsGroup = 'send' | 'read' | 'adv';
 
-export const RANGE_LO_KEY = 'inboxRefreshMinSec';
-export const RANGE_HI_KEY = 'inboxRefreshMaxSec';
+const RANGE_LO_KEY = 'inboxRefreshMinSec';
+const RANGE_HI_KEY = 'inboxRefreshMaxSec';
 
 const SEND_KEYS = ['paused', 'minSendIntervalSec', 'typingPace'];
 const QUIET_KEY = 'quietThreadMin';

@@ -6,7 +6,6 @@
 import { MIN_PASSWORD_LEN } from '@recycle-erp/shared';
 import { ApiError } from './api';
 
-export { MIN_PASSWORD_LEN };
 
 export type PasswordChangeFlags = {
   newTooShort: boolean;

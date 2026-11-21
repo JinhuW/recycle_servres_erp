@@ -19,7 +19,7 @@ export const PAID_BY_COMPANY = 'company';
 
 // The select's value for a record, '' for none. Checks for the company rather
 // than the manager: an older backend sends a manager without `kind`.
-export function paidByValue(p: PaidBy): string {
+function paidByValue(p: PaidBy): string {
   if (!p) return '';
   return p.kind === 'company' ? PAID_BY_COMPANY : p.id;
 }

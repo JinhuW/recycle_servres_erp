@@ -1,7 +1,7 @@
 // PayPal's own ladder. A case enters at INQUIRY and only climbs.
-export const DISPUTE_STAGES = ['INQUIRY', 'CHARGEBACK', 'PRE_ARBITRATION', 'ARBITRATION'] as const;
+const DISPUTE_STAGES = ['INQUIRY', 'CHARGEBACK', 'PRE_ARBITRATION', 'ARBITRATION'] as const;
 
-export type DisputeStage = (typeof DISPUTE_STAGES)[number];
+type DisputeStage = (typeof DISPUTE_STAGES)[number];
 
 export type DisputeLadderStep = {
   key: DisputeStage | 'CLOSED';

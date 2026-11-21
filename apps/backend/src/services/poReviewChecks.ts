@@ -53,13 +53,13 @@ export type WebSpec = { specs: Record<string, string>; sourceUrls: string[] };
 
 export type MarketRef = { value: number; label: string };
 
-export type FindingSource =
+type FindingSource =
   | { kind: 'decoder'; partNumber: string; readAs?: string; value?: string }
   | { kind: 'label'; read: 'scan' | 'reread'; url: string | null; value?: string }
   | { kind: 'web'; urls: string[]; value?: string }
   | { kind: 'market'; value: number; label: string };
 
-export type FindingCode =
+type FindingCode =
   | 'spec_mismatch'
   | 'spec_blank'
   | 'pn_label_differs'

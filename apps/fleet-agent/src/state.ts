@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HoldEntry, OutageRetry } from './plan.js';
-import { EMPTY_DESIRED, parseDesired, type Desired } from './types.js';
+import { parseDesired, type Desired } from './types.js';
 
 const DESIRED_FILE = 'desired.json';
 const MEMORY_FILE = 'memory.json';
@@ -30,7 +30,7 @@ export interface Memory {
   self_stopped: Record<string, number>;
 }
 
-export function emptyMemory(): Memory {
+function emptyMemory(): Memory {
   return { last_start_at: null, restarts: {}, soft_restarts: {}, license_outage: {}, outage_recovered_at: null, pending: {}, held: {}, self_stopped: {} };
 }
 
@@ -135,4 +135,3 @@ export function loadInstanceId(dir: string): string {
   return id;
 }
 
-export { EMPTY_DESIRED };

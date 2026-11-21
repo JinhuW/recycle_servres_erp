@@ -24,7 +24,7 @@ import { hrefFor, onLinkClick } from '../../../lib/route';
 // noVNC (~200 KB, with a top-level await) is imported here, on demand, so it
 // never weighs on the fleet page itself.
 
-export const RELOGIN_STRIP_LOOK: Record<ReloginPhase, { tone: string; icon: IconName }> = {
+const RELOGIN_STRIP_LOOK: Record<ReloginPhase, { tone: string; icon: IconName }> = {
   queued: { tone: '', icon: 'clock' },
   signing_in: { tone: '', icon: 'refresh' },
   needs_you: { tone: 'warn', icon: 'alert' },
@@ -33,7 +33,7 @@ export const RELOGIN_STRIP_LOOK: Record<ReloginPhase, { tone: string; icon: Icon
 };
 
 /** The strip above the viewer while a re-login is under way. */
-export type WatchStrip = { phase: ReloginPhase; text: string };
+type WatchStrip = { phase: ReloginPhase; text: string };
 
 type Phase =
   | { kind: 'connecting' }
@@ -41,7 +41,7 @@ type Phase =
   | { kind: 'closed'; title: string; text: string };
 
 /** What the page hands its side panel: whether keys can go to the browser, and how. */
-export type WatchTyping = { canType: boolean; onType: (text: string) => boolean };
+type WatchTyping = { canType: boolean; onType: (text: string) => boolean };
 
 type Props = {
   workerId: string;

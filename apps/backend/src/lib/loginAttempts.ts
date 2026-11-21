@@ -12,8 +12,8 @@ import type { SqlLike } from '../db';
 import type { ClientIp } from './clientIp';
 import { log } from './log';
 
-export const FAILED_LIMIT = 5;
-export const IP_FAILED_LIMIT = 30;
+const FAILED_LIMIT = 5;
+const IP_FAILED_LIMIT = 30;
 
 export type AttemptReservation =
   | { locked: true }

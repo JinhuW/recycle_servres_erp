@@ -568,7 +568,7 @@ export const comparePoIds = (a: string, b: string): number => PO_COLLATOR.compar
 
 // A product's PO lines in the order a picker walks them: POs in numeric order,
 // then line #, a hand-typed share last.
-export function sortSources<T extends PoSource>(sources: readonly T[]): T[] {
+function sortSources<T extends PoSource>(sources: readonly T[]): T[] {
   return [...sources].sort((a, b) => {
     if (!a.po || !b.po) return a.po ? -1 : b.po ? 1 : 0;
     return comparePoIds(a.po, b.po) || a.lineNo! - b.lineNo!;

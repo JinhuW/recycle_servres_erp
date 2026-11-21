@@ -32,7 +32,7 @@ export const leadsApi = {
 // The viewer's leads waiting on them. The page fires LEADS_CHANGED after every
 // write, so the badge follows without polling.
 
-export const LEADS_CHANGED = 'rl-leads-changed';
+const LEADS_CHANGED = 'rl-leads-changed';
 let attention = 0;
 let reading = false;
 let stale = false;

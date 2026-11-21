@@ -7,7 +7,7 @@
 
 import { responseReason } from './api';
 
-export const BRIDGE_URL = 'http://127.0.0.1:47811';
+const BRIDGE_URL = 'http://127.0.0.1:47811';
 
 export type BridgeHealth = {
   ok: boolean;

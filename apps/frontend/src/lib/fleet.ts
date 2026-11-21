@@ -49,7 +49,7 @@ export type FleetCityPatch = {
   override_verify?: true;
 };
 
-export type FleetRoll = { replace: string } | null;
+type FleetRoll = { replace: string } | null;
 
 export type FleetHost = FleetHostRow & {
   // What the ERP tells the agent to run, folded in by the hosts route.

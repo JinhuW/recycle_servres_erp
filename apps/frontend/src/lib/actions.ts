@@ -129,7 +129,7 @@ export function pollIsFresh(startedAt: number, lastChangeAt: number, dragging: b
 
 // ─── My open cards (sidebar count, Home) ──────────────────────────────────────
 
-export const ACTIONS_CHANGED = 'act-actions-changed';
+const ACTIONS_CHANGED = 'act-actions-changed';
 let mineCount = 0;
 let reading = false;
 let stale = false;

@@ -38,7 +38,7 @@ function LostCell({ all, unflagged }: { all: FleetCohortCounts; unflagged: Fleet
   );
 }
 
-export function CohortTable({ rows, label }: { rows: FleetCohortGroup[]; label: (g: FleetCohortGroup) => string }) {
+function CohortTable({ rows, label }: { rows: FleetCohortGroup[]; label: (g: FleetCohortGroup) => string }) {
   const { t } = useT();
   return (
     <div className="fp-table-wrap fleet-table-cap fleet-table-short">
@@ -89,7 +89,7 @@ export function CohortTable({ rows, label }: { rows: FleetCohortGroup[]; label: 
   );
 }
 
-export function CohortAccounts({ rows }: { rows: FleetCohortAccount[] }) {
+function CohortAccounts({ rows }: { rows: FleetCohortAccount[] }) {
   const { t, locale } = useT();
   const outcome = (o: FleetCohortOutcome | null, lostState: boolean) =>
     (o === null ? '—' : lostState ? t('fleetCohortInLossState') : t(`fleetCohortOutcome_${o}`));

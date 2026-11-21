@@ -12,7 +12,6 @@
 
 import { isRealPhotoUrl } from '@recycle-erp/shared';
 
-export { isRealPhotoUrl };
 
 export type LinePhoto = {
   id: string;

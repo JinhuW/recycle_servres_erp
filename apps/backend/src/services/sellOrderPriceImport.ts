@@ -14,7 +14,7 @@ export type OrderProduct = {
   oldPrice: number | null;
 };
 
-export type ParsedRowStatus =
+type ParsedRowStatus =
   | 'matched'
   | 'not-in-order'
   | 'no-price'
@@ -23,7 +23,7 @@ export type ParsedRowStatus =
   // A sheet from before v1.242.0 priced the part apart per condition.
   | 'per-condition';
 
-export type ParsedPriceRow = {
+type ParsedPriceRow = {
   // Worksheet the row came from — the template ships one tab per category, so
   // (sheet, rowNumber) is a row's identity; rowNumber alone repeats per tab.
   sheet: string;

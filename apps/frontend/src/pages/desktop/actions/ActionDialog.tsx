@@ -130,7 +130,7 @@ const asLink = (x: ActionLinkTarget): ActionLink => ({
 });
 
 /** Finds a record the viewer can open, by type and number or name. */
-export function RecordPicker({ value, onChange }: { value: ActionLink | null; onChange: (l: ActionLink | null) => void }) {
+function RecordPicker({ value, onChange }: { value: ActionLink | null; onChange: (l: ActionLink | null) => void }) {
   const { t } = useT();
   const user = useEffectiveUser();
   const types = actionLinkTypesFor(user?.role === 'manager' ? 'manager' : 'purchaser');

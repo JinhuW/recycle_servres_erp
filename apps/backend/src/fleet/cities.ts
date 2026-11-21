@@ -19,7 +19,7 @@ import { notifyReady } from './scheduler';
 // wrong part of the country, silently. `override_verify` is the manager's way
 // past that for a slug they have checked by hand.
 
-export type CityRow = {
+type CityRow = {
   slug: string;
   name: string;
   radius_km: number;
@@ -42,7 +42,7 @@ type ItemRow = {
 };
 
 /** The monitor's rule for a Marketplace location: a slug or a numeric id. */
-export const CITY_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const CITY_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ITEM_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 const MAX_CITY_NAME = 80;
 const MAX_RADIUS_KM = 500;
@@ -50,7 +50,7 @@ const MAX_PER_DAY = 24;
 const MAX_PHRASES = 100;
 const MAX_PHRASE = 500;
 const MAX_EVERY_DAYS = 30;
-export const VERIFY_PRIORITY = 50;
+const VERIFY_PRIORITY = 50;
 
 const cityToWire = (r: CityRow): FleetCity => ({
   slug: r.slug,
@@ -206,7 +206,7 @@ export async function createCity(sql: Sql, draft: CityDraft, userId: string): Pr
  * of "Facebook calls this somewhere else" sets `verified_at` too, so that
  * alone is not a reason to let the city be enabled.
  */
-export async function slugConfirmed(sql: SqlLike, row: CityRow): Promise<boolean> {
+async function slugConfirmed(sql: SqlLike, row: CityRow): Promise<boolean> {
   if (!row.verified_at) return false;
   if (row.verified_as === 'override' || row.verified_as === 'imported') return true;
   const [v] = await sql<{ matches: boolean }[]>`
@@ -333,7 +333,7 @@ type NumericKey = Exclude<keyof typeof FLEET_SETTINGS_DEFAULTS, FlagKey>;
 const FLAG_KEYS: readonly FlagKey[] = ['cloak_enabled'];
 
 /** Inclusive bounds per numeric key; the console's limits where it had one. */
-export const SETTING_BOUNDS: Record<NumericKey, readonly [number, number]> = {
+const SETTING_BOUNDS: Record<NumericKey, readonly [number, number]> = {
   per_day_default: [1, 24],
   budget_minutes: [1, 1440],
   lease_minutes: [1, 180],
@@ -378,7 +378,7 @@ const duration: Check = (v) => (typeof v === 'string' && DURATION.test(v.trim())
 const rating: Check = (v) => (typeof v === 'number' && v >= 0 && v <= 5 ? null : 'must be a number from 0 to 5');
 const prompt: Check = (v) => (typeof v === 'string' && v.trim() && v.length <= MAX_PROMPT ? null : `must be text of 1 to ${MAX_PROMPT} characters`);
 
-export const SEARCH_FIELDS: Record<string, Check> = {
+const SEARCH_FIELDS: Record<string, Check> = {
   date_listed: choiceOrList(DATE_LISTED),
   delivery_method: choice(DELIVERY_METHODS),
   max_results: int(1, 1000),

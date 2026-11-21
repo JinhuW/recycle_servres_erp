@@ -22,7 +22,7 @@ import { WorkerLink } from './shared';
 
 const STUB_TONE: Record<FleetStatus, string> = { live: 'accent', stale: 'warn', attention: 'warn', offline: 'neg' };
 
-export function initialsOf(name: string): string {
+function initialsOf(name: string): string {
   return name.replace(/[^a-z0-9]/gi, ' ').trim().split(/\s+/).map(p => p[0]).join('').slice(0, 2).toUpperCase() || '?';
 }
 
@@ -39,7 +39,7 @@ export function ErpBuildChip({ version, release }: { version: string | null; rel
   );
 }
 
-export function BackToFleet() {
+function BackToFleet() {
   const { t } = useT();
   return (
     <a className="fl-back" href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')}>

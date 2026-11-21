@@ -85,7 +85,7 @@ export function workerTokenKey(env: Env): Buffer | null {
 }
 
 /** The key a token signed before a rotation still verifies under, until the worker's next heartbeat re-signs it. */
-export function previousWorkerTokenKey(env: Env): Buffer | null {
+function previousWorkerTokenKey(env: Env): Buffer | null {
   const raw = env.FLEET_WORKER_TOKEN_KEY_PREVIOUS?.trim();
   return raw ? Buffer.from(raw, 'hex') : null;
 }
@@ -98,12 +98,12 @@ export function signWorkerToken(claims: FleetWorkerTokenClaims, key: Buffer): st
   return `${payload}.${hmac(key, payload).toString('base64url')}`;
 }
 
-export type TokenCheck =
+type TokenCheck =
   | { ok: true; claims: FleetWorkerTokenClaims; rotated: boolean }
   | { ok: false; reason: 'bad_token' | 'expired_token' };
 
 /** Verifies under the current key, then the previous one; says why a token fails. */
-export function checkWorkerToken(token: string, key: Buffer, previous: Buffer | null = null, now: Date = new Date()): TokenCheck {
+function checkWorkerToken(token: string, key: Buffer, previous: Buffer | null = null, now: Date = new Date()): TokenCheck {
   const parts = token.split('.');
   if (parts.length !== 2 || !parts[0] || !parts[1]) return { ok: false, reason: 'bad_token' };
   const [payload, sig] = parts;
@@ -195,7 +195,7 @@ export const hostAuth: MiddlewareHandler<HostEnv> = async (c, next) => {
 // seeds, cookies) and confirm its siblings stopped. A ticket can do one thing:
 // the first claim for the worker id (and handoff epoch) it was minted for.
 
-export const CLAIM_TICKET_PREFIX = 'fct_';
+const CLAIM_TICKET_PREFIX = 'fct_';
 export const CLAIM_TICKET_MINUTES = 10;
 
 /** A fresh ticket and the hash it is stored under. */

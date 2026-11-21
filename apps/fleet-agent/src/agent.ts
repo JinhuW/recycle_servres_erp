@@ -19,7 +19,7 @@ import { loadDesired, loadInstanceId, loadMemory, saveDesired, saveMemory, type 
 import { EMPTY_DESIRED, imageAllowed, type AgentIdentity, type Desired, type Report } from './types.js';
 
 // While a long pull or a row of stops runs, the ERP still hears from the host.
-export const KEEPALIVE_MS = 60_000;
+const KEEPALIVE_MS = 60_000;
 
 export interface AgentOptions {
   hostId: string;

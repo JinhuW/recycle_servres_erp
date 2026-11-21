@@ -62,7 +62,7 @@ export const fbChatApi = {
 };
 
 /** The setting every extension reads to stop typing replies. */
-export const FB_CHAT_PAUSED_KEY = 'paused';
+const FB_CHAT_PAUSED_KEY = 'paused';
 
 /**
  * Pauses or resumes one account. An override is only kept while it differs
