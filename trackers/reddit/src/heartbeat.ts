@@ -7,7 +7,7 @@
 
 import type {Sql} from './db.ts';
 
-export type WorkerRole = 'worker' | 'api';
+type WorkerRole = 'worker' | 'api';
 export type LoopName = 'poll' | 'evaluate' | 'notify' | 'trace';
 
 // Liveness thresholds, shared by the API's status filter and any UI: three

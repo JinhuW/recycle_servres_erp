@@ -23,7 +23,7 @@ import {listRules} from '../rules.ts';
 import type {SettingsStore} from '../settings.ts';
 
 /** Small batch: each item is a paid API call, and claims should turn over fast. */
-export const EVALUATE_BATCH_SIZE = 3;
+const EVALUATE_BATCH_SIZE = 3;
 
 export interface EvaluateDeps {
   sql: Sql;

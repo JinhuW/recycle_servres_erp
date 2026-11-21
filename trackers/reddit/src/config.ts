@@ -7,7 +7,7 @@ import 'dotenv/config';
 import type {AlertTransport} from './alerts.ts';
 import type {UserCredentials} from './userSender.ts';
 
-export type Role = 'worker' | 'api';
+type Role = 'worker' | 'api';
 
 export interface Config {
   readonly databaseUrl: string;

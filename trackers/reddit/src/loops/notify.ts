@@ -16,7 +16,7 @@ import type {Logger} from '../logger.ts';
 import {sendReview} from '../review.ts';
 import type {SettingsStore} from '../settings.ts';
 
-export const NOTIFY_BATCH_SIZE = 5;
+const NOTIFY_BATCH_SIZE = 5;
 const COPY_WAIT_SECONDS = 30;
 
 export interface NotifyDeps {
@@ -33,7 +33,7 @@ export interface NotifyDeps {
 }
 
 /** How long the api's user session may go unrenewed before workers take over. */
-export const USER_SENDER_STALE_S = 120;
+const USER_SENDER_STALE_S = 120;
 
 export async function notifyOnce(deps: NotifyDeps): Promise<boolean> {
   const {sql, workerId, logger} = deps;

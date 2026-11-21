@@ -8,7 +8,7 @@ import {userSenderLive} from './loops/notify.ts';
 
 export const SEEN_HOURS = 24;
 
-export interface SeenAlert {
+interface SeenAlert {
   chatId: string;
   messageId: number;
   redditId: string;
@@ -22,7 +22,7 @@ export interface SeenAlert {
   members: number;
 }
 
-export interface SeenPerson {
+interface SeenPerson {
   userId: string;
   name: string;
   username: string | null;

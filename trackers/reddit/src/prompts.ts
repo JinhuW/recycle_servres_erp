@@ -109,10 +109,10 @@ export async function verdictNotes(sql: Sql, redditId: string): Promise<VerdictN
   }));
 }
 
-export type PromptRole = 'live' | 'candidate' | 'retired';
+type PromptRole = 'live' | 'candidate' | 'retired';
 
 /** Reaction outcomes for the posts a version flagged that reached one audience. */
-export interface AudienceScore {
+interface AudienceScore {
   /** Flagged posts that went out to this audience. */
   sent: number;
   /** …that got any reaction other than 👎. */
@@ -123,13 +123,13 @@ export interface AudienceScore {
   leadRate: number | null;
 }
 
-export interface VsLiveCell {
+interface VsLiveCell {
   posts: number;
   leads: number;
   notLeads: number;
 }
 
-export interface PromptVersionStats {
+interface PromptVersionStats {
   id: number;
   role: PromptRole;
   model: string;
@@ -152,7 +152,7 @@ export interface PromptVersionStats {
 }
 
 /** A prompt as configured now; its version id is null until it has judged a post. */
-export interface ConfiguredPrompt extends PromptConfig {
+interface ConfiguredPrompt extends PromptConfig {
   promptVersionId: number | null;
 }
 

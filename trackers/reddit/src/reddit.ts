@@ -18,7 +18,7 @@ export interface RedditPost {
   postedAt: Date;
 }
 
-export interface RateLimitHint {
+interface RateLimitHint {
   /** Requests left in the current window, as reported by Reddit. */
   remaining?: number;
   /** Seconds until the window resets. */

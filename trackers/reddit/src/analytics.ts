@@ -16,7 +16,7 @@ export const ANALYTICS_WINDOWS: readonly AnalyticsWindow[] = ['24h', '7d', '30d'
 const WINDOW_HOURS: Record<AnalyticsWindow, number> = {'24h': 24, '7d': 168, '30d': 720};
 
 /** Buyers who asked by PM for a post to count as wanted. */
-export const HOT_PMS = 5;
+const HOT_PMS = 5;
 const LIST_LIMIT = 25;
 
 // The posts "missing" is about: anything that talks about memory, by the same
@@ -25,12 +25,12 @@ const LIST_LIMIT = 25;
 const MEMORY_PATTERN =
   '\\m(ram|memory|ecc|ddr[345]\\w*|[a-z]*dimms?|so-dimms?|pc[345]-\\w+)\\M';
 
-export interface Range {
+interface Range {
   since: string;
   until: string;
 }
 
-export interface ListedPost {
+interface ListedPost {
   redditId: string;
   subreddit: string;
   title: string;

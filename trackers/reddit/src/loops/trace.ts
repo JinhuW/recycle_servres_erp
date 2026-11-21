@@ -20,7 +20,7 @@ const LEASE_TTL_SECONDS = 600;
 /** PMs have mostly arrived a day after posting; earlier counts read low. */
 export const TRACE_AFTER_HOURS = 24;
 /** How far back an untraced post is still worth a request. */
-export const TRACE_WITHIN_DAYS = 8;
+const TRACE_WITHIN_DAYS = 8;
 /** After a block, this worker leaves the lease to the rest of the fleet for a while. */
 const STAND_DOWN_MS = 30 * 60_000;
 

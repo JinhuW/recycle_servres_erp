@@ -22,7 +22,7 @@ export interface ApiDeps {
   startedAt: number;
 }
 
-export interface MatchRow {
+interface MatchRow {
   reddit_id: string;
   subreddit: string;
   title: string;
