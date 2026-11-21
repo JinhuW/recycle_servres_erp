@@ -328,18 +328,6 @@ suppliers.post('/suggestions/dismiss', async (c) => {
   return c.json({ ok: true });
 });
 
-suppliers.post('/suggestions/restore', async (c) => {
-  const u = c.var.user;
-  const body = (await c.req.json().catch(() => null)) as { matchKey?: string } | null;
-  if (!body?.matchKey) return c.json({ error: 'matchKey is required' }, 400);
-  const sql = getDb(c.env);
-  await sql`
-    DELETE FROM supplier_suggestion_dismissals
-    WHERE user_id = ${u.id} AND match_key = ${body.matchKey}
-  `;
-  return c.json({ ok: true });
-});
-
 // ── Adopt a suggestion ─────────────────────────────────────────────────────
 // Creates the client AND attaches their past purchase orders in one
 // transaction. Linking the history is the whole point: the record is complete
@@ -530,16 +518,12 @@ suppliers.patch('/:id', async (c) => {
   const bad = validate(body);
   if (bad) return c.json({ error: bad }, 400);
 
-  // Not "managers may do it here too": a handover has to leave a trace, and
-  // only POST /:id/reassign writes the `owner_changed` timeline row, checks the
-  // target purchaser exists, and turns a match_key collision into a 409. Writing
-  // owner_id through the generic setter skipped all three and changed a book's
-  // owner as a silent column update.
+  // A handover has to leave a trace on the timeline, check the target
+  // purchaser exists and turn a match_key collision into a 409. Writing
+  // owner_id through the generic setter would do none of that and change a
+  // book's owner as a silent column update, so this route refuses it.
   if (body.ownerId !== undefined) {
-    return c.json(
-      { error: 'Use POST /api/suppliers/:id/reassign to change the owner' },
-      400,
-    );
+    return c.json({ error: 'The owner cannot be changed here' }, 400);
   }
   if (body.tierOverride !== undefined && u.role !== 'manager') {
     return c.json({ error: 'Only managers can pin a tier' }, 403);
@@ -627,75 +611,6 @@ suppliers.post('/:id/notes', async (c) => {
   });
   if (refused === 403) return c.json({ error: 'Forbidden' }, 403);
   return c.json({ ok: true, nextFollowUpAt: next });
-});
-
-suppliers.delete('/:id/notes/:noteId', async (c) => {
-  const u = c.var.user;
-  const sql = getDb(c.env);
-  const row = (await sql`
-    SELECT n.id, n.author_id, s.owner_id FROM supplier_notes n
-    JOIN suppliers s ON s.id = n.supplier_id
-    WHERE n.id = ${c.req.param('noteId')} AND n.supplier_id = ${c.req.param('id')}
-  `)[0] as { author_id: string | null; owner_id: string | null } | undefined;
-  // Not your client at all -> 404, the same as GET /:id. Confirming the note
-  // exists would leak another purchaser's book. Your client but someone else's
-  // note -> 403, which is a distinction the caller is entitled to.
-  if (!row || !canWrite(u, row.owner_id)) return c.json({ error: 'Not found' }, 404);
-  if (u.role !== 'manager' && row.author_id !== u.id) {
-    return c.json({ error: 'Only the person who wrote a note can delete it' }, 403);
-  }
-  const refused = await sql.begin(async (tx): Promise<404 | null> => {
-    const owner = (await tx<{ owner_id: string | null }[]>`
-      SELECT owner_id FROM suppliers WHERE id = ${c.req.param('id')} FOR NO KEY UPDATE
-    `)[0];
-    if (!owner || !canWrite(u, owner.owner_id)) return 404;
-    await tx`DELETE FROM supplier_notes WHERE id = ${c.req.param('noteId')}`;
-    return null;
-  });
-  if (refused === 404) return c.json({ error: 'Not found' }, 404);
-  return c.json({ ok: true });
-});
-
-// ── Reassign ───────────────────────────────────────────────────────────────
-// A book handover has to be auditable, so it lands on the same timeline as the
-// calls rather than in a silent column change. `null` sends the client to the
-// house-account queue, which is where a departing purchaser's book goes.
-suppliers.post('/:id/reassign', async (c) => {
-  const u = c.var.user;
-  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-  const sql = getDb(c.env);
-  const id = c.req.param('id');
-  const body = (await c.req.json().catch(() => null)) as { ownerId?: string | null } | null;
-  if (body === null || !('ownerId' in body)) return c.json({ error: 'ownerId is required' }, 400);
-
-  const cur = (await sql`
-    SELECT s.id, s.owner_id, u2.name AS owner_name FROM suppliers s
-    LEFT JOIN users u2 ON u2.id = s.owner_id WHERE s.id = ${id}
-  `)[0] as { owner_id: string | null; owner_name: string | null } | undefined;
-  if (!cur) return c.json({ error: 'Not found' }, 404);
-
-  const to = body.ownerId ?? null;
-  const toName = to
-    ? ((await sql`SELECT name FROM users WHERE id = ${to}`)[0]?.name as string | undefined)
-    : undefined;
-  if (to && !toName) return c.json({ error: 'That purchaser does not exist' }, 400);
-
-  try {
-    await sql.begin(async (tx) => {
-      await tx`UPDATE suppliers SET owner_id = ${to}, updated_at = NOW() WHERE id = ${id}`;
-      await tx`
-        INSERT INTO supplier_notes (supplier_id, author_id, kind, body)
-        VALUES (${id}, ${u.id}, 'owner_changed',
-                ${`Moved from ${cur.owner_name ?? 'house accounts'} to ${toName ?? 'house accounts'}`})
-      `;
-    });
-  } catch (e) {
-    if (String(e).includes('suppliers_owner_match_idx')) {
-      return c.json({ error: `${toName} already has this client` }, 409);
-    }
-    throw e;
-  }
-  return c.json({ ok: true });
 });
 
 // ── helpers ────────────────────────────────────────────────────────────────

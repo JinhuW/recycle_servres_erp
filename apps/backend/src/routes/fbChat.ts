@@ -5,7 +5,7 @@ import {
   FB_CHAT_ACCOUNT_LABEL_MAX, FB_CHAT_CONFIG_KEY, FB_CHAT_MEDIA_MAX_UPLOAD_BYTES, FB_CHAT_MEDIA_MIMES, FB_CHAT_REPLY_MAX_CHARS,
   FB_CHAT_REPLY_MEDIA_MAX,
   FB_CHAT_THREAD_FILTERS, fbChatConfigProblem,
-  type FbChatDeviceAnswer, type FbChatDeviceApproval, type FbChatMediaAnswer, type FbChatMessagesAnswer, type FbChatReplyAnswer,
+  type FbChatDeviceAnswer, type FbChatDeviceApproval, type FbChatDeviceRefusal, type FbChatMediaAnswer, type FbChatMessagesAnswer, type FbChatReplyAnswer,
   type FbChatTelegramStatus, type FbChatThreadFilter, type FbChatThreadsAnswer,
 } from '@recycle-erp/shared';
 import {
@@ -28,7 +28,7 @@ import {
 } from '../services/fbChat';
 import { configFor, knownFields, notePickup, reportFields, setConfig } from '../services/fbChatConfig';
 import {
-  approveDevice, decideDevice, deleteDevice, deviceForBearer, enrollDevice, helloDevice, isDeviceBearer, listDevices, touchDevice,
+  approveDevice, decideDevice, deviceForBearer, enrollDevice, helloDevice, isDeviceBearer, listDevices, touchDevice,
   type DeviceDecision, type DeviceRow,
 } from '../services/fbChatDevices';
 import {
@@ -73,7 +73,7 @@ const pushGuard: MiddlewareHandler<{ Bindings: Env; Variables: Vars }> = async (
   const device = await deviceForBearer(sql, header!);
   if (!device) return c.json({ error: 'invalid_token' }, 401);
   if (device.status !== 'approved' && c.req.path !== `${PUSH_PREFIX}device`) {
-    return c.json({ error: device.status === 'pending' ? 'device_pending' : 'device_rejected' }, 403);
+    return c.json({ error: device.status === 'pending' ? 'device_pending' : 'device_rejected' } satisfies FbChatDeviceRefusal, 403);
   }
   if (device.status === 'approved') await touchDevice(sql, device.id);
   c.set('device', device);
@@ -465,13 +465,6 @@ fbChat.post('/devices/:id/:decision', async (c) => {
   }
   if (!done) return c.json({ error: 'conflict', detail: `cannot ${decision} this extension now` }, 409);
   log.info('fb chat device decided', { module: 'fbChat', deviceId: id, decision });
-  return c.json({ ok: true });
-});
-
-fbChat.delete('/devices/:id', async (c) => {
-  const id = c.req.param('id');
-  if (!(await deleteDevice(getDb(c.env), id))) return c.json({ error: 'not_found' }, 404);
-  log.info('fb chat device deleted', { module: 'fbChat', deviceId: id });
   return c.json({ ok: true });
 });
 

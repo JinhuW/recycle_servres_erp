@@ -19,6 +19,11 @@ export const isRefusal = (v: unknown): v is Refusal =>
   typeof v === 'object' && v !== null && 'status' in v && 'body' in v
   && typeof (v as Refusal).body === 'object' && 'error' in (v as Refusal).body;
 
+/** A wire request body before validation: the contract's field names, and
+ *  nothing about their values, so a handler can only read fields the shared
+ *  type names and still has to check each one. */
+export type Unchecked<T> = { [K in keyof T]?: unknown };
+
 export const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
 
 /** fleet_tasks as postgres.js returns it: the BIGSERIAL id arrives as a string. */

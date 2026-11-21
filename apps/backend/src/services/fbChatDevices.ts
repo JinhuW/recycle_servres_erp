@@ -179,9 +179,3 @@ export async function approveDevice(
      WHERE id = ${id}`;
   return true;
 }
-
-/** Forgets a device. Its extension, if still running, enrolls again. */
-export async function deleteDevice(sql: SqlLike, id: string): Promise<boolean> {
-  const rows = await sql`DELETE FROM fb_chat_devices WHERE id = ${id} RETURNING id`;
-  return rows.length > 0;
-}

@@ -230,7 +230,10 @@ export const FB_CHAT_DEVICE_STATUSES = ['pending', 'approved', 'rejected', 'revo
 export type FbChatDeviceStatus = (typeof FB_CHAT_DEVICE_STATUSES)[number];
 export const FB_CHAT_DEVICE_BEARER_PREFIX = 'fbd_';
 
-/** `POST /enroll`. Every field is optional and only shown to the approver. */
+/**
+ * `POST /enroll`, and the extension's hello on `POST /push/device` while it
+ * waits and after. Every field is optional and only shown to the approver.
+ */
 export type FbChatEnrollRequest = {
   label?: string;
   extVersion?: string;
@@ -246,8 +249,7 @@ export type FbChatEnrollAnswer = {
   status: FbChatDeviceStatus;
 };
 
-/** `POST /push/device`: the extension's hello while it waits, and after. */
-export type FbChatDeviceHello = FbChatEnrollRequest;
+/** Answer of `POST /push/device`. */
 export type FbChatDeviceAnswer = { deviceId: string; code: string; status: FbChatDeviceStatus };
 
 /**

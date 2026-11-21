@@ -456,6 +456,10 @@ parked heartbeat delivers it too; that is what a re-login is for. A fresh
 claim (a new boot, which signs in anyway) drops a re-login that has not gone
 out.
 
+A queued resume (a manager's, or the auto-resume's) goes out the same way:
+`"resume"` in `directives` once, with its id as `resume_id`
+(`HeartbeatAnswer` in `packages/shared/src/fleet.ts`).
+
 The answer adds `{worker_token, token_expires_at}` (Unix seconds) when less
 than a day of the token remains, or when it verified under
 `FLEET_WORKER_TOKEN_KEY_PREVIOUS`: seven more days, same worker, account and

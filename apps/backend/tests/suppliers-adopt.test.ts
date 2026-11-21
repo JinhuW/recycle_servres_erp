@@ -56,7 +56,7 @@ describe('suggestions', () => {
     expect(after.body.items.find((i) => /Boulder/.test(i.name))).toBeUndefined();
   });
 
-  it('keeps a dismissed seller dismissed, and can restore them', async () => {
+  it('keeps a dismissed seller dismissed', async () => {
     await seedHistory(MARCUS, { order: 'PO-S030', seller: 'One Time Larry', cost: 120 });
     const marcus = await loginAs(MARCUS);
     const r1 = await api<{ items: Sugg[] }>('GET', '/api/suppliers/suggestions', { token: marcus.token });
@@ -65,10 +65,6 @@ describe('suggestions', () => {
     await api('POST', '/api/suppliers/suggestions/dismiss', { token: marcus.token, body: { matchKey: key } });
     const r2 = await api<{ items: Sugg[] }>('GET', '/api/suppliers/suggestions', { token: marcus.token });
     expect(r2.body.items.find((i) => /Larry/.test(i.name))).toBeUndefined();
-
-    await api('POST', '/api/suppliers/suggestions/restore', { token: marcus.token, body: { matchKey: key } });
-    const r3 = await api<{ items: Sugg[] }>('GET', '/api/suppliers/suggestions', { token: marcus.token });
-    expect(r3.body.items.find((i) => /Larry/.test(i.name))).toBeDefined();
   });
 
   it("one purchaser's dismissal does not hide the seller from another", async () => {

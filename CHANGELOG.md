@@ -28,7 +28,13 @@ keeps its own copy of), and the fleet agent drops `needsOperator`. The boot-time
 numbers from before migration 0170 goes too, with the legacy numbering it
 used and the `append_batch` it kept writing for a rollback to that release:
 prod holds no unnumbered sell line (0 of 6,625), and a line an older instance
-writes mid-deploy is still numbered by the next save.
+writes mid-deploy is still numbered by the next save. Four routes nothing called are gone:
+`POST /api/suppliers/suggestions/restore`, `POST /api/suppliers/:id/reassign`,
+`DELETE /api/suppliers/:id/notes/:noteId` and `DELETE /api/fb-chat/devices/:id`.
+With reassign gone, no API changes a client's owner. The worker-protocol and
+fb-chat request types in the shared package now type the handlers and the
+frontend calls that use them; `HeartbeatAnswer` gained the `resume` directive
+the heartbeat already sent.
 
 ## [1.472.0] - 2026-11-16
 

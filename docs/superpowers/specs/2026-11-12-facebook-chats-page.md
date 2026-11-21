@@ -411,7 +411,8 @@ page.
 
 `POST /devices/:id/reject` (Deny), `POST /devices/:id/revoke` (Disconnect this
 Chrome: the extension is refused from then on, the account and its chats
-stay, and the account shows `stale`) and `DELETE /devices/:id` are unchanged.
+stay, and the account shows `stale`) are unchanged. `DELETE /devices/:id`
+had no caller and was removed later.
 
 ### `GET /config`, `PUT /config/:key`, `DELETE /config/:key` — unchanged
 

@@ -13,15 +13,21 @@ import {
   fleetTakesResume,
   totpKey,
   type ClaimAnswer,
+  type ClaimRequest,
   FLEET_TZ,
   type FleetCookie,
   type FleetDevice,
+  type FleetEventRequest,
   type FleetItem,
   type FleetSettings,
   type FleetStorageState,
   type FleetTaskWhy,
   type HandedTask,
+  type HeartbeatAnswer,
+  type HeartbeatRequest,
   type NextTaskAnswer,
+  type NextTaskRequest,
+  type SessionRequest,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
@@ -40,7 +46,7 @@ import { exitIpForStint, latestProxyExit, slotWaits, type ProxyExitMeasure } fro
 import { exhaustedProxyIds } from './proxyMarks';
 import { NOTIFY_CHANNEL, notifyReady } from './scheduler';
 import { linkLaunch, readLaunchFacts } from './profile';
-import { minutesTodaySql, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow } from './sql';
+import { minutesTodaySql, type ClaimTicketRow, type FleetHostRow, type FleetSlotRow, type Unchecked } from './sql';
 import { loadRelease, ownWorkerId } from './hosts';
 import { recordStateChange } from './stateEvents';
 
@@ -291,7 +297,7 @@ type TicketRefusal = 'used_ticket' | 'expired_ticket';
 worker.post('/claim', claimAuth, async (c) => {
   const host: FleetHostRow = c.var.host;
   const ticket: ClaimTicketRow | null = c.var.ticket;
-  const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await c.req.json().catch(() => null)) as Unchecked<ClaimRequest> | null;
   if (!body) return c.json(BAD_REQUEST, 422);
   const { host_id, worker_id, version, vnc_port } = body;
   if (host_id !== host.host_id) return c.json({ ...BAD_REQUEST, detail: 'host_id is not the token\'s host' }, 422);
@@ -525,7 +531,7 @@ async function alertLicenceOutage(tx: SqlLike): Promise<void> {
 
 worker.post('/heartbeat', workerAuth, async (c) => {
   const w: WorkerIdentity = c.var.worker;
-  const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await c.req.json().catch(() => null)) as Unchecked<HeartbeatRequest> | null;
   if (!body || typeof body.state !== 'string' || !body.state || body.state.length > 40) {
     return c.json({ ...BAD_REQUEST, detail: 'state' }, 422);
   }
@@ -625,12 +631,14 @@ worker.post('/heartbeat', workerAuth, async (c) => {
     : {};
   if (accepted.relogin) flog.info('fleet relogin delivered', { workerId: w.worker_id, reloginId: accepted.relogin, state });
   if (accepted.resume) flog.info('fleet resume delivered', { workerId: w.worker_id, resumeId: accepted.resume, state });
-  const directives = {
-    directives: [...(accepted.relogin ? ['relogin'] : []), ...(accepted.resume ? ['resume'] : [])],
+  const answer = {
+    ok: true,
+    directives: [...(accepted.relogin ? ['relogin' as const] : []), ...(accepted.resume ? ['resume' as const] : [])],
     ...(accepted.relogin ? { relogin_id: accepted.relogin } : {}),
     ...(accepted.resume ? { resume_id: accepted.resume } : {}),
-  };
-  return c.json({ ok: true, ...directives, ...renewal });
+    ...renewal,
+  } satisfies HeartbeatAnswer;
+  return c.json(answer);
 });
 
 // ─── The browser's own report ─────────────────────────────────────────────────
@@ -793,7 +801,7 @@ async function pickTask(
 
 worker.post('/next-task', workerAuth, async (c) => {
   const w: WorkerIdentity = c.var.worker;
-  const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await c.req.json().catch(() => null)) as Unchecked<NextTaskRequest> | null;
   if (!body) return c.json(BAD_REQUEST, 422);
   let done: { task_id: number; result: Record<string, unknown> } | null = null;
   if (body.done !== null && body.done !== undefined) {
@@ -846,7 +854,7 @@ const EVENT_KINDS = new Set(['started', 'searched', 'finished', 'stopped']);
 
 worker.post('/events', workerAuth, async (c) => {
   const w: WorkerIdentity = c.var.worker;
-  const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await c.req.json().catch(() => null)) as Unchecked<FleetEventRequest> | null;
   if (!body || !Number.isInteger(body.task_id)) return c.json({ ...BAD_REQUEST, detail: 'task_id' }, 422);
   if (typeof body.kind !== 'string' || !EVENT_KINDS.has(body.kind)) return c.json({ ...BAD_REQUEST, detail: 'kind' }, 422);
   const detail = body.detail === undefined || body.detail === null ? null : isRecord(body.detail) ? body.detail : undefined;
@@ -891,7 +899,7 @@ worker.post('/events', workerAuth, async (c) => {
 
 worker.put('/session', workerAuth, async (c) => {
   const w: WorkerIdentity = c.var.worker;
-  const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await c.req.json().catch(() => null)) as Unchecked<SessionRequest> | null;
   const cookies = body ? parseCookies(body.cookies) : null;
   if (!cookies) return c.json({ ...BAD_REQUEST, detail: 'cookies' }, 422);
   const storageState = body!.storage_state === undefined ? undefined : parseStorageState(body!.storage_state);

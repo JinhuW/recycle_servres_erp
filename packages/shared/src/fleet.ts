@@ -902,10 +902,13 @@ export type HostReportRequest = FleetHostReport;
 
 export type HeartbeatAnswer = {
   ok: true;
-  /** `relogin` once, on the heartbeat after a manager queued one; else empty. */
-  directives: Array<'relogin'>;
+  /** Each once, on the heartbeat after it was queued (`relogin` by a manager,
+   *  `resume` by a manager or the auto-resume); else empty. */
+  directives: Array<'relogin' | 'resume'>;
   /** The id of the re-login a `relogin` directive delivers. */
   relogin_id?: string;
+  /** The id of the resume a `resume` directive delivers. */
+  resume_id?: string;
   worker_token?: string;
   token_expires_at?: number;
 };

@@ -240,17 +240,11 @@ describe('clients — the follow-up loop', () => {
     expect(second.body.items[0].name).not.toBe(first.body.items[0].name);
   });
 
-  it('lets the author delete their own note but not someone else\'s', async () => {
+  it("refuses a note on someone else's client", async () => {
     const marcus = await loginAs(MARCUS);
     const id = await mkClient(marcus.token, 'Typo Co');
-    await api('POST', `/api/suppliers/${id}/notes`, { token: marcus.token, body: { kind: 'note', body: 'oops' } });
-    const d = await api<{ timeline: { id: string }[] }>('GET', `/api/suppliers/${id}`, { token: marcus.token });
-    const noteId = d.body.timeline[0].id;
-
     const priya = await loginAs(PRIYA);
     expect((await api('POST', `/api/suppliers/${id}/notes`, { token: priya.token, body: { kind: 'note', body: 'hi' } })).status).toBe(404);
-    expect((await api('DELETE', `/api/suppliers/${id}/notes/${noteId}`, { token: priya.token })).status).toBe(404);
-    expect((await api('DELETE', `/api/suppliers/${id}/notes/${noteId}`, { token: marcus.token })).status).toBe(200);
   });
 });
 
@@ -346,48 +340,12 @@ describe('clients — building the book', () => {
   });
 });
 
-describe('clients — reassignment', () => {
+// Changing who owns a book has to leave a trace, so the generic setter must
+// never do it.
+describe('PATCH never changes the owner', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('a manager moves a book and the handover lands on the timeline', async () => {
-    const marcus = await loginAs(MARCUS);
-    const priya = await loginAs(PRIYA);
-    const id = await mkClient(marcus.token, 'Handover Co');
-
-    expect((await api('POST', `/api/suppliers/${id}/reassign`, {
-      token: marcus.token, body: { ownerId: priya.user.id } })).status).toBe(403);
-
-    const boss = await loginAs(ALEX);
-    expect((await api('POST', `/api/suppliers/${id}/reassign`, {
-      token: boss.token, body: { ownerId: priya.user.id } })).status).toBe(200);
-
-    expect((await api('GET', `/api/suppliers/${id}`, { token: marcus.token })).status).toBe(404);
-    const now = await api<Client & { timeline: { kind: string; body: string }[] }>(
-      'GET', `/api/suppliers/${id}`, { token: priya.token });
-    expect(now.status).toBe(200);
-    expect(now.body.timeline[0].kind).toBe('owner_changed');
-    expect(now.body.timeline[0].body).toMatch(/to Priya/i);
-  });
-
-  it('sends a departing purchaser\'s client to house accounts, not nowhere', async () => {
-    const marcus = await loginAs(MARCUS);
-    const id = await mkClient(marcus.token, 'Orphan Co');
-    const boss = await loginAs(ALEX);
-    expect((await api('POST', `/api/suppliers/${id}/reassign`, {
-      token: boss.token, body: { ownerId: null } })).status).toBe(200);
-    const seen = await api<ListBody>('GET', '/api/suppliers', { token: boss.token });
-    const row = seen.body.items.find((i) => i.name === 'Orphan Co')!;
-    expect(row.ownerId).toBeNull();
-    expect(row.ownerName).toBeNull();
-  });
-});
-
-// Changing who owns a book is the one supplier write that has to leave a trace,
-// so it gets exactly one door.
-describe('owner changes go through /reassign only', () => {
-  beforeEach(async () => { await resetDb(); });
-
-  it('PATCH refuses ownerId even for a manager, and points at the endpoint', async () => {
+  it('refuses ownerId even for a manager', async () => {
     const alex = await loginAs(ALEX);
     const priya = await loginAs(PRIYA);
     const id = await mkClient(alex.token, 'Door Policy Supply');
@@ -396,27 +354,10 @@ describe('owner changes go through /reassign only', () => {
       token: alex.token, body: { ownerId: priya.user.id },
     });
     expect(r.status).toBe(400);
-    expect(r.body.error).toContain('reassign');
 
     // and it really did not write
     const d = await api<{ ownerId: string | null }>('GET', `/api/suppliers/${id}`, { token: alex.token });
     expect(d.body.ownerId).toBe(alex.user.id);
-  });
-
-  it('reassign still works and still writes the owner_changed note', async () => {
-    const alex = await loginAs(ALEX);
-    const priya = await loginAs(PRIYA);
-    const id = await mkClient(alex.token, 'Handover Supply');
-
-    const r = await api('POST', `/api/suppliers/${id}/reassign`, {
-      token: alex.token, body: { ownerId: priya.user.id },
-    });
-    expect(r.status, JSON.stringify(r.body)).toBe(200);
-
-    const sql = getTestDb();
-    const notes = await sql<{ kind: string }[]>`
-      SELECT kind FROM supplier_notes WHERE supplier_id = ${id}::uuid AND kind = 'owner_changed'`;
-    expect(notes.length).toBe(1);
   });
 });
 

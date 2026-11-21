@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   fbChatAccountStatus, fbChatConfigValue,
-  type FbChatAccountRow, type FbChatAccountStatus, type FbChatAccountsAnswer, type FbChatConfigPage,
-  type FbChatDeviceApproval, type FbChatDeviceRow, type FbChatMediaAnswer, type FbChatMessagesAnswer, type FbChatReplyAnswer,
-  type FbChatReplyRequest,
+  type FbChatAccountPatch, type FbChatAccountRow, type FbChatAccountStatus, type FbChatAccountsAnswer, type FbChatConfigPage,
+  type FbChatConfigWrite, type FbChatDeviceApproval, type FbChatDeviceRow, type FbChatMediaAnswer, type FbChatMessagesAnswer,
+  type FbChatReplyAnswer, type FbChatReplyRequest, type FbChatRetryRequest,
   type FbChatSummary, type FbChatTelegramStatus, type FbChatThreadsAnswer, type FbChatThreadsQuery,
 } from '@recycle-erp/shared';
 import { api } from './api';
@@ -35,13 +35,13 @@ export const fbChatApi = {
   uploadMedia: (file: Blob) => api.uploadRaw<FbChatMediaAnswer>(`${BASE}/media`, file),
   /** `force`: required for an `uncertain` reply, which may already be on Facebook. */
   retry: (messageId: number, force = false) =>
-    api.post<FbChatReplyAnswer>(`${BASE}/messages/${messageId}/retry`, force ? { force: true } : {}),
+    api.post<FbChatReplyAnswer>(`${BASE}/messages/${messageId}/retry`, (force ? { force: true } : {}) satisfies FbChatRetryRequest),
   markRead: (threadId: number) => api.post<{ ok: true }>(`${BASE}/threads/${threadId}/read`, {}),
   markUnread: (threadId: number) => api.post<{ ok: true }>(`${BASE}/threads/${threadId}/unread`, {}),
 
   accounts: () => api.get<FbChatAccountsAnswer>(`${BASE}/accounts`),
   renameAccount: (accountId: number, label: string) =>
-    api.patch<{ ok: true }>(`${BASE}/accounts/${accountId}`, { label }),
+    api.patch<{ ok: true }>(`${BASE}/accounts/${accountId}`, { label } satisfies FbChatAccountPatch),
 
   devices: () => api.get<{ devices: FbChatDeviceRow[] }>(`${BASE}/devices`),
   approveDevice: (deviceId: string, approval: FbChatDeviceApproval = {}) =>
@@ -53,7 +53,7 @@ export const fbChatApi = {
   config: () => api.get<FbChatConfigPage>(`${BASE}/config`),
   /** `accountId` null sets the value for every account. */
   setConfig: (k: string, accountId: number | null, value: unknown) =>
-    api.put<{ ok: true }>(`${BASE}/config/${key(k)}`, { accountId, value }),
+    api.put<{ ok: true }>(`${BASE}/config/${key(k)}`, { accountId, value } satisfies FbChatConfigWrite),
   /** Removes a value: an account goes back to every account's, the shared one to the default. */
   resetConfig: (k: string, accountId: number | null) =>
     api.delete<{ ok: true }>(`${BASE}/config/${key(k)}${accountId === null ? '' : `?accountId=${accountId}`}`),

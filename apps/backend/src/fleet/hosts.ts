@@ -1,12 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import { Hono } from 'hono';
 import type { JSONValue } from 'postgres';
-import { FLEET_OUTAGE_LEASE_MINUTES, fleetInfraPark, fleetReportedEngine, fleetStateParked, type ClaimTicketAnswer, type DesiredAnswer, type FleetHost, type FleetHostContainer, type FleetHostReport, type FleetRelease } from '@recycle-erp/shared';
+import { FLEET_OUTAGE_LEASE_MINUTES, fleetInfraPark, fleetReportedEngine, fleetStateParked, type ClaimTicketAnswer, type DesiredAnswer, type FleetHost, type FleetHostContainer, type FleetHostReport, type FleetRelease, type HostReportRequest } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
 import type { Env } from '../types';
 import { CLAIM_TICKET_MINUTES, hostAuth, managerOnly, newClaimTicket, type HostEnv, type ManagerEnv } from './auth';
-import { sha256hex, type FleetHostRow, type FleetSlotRow } from './sql';
+import { sha256hex, type FleetHostRow, type FleetSlotRow, type Unchecked } from './sql';
 import { releaseTasks } from './claim';
 import { slotWaits } from './proxyExit';
 import { exhaustedProxyIds } from './proxyMarks';
@@ -534,7 +534,7 @@ hosts.post('/:id/tickets', hostAuth, async (c) => {
 
 hosts.post('/:id/report', hostAuth, async (c) => {
   const host: FleetHostRow = c.var.host;
-  const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await c.req.json().catch(() => null)) as Unchecked<HostReportRequest> | null;
   if (!body || typeof body.version !== 'string' || !Array.isArray(body.containers)) {
     return c.json({ error: 'bad_request', detail: 'version, containers' }, 422);
   }

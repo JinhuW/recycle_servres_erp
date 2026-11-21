@@ -1387,9 +1387,10 @@ log and `orders.supplier_id`.
   be one of yours — a purchaser cannot attach a PO to someone else's book, and a
   client's name is scoped to the reader, so a book handed to another purchaser
   stops appearing on the previous owner's orders (v1.114.1).
-- **Changing a client's owner goes through one endpoint only.** A handover has
-  to leave a trace on the same timeline as the calls, so it is a reassign, never
-  a field edit (v1.114.1).
+- **A client's owner is never changed by an edit.** A handover has to leave a
+  trace on the same timeline as the calls, so the client edit refuses an owner
+  change (v1.114.1). The reassign endpoint that made the handover had no screen
+  and was removed; a client keeps the owner it was created or adopted with.
 
 ## Leads (Reddit sellers)
 

@@ -188,8 +188,8 @@ describe('supplierId is validated at the boundary', () => {
     expect(bad.status).toBe(400);
   });
 
-  // Belt and braces behind the write guard: a row that predates it — or that a
-  // reassign moved out from under the PO — must not keep naming the client.
+  // Belt and braces behind the write guard: a row that predates it — or whose
+  // client changed hands under the PO — must not keep naming the client.
   it('reads back null once the client leaves the caller\'s book', async () => {
     const alex = await loginAs(ALEX);
     const marcus = await loginAs(MARCUS);
@@ -200,11 +200,8 @@ describe('supplierId is validated at the boundary', () => {
       'GET', `/api/orders/${po}`, { token: marcus.token });
     expect(before.body.order.supplier).not.toBeNull();
 
-    // A manager hands the book to someone else; MARCUS keeps the PO.
-    const r = await api('POST', `/api/suppliers/${client}/reassign`, {
-      token: alex.token, body: { ownerId: null },
-    });
-    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    // The book goes to house accounts; MARCUS keeps the PO.
+    await getTestDb()`UPDATE suppliers SET owner_id = NULL WHERE id = ${client}`;
 
     // House-account clients stay readable — they are nobody's private book.
     const after = await api<{ order: { supplier: unknown } }>(
@@ -218,10 +215,7 @@ describe('supplierId is validated at the boundary', () => {
     const client = await newClient(marcus.token, 'Moved To Alex Supply');
     const po = await submittedPO(marcus.token, client);
 
-    const r = await api('POST', `/api/suppliers/${client}/reassign`, {
-      token: alex.token, body: { ownerId: alex.user.id },
-    });
-    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    await getTestDb()`UPDATE suppliers SET owner_id = ${alex.user.id} WHERE id = ${client}`;
 
     // MARCUS still owns the PO but no longer the client, and GET /api/suppliers
     // would 404 it for him — so the order read must not keep handing him the name.

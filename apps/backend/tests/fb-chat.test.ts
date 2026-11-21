@@ -531,7 +531,7 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
       expect((await push<FbChatDeviceAnswer>('device', {}, deviceBearer(e))).body.status).toBe('revoked');
     });
 
-    it('refuses a rejected device, a wrong token and a deleted one', async () => {
+    it('refuses a rejected device and a wrong token', async () => {
       const e = (await enroll()).body;
       expect((await decide(e.deviceId, 'reject')).status).toBe(200);
       expect((await decide(e.deviceId, 'revoke')).status).toBe(409);
@@ -539,9 +539,6 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
 
       const forged = `fbd_${e.deviceId}_${'A'.repeat(43)}`;
       expect((await push('device', {}, forged)).status).toBe(401);
-      const manager = await loginAs(ALEX);
-      expect((await api('DELETE', `/api/fb-chat/devices/${e.deviceId}`, { token: manager.token })).status).toBe(200);
-      expect((await push('device', {}, deviceBearer(e))).status).toBe(401);
     });
 
     it('bounds enrollment per address and in waiting requests', async () => {
@@ -1171,8 +1168,6 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
       const [acct] = (await accounts()).accounts;
       expect(acct).toMatchObject({ threads: 1, device: { id: e.deviceId, status: 'revoked' } });
       expect(fbChatAccountStatus(acct!, Date.now())).toBe('stale');
-      await api('DELETE', `/api/fb-chat/devices/${e.deviceId}`, { token });
-      expect((await accounts()).accounts[0]!.device).toBeNull();
     });
 
     it('numbers accounts in the order they appear and counts what the tabs show', async () => {
