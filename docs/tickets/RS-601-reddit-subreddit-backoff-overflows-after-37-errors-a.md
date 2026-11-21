@@ -2,13 +2,13 @@
 id: RS-601
 title: Reddit subreddit backoff overflows after ~37 errors and the failure repeats forever
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-21
 reporter: jinhu
 branch: fix/reddit-dedup-memory-generation
-pr:
-version:
+pr: "#1234"
+version: "tracker c68b2c66, Railway api+worker deployed 2026-11-21; OCI fleet pending"
 related: []
 ---
 
