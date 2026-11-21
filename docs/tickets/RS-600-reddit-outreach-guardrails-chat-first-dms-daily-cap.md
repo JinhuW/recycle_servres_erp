@@ -2,7 +2,7 @@
 id: RS-600
 title: Reddit outreach guardrails: chat-first DMs, daily cap, do-not-contact
 type: story
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-11-20
 reporter: jinhu
