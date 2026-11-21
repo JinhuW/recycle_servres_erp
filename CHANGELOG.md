@@ -21,7 +21,8 @@ coordinator's `stats/reviews` proxy and its `PUT accounts/:id` credentials
 write (workers take pool accounts since RS-276). It also loses `loadSlot` and a
 handful of unused imports. The frontend loses the fleet `RoundCard` and
 `WorkersCard` boards the newer fleet pages replaced, the helpers and roughly 170
-translation keys only they used, and unused re-exports. The shared package drops
+translation keys only they used, unused re-exports, and 43 CSS classes no
+markup names. The shared package drops
 seven exports nobody imports (`sortCategories` among them, which the backend
 keeps its own copy of), and the fleet agent drops `needsOperator`.
 

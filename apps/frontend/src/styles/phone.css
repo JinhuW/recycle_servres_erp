@@ -32,7 +32,6 @@
   letter-spacing: -0.02em;
   margin: 0;
 }
-.ph-header .ph-sub { font-size: 12px; color: var(--fg-subtle); margin-top: 2px; }
 
 .ph-icon-btn {
   width: 36px; height: 36px;
@@ -118,10 +117,6 @@
   border-radius: 14px;
   overflow: hidden;
 }
-.ph-card-head { padding: 14px 16px 8px; }
-.ph-card-title { font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
-.ph-card-sub { font-size: 11.5px; color: var(--fg-subtle); margin-top: 2px; }
-.ph-card-body { padding: 8px 16px 14px; }
 
 /* List rows */
 .ph-row {
@@ -498,13 +493,6 @@
 }
 
 /* AI extracted card */
-.ph-ai-card {
-  background: var(--bg-elev);
-  border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--border));
-  border-radius: 14px;
-  overflow: hidden;
-  box-shadow: 0 4px 16px color-mix(in oklch, var(--accent) 12%, transparent);
-}
 .ph-ai-banner {
   padding: 10px 14px;
   background: var(--accent-soft);
@@ -742,10 +730,6 @@
   font-weight: 600;
   flex-shrink: 0;
 }
-
-/* Mini bar chart for phone */
-.ph-mini-bar { height: 6px; background: var(--bg-soft); border-radius: 999px; overflow: hidden; border: 1px solid var(--border); }
-.ph-mini-bar .fill { height: 100%; background: var(--accent); border-radius: 999px; }
 
 /* Sparkline area chart */
 .ph-spark { width: 100%; height: 110px; display: block; }
@@ -1327,7 +1311,7 @@
 .ph-ho-title { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
 .ph-ho-sub { font-size: 12.5px; color: var(--fg-subtle); margin-top: 2px; }
 .ph-ho-close { background: transparent; border: none; color: var(--accent-strong); font-size: 14px; font-weight: 600; font-family: inherit; padding: 4px; cursor: pointer; }
-.ph-ho-sheet .ho-tiles, .ph-ho-sheet .ho-row, .ph-ho-sheet .ho-row-pay { grid-template-columns: 1fr; }
+.ph-ho-sheet .ho-tiles, .ph-ho-sheet .ho-row { grid-template-columns: 1fr; }
 /* The phone stacks the payment picker and gives the proof panel the shell's
    field label weight, same as the rest of the sheet. */
 .ph-ho-sheet .pay-row, .ph-pay .pay-row { grid-template-columns: 1fr; }

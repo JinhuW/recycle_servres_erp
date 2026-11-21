@@ -199,7 +199,6 @@ body.phone-mode, body.phone-mode #root, body.phone-mode html { overflow: hidden;
 
 button { font-family: inherit; cursor: pointer; }
 .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-feature-settings: 'tnum'; }
-.tabular { font-variant-numeric: tabular-nums; }
 
 /* ===== Buttons ===== */
 .btn {
@@ -463,19 +462,6 @@ button { font-family: inherit; cursor: pointer; }
 .lb-rank.bronze { background: oklch(0.90 0.07 50);  color: oklch(0.35 0.10 50); }
 
 /* ===== AI banner / scan animations ===== */
-.ai-banner {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px;
-  background: var(--accent-soft);
-  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
-  border-radius: 10px;
-  font-size: 13px;
-  color: var(--accent-strong);
-}
-.ai-banner .pill-ai {
-  font-weight: 600; padding: 2px 7px; background: var(--accent); color: white;
-  border-radius: 5px; font-size: 10.5px; letter-spacing: 0.04em;
-}
 .ai-dot {
   display: inline-block; width: 6px; height: 6px; border-radius: 50%;
   background: var(--accent); animation: pulse 1.4s ease-in-out infinite;
@@ -595,16 +581,6 @@ button { font-family: inherit; cursor: pointer; }
   font-family: 'JetBrains Mono', monospace;
   flex-shrink: 0;
   padding-left: 10px;
-}
-.ai-dropzone-status .progress-track {
-  width: 76px; height: 4px; border-radius: 999px;
-  background: color-mix(in oklch, var(--accent) 18%, transparent);
-  overflow: hidden;
-}
-.ai-dropzone-status .progress-fill {
-  height: 100%; border-radius: 999px;
-  background: var(--accent);
-  transition: width 0.25s ease;
 }
 @media (prefers-reduced-motion: reduce) {
   .ai-dropzone { transition: border-color 0.16s ease, background 0.16s ease; }
@@ -747,49 +723,10 @@ button { font-family: inherit; cursor: pointer; }
    A small floating panel anchored to its trigger. `.up` flips it above the
    trigger — used in the sell-order modal footer, which sits at the screen
    bottom. The transparent backdrop captures the outside click that closes it. */
-.popmenu-wrap { position: relative; display: inline-flex; }
-.popmenu-backdrop { position: fixed; inset: 0; z-index: 40; }
-.popmenu {
-  position: absolute;
-  z-index: 41;
-  min-width: 232px;
-  right: 0;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: 0 10px 30px -8px oklch(0.2 0.02 250 / 0.28), 0 2px 8px -2px oklch(0.2 0.02 250 / 0.18);
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  transform-origin: bottom right;
-  animation: popmenu-in 0.13s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.popmenu.up { bottom: calc(100% + 6px); }
-.popmenu:not(.up) { top: calc(100% + 6px); }
 @keyframes popmenu-in {
   from { opacity: 0; transform: scale(0.96) translateY(4px); }
   to   { opacity: 1; transform: scale(1) translateY(0); }
 }
-.popmenu-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  text-align: left;
-  padding: 8px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  transition: background 0.1s;
-}
-.popmenu-item:hover { background: var(--bg-soft); }
-.popmenu-item .ico { color: var(--fg-muted); display: inline-grid; place-items: center; }
-.popmenu-item .txt { display: flex; flex-direction: column; line-height: 1.3; }
-.popmenu-item .txt b { font-size: 13px; font-weight: 600; }
-.popmenu-item .txt small { font-size: 11px; color: var(--fg-subtle); }
 
 /* ===== Avatar sizes (md/sm used in tables and modal headers) ===== */
 .avatar.md { width: 32px; height: 32px; font-size: 12px; }
@@ -885,24 +822,6 @@ button { font-family: inherit; cursor: pointer; }
   color: var(--fg-subtle);
   font-style: italic;
 }
-
-/* ===== Photo placeholder (dashed tile) ===== */
-.photo-ph {
-  width: 100%; aspect-ratio: 4/3;
-  border-radius: 10px;
-  background:
-    repeating-linear-gradient(135deg,
-      var(--bg-soft) 0 8px,
-      oklch(0.96 0.005 100) 8px 16px);
-  border: 1px dashed var(--border-strong);
-  display: grid; place-items: center;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--fg-subtle);
-}
-
-/* ===== Mobile preview wrapper (camera in larger containers) ===== */
-.mobile-preview { width: 100%; max-width: 380px; margin: 0 auto; }
 
 /* ===== Drawer entrance animation (used by HistoryDrawer etc.) ===== */
 @keyframes drawer-in {
@@ -1053,12 +972,3 @@ button { font-family: inherit; cursor: pointer; }
 .field.is-missing .select {
   border-color: var(--warn-strong);
 }
-.dw-missing {
-  display: flex; align-items: flex-start; gap: 8px;
-  padding: 9px 12px; border-radius: 8px;
-  background: var(--warn-soft); color: var(--warn-strong);
-  border: 1px solid var(--warn);
-  font-size: 12.5px; line-height: 1.45;
-}
-.dw-missing:focus-visible { outline: 2px solid var(--warn-strong); outline-offset: 2px; }
-.dw-missing .dw-missing-k { font-weight: 650; }

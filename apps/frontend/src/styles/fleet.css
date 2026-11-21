@@ -31,15 +31,6 @@
   font-size: 12px;
   margin: -6px 2px 0;
 }
-.fleet-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  color: var(--fg-subtle);
-  cursor: pointer;
-  user-select: none;
-}
 
 /* Tables */
 .fleet-table td {
@@ -1046,20 +1037,6 @@ button.fleet-bay:focus-visible {
 }
 
 /* The worker page */
-.fleet-facts {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 10px 24px;
-  margin: 0;
-  padding: 16px 18px;
-  font-size: 13px;
-}
-.fleet-facts dt {
-  color: var(--fg-subtle);
-}
-.fleet-facts dd {
-  margin: 0;
-}
 .fleet-city-pick {
   border: 0;
   padding: 0;
