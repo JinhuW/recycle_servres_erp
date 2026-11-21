@@ -76,7 +76,7 @@ function bidLot(n: number, patch: Partial<SheetLineRow> = {}): SheetLineRow {
   return {
     sol_id: `sale-${n}`, sell_qty: n, sol_label: 'Samsung 16GB DDR4', sol_sub: null,
     sol_part: null, sol_category: 'RAM', sol_condition: null, product_no: n,
-    append_batch: 0, pack_warehouse: `WH-${n}`, inv_id: `lot-${n}`,
+    pack_warehouse: `WH-${n}`, inv_id: `lot-${n}`,
     source_order_id: `PO-${n}`, po_line_no: 1,
     category: 'RAM', brand: 'Samsung', capacity: '16GB', generation: 'DDR4',
     type: 'Server', classification: 'RDIMM', rank: '2Rx4', speed: '2133',

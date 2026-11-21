@@ -130,8 +130,6 @@ export interface SellOrderLineInsert {
   // The product's # when the line continues one already on the order; null
   // for a new product, which assignSellProductNos numbers after the insert.
   productNo: number | null;
-  // What the release before 0170 numbered by; see appendBatches.
-  appendBatch: number | null;
 }
 
 export async function insertSellOrderLine(
@@ -143,14 +141,14 @@ export async function insertSellOrderLine(
     INSERT INTO sell_order_lines
       (sell_order_id, inventory_id, category, label, sub_label, part_number,
        qty, unit_price, warehouse_id, condition, position,
-       source_currency, source_unit_price, source_fx_rate_to_usd, product_no, append_batch)
+       source_currency, source_unit_price, source_fx_rate_to_usd, product_no)
     VALUES
       (${sellOrderId}, ${line.inventoryId}, ${line.category}, ${line.label},
        ${line.subLabel}, ${line.partNumber},
        ${line.qty}, ${line.unitPriceUsd},
        ${line.warehouseId}, ${line.condition}, ${line.position},
        ${line.sourceCurrency}, ${line.sourceUnitPrice}, ${line.sourceFxRate},
-       ${line.productNo}, ${line.appendBatch})
+       ${line.productNo})
   `;
 }
 
@@ -204,7 +202,6 @@ export async function createSellOrderDraft(
         sourceUnitPrice: isNonUsd ? l.unitPrice : null,
         sourceFxRate: isNonUsd ? fx.rate : null,
         productNo: null,
-        appendBatch: null,
       });
     }
     // Numbered once, in packing-list order, and never again.

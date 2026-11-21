@@ -25,7 +25,7 @@ import {
   buildPriceTemplateWorkbook, buildPackingListWorkbook, buildPackingListByPoWorkbook,
 } from '../lib/sellOrderPriceTemplate';
 import {
-  assignSellProductNos, foldSheetLines, healSellProductNos, numberSheetLines, sheetRows, type SheetLineRow,
+  assignSellProductNos, foldSheetLines, numberSheetLines, sheetRows, type SheetLineRow,
 } from '../services/sellOrderNumbers';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { searchSellableInventory } from '../services/sellableInventory';
@@ -310,12 +310,12 @@ sellOrders.get('/:id', async (c) => {
     lot_category: string | null; brand: string | null; capacity: string | null;
     generation: string | null; description: string | null; lot_part_number: string | null;
     chip_number: string | null; lot_condition: string | null; rpm: number | null;
-    product_no: number | null; append_batch: number | null;
+    product_no: number | null;
   }[]>`
     SELECT sol.id, sol.category, sol.label, sol.sub_label, sol.part_number,
            sol.qty, sol.unit_price::float AS unit_price,
            sol.source_unit_price::float AS source_unit_price,
-           sol.condition, sol.position, sol.product_no, sol.append_batch,
+           sol.condition, sol.position, sol.product_no,
            sol.inventory_id, sol.warehouse_id, ol.order_id AS source_order_id,
            ${poLineNo(sql, 'ol')} AS source_line_no,
            w.short AS warehouse_short, pw.short AS pack_warehouse_short,
@@ -386,7 +386,7 @@ sellOrders.get('/:id', async (c) => {
     sol_id: l.id, sell_qty: l.qty,
     sol_label: l.label, sol_sub: l.sub_label, sol_part: l.part_number,
     sol_category: l.category, sol_condition: l.condition,
-    product_no: l.product_no, append_batch: l.append_batch,
+    product_no: l.product_no,
     pack_warehouse: l.pack_warehouse_short,
     inv_id: l.inventory_id, source_order_id: l.source_order_id, po_line_no: l.source_line_no,
     category: l.lot_category, brand: l.brand, capacity: l.capacity, generation: l.generation,
@@ -808,36 +808,6 @@ async function carriedProductNos(
   };
 }
 
-// What the release before 0170 numbered a line by (sell_order_lines.append_batch),
-// still written so a rollback to it moves no #: a line keeps its own — by row,
-// else by lot — and a line new to an order past Draft gets the next batch. Drop
-// it with legacyNumbers.
-async function appendBatches(
-  tx: SqlLike, orderId: string, status: string,
-): Promise<(l: SaveLineInput) => number | null> {
-  const rows = await tx<{ id: string; inventory_id: string | null; append_batch: number | null }[]>`
-    SELECT id, inventory_id, append_batch FROM sell_order_lines WHERE sell_order_id = ${orderId}`;
-  const byRow = new Map(rows.map((r) => [r.id, r.append_batch]));
-  const byLot = new Map<string, number | null>();
-  for (const r of rows) {
-    if (!r.inventory_id) continue;
-    const lot = r.inventory_id.toLowerCase();
-    const had = byLot.get(lot);
-    if (!byLot.has(lot) || r.append_batch === null || (had != null && r.append_batch < had)) {
-      byLot.set(lot, r.append_batch);
-    }
-  }
-  const next = status === 'Draft'
-    ? null
-    : rows.reduce((max, r) => Math.max(max, r.append_batch ?? 0), 0) + 1;
-  return (l) => {
-    if (typeof l.id === 'string' && byRow.has(l.id)) return byRow.get(l.id)!;
-    const lot = l.inventoryId?.toLowerCase();
-    if (lot && byLot.has(lot)) return byLot.get(lot)!;
-    return next;
-  };
-}
-
 // Edit an existing sell order. Status / discount / notes are simple COALESCE
 // updates. Optionally the manager can also re-pick the customer and rewrite the
 // whole line set (same builder UI as a new order) — those edits replace
@@ -1007,9 +977,8 @@ sellOrders.patch('/:id', async (c) => {
       const isNonUsd = effectiveCurrency !== 'USD';
       // Lines an older instance rewrote mid-deploy carry no #: store the ones
       // they show before carrying them across this rewrite.
-      await healSellProductNos(tx, id);
+      await assignSellProductNos(tx, id);
       const carriedNo = await carriedProductNos(tx, id);
-      const batchFor = await appendBatches(tx, id, beforeHead.status);
       await tx`DELETE FROM sell_order_lines WHERE sell_order_id = ${id}`;
       for (let i = 0; i < body.lines.length; i++) {
         const l = body.lines[i];
@@ -1029,7 +998,6 @@ sellOrders.patch('/:id', async (c) => {
           sourceUnitPrice: isNonUsd ? l.unitPrice : null,
           sourceFxRate: isNonUsd ? fx.rate : null,
           productNo: carriedNo(l),
-          appendBatch: batchFor(l),
         });
       }
       await assignSellProductNos(tx, id);

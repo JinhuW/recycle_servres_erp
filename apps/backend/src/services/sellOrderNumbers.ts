@@ -10,7 +10,6 @@
 // category, device, DDR generation, brand / capacity / speed — and which lot's
 // details it shows. A new order's products are numbered in that order, so its
 // packing list reads 1..N; later ones take the next # wherever they print.
-import type postgres from 'postgres';
 import type { SqlLike } from '../db';
 import { comparePoIds, packSections, type PoSource, type PriceTemplateProduct } from '../lib/sellOrderPriceTemplate';
 import { ddr5SpecKey, ramShortCode, ramShortCodes, ramSpeedMts, sellSeriesKey } from '@recycle-erp/shared';
@@ -34,8 +33,6 @@ export type SheetLineRow = {
   sol_category: string; sol_condition: string | null;
   // Null until numbered: only a line an older instance wrote mid-deploy.
   product_no: number | null;
-  // What the # was derived from before 0170 — read by legacyNumbers alone.
-  append_batch: number | null;
   // The lot's current warehouse, not the one saved on the line: a transfer of
   // committed stock moves the lot, and the pick happens where it is.
   pack_warehouse: string | null;
@@ -263,16 +260,12 @@ function plannedNos(lines: readonly FoldLine[], next: number): { assigned: Map<s
   return { assigned, next };
 }
 
-// The # every line shows. A line not numbered yet shows what the next save
-// will store, so no screen ever shows a line without one: in an order with
-// none stored at all — written before 0170, or by the previous release's
-// instance while a deploy rolls — the # that release showed; otherwise the
-// # it is planned to take from `nextNo` on.
+// The # every line shows. A line not numbered yet (one an older instance wrote
+// mid-deploy) shows the # it is planned to take from `nextNo` on, which is what
+// the next save stores, so no screen ever shows a line without one.
 function withNos(rows: readonly SheetLineRow[], nextNo: number): readonly SheetLineRow[] {
   if (!rows.some((r) => r.product_no == null)) return rows;
-  const fill = rows.every((r) => r.product_no == null)
-    ? legacyNumbers(rows)
-    : plannedNos(rows.map(foldLine), nextNo).assigned;
+  const fill = plannedNos(rows.map(foldLine), nextNo).assigned;
   return rows.map((r) => {
     if (r.product_no != null) return r;
     const no = fill.get(r.sol_id);
@@ -377,7 +370,7 @@ export async function sheetRows(sql: SqlLike, id: string): Promise<SheetLineRow[
       sol.id AS sol_id, sol.qty AS sell_qty,
       sol.label AS sol_label, sol.sub_label AS sol_sub, sol.part_number AS sol_part,
       sol.category AS sol_category, sol.condition AS sol_condition,
-      sol.product_no, sol.append_batch,
+      sol.product_no,
       w.short AS pack_warehouse,
       l.id AS inv_id, l.order_id AS source_order_id, ${poLineNo(sql, 'l')} AS po_line_no,
       l.category, l.brand, l.capacity, l.generation, l.type,
@@ -428,74 +421,4 @@ export async function assignSellProductNos(tx: SqlLike, soId: string): Promise<v
     SELECT next_product_no FROM sell_orders WHERE id = ${soId}`;
   const { assigned, next } = plannedNos((await sheetRows(tx, soId)).map(foldLine), start);
   await writeNumbers(tx, soId, assigned, next);
-}
-
-// Stores the # an order's unnumbered lines show (withNos): an order with none
-// stored gets the numbers the previous release showed for it — from before
-// 0170, or a rewrite by that release's instance during a deploy — and any
-// other gets its planned ones. Run before a save carries the #s across its
-// rewrite, and at boot. The caller holds the order's row lock.
-export async function healSellProductNos(tx: SqlLike, soId: string): Promise<void> {
-  const [{ unnumbered, numbered }] = await tx<{ unnumbered: boolean; numbered: boolean }[]>`
-    SELECT bool_or(product_no IS NULL) AS unnumbered, bool_or(product_no IS NOT NULL) AS numbered
-    FROM sell_order_lines WHERE sell_order_id = ${soId}`;
-  if (!unnumbered) return;
-  if (numbered) {
-    await assignSellProductNos(tx, soId);
-    return;
-  }
-  const noByLine = legacyNumbers(await sheetRows(tx, soId));
-  await writeNumbers(tx, soId, noByLine, Math.max(0, ...noByLine.values()) + 1);
-}
-
-// ── Before 0170 ─────────────────────────────────────────────────────────────
-// The # every order showed until it was stored: derived on each read from the
-// packing-list sort, one per (warehouse tab, part|label|condition), in tiers of
-// append_batch so a product added past Draft went after the rest.
-// Kept only to freeze those numbers once (freezeLegacySellNumbers); delete it
-// with append_batch once prod holds no unnumbered line.
-function legacyNumbers(rows: readonly SheetLineRow[]): Map<string, number> {
-  const lines = rows.map(foldLine);
-  const numbered = byWarehouseTab(lines).map(([, whLines]) =>
-    packSections(foldProducts(whLines, byKey)).flatMap((s) => s.rows));
-
-  const batchByLine = new Map(lines.map((l) => [l.row.sol_id, l.row.append_batch]));
-  const tierOf = (p: SheetProduct): number => {
-    let tier = Infinity;
-    for (const src of p.poSources) {
-      for (const lineId of src.solIds) tier = Math.min(tier, batchByLine.get(lineId) ?? 0);
-    }
-    return tier;
-  };
-  const tiers = numbered.map((products) => products.map(tierOf));
-  const tierOrder = [...new Set(tiers.flat())].sort((a, b) => a - b);
-
-  let n = 0;
-  const noByLine = new Map<string, number>();
-  for (const tier of tierOrder) {
-    numbered.forEach((products, w) => {
-      products.forEach((p, i) => {
-        if (tiers[w]![i] !== tier) return;
-        n += 1;
-        for (const src of p.poSources) for (const lineId of src.solIds) noByLine.set(lineId, n);
-      });
-    });
-  }
-  return noByLine;
-}
-
-// Freezes the # every order showed before 0170 stored it — the numbers already
-// on labels — and numbers any line an older instance wrote since. Runs at boot
-// before the server takes requests; idempotent, and a failure stops the boot
-// rather than serve half-numbered orders.
-export async function freezeLegacySellNumbers(sql: postgres.Sql): Promise<number> {
-  const orders = await sql<{ sell_order_id: string }[]>`
-    SELECT DISTINCT sell_order_id FROM sell_order_lines WHERE product_no IS NULL ORDER BY sell_order_id`;
-  for (const { sell_order_id: id } of orders) {
-    await sql.begin(async (tx) => {
-      await tx`SELECT 1 FROM sell_orders WHERE id = ${id} FOR UPDATE`;
-      await healSellProductNos(tx, id);
-    });
-  }
-  return orders.length;
 }

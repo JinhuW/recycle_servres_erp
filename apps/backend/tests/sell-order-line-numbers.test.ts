@@ -14,7 +14,6 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { firstCustomerId } from './helpers/fixtures';
-import { freezeLegacySellNumbers } from '../src/services/sellOrderNumbers';
 
 type DetailLine = {
   id: string; no: number; inventoryId: string | null; category: string; label: string; sub: string | null;
@@ -486,56 +485,14 @@ describe('sell order #: an added product takes the next #, in any status', () =>
   });
 });
 
-// Orders that existed before 0170 showed a # derived on every read; the boot
-// freezes exactly that number — sorted set first, then each append batch — so
-// no label already written moves.
-describe('sell order #: the boot freezes the numbers older orders showed', () => {
+describe('sell order #: a line an older instance wrote unnumbered', () => {
   let mgr: string;
   beforeEach(async () => {
     await resetDb();
     mgr = (await loginAs(ALEX)).token;
   });
 
-  it('numbers the sorted set by the packing list, then each append batch after it, tabs and 0s included', async () => {
-    const [po] = await twoPos();
-    const [k4, s4, d3, h4, a3, nj, zero] = await lotsOn(po!, [
-      { pn: 'FRZ-K4', brand: 'Kingston', warehouse: 'WH-LA1' },
-      { pn: 'FRZ-S4', brand: 'Samsung', warehouse: 'WH-LA1' },
-      { pn: 'FRZ-D3', brand: 'Samsung', generation: 'DDR3', warehouse: 'WH-LA1' },
-      { pn: 'FRZ-H4', brand: 'Hynix', warehouse: 'WH-LA1' },
-      { pn: 'FRZ-A3', brand: 'Adata', generation: 'DDR3', warehouse: 'WH-LA1' },
-      { pn: 'FRZ-NJ', brand: 'Kingston', warehouse: 'WH-NJ2' },
-      { pn: 'FRZ-Z0', brand: 'Crucial', warehouse: 'WH-LA1' },
-    ]);
-    const id = await createOrder(mgr, [
-      lotLine(k4!, 'FRZ-K4', 'WH-LA1'), lotLine(s4!, 'FRZ-S4', 'WH-LA1'), lotLine(nj!, 'FRZ-NJ', 'WH-NJ2'),
-      lotLine(zero!, 'FRZ-Z0', 'WH-LA1'), lotLine(d3!, 'FRZ-D3', 'WH-LA1'), lotLine(h4!, 'FRZ-H4', 'WH-LA1'),
-      lotLine(a3!, 'FRZ-A3', 'WH-LA1'),
-    ]);
-    // As the order stood before 0170: nothing stored; K4, S4, NJ and a line
-    // held at 0 in the sorted set, D3 and H4 added by the first save past
-    // Draft, A3 by the second.
-    const sql = getTestDb();
-    await sql`UPDATE sell_order_lines SET qty = 0 WHERE sell_order_id = ${id} AND inventory_id = ${zero}`;
-    await sql`UPDATE sell_order_lines SET product_no = NULL, append_batch = CASE
-                WHEN inventory_id IN (${d3}, ${h4}) THEN 1
-                WHEN inventory_id = ${a3} THEN 2 END
-              WHERE sell_order_id = ${id}`;
-    await sql`UPDATE sell_orders SET next_product_no = 1 WHERE id = ${id}`;
-
-    expect(await freezeLegacySellNumbers(sql)).toBeGreaterThanOrEqual(1);
-    // The sorted set walks LA1 (Crucial, Kingston, Samsung) then NJ2; batch 1
-    // in sheet order (DDR3 before DDR4); batch 2 last.
-    expect(await numbers(mgr, id)).toEqual([
-      ['FRZ-Z0', 1], ['FRZ-K4', 2], ['FRZ-S4', 3], ['FRZ-NJ', 4], ['FRZ-D3', 5], ['FRZ-H4', 6], ['FRZ-A3', 7],
-    ]);
-    // The counter picks up after them, and a second boot changes nothing.
-    await addLines(mgr, id, [typedLine('FRZ-T1')]);
-    expect((await numbers(mgr, id)).at(-1)).toEqual(['FRZ-T1', 8]);
-    expect(await freezeLegacySellNumbers(sql)).toBe(0);
-  });
-
-  it('numbers a line an older instance wrote unnumbered into a numbered order, as a save would', async () => {
+  it('shows it as the # it will take, and the next save stores that', async () => {
     const [po] = await twoPos();
     const [k4, s4] = await lotsOn(po!, [
       { pn: 'FRZ-K4', brand: 'Kingston', warehouse: 'WH-LA1' },
@@ -547,7 +504,7 @@ describe('sell order #: the boot freezes the numbers older orders showed', () =>
               VALUES (${id}, ${s4}, 'RAM', 'FRZ-S4', 'FRZ-S4', 1, 30, 'WH-LA1')`;
     // Shown already as the # it will be stored with.
     expect(await numbers(mgr, id)).toEqual([['FRZ-K4', 1], ['FRZ-S4', 2]]);
-    await freezeLegacySellNumbers(sql);
+    await addLines(mgr, id, []);
     expect(await numbers(mgr, id)).toEqual([['FRZ-K4', 1], ['FRZ-S4', 2]]);
     const [{ n }] = await sql<{ n: number }[]>`
       SELECT COUNT(*)::int AS n FROM sell_order_lines WHERE sell_order_id = ${id} AND product_no IS NULL`;
@@ -574,27 +531,6 @@ describe('sell order #: what a deploy, a re-spec and a typed line can do', () =>
     await addLines(mgr, id, [lotLine(d3!, 'REV-D3', 'WH-LA1')]);
     return { id, po: po!, k4: k4!, s4: s4!, d3: d3! };
   }
-
-  it('an order the previous release rewrote mid-deploy shows, and keeps on its next save, the #s that release showed', async () => {
-    const { id } = await packingOrder();
-    const expected = [['REV-K4', 1], ['REV-S4', 2], ['REV-D3', 3]];
-    expect(await numbers(mgr, id)).toEqual(expected);
-    const sql = getTestDb();
-    // Still written, so the previous release numbers the added DDR3 module last too.
-    const batches = await sql<{ part_number: string; append_batch: number | null }[]>`
-      SELECT part_number, append_batch FROM sell_order_lines WHERE sell_order_id = ${id} ORDER BY part_number`;
-    expect(batches.map(b => [b.part_number, b.append_batch])).toEqual([['REV-D3', 1], ['REV-K4', null], ['REV-S4', null]]);
-
-    // The old instance's save: every line re-inserted with no #.
-    await sql`UPDATE sell_order_lines SET product_no = NULL WHERE sell_order_id = ${id}`;
-    expect(await numbers(mgr, id)).toEqual(expected);
-    // The new instance's next save stores those, not the counter's next three.
-    await addLines(mgr, id, []);
-    expect(await numbers(mgr, id)).toEqual(expected);
-    const stored = await sql<{ n: number }[]>`
-      SELECT COUNT(*)::int AS n FROM sell_order_lines WHERE sell_order_id = ${id} AND product_no IS NULL`;
-    expect(stored[0]!.n).toBe(0);
-  });
 
   it('a lot re-spec\'d keeps its product\'s #, and the sheet prints it as a row of its own', async () => {
     const [po, other] = await twoPos();

@@ -24,7 +24,11 @@ handful of unused imports. The frontend loses the fleet `RoundCard` and
 translation keys only they used, unused re-exports, and 43 CSS classes no
 markup names. The shared package drops
 seven exports nobody imports (`sortCategories` among them, which the backend
-keeps its own copy of), and the fleet agent drops `needsOperator`.
+keeps its own copy of), and the fleet agent drops `needsOperator`. The boot-time freeze of sell-order
+numbers from before migration 0170 goes too, with the legacy numbering it
+used and the `append_batch` it kept writing for a rollback to that release:
+prod holds no unnumbered sell line (0 of 6,625), and a line an older instance
+writes mid-deploy is still numbered by the next save.
 
 ## [1.472.0] - 2026-11-16
 

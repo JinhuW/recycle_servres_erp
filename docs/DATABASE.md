@@ -784,7 +784,7 @@ A client: someone we buy from ("Clients" in the UI, 供货商 in Chinese). Creat
 | `state` | `text` |  |  |  |
 | `zip` | `text` |  |  |  |
 | `country` | `text` | ✓ | `'US'` | ISO country code; defaults to 'US'. |
-| `owner_id` | `uuid` |  |  | → users. Purchaser accountable for the relationship; NULL = house account. Changed only through the reassign endpoint, which logs an owner_changed note. |
+| `owner_id` | `uuid` |  |  | → users. Purchaser accountable for the relationship; NULL = house account. Set when the client is created or adopted; no endpoint changes it (PATCH refuses ownerId), and the reassign endpoint that did was removed unused. |
 | `source` | `text` | ✓ | `'manual'` | How the record came to exist: 'manual', 'shipping' / 'package' (adopted from shipment or package history), 'referral', 'facebook', 'reddit', 'walk_in', 'web'. A converted web lot uses its channel (web/facebook/reddit). |
 | `status` | `text` | ✓ | `'active'` | Standing a person decides: 'prospect' (new lead), 'active', 'archived'. |
 | `supplies` | `text[]` | ✓ | `'{}'[]` | Tags for what they say they can get; what they actually sold is derived from order_lines. |
@@ -814,14 +814,14 @@ A client: someone we buy from ("Clients" in the UI, 供货商 in Chinese). Creat
 
 #### `supplier_notes`
 
-The contact log of a client: calls, texts, visits, offers and notes, plus owner handovers. Written by purchasers and by the reassign and adopt endpoints.
+The contact log of a client: calls, texts, visits, offers and notes, plus owner handovers from before the reassign endpoint was removed. Written by purchasers and by the adopt endpoint.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
 | `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
 | `supplier_id` | `uuid` | ✓ |  | → suppliers, cascade. |
 | `author_id` | `uuid` |  |  | → users. Who logged it. |
-| `kind` | `text` | ✓ | `'note'` | 'note', 'call', 'text', 'visit', 'offer', or 'owner_changed' (written by a reassign). |
+| `kind` | `text` | ✓ | `'note'` | 'note', 'call', 'text', 'visit', 'offer', or 'owner_changed' (written by the removed reassign endpoint; old rows only). |
 | `body` | `text` | ✓ |  | The note text; a default sentence when a contact is logged without typing. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
 
@@ -830,13 +830,13 @@ The contact log of a client: calls, texts, visits, offers and notes, plus owner 
 - **Checks:** `kind IN ('note', 'call', 'text', 'visit', 'offer', 'owner_changed')`
 - **Indexes:** `supplier_notes_author_idx` (author_id); `supplier_notes_supplier_idx` (supplier_id, created_at DESC)
 
-Not append-only on purpose: the author can delete a mistaken note.
+No route deletes a note.
 
 <a id="erp-supplier-suggestion-dismissals"></a>
 
 #### `supplier_suggestion_dismissals`
 
-A purchaser's "not interested" on a seller suggested from package history, so it stops reappearing in their suggestions rail. Deleted by restore.
+A purchaser's "not interested" on a seller suggested from package history, so it stops reappearing in their suggestions rail. No route deletes one.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
@@ -1224,7 +1224,7 @@ One line of a sell order: a quantity of an inventory lot, or of a hand-typed ite
 | `source_currency` | `char(3)` |  |  | The order's currency (CNY) on a non-USD order. NULL on USD orders. |
 | `source_unit_price` | `numeric(12,2)` |  |  | Native-currency unit price on a non-USD order. NULL on USD orders, where unit_price is already native. |
 | `source_fx_rate_to_usd` | `numeric(18,8)` |  |  | The USD-per-native-unit rate that produced unit_price. NULL on USD orders. |
-| `append_batch` | `integer` |  |  | Legacy product-numbering tier: n means the n-th save that added lines after the order left Draft. Still written so a rollback to before migration 0170 renumbers nothing; read only by the one-time freeze of old numbers. |
+| `append_batch` | `integer` |  |  | Legacy product-numbering tier from before migration 0170. Nothing reads or writes it since v1.472.1; older rows keep their value until a migration drops the column. |
 | `product_no` | `integer` |  |  | The product # the packer labels items with. Given once and never recomputed; lots of one product share it, so it is not unique per order. NULL until the backend numbers the line. |
 
 - **Primary key:** `id`
