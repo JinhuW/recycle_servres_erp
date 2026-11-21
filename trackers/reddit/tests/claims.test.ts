@@ -136,6 +136,20 @@ describe('subreddit claiming', () => {
     expect(await delaySeconds('a')).toBeLessThanOrEqual(1800);
   });
 
+  it('still releases a subreddit that has failed far past the cap', async () => {
+    await db.sql`INSERT INTO subreddits (name, poll_interval_seconds) VALUES ('a', 90)`;
+    await db.sql`UPDATE subreddits SET consecutive_errors = 500`;
+
+    await claimDueSubreddits(db.sql, 'worker-1');
+    await releaseSubredditFailure(db.sql, 'worker-1', ['a'], 'HTTP 404');
+
+    const [row] = await db.sql<{claimed_by: string | null; consecutive_errors: number}[]>`
+      SELECT claimed_by, consecutive_errors FROM subreddits WHERE name = 'a'`;
+    expect(row).toEqual({claimed_by: null, consecutive_errors: 501});
+    expect(await delaySeconds('a')).toBeGreaterThan(1790);
+    expect(await delaySeconds('a')).toBeLessThanOrEqual(1800);
+  });
+
   it('ignores a release from a worker that no longer holds the claim', async () => {
     await db.sql`INSERT INTO subreddits (name) VALUES ('a')`;
     await claimDueSubreddits(db.sql, 'worker-1');

@@ -16,7 +16,7 @@ import type {Sql} from './db.ts';
 import type {SentMessage} from './telegram.ts';
 
 /** How long a claim stays valid before another worker may steal it. */
-export const CLAIM_TTL_SECONDS = 300;
+const CLAIM_TTL_SECONDS = 300;
 
 /**
  * Subreddits claimed per poll cycle. They are fetched in ONE combined Reddit
@@ -24,9 +24,9 @@ export const CLAIM_TTL_SECONDS = 300;
  * against the rate limit — but Reddit truncates very long multireddit paths,
  * and a batch is re-fetched whole on failure, so 20 is the practical ceiling.
  */
-export const SUBREDDIT_BATCH_SIZE = 20;
+const SUBREDDIT_BATCH_SIZE = 20;
 
-export const MAX_ATTEMPTS = 5;
+const MAX_ATTEMPTS = 5;
 
 export interface SubredditRow {
   name: string;
@@ -133,8 +133,11 @@ export async function releaseSubredditFailure(
            last_polled_at = NOW(),
            last_status = ${status.slice(0, 200)},
            consecutive_errors = consecutive_errors + 1,
+           -- LEAST caps the interval only after Postgres has built it, so the
+           -- exponent is clamped too: past ~36 errors the uncapped interval is
+           -- out of range, the release throws, and the claim is never freed.
            next_poll_at = NOW() + LEAST(
-             make_interval(secs => poll_interval_seconds * POWER(2, consecutive_errors + 1)),
+             make_interval(secs => poll_interval_seconds * POWER(2, LEAST(consecutive_errors + 1, 16))),
              INTERVAL '30 minutes'
            )
      WHERE name = ANY(${names}) AND claimed_by = ${workerId}`;
@@ -329,7 +332,7 @@ export async function releasePostFailure(
        SET attempts = attempts + 1,
            status = CASE WHEN attempts + 1 >= ${MAX_ATTEMPTS} THEN 'failed' ELSE status END,
            next_retry_at = NOW() + LEAST(
-             make_interval(secs => 30 * POWER(2, attempts)),
+             make_interval(secs => 30 * POWER(2, LEAST(attempts, 16))),
              INTERVAL '15 minutes'
            ),
            claimed_by = NULL,
