@@ -133,8 +133,11 @@ export async function releaseSubredditFailure(
            last_polled_at = NOW(),
            last_status = ${status.slice(0, 200)},
            consecutive_errors = consecutive_errors + 1,
+           -- The exponent is capped before the multiply: past about 37 errors
+           -- the product overflows an interval, the UPDATE throws, and the
+           -- count it should raise never moves, so the failure repeats forever.
            next_poll_at = NOW() + LEAST(
-             make_interval(secs => poll_interval_seconds * POWER(2, consecutive_errors + 1)),
+             make_interval(secs => poll_interval_seconds * POWER(2, LEAST(consecutive_errors + 1, 10))),
              INTERVAL '30 minutes'
            )
      WHERE name = ANY(${names}) AND claimed_by = ${workerId}`;
