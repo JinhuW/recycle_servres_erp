@@ -11,7 +11,7 @@ import {
 } from '../../lib/facebookPool';
 import {
   isUnstampedBuild, reloginIsAutomatic, searchesPerDay, splitHighlights, vaultAccountIdFor,
-  type AccountLiveness, type CityHits,
+  type CityHits,
 } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 import type { Translate } from '../../lib/orderPresentation';
@@ -19,10 +19,9 @@ import { fleetWatchPath, hrefFor, navigate, onLinkClick } from '../../lib/route'
 import { useFleetMirror } from './fleet/shared';
 
 // ─── Fleet building blocks ────────────────────────────────────────────────────
-// The pieces the fleet list (FleetWorkers.tsx), the worker page
-// (FleetWorker.tsx) and the viewer share: highlighted text, state and
-// liveness chips, a city chip with its alert count, the build chip, and the
-// three actions the control plane can take today — watch the browser, queue a
+// The pieces the worker page (FleetWorker.tsx) and the viewer share:
+// highlighted text, state labels, a city chip with its alert count, the build
+// chip, and the three actions the control plane can take today — watch the browser, queue a
 // re-login, and assign the pool account Re-login signs in with.
 
 export const HITS_DAYS = 7;
@@ -37,25 +36,6 @@ export function Hi({ text, terms }: { text: string; terms: readonly string[] }) 
     </>
   );
 }
-
-export const LIVENESS_CHIP: Record<AccountLiveness, { chip: string; key: string }> = {
-  live: { chip: 'chip pos', key: 'fbcLive' },
-  stale: { chip: 'chip warn', key: 'fbcStale' },
-  dead: { chip: 'chip neg', key: 'fbcDead' },
-  unknown: { chip: 'chip muted', key: 'fbcNeverReported' },
-  none: { chip: 'chip muted', key: 'fbcNotDeployed' },
-};
-
-export const STATE_CHIP: Record<WorkerState, string> = {
-  HEALTHY: 'chip pos',
-  DEGRADED: 'chip warn',
-  SESSION_EXPIRED: 'chip warn',
-  CHALLENGE_2FA: 'chip accent',
-  CHALLENGE_EMAIL: 'chip accent',
-  CHALLENGE_CAPTCHA: 'chip accent',
-  CHECKPOINT: 'chip accent',
-  DEAD: 'chip neg',
-};
 
 // The control plane can add states faster than this UI ships, so an unknown
 // one falls back to its raw name rather than a blank cell.

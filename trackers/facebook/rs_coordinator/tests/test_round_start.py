@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from rs_coordinator import city_queue
-from rs_coordinator.city_queue import DAY, State
+from rs_coordinator.city_queue import State
 from rs_coordinator.tokens import mint_worker_token
 
 ADMIN = {"Authorization": "Bearer admin-token"}

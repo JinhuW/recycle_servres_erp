@@ -21,7 +21,6 @@ export type FleetTaskEventKind = (typeof FLEET_TASK_EVENT_KINDS)[number];
 /** Worker states that mean the account cannot search: a heartbeat in one of
  *  them releases the worker's current task. DEGRADED is not one of them. */
 export const FLEET_PARKED_STATES = ['SESSION_EXPIRED', 'CHECKPOINT', 'CHALLENGE', 'DEAD'] as const;
-export type FleetParkedState = (typeof FLEET_PARKED_STATES)[number];
 
 /** `CHALLENGE_*` states all count as parked. */
 export const fleetStateParked = (state: string | null | undefined): boolean =>
@@ -38,10 +37,6 @@ export const fleetResumable = (state: string | null | undefined, detail: unknown
  *  boot login. Never automatic, unlike the resume above. */
 export const fleetRestartable = (state: string | null | undefined, detail: unknown): boolean =>
   state === 'DEAD' && !!detail && typeof detail === 'object' && (detail as Record<string, unknown>).reason === 'exit_moved';
-
-/** Whether a worker waits on a fingerprint that differs from its account's record. */
-export const fleetProfileChanged = (state: string | null | undefined, detail: unknown): boolean =>
-  state === 'DEAD' && !!detail && typeof detail === 'object' && (detail as Record<string, unknown>).reason === 'profile_changed';
 
 /** The first worker build that takes the `resume` directive. */
 export const FLEET_RESUME_SINCE = [0, 15, 0] as const;
@@ -398,9 +393,6 @@ export function fleetVersionAtLeast(version: string | null | undefined, min: str
   return true;
 }
 
-/** Body of POST /api/fleet/slots/:no/engine. */
-export type FleetEngineSwitch = { engine: FleetBrowserEngine };
-
 // ─── Proxies ──────────────────────────────────────────────────────────────────
 
 export const FLEET_PROXY_SCHEMES = ['http', 'https', 'socks5'] as const;
@@ -490,9 +482,6 @@ export type FleetSlotWrite = {
   /** Alone, gives the account this engine outside any pilot; with `arm`, must equal it. */
   engine?: FleetBrowserEngine;
 };
-
-/** Slots on a proxy that count against `max_accounts_per_proxy`: every one but the parked. */
-export const proxyLoad = (p: Pick<FleetProxy, 'slots'>): number => p.slots.filter((s) => !s.parked).length;
 
 // ─── Proxy health ─────────────────────────────────────────────────────────────
 

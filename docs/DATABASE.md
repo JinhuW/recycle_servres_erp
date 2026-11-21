@@ -633,7 +633,7 @@ A line with no row reads as fully counted. A short count is only a flag; the lin
 
 #### `order_check_extras`
 
-Something found in a PO's box that no line names, recorded during the box check.
+Something found in a PO's box that no line names, recorded during the box check. Nothing writes it any more: the UI dropped extra items and sending flags in v1.190.0, and their endpoints are gone too. Old rows still come back from `GET /api/orders/:id/checks`.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
@@ -3821,7 +3821,7 @@ Tables: [`accounts`](#facebook-accounts), [`device_profiles`](#facebook-device-p
 
 #### `accounts`
 
-One Facebook login in the vault and the worker slot it fills. Written by `rsc vault set-account` and by the ERP through rs_console (`PUT /v1/accounts/{id}` for credentials, `PUT /v1/fleet/workers/{id}` for fleet on/off and host pin).
+One Facebook login in the vault and the worker slot it fills. Written by `rsc vault set-account` and by `PUT /v1/accounts/{id}` on rs_console, which the ERP no longer calls.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |

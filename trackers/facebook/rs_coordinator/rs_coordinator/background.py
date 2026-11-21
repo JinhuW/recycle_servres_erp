@@ -26,7 +26,7 @@ than one that arrives late, and the backlog is visible in /healthz and
 import logging
 import threading
 from datetime import timedelta
-from typing import Any, Callable
+from typing import Callable
 
 from . import fleet, health
 from .db import AnyDatabase, utcnow

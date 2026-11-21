@@ -124,11 +124,6 @@ export function fbChatStatusOf(a: FbChatAccountRow): FbChatAccountStatus {
   return fbChatAccountStatus(a, Date.now());
 }
 
-/** True when the account cannot type a reply right now, whatever the reason. */
-export function fbChatHoldsReplies(status: FbChatAccountStatus): boolean {
-  return status !== 'running';
-}
-
 // ── Polling ───────────────────────────────────────────────────────────────────
 
 export const FB_CHAT_POLL_MS = { summary: 30_000, threads: 10_000, messages: 4_000, accounts: 15_000, devices: 10_000 };

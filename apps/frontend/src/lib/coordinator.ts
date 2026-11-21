@@ -67,8 +67,6 @@ export type Challenge = {
 export const challengeScreenshotUrl = (id: number) =>
   `/api/coordinator/challenges/${id}/screenshot`;
 
-export type FleetFilter = 'all' | 'active' | 'attention';
-
 export type FilterPrompt = {
   prompt: string | null;
   rating_prompt: string | null;

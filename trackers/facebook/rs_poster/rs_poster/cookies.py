@@ -28,7 +28,6 @@ REQUIRED_COOKIES = ("c_user", "xs")
 # them across when the export includes them.
 DEVICE_COOKIES = ("datr", "sb")
 
-FACEBOOK_DOMAINS = (".facebook.com", "facebook.com", ".www.facebook.com")
 VALID_SAME_SITE = {"Strict", "Lax", "None"}
 
 

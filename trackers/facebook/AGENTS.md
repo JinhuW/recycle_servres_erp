@@ -44,7 +44,7 @@ tunnel). It sends Bearer `COORDINATOR_API_TOKEN`, which must equal
 rs_console's `RS_CONSOLE_TOKEN`, plus Cloudflare Access headers.
 
 Forwarded today:
-- `GET /v1/workers`, `/v1/fleet`, `/v1/stats/reviews`, `/v1/stats/alert-hits`,
+- `GET /v1/workers`, `/v1/fleet`, `/v1/stats/alert-hits`,
   `/v1/config/filter-prompt`, `/v1/challenges`,
   `/v1/challenges/{id}/screenshot`. `/v1/fleet` is composed here, so a new
   field in it is a contract change too: its `status_changes` (from the
@@ -56,7 +56,6 @@ Forwarded today:
   five-minute proxy round, not from a browser; a console without it answers
   404 and the ERP's Proxies tab shows its own proxies alone.
 - `POST /v1/workers/{id}/relogin`, `/v1/challenges/{id}/resolve`
-- `PUT /v1/accounts/{id}` (credentials write)
 - `PUT /v1/config/settings` (search settings; `rs_console/settings.py` lists
   the keys, and the README's *Settings saved from the ERP* says where they live)
 - `PUT /v1/workers/{id}/cities` (one worker's cities, into its own config)

@@ -1,6 +1,5 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import {
-  FB_FAILED_OUTCOMES,
   FB_POOL_LIMIT,
   FB_POOL_SECRET_FIELDS,
   FB_POOL_STATUSES,
@@ -57,7 +56,6 @@ const pushGuard = asVars(bearerGuard({ scopes: ['pool:write'] }));
 const NOT_CONFIGURED = 'The account pool is not configured — set FB_POOL_KEY';
 const MAX_IMPORT_ROWS = 500;
 const ACTIVITY_LIMIT = 100;
-const HOLDER_STATUSES: readonly FbPoolStatus[] = ['taken', 'fleet', 'problem'];
 
 type Row = {
   no: number;

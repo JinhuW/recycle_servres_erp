@@ -1,6 +1,5 @@
 // Box check: a manager counting a PO against the box that arrived. Progress
-// is stored per line; flags and extra items go to the purchaser as one
-// notification plus an order event, and never move the stage.
+// and flags are stored per line and never move the stage.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { getTestDb, resetDb } from './helpers/db';
@@ -120,7 +119,6 @@ describe('box check', () => {
     const { id, lineIds } = await createReviewing(pur, mgr);
     expect((await api('GET', `/api/orders/${id}/checks`, { token: pur })).status).toBe(403);
     expect((await api('PUT', `/api/orders/${id}/checks/${lineIds[0]}`, { token: pur, body: { counted: 1 } })).status).toBe(403);
-    expect((await api('POST', `/api/orders/${id}/checks/send`, { token: pur, body: {} })).status).toBe(403);
 
     expect((await api('PATCH', '/api/me/preferences', { token: mgr, body: { 'tweaks.rolePreview': 'as_purchaser' } })).status).toBe(200);
     expect((await api('GET', `/api/orders/${id}/checks`, { token: mgr })).status).toBe(200);
@@ -140,95 +138,11 @@ describe('box check', () => {
     expect((await api('GET', '/api/orders/PO-NOPE/checks', { token: mgr })).status).toBe(404);
   });
 
-  it('adds and removes extra items', async () => {
-    const { id } = await createReviewing(pur, mgr);
-    const added = await api<Checks>('POST', `/api/orders/${id}/checks/extras`, { token: mgr, body: { partNumber: ' X-99 ' } });
-    expect(added.status).toBe(201);
-    expect(added.body.extras).toMatchObject([{ partNumber: 'X-99', note: null }]);
-    expect((await api('POST', `/api/orders/${id}/checks/extras`, { token: mgr, body: { partNumber: '  ' } })).status).toBe(400);
-
-    const gone = await api<Checks>('DELETE', `/api/orders/${id}/checks/extras/${added.body.extras[0]!.id}`, { token: mgr });
-    expect(gone.status).toBe(200);
-    expect(gone.body.extras).toEqual([]);
-  });
-
-  it('refuses to send with nothing flagged, then notifies the owner and records the event', async () => {
-    const { id, lineIds } = await createReviewing(pur, mgr);
-    expect((await api('POST', `/api/orders/${id}/checks/send`, { token: mgr, body: {} })).status).toBe(409);
-
-    await api('PUT', `/api/orders/${id}/checks/${lineIds[0]}`, { token: mgr, body: { counted: 4, flagReason: 'damaged', flagNote: 'bent pins' } });
-    await api('POST', `/api/orders/${id}/checks/extras`, { token: mgr, body: { partNumber: 'X-99' } });
-    const sent = await api<Checks & { ok: true; sentFlags: number; sentExtras: number; notified: boolean }>(
-      'POST', `/api/orders/${id}/checks/send`, { token: mgr, body: {} });
-    expect(sent.status).toBe(200);
-    expect(sent.body).toMatchObject({ ok: true, sentFlags: 1, sentExtras: 1, notified: true });
-    // The response carries the stamped state, so the page shows what went out.
-    expect(sent.body.lines.find(l => l.lineId === lineIds[0])?.flagSentAt).toBeTruthy();
-    expect(sent.body.extras[0]?.sentAt).toBeTruthy();
-
-    const events = await api<{ events: { kind: string; detail: { flags: unknown[]; extras: unknown[] } }[] }>(
-      'GET', `/api/orders/${id}/events`, { token: pur });
-    const ev = events.body.events.find(e => e.kind === 'box_check_flagged');
-    expect(ev?.detail.flags).toMatchObject([{ partNumber: PN, reason: 'damaged', note: 'bent pins', counted: 4, qty: 4 }]);
-    expect(ev?.detail.extras).toMatchObject([{ partNumber: 'X-99' }]);
-
-    const sql = getTestDb();
-    const notes = await sql<{ title: string; body: string }[]>`
-      SELECT n.title, n.body FROM notifications n JOIN users u ON u.id = n.user_id
-      WHERE u.email = ${MARCUS} AND n.kind = 'box_check'`;
-    expect(notes).toHaveLength(1);
-    expect(notes[0]!.title).toContain(id);
-    expect(notes[0]!.body).toContain('bent pins');
-
-    const order = await api<{ order: { lifecycle: string } }>('GET', `/api/orders/${id}`, { token: mgr });
-    expect(order.body.order.lifecycle).toBe('reviewing');
-  });
-
-  it('sends each flag once, and again only after it changes', async () => {
-    const { id, lineIds } = await createReviewing(pur, mgr);
-    const [a, b] = lineIds as [string, string];
-    const send = () => api<{ sentFlags: number; sentExtras: number }>('POST', `/api/orders/${id}/checks/send`, { token: mgr, body: {} });
-    const put = (lineId: string, body: unknown) => api('PUT', `/api/orders/${id}/checks/${lineId}`, { token: mgr, body });
-    const sql = getTestDb();
-    const noteCount = async () => (await sql<{ n: number }[]>`
-      SELECT COUNT(*)::int AS n FROM notifications n JOIN users u ON u.id = n.user_id
-      WHERE u.email = ${MARCUS} AND n.kind = 'box_check'`)[0]!.n;
-
-    await put(a, { counted: 4, flagReason: 'damaged', flagNote: 'bent pins' });
-    expect((await send()).body).toMatchObject({ sentFlags: 1, sentExtras: 0 });
-    expect((await send()).status).toBe(409);
-
-    // A count-only write keeps the stamp; the flag itself is unchanged.
-    await put(a, { counted: 3, flagReason: 'damaged', flagNote: 'bent pins' });
-    expect((await send()).status).toBe(409);
-
-    // A new flag on another line goes out alone; an edited flag goes again.
-    await put(b, { counted: 1, flagReason: 'short' });
-    expect((await send()).body).toMatchObject({ sentFlags: 1 });
-    await put(a, { counted: 3, flagReason: 'damaged', flagNote: 'bent pins, cracked PCB' });
-    expect((await send()).body).toMatchObject({ sentFlags: 1 });
-    expect(await noteCount()).toBe(3);
-
-    const events = await api<{ events: { kind: string; detail: { flags: { lineId: string }[] } }[] }>(
-      'GET', `/api/orders/${id}/events`, { token: mgr });
-    const sentLines = events.body.events.filter(e => e.kind === 'box_check_flagged').map(e => e.detail.flags.map(f => f.lineId));
-    expect(sentLines.sort()).toEqual([[a], [a], [b]].sort());
-  });
-
-  it('says nobody was notified when the manager owns the PO', async () => {
-    const { id, lineIds } = await createReviewing(mgr, mgr);
-    await api('PUT', `/api/orders/${id}/checks/${lineIds[0]}`, { token: mgr, body: { counted: 4, flagReason: 'damaged' } });
-    const sent = await api<{ notified: boolean }>('POST', `/api/orders/${id}/checks/send`, { token: mgr, body: {} });
-    expect(sent.status).toBe(200);
-    expect(sent.body.notified).toBe(false);
-  });
-
   it('refuses writes on an archived PO but still reads', async () => {
     const { id, lineIds } = await createReviewing(pur, mgr);
     expect((await api('POST', `/api/orders/${id}/archive`, { token: mgr, body: {} })).status).toBe(200);
     expect((await api('GET', `/api/orders/${id}/checks`, { token: mgr })).status).toBe(200);
     expect((await api('PUT', `/api/orders/${id}/checks/${lineIds[0]}`, { token: mgr, body: { counted: 1 } })).status).toBe(409);
-    expect((await api('POST', `/api/orders/${id}/checks/extras`, { token: mgr, body: { partNumber: 'X' } })).status).toBe(409);
   });
 
   it('drops a line\'s check with the line', async () => {

@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 import time
 from pathlib import Path
@@ -40,10 +39,6 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parent.parent
 MASTER = ROOT / "configs" / "master.toml"
 DEFAULT_SESSION = ROOT / "configs" / "sessions" / "personal.json"
-
-# The location chip reads e.g. "Denver, Colorado · Within 500 mi".
-LOCATION_CHIP = re.compile(r"\d+\s*(mi|km)\b")
-
 
 def cities_from_master(regions: List[str]) -> List[Tuple[str, str, str]]:
     """Return (region, search_city, city_name) for the requested regions."""

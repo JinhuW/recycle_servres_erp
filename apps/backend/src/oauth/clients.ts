@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { withBcryptSlot } from '../lib/bcryptGate';
-import type postgres from 'postgres';
 import type { SqlLike } from '../db';
 import { oauthRefreshRevocationsTotal } from '../metrics';
 

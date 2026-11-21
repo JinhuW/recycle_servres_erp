@@ -15,7 +15,7 @@ import { lockOrdersForLinesTx } from '../services/orderLocks';
 import { mergedSpec, specVal, validateLineInput } from '../lib/orderInput';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
-  CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
+  SPEC_COLS_BY_CATEGORY, lineSpecFields, categoryTabSheets,
   sortSheetRows, type ExportCategory,
 } from '../lib/categoryColumns';
 import { UNTYPED_ITEM, chipMarkingCanon, ddr5SpecKey, isInventorySortCol, normSellPrice, ramFamily, ramFamilyLabel, ramShortCode, ramShortCodes, sortProductGroups, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';

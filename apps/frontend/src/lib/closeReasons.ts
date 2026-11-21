@@ -4,7 +4,6 @@
 // the soCloseReason_<id> key, so the picker translates with the rest of the UI
 // rather than serving English-only strings from the DB.
 export { CLOSE_REASON_IDS } from '@recycle-erp/shared';
-export type { CloseReasonId } from '@recycle-erp/shared';
 
 export function closeReasonLabelKey(id: string): string {
   return `soCloseReason_${id}`;

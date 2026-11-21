@@ -8,8 +8,6 @@ export const PERF_PAGES = [
   'tracker', 'wechat', 'coordinator', 'leadsReddit', 'leadsFacebook', 'settings',
 ] as const;
 
-export type PerfPage = (typeof PERF_PAGES)[number];
-
 export const PERF_WINDOWS = ['24h', '7d', '30d'] as const;
 export type PerfWindow = (typeof PERF_WINDOWS)[number];
 

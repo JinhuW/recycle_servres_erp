@@ -144,7 +144,6 @@ function foldProduct(id: string, lines: readonly FoldLine[]): SheetProduct {
   const ordered = [...lines].sort(byPoLine);
   const first = ordered[0]!;
   const live = ordered.filter((l) => l.qty > 0);
-  const shown = live[0] ?? first;
   const lot = live.find((l) => l.row.inv_id != null)?.row;
   const placing = first.row.inv_id != null ? first.row : null;
   const specs: Record<string, string | number> = {};

@@ -16,7 +16,7 @@ import {
   type LookedUpPackage, type TrackedPackage,
 } from '../lib/packages';
 import { PACKAGE_SOURCES, packageSourceLabelKey } from '../lib/packageSource';
-import { navigate, navigateBack, type ShippingRoute } from '../lib/route';
+import { navigate, type ShippingRoute } from '../lib/route';
 import { RouteLink } from '../components/RouteLink';
 import { STATUS_CHIP, fmtEta, mergeInbound, type InboundRow } from '../lib/shippingList';
 import { canCreatePo, groupInbound, inboundAction, journeyPos, type InboundAction } from '../lib/shippingInbound';

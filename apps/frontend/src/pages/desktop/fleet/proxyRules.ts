@@ -1,5 +1,5 @@
 import {
-  FLEET_EXIT_FRESH_MS, isFleetTimezone, parseProxyUrl, proxyLoad, type FleetDeviceProfile, type FleetProxy, type FleetProxyExitChange, type FleetProxyHealth, type FleetProxyHealthState, type FleetSlot,
+  FLEET_EXIT_FRESH_MS, isFleetTimezone, parseProxyUrl, type FleetDeviceProfile, type FleetProxy, type FleetProxyExitChange, type FleetProxyHealth, type FleetProxyHealthState, type FleetSlot,
 } from '../../../lib/fleet';
 import { leaseLive } from './fleetBoard';
 

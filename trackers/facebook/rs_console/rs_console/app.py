@@ -92,7 +92,7 @@ from fastapi import (
     Response,
     WebSocket,
 )
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__

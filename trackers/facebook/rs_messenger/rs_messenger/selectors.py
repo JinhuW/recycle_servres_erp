@@ -35,7 +35,6 @@ THREAD_LINK = 'a[href*="/marketplace/t/"]'
 # `inbox.looks_like_message` filters what comes back rather than trusting
 # the selector to be precise.
 CONVERSATION_PANE = 'div[role="main"]'
-MESSAGE_TEXT = 'div[role="main"] div[dir="auto"]'
 
 # A link to the listing the conversation is about, shown in the thread header.
 LISTING_LINK = 'div[role="main"] a[href*="/marketplace/item/"]'
@@ -44,8 +43,6 @@ LISTING_LINK = 'div[role="main"] a[href*="/marketplace/item/"]'
 # row ("You sent", "You replied"). Walked up from the text node; when no
 # marker is found the row is treated as INCOMING on purpose — a false "in"
 # costs one redundant Telegram alert, a false "out" suppresses a real one.
-OUTGOING_MARKER_RE = re.compile(r"\byou sent\b|\byou replied\b", re.IGNORECASE)
-
 # Runs inside the conversation pane and returns [{text, direction}] in page
 # order. Kept as one evaluate rather than per-row locator calls: the pane
 # re-renders while Playwright walks it, and a snapshot taken in one pass

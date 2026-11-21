@@ -10,7 +10,7 @@ import sqlite3
 import pytest
 
 from rs_coordinator.code_service import CodeUnavailable, get_code
-from rs_coordinator.db import SCHEMA, Database
+from rs_coordinator.db import Database
 from rs_coordinator.tokens import (
     TokenError,
     generate_secret,

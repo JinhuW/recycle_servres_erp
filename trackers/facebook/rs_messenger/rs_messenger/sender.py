@@ -40,10 +40,6 @@ def seconds_until_next_send(last_send_at: float, now: float) -> float:
     return max(0.0, last_send_at + min_send_interval() - now)
 
 
-class SendError(RuntimeError):
-    """The reply could not be confirmed as sent."""
-
-
 # How long to wait for the thread's messages to render before typing.
 PANE_TIMEOUT_S = 10.0
 # How long to watch the pane for our own bubble after Enter, and how often.

@@ -201,12 +201,12 @@ describe('Coordinator proxy read cache', () => {
   it('keys each query string separately', async () => {
     const { token } = await loginAs(ALEX);
     const spy = slowFacade((url) => ({ url }));
-    const week = await api<{ url: string }>('GET', '/api/coordinator/stats/reviews?days=7', { token, env: ENV });
-    const month = await api<{ url: string }>('GET', '/api/coordinator/stats/reviews?days=30', { token, env: ENV });
+    const week = await api<{ url: string }>('GET', '/api/coordinator/stats/alert-hits?days=7', { token, env: ENV });
+    const month = await api<{ url: string }>('GET', '/api/coordinator/stats/alert-hits?days=30', { token, env: ENV });
     expect(week.body.url).toMatch(/days=7$/);
     expect(month.body.url).toMatch(/days=30$/);
     expect(month.headers.get('X-Cache')).toBe('miss');
-    expect((await api('GET', '/api/coordinator/stats/reviews?days=7', { token, env: ENV })).headers.get('X-Cache')).toBe('hit');
+    expect((await api('GET', '/api/coordinator/stats/alert-hits?days=7', { token, env: ENV })).headers.get('X-Cache')).toBe('hit');
     expect(spy).toHaveBeenCalledTimes(2);
   });
 });

@@ -6,7 +6,8 @@ data/
 .DS_Store
 
 # secrets kept next to the deploy tooling — never committed
-secrets.env
+secrets.env*
+!secrets.env.example
 .api-token
 
 # terraform

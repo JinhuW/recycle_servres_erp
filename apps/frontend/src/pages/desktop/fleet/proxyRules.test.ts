@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { FleetProxyHealth } from '@recycle-erp/shared';
 import { fleetDeviceFor, parseProxyUrl } from '../../../lib/fleet';
 import { NOW, PROXIES, SLOTS } from './fixtures';
 import { deviceSummary, proxyExitFlags, fleetRowAction, proxyChangeVerdict, proxyChoices, proxyCrowding, proxyDraftProblem, proxyPatch, randomOpenProxy } from './proxyRules';

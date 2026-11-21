@@ -49,8 +49,6 @@ export const EXIT_CLAIM_FAILED = 70;
 // retry is another login against the same wall, so only a person starts it
 // again (`docker start`, or `docker rm` to let the agent run a fresh one).
 export const EXIT_OPERATOR_NEEDED = 78;
-/** What the report says for a worker left for an operator, in place of docker's `exited`. */
-export const OPERATOR_NEEDED_STATE = 'operator_needed';
 // The browser's licence server could not be reached. Not the worker's fault and
 // not a crash, but a retry during a long outage can still be a boot login.
 export const EXIT_LICENSE_OUTAGE = 74;
@@ -179,11 +177,6 @@ export function restartDelayMs(exitCode: number | null): number {
 export function isCrash(exitCode: number | null): boolean {
   return exitCode !== EXIT_STALE_OR_NO_SLOT && exitCode !== EXIT_CLAIM_FAILED && exitCode !== EXIT_OPERATOR_NEEDED
     && exitCode !== EXIT_LICENSE_OUTAGE && exitCode !== EXIT_NORMAL && exitCode !== EXIT_SIGTERM;
-}
-
-/** An exited worker that waits for a person, never for the agent. */
-export function needsOperator(c: Container): boolean {
-  return !c.running && c.exit_code === EXIT_OPERATOR_NEEDED;
 }
 
 export function outageDelayMs(retry: OutageRetry): number {

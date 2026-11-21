@@ -36,7 +36,7 @@ import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
 import { takeSharedFile } from './lib/sharedFile';
 import { handleFetchError, showErrorDialog } from './lib/errorToast';
 import {
-  navigate, navigateBack, useRoute, match, matchPurchaseOrder, poProductsPath, parseShippingRoute,
+  navigate, navigateBack, useRoute, matchPurchaseOrder, poProductsPath, parseShippingRoute,
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext, isAuthorizePath,
   readHashQuery,
   replaceRoute,
@@ -130,7 +130,7 @@ const toDraftLine = (l: OrderLine, i: number): DraftLine => ({
 });
 
 function Shell() {
-  const { user, loading, logout, pendingRoleChoice } = useAuth();
+  const { user, loading, pendingRoleChoice } = useAuth();
   const { t, lang } = useT();
   const { path } = useRoute();
   const view: View = pathToMobileView(path);
@@ -537,7 +537,7 @@ function Shell() {
     // Capture current state synchronously so we can read draftId and compute
     // the new lines array before the async PATCH.
     if (capture.phase !== 'form') return;
-    const { draftId, editingLineIdx, category, editingId, returnTo, originalLineIds } = capture;
+    const { draftId, editingLineIdx, editingId, returnTo, originalLineIds } = capture;
     const gen = captureGen.current;
 
     // Build the updated lines array.

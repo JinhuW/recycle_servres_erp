@@ -17,17 +17,16 @@ import { ApiError } from './api';
 import { sharedApi as api } from './sharedGet';
 
 export type {
-  FleetAccountBrief, FleetFunnelDay, FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetTaskEventKind, FleetTaskKind, FleetTaskReason,
-  FleetTaskResult, FleetTaskState, FleetHostContainer, FleetHostReport, DesiredAnswer, RoundStartAnswer,
-  FleetProxy, FleetProxyCheck, FleetProxyExitChange, FleetProxyExitPoint, FleetProxyHealth, FleetProxyHealthAnswer, FleetProxyHealthState, FleetProxySource,
-  FleetPilotArm, FleetProxyPatch, FleetProxyUse, FleetProxyWrite, FleetSlotWrite, FleetDeviceProfile,
-  FleetSecretKind, FleetWorkerDetail, FleetWorkerEvent, FleetWorkerRelogin, FleetWorkerResume,
-  FleetBrowserEngine, FleetCloakGpu, FleetCohortAccount, FleetCohortCounts, FleetCohortGroup, FleetCohortOutcome, FleetCohortReport, FleetCohortSearches, FleetEngineLoss, FleetEngineLossRow,
+  FleetAccountBrief, FleetFunnelDay, FleetItem, FleetRelease, FleetSettings, FleetTaskEvent, FleetHostContainer,
+  FleetProxy, FleetProxyExitChange, FleetProxyHealth, FleetProxyHealthAnswer, FleetProxyHealthState,
+  FleetProxySource, FleetDeviceProfile, FleetWorkerDetail, FleetWorkerEvent, FleetWorkerResume, FleetBrowserEngine,
+  FleetCohortAccount, FleetCohortCounts, FleetCohortGroup, FleetCohortOutcome, FleetCohortReport, FleetEngineLoss,
+  FleetEngineLossRow,
 } from '@recycle-erp/shared';
 export {
-  fleetExitPointText, FLEET_TASK_STATES, FLEET_PARKED_STATES, fleetStateParked, fleetResumable, fleetRestartable, fleetTakesResume, fleetAutoResumeDue, FLEET_AUTO_RESUME_MINUTES, FLEET_AUTO_RESUME_BY, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, proxyLoad,
-  FLEET_EXIT_FRESH_MS, FLEET_PROXY_BUCKET_MS, FLEET_PROXY_BUCKETS, FLEET_PROXY_SLOW_MS,
-  fleetCloakFor, fleetCloakSwitchable, fleetSessionLost, fleetStockRevertible,
+  fleetExitPointText, fleetStateParked, fleetResumable, fleetRestartable, fleetTakesResume, fleetAutoResumeDue,
+  FLEET_AUTO_RESUME_MINUTES, fleetSlotRetirable, fleetDeviceFor, isFleetTimezone, parseProxyUrl, FLEET_EXIT_FRESH_MS,
+  FLEET_PROXY_BUCKET_MS, FLEET_PROXY_SLOW_MS, fleetCloakFor, fleetCloakSwitchable, fleetStockRevertible,
 } from '@recycle-erp/shared';
 
 // snake_case on purpose: rows come straight from the backend's SQL.
@@ -72,7 +71,9 @@ export type FleetWorker = FleetWorkerRow & {
 
 // One account's slot, joined with its worker and its pool row. `uid` is the
 // pool account's Facebook id; the table masks it.
-export type { FleetProfileRecord } from '@recycle-erp/shared';
+export type {
+  FleetProfileRecord,
+} from '@recycle-erp/shared';
 
 export type FleetSlot = FleetSlotRow & {
   uid: string | null;

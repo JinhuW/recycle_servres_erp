@@ -36,7 +36,6 @@ from .cookies import (
     atomic_write_text,
     describe,
     load_cookie_file,
-    meta_path_for,
     read_session_meta,
     storage_state_cookies,
     write_session_meta,

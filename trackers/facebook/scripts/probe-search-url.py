@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import datetime
-import os
 import re
 import sys
 from pathlib import Path
@@ -33,7 +32,6 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 
 from ai_marketplace_monitor.config import Config  # noqa: E402
 from ai_marketplace_monitor.facebook import (  # noqa: E402
-    MAX_RESULT_SCROLLS,
     FacebookMarketplace,
     FacebookSearchResultPage,
 )

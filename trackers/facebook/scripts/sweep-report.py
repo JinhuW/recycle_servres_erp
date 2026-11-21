@@ -43,15 +43,6 @@ ORIGINAL_28 = {
     "108541499165950", "107634079257154",
 }
 
-# Gates a listing dies at, in the order the monitor applies them, so the digest
-# reads as a funnel rather than an unordered tally.
-SKIP_ORDER = [
-    "missing_keywords_title", "antikeyword", "missing_keywords",
-    "seller_rating", "already_notified",
-    "unit_count_below_minimum", "below_threshold",
-]
-
-
 def search(body: Dict[str, Any]) -> Dict[str, Any]:
     request = urllib.request.Request(
         f"{OPENSEARCH}/{INDEX}/_search",

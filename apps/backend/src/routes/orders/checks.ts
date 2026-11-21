@@ -3,9 +3,7 @@
 import { Hono } from 'hono';
 import { getDb } from '../../db';
 import { UUID_RE } from '../../lib/pagination';
-import { writeOrderEvent, type SqlLike } from '../../services/orderAudit';
-import { notify } from '../../lib/notify';
-import { poLineOrder } from '../../lib/poLineNo';
+import { type SqlLike } from '../../services/orderAudit';
 import { ramShortCode } from '@recycle-erp/shared';
 import { canonPartNumberJs } from '../../lib/part-number';
 import { allLimited } from '../../lib/concurrency';
@@ -118,109 +116,6 @@ checksRoutes.put('/:id/checks/:lineId', async (c) => {
       updated_by = EXCLUDED.updated_by,
       updated_at = NOW()`;
   return c.json(await readChecks(sql, id));
-});
-
-checksRoutes.post('/:id/checks/extras', async (c) => {
-  const u = c.var.user;
-  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-  const sql = getDb(c.env);
-  const id = c.req.param('id');
-  const order = await checkOrder(sql, id);
-  if (!order) return c.json({ error: 'Not found' }, 404);
-  if (order.archived_at) return c.json({ error: 'Order is archived — unarchive it first' }, 409);
-  const body = (await c.req.json().catch(() => null)) as { partNumber?: unknown; note?: unknown } | null;
-  const pn = typeof body?.partNumber === 'string' ? body.partNumber.trim().slice(0, 120) : '';
-  if (!pn) return c.json({ error: 'partNumber is required' }, 400);
-  const note = cleanCheckNote(body?.note);
-  if (note === undefined) return c.json({ error: 'note must be text' }, 400);
-  await sql`
-    INSERT INTO order_check_extras (order_id, part_number, note, created_by)
-    VALUES (${id}, ${pn}, ${note}, ${u.id})`;
-  return c.json(await readChecks(sql, id), 201);
-});
-
-checksRoutes.delete('/:id/checks/extras/:extraId', async (c) => {
-  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-  const sql = getDb(c.env);
-  const id = c.req.param('id');
-  const extraId = c.req.param('extraId');
-  const order = await checkOrder(sql, id);
-  if (!order || !UUID_RE.test(extraId)) return c.json({ error: 'Not found' }, 404);
-  if (order.archived_at) return c.json({ error: 'Order is archived — unarchive it first' }, 409);
-  const gone = await sql`DELETE FROM order_check_extras WHERE id = ${extraId} AND order_id = ${id}`;
-  if (gone.count === 0) return c.json({ error: 'Not found' }, 404);
-  return c.json(await readChecks(sql, id));
-});
-
-// The flags go to the purchaser as a notification and stay on the order's
-// history. The stage is left alone: what happens next is a conversation, not
-// a transition.  Only what hasn't gone out yet is sent, so a second click — or
-// a second manager opening the page — doesn't repeat the message.
-checksRoutes.post('/:id/checks/send', async (c) => {
-  const u = c.var.user;
-  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-  const sql = getDb(c.env);
-  const id = c.req.param('id');
-  const order = await checkOrder(sql, id);
-  if (!order) return c.json({ error: 'Not found' }, 404);
-  if (order.archived_at) return c.json({ error: 'Order is archived — unarchive it first' }, 409);
-
-  const sent = await sql.begin(async (tx) => {
-    const flags = await tx<{
-      line_id: string; product_no: number; part_number: string | null; qty: number; counted: number;
-      flag_reason: CheckFlagReason; flag_note: string | null;
-    }[]>`
-      SELECT l.id AS line_id, l.product_no, l.part_number, l.qty, k.counted, k.flag_reason, k.flag_note
-      FROM order_line_checks k JOIN order_lines l ON l.id = k.line_id
-      WHERE l.order_id = ${id} AND k.flag_reason IS NOT NULL AND k.flag_sent_at IS NULL
-      ORDER BY ${poLineOrder(tx, 'l')}
-      FOR UPDATE OF k`;
-    const extras = await tx<{ id: string; part_number: string; note: string | null }[]>`
-      SELECT id, part_number, note FROM order_check_extras
-      WHERE order_id = ${id} AND sent_at IS NULL ORDER BY created_at ASC, id ASC
-      FOR UPDATE`;
-    if (flags.length === 0 && extras.length === 0) return null;
-    if (flags.length) {
-      await tx`UPDATE order_line_checks SET flag_sent_at = NOW()
-               WHERE line_id IN ${tx(flags.map((f) => f.line_id))}`;
-    }
-    if (extras.length) {
-      await tx`UPDATE order_check_extras SET sent_at = NOW()
-               WHERE id IN ${tx(extras.map((x) => x.id))}`;
-    }
-
-    const detail = {
-      flags: flags.map((f) => ({
-        lineId: f.line_id, no: f.product_no, partNumber: f.part_number, qty: f.qty, counted: f.counted,
-        reason: f.flag_reason, note: f.flag_note,
-      })),
-      extras: extras.map((x) => ({ partNumber: x.part_number, note: x.note })),
-    };
-    await writeOrderEvent(tx, id, u.id, 'box_check_flagged', detail);
-    if (order.user_id !== u.id) {
-      const n = flags.length + extras.length;
-      await notify(tx, {
-        userId: order.user_id,
-        kind: 'box_check',
-        tone: 'warn',
-        icon: 'flag',
-        title: `${id}: ${n} ${n === 1 ? 'problem' : 'problems'} found in the box`,
-        body: [
-          ...flags.map((f) => `#${f.product_no}${f.part_number ? ` ${f.part_number}` : ''}: ${f.flag_reason.replace(/_/g, ' ')}`
-            + (f.flag_note ? ` (${f.flag_note})` : '')),
-          ...extras.map((x) => `Extra item ${x.part_number}` + (x.note ? ` (${x.note})` : '')),
-        ].join('\n'),
-      });
-    }
-    return detail;
-  });
-  if (!sent) {
-    return c.json({ error: 'Nothing new to send — every flag and extra item has already gone to the purchaser.' }, 409);
-  }
-  return c.json({
-    ...await readChecks(sql, id),
-    ok: true, sentFlags: sent.flags.length, sentExtras: sent.extras.length, notified: order.user_id !== u.id,
-  });
 });
 
 // ── Pricing from a sell order sheet: the quote a buyer sent back, read by

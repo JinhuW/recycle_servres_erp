@@ -88,11 +88,6 @@ class TelegramNotifier:
             self._last_send = time.time()
             return ok
 
-    def send_listing(
-        self: "TelegramNotifier", record: Dict[str, Any], verdict: str, worker_id: str
-    ) -> bool:
-        return self.send(format_listing(record, verdict, worker_id))
-
 
 def format_message(
     thread: Dict[str, Any], message: Dict[str, Any], item_count: str | None = None

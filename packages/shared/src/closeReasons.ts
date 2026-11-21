@@ -7,4 +7,3 @@
 export const CLOSE_REASON_IDS = [
   'customer_cancelled', 'lost_deal', 'returned', 'duplicate', 'other',
 ] as const;
-export type CloseReasonId = (typeof CLOSE_REASON_IDS)[number];

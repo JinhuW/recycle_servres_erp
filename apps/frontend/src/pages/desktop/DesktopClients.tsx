@@ -11,14 +11,14 @@ import { RhythmStrip } from '../../components/RhythmStrip';
 import { TableSkeleton } from '../../components/Skeleton';
 import { api } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
-import { fmtUSD0, fmtDate } from '../../lib/format';
+import { fmtUSD0 } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { useAuth } from '../../lib/auth';
 import { match, navigate, useRoute } from '../../lib/route';
 import {
   type Client, type ClientList, type Suggestion,
-  TIER_KEY, HEALTH_KEY, HEALTH_TONE, dueLabel, dueTone, rhythmMarks,
+  TIER_KEY, HEALTH_KEY, HEALTH_TONE, dueLabel, dueTone,
 } from '../../lib/clients';
 import { ClientDrawer } from './clients/ClientDrawer';
 import { AddClientModal } from './clients/AddClientModal';
@@ -26,7 +26,7 @@ import { AddClientModal } from './clients/AddClientModal';
 type Filter = 'due' | 'soon' | 'quiet' | 'all';
 
 export function DesktopClients({ showToast }: { showToast: (m: string, k?: 'success' | 'error' | 'warn') => void }) {
-  const { t, locale } = useT();
+  const { t } = useT();
   const { user } = useAuth();
   const isManager = user?.role === 'manager';
 
@@ -216,7 +216,7 @@ export function DesktopClients({ showToast }: { showToast: (m: string, k?: 'succ
               </thead>
               <tbody>
                 {rows.map((c) => (
-                  <Row key={c.id} c={c} isManager={isManager} locale={locale}
+                  <Row key={c.id} c={c} isManager={isManager}
                     onOpen={() => setOpenId(c.id)} t={t} />
                 ))}
               </tbody>
@@ -243,8 +243,8 @@ export function DesktopClients({ showToast }: { showToast: (m: string, k?: 'succ
   );
 }
 
-function Row({ c, isManager, locale, onOpen, t }: {
-  c: Client; isManager: boolean; locale: string; onOpen: () => void;
+function Row({ c, isManager, onOpen, t }: {
+  c: Client; isManager: boolean; onOpen: () => void;
   t: (k: string, v?: Record<string, string | number>) => string;
 }) {
   const late = c.dueState === 'overdue' || c.dueState === 'today';

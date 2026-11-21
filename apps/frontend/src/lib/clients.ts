@@ -119,10 +119,3 @@ const AUTO_BODIES = new Set(['Called', 'Texted', 'Visited', 'Made an offer', 'No
 export function isAutoBody(body: string): boolean {
   return AUTO_BODIES.has(body.trim());
 }
-
-/** Days-ago marks for the rhythm strip, from ISO order dates. */
-export function rhythmMarks(orders: { created_at: string }[]): number[] {
-  const now = Date.now();
-  return orders.map((o) =>
-    Math.max(0, Math.round((now - new Date(o.created_at).getTime()) / 86_400_000)));
-}

@@ -5,7 +5,7 @@
 
 import type {
   AlertHitRow, Challenge, CityStep, CityTierSettings, CityVisit, CityVisitOutcome, CityWrite, FleetAccount, FleetCity,
-  FleetDoc, FleetQueue, LedgerLogin, QueueCityState, QueueItemCounts, QueueStarted, SearchSettingsWrite,
+  FleetDoc, LedgerLogin, SearchSettingsWrite,
   StatusChange,
 } from './coordinator';
 import type { FbWorkerStint } from './facebookPool';
@@ -16,13 +16,6 @@ export type AccountLiveness = 'live' | 'stale' | 'dead' | 'unknown' | 'none';
 // 'none' = the coordinator has no row for this worker at all (not deployed);
 // 'unknown' = it has a row but the worker has never heartbeated.
 export const liveness = (w: FleetAccount): AccountLiveness => w.health?.liveness ?? 'none';
-
-// Live or stale: a worker whose city list is being searched right now. Stale
-// counts because one missed cycle is normal on a jittered 45–75 min interval.
-export const isActive = (w: FleetAccount): boolean => {
-  const lv = liveness(w);
-  return lv === 'live' || lv === 'stale';
-};
 
 export const needsAttention = (w: FleetAccount): boolean => Boolean(w.health?.needs_attention);
 
@@ -48,17 +41,6 @@ export function matchesTerms(haystack: string, terms: readonly string[]): boolea
   if (terms.length === 0) return true;
   const h = haystack.toLowerCase();
   return terms.every(t => h.includes(t));
-}
-
-// Everything the search box may match an account on.
-export function accountHaystack(w: FleetAccount): string {
-  return [
-    w.worker_id, w.health?.account_id, w.health?.state, liveness(w),
-    w.region.key, w.region.name, w.source, w.proxy_env,
-    w.proxy?.url, w.proxy?.ip, w.proxy?.city, w.proxy?.region,
-    w.account?.account_id, w.account?.fb_username, w.session?.fb_user_id,
-    ...w.cities.flatMap(c => [c.name, c.slug]),
-  ].filter(Boolean).join(' ');
 }
 
 // The Facebook identity behind a worker: login (email/name) from the vault
@@ -184,7 +166,6 @@ export function offersRelogin(w: FleetAccount): boolean {
 // Attention outranks liveness — a live worker parked on a checkpoint is the
 // one a manager has to act on.
 export type FleetStatus = 'live' | 'stale' | 'attention' | 'offline';
-export const FLEET_STATUSES: readonly FleetStatus[] = ['live', 'stale', 'attention', 'offline'];
 
 export function fleetStatus(w: FleetAccount, parked: ReadonlySet<string>): FleetStatus {
   const lv = liveness(w);
@@ -196,46 +177,6 @@ export function fleetStatus(w: FleetAccount, parked: ReadonlySet<string>): Fleet
 // Workers with an open checkpoint, by id.
 export const parkedWorkers = (challenges: readonly Challenge[] | null): Set<string> =>
   new Set((challenges ?? []).map(ch => ch.worker_id));
-
-// The Fleet table's sortable columns. Today has no single value of its own —
-// the day bar is a shape — so it sorts by the heartbeat its tooltip shows.
-// Proxy sorts by port; the VM's own IP has none, so it goes last.
-export type FleetSortCol = 'worker' | 'proxy' | 'status' | 'today' | 'searches' | 'session' | 'posts';
-
-export function fleetSortValue(col: FleetSortCol, w: FleetAccount, status: FleetStatus): string | number | null {
-  switch (col) {
-    case 'worker': {
-      const who = whoIs(w);
-      return (who.login ?? who.label ?? w.worker_id).toLowerCase();
-    }
-    case 'proxy': {
-      const port = proxyPort(w);
-      return port ? Number(port) : null;
-    }
-    case 'status': return FLEET_STATUSES.indexOf(status);
-    case 'today': {
-      const at = w.health?.last_heartbeat_at;
-      return at ? Date.parse(at) : null;
-    }
-    case 'searches': return w.today?.searches ?? null;
-    case 'session': return w.health?.session_days_left ?? null;
-    case 'posts': return w.today?.posts ?? null;
-  }
-}
-
-// Unknowns go last whichever way the column sorts, so flipping the order
-// never fills the top of the table with dashes.
-export function sortFleet(
-  workers: readonly FleetAccount[], col: FleetSortCol, dir: 'asc' | 'desc', parked: ReadonlySet<string>,
-): FleetAccount[] {
-  const sign = dir === 'asc' ? 1 : -1;
-  const keyed = workers.map(w => ({ w, v: fleetSortValue(col, w, fleetStatus(w, parked)) }));
-  keyed.sort((a, b) => {
-    if (a.v === null || b.v === null) return a.v === b.v ? 0 : a.v === null ? 1 : -1;
-    return a.v < b.v ? -sign : a.v > b.v ? sign : 0;
-  });
-  return keyed.map(k => k.w);
-}
 
 // The Recent activity feed. Status changes come from the coordinator's log
 // (`status_changes`); everything else is rebuilt from the timestamps it
@@ -478,19 +419,10 @@ export function draftChanges(base: SettingsDraft, draft: SettingsDraft): number 
   return n;
 }
 
-// ── Today ─────────────────────────────────────────────────────────────────────
-// A worker's day, drawn 00:00–24:00 in its region's zone: the window it has
-// searched, the now tick, and while a sweep runs, the tail to its estimated
-// end. Positions are fractions of the local day.
+// ── Start times ───────────────────────────────────────────────────────────────
+// The sweep's daily `start_at` times, read and typed in Eastern.
 
-const ZONE_LABEL: Record<string, string> = {
-  'America/New_York': 'ET', 'America/Chicago': 'CT', 'America/Denver': 'MT', 'America/Los_Angeles': 'PT',
-};
 const DEFAULT_ZONE = 'America/New_York';
-
-// A search reported this recently means the sweep is still under way. One
-// search is a few minutes through the proxy; a quiet half hour is not.
-export const SWEEP_IDLE_MS = 30 * 60_000;
 
 function localClock(ms: number, zone: string): { date: string; minutes: number } {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -522,105 +454,6 @@ function shiftClock(hm: string, by: number): string {
 
 export const utcToEastern = (hm: string, now: number = Date.now()): string => shiftClock(hm, easternOffset(now));
 export const easternToUtc = (hm: string, now: number = Date.now()): string => shiftClock(hm, -easternOffset(now));
-
-export type StripSegment = { from: number; to: number; kind: 'done' | 'eta' | 'rest' };
-export type DayStrip = {
-  zone: string;
-  localNow: string;
-  nowAt: number;
-  segments: StripSegment[];
-  start: string | null;
-  // null while the sweep runs, and when only cycle starts are known (a
-  // monitor that does not report single searches cannot say when it stopped).
-  end: string | null;
-  running: boolean;
-  eta: string | null;
-  // The next scheduled sweep, given only when nothing has run yet today.
-  next: { time: string; tomorrow: boolean } | null;
-  searches: number | null;
-  budget: number | null;
-};
-
-// The next of the daily `start_at` times (UTC "HH:MM") after `now`.
-function nextStart(startAt: readonly string[], now: number): number | null {
-  let best: number | null = null;
-  for (const hm of startAt) {
-    const m = /^(\d{1,2}):(\d{2})$/.exec(hm.trim());
-    if (!m) continue;
-    const d = new Date(now);
-    let at = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), Number(m[1]), Number(m[2]));
-    if (at <= now) at += 86_400_000;
-    if (best === null || at < best) best = at;
-  }
-  return best;
-}
-
-export function dayStrip(
-  w: FleetAccount,
-  status: FleetStatus,
-  startAt: readonly string[] | undefined,
-  now: number = Date.now(),
-): DayStrip | null {
-  const today = w.today;
-  if (!today) return null;
-  const zone = w.timezone ?? DEFAULT_ZONE;
-  const clock = localClock(now, zone);
-  // Clamped to the day: a first search before local midnight starts at 0.
-  const at = (ms: number) => {
-    const c = localClock(ms, zone);
-    return c.date < clock.date ? 0 : c.date > clock.date ? 1 : c.minutes / 1440;
-  };
-  const first = today.first_at ? Date.parse(today.first_at) : null;
-  const last = today.last_at ? Date.parse(today.last_at) : null;
-  const budget = w.plan?.per_day ?? null;
-  const searches = today.searches;
-  const working = status === 'live' || status === 'stale';
-  const running = working && searches !== null && last !== null
-    && now - last < SWEEP_IDLE_MS && (budget === null || searches < budget);
-
-  const segments: StripSegment[] = [];
-  let eta: string | null = null;
-  if (first !== null && last !== null) {
-    segments.push({ from: at(first), to: at(running ? now : last), kind: 'done' });
-    if (running && budget !== null && searches !== null && searches > 0) {
-      const e = localClock(now + ((now - first) / searches) * (budget - searches), zone);
-      if (e.date === clock.date) {
-        eta = hhmm(e.minutes);
-        segments.push({ from: clock.minutes / 1440, to: e.minutes / 1440, kind: 'eta' });
-      }
-    }
-  }
-  if (!working) segments.push({ from: segments[0]?.to ?? 0, to: 1, kind: 'rest' });
-
-  let next: DayStrip['next'] = null;
-  if (first === null && startAt?.length) {
-    const ms = nextStart(startAt, now);
-    if (ms !== null) {
-      const c = localClock(ms, zone);
-      next = { time: hhmm(c.minutes), tomorrow: c.date !== clock.date };
-    }
-  }
-
-  return {
-    zone: ZONE_LABEL[zone] ?? zone,
-    localNow: hhmm(clock.minutes),
-    nowAt: clock.minutes / 1440,
-    segments,
-    start: first !== null ? hhmm(localClock(first, zone).minutes) : null,
-    end: !running && searches !== null && last !== null ? hhmm(localClock(last, zone).minutes) : null,
-    running,
-    eta,
-    next,
-    searches,
-    budget,
-  };
-}
-
-// Today's new posts across the fleet, or null when no worker carries a count.
-export function fleetPostsToday(workers: readonly FleetAccount[]): number | null {
-  const counts = workers.map(w => w.today?.posts).filter((n): n is number => typeof n === 'number');
-  return counts.length ? counts.reduce((a, b) => a + b, 0) : null;
-}
 
 // A VNC link written into config, usable from the ERP only if it is absolute.
 // The facade hands out its own viewer as a path ("/vnc/homelab-1") meant for
@@ -731,23 +564,6 @@ export function cityOwners(fleet: FleetDoc, workerId: string): Map<string, strin
   return out;
 }
 
-export function proxyPort(w: FleetAccount): string | null {
-  return /:(\d+)$/.exec(w.proxy?.url ?? '')?.[1] ?? null;
-}
-
-// Workers per exit, keyed by proxy URL. A port is one exit IP, so Facebook
-// sees the accounts on it side by side; the VM's own address ('') is one IP
-// the same way. A facade that predates the proxy lookup counts nothing.
-export function sharedExits(workers: readonly FleetAccount[]): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const w of workers) {
-    if (!w.proxy) continue;
-    const key = w.proxy.url ?? '';
-    out.set(key, (out.get(key) ?? 0) + 1);
-  }
-  return out;
-}
-
 export function citiesDiffer(a: readonly CityWrite[], b: readonly CityWrite[]): boolean {
   return a.length !== b.length
     || a.some((c, i) => c.slug !== b[i].slug || c.name !== b[i].name || c.radius !== b[i].radius);
@@ -833,75 +649,6 @@ export function keysymsFor(text: string): number[] {
 }
 
 // ── The city queue ───────────────────────────────────────────────────────────
-
-export type RoundCell = {
-  slug: string;
-  name: string;
-  state: QueueCityState;
-  at: string | null;
-  by: string | null;
-};
-
-// The board reads left to right as the round does: done, under way, left to
-// do, not due yet, then the cities workers outside the queue keep.
-const ROUND_ORDER: Record<QueueCityState, number> = { searched: 0, leased: 1, due: 2, later: 3, held: 4 };
-
-/** The round a manager started by hand, while it still runs; else null. */
-export function queueStartedNow(queue: FleetQueue, now: number = Date.now()): QueueStarted | null {
-  const started = queue.started;
-  return started && Date.parse(started.until) > now ? started : null;
-}
-
-/** One item's round: every city in board order, and the counts. */
-export function queueRound(queue: FleetQueue, item: string): { cells: RoundCell[]; counts: QueueItemCounts } {
-  const cells: RoundCell[] = queue.cities.map(c => {
-    const at = c.items[item] ?? { state: 'due' as const, at: null, by: null };
-    return { slug: c.slug, name: c.name ?? c.slug, state: at.state, at: at.at, by: at.by };
-  });
-  cells.sort((a, b) => ROUND_ORDER[a.state] - ROUND_ORDER[b.state] || a.name.localeCompare(b.name));
-  const tally = (state: QueueCityState) => cells.filter(c => c.state === state).length;
-  const counts = queue.items[item] ?? {
-    cities: cells.length,
-    queue: cells.length - tally('held'),
-    searched: tally('searched'),
-    leased: tally('leased'),
-    due: tally('due'),
-    later: tally('later'),
-    held: tally('held'),
-  };
-  return { cells, counts };
-}
-
-export type QueueSummary = {
-  workers: number;
-  // Enrolled and on a monitor that asks the queue.
-  pulling: number;
-  // Enrolled but on an older monitor, so still searching its own list.
-  waiting: number;
-  // Workers on an older monitor, enrolled or not.
-  older: number;
-  everyone: boolean;
-};
-
-/** Who takes their cities from the queue; null without a queue. */
-export function queueSummary(fleet: FleetDoc): QueueSummary | null {
-  if (!fleet.queue) return null;
-  let pulling = 0, waiting = 0, older = 0;
-  for (const w of fleet.workers) {
-    const q = w.queue;
-    if (!q) continue;
-    if (!q.capable) older += 1;
-    if (q.enrolled && q.capable) pulling += 1;
-    else if (q.enrolled) waiting += 1;
-  }
-  return { workers: fleet.workers.length, pulling, waiting, older, everyone: fleet.queue.everyone };
-}
-
-/** An enrolled worker's cities today: its own list, and what the queue handed it on top. */
-export function queueCitiesToday(w: FleetAccount): { home: FleetCity[]; fromQueue: string[] } {
-  const own = new Set(w.cities.map(c => c.slug));
-  return { home: w.cities, fromQueue: (w.queue?.handed ?? []).filter(slug => !own.has(slug)) };
-}
 
 /** The city name the queue knows for a slug, else the slug. */
 export function queueCityName(fleet: FleetDoc | null, slug: string): string {

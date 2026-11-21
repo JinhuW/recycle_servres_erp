@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type postgres from 'postgres';
 import {
-  isFleetTimezone, fleetCloakFor, fleetCloakSwitchable, fleetDeviceFor, fleetReportedEngine, FLEET_PILOT_ARMS, type FleetCloakGpu, type FleetPilotArm, fleetStockRevertible, fleetResumable, fleetRestartable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
+  isFleetTimezone, fleetCloakSwitchable, fleetDeviceFor, fleetReportedEngine, FLEET_PILOT_ARMS, type FleetCloakGpu, type FleetPilotArm, fleetStockRevertible, fleetResumable, fleetRestartable, FLEET_BROWSER_ENGINES, type FleetBrowserEngine, fleetSlotRetirable, FLEET_SECRET_KINDS, type FleetSecretKind, type FleetSlot, type FleetTask, type FleetWorker, type FleetWorkerDetail,
   type FleetWorkerRelogin, type FleetWorkerResume, type FbPoolStatus,
 } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';

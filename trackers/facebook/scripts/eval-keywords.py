@@ -264,12 +264,8 @@ def main():
     master = cfg.get("master.toml", {})
     master_phrases = {p for body in master.values() if isinstance(body, dict)
                       for p in body.get("phrases", [])}
-    gen_phrases = {p for name, items in cfg.items() if name != "master.toml"
-                   for body in items.values() if isinstance(body, dict)
-                   for p in body.get("phrases", [])}
     seen_phrases = set(failed)
     drift_running = sorted(seen_phrases - master_phrases)
-    drift_generated = sorted(gen_phrases - master_phrases)
 
     out = []
     w = out.append

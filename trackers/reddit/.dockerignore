@@ -7,6 +7,7 @@ docs
 .env.local
 *.log
 # The Dockerfile copies scripts/ whole; keep the deploy secrets out of the image.
-scripts/secrets.env
+scripts/secrets.env*
+!scripts/secrets.env.example
 # Terraform only; its provider cache alone is hundreds of MB of build context.
 infra

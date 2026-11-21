@@ -182,8 +182,3 @@ export async function loadHostByTokenHash(sql: SqlLike, hash: string): Promise<F
   const rows = await sql<FleetHostRow[]>`SELECT * FROM fleet_hosts WHERE token_hash = ${hash}`;
   return rows[0] ?? null;
 }
-
-export async function loadSlot(sql: SqlLike, accountNo: number): Promise<FleetSlotRow | null> {
-  const rows = await sql<FleetSlotRow[]>`SELECT * FROM fleet_slots WHERE account_no = ${accountNo}`;
-  return rows[0] ?? null;
-}

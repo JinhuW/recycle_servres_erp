@@ -1,6 +1,5 @@
-import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useState } from 'react';
 import { Icon } from '../../components/Icon';
-import { Modal } from '../../components/Modal';
 import { FormSkeleton } from '../../components/Skeleton';
 import { ApiError } from '../../lib/api';
 import { coordinatorApi, type CityStep, type CityVisit, type CityVisitOutcome } from '../../lib/coordinator';
@@ -13,8 +12,7 @@ import '../../styles/facebookPool.css';
 // ─── The city log ─────────────────────────────────────────────────────────────
 // Each city a worker searched, from its handout (or its start, on a worker's
 // own list) to its end, with the worker's brief report: one row a city, and
-// under it every step. The worker page shows one worker's day; a city name on
-// the round card opens that city's day across workers.
+// under it every step. The worker page shows one worker's day.
 
 // null while loading; a console older than the log answers 404.
 export type CityLogState = CityVisit[] | 'not_served' | 'unreachable' | null;
@@ -144,9 +142,8 @@ function VisitSteps({ visit, locale }: { visit: CityVisit; locale: string }) {
   );
 }
 
-/** One row a city, and its steps under it. `by` names the column that varies:
- *  the city on a worker's page, the worker on a city's log. */
-export function CityLogTable({ visits, by }: { visits: CityVisit[]; by: 'city' | 'worker' }) {
+/** One row a city, and its steps under it. */
+export function CityLogTable({ visits }: { visits: CityVisit[] }) {
   const { t, locale } = useT();
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = (row: string) => setOpen(prev => {
@@ -162,7 +159,7 @@ export function CityLogTable({ visits, by }: { visits: CityVisit[]; by: 'city' |
           <tr>
             <th aria-label={t('fbcCityLogSteps')} />
             <th>{t('fbcCityLogColTime')}</th>
-            <th>{t(by === 'city' ? 'fbcCityLogColCity' : 'fbcCityLogColWorker')}</th>
+            <th>{t('fbcCityLogColCity')}</th>
             <th className="num">{t('fbcCityLogColSearches')}</th>
             <th className="num">{t('fbcCityLogColCards')}</th>
             <th className="num">{t('fbcCityLogColOpened')}</th>
@@ -176,9 +173,6 @@ export function CityLogTable({ visits, by }: { visits: CityVisit[]; by: 'city' |
             const row = `${v.worker_id}-${v.item}-${v.city}-${v.started_at}`;
             const isOpen = open.has(row);
             const minutes = visitMinutes(v);
-            const where: ReactNode = by === 'city'
-              ? <span>{v.name ?? v.city}</span>
-              : <span className="mono">{v.worker_id}</span>;
             return (
               <Fragment key={row}>
                 <tr className={isOpen ? 'ff-open ff-tl-toggle' : 'ff-tl-toggle'} onClick={() => toggle(row)}>
@@ -199,7 +193,7 @@ export function CityLogTable({ visits, by }: { visits: CityVisit[]; by: 'city' |
                   </td>
                   <td>
                     <span className="fp-holder">
-                      {where}
+                      <span>{v.name ?? v.city}</span>
                       <small className="mono">{v.item ?? t('fbcCityNoItem')}</small>
                     </span>
                   </td>
@@ -242,34 +236,7 @@ export function CityLogCard({ log }: { log: CityLogState }) {
       {log === null ? <FormSkeleton fields={2} />
         : log === 'unreachable' ? <div className="fp-empty fp-warn">{t('fbcCityLogFailed')}</div>
         : log.length === 0 ? <div className="fp-empty">{t('fbcCityLogNone')}</div>
-        : <CityLogTable visits={log} by="city" />}
+        : <CityLogTable visits={log} />}
     </section>
-  );
-}
-
-/** One city's last 24 h across workers and items, from the round card. */
-export function CityLogModal({ slug, name, onClose }: { slug: string; name: string; onClose: () => void }) {
-  const { t } = useT();
-  const [log, setLog] = useState<CityLogState>(null);
-  useEffect(() => { loadCityLog({ city: slug }, setLog); }, [slug]);
-  return (
-    <Modal onClose={onClose} shellStyle={{ maxWidth: 920 }}>
-      <div className="modal-head">
-        <div>
-          <div className="modal-title">{t('fbcCityLogCityTitle', { city: name })}</div>
-          <div className="modal-sub">{t('fbcCityLogCitySub')}</div>
-        </div>
-      </div>
-      <div className="modal-body">
-        {log === null ? <FormSkeleton fields={2} />
-          : log === 'not_served' ? <p className="fp-muted">{t('fbcCityLogNotServed')}</p>
-          : log === 'unreachable' ? <p className="fp-warn">{t('fbcCityLogFailed')}</p>
-          : log.length === 0 ? <p className="fp-muted">{t('fbcCityLogCityNone')}</p>
-          : <CityLogTable visits={log} by="worker" />}
-      </div>
-      <div className="modal-foot">
-        <button type="button" className="btn" onClick={onClose}>{t('close')}</button>
-      </div>
-    </Modal>
   );
 }

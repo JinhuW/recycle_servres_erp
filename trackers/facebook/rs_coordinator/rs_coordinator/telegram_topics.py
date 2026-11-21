@@ -72,14 +72,6 @@ def create_forum_topic(token: str, chat_id: str, name: str) -> Optional[int]:
     return int(topic_id) if topic_id is not None else None
 
 
-def close_forum_topic(token: str, chat_id: str, topic_id: int) -> bool:
-    return _call(token, "closeForumTopic", chat_id=chat_id, message_thread_id=topic_id) is not None
-
-
-def reopen_forum_topic(token: str, chat_id: str, topic_id: int) -> bool:
-    return _call(token, "reopenForumTopic", chat_id=chat_id, message_thread_id=topic_id) is not None
-
-
 def ensure_topic(db: Any, notifier: Any, thread: dict) -> Optional[int]:
     """The topic id for `thread`, creating and remembering one if needed.
 

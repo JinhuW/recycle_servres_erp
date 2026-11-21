@@ -18,6 +18,14 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Removed
+
+- Unused code: `DedupeResult`, `TelegramNotifier.send_listing`,
+  `close_forum_topic`/`reopen_forum_topic`, the messenger's `SendError` and two
+  unread selectors, `FACEBOOK_DOMAINS`, a few script constants and unused
+  imports. rs_console's test extra no longer installs `pytest-asyncio`; no test
+  used it.
+
 ## [0.18.0] - 2026-11-07
 
 ### Added

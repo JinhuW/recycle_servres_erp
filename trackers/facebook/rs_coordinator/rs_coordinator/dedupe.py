@@ -8,7 +8,6 @@ price detect edits and price drops that are worth a second alert.
 
 import hashlib
 import re
-from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
 
@@ -22,13 +21,6 @@ class Verdict(Enum):
     @property
     def should_notify(self: "Verdict") -> bool:
         return self is not Verdict.DUPLICATE
-
-
-@dataclass
-class DedupeResult:
-    verdict: Verdict
-    dedupe_key: str
-    previous_price: str | None = None
 
 
 def message_fingerprint(

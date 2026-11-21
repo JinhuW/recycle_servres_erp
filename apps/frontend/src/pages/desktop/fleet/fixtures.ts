@@ -7,16 +7,11 @@ import type {
 } from '@recycle-erp/shared';
 import type { AlertHitRow, FleetAccount, FleetDoc } from '../../../lib/coordinator';
 import type { PoolAccount } from '../../../lib/facebookPool';
-import type { FleetFunnelDay, FleetHost, FleetItem, FleetProxy, FleetSettings, FleetSlot, FleetTask, FleetWorker } from '../../../lib/fleet';
+import type { FleetFunnelDay, FleetHost, FleetProxy, FleetSettings, FleetSlot, FleetTask, FleetWorker } from '../../../lib/fleet';
 
 export const NOW = Date.parse('2026-10-24T18:30:00Z');
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
 const ahead = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
-
-export const ITEMS: FleetItem[] = [
-  { name: 'server_ram', phrases: ['server ram', 'ddr4 ecc'], filters: { date_listed: 'last 24 hours' }, enabled: true },
-  { name: 'enterprise_ssd', phrases: ['enterprise ssd'], filters: {}, enabled: true },
-];
 
 export const SETTINGS: FleetSettings = {
   per_day_default: 1, budget_minutes: 360, lease_minutes: 30, task_max_minutes: 45, poll_hold_seconds: 50,

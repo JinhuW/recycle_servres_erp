@@ -1,18 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import {
-  vncSocketUrl, type Challenge, type CityStep, type FleetAccount, type FleetDoc, type FleetQueue, type FleetQueueWorker, type FleetWorker,
+  vncSocketUrl, type Challenge, type CityStep, type FleetAccount, type FleetDoc, type FleetQueue, type FleetWorker,
   type LedgerLogin,
 } from './coordinator';
 import {
-  accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
+  accountAlerts, attentionReason, browserLabel, canWatch,
   externalVncUrl, fleetActivity, fleetStatus, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic, reloginProgress,
   matchesTerms, offersRelogin, queryTerms, searchedToday,
-  sortFleet, splitHighlights, vaultAccountIdFor, whoIs, easternToUtc, utcToEastern,
+  splitHighlights, vaultAccountIdFor, whoIs, easternToUtc, utcToEastern,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
-  citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyPort, sharedExits,
+  citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug,
   applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
-  loginAccountNo, workerHistory, queueCitiesToday, queueCityName, queueRound, queueSummary,
-  cityStepDot, stepCount, visitMinutes, VISIT_TONE, queueStartedNow, retiredAt, withoutRetired,
+  loginAccountNo, workerHistory, queueCityName,
+  cityStepDot, stepCount, visitMinutes, VISIT_TONE, retiredAt, withoutRetired,
 } from './fleetView';
 
 describe('keysymsFor', () => {
@@ -50,21 +50,12 @@ describe('fleetView', () => {
     expect(matchesTerms('anything', [])).toBe(true);
   });
 
-  it('haystack covers id, region, cities and health', () => {
-    const w = account({ health: { state: 'HEALTHY', liveness: 'live', account_id: 'acct-9' } as never });
-    const hay = accountHaystack(w);
-    for (const needle of ['w', 'rs_southeast', 'Southeast', 'Tampa, FL', 'tampa', 'HEALTHY', 'live', 'acct-9']) {
-      expect(hay).toContain(needle);
-    }
-  });
-
   it('names the account from the vault first, then the session', () => {
     const w = account({
       account: { account_id: 'personal', fb_username: 'me@example.com', region: null, vnc_url: null, allow_password_login: false, proxy_configured: true, secrets: { totp_secret: true } },
       session: { account_id: 'personal', fb_user_id: '100000000000001', user_agent: null, session_expiry: null, backed_up_at: null },
     });
     expect(whoIs(w)).toEqual({ login: 'me@example.com', label: 'personal', userId: '100000000000001' });
-    expect(accountHaystack(w)).toContain('100000000000001');
     expect(whoIs(account({}))).toEqual({ login: null, label: null, userId: null });
   });
 
@@ -365,51 +356,6 @@ describe('a worker\'s cities', () => {
     expect(owners.get('tampa')).toEqual(['homelab-1']);
   });
 
-  it('sorts by proxy port, counts the workers on each exit, and searches its city', () => {
-    const at = (id: string, port: number | null, city?: string, region?: string) => account({
-      worker_id: id,
-      proxy: port === null
-        ? { url: null, ip: '74.104.122.134', city: 'Framingham', region: 'Massachusetts' }
-        : { url: `http://isp.decodo.com:${port}`, ip: city ? `10.0.0.${port % 100}` : undefined, city, region, org: 'AS33651 Comcast' },
-    });
-    const fleet = [
-      at('ca-3', 10016, 'Palo Alto', 'California'),
-      at('va-1', null),
-      at('nj-1', 10018, 'Parsippany', 'New Jersey'),
-      at('ca-1b', 10014, 'Palo Alto', 'California'),
-      at('ca-1', 10014, 'Palo Alto', 'California'),
-      at('new-1', 10021),
-      at('se-1', null),
-      account({ worker_id: 'old', proxy_env: 'PROXY_OLD' }),
-    ];
-    const ids = (ws: FleetAccount[]) => ws.map(w => w.worker_id);
-    const none = new Set<string>();
-
-    expect(proxyPort(fleet[0])).toBe('10016');
-    expect(proxyPort(fleet[1])).toBeNull();
-    // Numeric by port, and the VM's own IP (no port) last whichever way.
-    expect(ids(sortFleet(fleet, 'proxy', 'asc', none))).toEqual(['ca-1b', 'ca-1', 'ca-3', 'nj-1', 'new-1', 'va-1', 'se-1', 'old']);
-    expect(ids(sortFleet(fleet, 'proxy', 'desc', none))).toEqual(['new-1', 'nj-1', 'ca-3', 'ca-1b', 'ca-1', 'va-1', 'se-1', 'old']);
-
-    // The VM's own address is one IP too; a facade without the lookup counts nothing.
-    expect(sharedExits(fleet)).toEqual(new Map([
-      ['http://isp.decodo.com:10016', 1], ['', 2], ['http://isp.decodo.com:10018', 1],
-      ['http://isp.decodo.com:10014', 2], ['http://isp.decodo.com:10021', 1],
-    ]));
-
-    const hay = accountHaystack(fleet[2]);
-    for (const term of ['10018', '10.0.0.18', 'parsippany', 'new jersey']) {
-      expect(matchesTerms(hay, [term])).toBe(true);
-    }
-  });
-
-  it('draws a worker that sweeps at its own time from that time', () => {
-    const w = account({ today: { first_at: null, last_at: null, searches: 0 } as never, start_at: ['17:00'] });
-    const NOON_UTC = Date.parse('2026-10-20T12:00:00Z');
-    expect(dayStrip(w, 'live', w.start_at ?? ['13:00'], NOON_UTC)!.next).toEqual({ time: '13:00', tomorrow: false });
-    expect(dayStrip(w, 'live', ['13:00'], NOON_UTC)!.next).toEqual({ time: '09:00', tomorrow: false });
-  });
-
   it('sees a reorder, a rename or a new radius as a change', () => {
     const a = [{ slug: 'dc', name: 'DC', radius: 100 }, { slug: 'tampa', name: 'Tampa', radius: 100 }];
     expect(citiesDiffer(a, a.map(c => ({ ...c })))).toBe(false);
@@ -503,9 +449,7 @@ describe('stage settings forms', () => {
   });
 });
 
-describe('dayStrip', () => {
-  // 13:40 in Denver (MDT, UTC-6).
-  const NOW = Date.parse('2026-10-17T19:40:00Z');
+describe('searchedToday', () => {
   const today = (over: Partial<NonNullable<FleetAccount['today']>>): FleetAccount['today'] => ({
     day: '2026-10-17', first_at: null, last_at: null, cycles: 0, searches: 0, posts: 0, alerts: 0, ...over,
   });
@@ -515,46 +459,6 @@ describe('dayStrip', () => {
     ...over,
   });
 
-  it('draws a running sweep to now, with the tail to its estimated end', () => {
-    // 07:25 → 13:40 local, 30 of 40 done: 375 min for 30, so 125 min to go.
-    const w = denver({ today: today({ first_at: '2026-10-17T13:25:00Z', last_at: '2026-10-17T19:35:00Z', searches: 30 }) });
-    const s = dayStrip(w, 'live', ['10:00'], NOW)!;
-    expect(s).toMatchObject({ zone: 'MT', localNow: '13:40', start: '07:25', end: null, running: true, eta: '15:45', next: null });
-    expect(s.segments.map(x => x.kind)).toEqual(['done', 'eta']);
-    expect(s.segments[0].from).toBeCloseTo((7 * 60 + 25) / 1440);
-    expect(s.segments[0].to).toBeCloseTo(s.nowAt);
-  });
-
-  it('ends a sweep at its last search once the budget is met or it goes quiet', () => {
-    const done = denver({ today: today({ first_at: '2026-10-17T13:10:00Z', last_at: '2026-10-17T18:50:00Z', searches: 40 }) });
-    expect(dayStrip(done, 'live', ['10:00'], NOW)).toMatchObject({ start: '07:10', end: '12:50', running: false, eta: null });
-    const quiet = denver({ today: today({ first_at: '2026-10-17T13:10:00Z', last_at: '2026-10-17T18:50:00Z', searches: 12 }) });
-    expect(dayStrip(quiet, 'live', ['10:00'], NOW)).toMatchObject({ end: '12:50', running: false });
-  });
-
-  it('gives only a start when the monitor reports cycles, not searches', () => {
-    const w = denver({ today: today({ first_at: '2026-10-17T13:25:00Z', last_at: '2026-10-17T16:00:00Z', searches: null, cycles: 2 }) });
-    expect(dayStrip(w, 'live', ['10:00'], NOW)).toMatchObject({ start: '07:25', end: null, running: false, searches: null });
-  });
-
-  it('names the next sweep when nothing ran today, and hatches a worker that is down', () => {
-    const w = denver({ today: today({}) });
-    // 10:00 UTC has passed: tomorrow, 04:00 Denver.
-    expect(dayStrip(w, 'live', ['10:00'], NOW)!.next).toEqual({ time: '04:00', tomorrow: true });
-    const early = Date.parse('2026-10-17T08:00:00Z');
-    expect(dayStrip(w, 'live', ['10:00'], early)!.next).toEqual({ time: '04:00', tomorrow: false });
-    expect(dayStrip(w, 'offline', ['10:00'], NOW)!.segments).toEqual([{ from: 0, to: 1, kind: 'rest' }]);
-  });
-
-  it('is null against a facade that serves no today', () => {
-    expect(dayStrip(account({}), 'live', ['10:00'], NOW)).toBeNull();
-  });
-
-  it('sums the fleet’s posts only over workers that carry a count', () => {
-    expect(fleetPostsToday([denver({ today: today({ posts: 23 }) }), denver({ today: today({ posts: 5 }) }), account({})])).toBe(28);
-    expect(fleetPostsToday([account({})])).toBeNull();
-  });
-
   it('knows the cities searched today, and falls back to liveness without a report', () => {
     const searched = searchedToday(denver({ today: today({ cities: ['denver'] }) }), 'live');
     expect([searched('denver'), searched('boulder')]).toEqual([true, false]);
@@ -562,32 +466,6 @@ describe('dayStrip', () => {
     expect(searchedToday(denver({ today: today({}) }), 'live')('denver')).toBe(true);
     expect(searchedToday(denver({ today: today({ cities: null }) }), 'stale')('denver')).toBe(true);
     expect(searchedToday(account({}), 'offline')('denver')).toBe(false);
-  });
-});
-
-describe('sortFleet', () => {
-  const posts = (worker_id: string, n: number | null) => account({
-    worker_id,
-    today: n === null ? null : { day: '2026-10-17', first_at: null, last_at: null, cycles: 0, searches: 0, posts: n, alerts: 0 },
-  });
-  const ids = (ws: FleetAccount[]) => ws.map(w => w.worker_id);
-  const none = new Set<string>();
-
-  it('keeps unknowns last in both directions', () => {
-    const ws = [posts('a', 3), posts('b', null), posts('c', 9), posts('d', 0)];
-    expect(ids(sortFleet(ws, 'posts', 'desc', none))).toEqual(['c', 'a', 'd', 'b']);
-    expect(ids(sortFleet(ws, 'posts', 'asc', none))).toEqual(['d', 'a', 'c', 'b']);
-  });
-
-  it('sorts workers by login, then id, case-insensitively', () => {
-    const ws = [account({ worker_id: 'Zed' }), account({ worker_id: 'alpha' }), account({ worker_id: 'Mid' })];
-    expect(ids(sortFleet(ws, 'worker', 'asc', none))).toEqual(['alpha', 'Mid', 'Zed']);
-  });
-
-  it('sorts status in legend order, a parked worker as attention', () => {
-    const live = { liveness: 'live', state: 'HEALTHY' } as never;
-    const ws = [account({ worker_id: 'off' }), account({ worker_id: 'parked', health: live }), account({ worker_id: 'ok', health: live })];
-    expect(ids(sortFleet(ws, 'status', 'asc', new Set(['parked'])))).toEqual(['ok', 'parked', 'off']);
   });
 });
 
@@ -638,7 +516,6 @@ describe('workerHistory', () => {
   });
 });
 
-
 describe('the city queue', () => {
   const at = (state: string, by: string | null = null) => ({ state, at: '2026-10-24T13:10:00+00:00', by }) as FleetQueue['cities'][number]['items'][string];
   const queue: FleetQueue = {
@@ -656,41 +533,7 @@ describe('the city queue', () => {
       { slug: 'atlanta', name: null, region: 'se', home: [], held_by: null, items: { server_ram: at('due') } },
     ],
   };
-  const part = (over: Partial<FleetQueueWorker>): FleetQueueWorker => ({
-    worker_id: 'w', enrolled: false, capable: true, version: '0.13.16', quarantined: false,
-    minutes_today: 0, budget_minutes: 360, handed_today: 0, handed: [], open: [], ...over,
-  });
-
-  it('lays a round out as it runs, done first and the kept cities last, and counts it', () => {
-    const { cells, counts } = queueRound(queue, 'server_ram');
-    expect(cells.map(c => c.state)).toEqual(['searched', 'leased', 'due', 'later', 'held']);
-    expect(cells.find(c => c.slug === 'atlanta')?.name).toBe('atlanta');
-    expect(counts).toEqual({ cities: 5, queue: 4, searched: 1, leased: 1, due: 1, later: 1, held: 1 });
-    // The served counts win when the coordinator sends them.
-    const served = { ...queue, items: { server_ram: { ...counts, due: 9 } } };
-    expect(queueRound(served, 'server_ram').counts.due).toBe(9);
-    // An item a city has no row for reads as due.
-    expect(queueRound(queue, 'enterprise_ssd').cells.every(c => c.state === 'due')).toBe(true);
-  });
-
-  it('counts who pulls, who waits on an older worker, and who is older', () => {
-    const fleet = {
-      queue,
-      workers: [
-        account({ worker_id: 'homelab-1', queue: part({ enrolled: true }) }),
-        account({ worker_id: 'ne-1', queue: part({ enrolled: true, capable: false, version: '0.13.12' }) }),
-        account({ worker_id: 'mw-1', queue: part({ capable: false }) }),
-        account({ worker_id: 'se-1', queue: null }),
-      ],
-    } as unknown as FleetDoc;
-    expect(queueSummary(fleet)).toEqual({ workers: 4, pulling: 1, waiting: 1, older: 2, everyone: false });
-    expect(queueSummary({ ...fleet, queue: null } as FleetDoc)).toBeNull();
-  });
-
-  it('splits an enrolled worker’s day into its own cities and what the queue added', () => {
-    const w = account({ queue: part({ enrolled: true, handed: ['dc', 'miami', 'reno'] }) });
-    expect(queueCitiesToday(w).fromQueue).toEqual(['miami', 'reno']);
-    expect(queueCitiesToday(account({})).fromQueue).toEqual([]);
+  it('names a city from the queue, else by its slug', () => {
     const fleet = { queue } as unknown as FleetDoc;
     expect(queueCityName(fleet, 'miami')).toBe('Miami, FL');
     expect(queueCityName(fleet, 'nowhere')).toBe('nowhere');
@@ -726,22 +569,6 @@ describe('the city log', () => {
     expect(stepCount(page, 'opened')).toBe(0);
     expect(stepCount(page, 'phrase')).toBe(0);
     expect(stepCount(page, 'reviewed')).toBe(0);
-  });
-});
-
-describe('a round started by hand', () => {
-  const queue = (started: FleetQueue['started']): FleetQueue => ({
-    at: '2026-10-24T08:00:00Z', everyone: true,
-    settings: { enrolled: ['*'], per_day: 1, budget_minutes: 360, window_hours: 8 },
-    items: {}, cities: [], quarantined: [], roster_updated_at: null, started,
-  });
-  const started = { at: '2026-10-24T08:00:00Z', by: 'Alex Chen', until: '2026-10-24T16:00:00Z', fresh_hours: 2 };
-
-  it('counts only while it runs', () => {
-    expect(queueStartedNow(queue(started), Date.parse('2026-10-24T09:00:00Z'))).toEqual(started);
-    expect(queueStartedNow(queue(started), Date.parse('2026-10-24T16:00:00Z'))).toBeNull();
-    expect(queueStartedNow(queue(null), Date.parse('2026-10-24T09:00:00Z'))).toBeNull();
-    expect(queueStartedNow(queue(undefined), Date.parse('2026-10-24T09:00:00Z'))).toBeNull();
   });
 });
 
