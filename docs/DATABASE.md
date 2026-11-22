@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-17:** ERP migration `0250`, Reddit tracker migration `0009`,
+**As of 2026-11-22:** ERP migration `0251`, Reddit tracker migration `0009`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -2946,15 +2946,16 @@ One seller, with their deal record from the latest harvest and, while claimed, w
 | `claimed_name` | `text` |  |  | Holder's name at claim time. |
 | `claimed_at` | `timestamptz` |  |  | A claim with no DM 48 h on is stale. |
 | `stage` | `text` | ✓ | `'claimed'` | claimed, dm, replied, talks (negotiating) or won. |
-| `closed` | `text` | ✓ | `''` | `''` open, `nostock` (comes back as a follow-up in 30 days) or `lost`. |
+| `closed` | `text` | ✓ | `''` | `''` open, `nostock` (comes back as a follow-up in 30 days), `lost` or `optout` (asked not to be contacted). |
 | `follow_up` | `date` |  |  | When the holder should get back to them; a DM sets it 3 days out, a reply clears it. |
 | `dm_at` | `timestamptz` |  |  | Last DM the holder marked sent. |
+| `opted_out_at` | `timestamptz` |  |  | The seller asked not to be contacted (0251). Survives release and re-import; while set, only a manager may claim, and a manager's reopen clears it. |
 | `imported_at` | `timestamptz` | ✓ | `now()` | Last import that touched the row. |
 | `updated_at` | `timestamptz` | ✓ | `now()` |  |
 
 - **Primary key:** `username`
 - **References:** `claimed_by` → `users.id` (on delete set null)
-- **Checks:** `username = lower(username)` and the name pattern; `stage IN ('claimed','dm','replied','talks','won')`; `closed IN ('','nostock','lost')`; `sales >= 0`, `buys >= 0`
+- **Checks:** `username = lower(username)` and the name pattern; `stage IN ('claimed','dm','replied','talks','won')`; `closed IN ('','nostock','lost','optout')`; `sales >= 0`, `buys >= 0`
 - **Indexes:** `reddit_leads_claimed_by_idx` (claimed_by), `reddit_leads_sales_idx` (sales DESC)
 
 A release or a new claim resets stage, closed, follow-up and dm_at; the
@@ -3006,13 +3007,13 @@ Who did what to which seller, including the seller replies purchasers log. Appen
 | `username` | `text` |  |  | The seller; no FK, so history survives an import that drops them. NULL for an import. |
 | `actor_id` | `uuid` |  |  | → users. |
 | `actor_name` | `text` | ✓ |  | Name snapshot. |
-| `kind` | `text` | ✓ |  | imported, claimed, released, dm, reply, stage, follow_up, closed, reopened. |
+| `kind` | `text` | ✓ |  | imported, claimed, released, dm, reply, stage, follow_up, closed, reopened, opt_in (a manager lifted a do-not-contact). |
 | `detail` | `text` | ✓ | `''` | The DM template, the reply text, the new stage, the date or the closing reason. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
 
 - **Primary key:** `id`
 - **References:** `actor_id` → `users.id` (on delete set null)
-- **Indexes:** `reddit_lead_events_username_idx` (username, created_at), `reddit_lead_events_actor_id_idx` (actor_id)
+- **Indexes:** `reddit_lead_events_username_idx` (username, created_at), `reddit_lead_events_actor_id_idx` (actor_id), `reddit_lead_events_actor_kind_idx` (actor_id, kind, created_at), for the daily first-DM count
 - **Triggers:** `reddit_lead_events_no_update` and `reddit_lead_events_no_delete` raise (`reddit_lead_events_lock()`), as `fb_pool_events` does.
 
 ### Actions

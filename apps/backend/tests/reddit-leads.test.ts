@@ -159,4 +159,56 @@ describe('reddit leads', () => {
     await expect(sql`UPDATE reddit_lead_events SET detail = 'x'`).rejects.toThrow(/append-only/);
     await expect(sql`DELETE FROM reddit_lead_events`).rejects.toThrow(/append-only/);
   });
+  it('caps first DMs per purchaser per day, but never follow-ups', async () => {
+    const alex = await loginAs(ALEX);
+    const names = Array.from({ length: 16 }, (_, i) => `seller_${String(i).padStart(2, '0')}`);
+    expect((await api('POST', `${BASE}/import`, { token: alex.token, body: { sellers: names.map((name) => ({ name, sales: 5, buys: 0 })) } })).status).toBe(201);
+    const { token } = await loginAs(MARCUS);
+    for (const u of names) expect((await api('POST', `${BASE}/${u}/claim`, { token })).status).toBe(200);
+    for (const u of names.slice(0, 15)) expect((await api('POST', `${BASE}/${u}/dm`, { token, body: { template: 'bulk' } })).status).toBe(200);
+
+    const over = await api<{ code: string }>('POST', `${BASE}/${names[15]}/dm`, { token, body: { template: 'bulk' } });
+    expect(over.status).toBe(429);
+    expect(over.body.code).toBe('rlDailyCap');
+    expect((await api('POST', `${BASE}/${names[0]}/dm`, { token, body: { template: 'follow' } })).status).toBe(200);
+
+    const r = await api<{ firstDmsToday: number; firstDmCap: number }>('GET', BASE, { token });
+    expect(r.body).toMatchObject({ firstDmsToday: 15, firstDmCap: 15 });
+    // The cap is the purchaser's own, not the team's.
+    const priya = await loginAs(PRIYA);
+    expect((await api<{ firstDmsToday: number }>('GET', BASE, { token: priya.token })).body.firstDmsToday).toBe(0);
+  });
+
+  it('a seller who opted out stays out through release, and only a manager lifts it', async () => {
+    await seed();
+    const marcus = await loginAs(MARCUS), priya = await loginAs(PRIYA), alex = await loginAs(ALEX);
+    await api('POST', `${BASE}/newuser156/claim`, { token: marcus.token });
+    await api('POST', `${BASE}/newuser156/dm`, { token: marcus.token, body: { template: 'bulk' } });
+    const closed = await api<Lead & { optedOut: boolean }>('PUT', `${BASE}/newuser156/close`, { token: marcus.token, body: { closed: 'optout' } });
+    expect(closed.body).toMatchObject({ closed: 'optout', optedOut: true, followUp: null });
+
+    // The holder can't talk their way back in.
+    expect((await api<{ code: string }>('POST', `${BASE}/newuser156/dm`, { token: marcus.token, body: { template: 'follow' } })).status).toBe(409);
+    expect((await api('PUT', `${BASE}/newuser156/stage`, { token: marcus.token, body: { stage: 'talks' } })).status).toBe(409);
+    expect((await api('POST', `${BASE}/newuser156/reopen`, { token: marcus.token })).status).toBe(403);
+
+    // Released, the seller is still off limits to every purchaser.
+    expect((await api('POST', `${BASE}/newuser156/release`, { token: marcus.token })).status).toBe(200);
+    const again = await api<{ code: string }>('POST', `${BASE}/newuser156/claim`, { token: priya.token });
+    expect(again.status).toBe(409);
+    expect(again.body.code).toBe('rlOptedOut');
+    expect(find(await list(priya.token), 'newuser156')).toMatchObject({ claimed: false, optedOut: true });
+
+    // A re-import doesn't clear it either.
+    await api('POST', `${BASE}/import`, { token: alex.token, body: harvest });
+    expect(find(await list(priya.token), 'newuser156')).toMatchObject({ optedOut: true });
+
+    // A manager may take the seller and lift it, and the ledger says so.
+    expect((await api('POST', `${BASE}/newuser156/claim`, { token: alex.token })).status).toBe(200);
+    const lifted = await api<Lead & { optedOut: boolean }>('POST', `${BASE}/newuser156/reopen`, { token: alex.token });
+    expect(lifted.status).toBe(200);
+    expect(lifted.body.optedOut).toBe(false);
+    const { body } = await api<{ history: History[] }>('GET', `${BASE}/newuser156`, { token: alex.token });
+    expect(body.history.map((h) => h.kind)).toContain('opt_in');
+  });
 });
