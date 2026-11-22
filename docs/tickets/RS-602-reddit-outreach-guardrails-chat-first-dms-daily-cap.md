@@ -2,13 +2,13 @@
 id: RS-602
 title: Reddit outreach guardrails: chat-first DMs, daily cap, do-not-contact
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-11-20
 reporter: jinhu
 branch: feat/reddit-outreach
-pr:
-version:
+pr: 1236
+version: 1.473.0
 related: [RS-477]
 ---
 
@@ -35,12 +35,12 @@ at volume:
 
 ## Acceptance criteria
 
-- [ ] The lead drawer's primary send action copies the message and opens `chat.reddit.com/user/<name>`; the old compose page stays as a secondary link.
-- [ ] A purchaser can mark at most `REDDIT_LEAD_DAILY_FIRST_DMS` (15) first DMs per local day. The next one gets 429 `rlDailyCap`, and the drawer shows the count and disables sending at the cap. Follow-up DMs are not capped.
-- [ ] A lead can be closed as **Asked not to be contacted** (`optout`). That stamp survives release and re-import, claim answers 409 `rlOptedOut`, and the Pool hides the seller. Only a manager can reopen it.
-- [ ] When a lead has a latest sale post, the writer asks the purchaser to comment on it first and links it.
-- [ ] First-contact templates end with an opt-out line.
-- [ ] Every new write goes to the append-only ledger.
+- [x] The lead drawer's primary send action copies the message and opens `chat.reddit.com/user/<name>`; the old compose page stays as a secondary link.
+- [x] A purchaser can mark at most `REDDIT_LEAD_DAILY_FIRST_DMS` (15) first DMs per local day. The next one gets 429 `rlDailyCap`, and the drawer shows the count and disables sending at the cap. Follow-up DMs are not capped.
+- [x] A lead can be closed as **Asked not to be contacted** (`optout`). That stamp survives release and re-import, claim answers 409 `rlOptedOut`, and the Pool hides the seller. Only a manager can reopen it.
+- [x] When a lead has a latest sale post, the writer asks the purchaser to comment on it first and links it.
+- [x] First-contact templates end with an opt-out line.
+- [x] Every new write goes to the append-only ledger.
 
 ## Out of scope
 
@@ -51,3 +51,5 @@ at volume:
 ## Notes
 
 - The cap is a constant, not a setting, until the owner wants to tune it.
+- Numbered RS-602: RS-600 and RS-601 were taken by tracker fixes merged while this was in flight.
+- RSS: from the office IP every feed answers 404 (2026-11-20 and 11-22), while the fleet still read most subreddits on 11-20/21. Recorded in `trackers/reddit/docs/debug-notes/reddit-rss-retired-2026-11-13.md`.
