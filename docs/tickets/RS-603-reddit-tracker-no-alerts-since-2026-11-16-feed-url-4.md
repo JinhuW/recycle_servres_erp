@@ -2,13 +2,13 @@
 id: RS-603
 title: Reddit tracker: no alerts since 2026-11-16, feed URL 404
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-11-17
 reporter: jinhu
 branch: session/20261117-185940
-pr:
-version:
+pr: "#1232"
+version: "tracker 318920c4, Railway api+worker deployed 2026-11-22"
 related: []
 ---
 
@@ -68,3 +68,10 @@ from `/api/stats` and from probing Reddit by hand.
 Filed as RS-600. Renumbered RS-603 on 2026-11-22: the id was also given to
 the DDR3/DDR4 dedup ticket, which merged first. Commits before that date cite
 RS-600 for this work.
+
+Alerts stopped a second time from 2026-11-20 23:54 UTC to 2026-11-22 23:45
+UTC. This branch had been deployed but not merged, and the RS-600/RS-601
+deploy from `dev` replaced it, so the api answered the vendor's deliveries
+with 404. Fixed by merging `dev` in, redeploying, and redriving 601 dead
+deliveries. See
+`trackers/reddit/docs/debug-notes/deploy-from-dev-removed-unmerged-webhook.md`.

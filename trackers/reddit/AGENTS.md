@@ -150,6 +150,11 @@ Breaking any of these breaks the fleet. The tests that cover them are
 
   `scripts/secrets.env` and `infra/terraform/terraform.tfvars` are gitignored
   local files.
+- **Deploy only what is merged, or merge right after.** Railway runs the folder
+  uploaded last, so a deploy from `dev` removes anything that was live from an
+  unmerged branch. That took the webhook route down for two days
+  ([debug note](docs/debug-notes/deploy-from-dev-removed-unmerged-webhook.md)).
+  After a deploy, `POST /webhooks/redditapis` must answer 401, not 404.
 - After any deploy, walk through "Verifying a deployment" in `README.md`.
 
 ## Local gotchas

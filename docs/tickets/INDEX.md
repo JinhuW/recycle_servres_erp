@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-603](./RS-603-reddit-tracker-no-alerts-since-2026-11-16-feed-url-4.md) | in-progress | bug | P1 | Reddit tracker: no alerts since 2026-11-16, feed URL 404 | — |
+| [RS-603](./RS-603-reddit-tracker-no-alerts-since-2026-11-16-feed-url-4.md) | done | bug | P1 | Reddit tracker: no alerts since 2026-11-16, feed URL 404 | tracker 318920c4, Railway api+worker deployed 2026-11-22 |
 | [RS-601](./RS-601-reddit-subreddit-backoff-overflows-after-37-errors-a.md) | done | bug | P2 | Reddit subreddit backoff overflows after ~37 errors and the failure repeats forever | tracker c68b2c66, Railway api+worker deployed 2026-11-21; OCI fleet pending |
 | [RS-600](./RS-600-reddit-alerts-drop-a-seller-s-second-lot-when-one-is.md) | done | bug | P2 | Reddit alerts drop a seller's second lot when one is DDR3 and the other DDR4 | tracker c68b2c66, Railway api+worker deployed 2026-11-21; OCI fleet pending |
 | [RS-599](./RS-599-wechat-market-buyer-seller-breakdown-top-traders-and.md) | done | story | P2 | WeChat market: buyer/seller breakdown, top traders and sentiment | 1.472.0 |
