@@ -2,14 +2,15 @@ import { describe, it, expect } from 'vitest';
 import {
   redditLeadIsDue, redditLeadIsStale, redditLeadNeedsAction, redditLeadRank, type RedditLead,
 } from '@recycle-erp/shared';
-import { composeUrl, dmDraft, parseCsv, parseLeadsFile } from './redditLeads';
+import { OPT_OUT_LINE, chatUrl, composeUrl, dmDraft, parseCsv, parseLeadsFile } from './redditLeads';
+import { inPool } from '../pages/desktop/leads/shared';
 import { leadsTabPath, matchLeadsTab, pathToDesktopView } from './route';
 
 const lead = (over: Partial<RedditLead> = {}): RedditLead => ({
   username: 'newuser156', name: 'NewUser156', sales: 289, buys: 4, recordSource: '', subreddits: ['homelabsales'],
   lastDeal: '2026-10-30', itemsSold: ['HP ProDesk 600 G3', 'EliteDesk 800 G6'], latestPostTitle: '', latestPostUrl: '',
   trackerAlerts: 1, claimed: true, mine: true, holderId: 'u1', holderName: 'Marcus', claimedAt: Date.now(),
-  stage: 'claimed', closed: '', followUp: null, dmAt: null, lastReply: null, ...over,
+  stage: 'claimed', closed: '', followUp: null, dmAt: null, lastReply: null, optedOut: false, ...over,
 });
 
 describe('lead urgency', () => {
@@ -42,6 +43,19 @@ describe('DM drafts', () => {
   it('falls back when the seller has no items or subreddit', () => {
     const d = dmDraft('item', lead({ itemsSold: [], subreddits: [] }), 'Priya');
     expect(d.subject).toBe('Do you have more what you sold recently?');
+  });
+  it('ends first-contact templates with the opt-out line, not follow-ups', () => {
+    expect(dmDraft('bulk', lead(), 'Marcus').body.endsWith(OPT_OUT_LINE)).toBe(true);
+    expect(dmDraft('item', lead(), 'Marcus').body.endsWith(OPT_OUT_LINE)).toBe(true);
+    expect(dmDraft('follow', lead(), 'Marcus').body).not.toContain(OPT_OUT_LINE);
+  });
+  it('opens a chat with the seller', () => {
+    expect(chatUrl('a_b')).toBe('https://chat.reddit.com/user/a_b');
+  });
+  it('keeps opted-out sellers out of the pool', () => {
+    expect(inPool(lead({ claimed: false }))).toBe(true);
+    expect(inPool(lead({ claimed: false, optedOut: true }))).toBe(false);
+    expect(inPool(lead())).toBe(false);
   });
   it('encodes the compose link', () => {
     expect(composeUrl('a_b', 'Hi & bye', 'x\ny')).toBe('https://www.reddit.com/message/compose/?to=a_b&subject=Hi%20%26%20bye&message=x%0Ay');

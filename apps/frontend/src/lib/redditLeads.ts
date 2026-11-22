@@ -11,7 +11,7 @@ const BASE = '/api/leads/reddit';
 const key = (u: string) => encodeURIComponent(u);
 
 export const leadsApi = {
-  list: () => api.get<{ leads: RedditLead[]; today: string }>(BASE),
+  list: () => api.get<{ leads: RedditLead[]; today: string; firstDmsToday: number; firstDmCap: number }>(BASE),
   detail: (u: string) =>
     api.get<{ lead: RedditLead; history: RedditLeadEvent[]; buyers: { username: string; name: string }[] }>(`${BASE}/${key(u)}`),
   buyers: () => api.get<{ buyers: RedditBuyer[] }>(`${BASE}/buyers`),
@@ -75,6 +75,9 @@ export const DM_TEMPLATES: readonly DmTemplateId[] = ['bulk', 'item', 'follow'];
 
 type Seller = Pick<RedditLead, 'name' | 'sales' | 'subreddits' | 'itemsSold'>;
 
+/** Ends every first message: a seller who says no is closed as opted out and never messaged again. */
+export const OPT_OUT_LINE = "If you'd rather not hear from us, just say so and we won't message again.";
+
 export function dmDraft(id: DmTemplateId, s: Seller, me: string): { subject: string; body: string } {
   const sub = s.subreddits[0] ?? 'homelabsales';
   const items = s.itemsSold.slice(0, 2);
@@ -82,7 +85,7 @@ export function dmDraft(id: DmTemplateId, s: Seller, me: string): { subject: str
     const item = items[0] ?? 'what you sold recently';
     return {
       subject: `Do you have more ${item}?`,
-      body: `Hi u/${s.name},\n\nDo you have any more ${item}? We'd take several at once and pay quickly.\n\nWhat quantity could you do, and at what price?\n\n${me}, Recycle Servers`,
+      body: `Hi u/${s.name},\n\nDo you have any more ${item}? We'd take several at once and pay quickly.\n\nWhat quantity could you do, and at what price?\n\n${me}, Recycle Servers\n\n${OPT_OUT_LINE}`,
     };
   }
   if (id === 'follow') {
@@ -94,11 +97,17 @@ export function dmDraft(id: DmTemplateId, s: Seller, me: string): { subject: str
   const sold = items.length ? items.join(' and ') : 'hardware';
   return {
     subject: `Buying in bulk — saw your sales on r/${sub}`,
-    body: `Hi u/${s.name},\n\nI'm ${me} with Recycle Servers in Denver. I saw you've sold ${sold} on r/${sub}, and your ${s.sales} confirmed sales caught our eye.\n\nWe buy used servers, drives and parts in volume and pay fast (PayPal G&S, or cash pickup in Colorado). Do you have more stock you'd like to move? Happy to make one offer on a whole lot.\n\nThanks,\n${me}`,
+    body: `Hi u/${s.name},\n\nI'm ${me} with Recycle Servers in Denver. I saw you've sold ${sold} on r/${sub}, and your ${s.sales} confirmed sales caught our eye.\n\nWe buy used servers, drives and parts in volume and pay fast (PayPal G&S, or cash pickup in Colorado). Do you have more stock you'd like to move? Happy to make one offer on a whole lot.\n\nThanks,\n${me}\n\n${OPT_OUT_LINE}`,
   };
 }
 
-/** Reddit's compose page with the message filled in; the purchaser presses Send. */
+/**
+ * A Reddit Chat with the seller. Private messages became Chat, which takes no
+ * pre-filled text, so the page copies the message before opening it.
+ */
+export const chatUrl = (name: string) => `https://chat.reddit.com/user/${encodeURIComponent(name)}`;
+
+/** Reddit's old compose page with the message filled in, where Reddit still serves it. */
 export function composeUrl(to: string, subject: string, body: string): string {
   return `https://www.reddit.com/message/compose/?to=${encodeURIComponent(to)}&subject=${encodeURIComponent(subject)}&message=${encodeURIComponent(body)}`;
 }

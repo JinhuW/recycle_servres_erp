@@ -18,7 +18,7 @@ import { hrefFor, leadsTabPath, matchLeadsTab, navigate, onLinkClick, replaceRou
 import { useEffectiveUser } from '../../lib/tweaks';
 import { BuyerNetwork } from './leads/BuyerNetwork';
 import { LeadDrawer } from './leads/LeadDrawer';
-import { DealRecord, Holder, NextStep, StageChip, fmtDay, leadToday, type RunLead } from './leads/shared';
+import { DealRecord, Holder, NextStep, StageChip, fmtDay, inPool, leadToday, type DmQuota, type RunLead } from './leads/shared';
 import '../../styles/redditLeads.css';
 
 // ─── Leads ▸ Reddit ───────────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ const TABS: { id: Tab; icon: IconName; key: string; manager?: true }[] = [
 const LEDE: Record<Tab, string> = {
   pool: 'rlLedePool', mine: 'rlLedeMine', network: 'rlLedeNetwork', team: 'rlLedeTeam', import: 'rlLedeImport',
 };
-const KNOWN_REFUSALS = new Set(['rlTakenElsewhere', 'rlNotClaimed']);
+const KNOWN_REFUSALS = new Set(['rlTakenElsewhere', 'rlNotClaimed', 'rlOptedOut', 'rlDailyCap']);
 const PAGE = 50;
 
 export function LeadsReddit({ showToast }: Props) {
@@ -54,6 +54,7 @@ export function LeadsReddit({ showToast }: Props) {
   useEffect(() => { if (routed && routed !== tab) replaceRoute(leadsTabPath('pool')); }, [routed, tab]);
 
   const [leads, setLeads] = useState<RedditLead[] | null>(null);
+  const [quota, setQuota] = useState<DmQuota>({ sent: 0, cap: 0 });
   const [buyers, setBuyers] = useState<RedditBuyer[] | null>(null);
   const [openLead, setOpenLead] = useState<string | null>(null);
   const [buyer, setBuyer] = useState<string | null>(null);
@@ -62,7 +63,7 @@ export function LeadsReddit({ showToast }: Props) {
   const today = leadToday();
 
   const load = useCallback(() => {
-    leadsApi.list().then(r => setLeads(r.leads), handleFetchError);
+    leadsApi.list().then(r => { setLeads(r.leads); setQuota({ sent: r.firstDmsToday, cap: r.firstDmCap }); }, handleFetchError);
   }, []);
   useEffect(() => { load(); }, [load, user?.role]);
   useEffect(() => { leadsApi.buyers().then(r => setBuyers(r.buyers), handleFetchError); }, []);
@@ -83,7 +84,7 @@ export function LeadsReddit({ showToast }: Props) {
       return next;
     } catch (err) {
       const code = err instanceof ApiError ? (err.body as { code?: string } | undefined)?.code : undefined;
-      if (err instanceof ApiError && err.status === 409 && code && KNOWN_REFUSALS.has(code)) {
+      if (err instanceof ApiError && code && KNOWN_REFUSALS.has(code)) {
         showWarnToast(t(code));
         load();
       } else handleFetchError(err);
@@ -102,7 +103,7 @@ export function LeadsReddit({ showToast }: Props) {
   const mine = all.filter(l => l.mine);
   const pending = mine.filter(l => redditLeadNeedsAction(l, today)).length;
   const counts: Partial<Record<Tab, number>> = {
-    pool: all.filter(l => !l.claimed).length,
+    pool: all.filter(inPool).length,
     mine: mine.length,
     network: buyers?.length,
     team: all.filter(l => l.claimed).length,
@@ -153,7 +154,7 @@ export function LeadsReddit({ showToast }: Props) {
 
   let body: ReactNode;
   if (!leads && tab !== 'import') body = <TableSkeleton rows={8} cols={5} />;
-  else if (tab === 'pool') body = <PoolTab leads={all.filter(l => !l.claimed && match(l))} max={max} q={q} busy={busy} onOpen={setOpenLead} onClaim={u => void claim([u])} onClear={() => setQ('')} />;
+  else if (tab === 'pool') body = <PoolTab leads={all.filter(l => inPool(l) && match(l))} max={max} q={q} busy={busy} onOpen={setOpenLead} onClaim={u => void claim([u])} onClear={() => setQ('')} />;
   else if (tab === 'mine') body = <MineTab leads={mine.filter(match)} board={view === 'board'} max={max} today={today} onOpen={setOpenLead} empty={mine.length === 0} />;
   else if (tab === 'network') body = <BuyerNetwork buyers={buyers} buyer={buyer} onBuyer={setBuyer} leads={byName} manager={manager} onOpen={setOpenLead} onClaim={u => void claim(u)} busy={busy} />;
   else if (tab === 'team') body = <TeamTab leads={all.filter(l => l.claimed)} match={match} max={max} today={today} me={user?.id ?? ''} busy={busy} onOpen={setOpenLead}
@@ -173,7 +174,7 @@ export function LeadsReddit({ showToast }: Props) {
       </div>
       {body}
       {lead && user && (
-        <LeadDrawer key={lead.username} lead={lead} me={user} manager={manager} run={run} onClose={() => setOpenLead(null)} onBuyer={showBuyer} />
+        <LeadDrawer key={lead.username} lead={lead} me={user} manager={manager} run={run} quota={quota} onFirstDm={() => setQuota(q => ({ ...q, sent: q.sent + 1 }))} onClose={() => setOpenLead(null)} onBuyer={showBuyer} />
       )}
     </>
   );

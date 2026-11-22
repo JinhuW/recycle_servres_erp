@@ -127,6 +127,11 @@
 .rl-next p b { font-weight: 600; }
 .rl-compose { display: flex; flex-direction: column; gap: 8px; }
 .rl-compose textarea { width: 100%; font-size: 13px; line-height: 1.5; }
+.rl-compose .rl-sub.rl-warn { color: var(--warn-strong); }
+.rl-compose a.btn[aria-disabled="true"] { opacity: 0.5; pointer-events: none; }
+.rl-compose details { display: flex; flex-direction: column; gap: 6px; }
+.rl-compose summary { cursor: pointer; }
+.rl-compose details[open] .input { margin: 6px 0; width: 100%; }
 .rl-dbody textarea { width: 100%; }
 .rl-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .rl-row .rl-sub { margin: 0; }
