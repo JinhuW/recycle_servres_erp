@@ -16,6 +16,8 @@ export type ProductLot = {
   // The lot's # on its PO's page. Absent from a backend older than this bundle.
   po_line_no?: number | null;
   created_at: string;
+  // When the lot's PO was handed off. Absent from a backend older than this bundle.
+  collected_at?: string;
   user_name: string;
   user_initials: string;
   unit_cost?: number;
@@ -80,6 +82,8 @@ export type ProductGroup = {
   sell_price: number | null;
   warehouses: string[];
   created_at: string;
+  // The newest of its lots' collected_at. Absent from a backend older than this bundle.
+  collected_at?: string;
   submitters: string[];
   lines: ProductLot[];
 };
@@ -114,6 +118,9 @@ type Props = {
 
 const SELLABLE = new Set(['Reviewing', 'Done']);
 
+const DAY_MS = 86_400_000;
+const daysSince = (iso: string) => Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / DAY_MS));
+
 const categoryChip = (c: string) =>
   c === 'RAM' ? 'info' : c === 'SSD' ? 'pos' : c === 'HDD' ? 'cool' : 'warn';
 
@@ -140,9 +147,10 @@ export function InventoryProductTable({
     <SortTh col={col} sort={sort} onSort={onSort} align={align}>{label}</SortTh>
   );
 
-  // toggle(chevron+checkbox) + product + lots are always shown; the rest follow
-  // the Columns menu toggles so the menu actually affects the grouped view.
-  const totalCols = 3
+  // toggle(chevron+checkbox) + product + lots + last collected are always
+  // shown; the rest follow the Columns menu toggles so the menu actually
+  // affects the grouped view.
+  const totalCols = 4
     + (cols.partNumber ? 1 : 0)
     + (cols.qty ? 1 : 0)
     + (cols.warehouse ? 1 : 0)
@@ -176,6 +184,7 @@ export function InventoryProductTable({
           {cols.warehouse && sortableTh('warehouses', t('iptWarehouses'))}
           {showCost && sortableTh('cost', t('eoCost'), 'right')}
           {cols.sellPrice && sortableTh('sell', t('mktLegendSell'), 'right')}
+          {sortableTh('collected', t('iptLastCollected'))}
         </tr>
       </thead>
       <tbody>
@@ -272,6 +281,16 @@ export function InventoryProductTable({
                     {g.sell_price == null ? <span className="muted">—</span> : fmtUSD(g.sell_price, locale)}
                   </td>
                 )}
+                <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                  {g.collected_at ? (
+                    <>
+                      <div>{fmtDateShort(g.collected_at, locale)}</div>
+                      <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                        {t('iptCollectedDaysAgo', { n: daysSince(g.collected_at) })}
+                      </div>
+                    </>
+                  ) : <span className="muted">—</span>}
+                </td>
               </tr>
 
               {isOpen && (
@@ -292,6 +311,7 @@ export function InventoryProductTable({
                           <th>{t('iptPO')}</th>
                           {manyPns && <th>{t('partNumber')}</th>}
                           <th>{t('date')}</th>
+                          <th>{t('iptCollected')}</th>
                           <th>{t('iptBy')}</th>
                           {showCost && <th className="num">{t('eoCost')}</th>}
                           {cols.condition && <th>{t('condition')}</th>}
@@ -359,6 +379,9 @@ export function InventoryProductTable({
                                 <td className="mono muted" style={{ fontSize: 11.5 }}>{l.part_number ?? '—'}</td>
                               )}
                               <td className="muted">{fmtDateShort(l.created_at, locale)}</td>
+                              <td className="muted" style={{ whiteSpace: 'nowrap' }}>
+                                {l.collected_at ? fmtDateShort(l.collected_at, locale) : '—'}
+                              </td>
                               <td>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                   <div className="avatar sm" title={l.user_name}>{l.user_initials}</div>

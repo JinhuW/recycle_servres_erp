@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import type { WechatActivity, WechatActivityDay, WechatActivityGroup } from '@recycle-erp/shared';
+import { sentimentLean, type WechatActivity, type WechatActivityDay, type WechatActivityGroup } from '@recycle-erp/shared';
 import { Skeleton } from '../../components/Skeleton';
 import { handleFetchError } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
 import { navigate, wechatDayPath } from '../../lib/route';
 import { useElementWidth } from '../../lib/useElementWidth';
-import { wechatApi } from '../../lib/wechatMarket';
+import { fmtScore, wechatApi } from '../../lib/wechatMarket';
 import { niceStep } from './DashboardChart';
 
 // ─── Monitors ▸ WeChat ▸ Activity ─────────────────────────────────────────────
@@ -24,6 +24,9 @@ const HOUR_PAD = { t: 18, b: 22 };
 const QUIET_RUN_H = 3;
 const HEAT_ROWS = 24;
 const REPORT_TZ = 'America/New_York';
+const FLOW_H = 150;
+const FLOW_PAD = { t: 12, b: 8 };
+const MOOD_H = 64;
 
 export function ActivityTab({ until }: { until: string | null }) {
   const { t, locale } = useT();
@@ -61,6 +64,24 @@ export function ActivityTab({ until }: { until: string | null }) {
             {today && <DayFigures days={days} fmt={fmt} />}
             <DailyChart days={days} fmt={fmt} locale={locale} />
           </>}
+        </div>
+      </section>
+
+      <section className="card" aria-label={t('wxActFlowTitle')}>
+        <div className="card-head">
+          <div>
+            <h2 className="card-title">{t('wxActFlowTitle')}</h2>
+            <span className="card-sub">{t('wxActFlowSub')}</span>
+          </div>
+          <span className="wx-flow-legend">
+            <span><i className="wx-dot wx-buy" />{t('wxActBuyers')}</span>
+            <span><i className="wx-dot wx-sell" />{t('wxActSellers')}</span>
+            <span><i className="wx-dot wx-mood-bullish" />{t('wxActMood')}</span>
+          </span>
+        </div>
+        <div className="card-body">
+          {!days ? <Skeleton width="100%" height={FLOW_H + MOOD_H + 24} />
+            : <FlowChart days={days} fmt={fmt} locale={locale} />}
         </div>
       </section>
 
@@ -230,6 +251,113 @@ function DailyChart({ days, fmt, locale }: { days: WechatActivityDay[]; fmt: Int
           </dl>
           {h.degraded && <p className="wx-act-tip-note">{t('wxActDegraded')}</p>}
           {h.warnings.map(w => <p key={w} className="wx-act-tip-note">{w}</p>)}
+          <p className="wx-act-tip-hint">{t('wxActOpenDay')}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Buyers, sellers and mood per report day (RS-599) ─────────────────────────
+// Two strips on one day axis: traders on each side as lines, and the mood
+// index as bars either side of zero. A day without a score is a gap.
+
+function FlowChart({ days, fmt, locale }: { days: WechatActivityDay[]; fmt: Intl.NumberFormat; locale: string }) {
+  const { t } = useT();
+  const wrap = useRef<HTMLDivElement>(null);
+  const width = useElementWidth(wrap);
+  const [hover, setHover] = useState<number | null>(null);
+  const dayFmt = useMemo(() => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }), [locale]);
+  const label = (date: string) => dayFmt.format(new Date(`${date}T00:00:00Z`));
+  if (!days.length) return <p className="fp-muted wx-chart-empty">{t('wxActEmpty')}</p>;
+
+  const n = days.length;
+  const hi = Math.max(1, ...days.flatMap(d => [d.buyers, d.sellers]));
+  const step = niceStep(hi / 3);
+  const yMax = Math.ceil(hi / step) * step;
+  const ticks: number[] = [];
+  for (let v = 0; v <= yMax + step / 2; v += step) ticks.push(v);
+  const padL = 12 + Math.max(4, ...ticks.map(v => fmt.format(v).length)) * 6.6;
+  const innerW = Math.max(0, width - padL - 8);
+  const innerH = FLOW_H - FLOW_PAD.t - FLOW_PAD.b;
+  const slot = innerW / n;
+  const cx = (i: number) => padL + slot * (i + 0.5);
+  const y = (v: number) => FLOW_PAD.t + ((yMax - v) / yMax) * innerH;
+  const line = (pick: (d: WechatActivityDay) => number) =>
+    days.map((d, i) => `${i ? 'L' : 'M'}${cx(i).toFixed(1)},${y(pick(d)).toFixed(1)}`).join('');
+  // The mood strip: 0 in the middle, ±100 at its edges.
+  // Clear of the traders' 0 label above it.
+  const moodTop = FLOW_H + 18;
+  const mid = moodTop + MOOD_H / 2;
+  const half = MOOD_H / 2 - 2;
+  const barW = Math.max(2, Math.min(18, slot - 4));
+  const every = Math.max(1, Math.ceil(52 / Math.max(1, slot)));
+  const total = moodTop + MOOD_H + 22;
+  const idxAt = (clientX: number) => {
+    const r = wrap.current!.getBoundingClientRect();
+    return Math.max(0, Math.min(n - 1, Math.floor((clientX - r.left - padL) / slot)));
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'ArrowLeft') setHover(h => Math.max(0, (h ?? n - 1) - 1));
+    else if (e.key === 'ArrowRight') setHover(h => Math.min(n - 1, (h ?? n - 1) + 1));
+    else if (e.key === 'Enter' && hover !== null) navigate(wechatDayPath(days[hover]!.date));
+    else return;
+    e.preventDefault();
+  };
+  const h = hover !== null ? days[hover]! : null;
+  const qty = (v: number | null) => (v === null ? '—' : fmt.format(v));
+
+  return (
+    <div className="wx-hist wx-act-flow" ref={wrap}>
+      <svg width={Math.max(1, width)} height={total} role="img"
+        aria-label={t('wxActFlowAria', { from: label(days[0]!.date), to: label(days[n - 1]!.date) })}>
+        {ticks.map(v => (
+          <g key={v}>
+            <line className="wx-hist-grid" x1={padL} x2={padL + innerW} y1={Math.round(y(v)) + 0.5} y2={Math.round(y(v)) + 0.5} />
+            <text className="wx-hist-tick" x={padL - 8} y={y(v) + 3.5} textAnchor="end">{fmt.format(v)}</text>
+          </g>
+        ))}
+        {hover !== null && <line className="wx-act-cursor" x1={cx(hover)} x2={cx(hover)} y1={FLOW_PAD.t} y2={moodTop + MOOD_H} />}
+        <path className="wx-act-line wx-buy" d={line(d => d.buyers)} />
+        <path className="wx-act-line wx-sell" d={line(d => d.sellers)} />
+        {days.map((d, i) => (
+          <g key={d.date}>
+            <circle className="wx-act-pt wx-buy" cx={cx(i)} cy={y(d.buyers)} r={hover === i ? 3.5 : 2} />
+            <circle className="wx-act-pt wx-sell" cx={cx(i)} cy={y(d.sellers)} r={hover === i ? 3.5 : 2} />
+          </g>
+        ))}
+        <line className="wx-hist-grid" x1={padL} x2={padL + innerW} y1={mid + 0.5} y2={mid + 0.5} />
+        <text className="wx-hist-tick" x={padL - 8} y={moodTop + 8} textAnchor="end">+100</text>
+        <text className="wx-hist-tick" x={padL - 8} y={mid + 3.5} textAnchor="end">0</text>
+        <text className="wx-hist-tick" x={padL - 8} y={moodTop + MOOD_H - 1} textAnchor="end">−100</text>
+        {days.map((d, i) => {
+          if (d.sentiment === null) return null;
+          const len = (Math.abs(d.sentiment) / 100) * half;
+          const lean = sentimentLean(d.sentiment) ?? 'neutral';
+          return (
+            <rect key={d.date} className={`wx-act-mood wx-mood-${lean}`} x={cx(i) - barW / 2}
+              y={d.sentiment >= 0 ? mid - len : mid} width={barW} height={Math.max(1, len)} rx={1.5} />
+          );
+        })}
+        {days.map((d, i) => (n - 1 - i) % every === 0 && (
+          <text key={d.date} className={`wx-hist-day${i === n - 1 ? ' is-current' : ''}`}
+            x={cx(i)} y={total - 6} textAnchor="middle">{label(d.date)}</text>
+        ))}
+        <rect className="wx-hist-hit wx-act-hit" tabIndex={0} x={padL} y={FLOW_PAD.t} width={innerW} height={moodTop + MOOD_H - FLOW_PAD.t}
+          aria-label={t('wxActDailyKeys')}
+          onPointerMove={e => setHover(idxAt(e.clientX))} onPointerLeave={() => setHover(null)}
+          onClick={e => navigate(wechatDayPath(days[idxAt(e.clientX)]!.date))}
+          onFocus={() => setHover(n - 1)} onBlur={() => setHover(null)} onKeyDown={onKey} />
+      </svg>
+      {h && hover !== null && (
+        <div className="wx-hist-tip wx-act-tip" role="status"
+          style={cx(hover) > width / 2 ? { right: width - cx(hover) + 14 } : { left: cx(hover) + 14 }}>
+          <div className="wx-hist-tip-title">{label(h.date)}</div>
+          <dl>
+            <dt>{t('wxActTraders')}</dt><dd>{fmt.format(h.buyers)} / {fmt.format(h.sellers)}</dd>
+            <dt>{t('wxActQty')}</dt><dd>{qty(h.buyQty)} / {qty(h.sellQty)}</dd>
+            <dt>{t('wxActMood')}</dt><dd>{h.sentiment === null ? '—' : fmtScore(h.sentiment)}</dd>
+          </dl>
           <p className="wx-act-tip-hint">{t('wxActOpenDay')}</p>
         </div>
       )}

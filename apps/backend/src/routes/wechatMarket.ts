@@ -10,13 +10,16 @@ import {
   type WechatDaySummary,
   type WechatEvidence,
   type WechatHistoryDay,
+  type WechatLineSentiment,
   type WechatPoint,
   type WechatPrice,
   type WechatRerun,
   type WechatRow,
   type WechatRowKind,
   type WechatSettings,
+  type WechatSentiment,
   type WechatSettingsPulled,
+  type WechatTraders,
   type WechatWarningAck,
 } from '@recycle-erp/shared';
 import { authMiddleware } from '../auth';
@@ -79,11 +82,17 @@ wechat.put('/push/days/:date', async (c) => {
       INSERT INTO wechat_market_days (
         report_date, window_start, window_end, degraded, summary, warnings,
         messages, groups_total, groups_active, candidates, posts,
-        buy_posts, sell_posts, buyers, sellers, point_count
+        buy_posts, sell_posts, buyers, sellers, point_count,
+        buy_qty, sell_qty, buy_qty_posts, sell_qty_posts, buy_only, sell_only, both_sides,
+        new_buyers, new_sellers, traders, sentiment
       ) VALUES (
         ${date}, ${day.windowStart}, ${day.windowEnd}, ${day.degraded}, ${day.summary}, ${day.warnings},
         ${t.messages}, ${t.groupsTotal}, ${t.groupsActive}, ${t.candidates}, ${t.posts},
-        ${t.buyPosts}, ${t.sellPosts}, ${t.buyers}, ${t.sellers}, ${day.pointCount}
+        ${t.buyPosts}, ${t.sellPosts}, ${t.buyers}, ${t.sellers}, ${day.pointCount},
+        ${t.buyQty}, ${t.sellQty}, ${t.buyQtyPosts}, ${t.sellQtyPosts}, ${t.buyOnly}, ${t.sellOnly}, ${t.both},
+        ${t.newBuyers}, ${t.newSellers},
+        ${day.traders === null ? null : tx.json(day.traders as never)},
+        ${day.sentiment === null ? null : tx.json(day.sentiment as never)}
       )
       RETURNING push_id
     `;
@@ -95,21 +104,23 @@ wechat.put('/push/days/:date', async (c) => {
           report_date, kind, row_key, brand, capacity_gb, speed, code, ddr, form_factor,
           ranks, part_numbers, signal,
           buy_posts, buy_senders, buy_groups, buy_exposures, buy_qty, buy_prices,
-          sell_posts, sell_senders, sell_groups, sell_exposures, sell_qty, sell_prices
+          sell_posts, sell_senders, sell_groups, sell_exposures, sell_qty, sell_prices, sentiment
         )
         SELECT ${date}, r.kind, r.row_key, r.brand, r.capacity_gb, r.speed, r.code, r.ddr, r.form_factor,
                r.ranks, r.part_numbers, r.signal,
                (r.buy->>'posts')::int, (r.buy->>'senders')::int, (r.buy->>'groups')::int,
                (r.buy->>'exposures')::int, (r.buy->>'qty')::int, r.buy->'prices',
                (r.sell->>'posts')::int, (r.sell->>'senders')::int, (r.sell->>'groups')::int,
-               (r.sell->>'exposures')::int, (r.sell->>'qty')::int, r.sell->'prices'
+               (r.sell->>'exposures')::int, (r.sell->>'qty')::int, r.sell->'prices',
+               NULLIF(r.sentiment, 'null'::jsonb)
           FROM jsonb_to_recordset(${tx.json(day.rows.map((r) => ({
             kind: r.kind, row_key: r.key, brand: r.brand, capacity_gb: r.capacityGb, speed: r.speed,
             code: r.code, ddr: r.ddr, form_factor: r.formFactor, ranks: r.ranks,
-            part_numbers: r.partNumbers, signal: r.signal, buy: r.buy, sell: r.sell,
+            part_numbers: r.partNumbers, signal: r.signal, buy: r.buy, sell: r.sell, sentiment: r.sentiment,
           })) as never)}::jsonb)
             AS r(kind text, row_key text, brand text, capacity_gb int, speed int, code text, ddr text,
-                 form_factor text, ranks text[], part_numbers text[], signal text, buy jsonb, sell jsonb)
+                 form_factor text, ranks text[], part_numbers text[], signal text, buy jsonb, sell jsonb,
+                 sentiment jsonb)
       `;
     }
     if (day.groups.length) {
@@ -162,12 +173,12 @@ wechat.post('/push/days/:date/points', async (c) => {
           report_date, post_key, item_index, sender_id, sender_name, group_ids, first_at, last_at,
           messages, source, direction, brands, capacity_gb, speed, ddr, rank, form_factor,
           part_codes, date_code, condition, price, price_approx, currency, tax, qty, location,
-          raw_line, row_keys
+          raw_line, row_keys, mood, urgent
         )
         SELECT ${date}, p.post_key, p.item_index, p.sender_id, p.sender_name, p.group_ids, p.first_at, p.last_at,
                p.messages, p.source, p.direction, p.brands, p.capacity_gb, p.speed, p.ddr, p.rank, p.form_factor,
                p.part_codes, p.date_code, p.condition, p.price, p.price_approx, p.currency, p.tax, p.qty, p.location,
-               p.raw_line, p.row_keys
+               p.raw_line, p.row_keys, p.mood, p.urgent
           FROM jsonb_to_recordset(${tx.json(points.map((p) => ({
             post_key: p.postKey, item_index: p.itemIndex, sender_id: p.senderId, sender_name: p.senderName,
             group_ids: p.groupIds, first_at: p.firstAt, last_at: p.lastAt, messages: p.messages,
@@ -175,13 +186,14 @@ wechat.post('/push/days/:date/points', async (c) => {
             speed: p.speed, ddr: p.ddr, rank: p.rank, form_factor: p.formFactor, part_codes: p.partCodes,
             date_code: p.dateCode, condition: p.condition, price: p.price, price_approx: p.priceApprox,
             currency: p.currency, tax: p.tax, qty: p.qty, location: p.location, raw_line: p.rawLine,
-            row_keys: p.rowKeys,
+            row_keys: p.rowKeys, mood: p.mood, urgent: p.urgent,
           })) as never)}::jsonb)
             AS p(post_key text, item_index int, sender_id text, sender_name text, group_ids text[],
                  first_at timestamptz, last_at timestamptz, messages int, source text, direction text,
                  brands text[], capacity_gb int, speed int, ddr text, rank text, form_factor text,
                  part_codes text[], date_code text, condition text, price numeric, price_approx boolean,
-                 currency text, tax text, qty int, location text, raw_line text, row_keys text[])
+                 currency text, tax text, qty int, location text, raw_line text, row_keys text[],
+                 mood text, urgent boolean)
         ON CONFLICT (report_date, post_key, item_index) DO NOTHING
       `;
     }
@@ -449,6 +461,9 @@ wechat.put('/days/:date/warning-acks', async (c) => {
 // ── Read ──────────────────────────────────────────────────────────────────────
 
 type DayRow = {
+  buy_qty: number | null; sell_qty: number | null; buy_qty_posts: number | null; sell_qty_posts: number | null;
+  buy_only: number | null; sell_only: number | null; both_sides: number | null;
+  new_buyers: number | null; new_sellers: number | null;
   date: string;
   window_start: Date;
   window_end: Date;
@@ -472,7 +487,9 @@ type DayRow = {
 const DAY_COLUMNS = (sql: ReturnType<typeof getDb>) => sql`
   to_char(d.report_date, 'YYYY-MM-DD') AS date, d.window_start, d.window_end, d.degraded, d.pushed_at,
   d.summary, d.warnings, d.messages, d.groups_total, d.groups_active, d.candidates, d.posts,
-  d.buy_posts, d.sell_posts, d.buyers, d.sellers, d.point_count, d.stored_points
+  d.buy_posts, d.sell_posts, d.buyers, d.sellers, d.point_count, d.stored_points,
+  d.buy_qty, d.sell_qty, d.buy_qty_posts, d.sell_qty_posts, d.buy_only, d.sell_only, d.both_sides,
+  d.new_buyers, d.new_sellers
 `;
 
 function daySummary(d: DayRow): WechatDaySummary {
@@ -486,6 +503,9 @@ function daySummary(d: DayRow): WechatDaySummary {
       messages: d.messages, groupsTotal: d.groups_total, groupsActive: d.groups_active,
       candidates: d.candidates, posts: d.posts, buyPosts: d.buy_posts, sellPosts: d.sell_posts,
       buyers: d.buyers, sellers: d.sellers,
+      buyQty: d.buy_qty, sellQty: d.sell_qty, buyQtyPosts: d.buy_qty_posts, sellQtyPosts: d.sell_qty_posts,
+      buyOnly: d.buy_only, sellOnly: d.sell_only, both: d.both_sides,
+      newBuyers: d.new_buyers, newSellers: d.new_sellers,
     },
     pointCount: d.point_count,
     storedPoints: d.stored_points,
@@ -516,6 +536,7 @@ type LineRow = {
   buy_prices: WechatPrice[];
   sell_posts: number; sell_senders: number; sell_groups: number; sell_exposures: number; sell_qty: number;
   sell_prices: WechatPrice[];
+  sentiment: WechatLineSentiment | null;
   prev_buy: WechatPrice | null;
   prev_sell: WechatPrice | null;
   has_prev: boolean;
@@ -528,8 +549,11 @@ wechat.get('/days/:date', async (c) => {
   const kind = c.req.query('kind') ?? 'quote';
   if (!isWechatRowKind(kind)) return c.json({ error: 'invalid_kind' }, 400);
   const sql = getDb(c.env);
-  const [day] = await sql<(DayRow & { prev_date: string | null; next_date: string | null })[]>`
-    SELECT ${DAY_COLUMNS(sql)},
+  const [day] = await sql<(DayRow & {
+    prev_date: string | null; next_date: string | null;
+    traders: WechatTraders | null; sentiment: WechatSentiment | null;
+  })[]>`
+    SELECT ${DAY_COLUMNS(sql)}, d.traders, d.sentiment,
            (SELECT to_char(MAX(report_date), 'YYYY-MM-DD') FROM wechat_market_days WHERE report_date < d.report_date) AS prev_date,
            (SELECT to_char(MIN(report_date), 'YYYY-MM-DD') FROM wechat_market_days WHERE report_date > d.report_date) AS next_date
       FROM wechat_market_days d WHERE d.report_date = ${date}
@@ -563,6 +587,8 @@ wechat.get('/days/:date', async (c) => {
     prevDate: day.prev_date,
     nextDate: day.next_date,
     rerun,
+    traders: day.traders,
+    sentiment: day.sentiment,
     // A re-run may have dropped or reworded a warning; its old ack stays out.
     warningAcks: acks.filter((a) => day.warnings.includes(a.warning)),
   };
@@ -586,6 +612,7 @@ wechat.get('/days/:date', async (c) => {
       posts: r.sell_posts, senders: r.sell_senders, groups: r.sell_groups,
       exposures: r.sell_exposures, qty: r.sell_qty, prices: r.sell_prices,
     },
+    sentiment: r.sentiment,
     prev: r.has_prev ? { buy: r.prev_buy, sell: r.prev_sell } : null,
   }));
   return c.json({ day: out, rows });
@@ -610,7 +637,7 @@ wechat.get('/days/:date/points', async (c) => {
            p.messages, p.source, p.direction, p.brands, p.capacity_gb AS "capacityGb", p.speed,
            p.ddr, p.rank, p.form_factor AS "formFactor", p.part_codes AS "partCodes",
            p.date_code AS "dateCode", p.condition, p.price, p.price_approx AS "priceApprox",
-           p.currency, p.tax, p.qty, p.location, p.raw_line AS "rawLine",
+           p.currency, p.tax, p.qty, p.location, p.raw_line AS "rawLine", p.mood, p.urgent,
            ARRAY(
              SELECT COALESCE(NULLIF(g.name, ''), gid)
                FROM unnest(p.group_ids) WITH ORDINALITY AS u(gid, ord)
@@ -677,11 +704,13 @@ wechat.get('/activity', async (c) => {
   const dayRows = await sql<{
     date: string; window_start: Date; window_end: Date; messages: number; groups_active: number;
     groups_total: number; candidates: number; posts: number; buyers: number; sellers: number;
+    buy_qty: number | null; sell_qty: number | null; score: number | null;
     degraded: boolean; warnings: string[];
   }[]>`
     SELECT * FROM (
       SELECT to_char(report_date, 'YYYY-MM-DD') AS date, window_start, window_end, messages,
-             groups_active, groups_total, candidates, posts, buyers, sellers, degraded, warnings
+             groups_active, groups_total, candidates, posts, buyers, sellers, buy_qty, sell_qty,
+             (sentiment->>'score')::int AS score, degraded, warnings
         FROM wechat_market_days
        WHERE ${until ?? null}::date IS NULL OR report_date <= ${until ?? null}::date
        ORDER BY report_date DESC LIMIT ${days}
@@ -725,7 +754,8 @@ wechat.get('/activity', async (c) => {
     days: dayRows.map((d) => ({
       date: d.date, windowStart: d.window_start.toISOString(), messages: d.messages,
       groupsActive: d.groups_active, groupsTotal: d.groups_total, candidates: d.candidates, posts: d.posts,
-      buyers: d.buyers, sellers: d.sellers, degraded: d.degraded, warnings: d.warnings,
+      buyers: d.buyers, sellers: d.sellers, buyQty: d.buy_qty, sellQty: d.sell_qty, sentiment: d.score,
+      degraded: d.degraded, warnings: d.warnings,
     })),
     groups: [...groups.values()].sort((a, b) => sum(b.messages) - sum(a.messages) || a.name.localeCompare(b.name)),
     hours,

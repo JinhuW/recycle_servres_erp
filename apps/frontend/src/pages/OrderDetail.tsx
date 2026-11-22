@@ -5,6 +5,7 @@ import { SoldBadge } from '../components/SoldBadge';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { OrderActivityLog } from '../components/OrderActivityLog';
 import { PhFold, type PhFoldMark } from '../components/PhFold';
+import { PhActionsSection } from '../components/PhActions';
 import { PhCommissionFields, PhCommissionSheet } from '../components/PhCommissionSheet';
 import { RevertNoticeDialog } from '../components/RevertNoticeDialog';
 import { useManagerTakeover } from '../components/ManagerTakeoverDialog';
@@ -99,7 +100,7 @@ export type OrderMetaDraft = {
  */
 export type ProductsLanding = { orderId: string; lineId: string | null };
 
-type FoldId = 'delivery' | 'payment' | 'commission' | 'notes' | 'activity';
+type FoldId = 'delivery' | 'payment' | 'commission' | 'notes' | 'actions' | 'activity';
 // The fold a stage is about; the others start closed.
 const STAGE_FOLD: Record<string, FoldId> = { 'In Transit': 'delivery', 'Ready to Pay': 'commission' };
 const NO_MANAGERS: { id: string; name: string }[] = [];
@@ -1553,6 +1554,16 @@ export function OrderDetail({
               </div>
             </div>
           )}
+        </PhFold>
+
+        <PhFold
+          id="actions"
+          title={t('eoTabActions')}
+          summary=""
+          open={openFold === 'actions'}
+          onToggle={() => toggleFold('actions')}
+        >
+          <PhActionsSection scope={{ po: order.id }} title={t('actPanelTitle')} />
         </PhFold>
 
         <PhFold

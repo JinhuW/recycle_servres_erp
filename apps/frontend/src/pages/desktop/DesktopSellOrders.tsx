@@ -51,6 +51,7 @@ import { productCount } from '../../lib/productNo';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useScanFilterText } from '../../lib/useScanFilter';
 import { useFixedPopover } from './popoverPlacement';
+import { ActionsPanel, useRecordActions } from './actions/ActionsPanel';
 
 // Its own chunk: only a packer opens it.
 const DesktopSellOrderPack = lazy(() => import('./DesktopSellOrderPack'));
@@ -1183,6 +1184,7 @@ function SellOrderDetail({ id, onToast }: {
   id: string;
   onToast?: (msg: string, kind?: 'success' | 'error') => void;
 }) {
+  const recActions = useRecordActions('so', id, { label: id });
   const { t, locale } = useT();
   const { user } = useAuth();
   // Lots Inventory's "Add to sell order" left for this order to append. That
@@ -2425,6 +2427,9 @@ function SellOrderDetail({ id, onToast }: {
                 className="card so-page-card"
                 managerId={order.paymentReceivedBy?.id ?? null}
               />
+
+              <ActionsPanel {...recActions.panel} className="so-page-card" />
+              {recActions.overlay}
 
               {/* After-sales cases — a sold order can take a new one, an older
                   order shows what it already has. */}

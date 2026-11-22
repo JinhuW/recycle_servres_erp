@@ -5,6 +5,7 @@ import { useT } from '../../lib/i18n';
 import { DESKTOP_VIEW_TO_PATH, matchWebsiteLead, navigate, useRoute, websiteLeadPath } from '../../lib/route';
 import { Icon } from '../../components/Icon';
 import { SubmissionThread, type MailMode } from './DesktopWebSubmissionThread';
+import { ActionsPanel, useRecordActions } from './actions/ActionsPanel';
 
 // Manager inbox for the public website forms: ram4cash.com sell lots and
 // recycleservers.com quote requests. A sell lot becomes a Draft PO only when
@@ -262,6 +263,7 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
 
 function SubmissionDetail({ id, onToast }: Props & { id: string }) {
   const { t } = useT();
+  const recActions = useRecordActions('ws', id, { label: id });
   const [s, setS] = useState<WebSubmission | null>(null);
   const [missing, setMissing] = useState(false);
   const [note, setNote] = useState('');
@@ -472,6 +474,9 @@ function SubmissionDetail({ id, onToast }: Props & { id: string }) {
             </div>
           )}
         </div>
+
+        <ActionsPanel {...recActions.panel} />
+        {recActions.overlay}
       </div>
     </>
   );

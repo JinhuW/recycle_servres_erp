@@ -48,7 +48,83 @@ export type WechatTotals = {
   sellPosts: number;
   buyers: number;
   sellers: number;
+} & WechatFlow;
+
+// The day's buy/sell breakdown (RS-599). Optional in a push, null when the
+// memtrade that pushed the day predates it.
+export type WechatFlow = {
+  // Units asked for and offered: each trader's largest figure per line,
+  // summed. Most posts give none, so this is a floor.
+  buyQty: number | null;
+  sellQty: number | null;
+  // Posts that stated a quantity, which the figures above rest on.
+  buyQtyPosts: number | null;
+  sellQtyPosts: number | null;
+  // Traders by the sides they posted: buyers = buyOnly + both.
+  buyOnly: number | null;
+  sellOnly: number | null;
+  both: number | null;
+  // Traders on that side not seen on it in the 30 report days before.
+  newBuyers: number | null;
+  newSellers: number | null;
 };
+
+export const WECHAT_FLOW_KEYS = [
+  'buyQty', 'sellQty', 'buyQtyPosts', 'sellQtyPosts', 'buyOnly', 'sellOnly', 'both', 'newBuyers', 'newSellers',
+] as const satisfies readonly (keyof WechatFlow)[];
+
+// ── Sentiment ─────────────────────────────────────────────────────────────────
+
+// A post's read of where prices are heading, whichever side it is on:
+// bullish = 急收, 加价收, 缺货, 涨价, 惜售 (a recycling ad's standing 高价收 is not); bearish = 急出, 清仓, 甩货, 特价,
+// 降价, 压价; neutral = a plain quote or ask.
+export const WECHAT_MOODS = ['bullish', 'neutral', 'bearish'] as const;
+export type WechatMood = typeof WECHAT_MOODS[number];
+
+// Traders by mood, one vote each: their latest post's.
+export type WechatMoodTally = { bullish: number; neutral: number; bearish: number };
+
+// (bullish − bearish) / voters × 100, rounded; null under
+// WECHAT_SENTIMENT_MIN_VOTERS voters.
+export type WechatLineSentiment = WechatMoodTally & { score: number | null };
+
+export type WechatSentiment = WechatLineSentiment & {
+  // Posts flagged urgent (急, 今天要, 马上, 实单), either side.
+  urgent: number;
+  buy: WechatMoodTally;
+  sell: WechatMoodTally;
+};
+
+export const WECHAT_SENTIMENT_MIN_VOTERS = 3;
+// A score at or past ±this reads bullish / bearish; between, neutral.
+export const WECHAT_SENTIMENT_LEAN = 20;
+
+export function sentimentLean(score: number | null): WechatMood | null {
+  if (score === null) return null;
+  if (score >= WECHAT_SENTIMENT_LEAN) return 'bullish';
+  if (score <= -WECHAT_SENTIMENT_LEAN) return 'bearish';
+  return 'neutral';
+}
+
+// ── Traders ───────────────────────────────────────────────────────────────────
+
+export type WechatTrader = {
+  senderId: string;
+  name: string;
+  posts: number;
+  // Distinct spec lines they posted on that side.
+  lines: number;
+  // Their largest figure per line, summed; 0 when they gave none.
+  qty: number;
+  groups: number;
+  // They posted on the other side too.
+  both: boolean;
+  mood: WechatMood | null;
+};
+
+// The day's most active traders on each side, most posts first.
+export type WechatTraders = { buy: WechatTrader[]; sell: WechatTrader[] };
+export const WECHAT_TRADERS_MAX = 10;
 
 export type WechatGroupCoverage = {
   id: string;
@@ -73,6 +149,8 @@ export type WechatLine = {
   signal: string | null;
   buy: WechatSideStats;
   sell: WechatSideStats;
+  // Optional in a push; null when memtrade predates it or too few voted.
+  sentiment: WechatLineSentiment | null;
 };
 
 // ── Push (memtrade → ERP) ─────────────────────────────────────────────────────
@@ -90,6 +168,9 @@ export type WechatDayPush = {
   rows: WechatLine[];
   // How many points the batches that follow will carry.
   pointCount: number;
+  // Optional in a push (RS-599).
+  traders: WechatTraders | null;
+  sentiment: WechatSentiment | null;
 };
 
 // POST /api/wechat-market/push/days/:date/points, in batches of
@@ -125,6 +206,9 @@ export type WechatPoint = {
   rawLine: string;
   // 'kind:key' of every line the item counted toward.
   rowKeys: string[];
+  // The post's mood; optional in a push, null when unread.
+  mood: WechatMood | null;
+  urgent: boolean;
 };
 
 export const WECHAT_MAX_ROWS = 5000;
@@ -153,6 +237,8 @@ export type WechatDay = WechatDaySummary & {
   nextDate: string | null;
   // The day's latest re-run request, if a manager ever asked for one.
   rerun: WechatRerun | null;
+  traders: WechatTraders | null;
+  sentiment: WechatSentiment | null;
   // The warnings above a manager has acknowledged, matched by their text.
   warningAcks: WechatWarningAck[];
 };
@@ -231,6 +317,9 @@ export type WechatActivityDay = {
   posts: number;
   buyers: number;
   sellers: number;
+  buyQty: number | null;
+  sellQty: number | null;
+  sentiment: number | null;
   degraded: boolean;
   warnings: string[];
 };

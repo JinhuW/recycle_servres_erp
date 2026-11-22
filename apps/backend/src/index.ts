@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import { r2Configured } from './r2';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
+import { FB_CHAT_MEDIA_MAX_UPLOAD_BYTES } from '@recycle-erp/shared';
 
 import { UPLOAD_HARD_CAP_BYTES } from './lib/settings';
 import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from './lib/error-log';
@@ -48,6 +49,7 @@ import customersRoutes from './routes/customers';
 import sellOrdersRoutes from './routes/sellOrders';
 import sellOrderPackRoutes from './routes/sellOrderPack';
 import afterSalesRoutes from './routes/afterSales';
+import actionsRoutes from './routes/actions';
 import accountingRoutes from './routes/accounting';
 import inventoryRoutes from './routes/inventory';
 import membersRoutes from './routes/members';
@@ -304,6 +306,13 @@ const leadsImportBodyLimit = bodyLimit({
   onError: (c) => c.json({ error: 'Payload too large' }, 413),
 });
 
+// A chat photo, from the Facebook extension or the chats page, arrives as the
+// raw body.
+const fbChatMediaBodyLimit = bodyLimit({
+  maxSize: FB_CHAT_MEDIA_MAX_UPLOAD_BYTES,
+  onError: (c) => c.json({ error: 'payload_too_large', detail: `max ${FB_CHAT_MEDIA_MAX_UPLOAD_BYTES} bytes` }, 413),
+});
+
 // All other routes: apply the 1 MiB JSON cap.
 const jsonBodyLimit = bodyLimit({
   maxSize: JSON_BODY_LIMIT,
@@ -314,6 +323,7 @@ app.use('*', (c, next) => {
   if (c.req.path === '/api/public/intake') return intakeBodyLimit(c, next);
   if (isUploadPath(c.req.path)) return uploadBodyLimit(c, next);
   if (c.req.path === '/api/leads/reddit/import') return leadsImportBodyLimit(c, next);
+  if (c.req.path === '/api/fb-chat/push/media' || c.req.path === '/api/fb-chat/media') return fbChatMediaBodyLimit(c, next);
   return jsonBodyLimit(c, next);
 });
 
@@ -380,6 +390,9 @@ app.use('/api/sell-orders/*', authMiddleware);
 // Bare path too: the list lives at the prefix root.
 app.use('/api/after-sales', authMiddleware);
 app.use('/api/after-sales/*', authMiddleware);
+// Bare path too: the board lives at the prefix root.
+app.use('/api/actions', authMiddleware);
+app.use('/api/actions/*', authMiddleware);
 app.use('/api/inventory/*', authMiddleware);
 app.use('/api/members/*', authMiddleware);
 app.use('/api/lookups/*', authMiddleware);
@@ -420,6 +433,7 @@ app.route('/api/customers', customersRoutes);
 app.route('/api/sell-orders', sellOrdersRoutes);
 app.route('/api/sell-orders', sellOrderPackRoutes);
 app.route('/api/after-sales', afterSalesRoutes);
+app.route('/api/actions', actionsRoutes);
 app.route('/api/inventory', inventoryRoutes);
 app.route('/api/members', membersRoutes);
 app.route('/api/lookups', lookupsRoutes);

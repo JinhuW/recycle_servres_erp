@@ -14,6 +14,7 @@ import { createOAuthClient } from '../src/oauth/clients';
 import { generateSigningKey, signAccessToken } from '../src/oauth/tokens';
 import { alignWindow } from '../src/services/fbChat';
 import { compareVersions } from '../src/services/fbChatConfig';
+import { fbChatMediaFetchesSettled, setFbChatMediaFetchForTests } from '../src/services/fbChatMediaFetch';
 import { fbChatTelegramConfig, fbChatTelegramConfigured, fbChatUserSession, runFbChatTelegramTick, setFbChatTelegramForTests } from '../src/services/fbChatTelegram';
 import { api, testEnv } from './helpers/app';
 import { ALEX, MARCUS, SOFIA, loginAs } from './helpers/auth';
@@ -127,9 +128,15 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     fail = null;
     topicSeq = 0;
     setFbChatTelegramForTests(telegram);
+    // Photo links here are made up; the hub's own fetch of them must never leave the test.
+    setFbChatMediaFetchForTests(async () => new Response(null, { status: 404 }));
   });
 
-  afterEach(() => setFbChatTelegramForTests(null));
+  afterEach(async () => {
+    setFbChatTelegramForTests(null);
+    await fbChatMediaFetchesSettled();
+    setFbChatMediaFetchForTests(null);
+  });
 
   it('guards the push routes by scope and the reads by role', async () => {
     const body = sync([row('in', 'hi')], { full: true });
@@ -186,6 +193,8 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
   it('mirrors a reply typed on Facebook, and a photo', async () => {
     await seeded();
     await push('sync', sync([row('in', 'Is this still available?'), row('out', 'Yes it is'), row('in', '', ['https://scontent.fbcdn.net/a.jpg'])]));
+    // Past the wait for the photo's bytes, none stored: the link goes.
+    await getTestDb()`UPDATE fb_chat_messages SET created_at = NOW() - INTERVAL '2 minutes'`;
     await tick();
     expect(texts()).toEqual(['↩️ You: Yes it is']);
     expect(sent('sendPhoto').map((c) => c.params.photo)).toEqual(['https://scontent.fbcdn.net/a.jpg']);
@@ -209,7 +218,7 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     topicReply(99, 'unknown topic');
     updates.push({ update_id: ++updateId, message: { message_id: 1, chat: { id: Number(CHAT) }, from: { id: 7, is_bot: false }, text: 'in General' } });
     expect((await tick()).queued).toBe(1);
-    expect(texts()).toEqual(['Only text can be sent to Facebook. This message was not forwarded.']);
+    expect(texts()).toEqual(['Only text, photos, and JPEG, PNG or WebP files can be sent to Facebook. Nothing was forwarded.']);
 
     expect((await push('outbox/claim', { account: OTHER })).status).toBe(204);
     const claim = await push<FbChatClaimAnswer>('outbox/claim', { account: ACCOUNT });
@@ -361,6 +370,17 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     expect((await push('events', { account: ACCOUNT, kind: 'bogus' })).status).toBe(400);
   });
 
+  it('tells General when Facebook warns that it is limiting an account, and holds its replies', async () => {
+    await seeded();
+    const event = { account: ACCOUNT, kind: 'restricted', detail: { restriction: 'blocked', url: 'https://www.facebook.com/marketplace/inbox', until: '2026-11-16T08:00:00.000Z' } };
+    await push('events', event);
+    await push('events', event);
+    await tick();
+    expect(texts()).toHaveLength(1);
+    expect(texts()[0]).toMatch(/^⚠️ Denver profile: Facebook warned that it is limiting this account/);
+    expect(texts()[0]).toContain('until 2026-11-16 08:00 UTC');
+  });
+
   it('opens a new topic when the old one was deleted in Telegram', async () => {
     await seeded();
     await push('sync', sync([row('in', 'Is this still available?'), row('in', 'hello?')]));
@@ -410,6 +430,8 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
     expect(pushed.body).toEqual({ needsFull: false, added: 2 });
     const labels = await sql`SELECT fb_sent_label FROM fb_chat_messages ORDER BY seq`;
     expect(labels.map((r) => r.fb_sent_label)).toEqual(['Tuesday 5:57pm', 'Tuesday 5:58pm']);
+    // Past the wait for the photo's bytes, none stored.
+    await sql`UPDATE fb_chat_messages SET created_at = NOW() - INTERVAL '2 minutes'`;
     await tick();
     expect(texts().at(-1)).toBe('📜 Earlier messages\n[Tuesday 5:57pm] Kane Bryant: [photo]\n[Tuesday 5:58pm] Kane Bryant: Is this still available?');
   });
@@ -422,6 +444,7 @@ describe('Facebook chat hub (/api/fb-chat)', () => {
       async history(afterId) { return afterId === 0 ? history.slice(-1) : history.filter((m) => m.id > afterId); },
       async send(text) { posted.push(text); return 0; },
       async sendPhotoUrl() { return 0; },
+      async sendPhotos() { return []; },
       async createTopic() { return 41; },
       async renameTopic() {},
       async react() {},

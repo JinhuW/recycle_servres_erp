@@ -21,6 +21,8 @@ export type SortableProductGroup = ProductSpecs & {
   // their list in workbook order instead of ranking by a figure they can't see.
   unit_cost_avg?: number;
   sell_price: number | null;
+  // Absent from a backend older than this bundle.
+  collected_at?: string;
 };
 
 export function productLabel(g: ProductSpecs): string {
@@ -44,7 +46,7 @@ export function productSpec(g: ProductSpecs): string {
     .filter(Boolean).join(' · ');
 }
 
-export const INVENTORY_SORT_COLS = ['product', 'partNumber', 'qty', 'lots', 'warehouses', 'cost', 'sell'] as const;
+export const INVENTORY_SORT_COLS = ['product', 'partNumber', 'qty', 'lots', 'warehouses', 'cost', 'sell', 'collected'] as const;
 export type InventorySortCol = typeof INVENTORY_SORT_COLS[number];
 
 export function isInventorySortCol(v: string): v is InventorySortCol {
@@ -63,6 +65,7 @@ function sortValue(col: InventorySortCol, g: SortableProductGroup): string | num
     case 'warehouses': return g.warehouses.length ? g.warehouses.join(', ') : null;
     case 'cost': return g.unit_cost_avg ?? null;
     case 'sell': return g.sell_price;
+    case 'collected': return g.collected_at ? new Date(g.collected_at).getTime() : null;
   }
 }
 

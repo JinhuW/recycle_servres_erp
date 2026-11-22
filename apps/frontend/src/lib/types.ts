@@ -141,6 +141,11 @@ export type OrderSummary = {
   sold?: boolean;
   archivedAt: string | null;
   createdAt: string;
+  // When the PO entered its stage (the board's days-in-stage). Optional for
+  // deploy skew; read as createdAt when absent.
+  stageSince?: string;
+  // The client the goods came from. The API scopes it to the caller's book.
+  supplier?: { id: string; name: string } | null;
   // The goods cost — a negotiated override of the line subtotal, or null for
   // none. `otherFees` is charged on top of it, never folded into it.
   totalCost: number | null;
