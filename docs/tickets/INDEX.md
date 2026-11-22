@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-602](./RS-602-reddit-outreach-guardrails-chat-first-dms-daily-cap.md) | in-progress | story | P2 | Reddit outreach guardrails: chat-first DMs, daily cap, do-not-contact | — |
+| [RS-602](./RS-602-reddit-outreach-guardrails-chat-first-dms-daily-cap.md) | in-review | story | P2 | Reddit outreach guardrails: chat-first DMs, daily cap, do-not-contact | — |
 | [RS-601](./RS-601-reddit-subreddit-backoff-overflows-after-37-errors-a.md) | done | bug | P2 | Reddit subreddit backoff overflows after ~37 errors and the failure repeats forever | tracker c68b2c66, Railway api+worker deployed 2026-11-21; OCI fleet pending |
 | [RS-600](./RS-600-reddit-alerts-drop-a-seller-s-second-lot-when-one-is.md) | done | bug | P2 | Reddit alerts drop a seller's second lot when one is DDR3 and the other DDR4 | tracker c68b2c66, Railway api+worker deployed 2026-11-21; OCI fleet pending |
 | [RS-599](./RS-599-wechat-market-buyer-seller-breakdown-top-traders-and.md) | done | story | P2 | WeChat market: buyer/seller breakdown, top traders and sentiment | 1.472.0 |
