@@ -1,5 +1,8 @@
 # Reddit's anonymous JSON API is blocked — use the Atom feed
 
+> **Superseded on 2026-11-13:** Reddit retired the Atom feed too. See
+> [reddit-rss-retired-2026-11-13.md](reddit-rss-retired-2026-11-13.md).
+
 **Discovered:** 2026-08-14, during initial implementation.
 
 ## Symptom

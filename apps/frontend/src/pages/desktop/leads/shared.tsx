@@ -1,13 +1,21 @@
 import {
   REPORTING_TZ, redditLeadIsDue, redditLeadIsOpen, redditLeadIsStale, todayIn,
-  type RedditLead, type RedditLeadStage,
+  type RedditLead, type RedditLeadClosing, type RedditLeadStage,
 } from '@recycle-erp/shared';
 import { useT } from '../../../lib/i18n';
 
 export const STAGE_KEY: Record<RedditLeadStage, string> = {
   claimed: 'rlStageClaimed', dm: 'rlStageDm', replied: 'rlStageReplied', talks: 'rlStageTalks', won: 'rlStageWon',
 };
-export const CLOSING_KEY = { nostock: 'rlClosedNoStock', lost: 'rlClosedLost' } as const;
+export const CLOSING_KEY: Record<RedditLeadClosing, string> = {
+  nostock: 'rlClosedNoStock', lost: 'rlClosedLost', optout: 'rlClosedOptOut',
+};
+
+/** First messages the viewer marked sent today, against the daily cap. */
+export type DmQuota = { sent: number; cap: number };
+
+/** Free to claim: nobody holds the seller and they never asked us to stop. */
+export const inPool = (l: RedditLead) => !l.claimed && !l.optedOut;
 
 /** The business day, the same clock the API dates follow-ups by. */
 export const leadToday = () => todayIn(REPORTING_TZ);
