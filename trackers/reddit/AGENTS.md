@@ -138,7 +138,7 @@ Breaking any of these breaks the fleet. The tests that cover them are
   code into the ERP backend. If this checkout isn't linked, run
   `railway link` (project `reddits-tracker`, env `production`). Then run
   `railway up --service <api|worker> --detach`.
-- **OCI worker fleet: stopped on 2026-11-18 (RS-600).** The VMs existed to
+- **OCI worker fleet: stopped on 2026-11-18 (RS-603).** The VMs existed to
   poll Reddit from many IPs. Posts now arrive by the redditapis.com webhook,
   so their tracker containers were stopped and removed, and their fleet rows
   deleted. The Railway `worker` alone runs evaluate and notify. The VMs still

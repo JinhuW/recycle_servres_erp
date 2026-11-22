@@ -65,6 +65,15 @@ export function isSameListing(a: ListingText, b: ListingText): boolean {
   if (conflicts(titleA, titleB, isQuantity) || conflicts(titleA, titleB, (w) => MAKERS.has(w))) {
     return false;
   }
+  // A seller's DDR3 lot and DDR4 lot share sizes, server models and often a
+  // template body, so one differing word is not enough to keep them apart on
+  // similarity alone. The body counts too: a retitled cross-post or a bare
+  // "Server RAM" title may name the generation only there.
+  if (generationsConflict(
+    new Set([...titleA, ...words(a.selftext)]),
+    new Set([...titleB, ...words(b.selftext)]))) {
+    return false;
+  }
   if (jaccard(titleA, titleB) >= TITLE_MATCH) {
     const numbersA = withDigits(titleA);
     const numbersB = withDigits(titleB);
@@ -80,6 +89,24 @@ const MAKERS = new Set([
   'samsung', 'hynix', 'skhynix', 'micron', 'crucial', 'kingston', 'corsair', 'gskill', 'intel',
   'seagate', 'wd', 'toshiba', 'hgst', 'sandisk', 'kioxia', 'solidigm',
 ]);
+
+/**
+ * The memory generation a word names: "ddr4", "lpddr5", "ddr3l" and the module
+ * names "pc4" / "pc3l" (from "PC4-2400T") are all one generation each.
+ */
+function generationOf(word: string): string | null {
+  const m = /^(?:lp)?ddr([2-5])[a-z]?$/.exec(word) ?? /^pc([2-5])l?$/.exec(word);
+  return m?.[1] ?? null;
+}
+
+/** Both texts name memory generations, and none of them in common. */
+function generationsConflict(a: Set<string>, b: Set<string>): boolean {
+  const of = (s: Set<string>) =>
+    new Set([...s].map(generationOf).filter((g): g is string => g !== null));
+  const ofA = of(a);
+  const ofB = of(b);
+  return ofA.size > 0 && ofB.size > 0 && ![...ofA].some((g) => ofB.has(g));
+}
 
 function isQuantity(word: string): boolean {
   return /^(?:\d+x|x\d+)$/.test(word);

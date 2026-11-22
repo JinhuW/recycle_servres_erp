@@ -1,5 +1,5 @@
 ---
-id: RS-600
+id: RS-603
 title: Reddit tracker: no alerts since 2026-11-16, feed URL 404
 type: bug
 status: in-progress
@@ -64,3 +64,7 @@ the rest.
 
 The worker's Railway log lines carried no message text, so the diagnosis came
 from `/api/stats` and from probing Reddit by hand.
+
+Filed as RS-600. Renumbered RS-603 on 2026-11-22: the id was also given to
+the DDR3/DDR4 dedup ticket, which merged first. Commits before that date cite
+RS-600 for this work.

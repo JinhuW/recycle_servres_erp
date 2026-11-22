@@ -61,6 +61,39 @@ describe('isSameListing', () => {
     )).toBe(false);
   });
 
+  it('keeps a seller\'s DDR3 and DDR4 lots apart when the sizes match', () => {
+    expect(isSameListing(
+      listing({title: '[FS][US-TX] DDR4 ECC RDIMM 8GB 16GB 32GB 64GB'}),
+      listing({title: '[FS][US-TX] DDR3 ECC RDIMM 8GB 16GB 32GB 64GB'}),
+    )).toBe(false);
+    expect(isSameListing(
+      listing({title: '[FS][US-TX] RAM pulled from Dell R720 R730 servers - DDR4'}),
+      listing({title: '[FS][US-TX] RAM pulled from Dell R720 R730 servers - DDR3'}),
+    )).toBe(false);
+  });
+
+  it('keeps DDR3 and DDR4 lots apart across subreddits despite a template body', () => {
+    expect(isSameListing(
+      listing({title: '[FS][US-TX] 32GB DDR4 RDIMMs', selftext: LONG_BODY}),
+      listing({subreddit: 'hardwareswap', title: '[USA-TX] [H] 16GB PC3-12800R RDIMMs [W] PayPal',
+               selftext: LONG_BODY}),
+    )).toBe(false);
+  });
+
+  it('reads the generation from the body when the titles are bare', () => {
+    expect(isSameListing(
+      listing({title: '[FS][US-TX] Server RAM', selftext: 'Lot of 32GB DDR4-2400 RDIMMs, $40 each.'}),
+      listing({title: '[FS][US-TX] Server RAM', selftext: 'Lot of 16GB DDR3-1600 RDIMMs, $8 each.'}),
+    )).toBe(false);
+  });
+
+  it('still pairs a cross-post that names one generation in either place', () => {
+    expect(isSameListing(
+      listing({title: '[FS] [USA-NY] 16 x 64GB DDR4 ECC RAM', selftext: 'PC4-2666V sticks, tested.'}),
+      listing({subreddit: 'hardwareswap', title: '[USA-NY] [H] 16 x 64GB DDR4 ECC RAM [W] Paypal G&S'}),
+    )).toBe(true);
+  });
+
   it('needs the same author', () => {
     expect(isSameListing(
       listing({title: '[FS] 88x 16gb DDR5 UDIMM ECC RAM'}),
