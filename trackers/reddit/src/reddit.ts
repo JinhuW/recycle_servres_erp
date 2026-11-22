@@ -5,6 +5,12 @@
 // multireddit path (r/a+b+c/new.rss) returns up to 100 entries spanning every
 // watched subreddit — that is why the poll loop claims subreddits in batches.
 // See docs/debug-notes/reddit-anonymous-json-blocked.md.
+//
+// Reddit withdrew logged-out RSS in November 2026, so with OAuth credentials
+// configured both fetchers go through redditOAuth.ts instead. The Atom path
+// stays as the no-credentials fallback. See docs/debug-notes/reddit-new-rss-404.md.
+
+import {fetchCommentsOAuth, fetchNewPostsOAuth, type RedditAuth} from './redditOAuth.ts';
 
 export interface RedditPost {
   redditId: string;
@@ -123,14 +129,14 @@ export function parseFeed(xml: string): RedditPost[] {
  * Reads a numeric header. Returns undefined for an absent header — plain
  * Number() would turn that null into 0, which reads as "no wait needed".
  */
-function numericHeader(headers: Headers, name: string): number | undefined {
+export function numericHeader(headers: Headers, name: string): number | undefined {
   const raw = headers.get(name);
   if (raw === null || raw.trim() === '') return undefined;
   const value = Number(raw);
   return Number.isFinite(value) ? value : undefined;
 }
 
-function readRateLimit(headers: Headers): RateLimitHint {
+export function readRateLimit(headers: Headers): RateLimitHint {
   const remaining = numericHeader(headers, 'x-ratelimit-remaining');
   const resetSeconds = numericHeader(headers, 'x-ratelimit-reset');
   return {
@@ -194,8 +200,10 @@ async function fetchFeed(url: string, userAgent: string): Promise<FeedResult> {
 export async function fetchNewPosts(
   subreddits: string[],
   userAgent: string,
+  auth: RedditAuth | null = null,
 ): Promise<FetchResult> {
   if (subreddits.length === 0) return {kind: 'ok', posts: [], rateLimit: {}};
+  if (auth) return fetchNewPostsOAuth(subreddits, userAgent, auth);
   const result = await fetchFeed(feedUrl(subreddits), userAgent);
   switch (result.kind) {
     case 'ok':
@@ -220,7 +228,7 @@ export type CommentsResult =
   | {kind: 'error'; message: string};
 
 /** Reddit's ceiling for one comment page; a thread longer than this is rare on a sale post. */
-const COMMENTS_LIMIT = 500;
+export const COMMENTS_LIMIT = 500;
 
 /** A post's comment feed, from its permalink. */
 export function commentsUrl(postUrl: string): string {
@@ -246,7 +254,12 @@ export function parseComments(xml: string): RedditComment[] {
 }
 
 /** Fetches a post's comments. Never throws, like fetchNewPosts. */
-export async function fetchComments(postUrl: string, userAgent: string): Promise<CommentsResult> {
+export async function fetchComments(
+  postUrl: string,
+  userAgent: string,
+  auth: RedditAuth | null = null,
+): Promise<CommentsResult> {
+  if (auth) return fetchCommentsOAuth(postUrl, userAgent, auth);
   const result = await fetchFeed(commentsUrl(postUrl), userAgent);
   if (result.kind !== 'ok') return result;
   return {kind: 'ok', comments: parseComments(result.body), rateLimit: result.rateLimit};

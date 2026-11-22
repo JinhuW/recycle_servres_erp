@@ -4,6 +4,12 @@
 
 import type {Sql} from './db.ts';
 
+/**
+ * Who discovers posts: 'reddit' runs the workers' poll loop, 'webhook' idles
+ * it because the redditapis.com monitor delivers them instead.
+ */
+export type PollSource = 'reddit' | 'webhook';
+
 export interface Settings {
   evalPrompt: string;
   llmModel: string;
@@ -15,6 +21,7 @@ export interface Settings {
   candidateEvalPrompt: string;
   /** '' runs the candidate on llmModel. */
   candidateLlmModel: string;
+  pollSource: PollSource;
 }
 
 /** Used only if a row is missing; migrations seed every key. */
@@ -26,6 +33,7 @@ const FALLBACKS: Settings = {
   telegramDevChatIds: [],
   candidateEvalPrompt: '',
   candidateLlmModel: '',
+  pollSource: 'reddit',
 };
 
 const CACHE_TTL_MS = 60_000;
@@ -38,6 +46,7 @@ export const SETTING_KEYS = [
   'telegram_dev_chat_ids',
   'candidate_eval_prompt',
   'candidate_llm_model',
+  'poll_source',
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -78,6 +87,7 @@ export class SettingsStore {
       candidateEvalPrompt:
         asString(byKey.get('candidate_eval_prompt')) ?? FALLBACKS.candidateEvalPrompt,
       candidateLlmModel: asString(byKey.get('candidate_llm_model')) ?? FALLBACKS.candidateLlmModel,
+      pollSource: parsePollSource(byKey.get('poll_source')),
     };
     this.cachedAt = this.now();
     return this.cache;
@@ -102,6 +112,14 @@ export class SettingsStore {
     this.cache = null;
     this.cachedAt = 0;
   }
+}
+
+/**
+ * Anything but exactly 'webhook' reads as 'reddit', so a missing or mangled
+ * row fails towards polling rather than towards silently discovering nothing.
+ */
+export function parsePollSource(value: unknown): PollSource {
+  return value === 'webhook' ? 'webhook' : 'reddit';
 }
 
 function asString(value: unknown): string | null {
