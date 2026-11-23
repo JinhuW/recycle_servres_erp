@@ -2144,7 +2144,9 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
 // Discard a Pending transfer order: undo the move and delete the TO. Full-move
 // lines flip back to their origin warehouse at their pre-transfer status;
 // partial-clone lines (their transferred event carries a peer_line_id) merge
-// their qty back into the source remainder and are deleted. Manager-only.
+// their qty back into the source remainder and are deleted, unless a sell
+// order names either side, in which case they revert like a full move and
+// stay a lot of their own. Manager-only.
 // Mirrors the PO "draft-only delete" rule — a Received order must be reopened
 // first. Guard: every line must still be In Transit and uncommitted to a sell
 // order, else 409 with no writes (matches reopen).
@@ -2209,16 +2211,23 @@ inventory.delete('/transfer-orders/:id', async (c) => {
       const peerLineId = typeof detail.peer_line_id === 'string' ? detail.peer_line_id : null;
 
       let merged = false;
+      // A clone a sell order names — a Draft or Packing claim the guard above
+      // lets through, or a Done sale that already took units — is never merged:
+      // deleting it would null that line's stock link (the FK is SET NULL), and
+      // a Done sale would make its qty less than the split handed over. It takes
+      // the standalone revert below and stays its own lot. The row lock above
+      // blocks a new line's FK check, so none can appear before the delete.
       if (peerLineId) {
         const peer = (await tx`
           SELECT id FROM order_lines
           WHERE id = ${peerLineId} AND transfer_order_id IS NULL
             AND NOT EXISTS (SELECT 1 FROM sell_order_lines sl WHERE sl.inventory_id = order_lines.id)
+            AND NOT EXISTS (SELECT 1 FROM sell_order_lines sl WHERE sl.inventory_id = ${l.id})
           FOR UPDATE
         `)[0] as { id: string } | undefined;
         if (peer) {
-          // Give back the share the split handed over. A clone can't have been
-          // sold from (discard refuses one that has), so its qty is all it cost.
+          // Give back the share the split handed over. No sell order names the
+          // clone (checked above), so its qty is all it cost.
           await tx`
             UPDATE order_lines
                SET qty = qty + ${l.qty},
