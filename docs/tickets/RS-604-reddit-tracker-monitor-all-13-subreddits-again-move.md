@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-22
 reporter: jinhu
 branch: fix/reddit-monitors-railway
-pr:
+pr: "#1238"
 version: "tracker, Railway api+worker deployed 2026-11-23"
 related: [RS-601, RS-603]
 ---
