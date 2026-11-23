@@ -1050,5 +1050,38 @@ function Shell() {
 // MobileApp is mounted by App.tsx when the viewport is phone-sized.
 // LangProvider is set up at the top of App.tsx so both shells share state.
 export function MobileApp() {
+  const { user } = useAuth();
+  // The eBay desk is desktop only, and the backend refuses this role every
+  // screen of the phone app: it gets this one notice, ahead of the shell's
+  // loads, which would only collect 403s.
+  if (user?.role === 'ebay') return <EbayOnDesktop />;
   return <Shell />;
+}
+
+function EbayOnDesktop() {
+  const { user, logout } = useAuth();
+  const { t } = useT();
+  useEffect(() => {
+    document.body.classList.add('phone-mode');
+    document.body.classList.remove('desktop');
+    return () => { document.body.classList.remove('phone-mode'); };
+  }, []);
+  return (
+    <div className="phone-app" style={{ display: 'grid', placeItems: 'center', padding: 24 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, textAlign: 'center', maxWidth: 320 }}>
+        <div style={{
+          width: 56, height: 56, borderRadius: 14, display: 'grid', placeItems: 'center',
+          background: 'var(--accent-soft)', color: 'var(--accent-strong)',
+        }}>
+          <Icon name="package" size={26} />
+        </div>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>{t('ebayDesktopOnlyTitle')}</h1>
+        <p style={{ margin: 0, fontSize: 14, color: 'var(--fg-muted)', lineHeight: 1.5 }}>{t('ebayDesktopOnlyBody')}</p>
+        <p style={{ margin: 0, fontSize: 12.5, color: 'var(--fg-subtle)' }}>{t('ebayDesktopOnlySignedIn', { name: user?.name ?? '' })}</p>
+        <button type="button" className="btn" onClick={logout}>
+          <Icon name="logout" size={14} /> {t('signOut')}
+        </button>
+      </div>
+    </div>
+  );
 }

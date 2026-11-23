@@ -55,6 +55,8 @@ export const DESKTOP_NAV: readonly NavGroup[] = [
       { id: 'inventory',  tKey: 'nav_inventory',  icon: 'inventory',  roles: ['manager'] },
       { id: 'sellorders', tKey: 'nav_sellorders', icon: 'tag',        roles: ['manager'] },
       { id: 'aftersales', tKey: 'nav_aftersales', icon: 'refresh',    roles: ['manager'] },
+      // The eBay operator's whole app: this page and nothing else.
+      { id: 'ebay',       tKey: 'nav_ebay',       icon: 'package',    roles: ['manager', 'ebay'] },
       { id: 'transfers',  tKey: 'nav_transfers',  icon: 'truck',      roles: ['manager'] },
     ],
   },
@@ -135,4 +137,34 @@ export function shownNav(role: Role, view: DesktopViewId): ShownGroup[] {
     if (items.length) groups.push({ tKey: g.tKey, items });
   }
   return groups;
+}
+
+// Views no sidebar entry names, reached through a tab or a link: who may open
+// each. Everything else is open to exactly the roles its entry lists.
+const UNLISTED_VIEW_ROLES: Partial<Record<DesktopViewId, readonly Role[]>> = {
+  stock: ['manager'],
+  internaltx: ['manager'],
+  shipping: ['manager', 'purchaser'],
+};
+
+const LEAF_ROLES = new Map<DesktopViewId, readonly Role[]>(
+  DESKTOP_NAV.flatMap(g => g.items.flatMap(i => ('children' in i ? [...i.children] : [i])))
+    .map(l => [l.id, l.roles]),
+);
+
+export function roleMayOpen(role: Role, view: DesktopViewId): boolean {
+  return (LEAF_ROLES.get(view) ?? UNLISTED_VIEW_ROLES[view] ?? []).includes(role);
+}
+
+/**
+ * The view a role actually lands on when it asks for `view`: the view itself
+ * when its role may open it, else the role's home. The eBay operator's home
+ * is the eBay desk; a purchaser sent away from the stock tab gets the
+ * Analysis tab beside it.
+ */
+export function desktopViewFor(role: Role, view: DesktopViewId): DesktopViewId {
+  if (roleMayOpen(role, view)) return view;
+  if (role === 'ebay') return 'ebay';
+  if (view === 'stock' && roleMayOpen(role, 'analysis')) return 'analysis';
+  return 'home';
 }

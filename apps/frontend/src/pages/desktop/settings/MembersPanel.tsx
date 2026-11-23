@@ -12,6 +12,8 @@ import { pwStrengthLabels } from '../../../lib/passwordI18n';
 import { ConfirmDialog } from './dialogs';
 import { useT } from '../../../lib/i18n';
 import { forgetMembers } from '../../../lib/useManagers';
+import { ROLES, roleDescKey, roleLabelKey } from '../../../lib/roles';
+import type { Role } from '../../../lib/types';
 
 // ─── Members ──────────────────────────────────────────────────────────────────
 export function MembersPanel({ showToast }: { showToast: ToastFn }) {
@@ -27,7 +29,7 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
     [members],
   );
   const [search, setSearch] = useState('');
-  const [roleFilter, setRoleFilter] = useState<'all' | 'manager' | 'purchaser'>('all');
+  const [roleFilter, setRoleFilter] = useState<'all' | Role>('all');
   const [showArchived, setShowArchived] = useState(false);
 
   // Archived members too: the Show archived toggle, the reactivate path and
@@ -69,6 +71,7 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
     all: visible.length,
     manager: visible.filter(m => m.role === 'manager').length,
     purchaser: visible.filter(m => m.role === 'purchaser').length,
+    ebay: visible.filter(m => m.role === 'ebay').length,
   };
 
   return (
@@ -93,6 +96,7 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
             { v: 'all', label: t('all'), count: counts.all },
             { v: 'manager', label: t('memManagers'), count: counts.manager },
             { v: 'purchaser', label: t('memPurchasers'), count: counts.purchaser },
+            { v: 'ebay', label: t('memEbayOperators'), count: counts.ebay },
           ] as const).map(o => (
             <button key={o.v} className={roleFilter === o.v ? 'active' : ''} onClick={() => setRoleFilter(o.v)}>
               {o.label} <span style={{ opacity: 0.55, marginLeft: 4 }}>{o.count}</span>
@@ -144,7 +148,7 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 500, fontSize: 13.5 }}>{inv.email}</div>
                   <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-                    {inv.role === 'manager' ? t('role_manager') : t('role_purchaser')} · {t('memAddedNotSignedIn', { rel: relTime(inv.created_at, locale) })}
+                    {t(roleLabelKey(inv.role))} · {t('memAddedNotSignedIn', { rel: relTime(inv.created_at, locale) })}
                   </div>
                 </div>
                 <button
@@ -198,8 +202,8 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
                     </div>
                   </td>
                   <td>
-                    <span className={'chip ' + (m.role === 'manager' ? 'accent' : 'muted')}>
-                      {m.role === 'manager' ? t('role_manager') : t('role_purchaser')}
+                    <span className={'chip ' + (m.role === 'manager' ? 'accent' : m.role === 'ebay' ? 'warn' : 'muted')}>
+                      {t(roleLabelKey(m.role))}
                     </span>
                   </td>
                   <td style={{ fontSize: 13, color: 'var(--fg-muted)' }}>{lastSeenLabel(m, locale)}</td>
@@ -281,7 +285,7 @@ function InviteMemberModal({
 }) {
   const { t } = useT();
   const [draft, setDraft] = useState({
-    name: '', email: '', role: 'purchaser' as 'manager' | 'purchaser',
+    name: '', email: '', role: 'purchaser' as Role,
     phone: '',
   });
   const [saving, setSaving] = useState(false);
@@ -440,7 +444,7 @@ function InviteMemberModal({
               </div>
             </div>
             <div className="role-picker" style={{ marginTop: 12 }}>
-              {(['manager', 'purchaser'] as const).map(r => (
+              {ROLES.map(r => (
                 <label key={r} className={'role-card ' + (draft.role === r ? 'active' : '')}>
                   <input
                     type="radio"
@@ -450,9 +454,9 @@ function InviteMemberModal({
                     onChange={() => set('role', r)}
                   />
                   <div className="role-card-body">
-                    <div className="role-card-title">{r === 'manager' ? t('role_manager') : t('role_purchaser')}</div>
+                    <div className="role-card-title">{t(roleLabelKey(r))}</div>
                     <div className="role-card-desc">
-                      {r === 'manager' ? t('memRoleMgrDesc') : t('memRolePurchDesc')}
+                      {t(roleDescKey(r))}
                     </div>
                   </div>
                 </label>
@@ -558,7 +562,7 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
         {tab === 'role' && (
           <>
             <div className="role-picker">
-              {(['manager', 'purchaser'] as const).map(r => (
+              {ROLES.map(r => (
                 <label key={r} className={'role-card ' + (role === r ? 'active' : '')}>
                   <input
                     type="radio"
@@ -569,11 +573,11 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
                   />
                   <div className="role-card-body">
                     <div className="role-card-title">
-                      {r === 'manager' ? t('role_manager') : t('role_purchaser')}
+                      {t(roleLabelKey(r))}
                       {role === r && <span className="chip accent" style={{ fontSize: 10 }}>{t('memCurrentRole')}</span>}
                     </div>
                     <div className="role-card-desc">
-                      {r === 'manager' ? t('memRoleMgrDesc') : t('memRolePurchDesc')}
+                      {t(roleDescKey(r))}
                     </div>
                   </div>
                 </label>

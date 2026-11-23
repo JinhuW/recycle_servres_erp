@@ -3,7 +3,7 @@
 // frontend's tests fail if a view is added without being listed here.
 export const PERF_PAGES = [
   'home', 'analysis', 'actions', 'stock', 'submit', 'history', 'shipping', 'clients',
-  'market', 'inventory', 'sellorders', 'aftersales', 'transfers',
+  'market', 'inventory', 'sellorders', 'aftersales', 'ebay', 'transfers',
   'websubmissions', 'activity', 'payments', 'internaltx', 'accounting',
   'tracker', 'wechat', 'coordinator', 'leadsReddit', 'leadsFacebook', 'settings',
 ] as const;

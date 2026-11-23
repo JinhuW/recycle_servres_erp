@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
-  accountingEntryPath, afterSalesCasePath, afterSalesNewPath, FLEET_TABS, fleetRedirect, fleetTabPath, matchFleetTab, fleetWorkerPath, hrefFor, matchFleetWorker, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, matchWebsiteLead, websiteLeadPath, navigate, navigateBack, onLinkClick,
+  accountingEntryPath, afterSalesCasePath, ebayListingPath, matchEbayListing, afterSalesNewPath, FLEET_TABS, fleetRedirect, fleetTabPath, matchFleetTab, fleetWorkerPath, hrefFor, matchFleetWorker, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, matchWebsiteLead, websiteLeadPath, navigate, navigateBack, onLinkClick,
   knownDesktopView, parseShippingRoute, pathToDesktopView, pathToMobileView, poCheckPath, poLinePath, readPath, readPoLineQuery, readSafeNext,
   replaceRoute, sellOrderPackPath, splitHash, fbChatTabPath, fbChatThreadPath, matchFbChatRoute,
   type LinkClick,
@@ -106,6 +106,23 @@ describe('after-sales routes', () => {
     expect(pathToDesktopView('/after-sales')).toBe('aftersales');
     expect(pathToDesktopView('/after-sales/AS-1001')).toBe('aftersales');
     expect(pathToDesktopView('/after-sales/new')).toBe('aftersales');
+  });
+});
+
+describe('eBay routes', () => {
+  it('are one desktop view for the desk and a listing open on it', () => {
+    expect(ebayListingPath('EB-118')).toBe('/ebay/EB-118');
+    expect(matchEbayListing('/ebay/EB-118')).toBe('EB-118');
+    expect(pathToDesktopView('/ebay')).toBe('ebay');
+    expect(pathToDesktopView('/ebay/EB-118')).toBe('ebay');
+    expect(knownDesktopView('/ebay/EB-118')).toBe('ebay');
+  });
+
+  it('claims no other path under /ebay', () => {
+    expect(matchEbayListing('/ebay')).toBeNull();
+    expect(matchEbayListing('/ebay/SO-1')).toBeNull();
+    expect(matchEbayListing('/ebay/EB-1/x')).toBeNull();
+    expect(knownDesktopView('/ebay/settings')).toBeNull();
   });
 });
 

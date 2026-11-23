@@ -9,11 +9,13 @@ export function Topbar() {
   const { t } = useT();
   const user = useEffectiveUser();
   if (!user) return null;
-  const label = user.role === 'manager' ? t('adminWorkspace') : t('purchaserWorkspace');
+  const label = user.role === 'manager' ? t('adminWorkspace')
+    : user.role === 'ebay' ? t('ebayWorkspace') : t('purchaserWorkspace');
   return (
     <div className="topbar">
       <span className="topbar-label">{label}</span>
-      <button
+      {/* The walkthrough is a purchaser's tour; the eBay desk has none. */}
+      {user.role !== 'ebay' && <button
         type="button"
         className="btn ghost sm topbar-guide"
         onClick={openWalkthrough}
@@ -22,7 +24,7 @@ export function Topbar() {
       >
         <Icon name="book" size={13} />
         {t('onbGuide')}
-      </button>
+      </button>}
     </div>
   );
 }
