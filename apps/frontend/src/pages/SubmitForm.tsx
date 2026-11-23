@@ -28,6 +28,7 @@ import { useMarketLookup } from '../lib/useMarketLookup';
 import { useChipFill } from '../lib/useChipFill';
 import { RamPartMismatchDialog, ScanPartNotice, useRamPartFill } from '../components/RamPartCheck';
 import { partQuestionKey, partQuestionPending } from '../lib/ramPartQuestion';
+import { unitFromTotal } from '../lib/lineTotal';
 
 type Props = {
   category: Category;
@@ -42,6 +43,9 @@ type Props = {
   // line being captured needs at least 1.
   allowZeroQty?: boolean;
   onSaveLine: (line: DraftLine) => void;
+  // The save is still being written and the form stays up until it lands, so
+  // a second tap would send the line a second time.
+  saving?: boolean;
   onCancel: () => void;
   onBack?: () => void;
   // Re-open the Camera page (take or upload a label photo). The current draft
@@ -131,7 +135,7 @@ const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
   };
 };
 
-export function SubmitForm({ category, detected, lineCount, editingLineIdx, newNo, existingLine, allowZeroQty = false, onSaveLine, onCancel, onBack, onRescan, rescanDraft, photoCtx }: Props) {
+export function SubmitForm({ category, detected, lineCount, editingLineIdx, newNo, existingLine, allowZeroQty = false, onSaveLine, saving = false, onCancel, onBack, onRescan, rescanDraft, photoCtx }: Props) {
   const { t, lang, locale } = useT();
   const isEditing = editingLineIdx != null;
   const aiFilled = !!detected;
@@ -172,6 +176,10 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
   // rewrites what's on screen.
   const [qtyRaw, setQtyRaw] = useState(() => (initial.qty || (allowZeroQty && initial.qty === 0) ? String(initial.qty) : ''));
   const [costRaw, setCostRaw] = useState(() => (initial.unitCost || isEditing ? String(initial.unitCost ?? 0) : ''));
+  // A lot total being typed, held as text for the same reason; null shows the
+  // total derived from qty × unit cost. Re-deriving it on every keystroke
+  // snapped "2" to "2.00" and rounded each later digit away.
+  const [totalRaw, setTotalRaw] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
   // Tracks which fields the user has touched since the AI populated them.
@@ -590,7 +598,12 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
               value={qtyRaw}
               onChange={e => {
                 setQtyRaw(e.target.value);
-                set('qty', parseInt(e.target.value, 10) || 0);
+                const qty = parseInt(e.target.value, 10) || 0;
+                set('qty', qty);
+                // A total typed ahead of the quantity is what was agreed; the
+                // unit cost follows it once there's a quantity to divide by.
+                const unit = totalRaw == null ? null : unitFromTotal(totalRaw, qty);
+                if (unit != null) { set('unitCost', unit); setCostRaw(String(unit)); }
               }}
             />
           </div>
@@ -625,6 +638,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
               value={costRaw}
               onChange={e => {
                 setCostRaw(e.target.value);
+                setTotalRaw(null);
                 set('unitCost', parseFloat(e.target.value) || 0);
               }}
             />
@@ -638,11 +652,11 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
               min={0}
               inputMode="decimal"
               placeholder="0.00"
-              value={line.qty * line.unitCost ? (line.qty * line.unitCost).toFixed(2) : ''}
+              value={totalRaw ?? (line.qty * line.unitCost ? (line.qty * line.unitCost).toFixed(2) : '')}
               onChange={e => {
-                const newTotal = parseFloat(e.target.value);
-                if (!Number.isFinite(newTotal) || line.qty <= 0) return;
-                const unit = +(newTotal / line.qty).toFixed(2);
+                setTotalRaw(e.target.value);
+                const unit = unitFromTotal(e.target.value, line.qty);
+                if (unit == null) return;
                 set('unitCost', unit);
                 setCostRaw(String(unit));
               }}
@@ -672,7 +686,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
           locale={locale}
           // costRaw is what the input actually renders, so applying a price has
           // to move both — same pairing the total-cost field does above.
-          onUseMaxBuy={v => { set('unitCost', v); setCostRaw(String(v)); }}
+          onUseMaxBuy={v => { set('unitCost', v); setCostRaw(String(v)); setTotalRaw(null); }}
           onUseSellPrice={v => set('sellPrice', v)}
         />
 
@@ -704,7 +718,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
 
       <div className="ph-action-bar">
         <button className="ph-btn ghost" onClick={leave}>{t('cancel')}</button>
-        <button className="ph-btn dark" onClick={() => attemptSave()}>
+        <button className="ph-btn dark" disabled={saving} onClick={() => { if (!saving) attemptSave(); }}>
           <Icon name="check" size={16} /> {isEditing ? t('saveChanges') : (isFirst ? t('addToOrder') : t('addItem'))}
         </button>
       </div>

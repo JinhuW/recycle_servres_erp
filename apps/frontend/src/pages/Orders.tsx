@@ -165,7 +165,9 @@ export function Orders({ onToast }: Props) {
                 o.userName.toLowerCase().includes(q)
               )
             : visibleOrders;
-          return filtered.slice(0, 30).map(o => {
+          // Every PO in scope is already loaded and counted in the header, so
+          // the list shows them all; a cap here hid the older ones from view.
+          return filtered.map(o => {
           const unpriced = o.unpricedLineCount ?? 0;
           // Rows open the PO rather than expanding: an 18-line PO unfolded
           // taller than the phone, and the edit button sat at the bottom of
