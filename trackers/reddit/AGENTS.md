@@ -33,13 +33,13 @@ has the repo map and workflow.
 ## Read before changing these
 
 - **Anything about fetching posts** →
-  [docs/debug-notes/reddit-anonymous-json-blocked.md](docs/debug-notes/reddit-anonymous-json-blocked.md).
-  The JSON API is dead for anonymous clients, and Reddit withdrew the Atom
-  feed in November 2026: every feed URL 404s
-  ([reddit-new-rss-404.md](docs/debug-notes/reddit-new-rss-404.md)).
-  The real rate limit is about 1 request per 40 s per IP, not 10/min.
-  Posts now come from the redditapis.com webhook (`poll_source`, README
-  *Post source*).
+  [docs/debug-notes/reddit-new-rss-404.md](docs/debug-notes/reddit-new-rss-404.md).
+  Reddit has no logged-out route left: the JSON API is 403-blocked and the
+  Atom feeds were withdrawn in November 2026, and the tracker's RSS code is
+  gone. Posts come from the redditapis.com webhook (`poll_source`, README
+  *Post source*); reading Reddit directly needs OAuth (`src/redditOAuth.ts`),
+  whose `x-ratelimit-*` headers drive the pacer. Don't bring back an
+  anonymous reader.
 - **The Dockerfile CMD or shutdown path** →
   [docs/debug-notes/signals-must-reach-node.md](docs/debug-notes/signals-must-reach-node.md).
   node must be PID 1 or SIGTERM never reaches the shutdown handler.
