@@ -4,14 +4,14 @@
 import type { EbayOrder } from './client';
 
 export interface ListingLookup {
-  /** ebay_listings.ebay_sku → listing id. */
-  bySku: ReadonlyMap<string, number>;
+  /** ebay_listings.ebay_sku → listing id (EB-n). */
+  bySku: ReadonlyMap<string, string>;
   /** ebay_listings.ebay_item_id → listing id, for listings linked by hand. */
-  byItemId: ReadonlyMap<string, number>;
+  byItemId: ReadonlyMap<string, string>;
 }
 
 export interface SaleCandidate {
-  listingId: number;
+  listingId: string;
   ebayOrderId: string;
   ebayLineItemId: string;
   qty: number;
@@ -46,7 +46,7 @@ function apportion(totalCents: number, weights: number[]): number[] {
   return shares;
 }
 
-function listingFor(line: EbayOrder['lineItems'][number], lookup: ListingLookup): number | null {
+function listingFor(line: EbayOrder['lineItems'][number], lookup: ListingLookup): string | null {
   if (line.sku) {
     const bySku = lookup.bySku.get(line.sku);
     if (bySku !== undefined) return bySku;

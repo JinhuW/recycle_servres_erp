@@ -130,4 +130,25 @@ describe('prod→dev sync scrub', () => {
     await sql`DROP TABLE ai_provider_key_removals`;
     await run();
   });
+
+  it('forgets prod’s eBay account, and runs where prod has no eBay tables yet', async () => {
+    const sql = getTestDb();
+    const [{ id: userId }] = await sql<{ id: string }[]>`SELECT id FROM users LIMIT 1`;
+    await sql`
+      INSERT INTO ebay_connection (id, environment, refresh_token_sealed, refresh_token_expires_at)
+      VALUES (1, 'production', 'v1.a.b.c', NOW() + INTERVAL '1 year')`;
+    await sql`INSERT INTO ebay_oauth_states (state_hash, user_id, expires_at) VALUES ('h', ${userId}, NOW())`;
+    const run = () => sql.begin(async (tx) => {
+      await tx`SELECT pg_catalog.set_config('search_path', '', true)`;
+      await tx.unsafe(scrub);
+    });
+    await run();
+    expect(await sql`SELECT 1 FROM ebay_connection`).toHaveLength(0);
+    expect(await sql`SELECT 1 FROM ebay_oauth_states`).toHaveLength(0);
+
+    await sql`DROP TABLE env_marker`;
+    await sql`DROP TABLE ebay_connection`;
+    await sql`DROP TABLE ebay_oauth_states`;
+    await run();
+  });
 });

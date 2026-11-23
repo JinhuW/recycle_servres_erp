@@ -29,8 +29,8 @@ function order(over: Partial<EbayOrder> & { lineItems: EbayLineItem[] }): EbayOr
 }
 
 const lookup: ListingLookup = {
-  bySku: new Map([['RS-EB-1', 1], ['RS-EB-2', 2]]),
-  byItemId: new Map([['335500000001', 1], ['335500000009', 9]]),
+  bySku: new Map([['RS-EB-1', 'EB-1'], ['RS-EB-2', 'EB-2']]),
+  byItemId: new Map([['335500000001', 'EB-1'], ['335500000009', 'EB-9']]),
 };
 
 describe('matchOrders', () => {
@@ -44,7 +44,7 @@ describe('matchOrders', () => {
     })], lookup);
     expect(rest).toEqual([]);
     expect(c).toEqual({
-      listingId: 1,
+      listingId: 'EB-1',
       ebayOrderId: '01-00001-00001',
       ebayLineItemId: '10001',
       qty: 3,
@@ -64,14 +64,14 @@ describe('matchOrders', () => {
       // A SKU the ERP never issued still matches by item number.
       lineItems: [line({ lineItemId: '2', sku: 'SELLER-OWN', legacyItemId: '335500000009' })],
     })], lookup);
-    expect(got.map((c) => [c.ebayOrderId, c.listingId])).toEqual([['01-00001-00001', 9], ['o2', 9]]);
+    expect(got.map((c) => [c.ebayOrderId, c.listingId])).toEqual([['01-00001-00001', 'EB-9'], ['o2', 'EB-9']]);
   });
 
   it('prefers the sku over the item number', () => {
     const [c] = matchOrders([order({
       lineItems: [line({ lineItemId: '1', sku: 'RS-EB-2', legacyItemId: '335500000001' })],
     })], lookup);
-    expect(c.listingId).toBe(2);
+    expect(c.listingId).toBe('EB-2');
   });
 
   it('apportions the fee by line total and skips unmatched lines', () => {

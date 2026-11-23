@@ -134,11 +134,19 @@ export interface EbayInventoryLocation {
 // ---------------------------------------------------------------------------
 // Account API
 
+/** Which listings a policy serves; `default` marks the account's default for that type. */
+export interface EbayCategoryType {
+  /** ALL_EXCLUDING_MOTORS_VEHICLES or MOTORS_VEHICLES. */
+  name: string;
+  default?: boolean;
+}
+
 export interface EbayFulfillmentPolicy {
   fulfillmentPolicyId: string;
   name: string;
   description?: string;
   marketplaceId?: string;
+  categoryTypes?: EbayCategoryType[];
 }
 
 export interface EbayPaymentPolicy {
@@ -146,6 +154,7 @@ export interface EbayPaymentPolicy {
   name: string;
   description?: string;
   marketplaceId?: string;
+  categoryTypes?: EbayCategoryType[];
 }
 
 export interface EbayReturnPolicy {
@@ -153,6 +162,7 @@ export interface EbayReturnPolicy {
   name: string;
   description?: string;
   marketplaceId?: string;
+  categoryTypes?: EbayCategoryType[];
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +218,44 @@ export interface GetOrdersParams {
   /** Default 50, at most 200. */
   limit?: number;
   offset?: number;
+}
+
+/** One SKU's row in bulkUpdatePriceQuantity's answer. */
+interface EbayPriceQuantityResponse {
+  offerId?: string;
+  sku?: string;
+  statusCode: number;
+  errors?: EbayErrorDetail[];
+  warnings?: EbayWarning[];
+}
+
+// ---------------------------------------------------------------------------
+// Commerce Identity API
+
+/** The seller behind a user token. */
+export interface EbayIdentityUser {
+  userId: string;
+  username?: string;
+}
+
+/**
+ * The account a fresh token belongs to. Served from the apiz host, and only
+ * with the commerce.identity.readonly scope, so it takes the token directly
+ * rather than going through a client's minted ones.
+ */
+export async function getIdentityUser(
+  cfg: EbayConfig,
+  accessToken: string,
+  fetchFn: FetchFn = fetch,
+): Promise<EbayIdentityUser> {
+  const base = cfg.apiBase.replace('://api.', '://apiz.');
+  const path = '/commerce/identity/v1/user/';
+  const res = await fetchFn(`${base}${path}`, {
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!res.ok) throw new EbayApiError(res.status, await parseErrors(res), 'GET', path);
+  return (await res.json()) as EbayIdentityUser;
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +384,34 @@ export class EbayClient {
       if (e instanceof EbayApiError && e.status === 404) return [];
       throw e;
     }
+  }
+
+  /**
+   * Revises a live listing's price and/or quantity without replacing the
+   * offer. The call answers 200 even when the revision failed, with the
+   * outcome per SKU, so a failed row is thrown here like any other refusal.
+   */
+  async updatePriceQuantity(
+    sku: string,
+    offerId: string,
+    change: { price?: number; quantity?: number; currency?: string },
+  ): Promise<void> {
+    const path = '/sell/inventory/v1/bulk_update_price_quantity';
+    const offer: Record<string, unknown> = { offerId };
+    if (change.price !== undefined) {
+      offer.price = { value: change.price.toFixed(2), currency: change.currency ?? 'USD' };
+    }
+    if (change.quantity !== undefined) offer.availableQuantity = change.quantity;
+    const request: Record<string, unknown> = { sku, offers: [offer] };
+    if (change.quantity !== undefined) {
+      request.shipToLocationAvailability = { quantity: change.quantity };
+    }
+    const body = await this.request<{ responses?: EbayPriceQuantityResponse[] }>('POST', path, {
+      body: { requests: [request] },
+      contentLanguage: true,
+    });
+    const failed = (body?.responses ?? []).find((r) => r.statusCode < 200 || r.statusCode >= 300);
+    if (failed) throw new EbayApiError(failed.statusCode, failed.errors ?? [], 'POST', path);
   }
 
   async getInventoryLocations(): Promise<EbayInventoryLocation[]> {

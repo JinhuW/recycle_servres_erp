@@ -15,6 +15,7 @@ import { flushPerf, startPerfLoop } from './lib/perf';
 import { onShutdown } from './lib/shutdown';
 import { startPackageTrackingLoop } from './shipping/track';
 import { startBankSyncLoop } from './banktx/sync';
+import { startEbaySyncLoop } from './ebay/sync';
 import { startWebSubmissionPurgeLoop } from './lib/webSubmissionPurge';
 import { attachVncBridge, closeVncBridges } from './vncBridge';
 import { startMailInboxLoop } from './mail/inbox';
@@ -41,6 +42,7 @@ const loops = [
   startFxRefreshLoop(getDb(env)),
   startPackageTrackingLoop(getDb(env), env),
   startBankSyncLoop(env),
+  startEbaySyncLoop(env),
   startWebSubmissionPurgeLoop(getDb(env), env),
   startMailInboxLoop(getDb(env), env),
   startPoAiReviewLoop(getDb(env), env),
