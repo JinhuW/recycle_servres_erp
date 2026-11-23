@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { _resetForTests } from '../src/ai/catalogue';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
@@ -38,6 +39,24 @@ describe('Cache-Control on reference-data endpoints', () => {
     const r = await api('GET', '/api/lookups', { token });
     expect(r.status).toBe(200);
     expect(r.headers.get('cache-control')).toBe('private, max-age=60');
+  });
+
+  // Pasting a key re-reads the list straight away; a 60s browser copy hid the
+  // new provider's models.
+  it('does NOT cache /api/ai/models', async () => {
+    _resetForTests();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: 'openai/gpt-6-luna', name: 'x', architecture: { input_modalities: ['text'], output_modalities: ['text'] } }],
+    }), { status: 200 })));
+    try {
+      const { token } = await loginAs(ALEX);
+      const r = await api('GET', '/api/ai/models', { token });
+      expect(r.status).toBe(200);
+      expect(r.headers.get('cache-control')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+      _resetForTests();
+    }
   });
 
   // The prefixes that stay cached also serve mutations; only safe methods may

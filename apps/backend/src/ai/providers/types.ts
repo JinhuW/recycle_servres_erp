@@ -46,11 +46,20 @@ export interface LlmProvider {
 }
 
 // A reply with no content at all, e.g. a reasoning model that spent its
-// budget thinking. Worth one more ask, like a timeout.
+// budget thinking. Worth one more ask, like a timeout. The turn was still
+// billed, so it carries its usage for the PO review's cost cap.
 export class EmptyAnswerError extends Error {
-  constructor(provider: string) {
+  constructor(provider: string, readonly usage?: AiUsage) {
     super(`${provider}: no content in response`);
     this.name = 'EmptyAnswerError';
+  }
+}
+
+/** The model declined the request; billed like any other turn. */
+export class RefusalError extends Error {
+  constructor(provider: string, readonly usage?: AiUsage) {
+    super(`${provider}: the model declined this request`);
+    this.name = 'RefusalError';
   }
 }
 

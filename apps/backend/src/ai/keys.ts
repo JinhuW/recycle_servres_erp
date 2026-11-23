@@ -3,7 +3,7 @@
 // the Reddit tracker too, so every key is managed in one place.
 
 import { hkdfSync } from 'node:crypto';
-import { AI_PROVIDERS, type AiProviderId } from '@recycle-erp/shared';
+import { AI_PROVIDERS, parseModelRef, type AiProviderId } from '@recycle-erp/shared';
 import type { Env } from '../types';
 import { getDb } from '../db';
 import { seal, unseal } from '../lib/sealed';
@@ -43,16 +43,21 @@ function fromEnv(env: Env): AiKeys {
 }
 
 let cache: { stored: AiKeys; expiresAt: number } | null = null;
+// Bumped on every save or removal, so a read that started before one can't
+// put the old keys back into the cache after it.
+let generation = 0;
 
 export function invalidateAiKeys(): void {
+  generation++;
   cache = null;
 }
 
-async function storedKeys(env: Env): Promise<AiKeys> {
+async function storedKeys(env: Env, { quiet = false } = {}): Promise<AiKeys> {
   if (cache && Date.now() < cache.expiresAt) return cache.stored;
   if (!env.DATABASE_URL) return {};
   const key = aiKeysKey(env);
   if (!key) return {};
+  const gen = generation;
   try {
     const rows = await getDb(env)<{ provider: AiProviderId; sealed: string }[]>`
       SELECT provider, sealed FROM ai_provider_keys`;
@@ -62,13 +67,13 @@ async function storedKeys(env: Env): Promise<AiKeys> {
         stored[r.provider] = unseal(r.sealed, key);
       } catch {
         // A rotated FB_POOL_KEY leaves the row unreadable: say which, never what.
-        klog.warn('stored AI key could not be unsealed; using env', { provider: r.provider });
+        if (!quiet) klog.warn('stored AI key could not be unsealed; using env', { provider: r.provider });
       }
     }
-    cache = { stored, expiresAt: Date.now() + TTL_MS };
+    if (gen === generation) cache = { stored, expiresAt: Date.now() + TTL_MS };
     return stored;
   } catch (e) {
-    klog.warn('could not read ai_provider_keys; using env', e);
+    if (!quiet) klog.warn('could not read ai_provider_keys; using env', e);
     return cache?.stored ?? {};
   }
 }
@@ -78,9 +83,24 @@ export async function aiKeys(env: Env): Promise<AiKeys> {
   return { ...fromEnv(env), ...(await storedKeys(env)) };
 }
 
-/** Synchronous best guess for /api/health: the last read of saved keys plus env. */
-export function aiKeysSnapshot(env: Env): AiKeys {
-  return { ...fromEnv(env), ...(cache?.stored ?? {}) };
+/**
+ * For /api/health: the last read of saved keys plus env, without logging.
+ * Reads the table only while nothing has been read yet (just after a
+ * restart), when the snapshot would report no saved key at all.
+ */
+export async function aiKeysForHealth(env: Env): Promise<AiKeys> {
+  if (cache) return { ...fromEnv(env), ...cache.stored };
+  return { ...fromEnv(env), ...(await storedKeys(env, { quiet: true })) };
+}
+
+/** Whether calls to `provider` have a key, saved or in env. */
+export async function providerHasKey(env: Env, provider: AiProviderId): Promise<boolean> {
+  return !!(await aiKeys(env))[provider];
+}
+
+/** Whether a call to model ref `ref` has a key for its provider. */
+export async function modelHasKey(env: Env, ref: string): Promise<boolean> {
+  return providerHasKey(env, parseModelRef(ref).provider);
 }
 
 export function sealKey(env: Env, plain: string): string {

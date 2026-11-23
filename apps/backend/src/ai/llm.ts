@@ -2,23 +2,26 @@
 // the deadline, the retry on a slow or empty turn, and the JSON re-ask. The
 // providers (./providers) only send one turn and read the answer.
 
-import { AI_PROVIDER_LABELS, parseModelRef, type AiFeature, type AiModelsSetting } from '@recycle-erp/shared';
+import sharp from 'sharp';
+import {
+  AI_PROVIDERS, AI_PROVIDER_LABELS, parseModelRef, type AiFeature, type AiModelsSetting, type AiProviderId,
+} from '@recycle-erp/shared';
 import type { Env, LineCategory } from '../types';
 import type { ScanResult } from './types';
 import { getDb } from '../db';
 import { getWorkspaceSetting } from '../lib/settings';
 import { log } from '../lib/log';
-import { PROVIDERS, EmptyAnswerError, type AiUsage, type Turn } from './providers';
-import { cachedPrice } from './catalogue';
-import { aiKeys, KEY_ENV } from './keys';
+import { PROVIDERS, EmptyAnswerError, RefusalError, type AiUsage, type Turn } from './providers';
+import { priceFor } from './catalogue';
+import { aiKeys, KEY_ENV, type AiKeys } from './keys';
 import { PROMPT_BY_CATEGORY, parseModelJson, EXPECTED_FIELD_COUNT, EXPECTED_FIELDS_BY_CATEGORY } from './prompts';
 
 export type { AiUsage } from './providers';
 
 const llog = log.child({ module: 'ai' });
 
-// RS-115 (2026-09-26): OpenAI gpt-6-luna for every image-AI call (labels,
-// receipts, PayPal). Benchmarked on real RAM label crops with the RAM prompt
+// OpenAI gpt-6-luna for every image-AI call (labels, receipts, PayPal),
+// chosen 2026-09-26. Benchmarked on real RAM label crops with the RAM prompt
 // and normalizeFields, 3 runs each: luna read 48/48 fields on 300 dpi scans
 // (93/96 incl. 150 dpi) at ~$0.21 per 1k images and ~3.8 s; the previous
 // gemini-2.5-flash read 96/96 at ~$0.70 per 1k and ~1.6 s. Cheaper OpenAI
@@ -26,6 +29,13 @@ const llog = log.child({ module: 'ai' });
 // Switched on Settings ▸ AI models now; AI_MODEL / OPENROUTER_OCR_MODEL set
 // the fallback.
 const DEFAULT_MODEL = 'openai/gpt-6-luna';
+// The fallback when only another provider has a key: the same model direct
+// from OpenAI, and for Claude the mid-priced current model.
+const PROVIDER_DEFAULT: Record<AiProviderId, string> = {
+  openrouter: DEFAULT_MODEL,
+  openai: 'openai:gpt-6-luna',
+  anthropic: 'anthropic:claude-sonnet-5-5',
+};
 
 // Cap on the coverage-derived confidence floor: even when the model returns
 // every expected field, observable coverage alone shouldn't claim more than
@@ -46,6 +56,12 @@ const OCR_DEADLINE_MS = 45_000;
 const MAX_TOKENS = 4096;
 // Settings ▸ AI models is read at most this often; a save clears it.
 const SETTING_TTL_MS = 30_000;
+// Anthropic refuses an image over 8000 px a side or 5 MB of base64, and
+// downsamples anything past 2576 px itself; a phone photo or a long PayPal
+// screenshot passes both. Shrunk here, for every provider, to what the
+// models read anyway.
+const MAX_IMAGE_EDGE = 2576;
+const MAX_IMAGE_BYTES = 3_500_000;
 
 export type AiCallOptions = {
   /** A model ref that wins over every setting. */
@@ -60,35 +76,86 @@ export type AiCallOptions = {
 };
 
 let setting: { value: AiModelsSetting; expiresAt: number } | null = null;
+// Bumped on save, so a read that started before it can't cache the old value.
+let settingGeneration = 0;
 
 export function invalidateAiModelsSetting(): void {
+  settingGeneration++;
   setting = null;
 }
 
-async function aiModelsSetting(env: Env): Promise<AiModelsSetting> {
+async function aiModelsSetting(env: Env, { quiet = false } = {}): Promise<AiModelsSetting> {
   if (setting && Date.now() < setting.expiresAt) return setting.value;
   if (!env.DATABASE_URL) return { default: null };
+  const gen = settingGeneration;
   try {
     const value = await getWorkspaceSetting<AiModelsSetting>(getDb(env), 'ai_models', { default: null });
-    setting = { value, expiresAt: Date.now() + SETTING_TTL_MS };
+    if (gen === settingGeneration) setting = { value, expiresAt: Date.now() + SETTING_TTL_MS };
     return value;
   } catch (e) {
     // A database blip must not fail a scan that the env default can serve.
-    llog.warn('could not read ai_models; using the env default', e);
+    if (!quiet) llog.warn('could not read ai_models; using the env default', e);
     return setting?.value ?? { default: null };
   }
 }
 
-/** The model a call falls back to when Settings ▸ AI models names none. */
+/** The model a call falls back to when Settings ▸ AI models names none and its key is set. */
 export function envModel(env: Env): string {
   return env.AI_MODEL ?? env.OPENROUTER_OCR_MODEL ?? DEFAULT_MODEL;
 }
 
-/** The model a call with `opts` uses: override → feature → default → env. */
+/**
+ * The last resort: the env model, unless only other providers have a key, in
+ * which case a default model of the first of those. With no key anywhere it
+ * is the env model, and the call fails naming the key it needs.
+ */
+export function fallbackModel(env: Env, keys: AiKeys): string {
+  const ref = envModel(env);
+  if (keys[parseModelRef(ref).provider]) return ref;
+  const keyed = AI_PROVIDERS.find((p) => keys[p]);
+  return keyed ? PROVIDER_DEFAULT[keyed] : ref;
+}
+
+function pick(s: AiModelsSetting, env: Env, keys: AiKeys, opts: AiCallOptions): string {
+  return opts.model || (opts.feature && s[opts.feature]) || s.default || fallbackModel(env, keys);
+}
+
+/** The model a call with `opts` uses: override → feature → default → env → any keyed provider. */
 export async function resolveModel(env: Env, opts: AiCallOptions = {}): Promise<string> {
   if (opts.model) return opts.model;
-  const s = await aiModelsSetting(env);
-  return (opts.feature && s[opts.feature]) || s.default || envModel(env);
+  return pick(await aiModelsSetting(env), env, await aiKeys(env), opts);
+}
+
+/**
+ * resolveModel for /api/health: the last read of the setting, read quietly
+ * only while nothing has been read since the restart.
+ */
+export async function resolveModelForHealth(env: Env, keys: AiKeys, opts: AiCallOptions = {}): Promise<string> {
+  const s = setting ? setting.value : await aiModelsSetting(env, { quiet: true });
+  return pick(s, env, keys, opts);
+}
+
+/** Shrinks an image past what the providers take; anything sharp can't read goes as it is. */
+export async function fitImage(img: ArrayBuffer): Promise<ArrayBuffer> {
+  try {
+    const meta = await sharp(img).metadata();
+    const edge = Math.max(meta.width ?? 0, meta.height ?? 0);
+    if (edge <= MAX_IMAGE_EDGE && img.byteLength <= MAX_IMAGE_BYTES) return img;
+    let quality = 90;
+    for (;;) {
+      const out = await sharp(img)
+        .rotate()
+        .resize({ width: MAX_IMAGE_EDGE, height: MAX_IMAGE_EDGE, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality })
+        .toBuffer();
+      if (out.byteLength <= MAX_IMAGE_BYTES || quality <= 50) {
+        return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
+      }
+      quality -= 20;
+    }
+  } catch {
+    return img;
+  }
 }
 
 // AbortSignal.timeout rejects with a DOMException, so match on the name rather
@@ -124,7 +191,9 @@ export async function aiJson(
     throw new Error(`No ${AI_PROVIDER_LABELS[id]} API key for ${ref}: add one on Settings ▸ AI models (or set ${KEY_ENV[id]})`);
   }
   const apiKey: string = found;
-  const price = cachedPrice(ref);
+  // Only the cost cap reads a price; without one, never wait for a catalogue.
+  const price = opts.onUsage ? await priceFor(ref) : undefined;
+  const fitted = await Promise.all(images.map(fitImage));
 
   const attemptMs = opts.timeoutMs ?? OCR_TIMEOUT_MS;
   const deadline = Date.now() + Math.max(OCR_DEADLINE_MS, attemptMs * 2);
@@ -133,17 +202,24 @@ export async function aiJson(
   async function askOnce(turns: Turn[]): Promise<string> {
     const budget = remaining();
     if (budget <= 0) throw new Error(`${provider.id}: deadline exceeded`);
-    const { text, usage } = await provider.complete(apiKey, {
-      model,
-      turns,
-      maxTokens: MAX_TOKENS,
-      signal: AbortSignal.timeout(budget),
-      webSearch: opts.webSearch,
-      wantUsage: !!opts.onUsage,
-      price,
-    });
-    if (opts.onUsage && usage) opts.onUsage(usage);
-    return text;
+    let reply: Awaited<ReturnType<typeof provider.complete>>;
+    try {
+      reply = await provider.complete(apiKey, {
+        model,
+        turns,
+        maxTokens: MAX_TOKENS,
+        signal: AbortSignal.timeout(budget),
+        webSearch: opts.webSearch,
+        wantUsage: !!opts.onUsage,
+        price,
+      });
+    } catch (e) {
+      // An empty or refused turn was billed all the same.
+      if ((e instanceof EmptyAnswerError || e instanceof RefusalError) && e.usage) opts.onUsage?.(e.usage);
+      throw e;
+    }
+    if (opts.onUsage && reply.usage) opts.onUsage(reply.usage);
+    return reply.text;
   }
 
   // A single slow turn was reaching the field as an error dialog on a phone
@@ -161,7 +237,7 @@ export async function aiJson(
     }
   }
 
-  const base: Turn = { role: 'user', text: prompt, images };
+  const base: Turn = { role: 'user', text: prompt, images: fitted };
   const first = await ask([base]);
   let json = parseModelJson(first);
   if (!json) {
