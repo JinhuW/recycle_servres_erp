@@ -23,6 +23,18 @@ export async function lotListings(sql: SqlLike, inventoryId: string) {
   }));
 }
 
+/** Queued or Listed listings on any of these lots: what a lot's deletion must wait for. */
+export async function activeListingsOnLines(
+  sql: SqlLike, lineIds: readonly string[],
+): Promise<{ line_id: string; listing_id: string }[]> {
+  if (lineIds.length === 0) return [];
+  return sql<{ line_id: string; listing_id: string }[]>`
+    SELECT inventory_id AS line_id, id AS listing_id FROM ebay_listings
+    WHERE inventory_id = ANY(${[...lineIds]}::uuid[]) AND status = ANY(${activeEbayStatuses()}::text[])
+    ORDER BY id
+  `;
+}
+
 export type EbayLink = {
   listingId: string; listingNo: string; spec: string | null; status: string; remaining: number;
   ebayItemId: string | null; ebayUrl: string | null;
@@ -78,4 +90,43 @@ export async function lotStock(sql: SqlLike, inventoryId: string): Promise<LotSt
   `;
   if (!r) return null;
   return { onHand: r.on_hand, heldForEbay: r.ebay, heldForSellOrders: r.held - r.ebay, sellable: r.on_hand - r.held };
+}
+
+/**
+ * A sell order raised from an eBay sale was Closed: the buyer cancelled or
+ * sent it back. Its sales are Dismissed, so their units count against the
+ * listing's remainder again — a sold-out listing is Listed once more, and an
+ * Ended one stays Ended, which hands the units back to the lot. Runs in the
+ * close's transaction, after the sell order's lock; the listing is locked
+ * here, as confirming a sale locks it.
+ */
+export async function releaseEbaySalesTx(
+  tx: SqlLike, sellOrderId: string, actorId: string, reason: string,
+): Promise<void> {
+  const sales = await tx<{ id: string; listing_id: string; qty: number }[]>`
+    SELECT id, listing_id, qty FROM ebay_sales
+    WHERE sell_order_id = ${sellOrderId} AND status = 'Confirmed'
+    ORDER BY listing_id, id
+  `;
+  for (const s of sales) {
+    const [listing] = await tx<{ status: string }[]>`
+      SELECT status FROM ebay_listings WHERE id = ${s.listing_id} FOR UPDATE
+    `;
+    await tx`UPDATE ebay_sales SET status = 'Dismissed' WHERE id = ${s.id}`;
+    await tx`
+      INSERT INTO ebay_listing_events (listing_id, kind, note, detail, actor_id)
+      VALUES (${s.listing_id}, 'sale_dismissed', ${`sell order ${sellOrderId} closed`},
+              ${tx.json({ saleId: s.id, qty: s.qty, sellOrderId, closeReason: reason })}, ${actorId})
+    `;
+    if (listing.status === 'Sold') {
+      await tx`
+        UPDATE ebay_listings SET status = 'Listed', sold_out_at = NULL, updated_at = NOW()
+         WHERE id = ${s.listing_id}
+      `;
+      await tx`
+        INSERT INTO ebay_listing_events (listing_id, kind, from_status, to_status, detail, actor_id)
+        VALUES (${s.listing_id}, 'listed', 'Sold', 'Listed', ${tx.json({ saleId: s.id, sellOrderId })}, ${actorId})
+      `;
+    }
+  }
 }

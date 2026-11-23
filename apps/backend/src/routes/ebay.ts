@@ -28,8 +28,10 @@ const ebay = new Hono<{ Bindings: Env; Variables: { user: User } }>()
 type ListingStatus = 'Queued' | 'Listed' | 'Sold' | 'Ended';
 const LISTING_STATUSES: readonly ListingStatus[] = ['Queued', 'Listed', 'Sold', 'Ended'];
 
-// Sold and Ended are final: a listing's sales live on as sell orders, and an
-// ended item goes back on eBay as a new listing.
+// Sold and Ended are final for the desk: a listing's sales live on as sell
+// orders, and an ended item goes back on eBay as a new listing. The one way
+// back is a sale undone by closing its sell order, which puts a Sold listing
+// Listed again (releaseEbaySalesTx).
 const ALLOWED_TRANSITIONS: Record<ListingStatus, Set<ListingStatus>> = {
   Queued: new Set(['Listed', 'Ended']),
   Listed: new Set(['Sold', 'Ended']),

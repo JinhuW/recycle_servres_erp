@@ -135,11 +135,21 @@ export function describeSellOrders(ids: string[]): string {
 // their lines and a plain refusal. The archive conflict keeps its own richer,
 // raw-role shape.
 export function committedLinesBody(
-  u: User, offendingLineIds: string[], sellOrderIds: string[], named: string, plain: string,
+  u: User, offendingLineIds: string[], holders: { sellOrderIds: string[]; ebayListingIds: string[] },
+  named: string, plain: string,
 ) {
   return effectiveRole(u) === 'manager'
-    ? { error: named, offendingLineIds, sellOrderIds }
+    ? { error: named, offendingLineIds, sellOrderIds: holders.sellOrderIds, ebayListingIds: holders.ebayListingIds }
     : { error: plain, offendingLineIds };
+}
+
+// "sell order SO-1", "eBay listing EB-101", or both, for a refusal.
+export function describeHolders(h: { sellOrderIds: string[]; ebayListingIds: string[] }): string {
+  return [
+    h.sellOrderIds.length > 0 && describeSellOrders(h.sellOrderIds),
+    h.ebayListingIds.length > 0
+      && `eBay listing${h.ebayListingIds.length === 1 ? '' : 's'} ${h.ebayListingIds.join(', ')}`,
+  ].filter(Boolean).join(' and ');
 }
 
 // Serial rules (shared with the frontend forms via @recycle-erp/shared):

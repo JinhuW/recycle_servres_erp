@@ -12,6 +12,7 @@ import { LINE_STATUS_FOR_LIFECYCLE } from './orderAdvance';
 import { lockOrdersTx } from './orderLocks';
 import { validateSellLines } from './sellOrderCreate';
 import { writeSellOrderEvent } from './sellOrderAudit';
+import { releaseEbaySalesTx } from './ebayListings';
 import { missingSigners, signoffState } from './sellOrderSignoff';
 
 // Sell-order lifecycle. A transition may carry a note; files are evidence
@@ -414,6 +415,8 @@ export async function moveSellOrderStatusTx(
   // Audit-event writes for close + reopen. Done's audit story is the
   // inventory_events rows below; archive lives in its own handler.
   if (body.to === 'Closed') {
+    // An eBay sale this order was made from is undone with it.
+    await releaseEbaySalesTx(tx, id, actorId, body.closeReasonId!);
     const withdrawnBids = await retractBidDataPoints(tx, id);
     await writeSellOrderEvent(tx, id, actorId, 'closed', {
       reasonId: body.closeReasonId!,

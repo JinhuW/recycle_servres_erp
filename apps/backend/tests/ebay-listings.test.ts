@@ -342,6 +342,53 @@ describe('eBay listings', () => {
     });
   });
 
+  it('closing the sell order a sale became undoes the sale', async () => {
+    const { token } = await loginAs(ALEX);
+    const { token: op } = await loginAs(EBAY);
+    const line = await freeSellableLine(token, 4);
+    const { body: { ids: [a, b] } } = await list(token, line.id, [{ qty: 2, listPrice: 30 }, { qty: 1, listPrice: 30 }]);
+    await linkItem(op, a, '255012345679');
+    await linkItem(op, b, '255012345680');
+    const first = await markSold(op, a, 1);
+    const sold = await markSold(op, a, 1);
+    expect(sold.body.listingStatus).toBe('Sold');
+    const onB = await markSold(op, b, 1);
+    expect(onB.body.listingStatus).toBe('Sold');
+    expect(await pickerQty(token, line.id)).toBe(line.qty - 3);
+
+    const close = (soId: string) => api('POST', `/api/sell-orders/${soId}/status`, {
+      token, body: { to: 'Closed', closeReasonId: 'customer_cancelled', note: 'buyer cancelled on eBay' },
+    });
+    const sql = getTestDb();
+
+    // A sold-out listing is Listed again with the unit back on it: still reserved.
+    expect((await close(sold.body.sellOrderId)).status).toBe(200);
+    const [la] = await sql<{ status: string; sold_out_at: Date | null }[]>`
+      SELECT status, sold_out_at FROM ebay_listings WHERE id = ${a}`;
+    expect(la).toEqual({ status: 'Listed', sold_out_at: null });
+    const [sale] = await sql<{ status: string }[]>`SELECT status FROM ebay_sales WHERE id = ${sold.body.saleId}`;
+    expect(sale.status).toBe('Dismissed');
+    const evA = await sql<{ kind: string }[]>`
+      SELECT kind FROM ebay_listing_events WHERE listing_id = ${a} AND kind IN ('sale_dismissed', 'listed')`;
+    expect(evA.map(e => e.kind).sort()).toEqual(['listed', 'listed', 'sale_dismissed']);
+    const detail = await api<{ listing: { remaining: number; status: string } }>('GET', `/api/ebay/listings/${a}`, { token: op });
+    expect(detail.body.listing).toMatchObject({ status: 'Listed', remaining: 1 });
+    expect(await pickerQty(token, line.id)).toBe(line.qty - 3);
+    // Still the other sale's order, untouched.
+    const [{ status: firstStatus }] = await sql<{ status: string }[]>`
+      SELECT status FROM ebay_sales WHERE id = ${first.body.saleId}`;
+    expect(firstStatus).toBe('Confirmed');
+
+    // An ended listing stays Ended, so the unit goes back to the lot.
+    expect((await api('POST', `/api/ebay/listings/${a}/end`, { token: op, body: { reason: 'no_buyer' } })).status).toBe(200);
+    expect(await pickerQty(token, line.id)).toBe(line.qty - 2);
+    await sql`UPDATE ebay_listings SET status = 'Ended', end_reason = 'other', ended_at = NOW(), sold_out_at = NULL WHERE id = ${b}`;
+    expect((await close(onB.body.sellOrderId)).status).toBe(200);
+    const [lb] = await sql<{ status: string }[]>`SELECT status FROM ebay_listings WHERE id = ${b}`;
+    expect(lb.status).toBe('Ended');
+    expect(await pickerQty(token, line.id)).toBe(line.qty - 1);
+  });
+
   it('a linked item # is unique across listings', async () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token, 2);

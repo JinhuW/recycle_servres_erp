@@ -1484,14 +1484,14 @@ Part of an inventory lot offered on eBay (migration 0254), numbered EB-n. A mana
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
 | `id` | `text` | ✓ |  | Human id 'EB-n' from id_counters row 'EB'; the first listing is EB-101. |
-| `inventory_id` | `uuid` |  |  | → order_lines: the lot the units come from. Not unique. NULL only once a PO edit deleted the lot. |
+| `inventory_id` | `uuid` |  |  | → order_lines: the lot the units come from. Not unique. While Queued or Listed the PO can't delete, archive or move the lot out of stock; NULL only once a PO edit deleted the lot after its listing ended or sold. |
 | `qty` | `integer` | ✓ |  | Units offered. What it still offers is qty less its Confirmed sales; while Queued or Listed that remainder is reserved (`committedQtySql`, lib/sellCommitment.ts), so the sell-order picker, transfers and qty edits see it as taken. |
 | `list_price` | `numeric(12,2)` | ✓ |  | Asking price per unit, USD. |
 | `title` | `text` |  |  | The eBay title. |
 | `spec` | `text` |  |  | Which part of the lot this item is, e.g. "16GB 2Rx8 DDR4-2666". Goes on the sell-order line as its sub-label when a sale is confirmed. |
 | `condition` | `text` |  |  | The eBay condition. |
 | `notes` | `text` |  |  | The manager's note to the operator. |
-| `status` | `text` | ✓ | `'Queued'` | Queued (to post), Listed (on eBay), Sold (every unit sold) or Ended (taken down; the remainder went back to stock). Sold and Ended are final. |
+| `status` | `text` | ✓ | `'Queued'` | Queued (to post), Listed (on eBay), Sold (every unit sold) or Ended (taken down; the remainder went back to stock). Final for the desk; closing the sell order of a Sold listing's sale puts it back to Listed. |
 | `ebay_sku` | `text` |  |  | Generated: 'RS-' ‖ id. The SKU the ERP publishes under, so a synced eBay order finds its listing. Unique. |
 | `ebay_offer_id` | `text` |  |  | eBay's offer id, once published through the API. |
 | `ebay_item_id` | `text` |  |  | eBay's item number. Setting it on a Queued listing makes it Listed. Unique where set. |
@@ -1514,7 +1514,7 @@ Part of an inventory lot offered on eBay (migration 0254), numbered EB-n. A mana
 
 #### `ebay_sales`
 
-One sale against a listing; a listing can sell in parts. A Detected row comes from the eBay sync and waits for the operator; Confirmed means it became a sell order to the customer named eBay, at Awaiting payment; Dismissed means it wasn't this listing's.
+One sale against a listing; a listing can sell in parts. A Detected row comes from the eBay sync and waits for the operator; Confirmed means it became a sell order to the customer named eBay, at Awaiting payment; Dismissed means it wasn't this listing's, or its sell order was Closed (the buyer cancelled or returned it), which gives its units back to the listing.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
