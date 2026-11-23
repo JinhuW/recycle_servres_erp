@@ -1,8 +1,8 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-import {fetchComments, fetchNewPosts} from '../src/reddit.ts';
 import {
-  fetchNewPostsOAuth,
+  fetchComments,
+  fetchNewPosts,
   parseCommentTree,
   parseListing,
   resetTokenCache,
@@ -107,7 +107,15 @@ describe('parseCommentTree', () => {
   });
 });
 
-describe('fetchNewPostsOAuth', () => {
+describe('fetchNewPosts', () => {
+  it('sends nothing for an empty batch', async () => {
+    const spy = vi.fn();
+    vi.stubGlobal('fetch', spy);
+
+    expect(await fetchNewPosts([], 'ua', AUTH)).toEqual({kind: 'ok', posts: [], rateLimit: {}});
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('gets a token once, then reads the multireddit with it', async () => {
     const spy = vi.fn()
       .mockResolvedValueOnce(tokenResponse())
@@ -142,20 +150,20 @@ describe('fetchNewPostsOAuth', () => {
 
   it('reports rejected credentials as blocked', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', {status: 401})));
-    expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH)).toEqual({kind: 'blocked', status: 401});
+    expect(await fetchNewPosts(['homelab'], 'ua', AUTH)).toEqual({kind: 'blocked', status: 401});
   });
 
   it('reports a token error body as blocked, like a 401', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({error: 'invalid_grant'}), {status: 200})));
-    expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH))
+    expect(await fetchNewPosts(['homelab'], 'ua', AUTH))
       .toEqual({kind: 'blocked', status: 401});
   });
 
   it('reports a rate-limited token endpoint as rate_limited', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response('', {status: 429, headers: {'retry-after': '30'}})));
-    expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH))
+    expect(await fetchNewPosts(['homelab'], 'ua', AUTH))
       .toEqual({kind: 'rate_limited', retryAfterSeconds: 30});
   });
 
@@ -163,7 +171,7 @@ describe('fetchNewPostsOAuth', () => {
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce(tokenResponse())
       .mockResolvedValueOnce(new Response('', {status: 429, headers: {'x-ratelimit-reset': '42'}})));
-    expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH))
+    expect(await fetchNewPosts(['homelab'], 'ua', AUTH))
       .toEqual({kind: 'rate_limited', retryAfterSeconds: 42});
   });
 
@@ -175,7 +183,7 @@ describe('fetchNewPostsOAuth', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify(LISTING), {status: 200}));
     vi.stubGlobal('fetch', spy);
 
-    expect((await fetchNewPostsOAuth(['homelab'], 'ua', AUTH)).kind).toBe('ok');
+    expect((await fetchNewPosts(['homelab'], 'ua', AUTH)).kind).toBe('ok');
     expect(spy.mock.calls[2]![0]).toBe('https://www.reddit.com/api/v1/access_token');
   });
 
@@ -186,18 +194,18 @@ describe('fetchNewPostsOAuth', () => {
       .mockResolvedValueOnce(new Response('', {status: 401}))
       .mockResolvedValueOnce(tokenResponse())
       .mockResolvedValueOnce(new Response('', {status: 401})));
-    expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH)).toEqual({kind: 'blocked', status: 401});
+    expect(await fetchNewPosts(['homelab'], 'ua', AUTH)).toEqual({kind: 'blocked', status: 401});
   });
 
   it('backs off when the token endpoint is unreachable or failing', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('socket hang up')));
-    expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH)).toEqual({kind: 'rate_limited'});
+    expect(await fetchNewPosts(['homelab'], 'ua', AUTH)).toEqual({kind: 'rate_limited'});
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', {status: 503})));
-    expect(await fetchNewPostsOAuth(['homelab'], 'ua', AUTH)).toEqual({kind: 'rate_limited'});
+    expect(await fetchNewPosts(['homelab'], 'ua', AUTH)).toEqual({kind: 'rate_limited'});
   });
 });
 
-describe('fetchComments with credentials', () => {
+describe('fetchComments', () => {
   it('reads the comment tree by post id', async () => {
     const spy = vi.fn()
       .mockResolvedValueOnce(tokenResponse())

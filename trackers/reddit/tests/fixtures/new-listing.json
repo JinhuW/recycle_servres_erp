@@ -1,0 +1,124 @@
+{
+  "kind": "Listing",
+  "data": {
+    "children": [
+      {
+        "kind": "t3",
+        "data": {
+          "name": "t3_1vob0ha",
+          "subreddit": "homelab",
+          "title": "Noctuah",
+          "selftext": "Fan go wheeeeeee hard drive go brrrrrrrrrr",
+          "author": "nAndFlash9084",
+          "link_flair_text": null,
+          "permalink": "/r/homelab/comments/1vob0ha/noctuah/",
+          "created_utc": 1786722676
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "name": "t3_1voaxlg",
+          "subreddit": "hardwareswap",
+          "title": "[USA-FL] [H] PayPal [W] DJI Osmo Mobile 8",
+          "selftext": "Hey everyone. I'm looking to buy a DJI Osmo Mobile 8 for a similar price to the one from this post was sold for:\n\n https://old.reddit.com/r/hardwareswap/comments/1vd3h3l/usacah_dji_osmo_mobile_8_ubiquiti_enterprise_poe/ \n\n Thanks in advance.",
+          "author": "politik1337",
+          "link_flair_text": null,
+          "permalink": "/r/hardwareswap/comments/1voaxlg/usafl_h_paypal_w_dji_osmo_mobile_8/",
+          "created_utc": 1786722491
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "name": "t3_1voawdx",
+          "subreddit": "hardwareswap",
+          "title": "[USA-IN][H] 7500X3D & Mobo Combo, MSI A650GL PSU, and Scythe Mugen 6 CPU Cooler [W] Verified Paypal",
+          "selftext": "Hi Everyone, \n\n Selling some parts that were for a buddy's PC build, but due to the cost of certain components, he changed his mind. \n\n 7500X3D with Asrock B850M-C- Opened but never used. $275 shipped. MSI A650GL PSU BNIB- $65 shipped. Scythe Mugen 6 CPU cooler BNIB- $40 shipped. Everything- $350 shipped. Timestamps: https://imgur.com/a/7500x3d-combo-msi-a650gl-scythe-cooler-Ifh17Wj",
+          "author": "corstang17",
+          "link_flair_text": null,
+          "permalink": "/r/hardwareswap/comments/1voawdx/usainh_7500x3d_mobo_combo_msi_a650gl_psu_and/",
+          "created_utc": 1786722418
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "name": "t3_1voaw0g",
+          "subreddit": "hardwareswap",
+          "title": "[USA-PA] [H] Refurbed DualSense controllers, Edge module with TMR sticks [W] PayPal",
+          "selftext": "I've got two DualSense controllers that I just put new analog sticks in. You can check my post history if you want to read a bit about my stick-fixing journey or you can just check out pics of my work to see how lovely the solder joints inside these sticks are .\n\n I refurbed them both by taking them apart and washing the shells and buttons with soap and water. Soldered new sticks in and calibrated with the open-source dualshock tools site so they're centered and have a circularity around the recommended 8%. Then I played 10 minutes of Astrobot to make sure they felt good.\n\n The nova pink has KSilver JS13 Pro+ TMRs. Asking $70 shipped.\n\n The white controller has the Gulikit TMRs with 720 degrees of adjustable tension. Comes with swappable stick toppers and a little screwdriver for adjusting tension. Asking $80 shipped.\n\n Also have a single DualSense Edge module with a KSilver JS13 Pro+ stick for $40 shipped.\n\n Finally, I've got a set of OEM Steam Deck joystick modules. These aren't TMR, they're the original modules from my LCD Steam Deck. They work great and don't have drift, I just wanted to customize my Steam Deck with the Gulikit modules. Asking $30 shipped for both modules.\n\n Timestamped Pics",
+          "author": "JumbledThought",
+          "link_flair_text": null,
+          "permalink": "/r/hardwareswap/comments/1voaw0g/usapa_h_refurbed_dualsense_controllers_edge/",
+          "created_utc": 1786722394
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "name": "t3_1voavnd",
+          "subreddit": "homelab",
+          "title": "Buying a UPS for my mini-rack this weekend, and have a question.",
+          "selftext": "TL;DR - which unit in my lab do I attach the UPS to for software and monitoring? \n\n Hey everyone! I’m relatively new to the whole homelab scene, but I’ve been up and running almost a year now largely because of the kindness and knowledge of the people here, so thank you all. \n\n I’m finally ready to get a UPS for my rack. But I had a question that even the guys over at MicroCenter couldn’t answer definitively. \n\n I’m looking at the CyberPower Systems PFC Sinewave Series UPS (CP1500PFCLCD) and my question is: Do I have to hook up the USB control of the UPS to the rack that it’s going to serve as a UPS for, or can I hook it up to my regular gaming PC which is on its own separate circuit with its own UPS? I have four mini PCs running in the rack, all headless and various different Linux distros, so if I do need to hook it up to the rack, how to choose which mini PC to connect it to? Or can I just connect it to my main PC that’s a dual boot system, which I use every day. I’m sure I’ll have to do some set up work with power loss safe shutdown protocols on the rack, but even then, how would I know which PC to connect to as the “brain”? \n\n I appreciate any suggestions, thanks in advance to this wonderful community!",
+          "author": "good_morning_magpie",
+          "link_flair_text": null,
+          "permalink": "/r/homelab/comments/1voavnd/buying_a_ups_for_my_minirack_this_weekend_and/",
+          "created_utc": 1786722373
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "name": "t3_1voankz",
+          "subreddit": "homelab",
+          "title": "Is M1 Mini good for homelab?",
+          "selftext": "I have 3x HP elitedesk with proxmox already running ci cd mostly.\n\n I’m going to buy m1 mini 8gb for 250 euros tomorrow. is that a good deal for homelab?\n\n i was running ai models on my m4 16gb can also m1 8gb do the same?",
+          "author": "levapriv",
+          "link_flair_text": null,
+          "permalink": "/r/homelab/comments/1voankz/is_m1_mini_good_for_homelab/",
+          "created_utc": 1786721881
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "name": "t3_1voa0o6",
+          "subreddit": "homelabsales",
+          "title": "[FS] [US-WI] 32GB (4x8GB) DDR4 UDIMM lot - Crucial 3200, Micron 2400/2133, SK hynix 2133",
+          "selftext": "Timestamp: photo \n\n Four 8GB DDR4 desktop sticks (UDIMM, non-ECC): \n\n - Crucial CT8G4DFRA32A - 8GB DDR4-3200 CL22 (2022) \n\n - Micron MTA8ATF1G64AZ - 8GB 1Rx8 DDR4-2400 \n\n - Micron MTA16ATF1G64AZ - 8GB 2Rx8 DDR4-2133 \n\n - SK hynix HMA41GU6AFR8N - 8GB 2Rx8 DDR4-2133 \n\n All pulled from working machines during upgrades. Each stick individually verified - POSTs clean and full 8GB detected. Pins are clean and straight, stored in anti-static since pull. \n\n Mixed speeds will run at 2133 together, or split them across a few SFF/USFF nodes. Standard desktop UDIMMs - these are NOT ECC and won't work in servers that require RDIMMs. \n\n $70 shipped CONUS for the lot, PayPal G&S.",
+          "author": "jdbuffs1",
+          "link_flair_text": null,
+          "permalink": "/r/homelabsales/comments/1voa0o6/fs_uswi_32gb_4x8gb_ddr4_udimm_lot_crucial_3200/",
+          "created_utc": 1786720450
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "name": "t3_1vo9opz",
+          "subreddit": "homelabsales",
+          "title": "[FS][USA-VA] i9-7980XE, Crucial P3 Plus 4.0 500GB NVME, SK Hynix OEM 1TB NVME",
+          "selftext": "Selling some spare parts. All have been tested and are in excellent working condition. The CPU and Crucial NVME are Brand New In Box condition (opened to show product per the rules). All used drives are wiped of data during testing. Price includes shipping and reasonable/bundle offers are encouraged.\n\n Intel i9-7980XE CPU - Brand new in box. In perfect condition. No bent/damaged pins. - Asking $150 Crucial P3 Plus 4.0 500GB NVME - Brand new in box. Perfect condition. Warranty still active. - Asking $80 SK Hynix OEM 1TB NVME - Used but in excellent health/working condition. Excellent physical condition - Asking $120",
+          "author": "ShotUnderstanding675",
+          "link_flair_text": null,
+          "permalink": "/r/homelabsales/comments/1vo9opz/fsusava_i97980xe_crucial_p3_plus_40_500gb_nvme_sk/",
+          "created_utc": 1786719717
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "name": "t3_1vo9ii6",
+          "subreddit": "homelabsales",
+          "title": "[FS] 2x Western Digital Ultrastar 10TB Hard Drives",
+          "selftext": "Brand new, still sealed. \n\n Model Number: 0B42266\n\n Price: $300 each, shipped w/signature confirmation. \n\n If you have any questions, feel free to DM.",
+          "author": "washednick",
+          "link_flair_text": null,
+          "permalink": "/r/homelabsales/comments/1vo9ii6/fs_2x_western_digital_ultrastar_10tb_hard_drives/",
+          "created_utc": 1786719325
+        }
+      }
+    ]
+  }
+}

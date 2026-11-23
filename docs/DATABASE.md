@@ -3279,12 +3279,12 @@ Every Reddit post any worker fetched that was younger than `max_post_age_hours`,
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
-| `reddit_id` | `text` | ✓ |  | Reddit fullname from the Atom feed, e.g. t3_1abcde. |
+| `reddit_id` | `text` | ✓ |  | Reddit fullname, e.g. t3_1abcde. |
 | `subreddit` | `text` | ✓ |  | Lowercase subreddit name; matches subreddits.name by value (no foreign key). |
 | `title` | `text` | ✓ |  |  |
 | `selftext` | `text` | ✓ | `''` | Post body as plain text with the feed's footer stripped, capped at 8,000 chars. |
 | `author` | `text` |  |  | Reddit username without the /u/ prefix. |
-| `flair` | `text` |  |  | Always NULL: the Atom feed the tracker reads carries no flair. |
+| `flair` | `text` |  |  | The post's link flair from the webhook or the OAuth listing; NULL on posts read from the old Atom feed, which carried none. |
 | `url` | `text` | ✓ |  | Permalink to the post. |
 | `posted_at` | `timestamptz` | ✓ |  | Reddit's publish time; a post older than max_post_age_hours is rejected as too_old without an LLM call. |
 | `discovered_at` | `timestamptz` | ✓ | `now()` | When the first worker inserted it; the `since` filter for matches and stats. |

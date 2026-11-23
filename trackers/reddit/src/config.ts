@@ -18,7 +18,7 @@ export interface Config {
   readonly role: Role;
   readonly workerId: string;
   readonly redditUserAgent: string;
-  /** App-only OAuth credentials; null falls back to the (withdrawn) Atom feed. */
+  /** App-only OAuth credentials; null means this process cannot read Reddit directly. */
   readonly redditAuth: RedditAuth | null;
   /** HMAC secret for redditapis.com monitor webhooks; '' turns the route off. */
   readonly redditapisWebhookSecret: string;

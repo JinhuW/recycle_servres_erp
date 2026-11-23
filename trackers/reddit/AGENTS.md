@@ -1,9 +1,10 @@
 # Reddit tracker — `trackers/reddit/`
 
-Distributed Reddit for-sale monitor: a fleet of workers polls subreddits through
-the Atom feed, an OpenRouter model judges each post, and buy-worthy listings go
-to Telegram once each. Read `README.md` for what it does and how to run it; this
-file is only about traps and conventions. The root [AGENTS.md](../../AGENTS.md)
+Reddit for-sale monitor: new posts arrive from the redditapis.com webhook (or,
+with OAuth credentials, from the workers' own poll), an OpenRouter model judges
+each post, and buy-worthy listings go to Telegram once each. Read `README.md`
+for what it does and how to run it; this file is only about traps and
+conventions. The root [AGENTS.md](../../AGENTS.md)
 has the repo map and workflow.
 
 ## Where it sits in the monorepo

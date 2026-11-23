@@ -13,8 +13,8 @@ import {holdLease, releaseLease} from '../claims.ts';
 import type {Sql} from '../db.ts';
 import type {Logger} from '../logger.ts';
 import type {RedditPacer} from '../pacing.ts';
-import {fetchComments, type RedditComment} from '../reddit.ts';
-import type {RedditAuth} from '../redditOAuth.ts';
+import type {RedditComment} from '../reddit.ts';
+import {fetchComments, type RedditAuth} from '../redditOAuth.ts';
 
 export const TRACER_LEASE = 'comment_tracer';
 const LEASE_TTL_SECONDS = 600;
@@ -52,8 +52,8 @@ export interface TraceDeps {
   sql: Sql;
   workerId: string;
   userAgent: string;
-  /** OAuth credentials; absent means the anonymous comment feed. */
-  auth?: RedditAuth | null;
+  /** OAuth credentials: the only way left to read a post's comments. */
+  auth: RedditAuth;
   pacer: RedditPacer;
   logger: Logger;
   now?: () => number;
@@ -87,7 +87,7 @@ export class Tracer {
     if (!post) return false;
 
     await pacer.acquire();
-    const result = await fetchComments(post.url, this.deps.userAgent, this.deps.auth ?? null);
+    const result = await fetchComments(post.url, this.deps.userAgent, this.deps.auth);
 
     switch (result.kind) {
       case 'rate_limited':
@@ -97,7 +97,7 @@ export class Tracer {
         pacer.recordBlocked(result.kind === 'rate_limited' ? result.retryAfterSeconds : undefined);
         this.standDownUntil = now + STAND_DOWN_MS;
         await releaseLease(sql, TRACER_LEASE, workerId);
-        logger.info('reddit refused the comment feed; leaving tracing to another worker', {
+        logger.info('reddit refused the comments read; leaving tracing to another worker', {
           redditId: post.reddit_id,
           result: result.kind,
         });
@@ -108,7 +108,7 @@ export class Tracer {
         // Removed posts and one-off failures alike are not retried: the queue
         // is newest first, and a post that always fails would hold it up.
         await sql`UPDATE posts SET comments_checked_at = NOW() WHERE reddit_id = ${post.reddit_id}`;
-        logger.info('comment feed unreadable', {
+        logger.info('comments unreadable', {
           redditId: post.reddit_id,
           reason: result.kind === 'gone' ? 'gone' : result.message,
         });
