@@ -18,6 +18,28 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`rs-poster` and `rs-messenger` work through an authenticated proxy.**
+  `PosterSession` handed Chromium the whole `http://user:pass@host:port` URL
+  (from `FB_PROXY` or the session's sidecar) as `server`. Chromium never
+  answers that proxy's 407, so runs ended in a navigation timeout that read
+  as "proxy down" while `rs-session check` on the same file passed. It now
+  splits the credentials out the way `rs-session` does; the splitter moved
+  to `rs_poster/proxy.py` so both share it.
+- **`scripts/release.sh patch --dry-run` is a dry run.** `--dry-run` was read
+  only as the first argument, so putting it after the bump cut a real
+  release, commit and tag. It now counts in any position, and an unknown
+  option or a second bump argument exits 2 before anything runs
+  (`scripts/tests/test-release-args.sh`).
+- **`scripts/deploy.sh` no longer calls a fleet verified when it checked no
+  worker.** With no `deploy/docker-compose.homelab*.yml` left and the fleet
+  under the ERP's fleet agent, verify compared zero workers and still printed
+  "verified: every worker and the coordinator run this tree", and the
+  Telegram notice said "0 workers - verified". Verify now counts the workers
+  it compared and, when there are none, says it checked the coordinator
+  alone. The missing compose files no longer print a `sed` error either.
+
 ## [0.18.0] - 2026-11-07
 
 ### Added

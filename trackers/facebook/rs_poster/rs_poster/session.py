@@ -25,6 +25,7 @@ from .cookies import (
     read_session_meta,
     write_session_meta,
 )
+from .proxy import proxy_settings
 
 logger = logging.getLogger(__name__)
 
@@ -182,12 +183,8 @@ class PosterSession:
     def __exit__(self: "PosterSession", *exc_info: object) -> None:
         self.close()
 
-    def start(self: "PosterSession") -> Page:
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=self.headless,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
+    def context_options(self: "PosterSession") -> dict:
+        """The keyword arguments for the browser context this session opens."""
         has_state = os.path.exists(self.storage_state_path)
         # Present the same browser identity and network the session was created
         # with; Facebook treats a session that moves between them as suspect.
@@ -195,13 +192,21 @@ class PosterSession:
         device = {"viewport": {"width": 1440, "height": 900}}
         device.update(device_context_options(self.storage_state_path))
         device.setdefault("user_agent", meta.get("user_agent"))
-        self._context = self._browser.new_context(
-            storage_state=self.storage_state_path if has_state else None,
-            proxy={"server": self.proxy or meta.get("proxy")}
-            if (self.proxy or meta.get("proxy"))
-            else None,
+        return {
+            "storage_state": self.storage_state_path if has_state else None,
+            # Split, not the raw URL: Chromium never answers the 407 of an
+            # authenticated proxy whose credentials sit in `server`.
+            "proxy": proxy_settings(self.proxy or meta.get("proxy")),
             **device,
+        }
+
+    def start(self: "PosterSession") -> Page:
+        self._playwright = sync_playwright().start()
+        self._browser = self._playwright.chromium.launch(
+            headless=self.headless,
+            args=["--disable-blink-features=AutomationControlled"],
         )
+        self._context = self._browser.new_context(**self.context_options())
         self.page = self._context.new_page()
         # Accept dialogs rather than Playwright's default dismissal: the one
         # dialog this flow can raise is beforeunload on an abandoned create

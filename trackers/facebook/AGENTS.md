@@ -151,7 +151,10 @@ mode* has the detail, and the written contract is
   worker, and `deploy` also runs `rsc fleet release <version>`, which
   recreates every fleet worker. **Each restarted worker is a Facebook login**
   (root AGENTS.md → *First rule*), so ask the owner before any mode but
-  `check`. `--redeploy` re-runs a deploy that failed partway. Details are in
+  `check`. `--redeploy` re-runs a deploy that failed partway. The script
+  finds only compose and `rs-fleetd` workers, not the ones the ERP's
+  `apps/fleet-agent/` runs, so when it finds none its verify says it checked
+  the coordinator alone; that is not a verified fleet. Details are in
   README → *Deploying to the homelab worker* and `deploy/README.md`.
 - **Fleet images are pushed by hand** with
   `scripts/push-fleet-images.sh [--no-push] [--only worker|agent]`. The
@@ -195,7 +198,7 @@ commands are in README → *Tests*:
 AIMM_PYTHON=$PWD/.venv-aimm/bin/python .venv-coordinator/bin/python -m pytest \
     rs_coordinator/tests rs_poster/tests rs_messenger/tests
 sh scripts/tests/test-version-gate.sh && sh scripts/tests/test-check-secrets.sh \
-    && sh scripts/tests/test-deploy-filter.sh
+    && sh scripts/tests/test-deploy-filter.sh && sh scripts/tests/test-release-args.sh
 ```
 
 Without `AIMM_PYTHON`, the generated-config tests skip silently. Running
