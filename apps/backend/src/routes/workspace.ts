@@ -59,9 +59,11 @@ workspace.patch('/', async (c) => {
     }
   }
   // A model whose provider has no key would fail every call it serves; say so
-  // now rather than at the next scan.
-  const refs = Object.values((body.ai_models ?? {}) as Record<string, unknown>)
-    .filter((r): r is string => typeof r === 'string');
+  // now rather than at the next scan, or at a PO review that runs without AI.
+  const refs = [
+    ...Object.values((body.ai_models ?? {}) as Record<string, unknown>),
+    (body.po_ai_review as { model?: unknown } | undefined)?.model,
+  ].filter((r): r is string => typeof r === 'string' && r !== '');
   if (refs.length > 0) {
     const keys = await aiKeys(c.env);
     for (const ref of refs) {

@@ -3084,7 +3084,7 @@ A card's timeline, written in the same transaction as the change. Comments are `
 
 Workspace-wide configuration and plumbing: key/value settings (workspace_settings), the counters behind human-readable ids such as PO-1289 (id_counters), and the migration runner's ledger (schema_migrations).
 
-Tables: [`workspace_settings`](#erp-workspace-settings), [`ai_provider_keys`](#erp-ai-provider-keys), [`id_counters`](#erp-id-counters), [`schema_migrations`](#erp-schema-migrations), [`perf_rollups`](#erp-perf-rollups)
+Tables: [`workspace_settings`](#erp-workspace-settings), [`ai_provider_keys`](#erp-ai-provider-keys), [`ai_provider_key_removals`](#erp-ai-provider-key-removals), [`id_counters`](#erp-id-counters), [`schema_migrations`](#erp-schema-migrations), [`perf_rollups`](#erp-perf-rollups)
 
 <a id="erp-workspace-settings"></a>
 
@@ -3120,7 +3120,22 @@ AI provider API keys pasted on Settings ▸ AI models (migration 0252). A row wi
 - **Primary key:** `provider`
 - **Indexes:** `ai_provider_keys_updated_by_idx` (`updated_by`)
 
-Written only by `PUT`/`DELETE /api/ai/keys/:provider`, which test a key against the provider before storing it and push it to the tracker. No route returns `sealed`. A rotated FB_POOL_KEY leaves the rows unreadable; they are then skipped and env keys apply until the keys are pasted again.
+Written only by `PUT`/`DELETE /api/ai/keys/:provider` and `POST /api/ai/keys/:provider/sync`. A save tests the key against the provider, writes the row, then pushes it to the tracker and records whether that landed; the sync route pushes it again. No route returns `sealed`. A rotated FB_POOL_KEY leaves the rows unreadable; they are then skipped and env keys apply until the keys are pasted again. The nightly prod→dev copy empties the table (`deploy/railway-sync/scrub.sql`).
+
+<a id="erp-ai-provider-key-removals"></a>
+
+#### `ai_provider_key_removals`
+
+A key removed on Settings ▸ AI models whose removal the Reddit tracker hasn't confirmed (migration 0253). The key's own row is already gone, so this is what keeps the page showing the provider as unsynced, with a retry, until the tracker drops its copy.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `provider` | `text` | ✓ |  | openrouter, anthropic or openai. |
+| `requested_at` | `timestamptz` | ✓ | `now()` | When the removal was asked for. |
+
+- **Primary key:** `provider`
+
+Written by `DELETE /api/ai/keys/:provider` when the push fails, cleared by a successful `POST /api/ai/keys/:provider/sync` or a new save for that provider.
 
 <a id="erp-id-counters"></a>
 
