@@ -164,7 +164,9 @@ A purchaser can drag only their own Draft.
   - **A partial transfer keeps its `#`.** The units moved to another warehouse
     become a second row with the source's `#`, so the PO page shows `#3`
     twice, each with its warehouse, right after each other. Discarding the
-    transfer folds it back and leaves no gap. The second row keeps the
+    transfer folds it back and leaves no gap, unless a sell order names the
+    moved units; then they return to their warehouse as a row of their own
+    (v1.473.1). The second row keeps the
     source's Chip # too (v1.237.1).
   - **"N products" counts `#`s**, so the PO list, the page head and the
     category groups count a transferred product once.
@@ -4237,7 +4239,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     searches, six minutes before any finish), done in the last 12 hours and
     due in the next 12. Only searches count; a slug check or a probe is not a
     city-item. **The table** lists the range (last 24 h, last 7 days, today
-    UTC) plus everything waiting, narrowed by a state segment (All, Running,
+    Eastern, v1.473.1) plus everything waiting, narrowed by a state segment (All, Running,
     Due, Done, Cancelled, Expired, each with its count under the other
     filters since v1.373.2), an item select and one search box over
     city, worker and account; a row gives the city, item, state (Running,
@@ -4288,7 +4290,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     city's latest slug check.
   - **Analysis** (`/#/fleet/analysis`, v1.344.0): the search-to-alert
     pipeline that used to sit on the Fleet tab, with a range segment (Today,
-    7 days, 14 days) that sums the ERP fleet's finished searches per UTC day
+    7 days, 14 days) that sums the ERP fleet's finished searches per Eastern day
     (`GET /api/fleet/stats/funnel`, since v1.377.1, RS-446; before, the
     coordinator's counters, which the ERP fleet's workers do not report to,
     so every stage read 0): searches, result cards, the title gate, listings
