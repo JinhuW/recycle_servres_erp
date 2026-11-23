@@ -52,4 +52,4 @@ at volume:
 
 - The cap is a constant, not a setting, until the owner wants to tune it.
 - Numbered RS-602: RS-600 and RS-601 were taken by tracker fixes merged while this was in flight.
-- RSS: from the office IP every feed answers 404 (2026-11-20 and 11-22), while the fleet still read most subreddits on 11-20/21. Recorded in `trackers/reddit/docs/debug-notes/reddit-rss-retired-2026-11-13.md`.
+- RSS: Reddit withdrew logged-out feeds around 2026-11-16, and the tracker moved to the redditapis.com webhook (RS-600). See `trackers/reddit/docs/debug-notes/reddit-new-rss-404.md`.
