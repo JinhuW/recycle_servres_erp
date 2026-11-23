@@ -11,6 +11,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "db:migrate": "tsx scripts/migrate.ts",
+    "redditapis": "tsx scripts/redditapis-monitor.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -25,6 +26,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.6.2",
+    "railway": "3.17.0",
     "typescript": "^5.7.2",
     "vitest": "^4.1.5"
   }

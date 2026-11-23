@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-16:** ERP migration `0250`, Reddit tracker migration `0007`,
+**As of 2026-11-22:** ERP migration `0251`, Reddit tracker migration `0009`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -40,7 +40,7 @@ refresh a section.
 | Database | Owner | Engine | Where it runs | Connection | Schema source | Tables |
 | --- | --- | --- | --- | --- | --- | --- |
 | **ERP** | `apps/backend` | Postgres 18 | Railway project `recycle-erp-experiment`, with one Postgres per environment (production, dev) | `DATABASE_URL` | `apps/backend/migrations/*.sql`, applied by `scripts/migrate.mjs` | 82 |
-| **Reddit tracker** | `trackers/reddit` (`api`, `worker` and the OCI worker VMs) | Postgres | Railway project `reddits-tracker`, with public networking on so the OCI VMs can reach it | `DATABASE_URL` | `trackers/reddit/migrations/*.sql`, applied by `scripts/migrate.ts` | 18 + 1 view |
+| **Reddit tracker** | `trackers/reddit` (`api`, `worker` and the OCI worker VMs) | Postgres | Railway project `reddits-tracker`, with public networking on so the OCI VMs can reach it | `DATABASE_URL` | `trackers/reddit/migrations/*.sql`, applied by `scripts/migrate.ts` | 19 + 1 view |
 | **Facebook coordinator** | `trackers/facebook/rs_coordinator` | Postgres 16 in prod; SQLite locally and in tests | Railway project `facebook-tracker` (Terraform in `trackers/facebook/infra/`), reached by the coordinator on the homelab VM through Railway's TCP proxy | `RS_DATABASE_URL`, else `DATABASE_URL`; with neither set, SQLite at `RS_COORDINATOR_DB` | `SCHEMA` plus the `*_EXTRA_COLUMNS` lists in `rs_coordinator/db.py`, applied at boot | 32 |
 
 **The three share no database and no rows.** The ERP reaches each tracker only
@@ -2946,15 +2946,16 @@ One seller, with their deal record from the latest harvest and, while claimed, w
 | `claimed_name` | `text` |  |  | Holder's name at claim time. |
 | `claimed_at` | `timestamptz` |  |  | A claim with no DM 48 h on is stale. |
 | `stage` | `text` | ✓ | `'claimed'` | claimed, dm, replied, talks (negotiating) or won. |
-| `closed` | `text` | ✓ | `''` | `''` open, `nostock` (comes back as a follow-up in 30 days) or `lost`. |
+| `closed` | `text` | ✓ | `''` | `''` open, `nostock` (comes back as a follow-up in 30 days), `lost` or `optout` (asked not to be contacted). |
 | `follow_up` | `date` |  |  | When the holder should get back to them; a DM sets it 3 days out, a reply clears it. |
 | `dm_at` | `timestamptz` |  |  | Last DM the holder marked sent. |
+| `opted_out_at` | `timestamptz` |  |  | The seller asked not to be contacted (0251). Survives release and re-import; while set, only a manager may claim, and a manager's reopen clears it. |
 | `imported_at` | `timestamptz` | ✓ | `now()` | Last import that touched the row. |
 | `updated_at` | `timestamptz` | ✓ | `now()` |  |
 
 - **Primary key:** `username`
 - **References:** `claimed_by` → `users.id` (on delete set null)
-- **Checks:** `username = lower(username)` and the name pattern; `stage IN ('claimed','dm','replied','talks','won')`; `closed IN ('','nostock','lost')`; `sales >= 0`, `buys >= 0`
+- **Checks:** `username = lower(username)` and the name pattern; `stage IN ('claimed','dm','replied','talks','won')`; `closed IN ('','nostock','lost','optout')`; `sales >= 0`, `buys >= 0`
 - **Indexes:** `reddit_leads_claimed_by_idx` (claimed_by), `reddit_leads_sales_idx` (sales DESC)
 
 A release or a new claim resets stage, closed, follow-up and dm_at; the
@@ -3006,13 +3007,13 @@ Who did what to which seller, including the seller replies purchasers log. Appen
 | `username` | `text` |  |  | The seller; no FK, so history survives an import that drops them. NULL for an import. |
 | `actor_id` | `uuid` |  |  | → users. |
 | `actor_name` | `text` | ✓ |  | Name snapshot. |
-| `kind` | `text` | ✓ |  | imported, claimed, released, dm, reply, stage, follow_up, closed, reopened. |
+| `kind` | `text` | ✓ |  | imported, claimed, released, dm, reply, stage, follow_up, closed, reopened, opt_in (a manager lifted a do-not-contact). |
 | `detail` | `text` | ✓ | `''` | The DM template, the reply text, the new stage, the date or the closing reason. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
 
 - **Primary key:** `id`
 - **References:** `actor_id` → `users.id` (on delete set null)
-- **Indexes:** `reddit_lead_events_username_idx` (username, created_at), `reddit_lead_events_actor_id_idx` (actor_id)
+- **Indexes:** `reddit_lead_events_username_idx` (username, created_at), `reddit_lead_events_actor_id_idx` (actor_id), `reddit_lead_events_actor_kind_idx` (actor_id, kind, created_at), for the daily first-DM count
 - **Triggers:** `reddit_lead_events_no_update` and `reddit_lead_events_no_delete` raise (`reddit_lead_events_lock()`), as `fb_pool_events` does.
 
 ### Actions
@@ -3207,7 +3208,7 @@ Runtime business config as key → JSON value, one row per key, seeded by migrat
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
-| `key` | `text` | ✓ |  | eval_prompt (live system prompt), llm_model (OpenRouter model id), telegram_chat_ids (buyer chats), max_post_age_hours (older posts are rejected unjudged; 1–720), telegram_dev_chat_ids (review chats), candidate_eval_prompt ('' = no trial), candidate_llm_model ('' = use llm_model). |
+| `key` | `text` | ✓ |  | eval_prompt (live system prompt), llm_model (OpenRouter model id), telegram_chat_ids (buyer chats), max_post_age_hours (older posts are rejected unjudged; 1–720), telegram_dev_chat_ids (review chats), candidate_eval_prompt ('' = no trial), candidate_llm_model ('' = use llm_model), poll_source (`reddit` = workers poll Reddit, `webhook` = the poll loop idles and posts arrive from the redditapis.com monitor; migration 0009). |
 | `value` | `jsonb` | ✓ |  | JSON string, number or array of chat ids, depending on the key. |
 | `updated_at` | `timestamptz` | ✓ | `now()` |  |
 
@@ -3566,7 +3567,7 @@ The people in each buyer chat, as of the reads loop's last pass, without bots or
 
 Fleet visibility, the ops watch's state and the migration ledger. Nothing in the pipeline reads any of them. The api's watch (`src/loops/watch.ts`, migration 0005) reads `workers` and `worker_errors` and sends down workers, failing loops and every warn/error line to the ops Telegram group through the alert relay.
 
-Tables: [`workers`](#reddit-workers), [`worker_errors`](#reddit-worker-errors), [`watch_alerts`](#reddit-watch-alerts), [`loop_leases`](#reddit-loop-leases), [`schema_migrations`](#reddit-schema-migrations)
+Tables: [`workers`](#reddit-workers), [`worker_errors`](#reddit-worker-errors), [`watch_alerts`](#reddit-watch-alerts), [`loop_leases`](#reddit-loop-leases), [`webhook_deliveries`](#reddit-webhook-deliveries), [`schema_migrations`](#reddit-schema-migrations)
 
 <a id="reddit-workers"></a>
 
@@ -3617,7 +3618,7 @@ Alerts the watch has raised and not yet resolved, so a restarted api neither pag
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
-| `key` | `text` | ✓ |  | `down:<worker_id>` or `failing:<worker_id>:<loop>`. |
+| `key` | `text` | ✓ |  | `down:<worker_id>`, `failing:<worker_id>:<loop>`, or `webhook:quiet` (worker_id `fleet`) when `poll_source` is `webhook` and no delivery has arrived for 90 minutes. |
 | `worker_id` | `text` | ✓ |  | The worker it is about. |
 | `raised_at` | `timestamptz` | ✓ | `now()` |  |
 
@@ -3636,6 +3637,23 @@ Jobs exactly one process in the fleet runs at a time (migration 0006). Today the
 | `expires_at` | `timestamptz` | ✓ |  | When it lapses unless renewed (10 minutes after the last renewal). |
 
 - **Primary key:** `name`
+
+<a id="reddit-webhook-deliveries"></a>
+
+#### `webhook_deliveries`
+
+One row per accepted delivery from the redditapis.com monitor (migration 0009). Reddit withdrew logged-out RSS in November 2026, so with `poll_source = webhook` the vendor discovers posts and POSTs them to the api's `/webhooks/redditapis`. The row is written in the same transaction as the delivery's posts, so a failed insert rolls both back and the vendor's retry is not mistaken for a duplicate. The ops watch reads the newest `received_at` to notice the webhook going quiet, and deletes rows older than 30 days, which is longer than the vendor retries or redrives a delivery.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `delivery_id` | `text` | ✓ |  | The vendor's idempotency key (`x-redditapis-delivery-id`); deliveries are at-least-once. |
+| `monitor_id` | `text` |  |  | The vendor monitor that matched. |
+| `items` | `integer` | ✓ |  | Items in the envelope. |
+| `inserted` | `integer` | ✓ |  | Posts actually inserted: watched subreddits only, younger than max_post_age_hours, not already known. |
+| `received_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `delivery_id`
+- **Index:** `webhook_deliveries_received_at` on `received_at`
 
 <a id="reddit-schema-migrations"></a>
 

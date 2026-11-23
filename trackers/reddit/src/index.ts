@@ -79,6 +79,8 @@ async function runApi(): Promise<void> {
     apiToken: config.apiToken,
     workerId: config.workerId,
     startedAt,
+    webhookSecret: config.redditapisWebhookSecret,
+    logger,
   });
 
   const server = serve({fetch: app.fetch, port: config.apiPort});
@@ -248,6 +250,7 @@ async function runWorker(): Promise<void> {
         sql,
         workerId: config.workerId,
         userAgent: config.redditUserAgent,
+        auth: config.redditAuth,
         pacer,
         settings,
         logger: logger.child('poll'),
@@ -277,13 +280,21 @@ async function runWorker(): Promise<void> {
     ),
     startHeartbeat('worker'),
   ];
-  if (config.commentTracer) {
+  // The tracer needs a working comment source. Reddit's anonymous comment feed
+  // 404s like the listing feed (docs/debug-notes/reddit-new-rss-404.md), and the
+  // tracer reads a 404 as "post removed": it would stamp every post traced with
+  // NULL counts and lose its PM data for good. So it runs only with OAuth.
+  if (config.commentTracer && !config.redditAuth) {
+    logger.info('PM tracer off: no REDDIT_CLIENT_ID, and anonymous comment feeds are gone');
+  }
+  if (config.commentTracer && config.redditAuth) {
     // Idle mostly means another worker holds the lease; checking every minute
     // is how this one notices the holder is gone.
     const tracer = new Tracer({
       sql,
       workerId: config.workerId,
       userAgent: config.redditUserAgent,
+      auth: config.redditAuth,
       pacer,
       logger: logger.child('trace'),
     });

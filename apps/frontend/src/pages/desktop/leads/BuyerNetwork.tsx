@@ -4,7 +4,7 @@ import { ListSkeleton } from '../../../components/Skeleton';
 import { handleFetchError } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
 import { leadsApi, type RedditBuyer, type RedditBuyerTree, type RedditLead } from '../../../lib/redditLeads';
-import { DealRecord, Holder, StageChip, fmtDay } from './shared';
+import { DealRecord, Holder, StageChip, fmtDay, inPool } from './shared';
 
 type Props = {
   buyers: RedditBuyer[] | null;
@@ -45,11 +45,11 @@ export function BuyerNetwork({ buyers, buyer, onBuyer, leads, manager, onOpen, o
     return <div className="card rl-card"><div className="rl-empty"><p>{t('rlNoBuyers')}</p></div></div>;
   }
   const lead = (u: string) => leads.get(u);
-  const free = tree ? tree.sellers.filter(s => lead(s.username) && !lead(s.username)!.claimed)
+  const free = tree ? tree.sellers.filter(s => lead(s.username) && inPool(lead(s.username)!))
     .sort((a, b) => lead(b.username)!.sales - lead(a.username)!.sales) : [];
   // Biggest sellers first: they are the ones worth a DM.
   const kids = tree ? tree.sellers
-    .filter(s => !onlyFree || (lead(s.username) && !lead(s.username)!.claimed))
+    .filter(s => !onlyFree || (lead(s.username) && inPool(lead(s.username)!)))
     .sort((a, b) => (lead(b.username)?.sales ?? -1) - (lead(a.username)?.sales ?? -1)) : [];
   const toggle = (u: string) => setExpanded(prev => { const n = new Set(prev); if (n.has(u)) n.delete(u); else n.add(u); return n; });
 
@@ -101,7 +101,7 @@ export function BuyerNetwork({ buyers, buyer, onBuyer, leads, manager, onOpen, o
                       <div className="rl-hide-s">{l ? <DealRecord sales={l.sales} buys={l.buys} /> : <span className="rl-muted">{t('rlNoRecord')}</span>}</div>
                       <div className="rl-hide-s rl-row">{l && <Holder lead={l} manager={manager} />}{l && l.claimed && (l.mine || manager) && <StageChip lead={l} />}</div>
                       <div className="rl-end">
-                        {l && !l.claimed && <button className="btn sm" disabled={busy} onClick={() => onClaim([s.username])}>{t('rlClaim')}</button>}
+                        {l && inPool(l) && <button className="btn sm" disabled={busy} onClick={() => onClaim([s.username])}>{t('rlClaim')}</button>}
                         {l && l.mine && <button className="btn sm" onClick={() => onOpen(s.username)}>{t('rlOpen')}</button>}
                       </div>
                     </div>

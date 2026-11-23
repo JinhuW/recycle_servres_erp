@@ -138,8 +138,11 @@ backward-compatible until the ERP release reaches `main`.
   ([debug note](docs/debug-notes/2026-10-16-auto-delete-head-branch-deleted-dev.md)).
 - **Standing authorization.** The owner authorizes agents to push completed
   work to `dev` through the feature-PR and squash-merge workflow without
-  asking for confirmation again. This authorization does not include
-  releasing `dev` to `main`.
+  asking for confirmation again. Since 2026-11-22 it also covers releasing
+  `dev` to `main`: once the release PR's checks are green, merge it with a
+  merge commit and tell the owner after. Anything else outward-facing still
+  needs a confirmation first: worker restarts or re-logins, prod data
+  changes, force pushes.
 - **Staging.** Stage by explicit path. A checkout routinely holds untracked
   operational files that must stay out of commits, such as `rollback/` SQL
   with prod ids, `.env` files and tracker tokens.

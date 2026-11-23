@@ -33,8 +33,12 @@ has the repo map and workflow.
 
 - **Anything about fetching posts** →
   [docs/debug-notes/reddit-anonymous-json-blocked.md](docs/debug-notes/reddit-anonymous-json-blocked.md).
-  The JSON API is dead for anonymous clients and the Atom feed is what works.
+  The JSON API is dead for anonymous clients, and Reddit withdrew the Atom
+  feed in November 2026: every feed URL 404s
+  ([reddit-new-rss-404.md](docs/debug-notes/reddit-new-rss-404.md)).
   The real rate limit is about 1 request per 40 s per IP, not 10/min.
+  Posts now come from the redditapis.com webhook (`poll_source`, README
+  *Post source*).
 - **The Dockerfile CMD or shutdown path** →
   [docs/debug-notes/signals-must-reach-node.md](docs/debug-notes/signals-must-reach-node.md).
   node must be PID 1 or SIGTERM never reaches the shutdown handler.
@@ -117,14 +121,20 @@ Breaking any of these breaks the fleet. The tests that cover them are
   `127.0.0.1:5433`). The claim logic depends on `FOR UPDATE SKIP LOCKED`, which
   fakes do not reproduce.
 - There is **no CLI** by design. The HTTP API is the only admin surface, so a UI
-  can do everything an operator can.
+  can do everything an operator can. `scripts/redditapis-monitor.ts` is not an
+  exception: it configures the vendor's monitor, not the tracker.
 - `ALERT_TRANSPORT=console` prints alerts to stdout instead of Telegram, which
   is useful locally and makes the bot token optional.
 
 ## Deploying
 
 - **Railway project `reddits-tracker`** has services `api` (`ROLE=api`),
-  `worker` and `Postgres`, and both app services share `railway.toml`. They are
+  `worker` and `Postgres`, and `.railway/railway.ts` sets both app services to
+  the Dockerfile builder (Railway stopped reading `railway.toml` on
+  2026-12-01). Change it with `railway config plan`, then `railway config
+  apply`. It is a whole-project file: a resource missing from it is deleted on
+  apply, so keep Postgres and its volumes listed. Variables are not managed
+  by it. The app services are
   deployed by CLI upload from this folder, not from GitHub, so merging code
   does not deploy it.
 - **Run `railway status` first, every time.** It must show project
@@ -134,13 +144,23 @@ Breaking any of these breaks the fleet. The tests that cover them are
   code into the ERP backend. If this checkout isn't linked, run
   `railway link` (project `reddits-tracker`, env `production`). Then run
   `railway up --service <api|worker> --detach`.
-- **OCI worker fleet** (`infra/terraform/`, see `infra/README.md`):
+- **OCI worker fleet: stopped on 2026-11-18 (RS-603).** The VMs existed to
+  poll Reddit from many IPs. Posts now arrive by the redditapis.com webhook,
+  so their tracker containers were stopped and removed, and their fleet rows
+  deleted. The Railway `worker` alone runs evaluate and notify. The VMs still
+  exist (terraform state unchanged). Don't redeploy them unless polling comes
+  back, for example with OAuth across many IPs. To bring them back:
   1. Build the multi-arch image `ghcr.io/jinhuw/reddits_tracker:<sha>` with
      `docker buildx … --push .` from this folder.
   2. Run `scripts/deploy-workers.sh <sha>`.
 
   `scripts/secrets.env` and `infra/terraform/terraform.tfvars` are gitignored
   local files.
+- **Deploy only what is merged, or merge right after.** Railway runs the folder
+  uploaded last, so a deploy from `dev` removes anything that was live from an
+  unmerged branch. That took the webhook route down for two days
+  ([debug note](docs/debug-notes/deploy-from-dev-removed-unmerged-webhook.md)).
+  After a deploy, `POST /webhooks/redditapis` must answer 401, not 404.
 - After any deploy, walk through "Verifying a deployment" in `README.md`.
 
 ## Local gotchas

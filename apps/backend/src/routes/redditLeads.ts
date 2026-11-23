@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import {
+  REDDIT_LEAD_DAILY_FIRST_DMS,
   REDDIT_LEAD_DM_FOLLOW_UP_DAYS,
   REDDIT_LEAD_IMPORT_MAX,
   REDDIT_LEAD_NOSTOCK_DAYS,
@@ -55,6 +56,7 @@ type Row = {
   closed: RedditLeadClosing | '';
   follow_up: string | null;
   dm_at: Date | null;
+  opted_out_at: Date | null;
   reply_text: string | null;
   reply_at: Date | null;
   reply_by: string | null;
@@ -69,7 +71,7 @@ const SELECT = (sql: Tx) => sql`
   SELECT l.username, l.display_name, l.sales, l.buys, l.record_source, l.subreddits,
          l.last_deal::text AS last_deal, l.items_sold, l.latest_post_title, l.latest_post_url,
          l.tracker_alerts, l.claimed_by, l.claimed_name, l.claimed_at, l.stage, l.closed,
-         l.follow_up::text AS follow_up, l.dm_at,
+         l.follow_up::text AS follow_up, l.dm_at, l.opted_out_at,
          r.detail AS reply_text, r.created_at AS reply_at, r.actor_name AS reply_by
   FROM reddit_leads l
   LEFT JOIN LATERAL (
@@ -107,6 +109,7 @@ function toLead(r: Row, user: User): RedditLead {
     followUp: open ? r.follow_up : null,
     dmAt: open ? ms(r.dm_at) : null,
     lastReply: open && r.reply_text !== null ? { text: r.reply_text, at: r.reply_at!.getTime(), by: r.reply_by! } : null,
+    optedOut: r.opted_out_at !== null,
   };
 }
 
@@ -123,10 +126,34 @@ async function writeEvent(tx: Tx, user: User, username: string | null, kind: Red
 
 const leads = new Hono<{ Bindings: Env; Variables: Vars }>().use('*', authMiddleware);
 
+/**
+ * The caller's first DMs since local midnight: `dm` events on sellers they had
+ * not messaged before. Counted from the ledger, so a release and re-claim
+ * can't reset it.
+ */
+async function firstDmsToday(sql: Tx, userId: string): Promise<number> {
+  const [{ n }] = await sql<{ n: number }[]>`
+    SELECT COUNT(*)::int AS n FROM reddit_lead_events e
+    WHERE e.actor_id = ${userId} AND e.kind = 'dm'
+      AND e.created_at >= (date_trunc('day', NOW() AT TIME ZONE ${REPORTING_TZ}) AT TIME ZONE ${REPORTING_TZ})
+      AND NOT EXISTS (
+        SELECT 1 FROM reddit_lead_events p
+        WHERE p.username = e.username AND p.actor_id = e.actor_id AND p.kind = 'dm' AND p.created_at < e.created_at)`;
+  return n;
+}
+
 leads.get('/', async (c) => {
   const sql = getDb(c.env);
-  const rows = await sql<Row[]>`${SELECT(sql)} ORDER BY l.sales DESC, l.username`;
-  return c.json({ leads: rows.map((r) => toLead(r, c.var.user)), today: today() });
+  const [rows, sent] = await Promise.all([
+    sql<Row[]>`${SELECT(sql)} ORDER BY l.sales DESC, l.username`,
+    firstDmsToday(sql, c.var.user.id),
+  ]);
+  return c.json({
+    leads: rows.map((r) => toLead(r, c.var.user)),
+    today: today(),
+    firstDmsToday: sent,
+    firstDmCap: REDDIT_LEAD_DAILY_FIRST_DMS,
+  });
 });
 
 // The sidebar badge: the caller's leads waiting on them, a first DM or a
@@ -199,10 +226,12 @@ leads.post('/:username/claim', async (c) => {
   const sql = getDb(c.env);
   const user = c.var.user;
   const verdict = await sql.begin(async (tx) => {
-    const [row] = await tx<{ claimed_by: string | null }[]>`
-      SELECT claimed_by FROM reddit_leads WHERE username = ${key} FOR NO KEY UPDATE`;
+    const [row] = await tx<{ claimed_by: string | null; opted_out_at: Date | null }[]>`
+      SELECT claimed_by, opted_out_at FROM reddit_leads WHERE username = ${key} FOR NO KEY UPDATE`;
     if (!row) return 'missing';
     if (row.claimed_by !== null) return row.claimed_by === user.id ? 'ok' : 'taken';
+    // A manager may take one to lift the stamp; nobody else may take one at all.
+    if (row.opted_out_at !== null && user.role !== 'manager') return 'optedout';
     // A new claim starts the pipeline over; the old holder's history stays.
     await tx`
       UPDATE reddit_leads
@@ -214,6 +243,7 @@ leads.post('/:username/claim', async (c) => {
   });
   if (verdict === 'missing') return c.json({ error: 'Not found' }, 404);
   if (verdict === 'taken') return c.json({ error: 'Another purchaser claimed this seller', code: 'rlTakenElsewhere' }, 409);
+  if (verdict === 'optedout') return c.json({ error: 'This seller asked not to be contacted', code: 'rlOptedOut' }, 409);
   return c.json(await readLead(sql, key, user));
 });
 
@@ -235,26 +265,43 @@ function heldRefusal(c: Context, verdict: HeldVerdict) {
   return c.json({ error: 'Claim this seller first', code: 'rlNotClaimed' }, 409);
 }
 
+type Refusal = { error: string; code?: string; status: 400 | 403 | 409 | 429 };
+
+const OPTED_OUT: Refusal = { error: 'This seller asked not to be contacted', code: 'rlOptedOut', status: 409 };
+
+async function isOptedOut(tx: Tx, key: string): Promise<boolean> {
+  const [{ out }] = await tx<{ out: boolean }[]>`
+    SELECT opted_out_at IS NOT NULL AS out FROM reddit_leads WHERE username = ${key}`;
+  return out;
+}
+
 /**
  * Runs `work` on a lead the caller holds (or manages) inside one transaction,
- * then answers with the lead. `work` may return a 400 message to refuse.
+ * then answers with the lead. `work` may return a 400 message, or a Refusal
+ * with its own status, to refuse.
  */
 async function held(
   c: Context<{ Bindings: Env; Variables: Vars }>,
-  work: (tx: Tx, key: string, user: User) => Promise<string | void>,
+  work: (tx: Tx, key: string, user: User) => Promise<string | Refusal | void>,
 ) {
   const key = redditKey(c.req.param('username') ?? '');
   const sql = getDb(c.env);
   const user = c.var.user;
-  let bad: string | void = undefined;
+  let bad: Refusal | null = null;
   const verdict = await sql.begin(async (tx) => {
     const v = await lockHeld(tx, key, user);
     if (v !== 'ok') return v;
-    bad = await work(tx, key, user);
-    if (bad) throw new Refused();
+    const r = await work(tx, key, user);
+    if (r) {
+      bad = typeof r === 'string' ? { error: r, status: 400 } : r;
+      throw new Refused();
+    }
     return v;
   }).catch((e) => { if (e instanceof Refused) return 'refused' as const; throw e; });
-  if (verdict === 'refused') return c.json({ error: bad }, 400);
+  if (verdict === 'refused') {
+    const { status, ...body } = bad!;
+    return c.json(body, status);
+  }
   if (verdict !== 'ok') return heldRefusal(c, verdict);
   return c.json(await readLead(sql, key, user));
 }
@@ -273,6 +320,17 @@ leads.post('/:username/dm', async (c) => {
   const body = await c.req.json().catch(() => null) as { template?: unknown } | null;
   const template = typeof body?.template === 'string' ? body.template.slice(0, 60) : '';
   return held(c, async (tx, key, user) => {
+    if (await isOptedOut(tx, key)) return OPTED_OUT;
+    const [{ before }] = await tx<{ before: boolean }[]>`
+      SELECT EXISTS (SELECT 1 FROM reddit_lead_events
+                     WHERE username = ${key} AND actor_id = ${user.id} AND kind = 'dm') AS before`;
+    if (!before && await firstDmsToday(tx, user.id) >= REDDIT_LEAD_DAILY_FIRST_DMS) {
+      return {
+        error: `You've sent ${REDDIT_LEAD_DAILY_FIRST_DMS} first messages today; send the rest tomorrow`,
+        code: 'rlDailyCap',
+        status: 429,
+      };
+    }
     const follow = addDays(today(), REDDIT_LEAD_DM_FOLLOW_UP_DAYS);
     // A DM moves a fresh claim to "DM sent"; later stages stay where they are.
     await tx`
@@ -305,6 +363,7 @@ leads.put('/:username/stage', async (c) => {
   const stage = body?.stage;
   return held(c, async (tx, key, user) => {
     if (!isRedditLeadStage(stage)) return `Stage must be one of ${REDDIT_LEAD_STAGES.join(', ')}`;
+    if (await isOptedOut(tx, key)) return OPTED_OUT;
     const [row] = await tx<{ stage: string }[]>`SELECT stage FROM reddit_leads WHERE username = ${key}`;
     if (row.stage === stage) return;
     await tx`
@@ -332,19 +391,30 @@ leads.put('/:username/close', async (c) => {
   const body = await c.req.json().catch(() => null) as { closed?: unknown } | null;
   const closed = body?.closed;
   return held(c, async (tx, key, user) => {
-    if (!isRedditLeadClosing(closed)) return 'Close as nostock or lost';
+    if (!isRedditLeadClosing(closed)) return 'Close as nostock, lost or optout';
     // "No stock now" is worth asking again later; "Not interested" is not.
     const follow = closed === 'nostock' ? addDays(today(), REDDIT_LEAD_NOSTOCK_DAYS) : null;
-    await tx`UPDATE reddit_leads SET closed = ${closed}, follow_up = ${follow}, updated_at = NOW() WHERE username = ${key}`;
+    await tx`
+      UPDATE reddit_leads
+      SET closed = ${closed}, follow_up = ${follow}, updated_at = NOW(),
+          opted_out_at = CASE WHEN ${closed} = 'optout' THEN COALESCE(opted_out_at, NOW()) ELSE opted_out_at END
+      WHERE username = ${key}`;
     await writeEvent(tx, user, key, 'closed', closed);
   });
 });
 
 leads.post('/:username/reopen', (c) => held(c, async (tx, key, user) => {
+  const opted_out = await isOptedOut(tx, key);
+  // Messaging someone who said no again is a manager's call, never a holder's.
+  if (opted_out && user.role !== 'manager') {
+    return { error: 'Only a manager can reopen a seller who asked not to be contacted', code: 'rlOptedOut', status: 403 };
+  }
   await tx`
     UPDATE reddit_leads
-    SET closed = '', stage = CASE WHEN stage = 'won' THEN 'talks' ELSE stage END, updated_at = NOW()
+    SET closed = '', stage = CASE WHEN stage = 'won' THEN 'talks' ELSE stage END,
+        opted_out_at = NULL, updated_at = NOW()
     WHERE username = ${key}`;
+  if (opted_out) await writeEvent(tx, user, key, 'opt_in');
   await writeEvent(tx, user, key, 'reopened');
 }));
 
