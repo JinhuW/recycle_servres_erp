@@ -2463,6 +2463,22 @@ shown.
 - **Inventory list.** Every lot shows its eBay listings as chips (a Live chip
   opens the item on eBay), with an All / On eBay / Not on eBay filter. A PO
   line held by a listing reads "On eBay · EB-n".
+- **eBay connection** (v1.477.0, managers). Settings ▸ eBay connects the
+  seller account through eBay's consent page; the refresh token is sealed
+  (`EBAY_KEY`) and never returned. Listings use the account's default
+  shipping, payment and return policies and its first enabled location, so
+  the ERP has no policy settings. The card shows the account, when it must be
+  reconnected, and the last sync or eBay's error word for word.
+- **Publish** (manager or eBay role) posts a To post listing to eBay and makes
+  it Live; a retry after a partial failure reuses the offer eBay already has.
+  A price change on a published listing, and ending it, go to eBay first, and
+  eBay's refusal stops the ERP change.
+- **Sync** every 10 minutes (and **Sync now** for managers) reads eBay orders
+  and adds each matching line as a sale under **Sales to confirm**. It never
+  creates a sell order: a person confirms each one. A cancelled order drops
+  its unconfirmed sale; a confirmed one is only flagged for a manager.
+- The prod → dev copy empties the connection, so dev can't act on the live
+  eBay account.
 
 ## After-sales
 

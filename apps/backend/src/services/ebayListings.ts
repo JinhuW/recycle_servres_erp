@@ -130,3 +130,27 @@ export async function releaseEbaySalesTx(
     }
   }
 }
+
+/**
+ * A Queued listing goes up on eBay: by hand (the operator links the item #)
+ * or through the API (publish, which also knows the offer). The caller holds
+ * the listing's lock and has checked it is Queued.
+ */
+export async function markListedTx(
+  tx: SqlLike, listingId: string, actorId: string,
+  f: { itemId: string; url: string; offerId?: string },
+): Promise<void> {
+  await tx`
+    UPDATE ebay_listings
+       SET status = 'Listed', listed_at = NOW(), updated_at = NOW(),
+           ebay_item_id = ${f.itemId}, ebay_url = ${f.url},
+           ebay_offer_id = COALESCE(${f.offerId ?? null}, ebay_offer_id)
+     WHERE id = ${listingId}
+  `;
+  await tx`
+    INSERT INTO ebay_listing_events (listing_id, kind, from_status, to_status, detail, actor_id)
+    VALUES (${listingId}, 'listed', 'Queued', 'Listed',
+            ${tx.json({ itemId: f.itemId, url: f.url, ...(f.offerId ? { offerId: f.offerId, via: 'api' } : {}) })},
+            ${actorId})
+  `;
+}

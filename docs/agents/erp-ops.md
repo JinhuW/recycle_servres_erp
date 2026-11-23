@@ -78,6 +78,40 @@ The release flow itself (`dev` → `main` is a full release) is in the root
   stdout-only.  Records are version/commit-stamped by `appendErrorRecord`
   itself — callers never pass them.  See `apps/backend/src/lib/error-log.ts`.
 
+## eBay connection
+
+The eBay desk publishes listings and reads sold orders through one connected
+seller account (Settings ▸ eBay, manager-only; `routes/ebayConnection.ts`,
+`src/ebay/`). Setting it up, per environment:
+
+1. In the eBay developer portal, make an app with a **sandbox** and a
+   **production** keyset. Under each keyset's *User Tokens*, add a RuName
+   (eBay redirect URL name) whose **accept** and **decline** URLs are both
+   `https://<erp host>/api/ebay/oauth/callback` (prod
+   `inventory.recycleservers.com`, dev `inventory-dev.recycleservers.com`). The Worker forwards `/api/*` to Railway with
+   `redirect: 'manual'`, so the callback's 302 back to the SPA reaches the
+   browser untouched; nothing in `deploy/cloudflare/worker.js` needs a change.
+2. On the backend's Railway service set `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`,
+   `EBAY_RU_NAME` (the RuName string, not the URL), `EBAY_ENV` (`sandbox` or
+   `production`, matching the keyset) and, in production, `EBAY_KEY`
+   (`openssl rand -hex 32`), which seals the refresh token. Without
+   `EBAY_KEY` production refuses to store a connection; outside production
+   one is derived from `JWT_SECRET`.
+3. The seller account needs business policies (shipping, payment, returns),
+   one marked default each or only one of each, and an enabled inventory
+   location. There are no pickers in the ERP: on connect it takes the
+   defaults, and the card names any it couldn't pick. Publishing refuses
+   until they exist; reconnect after fixing them on eBay.
+4. A manager presses **Connect eBay**. The refresh token lasts about 18
+   months; the card says *Reconnect by* that date and warns 30 days ahead.
+
+The consent asks for `sell.inventory`, `sell.fulfillment`, `sell.account`,
+`sell.finances` and `commerce.identity.readonly` (only to show the username).
+The sync runs every 10 minutes while a connection exists (`ebay/sync.ts`,
+advisory-locked, so instances and *Sync now* never overlap). The nightly
+prod→dev copy empties `ebay_connection`, so dev connects its own sandbox
+account. Rotating `EBAY_KEY` makes the stored token unreadable: reconnect.
+
 ## Cloudflare Worker deploys
 
 - Deploy the frontend Workers with `deploy/cloudflare/deploy.sh <prod|dev>` —

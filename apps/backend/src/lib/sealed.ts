@@ -23,6 +23,18 @@ export function poolKey(env: Env): Buffer | null {
   return Buffer.from(hkdfSync('sha256', env.JWT_SECRET, '', 'fb-pool', 32));
 }
 
+/**
+ * The eBay connection's key (it seals the seller's refresh token). Same
+ * contract as poolKey: EBAY_KEY in production, null there when unset so only
+ * the eBay routes refuse, and a JWT_SECRET derivation everywhere else.
+ */
+export function ebayKey(env: Env): Buffer | null {
+  const raw = env.EBAY_KEY?.trim();
+  if (raw) return Buffer.from(raw, 'hex');
+  if (env.NODE_ENV === 'production') return null;
+  return Buffer.from(hkdfSync('sha256', env.JWT_SECRET, '', 'ebay', 32));
+}
+
 export function seal(plain: string, key: Buffer): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv(ALGO, key, iv);

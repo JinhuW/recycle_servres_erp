@@ -12,7 +12,9 @@ import { committedClaimsByLine, ebayRemainingSql, isSellableLineStatus } from '.
 import {
   clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, escapeLike, UUID_RE,
 } from '../lib/pagination';
-import { lotStock } from '../services/ebayListings';
+import { ebayFailure, pickAccountDefaults, missingDefaults, requireEbay, saveAccountDefaults } from '../ebay/connection';
+import { PublishRefusal, publishListingTx, revisePriceTx, withdrawTx } from '../ebay/publish';
+import { lotStock, markListedTx } from '../services/ebayListings';
 import { createSellOrderDraftTx } from '../services/sellOrderCreate';
 import { moveSellOrderStatusTx } from '../services/sellOrderStatus';
 import type { Env, User } from '../types';
@@ -76,20 +78,32 @@ async function writeInventoryEvent(
 // A refusal inside a transaction that has already written: thrown, so the
 // transaction rolls back, and turned into a 409 by the handler.
 class EbayRefusal extends Error {
-  constructor(readonly status: 400 | 404 | 409, message: string) {
+  constructor(
+    readonly status: 400 | 404 | 409 | 422 | 502 | 503, message: string,
+    // eBay's own errors, when it was eBay that refused.
+    readonly ebay?: unknown[],
+  ) {
     super(message);
     this.name = 'EbayRefusal';
   }
 }
 
+// A desk action that also changes the item on eBay (ebay/publish.ts) throws
+// eBay's refusal from inside its transaction, rolling the ERP's side back;
+// it is answered like any other refusal, with eBay's errors verbatim.
 async function refusing<T>(run: () => Promise<T>): Promise<T | EbayRefusal> {
   try {
     return await run();
   } catch (e) {
     if (e instanceof EbayRefusal) return e;
+    if (e instanceof PublishRefusal) return new EbayRefusal(e.status, e.message);
+    const f = ebayFailure(e);
+    if (f) return new EbayRefusal(f.status, f.body.error, f.body.ebay);
     throw e;
   }
 }
+
+const refusalBody = (r: EbayRefusal) => (r.ebay ? { error: r.message, ebay: r.ebay } : { error: r.message });
 
 // ── Input parsing ───────────────────────────────────────────────────────────
 
@@ -592,8 +606,11 @@ ebay.patch('/listings/:id', async (c) => {
 
   const sql = getDb(c.env);
   const outcome = await refusing(() => sql.begin(async (tx) => {
-    const cur = (await tx<(Record<string, unknown> & { status: ListingStatus })[]>`
-      SELECT status, title, spec, condition, notes, list_price::float AS list_price, ebay_item_id, ebay_url
+    const cur = (await tx<(Record<string, unknown> & {
+      status: ListingStatus; ebay_sku: string; ebay_offer_id: string | null;
+    })[]>`
+      SELECT status, title, spec, condition, notes, list_price::float AS list_price, ebay_item_id, ebay_url,
+             ebay_sku, ebay_offer_id
       FROM ebay_listings WHERE id = ${id} FOR UPDATE
     `)[0];
     if (!cur) throw new EbayRefusal(404, 'Not found');
@@ -609,23 +626,24 @@ ebay.patch('/listings/:id', async (c) => {
       if (patch[k] !== cur[k]) changes[k] = { from: cur[k], to: patch[k] };
     }
     if (Object.keys(changes).length === 0) return cur.status;
+    // A live item published through the API is repriced on eBay first; if eBay
+    // refuses, so does this edit.
+    const reprice = changes.list_price !== undefined && cur.status === 'Listed' && cur.ebay_offer_id !== null;
+    if (reprice) {
+      await revisePriceTx(tx, await requireEbay(c.env, tx), {
+        ebay_sku: cur.ebay_sku, ebay_offer_id: cur.ebay_offer_id!,
+      }, patch.list_price!);
+    }
     const listing = cur.status === 'Queued' && patch.ebay_item_id !== undefined;
-    await tx`
-      UPDATE ebay_listings SET ${tx(patch)}, updated_at = NOW(),
-             status = ${listing ? 'Listed' : cur.status},
-             listed_at = CASE WHEN ${listing} THEN NOW() ELSE listed_at END
-       WHERE id = ${id}
-    `;
-    await writeEvent(tx, id, u.id, 'edited', { detail: { changes } });
+    await tx`UPDATE ebay_listings SET ${tx(patch)}, updated_at = NOW() WHERE id = ${id}`;
+    await writeEvent(tx, id, u.id, 'edited', { detail: { changes, ...(reprice ? { ebayRepriced: true } : {}) } });
     if (listing) {
-      await writeEvent(tx, id, u.id, 'listed', {
-        from: 'Queued', to: 'Listed', detail: { itemId: patch.ebay_item_id, url: patch.ebay_url },
-      });
+      await markListedTx(tx, id, u.id, { itemId: patch.ebay_item_id!, url: patch.ebay_url! });
       return 'Listed' as const;
     }
     return cur.status;
   }));
-  if (outcome instanceof EbayRefusal) return c.json({ error: outcome.message }, outcome.status);
+  if (outcome instanceof EbayRefusal) return c.json(refusalBody(outcome), outcome.status);
   return c.json({ ok: true, status: outcome });
 });
 
@@ -642,8 +660,11 @@ ebay.post('/listings/:id/end', async (c) => {
 
   const sql = getDb(c.env);
   const outcome = await refusing(() => sql.begin(async (tx) => {
-    const cur = (await tx<{ status: ListingStatus; inventory_id: string | null; remaining: number; detected: number }[]>`
-      SELECT el.status, el.inventory_id, ${ebayRemainingSql(tx, tx`el`)} AS remaining,
+    const cur = (await tx<{
+      status: ListingStatus; inventory_id: string | null; remaining: number; detected: number;
+      ebay_sku: string; ebay_offer_id: string | null;
+    }[]>`
+      SELECT el.status, el.inventory_id, ${ebayRemainingSql(tx, tx`el`)} AS remaining, el.ebay_sku, el.ebay_offer_id,
              (SELECT COUNT(*)::int FROM ebay_sales d WHERE d.listing_id = el.id AND d.status = 'Detected') AS detected
       FROM ebay_listings el WHERE el.id = ${id} FOR UPDATE
     `)[0];
@@ -653,13 +674,19 @@ ebay.post('/listings/:id/end', async (c) => {
       throw new EbayRefusal(409, 'only a listing still to post can be cancelled — end it on eBay instead');
     }
     if (cur.detected > 0) throw new EbayRefusal(409, 'confirm or dismiss the sales waiting on this listing first');
+    // An item published through the API comes down on eBay first; if eBay
+    // won't take it down, the ERP doesn't end it either.
+    const withdrawn = cur.status === 'Listed' && cur.ebay_offer_id !== null
+      ? await withdrawTx(tx, await requireEbay(c.env, tx), { ebay_sku: cur.ebay_sku, ebay_offer_id: cur.ebay_offer_id })
+      : null;
     await tx`
       UPDATE ebay_listings SET status = 'Ended', end_reason = ${reason}, end_note = ${note},
              ended_at = NOW(), updated_at = NOW()
        WHERE id = ${id}
     `;
     await writeEvent(tx, id, u.id, 'ended', {
-      from: cur.status, to: 'Ended', note, detail: { reason, returnedQty: cur.remaining },
+      from: cur.status, to: 'Ended', note,
+      detail: { reason, returnedQty: cur.remaining, ...(withdrawn ? { ebayWithdrawn: true, ...withdrawn } : {}) },
     });
     if (cur.inventory_id) {
       await writeInventoryEvent(tx, cur.inventory_id, u.id, 'ebay_ended', {
@@ -668,8 +695,28 @@ ebay.post('/listings/:id/end', async (c) => {
     }
     return cur.remaining;
   }));
-  if (outcome instanceof EbayRefusal) return c.json({ error: outcome.message }, outcome.status);
+  if (outcome instanceof EbayRefusal) return c.json(refusalBody(outcome), outcome.status);
   return c.json({ ok: true, status: 'Ended', returnedQty: outcome });
+});
+
+// Publish a Queued listing to eBay through the API: inventory item, offer,
+// publish, then Listed with the offer, item # and URL. A retry after a partial
+// failure reuses what eBay already has (publishListingTx).
+ebay.post('/listings/:id/publish', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+  const outcome = await refusing(async () => {
+    let ctx = await requireEbay(c.env, sql);
+    // Defaults the account lacked when it connected may exist by now.
+    if (missingDefaults(ctx.conn).length) {
+      await saveAccountDefaults(sql, await pickAccountDefaults(ctx.client));
+      ctx = await requireEbay(c.env, sql);
+    }
+    return sql.begin((tx) => publishListingTx(tx, ctx, id, u.id));
+  });
+  if (outcome instanceof EbayRefusal) return c.json(refusalBody(outcome), outcome.status);
+  return c.json({ ok: true, status: 'Listed', ...outcome });
 });
 
 // ── Sales ───────────────────────────────────────────────────────────────────

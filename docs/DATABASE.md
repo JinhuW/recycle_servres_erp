@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-23:** ERP migration `0254`, Reddit tracker migration `0010`,
+**As of 2026-11-23:** ERP migration `0255`, Reddit tracker migration `0010`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -1385,7 +1385,7 @@ A row counts only while its fingerprint matches the order's current one, so an e
 
 After-sales cases (AS-n) record a customer coming back about goods on a sell order. Each has a snapshot of the affected lines and a timeline. eBay listings (EB-n) are stock offered on eBay, and their sales become sell orders. The group also holds inbound shipping: `packages` tracks boxes sellers ship to us through Shippo until each becomes a PO. `shipments` is the unread remainder of the removed prepaid-label flow.
 
-Tables: [`after_sales_cases`](#erp-after-sales-cases), [`after_sales_case_lines`](#erp-after-sales-case-lines), [`after_sales_case_events`](#erp-after-sales-case-events), [`ebay_listings`](#erp-ebay-listings), [`ebay_sales`](#erp-ebay-sales), [`ebay_listing_events`](#erp-ebay-listing-events), [`shipments`](#erp-shipments), [`packages`](#erp-packages)
+Tables: [`after_sales_cases`](#erp-after-sales-cases), [`after_sales_case_lines`](#erp-after-sales-case-lines), [`after_sales_case_events`](#erp-after-sales-case-events), [`ebay_listings`](#erp-ebay-listings), [`ebay_sales`](#erp-ebay-sales), [`ebay_listing_events`](#erp-ebay-listing-events), [`ebay_connection`](#erp-ebay-connection), [`ebay_oauth_states`](#erp-ebay-oauth-states), [`shipments`](#erp-shipments), [`packages`](#erp-packages)
 
 ```mermaid
 erDiagram
@@ -1397,6 +1397,8 @@ erDiagram
   ebay_listings ||--o{ ebay_sales : "listing_id"
   sell_orders |o--o{ ebay_sales : "sell_order_id"
   ebay_listings ||--o{ ebay_listing_events : "listing_id"
+  users |o--o| ebay_connection : "connected_by"
+  users ||--o{ ebay_oauth_states : "user_id"
   orders ||--o{ shipments : "order_id"
   orders |o--o{ packages : "order_id"
 ```
@@ -1548,12 +1550,12 @@ Timeline of a listing, written by routes/ebay.ts in the same transaction as the 
 | --- | --- | :-: | --- | --- |
 | `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
 | `listing_id` | `text` | ✓ |  |  |
-| `kind` | `text` | ✓ |  | created (also each part a split makes, with detail.splitFrom), edited ({changes}; a split's {split: new ids}), listed, sale_detected, sale_confirmed ({saleId, qty, unitPrice, sellOrderId, remaining}), sale_dismissed, sold, ended ({reason, returnedQty}). |
+| `kind` | `text` | ✓ |  | created (also each part a split makes, with detail.splitFrom), edited ({changes}; a split's {split: new ids}; ebayRepriced when the price was revised on eBay), listed ({itemId, url}; offerId and via 'api' when published through the API), sale_detected (written by the sync: {saleId, qty, unitPrice, ebayOrderId, via 'sync'}), sale_confirmed ({saleId, qty, unitPrice, sellOrderId, remaining}), sale_dismissed (by hand, by a closed sell order, or by the sync when eBay cancelled the order: note 'cancelled on eBay'), sold, ended ({reason, returnedQty}; ebayWithdrawn when the item was taken down on eBay). |
 | `from_status` | `text` |  |  |  |
 | `to_status` | `text` |  |  |  |
 | `note` | `text` |  |  |  |
 | `detail` | `jsonb` | ✓ | `'{}'::jsonb` |  |
-| `actor_id` | `uuid` |  |  |  |
+| `actor_id` | `uuid` |  |  | NULL for what the eBay sync wrote. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
 
 - **Primary key:** `id`
@@ -1561,6 +1563,56 @@ Timeline of a listing, written by routes/ebay.ts in the same transaction as the 
 - **Checks:** `kind IN ('created', 'edited', 'listed', 'sale_detected', 'sale_confirmed', 'sale_dismissed', 'sold', 'ended')`
 - **Indexes:** `ebay_listing_events_listing_idx` (listing_id, created_at); `ebay_listing_events_actor_id_idx` (actor_id); `ebay_listing_events_feed_idx` (created_at DESC, id DESC)
 - **Triggers:** `ebay_listing_events_no_update`, `ebay_listing_events_no_delete` → `ebay_listing_events_lock()`
+
+<a id="erp-ebay-connection"></a>
+
+#### `ebay_connection`
+
+The eBay seller account the desk publishes to and the sync (ebay/sync.ts) reads orders from (migration 0255). One row at most (`id = 1`); a manager connects, reconnects and disconnects it on Settings ▸ eBay (routes/ebayConnection.ts). No route returns its token.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `smallint` | ✓ | `1` | Always 1. |
+| `environment` | `text` | ✓ |  | sandbox or production: the EBAY_ENV it was made under. A row from the other environment is treated as no connection. |
+| `refresh_token_sealed` | `text` | ✓ |  | The seller's refresh token, sealed with ebayKey (lib/sealed.ts). Access tokens are minted from it and kept only in memory. |
+| `refresh_token_expires_at` | `timestamptz` | ✓ |  | When eBay stops honouring it (about 18 months); the page asks for a reconnect 30 days before. |
+| `ebay_user_id` | `text` |  |  | From the Commerce Identity API, when it answered. A reconnect to the same account keeps the sync cursor. |
+| `ebay_username` | `text` |  |  |  |
+| `marketplace_id` | `text` | ✓ | `'EBAY_US'` |  |
+| `merchant_location_key` | `text` |  |  | The account's first enabled inventory location, picked on connect. |
+| `fulfillment_policy_id` | `text` |  |  | Per type, the policy eBay marks default for the marketplace, else the only one; NULL when neither (no picker by the owner's choice). Publishing refuses while any of the four is NULL. |
+| `payment_policy_id` | `text` |  |  | As above. |
+| `return_policy_id` | `text` |  |  | As above. |
+| `setup_issues` | `jsonb` | ✓ | `'[]'::jsonb` | [{field, reason: none, ambiguous or error, message?}] for each default that couldn't be picked. |
+| `sync_cursor` | `timestamptz` |  |  | Orders modified before this have been read (each run re-reads an hour behind it). Advanced in the run's transaction. NULL: the next run looks back 30 days. |
+| `last_sync_at` | `timestamptz` |  |  |  |
+| `last_error` | `text` |  |  | The last run's failure, eBay's words; NULL after a clean run. |
+| `last_result` | `jsonb` |  |  | The last clean run's counts ({ordersSeen, matched, newSales, updatedSales, linkedManual, dismissed}) and flags: confirmed sales whose eBay order was cancelled since, kept until the sale stops being Confirmed. |
+| `connected_by` | `uuid` |  |  |  |
+| `connected_at` | `timestamptz` | ✓ | `now()` |  |
+| `updated_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `connected_by` → `users.id` (on delete set null)
+- **Checks:** `id = 1`; `environment IN ('sandbox', 'production')`
+- **Indexes:** `ebay_connection_connected_by_idx` (connected_by)
+
+<a id="erp-ebay-oauth-states"></a>
+
+#### `ebay_oauth_states`
+
+The `state` of each eBay consent round trip a manager starts (migration 0255), so the callback can check it came from this server, for this user, within 10 minutes, once. Spent on use; expired rows are deleted when the next one starts.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `state_hash` | `text` | ✓ |  | sha256 of the state sent to eBay; the value itself is never stored. |
+| `user_id` | `uuid` | ✓ |  | The manager who started it; only their session can complete it. |
+| `expires_at` | `timestamptz` | ✓ |  |  |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `state_hash`
+- **References:** `user_id` → `users.id` (on delete cascade)
+- **Indexes:** `ebay_oauth_states_user_id_idx` (user_id); `ebay_oauth_states_expires_idx` (expires_at)
 
 <a id="erp-shipments"></a>
 

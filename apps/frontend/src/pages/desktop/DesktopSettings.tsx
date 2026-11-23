@@ -4,6 +4,7 @@ import { useAuth } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
 import { useAppVersion } from '../../lib/useAppVersion';
 import { fmtDate } from '../../lib/format';
+import { readHashQuery } from '../../lib/route';
 // The settings panels + their modals/dialogs/shared primitives were extracted
 // verbatim into ./settings/* — pure code-motion, no logic or JSX changes.
 // AccountPanel is the section Settings opens on, so it stays in this chunk;
@@ -18,10 +19,11 @@ const AiModelsPanel = lazy(() => import('./settings/AiModelsPanel').then(m => ({
 const GeneralPanel = lazy(() => import('./settings/GeneralPanel').then(m => ({ default: m.GeneralPanel })));
 const FxRatesPanel = lazy(() => import('../../components/FxRatesPanel').then(m => ({ default: m.FxRatesPanel })));
 const PerformancePanel = lazy(() => import('./settings/PerformancePanel').then(m => ({ default: m.PerformancePanel })));
+const EbayPanel = lazy(() => import('./settings/EbayPanel').then(m => ({ default: m.EbayPanel })));
 const DesktopSettingsConnectors = lazy(() => import('./DesktopSettingsConnectors').then(m => ({ default: m.DesktopSettingsConnectors })));
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
-type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'ai' | 'fx' | 'performance' | 'connectors';
+type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'ai' | 'fx' | 'performance' | 'ebay' | 'connectors';
 
 // Section labels are looked up via t() at render time — id ↔ tKey is the
 // only declarative mapping we need; pluralization / casing belongs to the
@@ -40,14 +42,20 @@ const SECTIONS: { id: SectionId; labelKey: string; subKey: string; icon: IconNam
   { id: 'ai',         labelKey: 'settingsNavAi',         subKey: 'settingsNavAiSub',         icon: 'chip', managerOnly: true },
   { id: 'fx',         labelKey: 'settingsNavFx',         subKey: 'settingsNavFxSub',         icon: 'refresh', managerOnly: true },
   { id: 'performance', labelKey: 'settingsNavPerformance', subKey: 'settingsNavPerformanceSub', icon: 'analytics', managerOnly: true },
+  { id: 'ebay',       labelKey: 'settingsNavEbay',       subKey: 'settingsNavEbaySub',       icon: 'tag', managerOnly: true },
   { id: 'connectors', labelKey: 'connectorsTab',         subKey: 'settingsNavConnectorsSub', icon: 'chip' },
 ];
 
 export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?: 'success' | 'error') => void }) {
   const { t, locale } = useT();
   const { user } = useAuth();
-  const [section, setSection] = useState<SectionId>('account');
   const sections = SECTIONS.filter(s => !s.managerOnly || user?.role === 'manager');
+  // `?section=` opens a section directly: the eBay consent comes back to
+  // `#/settings?section=ebay`.
+  const [section, setSection] = useState<SectionId>(() => {
+    const asked = readHashQuery().get('section');
+    return sections.find(s => s.id === asked)?.id ?? 'account';
+  });
   const build = useAppVersion();
 
   return (
@@ -95,6 +103,7 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
             {section === 'ai'         && <AiModelsPanel />}
             {section === 'fx'         && <FxRatesPanel />}
             {section === 'performance' && <PerformancePanel />}
+            {section === 'ebay'       && <EbayPanel showToast={showToast} />}
             {section === 'connectors' && <DesktopSettingsConnectors />}
           </Suspense>
         </div>
