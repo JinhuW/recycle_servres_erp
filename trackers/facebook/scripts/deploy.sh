@@ -453,14 +453,25 @@ echo "  $VERSION $SHA"
 # missed notification must never mark a verified deploy as failed.
 step "notify telegram"
 DEPLOY_DESC="v$VERSION ($SHA)$REDEPLOY_NOTE"
-if [ "$CHECKED" = "0" ]; then
+# Say only what verify checked: `sync` checks no coordinator, so it must
+# never read as a verified one (the same wording as verify_coordinator's).
+if [ "$MODE" = "sync" ]; then
+    DEPLOY_VERB="Synced"
+    if [ "$CHECKED" = "0" ]; then
+        VERIFIED_NOTE="- nothing verified: no worker was found, and sync checks no coordinator."
+    else
+        VERIFIED_NOTE="- $CHECKED worker(s) verified running this tree; sync checks no coordinator."
+    fi
+elif [ "$CHECKED" = "0" ]; then
+    DEPLOY_VERB="Deployed"
     VERIFIED_NOTE="to the coordinator - verified running this tree. No worker was found or checked."
 else
+    DEPLOY_VERB="Deployed"
     VERIFIED_NOTE="to the coordinator and $CHECKED workers - verified running this tree."
 fi
 HELD_NOTE=""
 [ -z "$(printf '%s' "$HOLD" | tr -d ' ')" ] || HELD_NOTE=" Held on their previous image:$HOLD"
-if ssh "$VM" "docker exec -i rs-coordinator python - \"Deployed facebook_tracker $DEPLOY_DESC $VERIFIED_NOTE$HELD_NOTE\"" <<'PYEOF'
+if ssh "$VM" "docker exec -i rs-coordinator python - \"$DEPLOY_VERB facebook_tracker $DEPLOY_DESC $VERIFIED_NOTE$HELD_NOTE\"" <<'PYEOF'
 import os, sys, urllib.parse, urllib.request
 
 # Deploy notices are ops, not listings: the ops chat when one is set, and its
@@ -481,5 +492,5 @@ PYEOF
 then
     echo "  sent"
 else
-    echo "  telegram notification failed (deploy itself is verified)"
+    echo "  telegram notification failed (the deploy itself is unaffected)"
 fi
