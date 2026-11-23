@@ -8,6 +8,7 @@ import {analytics, ANALYTICS_WINDOWS, type AnalyticsWindow} from './analytics.ts
 import {requeuePost} from './claims.ts';
 import type {Sql} from './db.ts';
 import {DEAD_AFTER_S, STALE_AFTER_S, type LoopName, type LoopStatus} from './heartbeat.ts';
+import {isModelRef} from './llm/ref.ts';
 import {candidateConfig, liveConfig, promptHash, promptStats} from './prompts.ts';
 import {createRule, deleteRule, listRules, updateRule} from './rules.ts';
 import {seen} from './seen.ts';
@@ -415,8 +416,8 @@ export function createApi(deps: ApiDeps): Hono {
     const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
     if (!prompt) return c.json({error: 'prompt must be a non-empty string'}, 400);
     const model = body?.model === undefined ? '' : body.model;
-    if (typeof model !== 'string' || (model !== '' && !MODEL_ID.test(model))) {
-      return c.json({error: 'model must be "" (use llm_model) or an OpenRouter model id'}, 400);
+    if (typeof model !== 'string' || (model !== '' && !isModelRef(model))) {
+      return c.json({error: 'model must be "" (use llm_model) or a model ref like anthropic:claude-sonnet-5-5 or an OpenRouter id'}, 400);
     }
 
     await deps.sql.begin(async (tx) => {
@@ -499,8 +500,6 @@ export function createApi(deps: ApiDeps): Hono {
   return app;
 }
 
-const MODEL_ID = /^[\w.-]+\/[\w.:-]+$/;
-
 function validateSetting(key: string, value: unknown): string | null {
   switch (key) {
     case 'eval_prompt':
@@ -508,9 +507,9 @@ function validateSetting(key: string, value: unknown): string | null {
         ? null
         : 'eval_prompt must be a non-empty string';
     case 'llm_model':
-      return typeof value === 'string' && MODEL_ID.test(value)
+      return typeof value === 'string' && isModelRef(value)
         ? null
-        : 'llm_model must be an OpenRouter model id, e.g. "openai/gpt-4o-mini"';
+        : 'llm_model must be a model ref like anthropic:claude-sonnet-5-5 or an OpenRouter id, e.g. "openai/gpt-4o-mini"';
     case 'telegram_chat_ids':
     case 'telegram_dev_chat_ids':
       return Array.isArray(value)
@@ -522,9 +521,9 @@ function validateSetting(key: string, value: unknown): string | null {
         ? null
         : 'candidate_eval_prompt must be a string ("" ends the trial)';
     case 'candidate_llm_model':
-      return typeof value === 'string' && (value === '' || MODEL_ID.test(value))
+      return typeof value === 'string' && (value === '' || isModelRef(value))
         ? null
-        : 'candidate_llm_model must be "" (use llm_model) or an OpenRouter model id';
+        : 'candidate_llm_model must be "" (use llm_model) or a model ref like anthropic:claude-sonnet-5-5 or an OpenRouter id';
     case 'max_post_age_hours':
       return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 720
         ? null

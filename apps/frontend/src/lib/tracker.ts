@@ -5,6 +5,7 @@
 
 import { TEXT_JSON_MODEL, type AiModel } from './aiModels';
 import { api } from './api';
+import { isModelRef } from '@recycle-erp/shared';
 
 export type TrackerWorkerRole = 'worker' | 'api';
 export type LoopName = 'poll' | 'evaluate' | 'notify';
@@ -184,15 +185,13 @@ export function workerHaystack(w: TrackerWorker, roleLabel: string): string {
   return [w.workerId, w.role, roleLabel].join(' ');
 }
 
-/** An OpenRouter model id, `provider/model`; the tracker checks the same shape. */
-export const MODEL_ID = /^[\w.-]+\/[\w.:-]+$/;
-
 /**
- * The catalogue entries the evaluator can run on. MODEL_ID also drops
- * OpenRouter's `~…-latest` aliases: they float to whatever is newest, which
- * would swap the model under an unchanged prompt version and blur its score.
+ * The catalogue entries the evaluator can run on. isModelRef (the tracker
+ * checks the same shape) also drops OpenRouter's `~…-latest` aliases: they
+ * float to whatever is newest, which would swap the model under an unchanged
+ * prompt version and blur its score.
  */
-export const EVALUATOR_MODEL = (m: AiModel): boolean => TEXT_JSON_MODEL(m) && MODEL_ID.test(m.id);
+export const EVALUATOR_MODEL = (m: AiModel): boolean => TEXT_JSON_MODEL(m) && isModelRef(m.id);
 
 /**
  * Why the evaluator cannot run on `id`, or null when it can. The shape is all
@@ -205,7 +204,7 @@ export function evaluatorModelProblem(
   id: string,
   catalogue: readonly AiModel[] | null,
 ): 'shape' | 'loading' | 'unlisted' | null {
-  if (!MODEL_ID.test(id)) return 'shape';
+  if (!isModelRef(id)) return 'shape';
   if (!catalogue) return 'loading';
   return catalogue.some(m => m.id === id && EVALUATOR_MODEL(m)) ? null : 'unlisted';
 }

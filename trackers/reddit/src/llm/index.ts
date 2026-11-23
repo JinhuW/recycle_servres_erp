@@ -1,5 +1,13 @@
 // Decides whether a post is something we want to buy, and writes the one-line
-// summary that goes into the Telegram alert. One OpenRouter call does both.
+// summary that goes into the Telegram alert. One model call does both; the
+// model ref picks the provider (ref.ts).
+
+import {completeAnthropic} from './anthropic.ts';
+import {completeOpenAI} from './openai.ts';
+import {completeOpenRouter} from './openrouter.ts';
+import {parseModelRef, type Provider} from './ref.ts';
+
+export {isModelRef, parseModelRef, type ModelRef, type Provider} from './ref.ts';
 
 export interface Evaluation {
   isTarget: boolean;
@@ -20,7 +28,25 @@ export interface EvaluationInput {
   author: string | null;
 }
 
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+/** API keys by provider; an empty or missing key means that provider is off. */
+export type LlmKeys = Partial<Record<Provider, string>>;
+
+/** What every provider adapter takes. */
+export interface CompletionRequest {
+  apiKey: string;
+  model: string;
+  systemPrompt: string;
+  userMessage: string;
+  schemaName: string;
+  schema: typeof RESPONSE_JSON_SCHEMA;
+  signal: AbortSignal;
+}
+
+/** The model's raw text, or why there is none. */
+export type CompletionResult =
+  | {kind: 'ok'; content: string}
+  | {kind: 'error'; message: string};
+
 const REQUEST_TIMEOUT_MS = 60_000;
 /** Keeps the prompt cheap; sale posts put the essentials up top. */
 const MAX_BODY_CHARS = 4000;
@@ -32,38 +58,46 @@ const MAX_BODY_CHARS = 4000;
  */
 export const RESPONSE_SCHEMA_ID = 'reasoning-first';
 
+const RESPONSE_SCHEMA_NAME = 'post_evaluation';
+
 // Reasoning comes first on purpose. Structured output writes the fields in
 // schema order, and with the verdict first the model committed before it
 // counted: "4 target items … does not meet the minimum of 7", is_target true.
 // Measured on 100 prod posts in
 // docs/prompt-evaluations/2026-10-19-candidate-1-offline.md.
-const RESPONSE_SCHEMA = {
-  type: 'json_schema',
-  json_schema: {
-    name: 'post_evaluation',
-    strict: true,
-    schema: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['reasoning', 'is_target', 'summary', 'price'],
-      properties: {
-        reasoning: {type: 'string', description: 'Brief justification for the verdict.'},
-        is_target: {
-          type: 'boolean',
-          description: 'True only if this is a for-sale listing of hardware we buy.',
-        },
-        summary: {
-          type: 'string',
-          description: 'One or two sentences describing the item, for a buyer alert.',
-        },
-        price: {
-          type: ['string', 'null'],
-          description: 'Asking price exactly as written, or null if not stated.',
-        },
-      },
+// Every provider gets this same object, so RESPONSE_SCHEMA_ID stays true.
+export const RESPONSE_JSON_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['reasoning', 'is_target', 'summary', 'price'],
+  properties: {
+    reasoning: {type: 'string', description: 'Brief justification for the verdict.'},
+    is_target: {
+      type: 'boolean',
+      description: 'True only if this is a for-sale listing of hardware we buy.',
+    },
+    summary: {
+      type: 'string',
+      description: 'One or two sentences describing the item, for a buyer alert.',
+    },
+    price: {
+      type: ['string', 'null'],
+      description: 'Asking price exactly as written, or null if not stated.',
     },
   },
 } as const;
+
+const ADAPTERS: Record<Provider, (req: CompletionRequest) => Promise<CompletionResult>> = {
+  openrouter: completeOpenRouter,
+  anthropic: completeAnthropic,
+  openai: completeOpenAI,
+};
+
+const KEY_ENV: Record<Provider, string> = {
+  openrouter: 'OPENROUTER_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  openai: 'OPENAI_API_KEY',
+};
 
 export function buildUserMessage(post: EvaluationInput): string {
   const body = post.selftext.slice(0, MAX_BODY_CHARS);
@@ -119,61 +153,31 @@ export function parseEvaluationContent(content: string): Evaluation | null {
  */
 export async function evaluatePost(
   post: EvaluationInput,
-  options: {apiKey: string; model: string; systemPrompt: string},
+  options: {keys: LlmKeys; model: string; systemPrompt: string},
 ): Promise<EvaluationResult> {
-  let response: Response;
+  const {provider, model} = parseModelRef(options.model);
+  const apiKey = options.keys[provider];
+  if (!apiKey) return {kind: 'error', message: `${KEY_ENV[provider]} is not set`};
+
+  let result: CompletionResult;
   try {
-    response = await fetch(OPENROUTER_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${options.apiKey}`,
-        'Content-Type': 'application/json',
-        // OpenRouter attributes traffic with these; they are not auth.
-        'HTTP-Referer': 'https://recycleservers.com',
-        'X-Title': 'Recycle Servers Reddit Tracker',
-      },
-      body: JSON.stringify({
-        model: options.model,
-        temperature: 0,
-        messages: [
-          {role: 'system', content: options.systemPrompt},
-          {role: 'user', content: buildUserMessage(post)},
-        ],
-        response_format: RESPONSE_SCHEMA,
-      }),
+    result = await ADAPTERS[provider]({
+      apiKey,
+      model,
+      systemPrompt: options.systemPrompt,
+      userMessage: buildUserMessage(post),
+      schemaName: RESPONSE_SCHEMA_NAME,
+      schema: RESPONSE_JSON_SCHEMA,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (e) {
     return {kind: 'error', message: e instanceof Error ? e.message : String(e)};
   }
+  if (result.kind === 'error') return result;
 
-  if (!response.ok) {
-    const detail = (await response.text().catch(() => '')).slice(0, 300);
-    return {kind: 'error', message: `OpenRouter HTTP ${response.status}: ${detail}`};
-  }
-
-  let payload: {choices?: Array<{message?: {content?: string}}>; error?: {message?: string}};
-  try {
-    payload = await response.json() as typeof payload;
-  } catch (e) {
-    return {kind: 'error', message: `unparseable OpenRouter response: ${String(e)}`};
-  }
-
-  // OpenRouter can return HTTP 200 with an error object when an upstream
-  // provider fails mid-stream.
-  if (payload.error) {
-    return {kind: 'error', message: `OpenRouter error: ${payload.error.message ?? 'unknown'}`};
-  }
-
-  const content = payload.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || content.trim() === '') {
-    return {kind: 'error', message: 'OpenRouter returned no message content'};
-  }
-
-  const evaluation = parseEvaluationContent(content);
+  const evaluation = parseEvaluationContent(result.content);
   if (!evaluation) {
-    return {kind: 'error', message: `could not parse verdict from: ${content.slice(0, 200)}`};
+    return {kind: 'error', message: `could not parse verdict from: ${result.content.slice(0, 200)}`};
   }
-
   return {kind: 'ok', evaluation};
 }

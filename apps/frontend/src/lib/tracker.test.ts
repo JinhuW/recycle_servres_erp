@@ -44,7 +44,7 @@ describe('summarizeTrial', () => {
 
 describe('EVALUATOR_MODEL', () => {
   const entry = (id: string, structuredOutputs = true) => ({
-    id, name: id, contextLength: 128000, promptPerM: 0.15, completionPerM: 0.6,
+    id, provider: 'openrouter' as const, name: id, contextLength: 128000, promptPerM: 0.15, completionPerM: 0.6,
     structuredOutputs, inputModalities: ['text'], outputModalities: ['text'],
   });
 
@@ -53,6 +53,7 @@ describe('EVALUATOR_MODEL', () => {
     expect(EVALUATOR_MODEL(entry('openai/gpt-4o-mini:batch'))).toBe(true);
     expect(EVALUATOR_MODEL(entry('~anthropic/claude-haiku-latest'))).toBe(false);
     expect(EVALUATOR_MODEL(entry('openrouter/auto', false))).toBe(false);
+    expect(EVALUATOR_MODEL({ ...entry('anthropic:claude-sonnet-5-5'), provider: 'anthropic' })).toBe(true);
   });
 
   it('accepts only an id the catalogue lists as an evaluator model', () => {
@@ -62,6 +63,8 @@ describe('EVALUATOR_MODEL', () => {
     expect(evaluatorModelProblem('vendor/not-in-catalogue', catalogue)).toBe('unlisted');
     expect(evaluatorModelProblem('openai/gpt-4o-mini', null)).toBe('loading');
     expect(evaluatorModelProblem('gpt-4o-mini', catalogue)).toBe('shape');
+    expect(evaluatorModelProblem('anthropic:claude/x', catalogue)).toBe('shape');
+    expect(evaluatorModelProblem('anthropic:claude-sonnet-5-5', catalogue)).toBe('unlisted');
   });
 });
 

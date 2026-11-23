@@ -261,7 +261,11 @@ async function runWorker(): Promise<void> {
       registry.wrap('evaluate', () => evaluateOnce({
         sql,
         workerId: config.workerId,
-        apiKey: config.openrouterApiKey,
+        keys: {
+          openrouter: config.openrouterApiKey,
+          anthropic: config.anthropicApiKey,
+          openai: config.openaiApiKey,
+        },
         settings,
         alerts,
         logger: logger.child('evaluate'),

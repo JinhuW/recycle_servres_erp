@@ -2,6 +2,7 @@
 // bindings now that the backend runs as a plain Node process.
 
 import type { Env } from './types';
+import { isModelRef, parseModelRef } from '@recycle-erp/shared';
 
 // Values that ship in the repo (Dockerfile ENV / .env.example). Sessions are
 // HS256-signed with JWT_SECRET, so booting prod on a published value means
@@ -48,9 +49,17 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
   }
   // The stub OCR provider returns canned data with a fixed high confidence —
   // safe for dev/tests, catastrophic in prod where users would trust it as
-  // real readings. Refuse to boot prod without a real key.
-  if (src.NODE_ENV === 'production' && !src.OPENROUTER_API_KEY) {
-    throw new Error('OPENROUTER_API_KEY is required in production (the stub OCR returns canned data)');
+  // real readings. Refuse to boot prod without the default model's key.
+  if (src.NODE_ENV === 'production') {
+    const ref = src.AI_MODEL ?? src.OPENROUTER_OCR_MODEL;
+    const provider = ref ? parseModelRef(ref).provider : 'openrouter';
+    const key = { openrouter: 'OPENROUTER_API_KEY', anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY' }[provider];
+    if (!src[key]) {
+      throw new Error(`${key} is required in production (the stub OCR returns canned data)`);
+    }
+  }
+  if (src.AI_MODEL !== undefined && !isModelRef(src.AI_MODEL)) {
+    throw new Error('AI_MODEL must be a model ref, e.g. anthropic:claude-sonnet-5-5 or openai/gpt-6-luna');
   }
   if (src.NODE_ENV === 'production' && !src.OAUTH_SIGNING_KEY_CURRENT) {
     throw new Error('OAUTH_SIGNING_KEY_CURRENT must be set in production');
@@ -82,6 +91,9 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
     STUB_LOW_CONF: src.STUB_LOW_CONF,
     OPENROUTER_API_KEY: src.OPENROUTER_API_KEY,
     OPENROUTER_OCR_MODEL: src.OPENROUTER_OCR_MODEL,
+    ANTHROPIC_API_KEY: src.ANTHROPIC_API_KEY, // pragma: allowlist secret
+    OPENAI_API_KEY: src.OPENAI_API_KEY, // pragma: allowlist secret
+    AI_MODEL: src.AI_MODEL,
     FB_CHAT_TELEGRAM_BOT_TOKEN: src.FB_CHAT_TELEGRAM_BOT_TOKEN, // pragma: allowlist secret
     FB_CHAT_TELEGRAM_CHAT_ID: src.FB_CHAT_TELEGRAM_CHAT_ID,
     FB_CHAT_TELEGRAM_USER_IDS: src.FB_CHAT_TELEGRAM_USER_IDS,

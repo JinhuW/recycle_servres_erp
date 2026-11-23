@@ -3,6 +3,9 @@ import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { _resetForTests } from '../src/routes/aiModels';
+import { invalidateAiModelsSetting, resolveModel } from '../src/ai/llm';
+import { getDb } from '../src/db';
+import { testEnv } from './helpers/app';
 
 // Two entries in OpenRouter's shape, plus the oddities the trimmer has to
 // survive: a router priced at -1 and an entry with no id.
@@ -59,6 +62,7 @@ describe('OpenRouter model catalogue (/api/ai/models)', () => {
     expect(r.body.models).toEqual([
       {
         id: 'openai/gpt-4o-mini',
+        provider: 'openrouter',
         name: 'OpenAI: GPT-4o-mini',
         contextLength: 128000,
         promptPerM: 0.15,
@@ -69,6 +73,7 @@ describe('OpenRouter model catalogue (/api/ai/models)', () => {
       },
       {
         id: 'openrouter/auto',
+        provider: 'openrouter',
         name: 'Auto Router',
         contextLength: 2000000,
         promptPerM: null,
@@ -129,5 +134,54 @@ describe('OpenRouter model catalogue (/api/ai/models)', () => {
     const spy = stubOpenRouter({ status: 200, body: CATALOGUE });
     expect((await api('GET', '/api/ai/models', { token })).status).toBe(403);
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('switching models (/api/ai/providers, ai_models)', () => {
+  beforeEach(async () => {
+    await resetDb();
+    invalidateAiModelsSetting();
+  });
+  afterEach(() => invalidateAiModelsSetting());
+
+  it('says which providers have a key, without the key', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ providers: Array<{ id: string; configured: boolean }> }>(
+      'GET', '/api/ai/providers', { token, env: { ANTHROPIC_API_KEY: 'secret-a' } });
+    expect(r.status).toBe(200);
+    expect(r.body.providers.map(p => [p.id, p.configured])).toEqual([
+      ['openrouter', false], ['anthropic', true], ['openai', false],
+    ]);
+    expect(JSON.stringify(r.body)).not.toContain('secret-a');
+    const { token: pur } = await loginAs(MARCUS);
+    expect((await api('GET', '/api/ai/providers', { token: pur })).status).toBe(403);
+  });
+
+  it('saves a per-feature model and the next call uses it', async () => {
+    const { token } = await loginAs(ALEX);
+    const env = { ANTHROPIC_API_KEY: 'a', OPENROUTER_API_KEY: 'o' };
+    const r = await api('PATCH', '/api/workspace', {
+      token, env, body: { ai_models: { default: 'anthropic:claude-sonnet-5-5', serial: 'openai/gpt-6-luna' } },
+    });
+    expect(r.status).toBe(200);
+    const e = { ...testEnv, ...env };
+    expect(await resolveModel(e, { feature: 'serial' })).toBe('openai/gpt-6-luna');
+    expect(await resolveModel(e, { feature: 'scan' })).toBe('anthropic:claude-sonnet-5-5');
+    expect(await resolveModel(e, { feature: 'scan', model: 'openai:gpt-x' })).toBe('openai:gpt-x');
+    const row = await getDb(e)`SELECT value FROM workspace_settings WHERE key = 'ai_models'`;
+    expect(row[0]!.value).toEqual({ default: 'anthropic:claude-sonnet-5-5', serial: 'openai/gpt-6-luna' });
+  });
+
+  it('refuses a model whose provider has no key, and a malformed setting', async () => {
+    const { token } = await loginAs(ALEX);
+    const patch = (v: unknown) => api<{ error: string }>('PATCH', '/api/workspace', {
+      token, env: { OPENROUTER_API_KEY: 'o' }, body: { ai_models: v },
+    });
+    const noKey = await patch({ default: 'anthropic:claude-sonnet-5-5' });
+    expect(noKey.status).toBe(400);
+    expect(noKey.body.error).toMatch(/ANTHROPIC_API_KEY/);
+    expect((await patch({ default: 'not a model' })).status).toBe(400);
+    expect((await patch({ default: null, bogus: 'openai/gpt-6-luna' })).status).toBe(400);
+    expect((await patch({ default: null, scan: 'openai/gpt-6-luna' })).status).toBe(200);
   });
 });

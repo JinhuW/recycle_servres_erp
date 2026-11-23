@@ -31,7 +31,7 @@ Each worker runs these independent loops:
 
 1. **poll** — claims every subreddit that is due, fetches them all in *one*
    Reddit request, and records the posts it found.
-2. **evaluate** — sends unjudged posts to OpenRouter, storing a verdict, a
+2. **evaluate** — sends unjudged posts to the LLM, storing a verdict, a
    one-line summary and the asking price. Since 2026-10-26 the prompt targets
    only bulk RAM from Samsung, SK Hynix and Micron; the spec and its evidence
    are in
@@ -103,7 +103,7 @@ string. Reviews still go out through the bot, and so do the reactions.
   as a review: the alert plus the model's reasoning and prompt version. The
   dev chat is where the team labels alerts without spamming buyers.
 - **Candidate prompt.** With `candidate_eval_prompt` set, every post is judged
-  a second time by the candidate. This doubles OpenRouter calls while a trial
+  a second time by the candidate. This doubles LLM calls while a trial
   runs.
   - The candidate's verdicts go to `candidate_verdicts` and never change a
     post's status.
@@ -221,7 +221,7 @@ through the API — no redeploy, and changes reach every worker within 60 s.
 | --- | --- | --- |
 | `DATABASE_URL` | yes | — |
 | `TELEGRAM_BOT_TOKEN` | unless `ALERT_TRANSPORT=console` | — |
-| `OPENROUTER_API_KEY` | workers only | — |
+| `OPENROUTER_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | workers: at least one | — (a model ref whose provider has no key fails each post, and the loop retries it) |
 | `ALERT_TRANSPORT` | no | `telegram` (`console` prints alerts to stdout instead) |
 | `ROLE` | no | `worker` (`api` runs the HTTP server instead of the loops) |
 | `API_PORT` / `API_TOKEN` | api role | `8080` / — |
@@ -243,6 +243,12 @@ poll Reddit) or `webhook` (the poll loop idles; see *Post source* below).
 Watched subreddits live in the `subreddits` table. Named buying rules live in
 `rules`; the enabled ones are appended to `eval_prompt` at evaluation time, so
 each post is still one LLM call (two while a candidate is on trial).
+
+`llm_model` and `candidate_llm_model` are model refs, `<provider>:<model>`:
+`anthropic:claude-sonnet-5-5` calls Anthropic's Messages API,
+`openai:gpt-6-luna` calls OpenAI's Responses API, and `openrouter:<id>` or a
+bare OpenRouter id such as `google/gemini-2.5-flash` calls OpenRouter. All
+three get the same response schema.
 
 ## Post source
 
@@ -476,7 +482,7 @@ src/
   dedup.ts         cross-post detection for notify
   analytics.ts     the ERP Analytics tab's numbers
   pacing.ts        per-IP rate limiter and backoff
-  llm.ts           OpenRouter evaluation
+  llm/             post evaluation; ref.ts picks OpenRouter, Anthropic or OpenAI
   rules.ts         named buying rules, composed into the eval prompt
   prompts.ts       prompt versions, candidate verdicts, per-version lead stats
   review.ts        dev-chat reviews of alerts and candidate-only posts

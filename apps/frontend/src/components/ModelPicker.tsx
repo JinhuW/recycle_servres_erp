@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Combobox } from './Combobox';
 import { loadAiModels, modelMeta, type AiModel } from '../lib/aiModels';
 import { useT } from '../lib/i18n';
+import { parseModelRef, type AiProviderId } from '@recycle-erp/shared';
 
-/** OpenRouter's catalogue: null while it loads, and for good once `failed`. */
+/** The model catalogue: null while it loads, and for good once `failed`. */
 export function useAiModels(): { models: AiModel[] | null; failed: boolean } {
   const [models, setModels] = useState<AiModel[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -19,11 +20,12 @@ export function useAiModels(): { models: AiModel[] | null; failed: boolean } {
 }
 
 /**
- * An OpenRouter model id field: pick from the catalogue, or type an id it
- * doesn't list yet (OpenRouter adds models before anyone touches the ERP).
- * The value is the text as typed; callers check it.
+ * A model id field: pick from the catalogue, or type an id it doesn't list
+ * yet (providers add models before anyone touches the ERP). The value is the
+ * text as typed; callers check it. With `provider`, the field holds that
+ * provider's own id, without the `anthropic:` / `openai:` prefix.
  */
-export function ModelPicker({ value, onChange, id, placeholder, invalid = false, filter, unavailableText }: {
+export function ModelPicker({ value, onChange, id, placeholder, invalid = false, filter, unavailableText, provider }: {
   value: string;
   onChange: (v: string) => void;
   id?: string;
@@ -33,13 +35,15 @@ export function ModelPicker({ value, onChange, id, placeholder, invalid = false,
   filter?: (m: AiModel) => boolean;
   /** What to say when the catalogue can't be loaded, for a caller that won't take a typed id. */
   unavailableText?: string;
+  provider?: AiProviderId;
 }) {
   const { t, locale } = useT();
   const { models, failed } = useAiModels();
 
   const shown = useMemo(() => (models ?? []).filter(m => !filter || filter(m)), [models, filter]);
-  const byId = useMemo(() => new Map(shown.map(m => [m.id, m])), [shown]);
-  const options = useMemo(() => shown.map(m => m.id), [shown]);
+  const label = (m: AiModel) => (provider ? parseModelRef(m.id).model : m.id);
+  const byId = useMemo(() => new Map(shown.map(m => [label(m), m])), [shown, provider]);
+  const options = useMemo(() => [...byId.keys()], [byId]);
 
   return (
     <>

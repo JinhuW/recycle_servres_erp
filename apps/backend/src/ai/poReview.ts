@@ -5,7 +5,7 @@
 // than failing the PO over one photo.
 
 import type { Env, LineCategory } from '../types';
-import { openRouterJson, openRouterScan, type AiCallOptions } from './openrouter';
+import { aiJson, aiScan, type AiCallOptions } from './llm';
 import { EXPECTED_FIELDS_BY_CATEGORY, partLookupPrompt } from './prompts';
 import { normalizeFields } from './normalize';
 
@@ -54,18 +54,18 @@ export async function rereadLabel(
 ): Promise<Record<string, string> | null> {
   const bytes = await fetchImage(url);
   if (!bytes) return null;
-  const r = await openRouterScan(env, category, bytes, opts);
+  const r = await aiScan(env, category, bytes, opts);
   if (r.confidence < MIN_LABEL_CONFIDENCE) return null;
   return keep(category, r.fields);
 }
 
-/** What the web says `partNumber` is, through the `:online` variant of the review's model. */
+/** What the web says `partNumber` is, through the review's model with web search on. */
 export async function lookUpPartNumber(
   env: Env, category: LineCategory, partNumber: string, opts: AiCallOptions & { model: string },
 ): Promise<{ specs: Record<string, string>; sourceUrls: string[] } | null> {
-  const json = await openRouterJson(env, partLookupPrompt(category, partNumber), [], {
+  const json = await aiJson(env, partLookupPrompt(category, partNumber), [], {
     ...opts,
-    model: opts.model.endsWith(':online') ? opts.model : `${opts.model}:online`,
+    webSearch: true,
     timeoutMs: LOOKUP_TIMEOUT_MS,
   });
   const raw = json.specs && typeof json.specs === 'object' ? json.specs as Record<string, unknown> : {};

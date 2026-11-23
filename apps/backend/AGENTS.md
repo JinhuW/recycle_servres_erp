@@ -258,16 +258,27 @@ together with its other side (root AGENTS.md → *Contracts*).
   (as `static.recycleservers.com` does).
 - **Don't reintroduce Cloudflare Images** — it's paywalled (error 5453); we
   migrated everything to R2 attachments.  See [the AI-scan image design][2].
-- **Model pickers read OpenRouter's public catalogue through
-  `routes/aiModels.ts`** (`GET /api/ai/models`, manager-only): no key, trimmed
-  to what a picker shows, cached in-process for an hour and served stale for
-  five minutes at a time while OpenRouter is down.
-- **OCR provider selection** lives in `apps/backend/src/ai/`.  OpenRouter
-  (`openai/gpt-6-luna`, overridable with `OPENROUTER_OCR_MODEL`) when
-  `OPENROUTER_API_KEY` is present; otherwise a deterministic stub that
-  returns canned data.  Production refuses to boot without the key
+- **AI providers are pluggable** (`ai/providers/`): OpenRouter, Anthropic
+  (Messages API) and OpenAI (Responses API), each one file implementing
+  `LlmProvider`, registered in `ai/providers/index.ts` and named in
+  `AI_PROVIDERS` (`packages/shared/src/aiModelRef.ts`).  A model setting is a
+  *model ref*: `anthropic:<id>`, `openai:<id>`, or a bare OpenRouter id, so
+  every id saved before providers existed still means OpenRouter.
+  `ai/llm.ts` is the one place for the deadline, the timeout/empty retry and
+  the JSON re-ask; providers only send a turn.
+- **Which model a call uses**: per-call override → the `ai_models` workspace
+  setting's feature row (scan, receipt, paypal, serial) → its `default` →
+  `AI_MODEL` / `OPENROUTER_OCR_MODEL` → `openai/gpt-6-luna`.  Settings ▸ AI
+  models writes `ai_models` through `PATCH /api/workspace`, which refuses a
+  ref whose provider has no key.  The setting is cached ~30 s in-process.
+- **Model pickers read `GET /api/ai/models`** (manager-only, `ai/catalogue.ts`):
+  OpenRouter's public catalogue plus the models of each provider with a key,
+  each cached for an hour and served stale for five minutes at a time while
+  its provider is down.  `GET /api/ai/providers` says which have a key.
+- **The stub**: with no provider key at all, a deterministic stub returns
+  canned data.  Production refuses to boot without the default model's key
   (`env.ts`); in dev and CI the stub logs one warning, and `/api/health`
-  reports which one is live (`providers.ocr`).
+  reports which provider is live (`providers.ocr`).
 
 [1]: ../../docs/superpowers/specs/2026-05-18-frontend-auth-overhaul-design.md
 [2]: ../../docs/superpowers/specs/2026-05-12-ai-scan-image-preview-design.md

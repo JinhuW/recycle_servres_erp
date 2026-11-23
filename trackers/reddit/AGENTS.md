@@ -51,11 +51,11 @@ has the repo map and workflow.
   [docs/debug-notes/telegram-supergroup-migration.md](docs/debug-notes/telegram-supergroup-migration.md).
   A group upgraded to a supergroup gets a new `-100…` chat id, and every alert
   to the old id fails.
-- **The eval prompt, rules, `src/llm.ts` or the response schema** →
+- **The eval prompt, rules, `src/llm/` or the response schema** →
   [docs/prompt-evaluations/](docs/prompt-evaluations/). Every verdict is
   scored by prompt version, so a wording change belongs in a candidate trial
   with its numbers written up, not straight in `eval_prompt`.
-- **The response schema** (`RESPONSE_SCHEMA` in `src/llm.ts`) is part of
+- **The response schema** (`RESPONSE_JSON_SCHEMA` in `src/llm/index.ts`) is part of
   every prompt version's identity, through `RESPONSE_SCHEMA_ID` in the hash.
   Changing the schema starts every version afresh, so give the new shape a
   new id, and measure it first. `reasoning` comes before `is_target` because
