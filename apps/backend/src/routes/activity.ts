@@ -8,9 +8,9 @@ import { restageSoldEvent, soldSettleEventSql } from '../services/orderSold';
 import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor } from '../lib/pagination';
 import type { Env, User } from '../types';
 
-// Workspace-wide activity feed — the union of all five audit ledgers
+// Workspace-wide activity feed — the union of all six audit ledgers
 // (order_events, sell_order_events, inventory_events, ref_price_events,
-// accounting_entry_events) as one reverse-chronological record. Drives the
+// accounting_entry_events, ebay_listing_events) as one reverse-chronological record. Drives the
 // desktop Activity page.
 //
 // Read-only. Every source table is append-only by trigger; nothing here writes.
@@ -65,7 +65,7 @@ activity.get('/', async (c) => {
   // ── Filter fragments, shared by the feed and the pill counts ──────────────
   // Keyset on (created_at, id) — the tiebreaker shape lib/pagination.ts
   // documents. Both columns stay uncast so each branch can use its *_feed_idx
-  // from migration 0079 (0197 for accounting); all five ledgers key on uuid,
+  // from migration 0079 (0197 for accounting); all six ledgers key on uuid,
   // so the id compare is type-clean.
   const afterTs = cursorTs(cursor);
   const cursorFrag = afterTs && cursor
@@ -105,6 +105,8 @@ activity.get('/', async (c) => {
     acct: sql`${sinceFrag} AND ${kindFrag('acct')} AND ${actorFrag('actor_id')}
             AND (${searchFrag(['e.entry_id', 'ae.order_id', 'ae.sell_order_id', 'ae.after_sales_id',
                                'ae.counterparty', "e.detail->>'text'", 'act.name'])})`,
+    ebay: sql`${sinceFrag} AND ${kindFrag('ebay')} AND ${actorFrag('actor_id')}
+            AND (${searchFrag(['e.listing_id', 'el.title', 'el.spec', 'act.name'])})`,
   };
 
   const FROM = {
@@ -121,11 +123,14 @@ activity.get('/', async (c) => {
     acct: sql`FROM accounting_entry_events e
               JOIN accounting_entries ae ON ae.id = e.entry_id
               LEFT JOIN users act ON act.id = e.actor_id`,
+    ebay: sql`FROM ebay_listing_events e
+              JOIN ebay_listings el ON el.id = e.listing_id
+              LEFT JOIN users act ON act.id = e.actor_id`,
   };
 
   // ── Feed ──────────────────────────────────────────────────────────────────
-  // Each branch pre-sorts and pre-limits, so the union merges five short lists
-  // rather than materialising five whole ledgers.
+  // Each branch pre-sorts and pre-limits, so the union merges six short lists
+  // rather than materialising six whole ledgers.
   const tail = (a: ActivityArea) =>
     sql`${FROM[a]} WHERE ${cursorFrag} AND ${WHERE[a]}
         ORDER BY e.created_at DESC, e.id DESC LIMIT ${limit + 1}`;
@@ -165,6 +170,10 @@ activity.get('/', async (c) => {
                   'direction', ae.direction, 'kind', ae.kind, 'amountCny', ae.amount_cny,
                   'record', COALESCE(ae.order_id, ae.sell_order_id, ae.after_sales_id))) AS detail
             ${tail('acct')}`,
+    ebay: sql`SELECT 'ebay' AS area, e.id AS id, e.created_at, ${cursorTsSelect(sql, sql`e.created_at`)} AS cursor_ts,
+              e.actor_id AS actor_id, act.name AS actor_name, act.initials AS actor_initials,
+              e.listing_id AS target, e.listing_id AS target_ref, e.kind, e.detail
+            ${tail('ebay')}`,
   };
 
   // Each branch must be parenthesised: an unwrapped ORDER BY / LIMIT binds to
@@ -194,7 +203,7 @@ activity.get('/', async (c) => {
   //
   // Which is exactly why it only runs on the first page. The count deliberately
   // ignores the cursor, so every infinite-scroll page used to re-run the same
-  // full five-ledger COUNT and get the same answer. Omitted on cursored pages;
+  // full six-ledger COUNT and get the same answer. Omitted on cursored pages;
   // the client keeps the numbers it already has.
   let counts: Record<string, number> | undefined;
   if (!cursor) {

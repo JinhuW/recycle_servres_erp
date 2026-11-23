@@ -9,7 +9,7 @@
 // drifting. The backend also inverts this map to turn `?action=status` into
 // the set of raw kinds to filter each branch on.
 
-export const ACTIVITY_AREAS = ['po', 'so', 'inv', 'price', 'acct'] as const;
+export const ACTIVITY_AREAS = ['po', 'so', 'inv', 'price', 'acct', 'ebay'] as const;
 export type ActivityArea = (typeof ACTIVITY_AREAS)[number];
 
 export const ACTIVITY_ACTIONS = [
@@ -75,6 +75,9 @@ export const ACTIVITY_KIND_MAP: Record<
     edited:      'edited',
     priced:      'priced',
     transferred: 'moved',
+    // Units put on, or handed back from, an eBay listing.
+    ebay_listed: 'moved',
+    ebay_ended:  'moved',
   },
   // Voiding takes an entry out of the book and restoring puts it back: its
   // standing changes, so both read as a status move.
@@ -91,6 +94,16 @@ export const ACTIVITY_KIND_MAP: Record<
     query_withdrawn: 'queried',
     attachment_added:   'added',
     attachment_removed: 'removed',
+  },
+  ebay: {
+    created:        'created',
+    edited:         'edited',
+    listed:         'status',
+    sold:           'status',
+    ended:          'status',
+    sale_detected:  'added',
+    sale_confirmed: 'added',
+    sale_dismissed: 'removed',
   },
 };
 

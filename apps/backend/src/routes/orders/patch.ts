@@ -681,7 +681,11 @@ patchRoutes.patch('/:id', async (c) => {
             throw new OrderRefusal({
               kind: 'qtyBelowCommitted',
               lineIds: short.map(l => l.id),
-              sellOrderIds: [...new Set(short.map(l => claims.get(l.id.toLowerCase())!.sellOrderId))].sort(),
+              // An eBay listing's id stands in where no sell order holds the units.
+              sellOrderIds: [...new Set(short.map(l => {
+                const claim = claims.get(l.id.toLowerCase())!;
+                return claim.sellOrderId ?? claim.ebayListingId!;
+              }))].sort(),
             });
           }
         }
