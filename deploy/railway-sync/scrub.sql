@@ -67,3 +67,19 @@ BEGIN
     UPDATE public.fb_chat_devices SET token_hash = pg_catalog.md5(pg_catalog.gen_random_uuid()::text);
   END IF;
 END $$;
+
+-- AI provider keys pasted on Settings ▸ AI models are prod's paid API keys.
+-- They are sealed too, but in a column named `sealed`, which the *_enc sweep
+-- above doesn't match, and a key leaked from dev bills prod's accounts. Dev
+-- runs on its own env keys. A pending tracker removal is about prod's
+-- tracker, not dev's, so it goes too. Guarded like the device table:
+-- prod gains these only when its release reaches main.
+DO $$
+BEGIN
+  IF pg_catalog.to_regclass('public.ai_provider_keys') IS NOT NULL THEN
+    TRUNCATE public.ai_provider_keys;
+  END IF;
+  IF pg_catalog.to_regclass('public.ai_provider_key_removals') IS NOT NULL THEN
+    TRUNCATE public.ai_provider_key_removals;
+  END IF;
+END $$;
