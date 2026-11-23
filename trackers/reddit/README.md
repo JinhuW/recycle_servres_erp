@@ -131,9 +131,9 @@ Two mechanisms, both in `src/claims.ts`:
 ### Cross-posts
 
 Sellers post one listing to r/homelabsales and r/hardwareswap, or repost it a
-day later, and each copy gets its own Reddit id. The feed carries no
-`crosspost_parent`, and most copies are pasted by hand, so `src/dedup.ts` finds
-them by author and words. Two posts are one listing when the same author posted
+day later, and each copy gets its own Reddit id. Most copies are pasted by
+hand rather than cross-posted, so `src/dedup.ts` finds them by author and
+words. Two posts are one listing when the same author posted
 them within 72 hours and either:
 
 - their titles share at least 60% of their words, once tags like `[FS]`,
@@ -157,8 +157,9 @@ shipped, 71 of 480 alerts were such repeats.
 On the swap subreddits a buyer comments "PM" or "chat sent" and takes the deal
 private, so the number of distinct buyers who did that is the best public
 measure of how wanted a listing was. The **trace** loop (`src/loops/trace.ts`)
-reads each post's comment feed (`<permalink>.rss`, anonymous like the post
-feed) once it is 24 hours old and up to 8 days back, newest first. It stores
+reads each post's comments through the OAuth API (`/comments/<id>`) once it
+is 24 hours old and up to 8 days back, newest first. It runs only with
+`REDDIT_CLIENT_ID` set. It stores
 `comment_count`, and `pm_count`: commenters other than the seller and bots
 whose comment asks by PM, DM or chat.
 
@@ -174,21 +175,21 @@ of the hot memory posts it judged, how many it flagged.
 
 ### Reddit access
 
-There are no Reddit credentials. The anonymous JSON API is 403-blocked for all
-User-Agents, so the tracker reads the **Atom feed** instead, which is still
-open:
+Reddit has no logged-out route left: the anonymous JSON API is 403-blocked,
+and Reddit withdrew the Atom feeds in November 2026
+(`docs/debug-notes/reddit-new-rss-404.md`). So posts come from the
+redditapis.com webhook (*Post source* below), and the workers read Reddit
+themselves only with app-only OAuth credentials (`REDDIT_CLIENT_ID` /
+`REDDIT_CLIENT_SECRET`, `src/redditOAuth.ts`):
 
 ```
-https://www.reddit.com/r/homelabsales+hardwareswap+homelab/new.rss?limit=100
+https://oauth.reddit.com/r/homelabsales+hardwareswap+homelab/new?limit=100
 ```
 
-One request returns up to 100 posts across every watched subreddit. The
-anonymous bucket refills roughly every 40 s (`REDDIT_MAX_RPM` defaults to `1`),
-and responses' `x-ratelimit-*` headers feed back into the pacer so Reddit's own
-accounting drives our timing.
-
-See `docs/debug-notes/reddit-anonymous-json-blocked.md` before changing
-anything about how posts are fetched.
+One request returns up to 100 posts across every watched subreddit, and
+responses' `x-ratelimit-*` headers feed back into the pacer so Reddit's own
+accounting drives our timing. With `poll_source = reddit` and no credentials,
+a worker claims nothing and logs one warning an hour.
 
 ## Local development
 
@@ -227,7 +228,7 @@ through the API — no redeploy, and changes reach every worker within 60 s.
 | `WORKER_ID` | no | `hostname-pid-random` |
 | `REDDIT_USER_AGENT` | no | `recycle-servers-tracker/1.0 (contact: …)` |
 | `REDDITAPIS_WEBHOOK_SECRET` | api role, when `poll_source` is `webhook` | — (`/webhooks/redditapis` answers 404) |
-| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | no, both or neither | — (falls back to the Atom feed, which Reddit withdrew in Nov 2026; see `docs/debug-notes/reddit-new-rss-404.md`) |
+| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | no, both or neither | — (no direct Reddit reads: the poll loop and the PM tracer stay off; posts come only from the webhook) |
 | `REDDIT_MAX_RPM` | no | `1` |
 | `COMMENT_TRACER` | no | `on` (`off` keeps this worker from taking the PM tracer lease; the tracer also needs `REDDIT_CLIENT_ID`) |
 | `LOG_LEVEL` | no | `info` |
@@ -257,9 +258,8 @@ Evaluation and alerts are unchanged. The ops watch pages when no delivery
 has added a post for 90 minutes, or at once if none ever has. Vendor test
 deliveries (`type: "test"`) are acknowledged and not stored.
 
-The PM tracer runs only with `REDDIT_CLIENT_ID` set. Reddit's anonymous
-comment feeds 404 like the listing feeds, and the tracer reads a 404 as a
-removed post, so without OAuth it would write off every post's PM count.
+The PM tracer runs only with `REDDIT_CLIENT_ID` set: comments, like posts,
+can no longer be read logged out.
 
 `pnpm redditapis <command>` (`scripts/redditapis-monitor.ts`, needs
 `REDDITAPIS_KEY`) manages the vendor side. It is an ops script against the
@@ -470,7 +470,9 @@ src/
   config.ts        env parsing, fails fast on a bad boot
   db.ts            postgres.js client
   claims.ts        all fleet coordination SQL — the core of the design
-  reddit.ts        Atom feed fetch + parse, posts and comments
+  reddit.ts        post and comment shapes, rate-limit headers
+  redditOAuth.ts   app-only OAuth reads: new posts, a post's comments
+  webhook.ts       redditapis.com deliveries into posts
   dedup.ts         cross-post detection for notify
   analytics.ts     the ERP Analytics tab's numbers
   pacing.ts        per-IP rate limiter and backoff

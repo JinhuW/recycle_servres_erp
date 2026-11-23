@@ -280,12 +280,9 @@ async function runWorker(): Promise<void> {
     ),
     startHeartbeat('worker'),
   ];
-  // The tracer needs a working comment source. Reddit's anonymous comment feed
-  // 404s like the listing feed (docs/debug-notes/reddit-new-rss-404.md), and the
-  // tracer reads a 404 as "post removed": it would stamp every post traced with
-  // NULL counts and lose its PM data for good. So it runs only with OAuth.
+  // Comments can only be read through OAuth (docs/debug-notes/reddit-new-rss-404.md).
   if (config.commentTracer && !config.redditAuth) {
-    logger.info('PM tracer off: no REDDIT_CLIENT_ID, and anonymous comment feeds are gone');
+    logger.info('PM tracer off: no REDDIT_CLIENT_ID, and comments can only be read through OAuth');
   }
   if (config.commentTracer && config.redditAuth) {
     // Idle mostly means another worker holds the lease; checking every minute

@@ -1,16 +1,10 @@
-// Reads new posts, and the comments under them, from Reddit without credentials.
+// The shapes both post sources share: the poll loop's OAuth reads
+// (redditOAuth.ts) and the redditapis.com webhook (webhook.ts).
 //
-// The anonymous JSON API (/r/x/new.json) is 403-blocked for every User-Agent,
-// so this uses the Atom feed instead, which is still open. One request to a
-// multireddit path (r/a+b+c/new.rss) returns up to 100 entries spanning every
-// watched subreddit — that is why the poll loop claims subreddits in batches.
-// See docs/debug-notes/reddit-anonymous-json-blocked.md.
-//
-// Reddit withdrew logged-out RSS in November 2026, so with OAuth credentials
-// configured both fetchers go through redditOAuth.ts instead. The Atom path
-// stays as the no-credentials fallback. See docs/debug-notes/reddit-new-rss-404.md.
-
-import {fetchCommentsOAuth, fetchNewPostsOAuth, type RedditAuth} from './redditOAuth.ts';
+// Reddit has no logged-out way in any more. The anonymous JSON API is
+// 403-blocked, and the Atom feeds were withdrawn in November 2026 (see
+// docs/debug-notes/reddit-new-rss-404.md), so reading Reddit directly needs
+// OAuth credentials.
 
 export interface RedditPost {
   redditId: string;
@@ -18,7 +12,6 @@ export interface RedditPost {
   title: string;
   selftext: string;
   author: string | null;
-  /** Always null: the Atom feed does not carry flair. */
   flair: string | null;
   url: string;
   postedAt: Date;
@@ -37,93 +30,20 @@ export type FetchResult =
   | {kind: 'blocked'; status: number}
   | {kind: 'error'; message: string};
 
-const FEED_TIMEOUT_MS = 20_000;
-/** Reddit's maximum; anything higher is silently clamped. */
-const FEED_LIMIT = 100;
-
-/** Builds the multireddit feed URL for a batch of subreddits. */
-export function feedUrl(subreddits: string[]): string {
-  const path = subreddits.map((s) => encodeURIComponent(s)).join('+');
-  return `https://www.reddit.com/r/${path}/new.rss?limit=${FEED_LIMIT}`;
+export interface RedditComment {
+  author: string | null;
+  text: string;
 }
 
-function decodeEntities(text: string): string {
-  return text
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#0?39;|&apos;/g, "'")
-    .replace(/&#0?32;/g, ' ')
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
-    // Ampersand last, so "&amp;lt;" does not become "<".
-    .replace(/&amp;/g, '&');
-}
+export type CommentsResult =
+  | {kind: 'ok'; comments: RedditComment[]; rateLimit: RateLimitHint}
+  | {kind: 'rate_limited'; retryAfterSeconds?: number}
+  | {kind: 'blocked'; status: number}
+  | {kind: 'gone'}
+  | {kind: 'error'; message: string};
 
-function tagContent(xml: string, tag: string): string | null {
-  const match = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`).exec(xml);
-  return match?.[1] ?? null;
-}
-
-/**
- * Turns Reddit's HTML post body into plain text for the LLM. The feed wraps
- * every body in a thumbnail table plus a "submitted by … to r/x" footer; the
- * footer is dropped so the prompt sees only what the author wrote.
- */
-export function htmlToText(html: string): string {
-  const decoded = decodeEntities(html);
-  const body = /<div class="md">([\s\S]*?)<\/div>/.exec(decoded)?.[1] ?? decoded;
-  return decodeEntities(
-    body
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/p>/gi, '\n\n')
-      .replace(/<[^>]+>/g, ' '),
-  )
-    .replace(/[ \t ]+/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-/**
- * Parses an Atom feed into posts. Malformed entries are skipped rather than
- * failing the batch — one bad entry must not cost us the other 99.
- */
-export function parseFeed(xml: string): RedditPost[] {
-  const posts: RedditPost[] = [];
-
-  for (const [, entry] of xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)) {
-    if (!entry) continue;
-
-    const redditId = tagContent(entry, 'id')?.trim();
-    const title = tagContent(entry, 'title');
-    const published = tagContent(entry, 'published')?.trim();
-    const href = /<link[^>]*href="([^"]+)"/.exec(entry)?.[1];
-    const subreddit = /<category[^>]*term="([^"]+)"/.exec(entry)?.[1];
-
-    if (!redditId || !title || !published || !href || !subreddit) continue;
-
-    const postedAt = new Date(published);
-    if (Number.isNaN(postedAt.getTime())) continue;
-
-    const authorRaw = tagContent(tagContent(entry, 'author') ?? '', 'name');
-    const content = tagContent(entry, 'content');
-
-    posts.push({
-      redditId,
-      subreddit: subreddit.toLowerCase(),
-      title: decodeEntities(title).trim(),
-      // Bodies get long; the LLM prompt truncates further, this just bounds
-      // what we store.
-      selftext: content ? htmlToText(content).slice(0, 8000) : '',
-      author: authorRaw ? authorRaw.replace(/^\/u\//, '') : null,
-      flair: null,
-      url: decodeEntities(href),
-      postedAt,
-    });
-  }
-
-  return posts;
-}
+/** Reddit's ceiling for one comment page; a thread longer than this is rare on a sale post. */
+export const COMMENTS_LIMIT = 500;
 
 /**
  * Reads a numeric header. Returns undefined for an absent header — plain
@@ -143,124 +63,4 @@ export function readRateLimit(headers: Headers): RateLimitHint {
     ...(remaining !== undefined ? {remaining} : {}),
     ...(resetSeconds !== undefined ? {resetSeconds} : {}),
   };
-}
-
-type FeedResult =
-  | {kind: 'ok'; body: string; rateLimit: RateLimitHint}
-  | {kind: 'rate_limited'; retryAfterSeconds?: number}
-  | {kind: 'blocked'; status: number}
-  | {kind: 'gone'}
-  | {kind: 'error'; message: string};
-
-/** One Atom request, with Reddit's failure modes told apart. Never throws. */
-async function fetchFeed(url: string, userAgent: string): Promise<FeedResult> {
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      headers: {'User-Agent': userAgent, Accept: 'application/atom+xml, application/xml'},
-      signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
-    });
-  } catch (e) {
-    return {kind: 'error', message: e instanceof Error ? e.message : String(e)};
-  }
-
-  if (response.status === 429) {
-    const seconds = numericHeader(response.headers, 'retry-after')
-      ?? numericHeader(response.headers, 'x-ratelimit-reset');
-    return {kind: 'rate_limited', ...(seconds !== undefined ? {retryAfterSeconds: seconds} : {})};
-  }
-
-  if (response.status === 403 || response.status === 401) {
-    return {kind: 'blocked', status: response.status};
-  }
-
-  if (response.status === 404) return {kind: 'gone'};
-
-  if (!response.ok) {
-    return {kind: 'error', message: `HTTP ${response.status}`};
-  }
-
-  const body = await response.text();
-
-  // A 200 carrying HTML is Reddit's block page, not a feed. Treat it exactly
-  // like a 403 rather than letting the parser return zero posts and look like
-  // a quiet subreddit.
-  if (!body.trimStart().startsWith('<?xml') && !body.includes('<feed')) {
-    return {kind: 'blocked', status: response.status};
-  }
-
-  return {kind: 'ok', body, rateLimit: readRateLimit(response.headers)};
-}
-
-/**
- * Fetches the newest posts across every given subreddit in a single request.
- * Never throws: transport and block failures come back as typed results so the
- * poll loop can decide between backing off and retrying.
- */
-export async function fetchNewPosts(
-  subreddits: string[],
-  userAgent: string,
-  auth: RedditAuth | null = null,
-): Promise<FetchResult> {
-  if (subreddits.length === 0) return {kind: 'ok', posts: [], rateLimit: {}};
-  if (auth) return fetchNewPostsOAuth(subreddits, userAgent, auth);
-  const result = await fetchFeed(feedUrl(subreddits), userAgent);
-  switch (result.kind) {
-    case 'ok':
-      return {kind: 'ok', posts: parseFeed(result.body), rateLimit: result.rateLimit};
-    case 'gone':
-      return {kind: 'error', message: 'HTTP 404'};
-    default:
-      return result;
-  }
-}
-
-export interface RedditComment {
-  author: string | null;
-  text: string;
-}
-
-export type CommentsResult =
-  | {kind: 'ok'; comments: RedditComment[]; rateLimit: RateLimitHint}
-  | {kind: 'rate_limited'; retryAfterSeconds?: number}
-  | {kind: 'blocked'; status: number}
-  | {kind: 'gone'}
-  | {kind: 'error'; message: string};
-
-/** Reddit's ceiling for one comment page; a thread longer than this is rare on a sale post. */
-export const COMMENTS_LIMIT = 500;
-
-/** A post's comment feed, from its permalink. */
-export function commentsUrl(postUrl: string): string {
-  return `${postUrl.replace(/\/+$/, '')}/.rss?limit=${COMMENTS_LIMIT}`;
-}
-
-/**
- * Parses a post's comment feed. Its first entry is the post itself (a `t3_`
- * id); every comment after it is a `t1_`, replies included.
- */
-export function parseComments(xml: string): RedditComment[] {
-  const comments: RedditComment[] = [];
-  for (const [, entry] of xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)) {
-    if (!entry || !tagContent(entry, 'id')?.trim().startsWith('t1_')) continue;
-    const authorRaw = tagContent(tagContent(entry, 'author') ?? '', 'name');
-    const content = tagContent(entry, 'content');
-    comments.push({
-      author: authorRaw ? authorRaw.replace(/^\/u\//, '') : null,
-      text: content ? htmlToText(content) : '',
-    });
-  }
-  return comments;
-}
-
-/** Fetches a post's comments. Never throws, like fetchNewPosts. */
-export async function fetchComments(
-  postUrl: string,
-  userAgent: string,
-  auth: RedditAuth | null = null,
-): Promise<CommentsResult> {
-  if (auth) return fetchCommentsOAuth(postUrl, userAgent, auth);
-  const result = await fetchFeed(commentsUrl(postUrl), userAgent);
-  if (result.kind !== 'ok') return result;
-  return {kind: 'ok', comments: parseComments(result.body), rateLimit: result.rateLimit};
 }
