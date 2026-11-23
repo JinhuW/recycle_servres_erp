@@ -5,6 +5,8 @@
 // quiet", "New lead". Keeping the translation in one place means a future
 // field cannot leak the internal vocabulary into the UI by accident.
 
+import { REPORTING_TZ, addDays, todayIn } from '@recycle-erp/shared';
+
 export type Tier = 'A' | 'B' | 'C';
 export type Health = 'new' | 'ok' | 'quiet' | 'lost';
 export type DueState = 'overdue' | 'today' | 'soon' | 'later' | 'none';
@@ -125,4 +127,11 @@ export function rhythmMarks(orders: { created_at: string }[]): number[] {
   const now = Date.now();
   return orders.map((o) =>
     Math.max(0, Math.round((now - new Date(o.created_at).getTime()) / 86_400_000)));
+}
+
+/** The follow-up date `days` from today. Today is the office's business day
+ *  (REPORTING_TZ), the same day the backend counts due and overdue from, so a
+ *  call logged in a Denver evening is not scheduled from tomorrow's UTC date. */
+export function followUpDate(days: number, now: Date = new Date()): string {
+  return addDays(todayIn(REPORTING_TZ, now), days);
 }

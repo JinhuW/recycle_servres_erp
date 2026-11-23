@@ -11,6 +11,7 @@
 // history (services/supplierCrm.ts). Nothing here caches or stores them.
 
 import { Hono } from 'hono';
+import { REPORTING_TZ } from '@recycle-erp/shared';
 import { isEmail } from '../lib/email';
 import { getDb } from '../db';
 import { clampLimit } from '../lib/pagination';
@@ -184,7 +185,7 @@ function rollup(sql: ReturnType<typeof getDb>, floor: number, u: User) {
            (NOW()::date - po.last_po_at::date) AS days_since_po,
            gap.raw_gap, tierrank.pr,
            COALESCE(items.item_types, '{}') AS item_types,
-           (CURRENT_DATE - s.next_follow_up_at) AS days_late
+           ((NOW() AT TIME ZONE ${REPORTING_TZ})::date - s.next_follow_up_at) AS days_late
     FROM suppliers s
     LEFT JOIN users u   ON u.id = s.owner_id
     LEFT JOIN po        ON po.supplier_id = s.id
@@ -391,7 +392,7 @@ suppliers.post('/adopt', async (c) => {
       await tx`
         UPDATE suppliers SET
           last_contacted_at = (SELECT MAX(created_at) FROM orders WHERE supplier_id = ${id}),
-          next_follow_up_at = CURRENT_DATE
+          next_follow_up_at = (NOW() AT TIME ZONE ${REPORTING_TZ})::date
         WHERE id = ${id}
       `;
       await tx`

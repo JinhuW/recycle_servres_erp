@@ -113,4 +113,11 @@ describe('scheduling', () => {
   it('does not drift across a month boundary', () => {
     expect(isoDatePlus(1, new Date('2026-08-31T12:00:00Z'))).toBe('2026-09-01');
   });
+
+  it('counts from the Denver business day, not the UTC one', () => {
+    // 18:00 MST on Nov 22 is 01:00Z on Nov 23.
+    expect(isoDatePlus(7, new Date('2026-11-23T01:00:00Z'))).toBe('2026-11-29');
+    expect(isoDatePlus(0, new Date('2026-11-23T06:59:00Z'))).toBe('2026-11-22');
+    expect(isoDatePlus(0, new Date('2026-11-23T07:00:00Z'))).toBe('2026-11-23');
+  });
 });

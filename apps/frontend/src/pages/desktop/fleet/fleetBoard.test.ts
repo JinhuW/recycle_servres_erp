@@ -5,7 +5,7 @@ import {
   fleetAttention, alertsByCity, averageTaskSeconds, beltAxis, beltLeft, beltRow, beltSummary, budgetTone, cityBucket, cityStanding, daySeries, dueIn, dueLabel,
   capacityCuts, easternClock, filterCities, filterTasks, funnelCounts, funnelGaps, funnelHeadline, hostRunning, isQuarantined, isSlug,
   lastDoneSearch, leaseLive, liveness, logByItem, maskUid, nextDue, niceTop, openSearch, releaseSummary, rollProgress, hostLag, imageVersion, roundStartPreview,
-  slotLease, sortTasks, spanLabel, utcDayStart, withCityNames, workersBusy,
+  slotLease, sortTasks, spanLabel, fleetDayStart, withCityNames, workersBusy,
 } from './fleetBoard';
 
 // A translator that shows its key and its numbers, so a sentence can be read
@@ -29,9 +29,20 @@ describe('easternClock', () => {
   });
 });
 
-describe('utcDayStart', () => {
-  it('is midnight UTC of the day', () => {
-    expect(utcDayStart(NOW)).toBe('2026-10-24T00:00:00.000Z');
+describe('fleetDayStart', () => {
+  it('is midnight Eastern of the Eastern day', () => {
+    // 18:30Z on Oct 24 is 14:30 EDT.
+    expect(fleetDayStart(NOW)).toBe('2026-10-24T04:00:00.000Z');
+  });
+  it('stays on the Eastern day after the UTC date rolls over', () => {
+    // 21:00 EST on Nov 22 is 02:00Z on Nov 23.
+    expect(fleetDayStart(Date.parse('2026-11-23T02:00:00Z'))).toBe('2026-11-22T05:00:00.000Z');
+  });
+  it('uses the offset in force at midnight on DST change days', () => {
+    // Nov 1 2026 falls back at 02:00 EDT; midnight is still EDT.
+    expect(fleetDayStart(Date.parse('2026-11-01T15:00:00Z'))).toBe('2026-11-01T04:00:00.000Z');
+    // Mar 8 2026 springs forward at 02:00 EST; midnight is still EST.
+    expect(fleetDayStart(Date.parse('2026-03-08T15:00:00Z'))).toBe('2026-03-08T05:00:00.000Z');
   });
 });
 
