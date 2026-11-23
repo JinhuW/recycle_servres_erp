@@ -28,7 +28,7 @@ import { useMarketLookup } from '../lib/useMarketLookup';
 import { useChipFill } from '../lib/useChipFill';
 import { RamPartMismatchDialog, ScanPartNotice, useRamPartFill } from '../components/RamPartCheck';
 import { partQuestionKey, partQuestionPending } from '../lib/ramPartQuestion';
-import { unitFromTotal } from '../lib/lineTotal';
+import { roundedLotTotal, unitFromTotal } from '../lib/lineTotal';
 
 type Props = {
   category: Category;
@@ -661,6 +661,16 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
                 setCostRaw(String(unit));
               }}
             />
+            {/* The typed total stays on screen (a later quantity re-divides
+                it), so say plainly when the line will not save as typed. */}
+            {(() => {
+              const rounded = totalRaw == null ? null : roundedLotTotal(totalRaw, line.qty);
+              return rounded && (
+                <div style={{ fontSize: 11.5, color: 'var(--warn)', marginTop: 4 }}>
+                  {t('lotTotalRounds', { saved: fmtUSD(rounded.saved, locale), qty: line.qty, unit: fmtUSD(rounded.unit, locale) })}
+                </div>
+              );
+            })()}
           </div>
           <div className="ph-field">
             <label>{t('sellPrice')}</label>

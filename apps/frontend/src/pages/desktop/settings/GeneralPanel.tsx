@@ -5,6 +5,7 @@ import { handleFetchError } from '../../../lib/errorToast';
 import { Toggle } from './_shared';
 import { isModelRef } from '@recycle-erp/shared';
 import { ProviderModelSelect } from '../../../components/ProviderModelSelect';
+import { READS_IMAGES } from '../../../lib/aiModels';
 import type { Lang } from '../../../lib/types';
 
 // ─── Language radio (used inside the General tab) ─────────────────────────────
@@ -295,8 +296,10 @@ export function GeneralPanel() {
                 each keystroke must not be saved as the review's model. */}
             <div style={{ display: 'flex', gap: 8, alignItems: 'start' }}>
               <div style={{ flex: 1 }}>
+                {/* The review rereads label photos, so only models that see images. */}
                 <ProviderModelSelect
                   id="ai-review-model"
+                  filter={READS_IMAGES}
                   value={modelDraft ?? data.aiReview.model ?? ''}
                   defaultLabel={t('aiUseDefaultModel', { model: t('aiModelsNavShort') })}
                   invalid={modelDraft !== null && modelDraft !== '' && !isModelRef(modelDraft)}

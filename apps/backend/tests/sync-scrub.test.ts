@@ -112,4 +112,22 @@ describe('prod→dev sync scrub', () => {
     await sql`DROP TABLE fb_chat_devices`;
     await run();
   });
+
+  it('empties the pasted AI provider keys, and runs where prod has no key table yet', async () => {
+    const sql = getTestDb();
+    await sql`INSERT INTO ai_provider_keys (provider, sealed, last4, tracker_synced) VALUES ('anthropic', 'v1.a.b.c', 'abcd', TRUE)`;
+    await sql`INSERT INTO ai_provider_key_removals (provider) VALUES ('openai')`;
+    const run = () => sql.begin(async (tx) => {
+      await tx`SELECT pg_catalog.set_config('search_path', '', true)`;
+      await tx.unsafe(scrub);
+    });
+    await run();
+    expect(await sql`SELECT 1 FROM ai_provider_keys`).toHaveLength(0);
+    expect(await sql`SELECT 1 FROM ai_provider_key_removals`).toHaveLength(0);
+
+    await sql`DROP TABLE env_marker`;
+    await sql`DROP TABLE ai_provider_keys`;
+    await sql`DROP TABLE ai_provider_key_removals`;
+    await run();
+  });
 });

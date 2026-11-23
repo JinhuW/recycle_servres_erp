@@ -14,7 +14,8 @@ let keys: KeyStore;
 beforeAll(async () => {
   db = await createTestDb('api');
   // A long TTL, so a test sees a stale read unless the route invalidates.
-  keys = new KeyStore(db.sql, {}, 3_600_000);
+  // An env OpenRouter key, so OpenRouter model ids pass the key check.
+  keys = new KeyStore(db.sql, {openrouter: 'env-or-key'}, 3_600_000);
   app = createApi({
     sql: db.sql,
     settings: new SettingsStore(db.sql, 0),
@@ -310,6 +311,31 @@ describe('settings', () => {
     });
 
     expect(res.status).toBe(200);
+  });
+
+  it('refuses a model whose provider has no key, and takes it once one lands', async () => {
+    const put = () => request('/api/settings/llm_model', {
+      method: 'PUT',
+      body: JSON.stringify({value: 'anthropic:claude-sonnet-5-5'}),
+    });
+
+    const refused = await put();
+    expect(refused.status).toBe(409);
+    expect((await refused.json() as {error: string}).error).toContain('no anthropic API key');
+    expect((await new SettingsStore(db.sql, 0).get()).llmModel).not.toBe('anthropic:claude-sonnet-5-5');
+
+    await request('/api/llm-keys/anthropic', {method: 'PUT', body: JSON.stringify({key: 'sk-ant-1234'})});
+    expect((await put()).status).toBe(200);
+  });
+
+  it('refuses a candidate model whose provider has no key, but not ""', async () => {
+    const put = (value: string) => request('/api/settings/candidate_llm_model', {
+      method: 'PUT',
+      body: JSON.stringify({value}),
+    });
+
+    expect((await put('openai:gpt-6-luna')).status).toBe(409);
+    expect((await put('')).status).toBe(200);
   });
 
   it('switches poll_source between reddit and webhook only', async () => {
@@ -899,6 +925,10 @@ describe('prompt scoring', () => {
 
     expect((await put({prompt: '   '})).status).toBe(400);
     expect((await put({prompt: 'P', model: 'gpt-4o-mini'})).status).toBe(400);
+    const noKey = await put({prompt: 'P', model: 'anthropic:claude-haiku-5-5'});
+    expect(noKey.status).toBe(409);
+    expect((await noKey.json() as {error: string}).error).toContain('ANTHROPIC_API_KEY');
+    expect((await new SettingsStore(db.sql, 0).get()).candidateEvalPrompt).toBe('');
 
     const res = await put({prompt: '  Judge bulk lots only.  ', model: 'anthropic/claude-haiku-5.5'});
     expect(res.status).toBe(200);
@@ -930,6 +960,15 @@ describe('prompt scoring', () => {
     expect(body.versions.find((x) => x.id === v.candidate)).toMatchObject({
       role: 'retired', evaluated: 5, targets: 2,
     });
+  });
+
+  it('refuses to promote a candidate whose provider key was removed', async () => {
+    await setSetting('candidate_llm_model', 'openai:gpt-6-luna');
+
+    const res = await request('/api/prompt-candidate/promote', {method: 'POST'});
+
+    expect(res.status).toBe(409);
+    expect((await new SettingsStore(db.sql, 0).get()).candidateLlmModel).toBe('openai:gpt-6-luna');
   });
 
   it('refuses to promote when no candidate is on trial', async () => {
@@ -981,9 +1020,9 @@ describe('llm keys', () => {
     const text = await listed.text();
     expect(text).not.toContain(SECRET);
     expect(JSON.parse(text)).toEqual({keys: [
-      {provider: 'openrouter', configured: true, last4: 'ab12'},
-      {provider: 'anthropic', configured: false, last4: null},
-      {provider: 'openai', configured: false, last4: null},
+      {provider: 'openrouter', configured: true, last4: 'ab12', available: true, source: 'stored'},
+      {provider: 'anthropic', configured: false, last4: null, available: false, source: null},
+      {provider: 'openai', configured: false, last4: null, available: false, source: null},
     ]});
     expect(await (await request('/api/settings')).text()).not.toContain(SECRET);
 
@@ -993,6 +1032,27 @@ describe('llm keys', () => {
       keys: Array<{configured: boolean}>;
     };
     expect(after.keys.every((k) => !k.configured)).toBe(true);
+  });
+
+  it('reports an env key as available without showing any of it', async () => {
+    const res = await request('/api/llm-keys');
+    const text = await res.text();
+
+    expect(text).not.toContain('env-or-key');
+    expect(JSON.parse(text).keys[0]).toEqual(
+      {provider: 'openrouter', configured: false, last4: null, available: true, source: 'env'},
+    );
+  });
+
+  it('rejects a key with inner whitespace, a line break or a control character', async () => {
+    for (const key of ['sk-ant one', 'sk-ant\r\nX-Evil: 1', 'sk-ant\tx', 'sk-ant\u0000x', 'sk\u007fx']) {
+      const res = await putKey('anthropic', {key});
+      expect(res.status).toBe(400);
+      expect(await res.text()).not.toContain('sk-ant');
+    }
+    expect((await keys.get()).anthropic).toBeUndefined();
+    // Surrounding whitespace is trimmed, not refused.
+    expect((await putKey('anthropic', {key: ' sk-ant-ok\n'})).status).toBe(200);
   });
 
   it('replaces a key and makes the new one visible at once', async () => {

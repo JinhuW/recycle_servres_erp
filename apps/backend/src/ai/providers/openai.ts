@@ -14,6 +14,18 @@ const WEB_SEARCH_USD = 0.01;
 // says nothing about which can chat.
 const CHAT_MODEL = /^(gpt-|o\d|chatgpt-)/;
 const NOT_CHAT = /(audio|realtime|transcribe|tts|image|embedding|moderation|search-preview|instruct)/;
+const LIST_TIMEOUT_MS = 10_000;
+
+/**
+ * The lowest reasoning effort `model` takes, as the OpenRouter path sends for
+ * the same models; null for models that reject the parameter (gpt-4o, the
+ * -chat aliases). These are transcriptions: thinking only costs time.
+ */
+export function minimalReasoning(model: string): 'minimal' | 'low' | null {
+  if (/^gpt-([5-9]|\d{2})/.test(model) && !model.includes('-chat')) return 'minimal';
+  if (/^o\d/.test(model)) return 'low';
+  return null;
+}
 
 function client(apiKey: string | undefined): OpenAI {
   return new OpenAI({
@@ -44,6 +56,8 @@ export const openAiProvider: LlmProvider = {
   id: 'openai',
 
   async complete(apiKey, req) {
+    // A web search needs more than minimal reasoning, so it keeps the default.
+    const effort = req.webSearch ? null : minimalReasoning(req.model);
     let res: OpenAI.Responses.Response;
     try {
       res = await client(apiKey).responses.create(
@@ -51,6 +65,7 @@ export const openAiProvider: LlmProvider = {
           model: req.model,
           input: toInput(req.turns),
           max_output_tokens: req.maxTokens,
+          ...(effort ? { reasoning: { effort } } : {}),
           // Every prompt sent here asks for one JSON object. JSON mode can't
           // be combined with web search, which cites as it writes.
           ...(req.webSearch
@@ -64,25 +79,23 @@ export const openAiProvider: LlmProvider = {
       if (e instanceof OpenAI.APIError) throw new Error(`OpenAI ${e.status ?? ''}: ${e.message}`);
       throw e;
     }
-    const text = res.output_text;
-    if (!text?.trim()) throw new EmptyAnswerError('OpenAI');
     const [inPerM, outPerM] = req.price ?? UNKNOWN_PRICE;
     const searches = res.output.filter((o) => o.type === 'web_search_call').length;
     const promptTokens = res.usage?.input_tokens ?? 0;
     const completionTokens = res.usage?.output_tokens ?? 0;
-    return {
-      text,
-      usage: {
-        promptTokens,
-        completionTokens,
-        costUsd: (promptTokens * inPerM + completionTokens * outPerM) / 1e6 + searches * WEB_SEARCH_USD,
-      },
+    const usage = {
+      promptTokens,
+      completionTokens,
+      costUsd: (promptTokens * inPerM + completionTokens * outPerM) / 1e6 + searches * WEB_SEARCH_USD,
     };
+    const text = res.output_text;
+    if (!text?.trim()) throw new EmptyAnswerError('OpenAI', usage);
+    return { text, usage };
   },
 
   async listModels(apiKey) {
     const out: AiModel[] = [];
-    for await (const m of client(apiKey).models.list()) {
+    for await (const m of client(apiKey).models.list({ timeout: LIST_TIMEOUT_MS })) {
       if (!CHAT_MODEL.test(m.id) || NOT_CHAT.test(m.id)) continue;
       out.push({
         id: `openai:${m.id}`,
@@ -91,8 +104,12 @@ export const openAiProvider: LlmProvider = {
         contextLength: null,
         promptPerM: null,
         completionPerM: null,
-        structuredOutputs: true,
-        inputModalities: ['text', 'image'],
+        // /v1/models says nothing about capabilities. The catalogue fills them
+        // from OpenRouter's openai/<id> entry; one it can't match is assumed
+        // text-only without strict schemas, so no image or evaluator picker
+        // offers it (o3-mini, gpt-3.5-turbo and gpt-4 are both).
+        structuredOutputs: false,
+        inputModalities: ['text'],
         outputModalities: ['text'],
       });
     }

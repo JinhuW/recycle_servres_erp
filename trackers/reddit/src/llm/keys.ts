@@ -10,17 +10,45 @@ export const PROVIDERS: readonly Provider[] = ['openrouter', 'anthropic', 'opena
 
 export const MAX_KEY_LENGTH = 500;
 
+/** The env var that holds each provider's fallback key. */
+export const KEY_ENV: Record<Provider, string> = {
+  openrouter: 'OPENROUTER_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  openai: 'OPENAI_API_KEY',
+};
+
+// Whitespace or a control character inside a key is a paste accident, and
+// sent as a header it makes fetch throw an error that quotes the value.
+const KEY_FORBIDDEN = /[\s\x00-\x1f\x7f]/;
+
 const CACHE_TTL_MS = 60_000;
 
 export function isProvider(value: string): value is Provider {
   return (PROVIDERS as readonly string[]).includes(value);
 }
 
+/** Why a pasted key can't be stored, or null when it can. */
+export function invalidKeyReason(key: string): string | null {
+  if (!key || key.length > MAX_KEY_LENGTH) {
+    return `key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters`;
+  }
+  if (KEY_FORBIDDEN.test(key)) {
+    return 'key must not contain spaces, line breaks or control characters';
+  }
+  return null;
+}
+
 /** What GET /api/llm-keys shows: enough to recognise a key, never the key. */
 export interface KeySummary {
   provider: Provider;
+  /** A stored key exists; env keys don't count, since the ERP manages only these. */
   configured: boolean;
+  /** Last 4 characters of the stored key. */
   last4: string | null;
+  /** The tracker can call this provider, with a stored or an env key. */
+  available: boolean;
+  /** Which key calls use: a stored key wins over env. */
+  source: 'stored' | 'env' | null;
 }
 
 /** The part of KeyStore the evaluate loop needs. */
@@ -71,15 +99,22 @@ export class KeyStore implements KeySource {
     this.invalidate();
   }
 
-  /** Stored keys only: the ERP manages these, not the env fallbacks. */
+  /**
+   * `configured` and `last4` describe stored keys only, which the ERP
+   * manages; `available` and `source` also count the env fallbacks, so the
+   * ERP can offer only providers the tracker can call.
+   */
   async summary(): Promise<KeySummary[]> {
     const stored = new Map((await this.rows()).map((r) => [r.provider, r.api_key]));
     return PROVIDERS.map((provider) => {
       const key = stored.get(provider);
+      const source = key !== undefined ? 'stored' : this.envKeys[provider] ? 'env' : null;
       return {
         provider,
         configured: key !== undefined,
         last4: key === undefined ? null : key.slice(-4),
+        available: source !== null,
+        source,
       };
     });
   }

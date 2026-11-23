@@ -74,8 +74,12 @@ has the repo map and workflow.
   Settings ▸ AI models is the writer, through `PUT|DELETE /api/llm-keys/:provider`.
   Keys are stored in plain text, the same trust level as the Railway env
   vars, and kept out of `settings` because `GET /api/settings` returns every
-  row. `GET /api/llm-keys` shows only `configured` and `last4`; no route or
-  log line may return a key. Env keys are fallbacks a stored key overrides.
+  row. `GET /api/llm-keys` shows `configured` and `last4` of the stored key
+  and whether a stored or env key is `available`; no route or log line may
+  return a key (`evaluatePost` redacts it from error messages). Env keys are
+  fallbacks a stored key overrides. A model whose provider has no key is
+  refused by the settings and candidate routes, and the evaluate loop claims
+  nothing while the live model has none, so posts never burn attempts on it.
 
 ## Design invariants
 

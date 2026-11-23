@@ -38,6 +38,10 @@ except ModuleNotFoundError:  # Python < 3.11
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "rs_poster"))
+# Chromium does not authenticate from credentials in the proxy URL, and
+# passing them there hands the password to the browser's command line.
+from rs_poster.proxy import proxy_settings  # noqa: E402
 MASTER = ROOT / "configs" / "master.toml"
 DEFAULT_SESSION = ROOT / "configs" / "sessions" / "personal.json"
 
@@ -78,7 +82,7 @@ def check(targets: List[Tuple[str, str, str]], session: Path, query: str) -> int
         context = browser.new_context(
             storage_state=str(session),
             user_agent=meta.get("user_agent"),
-            proxy={"server": meta["proxy"]} if meta.get("proxy") else None,
+            proxy=proxy_settings(meta.get("proxy")),
         )
         page = context.new_page()
         for region, city, expected in targets:

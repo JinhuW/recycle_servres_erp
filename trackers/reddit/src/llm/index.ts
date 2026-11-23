@@ -3,6 +3,7 @@
 // model ref picks the provider (ref.ts).
 
 import {completeAnthropic} from './anthropic.ts';
+import {KEY_ENV} from './keys.ts';
 import {completeOpenAI} from './openai.ts';
 import {completeOpenRouter} from './openrouter.ts';
 import {parseModelRef, type Provider} from './ref.ts';
@@ -93,11 +94,9 @@ const ADAPTERS: Record<Provider, (req: CompletionRequest) => Promise<CompletionR
   openai: completeOpenAI,
 };
 
-const KEY_ENV: Record<Provider, string> = {
-  openrouter: 'OPENROUTER_API_KEY',
-  anthropic: 'ANTHROPIC_API_KEY',
-  openai: 'OPENAI_API_KEY',
-};
+function redactKey(message: string, apiKey: string): string {
+  return message.split(apiKey).join(`[key …${apiKey.slice(-4)}]`);
+}
 
 export function buildUserMessage(post: EvaluationInput): string {
   const body = post.selftext.slice(0, MAX_BODY_CHARS);
@@ -171,9 +170,11 @@ export async function evaluatePost(
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (e) {
-    return {kind: 'error', message: e instanceof Error ? e.message : String(e)};
+    result = {kind: 'error', message: e instanceof Error ? e.message : String(e)};
   }
-  if (result.kind === 'error') return result;
+  // Error messages are logged and reach the ops group. Some quote the request
+  // (fetch names a header value it rejects), so the key never rides along.
+  if (result.kind === 'error') return {kind: 'error', message: redactKey(result.message, apiKey)};
 
   const evaluation = parseEvaluationContent(result.content);
   if (!evaluation) {

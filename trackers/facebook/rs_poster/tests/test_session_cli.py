@@ -248,6 +248,35 @@ def test_proxy_settings_percent_decodes_userinfo():
     }
 
 
+def test_proxy_settings_without_a_scheme_still_splits_credentials():
+    # Unsplit, `alice` parsed as the scheme and the password went to Chromium
+    # inside `server`.
+    assert session_cli.proxy_settings("alice:s3cr3t@proxy.example.net:8080") == {
+        "server": "http://proxy.example.net:8080",
+        "username": "alice",
+        "password": "s3cr3t",
+    }
+    assert session_cli.proxy_settings("proxy.example.net:8080") == {
+        "server": "http://proxy.example.net:8080"
+    }
+
+
+def test_proxy_settings_keeps_ipv6_brackets():
+    assert session_cli.proxy_settings("http://alice:pw@[2001:db8::1]:3128") == {
+        "server": "http://[2001:db8::1]:3128",
+        "username": "alice",
+        "password": "pw",
+    }
+
+
+def test_proxy_settings_bad_port_raises_without_the_password():
+    for bad in ("http://alice:hunter2@proxy.example.net:99999", "http://alice:hunter2@proxy.example.net:abc"):
+        with pytest.raises(ValueError) as caught:
+            session_cli.proxy_settings(bad)
+        assert "hunter2" not in str(caught.value)
+        assert "proxy.example.net" in str(caught.value)
+
+
 # -- auto-fill login (human-paced) ------------------------------------------
 # rs-session capture can fill a UID + password from configs/accounts.txt and
 # type them at a human pace (Facebook flags machine-speed login input).

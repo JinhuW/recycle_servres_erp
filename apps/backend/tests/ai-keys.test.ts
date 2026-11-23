@@ -6,7 +6,7 @@ import { getDb } from '../src/db';
 import { invalidateAiKeys } from '../src/ai/keys';
 import { _resetForTests } from '../src/ai/catalogue';
 import { aiImageJson } from '../src/ai/llm';
-import { featureProvider, NO_KEY_ERROR } from '../src/ai/index';
+import { describeOcr, featureProvider, NO_KEY_ERROR } from '../src/ai/index';
 import type { Env } from '../src/types';
 
 const TRACKER = { TRACKER_API_URL: 'http://tracker.test', TRACKER_API_TOKEN: 'tracker-token' };
@@ -131,6 +131,15 @@ describe('AI provider keys pasted on Settings ▸ AI models', () => {
       .toMatchObject({ source: 'env', last4: null });
   });
 
+  // Straight after a restart nothing has read the table yet; /api/health
+  // used to report no AI at all until some scan did.
+  it('/api/health sees a saved key while the cache is still cold', async () => {
+    stubUpstreams();
+    await put(KEY);
+    invalidateAiKeys();
+    expect(await describeOcr({ ...testEnv, OPENROUTER_API_KEY: undefined } as Env)).toBe('anthropic');
+  });
+
   it('rejects a blank key, an unknown provider, and non-managers', async () => {
     stubUpstreams();
     expect((await put('   ')).status).toBe(400);
@@ -138,6 +147,149 @@ describe('AI provider keys pasted on Settings ▸ AI models', () => {
     const { token: pur } = await loginAs(MARCUS);
     expect((await api('PUT', '/api/ai/keys/anthropic', { token: pur, body: { key: KEY } })).status).toBe(403);
     expect((await api('DELETE', '/api/ai/keys/anthropic', { token: pur })).status).toBe(403);
+  });
+});
+
+describe('AI keys and the tracker: order of writes, retries, removals', () => {
+  let token: string;
+  beforeEach(async () => {
+    await resetDb();
+    invalidateAiKeys();
+    _resetForTests();
+    ({ token } = await loginAs(ALEX));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    invalidateAiKeys();
+  });
+
+  type Sync = { ok?: boolean; trackerSynced?: boolean; trackerError?: string; error?: string; usedBy?: string[] };
+  const put = (env: Partial<Env> = TRACKER) => api<Sync>('PUT', '/api/ai/keys/anthropic', { token, env, body: { key: KEY } });
+  const del = (env: Partial<Env> = TRACKER) => api<Sync>('DELETE', '/api/ai/keys/anthropic', { token, env });
+  const sync = (env: Partial<Env> = TRACKER) => api<Sync>('POST', '/api/ai/keys/anthropic/sync', { token, env });
+  const status = async () => (await api<{ providers: Array<{ id: string; configured: boolean; source: string | null; trackerSynced: boolean | null; unreadable: boolean }> }>(
+    'GET', '/api/ai/providers', { token })).body.providers.find(x => x.id === 'anthropic')!;
+  const db = () => getDb(testEnv);
+
+  /** Like stubUpstreams, but records whether the key's row existed when the tracker was called. */
+  function stubWithRowCheck(trackerStatus: () => number) {
+    const seen: Array<{ method: string; rowExisted: boolean }> = [];
+    const calls = stubUpstreams();
+    const inner = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.startsWith('http://tracker.test')) {
+        const rows = await db()`SELECT 1 FROM ai_provider_keys WHERE provider = 'anthropic'`;
+        seen.push({ method: init?.method ?? 'GET', rowExisted: rows.length > 0 });
+        calls.push({ url, method: init?.method ?? 'GET', headers: new Headers(init?.headers), body: typeof init?.body === 'string' ? init.body : null });
+        return new Response('{}', { status: trackerStatus() });
+      }
+      return inner(input, init);
+    }));
+    return { seen, calls };
+  }
+
+  it('stores the key before pushing it, then records the push', async () => {
+    const { seen } = stubWithRowCheck(() => 200);
+    expect((await put()).body).toMatchObject({ ok: true, trackerSynced: true });
+    expect(seen).toEqual([{ method: 'PUT', rowExisted: true }]);
+    expect((await db()`SELECT tracker_synced FROM ai_provider_keys`)[0]).toEqual({ tracker_synced: true });
+  });
+
+  it('pushes a removal before deleting, and keeps an unconfirmed one for a retry', async () => {
+    let tracker = 200;
+    const { seen, calls } = stubWithRowCheck(() => tracker);
+    await put();
+    tracker = 503;
+    const r = await del();
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ trackerSynced: false });
+    expect(seen.at(-1)).toEqual({ method: 'DELETE', rowExisted: true });
+    expect(await db()`SELECT 1 FROM ai_provider_keys`).toHaveLength(0);
+    expect(await status()).toMatchObject({ source: null, configured: false, trackerSynced: false });
+
+    // Still down: the removal stays pending.
+    expect((await sync()).body).toMatchObject({ trackerSynced: false });
+    expect(await db()`SELECT provider FROM ai_provider_key_removals`).toEqual([{ provider: 'anthropic' }]);
+
+    tracker = 200;
+    const retried = await sync();
+    expect(retried.body).toMatchObject({ ok: true, trackerSynced: true });
+    expect(calls.at(-1)).toMatchObject({ method: 'DELETE', url: 'http://tracker.test/api/llm-keys/anthropic' });
+    expect(await db()`SELECT 1 FROM ai_provider_key_removals`).toHaveLength(0);
+    expect((await status()).trackerSynced).toBeNull();
+    expect((await sync()).status).toBe(404);
+  });
+
+  it('a new save supersedes a pending removal', async () => {
+    let tracker = 503;
+    stubWithRowCheck(() => tracker);
+    await put();
+    await del();
+    tracker = 200;
+    await put();
+    expect(await db()`SELECT 1 FROM ai_provider_key_removals`).toHaveLength(0);
+    expect((await status()).trackerSynced).toBe(true);
+  });
+
+  it('re-pushes a saved key the tracker missed', async () => {
+    let tracker = 503;
+    const { calls } = stubWithRowCheck(() => tracker);
+    expect((await put()).body).toMatchObject({ trackerSynced: false });
+    expect((await status()).trackerSynced).toBe(false);
+    tracker = 200;
+    expect((await sync()).body).toEqual({ ok: true, trackerSynced: true });
+    const push = calls.at(-1)!;
+    expect(push.method).toBe('PUT');
+    expect(JSON.parse(push.body!)).toEqual({ key: KEY });
+    expect((await status()).trackerSynced).toBe(true);
+  });
+
+  it('refuses to remove a key a saved model still needs, unless an env key backs it', async () => {
+    stubUpstreams();
+    await put();
+    await db()`
+      INSERT INTO workspace_settings (key, value) VALUES
+        ('ai_models', ${db().json({ default: 'anthropic:claude-sonnet-5-5', scan: 'anthropic:claude-sonnet-5-5' })}),
+        ('po_ai_review', ${db().json({ enabled: true, model: 'anthropic:claude-sonnet-5-5' })})
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+    const r = await del();
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/Settings ▸ AI models \(Default model, Label scan\)/);
+    expect(r.body.error).toMatch(/AI review of purchase orders/);
+    expect(await db()`SELECT 1 FROM ai_provider_keys`).toHaveLength(1);
+
+    await db()`UPDATE workspace_settings SET value = ${db().json({ default: null })} WHERE key = 'ai_models'`;
+    expect((await del()).status).toBe(409);
+
+    expect((await del({ ...TRACKER, ANTHROPIC_API_KEY: 'env-key' })).status).toBe(200);
+  });
+
+  it('shows a saved key it cannot unseal as not configured', async () => {
+    await db()`INSERT INTO ai_provider_keys (provider, sealed, last4, tracker_synced) VALUES ('anthropic', 'v1.a.b.c', 'abcd', TRUE)`;
+    expect(await status()).toMatchObject({ source: 'ui', configured: false, unreadable: true });
+    expect((await sync()).status).toBe(409);
+  });
+});
+
+describe('PATCH /api/workspace key-checks every model it saves', () => {
+  beforeEach(async () => {
+    await resetDb();
+    invalidateAiKeys();
+  });
+
+  it("refuses a PO review model whose provider has no key", async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ error: string }>('PATCH', '/api/workspace', {
+      token, body: { po_ai_review: { enabled: true, model: 'anthropic:claude-sonnet-5-5' } },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/No Anthropic \(Claude\) API key/);
+    const ok = await api('PATCH', '/api/workspace', {
+      token, env: { ANTHROPIC_API_KEY: 'k' }, body: { po_ai_review: { enabled: true, model: 'anthropic:claude-sonnet-5-5' } },
+    });
+    expect(ok.status).toBe(200);
+    expect((await api('PATCH', '/api/workspace', { token, body: { po_ai_review: { enabled: true, model: null } } })).status).toBe(200);
   });
 });
 

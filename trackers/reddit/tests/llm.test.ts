@@ -1,5 +1,6 @@
-import {afterEach, describe, expect, it, vi} from 'vitest';
-import {anthropicSchema} from '../src/llm/anthropic.ts';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {anthropicSchema, resetEffortSupport} from '../src/llm/anthropic.ts';
+import {acceptsTemperature} from '../src/llm/openai.ts';
 import {
   buildUserMessage,
   evaluatePost,
@@ -253,6 +254,20 @@ describe('evaluatePost provider routing', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it('never puts the key in an error message', async () => {
+    const key = 'sk-or-v1-SECRETSECRET-9z9z';
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(
+      new TypeError(`Headers.append: "Bearer ${key}\r\n" is an invalid header value.`),
+    ));
+
+    const result = await evaluatePost(POST, {...OPTIONS, keys: {openrouter: key}});
+
+    expect(result.kind).toBe('error');
+    if (result.kind !== 'error') return;
+    expect(result.message).not.toContain(key);
+    expect(result.message).toContain('9z9z');
+  });
+
   it('sends an openrouter: ref to OpenRouter with the prefix stripped', async () => {
     const spy = vi.fn().mockResolvedValue(modelSays(VERDICT));
     vi.stubGlobal('fetch', spy);
@@ -311,6 +326,50 @@ function anthropicSays(
   });
 }
 
+/** A Models API entry; `effort` null leaves capabilities out entirely. */
+function modelInfo(id: string, effort: boolean | null): Response {
+  const yes = {supported: true};
+  const flag = {supported: Boolean(effort)};
+  return jsonResponse({
+    type: 'model',
+    id,
+    display_name: id,
+    created_at: '2026-01-01T00:00:00Z',
+    capabilities: effort === null ? null : {
+      effort: {supported: effort, low: flag, medium: flag, high: flag, max: flag, xhigh: null},
+      structured_outputs: yes,
+    },
+  });
+}
+
+/**
+ * Stubs the Anthropic API: the Models API answers `models` (or 404 when the
+ * id is missing from it), the Messages API answers `message`.
+ */
+function stubAnthropic(
+  message: () => Response,
+  models: Record<string, boolean | null> = {'claude-sonnet-5-5': true},
+) {
+  const spy = vi.fn().mockImplementation(async (url: string | URL) => {
+    const path = new URL(String(url)).pathname;
+    if (path.startsWith('/v1/models/')) {
+      const id = decodeURIComponent(path.slice('/v1/models/'.length));
+      if (!(id in models)) {
+        return jsonResponse({type: 'error', error: {type: 'not_found_error', message: 'no'}}, 404);
+      }
+      return modelInfo(id, models[id]!);
+    }
+    return message();
+  });
+  vi.stubGlobal('fetch', spy);
+  return spy;
+}
+
+function messagesCall(spy: ReturnType<typeof vi.fn>): [string, RequestInit] {
+  const call = spy.mock.calls.find(([url]) => String(url).endsWith('/v1/messages'));
+  return call as [string, RequestInit];
+}
+
 describe('evaluatePost via Anthropic', () => {
   const ANTHROPIC = {
     ...OPTIONS,
@@ -318,13 +377,16 @@ describe('evaluatePost via Anthropic', () => {
     model: 'anthropic:claude-sonnet-5-5',
   };
 
+  beforeEach(() => {
+    resetEffortSupport();
+  });
+
   it('sends the shared schema as output_config.format, without temperature', async () => {
-    const spy = vi.fn().mockResolvedValue(anthropicSays(VERDICT));
-    vi.stubGlobal('fetch', spy);
+    const spy = stubAnthropic(() => anthropicSays(VERDICT));
 
     await evaluatePost(POST, ANTHROPIC);
 
-    const [url, init] = spy.mock.calls[0]! as [string, RequestInit];
+    const [url, init] = messagesCall(spy);
     expect(String(url)).toBe('https://api.anthropic.com/v1/messages');
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer ant-key');
     const body = JSON.parse(init.body as string);
@@ -344,8 +406,41 @@ describe('evaluatePost via Anthropic', () => {
     expect(body.output_config.format.schema.required).toEqual(RESPONSE_JSON_SCHEMA.required);
   });
 
+  it('sends no effort to a model the Models API says lacks it', async () => {
+    const spy = stubAnthropic(() => anthropicSays(VERDICT), {'claude-haiku-4-5': false});
+
+    await evaluatePost(POST, {...ANTHROPIC, model: 'anthropic:claude-haiku-4-5'});
+
+    const body = JSON.parse(messagesCall(spy)[1].body as string);
+    expect(body.output_config).not.toHaveProperty('effort');
+    expect(body.output_config.format.type).toBe('json_schema');
+  });
+
+  it('asks the Models API once per model', async () => {
+    const spy = stubAnthropic(() => anthropicSays(VERDICT));
+
+    await evaluatePost(POST, ANTHROPIC);
+    await evaluatePost(POST, ANTHROPIC);
+
+    const lookups = spy.mock.calls.filter(([url]) => String(url).includes('/v1/models/'));
+    expect(lookups).toHaveLength(1);
+  });
+
+  it('falls back to the known pre-effort models when the Models API cannot say', async () => {
+    // Neither id is in the stubbed Models API, so both lookups 404.
+    const spy = stubAnthropic(() => anthropicSays(VERDICT), {});
+
+    await evaluatePost(POST, {...ANTHROPIC, model: 'anthropic:claude-haiku-4-5-20251001'});
+    await evaluatePost(POST, {...ANTHROPIC, model: 'anthropic:claude-opus-4-5'});
+
+    const bodies = spy.mock.calls
+      .filter(([url]) => String(url).endsWith('/v1/messages'))
+      .map(([, init]) => JSON.parse((init as RequestInit).body as string));
+    expect(bodies.map((b) => b.output_config.effort)).toEqual([undefined, 'low']);
+  });
+
   it('reads the verdict from the text blocks', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(anthropicSays(VERDICT)));
+    stubAnthropic(() => anthropicSays(VERDICT));
 
     const result = await evaluatePost(POST, ANTHROPIC);
 
@@ -353,10 +448,10 @@ describe('evaluatePost via Anthropic', () => {
   });
 
   it('reports a refusal as an error', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(anthropicSays('', {
+    stubAnthropic(() => anthropicSays('', {
       stop_reason: 'refusal',
       stop_details: {type: 'refusal', category: 'cyber', explanation: null},
-    })));
+    }));
 
     const result = await evaluatePost(POST, ANTHROPIC);
 
@@ -364,10 +459,10 @@ describe('evaluatePost via Anthropic', () => {
   });
 
   it('reports an HTTP failure with its status instead of throwing', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(
+    stubAnthropic(() => jsonResponse(
       {type: 'error', error: {type: 'rate_limit_error', message: 'slow down'}},
       429,
-    )));
+    ));
 
     const result = await evaluatePost(POST, ANTHROPIC);
 
@@ -394,7 +489,26 @@ function openaiSays(content: unknown[], extra: Record<string, unknown> = {}): Re
 describe('evaluatePost via OpenAI', () => {
   const OPENAI = {...OPTIONS, keys: {openai: 'oa-key'}, model: 'openai:gpt-6-luna'};
 
-  it('sends the shared schema through the Responses API, without temperature', async () => {
+  it('sends temperature 0 to a chat model that takes it', async () => {
+    const spy = vi.fn().mockResolvedValue(
+      openaiSays([{type: 'output_text', text: VERDICT, annotations: []}]),
+    );
+    vi.stubGlobal('fetch', spy);
+
+    await evaluatePost(POST, {...OPENAI, model: 'openai:gpt-4.1-mini'});
+
+    const body = JSON.parse((spy.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body.temperature).toBe(0);
+  });
+
+  it('knows which models take temperature', () => {
+    expect(['gpt-4o-mini', 'gpt-4.1', 'gpt-3.5-turbo', 'chatgpt-4o-latest']
+      .every(acceptsTemperature)).toBe(true);
+    expect(['gpt-6-luna', 'gpt-5.6', 'o3', 'o4-mini', 'gpt-5-mini']
+      .some(acceptsTemperature)).toBe(false);
+  });
+
+  it('sends the shared schema through the Responses API, without temperature for a reasoning model', async () => {
     const spy = vi.fn().mockResolvedValue(
       openaiSays([{type: 'output_text', text: VERDICT, annotations: []}]),
     );

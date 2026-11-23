@@ -162,11 +162,15 @@ export class Agent {
       bootAt: this.bootAt,
       imageAllowed: imageAllowed(desired.image, this.o.imagePrefixes),
       staggerMs: this.o.staggerMs,
-      // Unconfirmed too once nothing runs under the id: a `docker rm` that
-      // failed after the stop leaves the browser exited but the stop unposted,
-      // and that worker is still the release's to run again.
+      // Unconfirmed too while this agent's stop mark stands and nothing runs
+      // under the id: a `docker rm` that failed after the stop leaves the
+      // browser exited but the stop unposted, and that worker is still the
+      // release's to run again. Without the mark (`tidy` drops it once the
+      // container is seen running or gone) the stop may never have happened,
+      // and running it again could start a worker above the count.
       restarting: Object.entries(this.memory.pending)
-        .filter(([id, p]) => p.restart && (p.confirmed || !observed.some((c) => c.worker_id === id && c.running)))
+        .filter(([id, p]) => p.restart && (p.confirmed
+          || (this.memory.self_stopped[id] !== undefined && !observed.some((c) => c.worker_id === id && c.running))))
         .map(([id]) => id),
     });
     result.actions = planned.actions;
@@ -284,6 +288,21 @@ export class Agent {
       // Observe-only, nothing will run it.
       if (workerIndex(this.o.hostId, id) === null || !desired.authoritative) pending.restart = false;
       const exists = observed.some((c) => c.worker_id === id);
+      // Unconfirmed, and this agent's stop mark is gone (`tidy` drops it once
+      // the container is seen running or gone): the stop is not on record as
+      // ours. Kept as a restart, the worker would be the release's to run
+      // again once it exits or is removed, above the count if it is an extra.
+      if (!pending.confirmed && this.memory.self_stopped[id] === undefined) {
+        if (observed.some((c) => c.worker_id === id && c.running)) {
+          // Still running: the `docker stop` failed. Nothing to confirm; a
+          // later release takes a fresh lease.
+          delete this.memory.pending[id];
+          this.save('pending');
+          continue;
+        }
+        // Stopped some other way: released like any stop once it is gone.
+        pending.restart = false;
+      }
       // A container for the id again after a confirmed stop: the replacement
       // was run and the handoff is spent.
       if (pending.confirmed && exists) {
@@ -331,7 +350,7 @@ export class Agent {
         }
         return this.runWorker(action);
       }
-      case 'remove':
+      case 'remove': {
         // The container may carry the only record of the newest start (one
         // made by hand); gone, the stagger would no longer see that login.
         if (lastStartAt !== null && (this.memory.last_start_at === null || lastStartAt > this.memory.last_start_at)) {
@@ -340,7 +359,18 @@ export class Agent {
         }
         // No stop: a person may have started it since it was observed, and
         // `docker rm` refuses a running container where a stop would sign it out.
-        return d.removeStopped(action.container);
+        const problem = await d.removeStopped(action.container);
+        if (problem) return problem;
+        // The rest of a stop for a replacement whose `docker rm` failed: gone
+        // now, the stop is confirmed and the run follows.
+        const pending = this.memory.pending[action.worker_id];
+        if (pending?.restart && !pending.confirmed) {
+          pending.confirmed = true;
+          this.save('pending');
+          if (!await this.acknowledge(action.worker_id, pending)) return 'stop confirmation not accepted';
+        }
+        return null;
+      }
     }
   }
 

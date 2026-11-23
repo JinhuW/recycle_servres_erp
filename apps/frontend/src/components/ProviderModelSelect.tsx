@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AI_PROVIDERS, AI_PROVIDER_LABELS, parseModelRef, type AiProviderId } from '@recycle-erp/shared';
 import { ModelPicker, useAiModels } from './ModelPicker';
-import { loadAiProviders, type AiModel, type AiProviderStatus } from '../lib/aiModels';
+import { loadAiProviders, modelsFor, preselectModel, type AiModel, type AiProviderStatus } from '../lib/aiModels';
+import { trackerApi, trackerProviderStatus, type TrackerKeyStatus } from '../lib/tracker';
 import { useT } from '../lib/i18n';
 
 /** Which providers have a key; null while it loads. Bump `version` to re-read. */
@@ -24,6 +25,26 @@ export function useAiProviders(version = 0): AiProviderStatus[] | null {
   return list;
 }
 
+/**
+ * The providers the Reddit tracker can call, for its model pickers; null
+ * while either list loads. See trackerProviderStatus for the fallback.
+ */
+export function useTrackerAiProviders(): AiProviderStatus[] | null {
+  const erp = useAiProviders();
+  const [tracker, setTracker] = useState<TrackerKeyStatus | null | undefined>(undefined);
+  useEffect(() => {
+    let alive = true;
+    trackerApi.llmKeys()
+      .then(r => { if (alive) setTracker(r); })
+      .catch(() => { if (alive) setTracker(null); });
+    return () => { alive = false; };
+  }, []);
+  return useMemo(
+    () => (erp === null || tracker === undefined ? null : trackerProviderStatus(erp, tracker)),
+    [erp, tracker],
+  );
+}
+
 /** Bare for OpenRouter: every saved setting already holds the bare id. */
 function toRef(provider: AiProviderId, model: string): string {
   return provider === 'openrouter' ? model : `${provider}:${model}`;
@@ -34,7 +55,9 @@ function toRef(provider: AiProviderId, model: string): string {
  * `value` is a model ref ('' = the default when `defaultLabel` is given).
  * The model field still takes a typed id the catalogue doesn't list yet.
  */
-export function ProviderModelSelect({ value, onChange, id, filter, defaultLabel, invalid, unavailableText }: {
+export function ProviderModelSelect({
+  value, onChange, id, filter, defaultLabel, invalid, unavailableText, providers: given, noKeyText,
+}: {
   value: string;
   onChange: (ref: string) => void;
   id?: string;
@@ -44,28 +67,38 @@ export function ProviderModelSelect({ value, onChange, id, filter, defaultLabel,
   defaultLabel?: string;
   invalid?: boolean;
   unavailableText?: string;
+  /** Whose keys decide which providers can be picked; the ERP's when omitted. */
+  providers?: AiProviderStatus[] | null;
+  /** Shown beside a provider without a key. */
+  noKeyText?: string;
 }) {
   const { t } = useT();
-  const providers = useAiProviders();
+  const erpProviders = useAiProviders();
+  const providers = given === undefined ? erpProviders : given;
   const { models } = useAiModels();
   const current = value === '' ? null : parseModelRef(value);
-  // Remembered so picking a provider shows its empty model field before a model is chosen.
+  // Remembered so picking a provider shows its empty model field before a
+  // model is chosen. A value set from outside (a reset, a reload) replaces it.
   const [picked, setPicked] = useState<AiProviderId | null>(current?.provider ?? null);
+  const emitted = useRef<string | null>(null);
+  useEffect(() => {
+    if (value === emitted.current) return;
+    setPicked(value === '' ? null : parseModelRef(value).provider);
+  }, [value]);
   const provider = current?.provider ?? picked;
 
-  const forProvider = useCallback(
-    (p: AiProviderId) => (m: AiModel) => m.provider === p && (!filter || filter(m)),
-    [filter],
-  );
-  const modelFilter = useMemo(() => (provider ? forProvider(provider) : undefined), [provider, forProvider]);
+  function emit(ref: string) {
+    emitted.current = ref;
+    onChange(ref);
+  }
+
+  const modelFilter = useMemo(() => (provider ? modelsFor(provider, filter) : undefined), [provider, filter]);
 
   function pickProvider(next: string) {
-    if (next === '') { setPicked(null); onChange(''); return; }
+    if (next === '') { setPicked(null); emit(''); return; }
     const p = next as AiProviderId;
     setPicked(p);
-    // Preselect its first usable model rather than leave a half-made setting.
-    const first = (models ?? []).find(forProvider(p));
-    onChange(first ? first.id : '');
+    emit(preselectModel(models, p, filter));
   }
 
   const status = (p: AiProviderId) => providers?.find(x => x.id === p);
@@ -88,7 +121,7 @@ export function ProviderModelSelect({ value, onChange, id, filter, defaultLabel,
           const off = s !== undefined && !s.configured && p !== provider;
           return (
             <option key={p} value={p} disabled={off}>
-              {AI_PROVIDER_LABELS[p]}{s && !s.configured ? ` — ${t('aiProviderNoKey')}` : ''}
+              {AI_PROVIDER_LABELS[p]}{s && !s.configured ? ` — ${noKeyText ?? t('aiProviderNoKey')}` : ''}
             </option>
           );
         })}
@@ -99,7 +132,7 @@ export function ProviderModelSelect({ value, onChange, id, filter, defaultLabel,
           <ModelPicker
             id={id}
             value={current?.model ?? ''}
-            onChange={m => onChange(m.trim() === '' ? '' : toRef(provider, m))}
+            onChange={m => emit(m.trim() === '' ? '' : toRef(provider, m))}
             filter={modelFilter}
             provider={provider}
             invalid={invalid}
