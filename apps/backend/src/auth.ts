@@ -159,8 +159,25 @@ export const authMiddleware: MiddlewareHandler<{
 
   c.set('user', user);
   addLogContext({ userId: user.id });
+  if (user.role === 'ebay' && !ebayRoleMayCall(c.req.method, c.req.path)) {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
   await next();
 };
+
+// The eBay operator is denied by default, here, because many routes check only
+// for 'manager' where they mean to let a purchaser in: anything that isn't the
+// eBay desk or what the app shell reads on boot stays out of reach, including
+// routes added later that forget this role exists.
+const EBAY_ROLE_GETS = new Set(['/api/lookups', '/api/workspace', '/api/warehouses', '/api/members/names']);
+const EBAY_ROLE_POSTS = new Set(['/api/client-errors', '/api/client-timings', '/api/notifications/mark-read']);
+
+function ebayRoleMayCall(method: string, path: string): boolean {
+  const under = (prefix: string) => path === prefix || path.startsWith(prefix + '/');
+  if (under('/api/ebay') || under('/api/me')) return true;
+  if (method === 'GET' && (EBAY_ROLE_GETS.has(path) || path === '/api/notifications')) return true;
+  return method === 'POST' && EBAY_ROLE_POSTS.has(path);
+}
 
 // ── Refresh tokens ────────────────────────────────────────────────────────
 // Opaque random tokens stored hashed; rotated on each use. Reusing an already

@@ -9,7 +9,7 @@ import { epochSeconds, hashPassword, generateTempPassword, revokeUserRefreshToke
 import { revokeUserOAuthTokens } from '../oauth/tokens';
 import { effUnitCost, poFeeBasis } from '../lib/po-cost';
 
-export type MemberRole = 'manager' | 'purchaser';
+export type MemberRole = 'manager' | 'purchaser' | 'ebay';
 
 export class LastManagerError extends Error {
   constructor() {
@@ -158,7 +158,9 @@ export async function updateMember(
     // bump stops the access tokens already issued — cookie sessions read the
     // role from the row anyway and just re-mint.
     const [cur] = await tx<{ role: MemberRole }[]>`SELECT role FROM users WHERE id = ${id} FOR UPDATE`;
-    const demoted = cur?.role === 'manager' && input.role !== undefined && input.role !== 'manager';
+    // Becoming the eBay operator drops every scope too (restrictScopesToRole).
+    const demoted = input.role !== undefined && input.role !== cur?.role
+      && (cur?.role === 'manager' || input.role === 'ebay');
     const bumpsCv = endsSessions || demoted;
     await tx`
       UPDATE users SET

@@ -124,9 +124,14 @@ const opaqueToken = () => randomBytes(32).toString('hex');
 // at consent time and re-derived from the live role on every refresh rotation
 // so a demotion takes effect within one access-token lifetime. Service
 // clients (no user) are untouched — their scopes are minted by a manager.
+// The eBay operator gets nothing: the role exists to keep cost out of reach,
+// and market prices are a cost signal.
 const NON_MANAGER_SCOPES = new Set(['market:read']);
-export const restrictScopesToRole = (scopes: string[], role: string | undefined): string[] =>
-  role === 'manager' ? scopes : scopes.filter(s => NON_MANAGER_SCOPES.has(s));
+export const restrictScopesToRole = (scopes: string[], role: string | undefined): string[] => {
+  if (role === 'manager') return scopes;
+  if (role === 'ebay') return [];
+  return scopes.filter(s => NON_MANAGER_SCOPES.has(s));
+};
 
 export type IssueRefreshInput = {
   clientId: string;

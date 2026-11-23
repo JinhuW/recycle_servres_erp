@@ -144,7 +144,8 @@ export type Env = {
   OAUTH_DCR_OPEN?: string;
 };
 
-export type Role = 'manager' | 'purchaser';
+// 'ebay' sees only the eBay desk; authMiddleware denies it everything else.
+export type Role = 'manager' | 'purchaser' | 'ebay';
 
 export type User = {
   id: string;
