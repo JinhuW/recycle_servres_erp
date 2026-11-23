@@ -2,13 +2,13 @@
 id: RS-610
 title: eBay API: publish listings and sync sold orders
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-23
 reporter: jinhu
 branch: feat/ebay-api-sync
-pr:
-version:
+pr: 1250
+version: 1.477.0
 related: [RS-609]
 ---
 

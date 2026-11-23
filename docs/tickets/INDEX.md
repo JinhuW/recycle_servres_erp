@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-610](./RS-610-ebay-api-publish-listings-and-sync-sold-orders.md) | in-progress | story | P2 | eBay API: publish listings and sync sold orders | — |
+| [RS-610](./RS-610-ebay-api-publish-listings-and-sync-sold-orders.md) | done | story | P2 | eBay API: publish listings and sync sold orders | — |
 | [RS-609](./RS-609-ebay-sales-desk-listings-page-and-ebay-only-role.md) | done | story | P2 | eBay sales desk: listings page and eBay-only role | 1.476.0 |
 | [RS-608](./RS-608-enter-ai-provider-api-keys-in-the-ui.md) | done | story | P2 | Enter AI provider API keys in the UI | 1.475.0 |
 | [RS-607](./RS-607-pluggable-ai-model-providers-anthropic-direct-and-op.md) | done | story | P2 | Pluggable AI model providers: Anthropic direct and OpenAI | 1.474.0 |
