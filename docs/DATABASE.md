@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-23:** ERP migration `0252`, Reddit tracker migration `0010`,
+**As of 2026-11-23:** ERP migration `0254`, Reddit tracker migration `0010`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -117,10 +117,10 @@ isolation boundary (`trackers/facebook/infra/README.md`).
 ### Conventions
 
 - **Keys.**
-  - 37 tables use `uuid` keys (`gen_random_uuid()`).
+  - 39 tables use `uuid` keys (`gen_random_uuid()`).
   - Business records people quote use `text` keys allocated by `lib/id-seq.ts`
     from `id_counters`, never by counting rows. These are `orders`,
-    `sell_orders`, `transfer_orders`, `after_sales_cases`,
+    `sell_orders`, `transfer_orders`, `after_sales_cases`, `ebay_listings`,
     `accounting_entries` and `web_submissions`.
   - 14 more tables use other `text` keys:
     - slugs, for the lookups `categories`, `warehouses`, `price_sources`,
@@ -201,7 +201,7 @@ erDiagram
 
 #### `users`
 
-One row per staff member who can sign in, a manager or a purchaser. Managers create and edit members on Settings → Members; nobody is deleted, a member is deactivated instead.
+One row per staff member who can sign in: a manager, a purchaser or the eBay operator. Managers create and edit members on Settings → Members; nobody is deleted, a member is deactivated instead.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
@@ -209,7 +209,7 @@ One row per staff member who can sign in, a manager or a purchaser. Managers cre
 | `email` | `text` | ✓ |  | Login name, stored lower-cased; unique. |
 | `name` | `text` | ✓ |  |  |
 | `initials` | `text` | ✓ |  | Avatar letters: first letters of up to two words of the name. Set at creation; a rename does not recompute it. |
-| `role` | `text` | ✓ |  | manager (sees and does everything) or purchaser (the buying side and their own POs). |
+| `role` | `text` | ✓ |  | manager (sees and does everything), purchaser (the buying side and their own POs) or ebay (the eBay desk only; authMiddleware denies every other route, and OAuth grants it no scope). |
 | `team` | `text` |  |  | Free-text team label, edited on Members. |
 | `password_hash` | `text` | ✓ |  | bcrypt hash (cost 10) of the password. |
 | `language` | `text` | ✓ | `'en'` | UI language, en or zh. Legacy mirror of preferences.language, kept in sync by the preferences endpoint and still returned at sign-in. |
@@ -226,7 +226,7 @@ One row per staff member who can sign in, a manager or a purchaser. Managers cre
 - **Primary key:** `id`
 - **References:** `default_warehouse_id` → `warehouses.id` (on delete set null)
 - **Unique:** `(email)`
-- **Checks:** `role IN ('manager', 'purchaser')`
+- **Checks:** `role IN ('manager', 'purchaser', 'ebay')` (0254)
 - **Indexes:** `users_default_warehouse_idx` (default_warehouse_id)
 
 Soft delete via `active`. A password change or reset stamps tokens_valid_after and bumps credential_version, and a deactivation bumps credential_version, so every cookie and OAuth token issued before stops working on its next request.
@@ -1084,7 +1084,7 @@ Append-only history of one inventory lot (`order_lines` row): status moves from 
 | `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
 | `order_line_id` | `uuid` | ✓ |  | → order_lines, cascade. |
 | `actor_id` | `uuid` |  |  | → users. NULL for migration backfills. |
-| `kind` | `text` | ✓ |  | 'status', 'edited', 'priced' (sell price), 'sold', 'unsold' (sell order reopened), 'transferred', 'received', 'reopened' (transfer reopened), 'transfer_discarded'. |
+| `kind` | `text` | ✓ |  | 'status', 'edited', 'priced' (sell price), 'sold', 'unsold' (sell order reopened), 'transferred', 'received', 'reopened' (transfer reopened), 'transfer_discarded', 'ebay_listed' (units sent to an eBay listing; {listing, qty}), 'ebay_ended' (a listing ended; {listing, reason, returnedQty}). |
 | `detail` | `jsonb` | ✓ | `'{}'::jsonb` | Kind-specific JSON: {field, from, to} for status/edited/priced; {soldQty, remainingQty, sellOrder, priorStatus, priorQty} for sold; {from, to, qty, transfer_order_id, prior_status, peer_line_id?} for transferred. |
 | `created_at` | `timestamptz` | ✓ | `now()` |  |
 
@@ -1383,9 +1383,9 @@ A row counts only while its fingerprint matches the order's current one, so an e
 
 ### After-sales and shipping
 
-After-sales cases (AS-n) record a customer coming back about goods on a sell order. Each has a snapshot of the affected lines and a timeline. The group also holds inbound shipping: `packages` tracks boxes sellers ship to us through Shippo until each becomes a PO. `shipments` is the unread remainder of the removed prepaid-label flow.
+After-sales cases (AS-n) record a customer coming back about goods on a sell order. Each has a snapshot of the affected lines and a timeline. eBay listings (EB-n) are stock offered on eBay, and their sales become sell orders. The group also holds inbound shipping: `packages` tracks boxes sellers ship to us through Shippo until each becomes a PO. `shipments` is the unread remainder of the removed prepaid-label flow.
 
-Tables: [`after_sales_cases`](#erp-after-sales-cases), [`after_sales_case_lines`](#erp-after-sales-case-lines), [`after_sales_case_events`](#erp-after-sales-case-events), [`shipments`](#erp-shipments), [`packages`](#erp-packages)
+Tables: [`after_sales_cases`](#erp-after-sales-cases), [`after_sales_case_lines`](#erp-after-sales-case-lines), [`after_sales_case_events`](#erp-after-sales-case-events), [`ebay_listings`](#erp-ebay-listings), [`ebay_sales`](#erp-ebay-sales), [`ebay_listing_events`](#erp-ebay-listing-events), [`shipments`](#erp-shipments), [`packages`](#erp-packages)
 
 ```mermaid
 erDiagram
@@ -1393,6 +1393,10 @@ erDiagram
   after_sales_cases ||--o{ after_sales_case_lines : "case_id"
   sell_order_lines |o--o{ after_sales_case_lines : "sell_order_line_id"
   after_sales_cases ||--o{ after_sales_case_events : "case_id"
+  order_lines |o--o{ ebay_listings : "inventory_id"
+  ebay_listings ||--o{ ebay_sales : "listing_id"
+  sell_orders |o--o{ ebay_sales : "sell_order_id"
+  ebay_listings ||--o{ ebay_listing_events : "listing_id"
   orders ||--o{ shipments : "order_id"
   orders |o--o{ packages : "order_id"
 ```
@@ -1470,6 +1474,93 @@ Timeline of a case: opened, moved, edited and noted, each with who and when. rou
 - **Indexes:** `after_sales_case_events_actor_id_idx` (actor_id); `after_sales_case_events_case_idx` (case_id, created_at)
 
 Unlike the other event tables it has no append-only trigger, but no code updates or deletes its rows.
+
+<a id="erp-ebay-listings"></a>
+
+#### `ebay_listings`
+
+Part of an inventory lot offered on eBay (migration 0254), numbered EB-n. A manager creates it (Queued), the eBay operator posts it and links the eBay item (Listed), records sales against it, and ends it when it doesn't sell. One lot may have several listings, one per eBay item: a lot of mixed specs is sold as one item per spec. routes/ebay.ts holds the transition table.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `text` | ✓ |  | Human id 'EB-n' from id_counters row 'EB'; the first listing is EB-101. |
+| `inventory_id` | `uuid` |  |  | → order_lines: the lot the units come from. Not unique. NULL only once a PO edit deleted the lot. |
+| `qty` | `integer` | ✓ |  | Units offered. What it still offers is qty less its Confirmed sales; while Queued or Listed that remainder is reserved (`committedQtySql`, lib/sellCommitment.ts), so the sell-order picker, transfers and qty edits see it as taken. |
+| `list_price` | `numeric(12,2)` | ✓ |  | Asking price per unit, USD. |
+| `title` | `text` |  |  | The eBay title. |
+| `spec` | `text` |  |  | Which part of the lot this item is, e.g. "16GB 2Rx8 DDR4-2666". Goes on the sell-order line as its sub-label when a sale is confirmed. |
+| `condition` | `text` |  |  | The eBay condition. |
+| `notes` | `text` |  |  | The manager's note to the operator. |
+| `status` | `text` | ✓ | `'Queued'` | Queued (to post), Listed (on eBay), Sold (every unit sold) or Ended (taken down; the remainder went back to stock). Sold and Ended are final. |
+| `ebay_sku` | `text` |  |  | Generated: 'RS-' ‖ id. The SKU the ERP publishes under, so a synced eBay order finds its listing. Unique. |
+| `ebay_offer_id` | `text` |  |  | eBay's offer id, once published through the API. |
+| `ebay_item_id` | `text` |  |  | eBay's item number. Setting it on a Queued listing makes it Listed. Unique where set. |
+| `ebay_url` | `text` |  |  | The item page; derived from the item number when only that was given. |
+| `end_reason` | `text` |  |  | Set exactly when Ended: no_buyer, damaged, sold_elsewhere, other, or cancelled (a manager took back a Queued listing). |
+| `end_note` | `text` |  |  |  |
+| `created_by` | `uuid` |  |  | → users: the manager who sent it. |
+| `listed_at` | `timestamptz` |  |  | When it went Listed; the start of its shelf time. |
+| `ended_at` | `timestamptz` |  |  | Set exactly when Ended. |
+| `sold_out_at` | `timestamptz` |  |  | Set exactly when Sold. |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+| `updated_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `created_by` → `users.id` (on delete set null); `inventory_id` → `order_lines.id` (on delete set null)
+- **Checks:** `qty > 0`; `list_price >= 0`; `status IN ('Queued', 'Listed', 'Sold', 'Ended')`; `end_reason IN ('no_buyer', 'damaged', 'sold_elsewhere', 'other', 'cancelled')`; `(status = 'Ended') = (end_reason IS NOT NULL)`; `(status = 'Ended') = (ended_at IS NOT NULL)`; `(status = 'Sold') = (sold_out_at IS NOT NULL)`
+- **Indexes:** `ebay_listings_ebay_sku_key` (ebay_sku) unique; `ebay_listings_item_id_key` (ebay_item_id) unique where `ebay_item_id IS NOT NULL`; `ebay_listings_inventory_id_idx` (inventory_id); `ebay_listings_created_by_idx` (created_by); `ebay_listings_status_created_idx` (status, created_at DESC, id DESC)
+
+<a id="erp-ebay-sales"></a>
+
+#### `ebay_sales`
+
+One sale against a listing; a listing can sell in parts. A Detected row comes from the eBay sync and waits for the operator; Confirmed means it became a sell order to the customer named eBay, at Awaiting payment; Dismissed means it wasn't this listing's.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
+| `listing_id` | `text` | ✓ |  |  |
+| `qty` | `integer` | ✓ |  | Units sold. |
+| `unit_price` | `numeric(12,2)` | ✓ |  | USD per unit; the sell-order line's price. |
+| `fees` | `numeric(12,2)` |  |  | What eBay kept, USD. Optional; written into the sell order's note. |
+| `ebay_order_id` | `text` |  |  | eBay's order number. |
+| `ebay_line_item_id` | `text` |  |  | eBay's line item within the order; with ebay_order_id unique where set, so a sync run twice can't count a sale twice. |
+| `buyer` | `text` |  |  | eBay's buyer handle. Optional. |
+| `sold_at` | `timestamptz` | ✓ | `now()` |  |
+| `status` | `text` | ✓ |  | Detected, Confirmed or Dismissed. Only Confirmed sales reduce the listing's remainder. |
+| `sell_order_id` | `text` |  |  | → sell_orders: the order a Confirmed sale became. |
+| `confirmed_by` | `uuid` |  |  |  |
+| `confirmed_at` | `timestamptz` |  |  |  |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `listing_id` → `ebay_listings.id` (on delete cascade); `sell_order_id` → `sell_orders.id` (on delete set null); `confirmed_by` → `users.id` (on delete set null)
+- **Checks:** `qty > 0`; `unit_price >= 0`; `fees >= 0`; `status IN ('Detected', 'Confirmed', 'Dismissed')`
+- **Indexes:** `ebay_sales_line_item_key` (ebay_order_id, ebay_line_item_id) unique where `ebay_line_item_id IS NOT NULL`; `ebay_sales_listing_id_idx` (listing_id); `ebay_sales_sell_order_id_idx` (sell_order_id); `ebay_sales_confirmed_by_idx` (confirmed_by); `ebay_sales_detected_idx` (sold_at DESC) where `status = 'Detected'`
+
+<a id="erp-ebay-listing-events"></a>
+
+#### `ebay_listing_events`
+
+Timeline of a listing, written by routes/ebay.ts in the same transaction as the change, and the Activity page's eBay area. Append-only: a trigger refuses UPDATE and any DELETE not cascading from its listing (the 0038 rule).
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `uuid` | ✓ | `gen_random_uuid()` |  |
+| `listing_id` | `text` | ✓ |  |  |
+| `kind` | `text` | ✓ |  | created (also each part a split makes, with detail.splitFrom), edited ({changes}; a split's {split: new ids}), listed, sale_detected, sale_confirmed ({saleId, qty, unitPrice, sellOrderId, remaining}), sale_dismissed, sold, ended ({reason, returnedQty}). |
+| `from_status` | `text` |  |  |  |
+| `to_status` | `text` |  |  |  |
+| `note` | `text` |  |  |  |
+| `detail` | `jsonb` | ✓ | `'{}'::jsonb` |  |
+| `actor_id` | `uuid` |  |  |  |
+| `created_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `id`
+- **References:** `actor_id` → `users.id` (on delete set null); `listing_id` → `ebay_listings.id` (on delete cascade)
+- **Checks:** `kind IN ('created', 'edited', 'listed', 'sale_detected', 'sale_confirmed', 'sale_dismissed', 'sold', 'ended')`
+- **Indexes:** `ebay_listing_events_listing_idx` (listing_id, created_at); `ebay_listing_events_actor_id_idx` (actor_id); `ebay_listing_events_feed_idx` (created_at DESC, id DESC)
+- **Triggers:** `ebay_listing_events_no_update`, `ebay_listing_events_no_delete` → `ebay_listing_events_lock()`
 
 <a id="erp-shipments"></a>
 
@@ -3145,7 +3236,7 @@ One row per human-readable id series; allocating an id is `UPDATE … SET value 
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
-| `name` | `text` | ✓ |  | Series: PO (purchase orders; was SO until 0044), SO (sell orders; was SL until 0055), TO (transfer orders), WS (web submissions), AS (after-sales cases), AC (RMB Flow accounting entries). |
+| `name` | `text` | ✓ |  | Series: PO (purchase orders; was SO until 0044), SO (sell orders; was SL until 0055), TO (transfer orders), WS (web submissions), AS (after-sales cases), AC (RMB Flow accounting entries), EB (eBay listings, from 100). |
 | `value` | `bigint` | ✓ |  | The last number handed out; the next id is value + 1. |
 
 - **Primary key:** `name`
