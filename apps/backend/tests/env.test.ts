@@ -37,12 +37,19 @@ describe('buildEnv', () => {
   // Keys can be pasted on Settings ▸ AI models, so none is needed to boot;
   // production refuses AI reads instead of serving stub data (ai/index.ts).
   it('boots in production without any AI provider key', () => {
-    expect(() => buildEnv({
-      NODE_ENV: 'production',
-      DATABASE_URL: 'postgres://x',
-      JWT_SECRET: PROD_SECRET,
-      CORS_ALLOWED_ORIGINS: 'https://app',
-    } as NodeJS.ProcessEnv)).not.toThrow(/API_KEY/);
+    const { OPENROUTER_API_KEY: _, ...noKey } = PROD;
+    expect(() => buildEnv(noKey)).not.toThrow();
+  });
+
+  // An emptied Railway variable arrives as ''.
+  it('reads a blank AI_MODEL or OPENROUTER_OCR_MODEL as unset', () => {
+    const env = buildEnv({ ...PROD, AI_MODEL: '', OPENROUTER_OCR_MODEL: '  ' });
+    expect(env.AI_MODEL).toBeUndefined();
+    expect(env.OPENROUTER_OCR_MODEL).toBeUndefined();
+  });
+
+  it('still refuses a malformed AI_MODEL', () => {
+    expect(() => buildEnv({ ...PROD, AI_MODEL: 'not a model' })).toThrow(/AI_MODEL/);
   });
 
   it('does not throw outside production when OPENROUTER_API_KEY is missing', () => {
