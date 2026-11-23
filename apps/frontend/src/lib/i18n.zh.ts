@@ -276,6 +276,7 @@ const zh: Record<string, string> = {
   roleViewSub: '管理员查看整个团队;采购员仅显示自己的内容。',
   defaultWarehouseSaved: '默认仓库已更新',
   totalCost: '总成本',
+  lotTotalRounds: '将保存为 {saved}（{qty} × {unit}）：单价只保留到分。',
   resumeDraftTitle: '继续未完成的订单?',
   startNewOrder: '开始新订单',
   aiLabelCapture: 'AI 标签识别',

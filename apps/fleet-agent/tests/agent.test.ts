@@ -440,11 +440,72 @@ describe('confirmed-stop handoff', () => {
     clock += 60_000;
     docker.commands = [];
     expect((await a.tick()).errors).toEqual([]);
-    // Not removed as an old extra: stopped, removed and run again with the handoff.
-    expect(docker.commands.map((c) => c[0])).toEqual(['ensure', 'stop+rm', 'run']);
-    expect(docker.handoffs).toEqual([4]);
+    // Removed without taking the tick's start, which confirms the stop...
+    expect(docker.commands.map((c) => c[0])).toEqual(['rm']);
     expect(server.stopped).toEqual([expect.objectContaining({ worker_id: 'lab-3', account_no: 9, epoch: 4, restart: true })]);
+    clock += 60_000;
+    docker.commands = [];
+    expect((await a.tick()).errors).toEqual([]);
+    // ...and run again with the handoff, not left removed as an old extra.
+    expect(docker.commands.map((c) => c[0])).toEqual(['ensure', 'run']);
+    expect(docker.handoffs).toEqual([4]);
     expect(docker.containers.get('rs-fleet-lab-3')).toMatchObject({ running: true, image: 'img:2' });
+    expect(JSON.parse(readFileSync(join(stateDir, 'memory.json'), 'utf8')).pending).toEqual({});
+  });
+
+  // A failed `docker stop` leaves the extra running, so the stop never
+  // happened. The worker is no longer the release's to run again: once it
+  // exits or is removed, starting it would put the host above its count.
+  for (const [after, end] of [
+    ['exits 75', (d: FakeDocker) => d.containers.set('rs-fleet-lab-3', { ...exited('lab-3', 75, new Date(clock - 120_000).toISOString(), 'img:1') })],
+    ['is removed by hand', (d: FakeDocker) => d.containers.delete('rs-fleet-lab-3')],
+  ] as const) {
+    it(`never runs above the count an extra whose stop for its replacement failed, after it ${after}`, async () => {
+      const docker = new FakeDocker([running('lab-1', 'img:2'), running('lab-3', 'img:1')]);
+      server.desired = desired({ count: 1, image: 'img:2', roll: { replace: 'lab-3' }, vnc_ports: { 'lab-1': 5901, 'lab-3': 5903 }, leases: { 'lab-3': { account_no: 9, epoch: 4 } } });
+      docker.failNext.stop = { error: 'docker stop: Error response from daemon: cannot stop container: tried to kill container, but did not receive an exit event', effect: false };
+      const a = agent(docker);
+      expect((await a.tick()).errors).toEqual([expect.stringMatching(/lab-3: could not replace rs-fleet-lab-3: docker stop/)]);
+      expect(docker.containers.get('rs-fleet-lab-3')).toMatchObject({ running: true, image: 'img:1' });
+      // The release moves on; the extra keeps running for a while.
+      server.desired = { ...server.desired, roll: null };
+      clock += 60_000;
+      expect((await a.tick()).errors).toEqual([]);
+      clock += 10 * 60_000;
+      end(docker);
+      docker.commands = [];
+      for (let i = 0; i < 3; i++) {
+        expect((await a.tick()).errors).toEqual([]);
+        clock += 5 * 60_000;
+      }
+      expect(docker.commands.filter((c) => c[0] === 'run' || c[0] === 'start' || c[0] === 'stop+rm')).toEqual([]);
+      expect(docker.containers.get('rs-fleet-lab-3')?.running ?? false).toBe(false);
+      expect(server.stopped).toEqual([]);
+      expect(JSON.parse(readFileSync(join(stateDir, 'memory.json'), 'utf8')).pending).toEqual({});
+    });
+  }
+
+  it('never runs above the count an extra whose stop failed and that exited while the ERP was away; its reservation is released', async () => {
+    const docker = new FakeDocker([running('lab-1', 'img:2'), running('lab-3', 'img:1')]);
+    const online = desired({ count: 1, image: 'img:2', roll: { replace: 'lab-3' }, vnc_ports: { 'lab-1': 5901, 'lab-3': 5903 }, leases: { 'lab-3': { account_no: 9, epoch: 4 } } });
+    server.desired = online;
+    docker.failNext.stop = { error: 'docker stop: timed out', effect: false };
+    const a = agent(docker);
+    await a.tick();
+    // Offline, the running extra is seen but nothing is settled.
+    server.desired = 'error';
+    clock += 60_000;
+    await a.tick();
+    docker.containers.set('rs-fleet-lab-3', exited('lab-3', 75, new Date(clock - 120_000).toISOString(), 'img:1'));
+    server.desired = { ...online, roll: null };
+    docker.commands = [];
+    for (let i = 0; i < 3; i++) {
+      clock += 5 * 60_000;
+      expect((await a.tick()).errors).toEqual([]);
+    }
+    // Removed as a stopped old-image extra, never run again.
+    expect(docker.commands.map((c) => c[0])).toEqual(['rm']);
+    expect(server.stopped).toEqual([expect.objectContaining({ worker_id: 'lab-3', epoch: 4, restart: false })]);
     expect(JSON.parse(readFileSync(join(stateDir, 'memory.json'), 'utf8')).pending).toEqual({});
   });
 
