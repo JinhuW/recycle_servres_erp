@@ -18,6 +18,40 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`rs-poster` and `rs-messenger` work through an authenticated proxy.**
+  `PosterSession` handed Chromium the whole `http://user:pass@host:port` URL
+  (from `FB_PROXY` or the session's sidecar) as `server`. Chromium never
+  answers that proxy's 407, so runs ended in a navigation timeout that read
+  as "proxy down" while `rs-session check` on the same file passed. It now
+  splits the credentials out the way `rs-session` does; the splitter moved
+  to `rs_poster/proxy.py` so both share it.
+- **`scripts/release.sh patch --dry-run` is a dry run.** `--dry-run` was read
+  only as the first argument, so putting it after the bump cut a real
+  release, commit and tag. It now counts in any position, and an unknown
+  option or a second bump argument exits 2 before anything runs
+  (`scripts/tests/test-release-args.sh`).
+- **`scripts/deploy.sh` no longer calls a fleet verified when it checked no
+  worker.** With no `deploy/docker-compose.homelab*.yml` left and the fleet
+  under the ERP's fleet agent, verify compared zero workers and still printed
+  "verified: every worker and the coordinator run this tree", and the
+  Telegram notice said "0 workers - verified". Verify now counts the workers
+  it compared and, when there are none, says it checked the coordinator
+  alone. The missing compose files no longer print a `sed` error either.
+- **The proxy splitter handles every URL form it is given.** A proxy written
+  without a scheme (`user:pass@host:port`) parsed `user` as the scheme and
+  went to Chromium whole, credentials and all; an IPv6 host lost the brackets
+  its URL needs; and a bad port raised urllib's error. It now assumes `http://`
+  when there is no scheme, keeps the brackets, and names the host (never the
+  password) when the port is invalid.
+- **`scripts/check-cities.py` authenticates to its proxy.** It still passed the
+  session's raw proxy URL, credentials included, as Chromium's `server`; it
+  now uses the shared splitter.
+- **A `deploy.sh sync` Telegram notice no longer says "verified".** It said the
+  coordinator was verified running this tree, though sync checks no
+  coordinator. It now reads "Synced" and says what was checked.
+
 ## [0.18.0] - 2026-11-07
 
 ### Added

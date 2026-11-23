@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
-  EVALUATOR_MODEL, evaluatorModelProblem, funnelCounts, summarizeTrial, TRIAL_MIN_LABELLED, workerHaystack,
-  type TrackerWorker, type VsLive,
+  EVALUATOR_MODEL, evaluatorModelProblem, funnelCounts, parseTrackerKeys, summarizeTrial, trackerProviderStatus,
+  TRIAL_MIN_LABELLED, workerHaystack, type TrackerWorker, type VsLive,
 } from './tracker';
+import type { AiProviderStatus } from './aiModels';
 
 const cell = (posts: number, leads = 0, notLeads = 0) => ({ posts, leads, notLeads });
 
@@ -44,7 +45,7 @@ describe('summarizeTrial', () => {
 
 describe('EVALUATOR_MODEL', () => {
   const entry = (id: string, structuredOutputs = true) => ({
-    id, name: id, contextLength: 128000, promptPerM: 0.15, completionPerM: 0.6,
+    id, provider: 'openrouter' as const, name: id, contextLength: 128000, promptPerM: 0.15, completionPerM: 0.6,
     structuredOutputs, inputModalities: ['text'], outputModalities: ['text'],
   });
 
@@ -53,6 +54,7 @@ describe('EVALUATOR_MODEL', () => {
     expect(EVALUATOR_MODEL(entry('openai/gpt-4o-mini:batch'))).toBe(true);
     expect(EVALUATOR_MODEL(entry('~anthropic/claude-haiku-latest'))).toBe(false);
     expect(EVALUATOR_MODEL(entry('openrouter/auto', false))).toBe(false);
+    expect(EVALUATOR_MODEL({ ...entry('anthropic:claude-sonnet-5-5'), provider: 'anthropic' })).toBe(true);
   });
 
   it('accepts only an id the catalogue lists as an evaluator model', () => {
@@ -62,6 +64,8 @@ describe('EVALUATOR_MODEL', () => {
     expect(evaluatorModelProblem('vendor/not-in-catalogue', catalogue)).toBe('unlisted');
     expect(evaluatorModelProblem('openai/gpt-4o-mini', null)).toBe('loading');
     expect(evaluatorModelProblem('gpt-4o-mini', catalogue)).toBe('shape');
+    expect(evaluatorModelProblem('anthropic:claude/x', catalogue)).toBe('shape');
+    expect(evaluatorModelProblem('anthropic:claude-sonnet-5-5', catalogue)).toBe('unlisted');
   });
 });
 
@@ -95,5 +99,42 @@ describe('workerHaystack', () => {
 
   it('matches on the id, the raw role and the label the table shows', () => {
     expect(workerHaystack(worker, 'API 服务')).toBe('oci-7f3a api API 服务');
+  });
+});
+
+describe("the tracker's own key status", () => {
+  it('reads `available` per provider, stored or env alike', () => {
+    expect(parseTrackerKeys({ keys: [
+      { provider: 'openrouter', configured: false, last4: null, available: true, source: 'env' },
+      { provider: 'anthropic', configured: true, last4: 'ab12', available: true, source: 'stored' },
+      { provider: 'openai', configured: false, last4: null, available: false, source: null },
+    ] })).toEqual({ openrouter: true, anthropic: true, openai: false });
+  });
+
+  it('treats an older answer, without `available`, and anything malformed as unknown', () => {
+    expect(parseTrackerKeys({ keys: [{ provider: 'anthropic', configured: true, last4: 'ab12' }] })).toEqual({});
+    expect(parseTrackerKeys({ keys: [{ provider: 'gemini', available: true }, null, 'x'] })).toEqual({});
+    expect(parseTrackerKeys(null)).toEqual({});
+    expect(parseTrackerKeys({ keys: 'nope' })).toEqual({});
+  });
+
+  const erp = (over: Partial<AiProviderStatus> & Pick<AiProviderStatus, 'id'>): AiProviderStatus => ({
+    label: over.id, configured: true, source: null, last4: null, trackerSynced: null, keyName: '', ...over,
+  });
+  const list = [
+    erp({ id: 'openrouter', source: 'env' }),
+    erp({ id: 'anthropic', source: 'ui', trackerSynced: true }),
+    erp({ id: 'openai', source: 'ui', trackerSynced: false }),
+  ];
+
+  it("enables a provider by the tracker's word when it gave one", () => {
+    expect(trackerProviderStatus(list, { openrouter: true, anthropic: false }).map(p => p.configured))
+      .toEqual([true, false, false]);
+  });
+
+  it('falls back to a key pasted here that reached the tracker, never an ERP env key', () => {
+    expect(trackerProviderStatus(list, null).map(p => p.configured)).toEqual([false, true, false]);
+    expect(trackerProviderStatus([erp({ id: 'anthropic', source: 'ui', trackerSynced: true, unreadable: true })], {})
+      .map(p => p.configured)).toEqual([false]);
   });
 });

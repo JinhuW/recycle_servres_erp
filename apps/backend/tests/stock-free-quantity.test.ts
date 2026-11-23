@@ -163,6 +163,24 @@ describe('POST /api/orders/:id/total-cost/follow-lines', () => {
       && e.detail.changes?.some((ch) => ch.field === 'total_cost'))).toBe(true);
   });
 
+  it('refuses on an archived PO and leaves its lot price pinned', async () => {
+    const { token } = await loginAs(ALEX);
+    const sql = getTestDb();
+    const [po] = await sql<{ id: string; sum: number }[]>`
+      SELECT o.id, SUM(COALESCE(l.qty_purchased, l.qty) * l.unit_cost)::float AS sum
+      FROM orders o JOIN order_lines l ON l.order_id = o.id
+      WHERE o.archived_at IS NULL
+      GROUP BY o.id ORDER BY o.id LIMIT 1`;
+    const pinned = po.sum + 100;
+    await sql`UPDATE orders SET total_cost = ${pinned}, archived_at = NOW() WHERE id = ${po.id}`;
+
+    const r = await api<{ error: string }>('POST', `/api/orders/${po.id}/total-cost/follow-lines`, { token, body: {} });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/archived/i);
+    const [row] = await sql<{ total_cost: number }[]>`SELECT total_cost::float AS total_cost FROM orders WHERE id = ${po.id}`;
+    expect(row!.total_cost).toBeCloseTo(pinned, 2);
+  });
+
   it('reports a partly sold PO whose total mirrors what was bought as following its lines', async () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token, 3);

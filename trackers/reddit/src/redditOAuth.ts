@@ -1,8 +1,6 @@
-// Reads new posts and comments through Reddit's OAuth Data API.
-//
-// Reddit withdrew logged-out RSS in November 2026, so every anonymous feed
-// URL now returns an Atom "Not Found" (docs/debug-notes/reddit-new-rss-404.md).
-// This uses app-only OAuth (grant_type=client_credentials): a client id and
+// Reads new posts and comments through Reddit's OAuth Data API, the only
+// direct way into Reddit left: logged-out RSS was withdrawn in November 2026
+// (docs/debug-notes/reddit-new-rss-404.md). This uses app-only OAuth (grant_type=client_credentials): a client id and
 // secret from a "script" app at reddit.com/prefs/apps, with no user account.
 // It reads the same r/a+b+c multireddit listing in one request, so the poll
 // loop's one-request-per-cycle invariant holds.
@@ -11,6 +9,8 @@ import {
   COMMENTS_LIMIT,
   numericHeader,
   readRateLimit,
+  type CommentsResult,
+  type FetchResult,
   type RateLimitHint,
   type RedditComment,
   type RedditPost,
@@ -153,7 +153,7 @@ async function apiGetOnce(
   try {
     return {kind: 'ok', json: await response.json(), rateLimit: readRateLimit(response.headers)};
   } catch {
-    // An HTML body on a 200 is a block page, as with the old feed.
+    // An HTML body on a 200 is Reddit's block page, not data.
     return {kind: 'blocked', status: response.status};
   }
 }
@@ -219,18 +219,17 @@ export function parseCommentTree(json: unknown): RedditComment[] {
   return out;
 }
 
-export type OAuthPostsResult =
-  | {kind: 'ok'; posts: RedditPost[]; rateLimit: RateLimitHint}
-  | {kind: 'rate_limited'; retryAfterSeconds?: number}
-  | {kind: 'blocked'; status: number}
-  | {kind: 'error'; message: string};
-
-/** The newest posts across every given subreddit, in one request. */
-export async function fetchNewPostsOAuth(
+/**
+ * The newest posts across every given subreddit, in one request. Never
+ * throws: failures come back typed, so the poll loop can tell backing off
+ * from retrying.
+ */
+export async function fetchNewPosts(
   subreddits: string[],
   userAgent: string,
   auth: RedditAuth,
-): Promise<OAuthPostsResult> {
+): Promise<FetchResult> {
+  if (subreddits.length === 0) return {kind: 'ok', posts: [], rateLimit: {}};
   const path = subreddits.map((s) => encodeURIComponent(s)).join('+');
   const result = await apiGet(`/r/${path}/new?limit=${LISTING_LIMIT}&raw_json=1`, userAgent, auth);
   switch (result.kind) {
@@ -243,19 +242,12 @@ export async function fetchNewPostsOAuth(
   }
 }
 
-export type OAuthCommentsResult =
-  | {kind: 'ok'; comments: RedditComment[]; rateLimit: RateLimitHint}
-  | {kind: 'rate_limited'; retryAfterSeconds?: number}
-  | {kind: 'blocked'; status: number}
-  | {kind: 'gone'}
-  | {kind: 'error'; message: string};
-
-/** A post's comments, from its permalink. */
-export async function fetchCommentsOAuth(
+/** A post's comments, from its permalink. Never throws, like fetchNewPosts. */
+export async function fetchComments(
   postUrl: string,
   userAgent: string,
   auth: RedditAuth,
-): Promise<OAuthCommentsResult> {
+): Promise<CommentsResult> {
   const id = /\/comments\/([a-z0-9]+)/i.exec(postUrl)?.[1];
   if (!id) return {kind: 'gone'};
   const result = await apiGet(`/comments/${id}?limit=${COMMENTS_LIMIT}&raw_json=1`, userAgent, auth);

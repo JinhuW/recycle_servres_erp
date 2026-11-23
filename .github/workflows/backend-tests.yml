@@ -28,8 +28,14 @@ on:
       - "apps/fleet-agent/**"
       - "packages/shared/**"
       - ".github/workflows/backend-tests.yml"
-      # tests/sync-scrub.test.ts runs this against the migrated schema.
-      - "deploy/railway-sync/scrub.sql"
+      # Files outside the packages that tests read: tests/sync-scrub and
+      # tests/sync-keep-fleet run the sync SQL against the migrated schema,
+      # the frontend's railway-alerts-relay test imports the alert relay, and
+      # tests/fleet-scheduler imports the live tracker fleet config and pins
+      # its counts.
+      - "deploy/railway-sync/*.sql"
+      - "deploy/railway-alerts/worker.js"
+      - "trackers/facebook/configs/master.toml"
       # The Worker is the backend's trusted edge (forwarded headers, client
       # IP): a change to it runs the suite too.
       - "deploy/cloudflare/**"
@@ -51,8 +57,14 @@ on:
       - "apps/fleet-agent/**"
       - "packages/shared/**"
       - ".github/workflows/backend-tests.yml"
-      # tests/sync-scrub.test.ts runs this against the migrated schema.
-      - "deploy/railway-sync/scrub.sql"
+      # Files outside the packages that tests read: tests/sync-scrub and
+      # tests/sync-keep-fleet run the sync SQL against the migrated schema,
+      # the frontend's railway-alerts-relay test imports the alert relay, and
+      # tests/fleet-scheduler imports the live tracker fleet config and pins
+      # its counts.
+      - "deploy/railway-sync/*.sql"
+      - "deploy/railway-alerts/worker.js"
+      - "trackers/facebook/configs/master.toml"
       # The Worker is the backend's trusted edge (forwarded headers, client
       # IP): a change to it runs the suite too.
       - "deploy/cloudflare/**"

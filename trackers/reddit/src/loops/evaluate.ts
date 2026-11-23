@@ -10,7 +10,8 @@
 import type {AlertSender} from '../alerts.ts';
 import {claimPosts, recordEvaluation, rejectPost, releasePostFailure} from '../claims.ts';
 import type {Sql} from '../db.ts';
-import {evaluatePost, type Evaluation} from '../llm.ts';
+import {evaluatePost, parseModelRef, type Evaluation, type LlmKeys} from '../llm/index.ts';
+import {KEY_ENV, type KeySource} from '../llm/keys.ts';
 import type {Logger} from '../logger.ts';
 import {
   candidateConfig,
@@ -28,27 +29,75 @@ export const EVALUATE_BATCH_SIZE = 3;
 export interface EvaluateDeps {
   sql: Sql;
   workerId: string;
-  apiKey: string;
+  /** Read once per batch, so a key the ERP pushes lands within the store's TTL. */
+  keys: KeySource;
   settings: SettingsStore;
   /** Sends the dev-chat review of a post only the candidate flagged. */
   alerts: AlertSender;
   logger: Logger;
 }
 
+/** How often a missing provider key is reported while posts wait on it. */
+export const NO_KEY_WARN_INTERVAL_MS = 15 * 60_000;
+
+/** When each missing-key warning last went out, by setting and model. */
+const noKeyWarnedAt = new Map<string, number>();
+
+/** Forgets the warning throttle, so tests start from a clean slate. */
+export function resetNoKeyWarnings(): void {
+  noKeyWarnedAt.clear();
+}
+
+function hasKey(keys: LlmKeys, model: string): boolean {
+  return Boolean(keys[parseModelRef(model).provider]);
+}
+
+/**
+ * Warns about a model whose provider has no key, at most once per interval:
+ * every warn reaches the ops group, and the loop checks every few seconds.
+ */
+function warnNoKey(logger: Logger, setting: string, model: string, now = Date.now()): void {
+  const throttleKey = `${setting}:${model}`;
+  if (now - (noKeyWarnedAt.get(throttleKey) ?? -Infinity) < NO_KEY_WARN_INTERVAL_MS) return;
+  noKeyWarnedAt.set(throttleKey, now);
+  const {provider} = parseModelRef(model);
+  logger.warn(`no API key for ${setting}'s provider`, {
+    setting,
+    model,
+    provider,
+    fix: `paste a ${provider} key on the ERP's Settings ▸ AI models, or set ${KEY_ENV[provider]}`,
+  });
+}
+
 export async function evaluateOnce(deps: EvaluateDeps): Promise<boolean> {
   const {sql, workerId, logger} = deps;
+
+  // Keys are checked before claiming: a post judged without one would count
+  // an attempt per batch and be parked 'failed' within minutes, losing the lead.
+  const settings = await deps.settings.get();
+  const keys = await deps.keys.get();
+  if (!hasKey(keys, settings.llmModel)) {
+    const [waiting] = await sql<Array<{exists: boolean}>>`
+      SELECT EXISTS (SELECT 1 FROM posts WHERE status = 'new') AS exists`;
+    if (waiting?.exists) warnNoKey(logger, 'llm_model', settings.llmModel);
+    return false;
+  }
 
   const posts = await claimPosts(sql, workerId, 'new', EVALUATE_BATCH_SIZE);
   if (posts.length === 0) return false;
 
-  const settings = await deps.settings.get();
   const cutoff = Date.now() - settings.maxPostAgeHours * 3600_000;
   // One cheap SELECT per batch keeps rule edits reaching the fleet as fast as
   // a settings change, without another cache to invalidate.
   const enabledRules = (await listRules(sql)).filter((r) => r.enabled);
   const live = liveConfig(settings, enabledRules);
   const liveVersionId = await ensurePromptVersion(sql, live);
-  const candidate = candidateConfig(settings);
+  let candidate = candidateConfig(settings);
+  if (candidate && !hasKey(keys, candidate.model)) {
+    // A trial without a key would only log a failure per post.
+    warnNoKey(logger, 'candidate_llm_model', candidate.model);
+    candidate = null;
+  }
   const candidateVersionId = candidate ? await ensurePromptVersion(sql, candidate) : null;
 
   for (const post of posts) {
@@ -82,7 +131,7 @@ export async function evaluateOnce(deps: EvaluateDeps): Promise<boolean> {
       selftext: post.selftext,
       author: post.author,
     };
-    const result = await evaluatePost(input, {apiKey: deps.apiKey, ...live});
+    const result = await evaluatePost(input, {keys, ...live});
 
     if (result.kind === 'error') {
       // The candidate waits for the retry too, so both verdicts on a post
@@ -100,7 +149,7 @@ export async function evaluateOnce(deps: EvaluateDeps): Promise<boolean> {
 
     let candidateVerdict: Evaluation | null = null;
     if (candidate && candidateVersionId !== null) {
-      const trial = await evaluatePost(input, {apiKey: deps.apiKey, ...candidate});
+      const trial = await evaluatePost(input, {keys, ...candidate});
       if (trial.kind === 'ok') {
         candidateVerdict = trial.evaluation;
         await recordCandidateVerdict(sql, post.reddit_id, candidateVersionId, candidateVerdict);

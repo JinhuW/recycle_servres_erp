@@ -1,9 +1,10 @@
 # Reddit tracker — `trackers/reddit/`
 
-Distributed Reddit for-sale monitor: a fleet of workers polls subreddits through
-the Atom feed, an OpenRouter model judges each post, and buy-worthy listings go
-to Telegram once each. Read `README.md` for what it does and how to run it; this
-file is only about traps and conventions. The root [AGENTS.md](../../AGENTS.md)
+Reddit for-sale monitor: new posts arrive from the redditapis.com webhook (or,
+with OAuth credentials, from the workers' own poll), an OpenRouter model judges
+each post, and buy-worthy listings go to Telegram once each. Read `README.md`
+for what it does and how to run it; this file is only about traps and
+conventions. The root [AGENTS.md](../../AGENTS.md)
 has the repo map and workflow.
 
 ## Where it sits in the monorepo
@@ -32,13 +33,13 @@ has the repo map and workflow.
 ## Read before changing these
 
 - **Anything about fetching posts** →
-  [docs/debug-notes/reddit-anonymous-json-blocked.md](docs/debug-notes/reddit-anonymous-json-blocked.md).
-  The JSON API is dead for anonymous clients, and Reddit withdrew the Atom
-  feed in November 2026: every feed URL 404s
-  ([reddit-new-rss-404.md](docs/debug-notes/reddit-new-rss-404.md)).
-  The real rate limit is about 1 request per 40 s per IP, not 10/min.
-  Posts now come from the redditapis.com webhook (`poll_source`, README
-  *Post source*).
+  [docs/debug-notes/reddit-new-rss-404.md](docs/debug-notes/reddit-new-rss-404.md).
+  Reddit has no logged-out route left: the JSON API is 403-blocked and the
+  Atom feeds were withdrawn in November 2026, and the tracker's RSS code is
+  gone. Posts come from the redditapis.com webhook (`poll_source`, README
+  *Post source*); reading Reddit directly needs OAuth (`src/redditOAuth.ts`),
+  whose `x-ratelimit-*` headers drive the pacer. Don't bring back an
+  anonymous reader.
 - **The Dockerfile CMD or shutdown path** →
   [docs/debug-notes/signals-must-reach-node.md](docs/debug-notes/signals-must-reach-node.md).
   node must be PID 1 or SIGTERM never reaches the shutdown handler.
@@ -50,11 +51,11 @@ has the repo map and workflow.
   [docs/debug-notes/telegram-supergroup-migration.md](docs/debug-notes/telegram-supergroup-migration.md).
   A group upgraded to a supergroup gets a new `-100…` chat id, and every alert
   to the old id fails.
-- **The eval prompt, rules, `src/llm.ts` or the response schema** →
+- **The eval prompt, rules, `src/llm/` or the response schema** →
   [docs/prompt-evaluations/](docs/prompt-evaluations/). Every verdict is
   scored by prompt version, so a wording change belongs in a candidate trial
   with its numbers written up, not straight in `eval_prompt`.
-- **The response schema** (`RESPONSE_SCHEMA` in `src/llm.ts`) is part of
+- **The response schema** (`RESPONSE_JSON_SCHEMA` in `src/llm/index.ts`) is part of
   every prompt version's identity, through `RESPONSE_SCHEMA_ID` in the hash.
   Changing the schema starts every version afresh, so give the new shape a
   new id, and measure it first. `reasoning` comes before `is_target` because
@@ -69,6 +70,16 @@ has the repo map and workflow.
   The emulator colima registers can crash node with an `uv__io_poll`
   assertion. Re-register it with `tonistiigi/binfmt`, and don't drop amd64:
   part of the fleet is E2.1.Micro.
+- **Provider API keys (`llm_keys`, `src/llm/keys.ts`)**. The ERP's
+  Settings ▸ AI models is the writer, through `PUT|DELETE /api/llm-keys/:provider`.
+  Keys are stored in plain text, the same trust level as the Railway env
+  vars, and kept out of `settings` because `GET /api/settings` returns every
+  row. `GET /api/llm-keys` shows `configured` and `last4` of the stored key
+  and whether a stored or env key is `available`; no route or log line may
+  return a key (`evaluatePost` redacts it from error messages). Env keys are
+  fallbacks a stored key overrides. A model whose provider has no key is
+  refused by the settings and candidate routes, and the evaluate loop claims
+  nothing while the live model has none, so posts never burn attempts on it.
 
 ## Design invariants
 
@@ -89,6 +100,8 @@ Breaking any of these breaks the fleet. The tests that cover them are
    `target` row.
 5. **Secrets in env, business config in the `settings` table.** If a change
    should reach a running fleet without a redeploy, it belongs in the database.
+   The one exception is provider API keys, which the ERP pushes into
+   `llm_keys` (env keys are fallbacks).
 6. **A candidate prompt never reaches buyers.** Its verdicts go to
    `candidate_verdicts` and never touch `posts.status`. A post only the
    candidate flags is reviewed in the dev chat from the evaluate loop, by the

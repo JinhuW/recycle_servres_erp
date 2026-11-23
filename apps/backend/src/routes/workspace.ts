@@ -3,6 +3,9 @@ import { getDb } from '../db';
 import { SAFE_UPLOAD_MIME, UPLOAD_HARD_CAP_BYTES } from '../lib/settings';
 import type { Env, User } from '../types';
 import { isPoAiReviewSetting } from '../services/poAiReview';
+import { AI_PROVIDER_LABELS, isAiModelsSetting, parseModelRef } from '@recycle-erp/shared';
+import { aiKeys } from '../ai/keys';
+import { invalidateAiModelsSetting } from '../ai/llm';
 
 const workspace = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -23,6 +26,7 @@ const KNOWN_SETTINGS: Record<string, (v: unknown) => boolean> = {
   target_margin: isFrac,
   category_default_margin: v => typeof v === 'number' && Number.isFinite(v) && v >= 0,
   po_ai_review: isPoAiReviewSetting,
+  ai_models: isAiModelsSetting,
 };
 
 // Most settings expose internal pricing/margin/upload config and stay
@@ -54,6 +58,20 @@ workspace.patch('/', async (c) => {
       return c.json({ error: `invalid value for ${k}` }, 400);
     }
   }
+  // A model whose provider has no key would fail every call it serves; say so
+  // now rather than at the next scan, or at a PO review that runs without AI.
+  const refs = [
+    ...Object.values((body.ai_models ?? {}) as Record<string, unknown>),
+    (body.po_ai_review as { model?: unknown } | undefined)?.model,
+  ].filter((r): r is string => typeof r === 'string' && r !== '');
+  if (refs.length > 0) {
+    const keys = await aiKeys(c.env);
+    for (const ref of refs) {
+      const p = parseModelRef(ref).provider;
+      if (!keys[p]) return c.json({ error: `No ${AI_PROVIDER_LABELS[p]} API key is set, so ${ref} can't be used` }, 400);
+    }
+  }
+
   const sql = getDb(c.env);
   // All-or-nothing: a multi-key PATCH must not leave settings half-applied
   // if one upsert fails midway.
@@ -66,6 +84,7 @@ workspace.patch('/', async (c) => {
       `;
     }
   });
+  if ('ai_models' in body) invalidateAiModelsSetting();
   return c.json({ ok: true });
 });
 

@@ -13,12 +13,14 @@ export type Role = 'worker' | 'api';
 export interface Config {
   readonly databaseUrl: string;
   readonly openrouterApiKey: string;
+  readonly anthropicApiKey: string;
+  readonly openaiApiKey: string;
   readonly alertTransport: AlertTransport;
   readonly telegramBotToken: string;
   readonly role: Role;
   readonly workerId: string;
   readonly redditUserAgent: string;
-  /** App-only OAuth credentials; null falls back to the (withdrawn) Atom feed. */
+  /** App-only OAuth credentials; null means this process cannot read Reddit directly. */
   readonly redditAuth: RedditAuth | null;
   /** HMAC secret for redditapis.com monitor webhooks; '' turns the route off. */
   readonly redditapisWebhookSecret: string;
@@ -99,12 +101,18 @@ export function loadConfig(): Config {
   }
   const redditAuth = redditClientId ? {clientId: redditClientId, clientSecret: redditClientSecret} : null;
 
+  // Fallbacks only: the ERP pushes keys into `llm_keys`, so a worker may boot
+  // with none; the evaluate loop then waits, claiming nothing, until a key lands.
+  const openrouterApiKey = process.env['OPENROUTER_API_KEY'] ?? '';
+  const anthropicApiKey = process.env['ANTHROPIC_API_KEY'] ?? '';
+  const openaiApiKey = process.env['OPENAI_API_KEY'] ?? '';
+
   return {
     databaseUrl: required('DATABASE_URL', role),
     alertTransport,
-    // The API role never calls OpenRouter, but it does expose a Telegram test
-    // endpoint, so only the key it cannot use is optional there.
-    openrouterApiKey: role === 'worker' ? required('OPENROUTER_API_KEY', role) : (process.env['OPENROUTER_API_KEY'] ?? ''),
+    openrouterApiKey,
+    anthropicApiKey,
+    openaiApiKey,
     telegramBotToken: alertTransport === 'telegram'
       ? required('TELEGRAM_BOT_TOKEN', role)
       : (process.env['TELEGRAM_BOT_TOKEN'] ?? ''),

@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { api } from '../../../lib/api';
 import { showErrorDialog } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
-import { type ContactKind, KIND_KEY } from '../../../lib/clients';
+import { type ContactKind, KIND_KEY, followUpDate } from '../../../lib/clients';
 
 const KINDS: ContactKind[] = ['call', 'text', 'visit', 'offer', 'note'];
 const OUTCOMES = ['cliOutHasStock', 'cliOutNothing', 'cliOutNoAnswer', 'cliOutCallBack'] as const;
@@ -26,15 +26,10 @@ export function LogContact({ id, cadenceDays, onSaved }: {
   const [picked, setPicked] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const iso = (days: number) => {
-    const d = new Date();
-    d.setDate(d.getDate() + days);
-    return d.toISOString().slice(0, 10);
-  };
   const nextIso =
-    when === 'cadence' ? iso(cadenceDays)
-    : when === 'week' ? iso(7)
-    : when === 'month' ? iso(30)
+    when === 'cadence' ? followUpDate(cadenceDays)
+    : when === 'week' ? followUpDate(7)
+    : when === 'month' ? followUpDate(30)
     : picked;
 
   const save = async () => {
@@ -88,7 +83,7 @@ export function LogContact({ id, cadenceDays, onSaved }: {
         <button type="button" className={`cli-when-btn${when === 'cadence' ? ' on' : ''}`}
           aria-pressed={when === 'cadence'} onClick={() => setWhen('cadence')}>
           {t('cliWhenUsual', { n: cadenceDays })}
-          <span className="cli-when-date">{fmtShort(iso(cadenceDays))}</span>
+          <span className="cli-when-date">{fmtShort(followUpDate(cadenceDays))}</span>
         </button>
         <button type="button" className={`cli-when-btn${when === 'week' ? ' on' : ''}`}
           aria-pressed={when === 'week'} onClick={() => setWhen('week')}>{t('cliWhenWeek')}</button>

@@ -3,8 +3,9 @@
 // with its bearer token; a 501 from any of them means the proxy env vars are
 // unset.
 
-import { TEXT_JSON_MODEL, type AiModel } from './aiModels';
+import { TEXT_JSON_MODEL, type AiModel, type AiProviderStatus } from './aiModels';
 import { api } from './api';
+import { AI_PROVIDERS, isModelRef, type AiProviderId } from '@recycle-erp/shared';
 
 export type TrackerWorkerRole = 'worker' | 'api';
 export type LoopName = 'poll' | 'evaluate' | 'notify';
@@ -184,15 +185,13 @@ export function workerHaystack(w: TrackerWorker, roleLabel: string): string {
   return [w.workerId, w.role, roleLabel].join(' ');
 }
 
-/** An OpenRouter model id, `provider/model`; the tracker checks the same shape. */
-export const MODEL_ID = /^[\w.-]+\/[\w.:-]+$/;
-
 /**
- * The catalogue entries the evaluator can run on. MODEL_ID also drops
- * OpenRouter's `~…-latest` aliases: they float to whatever is newest, which
- * would swap the model under an unchanged prompt version and blur its score.
+ * The catalogue entries the evaluator can run on. isModelRef (the tracker
+ * checks the same shape) also drops OpenRouter's `~…-latest` aliases: they
+ * float to whatever is newest, which would swap the model under an unchanged
+ * prompt version and blur its score.
  */
-export const EVALUATOR_MODEL = (m: AiModel): boolean => TEXT_JSON_MODEL(m) && MODEL_ID.test(m.id);
+export const EVALUATOR_MODEL = (m: AiModel): boolean => TEXT_JSON_MODEL(m) && isModelRef(m.id);
 
 /**
  * Why the evaluator cannot run on `id`, or null when it can. The shape is all
@@ -205,9 +204,50 @@ export function evaluatorModelProblem(
   id: string,
   catalogue: readonly AiModel[] | null,
 ): 'shape' | 'loading' | 'unlisted' | null {
-  if (!MODEL_ID.test(id)) return 'shape';
+  if (!isModelRef(id)) return 'shape';
   if (!catalogue) return 'loading';
   return catalogue.some(m => m.id === id && EVALUATOR_MODEL(m)) ? null : 'unlisted';
+}
+
+// ─── LLM keys (GET /api/llm-keys) ────────────────────────────────────────────
+// The tracker calls the providers with its own keys: pasted ones the ERP
+// pushed, or its own env vars. The ERP's env keys never reach it, so its
+// model pickers go by what the tracker itself reports.
+
+/** Per provider: whether the tracker can call it; absent when it didn't say. */
+export type TrackerKeyStatus = Partial<Record<AiProviderId, boolean>>;
+
+/**
+ * Reads the tracker's answer defensively. A tracker from before `available`
+ * reported only its stored keys, which says nothing about its env, so a
+ * provider without a boolean `available` stays unknown.
+ */
+export function parseTrackerKeys(body: unknown): TrackerKeyStatus {
+  const out: TrackerKeyStatus = {};
+  const keys = (body as { keys?: unknown } | null)?.keys;
+  if (!Array.isArray(keys)) return out;
+  for (const k of keys as unknown[]) {
+    if (!k || typeof k !== 'object') continue;
+    const { provider, available } = k as { provider?: unknown; available?: unknown };
+    if ((AI_PROVIDERS as readonly unknown[]).includes(provider) && typeof available === 'boolean') {
+      out[provider as AiProviderId] = available;
+    }
+  }
+  return out;
+}
+
+/**
+ * The ERP's provider list with `configured` meaning "the tracker can call
+ * it". Where the tracker didn't say (unreachable, or too old to report env
+ * keys), only a key pasted here that reached the tracker counts.
+ */
+export function trackerProviderStatus(
+  erp: readonly AiProviderStatus[], tracker: TrackerKeyStatus | null,
+): AiProviderStatus[] {
+  return erp.map(p => ({
+    ...p,
+    configured: tracker?.[p.id] ?? (p.source === 'ui' && p.trackerSynced === true && !p.unreadable),
+  }));
 }
 
 // ─── Analytics (GET /api/analytics) ──────────────────────────────────────────
@@ -345,6 +385,7 @@ export const trackerApi = {
       '/api/tracker/prompt-candidate/promote', {},
     ),
   // The one tracker setting the proxy opens; the rest stay behind it.
+  llmKeys: () => api.get<unknown>('/api/tracker/llm-keys').then(parseTrackerKeys),
   setModel: (model: string) =>
     api.put<{ key: string; value: string }>('/api/tracker/settings/llm_model', { value: model }).then(r => r.value),
 

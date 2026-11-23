@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { api } from '../../lib/api';
 import { useEscapeKey } from '../../lib/useEscapeKey';
-import { fmtDate } from '../../lib/format';
+import { fmtDate, localDayKey } from '../../lib/format';
 import { lineSpecLabel } from '../../lib/lineGroups';
 import { statusTone } from '../../lib/status';
 import { ListSkeleton } from '../../components/Skeleton';
@@ -70,11 +70,11 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
     return c;
   }, [events]);
 
-  // Group by day for sticky day headers.
+  // Group by local day for sticky day headers, which print the local date.
   const groups = useMemo(() => {
     const byDay = new Map<string, { date: Date; events: Event[] }>();
     (events ?? []).forEach(e => {
-      const key = new Date(e.created_at).toISOString().slice(0, 10);
+      const key = localDayKey(e.created_at);
       if (!byDay.has(key)) byDay.set(key, { date: new Date(e.created_at), events: [] });
       byDay.get(key)!.events.push(e);
     });

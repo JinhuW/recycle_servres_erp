@@ -251,7 +251,7 @@ app.get('/api/health', async (c) => {
   // than set/unset.
   const ship = describeShipping(c.env as Env);
   const providers = {
-    ...ship, ocr: describeOcr(c.env as Env), ...describeMail(c.env as Env),
+    ...ship, ocr: await describeOcr(c.env as Env), ...describeMail(c.env as Env),
     attachments: r2Configured(c.env as Env) ? 'r2' : 'none',
   };
   try {
@@ -285,6 +285,12 @@ const isUploadPath = (path: string): boolean =>
   path === '/api/scan/payment' ||
   path === '/api/scan/serial' ||
   /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path) ||
+  // Order-level files on a sell order, and the receipt photo or PDF behind an
+  // accounting entry, are the same multipart uploads checked against the
+  // workspace upload limits in the handler.
+  /^\/api\/sell-orders\/[^/]+\/attachments$/.test(path) ||
+  /^\/api\/accounting\/entries\/[^/]+\/attachments$/.test(path) ||
+  path === '/api/accounting/scan-receipt' ||
   // A line photo comes straight off a phone camera at several MB, uncompressed.
   // Left under the JSON cap it 413s before the handler that would have checked
   // it against the upload limits ever runs.
@@ -337,7 +343,9 @@ app.use('*', (c, next) => {
 // Safe methods only: these prefixes also carry POST/PATCH endpoints, whose
 // responses have no business advertising a cache lifetime. Successes only: a
 // cached 502 would keep answering the user's retry for the next minute.
-const CACHEABLE_PREFIXES = ['/api/lookups', '/api/categories', '/api/workspace', '/api/ai/models'];
+// Not /api/ai/models: the list changes the moment a key is pasted, and the
+// backend already holds it for an hour.
+const CACHEABLE_PREFIXES = ['/api/lookups', '/api/categories', '/api/workspace'];
 // Same trap as /api/warehouses, under a cached prefix: the FX panel re-reads
 // the rates straight after a manual save or a refresh.
 const UNCACHED_PATHS = new Set(['/api/workspace/fx-rates']);

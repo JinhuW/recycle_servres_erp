@@ -1,8 +1,13 @@
+import { isModelRef, parseModelRef, type AiProviderId } from '@recycle-erp/shared';
 import { api } from './api';
 
-/** One entry of OpenRouter's catalogue, as the backend trims it. */
+/**
+ * One entry of the model catalogue, as the backend trims it. `id` is a model
+ * ref: bare for OpenRouter, `anthropic:…` / `openai:…` for the others.
+ */
 export type AiModel = {
   id: string;
+  provider: AiProviderId;
   name: string;
   contextLength: number | null;
   /** USD per million tokens; null for routers, which price what they route to. */
@@ -19,6 +24,37 @@ export type AiModel = {
  */
 export const TEXT_JSON_MODEL = (m: AiModel): boolean =>
   m.structuredOutputs && m.outputModalities.includes('text');
+
+/** Models that read a photo and answer in text: every image AI read. */
+export const READS_IMAGES = (m: AiModel): boolean =>
+  m.inputModalities.includes('image') && m.outputModalities.includes('text');
+
+/**
+ * `provider`'s models that `filter` lets through. isModelRef drops ids a
+ * setting can't hold, such as OpenRouter's `~vendor/model-latest` aliases,
+ * which sort first and would otherwise be preselected and then refused.
+ */
+export function modelsFor(provider: AiProviderId, filter?: (m: AiModel) => boolean): (m: AiModel) => boolean {
+  return m => m.provider === provider && isModelRef(m.id) && (!filter || filter(m));
+}
+
+/**
+ * The model to preselect when `provider` is picked: its first listed model
+ * the row's filter vouches for, else ''. With no filter nothing is
+ * preselected, because capabilities the catalogue doesn't know are reported
+ * as missing, and an unchecked first entry could be one that can't do the job.
+ */
+export function preselectModel(
+  models: readonly AiModel[] | null, provider: AiProviderId, filter?: (m: AiModel) => boolean,
+): string {
+  if (!filter) return '';
+  return (models ?? []).find(modelsFor(provider, filter))?.id ?? '';
+}
+
+/** The i18n key of the hint for a model ref whose shape is wrong, by its provider. */
+export function modelShapeHintKey(ref: string): 'trkModelInvalid' | 'trkModelInvalidDirect' {
+  return parseModelRef(ref).provider === 'openrouter' ? 'trkModelInvalid' : 'trkModelInvalidDirect';
+}
 
 let cached: AiModel[] | null = null;
 let inflight: Promise<AiModel[]> | null = null;
@@ -40,10 +76,61 @@ export function loadAiModels(): Promise<AiModel[]> {
   return inflight;
 }
 
+export type AiProviderStatus = {
+  id: AiProviderId;
+  label: string;
+  configured: boolean;
+  /** 'ui': pasted on Settings ▸ AI models; 'env': the server's env var. */
+  source: 'ui' | 'env' | null;
+  last4: string | null;
+  /**
+   * For a pasted key: whether the Reddit tracker has it too. For a removed
+   * one: false while the tracker hasn't confirmed the removal.
+   */
+  trackerSynced: boolean | null;
+  /** A saved key this server can't unseal (FB_POOL_KEY rotated): it serves no call. */
+  unreadable?: boolean;
+  keyName: string;
+};
+
+export type AiProvidersInfo = { providers: AiProviderStatus[]; envModel: string; canStore: boolean };
+
+let providers: Promise<AiProvidersInfo> | null = null;
+
+/** Which providers have a key on the server; fetched once per session. */
+export function loadAiProviders(): Promise<AiProvidersInfo> {
+  providers ??= api.get<AiProvidersInfo>('/api/ai/providers')
+    .catch((e: unknown) => { providers = null; throw e; });
+  return providers;
+}
+
+export type KeySaveResult = { ok: true; last4?: string; trackerSynced: boolean; trackerError?: string };
+
+/** Tests and saves a provider key; the model list and key status reload after. */
+export async function saveAiKey(provider: AiProviderId, key: string): Promise<KeySaveResult> {
+  const r = await api.put<KeySaveResult>(`/api/ai/keys/${provider}`, { key });
+  resetAiModels();
+  return r;
+}
+
+export async function removeAiKey(provider: AiProviderId): Promise<KeySaveResult> {
+  const r = await api.delete<KeySaveResult>(`/api/ai/keys/${provider}`);
+  resetAiModels();
+  return r;
+}
+
+/** Pushes the saved key, or its removal, to the Reddit tracker again. */
+export async function resyncAiKey(provider: AiProviderId): Promise<KeySaveResult> {
+  const r = await api.post<KeySaveResult>(`/api/ai/keys/${provider}/sync`, {});
+  providers = null;
+  return r;
+}
+
 /** Called on logout, beside the other per-session caches. */
 export function resetAiModels(): void {
   cached = null;
   inflight = null;
+  providers = null;
 }
 
 type Translate = (key: string, vars?: Record<string, string | number>) => string;

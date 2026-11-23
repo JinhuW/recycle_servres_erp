@@ -6,7 +6,7 @@ import { PhoneListSkeleton } from '../components/Skeleton';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import { useT } from '../lib/i18n';
 import { useEffectiveUser } from '../lib/tweaks';
-import { fmtDateShort, fmtUSD0 } from '../lib/format';
+import { fmtCalendarDayShort, fmtUSD0 } from '../lib/format';
 import { LIFECYCLE_STATUS, statusTone, WORKFLOW_STAGES } from '../lib/status';
 import { NEED_SHORT_KEY, SERVER_BLOCKER_KEY } from '../lib/poReadiness';
 import { ageTone, daysSince, useHomeData } from '../lib/home';
@@ -195,7 +195,7 @@ function nextStep(o: PurchaserHome['openPos']['items'][number], t: T, locale: st
     if (!o.package) return t('homeNextPickup');
     if (o.package.status === 'exception') return t('homePkgException');
     if (o.package.status === 'delivered') return t('homePkgDelivered');
-    return o.package.eta ? t('homeEta', { date: fmtDateShort(o.package.eta, locale) }) : (o.package.trackingStatus ?? t('homeNoEta'));
+    return o.package.eta ? t('homeEta', { date: fmtCalendarDayShort(o.package.eta, locale) }) : (o.package.trackingStatus ?? t('homeNoEta'));
   }
   return t(o.lifecycle === 'reviewing' ? 'homeNextReview' : 'homeNextPayout');
 }

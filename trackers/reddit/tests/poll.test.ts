@@ -7,13 +7,19 @@ import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createLogger} from '../src/logger.ts';
-import {pollOnce, type PollDeps} from '../src/loops/poll.ts';
+import {pollOnce, resetNoAuthWarning, type PollDeps} from '../src/loops/poll.ts';
 import {RedditPacer} from '../src/pacing.ts';
+import {resetTokenCache} from '../src/redditOAuth.ts';
 import {SettingsStore} from '../src/settings.ts';
 import {createTestDb, type TestDb} from './helpers/db.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = readFileSync(join(here, 'fixtures', 'new-listing.xml'), 'utf8');
+// Nine posts across homelab, hardwareswap and homelabsales, as Reddit's OAuth
+// listing returns them.
+const fixture = JSON.parse(readFileSync(join(here, 'fixtures', 'new-listing.json'), 'utf8')) as {
+  data: {children: Array<{data: {created_utc: number}}>};
+};
+const AUTH = {clientId: 'cid', clientSecret: 'secret'};
 
 let db: TestDb;
 
@@ -30,6 +36,8 @@ afterEach(() => {
 });
 
 beforeEach(async () => {
+  resetTokenCache();
+  resetNoAuthWarning();
   await db.sql`DELETE FROM posts`;
   await db.sql`DELETE FROM subreddits`;
   await db.sql`UPDATE settings SET value = to_jsonb('reddit'::text) WHERE key = 'poll_source'`;
@@ -42,6 +50,7 @@ function deps(workerId = 'worker-1'): PollDeps {
     sql: db.sql,
     workerId,
     userAgent: 'test-agent',
+    auth: AUTH,
     // No real waiting: the pacer's own spacing is covered in pacing.test.ts.
     pacer: new RedditPacer({maxRpm: 60_000, sleep: async () => {}}),
     settings: new SettingsStore(db.sql, 0),
@@ -50,23 +59,33 @@ function deps(workerId = 'worker-1'): PollDeps {
 }
 
 /**
- * Rewrites every entry's timestamp. The captured fixture ages as the repo does,
+ * Rewrites every post's timestamp. The captured fixture ages as the repo does,
  * so tests state the age they need rather than depending on capture date.
  */
 function fixtureAged(hoursAgo: number): string {
-  const stamp = new Date(Date.now() - hoursAgo * 3600_000)
-    .toISOString()
-    .replace(/\.\d+Z$/, '+00:00');
-  return fixture.replace(/<published>[^<]+<\/published>/g, `<published>${stamp}</published>`);
+  const created = Math.floor((Date.now() - hoursAgo * 3600_000) / 1000);
+  const copy = structuredClone(fixture);
+  for (const child of copy.data.children) child.data.created_utc = created;
+  return JSON.stringify(copy);
 }
 
 const freshFixture = (): string => fixtureAged(0);
 
+const isToken = (url: string) => url.includes('/api/v1/access_token');
+const tokenResponse = () =>
+  new Response(JSON.stringify({access_token: 'tok', expires_in: 86400}), {status: 200});
+
+/** Answers the token request, and every listing read with `body`. */
 function stubFeed(body: string, init: ResponseInit = {status: 200}) {
-  const spy = vi.fn().mockResolvedValue(new Response(body, init));
+  const spy = vi.fn().mockImplementation(async (url: string) =>
+    isToken(url) ? tokenResponse() : new Response(body, init));
   vi.stubGlobal('fetch', spy);
   return spy;
 }
+
+/** The listing requests a spy saw, leaving out the token request. */
+const listingCalls = (spy: ReturnType<typeof vi.fn>): string[] =>
+  spy.mock.calls.map((c) => String(c[0])).filter((u) => !isToken(u));
 
 describe('pollOnce', () => {
   it('fetches every due subreddit in a single request', async () => {
@@ -74,8 +93,8 @@ describe('pollOnce', () => {
 
     await pollOnce(deps());
 
-    expect(spy).toHaveBeenCalledTimes(1);
-    const url = spy.mock.calls[0]![0] as string;
+    expect(listingCalls(spy)).toHaveLength(1);
+    const url = listingCalls(spy)[0]!;
     expect(url).toContain('homelab+hardwareswap+homelabsales');
     expect(url).toContain('limit=100');
   });
@@ -130,7 +149,8 @@ describe('pollOnce', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (isToken(url)) return tokenResponse();
       await gate;
       return new Response(freshFixture(), {status: 200});
     }));
@@ -179,6 +199,21 @@ describe('pollOnce', () => {
     expect(row?.claimed_by).toBeNull();
   });
 
+  it('without credentials: sends nothing, claims nothing, and warns once an hour', async () => {
+    const spy = stubFeed(freshFixture());
+    const d = {...deps(), auth: null};
+    const warn = vi.spyOn(d.logger, 'warn');
+    const acquire = vi.spyOn(d.pacer, 'acquire');
+
+    expect(await pollOnce(d)).toBe(false);
+    expect(await pollOnce(d)).toBe(false);
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(acquire).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(await db.sql`SELECT 1 FROM subreddits WHERE claimed_by IS NOT NULL`).toHaveLength(0);
+  });
+
   it('treats a 403 block page as a transient block, not a dead subreddit', async () => {
     stubFeed('<body class=theme-beta>blocked</body>', {status: 403});
     const d = deps();
@@ -205,7 +240,10 @@ describe('pollOnce', () => {
   });
 
   it('reschedules with backoff after a transport failure', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('socket hang up')));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (isToken(url)) return tokenResponse();
+      throw new Error('socket hang up');
+    }));
 
     expect(await pollOnce(deps())).toBe(false);
 
@@ -253,7 +291,7 @@ describe('pollOnce with poll_source', () => {
     const spy = stubFeed(freshFixture());
 
     expect(await pollOnce(deps())).toBe(true);
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(listingCalls(spy)).toHaveLength(1);
   });
 
   it('polls when the value is anything but exactly webhook', async () => {
@@ -261,6 +299,6 @@ describe('pollOnce with poll_source', () => {
     const spy = stubFeed(freshFixture());
 
     expect(await pollOnce(deps())).toBe(true);
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(listingCalls(spy)).toHaveLength(1);
   });
 });

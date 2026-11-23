@@ -94,10 +94,14 @@ while (!stopping) {
     log.error('tick failed', { error: e instanceof Error ? e.message : String(e) });
   }
   if (stopping) break;
+  // A signal wakes the sleep early; the timer is cleared too, or it would
+  // hold the process open for the rest of the interval after 'stopped'.
+  let timer: NodeJS.Timeout | undefined;
   await new Promise<void>((resolve) => {
     wake = resolve;
-    setTimeout(resolve, intervalMs);
+    timer = setTimeout(resolve, intervalMs);
   });
+  clearTimeout(timer);
   wake = null;
 }
 log.info('stopped');

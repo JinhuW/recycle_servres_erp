@@ -206,6 +206,11 @@ released (`restart: false`) when the worker falls beyond `count` or the host
 turns observe-only. One lost with `/state` is cleared by parking and
 unparking the slot. A confirmed stop is spent once a container for that
 worker exists again; the next stop takes a fresh identity from `leases`.
+A stop whose `docker stop` failed, leaving the worker running, is forgotten
+unposted: that worker is not the release's to run again, so an extra that
+later exits or is removed is never started above `count`. One whose
+`docker rm` failed after the stop is removed on a later tick without taking
+the tick's start, which confirms the stop; the run follows.
 
 Roll commands repeat until a fresh epoch/version passes the heartbeat gate.
 The agent leaves an already-updated running container alone, preserves its

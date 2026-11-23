@@ -1,4 +1,4 @@
-// The PM tracer: counting buyers on a real comment feed, and the lease that
+// The PM tracer: counting buyers on a real comment thread, and the lease that
 // keeps the work on one worker.
 
 import {readFileSync} from 'node:fs';
@@ -9,16 +9,30 @@ import {holdLease, insertNewPosts, releaseAllClaims} from '../src/claims.ts';
 import {createLogger} from '../src/logger.ts';
 import {countPms, Tracer, TRACER_LEASE} from '../src/loops/trace.ts';
 import {RedditPacer} from '../src/pacing.ts';
-import {parseComments} from '../src/reddit.ts';
+import {parseCommentTree, resetTokenCache} from '../src/redditOAuth.ts';
 import {createTestDb, type TestDb} from './helpers/db.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // r/hardwareswap t3_1xetlvn, captured 2026-10-26: hwsbot plus four buyers.
-const fixture = readFileSync(join(here, 'fixtures', 'comments-feed.xml'), 'utf8');
+const fixture = readFileSync(join(here, 'fixtures', 'comments-tree.json'), 'utf8');
+
+const tokenResponse = () =>
+  new Response(JSON.stringify({access_token: 'tok', expires_in: 86400}), {status: 200});
+
+/** Answers the token request, and every comments read with `body`. */
+function stubReddit(body: string, status = 200) {
+  const spy = vi.fn().mockImplementation(async (url: string) =>
+    url.includes('/api/v1/access_token') ? tokenResponse() : new Response(body, {status}));
+  vi.stubGlobal('fetch', spy);
+  return spy;
+}
+
+const commentReads = (spy: ReturnType<typeof vi.fn>) =>
+  spy.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith('https://oauth.reddit.com/'));
 
 describe('countPms', () => {
   it('counts the buyers on a captured thread and skips the swap bot', () => {
-    const comments = parseComments(fixture);
+    const comments = parseCommentTree(JSON.parse(fixture));
     expect(comments).toHaveLength(5);
     expect(countPms(comments, 'Ok-Advance2839')).toEqual({comments: 5, pms: 4});
   });
@@ -53,6 +67,7 @@ describe('Tracer', () => {
   });
 
   beforeEach(async () => {
+    resetTokenCache();
     await db.sql`DELETE FROM posts`;
     await db.sql`DELETE FROM loop_leases`;
   });
@@ -66,6 +81,7 @@ describe('Tracer', () => {
       sql: db.sql,
       workerId,
       userAgent: 'test',
+      auth: {clientId: 'cid', clientSecret: 'secret'},
       pacer: new RedditPacer({maxRpm: 1000}),
       logger: createLogger(workerId, 'error'),
     });
@@ -95,14 +111,12 @@ describe('Tracer', () => {
     await seed('t3_day', 30);
     await seed('t3_fresh', 3);
     await seed('t3_old', 24 * 10);
-    const spy = vi.fn().mockResolvedValue(new Response(fixture, {status: 200}));
-    vi.stubGlobal('fetch', spy);
+    const spy = stubReddit(fixture);
 
     expect(await tracer('w1').once()).toBe(true);
     expect(await tracer('w1').once()).toBe(false);
 
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(String(spy.mock.calls[0]![0])).toBe('https://www.reddit.com/r/hardwareswap/comments/day/x/.rss?limit=500');
+    expect(commentReads(spy)).toEqual(['https://oauth.reddit.com/comments/day?limit=500&raw_json=1']);
     expect(await countsOf('t3_day')).toMatchObject({comment_count: 5, pm_count: 4});
     expect((await countsOf('t3_fresh')).comments_checked_at).toBeNull();
     expect((await countsOf('t3_old')).comments_checked_at).toBeNull();
@@ -110,7 +124,7 @@ describe('Tracer', () => {
 
   it('lets only the lease holder trace', async () => {
     await seed('t3_day', 30);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(fixture, {status: 200})));
+    stubReddit(fixture);
     await holdLease(db.sql, TRACER_LEASE, 'w1', 600);
 
     expect(await tracer('w2').once()).toBe(false);
@@ -132,7 +146,7 @@ describe('Tracer', () => {
 
   it('gives the lease up when Reddit blocks it, and leaves the post for later', async () => {
     await seed('t3_day', 30);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', {status: 429})));
+    stubReddit('', 429);
 
     expect(await tracer('w1').once()).toBe(false);
 
@@ -142,7 +156,7 @@ describe('Tracer', () => {
 
   it('marks a removed post checked with no counts, so it is not asked for again', async () => {
     await seed('t3_day', 30);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', {status: 404})));
+    stubReddit('', 404);
 
     expect(await tracer('w1').once()).toBe(true);
 

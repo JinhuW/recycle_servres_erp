@@ -94,6 +94,13 @@ describe('the card rows', () => {
     expect(chips.hits.has('denver')).toBe(false);
     expect([...chips.searched]).toEqual(['denver', 'philly']);
   });
+  it('counts searched today on the Eastern day, not the UTC one', () => {
+    // 21:00 EST Nov 22 is 02:00Z Nov 23: a search at 20:00 EST is today, one
+    // the next UTC morning would not be.
+    const now = Date.parse('2026-11-23T02:00:00Z');
+    const d = { ...WORKER_DETAIL, cities: WORKER_DETAIL.cities.map((c, i) => ({ ...c, last_done_at: i === 0 ? '2026-11-23T01:00:00Z' : '2026-11-22T04:00:00Z' })) };
+    expect([...erpCityChips(d, now).searched]).toEqual([WORKER_DETAIL.cities[0].slug]);
+  });
 });
 
 describe('erpProxyBehind', () => {

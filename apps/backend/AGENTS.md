@@ -143,6 +143,17 @@ together with its other side (root AGENTS.md → *Contracts*).
   `csrfGuard` middleware drops it otherwise with 403).  Exempt: safe methods,
   `/api/health`, and `/api/public/*` (the unauthenticated website intake and
   quote forms and the Shippo webhook — no cookies, so CSRF doesn't apply).
+- **Three path lists are kept by hand; a new route has to join the ones that
+  fit it.**  Nothing derives them from the router, so a missed entry fails
+  quietly in production:
+  - `exempt()` in `csrf.ts`: bearer-only machine surfaces with no cookie.
+    Leave a route out and its callers get 403.
+  - `isUploadPath()` in `index.ts`: every multipart upload endpoint.  Anything
+    not listed gets the 1 MiB JSON body cap, so a phone photo or PDF 413s
+    before the handler's own upload limits run.  `tests/body-limit.test.ts`
+    covers the listed routes.
+  - `isMachineRoute()` in `routes/perf.ts`: callers no person waits on, kept
+    out of the user-facing latency figures.
 - Refresh-token reuse revokes the whole family.  Don't relax that.
 - A password change or reset stamps `users.tokens_valid_after`
   (app-clock second); `authMiddleware` and `bearerGuard` refuse any token whose
@@ -247,16 +258,36 @@ together with its other side (root AGENTS.md → *Contracts*).
   (as `static.recycleservers.com` does).
 - **Don't reintroduce Cloudflare Images** — it's paywalled (error 5453); we
   migrated everything to R2 attachments.  See [the AI-scan image design][2].
-- **Model pickers read OpenRouter's public catalogue through
-  `routes/aiModels.ts`** (`GET /api/ai/models`, manager-only): no key, trimmed
-  to what a picker shows, cached in-process for an hour and served stale for
-  five minutes at a time while OpenRouter is down.
-- **OCR provider selection** lives in `apps/backend/src/ai/`.  OpenRouter
-  (`openai/gpt-6-luna`, overridable with `OPENROUTER_OCR_MODEL`) when
-  `OPENROUTER_API_KEY` is present; otherwise a deterministic stub that
-  returns canned data.  Production refuses to boot without the key
-  (`env.ts`); in dev and CI the stub logs one warning, and `/api/health`
-  reports which one is live (`providers.ocr`).
+- **AI providers are pluggable** (`ai/providers/`): OpenRouter, Anthropic
+  (Messages API) and OpenAI (Responses API), each one file implementing
+  `LlmProvider`, registered in `ai/providers/index.ts`, named in
+  `AI_PROVIDERS` (`packages/shared/src/aiModelRef.ts`), with its env var in
+  `KEY_ENV` (`ai/keys.ts`).  A model setting is a
+  *model ref*: `anthropic:<id>`, `openai:<id>`, or a bare OpenRouter id, so
+  every id saved before providers existed still means OpenRouter.
+  `ai/llm.ts` is the one place for the deadline, the timeout/empty retry and
+  the JSON re-ask; providers only send a turn.
+- **Which model a call uses**: per-call override → the `ai_models` workspace
+  setting's feature row (scan, receipt, paypal, serial) → its `default` →
+  `AI_MODEL` / `OPENROUTER_OCR_MODEL` → `openai/gpt-6-luna`.  Settings ▸ AI
+  models writes `ai_models` through `PATCH /api/workspace`, which refuses a
+  ref whose provider has no key.  The setting is cached ~30 s in-process.
+- **Model pickers read `GET /api/ai/models`** (manager-only, `ai/catalogue.ts`):
+  OpenRouter's public catalogue plus the models of each provider with a key,
+  each cached for an hour and served stale for five minutes at a time while
+  its provider is down.  `GET /api/ai/providers` says which have a key.
+- **Provider keys** are pasted on Settings ▸ AI models and stored in
+  `ai_provider_keys`, sealed (`lib/sealed.ts`) under a key derived from
+  `FB_POOL_KEY` with the label `ai-keys`; a stored key wins over the
+  provider's env var.  `ai/keys.ts` resolves them (30 s cache) and pushes each
+  save to the Reddit tracker.  `PUT /api/ai/keys/:provider` tests a key with
+  the provider's model list before storing it.  No route returns a key, and
+  nothing logs one.
+- **The stub**: with no key anywhere, dev and CI get a deterministic stub
+  (one warning in the log); production refuses the read instead, so the scan
+  route answers 502.  Production boots without any key.  `/api/health`
+  reports which provider is live (`providers.ocr`, `none` in production with
+  no key).
 
 [1]: ../../docs/superpowers/specs/2026-05-18-frontend-auth-overhaul-design.md
 [2]: ../../docs/superpowers/specs/2026-05-12-ai-scan-image-preview-design.md

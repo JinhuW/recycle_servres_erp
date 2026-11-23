@@ -3,6 +3,7 @@
 // all exercised.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { REPORTING_TZ, addDays, todayIn } from '@recycle-erp/shared';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
@@ -170,7 +171,8 @@ describe('clients — the follow-up loop', () => {
     });
     expect(r.status).toBe(200);
 
-    const expected = new Date(Date.now() + cadence * 86_400_000).toISOString().slice(0, 10);
+    // Scheduled from the Denver business day, which trails the UTC date in the evening.
+    const expected = addDays(todayIn(REPORTING_TZ), cadence);
     expect(r.body.nextFollowUpAt).toBe(expected);
 
     const after = await api<Client & { timeline: { kind: string; body: string; author: string }[] }>(

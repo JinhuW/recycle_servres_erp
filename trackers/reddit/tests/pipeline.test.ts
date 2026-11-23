@@ -7,8 +7,14 @@ import {afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi} fr
 import {createConsoleAlertSender, createTelegramAlertSender} from '../src/alerts.ts';
 import type {NewPost} from '../src/claims.ts';
 import {insertNewPosts} from '../src/claims.ts';
+import {KeyStore} from '../src/llm/keys.ts';
 import {createLogger} from '../src/logger.ts';
-import {evaluateOnce, type EvaluateDeps} from '../src/loops/evaluate.ts';
+import {
+  evaluateOnce,
+  NO_KEY_WARN_INTERVAL_MS,
+  resetNoKeyWarnings,
+  type EvaluateDeps,
+} from '../src/loops/evaluate.ts';
 import {notifyOnce, type NotifyDeps} from '../src/loops/notify.ts';
 import {createRule, updateRule} from '../src/rules.ts';
 import {SettingsStore} from '../src/settings.ts';
@@ -42,7 +48,7 @@ function evaluateDeps(workerId = 'worker-1'): EvaluateDeps {
   return {
     sql: db.sql,
     workerId,
-    apiKey: 'test-key',
+    keys: new KeyStore(db.sql, {openrouter: 'test-key'}, 0),
     settings: new SettingsStore(db.sql, 0),
     alerts: createTelegramAlertSender('bot-token'),
     logger: createLogger(workerId, 'error'),
@@ -255,6 +261,58 @@ describe('evaluateOnce', () => {
     ]);
 
     expect(spy).toHaveBeenCalledTimes(3);
+  });
+
+  it('judges with a key pushed into the store rather than the env one', async () => {
+    await db.sql`INSERT INTO llm_keys (provider, api_key) VALUES ('openrouter', 'sk-or-from-erp')`;
+    try {
+      await insertNewPosts(db.sql, [post()]);
+      const spy = stubVerdict({is_target: false, summary: 's', price: null, reasoning: 'r'});
+
+      await evaluateOnce(evaluateDeps());
+
+      const headers = (spy.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+      expect(headers['Authorization']).toBe('Bearer sk-or-from-erp');
+    } finally {
+      await db.sql`DELETE FROM llm_keys`;
+    }
+  });
+
+  it('claims nothing and counts no attempt while the live model has no key', async () => {
+    resetNoKeyWarnings();
+    await insertNewPosts(db.sql, [post()]);
+    const spy = vi.fn();
+    vi.stubGlobal('fetch', spy);
+    const logger = createLogger('worker-1', 'error');
+    const warn = vi.spyOn(logger, 'warn');
+    const deps = {...evaluateDeps(), keys: new KeyStore(db.sql, {}, 0), logger};
+
+    // Far more batches than the five attempts that used to park it 'failed'.
+    for (let i = 0; i < 8; i++) expect(await evaluateOnce(deps)).toBe(false);
+
+    expect(spy).not.toHaveBeenCalled();
+    const [row] = await db.sql<Array<{status: string; attempts: number; claimed_by: string | null}>>`
+      SELECT status, attempts, claimed_by FROM posts WHERE reddit_id = 't3_a'`;
+    expect(row).toEqual({status: 'new', attempts: 0, claimed_by: null});
+    // Throttled: one warning, not one per iteration.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![1]).toMatchObject({setting: 'llm_model', provider: 'openrouter'});
+    expect(NO_KEY_WARN_INTERVAL_MS).toBeGreaterThanOrEqual(60_000);
+
+    // The key lands and the same post is judged.
+    stubVerdict({is_target: false, summary: 's', price: null, reasoning: 'r'});
+    expect(await evaluateOnce({...deps, keys: new KeyStore(db.sql, {openrouter: 'k'}, 0)})).toBe(true);
+    expect(await statusOf('t3_a')).toBe('rejected');
+  });
+
+  it('stays quiet without a key when nothing is waiting', async () => {
+    resetNoKeyWarnings();
+    const logger = createLogger('worker-1', 'error');
+    const warn = vi.spyOn(logger, 'warn');
+
+    await evaluateOnce({...evaluateDeps(), keys: new KeyStore(db.sql, {}, 0), logger});
+
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 
@@ -678,6 +736,23 @@ describe('candidate prompt trial', () => {
     const [row] = await db.sql<Array<{n: number}>>`
       SELECT COUNT(DISTINCT reddit_id)::int AS n FROM alert_messages WHERE audience = 'dev'`;
     expect(row?.n).toBe(3);
+  });
+
+  it('skips a candidate whose provider has no key, keeping the live verdict', async () => {
+    resetNoKeyWarnings();
+    await setSetting('candidate_eval_prompt', CANDIDATE);
+    await setSetting('candidate_llm_model', 'anthropic:claude-haiku-5-5');
+    await insertNewPosts(db.sql, [post()]);
+    const spy = stubUpstreams({live: TARGET});
+    const logger = createLogger('worker-1', 'error');
+    const warn = vi.spyOn(logger, 'warn');
+
+    await evaluateOnce({...evaluateDeps(), logger});
+
+    expect(await statusOf('t3_a')).toBe('target');
+    expect(spy.mock.calls.filter(([url]) => String(url).includes('anthropic'))).toHaveLength(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![1]).toMatchObject({setting: 'candidate_llm_model', provider: 'anthropic'});
   });
 
   it('keeps the live verdict when the candidate call fails', async () => {

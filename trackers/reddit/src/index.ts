@@ -11,6 +11,7 @@ import {loadConfig} from './config.ts';
 import {createDb} from './db.ts';
 import {heartbeatOnce, LoopRegistry, removeWorker} from './heartbeat.ts';
 import {createLogger} from './logger.ts';
+import {KeyStore} from './llm/keys.ts';
 import {evaluateOnce} from './loops/evaluate.ts';
 import {acquireUserSender, notifyOnce, releaseUserSender, renewUserSender} from './loops/notify.ts';
 import {pollOnce} from './loops/poll.ts';
@@ -33,6 +34,11 @@ const logger = createLogger(
 );
 const sql = createDb(config.databaseUrl);
 const settings = new SettingsStore(sql);
+const keys = new KeyStore(sql, {
+  openrouter: config.openrouterApiKey,
+  anthropic: config.anthropicApiKey,
+  openai: config.openaiApiKey,
+});
 const startedAt = Date.now();
 
 const HEARTBEAT_IDLE_MS = 30_000;
@@ -75,6 +81,7 @@ async function runApi(): Promise<void> {
   const app = createApi({
     sql,
     settings,
+    keys,
     botToken: config.telegramBotToken,
     apiToken: config.apiToken,
     workerId: config.workerId,
@@ -261,7 +268,7 @@ async function runWorker(): Promise<void> {
       registry.wrap('evaluate', () => evaluateOnce({
         sql,
         workerId: config.workerId,
-        apiKey: config.openrouterApiKey,
+        keys,
         settings,
         alerts,
         logger: logger.child('evaluate'),
@@ -280,12 +287,9 @@ async function runWorker(): Promise<void> {
     ),
     startHeartbeat('worker'),
   ];
-  // The tracer needs a working comment source. Reddit's anonymous comment feed
-  // 404s like the listing feed (docs/debug-notes/reddit-new-rss-404.md), and the
-  // tracer reads a 404 as "post removed": it would stamp every post traced with
-  // NULL counts and lose its PM data for good. So it runs only with OAuth.
+  // Comments can only be read through OAuth (docs/debug-notes/reddit-new-rss-404.md).
   if (config.commentTracer && !config.redditAuth) {
-    logger.info('PM tracer off: no REDDIT_CLIENT_ID, and anonymous comment feeds are gone');
+    logger.info('PM tracer off: no REDDIT_CLIENT_ID, and comments can only be read through OAuth');
   }
   if (config.commentTracer && config.redditAuth) {
     // Idle mostly means another worker holds the lease; checking every minute

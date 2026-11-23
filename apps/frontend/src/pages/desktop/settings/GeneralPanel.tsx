@@ -3,6 +3,9 @@ import { useT } from '../../../lib/i18n';
 import { api } from '../../../lib/api';
 import { handleFetchError } from '../../../lib/errorToast';
 import { Toggle } from './_shared';
+import { isModelRef } from '@recycle-erp/shared';
+import { ProviderModelSelect } from '../../../components/ProviderModelSelect';
+import { READS_IMAGES } from '../../../lib/aiModels';
 import type { Lang } from '../../../lib/types';
 
 // ─── Language radio (used inside the General tab) ─────────────────────────────
@@ -143,6 +146,7 @@ export function GeneralPanel() {
   const [capDraft, setCapDraft] = useState<string | null>(null);
 
   // The server stores the whole object, so every change sends all of it.
+  const [modelDraft, setModelDraft] = useState<string | null>(null);
   const updAi = (patch: Partial<AiReviewSetting>, persistNow = true) => {
     const next = { ...data.aiReview, ...patch };
     setData(d => ({ ...d, aiReview: next }));
@@ -288,12 +292,26 @@ export function GeneralPanel() {
           </div>
           <div className="field">
             <label className="label">{t('aiRevSettingsModel')}</label>
-            <input
-              className="input mono" placeholder="openai/gpt-6-luna"
-              value={data.aiReview.model ?? ''}
-              onChange={e => updAi({ model: e.target.value }, false)}
-              onBlur={() => updAi({ model: data.aiReview.model?.trim() || null })}
-            />
+            {/* A draft until Save: the model field also takes a typed id, and
+                each keystroke must not be saved as the review's model. */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'start' }}>
+              <div style={{ flex: 1 }}>
+                {/* The review rereads label photos, so only models that see images. */}
+                <ProviderModelSelect
+                  id="ai-review-model"
+                  filter={READS_IMAGES}
+                  value={modelDraft ?? data.aiReview.model ?? ''}
+                  defaultLabel={t('aiUseDefaultModel', { model: t('aiModelsNavShort') })}
+                  invalid={modelDraft !== null && modelDraft !== '' && !isModelRef(modelDraft)}
+                  onChange={setModelDraft}
+                />
+              </div>
+              <button
+                className="btn"
+                disabled={modelDraft === null || (modelDraft !== '' && !isModelRef(modelDraft))}
+                onClick={() => { updAi({ model: modelDraft || null }); setModelDraft(null); }}
+              >{t('save')}</button>
+            </div>
             <div className="help">{t('aiRevSettingsModelHelp')}</div>
           </div>
         </div>

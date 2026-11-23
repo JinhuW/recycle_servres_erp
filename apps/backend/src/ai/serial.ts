@@ -5,8 +5,8 @@
 // before it becomes a chip, so no confidence is carried.
 import type { Env } from '../types';
 import type { OcrProvider } from './types';
-import { pickProvider } from './index';
-import { openRouterImageJson } from './openrouter';
+import { featureProvider } from './index';
+import { aiImageJson } from './llm';
 import { ocrCallsTotal } from '../metrics';
 
 const SERIAL_PROMPT = `You are reading the label on a computer hardware part (a memory module, drive or similar). Extract its SERIAL NUMBER — usually printed next to "SN", "S/N", "Serial" or "Serial No.".
@@ -35,14 +35,14 @@ export function normalizeSerial(raw: unknown): string | null {
 export type SerialScan = { serial: string | null; provider: OcrProvider };
 
 export async function extractSerial(env: Env, imageBytes: ArrayBuffer): Promise<SerialScan> {
-  const provider = pickProvider(env);
+  const provider = await featureProvider(env, 'serial');
   if (provider === 'stub') {
     ocrCallsTotal.inc({ provider, outcome: 'stub' });
     return { serial: 'SN-STUB-0001', provider };
   }
   let json: Record<string, unknown>;
   try {
-    json = await openRouterImageJson(env, SERIAL_PROMPT, imageBytes);
+    json = await aiImageJson(env, SERIAL_PROMPT, imageBytes, { feature: 'serial' });
     ocrCallsTotal.inc({ provider, outcome: 'ok' });
   } catch (e) {
     ocrCallsTotal.inc({ provider, outcome: 'error' });

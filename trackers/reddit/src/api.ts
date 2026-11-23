@@ -8,6 +8,8 @@ import {analytics, ANALYTICS_WINDOWS, type AnalyticsWindow} from './analytics.ts
 import {requeuePost} from './claims.ts';
 import type {Sql} from './db.ts';
 import {DEAD_AFTER_S, STALE_AFTER_S, type LoopName, type LoopStatus} from './heartbeat.ts';
+import {invalidKeyReason, isProvider, KEY_ENV, PROVIDERS, type KeyStore} from './llm/keys.ts';
+import {isModelRef, parseModelRef} from './llm/ref.ts';
 import {candidateConfig, liveConfig, promptHash, promptStats} from './prompts.ts';
 import {createRule, deleteRule, listRules, updateRule} from './rules.ts';
 import {seen} from './seen.ts';
@@ -19,6 +21,8 @@ import {WEBHOOK_BODY_LIMIT_BYTES, webhookHandler} from './webhook.ts';
 export interface ApiDeps {
   sql: Sql;
   settings: SettingsStore;
+  /** Provider API keys; the ERP is the only writer. */
+  keys: KeyStore;
   botToken: string;
   apiToken: string;
   workerId: string;
@@ -314,6 +318,15 @@ export function createApi(deps: ApiDeps): Hono {
     return c.json({deleted: id});
   });
 
+  // A model whose provider has no key would park every post 'failed' once it
+  // went live, so refuse it here rather than at evaluation time.
+  async function missingKey(model: string): Promise<string | null> {
+    const {provider} = parseModelRef(model);
+    if ((await deps.keys.get())[provider]) return null;
+    return `the tracker has no ${provider} API key for ${model}: paste one on `
+      + `Settings ▸ AI models or set ${KEY_ENV[provider]} on the tracker first`;
+  }
+
   app.get('/api/settings', async (c) => c.json({settings: await deps.settings.all()}));
 
   app.put('/api/settings/:key', async (c) => {
@@ -329,9 +342,39 @@ export function createApi(deps: ApiDeps): Hono {
 
     const invalid = validateSetting(key, body.value);
     if (invalid) return c.json({error: invalid}, 400);
+    if ((key === 'llm_model' || key === 'candidate_llm_model') && body.value !== '') {
+      const noKey = await missingKey(body.value as string);
+      if (noKey) return c.json({error: noKey}, 409);
+    }
 
     await deps.settings.set(key, body.value);
     return c.json({key, value: body.value});
+  });
+
+  // Write-only from outside: no route returns a stored key, only its last 4.
+  // The ERP pushes keys here; other processes see them within the cache TTL.
+  app.get('/api/llm-keys', async (c) => c.json({keys: await deps.keys.summary()}));
+
+  app.put('/api/llm-keys/:provider', async (c) => {
+    const provider = c.req.param('provider');
+    if (!isProvider(provider)) {
+      return c.json({error: `unknown provider; expected one of ${PROVIDERS.join(', ')}`}, 400);
+    }
+    const body = await c.req.json().catch(() => null) as {key?: unknown} | null;
+    const key = typeof body?.key === 'string' ? body.key.trim() : '';
+    const invalid = invalidKeyReason(key);
+    if (invalid) return c.json({error: invalid}, 400);
+    await deps.keys.set(provider, key);
+    return c.json({ok: true, last4: key.slice(-4)});
+  });
+
+  app.delete('/api/llm-keys/:provider', async (c) => {
+    const provider = c.req.param('provider');
+    if (!isProvider(provider)) {
+      return c.json({error: `unknown provider; expected one of ${PROVIDERS.join(', ')}`}, 400);
+    }
+    await deps.keys.remove(provider);
+    return c.json({ok: true});
   });
 
   // `since` windows the status counts only. The oldest pending post and the
@@ -415,8 +458,12 @@ export function createApi(deps: ApiDeps): Hono {
     const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
     if (!prompt) return c.json({error: 'prompt must be a non-empty string'}, 400);
     const model = body?.model === undefined ? '' : body.model;
-    if (typeof model !== 'string' || (model !== '' && !MODEL_ID.test(model))) {
-      return c.json({error: 'model must be "" (use llm_model) or an OpenRouter model id'}, 400);
+    if (typeof model !== 'string' || (model !== '' && !isModelRef(model))) {
+      return c.json({error: 'model must be "" (use llm_model) or a model ref like anthropic:claude-sonnet-5-5 or an OpenRouter id'}, 400);
+    }
+    if (model !== '') {
+      const noKey = await missingKey(model);
+      if (noKey) return c.json({error: noKey}, 409);
     }
 
     await deps.sql.begin(async (tx) => {
@@ -456,6 +503,9 @@ export function createApi(deps: ApiDeps): Hono {
     const settings = await deps.settings.get();
     const candidate = candidateConfig(settings);
     if (!candidate) return c.json({error: 'no candidate_eval_prompt is set'}, 400);
+    // The key may have been removed since the trial started.
+    const noKey = await missingKey(candidate.model);
+    if (noKey) return c.json({error: noKey}, 409);
 
     const disabled = await deps.sql.begin(async (tx) => {
       const put = (key: string, value: string) => tx`
@@ -499,8 +549,6 @@ export function createApi(deps: ApiDeps): Hono {
   return app;
 }
 
-const MODEL_ID = /^[\w.-]+\/[\w.:-]+$/;
-
 function validateSetting(key: string, value: unknown): string | null {
   switch (key) {
     case 'eval_prompt':
@@ -508,9 +556,9 @@ function validateSetting(key: string, value: unknown): string | null {
         ? null
         : 'eval_prompt must be a non-empty string';
     case 'llm_model':
-      return typeof value === 'string' && MODEL_ID.test(value)
+      return typeof value === 'string' && isModelRef(value)
         ? null
-        : 'llm_model must be an OpenRouter model id, e.g. "openai/gpt-4o-mini"';
+        : 'llm_model must be a model ref like anthropic:claude-sonnet-5-5 or an OpenRouter id, e.g. "openai/gpt-4o-mini"';
     case 'telegram_chat_ids':
     case 'telegram_dev_chat_ids':
       return Array.isArray(value)
@@ -522,9 +570,9 @@ function validateSetting(key: string, value: unknown): string | null {
         ? null
         : 'candidate_eval_prompt must be a string ("" ends the trial)';
     case 'candidate_llm_model':
-      return typeof value === 'string' && (value === '' || MODEL_ID.test(value))
+      return typeof value === 'string' && (value === '' || isModelRef(value))
         ? null
-        : 'candidate_llm_model must be "" (use llm_model) or an OpenRouter model id';
+        : 'candidate_llm_model must be "" (use llm_model) or a model ref like anthropic:claude-sonnet-5-5 or an OpenRouter id';
     case 'max_post_age_hours':
       return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 720
         ? null

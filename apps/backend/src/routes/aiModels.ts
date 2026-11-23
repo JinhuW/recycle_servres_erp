@@ -1,124 +1,25 @@
 import { Hono } from 'hono';
+import {
+  AI_FEATURES, AI_PROVIDERS, AI_PROVIDER_LABELS, parseModelRef,
+  type AiFeature, type AiModelsSetting, type AiProviderId,
+} from '@recycle-erp/shared';
 import { authMiddleware } from '../auth';
+import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
 import { requireManager } from '../lib/role';
+import { unseal } from '../lib/sealed';
+import { getWorkspaceSetting } from '../lib/settings';
+import { poAiReviewSetting } from '../services/poAiReview';
+import { catalogue, dropCatalogue } from '../ai/catalogue';
+import { envModel } from '../ai/llm';
+import { aiKeysKey, invalidateAiKeys, KEY_ENV, pushKeyToTracker, sealKey } from '../ai/keys';
+import { PROVIDERS } from '../ai/providers';
 import type { Env, User } from '../types';
 
-// ─── OpenRouter model catalogue ───────────────────────────────────────────────
-// The model fields pick from OpenRouter's public catalogue. The browser can't
-// reach openrouter.ai (CSP, and every call goes through lib/api.ts), so this
-// fetches it, keeps what a picker shows, and holds it for an hour: the raw
-// list is ~800 KB and changes a few times a day. No key: the endpoint is
-// public, so dev and CI without OPENROUTER_API_KEY see the same list.
-
-const CATALOGUE_URL = 'https://openrouter.ai/api/v1/models';
-const TTL_MS = 3_600_000;
-// After a failed refresh the last copy is served this long before the next
-// attempt, so an OpenRouter outage doesn't cost every dialog open a timeout.
-const RETRY_MS = 300_000;
-const TIMEOUT_MS = 10_000;
+export { _resetForTests } from '../ai/catalogue';
 
 const rlog = log.child({ module: 'ai-models' });
-
-export interface AiModel {
-  id: string;
-  name: string;
-  contextLength: number | null;
-  /** USD per million tokens; null for routers, which price what they route to. */
-  promptPerM: number | null;
-  completionPerM: number | null;
-  /** Honours a strict `response_format` JSON schema, which the tracker's evaluator sends. */
-  structuredOutputs: boolean;
-  inputModalities: string[];
-  outputModalities: string[];
-}
-
-interface Catalogue {
-  models: AiModel[];
-  fetchedAt: string;
-}
-
-interface UpstreamModel {
-  id?: unknown;
-  name?: unknown;
-  context_length?: unknown;
-  pricing?: { prompt?: unknown; completion?: unknown };
-  supported_parameters?: unknown;
-  architecture?: { input_modalities?: unknown; output_modalities?: unknown };
-}
-
-let cache: { body: Catalogue; expiresAt: number } | null = null;
-let inflight: Promise<Catalogue> | null = null;
-
-/** `expire` keeps the cached copy but makes the next read refresh it. */
-export function _resetForTests({ expire = false } = {}): void {
-  inflight = null;
-  if (expire && cache) cache.expiresAt = 0;
-  else cache = null;
-}
-
-function strings(v: unknown): string[] {
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
-}
-
-function perMillion(raw: unknown): number | null {
-  const n = typeof raw === 'string' || typeof raw === 'number' ? Number(raw) : NaN;
-  // Routers (openrouter/auto) carry -1: their price is the routed model's.
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.round(n * 1e6 * 10_000) / 10_000;
-}
-
-function trim(raw: unknown): AiModel | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const m = raw as UpstreamModel;
-  if (typeof m.id !== 'string' || m.id === '') return null;
-  return {
-    id: m.id,
-    name: typeof m.name === 'string' ? m.name : m.id,
-    contextLength: typeof m.context_length === 'number' ? m.context_length : null,
-    promptPerM: perMillion(m.pricing?.prompt),
-    completionPerM: perMillion(m.pricing?.completion),
-    structuredOutputs: strings(m.supported_parameters).includes('structured_outputs'),
-    inputModalities: strings(m.architecture?.input_modalities),
-    outputModalities: strings(m.architecture?.output_modalities),
-  };
-}
-
-async function fetchCatalogue(): Promise<Catalogue> {
-  const res = await fetch(CATALOGUE_URL, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-    headers: { 'HTTP-Referer': 'https://recycle-erp.local', 'X-Title': 'Recycle ERP' },
-  });
-  if (!res.ok) throw new Error(`OpenRouter answered ${res.status}`);
-  const body = (await res.json()) as { data?: unknown };
-  if (!Array.isArray(body.data)) throw new Error('OpenRouter catalogue has no data array');
-  const models = body.data
-    .map(trim)
-    .filter((m): m is AiModel => m !== null)
-    .sort((a, b) => a.id.localeCompare(b.id));
-  // An empty answer would replace a good copy with a picker that offers nothing.
-  if (models.length === 0) throw new Error('OpenRouter catalogue is empty');
-  return { models, fetchedAt: new Date().toISOString() };
-}
-
-function catalogue(): Promise<Catalogue> {
-  if (cache && Date.now() < cache.expiresAt) return Promise.resolve(cache.body);
-  inflight ??= fetchCatalogue()
-    .then((body) => {
-      cache = { body, expiresAt: Date.now() + TTL_MS };
-      return body;
-    })
-    .catch((err: unknown) => {
-      if (!cache) throw err;
-      rlog.warn('model catalogue refresh failed; serving the last copy', err);
-      cache.expiresAt = Date.now() + RETRY_MS;
-      return cache.body;
-    })
-    .finally(() => {
-      inflight = null;
-    });
-  return inflight;
-}
+const MAX_KEY_LENGTH = 500;
 
 const aiModels = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
@@ -126,11 +27,195 @@ const aiModels = new Hono<{ Bindings: Env; Variables: { user: User } }>()
 
 aiModels.get('/models', async (c) => {
   try {
-    return c.json(await catalogue());
+    return c.json(await catalogue(c.env));
   } catch (err) {
     rlog.warn('model catalogue unreachable', err);
-    return c.json({ error: 'OpenRouter’s model catalogue is unreachable' }, 502);
+    return c.json({ error: err instanceof Error ? err.message : 'Model catalogue unreachable' }, 502);
   }
+});
+
+// Each provider's key status: where it comes from and its last four
+// characters. A key itself never leaves the backend, except to the tracker.
+// A saved key that can't be unsealed (FB_POOL_KEY rotated) serves no call, so
+// it doesn't count as configured; the row is still shown so it can be removed.
+aiModels.get('/providers', async (c) => {
+  const sql = getDb(c.env);
+  const [rows, removals] = await Promise.all([
+    sql<{ provider: AiProviderId; sealed: string; last4: string; tracker_synced: boolean }[]>`
+      SELECT provider, sealed, last4, tracker_synced FROM ai_provider_keys`,
+    sql<{ provider: AiProviderId }[]>`SELECT provider FROM ai_provider_key_removals`,
+  ]);
+  const saved = new Map(rows.map((r) => [r.provider, r]));
+  const removing = new Set(removals.map((r) => r.provider));
+  const sealKeyBuf = aiKeysKey(c.env);
+  const providers = AI_PROVIDERS.map((id) => {
+    const row = saved.get(id);
+    const fromEnv = !!c.env[KEY_ENV[id]]?.trim();
+    const readable = !!row && sealKeyBuf !== null && opens(row.sealed, sealKeyBuf);
+    return {
+      id,
+      label: AI_PROVIDER_LABELS[id],
+      configured: readable || fromEnv,
+      source: row ? 'ui' : fromEnv ? 'env' : null,
+      last4: row?.last4 ?? null,
+      // A removal the tracker hasn't confirmed leaves it holding the old key.
+      trackerSynced: row ? row.tracker_synced : removing.has(id) ? false : null,
+      unreadable: !!row && !readable,
+      keyName: KEY_ENV[id],
+    };
+  });
+  return c.json({ providers, envModel: envModel(c.env), canStore: sealKeyBuf !== null });
+});
+
+function opens(sealed: string, key: Buffer): boolean {
+  try {
+    unseal(sealed, key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function providerParam(raw: string): AiProviderId | null {
+  return (AI_PROVIDERS as readonly string[]).includes(raw) ? (raw as AiProviderId) : null;
+}
+
+const NO_SEAL_KEY = 'Keys can’t be stored until FB_POOL_KEY is set on the server';
+
+const FEATURE_NAMES: Record<'default' | AiFeature, string> = {
+  default: 'Default model', scan: 'Label scan', receipt: 'Receipt reading',
+  paypal: 'PayPal screenshot', serial: 'Serial number',
+};
+
+/** The saved settings whose model runs on `provider`, named as the pages name them. */
+async function settingsUsing(sql: SqlLike, provider: AiProviderId): Promise<string[]> {
+  const [models, review] = await Promise.all([
+    getWorkspaceSetting<AiModelsSetting>(sql, 'ai_models', { default: null }),
+    poAiReviewSetting(sql),
+  ]);
+  const on = (ref: unknown) => typeof ref === 'string' && ref !== '' && parseModelRef(ref).provider === provider;
+  const rows = (['default', ...AI_FEATURES] as const).filter((k) => on(models[k])).map((k) => FEATURE_NAMES[k]);
+  const out = rows.length > 0 ? [`Settings ▸ AI models (${rows.join(', ')})`] : [];
+  if (on(review.model)) out.push('Settings ▸ General ▸ AI review of purchase orders');
+  return out;
+}
+
+aiModels.put('/keys/:provider', async (c) => {
+  const provider = providerParam(c.req.param('provider'));
+  if (!provider) return c.json({ error: 'unknown provider' }, 400);
+  if (!aiKeysKey(c.env)) return c.json({ error: NO_SEAL_KEY }, 503);
+  const body = (await c.req.json().catch(() => null)) as { key?: unknown } | null;
+  const key = typeof body?.key === 'string' ? body.key.trim() : '';
+  if (!key || key.length > MAX_KEY_LENGTH || /\s/.test(key)) return c.json({ error: 'key required' }, 400);
+
+  // Tested before it is stored: listing models spends nothing and fails on a
+  // bad key, so a typo is caught here instead of at the next scan.
+  try {
+    await PROVIDERS[provider].listModels(key);
+  } catch (e) {
+    rlog.info('AI key test failed', { provider });
+    const why = e instanceof Error ? e.message.slice(0, 200) : 'the provider refused it';
+    return c.json({ error: `${AI_PROVIDER_LABELS[provider]} rejected this key: ${why}` }, 400);
+  }
+
+  // Stored before the push, so a tracker that is down can't lose the save,
+  // and the row is there to record the push's outcome and retry it from.
+  const last4 = key.slice(-4);
+  const sealed = sealKey(c.env, key);
+  const sql = getDb(c.env);
+  await sql.begin(async (tx) => {
+    await tx`
+      INSERT INTO ai_provider_keys (provider, sealed, last4, updated_by, tracker_synced)
+      VALUES (${provider}, ${sealed}, ${last4}, ${c.var.user.id}, FALSE)
+      ON CONFLICT (provider) DO UPDATE SET
+        sealed = EXCLUDED.sealed, last4 = EXCLUDED.last4, updated_by = EXCLUDED.updated_by,
+        tracker_synced = FALSE, updated_at = NOW()`;
+    // The push below replaces whatever the tracker holds, removal or not.
+    await tx`DELETE FROM ai_provider_key_removals WHERE provider = ${provider}`;
+  });
+  invalidateAiKeys();
+  dropCatalogue(provider);
+  const sync = await pushKeyToTracker(c.env, provider, key);
+  await recordSync(sql, provider, sealed, sync.trackerSynced);
+  rlog.info('AI key saved', { provider, trackerSynced: sync.trackerSynced });
+  return c.json({ ok: true, last4, ...sync });
+});
+
+// Matched on the sealed value: a save that landed meanwhile owns the flag.
+async function recordSync(sql: SqlLike, provider: AiProviderId, sealed: string, synced: boolean): Promise<void> {
+  await sql`
+    UPDATE ai_provider_keys SET tracker_synced = ${synced}
+    WHERE provider = ${provider} AND sealed = ${sealed}`;
+}
+
+aiModels.delete('/keys/:provider', async (c) => {
+  const provider = providerParam(c.req.param('provider'));
+  if (!provider) return c.json({ error: 'unknown provider' }, 400);
+  const sql = getDb(c.env);
+  const [row] = await sql<{ provider: string }[]>`
+    SELECT provider FROM ai_provider_keys WHERE provider = ${provider}`;
+  // Without a key every call those settings make would fail (a scan 502s, a
+  // PO review runs without AI), so they are moved first. An env key behind
+  // the saved one keeps them working.
+  if (row && !c.env[KEY_ENV[provider]]?.trim()) {
+    const users = await settingsUsing(sql, provider);
+    if (users.length > 0) {
+      return c.json({
+        error: `${AI_PROVIDER_LABELS[provider]} is still picked on ${users.join(' and ')}. `
+          + 'Choose a model from another provider there before removing this key.',
+        usedBy: users,
+      }, 409);
+    }
+  }
+
+  // Pushed first: once the row is gone, a failed push would leave nothing
+  // saying the tracker still holds the key. A failure is recorded instead,
+  // and the page offers a retry.
+  const sync = await pushKeyToTracker(c.env, provider, null);
+  await sql.begin(async (tx) => {
+    await tx`DELETE FROM ai_provider_keys WHERE provider = ${provider}`;
+    if (sync.trackerSynced) {
+      await tx`DELETE FROM ai_provider_key_removals WHERE provider = ${provider}`;
+    } else {
+      await tx`
+        INSERT INTO ai_provider_key_removals (provider) VALUES (${provider})
+        ON CONFLICT (provider) DO UPDATE SET requested_at = NOW()`;
+    }
+  });
+  invalidateAiKeys();
+  dropCatalogue(provider);
+  rlog.info('AI key removed', { provider, trackerSynced: sync.trackerSynced });
+  return c.json({ ok: true, ...sync });
+});
+
+// Pushes the provider's saved key, or its pending removal, to the tracker again.
+aiModels.post('/keys/:provider/sync', async (c) => {
+  const provider = providerParam(c.req.param('provider'));
+  if (!provider) return c.json({ error: 'unknown provider' }, 400);
+  const sql = getDb(c.env);
+  const [row] = await sql<{ sealed: string }[]>`
+    SELECT sealed FROM ai_provider_keys WHERE provider = ${provider}`;
+  if (row) {
+    const sealKeyBuf = aiKeysKey(c.env);
+    if (!sealKeyBuf) return c.json({ error: NO_SEAL_KEY }, 503);
+    let plain: string;
+    try {
+      plain = unseal(row.sealed, sealKeyBuf);
+    } catch {
+      return c.json({ error: 'The saved key can’t be read on this server; paste it again' }, 409);
+    }
+    const sync = await pushKeyToTracker(c.env, provider, plain);
+    await recordSync(sql, provider, row.sealed, sync.trackerSynced);
+    rlog.info('AI key re-synced', { provider, trackerSynced: sync.trackerSynced });
+    return c.json({ ok: true, ...sync });
+  }
+  const [removal] = await sql<{ provider: string }[]>`
+    SELECT provider FROM ai_provider_key_removals WHERE provider = ${provider}`;
+  if (!removal) return c.json({ error: 'Nothing to sync: no key is saved here for this provider' }, 404);
+  const sync = await pushKeyToTracker(c.env, provider, null);
+  if (sync.trackerSynced) await sql`DELETE FROM ai_provider_key_removals WHERE provider = ${provider}`;
+  rlog.info('AI key removal re-synced', { provider, trackerSynced: sync.trackerSynced });
+  return c.json({ ok: true, ...sync });
 });
 
 export default aiModels;

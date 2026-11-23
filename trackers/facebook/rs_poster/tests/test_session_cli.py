@@ -248,6 +248,35 @@ def test_proxy_settings_percent_decodes_userinfo():
     }
 
 
+def test_proxy_settings_without_a_scheme_still_splits_credentials():
+    # Unsplit, `alice` parsed as the scheme and the password went to Chromium
+    # inside `server`.
+    assert session_cli.proxy_settings("alice:s3cr3t@proxy.example.net:8080") == {
+        "server": "http://proxy.example.net:8080",
+        "username": "alice",
+        "password": "s3cr3t",
+    }
+    assert session_cli.proxy_settings("proxy.example.net:8080") == {
+        "server": "http://proxy.example.net:8080"
+    }
+
+
+def test_proxy_settings_keeps_ipv6_brackets():
+    assert session_cli.proxy_settings("http://alice:pw@[2001:db8::1]:3128") == {
+        "server": "http://[2001:db8::1]:3128",
+        "username": "alice",
+        "password": "pw",
+    }
+
+
+def test_proxy_settings_bad_port_raises_without_the_password():
+    for bad in ("http://alice:hunter2@proxy.example.net:99999", "http://alice:hunter2@proxy.example.net:abc"):
+        with pytest.raises(ValueError) as caught:
+            session_cli.proxy_settings(bad)
+        assert "hunter2" not in str(caught.value)
+        assert "proxy.example.net" in str(caught.value)
+
+
 # -- auto-fill login (human-paced) ------------------------------------------
 # rs-session capture can fill a UID + password from configs/accounts.txt and
 # type them at a human pace (Facebook flags machine-speed login input).
@@ -292,3 +321,42 @@ def test_account_row_locates_columns_by_header(tmp_path):
     assert row["twofa"] == "X7BHSEED"
     assert row["email"] == "a@b.com"
     assert session_cli._lookup_account("100008960563344", f) == ("100008960563344", "Ranrover@997")
+
+
+# -- PosterSession's browser context -----------------------------------------
+# rs-poster and rs-messenger open sessions through PosterSession, so they need
+# the same split as rs-session. Only the options are built; no browser starts.
+
+def test_poster_session_splits_an_authenticated_fb_proxy(tmp_path, monkeypatch):
+    from rs_poster.session import PosterSession
+
+    monkeypatch.delenv("FB_PROXY", raising=False)
+    poster = PosterSession(
+        storage_state_path=str(tmp_path / "fb_state.json"),
+        proxy="http://alice:s3cr3t+x@proxy.example.net:8080",
+    )
+    assert poster.context_options()["proxy"] == {
+        "server": "http://proxy.example.net:8080",
+        "username": "alice",
+        "password": "s3cr3t+x",
+    }
+
+
+def test_poster_session_splits_the_proxy_recorded_beside_the_session(tmp_path, monkeypatch):
+    from rs_poster.cookies import write_session_meta
+    from rs_poster.session import PosterSession
+
+    monkeypatch.delenv("FB_PROXY", raising=False)
+    state = tmp_path / "fb_state.json"
+    write_session_meta(state, proxy="http://bob:p%40ss@h:1")
+    options = PosterSession(storage_state_path=str(state)).context_options()
+    assert options["proxy"] == {"server": "http://h:1", "username": "bob", "password": "p@ss"}
+    assert options["storage_state"] is None  # no session file yet
+
+
+def test_poster_session_without_a_proxy_opens_a_direct_context(tmp_path, monkeypatch):
+    from rs_poster.session import PosterSession
+
+    monkeypatch.delenv("FB_PROXY", raising=False)
+    options = PosterSession(storage_state_path=str(tmp_path / "fb_state.json")).context_options()
+    assert options["proxy"] is None

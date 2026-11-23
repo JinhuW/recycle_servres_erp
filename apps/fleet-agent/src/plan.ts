@@ -315,10 +315,21 @@ export function plan(input: PlanInput): Plan {
   }
 
   // Stopped for a replacement whose run then failed: the release's worker,
-  // so it is run again even above the count, never left removed.
+  // so it is run again even above the count, never left removed. One whose
+  // container survived the stop (its `docker rm` failed) is removed first,
+  // which confirms the stop; the run follows on a later tick. The removal is
+  // not a login, so it takes no start: a `docker rm` that keeps failing must
+  // not hold the host's start every tick and starve its other workers.
   for (const id of input.restarting ?? []) {
     const n = workerIndex(hostId, id);
-    if (n === null || n <= desired.count || byId.has(id) || !canCreate) continue;
+    const current = byId.get(id);
+    if (n === null || n <= desired.count || current?.running || duplicates.has(id) || !canCreate) continue;
+    if (current) {
+      if (holdOf(current, input) === null) {
+        actions.push({ kind: 'remove', worker_id: id, container: current.name, reason: 'stopped for its replacement; removed before its run' });
+      }
+      continue;
+    }
     if (!takeStart()) {
       notes.push(`${id}: stopped for its replacement; run waits for its turn`);
       continue;

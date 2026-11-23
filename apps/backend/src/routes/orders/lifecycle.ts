@@ -265,17 +265,20 @@ async function setArchived(c: OrderCtx, archive: boolean) {
 // it survives every line edit after it (services/orderGoodsTotal.ts). Nothing
 // in the editors can tell "we agreed $8,500 for the lot" from "that number
 // went stale", so a manager says which: this lets go of the pinned figure and
-// the total follows the lines again. A correction, so allowed at any stage.
+// the total follows the lines again. A correction, so allowed at any stage —
+// but not on an archived PO, which is frozen until it is unarchived.
 lifecycleRoutes.post('/:id/total-cost/follow-lines', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
   const sql = getDb(c.env);
   const totalCost = await sql.begin(async (tx) => {
-    const [before] = await tx<{ total_cost: number | null }[]>`
-      SELECT total_cost::float AS total_cost FROM orders WHERE id = ${id} LIMIT 1 FOR NO KEY UPDATE
+    const [before] = await tx<{ total_cost: number | null; archived: boolean }[]>`
+      SELECT total_cost::float AS total_cost, archived_at IS NOT NULL AS archived
+      FROM orders WHERE id = ${id} LIMIT 1 FOR NO KEY UPDATE
     `;
     if (!before) return undefined;
+    if (before.archived) return 'archived' as const;
     await syncOrderGoodsTotal(tx, id, true);
     const [after] = await tx<{ total_cost: number | null }[]>`
       SELECT total_cost::float AS total_cost FROM orders WHERE id = ${id} LIMIT 1
@@ -285,6 +288,7 @@ lifecycleRoutes.post('/:id/total-cost/follow-lines', async (c) => {
     return after!.total_cost;
   });
   if (totalCost === undefined) return c.json({ error: 'Not found' }, 404);
+  if (totalCost === 'archived') return c.json({ error: 'Order is archived — unarchive it first' }, 409);
   return c.json({ ok: true, totalCost });
 });
 

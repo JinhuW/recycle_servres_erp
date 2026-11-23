@@ -37,7 +37,6 @@ const SPEC_PATCH_FIELDS = [
   'brand', 'capacity', 'generation', 'type', 'classification',
   'rank', 'speed', 'interface', 'formFactor', 'description',
 ] as const;
-const IS_SPEC_PATCH_FIELD = new Set<string>(SPEC_PATCH_FIELDS);
 
 // An event's detail as a purchaser may read it. Sell and transfer orders are
 // manager-only, so their ids stay out, and an edit to unit_cost keeps its row
@@ -1555,13 +1554,15 @@ inventory.patch('/:id', async (c) => {
         chip_number    = CASE WHEN ${chipAfter !== undefined ? 1 : 0}::int = 1 THEN ${chipAfter ?? null} ELSE chip_number END
       WHERE id = ${id}
     `;
+    // Several columns above COALESCE a null to "no change", so the body is not
+    // what landed; the audit below and the purchaser revert both diff this row.
+    const [after] = await tx<Record<string, unknown>[]>`SELECT * FROM order_lines WHERE id = ${id}`;
     // A purchaser's qty or cost edit sends a submitted order back to Draft, as
     // the PO PATCH does: those are what the review checked. Spec, status and
     // sell price stay the inventory page's ordinary edits, and past review the
     // goods are closed-book for everyone (doneLocked above). Judged on what
     // landed, so an echoed value is no edit.
     if (u.role !== 'manager' && touchesGoods && parent && parent.lifecycle !== 'draft') {
-      const [after] = await tx<Record<string, unknown>[]>`SELECT * FROM order_lines WHERE id = ${id}`;
       const changes = diff(before, after!, GOODS_FIELDS);
       if (changes.length) {
         const reverted = await revertOrderToDraftTx(tx, orderId, u, parent.lifecycle);
@@ -1585,12 +1586,11 @@ inventory.patch('/:id', async (c) => {
     }
     // One event per changed field — keeps the timeline easy to skim.
     for (const f of PATCH_AUDIT_FIELDS) {
-      const raw = (body as Record<string, unknown>)[f];
-      if (raw === undefined) continue;
+      if ((body as Record<string, unknown>)[f] === undefined) continue;
       // Compare and record what actually landed in the column, not what the
-      // client sent — otherwise clearing a field that was already NULL logs a
-      // phantom `null → ''` edit.
-      const newVal = IS_SPEC_PATCH_FIELD.has(f) ? specVal(raw as string | null) : raw;
+      // client sent: a null the UPDATE COALESCEd away, a sell price of 0 that
+      // stored NULL, or '12.5' against a stored '12.50' is no edit.
+      const newVal = after![PATCH_AUDIT_COL[f]];
       const oldVal = before[PATCH_AUDIT_COL[f]];
       if (String(oldVal) === String(newVal)) continue;
       const kind = f === 'status' ? 'status' : f === 'sellPrice' ? 'priced' : 'edited';
@@ -2144,7 +2144,9 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
 // Discard a Pending transfer order: undo the move and delete the TO. Full-move
 // lines flip back to their origin warehouse at their pre-transfer status;
 // partial-clone lines (their transferred event carries a peer_line_id) merge
-// their qty back into the source remainder and are deleted. Manager-only.
+// their qty back into the source remainder and are deleted, unless a sell
+// order names either side, in which case they revert like a full move and
+// stay a lot of their own. Manager-only.
 // Mirrors the PO "draft-only delete" rule — a Received order must be reopened
 // first. Guard: every line must still be In Transit and uncommitted to a sell
 // order, else 409 with no writes (matches reopen).
@@ -2209,16 +2211,23 @@ inventory.delete('/transfer-orders/:id', async (c) => {
       const peerLineId = typeof detail.peer_line_id === 'string' ? detail.peer_line_id : null;
 
       let merged = false;
+      // A clone a sell order names — a Draft or Packing claim the guard above
+      // lets through, or a Done sale that already took units — is never merged:
+      // deleting it would null that line's stock link (the FK is SET NULL), and
+      // a Done sale would make its qty less than the split handed over. It takes
+      // the standalone revert below and stays its own lot. The row lock above
+      // blocks a new line's FK check, so none can appear before the delete.
       if (peerLineId) {
         const peer = (await tx`
           SELECT id FROM order_lines
           WHERE id = ${peerLineId} AND transfer_order_id IS NULL
             AND NOT EXISTS (SELECT 1 FROM sell_order_lines sl WHERE sl.inventory_id = order_lines.id)
+            AND NOT EXISTS (SELECT 1 FROM sell_order_lines sl WHERE sl.inventory_id = ${l.id})
           FOR UPDATE
         `)[0] as { id: string } | undefined;
         if (peer) {
-          // Give back the share the split handed over. A clone can't have been
-          // sold from (discard refuses one that has), so its qty is all it cost.
+          // Give back the share the split handed over. No sell order names the
+          // clone (checked above), so its qty is all it cost.
           await tx`
             UPDATE order_lines
                SET qty = qty + ${l.qty},

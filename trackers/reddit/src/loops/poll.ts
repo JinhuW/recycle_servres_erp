@@ -15,19 +15,26 @@ import {
 import type {Sql} from '../db.ts';
 import type {Logger} from '../logger.ts';
 import type {RedditPacer} from '../pacing.ts';
-import {fetchNewPosts} from '../reddit.ts';
-import type {RedditAuth} from '../redditOAuth.ts';
+import {fetchNewPosts, type RedditAuth} from '../redditOAuth.ts';
 import type {SettingsStore} from '../settings.ts';
 
 export interface PollDeps {
   sql: Sql;
   workerId: string;
   userAgent: string;
-  /** OAuth credentials; absent means the anonymous Atom feed. */
-  auth?: RedditAuth | null;
+  /** OAuth credentials. Without them this worker cannot read Reddit at all. */
+  auth: RedditAuth | null;
   pacer: RedditPacer;
   settings: SettingsStore;
   logger: Logger;
+}
+
+const NO_AUTH_WARN_EVERY_MS = 60 * 60_000;
+let lastNoAuthWarning = -Infinity;
+
+/** For tests: lets the next credential-less poll warn again. */
+export function resetNoAuthWarning(): void {
+  lastNoAuthWarning = -Infinity;
 }
 
 /** Runs one poll cycle. Returns true when it fetched something. */
@@ -39,6 +46,17 @@ export async function pollOnce(deps: PollDeps): Promise<boolean> {
   // sends nothing to Reddit, hides no subreddit and logs nothing.
   if ((await deps.settings.get()).pollSource !== 'reddit') return false;
 
+  // Reddit has no logged-out route left, so polling without credentials could
+  // only fail. Say so (hourly, so the ops digest gets it without a flood) and
+  // claim nothing, leaving the subreddits to a worker that has credentials.
+  if (!deps.auth) {
+    if (Date.now() - lastNoAuthWarning >= NO_AUTH_WARN_EVERY_MS) {
+      lastNoAuthWarning = Date.now();
+      logger.warn('poll_source is reddit but REDDIT_CLIENT_ID is not set: this worker discovers no posts');
+    }
+    return false;
+  }
+
   // Reserve the rate-limit slot first; this may block for the better part of
   // a minute, which is fine because no claim is held while we wait.
   await pacer.acquire();
@@ -47,7 +65,7 @@ export async function pollOnce(deps: PollDeps): Promise<boolean> {
   if (claimed.length === 0) return false;
 
   const names = claimed.map((s) => s.name);
-  const result = await fetchNewPosts(names, deps.userAgent, deps.auth ?? null);
+  const result = await fetchNewPosts(names, deps.userAgent, deps.auth);
 
   switch (result.kind) {
     case 'rate_limited':

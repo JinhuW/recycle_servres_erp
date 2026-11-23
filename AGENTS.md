@@ -51,7 +51,7 @@ So:
 | `apps/fleet-agent/` | Docker-host agent: keeps each host's Facebook workers matching what the ERP desires, over `/api/fleet/hosts/:id/*` | TS, Node 24, no runtime deps, Docker CLI through the mounted socket | One container per fleet Docker host | root (the image is tagged with the root version; see `docs/agents/erp-ops.md`) | [apps/fleet-agent/AGENTS.md](apps/fleet-agent/AGENTS.md) |
 | `packages/shared/` | Types and helpers both apps import | TS source, no build step | — | root | [packages/shared/AGENTS.md](packages/shared/AGENTS.md) |
 | `deploy/` `backup/` `infra/` | ERP ops: Worker deploy, ops-alert relay Worker, prod→dev sync, uptime cron, R2 backup, Terraform | shell, Docker, Terraform | Railway crons, Cloudflare | root | [docs/agents/erp-ops.md](docs/agents/erp-ops.md) |
-| `trackers/reddit/` | Reddit for-sale monitor: polls subreddits, LLM-judges posts, alerts Telegram | Hono, Node 24, Postgres; **standalone pnpm project** | Railway `reddits-tracker` (`api`, `worker`) + OCI worker fleet | its `package.json`, no tags | [trackers/reddit/AGENTS.md](trackers/reddit/AGENTS.md) |
+| `trackers/reddit/` | Reddit for-sale monitor: takes new posts from the redditapis.com webhook (Reddit's RSS is gone), LLM-judges posts, alerts Telegram | Hono, Node 24, Postgres; **standalone pnpm project** | Railway `reddits-tracker` (`api`, `worker`); the OCI worker fleet is stopped | its `package.json`, no tags | [trackers/reddit/AGENTS.md](trackers/reddit/AGENTS.md) |
 | `trackers/facebook/` | Facebook Marketplace fleet: coordinator, console, worker entrypoint (`rs_worker`), poster, messenger, router, `rs_fleetd` | Python, FastAPI, Playwright | Homelab VM `10.10.10.73` (coordinator, console; Compose) + fleet Docker hosts, where `apps/fleet-agent/` runs the workers + Railway Postgres `facebook-tracker` | `VERSION`, its `CHANGELOG.md`, `facebook-tracker/v*` tags | [trackers/facebook/AGENTS.md](trackers/facebook/AGENTS.md) |
 
 ## Boundaries
@@ -62,10 +62,13 @@ So:
   commands never reach it. `trackers/facebook/` is Python with venvs in its own
   folder.
 - **No workflow tests the trackers**, so run a tracker's own suite before
-  pushing a change to it. Root CI is filtered to ERP paths, with one
-  exception: `fleet-images.yml` also fires on `facebook-tracker/v*` tags to
+  pushing a change to it. Root CI is filtered to ERP paths, with two
+  exceptions. `fleet-images.yml` also fires on `facebook-tracker/v*` tags to
   build the worker image, and skips itself until a private mirror of the
-  vendored monitor and a private image package are set up.
+  vendored monitor and a private image package are set up. `backend-tests.yml`
+  also fires on `trackers/facebook/configs/master.toml`, because an ERP test
+  (`apps/backend/tests/fleet-scheduler.test.ts`) reads the live fleet
+  config; it runs the ERP suites, not the tracker's.
 - **The ERP and the trackers share no code and no database.** They talk only
   over the HTTP contracts below.
 
@@ -76,7 +79,8 @@ contract, and both sides change together.
 
 | ERP side | Tracker side | Backend env | Test |
 | --- | --- | --- | --- |
-| `/api/tracker/*` → `apps/backend/src/routes/tracker.ts` (allowlist: workers, rules, subreddits, matches, stats, prompt-stats, analytics, seen, prompt-candidate, and the single setting `settings/llm_model`); UI `pages/desktop/DesktopTracker.tsx` + `lib/tracker.ts` | `trackers/reddit/src/api.ts`, Bearer `API_TOKEN` | `TRACKER_API_URL`, `TRACKER_API_TOKEN` | `apps/backend/tests/tracker-routes.test.ts` |
+| `/api/tracker/*` → `apps/backend/src/routes/tracker.ts` (allowlist: workers, rules, subreddits, matches, stats, prompt-stats, analytics, seen, prompt-candidate, the single setting `settings/llm_model`, and a read of `llm-keys`, whose per-provider `available` gates the tracker's model pickers); UI `pages/desktop/DesktopTracker.tsx` + `lib/tracker.ts` | `trackers/reddit/src/api.ts`, Bearer `API_TOKEN` | `TRACKER_API_URL`, `TRACKER_API_TOKEN` | `apps/backend/tests/tracker-routes.test.ts` |
+| Server-side, no browser route: saving or removing a key on Settings ▸ AI models (`PUT`/`DELETE /api/ai/keys/:provider`, `routes/aiModels.ts`) pushes it with `pushKeyToTracker` (`src/ai/keys.ts`); `POST /api/ai/keys/:provider/sync` pushes a saved key, or a removal the tracker missed, again | `PUT`/`DELETE /api/llm-keys/:provider` in `trackers/reddit/src/api.ts`, stored in `llm_keys`; Bearer `API_TOKEN` | `TRACKER_API_URL`, `TRACKER_API_TOKEN` | `apps/backend/tests/ai-keys.test.ts`, `trackers/reddit/tests/api.test.ts` |
 | `/api/coordinator/*` → `routes/coordinator.ts`, noVNC relay `src/vncBridge.ts`, and the proxy round in `src/fleet/proxyHealth.ts` (`/v1/proxies/health`, server-side); UI `DesktopCoordinator.tsx`, `FleetAccounts.tsx`, `FleetWatch.tsx` + `lib/coordinator.ts` | rs_console, `trackers/facebook/rs_console/`, at `fbc-api.recycleservers.com`, Bearer `RS_CONSOLE_TOKEN` + Cloudflare Access | `COORDINATOR_API_URL`, `COORDINATOR_API_TOKEN`, `COORDINATOR_ACCESS_CLIENT_ID` / `_SECRET` | `apps/backend/tests/coordinator-routes.test.ts`, `fleet-proxy-health.test.ts` |
 
 One contract runs the other way. **memtrade** (on the office Mac, outside
@@ -184,10 +188,11 @@ backward-compatible until the ERP release reaches `main`.
   since the latest `v*` tag without a bump, and auto-tags `v<version>` on
   green. Docs-only pushes, and pushes that only touch `trackers/`, are exempt.
 - Common entry points from the repo root:
-  - `pnpm dev` — runs every workspace package's `dev` script in parallel:
-    backend (`:8787`), frontend (`:5173`) and the fleet agent, which exits
-    at once unless `FLEET_URL`, `FLEET_HOST_ID` and `FLEET_HOST_TOKEN` are
-    set. `pnpm dev:backend` and `pnpm dev:frontend` run one each.
+  - `pnpm dev` — runs the backend (`:8787`) and the frontend (`:5173`) in
+    parallel. `pnpm dev:backend` and `pnpm dev:frontend` run one each. The
+    fleet agent is left out because it exits at once without `FLEET_URL`,
+    `FLEET_HOST_ID` and `FLEET_HOST_TOKEN`, and pnpm then stops its
+    siblings; run it on its own with `pnpm --filter recycle-erp-fleet-agent dev`.
   - `pnpm typecheck` / `pnpm build` — recursive across the workspace.
   - `pnpm db:migrate` / `pnpm db:seed` / `pnpm db:reset` — proxy to backend
     scripts.

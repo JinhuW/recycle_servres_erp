@@ -3,7 +3,7 @@
 // The test env has no OPENROUTER_API_KEY, so the run is the deterministic
 // part-number check alone — the model witnesses are skipped, not faked.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { getTestDb, resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
@@ -203,12 +203,36 @@ describe('PO AI review', () => {
     expect(await drain()).toBe(0);
   });
 
+  // With only another provider's key, every model call would fail and the
+  // review used to be filed under the model's name as if it had read it.
+  it("skips the model checks when the review's model has no key, and says so", async () => {
+    await getTestDb()`
+      UPDATE workspace_settings
+      SET value = value || '{"enabled": true, "model": "anthropic:claude-sonnet-5-5"}'::jsonb
+      WHERE key = 'po_ai_review'`;
+    const { id } = await createInTransit(pur);
+    await toReviewing(id, mgr);
+    const fetchSpy = vi.fn(async () => { throw new Error('no model call expected'); });
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      expect(await drainPoAiReviews(getTestDb(), { ...testEnv, OPENROUTER_API_KEY: 'o' })).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const [row] = await getTestDb()`SELECT status, model FROM po_ai_reviews WHERE order_id = ${id}`;
+    expect(row).toMatchObject({ status: 'done', model: 'stub' });
+  });
+
   it('validates the setting', async () => {
-    const patch = (v: unknown) => api('PATCH', '/api/workspace', { token: mgr, body: { po_ai_review: v } });
+    const patch = (v: unknown, env = {}) => api('PATCH', '/api/workspace', { token: mgr, env, body: { po_ai_review: v } });
     expect((await patch({ enabled: 'yes' })).status).toBe(400);
     expect((await patch({ enabled: true, maxCostPerPoUsd: 50 })).status).toBe(400);
     expect((await patch({ enabled: true, model: 'not a model' })).status).toBe(400);
-    expect((await patch({ enabled: true, webLookup: false, maxCostPerPoUsd: 1, model: 'openai/gpt-6-luna' })).status).toBe(200);
+    const ok = { enabled: true, webLookup: false, maxCostPerPoUsd: 1, model: 'openai/gpt-6-luna' };
+    // A model whose provider has no key is refused too.
+    expect((await patch(ok)).status).toBe(400);
+    expect((await patch(ok, { OPENROUTER_API_KEY: 'k' })).status).toBe(200);
   });
 
   it('is manager-only', async () => {

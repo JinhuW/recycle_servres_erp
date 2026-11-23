@@ -5,7 +5,7 @@
 
 import {createHash} from 'node:crypto';
 import type {Sql} from './db.ts';
-import {RESPONSE_SCHEMA_ID, type Evaluation} from './llm.ts';
+import {RESPONSE_SCHEMA_ID, type Evaluation} from './llm/index.ts';
 import {composeEvalPrompt, type Rule} from './rules.ts';
 import type {Settings} from './settings.ts';
 import type {VerdictNote} from './telegram.ts';

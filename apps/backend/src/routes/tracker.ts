@@ -12,8 +12,9 @@ import type { Env, User } from '../types';
 // no business calling. Prompt trials get their own narrow routes
 // (/prompt-candidate) for exactly that reason, and the one setting the
 // Evaluate stage edits, the live model, is opened by key rather than through
-// a `:key` param. Self-applies authMiddleware (oauthAdmin pattern), so
-// index.ts mounts it with a single app.route().
+// a `:key` param. Its LLM keys are only read here (`GET /llm-keys`).
+// Self-applies authMiddleware (oauthAdmin pattern), so index.ts mounts it
+// with a single app.route().
 
 const TIMEOUT_MS = 10_000;
 
@@ -107,6 +108,10 @@ tracker.delete('/prompt-candidate', (c) => forward(c, 'DELETE', '/api/prompt-can
 tracker.post('/prompt-candidate/promote', (c) =>
   forward(c, 'POST', '/api/prompt-candidate/promote', false));
 tracker.put('/settings/llm_model', (c) => forward(c, 'PUT', '/api/settings/llm_model', true));
+// Read-only: which providers the tracker itself holds a key for, so its model
+// pickers offer only those. Keys are written server-side (ai/keys.ts), never
+// through this proxy.
+tracker.get('/llm-keys', (c) => forward(c, 'GET', '/api/llm-keys', false));
 
 tracker.get('/subreddits', (c) => forward(c, 'GET', '/api/subreddits', false));
 tracker.post('/subreddits', (c) => forward(c, 'POST', '/api/subreddits', true));

@@ -23,12 +23,16 @@ SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10)
 [[ -f "$SECRETS" ]] || { echo "Missing $SECRETS — copy scripts/secrets.env.example" >&2; exit 1; }
 # shellcheck disable=SC1090
 source "$SECRETS"
-: "${DATABASE_URL:?set in secrets.env}" "${OPENROUTER_API_KEY:?set in secrets.env}"
+: "${DATABASE_URL:?set in secrets.env}"
 : "${GHCR_USERNAME:?set in secrets.env}" "${GHCR_READ_TOKEN:?set in secrets.env}"
 
 # The env file the workers run with. WORKER_ID stays unset (auto per process).
+# Provider keys are optional: the ERP pushes keys into the database
+# (llm_keys), and an env key only fills a provider without a stored one.
 ENV_CONTENT="DATABASE_URL=${DATABASE_URL}
-OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+OPENAI_API_KEY=${OPENAI_API_KEY:-}
 ROLE=worker
 ALERT_TRANSPORT=${ALERT_TRANSPORT:-console}
 TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}

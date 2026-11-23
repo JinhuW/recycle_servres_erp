@@ -78,7 +78,13 @@ describe('scale down', () => {
     const crashed = exited('lab-3', 1, ago(600), 'img:1');
     expect(run([running('lab-1', 'img:2'), crashed], { held: { 'lab-3': { container: crashed.id!, reason: 'crash_limit' } } }, d).actions).toEqual([]);
     expect(run([running('lab-1', 'img:2'), exited('lab-3', 0, ago(60), 'img:1')], { bootAt: NOW - 3600_000 }, d).actions).toEqual([]);
-    expect(run([running('lab-1', 'img:2'), exited('lab-3', 75, ago(600), 'img:1')], { restarting: ['lab-3'] }, d).actions).toEqual([]);
+    // Waiting for its replacement, it is removed only to be run again, and
+    // the removal takes no start.
+    expect(run([running('lab-1', 'img:2'), exited('lab-3', 143, ago(600), 'img:1')], { restarting: ['lab-3'] }, d).actions).toEqual([
+      { kind: 'remove', worker_id: 'lab-3', container: 'rs-fleet-lab-3', reason: 'stopped for its replacement; removed before its run' },
+    ]);
+    expect(kinds(run([running('lab-1', 'img:2'), exited('lab-3', 143, ago(600), 'img:1')], { restarting: ['lab-3'], lastStartAt: NOW - 1000 }, d))).toEqual([['remove', 'lab-3']]);
+    expect(run([running('lab-1', 'img:2'), exited('lab-3', 78, ago(600), 'img:1')], { restarting: ['lab-3'] }, d).actions).toEqual([]);
     expect(kinds(run([running('lab-1', 'img:2'), exited('lab-2', 75, ago(600), 'img:1')], {}, { ...d, count: 2 }))).toEqual([['start', 'lab-2']]);
   });
 
@@ -167,6 +173,11 @@ describe('roll', () => {
     const p = run([running('lab-1', 'img:2')], { restarting: ['lab-3'] }, { count: 1, image: 'img:2', vnc_ports: { 'lab-1': 5901, 'lab-3': 5903 } });
     expect(kinds(p)).toEqual([['run', 'lab-3']]);
     expect(p.actions[0]).toMatchObject({ image: 'img:2', port: 5903, reason: 'replacement' });
+  });
+
+  it('a stopped replacement whose removal keeps failing does not take the start from other workers', () => {
+    const p = run([running('lab-1', 'img:2'), exited('lab-3', 143, ago(600), 'img:1')], { restarting: ['lab-3'] }, { count: 2, image: 'img:2', vnc_ports: { 'lab-1': 5901, 'lab-2': 5902, 'lab-3': 5903 } });
+    expect(kinds(p)).toEqual([['remove', 'lab-3'], ['run', 'lab-2']]);
   });
 
   it('leaves a restarting id that already has a container to the usual rules', () => {

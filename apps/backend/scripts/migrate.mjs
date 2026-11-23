@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Run SQL files in ./migrations against DATABASE_URL.
-// Use --reset to DROP all known tables first (dev only).
+// Use --reset to DROP the app's tables and functions first (dev only).
 
 import postgres from 'postgres';
 import { createHash } from 'node:crypto';
@@ -101,7 +101,7 @@ try {
   // First statement of the run, so this is where a cold/absent database shows up.
   await connectWithRetry(() => sql`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`);
   if (reset) {
-    log.warn('dropping existing tables');
+    log.warn('dropping existing tables and functions');
     // Drop everything in the public schema (dev-only). Older versions of this
     // script hard-coded a fixed table list which silently went stale every time
     // we added a migration — switch to discovering tables at runtime so reset
@@ -112,6 +112,33 @@ try {
       BEGIN
         FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
           EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+        END LOOP;
+      END $$;
+    `);
+    // Functions are not dependents of the tables their bodies name, so the
+    // drop above leaves them, and the migrations that make them with a plain
+    // CREATE FUNCTION then fail on replay. Extension members (pgcrypto,
+    // pg_trgm) stay: dropping one would break its extension, which the
+    // migrations only CREATE IF NOT EXISTS. Every signature is rendered to
+    // text before the first drop: a FOR loop fetches its rows lazily, so a
+    // routine another one's CASCADE already dropped (a SQL-standard body
+    // depends on what it calls) would render as a bare OID, and
+    // `DROP ROUTINE IF EXISTS 12345` is a syntax error rather than a no-op.
+    await sql.unsafe(`
+      DO $$
+      DECLARE sig TEXT;
+      BEGIN
+        FOREACH sig IN ARRAY ARRAY(
+          SELECT p.oid::regprocedure::text
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.prokind IN ('f', 'p')
+            AND NOT EXISTS (
+              SELECT 1 FROM pg_depend d
+              WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e'
+            )
+        ) LOOP
+          EXECUTE 'DROP ROUTINE IF EXISTS ' || sig || ' CASCADE';
         END LOOP;
       END $$;
     `);
