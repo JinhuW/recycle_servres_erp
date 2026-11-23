@@ -198,6 +198,60 @@ describe('PATCH /api/inventory/:id — unit cost is manager-only', () => {
   });
 });
 
+// The UPDATE COALESCEs a null part number to "no change", so the audit has to
+// diff the row it wrote, not the body: a blanked part number logged a change
+// that never landed, and an echoed price in another format logged a 'priced'.
+describe('PATCH /api/inventory/:id — audits what landed', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('a blank part number keeps the column and logs nothing; an echoed price logs nothing', async () => {
+    const { token } = await loginAs(ALEX);
+    const { getTestDb } = await import('./helpers/db');
+    const sql = getTestDb();
+    const [line] = await sql<{ id: string }[]>`
+      SELECT l.id FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE o.archived_at IS NULL AND l.status <> 'Sold'
+      ORDER BY l.id LIMIT 1
+    `;
+    expect(line, 'seed has no editable line').toBeDefined();
+    const id = line!.id;
+    await sql`UPDATE order_lines SET part_number = 'PN-KEEP', sell_price = 12.50 WHERE id = ${id}`;
+    await sql`DELETE FROM inventory_events WHERE order_line_id = ${id}`;
+
+    const r = await api('PATCH', `/api/inventory/${id}`, {
+      token, body: { partNumber: null, sellPrice: 12.5 },
+    });
+    expect(r.status).toBe(200);
+
+    const [row] = await sql<{ part_number: string | null }[]>`
+      SELECT part_number FROM order_lines WHERE id = ${id}`;
+    expect(row!.part_number).toBe('PN-KEEP');
+    const events = await sql`SELECT kind, detail FROM inventory_events WHERE order_line_id = ${id}`;
+    expect(events).toEqual([]);
+  });
+
+  it('still logs a part number that did change, as stored', async () => {
+    const { token } = await loginAs(ALEX);
+    const { getTestDb } = await import('./helpers/db');
+    const sql = getTestDb();
+    const [line] = await sql<{ id: string }[]>`
+      SELECT l.id FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE o.archived_at IS NULL AND l.status <> 'Sold'
+      ORDER BY l.id LIMIT 1
+    `;
+    const id = line!.id;
+    await sql`UPDATE order_lines SET part_number = 'PN-OLD' WHERE id = ${id}`;
+    await sql`DELETE FROM inventory_events WHERE order_line_id = ${id}`;
+
+    const r = await api('PATCH', `/api/inventory/${id}`, { token, body: { partNumber: 'PN-NEW' } });
+    expect(r.status).toBe(200);
+    const events = await sql<{ kind: string; detail: { field: string; from: string | null; to: string | null } }[]>`
+      SELECT kind, detail FROM inventory_events WHERE order_line_id = ${id}`;
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: 'edited', detail: { field: 'partNumber', from: 'PN-OLD', to: 'PN-NEW' } });
+  });
+});
+
 describe('PATCH /api/inventory/:id — spec fields', () => {
   beforeEach(async () => { await resetDb(); });
 

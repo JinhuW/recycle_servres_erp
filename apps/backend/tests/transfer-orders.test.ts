@@ -621,6 +621,48 @@ describe('DELETE /api/inventory/transfer-orders/:id — discard', () => {
     expect(toGone.length).toBe(0);
   });
 
+  // Merging deletes the clone, and the FK would null the sell order's link
+  // to it: the draft keeps a line no stock backs and Done never consumes it.
+  it('partial move whose clone is on a Draft sell order: clone reverts standalone, link kept', async () => {
+    const { token } = await loginAs(ALEX);
+    const db = getTestDb();
+    const src = (await db`
+      SELECT l.id, COALESCE(l.warehouse_id, o.warehouse_id) AS wh
+      FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE l.status IN ('Reviewing','Done')
+        AND COALESCE(l.warehouse_id, o.warehouse_id) IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sell_order_lines sl WHERE sl.inventory_id = l.id)
+      LIMIT 1
+    `)[0] as { id: string; wh: string };
+    await db`UPDATE order_lines SET qty = 5 WHERE id = ${src.id}`;
+    const to = WAREHOUSES.find((w) => w !== src.wh)!;
+    const tr = await api<{ ok: true; transferOrderId: string }>(
+      'POST', '/api/inventory/transfer',
+      { token, body: { confirmDrafts: true, toWarehouseId: to, lines: [{ id: src.id, qty: 2 }] } },
+    );
+    const orderId = tr.body.transferOrderId;
+    const clone = (await db`SELECT id FROM order_lines WHERE transfer_order_id = ${orderId}`)[0] as { id: string };
+    const so = (await db`SELECT id FROM sell_orders ORDER BY created_at LIMIT 1`)[0] as { id: string };
+    await db`UPDATE sell_orders SET status = 'Draft' WHERE id = ${so.id}`;
+    const [sl] = await db<{ id: string }[]>`
+      INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price)
+      VALUES (${so.id}, ${clone.id}, 'RAM', 'x', 2, 1) RETURNING id`;
+
+    const r = await api('DELETE', `/api/inventory/transfer-orders/${orderId}`, { token });
+    expect(r.status).toBe(200);
+
+    const cloneRow = (await db`SELECT qty, warehouse_id, transfer_order_id FROM order_lines WHERE id = ${clone.id}`)[0] as
+      { qty: number; warehouse_id: string | null; transfer_order_id: string | null } | undefined;
+    expect(cloneRow).toBeDefined();
+    expect(cloneRow!.qty).toBe(2);
+    expect(cloneRow!.transfer_order_id).toBeNull();
+    expect(cloneRow!.warehouse_id).toBe(src.wh);
+    const srcRow = (await db`SELECT qty FROM order_lines WHERE id = ${src.id}`)[0] as { qty: number };
+    expect(srcRow.qty).toBe(3);
+    const link = (await db`SELECT inventory_id FROM sell_order_lines WHERE id = ${sl!.id}`)[0] as { inventory_id: string | null };
+    expect(link.inventory_id).toBe(clone.id);
+  });
+
   it('409 (no writes) when a line is committed to a sell order', async () => {
     const { token } = await loginAs(ALEX);
     const moved = await transferOne(token);
