@@ -129,7 +129,12 @@ Breaking any of these breaks the fleet. The tests that cover them are
 ## Deploying
 
 - **Railway project `reddits-tracker`** has services `api` (`ROLE=api`),
-  `worker` and `Postgres`, and both app services share `railway.toml`. They are
+  `worker` and `Postgres`, and `.railway/railway.ts` sets both app services to
+  the Dockerfile builder (Railway stopped reading `railway.toml` on
+  2026-12-01). Change it with `railway config plan`, then `railway config
+  apply`. It is a whole-project file: a resource missing from it is deleted on
+  apply, so keep Postgres and its volumes listed. Variables are not managed
+  by it. The app services are
   deployed by CLI upload from this folder, not from GitHub, so merging code
   does not deploy it.
 - **Run `railway status` first, every time.** It must show project
