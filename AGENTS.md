@@ -62,10 +62,13 @@ So:
   commands never reach it. `trackers/facebook/` is Python with venvs in its own
   folder.
 - **No workflow tests the trackers**, so run a tracker's own suite before
-  pushing a change to it. Root CI is filtered to ERP paths, with one
-  exception: `fleet-images.yml` also fires on `facebook-tracker/v*` tags to
+  pushing a change to it. Root CI is filtered to ERP paths, with two
+  exceptions. `fleet-images.yml` also fires on `facebook-tracker/v*` tags to
   build the worker image, and skips itself until a private mirror of the
-  vendored monitor and a private image package are set up.
+  vendored monitor and a private image package are set up. `backend-tests.yml`
+  also fires on `trackers/facebook/configs/master.toml`, because an ERP test
+  (`apps/backend/tests/fleet-scheduler.test.ts`) reads the live fleet
+  config; it runs the ERP suites, not the tracker's.
 - **The ERP and the trackers share no code and no database.** They talk only
   over the HTTP contracts below.
 
@@ -76,8 +79,8 @@ contract, and both sides change together.
 
 | ERP side | Tracker side | Backend env | Test |
 | --- | --- | --- | --- |
-| `/api/tracker/*` → `apps/backend/src/routes/tracker.ts` (allowlist: workers, rules, subreddits, matches, stats, prompt-stats, analytics, seen, prompt-candidate, and the single setting `settings/llm_model`); UI `pages/desktop/DesktopTracker.tsx` + `lib/tracker.ts` | `trackers/reddit/src/api.ts`, Bearer `API_TOKEN` | `TRACKER_API_URL`, `TRACKER_API_TOKEN` | `apps/backend/tests/tracker-routes.test.ts` |
-| Server-side, no browser route: saving or removing a key on Settings ▸ AI models (`PUT`/`DELETE /api/ai/keys/:provider`, `routes/aiModels.ts`) pushes it with `pushKeyToTracker` (`src/ai/keys.ts`) | `PUT`/`DELETE /api/llm-keys/:provider` in `trackers/reddit/src/api.ts`, stored in `llm_keys`; Bearer `API_TOKEN` | `TRACKER_API_URL`, `TRACKER_API_TOKEN` | `apps/backend/tests/ai-keys.test.ts`, `trackers/reddit/tests/api.test.ts` |
+| `/api/tracker/*` → `apps/backend/src/routes/tracker.ts` (allowlist: workers, rules, subreddits, matches, stats, prompt-stats, analytics, seen, prompt-candidate, the single setting `settings/llm_model`, and a read of `llm-keys`, whose per-provider `available` gates the tracker's model pickers); UI `pages/desktop/DesktopTracker.tsx` + `lib/tracker.ts` | `trackers/reddit/src/api.ts`, Bearer `API_TOKEN` | `TRACKER_API_URL`, `TRACKER_API_TOKEN` | `apps/backend/tests/tracker-routes.test.ts` |
+| Server-side, no browser route: saving or removing a key on Settings ▸ AI models (`PUT`/`DELETE /api/ai/keys/:provider`, `routes/aiModels.ts`) pushes it with `pushKeyToTracker` (`src/ai/keys.ts`); `POST /api/ai/keys/:provider/sync` pushes a saved key, or a removal the tracker missed, again | `PUT`/`DELETE /api/llm-keys/:provider` in `trackers/reddit/src/api.ts`, stored in `llm_keys`; Bearer `API_TOKEN` | `TRACKER_API_URL`, `TRACKER_API_TOKEN` | `apps/backend/tests/ai-keys.test.ts`, `trackers/reddit/tests/api.test.ts` |
 | `/api/coordinator/*` → `routes/coordinator.ts`, noVNC relay `src/vncBridge.ts`, and the proxy round in `src/fleet/proxyHealth.ts` (`/v1/proxies/health`, server-side); UI `DesktopCoordinator.tsx`, `FleetAccounts.tsx`, `FleetWatch.tsx` + `lib/coordinator.ts` | rs_console, `trackers/facebook/rs_console/`, at `fbc-api.recycleservers.com`, Bearer `RS_CONSOLE_TOKEN` + Cloudflare Access | `COORDINATOR_API_URL`, `COORDINATOR_API_TOKEN`, `COORDINATOR_ACCESS_CLIENT_ID` / `_SECRET` | `apps/backend/tests/coordinator-routes.test.ts`, `fleet-proxy-health.test.ts` |
 
 One contract runs the other way. **memtrade** (on the office Mac, outside

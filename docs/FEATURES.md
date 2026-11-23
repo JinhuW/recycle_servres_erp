@@ -3368,7 +3368,15 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   v1.310.1 both fields save only a model the list holds. A typed id it lacks,
   or a model without strict JSON output, is refused, because the evaluator
   can't read a prose answer. The ERP backend fetches the
-  catalogue (`GET /api/ai/models`) and keeps it for an hour.
+  catalogue (`GET /api/ai/models`) and keeps it for an hour. Since v1.474.0
+  both fields are a provider dropdown and a model dropdown, so the evaluator
+  can run on Claude or OpenAI directly as well as through OpenRouter. After
+  v1.475.0 a provider can be picked there only when the tracker itself holds
+  a key for it (one pasted on Settings ▸ AI models that reached it, or the
+  tracker's own env var), as the tracker reports through `GET
+  /api/tracker/llm-keys`. An older or unreachable tracker counts only pasted
+  keys it confirmed. When the tracker still refuses a model for want of a
+  key, the dialog shows its reason under the field.
   - Since v1.292.0, each version is labelled *verdict first* or *reasoning
     first*. That's its response schema. The tracker has asked for the
     reasoning first since RS-312.
@@ -4707,8 +4715,19 @@ inventory search, sell-order draft creation.
     the provider before it is saved, stored encrypted, and shown again only
     as its last four characters; Remove deletes it. A pasted key wins over
     the server's env var, which still works as a fallback. Each save is
-    pushed to the Reddit tracker, whose workers use it within a minute; if
-    the tracker can't be reached the row says so, and saving again retries.
+    pushed to the Reddit tracker, whose workers use it within a minute.
+    After v1.475.0 the key is stored before the push, and Remove pushes the
+    removal before deleting; when the tracker can't be reached the row says
+    so, the removal is remembered, and **Retry sync** pushes it again
+    (`POST /api/ai/keys/:provider/sync`). Remove is refused while a model
+    picked on this page or for the PO AI review still needs that provider
+    and no env key backs it, and the message names those settings. A saved
+    key the server can't unseal (FB_POOL_KEY changed) shows as unreadable and
+    counts as no key. Saving a model, the PO review's included, is refused
+    when its provider has no key. Choosing a provider preselects only a model
+    the row can use (one that reads images, or the evaluator's strict JSON),
+    else leaves the model empty; OpenRouter's `~…-latest` aliases are not
+    listed. The nightly prod→dev copy empties the pasted keys.
   - With no key anywhere, production refuses AI reads (the scanner shows
     its "AI recognition unavailable" message) instead of returning the
     demo stub's canned data.
@@ -4889,16 +4908,15 @@ inventory search, sell-order draft creation.
     different dies (`MTA16ATF2G64HZ-3G2J1` is recorded with WSM and VPP), so
     check the suggestion against the chip.
 
-> Provider selection is silent: OpenRouter when `OPENROUTER_API_KEY` is set,
-> otherwise a deterministic stub. A prod deploy missing the key looks healthy
-> and quietly stubs. The model is **`openai/gpt-6-luna`** for every image-AI
-> call — labels, receipts, PayPal screenshots (v1.181.0, RS-115; it was
-> `google/gemini-2.5-flash` before, not the Gemma this note used to name). It
-> is tuned for OpenAI: high image detail, minimal reasoning, JSON mode, and
-> an empty answer is asked again once. It reads 300 dpi flatbed scans reliably
-> but is weaker than Gemini on blurry/low-resolution images. Roll back without
-> a deploy by setting `OPENROUTER_OCR_MODEL=google/gemini-2.5-flash` on
-> Railway; a non-OpenAI model gets the old request.
+> Which provider and model a read uses is set on Settings ▸ AI models
+> (below, v1.474.0): OpenRouter, Anthropic or OpenAI, with keys pasted there
+> or set as env vars. With no model chosen, reads use the server's
+> `AI_MODEL` (`OPENROUTER_OCR_MODEL` is still read as a fallback name), which
+> defaults to **`openai/gpt-6-luna`** through OpenRouter (v1.181.0, RS-115;
+> `google/gemini-2.5-flash` before). It reads 300 dpi flatbed scans reliably
+> but is weaker than Gemini on blurry/low-resolution images. With no key at
+> all, dev and CI use a deterministic stub and production refuses the read.
+> Switch models on that page, with no deploy.
 
 ## The two shells
 

@@ -225,11 +225,14 @@ describe('PO AI review', () => {
   });
 
   it('validates the setting', async () => {
-    const patch = (v: unknown) => api('PATCH', '/api/workspace', { token: mgr, body: { po_ai_review: v } });
+    const patch = (v: unknown, env = {}) => api('PATCH', '/api/workspace', { token: mgr, env, body: { po_ai_review: v } });
     expect((await patch({ enabled: 'yes' })).status).toBe(400);
     expect((await patch({ enabled: true, maxCostPerPoUsd: 50 })).status).toBe(400);
     expect((await patch({ enabled: true, model: 'not a model' })).status).toBe(400);
-    expect((await patch({ enabled: true, webLookup: false, maxCostPerPoUsd: 1, model: 'openai/gpt-6-luna' })).status).toBe(200);
+    const ok = { enabled: true, webLookup: false, maxCostPerPoUsd: 1, model: 'openai/gpt-6-luna' };
+    // A model whose provider has no key is refused too.
+    expect((await patch(ok)).status).toBe(400);
+    expect((await patch(ok, { OPENROUTER_API_KEY: 'k' })).status).toBe(200);
   });
 
   it('is manager-only', async () => {

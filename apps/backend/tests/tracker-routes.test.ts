@@ -245,7 +245,33 @@ describe('Tracker proxy routes (/api/tracker)', () => {
       .toBe(404);
     expect((await api('PUT', '/api/tracker/settings/telegram_chat_ids', { ...opts, body: { value: [] } })).status)
       .toBe(404);
+    // Keys are only read through the proxy; they are written server-side.
+    expect((await api('PUT', '/api/tracker/llm-keys/openai', { ...opts, body: { key: 'k' } })).status).toBe(404);
+    expect((await api('DELETE', '/api/tracker/llm-keys/openai', opts)).status).toBe(404);
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("forwards the tracker's key status read, to managers only", async () => {
+    const body = { keys: [{ provider: 'openai', configured: false, last4: null, available: true, source: 'env' }] };
+    const spy = stubTracker(200, body);
+    const { token } = await loginAs(ALEX);
+    const r = await api('GET', '/api/tracker/llm-keys', { token, env: TRACKER_ENV });
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual(body);
+    expect((spy.mock.calls[0] as unknown as [string])[0]).toBe('http://tracker.internal:8080/api/llm-keys');
+
+    const { token: pur } = await loginAs(MARCUS);
+    expect((await api('GET', '/api/tracker/llm-keys', { token: pur, env: TRACKER_ENV })).status).toBe(403);
+  });
+
+  it("relays the tracker's 409 for a model whose provider it has no key for", async () => {
+    stubTracker(409, { error: 'No Anthropic key on the tracker' });
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ error: string }>('PUT', '/api/tracker/settings/llm_model', {
+      token, env: TRACKER_ENV, body: { value: 'anthropic:claude-sonnet-5-5' },
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe('No Anthropic key on the tracker');
   });
 
   it('forwards the live model setting by key and relays what the tracker stored', async () => {

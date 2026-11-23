@@ -3,7 +3,9 @@ import { AI_FEATURES, isAiModelsSetting, isModelRef, type AiFeature, type AiMode
 import { useT } from '../../../lib/i18n';
 import { api } from '../../../lib/api';
 import { handleFetchError } from '../../../lib/errorToast';
-import { loadAiProviders, removeAiKey, saveAiKey, type AiModel, type AiProviderStatus } from '../../../lib/aiModels';
+import {
+  loadAiProviders, READS_IMAGES, removeAiKey, resyncAiKey, saveAiKey, type AiProviderStatus,
+} from '../../../lib/aiModels';
 import { ProviderModelSelect, useAiProviders } from '../../../components/ProviderModelSelect';
 
 // ─── AI models ────────────────────────────────────────────────────────────────
@@ -18,9 +20,6 @@ const FEATURE_LABEL: Record<AiFeature, string> = {
   scan: 'aiFeatureScan', receipt: 'aiFeatureReceipt', paypal: 'aiFeaturePaypal', serial: 'aiFeatureSerial',
 };
 
-// Every feature here sends a photo.
-const READS_IMAGES = (m: AiModel) => m.inputModalities.includes('image') && m.outputModalities.includes('text');
-
 const EMPTY: AiModelsSetting = { default: null };
 
 export function ProviderKeyRow({ p, canStore, onChanged }: {
@@ -31,16 +30,18 @@ export function ProviderKeyRow({ p, canStore, onChanged }: {
   const { t } = useT();
   // Never pre-filled: the page only ever knows the last four characters.
   const [key, setKey] = useState('');
-  const [busy, setBusy] = useState<'save' | 'remove' | null>(null);
+  const [busy, setBusy] = useState<'save' | 'remove' | 'sync' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [trackerError, setTrackerError] = useState<string | null>(null);
 
-  async function run(kind: 'save' | 'remove') {
+  async function run(kind: 'save' | 'remove' | 'sync') {
     setBusy(kind);
     setError(null);
     try {
-      const r = kind === 'save' ? await saveAiKey(p.id, key.trim()) : await removeAiKey(p.id);
-      setKey('');
+      const r = kind === 'save' ? await saveAiKey(p.id, key.trim())
+        : kind === 'remove' ? await removeAiKey(p.id)
+        : await resyncAiKey(p.id);
+      if (kind !== 'sync') setKey('');
       setTrackerError(r.trackerSynced ? null : (r.trackerError ?? ''));
       onChanged();
     } catch (e) {
@@ -53,7 +54,9 @@ export function ProviderKeyRow({ p, canStore, onChanged }: {
   const status = p.source === 'ui'
     ? t('aiKeySetHere', { last4: p.last4 ?? '' })
     : p.source === 'env' ? t('aiKeyFromEnv') : t('aiProviderNoKey');
-  const unsynced = trackerError !== null || (p.source === 'ui' && p.trackerSynced === false);
+  // Read from the server unless this row's last action just answered: a
+  // removal the tracker missed leaves no key row, only trackerSynced false.
+  const unsynced = trackerError !== null || p.trackerSynced === false;
 
   return (
     <div className="field" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
@@ -85,7 +88,15 @@ export function ProviderKeyRow({ p, canStore, onChanged }: {
         )}
       </div>
       {error && <div className="help rt-help-invalid" role="alert">{error}</div>}
-      {unsynced && <div className="help rt-help-invalid">{t('aiKeyTrackerUnsynced')}</div>}
+      {p.unreadable && <div className="help rt-help-invalid">{t('aiKeyUnreadable')}</div>}
+      {unsynced && (
+        <div className="help rt-help-invalid" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>{p.source === 'ui' ? t('aiKeyTrackerUnsynced') : t('aiKeyTrackerRemovalUnsynced')}</span>
+          <button className="btn sm" disabled={busy !== null} onClick={() => run('sync')}>
+            {busy === 'sync' ? t('aiKeyRetrying') : t('aiKeyRetrySync')}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -101,6 +112,9 @@ export function AiModelsPanel() {
   const [draft, setDraft] = useState<AiModelsSetting>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Save stays off until the stored setting has loaded: a draft built on the
+  // empty placeholder would overwrite every model saved there.
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     loadAiProviders().then(r => { setEnvModel(r.envModel); setCanStore(r.canStore); }).catch(() => {});
@@ -109,6 +123,7 @@ export function AiModelsPanel() {
         const v = isAiModelsSetting(settings.ai_models) ? settings.ai_models : EMPTY;
         setSaved(v);
         setDraft(v);
+        setLoaded(true);
       })
       .catch(handleFetchError);
   }, []);
@@ -120,6 +135,7 @@ export function AiModelsPanel() {
   const dirty = keys.some(k => (draft[k] ?? null) !== (saved[k] ?? null));
 
   function save() {
+    if (!loaded) return;
     // Only the keys that hold something: an all-default setting is {default: null}.
     const body: AiModelsSetting = { default: draft.default ?? null };
     for (const f of AI_FEATURES) if (draft[f]) body[f] = draft[f];
@@ -188,7 +204,7 @@ export function AiModelsPanel() {
             <button className="btn" disabled={!dirty || saving} onClick={() => { setDraft(saved); setError(null); }}>
               {t('cancel')}
             </button>
-            <button className="btn primary" disabled={!dirty || saving || bad.length > 0} onClick={save}>
+            <button className="btn primary" disabled={!loaded || !dirty || saving || bad.length > 0} onClick={save}>
               {t('save')}
             </button>
           </div>
