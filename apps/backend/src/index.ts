@@ -285,6 +285,12 @@ const isUploadPath = (path: string): boolean =>
   path === '/api/scan/payment' ||
   path === '/api/scan/serial' ||
   /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path) ||
+  // Order-level files on a sell order, and the receipt photo or PDF behind an
+  // accounting entry, are the same multipart uploads checked against the
+  // workspace upload limits in the handler.
+  /^\/api\/sell-orders\/[^/]+\/attachments$/.test(path) ||
+  /^\/api\/accounting\/entries\/[^/]+\/attachments$/.test(path) ||
+  path === '/api/accounting/scan-receipt' ||
   // A line photo comes straight off a phone camera at several MB, uncompressed.
   // Left under the JSON cap it 413s before the handler that would have checked
   // it against the upload limits ever runs.
