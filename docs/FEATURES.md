@@ -3371,7 +3371,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   catalogue (`GET /api/ai/models`) and keeps it for an hour. Since v1.474.0
   both fields are a provider dropdown and a model dropdown, so the evaluator
   can run on Claude or OpenAI directly as well as through OpenRouter. After
-  v1.475.0 a provider can be picked there only when the tracker itself holds
+  v1.475.1 a provider can be picked there only when the tracker itself holds
   a key for it (one pasted on Settings ▸ AI models that reached it, or the
   tracker's own env var), as the tracker reports through `GET
   /api/tracker/llm-keys`. An older or unreachable tracker counts only pasted
@@ -4716,7 +4716,7 @@ inventory search, sell-order draft creation.
     as its last four characters; Remove deletes it. A pasted key wins over
     the server's env var, which still works as a fallback. Each save is
     pushed to the Reddit tracker, whose workers use it within a minute.
-    After v1.475.0 the key is stored before the push, and Remove pushes the
+    Since v1.475.1 the key is stored before the push, and Remove pushes the
     removal before deleting; when the tracker can't be reached the row says
     so, the removal is remembered, and **Retry sync** pushes it again
     (`POST /api/ai/keys/:provider/sync`). Remove is refused while a model
@@ -4913,7 +4913,10 @@ inventory search, sell-order draft creation.
 > or set as env vars. With no model chosen, reads use the server's
 > `AI_MODEL` (`OPENROUTER_OCR_MODEL` is still read as a fallback name), which
 > defaults to **`openai/gpt-6-luna`** through OpenRouter (v1.181.0, RS-115;
-> `google/gemini-2.5-flash` before). It reads 300 dpi flatbed scans reliably
+> `google/gemini-2.5-flash` before). When that model's provider has no key,
+> reads fall back to a default model of a provider that has one
+> (`openai:gpt-6-luna`, then `anthropic:claude-sonnet-5-5`; v1.475.1). It
+> reads 300 dpi flatbed scans reliably
 > but is weaker than Gemini on blurry/low-resolution images. With no key at
 > all, dev and CI use a deterministic stub and production refuses the read.
 > Switch models on that page, with no deploy.
