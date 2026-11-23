@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { modelMeta, TEXT_JSON_MODEL, type AiModel } from './aiModels';
+import {
+  modelMeta, modelShapeHintKey, modelsFor, preselectModel, READS_IMAGES, TEXT_JSON_MODEL, type AiModel,
+} from './aiModels';
 
 const t = (key: string, vars?: Record<string, string | number>) =>
   key + (vars ? JSON.stringify(vars) : '');
@@ -41,5 +43,39 @@ describe('TEXT_JSON_MODEL', () => {
     expect(TEXT_JSON_MODEL(model({}))).toBe(true);
     expect(TEXT_JSON_MODEL(model({ structuredOutputs: false }))).toBe(false);
     expect(TEXT_JSON_MODEL(model({ outputModalities: ['image'] }))).toBe(false);
+  });
+});
+
+describe('which models a provider dropdown offers and preselects', () => {
+  const catalogue = [
+    model({ id: '~openai/gpt-latest', inputModalities: ['text', 'image'] }),
+    model({ id: 'openai/gpt-4o-mini', inputModalities: ['text'] }),
+    model({ id: 'openai/gpt-6-luna', inputModalities: ['text', 'image'] }),
+    model({ id: 'openai:o3-mini', provider: 'openai', inputModalities: ['text'], structuredOutputs: false }),
+    model({ id: 'openai:gpt-6-luna', provider: 'openai', inputModalities: ['text', 'image'] }),
+  ];
+
+  it('never lists an id a setting cannot hold, such as an OpenRouter ~alias', () => {
+    expect(catalogue.filter(modelsFor('openrouter')).map(m => m.id)).toEqual(['openai/gpt-4o-mini', 'openai/gpt-6-luna']);
+  });
+
+  it("preselects the first model the row's filter vouches for", () => {
+    expect(preselectModel(catalogue, 'openrouter', READS_IMAGES)).toBe('openai/gpt-6-luna');
+    expect(preselectModel(catalogue, 'openai', READS_IMAGES)).toBe('openai:gpt-6-luna');
+    expect(preselectModel(catalogue, 'openai', TEXT_JSON_MODEL)).toBe('openai:gpt-6-luna');
+  });
+
+  it('preselects nothing without a filter, or when no model passes it', () => {
+    expect(preselectModel(catalogue, 'openrouter')).toBe('');
+    expect(preselectModel(catalogue, 'anthropic', READS_IMAGES)).toBe('');
+    expect(preselectModel(null, 'openai', READS_IMAGES)).toBe('');
+  });
+});
+
+describe('modelShapeHintKey', () => {
+  it('explains the shape of the provider the ref names', () => {
+    expect(modelShapeHintKey('gpt-4o')).toBe('trkModelInvalid');
+    expect(modelShapeHintKey('anthropic:claude/sonnet')).toBe('trkModelInvalidDirect');
+    expect(modelShapeHintKey('openai:a b')).toBe('trkModelInvalidDirect');
   });
 });

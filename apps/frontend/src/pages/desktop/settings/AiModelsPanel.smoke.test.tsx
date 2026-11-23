@@ -37,6 +37,20 @@ describe('a provider key row', () => {
     expect(html).toContain('aiKeyTrackerUnsynced');
   });
 
+  it('offers a retry for a key, or a removal, the tracker missed', () => {
+    const missedKey = row({ configured: true, source: 'ui', last4: 'ab12', trackerSynced: false });
+    expect(missedKey).toContain('aiKeyRetrySync');
+    expect(missedKey).not.toContain('aiKeyTrackerRemovalUnsynced');
+    const missedRemoval = row({ source: null, trackerSynced: false });
+    expect(missedRemoval).toContain('aiKeyTrackerRemovalUnsynced');
+    expect(missedRemoval).toContain('aiKeyRetrySync');
+    expect(row({ source: 'env', configured: true })).not.toContain('aiKeyRetrySync');
+  });
+
+  it('says when a saved key cannot be read here', () => {
+    expect(row({ source: 'ui', last4: 'ab12', unreadable: true, trackerSynced: true })).toContain('aiKeyUnreadable');
+  });
+
   it('locks the field when the server cannot store keys', () => {
     expect(row({}, false)).toMatch(/id="ai-key-anthropic"[^>]*disabled=""/);
   });
@@ -76,5 +90,18 @@ describe('ProviderModelSelect', () => {
     const html = render('', 'Default (x)');
     expect(html).toMatch(/<option value="" selected="">Default \(x\)<\/option>/);
     for (const p of ['openrouter', 'anthropic', 'openai']) expect(html).toContain(`<option value="${p}"`);
+  });
+
+  it("marks a provider by the keys the caller passes, such as the tracker's", () => {
+    const html = renderToString(
+      <ProviderModelSelect id="m" value="" onChange={() => undefined} noKeyText="no key on the tracker"
+        providers={[
+          { id: 'openrouter', label: 'OpenRouter', configured: true, source: 'env', last4: null, trackerSynced: null, keyName: '' },
+          { id: 'anthropic', label: 'Anthropic', configured: false, source: null, last4: null, trackerSynced: null, keyName: '' },
+          { id: 'openai', label: 'OpenAI', configured: false, source: null, last4: null, trackerSynced: null, keyName: '' },
+        ]} />,
+    );
+    expect(html).toMatch(/<option value="anthropic" disabled="">[^<]*(<!-- -->[^<]*)*— no key on the tracker<\/option>/);
+    expect(html).toMatch(/<option value="openrouter">OpenRouter(<!-- -->)*<\/option>/);
   });
 });

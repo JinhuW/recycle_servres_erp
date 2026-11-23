@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import { useAiModels } from '../../components/ModelPicker';
-import { ProviderModelSelect } from '../../components/ProviderModelSelect';
+import { ProviderModelSelect, useTrackerAiProviders } from '../../components/ProviderModelSelect';
 import { Skeleton } from '../../components/Skeleton';
+import { modelShapeHintKey } from '../../lib/aiModels';
 import { ApiError } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { matchesTerms, queryTerms } from '../../lib/fleetView';
@@ -877,19 +878,28 @@ function ModelModal({ model, onClose, onSaved, onError }: {
   const { t } = useT();
   const [value, setValue] = useState(model);
   const [saving, setSaving] = useState(false);
+  // The tracker's 409 (no key there for this provider), for the model it named.
+  const [refused, setRefused] = useState<{ model: string; why: string } | null>(null);
   const { models } = useAiModels();
+  const trackerProviders = useTrackerAiProviders();
   const next = value.trim();
   const problem = evaluatorModelProblem(next, models);
   const hint = next === '' ? null
-    : problem === 'shape' ? t('trkModelInvalid')
+    : problem === 'shape' ? t(modelShapeHintKey(next))
     : problem === 'unlisted' ? t('trkModelUnlisted')
+    : refused?.model === next ? refused.why
     : null;
-  const canSave = problem === null && next !== model;
+  const canSave = problem === null && next !== model && refused?.model !== next;
 
   function save() {
     if (!canSave || saving) return;
     setSaving(true);
-    trackerApi.setModel(next).then(onSaved).catch(onError).finally(() => setSaving(false));
+    trackerApi.setModel(next).then(onSaved)
+      .catch((err: unknown) => {
+        if (err instanceof ApiError && err.status === 409) setRefused({ model: next, why: err.message });
+        else onError(err);
+      })
+      .finally(() => setSaving(false));
   }
 
   return (
@@ -901,6 +911,7 @@ function ModelModal({ model, onClose, onSaved, onError }: {
         <div className="field">
           <label className="label" htmlFor="trk-model">{t('trkSetModel')}</label>
           <ProviderModelSelect id="trk-model" value={value} onChange={setValue} filter={EVALUATOR_MODEL}
+            providers={trackerProviders} noKeyText={t('aiProviderNoTrackerKey')}
             invalid={hint !== null} unavailableText={t('trkModelsUnavailable')} />
           <span className={`help${hint !== null ? ' rt-help-invalid' : ''}`}>
             {hint ?? t('trkModelHelp')}
