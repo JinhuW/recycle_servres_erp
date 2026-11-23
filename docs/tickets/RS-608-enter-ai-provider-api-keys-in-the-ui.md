@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-23
 reporter: jinhu
 branch: session/ai-keys-ui
-pr:
+pr: 1246
 version: 1.475.0
 related: [RS-607]
 ---
