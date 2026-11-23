@@ -216,7 +216,9 @@ describe('PATCH /api/inventory/:id — audits what landed', () => {
     expect(line, 'seed has no editable line').toBeDefined();
     const id = line!.id;
     await sql`UPDATE order_lines SET part_number = 'PN-KEEP', sell_price = 12.50 WHERE id = ${id}`;
-    await sql`DELETE FROM inventory_events WHERE order_line_id = ${id}`;
+    // inventory_events is append-only, so compare against what was there before.
+    const [before] = await sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM inventory_events WHERE order_line_id = ${id}`;
 
     const r = await api('PATCH', `/api/inventory/${id}`, {
       token, body: { partNumber: null, sellPrice: 12.5 },
@@ -226,8 +228,9 @@ describe('PATCH /api/inventory/:id — audits what landed', () => {
     const [row] = await sql<{ part_number: string | null }[]>`
       SELECT part_number FROM order_lines WHERE id = ${id}`;
     expect(row!.part_number).toBe('PN-KEEP');
-    const events = await sql`SELECT kind, detail FROM inventory_events WHERE order_line_id = ${id}`;
-    expect(events).toEqual([]);
+    const [after] = await sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM inventory_events WHERE order_line_id = ${id}`;
+    expect(after!.n).toBe(before!.n);
   });
 
   it('still logs a part number that did change, as stored', async () => {
@@ -241,12 +244,12 @@ describe('PATCH /api/inventory/:id — audits what landed', () => {
     `;
     const id = line!.id;
     await sql`UPDATE order_lines SET part_number = 'PN-OLD' WHERE id = ${id}`;
-    await sql`DELETE FROM inventory_events WHERE order_line_id = ${id}`;
+    const [{ at }] = await sql<{ at: Date }[]>`SELECT clock_timestamp() AS at`;
 
     const r = await api('PATCH', `/api/inventory/${id}`, { token, body: { partNumber: 'PN-NEW' } });
     expect(r.status).toBe(200);
     const events = await sql<{ kind: string; detail: { field: string; from: string | null; to: string | null } }[]>`
-      SELECT kind, detail FROM inventory_events WHERE order_line_id = ${id}`;
+      SELECT kind, detail FROM inventory_events WHERE order_line_id = ${id} AND created_at >= ${at}`;
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ kind: 'edited', detail: { field: 'partNumber', from: 'PN-OLD', to: 'PN-NEW' } });
   });
