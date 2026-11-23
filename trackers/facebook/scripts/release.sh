@@ -5,7 +5,7 @@
 #   scripts/release.sh minor          # 0.2.0 -> 0.3.0
 #   scripts/release.sh major          # 0.2.0 -> 1.0.0
 #   scripts/release.sh 0.4.2          # exactly this
-#   scripts/release.sh --dry-run minor
+#   scripts/release.sh --dry-run minor   # the flag may come anywhere
 #
 # One version covers the whole system, because the whole system ships together:
 # the coordinator, the poster, the configs, and the pinned revision of the
@@ -28,10 +28,8 @@ cd "$ROOT"
 # mix with the ERP's own v* release tags.
 TAG_PREFIX="facebook-tracker/v"
 
-DRY=""
-if [ "${1:-}" = "--dry-run" ]; then DRY=1; shift; fi
-BUMP="${1:-}"
-[ -n "$BUMP" ] || { echo "usage: $0 [--dry-run] <major|minor|patch|X.Y.Z>" >&2; exit 2; }
+. "$ROOT/scripts/release-args.sh"
+parse_release_args "$@" || exit 2
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
@@ -99,6 +97,9 @@ sh scripts/tests/test-version-gate.sh
 
 step "deploy filter still protects the VM"
 sh scripts/tests/test-deploy-filter.sh
+
+step "release arguments still parse"
+sh scripts/tests/test-release-args.sh
 
 step "vendored checkouts match VENDOR.md"
 sh scripts/check-vendor.sh
