@@ -366,6 +366,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     paySaveFirstRmb: 'Save to move this PO’s cost to the RMB Flow, then record the payment here.',
     payPayerLocked: "A manager has booked this PO's cost, so only a manager can change who paid.",
     totalCost: 'Total cost',
+    lotTotalRounds: 'Saves as {saved} ({qty} × {unit}): unit cost is kept to the cent.',
     totalRevenue: 'Total revenue',
     resumeDraftTitle: 'Continue a draft?',
     startNewOrder: 'Start a new order',
