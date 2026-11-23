@@ -45,15 +45,42 @@ export function loadAiModels(): Promise<AiModel[]> {
   return inflight;
 }
 
-export type AiProviderStatus = { id: AiProviderId; label: string; configured: boolean; keyName: string };
+export type AiProviderStatus = {
+  id: AiProviderId;
+  label: string;
+  configured: boolean;
+  /** 'ui': pasted on Settings ▸ AI models; 'env': the server's env var. */
+  source: 'ui' | 'env' | null;
+  last4: string | null;
+  /** For a pasted key: whether the Reddit tracker has it too. */
+  trackerSynced: boolean | null;
+  keyName: string;
+};
 
-let providers: Promise<{ providers: AiProviderStatus[]; envModel: string }> | null = null;
+export type AiProvidersInfo = { providers: AiProviderStatus[]; envModel: string; canStore: boolean };
+
+let providers: Promise<AiProvidersInfo> | null = null;
 
 /** Which providers have a key on the server; fetched once per session. */
-export function loadAiProviders(): Promise<{ providers: AiProviderStatus[]; envModel: string }> {
-  providers ??= api.get<{ providers: AiProviderStatus[]; envModel: string }>('/api/ai/providers')
+export function loadAiProviders(): Promise<AiProvidersInfo> {
+  providers ??= api.get<AiProvidersInfo>('/api/ai/providers')
     .catch((e: unknown) => { providers = null; throw e; });
   return providers;
+}
+
+export type KeySaveResult = { ok: true; last4?: string; trackerSynced: boolean; trackerError?: string };
+
+/** Tests and saves a provider key; the model list and key status reload after. */
+export async function saveAiKey(provider: AiProviderId, key: string): Promise<KeySaveResult> {
+  const r = await api.put<KeySaveResult>(`/api/ai/keys/${provider}`, { key });
+  resetAiModels();
+  return r;
+}
+
+export async function removeAiKey(provider: AiProviderId): Promise<KeySaveResult> {
+  const r = await api.delete<KeySaveResult>(`/api/ai/keys/${provider}`);
+  resetAiModels();
+  return r;
 }
 
 /** Called on logout, beside the other per-session caches. */

@@ -1,5 +1,4 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { Env } from '../../types';
 import { EmptyAnswerError, toBase64, type AiModel, type AiUsage, type LlmProvider } from './types';
 
 // USD per million tokens (input, output). Anthropic's API reports tokens, not
@@ -24,9 +23,9 @@ function priceOf(model: string): [number, number] {
   return PRICES[model] ?? UNKNOWN_PRICE;
 }
 
-function client(env: Env): Anthropic {
+function client(apiKey: string | undefined): Anthropic {
   return new Anthropic({
-    apiKey: env.ANTHROPIC_API_KEY,
+    apiKey,
     // Retries and the deadline belong to ai/llm.ts, which runs them the same
     // way for every provider.
     maxRetries: 0,
@@ -54,10 +53,8 @@ function toParams(turns: Parameters<LlmProvider['complete']>[1]['turns']): Anthr
 
 export const anthropicProvider: LlmProvider = {
   id: 'anthropic',
-  keyName: 'ANTHROPIC_API_KEY',
-  configured: (env) => !!env.ANTHROPIC_API_KEY,
 
-  async complete(env, req) {
+  async complete(apiKey, req) {
     const messages = toParams(req.turns);
     const usage: AiUsage = { promptTokens: 0, completionTokens: 0, costUsd: 0 };
     const [inPerM, outPerM] = priceOf(req.model);
@@ -67,7 +64,7 @@ export const anthropicProvider: LlmProvider = {
     for (let leg = 0; leg < 3; leg++) {
       let msg: Anthropic.Message;
       try {
-        msg = await client(env).messages.create(
+        msg = await client(apiKey).messages.create(
           {
             model: req.model,
             max_tokens: req.maxTokens,
@@ -100,9 +97,9 @@ export const anthropicProvider: LlmProvider = {
     return { text, usage };
   },
 
-  async listModels(env) {
+  async listModels(apiKey) {
     const out: AiModel[] = [];
-    for await (const m of client(env).models.list({ limit: 100 })) {
+    for await (const m of client(apiKey).models.list({ limit: 100 })) {
       if (m.lifecycle === 'retired') continue;
       const price = PRICES[m.id];
       out.push({

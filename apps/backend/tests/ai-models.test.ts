@@ -179,7 +179,7 @@ describe('switching models (/api/ai/providers, ai_models)', () => {
     });
     const noKey = await patch({ default: 'anthropic:claude-sonnet-5-5' });
     expect(noKey.status).toBe(400);
-    expect(noKey.body.error).toMatch(/ANTHROPIC_API_KEY/);
+    expect(noKey.body.error).toMatch(/No Anthropic \(Claude\) API key/);
     expect((await patch({ default: 'not a model' })).status).toBe(400);
     expect((await patch({ default: null, bogus: 'openai/gpt-6-luna' })).status).toBe(400);
     expect((await patch({ default: null, scan: 'openai/gpt-6-luna' })).status).toBe(200);

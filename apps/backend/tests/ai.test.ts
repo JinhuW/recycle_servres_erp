@@ -238,10 +238,10 @@ describe('aiImageJson request', () => {
 });
 
 describe('pickProvider', () => {
-  it('stub when no OpenRouter key', () => {
-    expect(pickProvider({} as Env)).toBe('stub');
+  it('stub when no OpenRouter key', async () => {
+    expect(await pickProvider({} as Env)).toBe('stub');
   });
-  it('openrouter when key present', () => {
-    expect(pickProvider({ OPENROUTER_API_KEY: 'k' } as Env)).toBe('openrouter');
+  it('openrouter when key present', async () => {
+    expect(await pickProvider({ OPENROUTER_API_KEY: 'k' } as Env)).toBe('openrouter');
   });
 });

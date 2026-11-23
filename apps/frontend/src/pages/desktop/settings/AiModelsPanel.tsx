@@ -3,14 +3,16 @@ import { AI_FEATURES, isAiModelsSetting, isModelRef, type AiFeature, type AiMode
 import { useT } from '../../../lib/i18n';
 import { api } from '../../../lib/api';
 import { handleFetchError } from '../../../lib/errorToast';
-import { loadAiProviders, type AiModel } from '../../../lib/aiModels';
+import { loadAiProviders, removeAiKey, saveAiKey, type AiModel, type AiProviderStatus } from '../../../lib/aiModels';
 import { ProviderModelSelect, useAiProviders } from '../../../components/ProviderModelSelect';
 
 // ─── AI models ────────────────────────────────────────────────────────────────
-// Which provider and model each image read uses, stored as the `ai_models`
-// workspace setting and read by the backend's ai/llm.ts on every call (cached
-// ~30 s). Provider keys stay in the server's env; this page only shows which
-// are set. A draft until Save, because the model field takes typed ids too.
+// The providers' API keys, and which provider and model each image read uses.
+// A pasted key is tested, stored sealed, pushed to the Reddit tracker, and
+// shown again only as its last four characters; it wins over the server's env
+// var. Models are the `ai_models` workspace setting, read by the backend's
+// ai/llm.ts on every call (cached ~30 s), and a draft until Save because the
+// model field takes typed ids too.
 
 const FEATURE_LABEL: Record<AiFeature, string> = {
   scan: 'aiFeatureScan', receipt: 'aiFeatureReceipt', paypal: 'aiFeaturePaypal', serial: 'aiFeatureSerial',
@@ -21,9 +23,79 @@ const READS_IMAGES = (m: AiModel) => m.inputModalities.includes('image') && m.ou
 
 const EMPTY: AiModelsSetting = { default: null };
 
+export function ProviderKeyRow({ p, canStore, onChanged }: {
+  p: AiProviderStatus;
+  canStore: boolean;
+  onChanged: () => void;
+}) {
+  const { t } = useT();
+  // Never pre-filled: the page only ever knows the last four characters.
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState<'save' | 'remove' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [trackerError, setTrackerError] = useState<string | null>(null);
+
+  async function run(kind: 'save' | 'remove') {
+    setBusy(kind);
+    setError(null);
+    try {
+      const r = kind === 'save' ? await saveAiKey(p.id, key.trim()) : await removeAiKey(p.id);
+      setKey('');
+      setTrackerError(r.trackerSynced ? null : (r.trackerError ?? ''));
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const status = p.source === 'ui'
+    ? t('aiKeySetHere', { last4: p.last4 ?? '' })
+    : p.source === 'env' ? t('aiKeyFromEnv') : t('aiProviderNoKey');
+  const unsynced = trackerError !== null || (p.source === 'ui' && p.trackerSynced === false);
+
+  return (
+    <div className="field" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <strong style={{ fontSize: 13 }}>{p.label}</strong>
+        <span className={`chip ${p.configured ? 'pos' : 'muted'}`} title={p.keyName}>{status}</span>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          className="input mono"
+          type="password"
+          autoComplete="off"
+          aria-label={t('aiKeyFor', { provider: p.label })}
+          id={`ai-key-${p.id}`}
+          placeholder={p.source === 'ui' ? t('aiKeyReplace') : t('aiKeyPaste')}
+          value={key}
+          disabled={!canStore || busy !== null}
+          onChange={e => setKey(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && key.trim()) void run('save'); }}
+          style={{ flex: 1 }}
+        />
+        <button className="btn primary" disabled={!canStore || !key.trim() || busy !== null} onClick={() => run('save')}>
+          {busy === 'save' ? t('aiKeyTesting') : t('save')}
+        </button>
+        {p.source === 'ui' && (
+          <button className="btn" disabled={busy !== null} onClick={() => run('remove')}>
+            {t('aiKeyRemove')}
+          </button>
+        )}
+      </div>
+      {error && <div className="help rt-help-invalid" role="alert">{error}</div>}
+      {unsynced && <div className="help rt-help-invalid">{t('aiKeyTrackerUnsynced')}</div>}
+    </div>
+  );
+}
+
 export function AiModelsPanel() {
   const { t } = useT();
-  const providers = useAiProviders();
+  // Bumped after a key changes, to re-read the key status and the model lists.
+  const [version, setVersion] = useState(0);
+  const providers = useAiProviders(version);
+  const [canStore, setCanStore] = useState(true);
   const [envModel, setEnvModel] = useState('');
   const [saved, setSaved] = useState<AiModelsSetting>(EMPTY);
   const [draft, setDraft] = useState<AiModelsSetting>(EMPTY);
@@ -31,7 +103,7 @@ export function AiModelsPanel() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadAiProviders().then(r => setEnvModel(r.envModel)).catch(() => {});
+    loadAiProviders().then(r => { setEnvModel(r.envModel); setCanStore(r.canStore); }).catch(() => {});
     api.get<{ settings: Record<string, unknown> }>('/api/workspace')
       .then(({ settings }) => {
         const v = isAiModelsSetting(settings.ai_models) ? settings.ai_models : EMPTY;
@@ -68,16 +140,16 @@ export function AiModelsPanel() {
             <div className="card-sub">{t('aiProvidersSub')}</div>
           </div>
         </div>
-        <div className="card-body" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {!canStore && <div className="help rt-help-invalid">{t('aiKeyCantStore')}</div>}
           {(providers ?? []).map(p => (
-            <span key={p.id} className={`chip ${p.configured ? 'pos' : 'muted'}`} title={p.keyName}>
-              {p.label} · {p.configured ? t('aiProviderReady') : t('aiProviderNoKey')}
-            </span>
+            <ProviderKeyRow key={p.id} p={p} canStore={canStore} onChanged={() => setVersion(v => v + 1)} />
           ))}
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 'var(--gap)' }}>
+      {/* Re-mounted after a key change so every model list is fetched again. */}
+      <div className="card" style={{ marginTop: 'var(--gap)' }} key={version}>
         <div className="card-head">
           <div>
             <div className="card-title">{t('aiModelsTitle')}</div>

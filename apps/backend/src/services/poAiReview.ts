@@ -228,7 +228,7 @@ async function reviewLines(
   const rows = await loadLines(sql, orderId);
   const lines = rows.map(toReviewLine);
   const market = await marketRefs(sql, lines);
-  const llm = pickProvider(env) !== 'stub';
+  const llm = (await pickProvider(env)) !== 'stub';
   const model = await resolveModel(env, { model: setting.model ?? undefined });
   const callOpts = { model, onUsage: budget.add };
 
@@ -309,7 +309,7 @@ export async function runPoAiReview(
     });
   }
   findings.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
-  const model = pickProvider(env) !== 'stub' ? await resolveModel(env, { model: setting.model ?? undefined }) : 'stub';
+  const model = (await pickProvider(env)) !== 'stub' ? await resolveModel(env, { model: setting.model ?? undefined }) : 'stub';
 
   await sql.begin(async (tx) => {
     // The orders row before the review row: a move or revert holds the order

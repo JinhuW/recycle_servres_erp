@@ -4,17 +4,23 @@ import { ModelPicker, useAiModels } from './ModelPicker';
 import { loadAiProviders, type AiModel, type AiProviderStatus } from '../lib/aiModels';
 import { useT } from '../lib/i18n';
 
-/** Which providers have a key; null while it loads. */
-export function useAiProviders(): AiProviderStatus[] | null {
+/** Which providers have a key; null while it loads. Bump `version` to re-read. */
+export function useAiProviders(version = 0): AiProviderStatus[] | null {
   const [list, setList] = useState<AiProviderStatus[] | null>(null);
   useEffect(() => {
     let alive = true;
     loadAiProviders()
       .then(r => { if (alive) setList(r.providers); })
       // Unknown: offer them all and let the save's 400 say which has no key.
-      .catch(() => { if (alive) setList(AI_PROVIDERS.map(id => ({ id, label: AI_PROVIDER_LABELS[id], configured: true, keyName: '' }))); });
+      .catch(() => {
+        if (alive) {
+          setList(AI_PROVIDERS.map(id => ({
+            id, label: AI_PROVIDER_LABELS[id], configured: true, source: null, last4: null, trackerSynced: null, keyName: '',
+          })));
+        }
+      });
     return () => { alive = false; };
-  }, []);
+  }, [version]);
   return list;
 }
 

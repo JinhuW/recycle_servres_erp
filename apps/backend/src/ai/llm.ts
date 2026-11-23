@@ -2,7 +2,7 @@
 // the deadline, the retry on a slow or empty turn, and the JSON re-ask. The
 // providers (./providers) only send one turn and read the answer.
 
-import { parseModelRef, type AiFeature, type AiModelsSetting } from '@recycle-erp/shared';
+import { AI_PROVIDER_LABELS, parseModelRef, type AiFeature, type AiModelsSetting } from '@recycle-erp/shared';
 import type { Env, LineCategory } from '../types';
 import type { ScanResult } from './types';
 import { getDb } from '../db';
@@ -10,6 +10,7 @@ import { getWorkspaceSetting } from '../lib/settings';
 import { log } from '../lib/log';
 import { PROVIDERS, EmptyAnswerError, type AiUsage, type Turn } from './providers';
 import { cachedPrice } from './catalogue';
+import { aiKeys, KEY_ENV } from './keys';
 import { PROMPT_BY_CATEGORY, parseModelJson, EXPECTED_FIELD_COUNT, EXPECTED_FIELDS_BY_CATEGORY } from './prompts';
 
 export type { AiUsage } from './providers';
@@ -118,7 +119,11 @@ export async function aiJson(
   const ref = await resolveModel(env, opts);
   const { provider: id, model } = parseModelRef(ref);
   const provider = PROVIDERS[id];
-  if (!provider.configured(env)) throw new Error(`${provider.keyName} is not set (model ${ref})`);
+  const found = (await aiKeys(env))[id];
+  if (!found) {
+    throw new Error(`No ${AI_PROVIDER_LABELS[id]} API key for ${ref}: add one on Settings ▸ AI models (or set ${KEY_ENV[id]})`);
+  }
+  const apiKey: string = found;
   const price = cachedPrice(ref);
 
   const attemptMs = opts.timeoutMs ?? OCR_TIMEOUT_MS;
@@ -128,7 +133,7 @@ export async function aiJson(
   async function askOnce(turns: Turn[]): Promise<string> {
     const budget = remaining();
     if (budget <= 0) throw new Error(`${provider.id}: deadline exceeded`);
-    const { text, usage } = await provider.complete(env, {
+    const { text, usage } = await provider.complete(apiKey, {
       model,
       turns,
       maxTokens: MAX_TOKENS,

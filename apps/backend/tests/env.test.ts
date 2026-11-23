@@ -34,13 +34,15 @@ describe('buildEnv', () => {
     expect(() => buildEnv({} as NodeJS.ProcessEnv)).toThrow(/JWT_SECRET/);
   });
 
-  it('throws in production when OPENROUTER_API_KEY is missing', () => {
+  // Keys can be pasted on Settings ▸ AI models, so none is needed to boot;
+  // production refuses AI reads instead of serving stub data (ai/index.ts).
+  it('boots in production without any AI provider key', () => {
     expect(() => buildEnv({
       NODE_ENV: 'production',
       DATABASE_URL: 'postgres://x',
       JWT_SECRET: PROD_SECRET,
       CORS_ALLOWED_ORIGINS: 'https://app',
-    } as NodeJS.ProcessEnv)).toThrow(/OPENROUTER_API_KEY/);
+    } as NodeJS.ProcessEnv)).not.toThrow(/API_KEY/);
   });
 
   it('does not throw outside production when OPENROUTER_API_KEY is missing', () => {

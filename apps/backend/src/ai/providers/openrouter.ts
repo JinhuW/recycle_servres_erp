@@ -1,8 +1,8 @@
-import type { Env } from '../../types';
 import { EmptyAnswerError, toBase64, type AiModel, type LlmProvider } from './types';
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const CATALOGUE_URL = 'https://openrouter.ai/api/v1/models';
+const KEY_URL = 'https://openrouter.ai/api/v1/key';
 const HEADERS = { 'HTTP-Referer': 'https://recycle-erp.local', 'X-Title': 'Recycle ERP' };
 
 type RequestTuning = {
@@ -75,10 +75,9 @@ function trim(raw: unknown): AiModel | null {
 
 export const openRouterProvider: LlmProvider = {
   id: 'openrouter',
-  keyName: 'OPENROUTER_API_KEY',
-  configured: (env) => !!env.OPENROUTER_API_KEY,
+  publicCatalogue: true,
 
-  async complete(env, req) {
+  async complete(apiKey, req) {
     // The `:online` suffix is a routing flag; the family is the model's own.
     const base = req.model.replace(/:online$/, '');
     const model = req.webSearch ? `${base}:online` : req.model;
@@ -101,7 +100,7 @@ export const openRouterProvider: LlmProvider = {
     });
     const res = await fetch(ENDPOINT, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, 'Content-Type': 'application/json', ...HEADERS },
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...HEADERS },
       body: JSON.stringify({
         model,
         max_tokens: req.maxTokens,
@@ -131,8 +130,15 @@ export const openRouterProvider: LlmProvider = {
     };
   },
 
-  // Public: no key, so dev and CI without OPENROUTER_API_KEY see the same list.
-  async listModels(_env: Env) {
+  // The catalogue is public; with a key, it is the one asked for, so a key
+  // being tested is checked by OpenRouter's key endpoint first.
+  async listModels(apiKey) {
+    if (apiKey) {
+      const check = await fetch(KEY_URL, {
+        signal: AbortSignal.timeout(10_000), headers: { ...HEADERS, Authorization: `Bearer ${apiKey}` },
+      });
+      if (!check.ok) throw new Error(`OpenRouter rejected the key (${check.status})`);
+    }
     const res = await fetch(CATALOGUE_URL, { signal: AbortSignal.timeout(10_000), headers: HEADERS });
     if (!res.ok) throw new Error(`OpenRouter answered ${res.status}`);
     const body = (await res.json()) as { data?: unknown };

@@ -3,8 +3,8 @@ import { getDb } from '../db';
 import { SAFE_UPLOAD_MIME, UPLOAD_HARD_CAP_BYTES } from '../lib/settings';
 import type { Env, User } from '../types';
 import { isPoAiReviewSetting } from '../services/poAiReview';
-import { isAiModelsSetting, parseModelRef } from '@recycle-erp/shared';
-import { PROVIDERS } from '../ai/providers';
+import { AI_PROVIDER_LABELS, isAiModelsSetting, parseModelRef } from '@recycle-erp/shared';
+import { aiKeys } from '../ai/keys';
 import { invalidateAiModelsSetting } from '../ai/llm';
 
 const workspace = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -62,10 +62,14 @@ workspace.patch('/', async (c) => {
   // now rather than at the next scan.
   const refs = Object.values((body.ai_models ?? {}) as Record<string, unknown>)
     .filter((r): r is string => typeof r === 'string');
-  for (const ref of refs) {
-    const p = PROVIDERS[parseModelRef(ref).provider];
-    if (!p.configured(c.env)) return c.json({ error: `${p.keyName} is not set, so ${ref} can't be used` }, 400);
+  if (refs.length > 0) {
+    const keys = await aiKeys(c.env);
+    for (const ref of refs) {
+      const p = parseModelRef(ref).provider;
+      if (!keys[p]) return c.json({ error: `No ${AI_PROVIDER_LABELS[p]} API key is set, so ${ref} can't be used` }, 400);
+    }
   }
+
   const sql = getDb(c.env);
   // All-or-nothing: a multi-key PATCH must not leave settings half-applied
   // if one upsert fails midway.

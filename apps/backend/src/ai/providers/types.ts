@@ -1,5 +1,4 @@
 import type { AiProviderId } from '@recycle-erp/shared';
-import type { Env } from '../../types';
 
 export type AiUsage = { promptTokens: number; completionTokens: number; costUsd: number };
 
@@ -35,13 +34,15 @@ export interface AiModel {
 
 export interface LlmProvider {
   id: AiProviderId;
-  /** The env var that turns it on, for error messages. */
-  keyName: string;
-  configured(env: Env): boolean;
   /** One model turn. Throws on HTTP errors; EmptyAnswerError on no content. */
-  complete(env: Env, req: CompleteRequest): Promise<{ text: string; usage?: AiUsage }>;
-  /** Its models for the picker, ids already prefixed. */
-  listModels(env: Env): Promise<AiModel[]>;
+  complete(apiKey: string, req: CompleteRequest): Promise<{ text: string; usage?: AiUsage }>;
+  /**
+   * Its models for the picker, ids already prefixed. Also how a pasted key is
+   * tested: it costs no tokens and fails on a bad key.
+   */
+  listModels(apiKey: string | undefined): Promise<AiModel[]>;
+  /** Whether listModels works without a key (OpenRouter's catalogue is public). */
+  publicCatalogue?: boolean;
 }
 
 // A reply with no content at all, e.g. a reasoning model that spent its

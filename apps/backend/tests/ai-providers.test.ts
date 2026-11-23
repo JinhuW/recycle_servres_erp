@@ -5,27 +5,27 @@ import { pickProvider } from '../src/ai/index';
 import type { Env } from '../src/types';
 
 describe('pickProvider with several providers', () => {
-  it('stub when no provider key is set at all', () => {
-    expect(pickProvider({ AI_MODEL: 'anthropic:claude-sonnet-5-5' } as Env)).toBe('stub');
+  it('stub when no provider key is set at all', async () => {
+    expect(await pickProvider({ AI_MODEL: 'anthropic:claude-sonnet-5-5' } as Env)).toBe('stub');
   });
-  it("the env default's provider when its key is set", () => {
-    expect(pickProvider({ ANTHROPIC_API_KEY: 'a', OPENROUTER_API_KEY: 'o', AI_MODEL: 'anthropic:claude-sonnet-5-5' } as Env))
+  it("the env default's provider when its key is set", async () => {
+    expect(await pickProvider({ ANTHROPIC_API_KEY: 'a', OPENROUTER_API_KEY: 'o', AI_MODEL: 'anthropic:claude-sonnet-5-5' } as Env))
       .toBe('anthropic');
   });
-  it('whichever provider has a key when the default has none', () => {
-    expect(pickProvider({ OPENAI_API_KEY: 'k' } as Env)).toBe('openai');
+  it('whichever provider has a key when the default has none', async () => {
+    expect(await pickProvider({ OPENAI_API_KEY: 'k' } as Env)).toBe('openai');
   });
 });
 
 describe('model refs', () => {
-  it('reads a bare id as OpenRouter, so saved settings keep their meaning', () => {
+  it('reads a bare id as OpenRouter, so saved settings keep their meaning', async () => {
     expect(parseModelRef('openai/gpt-6-luna')).toEqual({ provider: 'openrouter', model: 'openai/gpt-6-luna' });
     expect(parseModelRef('google/gemini-2.5-flash:online'))
       .toEqual({ provider: 'openrouter', model: 'google/gemini-2.5-flash:online' });
     expect(parseModelRef('anthropic:claude-sonnet-5-5')).toEqual({ provider: 'anthropic', model: 'claude-sonnet-5-5' });
     expect(parseModelRef('openai:gpt-6-luna')).toEqual({ provider: 'openai', model: 'gpt-6-luna' });
   });
-  it('validates each provider by its own id shape', () => {
+  it('validates each provider by its own id shape', async () => {
     expect(isModelRef('openai/gpt-6-luna')).toBe(true);
     expect(isModelRef('openrouter:openai/gpt-6-luna')).toBe(true);
     expect(isModelRef('anthropic:claude-sonnet-5-5')).toBe(true);
@@ -99,7 +99,7 @@ describe('the Anthropic provider', () => {
 
   it('refuses to call without its key', async () => {
     await expect(aiImageJson({ AI_MODEL: 'anthropic:claude-sonnet-5-5', OPENROUTER_API_KEY: 'o' } as Env, 'p', png))
-      .rejects.toThrow(/ANTHROPIC_API_KEY is not set/);
+      .rejects.toThrow(/No Anthropic \(Claude\) API key.*ANTHROPIC_API_KEY/);
   });
 
   it('a per-call model wins over the env default', async () => {

@@ -7,7 +7,40 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('../../../lib/api', () => ({ api: { get: vi.fn(() => new Promise(() => undefined)), patch: vi.fn() } }));
 vi.mock('../../../lib/errorToast', () => ({ handleFetchError: vi.fn() }));
 
-const { AiModelsPanel } = await import('./AiModelsPanel');
+const { AiModelsPanel, ProviderKeyRow } = await import('./AiModelsPanel');
+
+describe('a provider key row', () => {
+  const row = (over: Record<string, unknown>, canStore = true) => renderToString(
+    <ProviderKeyRow
+      p={{ id: 'anthropic', label: 'Anthropic (Claude)', configured: false, source: null, last4: null, trackerSynced: null, keyName: 'ANTHROPIC_API_KEY', ...over }}
+      canStore={canStore}
+      onChanged={() => undefined}
+    />,
+  );
+
+  it('says where the key comes from, and offers Remove only for one set here', () => {
+    const ui = row({ configured: true, source: 'ui', last4: 'ab12', trackerSynced: true });
+    expect(ui).toContain('aiKeySetHere');
+    expect(ui).toContain('aiKeyRemove');
+    expect(ui).not.toContain('aiKeyTrackerUnsynced');
+
+    const env = row({ configured: true, source: 'env' });
+    expect(env).toContain('aiKeyFromEnv');
+    expect(env).not.toContain('aiKeyRemove');
+
+    expect(row({})).toContain('aiProviderNoKey');
+  });
+
+  it('never fills the key field, and warns when the tracker missed the key', () => {
+    const html = row({ configured: true, source: 'ui', last4: 'ab12', trackerSynced: false });
+    expect(html).toMatch(/type="password"[^>]*value=""/);
+    expect(html).toContain('aiKeyTrackerUnsynced');
+  });
+
+  it('locks the field when the server cannot store keys', () => {
+    expect(row({}, false)).toMatch(/id="ai-key-anthropic"[^>]*disabled=""/);
+  });
+});
 const { ProviderModelSelect } = await import('../../../components/ProviderModelSelect');
 
 describe('Settings ▸ AI models', () => {
