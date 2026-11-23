@@ -552,6 +552,9 @@ function Shell() {
     const backToDetail = returnTo === 'detail' && !!editingId;
     // Back to the products screen, the only place the form opens from.
     const doneToDetail = () => {
+      // The session is over: a save queued behind this one (a second tap
+      // while the PATCH was in flight) must drop, not add the line again.
+      captureGen.current++;
       setCapture({ phase: 'idle' });
       if (editingId) navigate(poProductsPath(editingId));
       showToast(t('savedShort'));
@@ -892,6 +895,9 @@ function Shell() {
           existingLine={existing}
           allowZeroQty={!!capture.editingId && !!existing?.id}
           onSaveLine={onSaveLine}
+          // Only an existing order's form waits on its write; a draft's moves
+          // on to the review list at once.
+          saving={capture.returnTo === 'detail' && !!capture.editingId && pendingWrites > 0}
           onCancel={cancelCapture}
           onBack={goBack}
           onRescan={rescanLine}
