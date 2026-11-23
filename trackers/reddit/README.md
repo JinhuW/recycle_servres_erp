@@ -391,7 +391,7 @@ Merging deploys nothing. Both targets are pushed by hand from this folder.
 
 **Railway — project `reddits-tracker`.** Services `Postgres`, `api`
 (`ROLE=api`, `API_PORT`, `API_TOKEN`) and one `worker` on Railway's IP range.
-Both app services build this Dockerfile through `railway.toml` and differ only
+Both app services build this Dockerfile (set in `.railway/railway.ts`) and differ only
 in env vars. Read the Railway link hazard under *Deploying* in
 [AGENTS.md](AGENTS.md) first, then:
 
@@ -460,7 +460,7 @@ a different provider.
 
 ```
 Dockerfile         one image for every role; node is PID 1
-railway.toml       Railway build config, shared by api and worker
+.railway/railway.ts  Railway project config: both services use the Dockerfile builder
 migrations/        raw SQL, applied in order, once each
 scripts/
   migrate.ts       migration runner (advisory-locked, safe from any number of VMs)
