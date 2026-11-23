@@ -184,10 +184,11 @@ backward-compatible until the ERP release reaches `main`.
   since the latest `v*` tag without a bump, and auto-tags `v<version>` on
   green. Docs-only pushes, and pushes that only touch `trackers/`, are exempt.
 - Common entry points from the repo root:
-  - `pnpm dev` — runs every workspace package's `dev` script in parallel:
-    backend (`:8787`), frontend (`:5173`) and the fleet agent, which exits
-    at once unless `FLEET_URL`, `FLEET_HOST_ID` and `FLEET_HOST_TOKEN` are
-    set. `pnpm dev:backend` and `pnpm dev:frontend` run one each.
+  - `pnpm dev` — runs the backend (`:8787`) and the frontend (`:5173`) in
+    parallel. `pnpm dev:backend` and `pnpm dev:frontend` run one each. The
+    fleet agent is left out because it exits at once without `FLEET_URL`,
+    `FLEET_HOST_ID` and `FLEET_HOST_TOKEN`, and pnpm then stops its
+    siblings; run it on its own with `pnpm --filter recycle-erp-fleet-agent dev`.
   - `pnpm typecheck` / `pnpm build` — recursive across the workspace.
   - `pnpm db:migrate` / `pnpm db:seed` / `pnpm db:reset` — proxy to backend
     scripts.
