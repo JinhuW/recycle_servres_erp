@@ -37,7 +37,6 @@ const SPEC_PATCH_FIELDS = [
   'brand', 'capacity', 'generation', 'type', 'classification',
   'rank', 'speed', 'interface', 'formFactor', 'description',
 ] as const;
-const IS_SPEC_PATCH_FIELD = new Set<string>(SPEC_PATCH_FIELDS);
 
 // An event's detail as a purchaser may read it. Sell and transfer orders are
 // manager-only, so their ids stay out, and an edit to unit_cost keeps its row
@@ -1555,13 +1554,15 @@ inventory.patch('/:id', async (c) => {
         chip_number    = CASE WHEN ${chipAfter !== undefined ? 1 : 0}::int = 1 THEN ${chipAfter ?? null} ELSE chip_number END
       WHERE id = ${id}
     `;
+    // Several columns above COALESCE a null to "no change", so the body is not
+    // what landed; the audit below and the purchaser revert both diff this row.
+    const [after] = await tx<Record<string, unknown>[]>`SELECT * FROM order_lines WHERE id = ${id}`;
     // A purchaser's qty or cost edit sends a submitted order back to Draft, as
     // the PO PATCH does: those are what the review checked. Spec, status and
     // sell price stay the inventory page's ordinary edits, and past review the
     // goods are closed-book for everyone (doneLocked above). Judged on what
     // landed, so an echoed value is no edit.
     if (u.role !== 'manager' && touchesGoods && parent && parent.lifecycle !== 'draft') {
-      const [after] = await tx<Record<string, unknown>[]>`SELECT * FROM order_lines WHERE id = ${id}`;
       const changes = diff(before, after!, GOODS_FIELDS);
       if (changes.length) {
         const reverted = await revertOrderToDraftTx(tx, orderId, u, parent.lifecycle);
@@ -1585,12 +1586,11 @@ inventory.patch('/:id', async (c) => {
     }
     // One event per changed field — keeps the timeline easy to skim.
     for (const f of PATCH_AUDIT_FIELDS) {
-      const raw = (body as Record<string, unknown>)[f];
-      if (raw === undefined) continue;
+      if ((body as Record<string, unknown>)[f] === undefined) continue;
       // Compare and record what actually landed in the column, not what the
-      // client sent — otherwise clearing a field that was already NULL logs a
-      // phantom `null → ''` edit.
-      const newVal = IS_SPEC_PATCH_FIELD.has(f) ? specVal(raw as string | null) : raw;
+      // client sent: a null the UPDATE COALESCEd away, a sell price of 0 that
+      // stored NULL, or '12.5' against a stored '12.50' is no edit.
+      const newVal = after![PATCH_AUDIT_COL[f]];
       const oldVal = before[PATCH_AUDIT_COL[f]];
       if (String(oldVal) === String(newVal)) continue;
       const kind = f === 'status' ? 'status' : f === 'sellPrice' ? 'priced' : 'edited';
