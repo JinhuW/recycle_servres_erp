@@ -33,12 +33,10 @@ has the repo map and workflow.
 
 - **Anything about fetching posts** →
   [docs/debug-notes/reddit-anonymous-json-blocked.md](docs/debug-notes/reddit-anonymous-json-blocked.md).
-  The JSON API is dead for anonymous clients. Reddit is retiring the Atom
-  feed (announced for 2026-11-13); feeds now answer 404, from some IPs for
-  every subreddit
-  ([docs/debug-notes/reddit-rss-retired-2026-11-13.md](docs/debug-notes/reddit-rss-retired-2026-11-13.md)).
+  The JSON API is dead for anonymous clients, and Reddit withdrew the Atom
+  feed in November 2026: every feed URL 404s
+  ([reddit-new-rss-404.md](docs/debug-notes/reddit-new-rss-404.md)).
   The real rate limit is about 1 request per 40 s per IP, not 10/min.
-  See also [reddit-new-rss-404.md](docs/debug-notes/reddit-new-rss-404.md).
   Posts now come from the redditapis.com webhook (`poll_source`, README
   *Post source*).
 - **The Dockerfile CMD or shutdown path** →

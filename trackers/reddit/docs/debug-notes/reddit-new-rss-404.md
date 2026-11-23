@@ -39,7 +39,15 @@ staged rollout.
 
 The anonymous JSON API was already 403'd
 ([reddit-anonymous-json-blocked.md](reddit-anonymous-json-blocked.md)), so
-no logged-out route is left.
+no logged-out route is left. The other logged-out paths were probed from the
+office IP on 2026-11-20 and 2026-11-22, and none of them is a way back:
+
+| Path | Result |
+| --- | --- |
+| `old.reddit.com/r/<sub>/new/` and `/new/.rss` | 302 to the login page |
+| `www.reddit.com/r/<sub>/new/` (HTML) | 200, but an 8 KB `js_challenge` shell with no posts |
+| `www.reddit.com/svc/shreddit/community-more-posts/new/?name=<sub>` | 403 block page |
+| `/r/news/new.rss` | 404 like ours, so it is not about which subreddits we watch |
 
 ## How to tell next time
 

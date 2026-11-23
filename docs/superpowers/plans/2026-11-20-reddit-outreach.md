@@ -1,6 +1,6 @@
 # Reddit outreach after the API closes — implementation plan
 
-**Date:** 2026-11-20 · **Ticket:** RS-602 · **Status:** Workstream A in progress, B waiting on the owner
+**Date:** 2026-11-20 · **Ticket:** RS-602 · **Status:** A shipped in v1.473.0, B resolved by the redditapis.com webhook, C open
 
 ## Why
 
@@ -15,7 +15,7 @@ developer terms and API on 2026-11-20 found:
 | The Data APIs must not be used "to spam, incentivize, or harass users". Commercial use needs a separate agreement. | Data API Terms §3, revised 2026-07-20 |
 | New OAuth apps need manual approval (Responsible Builder Policy). New access requests closed 2026-10-31; unregistered apps lose access from 2027-01-12; public API access ends March 2027. | r/redditdev admin post of 2026-09-30, as reported by Unite.AI and PPC Land |
 | Private messages became Reddit Chat (from March 2025); old PMs are a read-only archive. No official Chat API. | Reddit changelog, 2025-03-25 |
-| Anonymous RSS is being retired (announced for 2026-11-13). From the office IP, `r/<sub>/new.rss` answers 404 for every subreddit; `.json` 403; `old.reddit.com` redirects to login; the HTML page is a `js_challenge` shell. | Probed 2026-11-20 and 2026-11-22 |
+| Reddit withdrew logged-out RSS around 2026-11-16 (announced for 2026-11-13). `r/<sub>/new.rss` answers 404 for every subreddit; `.json` 403; `old.reddit.com` redirects to login; the HTML page is a `js_challenge` shell. | Probed 2026-11-20 and 2026-11-22 |
 | Both swap subreddits expect a buyer to comment on a sale post before messaging the seller. | Seller posts and sub rules |
 
 We hold no registered Reddit app. **Decision: the ERP never sends a Reddit
@@ -90,25 +90,22 @@ draft: "Comment on their sale post first (sub rule)", linking the post.
   works). `apps/frontend/src/lib/redditLeads.test.ts` covers `chatUrl` and
   the opt-out line.
 
-## Workstream B: the tracker has no data source (needs the owner)
+## Workstream B: the tracker's data source (resolved)
 
-`trackers/reddit` reads only `new.rss`. From the office IP every feed has
-answered 404 since at least 2026-11-20. The fleet still read most subreddits
-on 2026-11-20/21 (RS-601 saw five 404s), so the shutdown looks like a rolling
-one, and the tracker should be expected to go dark: no Reddit alerts in
-Telegram, and no new sellers in the pool.
-None of the options below is free:
+Reddit withdrew logged-out RSS around 2026-11-16, and every tracker poll
+404'd. The owner chose option B1, a paid data provider: posts now arrive by
+the [redditapis.com](https://www.redditapis.com) webhook (`poll_source =
+webhook`, RS-600, #1232). See `trackers/reddit/README.md` *Post source* and
+`trackers/reddit/docs/debug-notes/reddit-new-rss-404.md`.
 
-| Option | Cost | Risk | Notes |
-| --- | --- | --- | --- |
-| **B1. Paid data provider** that resells Reddit listings over HTTP | Monthly fee | Low for our accounts; depends on the vendor's own licence | Smallest change: swap `fetchFeed` behind the existing `FetchResult` type. |
-| **B2. Logged-in browser** on the fleet VMs, reading `/r/<subs>/new/` with Playwright | VM time; one Reddit account per IP | Reddit rule 8 / "scraping without an agreement"; the account can be banned | Mirrors the Facebook fleet; most moving parts. |
-| **B3. Data licence with Reddit** | Unknown, likely high | None | Only route that stays legal past March 2027 for API reads. |
-| **B4. Pause it** and rely on manual browsing plus the harvest | None | None | Alerts stop; the pool still grows from hand-run harvests. |
+The options that were weighed:
 
-Done now regardless: a debug note,
-`trackers/reddit/docs/debug-notes/reddit-rss-retired-2026-11-13.md`, so the
-next session doesn't spend time on the 404s.
+| Option | Cost | Risk |
+| --- | --- | --- |
+| **B1. Paid data provider** (chosen) | Monthly fee | Low for our accounts; rests on the vendor's own licence |
+| B2. Logged-in browser on the fleet VMs | VM time; one Reddit account per IP | Reddit rule 8 / "scraping without an agreement"; accounts can be banned |
+| B3. Data licence with Reddit | Unknown, likely high | None |
+| B4. Pause the tracker | None | Alerts stop |
 
 ## Workstream C: `reddit_marketing` (not in this repo)
 
@@ -121,5 +118,4 @@ it gets its own change.
 
 1. A1–A5 code, then tests (backend integration + frontend unit), typecheck.
 2. A6 docs, version bump, PR to `dev`, squash-merge (standing authorization).
-3. The B debug note ships in the same PR (docs only).
-4. The owner picks a B option; it gets its own ticket.
+3. B was settled separately (RS-600, #1232).
