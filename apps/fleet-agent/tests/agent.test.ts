@@ -430,6 +430,24 @@ describe('confirmed-stop handoff', () => {
     expect(docker.handoffs).toEqual([4]);
   });
 
+  it('runs again an extra whose stop for its replacement left it exited, not removed', async () => {
+    const docker = new FakeDocker([running('lab-1', 'img:2'), running('lab-3', 'img:1')]);
+    server.desired = desired({ count: 1, image: 'img:2', roll: { replace: 'lab-3' }, vnc_ports: { 'lab-1': 5901, 'lab-3': 5903 }, leases: { 'lab-3': { account_no: 9, epoch: 4 } } });
+    docker.failNext.rm = { error: 'docker rm: Error response from daemon: removal of container is already in progress', effect: false };
+    const a = agent(docker);
+    expect((await a.tick()).errors).toEqual([expect.stringMatching(/lab-3: could not replace rs-fleet-lab-3: docker rm/)]);
+    expect(docker.containers.get('rs-fleet-lab-3')).toMatchObject({ running: false, exit_code: 143 });
+    clock += 60_000;
+    docker.commands = [];
+    expect((await a.tick()).errors).toEqual([]);
+    // Not removed as an old extra: stopped, removed and run again with the handoff.
+    expect(docker.commands.map((c) => c[0])).toEqual(['ensure', 'stop+rm', 'run']);
+    expect(docker.handoffs).toEqual([4]);
+    expect(server.stopped).toEqual([expect.objectContaining({ worker_id: 'lab-3', account_no: 9, epoch: 4, restart: true })]);
+    expect(docker.containers.get('rs-fleet-lab-3')).toMatchObject({ running: true, image: 'img:2' });
+    expect(JSON.parse(readFileSync(join(stateDir, 'memory.json'), 'utf8')).pending).toEqual({});
+  });
+
   it('releases a waiting reservation when the host turns observe-only', async () => {
     const docker = new FakeDocker();
     writeFileSync(join(stateDir, 'memory.json'), JSON.stringify({ last_start_at: null, restarts: {}, pending: { 'lab-1': { account_no: 7, epoch: 3, restart: true, confirmed: true } } }));

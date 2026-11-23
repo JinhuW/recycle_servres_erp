@@ -78,7 +78,10 @@ describe('scale down', () => {
     const crashed = exited('lab-3', 1, ago(600), 'img:1');
     expect(run([running('lab-1', 'img:2'), crashed], { held: { 'lab-3': { container: crashed.id!, reason: 'crash_limit' } } }, d).actions).toEqual([]);
     expect(run([running('lab-1', 'img:2'), exited('lab-3', 0, ago(60), 'img:1')], { bootAt: NOW - 3600_000 }, d).actions).toEqual([]);
-    expect(run([running('lab-1', 'img:2'), exited('lab-3', 75, ago(600), 'img:1')], { restarting: ['lab-3'] }, d).actions).toEqual([]);
+    // Waiting for its replacement, it is replaced, never removed.
+    expect(kinds(run([running('lab-1', 'img:2'), exited('lab-3', 143, ago(600), 'img:1')], { restarting: ['lab-3'] }, d))).toEqual([['replace', 'lab-3']]);
+    expect(run([running('lab-1', 'img:2'), exited('lab-3', 143, ago(600), 'img:1')], { restarting: ['lab-3'], lastStartAt: NOW - 1000 }, d).actions).toEqual([]);
+    expect(run([running('lab-1', 'img:2'), exited('lab-3', 78, ago(600), 'img:1')], { restarting: ['lab-3'] }, d).actions).toEqual([]);
     expect(kinds(run([running('lab-1', 'img:2'), exited('lab-2', 75, ago(600), 'img:1')], {}, { ...d, count: 2 }))).toEqual([['start', 'lab-2']]);
   });
 
