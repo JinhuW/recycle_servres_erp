@@ -8,8 +8,8 @@ import {analytics, ANALYTICS_WINDOWS, type AnalyticsWindow} from './analytics.ts
 import {requeuePost} from './claims.ts';
 import type {Sql} from './db.ts';
 import {DEAD_AFTER_S, STALE_AFTER_S, type LoopName, type LoopStatus} from './heartbeat.ts';
-import {isProvider, MAX_KEY_LENGTH, PROVIDERS, type KeyStore} from './llm/keys.ts';
-import {isModelRef} from './llm/ref.ts';
+import {invalidKeyReason, isProvider, KEY_ENV, PROVIDERS, type KeyStore} from './llm/keys.ts';
+import {isModelRef, parseModelRef} from './llm/ref.ts';
 import {candidateConfig, liveConfig, promptHash, promptStats} from './prompts.ts';
 import {createRule, deleteRule, listRules, updateRule} from './rules.ts';
 import {seen} from './seen.ts';
@@ -318,6 +318,15 @@ export function createApi(deps: ApiDeps): Hono {
     return c.json({deleted: id});
   });
 
+  // A model whose provider has no key would park every post 'failed' once it
+  // went live, so refuse it here rather than at evaluation time.
+  async function missingKey(model: string): Promise<string | null> {
+    const {provider} = parseModelRef(model);
+    if ((await deps.keys.get())[provider]) return null;
+    return `the tracker has no ${provider} API key for ${model}: paste one on `
+      + `Settings ▸ AI models or set ${KEY_ENV[provider]} on the tracker first`;
+  }
+
   app.get('/api/settings', async (c) => c.json({settings: await deps.settings.all()}));
 
   app.put('/api/settings/:key', async (c) => {
@@ -333,6 +342,10 @@ export function createApi(deps: ApiDeps): Hono {
 
     const invalid = validateSetting(key, body.value);
     if (invalid) return c.json({error: invalid}, 400);
+    if ((key === 'llm_model' || key === 'candidate_llm_model') && body.value !== '') {
+      const noKey = await missingKey(body.value as string);
+      if (noKey) return c.json({error: noKey}, 409);
+    }
 
     await deps.settings.set(key, body.value);
     return c.json({key, value: body.value});
@@ -349,9 +362,8 @@ export function createApi(deps: ApiDeps): Hono {
     }
     const body = await c.req.json().catch(() => null) as {key?: unknown} | null;
     const key = typeof body?.key === 'string' ? body.key.trim() : '';
-    if (!key || key.length > MAX_KEY_LENGTH) {
-      return c.json({error: `key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters`}, 400);
-    }
+    const invalid = invalidKeyReason(key);
+    if (invalid) return c.json({error: invalid}, 400);
     await deps.keys.set(provider, key);
     return c.json({ok: true, last4: key.slice(-4)});
   });
@@ -449,6 +461,10 @@ export function createApi(deps: ApiDeps): Hono {
     if (typeof model !== 'string' || (model !== '' && !isModelRef(model))) {
       return c.json({error: 'model must be "" (use llm_model) or a model ref like anthropic:claude-sonnet-5-5 or an OpenRouter id'}, 400);
     }
+    if (model !== '') {
+      const noKey = await missingKey(model);
+      if (noKey) return c.json({error: noKey}, 409);
+    }
 
     await deps.sql.begin(async (tx) => {
       const values: Array<[string, string]> =
@@ -487,6 +503,9 @@ export function createApi(deps: ApiDeps): Hono {
     const settings = await deps.settings.get();
     const candidate = candidateConfig(settings);
     if (!candidate) return c.json({error: 'no candidate_eval_prompt is set'}, 400);
+    // The key may have been removed since the trial started.
+    const noKey = await missingKey(candidate.model);
+    if (noKey) return c.json({error: noKey}, 409);
 
     const disabled = await deps.sql.begin(async (tx) => {
       const put = (key: string, value: string) => tx`

@@ -102,7 +102,7 @@ export function loadConfig(): Config {
   const redditAuth = redditClientId ? {clientId: redditClientId, clientSecret: redditClientSecret} : null;
 
   // Fallbacks only: the ERP pushes keys into `llm_keys`, so a worker may boot
-  // with none, and a provider without one fails each post until a key lands.
+  // with none; the evaluate loop then waits, claiming nothing, until a key lands.
   const openrouterApiKey = process.env['OPENROUTER_API_KEY'] ?? '';
   const anthropicApiKey = process.env['ANTHROPIC_API_KEY'] ?? '';
   const openaiApiKey = process.env['OPENAI_API_KEY'] ?? '';
