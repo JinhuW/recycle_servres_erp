@@ -9,6 +9,7 @@
 // business without a deploy; the constants here are only the fallback.
 
 import type postgres from 'postgres';
+import { REPORTING_TZ, addDays, todayIn } from '@recycle-erp/shared';
 import { getWorkspaceSetting } from '../lib/settings';
 
 type Sql = ReturnType<typeof postgres>;
@@ -140,9 +141,9 @@ export function dueStateFor(daysUntilDue: number | null): DueState {
   return 'later';
 }
 
-/** ISO date (no time) `n` days from today, for scheduling the next contact. */
+/** ISO date (no time) `n` days from today, for scheduling the next contact.
+ *  Today is the office's business day (REPORTING_TZ), the day due and overdue
+ *  are counted from; the UTC date runs a day ahead every Denver evening. */
 export function isoDatePlus(days: number, from = new Date()): string {
-  const d = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
+  return addDays(todayIn(REPORTING_TZ, from), days);
 }
