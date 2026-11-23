@@ -7,7 +7,7 @@
 import type { Context } from 'hono';
 import type { User } from '../../types';
 import {
-  committedLinesBody, describeSellOrders, PACKAGE_DELIVERED_MSG, PAYER_BOOKED_MSG,
+  committedLinesBody, describeHolders, PACKAGE_DELIVERED_MSG, PAYER_BOOKED_MSG,
   TRACKING_TAKEN_STANDALONE_MSG, trackingTakenMsg,
 } from './shared';
 
@@ -26,9 +26,9 @@ export type Refusal =
   | { kind: 'trackingTaken'; otherOrderId: string | null }
   | { kind: 'trackingTakenStandalone' }
   | { kind: 'packageDelivered' }
-  | { kind: 'qtyBelowCommitted'; lineIds: string[]; sellOrderIds: string[] }
-  | { kind: 'removeReferenced'; lineIds: string[]; sellOrderIds: string[] }
-  | { kind: 'lineShipped'; lineIds: string[]; sellOrderIds: string[] };
+  | { kind: 'qtyBelowCommitted'; lineIds: string[]; sellOrderIds: string[]; ebayListingIds: string[] }
+  | { kind: 'removeReferenced'; lineIds: string[]; sellOrderIds: string[]; ebayListingIds: string[] }
+  | { kind: 'lineShipped'; lineIds: string[]; sellOrderIds: string[]; ebayListingIds: string[] };
 
 export class OrderRefusal extends Error {
   constructor(readonly refusal: Refusal) {
@@ -76,16 +76,16 @@ export function refusalResponse(c: Context, u: User, r: Refusal): Response {
     case 'packageDelivered':
       return c.json({ error: PACKAGE_DELIVERED_MSG }, 409);
     case 'qtyBelowCommitted':
-      return c.json(committedLinesBody(u, r.lineIds, r.sellOrderIds,
-        `A product's new qty is below what ${describeSellOrders(r.sellOrderIds)} already holds. Lower or close that sell order first.`,
+      return c.json(committedLinesBody(u, r.lineIds, r,
+        `A product's new qty is below what ${describeHolders(r)} already holds. Lower or close that first.`,
         'A product\'s new qty is below what an open sell order holds — a manager has to change it.'), 409);
     case 'removeReferenced':
-      return c.json(committedLinesBody(u, r.lineIds, r.sellOrderIds,
-        `A product you tried to remove is on ${describeSellOrders(r.sellOrderIds)} and cannot be deleted. Archive or cancel those sell orders first.`,
+      return c.json(committedLinesBody(u, r.lineIds, r,
+        `A product you tried to remove is on ${describeHolders(r)} and cannot be deleted. Cancel or end those first.`,
         'A product you tried to remove is on an open sell order — a manager has to remove it.'), 409);
     case 'lineShipped':
-      return c.json(committedLinesBody(u, r.lineIds, r.sellOrderIds,
-        `A product you changed is on shipped ${describeSellOrders(r.sellOrderIds)} — it is view-only until that order is Done or Closed.`,
+      return c.json(committedLinesBody(u, r.lineIds, r,
+        `A product you changed is held by ${describeHolders(r)} — it is view-only until that sale is Done or Closed, or the listing ends.`,
         'A product you changed is on a shipped sell order — it is view-only until that order is Done or Closed.'), 409);
   }
 }

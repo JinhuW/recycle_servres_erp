@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Icon } from '../components/Icon';
+import { Icon, type IconName } from '../components/Icon';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
-import type { Lang } from '../lib/types';
+import { roleLabelKey } from '../lib/roles';
+import type { Lang, Role } from '../lib/types';
 
-type DemoAccount = { id: string; email: string; name: string; initials: string; role: 'manager' | 'purchaser'; team: string | null };
+const DEMO_ROLE_DESC: Record<Role, string> = {
+  manager: 'managerFullAccess', purchaser: 'purchaserOwn', ebay: 'ebayDeskOnly',
+};
+const DEMO_ROLE_ICON: Record<Role, IconName> = { manager: 'shield', purchaser: 'user', ebay: 'package' };
+
+type DemoAccount = { id: string; email: string; name: string; initials: string; role: Role; team: string | null };
 
 type Props = { initialPicking?: boolean; variant?: 'mobile' | 'desktop' };
 
@@ -131,7 +137,8 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
         if (variant === 'desktop') {
           const mgr = r.users.find(u => u.role === 'manager');
           const purchaser = r.users.find(u => u.role === 'purchaser');
-          setAccounts([mgr, purchaser].filter(Boolean) as DemoAccount[]);
+          const ebay = r.users.find(u => u.role === 'ebay');
+          setAccounts([mgr, purchaser, ebay].filter(Boolean) as DemoAccount[]);
         } else {
           setAccounts(r.users.filter(u => u.role === 'purchaser').slice(0, 4));
         }
@@ -274,12 +281,12 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>{u.name}</div>
                       <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-                        {u.role === 'manager' ? t('managerFullAccess') : t('purchaserOwn')}
+                        {t(DEMO_ROLE_DESC[u.role])}
                       </div>
                     </div>
                     <span className="chip">
-                      <Icon name={u.role === 'manager' ? 'shield' : 'user'} size={12} />
-                      {u.role === 'manager' ? t('role_admin') : t('role_purchaser')}
+                      <Icon name={DEMO_ROLE_ICON[u.role]} size={12} />
+                      {t(u.role === 'manager' ? 'role_admin' : roleLabelKey(u.role))}
                     </span>
                   </button>
                 ))}
@@ -375,12 +382,12 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>{u.name}</div>
                       <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-                        {u.role === 'manager' ? t('managerFullAccess') : t('purchaserOwn')}
+                        {t(DEMO_ROLE_DESC[u.role])}
                       </div>
                     </div>
                     <span className="chip">
-                      <Icon name={u.role === 'manager' ? 'shield' : 'user'} size={12} />
-                      {u.role === 'manager' ? t('role_admin') : t('role_purchaser')}
+                      <Icon name={DEMO_ROLE_ICON[u.role]} size={12} />
+                      {t(u.role === 'manager' ? 'role_admin' : roleLabelKey(u.role))}
                     </span>
                   </button>
                 ))}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../../lib/api';
+import { roleLabelKey } from '../../../lib/roles';
 import { useAuth } from '../../../lib/auth';
 import { useT } from '../../../lib/i18n';
 import { handleFetchError } from '../../../lib/errorToast';
@@ -98,7 +99,7 @@ export function AccountPanel({ showToast }: { showToast?: ToastFn }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 24, flexShrink: 0 }}>
-            <Meta label={t('accountIdentityRole')} value={user.role === 'manager' ? t('role_manager') : t('role_purchaser')} />
+            <Meta label={t('accountIdentityRole')} value={t(roleLabelKey(user.role))} />
             {user.team && <Meta label={t('memFieldTeam')} value={user.team} />}
           </div>
         </div>

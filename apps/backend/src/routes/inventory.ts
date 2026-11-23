@@ -23,6 +23,7 @@ import type { Ddr5SpecRow } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { diff, writeOrderEvent } from '../services/orderAudit';
 import { poLineNo } from '../lib/poLineNo';
+import { ebayFilterFrag, ebayLinksByLine, lotListings } from '../services/ebayListings';
 import type { Env, User } from '../types';
 import { isClosedBook, heldLines, revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS, REVIEWED_LIFECYCLES } from '../services/orderAdvance';
 
@@ -174,8 +175,10 @@ function inventoryWhereFrag(
   const pendingFrag  = pendingSellOrderFrag(sql, hidePending);
   const archivedFrag = archivedOrderFrag(sql);
   const unitsFrag    = hasUnitsFrag(sql);
+  // eBay listings are a manager's, like sell orders.
+  const ebayFrag     = isManager ? ebayFilterFrag(sql, c.req.query('ebay')) : sql`TRUE`;
 
-  return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${archivedFrag} AND ${unitsFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag} AND ${pendingFrag}`;
+  return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${archivedFrag} AND ${unitsFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag} AND ${pendingFrag} AND ${ebayFrag}`;
 }
 
 // The search box's one query matched against every identifying field on the
@@ -318,7 +321,11 @@ inventory.get('/', async (c) => {
     });
     return c.json({ items: filtered, nextCursor });
   }
-  return c.json({ items, nextCursor });
+  const ebayLinks = await ebayLinksByLine(sql, items.map(r => String(r.id)));
+  return c.json({
+    items: items.map(r => ({ ...r, ebay: ebayLinks.get(String(r.id).toLowerCase()) })),
+    nextCursor,
+  });
 });
 
 // The rows behind a desktop selection, by id. Select-all reaches lots in
@@ -1007,6 +1014,7 @@ inventory.get('/products', async (c) => {
   // same drop-self facet semantics as the attribute chips.
   const searchFrag   = lineSearchFrag(sql, search);
   const pendingFrag  = pendingSellOrderFrag(sql, hidePending);
+  const ebayFrag     = isManager ? ebayFilterFrag(sql, c.req.query('ebay')) : sql`TRUE`;
 
   const canonCol = canonPartCol(sql, sql`l.part_number`);
 
@@ -1059,7 +1067,7 @@ inventory.get('/products', async (c) => {
       ORDER BY ls.created_at ASC
       LIMIT 1
     ) img ON TRUE
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${archivedFrag} AND ${hasUnitsFrag(sql)} AND ${searchFrag} AND ${pendingFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${archivedFrag} AND ${hasUnitsFrag(sql)} AND ${searchFrag} AND ${pendingFrag} AND ${ebayFrag}
     ORDER BY l.created_at DESC
     LIMIT ${RAW_CAP}
   `) as unknown as Row[];
@@ -1263,8 +1271,14 @@ inventory.get('/products', async (c) => {
     for (const w of whs) warehouseProducts[w] = (warehouseProducts[w] ?? 0) + 1;
   }
 
+  // Each lot's eBay links, for the lots on this page only, in one query.
+  const ebayLinks = isManager
+    ? await ebayLinksByLine(sql, products.flatMap(p => p.lines.map(l => l.id)))
+    : null;
   return c.json({
-    products,
+    products: ebayLinks
+      ? products.map(p => ({ ...p, lines: p.lines.map(l => ({ ...l, ebay: ebayLinks.get(l.id.toLowerCase()) })) }))
+      : products,
     facets,
     warehouse_counts: warehouseProducts,
     total: totalProducts,
@@ -1346,6 +1360,17 @@ inventory.get('/:id/sell-orders', async (c) => {
     ORDER BY so.created_at DESC
   `;
   return c.json({ items: rows });
+});
+
+// eBay listings made from this lot, for the same page's "On eBay" card.
+inventory.get('/:id/ebay-listings', async (c) => {
+  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  if (!UUID_RE.test(id)) return c.json({ error: 'Not found' }, 404);
+  const sql = getDb(c.env);
+  const line = (await sql`SELECT 1 FROM order_lines WHERE id = ${id} LIMIT 1`)[0];
+  if (!line) return c.json({ error: 'Not found' }, 404);
+  return c.json({ items: await lotListings(sql, id) });
 });
 
 // Edit a line + write an audit event for every change.

@@ -4,6 +4,7 @@ import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { useEffectiveUser } from '../lib/tweaks';
 import { shownNav, type ShownLeaf } from '../lib/desktopNav';
+import { roleLabelKey } from '../lib/roles';
 import { useAcctReviewCount } from '../lib/accounting';
 import { useLeadsAttention } from '../lib/redditLeads';
 import { refreshActionsCount, useMyActionsCount } from '../lib/actions';
@@ -161,7 +162,7 @@ export function Sidebar({ view, folded, onToggleFold }: Props) {
         <div className="avatar">{user.initials}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="avatar-name">{user.name}</div>
-          <div className="avatar-role">{user.role === 'manager' ? t('role_manager') : t('role_purchaser')}</div>
+          <div className="avatar-role">{t(roleLabelKey(user.role))}</div>
         </div>
         <button className="btn icon sm" onClick={logout} title={t('signOut')}>
           <Icon name="logout" size={14} />

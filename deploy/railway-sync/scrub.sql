@@ -83,3 +83,14 @@ BEGIN
     TRUNCATE public.ai_provider_key_removals;
   END IF;
 END $$;
+
+-- Prod's eBay seller account: its refresh token is sealed under prod's
+-- EBAY_KEY, and a dev that could open it would publish to and read orders
+-- from the live account. Dev connects its own (sandbox) account. The consent
+-- states go too. Guarded: prod gains them only when the release reaches main.
+DO $$
+BEGIN
+  IF pg_catalog.to_regclass('public.ebay_connection') IS NOT NULL THEN
+    TRUNCATE public.ebay_connection, public.ebay_oauth_states;
+  END IF;
+END $$;

@@ -13,7 +13,10 @@ import { ENFORCED_EVERYWHERE, leaveDraftBlockers, type LeaveDraftBlocker } from 
 import type { SqlLike } from './orderAudit';
 import type { SOLineSnap } from './sellOrderLineMatch';
 import { prunePackRows } from '../routes/sellOrderPack';
-import { committedSellStatuses, isSellableLineStatus, openSellStatuses } from '../lib/sellCommitment';
+import {
+  committedClaimsByLine, committedSellStatuses, isSellableLineStatus, openSellStatuses,
+} from '../lib/sellCommitment';
+import { activeListingsOnLines } from './ebayListings';
 import { poAiReviewSetting, queuePoAiReviewTx, supersedePoAiReviewsTx } from './poAiReview';
 
 // Canonical lifecycle ordering. The workflow_stages table was removed; this
@@ -88,7 +91,7 @@ export type AdvanceOutcome =
   | { kind: 'sameStage'; lifecycle: string }
   | { kind: 'stageMoved'; lifecycle: string }
   | { kind: 'managerChanged'; manager: { id: string; name: string } | null }
-  | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
+  | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[]; ebayListingIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
   | LeaveDraftBlocker
   | { kind: 'ok'; nextStageId: string };
@@ -139,15 +142,16 @@ function statusesAheadOf(lineStatus: string): string[] {
 }
 
 // Lines of this order that sit at one of `lineStatuses` and are claimed by a
-// sell order in one of `sellStatuses`, with the sell orders involved so the
-// refusal can name them — a bare list of line UUIDs sent a manager hunting
-// through Closed sell orders for a Draft they had made a minute earlier.
+// sell order in one of `sellStatuses` or by an active eBay listing, with the
+// sell orders and listings involved so the refusal can name them — a bare list
+// of line UUIDs sent a manager hunting through Closed sell orders for a Draft
+// they had made a minute earlier.
 async function committedLines(
   tx: SqlLike,
   orderId: string,
   lineStatuses: string[],
   sellStatuses: string[],
-): Promise<{ lineIds: string[]; sellOrderIds: string[] }> {
+): Promise<{ lineIds: string[]; sellOrderIds: string[]; ebayListingIds: string[] }> {
   const rows = await tx`
     SELECT DISTINCT ol.id, so.id AS so_id
     FROM order_lines ol
@@ -159,9 +163,17 @@ async function committedLines(
       -- Same rule as committedQtySql: a sell line held at 0 holds nothing.
       AND sol.qty > 0
   ` as unknown as { id: string; so_id: string }[];
+  // A listing has no proposal stage: whenever it reserves anything it is as
+  // committed as a Shipped order, so the shared rule says which lines it holds.
+  const lines = await tx`
+    SELECT id FROM order_lines WHERE order_id = ${orderId} AND status = ANY(${lineStatuses})
+  ` as unknown as { id: string }[];
+  const listed = [...(await committedClaimsByLine(tx, lines.map(l => l.id))).entries()]
+    .filter(([, claim]) => claim.ebayListingId !== null);
   return {
-    lineIds: [...new Set(rows.map(r => r.id))],
+    lineIds: [...new Set([...rows.map(r => r.id.toLowerCase()), ...listed.map(([id]) => id)])],
     sellOrderIds: [...new Set(rows.map(r => r.so_id))].sort(),
+    ebayListingIds: [...new Set(listed.map(([, claim]) => claim.ebayListingId!))].sort(),
   };
 }
 
@@ -195,7 +207,7 @@ async function cascadeBlockers(
   orderId: string,
   newLineStatus: string,
 ): Promise<
-  | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
+  | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[]; ebayListingIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
   | null
 > {
@@ -208,7 +220,10 @@ async function cascadeBlockers(
   if (movingBack.length > 0 && !isSellableLineStatus(newLineStatus)) {
     const committed = await committedLines(tx, orderId, movingBack, openSellStatuses());
     if (committed.lineIds.length > 0) {
-      return { kind: 'committedLines', offendingLineIds: committed.lineIds, sellOrderIds: committed.sellOrderIds };
+      return {
+        kind: 'committedLines', offendingLineIds: committed.lineIds,
+        sellOrderIds: committed.sellOrderIds, ebayListingIds: committed.ebayListingIds,
+      };
     }
   }
   if (newLineStatus !== 'In Transit') {
@@ -231,14 +246,16 @@ async function heldBackLineIds(
   return (await committedLines(tx, orderId, movingBack, committedSellStatuses())).lineIds;
 }
 
+export type LineHolders = { sellOrderIds: string[]; ebayListingIds: string[] };
+
 /**
- * Lines held for a shipped sale: left at Done by a move back to Reviewing
- * because a committed sell order claims them (heldBackLineIds). The PO's
- * editors leave them alone; the hold lifts on its own once that order is Done
- * or Closed and the claim is gone. Keyed by lower-cased line id, with the
- * sell orders holding each.
+ * Lines held for a shipped sale or an active eBay listing: left at Done by a
+ * move back to Reviewing because a committed claim names them
+ * (heldBackLineIds). The PO's editors leave them alone; the hold lifts on its
+ * own once that order is Done or Closed, or the listing ends or sells out, and
+ * the claim is gone. Keyed by lower-cased line id, with what holds each.
  */
-export async function heldLines(tx: SqlLike, lineIds: readonly string[]): Promise<Map<string, string[]>> {
+export async function heldLines(tx: SqlLike, lineIds: readonly string[]): Promise<Map<string, LineHolders>> {
   if (lineIds.length === 0) return new Map();
   const rows = await tx`
     SELECT ol.id, array_agg(DISTINCT so.id ORDER BY so.id) AS so_ids
@@ -253,7 +270,19 @@ export async function heldLines(tx: SqlLike, lineIds: readonly string[]): Promis
       AND sol.qty > 0
     GROUP BY ol.id
   ` as unknown as { id: string; so_ids: string[] }[];
-  return new Map(rows.map(r => [r.id.toLowerCase(), r.so_ids]));
+  const held = new Map<string, LineHolders>(
+    rows.map(r => [r.id.toLowerCase(), { sellOrderIds: r.so_ids, ebayListingIds: [] }]));
+  const reviewingDone = await tx`
+    SELECT ol.id FROM order_lines ol JOIN orders o ON o.id = ol.order_id
+    WHERE ol.id = ANY(${[...lineIds]}::uuid[]) AND o.lifecycle = 'reviewing' AND ol.status = 'Done'
+  ` as unknown as { id: string }[];
+  for (const [id, claim] of await committedClaimsByLine(tx, reviewingDone.map(r => r.id))) {
+    if (claim.ebayListingId === null) continue;
+    const h = held.get(id) ?? { sellOrderIds: [], ebayListingIds: [] };
+    h.ebayListingIds.push(claim.ebayListingId);
+    held.set(id, h);
+  }
+  return held;
 }
 
 // Move every non-Sold line to `newLineStatus`, recording one inventory_events
@@ -294,7 +323,7 @@ async function cascadeLineStatusesTx(
 }
 
 export type RevertOutcome =
-  | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
+  | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[]; ebayListingIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
   | { kind: 'ok'; from: string };
 
@@ -350,6 +379,7 @@ export type ArchiveSellOrderConflict = {
 export type ArchiveOutcome =
   | { kind: 'committedLines'; sellOrders: ArchiveSellOrderConflict[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
+  | { kind: 'ebayListed'; offendingLineIds: string[]; ebayListingIds: string[] }
   | { kind: 'ok'; lines: number; removedSellOrderLines: number };
 
 // Take an order's goods out of stock. The caller holds the orders row FOR
@@ -383,6 +413,19 @@ export async function archiveOrderLinesTx(
   `;
   const blocked = await cascadeBlockers(tx, id, ARCHIVED_LINE_STATUS);
   if (blocked) return { kind: 'transferClaimed', offendingLineIds: blocked.offendingLineIds };
+
+  // Unlike a sell order there is no line to take off a listing: it has to be
+  // ended on the eBay desk first.
+  const listed = await activeListingsOnLines(tx, (await tx`
+    SELECT id FROM order_lines WHERE order_id = ${id} AND status <> 'Sold'
+  ` as unknown as { id: string }[]).map(l => l.id));
+  if (listed.length > 0) {
+    return {
+      kind: 'ebayListed',
+      offendingLineIds: [...new Set(listed.map(l => l.line_id))],
+      ebayListingIds: [...new Set(listed.map(l => l.listing_id))],
+    };
+  }
 
   const claimed = await tx`
     SELECT sol.id AS sol_id, so.id AS so_id, so.status AS so_status,

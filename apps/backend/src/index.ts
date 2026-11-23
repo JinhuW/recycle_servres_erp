@@ -49,6 +49,8 @@ import customersRoutes from './routes/customers';
 import sellOrdersRoutes from './routes/sellOrders';
 import sellOrderPackRoutes from './routes/sellOrderPack';
 import afterSalesRoutes from './routes/afterSales';
+import ebayRoutes from './routes/ebay';
+import ebayConnectionRoutes from './routes/ebayConnection';
 import actionsRoutes from './routes/actions';
 import accountingRoutes from './routes/accounting';
 import inventoryRoutes from './routes/inventory';
@@ -402,6 +404,13 @@ app.use('/api/after-sales/*', authMiddleware);
 app.use('/api/actions', authMiddleware);
 app.use('/api/actions/*', authMiddleware);
 app.use('/api/inventory/*', authMiddleware);
+// The eBay consent callback is a browser landing from eBay; it checks the
+// session itself so an expired one goes back to Settings (routes/ebayConnection.ts).
+app.use('/api/ebay/*', async (c, next) => {
+  if (c.req.path === '/api/ebay/oauth/callback') return next();
+  // Same cast as /api/market/* above: authMiddleware only reads/sets `user`.
+  return (authMiddleware as unknown as (c: unknown, next: unknown) => Promise<void>)(c, next);
+});
 app.use('/api/members/*', authMiddleware);
 app.use('/api/lookups/*', authMiddleware);
 app.use('/api/categories/*', authMiddleware);
@@ -443,6 +452,11 @@ app.route('/api/sell-orders', sellOrderPackRoutes);
 app.route('/api/after-sales', afterSalesRoutes);
 app.route('/api/actions', actionsRoutes);
 app.route('/api/inventory', inventoryRoutes);
+// Settings ▸ eBay (manager) first: ebayRoutes' router-wide role gate covers
+// every /api/ebay path registered after it, the OAuth callback included.
+app.route('/api/ebay', ebayConnectionRoutes);
+// Manager and the eBay operator; the router gates the roles itself.
+app.route('/api/ebay', ebayRoutes);
 app.route('/api/members', membersRoutes);
 app.route('/api/lookups', lookupsRoutes);
 app.route('/api/categories', categoriesRoutes);

@@ -36,8 +36,17 @@ behaviour, edit the bullet here in the same PR and cite the new version.
 
 ## Roles and access
 
-Two roles: **manager** and **purchaser**. The unauthenticated vendor bid
-portal was removed in v1.191.0; no bid had ever been placed through it.
+Three roles: **manager**, **purchaser** and **eBay** (v1.476.0). The
+unauthenticated vendor bid portal was removed in v1.191.0; no bid had ever
+been placed through it.
+
+- **The eBay role** (v1.476.0) is for the person who works the eBay desk. It
+  sees only the eBay page: its sidebar has one item, every other address
+  lands on `/ebay`, and on the phone it gets a "use a computer" screen. The
+  API denies it by default in `authMiddleware` — everything but `/api/ebay/*`
+  and the few calls the app shell makes on boot answers 403, including routes
+  added later — and it gets no MCP scopes. Listing data never carries cost,
+  supplier, purchaser or PO money.
 
 - Managers see everything. Purchasers see the buying side — Home, Analysis, submit,
   history, shipping, clients, market, settings — and their own POs.
@@ -2420,6 +2429,56 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   cases with their status, issue and amount. See [After-sales](#after-sales).
   The list has the same button in each eligible row's Actions column
   (v1.256.0), so a case can be opened without visiting the order first.
+
+## eBay
+
+Desktop only (v1.476.0). Managers send stock to eBay; the eBay role (or a
+manager) posts it, records what sold, and ends what didn't. The page is built
+around checking inventory, not shipping: no buyer, shipping or fee details are
+shown.
+
+- **Sending stock** (managers). The lot page's **Send to eBay** takes one row
+  per eBay listing — spec, units, price each — so a lot of mixed specs goes out
+  as one listing per spec. The rows must fit the lot's sellable qty. Each
+  listing is `EB-n` and starts **To post**. A To post listing can be **split**
+  further from the desk.
+- **Units on an active listing are held** for eBay through `committedQtySql`, so
+  the sellable picker, transfers, sell orders, PO stage moves, lot removal and
+  PO archive all treat them as taken. Ending a listing returns its unsold
+  units; a sale's units move onto its sell order.
+- **The desk** (`#/ebay`). Queue tabs — To post, Sales to confirm, Live, Sold,
+  Ended — open on the first with work. Live rows show a time-on-eBay bar that
+  turns amber after 30 days. The side panel shows the lot's other listings, a
+  **stock check** (on hand / held for eBay / still sellable, with a warning
+  when they don't add up), and the history.
+- **Linking** a listing posted by hand: paste the eBay listing link (or the
+  item number) and it moves to **Live**. The link is stored as
+  `https://www.ebay.com/itm/<id>`; one eBay item can't be linked twice.
+- **Sold or not sold.** **Mark sold** takes qty, price each and the eBay order
+  #. Each confirmed sale creates a sell order to customer **eBay** at Awaiting
+  payment, which a manager finishes as usual; the listing is **Sold** when
+  nothing is left. **End, not sold** takes a reason and returns the units.
+  Closing an eBay sale's sell order undoes the sale and puts a sold-out
+  listing back to Live.
+- **Inventory list.** Every lot shows its eBay listings as chips (a Live chip
+  opens the item on eBay), with an All / On eBay / Not on eBay filter. A PO
+  line held by a listing reads "On eBay · EB-n".
+- **eBay connection** (v1.477.0, managers). Settings ▸ eBay connects the
+  seller account through eBay's consent page; the refresh token is sealed
+  (`EBAY_KEY`) and never returned. Listings use the account's default
+  shipping, payment and return policies and its first enabled location, so
+  the ERP has no policy settings. The card shows the account, when it must be
+  reconnected, and the last sync or eBay's error word for word.
+- **Publish** (manager or eBay role) posts a To post listing to eBay and makes
+  it Live; a retry after a partial failure reuses the offer eBay already has.
+  A price change on a published listing, and ending it, go to eBay first, and
+  eBay's refusal stops the ERP change.
+- **Sync** every 10 minutes (and **Sync now** for managers) reads eBay orders
+  and adds each matching line as a sale under **Sales to confirm**. It never
+  creates a sell order: a person confirms each one. A cancelled order drops
+  its unconfirmed sale; a confirmed one is only flagged for a manager.
+- The prod → dev copy empties the connection, so dev can't act on the live
+  eBay account.
 
 ## After-sales
 

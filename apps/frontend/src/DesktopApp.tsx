@@ -17,6 +17,7 @@ import { showErrorDialog } from './lib/errorToast';
 import { ErrorDialog, useErrorDialogQueue } from './components/ErrorDialog';
 import { useWalkthroughAutoStart, useWalkthroughOpen } from './lib/onboarding';
 import { confirmDiscard } from './lib/unsavedGuard';
+import { desktopViewFor } from './lib/desktopNav';
 
 // Eager: the landing view, and the two gates a logged-out or freshly-logged-in
 // user hits before anything else. Making these lazy would only buy a spinner.
@@ -35,6 +36,7 @@ const DesktopDashboard = lazy(() => import('./pages/desktop/DesktopDashboard').t
 const DesktopAnalysis = lazy(() => import('./pages/desktop/DesktopAnalysis').then(m => ({ default: m.DesktopAnalysis })));
 const DesktopMarket = lazy(() => import('./pages/desktop/DesktopMarket').then(m => ({ default: m.DesktopMarket })));
 const DesktopSellOrders = lazy(() => import('./pages/desktop/DesktopSellOrders').then(m => ({ default: m.DesktopSellOrders })));
+const DesktopEbay = lazy(() => import('./pages/desktop/DesktopEbay').then(m => ({ default: m.DesktopEbay })));
 const DesktopAfterSales = lazy(() => import('./pages/desktop/DesktopAfterSales').then(m => ({ default: m.DesktopAfterSales })));
 const DesktopTransfers = lazy(() => import('./pages/desktop/DesktopTransfers').then(m => ({ default: m.DesktopTransfers })));
 const DesktopWebSubmissions = lazy(() => import('./pages/desktop/DesktopWebSubmissions').then(m => ({ default: m.DesktopWebSubmissions })));
@@ -97,6 +99,9 @@ export function DesktopApp() {
   // and the PO page re-sends every line on a stage save.
   const orderRouteKind = useRef<'page' | 'check' | null>(null);
   useEffect(() => {
+    // The eBay role is sent to its desk below; fetching the order would only
+    // put a 403 in front of it.
+    if (user?.role === 'ebay') return;
     const m = matchPurchaseOrder(path) ?? boxCheck;
     const kind = boxCheck ? 'check' : 'page';
     const kindChanged = orderRouteKind.current !== null && orderRouteKind.current !== kind;
@@ -145,6 +150,13 @@ export function DesktopApp() {
   useEffect(() => {
     if (boxCheckId && user && user.role !== 'manager') replaceRoute('/purchase-orders/' + boxCheckId);
   }, [boxCheckId, user]);
+
+  // The eBay role has one page: any other address is rewritten to it, so the
+  // URL never names a page it isn't shown.
+  const ebayElsewhere = user?.role === 'ebay' && view !== 'ebay';
+  useEffect(() => {
+    if (ebayElsewhere) replaceRoute('/ebay');
+  }, [ebayElsewhere]);
 
   // Apply 'desktop' class to <html> so the desktop CSS overrides take effect
   // and undo the mobile shell's overflow lock.
@@ -203,12 +215,9 @@ export function DesktopApp() {
     return <Suspense fallback={<FormSkeleton fields={4} />}><Authorize /></Suspense>;
   }
 
-  // A purchaser who reaches a manager-only view lands on Home — or, for the
-  // stock tab, on the Analysis tab they can see.
-  const view2: DesktopView = user.role === 'purchaser' && view === 'stock' ? 'analysis'
-    : user.role === 'purchaser' && (view === 'inventory' || view === 'sellorders' || view === 'aftersales' || view === 'transfers' || view === 'websubmissions' || view === 'leadsFacebook' || view === 'activity' || view === 'payments' || view === 'internaltx' || view === 'accounting' || view === 'tracker' || view === 'wechat')
-    ? 'home'
-    : view;
+  // A view the role may not open lands on the role's home: Home, the Analysis
+  // tab beside a purchaser's stock tab, or the eBay desk for the eBay role.
+  const view2: DesktopView = desktopViewFor(user.role, view);
   // Review mode and Pack mode take over the whole window — no sidebar, no top
   // bar. Pack mode only once the view stands: a bounced purchaser lands on
   // Home, which keeps its chrome.
@@ -319,6 +328,7 @@ export function DesktopApp() {
               <DesktopSellOrders onNewFromInventory={() => navigate('/inventory')} onToast={showToast} />
             )}
             {view2 === 'aftersales' && <DesktopAfterSales onToast={showToast} />}
+            {view2 === 'ebay'      && <DesktopEbay onToast={showToast} />}
             {view2 === 'transfers' && <DesktopTransfers onToast={showToast} />}
             {view2 === 'websubmissions' && <DesktopWebSubmissions onToast={showToast} />}
             {view2 === 'activity'  && <DesktopActivity />}

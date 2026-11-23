@@ -18,6 +18,7 @@ import { normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
 import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, committedLinesBody, describeSellOrders, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, cashRefused, CASH_RETIRED_MSG, movesPayer, paidByAfter, pickedPaidByErr, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, orderCostBooked, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, stageMovedBody, type StoredLine, storedLineCols, supplierErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, trackInput, warehouseErr } from './shared';
 import { OrderRefusal, refusalResponse } from './refusal';
+import { activeListingsOnLines } from '../../services/ebayListings';
 
 const patchRoutes = new Hono<OrdersEnv>();
 
@@ -623,11 +624,15 @@ patchRoutes.patch('/:id', async (c) => {
             AND so.status = ANY(${openSellStatuses()}::text[])
             AND sol.qty > 0
         ` as { line_id: string; sell_order_id: string }[] : [];
-        if (stillNamed.length) {
+        // A lot on a Queued or Listed eBay listing is being offered for sale;
+        // an ended or sold-out one keeps its record and lets the lot go.
+        const stillListed = await activeListingsOnLines(tx, doomed.map(r => r.id));
+        if (stillNamed.length || stillListed.length) {
           throw new OrderRefusal({
             kind: 'removeReferenced',
-            lineIds: [...new Set(stillNamed.map(r => r.line_id))],
+            lineIds: [...new Set([...stillNamed, ...stillListed].map(r => r.line_id))],
             sellOrderIds: [...new Set(stillNamed.map(r => r.sell_order_id))].sort(),
+            ebayListingIds: [...new Set(stillListed.map(r => r.listing_id))].sort(),
           });
         }
         await tx`DELETE FROM order_lines WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])`;
@@ -681,7 +686,10 @@ patchRoutes.patch('/:id', async (c) => {
             throw new OrderRefusal({
               kind: 'qtyBelowCommitted',
               lineIds: short.map(l => l.id),
-              sellOrderIds: [...new Set(short.map(l => claims.get(l.id.toLowerCase())!.sellOrderId))].sort(),
+              sellOrderIds: [...new Set(short.map(l => claims.get(l.id.toLowerCase())!.sellOrderId)
+                .filter((x): x is string => x !== null))].sort(),
+              ebayListingIds: [...new Set(short.map(l => claims.get(l.id.toLowerCase())!.ebayListingId)
+                .filter((x): x is string => x !== null))].sort(),
             });
           }
         }
@@ -908,7 +916,8 @@ patchRoutes.patch('/:id', async (c) => {
           throw new OrderRefusal({
             kind: 'lineShipped',
             lineIds: [...held.keys()],
-            sellOrderIds: [...new Set([...held.values()].flat())].sort(),
+            sellOrderIds: [...new Set([...held.values()].flatMap(h => h.sellOrderIds))].sort(),
+            ebayListingIds: [...new Set([...held.values()].flatMap(h => h.ebayListingIds))].sort(),
           });
         }
       }

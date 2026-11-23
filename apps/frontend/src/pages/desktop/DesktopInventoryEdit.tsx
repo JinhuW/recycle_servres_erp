@@ -3,8 +3,8 @@ import { Icon, type IconName } from '../../components/Icon';
 import { RouteLink, linkedSentence } from '../../components/RouteLink';
 import { useT } from '../../lib/i18n';
 import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
-import { api, ApiError } from '../../lib/api';
-import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
+import { api, ApiError, lotEbayListings, type LotEbayListing } from '../../lib/api';
+import { handleFetchError, showErrorDialog, showSuccessToast } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, fmtDate, relTime } from '../../lib/format';
 import { lineSpecLabel } from '../../lib/lineGroups';
 import {
@@ -27,6 +27,8 @@ import {
 } from '../../lib/catalog';
 import { FormSkeleton } from '../../components/Skeleton';
 import { ActionsPanel, useRecordActions } from './actions/ActionsPanel';
+import { ebayListingPath } from '../../lib/route';
+import { SendToEbayDialog } from './ebay/ListingRows';
 
 type DetailRow = {
   id: string;
@@ -42,6 +44,7 @@ type DetailRow = {
   warehouse_short: string | null; warehouse_region: string | null;
   user_initials: string; user_name: string;
   created_at: string; order_id: string;
+  product_no?: number;
   // Its PO is at Ready to Pay or later: qty and unit cost are frozen.
   order_closed_book?: boolean;
   // Held for a shipped sale on a PO back at Reviewing: frozen the same way.
@@ -188,6 +191,28 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   // not on the page — editing `720-CT` quietly showed `M720-CTX`.
   const resolveMarketValue = useMarketLookup([item?.part_number]);
   const refMatch = resolveMarketValue(item?.part_number);
+
+  // The lot's eBay listings, and what of it is still free to send: its qty
+  // less what sell orders and eBay listings already hold.
+  const [ebayListings, setEbayListings] = useState<LotEbayListing[]>([]);
+  const [sellable, setSellable] = useState<number | null>(null);
+  const [ebayReload, setEbayReload] = useState(0);
+  const [sendingToEbay, setSendingToEbay] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    lotEbayListings(itemId)
+      .then(r => { if (alive) setEbayListings(r.items); })
+      .catch(handleFetchError);
+    api.post<{ items: { qty: number; committed_qty?: number }[] }>('/api/inventory/rows', { ids: [itemId] })
+      .then(r => {
+        if (!alive) return;
+        const row = r.items[0];
+        // No row: the lot isn't sellable (in transit, sold, archived).
+        setSellable(row ? Math.max(0, row.qty - (row.committed_qty ?? 0)) : 0);
+      })
+      .catch(handleFetchError);
+    return () => { alive = false; };
+  }, [itemId, ebayReload]);
 
   // Sell orders that drew from this inventory line.
   useEffect(() => {
@@ -349,6 +374,14 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
           </div>
         </div>
         <div className="page-actions">
+          <button
+            className="btn"
+            disabled={archived || !sellable}
+            title={sellable ? t('ebSendTip', { n: sellable }) : t('ebSendNoneTip')}
+            onClick={() => setSendingToEbay(true)}
+          >
+            <Icon name="package" size={13} /> {t('ebSendTitle')}
+          </button>
           <button className="btn" onClick={cancel}>{t('cancel')}</button>
           <button className="btn accent" disabled={!dirty || saving || archived} onClick={save}>
             <Icon name="check" size={13} /> {saving ? '…' : t('save')}
@@ -415,6 +448,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
               linkedSellOrders={linkedSellOrders}
             />
           )}
+          {tab === 'details' && <LotEbayCard listings={ebayListings} />}
           {tab === 'pricing' && (
             <PricingPanel
               item={item}
@@ -459,6 +493,21 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
         </div>
       )}
       {partQ.dialog}
+      {sendingToEbay && sellable !== null && (
+        <SendToEbayDialog
+          inventoryId={item.id}
+          lotRef={item.product_no != null ? `${item.order_id} #${item.product_no}` : item.order_id}
+          sellable={sellable}
+          defaultSpec={itemTitle}
+          defaultPrice={item.sell_price}
+          onClose={() => setSendingToEbay(false)}
+          onSent={(ids) => {
+            setSendingToEbay(false);
+            setEbayReload(n => n + 1);
+            showSuccessToast(t('ebToastSent', { ids: ids.join(', ') }));
+          }}
+        />
+      )}
     </>
   );
 }
@@ -722,6 +771,64 @@ function DetailsPanel({
         )}
       </div>
     </>
+  );
+}
+
+// Every eBay listing made from this lot, ended ones included: where its units went.
+function LotEbayCard({ listings }: { listings: LotEbayListing[] }) {
+  const { t, locale } = useT();
+  const tone: Record<LotEbayListing['status'], string> = { Queued: 'warn', Listed: 'info', Sold: 'pos', Ended: 'muted' };
+  const label: Record<LotEbayListing['status'], string> = {
+    Queued: 'ebTabPost', Listed: 'ebTabLive', Sold: 'ebTabSold', Ended: 'ebTabEnded',
+  };
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div>
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {t('ebLotCardTitle')}
+            <span className="chip muted" style={{ fontSize: 10.5 }}>{listings.length}</span>
+          </div>
+          <div className="card-sub">{t('ebLotCardSub')}</div>
+        </div>
+      </div>
+      {listings.length === 0 ? (
+        <div className="card-body" style={{ padding: 24, textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
+          {t('ebNotOnEbay')}
+        </div>
+      ) : (
+        <div style={{ padding: '4px 6px 10px' }}>
+          <table className="table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th>{t('ebColListing')}</th>
+                <th>{t('ebRowSpec')}</th>
+                <th>{t('status')}</th>
+                <th style={{ textAlign: 'right' }}>{t('ebColLeft')}</th>
+                <th style={{ textAlign: 'right' }}>{t('ebRowPrice')}</th>
+                <th>{t('ebColEbayItem')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {listings.map(l => (
+                <tr key={l.id}>
+                  <td><RouteLink to={ebayListingPath(l.id)} className="mono rec-link" style={{ fontSize: 12.5 }}>{l.id}</RouteLink></td>
+                  <td style={{ fontSize: 13 }}>{l.spec ?? l.title ?? '—'}</td>
+                  <td><span className={'chip ' + tone[l.status]} style={{ fontSize: 10.5 }}>{t(label[l.status])}</span></td>
+                  <td className="mono" style={{ textAlign: 'right' }}>{t('ebLeftOf', { n: l.remaining, total: l.qty })}</td>
+                  <td className="mono" style={{ textAlign: 'right' }}>{fmtUSD(l.listPrice, locale)}</td>
+                  <td>
+                    {l.ebayUrl && l.ebayItemId
+                      ? <a className="mono" href={l.ebayUrl} target="_blank" rel="noreferrer">{l.ebayItemId}</a>
+                      : <span style={{ color: 'var(--fg-subtle)' }}>—</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 

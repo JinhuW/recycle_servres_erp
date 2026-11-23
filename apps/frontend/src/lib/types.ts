@@ -8,7 +8,7 @@ import type { TrackedPackage } from './packages';
 import type { RamScanCheck } from '@recycle-erp/shared';
 export type { LinePhoto };
 
-export type Role = 'manager' | 'purchaser';
+export type Role = 'manager' | 'purchaser' | 'ebay';
 export type Lang = 'en' | 'zh';
 export type Category = 'RAM' | 'SSD' | 'HDD' | 'Other';
 

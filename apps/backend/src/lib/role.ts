@@ -24,3 +24,15 @@ export const requireManager: MiddlewareHandler<{
   if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   return next();
 };
+
+// Router- or route-level gate for an explicit set of roles, by raw `role` as
+// above.
+export function requireRole(...roles: Role[]): MiddlewareHandler<{
+  Bindings: Env;
+  Variables: { user: User };
+}> {
+  return async (c, next) => {
+    if (!roles.includes(c.var.user.role)) return c.json({ error: 'Forbidden' }, 403);
+    return next();
+  };
+}

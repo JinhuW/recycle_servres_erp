@@ -60,9 +60,27 @@ export function sellableLineStatuses(): string[] {
 
 type SqlFragment = postgres.PendingQuery<postgres.Row[]>;
 
+// An eBay listing reserves what it still offers while Queued or Listed: its qty
+// less the sales already Confirmed, whose units the sell order each one became
+// holds instead (counted above with the sell orders, so not twice). Sold and
+// Ended listings hold nothing. A Detected sale reserves nothing of its own: its
+// units are still inside the listing's remainder until someone confirms it.
+const ACTIVE_EBAY_STATUSES = ['Queued', 'Listed'] as const;
+
+export function activeEbayStatuses(): string[] {
+  return [...ACTIVE_EBAY_STATUSES];
+}
+
+/** Units a listing still offers, for a listing aliased `listing`. */
+export function ebayRemainingSql(sql: SqlLike, listing: SqlFragment): SqlFragment {
+  return sql`(${listing}.qty - (SELECT COALESCE(SUM(r_es.qty), 0)::int FROM ebay_sales r_es
+                 WHERE r_es.listing_id = ${listing}.id AND r_es.status = 'Confirmed'))`;
+}
+
 /**
- * Units of a line held by sell orders in `statuses` (committed by default) —
- * as a scalar SQL expression, for a SELECT list, a WHERE or an ORDER BY.
+ * Units of a line held by sell orders in `statuses` (committed by default) and
+ * by active eBay listings — as a scalar SQL expression, for a SELECT list, a
+ * WHERE or an ORDER BY.
  * `lineId` is the column naming the line in the outer query (`sql\`l.id\``).
  * `excludeOrderId` leaves one order out: the one being edited, whose own claim
  * is not competition. The inner aliases are deliberately odd so they can never
@@ -75,22 +93,35 @@ export function committedQtySql(
 ): SqlFragment {
   const statuses = opts.statuses ?? committedSellStatuses();
   const exclude = opts.excludeOrderId ?? null;
-  return sql`(SELECT COALESCE(SUM(c_sol.qty), 0)::int
+  return sql`((SELECT COALESCE(SUM(c_sol.qty), 0)::int
       FROM sell_order_lines c_sol
       JOIN sell_orders c_so ON c_so.id = c_sol.sell_order_id
      WHERE c_sol.inventory_id = ${lineId}
        AND c_so.status = ANY(${statuses}::text[])
-       AND (${exclude}::text IS NULL OR c_so.id <> ${exclude}::text))`;
+       AND (${exclude}::text IS NULL OR c_so.id <> ${exclude}::text))
+   + (SELECT COALESCE(SUM(${ebayRemainingSql(sql, sql`c_el`)}), 0)::int
+      FROM ebay_listings c_el
+     WHERE c_el.inventory_id = ${lineId}
+       AND c_el.status = ANY(${activeEbayStatuses()}::text[])))`;
 }
 
 export type LineClaim = {
   qty: number;
-  // One committed order to name in a refusal: "not enough left" with no order
-  // to go and look at leaves the manager stuck.
-  sellOrderId: string;
+  // One holder to name in a refusal: "not enough left" with nothing to go and
+  // look at leaves the manager stuck. At least one of the two is set.
+  sellOrderId: string | null;
+  ebayListingId: string | null;
   label: string | null;
   partNumber: string | null;
 };
+
+/** "sell order SO-1", "eBay listing EB-101", or both, for a refusal message. */
+export function claimHolders(claim: LineClaim): string {
+  return [
+    claim.sellOrderId && `sell order ${claim.sellOrderId}`,
+    claim.ebayListingId && `eBay listing ${claim.ebayListingId}`,
+  ].filter(Boolean).join(' and ');
+}
 
 /**
  * Committed claims per line, keyed by lower-cased line id; a line nothing
@@ -104,21 +135,39 @@ export async function committedClaimsByLine(
 ): Promise<Map<string, LineClaim>> {
   if (lineIds.length === 0) return new Map();
   const exclude = opts.excludeOrderId ?? null;
+  const ids = [...lineIds];
   const rows = await sql<{
-    id: string; qty: number; so_id: string; label: string | null; part_number: string | null;
+    id: string; qty: number; so_id: string | null; listing_id: string | null;
+    label: string | null; part_number: string | null;
   }[]>`
-    SELECT sol.inventory_id AS id, SUM(sol.qty)::int AS qty, MIN(so.id) AS so_id,
-           MIN(sol.label) AS label, MIN(sol.part_number) AS part_number
-    FROM sell_order_lines sol
-    JOIN sell_orders so ON so.id = sol.sell_order_id
-    WHERE sol.inventory_id = ANY(${[...lineIds]}::uuid[])
-      AND so.status = ANY(${committedSellStatuses()}::text[])
-      AND (${exclude}::text IS NULL OR so.id <> ${exclude}::text)
-      -- A line held at 0 claims nothing, so it never names the order holding it.
-      AND sol.qty > 0
-    GROUP BY sol.inventory_id
+    WITH so_claims AS (
+      SELECT sol.inventory_id AS id, SUM(sol.qty)::int AS qty, MIN(so.id) AS so_id,
+             MIN(sol.label) AS label, MIN(sol.part_number) AS part_number
+      FROM sell_order_lines sol
+      JOIN sell_orders so ON so.id = sol.sell_order_id
+      WHERE sol.inventory_id = ANY(${ids}::uuid[])
+        AND so.status = ANY(${committedSellStatuses()}::text[])
+        AND (${exclude}::text IS NULL OR so.id <> ${exclude}::text)
+        -- A line held at 0 claims nothing, so it never names the order holding it.
+        AND sol.qty > 0
+      GROUP BY sol.inventory_id
+    ),
+    ebay_claims AS (
+      SELECT t.id, SUM(t.qty)::int AS qty, MIN(t.listing_id) AS listing_id
+      FROM (
+        SELECT el.inventory_id AS id, el.id AS listing_id, ${ebayRemainingSql(sql, sql`el`)} AS qty
+        FROM ebay_listings el
+        WHERE el.inventory_id = ANY(${ids}::uuid[])
+          AND el.status = ANY(${activeEbayStatuses()}::text[])
+      ) t
+      WHERE t.qty > 0
+      GROUP BY t.id
+    )
+    SELECT COALESCE(s.id, e.id) AS id, (COALESCE(s.qty, 0) + COALESCE(e.qty, 0))::int AS qty,
+           s.so_id, e.listing_id, s.label, s.part_number
+    FROM so_claims s FULL JOIN ebay_claims e ON e.id = s.id
   `;
   return new Map(rows.map((r) => [r.id.toLowerCase(), {
-    qty: r.qty, sellOrderId: r.so_id, label: r.label, partNumber: r.part_number,
+    qty: r.qty, sellOrderId: r.so_id, ebayListingId: r.listing_id, label: r.label, partNumber: r.part_number,
   }]));
 }

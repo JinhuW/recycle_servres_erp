@@ -1,11 +1,11 @@
 import type postgres from 'postgres';
 import type { Sql } from 'postgres';
 import { nextHumanId } from '../lib/id-seq';
-import { committedClaimsByLine, isSellableLineStatus } from '../lib/sellCommitment';
+import { claimHolders, committedClaimsByLine, isSellableLineStatus } from '../lib/sellCommitment';
 import { writeSellOrderEvent } from './sellOrderAudit';
 import { assignSellProductNos } from './sellOrderNumbers';
 import {
-  convertToUsd, getLatestRateToUsd, type SupportedCurrency,
+  convertToUsd, getLatestRateToUsd, type FxLookup, type SupportedCurrency,
 } from '../lib/fx';
 
 export type SellLine = { inventoryId?: string | null; qty: number };
@@ -76,9 +76,9 @@ export async function validateSellLines(
     if (claim && qty > remaining) {
       const name = claim.partNumber
         ? `${claim.label} (${claim.partNumber})`
-        : claim.label ?? inventoryId;
+        : claim.label ?? ref;
       return `qty ${qty} exceeds the ${remaining} left of ${name}`
-        + ` — ${claim.qty} already committed to sell order ${claim.sellOrderId}`;
+        + ` — ${claim.qty} already committed to ${claimHolders(claim)}`;
     }
   }
   return null;
@@ -158,73 +158,72 @@ export async function insertSellOrderLine(
 // create_sell_order_draft MCP tool. Resolves the FX snapshot BEFORE opening the
 // transaction (getLatestRateToUsd may do an outbound fetch on a cold cache;
 // holding the id-counter + inventory locks across it would serialize all
-// sell-order creation). Lock-validates lines, then allocates the id, inserts
-// the header + lines + a 'created' audit event, all atomically.
+// sell-order creation).
 export async function createSellOrderDraft(
   sql: Sql,
   input: CreateDraftInput,
 ): Promise<CreateDraftResult> {
-  const isNonUsd = input.currency !== 'USD';
   const fx = await getLatestRateToUsd(sql, input.currency);
+  return sql.begin((tx) => createSellOrderDraftTx(tx, input, fx));
+}
 
-  let nextId!: string;
-  let products = 0;
-  let outcome: CreateDraftResult = {
-    ok: true, id: '', customerId: input.customerId, lineCount: input.lines.length, productCount: 0, currency: input.currency,
-  };
-
-  await sql.begin(async (tx) => {
-    // Validated before the id is drawn: returning here commits the tx, so a
-    // counter bumped first would stay bumped and every refused create would
-    // leave a hole in the SO numbering.
-    const err = await validateSellLines(tx, input.lines, null);
-    if (err) { outcome = { ok: false, error: err }; return; }
-    nextId = await nextHumanId(tx, 'SO', 'SO');
-    await tx`
-      INSERT INTO sell_orders (id, customer_id, status, notes, created_by,
-                               payment_received_by, currency_code, fx_rate_to_usd, fx_source)
-      VALUES (${nextId}, ${input.customerId}, 'Draft', ${input.notes ?? null}, ${input.actorUserId},
-              ${input.paymentReceivedBy ?? null}, ${input.currency}, ${fx.rate}, ${fx.source})
-    `;
-    for (let i = 0; i < input.lines.length; i++) {
-      const l = input.lines[i];
-      const unitPriceUsd = isNonUsd ? convertToUsd(l.unitPrice, fx.rate) : l.unitPrice;
-      await insertSellOrderLine(tx, nextId, {
-        inventoryId: l.inventoryId ?? null,
-        category: l.category,
-        label: l.label,
-        subLabel: l.subLabel ?? null,
-        partNumber: l.partNumber ?? null,
-        qty: l.qty,
-        unitPriceUsd,
-        warehouseId: l.warehouseId ?? null,
-        condition: l.condition ?? null,
-        position: i,
-        sourceCurrency: isNonUsd ? input.currency : null,
-        sourceUnitPrice: isNonUsd ? l.unitPrice : null,
-        sourceFxRate: isNonUsd ? fx.rate : null,
-        productNo: null,
-        appendBatch: null,
-      });
-    }
-    // Numbered once, in packing-list order, and never again.
-    await assignSellProductNos(tx, nextId);
-    // Products, by # — lots of one product share it.
-    [{ products }] = await tx<{ products: number }[]>`
-      SELECT COUNT(DISTINCT product_no)::int AS products FROM sell_order_lines WHERE sell_order_id = ${nextId}`;
-    await writeSellOrderEvent(tx, nextId, input.actorUserId, 'created', {
-      source: input.source,
-      status: 'Draft',
-      lineCount: input.lines.length,
-      productCount: products,
-      customerId: input.customerId,
-      currency: input.currency,
-      fxRateToUsd: fx.rate,
-      fxSource: fx.source,
+// The same, inside the caller's transaction: lock-validates lines, then
+// allocates the id, inserts the header + lines + a 'created' audit event. A
+// confirmed eBay sale creates its order here, under the listing's lock.
+export async function createSellOrderDraftTx(
+  tx: postgres.TransactionSql,
+  input: CreateDraftInput,
+  fx: FxLookup,
+): Promise<CreateDraftResult> {
+  const isNonUsd = input.currency !== 'USD';
+  // Validated before the id is drawn: a refusal still commits the caller's
+  // tx, so a counter bumped first would stay bumped and every refused create
+  // would leave a hole in the SO numbering.
+  const err = await validateSellLines(tx, input.lines, null);
+  if (err) return { ok: false, error: err };
+  const nextId = await nextHumanId(tx, 'SO', 'SO');
+  await tx`
+    INSERT INTO sell_orders (id, customer_id, status, notes, created_by,
+                             payment_received_by, currency_code, fx_rate_to_usd, fx_source)
+    VALUES (${nextId}, ${input.customerId}, 'Draft', ${input.notes ?? null}, ${input.actorUserId},
+            ${input.paymentReceivedBy ?? null}, ${input.currency}, ${fx.rate}, ${fx.source})
+  `;
+  for (let i = 0; i < input.lines.length; i++) {
+    const l = input.lines[i];
+    const unitPriceUsd = isNonUsd ? convertToUsd(l.unitPrice, fx.rate) : l.unitPrice;
+    await insertSellOrderLine(tx, nextId, {
+      inventoryId: l.inventoryId ?? null,
+      category: l.category,
+      label: l.label,
+      subLabel: l.subLabel ?? null,
+      partNumber: l.partNumber ?? null,
+      qty: l.qty,
+      unitPriceUsd,
+      warehouseId: l.warehouseId ?? null,
+      condition: l.condition ?? null,
+      position: i,
+      sourceCurrency: isNonUsd ? input.currency : null,
+      sourceUnitPrice: isNonUsd ? l.unitPrice : null,
+      sourceFxRate: isNonUsd ? fx.rate : null,
+      productNo: null,
+      appendBatch: null,
     });
+  }
+  // Numbered once, in packing-list order, and never again.
+  await assignSellProductNos(tx, nextId);
+  // Products, by # — lots of one product share it.
+  const [{ products }] = await tx<{ products: number }[]>`
+    SELECT COUNT(DISTINCT product_no)::int AS products FROM sell_order_lines WHERE sell_order_id = ${nextId}`;
+  await writeSellOrderEvent(tx, nextId, input.actorUserId, 'created', {
+    source: input.source,
+    status: 'Draft',
+    lineCount: input.lines.length,
+    productCount: products,
+    customerId: input.customerId,
+    currency: input.currency,
+    fxRateToUsd: fx.rate,
+    fxSource: fx.source,
   });
-
-  if (!outcome.ok) return outcome;
   return {
     ok: true, id: nextId, customerId: input.customerId, lineCount: input.lines.length,
     productCount: products, currency: input.currency,

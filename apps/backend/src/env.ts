@@ -62,6 +62,9 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
   if (src.FB_POOL_KEY && !/^[0-9a-fA-F]{64}$/.test(src.FB_POOL_KEY.trim())) {
     throw new Error('FB_POOL_KEY must be 64 hex characters (openssl rand -hex 32)');
   }
+  if (src.EBAY_KEY && !/^[0-9a-fA-F]{64}$/.test(src.EBAY_KEY.trim())) {
+    throw new Error('EBAY_KEY must be 64 hex characters (openssl rand -hex 32)');
+  }
   if (src.FLEET_WORKER_TOKEN_KEY && !/^[0-9a-fA-F]{64}$/.test(src.FLEET_WORKER_TOKEN_KEY.trim())) {
     throw new Error('FLEET_WORKER_TOKEN_KEY must be 64 hex characters (openssl rand -hex 32)');
   }
@@ -101,6 +104,11 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
     COORDINATOR_API_URL: src.COORDINATOR_API_URL,
     COORDINATOR_API_TOKEN: src.COORDINATOR_API_TOKEN,
     FB_POOL_KEY: src.FB_POOL_KEY,
+    EBAY_CLIENT_ID: src.EBAY_CLIENT_ID,
+    EBAY_CLIENT_SECRET: src.EBAY_CLIENT_SECRET, // pragma: allowlist secret
+    EBAY_RU_NAME: src.EBAY_RU_NAME,
+    EBAY_ENV: src.EBAY_ENV,
+    EBAY_KEY: src.EBAY_KEY,
     FLEET_WORKER_TOKEN_KEY: src.FLEET_WORKER_TOKEN_KEY,
     FLEET_WORKER_TOKEN_KEY_PREVIOUS: src.FLEET_WORKER_TOKEN_KEY_PREVIOUS,
     FLEET_ROLE: src.FLEET_ROLE,

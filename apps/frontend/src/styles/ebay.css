@@ -1,0 +1,118 @@
+/* The eBay desk (pages/desktop/DesktopEbay.tsx), its Send to eBay / Split
+   rows (pages/desktop/ebay/) and the eBay chips on the Inventory pages. */
+
+.eb-head-sub { color: var(--fg-muted); }
+
+/* Queue tabs: pills with a status dot and a count. */
+.eb-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
+.eb-tab {
+  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px;
+  border-radius: 999px; border: 1px solid var(--border-strong); background: var(--bg-elev);
+  color: var(--fg); font: inherit; font-size: 13px; cursor: pointer;
+}
+.eb-tab:hover { background: var(--bg-soft); }
+.eb-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.eb-tab[aria-selected="true"] { background: var(--fg); border-color: var(--fg); color: var(--bg-elev); }
+/* Sales waiting on the operator: the one loud thing on the page. */
+.eb-tab.eb-loud { background: var(--warn-soft); border-color: var(--warn-loud); color: var(--warn-strong); font-weight: 600; }
+.eb-tab-count { font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace); font-weight: 600; font-size: 12.5px; }
+.eb-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.eb-dot.post { background: var(--warn); }
+.eb-dot.confirm { background: var(--warn-loud); }
+.eb-dot.live { background: var(--info); }
+.eb-dot.sold { background: var(--pos); }
+.eb-dot.ended { background: var(--fg-subtle); }
+.eb-search { position: relative; flex: 1 1 220px; display: flex; justify-content: flex-end; }
+.eb-search .input { max-width: 340px; height: 36px; padding-left: 30px; font-size: 13px; }
+.eb-search svg { position: absolute; top: 50%; transform: translateY(-50%); color: var(--fg-subtle); pointer-events: none; }
+
+.eb-layout { display: flex; gap: 18px; align-items: flex-start; }
+.eb-main { flex: 1 1 auto; min-width: 0; overflow-x: auto; }
+.eb-main .data-table td { vertical-align: middle; }
+.eb-main tr.eb-row { cursor: pointer; }
+.eb-main tr.eb-row:hover td { background: var(--bg-soft); }
+.eb-main tr.eb-row.selected td { background: var(--accent-soft); }
+.eb-empty { padding: 28px 20px; color: var(--fg-subtle); font-size: 13px; }
+.eb-more { display: flex; justify-content: center; padding: 12px; border-top: 1px solid var(--border); }
+
+.eb-item { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.eb-item-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.eb-item-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; }
+.eb-item-sub { font-size: 11.5px; color: var(--fg-muted); }
+.eb-thumb {
+  width: 40px; height: 40px; flex-shrink: 0; border-radius: 8px; overflow: hidden;
+  display: grid; place-items: center; background: var(--bg-soft); border: 1px solid var(--border);
+  color: var(--fg-muted); font-size: 10.5px; font-weight: 600;
+}
+.eb-thumb img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Time on eBay: fills over 30 days, warn after. */
+.eb-shelf { display: flex; align-items: center; gap: 10px; min-width: 150px; }
+.eb-shelf-track { flex: 1; height: 6px; border-radius: 3px; background: var(--bg-soft); border: 1px solid var(--border); overflow: hidden; }
+.eb-shelf-fill { height: 100%; border-radius: 3px; background: var(--info); }
+.eb-shelf.over .eb-shelf-fill { background: var(--warn-loud); }
+.eb-shelf-days { width: 40px; text-align: right; font-size: 12px; color: var(--fg-muted); }
+.eb-shelf.over .eb-shelf-days { color: var(--warn-strong); font-weight: 600; }
+
+/* The listing panel beside the table. */
+.eb-panel {
+  flex: 0 0 400px; max-width: 420px; position: sticky; top: 16px;
+  max-height: calc(100vh - 32px); overflow-y: auto;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 20px; display: flex; flex-direction: column; gap: 16px;
+}
+.eb-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.eb-panel-title { font-weight: 600; font-size: 15px; line-height: 1.35; }
+.eb-panel-section { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--border); padding-top: 14px; }
+.eb-label { font-size: 12px; color: var(--fg-muted); }
+.eb-field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--fg-muted); }
+.eb-field .input, .eb-field .select { height: 34px; font-size: 13px; padding: 0 10px; }
+.eb-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.eb-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.eb-sib {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: 999px;
+  border: 1px solid var(--border-strong); background: var(--bg-elev); color: var(--fg); font: inherit; font-size: 12px; cursor: pointer;
+}
+.eb-sib:hover { background: var(--bg-soft); }
+.eb-photos { display: flex; gap: 8px; flex-wrap: wrap; }
+.eb-photos img { width: 64px; height: 64px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border); }
+.eb-form { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 10px; background: var(--accent-soft); }
+.eb-end { margin: 0; display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 10px; border: 1px solid var(--border); font-size: 13px; }
+.eb-end legend { font-size: 12px; color: var(--fg-muted); padding: 0 4px; }
+.eb-end label { display: flex; align-items: center; gap: 8px; }
+.eb-neg { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 40%, var(--bg-elev)); }
+.eb-panel .btn { white-space: nowrap; }
+.eb-stock { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.eb-stock > div { display: flex; flex-direction: column; gap: 2px; padding: 10px; border-radius: 8px; background: var(--bg-soft); }
+.eb-stock-n { font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace); font-size: 18px; font-weight: 600; }
+.eb-check { font-size: 12.5px; padding: 8px 10px; border-radius: 8px; background: var(--pos-soft); color: var(--accent-strong); }
+.eb-check.off { background: var(--warn-soft); color: var(--warn-strong); font-weight: 500; }
+.eb-hist { display: flex; gap: 12px; font-size: 12.5px; }
+.eb-hist > span:first-child { color: var(--fg-muted); width: 92px; flex-shrink: 0; }
+
+/* Sales to confirm: eBay's order beside what the ERP will record. */
+.eb-cards { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
+.eb-card { border: 1px solid color-mix(in oklch, var(--warn-loud) 45%, var(--border)); border-radius: 10px; overflow: hidden; }
+.eb-card > header { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; padding: 12px 16px; background: var(--warn-soft); font-size: 13px; }
+.eb-card-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px 28px; padding: 16px; }
+.eb-card-cols > div { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.eb-card > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 0 16px 16px; }
+
+/* Send to eBay / Split rows. */
+.eb-rows { display: grid; grid-template-columns: minmax(0, 1fr) 84px 120px 36px; gap: 8px 10px; align-items: center; }
+.eb-rows .input { height: 34px; font-size: 13px; padding: 0 10px; }
+.eb-rows .input.bad { border-color: var(--neg); }
+.eb-rows-hd { font-size: 12px; color: var(--fg-muted); }
+.eb-total { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 10px 12px; border-radius: 8px; background: var(--bg-soft); color: var(--fg-muted); }
+.eb-total.over { background: var(--neg-soft); color: var(--neg); font-weight: 500; }
+
+/* A lot's eBay listings on the Inventory pages. */
+.eb-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.eb-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 999px;
+  border: 1px solid var(--border-strong); background: var(--bg-elev); color: var(--fg);
+  font-size: 12px; white-space: nowrap; text-decoration: none;
+}
+.eb-chip:hover { background: var(--bg-soft); }
+.eb-chip .mono { font-weight: 600; font-size: 11.5px; }
+.eb-none { color: var(--fg-subtle); font-size: 12px; }
