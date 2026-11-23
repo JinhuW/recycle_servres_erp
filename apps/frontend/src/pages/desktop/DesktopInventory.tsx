@@ -143,6 +143,8 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   // Hide lots already claimed by a pending sell order (Draft/Shipped/Awaiting
   // payment) so a fresh sell order doesn't re-pick committed stock.
   const [hidePending, setHidePending] = usePersisted<boolean>('desktop.inventory.hidePending', false);
+  // Lots on eBay, or not: a manager's filter, like the listings themselves.
+  const [ebayFilter, setEbayFilter] = usePersisted<'all' | 'listed' | 'none'>('desktop.inventory.ebay', 'all');
   const [warehouseFilter, setWarehouseFilter] = usePersisted<string>('desktop.inventory.warehouseFilter', 'all');
   const [search, setSearch] = usePersisted<string>('desktop.inventory.search', '');
   const [selected, setSelected] = usePersisted<Set<string>>('desktop.inventory.selected', new Set());
@@ -278,6 +280,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     if (filter !== 'all') params.set('category', filter);
     if (showSold) params.set('includeSold', '1');
     if (isManager && hidePending) params.set('hidePending', '1');
+    if (isManager && ebayFilter !== 'all') params.set('ebay', ebayFilter);
     if (warehouseFilter !== 'all') params.set('warehouse', warehouseFilter);
     if (search.trim()) params.set('q', search.trim());
     for (const spec of attrSchema) {
@@ -285,7 +288,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
       if (vals && vals.length) params.set(spec.param, vals.join(','));
     }
     return params.toString();
-  }, [filter, showSold, hidePending, warehouseFilter, search, attrSchema, attrFilters]);
+  }, [filter, showSold, hidePending, ebayFilter, warehouseFilter, search, attrSchema, attrFilters]);
 
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -779,6 +782,15 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                 </span>
                 <span>{t('invHidePending')}</span>
               </label>
+            )}
+            {isManager && (
+              <div className="seg" role="group" aria-label={t('ebInvFilter')}>
+                {([['all', 'ebInvAll'], ['listed', 'ebInvOn'], ['none', 'ebInvOff']] as const).map(([v, k]) => (
+                  <button key={v} className={ebayFilter === v ? 'active' : ''} aria-pressed={ebayFilter === v} onClick={() => setEbayFilter(v)}>
+                    {t(k)}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
