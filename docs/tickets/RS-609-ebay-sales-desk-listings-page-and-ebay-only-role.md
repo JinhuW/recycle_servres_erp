@@ -2,13 +2,13 @@
 id: RS-609
 title: eBay sales desk: listings page and eBay-only role
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-11-23
 reporter: jinhu
 branch: feat/ebay-desk-backend
-pr:
-version:
+pr: 1249
+version: 1.476.0
 related: []
 ---
 
@@ -37,19 +37,19 @@ follow-up.
 
 ## Acceptance criteria
 
-- [ ] A manager creates a member with role eBay; that member reaches only the
+- [x] A manager creates a member with role eBay; that member reaches only the
       eBay desk and the app shell's boot endpoints, and gets 403 everywhere else.
-- [ ] A manager sends part of an inventory lot to eBay as one or more listings;
+- [x] A manager sends part of an inventory lot to eBay as one or more listings;
       the units are reserved and the sell-order picker offers less. Listing more
       than is free is refused.
-- [ ] The operator links the eBay item #, marks units sold (whole or in parts)
+- [x] The operator links the eBay item #, marks units sold (whole or in parts)
       or ends a listing as not sold; ending gives the remainder back to stock.
-- [ ] A confirmed sale becomes a sell order to customer eBay at Awaiting
+- [x] A confirmed sale becomes a sell order to customer eBay at Awaiting
       payment, with the eBay order # and fees in its note; a listing whose last
       unit sells becomes Sold.
-- [ ] A Queued listing can be split into several listings of the same lot.
-- [ ] Listing JSON never carries cost, supplier or purchaser.
-- [ ] The inventory list and the lot page show the lot's eBay listings.
+- [x] A Queued listing can be split into several listings of the same lot.
+- [x] Listing JSON never carries cost, supplier or purchaser.
+- [x] The inventory list and the lot page show the lot's eBay listings.
 
 ## Out of scope
 
