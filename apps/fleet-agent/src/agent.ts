@@ -162,7 +162,12 @@ export class Agent {
       bootAt: this.bootAt,
       imageAllowed: imageAllowed(desired.image, this.o.imagePrefixes),
       staggerMs: this.o.staggerMs,
-      restarting: Object.entries(this.memory.pending).filter(([, p]) => p.restart && p.confirmed).map(([id]) => id),
+      // Unconfirmed too once nothing runs under the id: a `docker rm` that
+      // failed after the stop leaves the browser exited but the stop unposted,
+      // and that worker is still the release's to run again.
+      restarting: Object.entries(this.memory.pending)
+        .filter(([id, p]) => p.restart && (p.confirmed || !observed.some((c) => c.worker_id === id && c.running)))
+        .map(([id]) => id),
     });
     result.actions = planned.actions;
     if (Object.keys(planned.holds).length) {
