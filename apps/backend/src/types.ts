@@ -10,8 +10,14 @@ export type Env = {
   JWT_SECRET: string;
   JWT_ISSUER?: string;
   STUB_LOW_CONF?: string;
+  // AI providers: any one key turns real model calls on. Which model each
+  // feature uses is set on Settings ▸ AI models; AI_MODEL (or the older
+  // OPENROUTER_OCR_MODEL) is the default when nothing is set there.
   OPENROUTER_API_KEY?: string;
   OPENROUTER_OCR_MODEL?: string;
+  ANTHROPIC_API_KEY?: string;
+  OPENAI_API_KEY?: string;
+  AI_MODEL?: string;
   // Facebook chat hub (services/fbChatTelegram.ts): the bot that mirrors the
   // owner's Marketplace chats into forum topics, and the supergroup it posts
   // to. Either unset: chats are stored, Telegram is never called. The token

@@ -6,6 +6,7 @@ const t = (key: string, vars?: Record<string, string | number>) =>
 
 const model = (over: Partial<AiModel>): AiModel => ({
   id: 'openai/gpt-4o-mini',
+  provider: 'openrouter',
   name: 'OpenAI: GPT-4o-mini',
   contextLength: 128000,
   promptPerM: 0.15,

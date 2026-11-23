@@ -10,7 +10,7 @@
 import type {AlertSender} from '../alerts.ts';
 import {claimPosts, recordEvaluation, rejectPost, releasePostFailure} from '../claims.ts';
 import type {Sql} from '../db.ts';
-import {evaluatePost, type Evaluation} from '../llm.ts';
+import {evaluatePost, type Evaluation, type LlmKeys} from '../llm/index.ts';
 import type {Logger} from '../logger.ts';
 import {
   candidateConfig,
@@ -28,7 +28,7 @@ export const EVALUATE_BATCH_SIZE = 3;
 export interface EvaluateDeps {
   sql: Sql;
   workerId: string;
-  apiKey: string;
+  keys: LlmKeys;
   settings: SettingsStore;
   /** Sends the dev-chat review of a post only the candidate flagged. */
   alerts: AlertSender;
@@ -82,7 +82,7 @@ export async function evaluateOnce(deps: EvaluateDeps): Promise<boolean> {
       selftext: post.selftext,
       author: post.author,
     };
-    const result = await evaluatePost(input, {apiKey: deps.apiKey, ...live});
+    const result = await evaluatePost(input, {keys: deps.keys, ...live});
 
     if (result.kind === 'error') {
       // The candidate waits for the retry too, so both verdicts on a post
@@ -100,7 +100,7 @@ export async function evaluateOnce(deps: EvaluateDeps): Promise<boolean> {
 
     let candidateVerdict: Evaluation | null = null;
     if (candidate && candidateVersionId !== null) {
-      const trial = await evaluatePost(input, {apiKey: deps.apiKey, ...candidate});
+      const trial = await evaluatePost(input, {keys: deps.keys, ...candidate});
       if (trial.kind === 'ok') {
         candidateVerdict = trial.evaluation;
         await recordCandidateVerdict(sql, post.reddit_id, candidateVersionId, candidateVerdict);

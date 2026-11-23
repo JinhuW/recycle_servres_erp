@@ -42,7 +42,7 @@ function evaluateDeps(workerId = 'worker-1'): EvaluateDeps {
   return {
     sql: db.sql,
     workerId,
-    apiKey: 'test-key',
+    keys: {openrouter: 'test-key'},
     settings: new SettingsStore(db.sql, 0),
     alerts: createTelegramAlertSender('bot-token'),
     logger: createLogger(workerId, 'error'),

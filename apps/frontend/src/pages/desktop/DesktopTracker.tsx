@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
-import { ModelPicker, useAiModels } from '../../components/ModelPicker';
+import { useAiModels } from '../../components/ModelPicker';
+import { ProviderModelSelect } from '../../components/ProviderModelSelect';
 import { Skeleton } from '../../components/Skeleton';
 import { ApiError } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
@@ -899,7 +900,7 @@ function ModelModal({ model, onClose, onSaved, onError }: {
       <div className="modal-body">
         <div className="field">
           <label className="label" htmlFor="trk-model">{t('trkSetModel')}</label>
-          <ModelPicker id="trk-model" value={value} onChange={setValue} filter={EVALUATOR_MODEL}
+          <ProviderModelSelect id="trk-model" value={value} onChange={setValue} filter={EVALUATOR_MODEL}
             invalid={hint !== null} unavailableText={t('trkModelsUnavailable')} />
           <span className={`help${hint !== null ? ' rt-help-invalid' : ''}`}>
             {hint ?? t('trkModelHelp')}

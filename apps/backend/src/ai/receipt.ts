@@ -5,7 +5,8 @@
 // filename — an upload must never fail, and a canned stub name would be
 // worse than no rename, so unlike scanLabel there is no stub provider here.
 import type { Env } from '../types';
-import { openRouterImageJson } from './openrouter';
+import { aiImageJson } from './llm';
+import { featureProvider } from './index';
 import { ocrCallsTotal } from '../metrics';
 import { log } from '../lib/log';
 
@@ -93,17 +94,19 @@ export function suffixFilename(name: string, suffix: string): string {
 export type ReceiptReading = { method: ReceiptMethod; amount: string; currency: 'CNY' | 'USD' | null };
 
 export async function readReceipt(env: Env, file: File): Promise<ReceiptReading | null> {
-  if (!env.OPENROUTER_API_KEY || !file.type.startsWith('image/')) return null;
+  if (!file.type.startsWith('image/')) return null;
+  const provider = await featureProvider(env, 'receipt');
+  if (provider === 'stub') return null;
   try {
-    const json = await openRouterImageJson(env, RECEIPT_PROMPT, await file.arrayBuffer());
-    ocrCallsTotal.inc({ provider: 'openrouter', outcome: 'ok' });
+    const json = await aiImageJson(env, RECEIPT_PROMPT, await file.arrayBuffer(), { feature: 'receipt' });
+    ocrCallsTotal.inc({ provider, outcome: 'ok' });
     const method = typeof json.method === 'string' && (RECEIPT_METHODS as readonly string[]).includes(json.method)
       ? json.method as ReceiptMethod : null;
     const amount = normalizeAmount(json.amount);
     if (!method || !amount || Number(amount) > 1_000_000_000) return null;
     return { method, amount, currency: json.currency === 'CNY' || json.currency === 'USD' ? json.currency : null };
   } catch (e) {
-    ocrCallsTotal.inc({ provider: 'openrouter', outcome: 'error' });
+    ocrCallsTotal.inc({ provider, outcome: 'error' });
     aiLog.warn('receipt recognition failed', e);
     return null;
   }

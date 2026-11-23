@@ -13,6 +13,8 @@ export type Role = 'worker' | 'api';
 export interface Config {
   readonly databaseUrl: string;
   readonly openrouterApiKey: string;
+  readonly anthropicApiKey: string;
+  readonly openaiApiKey: string;
   readonly alertTransport: AlertTransport;
   readonly telegramBotToken: string;
   readonly role: Role;
@@ -99,12 +101,24 @@ export function loadConfig(): Config {
   }
   const redditAuth = redditClientId ? {clientId: redditClientId, clientSecret: redditClientSecret} : null;
 
+  // A worker needs some provider to judge with; which one is the llm_model
+  // setting's business, so a key it lacks surfaces as a per-post error.
+  const openrouterApiKey = process.env['OPENROUTER_API_KEY'] ?? '';
+  const anthropicApiKey = process.env['ANTHROPIC_API_KEY'] ?? '';
+  const openaiApiKey = process.env['OPENAI_API_KEY'] ?? '';
+  if (role === 'worker' && !openrouterApiKey && !anthropicApiKey && !openaiApiKey) {
+    throw new Error(
+      `One of OPENROUTER_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY is required (role=${role}). `
+        + 'Copy .env.example to .env and fill it in.',
+    );
+  }
+
   return {
     databaseUrl: required('DATABASE_URL', role),
     alertTransport,
-    // The API role never calls OpenRouter, but it does expose a Telegram test
-    // endpoint, so only the key it cannot use is optional there.
-    openrouterApiKey: role === 'worker' ? required('OPENROUTER_API_KEY', role) : (process.env['OPENROUTER_API_KEY'] ?? ''),
+    openrouterApiKey,
+    anthropicApiKey,
+    openaiApiKey,
     telegramBotToken: alertTransport === 'telegram'
       ? required('TELEGRAM_BOT_TOKEN', role)
       : (process.env['TELEGRAM_BOT_TOKEN'] ?? ''),

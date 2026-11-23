@@ -5,8 +5,8 @@
 // the user retries the shot).
 import type { Env } from '../types';
 import type { OcrProvider } from './types';
-import { pickProvider } from './index';
-import { openRouterImageJson } from './openrouter';
+import { featureProvider } from './index';
+import { aiImageJson } from './llm';
 import { ocrCallsTotal } from '../metrics';
 
 const PAYPAL_TXN_PROMPT = `You are reading a PayPal payment confirmation or activity screenshot. Extract two things.
@@ -61,14 +61,14 @@ export type PaypalTxnScan = {
 };
 
 export async function extractPaypalTxn(env: Env, imageBytes: ArrayBuffer): Promise<PaypalTxnScan> {
-  const provider = pickProvider(env);
+  const provider = await featureProvider(env, 'paypal');
   if (provider === 'stub') {
     ocrCallsTotal.inc({ provider, outcome: 'stub' });
     return { txnId: '7AB12345CD678901E', sellerName: 'Sample Seller', confidence: 0.9, provider };
   }
   let json: Record<string, unknown>;
   try {
-    json = await openRouterImageJson(env, PAYPAL_TXN_PROMPT, imageBytes);
+    json = await aiImageJson(env, PAYPAL_TXN_PROMPT, imageBytes, { feature: 'paypal' });
     ocrCallsTotal.inc({ provider, outcome: 'ok' });
   } catch (e) {
     ocrCallsTotal.inc({ provider, outcome: 'error' });

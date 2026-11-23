@@ -11,12 +11,12 @@
 // dismissed by a manager.
 
 import { createHash } from 'node:crypto';
-import { canonicalPartNumber, isRealPhotoUrl, reconcileRamScan } from '@recycle-erp/shared';
+import { canonicalPartNumber, isRealPhotoUrl, reconcileRamScan, isModelRef } from '@recycle-erp/shared';
 import type { Sql } from 'postgres';
 import type { SqlLike } from '../db';
 import type { Env, LineCategory } from '../types';
 import { pickProvider } from '../ai';
-import { aiModel, type AiUsage } from '../ai/openrouter';
+import { resolveModel, type AiUsage } from '../ai/llm';
 import { lookUpPartNumber, rereadLabel } from '../ai/poReview';
 import { allLimited } from '../lib/concurrency';
 import { getWorkspaceSetting } from '../lib/settings';
@@ -33,7 +33,7 @@ const reviewLog = log.child({ module: 'po-ai-review' });
 
 export type PoAiReviewSetting = {
   enabled: boolean;
-  /** OpenRouter model; null → OPENROUTER_OCR_MODEL. */
+  /** A model ref; null → the Settings ▸ AI models default. */
   model: string | null;
   webLookup: boolean;
   maxCostPerPoUsd: number;
@@ -54,7 +54,7 @@ export function isPoAiReviewSetting(v: unknown): boolean {
   return (o.enabled === undefined || typeof o.enabled === 'boolean')
     && (o.webLookup === undefined || typeof o.webLookup === 'boolean')
     && (o.model === undefined || o.model === null
-      || (typeof o.model === 'string' && /^[\w.-]+\/[\w.:-]+$/.test(o.model)))
+      || isModelRef(o.model))
     && (o.maxCostPerPoUsd === undefined
       || (typeof o.maxCostPerPoUsd === 'number' && o.maxCostPerPoUsd > 0 && o.maxCostPerPoUsd <= 10));
 }
@@ -228,8 +228,8 @@ async function reviewLines(
   const rows = await loadLines(sql, orderId);
   const lines = rows.map(toReviewLine);
   const market = await marketRefs(sql, lines);
-  const llm = pickProvider(env) === 'openrouter';
-  const model = aiModel(env, { model: setting.model ?? undefined });
+  const llm = pickProvider(env) !== 'stub';
+  const model = await resolveModel(env, { model: setting.model ?? undefined });
   const callOpts = { model, onUsage: budget.add };
 
   const perLine = rows.map((r, i) => async (): Promise<Finding[]> => {
@@ -309,7 +309,7 @@ export async function runPoAiReview(
     });
   }
   findings.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
-  const model = pickProvider(env) === 'openrouter' ? aiModel(env, { model: setting.model ?? undefined }) : 'stub';
+  const model = pickProvider(env) !== 'stub' ? await resolveModel(env, { model: setting.model ?? undefined }) : 'stub';
 
   await sql.begin(async (tx) => {
     // The orders row before the review row: a move or revert holds the order

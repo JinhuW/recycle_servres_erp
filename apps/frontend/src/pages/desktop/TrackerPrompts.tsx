@@ -1,7 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
-import { ModelPicker, useAiModels } from '../../components/ModelPicker';
+import { useAiModels } from '../../components/ModelPicker';
+import { ProviderModelSelect } from '../../components/ProviderModelSelect';
 import { Skeleton } from '../../components/Skeleton';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -365,7 +366,8 @@ function CandidateModal({ prompt: initialPrompt, model: initialModel, liveModel,
             instead of past the body's scroll edge. */}
         <div className="field">
           <label className="label" htmlFor="trk-trial-model">{t('trkTrialModel')}</label>
-          <ModelPicker id="trk-trial-model" value={model} onChange={setModel} placeholder={liveModel}
+          <ProviderModelSelect id="trk-trial-model" value={model} onChange={setModel}
+            defaultLabel={t('aiUseDefaultModel', { model: liveModel })}
             filter={EVALUATOR_MODEL} invalid={hint !== null} unavailableText={t('trkModelsUnavailable')} />
           <span className={`help${hint !== null ? ' rt-help-invalid' : ''}`}>
             {hint ?? t('trkTrialModelHelp', { model: liveModel })}

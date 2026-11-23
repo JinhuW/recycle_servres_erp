@@ -1,8 +1,13 @@
+import type { AiProviderId } from '@recycle-erp/shared';
 import { api } from './api';
 
-/** One entry of OpenRouter's catalogue, as the backend trims it. */
+/**
+ * One entry of the model catalogue, as the backend trims it. `id` is a model
+ * ref: bare for OpenRouter, `anthropic:…` / `openai:…` for the others.
+ */
 export type AiModel = {
   id: string;
+  provider: AiProviderId;
   name: string;
   contextLength: number | null;
   /** USD per million tokens; null for routers, which price what they route to. */
@@ -40,10 +45,22 @@ export function loadAiModels(): Promise<AiModel[]> {
   return inflight;
 }
 
+export type AiProviderStatus = { id: AiProviderId; label: string; configured: boolean; keyName: string };
+
+let providers: Promise<{ providers: AiProviderStatus[]; envModel: string }> | null = null;
+
+/** Which providers have a key on the server; fetched once per session. */
+export function loadAiProviders(): Promise<{ providers: AiProviderStatus[]; envModel: string }> {
+  providers ??= api.get<{ providers: AiProviderStatus[]; envModel: string }>('/api/ai/providers')
+    .catch((e: unknown) => { providers = null; throw e; });
+  return providers;
+}
+
 /** Called on logout, beside the other per-session caches. */
 export function resetAiModels(): void {
   cached = null;
   inflight = null;
+  providers = null;
 }
 
 type Translate = (key: string, vars?: Record<string, string | number>) => string;

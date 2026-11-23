@@ -713,8 +713,9 @@ A purchaser can drag only their own Draft.
       page's import is for that.
 - **AI review checks every product of a PO in Review mode** (v1.245.0, desktop,
   managers). Off by default; **Settings → General → AI review of purchase
-  orders** turns it on and sets a per-PO cost cap, the OpenRouter model, and
-  whether part numbers may be looked up on the web.
+  orders** turns it on and sets a per-PO cost cap, the provider and model
+  (v1.474.0: any provider on Settings ▸ AI models; Default uses its default
+  model), and whether part numbers may be looked up on the web.
   - Moving a PO to Reviewing queues a review in the same transaction. A
     background loop runs it within seconds. Moving the PO back to Draft or In
     Transit cancels a review that hasn't run yet, and so does archiving it
@@ -4692,14 +4693,26 @@ inventory search, sell-order draft creation.
 
 ## AI scanning and OCR
 
+- **AI providers and models are switched in the UI** (v1.474.0, desktop,
+  managers). **Settings ▸ AI models** shows which providers have an API key
+  on the server (OpenRouter, Anthropic for Claude, OpenAI; keys are never
+  shown) and picks the model for label scan, receipt reading, PayPal
+  screenshots and serial numbers, each with a provider dropdown and a
+  model dropdown that lists only that provider's models. A row left on
+  Default uses the default model, and that falls back to the server's
+  `AI_MODEL`. A change takes effect within a minute, with no redeploy. A
+  provider without a key can't be picked. The same two dropdowns pick the
+  PO AI review's model and the Reddit tracker's evaluator model, which can
+  now run on Claude or OpenAI directly as well as through OpenRouter.
+
 - **Label scanner for SSD lines**, gated by `categories.ai_capture` (v1.96.0),
   with high-res capture and client-side MozJPEG compression (v0.1.1).
 - Mobile QR/serial scanning: a button on the serial-number field (v1.83.0),
   single-shot — capture, confirm, auto-close (v1.83.2).
 - **AI read for damaged codes** (v1.192.0): the serial scanner on the phone
   Submit form has a QR / AI switch (opens on QR). In AI mode a shutter sends
-  the framed shot to `POST /api/scan/serial`, the same OpenRouter vision model
-  as label OCR reads the *printed* S/N, and the read is shown with Use /
+  the framed shot to `POST /api/scan/serial`, the vision model picked for
+  serial numbers on Settings ▸ AI models reads the *printed* S/N, and the read is shown with Use /
   Retake — never auto-added. Nothing is stored. The Shipping tracking scan has
   no switch.
 - **Serials are chips, in both shells** (v1.126.0): scanned, typed or pasted,
