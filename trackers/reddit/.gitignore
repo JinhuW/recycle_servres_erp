@@ -5,8 +5,10 @@ data/
 *.log
 .DS_Store
 
-# secrets kept next to the deploy tooling — never committed
-secrets.env
+# secrets kept next to the deploy tooling — never committed, backups and
+# variants included; only the template is tracked
+secrets.env*
+!secrets.env.example
 .api-token
 
 # terraform
