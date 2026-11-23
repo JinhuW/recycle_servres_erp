@@ -8,6 +8,8 @@ import { fmtUSD, fmtUSD0, fmtDateShort } from '../../lib/format';
 import { statusTone } from '../../lib/status';
 import { useT } from '../../lib/i18n';
 import { SerialNumbers } from '../../components/SerialNumbers';
+import type { EbayLink } from '../../lib/api';
+import { EbayChips } from './ebay/EbayChips';
 import { isInventorySortCol, productLabel, productSpec, sortProductGroups, type InventorySortCol } from '@recycle-erp/shared';
 
 export type ProductLot = {
@@ -47,6 +49,8 @@ export type ProductLot = {
   description?: string | null;
   item_type?: string | null;
   rpm?: number | null;
+  // The lot's eBay listings, ended ones left out. Managers only.
+  ebay?: EbayLink[];
 };
 
 export type ProductGroup = {
@@ -155,7 +159,8 @@ export function InventoryProductTable({
     + (cols.qty ? 1 : 0)
     + (cols.warehouse ? 1 : 0)
     + (showCost ? 1 : 0)
-    + (cols.sellPrice ? 1 : 0);
+    + (cols.sellPrice ? 1 : 0)
+    + (isManager ? 1 : 0);
 
   return (
     <>
@@ -185,6 +190,7 @@ export function InventoryProductTable({
           {showCost && sortableTh('cost', t('eoCost'), 'right')}
           {cols.sellPrice && sortableTh('sell', t('mktLegendSell'), 'right')}
           {sortableTh('collected', t('iptLastCollected'))}
+          {isManager && <th style={{ minWidth: 220 }}>{t('ebColEbay')}</th>}
         </tr>
       </thead>
       <tbody>
@@ -291,6 +297,11 @@ export function InventoryProductTable({
                     </>
                   ) : <span className="muted">—</span>}
                 </td>
+                {isManager && (
+                  <td>
+                    <EbayChips links={g.lines.some(l => l.ebay) ? g.lines.flatMap(l => l.ebay ?? []) : undefined} />
+                  </td>
+                )}
               </tr>
 
               {isOpen && (
@@ -318,6 +329,7 @@ export function InventoryProductTable({
                           {cols.warehouse && <th>{t('warehouse')}</th>}
                           {cols.qty && <th className="num">{t('qty')}</th>}
                           <th>{t('status')}</th>
+                          {isManager && <th>{t('ebColEbay')}</th>}
                           <th className="col-actions" style={{ width: 90 }}>{t('actions')}</th>
                         </tr>
                       </thead>
@@ -413,6 +425,7 @@ export function InventoryProductTable({
                                 <td className="num mono" style={{ fontWeight: 600 }}>{l.qty}</td>
                               )}
                               <td><span className={'chip dot ' + statusTone(l.status)}>{l.status}</span></td>
+                              {isManager && <td><EbayChips links={l.ebay} /></td>}
                               <td className="col-actions">
                                 <div style={{ display: 'inline-flex', gap: 4 }}>
                                   <button

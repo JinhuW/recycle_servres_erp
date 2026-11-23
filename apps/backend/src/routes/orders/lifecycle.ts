@@ -17,7 +17,7 @@ import { normalizeTracking, type Carrier, type PackageSource } from '@recycle-er
 import { type Env, type User } from '../../types';
 import { PAYPAL_TXN_STRICT, normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
-import { type OrdersEnv, committedLinesBody, describeSellOrders, handoffByErr, isOrderPayment, isPaymentMethod, cashRefused, CASH_RETIRED_MSG, pickedPaidByErr, PACKAGE_DELIVERED_MSG, parseCommissionRate, PAYER_BOOKED_MSG, registerIfNeeded, resolveOrderOwner, sourceErr, stageMovedBody, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, unackedRevertFrag, warehouseErr } from './shared';
+import { type OrdersEnv, committedLinesBody, describeHolders, handoffByErr, isOrderPayment, isPaymentMethod, cashRefused, CASH_RETIRED_MSG, pickedPaidByErr, PACKAGE_DELIVERED_MSG, parseCommissionRate, PAYER_BOOKED_MSG, registerIfNeeded, resolveOrderOwner, sourceErr, stageMovedBody, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, unackedRevertFrag, warehouseErr } from './shared';
 
 const lifecycleRoutes = new Hono<OrdersEnv>();
 
@@ -196,6 +196,7 @@ async function setArchived(c: OrderCtx, archive: boolean) {
     | { kind: 'noChange' }
     | { kind: 'committedLines'; sellOrders: ArchiveSellOrderConflict[] }
     | { kind: 'transferClaimed'; offendingLineIds: string[] }
+    | { kind: 'ebayListed'; offendingLineIds: string[]; ebayListingIds: string[] }
     | { kind: 'ok' };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
@@ -257,6 +258,11 @@ async function setArchived(c: OrderCtx, archive: boolean) {
       error: 'Products are out on an open transfer order — receive or discard that transfer first.',
       offendingLineIds: outcome.offendingLineIds,
     }, 409);
+  }
+  if (outcome.kind === 'ebayListed') {
+    return c.json(committedLinesBody(u, outcome.offendingLineIds, { sellOrderIds: [], ebayListingIds: outcome.ebayListingIds },
+      `Products in this order are on ${describeHolders({ sellOrderIds: [], ebayListingIds: outcome.ebayListingIds })} — end them on the eBay desk first.`,
+      'Products in this order are on eBay — a manager has to end those listings first.'), 409);
   }
   return c.json({ ok: true });
 }
@@ -413,8 +419,8 @@ function advanceRefusedResponse(
         manager: outcome.manager,
       }, 409);
     case 'committedLines':
-      return c.json(committedLinesBody(c.var.user, outcome.offendingLineIds, outcome.sellOrderIds,
-        `Products committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
+      return c.json(committedLinesBody(c.var.user, outcome.offendingLineIds, outcome,
+        `Products committed to ${describeHolders(outcome)} — ${outcome.ebayListingIds.length ? 'cancel or end those' : 'cancel those sell orders'} first.`,
         'Products in this order are on open sell orders — a manager has to move it.'), 409);
     case 'transferClaimed':
       return c.json({

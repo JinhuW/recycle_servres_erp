@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { LineHeldChips, lineHeldTitle } from '../../components/LineHeldChips';
 import { isPricedSellPrice, parseSerials, serialIssue } from '@recycle-erp/shared';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { CurrencyPicker, type Currency } from '../../components/CurrencyPicker';
@@ -924,9 +925,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               <LineSpecChips line={l} withType />
             </div>
             {held && (
-              <span className="chip info" title={t('lineShippedReadOnly', { so: shippedOn.join(', ') })}>
-                <Icon name="lock" size={10} /> {t('lineShippedChip', { so: shippedOn.join(', ') })}
-              </span>
+              <LineHeldChips holders={shippedOn} t={t} />
             )}
             {aiIssues.has(l.id) && (
               <span className="chip warn" title={t('aiRevLineChipTip', { n: aiIssues.get(l.id)! })}>
@@ -1030,7 +1029,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
             <button
               type="button"
               className={'btn ghost icon-only sm bc-editbtn' + (editing?.line._id === l.id ? ' on' : '')}
-              title={held ? t('lineShippedReadOnly', { so: shippedOn.join(', ') }) : t('bcEditTip')}
+              title={held ? lineHeldTitle(t, shippedOn) : t('bcEditTip')}
               aria-label={t('bcEditTip')}
               disabled={!ready || held}
               onClick={e => { e.stopPropagation(); openEdit(l); }}

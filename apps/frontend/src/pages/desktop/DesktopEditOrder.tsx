@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { LineHeldChips, lineHeldTitle } from '../../components/LineHeldChips';
 import type { ReactNode } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
@@ -1552,9 +1553,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                               <div style={{ fontWeight: 500 }}>{itemType(l)}</div>
                               <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{itemSpec(l)}</div>
                               {shippedOn.length > 0 && (
-                                <span className="chip info" style={{ marginTop: 4 }} title={t('lineShippedReadOnly', { so: shippedOn.join(', ') })}>
-                                  <Icon name="lock" size={10} /> {t('lineShippedChip', { so: shippedOn.join(', ') })}
-                                </span>
+                                <LineHeldChips holders={shippedOn} t={t} style={{ marginTop: 4 }} />
                               )}
                             </>
                           ) : (
@@ -1587,7 +1586,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                         <button
                           className="btn icon sm"
                           onClick={e => { e.stopPropagation(); removeLine(i); }}
-                          title={shippedOn.length ? t('lineShippedReadOnly', { so: shippedOn.join(', ') }) : t('poRemoveProduct')}
+                          title={shippedOn.length ? lineHeldTitle(t, shippedOn) : t('poRemoveProduct')}
                           disabled={lines.length <= 1 || shippedOn.length > 0}
                           style={lines.length <= 1 || shippedOn.length > 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                         >
@@ -2006,7 +2005,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           newNo={newNos[activeIdx]}
           readOnly={!canEditOrder || activeShippedOn.length > 0}
           readOnlyNote={canEditOrder && activeShippedOn.length > 0
-            ? t('lineShippedReadOnly', { so: activeShippedOn.join(', ') }) : undefined}
+            ? lineHeldTitle(t, activeShippedOn) : undefined}
           sellPriceEditable={paymentReview}
           missingFields={missingNamesFor(lines[activeIdx])}
           market={marketFor(lines[activeIdx].partNumber)}

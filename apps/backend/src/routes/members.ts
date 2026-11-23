@@ -21,7 +21,7 @@ import type { Env, User } from '../types';
 
 const members = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
-const VALID_ROLES: MemberRole[] = ['manager', 'purchaser'];
+const VALID_ROLES: MemberRole[] = ['manager', 'purchaser', 'ebay'];
 
 const TEXT_FIELDS = ['name', 'team', 'phone', 'title'] as const;
 

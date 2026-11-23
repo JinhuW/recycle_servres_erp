@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
 import { Icon, type IconName } from '../../../components/Icon';
 import { relTime } from '../../../lib/format';
+import type { Role } from '../../../lib/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type Member = {
   id: string; email: string; name: string; initials: string;
-  role: 'manager' | 'purchaser';
+  role: Role;
   team: string | null; phone: string | null; title: string | null;
   active: boolean;
   order_count: number; lifetime_profit: number;

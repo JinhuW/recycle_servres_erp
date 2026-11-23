@@ -198,7 +198,7 @@ function summarise(e: Event, ctx: Ctx): Summary {
 }
 
 const AREA_ICON: Record<ActivityArea, IconName> = {
-  po: 'file', so: 'tag', inv: 'inventory', price: 'trending', acct: 'cash',
+  po: 'file', so: 'tag', inv: 'inventory', price: 'trending', acct: 'cash', ebay: 'tag',
 };
 
 // The Accounting page's Log button lands here filtered to its book.
@@ -555,6 +555,7 @@ export function DesktopActivity() {
               <i style={{ background: {
                 po: 'var(--info)', so: 'var(--accent)',
                 inv: 'oklch(0.72 0.13 75)', price: 'oklch(0.55 0.16 295)', acct: 'oklch(0.4 0.03 250)',
+                ebay: 'var(--warn)',
               }[a.id as ActivityArea] }} />
               {t(a.tKey)}
             </span>

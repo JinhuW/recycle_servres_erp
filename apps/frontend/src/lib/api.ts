@@ -384,6 +384,97 @@ export const afterSalesForOrder = (sellOrderId: string) =>
   api.get<{ cases: AfterSalesOrderCase[] }>(`/api/after-sales/by-order/${encodeURIComponent(sellOrderId)}`)
     .then(b => ({ cases: b.cases.map(caseCurrency) }));
 
+// ── eBay desk ──────────────────────────────────────────────────────────────
+// Listings carry product identity only: no cost, supplier or purchaser.
+
+export type EbayListingStatus = 'Queued' | 'Listed' | 'Sold' | 'Ended';
+export type EbayEndReason = 'no_buyer' | 'damaged' | 'sold_elsewhere' | 'other' | 'cancelled';
+export type EbayCounts = Record<EbayListingStatus | 'ToConfirm', number>;
+export type EbayPerson = { id: string; name: string | null };
+export type EbaySibling = {
+  id: string; listingNo: string; spec: string | null; status: EbayListingStatus; qty: number; remaining: number;
+};
+export type EbayLotStock = { onHand: number; heldForEbay: number; heldForSellOrders: number; sellable: number };
+export type EbayListing = {
+  id: string; listingNo: string; status: EbayListingStatus;
+  qty: number; soldQty: number; remaining: number; listPrice: number;
+  title: string | null; spec: string | null; condition: string | null; notes: string | null;
+  ebay: { sku: string; offerId: string | null; itemId: string | null; url: string | null };
+  endReason: EbayEndReason | null; endNote: string | null; detectedSales: number;
+  createdAt: string; updatedAt: string; listedAt: string | null; endedAt: string | null; soldOutAt: string | null;
+  daysListed: number | null; daysWaiting: number | null;
+  createdBy: EbayPerson | null;
+  product: {
+    category: string; label: string | null; subLabel: string | null; partNumber: string | null;
+    brand: string | null; capacity: string | null; condition: string | null;
+  } | null;
+  warehouse: { id: string; short: string | null } | null;
+  photos: { id: string; url: string }[];
+  lot: { inventoryId: string; orderId: string; productNo: number; otherListings: EbaySibling[] } | null;
+};
+export type EbaySale = {
+  id: string; listingId: string; qty: number; unitPrice: number; fees: number | null;
+  ebayOrderId: string | null; ebayLineItemId: string | null; buyer: string | null; soldAt: string;
+  status: 'Detected' | 'Confirmed' | 'Dismissed'; sellOrderId: string | null; confirmedAt: string | null;
+  confirmedBy: EbayPerson | null; createdAt: string;
+};
+export type EbayEvent = {
+  id: string;
+  kind: 'created' | 'edited' | 'listed' | 'sale_detected' | 'sale_confirmed' | 'sale_dismissed' | 'sold' | 'ended';
+  from: string | null; to: string | null; note: string | null; detail: Record<string, unknown>;
+  at: string; actor: EbayPerson | null;
+};
+export type EbayListingDetail = Omit<EbayListing, 'lot'> & {
+  lot: (NonNullable<EbayListing['lot']> & { stock: EbayLotStock | null }) | null;
+  sales: EbaySale[];
+  events: EbayEvent[];
+  allowedTo: EbayListingStatus[];
+};
+export type EbaySaleWithListing = EbaySale & {
+  listing: { id: string; status: EbayListingStatus; title: string | null; spec: string | null; remaining: number };
+};
+export type EbaySaleOutcome = {
+  ok: true; saleId: string; sellOrderId: string; listingStatus: EbayListingStatus; remaining: number;
+};
+/** One listing part: what the Send to eBay and Split dialogs post per row. */
+export type EbayPartInput = { qty: number; listPrice: number; spec: string | null };
+/** A lot's listing on the Inventory pages: its chip, or a row of the lot's "On eBay" card. */
+export type EbayLink = {
+  listingId: string; listingNo: string; spec: string | null; status: EbayListingStatus; remaining: number;
+  ebayItemId: string | null; ebayUrl: string | null;
+};
+export type LotEbayListing = {
+  id: string; listingNo: string; status: EbayListingStatus; qty: number; remaining: number; listPrice: number;
+  spec: string | null; title: string | null; ebayItemId: string | null; ebayUrl: string | null;
+  createdAt: string; active: boolean;
+};
+
+const ebayPath = (id: string) => `/api/ebay/listings/${encodeURIComponent(id)}`;
+export const listEbayListings = (query: string) =>
+  api.get<{ rows: EbayListing[]; counts: EbayCounts; nextCursor: string | null }>(
+    '/api/ebay/listings' + (query ? '?' + query : ''));
+export const getEbayListing = (id: string) => api.get<{ listing: EbayListingDetail }>(ebayPath(id));
+export const listEbaySales = (status: EbaySale['status'], limit = 200) =>
+  api.get<{ sales: EbaySaleWithListing[] }>(`/api/ebay/sales?status=${status}&limit=${limit}`);
+export const createEbayListings = (body: { inventoryId: string; note?: string | null; listings: EbayPartInput[] }) =>
+  api.post<{ ids: string[] }>('/api/ebay/listings', body);
+export const splitEbayListing = (id: string, parts: EbayPartInput[]) =>
+  api.post<{ id: string; newIds: string[] }>(ebayPath(id) + '/split', { parts });
+export const patchEbayListing = (id: string, body: {
+  title?: string | null; spec?: string | null; condition?: string | null; notes?: string | null;
+  listPrice?: number; ebayItemId?: string; ebayUrl?: string;
+}) => api.patch<{ ok: true; status: EbayListingStatus }>(ebayPath(id), body);
+export const endEbayListing = (id: string, reason: EbayEndReason, note?: string) =>
+  api.post<{ ok: true; status: 'Ended'; returnedQty: number }>(ebayPath(id) + '/end', { reason, note });
+export const recordEbaySale = (id: string, body: { qty: number; unitPrice: number; ebayOrderId?: string | null }) =>
+  api.post<EbaySaleOutcome>(ebayPath(id) + '/sales', body);
+export const confirmEbaySale = (saleId: string) =>
+  api.post<EbaySaleOutcome>(`/api/ebay/sales/${encodeURIComponent(saleId)}/confirm`, {});
+export const dismissEbaySale = (saleId: string, note?: string) =>
+  api.post<{ ok: true }>(`/api/ebay/sales/${encodeURIComponent(saleId)}/dismiss`, { note });
+export const lotEbayListings = (inventoryId: string) =>
+  api.get<{ items: LotEbayListing[] }>(`/api/inventory/${encodeURIComponent(inventoryId)}/ebay-listings`);
+
 // `removeFromSellOrders` is the user's answer to the 409 the first call
 // returns when the goods sit on open sell orders (see lib/archiveConflict.ts).
 export const archiveOrder = (orderId: string, opts: { removeFromSellOrders?: boolean } = {}) =>

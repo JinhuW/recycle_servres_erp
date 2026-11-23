@@ -1,4 +1,5 @@
 import { Icon } from '../components/Icon';
+import { LineHeldChips } from '../components/LineHeldChips';
 import { LineSpecChips, lineHasSpecChips } from '../components/LineSpecChips';
 import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
@@ -112,9 +113,7 @@ export function OrderProductsBody({
                 </div>
               )}
               {shippedOn.length > 0 && (
-                <span className="chip info" style={{ marginTop: 5 }}>
-                  <Icon name="lock" size={10} /> {t('lineShippedChip', { so: shippedOn.join(', ') })}
-                </span>
+                <LineHeldChips holders={shippedOn} t={t} style={{ marginTop: 5 }} />
               )}
             </div>
             {editable && (

@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-609](./RS-609-ebay-sales-desk-listings-page-and-ebay-only-role.md) | done | story | P2 | eBay sales desk: listings page and eBay-only role | — |
 | [RS-608](./RS-608-enter-ai-provider-api-keys-in-the-ui.md) | done | story | P2 | Enter AI provider API keys in the UI | 1.475.0 |
 | [RS-607](./RS-607-pluggable-ai-model-providers-anthropic-direct-and-op.md) | done | story | P2 | Pluggable AI model providers: Anthropic direct and OpenAI | 1.474.0 |
 | [RS-606](./RS-606-fix-the-bugs-found-by-the-2026-11-22-workspace-revie.md) | done | bug | P2 | Fix the bugs found by the 2026-11-22 workspace review | 1.473.1 |

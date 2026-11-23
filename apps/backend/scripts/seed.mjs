@@ -41,6 +41,8 @@ const USERS = [
   { id: 'u7', name: 'Sofia Reyes',   initials: 'SR', role: 'manager',   email: 'sofia@recycleservers.io',  team: 'SG Ops' },
   { id: 'u8', name: 'Omar Haddad',   initials: 'OH', role: 'purchaser', email: 'omar@recycleservers.io',   team: 'HK Ops' },
   { id: 'u9', name: 'Ingrid Berg',   initials: 'IB', role: 'purchaser', email: 'ingrid@recycleservers.io', team: 'SG Ops' },
+  // The eBay operator: sees the eBay desk and nothing else.
+  { id: 'u10', name: 'Elena Brooks', initials: 'EB', role: 'ebay',      email: 'elena@recycleservers.io',  team: 'US Ops' },
 ];
 
 const WAREHOUSES = [
@@ -614,6 +616,8 @@ try {
     VALUES ('f30f98bc-09c7-4108-b083-c7d69cc9968c', 'MCP', TRUE)
     ON CONFLICT (id) DO NOTHING
   `;
+  // Every confirmed eBay sale is sold to this one (migration 0254).
+  await sql`INSERT INTO customers (name, short_name) VALUES ('eBay', 'eBay')`;
   const customers = [
     { name:'NorthBridge Data Centers', short:'NorthBridge',  contactName:'Dana Ortiz',   contactEmail:'ops@northbridge.io',       contactPhone:'+1-212-555-0147', address:'48 Hudson Yards, Floor 12\nNew York, NY 10001', country:'United States', region:'US-East',    tags:['hyperscaler','priority'] },
     { name:'Helios Cloud Pte Ltd',     short:'Helios Cloud', contactName:'Wei Lim',      contactEmail:'procurement@helios.sg',     contactPhone:'+65-6555-0192',   address:'1 Raffles Place, #20-01\nSingapore 048616',        country:'Singapore',     region:'APAC',       tags:['cloud'] },

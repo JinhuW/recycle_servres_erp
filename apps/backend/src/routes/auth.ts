@@ -103,7 +103,7 @@ auth.post('/login', async (c) => {
   }
 });
 
-// Demo-only: list purchaser/manager accounts so the role-picker login screen
+// Demo-only: list the login accounts so the role-picker login screen
 // can render avatars. This enumerates valid login emails, so it is FAIL-CLOSED:
 // BOTH conditions must hold — ENABLE_DEMO_ACCOUNTS=true AND NODE_ENV!='production'.
 // Returns 404 (not 403) when not enabled so the endpoint is invisible to attackers.
@@ -117,7 +117,7 @@ auth.get('/demo-accounts', async (c) => {
   const rows = await sql`
     SELECT id, email, name, initials, role, team
     FROM users
-    WHERE role IN ('purchaser','manager')
+    WHERE role IN ('purchaser','manager','ebay')
     ORDER BY role DESC, name
   `;
   return c.json({ users: rows });

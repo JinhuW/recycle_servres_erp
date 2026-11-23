@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { DESKTOP_NAV, shownNav, type NavLeaf, type ShownLeaf, type ShownParent } from './desktopNav';
+import { DESKTOP_NAV, desktopViewFor, roleMayOpen, shownNav, type NavLeaf, type ShownLeaf, type ShownParent } from './desktopNav';
 import { I18N } from './i18n';
-import type { DesktopViewId } from './route';
+import { DESKTOP_VIEW_TO_PATH, type DesktopViewId } from './route';
 import type { Role } from './types';
 
 function oversight(role: Role, view: DesktopViewId) {
@@ -132,5 +132,42 @@ describe('DESKTOP_NAV', () => {
       ...g.items.flatMap(i => ('children' in i ? [i.tKey, ...i.children.map(c => c.tKey)] : [i.tKey])),
     ]);
     expect(keys.filter(k => !(k in I18N.en!))).toEqual([]);
+  });
+});
+
+const ALL_VIEWS = Object.keys(DESKTOP_VIEW_TO_PATH) as DesktopViewId[];
+
+describe('the eBay role', () => {
+  it('sees the eBay page and nothing else in the sidebar', () => {
+    const groups = shownNav('ebay', 'ebay');
+    expect(groups.flatMap(g => g.items).map(i => (i.kind === 'leaf' ? i.leaf.id : i.parent.tKey))).toEqual(['ebay']);
+    expect(leaf('ebay', 'ebay', 'ebay')?.active).toBe(true);
+  });
+
+  it('may open only the eBay page, and lands there from every other view', () => {
+    expect(ALL_VIEWS.filter(v => roleMayOpen('ebay', v))).toEqual(['ebay']);
+    for (const v of ALL_VIEWS) expect(desktopViewFor('ebay', v), v).toBe('ebay');
+  });
+
+  it('is a manager page too, but never a purchaser one', () => {
+    expect(leaf('manager', 'home', 'ebay')).toBeDefined();
+    expect(leaf('purchaser', 'home', 'ebay')).toBeUndefined();
+    expect(desktopViewFor('manager', 'ebay')).toBe('ebay');
+    expect(desktopViewFor('purchaser', 'ebay')).toBe('home');
+  });
+});
+
+describe('desktopViewFor', () => {
+  it('lets a manager open every view', () => {
+    for (const v of ALL_VIEWS) expect(desktopViewFor('manager', v), v).toBe(v);
+  });
+
+  it('sends a purchaser home from the manager pages, and from the stock tab to Analysis', () => {
+    const managerOnly = ['inventory', 'sellorders', 'aftersales', 'transfers', 'websubmissions', 'leadsFacebook',
+      'activity', 'payments', 'internaltx', 'accounting', 'tracker', 'wechat', 'ebay'] as const;
+    for (const v of managerOnly) expect(desktopViewFor('purchaser', v), v).toBe('home');
+    expect(desktopViewFor('purchaser', 'stock')).toBe('analysis');
+    const open = ALL_VIEWS.filter(v => !(managerOnly as readonly string[]).includes(v) && v !== 'stock');
+    for (const v of open) expect(desktopViewFor('purchaser', v), v).toBe(v);
   });
 });

@@ -374,6 +374,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   inventory:  '/inventory',
   sellorders: '/sell-orders',
   aftersales: '/after-sales',
+  ebay:       '/ebay',
   transfers:  '/transfers',
   websubmissions: '/leads/website',
   activity:   '/activity',
@@ -411,6 +412,7 @@ export function knownDesktopView(path: string): DesktopViewId | null {
   if (path === '/sell-orders' || match('/sell-orders/:id', path) || match('/sell-orders/:id/edit', path)
     || matchSellOrderPack(path)) return 'sellorders';
   if (path === '/after-sales' || match('/after-sales/:id', path)) return 'aftersales';
+  if (path === '/ebay' || matchEbayListing(path)) return 'ebay';
   if (path === '/transfers') return 'transfers';
   if (path === '/leads/website' || path === '/web-submissions' || matchWebsiteLead(path)) return 'websubmissions';
   if (path === '/activity') return 'activity';
@@ -444,6 +446,16 @@ export function afterSalesCasePath(id: string): string {
 
 export function afterSalesNewPath(sellOrderId?: string): string {
   return '/after-sales/new' + (sellOrderId ? `?order=${encodeURIComponent(sellOrderId)}` : '');
+}
+
+// The eBay desk with one listing open in its side panel.
+export function ebayListingPath(id: string): string {
+  return `/ebay/${encodeURIComponent(id)}`;
+}
+
+export function matchEbayListing(path: string): string | null {
+  const m = /^\/ebay\/(EB-\d+)$/.exec(path);
+  return m ? m[1] : null;
 }
 
 // An Accounting entry: the ledger with that entry open (a drawer on desktop,
