@@ -464,6 +464,9 @@ export const patchEbayListing = (id: string, body: {
   title?: string | null; spec?: string | null; condition?: string | null; notes?: string | null;
   listPrice?: number; ebayItemId?: string; ebayUrl?: string;
 }) => api.patch<{ ok: true; status: EbayListingStatus }>(ebayPath(id), body);
+export const publishEbayListing = (id: string) =>
+  api.post<{ ok: true; status: 'Listed'; offerId: string; itemId: string; url: string; reusedOffer: boolean }>(
+    ebayPath(id) + '/publish', {});
 export const endEbayListing = (id: string, reason: EbayEndReason, note?: string) =>
   api.post<{ ok: true; status: 'Ended'; returnedQty: number }>(ebayPath(id) + '/end', { reason, note });
 export const recordEbaySale = (id: string, body: { qty: number; unitPrice: number; ebayOrderId?: string | null }) =>

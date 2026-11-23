@@ -3,7 +3,7 @@ import { Icon } from '../../components/Icon';
 import { RouteLink } from '../../components/RouteLink';
 import {
   confirmEbaySale, dismissEbaySale, endEbayListing, getEbayListing, listEbayListings, listEbaySales,
-  patchEbayListing, recordEbaySale,
+  patchEbayListing, publishEbayListing, recordEbaySale,
   type EbayCounts, type EbayEndReason, type EbayEvent, type EbayListing, type EbayListingDetail,
   type EbayListingStatus, type EbaySaleWithListing,
 } from '../../lib/api';
@@ -11,8 +11,9 @@ import { useAuth } from '../../lib/auth';
 import {
   EBAY_TABS, ebayTabCount, firstTabWithWork, shelfBar, shortItemId, stockShortfall, tabForStatus, type EbayTab,
 } from '../../lib/ebay';
+import { loadEbayConnection, syncEbayNow, type EbayConnection } from '../../lib/ebayConnection';
 import { handleFetchError } from '../../lib/errorToast';
-import { fmtDateShort, fmtUSD } from '../../lib/format';
+import { fmtDateShort, fmtUSD, relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { parseEbayListingRef } from '@recycle-erp/shared';
 import { ebayListingPath, matchEbayListing, navigate, useRoute } from '../../lib/route';
@@ -65,6 +66,28 @@ export function DesktopEbay({ onToast }: { onToast: Toast }) {
   const [reload, setReload] = useState(0);
   const [detail, setDetail] = useState<EbayListingDetail | null>(null);
   const refresh = useCallback(() => setReload(n => n + 1), []);
+  const [conn, setConn] = useState<EbayConnection | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  // Only managers may read the connection; the operator's desk works without it.
+  useEffect(() => {
+    if (!isManager) return;
+    loadEbayConnection().then(setConn).catch(handleFetchError);
+  }, [isManager, reload]);
+
+  const syncNow = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const r = await syncEbayNow();
+      onToast(t('ebaySyncDone', { n: r.result.newSales }));
+      refresh();
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   useEffect(() => {
     const h = setTimeout(() => setQ(search.trim()), 250);
@@ -185,6 +208,22 @@ export function DesktopEbay({ onToast }: { onToast: Toast }) {
           <h1 className="page-title">{t('ebTitle')}</h1>
           <div className="page-sub eb-head-sub">{t('ebSub')}</div>
         </div>
+        {isManager && conn && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12.5, color: 'var(--fg-muted)' }}>
+            {conn.connected ? (
+              <>
+                <span>
+                  {conn.sync?.lastSyncAt
+                    ? t('ebSyncedAgo', { ago: relTime(conn.sync.lastSyncAt, locale) })
+                    : t('ebayNeverSynced')}
+                </span>
+                <button type="button" className="btn" disabled={syncing} onClick={syncNow}>{t('ebaySyncNow')}</button>
+              </>
+            ) : (
+              <RouteLink to="/settings?section=ebay" className="rec-link">{t('ebConnectHint')}</RouteLink>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="eb-tabs">
@@ -437,6 +476,10 @@ function ListingPanel({ l, isManager, onClose, onOpen, onDone }: {
     });
     return t('ebToastSaved');
   });
+  const publish = () => run(async () => {
+    await publishEbayListing(l.id);
+    return t('ebToastPublished');
+  }, true);
   const savePrice = () => run(async () => {
     await patchEbayListing(l.id, { listPrice: Number(price) });
     return t('ebToastPrice');
@@ -553,7 +596,7 @@ function ListingPanel({ l, isManager, onClose, onOpen, onDone }: {
           {detailsDirty && (
             <button type="button" className="btn" disabled={busy || !priceOk} onClick={saveDetails}>{t('ebSaveDetails')}</button>
           )}
-          <button type="button" className="btn accent" disabled title={t('ebPublishLater')} style={{ height: 40, justifyContent: 'center' }}>
+          <button type="button" className="btn accent" disabled={busy} onClick={publish} style={{ height: 40, justifyContent: 'center' }}>
             {t('ebPublish')}
           </button>
           <button type="button" className="btn" style={{ justifyContent: 'center' }} onClick={() => setSplitting(true)}>
