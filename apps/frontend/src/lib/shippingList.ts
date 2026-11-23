@@ -1,4 +1,5 @@
 import type { PackageStatus, TrackedPackage } from './packages';
+import { isCalendarDay } from './format';
 
 // Pure helpers behind the shipping dashboard: filtering the package rows and
 // exporting CSV. Kept out of the component so the filter/search/export logic
@@ -26,7 +27,7 @@ export function fmtEta(iso: string | null, locale: string): string | null {
   // Carrier ETAs are calendar dates, not instants: a date-only value (or its
   // UTC-midnight round trip through the DB) rendered in a western timezone
   // would show the previous day.
-  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(iso) || /T00:00(:00(\.0+)?)?(Z|\+00:?00)$/.test(iso);
+  const dateOnly = isCalendarDay(iso);
   return d.toLocaleDateString(locale, {
     weekday: 'short', month: 'short', day: 'numeric',
     ...(dateOnly ? { timeZone: 'UTC' } : {}),
