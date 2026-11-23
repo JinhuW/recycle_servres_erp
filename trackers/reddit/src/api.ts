@@ -8,6 +8,7 @@ import {analytics, ANALYTICS_WINDOWS, type AnalyticsWindow} from './analytics.ts
 import {requeuePost} from './claims.ts';
 import type {Sql} from './db.ts';
 import {DEAD_AFTER_S, STALE_AFTER_S, type LoopName, type LoopStatus} from './heartbeat.ts';
+import {isProvider, MAX_KEY_LENGTH, PROVIDERS, type KeyStore} from './llm/keys.ts';
 import {isModelRef} from './llm/ref.ts';
 import {candidateConfig, liveConfig, promptHash, promptStats} from './prompts.ts';
 import {createRule, deleteRule, listRules, updateRule} from './rules.ts';
@@ -20,6 +21,8 @@ import {WEBHOOK_BODY_LIMIT_BYTES, webhookHandler} from './webhook.ts';
 export interface ApiDeps {
   sql: Sql;
   settings: SettingsStore;
+  /** Provider API keys; the ERP is the only writer. */
+  keys: KeyStore;
   botToken: string;
   apiToken: string;
   workerId: string;
@@ -333,6 +336,33 @@ export function createApi(deps: ApiDeps): Hono {
 
     await deps.settings.set(key, body.value);
     return c.json({key, value: body.value});
+  });
+
+  // Write-only from outside: no route returns a stored key, only its last 4.
+  // The ERP pushes keys here; other processes see them within the cache TTL.
+  app.get('/api/llm-keys', async (c) => c.json({keys: await deps.keys.summary()}));
+
+  app.put('/api/llm-keys/:provider', async (c) => {
+    const provider = c.req.param('provider');
+    if (!isProvider(provider)) {
+      return c.json({error: `unknown provider; expected one of ${PROVIDERS.join(', ')}`}, 400);
+    }
+    const body = await c.req.json().catch(() => null) as {key?: unknown} | null;
+    const key = typeof body?.key === 'string' ? body.key.trim() : '';
+    if (!key || key.length > MAX_KEY_LENGTH) {
+      return c.json({error: `key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters`}, 400);
+    }
+    await deps.keys.set(provider, key);
+    return c.json({ok: true, last4: key.slice(-4)});
+  });
+
+  app.delete('/api/llm-keys/:provider', async (c) => {
+    const provider = c.req.param('provider');
+    if (!isProvider(provider)) {
+      return c.json({error: `unknown provider; expected one of ${PROVIDERS.join(', ')}`}, 400);
+    }
+    await deps.keys.remove(provider);
+    return c.json({ok: true});
   });
 
   // `since` windows the status counts only. The oldest pending post and the

@@ -9,6 +9,7 @@ import { AI_PROVIDER_LABELS, parseModelRef, type AiProviderId } from '@recycle-e
 import type { Env } from '../types';
 import { log } from '../lib/log';
 import { PROVIDERS, type AiModel } from './providers';
+import { aiKeys } from './keys';
 
 const TTL_MS = 3_600_000;
 // After a failed refresh the last copy is served this long before the next
@@ -29,12 +30,12 @@ export function _resetForTests({ expire = false } = {}): void {
   else cache.clear();
 }
 
-function load(env: Env, id: AiProviderId): Promise<Entry> {
+function load(apiKey: string | undefined, id: AiProviderId): Promise<Entry> {
   const hit = cache.get(id);
   if (hit && Date.now() < hit.expiresAt) return Promise.resolve(hit);
   let p = inflight.get(id);
   if (!p) {
-    p = PROVIDERS[id].listModels(env)
+    p = PROVIDERS[id].listModels(apiKey)
       .then((models) => {
         // An empty answer would replace a good copy with a picker that offers nothing.
         if (models.length === 0) throw new Error(`${AI_PROVIDER_LABELS[id]} catalogue is empty`);
@@ -59,15 +60,18 @@ function load(env: Env, id: AiProviderId): Promise<Entry> {
   return p;
 }
 
-/** Providers the picker lists: OpenRouter's catalogue is public, the rest need their key. */
-function listed(env: Env): AiProviderId[] {
-  return (Object.keys(PROVIDERS) as AiProviderId[])
-    .filter((id) => id === 'openrouter' || PROVIDERS[id].configured(env));
+/** Forget one provider's list, e.g. after its key changed. */
+export function dropCatalogue(id: AiProviderId): void {
+  cache.delete(id);
+  inflight.delete(id);
 }
 
 export async function catalogue(env: Env): Promise<{ models: AiModel[]; fetchedAt: string; unavailable: AiProviderId[] }> {
-  const ids = listed(env);
-  const results = await Promise.allSettled(ids.map((id) => load(env, id)));
+  const keys = await aiKeys(env);
+  // A public catalogue is listed without a key; the rest need theirs.
+  const ids = (Object.keys(PROVIDERS) as AiProviderId[]).filter((id) => keys[id] || PROVIDERS[id].publicCatalogue);
+  // The public list is fetched without the key: a key would only add a check.
+  const results = await Promise.allSettled(ids.map((id) => load(PROVIDERS[id].publicCatalogue ? undefined : keys[id], id)));
   const models: AiModel[] = [];
   const unavailable: AiProviderId[] = [];
   let fetchedAt = '';

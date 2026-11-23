@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-22:** ERP migration `0251`, Reddit tracker migration `0009`,
+**As of 2026-11-23:** ERP migration `0252`, Reddit tracker migration `0010`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -3084,7 +3084,7 @@ A card's timeline, written in the same transaction as the change. Comments are `
 
 Workspace-wide configuration and plumbing: key/value settings (workspace_settings), the counters behind human-readable ids such as PO-1289 (id_counters), and the migration runner's ledger (schema_migrations).
 
-Tables: [`workspace_settings`](#erp-workspace-settings), [`id_counters`](#erp-id-counters), [`schema_migrations`](#erp-schema-migrations), [`perf_rollups`](#erp-perf-rollups)
+Tables: [`workspace_settings`](#erp-workspace-settings), [`ai_provider_keys`](#erp-ai-provider-keys), [`id_counters`](#erp-id-counters), [`schema_migrations`](#erp-schema-migrations), [`perf_rollups`](#erp-perf-rollups)
 
 <a id="erp-workspace-settings"></a>
 
@@ -3094,13 +3094,33 @@ Workspace-wide settings as key → JSON value; managers read and change them on 
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
-| `key` | `text` | ✓ |  | Setting name. Read by the backend: target_margin (fraction; max buy = basis × (1 − it)), low_margin_floor, category_default_margin, low_health_pct, upload_max_bytes, upload_allowed_mime, public_form_daily_submissions, public_form_daily_bytes, po_ai_review, po_company_txn_required_from, po_self_pay_chat_required_from, po_cash_shot_required_from, mcp.sellOrderCustomerId and crm.* (cadenceDays, tierFloorUsd, quietMultiple, lostMultiple). |
+| `key` | `text` | ✓ |  | Setting name. Read by the backend: target_margin (fraction; max buy = basis × (1 − it)), low_margin_floor, category_default_margin, low_health_pct, upload_max_bytes, upload_allowed_mime, public_form_daily_submissions, public_form_daily_bytes, po_ai_review, ai_models (which provider and model each AI read uses: `{default, scan, receipt, paypal, serial}`, each a model ref or null; migration-free, v1.474.0), po_company_txn_required_from, po_self_pay_chat_required_from, po_cash_shot_required_from, mcp.sellOrderCustomerId and crm.* (cadenceDays, tierFloorUsd, quietMultiple, lostMultiple). |
 | `value` | `jsonb` | ✓ |  | The value as JSON. The po_*_required_from keys hold the timestamp a PO rule took effect in this environment (older POs exempt; absent = rule off). |
 | `updated_at` | `timestamptz` | ✓ | `now()` |  |
 
 - **Primary key:** `key`
 
 Pricing and upload keys are type-checked on PATCH (upload_allowed_mime can only narrow the hard-coded safe list); any other key is stored as sent. The Settings → General keys (workspace_name, domain, currency, fiscal_start, timezone, fx_auto, week_start, notify_*) are stored for the page but no backend code reads them, so the notify_* toggles gate nothing.
+
+<a id="erp-ai-provider-keys"></a>
+
+#### `ai_provider_keys`
+
+AI provider API keys pasted on Settings ▸ AI models (migration 0252). A row wins over the provider's env var (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`); `ai/keys.ts` reads the table through a 30-second cache.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `provider` | `text` | ✓ |  | openrouter, anthropic or openai. |
+| `sealed` | `text` | ✓ |  | The key, AES-256-GCM sealed by lib/sealed.ts under a key derived from FB_POOL_KEY (label `ai-keys`). |
+| `last4` | `text` | ✓ |  | The key's last four characters: all the page ever shows of it. |
+| `updated_at` | `timestamptz` | ✓ | `now()` |  |
+| `updated_by` | `uuid` |  |  | → `users.id`, ON DELETE SET NULL. |
+| `tracker_synced` | `boolean` | ✓ | `false` | Whether the last save reached the Reddit tracker's `llm_keys`; the page offers a retry when not. |
+
+- **Primary key:** `provider`
+- **Indexes:** `ai_provider_keys_updated_by_idx` (`updated_by`)
+
+Written only by `PUT`/`DELETE /api/ai/keys/:provider`, which test a key against the provider before storing it and push it to the tracker. No route returns `sealed`. A rotated FB_POOL_KEY leaves the rows unreadable; they are then skipped and env keys apply until the keys are pasted again.
 
 <a id="erp-id-counters"></a>
 
@@ -3198,7 +3218,7 @@ The Reddit tracker's own Postgres. It is the only thing the worker fleet shares.
 
 What the fleet watches and how it judges. `settings` and `rules` change only through the api (the ERP proxies a subset) and reach every worker within a minute through a 60-second cache; `subreddits` is both the watch list and the poll scheduler workers claim from.
 
-Tables: [`settings`](#reddit-settings), [`rules`](#reddit-rules), [`subreddits`](#reddit-subreddits)
+Tables: [`settings`](#reddit-settings), [`llm_keys`](#reddit-llm-keys), [`rules`](#reddit-rules), [`subreddits`](#reddit-subreddits)
 
 <a id="reddit-settings"></a>
 
@@ -3208,13 +3228,29 @@ Runtime business config as key → JSON value, one row per key, seeded by migrat
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
-| `key` | `text` | ✓ |  | eval_prompt (live system prompt), llm_model (OpenRouter model id), telegram_chat_ids (buyer chats), max_post_age_hours (older posts are rejected unjudged; 1–720), telegram_dev_chat_ids (review chats), candidate_eval_prompt ('' = no trial), candidate_llm_model ('' = use llm_model), poll_source (`reddit` = workers poll Reddit, `webhook` = the poll loop idles and posts arrive from the redditapis.com monitor; migration 0009). |
+| `key` | `text` | ✓ |  | eval_prompt (live system prompt), llm_model (model ref: a bare OpenRouter id, `anthropic:<id>` or `openai:<id>`), telegram_chat_ids (buyer chats), max_post_age_hours (older posts are rejected unjudged; 1–720), telegram_dev_chat_ids (review chats), candidate_eval_prompt ('' = no trial), candidate_llm_model ('' = use llm_model), poll_source (`reddit` = workers poll Reddit, `webhook` = the poll loop idles and posts arrive from the redditapis.com monitor; migration 0009). |
 | `value` | `jsonb` | ✓ |  | JSON string, number or array of chat ids, depending on the key. |
 | `updated_at` | `timestamptz` | ✓ | `now()` |  |
 
 - **Primary key:** `key`
 
-Secrets never go here, only in env. The ERP may set only `llm_model` and drive the candidate routes; the other keys are api-only.
+Secrets never go here: `GET /api/settings` returns every row. Provider API keys live in `llm_keys`. The ERP may set only `llm_model` and drive the candidate routes; the other keys are api-only.
+
+<a id="reddit-llm-keys"></a>
+
+#### `llm_keys`
+
+LLM provider API keys the ERP pushes from Settings ▸ AI models (migration 0010). A row wins over the worker's env var for that provider; workers read the table through a 60-second `KeyStore` cache.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `provider` | `text` | ✓ |  | openrouter, anthropic or openai. |
+| `api_key` | `text` | ✓ |  | The key, in plain text: the same trust level as the Railway env vars it replaces. |
+| `updated_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `provider`
+
+Written only by `PUT`/`DELETE /api/llm-keys/:provider` (Bearer `API_TOKEN`, called server-side by the ERP). `GET /api/llm-keys` returns each provider's `configured` and `last4`, never the key.
 
 <a id="reddit-rules"></a>
 

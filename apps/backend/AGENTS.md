@@ -260,8 +260,9 @@ together with its other side (root AGENTS.md → *Contracts*).
   migrated everything to R2 attachments.  See [the AI-scan image design][2].
 - **AI providers are pluggable** (`ai/providers/`): OpenRouter, Anthropic
   (Messages API) and OpenAI (Responses API), each one file implementing
-  `LlmProvider`, registered in `ai/providers/index.ts` and named in
-  `AI_PROVIDERS` (`packages/shared/src/aiModelRef.ts`).  A model setting is a
+  `LlmProvider`, registered in `ai/providers/index.ts`, named in
+  `AI_PROVIDERS` (`packages/shared/src/aiModelRef.ts`), with its env var in
+  `KEY_ENV` (`ai/keys.ts`).  A model setting is a
   *model ref*: `anthropic:<id>`, `openai:<id>`, or a bare OpenRouter id, so
   every id saved before providers existed still means OpenRouter.
   `ai/llm.ts` is the one place for the deadline, the timeout/empty retry and
@@ -275,10 +276,18 @@ together with its other side (root AGENTS.md → *Contracts*).
   OpenRouter's public catalogue plus the models of each provider with a key,
   each cached for an hour and served stale for five minutes at a time while
   its provider is down.  `GET /api/ai/providers` says which have a key.
-- **The stub**: with no provider key at all, a deterministic stub returns
-  canned data.  Production refuses to boot without the default model's key
-  (`env.ts`); in dev and CI the stub logs one warning, and `/api/health`
-  reports which provider is live (`providers.ocr`).
+- **Provider keys** are pasted on Settings ▸ AI models and stored in
+  `ai_provider_keys`, sealed (`lib/sealed.ts`) under a key derived from
+  `FB_POOL_KEY` with the label `ai-keys`; a stored key wins over the
+  provider's env var.  `ai/keys.ts` resolves them (30 s cache) and pushes each
+  save to the Reddit tracker.  `PUT /api/ai/keys/:provider` tests a key with
+  the provider's model list before storing it.  No route returns a key, and
+  nothing logs one.
+- **The stub**: with no key anywhere, dev and CI get a deterministic stub
+  (one warning in the log); production refuses the read instead, so the scan
+  route answers 502.  Production boots without any key.  `/api/health`
+  reports which provider is live (`providers.ocr`, `none` in production with
+  no key).
 
 [1]: ../../docs/superpowers/specs/2026-05-18-frontend-auth-overhaul-design.md
 [2]: ../../docs/superpowers/specs/2026-05-12-ai-scan-image-preview-design.md

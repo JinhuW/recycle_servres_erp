@@ -2,7 +2,7 @@
 // bindings now that the backend runs as a plain Node process.
 
 import type { Env } from './types';
-import { isModelRef, parseModelRef } from '@recycle-erp/shared';
+import { isModelRef } from '@recycle-erp/shared';
 
 // Values that ship in the repo (Dockerfile ENV / .env.example). Sessions are
 // HS256-signed with JWT_SECRET, so booting prod on a published value means
@@ -47,17 +47,9 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
   if (src.NODE_ENV === 'production' && !src.CORS_ALLOWED_ORIGINS) {
     throw new Error('CORS_ALLOWED_ORIGINS is required in production');
   }
-  // The stub OCR provider returns canned data with a fixed high confidence —
-  // safe for dev/tests, catastrophic in prod where users would trust it as
-  // real readings. Refuse to boot prod without the default model's key.
-  if (src.NODE_ENV === 'production') {
-    const ref = src.AI_MODEL ?? src.OPENROUTER_OCR_MODEL;
-    const provider = ref ? parseModelRef(ref).provider : 'openrouter';
-    const key = { openrouter: 'OPENROUTER_API_KEY', anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY' }[provider];
-    if (!src[key]) {
-      throw new Error(`${key} is required in production (the stub OCR returns canned data)`);
-    }
-  }
+  // No AI key is required to boot: keys can be pasted on Settings ▸ AI
+  // models. Production never falls back to the stub's canned data; an AI
+  // read with no key anywhere fails instead (ai/index.ts).
   if (src.AI_MODEL !== undefined && !isModelRef(src.AI_MODEL)) {
     throw new Error('AI_MODEL must be a model ref, e.g. anthropic:claude-sonnet-5-5 or openai/gpt-6-luna');
   }

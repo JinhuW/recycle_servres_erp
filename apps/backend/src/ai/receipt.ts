@@ -95,7 +95,9 @@ export type ReceiptReading = { method: ReceiptMethod; amount: string; currency: 
 
 export async function readReceipt(env: Env, file: File): Promise<ReceiptReading | null> {
   if (!file.type.startsWith('image/')) return null;
-  const provider = await featureProvider(env, 'receipt');
+  // A receipt read is a convenience on an upload: no key means no rename,
+  // never a failed upload.
+  const provider = await featureProvider(env, 'receipt').catch(() => 'stub' as const);
   if (provider === 'stub') return null;
   try {
     const json = await aiImageJson(env, RECEIPT_PROMPT, await file.arrayBuffer(), { feature: 'receipt' });

@@ -4,6 +4,7 @@ import type {Hono} from 'hono';
 import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 import {createApi} from '../src/api.ts';
 import type {Logger} from '../src/logger.ts';
+import {KeyStore} from '../src/llm/keys.ts';
 import {SettingsStore} from '../src/settings.ts';
 import {parseDelivery, verifySignature} from '../src/webhook.ts';
 import {createTestDb, type TestDb} from './helpers/db.ts';
@@ -132,6 +133,7 @@ describe('POST /webhooks/redditapis', () => {
       ...(logger ? {logger} : {}),
       sql: db.sql,
       settings: new SettingsStore(db.sql, 0),
+      keys: new KeyStore(db.sql, {}, 0),
       botToken: 'bot-token',
       apiToken: TOKEN,
       workerId: 'test-worker',

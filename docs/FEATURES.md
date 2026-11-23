@@ -4694,9 +4694,8 @@ inventory search, sell-order draft creation.
 ## AI scanning and OCR
 
 - **AI providers and models are switched in the UI** (v1.474.0, desktop,
-  managers). **Settings ▸ AI models** shows which providers have an API key
-  on the server (OpenRouter, Anthropic for Claude, OpenAI; keys are never
-  shown) and picks the model for label scan, receipt reading, PayPal
+  managers). **Settings ▸ AI models** holds the providers' API keys
+  (OpenRouter, Anthropic for Claude, OpenAI; v1.475.0) and picks the model for label scan, receipt reading, PayPal
   screenshots and serial numbers, each with a provider dropdown and a
   model dropdown that lists only that provider's models. A row left on
   Default uses the default model, and that falls back to the server's
@@ -4704,6 +4703,15 @@ inventory search, sell-order draft creation.
   provider without a key can't be picked. The same two dropdowns pick the
   PO AI review's model and the Reddit tracker's evaluator model, which can
   now run on Claude or OpenAI directly as well as through OpenRouter.
+  - **API keys are pasted on the page** (v1.475.0). A key is tested against
+    the provider before it is saved, stored encrypted, and shown again only
+    as its last four characters; Remove deletes it. A pasted key wins over
+    the server's env var, which still works as a fallback. Each save is
+    pushed to the Reddit tracker, whose workers use it within a minute; if
+    the tracker can't be reached the row says so, and saving again retries.
+  - With no key anywhere, production refuses AI reads (the scanner shows
+    its "AI recognition unavailable" message) instead of returning the
+    demo stub's canned data.
 
 - **Label scanner for SSD lines**, gated by `categories.ai_capture` (v1.96.0),
   with high-res capture and client-side MozJPEG compression (v0.1.1).

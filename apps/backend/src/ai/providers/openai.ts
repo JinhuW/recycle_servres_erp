@@ -1,5 +1,4 @@
 import OpenAI from 'openai';
-import type { Env } from '../../types';
 import { EmptyAnswerError, toBase64, type AiModel, type LlmProvider, type Turn } from './types';
 
 // The Responses API, not Chat Completions: it takes images, JSON mode and the
@@ -16,9 +15,9 @@ const WEB_SEARCH_USD = 0.01;
 const CHAT_MODEL = /^(gpt-|o\d|chatgpt-)/;
 const NOT_CHAT = /(audio|realtime|transcribe|tts|image|embedding|moderation|search-preview|instruct)/;
 
-function client(env: Env): OpenAI {
+function client(apiKey: string | undefined): OpenAI {
   return new OpenAI({
-    apiKey: env.OPENAI_API_KEY,
+    apiKey,
     maxRetries: 0,
     fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args),
   });
@@ -43,13 +42,11 @@ function toInput(turns: Turn[]): OpenAI.Responses.ResponseInput {
 
 export const openAiProvider: LlmProvider = {
   id: 'openai',
-  keyName: 'OPENAI_API_KEY',
-  configured: (env) => !!env.OPENAI_API_KEY,
 
-  async complete(env, req) {
+  async complete(apiKey, req) {
     let res: OpenAI.Responses.Response;
     try {
-      res = await client(env).responses.create(
+      res = await client(apiKey).responses.create(
         {
           model: req.model,
           input: toInput(req.turns),
@@ -83,9 +80,9 @@ export const openAiProvider: LlmProvider = {
     };
   },
 
-  async listModels(env) {
+  async listModels(apiKey) {
     const out: AiModel[] = [];
-    for await (const m of client(env).models.list()) {
+    for await (const m of client(apiKey).models.list()) {
       if (!CHAT_MODEL.test(m.id) || NOT_CHAT.test(m.id)) continue;
       out.push({
         id: `openai:${m.id}`,

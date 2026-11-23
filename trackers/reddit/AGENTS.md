@@ -70,6 +70,12 @@ has the repo map and workflow.
   The emulator colima registers can crash node with an `uv__io_poll`
   assertion. Re-register it with `tonistiigi/binfmt`, and don't drop amd64:
   part of the fleet is E2.1.Micro.
+- **Provider API keys (`llm_keys`, `src/llm/keys.ts`)**. The ERP's
+  Settings ▸ AI models is the writer, through `PUT|DELETE /api/llm-keys/:provider`.
+  Keys are stored in plain text, the same trust level as the Railway env
+  vars, and kept out of `settings` because `GET /api/settings` returns every
+  row. `GET /api/llm-keys` shows only `configured` and `last4`; no route or
+  log line may return a key. Env keys are fallbacks a stored key overrides.
 
 ## Design invariants
 
@@ -90,6 +96,8 @@ Breaking any of these breaks the fleet. The tests that cover them are
    `target` row.
 5. **Secrets in env, business config in the `settings` table.** If a change
    should reach a running fleet without a redeploy, it belongs in the database.
+   The one exception is provider API keys, which the ERP pushes into
+   `llm_keys` (env keys are fallbacks).
 6. **A candidate prompt never reaches buyers.** Its verdicts go to
    `candidate_verdicts` and never touch `posts.status`. A post only the
    candidate flags is reviewed in the dev chat from the evaluate loop, by the

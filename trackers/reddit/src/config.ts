@@ -101,17 +101,11 @@ export function loadConfig(): Config {
   }
   const redditAuth = redditClientId ? {clientId: redditClientId, clientSecret: redditClientSecret} : null;
 
-  // A worker needs some provider to judge with; which one is the llm_model
-  // setting's business, so a key it lacks surfaces as a per-post error.
+  // Fallbacks only: the ERP pushes keys into `llm_keys`, so a worker may boot
+  // with none, and a provider without one fails each post until a key lands.
   const openrouterApiKey = process.env['OPENROUTER_API_KEY'] ?? '';
   const anthropicApiKey = process.env['ANTHROPIC_API_KEY'] ?? '';
   const openaiApiKey = process.env['OPENAI_API_KEY'] ?? '';
-  if (role === 'worker' && !openrouterApiKey && !anthropicApiKey && !openaiApiKey) {
-    throw new Error(
-      `One of OPENROUTER_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY is required (role=${role}). `
-        + 'Copy .env.example to .env and fill it in.',
-    );
-  }
 
   return {
     databaseUrl: required('DATABASE_URL', role),
