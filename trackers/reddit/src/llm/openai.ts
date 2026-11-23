@@ -1,6 +1,15 @@
 import OpenAI from 'openai';
 import type {CompletionRequest, CompletionResult} from './index.ts';
 
+// Reasoning models (o-series, gpt-5 and later) answer 400 to `temperature`;
+// only the older chat models below take it. An unknown id gets the model's
+// default rather than a request that can't succeed.
+const TAKES_TEMPERATURE = /^(?:gpt-4|gpt-3\.5|chatgpt-)/;
+
+export function acceptsTemperature(model: string): boolean {
+  return TAKES_TEMPERATURE.test(model);
+}
+
 export async function completeOpenAI(req: CompletionRequest): Promise<CompletionResult> {
   // Retries belong to the evaluate loop, which backs off per post.
   const client = new OpenAI({apiKey: req.apiKey, maxRetries: 0, timeout: 60_000});
@@ -8,6 +17,8 @@ export async function completeOpenAI(req: CompletionRequest): Promise<Completion
   try {
     response = await client.responses.create({
       model: req.model,
+      // Deterministic verdicts, as on OpenRouter, where the model allows it.
+      ...(acceptsTemperature(req.model) ? {temperature: 0} : {}),
       instructions: req.systemPrompt,
       input: req.userMessage,
       text: {format: {type: 'json_schema', name: req.schemaName, strict: true, schema: req.schema}},
