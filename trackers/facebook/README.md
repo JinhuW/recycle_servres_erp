@@ -251,7 +251,10 @@ Full fleet: see [deploy/README.md](deploy/README.md).
 ### Deploying to the homelab worker
 
 **Always deploy with the script.** It ends by proving the container is running
-this tree, which is the whole point:
+this tree, which is the whole point. It finds only compose and `rs-fleetd`
+workers; when it finds none (workers run by the ERP's fleet agent are not
+among them), its last line says no worker was checked rather than calling the
+fleet verified:
 
 ```bash
 scripts/deploy.sh          # test, regenerate config, sync, rebuild, restart, verify

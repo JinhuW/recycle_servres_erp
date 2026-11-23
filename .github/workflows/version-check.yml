@@ -50,8 +50,12 @@ jobs:
           if [ -n "$LAST_TAG" ]; then
             LAST_VERSION="${LAST_TAG#v}"
             # Markdown is never code, even under apps/ (the per-area AGENTS.md /
-            # CLAUDE.md agent docs live there).
-            if ! git diff --name-only "$LAST_TAG"..HEAD -- apps packages deploy docker-compose.yml backup infra pnpm-lock.yaml package.json pnpm-workspace.yaml tsconfig.base.json .npmrc .nvmrc ':(exclude)*.md' | grep -q .; then
+            # CLAUDE.md agent docs live there). `git diff --quiet`, not a pipe
+            # into `grep -q`: grep exits at the first name, a long name list
+            # then kills git with SIGPIPE, and under pipefail the 141 read as
+            # "no code changes". A git error (not 0 or 1) falls through to the
+            # bump check, which fails closed.
+            if git diff --quiet "$LAST_TAG"..HEAD -- apps packages deploy docker-compose.yml backup infra pnpm-lock.yaml package.json pnpm-workspace.yaml tsconfig.base.json .npmrc .nvmrc ':(exclude)*.md'; then
               echo "No code changes since $LAST_TAG — version bump not required."
               exit 0
             fi
@@ -77,8 +81,10 @@ jobs:
             # not machine-decidable, and a check that produces false blocks gets
             # cleared by touching the file for no reason — which is how a check
             # stops meaning anything.
-            if git log --no-merges --format='%s' "$LAST_TAG"..HEAD | grep -Eq '^feat(\(.+\))?!?:' \
-               && ! git diff --name-only "$LAST_TAG"..HEAD -- docs/FEATURES.md | grep -q .; then
+            # Captured first for the same SIGPIPE reason as above.
+            SUBJECTS="$(git log --no-merges --format='%s' "$LAST_TAG"..HEAD)"
+            if grep -Eq '^feat(\(.+\))?!?:' <<<"$SUBJECTS" \
+               && git diff --quiet "$LAST_TAG"..HEAD -- docs/FEATURES.md; then
               echo "::warning::This release adds feat() commits but does not touch docs/FEATURES.md. If user-visible behaviour changed, edit the bullet and cite v$VERSION."
             fi
           else

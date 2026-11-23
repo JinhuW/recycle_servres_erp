@@ -36,11 +36,25 @@ export function easternDateTime(at: string | null | undefined, locale: string): 
   return d.toLocaleString(locale, { timeZone: FLEET_TZ, dateStyle: 'medium', timeStyle: 'short' });
 }
 
-/** Midnight in UTC on the day `now` falls in: the fleet's "today", which is
- *  how the budget view and the scheduler count it. */
-export function utcDayStart(now: number = Date.now()): string {
-  const d = new Date(now);
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())).toISOString();
+/** The Eastern (FLEET_TZ) calendar date of an instant, YYYY-MM-DD. */
+export function fleetDate(at: number | string | Date): string {
+  return new Date(at).toLocaleDateString('en-CA', { timeZone: FLEET_TZ });
+}
+
+/** Midnight Eastern (FLEET_TZ) on the day `now` falls in, as a UTC instant:
+ *  the fleet's "today", which is how the budget and the Analysis funnel count
+ *  it on the backend. */
+export function fleetDayStart(now: number = Date.now()): string {
+  const [y, m, d] = fleetDate(now).split('-').map(Number);
+  const utcMidnight = Date.UTC(y, m - 1, d);
+  // The zone's offset at UTC midnight (the previous Eastern evening) is the
+  // one in force at Eastern midnight too: DST switches at 02:00 local.
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: FLEET_TZ, hourCycle: 'h23',
+    year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric',
+  }).formatToParts(utcMidnight).map(x => [x.type, Number(x.value)]));
+  const wall = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
+  return new Date(utcMidnight - (wall - utcMidnight)).toISOString();
 }
 
 // ── Due times ────────────────────────────────────────────────────────────────
@@ -157,7 +171,7 @@ export function beltAxis(now: number, locale: string): { left: number; label: st
 /** How long a city-item takes: the mean of today's finished searches, or the
  *  default when none has finished yet. */
 export function averageTaskSeconds(tasks: readonly FleetTask[], now: number = Date.now()): number {
-  const today = utcDayStart(now);
+  const today = fleetDayStart(now);
   const seconds: number[] = [];
   for (const t of tasks) {
     const s = t.result?.seconds;

@@ -18,8 +18,12 @@ export class FakeDocker implements DockerApi {
   /** The claim ticket passed to each run, in order. */
   tickets: string[] = [];
   agents: string[] = [];
-  /** What the next `run` / `start` / `stopAndRemove` answers, once; the effect still happens unless `effect` is false. */
-  failNext: Partial<Record<'run' | 'start' | 'stop', { error: string; effect: boolean }>> = {};
+  /**
+   * What the next `run` / `start` / `stopAndRemove` answers, once; the effect
+   * still happens unless `effect` is false. `rm` fails only the removal half
+   * of `stopAndRemove`: the container is stopped and left exited.
+   */
+  failNext: Partial<Record<'run' | 'start' | 'stop' | 'rm', { error: string; effect: boolean }>> = {};
   now: () => string = () => new Date().toISOString();
 
   constructor(containers: Container[] = [], images: string[] = ['img:1', 'img:2']) {
@@ -68,6 +72,12 @@ export class FakeDocker implements DockerApi {
       if (fail.effect) this.containers.delete(name);
       return fail.error;
     }
+    const rmFail = this.take('rm');
+    const c = this.containers.get(name);
+    if (rmFail && c) {
+      this.containers.set(name, { ...c, running: false, status: 'exited', exit_code: 143, finished_at: this.now() });
+      return rmFail.error;
+    }
     this.containers.delete(name);
     return null;
   }
@@ -88,7 +98,7 @@ export class FakeDocker implements DockerApi {
     return this.agents;
   }
 
-  private take(kind: 'run' | 'start' | 'stop') {
+  private take(kind: 'run' | 'start' | 'stop' | 'rm') {
     const fail = this.failNext[kind];
     delete this.failNext[kind];
     return fail;

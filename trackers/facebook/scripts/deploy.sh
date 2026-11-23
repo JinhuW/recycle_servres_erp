@@ -77,6 +77,9 @@ fleet_mode() {
 # copying one is restarted and verified without editing this script.
 homelab_workers() {
     for f in deploy/docker-compose.homelab*.yml; do
+        # An unmatched glob stays literal; without this its sed fails and
+        # the list comes out empty with an error, not just empty.
+        [ -e "$f" ] || continue
         service=$(sed -n '/^services:/{n;s/^ *\([a-z0-9-]*\):.*/\1/p;}' "$f")
         container=$(sed -n 's/^ *container_name: *//p' "$f")
         config=$(sed -n 's#^ *- \.\./configs/\([a-z0-9-]*\.toml\):.*#\1#p' "$f")
@@ -169,6 +172,7 @@ verify_fleet() {
             DRIFT=0
             verify_worker "$c" none
             [ "$DRIFT" = "0" ] || FAILED=1
+            CHECKED=$((CHECKED + 1))
         else
             step "verify: $c"
             echo "  still on $image; the rollout reaches it in turn"
@@ -179,6 +183,10 @@ verify_fleet() {
 }
 
 verify() {
+    # How many workers were compared with this tree. The summary and the
+    # Telegram notice report it, so a run that found no worker cannot read as
+    # a verified fleet.
+    CHECKED=0
     if fleet_mode; then
         verify_fleet
         DRIFT=$FAILED
@@ -203,6 +211,7 @@ verify() {
         DRIFT=0
         verify_worker "$3" "$4"
         [ "$DRIFT" = "0" ] || FAILED=1
+        CHECKED=$((CHECKED + 1))
     done
     IFS=$old_ifs
     DRIFT=$FAILED
@@ -222,7 +231,22 @@ verify_coordinator() {
         fi
     fi
     [ "${DRIFT:-0}" = "0" ] || { echo; echo "VERIFY FAILED — the fleet is not running this tree."; exit 1; }
-    echo; echo "verified: every worker and the coordinator run this tree."
+    echo
+    if [ "$CHECKED" = "0" ]; then
+        # Not a failure: this script finds only compose and rs-fleetd
+        # workers, and the fleet now runs under the ERP's fleet agent, whose
+        # releases go out from the ERP. But never call that a verified fleet.
+        if [ "$MODE" = "sync" ]; then
+            echo "verified: nothing. No worker found on $VM, and sync checks no coordinator."
+        else
+            echo "verified: the coordinator runs this tree. No worker found on $VM, so no worker was checked."
+        fi
+        echo "  Workers run by the ERP's fleet agent are not checked here."
+    elif [ "$MODE" = "sync" ]; then
+        echo "verified: $CHECKED worker(s) run this tree (sync checks no coordinator)."
+    else
+        echo "verified: $CHECKED worker(s) and the coordinator run this tree."
+    fi
 }
 
 if [ "$MODE" = "check" ]; then
@@ -429,10 +453,14 @@ echo "  $VERSION $SHA"
 # missed notification must never mark a verified deploy as failed.
 step "notify telegram"
 DEPLOY_DESC="v$VERSION ($SHA)$REDEPLOY_NOTE"
-WORKER_COUNT=$(homelab_workers | wc -l | tr -d ' ')
+if [ "$CHECKED" = "0" ]; then
+    VERIFIED_NOTE="to the coordinator - verified running this tree. No worker was found or checked."
+else
+    VERIFIED_NOTE="to the coordinator and $CHECKED workers - verified running this tree."
+fi
 HELD_NOTE=""
 [ -z "$(printf '%s' "$HOLD" | tr -d ' ')" ] || HELD_NOTE=" Held on their previous image:$HOLD"
-if ssh "$VM" "docker exec -i rs-coordinator python - \"Deployed facebook_tracker $DEPLOY_DESC to the coordinator and $WORKER_COUNT workers - verified running this tree.$HELD_NOTE\"" <<'PYEOF'
+if ssh "$VM" "docker exec -i rs-coordinator python - \"Deployed facebook_tracker $DEPLOY_DESC $VERIFIED_NOTE$HELD_NOTE\"" <<'PYEOF'
 import os, sys, urllib.parse, urllib.request
 
 # Deploy notices are ops, not listings: the ops chat when one is set, and its

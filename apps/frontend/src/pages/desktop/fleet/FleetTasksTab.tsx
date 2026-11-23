@@ -11,7 +11,7 @@ import { useT } from '../../../lib/i18n';
 import { fleetTabPath, hrefFor, onLinkClick } from '../../../lib/route';
 import { useSentinel } from '../../../lib/useSentinel';
 import {
-  averageTaskSeconds, BELT_WINDOW_H, beltAxis, beltRow, beltSummary, dueLabel, EMPTY_TASK_FILTER, easternClock, filterTasks,
+  averageTaskSeconds, BELT_WINDOW_H, beltAxis, beltRow, beltSummary, dueLabel, EMPTY_TASK_FILTER, easternClock, filterTasks, fleetDayStart,
   lastDoneSearch, logByItem, roundStartPreview, sortTasks, withCityNames, workersBusy,
   type BeltMark, type BeltRow, type TaskFilter, type Translate,
 } from './fleetBoard';
@@ -41,7 +41,7 @@ const STATE_SEG_KEY: Record<(typeof STATE_SEG)[number], string> = {
 type Data = { cities: FleetCity[]; items: FleetItem[]; tasks: FleetTask[]; workers: FleetWorker[]; settings: FleetSettings | null };
 
 function sinceFor(range: RangeKey, now: number): string {
-  if (range === 'today') return new Date(now).toISOString().slice(0, 10) + 'T00:00:00.000Z';
+  if (range === 'today') return fleetDayStart(now);
   const hours = RANGES.find(r => r.key === range)!.hours;
   return new Date(now - hours * 3_600_000).toISOString();
 }

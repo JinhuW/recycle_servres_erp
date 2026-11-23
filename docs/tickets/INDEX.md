@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-606](./RS-606-fix-the-bugs-found-by-the-2026-11-22-workspace-revie.md) | in-review | bug | P2 | Fix the bugs found by the 2026-11-22 workspace review | 1.473.1 |
 | [RS-605](./RS-605-reddit-tracker-remove-the-rss-atom-feed-code.md) | done | chore | P3 | Reddit tracker: remove the RSS/Atom feed code | tracker only, not deployed (prod runs poll_source = webhook) |
 | [RS-604](./RS-604-reddit-tracker-monitor-all-13-subreddits-again-move.md) | done | bug | P2 | Reddit tracker: monitor all 13 subreddits again; move Railway config off railway.toml | tracker, Railway api+worker deployed 2026-11-23 |
 | [RS-603](./RS-603-reddit-tracker-no-alerts-since-2026-11-16-feed-url-4.md) | done | bug | P1 | Reddit tracker: no alerts since 2026-11-16, feed URL 404 | tracker 318920c4, Railway api+worker deployed 2026-11-22 |

@@ -578,7 +578,7 @@ export function OrderDetail({
     // desktop saves the edits along with the move: its plain Save leaves the
     // PO). The commission sheet writes its own two fields, so those alone do
     // not hold it.
-    const unsavedOutsideSheet = notesDirty || warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts;
+    const unsavedOutsideSheet = notesDirty || warehouseDirty || paymentDirty || methodDirty || payerDirty || paypalDirty || feesDirty || facts;
     const unsaved = nextStatus === 'Ready to Pay' ? unsavedOutsideSheet : dirty;
     // Leaving Draft is the hand-off sheet's job: how the goods get here and
     // who paid, saved and advanced in one call. It is seeded from the saved
@@ -1451,7 +1451,7 @@ export function OrderDetail({
           summary={<span className={needs('payment') ? 'miss' : ''}>{paymentSummary}</span>}
           open={openFold === 'payment'}
           onToggle={() => toggleFold('payment')}
-          mark={markFor('payment', paymentDirty || methodDirty || paypalDirty)}
+          mark={markFor('payment', paymentDirty || methodDirty || payerDirty || paypalDirty)}
           bodyClassName="ph-pay"
         >
           <PaymentFields

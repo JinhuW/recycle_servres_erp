@@ -140,30 +140,47 @@ export async function registerPackageTracking(
   client: Pick<ShippoClient, 'registerTracking'>,
   pkg: { id: string; tracking_number: string; carrier: string },
 ): Promise<boolean> {
-  const claimed = await sql`
-    UPDATE packages SET tracking_claimed_at = NOW()
-    WHERE id = ${pkg.id} AND tracking_registered_at IS NULL
-      AND (tracking_claimed_at IS NULL OR tracking_claimed_at < NOW() - ${CLAIM_EXPIRES(sql)})
-    RETURNING id
-  `;
-  if (claimed.length === 0) return false;
+  const pkgLog = shipLog.child({ packageId: pkg.id });
+  // Never rejects: the add-time callers fire this detached, and a rejection
+  // there (a pool timeout, a Postgres restart) is unhandled and takes the
+  // whole process down. Every failure leaves the row for the sweep.
+  let claimed: boolean;
+  try {
+    claimed = (await sql`
+      UPDATE packages SET tracking_claimed_at = NOW()
+      WHERE id = ${pkg.id} AND tracking_registered_at IS NULL
+        AND (tracking_claimed_at IS NULL OR tracking_claimed_at < NOW() - ${CLAIM_EXPIRES(sql)})
+      RETURNING id
+    `).length > 0;
+  } catch (err) {
+    pkgLog.warn('tracking registration claim failed; the sweep will retry', err);
+    return false;
+  }
+  if (!claimed) return false;
   try {
     await client.registerTracking(pkg.tracking_number, pkg.carrier, `package ${pkg.id}`);
-    await sql`
-      UPDATE packages SET tracking_registered_at = NOW(), tracking_claimed_at = NULL WHERE id = ${pkg.id}
-    `;
-    return true;
   } catch (err) {
     const uncertain = err instanceof Error && /timeout|timed out|abort/i.test(err.message);
     if (!uncertain) {
-      await sql`UPDATE packages SET tracking_claimed_at = NULL WHERE id = ${pkg.id}`;
+      // Left standing, the claim only delays the sweep's retry until it expires.
+      await sql`UPDATE packages SET tracking_claimed_at = NULL WHERE id = ${pkg.id}`
+        .catch((e: unknown) => pkgLog.warn('tracking claim release failed', e));
     }
-    shipLog.child({ packageId: pkg.id })
-      .warn(uncertain
-        ? 'tracking registration timed out; its claim stands until it expires'
-        : 'tracking registration failed; the sweep will retry', err);
+    pkgLog.warn(uncertain
+      ? 'tracking registration timed out; its claim stands until it expires'
+      : 'tracking registration failed; the sweep will retry', err);
     return false;
   }
+  try {
+    await sql`
+      UPDATE packages SET tracking_registered_at = NOW(), tracking_claimed_at = NULL WHERE id = ${pkg.id}
+    `;
+  } catch (err) {
+    // Shippo has the number, so the claim is left to expire rather than be
+    // freed; a second registration would mean a second update stream.
+    pkgLog.error('tracking registered but its stamp failed to save', err);
+  }
+  return true;
 }
 
 // One registration is one awaited HTTP call with a 20s timeout, and this runs

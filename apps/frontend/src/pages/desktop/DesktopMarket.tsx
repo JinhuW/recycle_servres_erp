@@ -13,6 +13,7 @@ import { staleness, STALE_DAYS } from '../../lib/marketStaleness';
 import { TARGET_MARGIN_FALLBACK } from '../../lib/useMarketLookup';
 import { usePreference } from '../../lib/preferences';
 import { MarketPriceImportDialog } from './MarketPriceImportDialog';
+import { parseManualPrice } from '../../lib/marketPrice';
 
 // ─── Sparkline ───────────────────────────────────────────────────────────────
 function Sparkline({
@@ -703,9 +704,10 @@ function ManualPriceDialog({
   const [note, setNote] = useState<string>('');
   const [saving, setSaving] = useState(false);
 
+  const parsed = parseManualPrice(price);
   async function save() {
-    const n = Number(price);
-    if (!Number.isFinite(n) || n < 0) return;
+    const n = parsed;
+    if (n == null || saving) return;
     setSaving(true);
     try {
       const r = await api.post<{ lastPrice: number; lastPriceAt: string }>(
@@ -768,7 +770,7 @@ function ManualPriceDialog({
             type="button"
             className="btn primary"
             onClick={save}
-            disabled={saving || !Number.isFinite(Number(price)) || Number(price) < 0}
+            disabled={saving || parsed == null}
           >{saving ? '…' : t('save')}</button>
         </div>
       </div>

@@ -315,15 +315,24 @@ export function plan(input: PlanInput): Plan {
   }
 
   // Stopped for a replacement whose run then failed: the release's worker,
-  // so it is run again even above the count, never left removed.
+  // so it is run again even above the count, never left removed. One whose
+  // container survived the stop (its `docker rm` failed) is replaced, which
+  // removes it, confirms the stop and runs it.
   for (const id of input.restarting ?? []) {
     const n = workerIndex(hostId, id);
-    if (n === null || n <= desired.count || byId.has(id) || !canCreate) continue;
+    const current = byId.get(id);
+    if (n === null || n <= desired.count || current?.running || duplicates.has(id) || !canCreate) continue;
+    if (current && holdOf(current, input) !== null) continue;
     if (!takeStart()) {
       notes.push(`${id}: stopped for its replacement; run waits for its turn`);
       continue;
     }
-    actions.push({ kind: 'run', worker_id: id, container: containerName(id), image: desired.image, port: vncPort(desired, id, n), reason: 'replacement' });
+    const port = vncPort(desired, id, n);
+    if (current) {
+      actions.push({ kind: 'replace', worker_id: id, container: current.name, image: desired.image, port, reason: 'replacement', counted: false, soft: false });
+    } else {
+      actions.push({ kind: 'run', worker_id: id, container: containerName(id), image: desired.image, port, reason: 'replacement' });
+    }
   }
 
   const outages: { id: string; n: number; current: Container; sinceExit: number; recovered: boolean }[] = [];

@@ -1,13 +1,13 @@
 {
   "name": "recycle-erp",
-  "version": "1.473.0",
+  "version": "1.473.1",
   "private": true,
   "packageManager": "pnpm@11.0.9",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "dev": "pnpm -r --parallel --stream run dev",
+    "dev": "pnpm --parallel --stream --filter recycle-erp-backend --filter recycle-erp-frontend run dev",
     "dev:backend": "pnpm --filter recycle-erp-backend dev",
     "dev:frontend": "pnpm --filter recycle-erp-frontend dev",
     "build": "pnpm -r run build",

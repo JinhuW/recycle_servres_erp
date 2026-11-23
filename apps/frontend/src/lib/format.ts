@@ -69,8 +69,40 @@ export const fmtOrderTotal0 = (
 export const fmtDate = (d: Date | string, locale = 'en-US') =>
   new Date(d).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' });
 
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const UTC_MIDNIGHT_RE = /T00:00(:00(\.0+)?)?(Z|\+00:?00)$/;
+
+/** True for a value that names a calendar day rather than an instant: a bare
+ *  'YYYY-MM-DD', or that date's UTC-midnight round trip through a timestamp
+ *  column (how carrier ETAs are stored). */
+export const isCalendarDay = (s: string) => DATE_ONLY_RE.test(s) || UTC_MIDNIGHT_RE.test(s);
+
+/** A bare 'YYYY-MM-DD' is a calendar date. `new Date()` parses it as UTC
+ *  midnight, which local time shows as the day before anywhere west of UTC,
+ *  so it is formatted in UTC; any other value is an instant shown locally. */
 export const fmtDateShort = (d: Date | string, locale = 'en-US') =>
-  new Date(d).toLocaleDateString(locale, { month: 'short', day: 'numeric' });
+  new Date(d).toLocaleDateString(locale, {
+    month: 'short', day: 'numeric',
+    ...(typeof d === 'string' && DATE_ONLY_RE.test(d) ? { timeZone: 'UTC' } : {}),
+  });
+
+/** The viewer's local calendar day of an instant, 'YYYY-MM-DD', for grouping a
+ *  feed under day headers that fmtDate prints in local time. Slicing
+ *  toISOString() would file evening events under the next (UTC) day. */
+export const localDayKey = (d: Date | string): string => {
+  const x = new Date(d);
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  return `${x.getFullYear()}-${p2(x.getMonth() + 1)}-${p2(x.getDate())}`;
+};
+
+/** Like fmtDateShort for a value that may be a calendar day stored as UTC
+ *  midnight, such as a carrier ETA. Only use it where the field is known to
+ *  hold dates: a real event at 00:00 UTC would be read as its UTC day. */
+export const fmtCalendarDayShort = (d: string, locale = 'en-US') =>
+  new Date(d).toLocaleDateString(locale, {
+    month: 'short', day: 'numeric',
+    ...(isCalendarDay(d) ? { timeZone: 'UTC' } : {}),
+  });
 
 // Canonical part number for *grouping* — the key that decides whether two PO
 // lines are the same product. Re-exported here because this is where the rest

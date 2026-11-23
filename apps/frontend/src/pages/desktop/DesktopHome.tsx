@@ -5,7 +5,7 @@ import { RouteLink } from '../../components/RouteLink';
 import { DashboardSkeleton } from '../../components/Skeleton';
 import { useT } from '../../lib/i18n';
 import { useEffectiveUser } from '../../lib/tweaks';
-import { fmtDateShort, fmtUSD0 } from '../../lib/format';
+import { fmtCalendarDayShort, fmtDateShort, fmtUSD0 } from '../../lib/format';
 import { LIFECYCLE_STATUS, statusTone, WORKFLOW_STAGES } from '../../lib/status';
 import { NEED_SHORT_KEY, SERVER_BLOCKER_KEY } from '../../lib/poReadiness';
 import { ACCOUNTING_REVIEW_PATH, ACTIONS_PATH, actionPath } from '../../lib/route';
@@ -153,7 +153,7 @@ function nextStep(o: PurchaserHome['openPos']['items'][number], t: T, locale: st
     if (o.package.status === 'exception') return <span className="neg">{t('homePkgException')}</span>;
     if (o.package.status === 'delivered') return t('homePkgDelivered');
     return o.package.eta
-      ? t('homeEta', { date: fmtDateShort(o.package.eta, locale) })
+      ? t('homeEta', { date: fmtCalendarDayShort(o.package.eta, locale) })
       : (o.package.trackingStatus ?? t('homeNoEta'));
   }
   if (o.lifecycle === 'reviewing') return t('homeNextReview');
@@ -315,7 +315,7 @@ function MyActionsCard() {
                 <span className="home-list-main">{a.title}</span>
                 <span className={'home-list-meta' + (overdue ? ' neg' : due ? ' warn' : '')}>
                   {a.dueDate
-                    ? overdue || due ? (due ? t('homeDueToday') : t('actOverdue')) : fmtDateShort(a.dueDate + 'T12:00:00', locale)
+                    ? overdue || due ? (due ? t('homeDueToday') : t('actOverdue')) : fmtDateShort(a.dueDate, locale)
                     : t(STATUS_KEY[a.status])}
                 </span>
               </RouteLink>
@@ -396,7 +396,7 @@ function PackageList({ items, empty, showCreator }: { items: HomePackage[]; empt
             <span className={'home-list-meta' + (problem ? ' neg' : '')}>
               {p.status === 'exception' ? t('homePkgException')
                 : p.status === 'delivered' ? t('homePkgNoPo')
-                : p.eta ? t('homeEta', { date: fmtDateShort(p.eta, locale) })
+                : p.eta ? t('homeEta', { date: fmtCalendarDayShort(p.eta, locale) })
                 : (p.trackingStatus ?? t('homeNoEta'))}
             </span>
           </RouteLink>

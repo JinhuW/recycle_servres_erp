@@ -8,7 +8,7 @@ import type { CityStep, CityStepKind, CityVisit, CityVisitOutcome, FleetCity as 
 import {
   fleetAutoResumeDue, fleetResumable, fleetSlotRetirable, fleetStateParked, fleetTakesResume, FLEET_AUTO_RESUME_MINUTES, type FleetCityLogTask as FleetTaskLog, type FleetWorkerDetail, type FleetWorkerEvent } from '../../../lib/fleet';
 import type { CityHits, FleetStatus, ReloginProgress } from '../../../lib/fleetView';
-import { liveness } from './fleetBoard';
+import { fleetDate, liveness } from './fleetBoard';
 
 /** Live, Stale, Needs attention or Offline, as the homelab page buckets a worker. */
 export function erpWorkerStatus(w: FleetWorkerDetail['worker'], now: number = Date.now()): FleetStatus {
@@ -76,11 +76,11 @@ export function erpCityChips(d: FleetWorkerDetail, now: number = Date.now()): { 
   const chip = (c: FleetWorkerDetail['cities'][number]): ChipCity => ({ slug: c.slug, name: c.name ?? c.slug, radius_km: c.radius_km });
   const hits = new Map<string, CityHits>();
   for (const c of d.cities) if (c.alerts > 0) hits.set(c.slug, { sent: c.alerts, hit: 0 });
-  const today = new Date(now).toISOString().slice(0, 10);
+  const today = fleetDate(now);
   return {
     cities: d.cities.map(chip),
     hits,
-    searched: new Set(d.cities.filter(c => c.last_done_at?.slice(0, 10) === today).map(c => c.slug)),
+    searched: new Set(d.cities.filter(c => c.last_done_at && fleetDate(c.last_done_at) === today).map(c => c.slug)),
   };
 }
 

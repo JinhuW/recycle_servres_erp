@@ -78,6 +78,28 @@ describe('global JSON body-size limit', () => {
     expect(beside.status).toBe(413);
   });
 
+  it('lets a multipart file over 1 MiB reach the sell order and accounting upload routes', async () => {
+    const form = new FormData();
+    form.append('file', new File([new Uint8Array(OVER_1MIB_SIZE)], 'receipt.pdf', { type: 'application/pdf' }));
+    const post = async (path: string) => {
+      // FormData sets its own boundary, so the body is serialized first.
+      const req = new Request(`http://test${path}`, { method: 'POST', body: form });
+      const headers = new Headers(req.headers);
+      headers.set('X-Requested-By', 'recycle-erp');
+      return app.fetch(new Request(req, { headers }), testEnv);
+    };
+    for (const path of [
+      '/api/sell-orders/SO-1/attachments',
+      '/api/accounting/entries/AE-1/attachments',
+      '/api/accounting/scan-receipt',
+    ]) {
+      // Unauthenticated, so a body that clears the cap stops at auth instead.
+      const res = await post(path);
+      expect(res.status, path).not.toBe(413);
+      expect(res.status, path).toBe(401);
+    }
+  });
+
   it('accepts a POST body under 1 MiB on a JSON route (passes through to route logic)', async () => {
     // A normal-sized login attempt — wrong credentials, but NOT a 413.
     const payload = JSON.stringify({ email: 'nobody@example.com', password: 'wrong' });

@@ -80,13 +80,13 @@ async function purchaserHome(sql: Sql, u: User) {
       ${poRealizedLateral(sql, true)}
       WHERE ${mine} AND o.lifecycle IN ('ready_to_pay', 'done')`,
     // The supplier book's due states (services/supplierCrm.ts dueStateFor):
-    // past or today is due, within a week is soon.
+    // past or today is due, within a week is soon, counted on the business day.
     () => sql<{ id: string; name: string; next_follow_up_at: string; days_until: number }[]>`
       SELECT s.id, s.name, to_char(s.next_follow_up_at, 'YYYY-MM-DD') AS next_follow_up_at,
-             (s.next_follow_up_at - CURRENT_DATE)::int AS days_until
+             (s.next_follow_up_at - (NOW() AT TIME ZONE ${REPORTING_TZ})::date)::int AS days_until
       FROM suppliers s
       WHERE s.owner_id = ${u.id} AND s.status IN ('prospect', 'active')
-        AND s.next_follow_up_at <= CURRENT_DATE + 7
+        AND s.next_follow_up_at <= (NOW() AT TIME ZONE ${REPORTING_TZ})::date + 7
       ORDER BY s.next_follow_up_at, s.name`,
     () => readCutoffs(sql),
   ]);
