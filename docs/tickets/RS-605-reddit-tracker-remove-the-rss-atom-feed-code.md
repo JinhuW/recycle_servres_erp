@@ -2,13 +2,13 @@
 id: RS-605
 title: "Reddit tracker: remove the RSS/Atom feed code"
 type: chore
-status: in-review
+status: done
 priority: P3
 created: 2026-11-22
 reporter: jinhu
 branch: refactor/reddit-drop-rss
-pr:
-version:
+pr: 1241
+version: tracker only, not deployed (prod runs poll_source = webhook)
 related: [RS-600, RS-602]
 ---
 
