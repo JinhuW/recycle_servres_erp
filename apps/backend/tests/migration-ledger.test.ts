@@ -145,6 +145,10 @@ describe('migrate.mjs schema_migrations ledger', () => {
   // The scratch DB is at head by now. Functions outlive a table drop, so a
   // reset that left them failed on the first plain CREATE FUNCTION it replayed.
   it('--reset replays every migration onto a database already at head', async () => {
+    // A routine whose SQL-standard body calls another depends on it, so the
+    // first one's CASCADE drops it before the loop reaches it.
+    await db.unsafe(`CREATE FUNCTION public.reset_probe_a() RETURNS int LANGUAGE sql RETURN 1`);
+    await db.unsafe(`CREATE FUNCTION public.reset_probe_b() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT public.reset_probe_a(); END`);
     const r = spawnSync('node', [migrateScript, '--reset'], {
       env: { ...process.env, DATABASE_URL: scratchUrl },
       encoding: 'utf8',
@@ -155,5 +159,6 @@ describe('migrate.mjs schema_migrations ledger', () => {
     const [ext] = await db<{ n: number }[]>`
       SELECT COUNT(*)::int AS n FROM pg_extension WHERE extname IN ('pgcrypto', 'pg_trgm')`;
     expect(ext.n).toBe(2);
+    expect(await db`SELECT 1 FROM pg_proc WHERE proname LIKE 'reset_probe_%'`).toHaveLength(0);
   }, 120_000);
 });

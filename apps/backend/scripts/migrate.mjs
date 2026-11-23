@@ -119,13 +119,17 @@ try {
     // drop above leaves them, and the migrations that make them with a plain
     // CREATE FUNCTION then fail on replay. Extension members (pgcrypto,
     // pg_trgm) stay: dropping one would break its extension, which the
-    // migrations only CREATE IF NOT EXISTS.
+    // migrations only CREATE IF NOT EXISTS. Every signature is rendered to
+    // text before the first drop: a FOR loop fetches its rows lazily, so a
+    // routine another one's CASCADE already dropped (a SQL-standard body
+    // depends on what it calls) would render as a bare OID, and
+    // `DROP ROUTINE IF EXISTS 12345` is a syntax error rather than a no-op.
     await sql.unsafe(`
       DO $$
-      DECLARE r RECORD;
+      DECLARE sig TEXT;
       BEGIN
-        FOR r IN (
-          SELECT p.oid::regprocedure AS sig
+        FOREACH sig IN ARRAY ARRAY(
+          SELECT p.oid::regprocedure::text
           FROM pg_proc p
           JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.prokind IN ('f', 'p')
@@ -134,7 +138,7 @@ try {
               WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e'
             )
         ) LOOP
-          EXECUTE 'DROP ROUTINE IF EXISTS ' || r.sig || ' CASCADE';
+          EXECUTE 'DROP ROUTINE IF EXISTS ' || sig || ' CASCADE';
         END LOOP;
       END $$;
     `);
