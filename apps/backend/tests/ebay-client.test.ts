@@ -6,6 +6,7 @@ import {
 } from '../src/ebay/oauth';
 import { EbayApiError, EbayClient, EbayRateLimitError, type EbayOrder } from '../src/ebay/client';
 import { ebayKey, seal, unseal } from '../src/lib/sealed';
+import { buildEnv } from '../src/env';
 import type { Env } from '../src/types';
 
 // The eBay client never reaches eBay here: every call goes through an
@@ -52,6 +53,15 @@ describe('ebay config', () => {
     expect(ebayConfig({ ...env, EBAY_ENV: 'production' } as Env)).toMatchObject({
       apiBase: 'https://api.ebay.com', authBase: 'https://auth.ebay.com',
     });
+  });
+
+  it('reaches Env from process.env, and a malformed EBAY_KEY fails the boot', () => {
+    const base = { DATABASE_URL: 'postgres://x', JWT_SECRET: 's', OPENROUTER_API_KEY: 'k' };
+    const built = buildEnv({
+      ...base, EBAY_CLIENT_ID: 'id', EBAY_CLIENT_SECRET: 'sec', EBAY_RU_NAME: 'ru', EBAY_ENV: 'production',
+    } as NodeJS.ProcessEnv);
+    expect(ebayConfig(built)).toMatchObject({ clientId: 'id', ruName: 'ru', environment: 'production' });
+    expect(() => buildEnv({ ...base, EBAY_KEY: 'short' } as NodeJS.ProcessEnv)).toThrow(/EBAY_KEY/);
   });
 
   it('derives a sealing key outside production and refuses without one in it', () => {
