@@ -51,6 +51,15 @@ export type Env = {
   // Seals the Facebook account pool's credentials (lib/sealed.ts): 64 hex
   // chars. Unset in production disables the pool routes (503), nothing else.
   FB_POOL_KEY?: string;
+  // eBay seller connection (src/ebay/). All three of CLIENT_ID, CLIENT_SECRET
+  // and RU_NAME unset leaves the eBay sync off ("not configured"); EBAY_ENV is
+  // 'sandbox' (default) or 'production'. EBAY_KEY (64 hex chars) seals the
+  // stored refresh token; unset in production answers 503 on the connection.
+  EBAY_CLIENT_ID?: string;
+  EBAY_CLIENT_SECRET?: string;
+  EBAY_RU_NAME?: string;
+  EBAY_ENV?: string;
+  EBAY_KEY?: string;
   // Signs the fleet's worker tokens (src/fleet/auth.ts): 64 hex chars. Unset in
   // production answers 401 on the worker routes, nothing else; dev derives one.
   FLEET_WORKER_TOKEN_KEY?: string;
