@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { ebayItemUrl, parseEbayListingRef } from '@recycle-erp/shared';
 import type postgres from 'postgres';
 import { getDb, type SqlLike } from '../db';
 import { allLimited } from '../lib/concurrency';
@@ -128,13 +129,14 @@ function parseParts(raw: unknown, min: number): PartInput[] | string {
   return out;
 }
 
-// eBay item numbers are all digits; the URL is derived when only the number
-// is given, which is what an operator pasting from the eBay app has.
+// eBay item numbers are all digits. However the listing was given (the
+// number, or a link from the site or the app), one canonical URL is stored.
 const ITEM_ID_RE = /^\d{6,20}$/;
-const itemUrl = (itemId: string) => `https://www.ebay.com/itm/${itemId}`;
-const isHttpsUrl = (v: string) => {
-  try { return new URL(v).protocol === 'https:'; } catch { return false; }
-};
+const LINK_ERRORS = {
+  empty: 'ebayUrl is empty: paste the eBay listing link',
+  not_ebay: 'ebayUrl must be an eBay listing link, like https://www.ebay.com/itm/256712340987',
+  no_item: 'that eBay link has no item number in it: copy the link of the listing itself (ebay.com/itm/…)',
+} as const;
 
 // ── Reading listings ────────────────────────────────────────────────────────
 
@@ -576,12 +578,16 @@ ebay.patch('/listings/:id', async (c) => {
     patch.ebay_item_id = body.ebayItemId.trim();
   }
   if (body.ebayUrl !== undefined) {
-    if (typeof body.ebayUrl !== 'string' || body.ebayUrl.length > 2000 || !isHttpsUrl(body.ebayUrl.trim())) {
-      return c.json({ error: 'ebayUrl must be an https URL' }, 400);
+    const ref = typeof body.ebayUrl === 'string' && body.ebayUrl.length <= 2000
+      ? parseEbayListingRef(body.ebayUrl) : { error: 'not_ebay' as const };
+    if ('error' in ref) return c.json({ error: LINK_ERRORS[ref.error] }, 400);
+    if (patch.ebay_item_id !== undefined && patch.ebay_item_id !== ref.itemId) {
+      return c.json({ error: `ebayItemId ${patch.ebay_item_id} and the link's item ${ref.itemId} differ` }, 400);
     }
-    patch.ebay_url = body.ebayUrl.trim();
+    patch.ebay_item_id = ref.itemId;
+    patch.ebay_url = ref.url;
   }
-  if (patch.ebay_item_id && patch.ebay_url === undefined) patch.ebay_url = itemUrl(patch.ebay_item_id);
+  if (patch.ebay_item_id && patch.ebay_url === undefined) patch.ebay_url = ebayItemUrl(patch.ebay_item_id);
   if (Object.keys(patch).length === 0) return c.json({ error: 'nothing to change' }, 400);
 
   const sql = getDb(c.env);

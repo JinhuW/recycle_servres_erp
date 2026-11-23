@@ -398,4 +398,37 @@ describe('eBay listings', () => {
     expect(r.status).toBe(409);
     expect(r.body.error).toContain(a);
   });
+  it('the eBay operator adds the listing link, on a listing to post and on a live one', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const { token } = await loginAs(EBAY);
+    const line = await freeSellableLine(mgr, 2);
+    const { body: { ids: [a, b] } } = await list(mgr, line.id, [{ qty: 1, listPrice: 1 }, { qty: 1, listPrice: 1 }]);
+    const patch = (id: string, ebayUrl: unknown) =>
+      api<{ status: string; error?: string }>('PATCH', `/api/ebay/listings/${id}`, { token, body: { ebayUrl } });
+    const row = async (id: string) => (await getTestDb()<{ status: string; ebay_item_id: string; ebay_url: string }[]>`
+      SELECT status, ebay_item_id, ebay_url FROM ebay_listings WHERE id = ${id}`)[0];
+
+    // Queued → Listed, from a link with a title slug and a query.
+    const r = await patch(a, 'https://www.ebay.com/itm/Samsung-32GB-DDR4/256712340987?hash=item3bc&var=0');
+    expect(r.status).toBe(200);
+    expect(r.body.status).toBe('Listed');
+    expect(await row(a)).toEqual({ status: 'Listed', ebay_item_id: '256712340987', ebay_url: 'https://www.ebay.com/itm/256712340987' });
+
+    // A wrong link on a live listing is fixed the same way.
+    const fixed = await patch(a, 'm.ebay.com/itm/256712340999');
+    expect(fixed.status).toBe(200);
+    expect(fixed.body.status).toBe('Listed');
+    expect(await row(a)).toMatchObject({ ebay_item_id: '256712340999', ebay_url: 'https://www.ebay.com/itm/256712340999' });
+
+    for (const bad of ['https://www.amazon.com/itm/256712340987', 'https://www.ebay.com/sch/i.html?_nkw=ddr4', 'ebay.com/itm/', 42]) {
+      const no = await patch(b, bad);
+      expect(no.status, String(bad)).toBe(400);
+      expect(no.body.error).toMatch(/eBay listing link|no item number/);
+    }
+    expect((await row(b)).status).toBe('Queued');
+
+    // The item stays unique, whichever way it was named.
+    const taken = await patch(b, 'https://ebay.com/itm/256712340999');
+    expect(taken.status).toBe(409);
+  });
 });
