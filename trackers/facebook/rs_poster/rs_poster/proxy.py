@@ -25,15 +25,28 @@ def proxy_settings(proxy: Optional[str]) -> Optional[Dict[str, Any]]:
     """
     if not proxy:
         return None
+    # `user:pass@host:port` with no scheme would parse `user` as the scheme and
+    # leave the credentials inside `server`. Playwright reads a bare
+    # `host:port` as HTTP, so that is the scheme to assume.
+    if "://" not in proxy:
+        proxy = f"http://{proxy}"
     parts = urlsplit(proxy)
-    if not parts.username:
+    if "@" not in parts.netloc:
         return {"server": proxy}
     host = parts.hostname or ""
-    if parts.port:
-        host = f"{host}:{parts.port}"
+    # hostname drops the brackets an IPv6 literal needs in a URL.
+    if ":" in host:
+        host = f"[{host}]"
+    try:
+        port = parts.port
+    except ValueError:
+        # Never echo the URL: it carries the password.
+        raise ValueError(f"proxy URL for {host or '?'} has an invalid port") from None
+    if port is not None:
+        host = f"{host}:{port}"
     settings: Dict[str, Any] = {
         "server": urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
     }
-    settings["username"] = unquote(parts.username)
+    settings["username"] = unquote(parts.username or "")
     settings["password"] = unquote(parts.password or "")
     return settings

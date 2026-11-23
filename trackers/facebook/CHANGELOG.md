@@ -39,6 +39,18 @@ deployed?" harder to answer.
   Telegram notice said "0 workers - verified". Verify now counts the workers
   it compared and, when there are none, says it checked the coordinator
   alone. The missing compose files no longer print a `sed` error either.
+- **The proxy splitter handles every URL form it is given.** A proxy written
+  without a scheme (`user:pass@host:port`) parsed `user` as the scheme and
+  went to Chromium whole, credentials and all; an IPv6 host lost the brackets
+  its URL needs; and a bad port raised urllib's error. It now assumes `http://`
+  when there is no scheme, keeps the brackets, and names the host (never the
+  password) when the port is invalid.
+- **`scripts/check-cities.py` authenticates to its proxy.** It still passed the
+  session's raw proxy URL, credentials included, as Chromium's `server`; it
+  now uses the shared splitter.
+- **A `deploy.sh sync` Telegram notice no longer says "verified".** It said the
+  coordinator was verified running this tree, though sync checks no
+  coordinator. It now reads "Synced" and says what was checked.
 
 ## [0.18.0] - 2026-11-07
 
