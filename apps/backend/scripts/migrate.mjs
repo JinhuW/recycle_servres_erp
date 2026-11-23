@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Run SQL files in ./migrations against DATABASE_URL.
-// Use --reset to DROP all known tables first (dev only).
+// Use --reset to DROP the app's tables and functions first (dev only).
 
 import postgres from 'postgres';
 import { createHash } from 'node:crypto';
@@ -101,7 +101,7 @@ try {
   // First statement of the run, so this is where a cold/absent database shows up.
   await connectWithRetry(() => sql`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`);
   if (reset) {
-    log.warn('dropping existing tables');
+    log.warn('dropping existing tables and functions');
     // Drop everything in the public schema (dev-only). Older versions of this
     // script hard-coded a fixed table list which silently went stale every time
     // we added a migration — switch to discovering tables at runtime so reset
@@ -112,6 +112,29 @@ try {
       BEGIN
         FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
           EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+        END LOOP;
+      END $$;
+    `);
+    // Functions are not dependents of the tables their bodies name, so the
+    // drop above leaves them, and the migrations that make them with a plain
+    // CREATE FUNCTION then fail on replay. Extension members (pgcrypto,
+    // pg_trgm) stay: dropping one would break its extension, which the
+    // migrations only CREATE IF NOT EXISTS.
+    await sql.unsafe(`
+      DO $$
+      DECLARE r RECORD;
+      BEGIN
+        FOR r IN (
+          SELECT p.oid::regprocedure AS sig
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.prokind IN ('f', 'p')
+            AND NOT EXISTS (
+              SELECT 1 FROM pg_depend d
+              WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e'
+            )
+        ) LOOP
+          EXECUTE 'DROP ROUTINE IF EXISTS ' || r.sig || ' CASCADE';
         END LOOP;
       END $$;
     `);

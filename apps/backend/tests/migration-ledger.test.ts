@@ -141,4 +141,19 @@ describe('migrate.mjs schema_migrations ledger', () => {
     `;
     expect(backfilled.checksum).toBe(sha(first.filename));
   }, 60_000);
+
+  // The scratch DB is at head by now. Functions outlive a table drop, so a
+  // reset that left them failed on the first plain CREATE FUNCTION it replayed.
+  it('--reset replays every migration onto a database already at head', async () => {
+    const r = spawnSync('node', [migrateScript, '--reset'], {
+      env: { ...process.env, DATABASE_URL: scratchUrl },
+      encoding: 'utf8',
+    });
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    const [row] = await db<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM schema_migrations`;
+    expect(row.n).toBe(fileCount);
+    const [ext] = await db<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM pg_extension WHERE extname IN ('pgcrypto', 'pg_trgm')`;
+    expect(ext.n).toBe(2);
+  }, 120_000);
 });
