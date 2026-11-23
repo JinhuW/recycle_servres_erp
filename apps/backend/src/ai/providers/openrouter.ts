@@ -118,16 +118,14 @@ export const openRouterProvider: LlmProvider = {
       choices?: { message?: { content?: string } }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
     };
-    const text = data.choices?.[0]?.message?.content;
-    if (!text) throw new EmptyAnswerError('OpenRouter');
-    return {
-      text,
-      usage: data.usage && {
-        promptTokens: data.usage.prompt_tokens ?? 0,
-        completionTokens: data.usage.completion_tokens ?? 0,
-        costUsd: data.usage.cost ?? 0,
-      },
+    const usage = data.usage && {
+      promptTokens: data.usage.prompt_tokens ?? 0,
+      completionTokens: data.usage.completion_tokens ?? 0,
+      costUsd: data.usage.cost ?? 0,
     };
+    const text = data.choices?.[0]?.message?.content;
+    if (!text) throw new EmptyAnswerError('OpenRouter', usage);
+    return { text, usage };
   },
 
   // The catalogue is public; with a key, it is the one asked for, so a key

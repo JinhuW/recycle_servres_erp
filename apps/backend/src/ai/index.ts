@@ -5,33 +5,37 @@
 // data would be trusted as real readings. Real calls fail fast; the scan
 // route turns a throw into a 502 so the field user retries the shot.
 
-import { AI_PROVIDERS, parseModelRef, type AiFeature, type AiProviderId } from '@recycle-erp/shared';
+import { AI_PROVIDERS, parseModelRef, type AiFeature } from '@recycle-erp/shared';
 import type { Env, LineCategory } from '../types';
 import type { ScanResult, OcrProvider } from './types';
 import { stubScan } from './stub';
-import { aiScan, envModel, resolveModel } from './llm';
-import { aiKeys, aiKeysSnapshot, type AiKeys } from './keys';
+import { aiScan, fallbackModel, resolveModel, resolveModelForHealth } from './llm';
+import { aiKeys, aiKeysForHealth, type AiKeys } from './keys';
 import { ocrCallsTotal } from '../metrics';
 import { log } from '../lib/log';
 
 const aiLog = log.child({ module: 'ai' });
 
 export type { ScanResult, OcrProvider } from './types';
+export { modelHasKey, providerHasKey } from './keys';
 
 export const NO_KEY_ERROR = 'No AI provider key is set: add one on Settings ▸ AI models';
 
 function choose(env: Env, keys: AiKeys): OcrProvider {
-  const have = AI_PROVIDERS.filter((p) => keys[p]);
-  if (have.length === 0) return 'stub';
-  const p = parseModelRef(envModel(env)).provider;
-  return have.includes(p) ? p : (have[0] as AiProviderId);
+  if (!AI_PROVIDERS.some((p) => keys[p])) return 'stub';
+  return parseModelRef(fallbackModel(env, keys)).provider;
 }
 
-// Mode for /api/health, synchronous and without side effects: a probe must
-// not log or query. Reads the last fetch of saved keys plus env.
-export function describeOcr(env: Env): OcrProvider | 'none' {
-  const p = choose(env, aiKeysSnapshot(env));
-  return p === 'stub' && env.NODE_ENV === 'production' ? 'none' : p;
+/**
+ * Mode for /api/health: the provider label scans actually go to, or 'none'
+ * when that provider has no key and they fail. A probe must not log, and
+ * reads the database only while the caches are cold after a restart.
+ */
+export async function describeOcr(env: Env): Promise<OcrProvider | 'none'> {
+  const keys = await aiKeysForHealth(env);
+  if (choose(env, keys) === 'stub') return env.NODE_ENV === 'production' ? 'none' : 'stub';
+  const p = parseModelRef(await resolveModelForHealth(env, keys, { feature: 'scan' })).provider;
+  return keys[p] ? p : 'none';
 }
 
 let warnedAboutStub = false;

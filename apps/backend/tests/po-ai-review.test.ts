@@ -3,7 +3,7 @@
 // The test env has no OPENROUTER_API_KEY, so the run is the deterministic
 // part-number check alone — the model witnesses are skipped, not faked.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { getTestDb, resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
@@ -201,6 +201,27 @@ describe('PO AI review', () => {
     expect((await api('POST', `/api/orders/${id}/advance`, { token: mgr, body: { toStage: 'in_transit' } })).status).toBe(200);
     expect((await read(id, mgr)).body.latest!.status).toBe('superseded');
     expect(await drain()).toBe(0);
+  });
+
+  // With only another provider's key, every model call would fail and the
+  // review used to be filed under the model's name as if it had read it.
+  it("skips the model checks when the review's model has no key, and says so", async () => {
+    await getTestDb()`
+      UPDATE workspace_settings
+      SET value = value || '{"enabled": true, "model": "anthropic:claude-sonnet-5-5"}'::jsonb
+      WHERE key = 'po_ai_review'`;
+    const { id } = await createInTransit(pur);
+    await toReviewing(id, mgr);
+    const fetchSpy = vi.fn(async () => { throw new Error('no model call expected'); });
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      expect(await drainPoAiReviews(getTestDb(), { ...testEnv, OPENROUTER_API_KEY: 'o' })).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const [row] = await getTestDb()`SELECT status, model FROM po_ai_reviews WHERE order_id = ${id}`;
+    expect(row).toMatchObject({ status: 'done', model: 'stub' });
   });
 
   it('validates the setting', async () => {

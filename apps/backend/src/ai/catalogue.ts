@@ -15,6 +15,8 @@ const TTL_MS = 3_600_000;
 // After a failed refresh the last copy is served this long before the next
 // attempt, so an outage doesn't cost every dialog open a timeout.
 const RETRY_MS = 300_000;
+// How long a priced call waits for OpenRouter's list when nothing is cached.
+const PRICE_WAIT_MS = 5_000;
 
 const clog = log.child({ module: 'ai-models' });
 
@@ -22,10 +24,14 @@ type Entry = { models: AiModel[]; fetchedAt: string; expiresAt: number };
 
 const cache = new Map<AiProviderId, Entry>();
 const inflight = new Map<AiProviderId, Promise<Entry>>();
+// Bumped by dropCatalogue: a fetch started before the drop (under the old
+// key) must neither land in the cache nor clear a newer fetch's slot.
+const generation = new Map<AiProviderId, number>();
 
 /** `expire` keeps the cached copies but makes the next read refresh them. */
 export function _resetForTests({ expire = false } = {}): void {
   inflight.clear();
+  priceWaitFailedAt = 0;
   if (expire) for (const e of cache.values()) e.expiresAt = 0;
   else cache.clear();
 }
@@ -35,6 +41,8 @@ function load(apiKey: string | undefined, id: AiProviderId): Promise<Entry> {
   if (hit && Date.now() < hit.expiresAt) return Promise.resolve(hit);
   let p = inflight.get(id);
   if (!p) {
+    const gen = generation.get(id) ?? 0;
+    const current = () => (generation.get(id) ?? 0) === gen;
     p = PROVIDERS[id].listModels(apiKey)
       .then((models) => {
         // An empty answer would replace a good copy with a picker that offers nothing.
@@ -44,17 +52,19 @@ function load(apiKey: string | undefined, id: AiProviderId): Promise<Entry> {
           fetchedAt: new Date().toISOString(),
           expiresAt: Date.now() + TTL_MS,
         };
-        cache.set(id, entry);
+        if (current()) cache.set(id, entry);
         return entry;
       })
       .catch((err: unknown) => {
-        const last = cache.get(id);
+        const last = current() ? cache.get(id) : undefined;
         if (!last) throw err;
         clog.warn('model catalogue refresh failed; serving the last copy', { provider: id, error: String(err) });
         last.expiresAt = Date.now() + RETRY_MS;
         return last;
       })
-      .finally(() => inflight.delete(id));
+      .finally(() => {
+        if (inflight.get(id) === p) inflight.delete(id);
+      });
     inflight.set(id, p);
   }
   return p;
@@ -62,8 +72,28 @@ function load(apiKey: string | undefined, id: AiProviderId): Promise<Entry> {
 
 /** Forget one provider's list, e.g. after its key changed. */
 export function dropCatalogue(id: AiProviderId): void {
+  generation.set(id, (generation.get(id) ?? 0) + 1);
   cache.delete(id);
   inflight.delete(id);
+}
+
+/**
+ * OpenAI's /v1/models says nothing about what a model can do or cost;
+ * OpenRouter resells the same models as openai/<id> and says both.
+ */
+function withOpenRouterFacts(model: AiModel, openRouter: Map<string, AiModel>): AiModel {
+  if (model.provider !== 'openai') return model;
+  const twin = openRouter.get(`openai/${parseModelRef(model.id).model}`);
+  if (!twin) return model;
+  return {
+    ...model,
+    contextLength: twin.contextLength,
+    promptPerM: twin.promptPerM,
+    completionPerM: twin.completionPerM,
+    structuredOutputs: twin.structuredOutputs,
+    inputModalities: twin.inputModalities,
+    outputModalities: twin.outputModalities,
+  };
 }
 
 export async function catalogue(env: Env): Promise<{ models: AiModel[]; fetchedAt: string; unavailable: AiProviderId[] }> {
@@ -87,7 +117,8 @@ export async function catalogue(env: Env): Promise<{ models: AiModel[]; fetchedA
   if (models.length === 0) {
     throw new Error(`Model catalogue unreachable: ${unavailable.map((id) => AI_PROVIDER_LABELS[id]).join(', ')}`);
   }
-  return { models, fetchedAt, unavailable };
+  const openRouter = new Map(models.filter((m) => m.provider === 'openrouter').map((m) => [m.id, m]));
+  return { models: models.map((m) => withOpenRouterFacts(m, openRouter)), fetchedAt, unavailable };
 }
 
 /**
@@ -104,4 +135,30 @@ export function cachedPrice(ref: string): [number, number] | undefined {
     if (m && m.promptPerM !== null && m.completionPerM !== null) return [m.promptPerM, m.completionPerM];
   }
   return undefined;
+}
+
+/**
+ * cachedPrice, but an OpenAI ref with nothing cached (the list is otherwise
+ * fetched only when someone opens a picker) waits a few seconds for
+ * OpenRouter's public list, rather than being charged the guess.
+ */
+let priceWaitFailedAt = 0;
+
+export async function priceFor(ref: string): Promise<[number, number] | undefined> {
+  const hit = cachedPrice(ref);
+  if (hit || parseModelRef(ref).provider !== 'openai') return hit;
+  // Down a moment ago: a PO review makes many calls, and each would wait.
+  if (Date.now() - priceWaitFailedAt < RETRY_MS) return undefined;
+  let timer: NodeJS.Timeout | undefined;
+  const wait = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, PRICE_WAIT_MS);
+  });
+  try {
+    await Promise.race([load(undefined, 'openrouter').then(() => undefined, () => undefined), wait]);
+  } finally {
+    clearTimeout(timer);
+  }
+  const price = cachedPrice(ref);
+  if (!cache.has('openrouter')) priceWaitFailedAt = Date.now();
+  return price;
 }

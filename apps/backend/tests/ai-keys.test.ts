@@ -6,7 +6,7 @@ import { getDb } from '../src/db';
 import { invalidateAiKeys } from '../src/ai/keys';
 import { _resetForTests } from '../src/ai/catalogue';
 import { aiImageJson } from '../src/ai/llm';
-import { featureProvider, NO_KEY_ERROR } from '../src/ai/index';
+import { describeOcr, featureProvider, NO_KEY_ERROR } from '../src/ai/index';
 import type { Env } from '../src/types';
 
 const TRACKER = { TRACKER_API_URL: 'http://tracker.test', TRACKER_API_TOKEN: 'tracker-token' };
@@ -129,6 +129,15 @@ describe('AI provider keys pasted on Settings ▸ AI models', () => {
     expect(credential(calls.filter(c => c.url.includes('/v1/messages')).at(-1)!)).toBe('env-key');
     expect((await providers({ ANTHROPIC_API_KEY: 'env-key' })).body.providers.find(x => x.id === 'anthropic'))
       .toMatchObject({ source: 'env', last4: null });
+  });
+
+  // Straight after a restart nothing has read the table yet; /api/health
+  // used to report no AI at all until some scan did.
+  it('/api/health sees a saved key while the cache is still cold', async () => {
+    stubUpstreams();
+    await put(KEY);
+    invalidateAiKeys();
+    expect(await describeOcr({ ...testEnv, OPENROUTER_API_KEY: undefined } as Env)).toBe('anthropic');
   });
 
   it('rejects a blank key, an unknown provider, and non-managers', async () => {
