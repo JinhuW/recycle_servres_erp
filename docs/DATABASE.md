@@ -1557,7 +1557,7 @@ An inbound box a seller shipped to us on a label bought outside the system. Ship
 | `source` | `text` |  |  | Buying channel: facebook, local, reddit or other. The API requires it on new rows; it is NULL only on rows from before the column existed. |
 | `tracking_registered_at` | `timestamptz` |  |  | When the number was registered for Shippo webhooks. NULL = not yet, and a sweep registers stragglers. Shippo webhooks are not idempotent, so each number is registered exactly once. |
 | `tracking_status_at` | `timestamptz` |  |  | When the carrier says the stored status happened. A pushed event dated earlier is dropped instead of overwriting the newer status. |
-| `tracking_claimed_at` | `timestamptz` |  |  | Claim taken before registering, so only one registrant handles a number. It expires after 5 minutes. |
+| `tracking_claimed_at` | `timestamptz` |  |  | Claim taken before registering, so only one registrant handles a number. A refusal clears it; any other outcome leaves it, and after 5 minutes the sweep sets `tracking_registered_at` instead of registering again (Shippo registration is not idempotent). |
 
 - **Primary key:** `id`
 - **References:** `created_by` → `users.id` (on delete set null); `order_id` → `orders.id` (on delete set null)

@@ -130,9 +130,12 @@ export async function refreshPackageTracking(
 //
 // One registrant per number: the claim is taken in the database, so it holds
 // across the add-time call, the sweep and a second backend through a deploy.
-// A refusal frees the claim for the next sweep. A timed-out call may have
-// been delivered, so its claim stands until it expires rather than register
-// the number again at once.
+// A refusal frees the claim for the next sweep. Any other end leaves the
+// claim standing: a timed-out call, a stamp that failed to save, a process
+// that died mid-call. Each may have reached Shippo, so the number is never
+// registered again: once the claim expires the sweep counts it as registered
+// without calling (settleExpiredClaims). Should that attempt in fact have
+// been lost, the box still moves on the poll, only without pushes.
 const CLAIM_EXPIRES = (sql: Sql) => sql`INTERVAL '5 minutes'`;
 
 export async function registerPackageTracking(
@@ -148,8 +151,7 @@ export async function registerPackageTracking(
   try {
     claimed = (await sql`
       UPDATE packages SET tracking_claimed_at = NOW()
-      WHERE id = ${pkg.id} AND tracking_registered_at IS NULL
-        AND (tracking_claimed_at IS NULL OR tracking_claimed_at < NOW() - ${CLAIM_EXPIRES(sql)})
+      WHERE id = ${pkg.id} AND tracking_registered_at IS NULL AND tracking_claimed_at IS NULL
       RETURNING id
     `).length > 0;
   } catch (err) {
@@ -167,7 +169,7 @@ export async function registerPackageTracking(
         .catch((e: unknown) => pkgLog.warn('tracking claim release failed', e));
     }
     pkgLog.warn(uncertain
-      ? 'tracking registration timed out; its claim stands until it expires'
+      ? 'tracking registration timed out; it may have reached Shippo, so it is not retried'
       : 'tracking registration failed; the sweep will retry', err);
     return false;
   }
@@ -176,8 +178,8 @@ export async function registerPackageTracking(
       UPDATE packages SET tracking_registered_at = NOW(), tracking_claimed_at = NULL WHERE id = ${pkg.id}
     `;
   } catch (err) {
-    // Shippo has the number, so the claim is left to expire rather than be
-    // freed; a second registration would mean a second update stream.
+    // Shippo has the number, so the claim is left standing rather than be
+    // freed; the sweep stamps it once it expires.
     pkgLog.error('tracking registered but its stamp failed to save', err);
   }
   return true;
@@ -193,15 +195,32 @@ const REGISTER_BATCH = 50;
 // Subscribes any package Shippo isn't pushing for yet. Covers rows added before
 // Shippo was configured and any add-time registration that lost a network race;
 // without it those boxes would only ever move on the 45-minute poll.
+// An expired claim is an attempt whose outcome nobody saw (see CLAIM_EXPIRES).
+// Shippo's registration is not idempotent, so it counts as registered rather
+// than be made a second time.
+async function settleExpiredClaims(sql: Sql): Promise<void> {
+  const settled = await sql<{ id: string }[]>`
+    UPDATE packages SET tracking_registered_at = NOW(), tracking_claimed_at = NULL
+    WHERE tracking_registered_at IS NULL
+      AND tracking_claimed_at < NOW() - ${CLAIM_EXPIRES(sql)}
+    RETURNING id
+  `;
+  for (const row of settled) {
+    shipLog.child({ packageId: row.id })
+      .warn('tracking registration outcome unknown; counted as registered, not sent again');
+  }
+}
+
 export async function registerUntrackedPackages(
   sql: Sql,
   client: Pick<ShippoClient, 'registerTracking'>,
 ): Promise<number> {
+  await settleExpiredClaims(sql);
   const rows = await sql<{ id: string; tracking_number: string; carrier: string }[]>`
     SELECT id, tracking_number, carrier
     FROM packages
     WHERE tracking_registered_at IS NULL
-      AND (tracking_claimed_at IS NULL OR tracking_claimed_at < NOW() - ${CLAIM_EXPIRES(sql)})
+      AND tracking_claimed_at IS NULL
       AND status IN ('purchased','in_transit','exception')
     ORDER BY created_at
     LIMIT ${REGISTER_BATCH}

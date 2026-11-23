@@ -570,6 +570,45 @@ describe('packages — webhook registration', () => {
     expect(calls).toBe(1);
   });
 
+  // Shippo's registration is not idempotent: a timed-out call, a stamp that
+  // failed to save or a process that died mid-call may each have reached it,
+  // so an expired claim is counted as registered, never sent again.
+  it('never registers a number again once a claim whose outcome is unknown expires', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+    const sql = getTestDb();
+    const [row] = await sql<{ id: string; tracking_number: string; carrier: string }[]>`
+      SELECT id, tracking_number, carrier FROM packages WHERE id = ${pkg.id}`;
+    let calls = 0;
+    const timesOut = { registerTracking: async () => { calls++; throw new Error('shippo POST /tracks/ timeout'); } };
+    expect(await registerPackageTracking(sql, timesOut, row)).toBe(false);
+    expect(calls).toBe(1);
+    await sql`UPDATE packages SET tracking_claimed_at = NOW() - INTERVAL '6 minutes' WHERE id = ${pkg.id}`;
+
+    const counting = { registerTracking: async () => { calls++; } };
+    expect(await registerPackageTracking(sql, counting, row)).toBe(false);
+    expect(await registerUntrackedPackages(sql, counting)).toBe(0);
+    expect(await registerUntrackedPackages(sql, counting)).toBe(0);
+    expect(calls).toBe(1);
+    const [after] = await sql<{ tracking_registered_at: Date | null; tracking_claimed_at: Date | null }[]>`
+      SELECT tracking_registered_at, tracking_claimed_at FROM packages WHERE id = ${pkg.id}`;
+    expect(after.tracking_registered_at).not.toBeNull();
+    expect(after.tracking_claimed_at).toBeNull();
+  });
+
+  it('leaves a claim still within its window alone', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+    const sql = getTestDb();
+    await sql`UPDATE packages SET tracking_claimed_at = NOW() - INTERVAL '1 minute' WHERE id = ${pkg.id}`;
+    let calls = 0;
+    expect(await registerUntrackedPackages(sql, { registerTracking: async () => { calls++; } })).toBe(0);
+    expect(calls).toBe(0);
+    const [after] = await sql<{ tracking_registered_at: Date | null }[]>`
+      SELECT tracking_registered_at FROM packages WHERE id = ${pkg.id}`;
+    expect(after.tracking_registered_at).toBeNull();
+  });
+
   it('does not re-register a number, and does not stamp one that threw', async () => {
     const { token } = await loginAs(MARCUS);
     await addPackage(token);
