@@ -2,12 +2,12 @@
 id: RS-606
 title: Fix the bugs found by the 2026-11-22 workspace review
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-11-22
 reporter: owner
 branch: fix/review-2026-11-22
-pr:
+pr: "#1243"
 version: 1.473.1
 related: []
 ---
