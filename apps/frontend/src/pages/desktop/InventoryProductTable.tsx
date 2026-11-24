@@ -10,6 +10,8 @@ import { useT } from '../../lib/i18n';
 import { SerialNumbers } from '../../components/SerialNumbers';
 import type { EbayLink } from '../../lib/api';
 import { EbayChips } from './ebay/EbayChips';
+import { SendToEbayButton } from './ebay/SendToEbayButton';
+import { lineSpecLabel } from '../../lib/lineGroups';
 import { isInventorySortCol, productLabel, productSpec, sortProductGroups, type InventorySortCol } from '@recycle-erp/shared';
 
 export type ProductLot = {
@@ -118,6 +120,8 @@ type Props = {
   onToggleGroup: (g: ProductGroup) => void;
   onQuickView: (lotId: string) => void;
   onEditLot: (lotId: string) => void;
+  /** A lot went to eBay from this table: its chips and free qty changed. */
+  onEbaySent?: () => void;
 };
 
 const SELLABLE = new Set(['Reviewing', 'Done']);
@@ -130,7 +134,7 @@ const categoryChip = (c: string) =>
 
 export function InventoryProductTable({
   groups, isManager, sort, onSort, cols, selected, selectAllState, onToggleAll,
-  onToggleLot, onToggleGroup, onQuickView, onEditLot,
+  onToggleLot, onToggleGroup, onQuickView, onEditLot, onEbaySent,
 }: Props) {
   const { t, locale } = useT();
   const showCost = isManager && cols.unitCost;
@@ -143,6 +147,16 @@ export function InventoryProductTable({
       return next;
     });
   };
+
+  const sendButton = (g: ProductGroup, l: ProductLot) => (
+    <SendToEbayButton
+      lotId={l.id}
+      lotRef={l.po_line_no != null ? `${l.order_id} #${l.po_line_no}` : l.order_id}
+      spec={lineSpecLabel({ ...l, category: g.category }) ?? productLabel(g)}
+      price={l.sell_price}
+      onSent={onEbaySent}
+    />
+  );
 
   // The server already sent these sorted. Re-sorting what is here answers a
   // header click at once, and is a no-op once the refetch lands.
@@ -299,7 +313,11 @@ export function InventoryProductTable({
                 </td>
                 {isManager && (
                   <td>
-                    <EbayChips links={g.lines.some(l => l.ebay) ? g.lines.flatMap(l => l.ebay ?? []) : undefined} />
+                    <div className="eb-cell">
+                      <EbayChips links={g.lines.some(l => l.ebay) ? g.lines.flatMap(l => l.ebay ?? []) : undefined} />
+                      {/* One sellable lot: send it from here. Several: from each lot's row. */}
+                      {sellableLots.length === 1 && sendButton(g, sellableLots[0])}
+                    </div>
                   </td>
                 )}
               </tr>
@@ -425,7 +443,14 @@ export function InventoryProductTable({
                                 <td className="num mono" style={{ fontWeight: 600 }}>{l.qty}</td>
                               )}
                               <td><span className={'chip dot ' + statusTone(l.status)}>{l.status}</span></td>
-                              {isManager && <td><EbayChips links={l.ebay} /></td>}
+                              {isManager && (
+                                <td>
+                                  <div className="eb-cell">
+                                    <EbayChips links={l.ebay} />
+                                    {lotSellable && sendButton(g, l)}
+                                  </div>
+                                </td>
+                              )}
                               <td className="col-actions">
                                 <div style={{ display: 'inline-flex', gap: 4 }}>
                                   <button

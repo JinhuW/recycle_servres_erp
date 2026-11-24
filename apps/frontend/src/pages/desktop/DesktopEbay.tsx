@@ -318,7 +318,13 @@ export function DesktopEbay({ onToast }: { onToast: Toast }) {
               </table>
             )
           ) : rows.length === 0 ? (
-            <div className="eb-empty">{t(q ? 'ebNoMatch' : tab === 'post' ? 'ebPostEmpty' : tab === 'live' ? 'ebLiveEmpty' : 'ebEndedEmpty')}</div>
+            <div className="eb-empty">
+              {t(q ? 'ebNoMatch' : tab === 'post' ? 'ebPostEmpty' : tab === 'live' ? 'ebLiveEmpty' : 'ebEndedEmpty')}
+              {/* Stock is sent from the lot, so point a manager there. */}
+              {!q && tab === 'post' && isManager && (
+                <> <RouteLink to="/inventory" className="rec-link">{t('ebPostEmptyHow')}</RouteLink></>
+              )}
+            </div>
           ) : (
             <>
               <table className="data-table">
