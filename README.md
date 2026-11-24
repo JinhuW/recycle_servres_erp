@@ -46,9 +46,9 @@ shell, so each ships its own chunk):
 - **Storage** — Cloudflare R2 via S3 API.  Label scans + sell-order
   attachments live under `recycle-erp-attachments`, public-served at
   `https://static.recycleservers.com/recycle-erp-attachments/`.
-- **OCR** — OpenRouter (`openai/gpt-6-luna` by default; `OPENROUTER_OCR_MODEL` overrides).  Falls back to a
-  deterministic stub when `OPENROUTER_API_KEY` is unset so dev and CI run
-  offline.
+- **OCR** — OpenRouter, Anthropic or OpenAI (`openai/gpt-6-luna` by default),
+  with keys and models set on Settings ▸ AI models.  Falls back to a
+  deterministic stub when no key is saved there, so dev and CI run offline.
 - **Edge** — Caddy serves the built SPA and reverse-proxies `/api/*` to the
   backend over the compose network.
 
@@ -193,7 +193,6 @@ DATABASE_URL=postgres://recycle:recycle@localhost:5432/recycle_erp        # loca
 JWT_SECRET=dev-secret-change-me
 ADMIN_EMAIL=admin@recycle.local
 ADMIN_PASSWORD=admin
-OPENROUTER_API_KEY=                                                       # OCR; stub used when absent
 R2_S3_ENDPOINT=
 R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=
@@ -255,11 +254,12 @@ Single-host Docker Compose:
 
 1. Create repo-root `.env` (copy `.env.example`) with `NODE_ENV=production`,
    a real `JWT_SECRET`, `CORS_ALLOWED_ORIGINS`, `POSTGRES_PASSWORD`, the R2
-   credentials, and `OPENROUTER_API_KEY`. Those values override the dev
+   credentials, and `FB_POOL_KEY`. Those values override the dev
    defaults baked into the backend image (`NODE_ENV=development`, throwaway
    JWT, demo accounts on, `admin/admin` initial user).
 2. `docker compose up -d --build` — the backend runs migrations on startup
-   and a healthcheck pings `/api/health`.
+   and a healthcheck pings `/api/health`.  Paste an AI provider key on
+   Settings ▸ AI models.
 3. App is at `http://<host>:8080`.  Front it with your TLS-terminating
    reverse proxy.
 4. **Do not** ship `docker-compose.override.yml` — it re-publishes Postgres

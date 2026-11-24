@@ -78,6 +78,31 @@ The release flow itself (`dev` → `main` is a full release) is in the root
   stdout-only.  Records are version/commit-stamped by `appendErrorRecord`
   itself — callers never pass them.  See `apps/backend/src/lib/error-log.ts`.
 
+## AI provider keys and models
+
+AI keys (OpenRouter, Anthropic, OpenAI) and the model each AI read uses are
+set only on Settings ▸ AI models. Keys are sealed in `ai_provider_keys` under
+a key derived from `FB_POOL_KEY` and pushed to the Reddit tracker's
+`llm_keys`; models are the `ai_models` workspace setting. Nothing reads them
+from env.
+
+- **The old env vars are import only.** `OPENROUTER_API_KEY`,
+  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `AI_MODEL` and `OPENROUTER_OCR_MODEL`
+  on the backend are copied in once, at the first boot against a database
+  (`importEnvAiSettings`, `src/ai/keys.ts`): each key that has no row and no
+  pending removal is sealed, saved and pushed to the tracker, and `AI_MODEL`
+  fills an empty default model when its provider has a key. The
+  `workspace_settings.ai_env_imported` marker stops every later boot, so a key
+  removed on the page stays removed. After a deploy that ran it, check the page
+  shows the key, then delete the variables from Railway. The tracker does the
+  same with its own three key vars, once per provider
+  (`llm_keys_env_imported`).
+- **Without `FB_POOL_KEY` in production** the import logs
+  `AI keys in env were not imported` and writes no marker, so it runs on the
+  first boot after the key is set. Boot never fails over it.
+- **No key saved** means production refuses AI reads (`/api/health` reports
+  `ocr: none`) and dev and CI use the stub.
+
 ## eBay connection
 
 The eBay desk publishes listings and reads sold orders through one connected
