@@ -2437,7 +2437,8 @@ manager) posts it, records what sold, and ends what didn't. The page is built
 around checking inventory, not shipping: no buyer, shipping or fee details are
 shown.
 
-- **Sending stock** (managers). The lot page's **Send to eBay** takes one row
+- **Sending stock** (managers). **Send to eBay** is in each sellable lot's
+  eBay column on the Inventory list (v1.478.0) and on the lot page. It takes one row
   per eBay listing — spec, units, price each — so a lot of mixed specs goes out
   as one listing per spec. The rows must fit the lot's sellable qty. Each
   listing is `EB-n` and starts **To post**. A To post listing can be **split**

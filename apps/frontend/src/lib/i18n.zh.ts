@@ -5962,6 +5962,7 @@ const zh: Record<string, string> = {
   ebConfirmEmpty: "没有要确认的销售。eBay 报告的销售会显示在这里。",
   ebSoldEmpty: "eBay 上还没有卖出任何东西。",
   ebPostEmpty: "没有等待上架的刊登。",
+  ebPostEmptyHow: "从库存页发送：每个批次的 eBay 列里都有“发送到 eBay”。",
   ebLiveEmpty: "eBay 上没有在售的刊登。",
   ebEndedEmpty: "没有已下架的刊登。",
   ebNoMatch: "没有符合搜索的刊登。",

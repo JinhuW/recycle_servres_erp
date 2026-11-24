@@ -116,3 +116,6 @@
 .eb-chip:hover { background: var(--bg-soft); }
 .eb-chip .mono { font-weight: 600; font-size: 11.5px; }
 .eb-none { color: var(--fg-subtle); font-size: 12px; }
+
+/* An inventory row's eBay cell: the lot's listings, then Send to eBay. */
+.eb-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
