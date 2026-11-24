@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-23
 reporter: jinhu
 branch: feat-ebay-send-from-inventory
-pr:
+pr: 1253
 version: 1.478.0
 related: [RS-609]
 ---
